@@ -18,6 +18,7 @@ enough.
 cd runner
 npm ci
 npm start                      # listens on 127.0.0.1:8797, path /rpc
+scripts/dev-runner.sh          # the same, on a temp data dir and a free port
 ```
 
 As a LaunchAgent (`com.mikerosoft.threadbare.runner`, starts at login,
@@ -27,13 +28,105 @@ restarted if it exits):
 scripts/install-runner.sh --print       # show the plist, change nothing
 scripts/install-runner.sh               # install and start it
 scripts/install-runner.sh --uninstall   # stop it and remove the plist
-launchctl kickstart -k gui/$(id -u)/com.mikerosoft.threadbare.runner   # restart
+scripts/deploy-runner.sh                # ship this checkout's runner/ to it
 ```
 
-The plist pins the Node binary (`~/.nvm/versions/node/v24.22.1/bin/node`
-by default; change it with `--node` or `THREADBARE_NODE`) and the PATH your
-login shell has, so agents can run the same commands a terminal can. Pass
-`--path` to set it yourself. Logs go to `~/Library/Logs/threadbare-runner.log`.
+The LaunchAgent runs a release (a snapshot, below), never the checkout, so
+merging to main changes nothing until a deploy. `--from-source` installs the
+old way, running `src/main.ts` from the checkout, for debugging. The plist
+pins the Node binary (`~/.nvm/versions/node/v24.22.1/bin/node` by default;
+change it with `--node` or `THREADBARE_NODE`) and the PATH your login shell
+has, so agents can run the same commands a terminal can. Pass `--path` to set
+it yourself. Logs go to `~/Library/Logs/threadbare-runner.log`.
+
+A sandbox install next to the real one takes its own `--home` and `--label`
+(the script refuses a sandbox under the real label); its port defaults to 0,
+a free one, and its log goes to `<home>/runner.log`.
+
+## Releases and deploys
+
+```
+<home>/runner/
+  launch.mjs          the LaunchAgent's program (copied in by install-runner.sh)
+  releases/<id>/      src/, bin/, package files, production node_modules, release.json
+  current -> releases/<id>
+  state.json          { current, previous, lastGood, boots, rolledBack? }
+```
+
+A release id is `<UTC yyyymmddThhmmssZ>-<short commit>`, plus `-dirty` when
+built from uncommitted files. `deploy-runner.sh`:
+
+1. runs the typecheck and unit tests on the pinned Node (`--skip-checks`),
+2. snapshots `src/`, `bin/` and the package files at HEAD, refusing
+   uncommitted changes to them (`--allow-dirty` builds from the files as they
+   are), then installs production packages: cloned from an earlier release
+   with the same `package-lock.json` (APFS copy-on-write, so seconds and next
+   to no disk), else `npm ci --omit=dev`,
+3. smoke tests it: starts it on a temp data dir and port 0, says hello, and
+   checks the version names the new release,
+4. points `current` at it,
+5. asks the runner to restart once no thread is running (`runner.restart`),
+6. checks the runner comes back on the new release within 30 s, and if it
+   doesn't, points `current` back, restarts, prints the end of the log and
+   exits 1,
+7. keeps the newest 5 releases plus the last good one (and anything
+   current, previous or still running).
+
+Inside a Threadbare thread the restart waits for that thread's turn to end,
+so the script says so and exits: end the turn, and the runner restarts and
+sends the thread "The runner restarted on release <id>. Check that your
+change works, then carry on." (`--resume "text"` changes it). `--now`
+kickstarts the LaunchAgent at once and is refused inside a thread unless
+`--force`. A runner from before `runner.restart` is polled until idle
+(`--wait 30m`), then kickstarted; inside a thread the script prints the
+command for Mike instead.
+
+```sh
+scripts/deploy-runner.sh --list       # releases, which is current, previous, last good, running
+scripts/deploy-runner.sh --rollback   # back to the previous release
+scripts/deploy-runner.sh --dry-run    # what it would do
+```
+
+`launch.mjs` records every start in `state.json`. When a release starts 3
+times in 2 minutes without reaching 60 s of listening (when `main.ts` marks
+it `lastGood`), the third start runs `lastGood` instead, records
+`rolledBack`, and the runner warns every client about it. The runner adds
+`rolledBack.reportedAt` once it has, so only the first start after a
+rollback reports it. A change to `launch.mjs` itself only reaches the
+LaunchAgent through `install-runner.sh`; the deploy script says when the
+installed copy is out of date.
+
+## Restarts
+
+`runner.restart` (`tb restart`, and the deploy script's restart step)
+restarts the runner without cutting a turn short; `docs/protocol.md` has
+the details.
+
+- It waits until no thread is starting, running or waiting on an approval
+  or a question, then stops the way it does on SIGTERM and exits 0, and
+  launchd starts it again. `--now` (`when: "now"`) doesn't wait. Background
+  shells and subagents don't hold it up; the restart stops them.
+- The request is saved in `restart.json` in the data dir until the next
+  start handles it, so a crash meanwhile doesn't lose it.
+- A thread that asked to carry on gets a note ("Runner restarted: <old> to
+  <new>") and its resume text as a new turn from the runner, if the old
+  runner stopped less than 15 minutes ago, the thread isn't snoozed or
+  archived, and it hasn't been resumed 3 times in the last hour
+  (`run/resumes.json` keeps count). Otherwise it only gets the note.
+
+## A dev runner
+
+`scripts/dev-runner.sh [--home DIR] [--port N]` runs the working tree's
+runner in the foreground on a temp data dir (it refuses the real one) and
+prints what to point `tb` and the app at:
+
+```
+For tb:      export THREADBARE_HOME=/tmp/threadbare-dev.Ab12Cd
+For the app: --data-dir /tmp/threadbare-dev.Ab12Cd
+```
+
+It uses your real logins, so threads in it cost like any other. Ctrl-C stops
+it and the CLIs it started.
 
 ## Configuration
 
@@ -68,18 +161,28 @@ Environment variables, mainly for tests:
 | `THREADBARE_CLAUDE_MAIN_DIR`, `THREADBARE_CLAUDE_MAIN_JSON` | The main login (default `~/.claude` and `~/.claude.json`). |
 | `THREADBARE_DEBUG=1` | Log CLI stderr and other detail. |
 | `THREADBARE_LOG_STDERR=1` | Also print the log to stderr. |
+| `THREADBARE_NODE` | The Node binary the scripts pin (default `~/.nvm/versions/node/v24.22.1/bin/node`). |
+| `THREADBARE_GOOD_AFTER_MS` | How long a release has to stay up before it is marked `lastGood` (default 60 s; the tests shorten it). |
+| `THREADBARE_LAUNCHCTL`, `THREADBARE_LAUNCH_AGENTS_DIR` | Stand-ins for `launchctl` and `~/Library/LaunchAgents` in the install and deploy scripts (the deploy tests use both). |
+
+The runner gives every CLI it starts `THREADBARE_THREAD_ID`,
+`THREADBARE_HOME` and `THREADBARE_RUNNER_VERSION`, so `tb self` and the
+deploy script know which thread and runner they're in.
 
 ## Data layout
 
 ```
 ~/Library/Application Support/Threadbare/
   runner.json
+  runner/                       releases, launch.mjs and state.json (above)
+  restart.json                  a restart that's waiting for threads to finish
   secrets/runner-token          random bearer token, 0600 (folder 0700)
   inbox/                        images the app imports before sending
   run/children.json             CLI process groups this runner started, and the
                                 groups their tool commands ran in
   run/runner.pid                the lock: pid and start time of the runner that
                                 owns this data dir
+  run/resumes.json              when each thread was last resumed after a restart
   threads/<threadId>/
     thread.json                 summary plus internal state, written atomically
     events.ndjson               persisted events, line N is seq N
@@ -99,8 +202,8 @@ removed at startup.
 ## The tb CLI
 
 `bin/tb` talks to a running runner. It reads `THREADBARE_HOME` and the port
-from `runner.json` like the runner does (`THREADBARE_PORT` or
-`THREADBARE_URL` override it). Thread ids can be shortened to a unique
+from `runner.json` like the runner does (`THREADBARE_PORT`, unless it's 0,
+or `THREADBARE_URL` override it). Thread ids can be shortened to a unique
 prefix.
 
 ```sh
@@ -116,6 +219,18 @@ bin/tb answer <id> <approvalId> "Tea"
 bin/tb snooze <id> 2h          # or an ISO time
 bin/tb archive <id>            bin/tb unarchive <id>
 bin/tb accounts
+```
+
+For working on Threadbare itself:
+
+```sh
+bin/tb status [--json]          # version, live CLIs, busy threads, a pending restart
+bin/tb self [--json]            # the thread this runs in (THREADBARE_THREAD_ID)
+bin/tb restart [--now [--force]] [--resume "text"] [--reason "text"]
+bin/tb show <id> [--last N] [--tools]   # the thread as plain text
+bin/tb logs [-f] [-n 200] [--thread ID]
+bin/tb export <id> [--out DIR]  # a mock-runner fixture in app/.fixtures/threads/<id>
+bin/tb rpc <method> ['{"json": "params"}']
 ```
 
 ## How it behaves
@@ -243,7 +358,9 @@ bin/tb accounts
 
 | File | What it holds |
 |---|---|
+| `launch.mjs` | The LaunchAgent's program: records boots, rolls a crash-looping release back to `lastGood`, imports the release's `src/main.ts`. |
 | `src/main.ts` | Entry point: config, logger, orphan sweep, runner, server, signals. |
+| `src/release.ts`, `src/restart.ts` | The release this runner is, `lastGood` and rollback notices; `runner.restart`, `runner.status` and the resume after a restart. |
 | `src/runner.ts` | Threads, turns, queue, approvals, idle release, snooze, events, summaries. |
 | `src/rpc.ts` | WebSocket JSON-RPC server, auth, subscriptions. |
 | `src/adapters/types.ts` | The adapter interface. Codex will be a second implementation. |
@@ -254,15 +371,28 @@ bin/tb accounts
 | `src/proc.ts` | Process groups, tool command groups and orphan cleanup. |
 | `src/lock.ts` | The one-runner-per-data-dir lock. |
 | `src/accounts.ts`, `src/media.ts`, `src/config.ts` | Login discovery, image handling, config and data dir. |
-| `src/cli.ts`, `src/client.ts` | `tb` and the small client it and the tests use. |
+| `src/cli.ts`, `src/tb-dev.ts`, `src/client.ts` | `tb` (its working-on-Threadbare commands in `tb-dev.ts`) and the small client it and the tests use. |
+| `scripts/deploy-runner.sh`, `scripts/deploy.mjs` | Building, smoke testing, switching to and pruning releases. `scripts/rpc-client.mjs` is their dependency-free client. |
+| `scripts/install-runner.sh`, `scripts/dev-runner.sh` | The LaunchAgent, and a foreground runner on a temp data dir. |
 
 ## Tests
 
 ```sh
-npm test            # unit tests, no network, about 5 seconds
+npm test               # unit tests, no network, about 5 seconds
 npm run typecheck
-npm run test:e2e    # real Claude CLI, about 2.5 minutes
+npm run test:deploy    # the scripts and launch.mjs, about 30 seconds
+npm run test:e2e       # real Claude CLI, about 2.5 minutes
+../check.sh            # all of the above but e2e, plus the app's build and tests
 ```
+
+The deploy tests build releases of a throwaway git repo whose runner is
+`test/deploy/fake-runner.mjs` (no packages, so no `npm` downloads), with
+`test/deploy/fake-launchctl.mjs` standing in for launchd: it reads the plist
+`install-runner.sh` wrote and keeps its program running. They cover a first
+install, deploys through `runner.restart`, a deploy from inside a thread,
+an older runner (wait for idle, then kickstart), `--rollback`, a smoke test
+failure, uncommitted changes, a release that crash-loops back to
+`lastGood`, pruning, `--list`, `--dry-run` and uninstalling.
 
 The unit tests cover normalisation (recorded SDK sequences in
 `test/fixtures/`), persistence, seq and replay, idle release and snooze with

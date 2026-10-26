@@ -27,13 +27,29 @@ anything.
 ## Working on Threadbare from inside Threadbare
 
 Mike may be running this thread in Threadbare itself, through the installed
-runner (`com.mikerosoft.threadbare.runner`).
+runner (`com.mikerosoft.threadbare.runner`). Then `THREADBARE_THREAD_ID` is
+set, and `runner/bin/tb self` and `tb status` show your thread and the
+runner.
 
+- `./check.sh` runs every check (`--quick`: the runner's typecheck and unit
+  tests). Nothing in it touches the live runner.
+- The live runner runs a release, a snapshot, so editing `runner/` doesn't
+  change it. To try a runner change, start `runner/scripts/dev-runner.sh` in
+  the background and point `tb` (or the app's `--data-dir`) at the folder it
+  prints.
+- To ship a runner change, commit it and run
+  `runner/scripts/deploy-runner.sh`, which ships HEAD of this checkout. When
+  it says so, end your turn: the runner restarts once the turn is over and
+  resumes this thread so you can check the change. If it went wrong,
+  `deploy-runner.sh --rollback` goes back the same way.
+- Never pass `--now`, run `install-runner.sh`, `launchctl kickstart` the
+  runner or stop its node process: each ends your own turn with nothing to
+  carry on. If one is needed, finish and tell Mike the exact command.
 - Rebuilding or restarting the app (`app/restart.sh`, `app/install.sh`) is
   safe: the runner keeps your turn going and the app reconnects.
-- Restarting, reinstalling or killing the runner (`install-runner.sh`,
-  `launchctl kickstart`, stopping its node process) ends your own turn. Don't
-  do it yourself. Finish, then tell Mike the exact command to run.
+- `tb show <id>` reads a thread as text, `tb logs` the runner log, and
+  `tb export <id>` copies a thread into `app/.fixtures/` so a rendering bug
+  can be reproduced against the mock runner.
 - Check app changes with `app/Tools/screenshots.sh <dir>`: a debug build
   against the mock runner, in a temp folder, with the window kept behind
   whatever Mike is working in. Look at the images before saying it works.
