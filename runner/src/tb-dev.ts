@@ -181,10 +181,11 @@ export async function runDev(client: RunnerClient, cmd: string, args: string[], 
       const data = path.join(os.tmpdir(), `tb-mock-${id.slice(0, 8)}`);
       console.log(`Load it in the mock runner: node ${shQuote(mock)} --data-dir ${shQuote(data)} --fixtures ${shQuote(out)}`);
       console.log(`  then point tb (THREADBARE_HOME=${shQuote(data)}) or a debug app (--data-dir ${shQuote(data)}) at it.`);
-      // run-mock.sh runs the installed app in the foreground, with its
-      // window in front, until it quits.
-      console.log(`To look at it in the app, ask Mike first (it opens a window in front of his work and runs until it's quit):`);
-      console.log(`  ${shQuote(path.join(root, 'app', 'Tools', 'run-mock.sh'))} --fixtures ${shQuote(out)}`);
+      // dev-app.sh runs a debug build in a temp bundle with its window kept
+      // behind Mike's, so an agent can look at the export without asking.
+      // (run-mock.sh opened the installed app in front of his work.)
+      console.log(`To look at it in a debug app, then dump, shot and stop it:`);
+      console.log(`  ${shQuote(path.join(root, 'app', 'Tools', 'dev-app.sh'))} start --mock --fixtures ${shQuote(out)}`);
       return 0;
     }
     case 'rpc': {

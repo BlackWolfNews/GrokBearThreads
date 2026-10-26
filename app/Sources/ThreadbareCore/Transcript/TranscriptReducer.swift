@@ -365,8 +365,8 @@ public struct TranscriptModel: Sendable {
         let seq = event.seq
         let turnId = event.turnId
         switch event.payload {
-        case .userMessage(let text, let images):
-            append(TranscriptRow(id: "u:\(seq)", seq: seq, turnId: turnId, content: .user(UserMessage(text: text, images: images))))
+        case .userMessage(let text, let images, let origin):
+            append(TranscriptRow(id: "u:\(seq)", seq: seq, turnId: turnId, content: .user(UserMessage(text: text, images: images, origin: origin))))
 
         case .assistantText(let itemId, let text):
             streaming[itemId] = nil

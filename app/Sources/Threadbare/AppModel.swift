@@ -55,6 +55,9 @@ final class AppModel {
     /// A sidebar row drawn as if the pointer were over it, so the screenshot
     /// run can show the hover buttons without moving the mouse.
     var hoverOverride: String?
+    /// A runner restart that's waiting for threads to finish or under way,
+    /// for the quiet banner (see `banner`).
+    private(set) var restart = RunnerRestart()
 
     @ObservationIgnored private(set) var client: RPCClient?
     @ObservationIgnored private var sessions: [String: ThreadSession] = [:]
@@ -66,6 +69,14 @@ final class AppModel {
     @ObservationIgnored var notificationsEnabled = true
     @ObservationIgnored var onThreadsLoaded: (() -> Void)?
     @ObservationIgnored private var clockTimer: Timer?
+    /// Where the Copy menu items put things. A scripted debug run points it
+    /// at a private pasteboard, so it never touches Mike's clipboard.
+    @ObservationIgnored var pasteboard = NSPasteboard.general
+    @ObservationIgnored private var statusTask: Task<Void, Never>?
+    @ObservationIgnored private var restartExpiry: Task<Void, Never>?
+    /// The last reason a connection attempt failed, so a runner that stays
+    /// down logs once rather than on every retry.
+    @ObservationIgnored private var lastDownReason: String?
 
     static let maxSessions = 24
     static let lastAccountKey = "lastAccountId"
@@ -78,7 +89,13 @@ final class AppModel {
 
     init() {
         clockTimer = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { [weak self] _ in
-            MainActor.assumeIsolated { self?.now = Date() }
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                self.now = Date()
+                // Background work that ends sends no thread update, so a
+                // pending restart's count is asked for again now and then.
+                if self.restart.isPending { self.refreshRunnerStatus() }
+            }
         }
     }
 
@@ -138,6 +155,12 @@ final class AppModel {
                 accounts = hello.accounts
                 defaults = hello.defaults
                 connection = .connected
+                lastDownReason = nil
+                AppLog.write("connection", "connected to runner \(hello.runnerVersion) at \(endpoint.url.absoluteString)")
+                // Whatever restart there was is over; a new pending one
+                // comes back with hello's notice and runner.status.
+                updateRestart { $0.connected() }
+                refreshRunnerStatus()
                 clearConnectionError()
                 backoff.reset()
                 // Archived threads come too: the sidebar's footer shows how
@@ -163,18 +186,30 @@ final class AppModel {
                 self.client = nil
                 for session in sessions.values { session.connectionLost() }
                 connection = .lost
+                updateRestart { $0.disconnected(now: Date()) }
+                AppLog.write("connection", "lost the connection to the runner")
             } catch RPCError.unauthorized {
                 attempt?.close()
                 guard !Task.isCancelled else { return }
                 client = nil
                 connection = .unauthorized
+                AppLog.write("connection", "the runner didn't accept the token")
             } catch {
                 attempt?.close()
                 guard !Task.isCancelled else { return }
                 client = nil
                 connection = .runnerDown(error.localizedDescription)
+                updateRestart { $0.disconnected(now: Date()) }
+                if lastDownReason != error.localizedDescription {
+                    lastDownReason = error.localizedDescription
+                    AppLog.write("connection", "can't reach the runner: \(error.localizedDescription)")
+                }
             }
-            let delay = backoff.next()
+            var delay = backoff.next()
+            // A restart is over in a few seconds; backing off to 4 s and
+            // more left the window saying "Reconnecting" well after the
+            // runner was back.
+            if restart.isRestarting(now: Date()) { delay = min(delay, 0.5) }
             try? await Task.sleep(for: .seconds(delay))
         }
     }
@@ -189,10 +224,21 @@ final class AppModel {
             case .threadDeleted(let threadId):
                 forget(threadId)
             case .runnerNotice(let level, let message):
-                if level != "info" { errorMessage = message }
+                notice(level: level, message)
             case .other:
                 break
             }
+        }
+    }
+
+    /// A restart notice moves the quiet banner along; other warnings and
+    /// errors go in the error banner.
+    private func notice(level: String, _ message: String) {
+        AppLog.write("notice", "\(level): \(message)")
+        if restart(notice: message) {
+            refreshRunnerStatus()
+        } else if level != "info" {
+            errorMessage = message
         }
     }
 
@@ -201,6 +247,14 @@ final class AppModel {
     func useClientForTesting(_ client: RPCClient) {
         self.client = client
         connection = .connected
+    }
+
+    /// Tests feed it what the runner would: a notice, a status, a drop.
+    func noticeForTesting(level: String = "info", _ message: String) { notice(level: level, message) }
+    func restartStatusForTesting(_ pending: PendingRestart?) { updateRestart { $0.status(pending, now: Date()) } }
+    func connectionLostForTesting() {
+        connection = .lost
+        updateRestart { $0.disconnected(now: Date()) }
     }
     #endif
 
@@ -226,6 +280,8 @@ final class AppModel {
     private func receive(_ thread: ThreadSummary) {
         let previous = threads[thread.id]
         threads[thread.id] = thread
+        // A thread a pending restart waits for may just have finished.
+        if restart.isPending, previous?.status != thread.status { refreshRunnerStatus() }
         let becameNeedy = thread.needsYou && previous?.needsYou != true
         let showing = NSApp.isActive && selection == thread.id
         if becameNeedy && !showing && notificationsEnabled {
@@ -467,6 +523,7 @@ final class AppModel {
     }
 
     func show(_ error: Error) {
+        AppLog.write("rpc", "error: \(error.localizedDescription)")
         switch error as? RPCError {
         case .disconnected?, .timeout?, .connectFailed?:
             showConnectionError(error.localizedDescription)
@@ -484,5 +541,133 @@ final class AppModel {
     private func clearConnectionError() {
         if let stale = connectionErrorMessage, errorMessage == stale { errorMessage = nil }
         connectionErrorMessage = nil
+    }
+
+    // MARK: Runner restarts
+
+    /// A restart notice moves the banner along straight away. Returns false
+    /// for any other notice.
+    private func restart(notice message: String) -> Bool {
+        var handled = false
+        updateRestart { handled = $0.notice(message, now: Date()) }
+        return handled
+    }
+
+    private func updateRestart(_ change: (inout RunnerRestart) -> Void) {
+        let before = restart
+        var after = before
+        change(&after)
+        guard after != before else { return }
+        restart = after
+        if case .restarting = after.phase, !(before.phase.isRestarting) {
+            AppLog.write("restart", "the runner is restarting")
+            // The banner goes back to "Can't reach the runner" if it doesn't
+            // come back; `now` changing is what makes the view look again.
+            restartExpiry?.cancel()
+            restartExpiry = Task { [weak self] in
+                try? await Task.sleep(for: .seconds(RunnerRestart.patience + 1))
+                guard !Task.isCancelled else { return }
+                self?.now = Date()
+            }
+        } else if let text = after.pendingText, text != before.pendingText {
+            AppLog.write("restart", text)
+        } else if after.phase == .none {
+            restartExpiry?.cancel()
+        }
+    }
+
+    /// Asks `runner.status` which threads a restart waits for. Coalesced:
+    /// a burst of thread updates asks once.
+    func refreshRunnerStatus() {
+        statusTask?.cancel()
+        statusTask = Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(300))
+            guard !Task.isCancelled, let self, let client = self.client, self.connection == .connected else { return }
+            do {
+                let status = try await client.runnerStatus()
+                guard !Task.isCancelled, self.client === client else { return }
+                self.updateRestart { $0.status(status.pendingRestart, now: Date()) }
+            } catch RPCError.server(let code, _) where code == -32601 {
+                // A runner older than runner.status: its notices are all there is.
+            } catch {
+                AppLog.write("rpc", "runner.status failed: \(error.localizedDescription)")
+            }
+        }
+    }
+
+    // MARK: Banner
+
+    /// The line under the toolbar about the runner, if there's anything to
+    /// say: a restart waiting or under way (quiet), or a connection problem.
+    var banner: Banner? {
+        let restarting = restart.isRestarting(now: max(now, Date()))
+        switch connection {
+        case .connected:
+            if restarting {
+                return Banner(style: .quiet, icon: nil, text: "The runner is restarting now.")
+            }
+            if let text = restart.pendingText {
+                return Banner(style: .quiet, icon: "arrow.clockwise", text: text,
+                              detail: restart.waitingForText { self.threads[$0]?.title })
+            }
+            return nil
+        case .connecting, .lost, .runnerDown:
+            // While a restart is under way the runner is meant to be down
+            // for a moment: say so quietly, with no buttons to press.
+            if restarting {
+                return Banner(style: .quiet, icon: nil, text: "The runner is restarting. Reconnecting…")
+            }
+            switch connection {
+            case .runnerDown(let reason):
+                // One plain sentence; the raw reason is in the tooltip.
+                return Banner(style: .warning, icon: "bolt.horizontal.circle", text: "Can't reach the runner.", detail: reason,
+                              showStart: canStartRunner, showRetry: true)
+            case .lost:
+                return Banner(style: .warning, icon: "bolt.horizontal", text: "Lost the connection to the runner. Reconnecting…", showRetry: true)
+            default:
+                return Banner(style: .warning, icon: "bolt.horizontal", text: "Connecting to the runner…", showRetry: true)
+            }
+        case .unauthorized:
+            return Banner(style: .warning, icon: "lock", text: "The runner didn't accept the token in secrets/runner-token.", showRetry: true)
+        }
+    }
+
+    /// "Start runner" kickstarts the installed runner's LaunchAgent, which
+    /// only helps an app pointed at that runner's data folder. A debug app
+    /// against the mock or a dev runner must never start the live one.
+    var canStartRunner: Bool {
+        dataDir.standardizedFileURL.path == RunnerConfig.defaultDataDir.standardizedFileURL.path
+    }
+
+    // MARK: Copying
+
+    func copyToPasteboard(_ text: String) {
+        pasteboard.clearContents()
+        pasteboard.setString(text, forType: .string)
+    }
+}
+
+/// What `ConnectionBanner` shows.
+struct Banner: Equatable {
+    enum Style: String {
+        /// A restart: expected, nothing to do. Grey text, no buttons.
+        case quiet
+        /// The runner can't be reached: yellow, with Try again.
+        case warning
+    }
+
+    var style: Style
+    /// An SF Symbol, or nil for a spinner.
+    var icon: String?
+    var text: String
+    var detail: String?
+    var showStart = false
+    var showRetry = false
+}
+
+private extension RunnerRestart.Phase {
+    var isRestarting: Bool {
+        if case .restarting = self { return true }
+        return false
     }
 }

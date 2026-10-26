@@ -52,22 +52,39 @@ fs.mkdirSync(path.join(dataDir, 'secrets'), { recursive: true });
 fs.mkdirSync(path.join(dataDir, 'inbox'), { recursive: true });
 fs.writeFileSync(path.join(dataDir, 'secrets/runner-token'), token + '\n', { mode: 0o600 });
 
-const wss = new WebSocketServer({ host: '127.0.0.1', port: Number(args.port ?? 0), path: '/rpc', maxPayload: 64 * 1024 * 1024 });
-wss.on('listening', () => {
-  const { port } = wss.address();
-  fs.writeFileSync(path.join(dataDir, 'runner.json'), JSON.stringify({ port, mock: true }, null, 2));
-  log(`listening on ws://127.0.0.1:${port}/rpc with ${threads.size} threads`);
-  // Written whole and renamed into place, so a reader never sees it empty.
-  if (args['ready-file']) {
-    fs.writeFileSync(`${args['ready-file']}.tmp`, String(port));
-    fs.renameSync(`${args['ready-file']}.tmp`, args['ready-file']);
-  }
-});
+// What `hello` and `runner.status` report. mock.restart bumps the version,
+// as a deploy would, so the app's "Runner restarted" note has two to name.
+let runnerVersion = '0.0.0-mock';
+let restarts = 0;
+const startedAt = iso();
+// A restart waiting for threads (mock.restartPending): { when, reason?,
+// resumeThreadId?, requestedAt, waitingFor: string[] }.
+let pendingRestart;
 
 /** @type {Set<{ws: any, subs: Set<string>, authed: boolean}>} */
 const clients = new Set();
 
-wss.on('connection', (ws, request) => {
+let wss = listen(Number(args.port ?? 0));
+
+// The WebSocket server, on its own so mock.restart can close it and listen
+// again on the same port, the way the real runner goes away and comes back.
+function listen(port) {
+  const server = new WebSocketServer({ host: '127.0.0.1', port, path: '/rpc', maxPayload: 64 * 1024 * 1024 });
+  server.on('listening', () => {
+    const { port } = server.address();
+    fs.writeFileSync(path.join(dataDir, 'runner.json'), JSON.stringify({ port, mock: true }, null, 2));
+    log(`listening on ws://127.0.0.1:${port}/rpc with ${threads.size} threads`);
+    // Written whole and renamed into place, so a reader never sees it empty.
+    if (args['ready-file']) {
+      fs.writeFileSync(`${args['ready-file']}.tmp`, String(port));
+      fs.renameSync(`${args['ready-file']}.tmp`, args['ready-file']);
+    }
+  });
+  server.on('connection', onConnection);
+  return server;
+}
+
+function onConnection(ws, request) {
   const header = request.headers['authorization'] ?? '';
   const client = { ws, subs: new Set(), authed: header === `Bearer ${token}` };
   clients.add(client);
@@ -90,17 +107,31 @@ wss.on('connection', (ws, request) => {
       reply(client, message.id, null, { code: error.code ?? -32000, message: error.message });
     });
   });
-});
+}
 
 async function handle(client, { id, method, params = {} }) {
   const result = await dispatch(client, method, params);
   if (id !== undefined && id !== null) reply(client, id, result ?? {});
+  // Like the real runner: a client that says hello hears about a restart
+  // that's waiting, straight after the hello result.
+  if (method === 'hello' && pendingRestart) notice(client, 'info', pendingMessage(pendingRestart.waitingFor.length));
 }
 
 async function dispatch(client, method, p) {
   switch (method) {
     case 'hello':
-      return { runnerVersion: '0.0.0-mock', protocol: 1, accounts, defaults };
+      return { runnerVersion, protocol: 1, accounts, defaults };
+    case 'runner.status': {
+      const all = [...threads.values()].map((t) => t.summary);
+      const status = {
+        version: runnerVersion, pid: process.pid, startedAt, home: dataDir, logFile: path.join(dataDir, 'runner.log'),
+        liveClis: all.filter((s) => s.live).length,
+        running: all.filter((s) => ['starting', 'running', 'waiting'].includes(s.status)).map((s) => s.id),
+        background: [],
+      };
+      if (pendingRestart) status.pendingRestart = pendingRestart;
+      return status;
+    }
     case 'threads.list': {
       const include = new Set(p.include ?? ['inbox']);
       const now = Date.now();
@@ -213,7 +244,27 @@ async function dispatch(client, method, p) {
       const size = imageSize(dest);
       return { image: { path: dest, mediaType: mediaType(ext), ...size } };
     }
-    // Mock-only helpers for perf runs and demos.
+    // Mock-only helpers for perf runs, demos and screenshots.
+    case 'mock.restartPending': {
+      // A restart waiting for threads, as `runner.restart` leaves one:
+      // runner.status shows it and every client gets the notice. By default
+      // it waits for the threads that are busy (as the real runner would);
+      // `waitingFor` names them, `cancel: true` withdraws it.
+      if (p.cancel) {
+        pendingRestart = undefined;
+        broadcastNotice('info', 'The pending runner restart was cancelled.');
+        return { scheduled: false, waitingFor: [] };
+      }
+      const busy = [...threads.values()].map((t) => t.summary).filter((s) => ['starting', 'running', 'waiting'].includes(s.status)).map((s) => s.id);
+      const waitingFor = Array.isArray(p.waitingFor) ? p.waitingFor.filter((id) => threads.has(id)) : busy;
+      pendingRestart = { when: 'idle', requestedAt: iso(), waitingFor };
+      if (p.reason) pendingRestart.reason = p.reason;
+      if (p.resume?.threadId) pendingRestart.resumeThreadId = p.resume.threadId;
+      broadcastNotice('info', pendingMessage(waitingFor.length));
+      return { scheduled: true, waitingFor };
+    }
+    case 'mock.restart':
+      return restartNow(p);
     case 'mock.stream':
       return startStream(need(p.threadId).summary.id, p);
     case 'mock.approval': {
@@ -232,13 +283,13 @@ async function dispatch(client, method, p) {
 
 // ---------------------------------------------------------------- turns
 
-async function fakeTurn(threadId, text, images, turnId = 'turn_' + crypto.randomBytes(4).toString('hex')) {
+async function fakeTurn(threadId, text, images, turnId = 'turn_' + crypto.randomBytes(4).toString('hex'), origin) {
   const t = threads.get(threadId);
   if (!t) return;
   let interrupted = false;
   t.interrupt = () => { interrupted = true; };
   const started = Date.now();
-  persist(threadId, { type: 'user.message', text, images }, turnId);
+  persist(threadId, { type: 'user.message', text, images, ...(origin ? { origin } : {}) }, turnId);
   persist(threadId, { type: 'turn.started', turnId }, turnId);
   setStatus(threadId, 'running');
 
@@ -364,6 +415,60 @@ function streamText() {
     '- Retries use exponential backoff starting at 250 ms.\n- A failed chunk is re-sent on its own, not the whole file.\n- Progress is reported per chunk.\n\n',
     'Then the server confirms the checksum and the upload is marked complete. `UploadStore` keeps the state so a crash mid-way resumes where it left off.\n\n',
   ].join('');
+}
+
+// ---------------------------------------------------------------- restarts
+
+function pendingMessage(waiting) {
+  if (waiting === 0) return 'The runner is restarting now.';
+  return waiting === 1 ? 'The runner will restart when 1 thread finishes.' : `The runner will restart when ${waiting} threads finish.`;
+}
+
+/**
+ * Restarts the way the real runner does after `runner.restart`: the notice,
+ * every connection dropped and the port closed for `downMs` (default 3 s),
+ * then back on the same port with a new version. With `resume` (or a
+ * resume given to mock.restartPending) that thread gets the "Runner
+ * restarted" note and the resume text as a turn sent by the runner
+ * (`origin: "runner"`). The reply goes out before anything closes.
+ */
+function restartNow(p) {
+  const downMs = Number(p.downMs ?? 3000);
+  const resumeId = p.resume?.threadId ?? pendingRestart?.resumeThreadId;
+  if (resumeId) need(resumeId);
+  const oldVersion = runnerVersion;
+  const newVersion = `0.0.0-mock+r${restarts + 1}`;
+  const text = p.resume?.text ?? 'The runner restarted on release 20261027T101500Z-abc1234. Check that your change works, then carry on.';
+  broadcastNotice('info', pendingMessage(0));
+  pendingRestart = { when: 'now', requestedAt: iso(), waitingFor: [] };
+  setTimeout(() => {
+    const port = wss.address()?.port;
+    wss.close();
+    for (const client of clients) client.ws.terminate();
+    clients.clear();
+    log(`restarting: down for ${downMs} ms`);
+    setTimeout(() => {
+      restarts += 1;
+      runnerVersion = newVersion;
+      pendingRestart = undefined;
+      wss = listen(port);
+      if (resumeId) {
+        persist(resumeId, { type: 'system.note', text: `Runner restarted: ${oldVersion} to ${newVersion}` });
+        setTimeout(() => fakeTurn(resumeId, text, [], undefined, 'runner'), 10);
+      }
+    }, downMs);
+  }, 100);
+  return { scheduled: true, waitingFor: [], version: newVersion };
+}
+
+function notice(client, level, message) {
+  if (client.authed && client.ws.readyState === 1) {
+    client.ws.send(JSON.stringify({ jsonrpc: '2.0', method: 'runner.notice', params: { level, message } }));
+  }
+}
+
+function broadcastNotice(level, message) {
+  for (const client of clients) notice(client, level, message);
 }
 
 // ---------------------------------------------------------------- events

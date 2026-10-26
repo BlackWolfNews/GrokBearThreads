@@ -53,6 +53,11 @@ enum RowMetrics {
     /// all of it (it opens at `DiffPreview.lines`).
     static let maxDiffLines = 1500
     static let footerHeight: CGFloat = 27
+    /// A message the runner sent by itself after a restart: a centred note
+    /// right under the restart's own note, with room before the work it
+    /// starts.
+    static let runnerTop: CGFloat = 4
+    static let runnerBottom: CGFloat = 18
     static let changesHeader: CGFloat = 42
     static let changesFile: CGFloat = 34
 
@@ -282,6 +287,11 @@ enum RowRenderer {
         let width = RowMetrics.column(for: row, tableWidth: tableWidth).width
         let vertical = RowMetrics.rowTop + RowMetrics.rowBottom
         switch row.content {
+        case .user(let message) where message.isFromRunner:
+            let text = runnerMessageText(message.text)
+            let size = measurer.measure(text, width: width)
+            return RowRender(height: RowMetrics.runnerTop + size.height + RowMetrics.runnerBottom, text: text, textSize: size)
+
         case .user(let message):
             let maxText = floor(width * RowMetrics.bubbleShare) - RowMetrics.bubblePadH * 2
             let text = NSAttributedString(string: message.text.isEmpty ? " " : message.text, attributes: Theme.text())
@@ -413,6 +423,19 @@ enum RowRenderer {
         case .changes(let card):
             return changesRender(card, width: width, measurer: measurer)
         }
+    }
+
+    /// The resume the runner sends after a restart, as a note rather than a
+    /// bubble: it wasn't Mike talking. The first line says where it came
+    /// from; the message itself is under it, since the agent acts on it.
+    static func runnerMessageText(_ message: String) -> NSAttributedString {
+        let text = NSMutableAttributedString(string: "Sent by the runner after it restarted",
+                                             attributes: Theme.text(Theme.smallFont, color: Theme.faintText, line: 17, alignment: .center))
+        let body = message.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !body.isEmpty {
+            text.append(NSAttributedString(string: "\n" + body, attributes: Theme.text(Theme.labelFont, color: Theme.quietText, line: 19, alignment: .center)))
+        }
+        return text
     }
 
     // MARK: Work lines

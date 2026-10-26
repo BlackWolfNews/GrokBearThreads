@@ -1,0 +1,134 @@
+import Foundation
+
+/// What an agent needs to find a transcript row again: the row's own words
+/// for dumps, and "Copy debug info" (the thread, the row, the events it was
+/// built from and the runner), so Mike can point at a row and an agent can
+/// pull up the same events with `tb show` or a fixture export.
+public enum RowDebug {
+    /// The row's text on one line, cut to `limit` characters.
+    public static func excerpt(_ row: TranscriptRow, limit: Int = 100) -> String {
+        oneLine(text(row), limit: limit)
+    }
+
+    /// The row's words, whatever kind it is.
+    public static func text(_ row: TranscriptRow) -> String {
+        switch row.content {
+        case .user(let message):
+            if message.text.isEmpty { return message.images.count == 1 ? "1 image" : "\(message.images.count) images" }
+            // A dump should say it wasn't Mike, as the transcript does.
+            return message.isFromRunner ? "(sent by the runner) " + message.text : message.text
+        case .assistant(let item), .reasoning(let item):
+            return item.text
+        case .tool(let tool):
+            return tool.failed ? tool.title + " (failed)" : tool.title
+        case .images(_, let images):
+            return images.count == 1 ? "1 image" : "\(images.count) images"
+        case .approval(let item):
+            guard let resolution = item.resolution else { return item.request.title }
+            return "\(item.request.title) (\(resolution.decision.rawValue))"
+        case .question(let item):
+            return item.request.questions.map(\.question).joined(separator: " / ")
+        case .plan(let entries):
+            return entries.map(\.text).joined(separator: "; ")
+        case .footer(let completion):
+            var text = RelativeTime.duration(milliseconds: completion.durationMs)
+            if let cost = CostText.format(completion.costUsd) { text += ", " + cost }
+            if completion.outcome != .completed { text += ", " + completion.outcome.rawValue }
+            return text
+        case .note(let text), .error(let text):
+            return text
+        case .group(let group):
+            return group.summary
+        case .working:
+            return "Working"
+        case .changes(let card):
+            return card.title
+        }
+    }
+
+    static func oneLine(_ text: String, limit: Int) -> String {
+        let words = text.split(whereSeparator: \.isWhitespace).joined(separator: " ")
+        guard words.count > limit else { return words }
+        return String(words.prefix(max(0, limit - 1))) + "…"
+    }
+
+    /// "Copy debug info": one `key: value` per line, so it reads well
+    /// pasted into a message and an agent can pick it apart.
+    public static func info(threadId: String, row: TranscriptRow, seqs: [Int], runnerVersion: String) -> String {
+        var lines = [
+            "thread: \(threadId)",
+            "row: \(row.id)",
+            "kind: \(row.kind.rawValue)",
+        ]
+        if let turn = row.turnId, !turn.isEmpty { lines.append("turn: \(turn)") }
+        lines.append("events: " + (seqs.isEmpty ? "none loaded" : seqRanges(seqs)))
+        lines.append("runner: \(runnerVersion.isEmpty ? "unknown" : runnerVersion)")
+        return lines.joined(separator: "\n") + "\n"
+    }
+
+    /// "3, 7-9, 12": runs of seqs written as ranges, so a big group's
+    /// events stay one short line.
+    public static func seqRanges(_ seqs: [Int]) -> String {
+        let sorted = Array(Set(seqs)).sorted()
+        var parts: [String] = []
+        var index = 0
+        while index < sorted.count {
+            var end = index
+            while end + 1 < sorted.count, sorted[end + 1] == sorted[end] + 1 { end += 1 }
+            parts.append(end > index ? "\(sorted[index])-\(sorted[end])" : "\(sorted[index])")
+            index = end + 1
+        }
+        return parts.joined(separator: ", ")
+    }
+}
+
+extension TranscriptModel {
+    /// The seqs of the loaded events a row was built from, oldest first: a
+    /// tool's call, result and diff; an approval's request and its answer; a
+    /// group's members; a changes card's edits; the turn's start for the
+    /// working line.
+    public func sourceSeqs(of rowId: String) -> [Int] {
+        var wanted: Set<String> = [rowId]
+        switch (row(id: rowId) ?? item(id: rowId))?.content {
+        case .group(let group)?:
+            wanted = Set(group.memberIds)
+        case .changes(let card)?:
+            wanted = Set(items.filter { $0.turnId == card.turnId && $0.kind == .diff }.map(\.id))
+        default:
+            break
+        }
+        var planRows: [String: String] = [:]
+        return events.compactMap { event in
+            Self.rowIds(for: event, planRows: &planRows).contains(where: wanted.contains) ? event.seq : nil
+        }
+    }
+
+    /// The item and derived rows an event feeds, with the same ids the
+    /// reducer gives them. `planRows` carries each turn's plan row along,
+    /// since every update of a turn's plan goes to its first one.
+    static func rowIds(for event: Event, planRows: inout [String: String]) -> [String] {
+        let seq = event.seq
+        switch event.payload {
+        case .userMessage: return ["u:\(seq)"]
+        case .assistantText(let itemId, _): return ["a:" + itemId]
+        case .reasoning(let itemId, _): return ["r:" + itemId]
+        case .toolCall(let call): return ["t:" + call.itemId]
+        case .toolResult(let result): return ["t:" + result.itemId] + (result.images.isEmpty ? [] : ["i:" + result.itemId])
+        case .editDiff(let diff): return ["t:" + diff.itemId]
+        case .approvalRequested(let request): return ["ap:" + request.approvalId]
+        case .questionRequested(let request): return ["q:" + request.approvalId]
+        case .approvalResolved(let resolution): return ["ap:" + resolution.approvalId, "q:" + resolution.approvalId]
+        case .planUpdated:
+            let key = event.turnId ?? "seq\(seq)"
+            let id = planRows[key] ?? "p:\(seq)"
+            planRows[key] = id
+            return [id]
+        case .turnStarted: return ["w:" + (event.turnId ?? "")]
+        case .turnCompleted(let completion):
+            return ["f:" + (completion.turnId.isEmpty ? (event.turnId ?? "seq\(seq)") : completion.turnId)]
+        case .systemNote: return ["n:\(seq)"]
+        case .error: return ["e:\(seq)"]
+        default: return []
+        }
+    }
+}

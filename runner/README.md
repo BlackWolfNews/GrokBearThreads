@@ -343,9 +343,9 @@ says so when the thread is on another runner than the one tb talks to.
 reads; with the runner down it reads `<home>/runner.log` for a dev runner or
 sandbox, and `--thread` includes the CLI's spawn and exit lines. `tb export`
 writes the thread as idle (a mid-turn export would otherwise look stuck)
-and prints the mock runner command line for it, and the `run-mock.sh` one
-marked as something to ask Mike about first (it opens the installed app in
-front of his work and runs until it's quit); the mock no longer loads
+and prints the mock runner command line for it, and the
+`app/Tools/dev-app.sh start --mock --fixtures` one (a debug app kept behind
+Mike's windows, which an agent can dump, screenshot and stop); the mock no longer loads
 `app/.fixtures/threads/` by default, so exports never reach design
 screenshots. A mistyped flag gets a message, not a stack trace. Messages
 print `tb` with its full path.

@@ -338,7 +338,9 @@ public struct TurnCompletion: Sendable, Hashable, Decodable {
 }
 
 public enum EventPayload: Sendable, Hashable {
-    case userMessage(text: String, images: [ImageRef])
+    /// `origin` is "runner" for a message the runner sent by itself (the
+    /// resume after a restart); nil for anything a person or client sent.
+    case userMessage(text: String, images: [ImageRef], origin: String? = nil)
     case assistantText(itemId: String, text: String)
     case reasoning(itemId: String, text: String)
     case toolCall(ToolCall)
@@ -396,6 +398,7 @@ public struct Event: Sendable, Hashable, Decodable {
         var text: String?
         var images: [ImageRef]
         var message: String?
+        var origin: String?
 
         init(from decoder: Decoder) throws {
             let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -403,9 +406,10 @@ public struct Event: Sendable, Hashable, Decodable {
             text = try? c.decodeIfPresent(String.self, forKey: .text)
             images = c.lossyArray(ImageRef.self, forKey: .images)
             message = try? c.decodeIfPresent(String.self, forKey: .message)
+            origin = try? c.decodeIfPresent(String.self, forKey: .origin)
         }
 
-        enum CodingKeys: String, CodingKey { case itemId, text, images, message }
+        enum CodingKeys: String, CodingKey { case itemId, text, images, message, origin }
     }
 
     private struct PlanFields: Decodable {
@@ -445,7 +449,7 @@ public struct Event: Sendable, Hashable, Decodable {
         switch type {
         case "user.message":
             let fields = try text()
-            return .userMessage(text: fields.text ?? "", images: fields.images)
+            return .userMessage(text: fields.text ?? "", images: fields.images, origin: fields.origin)
         case "assistant.text":
             let fields = try text()
             return .assistantText(itemId: fields.itemId ?? "", text: fields.text ?? "")

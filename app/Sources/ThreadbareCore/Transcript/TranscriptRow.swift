@@ -49,11 +49,19 @@ public struct TextItem: Sendable, Hashable {
 public struct UserMessage: Sendable, Hashable {
     public var text: String
     public var images: [ImageRef]
+    /// "runner" when the runner sent it by itself (the resume after a
+    /// restart), nil when a person or a client did.
+    public var origin: String?
 
-    public init(text: String, images: [ImageRef] = []) {
+    public init(text: String, images: [ImageRef] = [], origin: String? = nil) {
         self.text = text
         self.images = images
+        self.origin = origin
     }
+
+    /// Sent by the runner, not by Mike: shown as a quiet centred line, not
+    /// a bubble of his own.
+    public var isFromRunner: Bool { origin == "runner" }
 }
 
 public struct ToolItem: Sendable, Hashable {

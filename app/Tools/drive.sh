@@ -8,19 +8,22 @@
 #   Tools/drive.sh '{"cmd":"status"}'
 #
 # Each command's result is a line in the log file the app was started with.
+# THREADBARE_AUTOMATION_ID=<id> reaches an app started with --automation-id
+# <id>. Tools/dev-app.sh starts such apps and waits for each result.
 set -euo pipefail
+CHANNEL="com.mikerosoft.threadbare.automation${THREADBARE_AUTOMATION_ID:+.$THREADBARE_AUTOMATION_ID}"
 
 if [[ $# -eq 0 ]]; then
-  sed -n '2,10p' "$0" | sed 's/^# \{0,1\}//'
+  sed -n '2,12p' "$0" | sed 's/^# \{0,1\}//'
   exit 1
 fi
 for command in "$@"; do
   # JavaScript for Automation reaches Foundation without compiling anything.
-  /usr/bin/osascript -l JavaScript - "$command" >/dev/null <<'JXA' || { echo "couldn't post $command" >&2; exit 1; }
+  /usr/bin/osascript -l JavaScript - "$command" "$CHANNEL" >/dev/null <<'JXA' || { echo "couldn't post $command" >&2; exit 1; }
 ObjC.import('Foundation');
 function run(argv) {
   $.NSDistributedNotificationCenter.defaultCenter.postNotificationNameObjectUserInfoDeliverImmediately(
-    'com.mikerosoft.threadbare.automation', argv[0], $(), true);
+    argv[1], argv[0], $(), true);
 }
 JXA
   sleep 0.3

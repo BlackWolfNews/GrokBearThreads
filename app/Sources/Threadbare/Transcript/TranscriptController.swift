@@ -582,7 +582,8 @@ final class TranscriptController: NSObject, NSTableViewDataSource, NSTableViewDe
 
     func menu(forRow index: Int) -> NSMenu? {
         let menu = NSMenu()
-        if let row = row(at: index), MarkdownExport.message(for: row) != nil {
+        let row = row(at: index)
+        if let row, MarkdownExport.message(for: row) != nil {
             let copy = NSMenuItem(title: "Copy message", action: #selector(copyMessage(_:)), keyEquivalent: "")
             copy.target = self
             copy.representedObject = row.id
@@ -598,14 +599,34 @@ final class TranscriptController: NSObject, NSTableViewDataSource, NSTableViewDe
         let transcript = NSMenuItem(title: "Copy transcript as Markdown", action: #selector(copyTranscript), keyEquivalent: "")
         transcript.target = self
         menu.addItem(transcript)
+        if let row {
+            // What an agent needs to find this row again (the thread, the
+            // row, the events behind it), so Mike can point at it.
+            menu.addItem(.separator())
+            let debug = NSMenuItem(title: "Copy debug info", action: #selector(copyDebugInfo(_:)), keyEquivalent: "")
+            debug.target = self
+            debug.representedObject = row.id
+            menu.addItem(debug)
+        }
         return menu
     }
 
     @objc private func copyMessage(_ sender: NSMenuItem) {
         guard let id = sender.representedObject as? String, let session, let index = session.displayIndex(of: id),
               let row = row(at: index), let text = MarkdownExport.message(for: row) else { return }
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(text, forType: .string)
+        session.app?.copyToPasteboard(text)
+    }
+
+    @objc private func copyDebugInfo(_ sender: NSMenuItem) {
+        guard let id = sender.representedObject as? String, let text = debugInfo(rowId: id) else { return }
+        session?.app?.copyToPasteboard(text)
+    }
+
+    /// "Copy debug info" for a row on screen.
+    func debugInfo(rowId: String) -> String? {
+        guard let session, let index = session.displayIndex(of: rowId), let row = row(at: index) else { return nil }
+        return RowDebug.info(threadId: session.threadId, row: row, seqs: session.model.sourceSeqs(of: row.id),
+                             runnerVersion: session.app?.runnerVersion ?? "")
     }
 
     @objc private func toggleFromMenu(_ sender: NSMenuItem) {

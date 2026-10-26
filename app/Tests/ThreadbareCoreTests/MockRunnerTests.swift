@@ -172,6 +172,52 @@ final class MockRunnerTests: XCTestCase {
         XCTAssertTrue(image.path.hasPrefix(dataDir.appendingPathComponent("inbox").path))
     }
 
+    /// The mock's restart helpers behave like runner.restart: a pending
+    /// restart shows in runner.status with a notice, the restart drops the
+    /// connection and comes back on a new version, and the resumed thread
+    /// gets the note and a message sent by the runner.
+    func testRestartPendingThenRestartResumesAThread() async throws {
+        let client = try await connect()
+        _ = try await client.hello(version: "test")
+        var restart = RunnerRestart()
+        _ = try await client.call("mock.restartPending", .object(["resume": .object(["threadId": .string("demo_settings_tabs")])]), as: JSONValue.self)
+        for await notification in client.notifications {
+            if case .runnerNotice(_, let message) = notification, restart.notice(message, now: Date()) { break }
+        }
+        XCTAssertEqual(restart.pendingText, "The runner will restart when 3 threads finish.")
+        let status = try await client.runnerStatus()
+        XCTAssertEqual(Set(status.pendingRestart?.waitingFor ?? []), ["demo_button_colour", "demo_ci_slow", "demo_upload_resume"])
+        XCTAssertEqual(status.pendingRestart?.resumeThreadId, "demo_settings_tabs")
+
+        let before = try await client.events(threadId: "demo_settings_tabs").lastSeq
+        _ = try await client.call("mock.restart", .object(["downMs": .number(300)]), as: JSONValue.self)
+        for await _ in client.closed { break }
+        client.close()
+
+        var again: RPCClient?
+        for _ in 0..<100 where again == nil {
+            try await Task.sleep(for: .milliseconds(50))
+            again = try? await connect()
+        }
+        let back = try XCTUnwrap(again, "the mock should listen again on the same port")
+        defer { back.close() }
+        let hello = try await back.hello(version: "test")
+        XCTAssertEqual(hello.runnerVersion, "0.0.0-mock+r1")
+        let after = try await back.runnerStatus()
+        XCTAssertNil(after.pendingRestart)
+        var events: [Event] = []
+        for _ in 0..<100 {
+            events = try await back.events(threadId: "demo_settings_tabs", afterSeq: before).events
+            if events.contains(where: { if case .turnCompleted = $0.payload { return true }; return false }) { break }
+            try await Task.sleep(for: .milliseconds(50))
+        }
+        let model = TranscriptModel(events: events)
+        guard case .note(let note)? = model.items.first?.content else { return XCTFail("no restart note") }
+        XCTAssertEqual(note, "Runner restarted: 0.0.0-mock to 0.0.0-mock+r1")
+        guard case .user(let message)? = model.items.dropFirst().first?.content else { return XCTFail("no resume message") }
+        XCTAssertTrue(message.isFromRunner)
+    }
+
     func testWrongTokenIsUnauthorized() async throws {
         let endpoint = try RunnerConfig.endpoint(dataDir: dataDir)
         let client = RPCClient(transport: WebSocketTransport(url: endpoint.url, token: "not-the-token"))

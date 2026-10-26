@@ -199,7 +199,42 @@ enum ScreenshotRunner {
             await scroll(app, toRow: "t:w", offset: 20)
             await capture(window, dir.appendingPathComponent("10b-answered-cards.png"))
         }
+        // 11. A runner restart: the quiet banner while it waits for threads
+        // to finish, the reconnecting line while the runner is down, and
+        // the thread it carried on, with the runner's message as a centred
+        // note. Last, since it restarts the mock.
+        if wanted("11") {
+            app.sidebarMode = .inbox
+            let thread = "demo_settings_tabs"
+            await open(app, thread)
+            app.transcript.scrollToBottom()
+            let resume: JSONValue = .object(["threadId": .string(thread)])
+            _ = try? await app.client?.call("mock.restartPending", .object(["resume": resume]), as: JSONValue.self)
+            // The count comes with the notice; the threads' names (the
+            // tooltip) with runner.status a moment later.
+            await waitUntil(5) { app.banner?.detail != nil }
+            await capture(window, dir.appendingPathComponent("11a-restart-pending.png"))
+            _ = try? await app.client?.call("mock.restart", .object(["downMs": .number(3000)]), as: JSONValue.self)
+            await waitUntil(5) { app.connection != .connected }
+            await capture(window, dir.appendingPathComponent("11b-restart-reconnecting.png"))
+            let before = app.threads[thread]?.lastSeq ?? 0
+            await waitUntil(20) {
+                guard app.connection == .connected, let summary = app.threads[thread] else { return false }
+                return summary.lastSeq > before && summary.status == .idle
+            }
+            try? await Task.sleep(for: .milliseconds(400))
+            app.transcript.scrollToBottom()
+            await scroll(app, toRow: "n:", offset: 140)
+            await capture(window, dir.appendingPathComponent("11c-restart-resumed.png"))
+        }
         NSApp.terminate(nil)
+    }
+
+    private static func waitUntil(_ seconds: Double, _ condition: () -> Bool) async {
+        let deadline = Date().addingTimeInterval(seconds)
+        while !condition(), Date() < deadline {
+            try? await Task.sleep(for: .milliseconds(25))
+        }
     }
 
     /// A fresh window's sidebar width. This debug build shares the app's
@@ -257,25 +292,42 @@ enum ScreenshotRunner {
     }
 
     private static func capture(_ window: NSWindow, _ url: URL) async {
+        switch await save(window, to: url) {
+        case .screencapture: print("saved \(url.path)")
+        case .inProcess: print("saved \(url.path) (drawn in-process: the screen is locked or asleep)")
+        case nil: print("could not save \(url.path)")
+        }
+    }
+
+    enum CaptureMethod: String {
+        case screencapture
+        case inProcess = "drawn in-process"
+    }
+
+    /// The window alone as a PNG: `screencapture -l` with its id (covered or
+    /// not), or AppKit's own drawing of it when the window server has no
+    /// image to give. Also the automation hook's `screenshot`.
+    static func save(_ window: NSWindow, to url: URL) async -> CaptureMethod? {
         window.displayIfNeeded()
         try? await Task.sleep(for: .milliseconds(300))
         // A shot left from an earlier run would pass for this one below.
         try? FileManager.default.removeItem(at: url)
+        try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/sbin/screencapture")
         process.arguments = ["-o", "-x", "-l", String(window.windowNumber), url.path]
-        try? process.run()
-        process.waitUntilExit()
-        if FileManager.default.fileExists(atPath: url.path) {
-            print("saved \(url.path)")
-        } else if drawInProcess(window, to: url) {
-            // With the screen locked (or the display asleep) the window
-            // server has no image of the window to give. AppKit can still
-            // draw it, with the sidebar's glass as a flat fill.
-            print("saved \(url.path) (drawn in-process: the screen is locked or asleep)")
-        } else {
-            print("could not save \(url.path)")
+        process.standardOutput = FileHandle.nullDevice
+        process.standardError = FileHandle.nullDevice
+        // Off the main thread: waiting here held up the run loop.
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            process.terminationHandler = { _ in continuation.resume() }
+            do { try process.run() } catch { continuation.resume() }
         }
+        if FileManager.default.fileExists(atPath: url.path) { return .screencapture }
+        // With the screen locked (or the display asleep) the window server
+        // has no image of the window to give. AppKit can still draw it,
+        // with the sidebar's glass as a flat fill.
+        return drawInProcess(window, to: url) ? .inProcess : nil
     }
 
     /// The whole window (title bar and toolbar too) drawn by AppKit into a

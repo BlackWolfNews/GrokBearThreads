@@ -69,6 +69,17 @@ class RowCellView: NSTableCellView {
         updateHover()
     }
 
+    #if DEBUG
+    /// The automation hook's `hover`: draws the row as if the pointer were
+    /// over the part a click opens. Returns false for a row with none.
+    func debugHover(_ on: Bool) -> Bool {
+        guard !on || hoverRect != .zero else { return false }
+        pointer = on ? NSPoint(x: hoverRect.midX, y: hoverRect.midY) : nil
+        updateHover()
+        return true
+    }
+    #endif
+
     private func updateHover() {
         let on = hoverRect != .zero && pointer.map { hoverRect.contains($0) } == true
         if hover.isHidden == on { hover.isHidden = !on }
@@ -202,6 +213,9 @@ final class TextRowCell: RowCellView {
         textView.isHidden = render.text == nil
 
         switch row.content {
+        case .user(let message) where message.isFromRunner:
+            textView.place(NSRect(x: x, y: RowMetrics.runnerTop, width: width, height: render.textSize.height))
+
         case .user(let message):
             var y = RowMetrics.userTop
             if !message.images.isEmpty {

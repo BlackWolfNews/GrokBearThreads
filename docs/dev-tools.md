@@ -151,21 +151,51 @@ the data dir (`<home>`, normally `~/Library/Application Support/Threadbare`):
 `AGENTS.md` ("Working on Threadbare from inside Threadbare", kept short),
 `runner/README.md`, `docs/protocol.md`.
 
-## Phase 2: app side (after the design pass lands)
+## Phase 2: app side
 
-- `app/Tools/dev-app.sh start [--mock [--fixtures DIR]] [--home DIR]`,
-  `do '<json>'...`, `shot <file>`, `dump`, `stop`: a debug app in a temp
-  bundle with `--automation`, its window kept behind Mike's, against the
-  mock runner, a fixture export or a dev runner. `do` waits for each
-  command's result and prints it.
-- Automation commands: `screenshot`, `dump` (sidebar rows and transcript
-  rows as JSON: id, kind, height, expanded, text excerpt), `hover`,
-  `expand`, `collapse`, `scroll`, `appearance`, `resize`, `open`,
-  `waitFor`.
-- The app shows a pending runner restart as a quiet banner, and marks
-  `origin: "runner"` messages as sent by the runner after a restart.
-- "Copy debug info" on transcript rows (thread id, row id, event seqs) and
-  "Copy thread id" in the ... menu, so Mike can point an agent at a row.
+Built on 2026-10-27. How to use it is in `app/README.md` ("Seeing and
+driving it from a script") and in AGENTS.md ("Seeing and driving the app").
+
+- `app/Tools/dev-app.sh start [--mock [--fixtures DIR]...] [--home DIR]
+  [--appearance light|dark] [--size WxH] [--id NAME]`, then `do
+  '<json>'...`, `shot <file>`, `dump [--json]`, `log`, `stop [--all]`,
+  `status`. Each instance is a debug build in a temp bundle with its own
+  bundle id (its own settings), data folder, automation notification name
+  and pasteboard (`--automation-id`), so several run at once without
+  crosstalk; commands take `--id`, defaulting to the one started last. It
+  launches with `open -g` and the app orders its window to the back as soon
+  as it exists. `do` tags each command with a request id and waits for that
+  result line; an error result or a timeout exits 1. `--fixtures` takes
+  `tb export` folders; `--home` a dev runner's data dir (never the live
+  one). `stop` quits the app, stops its mock and deletes the bundle, the
+  data, the logs and the bundle id's preferences.
+- Automation commands added or rounded out: `open` (waits for the rows),
+  `screenshot` (in-process when the screen is locked), `dump` (sidebar
+  rows by section; transcript rows with id, kind, height, open or not, on
+  screen or not, an excerpt; selection, composer text, banner), `hover`
+  (sidebar or transcript rows), `expand` and `collapse` (groups, tools,
+  changed files, whole diffs), `scroll`, `appearance`, `resize`,
+  `waitFor` (row, kind, status, text, banner, connection, ready, with
+  `not` and a timeout), `new`, `type`, `send`, `menu` (a row's context menu,
+  or one of its items), `debug-info`, `copy-thread-id`, `clipboard` and
+  `mock` (`mock.*` methods only). Still debug builds only.
+- The app's own log (connection, RPC errors, runner notices, automation
+  commands) goes to the unified log, and with `--automation` to a file
+  beside the automation log too (`--app-log`); `dev-app.sh log` tails it.
+- A pending runner restart is a quiet grey line under the toolbar ("The
+  runner will restart when 2 threads finish.", the threads in its tooltip),
+  from `runner.notice` and `runner.status`; while the runner is down it
+  says "The runner is restarting. Reconnecting…" with a spinner and the
+  app retries every half second. A `user.message` with `origin: "runner"`
+  is a centred note, "Sent by the runner after it restarted" over its text.
+  The mock has `runner.status`, `mock.restartPending` and `mock.restart`,
+  and `Tools/screenshots.sh --only 11` shoots all three states.
+- "Copy debug info" on every transcript row (thread, row, kind, turn, the
+  seqs of the events it came from, the runner's version) and "Copy thread
+  id" in the ... menu. A scripted app copies to its own pasteboard.
+- "Start runner" only shows when the app uses the installed runner's data
+  folder, so a debug app against the mock or a dev runner can't kickstart
+  the live one.
 
 ## Safety during the build
 

@@ -294,3 +294,127 @@ private final class RefusingTransport: RPCTransport, @unchecked Sendable {
         }
     }
 }
+
+/// The runner restart in the window: a quiet banner while it waits, a quiet
+/// "Reconnecting" while it's down, then nothing.
+@MainActor
+final class RestartBannerTests: XCTestCase {
+    override func setUp() {
+        super.setUp()
+        _ = NSApplication.shared
+    }
+
+    func testPendingThenRestartingThenBack() {
+        let app = AppModel()
+        app.connection = .connected
+        XCTAssertNil(app.banner)
+        app.noticeForTesting("The runner will restart when 2 threads finish.")
+        XCTAssertEqual(app.banner, Banner(style: .quiet, icon: "arrow.clockwise", text: "The runner will restart when 2 threads finish."))
+        XCTAssertNil(app.errorMessage, "a restart notice isn't an error")
+        app.threads["a"] = ThreadSummary(id: "a", title: "Fix the build", status: .running)
+        app.restartStatusForTesting(PendingRestart(waitingFor: ["a"]))
+        XCTAssertEqual(app.banner?.text, "The runner will restart when 1 thread finishes.")
+        XCTAssertEqual(app.banner?.detail, "Waiting for Fix the build")
+        app.noticeForTesting("The runner is restarting now.")
+        XCTAssertEqual(app.banner?.text, "The runner is restarting now.")
+        XCTAssertNil(app.banner?.icon, "a spinner")
+        app.connectionLostForTesting()
+        XCTAssertEqual(app.banner, Banner(style: .quiet, icon: nil, text: "The runner is restarting. Reconnecting…"))
+        // Failed attempts while it's down are part of the restart too.
+        app.connection = .runnerDown("refused")
+        XCTAssertEqual(app.banner?.style, .quiet)
+    }
+
+    func testAPlainDropIsStillAWarning() {
+        let app = AppModel()
+        app.connectionLostForTesting()
+        XCTAssertEqual(app.banner?.style, .warning)
+        XCTAssertEqual(app.banner?.text, "Lost the connection to the runner. Reconnecting…")
+        app.noticeForTesting(level: "warning", "Release X kept crashing at startup, so the runner went back to Y.")
+        XCTAssertEqual(app.errorMessage, "Release X kept crashing at startup, so the runner went back to Y.")
+    }
+
+    /// "Start runner" kickstarts the installed runner's LaunchAgent: never
+    /// from an app pointed at the mock or a dev runner.
+    func testStartRunnerOnlyForTheRealDataFolder() {
+        let app = AppModel()
+        app.dataDir = RunnerConfig.defaultDataDir
+        app.connection = .runnerDown("refused")
+        XCTAssertEqual(app.banner?.showStart, true)
+        app.dataDir = URL(fileURLWithPath: "/tmp/tb-mock-xyz", isDirectory: true)
+        XCTAssertEqual(app.banner?.showStart, false)
+        XCTAssertEqual(app.banner?.showRetry, true)
+    }
+
+    /// A scripted run's copies go to its own pasteboard, never Mike's.
+    func testCopiesGoToTheAppsPasteboard() {
+        let app = AppModel()
+        let board = NSPasteboard(name: NSPasteboard.Name("com.mikerosoft.threadbare.test.\(UUID().uuidString)"))
+        app.pasteboard = board
+        app.copyToPasteboard("th_123")
+        XCTAssertEqual(board.string(forType: .string), "th_123")
+        board.releaseGlobally()
+    }
+}
+
+/// The resume the runner sends after a restart is a centred note, not a
+/// bubble of Mike's.
+final class RunnerMessageRenderTests: XCTestCase {
+    func testRunnerMessageRendersAsANote() throws {
+        let row = TranscriptRow(id: "u:8", version: 3_000_001, seq: 8, content: .user(UserMessage(text: "Check that your change works.", origin: "runner")))
+        let render = RowRenderer.render(row, expanded: false, tableWidth: 900, measurer: TextMeasurer())
+        let text = try XCTUnwrap(render.text?.string)
+        XCTAssertEqual(text, "Sent by the runner after it restarted\nCheck that your change works.")
+        let style = try XCTUnwrap(render.text?.attribute(.paragraphStyle, at: 0, effectiveRange: nil) as? NSParagraphStyle)
+        XCTAssertEqual(style.alignment, .center)
+        // Shorter than the same words in a bubble, which has the turn's gap above.
+        let bubble = RowRenderer.render(TranscriptRow(id: "u:9", version: 3_000_002, seq: 9, content: .user(UserMessage(text: "Check that your change works."))),
+                                        expanded: false, tableWidth: 900, measurer: TextMeasurer())
+        XCTAssertLessThan(render.height, bubble.height)
+    }
+}
+
+#if DEBUG
+final class AutomationTests: XCTestCase {
+    /// Each dev-app instance has its own channel, so commands never reach
+    /// another instance (or the installed app).
+    @MainActor
+    func testChannelsAndLogPaths() {
+        XCTAssertEqual(Automation.channel(id: nil), "com.mikerosoft.threadbare.automation")
+        XCTAssertEqual(Automation.channel(id: ""), "com.mikerosoft.threadbare.automation")
+        XCTAssertEqual(Automation.channel(id: "a3f9"), "com.mikerosoft.threadbare.automation.a3f9")
+        XCTAssertEqual(Automation.appLogURL(automationLog: URL(fileURLWithPath: "/tmp/x/drive.log"), arguments: []).path, "/tmp/x/drive.app.log")
+        XCTAssertEqual(Automation.appLogURL(automationLog: URL(fileURLWithPath: "/tmp/x/drive.log"), arguments: ["--app-log", "/tmp/y/app.log"]).path, "/tmp/y/app.log")
+        XCTAssertEqual(Automation.parseSize("1240x820"), NSSize(width: 1240, height: 820))
+        XCTAssertNil(Automation.parseSize("big"))
+        XCTAssertEqual(Automation.json("a\nb"), "\"a\\nb\"")
+    }
+
+    func testDumpTextMarksSelectionAndRowsOnScreen() {
+        let dump = AppDump(
+            instance: "a3f9", connection: "connected", runnerVersion: "0.0.0-mock",
+            banner: AppDump.BannerInfo(style: "quiet", text: "The runner will restart when 1 thread finishes.", detail: nil),
+            error: nil, window: AppDump.Window(width: 1240, height: 820, appearance: "dark"),
+            sidebar: AppDump.Sidebar(mode: "inbox", sections: [
+                AppDump.Section(name: "Needs you", threads: []),
+                AppDump.Section(name: "Inbox", threads: [AppDump.Thread(id: "th1", title: "Fix it", status: "idle", needsYou: false, unread: true, hovered: false)]),
+            ], snoozed: 0, archived: 2),
+            selection: AppDump.Thread(id: "th1", title: "Fix it", status: "idle", needsYou: false, unread: false, hovered: false),
+            composer: AppDump.Composer(draft: "th1", text: "hello", images: 0),
+            transcript: AppDump.Transcript(threadId: "th1", state: "loaded", hasMoreAbove: false, atBottom: true, rows: [
+                AppDump.Row(id: "u:1", kind: "user", height: 64, expanded: nil, inGroup: false, onScreen: false, seq: 1, turn: "t1", text: "Fix it"),
+                AppDump.Row(id: "g:r:r1", kind: "group", height: 32, expanded: true, inGroup: false, onScreen: true, seq: 2, turn: "t1", text: "Ran a command"),
+            ])
+        )
+        let text = dump.text
+        XCTAssertTrue(text.hasPrefix("dev app a3f9: connected, runner 0.0.0-mock, window 1240x820 dark\n"))
+        XCTAssertTrue(text.contains("banner (quiet): The runner will restart when 1 thread finishes."))
+        XCTAssertFalse(text.contains("Needs you"), "empty sections are left out")
+        XCTAssertTrue(text.contains("  > th1"), "the selected thread is marked")
+        XCTAssertTrue(text.contains("composer (th1): \"hello\""))
+        XCTAssertTrue(text.contains("> g:r:r1"))
+        XCTAssertTrue(text.contains("open    Ran a command"))
+        XCTAssertTrue(dump.json(pretty: false).contains("\"onScreen\":true"))
+    }
+}
+#endif

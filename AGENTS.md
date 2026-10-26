@@ -67,12 +67,34 @@ if `tb` isn't found (an older runner, or outside a thread), use
 - Rebuilding or restarting the app (`app/restart.sh`, `app/install.sh`) is
   safe: the runner keeps your turn going and the app reconnects.
 - `tb show <id>` reads a thread as text, `tb logs` the runner log, and
-  `tb export <id>` copies a thread into `app/.fixtures/` so a rendering bug
-  can be reproduced against the mock runner (it prints the command). The
-  `run-mock.sh` line it also prints opens a window in front of Mike, so ask
-  him first.
-- Check app changes with `app/Tools/screenshots.sh <dir>`: a debug build
-  against the mock runner, in a temp folder, with the window kept behind
-  whatever Mike is working in. Look at the images before saying it works.
-- `app/Tools/perf-run.sh` brings its window to the front for about a minute,
-  so ask Mike before running it.
+  `tb export <id>` copies a thread into `app/.fixtures/threads/<id>` so a
+  rendering bug can be reproduced against the mock runner (it prints the
+  commands).
+- `app/Tools/perf-run.sh` and `app/Tools/run-mock.sh` bring a window to the
+  front of Mike's work, so ask him before running them.
+
+## Seeing and driving the app
+
+`app/Tools/dev-app.sh` runs a debug build in a temp bundle, against the
+mock runner or a dev runner, with its window kept behind Mike's. Several
+can run at once; each command takes `--id` (default: the last started).
+Never use `~/Applications/Threadbare.app` for this.
+
+- A UI change: `app/Tools/dev-app.sh start --mock` (the demo threads; add
+  `--appearance light` for the other look), then drive it with
+  `do '{"cmd":"open","id":"demo_upload"}' '{"cmd":"expand","row":"g:"}'`,
+  read it with `dump` (rows with ids, kinds and heights, the composer, the
+  banner) and look at it with `shot <file.png>`. Look at the images
+  before saying it works, then `stop`. The commands are in `app/README.md`
+  ("Seeing and driving it from a script").
+- A bug in one of Mike's real threads: `tb export <id>`, then
+  `app/Tools/dev-app.sh start --mock --fixtures app/.fixtures/threads/<id>`
+  and `open` it. Exports are his private conversations: keep shots of them
+  out of git and delete them when done.
+- A runner change seen in the app: start `runner/scripts/dev-runner.sh`,
+  then `dev-app.sh start --home <dev home>`.
+- `dev-app.sh log` shows the app's own log (connection, RPC errors, the
+  commands it ran). Mike can right-click a row for "Copy debug info" or use
+  "Copy thread id" in the ... menu to point you at what he's seeing.
+- For the full design set, `app/Tools/screenshots.sh <dir>` (`--only 11`
+  for one scene).

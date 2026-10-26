@@ -83,6 +83,8 @@ struct DetailView: View {
                         ThreadMenu(thread: thread)
                         Divider()
                         Button("Copy transcript as Markdown") { session?.copyTranscript() }
+                        // So Mike can point an agent at this thread (`tb show <id>`).
+                        Button("Copy thread id") { app.copyToPasteboard(thread.id) }
                     }
                 } label: {
                     Label("More", systemImage: "ellipsis")
@@ -219,30 +221,44 @@ struct ConnectionBanner: View {
     @Environment(AppModel.self) private var app
 
     var body: some View {
-        switch app.connection {
-        case .connected:
-            EmptyView()
-        case .connecting:
-            banner(icon: "bolt.horizontal", text: "Connecting to the runner…", showStart: false)
-        case .runnerDown(let reason):
-            // One plain sentence; the raw reason is in the tooltip.
-            banner(icon: "bolt.horizontal.circle", text: "Can't reach the runner.", detail: reason, showStart: true)
-        case .lost:
-            banner(icon: "bolt.horizontal", text: "Lost the connection to the runner. Reconnecting…", showStart: false)
-        case .unauthorized:
-            banner(icon: "lock", text: "The runner didn't accept the token in secrets/runner-token.", showStart: false)
+        if let banner = app.banner {
+            switch banner.style {
+            case .quiet: quiet(banner)
+            case .warning: warning(banner)
+            }
         }
     }
 
-    private func banner(icon: String, text: String, detail: String? = nil, showStart: Bool) -> some View {
+    /// A runner restart: grey words on the window's own background with a
+    /// hairline under them, so it reads as information, not a problem.
+    private func quiet(_ banner: Banner) -> some View {
         HStack(spacing: 8) {
-            Image(systemName: icon).foregroundStyle(.secondary)
-            Text(text).lineLimit(2).help(detail ?? "")
+            if let icon = banner.icon {
+                Image(systemName: icon).foregroundStyle(.secondary)
+            } else {
+                SpinnerMark(color: .secondaryLabelColor).frame(width: 13, height: 13)
+            }
+            Text(banner.text).foregroundStyle(.secondary).lineLimit(1)
+            Spacer(minLength: 0)
+        }
+        .font(.system(size: TypeScale.label))
+        .help(banner.detail ?? "")
+        .padding(.horizontal, 14)
+        .padding(.vertical, 7)
+        .overlay(alignment: .bottom) { Rectangle().fill(Color(nsColor: Theme.hairline)).frame(height: 0.5) }
+    }
+
+    private func warning(_ banner: Banner) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: banner.icon ?? "bolt.horizontal").foregroundStyle(.secondary)
+            Text(banner.text).lineLimit(2).help(banner.detail ?? "")
             Spacer()
-            if showStart {
+            if banner.showStart {
                 Button("Start runner") { app.startRunner() }
             }
-            Button("Try again") { app.reconnectNow() }
+            if banner.showRetry {
+                Button("Try again") { app.reconnectNow() }
+            }
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 8)

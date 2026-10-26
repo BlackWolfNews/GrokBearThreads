@@ -56,8 +56,8 @@ and the perf run stay away from the real one. Install the runner itself with
   Archive, with their counts, are at the bottom. There's no search in the
   inbox; the archive has its own.
 - **Header.** One line: the folder's name, then the title. The full path is
-  in its tooltip. The ... menu has Snooze, Archive and "Copy transcript as
-  Markdown".
+  in its tooltip. The ... menu has Snooze, Archive, "Copy transcript as
+  Markdown" and "Copy thread id" (for pointing an agent at the thread).
 - **New thread** with ⌘N or the New thread row. The composer sits in the
   middle of the pane under "What should we work on?", with where the thread
   will start ("Starts in misc on mike") under it, and drops to the bottom
@@ -89,11 +89,26 @@ and the perf run stay away from the real one. Install the runner itself with
   you aren't looking at them.
 - **Copy.** Right-click a row for Copy message. "Copy transcript as Markdown"
   (⇧⌘C, or the ... menu) copies the whole thread, fetching older pages first.
+  "Copy debug info" (on every row's menu) copies the thread id, the row's id
+  and kind, its turn, the seqs of the events it was built from and the
+  runner's version, one `key: value` a line, so an agent can find the same
+  events with `tb show` or a fixture export.
 - **Images** in the transcript are thumbnails; click one for Quick Look.
+- **Runner restarts** (`runner.restart`, the deploy script) show as a
+  quiet grey line under the toolbar, not the yellow banner: "The runner
+  will restart when 2 threads finish." (the threads' titles are in its
+  tooltip; the count follows `runner.status` as threads finish), then "The
+  runner is restarting. Reconnecting…" with a spinner while it's down. The
+  app retries every half second then, and the line goes once it's back. A
+  runner that isn't back within 90 seconds gets the usual banner. The
+  message the runner sends to carry a thread on (`origin: "runner"`) is a
+  small centred note under the "Runner restarted" one, "Sent by the runner
+  after it restarted" over its text, not a bubble of yours.
 - If the runner isn't running you get "Can't reach the runner." with
   **Start runner** (`launchctl kickstart` of
-  `com.mikerosoft.threadbare.runner`) and Try again; the reason is in its
-  tooltip. A dropped connection says "Lost the connection to the runner.
+  `com.mikerosoft.threadbare.runner`; only shown when the app uses the
+  installed runner's data folder, never against the mock or a dev runner)
+  and Try again; the reason is in its tooltip. A dropped connection says "Lost the connection to the runner.
   Reconnecting…". The app reconnects on its own with backoff (0.25 s
   doubling to 10 s), closing each failed attempt's socket, and catches each
   open thread up from the last event it had. A "not connected" banner goes
@@ -174,7 +189,17 @@ threads in `Tools/mock-runner/fixtures` (made up, safe to commit; regenerate
 with `node Tools/mock-runner/make-synthetic.mjs`) plus any private fixtures in
 `.fixtures/`, fakes a turn when you send a message (say "approval" or
 "question" in it to get a card), and has a `mock.stream` method that replays
-a 30 Hz stream for perf runs.
+a 30 Hz stream for perf runs. `--fixtures DIR` (repeatable) serves only
+those: a folder of fixtures, or one `tb export` folder.
+
+It also answers `runner.status`, and fakes a runner restart for the app's
+restart states: `mock.restartPending` (`waitingFor`, default the busy
+threads; `resume: {threadId}`; `cancel: true`) saves one and sends the
+notice, and `mock.restart` (`downMs`, default 3000; `resume: {threadId,
+text}`) sends "The runner is restarting now.", drops every connection,
+closes the port for `downMs`, comes back on the same port as
+`0.0.0-mock+r1`, and carries the resumed thread on with the "Runner
+restarted" note and a turn whose message has `origin: "runner"`.
 
 ```bash
 (cd Tools/mock-runner && npm install)
@@ -274,34 +299,76 @@ work group, a question), 5 the archive with a row's Unarchive button, 6 a
 long reply streaming (while it streams, at its end and in its middle), 8 a
 running turn and the demo's edits (a group with its diffs open, the changes
 card with a file open), 7 the new-thread composer (typed, with an image,
-with a long draft) and 9 an inbox row's hover buttons.
+with a long draft), 9 an inbox row's hover buttons, 10 a failed tool and
+answered cards, and 11 a runner restart (the quiet banner while it waits,
+reconnecting while it's down, and the thread it carried on, with the
+runner's message as a note; last, since it restarts the mock).
 `Tools/screenshots.sh <dir> [--only <prefix>] [--appearance light|dark]`
 does all of this in a temp folder with the window kept behind yours.
 
-## Driving it from a script
+## Seeing and driving it from a script
 
-Debug builds launched with `--automation <log file>` take commands from
-`Tools/drive.sh` (distributed notifications), so a script or an agent can use
-the app's own UI paths without bringing the window to the front or needing
-accessibility access: select a thread, set the new-thread folder, account,
-model and "Ask before edits", type into the composer and press Return, paste
-an image (through a private pasteboard, never the clipboard), click a button
-in the transcript (Allow, Always allow, Deny, a question's option, Send
-answer), archive, unarchive, snooze, switch the sidebar view, scroll, show
-a row's hover buttons (`hover`), and read the app's state back (`status`,
-and `sidebar` for the inbox's rows by section). It posts no notifications while scripted. Release
-builds don't include it.
+Debug builds launched with `--automation <log file>` take commands as
+distributed notifications, so a script or an agent can use the app's own UI
+paths without bringing the window to the front or needing accessibility
+access. Each result is a line in that log; the app's own log (connection,
+RPC errors, runner notices, the commands) goes beside it (`--app-log`, else
+`<log>.app.log`). It posts no notifications while scripted, and anything
+it copies goes to its own pasteboard, never the clipboard. Release builds
+don't include it.
+
+`Tools/dev-app.sh` is the way to use it. Each instance is a debug build in
+its own temp bundle with its own bundle id (so its own settings), data
+folder, notification name and pasteboard (`--automation-id`), so several
+run at once without crosstalk; its window opens with `open -g` and goes
+behind everything as soon as it's there.
 
 ```bash
-bash restart.sh && bash kill.sh     # a debug build in ~/Applications
-open -g ~/Applications/Threadbare.app --args --automation /tmp/tb-drive.log
-Tools/drive.sh '{"cmd":"select","id":"<thread id prefix>"}' '{"cmd":"click","title":"Allow"}'
-Tools/drive.sh '{"cmd":"status"}'; tail -1 /tmp/tb-drive.log
+Tools/dev-app.sh start --mock                    # the demo threads; prints the instance id
+Tools/dev-app.sh start --mock --fixtures .fixtures/threads/<id>   # a tb export
+Tools/dev-app.sh start --home <dev runner home>  # runner/scripts/dev-runner.sh
+Tools/dev-app.sh do '{"cmd":"open","id":"demo_upload"}' '{"cmd":"expand","row":"g:"}'
+Tools/dev-app.sh dump            # sidebar, rows (id, kind, height, open, text), composer, banner
+Tools/dev-app.sh shot /tmp/a.png # the window alone
+Tools/dev-app.sh log             # the app's own log
+Tools/dev-app.sh stop            # quits it, stops its mock, deletes its files and settings
 ```
 
-`account-ids` shows accounts by id instead of email address, for
-screenshots. The integration run on 2026-10-26 used this against the real
-runner; its window-only captures are in `../docs/screenshots/`.
+`start` also takes `--appearance light|dark`, `--size WxH` and `--id NAME`;
+every other command takes `--id` (default: the one started last), and
+`status` lists them. `do` waits for each result and exits 1 on an error or
+a timeout. `--home` refuses the live runner's data folder.
+
+The commands (`do`), each a JSON object with `cmd`. Rows and threads can be
+named by the start of their id.
+
+| cmd | fields | |
+|---|---|---|
+| `open` | `id`, `timeout` | selects a thread and waits until its rows are on screen |
+| `select` | `id` | selects it without waiting |
+| `new`, `options` | `cwd`, `account`, `model`, `ask` | the new-thread composer and its menus |
+| `type`, `send`, `return` | `text`, `replace` | types into the composer; `send` types and presses Return |
+| `paste-image` | `path` | through the instance's own pasteboard |
+| `click` | `title` | a button in the transcript: Allow, Always allow, Deny, an option, Send answer |
+| `expand`, `collapse` | `row`, `file`, `all` | a group, tool, thinking block or settled approval (one folded in a closed group opens it); `file` (path or index) in a changes card; `all` for a whole diff |
+| `scroll` | `to` (`top`, `bottom`) or `row`, `offset` | |
+| `hover` | `id` (sidebar) or `row` (transcript); neither clears | draws a row as if the pointer were on it |
+| `menu` | `row`, `click` | a transcript row's context menu, or chooses an item from it |
+| `debug-info`, `copy-thread-id`, `clipboard` | `row`, `id` | what "Copy debug info" and "Copy thread id" copy, and the instance's pasteboard |
+| `appearance`, `resize` | `mode` (light, dark, system); `w`, `h` | |
+| `archive`, `unarchive`, `snooze`, `mode` | `id`, `seconds`, `mode` | |
+| `waitFor` | `row`, `kind`, `status` (and `thread`), `text`, `banner` (`""` for none), `connection`, `loaded`, `ready`, `not`, `timeout` | until every condition given holds (default 10 s) |
+| `dump` | `format` (`json`, `text`), `out` | |
+| `screenshot` | `path` | `screencapture -l`, or drawn in-process when the screen is locked |
+| `mock` | `method`, `params` | `mock.<method>` on the mock runner, such as `restartPending` and `restart` |
+| `status`, `sidebar`, `streaming`, `account-ids`, `quit` | | |
+
+`Tools/drive.sh` posts commands without waiting (`THREADBARE_AUTOMATION_ID`
+picks an instance). The integration run on 2026-10-26 used it against the
+real runner with a debug build in `~/Applications` (`restart.sh`, then
+`open -g ~/Applications/Threadbare.app --args --automation /tmp/tb-drive.log`),
+which replaces Mike's app; its window-only captures are in
+`../docs/screenshots/`.
 
 ## Tests
 
@@ -314,12 +381,15 @@ shapes the strict decoders used to reject), the JSON-RPC client over a fake
 transport (request order, timeouts), the reducer and feed (streaming across
 earlier finished turns, gaps and unfillable holes, paging and moved rows,
 trimming), markdown blocks, diffs, snooze presets, sidebar sections, image
-headers and the Markdown export. `MockRunnerTests` runs the real WebSocket
-client against the mock runner (skipped if node or the mock's `npm install`
-is missing). `ThreadbareAppTests` tests the app target itself: typing into
-the composer, question answers, incremental streaming heights against a
-full measure, the render cache, sliced tall text, and drafts kept when a
-send fails.
+headers, the Markdown export, the runner restart's states, messages sent by
+the runner, and which events each row came from ("Copy debug info").
+`MockRunnerTests` runs the real WebSocket client against the mock runner,
+its restart included (skipped if node or the mock's `npm install` is
+missing). `ThreadbareAppTests` tests the app target itself: typing into the
+composer, question answers, incremental streaming heights against a full
+measure, the render cache, sliced tall text, drafts kept when a send fails,
+the restart banner, the runner's message as a note, and the automation
+hook's channels and dump.
 
 `--screenshots` also checks two things as it goes: a long streamed reply
 (drawn through a slice, captured at the end, in the middle and while it

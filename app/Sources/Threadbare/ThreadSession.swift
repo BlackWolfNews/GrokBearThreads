@@ -98,6 +98,7 @@ final class ThreadSession {
                 await subscribe()
             } catch {
                 perfLog.endInterval("open", signpost)
+                AppLog.write("rpc", "couldn't load \(threadId): \(error.localizedDescription)")
                 state = .failed(error.localizedDescription)
             }
         }
@@ -344,8 +345,7 @@ final class ThreadSession {
             let all = events
             // Items, not rows: nothing folded in a group is left out.
             let text = await Task.detached { MarkdownExport.transcript(title: title, rows: TranscriptModel(events: all).items) }.value
-            NSPasteboard.general.clearContents()
-            NSPasteboard.general.setString(text, forType: .string)
+            app?.copyToPasteboard(text)
         }
     }
 }
