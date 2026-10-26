@@ -181,18 +181,38 @@ final class ThreadSession {
         }
         let started = CACurrentMediaTime()
         lastFlush = started
-        let firstId = displayStart < feed.model.rows.count ? feed.model.rows[displayStart].id : nil
+        let oldStart = displayStart
         let change = feed.flush()
         guard !change.isEmpty else { return }
-        if let firstId, let index = feed.model.indexOf(id: firstId) {
-            displayStart = index
-        }
-        let start = displayStart
-        let inserted = IndexSet(change.inserted.compactMap { $0 >= start ? $0 - start : nil })
-        let updated = IndexSet(change.updated.compactMap { $0 >= start ? $0 - start : nil })
-        view?.apply(inserted: inserted, updated: updated)
+        show(change, oldStart: oldStart)
         flushCount += 1
         flushTime += CACurrentMediaTime() - started
+    }
+
+    /// Opens or closes a work group or a changed file. Its rows are
+    /// inserted or removed in place, like a live update.
+    func setModelExpanded(_ key: String, _ open: Bool) {
+        guard state == .loaded, !rebuilding else { return }
+        let oldStart = displayStart
+        let change = feed.setExpanded(key, open)
+        guard !change.isEmpty else { return }
+        show(change, oldStart: oldStart)
+    }
+
+    /// Moves `displayStart` past rows that came or went above it and hands
+    /// the table the rest in its own indices. Removed rows are indices in
+    /// the old row list; inserted and updated ones in the new list.
+    private func show(_ change: TranscriptChange, oldStart: Int) {
+        var start = oldStart - change.removed.count(in: 0..<oldStart)
+        for index in change.inserted {
+            guard index < start else { break }
+            start += 1
+        }
+        displayStart = min(start, feed.model.rows.count)
+        let removed = IndexSet(change.removed.compactMap { $0 >= oldStart ? $0 - oldStart : nil })
+        let inserted = IndexSet(change.inserted.compactMap { $0 >= start ? $0 - start : nil })
+        let updated = IndexSet(change.updated.compactMap { $0 >= start ? $0 - start : nil })
+        view?.apply(removed: removed, inserted: inserted, updated: updated)
     }
 
     // MARK: Older rows
@@ -320,7 +340,8 @@ final class ThreadSession {
                 first = page.events.first?.seq ?? 1
             }
             let all = events
-            let text = await Task.detached { MarkdownExport.transcript(title: title, rows: TranscriptModel(events: all).rows) }.value
+            // Items, not rows: nothing folded in a group is left out.
+            let text = await Task.detached { MarkdownExport.transcript(title: title, rows: TranscriptModel(events: all).items) }.value
             NSPasteboard.general.clearContents()
             NSPasteboard.general.setString(text, forType: .string)
         }

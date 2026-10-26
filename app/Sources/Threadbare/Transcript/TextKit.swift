@@ -24,13 +24,18 @@ final class BackgroundLayoutManager: NSLayoutManager {
             }
             guard !box.isNull else { return }
             let style = storage.attribute(.paragraphStyle, at: effective.location, effectiveRange: nil) as? NSParagraphStyle
-            let head = (style?.headIndent ?? 0) - 10
-            let tail = width + (style?.tailIndent ?? 0) + 10
-            var rect = NSRect(x: head, y: box.minY - 6, width: max(0, tail - head), height: box.height + 12)
+            let pad = MarkdownRenderer.codePad
+            let head = (style?.headIndent ?? 0) - pad
+            let tail = width + (style?.tailIndent ?? 0) + pad
+            var rect = NSRect(x: head, y: box.minY - pad, width: max(0, tail - head), height: box.height + pad * 2)
             rect.origin.y = max(0, rect.origin.y)
-            rect = rect.offsetBy(dx: origin.x, dy: origin.y)
+            rect = rect.offsetBy(dx: origin.x, dy: origin.y).insetBy(dx: 0.25, dy: 0.25)
+            let path = NSBezierPath(roundedRect: rect, xRadius: 8, yRadius: 8)
             color.setFill()
-            NSBezierPath(roundedRect: rect, xRadius: 6, yRadius: 6).fill()
+            path.fill()
+            Theme.cardBorder.setStroke()
+            path.lineWidth = 0.5
+            path.stroke()
         }
 
         storage.enumerateAttribute(.tbInlineBackground, in: characters) { value, range, _ in
@@ -134,6 +139,15 @@ final class TranscriptTextView: NSTextView {
 
     /// Where all of the text sits in the superview (what `frame` would be).
     private(set) var fullFrame = NSRect.zero
+
+    /// The text always starts at (0, 0) in the view's coordinates, whatever
+    /// slice the bounds show. NSTextView recomputes this from the bounds
+    /// origin when it re-lays out (a finished reply replacing its streamed
+    /// text did it), and a slice at offset 2,844 then drew the start of a
+    /// long reply where its end belonged.
+    override var textContainerOrigin: NSPoint {
+        NSPoint(x: textContainerInset.width, y: textContainerInset.height)
+    }
     private var placed = false
 
     /// Puts the text at `frame` in the superview, drawing only a slice of

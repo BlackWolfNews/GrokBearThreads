@@ -1,7 +1,9 @@
 import Foundation
 
 /// Turns transcript rows back into Markdown for "Copy message" and
-/// "Copy transcript as Markdown" (selection can't span table rows).
+/// "Copy transcript as Markdown" (selection can't span table rows). A
+/// transcript export takes the model's `items`, so nothing folded in a
+/// group is left out.
 public enum MarkdownExport {
     public static func transcript(title: String, rows: [TranscriptRow]) -> String {
         var parts: [String] = []
@@ -68,6 +70,13 @@ public enum MarkdownExport {
             return "_\(text)_"
         case .error(let message):
             return "**Error**: \(message)"
+        case .group(let group):
+            return "_\(group.summary)_"
+        case .working:
+            return nil
+        case .changes(let card):
+            let files = card.files.map { "- `\($0.path)` +\($0.added) −\($0.removed)" }
+            return ([card.title + ":"] + files).joined(separator: "\n")
         }
     }
 

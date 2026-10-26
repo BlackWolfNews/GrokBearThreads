@@ -12,7 +12,14 @@ enum MarkdownRenderer {
         let blocks: [String]
         /// UTF-16 offset where each block starts in `string`.
         let starts: [Int]
+        /// Room a code block's box needs below the last line when the
+        /// message ends with one (paragraph spacing after the last paragraph
+        /// doesn't count in TextKit's height).
+        var trailingPad: CGFloat = 0
     }
+
+    /// How far a code block's box reaches past its text.
+    static let codePad: CGFloat = 12
 
     nonisolated(unsafe) private static let cache: NSCache<NSString, NSAttributedString> = {
         let cache = NSCache<NSString, NSAttributedString>()
@@ -28,13 +35,29 @@ enum MarkdownRenderer {
         let output = NSMutableAttributedString()
         var starts: [Int] = []
         starts.reserveCapacity(blocks.count)
+        // TextKit ignores spacing before the first paragraph, so a message
+        // that opens with a code block gets a tiny spacer line for its box's
+        // top padding to sit in. The first block's kind never changes as a
+        // message streams, so block offsets stay stable.
+        if let first = blocks.first, isCodeBlock(first) { output.append(leadingSpacer) }
         for (index, block) in blocks.enumerated() {
             if index > 0 { output.append(separator) }
             starts.append(output.length)
             output.append(renderBlock(block))
         }
-        return Rendered(string: output, blocks: blocks, starts: starts)
+        let pad = blocks.last.map(isCodeBlock) == true ? codePad : 0
+        return Rendered(string: output, blocks: blocks, starts: starts, trailingPad: pad)
     }
+
+    static func isCodeBlock(_ block: String) -> Bool {
+        let trimmed = block.drop(while: { $0 == " " })
+        return trimmed.hasPrefix("```") || trimmed.hasPrefix("~~~")
+    }
+
+    private static let leadingSpacer: NSAttributedString = {
+        let (style, _) = Theme.lines(1, font: .systemFont(ofSize: 1))
+        return NSAttributedString(string: "\u{200B}\n", attributes: [.font: NSFont.systemFont(ofSize: 1), .paragraphStyle: style])
+    }()
 
     static func renderBlock(_ block: String) -> NSAttributedString {
         let key = block as NSString
@@ -77,9 +100,7 @@ enum MarkdownRenderer {
             if context.code { return context.bold ? Theme.codeBoldFont : Theme.codeFont }
             var font: NSFont
             switch context.headingLevel {
-            case 1: font = .systemFont(ofSize: 19, weight: .semibold)
-            case 2: font = .systemFont(ofSize: 16.5, weight: .semibold)
-            case 3: font = .systemFont(ofSize: 14.5, weight: .semibold)
+            case 1...3: font = Self.headingFont(context.headingLevel)
             case 4...: font = .systemFont(ofSize: Theme.bodySize, weight: .semibold)
             default: font = context.bold ? Theme.boldFont : Theme.bodyFont
             }
@@ -106,18 +127,28 @@ enum MarkdownRenderer {
             output.append(NSAttributedString(string: text, attributes: attributes(context)))
         }
 
-        func paragraphStyle(_ context: Context, spacing: CGFloat? = nil, before: CGFloat = 0, first: CGFloat? = nil, tabs: [CGFloat] = []) -> NSParagraphStyle {
-            let style = Theme.paragraph(spacing: spacing ?? context.listSpacing ?? 9, before: before, head: context.indent, first: first)
+        /// Gap after a paragraph, and between list items.
+        static let paragraphGap: CGFloat = 10
+        static let itemGap: CGFloat = 6
+
+        func paragraphStyle(_ context: Context, spacing: CGFloat? = nil, before: CGFloat = 0, first: CGFloat? = nil, tabs: [CGFloat] = [],
+                            line: CGFloat = Theme.bodyLine, font: NSFont = Theme.bodyFont) -> (style: NSParagraphStyle, offset: CGFloat) {
+            let (style, offset) = Theme.lines(line, font: font, spacing: spacing ?? context.listSpacing ?? Self.paragraphGap,
+                                              before: before, head: context.indent, first: first)
             if !tabs.isEmpty {
                 style.tabStops = tabs.map { NSTextTab(textAlignment: .left, location: $0) }
                 style.defaultTabInterval = 28
             }
-            return style
+            return (style, offset)
         }
 
-        mutating func finishParagraph(from start: Int, style: NSParagraphStyle) {
+        mutating func finishParagraph(from start: Int, style: (style: NSParagraphStyle, offset: CGFloat)) {
             append("\n", Context())
-            output.addAttribute(.paragraphStyle, value: style, range: NSRange(location: start, length: output.length - start))
+            let range = NSRange(location: start, length: output.length - start)
+            output.addAttribute(.paragraphStyle, value: style.style, range: range)
+            // One offset for the whole line, so smaller runs (inline code)
+            // share the body text's baseline.
+            output.addAttribute(.baselineOffset, value: style.offset, range: range)
         }
 
         // MARK: Blocks
@@ -130,7 +161,7 @@ enum MarkdownRenderer {
                 var tabs: [CGFloat] = []
                 if let listPrefix {
                     append(listPrefix + "\t", context)
-                    first = max(0, context.indent - 18)
+                    first = max(0, context.indent - 20)
                     tabs = [context.indent]
                 }
                 inlines(paragraph.children, context)
@@ -141,7 +172,9 @@ enum MarkdownRenderer {
                 inner.headingLevel = heading.level
                 let start = output.length
                 inlines(heading.children, inner)
-                finishParagraph(from: start, style: paragraphStyle(context, spacing: 5, before: heading.level <= 2 ? 6 : 3))
+                // 16 above in all (the paragraph before leaves 10), 6 below.
+                let font = Self.headingFont(heading.level)
+                finishParagraph(from: start, style: paragraphStyle(context, spacing: 6, before: 6, line: ceil(font.pointSize * 1.4), font: font))
 
             case let code as CodeBlock:
                 codeBlock(code.code, context)
@@ -194,12 +227,20 @@ enum MarkdownRenderer {
             }
         }
 
+        static func headingFont(_ level: Int) -> NSFont {
+            switch level {
+            case 1: return .systemFont(ofSize: 17, weight: .semibold)
+            case 2: return .systemFont(ofSize: 15, weight: .semibold)
+            default: return .systemFont(ofSize: Theme.bodySize, weight: .semibold)
+            }
+        }
+
         mutating func listItems(_ items: [ListItem], _ context: Context, marker: (Int, ListItem) -> String) {
             var inner = context
-            inner.indent += 20
+            inner.indent += 22
             for (index, item) in items.enumerated() {
                 var itemContext = inner
-                itemContext.listSpacing = index == items.count - 1 && context.listSpacing == nil ? 9 : 3
+                itemContext.listSpacing = index == items.count - 1 && context.listSpacing == nil ? Self.paragraphGap : Self.itemGap
                 var first = true
                 for child in item.children {
                     if first, child is Paragraph {
@@ -209,7 +250,7 @@ enum MarkdownRenderer {
                             // A list item that starts with something other than text still gets its marker.
                             let start = output.length
                             append(marker(index, item), itemContext)
-                            finishParagraph(from: start, style: paragraphStyle(itemContext, spacing: 2, first: max(0, itemContext.indent - 18)))
+                            finishParagraph(from: start, style: paragraphStyle(itemContext, spacing: 2, first: max(0, itemContext.indent - 20)))
                         }
                         block(child, itemContext)
                     }
@@ -223,9 +264,13 @@ enum MarkdownRenderer {
             while text.hasSuffix("\n") { text.removeLast() }
             if text.isEmpty { text = " " }
             // U+2028 keeps the block one paragraph, so spacing before and
-            // after applies once around the whole box.
+            // after applies once around the whole box. The box reaches
+            // `codePad` past the text on every side (BackgroundLayoutManager),
+            // so the spacing leaves the usual paragraph gap outside it.
             let body = text.replacingOccurrences(of: "\r\n", with: "\n").replacingOccurrences(of: "\n", with: "\u{2028}")
-            let style = Theme.paragraph(lineHeight: 1.15, spacing: 18, before: 10, head: context.indent + 12, tail: -12)
+            let pad = MarkdownRenderer.codePad
+            let (style, offset) = Theme.lines(Theme.codeLine, font: Theme.codeFont, spacing: Self.paragraphGap + pad, before: pad,
+                                              head: context.indent + pad, tail: -pad)
             style.lineBreakMode = .byCharWrapping
             let start = output.length
             output.append(NSAttributedString(string: body, attributes: [
@@ -234,7 +279,9 @@ enum MarkdownRenderer {
                 .tbBlockBackground: Theme.codeBackground,
             ]))
             append("\n", Context())
-            output.addAttribute(.paragraphStyle, value: style, range: NSRange(location: start, length: output.length - start))
+            let range = NSRange(location: start, length: output.length - start)
+            output.addAttribute(.paragraphStyle, value: style, range: range)
+            output.addAttribute(.baselineOffset, value: offset, range: range)
         }
 
         mutating func renderTable(_ table: Markdown.Table, _ context: Context) {
@@ -269,7 +316,7 @@ enum MarkdownRenderer {
                     if index > 0 { append("\t", context) }
                     output.append(cell)
                 }
-                let style = paragraphStyle(context, spacing: rowIndex == rows.count - 1 ? 9 : 3, tabs: stops)
+                let style = paragraphStyle(context, spacing: rowIndex == rows.count - 1 ? Self.paragraphGap : 4, tabs: stops)
                 finishParagraph(from: start, style: style)
             }
         }

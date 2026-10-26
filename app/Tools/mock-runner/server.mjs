@@ -310,6 +310,8 @@ function startStream(threadId, p) {
   const toolEvery = Math.max(1, Math.round(hz * 1.5));
   t.inProgress.set(itemId, { type: 'assistant.text', text: '' });
   setStatus(threadId, 'running');
+  // Like a real turn, so the app shows it as running ("Working for 3s").
+  persist(threadId, { type: 'turn.started', turnId }, turnId);
   const started = Date.now();
   const finishText = () => {
     const text = t.inProgress.get(itemId)?.text ?? '';
@@ -436,6 +438,12 @@ function loadFixtures() {
       });
       summary.lastSeq = events.at(-1)?.seq ?? 0;
       summary.lastSeenSeq ??= summary.lastSeq;
+      // A fixture caught mid-turn: start its clock a few seconds ago, so the
+      // app's "Working for" line reads like a live turn whenever it's run.
+      if (summary.status === 'running') {
+        const started = events.findLast((e) => e.type === 'turn.started');
+        if (started) started.ts = new Date(Date.now() - 14_000).toISOString();
+      }
       // Keep a fixture's waiting or running status so the sidebar has
       // something in every section; real exports are idle.
       summary.status ??= 'idle';
