@@ -25,10 +25,16 @@ enum ScreenshotRunner {
             NSApp.terminate(nil)
             return
         }
+        // `--appearance light|dark` checks both looks whatever the Mac is set to.
+        if let index = arguments.firstIndex(of: "--appearance"), index + 1 < arguments.count {
+            NSApp.appearance = NSAppearance(named: arguments[index + 1] == "light" ? .aqua : .darkAqua)
+        }
         window.setContentSize(NSSize(width: 1240, height: 820))
         window.center()
-        NSApp.activate()
-        window.makeKeyAndOrderFront(nil)
+        // Behind every other window and never activated: these runs happen
+        // while Mike is working, and `screencapture -l` captures a window by
+        // id even when it's covered.
+        window.orderBack(nil)
         try? await Task.sleep(for: .milliseconds(500))
 
         let only = arguments.firstIndex(of: "--only").flatMap { $0 + 1 < arguments.count ? arguments[$0 + 1] : nil }

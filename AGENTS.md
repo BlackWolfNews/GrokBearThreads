@@ -23,3 +23,19 @@ anything.
 - Transcript files and fixtures made from real sessions are private: keep them
   out of git (`.fixtures/` is ignored).
 - Mike's own repo: commit to main once tests pass.
+
+## Working on Threadbare from inside Threadbare
+
+Mike may be running this thread in Threadbare itself, through the installed
+runner (`com.mikerosoft.threadbare.runner`).
+
+- Rebuilding or restarting the app (`app/restart.sh`, `app/install.sh`) is
+  safe: the runner keeps your turn going and the app reconnects.
+- Restarting, reinstalling or killing the runner (`install-runner.sh`,
+  `launchctl kickstart`, stopping its node process) ends your own turn. Don't
+  do it yourself. Finish, then tell Mike the exact command to run.
+- Check app changes with `app/Tools/screenshots.sh <dir>`: a debug build
+  against the mock runner, in a temp folder, with the window kept behind
+  whatever Mike is working in. Look at the images before saying it works.
+- `app/Tools/perf-run.sh` brings its window to the front for about a minute,
+  so ask Mike before running it.
