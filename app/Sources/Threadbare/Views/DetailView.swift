@@ -4,11 +4,16 @@ import ThreadbareCore
 
 struct RootView: View {
     @Environment(AppModel.self) private var app
+    static let sidebarIdealWidth: CGFloat = 330
 
     var body: some View {
         NavigationSplitView {
+            // About a quarter of the window, as T3, Codex and Claude give
+            // theirs: at 290 most titles were cut at about 25 characters.
+            // At the default 1180 pt window the detail pane still fits the
+            // 780 pt reading column and its insets.
             SidebarView()
-                .navigationSplitViewColumnWidth(min: 230, ideal: 290, max: 420)
+                .navigationSplitViewColumnWidth(min: 250, ideal: Self.sidebarIdealWidth, max: 440)
         } detail: {
             DetailView()
         }
@@ -122,7 +127,7 @@ private struct HeaderTitle: View {
                     .foregroundStyle(.secondary)
                     .layoutPriority(1)
                 Text("/")
-                    .foregroundStyle(.tertiary)
+                    .foregroundStyle(Color(nsColor: Theme.faintText))
                     .layoutPriority(1)
                 Text(thread.title.isEmpty ? "Untitled" : thread.title)
                     .fontWeight(.semibold)
@@ -132,7 +137,7 @@ private struct HeaderTitle: View {
                     // the header, which nothing else in the window had.
                     // Unarchive is in the ... menu, ⌘E and the row's hover
                     // button.
-                    Text("·  Archived").foregroundStyle(.tertiary).layoutPriority(1)
+                    Text("·  Archived").foregroundStyle(Color(nsColor: Theme.faintText)).layoutPriority(1)
                 }
             }
             .font(.system(size: TypeScale.header))
@@ -219,7 +224,7 @@ private struct NewThreadNote: View {
         let account = app.newThreadAccount ?? app.lastAccountId
         Text("Starts in \(FolderName.short(cwd)) on \(app.accountShortTitle(account))")
             .font(.system(size: TypeScale.label))
-            .foregroundStyle(.tertiary)
+            .foregroundStyle(Color(nsColor: Theme.faintText))
             .help("\(cwd.abbreviatingHome) on \(app.accountTitle(account))")
             .frame(maxWidth: .infinity)
     }

@@ -53,7 +53,9 @@ struct ComposerView: View {
         // the same side insets once the window is narrower than that.
         .frame(maxWidth: Theme.maxContentWidth)
         .padding(.horizontal, Theme.sideInset)
-        .padding(.bottom, 12)
+        // At 12 the card looked wedged against the window's rounded bottom
+        // corners; Codex and T3 leave about 24.
+        .padding(.bottom, 20)
         .padding(.top, 4)
     }
 
@@ -63,7 +65,9 @@ struct ComposerView: View {
         let shape = RoundedRectangle(cornerRadius: Self.cornerRadius, style: .continuous)
         let dark = colorScheme == .dark
         return shape
-            .fill(dark ? Color.primary.opacity(0.05) : Color.white)
+            // About #2e2e2e on the #1c1c1c pane: at 0.05 the card was barely
+            // lighter than the pane and read as an outline, not a card.
+            .fill(dark ? Color.primary.opacity(0.085) : Color.white)
             .shadow(color: .black.opacity(dark ? 0 : 0.08), radius: 14, y: 4)
             .overlay(shape.strokeBorder(Color(nsColor: .separatorColor), lineWidth: 0.5))
             .contentShape(shape)
@@ -454,6 +458,13 @@ final class ComposerTextView: NSTextView {
         }
     }
 
+    /// Mid grey on the dark card, like Codex's and Claude's: the system
+    /// placeholder colour there was about 2.3:1, the dimmest of the four
+    /// apps. Light mode keeps the system colour.
+    static let placeholderColor = NSColor(name: nil) { appearance in
+        appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? NSColor(white: 1, alpha: 0.45) : .placeholderTextColor
+    }
+
     /// The placeholder is drawn outside the glyphs, so the first character
     /// typed (or the last one deleted) has to redraw the whole box.
     private var wasEmpty = true
@@ -476,7 +487,7 @@ final class ComposerTextView: NSTextView {
     override func draw(_ dirtyRect: NSRect) {
         super.draw(dirtyRect)
         if string.isEmpty, !placeholder.isEmpty {
-            let attributes: [NSAttributedString.Key: Any] = [.font: font ?? ComposerTextField.font, .foregroundColor: NSColor.tertiaryLabelColor]
+            let attributes: [NSAttributedString.Key: Any] = [.font: font ?? ComposerTextField.font, .foregroundColor: Self.placeholderColor]
             // Where the first character would go, so typing doesn't shift it.
             let x = textContainerInset.width + (textContainer?.lineFragmentPadding ?? 0)
             NSAttributedString(string: placeholder, attributes: attributes).draw(at: NSPoint(x: x, y: textContainerInset.height))

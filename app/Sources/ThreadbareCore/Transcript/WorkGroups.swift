@@ -32,20 +32,18 @@ public struct WorkGroup: Sendable, Hashable {
     }
 }
 
-/// The "Working for 12s" line at the end of a running turn. The view counts
-/// the seconds itself, so the row doesn't change (or re-render) as they pass.
+/// The "Working for 12s" line at the end of a running turn, the one place a
+/// running turn shows a spinner. The view counts the seconds itself, so the
+/// row doesn't change (or re-render) as they pass, nor as work above it
+/// comes and goes.
 public struct WorkingStatus: Sendable, Hashable {
     public var turnId: String
     /// When the turn started, if the loaded events say.
     public var startedAt: Date?
-    /// The line sits under the turn's live group, whose own spinner says
-    /// the same thing, so the line keeps its words but not a second spinner.
-    public var afterLiveGroup: Bool
 
-    public init(turnId: String, startedAt: Date?, afterLiveGroup: Bool = false) {
+    public init(turnId: String, startedAt: Date?) {
         self.turnId = turnId
         self.startedAt = startedAt
-        self.afterLiveGroup = afterLiveGroup
     }
 }
 
@@ -80,13 +78,17 @@ public struct ChangedFile: Sendable, Hashable {
     public var diffs: [EditDiff]
     /// Its diff is open under it in the card.
     public var isExpanded: Bool
+    /// Its open diff shows every line, not just the first few
+    /// (`DiffPreview.allKey`).
+    public var showsAll: Bool
 
-    public init(path: String, added: Int, removed: Int, diffs: [EditDiff], isExpanded: Bool = false) {
+    public init(path: String, added: Int, removed: Int, diffs: [EditDiff], isExpanded: Bool = false, showsAll: Bool = false) {
         self.path = path
         self.added = added
         self.removed = removed
         self.diffs = diffs
         self.isExpanded = isExpanded
+        self.showsAll = showsAll
     }
 
     public var name: String { (path as NSString).lastPathComponent }
@@ -94,6 +96,37 @@ public struct ChangedFile: Sendable, Hashable {
     /// The file's folder, short: its last two components ("Sources/Upload"),
     /// or "~" style for something right under the home folder.
     public var folder: String { PathDisplay.folder(of: path) }
+}
+
+/// How much of an opened diff shows. A diff opens at its first `lines`
+/// lines with "Show 30 more lines" under it, which opens the rest: a 400
+/// line Write opened from the changes card used to pour all of it into the
+/// turn.
+public enum DiffPreview {
+    public static let lines = 12
+    /// Hiding fewer lines than this isn't worth a click: a 15 line diff
+    /// showed 12 and "Show 3 more lines".
+    public static let slack = 6
+
+    /// How many of a diff's `total` display lines show while it's opened short.
+    public static func shown(of total: Int) -> Int {
+        total <= lines + slack ? total : lines
+    }
+
+    /// The expansion key that shows all of an opened diff: a tool row's id,
+    /// or a changes card file's `ChangedFiles.expansionKey`, plus "|all".
+    public static func allKey(_ key: String) -> String { key + "|all" }
+
+    /// Opens or closes `key` in a set of open keys. Closing also forgets
+    /// "show all", so a diff opens short again next time.
+    public static func set(_ key: String, open: Bool, in expanded: inout Set<String>) {
+        if open {
+            expanded.insert(key)
+        } else {
+            expanded.remove(key)
+            expanded.remove(allKey(key))
+        }
+    }
 }
 
 /// Words for a work group's one-line summary.
@@ -202,6 +235,18 @@ public enum WorkSummary {
     static func firstLine(_ text: String) -> String {
         let line = text.split(whereSeparator: \.isNewline).first.map(String.init) ?? text
         return line.count > 120 ? String(line.prefix(119)) + "…" : line
+    }
+
+    /// A thinking block's one-line summary: its first sentence, full stop
+    /// and all, when that's a reasonable length. Cut wherever the column
+    /// ended, a long first line could stop just after a full stop and read
+    /// "confirmed.…", and it pushed the line's chevron to the far edge.
+    public static func thought(_ text: String) -> String {
+        var line = text.split(whereSeparator: \.isNewline).first.map(String.init) ?? ""
+        if line.count > 200 { line = String(line.prefix(200)) }
+        guard let stop = line.range(of: ". ") else { return line }
+        let sentence = String(line[..<stop.lowerBound]) + "."
+        return (20...140).contains(sentence.count) ? sentence : line
     }
 
     static func capitalizedFirst(_ text: String) -> String {

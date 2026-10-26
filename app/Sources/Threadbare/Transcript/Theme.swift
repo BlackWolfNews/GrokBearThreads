@@ -71,6 +71,8 @@ enum Theme {
     /// text the same way whatever the scale.
     static let workLabelHeight = ceil(workFont.ascender - workFont.descender + workFont.leading)
     static let cardTitleFont = NSFont.systemFont(ofSize: TypeScale.cardTitle, weight: .semibold)
+    /// "Edited 3 files": quieter than a card that asks something.
+    static let changesTitleFont = NSFont.systemFont(ofSize: TypeScale.cardTitle, weight: .medium)
     static let statsFont = NSFont.monospacedDigitSystemFont(ofSize: TypeScale.detail, weight: .regular)
 
     /// One digit's advance in a monospaced font, for line number gutters.
@@ -96,6 +98,19 @@ enum Theme {
     /// Behind a work line the pointer is over (it opens on a click).
     static let hoverFill = dynamic(dark: NSColor(white: 1, alpha: 0.05), light: NSColor(white: 0, alpha: 0.04))
     static let hairline = dynamic(dark: NSColor(white: 1, alpha: 0.1), light: NSColor(white: 0, alpha: 0.1))
+
+    /// Text tiers that read the same in both looks. The system's tertiary
+    /// label is about 1.8:1 on white (2.4:1 on the dark pane), so times,
+    /// footers, folder names and line numbers were near invisible in light
+    /// mode and dim in dark. These are about 3.3:1 in both, and still
+    /// clearly quieter than secondary text. Disabled controls and the light
+    /// placeholder keep the system colour.
+    static let faintText = dynamic(dark: NSColor(white: 1, alpha: 0.36), light: NSColor(white: 0, alpha: 0.45))
+    /// Work line icons and chevrons.
+    static let faintIcon = dynamic(dark: .tertiaryLabelColor, light: NSColor(white: 0, alpha: 0.36))
+    /// Work lines and tool output: secondary, a step darker in light mode,
+    /// where thin grey glyphs on white read lighter than their colour.
+    static let quietText = dynamic(dark: .secondaryLabelColor, light: NSColor(white: 0, alpha: 0.6))
 
     /// The user's bubble: a touch of the accent colour over a faint fill.
     static let bubbleBackground = NSColor(name: nil) { appearance in
@@ -171,4 +186,7 @@ extension NSAttributedString.Key {
     static let tbLineBackground = NSAttributedString.Key("tbLineBackground")
     /// A small rounded fill behind just the run's glyphs (inline code).
     static let tbInlineBackground = NSAttributedString.Key("tbInlineBackground")
+    /// Clicking the run does something in its row ("Show 30 more lines"):
+    /// the value is passed to the text view's `onAction`.
+    static let tbAction = NSAttributedString.Key("tbAction")
 }

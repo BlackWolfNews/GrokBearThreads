@@ -126,7 +126,7 @@ final class WorkGroupTests: XCTestCase {
         XCTAssertEqual(model.rows.map(\.id), ["u:1", "g:r:r1", "w:t1"])
         XCTAssertEqual(change.removed, [1])
         XCTAssertEqual(change.inserted, [1])
-        XCTAssertEqual(change.updated, [2], "the working line drops its spinner under the live group")
+        XCTAssertEqual(change.updated, [], "the working line is left as it is")
 
         let version = model.rows[1].version
         change = model.apply([E.result(5, "c1"), E.call(6, "c2", name: "Read", kind: "read", title: "Read a.swift")])
@@ -144,7 +144,7 @@ final class WorkGroupTests: XCTestCase {
         Self.replay(change, onto: &table, model: model)
         XCTAssertEqual(model.rows.map(\.id), ["u:1", "g:r:r1", "a:m1", "w:t1"])
         XCTAssertEqual(change.inserted, [2])
-        XCTAssertEqual(change.updated, [1, 3], "the group and the working line, which gets its spinner back")
+        XCTAssertEqual(change.updated, [1], "only the group, no longer live")
         guard case .group(let finished) = model.rows[1].content else { return XCTFail() }
         XCTAssertFalse(finished.isLive)
         XCTAssertNil(finished.currentAction)
@@ -274,27 +274,21 @@ final class WorkGroupTests: XCTestCase {
         XCTAssertNil(model.openTurn)
     }
 
-    /// Under the live group (open or closed) the working line leaves the
-    /// spinner to the group; under anything else it has its own.
-    func testTheWorkingLineKnowsWhenItIsUnderTheLiveGroup() {
-        func afterLiveGroup(_ model: TranscriptModel) -> Bool? {
-            guard case .working(let status)? = model.rows.last?.content else { return nil }
-            return status.afterLiveGroup
-        }
+    /// The working line is the turn's one spinner wherever it sits, so it
+    /// doesn't change (or re-render) as a live group above it comes, opens
+    /// and finishes.
+    func testTheWorkingLineKeepsItsVersionAsWorkComesAndGoes() {
+        func working(_ model: TranscriptModel) -> TranscriptRow? { model.rows.last { $0.kind == .working } }
         var model = TranscriptModel(events: [E.user(1, "Go"), Self.started(2), E.call(3, "c1")])
-        XCTAssertEqual(afterLiveGroup(model), false, "a lone tool row")
+        let version = working(model)?.version
+        XCTAssertNotNil(version)
         _ = model.apply([E.call(4, "c2")])
-        XCTAssertEqual(afterLiveGroup(model), true)
+        XCTAssertEqual(model.rows.map(\.id), ["u:1", "g:t:c1", "w:t1"])
+        XCTAssertEqual(working(model)?.version, version, "under the live group")
         _ = model.setExpanded("g:t:c1", true)
-        XCTAssertEqual(model.rows.map(\.id), ["u:1", "g:t:c1", "t:c1", "t:c2", "w:t1"])
-        XCTAssertEqual(afterLiveGroup(model), true, "still under it when it's open")
+        XCTAssertEqual(working(model)?.version, version, "under the open group")
         _ = model.apply([E.text(5, "m1", "Found it")])
-        XCTAssertEqual(afterLiveGroup(model), false)
-        // A model loaded in one go agrees with one built up step by step.
-        var fresh = TranscriptModel(events: [E.user(1, "Go"), Self.started(2), E.call(3, "c1"), E.call(4, "c2")])
-        XCTAssertEqual(afterLiveGroup(fresh), true)
-        _ = fresh.setExpanded("g:t:c1", true)
-        XCTAssertEqual(afterLiveGroup(fresh), true)
+        XCTAssertEqual(working(model)?.version, version, "under a reply")
     }
 
     func testATurnThatStartedOnAnOlderPageIsStillRunning() {
@@ -339,6 +333,67 @@ final class WorkGroupTests: XCTestCase {
         guard case .changes(let opened)? = model.row(id: "cf:t1")?.content else { return XCTFail() }
         XCTAssertEqual(opened.files.map(\.isExpanded), [false, true])
         XCTAssertNotEqual(model.row(id: "cf:t1")?.version, version)
+    }
+
+    /// A file opened in the card shows the first lines of its diff; "Show N
+    /// more lines" opens the rest through its own key, and closing the file
+    /// forgets that, so it opens short again.
+    func testShowingAllOfAChangedFilesDiffRoundTrips() {
+        var model = TranscriptModel(events: [
+            E.user(1, "Write it"), Self.edit(2, "c1", path: "/repo/Long.swift", new: (1...40).map { "line \($0)" }.joined(separator: "\n"), name: "Write"),
+            E.result(3, "c1"), E.done(4),
+        ])
+        func file() -> ChangedFile? {
+            guard case .changes(let card)? = model.row(id: "cf:t1")?.content else { return nil }
+            return card.files.first
+        }
+        let key = ChangedFiles.expansionKey(turnId: "t1", path: "/repo/Long.swift")
+        let all = DiffPreview.allKey(key)
+        XCTAssertEqual(all, "cf:t1|/repo/Long.swift|all")
+        _ = model.setExpanded(key, true)
+        XCTAssertEqual(file()?.isExpanded, true)
+        XCTAssertEqual(file()?.showsAll, false)
+
+        let version = model.row(id: "cf:t1")!.version
+        let change = model.setExpanded(all, true)
+        XCTAssertEqual(change, TranscriptChange(updated: [model.indexOf(id: "cf:t1")!]), "only the card changes")
+        XCTAssertNotEqual(model.row(id: "cf:t1")?.version, version, "so its height is measured again")
+        XCTAssertEqual(file()?.showsAll, true)
+        XCTAssertTrue(model.isExpanded(all))
+
+        _ = model.setExpanded(key, false)
+        XCTAssertEqual(file()?.isExpanded, false)
+        XCTAssertEqual(file()?.showsAll, false)
+        XCTAssertFalse(model.isExpanded(all))
+        _ = model.setExpanded(key, true)
+        XCTAssertEqual(file()?.showsAll, false, "opens short again")
+    }
+
+    func testADiffIsOnlyShortenedWhenThatHidesEnough() {
+        XCTAssertEqual(DiffPreview.shown(of: 5), 5)
+        XCTAssertEqual(DiffPreview.shown(of: 15), 15, "not 12 and \"Show 3 more lines\"")
+        XCTAssertEqual(DiffPreview.shown(of: 18), 18)
+        XCTAssertEqual(DiffPreview.shown(of: 19), 12)
+        XCTAssertEqual(DiffPreview.shown(of: 400), 12)
+    }
+
+    /// Tool rows keep their open state in the app's own set, by the same rule.
+    func testDiffPreviewKeysInASet() {
+        var open: Set<String> = []
+        DiffPreview.set("t:c1", open: true, in: &open)
+        DiffPreview.set(DiffPreview.allKey("t:c1"), open: true, in: &open)
+        XCTAssertEqual(open, ["t:c1", "t:c1|all"])
+        DiffPreview.set("t:c1", open: false, in: &open)
+        XCTAssertEqual(open, [])
+    }
+
+    func testAThoughtIsSummedUpByItsFirstSentence() {
+        XCTAssertEqual(WorkSummary.thought("Uploads are chunked already, so the missing piece is remembering which chunks the server confirmed. I should look at UploadTask first."),
+                       "Uploads are chunked already, so the missing piece is remembering which chunks the server confirmed.")
+        XCTAssertEqual(WorkSummary.thought("Hmm. Let me look at the logs first and then decide."), "Hmm. Let me look at the logs first and then decide.", "too short a sentence to stand alone")
+        XCTAssertEqual(WorkSummary.thought("One long line with no full stop at all"), "One long line with no full stop at all")
+        XCTAssertEqual(WorkSummary.thought("First line only.\nSecond line"), "First line only.")
+        XCTAssertEqual(WorkSummary.thought(""), "")
     }
 
     /// A diff that lands after its turn finished updates the turn's card,

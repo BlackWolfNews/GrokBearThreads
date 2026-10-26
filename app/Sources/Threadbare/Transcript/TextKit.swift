@@ -238,6 +238,11 @@ final class TranscriptTextView: NSTextView {
         guard let storage = textStorage else { return }
         if storage.length == string.length, storage.isEqual(to: string) { return }
         storage.setAttributedString(string)
+        // The pointing hand over "Show 30 more lines" (always the last run)
+        // only shows once the view rebuilds its cursor rects.
+        if string.length > 0, string.attribute(.tbAction, at: string.length - 1, effectiveRange: nil) != nil {
+            window?.invalidateCursorRects(for: self)
+        }
     }
 
     /// Empties the text so a parked cell holds no layout.
@@ -259,6 +264,33 @@ final class TranscriptTextView: NSTextView {
         guard let layoutManager, let textContainer else { return 0 }
         layoutManager.ensureLayout(for: textContainer)
         return ceil(layoutManager.usedRect(for: textContainer).height)
+    }
+
+    /// Called with a `.tbAction` run's value when it's clicked. A plain
+    /// attribute rather than a link, so it keeps its own colour (links are
+    /// drawn in `linkTextAttributes`) and needs no URL scheme.
+    var onAction: ((String) -> Void)?
+
+    override func mouseDown(with event: NSEvent) {
+        if let onAction, let action = action(at: convert(event.locationInWindow, from: nil)) {
+            onAction(action)
+            return
+        }
+        super.mouseDown(with: event)
+    }
+
+    /// The `.tbAction` under `point` (view coordinates, which already
+    /// include a slice's bounds offset), if the point is on its glyphs.
+    private func action(at point: NSPoint) -> String? {
+        guard let layoutManager, let textContainer, let storage = textStorage, storage.length > 0 else { return nil }
+        let origin = textContainerOrigin
+        let local = NSPoint(x: point.x - origin.x, y: point.y - origin.y)
+        let glyph = layoutManager.glyphIndex(for: local, in: textContainer)
+        let box = layoutManager.boundingRect(forGlyphRange: NSRange(location: glyph, length: 1), in: textContainer)
+        guard box.insetBy(dx: -4, dy: -3).contains(local) else { return nil }
+        let index = layoutManager.characterIndexForGlyph(at: glyph)
+        guard index < storage.length else { return nil }
+        return storage.attribute(.tbAction, at: index, effectiveRange: nil) as? String
     }
 
     // Don't let a row's text view swallow scroll-wheel events or show an

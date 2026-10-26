@@ -193,14 +193,14 @@ private struct ComposerChip: View {
             HStack(spacing: 4) {
                 Image(systemName: icon)
                     .font(.system(size: TypeScale.chip - 1))
-                    .foregroundStyle(.tertiary)
+                    .foregroundStyle(Color(nsColor: Theme.faintIcon))
                 Text(title)
                     .font(.system(size: TypeScale.chip))
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
                 Image(systemName: "chevron.down")
                     .font(.system(size: 7.5, weight: .bold))
-                    .foregroundStyle(.tertiary)
+                    .foregroundStyle(Color(nsColor: Theme.faintIcon))
             }
             .padding(.horizontal, 7)
             .frame(height: 26)

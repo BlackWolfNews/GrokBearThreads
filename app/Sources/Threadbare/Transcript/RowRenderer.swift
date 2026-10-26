@@ -7,8 +7,13 @@ import ThreadbareCore
 enum RowMetrics {
     static let rowTop: CGFloat = 6
     static let rowBottom: CGFloat = 6
-    /// Space above a user message, which starts a turn.
-    static let userTop: CGFloat = 18
+    /// Space above a user message, which starts a turn: the biggest gap in
+    /// the transcript, so turns read apart.
+    static let userTop: CGFloat = 26
+    /// Space under the bubble before the turn's work. At 10 the message sat
+    /// right on top of the reply, closer than the gaps inside a turn; T3
+    /// and Codex leave a clear pause there.
+    static let userBottom: CGFloat = 22
     /// One line of work: a group summary, a tool call, a thinking block.
     static let workHeight: CGFloat = 32
     static let workingHeight: CGFloat = 34
@@ -40,7 +45,8 @@ enum RowMetrics {
     static let gridMaxHeight: CGFloat = 240
     static let gridMaxWidth: CGFloat = 320
     static let imageGap: CGFloat = 8
-    /// The most lines an opened diff shows in the flow.
+    /// The most lines an opened diff shows in the flow once Mike asks for
+    /// all of it (it opens at `DiffPreview.lines`).
     static let maxDiffLines = 1500
     static let footerHeight: CGFloat = 27
     static let changesHeader: CGFloat = 42
@@ -138,33 +144,43 @@ final class RenderCache: @unchecked Sendable {
         }
     }
 
+    /// "Show all lines" only changes an opened diff row; for anything else
+    /// it would just split the cache.
+    static func effectiveShowAll(_ row: TranscriptRow, expanded: Bool, showAll: Bool) -> Bool {
+        showAll && row.kind == .diff && effectiveExpanded(row, expanded)
+    }
+
+    /// 0 closed, 1 open, 2 open with every line of its diff.
+    static func openLevel(_ row: TranscriptRow, expanded: Bool, showAll: Bool) -> Int {
+        guard effectiveExpanded(row, expanded) else { return 0 }
+        return effectiveShowAll(row, expanded: expanded, showAll: showAll) ? 2 : 1
+    }
+
     /// Keyed by the reading column's width, which is all a render depends
     /// on: tables of different widths with the column at its widest share
     /// renders, so a sidebar drag or a scroller appearing costs nothing.
-    static func key(_ row: TranscriptRow, expanded: Bool, width: CGFloat) -> NSString {
-        let open = effectiveExpanded(row, expanded) ? 1 : 0
+    static func key(_ row: TranscriptRow, expanded: Bool, showAll: Bool = false, width: CGFloat) -> NSString {
+        let open = openLevel(row, expanded: expanded, showAll: showAll)
         return "\(row.id)|\(row.version)|\(open)|\(row.inGroup ? 1 : 0)|\(Int(RowMetrics.column(tableWidth: width).width))" as NSString
     }
 
-    func cached(_ row: TranscriptRow, expanded: Bool, width: CGFloat) -> RowRender? {
-        cache.object(forKey: Self.key(row, expanded: expanded, width: width))
+    func cached(_ row: TranscriptRow, expanded: Bool, showAll: Bool = false, width: CGFloat) -> RowRender? {
+        cache.object(forKey: Self.key(row, expanded: expanded, showAll: showAll, width: width))
     }
 
-    func render(_ row: TranscriptRow, expanded: Bool, width: CGFloat) -> RowRender {
-        let key = Self.key(row, expanded: expanded, width: width)
+    func render(_ row: TranscriptRow, expanded: Bool, showAll: Bool = false, width: CGFloat) -> RowRender {
+        let key = Self.key(row, expanded: expanded, showAll: showAll, width: width)
         if let hit = cache.object(forKey: key) { return hit }
-        let render = RowRenderer.render(row, expanded: Self.effectiveExpanded(row, expanded), tableWidth: width, measurer: .current)
-        store(render, key: key, row: row, expanded: expanded, width: width)
+        let render = RowRenderer.render(row, expanded: Self.effectiveExpanded(row, expanded),
+                                        showAll: Self.effectiveShowAll(row, expanded: expanded, showAll: showAll),
+                                        tableWidth: width, measurer: .current)
+        store(render, key: key, row: row, open: Self.openLevel(row, expanded: expanded, showAll: showAll), width: width)
         return render
     }
 
-    func store(_ render: RowRender, for row: TranscriptRow, expanded: Bool, width: CGFloat) {
-        store(render, key: Self.key(row, expanded: expanded, width: width), row: row, expanded: expanded, width: width)
-    }
-
-    private func store(_ render: RowRender, key: NSString, row: TranscriptRow, expanded: Bool, width: CGFloat) {
+    private func store(_ render: RowRender, key: NSString, row: TranscriptRow, open: Int, width: CGFloat) {
         cache.setObject(render, forKey: key, cost: Self.cost(render))
-        let slot = "\(row.id)|\(Self.effectiveExpanded(row, expanded) ? 1 : 0)|\(row.inGroup ? 1 : 0)|\(Int(RowMetrics.column(tableWidth: width).width))"
+        let slot = "\(row.id)|\(open)|\(row.inGroup ? 1 : 0)|\(Int(RowMetrics.column(tableWidth: width).width))"
         let live = row.isLive
         let superseded: NSString? = liveKeys.withLock { keys in
             let old = keys[slot]
@@ -177,11 +193,12 @@ final class RenderCache: @unchecked Sendable {
     /// Renders rows across all cores. Used before showing a thread or
     /// paging in older rows, so the main thread only reads the cache.
     func prepare(_ rows: [TranscriptRow], expanded: Set<String>, width: CGFloat) {
-        let missing = rows.filter { cached($0, expanded: expanded.contains($0.id), width: width) == nil }
+        func showAll(_ row: TranscriptRow) -> Bool { row.kind == .diff && expanded.contains(DiffPreview.allKey(row.id)) }
+        let missing = rows.filter { cached($0, expanded: expanded.contains($0.id), showAll: showAll($0), width: width) == nil }
         guard !missing.isEmpty else { return }
         DispatchQueue.concurrentPerform(iterations: missing.count) { index in
             let row = missing[index]
-            _ = render(row, expanded: expanded.contains(row.id), width: width)
+            _ = render(row, expanded: expanded.contains(row.id), showAll: showAll(row), width: width)
         }
     }
 
@@ -257,7 +274,7 @@ final class StreamingMeasurer {
 }
 
 enum RowRenderer {
-    static func render(_ row: TranscriptRow, expanded: Bool, tableWidth: CGFloat, measurer: TextMeasurer) -> RowRender {
+    static func render(_ row: TranscriptRow, expanded: Bool, showAll: Bool = false, tableWidth: CGFloat, measurer: TextMeasurer) -> RowRender {
         let width = RowMetrics.column(for: row, tableWidth: tableWidth).width
         let vertical = RowMetrics.rowTop + RowMetrics.rowBottom
         switch row.content {
@@ -270,7 +287,7 @@ enum RowRenderer {
             let showText = !message.text.isEmpty || message.images.isEmpty
             let imageBlock = message.images.isEmpty ? 0 : area + (showText ? RowMetrics.imageGap : 0)
             let bubble = showText ? size.height + RowMetrics.bubblePadV * 2 : 0
-            return RowRender(height: RowMetrics.userTop + imageBlock + bubble + RowMetrics.rowBottom + 4,
+            return RowRender(height: RowMetrics.userTop + imageBlock + bubble + RowMetrics.userBottom,
                              text: showText ? text : nil, textSize: size, imageFrames: frames, imageAreaHeight: area)
 
         case .assistant(let item):
@@ -289,10 +306,10 @@ enum RowRenderer {
                              blocks: item.isStreaming ? rendered.blocks : [], blockStarts: item.isStreaming ? rendered.starts : [])
 
         case .reasoning(let item):
-            let header = headerText(title: item.isStreaming ? "Thinking" : "Thought", subtitle: firstLine(item.text))
+            let header = headerText(title: item.isStreaming ? "Thinking" : "Thought", subtitle: WorkSummary.thought(item.text))
             let headerSize = header.size()
             guard expanded else { return RowRender(height: RowMetrics.workHeight, text: header, textSize: headerSize) }
-            let body = NSAttributedString(string: item.text, attributes: Theme.text(Theme.workFont, color: .secondaryLabelColor, line: 21, spacing: 6))
+            let body = NSAttributedString(string: item.text, attributes: Theme.text(Theme.workFont, color: Theme.quietText, line: 21, spacing: 6))
             let size = measurer.measure(body, width: width - RowMetrics.titleIndent)
             return RowRender(height: RowMetrics.workHeight + size.height + 12, text: header, textSize: headerSize, detail: body, detailSize: size)
 
@@ -304,7 +321,9 @@ enum RowRenderer {
             // 12 lines each, and the changes card shows them again anyway.
             guard expanded else { return RowRender(height: RowMetrics.workHeight, text: header, textSize: headerSize) }
             if row.kind == .diff, let diff = tool.effectiveDiff, !diff.hunks.isEmpty {
-                let body = diffWithNote([diff], maxLines: RowMetrics.maxDiffLines)
+                let body = showAll
+                    ? diffWithNote([diff], maxLines: RowMetrics.maxDiffLines)
+                    : diffWithNote([diff], maxLines: previewLines([diff]), more: DiffPreview.allKey(row.id))
                 let size = measurer.measure(body, width: width - RowMetrics.titleIndent - 1)
                 let box = size.height + RowMetrics.diffPadV * 2
                 return RowRender(height: RowMetrics.workHeight + box + 10, text: header, textSize: headerSize, detail: body, detailSize: size)
@@ -352,7 +371,7 @@ enum RowRenderer {
                 let header = headerText(title: firstLine(note), subtitle: "")
                 return RowRender(height: RowMetrics.workHeight, text: header, textSize: header.size())
             }
-            let text = NSAttributedString(string: note, attributes: Theme.text(Theme.smallFont, color: .secondaryLabelColor, line: 17, alignment: .center))
+            let text = NSAttributedString(string: note, attributes: Theme.text(Theme.smallFont, color: Theme.quietText, line: 17, alignment: .center))
             let size = measurer.measure(text, width: width)
             return RowRender(height: vertical + size.height, text: text, textSize: size)
 
@@ -395,11 +414,11 @@ enum RowRenderer {
     static func headerText(title: String, subtitle: String) -> NSAttributedString {
         let style = truncating
         let output = NSMutableAttributedString(string: title, attributes: [
-            .font: Theme.workFont, .foregroundColor: NSColor.secondaryLabelColor, .paragraphStyle: style,
+            .font: Theme.workFont, .foregroundColor: Theme.quietText, .paragraphStyle: style,
         ])
         if !subtitle.isEmpty {
             output.append(NSAttributedString(string: "  " + subtitle, attributes: [
-                .font: Theme.workFont, .foregroundColor: NSColor.tertiaryLabelColor, .paragraphStyle: style,
+                .font: Theme.workFont, .foregroundColor: Theme.faintText, .paragraphStyle: style,
             ]))
         }
         return output
@@ -408,7 +427,7 @@ enum RowRenderer {
     static func groupText(_ group: ThreadbareCore.WorkGroup) -> NSAttributedString {
         let style = truncating
         let output = NSMutableAttributedString(string: group.summary, attributes: [
-            .font: Theme.workFont, .foregroundColor: NSColor.secondaryLabelColor, .paragraphStyle: style,
+            .font: Theme.workFont, .foregroundColor: Theme.quietText, .paragraphStyle: style,
         ])
         if group.failedCount > 0 {
             output.append(NSAttributedString(string: ", \(group.failedCount) failed", attributes: [
@@ -419,10 +438,10 @@ enum RowRenderer {
             // What's happening now is what Mike watches while a turn runs:
             // readable secondary text, with only the dot kept faint.
             output.append(NSAttributedString(string: "  ·  ", attributes: [
-                .font: Theme.workFont, .foregroundColor: NSColor.tertiaryLabelColor, .paragraphStyle: style,
+                .font: Theme.workFont, .foregroundColor: Theme.faintText, .paragraphStyle: style,
             ]))
             output.append(NSAttributedString(string: ToolPresentation.shortTitle(action, limit: 90), attributes: [
-                .font: Theme.workFont, .foregroundColor: NSColor.secondaryLabelColor, .paragraphStyle: style,
+                .font: Theme.workFont, .foregroundColor: Theme.quietText, .paragraphStyle: style,
             ]))
         }
         return output
@@ -430,7 +449,7 @@ enum RowRenderer {
 
     static func toolHeader(_ tool: ToolItem) -> NSAttributedString {
         let style = truncating
-        let color = tool.failed ? Theme.removedText : NSColor.secondaryLabelColor
+        let color = tool.failed ? Theme.removedText : Theme.quietText
         let output: NSMutableAttributedString
         if let file = ToolPresentation.fileTitle(tool) {
             // "Read UploadTask.swift  Sources/Upload": the file, then its
@@ -441,7 +460,7 @@ enum RowRenderer {
             ])
             if !file.folder.isEmpty {
                 output.append(NSAttributedString(string: "  " + file.folder, attributes: [
-                    .font: Theme.detailFont, .foregroundColor: NSColor.tertiaryLabelColor, .paragraphStyle: style,
+                    .font: Theme.detailFont, .foregroundColor: Theme.faintText, .paragraphStyle: style,
                 ]))
             }
         } else {
@@ -483,7 +502,7 @@ enum RowRenderer {
     /// line numbers, a search and its matches, or the input as fields.
     static func toolBody(_ tool: ToolItem) -> NSAttributedString {
         let output = NSMutableAttributedString()
-        let outputColor: NSColor = tool.failed ? Theme.removedText : .secondaryLabelColor
+        let outputColor: NSColor = tool.failed ? Theme.removedText : Theme.quietText
         var hasOutput = false
         func appendOutput(_ text: String) {
             guard !text.isEmpty else { return }
@@ -496,7 +515,7 @@ enum RowRenderer {
         }
         switch ToolPresentation.detail(tool) {
         case .command(let command, let result):
-            output.append(mono("$ ", .tertiaryLabelColor))
+            output.append(mono("$ ", Theme.faintText))
             output.append(mono(clampLines(command, 40), .labelColor))
             appendOutput(result)
         case .file(_, let lines):
@@ -508,12 +527,12 @@ enum RowRenderer {
             }
         case .search(let query, let scope, let result):
             output.append(mono(query, .labelColor))
-            if let scope { output.append(mono("  in " + scope, .tertiaryLabelColor)) }
+            if let scope { output.append(mono("  in " + scope, Theme.faintText)) }
             appendOutput(result)
         case .fields(let fields, let result):
             for (index, field) in fields.enumerated() {
                 if index > 0 { output.append(mono("\n", .labelColor)) }
-                output.append(mono(field.key + "  ", .tertiaryLabelColor))
+                output.append(mono(field.key + "  ", Theme.faintText))
                 output.append(mono(field.value, .labelColor))
             }
             appendOutput(result)
@@ -521,10 +540,10 @@ enum RowRenderer {
         if tool.result?.truncated == true {
             output.append(mono("\n", .labelColor))
             output.append(gap(6))
-            output.append(NSAttributedString(string: "Output shortened", attributes: Theme.text(Theme.smallFont, color: .tertiaryLabelColor, line: 17)))
+            output.append(NSAttributedString(string: "Output shortened", attributes: Theme.text(Theme.smallFont, color: Theme.faintText, line: 17)))
         } else if !hasOutput {
             if output.length > 0 { output.append(mono("\n", .labelColor)) }
-            output.append(mono(tool.isFinished ? "No output" : "Running…", .tertiaryLabelColor))
+            output.append(mono(tool.isFinished ? "No output" : "Running…", Theme.faintText))
         }
         return output
     }
@@ -537,8 +556,8 @@ enum RowRenderer {
         let (style, offset) = Theme.lines(TypeScale.outputLine, font: monoFont, head: gutter + 14, first: 0)
         style.tabStops = [NSTextTab(textAlignment: .right, location: gutter), NSTextTab(textAlignment: .left, location: gutter + 14)]
         style.lineBreakMode = .byCharWrapping
-        let numberAttributes: [NSAttributedString.Key: Any] = [.font: monoFont, .foregroundColor: NSColor.tertiaryLabelColor, .paragraphStyle: style, .baselineOffset: offset]
-        let textAttributes: [NSAttributedString.Key: Any] = [.font: monoFont, .foregroundColor: NSColor.secondaryLabelColor, .paragraphStyle: style, .baselineOffset: offset]
+        let numberAttributes: [NSAttributedString.Key: Any] = [.font: monoFont, .foregroundColor: Theme.faintText, .paragraphStyle: style, .baselineOffset: offset]
+        let textAttributes: [NSAttributedString.Key: Any] = [.font: monoFont, .foregroundColor: Theme.quietText, .paragraphStyle: style, .baselineOffset: offset]
         let output = NSMutableAttributedString()
         for (index, line) in lines.enumerated() {
             if index > 0 { output.append(NSAttributedString(string: "\n", attributes: textAttributes)) }
@@ -550,16 +569,34 @@ enum RowRenderer {
 
     // MARK: Diffs
 
-    /// A diff and, if it was cut short, a quiet note of how much was left out.
-    static func diffWithNote(_ diffs: [EditDiff], maxLines: Int, inset: CGFloat = 10) -> NSAttributedString {
+    /// A diff and, if it was cut short, what was left out: "Show 30 more
+    /// lines", which opens the rest through the expansion key `more`, or
+    /// with no key (all of it is already open, up to the cap) a quiet note.
+    static func diffWithNote(_ diffs: [EditDiff], maxLines: Int, inset: CGFloat = 10, more: String? = nil) -> NSAttributedString {
         let (diff, hidden) = diffText(diffs, maxLines: maxLines, inset: inset)
         guard hidden > 0 else { return diff }
         let body = NSMutableAttributedString(attributedString: diff)
-        let (style, offset) = Theme.lines(24, font: Theme.smallFont, head: inset, first: inset)
-        let note: [NSAttributedString.Key: Any] = [.font: Theme.smallFont, .foregroundColor: NSColor.tertiaryLabelColor, .paragraphStyle: style, .baselineOffset: offset]
-        body.append(NSAttributedString(string: "\n", attributes: note))
-        body.append(NSAttributedString(string: hidden == 1 ? "1 more line not shown" : "\(hidden) more lines not shown", attributes: note))
+        let lines = hidden == 1 ? "1 more line" : "\(hidden) more lines"
+        if let more {
+            let (style, offset) = Theme.lines(26, font: Theme.detailFont, head: inset, first: inset)
+            let link: [NSAttributedString.Key: Any] = [.font: Theme.detailFont, .foregroundColor: Theme.quietText, .paragraphStyle: style,
+                                                       .baselineOffset: offset, .tbAction: more, .cursor: NSCursor.pointingHand]
+            body.append(NSAttributedString(string: "\n", attributes: [.font: Theme.detailFont, .paragraphStyle: style]))
+            body.append(NSAttributedString(string: "Show " + lines, attributes: link))
+        } else {
+            let (style, offset) = Theme.lines(24, font: Theme.smallFont, head: inset, first: inset)
+            let note: [NSAttributedString.Key: Any] = [.font: Theme.smallFont, .foregroundColor: Theme.faintText, .paragraphStyle: style, .baselineOffset: offset]
+            body.append(NSAttributedString(string: "\n", attributes: note))
+            body.append(NSAttributedString(string: lines + " not shown", attributes: note))
+        }
         return body
+    }
+
+    /// How many lines of `diffs` a diff opened short shows (a break between
+    /// two diffs counts as a line, as `diffText` draws it).
+    static func previewLines(_ diffs: [EditDiff]) -> Int {
+        let total = diffs.reduce(0) { $0 + DiffBuilder.displayLines($1).count } + max(0, diffs.count - 1)
+        return DiffPreview.shown(of: total)
     }
 
     /// Diff lines with line numbers and the +/− sign in a quiet gutter, on
@@ -590,11 +627,13 @@ enum RowRenderer {
         let newFile = lines.allSatisfy { $0.kind != .removed && $0.kind != .context }
         let signAt = numberEnd + 10
         let textAt = signAt + 14
-        let (style, offset) = Theme.lines(Theme.diffLine, font: Theme.diffFont, head: textAt, first: 0)
+        // Wrapped lines stop as far from the box's right edge as the
+        // numbers start from its left; they ran right up to the border.
+        let (style, offset) = Theme.lines(Theme.diffLine, font: Theme.diffFont, head: textAt, first: 0, tail: -inset)
         style.tabStops = [NSTextTab(textAlignment: .right, location: numberEnd), NSTextTab(textAlignment: .left, location: signAt),
                           NSTextTab(textAlignment: .left, location: textAt)]
         style.lineBreakMode = .byCharWrapping
-        let gutter: [NSAttributedString.Key: Any] = [.font: Theme.diffFont, .foregroundColor: NSColor.tertiaryLabelColor, .paragraphStyle: style, .baselineOffset: offset]
+        let gutter: [NSAttributedString.Key: Any] = [.font: Theme.diffFont, .foregroundColor: Theme.faintText, .paragraphStyle: style, .baselineOffset: offset]
         let body: [NSAttributedString.Key: Any] = [.font: Theme.diffFont, .foregroundColor: NSColor.labelColor, .paragraphStyle: style, .baselineOffset: offset]
 
         let output = NSMutableAttributedString()
@@ -632,19 +671,22 @@ enum RowRenderer {
     // MARK: Changes card
 
     static func changesRender(_ card: ChangedFiles, width: CGFloat, measurer: TextMeasurer) -> RowRender {
-        let title = NSAttributedString(string: card.title, attributes: [.font: NSFont.systemFont(ofSize: TypeScale.cardTitle, weight: .medium), .foregroundColor: NSColor.labelColor])
+        let title = NSAttributedString(string: card.title, attributes: [.font: Theme.changesTitleFont, .foregroundColor: NSColor.labelColor])
         let total = statsText(added: card.added, removed: card.removed)
         var parts: [RowRender.Part] = []
         var height = RowMetrics.changesHeader
         for file in card.files {
             let line = NSMutableAttributedString(string: file.name, attributes: [.font: Theme.workFont, .foregroundColor: NSColor.labelColor, .paragraphStyle: truncating])
             if !file.folder.isEmpty {
-                line.append(NSAttributedString(string: "  " + file.folder, attributes: [.font: Theme.detailFont, .foregroundColor: NSColor.tertiaryLabelColor, .paragraphStyle: truncating]))
+                line.append(NSAttributedString(string: "  " + file.folder, attributes: [.font: Theme.detailFont, .foregroundColor: Theme.faintText, .paragraphStyle: truncating]))
             }
             var part = RowRender.Part(leading: line, trailing: statsText(added: file.added, removed: file.removed))
             height += RowMetrics.changesFile
             if file.isExpanded {
-                let body = diffWithNote(file.diffs, maxLines: 600, inset: RowMetrics.cardPad)
+                let key = ChangedFiles.expansionKey(turnId: card.turnId, path: file.path)
+                let body = file.showsAll
+                    ? diffWithNote(file.diffs, maxLines: 600, inset: RowMetrics.cardPad)
+                    : diffWithNote(file.diffs, maxLines: previewLines(file.diffs), inset: RowMetrics.cardPad, more: DiffPreview.allKey(key))
                 part.body = body
                 part.bodyHeight = measurer.measure(body, width: width - 1).height + 8
                 height += part.bodyHeight
@@ -682,7 +724,7 @@ enum RowRenderer {
         }
         let output = NSMutableAttributedString()
         if let path = input["file_path"]?.stringValue ?? input["path"]?.stringValue {
-            output.append(mono(ToolPresentation.shortTitle(path, limit: 300), .secondaryLabelColor))
+            output.append(mono(ToolPresentation.shortTitle(path, limit: 300), Theme.quietText))
             let call = ToolCall(itemId: request.approvalId, name: request.name, kind: request.name == "Write" ? .write : .edit,
                                 title: request.title, input: input)
             if let diff = DiffBuilder.diff(forTool: call), !diff.hunks.isEmpty {
@@ -699,7 +741,7 @@ enum RowRenderer {
         if fields.isEmpty { return mono(clampLines(request.title, 10), .labelColor) }
         for (index, field) in fields.prefix(8).enumerated() {
             if index > 0 { output.append(mono("\n", .labelColor)) }
-            output.append(mono(field.key + "  ", .tertiaryLabelColor))
+            output.append(mono(field.key + "  ", Theme.faintText))
             output.append(mono(field.value, .labelColor))
         }
         return output
@@ -729,7 +771,7 @@ enum RowRenderer {
             let (mark, color, textColor): (String, NSColor, NSColor) = switch entry.status {
             case .completed: ("✓", Theme.addedText, .secondaryLabelColor)
             case .in_progress: ("●", .controlAccentColor, .labelColor)
-            case .pending: ("○", .tertiaryLabelColor, .labelColor)
+            case .pending: ("○", Theme.faintText, .labelColor)
             }
             output.append(NSAttributedString(string: mark + "\t", attributes: [.font: font, .foregroundColor: color, .paragraphStyle: style, .baselineOffset: offset]))
             var attributes: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: textColor, .paragraphStyle: style, .baselineOffset: offset]
@@ -751,7 +793,7 @@ enum RowRenderer {
         if let error = completion.error, !error.isEmpty { text += ": " + firstLine(error) }
         return NSAttributedString(string: text, attributes: [
             .font: Theme.smallFont,
-            .foregroundColor: completion.outcome == .failed ? NSColor.systemRed : NSColor.tertiaryLabelColor,
+            .foregroundColor: completion.outcome == .failed ? NSColor.systemRed : Theme.faintText,
             .paragraphStyle: truncating,
         ])
     }

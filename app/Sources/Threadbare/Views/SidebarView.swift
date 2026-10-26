@@ -15,6 +15,9 @@ enum SidebarMetrics {
     static let corner: CGFloat = 8
     /// Fainter than the selected row's 0.06 to 0.08, so the two read apart.
     static let hover = Color.primary.opacity(0.03)
+    /// Times, counts and account names: quieter than a preview but readable
+    /// (the system tertiary was about 2:1 here, like disabled text).
+    static let faint = Color(nsColor: Theme.faintText)
 }
 
 struct SidebarView: View {
@@ -134,12 +137,22 @@ private struct ThreadList<Content: View>: View {
                     }
                 }
                 .padding(.horizontal, SidebarMetrics.outerInset)
-                .padding(.bottom, 10)
+                // Room for the last row to scroll clear of the fade below.
+                .padding(.bottom, 18)
             }
             // With a mouse connected macOS draws a legacy scroller with a
             // track down the list, which also pushed the times left. Codex,
             // Claude and T3 show none; the list scrolls the same without it.
             .scrollIndicators(.never)
+            // The last row fades into the footer rather than being cut
+            // through its text at the hairline, as the transcript does above
+            // the composer. A static mask, so scrolling costs nothing more.
+            .mask {
+                VStack(spacing: 0) {
+                    Color.black
+                    LinearGradient(colors: [.black, .clear], startPoint: .top, endPoint: .bottom).frame(height: 16)
+                }
+            }
             .focusable()
             .focused($focused)
             .focusEffectDisabled()
@@ -226,17 +239,19 @@ struct ThreadRowView: View {
                         .lineLimit(1)
                 } else {
                     // A new thread, or one that has only asked a question:
-                    // a blank line here read as a gap in the list.
+                    // a blank line here read as a gap in the list. "Waiting
+                    // for your answer" is the row that most needs Mike, so
+                    // it's never the faintest text in the sidebar.
                     Text(ThreadRowLook.emptyPreview(thread))
                         .font(.system(size: TypeScale.sidebarPreview))
-                        .foregroundStyle(.tertiary)
+                        .foregroundStyle(thread.status == .waiting ? AnyShapeStyle(.secondary) : AnyShapeStyle(SidebarMetrics.faint))
                         .lineLimit(1)
                 }
                 Spacer(minLength: 0)
                 if app.showsAccountLabel(thread) {
                     Text(app.accountShortTitle(thread.accountId))
                         .font(.system(size: TypeScale.sidebarMeta))
-                        .foregroundStyle(.tertiary)
+                        .foregroundStyle(SidebarMetrics.faint)
                         .lineLimit(1)
                         .help(app.accountTitle(thread.accountId))
                 }
@@ -285,15 +300,18 @@ struct ThreadRowView: View {
         switch look.status {
         case .time:
             if mode != .snoozed {
-                time.foregroundStyle(.tertiary)
+                time.foregroundStyle(SidebarMetrics.faint)
             }
         case .working:
             HStack(spacing: 4) {
                 // An accent mark that animates in the render server: the
-                // system mini spinner drew grey whatever the tint.
+                // system mini spinner drew grey whatever the tint. At 10 pt
+                // most of its spokes were too faint to see in any one frame;
+                // at 13 it outweighs the times on the rows around it.
                 Image(systemName: "progress.indicator")
                     .symbolEffect(.variableColor.iterative)
-                    .font(.system(size: 10, weight: .semibold))
+                    .font(.system(size: 13, weight: .medium))
+                    .frame(width: 16, height: 16)
                 if look.labelled { Text("Working") }
             }
             .font(.system(size: TypeScale.sidebarMeta, weight: .medium))
@@ -408,15 +426,17 @@ private struct SidebarButtonRow: View {
                     .font(.system(size: size))
                     .foregroundStyle(.secondary)
                     .frame(width: 16)
+                // The footer's rows are navigation, quieter than the threads
+                // above them; New thread stays primary.
                 Text(title)
                     .font(.system(size: size))
-                    .foregroundStyle(.primary)
+                    .foregroundStyle(size < TypeScale.sidebarButton ? .secondary : .primary)
                 Spacer(minLength: 6)
                 if let hint {
-                    Text(hint).font(.system(size: TypeScale.sidebarMeta)).foregroundStyle(.tertiary)
+                    Text(hint).font(.system(size: TypeScale.sidebarMeta)).foregroundStyle(SidebarMetrics.faint)
                 }
                 if let count, count > 0 {
-                    Text("\(count)").font(.system(size: size)).foregroundStyle(.tertiary).monospacedDigit()
+                    Text("\(count)").font(.system(size: size)).foregroundStyle(SidebarMetrics.faint).monospacedDigit()
                 }
             }
             // The icon sits where thread titles start, Codex style.
@@ -577,7 +597,7 @@ private struct ModeHeader: View {
                 .font(.system(size: TypeScale.sidebarButton, weight: .semibold))
             Spacer()
             if let count, count > 0 {
-                Text("\(count)").font(.system(size: TypeScale.sidebarFooter)).foregroundStyle(.tertiary).monospacedDigit()
+                Text("\(count)").font(.system(size: TypeScale.sidebarFooter)).foregroundStyle(SidebarMetrics.faint).monospacedDigit()
             }
         }
         // The chevron's glyph lines up with the icons and titles below.
@@ -593,10 +613,13 @@ struct SearchField: View {
     let prompt: String
 
     var body: some View {
-        HStack(spacing: 6) {
+        // The glass and the prompt on the same columns as New thread's icon
+        // and title, as SidebarButtonRow lays them out.
+        HStack(spacing: 8) {
             Image(systemName: "magnifyingglass")
                 .font(.system(size: 12.5))
-                .foregroundStyle(.tertiary)
+                .foregroundStyle(SidebarMetrics.faint)
+                .frame(width: 16)
             TextField(prompt, text: $text)
                 .textFieldStyle(.plain)
                 .font(.system(size: TypeScale.sidebarButton))
@@ -610,9 +633,13 @@ struct SearchField: View {
                 .help("Clear")
             }
         }
-        .padding(.horizontal, 9)
+        .padding(.leading, SidebarMetrics.leading - 2)
+        .padding(.trailing, 9)
         .padding(.vertical, 6)
-        .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: SidebarMetrics.corner))
+        // A field, not a row: a lighter fill and a hairline. At the selected
+        // row's fill it read as a selected item stacked on the list.
+        .background(Color.primary.opacity(0.035), in: RoundedRectangle(cornerRadius: SidebarMetrics.corner))
+        .overlay(RoundedRectangle(cornerRadius: SidebarMetrics.corner).strokeBorder(.separator, lineWidth: 0.5))
     }
 }
 

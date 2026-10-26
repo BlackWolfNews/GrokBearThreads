@@ -84,7 +84,9 @@ final class TranscriptController: NSObject, NSTableViewDataSource, NSTableViewDe
         scrollView.scrollerStyle = .overlay
         scrollView.automaticallyAdjustsContentInsets = false
         // Room below the last row for the bottom fade, so a thread pinned to
-        // the bottom shows its last row whole.
+        // the bottom shows its last row whole. At the top, every row starts
+        // with at least 5 pt of its own padding, so 10 here keeps a thread
+        // scrolled to its top clear of the top fade.
         scrollView.contentInsets = NSEdgeInsets(top: 10, left: 0, bottom: Self.fadeHeight + 4, right: 0)
         scrollView.wantsLayer = true
         scrollView.contentView.postsBoundsChangedNotifications = true
@@ -93,13 +95,15 @@ final class TranscriptController: NSObject, NSTableViewDataSource, NSTableViewDe
         NotificationCenter.default.addObserver(self, selector: #selector(frameChanged), name: NSView.frameDidChangeNotification, object: scrollView.contentView)
     }
 
-    // MARK: Bottom fade
+    // MARK: Edge fades
 
-    /// The transcript ends a few points above the composer card. Cut off
-    /// there, the last line was sliced through its letters and images got a
-    /// hard edge, which read as a drawing glitch. A static mask fades the
-    /// bottom out instead; it only changes when the view is resized.
+    /// The transcript ends a few points above the composer card and starts
+    /// right under the header. Cut off there, lines were sliced through
+    /// their letters and images got a hard edge, which read as a drawing
+    /// glitch. A static mask fades both ends out instead, as Codex and
+    /// Claude do; it only changes when the view is resized.
     static let fadeHeight: CGFloat = 18
+    static let topFadeHeight: CGFloat = 14
     private let fadeMask = CALayer()
     private let fadeGradient = CAGradientLayer()
     private let fadeScroller = CALayer()
@@ -107,7 +111,7 @@ final class TranscriptController: NSObject, NSTableViewDataSource, NSTableViewDe
     private func updateFade() {
         guard let layer = scrollView.layer else { return }
         if layer.mask !== fadeMask {
-            fadeGradient.colors = [NSColor.black.cgColor, NSColor.black.cgColor, NSColor.clear.cgColor]
+            fadeGradient.colors = [NSColor.clear.cgColor, NSColor.black.cgColor, NSColor.black.cgColor, NSColor.clear.cgColor]
             fadeScroller.backgroundColor = NSColor.black.cgColor
             fadeMask.addSublayer(fadeGradient)
             fadeMask.addSublayer(fadeScroller)
@@ -117,7 +121,8 @@ final class TranscriptController: NSObject, NSTableViewDataSource, NSTableViewDe
         guard bounds.height > 0 else { return }
         // The scroller strip on the right stays whole; only the text fades.
         let scroller: CGFloat = 16
-        let stop = max(0, min(1, Self.fadeHeight / bounds.height))
+        let top = max(0, min(0.5, Self.topFadeHeight / bounds.height))
+        let bottom = max(0, min(0.5, Self.fadeHeight / bounds.height))
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         fadeMask.frame = bounds
@@ -127,7 +132,7 @@ final class TranscriptController: NSObject, NSTableViewDataSource, NSTableViewDe
         let flipped = layer.isGeometryFlipped
         fadeGradient.startPoint = CGPoint(x: 0.5, y: flipped ? 0 : 1)
         fadeGradient.endPoint = CGPoint(x: 0.5, y: flipped ? 1 : 0)
-        fadeGradient.locations = [0, NSNumber(value: Double(1 - stop)), 1]
+        fadeGradient.locations = [0, NSNumber(value: Double(top)), NSNumber(value: Double(1 - bottom)), 1]
         CATransaction.commit()
     }
 
@@ -192,7 +197,10 @@ final class TranscriptController: NSObject, NSTableViewDataSource, NSTableViewDe
     }
 
     func render(_ row: TranscriptRow) -> RowRender {
-        Self.renders.render(row, expanded: isExpanded(row), width: width)
+        // Only diff rows have more lines to show; skipping the lookup keeps
+        // a full reload's height pass free of a string per row.
+        let showAll = row.kind == .diff && session?.expanded.contains(DiffPreview.allKey(row.id)) == true
+        return Self.renders.render(row, expanded: isExpanded(row), showAll: showAll, width: width)
     }
 
     /// Item rows keep their open state in the session; groups and changes
@@ -407,7 +415,28 @@ final class TranscriptController: NSObject, NSTableViewDataSource, NSTableViewDe
             session.setModelExpanded(rowId, !group.isExpanded)
             return
         }
-        if session.expanded.contains(rowId) { session.expanded.remove(rowId) } else { session.expanded.insert(rowId) }
+        DiffPreview.set(rowId, open: !session.expanded.contains(rowId), in: &session.expanded)
+        refreshInPlace(index: index, row: row)
+    }
+
+    /// "Show 30 more lines" under an opened diff. A changes card's file is
+    /// the model's to open; a tool row's lines are this view's.
+    func showAllLines(_ key: String) {
+        guard let session else { return }
+        if key.hasPrefix("cf:") {
+            session.setModelExpanded(key, true)
+            return
+        }
+        let rowId = String(key.dropLast("|all".count))
+        guard key == DiffPreview.allKey(rowId), let index = session.displayIndex(of: rowId), let row = row(at: index) else { return }
+        DiffPreview.set(key, open: true, in: &session.expanded)
+        refreshInPlace(index: index, row: row)
+    }
+
+    /// Re-renders one row whose open state changed, keeping what's on
+    /// screen where it is.
+    private func refreshInPlace(index: Int, row: TranscriptRow) {
+        guard let session else { return }
         let memory = captureMemory()
         NSAnimationContext.beginGrouping()
         NSAnimationContext.current.duration = 0

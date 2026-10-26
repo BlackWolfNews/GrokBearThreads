@@ -207,11 +207,12 @@ public struct TranscriptModel: Sendable {
     }
 
     /// Opens or closes a group (`g:` id) or a file in a changes card
-    /// (`ChangedFiles.expansionKey`). Opening a group inserts its items under
-    /// it; the group keeps its id, so its cached height survives.
+    /// (`ChangedFiles.expansionKey`, or its `DiffPreview.allKey` to show all
+    /// of the file's diff). Opening a group inserts its items under it; the
+    /// group keeps its id, so its cached height survives.
     public mutating func setExpanded(_ key: String, _ open: Bool) -> TranscriptChange {
         guard expanded.contains(key) != open else { return TranscriptChange() }
-        if open { expanded.insert(key) } else { expanded.remove(key) }
+        DiffPreview.set(key, open: open, in: &expanded)
         let rowId = key.hasPrefix("cf:") ? String(key[..<(key.firstIndex(of: "|") ?? key.endIndex)]) : key
         guard let position = index[rowId] else { return TranscriptChange() }
         markUpdated(rowStarts[position])
@@ -716,12 +717,7 @@ public struct TranscriptModel: Sendable {
             }
         }
         if workingLine, let turn = openTurn, !pendingCards.values.contains(turn) {
-            // The row above the line, open group items aside. With nothing
-            // rebuilt (only the tail was dirty) it's the last row kept.
-            let above = out.last(where: { !$0.inGroup }) ?? rows.last(where: { !$0.inGroup && $0.kind != .working })
-            var afterLiveGroup = false
-            if case .group(let group)? = above?.content { afterLiveGroup = group.isLive }
-            let status = WorkingStatus(turnId: turn, startedAt: turnStarts[turn], afterLiveGroup: afterLiveGroup)
+            let status = WorkingStatus(turnId: turn, startedAt: turnStarts[turn])
             out.append(derived("w:" + turn, seq: lastSeq, turnId: turn, .working(status)))
             starts.append(items.count)
         }
@@ -746,8 +742,9 @@ public struct TranscriptModel: Sendable {
                 files[path] = file
             } else {
                 order.append(path)
+                let key = ChangedFiles.expansionKey(turnId: turn, path: path)
                 files[path] = ChangedFile(path: path, added: stats.added, removed: stats.removed, diffs: [diff],
-                                          isExpanded: expanded.contains(ChangedFiles.expansionKey(turnId: turn, path: path)))
+                                          isExpanded: expanded.contains(key), showsAll: expanded.contains(DiffPreview.allKey(key)))
             }
         }
         guard !order.isEmpty else { return nil }
