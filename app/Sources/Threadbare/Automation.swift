@@ -103,9 +103,7 @@ enum Automation {
             return "ok"
         case "mode":
             switch c["mode"] as? String {
-            case "archive":
-                app.sidebarMode = .archive
-                app.loadArchive()
+            case "archive": app.showArchive()
             case "snoozed": app.sidebarMode = .snoozed
             default: app.sidebarMode = .inbox
             }
@@ -149,8 +147,25 @@ enum Automation {
             let data = (try? JSONSerialization.data(withJSONObject: out, options: [.sortedKeys])) ?? Data()
             return "ok " + String(decoding: data, as: UTF8.self)
         case "sidebar":
-            guard let window else { return "error no window" }
-            return "ok " + (SidebarProbe.state(in: window) ?? "no sidebar list")
+            // The inbox's rows by section, as the sidebar lists them.
+            let sections = app.sections
+            let object: [String: Any] = [
+                "needsYou": sections.needsYou.map(\.id), "running": sections.running.map(\.id),
+                "inbox": sections.inbox.map(\.id), "snoozed": app.snoozed.count, "archived": app.archivedCount,
+                "hover": app.hoverOverride ?? "",
+            ]
+            let data = (try? JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])) ?? Data()
+            return "ok " + String(decoding: data, as: UTF8.self)
+        case "hover":
+            // Shows a row's hover buttons as if the pointer were over it;
+            // with no id, clears it.
+            guard let prefix = c["id"] as? String else {
+                app.hoverOverride = nil
+                return "ok"
+            }
+            guard let id = app.threads.keys.first(where: { $0.hasPrefix(prefix) }) else { return "error no such thread" }
+            app.hoverOverride = id
+            return "ok \(id)"
         case "quit":
             NSApp.terminate(nil)
             return "ok"
