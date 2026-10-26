@@ -126,7 +126,7 @@ class ClaudeSession implements AgentSession {
     const options: Options = {
       cwd: opts.cwd,
       pathToClaudeCodeExecutable: deps.claudePath,
-      env: cliEnv(opts.account),
+      env: { ...cliEnv(opts.account), ...opts.env },
       settingSources: ['user', 'project', 'local'],
       systemPrompt: { type: 'preset', preset: 'claude_code' },
       includePartialMessages: true,

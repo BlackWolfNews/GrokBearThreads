@@ -73,7 +73,9 @@ export type TurnOutcome = 'completed' | 'interrupted' | 'failed';
 
 // Persisted event bodies, without the envelope.
 export type EventBody =
-  | { type: 'user.message'; text: string; images: ImageRef[] }
+  // origin is set only on messages the runner sent by itself (the resume
+  // after a restart).
+  | { type: 'user.message'; text: string; images: ImageRef[]; origin?: 'runner' }
   | { type: 'assistant.text'; itemId: string; text: string }
   | { type: 'reasoning'; itemId: string; text: string }
   | { type: 'tool.call'; itemId: string; name: string; kind: ToolKind; title: string; input: Record<string, unknown> }

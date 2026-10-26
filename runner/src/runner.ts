@@ -35,6 +35,7 @@ import type {
 import type { ThreadRecord, ThreadStore, QueuedSend } from './store.ts';
 import type { Clock, TimerHandle } from './clock.ts';
 import type { Logger } from './log.ts';
+import { threadEnv } from './restart.ts';
 import type { AccountRegistry } from './accounts.ts';
 import { RUNNER_VERSION, expandHome, paths, readRunnerJson, writeRunnerJson, type Config } from './config.ts';
 import { copyImageInto, imageRefFor } from './media.ts';
@@ -489,14 +490,15 @@ export class Runner {
     return { thread: this.summary(st), turnId };
   }
 
-  send(threadId: string, text: string, images: ImageRef[] = []): { turnId: string } {
+  // origin "runner" marks a message the runner sends by itself (restart.ts).
+  send(threadId: string, text: string, images: ImageRef[] = [], opts: { origin?: 'runner' } = {}): { turnId: string } {
     const st = this.mustGet(threadId);
     if (!text && images.length === 0) throw new RpcError(ErrorCode.badParams, 'text or images required');
     checkImages(images);
-    return { turnId: this.sendTo(st, text, images) };
+    return { turnId: this.sendTo(st, text, images, opts.origin) };
   }
 
-  private sendTo(st: ThreadState, text: string, images: ImageRef[]): string {
+  private sendTo(st: ThreadState, text: string, images: ImageRef[], origin?: 'runner'): string {
     const { rec, rt } = st;
     // Copy images into the thread's own media folder now, so a queued
     // message still works if inbox/ is cleaned before it's sent.
@@ -517,16 +519,18 @@ export class Runner {
       rt.releaseWhenIdle = false;
     }
     const turnId = crypto.randomUUID();
+    const msg: QueuedSend = { turnId, text, images: refs };
+    if (origin) msg.origin = origin;
     rec.lastActivityAt = this.isoNow();
     if (rt.turn || rec.queue.length) {
       // Behind a running turn, or behind messages that couldn't start
       // earlier: they go first.
-      rec.queue.push({ turnId, text, images: refs });
+      rec.queue.push(msg);
       this.markDirty(st);
       this.kickQueue(st);
       return turnId;
     }
-    this.startTurn(st, { turnId, text, images: refs });
+    this.startTurn(st, msg);
     return turnId;
   }
 
@@ -535,7 +539,7 @@ export class Runner {
   // than stuck on a turn that never started.
   private startTurn(st: ThreadState, msg: QueuedSend): void {
     const { rec, rt } = st;
-    this.emit(st, { type: 'user.message', text: msg.text, images: msg.images }, msg.turnId);
+    this.emit(st, { type: 'user.message', text: msg.text, images: msg.images, ...(msg.origin ? { origin: msg.origin } : {}) }, msg.turnId);
     try {
       this.emit(st, { type: 'turn.started', turnId: msg.turnId }, msg.turnId);
     } catch (e) {
@@ -637,6 +641,7 @@ export class Runner {
         blobsDir: this.store.blobsDir(rec.id),
         tmpDir: path.join(paths.run(this.cfg.home), 'tmp'),
         allowRules: rec.allowRules ?? [],
+        env: threadEnv(rec.id, this.cfg.home),
       },
       sink,
     );
@@ -1363,6 +1368,11 @@ export class Runner {
 
   status(threadId: string): ThreadStatus | undefined {
     return this.threads.get(threadId)?.rec.status;
+  }
+
+  // A note outside any turn (restart.ts: "Runner restarted: ...").
+  note(threadId: string, text: string): void {
+    this.emit(this.mustGet(threadId), { type: 'system.note', text });
   }
 }
 

@@ -83,7 +83,7 @@ Persisted event types (stored in `events.ndjson`, returned by `threads.events`):
 
 | type | fields |
 |---|---|
-| `user.message` | `text`, `images: ImageRef[]` |
+| `user.message` | `text`, `images: ImageRef[]`, `origin?: "runner"` (set when the runner sent the message by itself, such as the resume after a restart; absent for anything a person or client sent) |
 | `assistant.text` | `itemId`, `text` (complete markdown for that block) |
 | `reasoning` | `itemId`, `text` (summary) |
 | `tool.call` | `itemId`, `name` (raw tool name), `kind` (`command` \| `read` \| `edit` \| `write` \| `search` \| `web` \| `mcp` \| `task` \| `todo` \| `other`), `title` (one line, e.g. "npm test" or "Edit src/a.ts"), `input` (object, large strings truncated to 16 KB) |
@@ -114,7 +114,7 @@ replaces whatever the deltas built up.
 
 | method | params | result |
 |---|---|---|
-| `hello` | `{ client: string, version: string }` | `{ runnerVersion, protocol: 1, accounts: Account[], defaults: { cwd, accountId } }` |
+| `hello` | `{ client: string, version: string }` | `{ runnerVersion, protocol: 1, accounts: Account[], defaults: { cwd, accountId } }`. `runnerVersion` is `<package version>+<release id>` when the runner runs from a release, else `<package version>+source` |
 | `threads.list` | `{ include?: ("inbox" \| "snoozed" \| "archived")[] }` (default `["inbox"]`) | `{ threads: ThreadSummary[] }` newest activity first |
 | `threads.search` | `{ query: string, limit?: number }` | `{ threads: ThreadSummary[] }` matches title and preview across all threads, archived included |
 | `threads.create` | `{ text: string, images?: ImageRef[], cwd?: string, accountId?: string, model?: string, permissionMode?: "full" \| "ask", title?: string }` | `{ thread: ThreadSummary }` (the first turn starts straight away) |
@@ -127,6 +127,8 @@ replaces whatever the deltas built up.
 | `threads.markSeen` | `{ threadId, seq }` | `{ thread: ThreadSummary }` |
 | `approvals.respond` | `{ threadId, approvalId, decision: "allow" \| "allowAlways" \| "deny" \| "answered", message?: string, answers?: Record<string, string> }` | `{}`. `allowAlways` allows matching requests for the rest of this thread only; it never changes the thread's permission mode or saves anything in the project |
 | `media.import` | `{ path: string }` | `{ image: ImageRef }` copies a file into `inbox/` and reads its size |
+| `runner.status` | `{}` | `{ version, release?, pid, startedAt, home, logFile, liveClis, running: string[], pendingRestart?: { when, reason?, resumeThreadId?, requestedAt, waitingFor: string[] } }`. `running` lists the threads that are starting, running or waiting on an approval or a question, the same ones a restart waits for |
+| `runner.restart` | `{ when?: "idle" \| "now", resume?: { threadId, text }, reason?: string }` | `{ scheduled: boolean, waitingFor: string[] }`. See Restarts below. `scheduled` is true once the restart is saved; an empty `waitingFor` means it is happening now. A runner older than this answers `-32601` |
 
 Errors use JSON-RPC error objects: `-32602` bad params, `-32004` thread not
 found, `-32010` account not found, `-32020` busy (e.g. two sends racing),
@@ -139,6 +141,47 @@ found, `-32010` account not found, `-32020` busy (e.g. two sends racing),
 | `thread.updated` | `{ thread: ThreadSummary }` sent to every connected client whenever a summary changes |
 | `thread.event` | `{ threadId, event: Event }` only for subscribed threads, persisted and transient |
 | `runner.notice` | `{ level: "info" \| "warning" \| "error", message }`. Also sent straight after the `hello` result for things the client missed (startup problems, a missing `claude` binary) |
+
+## Restarts
+
+`runner.restart` restarts the runner without cutting a turn short.
+
+- `when: "idle"` (the default) waits until no thread is starting, running or
+  waiting on an approval or a question, then shuts down the way it does on
+  SIGTERM and exits 0, and launchd starts it again. `waitingFor` names the
+  threads it is waiting for. A message sent meanwhile still starts a turn,
+  and the restart waits for that turn too.
+- `when: "now"` shuts down straight away. Turns in flight end as `stopped`.
+- While a restart is pending, every client gets a `runner.notice` ("The
+  runner will restart when 2 threads finish."), and clients that say hello
+  get it again. `runner.status` shows it as `pendingRestart`. When it
+  starts, the notice is "The runner is restarting now."
+- The request is saved in `restart.json` in the data dir, so a crash
+  before the runner is idle doesn't lose it: the next start counts as the
+  restart. Asking again while one is pending merges the two: `now` wins,
+  and each thread's latest `resume` is kept.
+- `resume` carries a thread on afterwards. On the next start the runner
+  adds a `system.note` "Runner restarted: <old version> to <new version>"
+  to that thread (with the rollback notice below as a second paragraph if
+  the new release kept crashing), then sends `text` as a new turn whose
+  `user.message` has `origin: "runner"`. The text is only sent if the old runner shut down
+  for the restart less than 15 minutes ago (after a crash, if the restart
+  was asked for less than 15 minutes ago), the thread isn't snoozed or
+  archived, and the runner hasn't already resumed that thread 3 times in
+  the last hour; otherwise there's only the note, saying why.
+- A runner that had to go back to an earlier release because the new one
+  kept crashing at startup says so with a `warning` notice at startup and
+  after every `hello` ("Release X kept crashing at startup, so the runner
+  went back to Y.").
+
+Every CLI the runner starts gets these environment variables, so tools an
+agent runs (`tb self`, the deploy script) know where they are:
+
+| Variable | Value |
+|---|---|
+| `THREADBARE_THREAD_ID` | the id of the thread the CLI belongs to |
+| `THREADBARE_HOME` | the runner's data dir |
+| `THREADBARE_RUNNER_VERSION` | the runner's version, as in `hello` |
 
 ## Ordering and reconnects
 

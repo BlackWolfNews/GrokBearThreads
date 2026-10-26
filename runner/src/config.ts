@@ -3,8 +3,10 @@ import os from 'node:os';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { atomicWriteFileSync } from './fsutil.ts';
+import { RELEASE } from './release.ts';
 
-export const RUNNER_VERSION = '0.1.0';
+// <package version>+<release id>, or +source when run from a checkout.
+export const RUNNER_VERSION = RELEASE.version;
 export const DEFAULT_CWD = '~/dev/me/misc';
 export const DEFAULT_PORT = 8797;
 export const DEFAULT_MAX_LIVE = 6;
@@ -98,6 +100,15 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
       env.THREADBARE_ACCOUNTS_DIR || '~/Library/Application Support/Token Stats/Accounts',
     ),
   };
+}
+
+// Where a client (tb) finds the runner. THREADBARE_PORT=0 tells a runner to
+// take any free port, and the CLIs a dev or sandbox runner starts inherit
+// it, so then the port it got, in runner.json, is the one to use.
+export function runnerUrl(cfg: Config, env: NodeJS.ProcessEnv = process.env): string {
+  if (env.THREADBARE_URL) return env.THREADBARE_URL;
+  const port = cfg.port || readRunnerJson(cfg.home).port || DEFAULT_PORT;
+  return `ws://127.0.0.1:${port}/rpc`;
 }
 
 export const paths = {
