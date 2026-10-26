@@ -28,8 +28,10 @@ anything.
 
 Mike may be running this thread in Threadbare itself, through the installed
 runner (`com.mikerosoft.threadbare.runner`). Then `THREADBARE_THREAD_ID` is
-set, and `runner/bin/tb self` and `tb status` show your thread and the
-runner. `runner/bin/tb --help` lists the rest.
+set, and `tb self` and `tb status` show your thread and the runner. The
+runner puts its own `tb` on your PATH; if `tb` isn't found (an older
+runner, or outside a thread), use `runner/bin/tb`. `tb --help` lists the
+rest.
 
 - `./check.sh` runs every check (`--quick`: the runner's typecheck and unit
   tests). Nothing in it touches the live runner.
@@ -37,7 +39,10 @@ runner. `runner/bin/tb --help` lists the rest.
   change it. To try a runner change, start `runner/scripts/dev-runner.sh` in
   the background and use the `<dev home>/tb` it prints (a bare `tb` reaches
   the live runner unless `THREADBARE_HOME` is set in that same command).
-  Stop it with the `kill <pid>` it prints, never `pkill`.
+  Its threads start in `<dev home>/work` on claude-3; give them
+  `--model claude-haiku-5-5`. Stop it with the `kill <pid>` it prints, never
+  `pkill`, and before you deploy or end your turn: the live runner's restart
+  waits for it.
 - To ship a runner change, merge it to main, then from main run
   `runner/scripts/deploy-runner.sh --dry-run` and
   `runner/scripts/deploy-runner.sh`, which ships HEAD of this checkout.
@@ -51,17 +56,19 @@ runner. `runner/bin/tb --help` lists the rest.
   from the main checkout and only Mike can switch it (one
   `install-runner.sh` from a terminal). Runner changes wait for him.
 - A restart waits for other threads' turns and background jobs (tests,
-  builds, subagents). `tb status` shows what it's waiting for; don't try to
-  hurry it.
-- Never pass `--now`, run `install-runner.sh`, `launchctl kickstart` the
-  runner or stop its node process: each ends your own turn and stops other
-  threads' work. If one is needed, finish and tell Mike the exact command.
-  `tb restart` is for dev runners and sandboxes.
+  builds, subagents; background ones for 30 minutes at most). `tb status`
+  shows what it's waiting for; don't try to hurry it.
+- Never pass `--now`, run `install-runner.sh`, `tb restart` the live runner,
+  `launchctl kickstart` it or stop its node process: each ends your own turn
+  and stops other threads' work. If one is needed, finish and tell Mike the
+  exact command. `tb restart` is for dev runners and sandboxes.
 - Rebuilding or restarting the app (`app/restart.sh`, `app/install.sh`) is
   safe: the runner keeps your turn going and the app reconnects.
 - `tb show <id>` reads a thread as text, `tb logs` the runner log, and
   `tb export <id>` copies a thread into `app/.fixtures/` so a rendering bug
-  can be reproduced against the mock runner (it prints the command).
+  can be reproduced against the mock runner (it prints the command). The
+  `run-mock.sh` line it also prints opens a window in front of Mike, so ask
+  him first.
 - Check app changes with `app/Tools/screenshots.sh <dir>`: a debug build
   against the mock runner, in a temp folder, with the window kept behind
   whatever Mike is working in. Look at the images before saying it works.
