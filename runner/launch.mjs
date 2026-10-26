@@ -133,7 +133,7 @@ async function main() {
   const plan = planBoot(state, Date.now(), (id) => releaseExists(dir, id));
   if (plan.rolledBack) {
     pointCurrent(dir, plan.start);
-    log('WARN', `release ${plan.rolledBack.from} started ${CRASH_BOOTS} times in 2 minutes without being marked good; going back to ${plan.start}`);
+    log('WARN', `release ${plan.rolledBack.from} failed to start ${CRASH_BOOTS} times in ${CRASH_WINDOW_MS / 60_000} minutes without being marked good; going back to ${plan.start}`);
   } else if (plan.stuck) {
     log('WARN', `release ${plan.start} keeps crashing at startup and there's no other good release to go back to`, { lastGood: state.lastGood });
   }

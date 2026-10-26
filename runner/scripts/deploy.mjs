@@ -849,19 +849,16 @@ async function list(c) {
   } else {
     say(`Releases in ${c.releases}, newest first:`);
     const width = Math.max(...ids.map((id) => id.length));
-    for (const id of ids) {
-      const info = readJson(path.join(c.releases, id, 'release.json')) ?? {};
-      const marks = [
-        id === cur && 'current',
-        id === state.previous && 'previous',
-        id === state.lastGood && 'last good',
-        id === state.rolledBack?.from && 'crashed at startup',
-      ]
+    const marksOf = (id) =>
+      [id === cur && 'current', id === state.previous && 'previous', id === state.lastGood && 'last good', id === state.rolledBack?.from && 'crashed at startup']
         .filter(Boolean)
         .join(', ');
+    const marksWidth = Math.max(...ids.map((id) => marksOf(id).length));
+    for (const id of ids) {
+      const info = readJson(path.join(c.releases, id, 'release.json')) ?? {};
       const built = info.builtAt ? info.builtAt.replace('T', ' ').replace(/\.\d+Z$/, ' UTC') : '?';
       const branch = typeof info.branch === 'string' ? `, ${info.branch === 'HEAD' ? 'no branch' : info.branch}` : '';
-      say(`${id === cur ? '*' : ' '} ${id.padEnd(width)}  ${marks.padEnd(28)}built ${built}${branch}, node ${info.node ?? '?'}`);
+      say(`${id === cur ? '*' : ' '} ${id.padEnd(width)}  ${marksOf(id).padEnd(marksWidth)}  built ${built}${branch}, node ${info.node ?? '?'}`);
     }
   }
   if (state.rolledBack) say(`Last crash rollback: ${state.rolledBack.from} to ${state.rolledBack.to} at ${state.rolledBack.at}.`);

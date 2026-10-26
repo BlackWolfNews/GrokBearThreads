@@ -40,8 +40,9 @@ export type RestartFile = {
   // reason while it was pending. A resume's age counts from here, so a
   // restart that waited an hour for a long turn still resumes.
   shutdownAt?: string;
-  // restart.done.json only: the version of the runner that handled it.
+  // restart.done.json only: the runner that handled it.
   handledBy?: string;
+  handledRelease?: string;
 };
 
 export type RestartParams = { when?: RestartWhen; resume?: ResumeRequest; reason?: string; release?: string; cancel?: boolean };
@@ -109,6 +110,7 @@ export type RestarterDeps = {
   // because the one deployed kept crashing: the resumed thread asked for
   // the new one, so its note says so.
   rolledBack?: string;
+  rolledBackFrom?: string; // the release launch.mjs went back from
   // The idle check and the restart run after the current tick: a turn that
   // ends and the queued message that starts straight after it never look
   // idle, and the runner.restart reply goes out before the runner stops.
@@ -258,6 +260,8 @@ export class Restarter {
   // counts as done from here, so a resume's age starts now rather than when
   // the restart was first asked for.
   stopping(): void {
+    // Stopping cleanly isn't crashing: the restart this runner handled is done.
+    this.proven();
     if (!this.pending || this.pending.shutdownAt) return;
     this.pending.shutdownAt = this.isoNow();
     this.save();
@@ -300,16 +304,19 @@ export class Restarter {
     if (fs.existsSync(file)) {
       saved = readJsonSync<RestartFile>(file);
       try {
-        if (saved && typeof saved === 'object') atomicWriteFileSync(done, JSON.stringify({ ...saved, handledBy: this.version }, null, 2) + '\n');
+        if (saved && typeof saved === 'object') {
+          atomicWriteFileSync(done, JSON.stringify({ ...saved, handledBy: this.version, handledRelease: this.deps.release }, null, 2) + '\n');
+        }
         fs.unlinkSync(file);
       } catch (e) {
         log.warn('could not move restart.json aside', { error: String(e) });
       }
     } else if (fs.existsSync(done)) {
       // Left by a runner that didn't stay up. Only worth acting on if that
-      // runner was a release launch.mjs has just gone back from.
-      if (this.deps.rolledBack) {
-        saved = readJsonSync<RestartFile>(done);
+      // runner was the release launch.mjs has just gone back from.
+      const left = readJsonSync<RestartFile>(done);
+      if (this.deps.rolledBack && left && typeof left === 'object' && left.handledRelease !== undefined && left.handledRelease === this.deps.rolledBackFrom) {
+        saved = left;
         again = true;
       }
       try {

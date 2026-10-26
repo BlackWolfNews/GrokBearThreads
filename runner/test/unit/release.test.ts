@@ -48,7 +48,7 @@ test('a rollback is reported once', () => {
   const home = tmpDir();
   assert.equal(takeRollbackNotice(home, nullLogger), undefined);
   writeState(home, { current: 'r1', previous: 'r2', lastGood: 'r1', boots: [], rolledBack: { from: 'r2', to: 'r1', at: '2026-10-26T10:00:00.000Z' } });
-  assert.equal(takeRollbackNotice(home, nullLogger, Date.parse('2026-10-26T10:01:00.000Z')), 'Release r2 kept crashing at startup, so the runner went back to r1.');
+  assert.deepEqual(takeRollbackNotice(home, nullLogger, Date.parse('2026-10-26T10:01:00.000Z')), { message: 'Release r2 kept crashing at startup, so the runner went back to r1.', from: 'r2' });
   assert.equal(readState(home)?.rolledBack?.reportedAt, '2026-10-26T10:01:00.000Z');
   assert.equal(takeRollbackNotice(home, nullLogger), undefined);
 });

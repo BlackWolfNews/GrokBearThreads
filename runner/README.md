@@ -148,8 +148,8 @@ the details.
 - If it asked for a release (the deploy script does) and the runner came
   back on another, the note and the message both say so.
 - The handled request stays as `restart.done.json` until the new runner is
-  marked good, so if that release crashes and `launch.mjs` goes back to the
-  last good one, the thread is carried on once more there.
+  marked good or stops cleanly, so if that release crashes and `launch.mjs`
+  goes back to the last good one, the thread is carried on once more there.
 - Snoozed and archived threads keep their queued messages through a
   restart and send them when they come back.
 

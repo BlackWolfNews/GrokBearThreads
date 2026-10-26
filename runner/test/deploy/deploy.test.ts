@@ -577,7 +577,7 @@ test('launch.mjs on its own: two failed starts, then the third runs lastGood', {
   third.stderr.on('data', (d) => (text += d));
   try {
     await waitFor('the third start to listen', () => /listening on/.test(text));
-    assert.match(text, new RegExp(`started 3 times in 2 minutes without being marked good; going back to ${good}`));
+    assert.match(text, new RegExp(`failed to start 3 times in 10 minutes without being marked good; going back to ${good}`));
     assert.equal(await version(home2), `9.9.9+${good}`);
     const s = JSON.parse(fs.readFileSync(path.join(dir2, 'state.json'), 'utf8')) as State;
     assert.equal(path.basename(fs.readlinkSync(path.join(dir2, 'current'))), good);

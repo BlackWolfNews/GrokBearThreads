@@ -79,15 +79,16 @@ export function markGood(home: string, releaseId: string | undefined, log: Logge
   }
 }
 
-// The message for a rollback launch.mjs did and nobody has reported yet.
-// Marks it reported, so the next runner doesn't say it again.
-export function takeRollbackNotice(home: string, log: Logger, now = Date.now()): string | undefined {
-  let message: string | undefined;
+// The message for a rollback launch.mjs did and nobody has reported yet,
+// and the release it went back from. Marks it reported, so the next runner
+// doesn't say it again.
+export function takeRollbackNotice(home: string, log: Logger, now = Date.now()): { message: string; from: string } | undefined {
+  let out: { message: string; from: string } | undefined;
   try {
     updateState(home, (s) => {
       const rb = s.rolledBack;
       if (!rb || typeof rb !== 'object' || rb.reportedAt) return false;
-      message = `Release ${rb.from} kept crashing at startup, so the runner went back to ${rb.to}.`;
+      out = { message: `Release ${rb.from} kept crashing at startup, so the runner went back to ${rb.to}.`, from: String(rb.from) };
       rb.reportedAt = new Date(now).toISOString();
       return true;
     });
@@ -95,8 +96,8 @@ export function takeRollbackNotice(home: string, log: Logger, now = Date.now()):
     // Better to say it twice than not at all.
     log.warn('could not mark the rollback reported', { error: String(e) });
   }
-  if (message) log.warn('running an earlier release after a rollback', { message });
-  return message;
+  if (out) log.warn('running an earlier release after a rollback', { message: out.message });
+  return out;
 }
 
 // A release counts as good once it has been listening this long: launch.mjs

@@ -15,7 +15,7 @@ import { tmpDir } from '../helpers/fakes.ts';
 const MIN = 60_000;
 
 // A Restarter on a harness, standing in for main.ts: restart() only counts.
-function withRestarter(h: Harness, version = '0.1.0+old', extra: { release?: string; rolledBack?: string; branch?: string } = {}) {
+function withRestarter(h: Harness, version = '0.1.0+old', extra: { release?: string; rolledBack?: string; rolledBackFrom?: string; branch?: string } = {}) {
   const state = { restarts: 0 };
   const r = new Restarter({ runner: h.runner, home: h.home, clock: h.clock, log: nullLogger, version, release: 'old', ...extra, restart: () => state.restarts++ });
   return { r, state };
@@ -419,10 +419,51 @@ test('background shells and subagents hold an idle restart until they finish', a
   assert.deepEqual(r.status().pendingRestart?.waitingFor, [thread.id]);
   await tick();
   assert.equal(state.restarts, 0);
-  // The work ends: the CLI's task list empties and the restart goes ahead.
+  // The work ends: the CLI's task list empties, it runs a turn to read the
+  // result, and then the restart goes ahead.
   s.out({ kind: 'tasks', tasks: [] });
+  s.out({ kind: 'cliTurn' });
+  s.result();
   await tick();
   assert.equal(state.restarts, 1);
+});
+
+test('when background work ends, the restart also waits for the turn the CLI starts to read the result', async () => {
+  const h = makeHarness();
+  const { r, state } = withRestarter(h);
+  const { thread } = create(h);
+  const s = h.adapter.last;
+  s.init();
+  s.out({ kind: 'tasks', tasks: TASKS });
+  s.result();
+  r.request({});
+  // The CLI says the list is empty a moment before its own turn starts.
+  s.out({ kind: 'tasks', tasks: [] });
+  await tick();
+  assert.equal(state.restarts, 0, 'not in the gap before the turn');
+  assert.match(r.status().background?.[0].tasks[0] ?? '', /just finished/);
+  s.out({ kind: 'cliTurn', note: 'Background command "npm run e2e" completed' });
+  await tick();
+  assert.equal(state.restarts, 0, 'the turn is running');
+  s.result();
+  await tick();
+  assert.equal(state.restarts, 1);
+
+  // If the CLI never starts one, the restart goes ahead after a while.
+  const h2 = makeHarness();
+  const r2 = withRestarter(h2);
+  create(h2);
+  const s2 = h2.adapter.last;
+  s2.init();
+  s2.out({ kind: 'tasks', tasks: TASKS });
+  s2.result();
+  r2.r.request({});
+  s2.out({ kind: 'tasks', tasks: [] });
+  await tick();
+  assert.equal(r2.state.restarts, 0);
+  h2.clock.advance(15_000);
+  await tick();
+  assert.equal(r2.state.restarts, 1);
 });
 
 test('a restart that does stop background work says so in that thread', async () => {
@@ -614,12 +655,33 @@ test('a release that crashes after handling the restart: the one launch.mjs goes
   assert.equal(h2.events(thread.id).filter((e) => e.type === 'user.message').length, 0);
   assert.equal(fs.existsSync(donePath(h.home)), false);
 
-  // Same again, but this time launch.mjs goes back to A.
+  // A rollback from some other release doesn't count: B didn't crash.
   saveRestart(h2, thread.id, { fromVersion: '0.1.0+A' }, { release: 'B', text: 'check B' });
   withRestarter(h2, '0.1.0+B', { release: 'B' }).r.resumeAfterRestart();
-  const h3 = h2.restart();
+  const hx = h2.restart();
+  withRestarter(hx, '0.1.0+A', { release: 'A', rolledBack: 'Release C kept crashing at startup, so the runner went back to A.', rolledBackFrom: 'C' }).r.resumeAfterRestart();
+  assert.deepEqual(
+    hx.events(thread.id).filter((e) => e.type !== 'turn.completed'),
+    [],
+    'nothing resumed, only the interrupted turn recovered',
+  );
+  assert.equal(fs.existsSync(donePath(h.home)), false);
+
+  // A clean stop isn't a crash either.
+  saveRestart(hx, thread.id, { fromVersion: '0.1.0+A' }, { release: 'B', text: 'check B' });
+  const rb = withRestarter(hx, '0.1.0+B', { release: 'B' }).r;
+  rb.resumeAfterRestart();
+  rb.stopping();
+  assert.equal(fs.existsSync(donePath(h.home)), false);
+
+  // Same again, but this time B crashes and launch.mjs goes back to A.
+  // (A fresh count: the thread has been resumed a few times by now.)
+  fs.rmSync(resumesPath(h.home), { force: true });
+  saveRestart(hx, thread.id, { fromVersion: '0.1.0+A' }, { release: 'B', text: 'check B' });
+  withRestarter(hx, '0.1.0+B', { release: 'B' }).r.resumeAfterRestart();
+  const h3 = hx.restart();
   const rolledBack = 'Release B kept crashing at startup, so the runner went back to A.';
-  withRestarter(h3, '0.1.0+A', { release: 'A', rolledBack }).r.resumeAfterRestart();
+  withRestarter(h3, '0.1.0+A', { release: 'A', rolledBack, rolledBackFrom: 'B' }).r.resumeAfterRestart();
   const evs = h3.events(thread.id);
   const note = evs.find((e) => e.type === 'system.note' && e.text.startsWith('Runner restarted'));
   assert.equal(note.text, `Runner restarted: 0.1.0+B to 0.1.0+A\n\n${rolledBack}`);

@@ -183,9 +183,9 @@ found, `-32010` account not found, `-32020` busy (e.g. two sends racing),
   the text sent starts with "Note from the runner: ..." saying which
   release is running, so the agent doesn't take the old code for its own.
 - The handled request is kept as `restart.done.json` until the new runner
-  has stayed up 60 seconds. If it crashes before then and launch.mjs goes
-  back to the last good release, that runner resumes the same threads once
-  more, with the rollback in the note and the message.
+  has stayed up 60 seconds or stops cleanly. If it crashes before then and
+  launch.mjs goes back to the last good release, that runner resumes the
+  same threads once more, with the rollback in the note and the message.
 - A runner that had to go back to an earlier release because the new one
   kept crashing at startup says so with a `warning` notice at startup and
   after every `hello` ("Release X kept crashing at startup, so the runner

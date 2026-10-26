@@ -68,7 +68,8 @@ async function main(): Promise<void> {
   // launch.mjs went back to this release because a newer one kept crashing
   // at startup. Every client that says hello hears about it, not just the
   // first few minutes' worth.
-  const rolledBack = takeRollbackNotice(cfg.home, log);
+  const rollback = takeRollbackNotice(cfg.home, log);
+  const rolledBack = rollback?.message;
   // runner.restart: when it's time, stop the same way SIGTERM does and
   // exit 0 so launchd starts the runner again.
   const restarter = new Restarter({
@@ -80,6 +81,7 @@ async function main(): Promise<void> {
     branch: RELEASE.branch,
     logFile: cfg.logFile,
     rolledBack,
+    rolledBackFrom: rollback?.from,
     restart: () => void stop('restart'),
   });
 

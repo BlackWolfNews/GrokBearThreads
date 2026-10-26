@@ -71,6 +71,10 @@ type Runtime = {
   retriedFresh: boolean;
   turn?: Turn;
   tasks: BackgroundTask[]; // background work the live CLI is running
+  // Set when background work finished with no turn running: the CLI is
+  // about to start a turn of its own to look at the result, and until it
+  // does (or WAKE_GRACE_MS passes) the thread isn't idle.
+  wakeTimer?: TimerHandle;
   activeAt: number; // last turn start or end, for picking which CLI to release
   approvals: Map<string, PendingApproval>;
   idleTimer?: TimerHandle;
@@ -99,6 +103,9 @@ const DELTA_INTERVAL_MS = 33; // at most ~30 delta flushes a second per thread
 const INTERRUPT_GRACE_MS = 10_000;
 // How long notices from startup are shown to clients that connect later.
 const STARTUP_NOTICE_MS = 10 * 60_000;
+// How long a finished background task keeps the thread counted as busy
+// while the CLI gets round to its own turn (usually well under a second).
+const WAKE_GRACE_MS = 15_000;
 
 export class Runner {
   private cfg: Config;
@@ -273,6 +280,7 @@ export class Runner {
       const { rt } = st;
       rt.idleTimer?.cancel();
       rt.deltaTimer?.cancel();
+      rt.wakeTimer?.cancel();
       this.flushDeltas(st);
       // Output and exits from CLIs that are about to be killed no longer count.
       rt.generation++;
@@ -309,7 +317,9 @@ export class Runner {
   backgroundWork(): { threadId: string; tasks: string[] }[] {
     const out: { threadId: string; tasks: string[] }[] = [];
     for (const st of this.threads.values()) {
-      if (st.rt.tasks.length) out.push({ threadId: st.rec.id, tasks: st.rt.tasks.map((t) => t.description || t.type) });
+      const tasks = st.rt.tasks.map((t) => t.description || t.type);
+      if (st.rt.wakeTimer) tasks.push('a background task that just finished, which the agent is about to look at');
+      if (tasks.length) out.push({ threadId: st.rec.id, tasks });
     }
     return out;
   }
@@ -728,8 +738,19 @@ export class Runner {
         rt.turn!.cliStarted = true;
         if (o.note) this.emit(st, { type: 'system.note', text: o.note }, rt.turn!.turnId);
         break;
-      case 'tasks':
+      case 'tasks': {
+        const ended = rt.tasks.some((t) => !o.tasks.some((n) => n.id === t.id));
         rt.tasks = o.tasks;
+        // The CLI reports the list shrinking a moment before it starts the
+        // turn that reads the result. A restart in between would lose that
+        // turn, so the thread stays busy until it starts.
+        if (ended && !rt.turn) {
+          rt.wakeTimer?.cancel();
+          rt.wakeTimer = this.clock.setTimeout(() => {
+            rt.wakeTimer = undefined;
+            this.markDirty(st);
+          }, WAKE_GRACE_MS);
+        }
         // No summary field changes, but a pending restart waits on
         // background work and re-checks on thread.updated.
         this.markDirty(st);
@@ -740,6 +761,7 @@ export class Runner {
           rt.idleTimer = undefined;
         } else if (!rt.turn) this.scheduleIdle(st);
         break;
+      }
       case 'allowRules': {
         const rules = new Set(rec.allowRules ?? []);
         for (const r of o.rules) rules.add(r);
@@ -767,6 +789,8 @@ export class Runner {
 
   private openCliTurn(st: ThreadState): void {
     const { rec, rt } = st;
+    rt.wakeTimer?.cancel();
+    rt.wakeTimer = undefined;
     const turnId = crypto.randomUUID();
     this.emit(st, { type: 'turn.started', turnId }, turnId);
     rt.idleTimer?.cancel();
@@ -856,6 +880,8 @@ export class Runner {
     if (rt.generation !== gen) return;
     rt.session = undefined;
     rt.tasks = [];
+    rt.wakeTimer?.cancel();
+    rt.wakeTimer = undefined;
     rt.idleTimer?.cancel();
     rt.idleTimer = undefined;
     this.log.info('session ended', { threadId: rec.id, error: err?.message });
