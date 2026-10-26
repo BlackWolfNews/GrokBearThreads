@@ -125,7 +125,8 @@ final class ImageGridView: NSView {
         self.frames = frames
         while tiles.count < frames.count {
             let tile = CALayer()
-            tile.cornerRadius = 6
+            tile.cornerRadius = 8
+            tile.cornerCurve = .continuous
             tile.masksToBounds = true
             tile.borderWidth = 0.5
             tile.contentsGravity = .resizeAspectFill
@@ -142,23 +143,35 @@ final class ImageGridView: NSView {
             }
             tile.isHidden = false
             tile.frame = frames[index]
-            tile.borderColor = NSColor.separatorColor.cgColor
-            tile.backgroundColor = NSColor.quaternaryLabelColor.cgColor
+            tile.borderColor = Theme.cardBorder.resolvedCGColor(for: self)
+            // A faint placeholder while the thumbnail decodes, and no box
+            // behind the image once it's there.
+            let placeholder = Theme.codeBackground.resolvedCGColor(for: self)
             let path = paths[index]
             let pixels = Int(max(frames[index].width, frames[index].height) * scale)
             if let image = ThumbnailLoader.shared.cached(path: path, maxPixels: pixels) {
                 tile.contents = image
+                tile.backgroundColor = nil
             } else {
                 tile.contents = nil
+                tile.backgroundColor = placeholder
                 tile.name = path
                 ThumbnailLoader.shared.load(path: path, maxPixels: pixels) { [weak tile] image in
                     guard let tile, tile.name == path else { return }
                     tile.contents = image
+                    if image != nil { tile.backgroundColor = nil }
                 }
             }
             tile.name = path
         }
         CATransaction.commit()
+    }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        // Layer colours don't follow appearance changes on their own.
+        let border = Theme.cardBorder.resolvedCGColor(for: self)
+        for tile in tiles { tile.borderColor = border }
     }
 
     /// Drops the decoded images, for a cell the table has parked off screen.

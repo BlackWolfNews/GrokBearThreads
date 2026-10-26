@@ -78,10 +78,14 @@ final class MockRunnerTests: XCTestCase {
 
         let page = try await client.events(threadId: "demo_upload_resume")
         let model = TranscriptModel(events: page.events)
-        let kinds = Set(model.rows.map(\.kind))
+        let kinds = Set(model.items.map(\.kind))
         for kind in [RowKind.user, .assistant, .reasoning, .tool, .diff, .images, .plan, .approval, .footer] {
-            XCTAssertTrue(kinds.contains(kind), "demo thread should have a \(kind) row")
+            XCTAssertTrue(kinds.contains(kind), "demo thread should have a \(kind) item")
         }
+        // Its turns fold their work into groups and end with a changes card.
+        let shown = Set(model.rows.map(\.kind))
+        XCTAssertTrue(shown.contains(.group))
+        XCTAssertTrue(shown.contains(.changes))
         // Image paths come back absolute so the app can read them.
         let images = page.events.flatMap { event -> [ImageRef] in
             if case .toolResult(let result) = event.payload { return result.images }

@@ -142,7 +142,13 @@ final class TranscriptController: NSObject, NSTableViewDataSource, NSTableViewDe
     }
 
     func render(_ row: TranscriptRow) -> RowRender {
-        Self.renders.render(row, expanded: session?.expanded.contains(row.id) == true, width: width)
+        Self.renders.render(row, expanded: isExpanded(row), width: width)
+    }
+
+    /// Item rows keep their open state in the session; groups and changes
+    /// cards carry theirs in the row.
+    func isExpanded(_ row: TranscriptRow) -> Bool {
+        RenderCache.effectiveExpanded(row, session?.expanded.contains(row.id) == true)
     }
 
     // MARK: Data source and delegate
@@ -156,9 +162,9 @@ final class TranscriptController: NSObject, NSTableViewDataSource, NSTableViewDe
 
     func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row index: Int) -> NSView? {
         guard let row = row(at: index) else { return nil }
-        let cell = makeCell(for: row.kind)
+        let cell = makeCell(for: row)
         cell.delegate = self
-        cell.configure(row: row, render: render(row), tableWidth: width, expanded: session?.expanded.contains(row.id) == true)
+        cell.configure(row: row, render: render(row), tableWidth: width, expanded: isExpanded(row))
         return cell
     }
 
@@ -173,15 +179,23 @@ final class TranscriptController: NSObject, NSTableViewDataSource, NSTableViewDe
         for case let cell as RowCellView in rowView.subviews { cell.updateSlices(force: true) }
     }
 
-    private func makeCell(for kind: RowKind) -> RowCellView {
-        let identifier: String
-        switch kind {
-        case .user, .assistant, .plan, .note, .error, .footer: identifier = "text"
-        case .reasoning, .tool, .diff: identifier = "header"
-        case .images: identifier = "images"
-        case .approval: identifier = "approval"
-        case .question: identifier = "question"
+    static func cellIdentifier(for row: TranscriptRow) -> String {
+        switch row.kind {
+        case .user, .assistant, .plan, .error, .footer: return "text"
+        // A system note folded into an open group reads as one of its lines.
+        case .note: return row.inGroup ? "header" : "text"
+        case .reasoning, .tool, .diff: return "header"
+        case .images: return "images"
+        case .approval: return "approval"
+        case .question: return "question"
+        case .group: return "group"
+        case .working: return "working"
+        case .changes: return "changes"
         }
+    }
+
+    private func makeCell(for row: TranscriptRow) -> RowCellView {
+        let identifier = Self.cellIdentifier(for: row)
         let id = NSUserInterfaceItemIdentifier(identifier)
         if let reused = tableView.makeView(withIdentifier: id, owner: nil) as? RowCellView { return reused }
         let cell: RowCellView
@@ -190,6 +204,9 @@ final class TranscriptController: NSObject, NSTableViewDataSource, NSTableViewDe
         case "header": cell = HeaderRowCell(frame: .zero)
         case "images": cell = ImagesRowCell(frame: .zero)
         case "approval": cell = ApprovalRowCell(frame: .zero)
+        case "group": cell = GroupRowCell(frame: .zero)
+        case "working": cell = WorkingRowCell(frame: .zero)
+        case "changes": cell = ChangesRowCell(frame: .zero)
         default: cell = QuestionRowCell(frame: .zero)
         }
         cell.identifier = id
@@ -198,8 +215,9 @@ final class TranscriptController: NSObject, NSTableViewDataSource, NSTableViewDe
 
     // MARK: Live updates
 
-    /// Applies a batch from the session. Indices are in display space.
-    func apply(inserted: IndexSet, updated: IndexSet) {
+    /// Applies a batch from the session. Indices are in display space:
+    /// `removed` in the rows before the change, the others after it.
+    func apply(removed: IndexSet = [], inserted: IndexSet, updated: IndexSet) {
         guard session != nil else { return }
         let wasPinned = isAtBottom
         let anchor = wasPinned ? nil : captureMemory()
@@ -208,6 +226,12 @@ final class TranscriptController: NSObject, NSTableViewDataSource, NSTableViewDe
 
         NSAnimationContext.beginGrouping()
         NSAnimationContext.current.duration = 0
+        // NSTableView applies these in order, each against the rows as they
+        // are after the one before: removals at old indices, then inserts
+        // at new ones.
+        if !removed.isEmpty {
+            tableView.removeRows(at: removed, withAnimation: [])
+        }
         if !inserted.isEmpty {
             tableView.insertRows(at: inserted, withAnimation: [])
         }
@@ -247,9 +271,14 @@ final class TranscriptController: NSObject, NSTableViewDataSource, NSTableViewDe
     }
 
     private func refreshCell(at index: Int, row: TranscriptRow) {
-        if let cell = tableView.view(atColumn: 0, row: index, makeIfNecessary: false) as? RowCellView {
-            cell.configure(row: row, render: render(row), tableWidth: width, expanded: session?.expanded.contains(row.id) == true)
+        guard let cell = tableView.view(atColumn: 0, row: index, makeIfNecessary: false) as? RowCellView else { return }
+        if cell.identifier?.rawValue != Self.cellIdentifier(for: row) {
+            // The row needs another kind of cell now (a note moving into an
+            // open group): let the table make it.
+            tableView.reloadData(forRowIndexes: [index], columnIndexes: [0])
+            return
         }
+        cell.configure(row: row, render: render(row), tableWidth: width, expanded: isExpanded(row))
     }
 
     private func scheduleDeferred() {
@@ -322,6 +351,12 @@ final class TranscriptController: NSObject, NSTableViewDataSource, NSTableViewDe
 
     func toggleExpanded(rowId: String) {
         guard let session, let index = session.displayIndex(of: rowId), let row = row(at: index) else { return }
+        if case .group(let group) = row.content {
+            // Opening a group inserts its items under it and closing removes
+            // them; `apply` keeps what's on screen where it is.
+            session.setModelExpanded(rowId, !group.isExpanded)
+            return
+        }
         if session.expanded.contains(rowId) { session.expanded.remove(rowId) } else { session.expanded.insert(rowId) }
         let memory = captureMemory()
         NSAnimationContext.beginGrouping()
@@ -473,8 +508,8 @@ final class TranscriptController: NSObject, NSTableViewDataSource, NSTableViewDe
             copy.target = self
             copy.representedObject = row.id
             menu.addItem(copy)
-            if [.tool, .reasoning, .diff].contains(row.kind) {
-                let expanded = session?.expanded.contains(row.id) == true
+            if [.tool, .reasoning, .diff, .group].contains(row.kind) {
+                let expanded = isExpanded(row)
                 let toggle = NSMenuItem(title: expanded ? "Collapse" : "Expand", action: #selector(toggleFromMenu(_:)), keyEquivalent: "")
                 toggle.target = self
                 toggle.representedObject = row.id
@@ -500,6 +535,12 @@ final class TranscriptController: NSObject, NSTableViewDataSource, NSTableViewDe
 
     @objc private func copyTranscript() {
         session?.copyTranscript()
+    }
+
+    func toggleChangedFile(turnId: String, path: String) {
+        guard let session else { return }
+        let key = ChangedFiles.expansionKey(turnId: turnId, path: path)
+        session.setModelExpanded(key, !session.model.isExpanded(key))
     }
 
     func respond(approvalId: String, decision: ApprovalDecision, answers: [String: String]?, message: String?) {

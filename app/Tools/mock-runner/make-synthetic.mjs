@@ -190,9 +190,7 @@ function others() {
       question: [{ question: 'Which colour should the Share button be?', header: 'Colour', multiSelect: false, options: [
         { label: 'Accent blue', description: 'Matches the other toolbar buttons' }, { label: 'Green', description: 'Stands out as the main action' }, { label: 'Plain grey' }] }] },
   ] });
-  smallThread({ name: 'ci-slow', title: 'Why is the build slow on CI?', minutesAgo: 1, status: 'running', turns: [
-    { user: 'The CI build went from 6 to 14 minutes this week. Can you find out why?', tools: [{ id: 'log', name: 'Bash', kind: 'command', title: 'Download the last two CI logs', output: 'saved run-812.log\nsaved run-845.log' }], reply: 'Looking at the two logs now.' },
-  ] });
+  runningThread();
   smallThread({ name: 'settings-tabs', title: 'Rename the Settings tabs', minutesAgo: 47, turns: [
     { user: 'Rename the Settings tabs to General, Sync and Advanced.', tools: [{ id: 'e', name: 'Edit', kind: 'edit', title: 'Edit ~/dev/photo-sync/Sources/Settings/SettingsView.swift', input: { file_path: `${home}/dev/photo-sync/Sources/Settings/SettingsView.swift`, old_string: 'Tab("Prefs")', new_string: 'Tab("General")' } }], reply: 'Done. The tabs now read **General**, **Sync** and **Advanced**.' },
   ] });
@@ -211,6 +209,37 @@ function others() {
   smallThread({ name: 'invoice-export', title: 'Export last quarter\'s invoices as CSV', minutesAgo: 60 * 3, snoozedHours: 18, turns: [
     { user: 'Export last quarter\'s invoices as CSV.', reply: 'The export is ready, but two invoices have no client name. Shall I fill those in from the PDFs?' },
   ] });
+}
+
+// A turn that's still running: some work, a short reply, then more work
+// with the last command still going. The mock runner moves its start to a
+// few seconds before it loads, so "Working for" reads as a live turn.
+function runningThread() {
+  const id = 'demo_ci_slow';
+  const dir = path.join(root, 'demo-ci-slow');
+  fs.mkdirSync(dir, { recursive: true });
+  const turnId = 'turn_1';
+  const ts = minutes(1);
+  const events = [];
+  let seq = 0;
+  const push = (fields) => events.push({ seq: ++seq, ts, threadId: id, turnId, ...fields });
+  push({ type: 'user.message', text: 'The CI build went from 6 to 14 minutes this week. Can you find out why?', images: [] });
+  push({ type: 'turn.started', turnId });
+  push({ type: 'tool.call', itemId: 'log', name: 'Bash', kind: 'command', title: 'Download the last two CI logs', input: { command: 'gh run download 812 845 --name logs', description: 'Download the last two CI logs' } });
+  push({ type: 'tool.result', itemId: 'log', ok: true, text: 'saved run-812.log\nsaved run-845.log', truncated: false, images: [] });
+  push({ type: 'assistant.text', itemId: 'm1', text: 'Looking at the two logs now.' });
+  push({ type: 'reasoning', itemId: 'r1', text: 'The slower run spends most of its extra time before the build starts, so the cache restore is the first thing to compare.' });
+  push({ type: 'tool.call', itemId: 'read1', name: 'Read', kind: 'read', title: 'Read run-812.log', input: { file_path: `${home}/dev/photo-sync/run-812.log` } });
+  push({ type: 'tool.result', itemId: 'read1', ok: true, text: 'Restoring cache... done in 41s\nBuilding... done in 4m 52s', truncated: false, images: [] });
+  push({ type: 'tool.call', itemId: 'read2', name: 'Read', kind: 'read', title: 'Read run-845.log', input: { file_path: `${home}/dev/photo-sync/run-845.log` } });
+  push({ type: 'tool.result', itemId: 'read2', ok: true, text: 'Restoring cache... miss\nBuilding... done in 13m 10s', truncated: false, images: [] });
+  push({ type: 'tool.call', itemId: 'cmp', name: 'Bash', kind: 'command', title: 'Compare the cache keys', input: { command: 'grep "cache key" run-812.log run-845.log', description: 'Compare the cache keys' } });
+  const summary = {
+    id, title: 'Why is the build slow on CI?', cwd: `${home}/dev/me/misc`, accountId: 'claude-main', provider: 'claude', permissionMode: 'full',
+    status: 'running', live: false, needsYou: false, createdAt: minutes(61), updatedAt: minutes(1), lastActivityAt: minutes(1),
+    preview: 'Looking at the two logs now.', lastSeq: seq, lastSeenSeq: seq,
+  };
+  writeFixture(dir, summary, events);
 }
 
 // ------------------------------------------------------------------ helpers

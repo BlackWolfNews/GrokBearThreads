@@ -238,12 +238,12 @@ final class MarkdownExportTests: XCTestCase {
             E.text(4, "m1", "All **green**."),
             E.done(5),
         ])
-        let markdown = MarkdownExport.transcript(title: "Tests", rows: model.rows)
+        let markdown = MarkdownExport.transcript(title: "Tests", rows: model.items)
         XCTAssertTrue(markdown.hasPrefix("# Tests\n\n## You\n\nRun the tests\n\n"))
         XCTAssertTrue(markdown.contains("**Bash**: `npm test`\n\n````\nok ```weird```\n````"))
         XCTAssertTrue(markdown.contains("## Claude\n\nAll **green**."))
         XCTAssertTrue(markdown.contains("_4s, $0.12_"))
-        XCTAssertEqual(MarkdownExport.message(for: model.rows[2]), "All **green**.")
+        XCTAssertEqual(MarkdownExport.message(for: model.items[2]), "All **green**.")
     }
 }
 

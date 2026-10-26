@@ -12,9 +12,11 @@ final class TranscriptModelTests: XCTestCase {
             E.text(6, "m1", "Fixed it."),
             E.done(7),
         ])
-        XCTAssertEqual(model.rows.map(\.kind), [.user, .reasoning, .tool, .assistant, .footer])
-        XCTAssertEqual(model.rows.map(\.id), ["u:2", "r:r1", "t:c1", "a:m1", "f:t1"])
-        guard case .tool(let tool) = model.rows[2].content else { return XCTFail() }
+        XCTAssertEqual(model.items.map(\.kind), [.user, .reasoning, .tool, .assistant, .footer])
+        XCTAssertEqual(model.items.map(\.id), ["u:2", "r:r1", "t:c1", "a:m1", "f:t1"])
+        // The thinking and the tool call fold into one group row.
+        XCTAssertEqual(model.rows.map(\.id), ["u:2", "g:r:r1", "a:m1", "f:t1"])
+        guard case .tool(let tool) = model.items[2].content else { return XCTFail() }
         XCTAssertEqual(tool.result?.text, "1 failing")
         XCTAssertEqual(model.firstSeq, 1)
         XCTAssertEqual(model.lastSeq, 7)
@@ -51,10 +53,14 @@ final class TranscriptModelTests: XCTestCase {
 
     func testToolResultImagesGetARowAfterTheirTool() {
         var model = TranscriptModel(events: [E.call(1, "c1", name: "Read", kind: "read", title: "Read a.png"), E.call(2, "c2")])
+        XCTAssertEqual(model.rows.map(\.id), ["g:t:c1"])
         let change = model.apply([E.result(3, "c1", images: [["path": "/tmp/a.png", "mediaType": "image/png"]])])
+        XCTAssertEqual(model.items.map(\.id), ["t:c1", "i:c1", "t:c2"])
+        // Images are never folded away: they split the group into two lone tools.
         XCTAssertEqual(model.rows.map(\.id), ["t:c1", "i:c1", "t:c2"])
-        XCTAssertEqual(change.inserted, [1])
-        XCTAssertEqual(change.updated, [0])
+        XCTAssertEqual(change.removed, [0])
+        XCTAssertEqual(change.inserted, [0, 1, 2])
+        XCTAssertEqual(change.updated, [])
         XCTAssertEqual(model.indexOf(id: "t:c2"), 2)
     }
 
@@ -118,10 +124,12 @@ final class TranscriptModelTests: XCTestCase {
 
     func testPrependOlderPageKeepsIdsAndMergesSplitToolCalls() {
         // The newer page starts with a result whose call is on the older page.
-        var model = TranscriptModel(events: [E.result(5, "c1", text: "ok"), E.text(6, "m1", "Done")])
-        XCTAssertEqual(model.rows.map(\.id), ["t:c1", "a:m1"])
+        // (The turn's end is on the newer page too; a page that starts
+        // mid-turn with no end would be a turn still running.)
+        var model = TranscriptModel(events: [E.result(5, "c1", text: "ok"), E.text(6, "m1", "Done"), E.done(7)])
+        XCTAssertEqual(model.rows.map(\.id), ["t:c1", "a:m1", "f:t1"])
         let added = model.prepend(olderEvents: [E.user(3, "Run it"), E.call(4, "c1", title: "make")])
-        XCTAssertEqual(model.rows.map(\.id), ["u:3", "t:c1", "a:m1"])
+        XCTAssertEqual(model.rows.map(\.id), ["u:3", "t:c1", "a:m1", "f:t1"])
         XCTAssertEqual(added.added, 1)
         XCTAssertEqual(added.changedIds, ["t:c1"])
         guard case .tool(let tool) = model.rows[1].content else { return XCTFail() }
@@ -158,7 +166,7 @@ final class TranscriptModelTests: XCTestCase {
         XCTAssertTrue(model.hasOlderEvents)
         XCTAssertNil(model.row(id: "u:1"))
         XCTAssertEqual(model.row(id: "a:m9")?.version, lastRowVersion, "unchanged rows keep their version")
-        guard case .assistant(let live)? = model.rows.last?.content else { return XCTFail("streaming row lost") }
+        guard case .assistant(let live)? = model.row(id: "a:live")?.content else { return XCTFail("streaming row lost") }
         XCTAssertEqual(live.text, "still typing")
         // Paging back in restores the rows.
         let added = model.prepend(olderEvents: Array(events.prefix(events.count - 6)))
@@ -225,10 +233,14 @@ final class TranscriptModelTests: XCTestCase {
         // Parallel tool calls: both calls on the older page, the second
         // result first on the newer page, then the first result. After the
         // merge t:c1 sits above t:c2, the old first row.
-        var model = TranscriptModel(events: [E.result(5, "c2"), E.result(6, "c1"), E.text(7, "m1", "Done")])
-        XCTAssertEqual(model.rows.map(\.id), ["t:c2", "t:c1", "a:m1"])
+        var model = TranscriptModel(events: [E.result(5, "c2"), E.result(6, "c1"), E.text(7, "m1", "Done"), E.done(8)])
+        XCTAssertEqual(model.items.map(\.id), ["t:c2", "t:c1", "a:m1", "f:t1"])
+        XCTAssertEqual(model.rows.map(\.id), ["g:t:c2", "a:m1", "f:t1"])
         let result = model.prepend(olderEvents: [E.user(2, "Go"), E.call(3, "c1"), E.call(4, "c2")])
-        XCTAssertEqual(model.rows.map(\.id), ["u:2", "t:c1", "t:c2", "a:m1"])
+        XCTAssertEqual(model.items.map(\.id), ["u:2", "t:c1", "t:c2", "a:m1", "f:t1"])
+        // The group now starts at t:c1, so it has a new id and the old first
+        // row is gone; the first old row still there is the reply.
+        XCTAssertEqual(model.rows.map(\.id), ["u:2", "g:t:c1", "a:m1", "f:t1"])
         XCTAssertEqual(result.added, 2)
         XCTAssertFalse(result.keepsOrder, "t:c1 moved above the old first row")
     }
@@ -236,14 +248,14 @@ final class TranscriptModelTests: XCTestCase {
     func testPrependWithAnOlderRowBelowTheOldFirstRowSaysTheOrderChanged() {
         // The newer page starts with c1's result; between the call and the
         // result the older page has some text, which lands below t:c1.
-        var model = TranscriptModel(events: [E.result(6, "c1"), E.text(7, "m1", "Done")])
+        var model = TranscriptModel(events: [E.result(6, "c1"), E.text(7, "m1", "Done"), E.done(8)])
         let result = model.prepend(olderEvents: [E.call(4, "c1"), E.text(5, "m0", "Running it")])
-        XCTAssertEqual(model.rows.map(\.id), ["t:c1", "a:m0", "a:m1"])
+        XCTAssertEqual(model.rows.map(\.id), ["t:c1", "a:m0", "a:m1", "f:t1"])
         XCTAssertFalse(result.keepsOrder)
     }
 
     func testPrependWithTheCallLastOnTheOlderPageKeepsOrder() {
-        var model = TranscriptModel(events: [E.result(5, "c1"), E.text(6, "m1", "Done")])
+        var model = TranscriptModel(events: [E.result(5, "c1"), E.text(6, "m1", "Done"), E.done(7)])
         let result = model.prepend(olderEvents: [E.user(3, "Run it"), E.call(4, "c1")])
         XCTAssertTrue(result.keepsOrder)
         XCTAssertEqual(result.added, 1)

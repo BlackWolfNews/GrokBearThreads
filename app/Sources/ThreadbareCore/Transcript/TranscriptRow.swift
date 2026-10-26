@@ -10,13 +10,17 @@ public struct TranscriptRow: Sendable, Hashable, Identifiable {
     public var seq: Int
     public var turnId: String?
     public var content: RowContent
+    /// Shown inside an open work group (indented under its summary line).
+    /// Set on display rows only; the same item renders differently there.
+    public var inGroup: Bool
 
-    public init(id: String, version: Int = 0, seq: Int, turnId: String? = nil, content: RowContent) {
+    public init(id: String, version: Int = 0, seq: Int, turnId: String? = nil, content: RowContent, inGroup: Bool = false) {
         self.id = id
         self.version = version
         self.seq = seq
         self.turnId = turnId
         self.content = content
+        self.inGroup = inGroup
     }
 
     public var kind: RowKind { content.kind }
@@ -24,6 +28,9 @@ public struct TranscriptRow: Sendable, Hashable, Identifiable {
 
 public enum RowKind: String, Sendable, Hashable, CaseIterable {
     case user, assistant, reasoning, tool, diff, images, approval, question, plan, footer, note, error
+    /// Rows the model derives rather than reads from events: a folded run
+    /// of work, the "Working for 12s" line, and the "Edited 3 files" card.
+    case group, working, changes
 }
 
 public struct TextItem: Sendable, Hashable {
@@ -112,6 +119,9 @@ public enum RowContent: Sendable, Hashable {
     case footer(TurnCompletion)
     case note(String)
     case error(String)
+    case group(WorkGroup)
+    case working(WorkingStatus)
+    case changes(ChangedFiles)
 
     public var kind: RowKind {
         switch self {
@@ -128,6 +138,9 @@ public enum RowContent: Sendable, Hashable {
         case .footer: return .footer
         case .note: return .note
         case .error: return .error
+        case .group: return .group
+        case .working: return .working
+        case .changes: return .changes
         }
     }
 }

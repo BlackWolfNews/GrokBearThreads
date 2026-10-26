@@ -52,13 +52,17 @@ enum ScreenshotRunner {
             await scroll(app, toRow: "p:", offset: 20)
             await capture(window, dir.appendingPathComponent("2-plan-and-diffs.png"))
         }
-        // 3. Top of the thread with the test run expanded.
+        // 3. Top of the thread with its first work group open and the file
+        // read in it expanded.
         if wanted("3") {
-            app.session(for: demo).expanded.insert("t:c2")
+            let session = app.session(for: demo)
+            session.expanded.insert("t:c2")
+            session.setModelExpanded("g:r:r1", true)
             app.transcript.show(nil)
-            app.transcript.show(app.session(for: demo))
+            app.transcript.show(session)
             await scroll(app, toRow: "u:1", offset: 0)
             await capture(window, dir.appendingPathComponent("3-top-tool-expanded.png"))
+            session.setModelExpanded("g:r:r1", false)
         }
         // 4. A thread waiting on a question.
         if wanted("4") {
@@ -100,6 +104,28 @@ enum ScreenshotRunner {
                     print("long reply text view: drawn \(Int(cell.textView.frame.height)) pt of \(Int(cell.textView.fullFrame.height)) pt")
                 }
             }
+        }
+        // 8. A turn that's still running (the working line and a live
+        // group), then the demo's edits: the group with its diffs open and a
+        // file opened in the changes card.
+        if wanted("8") {
+            app.sidebarMode = .inbox
+            await open(app, "demo_ci_slow")
+            app.transcript.scrollToBottom()
+            await capture(window, dir.appendingPathComponent("8a-live-turn.png"))
+            await open(app, demo)
+            let session = app.session(for: demo)
+            if let group = (0..<session.displayCount).map({ session.displayRow($0) }).first(where: { row in
+                if case .group(let group) = row.content { return group.memberIds.contains("t:c3") }
+                return false
+            }) {
+                session.setModelExpanded(group.id, true)
+            }
+            session.setModelExpanded(ChangedFiles.expansionKey(turnId: "turn_1", path: "/Users/mike/dev/photo-sync/Sources/Upload/UploadTask.swift"), true)
+            await scroll(app, toRow: "t:c3", offset: 60)
+            await capture(window, dir.appendingPathComponent("8b-group-and-diffs.png"))
+            await scroll(app, toRow: "cf:", offset: 120)
+            await capture(window, dir.appendingPathComponent("8c-changes-card.png"))
         }
         // 7. Typing into the composer reaches the draft (it used to be dropped).
         if wanted("7") {

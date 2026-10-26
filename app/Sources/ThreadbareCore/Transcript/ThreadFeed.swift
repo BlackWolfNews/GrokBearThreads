@@ -144,6 +144,12 @@ public struct ThreadFeed: Sendable {
         return model.apply(batch)
     }
 
+    /// Opens or closes a group or a changed file (see
+    /// `TranscriptModel.setExpanded`). Queued events stay queued.
+    public mutating func setExpanded(_ key: String, _ open: Bool) -> TranscriptChange {
+        model.setExpanded(key, open)
+    }
+
     /// Swaps in a model that had an older page prepended off the main thread.
     /// Only valid if nothing was flushed since the copy was taken.
     public mutating func replaceModel(_ newModel: TranscriptModel) {
