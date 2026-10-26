@@ -112,11 +112,12 @@ final class FillView: NSView {
             path.fill()
         }
         if let accent {
-            NSGraphicsContext.saveGraphicsState()
-            path.addClip()
+            // A capsule just inside the left edge, clear of the corners and
+            // the border. A strip clipped to the rounded rect tapered into
+            // each corner with the grey stroke running across its end.
             accent.setFill()
-            NSRect(x: 0, y: 0, width: RowMetrics.accentBar, height: bounds.height).fill()
-            NSGraphicsContext.restoreGraphicsState()
+            let bar = NSRect(x: 6, y: 10, width: RowMetrics.accentBar, height: max(0, bounds.height - 20))
+            NSBezierPath(roundedRect: bar, xRadius: bar.width / 2, yRadius: bar.width / 2).fill()
         }
         if let stroke {
             stroke.setStroke()
@@ -231,7 +232,7 @@ final class TextRowCell: RowCellView {
             textView.place(box.frame.insetBy(dx: RowMetrics.boxPad, dy: RowMetrics.boxPad))
 
         case .footer:
-            textView.place(NSRect(x: x, y: 5, width: width, height: 16))
+            textView.place(NSRect(x: x, y: 5, width: width, height: 17))
 
         default:
             textView.place(NSRect(x: x, y: top, width: width, height: render.textSize.height))
@@ -277,6 +278,39 @@ final class TextRowCell: RowCellView {
 
 // MARK: - Work rows: thinking, tools, diffs (and notes inside a group)
 
+/// Every work line has the same shape, T3 and Codex style: an icon (or a
+/// spinner) in a slot at the column edge, the text from
+/// `RowMetrics.titleIndent`, and the chevron right after the words rather
+/// than at the far end of the column.
+enum WorkLine {
+    /// The label's frame for text of `textWidth`, stopping short of
+    /// `trailing` (room for the chevron and a failed badge).
+    static func labelFrame(x: CGFloat, width: CGFloat, textWidth: CGFloat, trailing: CGFloat, rowHeight: CGFloat) -> NSRect {
+        let left = x + RowMetrics.titleIndent - RowMetrics.labelInset
+        let fit = ceil(textWidth) + RowMetrics.labelInset * 2
+        let height = Theme.workLabelHeight
+        return NSRect(x: left, y: (rowHeight - height) / 2, width: max(0, min(fit, x + width - left - trailing)), height: height)
+    }
+
+    static func iconFrame(x: CGFloat, rowHeight: CGFloat) -> NSRect {
+        NSRect(x: x, y: (rowHeight - 16) / 2, width: 16, height: 16)
+    }
+
+    static func spinnerFrame(x: CGFloat, rowHeight: CGFloat) -> NSRect {
+        NSRect(x: x + 1, y: (rowHeight - 14) / 2, width: 14, height: 14)
+    }
+
+    static func chevronFrame(after label: NSRect, rowHeight: CGFloat) -> NSRect {
+        NSRect(x: label.maxX + 1, y: (rowHeight - 14) / 2 + 0.5, width: 14, height: 14)
+    }
+
+    /// What a click opens, and where the hover fill goes: the line from its
+    /// icon to its chevron.
+    static func hitRect(x: CGFloat, right: CGFloat, rowHeight: CGFloat) -> NSRect {
+        NSRect(x: x - 6, y: 2, width: right - x + 12, height: rowHeight - 4)
+    }
+}
+
 final class HeaderRowCell: RowCellView {
     let chevron = Symbols.makeView()
     let icon = Symbols.makeView()
@@ -284,13 +318,11 @@ final class HeaderRowCell: RowCellView {
     let status = Symbols.makeView()
     let box = FillView()
     let body = TranscriptTextView()
-    let more = makeLabel()
     private var headerRect = NSRect.zero
-    private var moreRect = NSRect.zero
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
-        [hover, box, body, chevron, icon, title, status, more].forEach(addSubview)
+        [hover, box, body, chevron, icon, title, status].forEach(addSubview)
     }
 
     required init?(coder: NSCoder) { fatalError() }
@@ -299,46 +331,48 @@ final class HeaderRowCell: RowCellView {
         super.configure(row: row, render: render, tableWidth: tableWidth, expanded: expanded)
         let (x, width) = RowMetrics.column(for: row, tableWidth: tableWidth)
         let header = RowMetrics.workHeight
-        headerRect = NSRect(x: x - 6, y: 2, width: width + 12, height: header - 4)
         if title.attributedStringValue != render.text { title.attributedStringValue = render.text ?? NSAttributedString() }
 
         var symbol = "brain"
         var failed = false
         var canExpand = true
-        let isDiff = row.kind == .diff && render.detail != nil
+        var tooltip: String?
         switch row.content {
         case .reasoning:
             symbol = "brain"
         case .tool(let tool):
             symbol = ToolPresentation.symbol(for: tool.toolKind, name: tool.name)
             failed = tool.failed
-            canExpand = !isDiff
+            // The title names just the file; the whole path is here.
+            tooltip = ToolPresentation.fileTitle(tool)?.path
         case .note:
             symbol = "info.circle"
             canExpand = false
         default:
             break
         }
-        hoverRect = canExpand || isDiff ? headerRect : .zero
+        if title.toolTip != tooltip { title.toolTip = tooltip }
         Symbols.set(icon, symbol, size: 12, tint: failed ? Theme.removedText : .tertiaryLabelColor)
-        icon.frame = NSRect(x: x, y: (header - 16) / 2, width: 16, height: 16)
-        var right = x + width
-        status.isHidden = !failed
+        icon.frame = WorkLine.iconFrame(x: x, rowHeight: header)
+        let trailing: CGFloat = (canExpand ? 16 : 0) + (failed ? 20 : 0)
+        title.frame = WorkLine.labelFrame(x: x, width: width, textWidth: render.textSize.width, trailing: trailing, rowHeight: header)
+        var right = title.frame.maxX
         chevron.isHidden = !canExpand
         if canExpand {
             Symbols.set(chevron, expanded ? "chevron.down" : "chevron.right", size: 9, weight: .semibold, tint: .tertiaryLabelColor)
-            chevron.frame = NSRect(x: right - 14, y: (header - 14) / 2, width: 14, height: 14)
-            right -= 20
+            chevron.frame = WorkLine.chevronFrame(after: title.frame, rowHeight: header)
+            right = chevron.frame.maxX
         }
+        status.isHidden = !failed
         if failed {
             Symbols.set(status, "xmark.circle.fill", size: 12, tint: Theme.removedText)
-            status.frame = NSRect(x: right - 16, y: (header - 16) / 2, width: 16, height: 16)
-            right -= 22
+            status.frame = NSRect(x: right + 3, y: (header - 16) / 2, width: 16, height: 16)
+            right = status.frame.maxX
         }
-        title.frame = NSRect(x: x + RowMetrics.titleIndent, y: (header - 17) / 2, width: right - x - RowMetrics.titleIndent, height: 17)
+        headerRect = canExpand ? WorkLine.hitRect(x: x, right: right, rowHeight: header) : .zero
+        hoverRect = headerRect
+        window?.invalidateCursorRects(for: self)
 
-        more.isHidden = true
-        moreRect = .zero
         guard let detail = render.detail else {
             box.isHidden = true
             body.isHidden = true
@@ -346,26 +380,21 @@ final class HeaderRowCell: RowCellView {
         }
         box.isHidden = false
         body.isHidden = false
+        // Opened content sits under the title, past the icon slot.
+        let left = x + RowMetrics.titleIndent
+        let inner = width - RowMetrics.titleIndent
         switch row.content {
         case .reasoning:
             box.isHidden = true
-            body.place(NSRect(x: x + RowMetrics.titleIndent, y: header, width: width - RowMetrics.titleIndent, height: render.detailSize.height))
+            body.place(NSRect(x: left, y: header, width: inner, height: render.detailSize.height))
         default:
-            if isDiff {
-                let footer = render.parts.isEmpty ? 0 : RowMetrics.showMoreHeight
+            if row.kind == .diff {
                 box.set(fill: Theme.cardBackground, stroke: Theme.cardBorder, radius: 10)
-                box.frame = NSRect(x: x, y: header + 2, width: width, height: render.detailSize.height + RowMetrics.diffPadV * 2 + footer)
-                body.place(NSRect(x: x + 0.5, y: box.frame.minY + RowMetrics.diffPadV, width: width - 1, height: render.detailSize.height))
-                if let part = render.parts.first {
-                    more.isHidden = false
-                    more.attributedStringValue = part.leading
-                    moreRect = NSRect(x: x, y: box.frame.maxY - footer, width: width, height: footer)
-                    more.frame = NSRect(x: x + 12, y: moreRect.minY + (footer - 16) / 2 - 1, width: width - 24, height: 16)
-                }
+                box.frame = NSRect(x: left, y: header + 2, width: inner, height: render.detailSize.height + RowMetrics.diffPadV * 2)
+                body.place(NSRect(x: left + 0.5, y: box.frame.minY + RowMetrics.diffPadV, width: inner - 1, height: render.detailSize.height))
             } else {
                 box.set(fill: Theme.codeBackground, stroke: Theme.cardBorder, radius: 8)
-                box.frame = NSRect(x: x + RowMetrics.titleIndent, y: header + 2, width: width - RowMetrics.titleIndent,
-                                   height: render.detailSize.height + RowMetrics.boxPad * 2)
+                box.frame = NSRect(x: left, y: header + 2, width: inner, height: render.detailSize.height + RowMetrics.boxPad * 2)
                 body.place(box.frame.insetBy(dx: RowMetrics.boxPad, dy: RowMetrics.boxPad))
             }
         }
@@ -382,7 +411,7 @@ final class HeaderRowCell: RowCellView {
 
     override func mouseDown(with event: NSEvent) {
         let point = convert(event.locationInWindow, from: nil)
-        if headerRect.contains(point) || moreRect.contains(point) {
+        if headerRect.contains(point) {
             delegate?.toggleExpanded(rowId: rowId)
         } else {
             super.mouseDown(with: event)
@@ -390,25 +419,29 @@ final class HeaderRowCell: RowCellView {
     }
 
     override func resetCursorRects() {
-        addCursorRect(headerRect, cursor: .pointingHand)
-        if moreRect != .zero { addCursorRect(moreRect, cursor: .pointingHand) }
+        if headerRect != .zero { addCursorRect(headerRect, cursor: .pointingHand) }
     }
 }
 
 // MARK: - Group summary line
 
 /// "Read 3 files, ran 4 commands ›": a run of work folded into one line.
-/// Clicking it opens the run under it.
+/// Clicking it opens the run under it. While it's the live group a spinner
+/// takes its icon's place (and the working line under it shows none).
 final class GroupRowCell: RowCellView {
+    let icon = Symbols.makeView()
+    let spinner = NSProgressIndicator()
     let label = makeLabel()
     let chevron = Symbols.makeView()
     private var hitRect = NSRect.zero
+    private var isLive = false
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
-        addSubview(hover)
-        addSubview(label)
-        addSubview(chevron)
+        spinner.style = .spinning
+        spinner.controlSize = .small
+        spinner.isDisplayedWhenStopped = false
+        [hover, icon, spinner, label, chevron].forEach(addSubview)
     }
 
     required init?(coder: NSCoder) { fatalError() }
@@ -419,13 +452,31 @@ final class GroupRowCell: RowCellView {
         let (x, width) = RowMetrics.column(for: row, tableWidth: tableWidth)
         let height = RowMetrics.workHeight
         if label.attributedStringValue != render.text { label.attributedStringValue = render.text ?? NSAttributedString() }
-        let textWidth = min(ceil(render.textSize.width) + 2, width - 20)
-        label.frame = NSRect(x: x, y: (height - 17) / 2, width: textWidth, height: 17)
+        // T3's mark for a run of tool calls; no single tool uses it.
+        Symbols.set(icon, "hammer", size: 12, tint: .tertiaryLabelColor)
+        icon.frame = WorkLine.iconFrame(x: x, rowHeight: height)
+        spinner.frame = WorkLine.spinnerFrame(x: x, rowHeight: height)
+        isLive = group.isLive
+        icon.isHidden = isLive
+        updateSpinner()
+        label.frame = WorkLine.labelFrame(x: x, width: width, textWidth: render.textSize.width, trailing: 16, rowHeight: height)
         Symbols.set(chevron, group.isExpanded ? "chevron.down" : "chevron.right", size: 9, weight: .semibold, tint: .tertiaryLabelColor)
-        chevron.frame = NSRect(x: x + textWidth + 3, y: (height - 14) / 2 + 0.5, width: 14, height: 14)
-        hitRect = NSRect(x: x - 6, y: 2, width: textWidth + 28, height: height - 4)
+        chevron.frame = WorkLine.chevronFrame(after: label.frame, rowHeight: height)
+        hitRect = WorkLine.hitRect(x: x, right: chevron.frame.maxX, rowHeight: height)
         hoverRect = hitRect
         window?.invalidateCursorRects(for: self)
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        updateSpinner()
+    }
+
+    override func releaseContent() { spinner.stopAnimation(nil) }
+
+    /// Spins only while live and in a window, so parked cells cost nothing.
+    private func updateSpinner() {
+        if isLive, window != nil { spinner.startAnimation(nil) } else { spinner.stopAnimation(nil) }
     }
 
     override func mouseDown(with event: NSEvent) {
@@ -450,6 +501,7 @@ final class WorkingRowCell: RowCellView {
     let spinner = NSProgressIndicator()
     let label = makeLabel()
     private var startedAt: Date?
+    private var showsSpinner = true
     private var timer: Timer?
 
     override init(frame frameRect: NSRect) {
@@ -457,8 +509,10 @@ final class WorkingRowCell: RowCellView {
         spinner.style = .spinning
         spinner.controlSize = .small
         spinner.isDisplayedWhenStopped = false
-        label.font = .systemFont(ofSize: 12)
-        label.textColor = .tertiaryLabelColor
+        // Body-sized secondary text, not the faintest grey in the window:
+        // this line is what Mike watches while a turn runs.
+        label.font = Theme.workFont
+        label.textColor = .secondaryLabelColor
         addSubview(spinner)
         addSubview(label)
     }
@@ -470,9 +524,11 @@ final class WorkingRowCell: RowCellView {
         guard case .working(let status) = row.content else { return }
         let (x, width) = RowMetrics.column(for: row, tableWidth: tableWidth)
         let height = RowMetrics.workingHeight
-        spinner.frame = NSRect(x: x, y: (height - 14) / 2, width: 14, height: 14)
-        label.frame = NSRect(x: x + 22, y: (height - 16) / 2, width: width - 22, height: 16)
+        spinner.frame = WorkLine.spinnerFrame(x: x, rowHeight: height)
+        label.frame = WorkLine.labelFrame(x: x, width: width, textWidth: width, trailing: 0, rowHeight: height)
         startedAt = status.startedAt
+        showsSpinner = !status.afterLiveGroup
+        if !showsSpinner { spinner.stopAnimation(nil) }
         tick()
         startIfVisible()
     }
@@ -486,7 +542,7 @@ final class WorkingRowCell: RowCellView {
 
     private func startIfVisible() {
         guard window != nil else { return }
-        spinner.startAnimation(nil)
+        if showsSpinner { spinner.startAnimation(nil) }
         guard timer == nil, startedAt != nil else { return }
         let timer = Timer(timeInterval: 1, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated { self?.tick() }
@@ -547,12 +603,12 @@ final class ChangesRowCell: RowCellView {
         card.frame = NSRect(x: x, y: top, width: width, height: render.height - top - 6)
         let header = RowMetrics.changesHeader
         title.attributedStringValue = render.text ?? NSAttributedString()
-        title.frame = NSRect(x: x + pad, y: top + (header - 17) / 2, width: width / 2, height: 17)
+        title.frame = NSRect(x: x + pad, y: top + (header - 18) / 2, width: width / 2, height: 18)
         // Line counts sit against the right edge, sized to fit (a label
         // wider than its text would truncate or drift left).
         let totalWidth = ceil(render.detail?.size().width ?? 0) + 4
         total.attributedStringValue = render.detail ?? NSAttributedString()
-        total.frame = NSRect(x: x + width - pad - totalWidth, y: top + (header - 16) / 2, width: totalWidth, height: 16)
+        total.frame = NSRect(x: x + width - pad - totalWidth, y: top + (header - 17) / 2, width: totalWidth, height: 17)
         rule.set(fill: Theme.hairline, stroke: nil, radius: 0)
         rule.frame = NSRect(x: x + 0.5, y: top + header - 0.5, width: width - 1, height: 0.5)
 
@@ -574,9 +630,10 @@ final class ChangesRowCell: RowCellView {
             entry.chevron.frame = NSRect(x: x + pad - 2, y: y + (rowHeight - 14) / 2, width: 14, height: 14)
             let statsWidth = ceil(part.trailing?.size().width ?? 0) + 4
             entry.stats.attributedStringValue = part.trailing ?? NSAttributedString()
-            entry.stats.frame = NSRect(x: x + width - pad - statsWidth, y: y + (rowHeight - 16) / 2, width: statsWidth, height: 16)
+            entry.stats.frame = NSRect(x: x + width - pad - statsWidth, y: y + (rowHeight - 17) / 2, width: statsWidth, height: 17)
             entry.name.attributedStringValue = part.leading
-            entry.name.frame = NSRect(x: x + pad + 18, y: y + (rowHeight - 17) / 2, width: width - pad * 2 - 18 - statsWidth - 12, height: 17)
+            let nameHeight = Theme.workLabelHeight
+            entry.name.frame = NSRect(x: x + pad + 18, y: y + (rowHeight - nameHeight) / 2, width: width - pad * 2 - 18 - statsWidth - 12, height: nameHeight)
             if let path = file?.path { hitRects.append((NSRect(x: x, y: y, width: width, height: rowHeight), path)) }
             y += rowHeight
             if let body = part.body {
@@ -656,27 +713,48 @@ final class ImagesRowCell: RowCellView {
 /// filled with the accent colour, the others a hairline outline.
 final class PillButton: NSButton {
     var prominent = false { didSet { needsDisplay = true } }
+    /// A key drawn faintly after the title ("Allow  ⏎").
+    var shortcut: String? { didSet { needsDisplay = true } }
 
-    convenience init(pill title: String, prominent: Bool = false) {
+    override var isEnabled: Bool {
+        didSet { if isEnabled != oldValue { needsDisplay = true } }
+    }
+
+    convenience init(pill title: String, prominent: Bool = false, shortcut: String? = nil) {
         self.init(frame: .zero)
         self.title = title
         self.prominent = prominent
+        self.shortcut = shortcut
         isBordered = false
         setButtonType(.momentaryPushIn)
         focusRingType = .none
     }
 
-    static let font = NSFont.systemFont(ofSize: 13, weight: .medium)
+    static let font = NSFont.systemFont(ofSize: TypeScale.label + 0.5, weight: .medium)
+    static let shortcutFont = NSFont.systemFont(ofSize: 11, weight: .medium)
 
     var fittingWidth: CGFloat {
-        ceil((title as NSString).size(withAttributes: [.font: Self.font]).width) + 30
+        ceil(label(color: .labelColor).size().width) + 30
+    }
+
+    private func label(color: NSColor) -> NSAttributedString {
+        let text = NSMutableAttributedString(string: title, attributes: [.font: Self.font, .foregroundColor: color])
+        if let shortcut {
+            let faint = prominent && isEnabled ? NSColor.white.withAlphaComponent(0.7) : NSColor.tertiaryLabelColor
+            text.append(NSAttributedString(string: "  " + shortcut, attributes: [.font: Self.shortcutFont, .foregroundColor: faint]))
+        }
+        return text
     }
 
     override func draw(_ dirtyRect: NSRect) {
         let rect = bounds.insetBy(dx: 0.5, dy: 0.5)
         let path = NSBezierPath(roundedRect: rect, xRadius: rect.height / 2, yRadius: rect.height / 2)
         let pressed = isHighlighted
-        if prominent {
+        if prominent, !isEnabled {
+            // Nothing to send yet: no accent fill pretending it would work.
+            Theme.inlineCodeBackground.setFill()
+            path.fill()
+        } else if prominent {
             NSColor.controlAccentColor.blended(withFraction: pressed ? 0.2 : 0, of: .black)?.setFill()
             path.fill()
         } else {
@@ -686,8 +764,8 @@ final class PillButton: NSButton {
             path.lineWidth = 1
             path.stroke()
         }
-        let color: NSColor = prominent ? .white : (isEnabled ? .labelColor : .tertiaryLabelColor)
-        let text = NSAttributedString(string: title, attributes: [.font: Self.font, .foregroundColor: color])
+        let color: NSColor = !isEnabled ? .tertiaryLabelColor : prominent ? .white : .labelColor
+        let text = label(color: color)
         let size = text.size()
         text.draw(at: NSPoint(x: (bounds.width - size.width) / 2, y: (bounds.height - size.height) / 2))
     }
@@ -700,7 +778,8 @@ final class ApprovalRowCell: RowCellView {
     let titleView = TranscriptTextView()
     let payloadBox = FillView()
     let payloadView = TranscriptTextView()
-    let allow = PillButton(pill: "Allow", prominent: true)
+    /// Return in an empty composer allows it too (ComposerView).
+    let allow = PillButton(pill: "Allow", prominent: true, shortcut: "⏎")
     let always = PillButton(pill: "Always allow")
     let deny = PillButton(pill: "Deny")
     let resolved = makeLabel()
@@ -712,7 +791,7 @@ final class ApprovalRowCell: RowCellView {
             button.target = self
             button.action = action
         }
-        resolved.font = .systemFont(ofSize: 12)
+        resolved.font = Theme.labelFont
         resolved.textColor = .secondaryLabelColor
         [card, titleView, payloadBox, payloadView, allow, always, deny, resolved].forEach(addSubview)
     }
@@ -754,7 +833,7 @@ final class ApprovalRowCell: RowCellView {
         resolved.isHidden = pending
         if let resolution = item.resolution {
             resolved.stringValue = Self.label(resolution.decision)
-            resolved.frame = NSRect(x: left, y: y, width: inner, height: 16)
+            resolved.frame = NSRect(x: left, y: y, width: inner, height: 17)
         }
     }
 
@@ -821,12 +900,12 @@ final class QuestionRowCell: RowCellView, NSTextFieldDelegate {
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         other.placeholderString = "Something else"
-        other.font = .systemFont(ofSize: 13)
+        other.font = .systemFont(ofSize: TypeScale.work)
         other.bezelStyle = .roundedBezel
         other.delegate = self
         send.target = self
         send.action = #selector(sendClicked)
-        resolved.font = .systemFont(ofSize: 12)
+        resolved.font = Theme.labelFont
         resolved.textColor = .secondaryLabelColor
         [card, other, send, resolved].forEach(addSubview)
     }
@@ -864,14 +943,24 @@ final class QuestionRowCell: RowCellView, NSTextFieldDelegate {
         send.isHidden = !pending
         resolved.isHidden = pending
         if pending {
-            other.frame = NSRect(x: left, y: y, width: inner, height: 24)
-            y += 26 + 12
+            other.frame = NSRect(x: left, y: y, width: inner, height: RowMetrics.otherFieldHeight)
+            y += RowMetrics.otherFieldHeight + 2 + 12
             send.frame = NSRect(x: left, y: y, width: max(110, send.fittingWidth), height: RowMetrics.buttonHeight)
+            updateSend()
         } else {
             let message = item.resolution?.message.flatMap { $0.isEmpty ? nil : $0 }
             resolved.stringValue = message.map { "Answered: \(RowRenderer.firstLine($0))" } ?? ApprovalRowCell.label(item.resolution?.decision ?? .answered)
-            resolved.frame = NSRect(x: left, y: y, width: inner, height: 16)
+            resolved.frame = NSRect(x: left, y: y, width: inner, height: 17)
         }
+    }
+
+    /// "Send answer" only looks (and is) clickable once there's an answer.
+    private func updateSend() {
+        guard let request else { return }
+        let draft = delegate?.questionDraft(request.approvalId) ?? [:]
+        let typed = other.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        let ready = !Self.answers(for: request, chosen: draft, typed: typed).isEmpty
+        if send.isEnabled != ready { send.isEnabled = ready }
     }
 
     /// Places each question's views, reusing the ones already made.
@@ -897,7 +986,7 @@ final class QuestionRowCell: RowCellView, NSTextFieldDelegate {
             for (optionIndex, option) in question.options.enumerated() {
                 if group.buttons.count <= optionIndex {
                     let button = NSButton(radioButtonWithTitle: "", target: self, action: #selector(optionClicked(_:)))
-                    button.font = .systemFont(ofSize: 13)
+                    button.font = .systemFont(ofSize: TypeScale.work)
                     group.addSubview(button)
                     group.buttons.append(button)
                 }
@@ -911,7 +1000,7 @@ final class QuestionRowCell: RowCellView, NSTextFieldDelegate {
                 if let description = option.description, !description.isEmpty {
                     if group.notes.count <= noteIndex {
                         let note = makeLabel()
-                        note.font = .systemFont(ofSize: 12)
+                        note.font = Theme.labelFont
                         note.textColor = .secondaryLabelColor
                         group.addSubview(note)
                         group.notes.append(note)
@@ -947,11 +1036,13 @@ final class QuestionRowCell: RowCellView, NSTextFieldDelegate {
         }
         draft[entry.question] = chosen
         delegate?.setQuestionDraft(request.approvalId, draft)
+        updateSend()
     }
 
     /// Typing "Something else" for a single-choice last question clears its
     /// chosen option, so the answer is one or the other, never both.
     func controlTextDidChange(_ notification: Notification) {
+        defer { updateSend() }
         guard let request, let last = request.questions.indices.last, !request.questions[last].multiSelect,
               !other.stringValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
         var draft = delegate?.questionDraft(request.approvalId) ?? [:]

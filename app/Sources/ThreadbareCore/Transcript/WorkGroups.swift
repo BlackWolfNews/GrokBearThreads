@@ -38,10 +38,14 @@ public struct WorkingStatus: Sendable, Hashable {
     public var turnId: String
     /// When the turn started, if the loaded events say.
     public var startedAt: Date?
+    /// The line sits under the turn's live group, whose own spinner says
+    /// the same thing, so the line keeps its words but not a second spinner.
+    public var afterLiveGroup: Bool
 
-    public init(turnId: String, startedAt: Date?) {
+    public init(turnId: String, startedAt: Date?, afterLiveGroup: Bool = false) {
         self.turnId = turnId
         self.startedAt = startedAt
+        self.afterLiveGroup = afterLiveGroup
     }
 }
 
@@ -89,14 +93,7 @@ public struct ChangedFile: Sendable, Hashable {
 
     /// The file's folder, short: its last two components ("Sources/Upload"),
     /// or "~" style for something right under the home folder.
-    public var folder: String {
-        let parent = (path as NSString).deletingLastPathComponent
-        guard !parent.isEmpty, parent != "/" else { return "" }
-        let home = NSHomeDirectory()
-        if parent == home { return "~" }
-        let parts = parent.split(separator: "/")
-        return parts.suffix(2).joined(separator: "/")
-    }
+    public var folder: String { PathDisplay.folder(of: path) }
 }
 
 /// Words for a work group's one-line summary.

@@ -192,18 +192,18 @@ private struct ComposerChip: View {
         } label: {
             HStack(spacing: 4) {
                 Image(systemName: icon)
-                    .font(.system(size: 11))
+                    .font(.system(size: TypeScale.chip - 1))
                     .foregroundStyle(.tertiary)
                 Text(title)
-                    .font(.system(size: 12))
+                    .font(.system(size: TypeScale.chip))
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
                 Image(systemName: "chevron.down")
-                    .font(.system(size: 7, weight: .bold))
+                    .font(.system(size: 7.5, weight: .bold))
                     .foregroundStyle(.tertiary)
             }
             .padding(.horizontal, 7)
-            .frame(height: 24)
+            .frame(height: 26)
             .background(
                 RoundedRectangle(cornerRadius: 7, style: .continuous)
                     .fill(Color.primary.opacity(hovering ? 0.07 : 0))
@@ -236,7 +236,7 @@ private struct PlusButton: View {
             anchor.popUp(menu())
         } label: {
             Image(systemName: "plus")
-                .font(.system(size: 14, weight: .regular))
+                .font(.system(size: 15, weight: .regular))
                 .foregroundStyle(.secondary)
                 .frame(width: 26, height: 26)
                 .background(Circle().fill(Color.primary.opacity(hovering ? 0.08 : 0)))
@@ -261,7 +261,11 @@ private struct SendButton: View {
     static let size: CGFloat = 28
 
     var body: some View {
-        if running {
+        // Stop only while there's nothing typed: a follow-up typed during a
+        // turn is sent (the runner queues it), so the one round button
+        // never stops a turn Mike meant to add to. ⌘. and the Thread menu
+        // still stop it.
+        if running && !canSend {
             Button(action: onStop) {
                 Image(systemName: "stop.fill").font(.system(size: 9, weight: .bold))
             }
@@ -275,7 +279,7 @@ private struct SendButton: View {
             }
             .buttonStyle(CircleButtonStyle(filled: canSend))
             .disabled(!canSend)
-            .help("Send (Return)")
+            .help(running ? "Send (goes after this turn)" : "Send (Return)")
             .accessibilityLabel("Send")
         }
     }

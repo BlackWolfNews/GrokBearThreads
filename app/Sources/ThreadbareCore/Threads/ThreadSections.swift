@@ -1,5 +1,18 @@
 import Foundation
 
+/// The inbox's sections, top to bottom.
+public enum InboxSection: String, Sendable, CaseIterable {
+    case needsYou, running, inbox
+
+    public var title: String {
+        switch self {
+        case .needsYou: return "Needs you"
+        case .running: return "Running"
+        case .inbox: return "Inbox"
+        }
+    }
+}
+
 /// The sidebar's three sections.
 public struct ThreadSections: Sendable, Equatable {
     public var needsYou: [ThreadSummary] = []
@@ -36,6 +49,14 @@ public struct ThreadSections: Sendable, Equatable {
     }
 
     public var all: [ThreadSummary] { needsYou + running + inbox }
+
+    public subscript(section: InboxSection) -> [ThreadSummary] {
+        switch section {
+        case .needsYou: return needsYou
+        case .running: return running
+        case .inbox: return inbox
+        }
+    }
 
     /// Archived threads, most recently archived first, filtered by a search
     /// that matches title or preview (case and accent insensitive).

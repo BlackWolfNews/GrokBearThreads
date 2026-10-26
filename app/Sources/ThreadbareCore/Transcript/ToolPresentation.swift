@@ -28,6 +28,35 @@ public enum ToolPresentation {
         return line
     }
 
+    /// A file tool's title in parts: "Read" "UploadTask.swift" and its
+    /// folder, which the row dims after the name (as the changes card and
+    /// Claude do) rather than a long grey run of the whole path.
+    public struct FileTitle: Sendable, Hashable {
+        public var verb: String
+        public var name: String
+        /// The folder, short ("Sources/Upload"); empty for a file at the root.
+        public var folder: String
+        /// The whole path with the home folder as ~, for the tooltip.
+        public var path: String
+    }
+
+    /// For Read, Edit and Write calls with a file path; nil for anything else.
+    public static func fileTitle(_ tool: ToolItem) -> FileTitle? {
+        let verb: String
+        switch tool.toolKind {
+        case .read: verb = "Read"
+        case .edit: verb = "Edit"
+        case .write: verb = "Write"
+        default: return nil
+        }
+        let input = tool.call?.input
+        guard let path = input?["file_path"]?.stringValue ?? input?["notebook_path"]?.stringValue ?? input?["path"]?.stringValue,
+              !path.isEmpty else { return nil }
+        let name = (path as NSString).lastPathComponent
+        guard !name.isEmpty else { return nil }
+        return FileTitle(verb: verb, name: name, folder: PathDisplay.folder(of: path), path: shortTitle(path, limit: 400))
+    }
+
     /// The tool output preview shown when a tool row is expanded.
     public static func outputPreview(_ tool: ToolItem, maxLines: Int = 400) -> String {
         let text = tool.result?.text ?? tool.liveOutput
@@ -163,5 +192,17 @@ public enum ToolPresentation {
         let rest = trimmed.dropFirst(digits.count)
         guard let separator = rest.first, separator == "→" || separator == "\t" else { return nil }
         return NumberedLine(number: number, text: String(rest.dropFirst()))
+    }
+}
+
+/// Short forms of paths for the transcript.
+public enum PathDisplay {
+    /// A file's folder, short: its last two components ("Sources/Upload"),
+    /// "~" for something right in the home folder, empty at the root.
+    public static func folder(of path: String) -> String {
+        let parent = (path as NSString).deletingLastPathComponent
+        guard !parent.isEmpty, parent != "/" else { return "" }
+        if parent == NSHomeDirectory() || parent == "~" { return "~" }
+        return parent.split(separator: "/").suffix(2).joined(separator: "/")
     }
 }

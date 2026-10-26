@@ -34,14 +34,21 @@ public struct ThreadRowLook: Sendable, Equatable {
     public var unread: Bool
     /// Semibold title: the thread needs Mike or is unread.
     public var emphasised: Bool
+    /// The status is said in words. Under a heading that already says it
+    /// ("Needs you", "Running") the row doesn't repeat it: the word took
+    /// about 60 pt of the title line, so the rows that mattered most had
+    /// the most cut-off titles. A waiting row shows how long it has waited
+    /// in the needs-you colour instead, and a running row just its spinner.
+    public var labelled: Bool
 
-    public init(status: ThreadRowStatus, unread: Bool, emphasised: Bool) {
+    public init(status: ThreadRowStatus, unread: Bool, emphasised: Bool, labelled: Bool = true) {
         self.status = status
         self.unread = unread
         self.emphasised = emphasised
+        self.labelled = labelled
     }
 
-    public init(_ thread: ThreadSummary) {
+    public init(_ thread: ThreadSummary, section: InboxSection? = nil) {
         switch thread.status {
         case .waiting: status = .needsYou
         case .running, .starting: status = .working
@@ -51,6 +58,16 @@ public struct ThreadRowLook: Sendable, Equatable {
         }
         unread = thread.needsYou && status != .needsYou && status != .working
         emphasised = thread.needsYou || status == .needsYou
+        switch (status, section) {
+        case (.needsYou, .needsYou?), (.working, .running?): labelled = false
+        default: labelled = true
+        }
+    }
+
+    /// The second line when there's no preview yet. A thread that has only
+    /// asked a question is waiting on Mike, not new.
+    public static func emptyPreview(_ thread: ThreadSummary) -> String {
+        thread.status == .waiting ? "Waiting for your answer" : "No reply yet"
     }
 }
 

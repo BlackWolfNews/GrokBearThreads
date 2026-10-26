@@ -107,8 +107,8 @@ enum ScreenshotRunner {
             }
         }
         // 8. A turn that's still running (the working line and a live
-        // group), then the demo's edits: the group with its diffs open and a
-        // file opened in the changes card.
+        // group), then the demo's edits: the group open with its new file
+        // and its edit opened, and a file opened in the changes card.
         if wanted("8") {
             app.sidebarMode = .inbox
             await open(app, "demo_ci_slow")
@@ -116,6 +116,9 @@ enum ScreenshotRunner {
             await capture(window, dir.appendingPathComponent("8a-live-turn.png"))
             await open(app, demo)
             let session = app.session(for: demo)
+            // The new file and the edit in the group opened, so the shot
+            // shows both kinds of opened diff.
+            session.expanded.formUnion(["t:c3", "t:c4"])
             if let group = (0..<session.displayCount).map({ session.displayRow($0) }).first(where: { row in
                 if case .group(let group) = row.content { return group.memberIds.contains("t:c3") }
                 return false

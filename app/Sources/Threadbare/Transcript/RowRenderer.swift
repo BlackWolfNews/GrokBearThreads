@@ -10,7 +10,7 @@ enum RowMetrics {
     /// Space above a user message, which starts a turn.
     static let userTop: CGFloat = 18
     /// One line of work: a group summary, a tool call, a thinking block.
-    static let workHeight: CGFloat = 30
+    static let workHeight: CGFloat = 32
     static let workingHeight: CGFloat = 34
     static let bubblePadH: CGFloat = 14
     static let bubblePadV: CGFloat = 10
@@ -19,25 +19,32 @@ enum RowMetrics {
     static let bubbleShare: CGFloat = 0.8
     static let boxPad: CGFloat = 10
     static let diffPadV: CGFloat = 6
-    /// Where a work line's text starts, after its icon.
+    /// Where a work line's text starts, after its icon. Every work line
+    /// (group, tool, thinking, the working line) has its icon or spinner in
+    /// the slot before it, so their text shares one edge.
     static let titleIndent: CGFloat = 22
+    /// An NSTextField label draws its text this far in from its frame;
+    /// work line labels start this much left so their glyphs line up.
+    static let labelInset: CGFloat = 2
     /// How far an open group's items sit in from its summary line.
     static let groupIndent: CGFloat = 18
     static let cardPad: CGFloat = 14
     static let cardRadius: CGFloat = 12
     static let accentBar: CGFloat = 3
-    static let buttonHeight: CGFloat = 26
-    static let optionHeight: CGFloat = 22
-    static let optionDescription: CGFloat = 16
+    static let buttonHeight: CGFloat = 28
+    static let optionHeight: CGFloat = 24
+    static let optionDescription: CGFloat = 17
+    /// The question card's "Something else" field.
+    static let otherFieldHeight: CGFloat = 26
     static let userThumbHeight: CGFloat = 120
     static let gridMaxHeight: CGFloat = 240
     static let gridMaxWidth: CGFloat = 320
     static let imageGap: CGFloat = 8
-    static let collapsedDiffLines = 12
-    static let showMoreHeight: CGFloat = 26
-    static let footerHeight: CGFloat = 26
-    static let changesHeader: CGFloat = 40
-    static let changesFile: CGFloat = 32
+    /// The most lines an opened diff shows in the flow.
+    static let maxDiffLines = 1500
+    static let footerHeight: CGFloat = 27
+    static let changesHeader: CGFloat = 42
+    static let changesFile: CGFloat = 34
 
     /// The reading column for a given table width: (x, width).
     static func column(tableWidth: CGFloat) -> (x: CGFloat, width: CGFloat) {
@@ -69,7 +76,7 @@ final class RowRender: @unchecked Sendable {
     let imageAreaHeight: CGFloat
     /// Measured heights of a question card's question texts.
     let lineHeights: [CGFloat]
-    /// A changes card's files, or a diff row's "Show 30 more lines".
+    /// A changes card's files.
     let parts: [Part]
 
     /// One line of a card (a changed file) and what opens under it.
@@ -283,29 +290,28 @@ enum RowRenderer {
 
         case .reasoning(let item):
             let header = headerText(title: item.isStreaming ? "Thinking" : "Thought", subtitle: firstLine(item.text))
-            guard expanded else { return RowRender(height: RowMetrics.workHeight, text: header) }
-            let body = NSAttributedString(string: item.text, attributes: Theme.text(.systemFont(ofSize: 13), color: .secondaryLabelColor, line: 19, spacing: 6))
+            let headerSize = header.size()
+            guard expanded else { return RowRender(height: RowMetrics.workHeight, text: header, textSize: headerSize) }
+            let body = NSAttributedString(string: item.text, attributes: Theme.text(Theme.workFont, color: .secondaryLabelColor, line: 21, spacing: 6))
             let size = measurer.measure(body, width: width - RowMetrics.titleIndent)
-            return RowRender(height: RowMetrics.workHeight + size.height + 12, text: header, detail: body, detailSize: size)
+            return RowRender(height: RowMetrics.workHeight + size.height + 12, text: header, textSize: headerSize, detail: body, detailSize: size)
 
         case .tool(let tool):
             let header = toolHeader(tool)
+            let headerSize = header.size()
+            // An edit is one line with its +N -M that opens on a click, like
+            // every other tool: open groups used to pour out every diff at
+            // 12 lines each, and the changes card shows them again anyway.
+            guard expanded else { return RowRender(height: RowMetrics.workHeight, text: header, textSize: headerSize) }
             if row.kind == .diff, let diff = tool.effectiveDiff, !diff.hunks.isEmpty {
-                let (body, hidden) = diffText([diff], maxLines: expanded ? 1500 : RowMetrics.collapsedDiffLines)
-                let size = measurer.measure(body, width: width - 1)
-                var parts: [RowRender.Part] = []
-                var footer: CGFloat = 0
-                if hidden > 0 {
-                    parts.append(RowRender.Part(leading: showMoreText(hidden)))
-                    footer = RowMetrics.showMoreHeight
-                }
-                let box = size.height + RowMetrics.diffPadV * 2 + footer
-                return RowRender(height: RowMetrics.workHeight + box + 10, text: header, detail: body, detailSize: size, parts: parts)
+                let body = diffWithNote([diff], maxLines: RowMetrics.maxDiffLines)
+                let size = measurer.measure(body, width: width - RowMetrics.titleIndent - 1)
+                let box = size.height + RowMetrics.diffPadV * 2
+                return RowRender(height: RowMetrics.workHeight + box + 10, text: header, textSize: headerSize, detail: body, detailSize: size)
             }
-            guard expanded else { return RowRender(height: RowMetrics.workHeight, text: header) }
             let body = toolBody(tool)
             let size = measurer.measure(body, width: width - RowMetrics.titleIndent - RowMetrics.boxPad * 2)
-            return RowRender(height: RowMetrics.workHeight + size.height + RowMetrics.boxPad * 2 + 10, text: header, detail: body, detailSize: size)
+            return RowRender(height: RowMetrics.workHeight + size.height + RowMetrics.boxPad * 2 + 10, text: header, textSize: headerSize, detail: body, detailSize: size)
 
         case .images(_, let images):
             let (frames, area) = imageFrames(images, maxWidth: width, maxHeight: RowMetrics.gridMaxHeight, alignRight: false)
@@ -313,11 +319,11 @@ enum RowRenderer {
 
         case .approval(let item):
             let inner = width - RowMetrics.cardPad * 2 - RowMetrics.accentBar
-            let title = NSAttributedString(string: approvalTitle(item.request), attributes: Theme.text(Theme.cardTitleFont, line: 18))
+            let title = NSAttributedString(string: approvalTitle(item.request), attributes: Theme.text(Theme.cardTitleFont, line: 20))
             let titleSize = measurer.measure(title, width: inner)
             let payload = approvalPayload(item.request)
             let payloadSize = measurer.measure(payload, width: inner - RowMetrics.boxPad * 2)
-            let actions = item.resolution == nil ? RowMetrics.buttonHeight : 16
+            let actions = item.resolution == nil ? RowMetrics.buttonHeight : 17
             let height = RowMetrics.cardPad * 2 + titleSize.height + 10 + payloadSize.height + RowMetrics.boxPad * 2 + 12 + actions
             return RowRender(height: vertical + 4 + height, text: title, textSize: titleSize, detail: payload, detailSize: payloadSize)
 
@@ -330,7 +336,7 @@ enum RowRenderer {
                 textHeights.append(textHeight)
                 total += questionHeight(question, textHeight: textHeight)
             }
-            total += item.resolution == nil ? (26 + 12 + RowMetrics.buttonHeight) : 16
+            total += item.resolution == nil ? (RowMetrics.otherFieldHeight + 2 + 12 + RowMetrics.buttonHeight) : 17
             return RowRender(height: vertical + 4 + total, lineHeights: textHeights)
 
         case .plan(let entries):
@@ -343,9 +349,10 @@ enum RowRenderer {
 
         case .note(let note):
             if row.inGroup {
-                return RowRender(height: RowMetrics.workHeight, text: headerText(title: firstLine(note), subtitle: ""))
+                let header = headerText(title: firstLine(note), subtitle: "")
+                return RowRender(height: RowMetrics.workHeight, text: header, textSize: header.size())
             }
-            let text = NSAttributedString(string: note, attributes: Theme.text(Theme.smallFont, color: .secondaryLabelColor, line: 16, alignment: .center))
+            let text = NSAttributedString(string: note, attributes: Theme.text(Theme.smallFont, color: .secondaryLabelColor, line: 17, alignment: .center))
             let size = measurer.measure(text, width: width)
             return RowRender(height: vertical + size.height, text: text, textSize: size)
 
@@ -409,8 +416,13 @@ enum RowRenderer {
             ]))
         }
         if group.isLive, let action = group.currentAction {
-            output.append(NSAttributedString(string: "  ·  " + ToolPresentation.shortTitle(action, limit: 90), attributes: [
+            // What's happening now is what Mike watches while a turn runs:
+            // readable secondary text, with only the dot kept faint.
+            output.append(NSAttributedString(string: "  ·  ", attributes: [
                 .font: Theme.workFont, .foregroundColor: NSColor.tertiaryLabelColor, .paragraphStyle: style,
+            ]))
+            output.append(NSAttributedString(string: ToolPresentation.shortTitle(action, limit: 90), attributes: [
+                .font: Theme.workFont, .foregroundColor: NSColor.secondaryLabelColor, .paragraphStyle: style,
             ]))
         }
         return output
@@ -418,10 +430,25 @@ enum RowRenderer {
 
     static func toolHeader(_ tool: ToolItem) -> NSAttributedString {
         let style = truncating
-        let title = ToolPresentation.shortTitle(tool.title)
-        let output = NSMutableAttributedString(string: title, attributes: [
-            .font: Theme.workFont, .foregroundColor: tool.failed ? Theme.removedText : NSColor.secondaryLabelColor, .paragraphStyle: style,
-        ])
+        let color = tool.failed ? Theme.removedText : NSColor.secondaryLabelColor
+        let output: NSMutableAttributedString
+        if let file = ToolPresentation.fileTitle(tool) {
+            // "Read UploadTask.swift  Sources/Upload": the file, then its
+            // folder dimmed, as in the changes card. The whole path is the
+            // row's tooltip.
+            output = NSMutableAttributedString(string: file.verb + " " + file.name, attributes: [
+                .font: Theme.workFont, .foregroundColor: color, .paragraphStyle: style,
+            ])
+            if !file.folder.isEmpty {
+                output.append(NSAttributedString(string: "  " + file.folder, attributes: [
+                    .font: Theme.detailFont, .foregroundColor: NSColor.tertiaryLabelColor, .paragraphStyle: style,
+                ]))
+            }
+        } else {
+            output = NSMutableAttributedString(string: ToolPresentation.shortTitle(tool.title), attributes: [
+                .font: Theme.workFont, .foregroundColor: color, .paragraphStyle: style,
+            ])
+        }
         if let diff = tool.effectiveDiff, !diff.hunks.isEmpty {
             let stats = DiffBuilder.stats(diff)
             output.append(statsText(added: stats.added, removed: stats.removed, leading: "  "))
@@ -437,10 +464,10 @@ enum RowRenderer {
 
     // MARK: Expanded tools
 
-    static let monoFont = NSFont.monospacedSystemFont(ofSize: 12, weight: .regular)
+    static let monoFont = Theme.outputFont
 
     static func mono(_ text: String, _ color: NSColor) -> NSAttributedString {
-        let (style, offset) = Theme.lines(17, font: monoFont)
+        let (style, offset) = Theme.lines(TypeScale.outputLine, font: monoFont)
         style.lineBreakMode = .byCharWrapping
         return NSAttributedString(string: text, attributes: [.font: monoFont, .foregroundColor: color, .paragraphStyle: style, .baselineOffset: offset])
     }
@@ -472,12 +499,11 @@ enum RowRenderer {
             output.append(mono("$ ", .tertiaryLabelColor))
             output.append(mono(clampLines(command, 40), .labelColor))
             appendOutput(result)
-        case .file(let path, let lines):
-            output.append(mono(path, .tertiaryLabelColor))
+        case .file(_, let lines):
+            // Just the lines: the row's title already names the file (and
+            // its tooltip has the whole path).
             if !lines.isEmpty {
                 hasOutput = true
-                output.append(mono("\n", .labelColor))
-                output.append(gap(8))
                 output.append(numbered(lines))
             }
         case .search(let query, let scope, let result):
@@ -495,7 +521,7 @@ enum RowRenderer {
         if tool.result?.truncated == true {
             output.append(mono("\n", .labelColor))
             output.append(gap(6))
-            output.append(NSAttributedString(string: "Output shortened", attributes: Theme.text(Theme.smallFont, color: .tertiaryLabelColor, line: 16)))
+            output.append(NSAttributedString(string: "Output shortened", attributes: Theme.text(Theme.smallFont, color: .tertiaryLabelColor, line: 17)))
         } else if !hasOutput {
             if output.length > 0 { output.append(mono("\n", .labelColor)) }
             output.append(mono(tool.isFinished ? "No output" : "Running…", .tertiaryLabelColor))
@@ -506,9 +532,9 @@ enum RowRenderer {
     /// File lines with their numbers right-aligned in a gutter.
     static func numbered(_ lines: [ToolPresentation.NumberedLine]) -> NSAttributedString {
         let digits = max(3, String(lines.compactMap(\.number).max() ?? 0).count)
-        let gutter = CGFloat(digits) * 7.3 + 2
+        let gutter = CGFloat(digits) * Theme.digitWidth(monoFont) + 2
         // Wrapped lines hang under the text, past the number.
-        let (style, offset) = Theme.lines(17, font: monoFont, head: gutter + 14, first: 0)
+        let (style, offset) = Theme.lines(TypeScale.outputLine, font: monoFont, head: gutter + 14, first: 0)
         style.tabStops = [NSTextTab(textAlignment: .right, location: gutter), NSTextTab(textAlignment: .left, location: gutter + 14)]
         style.lineBreakMode = .byCharWrapping
         let numberAttributes: [NSAttributedString.Key: Any] = [.font: monoFont, .foregroundColor: NSColor.tertiaryLabelColor, .paragraphStyle: style, .baselineOffset: offset]
@@ -523,6 +549,18 @@ enum RowRenderer {
     }
 
     // MARK: Diffs
+
+    /// A diff and, if it was cut short, a quiet note of how much was left out.
+    static func diffWithNote(_ diffs: [EditDiff], maxLines: Int, inset: CGFloat = 10) -> NSAttributedString {
+        let (diff, hidden) = diffText(diffs, maxLines: maxLines, inset: inset)
+        guard hidden > 0 else { return diff }
+        let body = NSMutableAttributedString(attributedString: diff)
+        let (style, offset) = Theme.lines(24, font: Theme.smallFont, head: inset, first: inset)
+        let note: [NSAttributedString.Key: Any] = [.font: Theme.smallFont, .foregroundColor: NSColor.tertiaryLabelColor, .paragraphStyle: style, .baselineOffset: offset]
+        body.append(NSAttributedString(string: "\n", attributes: note))
+        body.append(NSAttributedString(string: hidden == 1 ? "1 more line not shown" : "\(hidden) more lines not shown", attributes: note))
+        return body
+    }
 
     /// Diff lines with line numbers and the +/− sign in a quiet gutter, on
     /// faint tints. Returns the text and how many lines were left out.
@@ -546,7 +584,10 @@ enum RowRenderer {
         }
         let numbers = lines.compactMap { $0.newNumber ?? $0.oldNumber }
         let digits = max(2, String(numbers.max() ?? 0).count)
-        let numberEnd = inset + CGFloat(digits) * 7.25
+        let numberEnd = inset + CGFloat(digits) * Theme.digitWidth(Theme.diffFont)
+        // A new file is all additions: shown as plain content with green
+        // signs rather than a solid green slab, the loudest thing on screen.
+        let newFile = lines.allSatisfy { $0.kind != .removed && $0.kind != .context }
         let signAt = numberEnd + 10
         let textAt = signAt + 14
         let (style, offset) = Theme.lines(Theme.diffLine, font: Theme.diffFont, head: textAt, first: 0)
@@ -564,8 +605,10 @@ enum RowRenderer {
             let sign: String
             let background: NSColor?
             switch line.kind {
-            case .added: number = line.newNumber; sign = "+"; background = Theme.addedBackground
-            case .removed: number = line.oldNumber; sign = "−"; background = Theme.removedBackground
+            case .added: number = line.newNumber; sign = "+"; background = newFile ? nil : Theme.addedBackground
+            // One column of new-file numbers that only counts up: a removed
+            // line's old number made it run 20, 20, ... 27, 25.
+            case .removed: number = nil; sign = "−"; background = Theme.removedBackground
             case .context: number = line.newNumber; sign = ""; background = nil
             case .hunkHeader, .elided: number = nil; sign = ""; background = nil
             }
@@ -574,7 +617,10 @@ enum RowRenderer {
                 output.append(NSAttributedString(string: "\t\t⋯", attributes: gutter))
                 continue
             }
-            output.append(NSAttributedString(string: "\t" + (number.map(String.init) ?? "") + "\t" + sign + "\t", attributes: gutter))
+            output.append(NSAttributedString(string: "\t" + (number.map(String.init) ?? "") + "\t", attributes: gutter))
+            var signAttributes = gutter
+            if newFile { signAttributes[.foregroundColor] = Theme.addedText }
+            output.append(NSAttributedString(string: sign + "\t", attributes: signAttributes))
             output.append(NSAttributedString(string: line.text.replacingOccurrences(of: "\t", with: "    "), attributes: body))
             if let background {
                 output.addAttribute(.tbLineBackground, value: background, range: NSRange(location: start, length: output.length - start))
@@ -583,32 +629,22 @@ enum RowRenderer {
         return (output, hidden)
     }
 
-    static func showMoreText(_ hidden: Int) -> NSAttributedString {
-        let text = hidden == 1 ? "Show 1 more line" : "Show \(hidden) more lines"
-        return NSAttributedString(string: text, attributes: [.font: NSFont.systemFont(ofSize: 12), .foregroundColor: NSColor.secondaryLabelColor])
-    }
-
     // MARK: Changes card
 
     static func changesRender(_ card: ChangedFiles, width: CGFloat, measurer: TextMeasurer) -> RowRender {
-        let title = NSAttributedString(string: card.title, attributes: [.font: NSFont.systemFont(ofSize: 13, weight: .medium), .foregroundColor: NSColor.labelColor])
+        let title = NSAttributedString(string: card.title, attributes: [.font: NSFont.systemFont(ofSize: TypeScale.cardTitle, weight: .medium), .foregroundColor: NSColor.labelColor])
         let total = statsText(added: card.added, removed: card.removed)
         var parts: [RowRender.Part] = []
         var height = RowMetrics.changesHeader
         for file in card.files {
-            let line = NSMutableAttributedString(string: file.name, attributes: [.font: NSFont.systemFont(ofSize: 13), .foregroundColor: NSColor.labelColor, .paragraphStyle: truncating])
+            let line = NSMutableAttributedString(string: file.name, attributes: [.font: Theme.workFont, .foregroundColor: NSColor.labelColor, .paragraphStyle: truncating])
             if !file.folder.isEmpty {
-                line.append(NSAttributedString(string: "  " + file.folder, attributes: [.font: NSFont.systemFont(ofSize: 12), .foregroundColor: NSColor.tertiaryLabelColor, .paragraphStyle: truncating]))
+                line.append(NSAttributedString(string: "  " + file.folder, attributes: [.font: Theme.detailFont, .foregroundColor: NSColor.tertiaryLabelColor, .paragraphStyle: truncating]))
             }
             var part = RowRender.Part(leading: line, trailing: statsText(added: file.added, removed: file.removed))
             height += RowMetrics.changesFile
             if file.isExpanded {
-                let (diff, hidden) = diffText(file.diffs, maxLines: 600, inset: RowMetrics.cardPad)
-                let body = NSMutableAttributedString(attributedString: diff)
-                if hidden > 0 {
-                    body.append(NSAttributedString(string: "\n", attributes: Theme.text(Theme.smallFont, line: 22)))
-                    body.append(NSAttributedString(string: "\(hidden) more lines not shown", attributes: Theme.text(Theme.smallFont, color: .tertiaryLabelColor, line: 22)))
-                }
+                let body = diffWithNote(file.diffs, maxLines: 600, inset: RowMetrics.cardPad)
                 part.body = body
                 part.bodyHeight = measurer.measure(body, width: width - 1).height + 8
                 height += part.bodyHeight
@@ -670,7 +706,7 @@ enum RowRenderer {
     }
 
     static func questionText(_ question: String) -> NSAttributedString {
-        NSAttributedString(string: question, attributes: Theme.text(Theme.cardTitleFont, line: 18))
+        NSAttributedString(string: question, attributes: Theme.text(Theme.cardTitleFont, line: 20))
     }
 
     static func questionHeight(_ question: Question, textHeight: CGFloat) -> CGFloat {
@@ -685,9 +721,9 @@ enum RowRenderer {
 
     static func planText(_ entries: [PlanEntry]) -> NSAttributedString {
         let output = NSMutableAttributedString()
-        let font = NSFont.systemFont(ofSize: 13.5)
-        let (style, offset) = Theme.lines(20, font: font, spacing: 4, head: 22, first: 0)
-        style.tabStops = [NSTextTab(textAlignment: .left, location: 22)]
+        let font = NSFont.systemFont(ofSize: TypeScale.body - 0.5)
+        let (style, offset) = Theme.lines(22, font: font, spacing: 4, head: 24, first: 0)
+        style.tabStops = [NSTextTab(textAlignment: .left, location: 24)]
         for (index, entry) in entries.enumerated() {
             if index > 0 { output.append(NSAttributedString(string: "\n", attributes: [.font: font, .paragraphStyle: style, .baselineOffset: offset])) }
             let (mark, color, textColor): (String, NSColor, NSColor) = switch entry.status {

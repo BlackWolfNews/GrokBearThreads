@@ -28,13 +28,42 @@ final class TranscriptLayoutTests: XCTestCase {
     """
 
     func testMeasuredHeightMatchesTheTextView() {
-        for text in [Self.reply, Self.reply + "\n\n- One more\n- And another", "```\ncode first\n```\n\nThen text."] {
+        for text in [Self.reply, Self.reply + "\n\n- One more\n- And another", "```\ncode first\n```\n\nThen text.", Self.table, Self.table + "\n\nAfter the table."] {
             let rendered = MarkdownRenderer.render(text)
             let measured = TextMeasurer().measure(rendered.string, width: 700)
             let view = TranscriptTextView()
             view.show(rendered.string, width: 700)
             XCTAssertEqual(view.usedHeight, measured.height, "for \(text.prefix(20))")
         }
+    }
+
+    static let table = """
+    | Case | Before | After |
+    | --- | --- | --- |
+    | Quit at 60% of 1 GB | 1 GB re-sent | 400 MB re-sent, and a long note that has to wrap inside its own column rather than under the first one |
+    | Network drop | Restart | |
+    """
+
+    /// Each cell is its own paragraph in a grid: a long cell wraps inside
+    /// its column, and the empty last cell still has its place.
+    func testATableCellWrapsInsideItsColumn() {
+        let rendered = MarkdownRenderer.render(Self.table).string
+        let storage = NSTextStorage(attributedString: rendered)
+        let layout = NSLayoutManager()
+        let container = NSTextContainer(size: NSSize(width: 600, height: CGFloat.greatestFiniteMagnitude))
+        container.lineFragmentPadding = 0
+        layout.addTextContainer(container)
+        storage.addLayoutManager(layout)
+        layout.ensureLayout(for: container)
+        let note = (rendered.string as NSString).range(of: "400 MB")
+        let glyphs = layout.glyphRange(forCharacterRange: NSRange(location: note.location, length: rendered.length - note.location - 30), actualCharacterRange: nil)
+        var lefts = Set<CGFloat>()
+        layout.enumerateLineFragments(forGlyphRange: glyphs) { _, used, _, range, _ in
+            if NSLocationInRange(note.location, range) || range.location > note.location { lefts.insert(used.minX) }
+        }
+        XCTAssertGreaterThan(lefts.min() ?? 0, 100, "the third column's lines all start in the third column")
+        let blocks = (rendered.attribute(.paragraphStyle, at: rendered.length - 1, effectiveRange: nil) as? NSParagraphStyle)?.textBlocks
+        XCTAssertEqual((blocks?.first as? NSTextTableBlock)?.startingColumn, 2, "the empty last cell is still a cell")
     }
 
     /// A tall reply draws through a slice whose bounds start part way down

@@ -8,6 +8,29 @@ final class ToolDetailTests: XCTestCase {
                  result: result.map { ToolResult(itemId: "c1", ok: ok, text: $0) })
     }
 
+    func testFileToolsTitleTheFileThenItsFolder() {
+        let home = NSHomeDirectory()
+        let read = ToolPresentation.fileTitle(tool("Read", .read, input: ["file_path": .string(home + "/dev/photo-sync/Sources/Upload/UploadTask.swift")]))
+        XCTAssertEqual(read, .init(verb: "Read", name: "UploadTask.swift", folder: "Sources/Upload", path: "~/dev/photo-sync/Sources/Upload/UploadTask.swift"))
+        XCTAssertEqual(ToolPresentation.fileTitle(tool("Write", .write, input: ["file_path": .string("/tmp/a.txt")]))?.verb, "Write")
+        let edit = ToolPresentation.fileTitle(tool("MultiEdit", .edit, input: ["file_path": .string(home + "/notes.md")]))
+        XCTAssertEqual(edit?.verb, "Edit")
+        XCTAssertEqual(edit?.folder, "~")
+        XCTAssertEqual(ToolPresentation.fileTitle(tool("Write", .write, input: ["file_path": .string("/a.txt")]))?.folder, "")
+        // Not a file tool, or no path: the plain title is used.
+        XCTAssertNil(ToolPresentation.fileTitle(tool("Bash", .command, input: ["command": .string("ls")])))
+        XCTAssertNil(ToolPresentation.fileTitle(tool("Read", .read, input: [:])))
+    }
+
+    func testFolderNames() {
+        XCTAssertEqual(PathDisplay.folder(of: "/Users/mike/dev/photo-sync/Sources/Upload/UploadTask.swift"), "Sources/Upload")
+        XCTAssertEqual(PathDisplay.folder(of: NSHomeDirectory() + "/a.txt"), "~")
+        XCTAssertEqual(PathDisplay.folder(of: "~/a.txt"), "~")
+        XCTAssertEqual(PathDisplay.folder(of: "/a.txt"), "")
+        XCTAssertEqual(PathDisplay.folder(of: "/tmp/a.txt"), "tmp")
+        XCTAssertEqual(PathDisplay.folder(of: "a.txt"), "")
+    }
+
     func testACommandShowsTheCommandThenItsOutput() {
         let detail = ToolPresentation.detail(tool("Bash", .command, input: ["command": .string("npm test")], result: "12 passed\n"))
         XCTAssertEqual(detail, .command(command: "npm test", output: "12 passed"))

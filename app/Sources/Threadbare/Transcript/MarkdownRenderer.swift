@@ -20,6 +20,10 @@ enum MarkdownRenderer {
 
     /// How far a code block's box reaches past its text.
     static let codePad: CGFloat = 12
+    /// How far an inline code pill reaches past its glyphs on each side,
+    /// and the space kerned in either side of the run to make room for it.
+    static let pillPad: CGFloat = 2.5
+    static let pillKern: CGFloat = 4
 
     nonisolated(unsafe) private static let cache: NSCache<NSString, NSAttributedString> = {
         let cache = NSCache<NSString, NSAttributedString>()
@@ -101,7 +105,7 @@ enum MarkdownRenderer {
             var font: NSFont
             switch context.headingLevel {
             case 1...3: font = Self.headingFont(context.headingLevel)
-            case 4...: font = .systemFont(ofSize: Theme.bodySize, weight: .semibold)
+            case 4...: font = Theme.boldFont
             default: font = context.bold ? Theme.boldFont : Theme.bodyFont
             }
             if context.italic {
@@ -229,9 +233,9 @@ enum MarkdownRenderer {
 
         static func headingFont(_ level: Int) -> NSFont {
             switch level {
-            case 1: return .systemFont(ofSize: 17, weight: .semibold)
-            case 2: return .systemFont(ofSize: 15, weight: .semibold)
-            default: return .systemFont(ofSize: Theme.bodySize, weight: .semibold)
+            case 1: return .systemFont(ofSize: TypeScale.headings.0, weight: .semibold)
+            case 2: return .systemFont(ofSize: TypeScale.headings.1, weight: .semibold)
+            default: return .systemFont(ofSize: TypeScale.headings.2, weight: .semibold)
             }
         }
 
@@ -284,42 +288,96 @@ enum MarkdownRenderer {
             output.addAttribute(.baselineOffset, value: offset, range: range)
         }
 
+        /// Space either side of a column boundary, and above and below a
+        /// row's text (its rule sits in the middle of the gap).
+        static let cellPadH: CGFloat = 12
+        static let cellPadV: CGFloat = 4
+
+        /// A grid like the references draw: a rule under the header and
+        /// hairlines between rows. Each cell is its own paragraph in an
+        /// NSTextTable, so a long cell wraps inside its own column (tab stops
+        /// wrapped it back under the first one, and a cell wider than its
+        /// stop pushed the rest of the row along).
         mutating func renderTable(_ table: Markdown.Table, _ context: Context) {
             var rows: [[NSAttributedString]] = []
-            func cells(_ cells: some Sequence<Markdown.Table.Cell>, bold: Bool) -> [NSAttributedString] {
+            func cells(_ cells: some Sequence<Markdown.Table.Cell>, header: Bool) -> [NSAttributedString] {
                 cells.map { cell in
                     var inner = Builder()
                     var cellContext = context
-                    cellContext.bold = bold
+                    cellContext.indent = 0
+                    if header { cellContext.color = .secondaryLabelColor }
                     inner.inlines(cell.children, cellContext)
-                    return NSAttributedString(attributedString: inner.output)
+                    let text = NSMutableAttributedString(attributedString: inner.output)
+                    if header {
+                        // Smaller and semibold, like a column label; code
+                        // stays in its own font.
+                        text.enumerateAttribute(.font, in: NSRange(location: 0, length: text.length)) { value, range, _ in
+                            guard (value as? NSFont)?.isFixedPitch != true else { return }
+                            text.addAttribute(.font, value: Self.tableHeaderFont, range: range)
+                        }
+                    }
+                    return text
                 }
             }
-            rows.append(cells(table.head.cells, bold: true))
-            for row in table.body.rows { rows.append(cells(row.cells, bold: false)) }
+            rows.append(cells(table.head.cells, header: true))
+            for row in table.body.rows { rows.append(cells(row.cells, header: false)) }
             let columns = rows.map(\.count).max() ?? 0
-            var widths = Array(repeating: CGFloat(0), count: columns)
+            guard columns > 0 else { return }
+
+            // Natural widths, fitted to the widest reading column. A
+            // narrower column scales the whole table down to fit.
+            var natural = Array(repeating: 0.0, count: columns)
             for row in rows {
                 for (index, cell) in row.enumerated() {
-                    widths[index] = max(widths[index], min(260, ceil(cell.size().width)))
+                    natural[index] = max(natural[index], Double(ceil(cell.size().width) + 1))
                 }
             }
-            var stops: [CGFloat] = []
-            var x = context.indent
-            for width in widths.dropLast() {
-                x += width + 18
-                stops.append(x)
-            }
+            let budget = Double(Theme.maxContentWidth - context.indent - CGFloat(columns - 1) * Self.cellPadH * 2)
+            let widths = TableColumns.fit(natural, into: budget)
+
+            let grid = NSTextTable()
+            grid.numberOfColumns = columns
+            grid.collapsesBorders = true
+            grid.hidesEmptyCells = false
+            let (lineStyle, offset) = Theme.lines(Theme.bodyLine, font: Theme.bodyFont)
             for (rowIndex, row) in rows.enumerated() {
-                let start = output.length
-                for (index, cell) in row.enumerated() {
-                    if index > 0 { append("\t", context) }
-                    output.append(cell)
+                let isLast = rowIndex == rows.count - 1
+                for column in 0..<columns {
+                    let block = NSTextTableBlock(table: grid, startingRow: rowIndex, rowSpan: 1, startingColumn: column, columnSpan: 1)
+                    block.setValue(CGFloat(widths[column]), type: .absoluteValueType, for: .width)
+                    block.setWidth(Self.cellPadV, type: .absoluteValueType, for: .padding, edge: .minY)
+                    // The paragraph gap after the table goes inside the last
+                    // row (it has no rule): a margin there was ignored.
+                    block.setWidth(Self.cellPadV + (isLast ? Self.paragraphGap : 0), type: .absoluteValueType, for: .padding, edge: .maxY)
+                    // The first column's text lines up with the paragraphs
+                    // around the table, and the last one ends at its text.
+                    block.setWidth(column == 0 ? 0 : Self.cellPadH, type: .absoluteValueType, for: .padding, edge: .minX)
+                    block.setWidth(column == columns - 1 ? 0 : Self.cellPadH, type: .absoluteValueType, for: .padding, edge: .maxX)
+                    if column == 0, context.indent > 0 {
+                        block.setWidth(context.indent, type: .absoluteValueType, for: .margin, edge: .minX)
+                    }
+                    if !isLast {
+                        block.setWidth(rowIndex == 0 ? 1 : 0.5, type: .absoluteValueType, for: .border, edge: .maxY)
+                        block.setBorderColor(rowIndex == 0 ? Theme.cardBorder : Theme.hairline, for: .maxY)
+                    }
+                    let style = lineStyle.mutableCopy() as! NSMutableParagraphStyle
+                    style.paragraphSpacing = 0
+                    style.textBlocks = [block]
+                    let start = output.length
+                    // An empty cell still needs a character: the message's
+                    // trailing newlines are trimmed, and an empty last cell
+                    // would lose its paragraph (and its column).
+                    let cell = column < row.count ? row[column] : NSAttributedString()
+                    if cell.length > 0 { output.append(cell) } else { append("\u{200B}", context) }
+                    append("\n", Context())
+                    let range = NSRange(location: start, length: output.length - start)
+                    output.addAttribute(.paragraphStyle, value: style, range: range)
+                    output.addAttribute(.baselineOffset, value: offset, range: range)
                 }
-                let style = paragraphStyle(context, spacing: rowIndex == rows.count - 1 ? Self.paragraphGap : 4, tabs: stops)
-                finishParagraph(from: start, style: style)
             }
         }
+
+        static let tableHeaderFont = NSFont.systemFont(ofSize: TypeScale.label, weight: .semibold)
 
         // MARK: Inlines
 
@@ -346,7 +404,18 @@ enum MarkdownRenderer {
             case let code as InlineCode:
                 var inner = context
                 inner.code = true
+                // BackgroundLayoutManager draws the pill `pillPad` past the
+                // glyphs on each side, which ate most of the word space
+                // around it. Kerning the characters either side reserves
+                // that room (and a little more) without changing the text.
+                let start = output.length
+                if start > 0, ![9, 10, 0x2028].contains(output.mutableString.character(at: start - 1)) {
+                    output.addAttribute(.kern, value: MarkdownRenderer.pillKern, range: NSRange(location: start - 1, length: 1))
+                }
                 append(code.code, inner)
+                if output.length > start {
+                    output.addAttribute(.kern, value: MarkdownRenderer.pillKern, range: NSRange(location: output.length - 1, length: 1))
+                }
             case let link as Markdown.Link:
                 var inner = context
                 inner.link = link.destination.flatMap(URL.init(string:))

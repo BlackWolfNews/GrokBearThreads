@@ -34,9 +34,6 @@ struct DetailView: View {
         VStack(spacing: 0) {
             ConnectionBanner()
             ErrorBanner()
-            if let thread, thread.isArchived {
-                ArchivedBar(thread: thread)
-            }
             ComposerPlacement(centred: isNew, trailingReserve: scrollerReserve) {
                 ZStack {
                     TranscriptView(session: session, controller: app.transcript)
@@ -100,6 +97,11 @@ struct DetailView: View {
                 .menuIndicator(.hidden)
                 .help("More")
                 .disabled(thread == nil)
+                // Still built (see above), but out of sight with nothing to
+                // act on: a dimmed "..." alone in an empty new thread's
+                // header looked broken.
+                .opacity(thread == nil ? 0 : 1)
+                .allowsHitTesting(thread != nil)
             }
             // A plain glyph like Codex's and Claude's. Its glass disc drew
             // dark grey on a light window.
@@ -108,8 +110,8 @@ struct DetailView: View {
     }
 }
 
-/// One line, T3 style: the folder's name, then the title. The full path is
-/// in the tooltip.
+/// One line, T3 style: the folder's name, then the title, and "Archived"
+/// for an archived thread. The full path is in the tooltip.
 private struct HeaderTitle: View {
     let thread: ThreadSummary?
 
@@ -125,8 +127,15 @@ private struct HeaderTitle: View {
                 Text(thread.title.isEmpty ? "Untitled" : thread.title)
                     .fontWeight(.semibold)
                     .foregroundStyle(.primary)
+                if thread.isArchived {
+                    // A quiet word here rather than a full-width band under
+                    // the header, which nothing else in the window had.
+                    // Unarchive is in the ... menu, ⌘E and the row's hover
+                    // button.
+                    Text("·  Archived").foregroundStyle(.tertiary).layoutPriority(1)
+                }
             }
-            .font(.system(size: 13))
+            .font(.system(size: TypeScale.header))
             .lineLimit(1)
             .padding(.leading, 6)
             .help(thread.cwd.abbreviatingHome)
@@ -209,29 +218,10 @@ private struct NewThreadNote: View {
         let cwd = app.newThreadCwd ?? app.defaults.cwd
         let account = app.newThreadAccount ?? app.lastAccountId
         Text("Starts in \(FolderName.short(cwd)) on \(app.accountShortTitle(account))")
-            .font(.system(size: 12))
+            .font(.system(size: TypeScale.label))
             .foregroundStyle(.tertiary)
             .help("\(cwd.abbreviatingHome) on \(app.accountTitle(account))")
             .frame(maxWidth: .infinity)
-    }
-}
-
-private struct ArchivedBar: View {
-    @Environment(AppModel.self) private var app
-    let thread: ThreadSummary
-
-    var body: some View {
-        HStack(spacing: 8) {
-            Image(systemName: "archivebox").foregroundStyle(.secondary)
-            Text("This thread is archived.").foregroundStyle(.secondary)
-            Spacer()
-            Button("Unarchive") { app.unarchive(thread.id) }
-                .controlSize(.small)
-        }
-        .font(.system(size: 12))
-        .padding(.horizontal, 14)
-        .padding(.vertical, 6)
-        .background(Color.primary.opacity(0.04))
     }
 }
 

@@ -34,11 +34,10 @@ private struct InboxList: View {
 
     var body: some View {
         let sections = app.sections
-        let titled = [("Needs you", sections.needsYou), ("Running", sections.running), ("Inbox", sections.inbox)]
         // Rows are identified by section and thread (see SectionRow), so
         // the arrow keys scroll to that.
-        let rowIDs = Dictionary(uniqueKeysWithValues: titled.flatMap { title, threads in
-            threads.map { ($0.id, SectionRow.id(section: title, thread: $0.id)) }
+        let rowIDs = Dictionary(uniqueKeysWithValues: InboxSection.allCases.flatMap { section in
+            sections[section].map { ($0.id, SectionRow.id(section: section.title, thread: $0.id)) }
         })
         VStack(spacing: 0) {
             SidebarButtonRow(icon: "square.and.pencil", title: "New thread", hint: "⌘N", active: app.selection == nil) {
@@ -49,9 +48,9 @@ private struct InboxList: View {
             .padding(.top, 4)
             ThreadList(order: sections.all.map(\.id), scrollID: { rowIDs[$0] ?? $0 }) { select in
                 if app.threadsLoaded {
-                    ThreadSection(title: titled[0].0, threads: sections.needsYou, mode: .inbox, select: select)
-                    ThreadSection(title: titled[1].0, threads: sections.running, mode: .inbox, select: select)
-                    ThreadSection(title: titled[2].0, threads: sections.inbox, mode: .inbox, select: select, showsWhenEmpty: true)
+                    ForEach(InboxSection.allCases, id: \.self) { section in
+                        ThreadSection(section: section, threads: sections[section], select: select)
+                    }
                     if sections.all.isEmpty {
                         EmptyNote(text: "Nothing in the inbox.")
                     }
@@ -64,17 +63,15 @@ private struct InboxList: View {
 
 /// A heading and its rows. Empty sections other than Inbox are left out.
 private struct ThreadSection: View {
-    let title: String
+    let section: InboxSection
     let threads: [ThreadSummary]
-    let mode: SidebarMode
     let select: (String) -> Void
-    var showsWhenEmpty = false
 
     var body: some View {
-        if !threads.isEmpty || showsWhenEmpty {
-            SectionHeading(title: title)
-            ForEach(threads.map { SectionRow(section: title, thread: $0) }) { row in
-                ThreadRowView(thread: row.thread, mode: mode) { select(row.thread.id) }
+        if !threads.isEmpty || section == .inbox {
+            SectionHeading(title: section.title)
+            ForEach(threads.map { SectionRow(section: section.title, thread: $0) }) { row in
+                ThreadRowView(thread: row.thread, mode: .inbox, section: section) { select(row.thread.id) }
             }
         }
     }
@@ -97,12 +94,15 @@ private struct SectionHeading: View {
     let title: String
 
     var body: some View {
+        // A quiet divider rather than a bold tag: regular-ish weight near
+        // the rows' size, with clear room above each group, like Codex and
+        // Claude.
         Text(title)
-            .font(.system(size: 11, weight: .semibold))
+            .font(.system(size: TypeScale.sidebarHeading, weight: .medium))
             .foregroundStyle(.secondary)
             .padding(.leading, SidebarMetrics.leading)
-            .padding(.top, 14)
-            .padding(.bottom, 4)
+            .padding(.top, 18)
+            .padding(.bottom, 6)
             .frame(maxWidth: .infinity, alignment: .leading)
             .accessibilityAddTraits(.isHeader)
     }
@@ -136,6 +136,10 @@ private struct ThreadList<Content: View>: View {
                 .padding(.horizontal, SidebarMetrics.outerInset)
                 .padding(.bottom, 10)
             }
+            // With a mouse connected macOS draws a legacy scroller with a
+            // track down the list, which also pushed the times left. Codex,
+            // Claude and T3 show none; the list scrolls the same without it.
+            .scrollIndicators(.never)
             .focusable()
             .focused($focused)
             .focusEffectDisabled()
@@ -177,6 +181,8 @@ struct ThreadRowView: View {
     @Environment(\.controlActiveState) private var activeState
     let thread: ThreadSummary
     let mode: SidebarMode
+    /// The inbox section the row is under, so it doesn't repeat its heading.
+    var section: InboxSection? = nil
     let select: () -> Void
     @State private var hovering = false
     @State private var pressed = false
@@ -186,11 +192,11 @@ struct ThreadRowView: View {
     private var showsActions: Bool { hovering || app.hoverOverride == thread.id }
 
     var body: some View {
-        let look = mode == .inbox ? ThreadRowLook(thread) : ThreadRowLook(status: .time, unread: false, emphasised: false)
+        let look = mode == .inbox ? ThreadRowLook(thread, section: section) : ThreadRowLook(status: .time, unread: false, emphasised: false)
         VStack(alignment: .leading, spacing: 3) {
             HStack(alignment: .firstTextBaseline, spacing: 6) {
                 Text(thread.title.isEmpty ? "Untitled" : thread.title)
-                    .font(.system(size: 13, weight: look.emphasised ? .semibold : .regular))
+                    .font(.system(size: TypeScale.sidebarTitle, weight: look.emphasised ? .semibold : .regular))
                     .foregroundStyle(.primary)
                     .lineLimit(1)
                     .overlay(alignment: .leading) {
@@ -209,26 +215,27 @@ struct ThreadRowView: View {
                     // don't change its height.
                     Color.clear.frame(width: CGFloat(mode.rowActions.count) * 24 - 6, height: 1)
                 } else {
-                    trailing(look.status)
+                    trailing(look)
                 }
             }
             HStack(alignment: .firstTextBaseline, spacing: 6) {
                 if let line = secondLine {
                     Text(line)
-                        .font(.system(size: 12))
+                        .font(.system(size: TypeScale.sidebarPreview))
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                 } else {
                     // A new thread, or one that has only asked a question:
                     // a blank line here read as a gap in the list.
-                    Text("No reply yet")
-                        .font(.system(size: 12))
+                    Text(ThreadRowLook.emptyPreview(thread))
+                        .font(.system(size: TypeScale.sidebarPreview))
                         .foregroundStyle(.tertiary)
+                        .lineLimit(1)
                 }
                 Spacer(minLength: 0)
                 if app.showsAccountLabel(thread) {
                     Text(app.accountShortTitle(thread.accountId))
-                        .font(.system(size: 11))
+                        .font(.system(size: TypeScale.sidebarMeta))
                         .foregroundStyle(.tertiary)
                         .lineLimit(1)
                         .help(app.accountTitle(thread.accountId))
@@ -274,31 +281,46 @@ struct ThreadRowView: View {
     }
 
     @ViewBuilder
-    private func trailing(_ status: ThreadRowStatus) -> some View {
-        switch status {
+    private func trailing(_ look: ThreadRowLook) -> some View {
+        switch look.status {
         case .time:
             if mode != .snoozed {
-                Text(RelativeTime.short(mode == .archive ? thread.archivedAt ?? thread.lastActivityAt : thread.lastActivityAt, now: app.now))
-                    .font(.system(size: 11))
-                    .foregroundStyle(.tertiary)
-                    .monospacedDigit()
+                time.foregroundStyle(.tertiary)
             }
         case .working:
             HStack(spacing: 4) {
-                ProgressView().controlSize(.mini)
-                Text("Working")
+                // An accent mark that animates in the render server: the
+                // system mini spinner drew grey whatever the tint.
+                Image(systemName: "progress.indicator")
+                    .symbolEffect(.variableColor.iterative)
+                    .font(.system(size: 10, weight: .semibold))
+                if look.labelled { Text("Working") }
             }
-            .font(.system(size: 11, weight: .medium))
+            .font(.system(size: TypeScale.sidebarMeta, weight: .medium))
             .foregroundStyle(Color.accentColor)
+            .help("Working")
         case .needsYou:
-            Text("Needs you").font(.system(size: 11, weight: .medium)).foregroundStyle(.orange)
+            if look.labelled {
+                Text("Needs you").font(.system(size: TypeScale.sidebarMeta, weight: .medium)).foregroundStyle(Color(nsColor: Theme.needsYou))
+            } else {
+                // Under the Needs you heading: how long it has been waiting.
+                time.fontWeight(.medium).foregroundStyle(Color(nsColor: Theme.needsYou))
+                    .help("Waiting for you")
+            }
         case .failed:
-            Text("Failed").font(.system(size: 11, weight: .medium)).foregroundStyle(.red)
+            Text("Failed").font(.system(size: TypeScale.sidebarMeta, weight: .medium)).foregroundStyle(Color(nsColor: Theme.failed))
                 .help("The last turn failed")
         case .stopped:
-            Text("Stopped").font(.system(size: 11)).foregroundStyle(.secondary)
+            Text("Stopped").font(.system(size: TypeScale.sidebarMeta)).foregroundStyle(.secondary)
                 .help("Stopped when the runner restarted")
         }
+    }
+
+    /// When the thread was last active (archived, in the archive).
+    private var time: Text {
+        Text(RelativeTime.short(mode == .archive ? thread.archivedAt ?? thread.lastActivityAt : thread.lastActivityAt, now: app.now))
+            .font(.system(size: TypeScale.sidebarMeta))
+            .monospacedDigit()
     }
 }
 
@@ -353,7 +375,7 @@ struct RowIconButtonStyle: ButtonStyle {
 
         var body: some View {
             configuration.label
-                .font(.system(size: 12.5))
+                .font(.system(size: 13))
                 .foregroundStyle(hovering ? .primary : .secondary)
                 .frame(width: 22, height: 22)
                 .background(
@@ -374,7 +396,7 @@ private struct SidebarButtonRow: View {
     var hint: String? = nil
     var count: Int? = nil
     var active = false
-    var size: CGFloat = 13
+    var size: CGFloat = TypeScale.sidebarButton
     let action: () -> Void
     @State private var hovering = false
     @Environment(\.controlActiveState) private var activeState
@@ -391,7 +413,7 @@ private struct SidebarButtonRow: View {
                     .foregroundStyle(.primary)
                 Spacer(minLength: 6)
                 if let hint {
-                    Text(hint).font(.system(size: 11)).foregroundStyle(.tertiary)
+                    Text(hint).font(.system(size: TypeScale.sidebarMeta)).foregroundStyle(.tertiary)
                 }
                 if let count, count > 0 {
                     Text("\(count)").font(.system(size: size)).foregroundStyle(.tertiary).monospacedDigit()
@@ -400,7 +422,7 @@ private struct SidebarButtonRow: View {
             // The icon sits where thread titles start, Codex style.
             .padding(.leading, SidebarMetrics.leading - 2)
             .padding(.trailing, SidebarMetrics.trailing)
-            .padding(.vertical, size >= 13 ? 7 : 6)
+            .padding(.vertical, size >= TypeScale.sidebarButton ? 7 : 6)
             .background(background, in: RoundedRectangle(cornerRadius: SidebarMetrics.corner))
             .contentShape(Rectangle())
         }
@@ -419,10 +441,10 @@ private struct SidebarFooter: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            SidebarButtonRow(icon: "moon.zzz", title: "Snoozed", count: app.snoozed.count, size: 12) {
+            SidebarButtonRow(icon: "moon.zzz", title: "Snoozed", count: app.snoozed.count, size: TypeScale.sidebarFooter) {
                 app.sidebarMode = .snoozed
             }
-            SidebarButtonRow(icon: "archivebox", title: "Archive", count: app.archiveLoaded ? app.archivedCount : nil, size: 12) {
+            SidebarButtonRow(icon: "archivebox", title: "Archive", count: app.archiveLoaded ? app.archivedCount : nil, size: TypeScale.sidebarFooter) {
                 app.showArchive()
             }
         }
@@ -528,7 +550,7 @@ private struct EmptyNote: View {
 
     var body: some View {
         Text(text)
-            .font(.system(size: 12))
+            .font(.system(size: TypeScale.sidebarPreview))
             .foregroundStyle(.secondary)
             .padding(.leading, SidebarMetrics.leading)
             .padding(.top, 10)
@@ -552,10 +574,10 @@ private struct ModeHeader: View {
             .buttonStyle(RowIconButtonStyle())
             .help("Back to the inbox (Esc)")
             Text(title)
-                .font(.system(size: 13, weight: .semibold))
+                .font(.system(size: TypeScale.sidebarButton, weight: .semibold))
             Spacer()
             if let count, count > 0 {
-                Text("\(count)").font(.system(size: 12)).foregroundStyle(.tertiary).monospacedDigit()
+                Text("\(count)").font(.system(size: TypeScale.sidebarFooter)).foregroundStyle(.tertiary).monospacedDigit()
             }
         }
         // The chevron's glyph lines up with the icons and titles below.
@@ -573,11 +595,11 @@ struct SearchField: View {
     var body: some View {
         HStack(spacing: 6) {
             Image(systemName: "magnifyingglass")
-                .font(.system(size: 12))
+                .font(.system(size: 12.5))
                 .foregroundStyle(.tertiary)
             TextField(prompt, text: $text)
                 .textFieldStyle(.plain)
-                .font(.system(size: 13))
+                .font(.system(size: TypeScale.sidebarButton))
             if !text.isEmpty {
                 Button {
                     text = ""

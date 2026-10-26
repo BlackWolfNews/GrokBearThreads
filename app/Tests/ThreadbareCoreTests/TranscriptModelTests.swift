@@ -94,6 +94,21 @@ final class TranscriptModelTests: XCTestCase {
         XCTAssertEqual(question.resolution?.decision, .answered)
     }
 
+    /// What Return in an empty composer can allow: approval cards still
+    /// waiting, oldest first, never questions.
+    func testPendingApprovalIds() {
+        var model = TranscriptModel(events: [
+            E.event(1, "approval.requested", ["approvalId": "ap1", "name": "Bash", "title": "ls", "input": [:], "options": ["allow", "deny"]]),
+            E.event(2, "question.requested", ["approvalId": "q1", "questions": [["question": "Which?", "multiSelect": false, "options": [["label": "A"]]]]]),
+            E.event(3, "approval.requested", ["approvalId": "ap2", "name": "Bash", "title": "pwd", "input": [:], "options": ["allow", "deny"]]),
+        ])
+        XCTAssertEqual(model.pendingApprovalIds, ["ap1", "ap2"])
+        _ = model.apply([E.event(4, "approval.resolved", ["approvalId": "ap1", "decision": "allow"])])
+        XCTAssertEqual(model.pendingApprovalIds, ["ap2"])
+        _ = model.apply([E.event(5, "approval.resolved", ["approvalId": "ap2", "decision": "deny"])])
+        XCTAssertEqual(model.pendingApprovalIds, [])
+    }
+
     func testPlanUpdatesOneRowPerTurn() {
         var model = TranscriptModel(events: [E.event(1, "plan.updated", ["entries": [["text": "A", "status": "pending"]]])])
         let change = model.apply([E.event(2, "plan.updated", ["entries": [["text": "A", "status": "completed"]]])])

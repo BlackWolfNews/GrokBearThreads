@@ -27,6 +27,38 @@ final class SidebarRowTests: XCTestCase {
         XCTAssertFalse(look(.running, needsYou: true).unread)
     }
 
+    /// Under "Needs you" and "Running" a row doesn't say its section's
+    /// word again; a row whose state differs from its section still does.
+    func testSectionWordsAreNotRepeated() {
+        func look(_ status: ThreadStatus, needsYou: Bool = false, in section: InboxSection) -> ThreadRowLook {
+            ThreadRowLook(ThreadSummary(id: "t", title: "t", status: status, needsYou: needsYou), section: section)
+        }
+        XCTAssertEqual(look(.waiting, in: .needsYou), ThreadRowLook(status: .needsYou, unread: false, emphasised: true, labelled: false))
+        XCTAssertEqual(look(.running, in: .running), ThreadRowLook(status: .working, unread: false, emphasised: false, labelled: false))
+        XCTAssertEqual(look(.starting, in: .running).labelled, false)
+        // Finished and unread under Needs you: the dot and the time, as before.
+        XCTAssertEqual(look(.idle, needsYou: true, in: .needsYou), ThreadRowLook(status: .time, unread: true, emphasised: true))
+        // A failed thread under Needs you, or anything in the inbox, keeps its word.
+        XCTAssertTrue(look(.error, needsYou: true, in: .needsYou).labelled)
+        XCTAssertTrue(look(.stopped, in: .inbox).labelled)
+        XCTAssertTrue(look(.waiting, in: .inbox).labelled)
+        // Outside the inbox (snoozed, archived) there's no section to lean on.
+        XCTAssertTrue(ThreadRowLook(ThreadSummary(id: "t", title: "t", status: .waiting)).labelled)
+    }
+
+    func testEmptyPreviewForAThreadWaitingOnMike() {
+        XCTAssertEqual(ThreadRowLook.emptyPreview(ThreadSummary(id: "t", title: "t", status: .waiting)), "Waiting for your answer")
+        XCTAssertEqual(ThreadRowLook.emptyPreview(ThreadSummary(id: "t", title: "t", status: .idle)), "No reply yet")
+        XCTAssertEqual(ThreadRowLook.emptyPreview(ThreadSummary(id: "t", title: "t", status: .starting)), "No reply yet")
+    }
+
+    func testSectionTitles() {
+        XCTAssertEqual(InboxSection.allCases.map(\.title), ["Needs you", "Running", "Inbox"])
+        let sections = ThreadSections(needsYou: [ThreadSummary(id: "a", title: "a")], running: [], inbox: [ThreadSummary(id: "b", title: "b")])
+        XCTAssertEqual(sections[.needsYou].map(\.id), ["a"])
+        XCTAssertEqual(sections[.inbox].map(\.id), ["b"])
+    }
+
     func testAccountShortNames() {
         let accounts = [
             Account(id: "claude-main", title: "mike@example.com"),

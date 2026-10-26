@@ -1,28 +1,82 @@
 import AppKit
 
+/// Every text size in the window, in one place. One step up from the
+/// system's 13 pt default: at 14 pt body text Threadbare read about 2 pt
+/// smaller than Codex and Claude beside it. Theme, the sidebar, the header
+/// and the composer all take their sizes from here, so a text size setting
+/// later only has to change this.
+enum TypeScale {
+    // Transcript
+    static let body: CGFloat = 15
+    /// Fixed line heights, with the glyphs centred in them (see
+    /// `Theme.lines`): about 1.5 times the text size, like the apps Mike
+    /// compares this with.
+    static let bodyLine: CGFloat = 23
+    /// Work lines: group summaries, tool and thinking rows, the working line.
+    static let work: CGFloat = 14
+    static let workLine: CGFloat = 20
+    static let code: CGFloat = 13
+    static let codeLine: CGFloat = 19.5
+    /// Tool output and file contents in an expanded tool.
+    static let output: CGFloat = 12.5
+    static let outputLine: CGFloat = 18
+    static let diff: CGFloat = 12.5
+    static let diffLine: CGFloat = 18.5
+    static let headings: (CGFloat, CGFloat, CGFloat) = (18, 16, 15)
+    static let cardTitle: CGFloat = 14
+    /// Card labels, notes and table headers.
+    static let label: CGFloat = 13
+    /// Folders after file names, "Show 12 more lines", line counts.
+    static let detail: CGFloat = 12.5
+    /// The turn footer and centred system notes.
+    static let small: CGFloat = 11.5
+
+    // Sidebar
+    static let sidebarTitle: CGFloat = 14
+    static let sidebarPreview: CGFloat = 13
+    /// Times, statuses and account names on a row.
+    static let sidebarMeta: CGFloat = 11.5
+    static let sidebarHeading: CGFloat = 12
+    static let sidebarButton: CGFloat = 14
+    static let sidebarFooter: CGFloat = 13
+
+    // Header and composer
+    static let header: CGFloat = 14
+    static let composer: CGFloat = 15
+    static let chip: CGFloat = 13
+}
+
 /// Fonts, colours and spacing for the transcript. Colours are dynamic so
 /// cached attributed strings follow light and dark mode.
 enum Theme {
-    static let bodySize: CGFloat = 14
-    /// Fixed line heights, with the glyphs centred in them (see `lines`):
-    /// about 1.5 times the text size, like the apps Mike compares this with.
-    static let bodyLine: CGFloat = 21
-    static let codeSize: CGFloat = 12.5
-    static let codeLine: CGFloat = 18.5
-    static let diffSize: CGFloat = 12
-    static let diffLine: CGFloat = 18
+    static let bodySize = TypeScale.body
+    static let bodyLine = TypeScale.bodyLine
+    static let codeSize = TypeScale.code
+    static let codeLine = TypeScale.codeLine
+    static let diffSize = TypeScale.diff
+    static let diffLine = TypeScale.diffLine
     static let bodyFont = NSFont.systemFont(ofSize: bodySize)
     static let boldFont = NSFont.systemFont(ofSize: bodySize, weight: .semibold)
     static let italicFont = NSFontManager.shared.convert(NSFont.systemFont(ofSize: bodySize), toHaveTrait: .italicFontMask)
     static let codeFont = NSFont.monospacedSystemFont(ofSize: codeSize, weight: .regular)
     static let codeBoldFont = NSFont.monospacedSystemFont(ofSize: codeSize, weight: .semibold)
     static let diffFont = NSFont.monospacedSystemFont(ofSize: diffSize, weight: .regular)
-    static let smallFont = NSFont.systemFont(ofSize: 11)
-    /// Work lines: group summaries, tool and thinking rows.
-    static let workFont = NSFont.systemFont(ofSize: 13)
-    static let workLine: CGFloat = 18
-    static let cardTitleFont = NSFont.systemFont(ofSize: 13, weight: .semibold)
-    static let statsFont = NSFont.monospacedDigitSystemFont(ofSize: 12, weight: .regular)
+    static let outputFont = NSFont.monospacedSystemFont(ofSize: TypeScale.output, weight: .regular)
+    static let smallFont = NSFont.systemFont(ofSize: TypeScale.small)
+    static let labelFont = NSFont.systemFont(ofSize: TypeScale.label)
+    static let detailFont = NSFont.systemFont(ofSize: TypeScale.detail)
+    static let workFont = NSFont.systemFont(ofSize: TypeScale.work)
+    static let workLine = TypeScale.workLine
+    /// A one-line label's height for `workFont`, so work lines centre their
+    /// text the same way whatever the scale.
+    static let workLabelHeight = ceil(workFont.ascender - workFont.descender + workFont.leading)
+    static let cardTitleFont = NSFont.systemFont(ofSize: TypeScale.cardTitle, weight: .semibold)
+    static let statsFont = NSFont.monospacedDigitSystemFont(ofSize: TypeScale.detail, weight: .regular)
+
+    /// One digit's advance in a monospaced font, for line number gutters.
+    static func digitWidth(_ font: NSFont) -> CGFloat {
+        ceil(("0" as NSString).size(withAttributes: [.font: font]).width * 4) / 4
+    }
 
     /// Widest the reading column gets; wider windows centre it.
     static let maxContentWidth: CGFloat = 780
@@ -63,6 +117,11 @@ enum Theme {
                                    light: NSColor(srgbRed: 0.1, green: 0.55, blue: 0.22, alpha: 1))
     static let removedText = dynamic(dark: NSColor(srgbRed: 1, green: 0.45, blue: 0.45, alpha: 1),
                                      light: NSColor(srgbRed: 0.8, green: 0.15, blue: 0.15, alpha: 1))
+    /// "Needs you" and "Failed" in the sidebar. System orange and red on
+    /// the light sidebar measured about 2:1; these darker light-mode shades
+    /// are about 4.5:1 and the same hue.
+    static let needsYou = dynamic(dark: .systemOrange, light: NSColor(srgbRed: 0.70, green: 0.33, blue: 0, alpha: 1))
+    static let failed = dynamic(dark: .systemRed, light: NSColor(srgbRed: 0.78, green: 0.13, blue: 0.13, alpha: 1))
     static let errorBackground = dynamic(dark: NSColor(srgbRed: 0.7, green: 0.2, blue: 0.2, alpha: 0.18),
                                          light: NSColor(srgbRed: 1, green: 0.94, blue: 0.94, alpha: 1))
 

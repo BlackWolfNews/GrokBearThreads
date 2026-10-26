@@ -83,11 +83,52 @@ final class TranscriptController: NSObject, NSTableViewDataSource, NSTableViewDe
         scrollView.autohidesScrollers = true
         scrollView.scrollerStyle = .overlay
         scrollView.automaticallyAdjustsContentInsets = false
-        scrollView.contentInsets = NSEdgeInsets(top: 10, left: 0, bottom: 14, right: 0)
+        // Room below the last row for the bottom fade, so a thread pinned to
+        // the bottom shows its last row whole.
+        scrollView.contentInsets = NSEdgeInsets(top: 10, left: 0, bottom: Self.fadeHeight + 4, right: 0)
+        scrollView.wantsLayer = true
         scrollView.contentView.postsBoundsChangedNotifications = true
         scrollView.contentView.postsFrameChangedNotifications = true
         NotificationCenter.default.addObserver(self, selector: #selector(boundsChanged), name: NSView.boundsDidChangeNotification, object: scrollView.contentView)
         NotificationCenter.default.addObserver(self, selector: #selector(frameChanged), name: NSView.frameDidChangeNotification, object: scrollView.contentView)
+    }
+
+    // MARK: Bottom fade
+
+    /// The transcript ends a few points above the composer card. Cut off
+    /// there, the last line was sliced through its letters and images got a
+    /// hard edge, which read as a drawing glitch. A static mask fades the
+    /// bottom out instead; it only changes when the view is resized.
+    static let fadeHeight: CGFloat = 18
+    private let fadeMask = CALayer()
+    private let fadeGradient = CAGradientLayer()
+    private let fadeScroller = CALayer()
+
+    private func updateFade() {
+        guard let layer = scrollView.layer else { return }
+        if layer.mask !== fadeMask {
+            fadeGradient.colors = [NSColor.black.cgColor, NSColor.black.cgColor, NSColor.clear.cgColor]
+            fadeScroller.backgroundColor = NSColor.black.cgColor
+            fadeMask.addSublayer(fadeGradient)
+            fadeMask.addSublayer(fadeScroller)
+            layer.mask = fadeMask
+        }
+        let bounds = scrollView.bounds
+        guard bounds.height > 0 else { return }
+        // The scroller strip on the right stays whole; only the text fades.
+        let scroller: CGFloat = 16
+        let stop = max(0, min(1, Self.fadeHeight / bounds.height))
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        fadeMask.frame = bounds
+        fadeGradient.frame = NSRect(x: 0, y: 0, width: max(0, bounds.width - scroller), height: bounds.height)
+        fadeScroller.frame = NSRect(x: max(0, bounds.width - scroller), y: 0, width: scroller, height: bounds.height)
+        // Layer y runs up from the bottom here (the scroll view isn't flipped).
+        let flipped = layer.isGeometryFlipped
+        fadeGradient.startPoint = CGPoint(x: 0.5, y: flipped ? 0 : 1)
+        fadeGradient.endPoint = CGPoint(x: 0.5, y: flipped ? 1 : 0)
+        fadeGradient.locations = [0, NSNumber(value: Double(1 - stop)), 1]
+        CATransaction.commit()
     }
 
     // MARK: Showing a session
@@ -106,6 +147,7 @@ final class TranscriptController: NSObject, NSTableViewDataSource, NSTableViewDe
         deferred = []
         remeasureTask?.cancel()
         width = currentTableWidth
+        updateFade()
         reloadAll()
     }
 
@@ -434,7 +476,8 @@ final class TranscriptController: NSObject, NSTableViewDataSource, NSTableViewDe
     }
 
     @objc private func frameChanged() {
-        // A shorter view (the archived banner appearing, the composer
+        updateFade()
+        // A shorter view (a connection banner appearing, the composer
         // growing with an attachment or a long draft) keeps its top where it
         // was, which hid the newest rows of a thread that was pinned to the
         // bottom. Whether it was pinned is judged by the height it had.

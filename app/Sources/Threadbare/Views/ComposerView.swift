@@ -35,6 +35,7 @@ struct ComposerView: View {
                 focusTrigger: app.focusComposer,
                 placeholder: "Message",
                 onSend: { send() },
+                onReturnWhenEmpty: { draft.wrappedValue.images.isEmpty && allowSoleApproval() },
                 onImages: { urls in attach(urls, to: draft) }
             )
             .frame(height: height)
@@ -72,6 +73,19 @@ struct ComposerView: View {
     private func send() {
         // AppModel empties the box, and puts the draft back if it isn't sent.
         app.send(threadId: thread?.id)
+    }
+
+    /// Return in an empty box allows the open thread's approval card, the
+    /// ⏎ its Allow button shows, when there's exactly one waiting (with
+    /// two, Return can't know which). Read when the key is pressed, so the
+    /// composer doesn't redraw as approvals come and go.
+    private func allowSoleApproval() -> Bool {
+        guard let thread else { return false }
+        let session = app.session(for: thread.id)
+        let pending = session.model.pendingApprovalIds
+        guard pending.count == 1, let id = pending.first else { return false }
+        session.respond(approvalId: id, decision: .allow, answers: nil, message: nil)
+        return true
     }
 
     /// Paste, drop and the "+" button all end up here: each file goes
@@ -190,9 +204,11 @@ struct ComposerTextField: NSViewRepresentable {
     var focusTrigger: Int
     var placeholder: String
     var onSend: () -> Void
+    /// Return with nothing typed: true if it did something.
+    var onReturnWhenEmpty: () -> Bool = { false }
     var onImages: ([URL]) -> Void
 
-    static let font = NSFont.systemFont(ofSize: 14)
+    static let font = NSFont.systemFont(ofSize: TypeScale.composer)
     /// About 1.45 lines of air, like the transcript. Spacing goes under each
     /// line, so the first line's top (and the placeholder) stays put.
     static let lineSpacing: CGFloat = 3
@@ -202,7 +218,7 @@ struct ComposerTextField: NSViewRepresentable {
         return [.font: font, .foregroundColor: NSColor.labelColor, .paragraphStyle: style]
     }()
     /// Two lines, before the first measure comes in.
-    static let minHeight: CGFloat = 40
+    static let minHeight: CGFloat = 42
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
 
@@ -210,7 +226,7 @@ struct ComposerTextField: NSViewRepresentable {
         let textView = Self.makeTextView()
         textView.delegate = context.coordinator
         textView.placeholder = placeholder
-        let scroll = NSScrollView()
+        let scroll = OverlayScrollView()
         scroll.documentView = textView
         scroll.drawsBackground = false
         scroll.hasVerticalScroller = true
@@ -262,6 +278,7 @@ struct ComposerTextField: NSViewRepresentable {
         context.coordinator.parent = self
         guard let textView = scroll.documentView as? ComposerTextView else { return }
         textView.onSend = onSend
+        textView.onReturnWhenEmpty = onReturnWhenEmpty
         textView.onImages = onImages
         textView.placeholder = placeholder
         if textView.string != text {
@@ -317,8 +334,19 @@ struct ComposerTextField: NSViewRepresentable {
     }
 }
 
+/// Always overlay scrollers. AppKit sets every scroll view back to the
+/// system's style when a mouse is connected, which drew a legacy scroller
+/// with a track inside the rounded card.
+final class OverlayScrollView: NSScrollView {
+    override var scrollerStyle: NSScroller.Style {
+        get { .overlay }
+        set { super.scrollerStyle = .overlay }
+    }
+}
+
 final class ComposerTextView: NSTextView {
     var onSend: (() -> Void)?
+    var onReturnWhenEmpty: (() -> Bool)?
     var onImages: (([URL]) -> Void)?
     var placeholder = "" {
         didSet { if placeholder != oldValue { needsDisplay = true } }
@@ -359,6 +387,8 @@ final class ComposerTextView: NSTextView {
         if isReturn, !hasMarkedText() {
             if event.modifierFlags.contains(.shift) || event.modifierFlags.contains(.option) {
                 insertNewlineIgnoringFieldEditor(nil)
+            } else if string.isEmpty, onReturnWhenEmpty?() == true {
+                // Allowed the waiting approval.
             } else {
                 onSend?()
             }

@@ -126,7 +126,7 @@ final class WorkGroupTests: XCTestCase {
         XCTAssertEqual(model.rows.map(\.id), ["u:1", "g:r:r1", "w:t1"])
         XCTAssertEqual(change.removed, [1])
         XCTAssertEqual(change.inserted, [1])
-        XCTAssertEqual(change.updated, [], "the working line doesn't change")
+        XCTAssertEqual(change.updated, [2], "the working line drops its spinner under the live group")
 
         let version = model.rows[1].version
         change = model.apply([E.result(5, "c1"), E.call(6, "c2", name: "Read", kind: "read", title: "Read a.swift")])
@@ -144,7 +144,7 @@ final class WorkGroupTests: XCTestCase {
         Self.replay(change, onto: &table, model: model)
         XCTAssertEqual(model.rows.map(\.id), ["u:1", "g:r:r1", "a:m1", "w:t1"])
         XCTAssertEqual(change.inserted, [2])
-        XCTAssertEqual(change.updated, [1])
+        XCTAssertEqual(change.updated, [1, 3], "the group and the working line, which gets its spinner back")
         guard case .group(let finished) = model.rows[1].content else { return XCTFail() }
         XCTAssertFalse(finished.isLive)
         XCTAssertNil(finished.currentAction)
@@ -272,6 +272,29 @@ final class WorkGroupTests: XCTestCase {
         Self.replay(change, onto: &table, model: model)
         XCTAssertEqual(model.rows.map(\.id), ["u:1", "t:c1", "ap:ap1", "f:t1"])
         XCTAssertNil(model.openTurn)
+    }
+
+    /// Under the live group (open or closed) the working line leaves the
+    /// spinner to the group; under anything else it has its own.
+    func testTheWorkingLineKnowsWhenItIsUnderTheLiveGroup() {
+        func afterLiveGroup(_ model: TranscriptModel) -> Bool? {
+            guard case .working(let status)? = model.rows.last?.content else { return nil }
+            return status.afterLiveGroup
+        }
+        var model = TranscriptModel(events: [E.user(1, "Go"), Self.started(2), E.call(3, "c1")])
+        XCTAssertEqual(afterLiveGroup(model), false, "a lone tool row")
+        _ = model.apply([E.call(4, "c2")])
+        XCTAssertEqual(afterLiveGroup(model), true)
+        _ = model.setExpanded("g:t:c1", true)
+        XCTAssertEqual(model.rows.map(\.id), ["u:1", "g:t:c1", "t:c1", "t:c2", "w:t1"])
+        XCTAssertEqual(afterLiveGroup(model), true, "still under it when it's open")
+        _ = model.apply([E.text(5, "m1", "Found it")])
+        XCTAssertEqual(afterLiveGroup(model), false)
+        // A model loaded in one go agrees with one built up step by step.
+        var fresh = TranscriptModel(events: [E.user(1, "Go"), Self.started(2), E.call(3, "c1"), E.call(4, "c2")])
+        XCTAssertEqual(afterLiveGroup(fresh), true)
+        _ = fresh.setExpanded("g:t:c1", true)
+        XCTAssertEqual(afterLiveGroup(fresh), true)
     }
 
     func testATurnThatStartedOnAnOlderPageIsStillRunning() {

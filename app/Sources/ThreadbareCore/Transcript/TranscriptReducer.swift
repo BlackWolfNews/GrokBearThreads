@@ -126,6 +126,15 @@ public struct TranscriptModel: Sendable {
 
     public func isExpanded(_ key: String) -> Bool { expanded.contains(key) }
 
+    /// Approval cards (not questions) still waiting on Mike, oldest first.
+    /// Return in an empty composer allows the one there is.
+    public var pendingApprovalIds: [String] {
+        pendingCards.keys
+            .filter { $0.hasPrefix("ap:") }
+            .sorted { (itemIndex[$0] ?? 0) < (itemIndex[$1] ?? 0) }
+            .map { String($0.dropFirst(3)) }
+    }
+
     /// Replaces everything with this page of events (oldest first).
     public mutating func load(events newEvents: [Event], inProgress: [EventsPage.InProgress] = []) {
         events = newEvents.filter { !$0.isTransient }.sorted { $0.seq < $1.seq }
@@ -707,7 +716,12 @@ public struct TranscriptModel: Sendable {
             }
         }
         if workingLine, let turn = openTurn, !pendingCards.values.contains(turn) {
-            let status = WorkingStatus(turnId: turn, startedAt: turnStarts[turn])
+            // The row above the line, open group items aside. With nothing
+            // rebuilt (only the tail was dirty) it's the last row kept.
+            let above = out.last(where: { !$0.inGroup }) ?? rows.last(where: { !$0.inGroup && $0.kind != .working })
+            var afterLiveGroup = false
+            if case .group(let group)? = above?.content { afterLiveGroup = group.isLive }
+            let status = WorkingStatus(turnId: turn, startedAt: turnStarts[turn], afterLiveGroup: afterLiveGroup)
             out.append(derived("w:" + turn, seq: lastSeq, turnId: turn, .working(status)))
             starts.append(items.count)
         }

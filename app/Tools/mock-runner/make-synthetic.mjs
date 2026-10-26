@@ -186,7 +186,7 @@ function others() {
       reply: '## 0.4\n\n- **Uploads resume** after the app quits or the network drops.\n- The thumbnail grid scrolls faster with large libraries.\n- The toolbar reads properly in dark mode.\n\nWant a shorter version for the App Store?' },
   ] });
   smallThread({ name: 'button-colour', title: 'Pick a colour for the new Share button', minutesAgo: 12, status: 'waiting', needsYou: true, turns: [
-    { user: 'Add a Share button to the photo viewer toolbar.', tools: [{ id: 'read', name: 'Read', kind: 'read', title: 'Read ~/dev/photo-sync/Sources/Viewer/Toolbar.swift', output: 'struct Toolbar: View { ... }' }],
+    { user: 'Add a Share button to the photo viewer toolbar.', tools: [{ id: 'read', name: 'Read', kind: 'read', title: 'Read ~/dev/photo-sync/Sources/Viewer/Toolbar.swift', input: { file_path: `${home}/dev/photo-sync/Sources/Viewer/Toolbar.swift` }, output: 'struct Toolbar: View { ... }' }],
       question: [{ question: 'Which colour should the Share button be?', header: 'Colour', multiSelect: false, options: [
         { label: 'Accent blue', description: 'Matches the other toolbar buttons' }, { label: 'Green', description: 'Stands out as the main action' }, { label: 'Plain grey' }] }] },
   ] });

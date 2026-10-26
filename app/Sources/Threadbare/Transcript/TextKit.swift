@@ -49,10 +49,16 @@ final class BackgroundLayoutManager: NSLayoutManager {
                 let part = NSIntersectionRange(lineGlyphs, glyphs)
                 guard part.length > 0 else { return }
                 var box = self.boundingRect(forGlyphRange: part, in: textContainer)
+                // The run's last character is kerned to make room for the
+                // pill (MarkdownRenderer); that space isn't part of the glyphs.
+                let last = self.characterIndexForGlyph(at: NSMaxRange(part) - 1)
+                if let kern = storage.attribute(.kern, at: last, effectiveRange: nil) as? CGFloat {
+                    box.size.width = max(0, box.width - kern)
+                }
                 let baseline = fragment.minY + self.location(forGlyphAt: part.location).y
                 box.origin.y = baseline - font.ascender - 1.5
                 box.size.height = font.ascender - font.descender + 3
-                box = box.insetBy(dx: -2.5, dy: 0).offsetBy(dx: origin.x, dy: origin.y)
+                box = box.insetBy(dx: -MarkdownRenderer.pillPad, dy: 0).offsetBy(dx: origin.x, dy: origin.y)
                 NSBezierPath(roundedRect: box, xRadius: 3.5, yRadius: 3.5).fill()
             }
         }
