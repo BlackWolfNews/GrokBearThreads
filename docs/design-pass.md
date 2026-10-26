@@ -80,31 +80,57 @@ Numbers are points. Keep both light and dark mode right (check both with
 `Tools/screenshots.sh --appearance light`). Keep the copy rules in
 AGENTS.md: plain words, no eyebrow or kicker labels, no em dashes.
 
+Text sizes are one step above the first draft of this brief. Review round
+1 put Threadbare beside Codex and Claude and its 14 pt body read about 2
+pt smaller than theirs, so every size moved up together. The sizes below
+are the ones in `TypeScale` (Theme.swift), which everything takes its
+sizes from.
+
+A few rules changed in the design reviews after the first build, each for
+a reason given where it applies: the sidebar doesn't repeat its section
+heading on a row, an allowed approval folds into the work, and a live
+group leaves the turn's one spinner to the working line.
+
 ### Sidebar and header (owner: sidebar)
 
-- Row: title 13 pt, `.primary`, semibold when the thread needs Mike or is
-  unread, regular otherwise. Preview 12 pt `.secondary`, one line. Right
-  side of the title line: the relative time in 11 pt `.tertiary` with
-  monospaced digits, or the status instead of it:
-  - running: a small spinner and "Working" in the accent colour,
-  - waiting on an approval or question: "Needs you" in orange,
+- Row: title 14 pt, `.primary`, semibold when the thread needs Mike or is
+  unread, regular otherwise. Preview 13 pt `.secondary`, one line. Right
+  side of the title line: the relative time in 11 pt with monospaced
+  digits (a readable faint grey; the system tertiary was about 2:1), or the
+  status instead of it:
+  - running: an accent spinner and how long the turn has run ("37s"), in
+    the accent colour, counting once a second,
+  - waiting on an approval or question: how long it has waited ("9m"), in
+    orange,
+  - failed: "Failed" in red; cut off by a runner restart: "Stopped",
   - finished and unread: a 7 pt accent dot before the title (Mail style).
+- A row says its status in words ("Working 37s", "Needs you") only when
+  it isn't under the heading that already says it. Under "Running" and
+  "Needs you" the word took about 60 pt of the title line, so the rows
+  that mattered most had the most cut-off titles; the heading, the accent
+  spinner and the orange time say it there. The tooltip still says
+  "Working" or "Waiting for you". Rows in the Snoozed and Archive lists
+  show when they come back or were archived, not a status.
 - Account: only when it isn't the default account, as plain 11 pt
   `.tertiary` text (the part of the email before the @), not a capsule.
 - Hover: the time or status is replaced by two 22 pt borderless icon
   buttons, Snooze (`moon.zzz`, menu of presets) and Archive
   (`archivebox`). In the Archive view: Unarchive
   (`arrow.uturn.backward`). Clicking them must not select the row.
-- Row padding 8 vertical, 10 horizontal; selected background
+- Row padding 8 vertical, 18 leading (a gutter for the unread dot, so
+  titles line up with or without one) and 10 trailing; selected background
   `Color.primary.opacity(0.08)` (0.06 when the window isn't key),
-  8 pt corners. Section headers 11 pt semibold `.secondary`, 14 above, 4
-  below.
-- Top of the sidebar, where search was: a "New thread" row with
+  8 pt corners. Section headings 13 pt semibold `.secondary` (no weaker
+  than the rows they group), 18 above, 6 below.
+- Top of the sidebar, where search was: a 14 pt "New thread" row with
   `square.and.pencil` and a ⌘N hint in `.tertiary`.
 - Footer: "Snoozed" and "Archive" as two full-width rows with counts
-  ("Snoozed 7"), 12 pt, icon + label + count, hover highlight.
+  ("Snoozed 7"), 13 pt, icon + label + count, hover highlight. The list
+  fades out over its last 30 pt above the footer rather than cutting a
+  row through its text.
 - Header: one line, `<folder name> / <title>`, folder in `.secondary`,
-  title in `.primary` semibold 13 pt. The full path goes in the tooltip.
+  title in `.primary` semibold 15 pt (at 14 the title was smaller than the
+  15 pt text under it). The full path goes in the tooltip.
   Toolbar: only the ... menu.
 - New thread state: a heading ("What should we work on?") and the
   composer centred in the pane (about 40% down), with "Starts in misc on
@@ -119,9 +145,10 @@ AGENTS.md: plain words, no eyebrow or kicker labels, no em dashes.
   with a soft shadow on light, 0.5 pt `separator` border, 14 pt padding,
   12 pt margin from the window's bottom edge, the same width as the
   transcript column (780 max) and centred under it.
-- Text 14 pt, placeholder "Message" in `.tertiary`, at least two lines tall,
-  grows to about 10 lines then scrolls.
-- Controls row: "+" on the left, then quiet menu chips in 12 pt
+- Text 15 pt on the transcript's 23 pt lines, placeholder "Message" in
+  `.tertiary`, at least two lines tall, grows to about 10 lines then
+  scrolls.
+- Controls row: "+" on the left, then quiet menu chips in 13 pt
   `.secondary`: account (the part of the email before the @), model
   ("Default model" becomes the account's model name if known, else
   "Default"), and the permission chip "Full access" (`lock.open`) or "Ask
@@ -144,24 +171,34 @@ AGENTS.md: plain words, no eyebrow or kicker labels, no em dashes.
 - **Work groups.** In ThreadbareCore, fold each maximal run of reasoning,
   tool calls (with their results and diffs) and system notes inside one
   turn into a group row. Assistant text, user messages, approval and
-  question cards, plan cards, errors and the turn footer end a group and
-  are never hidden in one. A run of one item is shown as that item, not
-  as a group.
-  - Collapsed (the default): one line, `chevron.right` + a summary in
-    13 pt `.secondary`: "Read 3 files, searched twice, edited 2 files, ran
-    4 commands" (and "used 2 tools", "thought" when there's nothing else,
-    "ran an agent", "fetched 2 pages"). Counts in words up to ten is
-    optional; keep it short.
+  question cards still waiting or turned down, plan cards, images, errors
+  and the turn footer end a group and are never hidden in one. A run of
+  one item is shown as that item, not as a group.
+  - An approval Mike allowed is a step of the work it let run: one work
+    line ("Allowed  Write release.sh") that folds into the run around it.
+    As a card it split every edit in an "Ask before edits" thread into a
+    group, a card, the edit and a second group. When the tool call it
+    allowed has its own row, the line doesn't open: that row opens to the
+    same file or command. Denied and expired ones are lines too, between
+    runs, and a waiting one is a card.
+  - Collapsed (the default): one line, a `hammer` icon, a summary in
+    14 pt `.secondary` and `chevron.right` after the words: "Read 3
+    files, searched twice, edited 2 files, ran 4 commands" (and "used 2
+    tools", "thought" when there's nothing else, "ran an agent", "fetched
+    2 pages"). Counts in words up to ten is optional; keep it short.
   - Expanded: the group's rows as they are now, indented 18.
   - Live (the last group of a running turn): the summary plus the current
-    action's title after a dot, with a small spinner, e.g. "Read 3 files ·
-    Running npm test". Stays collapsed unless Mike opens it.
+    action's title after a dot, e.g. "Read 3 files · Running npm test",
+    the action the brightest text on the line. Stays collapsed unless Mike
+    opens it. It keeps its hammer rather than a spinner: the working line
+    right under it is the turn's one spinner, and two stacked busy lines
+    read as a stray child row.
   - Ids: `g:<first item id>`, stable as the group grows, so expansion and
     cached heights survive streaming.
   - Unit tests for the grouping rules.
 - **Working line.** While a turn runs, the last row is "Working for 12s"
-  (counting) in 12 pt `.tertiary` with a spinner. It replaces the spinner on
-  tool rows.
+  (counting) in 14 pt `.secondary` with a spinner (at 12 pt tertiary it
+  was hard to read). It replaces the spinner on tool rows and groups.
 - **Changed files card.** After a turn's last row (before the footer), if the
   turn edited or wrote files: a card "Edited 3 files" listing each file
   (name in `.primary`, folder in `.tertiary`, `+N` green `−M` red at the
@@ -169,16 +206,17 @@ AGENTS.md: plain words, no eyebrow or kicker labels, no em dashes.
   0.5 pt separator border, faint fill.
 - **Diffs.** Header row with the path and +N −M; lines on faint tints (added
   green at 10 to 12% opacity, removed red at 10 to 12%), the +/- sign and
-  line numbers in a gutter in `.tertiary`, 12 pt monospaced, 10 pt
+  line numbers in a gutter in `.tertiary`, 13 pt monospaced, 10 pt
   corners, collapsed after 12 lines with "Show 30 more lines".
 - **Expanded tools.** Commands: `$ command` then the output in a
   monospaced block. Read: the file path then the content with line numbers.
   Search: the query then the matches. Others: input as `key: value` lines
   (not JSON braces) then the result. No bold JSON.
-- **Markdown.** Body 14 pt, line height 1.45, 10 between paragraphs, 6
-  between list items. Headings: 17 / 15 / 14 semibold with 16 above.
-  Inline code 12.5 pt monospaced on a faint pill. Code blocks: 8 pt corners,
-  faint fill, 0.5 pt border, 12 padding, 12.5 pt.
+- **Markdown.** Body 15 pt on 23 pt lines (about 1.5), 10 between
+  paragraphs, 6 between list items. Headings: 18 / 16 / 15 semibold with
+  16 above. Inline code 13 pt monospaced on a faint pill. Code blocks: 8 pt
+  corners, faint fill, 0.5 pt border, 12 padding, 13 pt (one monospaced
+  size for code, tool output and diffs).
 - **User messages.** Right-aligned bubble, 18 pt corners, 10/14 padding,
   max 80% of the column, fill a touch tinted towards the accent (about 8%
   accent over 6% white on dark). Attached images above it, right-aligned,
@@ -187,7 +225,7 @@ AGENTS.md: plain words, no eyebrow or kicker labels, no em dashes.
   in `.tertiary`, inside groups only (a lone thinking block is its own
   one-item row).
 - **Approval and question cards.** 12 pt corners, faint fill, 0.5 pt border
-  with a 3 pt accent bar on the left instead of the blue outline. Title 13
+  with a 3 pt accent bar on the left instead of the blue outline. Title 14
   pt semibold ("Run this command?", "Write .gitignore?"), the payload in a
   monospaced block (the command, or the file path and the start of the
   content). Buttons: Allow as the prominent default (accent fill, ⏎),
