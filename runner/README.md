@@ -438,7 +438,7 @@ so exports never reach design screenshots.
 ```sh
 npm test               # unit tests, no network, about 5 seconds
 npm run typecheck
-npm run test:deploy    # the scripts and launch.mjs, about 30 seconds
+npm run test:deploy    # the scripts and launch.mjs, about a minute
 npm run test:e2e       # real Claude CLI, about 2.5 minutes
 ../check.sh            # all of the above but e2e, plus the app's build and tests
 ```
