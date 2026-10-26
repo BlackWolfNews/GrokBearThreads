@@ -323,7 +323,11 @@ function startStream(threadId, p) {
   const timer = setInterval(() => {
     // Roughly what Claude streams: 2 to 12 characters per delta.
     const size = 2 + (ticks % 11);
-    let chunk = source.slice(offset % source.length, (offset % source.length) + size);
+    // From the text twice over, so a chunk that runs past the end wraps
+    // to the start instead of coming up short (which dropped letters and
+    // started paragraphs mid-word: "re is how...").
+    const at = offset % source.length;
+    let chunk = (source + source).slice(at, at + size);
     if (!chunk) chunk = ' ';
     offset += size;
     ticks += 1;

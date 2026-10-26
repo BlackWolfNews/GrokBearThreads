@@ -242,6 +242,61 @@ function runningThread() {
   writeFixture(dir, summary, events);
 }
 
+// The tool and card states the other threads don't have, for the design
+// screenshots: a command and a key/value tool opened, a failed tool inside a
+// group, a Write approval and a question that have both been answered.
+// Archived, so the inbox shots stay as they are.
+function toolDetailsThread() {
+  const id = 'demo_build_scripts';
+  const dir = path.join(root, 'demo-build-scripts');
+  fs.mkdirSync(dir, { recursive: true });
+  const turnId = 'turn_1';
+  const events = [];
+  let seq = 0;
+  let t = 60 * 40;
+  const push = (fields) => events.push({ seq: ++seq, ts: minutes((t -= 0.3)), threadId: id, turnId, ...fields });
+  const script = `${home}/dev/photo-sync/scripts/release.sh`;
+  const scriptSource = [
+    '#!/usr/bin/env bash',
+    '# Builds a signed release and zips it for upload.',
+    'set -euo pipefail',
+    '',
+    'swift build -c release',
+    'codesign --sign "$SIGNING_IDENTITY" --options runtime .build/release/PhotoSync',
+    'ditto -c -k --keepParent .build/release/PhotoSync PhotoSync.zip',
+    '',
+  ].join('\n');
+  push({ type: 'user.message', text: 'Tidy up the build scripts and check the release build still works.', images: [] });
+  push({ type: 'turn.started', turnId });
+  push({ type: 'tool.call', itemId: 'ls', name: 'Bash', kind: 'command', title: 'List the build scripts', input: { command: 'ls -l scripts/', description: 'List the build scripts' } });
+  push({ type: 'tool.result', itemId: 'ls', ok: true, text: [
+    'total 24',
+    '-rwxr-xr-x  1 mike  staff   412 Oct 12 09:14 build.sh',
+    '-rwxr-xr-x  1 mike  staff   398 Oct 12 09:14 build-old.sh',
+    '-rwxr-xr-x  1 mike  staff   655 Oct 20 17:02 release.sh',
+  ].join('\n'), truncated: false, images: [] });
+  push({ type: 'tool.call', itemId: 'pr', name: 'mcp__github__get_pull_request', kind: 'mcp', title: 'Get pull request #48',
+    input: { owner: 'mike', repo: 'photo-sync', pullNumber: 48 } });
+  push({ type: 'tool.result', itemId: 'pr', ok: true, text: '#48 Move signing into release.sh (merged 20 Oct)\nFiles: scripts/release.sh, scripts/build-old.sh', truncated: false, images: [] });
+  push({ type: 'tool.call', itemId: 'rel', name: 'Bash', kind: 'command', title: 'Run the release build', input: { command: './scripts/release.sh', description: 'Run the release build' } });
+  push({ type: 'tool.result', itemId: 'rel', ok: false, text: 'Building for production...\nerror: SIGNING_IDENTITY is not set', truncated: false, images: [] });
+  push({ type: 'approval.requested', approvalId: 'ap_w', itemId: 'w', name: 'Write', title: `Write ${script}`, input: { file_path: script, content: scriptSource }, options: ['allow', 'allowAlways', 'deny'] });
+  push({ type: 'approval.resolved', approvalId: 'ap_w', decision: 'allow' });
+  push({ type: 'tool.call', itemId: 'w', name: 'Write', kind: 'write', title: `Write ${script}`, input: { file_path: script, content: scriptSource } });
+  push({ type: 'tool.result', itemId: 'w', ok: true, text: 'File written.', truncated: false, images: [] });
+  push({ type: 'question.requested', approvalId: 'q_old', questions: [{ question: 'build-old.sh isn\'t used anywhere. Delete it?', header: 'Old script', multiSelect: false, options: [
+    { label: 'Delete it' }, { label: 'Keep it', description: 'Leave it for now' }] }] });
+  push({ type: 'approval.resolved', approvalId: 'q_old', decision: 'answered', message: 'Keep it for now, I still use it for beta builds.' });
+  push({ type: 'assistant.text', itemId: 'm1', text: 'The release script now reads the signing identity from `SIGNING_IDENTITY` and stops with a clear error when it is missing. I kept `build-old.sh` as you asked.' });
+  push({ type: 'turn.completed', turnId, outcome: 'completed', durationMs: 48_000, costUsd: 0.09 });
+  const summary = {
+    id, title: 'Tidy up the build scripts', cwd: `${home}/dev/photo-sync`, accountId: 'claude-main', provider: 'claude', permissionMode: 'ask',
+    status: 'idle', live: false, needsYou: false, createdAt: minutes(60 * 41), updatedAt: minutes(60 * 40), lastActivityAt: minutes(60 * 40),
+    archivedAt: minutes(60 * 39), preview: 'The release script now reads the signing identity from SIGNING_IDENTITY.', lastSeq: seq, lastSeenSeq: seq,
+  };
+  writeFixture(dir, summary, events);
+}
+
 // ------------------------------------------------------------------ helpers
 
 function writeFixture(dir, summary, events) {
@@ -385,4 +440,5 @@ function writePNG(file, width, height, draw) {
 
 demoThread();
 others();
+toolDetailsThread();
 console.log(`wrote ${fs.readdirSync(root).length} demo threads to ${root}`);

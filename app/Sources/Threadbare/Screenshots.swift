@@ -31,6 +31,7 @@ enum ScreenshotRunner {
         }
         window.setContentSize(NSSize(width: 1240, height: 820))
         window.center()
+        freshSidebar(in: window)
         // Behind every other window and never activated: these runs happen
         // while Mike is working, and `screencapture -l` captures a window by
         // id even when it's covered.
@@ -169,7 +170,37 @@ enum ScreenshotRunner {
             await capture(window, dir.appendingPathComponent("9-sidebar-hover.png"))
             app.hoverOverride = nil
         }
+        // 10. What the other threads don't show, from an archived one: a
+        // group with a failed tool, open, with its command and its key/value
+        // tool opened; then a Write approval and a question, both answered.
+        if wanted("10") {
+            let thread = "demo_build_scripts"
+            await open(app, thread)
+            let session = app.session(for: thread)
+            session.expanded.formUnion(["t:ls", "t:pr", "t:rel"])
+            session.setModelExpanded("g:t:ls", true)
+            app.transcript.show(nil)
+            app.transcript.show(session)
+            await scroll(app, toRow: "u:", offset: 0)
+            await capture(window, dir.appendingPathComponent("10a-tool-details.png"))
+            await scroll(app, toRow: "ap:", offset: 20)
+            await capture(window, dir.appendingPathComponent("10b-answered-cards.png"))
+        }
         NSApp.terminate(nil)
+    }
+
+    /// A fresh window's sidebar width. This debug build shares the app's
+    /// defaults, so its split view came back at whatever width was saved
+    /// last; the shots show the default instead, and don't save it back.
+    private static func freshSidebar(in window: NSWindow) {
+        func find(_ view: NSView?) -> NSSplitView? {
+            guard let view else { return nil }
+            if let split = view as? NSSplitView { return split }
+            return view.subviews.lazy.compactMap { find($0) }.first
+        }
+        guard let split = find(window.contentView), split.subviews.count > 1 else { return }
+        split.autosaveName = nil
+        split.setPosition(RootView.sidebarIdealWidth, ofDividerAt: 0)
     }
 
     /// The first image a demo thread's messages carry, if it's loaded.
