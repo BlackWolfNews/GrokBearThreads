@@ -318,12 +318,9 @@ enum ScreenshotRunner {
                 guard let content = glass.contentView else { continue }
                 let frame = glass.convert(glass.bounds, to: frameView)
                 if let around = glass.superview {
-                    // Inside the window's own rounded corners (26 pt on macOS 26).
-                    NSGraphicsContext.saveGraphicsState()
-                    NSBezierPath(roundedRect: frameView.bounds, xRadius: 26, yRadius: 26).addClip()
+                    // The window's corners (26 pt on macOS 26) are cleared below.
                     frameView.window?.backgroundColor.setFill()
                     around.convert(around.bounds, to: frameView).fill()
-                    NSGraphicsContext.restoreGraphicsState()
                 }
                 let dark = glass.effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
                 NSColor(white: dark ? 0.157 : 0.969, alpha: 1).setFill()
@@ -338,6 +335,14 @@ enum ScreenshotRunner {
             let frame = view.convert(view.bounds, to: frameView)
             if panels.contains(where: { $0.intersects(frame) }) { draw(view) }
         }
+        // Clear outside the window's rounded corners, as screencapture
+        // leaves them: the glass's backdrop filled them in black.
+        let outside = NSBezierPath(rect: frameView.bounds)
+        outside.append(NSBezierPath(roundedRect: frameView.bounds, xRadius: 26, yRadius: 26))
+        outside.windingRule = .evenOdd
+        context.compositingOperation = .copy
+        NSColor.clear.setFill()
+        outside.fill()
     }
 
     private static func descendants(of view: NSView) -> [NSView] {
