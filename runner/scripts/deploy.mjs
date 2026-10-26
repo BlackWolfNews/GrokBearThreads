@@ -26,12 +26,15 @@ Options:
                     or a checkout behind main); the next deploy from main
                     drops it again
   --now             restart straight away, stopping turns in progress
-                    (refused inside a thread unless --force)
-  --force           do it anyway: --now inside a thread, --rollback to a
+                    (refused inside a thread unless --force, and refused
+                    while other threads are busy unless run from a
+                    terminal with --force)
+  --force           do it anyway: --now (see above), --rollback to a
                     release that crashed at startup, or replacing a release
                     that is still waiting for its restart
   --wait 30m        how long to wait for running threads before giving up
-                    (s, m or h)
+                    (s, m or h); background shells and subagents hold the
+                    restart this long at most
   --resume "text"   sent to this thread as a new turn after the restart
                     (inside a thread, where there's a default)
   --rollback        go back to the previous release instead of building one
@@ -43,8 +46,10 @@ Options:
 
 For install-runner.sh:
   --no-restart      stop after step 4
-  --check           only step 6, for the release current points at
+  --check           only step 6, for the release current points at, then
+                    wait until it has been marked good
   --check-idle      exit 1 if a thread is busy (or the runner won't say)
+  --check-branch    exit 1 if HEAD isn't main's tip
 `;
 
 const DEFAULT_LABEL = 'com.mikerosoft.threadbare.runner';
@@ -115,6 +120,11 @@ function fmtDuration(ms) {
 
 function plural(n, word) {
   return `${n} ${word}${n === 1 ? '' : 's'}`;
+}
+
+// "1 thread finishes", "2 threads finish".
+function finish(n) {
+  return n === 1 ? '1 thread finishes' : `${n} threads finish`;
 }
 
 function tail(file, lines = 40) {
@@ -234,7 +244,10 @@ function requireReleases(c) {
       `The runner at ${c.home} ${what}, so a release would never start. Mike has to switch it to releases once, from a terminal:\n  ${path.join(c.runnerDir, 'scripts', 'install-runner.sh')}\nDon't run that from a thread: it stops the runner the thread runs on. Until then, runner changes wait for him.`,
     );
   }
-  throw new Fail(`The runner at ${c.home} ${what}. Install it with scripts/install-runner.sh --home ${c.home} --label ${c.label}, which builds the first release.`);
+  // Without --label, the default would be the real runner's, which
+  // install-runner.sh refuses for another data dir.
+  const label = c.labelKnown ? c.label : `${DEFAULT_LABEL}.devtest`;
+  throw new Fail(`The runner at ${c.home} ${what}. Install it with scripts/install-runner.sh --home ${c.home} --label ${label}, which builds the first release.`);
 }
 
 // ---------------------------------------------------------------- talking to the runner
@@ -308,8 +321,10 @@ const releaseOf = (version) => (version && version.includes('+') ? version.slice
 // Waits for the runner to come back on `id`. `before` is what answered
 // before the restart was asked for (or null). The restart has to start
 // within `startMs`; from then on the new runner has 30 s. Coming back on
-// any other release (launch.mjs going back to lastGood, say) fails at once.
-async function awaitRelease(home, id, before, startMs) {
+// any other release (launch.mjs going back to lastGood, say) fails at once,
+// and so does the same runner no longer having a restart pending (someone
+// ran tb restart --cancel) when `pending` says one was asked for.
+async function awaitRelease(home, id, before, startMs, pending = false) {
   const start = Date.now();
   let downAt = null;
   for (;;) {
@@ -320,6 +335,7 @@ async function awaitRelease(home, id, before, startMs) {
     else if (p.state === 'up') {
       const restarted = !before ? true : p.pid && before.pid ? p.pid !== before.pid : downAt !== null || p.version !== before.version;
       if (restarted) return { result: 'other', ...p };
+      if (pending && p.status && !p.status.pendingRestart) return { result: 'withdrawn', ...p };
     }
     if (downAt !== null && now - downAt > HEALTH_MS) return { result: 'timeout' };
     if (downAt === null && now - start > startMs) return { result: 'pending' };
@@ -413,11 +429,13 @@ function currentId(c) {
 // Swaps the link first (that's what launch.mjs starts), then records it.
 // previous is the release to go back to: the one running, when that's
 // known, rather than one current named that never started.
+// activated tells launch.mjs to count crashes of this release from now on
+// only, so a forced rollback onto one that crashed earlier gets fresh tries.
 function activate(c, id, previous) {
   const state = readState(c.dir);
   const was = currentId(c);
   pointCurrent(c.dir, id);
-  writeState(c.dir, { ...state, current: id, previous: previous ?? was ?? state.previous });
+  writeState(c.dir, { ...state, current: id, previous: previous ?? was ?? state.previous, activated: { release: id, at: new Date().toISOString() } });
   say(`current now points at ${id}${was ? ` (was ${was})` : ''}.`);
 }
 
@@ -700,6 +718,26 @@ function restartCommand(c) {
   return `launchctl kickstart -k ${c.target}`;
 }
 
+// The tb that goes with this checkout, written out in full in what the
+// script prints: a bare `tb` isn't on PATH in every shell.
+function tbCommand(c) {
+  return path.join(c.runnerDir, 'bin', 'tb');
+}
+
+// --now stops every turn and background job on the runner. Cutting other
+// threads' work short is never an agent's call: from a thread it's refused
+// even with --force (Mike can run it from a terminal); from a terminal,
+// --force does it.
+async function refuseNowWhileBusy(c, v) {
+  const others = (await busyThreads(c)).filter((t) => t.id !== c.threadId);
+  if (!others.length || (v.force && !c.inThread)) return;
+  const names = others.map((t) => `  ${t.id.slice(0, 8)}  ${t.title}`).join('\n');
+  const mine = c.inThread ? ' If it really can\'t wait, finish your turn and ask Mike to run this from a terminal with --now --force.' : '';
+  const other = c.threadId ? 'other ' : '';
+  const whose = others.length === 1 ? `1 ${other}thread's` : `${others.length} ${other}threads'`;
+  throw new Fail(`--now would cut short ${whose} work (turns, background shells, subagents):\n${names}\nLeave --now out: the runner then restarts once they finish.${mine}`);
+}
+
 // What the thread is sent after the restart, unless --resume says otherwise.
 function defaultResume(v, id, from) {
   return v.rollback
@@ -713,7 +751,15 @@ async function restartAndCheck(c, v, id, before, waitMs) {
   const baseline = await probe(c.home);
   const running = baseline.state === 'up' ? baseline : null;
   let startMs = HEALTH_MS;
-  const params = { when: v.now ? 'now' : 'idle', release: id, reason: v.rollback ? `Rolling back to release ${id}` : `Deploying release ${id}` };
+  let waited = false; // the restart waits for threads, up to waitMs
+  // Background work (a dev server, a watcher) may never finish, so it holds
+  // the restart for --wait at most. Turns always hold it.
+  const params = {
+    when: v.now ? 'now' : 'idle',
+    release: id,
+    reason: v.rollback ? `Rolling back to release ${id}` : `Deploying release ${id}`,
+    backgroundWaitMs: waitMs,
+  };
   if (c.threadId) params.resume = { threadId: c.threadId, text: v.resume ?? defaultResume(v, id, before.current) };
   if (v.now && c.inThread) {
     // Said first: the restart stops this script along with the turn.
@@ -766,6 +812,7 @@ async function restartAndCheck(c, v, id, before, waitMs) {
     await kickstart(c);
   } else {
     const waiting = Array.isArray(res?.waitingFor) ? res.waitingFor : [];
+    const background = Array.isArray(res?.background) ? res.background : [];
     if (c.inThread) {
       if (!waiting.length) {
         say(`Release ${id} is current and the runner is restarting now, which ends this turn.`);
@@ -773,39 +820,65 @@ async function restartAndCheck(c, v, id, before, waitMs) {
       }
       const mine = c.threadId && waiting.includes(c.threadId);
       const others = waiting.filter((t) => t !== c.threadId).length;
-      const when = mine ? (others ? `this thread and ${plural(others, 'other')} finish` : 'this turn ends') : `${plural(waiting.length, 'thread')} finish`;
-      say(
-        `Release ${id} is current. The runner restarts when ${when}${params.resume ? `, then resumes this thread with:\n  "${params.resume.text}"` : '.'}\n` +
-          `It also waits for background shells and subagents; tb status shows what it's waiting for.\nEnd your turn now; there's nothing more to do here until then.`,
-      );
+      const when = mine ? (others ? `this turn ends and ${finish(others).replace('thread', 'other thread')}` : 'this turn ends') : finish(waiting.length);
+      const lines = [`Release ${id} is current. The runner restarts when ${when}${params.resume ? `, then resumes this thread with:\n  "${params.resume.text}"` : '.'}`];
+      // Ending the turn doesn't stop these, and the restart waits for them.
+      const own = background.find((b) => b.threadId === c.threadId);
+      if (own?.tasks?.length) {
+        lines.push(
+          `It also waits for this thread's background work, which ending the turn doesn't stop:\n${own.tasks.map((t) => `  ${t}`).join('\n')}\n` +
+            `Stop it before you end your turn (a dev runner stops with the kill <pid> it printed). Otherwise the restart goes ahead after ${fmtDuration(waitMs)} and stops it.`,
+        );
+      } else if (others) {
+        lines.push('It also waits for the other threads\' turns, background shells and subagents.');
+      }
+      lines.push(`${tbCommand(c)} status shows what it's waiting for.`, "End your turn now; there's nothing more to do here until then.");
+      say(lines.join('\n'));
       return 0;
     }
     if (waiting.length) {
-      say(`The runner restarts when ${plural(waiting.length, 'thread')} finish (turns, or background shells and subagents): ${waiting.join(', ')}. Waiting up to ${fmtDuration(waitMs)}...`);
-      startMs = waitMs;
+      say(
+        `The runner restarts when ${finish(waiting.length)} (turns, or background shells and subagents for up to ${fmtDuration(waitMs)}): ${waiting.join(', ')}. Waiting up to ${fmtDuration(waitMs)}...`,
+      );
+      // Background work stops holding it at waitMs, and the runner starts
+      // its restart then if no turn holds it, so a little longer to see it.
+      startMs = waitMs + 5000;
+      waited = true;
     } else {
       say('The runner is restarting.');
     }
   }
 
-  const r = await awaitRelease(c.home, id, running, startMs);
+  const r = await awaitRelease(c.home, id, running, startMs, Boolean(res));
   if (r.result === 'ok') {
     say(`The runner is up on ${id}${r.pid ? ` (pid ${r.pid})` : ''}.`);
     return 0;
   }
+  if (r.result === 'withdrawn') {
+    const now = currentId(c);
+    console.error(
+      now !== id
+        ? `The restart was withdrawn (tb restart --cancel), and current points at ${now} again, so ${id} won't start.`
+        : `The restart was withdrawn (tb restart --cancel), but ${id} is still current and starts on the runner's next restart. deploy-runner.sh --rollback goes back to ${before.current}.`,
+    );
+    return 1;
+  }
   if (r.result === 'pending') {
-    if (startMs !== HEALTH_MS) {
-      say(`The threads are still busy after ${fmtDuration(waitMs)}. The restart stays queued: the runner starts ${id} when they finish (tb restart --cancel withdraws it).`);
+    if (waited) {
+      say(
+        `The threads are still busy after ${fmtDuration(waitMs)}. The restart stays queued: the runner starts ${id} when they finish. ` +
+          `To withdraw it and put current back on ${before.current}:\n  ${tbCommand(c)} restart --cancel`,
+      );
       return 0;
     }
     throw new Fail(`The runner hasn't restarted after ${HEALTH_MS / 1000} s. Release ${id} is current and starts on its next restart:\n  ${restartCommand(c)}`);
   }
-  return wentWrong(c, id, before, r);
+  return wentWrong(c, id, before, r, waitMs);
 }
 
 // Health check failed: go back to the release that was running before and
 // show the end of the runner's log.
-async function wentWrong(c, id, before, r) {
+async function wentWrong(c, id, before, r, waitMs) {
   console.error(
     r.result === 'other'
       ? `The runner came back on ${releaseOf(r.version) ?? r.version} instead of ${id}.`
@@ -821,6 +894,11 @@ async function wentWrong(c, id, before, r) {
       console.error(`The runner is already running ${before.current}.`);
     } else if (c.inThread) {
       console.error(`It starts on the runner's next restart. Mike can run:\n  ${restartCommand(c)}`);
+    } else if (now.state === 'up') {
+      // Up on yet another release (a crash rollback to an older lastGood,
+      // say). Turns may have started on it since, so it restarts once
+      // they've finished rather than at once.
+      await backTo(c, before.current, waitMs);
     } else if (c.labelKnown) {
       console.error(`Restarting: ${restartCommand(c)}`);
       try {
@@ -838,19 +916,56 @@ async function wentWrong(c, id, before, r) {
   return 1;
 }
 
+// Asks a runner that is answering to restart onto `release` once no thread
+// is busy. One too old for runner.restart is kickstarted only when idle.
+async function backTo(c, release, waitMs) {
+  try {
+    const res = await rpcPatient(c.home, 'runner.restart', { when: 'idle', release, reason: `Going back to release ${release}`, backgroundWaitMs: waitMs });
+    const w = Array.isArray(res?.waitingFor) ? res.waitingFor : [];
+    console.error(w.length ? `The runner restarts onto ${release} once ${finish(w.length)}.` : `The runner is restarting onto ${release}.`);
+    return;
+  } catch (e) {
+    if (e.code !== -32601) {
+      console.error(`Couldn't ask the runner to restart (${e.message}). It starts ${release} on its next restart:\n  ${restartCommand(c)}`);
+      return;
+    }
+  }
+  if (!c.labelKnown || (await busyThreads(c)).length) {
+    console.error(`It starts ${release} on the runner's next restart. Once no thread is busy:\n  ${restartCommand(c)}`);
+    return;
+  }
+  console.error(`Restarting: ${restartCommand(c)}`);
+  try {
+    await kickstart(c);
+  } catch (e) {
+    console.error(e.message);
+  }
+}
+
 // ---------------------------------------------------------------- commands
 
 async function list(c) {
   const state = readState(c.dir);
   const cur = currentId(c);
   const ids = listReleases(c);
+  const p = await probe(c.home);
+  const running = p.state === 'up' ? releaseOf(p.version) : null;
+  // current and running differ while a deploy's restart waits (or after
+  // one was withdrawn without putting current back).
+  const behind = running && cur && running !== cur;
   if (!ids.length) {
     say(`No releases in ${c.releases}.`);
   } else {
     say(`Releases in ${c.releases}, newest first:`);
     const width = Math.max(...ids.map((id) => id.length));
     const marksOf = (id) =>
-      [id === cur && 'current', id === state.previous && 'previous', id === state.lastGood && 'last good', id === state.rolledBack?.from && 'crashed at startup']
+      [
+        id === cur && (behind ? 'current, not running yet' : 'current'),
+        behind && id === running && 'running',
+        id === state.previous && 'previous',
+        id === state.lastGood && 'last good',
+        id === state.rolledBack?.from && 'crashed at startup',
+      ]
         .filter(Boolean)
         .join(', ');
     const marksWidth = Math.max(...ids.map((id) => marksOf(id).length));
@@ -862,26 +977,48 @@ async function list(c) {
     }
   }
   if (state.rolledBack) say(`Last crash rollback: ${state.rolledBack.from} to ${state.rolledBack.to} at ${state.rolledBack.at}.`);
-  const p = await probe(c.home);
   say(p.state === 'up' ? `Running: ${p.version}${p.pid ? ` (pid ${p.pid})` : ''}` : `The runner at ${c.home} isn't answering.`);
   const pending = p.status?.pendingRestart;
   if (pending) say(`Restart pending${pending.release ? ` onto ${pending.release}` : ''}, waiting for ${plural(pending.waitingFor?.length ?? 0, 'thread')}.`);
+  else if (behind) say(`${cur} is current but the runner is on ${running}: it starts ${cur} on its next restart.`);
   return 0;
 }
 
+// The runner marks a release good after 60 s of listening (src/release.ts);
+// this allows for a slow start on top.
+const GOOD_WAIT_MS = 150_000;
+
+// For install-runner.sh: the runner came up on current, and then stayed up
+// until it was marked good. Only then does install-runner.sh drop the plist
+// it replaced: on a first install there's no earlier good release, so until
+// this one is marked good, that plist is the only way back.
 async function check(c) {
   const id = currentId(c);
   if (!id) throw new Fail(`No current release in ${c.dir}.`);
   const r = await awaitRelease(c.home, id, null, HEALTH_MS);
-  if (r.result === 'ok') {
-    say(`The runner is up on ${id}.`);
-    return 0;
+  const fail = (msg) => {
+    console.error(msg);
+    console.error(`\nEnd of ${c.log}:\n${tail(c.log)}`);
+    return 1;
+  };
+  if (r.result !== 'ok') {
+    return fail(r.result === 'other' ? `The runner is running ${r.version}, not ${id}.` : `The runner didn't come up on ${id} within ${HEALTH_MS / 1000} s.`);
   }
-  console.error(
-    r.result === 'other' ? `The runner is running ${r.version}, not ${id}.` : `The runner didn't come up on ${id} within ${HEALTH_MS / 1000} s.`,
-  );
-  console.error(`\nEnd of ${c.log}:\n${tail(c.log)}`);
-  return 1;
+  say(`The runner is up on ${id}.`);
+  if (readState(c.dir).lastGood === id) return 0;
+  say('Waiting for it to stay up long enough to be marked good (about a minute)...');
+  const end = Date.now() + GOOD_WAIT_MS;
+  for (;;) {
+    if (readState(c.dir).lastGood === id) {
+      say(`${id} has been marked good.`);
+      return 0;
+    }
+    const p = await probe(c.home);
+    if (p.state === 'up' && releaseOf(p.version) !== id) return fail(`The runner went over to ${p.version} before ${id} was marked good.`);
+    if (p.state === 'up' && r.pid && p.pid && p.pid !== r.pid) return fail(`The runner on ${id} stopped and started again (pid ${r.pid}, now ${p.pid}) before it was marked good.`);
+    if (Date.now() > end) return fail(`${id} wasn't marked good within ${GOOD_WAIT_MS / 1000} s.`);
+    await sleep(1000);
+  }
 }
 
 // For install-runner.sh before it replaces the runner: 0 if nothing would
@@ -915,9 +1052,12 @@ function refuseWaiting(c, v, live) {
   if (!live.pending || !live.running || !cur || cur === live.running || v.force) return;
   const p = live.pending;
   const who = p.resumeThreadId ? `, and thread ${p.resumeThreadId.slice(0, 8)} is waiting to be carried on with it` : '';
+  // From a thread, replacing another deploy is Mike's call, so --force
+  // isn't offered there.
+  const force = c.inThread ? '' : ', or pass --force to replace it';
   throw new Fail(
-    `Release ${cur} is current but hasn't started yet: the runner (still on ${live.running}) restarts onto it when ${plural(p.waitingFor?.length ?? 0, 'thread')} finish${who}. ` +
-      `Deploying now would replace it before it ever ran. Wait for it to go live (deploy-runner.sh --list shows what's running), or pass --force to replace it.`,
+    `Release ${cur} is current but hasn't started yet: the runner (still on ${live.running}) restarts onto it when ${finish(p.waitingFor?.length ?? 0)}${who}. ` +
+      `Deploying now would replace it before it ever ran. Wait for it to go live (deploy-runner.sh --list shows what's running)${force}.`,
   );
 }
 
@@ -930,9 +1070,8 @@ async function rollback(c, v, waitMs) {
   if (!releaseExists(c.dir, target)) throw new Fail(`The previous release ${target} isn't in ${c.releases} any more.`);
   // After a crash rollback, previous names the release that crashed.
   if (state.rolledBack?.from === target && !v.force) {
-    throw new Fail(
-      `${target} kept crashing at startup, and launch.mjs already went back from it to ${state.rolledBack.to}, so there's nothing to roll back. (--rollback --force starts ${target} again.)`,
-    );
+    const again = c.inThread ? '' : ` (--rollback --force starts ${target} again.)`;
+    throw new Fail(`${target} kept crashing at startup, and launch.mjs already went back from it to ${state.rolledBack.to}, so there's nothing to roll back.${again}`);
   }
   requireReleases(c);
   const forward = cur && target > cur ? ' (that rolls forward to the newer release)' : '';
@@ -947,6 +1086,12 @@ async function rollback(c, v, waitMs) {
   if (forward) say(`Going to ${target}${forward}.`);
   const before = { current: live.running ?? cur, previous: state.previous };
   activate(c, target, live.running ?? cur);
+  // current named a release that never started (a deploy whose restart was
+  // withdrawn): pointing it back is all there is to do.
+  if (live.running === target) {
+    say(`The runner is already on ${target}, so it doesn't need a restart.`);
+    return 0;
+  }
   return restartAndCheck(c, v, target, before, waitMs);
 }
 
@@ -982,6 +1127,14 @@ async function deploy(c, v, waitMs) {
     say(`Would build ${id} from ${dirty ? 'the working tree' : `${g.short} (HEAD)`} on ${g.branch === 'HEAD' ? 'no branch' : `branch ${g.branch}`} into ${c.releases}, then smoke test it.`);
     say(`Would point current at ${id}${currentId(c) ? ` (now ${currentId(c)})` : ''}.`);
     say(`Would restart: ${describeRestart(c, v, id)}.`);
+    if (!v['no-restart']) {
+      try {
+        refuseWaiting(c, v, await liveRelease(c));
+      } catch (e) {
+        if (!(e instanceof Fail)) throw e;
+        say(`But the real run would stop before building: ${e.message}`);
+      }
+    }
     const gone = pruneList(c, [id]);
     say(gone.length ? `Would remove: ${gone.join(', ')}` : 'Would remove no old releases.');
     return 0;
@@ -1045,6 +1198,7 @@ async function main(argv) {
         'no-restart': { type: 'boolean' },
         check: { type: 'boolean' },
         'check-idle': { type: 'boolean' },
+        'check-branch': { type: 'boolean' },
         help: { type: 'boolean', short: 'h' },
       },
     }));
@@ -1060,14 +1214,21 @@ async function main(argv) {
   if (v.list) return list(c);
   if (v.check) return check(c);
   if (v['check-idle']) return checkIdle(c);
+  if (v['check-branch']) {
+    const off = branchProblem(c, gitInfo(c));
+    if (!off) return 0;
+    console.error(off);
+    return 1;
+  }
   // Everything that can be refused is refused before anything is built.
   if (v.now && v['no-restart']) throw new Fail('--now and --no-restart contradict each other.');
   if (v.now && !c.labelKnown) throw new Fail(`--now restarts through launchd, and ${c.home} isn't the default data dir, so pass --label with its launchd label.`);
   if (v.now && c.inThread && !v.force) {
     throw new Fail(
-      "--now would stop the runner this thread runs on, ending this turn. Leave it out: the runner then restarts once this turn ends and resumes this thread. (--now --force does it anyway.)",
+      '--now would stop the runner this thread runs on, ending this turn and any work other threads have going. Leave it out: the runner then restarts once every thread is idle and resumes this thread.',
     );
   }
+  if (v.now) await refuseNowWhileBusy(c, v);
   if (v.resume !== undefined && !c.threadId) {
     throw new Fail('--resume picks up the thread it runs in, so it only works inside a Threadbare thread of this runner (THREADBARE_THREAD_ID).');
   }

@@ -136,7 +136,7 @@ class ClaudeSession implements AgentSession {
       allowDangerouslySkipPermissions: true,
       canUseTool: (name, input, o) => this.canUseTool(name, input, o),
       abortController: this.abort,
-      spawnClaudeCodeProcess: groupSpawner(deps.registry, deps.log, (line) => this.stderr(line)),
+      spawnClaudeCodeProcess: groupSpawner(deps.registry, deps.log, (line) => this.stderr(line), opts.threadId),
     };
     if (opts.model) options.model = opts.model;
     if (opts.allowRules?.length) options.allowedTools = [...opts.allowRules];

@@ -4,7 +4,9 @@
 // `bootstrap` reads the plist install-runner.sh wrote and starts its
 // program with the plist's environment under a keep-alive loop; `kickstart
 // -k` stops the program and the loop starts it again; `bootout` stops both.
-// Every call is appended to <FAKE_LAUNCHD_DIR>/calls.ndjson.
+// Every call is appended to <FAKE_LAUNCHD_DIR>/calls.ndjson. While
+// <FAKE_LAUNCHD_DIR>/fail-bootstrap holds some text, bootstrapping a plist
+// whose PATH contains it fails the way launchd sometimes does.
 //
 // The keep-alive loop is this script run as `supervise`, detached, with its
 // pid in supervisor.pid and the program's in child.pid.
@@ -111,6 +113,11 @@ async function main(args) {
       }
       const p = JSON.parse(r.stdout);
       if (job()) return 37; // launchd: service already loaded
+      const failFor = fs.existsSync(path.join(dir, 'fail-bootstrap')) ? fs.readFileSync(path.join(dir, 'fail-bootstrap'), 'utf8').trim() : '';
+      if (failFor && String(p.EnvironmentVariables?.PATH ?? '').includes(failFor)) {
+        console.error('Bootstrap failed: 5: Input/output error');
+        return 5;
+      }
       fs.rmSync(path.join(dir, 'stop'), { force: true });
       fs.writeFileSync(
         jobFile,

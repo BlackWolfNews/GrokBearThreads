@@ -11,7 +11,9 @@
 #
 # It writes <home>/tb, a tb that always talks to this runner (an exported
 # THREADBARE_HOME doesn't last past one command in an agent's shell), and
-# prints the --data-dir for the app. Like launchd, it starts the runner
+# prints the --data-dir for the app. On a new data dir, threads default to
+# the folder <home>/work and account claude-3, not your real folders. Like
+# launchd, it starts the runner
 # again when it exits 0 (runner.restart, tb restart), and stops when it
 # exits with an error. Ctrl-C, or `kill <pid>` with the pid it prints, stops
 # it and the CLIs it started.
@@ -25,8 +27,8 @@ PORT=0
 
 while [ $# -gt 0 ]; do
   case "$1" in
-    --home) DATA_HOME="$2"; shift ;;
-    --port) PORT="$2"; shift ;;
+    --home) DATA_HOME="${2:?--home needs a folder}"; shift ;;
+    --port) PORT="${2:?--port needs a number}"; shift ;;
     -h|--help) awk 'NR > 1 && /^#/ { sub(/^# ?/, ""); print; next } NR > 1 { exit }' "$0"; exit 0 ;;
     *) echo "Unknown option: $1" >&2; exit 1 ;;
   esac
@@ -68,6 +70,17 @@ fi
 
 LOG="$DATA_HOME/runner.log"
 TB="$DATA_HOME/tb"
+WORK="$DATA_HOME/work"
+# The runner's defaults are Mike's real folder and the last account used;
+# a thread made to try a change belongs in a scratch folder. (The account
+# is the one the end-to-end tests use.)
+IN_WORK=""
+if [ ! -e "$DATA_HOME/runner.json" ]; then
+  mkdir -p "$WORK"
+  "$NODE" -e 'require("fs").writeFileSync(process.argv[1], JSON.stringify({ defaults: { cwd: process.argv[2], accountId: "claude-3" } }, null, 2) + "\n")' \
+    "$DATA_HOME/runner.json" "$WORK"
+  IN_WORK="   (in $(printf '%q' "$WORK"))"
+fi
 # THREADBARE_PORT and THREADBARE_URL go too: tb then reads the port this
 # runner wrote to runner.json.
 {
@@ -83,6 +96,7 @@ echo "  data: $DATA_HOME"
 echo "  log:  $LOG (also shown here)"
 echo "  pid:  $$"
 echo "For tb:      $(printf '%q' "$TB") status"
+echo "A thread:    $(printf '%q' "$TB") new \"say hi\" --model claude-haiku-5-5 --wait$IN_WORK"
 echo "For the app: --data-dir $(printf '%q' "$DATA_HOME")"
 echo "Stop it:     kill $$   (never pkill: the real runner runs src/main.ts too)"
 echo

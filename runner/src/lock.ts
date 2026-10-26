@@ -56,5 +56,6 @@ function holderAlive(h: { pid: number; lstart?: string }): boolean {
   const info = processInfo(h.pid);
   if (!info) return false;
   if (h.lstart) return info.lstart === h.lstart;
-  return /main\.ts/.test(info.command);
+  // A runner under launch.mjs (a release) shows as launch.mjs, not main.ts.
+  return /main\.ts|launch\.mjs/.test(info.command);
 }

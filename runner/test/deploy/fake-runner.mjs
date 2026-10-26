@@ -9,9 +9,10 @@
 //                                 launch.mjs (not in the smoke test)
 //   oldRunner: true               no runner.restart, like runners before it
 //   goodAfterMs: n                mark lastGood after n ms (default 200, -1 never)
-// <home>/fake-busy.json lists the threads that count as running, and while
-// <home>/fake-hang-restart exists runner.restart never answers (a runner
-// too busy to reply).
+// <home>/fake-busy.json lists the threads that count as running,
+// <home>/fake-background.json the background work ({ threadId, tasks }[]),
+// and while <home>/fake-hang-restart exists runner.restart never answers (a
+// runner too busy to reply).
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import http from 'node:http';
@@ -50,13 +51,16 @@ const startedAt = new Date().toISOString();
 export const REPORTS_LISTENING = true;
 let pending = null;
 
-const busy = () => {
+const readList = (name) => {
   try {
-    return JSON.parse(fs.readFileSync(path.join(home, 'fake-busy.json'), 'utf8'));
+    return JSON.parse(fs.readFileSync(path.join(home, name), 'utf8'));
   } catch {
     return [];
   }
 };
+const busy = () => readList('fake-busy.json');
+const background = () => readList('fake-background.json');
+let timer = null;
 
 function writeJsonAtomic(file, data) {
   const tmp = `${file}.${process.pid}.tmp`;
@@ -78,7 +82,7 @@ function handle(method, params) {
         home,
         liveClis: 0,
         running: busy(),
-        background: [],
+        background: background(),
         ...(pending ? { pendingRestart: { ...pending, waitingFor: busy() } } : {}),
       };
     case 'threads.list':
@@ -87,17 +91,26 @@ function handle(method, params) {
       if (mode.oldRunner) break;
       fs.appendFileSync(path.join(home, 'fake-restart-calls.ndjson'), JSON.stringify(params) + '\n');
       if (fs.existsSync(path.join(home, 'fake-hang-restart'))) return NO_REPLY;
-      const waitingFor = params.when === 'now' ? [] : busy();
+      if (params.cancel) {
+        // Unlike the real one, it doesn't put current back.
+        clearInterval(timer);
+        const had = pending !== null;
+        pending = null;
+        return { scheduled: false, waitingFor: [], ...(had ? { note: 'fake: current left alone' } : {}) };
+      }
+      const waitingFor = params.when === 'now' ? [] : [...new Set([...busy(), ...background().map((b) => b.threadId)])];
       pending = { when: params.when ?? 'idle', requestedAt: new Date().toISOString(), release: params.release, resumeThreadId: params.resume?.threadId };
       // Like the real one: exit 0 once nothing is running, and launchd
       // (here the fake one) starts it again.
-      const timer = setInterval(() => {
-        if (params.when === 'now' || busy().length === 0) {
+      clearInterval(timer);
+      timer = setInterval(() => {
+        if (params.when === 'now' || (busy().length === 0 && background().length === 0)) {
           clearInterval(timer);
           setTimeout(() => process.exit(0), 50);
         }
       }, 100);
-      return { scheduled: true, waitingFor };
+      const bg = background().filter((b) => waitingFor.includes(b.threadId));
+      return bg.length ? { scheduled: true, waitingFor, background: bg } : { scheduled: true, waitingFor };
     }
   }
   throw Object.assign(new Error(`Unknown method ${method}`), { code: -32601 });

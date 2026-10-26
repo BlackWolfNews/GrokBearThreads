@@ -6,6 +6,36 @@ import { RunnerClient } from './client.ts';
 import type { ImageRef, PersistedEvent, ThreadSummary } from './protocol.ts';
 import { DEV_HELP, logsCommand, runDev } from './tb-dev.ts';
 
+const OPTIONS = {
+  cwd: { type: 'string' },
+  account: { type: 'string' },
+  model: { type: 'string' },
+  ask: { type: 'boolean' },
+  image: { type: 'string', multiple: true },
+  wait: { type: 'boolean' },
+  json: { type: 'boolean' },
+  snoozed: { type: 'boolean' },
+  archived: { type: 'boolean' },
+  all: { type: 'boolean' },
+  from: { type: 'string' },
+  'until-done': { type: 'boolean' },
+  // tb-dev.ts
+  last: { type: 'string' },
+  tools: { type: 'boolean' },
+  out: { type: 'string' },
+  now: { type: 'boolean' },
+  force: { type: 'boolean' },
+  resume: { type: 'string' },
+  'no-resume': { type: 'boolean' },
+  cancel: { type: 'boolean' },
+  reason: { type: 'string' },
+  thread: { type: 'string' },
+  'max-wait': { type: 'string' },
+  lines: { type: 'string', short: 'n' },
+  follow: { type: 'boolean', short: 'f' },
+  help: { type: 'boolean', short: 'h' },
+} as const;
+
 const HELP = `tb: talk to the Threadbare runner
 
   tb new "text" [--cwd DIR] [--account ID] [--model M] [--ask] [--image FILE]... [--wait]
@@ -27,38 +57,15 @@ Uses THREADBARE_HOME and THREADBARE_PORT like the runner does.
 ${DEV_HELP}`;
 
 async function main(argv: string[]): Promise<number> {
-  const { values, positionals } = parseArgs({
-    args: argv,
-    allowPositionals: true,
-    options: {
-      cwd: { type: 'string' },
-      account: { type: 'string' },
-      model: { type: 'string' },
-      ask: { type: 'boolean' },
-      image: { type: 'string', multiple: true },
-      wait: { type: 'boolean' },
-      json: { type: 'boolean' },
-      snoozed: { type: 'boolean' },
-      archived: { type: 'boolean' },
-      all: { type: 'boolean' },
-      from: { type: 'string' },
-      'until-done': { type: 'boolean' },
-      // tb-dev.ts
-      last: { type: 'string' },
-      tools: { type: 'boolean' },
-      out: { type: 'string' },
-      now: { type: 'boolean' },
-      force: { type: 'boolean' },
-      resume: { type: 'string' },
-      'no-resume': { type: 'boolean' },
-      cancel: { type: 'boolean' },
-      reason: { type: 'string' },
-      thread: { type: 'string' },
-      lines: { type: 'string', short: 'n' },
-      follow: { type: 'boolean', short: 'f' },
-      help: { type: 'boolean', short: 'h' },
-    },
-  });
+  let parsed;
+  try {
+    parsed = parseArgs({ args: argv, allowPositionals: true, options: OPTIONS });
+  } catch (e) {
+    // A typo or a flag with no value: say which, not a stack trace.
+    console.error(`${(e as Error).message}\nSee tb --help.`);
+    return 2;
+  }
+  const { values, positionals } = parsed;
   const [cmd, ...args] = positionals;
   if (!cmd || values.help) {
     console.log(HELP);

@@ -274,7 +274,8 @@ test('inside a thread, the restart waits for the thread and then resumes it', { 
 
   const refused = deploy(['--now', '--skip-checks'], inThread);
   assert.notEqual(refused.status, 0);
-  assert.match(refused.stderr, /--force/);
+  assert.match(refused.stderr, /--now would stop the runner this thread runs on/);
+  assert.doesNotMatch(refused.stderr, /--force/, 'never taught to an agent');
   // Kickstarting the default label for a sandbox would restart the real runner.
   const noLabel = sh('deploy-runner.sh', ['--home', home, '--now', '--skip-checks']);
   assert.equal(noLabel.status, 1, out(noLabel));
@@ -290,6 +291,7 @@ test('inside a thread, the restart waits for the thread and then resumes it', { 
   assert.equal(call.when, 'idle');
   assert.equal(call.resume.threadId, 'thread-1');
   assert.equal(call.resume.text, `The runner restarted on release ${third}. Check that your change works, then carry on.`);
+  assert.equal(call.backgroundWaitMs, 30 * 60_000, 'background work holds it for --wait at most');
   // The thread is still running, so the old release still is too.
   assert.equal(await version(), `9.9.9+${second}`);
 
@@ -324,7 +326,7 @@ test("the real runner's label is refused for a sandbox, and a thread is spotted 
   // THREADBARE_RUNNER_HOME, not THREADBARE_HOME, says which runner a thread is on.
   r = deploy(['--now', '--skip-checks'], { THREADBARE_THREAD_ID: 'thread-1', THREADBARE_HOME: path.join(root, 'dev-home'), THREADBARE_RUNNER_HOME: home });
   assert.equal(r.status, 1, out(r));
-  assert.match(r.stderr, /--force/);
+  assert.match(r.stderr, /--now would stop the runner this thread runs on/);
 });
 
 test('--now --force inside a thread restarts through runner.restart and still carries the thread on', { timeout: 60_000 }, async () => {
@@ -339,6 +341,39 @@ test('--now --force inside a thread restarts through runner.restart and still ca
   assert.equal(call.release, id);
   assert.equal(call.resume.threadId, 'thread-1');
   assert.equal(kickstarts(), kicks, 'no launchctl kickstart, which would have skipped the resume');
+  await runsOn(id);
+});
+
+test('--now never cuts other threads short from a thread, and a thread hears about its own background work', { timeout: 60_000 }, async () => {
+  const inThread = { THREADBARE_THREAD_ID: 'thread-1', THREADBARE_HOME: home };
+  setBusy(['thread-1', 't-other']);
+  const ids = releases();
+  let r = deploy(['--now', '--force', '--skip-checks'], inThread);
+  assert.equal(r.status, 1, out(r));
+  assert.match(r.stderr, /^--now would cut short 1 other thread's work/);
+  assert.match(r.stderr, /t-other/);
+  assert.match(r.stderr, /ask Mike to run this from a terminal with --now --force/);
+  // From a terminal it takes --force, which isn't offered.
+  r = deploy(['--now', '--skip-checks']);
+  assert.equal(r.status, 1, out(r));
+  assert.match(r.stderr, /^--now would cut short 2 threads' work/);
+  assert.doesNotMatch(r.stderr, /--force/);
+  assert.deepEqual(releases(), ids, 'refused before building');
+
+  // Its own dev runner in the background: ending the turn isn't enough.
+  setBusy(['thread-1']);
+  fs.writeFileSync(path.join(home, 'fake-background.json'), JSON.stringify([{ threadId: 'thread-1', tasks: ['scripts/dev-runner.sh'] }]));
+  commit({ v: 'bg' }, 'background work');
+  r = deploy(['--skip-checks', '--wait', '5m'], inThread);
+  assert.equal(r.status, 0, out(r));
+  assert.match(r.stdout, /The runner restarts when this turn ends, then resumes this thread with:/);
+  assert.match(r.stdout, /It also waits for this thread's background work, which ending the turn doesn't stop:\n  scripts\/dev-runner\.sh\n/);
+  assert.match(r.stdout, /goes ahead after 5m and stops it\./);
+  assert.ok(r.stdout.includes(`${path.join(rdir, 'bin', 'tb')} status shows what it's waiting for`), r.stdout);
+  assert.equal(restartCalls().at(-1)!.backgroundWaitMs, 5 * 60_000);
+  const id = current();
+  setBusy([]);
+  fs.rmSync(path.join(home, 'fake-background.json'));
   await runsOn(id);
 });
 
@@ -359,13 +394,59 @@ test("a deploy while another deploy's restart is pending is refused unless --for
   assert.match(r.stderr, /thread thread-1 is waiting to be carried on with it/);
   assert.deepEqual(releases(), ids, 'refused before building');
 
+  // --dry-run says the real run would stop there.
+  r = deploy(['--skip-checks', '--dry-run']);
+  assert.equal(r.status, 0, out(r));
+  assert.match(r.stdout, new RegExp(`But the real run would stop before building: Release ${waiting} is current but hasn't started yet`));
+  // From a thread, --force isn't offered.
+  r = deploy(['--skip-checks'], { THREADBARE_THREAD_ID: 'thread-2', THREADBARE_HOME: home });
+  assert.equal(r.status, 1, out(r));
+  assert.doesNotMatch(r.stderr, /--force/);
+  r = deploy(['--list']);
+  assert.match(r.stdout, new RegExp(`\\* ${waiting}\\s+current, not running yet`));
+  assert.match(r.stdout, new RegExp(`  ${running}\\s+running, previous`));
+  assert.match(r.stdout, /Restart pending onto/);
+
   r = deploy(['--skip-checks', '--force', '--wait', '1s']);
   assert.equal(r.status, 0, out(r));
   assert.match(r.stdout, new RegExp(`Replacing release ${waiting}, which never started`));
+  assert.ok(r.stdout.includes(`${path.join(rdir, 'bin', 'tb')} restart --cancel`), r.stdout);
   const replaced = current();
   assert.equal(state().previous, running, 'previous is the release that ran, not the one that never did');
   setBusy([]);
   await runsOn(replaced);
+});
+
+test('a withdrawn restart: the waiting deploy says so, and --rollback puts current back without a restart', { timeout: 90_000 }, async () => {
+  const running = current();
+  setBusy(['t-w']);
+  commit({ v: 'withdrawn' }, 'to be withdrawn');
+  const bg = deployInBackground(['--skip-checks', '--wait', '1m']);
+  await waitFor('the deploy to wait', () => /The runner restarts when 1 thread finishes/.test(bg.output()));
+  const waiting = current();
+  assert.notEqual(waiting, running);
+  // tb restart --cancel, as the fake runner answers it (it leaves current
+  // alone, like a runner that can't put it back).
+  const { connectRpc } = await rpcClient;
+  const conn = await connectRpc(readJson(path.join(home, 'runner.json')).port, fs.readFileSync(path.join(home, 'secrets', 'runner-token'), 'utf8').trim(), 2000);
+  try {
+    assert.equal((await conn.call('runner.restart', { cancel: true })).scheduled, false);
+  } finally {
+    conn.close();
+  }
+  const r = await bg.done;
+  assert.equal(r.status, 1, out(r));
+  assert.match(r.stderr, new RegExp(`The restart was withdrawn \\(tb restart --cancel\\), but ${waiting} is still current and starts on the runner's next restart\\. deploy-runner\\.sh --rollback goes back to ${running}\\.`));
+  const kicks = kickstarts();
+  const calls = restartCalls().length;
+  const rb = deploy(['--rollback']);
+  assert.equal(rb.status, 0, out(rb));
+  assert.match(rb.stdout, new RegExp(`The runner is already on ${running}, so it doesn't need a restart\\.`));
+  assert.equal(current(), running);
+  assert.equal(restartCalls().length, calls, 'no restart asked for');
+  assert.equal(kickstarts(), kicks);
+  setBusy([]);
+  assert.equal(await version(), `9.9.9+${running}`);
 });
 
 test('a runner that is listening but too slow to answer is not kickstarted', { timeout: 90_000 }, async () => {
@@ -593,6 +674,32 @@ test('launch.mjs on its own: two failed starts, then the third runs lastGood', {
   }
 });
 
+test("launch.mjs still starts lastGood when it can't move the current link", { timeout: 60_000 }, async () => {
+  const home4 = path.join(root, 'home4');
+  const dir4 = path.join(home4, 'runner');
+  fs.mkdirSync(path.join(dir4, 'releases'), { recursive: true });
+  for (const id of [good, bad]) fs.cpSync(path.join(runnerDir(), 'releases', id), path.join(dir4, 'releases', id), { recursive: true });
+  fs.copyFileSync(path.join(RUNNER, 'launch.mjs'), path.join(dir4, 'launch.mjs'));
+  fs.symlinkSync(path.join('releases', bad), path.join(dir4, 'current'));
+  const at = new Date().toISOString();
+  fs.writeFileSync(path.join(dir4, 'state.json'), JSON.stringify({ current: bad, previous: good, lastGood: good, boots: [{ release: bad, at }, { release: bad, at }] }));
+  // A folder it can't write in (a full disk would do the same).
+  fs.chmodSync(dir4, 0o555);
+  const third = spawn(NODE, [path.join(dir4, 'launch.mjs')], { env: env({ THREADBARE_HOME: home4, THREADBARE_PORT: '0' }), stdio: ['ignore', 'pipe', 'pipe'] });
+  let text = '';
+  third.stdout.on('data', (d) => (text += d));
+  third.stderr.on('data', (d) => (text += d));
+  try {
+    await waitFor('the third start to listen', () => /listening on/.test(text));
+    assert.match(text, /could not point current at the release it went back to/);
+    assert.equal(await version(home4), `9.9.9+${good}`);
+    assert.equal(path.basename(fs.readlinkSync(path.join(dir4, 'current'))), bad, 'the link is where it was');
+  } finally {
+    third.kill('SIGTERM');
+    fs.chmodSync(dir4, 0o755);
+  }
+});
+
 test('planBoot: the crash-loop rules', async () => {
   const launch = await import(pathToFileURL(path.join(RUNNER, 'launch.mjs')).href);
   const now = Date.parse('2026-10-26T10:00:00Z');
@@ -630,6 +737,15 @@ test('planBoot: the crash-loop rules', async () => {
   p = launch.planBoot({ ...base, boots: [{ release: 'B', at: ago(20) }, { release: 'B', at: ago(10) }] }, now, () => false);
   assert.equal(p.start, 'B', 'lastGood has to still exist');
   assert.equal(p.stuck, true);
+
+  // --rollback --force onto B, which crashed a few minutes ago: only the
+  // boots since it was activated again count.
+  p = launch.planBoot({ ...base, activated: { release: 'B', at: ago(5) }, boots: [{ release: 'B', at: ago(200) }, { release: 'B', at: ago(190) }] }, now, exists);
+  assert.equal(p.start, 'B', 'fresh tries after a forced rollback');
+  p = launch.planBoot({ ...base, activated: { release: 'B', at: ago(60) }, boots: [{ release: 'B', at: ago(30) }, { release: 'B', at: ago(10) }] }, now, exists);
+  assert.equal(p.start, 'A', 'and it still goes back if it crashes again');
+  p = launch.planBoot({ ...base, activated: { release: 'C', at: ago(5) }, boots: [{ release: 'B', at: ago(30) }, { release: 'B', at: ago(10) }] }, now, exists);
+  assert.equal(p.start, 'A', "another release's activation doesn't count");
 
   const many = Array.from({ length: 25 }, (_, i) => ({ release: 'A', at: ago(1000 + i) }));
   p = launch.planBoot({ ...base, boots: many }, now, exists);
@@ -692,6 +808,11 @@ test('no deploy to a LaunchAgent that runs a checkout, or to none', () => {
     r = sh('deploy-runner.sh', ['--home', home3, '--label', `${LABEL}.none`, '--dry-run']);
     assert.equal(r.status, 1, out(r));
     assert.match(r.stderr, /isn't installed as a LaunchAgent/);
+    // No --label: the hint names a sandbox label, not the real runner's
+    // (which install-runner.sh refuses for another data dir).
+    r = sh('deploy-runner.sh', ['--home', home3, '--dry-run']);
+    assert.equal(r.status, 1, out(r));
+    assert.match(r.stderr, /--label com\.mikerosoft\.threadbare\.runner\.devtest, which builds/);
   } finally {
     fs.rmSync(path.join(agents, `${label}.plist`));
   }
@@ -723,6 +844,111 @@ test('install-runner.sh guards: sandbox labels, and not from inside its own thre
   assert.equal(r.status, 1, out(r));
   setBusy([]);
   assert.equal(launchctl('print', TARGET), 0, 'still installed');
+});
+
+test('reinstalling checks everything first, builds from HEAD, and puts the old setup back if the new one fails', { timeout: 240_000 }, async () => {
+  const installed = path.join(runnerDir(), 'launch.mjs');
+  const plistFile = path.join(agents, `${LABEL}.plist`);
+  const plistPath = () => JSON.parse(spawnSync('plutil', ['-convert', 'json', '-o', '-', plistFile], { encoding: 'utf8' }).stdout).EnvironmentVariables.PATH as string;
+  const install = (args: string[] = []) => sh('install-runner.sh', ['--home', home, '--label', LABEL, '--port', '0', '--path', '/usr/bin:/bin', ...args]);
+  const launchSrc = path.join(rdir, 'launch.mjs');
+  const pristine = fs.readFileSync(launchSrc, 'utf8');
+  const oldLaunch = fs.readFileSync(installed, 'utf8');
+  const before = current();
+  await runsOn(before);
+
+  // A launch.mjs change on main while a thread is busy: refused before
+  // launch.mjs or anything else changes.
+  fs.writeFileSync(launchSrc, pristine + '\n// a change\n');
+  commit({ v: 'launch change', goodAfterMs: 1500 }, 'launch.mjs change');
+  setBusy(['t-9']);
+  let r = install();
+  assert.equal(r.status, 1, out(r));
+  assert.match(r.stderr, /while threads are busy/);
+  assert.equal(fs.readFileSync(installed, 'utf8'), oldLaunch, 'launch.mjs untouched');
+  assert.equal(current(), before, 'no release built');
+  setBusy([]);
+
+  // Unmerged work: refused unless --allow-branch.
+  git('checkout', '-q', '-b', 'reinstall-branch');
+  commit({ v: 'branch' }, 'unmerged');
+  r = install();
+  assert.equal(r.status, 1, out(r));
+  assert.match(r.stderr, /has commits that aren't on main/);
+  assert.match(r.stderr, /pass --allow-branch/);
+  git('checkout', '-q', 'main');
+  git('branch', '-q', '-D', 'reinstall-branch');
+
+  // A launch.mjs that doesn't load: refused, nothing changed. (deploy.mjs
+  // imports it too, so this has to come before anything runs that.)
+  fs.writeFileSync(launchSrc, pristine + '\nthis is not javascript(\n');
+  let broke: Run;
+  try {
+    r = install();
+    broke = sh('install-runner.sh', ['--uninstall', '--home', home, '--label', LABEL]);
+  } finally {
+    git('checkout', '--', 'runner/launch.mjs');
+  }
+  assert.equal(r.status, 1, out(r));
+  assert.match(r.stderr, /launch\.mjs doesn't load, so nothing was changed/);
+  assert.doesNotMatch(r.stderr, /should run main|threads are busy/);
+  assert.equal(fs.readFileSync(installed, 'utf8'), oldLaunch);
+  assert.equal(broke.status, 1, out(broke));
+  assert.match(broke.stderr, /launch\.mjs doesn't load \(above\), so this can't check whether threads are busy/);
+  assert.equal(launchctl('print', TARGET), 0, 'still installed');
+
+  // Idle, from main: current was built before HEAD, so a new release is
+  // built, and the install waits for it to be marked good.
+  r = install();
+  assert.equal(r.status, 0, out(r));
+  assert.match(r.stdout, new RegExp(`Release ${before} wasn't built from HEAD, so building one that is`));
+  assert.match(r.stdout, /Waiting for it to stay up long enough to be marked good/);
+  assert.match(r.stdout, /has been marked good/);
+  const rebuilt = current();
+  assert.notEqual(rebuilt, before);
+  assert.equal(readJson(path.join(runnerDir(), 'releases', rebuilt, 'release.json')).commit, git('rev-parse', 'HEAD'));
+  assert.equal(fs.readFileSync(installed, 'utf8'), fs.readFileSync(launchSrc, 'utf8'));
+  for (const f of ['previous-launchagent.plist', 'previous-launch.mjs']) assert.ok(!fs.existsSync(path.join(runnerDir(), f)), f);
+  await runsOn(rebuilt);
+
+  // Again, so current is kept; launchd won't load the new plist: the old
+  // one goes back and starts.
+  fs.writeFileSync(path.join(launchd, 'fail-bootstrap'), '/fail/here');
+  try {
+    r = install(['--path', '/fail/here:/usr/bin:/bin']);
+  } finally {
+    fs.rmSync(path.join(launchd, 'fail-bootstrap'));
+  }
+  assert.equal(r.status, 1, out(r));
+  assert.match(r.stdout, new RegExp(`Keeping release ${rebuilt}, which was built from HEAD`));
+  assert.match(r.stderr, /Bootstrap failed: 5: Input\/output error/);
+  assert.match(r.stderr, /launchd wouldn't load the new plist\.\nPutting back the LaunchAgent as it was\./);
+  assert.match(r.stderr, /Back as it was/);
+  assert.ok(!plistPath().includes('/fail/here'), 'the old plist is back');
+  assert.deepEqual(fs.readdirSync(agents).filter((f) => f.startsWith(`${LABEL}.plist.`)), [], 'no temp plist left in LaunchAgents');
+  await runsOn(rebuilt);
+
+  // A launch.mjs that loads but can't start a runner, with a new release:
+  // the old launch.mjs, plist and current all go back.
+  const broken = pristine.replace('if (isMain()) {', "if (isMain()) {\n  throw new Error('launch.mjs broken on purpose');\n}\nif (false) {");
+  assert.notEqual(broken, pristine);
+  fs.writeFileSync(launchSrc, broken);
+  commit({ v: 'broken launch' }, 'broken launch.mjs');
+  const kept = fs.readFileSync(installed, 'utf8');
+  try {
+    r = install();
+  } finally {
+    fs.writeFileSync(launchSrc, pristine);
+    commit({ v: 'launch fixed' }, 'launch.mjs back');
+  }
+  assert.equal(r.status, 1, out(r));
+  assert.match(r.stderr, /The runner didn't come up and stay up on its release\./);
+  assert.match(r.stderr, new RegExp(`current points at ${rebuilt} again`));
+  assert.match(r.stderr, /Back as it was/);
+  assert.equal(fs.readFileSync(installed, 'utf8'), kept, 'the old launch.mjs is back');
+  assert.equal(current(), rebuilt);
+  for (const f of ['previous-launchagent.plist', 'previous-launch.mjs']) assert.ok(!fs.existsSync(path.join(runnerDir(), f)), f);
+  await runsOn(rebuilt);
 });
 
 test('uninstall boots the job out and removes the plist', { timeout: 30_000 }, async () => {

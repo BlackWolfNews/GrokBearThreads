@@ -81,10 +81,16 @@ export function releaseExists(dir, id) {
 // Decides what this boot starts, without touching the disk. `state.current`
 // should already agree with the symlink. Returns the state to save, the
 // release to start, and `rolledBack` when it went back to lastGood.
+//
+// Only boots since current was last activated count (deploy-runner.sh
+// records `activated`), so `--rollback --force` onto a release that crashed
+// a few minutes ago gives it fresh tries instead of going straight back.
 export function planBoot(state, now, exists, pid = process.pid) {
   const at = new Date(now).toISOString();
   const current = state.current;
-  const earlier = state.boots.filter((b) => b && b.release === current && !b.clean && Date.parse(b.at) > now - CRASH_WINDOW_MS).length;
+  const activatedAt = state.activated && state.activated.release === current ? Date.parse(state.activated.at) : NaN;
+  const since = Math.max(now - CRASH_WINDOW_MS, Number.isFinite(activatedAt) ? activatedAt - 1 : -Infinity);
+  const earlier = state.boots.filter((b) => b && b.release === current && !b.clean && Date.parse(b.at) > since).length;
   // This boot counts: the third start in the window is the one that
   // switches, so a broken release gets two tries.
   const crashLooping = Boolean(current) && current !== state.lastGood && earlier + 1 >= CRASH_BOOTS;
@@ -132,8 +138,15 @@ async function main() {
   }
   const plan = planBoot(state, Date.now(), (id) => releaseExists(dir, id));
   if (plan.rolledBack) {
-    pointCurrent(dir, plan.start);
     log('WARN', `release ${plan.rolledBack.from} failed to start ${CRASH_BOOTS} times in ${CRASH_WINDOW_MS / 60_000} minutes without being marked good; going back to ${plan.start}`);
+    try {
+      pointCurrent(dir, plan.start);
+    } catch (e) {
+      // Bookkeeping must never stop the runner from starting: lastGood
+      // still starts from its folder, and the next boot sees the link
+      // still on the bad release and goes back again.
+      log('ERROR', 'could not point current at the release it went back to', { release: plan.start, error: String(e) });
+    }
   } else if (plan.stuck) {
     log('WARN', `release ${plan.start} keeps crashing at startup and there's no other good release to go back to`, { lastGood: state.lastGood });
   }

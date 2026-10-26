@@ -3,6 +3,7 @@
 // it (docs/dev-tools.md). The LaunchAgent runs a snapshot under
 // <home>/runner/releases/<id>/ with a release.json beside src/; a runner
 // started from a checkout has none and reports itself as "+source".
+import fs from 'node:fs';
 import path from 'node:path';
 import { atomicWriteFileSync, readJsonSync } from './fsutil.ts';
 import type { Logger } from './log.ts';
@@ -18,6 +19,9 @@ export type RunnerState = {
   // launch.mjs's record of each start; clean once that start listened and
   // then exited 0, which never counts towards a crash loop.
   boots: { release: string; at: string; pid?: number; clean?: boolean }[];
+  // deploy-runner.sh's: when current was last activated. launch.mjs only
+  // counts that release's boots since then.
+  activated?: { release: string; at: string };
   // reportedAt is the runner's own: set once the notice has gone out, so a
   // rollback is announced by the first runner after it and no other.
   rolledBack?: { from: string; to: string; at: string; reportedAt?: string };
@@ -59,6 +63,35 @@ function updateState(home: string, change: (s: RunnerState) => boolean): boolean
   if (!change(s)) return false;
   atomicWriteFileSync(statePath(home), JSON.stringify(s, null, 2) + '\n');
   return true;
+}
+
+// The release <home>/runner/current names, if there's a link.
+export function currentLink(home: string): string | undefined {
+  try {
+    return path.basename(fs.readlinkSync(path.join(home, 'runner', 'current')));
+  } catch {
+    return undefined;
+  }
+}
+
+export function releaseExists(home: string, id: string): boolean {
+  return fs.existsSync(path.join(home, 'runner', 'releases', id, 'src', 'main.ts'));
+}
+
+// Points current at a release the way launch.mjs and deploy-runner.sh do
+// (a new link renamed over the old one, so it always names a whole
+// release), and records it in state.json. A cancelled deploy restart uses
+// it to put the running release back.
+export function pointCurrentAt(home: string, id: string): void {
+  const link = path.join(home, 'runner', 'current');
+  const tmp = `${link}.${process.pid}.tmp`;
+  fs.rmSync(tmp, { force: true });
+  fs.symlinkSync(path.join('releases', id), tmp);
+  fs.renameSync(tmp, link);
+  updateState(home, (s) => {
+    s.current = id;
+    return true;
+  });
 }
 
 // Tells launch.mjs this release starts and stays up, so it is never rolled

@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import path from 'node:path';
 import { makeHarness, tick, type Harness } from '../helpers/fakes.ts';
 import { Restarter, restartPath, resumesPath, donePath, restartMethods, parseRestartParams, takeResume, pendingMessage, type RestartFile } from '../../src/restart.ts';
 import { RpcServer } from '../../src/rpc.ts';
@@ -398,7 +399,7 @@ test('restart params are checked', () => {
   assert.deepEqual(parseRestartParams({ when: 'now', reason: ' x ', resume: { threadId: 't', text: 'go' } }), { when: 'now', reason: 'x', resume: { threadId: 't', text: 'go' } });
   assert.deepEqual(parseRestartParams({ cancel: true, release: 'r1' }), { cancel: true, release: 'r1' });
   assert.deepEqual(parseRestartParams({ cancel: false }), {});
-  for (const bad of [{ when: 'later' }, { reason: 3 }, { resume: 'x' }, { resume: { threadId: 't' } }, { resume: { threadId: 't', text: '  ' } }, { resume: [] }, { cancel: 'yes' }, { release: 3 }, { release: '' }]) {
+  for (const bad of [{ when: 'later' }, { reason: 3 }, { resume: 'x' }, { resume: { threadId: 't' } }, { resume: { threadId: 't', text: '  ' } }, { resume: [] }, { cancel: 'yes' }, { release: 3 }, { release: '' }, { backgroundWaitMs: -1 }, { backgroundWaitMs: '30m' }]) {
     assert.throws(() => parseRestartParams(bad), (e: RpcError) => e.code === -32602, JSON.stringify(bad));
   }
   assert.equal(pendingMessage(2), 'The runner will restart when 2 threads finish.');
@@ -466,6 +467,89 @@ test('when background work ends, the restart also waits for the turn the CLI sta
   assert.equal(r2.state.restarts, 1);
 });
 
+test('background work that ends during a turn: the restart waits for the turn the CLI may start after it', async () => {
+  const h = makeHarness();
+  const { r, state } = withRestarter(h);
+  const { thread } = create(h);
+  const s = h.adapter.last;
+  s.init();
+  s.out({ kind: 'tasks', tasks: TASKS });
+  r.request({});
+  // npm run e2e finishes while the model writes its last message. The CLI
+  // holds the notification and starts a turn of its own after the result.
+  s.out({ kind: 'tasks', tasks: [] });
+  s.result();
+  await tick();
+  assert.equal(state.restarts, 0, 'not between the result and the CLI turn');
+  assert.deepEqual(r.status().pendingRestart?.waitingFor, [thread.id]);
+  s.out({ kind: 'cliTurn', note: 'Background command "npm run e2e" completed' });
+  s.result();
+  await tick();
+  assert.equal(state.restarts, 1);
+
+  // If the CLI folded it into the turn instead, the restart goes ahead
+  // after the grace period.
+  const h2 = makeHarness();
+  const r2 = withRestarter(h2);
+  create(h2);
+  const s2 = h2.adapter.last;
+  s2.init();
+  s2.out({ kind: 'tasks', tasks: TASKS });
+  r2.r.request({});
+  s2.out({ kind: 'tasks', tasks: [] });
+  s2.result();
+  await tick();
+  assert.equal(r2.state.restarts, 0);
+  h2.clock.advance(15_000);
+  await tick();
+  assert.equal(r2.state.restarts, 1);
+});
+
+test('background work holds a restart for backgroundWaitMs at most, turns for as long as they take', async () => {
+  const h = makeHarness();
+  const { r, state } = withRestarter(h);
+  const dev = create(h).thread;
+  const sd = h.adapter.last;
+  sd.init();
+  sd.out({ kind: 'tasks', tasks: [{ id: 'b1', type: 'local_bash', description: 'npm run dev' }] });
+  sd.result();
+  const busy = create(h).thread;
+  const sb = h.adapter.last;
+  sb.init();
+  const res = r.request({ backgroundWaitMs: 10 * MIN });
+  assert.deepEqual(new Set(res.waitingFor), new Set([dev.id, busy.id]));
+  assert.deepEqual(res.background, [{ threadId: dev.id, tasks: ['npm run dev'] }], 'named, so the scripts can say what it waits for');
+  assert.equal(saved(h).backgroundUntil, new Date(h.clock.now() + 10 * MIN).toISOString());
+  assert.equal(r.status().pendingRestart?.backgroundUntil, saved(h).backgroundUntil);
+  // A later request with a longer limit doesn't extend it.
+  r.request({ backgroundWaitMs: 60 * MIN });
+  assert.equal(saved(h).backgroundUntil, new Date(h.clock.now() + 10 * MIN).toISOString());
+  h.clock.advance(10 * MIN);
+  await tick();
+  assert.equal(state.restarts, 0, 'the turn still holds it');
+  assert.deepEqual(r.status().pendingRestart?.waitingFor, [busy.id]);
+  sb.result();
+  await tick();
+  assert.equal(state.restarts, 1, 'the dev server no longer does');
+  await h.runner.shutdown();
+  assert.equal(h.events(dev.id).at(-1).text, 'Stopped background work when the runner stopped: npm run dev');
+
+  // With only background work left, the limit itself sets it off.
+  const h2 = makeHarness();
+  const r2 = withRestarter(h2);
+  create(h2);
+  const s2 = h2.adapter.last;
+  s2.init();
+  s2.out({ kind: 'tasks', tasks: TASKS });
+  s2.result();
+  r2.r.request({ backgroundWaitMs: 60_000 });
+  await tick();
+  assert.equal(r2.state.restarts, 0);
+  h2.clock.advance(60_000);
+  await tick();
+  assert.equal(r2.state.restarts, 1);
+});
+
 test('a restart that does stop background work says so in that thread', async () => {
   const h = makeHarness();
   const { r, state } = withRestarter(h);
@@ -512,6 +596,41 @@ test('a pending restart can be cancelled until it begins', async () => {
   assert.equal(state.restarts, 0, 'nothing restarts when the thread finishes');
   r.request({});
   assert.throws(() => r.request({ cancel: true }), (e: RpcError) => e.code === -32020);
+});
+
+test("cancelling a deploy's restart points current back at the running release", () => {
+  const h = makeHarness();
+  // A data dir with releases A (running) and B (a deploy made current).
+  const dir = path.join(h.home, 'runner');
+  for (const id of ['A', 'B']) {
+    fs.mkdirSync(path.join(dir, 'releases', id, 'src'), { recursive: true });
+    fs.writeFileSync(path.join(dir, 'releases', id, 'src', 'main.ts'), '');
+  }
+  fs.symlinkSync(path.join('releases', 'B'), path.join(dir, 'current'));
+  fs.writeFileSync(path.join(dir, 'state.json'), JSON.stringify({ current: 'B', previous: 'A', lastGood: 'A', boots: [] }));
+  const { thread } = create(h);
+  h.adapter.last.init();
+  const { r } = withRestarter(h, '0.1.0+A', { release: 'A' });
+  r.request({ release: 'B', resume: { threadId: thread.id, text: 'check B' } });
+  const res = r.request({ cancel: true });
+  assert.equal(res.scheduled, false);
+  assert.equal(res.note, "current points at A again (the release running now), so B won't start on the next restart.");
+  assert.equal(fs.readlinkSync(path.join(dir, 'current')), path.join('releases', 'A'));
+  assert.equal(JSON.parse(fs.readFileSync(path.join(dir, 'state.json'), 'utf8')).current, 'A');
+  assert.equal(JSON.parse(fs.readFileSync(path.join(dir, 'state.json'), 'utf8')).lastGood, 'A', 'the rest is kept');
+
+  // A restart that wasn't a deploy's leaves current alone.
+  fs.rmSync(path.join(dir, 'current'));
+  fs.symlinkSync(path.join('releases', 'B'), path.join(dir, 'current'));
+  r.request({});
+  assert.deepEqual(r.request({ cancel: true }), { scheduled: false, waitingFor: [] });
+  assert.equal(fs.readlinkSync(path.join(dir, 'current')), path.join('releases', 'B'));
+
+  // A runner run from source can't go back to itself, so it says so.
+  const { r: src } = withRestarter(h, '0.1.0+source', { release: undefined });
+  src.request({ release: 'B' });
+  assert.equal(src.request({ cancel: true }).note, "Release B is still current and starts on the runner's next restart (a crash or a reboot too).");
+  assert.equal(fs.readlinkSync(path.join(dir, 'current')), path.join('releases', 'B'));
 });
 
 test('a runner stopped some other way while a restart waits counts as restarted from then', async () => {
@@ -573,6 +692,28 @@ test('a snoozed thread keeps its queued message through a restart and sends it w
   await tick();
   const sent = h2.events(thread.id).filter((e) => e.type === 'user.message');
   assert.deepEqual(sent.map((e) => e.text), ['please also do X']);
+});
+
+test('a snooze that ends while the runner is down still sends the queued message', async () => {
+  const h = makeHarness();
+  const { thread } = create(h);
+  const s = h.adapter.last;
+  s.init();
+  h.runner.send(thread.id, 'please also do X');
+  h.runner.update({ threadId: thread.id, snoozedUntil: new Date(h.clock.now() + 60 * MIN).toISOString() });
+  s.result('interrupted');
+  await h.runner.shutdown();
+  // Down overnight: by the next start the snooze has long ended. (Each
+  // harness's clock starts at the same time, so the snooze moves back.)
+  const file = path.join(h.home, 'threads', thread.id, 'thread.json');
+  const rec = JSON.parse(fs.readFileSync(file, 'utf8'));
+  rec.snoozedUntil = new Date(h.clock.now() - 60 * MIN).toISOString();
+  fs.writeFileSync(file, JSON.stringify(rec));
+  const h2 = h.restart();
+  const evs = h2.events(thread.id);
+  assert.deepEqual(evs.filter((e) => e.type === 'system.note' && /queued message/.test(e.text)), [], 'not dropped with a note');
+  assert.deepEqual(evs.filter((e) => e.type === 'user.message').map((e) => e.text), ['please also do X']);
+  assert.equal(h2.runner.get(thread.id).snoozedUntil, undefined);
 });
 
 test('a thread someone has written in since it asked is not resumed over them', async () => {
@@ -644,55 +785,66 @@ test('a release that crashes after handling the restart: the one launch.mjs goes
   const { thread } = create(h);
   h.adapter.last.init();
   h.adapter.last.result();
+  // From the event log on disk: each harness only sees what it emitted.
+  const onDisk = (hh: Harness): any[] => {
+    const log = hh.store.log(thread.id);
+    return log.read(1, log.lastSeq);
+  };
+  const resumed = (hh: Harness) => onDisk(hh).filter((e) => e.type === 'user.message' && e.origin === 'runner').length;
   saveRestart(h, thread.id, { fromVersion: '0.1.0+A' }, { release: 'B', text: 'check B' });
-  // B handles it, resumes the thread, then crashes before it is marked good.
+  // The sequence launch.mjs produces for a release that dies once it is
+  // listening: B's first start handles it and resumes the thread, then dies.
   withRestarter(h, '0.1.0+B', { release: 'B' }).r.resumeAfterRestart();
   assert.equal(fs.existsSync(restartPath(h.home)), false);
   assert.ok(fs.existsSync(donePath(h.home)), 'kept until B proves itself');
+  assert.equal(resumed(h), 1);
+  // B's second start (launch.mjs gives it two): nothing is resumed twice,
+  // and the file stays for the rollback that may follow.
   const h2 = h.restart();
-  // B starts again (not rolled back yet): nothing is resumed twice.
   withRestarter(h2, '0.1.0+B', { release: 'B' }).r.resumeAfterRestart();
-  assert.equal(h2.events(thread.id).filter((e) => e.type === 'user.message').length, 0);
-  assert.equal(fs.existsSync(donePath(h.home)), false);
+  assert.equal(resumed(h2), 1);
+  assert.ok(fs.existsSync(donePath(h.home)), 'still there for the rollback');
+  // B dies again, and launch.mjs's third start goes back to A, which
+  // carries the thread on once more and says why.
+  const h3 = h2.restart();
+  const rolledBack = 'Release B kept crashing at startup, so the runner went back to A.';
+  withRestarter(h3, '0.1.0+A', { release: 'A', rolledBack, rolledBackFrom: 'B' }).r.resumeAfterRestart();
+  const evs = h3.events(thread.id);
+  const note = evs.findLast((e) => e.type === 'system.note' && e.text.startsWith('Runner restarted'));
+  assert.equal(note.text, `Runner restarted: 0.1.0+B to 0.1.0+A\n\n${rolledBack}`);
+  const msg = evs.findLast((e) => e.type === 'user.message');
+  assert.equal(msg.origin, 'runner');
+  assert.match(msg.text, /^Note from the runner: Release B kept crashing at startup.*\n\ncheck B$/s);
+  assert.equal(resumed(h3), 2);
+  assert.equal(fs.existsSync(donePath(h.home)), false, 'only once');
 
   // A rollback from some other release doesn't count: B didn't crash.
-  saveRestart(h2, thread.id, { fromVersion: '0.1.0+A' }, { release: 'B', text: 'check B' });
-  withRestarter(h2, '0.1.0+B', { release: 'B' }).r.resumeAfterRestart();
-  const hx = h2.restart();
+  fs.rmSync(resumesPath(h.home), { force: true });
+  saveRestart(h3, thread.id, { fromVersion: '0.1.0+A' }, { release: 'B', text: 'check B' });
+  withRestarter(h3, '0.1.0+B', { release: 'B' }).r.resumeAfterRestart();
+  const hx = h3.restart();
+  const before = resumed(hx);
   withRestarter(hx, '0.1.0+A', { release: 'A', rolledBack: 'Release C kept crashing at startup, so the runner went back to A.', rolledBackFrom: 'C' }).r.resumeAfterRestart();
-  assert.deepEqual(
-    hx.events(thread.id).filter((e) => e.type !== 'turn.completed'),
-    [],
-    'nothing resumed, only the interrupted turn recovered',
-  );
+  assert.equal(resumed(hx), before, 'nothing resumed');
+  assert.equal(fs.existsSync(donePath(h.home)), false);
+
+  // Nor does another release starting normally (a later deploy).
+  saveRestart(hx, thread.id, { fromVersion: '0.1.0+A' }, { release: 'B', text: 'check B' });
+  withRestarter(hx, '0.1.0+B', { release: 'B' }).r.resumeAfterRestart();
+  const hy = hx.restart();
+  withRestarter(hy, '0.1.0+C', { release: 'C' }).r.resumeAfterRestart();
   assert.equal(fs.existsSync(donePath(h.home)), false);
 
   // A clean stop isn't a crash either.
-  saveRestart(hx, thread.id, { fromVersion: '0.1.0+A' }, { release: 'B', text: 'check B' });
-  const rb = withRestarter(hx, '0.1.0+B', { release: 'B' }).r;
+  saveRestart(hy, thread.id, { fromVersion: '0.1.0+A' }, { release: 'B', text: 'check B' });
+  const rb = withRestarter(hy, '0.1.0+B', { release: 'B' }).r;
   rb.resumeAfterRestart();
   rb.stopping();
   assert.equal(fs.existsSync(donePath(h.home)), false);
 
-  // Same again, but this time B crashes and launch.mjs goes back to A.
-  // (A fresh count: the thread has been resumed a few times by now.)
-  fs.rmSync(resumesPath(h.home), { force: true });
-  saveRestart(hx, thread.id, { fromVersion: '0.1.0+A' }, { release: 'B', text: 'check B' });
-  withRestarter(hx, '0.1.0+B', { release: 'B' }).r.resumeAfterRestart();
-  const h3 = hx.restart();
-  const rolledBack = 'Release B kept crashing at startup, so the runner went back to A.';
-  withRestarter(h3, '0.1.0+A', { release: 'A', rolledBack, rolledBackFrom: 'B' }).r.resumeAfterRestart();
-  const evs = h3.events(thread.id);
-  const note = evs.find((e) => e.type === 'system.note' && e.text.startsWith('Runner restarted'));
-  assert.equal(note.text, `Runner restarted: 0.1.0+B to 0.1.0+A\n\n${rolledBack}`);
-  const msg = evs.find((e) => e.type === 'user.message');
-  assert.equal(msg.origin, 'runner');
-  assert.match(msg.text, /^Note from the runner: Release B kept crashing at startup.*\n\ncheck B$/s);
-  assert.equal(fs.existsSync(donePath(h.home)), false, 'only once');
-
   // A runner that stays up long enough drops it.
-  saveRestart(h3, thread.id);
-  const r4 = withRestarter(h3, '0.1.0+A', { release: 'A' }).r;
+  saveRestart(hy, thread.id);
+  const r4 = withRestarter(hy, '0.1.0+A', { release: 'A' }).r;
   r4.resumeAfterRestart();
   assert.ok(fs.existsSync(donePath(h.home)));
   r4.proven();
@@ -749,6 +901,10 @@ test('every CLI gets THREADBARE_THREAD_ID, THREADBARE_HOME and THREADBARE_RUNNER
   assert.equal(env.THREADBARE_HOME, h.home);
   assert.equal(env.THREADBARE_RUNNER_HOME, h.home);
   assert.match(env.THREADBARE_RUNNER_VERSION, /^\d+\.\d+\.\d+\+/);
+  // This runner's bin/ first, so a bare `tb` in the thread is its tb.
+  assert.equal(env.PATH.split(':')[0], path.resolve(import.meta.dirname, '..', '..', 'bin'));
+  assert.ok(fs.existsSync(path.join(env.PATH.split(':')[0], 'tb')));
+  assert.equal(env.PATH.split(':').slice(1).join(':'), process.env.PATH);
 
   // The Claude adapter puts them in the CLI's environment, over anything
   // inherited (a runner started from inside a thread has its own).

@@ -15,6 +15,8 @@ import type { ThreadStatus, ThreadSummary } from './protocol.ts';
 import { ErrorCode, RpcError } from './protocol.ts';
 import { atomicWriteFileSync, readJsonSync } from './fsutil.ts';
 import { paths, RUNNER_VERSION } from './config.ts';
+import { currentLink, pointCurrentAt, releaseExists } from './release.ts';
+import type { TimerHandle } from './clock.ts';
 
 export type RestartWhen = 'idle' | 'now';
 export type ResumeRequest = { threadId: string; text: string };
@@ -40,12 +42,22 @@ export type RestartFile = {
   // reason while it was pending. A resume's age counts from here, so a
   // restart that waited an hour for a long turn still resumes.
   shutdownAt?: string;
+  // After this, background shells and subagents no longer hold it (a dev
+  // server never finishes); turns always do.
+  backgroundUntil?: string;
   // restart.done.json only: the runner that handled it.
   handledBy?: string;
   handledRelease?: string;
 };
 
-export type RestartParams = { when?: RestartWhen; resume?: ResumeRequest; reason?: string; release?: string; cancel?: boolean };
+export type RestartParams = { when?: RestartWhen; resume?: ResumeRequest; reason?: string; release?: string; backgroundWaitMs?: number; cancel?: boolean };
+
+export type Background = { threadId: string; tasks: string[] };
+
+// runner.restart's result. background is the background work among the
+// threads it waits for, so the scripts can name it; note says what a cancel
+// did about the release the withdrawn restart was for.
+export type RestartResult = { scheduled: boolean; waitingFor: string[]; background?: Background[]; note?: string };
 
 export type Notice = { level: 'info' | 'warning' | 'error'; message: string };
 
@@ -60,8 +72,8 @@ export type RunnerStatus = {
   branch?: string;
   liveClis: number;
   running: string[]; // starting, running or waiting on an approval or a question
-  background?: { threadId: string; tasks: string[] }[]; // background shells and subagents still going
-  pendingRestart?: { when: RestartWhen; reason?: string; release?: string; resumeThreadId?: string; requestedAt: string; waitingFor: string[] };
+  background?: Background[]; // background shells and subagents still going
+  pendingRestart?: { when: RestartWhen; reason?: string; release?: string; resumeThreadId?: string; requestedAt: string; backgroundUntil?: string; waitingFor: string[] };
 };
 
 export const RESUME_MAX_AGE_MS = 15 * 60_000;
@@ -86,13 +98,23 @@ export function resumesPath(home: string): string {
   return path.join(paths.run(home), 'resumes.json');
 }
 
+// This runner's own bin/ (the release's, or the checkout's when run from
+// source), so a bare `tb` in a thread is there and matches the runner.
+export const BIN_DIR = path.resolve(import.meta.dirname, '..', 'bin');
+
 // Every CLI gets these, so tools an agent runs (tb self, deploy-runner.sh)
 // know which thread and which runner they're in. THREADBARE_HOME is the one
 // tb reads, and agents point it at a dev runner; THREADBARE_RUNNER_HOME
 // always names the runner the thread is on, so the scripts' guards against
 // restarting it from inside one of its threads go by that.
-export function threadEnv(threadId: string, home: string): Record<string, string> {
-  return { THREADBARE_THREAD_ID: threadId, THREADBARE_HOME: home, THREADBARE_RUNNER_HOME: home, THREADBARE_RUNNER_VERSION: RUNNER_VERSION };
+export function threadEnv(threadId: string, home: string, basePath = process.env.PATH): Record<string, string> {
+  return {
+    THREADBARE_THREAD_ID: threadId,
+    THREADBARE_HOME: home,
+    THREADBARE_RUNNER_HOME: home,
+    THREADBARE_RUNNER_VERSION: RUNNER_VERSION,
+    PATH: basePath ? `${BIN_DIR}:${basePath}` : BIN_DIR,
+  };
 }
 
 export type RestarterDeps = {
@@ -125,6 +147,8 @@ export class Restarter {
   private pending?: RestartFile;
   private restarting = false;
   private checkQueued = false;
+  // Re-checks when background work stops holding the restart.
+  private backgroundTimer?: TimerHandle;
 
   constructor(deps: RestarterDeps) {
     this.deps = deps;
@@ -139,7 +163,7 @@ export class Restarter {
 
   // ------------------------------------------------------------ requests
 
-  request(p: RestartParams): { scheduled: boolean; waitingFor: string[] } {
+  request(p: RestartParams): RestartResult {
     const { runner, log } = this.deps;
     if (p.cancel) return this.cancel();
     // A thread that doesn't exist is an error now, not a lost resume later.
@@ -149,6 +173,12 @@ export class Restarter {
     if (p.when === 'now') next.when = 'now';
     if (p.reason) next.reason = p.reason;
     if (p.release) next.release = p.release;
+    if (p.backgroundWaitMs !== undefined) {
+      // The most impatient request wins, as "now" does.
+      const until = this.deps.clock.now() + p.backgroundWaitMs;
+      const had = next.backgroundUntil ? Date.parse(next.backgroundUntil) : Infinity;
+      if (until < had) next.backgroundUntil = new Date(until).toISOString();
+    }
     if (p.resume && thread) {
       const { threadId, text } = p.resume;
       next.resumes = next.resumes.filter((r) => r.threadId !== threadId);
@@ -158,28 +188,54 @@ export class Restarter {
     }
     this.pending = next;
     this.save();
+    this.armBackgroundTimer();
     const waitingFor = next.when === 'now' || this.restarting ? [] : this.busy();
-    log.info('restart requested', { when: next.when, reason: p.reason, resumeThreadId: p.resume?.threadId, waitingFor });
+    log.info('restart requested', { when: next.when, reason: p.reason, resumeThreadId: p.resume?.threadId, waitingFor, backgroundUntil: next.backgroundUntil });
     if (!this.restarting) {
       if (waitingFor.length === 0) this.begin();
       else runner.notice('info', pendingMessage(waitingFor.length));
     }
-    return { scheduled: true, waitingFor };
+    const background = waitingFor.length ? runner.backgroundWork().filter((b) => waitingFor.includes(b.threadId)) : [];
+    return background.length ? { scheduled: true, waitingFor, background } : { scheduled: true, waitingFor };
   }
 
-  // Withdraws a restart that hasn't begun (tb restart --cancel).
-  private cancel(): { scheduled: boolean; waitingFor: string[] } {
+  // Withdraws a restart that hasn't begun (tb restart --cancel). A deploy
+  // has already pointed current at the release the restart was for, and
+  // that would start on the next restart of any kind (a crash, a reboot)
+  // with no health check and nobody watching, so current goes back to the
+  // release this runner is.
+  private cancel(): RestartResult {
     if (this.restarting) throw new RpcError(ErrorCode.busy, 'The runner is already restarting.');
-    if (!this.pending) return { scheduled: false, waitingFor: [] };
+    const p = this.pending;
+    if (!p) return { scheduled: false, waitingFor: [] };
     this.pending = undefined;
+    this.backgroundTimer?.cancel();
+    this.backgroundTimer = undefined;
     try {
       fs.rmSync(restartPath(this.deps.home), { force: true });
     } catch (e) {
       this.deps.log.warn('could not remove restart.json', { error: String(e) });
     }
-    this.deps.log.info('restart cancelled');
+    const note = this.putCurrentBack(p);
+    this.deps.log.info('restart cancelled', { release: p.release, note });
     this.deps.runner.notice('info', 'The pending runner restart was cancelled.');
-    return { scheduled: false, waitingFor: [] };
+    return note ? { scheduled: false, waitingFor: [], note } : { scheduled: false, waitingFor: [] };
+  }
+
+  private putCurrentBack(p: RestartFile): string | undefined {
+    const { home, release: mine } = this.deps;
+    const wanted = p.release;
+    if (!wanted || wanted === mine || currentLink(home) !== wanted) return undefined;
+    if (mine && releaseExists(home, mine)) {
+      try {
+        pointCurrentAt(home, mine);
+        return `current points at ${mine} again (the release running now), so ${wanted} won't start on the next restart.`;
+      } catch (e) {
+        this.deps.log.warn('could not point current back at the running release', { release: mine, error: String(e) });
+      }
+    }
+    const back = mine ? ` deploy-runner.sh --rollback goes back to ${mine}.` : '';
+    return `Release ${wanted} is still current and starts on the runner's next restart (a crash or a reboot too).${back}`;
   }
 
   status(): RunnerStatus {
@@ -202,6 +258,7 @@ export class Restarter {
       const pr: NonNullable<RunnerStatus['pendingRestart']> = { when: p.when, requestedAt: p.requestedAt, waitingFor: p.when === 'now' || this.restarting ? [] : this.busy() };
       if (p.reason) pr.reason = p.reason;
       if (p.release) pr.release = p.release;
+      if (p.backgroundUntil) pr.backgroundUntil = p.backgroundUntil;
       const last = p.resumes.at(-1);
       if (last) pr.resumeThreadId = last.threadId;
       out.pendingRestart = pr;
@@ -222,6 +279,8 @@ export class Restarter {
   // an approval or a question, or background shells and subagents the CLI
   // is still running after its turn ended. Stopping the runner stops those
   // too, and an agent waiting on a 40-minute test run would never hear back.
+  // Background work only holds it until backgroundUntil, though: a dev
+  // server or a watcher never finishes.
   private busy(): string[] {
     const ids = new Set(
       this.deps.runner
@@ -229,8 +288,20 @@ export class Restarter {
         .filter((t) => BUSY.includes(t.status))
         .map((t) => t.id),
     );
-    for (const b of this.deps.runner.backgroundWork()) ids.add(b.threadId);
+    const until = this.pending?.backgroundUntil ? Date.parse(this.pending.backgroundUntil) : Infinity;
+    if (this.deps.clock.now() < until) for (const b of this.deps.runner.backgroundWork()) ids.add(b.threadId);
     return [...ids];
+  }
+
+  private armBackgroundTimer(): void {
+    this.backgroundTimer?.cancel();
+    this.backgroundTimer = undefined;
+    const until = this.pending?.backgroundUntil ? Date.parse(this.pending.backgroundUntil) : NaN;
+    if (!Number.isFinite(until) || this.restarting) return;
+    this.backgroundTimer = this.deps.clock.setTimeout(() => {
+      this.backgroundTimer = undefined;
+      this.queueCheck();
+    }, until - this.deps.clock.now());
   }
 
   private queueCheck(): void {
@@ -246,6 +317,8 @@ export class Restarter {
   private begin(): void {
     if (this.restarting || !this.pending) return;
     this.restarting = true;
+    this.backgroundTimer?.cancel();
+    this.backgroundTimer = undefined;
     // A turn started now would be cut off before it got going.
     this.deps.runner.refuseNewTurns('The runner is restarting; send again in a moment.');
     this.pending.shutdownAt = this.isoNow();
@@ -315,9 +388,17 @@ export class Restarter {
       // Left by a runner that didn't stay up. Only worth acting on if that
       // runner was the release launch.mjs has just gone back from.
       const left = readJsonSync<RestartFile>(done);
-      if (this.deps.rolledBack && left && typeof left === 'object' && left.handledRelease !== undefined && left.handledRelease === this.deps.rolledBackFrom) {
-        saved = left;
+      const handled = left && typeof left === 'object' && typeof left.handledRelease === 'string' ? left.handledRelease : undefined;
+      if (this.deps.rolledBack && handled !== undefined && handled === this.deps.rolledBackFrom) {
+        saved = left!;
         again = true;
+      } else if (!this.deps.rolledBack && handled !== undefined && handled === this.deps.release) {
+        // The same release starting again before it was marked good:
+        // launch.mjs gives a broken release a second start before going
+        // back, and the release it goes back to needs the file then. This
+        // start being marked good (proven) or stopping cleanly drops it.
+        log.info('restart.done.json is from this release, which has not been marked good yet; keeping it');
+        return;
       }
       try {
         fs.unlinkSync(done);
@@ -464,6 +545,10 @@ export function parseRestartParams(p: Record<string, unknown>): RestartParams {
   if (p.when !== undefined && p.when !== null) {
     if (p.when !== 'idle' && p.when !== 'now') throw bad('when must be "idle" or "now"');
     out.when = p.when;
+  }
+  if (p.backgroundWaitMs !== undefined && p.backgroundWaitMs !== null) {
+    if (typeof p.backgroundWaitMs !== 'number' || !Number.isFinite(p.backgroundWaitMs) || p.backgroundWaitMs < 0) throw bad('backgroundWaitMs must be a number of milliseconds');
+    out.backgroundWaitMs = p.backgroundWaitMs;
   }
   if (p.reason !== undefined && p.reason !== null) {
     if (typeof p.reason !== 'string') throw bad('reason must be a string');

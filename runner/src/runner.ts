@@ -75,6 +75,11 @@ type Runtime = {
   // about to start a turn of its own to look at the result, and until it
   // does (or WAKE_GRACE_MS passes) the thread isn't idle.
   wakeTimer?: TimerHandle;
+  // Background work finished while a turn was running. If the model was
+  // already writing its last message, the CLI holds the notification and
+  // starts a turn of its own after the result, so the wake grace starts
+  // when the turn ends.
+  taskEndedInTurn?: boolean;
   activeAt: number; // last turn start or end, for picking which CLI to release
   approvals: Map<string, PendingApproval>;
   idleTimer?: TimerHandle;
@@ -246,8 +251,10 @@ export class Runner {
     }
     // A snoozed or archived thread holds its queue until it comes back, and
     // nothing sends it before then anyway, so a restart (planned or not)
-    // leaves it for the wake-up to send. Anything else queued was cut off.
-    if (rec.queue.length && !midTurn && this.bucket(rec) !== 'inbox') {
+    // leaves it for the wake-up to send. That includes a snooze that ended
+    // while the runner was down: start() wakes it straight after loading.
+    // Anything else queued was cut off.
+    if (rec.queue.length && !midTurn && (rec.snoozedUntil !== undefined || rec.archivedAt !== undefined)) {
       this.markDirty(st);
       return false;
     }
@@ -744,13 +751,8 @@ export class Runner {
         // The CLI reports the list shrinking a moment before it starts the
         // turn that reads the result. A restart in between would lose that
         // turn, so the thread stays busy until it starts.
-        if (ended && !rt.turn) {
-          rt.wakeTimer?.cancel();
-          rt.wakeTimer = this.clock.setTimeout(() => {
-            rt.wakeTimer = undefined;
-            this.markDirty(st);
-          }, WAKE_GRACE_MS);
-        }
+        if (ended && !rt.turn) this.startWakeGrace(st);
+        else if (ended) rt.taskEndedInTurn = true;
         // No summary field changes, but a pending restart waits on
         // background work and re-checks on thread.updated.
         this.markDirty(st);
@@ -785,6 +787,15 @@ export class Runner {
         break;
       }
     }
+  }
+
+  private startWakeGrace(st: ThreadState): void {
+    const { rt } = st;
+    rt.wakeTimer?.cancel();
+    rt.wakeTimer = this.clock.setTimeout(() => {
+      rt.wakeTimer = undefined;
+      this.markDirty(st);
+    }, WAKE_GRACE_MS);
   }
 
   private openCliTurn(st: ThreadState): void {
@@ -839,6 +850,11 @@ export class Runner {
     const { rec, rt } = st;
     rt.turn?.interruptTimer?.cancel();
     rt.turn = undefined;
+    if (rt.taskEndedInTurn) {
+      rt.taskEndedInTurn = false;
+      // Only while the CLI is there to start that turn.
+      if (rt.session && !rt.closing && !this.stopping) this.startWakeGrace(st);
+    }
     rt.activeAt = this.clock.now();
     rec.turnId = undefined;
     rec.lastTurnCompletedSeq = completedSeq;
@@ -880,6 +896,7 @@ export class Runner {
     if (rt.generation !== gen) return;
     rt.session = undefined;
     rt.tasks = [];
+    rt.taskEndedInTurn = false;
     rt.wakeTimer?.cancel();
     rt.wakeTimer = undefined;
     rt.idleTimer?.cancel();
