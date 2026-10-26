@@ -178,3 +178,18 @@ test('a subscriber that stops reading loses deltas, then is disconnected', async
   reader.close();
   await server.close();
 });
+
+test('close does not wait long for a client that never answers the close', async () => {
+  const { server, url } = await serve({ closeGraceMs: 200 });
+  const ok = await RunnerClient.connect(url, TOKEN);
+  // Stops reading, so it never answers the runner's close frame; ws alone
+  // would wait 30 s for it.
+  const silent = await RunnerClient.connect(url, TOKEN);
+  (silent as any).ws._socket.pause();
+  const started = Date.now();
+  await server.close();
+  assert.ok(Date.now() - started < 5000, `close took ${Date.now() - started} ms`);
+  assert.equal((await ok.waitClosed()).code, 1001);
+  (silent as any).ws._socket.resume();
+  await silent.waitClosed();
+});

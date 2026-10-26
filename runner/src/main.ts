@@ -3,6 +3,8 @@
 // THREADBARE_PORT pointing at temp places.
 import fs from 'node:fs';
 import { loadConfig, ensureHome, readToken, paths, recordListening, DEFAULT_CWD, RUNNER_VERSION } from './config.ts';
+import { RELEASE, markGoodLater, takeRollbackNotice, tellLaunchListening } from './release.ts';
+import { Restarter, restartMethods } from './restart.ts';
 import { createLogger } from './log.ts';
 import { ThreadStore } from './store.ts';
 import { AccountRegistry } from './accounts.ts';
@@ -14,6 +16,10 @@ import { realClock } from './clock.ts';
 import { acquireLock } from './lock.ts';
 import { removeTempFiles } from './fsutil.ts';
 import { ALWAYS_ASK_TOOLS, SERVER_NAME, threadbareMcpServer } from './threadbare-mcp.ts';
+
+// Tells launch.mjs this runner calls its listening() hook (release.ts), so
+// it may stop one that hasn't started listening in time.
+export const REPORTS_LISTENING = true;
 
 async function main(): Promise<void> {
   const cfg = loadConfig();
@@ -70,7 +76,35 @@ async function main(): Promise<void> {
   runner.start();
   if (swept) runner.startupNotice('info', `Stopped ${swept === 1 ? 'a process group' : `${swept} process groups`} left running by the previous runner.`);
 
-  const server = new RpcServer({ host: cfg.host, port: cfg.port, token: readToken(cfg.home), runner, log });
+  // launch.mjs went back to this release because a newer one kept crashing
+  // at startup. Every client that says hello hears about it, not just the
+  // first few minutes' worth.
+  const rollback = takeRollbackNotice(cfg.home, log);
+  const rolledBack = rollback?.message;
+  // runner.restart: when it's time, stop the same way SIGTERM does and
+  // exit 0 so launchd starts the runner again.
+  const restarter = new Restarter({
+    runner,
+    home: cfg.home,
+    clock: realClock,
+    log,
+    release: RELEASE.release,
+    branch: RELEASE.branch,
+    logFile: cfg.logFile,
+    rolledBack,
+    rolledBackFrom: rollback?.from,
+    restart: () => void stop('restart'),
+  });
+
+  const server = new RpcServer({
+    host: cfg.host,
+    port: cfg.port,
+    token: readToken(cfg.home),
+    runner,
+    log,
+    methods: restartMethods(restarter),
+    helloNotices: () => [...(rolledBack ? [{ level: 'warning' as const, message: rolledBack }] : []), ...restarter.helloNotices()],
+  });
   let port: number;
   try {
     ({ port } = await server.listen());
@@ -86,12 +120,20 @@ async function main(): Promise<void> {
   log.info('runner listening', { url: `ws://${cfg.host}:${port}/rpc` });
   // Tests read this line to know the runner is up.
   process.stdout.write(`threadbare-runner listening on ${port}\n`);
+  tellLaunchListening();
+  const cancelMarkGood = markGoodLater(cfg.home, RELEASE.release, log, process.env, () => restarter.proven());
+  // Only once listening: a runner that can't listen exits, and the next
+  // one should still find the resume.
+  restarter.resumeAfterRestart();
 
   let stopping = false;
   const stop = async (signal: string) => {
     if (stopping) return;
     stopping = true;
+    cancelMarkGood();
     log.info('runner stopping', { signal });
+    // Whatever stopped it, a pending restart has now happened.
+    restarter.stopping();
     try {
       await runner.shutdown();
       await server.close().catch(() => {});

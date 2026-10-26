@@ -24,6 +24,8 @@ const AUTH_TIMEOUT_MS = 5000;
 // closed with 4408, and the client reconnects and replays from its last seq.
 const SKIP_DELTAS_BYTES = 1024 * 1024;
 const CLOSE_BYTES = 32 * 1024 * 1024;
+// How long close() waits for clients to finish closing before dropping them.
+const CLOSE_GRACE_MS = 1000;
 
 export type RpcServerOptions = {
   host: string;
@@ -31,10 +33,16 @@ export type RpcServerOptions = {
   token: string;
   runner: Runner;
   log: Logger;
+  // Methods served beside the runner's own (runner.status and
+  // runner.restart, from restart.ts), and notices for a client that has
+  // just said hello beside the runner's.
+  methods?: Record<string, (params: Record<string, unknown>) => unknown>;
+  helloNotices?: () => { level: 'info' | 'warning' | 'error'; message: string }[];
   // Tests shorten these.
   authTimeoutMs?: number;
   skipDeltasBytes?: number;
   closeBytes?: number;
+  closeGraceMs?: number;
 };
 
 export class RpcServer {
@@ -82,7 +90,16 @@ export class RpcServer {
       clearTimeout(c.authTimer);
       c.ws.close(1001, 'runner stopping');
     }
+    // wss.close waits for every client to answer the close, and ws gives a
+    // silent one (a suspended app, a script blocked on `launchctl kickstart
+    // -k`, which waits for this very exit) 30 s. That's past launchd's
+    // ExitTimeOut, which would SIGKILL the runner and leave its CLIs for the
+    // next start to sweep, so cut stragglers off after a moment.
+    const cutOff = setTimeout(() => {
+      for (const ws of this.wss.clients) ws.terminate();
+    }, this.opts.closeGraceMs ?? CLOSE_GRACE_MS);
     await new Promise<void>((r) => this.wss.close(() => r()));
+    clearTimeout(cutOff);
     await new Promise<void>((r) => this.http.close(() => r()));
   }
 
@@ -184,7 +201,7 @@ export class RpcServer {
     // Things the app should know about that happened before it connected
     // (a missing claude binary, CLIs stopped at startup).
     if (msg.method === 'hello') {
-      for (const n of this.opts.runner.noticesForNewClient()) {
+      for (const n of [...this.opts.runner.noticesForNewClient(), ...(this.opts.helloNotices?.() ?? [])]) {
         this.send(conn, { jsonrpc: '2.0', method: 'runner.notice', params: n });
       }
     }
@@ -279,8 +296,12 @@ export class RpcServer {
       }
       case 'media.import':
         return r.importMedia(reqString(p, 'path'));
-      default:
+      default: {
+        // hasOwn, so "constructor" and friends aren't methods.
+        const methods = this.opts.methods;
+        if (methods && Object.hasOwn(methods, method)) return methods[method](p);
         throw new RpcError(ErrorCode.methodNotFound, `Unknown method ${method}`);
+      }
     }
   }
 }

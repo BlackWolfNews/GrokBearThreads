@@ -4,7 +4,9 @@ import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { makeHarness } from '../helpers/fakes.ts';
 import { RpcServer } from '../../src/rpc.ts';
-import { readToken } from '../../src/config.ts';
+import fs from 'node:fs';
+import os from 'node:os';
+import { loadConfig, readToken, runnerUrl } from '../../src/config.ts';
 import { nullLogger } from '../../src/log.ts';
 
 const TB = path.join(import.meta.dirname, '..', '..', 'bin', 'tb');
@@ -16,9 +18,9 @@ async function serve() {
   return { h, server, url: `ws://127.0.0.1:${port}/rpc` };
 }
 
-function tb(h: { home: string }, url: string, args: string[]) {
+function tb(h: { home: string }, url: string, args: string[], env: Record<string, string> = {}) {
   let out = '';
-  const p = spawn(process.execPath, [TB, ...args], { env: { ...process.env, THREADBARE_HOME: h.home, THREADBARE_URL: url }, stdio: ['ignore', 'pipe', 'pipe'] });
+  const p = spawn(process.execPath, [TB, ...args], { env: { ...process.env, THREADBARE_HOME: h.home, THREADBARE_URL: url, ...env }, stdio: ['ignore', 'pipe', 'pipe'] });
   p.stdout.on('data', (d) => (out += d));
   p.stderr.on('data', (d) => (out += d));
   const exited = new Promise<number | null>((r) => p.once('exit', (code) => r(code)));
@@ -70,5 +72,49 @@ test('tb send --wait shows the new message and leaves the thread unread', async 
   } finally {
     t.kill();
     await server.close();
+  }
+});
+
+test('inside a thread, tb will not delete, interrupt, snooze or archive that thread, as the threadbare tools will not', async () => {
+  const { h, server, url } = await serve();
+  const self = h.runner.create({ text: 'me', accountId: 'claude-3' }).thread;
+  h.adapter.last.init();
+  const other = h.runner.create({ text: 'other', accountId: 'claude-3' }).thread;
+  h.adapter.last.init();
+  h.adapter.last.result();
+  const inThread = { THREADBARE_THREAD_ID: self.id };
+  try {
+    for (const args of [['delete', self.id.slice(0, 8)], ['interrupt', self.id], ['snooze', self.id, '1h'], ['archive', self.id]]) {
+      const t = tb(h, url, args, inThread);
+      assert.equal(await t.exited, 1, args[0]);
+      assert.match(t.out(), /this runs in|delete itself/, args[0]);
+    }
+    const s = h.runner.get(self.id);
+    assert.equal(s.status, 'running', 'its turn carries on');
+    assert.equal(s.archivedAt, undefined);
+    assert.equal(s.snoozedUntil, undefined);
+    // Unarchiving itself, and other threads, are fine.
+    assert.equal(await tb(h, url, ['unarchive', self.id], inThread).exited, 0);
+    assert.equal(await tb(h, url, ['archive', other.id], inThread).exited, 0);
+    assert.ok(h.runner.get(other.id).archivedAt);
+    assert.equal(await tb(h, url, ['delete', other.id], inThread).exited, 0);
+    assert.throws(() => h.runner.get(other.id));
+  } finally {
+    await server.close();
+  }
+});
+
+test('tb finds a runner on port 0 through runner.json, as the CLIs of a dev or sandbox runner must', () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'tb-port-'));
+  try {
+    fs.writeFileSync(path.join(home, 'runner.json'), JSON.stringify({ port: 4242 }));
+    const env = { THREADBARE_HOME: home, THREADBARE_PORT: '0' };
+    assert.equal(runnerUrl(loadConfig(env), env), 'ws://127.0.0.1:4242/rpc');
+    const fixed = { THREADBARE_HOME: home, THREADBARE_PORT: '5151' };
+    assert.equal(runnerUrl(loadConfig(fixed), fixed), 'ws://127.0.0.1:5151/rpc');
+    const url = { ...env, THREADBARE_URL: 'ws://127.0.0.1:1/rpc' };
+    assert.equal(runnerUrl(loadConfig(url), url), 'ws://127.0.0.1:1/rpc');
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
   }
 });

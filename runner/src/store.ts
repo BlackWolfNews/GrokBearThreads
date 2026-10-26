@@ -4,7 +4,7 @@ import type { PermissionMode, PersistedEvent, Provider, ThreadStatus, ImageRef }
 import { atomicWriteFileSync, readJsonSync } from './fsutil.ts';
 import { paths } from './config.ts';
 
-export type QueuedSend = { turnId: string; text: string; images: ImageRef[] };
+export type QueuedSend = { turnId: string; text: string; images: ImageRef[]; origin?: 'runner' };
 
 // What thread.json holds: the public summary fields plus a few internal ones.
 export type ThreadRecord = {

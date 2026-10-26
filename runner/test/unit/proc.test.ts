@@ -97,3 +97,18 @@ test('only one runner holds the data dir lock; a dead or recycled holder is take
     holder.kill('SIGKILL');
   }
 });
+
+test('a lock with no start time still counts while a runner under launch.mjs holds it', async () => {
+  const run = tmpDir();
+  // A release runs as `node <home>/runner/launch.mjs`, not main.ts.
+  const script = path.join(tmpDir(), 'launch.mjs');
+  fs.writeFileSync(script, "console.log('up'); setInterval(() => {}, 1000);\n");
+  const holder = spawn(process.execPath, [script], { stdio: ['ignore', 'pipe', 'inherit'] });
+  try {
+    await new Promise((r) => holder.stdout!.once('data', r));
+    fs.writeFileSync(path.join(run, 'runner.pid'), JSON.stringify({ pid: holder.pid, lstart: '' }));
+    assert.deepEqual(acquireLock(run), { heldBy: holder.pid });
+  } finally {
+    holder.kill('SIGKILL');
+  }
+});

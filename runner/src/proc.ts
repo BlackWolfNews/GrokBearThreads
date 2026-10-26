@@ -210,11 +210,13 @@ function psTable(): Promise<{ pid: number; ppid: number; pgid: number }[]> {
   });
 }
 
-// spawnClaudeCodeProcess implementation for the SDK.
+// spawnClaudeCodeProcess implementation for the SDK. threadId goes in the
+// spawn and exit log lines, so `tb logs --thread` shows a CLI crashing.
 export function groupSpawner(
   registry: ProcessRegistry,
   log: Logger,
   onStderr: (line: string) => void,
+  threadId?: string,
 ): (opts: SpawnOptions) => SpawnedProcess {
   return (opts) => {
     const child = spawn(opts.command, opts.args, {
@@ -225,7 +227,7 @@ export function groupSpawner(
     });
     const pid = child.pid;
     if (pid) registry.add(pid, opts.command);
-    log.info('spawned CLI', { pid, cwd: opts.cwd });
+    log.info('spawned CLI', { threadId, pid, cwd: opts.cwd });
     let buf = '';
     child.stderr?.setEncoding('utf8');
     child.stderr?.on('data', (d: string) => {
@@ -249,7 +251,7 @@ export function groupSpawner(
       { once: true },
     );
     child.once('exit', (code, signal) => {
-      log.info('CLI exited', { pid, code, signal });
+      log.info('CLI exited', { threadId, pid, code, signal });
       if (!pid) return;
       // Stop anything the CLI left running in its group.
       killGroup(pid, 'SIGTERM');
@@ -258,7 +260,7 @@ export function groupSpawner(
       if (code !== 0) {
         const left = registry.toolGroups(pid);
         if (left.length) {
-          log.warn('stopping tool commands a CLI left behind', { pid, groups: left });
+          log.warn('stopping tool commands a CLI left behind', { threadId, pid, groups: left });
           for (const g of left) killGroup(g, 'SIGTERM');
           setTimeout(() => {
             for (const g of left) if (groupAlive(g)) killGroup(g, 'SIGKILL');

@@ -1,9 +1,40 @@
 // tb: a small command line client for testing and scripting the runner.
 import { parseArgs } from 'node:util';
 import path from 'node:path';
-import { loadConfig, readToken } from './config.ts';
+import { loadConfig, readToken, runnerUrl } from './config.ts';
 import { RunnerClient } from './client.ts';
 import type { ImageRef, PersistedEvent, ThreadSummary } from './protocol.ts';
+import { DEV_HELP, logsCommand, runDev } from './tb-dev.ts';
+
+const OPTIONS = {
+  cwd: { type: 'string' },
+  account: { type: 'string' },
+  model: { type: 'string' },
+  ask: { type: 'boolean' },
+  image: { type: 'string', multiple: true },
+  wait: { type: 'boolean' },
+  json: { type: 'boolean' },
+  snoozed: { type: 'boolean' },
+  archived: { type: 'boolean' },
+  all: { type: 'boolean' },
+  from: { type: 'string' },
+  'until-done': { type: 'boolean' },
+  // tb-dev.ts
+  last: { type: 'string' },
+  tools: { type: 'boolean' },
+  out: { type: 'string' },
+  now: { type: 'boolean' },
+  force: { type: 'boolean' },
+  resume: { type: 'string' },
+  'no-resume': { type: 'boolean' },
+  cancel: { type: 'boolean' },
+  reason: { type: 'string' },
+  thread: { type: 'string' },
+  'max-wait': { type: 'string' },
+  lines: { type: 'string', short: 'n' },
+  follow: { type: 'boolean', short: 'f' },
+  help: { type: 'boolean', short: 'h' },
+} as const;
 
 const HELP = `tb: talk to the Threadbare runner
 
@@ -23,35 +54,28 @@ const HELP = `tb: talk to the Threadbare runner
   tb accounts
 
 Thread ids can be shortened to any unique prefix.
-Uses THREADBARE_HOME and THREADBARE_PORT like the runner does.`;
+Uses THREADBARE_HOME and THREADBARE_PORT like the runner does.
+
+${DEV_HELP}`;
 
 async function main(argv: string[]): Promise<number> {
-  const { values, positionals } = parseArgs({
-    args: argv,
-    allowPositionals: true,
-    options: {
-      cwd: { type: 'string' },
-      account: { type: 'string' },
-      model: { type: 'string' },
-      ask: { type: 'boolean' },
-      image: { type: 'string', multiple: true },
-      wait: { type: 'boolean' },
-      json: { type: 'boolean' },
-      snoozed: { type: 'boolean' },
-      archived: { type: 'boolean' },
-      all: { type: 'boolean' },
-      from: { type: 'string' },
-      'until-done': { type: 'boolean' },
-      help: { type: 'boolean', short: 'h' },
-    },
-  });
+  let parsed;
+  try {
+    parsed = parseArgs({ args: argv, allowPositionals: true, options: OPTIONS });
+  } catch (e) {
+    // A typo or a flag with no value: say which, not a stack trace.
+    console.error(`${(e as Error).message}\nSee tb --help.`);
+    return 2;
+  }
+  const { values, positionals } = parsed;
   const [cmd, ...args] = positionals;
   if (!cmd || values.help) {
     console.log(HELP);
     return cmd ? 0 : 1;
   }
   const cfg = loadConfig();
-  const url = process.env.THREADBARE_URL || `ws://127.0.0.1:${cfg.port}/rpc`;
+  if (cmd === 'logs') return logsCommand(cfg, values);
+  const url = runnerUrl(cfg);
   let client: RunnerClient;
   try {
     client = await RunnerClient.connect(url, readToken(cfg.home));
@@ -124,24 +148,20 @@ async function run(client: RunnerClient, cmd: string, args: string[], f: Flags):
       for (const e of r.events) printEvent(e, Boolean(f.json));
       return 0;
     }
-    case 'interrupt':
-      await client.call('threads.interrupt', { threadId: await resolveId(client, args[0]) });
+    case 'interrupt': {
+      const id = notSelf(await resolveId(client, args[0]), "That's the thread this runs in. Just end the turn.");
+      await client.call('threads.interrupt', { threadId: id });
       return 0;
+    }
     case 'approve':
-      await client.call('approvals.respond', {
-        threadId: await resolveId(client, args[0]),
-        approvalId: args[1],
-        decision: args[2] ?? 'allow',
-      });
+    case 'answer': {
+      const threadId = await resolveId(client, args[0]);
+      const params: Record<string, unknown> = { threadId, approvalId: await resolveApproval(client, threadId, args[1]) };
+      if (cmd === 'approve') params.decision = args[2] ?? 'allow';
+      else Object.assign(params, { decision: 'answered', answers: { '0': args[2] ?? '' } });
+      await client.call('approvals.respond', params);
       return 0;
-    case 'answer':
-      await client.call('approvals.respond', {
-        threadId: await resolveId(client, args[0]),
-        approvalId: args[1],
-        decision: 'answered',
-        answers: { '0': args[2] ?? '' },
-      });
-      return 0;
+    }
     case 'move': {
       const id = await resolveId(client, args[0]);
       if (!args[1]) throw new Error('folder required');
@@ -150,22 +170,25 @@ async function run(client: RunnerClient, cmd: string, args: string[], f: Flags):
       return 0;
     }
     case 'delete': {
-      const id = await resolveId(client, args[0]);
+      const id = notSelf(await resolveId(client, args[0]), "A thread can't delete itself. Ask Mike to.");
       await client.call('threads.delete', { threadId: id });
       console.log(`deleted ${id}`);
       return 0;
     }
     case 'snooze': {
-      const id = await resolveId(client, args[0]);
+      const id = notSelf(await resolveId(client, args[0]), STOPS_SELF);
       const until = parseWhen(args[1] ?? '1h');
       const r = await client.call<{ thread: ThreadSummary }>('threads.update', { threadId: id, snoozedUntil: until });
       console.log(`snoozed until ${r.thread.snoozedUntil}`);
       return 0;
     }
     case 'archive':
-    case 'unarchive':
-      await client.call('threads.update', { threadId: await resolveId(client, args[0]), archived: cmd === 'archive' });
+    case 'unarchive': {
+      const id = await resolveId(client, args[0]);
+      if (cmd === 'archive') notSelf(id, STOPS_SELF);
+      await client.call('threads.update', { threadId: id, archived: cmd === 'archive' });
       return 0;
+    }
     case 'accounts': {
       const r = await client.call<{ accounts: { id: string; title: string }[]; defaults: { accountId: string; cwd: string } }>('hello', {
         client: 'tb',
@@ -174,10 +197,23 @@ async function run(client: RunnerClient, cmd: string, args: string[], f: Flags):
       for (const a of r.accounts) console.log(`${a.id === r.defaults.accountId ? '*' : ' '} ${a.id.padEnd(12)} ${a.title}`);
       return 0;
     }
-    default:
+    default: {
+      const code = await runDev(client, cmd, args, f, (prefix) => resolveId(client, prefix));
+      if (code !== undefined) return code;
       console.error(`Unknown command: ${cmd}\n\n${HELP}`);
       return 1;
+    }
   }
+}
+
+// Inside a thread, tb won't stop the thread it runs in, as the threadbare
+// MCP tools won't (threadbare-mcp.ts): it would end this very turn.
+// THREADBARE_THREAD_ID is only set in a thread's own CLI and what it runs.
+const STOPS_SELF = "Can't snooze or archive the thread this runs in from inside its own turn. Ask Mike to, or do it when the work is done.";
+
+function notSelf(id: string, message: string): string {
+  if (id === process.env.THREADBARE_THREAD_ID) throw new Error(message);
+  return id;
 }
 
 async function resolveId(client: RunnerClient, prefix: string | undefined): Promise<string> {
@@ -187,6 +223,20 @@ async function resolveId(client: RunnerClient, prefix: string | undefined): Prom
   if (hits.length === 1) return hits[0].id;
   if (hits.length === 0) return prefix;
   throw new Error(`${prefix} matches ${hits.length} threads`);
+}
+
+// An approval id, or the start of one (tb show prints the first 8
+// characters), among the thread's approvals that haven't been answered.
+async function resolveApproval(client: RunnerClient, threadId: string, prefix: string | undefined): Promise<string> {
+  if (!prefix) throw new Error('approval id required');
+  const { events } = await client.call<{ events: PersistedEvent[] }>('threads.events', { threadId, limit: 10_000 });
+  const resolved = new Set(events.flatMap((e) => (e.type === 'approval.resolved' ? [e.approvalId] : [])));
+  const open = events.flatMap((e) => ((e.type === 'approval.requested' || e.type === 'question.requested') && !resolved.has(e.approvalId) ? [e.approvalId] : []));
+  if (open.includes(prefix)) return prefix;
+  const hits = open.filter((id) => id.startsWith(prefix));
+  if (hits.length === 1) return hits[0];
+  if (hits.length > 1) throw new Error(`${prefix} matches ${hits.length} open approvals`);
+  return prefix;
 }
 
 function parseWhen(s: string): string {

@@ -130,7 +130,7 @@ class ClaudeSession implements AgentSession {
     const options: Options = {
       cwd: opts.cwd,
       pathToClaudeCodeExecutable: deps.claudePath,
-      env: cliEnv(opts.account),
+      env: { ...cliEnv(opts.account), ...opts.env },
       settingSources: ['user', 'project', 'local'],
       systemPrompt: { type: 'preset', preset: 'claude_code' },
       includePartialMessages: true,
@@ -140,7 +140,7 @@ class ClaudeSession implements AgentSession {
       allowDangerouslySkipPermissions: true,
       canUseTool: (name, input, o) => this.canUseTool(name, input, o),
       abortController: this.abort,
-      spawnClaudeCodeProcess: groupSpawner(deps.registry, deps.log, (line) => this.stderr(line)),
+      spawnClaudeCodeProcess: groupSpawner(deps.registry, deps.log, (line) => this.stderr(line), opts.threadId),
     };
     const servers = deps.mcpServersFor?.(opts.threadId);
     if (servers && Object.keys(servers).length) options.mcpServers = servers;

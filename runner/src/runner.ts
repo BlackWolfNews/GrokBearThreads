@@ -35,6 +35,7 @@ import type {
 import type { ThreadRecord, ThreadStore, QueuedSend } from './store.ts';
 import type { Clock, TimerHandle } from './clock.ts';
 import type { Logger } from './log.ts';
+import { threadEnv } from './restart.ts';
 import type { AccountRegistry } from './accounts.ts';
 import { RUNNER_VERSION, expandHome, paths, readRunnerJson, writeRunnerJson, type Config } from './config.ts';
 import { copyImageInto, imageRefFor } from './media.ts';
@@ -77,6 +78,15 @@ type Runtime = {
   deleted?: boolean; // anything the old CLI still reports is dropped
   turn?: Turn;
   tasks: BackgroundTask[]; // background work the live CLI is running
+  // Set when background work finished with no turn running: the CLI is
+  // about to start a turn of its own to look at the result, and until it
+  // does (or WAKE_GRACE_MS passes) the thread isn't idle.
+  wakeTimer?: TimerHandle;
+  // Background work finished while a turn was running. If the model was
+  // already writing its last message, the CLI holds the notification and
+  // starts a turn of its own after the result, so the wake grace starts
+  // when the turn ends.
+  taskEndedInTurn?: boolean;
   activeAt: number; // last turn start or end, for picking which CLI to release
   approvals: Map<string, PendingApproval>;
   idleTimer?: TimerHandle;
@@ -108,6 +118,9 @@ const DELTA_INTERVAL_MS = 33; // at most ~30 delta flushes a second per thread
 const INTERRUPT_GRACE_MS = 10_000;
 // How long notices from startup are shown to clients that connect later.
 const STARTUP_NOTICE_MS = 10 * 60_000;
+// How long a finished background task keeps the thread counted as busy
+// while the CLI gets round to its own turn (usually well under a second).
+const WAKE_GRACE_MS = 15_000;
 
 export class Runner {
   private cfg: Config;
@@ -124,6 +137,7 @@ export class Runner {
   private flushScheduled = false;
   private snoozeTimer?: TimerHandle;
   private stopping = false;
+  private refusing?: string;
   private startedAt = 0;
   private startupNotices: { level: 'info' | 'warning' | 'error'; message: string }[] = [];
 
@@ -247,6 +261,15 @@ export class Runner {
       rec.turnId = undefined;
       rec.status = 'stopped';
     }
+    // A snoozed or archived thread holds its queue until it comes back, and
+    // nothing sends it before then anyway, so a restart (planned or not)
+    // leaves it for the wake-up to send. That includes a snooze that ended
+    // while the runner was down: start() wakes it straight after loading.
+    // Anything else queued was cut off.
+    if (rec.queue.length && !midTurn && (rec.snoozedUntil !== undefined || rec.archivedAt !== undefined)) {
+      this.markDirty(st);
+      return false;
+    }
     if (rec.queue.length) {
       const texts = rec.queue.map((q) => q.text).filter(Boolean);
       this.emit(st, {
@@ -276,12 +299,48 @@ export class Runner {
       const { rt } = st;
       rt.idleTimer?.cancel();
       rt.deltaTimer?.cancel();
+      rt.wakeTimer?.cancel();
       this.flushDeltas(st);
       // Output and exits from CLIs that are about to be killed no longer count.
       rt.generation++;
       if (rt.turn) this.stopTurn(st);
+      // Killing the CLIs kills their background shells and subagents too.
+      // Say so in the thread, as releaseSession does, or it would wait for
+      // a result that never comes with nothing to say why.
+      if (rt.tasks.length) {
+        const what = rt.tasks.map((t) => t.description || t.type).join('; ');
+        rt.tasks = [];
+        try {
+          this.emit(st, { type: 'system.note', text: `Stopped background work when the runner stopped: ${what}` });
+        } catch (e) {
+          this.log.error('could not save a note', { threadId: st.rec.id, error: String(e) });
+        }
+      }
     }
     this.flush();
+  }
+
+  // From the moment a restart begins until the runner exits, a new turn
+  // would only be cut off straight away, so sends and new threads are
+  // refused with a message saying to send again in a moment.
+  refuseNewTurns(message: string): void {
+    this.refusing = message;
+  }
+
+  private checkAccepting(): void {
+    if (this.refusing) throw new RpcError(ErrorCode.busy, this.refusing);
+  }
+
+  // Threads whose CLI is running background shells or subagents. A restart
+  // waits for them (restart.ts), since stopping the CLI stops them.
+  backgroundWork(): { threadId: string; tasks: string[] }[] {
+    const out: { threadId: string; tasks: string[] }[] = [];
+    for (const st of this.threads.values()) {
+      const tasks = st.rt.tasks.map((t) => t.description || t.type);
+      if (st.rt.wakeTimer) tasks.push('a background task that just finished, which the agent is about to look at');
+      if (tasks.length) out.push({ threadId: st.rec.id, tasks });
+    }
+    return out;
   }
 
   private stopTurn(st: ThreadState): void {
@@ -462,6 +521,7 @@ export class Runner {
     permissionMode?: PermissionMode;
     title?: string;
   }): { thread: ThreadSummary; turnId: string } {
+    this.checkAccepting();
     const accountId = params.accountId ?? this.defaultAccountId();
     if (!this.accounts.get(accountId)) throw new RpcError(ErrorCode.accountNotFound, `No account called ${accountId}`);
     // A blank folder means the default, not the runner's own folder.
@@ -501,14 +561,16 @@ export class Runner {
     return { thread: this.summary(st), turnId };
   }
 
-  send(threadId: string, text: string, images: ImageRef[] = []): { turnId: string } {
+  // origin "runner" marks a message the runner sends by itself (restart.ts).
+  send(threadId: string, text: string, images: ImageRef[] = [], opts: { origin?: 'runner' } = {}): { turnId: string } {
     const st = this.mustGet(threadId);
+    this.checkAccepting();
     if (!text && images.length === 0) throw new RpcError(ErrorCode.badParams, 'text or images required');
     checkImages(images);
-    return { turnId: this.sendTo(st, text, images) };
+    return { turnId: this.sendTo(st, text, images, opts.origin) };
   }
 
-  private sendTo(st: ThreadState, text: string, images: ImageRef[]): string {
+  private sendTo(st: ThreadState, text: string, images: ImageRef[], origin?: 'runner'): string {
     const { rec, rt } = st;
     // Copy images into the thread's own media folder now, so a queued
     // message still works if inbox/ is cleaned before it's sent.
@@ -529,16 +591,18 @@ export class Runner {
       rt.releaseWhenIdle = false;
     }
     const turnId = crypto.randomUUID();
+    const msg: QueuedSend = { turnId, text, images: refs };
+    if (origin) msg.origin = origin;
     rec.lastActivityAt = this.isoNow();
     if (rt.turn || rec.queue.length) {
       // Behind a running turn, or behind messages that couldn't start
       // earlier: they go first.
-      rec.queue.push({ turnId, text, images: refs });
+      rec.queue.push(msg);
       this.markDirty(st);
       this.kickQueue(st);
       return turnId;
     }
-    this.startTurn(st, { turnId, text, images: refs });
+    this.startTurn(st, msg);
     return turnId;
   }
 
@@ -547,7 +611,7 @@ export class Runner {
   // than stuck on a turn that never started.
   private startTurn(st: ThreadState, msg: QueuedSend): void {
     const { rec, rt } = st;
-    this.emit(st, { type: 'user.message', text: msg.text, images: msg.images }, msg.turnId);
+    this.emit(st, { type: 'user.message', text: msg.text, images: msg.images, ...(msg.origin ? { origin: msg.origin } : {}) }, msg.turnId);
     try {
       this.emit(st, { type: 'turn.started', turnId: msg.turnId }, msg.turnId);
     } catch (e) {
@@ -668,6 +732,7 @@ export class Runner {
         blobsDir: this.store.blobsDir(rec.id),
         tmpDir: path.join(paths.run(this.cfg.home), 'tmp'),
         allowRules: rec.allowRules ?? [],
+        env: threadEnv(rec.id, this.cfg.home),
       },
       sink,
     );
@@ -711,8 +776,17 @@ export class Runner {
         rt.turn!.cliStarted = true;
         if (o.note) this.emit(st, { type: 'system.note', text: o.note }, rt.turn!.turnId);
         break;
-      case 'tasks':
+      case 'tasks': {
+        const ended = rt.tasks.some((t) => !o.tasks.some((n) => n.id === t.id));
         rt.tasks = o.tasks;
+        // The CLI reports the list shrinking a moment before it starts the
+        // turn that reads the result. A restart in between would lose that
+        // turn, so the thread stays busy until it starts.
+        if (ended && !rt.turn) this.startWakeGrace(st);
+        else if (ended) rt.taskEndedInTurn = true;
+        // No summary field changes, but a pending restart waits on
+        // background work and re-checks on thread.updated.
+        this.markDirty(st);
         // Background work keeps the CLI live; once it's done the idle
         // countdown starts again.
         if (o.tasks.length) {
@@ -720,6 +794,7 @@ export class Runner {
           rt.idleTimer = undefined;
         } else if (!rt.turn) this.scheduleIdle(st);
         break;
+      }
       case 'allowRules': {
         const rules = new Set(rec.allowRules ?? []);
         for (const r of o.rules) rules.add(r);
@@ -745,8 +820,19 @@ export class Runner {
     }
   }
 
+  private startWakeGrace(st: ThreadState): void {
+    const { rt } = st;
+    rt.wakeTimer?.cancel();
+    rt.wakeTimer = this.clock.setTimeout(() => {
+      rt.wakeTimer = undefined;
+      this.markDirty(st);
+    }, WAKE_GRACE_MS);
+  }
+
   private openCliTurn(st: ThreadState): void {
     const { rec, rt } = st;
+    rt.wakeTimer?.cancel();
+    rt.wakeTimer = undefined;
     const turnId = crypto.randomUUID();
     this.emit(st, { type: 'turn.started', turnId }, turnId);
     rt.idleTimer?.cancel();
@@ -795,6 +881,11 @@ export class Runner {
     const { rec, rt } = st;
     rt.turn?.interruptTimer?.cancel();
     rt.turn = undefined;
+    if (rt.taskEndedInTurn) {
+      rt.taskEndedInTurn = false;
+      // Only while the CLI is there to start that turn.
+      if (rt.session && !rt.closing && !this.stopping) this.startWakeGrace(st);
+    }
     rt.activeAt = this.clock.now();
     rec.turnId = undefined;
     rec.lastTurnCompletedSeq = completedSeq;
@@ -836,6 +927,9 @@ export class Runner {
     if (rt.generation !== gen) return;
     rt.session = undefined;
     rt.tasks = [];
+    rt.taskEndedInTurn = false;
+    rt.wakeTimer?.cancel();
+    rt.wakeTimer = undefined;
     rt.idleTimer?.cancel();
     rt.idleTimer = undefined;
     this.log.info('session ended', { threadId: rec.id, error: err?.message });
@@ -1012,6 +1106,7 @@ export class Runner {
     this.dirty.delete(threadId);
     rt.idleTimer?.cancel();
     rt.deltaTimer?.cancel();
+    rt.wakeTimer?.cancel();
     rt.turn?.interruptTimer?.cancel();
     // Bumping the generation makes everything the old CLI still reports
     // (output, approvals, its exit) go nowhere.
@@ -1442,6 +1537,11 @@ export class Runner {
 
   status(threadId: string): ThreadStatus | undefined {
     return this.threads.get(threadId)?.rec.status;
+  }
+
+  // A note outside any turn (restart.ts: "Runner restarted: ...").
+  note(threadId: string, text: string): void {
+    this.emit(this.mustGet(threadId), { type: 'system.note', text });
   }
 }
 

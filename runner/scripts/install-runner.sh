@@ -7,42 +7,182 @@
 #   scripts/install-runner.sh --print      print the plist and change nothing
 #   scripts/install-runner.sh --uninstall  stop it and remove the plist
 #
-# Options:
-#   --node PATH   Node 24 binary to pin in the plist
-#                 (default: $THREADBARE_NODE, else ~/.nvm/versions/node/v24.22.1/bin/node)
-#   --path PATH   PATH for the runner and the agents it starts
-#                 (default: your login shell's PATH, captured now)
+# The runner runs from a release, never from this checkout: the plist
+# starts <home>/runner/launch.mjs, which starts the release
+# <home>/runner/current points at. The first release is built here; after
+# that, ship changes with scripts/deploy-runner.sh.
 #
-# The runner reads its data dir and port from ~/Library/Application
-# Support/Threadbare/runner.json, so nothing else is pinned here.
+# It replaces a running copy only when no thread is busy (a turn, or
+# background shells and subagents), since that stops them; --force does it
+# anyway. It keeps the release current names only if it was built from
+# HEAD, and otherwise builds one that was. If the new runner doesn't come up
+# and stay up until it is marked good (about a minute), the old plist,
+# launch.mjs and current are put back.
+#
+# Options:
+#   --from-source  run src/main.ts straight from this checkout instead, as
+#                  before releases (for debugging the runner itself)
+#   --force        replace the running copy even if threads are busy
+#   --allow-branch install from a HEAD that isn't main's tip (its launch.mjs
+#                  and release)
+#   --home DIR     data dir (default ~/Library/Application Support/Threadbare)
+#   --label LABEL  launchd label (default com.mikerosoft.threadbare.runner)
+#   --port N       port to listen on (default: the one in runner.json, else
+#                  8797). A sandbox next to the real runner needs its own
+#                  --home and --label; its port defaults to 0, a free one.
+#   --node PATH    Node 24 binary to pin in the plist
+#                  (default: $THREADBARE_NODE, else ~/.nvm/versions/node/v24.22.1/bin/node)
+#   --path PATH    PATH for the runner and the agents it starts
+#                  (default: your login shell's PATH, captured now)
+#
+# THREADBARE_LAUNCHCTL and THREADBARE_LAUNCH_AGENTS_DIR replace launchctl
+# and ~/Library/LaunchAgents (the tests use both).
 set -euo pipefail
 
-LABEL="com.mikerosoft.threadbare.runner"
+DEFAULT_LABEL="com.mikerosoft.threadbare.runner"
+DEFAULT_HOME="$HOME/Library/Application Support/Threadbare"
 RUNNER_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
-LOG="$HOME/Library/Logs/threadbare-runner.log"
 NODE="${THREADBARE_NODE:-$HOME/.nvm/versions/node/v24.22.1/bin/node}"
+LAUNCHCTL="${THREADBARE_LAUNCHCTL:-launchctl}"
+AGENTS_DIR="${THREADBARE_LAUNCH_AGENTS_DIR:-$HOME/Library/LaunchAgents}"
+LABEL="$DEFAULT_LABEL"
+DATA_HOME="$DEFAULT_HOME"
+PORT=""
 AGENT_PATH=""
+FROM_SOURCE=0
+FORCE=0
+ALLOW_BRANCH=0
+HOME_GIVEN=0
 MODE="install"
+ARGS=("$@")
 
 while [ $# -gt 0 ]; do
   case "$1" in
     --print) MODE="print" ;;
     --uninstall) MODE="uninstall" ;;
-    --node) NODE="$2"; shift ;;
-    --path) AGENT_PATH="$2"; shift ;;
-    -h|--help) sed -n '2,17p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    --from-source) FROM_SOURCE=1 ;;
+    --force) FORCE=1 ;;
+    --allow-branch) ALLOW_BRANCH=1 ;;
+    --home) DATA_HOME="${2:?--home needs a folder}"; HOME_GIVEN=1; shift ;;
+    --label) LABEL="${2:?--label needs a launchd label}"; shift ;;
+    --port) PORT="${2:?--port needs a number}"; shift ;;
+    --node) NODE="${2:?--node needs the path to a Node binary}"; shift ;;
+    --path) AGENT_PATH="${2:?--path needs a PATH}"; shift ;;
+    -h|--help) awk 'NR > 1 && /^#/ { sub(/^# ?/, ""); print; next } NR > 1 { exit }' "$0"; exit 0 ;;
     *) echo "Unknown option: $1" >&2; exit 1 ;;
   esac
   shift
 done
 
+case "$DATA_HOME" in /*) ;; *) DATA_HOME="$PWD/$DATA_HOME" ;; esac
+DATA_HOME="${DATA_HOME%/}"
+
+# Same folder, even through a symlink (/tmp is /private/tmp).
+same_dir() {
+  [ "$1" = "$2" ] && return 0
+  [ -d "$1" ] && [ -d "$2" ] && [ "$(cd "$1" && pwd -P)" = "$(cd "$2" && pwd -P)" ]
+}
+
+SANDBOX=0
+same_dir "$DATA_HOME" "$DEFAULT_HOME" || SANDBOX=1
+# A sandbox under the real label would replace the real runner, and a
+# second label on the real data dir would be a second runner fighting
+# for its lock.
+if [ "$SANDBOX" = 1 ] && [ "$LABEL" = "$DEFAULT_LABEL" ]; then
+  echo "A runner on another data dir needs its own --label (say $DEFAULT_LABEL.devtest), or it would replace the real one." >&2
+  exit 1
+fi
+if [ "$SANDBOX" = 0 ] && [ "$LABEL" != "$DEFAULT_LABEL" ]; then
+  echo "$DATA_HOME belongs to $DEFAULT_LABEL; give a second runner its own --home." >&2
+  exit 1
+fi
+if [ "$SANDBOX" = 1 ]; then
+  [ -n "$PORT" ] || PORT=0
+  LOG="$DATA_HOME/runner.log"
+else
+  LOG="$HOME/Library/Logs/threadbare-runner.log"
+fi
+PLIST="$AGENTS_DIR/$LABEL.plist"
 DOMAIN="gui/$(id -u)"
 
+# The pid in <home>/run/runner.pid (plain, or JSON with the pid first).
+runner_pid() {
+  [ -f "$1/run/runner.pid" ] || return 1
+  grep -o '[0-9][0-9]*' "$1/run/runner.pid" 2>/dev/null | head -n 1
+}
+
+# True if pid $1 is an ancestor of this script: a CLI that runner started
+# ran it, directly or through a shell or a dev runner.
+is_ancestor() {
+  local p="$PPID" n=0
+  while [ -n "$p" ] && [ "$p" -gt 1 ] && [ "$n" -lt 200 ]; do
+    [ "$p" = "$1" ] && return 0
+    p="$(ps -o ppid= -p "$p" 2>/dev/null | tr -d ' ')"
+    n=$((n + 1))
+  done
+  return 1
+}
+
+# Reinstalling or removing the runner a thread runs on ends that thread's
+# turn, so an agent hands it to Mike instead. That's decided by the process
+# tree (which works under any runner, and whatever an agent exported) and
+# by THREADBARE_RUNNER_HOME, which the runner sets and nothing tells an
+# agent to change. THREADBARE_HOME is the one agents point at dev runners,
+# so it can't be trusted for this. The real runner is refused from any
+# thread at all.
+if [ "$MODE" != "print" ]; then
+  IN_THREAD=0
+  PID="$(runner_pid "$DATA_HOME" || true)"
+  if [ -n "$PID" ] && is_ancestor "$PID"; then IN_THREAD=1; fi
+  if [ -n "${THREADBARE_THREAD_ID:-}" ]; then
+    if [ "$SANDBOX" = 0 ] || same_dir "${THREADBARE_RUNNER_HOME:-${THREADBARE_HOME:-${THREADBARE_DATA_DIR:-$DEFAULT_HOME}}}" "$DATA_HOME"; then IN_THREAD=1; fi
+  fi
+  if [ "$IN_THREAD" = 1 ]; then
+    echo "This would stop the runner this thread runs on and end this turn. Ask Mike to run it from a terminal:" >&2
+    printf '  %q' "$RUNNER_DIR/scripts/install-runner.sh" ${ARGS[@]+"${ARGS[@]}"} >&2
+    echo >&2
+    exit 1
+  fi
+fi
+# deploy-runner.sh takes its data dir from THREADBARE_HOME; this script
+# doesn't, so someone counting on it would reinstall the real runner.
+if [ "$HOME_GIVEN" = 0 ] && [ -n "${THREADBARE_HOME:-}" ] && ! same_dir "$THREADBARE_HOME" "$DEFAULT_HOME"; then
+  echo "THREADBARE_HOME is $THREADBARE_HOME, but install-runner.sh only goes by --home (default $DEFAULT_HOME). Pass --home." >&2
+  exit 1
+fi
+
+# Loads a launch.mjs the way the LaunchAgent would, short of starting a
+# runner (it only starts one when it is the program, not when imported), and
+# checks it has what deploy-runner.sh imports from it.
+check_launch() {
+  "$NODE" --check "$1" && TB_LAUNCH="$1" "$NODE" --input-type=module -e '
+    const { pathToFileURL } = await import("node:url");
+    const m = await import(pathToFileURL(process.env.TB_LAUNCH).href);
+    for (const f of ["planBoot", "readState", "writeState", "pointCurrent", "readCurrentLink", "releaseExists", "markBootClean"]) {
+      if (typeof m[f] !== "function") throw new Error(`launch.mjs has no ${f}()`);
+    }'
+}
+
+# deploy-runner.sh (which the busy check below runs) imports this
+# checkout's launch.mjs, so a broken one would look like busy threads.
+LAUNCH_OK=1
+if [ "$MODE" != "print" ] && [ -x "$NODE" ] && ! check_launch "$RUNNER_DIR/launch.mjs"; then
+  LAUNCH_OK=0
+fi
+
 if [ "$MODE" = "uninstall" ]; then
-  launchctl bootout "$DOMAIN/$LABEL" 2>/dev/null || true
+  if [ "$FORCE" = 0 ] && [ "$LAUNCH_OK" = 0 ]; then
+    echo "$RUNNER_DIR/launch.mjs doesn't load (above), so this can't check whether threads are busy. Fix it, or add --force." >&2
+    exit 1
+  fi
+  if [ "$FORCE" = 0 ] && "$LAUNCHCTL" print "$DOMAIN/$LABEL" >/dev/null 2>&1 && [ -x "$NODE" ] \
+    && ! THREADBARE_NODE="$NODE" bash "$RUNNER_DIR/scripts/deploy-runner.sh" --home "$DATA_HOME" --label "$LABEL" --check-idle; then
+    echo "Not removing $LABEL while threads are busy: they'd be cut short. Run it again once they finish, or add --force." >&2
+    exit 1
+  fi
+  "$LAUNCHCTL" bootout "$DOMAIN/$LABEL" 2>/dev/null || true
   rm -f "$PLIST"
-  echo "Removed $LABEL. Thread data in ~/Library/Application Support/Threadbare is untouched."
+  echo "Removed $LABEL. The data in $DATA_HOME (releases included) is untouched."
   exit 0
 fi
 
@@ -67,12 +207,22 @@ fi
 # The pinned Node and the claude CLI (~/.local/bin) always come first.
 AGENT_PATH="$(dirname "$NODE"):$HOME/.local/bin:$AGENT_PATH"
 
+if [ "$FROM_SOURCE" = 1 ]; then
+  PROGRAM="$RUNNER_DIR/src/main.ts"
+  WORKDIR="$RUNNER_DIR"
+else
+  PROGRAM="$DATA_HOME/runner/launch.mjs"
+  WORKDIR="$DATA_HOME/runner"
+fi
+
+# sed rather than ${s//</&lt;}: bash 5.2 reads & in a replacement as the
+# match, so that would differ between /bin/bash and Homebrew's.
 xml() {
-  local s="$1"
-  s="${s//&/&amp;}"
-  s="${s//</&lt;}"
-  s="${s//>/&gt;}"
-  printf '%s' "$s"
+  printf '%s' "$1" | sed -e 's/&/\&amp;/g' -e 's/</\&lt;/g' -e 's/>/\&gt;/g'
+}
+
+env_entry() {
+  printf '\t\t<key>%s</key>\n\t\t<string>%s</string>\n' "$1" "$(xml "$2")"
 }
 
 plist() {
@@ -82,20 +232,25 @@ plist() {
 <plist version="1.0">
 <dict>
 	<key>Label</key>
-	<string>$LABEL</string>
+	<string>$(xml "$LABEL")</string>
 	<key>ProgramArguments</key>
 	<array>
 		<string>$(xml "$NODE")</string>
-		<string>$(xml "$RUNNER_DIR/src/main.ts")</string>
+		<string>$(xml "$PROGRAM")</string>
 	</array>
 	<key>WorkingDirectory</key>
-	<string>$(xml "$RUNNER_DIR")</string>
+	<string>$(xml "$WORKDIR")</string>
 	<key>EnvironmentVariables</key>
 	<dict>
-		<key>PATH</key>
-		<string>$(xml "$AGENT_PATH")</string>
-		<key>LANG</key>
-		<string>en_US.UTF-8</string>
+$(env_entry PATH "$AGENT_PATH")
+$(env_entry LANG en_US.UTF-8)
+EOF
+  if [ "$SANDBOX" = 1 ]; then
+    env_entry THREADBARE_HOME "$DATA_HOME"
+    env_entry THREADBARE_LOG "$LOG"
+  fi
+  [ -z "$PORT" ] || env_entry THREADBARE_PORT "$PORT"
+  cat <<EOF
 	</dict>
 	<key>RunAtLoad</key>
 	<true/>
@@ -119,30 +274,203 @@ if [ "$MODE" = "print" ]; then
   exit 0
 fi
 
-if [ ! -d "$RUNNER_DIR/node_modules/@anthropic-ai/claude-agent-sdk" ] || [ ! -d "$RUNNER_DIR/node_modules/ws" ]; then
-  echo "Installing the runner's packages..."
-  (cd "$RUNNER_DIR" && PATH="$(dirname "$NODE"):$PATH" npm ci)
+# deploy-runner.sh, on the Node the plist pins.
+deploy() {
+  THREADBARE_NODE="$NODE" bash "$RUNNER_DIR/scripts/deploy-runner.sh" --home "$DATA_HOME" --label "$LABEL" "$@"
+}
+
+# Loads $PLIST and starts it. Straight after a bootout, bootstrap can fail
+# for a moment while launchd is still tearing the old job down ("Bootstrap
+# failed: 5: Input/output error"), so it gets a few tries.
+load() {
+  local out="" i
+  for i in 1 2 3 4 5 6 7 8 9 10; do
+    if out="$("$LAUNCHCTL" bootstrap "$DOMAIN" "$PLIST" 2>&1)"; then
+      "$LAUNCHCTL" kickstart "$DOMAIN/$LABEL" 2>/dev/null || true
+      return 0
+    fi
+    sleep 0.5
+  done
+  echo "launchctl bootstrap $DOMAIN $PLIST failed: $out" >&2
+  return 1
+}
+
+# Stops the job and starts it again from the plist.
+reload() {
+  "$LAUNCHCTL" bootout "$DOMAIN/$LABEL" 2>/dev/null || true
+  # bootout returns before the old job is gone; bootstrap fails until it is.
+  for _ in $(seq 1 100); do
+    "$LAUNCHCTL" print "$DOMAIN/$LABEL" >/dev/null 2>&1 || break
+    sleep 0.25
+  done
+  load
+}
+
+# The commit a release was built from, or nothing for a dirty build.
+release_commit() {
+  "$NODE" -e 'try { const r = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")); process.stdout.write(r.dirty ? "" : String(r.commit || "")); } catch {}' "$1"
+}
+
+# Points current back at a release, with the same helpers deploy-runner.sh
+# uses (from this checkout's launch.mjs, already checked above).
+point_current() {
+  TB_LAUNCH="$RUNNER_DIR/launch.mjs" TB_DIR="$RDIR" TB_ID="$1" "$NODE" --input-type=module -e '
+    const { pathToFileURL } = await import("node:url");
+    const m = await import(pathToFileURL(process.env.TB_LAUNCH).href);
+    const { TB_DIR: dir, TB_ID: id } = process.env;
+    m.pointCurrent(dir, id);
+    m.writeState(dir, { ...m.readState(dir), current: id });'
+}
+
+RDIR="$DATA_HOME/runner"
+LOADED=0
+"$LAUNCHCTL" print "$DOMAIN/$LABEL" >/dev/null 2>&1 && LOADED=1
+
+# Everything that can be refused is refused before anything changes.
+# launch.mjs first: it is the LaunchAgent's program, nothing tests it once
+# it's in, and deploy-runner.sh can't run without it.
+if [ "$FROM_SOURCE" = 0 ] && [ "$LAUNCH_OK" = 0 ]; then
+  echo "$RUNNER_DIR/launch.mjs doesn't load, so nothing was changed." >&2
+  exit 1
+fi
+if [ "$FROM_SOURCE" = 0 ] && [ "$ALLOW_BRANCH" = 0 ] && ! deploy --check-branch; then
+  echo "The LaunchAgent should run main. Install from main's tip, or pass --allow-branch." >&2
+  exit 1
+fi
+# Replacing a running copy stops its CLIs, and every turn and background
+# job with them, so only when nothing is busy.
+if [ "$LOADED" = 1 ] && [ "$FORCE" = 0 ]; then
+  if [ "$LAUNCH_OK" = 0 ]; then
+    echo "$RUNNER_DIR/launch.mjs doesn't load (above), so this can't check whether threads are busy. Fix it, or add --force." >&2
+    exit 1
+  fi
+  if ! deploy --check-idle; then
+    echo "Not replacing the running $LABEL while threads are busy: they'd be cut short. Run this again once they finish, or add --force." >&2
+    exit 1
+  fi
 fi
 
-mkdir -p "$(dirname "$PLIST")" "$(dirname "$LOG")"
+# What this run replaces, kept to put back if the new runner doesn't come
+# up. In the data dir, not LaunchAgents: launchd reads every file there.
+PREV="$RDIR/previous-launchagent.plist"
+PREV_LAUNCH="$RDIR/previous-launch.mjs"
+NEW_LAUNCH=""
+HAD_LAUNCH=0
+SWAPPED=0
+OLD_CURRENT=""
+BUILT=0
+TMP=""
+mkdir -p "$AGENTS_DIR" "$(dirname "$LOG")" "$RDIR"
+rm -f "$PREV" "$PREV_LAUNCH"
+
+if [ "$FROM_SOURCE" = 1 ]; then
+  if [ ! -d "$RUNNER_DIR/node_modules/@anthropic-ai/claude-agent-sdk" ] || [ ! -d "$RUNNER_DIR/node_modules/ws" ]; then
+    echo "Installing the runner's packages..."
+    (cd "$RUNNER_DIR" && PATH="$(dirname "$NODE"):$PATH" npm ci)
+  fi
+else
+  # The copy that goes in, checked again in case the checkout changed
+  # since the check above.
+  NEW_LAUNCH="$RDIR/.launch-new.mjs"
+  cp "$RUNNER_DIR/launch.mjs" "$NEW_LAUNCH"
+  if ! check_launch "$NEW_LAUNCH"; then
+    rm -f "$NEW_LAUNCH"
+    echo "$RUNNER_DIR/launch.mjs doesn't load, so nothing was changed." >&2
+    exit 1
+  fi
+  # A release built from anything but HEAD would quietly take merged work
+  # back out (or ship what a feature branch had), so current is only kept
+  # when it was built from HEAD.
+  [ ! -L "$RDIR/current" ] || OLD_CURRENT="$(basename "$(readlink "$RDIR/current")")"
+  HEAD_COMMIT="$(git -C "$RUNNER_DIR" rev-parse HEAD 2>/dev/null || true)"
+  if [ -n "$OLD_CURRENT" ] && [ -n "$HEAD_COMMIT" ] && [ "$(release_commit "$RDIR/current/release.json")" = "$HEAD_COMMIT" ]; then
+    echo "Keeping release $OLD_CURRENT, which was built from HEAD."
+  else
+    [ -z "$OLD_CURRENT" ] || echo "Release $OLD_CURRENT wasn't built from HEAD, so building one that is."
+    BRANCH_ARG=()
+    [ "$ALLOW_BRANCH" = 0 ] || BRANCH_ARG=(--allow-branch)
+    if ! deploy --no-restart ${BRANCH_ARG[@]+"${BRANCH_ARG[@]}"}; then
+      rm -f "$NEW_LAUNCH"
+      exit 1
+    fi
+    BUILT=1
+  fi
+fi
+
+# Puts back what this run replaced (the plist, launch.mjs and current) and
+# starts the old setup again. Every failure from here on ends up here,
+# through the EXIT trap below if nothing calls it first.
+fail_back() {
+  trap - EXIT
+  set +e
+  echo "$1" >&2
+  [ -z "$TMP" ] || rm -f "$TMP"
+  if [ -f "$PREV" ]; then
+    echo "Putting back the LaunchAgent as it was." >&2
+    mv -f "$PREV" "$PLIST"
+    if [ "$SWAPPED" = 1 ]; then
+      if [ "$HAD_LAUNCH" = 1 ]; then mv -f "$PREV_LAUNCH" "$RDIR/launch.mjs"; else rm -f "$RDIR/launch.mjs"; fi
+    fi
+    if [ "$BUILT" = 1 ] && [ -n "$OLD_CURRENT" ]; then
+      point_current "$OLD_CURRENT" && echo "current points at $OLD_CURRENT again." >&2
+    fi
+    if reload; then
+      echo "Back as it was. The log above says what went wrong; fix it and run this again." >&2
+    else
+      echo "The old plist didn't load either. Load it by hand: launchctl bootstrap $DOMAIN $(printf '%q' "$PLIST")" >&2
+    fi
+  else
+    echo "There was no LaunchAgent before to go back to. To run the runner from this checkout instead:" >&2
+    printf '  %q' "$RUNNER_DIR/scripts/install-runner.sh" --from-source ${ARGS[@]+"${ARGS[@]}"} >&2
+    echo >&2
+  fi
+  [ -z "$NEW_LAUNCH" ] || rm -f "$NEW_LAUNCH"
+  exit 1
+}
+
+[ ! -f "$PLIST" ] || cp "$PLIST" "$PREV"
+# An EXIT trap rather than ERR: it also covers set -e exits inside
+# functions and Ctrl-C, and never runs in a $(...) subshell.
+trap 'fail_back "Replacing the LaunchAgent stopped part way."' EXIT
+
+if [ "$FROM_SOURCE" = 0 ]; then
+  if [ -f "$RDIR/launch.mjs" ]; then
+    cp -p "$RDIR/launch.mjs" "$PREV_LAUNCH"
+    HAD_LAUNCH=1
+  fi
+  # Only now that there's a release for it to start: deploy-runner.sh takes
+  # launch.mjs being here to mean the LaunchAgent runs releases.
+  mv -f "$NEW_LAUNCH" "$RDIR/launch.mjs"
+  SWAPPED=1
+fi
 TMP="$(mktemp "$PLIST.XXXXXX")"
 plist > "$TMP"
 plutil -lint "$TMP" >/dev/null
 mv "$TMP" "$PLIST"
+TMP=""
 
-# Replace a running copy. The runner stops its CLIs on SIGTERM; threads
-# that were mid-turn show as stopped and resume on the next message.
-launchctl bootout "$DOMAIN/$LABEL" 2>/dev/null || true
-# bootout returns before the old job is gone; bootstrap fails until it is.
-for _ in $(seq 1 100); do
-  launchctl print "$DOMAIN/$LABEL" >/dev/null 2>&1 || break
-  sleep 0.25
-done
-launchctl bootstrap "$DOMAIN" "$PLIST"
-launchctl kickstart "$DOMAIN/$LABEL" 2>/dev/null || true
+# The runner stops its CLIs on SIGTERM; threads that were mid-turn show as
+# stopped and resume on the next message.
+reload || fail_back "launchd wouldn't load the new plist."
 
 echo "Installed $LABEL"
 echo "  node:   $NODE"
-echo "  runner: $RUNNER_DIR/src/main.ts"
+echo "  runner: $PROGRAM"
+echo "  data:   $DATA_HOME"
 echo "  log:    $LOG"
+if [ "$FROM_SOURCE" = 1 ]; then
+  # So nothing takes this data dir to run releases (deploy-runner.sh
+  # refuses to ship to it); installing without --from-source copies it in
+  # again.
+  [ ! -f "$RDIR/launch.mjs" ] || mv "$RDIR/launch.mjs" "$RDIR/launch.mjs.unused"
+else
+  deploy --check || fail_back "The runner didn't come up and stay up on its release."
+  if [ "$SANDBOX" = 1 ]; then
+    echo "Ship changes with: scripts/deploy-runner.sh --home $(printf '%q' "$DATA_HOME") --label $LABEL"
+  else
+    echo "Ship changes with: scripts/deploy-runner.sh"
+  fi
+fi
+trap - EXIT
+rm -f "$PREV" "$PREV_LAUNCH"
 echo "Restart it with: launchctl kickstart -k $DOMAIN/$LABEL"

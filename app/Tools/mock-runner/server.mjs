@@ -57,7 +57,11 @@ wss.on('listening', () => {
   const { port } = wss.address();
   fs.writeFileSync(path.join(dataDir, 'runner.json'), JSON.stringify({ port, mock: true }, null, 2));
   log(`listening on ws://127.0.0.1:${port}/rpc with ${threads.size} threads`);
-  if (args['ready-file']) fs.writeFileSync(args['ready-file'], String(port));
+  // Written whole and renamed into place, so a reader never sees it empty.
+  if (args['ready-file']) {
+    fs.writeFileSync(`${args['ready-file']}.tmp`, String(port));
+    fs.renameSync(`${args['ready-file']}.tmp`, args['ready-file']);
+  }
 });
 
 /** @type {Set<{ws: any, subs: Set<string>, authed: boolean}>} */
@@ -425,13 +429,17 @@ function defaultFixtureDirs() {
   const dirs = [path.join(here, 'fixtures')];
   const privateDir = path.resolve(here, '../../.fixtures');
   if (fs.existsSync(privateDir)) dirs.push(privateDir);
+  // Not .fixtures/threads, where `tb export` puts Mike's real threads: they'd
+  // sort above the demo threads in every screenshot. Pass --fixtures for them.
   return dirs;
 }
 
 function loadFixtures() {
   for (const root of fixtureDirs) {
     if (!fs.existsSync(root)) continue;
-    for (const name of fs.readdirSync(root).sort()) {
+    // A folder of fixtures, or one fixture itself (what `tb export` prints).
+    const names = fs.existsSync(path.join(root, 'thread.json')) ? ['.'] : fs.readdirSync(root).sort();
+    for (const name of names) {
       const dir = path.join(root, name);
       const threadFile = path.join(dir, 'thread.json');
       const eventsFile = path.join(dir, 'events.ndjson');
@@ -457,7 +465,7 @@ function loadFixtures() {
         }
       }
       // Keep a fixture's waiting or running status so the sidebar has
-      // something in every section; real exports are idle.
+      // something in every section; tb export makes real ones idle.
       summary.status ??= 'idle';
       summary.live = false;
       threads.set(summary.id, { summary, events, inProgress: new Map(), timers: [], dir });
