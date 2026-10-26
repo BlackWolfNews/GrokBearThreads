@@ -55,7 +55,11 @@ wss.on('listening', () => {
   const { port } = wss.address();
   fs.writeFileSync(path.join(dataDir, 'runner.json'), JSON.stringify({ port, mock: true }, null, 2));
   log(`listening on ws://127.0.0.1:${port}/rpc with ${threads.size} threads`);
-  if (args['ready-file']) fs.writeFileSync(args['ready-file'], String(port));
+  // Written whole and renamed into place, so a reader never sees it empty.
+  if (args['ready-file']) {
+    fs.writeFileSync(`${args['ready-file']}.tmp`, String(port));
+    fs.renameSync(`${args['ready-file']}.tmp`, args['ready-file']);
+  }
 });
 
 /** @type {Set<{ws: any, subs: Set<string>, authed: boolean}>} */

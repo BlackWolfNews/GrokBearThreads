@@ -211,8 +211,10 @@ test('the mock runner loads an export', { skip: !fs.existsSync(path.join(MOCK, '
   const ready = path.join(data, 'ready');
   const mock = spawn(process.execPath, [path.join(MOCK, 'server.mjs'), '--data-dir', data, '--fixtures', path.join(parent, T.id), '--ready-file', ready, '--quiet'], { stdio: 'ignore' });
   try {
-    for (let i = 0; i < 100 && !fs.existsSync(ready); i++) await new Promise((r) => setTimeout(r, 50));
-    const port = Number(fs.readFileSync(ready, 'utf8'));
+    // Until it holds a port: an older mock wrote the file in two steps.
+    const readPort = () => (fs.existsSync(ready) ? Number(fs.readFileSync(ready, 'utf8')) : 0);
+    for (let i = 0; i < 100 && !readPort(); i++) await new Promise((r) => setTimeout(r, 50));
+    const port = readPort();
     const c = await RunnerClient.connect(`ws://127.0.0.1:${port}/rpc`, fs.readFileSync(path.join(data, 'secrets', 'runner-token'), 'utf8').trim());
     const list = await c.call('threads.list', { include: ['inbox'] });
     assert.deepEqual(list.threads.map((t: ThreadSummary) => t.id), [T.id]);
