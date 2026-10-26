@@ -259,6 +259,8 @@ enum ScreenshotRunner {
     private static func capture(_ window: NSWindow, _ url: URL) async {
         window.displayIfNeeded()
         try? await Task.sleep(for: .milliseconds(300))
+        // A shot left from an earlier run would pass for this one below.
+        try? FileManager.default.removeItem(at: url)
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/sbin/screencapture")
         process.arguments = ["-o", "-x", "-l", String(window.windowNumber), url.path]
@@ -269,7 +271,7 @@ enum ScreenshotRunner {
         } else if drawInProcess(window, to: url) {
             // With the screen locked (or the display asleep) the window
             // server has no image of the window to give. AppKit can still
-            // draw it, without the sidebar's translucency.
+            // draw it, with the sidebar's glass as a flat fill.
             print("saved \(url.path) (drawn in-process: the screen is locked or asleep)")
         } else {
             print("could not save \(url.path)")
@@ -283,7 +285,62 @@ enum ScreenshotRunner {
         frameView.layoutSubtreeIfNeeded()
         guard let rep = frameView.bitmapImageRepForCachingDisplay(in: frameView.bounds) else { return false }
         frameView.cacheDisplay(in: frameView.bounds, to: rep)
+        redrawGlass(in: frameView, onto: rep)
         guard let png = rep.representation(using: .png, properties: [:]) else { return false }
         return (try? png.write(to: url)) != nil
+    }
+
+    /// AppKit's own drawing of the window leaves a Liquid Glass panel (the
+    /// sidebar) blank white: the panel's content sits under a plain layer
+    /// that the caching pass skips. So each panel's content is drawn again
+    /// on its own, over a flat fill with the glass's corners, in the grey it
+    /// showed in real captures of the demo (pixel values, as this bitmap
+    /// stores them), with the window's background around it.
+    /// The title bar controls over a panel (the window buttons, the sidebar
+    /// toggle) are skipped the same way, so they're drawn again on top.
+    private static func redrawGlass(in frameView: NSView, onto rep: NSBitmapImageRep) {
+        guard let context = NSGraphicsContext(bitmapImageRep: rep) else { return }
+        NSGraphicsContext.saveGraphicsState()
+        defer { NSGraphicsContext.restoreGraphicsState() }
+        NSGraphicsContext.current = context
+        func draw(_ view: NSView) {
+            guard let viewRep = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { return }
+            view.cacheDisplay(in: view.bounds, to: viewRep)
+            viewRep.draw(in: view.convert(view.bounds, to: frameView), from: .zero, operation: .sourceOver,
+                         fraction: 1, respectFlipped: false, hints: nil)
+        }
+        let views = descendants(of: frameView)
+        var panels: [NSRect] = []
+        // Dynamic colours (the window's background) in the window's look,
+        // not the Mac's, for `--appearance`.
+        frameView.effectiveAppearance.performAsCurrentDrawingAppearance {
+            for case let glass as NSGlassEffectView in views {
+                guard let content = glass.contentView else { continue }
+                let frame = glass.convert(glass.bounds, to: frameView)
+                if let around = glass.superview {
+                    // Inside the window's own rounded corners (26 pt on macOS 26).
+                    NSGraphicsContext.saveGraphicsState()
+                    NSBezierPath(roundedRect: frameView.bounds, xRadius: 26, yRadius: 26).addClip()
+                    frameView.window?.backgroundColor.setFill()
+                    around.convert(around.bounds, to: frameView).fill()
+                    NSGraphicsContext.restoreGraphicsState()
+                }
+                let dark = glass.effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+                NSColor(white: dark ? 0.157 : 0.969, alpha: 1).setFill()
+                NSBezierPath(roundedRect: frame, xRadius: 18, yRadius: 18).fill()
+                draw(content)
+                panels.append(frame)
+            }
+        }
+        let buttons = [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton].compactMap { frameView.window?.standardWindowButton($0) }
+        let toolbarItems = views.filter { String(describing: type(of: $0)) == "NSToolbarItemViewer" }
+        for view in buttons + toolbarItems {
+            let frame = view.convert(view.bounds, to: frameView)
+            if panels.contains(where: { $0.intersects(frame) }) { draw(view) }
+        }
+    }
+
+    private static func descendants(of view: NSView) -> [NSView] {
+        view.subviews + view.subviews.flatMap { descendants(of: $0) }
     }
 }
