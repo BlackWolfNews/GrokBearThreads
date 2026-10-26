@@ -14,6 +14,25 @@ final class ComposerTests: XCTestCase {
         composer.insertText("!", replacementRange: NSRange(location: composer.string.utf16.count, length: 0))
         XCTAssertEqual(composer.string, "Hello there!")
     }
+
+    /// The box is two lines tall when empty, grows a line at a time, and
+    /// stops at ten lines (the rest scrolls).
+    func testComposerGrowsFromTwoLinesToTen() throws {
+        let composer = ComposerTextField.makeTextView()
+        composer.frame = NSRect(x: 0, y: 0, width: 400, height: 40)
+        let layoutManager = try XCTUnwrap(composer.layoutManager)
+        let line = layoutManager.defaultLineHeight(for: ComposerTextField.font) + ComposerTextField.lineSpacing
+        func lines(_ count: Int) -> String { (1...count).map { "Line \($0)" }.joined(separator: "\n") }
+
+        composer.replaceText("")
+        XCTAssertEqual(ComposerTextField.fittingHeight(of: composer), ceil(line * 2))
+        composer.replaceText("One line")
+        XCTAssertEqual(ComposerTextField.fittingHeight(of: composer), ceil(line * 2))
+        composer.replaceText(lines(4))
+        XCTAssertEqual(ComposerTextField.fittingHeight(of: composer), ceil(line * 4), accuracy: 1)
+        composer.replaceText(lines(30))
+        XCTAssertEqual(ComposerTextField.fittingHeight(of: composer), ceil(line * 10))
+    }
 }
 
 final class QuestionAnswerTests: XCTestCase {

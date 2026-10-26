@@ -112,6 +112,20 @@ enum ScreenshotRunner {
                 try? await Task.sleep(for: .milliseconds(300))
                 print("composer: typed text, draft is now \"\(app.drafts["new"]?.text ?? "")\"")
                 await capture(window, dir.appendingPathComponent("7-composer-typed.png"))
+                // 7b. An image from the demo thread attached the way "+",
+                // paste and drop attach one, with its remove badge showing.
+                if let image = demoImage(app, "demo_upload_resume") {
+                    let refs = await app.importImages([URL(fileURLWithPath: image)])
+                    app.drafts["new", default: Draft()].images += refs
+                    AttachmentThumbnail.debugShowRemove = true
+                    try? await Task.sleep(for: .milliseconds(400))
+                    await capture(window, dir.appendingPathComponent("7b-composer-image.png"))
+                    AttachmentThumbnail.debugShowRemove = false
+                }
+                // 7c. A long draft: the box stops growing at ten lines and scrolls.
+                app.drafts["new"] = Draft(text: (1...14).map { "Line \($0) of a long message" }.joined(separator: "\n"))
+                try? await Task.sleep(for: .milliseconds(400))
+                await capture(window, dir.appendingPathComponent("7c-composer-long.png"))
                 app.drafts["new"] = nil
             } else {
                 print("composer: not found")
@@ -127,6 +141,19 @@ enum ScreenshotRunner {
             app.hoverOverride = nil
         }
         NSApp.terminate(nil)
+    }
+
+    /// The first image a demo thread's messages carry, if it's loaded.
+    private static func demoImage(_ app: AppModel, _ id: String) -> String? {
+        let session = app.session(for: id)
+        for index in 0..<session.displayCount {
+            switch session.displayRow(index).content {
+            case .user(let message) where !message.images.isEmpty: return message.images[0].path
+            case .images(_, let images) where !images.isEmpty: return images[0].path
+            default: continue
+            }
+        }
+        return nil
     }
 
     private static func findComposer(in view: NSView?) -> ComposerTextView? {
