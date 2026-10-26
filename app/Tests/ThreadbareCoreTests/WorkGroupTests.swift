@@ -318,6 +318,48 @@ final class WorkGroupTests: XCTestCase {
         XCTAssertNotEqual(model.row(id: "cf:t1")?.version, version)
     }
 
+    /// A diff that lands after its turn finished updates the turn's card,
+    /// and only the rows for that turn change.
+    func testALateDiffUpdatesItsTurnsCard() {
+        var model = TranscriptModel(events: [
+            E.user(1, "Edit it"), Self.edit(2, "c1", path: "/a.swift"), E.result(3, "c1"), E.text(4, "m1", "Done"), E.done(5),
+            E.user(6, "Thanks").withTurn("t2"), E.text(7, "m2", "Any time").withTurn("t2"), E.done(8, turn: "t2"),
+        ])
+        var table = model.rows.map(\.id)
+        let after = model.rows.suffix(3).map(\.version)
+        let change = model.apply([E.event(9, "edit.diff", ["itemId": "c1", "path": "/a.swift", "hunks": [
+            ["oldStart": 40, "oldLines": 1, "newStart": 40, "newLines": 2, "lines": ["-a", "+b", "+c"]],
+        ]])])
+        Self.replay(change, onto: &table, model: model)
+        XCTAssertEqual(change.updated, [1, 3], "the edit row and its turn's card")
+        XCTAssertEqual(model.rows.suffix(3).map(\.version), after, "the next turn's rows are untouched")
+        guard case .changes(let card)? = model.row(id: "cf:t1")?.content else { return XCTFail() }
+        XCTAssertEqual(card.files.first?.added, 2)
+    }
+
+    /// Opening a group near the top of a long thread only touches that
+    /// group's rows; everything after it keeps its version.
+    func testOpeningAnEarlyGroupLeavesLaterRowsAlone() {
+        var events: [Event] = []
+        var seq = 0
+        for turn in 0..<20 {
+            let id = "t\(turn)"
+            seq += 1; events.append(E.user(seq, "Go \(turn)").withTurn(id))
+            seq += 1; events.append(E.call(seq, "a\(turn)").withTurn(id))
+            seq += 1; events.append(E.call(seq, "b\(turn)").withTurn(id))
+            seq += 1; events.append(E.text(seq, "m\(turn)", "Done").withTurn(id))
+            seq += 1; events.append(E.done(seq, turn: id))
+        }
+        var model = TranscriptModel(events: events)
+        var table = model.rows.map(\.id)
+        let later = model.rows.dropFirst(4).map { "\($0.id)|\($0.version)" }
+        let change = model.setExpanded("g:t:a0", true)
+        Self.replay(change, onto: &table, model: model)
+        XCTAssertEqual(change, TranscriptChange(inserted: [2, 3], updated: [1]))
+        XCTAssertEqual(model.rows.dropFirst(6).map { "\($0.id)|\($0.version)" }, later)
+        XCTAssertEqual(model.indexOf(id: "f:t19"), model.rows.count - 1, "rows after the group moved down in the index too")
+    }
+
     func testATurnWithNoEditsHasNoCard() {
         let model = TranscriptModel(events: [E.user(1, "Hi"), E.call(2, "c1"), E.text(3, "m1", "Hello"), E.done(4)])
         XCTAssertNil(model.rows.first { $0.kind == .changes })

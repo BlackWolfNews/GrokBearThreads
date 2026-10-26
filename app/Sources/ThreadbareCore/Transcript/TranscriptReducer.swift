@@ -94,6 +94,14 @@ public struct TranscriptModel: Sendable {
     /// `rows` was last brought up to date.
     private var dirtyUpdate: Int?
     private var dirtyInsert: Int?
+    /// One past the last item changed in place (and a changed edit's turn
+    /// footer, whose card counts its lines). Changes in place only rebuild
+    /// the rows up to here: opening a group near the top of a long thread
+    /// rebuilt every row after it, 30 ms a click.
+    private var dirtyUpdateEnd = 0
+    /// Something the working line depends on changed (an approval or
+    /// question came or went), so the rows to the end need rebuilding.
+    private var tailDirty = false
 
     public init() {}
 
@@ -259,10 +267,19 @@ public struct TranscriptModel: Sendable {
         index = Dictionary(rows.enumerated().map { ($1.id, $0) }, uniquingKeysWith: { first, _ in first })
         dirtyUpdate = nil
         dirtyInsert = nil
+        dirtyUpdateEnd = 0
+        tailDirty = false
     }
 
     private mutating func markUpdated(_ itemIndex: Int) {
+        guard itemIndex < items.count else { return markInserted(itemIndex) }
         dirtyUpdate = min(dirtyUpdate ?? itemIndex, itemIndex)
+        dirtyUpdateEnd = max(dirtyUpdateEnd, runEnd(itemIndex))
+        // An edit in a finished turn changes its changes card too.
+        if case .tool(let tool) = items[itemIndex].content, tool.diff != nil || tool.call.map(DiffBuilder.isEditTool) == true,
+           let footer = self.itemIndex["f:" + (items[itemIndex].turnId ?? "")] {
+            dirtyUpdateEnd = max(dirtyUpdateEnd, footer + 1)
+        }
     }
 
     private mutating func markInserted(_ itemIndex: Int) {
@@ -456,15 +473,18 @@ public struct TranscriptModel: Sendable {
             let id = "ap:\(request.approvalId)"
             append(TranscriptRow(id: id, seq: seq, turnId: turnId, content: .approval(ApprovalItem(request: request))))
             pendingCards[id] = turnId ?? ""
+            tailDirty = true
 
         case .questionRequested(let request):
             let id = "q:\(request.approvalId)"
             append(TranscriptRow(id: id, seq: seq, turnId: turnId, content: .question(QuestionItem(request: request))))
             pendingCards[id] = turnId ?? ""
+            tailDirty = true
 
         case .approvalResolved(let resolution):
             for id in ["ap:\(resolution.approvalId)", "q:\(resolution.approvalId)"] where itemIndex[id] != nil {
                 pendingCards[id] = nil
+                tailDirty = true
                 update(id) { content in
                     switch content {
                     case .approval(var item):
@@ -564,32 +584,56 @@ public struct TranscriptModel: Sendable {
         return j
     }
 
-    /// Brings `rows` up to date with the items changed since the last call,
-    /// rebuilding from the first run they touch, and says what changed.
+    /// One past the last item of the run that item `i` is in (or `i + 1`).
+    private func runEnd(_ i: Int) -> Int {
+        guard i >= 0, i < items.count, Self.isWork(items[i]) else { return min(items.count, i + 1) }
+        let turn = items[i].turnId
+        var j = i + 1
+        while j < items.count, Self.isWork(items[j]), items[j].turnId == turn { j += 1 }
+        return j
+    }
+
+    /// The first row standing for item `item` or a later one.
+    private func firstRow(atOrAfter item: Int) -> Int {
+        var low = 0, high = rowStarts.count
+        while low < high {
+            let mid = (low + high) / 2
+            if rowStarts[mid] < item { low = mid + 1 } else { high = mid }
+        }
+        return low
+    }
+
+    /// Brings `rows` up to date with the items changed since the last call
+    /// and says what changed. New items rebuild from the first run they
+    /// touch to the end (nearly always just the current turn); changes in
+    /// place only rebuild the runs they're in.
     private mutating func refreshRows() -> TranscriptChange {
-        guard dirtyUpdate != nil || dirtyInsert != nil else { return TranscriptChange() }
+        guard dirtyUpdate != nil || dirtyInsert != nil || tailDirty else { return TranscriptChange() }
         var start = items.count
+        var end = items.count
         // A changed item can change its group's summary.
         if let changed = dirtyUpdate { start = min(start, runStart(changed)) }
         // A new item can join the run before it, or end it (so it's no longer
         // the live group).
         if let added = dirtyInsert { start = min(start, runStart(added), runStart(added - 1)) }
+        let bounded = dirtyInsert == nil && !tailDirty
+        if bounded { end = min(items.count, dirtyUpdateEnd) }
         dirtyUpdate = nil
         dirtyInsert = nil
+        dirtyUpdateEnd = 0
+        tailDirty = false
 
-        var low = 0, high = rowStarts.count
-        while low < high {
-            let mid = (low + high) / 2
-            if rowStarts[mid] < start { low = mid + 1 } else { high = mid }
-        }
-        let first = low
-        let built = buildRows(from: start)
+        let first = firstRow(atOrAfter: start)
+        // Rows from `last` on stand for items past the change (and the
+        // working line) and stay as they are.
+        let last = bounded ? firstRow(atOrAfter: end) : rows.count
+        let built = buildRows(from: start, to: end, workingLine: !bounded)
 
         var change = TranscriptChange()
         var kept = Set<String>(minimumCapacity: built.rows.count)
         for (offset, row) in built.rows.enumerated() {
             kept.insert(row.id)
-            if let old = index[row.id], old >= first {
+            if let old = index[row.id], old >= first, old < last {
                 let previous = rows[old]
                 if previous.version != row.version || previous.inGroup != row.inGroup {
                     change.updated.insert(first + offset)
@@ -598,22 +642,24 @@ public struct TranscriptModel: Sendable {
                 change.inserted.insert(first + offset)
             }
         }
-        for old in first..<rows.count where !kept.contains(rows[old].id) {
+        for old in first..<last where !kept.contains(rows[old].id) {
             change.removed.insert(old)
             index[rows[old].id] = nil
         }
-        rows.replaceSubrange(first..., with: built.rows)
-        rowStarts.replaceSubrange(first..., with: built.starts)
-        for (offset, row) in built.rows.enumerated() { index[row.id] = first + offset }
+        rows.replaceSubrange(first..<last, with: built.rows)
+        rowStarts.replaceSubrange(first..<last, with: built.starts)
+        let shifted = built.rows.count != last - first ? rows.count : first + built.rows.count
+        for position in first..<shifted { index[rows[position].id] = position }
         return change
     }
 
-    /// The rows for items from `start` on (a run boundary), with the
-    /// working line at the end while a turn runs.
-    private func buildRows(from start: Int) -> (rows: [TranscriptRow], starts: [Int]) {
+    /// The rows for items from `start` (a run boundary) up to `end`, with
+    /// the working line after them while a turn runs.
+    private func buildRows(from start: Int, to end: Int? = nil, workingLine: Bool = true) -> (rows: [TranscriptRow], starts: [Int]) {
+        let end = end ?? items.count
         var out: [TranscriptRow] = []
         var starts: [Int] = []
-        out.reserveCapacity(max(0, items.count - start) + 2)
+        out.reserveCapacity(max(0, end - start) + 2)
         starts.reserveCapacity(out.capacity)
 
         // Derived rows keep their old version while their content is the same.
@@ -625,24 +671,23 @@ public struct TranscriptModel: Sendable {
         }
 
         var i = start
-        while i < items.count {
+        while i < end {
             let item = items[i]
             if Self.isWork(item) {
-                var end = i + 1
-                while end < items.count, Self.isWork(items[end]), items[end].turnId == item.turnId { end += 1 }
-                if end - i == 1 {
+                let runEnd = runEnd(i)
+                if runEnd - i == 1 {
                     // A run of one is shown as itself.
                     out.append(item)
                     starts.append(i)
                 } else {
                     let id = "g:" + item.id
                     let open = expanded.contains(id)
-                    let live = end == items.count && openTurn != nil && (item.turnId ?? "") == openTurn
-                    let group = WorkGroup(members: items[i..<end], isExpanded: open, isLive: live)
+                    let live = runEnd == items.count && openTurn != nil && (item.turnId ?? "") == openTurn
+                    let group = WorkGroup(members: items[i..<runEnd], isExpanded: open, isLive: live)
                     out.append(derived(id, seq: item.seq, turnId: item.turnId, .group(group)))
                     starts.append(i)
                     if open {
-                        for k in i..<end {
+                        for k in i..<runEnd {
                             var member = items[k]
                             member.inGroup = true
                             out.append(member)
@@ -650,7 +695,7 @@ public struct TranscriptModel: Sendable {
                         }
                     }
                 }
-                i = end
+                i = runEnd
             } else {
                 if case .footer = item.content, let card = changedFiles(turn: item.turnId ?? "") {
                     out.append(derived("cf:" + card.turnId, seq: item.seq, turnId: item.turnId, .changes(card)))
@@ -661,7 +706,7 @@ public struct TranscriptModel: Sendable {
                 i += 1
             }
         }
-        if let turn = openTurn, !pendingCards.values.contains(turn) {
+        if workingLine, let turn = openTurn, !pendingCards.values.contains(turn) {
             let status = WorkingStatus(turnId: turn, startedAt: turnStarts[turn])
             out.append(derived("w:" + turn, seq: lastSeq, turnId: turn, .working(status)))
             starts.append(items.count)
