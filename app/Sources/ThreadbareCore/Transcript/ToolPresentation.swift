@@ -6,7 +6,9 @@ public enum ToolPresentation {
         switch kind {
         case .command: return "terminal"
         case .read: return "doc.text"
-        case .edit: return "pencil"
+        // At 12 pt the bare `pencil` drew as one diagonal stroke and read
+        // as a stray "/" before the title.
+        case .edit: return "pencil.line"
         case .write: return "square.and.pencil"
         case .search: return "magnifyingglass"
         case .web: return "globe"
@@ -34,7 +36,8 @@ public enum ToolPresentation {
     public struct FileTitle: Sendable, Hashable {
         public var verb: String
         public var name: String
-        /// The folder, short ("Sources/Upload"); empty for a file at the root.
+        /// The folder inside the thread's folder ("Sources/Upload"), empty
+        /// for a file at its top; short for a file outside it.
         public var folder: String
         /// The whole path with the home folder as ~, for the tooltip.
         public var path: String
@@ -54,7 +57,7 @@ public enum ToolPresentation {
               !path.isEmpty else { return nil }
         let name = (path as NSString).lastPathComponent
         guard !name.isEmpty else { return nil }
-        return FileTitle(verb: verb, name: name, folder: PathDisplay.folder(of: path), path: shortTitle(path, limit: 400))
+        return FileTitle(verb: verb, name: name, folder: PathDisplay.folder(of: path, relativeTo: tool.root), path: shortTitle(path, limit: 400))
     }
 
     /// The tool output preview shown when a tool row is expanded.
@@ -160,6 +163,27 @@ public enum ToolPresentation {
         }
     }
 
+    /// The widest "key:" in `fields`, in characters, capped at `cap`. Tool
+    /// input is shown in a monospaced font, so values line up in one
+    /// column a fixed number of characters in; a key longer than the cap
+    /// just runs on into its value rather than pushing every value right.
+    public static func keyWidth(_ fields: [Field], cap: Int = 16) -> Int {
+        min(cap, fields.map { $0.key.count + 1 }.max() ?? 0)
+    }
+
+    /// A line of a failed tool's output that says what went wrong
+    /// ("error: ...", "fatal: ..."). Only those are marked red; the rest of
+    /// the output is ordinary text, not something that was removed.
+    public static func isErrorLine(_ line: Substring) -> Bool {
+        let trimmed = line.drop(while: { $0 == " " || $0 == "\t" })
+        for word in ["error", "fatal"] {
+            guard trimmed.count > word.count, trimmed.prefix(word.count).lowercased() == word else { continue }
+            let next = trimmed[trimmed.index(trimmed.startIndex, offsetBy: word.count)]
+            if next == ":" || next == " " || next == "[" { return true }
+        }
+        return false
+    }
+
     /// File content with line numbers. Claude's Read results already number
     /// their lines ("    12→text" or "12<tab>text"); those numbers are used.
     /// Otherwise lines are numbered from `start`.
@@ -197,6 +221,29 @@ public enum ToolPresentation {
 
 /// Short forms of paths for the transcript.
 public enum PathDisplay {
+    /// A file's folder as seen from the thread's folder `root`:
+    /// "Sources/Upload" for a file in there, empty for one at its top.
+    /// Outside it (or with no root), as `folder(of:)`. The project's name
+    /// is already in the header, so "photo-sync/scripts" said it twice and
+    /// a file at the top read "dev/photo-sync".
+    public static func folder(of path: String, relativeTo root: String?) -> String {
+        if let root, let relative = relativePath(path, to: root) {
+            return (relative as NSString).deletingLastPathComponent
+        }
+        return folder(of: path)
+    }
+
+    /// `path` inside `root` without the root ("scripts/release.sh"), or
+    /// nil when it isn't inside it.
+    public static func relativePath(_ path: String, to root: String) -> String? {
+        var base = (root as NSString).expandingTildeInPath
+        while base.count > 1, base.hasSuffix("/") { base.removeLast() }
+        guard !base.isEmpty, base != "/" else { return nil }
+        let full = (path as NSString).expandingTildeInPath
+        guard full.hasPrefix(base + "/"), full.count > base.count + 1 else { return nil }
+        return String(full.dropFirst(base.count + 1))
+    }
+
     /// A file's folder, short: its last two components ("Sources/Upload"),
     /// "~" for something right in the home folder, empty at the root.
     public static func folder(of path: String) -> String {

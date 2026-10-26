@@ -102,11 +102,16 @@ public struct TranscriptModel: Sendable {
     /// Something the working line depends on changed (an approval or
     /// question came or went), so the rows to the end need rebuilding.
     private var tailDirty = false
+    /// The thread's working folder. File rows and the changes card name
+    /// folders relative to it, so they don't repeat the project's name.
+    public private(set) var root: String?
 
-    public init() {}
+    public init(root: String? = nil) {
+        self.root = root
+    }
 
-    public init(events: [Event]) {
-        self.init()
+    public init(events: [Event], root: String? = nil) {
+        self.init(root: root)
         load(events: events)
     }
 
@@ -424,7 +429,7 @@ public struct TranscriptModel: Sendable {
                     }
                 }
             } else {
-                append(TranscriptRow(id: id, seq: seq, turnId: turnId, content: .tool(ToolItem(itemId: call.itemId, call: call))))
+                append(TranscriptRow(id: id, seq: seq, turnId: turnId, content: .tool(ToolItem(itemId: call.itemId, call: call, root: root))))
             }
             if DiffBuilder.isEditTool(call) { noteEdit(id, turnId: turnId) }
 
@@ -439,7 +444,7 @@ public struct TranscriptModel: Sendable {
                     }
                 }
             } else {
-                append(TranscriptRow(id: id, seq: seq, turnId: turnId, content: .tool(ToolItem(itemId: result.itemId, result: result))))
+                append(TranscriptRow(id: id, seq: seq, turnId: turnId, content: .tool(ToolItem(itemId: result.itemId, result: result, root: root))))
             }
             if !result.images.isEmpty {
                 let imagesId = "i:\(result.itemId)"
@@ -475,13 +480,13 @@ public struct TranscriptModel: Sendable {
                     }
                 }
             } else {
-                append(TranscriptRow(id: id, seq: seq, turnId: turnId, content: .tool(ToolItem(itemId: diff.itemId, diff: diff))))
+                append(TranscriptRow(id: id, seq: seq, turnId: turnId, content: .tool(ToolItem(itemId: diff.itemId, diff: diff, root: root))))
             }
             noteEdit(id, turnId: turnId)
 
         case .approvalRequested(let request):
             let id = "ap:\(request.approvalId)"
-            append(TranscriptRow(id: id, seq: seq, turnId: turnId, content: .approval(ApprovalItem(request: request))))
+            append(TranscriptRow(id: id, seq: seq, turnId: turnId, content: .approval(ApprovalItem(request: request, root: root))))
             pendingCards[id] = turnId ?? ""
             tailDirty = true
 
@@ -575,12 +580,16 @@ public struct TranscriptModel: Sendable {
 
     // MARK: - Rows
 
-    /// Work that folds into groups: thinking, tool calls and system notes.
-    /// Everything else (messages, cards, plans, images, errors, footers)
-    /// ends a run and is never hidden in one.
+    /// Work that folds into groups: thinking, tool calls, system notes and
+    /// approvals Mike allowed. Everything else (messages, plans, images,
+    /// errors, footers, and cards still waiting or turned down) ends a run
+    /// and is never hidden in one. In "Ask before edits" threads every
+    /// allowed edit used to split the turn's work into a card, the edit
+    /// and a second group.
     static func isWork(_ row: TranscriptRow) -> Bool {
         switch row.content {
         case .reasoning, .tool, .note: return true
+        case .approval(let item): return item.isAllowed
         default: return false
         }
     }
@@ -744,7 +753,7 @@ public struct TranscriptModel: Sendable {
                 order.append(path)
                 let key = ChangedFiles.expansionKey(turnId: turn, path: path)
                 files[path] = ChangedFile(path: path, added: stats.added, removed: stats.removed, diffs: [diff],
-                                          isExpanded: expanded.contains(key), showsAll: expanded.contains(DiffPreview.allKey(key)))
+                                          isExpanded: expanded.contains(key), showsAll: expanded.contains(DiffPreview.allKey(key)), root: root)
             }
         }
         guard !order.isEmpty else { return nil }

@@ -81,21 +81,24 @@ public struct ChangedFile: Sendable, Hashable {
     /// Its open diff shows every line, not just the first few
     /// (`DiffPreview.allKey`).
     public var showsAll: Bool
+    /// The thread's working folder.
+    public var root: String?
 
-    public init(path: String, added: Int, removed: Int, diffs: [EditDiff], isExpanded: Bool = false, showsAll: Bool = false) {
+    public init(path: String, added: Int, removed: Int, diffs: [EditDiff], isExpanded: Bool = false, showsAll: Bool = false, root: String? = nil) {
         self.path = path
         self.added = added
         self.removed = removed
         self.diffs = diffs
         self.isExpanded = isExpanded
         self.showsAll = showsAll
+        self.root = root
     }
 
     public var name: String { (path as NSString).lastPathComponent }
 
-    /// The file's folder, short: its last two components ("Sources/Upload"),
-    /// or "~" style for something right under the home folder.
-    public var folder: String { PathDisplay.folder(of: path) }
+    /// The file's folder inside the thread's folder ("Sources/Upload",
+    /// empty at its top), or short for a file outside it.
+    public var folder: String { PathDisplay.folder(of: path, relativeTo: root) }
 }
 
 /// How much of an opened diff shows. A diff opens at its first `lines`
@@ -145,6 +148,7 @@ public enum WorkSummary {
         var failed = 0
         var thought = false
         var firstNote: String?
+        var allowed = 0
 
         func count(_ category: Category, by amount: Int = 1) {
             if counts[category] == nil { order.append(category) }
@@ -157,6 +161,10 @@ public enum WorkSummary {
                 thought = true
             case .note(let text):
                 if firstNote == nil { firstNote = text }
+            case .approval:
+                // The tool it let run is counted when it comes; the approval
+                // only names the run while that hasn't arrived yet.
+                allowed += 1
             case .tool(let tool):
                 if tool.failed { failed += 1 }
                 let category = category(of: tool)
@@ -182,7 +190,15 @@ public enum WorkSummary {
         let parts = order.compactMap { phrase($0, counts[$0] ?? 0) }
         var text = parts.joined(separator: ", ")
         if text.isEmpty {
-            text = thought ? "thought" : (firstNote.map { firstLine($0) } ?? "worked")
+            if thought {
+                text = "thought"
+            } else if let firstNote {
+                text = firstLine(firstNote)
+            } else if allowed > 0 {
+                text = allowed == 1 ? "allowed a request" : "allowed \(allowed) requests"
+            } else {
+                text = "worked"
+            }
         }
         return (capitalizedFirst(text), failed)
     }

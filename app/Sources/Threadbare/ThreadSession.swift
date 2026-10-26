@@ -70,6 +70,8 @@ final class ThreadSession {
         state = .loading
         let threadId = threadId
         let expanded = expanded
+        // File rows name folders from the thread's folder.
+        let root = app?.threads[threadId]?.cwd
         let signpost = perfLog.beginInterval("open", id: perfLog.makeSignpostID(), "\(threadId)")
         loadTask = Task {
             defer { loadTask = nil }
@@ -79,7 +81,7 @@ final class ThreadSession {
                 let page = try await client.events(threadId: threadId, limit: Self.eventsPage)
                 if debug { print(String(format: "    after fetch %.0f MB", memoryMB())) }
                 let prepared = await Task.detached(priority: .userInitiated) { () -> (TranscriptModel, Int) in
-                    var model = TranscriptModel()
+                    var model = TranscriptModel(root: root)
                     model.load(events: page.events, inProgress: page.inProgress)
                     if debug { print(String(format: "    after model %.0f MB", memoryMB())) }
                     let start = max(0, model.rows.count - Self.initialRows)

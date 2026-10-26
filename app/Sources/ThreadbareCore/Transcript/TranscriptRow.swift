@@ -63,13 +63,17 @@ public struct ToolItem: Sendable, Hashable {
     /// Live output from `tool.output.delta`, dropped once the result lands.
     public var liveOutput: String
     public var diff: EditDiff?
+    /// The thread's working folder, so a file row names its folder from
+    /// there ("scripts", not "photo-sync/scripts").
+    public var root: String?
 
-    public init(itemId: String, call: ToolCall? = nil, result: ToolResult? = nil, liveOutput: String = "", diff: EditDiff? = nil) {
+    public init(itemId: String, call: ToolCall? = nil, result: ToolResult? = nil, liveOutput: String = "", diff: EditDiff? = nil, root: String? = nil) {
         self.itemId = itemId
         self.call = call
         self.result = result
         self.liveOutput = liveOutput
         self.diff = diff
+        self.root = root
     }
 
     public var name: String { call?.name ?? "Tool" }
@@ -90,10 +94,19 @@ public struct ToolItem: Sendable, Hashable {
 public struct ApprovalItem: Sendable, Hashable {
     public var request: ApprovalRequest
     public var resolution: ApprovalResolution?
+    /// The thread's working folder, for the file's folder in the card.
+    public var root: String?
 
-    public init(request: ApprovalRequest, resolution: ApprovalResolution? = nil) {
+    public init(request: ApprovalRequest, resolution: ApprovalResolution? = nil, root: String? = nil) {
         self.request = request
         self.resolution = resolution
+        self.root = root
+    }
+
+    /// Mike let it happen: the request is now just a step of the work it
+    /// allowed, so it folds into the run of work around it.
+    public var isAllowed: Bool {
+        resolution?.decision == .allow || resolution?.decision == .allowAlways
     }
 }
 

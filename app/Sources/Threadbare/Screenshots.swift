@@ -53,6 +53,17 @@ enum ScreenshotRunner {
             await scroll(app, toRow: "p:", offset: 20)
             await capture(window, dir.appendingPathComponent("2-plan-and-diffs.png"))
         }
+        // 2b. A message with an image attached: the image above the bubble,
+        // right-aligned, with no box behind it.
+        if wanted("2b"), let session = app.transcript.session,
+           let index = (0..<session.displayCount).first(where: { index in
+               if case .user(let message) = session.displayRow(index).content { return !message.images.isEmpty }
+               return false
+           }) {
+            app.transcript.scroll(toRow: index, offset: 140)
+            try? await Task.sleep(for: .milliseconds(400))
+            await capture(window, dir.appendingPathComponent("2b-user-image.png"))
+        }
         // 3. Top of the thread with its first work group open and the file
         // read in it expanded.
         if wanted("3") {
@@ -172,12 +183,13 @@ enum ScreenshotRunner {
         }
         // 10. What the other threads don't show, from an archived one: a
         // group with a failed tool, open, with its command and its key/value
-        // tool opened; then a Write approval and a question, both answered.
+        // tool opened; then an allowed Write approval (a line in the group,
+        // opened to what it asked) and an answered question.
         if wanted("10") {
             let thread = "demo_build_scripts"
             await open(app, thread)
             let session = app.session(for: thread)
-            session.expanded.formUnion(["t:ls", "t:pr", "t:rel"])
+            session.expanded.formUnion(["t:ls", "t:pr", "t:rel", "ap:ap_w"])
             session.setModelExpanded("g:t:ls", true)
             app.transcript.show(nil)
             app.transcript.show(session)
@@ -251,6 +263,26 @@ enum ScreenshotRunner {
         process.arguments = ["-o", "-x", "-l", String(window.windowNumber), url.path]
         try? process.run()
         process.waitUntilExit()
-        print("saved \(url.path)")
+        if FileManager.default.fileExists(atPath: url.path) {
+            print("saved \(url.path)")
+        } else if drawInProcess(window, to: url) {
+            // With the screen locked (or the display asleep) the window
+            // server has no image of the window to give. AppKit can still
+            // draw it, without the sidebar's translucency.
+            print("saved \(url.path) (drawn in-process: the screen is locked or asleep)")
+        } else {
+            print("could not save \(url.path)")
+        }
+    }
+
+    /// The whole window (title bar and toolbar too) drawn by AppKit into a
+    /// bitmap at the window's scale.
+    private static func drawInProcess(_ window: NSWindow, to url: URL) -> Bool {
+        guard let frameView = window.contentView?.superview else { return false }
+        frameView.layoutSubtreeIfNeeded()
+        guard let rep = frameView.bitmapImageRepForCachingDisplay(in: frameView.bounds) else { return false }
+        frameView.cacheDisplay(in: frameView.bounds, to: rep)
+        guard let png = rep.representation(using: .png, properties: [:]) else { return false }
+        return (try? png.write(to: url)) != nil
     }
 }

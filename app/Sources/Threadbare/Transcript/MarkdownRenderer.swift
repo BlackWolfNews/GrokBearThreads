@@ -164,8 +164,8 @@ enum MarkdownRenderer {
                 var first: CGFloat?
                 var tabs: [CGFloat] = []
                 if let listPrefix {
-                    append(listPrefix + "\t", context)
-                    first = max(0, context.indent - 20)
+                    appendMarker(listPrefix, context)
+                    first = Self.markerStart(listPrefix, indent: context.indent)
                     tabs = [context.indent]
                 }
                 inlines(paragraph.children, context)
@@ -239,9 +239,31 @@ enum MarkdownRenderer {
             }
         }
 
+        /// How far a list's text sits in from its parent's. At 22, with the
+        /// marker 2 pt from the column edge, lists looked cramped against
+        /// the paragraphs around them; Claude's sit clearly in.
+        static let listIndent: CGFloat = 30
+
+        /// Where an item's marker starts: a bullet 18 pt before the text, a
+        /// number a little further out so "10." still fits before it.
+        static func markerStart(_ marker: String, indent: CGFloat) -> CGFloat {
+            max(0, indent - (marker == "•" ? 18 : 22))
+        }
+
+        /// A list marker and the tab to the item's text. The bullet is drawn
+        /// semibold: at the body weight it read small beside 15 pt text.
+        func appendMarker(_ marker: String, _ context: Context) {
+            var markerContext = context
+            markerContext.link = nil
+            markerContext.strike = false
+            if marker == "•" { markerContext.bold = true }
+            append(marker, markerContext)
+            append("\t", context)
+        }
+
         mutating func listItems(_ items: [ListItem], _ context: Context, marker: (Int, ListItem) -> String) {
             var inner = context
-            inner.indent += 22
+            inner.indent += Self.listIndent
             for (index, item) in items.enumerated() {
                 var itemContext = inner
                 itemContext.listSpacing = index == items.count - 1 && context.listSpacing == nil ? Self.paragraphGap : Self.itemGap
@@ -253,8 +275,9 @@ enum MarkdownRenderer {
                         if first {
                             // A list item that starts with something other than text still gets its marker.
                             let start = output.length
-                            append(marker(index, item), itemContext)
-                            finishParagraph(from: start, style: paragraphStyle(itemContext, spacing: 2, first: max(0, itemContext.indent - 20)))
+                            let mark = marker(index, item)
+                            append(mark, itemContext)
+                            finishParagraph(from: start, style: paragraphStyle(itemContext, spacing: 2, first: Self.markerStart(mark, indent: itemContext.indent)))
                         }
                         block(child, itemContext)
                     }

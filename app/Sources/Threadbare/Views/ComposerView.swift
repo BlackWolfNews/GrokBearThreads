@@ -213,16 +213,16 @@ struct ComposerTextField: NSViewRepresentable {
     var onImages: ([URL]) -> Void
 
     static let font = NSFont.systemFont(ofSize: TypeScale.composer)
-    /// About 1.45 lines of air, like the transcript. Spacing goes under each
-    /// line, so the first line's top (and the placeholder) stays put.
-    static let lineSpacing: CGFloat = 3
+    /// The transcript's fixed body line height, glyphs centred in it, so a
+    /// message keeps its rhythm when it's sent (at 18 + 3 spacing the box
+    /// was denser than the bubble it became).
+    static let lineHeight = TypeScale.bodyLine
     static let attributes: [NSAttributedString.Key: Any] = {
-        let style = NSMutableParagraphStyle()
-        style.lineSpacing = lineSpacing
-        return [.font: font, .foregroundColor: NSColor.labelColor, .paragraphStyle: style]
+        let (style, offset) = Theme.lines(lineHeight, font: font)
+        return [.font: font, .foregroundColor: NSColor.labelColor, .paragraphStyle: style, .baselineOffset: offset]
     }()
     /// Two lines, before the first measure comes in.
-    static let minHeight: CGFloat = 42
+    static let minHeight: CGFloat = lineHeight * 2
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
 
@@ -271,11 +271,8 @@ struct ComposerTextField: NSViewRepresentable {
     static func fittingHeight(of textView: NSTextView) -> CGFloat {
         guard let layoutManager = textView.layoutManager, let container = textView.textContainer else { return minHeight }
         layoutManager.ensureLayout(for: container)
-        let line = layoutManager.defaultLineHeight(for: textView.font ?? font) + lineSpacing
-        // TextKit leaves the spacing off the last line; counting it keeps
-        // the box a whole number of lines.
-        let used = layoutManager.usedRect(for: container).height + lineSpacing
-        return ComposerChips.boxHeight(textHeight: used, lineHeight: line)
+        let used = layoutManager.usedRect(for: container).height
+        return ComposerChips.boxHeight(textHeight: used, lineHeight: lineHeight)
     }
 
     func updateNSView(_ scroll: NSScrollView, context: Context) {
@@ -335,16 +332,6 @@ struct ComposerTextField: NSViewRepresentable {
                 DispatchQueue.main.async { self.parent.height = height }
             }
         }
-    }
-}
-
-/// Always overlay scrollers. AppKit sets every scroll view back to the
-/// system's style when a mouse is connected, which drew a legacy scroller
-/// with a track inside the rounded card.
-final class OverlayScrollView: NSScrollView {
-    override var scrollerStyle: NSScroller.Style {
-        get { .overlay }
-        set { super.scrollerStyle = .overlay }
     }
 }
 
@@ -487,10 +474,13 @@ final class ComposerTextView: NSTextView {
     override func draw(_ dirtyRect: NSRect) {
         super.draw(dirtyRect)
         if string.isEmpty, !placeholder.isEmpty {
-            let attributes: [NSAttributedString.Key: Any] = [.font: font ?? ComposerTextField.font, .foregroundColor: Self.placeholderColor]
-            // Where the first character would go, so typing doesn't shift it.
+            var attributes = ComposerTextField.attributes
+            attributes[.foregroundColor] = Self.placeholderColor
+            // Where the first character would go, on the same line height
+            // and baseline, so typing doesn't shift it.
             let x = textContainerInset.width + (textContainer?.lineFragmentPadding ?? 0)
-            NSAttributedString(string: placeholder, attributes: attributes).draw(at: NSPoint(x: x, y: textContainerInset.height))
+            let rect = NSRect(x: x, y: textContainerInset.height, width: max(0, bounds.width - x), height: ComposerTextField.lineHeight)
+            NSAttributedString(string: placeholder, attributes: attributes).draw(with: rect, options: [.usesLineFragmentOrigin])
         }
     }
 }

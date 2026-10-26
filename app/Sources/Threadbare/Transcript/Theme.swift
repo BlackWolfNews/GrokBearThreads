@@ -15,33 +15,42 @@ enum TypeScale {
     /// Work lines: group summaries, tool and thinking rows, the working line.
     static let work: CGFloat = 14
     static let workLine: CGFloat = 20
+    /// One monospaced size and leading for code blocks, tool output and
+    /// diffs: at 12.5 and 13 a file read in a tool and the code block under
+    /// it visibly differed in size and line spacing.
     static let code: CGFloat = 13
     static let codeLine: CGFloat = 19.5
     /// Tool output and file contents in an expanded tool.
-    static let output: CGFloat = 12.5
-    static let outputLine: CGFloat = 18
-    static let diff: CGFloat = 12.5
-    static let diffLine: CGFloat = 18.5
+    static let output: CGFloat = code
+    static let outputLine: CGFloat = codeLine
+    static let diff: CGFloat = code
+    static let diffLine: CGFloat = codeLine
     static let headings: (CGFloat, CGFloat, CGFloat) = (18, 16, 15)
     static let cardTitle: CGFloat = 14
     /// Card labels, notes and table headers.
     static let label: CGFloat = 13
-    /// Folders after file names, "Show 12 more lines", line counts.
-    static let detail: CGFloat = 12.5
+    /// Folders after file names, "Show 12 more lines", line counts. Whole
+    /// points throughout: half-point steps made neighbouring text almost,
+    /// but not quite, the same size.
+    static let detail: CGFloat = 12
     /// The turn footer and centred system notes.
-    static let small: CGFloat = 11.5
+    static let small: CGFloat = 11
 
     // Sidebar
     static let sidebarTitle: CGFloat = 14
     static let sidebarPreview: CGFloat = 13
     /// Times, statuses and account names on a row.
-    static let sidebarMeta: CGFloat = 11.5
-    static let sidebarHeading: CGFloat = 12
+    static let sidebarMeta: CGFloat = 11
+    /// "Needs you", "Running", "Inbox": semibold at the previews' size, so a
+    /// heading isn't weaker than the rows it groups.
+    static let sidebarHeading: CGFloat = 13
     static let sidebarButton: CGFloat = 14
     static let sidebarFooter: CGFloat = 13
 
     // Header and composer
-    static let header: CGFloat = 14
+    /// At 14 the title was smaller than the 15 pt text under it; Codex and
+    /// Claude set theirs at about 15.
+    static let header: CGFloat = 15
     static let composer: CGFloat = 15
     static let chip: CGFloat = 13
 }

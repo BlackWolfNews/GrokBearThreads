@@ -37,7 +37,9 @@ struct ScrollMemory {
 final class TranscriptController: NSObject, NSTableViewDataSource, NSTableViewDelegate, RowCellDelegate {
     nonisolated static let renders = RenderCache()
 
-    let scrollView = NSScrollView()
+    /// Overlay scrollers whatever the system setting, so the reading
+    /// column and the composer under it are centred in the pane.
+    let scrollView: NSScrollView = OverlayScrollView()
     let tableView = TranscriptTableView()
     private(set) weak var session: ThreadSession?
     private(set) var width: CGFloat = 0
@@ -102,7 +104,10 @@ final class TranscriptController: NSObject, NSTableViewDataSource, NSTableViewDe
     /// their letters and images got a hard edge, which read as a drawing
     /// glitch. A static mask fades both ends out instead, as Codex and
     /// Claude do; it only changes when the view is resized.
-    static let fadeHeight: CGFloat = 18
+    /// Tall enough that a bright image passing under the composer fades
+    /// out rather than turning into a grey strip with its corners floating
+    /// above the card (Codex fades over about 40 pt).
+    static let fadeHeight: CGFloat = 36
     static let topFadeHeight: CGFloat = 14
     private let fadeMask = CALayer()
     private let fadeGradient = CAGradientLayer()
@@ -111,7 +116,10 @@ final class TranscriptController: NSObject, NSTableViewDataSource, NSTableViewDe
     private func updateFade() {
         guard let layer = scrollView.layer else { return }
         if layer.mask !== fadeMask {
-            fadeGradient.colors = [NSColor.clear.cgColor, NSColor.black.cgColor, NSColor.black.cgColor, NSColor.clear.cgColor]
+            // The bottom eases out: most of the fall happens early, so the
+            // last few points above the composer are nearly clear.
+            fadeGradient.colors = [NSColor.clear.cgColor, NSColor.black.cgColor, NSColor.black.cgColor,
+                                   NSColor.black.withAlphaComponent(0.35).cgColor, NSColor.clear.cgColor]
             fadeScroller.backgroundColor = NSColor.black.cgColor
             fadeMask.addSublayer(fadeGradient)
             fadeMask.addSublayer(fadeScroller)
@@ -132,7 +140,8 @@ final class TranscriptController: NSObject, NSTableViewDataSource, NSTableViewDe
         let flipped = layer.isGeometryFlipped
         fadeGradient.startPoint = CGPoint(x: 0.5, y: flipped ? 0 : 1)
         fadeGradient.endPoint = CGPoint(x: 0.5, y: flipped ? 1 : 0)
-        fadeGradient.locations = [0, NSNumber(value: Double(top)), NSNumber(value: Double(1 - bottom)), 1]
+        fadeGradient.locations = [0, NSNumber(value: Double(top)), NSNumber(value: Double(1 - bottom)),
+                                  NSNumber(value: Double(1 - bottom * 0.35)), 1]
         CATransaction.commit()
     }
 
@@ -156,25 +165,12 @@ final class TranscriptController: NSObject, NSTableViewDataSource, NSTableViewDe
         reloadAll()
     }
 
-    /// The width rows are laid out at. It's the scroll view's width less a
-    /// legacy scroller's, whether or not the scroller is showing: with
-    /// "Show scroll bars: Automatic" and a mouse the scroller comes and goes
-    /// as threads get long or short, and using the clip view's width made
-    /// every switch lay rows out twice (982 then 965 pt).
+    /// The width rows are laid out at: the whole scroll view, whose
+    /// scroller is always an overlay. (With legacy scrollers it came and
+    /// went as threads got long or short, and every switch laid rows out
+    /// twice.)
     var currentTableWidth: CGFloat {
-        max(320, scrollView.frame.width - reservedScrollerWidth)
-    }
-
-    /// The width a legacy scroller takes at the right edge (0 with overlay
-    /// scrollers). The reading column is centred in what's left, so the
-    /// composer below lines itself up by the same amount.
-    var reservedScrollerWidth: CGFloat {
-        let probe = NSSize(width: 1000, height: 1000)
-        let content = NSScrollView.contentSize(
-            forFrameSize: probe, horizontalScrollerClass: nil, verticalScrollerClass: NSScroller.self,
-            borderType: scrollView.borderType, controlSize: .regular, scrollerStyle: scrollView.scrollerStyle
-        )
-        return probe.width - content.width
+        max(320, scrollView.frame.width)
     }
 
     /// Full reload: only used when switching threads or after a fresh load.
@@ -244,7 +240,10 @@ final class TranscriptController: NSObject, NSTableViewDataSource, NSTableViewDe
         case .note: return row.inGroup ? "header" : "text"
         case .reasoning, .tool, .diff: return "header"
         case .images: return "images"
-        case .approval: return "approval"
+        // Once answered, an approval is one work line (and can sit in a group).
+        case .approval:
+            if case .approval(let item) = row.content, item.resolution != nil { return "header" }
+            return "approval"
         case .question: return "question"
         case .group: return "group"
         case .working: return "working"

@@ -69,6 +69,38 @@ public struct ThreadRowLook: Sendable, Equatable {
     public static func emptyPreview(_ thread: ThreadSummary) -> String {
         thread.status == .waiting ? "Waiting for your answer" : "No reply yet"
     }
+
+    /// How long a running turn has been going, where the time would be:
+    /// "53s", "4m", "1h 2m". The runner sets a thread's `lastActivityAt`
+    /// when a turn starts (and when it ends or a message is sent), not on
+    /// every event, so for a running thread it's the turn's start.
+    public static func workingLabel(since start: Date, now: Date) -> String {
+        let seconds = max(0, Int(now.timeIntervalSince(start)))
+        if seconds < 60 { return "\(seconds)s" }
+        let minutes = seconds / 60
+        if minutes < 60 { return "\(minutes)m" }
+        let hours = minutes / 60
+        return minutes % 60 == 0 ? "\(hours)h" : "\(hours)h \(minutes % 60)m"
+    }
+}
+
+/// Snoozing or archiving a thread whose turn is underway makes the runner
+/// stop that turn. From the row's hover buttons, where a stray click is
+/// easy, that asks first; the menus and ⌘E are deliberate and don't.
+public enum BusyThreadAction {
+    public enum Action: Sendable {
+        case archive, snooze
+    }
+
+    public static func needsConfirm(_ status: ThreadStatus) -> Bool { status.isBusy }
+
+    /// The confirmation's question and its explanation.
+    public static func prompt(_ action: Action, status: ThreadStatus) -> (title: String, detail: String) {
+        let verb = action == .archive ? "Archive" : "Snooze"
+        let state = status == .waiting ? "is waiting for you" : "is still working"
+        let doing = action == .archive ? "Archiving" : "Snoozing"
+        return ("\(verb) and stop the turn?", "This thread \(state). \(doing) it now stops its turn.")
+    }
 }
 
 /// Short names for accounts, for the sidebar and the new-thread line.

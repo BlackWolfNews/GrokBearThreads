@@ -40,7 +40,11 @@ enum RowMetrics {
     static let optionHeight: CGFloat = 24
     static let optionDescription: CGFloat = 17
     /// The question card's "Something else" field.
-    static let otherFieldHeight: CGFloat = 26
+    static let otherFieldHeight: CGFloat = 30
+    /// An answered question: the space under each question, and the line
+    /// with the answer.
+    static let answeredGap: CGFloat = 6
+    static let answerHeight: CGFloat = 20
     static let userThumbHeight: CGFloat = 120
     static let gridMaxHeight: CGFloat = 240
     static let gridMaxWidth: CGFloat = 320
@@ -337,26 +341,45 @@ enum RowRenderer {
             return RowRender(height: vertical + 2 + area, imageFrames: frames, imageAreaHeight: area)
 
         case .approval(let item):
+            if let resolution = item.resolution {
+                // Settled, it's one quiet work line ("Allowed  Write
+                // release.sh") that opens to what was asked, like a tool
+                // row. As a full card it was as loud as one still waiting,
+                // and the write it allowed followed it straight away.
+                let header = resolvedApprovalText(item.request, resolution)
+                let headerSize = header.size()
+                guard expanded else { return RowRender(height: RowMetrics.workHeight, text: header, textSize: headerSize) }
+                let body = approvalPayload(item.request)
+                let size = measurer.measure(body, width: width - RowMetrics.titleIndent - RowMetrics.boxPad * 2)
+                return RowRender(height: RowMetrics.workHeight + size.height + RowMetrics.boxPad * 2 + 10, text: header, textSize: headerSize,
+                                 detail: body, detailSize: size)
+            }
             let inner = width - RowMetrics.cardPad * 2 - RowMetrics.accentBar
-            let title = NSAttributedString(string: approvalTitle(item.request), attributes: Theme.text(Theme.cardTitleFont, line: 20))
+            let title = approvalTitleText(item)
             let titleSize = measurer.measure(title, width: inner)
             let payload = approvalPayload(item.request)
             let payloadSize = measurer.measure(payload, width: inner - RowMetrics.boxPad * 2)
-            let actions = item.resolution == nil ? RowMetrics.buttonHeight : 17
-            let height = RowMetrics.cardPad * 2 + titleSize.height + 10 + payloadSize.height + RowMetrics.boxPad * 2 + 12 + actions
+            let height = RowMetrics.cardPad * 2 + titleSize.height + 10 + payloadSize.height + RowMetrics.boxPad * 2 + 12 + RowMetrics.buttonHeight
             return RowRender(height: vertical + 4 + height, text: title, textSize: titleSize, detail: payload, detailSize: payloadSize)
 
         case .question(let item):
             let inner = width - RowMetrics.cardPad * 2 - RowMetrics.accentBar
             var total = RowMetrics.cardPad * 2
             var textHeights: [CGFloat] = []
+            let answered = item.resolution != nil
             for question in item.request.questions {
-                let textHeight = measurer.measure(questionText(question.question), width: inner).height
+                let textHeight = measurer.measure(questionText(question.question, answered: answered), width: inner).height
                 textHeights.append(textHeight)
-                total += questionHeight(question, textHeight: textHeight)
+                total += answered ? textHeight + RowMetrics.answeredGap : questionHeight(question, textHeight: textHeight)
             }
-            total += item.resolution == nil ? (RowMetrics.otherFieldHeight + 2 + 12 + RowMetrics.buttonHeight) : 17
-            return RowRender(height: vertical + 4 + total, lineHeights: textHeights)
+            guard let resolution = item.resolution else {
+                total += RowMetrics.otherFieldHeight + 2 + 12 + RowMetrics.buttonHeight
+                return RowRender(height: vertical + 4 + total, lineHeights: textHeights)
+            }
+            // Answered: the question and the answer, not every option
+            // greyed out with none of them ticked.
+            total += RowMetrics.answerHeight
+            return RowRender(height: vertical + 4 + total, text: answerText(resolution), lineHeights: textHeights)
 
         case .plan(let entries):
             let text = planText(entries)
@@ -431,16 +454,31 @@ enum RowRenderer {
         ])
         if group.failedCount > 0 {
             output.append(NSAttributedString(string: ", \(group.failedCount) failed", attributes: [
-                .font: Theme.workFont, .foregroundColor: Theme.removedText, .paragraphStyle: style,
+                .font: Theme.workFont, .foregroundColor: Theme.failed, .paragraphStyle: style,
             ]))
         }
         if group.isLive, let action = group.currentAction {
-            // What's happening now is what Mike watches while a turn runs:
-            // readable secondary text, with only the dot kept faint.
+            // What's happening now is what Mike watches while a turn runs,
+            // so it's the brightest work text on screen: the summary before
+            // it stays quiet and the dot faint, as Codex and T3 do.
             output.append(NSAttributedString(string: "  ·  ", attributes: [
                 .font: Theme.workFont, .foregroundColor: Theme.faintText, .paragraphStyle: style,
             ]))
             output.append(NSAttributedString(string: ToolPresentation.shortTitle(action, limit: 90), attributes: [
+                .font: Theme.workFont, .foregroundColor: NSColor.labelColor, .paragraphStyle: style,
+            ]))
+        }
+        return output
+    }
+
+    /// "Allowed  Write release.sh": the decision, then what it was for.
+    static func resolvedApprovalText(_ request: ApprovalRequest, _ resolution: ApprovalResolution) -> NSAttributedString {
+        let style = truncating
+        let output = NSMutableAttributedString(string: ApprovalText.decision(resolution.decision), attributes: [
+            .font: Theme.workFont, .foregroundColor: Theme.faintText, .paragraphStyle: style,
+        ])
+        if resolution.decision != .expired {
+            output.append(NSAttributedString(string: "  " + ApprovalText.target(request), attributes: [
                 .font: Theme.workFont, .foregroundColor: Theme.quietText, .paragraphStyle: style,
             ]))
         }
@@ -449,7 +487,9 @@ enum RowRenderer {
 
     static func toolHeader(_ tool: ToolItem) -> NSAttributedString {
         let style = truncating
-        let color = tool.failed ? Theme.removedText : Theme.quietText
+        // A failure is marked once, by the red icon; the title stays in the
+        // work line colour rather than the row turning red all over.
+        let color = Theme.quietText
         let output: NSMutableAttributedString
         if let file = ToolPresentation.fileTitle(tool) {
             // "Read UploadTask.swift  Sources/Upload": the file, then its
@@ -502,7 +542,10 @@ enum RowRenderer {
     /// line numbers, a search and its matches, or the input as fields.
     static func toolBody(_ tool: ToolItem) -> NSAttributedString {
         let output = NSMutableAttributedString()
-        let outputColor: NSColor = tool.failed ? Theme.removedText : Theme.quietText
+        // Output is ordinary text even when the tool failed: in red it read
+        // as removed code and was the loudest thing in the window. Only the
+        // lines that say what went wrong are marked.
+        let outputColor = Theme.quietText
         var hasOutput = false
         func appendOutput(_ text: String) {
             guard !text.isEmpty else { return }
@@ -511,7 +554,25 @@ enum RowRenderer {
                 output.append(mono("\n", outputColor))
                 output.append(gap(8))
             }
-            output.append(mono(text, outputColor))
+            guard tool.failed else { return output.append(mono(text, outputColor)) }
+            // Runs of lines in one colour, so long output stays a few runs.
+            var run: [Substring] = []
+            var runIsError = false
+            func flush() {
+                guard !run.isEmpty else { return }
+                output.append(mono(run.joined(separator: "\n"), runIsError ? Theme.failed : outputColor))
+                run = []
+            }
+            for line in text.split(separator: "\n", omittingEmptySubsequences: false) {
+                let isError = ToolPresentation.isErrorLine(line)
+                if !run.isEmpty, isError != runIsError {
+                    flush()
+                    output.append(mono("\n", outputColor))
+                }
+                runIsError = isError
+                run.append(line)
+            }
+            flush()
         }
         switch ToolPresentation.detail(tool) {
         case .command(let command, let result):
@@ -530,11 +591,7 @@ enum RowRenderer {
             if let scope { output.append(mono("  in " + scope, Theme.faintText)) }
             appendOutput(result)
         case .fields(let fields, let result):
-            for (index, field) in fields.enumerated() {
-                if index > 0 { output.append(mono("\n", .labelColor)) }
-                output.append(mono(field.key + "  ", Theme.faintText))
-                output.append(mono(field.value, .labelColor))
-            }
+            output.append(fieldsText(fields))
             appendOutput(result)
         }
         if tool.result?.truncated == true {
@@ -544,6 +601,29 @@ enum RowRenderer {
         } else if !hasOutput {
             if output.length > 0 { output.append(mono("\n", .labelColor)) }
             output.append(mono(tool.isFinished ? "No output" : "Running…", Theme.faintText))
+        }
+        return output
+    }
+
+    /// Tool input as "key:  value" lines with the values in one column (a
+    /// tab stop past the widest key, up to a cap) and long values wrapping
+    /// under their value rather than back under the key.
+    static func fieldsText(_ fields: [ToolPresentation.Field]) -> NSAttributedString {
+        let keyWidth = ToolPresentation.keyWidth(fields)
+        let column = CGFloat(keyWidth + 2) * Theme.digitWidth(monoFont)
+        let (style, offset) = Theme.lines(TypeScale.outputLine, font: monoFont, head: column, first: 0)
+        style.tabStops = [NSTextTab(textAlignment: .left, location: column)]
+        style.lineBreakMode = .byCharWrapping
+        let key: [NSAttributedString.Key: Any] = [.font: monoFont, .foregroundColor: Theme.faintText, .paragraphStyle: style, .baselineOffset: offset]
+        var value = key
+        value[.foregroundColor] = NSColor.labelColor
+        let output = NSMutableAttributedString()
+        for (index, field) in fields.enumerated() {
+            if index > 0 { output.append(NSAttributedString(string: "\n", attributes: value)) }
+            // A key past the cap runs on into its value instead.
+            let label = field.key + ":"
+            output.append(NSAttributedString(string: label + (label.count > keyWidth ? " " : "\t"), attributes: key))
+            output.append(NSAttributedString(string: field.value, attributes: value))
         }
         return output
     }
@@ -699,56 +779,61 @@ enum RowRenderer {
 
     // MARK: Cards
 
-    static func approvalTitle(_ request: ApprovalRequest) -> String {
-        let path = request.input["file_path"]?.stringValue ?? request.input["path"]?.stringValue
-        let file = path.map { ($0 as NSString).lastPathComponent }
-        switch request.name {
-        case "Bash": return "Run this command?"
-        case "Edit", "MultiEdit", "NotebookEdit": return file.map { "Edit \($0)?" } ?? "Edit this file?"
-        case "Write": return file.map { "Write \($0)?" } ?? "Write this file?"
-        case "WebFetch": return "Fetch this page?"
-        case "WebSearch": return "Search the web?"
-        default:
-            let parts = request.name.split(separator: "_", omittingEmptySubsequences: true)
-            let name = request.name.hasPrefix("mcp__") && parts.count >= 3 ? parts.dropFirst(2).joined(separator: " ") : request.name
-            return "Use \(name)?"
+    /// "Write release.sh?" and, for a file, its folder after it, dimmed, as
+    /// file rows show it. The card's tooltip has the whole path.
+    static func approvalTitleText(_ item: ApprovalItem) -> NSAttributedString {
+        var attributes = Theme.text(Theme.cardTitleFont, line: 20)
+        let output = NSMutableAttributedString(string: ApprovalText.title(item.request), attributes: attributes)
+        if let path = ApprovalText.filePath(item.request) {
+            let folder = PathDisplay.folder(of: path, relativeTo: item.root)
+            if !folder.isEmpty {
+                // Same line height and baseline offset as the title, so the
+                // smaller run sits on its baseline.
+                attributes[.font] = Theme.detailFont
+                attributes[.foregroundColor] = Theme.faintText
+                output.append(NSAttributedString(string: "  " + folder, attributes: attributes))
+            }
         }
+        return output
     }
 
-    /// The command, or the file and the start of what would be written, in
-    /// a monospaced block.
+    /// The command, the start of what would be written to a file, the page,
+    /// or the tool's input, in a monospaced block. The file's name and
+    /// folder are in the title above it.
     static func approvalPayload(_ request: ApprovalRequest) -> NSAttributedString {
         let input = request.input
         if let command = input["command"]?.stringValue {
             return mono(clampLines(command, 12), .labelColor)
         }
-        let output = NSMutableAttributedString()
-        if let path = input["file_path"]?.stringValue ?? input["path"]?.stringValue {
-            output.append(mono(ToolPresentation.shortTitle(path, limit: 300), Theme.quietText))
+        if ApprovalText.filePath(request) != nil {
             let call = ToolCall(itemId: request.approvalId, name: request.name, kind: request.name == "Write" ? .write : .edit,
                                 title: request.title, input: input)
             if let diff = DiffBuilder.diff(forTool: call), !diff.hunks.isEmpty {
-                output.append(mono("\n", .labelColor))
-                output.append(gap(6))
-                output.append(diffText([diff], maxLines: 8, inset: 0).0)
+                return diffText([diff], maxLines: 8, inset: 0).0
             }
-            return output
+            return mono(ToolPresentation.shortTitle(ApprovalText.filePath(request) ?? "", limit: 300), Theme.quietText)
         }
         if let url = input["url"]?.stringValue {
             return mono(url, .labelColor)
         }
         let fields = ToolPresentation.fields(input)
         if fields.isEmpty { return mono(clampLines(request.title, 10), .labelColor) }
-        for (index, field) in fields.prefix(8).enumerated() {
-            if index > 0 { output.append(mono("\n", .labelColor)) }
-            output.append(mono(field.key + "  ", Theme.faintText))
-            output.append(mono(field.value, .labelColor))
-        }
-        return output
+        return fieldsText(Array(fields.prefix(8)))
     }
 
-    static func questionText(_ question: String) -> NSAttributedString {
-        NSAttributedString(string: question, attributes: Theme.text(Theme.cardTitleFont, line: 20))
+    /// A question's text: card title weight, quieter once it's answered so
+    /// the answer under it is the brighter line.
+    static func questionText(_ question: String, answered: Bool = false) -> NSAttributedString {
+        NSAttributedString(string: question, attributes: Theme.text(Theme.cardTitleFont, color: answered ? Theme.quietText : .labelColor, line: 20))
+    }
+
+    /// What an answered question card says under the question: the answer
+    /// (sent as the resolution's message), or how it ended.
+    static func answerText(_ resolution: ApprovalResolution) -> NSAttributedString {
+        let message = resolution.message.flatMap { firstLine($0).isEmpty ? nil : firstLine($0) }
+        let text = resolution.decision == .answered ? (message ?? "Answered") : ApprovalText.decision(resolution.decision)
+        let color: NSColor = resolution.decision == .answered ? .labelColor : Theme.quietText
+        return NSAttributedString(string: text, attributes: [.font: Theme.workFont, .foregroundColor: color, .paragraphStyle: truncating])
     }
 
     static func questionHeight(_ question: Question, textHeight: CGFloat) -> CGFloat {
@@ -761,11 +846,18 @@ enum RowRenderer {
         return height + 12
     }
 
+    /// "2 of 5 steps done", then the steps. Every card starts with a
+    /// one-line title; without one the plan read as an orphaned box of
+    /// struck-through lines.
     static func planText(_ entries: [PlanEntry]) -> NSAttributedString {
-        let output = NSMutableAttributedString()
-        let font = NSFont.systemFont(ofSize: TypeScale.body - 0.5)
+        let (titleStyle, titleOffset) = Theme.lines(TypeScale.workLine, font: Theme.changesTitleFont, spacing: 8)
+        let output = NSMutableAttributedString(string: PlanSummary.title(entries), attributes: [
+            .font: Theme.changesTitleFont, .foregroundColor: NSColor.labelColor, .paragraphStyle: titleStyle, .baselineOffset: titleOffset,
+        ])
+        let font = Theme.bodyFont
         let (style, offset) = Theme.lines(22, font: font, spacing: 4, head: 24, first: 0)
         style.tabStops = [NSTextTab(textAlignment: .left, location: 24)]
+        output.append(NSAttributedString(string: "\n", attributes: [.font: Theme.changesTitleFont, .paragraphStyle: titleStyle]))
         for (index, entry) in entries.enumerated() {
             if index > 0 { output.append(NSAttributedString(string: "\n", attributes: [.font: font, .paragraphStyle: style, .baselineOffset: offset])) }
             let (mark, color, textColor): (String, NSColor, NSColor) = switch entry.status {
@@ -800,39 +892,13 @@ enum RowRenderer {
 
     // MARK: Images
 
-    /// Lays images out in rows, each scaled to fit `maxHeight` and `maxWidth`.
+    /// Lays images out in rows, each fitted to `maxHeight` and the grid's
+    /// cell width, with the images in a row at one height
+    /// (`ImageLayout`).
     static func imageFrames(_ images: [ImageRef], maxWidth: CGFloat, maxHeight: CGFloat, alignRight: Bool) -> ([NSRect], CGFloat) {
-        guard !images.isEmpty else { return ([], 0) }
-        var frames: [NSRect] = []
-        var x: CGFloat = 0
-        var y: CGFloat = 0
-        var rowHeight: CGFloat = 0
-        var rowStart = 0
-        let cellMaxWidth = min(maxWidth, RowMetrics.gridMaxWidth)
-        func finishRow() {
-            guard alignRight, rowStart < frames.count else { return }
-            let used = frames[frames.count - 1].maxX
-            let shift = maxWidth - used
-            for index in rowStart..<frames.count { frames[index].origin.x += shift }
-        }
-        for image in images {
-            let size = pixelSize(image)
-            let scale = min(1, maxHeight / max(1, size.height), cellMaxWidth / max(1, size.width))
-            let width = max(24, floor(size.width * scale))
-            let height = max(24, floor(size.height * scale))
-            if x > 0, x + width > maxWidth {
-                finishRow()
-                y += rowHeight + RowMetrics.imageGap
-                x = 0
-                rowHeight = 0
-                rowStart = frames.count
-            }
-            frames.append(NSRect(x: x, y: y, width: width, height: height))
-            x += width + RowMetrics.imageGap
-            rowHeight = max(rowHeight, height)
-        }
-        finishRow()
-        return (frames, y + rowHeight)
+        let layout = ImageLayout.frames(sizes: images.map(pixelSize), maxWidth: maxWidth, maxHeight: maxHeight,
+                                        cellWidth: RowMetrics.gridMaxWidth, gap: RowMetrics.imageGap, alignRight: alignRight)
+        return (layout.frames, layout.height)
     }
 
     nonisolated(unsafe) private static let sizeCache = NSCache<NSString, NSValue>()

@@ -97,11 +97,11 @@ private struct SectionHeading: View {
     let title: String
 
     var body: some View {
-        // A quiet divider rather than a bold tag: regular-ish weight near
-        // the rows' size, with clear room above each group, like Codex and
-        // Claude.
+        // A quiet divider rather than a bold tag: grey, at the previews'
+        // size, with clear room above each group, like Codex and Claude.
+        // Semibold so it isn't weaker than the rows it groups.
         Text(title)
-            .font(.system(size: TypeScale.sidebarHeading, weight: .medium))
+            .font(.system(size: TypeScale.sidebarHeading, weight: .semibold))
             .foregroundStyle(.secondary)
             .padding(.leading, SidebarMetrics.leading)
             .padding(.top, 18)
@@ -138,7 +138,7 @@ private struct ThreadList<Content: View>: View {
                 }
                 .padding(.horizontal, SidebarMetrics.outerInset)
                 // Room for the last row to scroll clear of the fade below.
-                .padding(.bottom, 18)
+                .padding(.bottom, 32)
             }
             // With a mouse connected macOS draws a legacy scroller with a
             // track down the list, which also pushed the times left. Codex,
@@ -146,11 +146,14 @@ private struct ThreadList<Content: View>: View {
             .scrollIndicators(.never)
             // The last row fades into the footer rather than being cut
             // through its text at the hairline, as the transcript does above
-            // the composer. A static mask, so scrolling costs nothing more.
+            // the composer. About a title and a preview tall, and clear just
+            // before the hairline: at 16 pt a row still showed half its
+            // letters on the rule. A static mask, so scrolling costs nothing.
             .mask {
                 VStack(spacing: 0) {
                     Color.black
-                    LinearGradient(colors: [.black, .clear], startPoint: .top, endPoint: .bottom).frame(height: 16)
+                    LinearGradient(colors: [.black, .clear], startPoint: .top, endPoint: .bottom).frame(height: 30)
+                    Color.clear.frame(height: 4)
                 }
             }
             .focusable()
@@ -303,16 +306,20 @@ struct ThreadRowView: View {
                 time.foregroundStyle(SidebarMetrics.faint)
             }
         case .working:
-            HStack(spacing: 4) {
-                // An accent mark that animates in the render server: the
-                // system mini spinner drew grey whatever the tint. At 10 pt
-                // most of its spokes were too faint to see in any one frame;
-                // at 13 it outweighs the times on the rows around it.
-                Image(systemName: "progress.indicator")
-                    .symbolEffect(.variableColor.iterative)
-                    .font(.system(size: 13, weight: .medium))
-                    .frame(width: 16, height: 16)
-                if look.labelled { Text("Working") }
+            HStack(alignment: .firstTextBaseline, spacing: 5) {
+                // An accent arc turned in the render server (SpinnerView):
+                // the system mini spinner drew grey whatever the tint, and
+                // the symbol's variable colour left it a pale asterisk.
+                SpinnerMark(color: .controlAccentColor)
+                    .frame(width: 12, height: 12)
+                    // On the text's baseline, centred on its lowercase.
+                    .alignmentGuide(.firstTextBaseline) { $0[VerticalAlignment.center] + 4 }
+                // How long the turn has run, ticking once a second. Only
+                // running rows have this, and there are one to three.
+                TimelineView(.periodic(from: .now, by: 1)) { context in
+                    let elapsed = ThreadRowLook.workingLabel(since: thread.lastActivityAt, now: context.date)
+                    Text(look.labelled ? "Working " + elapsed : elapsed).monospacedDigit()
+                }
             }
             .font(.system(size: TypeScale.sidebarMeta, weight: .medium))
             .foregroundStyle(Color.accentColor)
@@ -354,7 +361,7 @@ private struct RowActions: View {
                 switch action {
                 case .snooze:
                     Menu {
-                        SnoozeMenuItems(threadId: thread.id)
+                        SnoozeMenuItems(threadId: thread.id, confirmIfBusy: true)
                     } label: {
                         Image(systemName: "moon.zzz")
                     }
@@ -364,7 +371,10 @@ private struct RowActions: View {
                     .fixedSize()
                     .help("Snooze")
                 case .archive:
-                    Button { app.archive(thread.id) } label: { Image(systemName: "archivebox") }
+                    Button {
+                        guard BusyConfirm.allowed(.archive, threadId: thread.id, app: app) else { return }
+                        app.archive(thread.id)
+                    } label: { Image(systemName: "archivebox") }
                         .buttonStyle(RowIconButtonStyle())
                         .help("Archive (⌘E)")
                 case .unsnooze:
@@ -508,13 +518,43 @@ struct SnoozeMenu: View {
 struct SnoozeMenuItems: View {
     @Environment(AppModel.self) private var app
     let threadId: String
+    /// From a row's hover button: ask before snoozing a thread whose turn
+    /// is underway, which stops the turn.
+    var confirmIfBusy = false
 
     var body: some View {
         ForEach(Snooze.presets(now: app.now)) { preset in
-            Button(preset.title) { app.snooze(threadId, until: Snooze.date(for: preset.id, now: Date())) }
+            Button(preset.title) {
+                guard allowed() else { return }
+                app.snooze(threadId, until: Snooze.date(for: preset.id, now: Date()))
+            }
         }
         Divider()
-        Button("Pick a time…") { SnoozePicker.show(threadId: threadId, app: app) }
+        Button("Pick a time…") {
+            guard allowed() else { return }
+            SnoozePicker.show(threadId: threadId, app: app)
+        }
+    }
+
+    private func allowed() -> Bool {
+        !confirmIfBusy || BusyConfirm.allowed(.snooze, threadId: threadId, app: app)
+    }
+}
+
+/// Asks before a hover button stops a running turn (`BusyThreadAction`).
+@MainActor
+enum BusyConfirm {
+    /// Whether to go ahead: the thread isn't busy, or Mike said yes. Its
+    /// status is read now, not when the row was drawn.
+    static func allowed(_ action: BusyThreadAction.Action, threadId: String, app: AppModel) -> Bool {
+        guard let status = app.threads[threadId]?.status, BusyThreadAction.needsConfirm(status) else { return true }
+        let prompt = BusyThreadAction.prompt(action, status: status)
+        let alert = NSAlert()
+        alert.messageText = prompt.title
+        alert.informativeText = prompt.detail
+        alert.addButton(withTitle: action == .archive ? "Archive" : "Snooze")
+        alert.addButton(withTitle: "Cancel")
+        return alert.runModal() == .alertFirstButtonReturn
     }
 }
 

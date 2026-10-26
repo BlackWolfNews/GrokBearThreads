@@ -321,14 +321,13 @@ final class HeaderRowCell: RowCellView {
     let chevron = Symbols.makeView()
     let icon = Symbols.makeView()
     let title = makeLabel()
-    let status = Symbols.makeView()
     let box = FillView()
     let body = TranscriptTextView()
     private var headerRect = NSRect.zero
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
-        [hover, box, body, chevron, icon, title, status].forEach(addSubview)
+        [hover, box, body, chevron, icon, title].forEach(addSubview)
         body.onAction = { [weak self] key in self?.delegate?.showAllLines(key) }
     }
 
@@ -341,17 +340,28 @@ final class HeaderRowCell: RowCellView {
         if title.attributedStringValue != render.text { title.attributedStringValue = render.text ?? NSAttributedString() }
 
         var symbol = "brain"
-        var failed = false
+        var tint = Theme.faintIcon
         var canExpand = true
         var tooltip: String?
         switch row.content {
         case .reasoning:
             symbol = "brain"
         case .tool(let tool):
-            symbol = ToolPresentation.symbol(for: tool.toolKind, name: tool.name)
-            failed = tool.failed
+            // A failed tool is marked once, by a red icon in the icon's
+            // place; its title and output keep their usual colours.
+            symbol = tool.failed ? "xmark.circle.fill" : ToolPresentation.symbol(for: tool.toolKind, name: tool.name)
+            if tool.failed { tint = Theme.failed }
             // The title names just the file; the whole path is here.
             tooltip = ToolPresentation.fileTitle(tool)?.path
+        case .approval(let item):
+            switch item.resolution?.decision {
+            case .deny?:
+                symbol = "xmark.circle"
+                tint = Theme.failed
+            case .expired?: symbol = "clock"
+            default: symbol = "checkmark.circle"
+            }
+            tooltip = ToolPresentation.shortTitle(item.request.title, limit: 400)
         case .note:
             symbol = "info.circle"
             canExpand = false
@@ -359,22 +369,15 @@ final class HeaderRowCell: RowCellView {
             break
         }
         if title.toolTip != tooltip { title.toolTip = tooltip }
-        Symbols.set(icon, symbol, size: 12, tint: failed ? Theme.removedText : Theme.faintIcon)
+        Symbols.set(icon, symbol, size: 12, tint: tint)
         icon.frame = WorkLine.iconFrame(x: x, rowHeight: header)
-        let trailing: CGFloat = (canExpand ? 16 : 0) + (failed ? 20 : 0)
-        title.frame = WorkLine.labelFrame(x: x, width: width, textWidth: render.textSize.width, trailing: trailing, rowHeight: header)
+        title.frame = WorkLine.labelFrame(x: x, width: width, textWidth: render.textSize.width, trailing: canExpand ? 16 : 0, rowHeight: header)
         var right = title.frame.maxX
         chevron.isHidden = !canExpand
         if canExpand {
             Symbols.set(chevron, expanded ? "chevron.down" : "chevron.right", size: 9, weight: .semibold, tint: Theme.faintIcon)
             chevron.frame = WorkLine.chevronFrame(after: title.frame, rowHeight: header)
             right = chevron.frame.maxX
-        }
-        status.isHidden = !failed
-        if failed {
-            Symbols.set(status, "xmark.circle.fill", size: 12, tint: Theme.removedText)
-            status.frame = NSRect(x: right + 3, y: (header - 16) / 2, width: 16, height: 16)
-            right = status.frame.maxX
         }
         headerRect = canExpand ? WorkLine.hitRect(x: x, right: right, rowHeight: header) : .zero
         hoverRect = headerRect
@@ -486,16 +489,16 @@ final class GroupRowCell: RowCellView {
 /// turn's one status line. Counts by itself once a second while it's in a
 /// window, so the row never re-renders as time passes.
 final class WorkingRowCell: RowCellView {
-    let spinner = NSProgressIndicator()
+    let spinner = SpinnerView()
     let label = makeLabel()
     private var startedAt: Date?
     private var timer: Timer?
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
-        spinner.style = .spinning
-        spinner.controlSize = .small
-        spinner.isDisplayedWhenStopped = false
+        // The same tier as the label beside it: the system spinner's
+        // palest spokes were about 1.6:1 on white.
+        spinner.color = Theme.quietText
         // Body-sized secondary text, not the faintest grey in the window:
         // this line is what Mike watches while a turn runs.
         label.font = Theme.workFont
@@ -527,7 +530,7 @@ final class WorkingRowCell: RowCellView {
 
     private func startIfVisible() {
         guard window != nil else { return }
-        spinner.startAnimation(nil)
+        spinner.start()
         guard timer == nil, startedAt != nil else { return }
         let timer = Timer(timeInterval: 1, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated { self?.tick() }
@@ -540,7 +543,7 @@ final class WorkingRowCell: RowCellView {
     private func stop() {
         timer?.invalidate()
         timer = nil
-        spinner.stopAnimation(nil)
+        spinner.stop()
     }
 
     private func tick() {
@@ -738,7 +741,7 @@ final class PillButton: NSButton {
         focusRingType = .none
     }
 
-    static let font = NSFont.systemFont(ofSize: TypeScale.label + 0.5, weight: .medium)
+    static let font = NSFont.systemFont(ofSize: TypeScale.label, weight: .medium)
     static let shortcutFont = NSFont.systemFont(ofSize: 11, weight: .medium)
 
     var fittingWidth: CGFloat {
@@ -790,7 +793,6 @@ final class ApprovalRowCell: RowCellView {
     let allow = PillButton(pill: "Allow", prominent: true, shortcut: "⏎")
     let always = PillButton(pill: "Always allow")
     let deny = PillButton(pill: "Deny")
-    let resolved = makeLabel()
     private var approvalId = ""
 
     override init(frame frameRect: NSRect) {
@@ -799,9 +801,7 @@ final class ApprovalRowCell: RowCellView {
             button.target = self
             button.action = action
         }
-        resolved.font = Theme.labelFont
-        resolved.textColor = .secondaryLabelColor
-        [card, titleView, payloadBox, payloadView, allow, always, deny, resolved].forEach(addSubview)
+        [card, titleView, payloadBox, payloadView, allow, always, deny].forEach(addSubview)
     }
 
     required init?(coder: NSCoder) { fatalError() }
@@ -812,16 +812,19 @@ final class ApprovalRowCell: RowCellView {
         approvalId = item.request.approvalId
         let (x, width) = RowMetrics.column(for: row, tableWidth: tableWidth)
         let pad = RowMetrics.cardPad
+        // Only a waiting approval gets this card; once answered it's a work
+        // line (HeaderRowCell).
         let pending = item.resolution == nil
         let top = RowMetrics.rowTop + 2
         card.frame = NSRect(x: x, y: top, width: width, height: render.height - top - RowMetrics.rowBottom - 2)
-        card.set(fill: Theme.cardBackground, stroke: Theme.cardBorder, radius: RowMetrics.cardRadius,
-                 accent: pending ? .controlAccentColor : nil)
+        card.set(fill: Theme.cardBackground, stroke: Theme.cardBorder, radius: RowMetrics.cardRadius, accent: .controlAccentColor)
         let left = x + pad + RowMetrics.accentBar
         let inner = width - pad * 2 - RowMetrics.accentBar
         var y = card.frame.minY + pad
         titleView.place(NSRect(x: left, y: y, width: inner, height: render.textSize.height))
         titleView.show(render.text ?? NSAttributedString(), width: inner)
+        let path = ApprovalText.filePath(item.request).map { ToolPresentation.shortTitle($0, limit: 400) }
+        if titleView.toolTip != path { titleView.toolTip = path }
         y += render.textSize.height + 10
         payloadBox.set(fill: Theme.codeBackground, stroke: nil, radius: 8)
         payloadBox.frame = NSRect(x: left, y: y, width: inner, height: render.detailSize.height + RowMetrics.boxPad * 2)
@@ -838,11 +841,6 @@ final class ApprovalRowCell: RowCellView {
             button.frame = NSRect(x: buttonX, y: y, width: max(76, button.fittingWidth), height: RowMetrics.buttonHeight)
             buttonX = button.frame.maxX + 8
         }
-        resolved.isHidden = pending
-        if let resolution = item.resolution {
-            resolved.stringValue = Self.label(resolution.decision)
-            resolved.frame = NSRect(x: left, y: y, width: inner, height: 17)
-        }
     }
 
     override func releaseContent() {
@@ -853,16 +851,6 @@ final class ApprovalRowCell: RowCellView {
     override func updateSlices(force: Bool = false) {
         titleView.updateSlice(force: force)
         payloadView.updateSlice(force: force)
-    }
-
-    static func label(_ decision: ApprovalDecision) -> String {
-        switch decision {
-        case .allow: return "Allowed"
-        case .allowAlways: return "Always allowed"
-        case .deny: return "Denied"
-        case .answered: return "Answered"
-        case .expired: return "Expired when the runner restarted"
-        }
     }
 
     @objc private func allowClicked() { delegate?.respond(approvalId: approvalId, decision: .allow, answers: nil, message: nil) }
@@ -892,9 +880,14 @@ private final class QuestionGroupView: NSView {
 
 final class QuestionRowCell: RowCellView, NSTextFieldDelegate {
     let card = FillView()
+    /// "Something else": a plain field in a rounded box like the approval
+    /// card's payload. The system's rounded bezel was the only bright,
+    /// hard-edged box in the transcript.
+    let otherBox = FillView()
     let other = NSTextField()
     let send = PillButton(pill: "Send answer", prominent: true)
-    let resolved = NSTextField(wrappingLabelWithString: "")
+    let answerIcon = Symbols.makeView()
+    let answer = makeLabel()
     private var request: QuestionRequest?
     private var groups: [QuestionGroupView] = []
     private var buttons: [(question: Int, label: String, button: NSButton)] = []
@@ -904,18 +897,24 @@ final class QuestionRowCell: RowCellView, NSTextFieldDelegate {
     /// on each configure made a 580 pt card cost a 100 ms frame in a fling.
     private var builtFor: String?
     private var optionsBottom: CGFloat = 0
+    private var editing = false
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
-        other.placeholderString = "Something else"
         other.font = .systemFont(ofSize: TypeScale.work)
-        other.bezelStyle = .roundedBezel
+        // The composer's placeholder tier, set outright: a borderless field
+        // otherwise picks its own grey.
+        other.placeholderAttributedString = NSAttributedString(string: "Something else", attributes: [
+            .font: NSFont.systemFont(ofSize: TypeScale.work), .foregroundColor: ComposerTextView.placeholderColor,
+        ])
+        other.isBezeled = false
+        other.isBordered = false
+        other.drawsBackground = false
+        other.focusRingType = .none
         other.delegate = self
         send.target = self
         send.action = #selector(sendClicked)
-        resolved.font = Theme.labelFont
-        resolved.textColor = .secondaryLabelColor
-        [card, other, send, resolved].forEach(addSubview)
+        [card, otherBox, other, send, answerIcon, answer].forEach(addSubview)
     }
 
     required init?(coder: NSCoder) { fatalError() }
@@ -930,42 +929,68 @@ final class QuestionRowCell: RowCellView, NSTextFieldDelegate {
         let pending = item.resolution == nil
         let top = RowMetrics.rowTop + 2
         card.frame = NSRect(x: x, y: top, width: width, height: render.height - top - RowMetrics.rowBottom - 2)
-        card.set(fill: Theme.cardBackground, stroke: Theme.cardBorder, radius: RowMetrics.cardRadius,
+        // Answered, it's history: an outline with no fill or accent, so a
+        // card still waiting on Mike stands out from it.
+        card.set(fill: pending ? Theme.cardBackground : nil, stroke: Theme.cardBorder, radius: RowMetrics.cardRadius,
                  accent: pending ? .controlAccentColor : nil)
 
         let key = "\(row.id)|\(row.version)|\(Int(tableWidth))"
         if builtFor != key {
             if request?.approvalId != item.request.approvalId { other.stringValue = "" }
             request = item.request
-            layoutQuestions(item.request, render: render, x: left, top: card.frame.minY + pad, width: inner)
+            layoutQuestions(item.request, render: render, x: left, top: card.frame.minY + pad, width: inner, answered: !pending)
             builtFor = key
         }
         let draft = delegate?.questionDraft(item.request.approvalId) ?? [:]
         for entry in buttons {
             entry.button.state = draft[entry.question]?.contains(entry.label) == true ? .on : .off
-            entry.button.isEnabled = pending
-        }
-        // Once answered the options are disabled; their notes dim with
-        // them rather than stay brighter than the options they explain.
-        let noteColor: NSColor = pending ? .secondaryLabelColor : .tertiaryLabelColor
-        for group in groups {
-            for note in group.notes where note.textColor != noteColor { note.textColor = noteColor }
         }
 
         var y = optionsBottom
-        other.isHidden = !pending
-        send.isHidden = !pending
-        resolved.isHidden = pending
-        if pending {
-            other.frame = NSRect(x: left, y: y, width: inner, height: RowMetrics.otherFieldHeight)
+        for view in [otherBox, other, send] as [NSView] { view.isHidden = !pending }
+        answerIcon.isHidden = pending
+        answer.isHidden = pending
+        if let resolution = item.resolution {
+            let (symbol, tint): (String, NSColor) = switch resolution.decision {
+            case .answered: ("checkmark.circle.fill", .controlAccentColor)
+            case .expired: ("clock", Theme.faintIcon)
+            default: ("xmark.circle", Theme.faintIcon)
+            }
+            Symbols.set(answerIcon, symbol, size: 13, tint: tint)
+            answerIcon.frame = NSRect(x: left, y: y + (RowMetrics.answerHeight - 16) / 2, width: 16, height: 16)
+            if answer.attributedStringValue != render.text { answer.attributedStringValue = render.text ?? NSAttributedString() }
+            // Text from the same edge as a work line's after its icon, less
+            // the label's own inset so the glyphs line up.
+            let textX = left + RowMetrics.titleIndent - RowMetrics.labelInset
+            let height = Theme.workLabelHeight
+            answer.frame = NSRect(x: textX, y: y + (RowMetrics.answerHeight - height) / 2, width: left + inner - textX + RowMetrics.labelInset, height: height)
+            answer.toolTip = resolution.message
+        } else {
+            otherBox.frame = NSRect(x: left, y: y, width: inner, height: RowMetrics.otherFieldHeight)
+            updateOtherBox()
+            let fieldHeight = ceil(other.intrinsicContentSize.height)
+            other.frame = NSRect(x: left + RowMetrics.boxPad - RowMetrics.labelInset, y: y + (RowMetrics.otherFieldHeight - fieldHeight) / 2,
+                                 width: inner - RowMetrics.boxPad * 2 + RowMetrics.labelInset * 2, height: fieldHeight)
             y += RowMetrics.otherFieldHeight + 2 + 12
             send.frame = NSRect(x: left, y: y, width: max(110, send.fittingWidth), height: RowMetrics.buttonHeight)
             updateSend()
-        } else {
-            let message = item.resolution?.message.flatMap { $0.isEmpty ? nil : $0 }
-            resolved.stringValue = message.map { "Answered: \(RowRenderer.firstLine($0))" } ?? ApprovalRowCell.label(item.resolution?.decision ?? .answered)
-            resolved.frame = NSRect(x: left, y: y, width: inner, height: 17)
         }
+    }
+
+    /// The box's outline takes the accent colour while Mike types in it,
+    /// standing in for the focus ring the plain field doesn't draw.
+    private func updateOtherBox() {
+        otherBox.set(fill: Theme.codeBackground, stroke: editing ? NSColor.controlAccentColor.withAlphaComponent(0.5) : Theme.cardBorder, radius: 8)
+    }
+
+    func controlTextDidBeginEditing(_ notification: Notification) {
+        editing = true
+        updateOtherBox()
+    }
+
+    func controlTextDidEndEditing(_ notification: Notification) {
+        editing = false
+        updateOtherBox()
     }
 
     /// "Send answer" only looks (and is) clickable once there's an answer.
@@ -977,8 +1002,9 @@ final class QuestionRowCell: RowCellView, NSTextFieldDelegate {
         if send.isEnabled != ready { send.isEnabled = ready }
     }
 
-    /// Places each question's views, reusing the ones already made.
-    private func layoutQuestions(_ request: QuestionRequest, render: RowRender, x: CGFloat, top: CGFloat, width: CGFloat) {
+    /// Places each question's views, reusing the ones already made. An
+    /// answered card shows just its questions; the answer goes under them.
+    private func layoutQuestions(_ request: QuestionRequest, render: RowRender, x: CGFloat, top: CGFloat, width: CGFloat, answered: Bool) {
         buttons = []
         var y = top
         for (index, question) in request.questions.enumerated() {
@@ -989,12 +1015,19 @@ final class QuestionRowCell: RowCellView, NSTextFieldDelegate {
             }
             let group = groups[index]
             group.isHidden = false
-            let text = RowRenderer.questionText(question.question)
+            let text = RowRenderer.questionText(question.question, answered: answered)
             // Heights come from the render (measured off the main thread).
             let height = render.lineHeights.indices.contains(index)
                 ? render.lineHeights[index] : TextMeasurer.current.measure(text, width: width).height
             group.label.frame = NSRect(x: 0, y: 0, width: width, height: height)
             group.label.show(text, width: width)
+            if answered {
+                group.buttons.forEach { $0.isHidden = true }
+                group.notes.forEach { $0.isHidden = true }
+                group.frame = NSRect(x: x, y: y, width: width, height: height)
+                y += height + RowMetrics.answeredGap
+                continue
+            }
             var inner = height + 8
             var noteIndex = 0
             for (optionIndex, option) in question.options.enumerated() {
@@ -1072,7 +1105,11 @@ final class QuestionRowCell: RowCellView, NSTextFieldDelegate {
         let typed = other.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
         let answers = Self.answers(for: request, chosen: draft, typed: typed)
         guard !answers.isEmpty else { return }
-        delegate?.respond(approvalId: request.approvalId, decision: .answered, answers: answers, message: nil)
+        // The answers also go as the message, which the runner keeps in the
+        // transcript (only `answers` goes to the CLI), so the card can show
+        // what was chosen after the drafts are gone.
+        delegate?.respond(approvalId: request.approvalId, decision: .answered, answers: answers,
+                          message: ApprovalText.answerSummary(request, answers: answers))
     }
 
     /// The `answers` map for `approvals.respond`. "Something else" is the

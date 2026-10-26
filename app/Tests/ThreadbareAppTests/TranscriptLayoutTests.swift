@@ -86,6 +86,32 @@ final class TranscriptLayoutTests: XCTestCase {
         text.layoutManager?.ensureLayout(for: text.textContainer!)
         XCTAssertEqual(text.textContainerOrigin, .zero)
     }
+
+    /// A failed tool's output stays ordinary text; only the lines that say
+    /// what went wrong are red.
+    func testFailedOutputMarksOnlyItsErrorLines() {
+        let tool = ToolItem(itemId: "c1", call: ToolCall(itemId: "c1", name: "Bash", kind: .command, title: "Build", input: .object(["command": .string("make")])),
+                            result: ToolResult(itemId: "c1", ok: false, text: "Building...\nstep 2\nerror: no identity\nfatal: stopped\ndone"))
+        let body = RowRenderer.toolBody(tool)
+        let string = body.string as NSString
+        func colour(of text: String) -> NSColor? {
+            body.attribute(.foregroundColor, at: string.range(of: text).location, effectiveRange: nil) as? NSColor
+        }
+        XCTAssertTrue(body.string.hasSuffix("Building...\nstep 2\nerror: no identity\nfatal: stopped\ndone"))
+        XCTAssertEqual(colour(of: "Building"), Theme.quietText)
+        XCTAssertEqual(colour(of: "step 2"), Theme.quietText)
+        XCTAssertEqual(colour(of: "error: no"), Theme.failed)
+        XCTAssertEqual(colour(of: "fatal:"), Theme.failed)
+        XCTAssertEqual(colour(of: "done"), Theme.quietText)
+    }
+
+    /// Tool input fields put their values in one column after a tab.
+    func testFieldsLineUpAfterATab() {
+        let text = RowRenderer.fieldsText([.init(key: "owner", value: "mike"), .init(key: "pullNumber", value: "48")])
+        XCTAssertEqual(text.string, "owner:\tmike\npullNumber:\t48")
+        let style = text.attribute(.paragraphStyle, at: 0, effectiveRange: nil) as? NSParagraphStyle
+        XCTAssertEqual(style?.tabStops.first?.location, style?.headIndent, "wrapped values hang under the value column")
+    }
 }
 
 private final class FlippedDocument: NSView {

@@ -20,8 +20,9 @@ final class ComposerTests: XCTestCase {
     func testComposerGrowsFromTwoLinesToTen() throws {
         let composer = ComposerTextField.makeTextView()
         composer.frame = NSRect(x: 0, y: 0, width: 400, height: 40)
-        let layoutManager = try XCTUnwrap(composer.layoutManager)
-        let line = layoutManager.defaultLineHeight(for: ComposerTextField.font) + ComposerTextField.lineSpacing
+        // The transcript's body line height, so a sent message keeps its rhythm.
+        let line = ComposerTextField.lineHeight
+        XCTAssertEqual(line, TypeScale.bodyLine)
         func lines(_ count: Int) -> String { (1...count).map { "Line \($0)" }.joined(separator: "\n") }
 
         composer.replaceText("")

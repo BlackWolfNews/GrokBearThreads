@@ -63,6 +63,81 @@ final class WorkGroupTests: XCTestCase {
         XCTAssertEqual(model.rows.map(\.id), ["t:c1", "g:t:c2"])
     }
 
+    // MARK: Approvals in runs
+
+    static func asked(_ seq: Int, _ id: String, name: String = "Bash") -> Event {
+        E.event(seq, "approval.requested", ["approvalId": id, "name": name, "title": "rm x", "input": ["command": "rm x"], "options": ["allow", "deny"]])
+    }
+
+    static func resolved(_ seq: Int, _ id: String, _ decision: String) -> Event {
+        E.event(seq, "approval.resolved", ["approvalId": id, "decision": decision])
+    }
+
+    /// An approval Mike allowed is a step of the work: it folds into the
+    /// run with the tool it let run. Waiting, denied and expired ones stay
+    /// cards between runs.
+    func testAllowedApprovalsFoldIntoTheRun() {
+        let allowed = TranscriptModel(events: [
+            E.user(1, "Go"), E.call(2, "c1"), E.result(3, "c1"),
+            Self.asked(4, "ap1"), Self.resolved(5, "ap1", "allow"), E.call(6, "c2", title: "rm x"), E.result(7, "c2"),
+            E.text(8, "m1", "Done"),
+        ])
+        XCTAssertEqual(allowed.rows.map(\.id), ["u:1", "g:t:c1", "a:m1"])
+        guard case .group(let group)? = allowed.row(id: "g:t:c1")?.content else { return XCTFail() }
+        XCTAssertEqual(group.memberIds, ["t:c1", "ap:ap1", "t:c2"])
+        XCTAssertEqual(group.summary, "Ran 2 commands", "the approval isn't counted on top of the command it allowed")
+
+        for decision in ["deny", "expired"] {
+            let model = TranscriptModel(events: [
+                E.user(1, "Go"), E.call(2, "c1"), Self.asked(3, "ap1"), Self.resolved(4, "ap1", decision), E.call(5, "c2"),
+            ])
+            XCTAssertEqual(model.rows.map(\.id), ["u:1", "t:c1", "ap:ap1", "t:c2"], decision)
+        }
+        let waiting = TranscriptModel(events: [E.user(1, "Go"), E.call(2, "c1"), Self.asked(3, "ap1")])
+        XCTAssertEqual(waiting.rows.map(\.id), ["u:1", "t:c1", "ap:ap1"])
+    }
+
+    func testARunOfOnlyAnAllowedApprovalIsShownAsItself() {
+        let model = TranscriptModel(events: [E.user(1, "Go"), Self.asked(2, "ap1"), Self.resolved(3, "ap1", "allowAlways")])
+        XCTAssertEqual(model.rows.map(\.id), ["u:1", "ap:ap1"])
+        let two = TranscriptModel(events: [E.user(1, "Go"), Self.asked(2, "ap1"), Self.resolved(3, "ap1", "allow"),
+                                           Self.asked(4, "ap2"), Self.resolved(5, "ap2", "allow")])
+        guard case .group(let group)? = two.row(id: "g:ap:ap1")?.content else { return XCTFail() }
+        XCTAssertEqual(group.summary, "Allowed 2 requests")
+    }
+
+    /// Allowing the card between two runs joins them into the first one's
+    /// group, through the same incremental change as any other update: the
+    /// first group keeps its id, the card and the second group go.
+    func testAllowingACardMergesTheRunsAroundIt() {
+        var model = TranscriptModel(events: [
+            E.user(1, "Go"), Self.started(2), E.call(3, "c1"), E.call(4, "c2"), Self.asked(5, "ap1"),
+        ])
+        // A tool that ran in the background while the card waited.
+        _ = model.apply([E.call(6, "c3"), E.call(7, "c4")])
+        XCTAssertEqual(model.rows.map(\.id), ["u:1", "g:t:c1", "ap:ap1", "g:t:c3"])
+        var table = model.rows.map(\.id)
+        let groupVersion = model.row(id: "g:t:c1")?.version
+
+        let change = model.apply([Self.resolved(8, "ap1", "allow")])
+        Self.replay(change, onto: &table, model: model)
+        XCTAssertEqual(model.rows.map(\.id), ["u:1", "g:t:c1", "w:t1"])
+        XCTAssertEqual(change.removed, [2, 3], "the card and the second group go")
+        XCTAssertEqual(change.updated, [1])
+        XCTAssertNotEqual(model.row(id: "g:t:c1")?.version, groupVersion)
+        guard case .group(let group)? = model.row(id: "g:t:c1")?.content else { return XCTFail() }
+        XCTAssertEqual(group.memberIds, ["t:c1", "t:c2", "ap:ap1", "t:c3", "t:c4"])
+        XCTAssertTrue(group.isLive)
+    }
+
+    /// An open group shows the allowed approval as one of its lines.
+    func testAnOpenGroupListsItsAllowedApproval() {
+        var model = TranscriptModel(events: [E.call(1, "c1"), Self.asked(2, "ap1"), Self.resolved(3, "ap1", "allow"), E.call(4, "c2")])
+        _ = model.setExpanded("g:t:c1", true)
+        XCTAssertEqual(model.rows.map(\.id), ["g:t:c1", "t:c1", "ap:ap1", "t:c2"])
+        XCTAssertEqual(model.row(id: "ap:ap1")?.inGroup, true)
+    }
+
     // MARK: Summaries
 
     func testSummaryCountsWorkInTheOrderItHappened() {
@@ -266,11 +341,12 @@ final class WorkGroupTests: XCTestCase {
 
         change = model.apply([E.event(5, "approval.resolved", ["approvalId": "ap1", "decision": "allow"])])
         Self.replay(change, onto: &table, model: model)
-        XCTAssertEqual(model.rows.map(\.id), ["u:1", "t:c1", "ap:ap1", "w:t1"])
+        // Allowed, the card folds into the run with the command before it.
+        XCTAssertEqual(model.rows.map(\.id), ["u:1", "g:t:c1", "w:t1"])
 
         change = model.apply([E.done(6)])
         Self.replay(change, onto: &table, model: model)
-        XCTAssertEqual(model.rows.map(\.id), ["u:1", "t:c1", "ap:ap1", "f:t1"])
+        XCTAssertEqual(model.rows.map(\.id), ["u:1", "g:t:c1", "f:t1"])
         XCTAssertNil(model.openTurn)
     }
 

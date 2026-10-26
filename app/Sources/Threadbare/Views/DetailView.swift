@@ -27,10 +27,6 @@ struct DetailView: View {
     /// Stepped so a live resize re-renders this view a few times, not on
     /// every frame.
     @State private var widthStep: CGFloat = 900
-    /// The legacy scroller's width the transcript keeps free on its right,
-    /// so the composer centres under the same reading column. Only changes
-    /// with the system's scroll bar setting (or a mouse coming and going).
-    @State private var scrollerReserve: CGFloat = 0
 
     var body: some View {
         let thread = app.selectedThread
@@ -39,7 +35,7 @@ struct DetailView: View {
         VStack(spacing: 0) {
             ConnectionBanner()
             ErrorBanner()
-            ComposerPlacement(centred: isNew, trailingReserve: scrollerReserve) {
+            ComposerPlacement(centred: isNew) {
                 ZStack {
                     TranscriptView(session: session, controller: app.transcript)
                     if let session, session.state == .loading, session.displayCount == 0 {
@@ -64,14 +60,6 @@ struct DetailView: View {
             }
         }
         .onGeometryChange(for: CGFloat.self) { ($0.size.width / 20).rounded(.down) * 20 } action: { widthStep = $0 }
-        .onAppear { scrollerReserve = app.transcript.reservedScrollerWidth }
-        .onReceive(NotificationCenter.default.publisher(for: NSScroller.preferredScrollerStyleDidChangeNotification)) { _ in
-            // With a mouse connected AppKit switches to legacy scrollers a
-            // moment after launch (onAppear still sees overlay), and again
-            // whenever the setting changes. Read it once the scroll views
-            // have taken up the new style.
-            DispatchQueue.main.async { scrollerReserve = app.transcript.reservedScrollerWidth }
-        }
         // The window's title (Window menu, Mission Control); the toolbar
         // shows the header below instead.
         .navigationTitle(thread.map { $0.title.isEmpty ? "Untitled" : $0.title } ?? "New thread")
@@ -169,11 +157,6 @@ private enum PaneRole: LayoutValueKey {
 /// the same either way, so showing that first thread doesn't resize it.
 private struct ComposerPlacement: Layout {
     var centred: Bool
-    /// Kept free at the right under a thread, where the transcript keeps
-    /// room for a legacy scroller, so the composer card lines up with the
-    /// reading column above it. A new thread has no column to line up
-    /// with, so it centres in the whole pane like its heading.
-    var trailingReserve: CGFloat = 0
 
     func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
         proposal.replacingUnspecifiedDimensions()
@@ -182,7 +165,9 @@ private struct ComposerPlacement: Layout {
     func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
         func find(_ role: PaneRole.Role) -> LayoutSubview? { subviews.first { $0[PaneRole.self] == role } }
         let width = ProposedViewSize(width: bounds.width, height: nil)
-        let composerWidth = centred ? bounds.width : max(0, bounds.width - trailingReserve)
+        // The whole pane either way: the transcript's scroller is an
+        // overlay, so its reading column is centred in the pane too.
+        let composerWidth = bounds.width
         let composerHeight = find(.composer)?.sizeThatFits(ProposedViewSize(width: composerWidth, height: nil)).height ?? 0
         let transcriptHeight = max(0, bounds.height - composerHeight)
         find(.transcript)?.place(at: bounds.origin, proposal: ProposedViewSize(width: bounds.width, height: transcriptHeight))

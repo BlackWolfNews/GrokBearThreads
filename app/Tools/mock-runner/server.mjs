@@ -370,7 +370,10 @@ function persist(threadId, fields, turnId) {
   const event = { seq: s.lastSeq + 1, ts: iso(), threadId, ...(turnId ? { turnId } : {}), ...fields };
   t.events.push(event);
   s.lastSeq = event.seq;
-  s.lastActivityAt = event.ts;
+  // Like the real runner: activity is a message, or a turn starting or
+  // ending, not every event. The app reads a running thread's
+  // lastActivityAt as when its turn started.
+  if (['user.message', 'turn.started', 'turn.completed'].includes(fields.type)) s.lastActivityAt = event.ts;
   s.updatedAt = event.ts;
   if (fields.type === 'assistant.text') s.preview = fields.text.replace(/\s+/g, ' ').slice(0, 140);
   sendEvent(threadId, event);
@@ -448,7 +451,10 @@ function loadFixtures() {
       // app's "Working for" line reads like a live turn whenever it's run.
       if (summary.status === 'running') {
         const started = events.findLast((e) => e.type === 'turn.started');
-        if (started) started.ts = new Date(Date.now() - 14_000).toISOString();
+        if (started) {
+          started.ts = new Date(Date.now() - 14_000).toISOString();
+          summary.lastActivityAt = started.ts;
+        }
       }
       // Keep a fixture's waiting or running status so the sidebar has
       // something in every section; real exports are idle.
