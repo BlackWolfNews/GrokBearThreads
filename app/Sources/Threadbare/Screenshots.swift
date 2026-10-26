@@ -183,19 +183,20 @@ enum ScreenshotRunner {
         }
         // 10. What the other threads don't show, from an archived one: a
         // group with a failed tool, open, with its command and its key/value
-        // tool opened; then an allowed Write approval (a line in the group,
-        // opened to what it asked) and an answered question.
+        // tool opened; then a Write and the approval that allowed it (a line
+        // in the group that doesn't open: the Write, opened, shows the file)
+        // and an answered question.
         if wanted("10") {
             let thread = "demo_build_scripts"
             await open(app, thread)
             let session = app.session(for: thread)
-            session.expanded.formUnion(["t:ls", "t:pr", "t:rel", "ap:ap_w"])
+            session.expanded.formUnion(["t:ls", "t:pr", "t:rel", "t:w"])
             session.setModelExpanded("g:t:ls", true)
             app.transcript.show(nil)
             app.transcript.show(session)
             await scroll(app, toRow: "u:", offset: 0)
             await capture(window, dir.appendingPathComponent("10a-tool-details.png"))
-            await scroll(app, toRow: "ap:", offset: 20)
+            await scroll(app, toRow: "t:w", offset: 20)
             await capture(window, dir.appendingPathComponent("10b-answered-cards.png"))
         }
         NSApp.terminate(nil)

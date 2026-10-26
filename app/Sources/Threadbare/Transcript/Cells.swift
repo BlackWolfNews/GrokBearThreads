@@ -361,6 +361,8 @@ final class HeaderRowCell: RowCellView {
             case .expired?: symbol = "clock"
             default: symbol = "checkmark.circle"
             }
+            // Its tool's own row opens to the same thing.
+            canExpand = item.opens
             tooltip = ToolPresentation.shortTitle(item.request.title, limit: 400)
         case .note:
             symbol = "info.circle"

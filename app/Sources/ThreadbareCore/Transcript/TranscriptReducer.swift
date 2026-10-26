@@ -90,6 +90,9 @@ public struct TranscriptModel: Sendable {
     /// Approval and question rows still waiting, and their turn. A turn
     /// waiting on Mike isn't "working".
     private var pendingCards: [String: String] = [:]
+    /// Approval rows by the `t:` row of the tool call they asked about, so
+    /// one learns when that tool gets a row (`ApprovalItem.toolShown`).
+    private var approvalForTool: [String: String] = [:]
     /// The first item changed in place, and the first item added, since
     /// `rows` was last brought up to date.
     private var dirtyUpdate: Int?
@@ -239,6 +242,7 @@ public struct TranscriptModel: Sendable {
         completedTurns = []
         editsByTurn = [:]
         pendingCards = [:]
+        approvalForTool = [:]
         openTurn = nil
         items.reserveCapacity(events.count)
         // Set aside what's streaming now before replaying history: a
@@ -327,6 +331,21 @@ public struct TranscriptModel: Sendable {
         body(&items[i].content)
         items[i].version = RowVersion.next()
         markUpdated(i)
+    }
+
+    /// A tool call got its row (`t:` id): the approval that asked about it,
+    /// if any, stops opening to the same thing once it's settled. The
+    /// runner sends the call first, but an older page can bring the
+    /// approval after it.
+    private mutating func noteToolRow(_ id: String) {
+        guard let approval = approvalForTool[id],
+              case .approval(let existing)? = item(id: approval)?.content, !existing.toolShown else { return }
+        update(approval) { content in
+            if case .approval(var item) = content {
+                item.toolShown = true
+                content = .approval(item)
+            }
+        }
     }
 
     private mutating func noteEdit(_ itemId: String, turnId: String?) {
@@ -430,6 +449,7 @@ public struct TranscriptModel: Sendable {
                 }
             } else {
                 append(TranscriptRow(id: id, seq: seq, turnId: turnId, content: .tool(ToolItem(itemId: call.itemId, call: call, root: root))))
+                noteToolRow(id)
             }
             if DiffBuilder.isEditTool(call) { noteEdit(id, turnId: turnId) }
 
@@ -445,6 +465,7 @@ public struct TranscriptModel: Sendable {
                 }
             } else {
                 append(TranscriptRow(id: id, seq: seq, turnId: turnId, content: .tool(ToolItem(itemId: result.itemId, result: result, root: root))))
+                noteToolRow(id)
             }
             if !result.images.isEmpty {
                 let imagesId = "i:\(result.itemId)"
@@ -481,12 +502,17 @@ public struct TranscriptModel: Sendable {
                 }
             } else {
                 append(TranscriptRow(id: id, seq: seq, turnId: turnId, content: .tool(ToolItem(itemId: diff.itemId, diff: diff, root: root))))
+                noteToolRow(id)
             }
             noteEdit(id, turnId: turnId)
 
         case .approvalRequested(let request):
             let id = "ap:\(request.approvalId)"
-            append(TranscriptRow(id: id, seq: seq, turnId: turnId, content: .approval(ApprovalItem(request: request, root: root))))
+            // A subagent's tools have no item id, and no row of their own.
+            let toolId = request.itemId.flatMap { $0.isEmpty ? nil : "t:" + $0 }
+            if let toolId { approvalForTool[toolId] = id }
+            let shown = toolId.map { itemIndex[$0] != nil } ?? false
+            append(TranscriptRow(id: id, seq: seq, turnId: turnId, content: .approval(ApprovalItem(request: request, root: root, toolShown: shown))))
             pendingCards[id] = turnId ?? ""
             tailDirty = true
 

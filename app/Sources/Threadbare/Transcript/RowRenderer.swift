@@ -348,7 +348,7 @@ enum RowRenderer {
                 // and the write it allowed followed it straight away.
                 let header = resolvedApprovalText(item.request, resolution)
                 let headerSize = header.size()
-                guard expanded else { return RowRender(height: RowMetrics.workHeight, text: header, textSize: headerSize) }
+                guard expanded, item.opens else { return RowRender(height: RowMetrics.workHeight, text: header, textSize: headerSize) }
                 let body = approvalPayload(item.request)
                 let size = measurer.measure(body, width: width - RowMetrics.titleIndent - RowMetrics.boxPad * 2)
                 return RowRender(height: RowMetrics.workHeight + size.height + RowMetrics.boxPad * 2 + 10, text: header, textSize: headerSize,

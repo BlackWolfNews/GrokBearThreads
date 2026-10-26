@@ -130,6 +130,52 @@ final class WorkGroupTests: XCTestCase {
         XCTAssertTrue(group.isLive)
     }
 
+    static func askedFor(_ seq: Int, _ id: String, tool: String?) -> Event {
+        var fields: [String: Any] = ["approvalId": id, "name": "Write", "title": "Write /a.sh", "input": ["file_path": "/a.sh", "content": "x"],
+                                     "options": ["allow", "deny"]]
+        if let tool { fields["itemId"] = tool }
+        return E.event(seq, "approval.requested", fields)
+    }
+
+    func approval(_ model: TranscriptModel, _ id: String) -> ApprovalItem? {
+        if case .approval(let item)? = model.item(id: id)?.content { return item }
+        return nil
+    }
+
+    /// A settled approval whose tool call has its own row doesn't open: that
+    /// row opens to the same file or command. The runner sends the call
+    /// first; the approval can also come first (an older page, the mock).
+    func testASettledApprovalWithItsToolsRowDoesNotOpen() {
+        let callFirst = TranscriptModel(events: [
+            E.user(1, "Go"), Self.edit(2, "w", path: "/a.sh", name: "Write"), Self.askedFor(3, "ap1", tool: "w"),
+            Self.resolved(4, "ap1", "allow"), E.result(5, "w"),
+        ])
+        XCTAssertEqual(approval(callFirst, "ap:ap1")?.toolShown, true)
+        XCTAssertEqual(approval(callFirst, "ap:ap1")?.opens, false)
+
+        var approvalFirst = TranscriptModel(events: [E.user(1, "Go"), Self.started(2), Self.askedFor(3, "ap1", tool: "w")])
+        XCTAssertEqual(approval(approvalFirst, "ap:ap1")?.opens, true, "a waiting card always shows what it asks")
+        _ = approvalFirst.apply([Self.resolved(4, "ap1", "allow")])
+        XCTAssertEqual(approval(approvalFirst, "ap:ap1")?.opens, true, "nothing else shows the file yet")
+        let version = approvalFirst.item(id: "ap:ap1")?.version
+        _ = approvalFirst.apply([Self.edit(5, "w", path: "/a.sh", name: "Write")])
+        XCTAssertEqual(approval(approvalFirst, "ap:ap1")?.opens, false)
+        XCTAssertNotEqual(approvalFirst.item(id: "ap:ap1")?.version, version, "the line is measured again without its chevron")
+        // The result after it changes nothing more on the approval.
+        let settled = approvalFirst.item(id: "ap:ap1")?.version
+        _ = approvalFirst.apply([E.result(6, "w")])
+        XCTAssertEqual(approvalFirst.item(id: "ap:ap1")?.version, settled)
+
+        // A subagent's tool has no item id and no row: its approval still opens.
+        let subagent = TranscriptModel(events: [E.user(1, "Go"), Self.askedFor(2, "ap1", tool: nil), Self.resolved(3, "ap1", "allow")])
+        XCTAssertEqual(approval(subagent, "ap:ap1")?.opens, true)
+        // Denied with its tool shown: the line is the record, the tool row the detail.
+        let denied = TranscriptModel(events: [
+            E.user(1, "Go"), Self.edit(2, "w", path: "/a.sh", name: "Write"), Self.askedFor(3, "ap1", tool: "w"), Self.resolved(4, "ap1", "deny"),
+        ])
+        XCTAssertEqual(approval(denied, "ap:ap1")?.opens, false)
+    }
+
     /// An open group shows the allowed approval as one of its lines.
     func testAnOpenGroupListsItsAllowedApproval() {
         var model = TranscriptModel(events: [E.call(1, "c1"), Self.asked(2, "ap1"), Self.resolved(3, "ap1", "allow"), E.call(4, "c2")])

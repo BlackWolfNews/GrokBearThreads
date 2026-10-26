@@ -1,4 +1,4 @@
-{"seq":1,"ts":"2026-10-25T12:56:57.726Z","threadId":"demo_dark_mode","turnId":"turn_1","type":"user.message","text":"Add dark mode to the dashboard.","images":[]}
-{"seq":2,"ts":"2026-10-25T12:56:57.726Z","threadId":"demo_dark_mode","turnId":"turn_1","type":"turn.started"}
-{"seq":3,"ts":"2026-10-25T12:56:57.726Z","threadId":"demo_dark_mode","turnId":"turn_1","type":"assistant.text","itemId":"turn_1_m","text":"Added. Colours come from the asset catalogue, so they follow the system setting."}
-{"seq":4,"ts":"2026-10-25T12:56:57.726Z","threadId":"demo_dark_mode","turnId":"turn_1","type":"turn.completed","outcome":"completed","durationMs":18000,"costUsd":0.05}
+{"seq":1,"ts":"2026-10-25T14:19:01.671Z","threadId":"demo_dark_mode","turnId":"turn_1","type":"user.message","text":"Add dark mode to the dashboard.","images":[]}
+{"seq":2,"ts":"2026-10-25T14:19:01.671Z","threadId":"demo_dark_mode","turnId":"turn_1","type":"turn.started"}
+{"seq":3,"ts":"2026-10-25T14:19:01.671Z","threadId":"demo_dark_mode","turnId":"turn_1","type":"assistant.text","itemId":"turn_1_m","text":"Added. Colours come from the asset catalogue, so they follow the system setting."}
+{"seq":4,"ts":"2026-10-25T14:19:01.671Z","threadId":"demo_dark_mode","turnId":"turn_1","type":"turn.completed","outcome":"completed","durationMs":18000,"costUsd":0.05}

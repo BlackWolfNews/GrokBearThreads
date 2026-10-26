@@ -96,12 +96,22 @@ public struct ApprovalItem: Sendable, Hashable {
     public var resolution: ApprovalResolution?
     /// The thread's working folder, for the file's folder in the card.
     public var root: String?
+    /// The tool call it asked about has a row of its own, which opens to
+    /// the same command or file. Settled, this line then doesn't open:
+    /// opened, "Allowed  Write release.sh" showed the file and the Write
+    /// row right under it showed it again.
+    public var toolShown: Bool
 
-    public init(request: ApprovalRequest, resolution: ApprovalResolution? = nil, root: String? = nil) {
+    public init(request: ApprovalRequest, resolution: ApprovalResolution? = nil, root: String? = nil, toolShown: Bool = false) {
         self.request = request
         self.resolution = resolution
         self.root = root
+        self.toolShown = toolShown
     }
+
+    /// It shows what it asked: always while it waits (a card then), and
+    /// once settled only if its tool call has no row to show it.
+    public var opens: Bool { resolution == nil || !toolShown }
 
     /// Mike let it happen: the request is now just a step of the work it
     /// allowed, so it folds into the run of work around it.

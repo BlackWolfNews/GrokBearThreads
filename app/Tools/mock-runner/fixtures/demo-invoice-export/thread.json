@@ -8,11 +8,11 @@
   "status": "idle",
   "live": false,
   "needsYou": false,
-  "createdAt": "2026-10-26T11:01:57.726Z",
-  "updatedAt": "2026-10-26T12:01:57.726Z",
-  "lastActivityAt": "2026-10-26T12:01:57.726Z",
+  "createdAt": "2026-10-26T12:24:01.671Z",
+  "updatedAt": "2026-10-26T13:24:01.671Z",
+  "lastActivityAt": "2026-10-26T13:24:01.671Z",
   "preview": "The export is ready, but two invoices have no client name. Shall I fill those in from the PDFs?",
   "lastSeq": 4,
   "lastSeenSeq": 4,
-  "snoozedUntil": "2026-10-27T09:01:57.726Z"
+  "snoozedUntil": "2026-10-27T10:24:01.671Z"
 }

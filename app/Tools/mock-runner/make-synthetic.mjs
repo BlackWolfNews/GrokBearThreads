@@ -280,9 +280,10 @@ function toolDetailsThread() {
   push({ type: 'tool.result', itemId: 'pr', ok: true, text: '#48 Move signing into release.sh (merged 20 Oct)\nFiles: scripts/release.sh, scripts/build-old.sh', truncated: false, images: [] });
   push({ type: 'tool.call', itemId: 'rel', name: 'Bash', kind: 'command', title: 'Run the release build', input: { command: './scripts/release.sh', description: 'Run the release build' } });
   push({ type: 'tool.result', itemId: 'rel', ok: false, text: 'Building for production...\nerror: SIGNING_IDENTITY is not set', truncated: false, images: [] });
+  // In the runner's order: the call, then the approval it waits on, then its result.
+  push({ type: 'tool.call', itemId: 'w', name: 'Write', kind: 'write', title: `Write ${script}`, input: { file_path: script, content: scriptSource } });
   push({ type: 'approval.requested', approvalId: 'ap_w', itemId: 'w', name: 'Write', title: `Write ${script}`, input: { file_path: script, content: scriptSource }, options: ['allow', 'allowAlways', 'deny'] });
   push({ type: 'approval.resolved', approvalId: 'ap_w', decision: 'allow' });
-  push({ type: 'tool.call', itemId: 'w', name: 'Write', kind: 'write', title: `Write ${script}`, input: { file_path: script, content: scriptSource } });
   push({ type: 'tool.result', itemId: 'w', ok: true, text: 'File written.', truncated: false, images: [] });
   push({ type: 'question.requested', approvalId: 'q_old', questions: [{ question: 'build-old.sh isn\'t used anywhere. Delete it?', header: 'Old script', multiSelect: false, options: [
     { label: 'Delete it' }, { label: 'Keep it', description: 'Leave it for now' }] }] });

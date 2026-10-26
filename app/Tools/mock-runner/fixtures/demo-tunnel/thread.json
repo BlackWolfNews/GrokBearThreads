@@ -8,11 +8,11 @@
   "status": "idle",
   "live": false,
   "needsYou": false,
-  "createdAt": "2026-10-24T12:01:57.726Z",
-  "updatedAt": "2026-10-24T13:01:57.726Z",
-  "lastActivityAt": "2026-10-24T13:01:57.726Z",
+  "createdAt": "2026-10-24T13:24:01.671Z",
+  "updatedAt": "2026-10-24T14:24:01.671Z",
+  "lastActivityAt": "2026-10-24T14:24:01.671Z",
   "preview": "The tunnel is running as a LaunchAgent and forwards preview.example.com to port 4321.",
   "lastSeq": 4,
   "lastSeenSeq": 4,
-  "archivedAt": "2026-10-24T14:01:57.726Z"
+  "archivedAt": "2026-10-24T15:24:01.671Z"
 }
