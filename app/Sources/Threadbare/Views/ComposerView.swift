@@ -3,14 +3,19 @@ import SwiftUI
 import ThreadbareCore
 import UniformTypeIdentifiers
 
-/// The message box at the bottom: Return sends, Shift-Return adds a line,
-/// paste or drop images, Stop while running, and small menus for folder,
-/// account, model and "Ask before edits".
+/// The message box: a rounded card the width of the transcript column.
+/// Return sends, Shift-Return adds a line, paste, drop or "+" adds images,
+/// and the row under the text holds the folder, account, model and
+/// permission chips and the send (or Stop) button.
 struct ComposerView: View {
     @Environment(AppModel.self) private var app
+    @Environment(\.colorScheme) private var colorScheme
     let thread: ThreadSummary?
-    @State private var height: CGFloat = 22
+    @State private var height: CGFloat = ComposerTextField.minHeight
     @State private var importing = 0
+
+    static let cornerRadius: CGFloat = 20
+    static let padding: CGFloat = 14
 
     private var draftKey: String { thread?.id ?? "new" }
 
@@ -19,61 +24,82 @@ struct ComposerView: View {
             get: { app.drafts[draftKey] ?? Draft() },
             set: { app.drafts[draftKey] = $0 }
         )
-        let running = thread?.status.isBusy == true
-        VStack(alignment: .leading, spacing: 6) {
+        let canSend = ComposerChips.canSend(text: draft.wrappedValue.text, imageCount: draft.wrappedValue.images.count)
+        VStack(alignment: .leading, spacing: 10) {
             if !draft.wrappedValue.images.isEmpty || importing > 0 {
                 AttachmentStrip(images: draft.images, importing: importing)
             }
-            HStack(alignment: .bottom, spacing: 8) {
-                ComposerTextField(
-                    text: draft.text,
-                    height: $height,
-                    focusTrigger: app.focusComposer,
-                    placeholder: thread == nil ? "Start a new thread" : "Message",
-                    onSend: { send(draft) },
-                    onImages: { urls in attach(urls, to: draft) }
-                )
-                .frame(height: min(180, max(22, height)))
-                if running {
-                    Button {
-                        app.interrupt()
-                    } label: {
-                        Image(systemName: "stop.fill")
-                    }
-                    .help("Stop")
-                    .keyboardShortcut(".", modifiers: .command)
-                } else {
-                    Button {
-                        send(draft)
-                    } label: {
-                        Image(systemName: "arrow.up")
-                    }
-                    .help("Send (Return)")
-                    .disabled(draft.wrappedValue.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && draft.wrappedValue.images.isEmpty)
-                }
-            }
-            ComposerControls(thread: thread)
+            ComposerTextField(
+                text: draft.text,
+                height: $height,
+                focusTrigger: app.focusComposer,
+                placeholder: "Message",
+                onSend: { send() },
+                onImages: { urls in attach(urls, to: draft) }
+            )
+            .frame(height: height)
+            ComposerControls(
+                thread: thread,
+                running: thread?.status.isBusy == true,
+                canSend: canSend,
+                onAttach: { chooseImages(for: draft) },
+                onSend: { send() }
+            )
         }
-        .padding(10)
-        .background(RoundedRectangle(cornerRadius: 12).fill(Color(nsColor: .textBackgroundColor)))
-        .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Color(nsColor: .separatorColor)))
-        .frame(maxWidth: Theme.maxContentWidth + 20)
-        .padding(.horizontal, 16)
+        .padding(Self.padding)
+        .background { card }
+        // The transcript's reading column: 780 wide at most, centred, with
+        // the same side insets once the window is narrower than that.
+        .frame(maxWidth: Theme.maxContentWidth)
+        .padding(.horizontal, Theme.sideInset)
         .padding(.bottom, 12)
         .padding(.top, 4)
     }
 
-    private func send(_ draft: Binding<Draft>) {
+    /// A lighter fill on dark; on light, white lifted off the page by a
+    /// soft shadow. Clicking the card's padding puts the cursor in the text.
+    private var card: some View {
+        let shape = RoundedRectangle(cornerRadius: Self.cornerRadius, style: .continuous)
+        let dark = colorScheme == .dark
+        return shape
+            .fill(dark ? Color.primary.opacity(0.05) : Color.white)
+            .shadow(color: .black.opacity(dark ? 0 : 0.08), radius: 14, y: 4)
+            .overlay(shape.strokeBorder(Color(nsColor: .separatorColor), lineWidth: 0.5))
+            .contentShape(shape)
+            .onTapGesture { app.focusComposer += 1 }
+    }
+
+    private func send() {
         // AppModel empties the box, and puts the draft back if it isn't sent.
         app.send(threadId: thread?.id)
     }
 
+    /// Paste, drop and the "+" button all end up here: each file goes
+    /// through the runner's `media.import` into the draft.
     private func attach(_ urls: [URL], to draft: Binding<Draft>) {
+        guard !urls.isEmpty else { return }
         importing += urls.count
         Task {
             let refs = await app.importImages(urls)
             importing -= urls.count
             draft.wrappedValue.images += refs
+        }
+    }
+
+    private func chooseImages(for draft: Binding<Draft>) {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = true
+        panel.allowedContentTypes = [.image]
+        panel.prompt = "Add"
+        let finish = { (response: NSApplication.ModalResponse) in
+            if response == .OK { attach(panel.urls, to: draft) }
+        }
+        if let window = NSApp.keyWindow {
+            panel.beginSheetModal(for: window, completionHandler: finish)
+        } else {
+            finish(panel.runModal())
         }
     }
 }
@@ -83,28 +109,56 @@ private struct AttachmentStrip: View {
     let importing: Int
 
     var body: some View {
-        HStack(spacing: 6) {
+        HStack(spacing: 8) {
             ForEach(Array(images.enumerated()), id: \.offset) { index, image in
-                ZStack(alignment: .topTrailing) {
-                    AsyncThumbnail(path: image.path)
-                        .frame(width: 52, height: 52)
-                        .clipShape(RoundedRectangle(cornerRadius: 6))
-                    Button {
-                        images.remove(at: index)
-                    } label: {
-                        Image(systemName: "xmark.circle.fill")
-                            .symbolRenderingMode(.palette)
-                            .foregroundStyle(.white, .black.opacity(0.6))
-                    }
-                    .buttonStyle(.plain)
-                    .padding(2)
-                    .help("Remove")
-                }
+                AttachmentThumbnail(path: image.path) { images.remove(at: index) }
             }
-            if importing > 0 {
-                ProgressView().controlSize(.small)
+            // One placeholder per image still being imported, so the strip
+            // doesn't jump when they arrive.
+            ForEach(0..<importing, id: \.self) { _ in
+                RoundedRectangle(cornerRadius: AttachmentThumbnail.cornerRadius, style: .continuous)
+                    .fill(Color.primary.opacity(0.06))
+                    .frame(width: AttachmentThumbnail.size, height: AttachmentThumbnail.size)
+                    .overlay(ProgressView().controlSize(.small))
             }
         }
+    }
+}
+
+struct AttachmentThumbnail: View {
+    let path: String
+    let onRemove: () -> Void
+    @State private var hovering = false
+
+    static let size: CGFloat = 56
+    static let cornerRadius: CGFloat = 8
+    /// Screenshots show the remove badge without a real hover.
+    static var debugShowRemove = false
+
+    var body: some View {
+        let shape = RoundedRectangle(cornerRadius: Self.cornerRadius, style: .continuous)
+        AsyncThumbnail(path: path)
+            .frame(width: Self.size, height: Self.size)
+            .clipShape(shape)
+            .overlay(shape.strokeBorder(Color(nsColor: .separatorColor), lineWidth: 0.5))
+            .overlay(alignment: .topTrailing) {
+                if hovering || Self.debugShowRemove {
+                    Button(action: onRemove) {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 8, weight: .bold))
+                            .foregroundStyle(.white)
+                            .frame(width: 18, height: 18)
+                            .background(Circle().fill(.black.opacity(0.72)))
+                            .overlay(Circle().strokeBorder(.white.opacity(0.2), lineWidth: 0.5))
+                            .contentShape(Circle())
+                    }
+                    .buttonStyle(.plain)
+                    .padding(4)
+                    .help("Remove")
+                    .accessibilityLabel("Remove image")
+                }
+            }
+            .onHover { hovering = $0 }
     }
 }
 
@@ -117,98 +171,19 @@ private struct AsyncThumbnail: View {
             if let image {
                 Image(decorative: image, scale: 2).resizable().aspectRatio(contentMode: .fill)
             } else {
-                Rectangle().fill(.quaternary)
+                Rectangle().fill(Color.primary.opacity(0.06))
             }
         }
         .onAppear {
-            ThumbnailLoader.shared.load(path: path, maxPixels: 104) { image = $0 }
+            // Filled into a square, so the short side needs the 2x pixels:
+            // decode a bit larger than the tile or wide shots come out soft.
+            ThumbnailLoader.shared.load(path: path, maxPixels: Int(AttachmentThumbnail.size * 4)) { image = $0 }
         }
     }
 }
 
-private struct ComposerControls: View {
-    @Environment(AppModel.self) private var app
-    let thread: ThreadSummary?
-
-    var body: some View {
-        let cwd = thread?.cwd ?? app.newThreadCwd ?? app.defaults.cwd
-        let account = thread?.accountId ?? app.newThreadAccount ?? app.lastAccountId
-        let model = thread == nil ? app.newThreadModel : thread?.model
-        let ask = thread.map { $0.permissionMode == .ask } ?? app.newThreadAsk
-        HStack(spacing: 12) {
-            Menu {
-                ForEach(recentFolders(including: cwd), id: \.self) { folder in
-                    Button(folder.abbreviatingHome) { setCwd(folder) }
-                }
-                Divider()
-                Button("Choose…") { chooseFolder() }
-            } label: {
-                Label(cwd.abbreviatingHome, systemImage: "folder")
-            }
-            Menu {
-                ForEach(app.accounts) { item in
-                    Button(item.title) { setAccount(item.id) }
-                }
-            } label: {
-                Label(app.accountTitle(account), systemImage: "person.crop.circle")
-            }
-            Menu {
-                Button("Account default") { setModel(nil) }
-                Divider()
-                ForEach(["opus", "sonnet", "haiku"], id: \.self) { name in
-                    Button(name.capitalized) { setModel(name) }
-                }
-            } label: {
-                Label(model.map(ModelName.display) ?? "Default model", systemImage: "cpu")
-            }
-            Toggle("Ask before edits", isOn: Binding(get: { ask }, set: { setAsk($0) }))
-                .toggleStyle(.checkbox)
-            Spacer()
-        }
-        .menuStyle(.borderlessButton)
-        .fixedSize(horizontal: false, vertical: true)
-        .font(.caption)
-        .foregroundStyle(.secondary)
-        .controlSize(.small)
-    }
-
-    private func recentFolders(including cwd: String) -> [String] {
-        var seen = Set<String>()
-        var folders: [String] = []
-        for folder in [cwd, app.defaults.cwd] + app.threads.values.sorted(by: { $0.lastActivityAt > $1.lastActivityAt }).map(\.cwd) {
-            guard !folder.isEmpty, seen.insert(folder).inserted else { continue }
-            folders.append(folder)
-            if folders.count >= 8 { break }
-        }
-        return folders
-    }
-
-    private func chooseFolder() {
-        let panel = NSOpenPanel()
-        panel.canChooseDirectories = true
-        panel.canChooseFiles = false
-        panel.allowsMultipleSelection = false
-        if panel.runModal() == .OK, let url = panel.url { setCwd(url.path) }
-    }
-
-    private func setCwd(_ folder: String) {
-        if let thread { app.setCwd(thread.id, folder) } else { app.newThreadCwd = folder }
-    }
-
-    private func setAccount(_ id: String) {
-        if let thread { app.setAccount(thread.id, id) } else { app.newThreadAccount = id }
-    }
-
-    private func setModel(_ model: String?) {
-        if let thread { app.setModel(thread.id, model) } else { app.newThreadModel = model }
-    }
-
-    private func setAsk(_ ask: Bool) {
-        if let thread { app.setPermission(thread.id, ask: ask) } else { app.newThreadAsk = ask }
-    }
-}
-
-/// NSTextView-backed field that grows with its text.
+/// NSTextView-backed field that grows with its text: two lines at least,
+/// ten at most, then it scrolls.
 struct ComposerTextField: NSViewRepresentable {
     @Binding var text: String
     @Binding var height: CGFloat
@@ -217,31 +192,70 @@ struct ComposerTextField: NSViewRepresentable {
     var onSend: () -> Void
     var onImages: ([URL]) -> Void
 
+    static let font = NSFont.systemFont(ofSize: 14)
+    /// About 1.45 lines of air, like the transcript. Spacing goes under each
+    /// line, so the first line's top (and the placeholder) stays put.
+    static let lineSpacing: CGFloat = 3
+    static let attributes: [NSAttributedString.Key: Any] = {
+        let style = NSMutableParagraphStyle()
+        style.lineSpacing = lineSpacing
+        return [.font: font, .foregroundColor: NSColor.labelColor, .paragraphStyle: style]
+    }()
+    /// Two lines, before the first measure comes in.
+    static let minHeight: CGFloat = 40
+
     func makeCoordinator() -> Coordinator { Coordinator(self) }
 
     func makeNSView(context: Context) -> NSScrollView {
-        let textView = ComposerTextView()
+        let textView = Self.makeTextView()
         textView.delegate = context.coordinator
-        textView.font = .systemFont(ofSize: 14)
-        textView.isRichText = false
-        textView.allowsUndo = true
-        textView.drawsBackground = false
-        textView.textContainerInset = NSSize(width: 0, height: 2)
-        textView.textContainer?.lineFragmentPadding = 2
-        textView.isAutomaticQuoteSubstitutionEnabled = false
-        textView.isAutomaticDashSubstitutionEnabled = false
-        textView.isVerticallyResizable = true
-        textView.autoresizingMask = [.width]
-        textView.textContainer?.widthTracksTextView = true
         textView.placeholder = placeholder
         let scroll = NSScrollView()
         scroll.documentView = textView
         scroll.drawsBackground = false
         scroll.hasVerticalScroller = true
         scroll.autohidesScrollers = true
+        scroll.scrollerStyle = .overlay
         scroll.borderType = .noBorder
         context.coordinator.textView = textView
+        context.coordinator.watchWidth(of: scroll)
+        DispatchQueue.main.async { context.coordinator.updateHeight() }
         return scroll
+    }
+
+    static func makeTextView() -> ComposerTextView {
+        let textView = ComposerTextView()
+        textView.font = font
+        textView.textColor = .labelColor
+        textView.defaultParagraphStyle = attributes[.paragraphStyle] as? NSParagraphStyle
+        textView.typingAttributes = attributes
+        textView.isRichText = false
+        textView.allowsUndo = true
+        textView.drawsBackground = false
+        // No inset or padding, so the text's left edge lines up with the
+        // chips under it and the height is whole lines.
+        textView.textContainerInset = .zero
+        textView.textContainer?.lineFragmentPadding = 0
+        textView.isAutomaticQuoteSubstitutionEnabled = false
+        textView.isAutomaticDashSubstitutionEnabled = false
+        textView.isVerticallyResizable = true
+        textView.isHorizontallyResizable = false
+        textView.minSize = .zero
+        textView.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
+        textView.autoresizingMask = [.width]
+        textView.textContainer?.widthTracksTextView = true
+        return textView
+    }
+
+    /// The box height for the text as laid out now: whole lines, two to ten.
+    static func fittingHeight(of textView: NSTextView) -> CGFloat {
+        guard let layoutManager = textView.layoutManager, let container = textView.textContainer else { return minHeight }
+        layoutManager.ensureLayout(for: container)
+        let line = layoutManager.defaultLineHeight(for: textView.font ?? font) + lineSpacing
+        // TextKit leaves the spacing off the last line; counting it keeps
+        // the box a whole number of lines.
+        let used = layoutManager.usedRect(for: container).height + lineSpacing
+        return ComposerChips.boxHeight(textHeight: used, lineHeight: line)
     }
 
     func updateNSView(_ scroll: NSScrollView, context: Context) {
@@ -251,7 +265,7 @@ struct ComposerTextField: NSViewRepresentable {
         textView.onImages = onImages
         textView.placeholder = placeholder
         if textView.string != text {
-            textView.string = text
+            textView.replaceText(text)
             context.coordinator.updateHeight()
         }
         if context.coordinator.lastFocus != focusTrigger {
@@ -264,10 +278,27 @@ struct ComposerTextField: NSViewRepresentable {
         var parent: ComposerTextField
         weak var textView: ComposerTextView?
         var lastFocus = 0
+        private var lastWidth: CGFloat = 0
+        private var widthObserver: NSObjectProtocol?
 
         init(_ parent: ComposerTextField) {
             self.parent = parent
             lastFocus = parent.focusTrigger
+        }
+
+        deinit {
+            if let widthObserver { NotificationCenter.default.removeObserver(widthObserver) }
+        }
+
+        /// A narrower window wraps the text onto more lines, so the box
+        /// re-measures when its width changes (and only then).
+        func watchWidth(of scroll: NSScrollView) {
+            scroll.postsFrameChangedNotifications = true
+            widthObserver = NotificationCenter.default.addObserver(forName: NSView.frameDidChangeNotification, object: scroll, queue: .main) { [weak self, weak scroll] _ in
+                guard let self, let scroll, abs(scroll.frame.width - self.lastWidth) > 0.5 else { return }
+                self.lastWidth = scroll.frame.width
+                self.updateHeight()
+            }
         }
 
         func textDidChange(_ notification: Notification) {
@@ -277,9 +308,8 @@ struct ComposerTextField: NSViewRepresentable {
         }
 
         func updateHeight() {
-            guard let textView, let layoutManager = textView.layoutManager, let container = textView.textContainer else { return }
-            layoutManager.ensureLayout(for: container)
-            let height = ceil(layoutManager.usedRect(for: container).height) + 4
+            guard let textView else { return }
+            let height = ComposerTextField.fittingHeight(of: textView)
             if abs(height - parent.height) > 0.5 {
                 DispatchQueue.main.async { self.parent.height = height }
             }
@@ -291,7 +321,7 @@ final class ComposerTextView: NSTextView {
     var onSend: (() -> Void)?
     var onImages: (([URL]) -> Void)?
     var placeholder = "" {
-        didSet { needsDisplay = true }
+        didSet { if placeholder != oldValue { needsDisplay = true } }
     }
 
     override init(frame frameRect: NSRect, textContainer container: NSTextContainer?) {
@@ -313,6 +343,16 @@ final class ComposerTextView: NSTextView {
     }
 
     required init?(coder: NSCoder) { fatalError() }
+
+    /// A draft from another thread, or the box emptied after a send.
+    /// Setting `string` doesn't reliably take the typing attributes, so the
+    /// font and line spacing are put back on the whole text.
+    func replaceText(_ text: String) {
+        string = text
+        if let storage = textStorage, storage.length > 0 {
+            storage.setAttributes(ComposerTextField.attributes, range: NSRange(location: 0, length: storage.length))
+        }
+    }
 
     override func keyDown(with event: NSEvent) {
         let isReturn = event.keyCode == 36 || event.keyCode == 76
@@ -384,11 +424,32 @@ final class ComposerTextView: NSTextView {
         }
     }
 
+    /// The placeholder is drawn outside the glyphs, so the first character
+    /// typed (or the last one deleted) has to redraw the whole box.
+    private var wasEmpty = true
+
+    override func didChangeText() {
+        super.didChangeText()
+        if string.isEmpty != wasEmpty {
+            wasEmpty = string.isEmpty
+            needsDisplay = true
+        }
+    }
+
+    override var string: String {
+        didSet {
+            wasEmpty = string.isEmpty
+            needsDisplay = true
+        }
+    }
+
     override func draw(_ dirtyRect: NSRect) {
         super.draw(dirtyRect)
         if string.isEmpty, !placeholder.isEmpty {
-            let attributes: [NSAttributedString.Key: Any] = [.font: font ?? .systemFont(ofSize: 14), .foregroundColor: NSColor.placeholderTextColor]
-            NSAttributedString(string: placeholder, attributes: attributes).draw(at: NSPoint(x: 4, y: textContainerInset.height))
+            let attributes: [NSAttributedString.Key: Any] = [.font: font ?? ComposerTextField.font, .foregroundColor: NSColor.tertiaryLabelColor]
+            // Where the first character would go, so typing doesn't shift it.
+            let x = textContainerInset.width + (textContainer?.lineFragmentPadding ?? 0)
+            NSAttributedString(string: placeholder, attributes: attributes).draw(at: NSPoint(x: x, y: textContainerInset.height))
         }
     }
 }
