@@ -4,8 +4,9 @@
 // mock runner, and raw calls. cli.ts hands these commands over; the
 // formatting and export functions are pure enough to test on their own.
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
-import { readToken, runnerUrl, type Config } from './config.ts';
+import { defaultHome, readToken, runnerUrl, type Config } from './config.ts';
 import { RunnerClient, RpcClientError } from './client.ts';
 import { ErrorCode, type ImageRef, type PersistedEvent, type ThreadSummary } from './protocol.ts';
 import type { RunnerStatus } from './restart.ts';
@@ -13,9 +14,10 @@ import type { RunnerStatus } from './restart.ts';
 export const DEV_HELP = `Working on Threadbare itself:
   tb status [--json]              the runner: version, live CLIs, busy threads, a pending restart
   tb self [--json]                the thread this command runs in (THREADBARE_THREAD_ID)
-  tb restart [--now [--force]] [--resume "text"] [--reason "text"] [--thread ID]
-                                  restart when every thread is idle (or now); --resume carries
-                                  this thread (or --thread) on afterwards
+  tb restart [--now [--force]] [--resume "text" | --no-resume] [--reason "text"] [--thread ID]
+                                  restart once no thread is busy (or now). Inside a thread it
+                                  carries that thread on afterwards; --resume sets the text
+  tb restart --cancel             withdraw a restart that hasn't begun
   tb show <threadId> [--last N] [--tools]
                                   the thread as plain text; --last N turns; --tools adds results
   tb logs [-f] [-n 200] [--thread ID]
@@ -28,16 +30,28 @@ export type Flags = Record<string, string | boolean | string[] | undefined>;
 type Resolve = (prefix: string | undefined) => Promise<string>;
 
 const ALL = ['inbox', 'snoozed', 'archived'];
+const BUSY = ['starting', 'running', 'waiting'];
 
 // Returns undefined for a command that isn't one of these.
 export async function runDev(client: RunnerClient, cmd: string, args: string[], f: Flags, resolveId: Resolve): Promise<number | undefined> {
   const env = process.env;
   switch (cmd) {
     case 'status': {
-      const s = await client.call<RunnerStatus>('runner.status').catch(tooOld);
-      if (!s) return TOO_OLD;
+      const s = await client.call<RunnerStatus>('runner.status').catch(quietlyTooOld);
+      if (!s) {
+        // Most of it can still be had from hello and threads.list.
+        const hello = await client.call<{ runnerVersion: string }>('hello', { client: 'tb', version: '1' });
+        const threads = await listAll(client);
+        const busy = threads.filter((t) => BUSY.includes(t.status)).map((t) => t.id);
+        if (f.json) return printJson({ version: hello.runnerVersion, running: busy, old: true });
+        const lines = [`Runner ${hello.runnerVersion}`, busy.length ? `Busy threads: ${busy.length}` : 'Busy threads: none'];
+        for (const id of busy) lines.push(`  ${threadLine(id, threads, env.THREADBARE_THREAD_ID)}`);
+        lines.push("This runner predates runner.status and picks it up on its next restart. Don't restart it yourself.");
+        process.stdout.write(lines.join('\n') + '\n');
+        return 0;
+      }
       if (f.json) return printJson(s);
-      process.stdout.write(formatStatus(s, await listAll(client), Date.now()));
+      process.stdout.write(formatStatus(s, await listAll(client), Date.now(), env.THREADBARE_THREAD_ID));
       return 0;
     }
     case 'self': {
@@ -52,30 +66,49 @@ export async function runDev(client: RunnerClient, cmd: string, args: string[], 
       return 0;
     }
     case 'restart': {
-      const inThread = env.THREADBARE_THREAD_ID;
-      if (f.now && inThread && !f.force) {
+      if (f.cancel) {
+        const r = await client.call<{ scheduled: boolean }>('runner.restart', { cancel: true }).catch(tooOld);
+        if (!r) return TOO_OLD;
+        console.log(r.scheduled ? 'The restart is still on.' : 'No restart is pending now.');
+        return 0;
+      }
+      const threads = await listAll(client);
+      // The thread this runs in, if it's one of this runner's: tb may be
+      // pointed at a dev runner or sandbox from a thread of the real one.
+      const self = env.THREADBARE_THREAD_ID && threads.some((t) => t.id === env.THREADBARE_THREAD_ID) ? env.THREADBARE_THREAD_ID : undefined;
+      if (f.now && self && !f.force) {
         console.error("--now stops every turn, this thread's own included. Leave it out to restart once every thread is idle, or add --force.");
         return 1;
       }
       const params: Record<string, unknown> = { when: f.now ? 'now' : 'idle' };
       if (typeof f.reason === 'string') params.reason = f.reason;
+      const target = typeof f.thread === 'string' ? await resolveId(f.thread) : self;
       if (typeof f.resume === 'string') {
-        const target = typeof f.thread === 'string' ? await resolveId(f.thread) : inThread;
         if (!target) {
           console.error('--resume needs a thread: run it inside one, or pass --thread ID.');
           return 1;
         }
         params.resume = { threadId: target, text: f.resume };
+      } else if (target && !f['no-resume']) {
+        // Inside a thread the agent that asked should hear how it went, as
+        // deploy-runner.sh does.
+        params.resume = { threadId: target, text: `The runner restarted${typeof f.reason === 'string' ? ` (${f.reason})` : ''}. Check that it worked, then carry on.` };
       }
       const r = await client.call<{ scheduled: boolean; waitingFor: string[] }>('runner.restart', params).catch(tooOld);
       if (!r) return TOO_OLD;
+      const resume = params.resume as { threadId: string; text: string } | undefined;
+      const then = resume ? `Then ${resume.threadId === self ? 'this thread' : resume.threadId.slice(0, 8)} carries on with: "${resume.text}"` : '';
       if (r.waitingFor.length === 0) {
-        console.log('Restarting now.');
+        console.log(self ? `Restarting now; this turn ends with it.${then ? ` ${then}` : ''}` : `Restarting now.${then ? ` ${then}` : ''}`);
         return 0;
       }
-      const threads = await listAll(client);
-      console.log(`The runner will restart when ${plural(r.waitingFor.length, 'thread finishes', 'threads finish')}:`);
-      for (const id of r.waitingFor) console.log(`  ${threadLine(id, threads)}`);
+      const after = await listAll(client);
+      console.log(`The runner will restart when ${plural(r.waitingFor.length, 'thread finishes', 'threads finish')} (a turn, or background shells and subagents):`);
+      for (const id of r.waitingFor) console.log(`  ${threadLine(id, after, self)}`);
+      if (then) console.log(then);
+      // Waiting for it from inside the turn it waits for would never end.
+      if (self && r.waitingFor.includes(self)) console.log('End your turn now; the runner restarts after it and carries this thread on.');
+      else console.log('tb restart --cancel withdraws it.');
       return 0;
     }
     case 'show': {
@@ -92,10 +125,14 @@ export async function runDev(client: RunnerClient, cmd: string, args: string[], 
       const out = typeof f.out === 'string' ? path.resolve(f.out) : defaultExportDir(id);
       const r = exportThread(t, await allEvents(client, id), out);
       console.log(`Exported ${plural(r.events, 'event', 'events')} and ${plural(r.media, 'image', 'images')} to ${out}`);
-      // --fixtures loads just this one (and anything else exported beside
-      // it), without the mock's own sample threads.
-      const mock = path.join(findRepoRoot() ?? '.', 'app', 'Tools', 'mock-runner', 'server.mjs');
-      console.log(`Load it with: node ${shQuote(mock)} --data-dir "$(mktemp -d)" --fixtures ${shQuote(path.dirname(out))}`);
+      // --fixtures with the export's own folder loads just this thread,
+      // without the mock's sample threads or anything beside it.
+      const root = findRepoRoot() ?? '.';
+      const mock = path.join(root, 'app', 'Tools', 'mock-runner', 'server.mjs');
+      const data = path.join(os.tmpdir(), `tb-mock-${id.slice(0, 8)}`);
+      console.log(`Load it in the mock runner: node ${shQuote(mock)} --data-dir ${shQuote(data)} --fixtures ${shQuote(out)}`);
+      console.log(`  then point tb (THREADBARE_HOME=${shQuote(data)}) or a debug app (--data-dir ${shQuote(data)}) at it.`);
+      console.log(`Or open it in the app: ${shQuote(path.join(root, 'app', 'Tools', 'run-mock.sh'))} --fixtures ${shQuote(out)}`);
       return 0;
     }
     case 'rpc': {
@@ -132,10 +169,15 @@ function printJson(v: unknown): number {
 const TOO_OLD = 3;
 
 function tooOld(e: unknown): undefined {
-  if (e instanceof RpcClientError && e.code === ErrorCode.methodNotFound) {
-    console.error("This runner is too old for runner.status and runner.restart; it has to be restarted from launchd.");
-    return undefined;
-  }
+  quietlyTooOld(e);
+  console.error(
+    "This runner is too old for runner.status and runner.restart, so it can't wait for its threads before restarting. deploy-runner.sh waits for them itself; inside a thread, leave the restart to Mike.",
+  );
+  return undefined;
+}
+
+function quietlyTooOld(e: unknown): undefined {
+  if (e instanceof RpcClientError && e.code === ErrorCode.methodNotFound) return undefined;
   throw e;
 }
 
@@ -177,25 +219,34 @@ export function duration(ms: number): string {
   return `${Math.floor(h / 24)}d ${h % 24}h`;
 }
 
-function threadLine(id: string, threads: ThreadSummary[]): string {
+// self marks the thread the command runs in.
+function threadLine(id: string, threads: ThreadSummary[], self?: string): string {
   const t = threads.find((x) => x.id === id);
-  return t ? `${id.slice(0, 8)}  ${t.title}  [${t.status}]` : id.slice(0, 8);
+  const mine = id === self ? '  (this thread)' : '';
+  return t ? `${id.slice(0, 8)}  ${t.title}  [${t.status}]${mine}` : `${id.slice(0, 8)}${mine}`;
 }
 
-export function formatStatus(s: RunnerStatus, threads: ThreadSummary[], now: number): string {
-  const lines = [`Runner ${s.version}, pid ${s.pid}, up ${duration(now - Date.parse(s.startedAt))}`, `Data dir: ${s.home}`];
+export function formatStatus(s: RunnerStatus, threads: ThreadSummary[], now: number, self?: string): string {
+  const lines = [`Runner ${s.version}${s.branch ? ` (branch ${s.branch})` : ''}, pid ${s.pid}, up ${duration(now - Date.parse(s.startedAt))}`, `Data dir: ${s.home}`];
   if (s.logFile) lines.push(`Log: ${s.logFile}`);
   lines.push(`Live CLIs: ${s.liveClis}`);
   lines.push(s.running.length ? `Busy threads: ${s.running.length}` : 'Busy threads: none');
-  for (const id of s.running) lines.push(`  ${threadLine(id, threads)}`);
+  for (const id of s.running) lines.push(`  ${threadLine(id, threads, self)}`);
+  // A restart waits for these too; --now (or launchctl) would stop them.
+  const bg = s.background ?? [];
+  if (bg.length) {
+    lines.push(`Background work: ${plural(bg.length, 'thread', 'threads')}`);
+    for (const b of bg) lines.push(`  ${threadLine(b.threadId, threads, self)}: ${b.tasks.join('; ')}`);
+  }
   const p = s.pendingRestart;
   if (p) {
     const waiting = p.waitingFor?.length ?? 0;
-    let line = `Restart pending: ${p.when === 'now' ? 'now' : 'when idle'}, asked ${duration(now - Date.parse(p.requestedAt))} ago`;
+    let line = `Restart pending: ${p.when === 'now' ? 'now' : 'when idle'}${p.release ? ` onto ${p.release}` : ''}, asked ${duration(now - Date.parse(p.requestedAt))} ago`;
     if (waiting) line += `, waiting for ${plural(waiting, 'thread', 'threads')}`;
     lines.push(line);
+    for (const id of p.waitingFor ?? []) lines.push(`  ${threadLine(id, threads, self)}`);
     if (p.reason) lines.push(`  Reason: ${p.reason}`);
-    if (p.resumeThreadId) lines.push(`  Then carries on: ${threadLine(p.resumeThreadId, threads)}`);
+    if (p.resumeThreadId) lines.push(`  Then carries on: ${threadLine(p.resumeThreadId, threads, self)}`);
   }
   return lines.join('\n') + '\n';
 }
@@ -296,9 +347,13 @@ export function formatThread(t: ThreadSummary, events: PersistedEvent[], opts: {
       case 'edit.diff':
         if (opts.tools) lines.push(...capped(e.hunks.flatMap((h) => h.lines), DIFF_LINES, '      '));
         break;
-      case 'approval.requested':
-        lines.push(`  Approval asked: ${e.title}`);
+      case 'approval.requested': {
+        // The id, so tb approve can answer it, and a Bash command whole
+        // (the title is cut short).
+        const cmd = e.name === 'Bash' && typeof e.input?.command === 'string' ? e.input.command : e.title;
+        lines.push(...block(`  Approval asked (${e.approvalId.slice(0, 8)}): `, cmd, '    '));
         break;
+      }
       case 'question.requested':
         for (const q of e.questions) {
           lines.push(`  Question: ${q.question}${q.options.length ? ` (${q.options.map((o) => o.label).join(' / ')})` : ''}`);
@@ -380,8 +435,14 @@ export function exportThread(t: ThreadSummary, events: PersistedEvent[], out: st
     return JSON.stringify(Array.isArray(images) ? { ...e, images: images.map(localise) } : e);
   });
   fs.writeFileSync(path.join(out, 'events.ndjson'), lines.map((l) => l + '\n').join(''));
-  // The mock has no CLI behind it.
-  fs.writeFileSync(path.join(out, 'thread.json'), JSON.stringify({ ...t, live: false }, null, 2) + '\n');
+  // The mock has no CLI behind it, so nothing will finish a turn that's in
+  // progress (as when a thread exports itself): it's shown as idle.
+  const summary: ThreadSummary = { ...t, live: false };
+  if (BUSY.includes(summary.status)) {
+    summary.status = 'idle';
+    summary.needsYou = false;
+  }
+  fs.writeFileSync(path.join(out, 'thread.json'), JSON.stringify(summary, null, 2) + '\n');
   return { events: events.length, media: copied.size };
 }
 
@@ -389,9 +450,12 @@ export function exportThread(t: ThreadSummary, events: PersistedEvent[], out: st
 
 // tb logs works with the runner down (that's when it's needed most), so it
 // runs before tb connects. The file is THREADBARE_LOG, else the one the
-// runner says it writes, else the default.
+// runner says it writes, else where a runner on that data dir writes:
+// <home>/runner.log for a dev runner or sandbox, the default for the real
+// one. Which file it is goes to stderr.
 export async function logsCommand(cfg: Config, f: Flags): Promise<number> {
-  const file = process.env.THREADBARE_LOG ? cfg.logFile : ((await runnerLogFile(cfg)) ?? cfg.logFile);
+  const file = process.env.THREADBARE_LOG ? cfg.logFile : ((await runnerLogFile(cfg)) ?? fallbackLog(cfg));
+  console.error(`==> ${file} <==`);
   const n = f.lines !== undefined ? Number(f.lines) : 200;
   if (!Number.isInteger(n) || n < 0) throw new Error('-n takes a whole number');
   const filter = typeof f.thread === 'string' && f.thread ? f.thread : undefined;
@@ -406,6 +470,22 @@ export async function logsCommand(cfg: Config, f: Flags): Promise<number> {
   if (!f.follow) return 0;
   await follow(file, filter);
   return 0;
+}
+
+function fallbackLog(cfg: Config): string {
+  const own = path.join(cfg.home, 'runner.log');
+  return !sameDir(cfg.home, defaultHome()) && fs.existsSync(own) ? own : cfg.logFile;
+}
+
+function sameDir(a: string, b: string): boolean {
+  const real = (p: string) => {
+    try {
+      return fs.realpathSync(p);
+    } catch {
+      return path.resolve(p);
+    }
+  };
+  return real(a) === real(b);
 }
 
 async function runnerLogFile(cfg: Config): Promise<string | undefined> {

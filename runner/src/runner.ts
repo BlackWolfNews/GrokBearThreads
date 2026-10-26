@@ -114,6 +114,7 @@ export class Runner {
   private flushScheduled = false;
   private snoozeTimer?: TimerHandle;
   private stopping = false;
+  private refusing?: string;
   private startedAt = 0;
   private startupNotices: { level: 'info' | 'warning' | 'error'; message: string }[] = [];
 
@@ -236,6 +237,13 @@ export class Runner {
       rec.turnId = undefined;
       rec.status = 'stopped';
     }
+    // A snoozed or archived thread holds its queue until it comes back, and
+    // nothing sends it before then anyway, so a restart (planned or not)
+    // leaves it for the wake-up to send. Anything else queued was cut off.
+    if (rec.queue.length && !midTurn && this.bucket(rec) !== 'inbox') {
+      this.markDirty(st);
+      return false;
+    }
     if (rec.queue.length) {
       const texts = rec.queue.map((q) => q.text).filter(Boolean);
       this.emit(st, {
@@ -269,8 +277,41 @@ export class Runner {
       // Output and exits from CLIs that are about to be killed no longer count.
       rt.generation++;
       if (rt.turn) this.stopTurn(st);
+      // Killing the CLIs kills their background shells and subagents too.
+      // Say so in the thread, as releaseSession does, or it would wait for
+      // a result that never comes with nothing to say why.
+      if (rt.tasks.length) {
+        const what = rt.tasks.map((t) => t.description || t.type).join('; ');
+        rt.tasks = [];
+        try {
+          this.emit(st, { type: 'system.note', text: `Stopped background work when the runner stopped: ${what}` });
+        } catch (e) {
+          this.log.error('could not save a note', { threadId: st.rec.id, error: String(e) });
+        }
+      }
     }
     this.flush();
+  }
+
+  // From the moment a restart begins until the runner exits, a new turn
+  // would only be cut off straight away, so sends and new threads are
+  // refused with a message saying to send again in a moment.
+  refuseNewTurns(message: string): void {
+    this.refusing = message;
+  }
+
+  private checkAccepting(): void {
+    if (this.refusing) throw new RpcError(ErrorCode.busy, this.refusing);
+  }
+
+  // Threads whose CLI is running background shells or subagents. A restart
+  // waits for them (restart.ts), since stopping the CLI stops them.
+  backgroundWork(): { threadId: string; tasks: string[] }[] {
+    const out: { threadId: string; tasks: string[] }[] = [];
+    for (const st of this.threads.values()) {
+      if (st.rt.tasks.length) out.push({ threadId: st.rec.id, tasks: st.rt.tasks.map((t) => t.description || t.type) });
+    }
+    return out;
   }
 
   private stopTurn(st: ThreadState): void {
@@ -451,6 +492,7 @@ export class Runner {
     permissionMode?: PermissionMode;
     title?: string;
   }): { thread: ThreadSummary; turnId: string } {
+    this.checkAccepting();
     const accountId = params.accountId ?? this.defaultAccountId();
     if (!this.accounts.get(accountId)) throw new RpcError(ErrorCode.accountNotFound, `No account called ${accountId}`);
     // A blank folder means the default, not the runner's own folder.
@@ -493,6 +535,7 @@ export class Runner {
   // origin "runner" marks a message the runner sends by itself (restart.ts).
   send(threadId: string, text: string, images: ImageRef[] = [], opts: { origin?: 'runner' } = {}): { turnId: string } {
     const st = this.mustGet(threadId);
+    this.checkAccepting();
     if (!text && images.length === 0) throw new RpcError(ErrorCode.badParams, 'text or images required');
     checkImages(images);
     return { turnId: this.sendTo(st, text, images, opts.origin) };
@@ -687,6 +730,9 @@ export class Runner {
         break;
       case 'tasks':
         rt.tasks = o.tasks;
+        // No summary field changes, but a pending restart waits on
+        // background work and re-checks on thread.updated.
+        this.markDirty(st);
         // Background work keeps the CLI live; once it's done the idle
         // countdown starts again.
         if (o.tasks.length) {

@@ -29,27 +29,39 @@ anything.
 Mike may be running this thread in Threadbare itself, through the installed
 runner (`com.mikerosoft.threadbare.runner`). Then `THREADBARE_THREAD_ID` is
 set, and `runner/bin/tb self` and `tb status` show your thread and the
-runner.
+runner. `runner/bin/tb --help` lists the rest.
 
 - `./check.sh` runs every check (`--quick`: the runner's typecheck and unit
   tests). Nothing in it touches the live runner.
 - The live runner runs a release, a snapshot, so editing `runner/` doesn't
   change it. To try a runner change, start `runner/scripts/dev-runner.sh` in
-  the background and point `tb` (or the app's `--data-dir`) at the folder it
-  prints.
-- To ship a runner change, commit it and run
-  `runner/scripts/deploy-runner.sh`, which ships HEAD of this checkout. When
-  it says so, end your turn: the runner restarts once the turn is over and
-  resumes this thread so you can check the change. If it went wrong,
-  `deploy-runner.sh --rollback` goes back the same way.
+  the background and use the `<dev home>/tb` it prints (a bare `tb` reaches
+  the live runner unless `THREADBARE_HOME` is set in that same command).
+  Stop it with the `kill <pid>` it prints, never `pkill`.
+- To ship a runner change, merge it to main, then from main run
+  `runner/scripts/deploy-runner.sh --dry-run` and
+  `runner/scripts/deploy-runner.sh`, which ships HEAD of this checkout.
+  When it says so, end your turn: the runner restarts once no thread is
+  busy and resumes this thread so you can check the change
+  (`deploy-runner.sh --list` shows what's running). If the message that
+  resumes you says your release isn't running, read `tb logs` before doing
+  anything else. To undo a deploy, `deploy-runner.sh --rollback`; after an
+  automatic crash rollback there's nothing to undo.
+- Until `deploy-runner.sh --list` shows releases, the live runner still runs
+  from the main checkout and only Mike can switch it (one
+  `install-runner.sh` from a terminal). Runner changes wait for him.
+- A restart waits for other threads' turns and background jobs (tests,
+  builds, subagents). `tb status` shows what it's waiting for; don't try to
+  hurry it.
 - Never pass `--now`, run `install-runner.sh`, `launchctl kickstart` the
-  runner or stop its node process: each ends your own turn with nothing to
-  carry on. If one is needed, finish and tell Mike the exact command.
+  runner or stop its node process: each ends your own turn and stops other
+  threads' work. If one is needed, finish and tell Mike the exact command.
+  `tb restart` is for dev runners and sandboxes.
 - Rebuilding or restarting the app (`app/restart.sh`, `app/install.sh`) is
   safe: the runner keeps your turn going and the app reconnects.
 - `tb show <id>` reads a thread as text, `tb logs` the runner log, and
   `tb export <id>` copies a thread into `app/.fixtures/` so a rendering bug
-  can be reproduced against the mock runner.
+  can be reproduced against the mock runner (it prints the command).
 - Check app changes with `app/Tools/screenshots.sh <dir>`: a debug build
   against the mock runner, in a temp folder, with the window kept behind
   whatever Mike is working in. Look at the images before saying it works.

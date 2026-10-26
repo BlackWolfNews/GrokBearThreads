@@ -44,7 +44,7 @@ export THREADBARE_NODE="$NODE"
 # Inside a Threadbare thread these name the live runner and the thread.
 # Every test makes its own temp data dir; none may find the real one.
 unset THREADBARE_HOME THREADBARE_DATA_DIR THREADBARE_PORT THREADBARE_URL THREADBARE_LOG \
-  THREADBARE_THREAD_ID THREADBARE_RUNNER_VERSION
+  THREADBARE_THREAD_ID THREADBARE_RUNNER_VERSION THREADBARE_RUNNER_HOME
 
 TMP_ROOT="${TMPDIR:-/tmp}"
 LOGS="$(mktemp -d "${TMP_ROOT%/}/threadbare-check.XXXXXX")"

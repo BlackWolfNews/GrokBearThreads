@@ -9,7 +9,9 @@
 //                                 launch.mjs (not in the smoke test)
 //   oldRunner: true               no runner.restart, like runners before it
 //   goodAfterMs: n                mark lastGood after n ms (default 200, -1 never)
-// <home>/fake-busy.json lists the threads that count as running.
+// <home>/fake-busy.json lists the threads that count as running, and while
+// <home>/fake-hang-restart exists runner.restart never answers (a runner
+// too busy to reply).
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import http from 'node:http';
@@ -43,6 +45,11 @@ if (!fs.existsSync(tokenFile)) fs.writeFileSync(tokenFile, crypto.randomBytes(16
 const token = fs.readFileSync(tokenFile, 'utf8').trim();
 const startedAt = new Date().toISOString();
 
+// Like main.ts: launch.mjs's watchdog applies, and a clean exit after
+// listening isn't counted as a crash.
+export const REPORTS_LISTENING = true;
+let pending = null;
+
 const busy = () => {
   try {
     return JSON.parse(fs.readFileSync(path.join(home, 'fake-busy.json'), 'utf8'));
@@ -63,13 +70,25 @@ function handle(method, params) {
       return { runnerVersion: version, protocol: 1, accounts: [], defaults: { cwd: '/tmp' } };
     case 'runner.status':
       if (mode.oldRunner) break;
-      return { version, release: release ?? undefined, pid: process.pid, startedAt, home, liveClis: 0, running: busy() };
+      return {
+        version,
+        release: release ?? undefined,
+        pid: process.pid,
+        startedAt,
+        home,
+        liveClis: 0,
+        running: busy(),
+        background: [],
+        ...(pending ? { pendingRestart: { ...pending, waitingFor: busy() } } : {}),
+      };
     case 'threads.list':
       return { threads: busy().map((id) => ({ id, title: `Thread ${id}`, status: 'running' })) };
     case 'runner.restart': {
       if (mode.oldRunner) break;
       fs.appendFileSync(path.join(home, 'fake-restart-calls.ndjson'), JSON.stringify(params) + '\n');
+      if (fs.existsSync(path.join(home, 'fake-hang-restart'))) return NO_REPLY;
       const waitingFor = params.when === 'now' ? [] : busy();
+      pending = { when: params.when ?? 'idle', requestedAt: new Date().toISOString(), release: params.release, resumeThreadId: params.resume?.threadId };
       // Like the real one: exit 0 once nothing is running, and launchd
       // (here the fake one) starts it again.
       const timer = setInterval(() => {
@@ -83,6 +102,8 @@ function handle(method, params) {
   }
   throw Object.assign(new Error(`Unknown method ${method}`), { code: -32601 });
 }
+
+const NO_REPLY = Symbol('no reply');
 
 // The smallest WebSocket server that works with Node's WebSocket client:
 // the upgrade handshake, masked client frames in, unmasked text frames out.
@@ -143,7 +164,9 @@ server.on('upgrade', (req, socket) => {
       }
       let reply;
       try {
-        reply = { jsonrpc: '2.0', id: msg.id, result: handle(msg.method, msg.params ?? {}) };
+        const result = handle(msg.method, msg.params ?? {});
+        if (result === NO_REPLY) continue;
+        reply = { jsonrpc: '2.0', id: msg.id, result };
       } catch (e) {
         reply = { jsonrpc: '2.0', id: msg.id, error: { code: e.code ?? -32000, message: e.message } };
       }
@@ -156,6 +179,7 @@ server.listen(Number(process.env.THREADBARE_PORT ?? 0), '127.0.0.1', () => {
   const { port } = server.address();
   writeJsonAtomic(path.join(home, 'runner.json'), { port });
   console.log(`threadbare-runner listening on ${port}`);
+  globalThis.threadbareLaunch?.listening?.();
   const goodAfter = mode.goodAfterMs ?? 200;
   // main.ts does this after 60 s; the tests can't wait that long.
   if (launched && release && goodAfter >= 0) {

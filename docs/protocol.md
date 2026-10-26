@@ -127,8 +127,8 @@ replaces whatever the deltas built up.
 | `threads.markSeen` | `{ threadId, seq }` | `{ thread: ThreadSummary }` |
 | `approvals.respond` | `{ threadId, approvalId, decision: "allow" \| "allowAlways" \| "deny" \| "answered", message?: string, answers?: Record<string, string> }` | `{}`. `allowAlways` allows matching requests for the rest of this thread only; it never changes the thread's permission mode or saves anything in the project |
 | `media.import` | `{ path: string }` | `{ image: ImageRef }` copies a file into `inbox/` and reads its size |
-| `runner.status` | `{}` | `{ version, release?, pid, startedAt, home, logFile, liveClis, running: string[], pendingRestart?: { when, reason?, resumeThreadId?, requestedAt, waitingFor: string[] } }`. `running` lists the threads that are starting, running or waiting on an approval or a question, the same ones a restart waits for |
-| `runner.restart` | `{ when?: "idle" \| "now", resume?: { threadId, text }, reason?: string }` | `{ scheduled: boolean, waitingFor: string[] }`. See Restarts below. `scheduled` is true once the restart is saved; an empty `waitingFor` means it is happening now. A runner older than this answers `-32601` |
+| `runner.status` | `{}` | `{ version, release?, branch?, pid, startedAt, home, logFile, liveClis, running: string[], background: { threadId, tasks: string[] }[], pendingRestart?: { when, reason?, release?, resumeThreadId?, requestedAt, waitingFor: string[] } }`. `running` lists the threads that are starting, running or waiting on an approval or a question; `background` the threads whose CLI is still running background shells or subagents (`tasks` describes each). A restart waits for both. `branch` is the branch the release was built from |
+| `runner.restart` | `{ when?: "idle" \| "now", resume?: { threadId, text }, reason?: string, release?: string, cancel?: boolean }` | `{ scheduled: boolean, waitingFor: string[] }`. See Restarts below. `scheduled` is true once the restart is saved; an empty `waitingFor` means it is happening now. `release` is the release the restart should come back on (the deploy script sets it). `cancel: true` withdraws a pending restart that hasn't begun and returns `scheduled: false` (`-32020` once it has begun). A runner older than this answers `-32601` |
 
 Errors use JSON-RPC error objects: `-32602` bad params, `-32004` thread not
 found, `-32010` account not found, `-32020` busy (e.g. two sends racing),
@@ -147,28 +147,45 @@ found, `-32010` account not found, `-32020` busy (e.g. two sends racing),
 `runner.restart` restarts the runner without cutting a turn short.
 
 - `when: "idle"` (the default) waits until no thread is starting, running or
-  waiting on an approval or a question, then shuts down the way it does on
-  SIGTERM and exits 0, and launchd starts it again. `waitingFor` names the
-  threads it is waiting for. A message sent meanwhile still starts a turn,
-  and the restart waits for that turn too.
+  waiting on an approval or a question, and no CLI is still running
+  background shells or subagents (stopping the runner stops those too).
+  Then it shuts down the way it does on SIGTERM and exits 0, and launchd
+  starts it again. `waitingFor` names the threads it is waiting for. A
+  message sent meanwhile still starts a turn, and the restart waits for
+  that turn too. Once the shutdown has begun, `threads.send` and
+  `threads.create` answer `-32020` ("The runner is restarting; send again
+  in a moment.").
 - `when: "now"` shuts down straight away. Turns in flight end as `stopped`.
+  Whenever the runner stops with background work still going, each thread
+  that had some gets a `system.note` saying what was stopped.
 - While a restart is pending, every client gets a `runner.notice` ("The
   runner will restart when 2 threads finish."), and clients that say hello
   get it again. `runner.status` shows it as `pendingRestart`. When it
   starts, the notice is "The runner is restarting now."
 - The request is saved in `restart.json` in the data dir, so a crash
   before the runner is idle doesn't lose it: the next start counts as the
-  restart. Asking again while one is pending merges the two: `now` wins,
-  and each thread's latest `resume` is kept.
+  restart. If the runner stops some other way while it waits (launchctl,
+  a reboot), that stop counts as the restart. Asking again while one is
+  pending merges the two: `now` wins, and each thread's latest `resume`
+  is kept.
 - `resume` carries a thread on afterwards. On the next start the runner
   adds a `system.note` "Runner restarted: <old version> to <new version>"
-  to that thread (with the rollback notice below as a second paragraph if
-  the new release kept crashing), then sends `text` as a new turn whose
-  `user.message` has `origin: "runner"`. The text is only sent if the old runner shut down
-  for the restart less than 15 minutes ago (after a crash, if the restart
-  was asked for less than 15 minutes ago), the thread isn't snoozed or
-  archived, and the runner hasn't already resumed that thread 3 times in
-  the last hour; otherwise there's only the note, saying why.
+  to that thread (with " (from branch X)" for a release not built on main,
+  and the rollback notice below as a second paragraph if the new release
+  kept crashing), then sends `text` as a new turn whose `user.message` has
+  `origin: "runner"`. The text is only sent if the old runner stopped less
+  than 15 minutes ago (after a crash, if that thread asked less than 15
+  minutes ago), the thread isn't snoozed or archived, nobody has sent it a
+  message since it asked, and the runner hasn't already resumed it 3 times
+  in the last hour; otherwise there's only the note, saying why.
+- If the request named a `release` and the runner came back on another one
+  (it kept crashing, or a later deploy replaced it), the note says so and
+  the text sent starts with "Note from the runner: ..." saying which
+  release is running, so the agent doesn't take the old code for its own.
+- The handled request is kept as `restart.done.json` until the new runner
+  has stayed up 60 seconds. If it crashes before then and launch.mjs goes
+  back to the last good release, that runner resumes the same threads once
+  more, with the rollback in the note and the message.
 - A runner that had to go back to an earlier release because the new one
   kept crashing at startup says so with a `warning` notice at startup and
   after every `hello` ("Release X kept crashing at startup, so the runner
@@ -180,7 +197,8 @@ agent runs (`tb self`, the deploy script) know where they are:
 | Variable | Value |
 |---|---|
 | `THREADBARE_THREAD_ID` | the id of the thread the CLI belongs to |
-| `THREADBARE_HOME` | the runner's data dir |
+| `THREADBARE_HOME` | the runner's data dir, where `tb` looks for a runner (agents may point it at a dev runner) |
+| `THREADBARE_RUNNER_HOME` | the runner's data dir too, which agents never change: the scripts' guards against restarting the runner a thread runs on go by it |
 | `THREADBARE_RUNNER_VERSION` | the runner's version, as in `hello` |
 
 ## Ordering and reconnects

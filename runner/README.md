@@ -33,7 +33,11 @@ scripts/deploy-runner.sh                # ship this checkout's runner/ to it
 
 The LaunchAgent runs a release (a snapshot, below), never the checkout, so
 merging to main changes nothing until a deploy. `--from-source` installs the
-old way, running `src/main.ts` from the checkout, for debugging. The plist
+old way, running `src/main.ts` from the checkout, for debugging (and moves
+`launch.mjs` aside, so the deploy script won't ship to it). Replacing or
+removing a running copy waits for no thread to be busy, since it stops them
+(`--force` doesn't wait); if the new runner doesn't come up on its release,
+the old plist goes back. The plist
 pins the Node binary (`~/.nvm/versions/node/v24.22.1/bin/node` by default;
 change it with `--node` or `THREADBARE_NODE`) and the PATH your login shell
 has, so agents can run the same commands a terminal can. Pass `--path` to set
@@ -54,8 +58,14 @@ a free one, and its log goes to `<home>/runner.log`.
 ```
 
 A release id is `<UTC yyyymmddThhmmssZ>-<short commit>`, plus `-dirty` when
-built from uncommitted files. `deploy-runner.sh`:
+built from uncommitted files. `release.json` records the commit and the
+branch. `deploy-runner.sh`:
 
+0. refuses a LaunchAgent that doesn't run releases (for the real runner the
+   one-time switch is Mike's, from a terminal), a HEAD that isn't main's tip
+   (`--allow-branch`: a feature branch's work goes live unmerged, and the
+   next deploy from main drops it), and a release that is still waiting for
+   its own restart (`--force` replaces it),
 1. runs the typecheck and unit tests on the pinned Node (`--skip-checks`),
 2. snapshots `src/`, `bin/` and the package files at HEAD, refusing
    uncommitted changes to them (`--allow-dirty` builds from the files as they
@@ -67,34 +77,52 @@ built from uncommitted files. `deploy-runner.sh`:
 4. points `current` at it,
 5. asks the runner to restart once no thread is running (`runner.restart`),
 6. checks the runner comes back on the new release within 30 s, and if it
-   doesn't, points `current` back, restarts, prints the end of the log and
-   exits 1,
+   doesn't, points `current` back at the release that was running, restarts,
+   prints the end of the log and exits 1,
 7. keeps the newest 5 releases plus the last good one (and anything
    current, previous or still running).
 
 Inside a Threadbare thread the restart waits for that thread's turn to end,
 so the script says so and exits: end the turn, and the runner restarts and
 sends the thread "The runner restarted on release <id>. Check that your
-change works, then carry on." (`--resume "text"` changes it). `--now`
-kickstarts the LaunchAgent at once and is refused inside a thread unless
+change works, then carry on." (`--resume "text"` changes it). If the runner
+comes back on another release (it kept crashing, say), that message starts
+by saying so. `--now` restarts at once (through `runner.restart`, so the
+thread is still carried on) and is refused inside a thread unless
 `--force`. A runner from before `runner.restart` is polled until idle
 (`--wait 30m`), then kickstarted; inside a thread the script prints the
-command for Mike instead.
+command for Mike instead. A runner that is listening but doesn't answer in
+time is never kickstarted: the script fails and prints the command.
+
+The script counts as inside a thread when `THREADBARE_THREAD_ID` is set and
+`THREADBARE_RUNNER_HOME` (which the runner sets, and agents don't change,
+unlike `THREADBARE_HOME`) names the data dir it deploys to, or when that
+runner's pid (`run/runner.pid`) is one of its ancestors, which also catches
+runners too old to set the variables. The real runner's label only goes
+with its own data dir, and the other way round.
 
 ```sh
-scripts/deploy-runner.sh --list       # releases, which is current, previous, last good, running
+scripts/deploy-runner.sh --list       # releases, branches, which is current, previous, last good, running
 scripts/deploy-runner.sh --rollback   # back to the previous release
 scripts/deploy-runner.sh --dry-run    # what it would do
 ```
 
+`--rollback` won't go back to a release that crashed at startup (after an
+automatic rollback, `previous` names it; `--force` tries it again). Its
+default resume says the change is no longer live.
+
 `launch.mjs` records every start in `state.json`. When a release starts 3
-times in 2 minutes without reaching 60 s of listening (when `main.ts` marks
+times in 10 minutes without reaching 60 s of listening (when `main.ts` marks
 it `lastGood`), the third start runs `lastGood` instead, records
-`rolledBack`, and the runner warns every client about it. The runner adds
-`rolledBack.reportedAt` once it has, so only the first start after a
-rollback reports it. A change to `launch.mjs` itself only reaches the
-LaunchAgent through `install-runner.sh`; the deploy script says when the
-installed copy is out of date.
+`rolledBack`, and the runner warns every client about it. A start that
+listened and then exited 0 (a planned restart, `launchctl kickstart`, a
+reboot) is marked `clean` and doesn't count, and a start that isn't
+listening after 90 s is stopped and does, so a release that hangs at
+startup is rolled back too. The runner adds `rolledBack.reportedAt` once it
+has reported it, so only the first start after a rollback does. A change to
+`launch.mjs` itself only reaches the LaunchAgent through
+`install-runner.sh`; the deploy script says when the installed copy is out
+of date.
 
 ## Restarts
 
@@ -103,16 +131,27 @@ restarts the runner without cutting a turn short; `docs/protocol.md` has
 the details.
 
 - It waits until no thread is starting, running or waiting on an approval
-  or a question, then stops the way it does on SIGTERM and exits 0, and
-  launchd starts it again. `--now` (`when: "now"`) doesn't wait. Background
-  shells and subagents don't hold it up; the restart stops them.
+  or a question, and no CLI is running background shells or subagents
+  (`tb status` lists both), then stops the way it does on SIGTERM and exits
+  0, and launchd starts it again. `--now` (`when: "now"`) doesn't wait; any
+  background work it stops gets a note in its thread. From the moment it
+  begins, new sends are refused with "send again in a moment".
 - The request is saved in `restart.json` in the data dir until the next
-  start handles it, so a crash meanwhile doesn't lose it.
+  start handles it, so a crash meanwhile doesn't lose it. `tb restart
+  --cancel` withdraws one that hasn't begun.
 - A thread that asked to carry on gets a note ("Runner restarted: <old> to
   <new>") and its resume text as a new turn from the runner, if the old
   runner stopped less than 15 minutes ago, the thread isn't snoozed or
-  archived, and it hasn't been resumed 3 times in the last hour
-  (`run/resumes.json` keeps count). Otherwise it only gets the note.
+  archived, nobody has written in it since it asked, and it hasn't been
+  resumed 3 times in the last hour (`run/resumes.json` keeps count).
+  Otherwise it only gets the note, which says why.
+- If it asked for a release (the deploy script does) and the runner came
+  back on another, the note and the message both say so.
+- The handled request stays as `restart.done.json` until the new runner is
+  marked good, so if that release crashes and `launch.mjs` goes back to the
+  last good one, the thread is carried on once more there.
+- Snoozed and archived threads keep their queued messages through a
+  restart and send them when they come back.
 
 ## A dev runner
 
@@ -121,12 +160,18 @@ runner in the foreground on a temp data dir (it refuses the real one) and
 prints what to point `tb` and the app at:
 
 ```
-For tb:      export THREADBARE_HOME=/tmp/threadbare-dev.Ab12Cd
+  pid:  41234
+For tb:      /tmp/threadbare-dev.Ab12Cd/tb status
 For the app: --data-dir /tmp/threadbare-dev.Ab12Cd
+Stop it:     kill 41234   (never pkill: the real runner runs src/main.ts too)
 ```
 
-It uses your real logins, so threads in it cost like any other. Ctrl-C stops
-it and the CLIs it started.
+`<home>/tb` is `bin/tb` with that data dir built in, since an exported
+`THREADBARE_HOME` lasts one command in an agent's shell and a bare `tb`
+then reaches the real runner. Like launchd, the script starts the runner
+again when it exits 0 (`tb restart`), and stops when it exits with an
+error. It uses your real logins, so threads in it cost like any other.
+Ctrl-C or the `kill` stops it and the CLIs it started.
 
 ## Configuration
 
@@ -163,11 +208,12 @@ Environment variables, mainly for tests:
 | `THREADBARE_LOG_STDERR=1` | Also print the log to stderr. |
 | `THREADBARE_NODE` | The Node binary the scripts pin (default `~/.nvm/versions/node/v24.22.1/bin/node`). |
 | `THREADBARE_GOOD_AFTER_MS` | How long a release has to stay up before it is marked `lastGood` (default 60 s; the tests shorten it). |
+| `THREADBARE_START_TIMEOUT_MS` | How long `launch.mjs` gives a release to start listening before stopping it (default 90 s). |
 | `THREADBARE_LAUNCHCTL`, `THREADBARE_LAUNCH_AGENTS_DIR` | Stand-ins for `launchctl` and `~/Library/LaunchAgents` in the install and deploy scripts (the deploy tests use both). |
 
 The runner gives every CLI it starts `THREADBARE_THREAD_ID`,
-`THREADBARE_HOME` and `THREADBARE_RUNNER_VERSION`, so `tb self` and the
-deploy script know which thread and runner they're in.
+`THREADBARE_HOME`, `THREADBARE_RUNNER_HOME` and `THREADBARE_RUNNER_VERSION`,
+so `tb self` and the deploy script know which thread and runner they're in.
 
 ## Data layout
 
@@ -176,6 +222,7 @@ deploy script know which thread and runner they're in.
   runner.json
   runner/                       releases, launch.mjs and state.json (above)
   restart.json                  a restart that's waiting for threads to finish
+  restart.done.json             the last one handled, until this release is marked good
   secrets/runner-token          random bearer token, 0600 (folder 0700)
   inbox/                        images the app imports before sending
   run/children.json             CLI process groups this runner started, and the
@@ -214,7 +261,7 @@ bin/tb search "words"
 bin/tb tail <id> [--from SEQ] [--json] [--until-done]
 bin/tb events <id> [--json]
 bin/tb interrupt <id>
-bin/tb approve <id> <approvalId> [allow|allowAlways|deny]
+bin/tb approve <id> <approvalId> [allow|allowAlways|deny]   # the id's start will do
 bin/tb answer <id> <approvalId> "Tea"
 bin/tb snooze <id> 2h          # or an ISO time
 bin/tb archive <id>            bin/tb unarchive <id>
@@ -224,14 +271,25 @@ bin/tb accounts
 For working on Threadbare itself:
 
 ```sh
-bin/tb status [--json]          # version, live CLIs, busy threads, a pending restart
+bin/tb status [--json]          # version, live CLIs, busy threads, background work, a pending restart
 bin/tb self [--json]            # the thread this runs in (THREADBARE_THREAD_ID)
-bin/tb restart [--now [--force]] [--resume "text"] [--reason "text"]
-bin/tb show <id> [--last N] [--tools]   # the thread as plain text
+bin/tb restart [--now [--force]] [--resume "text" | --no-resume] [--reason "text"]
+bin/tb restart --cancel         # withdraw a pending restart
+bin/tb show <id> [--last N] [--tools]   # the thread as plain text, approvals with their ids
 bin/tb logs [-f] [-n 200] [--thread ID]
 bin/tb export <id> [--out DIR]  # a mock-runner fixture in app/.fixtures/threads/<id>
 bin/tb rpc <method> ['{"json": "params"}']
 ```
+
+Inside a thread, `tb restart` carries that thread on afterwards by default
+and says to end the turn, since the restart waits for it. `tb status` marks
+the calling thread. Against a runner from before `runner.status` it shows
+what `hello` and `threads.list` give. `tb logs` says which file it reads;
+with the runner down it reads `<home>/runner.log` for a dev runner or
+sandbox. `tb export` writes the thread as idle (a mid-turn export would
+otherwise look stuck) and prints the mock runner and `run-mock.sh` command
+lines for it; the mock no longer loads `app/.fixtures/threads/` by default,
+so exports never reach design screenshots.
 
 ## How it behaves
 
@@ -390,16 +448,23 @@ The deploy tests build releases of a throwaway git repo whose runner is
 `test/deploy/fake-launchctl.mjs` standing in for launchd: it reads the plist
 `install-runner.sh` wrote and keeps its program running. They cover a first
 install, deploys through `runner.restart`, a deploy from inside a thread,
-an older runner (wait for idle, then kickstart), `--rollback`, a smoke test
+the real label refused for a sandbox, a thread spotted from the process
+tree, `--now --force` through `runner.restart`, a deploy while another's
+restart is pending, a runner too slow to answer (no kickstart), the main
+branch check, an older runner (wait for idle, then kickstart),
+`--rollback` (and its refusal after a crash rollback), a smoke test
 failure, uncommitted changes, a release that crash-loops back to
-`lastGood`, pruning, `--list`, `--dry-run` and uninstalling.
+`lastGood`, pruning, `--list`, `--dry-run`, LaunchAgents that don't run
+releases, the install guards and uninstalling.
 
 The unit tests cover normalisation (recorded SDK sequences in
 `test/fixtures/`), persistence, seq and replay, idle release and snooze with
 a fake clock, approvals, queueing, handoff, recovery, CLI-started turns,
 background work, the live CLI cap, disk errors, the RPC server (auth
 timeout, backpressure), process groups and the lock (with real processes),
-two runners starting on one data dir, and `tb`.
+two runners starting on one data dir, restarts (background work, held
+queues, resumes on the wrong release, cancelling), planned restarts under
+`launch.mjs` and its startup watchdog, and `tb`.
 `test/helpers/protocol-check.ts` checks events and summaries against
 `docs/protocol.md` and is shared by both suites.
 

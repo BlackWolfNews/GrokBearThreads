@@ -9,8 +9,12 @@
 #   --port N     port (default 0: a free one, written to <home>/runner.json
 #                where tb and the app find it)
 #
-# It prints the line that points tb at it and the --data-dir for the app,
-# then runs until Ctrl-C, which stops it and the CLIs it started.
+# It writes <home>/tb, a tb that always talks to this runner (an exported
+# THREADBARE_HOME doesn't last past one command in an agent's shell), and
+# prints the --data-dir for the app. Like launchd, it starts the runner
+# again when it exits 0 (runner.restart, tb restart), and stops when it
+# exits with an error. Ctrl-C, or `kill <pid>` with the pid it prints, stops
+# it and the CLIs it started.
 set -euo pipefail
 
 RUNNER_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -63,17 +67,54 @@ if [ ! -d "$RUNNER_DIR/node_modules/@anthropic-ai/claude-agent-sdk" ] || [ ! -d 
 fi
 
 LOG="$DATA_HOME/runner.log"
+TB="$DATA_HOME/tb"
+# THREADBARE_PORT and THREADBARE_URL go too: tb then reads the port this
+# runner wrote to runner.json.
+{
+  echo '#!/bin/bash'
+  echo '# tb for the dev runner in this folder (scripts/dev-runner.sh wrote it).'
+  printf 'exec env -u THREADBARE_DATA_DIR -u THREADBARE_URL -u THREADBARE_PORT -u THREADBARE_LOG THREADBARE_HOME=%q %q %q "$@"\n' \
+    "$DATA_HOME" "$NODE" "$RUNNER_DIR/bin/tb"
+} > "$TB"
+chmod +x "$TB"
+
 echo "Dev runner: $RUNNER_DIR (working tree)"
 echo "  data: $DATA_HOME"
 echo "  log:  $LOG (also shown here)"
-echo "For tb:      export THREADBARE_HOME=$(printf '%q' "$DATA_HOME")"
+echo "  pid:  $$"
+echo "For tb:      $(printf '%q' "$TB") status"
 echo "For the app: --data-dir $(printf '%q' "$DATA_HOME")"
-echo "Ctrl-C stops it."
+echo "Stop it:     kill $$   (never pkill: the real runner runs src/main.ts too)"
 echo
 
 cd "$RUNNER_DIR"
+CHILD=""
+stop() {
+  trap - INT TERM HUP
+  if [ -n "$CHILD" ]; then
+    kill -TERM "$CHILD" 2>/dev/null || true
+    wait "$CHILD" 2>/dev/null || true
+  fi
+  exit 0
+}
+trap stop INT TERM HUP
+
 # Inside a thread these name the live runner and that thread; the dev
 # runner sets its own for the CLIs it starts.
-exec env -u THREADBARE_DATA_DIR -u THREADBARE_URL -u THREADBARE_THREAD_ID -u THREADBARE_RUNNER_VERSION \
-  THREADBARE_HOME="$DATA_HOME" THREADBARE_PORT="$PORT" THREADBARE_LOG="$LOG" THREADBARE_LOG_STDERR=1 \
-  "$NODE" src/main.ts
+while :; do
+  env -u THREADBARE_DATA_DIR -u THREADBARE_URL -u THREADBARE_THREAD_ID -u THREADBARE_RUNNER_VERSION -u THREADBARE_RUNNER_HOME \
+    THREADBARE_HOME="$DATA_HOME" THREADBARE_PORT="$PORT" THREADBARE_LOG="$LOG" THREADBARE_LOG_STDERR=1 \
+    "$NODE" src/main.ts &
+  CHILD=$!
+  CODE=0
+  wait "$CHILD" || CODE=$?
+  CHILD=""
+  if [ "$CODE" != 0 ]; then
+    echo "The dev runner exited with $CODE; not starting it again." >&2
+    exit "$CODE"
+  fi
+  # Exit 0 is a restart (runner.restart), which launchd would answer by
+  # starting it again; so does this.
+  echo "The dev runner restarted itself; starting it again."
+  sleep 1
+done

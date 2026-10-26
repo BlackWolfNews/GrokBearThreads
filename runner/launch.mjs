@@ -6,17 +6,25 @@
 // Node built-ins. scripts/deploy.mjs imports the state helpers from here so
 // both agree on the file format.
 //
-// Each start records a boot. A release that keeps dying at startup (3 boots
-// in 2 minutes without main.ts marking it good) is swapped for the last
-// good one. Then the release's src/main.ts is imported into this process,
-// so launchd's signals reach the runner as they did before.
+// Each start records a boot. A release that keeps dying at startup (3
+// boots in 10 minutes that neither stayed up long enough for main.ts to
+// mark it good nor stopped cleanly) is swapped for the last good one. Then
+// the release's src/main.ts is imported into this process, so launchd's
+// signals reach the runner as they did before. A release that hasn't
+// started listening within 90 seconds is stopped, so one that hangs at
+// startup counts as crashing too.
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 export const CRASH_BOOTS = 3;
-export const CRASH_WINDOW_MS = 2 * 60_000;
+// Long enough to hold three starts that each hang until the watchdog below
+// stops them (launchd waits 5 s between starts). It can't catch a healthy
+// release: one marked good is never rolled back, and clean stops (a
+// restart, launchctl kickstart, a reboot) don't count.
+export const CRASH_WINDOW_MS = 10 * 60_000;
+export const START_TIMEOUT_MS = 90_000;
 export const KEEP_BOOTS = 20;
 
 export function emptyState() {
@@ -73,16 +81,16 @@ export function releaseExists(dir, id) {
 // Decides what this boot starts, without touching the disk. `state.current`
 // should already agree with the symlink. Returns the state to save, the
 // release to start, and `rolledBack` when it went back to lastGood.
-export function planBoot(state, now, exists) {
+export function planBoot(state, now, exists, pid = process.pid) {
   const at = new Date(now).toISOString();
   const current = state.current;
-  const earlier = state.boots.filter((b) => b && b.release === current && Date.parse(b.at) > now - CRASH_WINDOW_MS).length;
+  const earlier = state.boots.filter((b) => b && b.release === current && !b.clean && Date.parse(b.at) > now - CRASH_WINDOW_MS).length;
   // This boot counts: the third start in the window is the one that
   // switches, so a broken release gets two tries.
   const crashLooping = Boolean(current) && current !== state.lastGood && earlier + 1 >= CRASH_BOOTS;
   const canRollBack = crashLooping && exists(state.lastGood);
   const start = canRollBack ? state.lastGood : current;
-  const next = { ...state, boots: [...state.boots, { release: start, at }].slice(-KEEP_BOOTS) };
+  const next = { ...state, boots: [...state.boots, { release: start, at, pid }].slice(-KEEP_BOOTS) };
   let rolledBack = null;
   if (canRollBack) {
     rolledBack = { from: current, to: start, at };
@@ -91,6 +99,19 @@ export function planBoot(state, now, exists) {
     Object.assign(next, { current: start, previous: current, rolledBack });
   }
   return { state: next, start, rolledBack, stuck: crashLooping && !canRollBack };
+}
+
+// Marks this process's boot as a clean stop: the runner listened and then
+// exited 0 (a planned restart, launchctl kickstart, a reboot). planBoot
+// doesn't count those, so restarting a new release a few times in a row
+// isn't mistaken for a crash loop.
+export function markBootClean(dir, at, pid = process.pid) {
+  const state = readState(dir);
+  const boot = state.boots.findLast((b) => b && b.at === at && b.pid === pid);
+  if (!boot || boot.clean) return false;
+  boot.clean = true;
+  writeState(dir, state);
+  return true;
 }
 
 function log(level, msg, extra) {
@@ -125,7 +146,35 @@ async function main() {
   const root = path.join(dir, 'releases', plan.start);
   log('INFO', 'starting release', { release: plan.start, pid: process.pid });
   process.chdir(root);
-  await import(pathToFileURL(path.join(root, 'src', 'main.ts')).href);
+  // main.ts calls listening() once it is serving (src/release.ts).
+  let listened = false;
+  let watchdog;
+  globalThis.threadbareLaunch = {
+    listening() {
+      listened = true;
+      clearTimeout(watchdog);
+    },
+  };
+  const at = plan.state.boots.at(-1).at;
+  process.on('exit', (code) => {
+    if (code !== 0 || !listened) return;
+    try {
+      markBootClean(dir, at);
+    } catch {
+      // the next boot just counts this one
+    }
+  });
+  const mod = await import(pathToFileURL(path.join(root, 'src', 'main.ts')).href);
+  // Releases from before the hook never call it, so only those that say
+  // they do get the watchdog. It keeps the process alive on purpose: a
+  // startup that stalls with nothing left to run would otherwise exit 0.
+  if (mod.REPORTS_LISTENING && !listened) {
+    const ms = Number(process.env.THREADBARE_START_TIMEOUT_MS) > 0 ? Number(process.env.THREADBARE_START_TIMEOUT_MS) : START_TIMEOUT_MS;
+    watchdog = setTimeout(() => {
+      log('ERROR', `release ${plan.start} wasn't listening after ${Math.round(ms / 1000)} s; stopping it so it counts as a failed start`);
+      process.exit(1);
+    }, ms);
+  }
 }
 
 // Only when run as the program, so deploy.mjs and the tests can import the

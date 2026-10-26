@@ -3,7 +3,7 @@
 // THREADBARE_PORT pointing at temp places.
 import fs from 'node:fs';
 import { loadConfig, ensureHome, readToken, paths, recordListening, DEFAULT_CWD, RUNNER_VERSION } from './config.ts';
-import { RELEASE, markGoodLater, takeRollbackNotice } from './release.ts';
+import { RELEASE, markGoodLater, takeRollbackNotice, tellLaunchListening } from './release.ts';
 import { Restarter, restartMethods } from './restart.ts';
 import { createLogger } from './log.ts';
 import { ThreadStore } from './store.ts';
@@ -15,6 +15,10 @@ import { RpcServer } from './rpc.ts';
 import { realClock } from './clock.ts';
 import { acquireLock } from './lock.ts';
 import { removeTempFiles } from './fsutil.ts';
+
+// Tells launch.mjs this runner calls its listening() hook (release.ts), so
+// it may stop one that hasn't started listening in time.
+export const REPORTS_LISTENING = true;
 
 async function main(): Promise<void> {
   const cfg = loadConfig();
@@ -73,6 +77,7 @@ async function main(): Promise<void> {
     clock: realClock,
     log,
     release: RELEASE.release,
+    branch: RELEASE.branch,
     logFile: cfg.logFile,
     rolledBack,
     restart: () => void stop('restart'),
@@ -102,7 +107,8 @@ async function main(): Promise<void> {
   log.info('runner listening', { url: `ws://${cfg.host}:${port}/rpc` });
   // Tests read this line to know the runner is up.
   process.stdout.write(`threadbare-runner listening on ${port}\n`);
-  const cancelMarkGood = markGoodLater(cfg.home, RELEASE.release, log);
+  tellLaunchListening();
+  const cancelMarkGood = markGoodLater(cfg.home, RELEASE.release, log, process.env, () => restarter.proven());
   // Only once listening: a runner that can't listen exits, and the next
   // one should still find the resume.
   restarter.resumeAfterRestart();
@@ -113,6 +119,8 @@ async function main(): Promise<void> {
     stopping = true;
     cancelMarkGood();
     log.info('runner stopping', { signal });
+    // Whatever stopped it, a pending restart has now happened.
+    restarter.stopping();
     try {
       await runner.shutdown();
       await server.close().catch(() => {});

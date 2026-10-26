@@ -44,8 +44,8 @@ function events(img = '/m/a.png'): PersistedEvent[] {
     { turnId: 't1', type: 'tool.result', itemId: 'c1', ok: false, text: 'FAIL a.test.ts\n1 failing', truncated: false, images: [] },
     { turnId: 't1', type: 'tool.call', itemId: 'c2', name: 'Edit', kind: 'edit', title: 'Edit src/a.ts', input: {} },
     { turnId: 't1', type: 'edit.diff', itemId: 'c2', path: '/w/src/a.ts', hunks: [{ oldStart: 1, oldLines: 2, newStart: 1, newLines: 2, lines: [' a', '-b', '+c'] }] },
-    { turnId: 't1', type: 'approval.requested', approvalId: 'ap1', itemId: 'c2', name: 'Edit', title: 'Edit src/a.ts', input: {}, options: ['allow', 'deny'] },
-    { turnId: 't1', type: 'approval.resolved', approvalId: 'ap1', decision: 'allow' },
+    { turnId: 't1', type: 'approval.requested', approvalId: 'ap1-0000-edit', itemId: 'c2', name: 'Edit', title: 'Edit src/a.ts', input: {}, options: ['allow', 'deny'] },
+    { turnId: 't1', type: 'approval.resolved', approvalId: 'ap1-0000-edit', decision: 'allow' },
     { turnId: 't1', type: 'tool.result', itemId: 'c2', ok: true, text: '', truncated: false, images: [] },
     { turnId: 't1', type: 'plan.updated', entries: [{ text: 'Run tests', status: 'completed' }, { text: 'Fix', status: 'in_progress' }, { text: 'Commit', status: 'pending' }] },
     { turnId: 't1', type: 'assistant.text', itemId: 'm2', text: 'Fixed it.\n\nAll green.' },
@@ -78,7 +78,7 @@ test('tb show: messages, one line per tool call, approvals, notes and turn foote
       'Assistant: I will run the tests.',
       '  - npm test (failed)',
       '  - Edit src/a.ts',
-      '  Approval asked: Edit src/a.ts',
+      '  Approval asked (ap1-0000): Edit src/a.ts',
       '  Answer: allowed',
       '  Plan:',
       '    [x] Run tests',
@@ -110,7 +110,7 @@ test('tb show --tools adds results, diffs and thinking; --last keeps the last tu
         '       a',
         '      -b',
         '      +c',
-        '  Approval asked: Edit src/a.ts',
+        '  Approval asked (ap1-0000): Edit src/a.ts',
         '  Answer: allowed',
         '      (no output)',
       ].join('\n'),
@@ -135,25 +135,32 @@ test('tb status text', () => {
       startedAt: '2026-10-26T09:55:00.000Z',
       home: '/h',
       logFile: '/h/runner.log',
+      branch: 'devtools',
       liveClis: 2,
       running: [T.id],
-      pendingRestart: { when: 'idle', requestedAt: '2026-10-26T11:57:00.000Z', waitingFor: [T.id], reason: 'deploy', resumeThreadId: T.id },
+      background: [{ threadId: 'bbbbbbbb-1', tasks: ['npm run e2e', 'research subagent'] }],
+      pendingRestart: { when: 'idle', release: 'r2', requestedAt: '2026-10-26T11:57:00.000Z', waitingFor: [T.id, 'bbbbbbbb-1'], reason: 'deploy', resumeThreadId: T.id },
     },
-    [{ ...T, status: 'running' }],
+    [{ ...T, status: 'running' }, { ...T, id: 'bbbbbbbb-1', title: 'E2E run', status: 'idle' }],
     now,
+    T.id,
   );
   assert.equal(
     text,
     [
-      'Runner 0.1.0+r1, pid 42, up 2h 5m',
+      'Runner 0.1.0+r1 (branch devtools), pid 42, up 2h 5m',
       'Data dir: /h',
       'Log: /h/runner.log',
       'Live CLIs: 2',
       'Busy threads: 1',
-      '  abcdef12  Fix the tests  [running]',
-      'Restart pending: when idle, asked 3m ago, waiting for 1 thread',
+      '  abcdef12  Fix the tests  [running]  (this thread)',
+      'Background work: 1 thread',
+      '  bbbbbbbb  E2E run  [idle]: npm run e2e; research subagent',
+      'Restart pending: when idle onto r2, asked 3m ago, waiting for 2 threads',
+      '  abcdef12  Fix the tests  [running]  (this thread)',
+      '  bbbbbbbb  E2E run  [idle]',
       '  Reason: deploy',
-      '  Then carries on: abcdef12  Fix the tests  [running]',
+      '  Then carries on: abcdef12  Fix the tests  [running]  (this thread)',
       '',
     ].join('\n'),
   );
@@ -175,11 +182,15 @@ test('tb export writes the mock runner fixture format, with images copied next t
     { path: path.join(src, 'gone.png'), mediaType: 'image/png' },
   ];
   const out = path.join(tmpDir(), T.id);
-  assert.deepEqual(exportThread(T, evs, out), { events: 21, media: 2 });
+  // A thread exporting itself mid-turn: the mock has nothing to end the
+  // turn, so it's exported idle.
+  assert.deepEqual(exportThread({ ...T, status: 'running', needsYou: true }, evs, out), { events: 21, media: 2 });
   assert.deepEqual(fs.readdirSync(path.join(out, 'media')).sort(), ['2-shot.png', 'shot.png']);
   const thread = JSON.parse(fs.readFileSync(path.join(out, 'thread.json'), 'utf8'));
   assert.equal(thread.id, T.id);
   assert.equal(thread.live, false);
+  assert.equal(thread.status, 'idle');
+  assert.equal(thread.needsYou, false);
   const lines = fs.readFileSync(path.join(out, 'events.ndjson'), 'utf8').split('\n');
   assert.equal(lines.pop(), '', 'ends with a newline');
   const back = lines.map((l) => JSON.parse(l));
@@ -194,9 +205,11 @@ test('the mock runner loads an export', { skip: !fs.existsSync(path.join(MOCK, '
   fs.writeFileSync(path.join(src, 'shot.png'), makePng(4, 3));
   const parent = tmpDir();
   exportThread(T, events(path.join(src, 'shot.png')), path.join(parent, T.id));
+  // Something else beside it, which loading the export alone leaves out.
+  exportThread({ ...T, id: 'other' }, events(path.join(src, 'shot.png')), path.join(parent, 'other'));
   const data = tmpDir();
   const ready = path.join(data, 'ready');
-  const mock = spawn(process.execPath, [path.join(MOCK, 'server.mjs'), '--data-dir', data, '--fixtures', parent, '--ready-file', ready, '--quiet'], { stdio: 'ignore' });
+  const mock = spawn(process.execPath, [path.join(MOCK, 'server.mjs'), '--data-dir', data, '--fixtures', path.join(parent, T.id), '--ready-file', ready, '--quiet'], { stdio: 'ignore' });
   try {
     for (let i = 0; i < 100 && !fs.existsSync(ready); i++) await new Promise((r) => setTimeout(r, 50));
     const port = Number(fs.readFileSync(ready, 'utf8'));
@@ -205,7 +218,7 @@ test('the mock runner loads an export', { skip: !fs.existsSync(path.join(MOCK, '
     assert.deepEqual(list.threads.map((t: ThreadSummary) => t.id), [T.id]);
     const page = await c.call('threads.events', { threadId: T.id, limit: 100 });
     assert.equal(page.events.length, 21);
-    assert.equal(page.events[0].images[0].path, path.join(parent, T.id, 'media', 'shot.png'));
+    assert.equal(path.normalize(page.events[0].images[0].path), path.join(parent, T.id, 'media', 'shot.png'));
     assert.ok(fs.existsSync(page.events[0].images[0].path));
     c.close();
   } finally {
@@ -303,6 +316,8 @@ test('tb status, self, show, export and rpc against a runner', async () => {
     r = await run(h.home, url, ['export', thread.id, '--out', out]);
     assert.equal(r.code, 0, r.out);
     assert.match(r.out, /Exported 4 events and 0 images to /);
+    assert.match(r.out, new RegExp(`--fixtures ${out.replaceAll('.', '\\.')}\n`), 'loads the export alone');
+    assert.match(r.out, /--data-dir \S*tb-mock-[0-9a-f]{8}/);
     assert.equal(fs.readFileSync(path.join(out, 'events.ndjson'), 'utf8').trim().split('\n').length, 4);
 
     r = await run(h.home, url, ['rpc', 'threads.list', '{"include":["inbox"]}']);
@@ -330,29 +345,53 @@ test('tb restart: waits for busy threads, resumes the calling thread, and guards
     assert.equal(r.code, 1);
     assert.match(r.out, /--now stops every turn, this thread's own included/);
 
+    // Inside a thread it carries the thread on by default, and says to end
+    // the turn: waiting for the restart from inside it would never end.
+    r = await run(h.home, url, ['restart', '--reason', 'new release'], inThread);
+    assert.equal(r.code, 0, r.out);
+    const id8 = thread.id.slice(0, 8);
+    assert.equal(
+      r.out,
+      `The runner will restart when 1 thread finishes (a turn, or background shells and subagents):\n  ${id8}  Deploy  [running]  (this thread)\n` +
+        'Then this thread carries on with: "The runner restarted (new release). Check that it worked, then carry on."\n' +
+        'End your turn now; the runner restarts after it and carries this thread on.\n',
+    );
+    let saved = JSON.parse(fs.readFileSync(restartPath(h.home), 'utf8'));
+    assert.deepEqual(saved.resumes.map((x: { threadId: string; text: string }) => [x.threadId, x.text]), [[thread.id, 'The runner restarted (new release). Check that it worked, then carry on.']]);
+
     r = await run(h.home, url, ['restart', '--resume', 'Check it works', '--reason', 'new release'], inThread);
     assert.equal(r.code, 0, r.out);
-    assert.equal(r.out, `The runner will restart when 1 thread finishes:\n  ${thread.id.slice(0, 8)}  Deploy  [running]\n`);
-    const saved = JSON.parse(fs.readFileSync(restartPath(h.home), 'utf8'));
+    saved = JSON.parse(fs.readFileSync(restartPath(h.home), 'utf8'));
     assert.deepEqual(saved.resumes.map((x: { threadId: string; text: string }) => [x.threadId, x.text]), [[thread.id, 'Check it works']]);
     assert.equal(saved.reason, 'new release');
 
-    r = await run(h.home, url, ['status']);
-    assert.match(r.out, /Restart pending: when idle, asked [^\n]+ ago, waiting for 1 thread\n  Reason: new release\n  Then carries on: /);
+    r = await run(h.home, url, ['status'], inThread);
+    assert.match(r.out, new RegExp(`Restart pending: when idle, asked [^\\n]+ ago, waiting for 1 thread\\n  ${id8}  Deploy  \\[running\\]  \\(this thread\\)\\n  Reason: new release\\n  Then carries on: `));
 
     // Outside a thread, --resume needs one named.
     r = await run(h.home, url, ['restart', '--resume', 'x']);
     assert.equal(r.code, 1);
     assert.match(r.out, /--resume needs a thread/);
 
+    // A thread of another runner (tb pointed at a sandbox from a real
+    // thread) isn't carried on, and --now isn't refused for it.
+    r = await run(h.home, url, ['restart', '--cancel']);
+    assert.equal(r.out, 'No restart is pending now.\n');
+    assert.equal(fs.existsSync(restartPath(h.home)), false, 'withdrawn');
+    r = await run(h.home, url, ['restart'], { THREADBARE_THREAD_ID: 'a-thread-of-another-runner' });
+    assert.equal(r.code, 0, r.out);
+    assert.doesNotMatch(r.out, /this thread/);
+    assert.match(r.out, /tb restart --cancel withdraws it/);
+    assert.deepEqual(JSON.parse(fs.readFileSync(restartPath(h.home), 'utf8')).resumes, []);
+
     assert.equal(state.restarts, 0);
     h.adapter.last.result();
     await tick();
     assert.equal(state.restarts, 1);
 
-    r = await run(h.home, url, ['restart', '--now', '--force'], inThread);
+    r = await run(h.home, url, ['restart', '--now', '--force', '--no-resume'], inThread);
     assert.equal(r.code, 0, r.out);
-    assert.equal(r.out, 'Restarting now.\n');
+    assert.equal(r.out, 'Restarting now; this turn ends with it.\n');
   } finally {
     await server.close();
   }
@@ -364,11 +403,16 @@ test('tb restart and status on a runner that is older than runner.restart', asyn
   const { port } = await server.listen();
   try {
     const url = `ws://127.0.0.1:${port}/rpc`;
-    for (const cmd of ['restart', 'status']) {
-      const r = await run(h.home, url, [cmd]);
-      assert.equal(r.code, 3, r.out);
-      assert.match(r.out, /This runner is too old for runner\.status and runner\.restart/);
-    }
+    const { thread } = h.runner.create({ text: 'Busy', accountId: 'claude-3' });
+    h.adapter.last.init();
+    let r = await run(h.home, url, ['restart']);
+    assert.equal(r.code, 3, r.out);
+    assert.match(r.out, /This runner is too old for runner\.status and runner\.restart/);
+    // status says what it can, and not to restart it.
+    r = await run(h.home, url, ['status']);
+    assert.equal(r.code, 0, r.out);
+    assert.match(r.out, new RegExp(`^Runner \\S+\\nBusy threads: 1\\n  ${thread.id.slice(0, 8)}  Busy  \\[running\\]\\n`));
+    assert.match(r.out, /picks it up on its next restart\. Don't restart it yourself\./);
   } finally {
     await server.close();
   }
@@ -382,9 +426,13 @@ test('tb logs prints the tail, filters by thread, and follows', async () => {
   const env = { THREADBARE_LOG: log };
   let r = await run(dir, 'ws://127.0.0.1:1/rpc', ['logs', '-n', '2'], env);
   assert.equal(r.code, 0, r.out);
-  assert.equal(r.out, 'three\nfour {"threadId":"t-1"}\n');
+  assert.equal(r.out, `==> ${log} <==\nthree\nfour {"threadId":"t-1"}\n`);
   r = await run(dir, 'ws://127.0.0.1:1/rpc', ['logs', '--thread', 't-1'], env);
-  assert.equal(r.out, 'two {"threadId":"t-1"}\nfour {"threadId":"t-1"}\n');
+  assert.equal(r.out, `==> ${log} <==\ntwo {"threadId":"t-1"}\nfour {"threadId":"t-1"}\n`);
+  // With the runner down and no THREADBARE_LOG, a dev or sandbox data dir's
+  // own log, not the real runner's.
+  r = await run(dir, 'ws://127.0.0.1:1/rpc', ['logs', '-n', '1']);
+  assert.equal(r.out, `==> ${log} <==\nfour {"threadId":"t-1"}\n`);
   r = await run(dir, 'ws://127.0.0.1:1/rpc', ['logs'], { THREADBARE_LOG: path.join(dir, 'none.log') });
   assert.equal(r.code, 1);
   assert.match(r.out, /No log at/);
@@ -394,7 +442,7 @@ test('tb logs prints the tail, filters by thread, and follows', async () => {
     await new Promise((res) => setTimeout(res, 400));
     fs.appendFileSync(log, 'five {"threadId":"t-2"}\nsix\nseven {"threadId":"t-2"}\n');
     for (let i = 0; i < 40 && !f.out().includes('seven'); i++) await new Promise((res) => setTimeout(res, 50));
-    assert.equal(f.out(), 'five {"threadId":"t-2"}\nseven {"threadId":"t-2"}\n');
+    assert.equal(f.out(), `==> ${log} <==\nfive {"threadId":"t-2"}\nseven {"threadId":"t-2"}\n`);
   } finally {
     f.kill();
   }

@@ -186,3 +186,71 @@ test('a runner run from source says +source and leaves state.json alone', async 
     r.proc.kill('SIGKILL');
   }
 });
+
+// ------------------------------------------------- under launch.mjs
+
+function installLaunch(home: string, current: string): string {
+  const launch = path.join(home, 'runner', 'launch.mjs');
+  fs.copyFileSync(path.join(RUNNER_DIR, 'launch.mjs'), launch);
+  fs.symlinkSync(path.join('releases', current), path.join(home, 'runner', 'current'));
+  return launch;
+}
+
+test('planned restarts under launch.mjs are clean stops, so several in a row are not a crash loop', async () => {
+  const home = tmpDir();
+  const older = '20261025T101500Z-0000001';
+  const id = '20261026T101500Z-abc1234';
+  makeRelease(home, older);
+  makeRelease(home, id);
+  const launch = installLaunch(home, id);
+  writeState(home, { current: id, previous: older, lastGood: older, boots: [] });
+  // launchd would start it again after each exit; three planned restarts
+  // well inside a minute, none of them long enough to be marked good.
+  for (let i = 0; i < 4; i++) {
+    const r = startRunner(launch, home, { THREADBARE_GOOD_AFTER_MS: '600000' });
+    try {
+      const port = await r.listening;
+      const { c, hello } = await connect(home, port);
+      assert.equal(hello.runnerVersion, `${PKG_VERSION}+${id}`, `start ${i + 1} runs the new release`);
+      assert.deepEqual(await c.call('runner.restart', { reason: `restart ${i + 1}` }), { scheduled: true, waitingFor: [] });
+      assert.equal(await r.exited, 0);
+      c.close();
+    } finally {
+      r.proc.kill('SIGKILL');
+    }
+  }
+  const s = readState(home)!;
+  assert.equal(s.rolledBack, undefined);
+  assert.equal(s.current, id);
+  assert.equal(s.lastGood, older);
+  assert.deepEqual(
+    s.boots.map((b) => [b.release, b.clean]),
+    [
+      [id, true],
+      [id, true],
+      [id, true],
+      [id, true],
+    ],
+  );
+});
+
+test('launch.mjs stops a release that never starts listening, and that start counts as a crash', async () => {
+  const home = tmpDir();
+  const id = '20261026T101500Z-0000002';
+  const dir = path.join(home, 'runner', 'releases', id);
+  fs.mkdirSync(path.join(dir, 'src'), { recursive: true });
+  // Says it reports listening, then hangs at startup.
+  fs.writeFileSync(path.join(dir, 'src', 'main.ts'), 'export const REPORTS_LISTENING = true;\nsetInterval(() => {}, 1000);\n');
+  const launch = installLaunch(home, id);
+  writeState(home, { current: id, previous: null, lastGood: null, boots: [] });
+  const r = startRunner(launch, home, { THREADBARE_START_TIMEOUT_MS: '300' });
+  try {
+    assert.equal(await r.exited, 1);
+    assert.match(r.out(), new RegExp(`release ${id} wasn't listening after 0 s; stopping it so it counts as a failed start`));
+    const s = readState(home)!;
+    assert.equal(s.boots.length, 1);
+    assert.equal(s.boots[0].clean, undefined);
+  } finally {
+    r.proc.kill('SIGKILL');
+  }
+});

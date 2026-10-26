@@ -42,7 +42,10 @@ the data dir (`<home>`, normally `~/Library/Application Support/Threadbare`):
   "boots": [{ "release": id, "at": iso }], "rolledBack": { "from", "to",
   "at" }? }`. Keep the last 20 boots.
 - **launch.mjs** records a boot. If `current` has booted 3 times in the
-  last 2 minutes without being marked good, and `lastGood` is a different
+  last 2 minutes without being marked good (since built: 10 minutes, with
+  clean stops not counted and a 90 s startup watchdog, so planned restarts
+  never trip it and a hang does; see `runner/README.md`), and `lastGood`
+  is a different
   release that still exists, it points `current` at `lastGood`, records
   `rolledBack`, and logs it. Then it imports `current/src/main.ts`
   in-process (Node 24 runs TypeScript directly), so launchd's signals

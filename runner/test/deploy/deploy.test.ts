@@ -263,6 +263,7 @@ test('a second release goes live through runner.restart', { timeout: 60_000 }, a
   assert.equal(await version(), `9.9.9+${second}`);
   const call = restartCalls().at(-1)!;
   assert.equal(call.when, 'idle');
+  assert.equal(call.release, second, 'the runner is told which release to expect');
   assert.equal(call.resume, undefined, 'no thread to resume outside one');
   assert.deepEqual(leftovers(), []);
 });
@@ -294,6 +295,121 @@ test('inside a thread, the restart waits for the thread and then resumes it', { 
 
   setBusy([]);
   await runsOn(third);
+});
+
+test("the real runner's label is refused for a sandbox, and a thread is spotted from the process tree", { timeout: 60_000 }, async () => {
+  // The reviewer's case: a sandbox --home with the real label, from inside a thread.
+  let r = sh('deploy-runner.sh', ['--home', home, '--label', 'com.mikerosoft.threadbare.runner', '--now', '--dry-run'], { THREADBARE_THREAD_ID: 'thread-1' });
+  assert.equal(r.status, 1, out(r));
+  assert.match(r.stderr, /is the real runner's label/);
+  assert.doesNotMatch(r.stdout, /kickstart/);
+
+  // No THREADBARE_* at all, but the runner owning the data dir is an
+  // ancestor (here this test process stands in for it).
+  fs.mkdirSync(path.join(home, 'run'), { recursive: true });
+  fs.writeFileSync(path.join(home, 'run', 'runner.pid'), JSON.stringify({ pid: process.pid, lstart: 'x' }));
+  try {
+    r = deploy(['--now', '--skip-checks']);
+    assert.equal(r.status, 1, out(r));
+    assert.match(r.stderr, /--now would stop the runner this thread runs on/);
+    r = sh('install-runner.sh', ['--home', home, '--label', LABEL]);
+    assert.equal(r.status, 1, out(r));
+    assert.match(r.stderr, /Ask Mike to run it from a terminal/);
+    // THREADBARE_HOME pointed at a dev runner doesn't switch the guard off.
+    r = sh('install-runner.sh', ['--home', home, '--label', LABEL], { THREADBARE_THREAD_ID: 't', THREADBARE_HOME: path.join(root, 'dev-home') });
+    assert.equal(r.status, 1, out(r));
+  } finally {
+    fs.rmSync(path.join(home, 'run'), { recursive: true, force: true });
+  }
+  // THREADBARE_RUNNER_HOME, not THREADBARE_HOME, says which runner a thread is on.
+  r = deploy(['--now', '--skip-checks'], { THREADBARE_THREAD_ID: 'thread-1', THREADBARE_HOME: path.join(root, 'dev-home'), THREADBARE_RUNNER_HOME: home });
+  assert.equal(r.status, 1, out(r));
+  assert.match(r.stderr, /--force/);
+});
+
+test('--now --force inside a thread restarts through runner.restart and still carries the thread on', { timeout: 60_000 }, async () => {
+  commit({ v: 'now' }, 'now');
+  const kicks = kickstarts();
+  const r = deploy(['--now', '--force', '--skip-checks'], { THREADBARE_THREAD_ID: 'thread-1', THREADBARE_HOME: home });
+  assert.equal(r.status, 0, out(r));
+  assert.match(r.stdout, /Restarting now\. This turn ends here, and the runner then carries this thread on with:/);
+  const id = current();
+  const call = restartCalls().at(-1)!;
+  assert.equal(call.when, 'now');
+  assert.equal(call.release, id);
+  assert.equal(call.resume.threadId, 'thread-1');
+  assert.equal(kickstarts(), kicks, 'no launchctl kickstart, which would have skipped the resume');
+  await runsOn(id);
+});
+
+test("a deploy while another deploy's restart is pending is refused unless --force", { timeout: 90_000 }, async () => {
+  const running = current();
+  setBusy(['t-p']);
+  commit({ v: 'p1' }, 'first of two');
+  let r = deploy(['--skip-checks'], { THREADBARE_THREAD_ID: 'thread-1', THREADBARE_HOME: home });
+  assert.equal(r.status, 0, out(r));
+  const waiting = current();
+  assert.equal(await version(), `9.9.9+${running}`);
+
+  commit({ v: 'p2' }, 'second of two');
+  const ids = releases();
+  r = deploy(['--skip-checks']);
+  assert.equal(r.status, 1, out(r));
+  assert.match(r.stderr, new RegExp(`Release ${waiting} is current but hasn't started yet`));
+  assert.match(r.stderr, /thread thread-1 is waiting to be carried on with it/);
+  assert.deepEqual(releases(), ids, 'refused before building');
+
+  r = deploy(['--skip-checks', '--force', '--wait', '1s']);
+  assert.equal(r.status, 0, out(r));
+  assert.match(r.stdout, new RegExp(`Replacing release ${waiting}, which never started`));
+  const replaced = current();
+  assert.equal(state().previous, running, 'previous is the release that ran, not the one that never did');
+  setBusy([]);
+  await runsOn(replaced);
+});
+
+test('a runner that is listening but too slow to answer is not kickstarted', { timeout: 90_000 }, async () => {
+  const running = current();
+  const kicks = kickstarts();
+  commit({ v: 'slow' }, 'slow');
+  fs.writeFileSync(path.join(home, 'fake-hang-restart'), '');
+  try {
+    const r = deploy(['--skip-checks']);
+    assert.equal(r.status, 1, out(r));
+    assert.match(r.stderr, /listening but didn't answer runner\.restart/);
+    assert.match(r.stderr, /launchctl kickstart -k/);
+    assert.equal(kickstarts(), kicks);
+    assert.equal(await version(), `9.9.9+${running}`);
+  } finally {
+    fs.rmSync(path.join(home, 'fake-hang-restart'));
+  }
+  assert.equal(launchctl('kickstart', '-k', TARGET), 0);
+  await runsOn(current());
+});
+
+test('a HEAD that is not main is refused unless --allow-branch, and the branch is recorded', { timeout: 60_000 }, async () => {
+  git('checkout', '-q', '-b', 'feature');
+  commit({ v: 'feature' }, 'unmerged work');
+  let r = deploy(['--skip-checks']);
+  assert.equal(r.status, 1, out(r));
+  assert.match(r.stderr, /branch feature\) has commits that aren't on main/);
+  assert.match(r.stderr, /--allow-branch/);
+  r = deploy(['--skip-checks', '--allow-branch']);
+  assert.equal(r.status, 0, out(r));
+  const id = current();
+  assert.equal(readJson(path.join(runnerDir(), 'releases', id, 'release.json')).branch, 'feature');
+  await runsOn(id);
+  r = deploy(['--list']);
+  assert.match(r.stdout, new RegExp(`\\* ${id}.*, feature, node`));
+  // Behind main: merged work would come back out.
+  git('checkout', '-q', 'main');
+  git('merge', '-q', '--ff-only', 'feature');
+  commit({ v: 'main-ahead' }, 'main moves on');
+  git('checkout', '-q', 'HEAD~1');
+  r = deploy(['--skip-checks', '--dry-run']);
+  assert.equal(r.status, 1, out(r));
+  assert.match(r.stderr, /is behind main/);
+  git('checkout', '-q', 'main');
 });
 
 test('a runner too old for runner.restart: waits until idle, then kickstarts', { timeout: 120_000 }, async () => {
@@ -423,6 +539,23 @@ test('a release that keeps crashing at startup goes back to lastGood', { timeout
   assert.equal(await version(), `9.9.9+${good}`);
 });
 
+test('--rollback after a crash rollback will not go back to the release that crashed', () => {
+  // As launch.mjs leaves it when nothing put previous back (a deploy from a
+  // thread, which doesn't wait for the health check).
+  const file = path.join(runnerDir(), 'state.json');
+  const saved = fs.readFileSync(file, 'utf8');
+  fs.writeFileSync(file, JSON.stringify({ ...state(), previous: bad }));
+  try {
+    const r = deploy(['--rollback']);
+    assert.equal(r.status, 1, out(r));
+    assert.match(r.stderr, new RegExp(`${bad} kept crashing at startup, and launch\\.mjs already went back from it to ${good}`));
+    assert.match(r.stderr, /--rollback --force/);
+    assert.equal(current(), good);
+  } finally {
+    fs.writeFileSync(file, saved);
+  }
+});
+
 test('launch.mjs on its own: two failed starts, then the third runs lastGood', { timeout: 60_000 }, async () => {
   const home2 = path.join(root, 'home2');
   const dir2 = path.join(home2, 'runner');
@@ -477,8 +610,18 @@ test('planBoot: the crash-loop rules', async () => {
   assert.equal(p.state.current, 'A');
   assert.equal(p.state.previous, 'B');
 
-  p = launch.planBoot({ ...base, boots: [{ release: 'B', at: ago(130) }, { release: 'B', at: ago(10) }] }, now, exists);
-  assert.equal(p.start, 'B', 'boots older than 2 minutes do not count');
+  p = launch.planBoot({ ...base, boots: [{ release: 'B', at: ago(610) }, { release: 'B', at: ago(10) }] }, now, exists);
+  assert.equal(p.start, 'B', 'boots older than 10 minutes do not count');
+
+  // Three starts that each hung until the watchdog stopped them, 95 s apart.
+  p = launch.planBoot({ ...base, boots: [{ release: 'B', at: ago(190) }, { release: 'B', at: ago(95) }] }, now, exists);
+  assert.equal(p.start, 'A', 'starts that hang count too');
+
+  // Planned restarts (runner.restart, launchctl kickstart) are clean stops.
+  p = launch.planBoot({ ...base, boots: [{ release: 'B', at: ago(80), clean: true }, { release: 'B', at: ago(40), clean: true }] }, now, exists);
+  assert.equal(p.start, 'B', 'clean restarts are not crashes');
+  assert.equal(p.rolledBack, null);
+  assert.equal(p.state.boots.at(-1).pid, process.pid, 'each boot records its pid, so its exit can mark it clean');
 
   p = launch.planBoot({ ...base, lastGood: 'B', boots: [{ release: 'B', at: ago(20) }, { release: 'B', at: ago(10) }] }, now, exists);
   assert.equal(p.start, 'B', 'a release marked good is not rolled back');
@@ -529,6 +672,31 @@ test('--list and --dry-run change nothing', { timeout: 60_000 }, async () => {
   assert.equal(fs.readFileSync(path.join(runnerDir(), 'state.json'), 'utf8'), s);
 });
 
+test('no deploy to a LaunchAgent that runs a checkout, or to none', () => {
+  const home3 = path.join(root, 'home3');
+  const label = `${LABEL}.checkout`;
+  fs.writeFileSync(
+    path.join(agents, `${label}.plist`),
+    `<?xml version="1.0" encoding="UTF-8"?>\n<plist version="1.0"><dict><key>Label</key><string>${label}</string><key>ProgramArguments</key><array><string>${NODE}</string><string>/x/runner/src/main.ts</string></array></dict></plist>\n`,
+  );
+  try {
+    let r = sh('deploy-runner.sh', ['--home', home3, '--label', label, '--dry-run']);
+    assert.equal(r.status, 1, out(r));
+    assert.match(r.stderr, /runs from a checkout/);
+    assert.match(r.stderr, /Install it with scripts\/install-runner\.sh --home/);
+    // From a thread of that runner it's Mike's to do, not the agent's.
+    r = sh('deploy-runner.sh', ['--home', home3, '--label', label, '--dry-run'], { THREADBARE_THREAD_ID: 't', THREADBARE_RUNNER_HOME: home3 });
+    assert.equal(r.status, 1, out(r));
+    assert.match(r.stderr, /Mike has to switch it to releases once, from a terminal/);
+    assert.match(r.stderr, /Don't run that from a thread/);
+    r = sh('deploy-runner.sh', ['--home', home3, '--label', `${LABEL}.none`, '--dry-run']);
+    assert.equal(r.status, 1, out(r));
+    assert.match(r.stderr, /isn't installed as a LaunchAgent/);
+  } finally {
+    fs.rmSync(path.join(agents, `${label}.plist`));
+  }
+});
+
 test('install-runner.sh guards: sandbox labels, and not from inside its own thread', () => {
   let r = sh('install-runner.sh', ['--home', home, '--print']);
   assert.equal(r.status, 1);
@@ -539,6 +707,21 @@ test('install-runner.sh guards: sandbox labels, and not from inside its own thre
   r = sh('install-runner.sh', ['--home', home, '--label', LABEL], { THREADBARE_THREAD_ID: 'thread-1', THREADBARE_HOME: home });
   assert.equal(r.status, 1);
   assert.match(r.stderr, /Ask Mike to run it from a terminal/);
+  // THREADBARE_HOME doesn't pick install-runner.sh's data dir; saying so
+  // beats reinstalling the real runner.
+  // (--print, so a broken guard could only print the real runner's plist.)
+  r = sh('install-runner.sh', ['--print'], { THREADBARE_HOME: home });
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /only goes by --home/);
+  // A busy runner isn't replaced (or removed) without --force.
+  setBusy(['t-9']);
+  r = sh('install-runner.sh', ['--home', home, '--label', LABEL, '--port', '0', '--path', '/usr/bin:/bin']);
+  assert.equal(r.status, 1, out(r));
+  assert.match(r.stderr, /1 thread would be cut short/);
+  assert.match(r.stderr, /while threads are busy/);
+  r = sh('install-runner.sh', ['--uninstall', '--home', home, '--label', LABEL]);
+  assert.equal(r.status, 1, out(r));
+  setBusy([]);
   assert.equal(launchctl('print', TARGET), 0, 'still installed');
 });
 

@@ -23,7 +23,9 @@ fi
 THREADBARE_APP_DIR="$WORK/Threadbare.app" THREADBARE_BUILD_CONFIGURATION=debug \
   bash "$APP_ROOT/build-app.sh" >/dev/null
 
-node "$TOOLS_DIR/mock-runner/server.mjs" --data-dir "$DATA_DIR" --quiet &
+# Only the demo threads: private fixtures (real transcripts, tb exports)
+# must never end up in screenshots that go on GitHub.
+node "$TOOLS_DIR/mock-runner/server.mjs" --data-dir "$DATA_DIR" --fixtures "$TOOLS_DIR/mock-runner/fixtures" --quiet &
 MOCK_PID=$!
 cleanup() {
   kill "$MOCK_PID" 2>/dev/null || true

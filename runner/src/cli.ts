@@ -50,6 +50,8 @@ async function main(argv: string[]): Promise<number> {
       now: { type: 'boolean' },
       force: { type: 'boolean' },
       resume: { type: 'string' },
+      'no-resume': { type: 'boolean' },
+      cancel: { type: 'boolean' },
       reason: { type: 'string' },
       thread: { type: 'string' },
       lines: { type: 'string', short: 'n' },
@@ -141,20 +143,14 @@ async function run(client: RunnerClient, cmd: string, args: string[], f: Flags):
       await client.call('threads.interrupt', { threadId: await resolveId(client, args[0]) });
       return 0;
     case 'approve':
-      await client.call('approvals.respond', {
-        threadId: await resolveId(client, args[0]),
-        approvalId: args[1],
-        decision: args[2] ?? 'allow',
-      });
+    case 'answer': {
+      const threadId = await resolveId(client, args[0]);
+      const params: Record<string, unknown> = { threadId, approvalId: await resolveApproval(client, threadId, args[1]) };
+      if (cmd === 'approve') params.decision = args[2] ?? 'allow';
+      else Object.assign(params, { decision: 'answered', answers: { '0': args[2] ?? '' } });
+      await client.call('approvals.respond', params);
       return 0;
-    case 'answer':
-      await client.call('approvals.respond', {
-        threadId: await resolveId(client, args[0]),
-        approvalId: args[1],
-        decision: 'answered',
-        answers: { '0': args[2] ?? '' },
-      });
-      return 0;
+    }
     case 'snooze': {
       const id = await resolveId(client, args[0]);
       const until = parseWhen(args[1] ?? '1h');
@@ -190,6 +186,20 @@ async function resolveId(client: RunnerClient, prefix: string | undefined): Prom
   if (hits.length === 1) return hits[0].id;
   if (hits.length === 0) return prefix;
   throw new Error(`${prefix} matches ${hits.length} threads`);
+}
+
+// An approval id, or the start of one (tb show prints the first 8
+// characters), among the thread's approvals that haven't been answered.
+async function resolveApproval(client: RunnerClient, threadId: string, prefix: string | undefined): Promise<string> {
+  if (!prefix) throw new Error('approval id required');
+  const { events } = await client.call<{ events: PersistedEvent[] }>('threads.events', { threadId, limit: 10_000 });
+  const resolved = new Set(events.flatMap((e) => (e.type === 'approval.resolved' ? [e.approvalId] : [])));
+  const open = events.flatMap((e) => ((e.type === 'approval.requested' || e.type === 'question.requested') && !resolved.has(e.approvalId) ? [e.approvalId] : []));
+  if (open.includes(prefix)) return prefix;
+  const hits = open.filter((id) => id.startsWith(prefix));
+  if (hits.length === 1) return hits[0];
+  if (hits.length > 1) throw new Error(`${prefix} matches ${hits.length} open approvals`);
+  return prefix;
 }
 
 function parseWhen(s: string): string {

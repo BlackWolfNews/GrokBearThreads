@@ -7,13 +7,17 @@ import path from 'node:path';
 import { atomicWriteFileSync, readJsonSync } from './fsutil.ts';
 import type { Logger } from './log.ts';
 
-export type ReleaseJson = { id: string; commit: string; dirty: boolean; builtAt: string; node: string };
+// branch is the branch HEAD was on when it was built (older releases have
+// none), so a release from a feature branch is easy to spot.
+export type ReleaseJson = { id: string; commit: string; dirty: boolean; builtAt: string; node: string; branch?: string };
 
 export type RunnerState = {
   current: string;
   previous: string | null;
   lastGood: string | null;
-  boots: { release: string; at: string }[];
+  // launch.mjs's record of each start; clean once that start listened and
+  // then exited 0, which never counts towards a crash loop.
+  boots: { release: string; at: string; pid?: number; clean?: boolean }[];
   // reportedAt is the runner's own: set once the notice has gone out, so a
   // rollback is announced by the first runner after it and no other.
   rolledBack?: { from: string; to: string; at: string; reportedAt?: string };
@@ -27,11 +31,12 @@ export function readRelease(root = CODE_ROOT): ReleaseJson | undefined {
   return r && typeof r.id === 'string' && r.id ? r : undefined;
 }
 
-export function runnerVersion(root = CODE_ROOT): { version: string; release?: string } {
+export function runnerVersion(root = CODE_ROOT): { version: string; release?: string; branch?: string } {
   const pkg = readJsonSync<{ version?: string }>(path.join(root, 'package.json'));
   const base = typeof pkg?.version === 'string' ? pkg.version : '0.0.0';
-  const release = readRelease(root)?.id;
-  return release ? { version: `${base}+${release}`, release } : { version: `${base}+source` };
+  const r = readRelease(root);
+  if (!r) return { version: `${base}+source` };
+  return typeof r.branch === 'string' && r.branch ? { version: `${base}+${r.id}`, release: r.id, branch: r.branch } : { version: `${base}+${r.id}`, release: r.id };
 }
 
 export const RELEASE = runnerVersion();
@@ -100,12 +105,28 @@ export function takeRollbackNotice(home: string, log: Logger, now = Date.now()):
 export const GOOD_AFTER_MS = 60_000;
 
 // Returns a cancel for main.ts's shutdown: a runner that is stopping (one
-// whose shutdown hangs, say) hasn't shown it stays up.
-export function markGoodLater(home: string, releaseId: string | undefined, log: Logger, env: NodeJS.ProcessEnv = process.env): () => void {
-  if (!releaseId) return () => {};
+// whose shutdown hangs, say) hasn't shown it stays up. then runs once it
+// has, release or not.
+export function markGoodLater(home: string, releaseId: string | undefined, log: Logger, env: NodeJS.ProcessEnv = process.env, then?: () => void): () => void {
   const fromEnv = env.THREADBARE_GOOD_AFTER_MS ? Number(env.THREADBARE_GOOD_AFTER_MS) : NaN;
   const ms = Number.isFinite(fromEnv) && fromEnv >= 0 ? fromEnv : GOOD_AFTER_MS;
-  const timer = setTimeout(() => markGood(home, releaseId, log), ms);
+  const timer = setTimeout(() => {
+    markGood(home, releaseId, log);
+    then?.();
+  }, ms);
   timer.unref();
   return () => clearTimeout(timer);
+}
+
+// launch.mjs (when it started this runner) leaves this on globalThis: a
+// release that hasn't said it is listening within its time limit is
+// stopped, so one that hangs at startup is rolled back like one that
+// crashes. Runners started some other way don't have it.
+export function tellLaunchListening(): void {
+  const hook = (globalThis as { threadbareLaunch?: { listening?: () => void } }).threadbareLaunch;
+  try {
+    hook?.listening?.();
+  } catch {
+    // launch.mjs's bookkeeping must never stop the runner
+  }
 }

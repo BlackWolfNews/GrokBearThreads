@@ -414,16 +414,17 @@ function defaultFixtureDirs() {
   const dirs = [path.join(here, 'fixtures')];
   const privateDir = path.resolve(here, '../../.fixtures');
   if (fs.existsSync(privateDir)) dirs.push(privateDir);
-  // Where `tb export` puts a real thread (runner/src/tb-dev.ts).
-  const exported = path.join(privateDir, 'threads');
-  if (fs.existsSync(exported)) dirs.push(exported);
+  // Not .fixtures/threads, where `tb export` puts Mike's real threads: they'd
+  // sort above the demo threads in every screenshot. Pass --fixtures for them.
   return dirs;
 }
 
 function loadFixtures() {
   for (const root of fixtureDirs) {
     if (!fs.existsSync(root)) continue;
-    for (const name of fs.readdirSync(root).sort()) {
+    // A folder of fixtures, or one fixture itself (what `tb export` prints).
+    const names = fs.existsSync(path.join(root, 'thread.json')) ? ['.'] : fs.readdirSync(root).sort();
+    for (const name of names) {
       const dir = path.join(root, name);
       const threadFile = path.join(dir, 'thread.json');
       const eventsFile = path.join(dir, 'events.ndjson');
@@ -440,7 +441,7 @@ function loadFixtures() {
       summary.lastSeq = events.at(-1)?.seq ?? 0;
       summary.lastSeenSeq ??= summary.lastSeq;
       // Keep a fixture's waiting or running status so the sidebar has
-      // something in every section; real exports are idle.
+      // something in every section; tb export makes real ones idle.
       summary.status ??= 'idle';
       summary.live = false;
       threads.set(summary.id, { summary, events, inProgress: new Map(), timers: [], dir });
