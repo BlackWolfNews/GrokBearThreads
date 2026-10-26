@@ -1,0 +1,102 @@
+import XCTest
+@testable import ThreadbareCore
+
+final class SidebarRowTests: XCTestCase {
+    func look(_ status: ThreadStatus, needsYou: Bool = false) -> ThreadRowLook {
+        ThreadRowLook(ThreadSummary(id: "t", title: "t", status: status, needsYou: needsYou))
+    }
+
+    func testStatusInWords() {
+        XCTAssertEqual(look(.idle), ThreadRowLook(status: .time, unread: false, emphasised: false))
+        XCTAssertEqual(look(.running), ThreadRowLook(status: .working, unread: false, emphasised: false))
+        XCTAssertEqual(look(.starting).status, .working)
+        XCTAssertEqual(look(.error).status, .failed)
+        XCTAssertEqual(look(.stopped).status, .stopped)
+        XCTAssertEqual(ThreadRowStatus.working.label, "Working")
+        XCTAssertEqual(ThreadRowStatus.needsYou.label, "Needs you")
+        XCTAssertNil(ThreadRowStatus.time.label)
+    }
+
+    /// Waiting on Mike says "Needs you" in words, so it gets no unread dot
+    /// as well; a finished, unread thread gets the dot and the time.
+    func testUnreadDotOnlyForFinishedThreads() {
+        XCTAssertEqual(look(.waiting, needsYou: true), ThreadRowLook(status: .needsYou, unread: false, emphasised: true))
+        XCTAssertEqual(look(.waiting), ThreadRowLook(status: .needsYou, unread: false, emphasised: true))
+        XCTAssertEqual(look(.idle, needsYou: true), ThreadRowLook(status: .time, unread: true, emphasised: true))
+        XCTAssertEqual(look(.error, needsYou: true), ThreadRowLook(status: .failed, unread: true, emphasised: true))
+        XCTAssertFalse(look(.running, needsYou: true).unread)
+    }
+
+    func testAccountShortNames() {
+        let accounts = [
+            Account(id: "claude-main", title: "mike@example.com"),
+            Account(id: "claude-3", title: "mike+3@example.com"),
+            Account(id: "work", title: "mike@work.example"),
+            Account(id: "local", title: "Local"),
+        ]
+        XCTAssertEqual(AccountName.short("claude-3", accounts: accounts), "mike+3")
+        // Two accounts share "mike", so both keep their whole address.
+        XCTAssertEqual(AccountName.short("claude-main", accounts: accounts), "mike@example.com")
+        XCTAssertEqual(AccountName.short("local", accounts: accounts), "Local")
+        XCTAssertEqual(AccountName.short("gone", accounts: accounts), "gone")
+    }
+
+    func testAccountIsShownUnlessMain() {
+        let accounts = [Account(id: "claude-main", title: "a@x"), Account(id: "claude-3", title: "b@x")]
+        XCTAssertFalse(AccountName.isShown("claude-main", accounts: accounts, mainId: "claude-main"))
+        XCTAssertTrue(AccountName.isShown("claude-3", accounts: accounts, mainId: "claude-main"))
+        XCTAssertFalse(AccountName.isShown("", accounts: accounts, mainId: "claude-main"))
+        // No main account: the first one is treated as main.
+        let others = [Account(id: "work", title: "w@x"), Account(id: "home", title: "h@x")]
+        XCTAssertFalse(AccountName.isShown("work", accounts: others, mainId: "claude-main"))
+        XCTAssertTrue(AccountName.isShown("home", accounts: others, mainId: "claude-main"))
+        // Before hello, with no accounts known, only the main id is unlabelled.
+        XCTAssertTrue(AccountName.isShown("claude-3", accounts: [], mainId: "claude-main"))
+    }
+
+    func testFolderName() {
+        XCTAssertEqual(FolderName.short("/Users/mike/dev/me/misc"), "misc")
+        XCTAssertEqual(FolderName.short("~/dev/photo-sync/"), "photo-sync")
+        XCTAssertEqual(FolderName.short("~"), "~")
+        XCTAssertEqual(FolderName.short("/"), "/")
+        XCTAssertEqual(FolderName.short(""), "")
+    }
+
+    func testKeyboardOrder() {
+        let ids = ["a", "b", "c"]
+        XCTAssertEqual(SidebarOrder.neighbour(of: "a", in: ids, step: 1), "b")
+        XCTAssertEqual(SidebarOrder.neighbour(of: "c", in: ids, step: 1), "c", "stops at the end")
+        XCTAssertEqual(SidebarOrder.neighbour(of: "a", in: ids, step: -1), "a", "stops at the start")
+        XCTAssertEqual(SidebarOrder.neighbour(of: nil, in: ids, step: 1), "a")
+        XCTAssertEqual(SidebarOrder.neighbour(of: "gone", in: ids, step: -1), "c")
+        XCTAssertNil(SidebarOrder.neighbour(of: "a", in: [], step: 1))
+    }
+}
+
+final class ComposerPlacementTests: XCTestCase {
+    func testAtTheBottomUnderAThread() {
+        XCTAssertEqual(ComposerPlacementMath.composerTop(paneHeight: 700, composerHeight: 110, centred: false), 590)
+    }
+
+    /// An empty new thread: the composer's middle about 40% down.
+    func testAboutFortyPercentDownForANewThread() {
+        let top = ComposerPlacementMath.composerTop(paneHeight: 700, composerHeight: 112, centred: true, headingHeight: 30, noteHeight: 16)
+        XCTAssertEqual(top, 224)
+        XCTAssertEqual((top + 56) / 700, 0.4, accuracy: 0.01)
+    }
+
+    /// Typing grows the composer downwards; its top stays put.
+    func testGrowingComposerKeepsItsTop() {
+        let empty = ComposerPlacementMath.composerTop(paneHeight: 700, composerHeight: 112, centred: true)
+        let tall = ComposerPlacementMath.composerTop(paneHeight: 700, composerHeight: 260, centred: true)
+        XCTAssertEqual(empty, tall)
+    }
+
+    func testShortWindowsKeepTheHeadingAndTheNoteOnScreen() {
+        // The heading needs 30 + 40 above the composer.
+        XCTAssertEqual(ComposerPlacementMath.composerTop(paneHeight: 300, composerHeight: 110, centred: true, headingHeight: 30, noteHeight: 16), 70)
+        // Too short for everything: the composer and its note stay on screen.
+        XCTAssertEqual(ComposerPlacementMath.composerTop(paneHeight: 180, composerHeight: 110, centred: true, headingHeight: 30, noteHeight: 16), 54)
+        XCTAssertEqual(ComposerPlacementMath.composerTop(paneHeight: 80, composerHeight: 110, centred: true), 0)
+    }
+}

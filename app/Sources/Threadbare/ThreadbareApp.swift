@@ -41,7 +41,7 @@ struct ThreadbareApp: App {
                     .keyboardShortcut("n")
             }
             CommandMenu("Thread") {
-                Button("Archive") { app.archive() }
+                Button(app.selectedThread?.isArchived == true ? "Unarchive" : "Archive") { app.toggleArchive() }
                     .keyboardShortcut("e")
                     .disabled(app.selection == nil)
                 Menu("Snooze") {
@@ -66,24 +66,11 @@ struct ThreadbareApp: App {
                 .keyboardShortcut("c", modifiers: [.command, .shift])
                 .disabled(app.selection == nil)
                 Divider()
-                Button("Search Threads") { focusSearch() }
-                    .keyboardShortcut("k")
-                Button("Find Thread") { focusSearch() }
-                    .keyboardShortcut("f")
-                Divider()
                 Button("Show Inbox") { app.sidebarMode = .inbox }
                 Button("Show Snoozed") { app.sidebarMode = .snoozed }
-                Button("Show Archive") {
-                    app.sidebarMode = .archive
-                    app.loadArchive()
-                }
+                Button("Show Archive") { app.showArchive() }
             }
         }
-    }
-
-    private func focusSearch() {
-        app.sidebarMode = .inbox
-        app.focusSearch = true
     }
 }
 

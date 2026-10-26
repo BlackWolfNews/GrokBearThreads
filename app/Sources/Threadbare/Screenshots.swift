@@ -66,13 +66,14 @@ enum ScreenshotRunner {
             app.transcript.scrollToBottom()
             await capture(window, dir.appendingPathComponent("4-question.png"))
         }
-        // 5. The archive.
+        // 5. The archive, with the pointer over the other row (Unarchive).
         if wanted("5") {
-            app.sidebarMode = .archive
-            app.loadArchive()
+            app.showArchive()
             try? await Task.sleep(for: .milliseconds(400))
             await open(app, "demo_tunnel")
+            app.hoverOverride = "demo_quick_ask_readme"
             await capture(window, dir.appendingPathComponent("5-archive.png"))
+            app.hoverOverride = nil
         }
         // 6. A long reply (the mock's synthetic stream text): taller than
         // the window, so its text is drawn through a slice. Captured at the
@@ -115,6 +116,15 @@ enum ScreenshotRunner {
             } else {
                 print("composer: not found")
             }
+        }
+        // 8. The pointer over an inbox row: Snooze and Archive in place of
+        // its time.
+        if wanted("8") {
+            app.sidebarMode = .inbox
+            await open(app, "demo_upload_resume")
+            app.hoverOverride = "demo_settings_tabs"
+            await capture(window, dir.appendingPathComponent("8-sidebar-hover.png"))
+            app.hoverOverride = nil
         }
         NSApp.terminate(nil)
     }

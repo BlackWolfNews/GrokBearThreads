@@ -44,29 +44,41 @@ and the perf run stay away from the real one. Install the runner itself with
 
 ## Using it
 
-- **Sidebar.** Needs you (waiting on an approval or a question, or finished
-  and unread), Running, then Inbox. Each row has the title, a one-line
-  preview, a relative time, a status dot, and a small account badge (the
-  part of its email before the @) only if it isn't on `claude-main`.
-  Snoozed and Archive are buttons at the bottom.
-- **New thread** with ⌘N. It starts in `~/dev/me/misc` on the last account you
-  used. The folder, account, model and "Ask before edits" are small menus on
-  the composer; change them if you want, you never have to. Folder, model
-  and "Ask before edits" apply to that one thread; the next starts from the
+- **Sidebar.** New thread at the top, then Needs you (waiting on an
+  approval or a question, or finished and unread), Running, then Inbox.
+  Each row has the title, a one-line preview, and at the right the time or
+  the status in words: "Working" with a spinner, "Needs you" in orange,
+  "Failed" or "Stopped". A finished thread you haven't read has a blue dot
+  before its title. The account (the part of its email before the @) shows
+  at the end of the preview only if it isn't on `claude-main`. Hover a row
+  for Snooze and Archive buttons. A click selects a row straight away, and
+  the up and down arrows move through threads from there. Snoozed and
+  Archive, with their counts, are at the bottom. There's no search in the
+  inbox; the archive has its own.
+- **Header.** One line: the folder's name, then the title. The full path is
+  in its tooltip. The ... menu has Snooze, Archive and "Copy transcript as
+  Markdown".
+- **New thread** with ⌘N or the New thread row. The composer sits in the
+  middle of the pane under "What should we work on?", with where the thread
+  will start ("Starts in misc on mike") under it, and drops to the bottom
+  once you send. It starts in `~/dev/me/misc` on the last account you used.
+  The folder, account, model and "Ask before edits" are small menus on the
+  composer; change them if you want, you never have to. Folder, model and
+  "Ask before edits" apply to that one thread; the next starts from the
   defaults again. The account sticks.
 - **Composer.** Return sends, Shift-Return adds a line. Paste or drop images;
   they go through `media.import` into the runner's `inbox/` and show as
   thumbnails you can remove before sending. Stop (⌘.) while a turn runs. If
   the runner is down, or it doesn't take the message (busy, say), the text
   and images stay in the box (or go back into it) and a banner says why.
-- **Snooze** from the toolbar, the Thread menu or a row's menu: 1 hour, this
-  evening 6 pm, tomorrow 9 am, next Monday 9 am, or pick a time. The time is
-  worked out when you choose, not when the menu was built. The thread comes
-  back marked unread.
-- **Archive** with ⌘E. The Archive view lists archived threads, newest first,
-  with search and an Unarchive button on each. Archived threads open as fast
-  as live ones.
-- **Search** with ⌘K or ⌘F (titles and previews, archived included).
+- **Snooze** from a row's hover button, the Thread menu, the ... menu or a
+  row's right-click menu: 1 hour, this evening 6 pm, tomorrow 9 am, next
+  Monday 9 am, or pick a time. The time is worked out when you choose, not
+  when the menu was built. The thread comes back marked unread.
+- **Archive** with ⌘E (⌘E on an archived thread brings it back), a row's
+  hover button or its menus. The Archive view lists archived threads, newest
+  first, with search; hover a row for Unarchive. Esc goes back to the inbox.
+  Archived threads load with the rest, so they open as fast as live ones.
 - **Approvals and questions** show as a card in the transcript with Allow,
   Always allow and Deny, or the question's options plus "Something else".
   "Something else" answers the last question: it replaces a single choice

@@ -33,19 +33,14 @@ final class AppModel {
     var runnerVersion = ""
     var accounts: [Account] = []
     var defaults = RunnerDefaults(cwd: NSString("~/dev/me/misc").expandingTildeInPath, accountId: "claude-main")
-    var threads: [String: ThreadSummary] = [:] {
-        willSet { SidebarScroll.threadsWillChange() }
-    }
+    var threads: [String: ThreadSummary] = [:]
     var selection: String?
     var sidebarMode: SidebarMode = .inbox
-    var searchText = "" {
-        didSet { scheduleSearch() }
-    }
-    var searchResults: [ThreadSummary]?
     var archiveQuery = ""
+    /// Archived threads are in `threads` (the first list includes them, for
+    /// the Archive count in the sidebar's footer).
     var archiveLoaded = false
     var errorMessage: String?
-    var focusSearch = false
     var focusComposer = 0
     var now = Date()
     var drafts: [String: Draft] = [:]
@@ -57,11 +52,13 @@ final class AppModel {
     var newThreadAccount: String?
     var newThreadModel: String?
     var newThreadAsk = false
+    /// A sidebar row drawn as if the pointer were over it, so the screenshot
+    /// run can show the hover buttons without moving the mouse.
+    var hoverOverride: String?
 
     @ObservationIgnored private(set) var client: RPCClient?
     @ObservationIgnored private var sessions: [String: ThreadSession] = [:]
     @ObservationIgnored private var connectTask: Task<Void, Never>?
-    @ObservationIgnored private var searchTask: Task<Void, Never>?
     @ObservationIgnored private var markSeenTask: Task<Void, Never>?
     @ObservationIgnored private var backoff = Backoff()
     @ObservationIgnored let transcript = TranscriptController()
@@ -72,8 +69,8 @@ final class AppModel {
 
     static let maxSessions = 24
     static let lastAccountKey = "lastAccountId"
-    /// The account threads don't get a badge for. Fixed, unlike the runner's
-    /// `defaults.accountId` (the last one used), so badges don't move about.
+    /// The account threads aren't labelled with. Fixed, unlike the runner's
+    /// `defaults.accountId` (the last one used), so labels don't move about.
     static let mainAccountId = "claude-main"
     /// The error banner text shown for a connection problem, so it can be
     /// cleared when the connection comes back.
@@ -90,6 +87,7 @@ final class AppModel {
     var sections: ThreadSections { ThreadSections.build(threads.values, now: now) }
     var snoozed: [ThreadSummary] { ThreadSections.snoozed(threads.values, now: now) }
     var archived: [ThreadSummary] { ThreadSections.archived(threads.values, matching: archiveQuery) }
+    var archivedCount: Int { threads.values.reduce(0) { $0 + ($1.isArchived ? 1 : 0) } }
     var selectedThread: ThreadSummary? { selection.flatMap { threads[$0] } }
 
     var lastAccountId: String {
@@ -100,22 +98,15 @@ final class AppModel {
         accounts.first(where: { $0.id == id })?.title ?? id
     }
 
-    /// A short name for the sidebar badge: the part of the account's email
-    /// before the @, unless another account shares it.
+    /// The part of the account's email before the @ (see `AccountName`).
     func accountShortTitle(_ id: String) -> String {
-        let title = accountTitle(id)
-        guard let at = title.firstIndex(of: "@") else { return title }
-        let local = String(title[..<at])
-        let clashes = accounts.filter { $0.id != id && $0.title.hasPrefix(local + "@") }
-        return clashes.isEmpty ? local : title
+        AccountName.short(id, accounts: accounts)
     }
 
-    /// Whether a thread's row shows its account: only when it isn't on the
-    /// main account (or the first one, if there's no main).
-    func showsAccountBadge(_ thread: ThreadSummary) -> Bool {
-        guard !thread.accountId.isEmpty else { return false }
-        let main = accounts.contains { $0.id == Self.mainAccountId } || accounts.isEmpty ? Self.mainAccountId : accounts[0].id
-        return thread.accountId != main
+    /// Whether a thread's row names its account: only when it isn't on the
+    /// main account.
+    func showsAccountLabel(_ thread: ThreadSummary) -> Bool {
+        AccountName.isShown(thread.accountId, accounts: accounts, mainId: Self.mainAccountId)
     }
 
     // MARK: Connection
@@ -149,11 +140,14 @@ final class AppModel {
                 connection = .connected
                 clearConnectionError()
                 backoff.reset()
-                let list = try await client.listThreads(include: archiveLoaded ? [.inbox, .snoozed, .archived] : [.inbox, .snoozed])
+                // Archived threads come too: the sidebar's footer shows how
+                // many there are, and they open as fast as live ones.
+                let list = try await client.listThreads(include: [.inbox, .snoozed, .archived])
                 var fresh: [String: ThreadSummary] = [:]
                 for thread in list { fresh[thread.id] = thread }
                 threads = fresh
                 threadsLoaded = true
+                archiveLoaded = true
                 onThreadsLoaded?()
                 for session in sessions.values where session.state == .loaded {
                     await session.subscribe()
@@ -398,6 +392,12 @@ final class AppModel {
         if selection == threadId { select(next) }
     }
 
+    /// ⌘E: archives the open thread, or brings it back if it's archived.
+    func toggleArchive() {
+        guard let thread = selectedThread else { return }
+        if thread.isArchived { unarchive(thread.id) } else { archive(thread.id) }
+    }
+
     func unarchive(_ threadId: String) {
         update(threadId, ThreadUpdate(archived: false))
     }
@@ -438,6 +438,12 @@ final class AppModel {
         return index > 0 ? ordered[index - 1] : nil
     }
 
+    func showArchive() {
+        sidebarMode = .archive
+        loadArchive()
+    }
+
+    /// Refreshes the archived threads (the first list already has them).
     func loadArchive() {
         guard let client else { return }
         Task {
@@ -459,24 +465,6 @@ final class AppModel {
             }
         }
         return refs
-    }
-
-    private func scheduleSearch() {
-        searchTask?.cancel()
-        let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !query.isEmpty else {
-            searchResults = nil
-            return
-        }
-        searchTask = Task {
-            try? await Task.sleep(for: .milliseconds(150))
-            guard !Task.isCancelled else { return }
-            if let client, let results = try? await client.searchThreads(query, limit: 50) {
-                searchResults = results
-            } else {
-                searchResults = threads.values.filter { ThreadSections.matches($0, query) }.sorted { $0.lastActivityAt > $1.lastActivityAt }
-            }
-        }
     }
 
     func show(_ error: Error) {
