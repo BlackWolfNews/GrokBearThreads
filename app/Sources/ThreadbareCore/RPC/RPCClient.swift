@@ -27,6 +27,7 @@ public enum RPCError: Error, Sendable, Equatable, LocalizedError {
 public enum RPCNotification: Sendable {
     case threadUpdated(ThreadSummary)
     case threadEvent(threadId: String, event: Event)
+    case threadDeleted(threadId: String)
     case runnerNotice(level: String, message: String)
     case other(method: String)
 }
@@ -204,6 +205,10 @@ public final class RPCClient: Sendable {
             guard let params = try? decoder.decode(RPCNotificationEnvelope<ThreadEventParams>.self, from: data).params
             else { return nil }
             return .threadEvent(threadId: params.threadId, event: params.event)
+        case "thread.deleted":
+            guard let params = try? decoder.decode(RPCNotificationEnvelope<ThreadDeletedParams>.self, from: data).params
+            else { return nil }
+            return .threadDeleted(threadId: params.threadId)
         case "runner.notice":
             guard let params = try? decoder.decode(RPCNotificationEnvelope<RunnerNoticeParams>.self, from: data).params
             else { return nil }
@@ -271,6 +276,10 @@ private struct ThreadUpdatedParams: Decodable {
 private struct ThreadEventParams: Decodable {
     var threadId: String
     var event: Event
+}
+
+private struct ThreadDeletedParams: Decodable {
+    var threadId: String
 }
 
 private struct RunnerNoticeParams: Decodable {

@@ -1,6 +1,6 @@
 import crypto from 'node:crypto';
 import { query as sdkQuery } from '@anthropic-ai/claude-agent-sdk';
-import type { Options, PermissionResult, Query, SDKUserMessage, PermissionUpdate } from '@anthropic-ai/claude-agent-sdk';
+import type { McpServerConfig, Options, PermissionResult, Query, SDKUserMessage, PermissionUpdate } from '@anthropic-ai/claude-agent-sdk';
 import type { Account, PermissionMode, Question } from '../../protocol.ts';
 import type { AgentAdapter, AgentSession, SessionSink, StartSessionOptions, UserInput } from '../types.ts';
 import type { Logger } from '../../log.ts';
@@ -79,6 +79,10 @@ export type ClaudeAdapterDeps = {
   registry: ProcessRegistry;
   log: Logger;
   queryFn?: typeof sdkQuery;
+  // In-process MCP servers for a thread's session (the threadbare tools).
+  mcpServersFor?: (threadId: string) => Record<string, McpServerConfig>;
+  // Tools that ask Mike even in a thread with full access.
+  alwaysAsk?: Set<string>;
 };
 
 export class ClaudeAdapter implements AgentAdapter {
@@ -138,6 +142,8 @@ class ClaudeSession implements AgentSession {
       abortController: this.abort,
       spawnClaudeCodeProcess: groupSpawner(deps.registry, deps.log, (line) => this.stderr(line)),
     };
+    const servers = deps.mcpServersFor?.(opts.threadId);
+    if (servers && Object.keys(servers).length) options.mcpServers = servers;
     if (opts.model) options.model = opts.model;
     if (opts.allowRules?.length) options.allowedTools = [...opts.allowRules];
     if (opts.resume) options.resume = opts.sessionId;
@@ -217,14 +223,15 @@ class ClaudeSession implements AgentSession {
       if (ans.answers) return { behavior: 'allow', updatedInput: { ...input, answers: ans.answers }, toolUseID: o.toolUseID };
       return { behavior: 'deny', message: ans.message || 'The user dismissed the question without answering.', toolUseID: o.toolUseID };
     }
-    if (this.mode === 'full') return { behavior: 'allow', updatedInput: input, toolUseID: o.toolUseID };
+    if (this.mode === 'full' && !this.deps.alwaysAsk?.has(name)) return { behavior: 'allow', updatedInput: input, toolUseID: o.toolUseID };
     if (!sub) for (const out of this.normalizer.beforeApproval(o.toolUseID, name, input)) this.sink.output(out);
     const ans = await this.sink.requestApproval({
       toolUseId: itemId,
       name,
       title: toolTitle(name, input, this.opts.cwd),
       input: truncateInput(input),
-      canAlwaysAllow: !o.suppressAlwaysAllowRule,
+      // "Always allow" would defeat a tool that's meant to ask every time.
+      canAlwaysAllow: !o.suppressAlwaysAllowRule && !this.deps.alwaysAsk?.has(name),
       signal: o.signal,
     });
     switch (ans.decision) {

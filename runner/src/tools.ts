@@ -125,11 +125,40 @@ export function toolTitle(name: string, input: Record<string, unknown>, cwd: str
     case 'ExitPlanMode':
       return 'Finish the plan';
     default:
+      if (name.startsWith('mcp__threadbare__')) return threadbareTitle(name.slice('mcp__threadbare__'.length), input);
       if (name.startsWith('mcp__')) {
         const [, server, ...rest] = name.split('__');
         return `${server}: ${rest.join('__')}`;
       }
       return name;
+  }
+}
+
+// The threadbare tools (threadbare-mcp.ts) in plain words, for tool rows and
+// approval cards.
+function threadbareTitle(tool: string, input: Record<string, unknown>): string {
+  const id = (str(input.threadId) || str(input.id)).slice(0, 8);
+  switch (tool) {
+    case 'list_threads':
+      return str(input.query) ? `Search threads: ${firstLine(str(input.query), 80)}` : 'List threads';
+    case 'read_thread':
+      return id ? `Read thread ${id}` : 'Read this thread';
+    case 'list_accounts':
+      return 'List accounts';
+    case 'create_thread':
+      return `Start a thread: ${firstLine(str(input.title) || str(input.text), 80)}`;
+    case 'send_message':
+      return `Message thread ${id}`;
+    case 'update_thread':
+      return id ? `Update thread ${id}` : 'Update this thread';
+    case 'move_thread':
+      return `Move ${id ? `thread ${id}` : 'this thread'} to ${str(input.folder)}`;
+    case 'interrupt_thread':
+      return `Stop thread ${id}`;
+    case 'delete_thread':
+      return `Delete thread ${id}`;
+    default:
+      return `threadbare: ${tool}`;
   }
 }
 

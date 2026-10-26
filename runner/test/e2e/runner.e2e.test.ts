@@ -302,7 +302,7 @@ describe('runner end to end (real Claude CLI)', { concurrency: false }, () => {
     assertProtocol(main.id);
   });
 
-  test('changing the folder starts a new session with a handoff note', async () => {
+  test('changing the folder carries the session there and resumes it', async () => {
     const before = summaries.get(main.id)!;
     const other = path.join(root, 'other');
     fs.mkdirSync(other, { recursive: true });
@@ -316,11 +316,13 @@ describe('runner end to end (real Claude CLI)', { concurrency: false }, () => {
     const done = await turnDone(main.id, turnId);
     assert.equal(done.outcome, 'completed', done.error);
     const evs = turnEvents(main.id, turnId);
-    assert.ok(evs.some((e) => e.type === 'system.note' && /Started a new session/.test(e.text)));
+    // Same account, so the transcript is copied across and resumed (a
+    // handoff note is only for account changes or a missing transcript).
+    assert.ok(evs.some((e) => e.type === 'system.note' && e.text.startsWith(`Moved to ${other}`)), JSON.stringify(evs.filter((e) => e.type === 'system.note')));
     assert.equal(evs.find((e) => e.type === 'user.message').text.startsWith('Use the Bash tool'), true, 'the transcript shows what was typed');
     assert.match(replyText(main.id, turnId), /only-file\.txt/);
     const after = await waitFor('summary', () => summaries.get(main.id)?.status === 'idle' && summaries.get(main.id));
-    assert.notEqual(after.nativeSessionId, before.nativeSessionId);
+    assert.equal(after.nativeSessionId, before.nativeSessionId, 'the same native session, resumed');
     assertProtocol(main.id);
   });
 

@@ -239,6 +239,8 @@ export class RpcServer {
         }
         return r.update(upd);
       }
+      case 'threads.delete':
+        return r.delete(reqString(p, 'threadId'));
       case 'threads.events':
         return r.events(reqString(p, 'threadId'), {
           afterSeq: optInt(p, 'afterSeq'),

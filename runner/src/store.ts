@@ -200,6 +200,17 @@ export class ThreadStore {
     atomicWriteFileSync(path.join(this.threadDir(rec.id), 'thread.json'), JSON.stringify(rec, null, 1) + '\n');
   }
 
+  // Moves a thread's folder to trash/<id>-<time> so it's out of the list but
+  // can still be put back by hand.
+  trash(id: string, now: number): void {
+    const dir = this.threadDir(id);
+    if (!fs.existsSync(dir)) return;
+    const bin = path.join(this.home, 'trash');
+    fs.mkdirSync(bin, { recursive: true });
+    fs.renameSync(dir, path.join(bin, `${id}-${now}`));
+    this.logs.delete(id);
+  }
+
   log(id: string): EventLog {
     let log = this.logs.get(id);
     if (!log) {

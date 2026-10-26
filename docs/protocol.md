@@ -120,7 +120,8 @@ replaces whatever the deltas built up.
 | `threads.create` | `{ text: string, images?: ImageRef[], cwd?: string, accountId?: string, model?: string, permissionMode?: "full" \| "ask", title?: string }` | `{ thread: ThreadSummary }` (the first turn starts straight away) |
 | `threads.send` | `{ threadId, text, images?: ImageRef[] }` | `{ turnId }`. If a turn is running, the message is queued and sent when it ends |
 | `threads.interrupt` | `{ threadId }` | `{}` |
-| `threads.update` | `{ threadId, title?, cwd?, accountId?, model?: string \| null, permissionMode?, snoozedUntil?: string \| null, archived?: boolean }` | `{ thread: ThreadSummary }`. Snoozing or archiving releases the CLI. Changing account or cwd takes effect on the next turn and starts a new native session with a short handoff note |
+| `threads.update` | `{ threadId, title?, cwd?, accountId?, model?: string \| null, permissionMode?, snoozedUntil?: string \| null, archived?: boolean }` | `{ thread: ThreadSummary }`. Snoozing or archiving releases the CLI. Changing account or cwd takes effect on the next turn. A folder change on the same account copies the native session's transcript to the new folder and resumes it; otherwise (or if that fails) it starts a new native session with a short handoff note |
+| `threads.delete` | `{ threadId }` | `{}`. Stops the thread's CLI and moves its folder to `trash/` in the data dir. Every client gets `thread.deleted` |
 | `threads.events` | `{ threadId, afterSeq?: number, beforeSeq?: number, limit?: number }` (default: the newest 500) | `{ events: Event[], firstSeq, lastSeq, inProgress: { itemId, type: "assistant.text" \| "reasoning", text }[] }` |
 | `threads.subscribe` | `{ threadId, afterSeq?: number }` | `{ events: Event[], inProgress: { itemId, type, text }[] }` (everything after `afterSeq`, and the text streamed so far for items still streaming), then pushes `thread.event` notifications. Deltas pushed after the reply carry on from `inProgress` |
 | `threads.unsubscribe` | `{ threadId }` | `{}` |
@@ -138,6 +139,7 @@ found, `-32010` account not found, `-32020` busy (e.g. two sends racing),
 |---|---|
 | `thread.updated` | `{ thread: ThreadSummary }` sent to every connected client whenever a summary changes |
 | `thread.event` | `{ threadId, event: Event }` only for subscribed threads, persisted and transient |
+| `thread.deleted` | `{ threadId }` sent to every connected client when a thread is deleted |
 | `runner.notice` | `{ level: "info" \| "warning" \| "error", message }`. Also sent straight after the `hello` result for things the client missed (startup problems, a missing `claude` binary) |
 
 ## Ordering and reconnects
@@ -153,3 +155,16 @@ found, `-32010` account not found, `-32020` busy (e.g. two sends racing),
 - A client that stops reading may miss transient deltas (the persisted
   event replaces them). One that falls far behind is closed with code 4408
   and should reconnect and replay from its last `seq`.
+
+## Tools for agents
+
+Every Claude session the runner starts gets an in-process MCP server called
+`threadbare` (`runner/src/threadbare-mcp.ts`), bound to its own thread, so
+an agent can drive Threadbare itself: `list_threads`, `read_thread`,
+`list_accounts`, `create_thread`, `send_message`, `update_thread`,
+`move_thread`, `interrupt_thread` and `delete_thread`. They call the same
+runner methods as the requests above. Messages an agent sends to another
+thread (or as a new thread's first message) start with a line saying which
+thread sent them. `delete_thread` always asks for approval, even in a thread
+with full access, and no tool can delete, interrupt, snooze or archive the
+thread that's calling it.

@@ -192,6 +192,8 @@ final class AppModel {
                 receive(thread)
             case .threadEvent(let threadId, let event):
                 sessions[threadId]?.receive(event)
+            case .threadDeleted(let threadId):
+                forget(threadId)
             case .runnerNotice(let level, let message):
                 if level != "info" { errorMessage = message }
             case .other:
@@ -238,6 +240,16 @@ final class AppModel {
         if showing && thread.lastSeq > thread.lastSeenSeq && thread.status != .waiting {
             scheduleMarkSeen(thread.id)
         }
+    }
+
+    /// A thread deleted on the runner (by an agent's delete_thread, or `tb
+    /// delete`) disappears from every list straight away.
+    private func forget(_ threadId: String) {
+        threads[threadId] = nil
+        searchResults?.removeAll { $0.id == threadId }
+        drafts[threadId] = nil
+        if let session = sessions.removeValue(forKey: threadId) { session.unsubscribe() }
+        if selection == threadId { selection = nil }
     }
 
     // MARK: Selection and sessions

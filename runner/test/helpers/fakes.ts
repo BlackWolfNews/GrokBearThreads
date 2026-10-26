@@ -6,7 +6,7 @@ import type { Account, PermissionMode } from '../../src/protocol.ts';
 import type { Config } from '../../src/config.ts';
 import { ensureHome } from '../../src/config.ts';
 import { ThreadStore } from '../../src/store.ts';
-import { Runner, type Notification } from '../../src/runner.ts';
+import { Runner, type Notification, type RunnerDeps } from '../../src/runner.ts';
 import { FakeClock } from '../../src/clock.ts';
 import { nullLogger } from '../../src/log.ts';
 
@@ -137,7 +137,7 @@ export type Harness = {
   restart(): Harness;
 };
 
-export function makeHarness(home = tmpDir(), cfgExtra: Partial<Config> = {}): Harness {
+export function makeHarness(home = tmpDir(), cfgExtra: Partial<Config> = {}, depsExtra: Partial<RunnerDeps> = {}): Harness {
   ensureHome(home);
   const cfg = testConfig(home, cfgExtra);
   const clock = new FakeClock();
@@ -151,6 +151,9 @@ export function makeHarness(home = tmpDir(), cfgExtra: Partial<Config> = {}): Ha
     clock,
     log: nullLogger,
     defer: (fn) => fn(),
+    // Never touch a real Claude config dir from a test.
+    copyTranscript: () => false,
+    ...depsExtra,
   });
   const notes: Notification[] = [];
   runner.onNotification((n) => notes.push(n));
@@ -165,7 +168,7 @@ export function makeHarness(home = tmpDir(), cfgExtra: Partial<Config> = {}): Ha
     notes,
     events: (threadId) =>
       notes.filter((n) => n.method === 'thread.event' && n.params.threadId === threadId).map((n) => (n as any).params.event),
-    restart: () => makeHarness(home, cfgExtra),
+    restart: () => makeHarness(home, cfgExtra, depsExtra),
   };
 }
 

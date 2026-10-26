@@ -110,6 +110,7 @@ final class RPCClientTests: XCTestCase {
         transport.push(E.json(["jsonrpc": "2.0", "method": "thread.event", "params": ["threadId": "th1", "event": [
             "seq": 4, "ts": "2026-10-26T10:00:01Z", "threadId": "th1", "type": "assistant.text.delta", "itemId": "m1", "text": "Hel",
         ]]]))
+        transport.push(E.json(["jsonrpc": "2.0", "method": "thread.deleted", "params": ["threadId": "th2"]]))
         transport.push(E.json(["jsonrpc": "2.0", "method": "some.future.thing", "params": [:]]))
         var iterator = client.notifications.makeAsyncIterator()
         guard case .threadUpdated(let thread)? = await iterator.next() else { return XCTFail("no update") }
@@ -119,6 +120,8 @@ final class RPCClientTests: XCTestCase {
         guard case .threadEvent(let threadId, let event)? = await iterator.next() else { return XCTFail("no event") }
         XCTAssertEqual(threadId, "th1")
         XCTAssertEqual(event.payload, .assistantTextDelta(itemId: "m1", text: "Hel"))
+        guard case .threadDeleted(let deleted)? = await iterator.next() else { return XCTFail("no delete") }
+        XCTAssertEqual(deleted, "th2")
         guard case .other(let method)? = await iterator.next() else { return XCTFail("no other") }
         XCTAssertEqual(method, "some.future.thing")
     }

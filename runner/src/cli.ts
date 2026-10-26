@@ -18,6 +18,8 @@ const HELP = `tb: talk to the Threadbare runner
   tb answer <threadId> <approvalId> "answer"
   tb snooze <threadId> <ISO time or 30m, 2h, 1d>
   tb archive <threadId>      tb unarchive <threadId>
+  tb move <threadId> <folder>
+  tb delete <threadId>
   tb accounts
 
 Thread ids can be shortened to any unique prefix.
@@ -140,6 +142,19 @@ async function run(client: RunnerClient, cmd: string, args: string[], f: Flags):
         answers: { '0': args[2] ?? '' },
       });
       return 0;
+    case 'move': {
+      const id = await resolveId(client, args[0]);
+      if (!args[1]) throw new Error('folder required');
+      const r = await client.call<{ thread: ThreadSummary }>('threads.update', { threadId: id, cwd: path.resolve(args[1]) });
+      console.log(`moved to ${r.thread.cwd} (from the next message)`);
+      return 0;
+    }
+    case 'delete': {
+      const id = await resolveId(client, args[0]);
+      await client.call('threads.delete', { threadId: id });
+      console.log(`deleted ${id}`);
+      return 0;
+    }
     case 'snooze': {
       const id = await resolveId(client, args[0]);
       const until = parseWhen(args[1] ?? '1h');

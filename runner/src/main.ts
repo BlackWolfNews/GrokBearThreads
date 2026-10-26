@@ -13,6 +13,7 @@ import { RpcServer } from './rpc.ts';
 import { realClock } from './clock.ts';
 import { acquireLock } from './lock.ts';
 import { removeTempFiles } from './fsutil.ts';
+import { ALWAYS_ASK_TOOLS, SERVER_NAME, threadbareMcpServer } from './threadbare-mcp.ts';
 
 async function main(): Promise<void> {
   const cfg = loadConfig();
@@ -48,10 +49,20 @@ async function main(): Promise<void> {
 
   const store = new ThreadStore(cfg.home);
   const accounts = new AccountRegistry(cfg);
-  const runner = new Runner({
+  // Every session gets tools for driving Threadbare itself, bound to its
+  // own thread. Sessions only start after the runner exists.
+  let runner!: Runner;
+  const claude = new ClaudeAdapter({
+    claudePath: cfg.claudePath,
+    registry,
+    log,
+    mcpServersFor: (threadId) => ({ [SERVER_NAME]: threadbareMcpServer(runner, threadId) }),
+    alwaysAsk: ALWAYS_ASK_TOOLS,
+  });
+  runner = new Runner({
     config: cfg,
     store,
-    adapters: { claude: new ClaudeAdapter({ claudePath: cfg.claudePath, registry, log }) },
+    adapters: { claude },
     accounts,
     clock: realClock,
     log,

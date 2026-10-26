@@ -1,0 +1,274 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
+import { makeHarness, tick, tmpDir } from '../helpers/fakes.ts';
+import { copySessionTranscript, projectDirName } from '../../src/transcripts.ts';
+import { buildThreadbareTools, parseWhen } from '../../src/threadbare-mcp.ts';
+import { toolTitle } from '../../src/tools.ts';
+
+function start(h: ReturnType<typeof makeHarness>, text = 'Fix the tests', extra: Record<string, unknown> = {}) {
+  const { thread } = h.runner.create({ text, accountId: 'claude-3', ...extra });
+  const s = h.adapter.last;
+  s.init();
+  return { thread, s };
+}
+
+function tools(h: ReturnType<typeof makeHarness>, selfId: string) {
+  const list = buildThreadbareTools(h.runner, selfId, () => Date.parse('2026-10-26T12:00:00Z'));
+  const call = async (name: string, args: Record<string, unknown> = {}) => {
+    const t = list.find((x) => x.name === name);
+    assert.ok(t, `tool ${name}`);
+    const r = (await t.handler(args as never, {})) as { content: { text: string }[]; isError?: boolean };
+    return { text: r.content.map((c) => c.text).join('\n'), error: Boolean(r.isError) };
+  };
+  return { list, call };
+}
+
+// ------------------------------------------------------------ transcripts
+
+test('projectDirName matches how the CLI names folders', () => {
+  assert.equal(projectDirName('/Users/m5-mike/dev/me/misc'), '-Users-m5-mike-dev-me-misc');
+  assert.equal(projectDirName('/Users/x/.agents/a_b c'), '-Users-x--agents-a-b-c');
+});
+
+test('copySessionTranscript copies the jsonl and the subagent folder, using real paths', () => {
+  const config = tmpDir();
+  const a = fs.realpathSync(tmpDir());
+  const b = tmpDir(); // under /var -> /private/var, so the real path differs
+  const sid = '0b7a4c1e-1111-2222-3333-444455556666';
+  const src = path.join(config, 'projects', projectDirName(a));
+  fs.mkdirSync(path.join(src, sid, 'subagents'), { recursive: true });
+  fs.writeFileSync(path.join(src, `${sid}.jsonl`), '{"x":1}\n');
+  fs.writeFileSync(path.join(src, sid, 'subagents', 'agent-1.jsonl'), '{}\n');
+  assert.equal(copySessionTranscript(config, a, b, sid), true);
+  const dest = path.join(config, 'projects', projectDirName(fs.realpathSync(b)));
+  assert.equal(fs.readFileSync(path.join(dest, `${sid}.jsonl`), 'utf8'), '{"x":1}\n');
+  assert.ok(fs.existsSync(path.join(dest, sid, 'subagents', 'agent-1.jsonl')));
+  assert.ok(fs.existsSync(path.join(src, `${sid}.jsonl`)), 'the original stays');
+  assert.equal(copySessionTranscript(config, a, b, 'not-there'), false);
+  assert.equal(copySessionTranscript(config, a, b, '../evil'), false);
+});
+
+// ------------------------------------------------------ moving a thread
+
+test('a folder move on the same account carries the transcript and resumes the same session', async () => {
+  const copies: string[][] = [];
+  const h = makeHarness(undefined, {}, {
+    copyTranscript: (configDir, from, to, sid) => {
+      copies.push([configDir, from, to, sid]);
+      return true;
+    },
+  });
+  const { thread, s } = start(h);
+  s.result('completed', 0.01);
+  const other = tmpDir();
+  h.runner.update({ threadId: thread.id, cwd: other });
+  await tick();
+  h.runner.send(thread.id, 'Now commit it');
+  await tick();
+  const s2 = h.adapter.last;
+  assert.notEqual(s2, s);
+  assert.equal(s2.opts.cwd, other);
+  assert.equal(s2.opts.resume, true, 'resumes rather than starting fresh');
+  assert.equal(s2.opts.sessionId, s.opts.sessionId);
+  assert.equal(s2.sent[0].text, 'Now commit it', 'no handoff note');
+  assert.deepEqual(copies, [['/tmp/three', h.cfg.defaults.cwd, other, s.opts.sessionId]]);
+  assert.ok(h.events(thread.id).some((e) => e.type === 'system.note' && /^Moved to /.test(e.text)));
+});
+
+test('a move falls back to the handoff note when the transcript cannot be carried, or the account changes', async () => {
+  for (const how of ['missing', 'account'] as const) {
+    let called = 0;
+    const h = makeHarness(undefined, {}, {
+      copyTranscript: () => {
+        called++;
+        return how !== 'missing';
+      },
+    });
+    const { thread, s } = start(h);
+    s.text('m1:0', 'Done.');
+    s.result();
+    h.runner.update({ threadId: thread.id, cwd: tmpDir(), ...(how === 'account' ? { accountId: 'claude-main' } : {}) });
+    await tick();
+    h.runner.send(thread.id, 'next');
+    await tick();
+    const s2 = h.adapter.last;
+    assert.equal(s2.opts.resume, false, how);
+    assert.match(s2.sent[0].text, /^\[Threadbare handoff\]/, how);
+    assert.equal(called, how === 'missing' ? 1 : 0, `${how}: copy attempts`);
+  }
+});
+
+test('if the carried transcript will not resume, the fresh session gets the handoff note', async () => {
+  const h = makeHarness(undefined, {}, { copyTranscript: () => true });
+  const { thread, s } = start(h);
+  s.text('m1:0', 'The tests pass now.');
+  s.result();
+  h.runner.update({ threadId: thread.id, cwd: tmpDir() });
+  await tick();
+  h.runner.send(thread.id, 'Now commit it');
+  await tick();
+  const s2 = h.adapter.last;
+  assert.equal(s2.opts.resume, true);
+  s2.sink.exited(new Error('No conversation found with session ID x'));
+  await tick();
+  const s3 = h.adapter.last;
+  assert.notEqual(s3, s2);
+  assert.equal(s3.opts.resume, false);
+  assert.match(s3.sent[0].text, /^\[Threadbare handoff\][\s\S]*The tests pass now\.[\s\S]*Now commit it$/);
+});
+
+// ---------------------------------------------------------------- delete
+
+test('delete stops the CLI, moves the files to trash and tells clients', async () => {
+  const h = makeHarness();
+  const { thread, s } = start(h);
+  const dir = h.store.threadDir(thread.id);
+  assert.ok(fs.existsSync(dir));
+  h.runner.delete(thread.id);
+  await tick();
+  assert.equal(s.endedHard, true);
+  assert.ok(!fs.existsSync(dir));
+  const trashed = fs.readdirSync(path.join(h.home, 'trash'));
+  assert.equal(trashed.length, 1);
+  assert.ok(trashed[0].startsWith(thread.id));
+  assert.ok(h.notes.some((n) => n.method === 'thread.deleted' && n.params.threadId === thread.id));
+  assert.throws(() => h.runner.get(thread.id), (e: { code: number }) => e.code === -32004);
+  // Late output from the old CLI goes nowhere and doesn't bring the folder back.
+  s.text('m1:0', 'late');
+  s.result();
+  h.runner.flush();
+  assert.ok(!fs.existsSync(dir));
+  assert.equal(h.restart().runner.list(['inbox', 'snoozed', 'archived']).length, 0, 'gone after a restart too');
+});
+
+// ----------------------------------------------------------------- tools
+
+test('list, read and account tools', async () => {
+  const h = makeHarness();
+  const { thread: a, s } = start(h, 'First thread');
+  s.text('m1:0', 'Hello from the agent');
+  s.result();
+  const { thread: b } = start(h, 'Second thread');
+  const t = tools(h, a.id);
+  const list = await t.call('list_threads');
+  assert.match(list.text, /First thread .*this thread/);
+  assert.match(list.text, /Second thread/);
+  const read = await t.call('read_thread', { threadId: b.id.slice(0, 8) });
+  assert.match(read.text, /title: Second thread/);
+  const self = await t.call('read_thread');
+  assert.match(self.text, /Mike \(.*\):\nFirst thread/);
+  assert.match(self.text, /Agent \(.*\):\nHello from the agent/);
+  assert.match((await t.call('list_accounts')).text, /claude-3 {2}three@example\.com/);
+  assert.match((await t.call('list_threads', { query: 'Second' })).text, /Second thread/);
+  const missing = await t.call('read_thread', { threadId: 'zzzz' });
+  assert.equal(missing.error, true);
+});
+
+test('create and send say where the message came from', async () => {
+  const h = makeHarness();
+  const { thread: me } = start(h, 'Boss thread');
+  const t = tools(h, me.id);
+  const made = await t.call('create_thread', { text: 'Write the docs\nin detail', account: 'three', folder: '.' });
+  assert.equal(made.error, false, made.text);
+  const child = h.runner.list().find((x) => x.title === 'Write the docs')!;
+  assert.ok(child, 'title from the first line, without the prefix');
+  assert.equal(child.cwd, me.cwd);
+  const cs = h.adapter.last;
+  assert.match(cs.sent[0].text, /^\[Sent by the agent in the thread "Boss thread"/);
+  cs.init();
+  cs.result();
+  await t.call('send_message', { threadId: child.id, text: 'Also add examples' });
+  const um = h.events(child.id).filter((e) => e.type === 'user.message').at(-1);
+  assert.match(um.text, /^\[Sent by the agent[\s\S]*Also add examples$/);
+  assert.equal((await t.call('send_message', { threadId: me.id, text: 'x' })).error, true, 'not to itself');
+});
+
+test('update renames and snoozes others, but will not stop its own turn', async () => {
+  const h = makeHarness();
+  const { thread: me } = start(h, 'Me');
+  const { thread: other } = start(h, 'Other');
+  const t = tools(h, me.id);
+  assert.match((await t.call('update_thread', { title: 'Renamed me' })).text, /title: Renamed me/);
+  const own = await t.call('update_thread', { archived: true });
+  assert.equal(own.error, true);
+  assert.equal(h.runner.get(me.id).archivedAt, undefined);
+  const snoozed = await t.call('update_thread', { threadId: other.id, snooze: '2h' });
+  assert.match(snoozed.text, /snoozed until: 2026-10-26T14:00:00\.000Z/);
+  await t.call('update_thread', { threadId: other.id, snooze: 'off' });
+  assert.equal(h.runner.get(other.id).snoozedUntil, undefined);
+});
+
+test('move_thread on itself switches folder after the turn and carries on with `then`', async () => {
+  const h = makeHarness(undefined, {}, { copyTranscript: () => true });
+  const { thread: me, s } = start(h, 'Move me');
+  const dest = tmpDir();
+  const t = tools(h, me.id);
+  const r = await t.call('move_thread', { folder: dest, then: 'Carry on with the tests' });
+  assert.equal(r.error, false, r.text);
+  assert.match(r.text, /when this turn ends.*carries on by itself/);
+  assert.equal(h.adapter.sessions.length, 1, 'the running turn is left alone');
+  assert.equal(h.runner.get(me.id).cwd, dest);
+  s.result();
+  await tick();
+  const s2 = h.adapter.last;
+  assert.notEqual(s2, s);
+  assert.equal(s2.opts.cwd, dest);
+  assert.equal(s2.opts.resume, true);
+  assert.match(s2.sent[0].text, /^\[Sent by the agent before moving to .*\]\n\nCarry on with the tests$/);
+  assert.equal((await t.call('move_thread', { folder: '/definitely/not/here' })).error, true);
+});
+
+test('interrupt and delete refuse this thread and work on others', async () => {
+  const h = makeHarness();
+  const { thread: me } = start(h, 'Me');
+  const { thread: other, s: os } = start(h, 'Other');
+  const t = tools(h, me.id);
+  assert.equal((await t.call('interrupt_thread', { threadId: me.id })).error, true);
+  assert.equal((await t.call('delete_thread', { threadId: me.id })).error, true);
+  await t.call('interrupt_thread', { threadId: other.id });
+  assert.equal(os.interrupts, 1);
+  const del = await t.call('delete_thread', { threadId: other.id.slice(0, 8) });
+  assert.match(del.text, /Deleted "Other"/);
+  assert.equal(h.runner.list().length, 1);
+});
+
+test('`id` works as a thread id, and a missing one is an error rather than "this thread"', async () => {
+  const h = makeHarness();
+  const { thread: me } = start(h, 'Me');
+  const { thread: other } = start(h, 'Other');
+  const t = tools(h, me.id);
+  await t.call('update_thread', { id: other.id, title: 'Renamed other' });
+  assert.equal(h.runner.get(other.id).title, 'Renamed other');
+  assert.equal(h.runner.get(me.id).title, 'Me');
+  assert.equal((await t.call('delete_thread', {})).error, true);
+  assert.equal(h.runner.list().length, 2);
+});
+
+test('the delete approval names the thread', async () => {
+  const h = makeHarness();
+  const { thread: other } = start(h, 'Old experiment');
+  const { thread: me, s } = start(h, 'Me', { permissionMode: 'ask' });
+  const answer = s.sink.requestApproval({
+    toolUseId: 'tu1',
+    name: 'mcp__threadbare__delete_thread',
+    title: 'Delete thread x',
+    input: { id: other.id.slice(0, 8) },
+    canAlwaysAllow: false,
+    signal: new AbortController().signal,
+  });
+  const ask = h.events(me.id).find((e) => e.type === 'approval.requested');
+  assert.equal(ask.title, 'Delete the thread "Old experiment"');
+  h.runner.respondApproval({ threadId: me.id, approvalId: ask.approvalId, decision: 'deny' });
+  assert.equal((await answer).decision, 'deny');
+});
+
+test('parseWhen and tool titles', () => {
+  const now = Date.parse('2026-10-26T12:00:00Z');
+  assert.equal(parseWhen('30m', now), '2026-10-26T12:30:00.000Z');
+  assert.equal(parseWhen('1d', now), '2026-10-27T12:00:00.000Z');
+  assert.throws(() => parseWhen('soonish', now));
+  assert.equal(toolTitle('mcp__threadbare__move_thread', { folder: '~/dev/x' }, '/'), 'Move this thread to ~/dev/x');
+  assert.equal(toolTitle('mcp__threadbare__delete_thread', { threadId: 'abcdef123456' }, '/'), 'Delete thread abcdef12');
+});

@@ -39,10 +39,13 @@ import type { AccountRegistry } from './accounts.ts';
 import { RUNNER_VERSION, expandHome, paths, readRunnerJson, writeRunnerJson, type Config } from './config.ts';
 import { copyImageInto, imageRefFor } from './media.ts';
 import { isDirectory } from './fsutil.ts';
+import { copySessionTranscript } from './transcripts.ts';
+import { approvalTitle } from './threadbare-mcp.ts';
 
 export type Notification =
   | { method: 'thread.updated'; params: { thread: ThreadSummary } }
   | { method: 'thread.event'; params: { threadId: string; event: AnyEvent } }
+  | { method: 'thread.deleted'; params: { threadId: string } }
   | { method: 'runner.notice'; params: { level: 'info' | 'warning' | 'error'; message: string } };
 
 type PendingApproval =
@@ -68,6 +71,10 @@ type Runtime = {
   releasedGen?: number; // generation of the session being released on purpose
   resumed: boolean; // the live session was started with resume
   retriedFresh: boolean;
+  // Where the live session's transcript was carried from, if it moved
+  // folder; used only if resuming the copy fails.
+  carried?: ThreadRecord['handoff'];
+  deleted?: boolean; // anything the old CLI still reports is dropped
   turn?: Turn;
   tasks: BackgroundTask[]; // background work the live CLI is running
   activeAt: number; // last turn start or end, for picking which CLI to release
@@ -90,6 +97,9 @@ export type RunnerDeps = {
   log: Logger;
   // Coalesces summary saves and thread.updated; tests pass a synchronous one.
   defer?: (fn: () => void) => void;
+  // Copies a Claude session's transcript to another folder (transcripts.ts);
+  // tests swap it out.
+  copyTranscript?: typeof copySessionTranscript;
 };
 
 const DELTA_INTERVAL_MS = 33; // at most ~30 delta flushes a second per thread
@@ -107,6 +117,7 @@ export class Runner {
   private clock: Clock;
   private log: Logger;
   private defer: (fn: () => void) => void;
+  private copyTranscript: typeof copySessionTranscript;
   private threads = new Map<string, ThreadState>();
   private listeners = new Set<(n: Notification) => void>();
   private dirty = new Set<string>();
@@ -119,6 +130,7 @@ export class Runner {
   constructor(deps: RunnerDeps) {
     this.cfg = deps.config;
     this.store = deps.store;
+    this.copyTranscript = deps.copyTranscript ?? copySessionTranscript;
     this.adapters = deps.adapters;
     this.accounts = deps.accounts;
     this.clock = deps.clock;
@@ -568,7 +580,12 @@ export class Runner {
       const account = this.accounts.get(rec.accountId);
       if (!account) throw new Error(`Account ${rec.accountId} isn't available on this Mac.`);
       if (!isDirectory(rec.cwd)) throw new Error(`Folder not found: ${rec.cwd}`);
-      if (rec.handoff) {
+      if (rec.handoff && this.carryTranscript(st, account)) {
+        // Same login, new folder: the whole conversation came along.
+        this.emit(st, { type: 'system.note', text: `Moved to ${rec.cwd}. The session carries on there.` }, msg.turnId);
+        rt.carried = rec.handoff;
+        delete rec.handoff;
+      } else if (rec.handoff) {
         text = this.handoffNote(st, account) + text;
         this.emit(st, { type: 'system.note', text: `Started a new session in ${rec.cwd} on ${account.title}.` }, msg.turnId);
         rec.nativeSessionId = crypto.randomUUID();
@@ -588,6 +605,20 @@ export class Runner {
   // the longest. CLIs with a turn, an approval, queued messages or
   // background work are never picked; if every other one is busy the cap
   // is passed rather than stopping work.
+  // A folder move on the same login copies the session's transcript to the
+  // new folder so it resumes with everything, rather than a short note.
+  // Anything else (a new login, a rebuilt record, a transcript that can't
+  // be found) gets the handoff note.
+  private carryTranscript(st: ThreadState, account: Account): boolean {
+    const { rec } = st;
+    const from = rec.handoff;
+    if (!from || from.rebuilt || from.fromAccountId !== rec.accountId || from.fromCwd === rec.cwd) return false;
+    if (!rec.sessionUsed || !rec.nativeSessionId) return false;
+    const ok = this.copyTranscript(account.configDir, from.fromCwd, rec.cwd, rec.nativeSessionId);
+    if (!ok) this.log.info('could not carry the transcript to the new folder; using a handoff note', { threadId: rec.id });
+    return ok;
+  }
+
   private makeRoomForCli(starting: ThreadState): void {
     const live = [...this.threads.values()].filter((t) => t !== starting && t.rt.session && !t.rt.closing);
     if (live.length < this.cfg.maxLive) return;
@@ -835,8 +866,17 @@ export class Runner {
           const log = this.store.log(rec.id);
           const msg = log.read(Math.max(1, log.lastSeq - 50), log.lastSeq).reverse().find((e) => e.type === 'user.message' && e.turnId === turnId);
           if (msg && msg.type === 'user.message') {
+            // A transcript carried to a new folder that wouldn't resume:
+            // give the fresh session the handoff note it would have had.
+            let text = msg.text;
+            if (rt.carried) {
+              rec.handoff = rt.carried;
+              text = this.handoffNote(st, account) + text;
+              delete rec.handoff;
+            }
+            rt.carried = undefined;
             this.startSession(st, account);
-            rt.session!.send({ id: turnId, text: msg.text, images: msg.images });
+            rt.session!.send({ id: turnId, text, images: msg.images });
             return;
           }
         }
@@ -962,6 +1002,35 @@ export class Runner {
     return { thread: this.summary(st) };
   }
 
+  // Stops the thread's CLI, moves its folder to trash/ in the data dir (so
+  // a mistake can be undone by hand) and forgets it.
+  delete(threadId: string): Record<string, never> {
+    const st = this.mustGet(threadId);
+    const { rec, rt } = st;
+    rt.deleted = true;
+    this.threads.delete(threadId);
+    this.dirty.delete(threadId);
+    rt.idleTimer?.cancel();
+    rt.deltaTimer?.cancel();
+    rt.turn?.interruptTimer?.cancel();
+    // Bumping the generation makes everything the old CLI still reports
+    // (output, approvals, its exit) go nowhere.
+    rt.generation++;
+    for (const [, p] of rt.approvals) {
+      if (p.kind === 'tool') p.resolve({ decision: 'expired', message: 'The thread was deleted.' });
+      else p.resolve({ answers: null, message: 'The thread was deleted.' });
+    }
+    rt.approvals.clear();
+    const session = rt.session;
+    rt.session = undefined;
+    session?.end({ hard: true }).catch((e: unknown) => this.log.warn('stopping a deleted thread failed', { threadId, error: String(e) }));
+    this.store.trash(threadId, this.clock.now());
+    this.log.info('thread deleted', { threadId, title: rec.title });
+    this.armSnoozeTimer();
+    this.notify({ method: 'thread.deleted', params: { threadId } });
+    return {};
+  }
+
   markSeen(threadId: string, seq: number): { thread: ThreadSummary } {
     const st = this.mustGet(threadId);
     const { rec } = st;
@@ -1033,7 +1102,7 @@ export class Runner {
       type: 'approval.requested',
       approvalId,
       name: req.name,
-      title: req.title,
+      title: approvalTitle(req.name, req.input, (q) => this.findThread(q)) ?? req.title,
       input: req.input,
       options: req.canAlwaysAllow ? ['allow', 'allowAlways', 'deny'] : ['allow', 'deny'],
     };
@@ -1189,6 +1258,7 @@ export class Runner {
   // ---------------------------------------------------------------- events
 
   private emit(st: ThreadState, body: EventBody, turnId?: string): PersistedEvent {
+    if (st.rt.deleted) throw new Error('The thread was deleted.');
     this.flushDeltas(st);
     const log = this.store.log(st.rec.id);
     const event = { seq: log.lastSeq + 1, ts: this.isoNow(), threadId: st.rec.id, ...(turnId ? { turnId } : {}), ...body } as PersistedEvent;
@@ -1236,6 +1306,7 @@ export class Runner {
   // --------------------------------------------------------------- helpers
 
   private markDirty(st: ThreadState): void {
+    if (st.rt.deleted) return;
     this.dirty.add(st.rec.id);
     if (this.flushScheduled) return;
     this.flushScheduled = true;
@@ -1286,6 +1357,14 @@ export class Runner {
     if (rec.contextTokens !== undefined) s.contextTokens = rec.contextTokens;
     if (rec.costUsd !== undefined) s.costUsd = rec.costUsd;
     return s;
+  }
+
+  // A thread by full id or unique prefix, for titles; undefined if unclear.
+  private findThread(q: string): ThreadSummary | undefined {
+    const exact = this.threads.get(q);
+    if (exact) return this.summary(exact);
+    const hits = [...this.threads.values()].filter((t) => t.rec.id.startsWith(q));
+    return hits.length === 1 ? this.summary(hits[0]) : undefined;
   }
 
   private mustGet(threadId: string): ThreadState {
