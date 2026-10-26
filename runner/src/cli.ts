@@ -1,9 +1,10 @@
 // tb: a small command line client for testing and scripting the runner.
 import { parseArgs } from 'node:util';
 import path from 'node:path';
-import { loadConfig, readToken } from './config.ts';
+import { loadConfig, readToken, runnerUrl } from './config.ts';
 import { RunnerClient } from './client.ts';
 import type { ImageRef, PersistedEvent, ThreadSummary } from './protocol.ts';
+import { DEV_HELP, logsCommand, runDev } from './tb-dev.ts';
 
 const HELP = `tb: talk to the Threadbare runner
 
@@ -21,7 +22,9 @@ const HELP = `tb: talk to the Threadbare runner
   tb accounts
 
 Thread ids can be shortened to any unique prefix.
-Uses THREADBARE_HOME and THREADBARE_PORT like the runner does.`;
+Uses THREADBARE_HOME and THREADBARE_PORT like the runner does.
+
+${DEV_HELP}`;
 
 async function main(argv: string[]): Promise<number> {
   const { values, positionals } = parseArgs({
@@ -40,6 +43,17 @@ async function main(argv: string[]): Promise<number> {
       all: { type: 'boolean' },
       from: { type: 'string' },
       'until-done': { type: 'boolean' },
+      // tb-dev.ts
+      last: { type: 'string' },
+      tools: { type: 'boolean' },
+      out: { type: 'string' },
+      now: { type: 'boolean' },
+      force: { type: 'boolean' },
+      resume: { type: 'string' },
+      reason: { type: 'string' },
+      thread: { type: 'string' },
+      lines: { type: 'string', short: 'n' },
+      follow: { type: 'boolean', short: 'f' },
       help: { type: 'boolean', short: 'h' },
     },
   });
@@ -49,7 +63,8 @@ async function main(argv: string[]): Promise<number> {
     return cmd ? 0 : 1;
   }
   const cfg = loadConfig();
-  const url = process.env.THREADBARE_URL || `ws://127.0.0.1:${cfg.port}/rpc`;
+  if (cmd === 'logs') return logsCommand(cfg, values);
+  const url = runnerUrl(cfg);
   let client: RunnerClient;
   try {
     client = await RunnerClient.connect(url, readToken(cfg.home));
@@ -159,9 +174,12 @@ async function run(client: RunnerClient, cmd: string, args: string[], f: Flags):
       for (const a of r.accounts) console.log(`${a.id === r.defaults.accountId ? '*' : ' '} ${a.id.padEnd(12)} ${a.title}`);
       return 0;
     }
-    default:
+    default: {
+      const code = await runDev(client, cmd, args, f, (prefix) => resolveId(client, prefix));
+      if (code !== undefined) return code;
       console.error(`Unknown command: ${cmd}\n\n${HELP}`);
       return 1;
+    }
   }
 }
 

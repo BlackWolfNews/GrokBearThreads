@@ -414,6 +414,9 @@ function defaultFixtureDirs() {
   const dirs = [path.join(here, 'fixtures')];
   const privateDir = path.resolve(here, '../../.fixtures');
   if (fs.existsSync(privateDir)) dirs.push(privateDir);
+  // Where `tb export` puts a real thread (runner/src/tb-dev.ts).
+  const exported = path.join(privateDir, 'threads');
+  if (fs.existsSync(exported)) dirs.push(exported);
   return dirs;
 }
 

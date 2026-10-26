@@ -4,7 +4,9 @@ import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { makeHarness } from '../helpers/fakes.ts';
 import { RpcServer } from '../../src/rpc.ts';
-import { readToken } from '../../src/config.ts';
+import fs from 'node:fs';
+import os from 'node:os';
+import { loadConfig, readToken, runnerUrl } from '../../src/config.ts';
 import { nullLogger } from '../../src/log.ts';
 
 const TB = path.join(import.meta.dirname, '..', '..', 'bin', 'tb');
@@ -70,5 +72,20 @@ test('tb send --wait shows the new message and leaves the thread unread', async 
   } finally {
     t.kill();
     await server.close();
+  }
+});
+
+test('tb finds a runner on port 0 through runner.json, as the CLIs of a dev or sandbox runner must', () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'tb-port-'));
+  try {
+    fs.writeFileSync(path.join(home, 'runner.json'), JSON.stringify({ port: 4242 }));
+    const env = { THREADBARE_HOME: home, THREADBARE_PORT: '0' };
+    assert.equal(runnerUrl(loadConfig(env), env), 'ws://127.0.0.1:4242/rpc');
+    const fixed = { THREADBARE_HOME: home, THREADBARE_PORT: '5151' };
+    assert.equal(runnerUrl(loadConfig(fixed), fixed), 'ws://127.0.0.1:5151/rpc');
+    const url = { ...env, THREADBARE_URL: 'ws://127.0.0.1:1/rpc' };
+    assert.equal(runnerUrl(loadConfig(url), url), 'ws://127.0.0.1:1/rpc');
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
   }
 });
