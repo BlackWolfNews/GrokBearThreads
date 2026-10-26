@@ -1,0 +1,17 @@
+{
+  "id": "demo_sqlite_vs_files",
+  "title": "Compare SQLite and plain files for the runner",
+  "cwd": "/Users/mike/dev/me/misc",
+  "accountId": "claude-3",
+  "provider": "claude",
+  "permissionMode": "full",
+  "status": "idle",
+  "live": false,
+  "needsYou": false,
+  "createdAt": "2026-10-26T02:22:04.870Z",
+  "updatedAt": "2026-10-26T03:22:04.870Z",
+  "lastActivityAt": "2026-10-26T03:22:04.870Z",
+  "preview": "Plain files win here: 1. Events are append-only, which is what NDJSON is good at. 2. Each thread is read whole or from the end, never querie",
+  "lastSeq": 4,
+  "lastSeenSeq": 4
+}

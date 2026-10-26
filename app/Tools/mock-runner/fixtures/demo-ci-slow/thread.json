@@ -1,0 +1,17 @@
+{
+  "id": "demo_ci_slow",
+  "title": "Why is the build slow on CI?",
+  "cwd": "/Users/mike/dev/me/misc",
+  "accountId": "claude-main",
+  "provider": "claude",
+  "permissionMode": "full",
+  "status": "running",
+  "live": false,
+  "needsYou": false,
+  "createdAt": "2026-10-26T05:21:04.870Z",
+  "updatedAt": "2026-10-26T06:21:04.870Z",
+  "lastActivityAt": "2026-10-26T06:21:04.870Z",
+  "preview": "Looking at the two logs now.",
+  "lastSeq": 6,
+  "lastSeenSeq": 6
+}

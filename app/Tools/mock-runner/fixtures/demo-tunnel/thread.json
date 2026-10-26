@@ -1,0 +1,18 @@
+{
+  "id": "demo_tunnel",
+  "title": "Set up the Cloudflare tunnel for the preview server",
+  "cwd": "/Users/mike/dev/me/misc",
+  "accountId": "claude-main",
+  "provider": "claude",
+  "permissionMode": "full",
+  "status": "idle",
+  "live": false,
+  "needsYou": false,
+  "createdAt": "2026-10-24T03:22:04.870Z",
+  "updatedAt": "2026-10-24T04:22:04.870Z",
+  "lastActivityAt": "2026-10-24T04:22:04.870Z",
+  "preview": "The tunnel is running as a LaunchAgent and forwards preview.example.com to port 4321.",
+  "lastSeq": 4,
+  "lastSeenSeq": 4,
+  "archivedAt": "2026-10-24T05:22:04.870Z"
+}

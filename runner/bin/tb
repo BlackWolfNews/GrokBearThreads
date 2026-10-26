@@ -1,0 +1,3 @@
+#!/usr/bin/env node
+// Thin launcher: Node 24 runs the TypeScript source directly.
+import '../src/cli.ts';

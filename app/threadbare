@@ -1,0 +1,38 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# This launcher is normally reached through ~/.local/bin/threadbare.
+# Resolve the symlink so subcommands still find the scripts next to it.
+SCRIPT_DIR="$(python3 -c 'import os,sys; print(os.path.dirname(os.path.realpath(sys.argv[1])))' "${BASH_SOURCE[0]}")"
+APP_DIR="${THREADBARE_APP_DIR:-$HOME/Applications/Threadbare.app}"
+
+case "${1:-start}" in
+  start)
+    if [[ ! -d "$APP_DIR" ]]; then
+      bash "$SCRIPT_DIR/setup_mac.sh"
+    fi
+    open "$APP_DIR"
+    ;;
+  restart)
+    exec bash "$SCRIPT_DIR/restart.sh"
+    ;;
+  mock)
+    # Opens the app against the mock runner with a temp data folder.
+    shift
+    exec bash "$SCRIPT_DIR/Tools/run-mock.sh" "$@"
+    ;;
+  perf)
+    shift
+    exec bash "$SCRIPT_DIR/Tools/perf-run.sh" "$@"
+    ;;
+  stop|kill)
+    exec bash "$SCRIPT_DIR/kill.sh"
+    ;;
+  setup|install)
+    exec bash "$SCRIPT_DIR/setup_mac.sh"
+    ;;
+  *)
+    echo "Usage: threadbare [start|restart|mock|perf|stop|setup]" >&2
+    exit 2
+    ;;
+esac

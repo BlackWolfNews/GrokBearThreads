@@ -1,0 +1,17 @@
+{
+  "id": "demo_button_colour",
+  "title": "Pick a colour for the new Share button",
+  "cwd": "/Users/mike/dev/me/misc",
+  "accountId": "claude-main",
+  "provider": "claude",
+  "permissionMode": "full",
+  "status": "waiting",
+  "live": false,
+  "needsYou": true,
+  "createdAt": "2026-10-26T05:10:04.870Z",
+  "updatedAt": "2026-10-26T06:10:04.870Z",
+  "lastActivityAt": "2026-10-26T06:10:04.870Z",
+  "preview": "",
+  "lastSeq": 5,
+  "lastSeenSeq": 4
+}

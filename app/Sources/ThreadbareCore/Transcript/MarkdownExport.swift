@@ -1,0 +1,93 @@
+import Foundation
+
+/// Turns transcript rows back into Markdown for "Copy message" and
+/// "Copy transcript as Markdown" (selection can't span table rows).
+public enum MarkdownExport {
+    public static func transcript(title: String, rows: [TranscriptRow]) -> String {
+        var parts: [String] = []
+        if !title.isEmpty { parts.append("# \(title)") }
+        for row in rows {
+            if let text = section(for: row) { parts.append(text) }
+        }
+        return parts.joined(separator: "\n\n") + "\n"
+    }
+
+    /// The row as it reads in a transcript export (with a speaker heading
+    /// for messages).
+    public static func section(for row: TranscriptRow) -> String? {
+        switch row.content {
+        case .user(let message):
+            var text = "## You\n\n" + message.text
+            for image in message.images { text += "\n\n![image](\(image.path))" }
+            return text
+        case .assistant(let item):
+            return "## Claude\n\n" + item.text
+        default:
+            return message(for: row)
+        }
+    }
+
+    /// The row's own content, for "Copy message".
+    public static func message(for row: TranscriptRow) -> String? {
+        switch row.content {
+        case .user(let message):
+            return ([message.text] + message.images.map { "![image](\($0.path))" }).joined(separator: "\n\n")
+        case .assistant(let item):
+            return item.text
+        case .reasoning(let item):
+            return item.text.split(separator: "\n", omittingEmptySubsequences: false).map { "> " + $0 }.joined(separator: "\n")
+        case .tool(let tool):
+            var text = "**\(tool.name)**: `\(tool.title.replacingOccurrences(of: "`", with: "'"))`"
+            if let diff = tool.effectiveDiff, !diff.hunks.isEmpty {
+                let body = diff.hunks.map { hunk in
+                    (["@@ -\(hunk.oldStart),\(hunk.oldLines) +\(hunk.newStart),\(hunk.newLines) @@"] + hunk.lines).joined(separator: "\n")
+                }.joined(separator: "\n")
+                text += "\n\n```diff\n\(body)\n```"
+            } else if let result = tool.result, !result.text.isEmpty {
+                text += "\n\n" + fenced(result.text)
+            }
+            return text
+        case .images(_, let images):
+            return images.map { "![image](\($0.path))" }.joined(separator: "\n")
+        case .approval(let item):
+            let decision = item.resolution.map { " (\(label(for: $0.decision)))" } ?? ""
+            return "**Approval**: \(item.request.title)\(decision)"
+        case .question(let item):
+            return item.request.questions.map { "**Question**: \($0.question)" }.joined(separator: "\n")
+        case .plan(let entries):
+            return entries.map { entry in
+                let box = entry.status == .completed ? "[x]" : "[ ]"
+                return "- \(box) \(entry.text)"
+            }.joined(separator: "\n")
+        case .footer(let completion):
+            var text = "_\(RelativeTime.duration(milliseconds: completion.durationMs))"
+            if let cost = CostText.format(completion.costUsd) { text += ", " + cost }
+            if completion.outcome != .completed { text += ", \(completion.outcome.rawValue)" }
+            return text + "_"
+        case .note(let text):
+            return "_\(text)_"
+        case .error(let message):
+            return "**Error**: \(message)"
+        }
+    }
+
+    static func fenced(_ text: String) -> String {
+        // Use a fence longer than any backtick run inside the text.
+        var longest = 0, run = 0
+        for character in text {
+            if character == "`" { run += 1; longest = max(longest, run) } else { run = 0 }
+        }
+        let fence = String(repeating: "`", count: max(3, longest + 1))
+        return "\(fence)\n\(text)\n\(fence)"
+    }
+
+    static func label(for decision: ApprovalDecision) -> String {
+        switch decision {
+        case .allow: return "allowed"
+        case .allowAlways: return "always allowed"
+        case .deny: return "denied"
+        case .answered: return "answered"
+        case .expired: return "expired"
+        }
+    }
+}

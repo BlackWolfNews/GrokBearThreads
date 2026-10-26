@@ -1,0 +1,18 @@
+{
+  "id": "demo_upload_resume",
+  "title": "Make uploads resume after a crash",
+  "cwd": "/Users/mike/dev/photo-sync",
+  "accountId": "claude-main",
+  "provider": "claude",
+  "permissionMode": "ask",
+  "status": "waiting",
+  "live": true,
+  "needsYou": true,
+  "createdAt": "2026-10-26T04:46:04.870Z",
+  "updatedAt": "2026-10-26T06:21:04.870Z",
+  "lastActivityAt": "2026-10-26T06:21:04.870Z",
+  "preview": "Here it is after a forced quit at about two thirds.",
+  "lastSeq": 31,
+  "lastSeenSeq": 27,
+  "costUsd": 0.44
+}

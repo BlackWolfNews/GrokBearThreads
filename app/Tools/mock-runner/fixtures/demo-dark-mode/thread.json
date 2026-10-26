@@ -1,0 +1,17 @@
+{
+  "id": "demo_dark_mode",
+  "title": "Add dark mode to the dashboard",
+  "cwd": "/Users/mike/dev/me/misc",
+  "accountId": "claude-main",
+  "provider": "claude",
+  "permissionMode": "full",
+  "status": "idle",
+  "live": false,
+  "needsYou": false,
+  "createdAt": "2026-10-25T03:22:04.870Z",
+  "updatedAt": "2026-10-25T04:22:04.870Z",
+  "lastActivityAt": "2026-10-25T04:22:04.870Z",
+  "preview": "Added. Colours come from the asset catalogue, so they follow the system setting.",
+  "lastSeq": 4,
+  "lastSeenSeq": 4
+}

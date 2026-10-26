@@ -1,0 +1,6 @@
+{"seq":1,"ts":"2026-10-26T06:13:04.870Z","threadId":"demo_release_notes","turnId":"turn_1","type":"user.message","text":"Draft release notes for 0.4 from the merged PRs since 0.3.","images":[]}
+{"seq":2,"ts":"2026-10-26T06:13:04.870Z","threadId":"demo_release_notes","turnId":"turn_1","type":"turn.started"}
+{"seq":3,"ts":"2026-10-26T06:13:04.870Z","threadId":"demo_release_notes","turnId":"turn_1","type":"tool.call","itemId":"turn_1_gh","name":"Bash","kind":"command","title":"List merged PRs since v0.3","input":{}}
+{"seq":4,"ts":"2026-10-26T06:13:04.870Z","threadId":"demo_release_notes","turnId":"turn_1","type":"tool.result","itemId":"turn_1_gh","ok":true,"text":"#41 Resume uploads after a crash\n#43 Faster thumbnail grid\n#44 Fix the dark mode toolbar","truncated":false,"images":[]}
+{"seq":5,"ts":"2026-10-26T06:13:04.870Z","threadId":"demo_release_notes","turnId":"turn_1","type":"assistant.text","itemId":"turn_1_m","text":"## 0.4\n\n- **Uploads resume** after the app quits or the network drops.\n- The thumbnail grid scrolls faster with large libraries.\n- The toolbar reads properly in dark mode.\n\nWant a shorter version for the App Store?"}
+{"seq":6,"ts":"2026-10-26T06:13:04.870Z","threadId":"demo_release_notes","turnId":"turn_1","type":"turn.completed","outcome":"completed","durationMs":18000,"costUsd":0.05}

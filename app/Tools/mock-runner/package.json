@@ -1,0 +1,12 @@
+{
+  "name": "threadbare-mock-runner",
+  "private": true,
+  "type": "module",
+  "description": "A stand-in Threadbare runner that speaks docs/protocol.md, for app development and perf runs.",
+  "scripts": {
+    "start": "node server.mjs"
+  },
+  "dependencies": {
+    "ws": "8.22.0"
+  }
+}

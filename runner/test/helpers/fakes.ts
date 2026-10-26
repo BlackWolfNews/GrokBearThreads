@@ -1,0 +1,175 @@
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import type { AgentAdapter, AgentSession, SessionSink, StartSessionOptions, UserInput, AdapterOutput } from '../../src/adapters/types.ts';
+import type { Account, PermissionMode } from '../../src/protocol.ts';
+import type { Config } from '../../src/config.ts';
+import { ensureHome } from '../../src/config.ts';
+import { ThreadStore } from '../../src/store.ts';
+import { Runner, type Notification } from '../../src/runner.ts';
+import { FakeClock } from '../../src/clock.ts';
+import { nullLogger } from '../../src/log.ts';
+
+export class FakeSession implements AgentSession {
+  opts: StartSessionOptions;
+  sink: SessionSink;
+  sent: UserInput[] = [];
+  interrupts = 0;
+  ended = false;
+  endedHard = false;
+  killed = false;
+  models: (string | undefined)[] = [];
+  modes: PermissionMode[] = [];
+  interruptError?: Error;
+  // When set, end() waits for exit() like a real CLI that takes a moment
+  // to shut down after its input ends.
+  slowExit = false;
+  private exitNow?: () => void;
+
+  constructor(opts: StartSessionOptions, sink: SessionSink) {
+    this.opts = opts;
+    this.sink = sink;
+  }
+  send(input: UserInput): void {
+    this.sent.push(input);
+  }
+  async interrupt(): Promise<void> {
+    this.interrupts++;
+    if (this.interruptError) throw this.interruptError;
+  }
+  async setModel(model: string | undefined): Promise<void> {
+    this.models.push(model);
+  }
+  async setPermissionMode(mode: PermissionMode): Promise<void> {
+    this.modes.push(mode);
+  }
+  async end(opts: { hard?: boolean } = {}): Promise<void> {
+    this.ended = true;
+    this.endedHard = Boolean(opts.hard);
+    if (this.slowExit) await new Promise<void>((r) => (this.exitNow = r));
+    this.sink.exited();
+  }
+  exit(): void {
+    this.exitNow?.();
+  }
+  kill(): void {
+    this.killed = true;
+    this.sink.exited(new Error('killed'));
+  }
+  // Test helpers that play the CLI's part.
+  out(o: AdapterOutput): void {
+    this.sink.output(o);
+  }
+  init(id = this.opts.sessionId): void {
+    this.out({ kind: 'session', nativeSessionId: id, model: 'claude-haiku-5-5' });
+  }
+  text(itemId: string, text: string): void {
+    this.out({ kind: 'event', event: { type: 'assistant.text', itemId, text } });
+  }
+  delta(itemId: string, text: string): void {
+    this.out({ kind: 'delta', delta: { type: 'assistant.text.delta', itemId, text } });
+  }
+  result(outcome: 'completed' | 'interrupted' | 'failed' = 'completed', totalCostUsd?: number, error?: string): void {
+    this.out({ kind: 'result', result: { outcome, durationMs: 10, totalCostUsd, error } });
+  }
+}
+
+export class FakeAdapter implements AgentAdapter {
+  readonly provider = 'claude';
+  sessions: FakeSession[] = [];
+  slowExit = false;
+  start(opts: StartSessionOptions, sink: SessionSink): AgentSession {
+    const s = new FakeSession(opts, sink);
+    s.slowExit = this.slowExit;
+    this.sessions.push(s);
+    return s;
+  }
+  get last(): FakeSession {
+    return this.sessions[this.sessions.length - 1];
+  }
+}
+
+const made: string[] = [];
+process.on('exit', () => {
+  for (const d of made) fs.rmSync(d, { recursive: true, force: true });
+});
+
+// A temp folder that's removed when the test process exits.
+export function tmpDir(prefix = 'tb-test-'): string {
+  const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+  made.push(d);
+  return d;
+}
+
+export function testConfig(home: string, extra: Partial<Config> = {}): Config {
+  const cwd = path.join(home, 'work');
+  fs.mkdirSync(cwd, { recursive: true });
+  return {
+    home,
+    port: 0,
+    host: '127.0.0.1',
+    logFile: path.join(home, 'runner.log'),
+    claudePath: '/nonexistent/claude',
+    idleMs: 30 * 60_000,
+    maxLive: 6,
+    defaults: { cwd },
+    claudeMainDir: path.join(home, 'no-claude-main'),
+    claudeMainJson: path.join(home, 'no-claude-main.json'),
+    tokenStatsAccountsDir: path.join(home, 'no-accounts'),
+    ...extra,
+  };
+}
+
+export const ACCOUNTS: Account[] = [
+  { id: 'claude-main', provider: 'claude', title: 'main@example.com', configDir: '/tmp/main' },
+  { id: 'claude-3', provider: 'claude', title: 'three@example.com', configDir: '/tmp/three' },
+];
+
+export type Harness = {
+  home: string;
+  cfg: Config;
+  clock: FakeClock;
+  adapter: FakeAdapter;
+  runner: Runner;
+  store: ThreadStore;
+  notes: Notification[];
+  events(threadId: string): any[];
+  restart(): Harness;
+};
+
+export function makeHarness(home = tmpDir(), cfgExtra: Partial<Config> = {}): Harness {
+  ensureHome(home);
+  const cfg = testConfig(home, cfgExtra);
+  const clock = new FakeClock();
+  const adapter = new FakeAdapter();
+  const store = new ThreadStore(home);
+  const runner = new Runner({
+    config: cfg,
+    store,
+    adapters: { claude: adapter },
+    accounts: { list: () => ACCOUNTS, get: (id: string) => ACCOUNTS.find((a) => a.id === id) },
+    clock,
+    log: nullLogger,
+    defer: (fn) => fn(),
+  });
+  const notes: Notification[] = [];
+  runner.onNotification((n) => notes.push(n));
+  runner.start();
+  return {
+    home,
+    cfg,
+    clock,
+    adapter,
+    runner,
+    store,
+    notes,
+    events: (threadId) =>
+      notes.filter((n) => n.method === 'thread.event' && n.params.threadId === threadId).map((n) => (n as any).params.event),
+    restart: () => makeHarness(home, cfgExtra),
+  };
+}
+
+// Lets promise callbacks (deliver(), interrupt().catch) run.
+export async function tick(n = 3): Promise<void> {
+  for (let i = 0; i < n; i++) await new Promise((r) => setImmediate(r));
+}
