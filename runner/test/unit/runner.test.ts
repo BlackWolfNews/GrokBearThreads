@@ -461,6 +461,19 @@ test('default account is the last one used', () => {
   assert.equal(h.runner.create({ text: 'x' }).thread.accountId, 'claude-3');
 });
 
+test("runner.json's default model is used when a new thread names none", () => {
+  // dev-runner.sh sets it, so a thread started from a debug app's composer
+  // runs on the cheapest model rather than the account's default.
+  const h = makeHarness(tmpDir(), { defaults: { cwd: tmpDir(), model: 'claude-haiku-5-5' } });
+  assert.equal(h.runner.hello().defaults.model, 'claude-haiku-5-5');
+  const a = h.runner.create({ text: 'x', accountId: 'claude-3' }).thread;
+  assert.equal(a.model, 'claude-haiku-5-5');
+  assert.equal(h.adapter.last.opts.model, 'claude-haiku-5-5');
+  const b = h.runner.create({ text: 'y', accountId: 'claude-3', model: 'sonnet' }).thread;
+  assert.equal(b.model, 'sonnet', 'a model given wins');
+  assert.equal(makeHarness().runner.hello().defaults.model, undefined);
+});
+
 // ---------------------------------------------------------------- review fixes
 
 test('a turn the CLI starts by itself gets turn events, a running status and needsYou', async () => {

@@ -74,14 +74,18 @@ public struct RunnerRestart: Sendable, Equatable {
         case restarting(since: Date)
     }
 
-    /// What a `runner.notice` says about a restart.
+    /// What a `runner.notice` says about a restart: how many threads it
+    /// waits for, and how many of those wait on an answer from Mike.
     public enum Notice: Sendable, Equatable {
-        case pending(Int)
+        case pending(Int, onYou: Int)
         case restarting
         case cancelled
     }
 
     public private(set) var phase: Phase = .none
+    /// From the last notice, until `runner.status` names the threads (then
+    /// their statuses say which wait on Mike).
+    private var noticeOnYou = 0
 
     /// How long a restart keeps the connection banner quiet. A runner that
     /// hasn't come back by then is down, not restarting, and gets the usual
@@ -93,14 +97,20 @@ public struct RunnerRestart: Sendable, Equatable {
     }
 
     /// The runner's restart notices (`pendingMessage` and the cancel in
-    /// runner/src/restart.ts), or nil for any other notice.
+    /// runner/src/restart.ts, whose test pins these sentences), or nil for
+    /// any other notice. The numbers after "when" add up to the count:
+    /// "when 3 threads finish", "when 1 thread finishes and you answer 2",
+    /// "when you answer 1 thread".
     public static func parse(_ message: String) -> Notice? {
         if message.hasPrefix("The runner is restarting") { return .restarting }
         if message.hasPrefix("The pending runner restart was cancelled") { return .cancelled }
         let prefix = "The runner will restart when "
         guard message.hasPrefix(prefix) else { return nil }
-        let count = message.dropFirst(prefix.count).prefix { $0.isNumber }
-        return .pending(Int(count) ?? 1)
+        let rest = message.dropFirst(prefix.count)
+        let numbers = rest.split { !$0.isNumber }.compactMap { Int($0) }
+        let answerAt = rest.range(of: "you answer ")
+        let onYou = answerAt.map { rest[$0.upperBound...].prefix { $0.isNumber } }.flatMap { Int($0) } ?? 0
+        return .pending(max(1, numbers.reduce(0, +)), onYou: onYou)
     }
 
     /// Returns true when the notice was about a restart, so the caller can
@@ -109,7 +119,8 @@ public struct RunnerRestart: Sendable, Equatable {
     public mutating func notice(_ message: String, now: Date) -> Bool {
         guard let notice = Self.parse(message) else { return false }
         switch notice {
-        case .pending(let count):
+        case .pending(let count, let onYou):
+            noticeOnYou = onYou
             // Keep the thread list from the last status if it still fits.
             if case .pending(_, let ids) = phase, ids.count == count {
                 phase = .pending(count: count, threadIds: ids)
@@ -169,9 +180,24 @@ public struct RunnerRestart: Sendable, Equatable {
     }
 
     /// The pending restart in the runner's own words.
-    public var pendingText: String? {
-        guard case .pending(let count, _) = phase else { return nil }
-        return count == 1 ? "The runner will restart when 1 thread finishes." : "The runner will restart when \(count) threads finish."
+    public var pendingText: String? { pendingText { _ in false } }
+
+    /// The same, counting the threads `isWaitingOnYou` picks (waiting on an
+    /// approval or a question) apart: those won't finish until Mike answers.
+    public func pendingText(isWaitingOnYou: (String) -> Bool) -> String? {
+        guard case .pending(let count, let ids) = phase else { return nil }
+        let onYou = ids.isEmpty ? min(noticeOnYou, count) : ids.filter(isWaitingOnYou).count
+        return Self.text(waiting: count, onYou: onYou)
+    }
+
+    /// `pendingMessage` in runner/src/restart.ts.
+    public static func text(waiting: Int, onYou: Int) -> String {
+        let answer = min(max(0, onYou), waiting)
+        let finishing = waiting - answer
+        let finish = finishing == 1 ? "1 thread finishes" : "\(finishing) threads finish"
+        if answer == 0 { return "The runner will restart when \(finish)." }
+        if finishing == 0 { return "The runner will restart when you answer \(answer == 1 ? "1 thread" : "\(answer) threads")." }
+        return "The runner will restart when \(finish) and you answer \(answer)."
     }
 
     /// The threads it's waiting for, by title, for the banner's tooltip.

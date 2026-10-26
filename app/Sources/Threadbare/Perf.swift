@@ -63,6 +63,8 @@ final class PerfRunner: NSObject {
             let parts = CommandLine.arguments[index + 1].split(separator: "x").compactMap { Double($0) }
             if parts.count == 2 { size = NSSize(width: parts[0], height: parts[1]) }
         }
+        // The perf sizes are never saved as the window's frame.
+        window.setFrameAutosaveName("")
         window.setContentSize(size)
         window.center()
         try? await Task.sleep(for: .milliseconds(300))

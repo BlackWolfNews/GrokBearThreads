@@ -91,13 +91,17 @@ and the perf run stay away from the real one. Install the runner itself with
   (⇧⌘C, or the ... menu) copies the whole thread, fetching older pages first.
   "Copy debug info" (on every row's menu) copies the thread id, the row's id
   and kind, its turn, the seqs of the events it was built from and the
-  runner's version, one `key: value` a line, so an agent can find the same
-  events with `tb show` or a fixture export.
+  runner's version, one `key: value` a line, and the `tb events <thread>
+  --from N --to M` command that prints those events (or read them in a `tb
+  export`'s events.ndjson, where line N is seq N).
 - **Images** in the transcript are thumbnails; click one for Quick Look.
 - **Runner restarts** (`runner.restart`, the deploy script) show as a
   quiet grey line under the toolbar, not the yellow banner: "The runner
   will restart when 2 threads finish." (the threads' titles are in its
-  tooltip; the count follows `runner.status` as threads finish), then "The
+  tooltip; the count follows `runner.status` as threads finish). Threads
+  waiting on your answer are counted apart, since they won't finish until
+  you answer: "The runner will restart when 1 thread finishes and you
+  answer 2." Then "The
   runner is restarting. Reconnecting…" with a spinner while it's down. The
   app retries every half second then, and the line goes once it's back. A
   runner that isn't back within 90 seconds gets the usual banner. The
@@ -304,7 +308,13 @@ answered cards, and 11 a runner restart (the quiet banner while it waits,
 reconnecting while it's down, and the thread it carried on, with the
 runner's message as a note; last, since it restarts the mock).
 `Tools/screenshots.sh <dir> [--only <prefix>] [--appearance light|dark]`
-does all of this in a temp folder with the window kept behind yours.
+does all of this in a temp folder with the window kept behind yours, under
+a bundle id of its own (so it never reads or writes the installed app's
+settings; it used to leave its window size in them). It runs the binary
+from your shell, so screencapture has the shell's Screen Recording
+permission. Without it, or with the screen locked, each shot is AppKit's own
+drawing of the window ("drawn in-process"): the sidebar's glass is a flat
+fill and the traffic lights are approximate, and the rest matches.
 
 ## Seeing and driving it from a script
 
@@ -313,15 +323,31 @@ distributed notifications, so a script or an agent can use the app's own UI
 paths without bringing the window to the front or needing accessibility
 access. Each result is a line in that log; the app's own log (connection,
 RPC errors, runner notices, the commands) goes beside it (`--app-log`, else
-`<log>.app.log`). It posts no notifications while scripted, and anything
-it copies goes to its own pasteboard, never the clipboard. Release builds
-don't include it.
+`<log>.app.log`). It posts no notifications while scripted, anything it
+copies goes to its own pasteboard, never the clipboard, and window sizes it
+sets are never saved. It refuses to start against the installed runner's
+data folder (no `--data-dir`), since commands would then act on Mike's real
+threads, unless `--automation-allow-live` is given; that's for Mike to
+decide. `--automation-idle-quit <seconds>` quits it after that long with no
+command. Release builds don't include it.
 
 `Tools/dev-app.sh` is the way to use it. Each instance is a debug build in
 its own temp bundle with its own bundle id (so its own settings), data
 folder, notification name and pasteboard (`--automation-id`), so several
-run at once without crosstalk; its window opens with `open -g` and goes
-behind everything as soon as it's there.
+run at once; its window opens with `open -g` and goes behind everything as
+soon as it's there.
+
+Instances belong to whoever started them: the Threadbare thread
+(`THREADBARE_THREAD_ID`) and the checkout the script is in. Several threads
+can be using dev apps at once, so without `--id` a command means the
+caller's newest running instance, never another thread's or another
+checkout's (it says whose they are if you have none); `stop --all` stops
+only yours (`--everyone`: every instance on the Mac); `status` lists them
+all with whose they are; and an id another thread has is refused at
+`start`. An app quits after 60 minutes with no command, and its mock runner
+exits once its app has gone, so an instance nobody stopped doesn't stay
+behind Mike's windows; `start` and `status` clean up after instances whose
+app has quit (another thread's once it has been quiet for 30 minutes).
 
 ```bash
 Tools/dev-app.sh start --mock                    # the demo threads; prints the instance id
@@ -330,14 +356,32 @@ Tools/dev-app.sh start --home <dev runner home>  # runner/scripts/dev-runner.sh
 Tools/dev-app.sh do '{"cmd":"open","id":"demo_upload"}' '{"cmd":"expand","row":"g:"}'
 Tools/dev-app.sh dump            # sidebar, rows (id, kind, height, open, text), composer, banner
 Tools/dev-app.sh shot /tmp/a.png # the window alone
+Tools/dev-app.sh rebuild         # a new build, same options and runner, same thread open
 Tools/dev-app.sh log             # the app's own log
 Tools/dev-app.sh stop            # quits it, stops its mock, deletes its files and settings
 ```
 
 `start` also takes `--appearance light|dark`, `--size WxH` and `--id NAME`;
-every other command takes `--id` (default: the one started last), and
-`status` lists them. `do` waits for each result and exits 1 on an error or
-a timeout. `--home` refuses the live runner's data folder.
+every other command takes `--id` (default: your newest), and `status` lists
+them. `do` waits for each result and exits 1 on an error or a timeout.
+`--home` refuses the live runner's data folder; against a dev runner whose
+`runner.json` has no default model it sets the composer's to
+claude-haiku-5-5 and says so, since a thread sent from it is a real turn.
+`dump` shows what a send from the composer would run on (folder, account,
+model and whose default it is, access).
+
+`shot` asks the app for its window's id and runs `screencapture -l` from
+the script, in your shell: the temp bundle has no Screen Recording
+permission of its own, so screencapture from inside the app always failed
+(and macOS could ask Mike for it). When that gives no image (the screen is
+locked, or your shell has no permission either) it falls back to the
+app's own drawing and says so on stderr: the sidebar's glass is a flat fill
+and the traffic lights are approximate, the rest matches.
+
+A build that fails prints just its errors (no colour codes or compiler
+command lines) and keeps the whole log in
+`$TMPDIR/threadbare-dev-app/build-logs/`. `rebuild` leaves the running app
+alone when the build fails.
 
 The commands (`do`), each a JSON object with `cmd`. Rows and threads can be
 named by the start of their id.
@@ -346,7 +390,7 @@ named by the start of their id.
 |---|---|---|
 | `open` | `id`, `timeout` | selects a thread and waits until its rows are on screen |
 | `select` | `id` | selects it without waiting |
-| `new`, `options` | `cwd`, `account`, `model`, `ask` | the new-thread composer and its menus |
+| `new`, `options` | `cwd`, `account`, `model` (`null` for the default), `ask` | the new-thread composer and its menus; `options` refuses anything else (a typo used to pass) and says what's set now |
 | `type`, `send`, `return` | `text`, `replace` | types into the composer; `send` types and presses Return |
 | `paste-image` | `path` | through the instance's own pasteboard |
 | `click` | `title` | a button in the transcript: Allow, Always allow, Deny, an option, Send answer |
@@ -359,16 +403,17 @@ named by the start of their id.
 | `archive`, `unarchive`, `snooze`, `mode` | `id`, `seconds`, `mode` | |
 | `waitFor` | `row`, `kind`, `status` (and `thread`), `text`, `banner` (`""` for none), `connection`, `loaded`, `ready`, `not`, `timeout` | until every condition given holds (default 10 s) |
 | `dump` | `format` (`json`, `text`), `out` | |
-| `screenshot` | `path` | `screencapture -l`, or drawn in-process when the screen is locked |
+| `screenshot` | `path`, `inProcess` | `screencapture -l`, or drawn in-process when that gives no image; a dev-app instance always draws in-process (`shot` runs screencapture itself) |
+| `window` | | the window's id (for `screencapture -l`) and size, once anything pending is drawn |
+| `focus` | `on` (default true) | acts as if the app were in front, so an open thread gets marked read as it would for Mike; never activates it |
 | `mock` | `method`, `params` | `mock.<method>` on the mock runner, such as `restartPending` and `restart` |
 | `status`, `sidebar`, `streaming`, `account-ids`, `quit` | | |
 
 `Tools/drive.sh` posts commands without waiting (`THREADBARE_AUTOMATION_ID`
 picks an instance). The integration run on 2026-10-26 used it against the
-real runner with a debug build in `~/Applications` (`restart.sh`, then
-`open -g ~/Applications/Threadbare.app --args --automation /tmp/tb-drive.log`),
-which replaces Mike's app; its window-only captures are in
-`../docs/screenshots/`.
+real runner with a debug build that replaced Mike's app in `~/Applications`;
+that's his call, never an agent's, and now needs `--automation-allow-live`.
+Its window-only captures are in `../docs/screenshots/`.
 
 ## Tests
 
@@ -385,7 +430,8 @@ headers, the Markdown export, the runner restart's states, messages sent by
 the runner, and which events each row came from ("Copy debug info").
 `MockRunnerTests` runs the real WebSocket client against the mock runner,
 its restart included (skipped if node or the mock's `npm install` is
-missing). `ThreadbareAppTests` tests the app target itself: typing into the
+missing, except under `THREADBARE_REQUIRE_MOCK=1`, which `../check.sh` sets
+after installing the mock's packages). `ThreadbareAppTests` tests the app target itself: typing into the
 composer, question answers, incremental streaming heights against a full
 measure, the render cache, sliced tall text, drafts kept when a send fails,
 the restart banner, the runner's message as a note, and the automation

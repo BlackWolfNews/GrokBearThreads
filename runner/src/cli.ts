@@ -18,6 +18,7 @@ const OPTIONS = {
   archived: { type: 'boolean' },
   all: { type: 'boolean' },
   from: { type: 'string' },
+  to: { type: 'string' },
   'until-done': { type: 'boolean' },
   // tb-dev.ts
   last: { type: 'string' },
@@ -43,7 +44,8 @@ const HELP = `tb: talk to the Threadbare runner
   tb list [--snoozed] [--archived] [--all] [--json]
   tb search "words" [--json]
   tb tail <threadId> [--from SEQ] [--json] [--until-done]
-  tb events <threadId> [--json]
+  tb events <threadId> [--from SEQ] [--to SEQ] [--json]
+                                  each event with its seq first (Copy debug info's "events: 5-9")
   tb interrupt <threadId>
   tb approve <threadId> <approvalId> [allow|allowAlways|deny]
   tb answer <threadId> <approvalId> "answer"
@@ -58,6 +60,48 @@ Uses THREADBARE_HOME and THREADBARE_PORT like the runner does.
 
 ${DEV_HELP}`;
 
+// The flags each command reads. Any other is refused rather than ignored:
+// `tb events <id> --from 3` used to print every event as if it had worked.
+const COMMAND_FLAGS: Record<string, string[]> = {
+  new: ['cwd', 'account', 'model', 'ask', 'image', 'wait', 'json'],
+  send: ['image', 'wait', 'json'],
+  list: ['snoozed', 'archived', 'all', 'json'],
+  search: ['json'],
+  tail: ['from', 'json', 'until-done'],
+  events: ['from', 'to', 'json'],
+  interrupt: [],
+  approve: [],
+  answer: [],
+  snooze: [],
+  archive: [],
+  unarchive: [],
+  move: [],
+  delete: [],
+  accounts: [],
+  status: ['json'],
+  self: ['json'],
+  restart: ['now', 'force', 'resume', 'no-resume', 'cancel', 'reason', 'thread', 'max-wait'],
+  show: ['last', 'tools'],
+  logs: ['lines', 'follow', 'thread'],
+  export: ['out'],
+  rpc: ['force'],
+};
+
+// `tb show --help`: the help lines for that command (its usage line and
+// the indented lines under it), or undefined for a command it doesn't know.
+function commandHelp(cmd: string, help = HELP): string | undefined {
+  const lines = help.split('\n');
+  const out: string[] = [];
+  for (let i = 0; i < lines.length; i++) {
+    const name = cmd.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    if (!new RegExp(`^\\s*tb ${name}(\\s|$)`).test(lines[i]) && !lines[i].includes(`tb ${cmd} <`)) continue;
+    out.push(lines[i]);
+    // The lines that carry on its description are indented past the usage.
+    while (i + 1 < lines.length && /^ {6,}\S/.test(lines[i + 1]) && !/^\s*tb /.test(lines[i + 1])) out.push(lines[++i]);
+  }
+  return out.length ? out.join('\n') : undefined;
+}
+
 async function main(argv: string[]): Promise<number> {
   let parsed;
   try {
@@ -70,8 +114,17 @@ async function main(argv: string[]): Promise<number> {
   const { values, positionals } = parsed;
   const [cmd, ...args] = positionals;
   if (!cmd || values.help) {
-    console.log(HELP);
+    console.log((cmd && commandHelp(cmd)) || HELP);
     return cmd ? 0 : 1;
+  }
+  const allowed = COMMAND_FLAGS[cmd];
+  if (allowed) {
+    const wrong = Object.keys(values).filter((k) => values[k as keyof typeof values] !== undefined && !allowed.includes(k));
+    if (wrong.length) {
+      const names = wrong.map((k) => `--${k}`).join(', ');
+      console.error(`tb ${cmd} doesn't take ${names}.${allowed.length ? ` It takes ${allowed.map((k) => `--${k}`).join(', ')}.` : ''}\nSee tb ${cmd} --help.`);
+      return 2;
+    }
   }
   const cfg = loadConfig();
   if (cmd === 'logs') return logsCommand(cfg, values);
@@ -144,8 +197,16 @@ async function run(client: RunnerClient, cmd: string, args: string[], f: Flags):
     }
     case 'events': {
       const id = await resolveId(client, args[0]);
-      const r = await client.call<{ events: PersistedEvent[] }>('threads.events', { threadId: id, limit: 10_000 });
-      for (const e of r.events) printEvent(e, Boolean(f.json));
+      const from = seqFlag(f.from, '--from');
+      const to = seqFlag(f.to, '--to');
+      if (from !== undefined && to !== undefined && to < from) throw new Error('--to is before --from');
+      const params: Record<string, unknown> = { threadId: id, limit: 10_000 };
+      if (from !== undefined) params.afterSeq = from - 1;
+      if (to !== undefined) params.beforeSeq = to + 1;
+      const r = await client.call<{ events: PersistedEvent[] }>('threads.events', params);
+      // Each line starts with its seq, so the seqs in Copy debug info and
+      // an export's events.ndjson can be matched up.
+      for (const e of r.events) printEvent(e, Boolean(f.json), f.json ? '' : `${String(e.seq).padStart(5)}  `);
       return 0;
     }
     case 'interrupt': {
@@ -155,7 +216,9 @@ async function run(client: RunnerClient, cmd: string, args: string[], f: Flags):
     }
     case 'approve':
     case 'answer': {
-      const threadId = await resolveId(client, args[0]);
+      // Its own cards are Mike's to answer: delete_thread always asks him,
+      // and an edit in an ask-before-edits thread waits for him.
+      const threadId = notSelf(await resolveId(client, args[0]), "That's this thread's own card; Mike answers it.");
       const params: Record<string, unknown> = { threadId, approvalId: await resolveApproval(client, threadId, args[1]) };
       if (cmd === 'approve') params.decision = args[2] ?? 'allow';
       else Object.assign(params, { decision: 'answered', answers: { '0': args[2] ?? '' } });
@@ -216,6 +279,13 @@ function notSelf(id: string, message: string): string {
   return id;
 }
 
+function seqFlag(v: string | boolean | string[] | undefined, name: string): number | undefined {
+  if (v === undefined) return undefined;
+  const n = Number(v);
+  if (!Number.isInteger(n) || n < 1) throw new Error(`${name} takes a seq, a whole number from 1`);
+  return n;
+}
+
 async function resolveId(client: RunnerClient, prefix: string | undefined): Promise<string> {
   if (!prefix) throw new Error('thread id required');
   const r = await client.call<{ threads: ThreadSummary[] }>('threads.list', { include: ['inbox', 'snoozed', 'archived'] });
@@ -265,7 +335,8 @@ function printThreads(threads: ThreadSummary[], json: boolean): void {
 let midLine = false;
 const streamed = new Set<string>();
 
-function printEvent(e: any, json: boolean): void {
+// prefix (tb events' seq) goes before the event's first line.
+function printEvent(e: any, json: boolean, prefix = ''): void {
   if (json) {
     console.log(JSON.stringify(e));
     return;
@@ -273,7 +344,7 @@ function printEvent(e: any, json: boolean): void {
   const out = (s: string) => {
     if (midLine) process.stdout.write('\n');
     midLine = false;
-    console.log(s);
+    console.log(prefix ? prefix + s.replace(/^\n+/, '') : s);
   };
   switch (e.type) {
     case 'assistant.text.delta':
@@ -310,7 +381,8 @@ function printEvent(e: any, json: boolean): void {
     case 'plan.updated':
       return out(e.entries.map((x: { status: string; text: string }) => `  [${x.status === 'completed' ? 'x' : x.status === 'in_progress' ? '>' : ' '}] ${x.text}`).join('\n'));
     case 'turn.started':
-      return;
+      // tb events lists every event, so its seqs have no gaps.
+      return prefix ? out('(turn started)') : undefined;
     case 'turn.completed':
       return out(`(${e.outcome}, ${(e.durationMs / 1000).toFixed(1)}s${e.costUsd !== undefined ? `, $${e.costUsd.toFixed(4)}` : ''}${e.error ? `: ${e.error}` : ''})`);
     case 'system.note':

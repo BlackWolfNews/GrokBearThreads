@@ -79,6 +79,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         MainActor.assumeIsolated {
             let app = AppModel.shared
             let arguments = CommandLine.arguments
+            #if DEBUG
+            // Before anything connects.
+            if Automation.refusesLiveRunner(dataDir: app.dataDir) { Automation.refuseLiveRunner() }
+            #endif
             let perf = arguments.contains("--perf-run")
             let screenshots = arguments.contains("--screenshots")
             // Scripted runs (perf, screenshots, a test driving the app) post

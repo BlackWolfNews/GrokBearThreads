@@ -203,7 +203,7 @@ prints what to point `tb` and the app at:
 ```
   pid:  41234
 For tb:      /tmp/threadbare-dev.Ab12Cd/tb status
-For the app: --data-dir /tmp/threadbare-dev.Ab12Cd
+For the app: ~/dev/me/threadbare/app/Tools/dev-app.sh start --home /tmp/threadbare-dev.Ab12Cd
 Stop it:     kill 41234   (never pkill: the real runner runs src/main.ts too)
 ```
 
@@ -213,8 +213,9 @@ then reaches the real runner. Like launchd, the script starts the runner
 again when it exits 0 (`tb restart`), and stops when it exits with an
 error. It uses your real logins, so threads in it cost like any other. On a
 new data dir it writes a `runner.json` whose threads default to the folder
-`<home>/work` and account `claude-3`, and it prints a `tb new` line with
-`--model claude-haiku-5-5`. Ctrl-C or the `kill` stops it and the CLIs it
+`<home>/work`, account `claude-3` and model `claude-haiku-5-5`, so a thread
+a debug app's composer starts is a cheap one too (an account's own default
+can be Fable with a 1M context), and it prints a `tb new` line. Ctrl-C or the `kill` stops it and the CLIs it
 started. Run in the background from a thread, it is background work that
 holds the live runner's restart, so stop it before a deploy.
 
@@ -225,7 +226,7 @@ holds the live runner's restart, so stop it before a deploy.
 ```json
 {
   "port": 8797,
-  "defaults": { "cwd": "~/dev/me/misc", "accountId": "claude-3" },
+  "defaults": { "cwd": "~/dev/me/misc", "accountId": "claude-3", "model": "claude-haiku-5-5" },
   "claudePath": "~/.local/bin/claude",
   "idleMinutes": 30,
   "maxLiveCLIs": 6
@@ -235,7 +236,9 @@ holds the live runner's restart, so stop it before a deploy.
 The runner writes `port` (the one it is actually listening on, so the app
 can find it) and `defaults.cwd` on start, and `defaults.accountId` whenever
 a thread is created on, or moved to, an account, so new threads start on
-the last one used.
+the last one used. `defaults.model` is optional: a new thread that names no
+model gets it, rather than the account's default (`hello` reports it). The
+installed runner leaves it out; `scripts/dev-runner.sh` sets it.
 
 Environment variables, mainly for tests:
 
@@ -303,9 +306,9 @@ bin/tb send <id> "and commit it" [--image FILE] [--wait]
 bin/tb list [--snoozed | --archived | --all] [--json]
 bin/tb search "words"
 bin/tb tail <id> [--from SEQ] [--json] [--until-done]
-bin/tb events <id> [--json]
+bin/tb events <id> [--from SEQ] [--to SEQ] [--json]   # each line starts with its seq
 bin/tb interrupt <id>
-bin/tb approve <id> <approvalId> [allow|allowAlways|deny]   # the id's start will do
+bin/tb approve <id> <approvalId> [allow|allowAlways|deny]   # the id's start will do; never a thread's own
 bin/tb answer <id> <approvalId> "Tea"
 bin/tb snooze <id> 2h          # or an ISO time
 bin/tb archive <id>            bin/tb unarchive <id>
@@ -339,13 +342,20 @@ the turn. `--now` is refused inside a thread, and while other threads are
 busy. `tb status` marks the calling thread. Against a runner from before
 `runner.status` it shows what `hello` and `threads.list` give. `tb self`
 says so when the thread is on another runner than the one tb talks to.
-`tb show --tools` prints Bash commands whole. `tb logs` says which file it
+`tb show` puts each call's diff, approval and result straight under it, so
+parallel calls' results don't land under the wrong call; `--tools` prints
+Bash commands whole. `tb events --from --to` prints a seq range (the
+"events: 5, 8-9" in the app's Copy debug info, which also gives the
+command). Inside a thread, `tb approve` and `tb answer` refuse that
+thread's own cards, as `tb rpc approvals.respond` does: they're Mike's. Each
+command refuses flags it doesn't read (`tb events --last` used to be
+ignored), and `tb <command> --help` shows just that command. `tb logs` says which file it
 reads; with the runner down it reads `<home>/runner.log` for a dev runner or
 sandbox, and `--thread` includes the CLI's spawn and exit lines. `tb export`
 writes the thread as idle (a mid-turn export would otherwise look stuck)
-and prints the mock runner command line for it, and the
-`app/Tools/dev-app.sh start --mock --fixtures` one (a debug app kept behind
-Mike's windows, which an agent can dump, screenshot and stop); the mock no longer loads
+and prints the `app/Tools/dev-app.sh start --mock --fixtures` command for
+it (a debug app kept behind Mike's windows, with its own mock runner, which
+an agent can dump, screenshot and stop) and the `tb events` one; the mock no longer loads
 `app/.fixtures/threads/` by default, so exports never reach design
 screenshots. A mistyped flag gets a message, not a stack trace. Messages
 print `tb` with its full path.
@@ -532,7 +542,7 @@ npm test               # unit tests, no network, about 5 seconds
 npm run typecheck
 npm run test:deploy    # the scripts and launch.mjs, about two minutes
 npm run test:e2e       # real Claude CLI, about 2.5 minutes
-../check.sh            # all of the above but e2e, plus the app's build and tests
+../check.sh            # all of the above but e2e, plus the app's build and tests (about 2.5 minutes)
 ```
 
 The deploy tests build releases of a throwaway git repo whose runner is

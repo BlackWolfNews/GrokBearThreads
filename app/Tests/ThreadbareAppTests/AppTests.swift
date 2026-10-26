@@ -400,7 +400,7 @@ final class AutomationTests: XCTestCase {
                 AppDump.Section(name: "Inbox", threads: [AppDump.Thread(id: "th1", title: "Fix it", status: "idle", needsYou: false, unread: true, hovered: false)]),
             ], snoozed: 0, archived: 2),
             selection: AppDump.Thread(id: "th1", title: "Fix it", status: "idle", needsYou: false, unread: false, hovered: false),
-            composer: AppDump.Composer(draft: "th1", text: "hello", images: 0),
+            composer: AppDump.Composer(draft: "th1", text: "hello", images: 0, cwd: "/w", account: "claude-3", model: "default (the runner's, claude-haiku-5-5)", ask: true),
             transcript: AppDump.Transcript(threadId: "th1", state: "loaded", hasMoreAbove: false, atBottom: true, rows: [
                 AppDump.Row(id: "u:1", kind: "user", height: 64, expanded: nil, inGroup: false, onScreen: false, seq: 1, turn: "t1", text: "Fix it"),
                 AppDump.Row(id: "g:r:r1", kind: "group", height: 32, expanded: true, inGroup: false, onScreen: true, seq: 2, turn: "t1", text: "Ran a command"),
@@ -412,9 +412,53 @@ final class AutomationTests: XCTestCase {
         XCTAssertFalse(text.contains("Needs you"), "empty sections are left out")
         XCTAssertTrue(text.contains("  > th1"), "the selected thread is marked")
         XCTAssertTrue(text.contains("composer (th1): \"hello\""))
+        XCTAssertTrue(text.contains("\n  runs in /w on claude-3, model default (the runner's, claude-haiku-5-5), asks before edits\n"), text)
         XCTAssertTrue(text.contains("> g:r:r1"))
         XCTAssertTrue(text.contains("open    Ran a command"))
         XCTAssertTrue(dump.json(pretty: false).contains("\"onScreen\":true"))
+    }
+
+    /// A scripted app never drives Mike's real threads: no --data-dir
+    /// means the installed runner's folder, and that's refused.
+    @MainActor
+    func testRefusesTheLiveRunnerUnlessAllowed() {
+        let live = RunnerConfig.defaultDataDir
+        let mock = URL(fileURLWithPath: "/tmp/tb-mock-xyz", isDirectory: true)
+        XCTAssertTrue(Automation.refusesLiveRunner(dataDir: live, arguments: ["Threadbare", "--automation", "/tmp/a.log"]))
+        XCTAssertTrue(Automation.refusesLiveRunner(dataDir: live.appendingPathComponent("."), arguments: ["Threadbare", "--automation", "/tmp/a.log"]))
+        XCTAssertFalse(Automation.refusesLiveRunner(dataDir: live, arguments: ["Threadbare", "--automation", "/tmp/a.log", "--automation-allow-live"]))
+        XCTAssertFalse(Automation.refusesLiveRunner(dataDir: mock, arguments: ["Threadbare", "--automation", "/tmp/a.log"]))
+        XCTAssertFalse(Automation.refusesLiveRunner(dataDir: live, arguments: ["Threadbare"]), "not scripted at all")
+    }
+
+    /// What a new thread from the composer would run on, as `dump` and
+    /// `options` report it: whose default model it is matters, since an
+    /// account's default can be an expensive one.
+    @MainActor
+    func testNewThreadSettingsSayWhoseDefaultModel() {
+        _ = NSApplication.shared
+        let app = AppModel()
+        app.defaults = RunnerDefaults(cwd: "/w", accountId: "claude-3")
+        XCTAssertEqual(AppDump.newThreadSettings(app).model, "default (the account's)")
+        app.defaults.model = "claude-haiku-5-5"
+        XCTAssertEqual(AppDump.newThreadSettings(app).model, "default (the runner's, claude-haiku-5-5)")
+        app.newThreadModel = "sonnet"
+        app.newThreadAsk = true
+        let settings = AppDump.newThreadSettings(app)
+        XCTAssertEqual(settings.model, "sonnet")
+        XCTAssertEqual(settings.cwd, "/w")
+        XCTAssertTrue(settings.ask)
+    }
+
+    /// `focus` lets a scripted app (never in front) count as looking, so
+    /// opening an unread thread marks it read as it would for Mike.
+    @MainActor
+    func testFocusCountsAsLooking() {
+        _ = NSApplication.shared
+        let app = AppModel()
+        XCTAssertFalse(app.isLooking, "a test process isn't the active app")
+        app.actsActive = true
+        XCTAssertTrue(app.isLooking)
     }
 }
 #endif

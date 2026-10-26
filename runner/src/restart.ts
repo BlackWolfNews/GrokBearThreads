@@ -195,7 +195,7 @@ export class Restarter {
     log.info('restart requested', { when: next.when, reason: p.reason, resumeThreadId: p.resume?.threadId, waitingFor, backgroundUntil: next.backgroundUntil });
     if (!this.restarting) {
       if (waitingFor.length === 0) this.begin();
-      else runner.notice('info', pendingMessage(waitingFor.length));
+      else runner.notice('info', pendingMessage(waitingFor.length, this.onYou(waitingFor)));
     }
     const background = waitingFor.length ? runner.backgroundWork().filter((b) => waitingFor.includes(b.threadId)) : [];
     return background.length ? { scheduled: true, waitingFor, background } : { scheduled: true, waitingFor };
@@ -272,7 +272,14 @@ export class Restarter {
   // knows about it.
   helloNotices(): Notice[] {
     if (!this.pending) return [];
-    return [{ level: 'info', message: this.restarting ? pendingMessage(0) : pendingMessage(this.busy().length) }];
+    const busy = this.busy();
+    return [{ level: 'info', message: this.restarting ? pendingMessage(0) : pendingMessage(busy.length, this.onYou(busy)) }];
+  }
+
+  // How many of these threads wait on Mike (an approval or a question).
+  private onYou(ids: string[]): number {
+    const waiting = new Set(this.deps.runner.list(ALL).filter((t) => t.status === 'waiting').map((t) => t.id));
+    return ids.filter((id) => waiting.has(id)).length;
   }
 
   // --------------------------------------------------------- idle check
@@ -494,9 +501,20 @@ export class Restarter {
   }
 }
 
-export function pendingMessage(waiting: number): string {
+// The notice while a restart waits. onYou of the waiting threads are
+// waiting on Mike's answer to an approval or a question, which won't come by
+// itself, so the line says so. The Mac app reads these sentences
+// (RunnerRestart.parse in app/Sources/ThreadbareCore/RPC/RunnerRestart.swift:
+// the prefix, and the numbers after it adding up to the count), and so does
+// the mock runner's copy; restart.test.ts pins them.
+export function pendingMessage(waiting: number, onYou = 0): string {
   if (waiting === 0) return 'The runner is restarting now.';
-  return waiting === 1 ? 'The runner will restart when 1 thread finishes.' : `The runner will restart when ${waiting} threads finish.`;
+  const answer = Math.min(Math.max(0, onYou), waiting);
+  const finishing = waiting - answer;
+  const finish = finishing === 1 ? '1 thread finishes' : `${finishing} threads finish`;
+  if (answer === 0) return `The runner will restart when ${finish}.`;
+  if (finishing === 0) return `The runner will restart when you answer ${answer === 1 ? '1 thread' : `${answer} threads`}.`;
+  return `The runner will restart when ${finish} and you answer ${answer}.`;
 }
 
 // At most RESUMES_PER_HOUR automatic resumes per thread in any hour, kept in

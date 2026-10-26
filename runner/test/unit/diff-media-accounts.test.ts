@@ -113,6 +113,9 @@ test('config honours THREADBARE_HOME, THREADBARE_PORT and runner.json', () => {
   assert.equal(b.idleMs, 1000);
   // The app's name for the same override.
   assert.equal(loadConfig({ THREADBARE_DATA_DIR: home }).home, home);
+  assert.equal(a.defaults.model, undefined, 'no default model: the account decides');
+  fs.writeFileSync(path.join(home, 'runner.json'), JSON.stringify({ defaults: { cwd: '/tmp', model: ' claude-haiku-5-5 ' } }));
+  assert.equal(loadConfig({ THREADBARE_HOME: home }).defaults.model, 'claude-haiku-5-5');
 });
 
 test('runner.json records the port the runner listens on and keeps other settings', () => {

@@ -425,12 +425,14 @@ export class Runner {
 
   // --------------------------------------------------------------- queries
 
-  hello(): { runnerVersion: string; protocol: number; accounts: Account[]; defaults: { cwd: string; accountId: string } } {
+  hello(): { runnerVersion: string; protocol: number; accounts: Account[]; defaults: { cwd: string; accountId: string; model?: string } } {
+    const defaults: { cwd: string; accountId: string; model?: string } = { cwd: this.cfg.defaults.cwd, accountId: this.defaultAccountId() };
+    if (this.cfg.defaults.model) defaults.model = this.cfg.defaults.model;
     return {
       runnerVersion: RUNNER_VERSION,
       protocol: PROTOCOL_VERSION,
       accounts: this.accounts.list(),
-      defaults: { cwd: this.cfg.defaults.cwd, accountId: this.defaultAccountId() },
+      defaults,
     };
   }
 
@@ -552,7 +554,8 @@ export class Runner {
       queue: [],
       pendingApprovals: [],
     };
-    if (params.model) rec.model = params.model;
+    const model = params.model || this.cfg.defaults.model;
+    if (model) rec.model = model;
     this.store.create(rec);
     const st: ThreadState = { rec, rt: newRuntime(this.clock.now()) };
     this.threads.set(id, st);

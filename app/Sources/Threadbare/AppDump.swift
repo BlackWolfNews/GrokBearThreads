@@ -46,6 +46,33 @@ struct AppDump: Encodable {
         var draft: String
         var text: String
         var images: Int
+        /// Where that thread runs, or where a new one will start: what the
+        /// composer's chips and menus show.
+        var cwd: String
+        var account: String
+        /// The model, or "default (...)" saying whose default.
+        var model: String
+        var ask: Bool
+    }
+
+    struct Settings {
+        var cwd: String
+        var account: String
+        var model: String
+        var ask: Bool
+    }
+
+    /// What a new thread sent from the composer would get, as the
+    /// composer's menus show it (`ThreadSettings` in ComposerControls).
+    @MainActor
+    static func newThreadSettings(_ app: AppModel) -> Settings {
+        Settings(cwd: app.newThreadCwd ?? app.defaults.cwd, account: app.newThreadAccount ?? app.lastAccountId,
+                 model: app.newThreadModel ?? defaultModel(app), ask: app.newThreadAsk)
+    }
+
+    @MainActor
+    static func defaultModel(_ app: AppModel) -> String {
+        app.defaults.model.map { "default (the runner's, \($0))" } ?? "default (the account's)"
     }
 
     struct Row: Encodable {
@@ -143,9 +170,21 @@ struct AppDump: Encodable {
             sidebar: Sidebar(mode: String(describing: app.sidebarMode), sections: sections,
                              snoozed: ThreadSections.snoozed(app.threads.values, now: now).count, archived: app.archivedCount),
             selection: app.selectedThread.map { thread($0) },
-            composer: Composer(draft: key, text: app.drafts[key]?.text ?? "", images: app.drafts[key]?.images.count ?? 0),
+            composer: composer(app, key: key),
             transcript: transcript
         )
+    }
+
+    @MainActor
+    private static func composer(_ app: AppModel, key: String) -> Composer {
+        let settings: Settings
+        if let thread = app.selectedThread {
+            settings = Settings(cwd: thread.cwd, account: thread.accountId, model: thread.model ?? defaultModel(app), ask: thread.permissionMode == .ask)
+        } else {
+            settings = newThreadSettings(app)
+        }
+        return Composer(draft: key, text: app.drafts[key]?.text ?? "", images: app.drafts[key]?.images.count ?? 0,
+                        cwd: settings.cwd, account: settings.account, model: settings.model, ask: settings.ask)
     }
 
     /// Rows a click opens: work lines, groups and settled approvals that
@@ -200,6 +239,8 @@ struct AppDump: Encodable {
             lines.append("selection: none (new thread)")
         }
         lines.append("composer (\(composer.draft)): \"\(composer.text)\"" + (composer.images > 0 ? " and \(composer.images) image(s)" : ""))
+        lines.append("  \(composer.draft == "new" ? "starts" : "runs") in \(composer.cwd) on \(composer.account), model \(composer.model), "
+            + (composer.ask ? "asks before edits" : "full access"))
         if let transcript {
             var about = "\(transcript.rows.count) rows, \(transcript.state)"
             if transcript.hasMoreAbove { about += ", more above" }

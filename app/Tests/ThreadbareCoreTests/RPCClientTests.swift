@@ -10,7 +10,7 @@ final class RPCClientTests: XCTestCase {
                 "jsonrpc": "2.0", "id": id,
                 "result": ["runnerVersion": "0.1.0", "protocol": 1,
                            "accounts": [["id": "claude-main", "provider": "claude", "title": "mike@example.com", "configDir": "/x", "extra": true]],
-                           "defaults": ["cwd": "/Users/m/dev/me/misc", "accountId": "claude-main"]],
+                           "defaults": ["cwd": "/Users/m/dev/me/misc", "accountId": "claude-main", "model": "claude-haiku-5-5"]],
             ])]
         }
         let client = RPCClient(transport: transport)
@@ -19,6 +19,7 @@ final class RPCClientTests: XCTestCase {
         XCTAssertEqual(hello.runnerVersion, "0.1.0")
         XCTAssertEqual(hello.accounts.first?.title, "mike@example.com")
         XCTAssertEqual(hello.defaults.accountId, "claude-main")
+        XCTAssertEqual(hello.defaults.model, "claude-haiku-5-5", "a dev runner's default model")
         let sent = transport.sent.first!
         XCTAssertEqual(sent["jsonrpc"] as? String, "2.0")
         XCTAssertEqual(sent["method"] as? String, "hello")

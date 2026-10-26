@@ -1,51 +1,74 @@
 #!/usr/bin/env bash
 # Debug builds of the app for an agent to look at and drive: each in a temp
 # bundle, against the mock runner or a dev runner, with its window kept
-# behind whatever Mike is working in. Several can run at once without
-# crosstalk: each has its own id, bundle id (so its own settings), data
-# folder, automation channel and pasteboard. Nothing here touches the
-# installed app, the live runner or its data folder.
+# behind whatever Mike is working in. Several can run at once: each has its
+# own id, bundle id (so its own settings), data folder, automation channel
+# and pasteboard. Nothing here touches the installed app, the live runner or
+# its data folder.
 #
 #   Tools/dev-app.sh start [--mock [--fixtures DIR]...] [--home DIR]
 #                          [--appearance light|dark] [--size WxH] [--id NAME]
 #   Tools/dev-app.sh do '<json>'... [--timeout S]
 #   Tools/dev-app.sh shot <file.png>
 #   Tools/dev-app.sh dump [--json]
+#   Tools/dev-app.sh rebuild
 #   Tools/dev-app.sh log [-f] [-n N] [--mock | --automation]
-#   Tools/dev-app.sh stop [--all]
+#   Tools/dev-app.sh stop [--all | --everyone]
 #   Tools/dev-app.sh status
 #
-# start  builds the debug app, starts the mock runner (its demo threads, or
-#        only the --fixtures folders given: `tb export` puts one thread in
-#        app/.fixtures/threads/<id>) or points at a dev runner's --home
-#        (runner/scripts/dev-runner.sh), launches the app with --automation,
-#        waits until it's connected and prints the instance id.
-# do     sends each command and prints its result line ("open ok ...");
-#        exits 1 on an error result or a timeout. The commands are in
-#        app/README.md, "Driving it from a script".
-# shot   saves the window as a PNG (screencapture -l, or drawn in-process
-#        when the screen is locked).
-# dump   what the window shows: the sidebar's rows by section, the open
-#        thread's rows (id, kind, height, open or closed, text; > marks the
-#        ones on screen), the selection, the composer and the banner.
-# log    the app's own log: connection, RPC errors, automation commands.
-# stop   quits the app and its mock and deletes the instance's temp files.
+# start    builds the debug app, starts the mock runner (its demo threads, or
+#          only the --fixtures folders given: `tb export` puts one thread in
+#          app/.fixtures/threads/<id>) or points at a dev runner's --home
+#          (runner/scripts/dev-runner.sh), launches the app with
+#          --automation, waits until it's connected and prints the id.
+# do       sends each command and prints its result line ("open ok ...");
+#          exits 1 on an error result or a timeout. The commands are in
+#          app/README.md, "Seeing and driving it from a script".
+# shot     saves the window as a PNG: screencapture -l from this shell, or
+#          the app's own drawing when that gives no image (screen locked,
+#          or no Screen Recording permission), which it says.
+# dump     what the window shows: the sidebar's rows by section, the open
+#          thread's rows (id, kind, height, open or closed, text; > marks
+#          the ones on screen), the selection, the composer (its text, and
+#          the folder, account, model and access a send would use) and the
+#          banner.
+# rebuild  builds again and restarts the app with the same options, on the
+#          same runner (the mock keeps its state), reopening the thread that
+#          was open. A build that fails leaves the running app alone.
+# log      the app's own log: connection, RPC errors, automation commands.
+# stop     quits the app and its mock and deletes the instance's files.
 #
-# Every command but start takes --id ID; the default is the instance started
-# last. Pass it whenever more than one is running.
+# Instances belong to whoever started them: the Threadbare thread
+# (THREADBARE_THREAD_ID) and this checkout. Without --id a command means
+# your newest running instance, never another thread's or another
+# checkout's; stop --all stops all of yours (--everyone: every instance on
+# this Mac). status lists them all, with whose they are. An app quits after
+# 60 minutes with no command, and its mock with it; start and status clean
+# up after instances whose app has quit.
 set -Eeuo pipefail
 
 TOOLS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 APP_ROOT="$(cd "$TOOLS_DIR/.." && pwd)"
+# The checkout an instance was built from, and the thread that started it.
+CHECKOUT="$(cd "$APP_ROOT/.." && pwd -P)"
+OWNER_THREAD="${THREADBARE_THREAD_ID:-}"
 TMP_ROOT="${TMPDIR:-/tmp}"
 mkdir -p "${TMP_ROOT%/}/threadbare-dev-app"
 # With symlinks resolved (/var is /private/var): it's how the app's own
 # path reads in ps and pgrep.
 STATE_ROOT="$(cd "${TMP_ROOT%/}/threadbare-dev-app" && pwd -P)"
+# Build logs outlive a failed start, whose instance folder is deleted.
+BUILD_LOGS="$STATE_ROOT/build-logs"
 REAL_HOME="$HOME/Library/Application Support/Threadbare"
 BUNDLE_PREFIX="com.mikerosoft.threadbare.dev"
 CHANNEL_PREFIX="com.mikerosoft.threadbare.automation"
 LSREGISTER="/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister"
+# An instance nobody sends a command to for this long quits by itself
+# (the variable is for testing that).
+IDLE_QUIT_SECONDS="${DEV_APP_IDLE_QUIT_SECONDS:-3600}"
+# Another thread's instance whose app has quit is cleaned up once it has
+# been quiet this long (its log may still be wanted).
+REAP_OTHERS_AFTER=1800
 
 # A start that fails part way stops what it had started.
 CLEANUP_ID=""
@@ -86,6 +109,8 @@ bundle_pid() {
   pgrep -f "^$1/Contents/MacOS/Threadbare( |\$)" | head -n 1 || true
 }
 
+mtime() { stat -f %m "$1" 2>/dev/null || echo 0; }
+
 # ------------------------------------------------------------------ instances
 
 instance_dir() { printf '%s/%s' "$STATE_ROOT" "$1"; }
@@ -96,6 +121,7 @@ load_instance() {
   [ -f "$dir/instance" ] || die "no instance $1 (Tools/dev-app.sh status lists them)"
   I_ID="$1"; I_DIR="$dir"
   I_PID=""; I_MOCK_PID=""; I_DATA=""; I_BUNDLE=""; I_BUNDLE_ID=""; I_RUNNER=""
+  I_THREAD=""; I_CHECKOUT=""; I_CREATED=0; I_STARTED=0
   while IFS='=' read -r key value; do
     case "$key" in
       pid) I_PID="$value" ;;
@@ -104,23 +130,101 @@ load_instance() {
       bundle) I_BUNDLE="$value" ;;
       bundle_id) I_BUNDLE_ID="$value" ;;
       runner) I_RUNNER="$value" ;;
+      thread) I_THREAD="$value" ;;
+      checkout) I_CHECKOUT="$value" ;;
+      created) I_CREATED="$value" ;;
+      started) I_STARTED="$value" ;;
     esac
   done <"$dir/instance"
   I_LOG="$dir/automation.log"
   I_CHANNEL="$CHANNEL_PREFIX.$1"
 }
 
-# The instance a command means: --id, else the one started last that's
-# still running.
-resolve_id() {
-  if [ -n "$ID" ]; then printf '%s' "$ID"; return; fi
-  local latest=""
-  [ -f "$STATE_ROOT/latest" ] && latest="$(cat "$STATE_ROOT/latest")"
-  if [ -n "$latest" ] && [ -f "$(instance_dir "$latest")/instance" ]; then printf '%s' "$latest"; return; fi
-  local newest
-  newest="$(ls -t "$STATE_ROOT"/*/instance 2>/dev/null | head -n 1 || true)"
-  [ -n "$newest" ] || die "no dev app is running (Tools/dev-app.sh start)"
-  basename "$(dirname "$newest")"
+# Sets KEY=value in the loaded instance's file.
+set_field() {
+  local file="$I_DIR/instance"
+  { grep -v "^$1=" "$file" || true; echo "$1=$2"; } >"$file.tmp"
+  mv "$file.tmp" "$file"
+}
+
+# Started by this thread (or by no thread, outside one) from this checkout.
+is_mine() { [ "$I_THREAD" = "$OWNER_THREAD" ] && [ "$I_CHECKOUT" = "$CHECKOUT" ]; }
+
+# The app is running from this instance's own bundle (a pid can be reused).
+app_running() {
+  alive "$I_PID" && ps -p "$I_PID" -o command= 2>/dev/null | grep -qF "$I_BUNDLE/Contents/MacOS/Threadbare"
+}
+
+# "yours", or the thread and checkout that started it.
+whose() {
+  if is_mine; then printf 'yours'; return; fi
+  if [ -n "$I_THREAD" ]; then printf 'thread %s, ' "${I_THREAD:0:8}"; else printf 'no thread, '; fi
+  printf 'built from %s' "${I_CHECKOUT:-an unknown checkout}"
+}
+
+all_ids() {
+  local file
+  for file in "$STATE_ROOT"/*/instance; do
+    [ -f "$file" ] || continue
+    basename "$(dirname "$file")"
+  done
+}
+
+# Loads the instance a command means: --id, else the caller's newest
+# running one. With "any", the caller's newest one even if its app has quit
+# (for log and stop).
+use_instance() {
+  if [ -n "$ID" ]; then
+    load_instance "$ID"
+    is_mine || echo "dev-app: note: $ID isn't yours ($(whose))." >&2
+    return
+  fi
+  local id best="" best_started=-1 quit="" others=""
+  for id in $(all_ids); do
+    load_instance "$id"
+    if ! is_mine; then others="$others $id"; continue; fi
+    if [ "${1:-}" != any ] && ! app_running; then quit="$quit $id"; continue; fi
+    if [ "$I_STARTED" -gt "$best_started" ]; then best="$id"; best_started="$I_STARTED"; fi
+  done
+  if [ -n "$best" ]; then load_instance "$best"; return; fi
+  if [ -n "$quit" ]; then
+    local first="${quit# }"
+    die "your dev app${quit} has quit (after 60 minutes with no command, or it crashed: Tools/dev-app.sh --id ${first%% *} log). Start a new one."
+  fi
+  [ -z "$others" ] || die "no dev app of yours is running (yours: this thread and checkout). Others' are:${others}; Tools/dev-app.sh status says whose. Start your own, or pass --id."
+  die "no dev app is running (Tools/dev-app.sh start)"
+}
+
+# The id commands without --id use, or nothing.
+default_id() {
+  local id best="" best_started=-1
+  for id in $(all_ids); do
+    load_instance "$id"
+    is_mine && app_running || continue
+    if [ "$I_STARTED" -gt "$best_started" ]; then best="$id"; best_started="$I_STARTED"; fi
+  done
+  printf '%s' "$best"
+}
+
+# Cleans up instances whose app has quit: the caller's straight away, other
+# threads' once they've been quiet for a while (their log may be wanted).
+# A start still under way (no pid yet) is left for 10 minutes.
+reap() {
+  local id now; now="$(date +%s)"
+  find "$BUILD_LOGS" -name '*.log' -mtime +1 -delete 2>/dev/null || true
+  for id in $(all_ids); do
+    load_instance "$id"
+    app_running && continue
+    if [ -z "$I_PID" ]; then
+      [ $(( now - I_CREATED )) -gt 600 ] || continue
+    elif ! is_mine; then
+      local quiet; quiet="$(mtime "$I_LOG")"
+      [ "$quiet" -gt 0 ] || quiet="$(mtime "$I_DIR/instance")"
+      [ $(( now - quiet )) -gt "$REAP_OTHERS_AFTER" ] || continue
+    fi
+    stop_one "$id" >/dev/null 2>&1 || true
+    echo "Cleaned up dev app $id ($(is_mine && echo yours || echo "$(whose)")): its app had quit." >&2
+  done
 }
 
 # ------------------------------------------------------------------ commands
@@ -177,6 +281,70 @@ JXA
   return 0
 }
 
+# The error lines of a failed build, with a little context: no colour
+# codes, and no compiler command lines (several KB each) to wade through.
+show_build_errors() {
+  sed -E $'s/\x1b\\[[0-9;]*[A-Za-z]//g' "$1" | awk '
+    length($0) > 400 { next }
+    /error:/ { keep = 4 }
+    keep > 0 { if (!seen[$0]++) { print; shown++ } keep-- }
+    shown >= 60 { exit }
+    END { if (!shown) exit 1 }
+  ' >&2 || sed -E $'s/\x1b\\[[0-9;]*[A-Za-z]//g' "$1" | awk 'length($0) <= 400' | tail -n 20 >&2
+  echo "The whole build log: $1" >&2
+}
+
+# Builds the app; on failure prints its errors and returns 1.
+build_binary() {
+  mkdir -p "$BUILD_LOGS"
+  local log="$BUILD_LOGS/$1.log"
+  if ! swift build --package-path "$APP_ROOT" --product Threadbare >"$log" 2>&1; then
+    show_build_errors "$log"
+    return 1
+  fi
+  rm -f "$log"
+}
+
+# Puts the build into the instance's bundle under its own bundle id.
+install_bundle() {
+  local bin; bin="$(swift build --package-path "$APP_ROOT" --show-bin-path 2>/dev/null)/Threadbare"
+  # Its own bundle id gives it its own settings (window size, sidebar
+  # width, last account), so it neither reads nor changes the installed
+  # app's, nor another instance's.
+  mkdir -p "$I_BUNDLE/Contents/MacOS"
+  cp "$bin" "$I_BUNDLE/Contents/MacOS/Threadbare"
+  cp "$APP_ROOT/Resources/Info.plist" "$I_BUNDLE/Contents/Info.plist"
+  /usr/libexec/PlistBuddy -c "Set :CFBundleIdentifier $I_BUNDLE_ID" \
+    -c "Set :CFBundleName Threadbare dev $I_ID" -c "Set :CFBundleDisplayName Threadbare dev $I_ID" "$I_BUNDLE/Contents/Info.plist"
+  codesign --force --sign - "$I_BUNDLE" >/dev/null 2>&1
+}
+
+# Launches the bundle with the arguments in app.args and waits until it
+# takes commands and is connected. Records its pid (app.pid is what the mock
+# watches).
+launch_app() {
+  local app_args=() arg i pid=""
+  while IFS= read -r arg; do app_args+=("$arg"); done <"$I_DIR/app.args"
+  # The new app writes "ready" to a fresh log; an old one would pass for it.
+  rm -f "$I_LOG"
+  # open -g launches it without bringing it forward; the app then puts its
+  # window behind everything as soon as it's there (Automation.swift).
+  open -g -n "$I_BUNDLE" --stdout "$I_DIR/app.stdout" --stderr "$I_DIR/app.stderr" --args "${app_args[@]}"
+  for i in $(seq 1 200); do
+    pid="$(bundle_pid "$I_BUNDLE")"
+    [ -n "$pid" ] && break
+    sleep 0.05
+  done
+  [ -n "$pid" ] || die "the app didn't start (see $I_DIR/app.stderr)"
+  set_field pid "$pid"
+  set_field started "$(date +%s)"
+  printf '%s' "$pid" >"$I_DIR/app.pid"
+  I_PID="$pid"
+  for i in $(seq 1 400); do grep -qx ready "$I_LOG" 2>/dev/null && break; sleep 0.05; done
+  grep -qx ready "$I_LOG" 2>/dev/null || { cat "$I_LOG" >&2 2>/dev/null || true; die "the app didn't take commands (see $I_DIR/app.stderr)"; }
+  send '{"cmd":"waitFor","ready":true,"timeout":20}' >/dev/null || { tail -n 20 "$I_DIR/app.log" >&2; die "the app didn't connect to the runner"; }
+}
+
 cmd_start() {
   local mode="" home="" appearance="" size="" fixtures=()
   while [ $# -gt 0 ]; do
@@ -203,7 +371,7 @@ cmd_start() {
     [ -f "$fixture/thread.json" ] || ls "$fixture"/*/thread.json >/dev/null 2>&1 || die "no fixtures in $fixture (a tb export folder, or a folder of them)"
   done
 
-  local data
+  local data runner_model=""
   if [ -n "$home" ]; then
     case "$home" in /*) ;; *) home="$PWD/$home" ;; esac
     # The live runner's data folder holds its token; a debug app driven by
@@ -211,41 +379,38 @@ cmd_start() {
     [ "$(real_dir "$home")" != "$(real_dir "$REAL_HOME")" ] || die "that's the live runner's data folder. Start a dev runner (runner/scripts/dev-runner.sh) and pass its home."
     [ -f "$home/runner.json" ] && [ -f "$home/secrets/runner-token" ] || die "no runner.json and token in $home; is a dev runner running there?"
     data="$(real_dir "$home")"
+    runner_model="$(plutil -extract defaults.model raw -o - "$home/runner.json" 2>/dev/null || true)"
   fi
 
+  reap
   if [ -n "$ID" ]; then
     [[ "$ID" =~ ^[A-Za-z0-9_-]{1,24}$ ]] || die "an id is up to 24 letters, digits, - or _"
+    if [ -e "$(instance_dir "$ID")/instance" ]; then
+      load_instance "$ID"
+      is_mine && die "you already have a dev app $ID: stop it first (Tools/dev-app.sh --id $ID stop), or rebuild it"
+      die "the id $ID is taken by another thread's dev app ($(whose)); pick another --id"
+    fi
   else
     ID="$(od -An -N2 -tx1 /dev/urandom | tr -d ' \n')"
   fi
   local dir; dir="$(instance_dir "$ID")"
-  [ ! -e "$dir" ] || die "there's already an instance $ID (stop it first)"
+  [ ! -e "$dir" ] || die "there's a leftover folder for $ID at $dir; pick another --id"
   mkdir -p "$dir"
-  local bundle="$dir/Threadbare.app" bundle_id="$BUNDLE_PREFIX.$ID"
   # Written as it goes, so stop can clean up after a start that failed.
   {
-    echo "bundle=$bundle"
-    echo "bundle_id=$bundle_id"
+    echo "bundle=$dir/Threadbare.app"
+    echo "bundle_id=$BUNDLE_PREFIX.$ID"
+    echo "thread=$OWNER_THREAD"
+    echo "checkout=$CHECKOUT"
+    echo "created=$(date +%s)"
   } >"$dir/instance"
-  printf '%s' "$ID" >"$STATE_ROOT/latest"
   CLEANUP_ID="$ID"
   trap 'die "start failed"' ERR
+  load_instance "$ID"
 
   echo "Building the debug app..."
-  if ! swift build --package-path "$APP_ROOT" --product Threadbare >"$dir/build.log" 2>&1; then
-    tail -n 30 "$dir/build.log" >&2
-    false
-  fi
-  local bin; bin="$(swift build --package-path "$APP_ROOT" --show-bin-path 2>/dev/null)/Threadbare"
-  # Its own bundle id gives it its own settings (window size, sidebar
-  # width, last account), so it neither reads nor changes the installed
-  # app's, nor another instance's.
-  mkdir -p "$bundle/Contents/MacOS"
-  cp "$bin" "$bundle/Contents/MacOS/Threadbare"
-  cp "$APP_ROOT/Resources/Info.plist" "$bundle/Contents/Info.plist"
-  /usr/libexec/PlistBuddy -c "Set :CFBundleIdentifier $bundle_id" \
-    -c "Set :CFBundleName Threadbare dev $ID" -c "Set :CFBundleDisplayName Threadbare dev $ID" "$bundle/Contents/Info.plist"
-  codesign --force --sign - "$bundle" >/dev/null 2>&1
+  build_binary "$ID" || false
+  install_bundle
 
   local runner
   if [ -z "$home" ]; then
@@ -262,8 +427,10 @@ cmd_start() {
     local args=()
     if [ ${#fixtures[@]} -eq 0 ]; then fixtures=("$TOOLS_DIR/mock-runner/fixtures"); fi
     for fixture in "${fixtures[@]}"; do args+=(--fixtures "$fixture"); done
+    # It exits once the app has quit (app.pid), so an instance that's
+    # never stopped doesn't leave a mock running.
     nohup "$node" "$TOOLS_DIR/mock-runner/server.mjs" --data-dir "$data" "${args[@]}" --ready-file "$dir/mock.port" \
-      >"$dir/mock.log" 2>&1 </dev/null &
+      --exit-with-pid-file "$dir/app.pid" >"$dir/mock.log" 2>&1 </dev/null &
     echo "mock_pid=$!" >>"$dir/instance"
     local i
     for i in $(seq 1 200); do [ -f "$dir/mock.port" ] && break; sleep 0.05; done
@@ -275,32 +442,33 @@ cmd_start() {
     echo "data=$data"
     echo "runner=$runner"
   } >>"$dir/instance"
-
-  # open -g launches it without bringing it forward; the app then puts its
-  # window behind everything as soon as it's there (Automation.swift).
-  local app_args=(--data-dir "$data" --automation "$dir/automation.log" --automation-id "$ID" --app-log "$dir/app.log")
-  [ -z "$appearance" ] || app_args+=(--appearance "$appearance")
-  [ -z "$size" ] || app_args+=(--window-size "$size")
-  open -g -n "$bundle" --stdout "$dir/app.stdout" --stderr "$dir/app.stderr" --args "${app_args[@]}"
-  local pid=""
-  for i in $(seq 1 200); do
-    pid="$(bundle_pid "$bundle")"
-    [ -n "$pid" ] && break
-    sleep 0.05
-  done
-  [ -n "$pid" ] || die "the app didn't start (see $dir/app.stderr)"
-  echo "pid=$pid" >>"$dir/instance"
-  echo "started=$(date +%s)" >>"$dir/instance"
-  for i in $(seq 1 400); do grep -qx ready "$dir/automation.log" 2>/dev/null && break; sleep 0.05; done
-  grep -qx ready "$dir/automation.log" 2>/dev/null || die "the app didn't take commands (see $dir/app.stderr)"
   load_instance "$ID"
-  send '{"cmd":"waitFor","ready":true,"timeout":20}' >/dev/null || { tail -n 20 "$dir/app.log" >&2; die "the app didn't connect to the runner"; }
+
+  {
+    printf '%s\n' --data-dir "$data" --automation "$dir/automation.log" --automation-id "$ID" --app-log "$dir/app.log" \
+      --automation-idle-quit "$IDLE_QUIT_SECONDS"
+    [ -z "$appearance" ] || printf '%s\n' --appearance "$appearance"
+    [ -z "$size" ] || printf '%s\n' --window-size "$size"
+  } >"$dir/app.args"
+  launch_app
   trap - ERR
   CLEANUP_ID=""
 
-  echo "Started dev app $ID (pid $pid) on $( [ "$runner" = mock ] && echo "the mock runner" || echo "the runner at $data" )."
+  echo "Started dev app $ID (pid $I_PID) on $( [ "$runner" = mock ] && echo "the mock runner" || echo "the runner at $data" )."
   echo "  data folder: $data"
-  echo "  Tools/dev-app.sh --id $ID do '{\"cmd\":\"open\",\"id\":\"<thread>\"}'   dump   shot <file.png>   log   stop"
+  if [ -n "$home" ] && [ -z "$runner_model" ]; then
+    # A runner.json from before dev-runner.sh set a default model: a
+    # thread started from the composer would run on the account's own.
+    send '{"cmd":"options","model":"claude-haiku-5-5"}' >/dev/null || true
+    echo "  That runner has no default model (runner.json defaults.model), so the composer's model is set to"
+    echo "  claude-haiku-5-5 for the next new thread only. Set it again before each one: do '{\"cmd\":\"options\",\"model\":\"claude-haiku-5-5\"}'."
+  fi
+  echo "  Tools/dev-app.sh --id $ID do '{\"cmd\":\"open\",\"id\":\"<thread>\"}'   dump   shot <file.png>   rebuild   log   stop"
+}
+
+# do, shot, dump and rebuild need the app up.
+require_running() {
+  app_running || die "dev app $I_ID has quit (after 60 minutes with no command, or it crashed: Tools/dev-app.sh --id $I_ID log). Stop it and start a new one."
 }
 
 cmd_do() {
@@ -314,7 +482,8 @@ cmd_do() {
     shift
   done
   [ ${#commands[@]} -gt 0 ] || die "do needs at least one '<json>' command"
-  load_instance "$(resolve_id)"
+  use_instance
+  require_running
   local command
   for command in "${commands[@]}"; do
     send "$command" "$timeout" || exit 1
@@ -332,8 +501,23 @@ cmd_shot() {
   done
   [ -n "$file" ] || die "shot needs a file (.png)"
   case "$file" in /*) ;; *) file="$PWD/$file" ;; esac
-  load_instance "$(resolve_id)"
-  send "{\"cmd\":\"screenshot\",\"path\":$(json_string "$file")}"
+  use_instance
+  require_running
+  # screencapture runs here, in the agent's shell: the instance's temp
+  # bundle has no Screen Recording permission, so from inside the app it
+  # always fell back to the app's own drawing (and macOS may ask Mike).
+  local line wid
+  line="$(send '{"cmd":"window"}')" || exit 1
+  wid="$(printf '%s' "$line" | awk '{ print $3 }')"
+  mkdir -p "$(dirname "$file")"
+  rm -f "$file"
+  if [[ "$wid" =~ ^[0-9]+$ ]] && /usr/sbin/screencapture -o -x -l "$wid" "$file" >/dev/null 2>&1 && [ -s "$file" ]; then
+    echo "screenshot ok $file (screencapture)"
+    return 0
+  fi
+  rm -f "$file"
+  send "{\"cmd\":\"screenshot\",\"inProcess\":true,\"path\":$(json_string "$file")}" || exit 1
+  echo "dev-app: screencapture gave no image (the screen is locked or asleep, or this shell has no Screen Recording permission), so that's the app's own drawing: the sidebar's glass is a flat fill and the traffic lights are approximate." >&2
 }
 
 cmd_dump() {
@@ -346,10 +530,43 @@ cmd_dump() {
     esac
     shift
   done
-  load_instance "$(resolve_id)"
+  use_instance
+  require_running
   local out="$I_DIR/dump.$format"
   send "{\"cmd\":\"dump\",\"format\":\"$format\",\"out\":$(json_string "$out")}" >/dev/null || exit 1
   cat "$out"
+}
+
+cmd_rebuild() {
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --id) ID="${2:?--id needs an id}"; shift ;;
+      *) die "unknown option for rebuild: $1" ;;
+    esac
+    shift
+  done
+  use_instance
+  require_running
+  [ -f "$I_DIR/app.args" ] || die "$I_ID was started by an older dev-app.sh; stop it and start a new one"
+  local status selection
+  status="$(send '{"cmd":"status"}')" || exit 1
+  selection="$(printf '%s' "$status" | sed -n 's/.*"selection":"\([^"]*\)".*/\1/p')"
+  echo "Building the debug app..."
+  # The running app stays up if the build fails.
+  build_binary "$I_ID" || exit 1
+  send '{"cmd":"quit"}' 5 >/dev/null 2>&1 || true
+  local i
+  for i in $(seq 1 100); do alive "$I_PID" || break; sleep 0.05; done
+  app_running && kill "$I_PID" 2>/dev/null || true
+  for i in $(seq 1 100); do alive "$I_PID" || break; sleep 0.05; done
+  # The mock waits for the new pid rather than exiting with the old app.
+  rm -f "$I_DIR/app.pid"
+  install_bundle
+  launch_app
+  if [ -n "$selection" ]; then
+    send "{\"cmd\":\"open\",\"id\":$(json_string "$selection")}" >/dev/null || echo "dev-app: couldn't reopen $selection" >&2
+  fi
+  echo "Rebuilt dev app $I_ID (pid $I_PID)${selection:+, with $selection open again}."
 }
 
 cmd_log() {
@@ -365,7 +582,7 @@ cmd_log() {
     esac
     shift
   done
-  load_instance "$(resolve_id)"
+  use_instance any
   local file="$I_DIR/$which.log"
   [ -f "$file" ] || die "no $which log for $I_ID"
   tail -n "$lines" $follow "$file"
@@ -390,57 +607,63 @@ stop_one() {
     kill "$I_MOCK_PID" 2>/dev/null || true
   fi
   [ -z "$I_BUNDLE" ] || [ ! -d "$I_BUNDLE" ] || "$LSREGISTER" -u "$I_BUNDLE" >/dev/null 2>&1 || true
-  # Only ever this instance's own bundle id.
+  # Only ever this instance's own bundle id. With ApplePersistenceIgnoreState
+  # the app keeps its saved state in the per-user temp folder.
   case "$I_BUNDLE_ID" in
     "$BUNDLE_PREFIX".?*)
       defaults delete "$I_BUNDLE_ID" >/dev/null 2>&1 || true
       rm -rf "$HOME/Library/Preferences/$I_BUNDLE_ID.plist" "$HOME/Library/Saved Application State/$I_BUNDLE_ID.savedState" \
+        "$(getconf DARWIN_USER_TEMP_DIR)$I_BUNDLE_ID.savedState" \
         "$HOME/Library/Caches/$I_BUNDLE_ID" "$HOME/Library/HTTPStorages/$I_BUNDLE_ID" "$HOME/Library/HTTPStorages/$I_BUNDLE_ID.binarycookies"
       ;;
   esac
+  # Not its failed build's log: a start that fails cleans up with this,
+  # and the log is what it points at. reap prunes old ones.
   rm -rf "$I_DIR"
-  if [ -f "$STATE_ROOT/latest" ] && [ "$(cat "$STATE_ROOT/latest")" = "$1" ]; then rm -f "$STATE_ROOT/latest"; fi
   echo "Stopped dev app $1."
 }
 
 cmd_stop() {
-  local everything=""
+  local which=""
   while [ $# -gt 0 ]; do
     case "$1" in
-      --all) everything=1 ;;
+      --all) which=mine ;;
+      --everyone) which=everyone ;;
       --id) ID="${2:?--id needs an id}"; shift ;;
       *) die "unknown option for stop: $1" ;;
     esac
     shift
   done
-  if [ -n "$everything" ]; then
-    local file any=""
-    for file in "$STATE_ROOT"/*/instance; do
-      [ -f "$file" ] || continue
+  if [ -n "$which" ]; then
+    local id any=""
+    for id in $(all_ids); do
+      load_instance "$id"
+      [ "$which" = everyone ] || is_mine || continue
       any=1
-      stop_one "$(basename "$(dirname "$file")")"
+      stop_one "$id"
     done
-    [ -n "$any" ] || echo "No dev apps."
+    [ -n "$any" ] || echo "No dev apps$( [ "$which" = mine ] && echo " of yours")."
     return
   fi
-  stop_one "$(resolve_id)"
+  use_instance any
+  stop_one "$I_ID"
 }
 
 cmd_status() {
-  local file found=""
-  local latest=""
-  [ -f "$STATE_ROOT/latest" ] && latest="$(cat "$STATE_ROOT/latest")"
-  for file in "$STATE_ROOT"/*/instance; do
-    [ -f "$file" ] || continue
+  reap
+  local id found="" default=""
+  default="$(default_id)"
+  for id in $(all_ids); do
     found=1
-    local id; id="$(basename "$(dirname "$file")")"
     load_instance "$id"
-    local state="stopped (run stop to clean up)"
-    alive "$I_PID" && state="running, pid $I_PID"
-    printf '%s %-8s %s; %s\n' "$( [ "$id" = "$latest" ] && echo '*' || echo ' ')" "$id" "$state" \
-      "$( [ "$I_RUNNER" = mock ] && echo "mock runner (data $I_DATA)" || echo "runner at ${I_RUNNER#home }")"
+    local state="quit (stop cleans it up)"
+    app_running && state="running, pid $I_PID"
+    [ -n "$I_PID" ] || state="starting"
+    printf '%s %-8s %s; %s; %s\n' "$( [ "$id" = "$default" ] && echo '*' || echo ' ')" "$id" "$state" \
+      "$( [ "$I_RUNNER" = mock ] && echo "mock runner (data $I_DATA)" || echo "runner at ${I_RUNNER#home }")" "$(whose)"
   done
-  [ -n "$found" ] || echo "No dev apps. Start one with Tools/dev-app.sh start --mock."
+  if [ -z "$found" ]; then echo "No dev apps. Start one with Tools/dev-app.sh start --mock."; return; fi
+  [ -z "$default" ] || echo "* is the one commands without --id use."
 }
 
 # ------------------------------------------------------------------ main
@@ -461,6 +684,7 @@ case "$command" in
   do) cmd_do "$@" ;;
   shot) cmd_shot "$@" ;;
   dump) cmd_dump "$@" ;;
+  rebuild) cmd_rebuild "$@" ;;
   log) cmd_log "$@" ;;
   stop) cmd_stop "$@" ;;
   status) cmd_status ;;

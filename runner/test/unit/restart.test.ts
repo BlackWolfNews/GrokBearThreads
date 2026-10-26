@@ -116,6 +116,9 @@ test('a background subagent asking for approval after its turn ended keeps the r
   void s.sink.requestApproval({ name: 'Write', title: 'Write x', input: {}, canAlwaysAllow: false, signal: new AbortController().signal });
   assert.equal(h.runner.get(thread.id).status, 'waiting');
   assert.deepEqual(r.request({}).waitingFor, [thread.id]);
+  // It waits on Mike, not on the thread finishing, and says so.
+  assert.deepEqual(notices(h), ['The runner will restart when you answer 1 thread.']);
+  assert.deepEqual(r.helloNotices(), [{ level: 'info', message: 'The runner will restart when you answer 1 thread.' }]);
   await tick();
   assert.equal(state.restarts, 0);
 });
@@ -418,6 +421,21 @@ test('restart params are checked', () => {
     assert.throws(() => parseRestartParams(bad), (e: RpcError) => e.code === -32602, JSON.stringify(bad));
   }
   assert.equal(pendingMessage(2), 'The runner will restart when 2 threads finish.');
+});
+
+test('the restart notices are the sentences the Mac app reads', () => {
+  // RunnerRestart.parse (app/Sources/ThreadbareCore/RPC/RunnerRestart.swift)
+  // goes by these prefixes and adds up the numbers after "when"; the mock
+  // runner has the same sentences. Change all three together.
+  assert.equal(pendingMessage(0), 'The runner is restarting now.');
+  assert.equal(pendingMessage(1), 'The runner will restart when 1 thread finishes.');
+  assert.equal(pendingMessage(3), 'The runner will restart when 3 threads finish.');
+  assert.equal(pendingMessage(3, 2), 'The runner will restart when 1 thread finishes and you answer 2.');
+  assert.equal(pendingMessage(3, 1), 'The runner will restart when 2 threads finish and you answer 1.');
+  assert.equal(pendingMessage(1, 1), 'The runner will restart when you answer 1 thread.');
+  assert.equal(pendingMessage(2, 2), 'The runner will restart when you answer 2 threads.');
+  const src = fs.readFileSync(path.join(import.meta.dirname, '..', '..', 'src', 'restart.ts'), 'utf8');
+  assert.match(src, /'The pending runner restart was cancelled\.'/);
 });
 
 test('background shells and subagents hold an idle restart until they finish', async () => {

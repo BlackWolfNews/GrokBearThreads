@@ -111,7 +111,8 @@ private struct ThreadSettings {
         let menu = NSMenu()
         let current = model
         let fallback = ActionMenuItem("Default", checked: current == nil) { setModel(nil) }
-        fallback.subtitle = "Whatever the account is set to use"
+        // A dev runner sets a default model of its own (runner.json).
+        fallback.subtitle = app.defaults.model.map { "The runner's default, \($0)" } ?? "Whatever the account is set to use"
         menu.addItem(fallback)
         menu.addItem(.separator())
         for name in ["opus", "sonnet", "haiku"] {

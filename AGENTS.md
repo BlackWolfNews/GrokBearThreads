@@ -35,14 +35,16 @@ interrupt, snooze or archive it. The runner puts its own `tb` on your PATH;
 if `tb` isn't found (an older runner, or outside a thread), use
 `runner/bin/tb`. `tb --help` lists the rest.
 
-- `./check.sh` runs every check (`--quick`: the runner's typecheck and unit
-  tests). Nothing in it touches the live runner.
+- `./check.sh` runs every check, about two and a half minutes (`--quick`:
+  the runner's typecheck and unit tests; `--app`: the app's build and tests,
+  for a change outside `runner/`). Nothing in it touches the live runner.
 - The live runner runs a release, a snapshot, so editing `runner/` doesn't
   change it. To try a runner change, start `runner/scripts/dev-runner.sh` in
   the background and use the `<dev home>/tb` it prints (a bare `tb` reaches
   the live runner unless `THREADBARE_HOME` is set in that same command).
-  Its threads start in `<dev home>/work` on claude-3; give them
-  `--model claude-haiku-5-5`. Stop it with the `kill <pid>` it prints, never
+  Its threads start in `<dev home>/work` on claude-3 and claude-haiku-5-5
+  (its `runner.json` defaults), from `tb` or a debug app's composer alike.
+  Stop it with the `kill <pid>` it prints, never
   `pkill`, and before you deploy or end your turn: the live runner's restart
   waits for it.
 - To ship a runner change, merge it to main, then from main run
@@ -64,35 +66,50 @@ if `tb` isn't found (an older runner, or outside a thread), use
   `launchctl kickstart` it or stop its node process: each ends your own turn
   and stops other threads' work. If one is needed, finish and tell Mike the
   exact command. `tb restart` is for dev runners and sandboxes.
-- Rebuilding or restarting the app (`app/restart.sh`, `app/install.sh`) is
-  safe: the runner keeps your turn going and the app reconnects.
-- `tb show <id>` reads a thread as text, `tb logs` the runner log, and
-  `tb export <id>` copies a thread into `app/.fixtures/threads/<id>` so a
-  rendering bug can be reproduced against the mock runner (it prints the
-  commands).
+- Never run `app/restart.sh` or `app/install.sh` yourself: they replace and
+  relaunch Mike's own app, in front of his work, and throw away whatever
+  he's typed but not sent. To see an app change, use `app/Tools/dev-app.sh`
+  (below); if his installed app needs updating, tell him the command.
+- `tb show <id>` reads a thread as text (`--tools` for results, each under
+  its own call), `tb events <id> --from N --to M` a range of events by seq,
+  `tb logs` the runner log, and `tb export <id>` copies a thread into
+  `app/.fixtures/threads/<id>` so a rendering bug can be reproduced in a
+  debug app (it prints the command). `tb <command> --help` explains one.
 - `app/Tools/perf-run.sh` and `app/Tools/run-mock.sh` bring a window to the
   front of Mike's work, so ask him before running them.
 
 ## Seeing and driving the app
 
 `app/Tools/dev-app.sh` runs a debug build in a temp bundle, against the
-mock runner or a dev runner, with its window kept behind Mike's. Several
-can run at once; each command takes `--id` (default: the last started).
-Never use `~/Applications/Threadbare.app` for this.
+mock runner or a dev runner, with its window kept behind Mike's. Never use
+`~/Applications/Threadbare.app` for this. Instances belong to the thread
+and checkout that started them: without `--id`, a command means your
+newest one, never another thread's, and `stop --all` stops only yours.
+`start` prints the id; pass `--id` to every command once you have more
+than one, and use `status` to see whose is whose.
 
 - A UI change: `app/Tools/dev-app.sh start --mock` (the demo threads; add
   `--appearance light` for the other look), then drive it with
   `do '{"cmd":"open","id":"demo_upload"}' '{"cmd":"expand","row":"g:"}'`,
-  read it with `dump` (rows with ids, kinds and heights, the composer, the
-  banner) and look at it with `shot <file.png>`. Look at the images
-  before saying it works, then `stop`. The commands are in `app/README.md`
-  ("Seeing and driving it from a script").
+  read it with `dump` (rows with ids, kinds and heights, the composer and
+  what a send would run on, the banner) and look at it with
+  `shot <file.png>`. After an edit, `rebuild` restarts it on the new build
+  with the same thread open. Look at the images before saying it works,
+  then `stop`. An instance quits after an hour with no command. The
+  commands are in `app/README.md` ("Seeing and driving it from a script").
+- `shot` runs screencapture from your shell. If it says the image was drawn
+  in-process (the screen is locked, or your shell has no Screen Recording
+  permission), the sidebar's glass is a flat fill; the rest is right.
+- A scripted app is never in front, so opening a thread doesn't mark it
+  read until you send `{"cmd":"focus"}`.
 - A bug in one of Mike's real threads: `tb export <id>`, then
   `app/Tools/dev-app.sh start --mock --fixtures app/.fixtures/threads/<id>`
   and `open` it. Exports are his private conversations: keep shots of them
   out of git and delete them when done.
 - A runner change seen in the app: start `runner/scripts/dev-runner.sh`,
-  then `dev-app.sh start --home <dev home>`.
+  then `dev-app.sh start --home <dev home>` (it prints that line). A
+  message sent from that app's composer is a real turn; `dump` shows the
+  model it would use.
 - `dev-app.sh log` shows the app's own log (connection, RPC errors, the
   commands it ran). Mike can right-click a row for "Copy debug info" or use
   "Copy thread id" in the ... menu to point you at what he's seeing.

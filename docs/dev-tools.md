@@ -125,7 +125,12 @@ the data dir (`<home>`, normally `~/Library/Application Support/Threadbare`):
 - `tb restart [--now] [--resume "text"] [--reason "text"]`.
 - `tb show <id> [--last N] [--tools]`: the thread as plain text: user and
   assistant messages, one line per tool call (with `--tools`, results
-  too), approvals, notes, turn footers.
+  too), approvals, notes, turn footers. A call's diff, approval and result
+  go under it, so parallel calls' results don't land under the wrong one.
+- `tb events <id> [--from N] [--to M] [--json]`: events by seq, each line
+  starting with its seq (Copy debug info gives the command). Every tb
+  command refuses flags it doesn't read, and `tb <command> --help` shows
+  just that one.
 - `tb logs [-f] [-n 200] [--thread ID]`: the runner log, optionally
   filtered to one thread.
 - `tb export <id> [--out DIR]`: `thread.json`, `events.ndjson` and
@@ -138,10 +143,14 @@ the data dir (`<home>`, normally `~/Library/Application Support/Threadbare`):
 
 - `runner/scripts/dev-runner.sh [--home DIR] [--port N]`: runs the working
   tree's runner in the foreground on a temp data dir (refuses the real
-  one) and prints the `THREADBARE_HOME=...` line for `tb` and the
-  `--data-dir` for the app.
-- `./check.sh [--quick] [--e2e] [--shots DIR]` at the repo root: runner
-  typecheck and unit tests, app `swift build` and `swift test`. `--e2e`
+  one) and prints the `<home>/tb` for `tb` and the `dev-app.sh start
+  --home` line for the app. A new data dir's `runner.json` defaults threads
+  to `<home>/work`, claude-3 and claude-haiku-5-5 (`defaults.model`, which
+  the runner applies to a `threads.create` with no model).
+- `./check.sh [--quick | --app] [--e2e] [--shots DIR]` at the repo root:
+  runner typecheck, unit tests and deploy tests, app `swift build` and
+  `swift test` (with the mock runner's packages installed and its tests
+  required). `--app` is the app's part alone. `--e2e`
   adds the runner's real-model e2e (cheapest model, temp dirs); `--shots`
   runs `app/Tools/screenshots.sh`. One line per step, nonzero exit if
   anything failed, pinned Node 24.
@@ -158,17 +167,28 @@ driving it from a script") and in AGENTS.md ("Seeing and driving the app").
 
 - `app/Tools/dev-app.sh start [--mock [--fixtures DIR]...] [--home DIR]
   [--appearance light|dark] [--size WxH] [--id NAME]`, then `do
-  '<json>'...`, `shot <file>`, `dump [--json]`, `log`, `stop [--all]`,
-  `status`. Each instance is a debug build in a temp bundle with its own
-  bundle id (its own settings), data folder, automation notification name
-  and pasteboard (`--automation-id`), so several run at once without
-  crosstalk; commands take `--id`, defaulting to the one started last. It
+  '<json>'...`, `shot <file>`, `dump [--json]`, `rebuild`, `log`,
+  `stop [--all | --everyone]`, `status`. Each instance is a debug build in
+  a temp bundle with its own bundle id (its own settings), data folder,
+  automation notification name and pasteboard (`--automation-id`), so
+  several run at once. Instances belong to the thread and checkout that
+  started them: commands take `--id`, defaulting to the caller's newest,
+  never another thread's, and `stop --all` stops only the caller's. An
+  instance quits after an hour with no command and its mock exits with it;
+  `start` and `status` clean up after ones that quit. `shot` runs
+  screencapture from the caller's shell (the temp bundle has no Screen
+  Recording permission) and falls back to the app's own drawing. It
   launches with `open -g` and the app orders its window to the back as soon
   as it exists. `do` tags each command with a request id and waits for that
   result line; an error result or a timeout exits 1. `--fixtures` takes
   `tb export` folders; `--home` a dev runner's data dir (never the live
   one). `stop` quits the app, stops its mock and deletes the bundle, the
   data, the logs and the bundle id's preferences.
+- The scripted app refuses the installed runner's data folder unless
+  `--automation-allow-live`, never saves window sizes, and has `focus`
+  (counts as looking, so threads get marked read) and `window` (its id for
+  screencapture); `options` refuses unknown keys and reports what's set,
+  and `dump` shows what a send from the composer would run on.
 - Automation commands added or rounded out: `open` (waits for the rows),
   `screenshot` (in-process when the screen is locked), `dump` (sidebar
   rows by section; transcript rows with id, kind, height, open or not, on
@@ -183,7 +203,8 @@ driving it from a script") and in AGENTS.md ("Seeing and driving the app").
   commands) goes to the unified log, and with `--automation` to a file
   beside the automation log too (`--app-log`); `dev-app.sh log` tails it.
 - A pending runner restart is a quiet grey line under the toolbar ("The
-  runner will restart when 2 threads finish.", the threads in its tooltip),
+  runner will restart when 2 threads finish.", or "when 1 thread finishes
+  and you answer 2." when some wait on Mike; the threads in its tooltip),
   from `runner.notice` and `runner.status`; while the runner is down it
   says "The runner is restarting. Reconnecting…" with a spinner and the
   app retries every half second. A `user.message` with `origin: "runner"`

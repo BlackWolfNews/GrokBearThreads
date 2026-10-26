@@ -29,6 +29,8 @@ enum ScreenshotRunner {
         if let index = arguments.firstIndex(of: "--appearance"), index + 1 < arguments.count {
             NSApp.appearance = NSAppearance(named: arguments[index + 1] == "light" ? .aqua : .darkAqua)
         }
+        // Never saved as the window's frame (see freshSidebar).
+        window.setFrameAutosaveName("")
         window.setContentSize(NSSize(width: 1240, height: 820))
         window.center()
         freshSidebar(in: window)
@@ -237,9 +239,10 @@ enum ScreenshotRunner {
         }
     }
 
-    /// A fresh window's sidebar width. This debug build shares the app's
-    /// defaults, so its split view came back at whatever width was saved
-    /// last; the shots show the default instead, and don't save it back.
+    /// A fresh window's sidebar width, not saved back. screenshots.sh gives
+    /// the build its own bundle id (so its own, empty defaults: it used to
+    /// share Mike's and leave its window size in them); this keeps the
+    /// shots right for a build run some other way.
     private static func freshSidebar(in window: NSWindow) {
         func find(_ view: NSView?) -> NSSplitView? {
             guard let view else { return nil }
@@ -294,7 +297,7 @@ enum ScreenshotRunner {
     private static func capture(_ window: NSWindow, _ url: URL) async {
         switch await save(window, to: url) {
         case .screencapture: print("saved \(url.path)")
-        case .inProcess: print("saved \(url.path) (drawn in-process: the screen is locked or asleep)")
+        case .inProcess: print("saved \(url.path) (drawn in-process: screencapture gave no image, so the screen is locked or asleep, or this shell has no Screen Recording permission)")
         case nil: print("could not save \(url.path)")
         }
     }
@@ -307,12 +310,17 @@ enum ScreenshotRunner {
     /// The window alone as a PNG: `screencapture -l` with its id (covered or
     /// not), or AppKit's own drawing of it when the window server has no
     /// image to give. Also the automation hook's `screenshot`.
-    static func save(_ window: NSWindow, to url: URL) async -> CaptureMethod? {
+    /// screencapture needs Screen Recording permission for whoever started
+    /// this process: a shell that has it (screenshots.sh runs the binary from
+    /// one), not an app launched with `open` (a dev-app.sh instance, which
+    /// runs screencapture from the shell instead and passes false here).
+    static func save(_ window: NSWindow, to url: URL, tryScreencapture: Bool = true) async -> CaptureMethod? {
         window.displayIfNeeded()
         try? await Task.sleep(for: .milliseconds(300))
         // A shot left from an earlier run would pass for this one below.
         try? FileManager.default.removeItem(at: url)
         try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        if !tryScreencapture { return drawInProcess(window, to: url) ? .inProcess : nil }
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/sbin/screencapture")
         process.arguments = ["-o", "-x", "-l", String(window.windowNumber), url.path]
@@ -325,8 +333,9 @@ enum ScreenshotRunner {
         }
         if FileManager.default.fileExists(atPath: url.path) { return .screencapture }
         // With the screen locked (or the display asleep) the window server
-        // has no image of the window to give. AppKit can still draw it,
-        // with the sidebar's glass as a flat fill.
+        // has no image of the window to give, and without the permission
+        // screencapture writes nothing. AppKit can still draw it, with the
+        // sidebar's glass as a flat fill.
         return drawInProcess(window, to: url) ? .inProcess : nil
     }
 
@@ -335,6 +344,15 @@ enum ScreenshotRunner {
     private static func drawInProcess(_ window: NSWindow, to url: URL) -> Bool {
         guard let frameView = window.contentView?.superview else { return false }
         frameView.layoutSubtreeIfNeeded()
+        // A label (NSTextField) draws its text twice in this pass: its own
+        // cell, and the private subview that draws it on screen. Text in a
+        // translucent colour came out far too bright (the work lines'
+        // secondary label colour at 0.55 drew at about 0.8), so the
+        // subviews sit this pass out. Shown again in the same run loop
+        // turn, so the window on screen never changes.
+        let doubled = descendants(of: frameView).filter { !$0.isHidden && String(describing: type(of: $0)) == "NSTextFieldSimpleLabel" }
+        doubled.forEach { $0.isHidden = true }
+        defer { doubled.forEach { $0.isHidden = false } }
         guard let rep = frameView.bitmapImageRepForCachingDisplay(in: frameView.bounds) else { return false }
         frameView.cacheDisplay(in: frameView.bounds, to: rep)
         redrawGlass(in: frameView, onto: rep)

@@ -5,7 +5,6 @@
 // formatting and export functions are pure enough to test on their own.
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { defaultHome, readToken, runnerUrl, type Config } from './config.ts';
 import { RunnerClient, RpcClientError } from './client.ts';
@@ -174,18 +173,16 @@ export async function runDev(client: RunnerClient, cmd: string, args: string[], 
       const out = typeof f.out === 'string' ? path.resolve(f.out) : defaultExportDir(id);
       const r = exportThread(t, await allEvents(client, id), out);
       console.log(`Exported ${plural(r.events, 'event', 'events')} and ${plural(r.media, 'image', 'images')} to ${out}`);
+      // dev-app.sh runs a debug build in a temp bundle with its window kept
+      // behind Mike's, with its own mock runner that it stops again, so an
+      // agent can look at the export without asking. It comes first: a
+      // bare mock runner started by hand blocks the shell it runs in.
       // --fixtures with the export's own folder loads just this thread,
       // without the mock's sample threads or anything beside it.
       const root = findRepoRoot() ?? '.';
-      const mock = path.join(root, 'app', 'Tools', 'mock-runner', 'server.mjs');
-      const data = path.join(os.tmpdir(), `tb-mock-${id.slice(0, 8)}`);
-      console.log(`Load it in the mock runner: node ${shQuote(mock)} --data-dir ${shQuote(data)} --fixtures ${shQuote(out)}`);
-      console.log(`  then point tb (THREADBARE_HOME=${shQuote(data)}) or a debug app (--data-dir ${shQuote(data)}) at it.`);
-      // dev-app.sh runs a debug build in a temp bundle with its window kept
-      // behind Mike's, so an agent can look at the export without asking.
-      // (run-mock.sh opened the installed app in front of his work.)
       console.log(`To look at it in a debug app, then dump, shot and stop it:`);
       console.log(`  ${shQuote(path.join(root, 'app', 'Tools', 'dev-app.sh'))} start --mock --fixtures ${shQuote(out)}`);
+      console.log(`Its events by seq (line N of events.ndjson is seq N): ${TB} events ${id.slice(0, 8)} --from N --to M`);
       return 0;
     }
     case 'rpc': {
@@ -204,6 +201,13 @@ export async function runDev(client: RunnerClient, cmd: string, args: string[], 
         }
       }
       if (!params || typeof params !== 'object' || Array.isArray(params)) throw new Error('Params must be a JSON object');
+      // The same guards tb approve, delete and interrupt apply: a thread's
+      // own cards are Mike's to answer, and it can't stop itself.
+      const own = env.THREADBARE_THREAD_ID && (params as { threadId?: unknown }).threadId === env.THREADBARE_THREAD_ID;
+      if (own && ['approvals.respond', 'threads.delete', 'threads.interrupt'].includes(args[0])) {
+        console.error(args[0] === 'approvals.respond' ? "That's this thread's own card; Mike answers it." : `Not on the thread this runs in (${args[0]}).`);
+        return 1;
+      }
       return printJson(await client.call(args[0], params as Record<string, unknown>));
     }
     default:
@@ -427,9 +431,33 @@ export function formatThread(t: ThreadSummary, events: PersistedEvent[], opts: {
   const lines = [t.title, `${t.id}, ${t.status}, ${t.accountId}${t.model ? `, ${t.model}` : ''}, ${access(t)}, in ${t.cwd}`];
   const { events: shown, hidden } = opts.last ? lastTurns(events, opts.last) : { events, hidden: 0 };
   if (hidden) lines.push(`(${plural(hidden, 'earlier turn', 'earlier turns')} not shown)`);
+  // Everything that belongs to a call (its diff, its approval and the
+  // answer, its result) goes straight under it, in seq order. Parallel
+  // calls, the usual case, have their results arrive after all the calls,
+  // in whatever order they finish, so in plain seq order a result would sit
+  // under the wrong call. Anything whose call isn't shown stays where it is.
   const results = new Map<string, Extract<PersistedEvent, { type: 'tool.result' }>>();
-  for (const e of shown) if (e.type === 'tool.result') results.set(e.itemId, e);
+  const attached = new Map<string, PersistedEvent[]>();
+  const owned = new Set<PersistedEvent>();
+  const approvalCall = new Map<string, string>();
+  const attach = (itemId: string, e: PersistedEvent) => {
+    const list = attached.get(itemId);
+    if (!list) return;
+    list.push(e);
+    owned.add(e);
+  };
   for (const e of shown) {
+    if (e.type === 'tool.call') attached.set(e.itemId, []);
+    else if (e.type === 'tool.result') {
+      results.set(e.itemId, e);
+      attach(e.itemId, e);
+    } else if (e.type === 'edit.diff') attach(e.itemId, e);
+    else if (e.type === 'approval.requested' && e.itemId && attached.has(e.itemId)) {
+      approvalCall.set(e.approvalId, e.itemId);
+      attach(e.itemId, e);
+    } else if (e.type === 'approval.resolved' && approvalCall.has(e.approvalId)) attach(approvalCall.get(e.approvalId)!, e);
+  }
+  const render = (e: PersistedEvent) => {
     switch (e.type) {
       case 'user.message':
         lines.push('', ...block(e.origin === 'runner' ? 'Runner: ' : 'User: ', e.text, '  '));
@@ -448,6 +476,7 @@ export function formatThread(t: ThreadSummary, events: PersistedEvent[], opts: {
         // see exactly what ran.
         if (opts.tools && e.name === 'Bash' && typeof e.input?.command === 'string') lines.push(...block('  - ', `${e.input.command}${failed}`, '    '));
         else lines.push(`  - ${e.title}${failed}`);
+        for (const a of attached.get(e.itemId) ?? []) render(a);
         break;
       }
       case 'tool.result':
@@ -494,7 +523,8 @@ export function formatThread(t: ThreadSummary, events: PersistedEvent[], opts: {
       default:
         lines.push(`  (${(e as { type: string }).type})`);
     }
-  }
+  };
+  for (const e of shown) if (!owned.has(e)) render(e);
   return lines.join('\n') + '\n';
 }
 

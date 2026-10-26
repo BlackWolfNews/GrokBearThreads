@@ -435,13 +435,36 @@ function activate(c, id, previous) {
   const state = readState(c.dir);
   const was = currentId(c);
   pointCurrent(c.dir, id);
-  writeState(c.dir, { ...state, current: id, previous: previous ?? was ?? state.previous, activated: { release: id, at: new Date().toISOString() } });
+  saveState(c, { ...state, current: id, previous: previous ?? was ?? state.previous, activated: { release: id, at: new Date().toISOString() } }, id);
   say(`current now points at ${id}${was ? ` (was ${was})` : ''}.`);
 }
 
 function restore(c, before) {
   pointCurrent(c.dir, before.current);
-  writeState(c.dir, { ...readState(c.dir), current: before.current, previous: before.previous });
+  saveState(c, { ...readState(c.dir), current: before.current, previous: before.previous });
+}
+
+// The releases that crashed at startup since they were last activated.
+// launch.mjs records only the latest crash rollback (rolledBack), and the
+// next one overwrites it: release A crashes, a deploy of B crashes too and
+// its health check puts previous back to A, and then nothing said A was
+// bad. So every state write here keeps them in `crashed`. One marked good
+// since, or activated again on purpose (--rollback --force), drops out.
+function crashedReleases(state) {
+  const ids = new Set(Array.isArray(state.crashed) ? state.crashed.filter((x) => typeof x === 'string' && x) : []);
+  const rb = state.rolledBack;
+  const again = rb && state.activated?.release === rb.from && Date.parse(state.activated.at) > Date.parse(rb.at);
+  if (rb?.from && !again) ids.add(rb.from);
+  if (state.lastGood) ids.delete(state.lastGood);
+  return ids;
+}
+
+// writeState, keeping `crashed` up to date. activated: a release activated
+// just now, which gets fresh tries.
+function saveState(c, state, activated) {
+  const crashed = crashedReleases(state);
+  if (activated) crashed.delete(activated);
+  writeState(c.dir, { ...state, crashed: [...crashed].slice(-20) });
 }
 
 function pruneList(c, extraKeep = []) {
@@ -953,6 +976,7 @@ async function list(c) {
   // current and running differ while a deploy's restart waits (or after
   // one was withdrawn without putting current back).
   const behind = running && cur && running !== cur;
+  const crashed = crashedReleases(state);
   if (!ids.length) {
     say(`No releases in ${c.releases}.`);
   } else {
@@ -964,7 +988,7 @@ async function list(c) {
         behind && id === running && 'running',
         id === state.previous && 'previous',
         id === state.lastGood && 'last good',
-        id === state.rolledBack?.from && 'crashed at startup',
+        crashed.has(id) && 'crashed at startup',
       ]
         .filter(Boolean)
         .join(', ');
@@ -1068,10 +1092,14 @@ async function rollback(c, v, waitMs) {
   if (!target) throw new Fail('There is no previous release to go back to.');
   if (target === cur) throw new Fail(`current already points at ${target}.`);
   if (!releaseExists(c.dir, target)) throw new Fail(`The previous release ${target} isn't in ${c.releases} any more.`);
-  // After a crash rollback, previous names the release that crashed.
-  if (state.rolledBack?.from === target && !v.force) {
+  // After a crash rollback, previous names the release that crashed; after
+  // a later deploy's own rollback, it can name an earlier one that did.
+  if (crashedReleases(state).has(target) && !v.force) {
     const again = c.inThread ? '' : ` (--rollback --force starts ${target} again.)`;
-    throw new Fail(`${target} kept crashing at startup, and launch.mjs already went back from it to ${state.rolledBack.to}, so there's nothing to roll back.${again}`);
+    if (state.rolledBack?.from === target) {
+      throw new Fail(`${target} kept crashing at startup, and launch.mjs already went back from it to ${state.rolledBack.to}, so there's nothing to roll back.${again}`);
+    }
+    throw new Fail(`The previous release, ${target}, crashed at startup earlier (deploy-runner.sh --list marks it), so going back to it would only crash again.${again}`);
   }
   requireReleases(c);
   const forward = cur && target > cur ? ' (that rolls forward to the newer release)' : '';

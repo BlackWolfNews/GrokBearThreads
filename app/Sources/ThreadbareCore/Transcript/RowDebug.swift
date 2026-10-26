@@ -3,7 +3,8 @@ import Foundation
 /// What an agent needs to find a transcript row again: the row's own words
 /// for dumps, and "Copy debug info" (the thread, the row, the events it was
 /// built from and the runner), so Mike can point at a row and an agent can
-/// pull up the same events with `tb show` or a fixture export.
+/// pull up the same events with `tb events --from --to` or a fixture
+/// export (line N of its events.ndjson is seq N).
 public enum RowDebug {
     /// The row's text on one line, cut to `limit` characters.
     public static func excerpt(_ row: TranscriptRow, limit: Int = 100) -> String {
@@ -63,6 +64,10 @@ public enum RowDebug {
         if let turn = row.turnId, !turn.isEmpty { lines.append("turn: \(turn)") }
         lines.append("events: " + (seqs.isEmpty ? "none loaded" : seqRanges(seqs)))
         lines.append("runner: \(runnerVersion.isEmpty ? "unknown" : runnerVersion)")
+        // The command that prints those events, ready to run.
+        if let first = seqs.min(), let last = seqs.max() {
+            lines.append("see: tb events \(threadId) --from \(first) --to \(last)")
+        }
         return lines.joined(separator: "\n") + "\n"
     }
 

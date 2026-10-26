@@ -114,10 +114,10 @@ replaces whatever the deltas built up.
 
 | method | params | result |
 |---|---|---|
-| `hello` | `{ client: string, version: string }` | `{ runnerVersion, protocol: 1, accounts: Account[], defaults: { cwd, accountId } }`. `runnerVersion` is `<package version>+<release id>` when the runner runs from a release, else `<package version>+source` |
+| `hello` | `{ client: string, version: string }` | `{ runnerVersion, protocol: 1, accounts: Account[], defaults: { cwd, accountId, model? } }`. `defaults.model` is the model a new thread gets when it names none (`runner.json`'s `defaults.model`; a dev runner sets the cheapest); absent means the account's own default. `runnerVersion` is `<package version>+<release id>` when the runner runs from a release, else `<package version>+source` |
 | `threads.list` | `{ include?: ("inbox" \| "snoozed" \| "archived")[] }` (default `["inbox"]`) | `{ threads: ThreadSummary[] }` newest activity first |
 | `threads.search` | `{ query: string, limit?: number }` | `{ threads: ThreadSummary[] }` matches title and preview across all threads, archived included |
-| `threads.create` | `{ text: string, images?: ImageRef[], cwd?: string, accountId?: string, model?: string, permissionMode?: "full" \| "ask", title?: string }` | `{ thread: ThreadSummary }` (the first turn starts straight away) |
+| `threads.create` | `{ text: string, images?: ImageRef[], cwd?: string, accountId?: string, model?: string, permissionMode?: "full" \| "ask", title?: string }` | `{ thread: ThreadSummary }` (the first turn starts straight away). With no `model`, the thread gets `defaults.model` from `hello` if there is one |
 | `threads.send` | `{ threadId, text, images?: ImageRef[] }` | `{ turnId }`. If a turn is running, the message is queued and sent when it ends |
 | `threads.interrupt` | `{ threadId }` | `{}` |
 | `threads.update` | `{ threadId, title?, cwd?, accountId?, model?: string \| null, permissionMode?, snoozedUntil?: string \| null, archived?: boolean }` | `{ thread: ThreadSummary }`. Snoozing or archiving releases the CLI. Changing account or cwd takes effect on the next turn. A folder change on the same account copies the native session's transcript to the new folder and resumes it; otherwise (or if that fails) it starts a new native session with a short handoff note |
@@ -169,7 +169,11 @@ found, `-32010` account not found, `-32020` busy (e.g. two sends racing),
   that had some gets a `system.note` saying what was stopped.
 - While a restart is pending, every client gets a `runner.notice` ("The
   runner will restart when 2 threads finish."), and clients that say hello
-  get it again. `runner.status` shows it as `pendingRestart`. When it
+  get it again. Threads waiting on an approval or a question won't finish
+  until someone answers, so they're counted apart: "The runner will restart
+  when 1 thread finishes and you answer 2.", or "when you answer 1 thread."
+  The Mac app reads these sentences (the numbers after "when" add up to the
+  threads waited for), so they change together. `runner.status` shows it as `pendingRestart`. When it
   starts, the notice is "The runner is restarting now."
 - The request is saved in `restart.json` in the data dir, so a crash
   before the runner is idle doesn't lose it: the next start counts as the

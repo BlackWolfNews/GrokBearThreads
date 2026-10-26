@@ -11,12 +11,14 @@
 #
 # It writes <home>/tb, a tb that always talks to this runner (an exported
 # THREADBARE_HOME doesn't last past one command in an agent's shell), and
-# prints the --data-dir for the app. On a new data dir, threads default to
-# the folder <home>/work and account claude-3, not your real folders. Like
-# launchd, it starts the runner
-# again when it exits 0 (runner.restart, tb restart), and stops when it
-# exits with an error. Ctrl-C, or `kill <pid>` with the pid it prints, stops
-# it and the CLIs it started.
+# prints the app/Tools/dev-app.sh command for a debug app against it. On a
+# new data dir, threads default to the folder <home>/work, account claude-3
+# and model claude-haiku-5-5 (runner.json's defaults), not your real folders
+# or the account's own model, so a thread started from a debug app's
+# composer is a cheap one. Like launchd, it starts the runner again when it
+# exits 0 (runner.restart, tb restart), and stops when it exits with an
+# error. Ctrl-C, or `kill <pid>` with the pid it prints, stops it and the
+# CLIs it started.
 set -euo pipefail
 
 RUNNER_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -71,15 +73,17 @@ fi
 LOG="$DATA_HOME/runner.log"
 TB="$DATA_HOME/tb"
 WORK="$DATA_HOME/work"
-# The runner's defaults are Mike's real folder and the last account used;
-# a thread made to try a change belongs in a scratch folder. (The account
-# is the one the end-to-end tests use.)
+# The runner's defaults are Mike's real folder, the last account used and
+# the account's own model (Fable with a 1M context on claude-3); a thread
+# made to try a change belongs in a scratch folder on the cheapest model,
+# whether tb or a debug app's composer starts it. (The account and model
+# are the ones the end-to-end tests use.)
 IN_WORK=""
 if [ ! -e "$DATA_HOME/runner.json" ]; then
   mkdir -p "$WORK"
-  "$NODE" -e 'require("fs").writeFileSync(process.argv[1], JSON.stringify({ defaults: { cwd: process.argv[2], accountId: "claude-3" } }, null, 2) + "\n")' \
+  "$NODE" -e 'require("fs").writeFileSync(process.argv[1], JSON.stringify({ defaults: { cwd: process.argv[2], accountId: "claude-3", model: "claude-haiku-5-5" } }, null, 2) + "\n")' \
     "$DATA_HOME/runner.json" "$WORK"
-  IN_WORK="   (in $(printf '%q' "$WORK"))"
+  IN_WORK="   (in $(printf '%q' "$WORK"), on claude-haiku-5-5)"
 fi
 # THREADBARE_PORT and THREADBARE_URL go too: tb then reads the port this
 # runner wrote to runner.json.
@@ -97,7 +101,7 @@ echo "  log:  $LOG (also shown here)"
 echo "  pid:  $$"
 echo "For tb:      $(printf '%q' "$TB") status"
 echo "A thread:    $(printf '%q' "$TB") new \"say hi\" --model claude-haiku-5-5 --wait$IN_WORK"
-echo "For the app: --data-dir $(printf '%q' "$DATA_HOME")"
+echo "For the app: $(printf '%q' "$(cd "$RUNNER_DIR/.." && pwd)/app/Tools/dev-app.sh") start --home $(printf '%q' "$DATA_HOME")"
 echo "Stop it:     kill $$   (never pkill: the real runner runs src/main.ts too)"
 echo
 

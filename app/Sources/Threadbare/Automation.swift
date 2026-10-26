@@ -21,6 +21,8 @@ enum Automation {
     private(set) static var instanceId: String?
     private static var logURL: URL?
     private static var observer: NSObjectProtocol?
+    /// When the last command came in, for `--automation-idle-quit`.
+    private static var lastCommandAt = Date()
     /// A transcript cell drawn as hovered by `hover`, to clear later.
     private static weak var hoveredCell: RowCellView?
 
@@ -47,6 +49,27 @@ enum Automation {
         return automationLog.deletingPathExtension().appendingPathExtension("app.log")
     }
 
+    /// A scripted app pointed at the installed runner's data folder would
+    /// send, approve, archive and snooze in Mike's real threads (and the
+    /// installed app is itself a debug build). It needs `--data-dir` (the
+    /// mock or a dev runner), or `--automation-allow-live` from Mike.
+    static func refusesLiveRunner(dataDir: URL, arguments: [String] = CommandLine.arguments) -> Bool {
+        guard argument(after: "--automation", in: arguments) != nil, !arguments.contains("--automation-allow-live") else { return false }
+        return dataDir.resolvingSymlinksInPath().standardizedFileURL.path
+            == RunnerConfig.defaultDataDir.resolvingSymlinksInPath().standardizedFileURL.path
+    }
+
+    /// Says why in the automation log (where the script waits for "ready")
+    /// and on stderr, then exits before the app connects to anything.
+    static func refuseLiveRunner() -> Never {
+        let message = "error refusing to be scripted against the live runner's data folder: pass --data-dir (the mock or a dev runner; Tools/dev-app.sh does), or --automation-allow-live if Mike asked for it"
+        if let path = argument(after: "--automation") {
+            FileManager.default.createFile(atPath: path, contents: Data((message + "\n").utf8))
+        }
+        FileHandle.standardError.write(Data(("Threadbare: " + message + "\n").utf8))
+        exit(2)
+    }
+
     static func startIfAsked(app: AppModel) {
         guard let path = argument(after: "--automation") else { return }
         instanceId = argument(after: "--automation-id")
@@ -65,6 +88,22 @@ enum Automation {
             await keepBehind()
             log("ready")
         }
+        // dev-app.sh passes it so an instance an agent never stopped (an
+        // interrupted turn, a thread that ran out of context) doesn't sit
+        // behind Mike's windows for good. Its mock runner exits with it.
+        if let seconds = argument(after: "--automation-idle-quit").flatMap(Double.init), seconds > 0 {
+            Task {
+                while true {
+                    try? await Task.sleep(for: .seconds(min(60, seconds)))
+                    let idle = Date().timeIntervalSince(lastCommandAt)
+                    guard idle >= seconds else { continue }
+                    AppLog.write("automation", "quitting: no command for \(Int(idle)) s (--automation-idle-quit)")
+                    log("quit idle for \(Int(idle)) s")
+                    NSApp.terminate(nil)
+                    return
+                }
+            }
+        }
     }
 
     /// The window goes behind everything as soon as it's there, and is sized
@@ -76,6 +115,10 @@ enum Automation {
         }
         guard let window = mainWindow else { return }
         window.orderBack(nil)
+        // Sizes set by a script aren't the user's: never saved as the
+        // window's frame (a bundle that shares the installed app's id would
+        // otherwise reopen Mike's window at them).
+        window.setFrameAutosaveName("")
         if let size = argument(after: "--window-size").flatMap(parseSize) {
             window.setContentSize(size)
         }
@@ -100,6 +143,7 @@ enum Automation {
             return
         }
         let prefix = (command["rid"] as? String).map { "#\($0) " } ?? ""
+        lastCommandAt = Date()
         AppLog.write("automation", text)
         Task {
             let result = await run(name, command, app: app)
@@ -140,18 +184,15 @@ enum Automation {
             app.newThread()
             return "ok"
         case "options":
-            // What the composer's folder, account, model and "Ask before
-            // edits" menus set for a new thread.
-            if let cwd = c["cwd"] as? String { app.newThreadCwd = cwd }
-            if let account = c["account"] as? String { app.newThreadAccount = account }
-            if let model = c["model"] as? String { app.newThreadModel = model }
-            if let ask = c["ask"] as? Bool { app.newThreadAsk = ask }
-            return "ok"
+            return options(c, app: app)
         case "type":
             guard let composer = find(ComposerTextView.self, in: window?.contentView) else { return "error no composer" }
-            if c["replace"] as? Bool == true { app.drafts[app.selection ?? "new", default: Draft()].text = "" }
             window?.makeFirstResponder(composer)
-            composer.insertText(c["text"] as? String ?? "", replacementRange: composer.selectedRange())
+            // `replace` takes the text view's whole text: clearing only the
+            // draft reaches the view on SwiftUI's next update, after this
+            // insert, and the old text would come back.
+            let range = c["replace"] as? Bool == true ? NSRange(location: 0, length: (composer.string as NSString).length) : composer.selectedRange()
+            composer.insertText(c["text"] as? String ?? "", replacementRange: range)
             return "ok"
         case "return":
             return pressReturn(window)
@@ -269,8 +310,31 @@ enum Automation {
         case "screenshot":
             guard let path = c["path"] as? String, path.hasPrefix("/") else { return "error path must be absolute" }
             guard let window else { return "error no window" }
-            guard let method = await ScreenshotRunner.save(window, to: URL(fileURLWithPath: path)) else { return "error couldn't capture the window" }
+            // A dev-app.sh instance never runs screencapture itself: its temp
+            // bundle has no Screen Recording permission (the capture is
+            // refused, and macOS may ask Mike for it). dev-app.sh's shot runs
+            // screencapture from the agent's shell first, with this window's
+            // id from `window`, and asks for the in-process drawing only
+            // when that gives no image.
+            let tryScreencapture = instanceId == nil && c["inProcess"] as? Bool != true
+            guard let method = await ScreenshotRunner.save(window, to: URL(fileURLWithPath: path), tryScreencapture: tryScreencapture) else { return "error couldn't capture the window" }
             return "ok \(path) (\(method.rawValue))"
+        case "window":
+            // The window's id for `screencapture -l`, once anything pending
+            // has been drawn (as `screenshot` waits).
+            guard let window else { return "error no window" }
+            window.displayIfNeeded()
+            try? await Task.sleep(for: .milliseconds(300))
+            let size = AppDump.contentSize(window)
+            return "ok \(window.windowNumber) \(Int(size.width))x\(Int(size.height))"
+        case "focus":
+            // The app acts as if it were in front, so a thread that's open
+            // gets marked read the way it does when Mike looks at it. It is
+            // never activated: a scripted app stays behind his windows.
+            let on = c["on"] as? Bool ?? true
+            app.actsActive = on
+            if on { app.appBecameActive() }
+            return "ok \(on ? "on" : "off")"
         case "waitFor":
             return await waitFor(c, app: app)
         case "menu":
@@ -296,6 +360,40 @@ enum Automation {
     }
 
     // MARK: Commands
+
+    /// What the new-thread composer's folder, account, model and "Ask
+    /// before edits" menus set. Anything else is an error rather than a
+    /// silent "ok" (a typo like "models" would leave the account's default
+    /// model in place), and the answer says what's set now.
+    private static func options(_ c: [String: Any], app: AppModel) -> String {
+        let known: Set<String> = ["cmd", "rid", "cwd", "account", "model", "ask"]
+        let unknown = c.keys.filter { !known.contains($0) }.sorted()
+        guard unknown.isEmpty else { return "error options takes cwd, account, model and ask, not \(unknown.joined(separator: ", "))" }
+        if let value = c["cwd"] {
+            guard let cwd = value as? String, !cwd.isEmpty else { return "error cwd is a folder path" }
+            app.newThreadCwd = cwd
+        }
+        if let value = c["account"] {
+            guard let account = value as? String else { return "error account is an account id" }
+            if !app.accounts.isEmpty, !app.accounts.contains(where: { $0.id == account }) {
+                return "error no account \(account) (the runner has \(app.accounts.map(\.id).joined(separator: ", ")))"
+            }
+            app.newThreadAccount = account
+        }
+        if let value = c["model"] {
+            // null goes back to the default.
+            if value is NSNull { app.newThreadModel = nil } else {
+                guard let model = value as? String, !model.isEmpty else { return "error model is a model name, or null for the default" }
+                app.newThreadModel = model
+            }
+        }
+        if let value = c["ask"] {
+            guard let ask = value as? Bool else { return "error ask is true or false" }
+            app.newThreadAsk = ask
+        }
+        let settings = AppDump.newThreadSettings(app)
+        return "ok cwd=\(settings.cwd) account=\(settings.account) model=\(settings.model) ask=\(settings.ask)"
+    }
 
     private static func pressReturn(_ window: NSWindow?) -> String {
         // The same key event the Return key sends.

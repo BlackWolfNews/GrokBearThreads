@@ -23,6 +23,12 @@ if [[ ! -d "$TOOLS_DIR/mock-runner/node_modules" ]]; then
 fi
 
 THREADBARE_APP_DIR="$WORK/Threadbare.app" THREADBARE_BUILD_CONFIGURATION=release bash "$APP_ROOT/build-app.sh" >/dev/null
+# Its own bundle id, so its own settings: with the installed app's id it
+# left its window size and sidebar width in Mike's preferences. Re-signed
+# ad hoc, since the plist is sealed.
+PERF_ID="com.mikerosoft.threadbare.perf.$$"
+/usr/libexec/PlistBuddy -c "Set :CFBundleIdentifier $PERF_ID" "$WORK/Threadbare.app/Contents/Info.plist"
+codesign --force --sign - "$WORK/Threadbare.app" >/dev/null 2>&1
 
 # 16 copies of the three biggest fixtures (same events and media, their own
 # thread ids), so the 20-thread memory step loads real-size threads rather
@@ -57,6 +63,9 @@ MOCK_PID=$!
 cleanup() {
   kill "$MOCK_PID" 2>/dev/null || true
   rm -rf "$WORK"
+  defaults delete "$PERF_ID" >/dev/null 2>&1 || true
+  rm -rf "$HOME/Library/Preferences/$PERF_ID.plist" "$HOME/Library/Saved Application State/$PERF_ID.savedState" \
+    "$(getconf DARWIN_USER_TEMP_DIR)$PERF_ID.savedState" "$HOME/Library/Caches/$PERF_ID"
 }
 trap cleanup EXIT
 for _ in $(seq 1 200); do

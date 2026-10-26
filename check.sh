@@ -3,14 +3,17 @@
 # the end of the log for each step that failed, and a nonzero exit if any
 # did.
 #
-#   ./check.sh [--quick] [--e2e] [--shots DIR]
+#   ./check.sh [--quick | --app] [--e2e] [--shots DIR]
 #
 #   (no options)  runner typecheck, unit tests and deploy tests, then the
-#                 app's swift build and swift test (about a minute)
-#   --quick       runner typecheck and unit tests only
+#                 app's swift build and swift test (about two and a half
+#                 minutes, most of it the deploy tests)
+#   --quick       runner typecheck and unit tests only (about 10 seconds)
+#   --app         the app's swift build and swift test only, for a change
+#                 that doesn't touch runner/ (about 30 seconds)
 #   --e2e         also the runner's end-to-end tests: the real claude CLI on
 #                 claude-haiku-5-5 and account claude-3, in temp folders
-#                 (a few minutes, a few cents)
+#                 (about three minutes, a few cents)
 #   --shots DIR   also save the app's design screenshots to DIR
 #                 (app/Tools/screenshots.sh; look at them afterwards)
 set -uo pipefail
@@ -18,12 +21,14 @@ set -uo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 NODE="${THREADBARE_NODE:-$HOME/.nvm/versions/node/v24.22.1/bin/node}"
 QUICK=0
+APP_ONLY=0
 E2E=0
 SHOTS=""
 
 while [ $# -gt 0 ]; do
   case "$1" in
     --quick) QUICK=1 ;;
+    --app) APP_ONLY=1 ;;
     --e2e) E2E=1 ;;
     --shots)
       [ $# -ge 2 ] || { echo "--shots needs a folder" >&2; exit 2; }
@@ -34,6 +39,11 @@ while [ $# -gt 0 ]; do
   esac
   shift
 done
+
+if [ "$QUICK" = 1 ] && [ "$APP_ONLY" = 1 ]; then
+  echo "--quick is the runner's checks and --app the app's; pick one (or neither for both)." >&2
+  exit 2
+fi
 
 if [ ! -x "$NODE" ]; then
   echo "No Node binary at $NODE. Set THREADBARE_NODE to a Node 24 binary." >&2
@@ -65,15 +75,23 @@ step() {
   fi
 }
 
-if [ ! -d "$ROOT/runner/node_modules" ]; then
-  step "runner packages" "$ROOT/runner" npm ci --no-audit --no-fund
+if [ "$APP_ONLY" = 0 ]; then
+  if [ ! -d "$ROOT/runner/node_modules" ]; then
+    step "runner packages" "$ROOT/runner" npm ci --no-audit --no-fund
+  fi
+  step "runner typecheck" "$ROOT/runner" npm run typecheck
+  step "runner unit tests" "$ROOT/runner" npm test
+  [ "$QUICK" = 1 ] || step "runner deploy tests" "$ROOT/runner" bash test/deploy/run.sh
 fi
-step "runner typecheck" "$ROOT/runner" npm run typecheck
-step "runner unit tests" "$ROOT/runner" npm test
 if [ "$QUICK" = 0 ]; then
-  step "runner deploy tests" "$ROOT/runner" bash test/deploy/run.sh
+  # The app's MockRunnerTests run the real WebSocket client (and the
+  # runner restart) against the mock, and skip without its packages: in a
+  # fresh checkout or worktree they used to skip while this said ok.
+  if [ ! -d "$ROOT/app/Tools/mock-runner/node_modules" ]; then
+    step "mock runner packages" "$ROOT/app/Tools/mock-runner" npm ci --no-audit --no-fund
+  fi
   step "app build" "$ROOT/app" swift build
-  step "app tests" "$ROOT/app" swift test
+  step "app tests" "$ROOT/app" env THREADBARE_REQUIRE_MOCK=1 swift test
 fi
 [ "$E2E" = 0 ] || step "runner e2e" "$ROOT/runner" npm run test:e2e
 [ -z "$SHOTS" ] || step "app screenshots" "$ROOT/app" bash Tools/screenshots.sh "$SHOTS"

@@ -93,6 +93,15 @@ test('inside a thread, tb will not delete, interrupt, snooze or archive that thr
     assert.equal(s.status, 'running', 'its turn carries on');
     assert.equal(s.archivedAt, undefined);
     assert.equal(s.snoozedUntil, undefined);
+    // Its own approval cards are Mike's, through tb approve and a raw call alike.
+    void h.adapter.sessions.find((x) => x.opts.threadId === self.id)!.sink.requestApproval({ name: 'Bash', title: 'rm -rf build', input: { command: 'rm -rf build' }, canAlwaysAllow: true, signal: new AbortController().signal });
+    const approvalId = h.events(self.id).find((e) => e.type === 'approval.requested').approvalId;
+    for (const args of [['approve', self.id, approvalId, 'allow'], ['answer', self.id.slice(0, 8), approvalId, 'yes'], ['rpc', 'approvals.respond', JSON.stringify({ threadId: self.id, approvalId, decision: 'allow' })]]) {
+      const t = tb(h, url, args, inThread);
+      assert.equal(await t.exited, 1, args[0]);
+      assert.match(t.out(), /own card; Mike answers it/, args[0]);
+    }
+    assert.equal(h.runner.get(self.id).status, 'waiting', 'still waiting on Mike');
     // Unarchiving itself, and other threads, are fine.
     assert.equal(await tb(h, url, ['unarchive', self.id], inThread).exited, 0);
     assert.equal(await tb(h, url, ['archive', other.id], inThread).exited, 0);
@@ -116,5 +125,42 @@ test('tb finds a runner on port 0 through runner.json, as the CLIs of a dev or s
     assert.equal(runnerUrl(loadConfig(url), url), 'ws://127.0.0.1:1/rpc');
   } finally {
     fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test('tb refuses flags its command does not read, explains one command with --help, and prints a seq range of events', async () => {
+  const { h, server, url } = await serve();
+  const { thread } = h.runner.create({ text: 'first', accountId: 'claude-3' });
+  const s = h.adapter.last;
+  s.init();
+  s.text('m1:0', 'one');
+  s.result();
+  try {
+    let t = tb(h, url, ['show', thread.id, '--from', '3']);
+    assert.equal(await t.exited, 2);
+    assert.match(t.out(), /^tb show doesn't take --from\. It takes --last, --tools\.\nSee tb show --help\.\n$/);
+    t = tb(h, url, ['show', '--help']);
+    assert.equal(await t.exited, 0);
+    assert.match(t.out(), /^  tb show <threadId> \[--last N\] \[--tools\]\n +the thread as plain text/);
+    assert.doesNotMatch(t.out(), /tb new/);
+    t = tb(h, url, ['unarchive', '--help']);
+    assert.equal(await t.exited, 0);
+    assert.match(t.out(), /tb unarchive <threadId>/);
+
+    const all = h.events(thread.id);
+    t = tb(h, url, ['events', thread.id, '--from', '2', '--to', '3']);
+    assert.equal(await t.exited, 0, t.out());
+    const lines = t.out().trimEnd().split('\n');
+    assert.deepEqual(lines.map((l) => Number(l.slice(0, 5))), [2, 3], t.out());
+    assert.equal(lines[0], '    2  (turn started)');
+    assert.ok(all.length > 3);
+    t = tb(h, url, ['events', thread.id, '--from', '2', '--json']);
+    assert.equal(await t.exited, 0);
+    assert.deepEqual(t.out().trimEnd().split('\n').map((l) => JSON.parse(l).seq), all.slice(1).map((e) => e.seq));
+    t = tb(h, url, ['events', thread.id, '--from', '3', '--to', '2']);
+    assert.equal(await t.exited, 1);
+    assert.match(t.out(), /--to is before --from/);
+  } finally {
+    await server.close();
   }
 });

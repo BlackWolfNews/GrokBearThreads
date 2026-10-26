@@ -5,6 +5,13 @@
 //
 // Usage:
 //   node server.mjs --data-dir /tmp/tb-mock [--port 0] [--fixtures dir]... [--filler 16]
+//                   [--ready-file FILE] [--exit-with-pid-file FILE] [--quiet]
+//
+// --exit-with-pid-file names a file holding the pid of the app it serves
+// (Tools/dev-app.sh writes it): the mock exits once that app has quit, or
+// once the file has been missing for two minutes (the instance was deleted
+// or never started), so a debug app that's never stopped doesn't leave a
+// mock behind.
 //
 // It writes <data-dir>/runner.json ({ port }) and <data-dir>/secrets/runner-token
 // (random, 0600) so the app can point at it with --data-dir. Nothing touches
@@ -114,7 +121,10 @@ async function handle(client, { id, method, params = {} }) {
   if (id !== undefined && id !== null) reply(client, id, result ?? {});
   // Like the real runner: a client that says hello hears about a restart
   // that's waiting, straight after the hello result.
-  if (method === 'hello' && pendingRestart) notice(client, 'info', pendingMessage(pendingRestart.waitingFor.length));
+  if (method === 'hello' && pendingRestart) {
+    const onYou = pendingRestart.waitingFor.filter((id) => threads.get(id)?.summary.status === 'waiting').length;
+    notice(client, 'info', pendingMessage(pendingRestart.waitingFor.length, onYou));
+  }
 }
 
 async function dispatch(client, method, p) {
@@ -260,7 +270,8 @@ async function dispatch(client, method, p) {
       pendingRestart = { when: 'idle', requestedAt: iso(), waitingFor };
       if (p.reason) pendingRestart.reason = p.reason;
       if (p.resume?.threadId) pendingRestart.resumeThreadId = p.resume.threadId;
-      broadcastNotice('info', pendingMessage(waitingFor.length));
+      const onYou = waitingFor.filter((id) => threads.get(id)?.summary.status === 'waiting').length;
+      broadcastNotice('info', pendingMessage(waitingFor.length, onYou));
       return { scheduled: true, waitingFor };
     }
     case 'mock.restart':
@@ -419,9 +430,16 @@ function streamText() {
 
 // ---------------------------------------------------------------- restarts
 
-function pendingMessage(waiting) {
+// The runner's sentences (pendingMessage in runner/src/restart.ts), which
+// the app reads: onYou of the waiting threads wait on an answer from you.
+function pendingMessage(waiting, onYou = 0) {
   if (waiting === 0) return 'The runner is restarting now.';
-  return waiting === 1 ? 'The runner will restart when 1 thread finishes.' : `The runner will restart when ${waiting} threads finish.`;
+  const answer = Math.min(Math.max(0, onYou), waiting);
+  const finishing = waiting - answer;
+  const finish = finishing === 1 ? '1 thread finishes' : `${finishing} threads finish`;
+  if (answer === 0) return `The runner will restart when ${finish}.`;
+  if (finishing === 0) return `The runner will restart when you answer ${answer === 1 ? '1 thread' : `${answer} threads`}.`;
+  return `The runner will restart when ${finish} and you answer ${answer}.`;
 }
 
 /**
@@ -674,6 +692,37 @@ function parseArgs(argv) {
 
 function log(message) {
   if (!quiet) console.log(`mock-runner: ${message}`);
+}
+
+if (typeof args['exit-with-pid-file'] === 'string') watchOwner(args['exit-with-pid-file']);
+
+function watchOwner(file) {
+  // A missing file is allowed for a while: the app isn't started yet, or
+  // dev-app.sh rebuild is between quitting it and starting the new build.
+  let missingSince = Date.now();
+  const timer = setInterval(() => {
+    let pid = NaN;
+    try {
+      pid = Number(fs.readFileSync(file, 'utf8').trim());
+    } catch {
+      if (!fs.existsSync(path.dirname(file)) || Date.now() - missingSince > 120_000) stop('its pid file is gone');
+      return;
+    }
+    missingSince = Date.now();
+    if (!Number.isInteger(pid) || pid <= 0) return;
+    try {
+      process.kill(pid, 0);
+    } catch (e) {
+      // EPERM means it's there but not ours to signal.
+      if (e.code === 'ESRCH') stop(`the app (pid ${pid}) quit`);
+    }
+  }, 2000);
+  timer.unref();
+  function stop(why) {
+    log(`exiting: ${why}`);
+    wss.close();
+    process.exit(0);
+  }
 }
 
 for (const signal of ['SIGINT', 'SIGTERM']) {

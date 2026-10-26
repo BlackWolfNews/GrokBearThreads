@@ -25,7 +25,10 @@ export type Config = {
   // copy of the account's MCP servers (about 400 MB), so past this the
   // longest-idle one is released early.
   maxLive: number;
-  defaults: { cwd: string; accountId?: string };
+  // model: what threads.create uses when it isn't given one (a dev runner
+  // sets the cheapest, so a thread started from a debug app's composer
+  // doesn't run on the account's default). Unset means the account's own.
+  defaults: { cwd: string; accountId?: string; model?: string };
   // Where accounts are discovered. Tests can narrow these.
   claudeMainDir: string;
   claudeMainJson: string;
@@ -34,7 +37,7 @@ export type Config = {
 
 export type RunnerJson = {
   port?: number;
-  defaults?: { cwd?: string; accountId?: string };
+  defaults?: { cwd?: string; accountId?: string; model?: string };
   claudePath?: string;
   idleMinutes?: number;
   maxLiveCLIs?: number;
@@ -93,6 +96,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     defaults: {
       cwd: expandHome(json.defaults?.cwd || DEFAULT_CWD),
       accountId: json.defaults?.accountId,
+      model: typeof json.defaults?.model === 'string' && json.defaults.model.trim() ? json.defaults.model.trim() : undefined,
     },
     claudeMainDir: expandHome(env.THREADBARE_CLAUDE_MAIN_DIR || '~/.claude'),
     claudeMainJson: expandHome(env.THREADBARE_CLAUDE_MAIN_JSON || '~/.claude.json'),

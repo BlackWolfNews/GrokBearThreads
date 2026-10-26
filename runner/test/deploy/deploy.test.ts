@@ -632,6 +632,18 @@ test('--rollback after a crash rollback will not go back to the release that cra
     assert.match(r.stderr, new RegExp(`${bad} kept crashing at startup, and launch\\.mjs already went back from it to ${good}`));
     assert.match(r.stderr, /--rollback --force/);
     assert.equal(current(), good);
+    // A later crash rollback (from another release) overwrites rolledBack;
+    // the crashed list still remembers this one, as the deploy that wrote
+    // state after the first crash left it.
+    fs.writeFileSync(file, JSON.stringify({ ...state(), previous: bad, crashed: [bad], rolledBack: { from: 'zz-later', to: good, at: new Date().toISOString() } }));
+    const again = deploy(['--rollback', '--dry-run']);
+    assert.equal(again.status, 1, out(again));
+    assert.match(again.stderr, new RegExp(`The previous release, ${bad}, crashed at startup earlier`));
+    const list = deploy(['--list']);
+    assert.match(list.stdout, new RegExp(`${bad}\\s+previous, crashed at startup`), list.stdout);
+    // Marked good since: it drops out.
+    fs.writeFileSync(file, JSON.stringify({ ...state(), lastGood: bad }));
+    assert.doesNotMatch(deploy(['--list']).stdout, new RegExp(`${bad}.*crashed at startup`));
   } finally {
     fs.writeFileSync(file, saved);
   }

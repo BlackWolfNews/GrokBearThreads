@@ -31,8 +31,10 @@ final class RunnerRestartTests: XCTestCase {
     let now = Date(timeIntervalSince1970: 1_800_000_000)
 
     func testParsesTheRunnersNotices() {
-        XCTAssertEqual(RunnerRestart.parse("The runner will restart when 2 threads finish."), .pending(2))
-        XCTAssertEqual(RunnerRestart.parse("The runner will restart when 1 thread finishes."), .pending(1))
+        XCTAssertEqual(RunnerRestart.parse("The runner will restart when 2 threads finish."), .pending(2, onYou: 0))
+        XCTAssertEqual(RunnerRestart.parse("The runner will restart when 1 thread finishes."), .pending(1, onYou: 0))
+        XCTAssertEqual(RunnerRestart.parse("The runner will restart when 1 thread finishes and you answer 2."), .pending(3, onYou: 2))
+        XCTAssertEqual(RunnerRestart.parse("The runner will restart when you answer 2 threads."), .pending(2, onYou: 2))
         XCTAssertEqual(RunnerRestart.parse("The runner is restarting now."), .restarting)
         XCTAssertEqual(RunnerRestart.parse("The pending runner restart was cancelled."), .cancelled)
         XCTAssertNil(RunnerRestart.parse("Release X kept crashing at startup, so the runner went back to Y."))
@@ -57,6 +59,22 @@ final class RunnerRestartTests: XCTestCase {
         XCTAssertEqual(restart.phase, .restarting(since: now), "losing the connection keeps when it started")
         restart.connected()
         XCTAssertEqual(restart.phase, .none)
+    }
+
+    /// Threads waiting on Mike's answer won't finish by themselves, so the
+    /// line says he's what it waits for (the runner's own sentences).
+    func testThreadsWaitingOnYouAreCountedApart() {
+        var restart = RunnerRestart()
+        XCTAssertTrue(restart.notice("The runner will restart when 1 thread finishes and you answer 2.", now: now))
+        XCTAssertEqual(restart.pendingText, "The runner will restart when 1 thread finishes and you answer 2.")
+        restart.status(PendingRestart(waitingFor: ["a", "b", "c"]), now: now)
+        XCTAssertEqual(restart.pendingText { $0 != "a" }, "The runner will restart when 1 thread finishes and you answer 2.")
+        // Mike answers one; it's running again until it finishes.
+        XCTAssertEqual(restart.pendingText { $0 == "c" }, "The runner will restart when 2 threads finish and you answer 1.")
+        restart.status(PendingRestart(waitingFor: ["c"]), now: now)
+        XCTAssertEqual(restart.pendingText { $0 == "c" }, "The runner will restart when you answer 1 thread.")
+        XCTAssertEqual(RunnerRestart.text(waiting: 2, onYou: 2), "The runner will restart when you answer 2 threads.")
+        XCTAssertEqual(RunnerRestart.text(waiting: 3, onYou: 0), "The runner will restart when 3 threads finish.")
     }
 
     func testOtherNoticesChangeNothing() {
@@ -183,6 +201,7 @@ final class RowDebugTests: XCTestCase {
         turn: t1
         events: 5, 8-9
         runner: 0.1.0+source
+        see: tb events th1 --from 5 --to 9
 
         """)
         let note = try XCTUnwrap(model.item(id: "n:13"))

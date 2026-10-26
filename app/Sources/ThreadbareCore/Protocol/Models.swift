@@ -196,10 +196,14 @@ public struct ThreadSummary: Sendable, Hashable, Codable, Identifiable {
 public struct RunnerDefaults: Sendable, Hashable, Codable {
     public var cwd: String
     public var accountId: String
+    /// The model a new thread gets when it names none (runner.json's
+    /// `defaults.model`; a dev runner sets the cheapest). Nil: the account's.
+    public var model: String?
 
-    public init(cwd: String, accountId: String) {
+    public init(cwd: String, accountId: String, model: String? = nil) {
         self.cwd = cwd
         self.accountId = accountId
+        self.model = model
     }
 }
 

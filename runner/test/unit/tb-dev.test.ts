@@ -125,6 +125,47 @@ test('tb show --tools adds results, diffs and thinking; --last keeps the last tu
   assert.match(formatThread(T, long, { tools: true }), /      line 19\n      \.\.\. 10 more lines\n/);
 });
 
+test('tb show --tools puts each result under its own call when calls run in parallel', () => {
+  const bodies: Record<string, unknown>[] = [
+    { turnId: 't1', type: 'user.message', text: 'Read both', images: [] },
+    { turnId: 't1', type: 'tool.call', itemId: 'a', name: 'Read', kind: 'read', title: 'Read alpha/notes.txt', input: {} },
+    { turnId: 't1', type: 'tool.call', itemId: 'b', name: 'Read', kind: 'read', title: 'Read beta/notes.txt', input: {} },
+    { turnId: 't1', type: 'tool.call', itemId: 'c', name: 'Bash', kind: 'command', title: 'ls', input: { command: 'ls' } },
+    { turnId: 't1', type: 'approval.requested', approvalId: 'ap-ls', itemId: 'c', name: 'Bash', title: 'ls', input: { command: 'ls' }, options: ['allow', 'deny'] },
+    { turnId: 't1', type: 'tool.result', itemId: 'b', ok: true, text: 'beta says 2', truncated: false, images: [] },
+    { turnId: 't1', type: 'tool.result', itemId: 'a', ok: true, text: 'alpha says 1', truncated: false, images: [] },
+    { turnId: 't1', type: 'approval.resolved', approvalId: 'ap-ls', decision: 'allow' },
+    { turnId: 't1', type: 'tool.result', itemId: 'c', ok: true, text: 'alpha\nbeta', truncated: false, images: [] },
+    // A result whose call came before the turns shown stays where it is.
+    { turnId: 't1', type: 'tool.result', itemId: 'gone', ok: true, text: 'orphan', truncated: false, images: [] },
+  ];
+  const evs = bodies.map((b, i) => ({ seq: i + 1, ts: '2026-10-26T10:00:00.000Z', threadId: T.id, ...b }) as unknown as PersistedEvent);
+  assert.equal(
+    formatThread(T, evs, { tools: true }),
+    [
+      ...HEADER,
+      '',
+      'User: Read both',
+      '  - Read alpha/notes.txt',
+      '      alpha says 1',
+      '  - Read beta/notes.txt',
+      '      beta says 2',
+      '  - ls',
+      '  Approval asked (ap-ls): ls',
+      '  Answer: allowed',
+      '      alpha',
+      '      beta',
+      '      orphan',
+      '',
+    ].join('\n'),
+  );
+  // Without --tools the approval still sits under its call.
+  assert.equal(
+    formatThread(T, evs),
+    [...HEADER, '', 'User: Read both', '  - Read alpha/notes.txt', '  - Read beta/notes.txt', '  - ls', '  Approval asked (ap-ls): ls', '  Answer: allowed', ''].join('\n'),
+  );
+});
+
 test('tb status text', () => {
   const now = Date.parse('2026-10-26T12:00:00.000Z');
   const text = formatStatus(
@@ -330,7 +371,11 @@ test('tb status, self, show, export and rpc against a runner', async () => {
     assert.equal(r.code, 0, r.out);
     assert.match(r.out, /Exported 4 events and 0 images to /);
     assert.match(r.out, new RegExp(`--fixtures ${out.replaceAll('.', '\\.')}\n`), 'loads the export alone');
-    assert.match(r.out, /--data-dir \S*tb-mock-[0-9a-f]{8}/);
+    // The debug app comes first, and there's no bare mock runner line to
+    // run in the foreground by mistake.
+    assert.match(r.out, /\n  \S*app\/Tools\/dev-app\.sh start --mock --fixtures /);
+    assert.doesNotMatch(r.out, /server\.mjs/);
+    assert.match(r.out, new RegExp(`tb events ${thread.id.slice(0, 8)} --from N --to M\n`));
     assert.equal(fs.readFileSync(path.join(out, 'events.ndjson'), 'utf8').trim().split('\n').length, 4);
 
     r = await run(h.home, url, ['rpc', 'threads.list', '{"include":["inbox"]}']);

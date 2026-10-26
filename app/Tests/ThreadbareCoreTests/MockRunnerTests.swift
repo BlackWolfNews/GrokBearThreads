@@ -17,9 +17,9 @@ final class MockRunnerTests: XCTestCase {
     override func setUp() async throws {
         let mock = Self.appRoot.appendingPathComponent("Tools/mock-runner")
         guard FileManager.default.fileExists(atPath: mock.appendingPathComponent("node_modules/ws").path) else {
-            throw XCTSkip("Tools/mock-runner has no node_modules; run npm install there")
+            throw try Self.missing("Tools/mock-runner has no node_modules; run npm install there")
         }
-        guard let node = Self.findNode() else { throw XCTSkip("node isn't on PATH") }
+        guard let node = Self.findNode() else { throw try Self.missing("node isn't on PATH") }
         dataDir = FileManager.default.temporaryDirectory.appendingPathComponent("tb-mock-test-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: dataDir, withIntermediateDirectories: true)
         let process = Process()
@@ -44,6 +44,18 @@ final class MockRunnerTests: XCTestCase {
         process?.terminate()
         process?.waitUntilExit()
         if let dataDir { try? FileManager.default.removeItem(at: dataDir) }
+    }
+
+    /// A skip, unless THREADBARE_REQUIRE_MOCK=1 (./check.sh sets it, having
+    /// installed the mock's packages): then a missing mock is a failure,
+    /// since these are the only tests of the real WebSocket client and the
+    /// restart over it, and a quiet skip once let check.sh pass without them.
+    private static func missing(_ why: String) throws -> XCTSkip {
+        if ProcessInfo.processInfo.environment["THREADBARE_REQUIRE_MOCK"] == "1" {
+            XCTFail("\(why) (THREADBARE_REQUIRE_MOCK is set)")
+            throw CancellationError()
+        }
+        return XCTSkip(why)
     }
 
     private static func findNode() -> String? {
@@ -184,7 +196,7 @@ final class MockRunnerTests: XCTestCase {
         for await notification in client.notifications {
             if case .runnerNotice(_, let message) = notification, restart.notice(message, now: Date()) { break }
         }
-        XCTAssertEqual(restart.pendingText, "The runner will restart when 3 threads finish.")
+        XCTAssertEqual(restart.pendingText, "The runner will restart when 1 thread finishes and you answer 2.", "two of the three wait on a card")
         let status = try await client.runnerStatus()
         XCTAssertEqual(Set(status.pendingRestart?.waitingFor ?? []), ["demo_button_colour", "demo_ci_slow", "demo_upload_resume"])
         XCTAssertEqual(status.pendingRestart?.resumeThreadId, "demo_settings_tabs")

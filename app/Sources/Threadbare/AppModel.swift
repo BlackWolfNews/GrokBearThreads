@@ -55,6 +55,12 @@ final class AppModel {
     /// A sidebar row drawn as if the pointer were over it, so the screenshot
     /// run can show the hover buttons without moving the mouse.
     var hoverOverride: String?
+    /// The automation hook's `focus`: a scripted app is never in front, so
+    /// it never marked anything read; with this it acts as if Mike were
+    /// looking at it. Never set outside a scripted debug run.
+    @ObservationIgnored var actsActive = false
+    /// Mike can see the window: the app is in front (or acting as if).
+    var isLooking: Bool { NSApp.isActive || actsActive }
     /// A runner restart that's waiting for threads to finish or under way,
     /// for the quiet banner (see `banner`).
     private(set) var restart = RunnerRestart()
@@ -283,7 +289,7 @@ final class AppModel {
         // A thread a pending restart waits for may just have finished.
         if restart.isPending, previous?.status != thread.status { refreshRunnerStatus() }
         let becameNeedy = thread.needsYou && previous?.needsYou != true
-        let showing = NSApp.isActive && selection == thread.id
+        let showing = isLooking && selection == thread.id
         if becameNeedy && !showing && notificationsEnabled {
             Notifier.post(thread: thread)
         }
@@ -344,7 +350,7 @@ final class AppModel {
         markSeenTask?.cancel()
         markSeenTask = Task {
             try? await Task.sleep(for: .milliseconds(400))
-            guard !Task.isCancelled, let client, let thread = threads[threadId], NSApp.isActive, selection == threadId else { return }
+            guard !Task.isCancelled, let client, let thread = threads[threadId], isLooking, selection == threadId else { return }
             if let updated = try? await client.markSeen(threadId: threadId, seq: thread.lastSeq) {
                 threads[threadId] = updated
             }
@@ -606,7 +612,7 @@ final class AppModel {
             if restarting {
                 return Banner(style: .quiet, icon: nil, text: "The runner is restarting now.")
             }
-            if let text = restart.pendingText {
+            if let text = restart.pendingText(isWaitingOnYou: { self.threads[$0]?.status == .waiting }) {
                 return Banner(style: .quiet, icon: "arrow.clockwise", text: text,
                               detail: restart.waitingForText { self.threads[$0]?.title })
             }
