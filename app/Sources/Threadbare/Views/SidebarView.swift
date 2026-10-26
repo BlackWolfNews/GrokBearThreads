@@ -34,6 +34,12 @@ private struct InboxList: View {
 
     var body: some View {
         let sections = app.sections
+        let titled = [("Needs you", sections.needsYou), ("Running", sections.running), ("Inbox", sections.inbox)]
+        // Rows are identified by section and thread (see SectionRow), so
+        // the arrow keys scroll to that.
+        let rowIDs = Dictionary(uniqueKeysWithValues: titled.flatMap { title, threads in
+            threads.map { ($0.id, SectionRow.id(section: title, thread: $0.id)) }
+        })
         VStack(spacing: 0) {
             SidebarButtonRow(icon: "square.and.pencil", title: "New thread", hint: "⌘N", active: app.selection == nil) {
                 app.newThread()
@@ -41,11 +47,11 @@ private struct InboxList: View {
             .help("New thread (⌘N)")
             .padding(.horizontal, SidebarMetrics.outerInset)
             .padding(.top, 4)
-            ThreadList(order: sections.all.map(\.id)) { select in
+            ThreadList(order: sections.all.map(\.id), scrollID: { rowIDs[$0] ?? $0 }) { select in
                 if app.threadsLoaded {
-                    ThreadSection(title: "Needs you", threads: sections.needsYou, mode: .inbox, select: select)
-                    ThreadSection(title: "Running", threads: sections.running, mode: .inbox, select: select)
-                    ThreadSection(title: "Inbox", threads: sections.inbox, mode: .inbox, select: select, showsWhenEmpty: true)
+                    ThreadSection(title: titled[0].0, threads: sections.needsYou, mode: .inbox, select: select)
+                    ThreadSection(title: titled[1].0, threads: sections.running, mode: .inbox, select: select)
+                    ThreadSection(title: titled[2].0, threads: sections.inbox, mode: .inbox, select: select, showsWhenEmpty: true)
                     if sections.all.isEmpty {
                         EmptyNote(text: "Nothing in the inbox.")
                     }
@@ -67,12 +73,24 @@ private struct ThreadSection: View {
     var body: some View {
         if !threads.isEmpty || showsWhenEmpty {
             SectionHeading(title: title)
-            ForEach(threads) { thread in
-                ThreadRowView(thread: thread, mode: mode) { select(thread.id) }
-                    .id(thread.id)
+            ForEach(threads.map { SectionRow(section: title, thread: $0) }) { row in
+                ThreadRowView(thread: row.thread, mode: mode) { select(row.thread.id) }
             }
         }
     }
+}
+
+/// A row's identity in the lazy stack includes its section. Keyed by the
+/// thread id alone, a thread that moved section kept the row it had drawn
+/// before (it went to Running still showing its time, not "Working"): the
+/// stack moved the row without running its body again. So no plain
+/// `.id(thread.id)` on these rows either; the stack keys rows by that too.
+private struct SectionRow: Identifiable {
+    let section: String
+    let thread: ThreadSummary
+    var id: String { Self.id(section: section, thread: thread.id) }
+
+    static func id(section: String, thread: String) -> String { section + "/" + thread }
 }
 
 private struct SectionHeading: View {
@@ -97,8 +115,10 @@ private struct SectionHeading: View {
 /// as the other agent apps' grey highlight.
 private struct ThreadList<Content: View>: View {
     @Environment(AppModel.self) private var app
-    /// Row ids top to bottom, for the arrow keys.
+    /// Thread ids top to bottom, for the arrow keys.
     let order: [String]
+    /// The id a thread's row has in the stack, to scroll it into view.
+    var scrollID: (String) -> String = { $0 }
     @ViewBuilder let content: (_ select: @escaping (String) -> Void) -> Content
     @FocusState private var focused: Bool
 
@@ -128,7 +148,7 @@ private struct ThreadList<Content: View>: View {
                 }
                 guard let next = SidebarOrder.neighbour(of: app.selection, in: order, step: step), next != app.selection else { return }
                 app.select(next)
-                proxy.scrollTo(next)
+                proxy.scrollTo(scrollID(next))
             }
             .onExitCommand {
                 if app.sidebarMode != .inbox { app.sidebarMode = .inbox }
