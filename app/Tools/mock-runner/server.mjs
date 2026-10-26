@@ -38,7 +38,9 @@ const accounts = [
   { id: 'claude-main', provider: 'claude', title: 'mike@example.com', configDir: '~/.claude' },
   { id: 'claude-3', provider: 'claude', title: 'mike+3@example.com', configDir: '~/Library/Application Support/Token Stats/Accounts/claude-3' },
 ];
-const defaults = { cwd: path.join(process.env.HOME ?? '/tmp', 'dev/me/misc'), accountId: 'claude-main' };
+// The synthetic fixtures live under a made-up /Users/mike, so the default
+// folder does too: the app only shows a folder chip away from the default.
+const defaults = { cwd: '/Users/mike/dev/me/misc', accountId: 'claude-main' };
 
 /** threadId -> { summary, events: [], inProgress: Map(itemId -> {type,text}), timers: [] } */
 const threads = new Map();

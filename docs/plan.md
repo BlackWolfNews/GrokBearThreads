@@ -117,7 +117,8 @@ Quick Ask, Tinker Desk as a second runner, cloud sandboxes.
   an approval or question, or finished and unread), Running, Inbox (the
   rest), then a footer button for Snoozed and Archive views. Each row: title,
   one-line preview, relative time, small status dot, account badge only if
-  it isn't the default. ⌘N new thread, ⌘E archive, ⌘K or ⌘F search.
+  it isn't the default. ⌘N new thread, ⌘E archive. (No inbox search since
+  design pass 1; the Archive view keeps its own.)
 - **Transcript:** view-based `NSTableView` in an `NSViewRepresentable`, one
   row per item: user message, assistant text, reasoning (collapsed), tool
   call with result (one collapsed line with an icon and a short title,

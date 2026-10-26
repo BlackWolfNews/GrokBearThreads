@@ -62,11 +62,13 @@ and the perf run stay away from the real one. Install the runner itself with
   middle of the pane under "What should we work on?", with where the thread
   will start ("Starts in misc on mike") under it, and drops to the bottom
   once you send. It starts in `~/dev/me/misc` on the last account you used.
-  The folder, account, model and "Ask before edits" are small menus on the
-  composer; change them if you want, you never have to. Folder, model and
-  "Ask before edits" apply to that one thread; the next starts from the
-  defaults again. The account sticks.
-- **Composer.** Return sends, Shift-Return adds a line. Paste or drop images;
+  The account, model and "Ask before edits" are small menus on the
+  composer, and "+" > Folder changes the folder; the folder only gets a chip
+  of its own when it isn't the runner's default. Change them if you want,
+  you never have to. Folder, model and "Ask before edits" apply to that one
+  thread; the next starts from the defaults again. The account sticks.
+- **Composer.** Return sends, Shift-Return adds a line. Paste or drop images,
+  or "+" > "Attach images…";
   they go through `media.import` into the runner's `inbox/` and show as
   thumbnails you can remove before sending. Stop (⌘.) while a turn runs. If
   the runner is down, or it doesn't take the message (busy, say), the text
@@ -100,10 +102,21 @@ and the perf run stay away from the real one. Install the runner itself with
 ## How the transcript works
 
 The transcript is a view-based `NSTableView` inside the SwiftUI window, one
-row per item: your message, assistant text, thinking (collapsed), a tool call
-with its result (one line with an icon, click to expand), a diff for
+row per item: your message, assistant text, thinking, a tool call with its
+result (one line with an icon, click to expand), a diff for
 Edit/MultiEdit/Write, an image grid, an approval or question card, a plan, a
 turn footer (duration and cost), a note or an error.
+
+- A run of work inside one turn (thinking, tool calls with their results
+  and diffs, notes) folds into one group row: "Read 2 files, searched
+  twice, ran a command". Click it to open it. A run of one item shows as
+  that item. Messages, cards, plans, images, errors and footers are never
+  folded. The model keeps both lists: `items` (one per item, for copy and
+  export) and `rows` (what the table shows).
+- While a turn runs, the last row is "Working for 12s" with a spinner, and
+  the turn's live group adds the current action after a dot.
+- A turn that edited files ends with an "Edited 3 files" card (name, folder,
+  +N −M); click a file for its diff.
 
 - `ThreadbareCore` turns protocol events into rows (`TranscriptModel`), keeps
   live events in seq order and spots gaps (`ThreadFeed`), splits markdown into
@@ -256,8 +269,14 @@ of a freshly signed build), older page fetch 13 ms and merge 9 ms (median).
 threads and saves window-only captures (`screencapture -l` with the window's
 id, never the full screen). `--only 2` takes just one. Run the mock with
 `--fixtures Tools/mock-runner/fixtures` so only the synthetic threads are
-there. Steps 6 and 7 stream a long synthetic reply (captured while it
-streams, at its end and in its middle) and type into the composer.
+there. Shots 1 to 4 are demo threads (approval card, plan and diffs, an open
+work group, a question), 5 the archive with a row's Unarchive button, 6 a
+long reply streaming (while it streams, at its end and in its middle), 8 a
+running turn and the demo's edits (a group with its diffs open, the changes
+card with a file open), 7 the new-thread composer (typed, with an image,
+with a long draft) and 9 an inbox row's hover buttons.
+`Tools/screenshots.sh <dir> [--only <prefix>] [--appearance light|dark]`
+does all of this in a temp folder with the window kept behind yours.
 
 ## Driving it from a script
 
@@ -268,8 +287,9 @@ accessibility access: select a thread, set the new-thread folder, account,
 model and "Ask before edits", type into the composer and press Return, paste
 an image (through a private pasteboard, never the clipboard), click a button
 in the transcript (Allow, Always allow, Deny, a question's option, Send
-answer), archive, unarchive, snooze, switch the sidebar view, scroll, and
-read the app's state back. It posts no notifications while scripted. Release
+answer), archive, unarchive, snooze, switch the sidebar view, scroll, show
+a row's hover buttons (`hover`), and read the app's state back (`status`,
+and `sidebar` for the inbox's rows by section). It posts no notifications while scripted. Release
 builds don't include it.
 
 ```bash

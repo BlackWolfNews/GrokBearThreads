@@ -157,13 +157,13 @@ enum ScreenshotRunner {
                 print("composer: not found")
             }
         }
-        // 8. The pointer over an inbox row: Snooze and Archive in place of
+        // 9. The pointer over an inbox row: Snooze and Archive in place of
         // its time.
-        if wanted("8") {
+        if wanted("9") {
             app.sidebarMode = .inbox
             await open(app, "demo_upload_resume")
             app.hoverOverride = "demo_settings_tabs"
-            await capture(window, dir.appendingPathComponent("8-sidebar-hover.png"))
+            await capture(window, dir.appendingPathComponent("9-sidebar-hover.png"))
             app.hoverOverride = nil
         }
         NSApp.terminate(nil)

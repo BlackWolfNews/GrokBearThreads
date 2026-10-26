@@ -82,10 +82,6 @@ final class PerfRunner: NSObject {
 
         checkpoint("thread list loaded")
         let debug = CommandLine.arguments.contains("--perf-debug")
-        if let sidebar = SidebarProbe.state(in: window) {
-            log("Sidebar after launch: \(sidebar)")
-            json["sidebarAtLaunch"] = sidebar
-        }
         if debug { debugCells() }
 
         // 1. The biggest thread as the very first thing opened after launch:
@@ -713,31 +709,5 @@ final class Fling: NSObject {
         result.reachedFirst = !session.hasMoreAbove
         goingUp = false
         phaseStart = now
-    }
-}
-
-/// Reads where the sidebar's list is scrolled to (the review found it
-/// starting 60 pt down, hiding the Needs you heading).
-@MainActor
-enum SidebarProbe {
-    static func table(in window: NSWindow) -> NSTableView? {
-        func walk(_ view: NSView) -> NSTableView? {
-            if let table = view as? NSTableView, !(table is TranscriptTableView) { return table }
-            for sub in view.subviews {
-                if let found = walk(sub) { return found }
-            }
-            return nil
-        }
-        return window.contentView.flatMap(walk)
-    }
-
-    static func state(in window: NSWindow) -> String? {
-        guard let table = table(in: window), let scroll = table.enclosingScrollView else { return nil }
-        let clip = scroll.contentView.bounds
-        let visible = table.rows(in: table.visibleRect)
-        let atTop = clip.minY <= -scroll.contentInsets.top + 1
-        return String(format: "%@, scrolled to y %.0f (top is %.0f), rows %d to %d of %d visible",
-                      atTop ? "at the top" : "NOT at the top", clip.minY, -scroll.contentInsets.top,
-                      visible.location, visible.location + visible.length - 1, table.numberOfRows)
     }
 }

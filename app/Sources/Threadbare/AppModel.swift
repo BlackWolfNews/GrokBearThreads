@@ -240,7 +240,6 @@ final class AppModel {
     /// delete`) disappears from every list straight away.
     private func forget(_ threadId: String) {
         threads[threadId] = nil
-        searchResults?.removeAll { $0.id == threadId }
         drafts[threadId] = nil
         if let session = sessions.removeValue(forKey: threadId) { session.unsubscribe() }
         if selection == threadId { selection = nil }

@@ -2,8 +2,9 @@ import AppKit
 import SwiftUI
 import ThreadbareCore
 
-/// The row under the composer's text: "+" for images, the folder, account,
-/// model and permission chips, and send (or Stop) on the right.
+/// The row under the composer's text: "+" (images and the folder), the
+/// folder chip when it isn't the default one, the account, model and
+/// permission chips, and send (or Stop) on the right.
 struct ComposerControls: View {
     @Environment(AppModel.self) private var app
     let thread: ThreadSummary?
@@ -19,13 +20,15 @@ struct ComposerControls: View {
         let model = settings.model
         let ask = settings.ask
         HStack(spacing: 4) {
-            PlusButton(action: onAttach)
+            PlusButton { settings.plusMenu(attach: onAttach) }
                 // Pulls the glyph back so it lines up with the text above.
                 .padding(.leading, -7)
-            ComposerChip(icon: "folder", title: ComposerChips.folder(cwd), help: cwd.abbreviatingHome) {
-                settings.folderMenu()
+            if ComposerChips.showsFolder(cwd, defaultFolder: app.defaults.cwd) {
+                ComposerChip(icon: "folder", title: ComposerChips.folder(cwd), help: cwd.abbreviatingHome) {
+                    settings.folderMenu()
+                }
+                ChipDivider()
             }
-            ChipDivider()
             ComposerChip(icon: "person.crop.circle", title: app.accountShortTitle(account), help: app.accountTitle(account)) {
                 settings.accountMenu()
             }
@@ -63,11 +66,27 @@ private struct ThreadSettings {
     var model: String? { thread == nil ? app.newThreadModel : thread?.model }
     var ask: Bool { thread.map { $0.permissionMode == .ask } ?? app.newThreadAsk }
 
+    /// "+": images, and the folder, which has no chip of its own while it's
+    /// the default.
+    func plusMenu(attach: @escaping () -> Void) -> NSMenu {
+        let menu = NSMenu()
+        let images = ActionMenuItem("Attach images…", handler: attach)
+        images.image = NSImage(systemSymbolName: "photo", accessibilityDescription: nil)
+        menu.addItem(images)
+        let folder = NSMenuItem(title: "Folder", action: nil, keyEquivalent: "")
+        folder.image = NSImage(systemSymbolName: "folder", accessibilityDescription: nil)
+        folder.submenu = folderMenu()
+        menu.addItem(folder)
+        return menu
+    }
+
     func folderMenu() -> NSMenu {
         let menu = NSMenu()
         let current = cwd
         for folder in recentFolders(including: current) {
-            menu.addItem(ActionMenuItem(folder.abbreviatingHome, checked: folder == current) { setCwd(folder) })
+            let item = ActionMenuItem(folder.abbreviatingHome, checked: folder == current) { setCwd(folder) }
+            if !ComposerChips.showsFolder(folder, defaultFolder: app.defaults.cwd) { item.subtitle = "Default" }
+            menu.addItem(item)
         }
         menu.addItem(.separator())
         menu.addItem(ActionMenuItem("Choose…") { chooseFolder() })
@@ -206,12 +225,16 @@ private struct ChipDivider: View {
     }
 }
 
+/// Opens a small menu: "Attach images…" and the folder.
 private struct PlusButton: View {
-    let action: () -> Void
+    let menu: () -> NSMenu
     @State private var hovering = false
+    @State private var anchor = MenuAnchor()
 
     var body: some View {
-        Button(action: action) {
+        Button {
+            anchor.popUp(menu())
+        } label: {
             Image(systemName: "plus")
                 .font(.system(size: 14, weight: .regular))
                 .foregroundStyle(.secondary)
@@ -220,9 +243,10 @@ private struct PlusButton: View {
                 .contentShape(Circle())
         }
         .buttonStyle(.plain)
+        .background(MenuAnchorView(anchor: anchor))
         .onHover { hovering = $0 }
-        .help("Add images")
-        .accessibilityLabel("Add images")
+        .help("Attach images or change the folder")
+        .accessibilityLabel("Attach images or change the folder")
     }
 }
 

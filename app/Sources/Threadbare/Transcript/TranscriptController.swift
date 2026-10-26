@@ -115,11 +115,19 @@ final class TranscriptController: NSObject, NSTableViewDataSource, NSTableViewDe
     /// as threads get long or short, and using the clip view's width made
     /// every switch lay rows out twice (982 then 965 pt).
     var currentTableWidth: CGFloat {
+        max(320, scrollView.frame.width - reservedScrollerWidth)
+    }
+
+    /// The width a legacy scroller takes at the right edge (0 with overlay
+    /// scrollers). The reading column is centred in what's left, so the
+    /// composer below lines itself up by the same amount.
+    var reservedScrollerWidth: CGFloat {
+        let probe = NSSize(width: 1000, height: 1000)
         let content = NSScrollView.contentSize(
-            forFrameSize: scrollView.frame.size, horizontalScrollerClass: nil, verticalScrollerClass: NSScroller.self,
+            forFrameSize: probe, horizontalScrollerClass: nil, verticalScrollerClass: NSScroller.self,
             borderType: scrollView.borderType, controlSize: .regular, scrollerStyle: scrollView.scrollerStyle
         )
-        return max(320, content.width)
+        return probe.width - content.width
     }
 
     /// Full reload: only used when switching threads or after a fresh load.

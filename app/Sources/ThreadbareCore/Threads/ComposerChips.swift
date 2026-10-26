@@ -12,6 +12,21 @@ public enum ComposerChips {
         return (trimmed as NSString).lastPathComponent
     }
 
+    /// Whether the folder chip shows. Nearly every thread starts in the
+    /// runner's default folder (misc), so the chip only appears for one
+    /// that doesn't; "+" > Folder changes it either way.
+    public static func showsFolder(_ path: String, defaultFolder: String) -> Bool {
+        let folder = standardised(path)
+        return folder.isEmpty || folder != standardised(defaultFolder)
+    }
+
+    /// "~/x/" and "/Users/me/x" are the same folder.
+    private static func standardised(_ path: String) -> String {
+        var expanded = (path as NSString).expandingTildeInPath
+        while expanded.count > 1, expanded.hasSuffix("/") { expanded.removeLast() }
+        return expanded
+    }
+
     /// The model chip. No model means the account's own default, whose name
     /// the app doesn't know, so it reads "Default". A menu alias reads as a
     /// word ("Opus") and a full Claude id as family and version

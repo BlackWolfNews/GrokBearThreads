@@ -5,8 +5,8 @@ import UniformTypeIdentifiers
 
 /// The message box: a rounded card the width of the transcript column.
 /// Return sends, Shift-Return adds a line, paste, drop or "+" adds images,
-/// and the row under the text holds the folder, account, model and
-/// permission chips and the send (or Stop) button.
+/// and the row under the text holds the account, model and permission
+/// chips (and the folder's, away from the default) and send (or Stop).
 struct ComposerView: View {
     @Environment(AppModel.self) private var app
     @Environment(\.colorScheme) private var colorScheme
