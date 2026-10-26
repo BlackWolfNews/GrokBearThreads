@@ -121,12 +121,17 @@ AGENTS.md: plain words, no eyebrow or kicker labels, no em dashes.
   transcript column (780 max) and centred under it.
 - Text 14 pt, placeholder "Message" in `.tertiary`, at least two lines tall,
   grows to about 10 lines then scrolls.
-- Controls row: "+" (attach images, opens a file picker) on the left, then
-  quiet menu chips in 12 pt `.secondary`: folder (last path component, full
-  path in the tooltip and menu), account (the part of the email before the
-  @), model ("Default model" becomes the account's model name if known,
-  else "Default"), and the permission chip "Full access" (`lock.open`) or
-  "Ask before edits" (`lock`). Thin 12 pt vertical dividers between chips.
+- Controls row: "+" on the left, then quiet menu chips in 12 pt
+  `.secondary`: account (the part of the email before the @), model
+  ("Default model" becomes the account's model name if known, else
+  "Default"), and the permission chip "Full access" (`lock.open`) or "Ask
+  before edits" (`lock`). Thin 12 pt vertical dividers between chips.
+- **No folder chip for the default folder** (added after Mike asked "is this
+  directory needed?"). A thread still needs a folder, but nearly every one
+  is misc, so the chip only appears when the thread's folder isn't the
+  runner's default (last path component, full path in the tooltip). "+" is
+  a menu: "Attach images…" (the file picker) and "Folder" (recent folders,
+  "Choose…", and the default marked), which is how you change it.
 - Send: a 28 pt circle on the right. With text, filled `.primary` with an
   `arrow.up` in the background colour; empty, `Color.primary.opacity(0.1)`
   with a `.tertiary` arrow. While running it becomes Stop (`stop.fill`) in
