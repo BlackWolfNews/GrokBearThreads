@@ -49,29 +49,39 @@ export function refusal(method: string): Reply {
 // the runner keeps its own rules in the thread's allowRules and answers
 // matching requests itself:
 //   codex:fileChange              any edit in this thread
-//   codex:command:<JSON argv>     a plain command starting with these words
+//   codex:command:<JSON argv>     exactly this command, as the card showed it
+//   codex:prefix:<JSON argv>      a plain command starting with these words,
+//                                 only from Codex's own proposed amendment
 export const FILE_CHANGE_RULE = 'codex:fileChange';
 const COMMAND_RULE = 'codex:command:';
+const PREFIX_RULE = 'codex:prefix:';
 
 export function commandRule(argv: string[]): string {
   return COMMAND_RULE + JSON.stringify(argv);
 }
 
-function ruleArgv(rule: string): string[] | null {
-  if (!rule.startsWith(COMMAND_RULE)) return null;
+export function prefixRule(argv: string[]): string {
+  return PREFIX_RULE + JSON.stringify(argv);
+}
+
+function ruleArgv(rule: string, kind: string): string[] | null {
+  if (!rule.startsWith(kind)) return null;
   try {
-    const v = JSON.parse(rule.slice(COMMAND_RULE.length));
+    const v = JSON.parse(rule.slice(kind.length));
     return Array.isArray(v) && v.length && v.every((x) => typeof x === 'string') ? v : null;
   } catch {
     return null;
   }
 }
 
-// Commands that run other commands given as arguments. A rule starting with
+// Commands that run other commands, or code, given as arguments. A rule for
 // one would allow anything, so none is made or matched.
 const RUNS_OTHERS = new Set([
-  'sh', 'bash', 'zsh', 'fish', 'dash', 'ksh', 'env', 'sudo', 'doas', 'su', 'xargs', 'eval', 'exec', 'command', 'builtin',
+  'sh', 'bash', 'zsh', 'fish', 'dash', 'ksh', 'csh', 'tcsh',
+  'env', 'sudo', 'doas', 'su', 'xargs', 'eval', 'exec', 'command', 'builtin', 'source', '.',
   'nohup', 'time', 'nice', 'timeout', 'watch', 'osascript',
+  'python', 'python3', 'node', 'deno', 'bun', 'ruby', 'perl', 'php', 'lua', 'tclsh',
+  'npx', 'pnpx', 'bunx', 'uvx', 'uv', 'awk', 'gawk', 'sed', 'find', 'make', 'git',
 ]);
 
 // Codex wraps every command as `/bin/zsh -lc '<command>'`. Returns the inner
@@ -83,10 +93,20 @@ export function unwrapShell(command: string): string {
   return words && words.length === 1 ? words[0] : command;
 }
 
+// Characters zsh does something with outside quotes: run other commands
+// (; & | < > newline, backticks, $(...), =(...), <(...)), expand ($var,
+// ${...}, ~user, =cmd, !history), or glob (* ? [ ] and qualifiers in
+// parentheses, # ^ ~ with extendedglob), or group ({ } ( )). = and %
+// count at the start of a word (=cmd, =(...), job specs), where zsh expands
+// them. A command with any of them unquoted never matches a rule: when in
+// doubt, ask.
+const UNQUOTED_SPECIAL = new Set([...';&|<>\n`$(){}*?[]!~#^']);
+const WORD_START_SPECIAL = new Set(['=', '%']);
+
 // Splits a command into words the way a shell would, or returns null if it
-// isn't one plain command: any of ; & | > < or a newline outside quotes, or
-// a backtick or $( outside single quotes (command substitution), means it
-// could run something else, so it never matches a rule.
+// isn't one plain command made only of literal words (see UNQUOTED_SPECIAL).
+// Inside double quotes $, ` and ! still expand, so they count too; inside
+// single quotes nothing does.
 export function shellWords(s: string): string[] | null {
   const words: string[] = [];
   let cur = '';
@@ -112,12 +132,13 @@ export function shellWords(s: string): string[] | null {
           i++;
           break;
         }
-        if (d === '`' || (d === '$' && s[i + 1] === '(')) return null;
-        if (d === '\\' && i + 1 < s.length && '"\\$`\n'.includes(s[i + 1])) {
+        if (d === '`' || d === '$' || d === '!') return null;
+        if (d === '\\' && i + 1 < s.length && '"\\'.includes(s[i + 1])) {
           cur += s[i + 1];
           i += 2;
           continue;
         }
+        if (d === '\\') return null; // \$, \` and the like: refuse rather than reason about it
         cur += d;
         i++;
       }
@@ -126,13 +147,14 @@ export function shellWords(s: string): string[] | null {
       continue;
     }
     if (c === '\\') {
-      if (i + 1 >= s.length || s[i + 1] === '\n') return null;
+      // An escaped ordinary character is fine; anything else, ask.
+      if (i + 1 >= s.length || !/[A-Za-z0-9 ._\/:,+@-]/.test(s[i + 1])) return null;
       cur += s[i + 1];
       inWord = true;
       i += 2;
       continue;
     }
-    if (';&|<>\n`'.includes(c) || (c === '$' && s[i + 1] === '(')) return null;
+    if (UNQUOTED_SPECIAL.has(c) || (!inWord && WORD_START_SPECIAL.has(c))) return null;
     if (c === ' ' || c === '\t') {
       if (inWord) words.push(cur);
       cur = '';
@@ -140,6 +162,7 @@ export function shellWords(s: string): string[] | null {
       i++;
       continue;
     }
+    if (c.charCodeAt(0) < 0x20 || c.charCodeAt(0) === 0x7f) return null;
     cur += c;
     inWord = true;
     i++;
@@ -160,13 +183,20 @@ export function plainArgv(p: CommandExecutionRequestApprovalParams): string[] | 
 }
 
 // The rule "Always allow" makes for a command: Codex's proposed amendment
-// (["touch","b.txt"]) when it's a prefix of the command, else the exact argv.
+// (["npm","test"]) as a prefix when it starts the command and is more than
+// one word, else exactly the command the card showed.
 export function ruleFor(p: CommandExecutionRequestApprovalParams): string | null {
   const argv = plainArgv(p);
   if (!argv) return null;
   const proposed = p.proposedExecpolicyAmendment;
-  if (Array.isArray(proposed) && proposed.length && proposed.every((x) => typeof x === 'string') && startsWith(argv, proposed) && !RUNS_OTHERS.has(proposed[0])) {
-    return commandRule(proposed);
+  if (
+    Array.isArray(proposed) &&
+    proposed.length >= 2 &&
+    proposed.length < argv.length &&
+    proposed.every((x) => typeof x === 'string') &&
+    startsWith(argv, proposed)
+  ) {
+    return prefixRule(proposed);
   }
   return commandRule(argv);
 }
@@ -175,8 +205,10 @@ export function commandAllowed(p: CommandExecutionRequestApprovalParams, rules: 
   const argv = plainArgv(p);
   if (!argv) return false;
   for (const r of rules) {
-    const prefix = ruleArgv(r);
-    if (prefix && startsWith(argv, prefix)) return true;
+    const exact = ruleArgv(r, COMMAND_RULE);
+    if (exact && exact.length === argv.length && startsWith(argv, exact)) return true;
+    const prefix = ruleArgv(r, PREFIX_RULE);
+    if (prefix && prefix.length >= 2 && !RUNS_OTHERS.has(prefix[0].split('/').pop()!) && startsWith(argv, prefix)) return true;
   }
   return false;
 }

@@ -275,6 +275,9 @@ type ActiveTurn = {
   interruptRequested: boolean;
   steerQueue: UserInput[]; // sent before the turn id was known
   steers: Promise<void>[];
+  // turn/completed has arrived and the end is being worked out: a message
+  // sent now can't join this turn, so it waits for the next turn/start.
+  ending: boolean;
   dropped: string[]; // held messages Stop dropped
   openCommands: Set<string>;
 };
@@ -342,6 +345,9 @@ export class CodexSession implements AgentSession {
     this.tools = new CodexTools(deps.toolsFor?.(opts.threadId) ?? [], {
       requestApproval: (req) => this.sink.requestApproval(req),
       cwd: () => this.cwd,
+      mode: () => this.mode,
+      rules: () => this.rules,
+      addRules: (rules) => this.addRules(rules),
     });
     this.proc = new AppServerProcess({
       binary: deps.codexBinary(),
@@ -363,10 +369,7 @@ export class CodexSession implements AgentSession {
       requestApproval: (req) => this.sink.requestApproval(req),
       requestQuestion: (req) => this.sink.requestQuestion(req),
       rules: () => this.rules,
-      addRules: (rules) => {
-        for (const r of rules) this.rules.add(r);
-        this.sink.output({ kind: 'allowRules', rules });
-      },
+      addRules: (rules) => this.addRules(rules),
       note: (text) => this.sink.output({ kind: 'event', event: { type: 'system.note', text } }),
       cwd: () => this.cwd,
       itemPaths: (id) => this.itemPaths.get(id),
@@ -377,6 +380,12 @@ export class CodexSession implements AgentSession {
     this.proc.onRequest = (id, method, params) => this.enqueue(() => this.request(id, method, params));
     this.proc.onOversize = (info) => this.enqueue(() => this.route(OVERSIZED_LINE, info));
     this.proc.onExit = (err) => this.enqueue(() => this.exited(err));
+  }
+
+  // "Always allow" rules, kept for the thread so they outlast a release.
+  private addRules(rules: string[]): void {
+    for (const r of rules) this.rules.add(r);
+    this.sink.output({ kind: 'allowRules', rules });
   }
 
   // ---- Start
@@ -393,7 +402,12 @@ export class CodexSession implements AgentSession {
   private async boot(): Promise<void> {
     const { opts } = this;
     await this.proc.start();
-    if (this.state !== 'starting') return;
+    if (this.state !== 'starting') {
+      // Ended while the process started: finish() may have found nothing to
+      // close yet, so close what started.
+      await this.proc.close();
+      return;
+    }
     const common = {
       cwd: opts.cwd,
       ...(this.model ? { model: this.model } : {}),
@@ -653,10 +667,23 @@ export class CodexSession implements AgentSession {
   // ---- Turns
 
   private newTurn(o: { ids: string[]; own: boolean; codexTurnId?: string }): ActiveTurn {
-    return { ...o, startedAt: this.now(), interruptRequested: false, steerQueue: [], steers: [], dropped: [], openCommands: new Set() };
+    return { ...o, startedAt: this.now(), interruptRequested: false, steerQueue: [], steers: [], ending: false, dropped: [], openCommands: new Set() };
+  }
+
+  // Messages waiting for a turn/start, kept in the order they were sent:
+  // a steer refused late can come back after a message sent behind it.
+  private sendOrder = new WeakMap<UserInput, number>();
+  private sends = 0;
+
+  private hold(input: UserInput): void {
+    const mine = this.sendOrder.get(input) ?? Infinity;
+    const at = this.held.findIndex((m) => (this.sendOrder.get(m) ?? Infinity) > mine);
+    if (at < 0) this.held.push(input);
+    else this.held.splice(at, 0, input);
   }
 
   send(input: UserInput): void {
+    this.sendOrder.set(input, this.sends++);
     switch (this.state) {
       case 'closing':
       case 'closed':
@@ -666,15 +693,20 @@ export class CodexSession implements AgentSession {
         this.held.push(input);
         return;
       case 'ready':
-        // A message during the "is closing" wait or after a refused steer
-        // waits behind the ones already held.
-        if (this.held.length) this.held.push(input);
-        else this.startTurn(input);
+        // Behind any already held, and whatever is held goes now: nothing
+        // may sit in `held` while the session is idle.
+        this.hold(input);
+        this.next();
         return;
       case 'turnPending':
       case 'turnActive': {
         const turn = this.turn!;
         if (turn.interruptRequested) return this.holdBehindInterrupt(input);
+        if (turn.ending) {
+          // Counted in this turn's queuedTurns; next() starts it.
+          this.hold(input);
+          return;
+        }
         if (this.state === 'turnPending' || !turn.codexTurnId) turn.steerQueue.push(input);
         else this.steer(turn, input);
         return;
@@ -828,7 +860,10 @@ export class CodexSession implements AgentSession {
         if (turn.interruptRequested) {
           if (input.id) turn.dropped.push(input.id);
         } else {
-          this.held.push(input);
+          this.hold(input);
+          // Normally the turn's end starts it; if the turn has already
+          // ended, this does.
+          this.enqueue(() => this.next());
         }
       });
     turn.steers.push(done);
@@ -846,7 +881,8 @@ export class CodexSession implements AgentSession {
       return;
     }
     // A steer still in flight is either in this turn or refused and held;
-    // the result has to say which.
+    // the result has to say which. No new steer starts from here on.
+    turn.ending = true;
     await Promise.all(turn.steers);
     // turn/interrupt doesn't stop a running command (spike 10). Stop the
     // ones this turn left open, or end the process, which does.

@@ -346,9 +346,18 @@ export class AppServerProcess {
   // second or two while Token Stats reinstalls it.
   async start(): Promise<InitializeResponse> {
     const deadline = Date.now() + this.t.spawnRetryForMs;
+    const closed = () => new CodexExitedError('codex app-server was closed while it started');
     for (;;) {
+      // close() during the retry wait: never spawn again.
+      if (this.closing) throw closed();
       try {
         const init = await this.startOnce();
+        if (this.closing) {
+          // close() came while this one was starting and found it not yet
+          // spawned (or between attempts): don't leave it running.
+          await this.stop();
+          throw closed();
+        }
         this.started = true;
         return init;
       } catch (e) {
@@ -554,6 +563,10 @@ export class AppServerProcess {
   // closeWaitMs, its process group is killed.
   async close(): Promise<void> {
     this.closing = true;
+    await this.stop();
+  }
+
+  private async stop(): Promise<void> {
     if (this.exited) return;
     this.child?.stdin?.end();
     if (await this.waitExit(this.t.closeWaitMs)) return;
@@ -634,7 +647,15 @@ export class RateLimitTracker {
   }
 
   update(params: unknown): GetAccountRateLimitsResponse {
-    const snap = (params as { rateLimits?: RateLimitSnapshot })?.rateLimits;
+    const p = params as { rateLimits?: RateLimitSnapshot; ordinaryUsageAllowed?: unknown } | undefined;
+    const snap = p?.rateLimits;
+    if (typeof p?.ordinaryUsageAllowed === 'boolean') this.snapshot.ordinaryUsageAllowed = p.ordinaryUsageAllowed;
+    else if (snap && (snap.limitId ?? 'codex') === 'codex' && snap.rateLimitReachedType === null && this.snapshot.ordinaryUsageAllowed === false) {
+      // Updates don't carry ordinaryUsageAllowed. The start-up read's
+      // "false" mustn't outlive a main bucket that now says it isn't at its
+      // limit, or the account would look blocked until the next process.
+      this.snapshot.ordinaryUsageAllowed = null;
+    }
     if (snap && typeof snap === 'object') {
       this.merge(snap);
       this.recent.push({ seq: ++this.seq, snap });
@@ -647,7 +668,9 @@ export class RateLimitTracker {
     const id = (typeof snap.limitId === 'string' && snap.limitId) || idHint || 'codex';
     const prev = this.snapshot.rateLimitsByLimitId[id];
     const next: RateLimitSnapshot = { ...(prev ?? ({} as RateLimitSnapshot)) };
-    for (const [k, v] of Object.entries(snap)) if (v !== null && v !== undefined) next[k] = v;
+    // An explicit null clears what was known: rateLimitReachedType goes back
+    // to null after a reset, and a block must lift with it.
+    for (const [k, v] of Object.entries(snap)) if (v !== undefined) next[k] = v;
     // A bucket that has never reported a window keeps it null rather than
     // undefined, as Codex sends it.
     for (const k of ['limitId', 'limitName', 'primary', 'secondary', 'credits', 'planType', 'rateLimitReachedType'] as const) {
