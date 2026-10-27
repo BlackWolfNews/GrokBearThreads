@@ -274,6 +274,50 @@ test('codex: "Go back" swaps current to the kept previous version with no downlo
   assert.deepEqual(t.hooks.released, [['codex', '0.164.0']]);
 });
 
+test('codex: going back holds the version left behind, so a check doesn\'t put it back; a newer one or force still installs', async () => {
+  const t = setup();
+  t.u.update('codex', { version: '0.164.0' });
+  await t.u.settled();
+  t.u.update('codex', { version: '0.165.0' });
+  await t.u.settled();
+  t.u.update('codex', { version: '0.164.0' }); // Go back
+  await t.u.settled();
+  let c = of(t.u.list(), 'codex');
+  assert.equal(c.installedVersion, '0.164.0');
+  assert.deepEqual(c.hold, { version: '0.165.0', reason: 'you went back from it' });
+  // The hourly check sees 0.165.0 as latest and leaves it.
+  t.u.check('codex');
+  await t.u.settled();
+  c = of(t.u.list(), 'codex');
+  assert.equal(c.installedVersion, '0.164.0');
+  assert.equal(c.status, 'held');
+  // Asked for by name without force: still held, said why.
+  t.u.update('codex', { version: '0.165.0' });
+  await t.u.settled();
+  c = of(t.u.list(), 'codex');
+  assert.equal(c.installedVersion, '0.164.0');
+  assert.match(c.update?.message ?? '', /held back because you went back from it/);
+  // A newer release goes through the gate as usual, and clears the hold.
+  t.latest.codex = '0.166.0';
+  t.u.check('codex');
+  await t.u.settled();
+  c = of(t.u.list(), 'codex');
+  assert.equal(c.installedVersion, '0.166.0');
+  assert.equal(c.hold, undefined);
+  // Going back again and then "Update anyway" reinstalls it.
+  t.u.update('codex', { version: '0.165.0' });
+  await t.u.settled();
+  assert.equal(of(t.u.list(), 'codex').hold?.version, '0.166.0');
+  t.u.update('codex', { version: '0.166.0', force: true });
+  await t.u.settled();
+  c = of(t.u.list(), 'codex');
+  assert.equal(c.installedVersion, '0.166.0');
+  assert.equal(c.hold, undefined);
+  // 0.165.0 was cleaned up once 0.166.0 and 0.164.0 were the two kept, so
+  // going back to it downloaded it again; "Update anyway" used the kept 0.166.0.
+  assert.deepEqual(t.npm.installs(), ['0.164.0', '0.165.0', '0.166.0', '0.165.0']);
+});
+
 test('codex: a failed install leaves no .partial folder and changes nothing', async () => {
   const t = setup();
   t.u.update('codex', { version: '0.164.0' });
@@ -315,7 +359,8 @@ test('codex: an old version is deleted only once nothing runs it', async () => {
   await t.u.settled();
   assert.ok(fs.existsSync(path.join(t.tools, '0.164.0')), 'kept while a process names it');
   psOut = '/usr/bin/other\n';
-  t.u.update('codex', { version: '0.166.0' });
+  // Going back to 0.165.0 held 0.166.0, so this is "Update anyway".
+  t.u.update('codex', { version: '0.166.0', force: true });
   await t.u.settled();
   assert.ok(!fs.existsSync(path.join(t.tools, '0.164.0')), 'gone once nothing uses it');
   assert.deepEqual(fs.readdirSync(t.tools).filter((n) => /^\d/.test(n)).sort(compareVersions), ['0.165.0', '0.166.0']);

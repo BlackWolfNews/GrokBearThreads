@@ -212,7 +212,9 @@ test('tb new on codex-main with a model and effort, tb accounts with and without
 
     const a = tb(h, url, ['accounts']);
     assert.equal(await a.exited, 0);
-    assert.match(a.out(), /^\* codex-main +Codex +Codex · main@example\.com$/m);
+    // The provider once, then the email (not "Codex  Codex · ...").
+    assert.match(a.out(), /^\* codex-main +Codex +main@example\.com$/m);
+    assert.doesNotMatch(a.out(), /Codex · /);
     assert.match(a.out(), /^ {2}claude-3 +Claude +three@example\.com {2}\(Convex work only\)$/m);
   } finally {
     await server.close();
