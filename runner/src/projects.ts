@@ -16,16 +16,23 @@ import crypto from 'node:crypto';
 import type { Clock } from './clock.ts';
 import type { Logger } from './log.ts';
 import type { Notification } from './runner.ts';
-import type { Project, ProjectMaker, ThreadProject, ThreadSummary } from './protocol.ts';
+import type { Project, ProjectIcon, ProjectMaker, ThreadProject, ThreadSummary } from './protocol.ts';
 import { ErrorCode, RpcError } from './protocol.ts';
 import type { ThreadRecord } from './store.ts';
 import type { ProjectFolder } from './patches.ts';
 import { atomicWriteFileSync, isDirectory, readJsonSync } from './fsutil.ts';
 import { expandHome } from './config.ts';
+import { fileHash, removeIcons, storeIcon } from './project-icons.ts';
 
 // What projects.json holds for each: the counts are worked out from the
-// threads when they're sent.
-export type ProjectRecord = Omit<Project, 'threadCount' | 'lastActivityAt'>;
+// threads when they're sent. An icon keeps the hash of the file it was
+// copied from, to tell when that file changes.
+export type ProjectRecord = Omit<Project, 'threadCount' | 'lastActivityAt' | 'icon'> & { icon?: StoredIcon };
+export type StoredIcon = ProjectIcon & { hash?: string };
+
+// What Mike or an agent chooses: a picture, a symbol, or neither to go
+// back to the one the librarian finds.
+export type IconChoice = { path?: string; symbol?: string };
 
 // What the projects need from the runner: its threads, a way to change
 // one (which saves it, sends its summary and says what changed), and the
@@ -77,6 +84,8 @@ export const BRIEF_MAX = 2000;
 
 export class Projects {
   private file: string;
+  // Where projects' icons are copied to (project-icons.ts).
+  readonly iconDir: string;
   private clock: Clock;
   private log: Logger;
   private home: string;
@@ -88,6 +97,7 @@ export class Projects {
 
   constructor(deps: { home: string; clock: Clock; log: Logger; userHome?: string }) {
     this.file = path.join(deps.home, 'projects.json');
+    this.iconDir = path.join(deps.home, 'project-icons');
     this.clock = deps.clock;
     this.log = deps.log;
     this.home = deps.userHome ?? os.homedir();
@@ -301,6 +311,8 @@ export class Projects {
     this.items.set(into.id, kept);
     this.items.delete(from.id);
     this.save();
+    // The kept project's icon stays; with none, the librarian finds one.
+    removeIcons(this.iconDir, from.id);
     for (const t of this.mustHost().threadRecords()) {
       if (!t.projects?.some((m) => m.id === from.id)) continue;
       this.mustHost().editThread(t.id, (r) => {
@@ -335,6 +347,7 @@ export class Projects {
     }
     this.items.delete(rec.id);
     this.save();
+    removeIcons(this.iconDir, rec.id);
     this.log.info('project deleted', { id: rec.id, title: rec.title });
     this.publish();
     return {};
@@ -403,6 +416,49 @@ export class Projects {
     return { joined, left, thread };
   }
 
+  // The librarian's icon, found or picked (librarian.ts). Never over one
+  // Mike or an agent chose: they set it back to automatic first.
+  setFoundIcon(projectId: string, icon: Omit<StoredIcon, 'by' | 'updatedAt'>): Project | undefined {
+    const rec = this.items.get(projectId);
+    if (!rec || (rec.icon && rec.icon.by !== 'librarian')) return undefined;
+    return this.putIcon(rec, { ...icon, by: 'librarian', updatedAt: this.iso() });
+  }
+
+  // Mike's or an agent's choice: a picture file (copied in), an SF Symbol,
+  // or neither for automatic again, which the librarian fills in soon.
+  async chooseIcon(projectId: string, choice: IconChoice, by: ProjectMaker): Promise<Project> {
+    const rec = this.must(projectId);
+    if (this.frozen) throw new RpcError(ErrorCode.other, 'This runner is handing over; projects are changed on the new one.');
+    if (choice.path !== undefined && choice.symbol !== undefined) throw bad('Give a picture or a symbol, not both.');
+    if (choice.path !== undefined) {
+      const src = path.resolve(expandHome(choice.path.trim()));
+      if (!/\.(png|jpe?g|webp|svg|icns|ico|gif|heic|tiff?)$/i.test(src)) throw bad('An icon is a picture: PNG, JPEG, WebP, SVG, ICNS or ICO.');
+      const hash = await fileHash(src);
+      if (!hash) throw bad(`Picture not found (or over 10 MB): ${src}`);
+      const image = await storeIcon(src, this.iconDir, rec.id, hash);
+      return this.putIcon(this.must(rec.id), { image, from: src, hash, by, updatedAt: this.iso() });
+    }
+    if (choice.symbol !== undefined) {
+      const symbol = choice.symbol.trim();
+      if (!/^[a-z0-9]+(\.[a-z0-9]+)*$/.test(symbol) || symbol.length > 80) throw bad(`Not an SF Symbol name: ${choice.symbol}`);
+      removeIcons(this.iconDir, rec.id);
+      return this.putIcon(rec, { symbol, by, updatedAt: this.iso() });
+    }
+    removeIcons(this.iconDir, rec.id);
+    return this.putIcon(rec, undefined);
+  }
+
+  private putIcon(rec: ProjectRecord, icon: StoredIcon | undefined): Project {
+    const next = { ...rec };
+    if (icon) next.icon = icon;
+    else delete next.icon;
+    this.items.set(rec.id, next);
+    this.save();
+    this.log.info('project icon', { id: rec.id, by: icon?.by, image: icon?.image?.path, symbol: icon?.symbol });
+    this.publish();
+    return this.withCounts(next, this.mustHost().threadRecords());
+  }
+
   // ------------------------------------------------------------- helpers
 
   threadsIn(projectId: string): string[] {
@@ -417,7 +473,12 @@ export class Projects {
       count++;
       if (!last || t.lastActivityAt > last) last = t.lastActivityAt;
     }
-    const out: Project = { ...p, threadCount: count };
+    const { icon, ...rest } = p;
+    const out: Project = { ...rest, threadCount: count };
+    if (icon) {
+      const { hash: _hash, ...shown } = icon;
+      out.icon = shown;
+    }
     if (last) out.lastActivityAt = last;
     return out;
   }
@@ -519,6 +580,11 @@ export function projectMethods(projects: Projects): Record<string, (p: Record<st
         archived: bool(p, 'archived'),
       }),
     }),
+    'projects.setIcon': async (p) => {
+      const path = str(p, 'path');
+      const symbol = str(p, 'symbol');
+      return { project: await projects.chooseIcon(reqStr(p, 'projectId'), { path, symbol }, 'mike') };
+    },
     'projects.merge': (p) => ({ project: projects.merge(reqStr(p, 'projectId'), reqStr(p, 'intoId')) }),
     'projects.delete': (p) => projects.delete(reqStr(p, 'projectId')),
     'threads.setProjects': (p) => ({
@@ -556,11 +622,11 @@ function bool(p: Record<string, unknown>, k: string): boolean | undefined {
 
 // The project tools' view of Projects, refusing while `blocked` says why
 // (a draining runner during a handover).
-export function guardProjects<K extends 'list' | 'get' | 'find' | 'create' | 'update' | 'appendNote' | 'changeMembership'>(
+export function guardProjects<K extends 'list' | 'get' | 'find' | 'create' | 'update' | 'appendNote' | 'changeMembership' | 'chooseIcon'>(
   projects: Projects,
   blocked: () => string | undefined,
 ): Pick<Projects, K> {
-  const writes = new Set(['create', 'update', 'appendNote', 'changeMembership']);
+  const writes = new Set(['create', 'update', 'appendNote', 'changeMembership', 'chooseIcon']);
   return new Proxy(projects, {
     get(target, prop, receiver) {
       const v = Reflect.get(target, prop, receiver);

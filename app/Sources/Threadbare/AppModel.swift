@@ -48,12 +48,23 @@ final class AppModel {
     /// account doesn't clear the status, so this is how the limit line
     /// knows the new account isn't the one that ran out.
     @ObservationIgnored private(set) var failedOnAccount: [String: String] = [:]
-    var selection: String?
+    // These four are where the window is; a change to any of them is a
+    // step in the back/forward history (Navigation.swift).
+    var selection: String? {
+        didSet { if selection != oldValue { noteNavigation() } }
+    }
     /// A sub-agent's transcript is showing instead of its thread's. The
     /// thread stays `selection`, so the sidebar keeps its sub-agents listed
     /// and the toolbar still names it.
-    var subagentSelection: SubagentRef?
-    var sidebarMode: SidebarMode = .inbox
+    var subagentSelection: SubagentRef? {
+        didSet { if subagentSelection != oldValue { noteNavigation() } }
+    }
+    var sidebarMode: SidebarMode = .inbox {
+        didSet { if sidebarMode != oldValue { noteNavigation() } }
+    }
+    /// Back and forward (⌘[ and ⌘], or the mouse's side buttons).
+    var history = NavigationHistory<NavigationPlace>()
+    @ObservationIgnored var navigationPending = false
     var archiveQuery = ""
     /// Archived threads are in `threads` (the first list includes them, for
     /// the Archive view's count).
@@ -114,7 +125,9 @@ final class AppModel {
     var librarian: LibrarianStatus?
     /// The project page showing in the detail area instead of the thread.
     /// Selecting a thread (or a new one) closes it.
-    var openProjectId: String?
+    var openProjectId: String? {
+        didSet { if openProjectId != oldValue { noteNavigation() } }
+    }
     /// The runner's settings for the Settings window: nil until
     /// `settings.get` answers, then replaced whole by `settings.updated`.
     var runnerSettings: RunnerSettings?

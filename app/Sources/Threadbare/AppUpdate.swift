@@ -220,7 +220,7 @@ final class AppUpdater {
         restartTimer = Timer.scheduledTimer(withTimeInterval: Self.autoRestartInterval, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.considerAutoRestart(app: AppModel.shared) }
         }
-        inputMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .leftMouseDown, .rightMouseDown, .scrollWheel]) { [weak self] event in
+        inputMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .leftMouseDown, .rightMouseDown, .otherMouseDown, .scrollWheel]) { [weak self] event in
             self?.lastInput = Date()
             return event
         }

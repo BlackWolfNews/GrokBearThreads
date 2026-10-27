@@ -70,7 +70,7 @@ private struct PanelTabs: View {
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                .help("Open in browser")
+                .tip("Open in browser")
             }
         }
         .padding(.horizontal, zoomed(6))
@@ -97,7 +97,7 @@ private struct PanelTabs: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .help(help)
+        .tip(help)
     }
 
     static var height: CGFloat { zoomed(38) }
@@ -185,7 +185,7 @@ struct PatchesList: View {
                         .truncationMode(.middle)
                 }
                 .buttonStyle(.plain)
-                .help("Open the file")
+                .tip("Open the file")
             } else if let folder = patch.folder, patch.projectId != nil {
                 // A built-in from a project folder: which one.
                 Text(folder.abbreviatingHome)
@@ -324,7 +324,7 @@ private struct ImagePanel: View {
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
                 .buttonStyle(.plain)
-                .help("Open Simulator")
+                .tip("Open Simulator")
             } else {
                 PanelNote(text: render?.note ?? "Taking a screenshot…")
             }

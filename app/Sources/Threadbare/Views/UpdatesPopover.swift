@@ -44,8 +44,10 @@ struct UpdatesPopover: View {
                 line(UpdatesText.appLine(side))
                 if side.staged != nil {
                     Button("Restart to Update") { updater.restartToUpdate() }
+                        .tip("Quit and reopen on the new version. Running threads carry on in the runner.")
                 } else if side.failed {
                     Button("Show the Log") { NSWorkspace.shared.open(URL(fileURLWithPath: AppUpdater.logPath)) }
+                        .tip("Open the update build's log, to see why it failed")
                 }
             }
             section("Runner") {
@@ -67,6 +69,7 @@ struct UpdatesPopover: View {
                             }
                             .buttonStyle(.link)
                             .font(.system(size: zoomed(12)))
+                            .tip("Open this thread")
                         }
                     }
                     if let launcher = lines[2] {
@@ -79,6 +82,7 @@ struct UpdatesPopover: View {
                                 .lineLimit(2)
                             Spacer(minLength: 0)
                             Button("Copy") { app.copyToPasteboard(command) }
+                                .tip("Copy the command, to run in Terminal")
                         }
                     }
                 } else {

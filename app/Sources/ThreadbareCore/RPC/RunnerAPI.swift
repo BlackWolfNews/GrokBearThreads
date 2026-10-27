@@ -439,6 +439,15 @@ public extension RPCClient {
         return try await call("projects.update", .object(params), as: ProjectResult.self).project
     }
 
+    /// Mike's icon for a project: a picture file, an SF Symbol, or neither
+    /// for automatic again (the librarian finds one).
+    func setProjectIcon(_ projectId: String, path: String? = nil, symbol: String? = nil) async throws -> Project {
+        var params: [String: JSONValue] = ["projectId": .string(projectId)]
+        if let path { params["path"] = .string(path) }
+        if let symbol { params["symbol"] = .string(symbol) }
+        return try await call("projects.setIcon", .object(params), as: ProjectResult.self).project
+    }
+
     /// Moves `projectId`'s folders and threads into `intoId` and deletes it.
     func mergeProject(_ projectId: String, into intoId: String) async throws -> Project {
         try await call("projects.merge", .object(["projectId": .string(projectId), "intoId": .string(intoId)]), as: ProjectResult.self).project

@@ -83,12 +83,14 @@ struct DetailView: View {
                             Text("Couldn't load this sub-agent.").font(.headline)
                             Text(message).foregroundStyle(.secondary)
                             Button("Try again") { app.selectSubagent(threadId: session.threadId, subagentId: session.subagentId ?? "") }
+                                .tip("Load the sub-agent's transcript again")
                         }
                     } else if let session, case .failed(let message) = session.state {
                         VStack(spacing: zoomed(8)) {
                             Text("Couldn't load this thread.").font(.headline)
                             Text(message).foregroundStyle(.secondary)
                             Button("Try again") { app.select(session.threadId) }
+                                .tip("Load the thread again")
                         }
                     }
                 }
@@ -151,7 +153,7 @@ struct DetailView: View {
                 } label: {
                     Label(app.panelsShown ? "Hide Panels" : "Show Panels", systemImage: "sidebar.trailing")
                 }
-                .help(app.panelsShown ? "Hide the panels" : "Show the panels")
+                .tip(app.panelsShown ? "Hide the panels" : "Show the panels")
                 .disabled(!hasPanels)
                 .opacity(hasPanels ? 1 : 0)
                 .allowsHitTesting(hasPanels)
@@ -173,7 +175,7 @@ struct DetailView: View {
                     Label("More", systemImage: "ellipsis")
                 }
                 .menuIndicator(.hidden)
-                .help("More")
+                .tip("More")
                 .disabled(!hasMenu)
                 // Still built (see above), but out of sight with nothing to
                 // act on: a dimmed "..." alone in an empty new thread's
@@ -221,7 +223,7 @@ private struct HeaderTitle: View {
                     Text("·  Finishing on the previous version")
                         .foregroundStyle(Color(nsColor: Theme.faintText))
                         .layoutPriority(1)
-                        .help("This turn started before the runner updated, so it runs on the previous version. The thread moves to the new one when the turn ends.")
+                        .tip("This turn started before the runner updated, so it runs on the previous version. The thread moves to the new one when the turn ends.")
                 }
                 if let worktree = thread.worktree {
                     // Its own worktree (protocol "Worktrees"): the branch,
@@ -229,7 +231,7 @@ private struct HeaderTitle: View {
                     Text("·  \(worktree.branch)")
                         .foregroundStyle(Color(nsColor: Theme.faintText))
                         .layoutPriority(1)
-                        .help("Works on its own branch in a worktree. tb land, or the Land chip, puts it on main in \(worktree.mainCheckout.abbreviatingHome).")
+                        .tip("Works on its own branch in a worktree. tb land, or the Land chip, puts it on main in \(worktree.mainCheckout.abbreviatingHome).")
                 }
                 if app.projectsSupported, !thread.projects.isEmpty {
                     ProjectChips(thread: thread)
@@ -240,7 +242,7 @@ private struct HeaderTitle: View {
             .font(.system(size: TypeScale.header))
             .lineLimit(1)
             .padding(.leading, zoomed(6))
-            .help(thread.cwd.abbreviatingHome)
+            .tip(thread.cwd.abbreviatingHome)
         } else {
             Color.clear.frame(width: 1, height: 1)
         }
@@ -257,10 +259,13 @@ private struct ProjectHeaderTitle: View {
             Button("Projects") { app.showProjects() }
                 .buttonStyle(.plain)
                 .foregroundStyle(.secondary)
-                .help("Show the Projects view")
+                .tip("Show the Projects view")
                 .layoutPriority(1)
             Text("/")
                 .foregroundStyle(Color(nsColor: Theme.faintText))
+                .layoutPriority(1)
+            ProjectIconView(project: project, size: 14)
+                .accessibilityHidden(true)
                 .layoutPriority(1)
             Text(project.title)
                 .fontWeight(.semibold)
@@ -303,10 +308,15 @@ private struct ProjectChip: View {
 
     var body: some View {
         Button { app.openProjectPage(membership.id) } label: {
-            Text(title)
+            HStack(spacing: zoomed(4)) {
+                ProjectIconView(project: app.project(membership.id), title: title, size: 12)
+                .accessibilityHidden(true)
+                Text(title)
+            }
                 .font(.system(size: TypeScale.detail))
                 .foregroundStyle(hovering ? .primary : .secondary)
-                .padding(.horizontal, zoomed(7))
+                .padding(.leading, zoomed(4))
+                .padding(.trailing, zoomed(7))
                 .padding(.vertical, zoomed(2))
                 .background(Color.primary.opacity(hovering ? 0.08 : 0.05), in: Capsule())
                 .overlay {
@@ -318,7 +328,7 @@ private struct ProjectChip: View {
         }
         .buttonStyle(.plain)
         .onHover { hovering = $0 }
-        .help(guessed ? "The librarian put this thread in \(title). Right-click to keep it there or take it out." : "Open \(title)")
+        .tip(guessed ? "The librarian put this thread in \(title). Right-click to keep it there or take it out." : "Open \(title)")
         .contextMenu {
             Button("Open \(title)") { app.openProjectPage(membership.id) }
             Divider()
@@ -414,7 +424,7 @@ private struct NewThreadNote: View {
             Text("Starts in \(FolderName.short(cwd)) on \(app.accountShortTitle(account))")
                 .font(.system(size: TypeScale.label))
                 .foregroundStyle(Color(nsColor: Theme.faintText))
-                .help("\(cwd.abbreviatingHome) on \(app.accountTitle(account))")
+                .tip("\(cwd.abbreviatingHome) on \(app.accountTitle(account))")
             // Only once there's something to compare: an older runner sends
             // no usage, and one account has nothing to choose between.
             let accounts = UsageSections.build(app.accounts).flatMap(\.accounts)
@@ -489,7 +499,7 @@ private struct AccountRoomCard: View {
         }
         .buttonStyle(.plain)
         .onHover { hovering = $0 }
-        .help(AccountUsageText.tooltip(account, fallback: AccountName.title(account), now: now))
+        .tip(AccountUsageText.tooltip(account, fallback: AccountName.title(account), now: now))
         .accessibilityAddTraits(selected ? .isSelected : [])
     }
 
@@ -529,10 +539,11 @@ struct ConnectionBanner: View {
             if let key = banner.dismissKey {
                 Button("Dismiss") { app.dismissCliFailure(key) }
                     .buttonStyle(.borderless)
+                    .tip("Hide this until it happens again")
             }
         }
         .font(.system(size: TypeScale.label))
-        .help(banner.detail ?? "")
+        .tip(banner.detail ?? "")
         .padding(.horizontal, zoomed(14))
         .padding(.vertical, zoomed(7))
         .overlay(alignment: .bottom) { Rectangle().fill(Color(nsColor: Theme.hairline)).frame(height: 0.5) }
@@ -541,13 +552,15 @@ struct ConnectionBanner: View {
     private func warning(_ banner: Banner) -> some View {
         HStack(spacing: zoomed(8)) {
             Image(systemName: banner.icon ?? "bolt.horizontal").foregroundStyle(.secondary)
-            Text(banner.text).lineLimit(2).help(banner.detail ?? "")
+            Text(banner.text).lineLimit(2).tip(banner.detail ?? "")
             Spacer()
             if banner.showStart {
                 Button("Start runner") { app.startRunner() }
+                    .tip("Start the runner's background service")
             }
             if banner.showRetry {
                 Button("Try again") { app.reconnectNow() }
+                    .tip("Try to reach the runner now rather than waiting")
             }
         }
         .padding(.horizontal, zoomed(14))
@@ -569,12 +582,13 @@ private struct LimitBanner: View {
         if let advice = app.limitAdvice(for: thread) {
             HStack(spacing: zoomed(8)) {
                 Image(systemName: "gauge.with.dots.needle.100percent").foregroundStyle(.red)
-                Text(advice.text).lineLimit(1)
+                Text(advice.text).lineLimit(1).tip(advice.text)
                 Spacer(minLength: zoomed(6))
                 if let target = advice.target {
                     Button(AccountUsageText.switchTitle(target, accounts: app.accounts)) {
                         app.switchAccount(thread.id, to: target.id)
                     }
+                    .tip("Carry on this thread on that account, from where it is")
                 }
             }
             .font(.system(size: TypeScale.label))
@@ -592,10 +606,11 @@ private struct ErrorBanner: View {
         if let message = app.errorMessage {
             HStack {
                 Image(systemName: "exclamationmark.triangle").foregroundStyle(.orange)
-                Text(message).lineLimit(2)
+                Text(message).lineLimit(2).tip(message)
                 Spacer()
                 Button("Dismiss") { app.errorMessage = nil }
                     .buttonStyle(.borderless)
+                    .tip("Hide this message")
             }
             .padding(.horizontal, zoomed(14))
             .padding(.vertical, zoomed(7))
