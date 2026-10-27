@@ -11,7 +11,10 @@ import type { Clock, TimerHandle } from './clock.ts';
 import type { Logger } from './log.ts';
 import { atomicWriteFileSync, readJsonSync } from './fsutil.ts';
 
-export type UsageReading = { windows: UsageWindow[]; blocked?: boolean; email?: string; plan?: string };
+// blockedUntil (ms) says when a block ends when no window does: the runner
+// marks a login blocked when a turn hits its limit (pools, runner.ts) and
+// the reading didn't already say so.
+export type UsageReading = { windows: UsageWindow[]; blocked?: boolean; blockedUntil?: number; email?: string; plan?: string };
 
 // Token Stats hasn't written limits.json for this long: its numbers are old.
 export const STALE_MS = 15 * 60_000;
@@ -227,6 +230,7 @@ export class UsageStore {
         // the block holds until a reading says otherwise.
         const ends = reading.windows.filter((w) => w.remainingPercent < 1 && w.resetsAt).map((w) => Date.parse(w.resetsAt!));
         if (ends.length) next.blockedUntil = Math.max(...ends);
+        else if (reading.blockedUntil !== undefined && Number.isFinite(reading.blockedUntil)) next.blockedUntil = reading.blockedUntil;
       } else delete next.blocked;
     }
     if (reading.email) next.email = reading.email;

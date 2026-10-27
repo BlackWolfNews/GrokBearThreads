@@ -170,7 +170,7 @@ test('moving a Claude thread to codex-main switches provider, resets settings an
 
 test('Claude keeps carrying its transcript on a folder move; it never tries for Codex', async () => {
   const copies: string[] = [];
-  const h = codexHarness({}, { copyTranscript: (_c, _f, to) => (copies.push(to), true) });
+  const h = codexHarness({}, { copyTranscript: (_c, _d, _f, to) => (copies.push(to), true) });
   const other = tmpDir();
   const { thread } = h.runner.create({ text: 'x', accountId: 'claude-3' });
   h.adapter.last.init();

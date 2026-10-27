@@ -333,6 +333,7 @@ export class RpcServer {
           images: optImages(p),
           cwd: optString(p, 'cwd'),
           accountId: optString(p, 'accountId'),
+          poolId: optString(p, 'poolId'),
           model: optString(p, 'model'),
           effort: optEffort(p),
           permissionMode: optMode(p),
@@ -349,6 +350,7 @@ export class RpcServer {
         if (p.title !== undefined) upd.title = reqString(p, 'title');
         if (p.cwd !== undefined) upd.cwd = reqString(p, 'cwd');
         if (p.accountId !== undefined) upd.accountId = reqString(p, 'accountId');
+        if (p.poolId !== undefined) upd.poolId = p.poolId === null ? null : reqString(p, 'poolId');
         if (p.model !== undefined) upd.model = p.model === null ? null : reqString(p, 'model');
         if (p.effort !== undefined) upd.effort = p.effort === null ? null : optEffort(p);
         if (p.permissionMode !== undefined) upd.permissionMode = optMode(p);
@@ -404,6 +406,10 @@ export class RpcServer {
           answers,
         });
       }
+      case 'pools.list':
+        return r.listPools();
+      case 'pools.save':
+        return r.savePools(p.pools);
       case 'media.import':
         return r.importMedia(reqString(p, 'path'));
       case 'panels.render':

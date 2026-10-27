@@ -41,13 +41,28 @@ test('copySessionTranscript copies the jsonl and the subagent folder, using real
   fs.mkdirSync(path.join(src, sid, 'subagents'), { recursive: true });
   fs.writeFileSync(path.join(src, `${sid}.jsonl`), '{"x":1}\n');
   fs.writeFileSync(path.join(src, sid, 'subagents', 'agent-1.jsonl'), '{}\n');
-  assert.equal(copySessionTranscript(config, a, b, sid), true);
+  assert.equal(copySessionTranscript(config, config, a, b, sid), true);
   const dest = path.join(config, 'projects', projectDirName(fs.realpathSync(b)));
   assert.equal(fs.readFileSync(path.join(dest, `${sid}.jsonl`), 'utf8'), '{"x":1}\n');
   assert.ok(fs.existsSync(path.join(dest, sid, 'subagents', 'agent-1.jsonl')));
   assert.ok(fs.existsSync(path.join(src, `${sid}.jsonl`)), 'the original stays');
-  assert.equal(copySessionTranscript(config, a, b, 'not-there'), false);
-  assert.equal(copySessionTranscript(config, a, b, '../evil'), false);
+  assert.equal(copySessionTranscript(config, config, a, b, 'not-there'), false);
+  assert.equal(copySessionTranscript(config, config, a, b, '../evil'), false);
+});
+
+test('copySessionTranscript copies into another login\'s config dir, in the same folder', () => {
+  const from = tmpDir();
+  const to = tmpDir();
+  const cwd = fs.realpathSync(tmpDir());
+  const sid = '0b7a4c1e-1111-2222-3333-777788889999';
+  const src = path.join(from, 'projects', projectDirName(cwd));
+  fs.mkdirSync(src, { recursive: true });
+  fs.writeFileSync(path.join(src, `${sid}.jsonl`), '{"y":2}\n');
+  assert.equal(copySessionTranscript(from, to, cwd, cwd, sid), true);
+  assert.equal(fs.readFileSync(path.join(to, 'projects', projectDirName(cwd), `${sid}.jsonl`), 'utf8'), '{"y":2}\n');
+  assert.ok(fs.existsSync(path.join(src, `${sid}.jsonl`)), 'the original stays');
+  // Nothing in the old login's folder: nothing to carry.
+  assert.equal(copySessionTranscript(to, from, tmpDir(), cwd, sid), false);
 });
 
 // ------------------------------------------------------ moving a thread
@@ -55,8 +70,8 @@ test('copySessionTranscript copies the jsonl and the subagent folder, using real
 test('a folder move on the same account carries the transcript and resumes the same session', async () => {
   const copies: string[][] = [];
   const h = makeHarness(undefined, {}, {
-    copyTranscript: (configDir, from, to, sid) => {
-      copies.push([configDir, from, to, sid]);
+    copyTranscript: (fromConfig, toConfig, from, to, sid) => {
+      copies.push([fromConfig, toConfig, from, to, sid]);
       return true;
     },
   });
@@ -73,31 +88,48 @@ test('a folder move on the same account carries the transcript and resumes the s
   assert.equal(s2.opts.resume, true, 'resumes rather than starting fresh');
   assert.equal(s2.opts.sessionId, s.opts.sessionId);
   assert.equal(s2.sent[0].text, 'Now commit it', 'no handoff note');
-  assert.deepEqual(copies, [['/tmp/three', h.cfg.defaults.cwd, other, s.opts.sessionId]]);
+  assert.deepEqual(copies, [['/tmp/three', '/tmp/three', h.cfg.defaults.cwd, other, s.opts.sessionId]]);
   assert.ok(h.events(thread.id).some((e) => e.type === 'system.note' && /^Moved to /.test(e.text)));
 });
 
-test('a move falls back to the handoff note when the transcript cannot be carried, or the account changes', async () => {
-  for (const how of ['missing', 'account'] as const) {
-    let called = 0;
-    const h = makeHarness(undefined, {}, {
-      copyTranscript: () => {
-        called++;
-        return how !== 'missing';
-      },
-    });
-    const { thread, s } = start(h);
-    s.text('m1:0', 'Done.');
-    s.result();
-    h.runner.update({ threadId: thread.id, cwd: tmpDir(), ...(how === 'account' ? { accountId: 'claude-main' } : {}) });
-    await tick();
-    h.runner.send(thread.id, 'next');
-    await tick();
-    const s2 = h.adapter.last;
-    assert.equal(s2.opts.resume, false, how);
-    assert.match(s2.sent[0].text, /^\[Threadbare handoff\]/, how);
-    assert.equal(called, how === 'missing' ? 1 : 0, `${how}: copy attempts`);
-  }
+test('a move falls back to the handoff note when the transcript cannot be carried', async () => {
+  let called = 0;
+  const h = makeHarness(undefined, {}, {
+    copyTranscript: () => {
+      called++;
+      return false;
+    },
+  });
+  const { thread, s } = start(h);
+  s.text('m1:0', 'Done.');
+  s.result();
+  h.runner.update({ threadId: thread.id, cwd: tmpDir() });
+  await tick();
+  h.runner.send(thread.id, 'next');
+  await tick();
+  const s2 = h.adapter.last;
+  assert.equal(s2.opts.resume, false);
+  assert.match(s2.sent[0].text, /^\[Threadbare handoff\]/);
+  assert.equal(called, 1, 'copy attempts');
+});
+
+test('a move to another Claude login carries the transcript into its config dir and resumes there', async () => {
+  const copies: string[][] = [];
+  const h = makeHarness(undefined, {}, { copyTranscript: (fc, tc, f, t, sid) => (copies.push([fc, tc, f, t, sid]), true) });
+  const { thread, s } = start(h);
+  s.text('m1:0', 'Done.');
+  s.result();
+  h.runner.update({ threadId: thread.id, accountId: 'claude-main' });
+  await tick();
+  h.runner.send(thread.id, 'next');
+  await tick();
+  const s2 = h.adapter.last;
+  assert.equal(s2.opts.account.id, 'claude-main');
+  assert.equal(s2.opts.resume, true);
+  assert.equal(s2.opts.sessionId, s.opts.sessionId);
+  assert.equal(s2.sent[0].text, 'next', 'no handoff note');
+  assert.deepEqual(copies, [['/tmp/three', '/tmp/main', h.cfg.defaults.cwd, h.cfg.defaults.cwd, s.opts.sessionId]]);
+  assert.ok(h.events(thread.id).some((e) => e.type === 'system.note' && e.text === 'Resumed the session on main@example.com, with the whole conversation.'));
 });
 
 test('if the carried transcript will not resume, the fresh session gets the handoff note', async () => {

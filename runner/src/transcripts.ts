@@ -1,8 +1,11 @@
-// Moving a Claude session to another folder. The CLI keeps each session's
-// transcript under <configDir>/projects/<folder as a name>/<sessionId>.jsonl
-// and only looks in the current folder's directory when resuming, so a
-// thread that moves folder can keep its whole conversation by copying the
-// transcript across before the CLI starts there. This leans on how the CLI
+// Moving a Claude session to another folder or login. The CLI keeps each
+// session's transcript under
+// <configDir>/projects/<folder as a name>/<sessionId>.jsonl and only looks
+// in the current folder's directory of its own config dir when resuming, so
+// a thread that moves folder, or moves to another Claude login (a pool
+// move), can keep its whole conversation by copying the transcript across
+// before the CLI starts there. The CLI resumes another login's transcript,
+// thinking signatures and all (test/e2e/pools.e2e.test.ts checks it). This leans on how the CLI
 // lays out its files, which isn't documented, so callers fall back to a
 // short handoff note when it doesn't work.
 import fs from 'node:fs';
@@ -28,17 +31,17 @@ function names(cwd: string): string[] {
 }
 
 // Copies session <sessionId> (its .jsonl and any subagent folder beside it)
-// from <fromCwd>'s project directory to <toCwd>'s. Returns false if the
-// transcript can't be found or copied. Never deletes or overwrites the
-// original, so the session can still be resumed where it was.
-export function copySessionTranscript(configDir: string, fromCwd: string, toCwd: string, sessionId: string): boolean {
+// from <fromCwd>'s project directory under <fromConfigDir> to <toCwd>'s
+// under <toConfigDir> (the same config dir for a folder move). Returns false
+// if the transcript can't be found or copied. Never deletes or overwrites
+// the original, so the session can still be resumed where it was.
+export function copySessionTranscript(fromConfigDir: string, toConfigDir: string, fromCwd: string, toCwd: string, sessionId: string): boolean {
   if (!/^[0-9a-zA-Z-]+$/.test(sessionId)) return false;
-  const projects = path.join(configDir, 'projects');
   const fromDir = names(fromCwd)
-    .map((n) => path.join(projects, n))
+    .map((n) => path.join(fromConfigDir, 'projects', n))
     .find((d) => fs.existsSync(path.join(d, `${sessionId}.jsonl`)));
   if (!fromDir) return false;
-  const toDir = path.join(projects, names(toCwd)[0]);
+  const toDir = path.join(toConfigDir, 'projects', names(toCwd)[0]);
   if (toDir === fromDir) return true;
   try {
     fs.mkdirSync(toDir, { recursive: true });
