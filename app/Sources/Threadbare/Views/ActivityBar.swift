@@ -96,6 +96,9 @@ struct ActivityButton: View {
     var badge: Int? = nil
     /// Accent, unlike the counts: it means something needs Mike.
     var dot: Bool = false
+    /// The same dot in grey, when `dot` isn't set: something's going on
+    /// that sorts itself out, like an update on its way.
+    var quietDot: Bool = false
     let active: Bool
     let action: () -> Void
     @State private var hovering = false
@@ -121,9 +124,9 @@ struct ActivityButton: View {
                             .overlay(Capsule().strokeBorder(.separator, lineWidth: 0.5))
                             .offset(x: zoomed(3), y: -zoomed(2))
                             .allowsHitTesting(false)
-                    } else if dot {
+                    } else if dot || quietDot {
                         Circle()
-                            .fill(Color.accentColor)
+                            .fill(dot ? AnyShapeStyle(Color.accentColor) : AnyShapeStyle(.secondary))
                             .frame(width: zoomed(7), height: zoomed(7))
                             .overlay(Circle().strokeBorder(Color(nsColor: .windowBackgroundColor), lineWidth: 1.5))
                             .offset(x: zoomed(1), y: zoomed(1))
