@@ -7,6 +7,18 @@ import ThreadbareCore
 /// rendered once and cached by its text, so a streaming message only
 /// re-renders its last, still-open block. Safe to call off the main thread.
 enum MarkdownRenderer {
+    /// A bare absolute path parses as a URL without a scheme, which looks
+    /// clickable but cannot be opened. Give the transcript's file opener a
+    /// file URL, keeping URL escaping and HTML fragments intact.
+    private static func linkURL(_ destination: String) -> URL? {
+        guard var components = URLComponents(string: destination) else { return nil }
+        if components.scheme == nil, destination.hasPrefix("/") {
+            components.scheme = "file"
+            components.host = ""
+        }
+        return components.url
+    }
+
     struct Rendered {
         let string: NSAttributedString
         let blocks: [String]
@@ -458,11 +470,11 @@ enum MarkdownRenderer {
                 }
             case let link as Markdown.Link:
                 var inner = context
-                inner.link = link.destination.flatMap(URL.init(string:))
+                inner.link = link.destination.flatMap(MarkdownRenderer.linkURL)
                 inlines(link.children, inner)
             case let image as Markdown.Image:
                 var inner = context
-                inner.link = image.source.flatMap(URL.init(string:))
+                inner.link = image.source.flatMap(MarkdownRenderer.linkURL)
                 let alt = image.plainText.isEmpty ? (image.source ?? "image") : image.plainText
                 append("[\(alt)]", inner)
             case is SoftBreak:
