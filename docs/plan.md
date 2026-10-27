@@ -95,8 +95,8 @@ Quick Ask, Tinker Desk as a second runner, cloud sandboxes.
     immediately on snooze/archive, end the input so the CLI exits. The next
     send starts a new `query()` with `resume`. Never run two live queries on
     one session. Kill the CLI's process group if the runner exits.
-  - Title: first line of the first message, trimmed to 60 characters, until
-    a later step asks a small model for a better one.
+  - Title: first line of the first message, trimmed to 60 characters,
+    then a small model's title once there's an OpenRouter key (src/models/).
 - **Adapter interface** so Codex can be added without touching the rest.
 - **Startup:** threads that were live when the runner stopped become
   `stopped`; any approval that was pending is marked expired.

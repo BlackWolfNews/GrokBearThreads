@@ -168,6 +168,7 @@ export function testConfig(home: string, extra: Partial<Config> = {}): Config {
     cliUpdates: { claude: 'off', codex: 'off', checkMinutes: 60, keepCodexVersions: 2 },
     accountNotes: {},
     followMain: false,
+    models: { dailyBudgetUsd: 1, privateFolders: [] },
     ...extra,
   };
 }

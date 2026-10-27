@@ -148,6 +148,15 @@ const clis = [
     hold: { version: '0.165.0', reason: 'the app-server protocol changed', missing: ['thread/backgroundTerminals/list'] },
   },
 ];
+// The Settings window's settings, as a runner with a key set and a little
+// spent would have them, so a shot of it has something in every row.
+const settings = {
+  defaultCwd: defaults.cwd, idleMinutes: 30, maxLiveCLIs: 6, followMain: true,
+  models: {
+    openRouterKey: { set: true, hint: 'f3a9' }, dailyBudgetUsd: 1, spentTodayUsd: 0.0123, spentMonthUsd: 0.4187,
+    privateFolders: ['~/dev/clients/acme'],
+  },
+};
 
 /** threadId -> { summary, events: [], inProgress: Map(itemId -> {type,text}), timers: [] } */
 const threads = new Map();
@@ -468,6 +477,50 @@ async function dispatch(client, method, p) {
     case 'schedules.preview': {
       const when = readWhen(p, Math.min(20, p.count ?? 5));
       return { whenText: when.whenText, runs: when.runs };
+    }
+    // Settings (docs/protocol.md, "Settings and models"), kept in memory.
+    // Like the real runner, the key itself is never kept or sent back:
+    // only whether one is set and its last 4 characters.
+    case 'settings.get':
+      return { settings };
+    case 'settings.update': {
+      if (p.defaultCwd !== undefined) {
+        if (typeof p.defaultCwd !== 'string' || !p.defaultCwd.trim()) throw rpcError(-32602, 'defaultCwd must be a folder');
+        settings.defaultCwd = p.defaultCwd;
+        defaults.cwd = p.defaultCwd;
+      }
+      if (p.idleMinutes !== undefined) {
+        if (!Number.isInteger(p.idleMinutes) || p.idleMinutes < 1) throw rpcError(-32602, 'idleMinutes must be a whole number of minutes, at least 1');
+        settings.idleMinutes = p.idleMinutes;
+      }
+      if (p.maxLiveCLIs !== undefined) {
+        if (!Number.isInteger(p.maxLiveCLIs) || p.maxLiveCLIs < 1 || p.maxLiveCLIs > 20) throw rpcError(-32602, 'maxLiveCLIs must be 1 to 20');
+        settings.maxLiveCLIs = p.maxLiveCLIs;
+      }
+      if (p.followMain !== undefined) settings.followMain = Boolean(p.followMain);
+      const m = p.models ?? {};
+      if (m.dailyBudgetUsd !== undefined) {
+        if (typeof m.dailyBudgetUsd !== 'number' || m.dailyBudgetUsd < 0 || m.dailyBudgetUsd > 100) throw rpcError(-32602, 'The daily budget must be between $0 and $100');
+        settings.models.dailyBudgetUsd = m.dailyBudgetUsd;
+      }
+      if (m.privateFolders !== undefined) {
+        if (!Array.isArray(m.privateFolders) || m.privateFolders.some((f) => typeof f !== 'string')) throw rpcError(-32602, 'privateFolders must be a list of folders');
+        settings.models.privateFolders = m.privateFolders;
+      }
+      broadcastSettings();
+      return { settings };
+    }
+    case 'settings.setKey': {
+      if (p.provider !== 'openrouter') throw rpcError(-32602, 'provider must be "openrouter"');
+      if (p.key === null) {
+        settings.models.openRouterKey = { set: false };
+      } else {
+        const key = typeof p.key === 'string' ? p.key.trim() : '';
+        if (key.length < 20 || /\s/.test(key)) throw rpcError(-32602, "That doesn't look like an OpenRouter key");
+        settings.models.openRouterKey = { set: true, hint: key.slice(-4) };
+      }
+      broadcastSettings();
+      return { settings };
     }
     // Mock-only helpers for perf runs, demos and screenshots.
     case 'mock.restartPending': {
@@ -930,6 +983,11 @@ function needSchedule(id) {
 function sortedSchedules() {
   const rank = (x) => (x.nextRunAt ? Date.parse(x.nextRunAt) : Infinity);
   return [...schedules].sort((a, b) => rank(a) - rank(b));
+}
+
+function broadcastSettings() {
+  const text = JSON.stringify({ jsonrpc: '2.0', method: 'settings.updated', params: { settings } });
+  for (const client of clients) if (client.authed) client.ws.send(text);
 }
 
 function broadcastSchedules() {

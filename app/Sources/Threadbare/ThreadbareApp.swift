@@ -104,6 +104,11 @@ struct ThreadbareApp: App {
                     .disabled(!app.schedulesSupported)
             }
         }
+        // ⌘, (the app menu's Settings…): the runner's settings.
+        Settings {
+            SettingsView()
+                .environment(app)
+        }
     }
 }
 

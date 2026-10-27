@@ -981,7 +981,7 @@ All edits to `runner.ts`, `main.ts`, `rpc.ts`, `store.ts`, `threadbare-mcp.ts`, 
 **`tb` and the dev runner**
 
 - `tb new --account codex-main --model gpt-6-luna --effort low` works.
-- `tb models <account>` prints that account's `models` and default from `hello`.
+- `tb accounts <account>` prints that account's `models` and default from `hello` (`tb models` is main's OpenRouter command).
 - `tb self` and `formatSelf` (`tb-dev.ts`) show the provider.
 - `dev-runner.sh` writes `defaults.models.codex: "gpt-6-luna"`, `defaults.efforts.codex: "low"` and `cliUpdates` off into a new data dir, next to today's claude-3 and `claude-haiku-5-5`. Dev runners use the fallback npm copy.
 
@@ -1028,7 +1028,7 @@ Calls made where the section didn't say, or said otherwise:
 - **Archive** runs only when a thread becomes archived (not on a repeat), after the session's release settles; delete after its hard stop.
 - **`accounts.updated`** sends nothing when the list is the same as the last one sent; the 10 s rescan uses that to notice a change even without D's `onChange`.
 - **A real Codex conversation on a dev runner** (27 Oct, luna at low effort, Mike's MCP servers and memories off through `codexArgs`): a text turn, `ls` plus a file written by the shell, an `apply_patch` touching two files (one tool row, two `edit.diff`s), a same-account folder move (the next answer followed the new folder's `AGENTS.md`, same process), a message steered in during `sleep 6` (one runner turn, one `turn.completed`), archive (released, rollout moved to `archived_sessions`), unarchive and resume (context kept, Codex unarchived it), and a `list_threads` dynamic tool call after the resume. Summaries had `modelInUse`, `effortInUse`, `contextTokens` and `contextWindow` 258,400; `thread.json` kept `cliVersion` 0.164.0. The thread was deleted with `thread/delete` afterwards.
-- **`tb accounts`** shows the provider and note; **`tb models <account> [--json]`** is in `tb-dev.ts`'s `formatModels`. `check.sh --e2e` runs `codex*.e2e.test.ts` as its own step after Claude's.
+- **`tb accounts`** shows the provider and note; **`tb accounts <account> [--json]`** is in `tb-dev.ts`'s `formatModels`. `check.sh --e2e` runs `codex*.e2e.test.ts` as its own step after Claude's.
 
 ## D. Accounts and usage (`accounts.ts`, `usage.ts`)
 

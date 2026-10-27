@@ -9,7 +9,7 @@
 #   Tools/dev-app.sh start [--mock [--fixtures DIR]...] [--home DIR]
 #                          [--appearance light|dark] [--size WxH] [--id NAME]
 #   Tools/dev-app.sh do '<json>'... [--timeout S]
-#   Tools/dev-app.sh shot <file.png> [--sheet]   (--sheet: the sheet over it)
+#   Tools/dev-app.sh shot <file.png> [--sheet|--settings]   (the sheet over it, or the Settings window)
 #   Tools/dev-app.sh dump [--json]
 #   Tools/dev-app.sh rebuild
 #   Tools/dev-app.sh log [-f] [-n N] [--mock | --automation]
@@ -534,12 +534,14 @@ cmd_do() {
 }
 
 cmd_shot() {
-  local file="" sheet=false
+  local file="" sheet=false settings=false
   while [ $# -gt 0 ]; do
     case "$1" in
       --id) ID="${2:?--id needs an id}"; shift ;;
       # The sheet over the window (the schedule editor) instead of the window.
       --sheet) sheet=true ;;
+      # The Settings window (open it first with do '{"cmd":"settings"}').
+      --settings) settings=true ;;
       *) [ -z "$file" ] || die "shot takes one file"; file="$1" ;;
     esac
     shift
@@ -552,7 +554,7 @@ cmd_shot() {
   # bundle has no Screen Recording permission, so from inside the app it
   # always fell back to the app's own drawing (and macOS may ask Mike).
   local line wid
-  line="$(send "{\"cmd\":\"window\",\"sheet\":$sheet}")" || exit 1
+  line="$(send "{\"cmd\":\"window\",\"sheet\":$sheet,\"settings\":$settings}")" || exit 1
   wid="$(printf '%s' "$line" | awk '{ print $3 }')"
   mkdir -p "$(dirname "$file")"
   rm -f "$file"
@@ -566,7 +568,7 @@ cmd_shot() {
   # access prompt in front of Mike.
   local drawn="$I_DIR/shot.png"
   rm -f "$drawn"
-  send "{\"cmd\":\"screenshot\",\"inProcess\":true,\"sheet\":$sheet,\"path\":$(json_string "$drawn")}" >/dev/null || exit 1
+  send "{\"cmd\":\"screenshot\",\"inProcess\":true,\"sheet\":$sheet,\"settings\":$settings,\"path\":$(json_string "$drawn")}" >/dev/null || exit 1
   mv "$drawn" "$file"
   echo "screenshot ok $file (in-process)"
   echo "dev-app: screencapture gave no image (the screen is locked or asleep, or this shell has no Screen Recording permission), so that's the app's own drawing: the sidebar's glass is a flat fill and the traffic lights are approximate." >&2

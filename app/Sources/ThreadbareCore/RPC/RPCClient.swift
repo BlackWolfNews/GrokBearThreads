@@ -35,6 +35,9 @@ public enum RPCNotification: Sendable {
     case clisUpdated([CliStatus])
     /// The whole schedule list, after any change.
     case schedulesUpdated([Schedule])
+    /// The runner's settings after any change (a setting, the key, or the
+    /// spend going up).
+    case settingsUpdated(RunnerSettings)
     case runnerNotice(level: String, message: String)
     case other(method: String)
 }
@@ -228,6 +231,10 @@ public final class RPCClient: Sendable {
             guard let params = try? decoder.decode(RPCNotificationEnvelope<SchedulesResult>.self, from: data).params
             else { return nil }
             return .schedulesUpdated(params.schedules)
+        case "settings.updated":
+            guard let params = try? decoder.decode(RPCNotificationEnvelope<SettingsResult>.self, from: data).params
+            else { return nil }
+            return .settingsUpdated(params.settings)
         case "runner.notice":
             guard let params = try? decoder.decode(RPCNotificationEnvelope<RunnerNoticeParams>.self, from: data).params
             else { return nil }

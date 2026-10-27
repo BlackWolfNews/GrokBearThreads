@@ -68,6 +68,9 @@ export type Config = {
   // (src/update.ts). Off with followMain: false in runner.json or
   // THREADBARE_FOLLOW_MAIN=0.
   followMain: boolean;
+  // The runner's own model calls (src/models/): a daily cap in dollars (0
+  // turns them off) and folders whose threads are never sent.
+  models: { dailyBudgetUsd: number; privateFolders: string[] };
 };
 
 export type RunnerJson = {
@@ -91,6 +94,7 @@ export type RunnerJson = {
   cliUpdates?: Partial<CliUpdatesConfig>;
   accountNotes?: Record<string, string>;
   followMain?: boolean;
+  models?: { dailyBudgetUsd?: number; privateFolders?: string[] };
 };
 
 export function defaultHome(): string {
@@ -159,6 +163,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
       env.THREADBARE_ACCOUNTS_DIR || '~/Library/Application Support/Token Stats/Accounts',
     ),
     followMain: env.THREADBARE_FOLLOW_MAIN ? env.THREADBARE_FOLLOW_MAIN !== '0' : json.followMain !== false,
+    models: modelSettingsFrom(json),
     ...(codexPath ? { codexPath: expandHome(codexPath) } : {}),
     codexArgs: Array.isArray(json.codexArgs) ? json.codexArgs.filter((a): a is string => typeof a === 'string') : [],
     codexMainDir: expandHome(env.THREADBARE_CODEX_MAIN_DIR || '~/.codex'),
@@ -205,6 +210,17 @@ function cliUpdatesConfig(raw: Partial<CliUpdatesConfig> | undefined, envValue: 
     checkMinutes: count(raw?.checkMinutes, DEFAULT_CLI_UPDATES.checkMinutes, 1),
     // Fewer than 2 would leave nothing for "Go back".
     keepCodexVersions: count(raw?.keepCodexVersions, DEFAULT_CLI_UPDATES.keepCodexVersions, 2),
+  };
+}
+
+export const DEFAULT_DAILY_BUDGET_USD = 1;
+
+export function modelSettingsFrom(json: RunnerJson): Config['models'] {
+  const budget = json.models?.dailyBudgetUsd;
+  const folders = json.models?.privateFolders;
+  return {
+    dailyBudgetUsd: typeof budget === 'number' && Number.isFinite(budget) && budget >= 0 ? budget : DEFAULT_DAILY_BUDGET_USD,
+    privateFolders: Array.isArray(folders) ? folders.filter((f): f is string => typeof f === 'string' && f.trim() !== '') : [],
   };
 }
 

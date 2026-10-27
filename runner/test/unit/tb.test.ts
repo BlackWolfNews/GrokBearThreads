@@ -178,7 +178,7 @@ test('tb list says what a thread is still running in the background', () => {
   assert.equal(backgroundFlag([{ kind: 'other', description: 'x', finished: true }]), '1 just finished');
 });
 
-test('tb new on codex-main with a model and effort, tb models and tb accounts', async () => {
+test('tb new on codex-main with a model and effort, tb accounts with and without an account', async () => {
   const h = makeHarness(undefined, {}, { accounts: new FakeAccounts(withCodex().map((a) => (a.id === 'claude-3' ? { ...a, note: 'Convex work only' } : a))) });
   const server = new RpcServer({ host: '127.0.0.1', port: 0, token: readToken(h.home), runner: h.runner, log: nullLogger });
   const { port } = await server.listen();
@@ -194,19 +194,19 @@ test('tb new on codex-main with a model and effort, tb models and tb accounts', 
     assert.equal(h.codex.last.opts.model, 'gpt-6-luna');
     assert.match(formatSelf(t), /Account: codex-main \(Codex\), model gpt-6-luna/);
 
-    const m = tb(h, url, ['models', 'codex-main']);
+    const m = tb(h, url, ['accounts', 'codex-main']);
     assert.equal(await m.exited, 0, m.out());
     assert.match(m.out(), /^codex-main \(Codex\)/);
     assert.match(m.out(), /\* gpt-6\.1-sol +GPT-6\.1-Sol +efforts: low, medium, high, xhigh, max, ultra \(own level low\)/);
     assert.match(m.out(), /\n {2}gpt-6-luna +GPT-6-Luna/);
     assert.match(m.out(), /Account default: gpt-6\.1-sol/);
-    const j = tb(h, url, ['models', 'codex-main', '--json']);
+    const j = tb(h, url, ['accounts', 'codex-main', '--json']);
     assert.equal(await j.exited, 0);
     assert.equal(JSON.parse(j.out()).models.length, 2);
-    const none = tb(h, url, ['models', 'claude-3']);
+    const none = tb(h, url, ['accounts', 'claude-3']);
     assert.equal(await none.exited, 0);
     assert.match(none.out(), /hasn't been asked for its models yet/);
-    const missing = tb(h, url, ['models', 'nope']);
+    const missing = tb(h, url, ['accounts', 'nope']);
     assert.equal(await missing.exited, 1);
     assert.match(missing.out(), /No account nope/);
 

@@ -85,6 +85,17 @@ final class AppModel {
     /// The runner knows about schedules: an older one answers
     /// `schedules.list` with -32601, and then the sidebar has no Scheduled row.
     var schedulesSupported = false
+    /// The runner's settings for the Settings window: nil until
+    /// `settings.get` answers, then replaced whole by `settings.updated`.
+    var runnerSettings: RunnerSettings?
+    /// The runner is from before settings (it answers -32601).
+    var settingsUnsupported = false
+    /// Why the last change in the Settings window didn't take, shown there.
+    var settingsError: String?
+    var settingsTab: SettingsTab = .general
+    /// Bumped to open the Settings window from the automation (RootView
+    /// opens it, as ⌘, does).
+    var settingsRequest = 0
     /// The schedule editor sheet, when it's open (ScheduleEditor).
     var scheduleEditor: ScheduleEditorState?
     /// A sidebar row drawn as if the pointer were over it, so the screenshot
@@ -284,6 +295,7 @@ final class AppModel {
                 archiveLoaded = true
                 onThreadsLoaded?()
                 loadSchedules()
+                loadSettings()
                 for session in sessions.values where session.state == .loaded {
                     await session.subscribe()
                 }
@@ -346,6 +358,8 @@ final class AppModel {
             case .schedulesUpdated(let list):
                 schedules = list
                 schedulesSupported = true
+            case .settingsUpdated(let settings):
+                receive(settings)
             case .runnerNotice(let level, let message):
                 notice(level: level, message)
             case .other:

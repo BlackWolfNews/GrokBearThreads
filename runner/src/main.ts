@@ -22,6 +22,8 @@ import { RpcServer } from './rpc.ts';
 import { realClock } from './clock.ts';
 import { acquireLock } from './lock.ts';
 import { removeTempFiles } from './fsutil.ts';
+import { Models } from './models/index.ts';
+import { SettingsService, modelMethods, settingsMethods } from './settings.ts';
 import { ALWAYS_ASK_TOOLS, SERVER_NAME, buildThreadbareTools, threadbareMcpServer } from './threadbare-mcp.ts';
 
 // Tells launch.mjs this runner calls its listening() hook (release.ts), so
@@ -103,6 +105,17 @@ async function main(): Promise<void> {
     toolsFor: (threadId) => buildThreadbareTools(runner, threadId, Date.now, scheduler),
     onNotice: (text) => runner.notice('warning', text),
   });
+  // The runner's own small-model calls. Reads the key from secrets/ on
+  // each call, so a key written by hand works without a restart.
+  let settings!: SettingsService;
+  const models = new Models({
+    home: cfg.home,
+    clock: realClock,
+    log,
+    settings: () => cfg.models,
+    notice: (level, message) => runner.notice(level, message),
+    onSpend: () => settings.spendChanged(),
+  });
   runner = new Runner({
     config: cfg,
     store,
@@ -111,7 +124,9 @@ async function main(): Promise<void> {
     usage,
     clock: realClock,
     log,
+    models,
   });
+  settings = new SettingsService({ config: cfg, models, publish: (n) => runner.publish(n), clock: realClock });
   runner.start();
   // After the threads are loaded, so a schedule that came due while the
   // runner was stopped finds its thread.
@@ -152,7 +167,7 @@ async function main(): Promise<void> {
   });
 
   runner.attachClis(updates);
-  const methods = { ...restartMethods(restarter), ...scheduleMethods(scheduler) };
+  const methods = { ...restartMethods(restarter), ...scheduleMethods(scheduler), ...settingsMethods(settings), ...modelMethods(models) };
   // runner.status carries the CLI statuses too (protocol, "runner.status").
   const restartStatus = methods['runner.status'];
   methods['runner.status'] = (p) => ({ ...(restartStatus(p) as Record<string, unknown>), clis: updates.list() });
@@ -214,6 +229,7 @@ async function main(): Promise<void> {
     scheduler.stop();
     usage.stop();
     updates.stop();
+    settings.stop();
     try {
       await runner.shutdown();
       await server.close().catch(() => {});

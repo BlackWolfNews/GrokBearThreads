@@ -235,6 +235,24 @@ type Schedule = {
     note?: string       // why it was skipped or failed
   }
 }
+
+// The runner's settings, as the Settings window shows them. Everything here
+// is kept in runner.json except the key, which only the runner ever reads.
+type Settings = {
+  defaultCwd: string    // where a new thread starts when it names no folder
+  idleMinutes: number   // a CLI with no turn for this long is released
+  maxLiveCLIs: number   // most CLIs kept live at once
+  followMain: boolean   // build and restart onto main by itself; a change
+                        // takes effect when the runner next restarts
+  models: {
+    openRouterKey: { set: boolean, hint?: string } // hint: the key's last 4 characters
+    dailyBudgetUsd: number   // 1 by default; 0 turns model calls off
+    spentTodayUsd: number    // since local midnight
+    spentMonthUsd: number    // since the 1st, local time
+    privateFolders: string[] // folders (and everything under them) whose
+                             // text is never sent; "~/" paths as written
+  }
+}
 ```
 
 ## Events
@@ -310,6 +328,10 @@ replaces whatever the deltas built up.
 | `schedules.delete` | `{ scheduleId }` | `{}` |
 | `schedules.run` | `{ scheduleId }` | `{ schedule: Schedule, threadId: string, turnId: string }` runs it now, as if it were due, even when paused. A repeating schedule keeps its `nextRunAt`; a one-off is finished |
 | `schedules.preview` | `{ cron?: string, at?: string, timezone?: string, count?: number }` | `{ whenText: string, runs: string[] }`, the next `count` (default 5, at most 20) times it would run, for an editor to show as someone types. `-32602` with the reason for a cron or zone it can't read |
+| `settings.get` | `{}` | `{ settings: Settings }` |
+| `settings.update` | `{ defaultCwd?, idleMinutes?, maxLiveCLIs?, followMain?, models?: { dailyBudgetUsd?, privateFolders? } }` | `{ settings: Settings }`. Saves what's given to `runner.json` and applies it straight away, except `followMain` (next restart). `defaultCwd` must be an existing folder, `idleMinutes` at least 1, `maxLiveCLIs` 1 to 20, `dailyBudgetUsd` 0 to 100; otherwise `-32602` saying which. Every client gets `settings.updated` |
+| `settings.setKey` | `{ provider: "openrouter", key: string \| null }` | `{ settings: Settings }`. Writes the key to `secrets/openrouter-key` (0600), or removes it for `null`. The key is never sent back, only `set` and `hint`. A key with spaces inside or under 20 characters is `-32602`. Every client gets `settings.updated` |
+| `models.run` | `{ job: "classify" \| "extract" \| "summarize" \| "generate", text: string, labels?: string[], fields?: Record<string, string>, maxWords?: number, system?: string, cwd?: string }` | `{ ok: true, value, model, costUsd? }` or `{ ok: false, reason: "no-key" \| "off" \| "private" \| "over-budget" \| "timeout" \| "provider", message }`. One model call by hand (`tb models try`), spent and counted like any other, with `feature: "tb"`. `classify` needs 2 or more `labels` and answers one of them; `extract` needs `fields` (name to a plain description) and answers an object of them, `null` where the text doesn't say |
 | `runner.status` | `{}` | `{ version, release?, branch?, pid, startedAt, home, logFile, liveClis, running: string[], background: { threadId, tasks: string[] }[], pendingRestart?: { when, reason?, release?, resumeThreadId?, requestedAt, backgroundUntil?, waitingFor: string[] }, rolledBack?: { from, at }, update?: { state, checkout?, reason?, checkedAt?, commit?, release?, logFile? }, clis?: CliStatus[] }`. `running` lists the threads that are starting, running or waiting on an approval or a question; `background` the threads whose CLI is still running background shells or subagents (`tasks` describes each). A restart waits for both. `branch` is the branch the release was built from. `rolledBack` is set when this release is running because `launch.mjs` went back to it from `from`, which kept crashing at startup (and nobody has activated it on purpose since). `update` is the runner following main by itself (docs/dev-tools.md): `state` is `off` (`reason` says why), `idle`, `checking`, `building`, `waiting` (`release` is built and starts on the pending restart) or `failed` (`reason` is the error; `logFile` has the build's output); `commit` is main's tip at the last check (`checkedAt`) |
 | `runner.restart` | `{ when?: "idle" \| "now", resume?: { threadId, text }, reason?: string, release?: string, backgroundWaitMs?: number, cancel?: boolean }` | `{ scheduled: boolean, waitingFor: string[], background?: { threadId, tasks: string[] }[], note?: string, noResume?: string }`. See Restarts below. `scheduled` is true once the restart is saved; an empty `waitingFor` means it is happening now. `background` is the background work among `waitingFor`. `release` is the release the restart should come back on (the deploy script sets it). `backgroundWaitMs` limits how long background shells and subagents hold the restart. `cancel: true` withdraws a pending restart that hasn't begun and returns `scheduled: false` (`-32020` once it has begun), with a `note` when it also put `current` back. `noResume` says why the `resume` won't be sent as things stand (the thread has already been resumed 3 times in the last hour), so whoever asked can say so rather than wait for it. A runner older than this answers `-32601` |
 | `clis.list` | `{}` | `{ clis: CliStatus[] }` |
@@ -350,6 +372,7 @@ still `-32602`.)
 | `accounts.updated` | `{ accounts: Account[] }` sent to every connected client when the account list or what the runner knows about an account changes: a login appears or goes (checked every 10 seconds), its `models` once the CLI has been asked, its `defaultModel` once a turn has shown it, or its `usage` (Token Stats' `limits.json` changed, or a live reading moved a window by a point or more). The first change goes out at once, then at most one every 5 seconds, always ending on the latest list. Replaces the list from `hello` |
 | `clis.updated` | `{ clis: CliStatus[] }` sent to every connected client when a CLI's status changes (a check finished, an update started, moved on or ended). The latest list wins |
 | `schedules.updated` | `{ schedules: Schedule[] }` sent to every connected client whenever any schedule changes (made, edited, run, deleted, or its thread deleted). The whole list, in `schedules.list` order |
+| `settings.updated` | `{ settings: Settings }` sent to every connected client when a setting or the key changes, and at most once a minute while model calls are adding to the spend |
 | `runner.notice` | `{ level: "info" \| "warning" \| "error", message }`. Also sent straight after the `hello` result for things the client missed (startup problems, a missing `claude` binary) |
 
 ## Restarts
@@ -420,6 +443,38 @@ still `-32602`.)
   kept crashing at startup says so with a `warning` notice at startup and
   after every `hello` ("Release X kept crashing at startup, so the runner
   went back to Y.").
+
+## Settings and models
+
+The runner makes small model calls of its own (classify, extract,
+summarise, generate) for features like titles, digests and needs-you
+triage. They go to OpenRouter (`src/models/`), with one key Mike sets in
+the Settings window, `tb models key`, or by writing
+`secrets/openrouter-key` himself. The app never holds the key: it sends
+it once through `settings.setKey` and only ever hears `set` and `hint`.
+
+- **Consent.** Setting a key is the go-ahead to send thread text to
+  OpenRouter and the model's provider (ScaleDown, Anthropic). With no
+  key, nothing is sent and every feature falls back to what it did
+  before.
+- **Private folders.** `models.privateFolders` in `runner.json` lists
+  folders whose threads are never sent, for client work and the like. A
+  call for a thread in one of them, or anywhere under one, doesn't go out.
+- **Budget.** `models.dailyBudgetUsd` (default 1) caps what's spent per
+  local day. Once a call takes it over, later calls that day don't go out,
+  and every client gets one `warning` notice saying so. 0 stops all calls.
+- **Spend.** Each call that goes out adds a line to `models/usage.ndjson`
+  in the data dir: `{ ts, feature, job, model, ok, ms, inputTokens?,
+  outputTokens?, costUsd?, error? }`, with the cost OpenRouter reports.
+  No text from the call is kept. `spentTodayUsd` and `spentMonthUsd` add
+  these up.
+- **Titles.** A new thread's title is the first line of its first
+  message, as before; with a key, a few seconds later a small model's
+  title replaces it, unless someone has set one meanwhile.
+- **Failures.** A call never throws: it says why it didn't answer (no key,
+  private folder, over budget, timed out, provider error), and the feature
+  falls back. Each call times out after 20 seconds, is tried again once
+  on a network error or a 5xx, and at most 4 are in flight at once.
 
 ## Patches
 

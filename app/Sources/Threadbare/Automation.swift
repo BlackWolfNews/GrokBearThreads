@@ -161,6 +161,47 @@ enum Automation {
         }
     }
 
+    /// Opens the Settings window on a tab (`tab`: general, models), kept
+    /// behind Mike's windows like the main one, or closes it (`close`).
+    /// Says the tab and what the window shows.
+    private static func settings(_ c: [String: Any], app: AppModel) async -> String {
+        if c["close"] as? Bool == true {
+            SettingsWindow.current?.close()
+            return "ok closed"
+        }
+        if let name = c["tab"] as? String {
+            guard let tab = SettingsTab(rawValue: name) else {
+                return "error tab must be one of \(SettingsTab.allCases.map(\.rawValue).joined(separator: ", "))"
+            }
+            app.settingsTab = tab
+        }
+        if SettingsWindow.current?.isVisible != true { app.settingsRequest += 1 }
+        for _ in 0..<200 where SettingsWindow.current?.isVisible != true {
+            try? await Task.sleep(for: .milliseconds(15))
+        }
+        guard let window = SettingsWindow.current, window.isVisible else { return "error the Settings window didn't open" }
+        window.orderBack(nil)
+        // Let the tab switch and the window's new height settle.
+        try? await Task.sleep(for: .milliseconds(400))
+        let shown: String
+        if let settings = app.runnerSettings {
+            shown = json([
+                "tab": app.settingsTab.rawValue,
+                "defaultCwd": settings.defaultCwd,
+                "idleMinutes": settings.idleMinutes,
+                "maxLiveCLIs": settings.maxLiveCLIs,
+                "followMain": settings.followMain,
+                "keySet": settings.models.openRouterKey.set,
+                "dailyBudgetUsd": settings.models.dailyBudgetUsd,
+                "privateFolders": settings.models.privateFolders,
+                "error": app.settingsError ?? "",
+            ] as [String: Any])
+        } else {
+            shown = json(["tab": app.settingsTab.rawValue, "unsupported": app.settingsUnsupported] as [String: Any])
+        }
+        return "ok \(window.windowNumber) " + shown
+    }
+
     private static func run(_ name: String, _ c: [String: Any], app: AppModel) async -> String {
         let window = mainWindow
         switch name {
@@ -418,6 +459,10 @@ enum Automation {
                 guard let sheet = window.attachedSheet else { return "error no sheet" }
                 window = sheet
             }
+            if c["settings"] as? Bool == true {
+                guard let settings = SettingsWindow.current, settings.isVisible else { return "error the Settings window isn't open" }
+                window = settings
+            }
             // A dev-app.sh instance never runs screencapture itself: its temp
             // bundle has no Screen Recording permission (the capture is
             // refused, and macOS may ask Mike for it). dev-app.sh's shot runs
@@ -437,10 +482,17 @@ enum Automation {
                 guard let sheet = window.attachedSheet else { return "error no sheet" }
                 window = sheet
             }
+            // {"settings": true}: the Settings window (open it with `settings`).
+            if c["settings"] as? Bool == true {
+                guard let settings = SettingsWindow.current, settings.isVisible else { return "error the Settings window isn't open" }
+                window = settings
+            }
             window.displayIfNeeded()
             try? await Task.sleep(for: .milliseconds(300))
             let size = AppDump.contentSize(window)
             return "ok \(window.windowNumber) \(Int(size.width))x\(Int(size.height))"
+        case "settings":
+            return await settings(c, app: app)
         case "focus":
             // The app acts as if it were in front, so a thread that's open
             // gets marked read the way it does when Mike looks at it. It is
