@@ -35,6 +35,8 @@ struct ActivityBar: View {
                 }
             }
             Spacer(minLength: zoomed(8))
+            // Only while the app or the runner has an update on its way.
+            UpdatesActivityButton()
             UsageActivityButton()
             // The same window as ⌘, without a trip to the menu bar.
             ActivityButton(symbol: "gearshape", title: "Settings", shortcut: "⌘,", active: false) {
@@ -70,14 +72,17 @@ private struct UsageActivityButton: View {
 }
 
 /// One icon in the bar: grey, primary with a faint square when it's the
-/// view on show, and a small count in its corner when there is one.
-private struct ActivityButton: View {
+/// view on show, and a small count in its corner when there is one, or a
+/// dot when something there needs Mike.
+struct ActivityButton: View {
     var symbol: String? = nil
     /// Drawn instead of a symbol (the sleeping bear).
     var image: NSImage? = nil
     let title: String
     var shortcut: String? = nil
     var badge: Int? = nil
+    /// Accent, unlike the counts: it means something needs Mike.
+    var dot: Bool = false
     let active: Bool
     let action: () -> Void
     @State private var hovering = false
@@ -103,6 +108,13 @@ private struct ActivityButton: View {
                             .overlay(Capsule().strokeBorder(.separator, lineWidth: 0.5))
                             .offset(x: zoomed(3), y: -zoomed(2))
                             .allowsHitTesting(false)
+                    } else if dot {
+                        Circle()
+                            .fill(Color.accentColor)
+                            .frame(width: zoomed(7), height: zoomed(7))
+                            .overlay(Circle().strokeBorder(Color(nsColor: .windowBackgroundColor), lineWidth: 1.5))
+                            .offset(x: zoomed(1), y: zoomed(1))
+                            .allowsHitTesting(false)
                     }
                 }
                 .contentShape(Rectangle())
@@ -111,7 +123,7 @@ private struct ActivityButton: View {
         .onHover { hovering = $0 }
         .help(shortcut.map { "\(title) (\($0))" } ?? title)
         .accessibilityLabel(title)
-        .accessibilityValue(badge.map { $0 > 0 ? "\($0)" : "" } ?? "")
+        .accessibilityValue(dot ? "Needs you" : badge.map { $0 > 0 ? "\($0)" : "" } ?? "")
         .accessibilityAddTraits(active ? [.isSelected] : [])
     }
 

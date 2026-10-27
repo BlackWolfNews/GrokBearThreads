@@ -532,6 +532,20 @@ enum Automation {
             // one of its buttons for a CLI ({"provider": "codex"}), and
             // with neither it lists what it says.
             return usage(c, app: app)
+        case "updates":
+            // The rail's updates popover: {"show": true} opens it (and says
+            // its window, for a screencapture -l); with nothing, whether the
+            // icon is showing and what the popover would say.
+            if let show = c["show"] as? Bool {
+                app.updatesPopoverShown = show
+                guard show else { return "ok closed" }
+                RunLoop.main.run(until: Date().addingTimeInterval(0.5))
+                let popover = NSApp.windows.first { String(describing: type(of: $0)).contains("Popover") && $0.isVisible }
+                return popover.map { "ok window \($0.windowNumber)" } ?? "error the popover didn't open (is the icon showing?)"
+            }
+            let side = UpdatesPopover.appSide(AppUpdater.shared)
+            let shown = UpdatesText.shown(app: side, runner: app.runnerUpdates)
+            return "ok " + json(["shown: \(shown)", UpdatesText.appLine(side)] + UpdatesText.runnerLines(app.runnerUpdates))
         case "debug-info":
             // What the row menu's "Copy debug info" copies, copied the same
             // way (to this instance's pasteboard).

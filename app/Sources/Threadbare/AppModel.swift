@@ -140,6 +140,11 @@ final class AppModel {
     /// A runner restart that's waiting for threads to finish or under way,
     /// for the quiet banner (see `banner`).
     private(set) var restart = RunnerRestart()
+    /// The runner's own update (protocol "Runner updates"), for the rail's
+    /// updates icon. Nil from a runner older than that.
+    var runnerUpdates: RunnerUpdates?
+    /// The updates popover is open (on the model so a script can open it).
+    var updatesPopoverShown = false
 
     @ObservationIgnored private(set) var client: RPCClient?
     @ObservationIgnored private var sessions: [String: ThreadSession] = [:]
@@ -295,6 +300,7 @@ final class AppModel {
                 // none, and `clis.list` tells which.
                 clis = hello.clis
                 clisSupported = hello.clis.isEmpty ? nil : true
+                runnerUpdates = hello.updates
                 if hello.clis.isEmpty { loadClis() }
                 lastDownReason = nil
                 AppLog.write("connection", "connected to runner \(hello.runnerVersion) at \(endpoint.url.absoluteString)")
@@ -385,6 +391,8 @@ final class AppModel {
                 receive(settings)
             case .runnerNotice(let level, let message):
                 notice(level: level, message)
+            case .runnerUpdates(let updates):
+                runnerUpdates = updates
             case .other:
                 break
             }

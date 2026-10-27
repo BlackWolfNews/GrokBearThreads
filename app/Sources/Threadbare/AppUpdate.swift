@@ -167,8 +167,12 @@ final class AppUpdater {
     private(set) var running: BuildInfo?
     /// Why updates are off, for the log.
     private(set) var disabledReason: String?
-    @ObservationIgnored private var building: String?
-    @ObservationIgnored private var failed: String?
+    /// main's app/ tree being built, and the one whose build failed (not
+    /// tried again until main moves on), for the updates popover.
+    private(set) var building: String?
+    private(set) var failed: String?
+    @ObservationIgnored private var mainWatch: MainRefWatch?
+    @ObservationIgnored private var soonCheck: Task<Void, Never>?
     @ObservationIgnored private var timer: Timer?
     @ObservationIgnored private var restartTimer: Timer?
     @ObservationIgnored private var build: Process?
@@ -207,6 +211,11 @@ final class AppUpdater {
         Task { @MainActor [weak self] in
             try? await Task.sleep(for: .seconds(Self.firstCheckDelay))
             self?.check()
+        }
+        // A merge to main is built within seconds, not at the next
+        // five-minute look (the runner does the same).
+        mainWatch = MainRefWatch(checkout: info.checkout) { [weak self] in
+            Task { @MainActor in self?.checkSoon() }
         }
         restartTimer = Timer.scheduledTimer(withTimeInterval: Self.autoRestartInterval, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.considerAutoRestart(app: AppModel.shared) }
@@ -259,6 +268,17 @@ final class AppUpdater {
         default: app.sidebarMode = .inbox
         }
         if let id = saved["selection"], !id.isEmpty, app.threads[id] != nil { app.select(id) }
+    }
+
+    /// main moved: check in a few seconds. A burst of ref writes (a merge,
+    /// then packed-refs) makes one check.
+    func checkSoon() {
+        soonCheck?.cancel()
+        soonCheck = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .seconds(3))
+            guard !Task.isCancelled else { return }
+            self?.check()
+        }
     }
 
     /// Reads main's app/ tree in the checkout and starts a build if it's new.
@@ -376,5 +396,42 @@ final class AppUpdater {
                 continuation.resume(returning: (-1, error.localizedDescription))
             }
         }
+    }
+}
+
+/// Watches a checkout's main ref (refs/heads/main, written through
+/// main.lock, and packed-refs) in the repository's common dir, which
+/// worktrees share, and calls `changed` when it moves. Directory watches:
+/// git replaces the files rather than writing them in place.
+final class MainRefWatch {
+    private var sources: [DispatchSourceFileSystemObject] = []
+
+    init?(checkout: String, changed: @escaping @Sendable () -> Void) {
+        let git = Process()
+        let pipe = Pipe()
+        git.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+        git.arguments = ["-C", checkout, "rev-parse", "--git-common-dir"]
+        git.standardOutput = pipe
+        git.standardError = FileHandle.nullDevice
+        guard (try? git.run()) != nil else { return nil }
+        git.waitUntilExit()
+        guard git.terminationStatus == 0,
+              let out = String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8)?
+                .trimmingCharacters(in: .whitespacesAndNewlines), !out.isEmpty else { return nil }
+        let common = out.hasPrefix("/") ? out : (checkout as NSString).appendingPathComponent(out)
+        for dir in [(common as NSString).appendingPathComponent("refs/heads"), common] {
+            let fd = open(dir, O_EVTONLY)
+            guard fd >= 0 else { continue }
+            let source = DispatchSource.makeFileSystemObjectSource(fileDescriptor: fd, eventMask: [.write, .rename, .delete], queue: .main)
+            source.setEventHandler { changed() }
+            source.setCancelHandler { close(fd) }
+            source.resume()
+            sources.append(source)
+        }
+        if sources.isEmpty { return nil }
+    }
+
+    deinit {
+        for s in sources { s.cancel() }
     }
 }

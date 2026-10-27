@@ -40,6 +40,8 @@ public enum RPCNotification: Sendable {
     /// spend going up).
     case settingsUpdated(RunnerSettings)
     case runnerNotice(level: String, message: String)
+    /// The runner's own update, whole each time.
+    case runnerUpdates(RunnerUpdates)
     case other(method: String)
 }
 
@@ -236,6 +238,10 @@ public final class RPCClient: Sendable {
             guard let params = try? decoder.decode(RPCNotificationEnvelope<SettingsResult>.self, from: data).params
             else { return nil }
             return .settingsUpdated(params.settings)
+        case "runner.updates":
+            guard let params = try? decoder.decode(RPCNotificationEnvelope<RunnerUpdatesParams>.self, from: data).params
+            else { return nil }
+            return .runnerUpdates(params.updates)
         case "runner.notice":
             guard let params = try? decoder.decode(RPCNotificationEnvelope<RunnerNoticeParams>.self, from: data).params
             else { return nil }

@@ -187,6 +187,15 @@ private struct HeaderTitle: View {
                     // button.
                     Text("·  Archived").foregroundStyle(Color(nsColor: Theme.faintText)).layoutPriority(1)
                 }
+                if thread.onOldRunner {
+                    // A handover (protocol "Handovers"): this turn began
+                    // before the runner updated, so a fix just merged isn't
+                    // in it yet. The flag goes when the turn ends.
+                    Text("·  Finishing on the previous version")
+                        .foregroundStyle(Color(nsColor: Theme.faintText))
+                        .layoutPriority(1)
+                        .help("This turn started before the runner updated, so it runs on the previous version. The thread moves to the new one when the turn ends.")
+                }
             }
             .font(.system(size: TypeScale.header))
             .lineLimit(1)
