@@ -51,6 +51,6 @@ private struct ActionChip: View {
         }
         .buttonStyle(.plain)
         .disabled(running)
-        .help(action.note ?? action.command ?? action.prompt ?? action.title)
+        .tip(action.note ?? action.command ?? action.prompt ?? action.title)
     }
 }

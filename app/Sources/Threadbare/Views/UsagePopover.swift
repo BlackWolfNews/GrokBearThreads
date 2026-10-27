@@ -150,13 +150,13 @@ private struct AccountNameCell: View {
                 Text("Numbers from " + AccountUsageText.when(readAt, now: now))
                     .font(.system(size: zoomed(11)))
                     .foregroundStyle(.tertiary)
-                    .help("Token Stats hasn't updated this account since then")
+                    .tip("Token Stats hasn't updated this account since then")
             }
             if let note = account.note, !note.isEmpty {
                 Text(note).font(.system(size: zoomed(11))).foregroundStyle(.tertiary).lineLimit(1)
             }
         }
-        .help([AccountName.title(account), account.plan].compactMap { $0 }.joined(separator: ", "))
+        .tip([AccountName.title(account), account.plan].compactMap { $0 }.joined(separator: ", "))
     }
 }
 
@@ -181,7 +181,7 @@ private struct RoomCell: View {
                     .foregroundStyle(window.remainingPercent < AccountUsageText.chipWarning ? AnyShapeStyle(fill(window)) : AnyShapeStyle(.secondary))
                     .frame(minWidth: zoomed(30), alignment: .trailing)
             }
-            .help("\(window.title): " + AccountUsageText.windowLine(window, now: now))
+            .tip("\(window.title): " + AccountUsageText.windowLine(window, now: now))
             .accessibilityElement(children: .ignore)
             .accessibilityLabel("\(window.title): \(AccountUsageText.windowLine(window, now: now))")
         } else {
@@ -218,6 +218,7 @@ private struct CliSection: View {
                     Spacer()
                     Button("Check now") { app.checkClis() }
                         .buttonStyle(.borderless)
+                        .tip("Look for new versions of the CLIs now")
                         .font(.system(size: zoomed(11)))
                 }
             }
@@ -240,6 +241,7 @@ private struct CliRow: View {
                 if let title = CliText.updateTitle(cli) {
                     Button(title) { app.updateCli(cli.provider, force: cli.status == "held") }
                         .controlSize(.small)
+                        .tip(cli.status == "held" ? "Install it even though the check held it back" : "Install the new version now")
                 }
             }
             if let text = CliText.isUpdating(cli) ? CliText.bannerText(cli) : nil {
@@ -272,11 +274,12 @@ private struct CliRow: View {
                 .controlSize(.small)
                 .fixedSize()
                 .foregroundStyle(.secondary)
-                .help("Whether new versions install by themselves")
+                .tip("Whether new versions install by themselves")
                 Spacer()
                 if let back = CliText.goBackTitle(cli), let previous = cli.previousVersion {
                     Button(back) { app.updateCli(cli.provider, version: previous) }
                         .buttonStyle(.borderless)
+                        .tip("Go back to the version you had before the last update")
                         .font(.system(size: zoomed(11)))
                 }
             }
