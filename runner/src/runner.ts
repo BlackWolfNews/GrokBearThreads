@@ -10,6 +10,8 @@ import type {
   AnyEvent,
   ApprovalDecision,
   BackgroundTask as ProtocolBackgroundTask,
+  CliPolicy,
+  CliStatus,
   DeltaBody,
   DeltaType,
   EffortLevel,
@@ -17,12 +19,16 @@ import type {
   ImageRef,
   InProgressItem,
   MessageOrigin,
+  ModelChoice,
   PermissionMode,
   PersistedEvent,
+  Provider,
   Question,
+  RunnerDefaults,
   ThreadStatus,
   ThreadSummary,
   TurnOutcome,
+  UsageWindow,
 } from './protocol.ts';
 import { ErrorCode, LIMITS, PROTOCOL_VERSION, RpcError } from './protocol.ts';
 import type { Schedule } from './protocol.ts';
@@ -38,11 +44,12 @@ import type {
   ToolApprovalRequest,
   TurnResult,
 } from './adapters/types.ts';
+import { SessionNotFoundError } from './adapters/types.ts';
 import type { ThreadRecord, ThreadStore, QueuedSend } from './store.ts';
 import type { Clock, TimerHandle } from './clock.ts';
 import type { Logger } from './log.ts';
 import { threadEnv } from './restart.ts';
-import type { AccountRegistry, LearnedAccountInfo } from './accounts.ts';
+import { stripModelSuffix, type AccountRegistry, type LearnedAccountInfo } from './accounts.ts';
 import { RUNNER_VERSION, expandHome, paths, readRunnerJson, writeRunnerJson, type Config } from './config.ts';
 import { copyImageInto, imageRefFor } from './media.ts';
 import { isDirectory } from './fsutil.ts';
@@ -68,7 +75,50 @@ export type Notification =
   | { method: 'thread.deleted'; params: { threadId: string } }
   | { method: 'accounts.updated'; params: { accounts: Account[] } }
   | { method: 'runner.notice'; params: { level: 'info' | 'warning' | 'error'; message: string } }
-  | { method: 'schedules.updated'; params: { schedules: Schedule[] } };
+  | { method: 'schedules.updated'; params: { schedules: Schedule[] } }
+  | { method: 'clis.updated'; params: { clis: CliStatus[] } };
+
+// The seams to D's and E's modules (usage.ts, updates/), as far as the
+// runner uses them. They're structural so tests can pass small fakes.
+
+// A rate-limit reading from a session (the `limits` output), for D's
+// UsageStore.record().
+export type UsageReading = { windows: UsageWindow[]; blocked?: boolean; email?: string; plan?: string };
+export type UsageSink = {
+  record(accountId: string, reading: UsageReading): void;
+  // Fired when what it knows changes enough to tell clients (UsageStore's
+  // onChange). The runner then sends accounts.updated through its throttle.
+  onChange?(fn: (accountIds: string[]) => void): () => void;
+};
+
+// E's CliUpdates, as the runner and rpc.ts use it.
+export type CliControl = {
+  list(): CliStatus[];
+  check(p?: Provider): CliStatus[];
+  update(p: Provider, o?: { version?: string; force?: boolean }): CliStatus[];
+  setPolicy(p: Provider, policy: CliPolicy): CliStatus[];
+  onChange(fn: (clis: CliStatus[]) => void): () => void;
+};
+
+// What E's CliUpdates calls back into (its constructor's `hooks`).
+export type CliHooks = {
+  restartPending(): boolean;
+  releaseIdle(p: Provider, keepVersion: string): void;
+  versionsInUse(p: Provider): { version: string; threadIds: string[] }[];
+  codexBinariesInUse(): string[];
+};
+
+// usage.ts's pickAccount: the account a thread made without one starts on.
+export type AccountPicker = (accounts: Account[], lastUsedId: string | undefined) => string | undefined;
+
+// AccountRegistry, plus the onChange D adds (fired when a rescan finds a
+// different list).
+export type AccountSource = Pick<AccountRegistry, 'list' | 'get' | 'learn'> & { onChange?(fn: () => void): () => void };
+
+// The Codex adapter reports the binaries its live processes run, so E only
+// deletes version folders nothing uses. Not on AgentAdapter, since only
+// Codex has it.
+type BinaryReporter = { binariesInUse?(): string[] };
 
 type PendingApproval =
   | { approvalId: string; kind: 'tool'; resolve: (a: ToolApprovalAnswer) => void }
@@ -107,6 +157,14 @@ type Runtime = {
   deleted?: boolean; // anything the old CLI still reports is dropped
   turn?: Turn;
   tasks: BackgroundTask[]; // background work the live CLI is running
+  // The version of the CLI running the live session, from its cliVersion
+  // output (Codex reports it; Claude doesn't yet).
+  cliVersion?: string;
+  // A CLI update came in while this session ran on the old version: it's
+  // released the next time it's idle (no turn, approval, queued message,
+  // background work or wake grace), and the next message resumes on the
+  // new one. Background work is never stopped for it.
+  versionMove?: boolean;
   // Background work that ended and whose result the CLI hasn't started a
   // turn to read yet. Shown as `finished` in the summary's background list
   // while wakeTimer runs; cleared when that turn starts or the grace ends.
@@ -147,7 +205,11 @@ export type RunnerDeps = {
   config: Config;
   store: ThreadStore;
   adapters: Record<string, AgentAdapter>;
-  accounts: Pick<AccountRegistry, 'list' | 'get' | 'learn'>;
+  accounts: AccountSource;
+  // D's UsageStore: live readings go to it, and its changes reach clients.
+  usage?: UsageSink;
+  // D's pickAccount. Without it a new thread starts on the last account used.
+  pickAccount?: AccountPicker;
   clock: Clock;
   log: Logger;
   // Coalesces summary saves and thread.updated; tests pass a synchronous one.
@@ -176,6 +238,12 @@ const STARTUP_NOTICE_MS = 10 * 60_000;
 const WAKE_GRACE_MS = 15_000;
 // How long a thread's patches are kept before the folder is read again.
 const PATCHES_TTL_MS = 15_000;
+// How often the account list is read again, so a new login is noticed
+// (and its models asked for) without a client asking.
+const ACCOUNT_RESCAN_MS = 10_000;
+// accounts.updated: the first change goes out at once, then at most one
+// this often, always ending on the latest list.
+const ACCOUNTS_THROTTLE_MS = 5_000;
 // How many turns in a row one hook may start with its result.
 const HOOK_TELL_LIMIT = 2;
 // How much of a hook's output goes to the agent (the transcript has it all).
@@ -185,7 +253,10 @@ export class Runner {
   private cfg: Config;
   private store: ThreadStore;
   private adapters: Record<string, AgentAdapter>;
-  private accounts: Pick<AccountRegistry, 'list' | 'get' | 'learn'>;
+  private accounts: AccountSource;
+  private usage?: UsageSink;
+  private pickAccount: AccountPicker;
+  private clis?: CliControl;
   private clock: Clock;
   private log: Logger;
   private defer: (fn: () => void) => void;
@@ -204,6 +275,16 @@ export class Runner {
   private refusing?: string;
   private startedAt = 0;
   private startupNotices: { level: 'info' | 'warning' | 'error'; message: string }[] = [];
+  // Accounts whose CLI has been asked for its models (or is being asked).
+  private probed = new Set<string>();
+  private rescanTimer?: TimerHandle;
+  private accountsTimer?: TimerHandle;
+  private accountsSentAt = -Infinity;
+  private accountsShown?: string; // the last list clients were sent (or got in hello's time)
+  private codexVersion?: string; // E's installed Codex version, to notice an update activating
+  // The version E last asked sessions to move to, per provider.
+  private wantedVersion: Partial<Record<Provider, string>> = {};
+  private unsubs: (() => void)[] = [];
 
   constructor(deps: RunnerDeps) {
     this.cfg = deps.config;
@@ -215,6 +296,8 @@ export class Runner {
     this.actionTimeoutMs = deps.actionTimeoutMs;
     this.adapters = deps.adapters;
     this.accounts = deps.accounts;
+    this.usage = deps.usage;
+    this.pickAccount = deps.pickAccount ?? ((_accounts, last) => last);
     this.clock = deps.clock;
     this.log = deps.log;
     this.defer = deps.defer ?? ((fn) => setImmediate(fn));
@@ -244,14 +327,24 @@ export class Runner {
     this.flush();
     this.armSnoozeTimer();
     this.log.info('runner loaded threads', { count: this.threads.size });
+    this.accountsShown = accountsKey(this.safeAccounts());
     void this.probeModels();
+    // Usage readings and a rescan that finds another list both reach
+    // clients through the same throttle as what the probes learn.
+    if (this.usage?.onChange) this.unsubs.push(this.usage.onChange(() => this.accountsChanged()));
+    if (this.accounts.onChange) this.unsubs.push(this.accounts.onChange(() => this.accountsChanged()));
+    this.armRescan();
   }
 
   // Asks each account's CLI for its model list, one account at a time so
   // startup doesn't spawn three CLIs at once. Clients hear through
-  // accounts.updated; a failure just leaves the list unknown.
-  async probeModels(): Promise<void> {
-    for (const account of this.accounts.list()) {
+  // accounts.updated; a failure just leaves the list unknown. `only` picks
+  // some accounts: a login that has just appeared, or every Codex account
+  // after a Codex update (a new version can change the list).
+  async probeModels(only?: (a: Account) => boolean): Promise<void> {
+    const targets = this.safeAccounts().filter((a) => !only || only(a));
+    for (const a of targets) this.probed.add(a.id);
+    for (const account of targets) {
       if (this.stopping) return;
       const adapter = this.adapters[account.provider];
       if (!adapter?.models) continue;
@@ -266,7 +359,62 @@ export class Runner {
 
   private learnAccount(accountId: string, info: LearnedAccountInfo): void {
     if (!this.accounts.learn(accountId, info)) return;
-    this.notify({ method: 'accounts.updated', params: { accounts: this.accounts.list() } });
+    this.accountsChanged();
+  }
+
+  private safeAccounts(): Account[] {
+    try {
+      return this.accounts.list();
+    } catch (e) {
+      this.log.warn('could not list the accounts', { error: String(e) });
+      return [];
+    }
+  }
+
+  // Reads the account list again every ACCOUNT_RESCAN_MS, so a login added
+  // in Token Stats shows up in the app (and gets its models asked for)
+  // without a reconnect.
+  private armRescan(): void {
+    this.rescanTimer?.cancel();
+    this.rescanTimer = this.clock.setTimeout(() => {
+      this.rescanTimer = undefined;
+      if (this.stopping) return;
+      this.rescanAccounts();
+      this.armRescan();
+    }, ACCOUNT_RESCAN_MS);
+  }
+
+  rescanAccounts(): void {
+    const list = this.safeAccounts();
+    const fresh = new Set(list.filter((a) => !this.probed.has(a.id)).map((a) => a.id));
+    if (fresh.size) void this.probeModels((a) => fresh.has(a.id));
+    if (accountsKey(list) !== this.accountsShown) this.accountsChanged();
+  }
+
+  // accounts.updated, level-triggered: the first change goes out at once,
+  // then at most one every ACCOUNTS_THROTTLE_MS, read when it goes so it's
+  // always the latest list.
+  private accountsChanged(): void {
+    if (this.accountsTimer || this.stopping) return;
+    const wait = this.accountsSentAt + ACCOUNTS_THROTTLE_MS - this.clock.now();
+    if (wait <= 0) {
+      this.sendAccounts();
+      return;
+    }
+    this.accountsTimer = this.clock.setTimeout(() => {
+      this.accountsTimer = undefined;
+      if (!this.stopping) this.sendAccounts();
+    }, wait);
+  }
+
+  private sendAccounts(): void {
+    const accounts = this.safeAccounts();
+    const key = accountsKey(accounts);
+    // A change that went back to what clients already have isn't news.
+    if (key === this.accountsShown) return;
+    this.accountsShown = key;
+    this.accountsSentAt = this.clock.now();
+    this.notify({ method: 'accounts.updated', params: { accounts } });
   }
 
   // A thread folder whose thread.json can't be read: rebuild what can be
@@ -290,7 +438,9 @@ export class Runner {
       title: firstMsg && firstMsg.type === 'user.message' ? titleFrom(firstMsg.text) : 'Untitled',
       cwd: this.cfg.defaults.cwd,
       accountId,
-      provider: 'claude',
+      // The account's own, so a Codex default never starts the Claude CLI
+      // with CLAUDE_CONFIG_DIR=~/.codex.
+      provider: this.accounts.get(accountId)?.provider ?? 'claude',
       // Unknown, so the safer one.
       permissionMode: 'ask',
       status: open ? 'running' : 'idle',
@@ -386,6 +536,9 @@ export class Runner {
   async shutdown(): Promise<void> {
     this.stopping = true;
     this.snoozeTimer?.cancel();
+    this.rescanTimer?.cancel();
+    this.accountsTimer?.cancel();
+    for (const off of this.unsubs.splice(0)) off();
     for (const st of this.threads.values()) {
       const { rt } = st;
       rt.idleTimer?.cancel();
@@ -535,22 +688,49 @@ export class Runner {
 
   // --------------------------------------------------------------- queries
 
-  hello(): { runnerVersion: string; protocol: number; accounts: Account[]; defaults: { cwd: string; accountId: string; model?: string } } {
-    const defaults: { cwd: string; accountId: string; model?: string } = { cwd: this.cfg.defaults.cwd, accountId: this.defaultAccountId() };
-    if (this.cfg.defaults.model) defaults.model = this.cfg.defaults.model;
-    return {
-      runnerVersion: RUNNER_VERSION,
-      protocol: PROTOCOL_VERSION,
-      accounts: this.accounts.list(),
-      defaults,
-    };
+  hello(): { runnerVersion: string; protocol: number; accounts: Account[]; defaults: RunnerDefaults; clis?: CliStatus[] } {
+    const accounts = this.accounts.list();
+    const defaults: RunnerDefaults = { cwd: this.cfg.defaults.cwd, accountId: this.defaultAccountId(accounts) };
+    // `model` is Claude's, for apps that predate `models`.
+    const claudeModel = this.defaultModelFor('claude');
+    if (claudeModel) defaults.model = claudeModel;
+    if (this.cfg.defaults.models) defaults.models = { ...this.cfg.defaults.models };
+    if (this.cfg.defaults.efforts) defaults.efforts = { ...this.cfg.defaults.efforts };
+    const out: ReturnType<Runner['hello']> = { runnerVersion: RUNNER_VERSION, protocol: PROTOCOL_VERSION, accounts, defaults };
+    const clis = this.cliList();
+    if (clis) out.clis = clis;
+    return out;
   }
 
-  private defaultAccountId(): string {
-    const accounts = this.accounts.list();
-    const last = readRunnerJson(this.cfg.home).defaults?.accountId ?? this.cfg.defaults.accountId;
-    if (last && accounts.some((a) => a.id === last)) return last;
-    return accounts.find((a) => a.id === 'claude-main')?.id ?? accounts[0]?.id ?? 'claude-main';
+  // The account a thread made without one starts on (tb new, create_thread,
+  // schedules) and hello's defaults.accountId: the one with the most room
+  // among the last-used account's provider (usage.ts, pickAccount), worked
+  // out again each time so it follows usage. Without usage it's the last
+  // one used.
+  private defaultAccountId(accounts = this.accounts.list()): string {
+    const json = readRunnerJson(this.cfg.home).defaults;
+    const saved = json?.accountId ?? this.cfg.defaults.accountId;
+    const last = saved && accounts.some((a) => a.id === saved) ? saved : (accounts.find((a) => a.id === 'claude-main')?.id ?? accounts[0]?.id);
+    if (json?.keepAccount && last) return last;
+    let picked: string | undefined;
+    try {
+      picked = this.pickAccount(accounts, last);
+    } catch (e) {
+      this.log.warn('could not pick an account', { error: String(e) });
+    }
+    if (picked && accounts.some((a) => a.id === picked)) return picked;
+    return last ?? 'claude-main';
+  }
+
+  // What a thread on this provider gets when it names no model: the
+  // runner's default for that provider, or for Claude the older single
+  // default. Undefined means the account's own.
+  private defaultModelFor(provider: Provider): string | undefined {
+    return this.cfg.defaults.models?.[provider] ?? (provider === 'claude' ? this.cfg.defaults.model : undefined);
+  }
+
+  private defaultEffortFor(provider: Provider): EffortLevel | undefined {
+    return this.cfg.defaults.efforts?.[provider];
   }
 
   list(include: ('inbox' | 'snoozed' | 'archived')[] = ['inbox']): ThreadSummary[] {
@@ -638,7 +818,8 @@ export class Runner {
   }): { thread: ThreadSummary; turnId: string } {
     this.checkAccepting();
     const accountId = params.accountId ?? this.defaultAccountId();
-    if (!this.accounts.get(accountId)) throw new RpcError(ErrorCode.accountNotFound, `No account called ${accountId}`);
+    const account = this.accounts.get(accountId);
+    if (!account) throw new RpcError(ErrorCode.accountNotFound, `No account called ${accountId}`);
     // A blank folder means the default, not the runner's own folder.
     const cwd = path.resolve(expandHome(params.cwd?.trim() ? params.cwd.trim() : this.cfg.defaults.cwd));
     if (!isDirectory(cwd)) throw new RpcError(ErrorCode.badParams, `Folder not found: ${cwd}`);
@@ -652,7 +833,7 @@ export class Runner {
       titleSet: Boolean(params.title?.trim()),
       cwd,
       accountId,
-      provider: 'claude',
+      provider: account.provider,
       permissionMode: params.permissionMode ?? 'full',
       status: 'idle',
       createdAt: now,
@@ -667,15 +848,58 @@ export class Runner {
       queue: [],
       pendingApprovals: [],
     };
-    const model = params.model || this.cfg.defaults.model;
-    if (model) rec.model = model;
-    if (params.effort) rec.effort = params.effort;
+    const checked = this.checkSettings(account, params.model || this.defaultModelFor(account.provider), params.effort ?? this.defaultEffortFor(account.provider));
+    if (checked.model) rec.model = checked.model;
+    if (checked.effort) rec.effort = checked.effort;
     this.store.create(rec);
     const st: ThreadState = { rec, rt: newRuntime(this.clock.now()) };
     this.threads.set(id, st);
     this.rememberAccount(accountId);
     const turnId = this.sendTo(st, params.text ?? '', params.images ?? [], { origin: params.origin, scheduleId: params.scheduleId });
+    // Under the first turn, so they read as part of starting it.
+    for (const text of checked.notes) this.emit(st, { type: 'system.note', text }, st.rt.turn?.turnId ?? turnId);
     return { thread: this.summary(st), turnId };
+  }
+
+  // Checks a model and effort against the account's provider (protocol,
+  // "Models and effort across providers"). A model of the other provider,
+  // or a Codex id the account doesn't list, gives way to the provider's
+  // default; an effort the model doesn't offer is dropped. Each says so in
+  // a note rather than failing the call, since an older app always sends a
+  // model and can't get past an error.
+  private checkSettings(account: Account, model: string | undefined, effort: EffortLevel | undefined): { model?: string; effort?: EffortLevel; notes: string[] } {
+    const notes: string[] = [];
+    const provider = account.provider;
+    if (model && !this.modelFits(account, model)) {
+      const replacement = this.defaultModelFor(provider);
+      const fallback = replacement && this.modelFits(account, replacement) ? replacement : undefined;
+      const uses = fallback ? modelTitle(account, fallback) : account.defaultModel ? modelTitle(account, account.defaultModel) : "the account's default model";
+      notes.push(`${model} isn't a ${providerName(provider)} model, so this thread uses ${uses}.`);
+      model = fallback;
+    }
+    if (effort) {
+      const row = modelRow(account, model ?? account.defaultModel);
+      const offered = (e: EffortLevel) => !(provider === 'claude' && e === 'ultra') && (!row?.effortLevels || row.effortLevels.includes(e));
+      if (!offered(effort)) {
+        const fallback = this.defaultEffortFor(provider);
+        const next = fallback && fallback !== effort && offered(fallback) ? fallback : undefined;
+        const why = provider === 'claude' && effort === 'ultra' ? `${effortTitle(effort)} effort is Codex only` : `${row ? row.title : 'This model'} doesn't offer ${effortTitle(effort)} effort`;
+        notes.push(`${why}, so this thread uses ${next ? `${effortTitle(next)} effort` : "the model's own level"}.`);
+        effort = next;
+      }
+    }
+    return { ...(model ? { model } : {}), ...(effort ? { effort } : {}), notes };
+  }
+
+  // Whether a thread on this account can run this model id. Codex: one the
+  // account lists, or before the list is known anything starting gpt-.
+  // Claude: anything but a Codex id, unless the account itself lists it.
+  private modelFits(account: Account, model: string): boolean {
+    if (modelRow(account, model)) return true;
+    if (account.provider === 'codex') return !account.models?.length && model.startsWith('gpt-');
+    if (isClaudeModel(model)) return true;
+    const codexIds = this.safeAccounts().filter((a) => a.provider === 'codex').some((a) => modelRow(a, model));
+    return !model.startsWith('gpt-') && !codexIds;
   }
 
   // origin "runner" marks a message the runner sends by itself (restart.ts),
@@ -746,7 +970,7 @@ export class Runner {
     const { rec, rt } = st;
     const turn = rt.turn;
     if (!turn || !rt.session || rt.closing || this.stopping) return false;
-    if (rec.queue.length || rec.handoff || rt.releaseWhenIdle || turn.interruptRequested) return false;
+    if (rec.queue.length || rec.handoff || rec.moved || rt.releaseWhenIdle || rt.versionMove || turn.interruptRequested) return false;
     return !turn.auto || Boolean(turn.cliStarted);
   }
 
@@ -790,8 +1014,9 @@ export class Runner {
 
   private async deliver(st: ThreadState, msg: QueuedSend): Promise<void> {
     const { rec, rt } = st;
-    // A folder, account or settings change asked for a fresh CLI.
-    if (rt.session && (rt.releaseWhenIdle || rec.handoff)) this.releaseSession(st);
+    // A folder, account or settings change asked for a fresh CLI, or a CLI
+    // update came in since this one started.
+    if (rt.session && (rt.releaseWhenIdle || rec.handoff || (rt.versionMove && rt.tasks.length === 0))) this.releaseSession(st);
     // Never two live CLIs on one session: wait for a releasing one to exit.
     while (rt.closing) await rt.closing;
     if (rt.turn?.turnId !== msg.turnId) return; // interrupted while waiting
@@ -812,11 +1037,17 @@ export class Runner {
         rec.sessionUsed = false;
         rec.sessionCostTotal = 0;
         delete rec.handoff;
-      } else if (rec.sessionUsed) {
+      } else if (rec.sessionUsed && !rec.moved) {
         this.emit(st, { type: 'system.note', text: 'Resumed session' }, msg.turnId);
       }
       this.makeRoomForCli(st);
       this.startSession(st, account);
+    }
+    if (rec.moved) {
+      // A CLI that moves folders itself: the live session got setCwd, or a
+      // released one resumes in the new folder (startSession passes it).
+      this.emit(st, { type: 'system.note', text: `Moved to ${rec.cwd}. The session carries on there.` }, msg.turnId);
+      delete rec.moved;
     }
     rt.session!.send({ id: msg.turnId, text, images: msg.images });
   }
@@ -832,6 +1063,9 @@ export class Runner {
   private carryTranscript(st: ThreadState, account: Account): boolean {
     const { rec } = st;
     const from = rec.handoff;
+    // Claude only: it copies Claude's own transcript files. Codex moves
+    // folders in the same session (movesFolders) and never gets here.
+    if (rec.provider !== 'claude') return false;
     if (!from || from.rebuilt || from.fromAccountId !== rec.accountId || from.fromCwd === rec.cwd) return false;
     if (!rec.sessionUsed || !rec.nativeSessionId) return false;
     const ok = this.copyTranscript(account.configDir, from.fromCwd, rec.cwd, rec.nativeSessionId);
@@ -875,6 +1109,8 @@ export class Runner {
       exited: (err) => this.onExited(st, gen, err),
     };
     rt.resumed = resume;
+    rt.cliVersion = undefined;
+    rt.versionMove = false;
     rt.session = adapter.start(
       {
         threadId: rec.id,
@@ -924,6 +1160,9 @@ export class Runner {
       case 'session':
         rec.nativeSessionId = o.nativeSessionId;
         rec.sessionUsed = true;
+        // This session is there, so a later one that can't be found gets
+        // its own fresh start.
+        rt.retriedFresh = false;
         if (rec.status === 'starting') rec.status = rt.approvals.size ? 'waiting' : 'running';
         if (o.model) {
           rec.modelInUse = o.model;
@@ -941,8 +1180,36 @@ export class Runner {
         break;
       case 'context':
         rec.contextTokens = o.contextTokens;
+        if (o.contextWindow !== undefined) rec.contextWindow = o.contextWindow;
         this.markDirty(st);
         break;
+      case 'limits':
+        // The account's usage lives in D's UsageStore, which tells clients
+        // through accounts.updated when it matters.
+        try {
+          this.usage?.record(rec.accountId, {
+            windows: o.windows,
+            ...(o.blocked !== undefined ? { blocked: o.blocked } : {}),
+            ...(o.email ? { email: o.email } : {}),
+            ...(o.plan ? { plan: o.plan } : {}),
+          });
+        } catch (e) {
+          this.log.warn('could not record a usage reading', { accountId: rec.accountId, error: String(e) });
+        }
+        break;
+      case 'cliVersion': {
+        rt.cliVersion = o.version;
+        if (rec.cliVersion && rec.cliVersion !== o.version) {
+          this.emit(st, { type: 'system.note', text: `${cliName(rec.provider)} ${o.version} from this turn on (was ${rec.cliVersion})` }, rt.turn?.turnId);
+        }
+        if (rec.cliVersion !== o.version) {
+          rec.cliVersion = o.version;
+          this.markDirty(st);
+        }
+        // Started on the version an update wants: nothing to move.
+        if (this.wantedVersion[rec.provider] === o.version) rt.versionMove = false;
+        break;
+      }
       case 'cliTurn':
         // The CLI started a turn of its own. Give it a turn in the thread so
         // its output isn't loose, the status says running, and the app
@@ -954,9 +1221,13 @@ export class Runner {
         break;
       case 'tasks': {
         const endedTasks = rt.tasks.filter((t) => !o.tasks.some((n) => n.id === t.id));
-        const ended = endedTasks.length > 0;
+        // Claude starts a turn of its own to read a finished task's result;
+        // Codex doesn't (wakesAfterTasks: false), so there it would only
+        // look busy for WAKE_GRACE_MS for nothing.
+        const wakes = this.adapters[rec.provider]?.wakesAfterTasks !== false;
+        const ended = endedTasks.length > 0 && wakes;
         rt.tasks = o.tasks;
-        rt.finished.push(...endedTasks);
+        if (wakes) rt.finished.push(...endedTasks);
         // The CLI reports the list shrinking a moment before it starts the
         // turn that reads the result. A restart in between would lose that
         // turn, so the thread stays busy until it starts.
@@ -1024,6 +1295,8 @@ export class Runner {
       rt.wakeTimer = undefined;
       rt.finished = [];
       this.markDirty(st);
+      // A version move was waiting for the grace to end.
+      if (rt.versionMove && !rt.turn) this.scheduleIdle(st);
     }, WAKE_GRACE_MS);
   }
 
@@ -1150,31 +1423,47 @@ export class Runner {
       return;
     }
     if (rt.turn) {
-      // A resume can fail if the CLI never wrote the session's transcript
-      // (it died before the first message). Start a fresh session once.
-      if (err && rt.resumed && !rt.retriedFresh && /no conversation found/i.test(err.message) && rec.status === 'starting') {
+      // The session to resume doesn't exist. For Claude that only ever
+      // meant the CLI died before its first message (it never wrote the
+      // transcript); for Codex it also covers a thread deleted in Codex's
+      // own app, a missing rollout or a moved CODEX_HOME, part way through
+      // a conversation. Start a fresh session once.
+      const notFound = err && (err instanceof SessionNotFoundError || err.name === 'SessionNotFoundError' || (/no conversation found/i.test(err.message) && rec.status === 'starting'));
+      if (notFound && rt.resumed && !rt.retriedFresh) {
         rt.retriedFresh = true;
         rec.sessionUsed = false;
         rec.nativeSessionId = crypto.randomUUID();
         rec.sessionCostTotal = 0;
+        delete rec.cliVersion;
         const account = this.accounts.get(rec.accountId);
         if (account && rt.turn) {
           this.emit(st, { type: 'system.note', text: "Couldn't resume the earlier session, so this is a new one." }, rt.turn.turnId);
-          const turnId = rt.turn.turnId;
+          const turn = rt.turn;
           const log = this.store.log(rec.id);
-          const msg = log.read(Math.max(1, log.lastSeq - 50), log.lastSeq).reverse().find((e) => e.type === 'user.message' && e.turnId === turnId);
-          if (msg && msg.type === 'user.message') {
-            // A transcript carried to a new folder that wouldn't resume:
-            // give the fresh session the handoff note it would have had.
-            let text = msg.text;
-            if (rt.carried) {
-              rec.handoff = rt.carried;
+          const msgs = log.read(Math.max(1, log.lastSeq - 200), log.lastSeq).filter((e) => e.type === 'user.message' && e.turnId === turn.turnId);
+          const first = msgs[0];
+          if (first && first.type === 'user.message') {
+            // The fresh session starts knowing where the thread got to: a
+            // transcript carried to a new folder that wouldn't resume gets
+            // the move's note, any other thread with earlier turns the
+            // not-found one.
+            let text = first.text;
+            const earlier = rec.lastTurnCompletedSeq > 0;
+            if (rt.carried || earlier) {
+              rec.handoff = rt.carried ?? { fromCwd: rec.cwd, fromAccountId: rec.accountId, lost: true };
               text = this.handoffNote(st, account) + text;
               delete rec.handoff;
             }
             rt.carried = undefined;
             this.startSession(st, account);
-            rt.session!.send({ id: turnId, text, images: msg.images });
+            rt.session!.send({ id: turn.turnId, text, images: first.images });
+            // Messages sent into the turn before the CLI went go again, in
+            // order, matched to their ids when the counts agree.
+            if (msgs.length === turn.messages.length) {
+              msgs.slice(1).forEach((m, i) => {
+                if (m.type === 'user.message') rt.session!.send({ id: turn.messages[i + 1], text: m.text, images: m.images });
+              });
+            }
             return;
           }
         }
@@ -1234,14 +1523,41 @@ export class Runner {
     if (params.cwd !== undefined && !params.cwd.trim()) throw new RpcError(ErrorCode.badParams, 'cwd must not be blank');
     const newCwd = params.cwd !== undefined ? path.resolve(expandHome(params.cwd.trim())) : undefined;
     if (newCwd !== undefined && !isDirectory(newCwd)) throw new RpcError(ErrorCode.badParams, `Folder not found: ${newCwd}`);
-    if (params.accountId !== undefined && !this.accounts.get(params.accountId)) {
+    const newAccount = params.accountId !== undefined ? this.accounts.get(params.accountId) : undefined;
+    if (params.accountId !== undefined && !newAccount) {
       throw new RpcError(ErrorCode.accountNotFound, `No account called ${params.accountId}`);
     }
     const cwdChanged = newCwd !== undefined && newCwd !== rec.cwd;
     const accountChanged = params.accountId !== undefined && params.accountId !== rec.accountId;
-    if (cwdChanged || accountChanged) {
+    const providerChanged = accountChanged && newAccount!.provider !== rec.provider;
+    const adapter = this.adapters[rec.provider];
+    // Changes a CLI that applies settings from its next turn only (Codex)
+    // can't take into a turn that's running; the thread says so.
+    const nextTurn: string[] = [];
+    const sayNextTurn = () => Boolean(rt.turn) && Boolean(adapter?.settingsApplyNextTurn) && !release;
+    if (cwdChanged && !accountChanged && !rec.handoff && adapter?.movesFolders) {
+      // Same account on a CLI that moves folders itself: the same session
+      // carries on in the new folder from its next turn, with no
+      // transcript copy and no handoff. A live session is told now; a
+      // released one gets the folder when it resumes.
+      if (rec.sessionUsed || rt.session) rec.moved ??= { fromCwd: rec.cwd };
+      rec.cwd = newCwd!;
+      if (rec.moved?.fromCwd === rec.cwd) delete rec.moved;
+      const session = rt.session;
+      if (session && !rt.closing) {
+        const fallback = () => {
+          // Couldn't move the live session: a fresh CLI resumes there.
+          rt.releaseWhenIdle = true;
+          if (!rt.turn) this.releaseSession(st);
+        };
+        if (session.setCwd) session.setCwd(rec.cwd).catch(fallback);
+        else fallback();
+      }
+      if (sayNextTurn()) nextTurn.push(`The move to ${rec.cwd}`);
+    } else if (cwdChanged || accountChanged) {
       // Takes effect on the next turn as a new native session.
-      if (rec.sessionUsed || rt.session) rec.handoff ??= { fromCwd: rec.cwd, fromAccountId: rec.accountId };
+      if (rec.sessionUsed || rt.session) rec.handoff ??= { fromCwd: rec.moved?.fromCwd ?? rec.cwd, fromAccountId: rec.accountId };
+      delete rec.moved;
       if (newCwd !== undefined) rec.cwd = newCwd;
       if (params.accountId !== undefined) {
         rec.accountId = params.accountId;
@@ -1249,28 +1565,54 @@ export class Runner {
       }
       release = true;
     }
+    // The account the settings are checked against, after any change.
+    const account = newAccount ?? this.accounts.get(rec.accountId);
+    let model = rec.model;
+    let effort = rec.effort;
+    let touched = false;
+    if (providerChanged) {
+      // Another provider's CLI: its own defaults (unless this call sets
+      // them), and none of the old CLI's "Always allow" rules, which are in
+      // its own syntax.
+      rec.provider = newAccount!.provider;
+      delete rec.allowRules;
+      delete rec.cliVersion;
+      model = this.defaultModelFor(rec.provider);
+      effort = this.defaultEffortFor(rec.provider);
+      touched = true;
+    }
     if (params.model !== undefined) {
-      const model = params.model || undefined;
-      if (model !== rec.model) {
-        if (model) rec.model = model;
-        else delete rec.model;
-        if (rt.session && !release) {
-          rt.session.setModel(model).catch(() => {
-            rt.releaseWhenIdle = true;
-          });
-        }
-      }
+      model = params.model || undefined;
+      touched = true;
     }
     if (params.effort !== undefined) {
-      const effort = params.effort || undefined;
-      if (effort !== rec.effort) {
-        if (effort) rec.effort = effort;
-        else delete rec.effort;
-        if (rt.session && !release) {
-          rt.session.setEffort(effort).catch(() => {
-            rt.releaseWhenIdle = true;
-          });
-        }
+      effort = params.effort || undefined;
+      touched = true;
+    }
+    if (touched && account) {
+      const checked = this.checkSettings(account, model, effort);
+      model = checked.model;
+      effort = checked.effort;
+      for (const text of checked.notes) this.emit(st, { type: 'system.note', text }, rt.turn?.turnId);
+    }
+    if (model !== rec.model) {
+      if (model) rec.model = model;
+      else delete rec.model;
+      if (rt.session && !release) {
+        rt.session.setModel(model).catch(() => {
+          rt.releaseWhenIdle = true;
+        });
+        if (sayNextTurn()) nextTurn.push(model ? (account ? modelTitle(account, model) : model) : 'The default model');
+      }
+    }
+    if (effort !== rec.effort) {
+      if (effort) rec.effort = effort;
+      else delete rec.effort;
+      if (rt.session && !release) {
+        rt.session.setEffort(effort).catch(() => {
+          rt.releaseWhenIdle = true;
+        });
+        if (sayNextTurn()) nextTurn.push(effort ? `${effortTitle(effort)} effort` : "The model's own effort level");
       }
     }
     if (params.permissionMode !== undefined && params.permissionMode !== rec.permissionMode) {
@@ -1280,7 +1622,15 @@ export class Runner {
           rt.releaseWhenIdle = true;
           if (!rt.turn) this.releaseSession(st);
         });
+        if (sayNextTurn()) nextTurn.push(params.permissionMode === 'ask' ? 'Ask before edits' : 'Full access');
       }
+    }
+    if (nextTurn.length) {
+      this.emit(
+        st,
+        { type: 'system.note', text: `${joinWords(nextTurn)} ${nextTurn.length === 1 ? 'applies' : 'apply'} from the next turn. This turn carries on as it started.` },
+        rt.turn?.turnId,
+      );
     }
     if (params.snoozedUntil !== undefined) {
       if (params.snoozedUntil === null) delete rec.snoozedUntil;
@@ -1292,8 +1642,10 @@ export class Runner {
       }
       this.armSnoozeTimer();
     }
+    let archiving = false;
     if (params.archived !== undefined) {
       if (params.archived) {
+        archiving = !rec.archivedAt;
         rec.archivedAt = this.isoNow();
         stop = true;
       } else delete rec.archivedAt;
@@ -1308,6 +1660,9 @@ export class Runner {
       rt.releaseWhenIdle = true;
       if (!rt.turn) this.releaseSession(st);
     }
+    // Archived here, archived in the CLI's own app too (Codex Desktop's
+    // list), once the session has let go of it. Resuming unarchives.
+    if (archiving) this.archiveNative(st, rt.closing);
     rec.updatedAt = this.isoNow();
     this.markDirty(st);
     return { thread: this.summary(st) };
@@ -1335,7 +1690,8 @@ export class Runner {
     rt.approvals.clear();
     const session = rt.session;
     rt.session = undefined;
-    session?.end({ hard: true }).catch((e: unknown) => this.log.warn('stopping a deleted thread failed', { threadId, error: String(e) }));
+    const ended = session?.end({ hard: true }).catch((e: unknown) => this.log.warn('stopping a deleted thread failed', { threadId, error: String(e) }));
+    this.archiveNative(st, ended ?? rt.closing);
     this.store.trash(threadId, this.clock.now());
     this.log.info('thread deleted', { threadId, title: rec.title });
     this.armSnoozeTimer();
@@ -1478,6 +1834,14 @@ export class Runner {
       this.releaseSession(st);
       return;
     }
+    // A CLI update is waiting for this session to be idle. Never at the
+    // cost of background work, or of the turn the CLI is about to start to
+    // read a finished task's result.
+    if (rt.versionMove && rt.tasks.length === 0 && !rt.wakeTimer) {
+      this.log.info('releasing a CLI on an old version', { threadId: rec.id, version: rt.cliVersion, wanted: this.wantedVersion[rec.provider] });
+      this.releaseSession(st);
+      return;
+    }
     // A background shell or subagent is still working; the countdown starts
     // when it finishes.
     if (rt.tasks.length) return;
@@ -1522,6 +1886,115 @@ export class Runner {
         }
         this.markDirty(st);
       });
+  }
+
+  // ------------------------------------------------------------ CLI updates
+
+  // The hooks E's CliUpdates calls (restartPending comes from the
+  // Restarter, in main.ts).
+  cliHooks(restartPending: () => boolean): CliHooks {
+    return {
+      restartPending,
+      releaseIdle: (p, v) => this.releaseIdle(p, v),
+      versionsInUse: (p) => this.versionsInUse(p),
+      codexBinariesInUse: () => this.codexBinariesInUse(),
+    };
+  }
+
+  // A new version of a provider's CLI is in place. Live sessions on another
+  // version are released now if they're idle, with the soft release (so
+  // background work is never stopped by an update), and the rest as soon
+  // as they are (scheduleIdle). The next message resumes on the new one.
+  releaseIdle(provider: Provider, keepVersion: string): void {
+    this.wantedVersion[provider] = keepVersion;
+    for (const st of this.threads.values()) {
+      const { rec, rt } = st;
+      if (rec.provider !== provider || !rt.session || rt.closing) continue;
+      if (rt.cliVersion === keepVersion) {
+        rt.versionMove = false;
+        continue;
+      }
+      rt.versionMove = true;
+      if (this.idleForUpdate(st)) {
+        this.log.info('releasing an idle CLI for an update', { threadId: rec.id, version: rt.cliVersion, wanted: keepVersion });
+        this.releaseSession(st);
+      }
+    }
+  }
+
+  // Nothing would be cut short by releasing it: no turn (starting, running
+  // or interrupting), approval or question, queued message, background
+  // work or wake grace, and not already due to go.
+  private idleForUpdate(st: ThreadState): boolean {
+    const { rec, rt } = st;
+    return !rt.turn && rt.approvals.size === 0 && rec.queue.length === 0 && rt.tasks.length === 0 && !rt.wakeTimer && !rt.releaseWhenIdle;
+  }
+
+  // Which versions of a provider's CLI the live sessions run, from their
+  // cliVersion outputs.
+  versionsInUse(provider: Provider): { version: string; threadIds: string[] }[] {
+    const by = new Map<string, string[]>();
+    for (const { rec, rt } of this.threads.values()) {
+      if (rec.provider !== provider || !rt.session || !rt.cliVersion) continue;
+      by.set(rt.cliVersion, [...(by.get(rt.cliVersion) ?? []), rec.id]);
+    }
+    return [...by].map(([version, threadIds]) => ({ version, threadIds }));
+  }
+
+  // The Codex binaries live processes run, so E only deletes version
+  // folders nothing uses.
+  codexBinariesInUse(): string[] {
+    const codex = this.adapters.codex as (AgentAdapter & BinaryReporter) | undefined;
+    try {
+      return codex?.binariesInUse?.() ?? [];
+    } catch (e) {
+      this.log.warn('could not list the Codex binaries in use', { error: String(e) });
+      return [];
+    }
+  }
+
+  // E's CliUpdates: hello and clis.updated carry its statuses, and a Codex
+  // update that activates asks every Codex account for its models again.
+  attachClis(clis: CliControl): void {
+    this.clis = clis;
+    this.codexVersion = this.cliList()?.find((c) => c.provider === 'codex')?.installedVersion;
+    this.unsubs.push(clis.onChange((list) => this.clisChanged(list)));
+  }
+
+  private cliList(): CliStatus[] | undefined {
+    if (!this.clis) return undefined;
+    try {
+      return this.clis.list();
+    } catch (e) {
+      this.log.warn('could not read the CLI statuses', { error: String(e) });
+      return undefined;
+    }
+  }
+
+  private clisChanged(list: CliStatus[]): void {
+    this.notify({ method: 'clis.updated', params: { clis: list } });
+    const version = list.find((c) => c.provider === 'codex')?.installedVersion;
+    if (version && version !== this.codexVersion) {
+      this.codexVersion = version;
+      if (!this.stopping) void this.probeModels((a) => a.provider === 'codex');
+    }
+  }
+
+  // Archives the native session in the CLI's own app (Codex Desktop) when
+  // the thread is archived or deleted here, once `after` (the session
+  // letting go) has settled. Best effort.
+  private archiveNative(st: ThreadState, after?: Promise<unknown>): void {
+    const { rec } = st;
+    const adapter = this.adapters[rec.provider];
+    if (!adapter?.archive || !rec.sessionUsed || !rec.nativeSessionId) return;
+    const account = this.accounts.get(rec.accountId);
+    if (!account) return;
+    const nativeId = rec.nativeSessionId;
+    const threadId = rec.id;
+    void Promise.resolve(after)
+      .catch(() => undefined)
+      .then(() => adapter.archive!(account, nativeId))
+      .catch((e: unknown) => this.log.warn('could not archive the session in the CLI', { threadId, nativeSessionId: nativeId, error: String(e) }));
   }
 
   // ----------------------------------------------------------------- snooze
@@ -1671,6 +2144,7 @@ export class Runner {
     if (rec.archivedAt) s.archivedAt = rec.archivedAt;
     if (rec.nativeSessionId && rec.sessionUsed) s.nativeSessionId = rec.nativeSessionId;
     if (rec.contextTokens !== undefined) s.contextTokens = rec.contextTokens;
+    if (rec.contextWindow !== undefined) s.contextWindow = rec.contextWindow;
     if (rec.costUsd !== undefined) s.costUsd = rec.costUsd;
     const set = this.patchSet(st);
     if (set.panels.length) s.panels = set.panels;
@@ -1901,6 +2375,12 @@ export class Runner {
       lines.unshift(line);
     }
     const fromAccount = this.accounts.get(from.fromAccountId)?.title ?? from.fromAccountId;
+    if (from.lost) {
+      return (
+        `[Threadbare handoff] The earlier session couldn't be found, so here's where the thread got to. This is a fresh session in ${rec.cwd}. ` +
+        `Recent messages, for context:\n\n${lines.join('\n\n') || '(none)'}\n\n[End of handoff. The new message follows.]\n\n`
+      );
+    }
     if (from.rebuilt) {
       return (
         `[Threadbare handoff] This conversation's earlier session couldn't be found, so this is a fresh session in ${rec.cwd}. ` +
@@ -1994,6 +2474,49 @@ export function titleFrom(text: string): string {
 export function oneLine(text: string, max: number): string {
   const s = text.replace(/\s+/g, ' ').trim();
   return s.length > max ? s.slice(0, max - 1).trimEnd() + '…' : s;
+}
+
+// A provider's name in notes.
+function providerName(p: Provider): string {
+  return p === 'codex' ? 'Codex' : 'Claude';
+}
+
+function cliName(p: Provider): string {
+  return p === 'codex' ? 'Codex' : 'Claude Code';
+}
+
+// Claude's own ids: its aliases, and anything starting claude- (with or
+// without a [1m] suffix).
+export function isClaudeModel(id: string): boolean {
+  const bare = stripModelSuffix(id).toLowerCase();
+  return ['opus', 'sonnet', 'haiku', 'default', 'opusplan'].includes(bare) || bare.startsWith('claude-');
+}
+
+// The account's row for a model id, matched by picker id or full id.
+function modelRow(account: Account, model: string | undefined): ModelChoice | undefined {
+  if (!model) return undefined;
+  return account.models?.find((m) => m.id === model || m.model === model);
+}
+
+function modelTitle(account: Account, model: string): string {
+  return modelRow(account, model)?.title ?? model;
+}
+
+const EFFORT_TITLES: Record<EffortLevel, string> = { low: 'Low', medium: 'Medium', high: 'High', xhigh: 'Extra high', max: 'Max', ultra: 'Ultra' };
+
+function effortTitle(e: EffortLevel): string {
+  return EFFORT_TITLES[e] ?? e;
+}
+
+// "A", "A and B", "A, B and C".
+function joinWords(words: string[]): string {
+  return words.length <= 1 ? (words[0] ?? '') : `${words.slice(0, -1).join(', ')} and ${words.at(-1)}`;
+}
+
+// What clients were last told about the accounts, to tell a real change
+// from a rescan that found the same list.
+function accountsKey(accounts: Account[]): string {
+  return JSON.stringify(accounts);
 }
 
 function round6(n: number): number {

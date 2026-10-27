@@ -3,10 +3,10 @@ import { parseArgs } from 'node:util';
 import path from 'node:path';
 import { loadConfig, readToken, runnerUrl } from './config.ts';
 import { RunnerClient } from './client.ts';
-import type { ImageRef, PersistedEvent, Schedule, ThreadSummary } from './protocol.ts';
+import type { Account, ImageRef, PersistedEvent, RunnerDefaults, Schedule, ThreadSummary } from './protocol.ts';
 import { backgroundFlag } from './protocol.ts';
 import { parseWhen as parseLater, relativeFuture } from './when.ts';
-import { DEV_HELP, logsCommand, runDev } from './tb-dev.ts';
+import { DEV_HELP, formatModels, logsCommand, runDev } from './tb-dev.ts';
 
 const OPTIONS = {
   cwd: { type: 'string' },
@@ -60,7 +60,8 @@ const HELP = `tb: talk to the Threadbare runner
   tb archive <threadId>      tb unarchive <threadId>
   tb move <threadId> <folder>
   tb delete <threadId>
-  tb accounts
+  tb accounts                     the Claude and Codex logins (* new threads start on it)
+  tb models <account> [--json]    that account's models and its default
   tb actions <threadId> [--json]  the thread's actions, panels and patches (from its folder)
   tb run <threadId> <actionId>    run one: a command's output is printed and goes into the thread
   tb schedule "text" (--at WHEN | --cron "0 9 * * 1-5") [--tz ZONE] [--title T]
@@ -93,6 +94,7 @@ const COMMAND_FLAGS: Record<string, string[]> = {
   move: [],
   delete: [],
   accounts: [],
+  models: ['json'],
   schedule: ['at', 'cron', 'tz', 'title', 'thread', 'cwd', 'account', 'model', 'effort', 'ask', 'json'],
   schedules: ['json'],
   status: ['json'],
@@ -171,6 +173,7 @@ async function main(argv: string[]): Promise<number> {
 }
 
 type Flags = Record<string, string | boolean | string[] | undefined>;
+
 
 async function run(client: RunnerClient, cmd: string, args: string[], f: Flags): Promise<number> {
   const images = async (): Promise<ImageRef[]> => {
@@ -327,11 +330,23 @@ async function run(client: RunnerClient, cmd: string, args: string[], f: Flags):
       return r.ok ? 0 : 1;
     }
     case 'accounts': {
-      const r = await client.call<{ accounts: { id: string; title: string }[]; defaults: { accountId: string; cwd: string } }>('hello', {
-        client: 'tb',
-        version: '1',
-      });
-      for (const a of r.accounts) console.log(`${a.id === r.defaults.accountId ? '*' : ' '} ${a.id.padEnd(12)} ${a.title}`);
+      const r = await client.call<{ accounts: Account[]; defaults: RunnerDefaults }>('hello', { client: 'tb', version: '1' });
+      for (const a of r.accounts) {
+        const note = a.note ? `  (${a.note})` : '';
+        console.log(`${a.id === r.defaults.accountId ? '*' : ' '} ${a.id.padEnd(12)} ${(a.provider === 'codex' ? 'Codex' : 'Claude').padEnd(7)}${a.title}${note}`);
+      }
+      return 0;
+    }
+    case 'models': {
+      if (!args[0]) throw new Error('Which account? tb models <account> (tb accounts lists them)');
+      const r = await client.call<{ accounts: Account[]; defaults: RunnerDefaults }>('hello', { client: 'tb', version: '1' });
+      const a = r.accounts.find((x) => x.id === args[0]) ?? r.accounts.find((x) => x.email === args[0] || x.title === args[0]);
+      if (!a) throw new Error(`No account ${args[0]}. Accounts: ${r.accounts.map((x) => x.id).join(', ')}`);
+      if (f.json) {
+        console.log(JSON.stringify({ accountId: a.id, provider: a.provider, defaultModel: a.defaultModel, defaultEffort: a.defaultEffort, models: a.models ?? [] }, null, 2));
+        return 0;
+      }
+      console.log(formatModels(a, r.defaults));
       return 0;
     }
     case 'schedule': {

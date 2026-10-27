@@ -8,7 +8,8 @@ import { createSdkMcpServer, tool } from '@anthropic-ai/claude-agent-sdk';
 import type { McpSdkServerConfigWithInstance } from '@anthropic-ai/claude-agent-sdk';
 import { z } from 'zod';
 import type { Runner } from './runner.ts';
-import type { Account, PersistedEvent, Schedule, ThreadSummary } from './protocol.ts';
+import type { Account, AccountUsage, EffortLevel, PersistedEvent, Schedule, ThreadSummary } from './protocol.ts';
+import { EFFORT_LEVELS } from './protocol.ts';
 import type { Scheduler } from './schedules.ts';
 import { parseWhen, relativeFuture, relativeTime } from './when.ts';
 
@@ -28,6 +29,24 @@ export const SERVER_NAME = 'threadbare';
 export const ALWAYS_ASK_TOOLS = new Set([`mcp__${SERVER_NAME}__delete_thread`]);
 
 type Result = { content: { type: 'text'; text: string }[]; isError?: boolean };
+
+// Every level, Codex's ultra included; the runner drops one the thread's
+// model doesn't offer, with a note.
+const effortEnum = z.enum(EFFORT_LEVELS as unknown as [EffortLevel, ...EffortLevel[]]);
+
+const providerName = (a: Pick<Account, 'provider'>): string => (a.provider === 'codex' ? 'Codex' : 'Claude');
+
+// "5-hour 89% left, weekly 78% left". Step 4 wiring: replace with D's
+// usageLine from usage.ts once it's on the branch, so this and the app
+// word it the same way.
+export function roomLeft(u: AccountUsage | undefined): string {
+  if (!u) return '';
+  if (u.blocked) return 'limit reached';
+  const parts = u.windows
+    .filter((w) => w.kind === 'five_hour' || w.kind === 'weekly')
+    .map((w) => `${w.kind === 'five_hour' ? '5-hour' : 'weekly'} ${Math.round(w.remainingPercent)}% left`);
+  return parts.length ? parts.join(', ') + (u.stale ? ' (not updated lately)' : '') : '';
+}
 
 const ok = (text: string): Result => ({ content: [{ type: 'text', text }] });
 const fail = (text: string): Result => ({ content: [{ type: 'text', text }], isError: true });
@@ -79,15 +98,23 @@ export function buildThreadbareTools(control: ThreadControl, selfId: string, now
     return resolve(id);
   };
 
+  // An account by id, email, title or the part of the email before the @,
+  // or "codex" / "claude" when that provider has only one. claude-1 and
+  // codex-main can share an email, so a name that fits several is refused
+  // rather than guessed.
   const account = (q: string | undefined): string | undefined => {
     if (!q) return undefined;
     const accounts: Account[] = control.hello().accounts;
-    const hit =
-      accounts.find((a) => a.id === q) ??
-      accounts.find((a) => a.title === q) ??
-      accounts.find((a) => a.title.split('@')[0] === q);
-    if (!hit) throw new Error(`No account ${q}. Accounts: ${accounts.map((a) => `${a.id} (${a.title})`).join(', ')}`);
-    return hit.id;
+    const named = (a: Account) => `${a.id} (${a.title})`;
+    const exact = accounts.find((a) => a.id === q);
+    if (exact) return exact.id;
+    const email = (a: Account) => a.email ?? a.title.replace(/^Codex · /, '');
+    let hits = accounts.filter((a) => a.title === q || email(a) === q);
+    if (!hits.length) hits = accounts.filter((a) => email(a).split('@')[0] === q);
+    if (!hits.length) hits = accounts.filter((a) => a.provider === q.toLowerCase());
+    if (hits.length === 1) return hits[0].id;
+    if (hits.length > 1) throw new Error(`${q} fits ${hits.map(named).join(' and ')}; use the id.`);
+    throw new Error(`No account ${q}. Accounts: ${accounts.map(named).join(', ')}`);
   };
 
   const folder = (f: string): string => {
@@ -107,7 +134,7 @@ export function buildThreadbareTools(control: ThreadControl, selfId: string, now
       `title: ${t.title}`,
       `status: ${t.status}${t.needsYou ? ' (needs Mike)' : ''}`,
       `folder: ${t.cwd}`,
-      `account: ${t.accountId}`,
+      `account: ${t.accountId} (${providerName(t)})`,
       `model: ${t.model ?? 'default'}${t.modelInUse ? ` (running as ${t.modelInUse})` : ''}`,
       `effort: ${t.effort ?? 'default'}${t.effortInUse ? ` (${t.effortInUse} last turn)` : ''}`,
       `permissions: ${t.permissionMode === 'full' ? 'full access' : 'ask before edits'}`,
@@ -157,9 +184,9 @@ export function buildThreadbareTools(control: ThreadControl, selfId: string, now
         ...thisOrOther,
         new_thread: z.boolean().optional().describe('Start a new thread each time instead of sending to a thread.'),
         folder: z.string().optional().describe("With new_thread: its working folder. Default: this thread's folder."),
-        account: z.string().optional().describe('With new_thread: account id or email. Default: the last one used.'),
-        model: z.string().optional().describe('With new_thread: model id.'),
-        effort: z.enum(['low', 'medium', 'high', 'xhigh', 'max']).optional().describe('With new_thread: reasoning effort.'),
+        account: z.string().optional().describe('With new_thread: account id or email (Claude or Codex; see list_accounts). Default: the one with the most room, on the provider last used.'),
+        model: z.string().optional().describe("With new_thread: model id, one of the account's (list_accounts shows them)."),
+        effort: effortEnum.optional().describe('With new_thread: reasoning effort (ultra is Codex only).'),
         permissionMode: z.enum(['full', 'ask']).optional().describe('With new_thread: "full" (default) or "ask".'),
       },
       handle(({ text, when, cron, timezone, title, threadId, id: alias, new_thread, folder: f, account: acc, model, effort, permissionMode }) => {
@@ -275,11 +302,16 @@ export function buildThreadbareTools(control: ThreadControl, selfId: string, now
     ),
     tool(
       'list_accounts',
-      'Lists the Claude logins Threadbare can run threads on, and the defaults for new threads.',
+      'Lists the Claude and Codex logins Threadbare can run threads on: provider, how much room each has left, its models, and the defaults for new threads (a new thread with no account starts on the one with the most room).',
       {},
       handle(() => {
         const h = control.hello();
-        const rows = h.accounts.map((a) => `${a.id}  ${a.title}${a.id === h.defaults.accountId ? '  (default)' : ''}`);
+        const rows = h.accounts.map((a) => {
+          const bits = [providerName(a), a.note ?? '', roomLeft(a.usage), a.id === h.defaults.accountId ? 'default for new threads' : ''].filter(Boolean);
+          const head = `${a.id}  ${a.title}  [${bits.join('; ')}]`;
+          const models = a.models?.length ? `\n    models: ${a.models.map((m) => (m.model === a.defaultModel || m.id === a.defaultModel ? `${m.id} (default)` : m.id)).join(', ')}` : '';
+          return head + models;
+        });
         return `${rows.join('\n')}\n\nDefault folder: ${h.defaults.cwd}`;
       }),
       { annotations: { readOnlyHint: true } },
@@ -291,9 +323,9 @@ export function buildThreadbareTools(control: ThreadControl, selfId: string, now
         text: z.string().min(1).describe('The first message: a complete brief, since the new thread knows nothing else.'),
         title: z.string().optional().describe('Title for the sidebar. Default: the first line of text.'),
         folder: z.string().optional().describe("Working folder. Default: this thread's folder. Relative paths are from this thread's folder."),
-        account: z.string().optional().describe('Account id or email (see list_accounts). Default: the last one used.'),
-        model: z.string().optional().describe("Model id. Default: the runner's default model if it has one (a dev runner's is the cheapest), else the account's."),
-        effort: z.enum(['low', 'medium', 'high', 'xhigh', 'max']).optional().describe("Reasoning effort. Default: the model's own level."),
+        account: z.string().optional().describe('Account id or email, Claude or Codex (see list_accounts). Default: the one with the most room, on the provider last used.'),
+        model: z.string().optional().describe("Model id, one of the account's (list_accounts shows them; Codex ones look like gpt-6-luna). Default: the runner's default model for the provider if it has one (a dev runner's is the cheapest), else the account's."),
+        effort: effortEnum.optional().describe("Reasoning effort (ultra is Codex only). Default: the model's own level."),
         permissionMode: z.enum(['full', 'ask']).optional().describe('"full" (default) or "ask" before edits and commands.'),
       },
       handle(({ text, title, folder: f, account: acc, model, effort, permissionMode }) => {
@@ -330,7 +362,7 @@ export function buildThreadbareTools(control: ThreadControl, selfId: string, now
         ...thisOrOther,
         title: z.string().optional(),
         model: z.string().nullable().optional().describe('Model id, or null for the account default.'),
-        effort: z.enum(['low', 'medium', 'high', 'xhigh', 'max']).nullable().optional().describe("Reasoning effort, or null for the model's own level."),
+        effort: effortEnum.nullable().optional().describe("Reasoning effort, or null for the model's own level (ultra is Codex only)."),
         permissionMode: z.enum(['full', 'ask']).optional(),
         snooze: z.string().optional().describe('Snooze until: 30m, 2h, 1d, tomorrow, an ISO time, or "off" to wake it.'),
         archived: z.boolean().optional().describe('true to archive, false to bring back to the inbox.'),
@@ -355,7 +387,7 @@ export function buildThreadbareTools(control: ThreadControl, selfId: string, now
       {
         folder: z.string().describe("The new folder. ~ works; relative paths are from this thread's current folder."),
         ...thisOrOther,
-        account: z.string().optional().describe('Also move to this account (id or email).'),
+        account: z.string().optional().describe('Also move to this account (id or email), Claude or Codex. Another provider starts fresh with a summary, on that provider\'s default model.'),
         then: z.string().optional().describe('For this thread: what to do next once moved, sent as the next message.'),
       },
       handle(({ folder: f, threadId, id: alias, account: acc, then }) => {

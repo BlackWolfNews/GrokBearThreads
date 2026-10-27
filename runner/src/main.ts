@@ -12,7 +12,7 @@ import { ThreadStore } from './store.ts';
 import { AccountRegistry } from './accounts.ts';
 import { ClaudeAdapter } from './adapters/claude/adapter.ts';
 import { ProcessRegistry } from './proc.ts';
-import { Runner } from './runner.ts';
+import { Runner, type AccountPicker, type CliControl, type UsageSink } from './runner.ts';
 import { RpcServer } from './rpc.ts';
 import { realClock } from './clock.ts';
 import { acquireLock } from './lock.ts';
@@ -56,6 +56,12 @@ async function main(): Promise<void> {
   if (swept) log.warn('stopped process groups left from a previous run', { count: swept });
 
   const store = new ThreadStore(cfg.home);
+  // STEP 4 WIRING (waits for D and E on step4), in this order:
+  //   const usage = new UsageStore({ limitsFile: cfg.tokenStatsLimitsFile, dataDir: cfg.home, clock: realClock, log });
+  //   const accounts = new AccountRegistry(cfg, usage);  // D: list() carries usage, onChange on a rescan change
+  //   pickAccount = D's pickAccount (usage.ts); usage.start() here, usage.stop() in stop()
+  const usage: UsageSink | undefined = undefined;
+  const pickAccount: AccountPicker | undefined = undefined;
   const accounts = new AccountRegistry(cfg);
   // Every session gets tools for driving Threadbare itself, bound to its
   // own thread. Sessions only start after the runner exists.
@@ -68,11 +74,18 @@ async function main(): Promise<void> {
     mcpServersFor: (threadId) => ({ [SERVER_NAME]: threadbareMcpServer(runner, threadId, scheduler) }),
     alwaysAsk: ALWAYS_ASK_TOOLS,
   });
+  // STEP 4 WIRING (waits for A and E): the Codex adapter, starting E's
+  // current binary on every spawn, with the same threadbare tools:
+  //   const codex = new CodexAdapter({ codexBinary: () => updates.codexBinary(), codexArgs: cfg.codexArgs, registry, log,
+  //     toolsFor: (threadId) => buildThreadbareTools(runner, threadId, Date.now, scheduler) });
+  // and adapters: { claude, codex }.
   runner = new Runner({
     config: cfg,
     store,
     adapters: { claude },
     accounts,
+    usage,
+    pickAccount,
     clock: realClock,
     log,
   });
@@ -115,13 +128,29 @@ async function main(): Promise<void> {
     pendingRestart: () => Boolean(restarter.status().pendingRestart),
   });
 
+  // STEP 4 WIRING (waits for E): E's CliUpdates, calling back into the
+  // runner, with restartPending from the Restarter:
+  //   const updates = new CliUpdates({ cfg, log, clock: realClock, hooks: runner.cliHooks(() => Boolean(restarter.status().pendingRestart)) });
+  //   clis = updates; updates.start() once listening, updates.stop() in stop();
+  //   a missing Codex binary (updates.codexBinary() not on disk) is a
+  //   runner.startupNotice('warning', ...) like a missing claude.
+  const clis: CliControl | undefined = undefined;
+  if (clis) runner.attachClis(clis);
+  const methods = { ...restartMethods(restarter), ...scheduleMethods(scheduler) };
+  // runner.status carries the CLI statuses too (protocol, "runner.status").
+  const restartStatus = methods['runner.status'];
+  methods['runner.status'] = (p) => {
+    const status = restartStatus(p) as Record<string, unknown>;
+    return clis ? { ...status, clis: (clis as CliControl).list() } : status;
+  };
   const server = new RpcServer({
     host: cfg.host,
     port: cfg.port,
     token: readToken(cfg.home),
     runner,
     log,
-    methods: { ...restartMethods(restarter), ...scheduleMethods(scheduler) },
+    clis,
+    methods,
     helloNotices: () => [...(rolledBack ? [{ level: 'warning' as const, message: rolledBack }] : []), ...restarter.helloNotices()],
   });
   let port: number;

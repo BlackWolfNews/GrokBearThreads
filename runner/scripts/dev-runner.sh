@@ -16,9 +16,13 @@
 # THREADBARE_HOME doesn't last past one command in an agent's shell), and
 # prints the app/Tools/dev-app.sh command for a debug app against it. On a
 # new data dir, threads default to the folder <home>/work, account claude-3
-# and model claude-haiku-5-5 (runner.json's defaults), not your real folders
-# or the account's own model, so a thread started from a debug app's
-# composer is a cheap one. Like launchd, it starts the runner again when it
+# and model claude-haiku-5-5, and Codex threads to gpt-6-luna at low effort
+# (runner.json's defaults; keepAccount keeps new threads on claude-3 rather
+# than the login with the most room), not your real folders or the
+# account's own model, so a thread started from a debug app's composer is
+# a cheap one.
+# It never updates a CLI (cliUpdates off): Codex runs from the npm copy
+# next to its Node. Like launchd, it starts the runner again when it
 # exits 0 (runner.restart, tb restart), and stops when it exits with an
 # error. Ctrl-C, or `kill <pid>` with the pid it prints, stops it and the
 # CLIs it started.
@@ -88,7 +92,10 @@ WORK="$DATA_HOME/work"
 IN_WORK=""
 if [ ! -e "$DATA_HOME/runner.json" ]; then
   mkdir -p "$WORK"
-  "$NODE" -e 'require("fs").writeFileSync(process.argv[1], JSON.stringify({ defaults: { cwd: process.argv[2], accountId: "claude-3", model: "claude-haiku-5-5" } }, null, 2) + "\n")' \
+  "$NODE" -e 'require("fs").writeFileSync(process.argv[1], JSON.stringify({
+    defaults: { cwd: process.argv[2], accountId: "claude-3", keepAccount: true, model: "claude-haiku-5-5", models: { codex: "gpt-6-luna" }, efforts: { codex: "low" } },
+    cliUpdates: { claude: "off", codex: "off" },
+  }, null, 2) + "\n")' \
     "$DATA_HOME/runner.json" "$WORK"
   IN_WORK="   (in $(printf '%q' "$WORK"), on claude-haiku-5-5)"
 fi
@@ -114,6 +121,7 @@ echo "  log:  $LOG (also shown here)"
 echo "  pid:  $$"
 echo "For tb:      $(printf '%q' "$TB") status"
 echo "A thread:    $(printf '%q' "$TB") new \"say hi\" --model claude-haiku-5-5 --wait$IN_WORK"
+echo "On Codex:    $(printf '%q' "$TB") new \"say hi\" --account codex-main --model gpt-6-luna --effort low --wait"
 echo "For the app: $(printf '%q' "$(cd "$RUNNER_DIR/.." && pwd)/app/Tools/dev-app.sh") start --home $(printf '%q' "$DATA_HOME")"
 echo "Stop it:     kill $$   (never pkill: the real runner runs src/main.ts too)"
 echo
@@ -146,7 +154,7 @@ trap stop INT TERM HUP
 # runner sets its own for the CLIs it starts.
 while :; do
   env -u THREADBARE_DATA_DIR -u THREADBARE_URL -u THREADBARE_THREAD_ID -u THREADBARE_RUNNER_VERSION -u THREADBARE_RUNNER_HOME \
-    THREADBARE_HOME="$DATA_HOME" THREADBARE_PORT="$PORT" THREADBARE_LOG="$LOG" THREADBARE_LOG_STDERR=1 \
+    THREADBARE_HOME="$DATA_HOME" THREADBARE_PORT="$PORT" THREADBARE_LOG="$LOG" THREADBARE_LOG_STDERR=1 THREADBARE_CLI_UPDATES=off \
     "$NODE" src/main.ts &
   CHILD=$!
   CODE=0
