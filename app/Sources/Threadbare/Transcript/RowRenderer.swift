@@ -3,7 +3,8 @@ import Synchronization
 import ThreadbareCore
 
 /// Layout numbers shared by height measurement and the cell views, so the
-/// two always agree.
+/// two always agree. Heights that hold a line of text follow `TextZoom`
+/// (`TypeScale.scaled`); paddings, radii and image sizes don't.
 enum RowMetrics {
     static let rowTop: CGFloat = 6
     static let rowBottom: CGFloat = 6
@@ -15,8 +16,8 @@ enum RowMetrics {
     /// and Codex leave a clear pause there.
     static let userBottom: CGFloat = 22
     /// One line of work: a group summary, a tool call, a thinking block.
-    static let workHeight: CGFloat = 32
-    static let workingHeight: CGFloat = 34
+    static var workHeight: CGFloat { TypeScale.scaled(32) }
+    static var workingHeight: CGFloat { TypeScale.scaled(34) }
     static let bubblePadH: CGFloat = 14
     static let bubblePadV: CGFloat = 10
     static let bubbleRadius: CGFloat = 18
@@ -36,15 +37,15 @@ enum RowMetrics {
     static let cardPad: CGFloat = 14
     static let cardRadius: CGFloat = 12
     static let accentBar: CGFloat = 3
-    static let buttonHeight: CGFloat = 28
-    static let optionHeight: CGFloat = 24
-    static let optionDescription: CGFloat = 17
+    static var buttonHeight: CGFloat { TypeScale.scaled(28) }
+    static var optionHeight: CGFloat { TypeScale.scaled(24) }
+    static var optionDescription: CGFloat { TypeScale.scaled(17) }
     /// The question card's "Something else" field.
-    static let otherFieldHeight: CGFloat = 30
+    static var otherFieldHeight: CGFloat { TypeScale.scaled(30) }
     /// An answered question: the space under each question, and the line
     /// with the answer.
     static let answeredGap: CGFloat = 6
-    static let answerHeight: CGFloat = 20
+    static var answerHeight: CGFloat { TypeScale.scaled(20) }
     static let userThumbHeight: CGFloat = 120
     static let gridMaxHeight: CGFloat = 240
     static let gridMaxWidth: CGFloat = 320
@@ -52,14 +53,14 @@ enum RowMetrics {
     /// The most lines an opened diff shows in the flow once Mike asks for
     /// all of it (it opens at `DiffPreview.lines`).
     static let maxDiffLines = 1500
-    static let footerHeight: CGFloat = 27
+    static var footerHeight: CGFloat { TypeScale.scaled(27) }
     /// A message the runner sent by itself after a restart: a centred note
     /// right under the restart's own note, with room before the work it
     /// starts.
     static let runnerTop: CGFloat = 4
     static let runnerBottom: CGFloat = 18
-    static let changesHeader: CGFloat = 42
-    static let changesFile: CGFloat = 34
+    static var changesHeader: CGFloat { TypeScale.scaled(42) }
+    static var changesFile: CGFloat { TypeScale.scaled(34) }
 
     /// The reading column for a given table width: (x, width).
     static func column(tableWidth: CGFloat) -> (x: CGFloat, width: CGFloat) {
@@ -165,12 +166,13 @@ final class RenderCache: @unchecked Sendable {
         return effectiveShowAll(row, expanded: expanded, showAll: showAll) ? 2 : 1
     }
 
-    /// Keyed by the reading column's width, which is all a render depends
-    /// on: tables of different widths with the column at its widest share
-    /// renders, so a sidebar drag or a scroller appearing costs nothing.
+    /// Keyed by the reading column's width, which with the text zoom is all
+    /// a render depends on: tables of different widths with the column at
+    /// its widest share renders, so a sidebar drag or a scroller appearing
+    /// costs nothing.
     static func key(_ row: TranscriptRow, expanded: Bool, showAll: Bool = false, width: CGFloat) -> NSString {
         let open = openLevel(row, expanded: expanded, showAll: showAll)
-        return "\(row.id)|\(row.version)|\(open)|\(row.inGroup ? 1 : 0)|\(Int(RowMetrics.column(tableWidth: width).width))" as NSString
+        return "\(row.id)|\(row.version)|\(open)|\(row.inGroup ? 1 : 0)|\(Int(RowMetrics.column(tableWidth: width).width))|\(TypeScale.percent)" as NSString
     }
 
     func cached(_ row: TranscriptRow, expanded: Bool, showAll: Bool = false, width: CGFloat) -> RowRender? {
@@ -189,7 +191,7 @@ final class RenderCache: @unchecked Sendable {
 
     private func store(_ render: RowRender, key: NSString, row: TranscriptRow, open: Int, width: CGFloat) {
         cache.setObject(render, forKey: key, cost: Self.cost(render))
-        let slot = "\(row.id)|\(open)|\(row.inGroup ? 1 : 0)|\(Int(RowMetrics.column(tableWidth: width).width))"
+        let slot = "\(row.id)|\(open)|\(row.inGroup ? 1 : 0)|\(Int(RowMetrics.column(tableWidth: width).width))|\(TypeScale.percent)"
         let live = row.isLive
         let superseded: NSString? = liveKeys.withLock { keys in
             let old = keys[slot]
@@ -238,6 +240,9 @@ final class StreamingMeasurer {
     private let layoutManager = NSLayoutManager()
     private let container = NSTextContainer(size: NSSize(width: 100, height: CGFloat.greatestFiniteMagnitude))
     private var rowId = ""
+    /// The zoom the kept text was rendered at: after a zoom change the
+    /// blocks still match as strings but every line is a different height.
+    private var zoom = 0
     private var blocks: [String] = []
     private var starts: [Int] = []
 
@@ -254,7 +259,8 @@ final class StreamingMeasurer {
         guard string.length > 0 else { return .zero }
         let width = max(1, width)
         var replaced = false
-        if rowId == self.rowId, container.size.width == width, !blocks.isEmpty {
+        let zoom = TypeScale.percent
+        if rowId == self.rowId, zoom == self.zoom, container.size.width == width, !blocks.isEmpty {
             var common = 0
             while common < min(blocks.count, rendered.blocks.count) - 1, blocks[common] == rendered.blocks[common] {
                 common += 1
@@ -274,6 +280,7 @@ final class StreamingMeasurer {
             storage.setAttributedString(string)
         }
         self.rowId = rowId
+        self.zoom = zoom
         blocks = rendered.blocks
         starts = rendered.starts
         layoutManager.ensureLayout(for: container)
@@ -323,7 +330,7 @@ enum RowRenderer {
             let header = headerText(title: item.isStreaming ? "Thinking" : "Thought", subtitle: WorkSummary.thought(item.text))
             let headerSize = header.size()
             guard expanded else { return RowRender(height: RowMetrics.workHeight, text: header, textSize: headerSize) }
-            let body = NSAttributedString(string: item.text, attributes: Theme.text(Theme.workFont, color: Theme.quietText, line: 21, spacing: 6))
+            let body = NSAttributedString(string: item.text, attributes: Theme.text(Theme.workFont, color: Theme.quietText, line: TypeScale.scaled(21), spacing: 6))
             let size = measurer.measure(body, width: width - RowMetrics.titleIndent)
             return RowRender(height: RowMetrics.workHeight + size.height + 12, text: header, textSize: headerSize, detail: body, detailSize: size)
 
@@ -404,7 +411,7 @@ enum RowRenderer {
                 let header = headerText(title: firstLine(note), subtitle: "")
                 return RowRender(height: RowMetrics.workHeight, text: header, textSize: header.size())
             }
-            let text = NSAttributedString(string: note, attributes: Theme.text(Theme.smallFont, color: Theme.quietText, line: 17, alignment: .center))
+            let text = NSAttributedString(string: note, attributes: Theme.text(Theme.smallFont, color: Theme.quietText, line: TypeScale.scaled(17), alignment: .center))
             let size = measurer.measure(text, width: width)
             return RowRender(height: vertical + size.height, text: text, textSize: size)
 
@@ -430,10 +437,10 @@ enum RowRenderer {
     /// from; the message itself is under it, since the agent acts on it.
     static func runnerMessageText(_ message: String) -> NSAttributedString {
         let text = NSMutableAttributedString(string: "Sent by the runner after it restarted",
-                                             attributes: Theme.text(Theme.smallFont, color: Theme.faintText, line: 17, alignment: .center))
+                                             attributes: Theme.text(Theme.smallFont, color: Theme.faintText, line: TypeScale.scaled(17), alignment: .center))
         let body = message.trimmingCharacters(in: .whitespacesAndNewlines)
         if !body.isEmpty {
-            text.append(NSAttributedString(string: "\n" + body, attributes: Theme.text(Theme.labelFont, color: Theme.quietText, line: 19, alignment: .center)))
+            text.append(NSAttributedString(string: "\n" + body, attributes: Theme.text(Theme.labelFont, color: Theme.quietText, line: TypeScale.scaled(19), alignment: .center)))
         }
         return text
     }
@@ -546,7 +553,7 @@ enum RowRenderer {
 
     // MARK: Expanded tools
 
-    static let monoFont = Theme.outputFont
+    static var monoFont: NSFont { Theme.outputFont }
 
     static func mono(_ text: String, _ color: NSColor) -> NSAttributedString {
         let (style, offset) = Theme.lines(TypeScale.outputLine, font: monoFont)
@@ -620,7 +627,7 @@ enum RowRenderer {
         if tool.result?.truncated == true {
             output.append(mono("\n", .labelColor))
             output.append(gap(6))
-            output.append(NSAttributedString(string: "Output shortened", attributes: Theme.text(Theme.smallFont, color: Theme.faintText, line: 17)))
+            output.append(NSAttributedString(string: "Output shortened", attributes: Theme.text(Theme.smallFont, color: Theme.faintText, line: TypeScale.scaled(17))))
         } else if !hasOutput {
             if output.length > 0 { output.append(mono("\n", .labelColor)) }
             output.append(mono(tool.isFinished ? "No output" : "Running…", Theme.faintText))
@@ -681,13 +688,13 @@ enum RowRenderer {
         let body = NSMutableAttributedString(attributedString: diff)
         let lines = hidden == 1 ? "1 more line" : "\(hidden) more lines"
         if let more {
-            let (style, offset) = Theme.lines(26, font: Theme.detailFont, head: inset, first: inset)
+            let (style, offset) = Theme.lines(TypeScale.scaled(26), font: Theme.detailFont, head: inset, first: inset)
             let link: [NSAttributedString.Key: Any] = [.font: Theme.detailFont, .foregroundColor: Theme.quietText, .paragraphStyle: style,
                                                        .baselineOffset: offset, .tbAction: more, .cursor: NSCursor.pointingHand]
             body.append(NSAttributedString(string: "\n", attributes: [.font: Theme.detailFont, .paragraphStyle: style]))
             body.append(NSAttributedString(string: "Show " + lines, attributes: link))
         } else {
-            let (style, offset) = Theme.lines(24, font: Theme.smallFont, head: inset, first: inset)
+            let (style, offset) = Theme.lines(TypeScale.scaled(24), font: Theme.smallFont, head: inset, first: inset)
             let note: [NSAttributedString.Key: Any] = [.font: Theme.smallFont, .foregroundColor: Theme.faintText, .paragraphStyle: style, .baselineOffset: offset]
             body.append(NSAttributedString(string: "\n", attributes: note))
             body.append(NSAttributedString(string: lines + " not shown", attributes: note))
@@ -805,7 +812,7 @@ enum RowRenderer {
     /// "Write release.sh?" and, for a file, its folder after it, dimmed, as
     /// file rows show it. The card's tooltip has the whole path.
     static func approvalTitleText(_ item: ApprovalItem) -> NSAttributedString {
-        var attributes = Theme.text(Theme.cardTitleFont, line: 20)
+        var attributes = Theme.text(Theme.cardTitleFont, line: TypeScale.scaled(20))
         let output = NSMutableAttributedString(string: ApprovalText.title(item.request), attributes: attributes)
         if let path = ApprovalText.filePath(item.request) {
             let folder = PathDisplay.folder(of: path, relativeTo: item.root)
@@ -847,7 +854,7 @@ enum RowRenderer {
     /// A question's text: card title weight, quieter once it's answered so
     /// the answer under it is the brighter line.
     static func questionText(_ question: String, answered: Bool = false) -> NSAttributedString {
-        NSAttributedString(string: question, attributes: Theme.text(Theme.cardTitleFont, color: answered ? Theme.quietText : .labelColor, line: 20))
+        NSAttributedString(string: question, attributes: Theme.text(Theme.cardTitleFont, color: answered ? Theme.quietText : .labelColor, line: TypeScale.scaled(20)))
     }
 
     /// What an answered question card says under the question: the answer
@@ -878,7 +885,7 @@ enum RowRenderer {
             .font: Theme.changesTitleFont, .foregroundColor: NSColor.labelColor, .paragraphStyle: titleStyle, .baselineOffset: titleOffset,
         ])
         let font = Theme.bodyFont
-        let (style, offset) = Theme.lines(22, font: font, spacing: 4, head: 24, first: 0)
+        let (style, offset) = Theme.lines(TypeScale.scaled(22), font: font, spacing: 4, head: 24, first: 0)
         style.tabStops = [NSTextTab(textAlignment: .left, location: 24)]
         output.append(NSAttributedString(string: "\n", attributes: [.font: Theme.changesTitleFont, .paragraphStyle: titleStyle]))
         for (index, entry) in entries.enumerated() {

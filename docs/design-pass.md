@@ -84,7 +84,9 @@ Text sizes are one step above the first draft of this brief. Review round
 1 put Threadbare beside Codex and Claude and its 14 pt body read about 2
 pt smaller than theirs, so every size moved up together. The sizes below
 are the ones in `TypeScale` (Theme.swift), which everything takes its
-sizes from.
+sizes from. They're the 100% sizes: ⌘= and ⌘- in the View menu (⌘0 puts
+it back) scale every one of them, and the row heights that hold a line of
+text, through `TextZoom`; paddings, icons and the column width don't move.
 
 A few rules changed in the design reviews after the first build, each for
 a reason given where it applies: the sidebar doesn't repeat its section

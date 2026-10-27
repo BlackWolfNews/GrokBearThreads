@@ -1,88 +1,178 @@
 import AppKit
+import Observation
+import Synchronization
+
+/// The window's text size: ⌘= and ⌘- in the View menu step it through
+/// `steps` (percentages of the design sizes in `TypeScale`), ⌘0 puts it
+/// back, and it's remembered across launches. Like the zoom in the Electron
+/// agent apps, but only the text and the rows it sits in grow; paddings,
+/// icons and the reading column's width stay.
+@Observable @MainActor
+final class TextZoom {
+    static let shared = TextZoom()
+    nonisolated static let steps = [80, 90, 100, 110, 125, 140, 160, 180, 200]
+    nonisolated static let defaultPercent = 100
+    nonisolated static let defaultsKey = "textZoomPercent"
+    /// Posted after the percent changes, for the AppKit side (the
+    /// transcript, the composer) to re-lay itself out; SwiftUI views follow
+    /// the observable `percent` on their own.
+    nonisolated static let didChange = Notification.Name("TextZoom.didChange")
+    /// The percent for any thread: rows render and measure off the main
+    /// thread, and a render must not block on the main actor.
+    nonisolated static let current = Atomic<Int>(defaultPercent)
+
+    private(set) var percent: Int
+    private let defaults: UserDefaults
+
+    init(defaults: UserDefaults = .standard) {
+        self.defaults = defaults
+        let saved = defaults.integer(forKey: Self.defaultsKey)
+        percent = Self.steps.contains(saved) ? saved : Self.defaultPercent
+        Self.current.store(percent, ordering: .relaxed)
+    }
+
+    var canZoomIn: Bool { percent < Self.steps.last! }
+    var canZoomOut: Bool { percent > Self.steps.first! }
+    var isDefault: Bool { percent == Self.defaultPercent }
+
+    func zoomIn() {
+        if let next = Self.steps.first(where: { $0 > percent }) { set(next) }
+    }
+
+    func zoomOut() {
+        if let next = Self.steps.last(where: { $0 < percent }) { set(next) }
+    }
+
+    func reset() { set(Self.defaultPercent) }
+
+    func set(_ newPercent: Int) {
+        guard Self.steps.contains(newPercent), newPercent != percent else { return }
+        percent = newPercent
+        Self.current.store(newPercent, ordering: .relaxed)
+        if newPercent == Self.defaultPercent {
+            defaults.removeObject(forKey: Self.defaultsKey)
+        } else {
+            defaults.set(newPercent, forKey: Self.defaultsKey)
+        }
+        NotificationCenter.default.post(name: Self.didChange, object: self)
+    }
+}
 
 /// Every text size in the window, in one place. One step up from the
 /// system's 13 pt default: at 14 pt body text Threadbare read about 2 pt
 /// smaller than Codex and Claude beside it. Theme, the sidebar, the header
-/// and the composer all take their sizes from here, so a text size setting
-/// later only has to change this.
+/// and the composer all take their sizes from here, each the design size
+/// below scaled by `TextZoom`.
 enum TypeScale {
+    /// The zoom as a percent. On the main thread it reads the observable,
+    /// so a SwiftUI body that asks for any size here re-renders when the
+    /// zoom changes without each view having to watch it; renderers on
+    /// other threads read the atomic copy.
+    static var percent: Int {
+        if Thread.isMainThread { return MainActor.assumeIsolated { TextZoom.shared.percent } }
+        return TextZoom.current.load(ordering: .relaxed)
+    }
+
+    /// `size` at the current zoom, to a whole point (except at 100%, where
+    /// the design sizes stand as written, half points and all): half-point
+    /// steps made neighbouring text almost, but not quite, the same size.
+    static func scaled(_ size: CGFloat) -> CGFloat {
+        let percent = percent
+        return percent == 100 ? size : (size * CGFloat(percent) / 100).rounded()
+    }
+
     // Transcript
-    static let body: CGFloat = 15
+    static var body: CGFloat { scaled(15) }
     /// Fixed line heights, with the glyphs centred in them (see
     /// `Theme.lines`): about 1.5 times the text size, like the apps Mike
     /// compares this with.
-    static let bodyLine: CGFloat = 23
+    static var bodyLine: CGFloat { scaled(23) }
     /// Work lines: group summaries, tool and thinking rows, the working line.
-    static let work: CGFloat = 14
-    static let workLine: CGFloat = 20
+    static var work: CGFloat { scaled(14) }
+    static var workLine: CGFloat { scaled(20) }
     /// One monospaced size and leading for code blocks, tool output and
     /// diffs: at 12.5 and 13 a file read in a tool and the code block under
     /// it visibly differed in size and line spacing.
-    static let code: CGFloat = 13
-    static let codeLine: CGFloat = 19.5
+    static var code: CGFloat { scaled(13) }
+    static var codeLine: CGFloat { scaled(19.5) }
     /// Tool output and file contents in an expanded tool.
-    static let output: CGFloat = code
-    static let outputLine: CGFloat = codeLine
-    static let diff: CGFloat = code
-    static let diffLine: CGFloat = codeLine
-    static let headings: (CGFloat, CGFloat, CGFloat) = (18, 16, 15)
-    static let cardTitle: CGFloat = 14
+    static var output: CGFloat { code }
+    static var outputLine: CGFloat { codeLine }
+    static var diff: CGFloat { code }
+    static var diffLine: CGFloat { codeLine }
+    static var headings: (CGFloat, CGFloat, CGFloat) { (scaled(18), scaled(16), scaled(15)) }
+    static var cardTitle: CGFloat { scaled(14) }
     /// Card labels, notes and table headers.
-    static let label: CGFloat = 13
+    static var label: CGFloat { scaled(13) }
     /// Folders after file names, "Show 12 more lines", line counts. Whole
-    /// points throughout: half-point steps made neighbouring text almost,
-    /// but not quite, the same size.
-    static let detail: CGFloat = 12
+    /// points throughout, see `scaled`.
+    static var detail: CGFloat { scaled(12) }
     /// The turn footer and centred system notes.
-    static let small: CGFloat = 11
+    static var small: CGFloat { scaled(11) }
 
     // Sidebar
-    static let sidebarTitle: CGFloat = 14
-    static let sidebarPreview: CGFloat = 13
+    static var sidebarTitle: CGFloat { scaled(14) }
+    static var sidebarPreview: CGFloat { scaled(13) }
     /// Times, statuses and account names on a row.
-    static let sidebarMeta: CGFloat = 11
+    static var sidebarMeta: CGFloat { scaled(11) }
     /// "Needs you", "Running", "Inbox": semibold at the previews' size, so a
     /// heading isn't weaker than the rows it groups.
-    static let sidebarHeading: CGFloat = 13
-    static let sidebarButton: CGFloat = 14
-    static let sidebarFooter: CGFloat = 13
+    static var sidebarHeading: CGFloat { scaled(13) }
+    static var sidebarButton: CGFloat { scaled(14) }
+    static var sidebarFooter: CGFloat { scaled(13) }
 
     // Header and composer
     /// At 14 the title was smaller than the 15 pt text under it; Codex and
     /// Claude set theirs at about 15.
-    static let header: CGFloat = 15
-    static let composer: CGFloat = 15
-    static let chip: CGFloat = 13
+    static var header: CGFloat { scaled(15) }
+    static var composer: CGFloat { scaled(15) }
+    static var chip: CGFloat { scaled(13) }
 }
 
 /// Fonts, colours and spacing for the transcript. Colours are dynamic so
-/// cached attributed strings follow light and dark mode.
+/// cached attributed strings follow light and dark mode. The fonts are
+/// computed, not stored, so they follow `TextZoom` (AppKit caches system
+/// fonts by size, so asking is cheap).
 enum Theme {
-    static let bodySize = TypeScale.body
-    static let bodyLine = TypeScale.bodyLine
-    static let codeSize = TypeScale.code
-    static let codeLine = TypeScale.codeLine
-    static let diffSize = TypeScale.diff
-    static let diffLine = TypeScale.diffLine
-    static let bodyFont = NSFont.systemFont(ofSize: bodySize)
-    static let boldFont = NSFont.systemFont(ofSize: bodySize, weight: .semibold)
-    static let italicFont = NSFontManager.shared.convert(NSFont.systemFont(ofSize: bodySize), toHaveTrait: .italicFontMask)
-    static let codeFont = NSFont.monospacedSystemFont(ofSize: codeSize, weight: .regular)
-    static let codeBoldFont = NSFont.monospacedSystemFont(ofSize: codeSize, weight: .semibold)
-    static let diffFont = NSFont.monospacedSystemFont(ofSize: diffSize, weight: .regular)
-    static let outputFont = NSFont.monospacedSystemFont(ofSize: TypeScale.output, weight: .regular)
-    static let smallFont = NSFont.systemFont(ofSize: TypeScale.small)
-    static let labelFont = NSFont.systemFont(ofSize: TypeScale.label)
-    static let detailFont = NSFont.systemFont(ofSize: TypeScale.detail)
-    static let workFont = NSFont.systemFont(ofSize: TypeScale.work)
-    static let workLine = TypeScale.workLine
+    static var bodySize: CGFloat { TypeScale.body }
+    static var bodyLine: CGFloat { TypeScale.bodyLine }
+    static var codeSize: CGFloat { TypeScale.code }
+    static var codeLine: CGFloat { TypeScale.codeLine }
+    static var diffSize: CGFloat { TypeScale.diff }
+    static var diffLine: CGFloat { TypeScale.diffLine }
+    static var bodyFont: NSFont { .systemFont(ofSize: bodySize) }
+    static var boldFont: NSFont { .systemFont(ofSize: bodySize, weight: .semibold) }
+    /// Made through the font manager, which isn't cached like the system
+    /// fonts, so one per size is kept here (renders ask from any thread).
+    static var italicFont: NSFont {
+        let size = bodySize
+        return italics.withLock { fonts in
+            if let font = fonts[size] { return font }
+            let font = NSFontManager.shared.convert(NSFont.systemFont(ofSize: size), toHaveTrait: .italicFontMask)
+            fonts[size] = font
+            return font
+        }
+    }
+    private static let italics = Mutex<[CGFloat: NSFont]>([:])
+    static var codeFont: NSFont { .monospacedSystemFont(ofSize: codeSize, weight: .regular) }
+    static var codeBoldFont: NSFont { .monospacedSystemFont(ofSize: codeSize, weight: .semibold) }
+    static var diffFont: NSFont { .monospacedSystemFont(ofSize: diffSize, weight: .regular) }
+    static var outputFont: NSFont { .monospacedSystemFont(ofSize: TypeScale.output, weight: .regular) }
+    static var smallFont: NSFont { .systemFont(ofSize: TypeScale.small) }
+    static var labelFont: NSFont { .systemFont(ofSize: TypeScale.label) }
+    static var detailFont: NSFont { .systemFont(ofSize: TypeScale.detail) }
+    static var workFont: NSFont { .systemFont(ofSize: TypeScale.work) }
+    static var workLine: CGFloat { TypeScale.workLine }
     /// A one-line label's height for `workFont`, so work lines centre their
     /// text the same way whatever the scale.
-    static let workLabelHeight = ceil(workFont.ascender - workFont.descender + workFont.leading)
-    static let cardTitleFont = NSFont.systemFont(ofSize: TypeScale.cardTitle, weight: .semibold)
+    static var workLabelHeight: CGFloat {
+        let font = workFont
+        return ceil(font.ascender - font.descender + font.leading)
+    }
+    static var cardTitleFont: NSFont { .systemFont(ofSize: TypeScale.cardTitle, weight: .semibold) }
     /// "Edited 3 files": quieter than a card that asks something.
-    static let changesTitleFont = NSFont.systemFont(ofSize: TypeScale.cardTitle, weight: .medium)
-    static let statsFont = NSFont.monospacedDigitSystemFont(ofSize: TypeScale.detail, weight: .regular)
+    static var changesTitleFont: NSFont { .systemFont(ofSize: TypeScale.cardTitle, weight: .medium) }
+    static var statsFont: NSFont { .monospacedDigitSystemFont(ofSize: TypeScale.detail, weight: .regular) }
 
     /// One digit's advance in a monospaced font, for line number gutters.
     static func digitWidth(_ font: NSFont) -> CGFloat {

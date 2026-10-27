@@ -400,6 +400,7 @@ named by the start of their id.
 | `menu` | `row`, `click` | a transcript row's context menu, or chooses an item from it |
 | `debug-info`, `copy-thread-id`, `clipboard` | `row`, `id` | what "Copy debug info" and "Copy thread id" copy, and the instance's pasteboard |
 | `appearance`, `resize` | `mode` (light, dark, system); `w`, `h` | |
+| `zoom` | `to` (in, out, reset) or `percent` | the text size, as ⌘=, ⌘- and ⌘0 set it; says the percent it's at |
 | `archive`, `unarchive`, `snooze`, `mode` | `id`, `seconds`, `mode` | |
 | `waitFor` | `row`, `kind`, `status` (and `thread`), `text`, `banner` (`""` for none), `connection`, `loaded`, `ready`, `not`, `timeout` | until every condition given holds (default 10 s) |
 | `dump` | `format` (`json`, `text`), `out` | |

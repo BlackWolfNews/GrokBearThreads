@@ -3,6 +3,83 @@ import XCTest
 @testable import Threadbare
 @testable import ThreadbareCore
 
+/// ⌘= and ⌘-: every size comes from TypeScale, scaled by the zoom.
+@MainActor
+final class TextZoomTests: XCTestCase {
+    override func tearDown() {
+        TextZoom.shared.reset()
+        super.tearDown()
+    }
+
+    func testDesignSizesStandAtDefault() {
+        TextZoom.shared.reset()
+        XCTAssertEqual(TypeScale.body, 15)
+        XCTAssertEqual(TypeScale.codeLine, 19.5)
+        XCTAssertEqual(Theme.bodyFont.pointSize, 15)
+        XCTAssertEqual(RowMetrics.workHeight, 32)
+        XCTAssertEqual(ComposerTextField.lineHeight, 23)
+    }
+
+    func testStepsScaleEverySizeToWholePoints() {
+        let zoom = TextZoom.shared
+        zoom.zoomIn()
+        XCTAssertEqual(zoom.percent, 110)
+        XCTAssertEqual(TypeScale.body, 17) // 16.5 rounded
+        XCTAssertEqual(TypeScale.bodyLine, 25)
+        XCTAssertEqual(TypeScale.codeLine, 21)
+        XCTAssertEqual(Theme.bodyFont.pointSize, 17)
+        XCTAssertEqual(Theme.italicFont.pointSize, 17)
+        XCTAssertEqual(RowMetrics.workHeight, 35)
+        XCTAssertEqual(ComposerTextField.lineHeight, 25)
+        XCTAssertEqual(ComposerTextField.font.pointSize, 17)
+        zoom.zoomOut()
+        zoom.zoomOut()
+        XCTAssertEqual(zoom.percent, 90)
+        XCTAssertEqual(TypeScale.body, 14) // 13.5 rounded
+        zoom.reset()
+        XCTAssertEqual(TypeScale.body, 15)
+    }
+
+    func testStopsAtTheEnds() {
+        let zoom = TextZoom.shared
+        for _ in 0..<20 { zoom.zoomIn() }
+        XCTAssertEqual(zoom.percent, TextZoom.steps.last)
+        XCTAssertFalse(zoom.canZoomIn)
+        XCTAssertTrue(zoom.canZoomOut)
+        for _ in 0..<20 { zoom.zoomOut() }
+        XCTAssertEqual(zoom.percent, TextZoom.steps.first)
+        XCTAssertFalse(zoom.canZoomOut)
+    }
+
+    func testRendersAreKeyedByZoomAndGrowWithIt() {
+        let zoom = TextZoom.shared
+        zoom.reset()
+        let row = TranscriptRow(id: "r1", version: 1, seq: 1, content: .assistant(TextItem(itemId: "a1", text: "Hello there, a line of **markdown**.", isStreaming: false)))
+        let cache = RenderCache()
+        let before = cache.render(row, expanded: false, width: 800)
+        let keyBefore = RenderCache.key(row, expanded: false, width: 800)
+        zoom.set(160)
+        XCTAssertNotEqual(RenderCache.key(row, expanded: false, width: 800), keyBefore)
+        let after = cache.render(row, expanded: false, width: 800)
+        XCTAssertGreaterThan(after.height, before.height)
+        XCTAssertEqual((after.text?.attribute(.font, at: 0, effectiveRange: nil) as? NSFont)?.pointSize, 24)
+    }
+
+    func testZoomChangeRestylesTheComposer() {
+        let zoom = TextZoom.shared
+        zoom.reset()
+        let composer = ComposerTextField.makeTextView()
+        composer.replaceText("Some words")
+        zoom.set(140)
+        composer.applyTypeScale()
+        XCTAssertEqual(composer.font?.pointSize, 21)
+        let font = composer.textStorage?.attribute(.font, at: 0, effectiveRange: nil) as? NSFont
+        XCTAssertEqual(font?.pointSize, 21)
+        let style = composer.typingAttributes[.paragraphStyle] as? NSParagraphStyle
+        XCTAssertEqual(style?.minimumLineHeight, 32)
+    }
+}
+
 /// The composer used to be built with no text storage, so typing did nothing.
 final class ComposerTests: XCTestCase {
     func testComposerKeepsWhatIsTyped() {

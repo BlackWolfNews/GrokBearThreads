@@ -193,6 +193,9 @@ final class TextRowCell: RowCellView {
     private var shownBlocks: [String] = []
     private var shownStarts: [Int] = []
     private var shownRowId = ""
+    /// The zoom the shown text was rendered at: a pooled cell can get the
+    /// same row back after a zoom change, with its blocks still matching.
+    private var shownZoom = 0
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -252,7 +255,7 @@ final class TextRowCell: RowCellView {
             textView.place(box.frame.insetBy(dx: RowMetrics.boxPad, dy: RowMetrics.boxPad))
 
         case .footer:
-            textView.place(NSRect(x: x, y: 5, width: width, height: 17))
+            textView.place(NSRect(x: x, y: 5, width: width, height: RowMetrics.footerHeight - 10))
 
         default:
             textView.place(NSRect(x: x, y: top, width: width, height: render.textSize.height))
@@ -262,7 +265,8 @@ final class TextRowCell: RowCellView {
         let textWidth = textView.fullFrame.width
         // A streaming assistant row only replaces the blocks that changed,
         // so TextKit lays out just the tail.
-        if case .assistant = row.content, previousRowId == row.id, !shownBlocks.isEmpty,
+        let zoom = TypeScale.percent
+        if case .assistant = row.content, previousRowId == row.id, zoom == shownZoom, !shownBlocks.isEmpty,
            textView.textContainer?.size.width == textWidth {
             var common = 0
             while common < min(shownBlocks.count, render.blocks.count) - 1, shownBlocks[common] == render.blocks[common] {
@@ -282,6 +286,7 @@ final class TextRowCell: RowCellView {
         shownBlocks = render.blocks
         shownStarts = render.blockStarts
         shownRowId = row.id
+        shownZoom = zoom
     }
 
     override func releaseContent() {
@@ -757,8 +762,8 @@ final class PillButton: NSButton {
         focusRingType = .none
     }
 
-    static let font = NSFont.systemFont(ofSize: TypeScale.label, weight: .medium)
-    static let shortcutFont = NSFont.systemFont(ofSize: 11, weight: .medium)
+    static var font: NSFont { .systemFont(ofSize: TypeScale.label, weight: .medium) }
+    static var shortcutFont: NSFont { .systemFont(ofSize: TypeScale.small, weight: .medium) }
 
     var fittingWidth: CGFloat {
         ceil(label(color: .labelColor).size().width) + 30
@@ -950,7 +955,7 @@ final class QuestionRowCell: RowCellView, NSTextFieldDelegate {
         card.set(fill: pending ? Theme.cardBackground : nil, stroke: Theme.cardBorder, radius: RowMetrics.cardRadius,
                  accent: pending ? .controlAccentColor : nil)
 
-        let key = "\(row.id)|\(row.version)|\(Int(tableWidth))"
+        let key = "\(row.id)|\(row.version)|\(Int(tableWidth))|\(TypeScale.percent)"
         if builtFor != key {
             if request?.approvalId != item.request.approvalId { other.stringValue = "" }
             request = item.request

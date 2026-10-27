@@ -7,6 +7,7 @@ import UserNotifications
 struct ThreadbareApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var delegate
     @State private var app = AppModel.shared
+    @State private var zoom = TextZoom.shared
 
     init() {
         UserDefaults.standard.register(defaults: [
@@ -39,6 +40,19 @@ struct ThreadbareApp: App {
             CommandGroup(replacing: .newItem) {
                 Button("New Thread") { app.newThread() }
                     .keyboardShortcut("n")
+            }
+            // In the View menu, as the Electron agent apps and Safari have
+            // it. ⌘= is the key under the + sign, so ⌘+ works without shift.
+            CommandGroup(after: .toolbar) {
+                Button("Bigger Text") { zoom.zoomIn() }
+                    .keyboardShortcut("=")
+                    .disabled(!zoom.canZoomIn)
+                Button("Smaller Text") { zoom.zoomOut() }
+                    .keyboardShortcut("-")
+                    .disabled(!zoom.canZoomOut)
+                Button("Default Text Size") { zoom.reset() }
+                    .keyboardShortcut("0")
+                    .disabled(zoom.isDefault)
             }
             CommandMenu("Thread") {
                 Button(app.selectedThread?.isArchived == true ? "Unarchive" : "Archive") { app.toggleArchive() }

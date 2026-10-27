@@ -95,6 +95,7 @@ final class TranscriptController: NSObject, NSTableViewDataSource, NSTableViewDe
         scrollView.contentView.postsFrameChangedNotifications = true
         NotificationCenter.default.addObserver(self, selector: #selector(boundsChanged), name: NSView.boundsDidChangeNotification, object: scrollView.contentView)
         NotificationCenter.default.addObserver(self, selector: #selector(frameChanged), name: NSView.frameDidChangeNotification, object: scrollView.contentView)
+        NotificationCenter.default.addObserver(self, selector: #selector(zoomChanged), name: TextZoom.didChange, object: nil)
     }
 
     // MARK: Edge fades
@@ -557,18 +558,43 @@ final class TranscriptController: NSObject, NSTableViewDataSource, NSTableViewDe
         if measured.count < count { scheduleRemeasure() } else { remeasureTask?.cancel() }
     }
 
+    /// ⌘= or ⌘-: every row's height changes, like a column width change,
+    /// but as a one-off rather than a live resize. The renders are keyed by
+    /// zoom, so nothing cached is reused; the rows near the screen are
+    /// re-measured now and the rest off the main thread. A full reload
+    /// (rather than re-configuring the cells on screen) drops every cell's
+    /// own text layout, which was done at the old sizes.
+    @objc private func zoomChanged() {
+        guard let session else { return }
+        let memory = captureMemory()
+        let count = session.displayCount
+        let visible = tableView.rows(in: tableView.visibleRect)
+        let margin = 60
+        let measured = count <= Self.syncRemeasureLimit
+            ? 0..<count
+            : max(0, visible.location - margin)..<min(count, visible.location + visible.length + margin)
+        Self.renders.prepare(measured.map { session.displayRow($0) }, expanded: session.expanded, width: width)
+        NSAnimationContext.beginGrouping()
+        NSAnimationContext.current.duration = 0
+        tableView.reloadData()
+        NSAnimationContext.endGrouping()
+        restore(memory)
+        if measured.count < count { scheduleRemeasure() } else { remeasureTask?.cancel() }
+    }
+
     private func scheduleRemeasure() {
         remeasureTask?.cancel()
         remeasureTask = Task { [weak self] in
             try? await Task.sleep(for: .milliseconds(200))
             guard let self, !Task.isCancelled, let session = self.session else { return }
             let width = self.width
+            let zoom = TypeScale.percent
             let rows = (0..<session.displayCount).map { session.displayRow($0) }
             let expanded = session.expanded
             await Task.detached(priority: .userInitiated) {
                 TranscriptController.renders.prepare(rows, expanded: expanded, width: width)
             }.value
-            guard !Task.isCancelled, self.session === session, self.width == width else { return }
+            guard !Task.isCancelled, self.session === session, self.width == width, TypeScale.percent == zoom else { return }
             let memory = self.captureMemory()
             NSAnimationContext.beginGrouping()
             NSAnimationContext.current.duration = 0

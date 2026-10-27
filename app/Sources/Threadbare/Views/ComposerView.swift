@@ -212,17 +212,20 @@ struct ComposerTextField: NSViewRepresentable {
     var onReturnWhenEmpty: () -> Bool = { false }
     var onImages: ([URL]) -> Void
 
-    static let font = NSFont.systemFont(ofSize: TypeScale.composer)
+    // Computed, so they follow the text zoom (`applyTypeScale` re-applies
+    // them to a text view that's already up).
+    static var font: NSFont { .systemFont(ofSize: TypeScale.composer) }
     /// The transcript's fixed body line height, glyphs centred in it, so a
     /// message keeps its rhythm when it's sent (at 18 + 3 spacing the box
     /// was denser than the bubble it became).
-    static let lineHeight = TypeScale.bodyLine
-    static let attributes: [NSAttributedString.Key: Any] = {
+    static var lineHeight: CGFloat { TypeScale.bodyLine }
+    static var attributes: [NSAttributedString.Key: Any] {
+        let font = font
         let (style, offset) = Theme.lines(lineHeight, font: font)
         return [.font: font, .foregroundColor: NSColor.labelColor, .paragraphStyle: style, .baselineOffset: offset]
-    }()
+    }
     /// Two lines, before the first measure comes in.
-    static let minHeight: CGFloat = lineHeight * 2
+    static var minHeight: CGFloat { lineHeight * 2 }
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
 
@@ -245,10 +248,8 @@ struct ComposerTextField: NSViewRepresentable {
 
     static func makeTextView() -> ComposerTextView {
         let textView = ComposerTextView()
-        textView.font = font
         textView.textColor = .labelColor
-        textView.defaultParagraphStyle = attributes[.paragraphStyle] as? NSParagraphStyle
-        textView.typingAttributes = attributes
+        textView.applyTypeScale()
         textView.isRichText = false
         textView.allowsUndo = true
         textView.drawsBackground = false
@@ -298,14 +299,22 @@ struct ComposerTextField: NSViewRepresentable {
         var lastFocus = 0
         private var lastWidth: CGFloat = 0
         private var widthObserver: NSObjectProtocol?
+        private var zoomObserver: NSObjectProtocol?
 
         init(_ parent: ComposerTextField) {
             self.parent = parent
             lastFocus = parent.focusTrigger
+            super.init()
+            zoomObserver = NotificationCenter.default.addObserver(forName: TextZoom.didChange, object: nil, queue: .main) { [weak self] _ in
+                guard let self, let textView = self.textView else { return }
+                textView.applyTypeScale()
+                self.updateHeight()
+            }
         }
 
         deinit {
             if let widthObserver { NotificationCenter.default.removeObserver(widthObserver) }
+            if let zoomObserver { NotificationCenter.default.removeObserver(zoomObserver) }
         }
 
         /// A narrower window wraps the text onto more lines, so the box
@@ -370,6 +379,18 @@ final class ComposerTextView: NSTextView {
         string = text
         if let storage = textStorage, storage.length > 0 {
             storage.setAttributes(ComposerTextField.attributes, range: NSRange(location: 0, length: storage.length))
+        }
+    }
+
+    /// The font and line height at the current text zoom, for what's typed
+    /// next and (after a zoom change) what's already in the box.
+    func applyTypeScale() {
+        let attributes = ComposerTextField.attributes
+        font = ComposerTextField.font
+        defaultParagraphStyle = attributes[.paragraphStyle] as? NSParagraphStyle
+        typingAttributes = attributes
+        if let storage = textStorage, storage.length > 0 {
+            storage.setAttributes(attributes, range: NSRange(location: 0, length: storage.length))
         }
     }
 

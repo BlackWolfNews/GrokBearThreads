@@ -64,7 +64,8 @@ enum MarkdownRenderer {
     }()
 
     static func renderBlock(_ block: String) -> NSAttributedString {
-        let key = block as NSString
+        // The zoom is in the key: a block's layout is all sizes.
+        let key = "\(TypeScale.percent)|\(block)" as NSString
         if let cached = cache.object(forKey: key) { return cached }
         let document = Document(parsing: block, options: [.disableSmartOpts])
         var builder = Builder()
@@ -77,7 +78,7 @@ enum MarkdownRenderer {
         return result
     }
 
-    private static let separator = NSAttributedString(string: "\n", attributes: Theme.bodyAttributes)
+    private static var separator: NSAttributedString { NSAttributedString(string: "\n", attributes: Theme.bodyAttributes) }
 
     struct Context {
         var bold = false
@@ -400,7 +401,7 @@ enum MarkdownRenderer {
             }
         }
 
-        static let tableHeaderFont = NSFont.systemFont(ofSize: TypeScale.label, weight: .semibold)
+        static var tableHeaderFont: NSFont { .systemFont(ofSize: TypeScale.label, weight: .semibold) }
 
         // MARK: Inlines
 

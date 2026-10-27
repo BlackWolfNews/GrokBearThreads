@@ -266,6 +266,22 @@ enum Automation {
             // give AppKit a moment to redraw in the new one.
             try? await Task.sleep(for: .milliseconds(200))
             return "ok \(mode)"
+        case "zoom":
+            // What ⌘=, ⌘- and ⌘0 do, or a percent from TextZoom.steps.
+            let zoom = TextZoom.shared
+            switch c["to"] as? String {
+            case "in": zoom.zoomIn()
+            case "out": zoom.zoomOut()
+            case "reset": zoom.reset()
+            case nil:
+                if let percent = number(c["percent"]).map({ Int($0) }) {
+                    guard TextZoom.steps.contains(percent) else { return "error percent is one of \(TextZoom.steps)" }
+                    zoom.set(percent)
+                }
+            default: return "error to is in, out or reset"
+            }
+            try? await Task.sleep(for: .milliseconds(100))
+            return "ok \(zoom.percent)"
         case "hover":
             return hover(c, app: app)
         case "account-ids":
