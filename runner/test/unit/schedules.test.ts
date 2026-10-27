@@ -156,19 +156,23 @@ test('a cron starts a new thread each time, and skips a run while the last threa
   assert.equal(first.accountId, 'claude-3');
   assert.equal(first.model, 'claude-haiku-5-5');
   assert.equal(h.events(first.id)[0].origin, 'schedule');
+  // The thread remembers the schedule that started it, even once renamed.
+  assert.deepEqual(first.schedule, { id: sc.id, title: 'Inbox summary' });
+  h.runner.update({ threadId: first.id, title: 'Renamed' });
+  assert.deepEqual(h.runner.get(first.id).schedule, { id: sc.id, title: 'Inbox summary' });
   assert.equal(sched.find(sc.id).nextRunAt, '2026-10-26T13:00:00.000Z');
 
   // Still running at 13:00: skipped.
   h.clock.advance(30 * MIN);
   await tick();
-  assert.equal(h.runner.list().filter((t) => t.title === 'Inbox summary').length, 1);
+  assert.equal(h.runner.list().filter((t) => t.schedule?.id === sc.id).length, 1);
   assert.equal(sched.find(sc.id).lastRun?.outcome, 'skipped');
 
   h.adapter.last.init();
   h.adapter.last.result('completed');
   h.clock.advance(30 * MIN);
   await tick();
-  assert.equal(h.runner.list().filter((t) => t.title === 'Inbox summary').length, 2);
+  assert.equal(h.runner.list().filter((t) => t.schedule?.id === sc.id).length, 2);
   assert.equal(sched.find(sc.id).runs, 2);
   sched.stop();
 });

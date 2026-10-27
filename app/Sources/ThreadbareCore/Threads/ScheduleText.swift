@@ -168,3 +168,17 @@ public struct ScheduledHeader: Sendable, Hashable {
         body = lines.count > 1 ? String(lines[1]).trimmingCharacters(in: .newlines) : ""
     }
 }
+
+/// Words for a thread a schedule started (its summary's `schedule`), for
+/// the clock on its sidebar row and the chip in its header.
+public enum StartedBySchedule {
+    /// What the schedule is now, if it's still there: when it runs, or that
+    /// it's paused. Its title as it was when it started the thread, as the
+    /// schedule may since have been renamed or deleted.
+    public static func tip(_ origin: ThreadSchedule, current: Schedule?) -> String {
+        let named = "Started by a schedule: \(origin.title.isEmpty ? "Untitled" : origin.title)"
+        guard let current else { return named + ". It has since been deleted." }
+        let when = current.paused ? "paused" : current.whenText
+        return when.isEmpty ? named + ". Click to edit it." : named + " (\(when)). Click to edit it."
+    }
+}

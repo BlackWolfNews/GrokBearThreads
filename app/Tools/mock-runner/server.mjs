@@ -1193,6 +1193,7 @@ function runSchedule(schedule) {
       id: threadId, title: schedule.title, cwd: schedule.cwd ?? defaults.cwd, accountId: schedule.accountId ?? defaults.accountId,
       provider: 'claude', model: schedule.model, effort: schedule.effort, permissionMode: schedule.permissionMode ?? 'full',
       status: 'starting', live: true, needsYou: false, createdAt: now, updatedAt: now, lastActivityAt: now, preview: '', lastSeq: 0, lastSeenSeq: 0,
+      schedule: { id: schedule.id, title: schedule.title },
     }, events: [], inProgress: new Map(), timers: [] });
     broadcastSummary(threadId);
   }
@@ -1230,6 +1231,14 @@ function addDemoSchedules() {
   make({ id: 'sc_demo_deps', title: 'Weekly dependency check', text: 'Look for outdated npm and Swift packages in ~/dev/me and list the ones worth updating.',
     cron: '0 10 * * 1', cwd: defaults.cwd, accountId: defaults.accountId, permissionMode: 'full', runs: 6,
     lastRun: { at: ago(60 * 24 * 6), outcome: 'skipped', note: 'the last thread it started was still running' } });
+  // A schedule that starts a new thread each time, and the thread it
+  // started last, so the sidebar and header show a scheduled thread.
+  if (threads.has('demo_invoice_export')) {
+    make({ id: 'sc_demo_invoices', title: 'Quarterly invoice export', text: 'Export last quarter\'s invoices as CSV for the accountant.',
+      cron: '0 8 1 1,4,7,10 *', cwd: defaults.cwd, accountId: defaults.accountId, permissionMode: 'full', runs: 3,
+      lastRun: { at: ago(60 * 26), outcome: 'sent', threadId: 'demo_invoice_export' } });
+    threads.get('demo_invoice_export').summary.schedule = { id: 'sc_demo_invoices', title: 'Quarterly invoice export' };
+  }
   make({ id: 'sc_demo_backup', title: 'Nightly backup report', text: 'Summarise last night\'s Backblaze log and say if anything failed.',
     cron: '0 2 * * *', cwd: '/Users/mike/dev/old-backups', accountId: defaults.accountId, paused: true, runs: 21,
     lastRun: { at: ago(60 * 30), outcome: 'failed', note: 'the folder /Users/mike/dev/old-backups is gone' } });

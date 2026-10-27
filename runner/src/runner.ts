@@ -1243,6 +1243,7 @@ export class Runner {
     // patch files is async, so it happens there; a folder with no patch
     // files at all (most of them) starts its CLI straight away as before.
     if (params.worktree !== false && this.mayWantWorktree(cwd)) rec.worktreePending = true;
+    if (params.origin === 'schedule' && params.scheduleId) rec.schedule = { id: params.scheduleId, title: params.title?.trim() || rec.title };
     this.store.create(rec);
     const st: ThreadState = { rec, rt: newRuntime(this.clock.now()) };
     this.threads.set(id, st);
@@ -2980,6 +2981,7 @@ export class Runner {
     if (rec.worktree && !rec.worktree.removedAt) {
       s.worktree = { branch: rec.worktree.branch, mainCheckout: rec.worktree.mainCheckout, path: rec.worktree.path };
     }
+    if (rec.schedule) s.schedule = { ...rec.schedule };
     return s;
   }
 

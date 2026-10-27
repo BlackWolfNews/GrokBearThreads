@@ -762,6 +762,18 @@ public struct ThreadWorktree: Sendable, Hashable, Codable {
     }
 }
 
+/// The schedule that started a thread (protocol "Schedules"), with its
+/// title as it was then: the schedule may since be renamed or deleted.
+public struct ThreadSchedule: Sendable, Hashable, Codable {
+    public var id: String
+    public var title: String
+
+    public init(id: String, title: String) {
+        self.id = id
+        self.title = title
+    }
+}
+
 public struct ThreadSummary: Sendable, Hashable, Codable, Identifiable {
     public var id: String
     public var title: String
@@ -828,6 +840,9 @@ public struct ThreadSummary: Sendable, Hashable, Codable, Identifiable {
     /// `threads.highlights` again when this or `lastSeq` moves. Nil from a
     /// runner from before highlights, or before anything changed.
     public var highlightsAt: Date?
+    /// The schedule that started it; nil for one a person or an agent
+    /// started, and from a runner that predates this.
+    public var schedule: ThreadSchedule?
 
     public init(
         id: String, title: String, cwd: String = "~/dev/me/misc", accountId: String = "claude-main",
@@ -840,7 +855,8 @@ public struct ThreadSummary: Sendable, Hashable, Codable, Identifiable {
         effort: String? = nil, modelInUse: String? = nil, effortInUse: String? = nil, contextWindow: Int? = nil,
         panels: [Panel] = [], actions: [Action] = [], hooks: [Hook] = [], patches: [PatchInfo] = [], background: [BackgroundTask] = [],
         subagents: [Subagent] = [], projects: [ThreadProject] = [], pendingReviews: Int? = nil, worktree: ThreadWorktree? = nil, needs: String? = nil, asks: [Ask] = [], asksSeq: Int? = nil,
-        highlightsAt: Date? = nil
+        highlightsAt: Date? = nil,
+        schedule: ThreadSchedule? = nil
     ) {
         self.id = id
         self.title = title
@@ -882,6 +898,7 @@ public struct ThreadSummary: Sendable, Hashable, Codable, Identifiable {
         self.asks = asks
         self.asksSeq = asksSeq
         self.highlightsAt = highlightsAt
+        self.schedule = schedule
     }
 
     public init(from decoder: Decoder) throws {
@@ -932,6 +949,7 @@ public struct ThreadSummary: Sendable, Hashable, Codable, Identifiable {
         asks = c.lossyArray(Ask.self, forKey: .asks)
         asksSeq = (try? c.decodeIfPresent(Int.self, forKey: .asksSeq)) ?? nil
         highlightsAt = ((try? c.decodeIfPresent(String.self, forKey: .highlightsAt)) ?? nil).flatMap(ISO8601.parse)
+        schedule = (try? c.decodeIfPresent(ThreadSchedule.self, forKey: .schedule)) ?? nil
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -976,13 +994,14 @@ public struct ThreadSummary: Sendable, Hashable, Codable, Identifiable {
         if !asks.isEmpty { try c.encode(asks, forKey: .asks) }
         try c.encodeIfPresent(asksSeq, forKey: .asksSeq)
         try c.encodeIfPresent(highlightsAt.map(ISO8601.format), forKey: .highlightsAt)
+        try c.encodeIfPresent(schedule, forKey: .schedule)
     }
 
     enum CodingKeys: String, CodingKey {
         case id, title, cwd, accountId, provider, model, effort, modelInUse, effortInUse, permissionMode, status, live, needsYou, pendingReviews
         case createdAt, updatedAt, lastActivityAt, snoozedUntil, snoozedUntilRestart, archivedAt, onOldRunner, preview
         case lastSeq, lastSeenSeq, nativeSessionId, contextTokens, contextWindow, costUsd, panels, actions, hooks, patches, background, subagents
-        case projects, worktree, needs, asks, asksSeq, highlightsAt
+        case projects, worktree, needs, asks, asksSeq, highlightsAt, schedule
     }
 
     /// The first ask Mike hasn't ticked on the open card, if any: what the

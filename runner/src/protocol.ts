@@ -162,9 +162,15 @@ export type ThreadSummary = {
   // Its own git worktree (docs/thread-worktrees.md). Absent when it has
   // none, or once that was removed.
   worktree?: ThreadWorktree;
+  // The schedule that started it (docs/protocol.md, "Schedules"). Absent
+  // for a thread a person or an agent started.
+  schedule?: ThreadSchedule;
 };
 
 export type ThreadWorktree = { branch: string; mainCheckout: string; path: string };
+
+// The schedule's title as it was when it started the thread.
+export type ThreadSchedule = { id: string; title: string };
 
 // Projects (docs/protocol.md, "Projects"): a grouping above folders that
 // carries goals, state and notes forward, made by the librarian, agents or
