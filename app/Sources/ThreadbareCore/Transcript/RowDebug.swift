@@ -24,7 +24,7 @@ public enum RowDebug {
             return item.text
         case .tool(let tool):
             return tool.failed ? tool.title + " (failed)" : tool.title
-        case .images(_, let images):
+        case .images(_, let images, _):
             return images.count == 1 ? "1 image" : "\(images.count) images"
         case .approval(let item):
             guard let resolution = item.resolution else { return item.request.title }
@@ -37,8 +37,10 @@ public enum RowDebug {
             var text = RelativeTime.duration(milliseconds: completion.durationMs)
             if let cost = CostText.format(completion.costUsd) { text += ", " + cost }
             if completion.outcome != .completed { text += ", " + completion.outcome.rawValue }
+            // Codex's footer shows only the time; its tokens are here.
+            if let tokens = TokenText.line(completion.usage) { text += ", " + tokens }
             return text
-        case .note(let text), .error(let text):
+        case .note(let text), .error(let text, _):
             return text
         case .group(let group):
             return group.summary
@@ -158,5 +160,37 @@ extension TranscriptModel {
         case .actionRun(let run): return ["t:" + run.itemId(seq: seq)]
         default: return []
         }
+    }
+}
+
+/// A turn's token counts in words, for "Copy debug info" (the footer
+/// itself shows only the time, and Claude's cost).
+public enum TokenText {
+    /// "24,177 in (12,032 cached), 310 out, 120 reasoning", from either
+    /// provider's `usage` (Claude's cache reads count as cached). Nil with
+    /// no counts.
+    public static func line(_ usage: JSONValue?) -> String? {
+        guard let usage else { return nil }
+        func count(_ key: String) -> Int? { usage[key]?.doubleValue.map { Int($0) } }
+        var parts: [String] = []
+        if let input = count("inputTokens") {
+            var part = format(input) + " in"
+            if let cached = count("cachedInputTokens") ?? count("cacheReadTokens"), cached > 0 { part += " (\(format(cached)) cached)" }
+            parts.append(part)
+        }
+        if let written = count("cacheWriteTokens"), written > 0 { parts.append(format(written) + " cache written") }
+        if let output = count("outputTokens") { parts.append(format(output) + " out") }
+        if let reasoning = count("reasoningTokens"), reasoning > 0 { parts.append(format(reasoning) + " reasoning") }
+        return parts.isEmpty ? nil : parts.joined(separator: ", ")
+    }
+
+    static func format(_ n: Int) -> String {
+        let digits = String(abs(n))
+        var out = ""
+        for (i, c) in digits.reversed().enumerated() {
+            if i > 0 && i % 3 == 0 { out.append(",") }
+            out.append(c)
+        }
+        return (n < 0 ? "-" : "") + String(out.reversed())
     }
 }

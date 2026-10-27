@@ -771,7 +771,7 @@ final class ImagesRowCell: RowCellView {
 
     override func configure(row: TranscriptRow, render: RowRender, tableWidth: CGFloat, expanded: Bool) {
         super.configure(row: row, render: render, tableWidth: tableWidth, expanded: expanded)
-        guard case .images(_, let images) = row.content else { return }
+        guard case .images(_, let images, _) = row.content else { return }
         let (x, width) = RowMetrics.column(for: row, tableWidth: tableWidth)
         grid.frame = NSRect(x: x, y: RowMetrics.rowTop + 2, width: width, height: render.imageAreaHeight)
         grid.show(paths: images.map(\.path), frames: render.imageFrames)

@@ -341,10 +341,11 @@ enum RowRenderer {
             // every other tool: open groups used to pour out every diff at
             // 12 lines each, and the changes card shows them again anyway.
             guard expanded else { return RowRender(height: RowMetrics.workHeight, text: header, textSize: headerSize) }
-            if row.kind == .diff, let diff = tool.effectiveDiff, !diff.hunks.isEmpty {
+            let diffs = row.kind == .diff ? tool.effectiveDiffs.filter { !$0.hunks.isEmpty } : []
+            if !diffs.isEmpty {
                 let body = showAll
-                    ? diffWithNote([diff], maxLines: RowMetrics.maxDiffLines)
-                    : diffWithNote([diff], maxLines: previewLines([diff]), more: DiffPreview.allKey(row.id))
+                    ? diffWithNote(diffs, maxLines: RowMetrics.maxDiffLines)
+                    : diffWithNote(diffs, maxLines: previewLines(diffs), more: DiffPreview.allKey(row.id))
                 let size = measurer.measure(body, width: width - RowMetrics.titleIndent - 1)
                 let box = size.height + RowMetrics.diffPadV * 2
                 return RowRender(height: RowMetrics.workHeight + box + 10, text: header, textSize: headerSize, detail: body, detailSize: size)
@@ -353,8 +354,12 @@ enum RowRenderer {
             let size = measurer.measure(body, width: width - RowMetrics.titleIndent - RowMetrics.boxPad * 2)
             return RowRender(height: RowMetrics.workHeight + size.height + RowMetrics.boxPad * 2 + 10, text: header, textSize: headerSize, detail: body, detailSize: size)
 
-        case .images(_, let images):
-            let (frames, area) = imageFrames(images, maxWidth: width, maxHeight: RowMetrics.gridMaxHeight, alignRight: false)
+        case .images(_, let images, let generated):
+            // A picture the agent made is the point of the step, so it's
+            // shown large; screenshots from tools stay thumbnails.
+            let (frames, area) = generated
+                ? imageFrames(images, maxWidth: width, maxHeight: ImageLayout.generatedMaxSide, cellWidth: ImageLayout.generatedMaxSide, alignRight: false)
+                : imageFrames(images, maxWidth: width, maxHeight: RowMetrics.gridMaxHeight, alignRight: false)
             return RowRender(height: vertical + 2 + area, imageFrames: frames, imageAreaHeight: area)
 
         case .approval(let item):
@@ -415,8 +420,14 @@ enum RowRenderer {
             let size = measurer.measure(text, width: width)
             return RowRender(height: vertical + size.height, text: text, textSize: size)
 
-        case .error(let message):
-            let text = NSAttributedString(string: message, attributes: Theme.text(color: .systemRed))
+        case .error(let message, let kind):
+            let text = NSMutableAttributedString(string: message, attributes: Theme.text(color: .systemRed))
+            // What to do about it, when the runner knows why. The limit's
+            // fix (another account) is a button in the line above the
+            // transcript, which knows the accounts.
+            if let advice = errorAdvice(kind) {
+                text.append(NSAttributedString(string: "\n" + advice, attributes: Theme.text(Theme.detailFont, color: Theme.quietText, line: TypeScale.scaled(19))))
+            }
             let size = measurer.measure(text, width: width - RowMetrics.boxPad * 2)
             return RowRender(height: vertical + size.height + RowMetrics.boxPad * 2, text: text, textSize: size)
 
@@ -580,8 +591,9 @@ enum RowRenderer {
                 .font: Theme.workFont, .foregroundColor: color, .paragraphStyle: style,
             ])
         }
-        if let diff = tool.effectiveDiff, !diff.hunks.isEmpty {
-            let stats = DiffBuilder.stats(diff)
+        let diffs = tool.effectiveDiffs.filter { !$0.hunks.isEmpty }
+        if !diffs.isEmpty {
+            let stats = diffs.map(DiffBuilder.stats).reduce((added: 0, removed: 0)) { ($0.added + $1.added, $0.removed + $1.removed) }
             output.append(statsText(added: stats.added, removed: stats.removed, leading: "  "))
         }
         return output
@@ -866,6 +878,11 @@ enum RowRenderer {
                 output.append(NSAttributedString(string: "  " + folder, attributes: attributes))
             }
         }
+        // Codex says why it's asking, in the model's own words ("Allow
+        // creating b.txt in the current directory?").
+        if let reason = item.request.input["reason"]?.stringValue?.trimmingCharacters(in: .whitespacesAndNewlines), !reason.isEmpty {
+            output.append(NSAttributedString(string: "\n" + reason, attributes: Theme.text(Theme.detailFont, color: Theme.quietText, line: TypeScale.scaled(19))))
+        }
         return output
     }
 
@@ -945,6 +962,17 @@ enum RowRenderer {
         return output
     }
 
+    /// A plain sentence for a failure whose cause the runner gave.
+    static func errorAdvice(_ kind: TurnErrorKind?) -> String? {
+        switch kind {
+        case .contextWindow?: return "The conversation is too long for this model. Start a new thread to carry on."
+        case .auth?: return "This account's login has run out. Sign in again with its CLI, then send the message again."
+        case .usageLimit?, nil: return nil
+        }
+    }
+
+    /// "12s · $0.04" for Claude, "12s" for Codex, which reports no cost
+    /// (its tokens are in "Copy debug info" instead).
     static func footerText(_ completion: TurnCompletion) -> NSAttributedString {
         var parts: [String] = []
         switch completion.outcome {
@@ -967,9 +995,10 @@ enum RowRenderer {
     /// Lays images out in rows, each fitted to `maxHeight` and the grid's
     /// cell width, with the images in a row at one height
     /// (`ImageLayout`).
-    static func imageFrames(_ images: [ImageRef], maxWidth: CGFloat, maxHeight: CGFloat, alignRight: Bool) -> ([NSRect], CGFloat) {
+    static func imageFrames(_ images: [ImageRef], maxWidth: CGFloat, maxHeight: CGFloat, cellWidth: CGFloat = RowMetrics.gridMaxWidth,
+                            alignRight: Bool) -> ([NSRect], CGFloat) {
         let layout = ImageLayout.frames(sizes: images.map(pixelSize), maxWidth: maxWidth, maxHeight: maxHeight,
-                                        cellWidth: RowMetrics.gridMaxWidth, gap: RowMetrics.imageGap, alignRight: alignRight)
+                                        cellWidth: cellWidth, gap: RowMetrics.imageGap, alignRight: alignRight)
         return (layout.frames, layout.height)
     }
 

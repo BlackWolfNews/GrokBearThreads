@@ -82,15 +82,25 @@ public enum ModelPicker {
     /// asked the account what it really lists.
     public static let aliases = ["opus", "sonnet", "haiku"]
 
-    /// The rows for one account's list. The main rows are the aliases (a
-    /// word) plus whatever the default and the chosen model are; dated
-    /// and old full ids are `isOlder`. The CLI lists "opus" and the default
-    /// both as the same model, so each model appears once. A chosen model
-    /// the list doesn't know (set some other way) still gets a row, ticked.
-    /// With a `query`, every row that mentions it is kept and the
-    /// main/older split goes: a search is a search.
-    public static func rows(choices: [ModelChoice], defaultId: String?, selected: String?, query: String = "") -> [Row] {
-        let known = choices.isEmpty ? aliases.map { ModelChoice(id: $0, model: $0, title: ComposerChips.model($0)) } : choices
+    /// The rows for one account's list. For Claude the main rows are the
+    /// aliases (a word) plus whatever the default and the chosen model are;
+    /// dated and old full ids are `isOlder`. The CLI lists "opus" and the
+    /// default both as the same model, so each model appears once. Codex
+    /// ids are all dashed ("gpt-6.1-sol"), so for Codex every model is a
+    /// main row, in `model/list`'s order. A chosen model the list doesn't
+    /// know (set some other way) still gets a row, ticked. With a `query`,
+    /// every row that mentions it is kept and the main/older split goes: a
+    /// search is a search.
+    ///
+    /// Before the runner has the list, Claude offers the three aliases the
+    /// CLI always takes; Codex offers just its default, since a Claude
+    /// alias would be the wrong provider's model.
+    public static func rows(choices: [ModelChoice], defaultId: String?, selected: String?, query: String = "", provider: String = "claude") -> [Row] {
+        let codex = provider == "codex"
+        let fallback: [ModelChoice] = codex
+            ? [defaultId].compactMap { $0 }.filter { !$0.isEmpty }.map { ModelChoice(id: $0, model: $0, title: ComposerChips.model($0)) }
+            : aliases.map { ModelChoice(id: $0, model: $0, title: ComposerChips.model($0)) }
+        let known = choices.isEmpty ? fallback : choices
         var rows: [Row] = []
         var seenModels = Set<String>()
         func add(_ c: ModelChoice, older: Bool) {
@@ -99,7 +109,7 @@ public enum ModelPicker {
             rows.append(Row(id: c.id, title: c.title, subtitle: c.description, isDefault: isDefault, isSelected: matches(c, selected), isOlder: older))
         }
         let isMain = { (c: ModelChoice) -> Bool in
-            c.id.allSatisfy(\.isLetter) || matches(c, defaultId) || matches(c, selected)
+            codex || c.id.allSatisfy(\.isLetter) || matches(c, defaultId) || matches(c, selected)
         }
         for c in known where isMain(c) { add(c, older: false) }
         if let selected, !selected.isEmpty, !known.contains(where: { matches($0, selected) }) {
@@ -123,12 +133,23 @@ public enum ModelPicker {
     }
 
     /// The effort levels the picker offers for a model: the CLI's list for
-    /// it when known, else the usual five. There's no "default" level any
-    /// more: the picker remembers the last one chosen instead.
-    public static func effortLevels(for model: String?, in choices: [ModelChoice]) -> [String] {
+    /// it when known (Codex's go up to "ultra"), else the provider's usual
+    /// ones. There's no "default" level any more: the picker remembers the
+    /// last one chosen instead.
+    public static func effortLevels(for model: String?, in choices: [ModelChoice], provider: String = "claude") -> [String] {
         guard let model, let levels = ComposerChips.choice(for: model, in: choices)?.effortLevels, !levels.isEmpty else {
-            return ComposerChips.effortLevels
+            return ComposerChips.effortLevels(provider: provider)
         }
         return levels
+    }
+
+    /// The level a thread with none chosen runs at, when it's known: the
+    /// runner's default for the provider (new threads), else the account's
+    /// own (Codex's `model_reasoning_effort`), else the model's.
+    public static func impliedEffort(model: String?, choices: [ModelChoice], account: Account?, runnerDefault: String?) -> String? {
+        if let runnerDefault, !runnerDefault.isEmpty { return runnerDefault }
+        if let own = account?.defaultEffort, !own.isEmpty { return own }
+        guard let model else { return nil }
+        return ComposerChips.choice(for: model, in: choices)?.defaultEffort
     }
 }

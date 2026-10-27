@@ -30,9 +30,10 @@ struct ComposerControls: View {
                 }
                 ChipDivider()
             }
-            ComposerChip(icon: "person.crop.circle", title: app.accountShortTitle(account), help: app.accountTitle(account)) {
-                settings.accountMenu()
-            }
+            ComposerChip(icon: "person.crop.circle", title: app.accountShortTitle(account), help: settings.accountChipHelp,
+                         badge: settings.accountBadge, popover: {
+                NSHostingController(rootView: AccountPickerView(threadId: thread?.id, close: $0).environment(app))
+            }, openRequest: app.accountPickerRequest)
             ChipDivider()
             ComposerChip(icon: "sparkle", title: settings.modelChipTitle, help: settings.modelChipHelp, popover: {
                 // The picker reads the thread live, so a pick made while
@@ -69,9 +70,12 @@ struct ThreadSettings {
     let thread: ThreadSummary?
 
     var cwd: String { thread?.cwd ?? app.newThreadCwd ?? app.defaults.cwd }
-    var account: String { thread?.accountId ?? app.newThreadAccount ?? app.lastAccountId }
-    var model: String? { thread == nil ? app.newThreadModel : thread?.model }
-    var effort: String? { thread == nil ? app.newThreadEffort : thread?.effort }
+    /// A new thread's is the one with the most room until Mike picks one.
+    var account: String { thread?.accountId ?? app.newThreadAccountId }
+    /// "claude" or "codex": the account's, which a thread's own follows.
+    var provider: String { thread?.provider ?? app.provider(ofAccount: account) }
+    var model: String? { thread == nil ? app.lastModels[provider] : thread?.model }
+    var effort: String? { thread == nil ? app.lastEfforts[provider] : thread?.effort }
     var ask: Bool { thread.map { $0.permissionMode == .ask } ?? app.newThreadAsk }
 
     /// What the account's CLI offers, once the runner has asked it.
@@ -82,7 +86,7 @@ struct ThreadSettings {
     /// last turn is the truth, and it already includes the runner's default.
     var defaultModel: String? {
         if let thread { return ComposerChips.resolvedModel(thread.modelInUse, app.account(thread.accountId)?.defaultModel) }
-        return ComposerChips.resolvedModel(app.defaults.model, app.account(account)?.defaultModel)
+        return ComposerChips.resolvedModel(app.defaults.model(for: provider), app.account(account)?.defaultModel)
     }
 
     /// The model the chip shows, resolved; nil only before the runner has
@@ -90,8 +94,26 @@ struct ThreadSettings {
     var effectiveModel: String? { ComposerChips.resolvedModel(model, defaultModel) }
 
     /// The level the chip shows: the one chosen, else what the CLI said it
-    /// ran the last turn at.
-    var effectiveEffort: String? { effort ?? thread?.effortInUse }
+    /// ran the last turn at, else the level that will apply (the runner's
+    /// default for a new thread, the account's, the model's).
+    var effectiveEffort: String? {
+        effort ?? thread?.effortInUse ?? ModelPicker.impliedEffort(
+            model: effectiveModel, choices: choices, account: app.account(account),
+            runnerDefault: thread == nil ? app.defaults.efforts[provider] : nil)
+    }
+
+    /// The account chip's "· 12%" or "Limit reached".
+    var accountBadge: AccountUsageText.ChipBadge? { AccountUsageText.chipBadge(app.account(account)?.usage) }
+
+    /// The full sentence: the address, its note, and the room left.
+    var accountChipHelp: String {
+        AccountUsageText.tooltip(app.account(account), fallback: app.accountTitle(account), now: app.now)
+    }
+
+    /// The account picker's sections and its last line.
+    var accountSections: [AccountMenu.Section] { AccountMenu.sections(app.accounts, selected: account, now: app.now) }
+    var accountFooter: String? { AccountUsageText.sourceLine(app.accounts, now: app.now) }
+    func accountLines() -> [String] { AccountMenu.lines(accountSections, footer: accountFooter) }
 
     var modelChipTitle: String { ComposerChips.chipTitle(model: effectiveModel, effort: effectiveEffort, choices: choices) }
 
@@ -100,6 +122,7 @@ struct ThreadSettings {
         if let model { parts.append(model) } else if let defaultModel { parts.append("\(defaultModel), the default") } else { parts.append("The account's default model") }
         if let effort { parts.append("\(ComposerChips.effortTitle(effort).lowercased()) effort") }
         else if let level = thread?.effortInUse { parts.append("\(level) effort, the model's own level") }
+        else if let level = effectiveEffort { parts.append("\(ComposerChips.effortTitle(level).lowercased()) effort, the default") }
         else { parts.append("the model's own effort level") }
         return parts.joined(separator: ", ")
     }
@@ -137,20 +160,6 @@ struct ThreadSettings {
         return menu
     }
 
-    func accountMenu() -> NSMenu {
-        let menu = NSMenu()
-        let current = account
-        for item in app.accounts {
-            menu.addItem(ActionMenuItem(item.title, checked: item.id == current) { setAccount(item.id) })
-        }
-        if app.accounts.isEmpty {
-            let none = NSMenuItem(title: "No accounts yet", action: nil, keyEquivalent: "")
-            none.isEnabled = false
-            menu.addItem(none)
-        }
-        return menu
-    }
-
     /// The providers in the picker's rail, and which column opens: the
     /// account's own provider.
     var providers: [ModelPicker.Provider] { ModelPicker.providers(app.accounts) }
@@ -172,12 +181,12 @@ struct ThreadSettings {
         }
         let own = listed == account
         let choices = app.account(listed)?.models ?? []
-        let defaultId = own ? defaultModel : app.account(listed)?.defaultModel
-        return ModelPicker.rows(choices: choices, defaultId: defaultId, selected: own ? effectiveModel : nil, query: query)
+        let defaultId = own ? defaultModel : (app.defaults.model(for: providerId) ?? app.account(listed)?.defaultModel)
+        return ModelPicker.rows(choices: choices, defaultId: defaultId, selected: own ? effectiveModel : nil, query: query, provider: providerId)
     }
 
     /// The levels the effort row offers for the model in use.
-    var effortLevels: [String] { ModelPicker.effortLevels(for: effectiveModel, in: choices) }
+    var effortLevels: [String] { ModelPicker.effortLevels(for: effectiveModel, in: choices, provider: provider) }
 
     /// Picks a row: the default row leaves the thread on the default (so
     /// it follows the account's setting), any other pins that model. A row
@@ -270,11 +279,11 @@ struct ThreadSettings {
     }
 
     func setModel(_ model: String?) {
-        if let thread { app.setModel(thread.id, model) } else { app.newThreadModel = model }
+        if let thread { app.setModel(thread.id, model) } else { app.remember(model: model, provider: provider) }
     }
 
     func setEffort(_ effort: String?) {
-        if let thread { app.setEffort(thread.id, effort) } else { app.newThreadEffort = effort }
+        if let thread { app.setEffort(thread.id, effort) } else { app.remember(effort: effort, provider: provider) }
     }
 
     private func setAsk(_ ask: Bool) {
@@ -290,6 +299,9 @@ private struct ComposerChip: View {
     let icon: String
     let title: String
     let help: String
+    /// After the title: "· 12%" in orange, "Limit reached" in red. Colour
+    /// only here, where it means the account is running out.
+    var badge: AccountUsageText.ChipBadge? = nil
     var menu: (() -> NSMenu)? = nil
     /// Instead of a menu: a popover above the chip, given a way to close
     /// itself.
@@ -312,6 +324,20 @@ private struct ComposerChip: View {
                     .font(.system(size: TypeScale.chip))
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
+                switch badge {
+                case .low(let percent)?:
+                    Text("· " + percent)
+                        .font(.system(size: TypeScale.chip))
+                        .foregroundStyle(.orange)
+                        .lineLimit(1)
+                case .blocked?:
+                    Text("Limit reached")
+                        .font(.system(size: TypeScale.chip))
+                        .foregroundStyle(.red)
+                        .lineLimit(1)
+                case nil:
+                    EmptyView()
+                }
                 Image(systemName: "chevron.down")
                     .font(.system(size: 7.5, weight: .bold))
                     .foregroundStyle(Color(nsColor: Theme.faintIcon))
@@ -511,13 +537,11 @@ struct ModelPickerView: View {
         let providers = settings.providers
         let column = providerId ?? settings.providerId
         let rows = settings.rows(for: column, query: query)
-        HStack(spacing: 0) {
-            ProviderRail(providers: providers, selected: column) { id in
-                providerId = id
-                query = ""
-            }
-            Divider()
-            VStack(spacing: 0) {
+        // The rail is laid over the column's leading edge rather than
+        // beside it in a stack: its full-height frame made the stack's
+        // height a guess, and a short list (Codex's two models) floated in
+        // the middle of a popover sized for a longer one.
+        VStack(spacing: 0) {
                 HStack(spacing: 6) {
                     Image(systemName: "magnifyingglass")
                         .font(.system(size: 12))
@@ -537,7 +561,11 @@ struct ModelPickerView: View {
                 .frame(height: 36)
                 Divider()
                 ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 1) {
+                    // Not lazy: a list this short costs nothing to build,
+                    // and a lazy stack's guessed height left a short list
+                    // (Codex's two models) floating in a popover sized for
+                    // more.
+                    VStack(alignment: .leading, spacing: 1) {
                         ForEach(rows.filter { !$0.isOlder }) { row in
                             ModelRow(row: row) {
                                 settings.pick(row, in: column)
@@ -572,6 +600,15 @@ struct ModelPickerView: View {
                 .fixedSize(horizontal: false, vertical: true)
                 Divider()
                 EffortRow(levels: settings.effortLevels, chosen: settings.effectiveEffort) { settings.setEffort($0) }
+        }
+        .padding(.leading, Self.railWidth + 1)
+        .overlay(alignment: .leading) {
+            HStack(spacing: 0) {
+                ProviderRail(providers: providers, selected: column) { id in
+                    providerId = id
+                    query = ""
+                }
+                Divider()
             }
         }
         .frame(width: Self.width)
@@ -736,6 +773,119 @@ private struct EffortRow: View {
             }
             .buttonStyle(.plain)
             .onHover { hovering = $0 }
+        }
+    }
+}
+
+// MARK: - Account picker
+
+/// The account picker: the logins grouped by provider, each by its email
+/// with its note and the room it has left under it, and where the numbers
+/// came from at the bottom. A popover rather than a menu, like the model
+/// picker beside it, so its rows can say more than a title.
+struct AccountPickerView: View {
+    @Environment(AppModel.self) private var app
+    /// Nil for the new-thread composer.
+    let threadId: String?
+    let close: () -> Void
+
+    static let width: CGFloat = 340
+
+    private var settings: ThreadSettings { ThreadSettings(app: app, thread: threadId.flatMap { app.threads[$0] }) }
+
+    var body: some View {
+        let settings = settings
+        let sections = settings.accountSections
+        VStack(alignment: .leading, spacing: 0) {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 1) {
+                    ForEach(sections) { section in
+                        Text(section.title)
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundStyle(.tertiary)
+                            .padding(.horizontal, 10)
+                            .padding(.top, section.id == sections.first?.id ? 2 : 10)
+                            .padding(.bottom, 2)
+                            .accessibilityAddTraits(.isHeader)
+                        ForEach(section.items) { item in
+                            AccountRow(item: item) {
+                                settings.setAccount(item.id)
+                                close()
+                            }
+                        }
+                    }
+                    if sections.isEmpty {
+                        Text("No accounts yet")
+                            .font(.system(size: 13))
+                            .foregroundStyle(.secondary)
+                            .padding(10)
+                    }
+                }
+                .padding(6)
+            }
+            .frame(maxHeight: 420)
+            .fixedSize(horizontal: false, vertical: true)
+            if let footer = settings.accountFooter {
+                Divider()
+                Text(footer)
+                    .font(.system(size: 11))
+                    .foregroundStyle(.tertiary)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 8)
+            }
+        }
+        .frame(width: Self.width)
+    }
+
+    private struct AccountRow: View {
+        let item: AccountMenu.Item
+        let action: () -> Void
+        @State private var hovering = false
+
+        var body: some View {
+            Button(action: action) {
+                HStack(spacing: 8) {
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(item.title)
+                            .font(.system(size: 13, weight: .medium))
+                            .foregroundStyle(.primary)
+                            .lineLimit(1)
+                        if let subtitle = item.subtitle {
+                            Text(subtitle)
+                                .font(.system(size: 11))
+                                .foregroundStyle(subtitleStyle)
+                                .lineLimit(1)
+                        }
+                    }
+                    Spacer(minLength: 8)
+                    Image(systemName: "checkmark")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(.primary)
+                        .opacity(item.isSelected ? 1 : 0)
+                        .accessibilityHidden(!item.isSelected)
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 5)
+                .background(
+                    RoundedRectangle(cornerRadius: 6, style: .continuous)
+                        .fill(Color.primary.opacity(hovering ? 0.06 : 0))
+                )
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .onHover { hovering = $0 }
+            .help(item.subtitle ?? item.title)
+            .accessibilityLabel(item.title + (item.isSelected ? ", chosen" : ""))
+        }
+
+        /// The usage line is grey, unless the account is running out (as
+        /// the chip shows it): then the colour says so.
+        private var subtitleStyle: AnyShapeStyle {
+            switch item.badge {
+            case .blocked?: return AnyShapeStyle(Color.red)
+            case .low?: return AnyShapeStyle(Color.orange)
+            case nil: return AnyShapeStyle(.secondary)
+            }
         }
     }
 }

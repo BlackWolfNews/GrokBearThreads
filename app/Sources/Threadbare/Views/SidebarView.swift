@@ -511,12 +511,30 @@ private struct SidebarFooter: View {
                     app.showSchedules()
                 }
             }
+            UsageButton()
         }
         .padding(.horizontal, SidebarMetrics.outerInset)
         .padding(.top, 6)
         .padding(.bottom, 8)
         .overlay(alignment: .top) {
             Rectangle().fill(.separator).frame(height: 0.5).padding(.horizontal, SidebarMetrics.outerInset + 10)
+        }
+    }
+}
+
+/// "Usage": every account's room and the CLIs' versions, in a popover.
+private struct UsageButton: View {
+    @Environment(AppModel.self) private var app
+
+    var body: some View {
+        @Bindable var app = app
+        SidebarButtonRow(icon: "gauge.with.dots.needle.33percent", title: "Usage", size: TypeScale.sidebarFooter) {
+            app.usagePopoverShown.toggle()
+        }
+        // On the model, so a script can open it and `dump` can say so.
+        // Above the button, which sits at the foot of the window.
+        .popover(isPresented: $app.usagePopoverShown, arrowEdge: .top) {
+            UsagePopover().environment(app)
         }
     }
 }

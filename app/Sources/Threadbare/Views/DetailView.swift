@@ -41,6 +41,7 @@ struct DetailView: View {
             VStack(spacing: 0) {
             ConnectionBanner()
             ErrorBanner()
+            if let thread { LimitBanner(thread: thread) }
             ComposerPlacement(centred: isNew) {
                 ZStack {
                     TranscriptView(session: session, controller: app.transcript)
@@ -238,7 +239,7 @@ private struct NewThreadNote: View {
 
     var body: some View {
         let cwd = app.newThreadCwd ?? app.defaults.cwd
-        let account = app.newThreadAccount ?? app.lastAccountId
+        let account = app.newThreadAccountId
         Text("Starts in \(FolderName.short(cwd)) on \(app.accountShortTitle(account))")
             .font(.system(size: TypeScale.label))
             .foregroundStyle(Color(nsColor: Theme.faintText))
@@ -270,6 +271,10 @@ struct ConnectionBanner: View {
             }
             Text(banner.text).foregroundStyle(.secondary).lineLimit(1)
             Spacer(minLength: 0)
+            if let key = banner.dismissKey {
+                Button("Dismiss") { app.dismissCliFailure(key) }
+                    .buttonStyle(.borderless)
+            }
         }
         .font(.system(size: TypeScale.label))
         .help(banner.detail ?? "")
@@ -293,6 +298,35 @@ struct ConnectionBanner: View {
         .padding(.horizontal, 14)
         .padding(.vertical, 8)
         .background(.yellow.opacity(0.12))
+    }
+}
+
+/// The open thread's account is at its limit (or its last turn failed on
+/// it): says so, with a button to move the thread to the account with the
+/// most room. Here rather than in the transcript's error row, whose drawing
+/// is cached and knows nothing of accounts, so the name and the room it
+/// offers stay current as usage changes.
+private struct LimitBanner: View {
+    @Environment(AppModel.self) private var app
+    let thread: ThreadSummary
+
+    var body: some View {
+        if let advice = app.limitAdvice(for: thread) {
+            HStack(spacing: 8) {
+                Image(systemName: "gauge.with.dots.needle.100percent").foregroundStyle(.red)
+                Text(advice.text).lineLimit(1)
+                Spacer(minLength: 6)
+                if let target = advice.target {
+                    Button(AccountUsageText.switchTitle(target, accounts: app.accounts)) {
+                        app.switchAccount(thread.id, to: target.id)
+                    }
+                }
+            }
+            .font(.system(size: TypeScale.label))
+            .padding(.horizontal, 14)
+            .padding(.vertical, 7)
+            .overlay(alignment: .bottom) { Rectangle().fill(Color(nsColor: Theme.hairline)).frame(height: 0.5) }
+        }
     }
 }
 

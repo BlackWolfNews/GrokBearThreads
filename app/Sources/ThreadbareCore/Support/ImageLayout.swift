@@ -4,6 +4,12 @@ import Foundation
 /// Lays images out in rows for the transcript: each scaled to fit a box,
 /// wrapping onto a new row when the next one won't fit.
 public enum ImageLayout {
+    /// The box a generated image fits in (points): larger than a tool's
+    /// screenshot, which the transcript keeps to 320 by 240, since the
+    /// picture is what the turn was for. Still a box, so a 1254 px square
+    /// from gpt-image-2 doesn't fill the window.
+    public static let generatedMaxSide: CGFloat = 420
+
     public struct Result: Sendable, Equatable {
         /// Relative to the image area's top-left.
         public var frames: [CGRect]
