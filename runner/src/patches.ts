@@ -53,7 +53,7 @@ type LoadedPatch = { info: PatchInfo; panels: Panel[]; actions: Action[]; hooks:
 export async function loadPatchSet(cwd: string, home: string = os.homedir(), cache: PatchCache = new Map()): Promise<PatchSet> {
   const set: PatchSet = { panels: [], actions: [], hooks: [], patches: [] };
   // Built in first, so their panels come first.
-  const convexDir = findUp(cwd, home, (dir) => isDir(path.join(dir, 'convex')));
+  const convexDir = findUp(cwd, home, isConvexProject);
   if (convexDir) {
     set.panels.push(convexPanel(convexDir));
     set.patches.push({ id: 'convex', source: 'builtin' });
@@ -224,7 +224,7 @@ function firstLine(e: unknown): string {
 // shows before its patch files have been read.
 export function projectPanels(cwd: string, home: string = os.homedir()): Panel[] {
   const panels: Panel[] = [];
-  const convexDir = findUp(cwd, home, (dir) => isDir(path.join(dir, 'convex')));
+  const convexDir = findUp(cwd, home, isConvexProject);
   if (convexDir) panels.push(convexPanel(convexDir));
   const xcodeDir = findUp(cwd, home, hasXcodeProject);
   if (xcodeDir) panels.push(simulatorPanel(xcodeDir));
@@ -252,6 +252,14 @@ export function convexDashboardUrl(deployment: string | undefined): { url: strin
   if (!name) return { url: CONVEX_DASHBOARD };
   if (type === 'anonymous') return { url: CONVEX_LOCAL_DASHBOARD, note: `${name}, local; the dashboard is up while convex dev runs` };
   return { url: `${CONVEX_DASHBOARD}/d/${encodeURIComponent(name)}`, note: type ? `${name} (${type})` : name };
+}
+
+// A folder with its functions in convex/ and a package.json or convex.json
+// beside them. A bare folder called convex isn't enough: ~/dev/convex is a
+// folder of repos, and every thread under ~/dev got a dashboard panel.
+export function isConvexProject(dir: string): boolean {
+  if (!isDir(path.join(dir, 'convex'))) return false;
+  return fs.existsSync(path.join(dir, 'package.json')) || fs.existsSync(path.join(dir, 'convex.json'));
 }
 
 function simulatorPanel(dir: string): Panel {

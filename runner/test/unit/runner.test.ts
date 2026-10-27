@@ -1151,6 +1151,7 @@ test('a thread in a Convex project has the dashboard panel; a folder change refr
   const project = path.join(root, 'app');
   fs.mkdirSync(path.join(project, 'convex'), { recursive: true });
   fs.writeFileSync(path.join(project, '.env.local'), 'CONVEX_DEPLOYMENT=dev:quick-fox-77\n');
+  fs.writeFileSync(path.join(project, 'package.json'), '{}');
   const plain = path.join(root, 'plain');
   fs.mkdirSync(plain);
   const h = makeHarness(undefined, {}, { panelsRoot: root });

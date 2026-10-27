@@ -20,7 +20,7 @@ function project(home: string, rel: string, files: Record<string, string | null>
 
 test('a folder with convex/ gets the dashboard panel for its deployment', () => {
   const home = tmpDir();
-  const dir = project(home, 'dev/app', { convex: null, '.env.local': 'CONVEX_DEPLOYMENT=dev:happy-otter-123 # team: mike\nCONVEX_URL=https://happy-otter-123.convex.cloud\n' });
+  const dir = project(home, 'dev/app', { convex: null, 'package.json': '{}', '.env.local': 'CONVEX_DEPLOYMENT=dev:happy-otter-123 # team: mike\nCONVEX_URL=https://happy-otter-123.convex.cloud\n' });
   const panels = projectPanels(dir, home);
   assert.equal(panels.length, 1);
   assert.deepEqual(checkPanel(panels[0] as never), []);
@@ -32,7 +32,7 @@ test('a folder with convex/ gets the dashboard panel for its deployment', () => 
 
 test('a thread in a package of the project still gets the project panels; nothing above home', () => {
   const home = tmpDir();
-  project(home, 'dev/app', { convex: null, '.env.local': 'CONVEX_DEPLOYMENT=prod:big-cat-9\n' });
+  project(home, 'dev/app', { convex: null, 'package.json': '{}', '.env.local': 'CONVEX_DEPLOYMENT=prod:big-cat-9\n' });
   const sub = project(home, 'dev/app/packages/web');
   assert.equal(projectPanels(sub, home)[0]?.url, 'https://dashboard.convex.dev/d/big-cat-9');
   // A convex/ folder in the fake home's parent isn't found from inside home.
@@ -53,7 +53,7 @@ test('dashboard URLs: no deployment, anonymous local, quoted .env values, .env.l
   assert.equal(parseEnvValue("CONVEX_DEPLOYMENT='dev:single-1'", 'CONVEX_DEPLOYMENT'), 'dev:single-1');
   assert.equal(parseEnvValue('# CONVEX_DEPLOYMENT=dev:commented\nOTHER=1\n', 'CONVEX_DEPLOYMENT'), undefined);
   const home = tmpDir();
-  const dir = project(home, 'p', { convex: null, '.env': 'CONVEX_DEPLOYMENT=prod:from-env\n', '.env.local': 'CONVEX_DEPLOYMENT=dev:from-local\n' });
+  const dir = project(home, 'p', { convex: null, 'package.json': '{}', '.env': 'CONVEX_DEPLOYMENT=prod:from-env\n', '.env.local': 'CONVEX_DEPLOYMENT=dev:from-local\n' });
   assert.equal(projectPanels(dir, home)[0]?.note, 'from-local (dev)');
 });
 
@@ -63,7 +63,7 @@ test('an Xcode project gets the Simulator panel; both patches can apply', () => 
   const panels = projectPanels(ios, home);
   assert.deepEqual(panels, [{ id: 'xcode.simulator', title: 'Simulator', kind: 'image', patch: 'xcode', note: 'Walkies' }]);
   assert.deepEqual(checkPanel(panels[0] as never), []);
-  const both = project(home, 'dev/Both', { 'App.xcworkspace': null, convex: null });
+  const both = project(home, 'dev/Both', { 'App.xcworkspace': null, convex: null, 'package.json': '{}' });
   assert.deepEqual(projectPanels(both, home).map((p) => p.id), ['convex.dashboard', 'xcode.simulator']);
   assert.deepEqual(projectPanels(project(home, 'dev/nothing'), home), []);
 });
@@ -102,7 +102,7 @@ function writePatch(dir: string, name: string, text: string): string {
 
 test('patch files in the project and in home give actions and panels, with ids from the title', async () => {
   const home = tmpDir();
-  const app = project(home, 'dev/app', { convex: null });
+  const app = project(home, 'dev/app', { convex: null, 'package.json': '{}' });
   const file = writePatch(path.join(app, '.threadbear/patches'), 'reseed.ts', `
     export default {
       actions: [
@@ -218,4 +218,16 @@ test('hooks in a patch file: shape, defaults and the edited glob', () => {
   assert.equal(hookApplies(hook, ['/p/README.md', '/elsewhere/c.ts'], '/p'), false);
   assert.equal(hookApplies(hook, [], '/p'), false);
   assert.equal(hookApplies(ok.hooks[1], [], '/p'), true, 'no filter: every turn');
+});
+
+test('a folder that is only called convex is not a Convex project', async () => {
+  const home = tmpDir();
+  // Like ~/dev/convex: a folder of repos, no package.json beside it.
+  project(home, 'dev/convex/some-repo');
+  const thread = project(home, 'dev/me/misc');
+  assert.deepEqual(projectPanels(thread, home), []);
+  assert.deepEqual((await loadPatchSet(thread, home)).patches, []);
+  // convex.json alone is enough.
+  const cfg = project(home, 'dev/me/app', { convex: null, 'convex.json': '{}' });
+  assert.equal(projectPanels(cfg, home)[0]?.id, 'convex.dashboard');
 });
