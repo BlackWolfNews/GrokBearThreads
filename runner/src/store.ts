@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import type { EffortLevel, MessageOrigin, PermissionMode, PersistedEvent, Provider, Subagent, ThreadStatus, ImageRef } from './protocol.ts';
+import type { EffortLevel, MessageOrigin, PermissionMode, PersistedEvent, Provider, Subagent, ThreadProject, ThreadStatus, ImageRef } from './protocol.ts';
 import { atomicWriteFileSync, readJsonSync } from './fsutil.ts';
 import { paths } from './config.ts';
 
@@ -56,7 +56,17 @@ export type ThreadRecord = {
   turnId?: string; // turn in progress when the record was saved
   titleSet?: boolean;
   subagents?: SubagentRecord[]; // newest last, at most SUBAGENTS_KEPT
+  // The projects the thread is in (projects.ts), oldest first; titles come
+  // from the project list when the summary is made.
+  projects?: ThreadProjectRecord[];
+  // Projects Mike took the thread out of: the librarian never puts it back.
+  projectsLeft?: string[];
+  // The projects the native session has been told about (the brief, or a
+  // line when it joined one), so it hears about each once.
+  projectsTold?: string[];
 };
+
+export type ThreadProjectRecord = Omit<ThreadProject, 'title'>;
 
 // A sub-agent as the summary shows it, plus where its transcript is: the
 // thread can change folder, account or session after it ran.

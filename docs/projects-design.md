@@ -124,7 +124,7 @@ it) and edit any field, in the project page. He never has to.
 - `ThreadSummary.projects` as above.
 - `projects.list`, `projects.get`, `projects.create`, `projects.update`,
   `projects.archive`, `projects.merge`, `threads.setProjects`.
-- `project.updated` notification, like thread summaries.
+- `projects.updated` and `librarian.updated` notifications.
 - `PatchInfo` gains `folder` and `projectId`.
 
 ## Build order

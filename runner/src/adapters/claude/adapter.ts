@@ -188,7 +188,7 @@ class ClaudeSession implements AgentSession {
       pathToClaudeCodeExecutable: deps.claudePath,
       env: { ...cliEnv(opts.account), ...opts.env },
       settingSources: ['user', 'project', 'local'],
-      systemPrompt: { type: 'preset', preset: 'claude_code' },
+      systemPrompt: { type: 'preset', preset: 'claude_code', ...(opts.instructions ? { append: opts.instructions } : {}) },
       includePartialMessages: true,
       thinking: { type: 'adaptive', display: 'summarized' },
       permissionMode: sdkPermissionMode(opts.permissionMode),

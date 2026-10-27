@@ -34,6 +34,8 @@ struct SidebarView: View {
                 case .snoozed: SnoozedList()
                 case .archive: ArchiveList()
                 case .scheduled: ScheduledList()
+                case .projects: ProjectsList()
+                case .librarian: LibrarianView()
                 }
             }
             .frame(maxWidth: .infinity)
@@ -94,7 +96,7 @@ private struct ThreadSection: View {
 /// before (it went to Running still showing its time, not "Working"): the
 /// stack moved the row without running its body again. So no plain
 /// `.id(thread.id)` on these rows either; the stack keys rows by that too.
-private struct SectionRow: Identifiable {
+struct SectionRow: Identifiable {
     let section: String
     let thread: ThreadSummary
     var id: String { Self.id(section: section, thread: thread.id) }
@@ -102,7 +104,7 @@ private struct SectionRow: Identifiable {
     static func id(section: String, thread: String) -> String { section + "/" + thread }
 }
 
-private struct SectionHeading: View {
+struct SectionHeading: View {
     let title: String
 
     var body: some View {
@@ -125,7 +127,7 @@ private struct SectionHeading: View {
 /// are drawn here rather than in a `List` because the sidebar list style
 /// paints its own accent-coloured selection, which can't be made as quiet
 /// as the other agent apps' grey highlight.
-private struct ThreadList<Content: View>: View {
+struct ThreadList<Content: View>: View {
     @Environment(AppModel.self) private var app
     /// Thread ids top to bottom, for the arrow keys.
     let order: [String]
@@ -190,10 +192,10 @@ private struct ThreadList<Content: View>: View {
 extension SidebarMode {
     var rowActions: [RowAction] {
         switch self {
-        case .inbox: return [.snooze, .archive]
+        case .inbox, .projects: return [.snooze, .archive]
         case .snoozed: return [.unsnooze, .archive]
         case .archive: return [.unarchive]
-        case .scheduled: return []
+        case .scheduled, .librarian: return []
         }
     }
 }
@@ -214,12 +216,14 @@ struct ThreadRowView: View {
     @State private var pressed = false
 
     /// Not while one of its sub-agents is showing: that row is highlighted.
-    private var isSelected: Bool { app.selection == thread.id && app.subagentSelection == nil }
+    private var isSelected: Bool { app.selection == thread.id && app.subagentSelection == nil && app.openProjectId == nil }
     /// The screenshot run shows one row as if the pointer were over it.
     private var showsActions: Bool { hovering || app.hoverOverride == thread.id }
 
     var body: some View {
-        let look = mode == .inbox ? ThreadRowLook(thread, section: section) : ThreadRowLook(status: .time, unread: false, emphasised: false)
+        // The Projects view's rows say what they're doing too: it has no
+        // Needs you or Running headings to say it for them.
+        let look = mode == .inbox || mode == .projects ? ThreadRowLook(thread, section: section) : ThreadRowLook(status: .time, unread: false, emphasised: false)
         VStack(alignment: .leading, spacing: zoomed(3)) {
             HStack(alignment: .firstTextBaseline, spacing: zoomed(6)) {
                 Text(thread.title.isEmpty ? "Untitled" : thread.title)
@@ -500,6 +504,33 @@ struct ThreadMenu: View {
             Button("Unarchive") { app.unarchive(thread.id) }
         } else {
             Button("Archive") { app.archive(thread.id) }
+        }
+        if app.projectsSupported {
+            ThreadProjectsMenu(thread: thread)
+        }
+    }
+}
+
+/// "Projects ▸": a tick by each project the thread is in (choosing one
+/// puts it in or takes it out, by hand, so it's pinned or remembered), a
+/// new one, and asking the librarian to look at it now.
+struct ThreadProjectsMenu: View {
+    @Environment(AppModel.self) private var app
+    let thread: ThreadSummary
+
+    var body: some View {
+        Menu("Projects") {
+            let live = app.projects.filter { !$0.archived }.sorted { $0.title.localizedStandardCompare($1.title) == .orderedAscending }
+            ForEach(live) { project in
+                let inIt = thread.projects.contains { $0.id == project.id }
+                Toggle(project.title, isOn: Binding(
+                    get: { inIt },
+                    set: { on in app.setProjects(thread.id, add: on ? [project.id] : [], remove: on ? [] : [project.id]) }
+                ))
+            }
+            if !live.isEmpty { Divider() }
+            Button("New project…") { app.newProject(with: thread.id) }
+            Button("Ask the librarian to look") { app.runLibrarian(threadId: thread.id) }
         }
     }
 }

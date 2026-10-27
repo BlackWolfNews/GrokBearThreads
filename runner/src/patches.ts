@@ -25,6 +25,12 @@
 // Patches are found by walking up from the thread's folder to the home
 // folder, so a thread started in a package of a monorepo still gets the
 // project's; a parent folder's patches apply to every project under it.
+//
+// A thread in projects (projects.ts) also gets the patches of every folder
+// of those projects, found the same way from each. Those are tagged with
+// the folder and project, and their commands run in that folder rather
+// than the thread's: a thread in ~/dev/me/misc that's about Poddle gets
+// Poddle's dashboard and chips, and Poddle's Reseed runs in Poddle.
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -50,29 +56,112 @@ export const EMPTY_PATCH_SET: PatchSet = { panels: [], actions: [], hooks: [], p
 export type PatchCache = Map<string, { mtimeMs: number; loaded: LoadedPatch }>;
 type LoadedPatch = { info: PatchInfo; panels: Panel[]; actions: Action[]; hooks: Hook[] };
 
-export async function loadPatchSet(cwd: string, home: string = os.homedir(), cache: PatchCache = new Map()): Promise<PatchSet> {
+// A folder of one of the thread's projects.
+export type ProjectFolder = { folder: string; projectId: string };
+
+export async function loadPatchSet(cwd: string, home: string = os.homedir(), cache: PatchCache = new Map(), projectFolders: ProjectFolder[] = []): Promise<PatchSet> {
   const set: PatchSet = { panels: [], actions: [], hooks: [], patches: [] };
-  // Built in first, so their panels come first.
-  const convexDir = findUp(cwd, home, isConvexProject);
-  if (convexDir) {
-    set.panels.push(convexPanel(convexDir));
-    set.patches.push({ id: 'convex', source: 'builtin' });
-  }
-  const xcodeDir = findUp(cwd, home, hasXcodeProject);
-  if (xcodeDir) {
-    set.panels.push(simulatorPanel(xcodeDir));
-    set.patches.push({ id: 'xcode', source: 'builtin' });
-  }
+  const roots = projectRoots(cwd, projectFolders);
+  // Built in first, so their panels come first: the thread's own, then
+  // its projects'.
+  for (const b of builtins(cwd, home, roots)) addPatch(set, b);
+  // Then the files: the thread's own chain (home's folder first), then
+  // each project folder's chain, each patch folder once.
+  const seen = new Set<string>();
   for (const { dir, source } of patchDirs(cwd, home)) {
-    for (const file of patchFiles(dir)) {
-      const loaded = await loadPatchFile(file, source, cache);
-      set.patches.push(loaded.info);
-      set.panels.push(...loaded.panels);
-      set.actions.push(...loaded.actions);
-      set.hooks.push(...loaded.hooks);
+    seen.add(dir);
+    for (const file of patchFiles(dir)) addPatch(set, await loadPatchFile(file, source, cache));
+  }
+  for (const root of roots) {
+    for (const { dir, source } of patchDirs(root.folder, home)) {
+      if (seen.has(dir) || source === 'home') continue;
+      seen.add(dir);
+      for (const file of patchFiles(dir)) addPatch(set, inFolder(await loadPatchFile(file, source, cache), root));
     }
   }
   return set;
+}
+
+// The project folders that add anything: not the thread's own folder or
+// one it's inside (its own chain already covers those), each once.
+function projectRoots(cwd: string, projectFolders: ProjectFolder[]): ProjectFolder[] {
+  const own = path.resolve(cwd);
+  const out: ProjectFolder[] = [];
+  for (const pf of projectFolders) {
+    const folder = path.resolve(pf.folder);
+    if (isInside(own, folder) || out.some((r) => r.folder === folder)) continue;
+    out.push({ folder, projectId: pf.projectId });
+  }
+  return out;
+}
+
+// The built-in patches: the thread's folder's, then each project folder's
+// that isn't the same project as one already found.
+function builtins(cwd: string, home: string, roots: ProjectFolder[]): LoadedPatch[] {
+  const out: LoadedPatch[] = [];
+  const found = new Set<string>();
+  const add = (start: string, root?: ProjectFolder) => {
+    const convexDir = findUp(start, home, isConvexProject);
+    if (convexDir && !found.has('convex@' + convexDir)) {
+      found.add('convex@' + convexDir);
+      out.push(inFolder({ info: { id: 'convex', source: 'builtin' }, panels: [convexPanel(convexDir)], actions: [], hooks: [] }, root, convexDir));
+    }
+    const xcodeDir = findUp(start, home, hasXcodeProject);
+    if (xcodeDir && !found.has('xcode@' + xcodeDir)) {
+      found.add('xcode@' + xcodeDir);
+      out.push(inFolder({ info: { id: 'xcode', source: 'builtin' }, panels: [simulatorPanel(xcodeDir)], actions: [], hooks: [] }, root, xcodeDir));
+    }
+  };
+  add(cwd);
+  for (const root of roots) add(root.folder, root);
+  return out;
+}
+
+// Tags a patch from a project folder with where it came from and where
+// its commands run. The thread's own patches are left as they were.
+function inFolder(loaded: LoadedPatch, root: ProjectFolder | undefined, infoFolder?: string): LoadedPatch {
+  if (!root) return loaded;
+  const tag = { projectId: root.projectId };
+  return {
+    info: { ...loaded.info, folder: infoFolder ?? root.folder, ...tag },
+    panels: loaded.panels.map((p) => ({ ...p, ...tag })),
+    actions: loaded.actions.map((a) => ({ ...a, folder: root.folder, ...tag })),
+    hooks: loaded.hooks.map((h) => ({ ...h, folder: root.folder, ...tag })),
+  };
+}
+
+// Adds a patch to the set; one whose name is already taken gets its
+// folder's name in front ("web:convex"), and so do its items' ids.
+function addPatch(set: PatchSet, loaded: LoadedPatch): void {
+  let patch = loaded;
+  if (set.patches.some((p) => p.id === loaded.info.id)) {
+    const folder = loaded.info.folder ?? (loaded.info.file ? path.dirname(path.dirname(path.dirname(loaded.info.file))) : undefined);
+    const prefix = folder ? path.basename(folder) : 'other';
+    let id = `${prefix}:${loaded.info.id}`;
+    for (let n = 2; set.patches.some((p) => p.id === id); n++) id = `${prefix}:${loaded.info.id}-${n}`;
+    patch = renamePatch(loaded, id);
+  }
+  set.patches.push(patch.info);
+  set.panels.push(...patch.panels);
+  set.actions.push(...patch.actions);
+  set.hooks.push(...patch.hooks);
+}
+
+function renamePatch(loaded: LoadedPatch, id: string): LoadedPatch {
+  const from = loaded.info.id;
+  const item = <T extends { id: string; patch: string }>(x: T): T => ({ ...x, id: id + x.id.slice(from.length), patch: id });
+  return {
+    info: { ...loaded.info, id },
+    panels: loaded.panels.map(item),
+    actions: loaded.actions.map(item),
+    hooks: loaded.hooks.map(item),
+  };
+}
+
+// Whether `dir` is `parent` or somewhere under it.
+export function isInside(dir: string, parent: string): boolean {
+  const rel = path.relative(parent, dir);
+  return rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel));
 }
 
 // The patch folders that apply to `cwd`: the home one, then each folder
@@ -197,13 +286,15 @@ export function readPatchModule(id: string, source: 'home' | 'project', file: st
 }
 
 // Whether a turn's edits make a hook run: no filter, or one of the edited
-// paths (relative to the thread's folder) matches its glob.
+// paths (relative to the thread's folder) matches its glob. A hook from a
+// project folder only sees edits inside that folder, and needs one.
 export function hookApplies(hook: Hook, editedPaths: Iterable<string>, cwd: string): boolean {
-  if (!hook.edited) return true;
+  if (!hook.edited && !hook.folder) return true;
+  const base = hook.folder ?? cwd;
   for (const p of editedPaths) {
-    const rel = path.isAbsolute(p) ? path.relative(cwd, p) : p;
-    if (rel.startsWith('..')) continue;
-    if (path.matchesGlob(rel, hook.edited)) return true;
+    const rel = path.relative(base, path.resolve(cwd, p));
+    if (rel.startsWith('..') || path.isAbsolute(rel)) continue;
+    if (!hook.edited || path.matchesGlob(rel, hook.edited)) return true;
   }
   return false;
 }
@@ -222,13 +313,10 @@ function firstLine(e: unknown): string {
 
 // The built-in set alone, synchronous: what the first summary of a thread
 // shows before its patch files have been read.
-export function projectPanels(cwd: string, home: string = os.homedir()): Panel[] {
-  const panels: Panel[] = [];
-  const convexDir = findUp(cwd, home, isConvexProject);
-  if (convexDir) panels.push(convexPanel(convexDir));
-  const xcodeDir = findUp(cwd, home, hasXcodeProject);
-  if (xcodeDir) panels.push(simulatorPanel(xcodeDir));
-  return panels;
+export function projectPanels(cwd: string, home: string = os.homedir(), projectFolders: ProjectFolder[] = []): Panel[] {
+  const set: PatchSet = { panels: [], actions: [], hooks: [], patches: [] };
+  for (const b of builtins(cwd, home, projectRoots(cwd, projectFolders))) addPatch(set, b);
+  return set.panels;
 }
 
 // The Convex dashboard for the project's deployment. `.env.local` (what

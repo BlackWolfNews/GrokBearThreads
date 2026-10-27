@@ -100,7 +100,7 @@ struct ThreadbareApp: App {
                 .keyboardShortcut("c", modifiers: [.command, .shift])
                 .disabled(app.selection == nil)
                 Divider()
-                // ⌘1 to ⌘4 in the activity bar's order, as VS Code numbers
+                // ⌘1 to ⌘6 in the activity bar's order, as VS Code numbers
                 // its views.
                 Button("Show Inbox") { app.sidebarMode = .inbox }
                     .keyboardShortcut("1")
@@ -111,6 +111,12 @@ struct ThreadbareApp: App {
                 Button("Show Scheduled") { app.showSchedules() }
                     .keyboardShortcut("4")
                     .disabled(!app.schedulesSupported)
+                Button("Show Projects") { app.showProjects() }
+                    .keyboardShortcut("5")
+                    .disabled(!app.projectsSupported)
+                Button("Show Librarian") { app.showLibrarian() }
+                    .keyboardShortcut("6")
+                    .disabled(!app.projectsSupported)
             }
         }
         // ⌘, (the app menu's Settings…): the runner's settings.

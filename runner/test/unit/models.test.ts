@@ -34,6 +34,12 @@ function fakeFetch(replies: (Reply | ((c: Call) => Reply))[]) {
     if (r.hang) {
       return new Promise((_, reject) => init.signal?.addEventListener('abort', () => reject(new Error('aborted'))));
     }
+    // A 200 with no text: what OpenRouter sends when the provider fails
+    // after the request was accepted.
+    if (r.empty !== undefined) {
+      const choice = r.empty === 'length' ? { message: { content: null }, finish_reason: 'length' } : { message: { content: null }, finish_reason: 'error', error: { message: r.empty } };
+      return new Response(JSON.stringify({ choices: [choice] }), { status: 200 });
+    }
     const status = r.status ?? 200;
     const json = status === 200 ? { choices: [{ message: { content: r.text ?? '' } }], usage: { prompt_tokens: 10, completion_tokens: 3, cost: r.cost ?? 0.0001 } } : { error: { code: status, message: r.text ?? 'nope' } };
     return new Response(JSON.stringify(json), { status });
@@ -41,7 +47,7 @@ function fakeFetch(replies: (Reply | ((c: Call) => Reply))[]) {
   return { f, calls };
 }
 
-type Reply = { text?: string; status?: number; cost?: number; throws?: string; hang?: boolean };
+type Reply = { text?: string; status?: number; cost?: number; throws?: string; hang?: boolean; empty?: string };
 
 function setup(opts: { key?: boolean; settings?: Partial<ModelSettings>; replies?: (Reply | ((c: Call) => Reply))[]; maxInFlight?: number; timeoutMs?: number } = {}) {
   const home = tmpDir();
@@ -170,6 +176,20 @@ test('models: one retry on a 5xx or a network error, none on a 4xx', async () =>
   assert.ok(!rc.ok && rc.reason === 'provider' && /401: No auth credentials/.test(rc.message));
   assert.equal(c.calls.length, 1);
   assert.equal(c.ledger()[0].ok, false);
+
+  // A 200 with no text is tried again too, and says what OpenRouter said.
+  const d = setup({ replies: [{ empty: 'Provider returned error' }, { text: 'second time' }] });
+  const rd = await d.models.generate({ feature: 'f', prompt: 'x' });
+  assert.ok(rd.ok && rd.value === 'second time');
+  assert.equal(d.calls.length, 2);
+  assert.match(d.ledger()[0].error, /no text.*Provider returned error/);
+
+  // Out of tokens before any text (the model thought first): the same
+  // limit would run out again, so not tried again.
+  const e = setup({ replies: [{ empty: 'length' }, { text: 'unused' }] });
+  const re = await e.models.generate({ feature: 'f', prompt: 'x', maxTokens: 30 });
+  assert.ok(!re.ok && /finish_reason length/.test(re.message));
+  assert.equal(e.calls.length, 1);
 });
 
 test('models: a call that hangs times out', async () => {
@@ -378,9 +398,10 @@ test('titles: retitle names the threads still on their first line, and only thos
   const models = {
     generate: async (p: any) => {
       if (!keyed) return { ok: false as const, reason: 'no-key' as const, message: 'No key' };
-      asked.push(p.prompt);
-      if (p.prompt.startsWith('client')) return { ok: false as const, reason: 'private' as const, message: 'private folder' };
-      return { ok: true as const, value: `Named: ${p.prompt.split('\n')[0].slice(0, 20)}`, model: HAIKU };
+      const msg = p.prompt.replace(/^Message:\n/, '');
+      asked.push(msg);
+      if (msg.startsWith('client')) return { ok: false as const, reason: 'private' as const, message: 'private folder' };
+      return { ok: true as const, value: `Named: ${msg.split('\n')[0].slice(0, 20)}`, model: HAIKU };
     },
   };
   const h = makeHarness(undefined, {}, { models });
@@ -424,12 +445,41 @@ test('titles: retitle names the threads still on their first line, and only thos
   asked.length = 0;
   const again = await h.runner.retitle({});
   assert.deepEqual(again.threads.map((t) => t.threadId), [client]);
+
+  // By id it names them again, model titles included, but never one named by hand.
+  asked.length = 0;
+  const byId = await h.runner.retitle({ threadIds: [named, plain, renamed] });
+  assert.deepEqual(byId.threads.map((t) => t.threadId).sort(), [named, plain].sort());
+  assert.equal(asked.length, 2);
+  await assert.rejects(async () => h.runner.retitle({ threadIds: ['nope'] }), (e: RpcError) => e.code === ErrorCode.threadNotFound);
+});
+
+test('titles: naming an older thread also sends the start of its first reply', async () => {
+  const asked: any[] = [];
+  const models = { generate: async (p: any) => (asked.push(p), { ok: false as const, reason: 'no-key' as const, message: '' }) };
+  const h = makeHarness(undefined, {}, { models });
+  const id = h.runner.create({ text: 'Explain thread count', accountId: 'claude-3' }).thread.id;
+  await tick();
+  const s = h.adapter.last;
+  s.init();
+  s.text('m1:0', 'The sidebar counts threads that are running, plus the ones waiting on you.');
+  s.result();
+  await tick();
+  asked.length = 0;
+  await h.runner.retitle({});
+  assert.equal(asked.length, 1);
+  assert.match(asked[0].prompt, /Explain thread count/);
+  assert.match(asked[0].prompt, /The sidebar counts threads that are running/);
 });
 
 test('titles: cleanTitle tidies what a model says', () => {
   assert.equal(cleanTitle('Title: "Ship the settings window."'), 'Ship the settings window');
   assert.equal(cleanTitle('\n**Debug flaky CI**\nextra'), 'Debug flaky CI');
-  assert.equal(cleanTitle('x'.repeat(80)).length, 60);
+  assert.equal(cleanTitle('Fix the upload test — a short thread about CI'), 'Fix the upload test');
+  assert.equal(cleanTitle('Fix README typo "directons"'), 'Fix README typo "directons"', 'quotes inside stay');
+  // Rambling or cut off by the token limit: no title, so the first line stays.
+  assert.equal(cleanTitle('x'.repeat(80)), '');
+  assert.equal(cleanTitle('Adding Cmd plus and Cmd minus zoom shortcuts to the whole Threadbare window'), '');
 });
 
 // ------------------------------------------------------------------ tb

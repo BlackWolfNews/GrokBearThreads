@@ -12,6 +12,7 @@ import type { Account, EffortLevel, PersistedEvent, Schedule, ThreadSummary } fr
 import { usageLine } from './usage.ts';
 import { EFFORT_LEVELS } from './protocol.ts';
 import type { Scheduler } from './schedules.ts';
+import type { Projects } from './projects.ts';
 import { parseWhen, relativeFuture, relativeTime } from './when.ts';
 
 export { parseWhen, relativeFuture, relativeTime };
@@ -25,6 +26,8 @@ type Async<T, K extends keyof T> = { [P in K]: T[P] extends (...a: infer A) => i
 export type ThreadControl = { hello: Runner['hello'] } & Async<Runner, 'list' | 'search' | 'get' | 'events' | 'create' | 'send' | 'update' | 'interrupt' | 'delete'>;
 
 export type ScheduleControl = Async<Scheduler, 'create' | 'list' | 'find' | 'update' | 'delete'>;
+
+export type ProjectControl = Pick<Projects, 'list' | 'get' | 'find' | 'create' | 'update' | 'appendNote' | 'changeMembership'>;
 
 export const SERVER_NAME = 'threadbare';
 // Asked about every time, even in a thread with full access: deleting is
@@ -72,7 +75,7 @@ export function approvalTitle(name: string, input: Record<string, unknown>, find
   return t ? `Delete the thread "${t.title}"` : undefined;
 }
 
-export function buildThreadbareTools(control: ThreadControl, selfId: string, now: () => number = Date.now, schedules?: ScheduleControl) {
+export function buildThreadbareTools(control: ThreadControl, selfId: string, now: () => number = Date.now, schedules?: ScheduleControl, projects?: ProjectControl) {
   const all = async (): Promise<ThreadSummary[]> => control.list(['inbox', 'snoozed', 'archived']);
 
   // Full ids, or any unique prefix of one (the list shows 8 characters).
@@ -245,8 +248,144 @@ export function buildThreadbareTools(control: ThreadControl, selfId: string, now
     ),
   ];
 
+  const mustProjects = (): ProjectControl => {
+    if (!projects) throw new Error("This runner doesn't have projects yet.");
+    return projects;
+  };
+  const project = (q: string) => {
+    const p = mustProjects().find(q);
+    if (!p) throw new Error(`No project ${q}. list_projects shows them.`);
+    return p;
+  };
+  const home = process.env.HOME ?? '';
+  const tilde = (p: string) => (home && p.startsWith(home + '/') ? '~' + p.slice(home.length) : p);
+  const projectFolder = (f: string): Promise<string> => folder(f);
+
+  const projectTools = [
+    tool(
+      'list_projects',
+      "Lists Mike's projects: groupings above folders that carry goals, state and notes from thread to thread. Shows which this thread is in. A background librarian files threads into them; you can too (join_project), and should keep a project's state and notes current (update_project).",
+      { archived: z.boolean().optional().describe('Include archived projects.') },
+      handle(async ({ archived }) => {
+        const mine = new Set(((await control.get(selfId)).projects ?? []).map((m) => m.id));
+        const list = mustProjects().list({ archived });
+        if (!list.length) return 'No projects yet. create_project makes one.';
+        return list
+          .map((p) => {
+            const bits = [`${p.id} "${p.title}"${mine.has(p.id) ? ' (this thread is in it)' : ''}${p.archived ? ' (archived)' : ''}`, `${p.threadCount} thread${p.threadCount === 1 ? '' : 's'}`];
+            if (p.folders.length) bits.push(`folders ${p.folders.map(tilde).join(', ')}`);
+            const state = p.state.split('\n')[0];
+            if (state) bits.push(`state: ${clip(state, 160)}`);
+            return bits.join(' · ');
+          })
+          .join('\n');
+      }),
+    ),
+    tool(
+      'read_project',
+      "Reads a project: its folders, goals, state, notes and threads. Read the notes before working on a project you're in, for decisions and gotchas earlier threads left.",
+      { project: z.string().describe('Project id, id prefix or title.') },
+      handle(async ({ project: q }) => {
+        const { project: p, threadIds } = mustProjects().get(project(q).id);
+        const threads: string[] = [];
+        for (const id of threadIds.slice(0, 20)) {
+          const t = await Promise.resolve(control.get(id)).catch(() => undefined);
+          threads.push(`- ${id.slice(0, 8)} "${t?.title ?? '?'}"${id === selfId ? ' (this thread)' : ''}`);
+        }
+        return [
+          `${p.title} (${p.id})${p.archived ? ', archived' : ''}`,
+          `Folders: ${p.folders.map(tilde).join(', ') || 'none'}`,
+          `Goals: ${p.goals || '(none yet)'}`,
+          `State: ${p.state || '(none yet)'}`,
+          '',
+          'Notes:',
+          p.notes || '(none yet)',
+          '',
+          `Threads (${p.threadCount}):`,
+          ...threads,
+          ...(threadIds.length > 20 ? [`… and ${threadIds.length - 20} more`] : []),
+        ].join('\n');
+      }),
+    ),
+    tool(
+      'create_project',
+      "Makes a project and puts this thread in it. For a body of work Mike will come back to (an app, a library, a video, an ongoing job), not a single task; check list_projects first so you don't make a second one for the same thing.",
+      {
+        title: z.string().min(1).describe('Short name, as Mike would say it.'),
+        folders: z.array(z.string()).optional().describe("Repos the work lives in. ~ works; relative paths are from this thread's folder."),
+        goals: z.string().optional().describe("What it's for and what done looks like, a few lines."),
+        state: z.string().optional().describe("Where it's up to and what's next, a few lines."),
+        notes: z.string().optional().describe('Markdown: decisions, gotchas, commands, links.'),
+        join: z.boolean().optional().describe('Put this thread in it. Default true.'),
+      },
+      handle(async ({ title, folders, goals, state, notes, join }) => {
+        const p = mustProjects().create({
+          title,
+          folders: await Promise.all((folders ?? []).map(projectFolder)),
+          goals,
+          state,
+          notes,
+          by: 'agent',
+          byThread: selfId,
+          threadIds: join === false ? [] : [selfId],
+        });
+        return `Made the project "${p.title}" (${p.id})${join === false ? '' : ' and put this thread in it'}.`;
+      }),
+    ),
+    tool(
+      'update_project',
+      "Changes a project: title, goals, state, notes or folders. Keep state current as work moves on (what's done, what's next, what's blocked), and add to the notes anything a later thread should know. appendNote adds a paragraph without rewriting the notes.",
+      {
+        project: z.string().describe('Project id, id prefix or title.'),
+        title: z.string().optional(),
+        goals: z.string().optional(),
+        state: z.string().optional(),
+        notes: z.string().optional().describe('Replaces all the notes.'),
+        appendNote: z.string().optional().describe('Adds a paragraph to the end of the notes.'),
+        addFolders: z.array(z.string()).optional(),
+        removeFolders: z.array(z.string()).optional(),
+      },
+      handle(async ({ project: q, title, goals, state, notes, appendNote, addFolders, removeFolders }) => {
+        const pc = mustProjects();
+        const p = project(q);
+        let folders: string[] | undefined;
+        if (addFolders?.length || removeFolders?.length) {
+          const drop = new Set(await Promise.all((removeFolders ?? []).map(projectFolder)));
+          const add = await Promise.all((addFolders ?? []).map(projectFolder));
+          folders = [...p.folders.filter((f) => !drop.has(f)), ...add.filter((f) => !p.folders.includes(f))];
+        }
+        let out = pc.update(p.id, { title, goals, state, notes, folders });
+        if (appendNote?.trim()) out = pc.appendNote(p.id, appendNote);
+        return `Updated "${out.title}" (${out.id}).`;
+      }),
+    ),
+    tool(
+      'join_project',
+      "Puts a thread (this one by default) in a project, so it gets the project's brief and the patches from its folders. Pinned: the librarian won't take it out.",
+      { project: z.string().describe('Project id, id prefix or title.'), ...thisOrOther },
+      handle(async ({ project: q, threadId, id: alias }) => {
+        const id = await resolve(threadId ?? alias);
+        const p = project(q);
+        mustProjects().changeMembership(id, { add: [p.id], by: 'agent' });
+        return `${id === selfId ? 'This thread is' : `"${(await control.get(id)).title}" is`} in "${p.title}" now.`;
+      }),
+    ),
+    tool(
+      'leave_project',
+      'Takes a thread (this one by default) out of a project. The librarian will not put it back.',
+      { project: z.string().describe('Project id, id prefix or title.'), ...thisOrOther },
+      handle(async ({ project: q, threadId, id: alias }) => {
+        const id = await resolve(threadId ?? alias);
+        const p = project(q);
+        mustProjects().changeMembership(id, { remove: [p.id], by: 'agent' });
+        return `${id === selfId ? 'This thread is' : `"${(await control.get(id)).title}" is`} no longer in "${p.title}".`;
+      }),
+    ),
+  ];
+
   return [
     ...(schedules ? scheduleTools : []),
+    ...(projects ? projectTools : []),
     tool(
       'list_threads',
       "Lists Threadbare threads, newest activity first: short id, title, status, folder, account. By default the inbox; include snoozed and archived ones to see everything. With a query, searches titles and previews across all threads.",
@@ -432,15 +571,15 @@ function clip(text: string, max = 2000): string {
   return text.length > max ? `${text.slice(0, max)}… (${text.length - max} more characters)` : text;
 }
 
-export function threadbareMcpServer(control: ThreadControl, selfId: string, schedules?: ScheduleControl): McpSdkServerConfigWithInstance {
+export function threadbareMcpServer(control: ThreadControl, selfId: string, schedules?: ScheduleControl, projects?: ProjectControl): McpSdkServerConfigWithInstance {
   const server = createSdkMcpServer({
     name: SERVER_NAME,
     version: RUNNER_VERSION,
     instructions:
       `This session is a thread in Threadbare, Mike's own app for running agent threads (thread id ${selfId}). ` +
-      'These tools manage Threadbare itself: list and read threads, start new ones, message them, rename, snooze, archive, move and delete them, and schedule messages for later (once or on a cron). ' +
+      'These tools manage Threadbare itself: list and read threads, start new ones, message them, rename, snooze, archive, move and delete them, schedule messages for later (once or on a cron), and keep Mike\'s projects (groupings above folders with goals, state and notes) up to date. ' +
       'Use move_thread when the work belongs in another folder (for example a repo), so this thread runs there from the next turn.',
-    tools: buildThreadbareTools(control, selfId, Date.now, schedules),
+    tools: buildThreadbareTools(control, selfId, Date.now, schedules, projects),
   });
   server.tools = [...ALWAYS_ASK_TOOLS].map((name) => ({ name: name.split('__').at(-1)!, permission_policy: 'always_ask' as const }));
   return server;

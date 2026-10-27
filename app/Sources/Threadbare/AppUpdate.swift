@@ -252,6 +252,8 @@ final class AppUpdater {
         case .snoozed: "snoozed"
         case .archive: "archive"
         case .scheduled: "scheduled"
+        case .projects: "projects"
+        case .librarian: "librarian"
         }
         UserDefaults.standard.set(["selection": selection ?? "", "mode": modeName], forKey: restoreKey)
     }
@@ -265,6 +267,10 @@ final class AppUpdater {
         case "snoozed": app.sidebarMode = .snoozed
         case "archive": app.showArchive()
         case "scheduled": app.showSchedules()
+        // Before projects.list has answered; an older runner's -32601 puts
+        // it back on the inbox.
+        case "projects": app.showProjects()
+        case "librarian": app.showLibrarian()
         default: app.sidebarMode = .inbox
         }
         if let id = saved["selection"], !id.isEmpty, app.threads[id] != nil { app.select(id) }

@@ -361,7 +361,8 @@ export class RpcServer {
       }
       case 'threads.retitle': {
         if (p.dryRun !== undefined && typeof p.dryRun !== 'boolean') throw bad('dryRun must be a boolean');
-        return r.retitle({ dryRun: p.dryRun === true });
+        const threadIds = p.threadIds === undefined ? undefined : stringArray(p, 'threadIds');
+        return r.retitle({ dryRun: p.dryRun === true, threadIds });
       }
       case 'threads.delete':
         return r.delete(reqString(p, 'threadId'));

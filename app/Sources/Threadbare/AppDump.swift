@@ -136,6 +136,20 @@ struct AppDump: Encodable {
     var transcript: Transcript?
     /// The usage popover's content as lines, and whether it's open.
     var usage: Usage? = nil
+    /// The project page showing in place of the thread, if one is.
+    var project: ProjectInfo? = nil
+    /// The librarian's state in words ("Looking at ..."), when the runner
+    /// has projects.
+    var librarian: String? = nil
+
+    struct ProjectInfo: Encodable {
+        var id: String
+        var title: String
+        var folders: [String]
+        var threads: [String]
+        var patches: [String]
+        var archived: Bool
+    }
 
     struct Usage: Encodable {
         var shown: Bool
@@ -199,6 +213,23 @@ struct AppDump: Encodable {
             sections = [Section(name: "Snoozed", threads: app.snoozed.map { thread($0) })]
         case .archive:
             sections = [Section(name: "Archive", threads: app.archived.map { thread($0) })]
+        case .projects:
+            // A section per project, then the threads in none.
+            let built = app.projectSections
+            sections = built.sections.map { Section(name: $0.project.title, threads: $0.threads.map { thread($0) }) }
+                + [Section(name: "Not in a project", threads: built.unfiled.map { thread($0) })]
+        case .librarian:
+            // Looks in the thread shape: the queue's reason, or what a look
+            // did, is the status.
+            let status = app.librarian
+            sections = [
+                Section(name: "Next", threads: (status?.queue ?? []).map { job in
+                    Thread(id: job.threadId, title: job.threadTitle, status: job.reason.rawValue, needsYou: false, unread: false, hovered: false)
+                }),
+                Section(name: "Recent", threads: (status?.recent ?? []).map { entry in
+                    Thread(id: entry.threadId, title: entry.text, status: entry.outcome.rawValue, needsYou: false, unread: false, hovered: false)
+                }),
+            ]
         case .scheduled:
             // Schedules in the thread shape: their state is the status.
             sections = [Section(name: "Scheduled", threads: app.schedules.map { schedule in
@@ -245,7 +276,13 @@ struct AppDump: Encodable {
             } ?? [],
             composer: composer(app, key: key),
             transcript: transcript,
-            usage: Usage(shown: app.usagePopoverShown, lines: usageLines(app))
+            usage: Usage(shown: app.usagePopoverShown, lines: usageLines(app)),
+            project: app.openProject.map { project in
+                let threads = ProjectSections.threads(in: project.id, from: app.threads.values)
+                return ProjectInfo(id: project.id, title: project.title, folders: project.folders, threads: threads.map(\.id),
+                                   patches: PatchGroups.patches(of: project.id, in: threads).map(\.patch.id), archived: project.archived)
+            },
+            librarian: app.librarian.map(LibrarianText.state)
         )
     }
 

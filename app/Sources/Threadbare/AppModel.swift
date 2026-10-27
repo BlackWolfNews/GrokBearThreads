@@ -3,7 +3,7 @@ import Observation
 import ThreadbareCore
 
 enum SidebarMode: Equatable {
-    case inbox, snoozed, archive, scheduled
+    case inbox, snoozed, archive, scheduled, projects, librarian
 }
 
 enum ConnectionState: Equatable {
@@ -101,6 +101,19 @@ final class AppModel {
     /// The runner knows about schedules: an older one answers
     /// `schedules.list` with -32601, and then the sidebar has no Scheduled row.
     var schedulesSupported = false
+    /// Every project, archived ones too, in the runner's order (newest
+    /// activity first). Replaced whole by `projects.updated`.
+    var projects: [Project] = []
+    /// The runner knows about projects: an older one answers
+    /// `projects.list` with -32601, and then the activity bar has no
+    /// Projects or Librarian button and threads show no project chips.
+    var projectsSupported = false
+    /// What the librarian is doing, once `librarian.status` has answered;
+    /// replaced by `librarian.updated`.
+    var librarian: LibrarianStatus?
+    /// The project page showing in the detail area instead of the thread.
+    /// Selecting a thread (or a new one) closes it.
+    var openProjectId: String?
     /// The runner's settings for the Settings window: nil until
     /// `settings.get` answers, then replaced whole by `settings.updated`.
     var runnerSettings: RunnerSettings?
@@ -320,6 +333,7 @@ final class AppModel {
                 archiveLoaded = true
                 onThreadsLoaded?()
                 loadSchedules()
+                loadProjects()
                 loadSettings()
                 for session in sessions.values where session.state == .loaded {
                     await session.subscribe()
@@ -387,6 +401,11 @@ final class AppModel {
             case .schedulesUpdated(let list):
                 schedules = list
                 schedulesSupported = true
+            case .projectsUpdated(let list):
+                receive(projects: list)
+            case .librarianUpdated(let status):
+                librarian = status
+                projectsSupported = true
             case .settingsUpdated(let settings):
                 receive(settings)
             case .runnerNotice(let level, let message):
@@ -483,6 +502,7 @@ final class AppModel {
 
     func select(_ threadId: String?) {
         selection = threadId
+        openProjectId = nil
         stopShowingSubagent()
         guard let threadId else { return }
         let session = session(for: threadId)
@@ -611,6 +631,7 @@ final class AppModel {
 
     func newThread() {
         selection = nil
+        openProjectId = nil
         stopShowingSubagent()
         sidebarMode = .inbox
         focusComposer += 1

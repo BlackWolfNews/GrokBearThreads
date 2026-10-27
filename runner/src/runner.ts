@@ -31,7 +31,8 @@ import type {
   TurnOutcome,
 } from './protocol.ts';
 import { ErrorCode, LIMITS, PROTOCOL_VERSION, RpcError } from './protocol.ts';
-import type { Schedule } from './protocol.ts';
+import type { LibrarianStatus, Project, Schedule } from './protocol.ts';
+import type { Projects } from './projects.ts';
 import type { Settings } from './settings.ts';
 import type {
   AgentAdapter,
@@ -85,6 +86,8 @@ export type Notification =
   | { method: 'clis.updated'; params: { clis: CliStatus[] } }
   | { method: 'settings.updated'; params: { settings: Settings } }
   | { method: 'runner.updates'; params: { updates: RunnerUpdates } }
+  | { method: 'projects.updated'; params: { projects: Project[] } }
+  | { method: 'librarian.updated'; params: { librarian: LibrarianStatus } }
   // Only from a draining runner, to the primary (handover.ts).
   | { method: 'drain.handedOver'; params: { threadId: string } }
   | { method: 'drain.usage'; params: { accountId: string; reading: UsageReading } };
@@ -98,6 +101,12 @@ export type RunnerUpdates = {
   oldRunners: { version: string; threads: string[] }[];
   launcherChanged?: true;
 };
+
+// What the librarian (librarian.ts) hears about threads: a turn that ended,
+// and a folder move.
+export type ThreadActivity =
+  | { kind: 'turn.end'; threadId: string; outcome: TurnOutcome; edited: string[] }
+  | { kind: 'moved'; threadId: string; from: string; to: string };
 
 // The seams to D's and E's modules (usage.ts, updates/), as far as the
 // runner uses them. They're structural so tests can pass small fakes.
@@ -222,7 +231,7 @@ type Runtime = {
   // has just written .env.local, or a patch file the agent has just
   // written, shows up within seconds. Until the first read finishes the
   // built-in panels stand in.
-  patches?: { cwd: string; at: number; set: PatchSet; refreshing: boolean; loaded: boolean };
+  patches?: { cwd: string; key: string; at: number; set: PatchSet; refreshing: boolean; loaded: boolean };
   runningActions?: Set<string>;
   // Turns in a row that a hook's message started, per hook. A hook that
   // keeps failing stops being told to the agent after HOOK_TELL_LIMIT, so
@@ -280,6 +289,9 @@ export type RunnerDeps = {
   // The runner's own small-model calls (models/index.ts), for titles.
   // Absent in most tests, which then keep the first-line title.
   models?: Pick<Models, 'generate'>;
+  // Projects (projects.ts): their folders' patches, the brief a session
+  // starts with, and the summary's `projects`. Started by start().
+  projects?: Projects;
 };
 
 const DELTA_INTERVAL_MS = 33; // at most ~30 delta flushes a second per thread
@@ -327,6 +339,8 @@ export class Runner {
   private actionShell?: string[];
   private actionTimeoutMs?: number;
   private models?: Pick<Models, 'generate'>;
+  private projects?: Projects;
+  private activity = new Set<(a: ThreadActivity) => void>();
   private patchCache: PatchCache = new Map();
   private threads = new Map<string, ThreadState>();
   private listeners = new Set<(n: Notification) => void>();
@@ -365,6 +379,7 @@ export class Runner {
     this.actionShell = deps.actionShell;
     this.actionTimeoutMs = deps.actionTimeoutMs;
     this.models = deps.models;
+    this.projects = deps.projects;
     this.adapters = deps.adapters;
     this.accounts = deps.accounts;
     this.usage = deps.usage;
@@ -888,6 +903,80 @@ export class Runner {
     this.notify(n);
   }
 
+  // Turn ends and folder moves, for the librarian.
+  onThreadActivity(fn: (a: ThreadActivity) => void): () => void {
+    this.activity.add(fn);
+    return () => this.activity.delete(fn);
+  }
+
+  private tellActivity(a: ThreadActivity): void {
+    for (const fn of this.activity) {
+      try {
+        fn(a);
+      } catch (e) {
+        this.log.error('activity listener failed', { error: String(e) });
+      }
+    }
+  }
+
+  // ---------------------------------------------------- for projects.ts
+
+  // Every thread's record, put away ones included. Read only.
+  threadRecords(): ThreadRecord[] {
+    return [...this.threads.values()].filter((t) => !t.rt.deleted).map((t) => t.rec);
+  }
+
+  // A thread id from a full id or unique prefix; -32004 otherwise.
+  resolveThread(idOrPrefix: string): string {
+    const t = typeof idOrPrefix === 'string' && idOrPrefix ? this.findThread(idOrPrefix) : undefined;
+    if (!t) throw new RpcError(ErrorCode.threadNotFound, `Thread not found: ${idOrPrefix}`);
+    return t.id;
+  }
+
+  // Changes a thread's record for projects.ts, saves it and sends its
+  // summary; `note` goes in the transcript. The agent hears about a new
+  // project with its next message (projectNews).
+  editThread(threadId: string, edit: (rec: ThreadRecord) => void, say: { note?: string } = {}): ThreadSummary {
+    const st = this.mustGet(threadId);
+    edit(st.rec);
+    if (say.note) this.emit(st, { type: 'system.note', text: say.note }, st.rt.turn?.turnId);
+    this.markDirty(st);
+    return this.summary(st);
+  }
+
+  // Sends these threads' summaries again; their patches are read again on
+  // the way, since a project's folders may have changed.
+  touchThreads(threadIds: string[]): void {
+    for (const id of threadIds) {
+      const st = this.threads.get(id);
+      if (!st) continue;
+      if (st.rt.patches) st.rt.patches.at = -Infinity;
+      this.markDirty(st);
+    }
+  }
+
+  // The first user message and the last few messages of a thread, as plain
+  // text, for the librarian.
+  threadGist(threadId: string, opts: { recent?: number; chars?: number } = {}): { first?: string; recent: { who: 'user' | 'assistant'; text: string }[] } {
+    const st = this.mustGet(threadId);
+    const chars = opts.chars ?? 600;
+    const cut = (t: string) => (t.length > chars ? t.slice(0, chars) + '…' : t);
+    const first = this.opening(st.rec.id).text;
+    const log = this.store.log(st.rec.id);
+    const recent: { who: 'user' | 'assistant'; text: string }[] = [];
+    const want = opts.recent ?? 6;
+    // Back from the end a page at a time until there are enough.
+    for (let to = log.lastSeq; to >= 1 && recent.length < want; to -= 200) {
+      const page = log.read(Math.max(1, to - 199), to);
+      for (const e of page.reverse()) {
+        if (recent.length >= want) break;
+        if (e.type === 'user.message' && e.origin === undefined) recent.unshift({ who: 'user', text: cut(e.text) });
+        else if (e.type === 'assistant.text' && e.text.trim()) recent.unshift({ who: 'assistant', text: cut(e.text) });
+      }
+    }
+    return { first: first ? cut(first) : undefined, recent };
+  }
+
   private notify(n: Notification): void {
     // A kept thread's summary changing can be it becoming free to go.
     if (this.draining && n.method === 'thread.updated') this.queueHandoverCheck();
@@ -1175,17 +1264,20 @@ export class Runner {
   // Asks a small model for a better title than the first line. Without a
   // key, in a private folder or over budget it says why and nothing
   // changes. A title set meanwhile (by Mike or an agent) wins.
-  private async titleFromModel(st: ThreadState, text: string): Promise<{ title: string } | { reason: string }> {
+  // `reply`, the start of the agent's first answer, is there when an older
+  // thread is named (retitle): a terse first message like "Explain thread
+  // count" means little without it.
+  private async titleFromModel(st: ThreadState, text: string, reply?: string): Promise<{ title: string } | { reason: string }> {
     if (!this.models) return { reason: 'Model calls are off in this runner.' };
     const before = st.rec.title;
     const res = await this.models.generate({
       feature: 'titles',
       cwd: st.rec.cwd,
-      system:
-        'You name chat threads. Reply with a title of 3 to 7 words for the thread that starts with the message below: ' +
-        'sentence case, no quotes, no full stop, no emoji. Name the task, not the person.',
-      prompt: text.slice(0, 4000),
-      maxTokens: 30,
+      system: TITLE_PROMPT,
+      prompt: reply ? `Message:\n${text.slice(0, 4000)}\n\nStart of the reply:\n${reply.slice(0, 1000)}` : `Message:\n${text.slice(0, 4000)}`,
+      // Room for Haiku to think first: at 30 it sometimes ran out before
+      // writing a word. A long answer is turned down by cleanTitle anyway.
+      maxTokens: 300,
     });
     if (!res.ok) return { reason: res.message };
     if (st.rt.deleted) return { reason: 'Deleted meanwhile.' };
@@ -1201,21 +1293,24 @@ export class Runner {
   // Names the threads that started before there was a key (or whose call
   // failed): the ones still titled with their first message's first line
   // and never named by anyone. A model title doesn't set titleSet, so the
-  // first-line check is what keeps those from being asked again.
-  async retitle(params: { dryRun?: boolean }): Promise<{ threads: { threadId: string; from: string; to?: string; reason?: string }[] }> {
-    const due: { st: ThreadState; text: string }[] = [];
-    for (const st of this.threads.values()) {
+  // first-line check is what keeps those from being asked again. Given
+  // threadIds, it names those whatever their title, so a poor model title
+  // can be asked for again; one named by hand still stays.
+  async retitle(params: { dryRun?: boolean; threadIds?: string[] }): Promise<{ threads: { threadId: string; from: string; to?: string; reason?: string }[] }> {
+    const picked = params.threadIds?.map((id) => this.mustGet(id));
+    const due: { st: ThreadState; text: string; reply?: string }[] = [];
+    for (const st of picked ?? this.threads.values()) {
       if (st.rec.titleSet) continue;
-      const text = this.firstMessageText(st.rec.id);
+      const { text, reply } = this.opening(st.rec.id);
       const line = text?.split('\n').map((l) => l.trim()).find(Boolean);
       // titleFrom cut it at some length; an older runner may have cut it elsewhere.
-      if (line && st.rec.title && line.startsWith(st.rec.title)) due.push({ st, text: text! });
+      if (line && (picked || (st.rec.title && line.startsWith(st.rec.title)))) due.push({ st, text: text!, reply });
     }
     const threads = await Promise.all(
-      due.map(async ({ st, text }) => {
+      due.map(async ({ st, text, reply }) => {
         const from = st.rec.title;
         if (params.dryRun) return { threadId: st.rec.id, from };
-        const r = await this.titleFromModel(st, text);
+        const r = await this.titleFromModel(st, text, reply);
         return 'title' in r ? { threadId: st.rec.id, from, to: r.title } : { threadId: st.rec.id, from, reason: r.reason };
       }),
     );
@@ -1223,15 +1318,19 @@ export class Runner {
     return { threads };
   }
 
-  // The first user.message's text, read a page at a time: it's nearly
-  // always the first event, and a long thread's log is large.
-  private firstMessageText(id: string): string | undefined {
+  // The first user.message's text and the first assistant.text after it,
+  // read a page at a time from the start: both are nearly always within
+  // the first few events, and a long thread's log is large.
+  private opening(id: string): { text?: string; reply?: string } {
     const log = this.store.log(id);
-    for (let from = 1; from <= log.lastSeq; from += 50) {
-      const msg = log.read(from, from + 49).find((e) => e.type === 'user.message');
-      if (msg && msg.type === 'user.message') return msg.text;
+    let text: string | undefined;
+    for (let from = 1; from <= Math.min(log.lastSeq, 500); from += 50) {
+      for (const e of log.read(from, from + 49)) {
+        if (text === undefined && e.type === 'user.message') text = e.text;
+        else if (text !== undefined && e.type === 'assistant.text' && e.text.trim()) return { text, reply: e.text };
+      }
     }
-    return undefined;
+    return { text };
   }
 
   // origin "runner" marks a message the runner sends by itself (restart.ts),
@@ -1380,6 +1479,10 @@ export class Runner {
       this.makeRoomForCli(st);
       this.startSession(st, account);
     }
+    // Projects the session hasn't been told about: one it was put in while
+    // live, or since it last ran. A fresh session got them as instructions.
+    const news = this.projectNews(rec);
+    if (news) text = `${news}\n\n${text}`;
     if (rec.moved) {
       // A CLI that moves folders itself: the live session got setCwd, or a
       // released one resumes in the new folder (startSession passes it).
@@ -1465,6 +1568,7 @@ export class Runner {
         tmpDir: path.join(paths.run(this.cfg.home), 'tmp'),
         allowRules: rec.allowRules ?? [],
         env: threadEnv(rec.id, this.cfg.home),
+        ...this.briefFor(rec, resume),
       },
       sink,
     );
@@ -1706,6 +1810,9 @@ export class Runner {
     // The folder's turn.end hooks, after a turn the agent finished itself
     // (not one the runner opened for a background task's approval).
     if (outcome === 'completed' && finished && !finished.auto && !this.stopping) void this.runHooks(st, finished);
+    if (outcome && finished && !finished.auto && !this.stopping) {
+      this.tellActivity({ kind: 'turn.end', threadId: rec.id, outcome, edited: [...finished.edited].map((p) => path.resolve(rec.cwd, p)) });
+    }
     if (rt.taskEndedInTurn) {
       rt.taskEndedInTurn = false;
       // Only while the CLI is there to start that turn.
@@ -1887,6 +1994,7 @@ export class Runner {
     }
     if (newAccount && params.accountId !== rec.accountId) this.checkProvider(newAccount);
     const cwdChanged = newCwd !== undefined && newCwd !== rec.cwd;
+    const fromCwd = rec.cwd;
     const accountChanged = params.accountId !== undefined && params.accountId !== rec.accountId;
     const providerChanged = accountChanged && newAccount!.provider !== rec.provider;
     const adapter = this.adapters[rec.provider];
@@ -1924,6 +2032,7 @@ export class Runner {
       }
       release = true;
     }
+    if (cwdChanged) this.tellActivity({ kind: 'moved', threadId: rec.id, from: fromCwd, to: rec.cwd });
     // The account the settings are checked against, after any change.
     const account = newAccount ?? this.accounts.get(rec.accountId);
     let model = rec.model;
@@ -2600,6 +2709,8 @@ export class Runner {
     const background = this.background(st);
     if (background.length) s.background = background;
     if (rec.subagents?.length) s.subagents = rec.subagents.map(publicSubagent);
+    const projects = this.projects?.threadProjects(rec);
+    if (projects) s.projects = projects;
     return s;
   }
 
@@ -2608,15 +2719,23 @@ export class Runner {
   private patchSet(st: ThreadState): PatchSet {
     const { rec, rt } = st;
     const now = this.clock.now();
+    const folders = this.projects?.foldersFor(rec) ?? [];
+    const key = JSON.stringify([rec.cwd, folders]);
+    if (rt.patches && rt.patches.cwd === rec.cwd && rt.patches.key !== key) {
+      // Same folder, different projects: keep showing what there is while
+      // the new set loads, rather than flashing the panels away.
+      rt.patches.key = key;
+      rt.patches.at = -Infinity;
+    }
     if (!rt.patches || rt.patches.cwd !== rec.cwd) {
       // The built-in panels straight away; the files follow.
       let panels: PatchSet['panels'] = [];
       try {
-        panels = projectPanels(rec.cwd, this.panelsRoot);
+        panels = projectPanels(rec.cwd, this.panelsRoot, folders);
       } catch (e) {
         this.log.warn('could not read the folder for panels', { threadId: rec.id, cwd: rec.cwd, error: String(e) });
       }
-      rt.patches = { cwd: rec.cwd, at: now, set: { ...EMPTY_PATCH_SET, panels }, refreshing: false, loaded: false };
+      rt.patches = { cwd: rec.cwd, key, at: now, set: { ...EMPTY_PATCH_SET, panels }, refreshing: false, loaded: false };
       void this.refreshPatches(st);
     } else if (!rt.patches.refreshing && now - rt.patches.at > PATCHES_TTL_MS) {
       void this.refreshPatches(st);
@@ -2633,9 +2752,10 @@ export class Runner {
     if (!entry || entry.refreshing) return;
     entry.refreshing = true;
     const cwd = rec.cwd;
+    const key = entry.key;
     let set: PatchSet;
     try {
-      set = await loadPatchSet(cwd, this.panelsRoot, this.patchCache);
+      set = await loadPatchSet(cwd, this.panelsRoot, this.patchCache, this.projects?.foldersFor(rec) ?? []);
     } catch (e) {
       this.log.warn('could not read the folder for patches', { threadId: rec.id, cwd, error: String(e) });
       set = entry.set;
@@ -2644,6 +2764,12 @@ export class Runner {
     entry.at = this.clock.now();
     // The folder moved on meanwhile: the next summary starts over.
     if (rt.patches !== entry || rec.cwd !== cwd || rt.deleted) return;
+    // The projects changed meanwhile: read again.
+    if (entry.key !== key) {
+      entry.at = -Infinity;
+      this.markDirty(st);
+      return;
+    }
     const before = entry.set;
     const changed = JSON.stringify(before) !== JSON.stringify(set);
     if (entry.loaded && changed) this.notePatchChanges(st, before, set);
@@ -2702,7 +2828,7 @@ export class Runner {
     for (const hook of hooks) {
       if (st.rt.deleted || this.stopping) return;
       const outcome = await runCommand(hook.command, {
-        cwd: st.rec.cwd,
+        cwd: hook.folder ?? st.rec.cwd,
         env: { ...process.env, ...threadEnv(st.rec.id, this.cfg.home) },
         shell: this.actionShell,
         timeoutMs: this.actionTimeoutMs,
@@ -2760,7 +2886,7 @@ export class Runner {
     running.add(actionId);
     try {
       const outcome = await runCommand(action.command ?? '', {
-        cwd: st.rec.cwd,
+        cwd: action.folder ?? st.rec.cwd,
         env: { ...process.env, ...threadEnv(threadId, this.cfg.home) },
         shell: this.actionShell,
         timeoutMs: this.actionTimeoutMs,
@@ -2812,6 +2938,29 @@ export class Runner {
     } catch (e) {
       this.log.warn('could not save default account', { error: String(e) });
     }
+  }
+
+  // What a starting session is told about the thread's projects. Only a
+  // fresh session: Claude Code keeps a resumed session's system prompt and
+  // ignores an appended one, so a resume hears through projectNews.
+  private briefFor(rec: ThreadRecord, resume: boolean): { instructions?: string } {
+    if (!this.projects || resume) return {};
+    rec.projectsTold = this.projects.briefIds(rec);
+    const brief = this.projects.brief(rec);
+    return brief ? { instructions: brief } : {};
+  }
+
+  // The thread's projects its session hasn't been told about, as lines to
+  // put before its next message, or undefined. A thread whose session
+  // predates projects (never told anything) gets the whole brief.
+  private projectNews(rec: ThreadRecord): string | undefined {
+    if (!this.projects) return undefined;
+    const ids = this.projects.briefIds(rec);
+    const told = rec.projectsTold;
+    const fresh = ids.filter((id) => !told?.includes(id));
+    rec.projectsTold = ids;
+    if (!fresh.length) return undefined;
+    return told === undefined ? this.projects.brief(rec) : this.projects.joinedLines(fresh);
   }
 
   // A short note that gives a new native session the gist of the thread so
@@ -2939,11 +3088,37 @@ export function titleFrom(text: string): string {
   return line.length > LIMITS.titleChars ? line.slice(0, LIMITS.titleChars).trimEnd() : line;
 }
 
-// A model's title, tidied: first line, no wrapping quotes or full stop.
+// What the runner asks a small model for a thread's title. The examples
+// do more than the rules: without them Haiku drifts into Title Case and
+// sometimes describes the naming job itself.
+const TITLE_PROMPT = [
+  'You name threads in Threadbare, an app for running AI agents, mostly for coding.',
+  'Reply with the title only: 2 to 6 words saying what the thread is about.',
+  'Sentence case: a capital for the first word and for names only. No quotes, no full stop, no dashes, no emoji.',
+  'Never mention titles, threads or the person asking.',
+  '',
+  'Message: can you look at why the upload test keeps failing on CI',
+  'Title: Fix the flaky upload test on CI',
+  '',
+  'Message: Hey, does the runner keep running even if we restart the UI?',
+  'Title: Does the runner outlive the app',
+  '',
+  'Message: hello there',
+  'Title: Hello',
+].join('\n');
+
+// A model's title, tidied: first line, no wrapping quotes or full stop,
+// nothing after a dash. One that runs long (rambling, or cut off by the
+// token limit) is no title at all, so the first line stays.
 export function cleanTitle(text: string): string {
   let t = (text ?? '').split('\n').map((l) => l.trim()).find(Boolean) ?? '';
-  t = t.replace(/^(title:\s*)/i, '').replace(/^["'`*]+|["'`*]+$/g, '').replace(/\.$/, '').trim();
-  return t.length > LIMITS.titleChars ? t.slice(0, LIMITS.titleChars).trimEnd() : t;
+  t = t.replace(/^(title:\s*)/i, '').split(/\s[—–-]\s/)[0];
+  t = t.replace(/^\*+|\*+$/g, '').trim();
+  // Quotes only when they wrap the whole title; ones inside it stay.
+  if (/^(["'`]).*\1$/.test(t)) t = t.slice(1, -1);
+  t = t.replace(/\.$/, '').trim();
+  if (t.length > LIMITS.titleChars || t.split(/\s+/).length > 10) return '';
+  return t;
 }
 
 export function oneLine(text: string, max: number): string {

@@ -198,7 +198,7 @@ export function modelMethods(m: Models): Record<string, (p: Record<string, unkno
         case 'summarize':
           return m.summarize({ feature, cwd, text, maxWords: p.maxWords === undefined ? undefined : num(p.maxWords, 'maxWords') });
         case 'generate':
-          return m.generate({ feature, cwd, prompt: text, system: p.system === undefined ? undefined : str(p.system, 'system') });
+          return m.generate({ feature, cwd, prompt: text, system: p.system === undefined ? undefined : str(p.system, 'system'), ...maxTokens(p) });
         default:
           throw bad('job must be classify, extract, summarize or generate');
       }
@@ -230,4 +230,11 @@ function isDirectory(p: string): boolean {
   } catch {
     return false;
   }
+}
+
+// models.run's optional output limit, for trying a feature's own call.
+function maxTokens(p: Record<string, unknown>): { maxTokens?: number } {
+  if (p.maxTokens === undefined || p.maxTokens === null) return {};
+  if (typeof p.maxTokens !== 'number' || !Number.isInteger(p.maxTokens) || p.maxTokens < 1 || p.maxTokens > 8000) throw bad('maxTokens must be a whole number from 1 to 8000');
+  return { maxTokens: p.maxTokens };
 }

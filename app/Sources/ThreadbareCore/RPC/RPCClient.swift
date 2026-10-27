@@ -23,6 +23,7 @@ public enum RPCError: Error, Sendable, Equatable, LocalizedError {
     public static let threadNotFound = -32004
     public static let scheduleNotFound = -32005
     public static let subagentNotFound = -32006
+    public static let projectNotFound = -32007
     public static let methodNotFound = -32601
     public static let busy = -32020
 }
@@ -36,6 +37,11 @@ public enum RPCNotification: Sendable {
     case clisUpdated([CliStatus])
     /// The whole schedule list, after any change.
     case schedulesUpdated([Schedule])
+    /// Every project, archived ones too, after any change. Thread
+    /// membership comes as `thread.updated`.
+    case projectsUpdated([Project])
+    /// The librarian's status, whole, whenever it changes.
+    case librarianUpdated(LibrarianStatus)
     /// The runner's settings after any change (a setting, the key, or the
     /// spend going up).
     case settingsUpdated(RunnerSettings)
@@ -234,6 +240,14 @@ public final class RPCClient: Sendable {
             guard let params = try? decoder.decode(RPCNotificationEnvelope<SchedulesResult>.self, from: data).params
             else { return nil }
             return .schedulesUpdated(params.schedules)
+        case "projects.updated":
+            guard let params = try? decoder.decode(RPCNotificationEnvelope<ProjectsResult>.self, from: data).params
+            else { return nil }
+            return .projectsUpdated(params.projects)
+        case "librarian.updated":
+            guard let params = try? decoder.decode(RPCNotificationEnvelope<LibrarianResult>.self, from: data).params
+            else { return nil }
+            return .librarianUpdated(params.librarian)
         case "settings.updated":
             guard let params = try? decoder.decode(RPCNotificationEnvelope<SettingsResult>.self, from: data).params
             else { return nil }

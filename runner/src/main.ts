@@ -9,6 +9,8 @@ import { Peers, PrimaryLink, ThreadRouter, drainChildrenName, peersElsewhere, pr
 import { RunnerUpdater } from './update.ts';
 import { Restarter, restartMethods } from './restart.ts';
 import { Scheduler, scheduleMethods } from './schedules.ts';
+import { Projects, guardProjects, projectMethods } from './projects.ts';
+import { Librarian, librarianMethods } from './librarian.ts';
 import { createLogger } from './log.ts';
 import { ThreadStore } from './store.ts';
 import { AccountRegistry } from './accounts.ts';
@@ -87,6 +89,9 @@ async function main(): Promise<void> {
   // Set once this runner has handed over and is finishing its kept turns.
   let draining = false;
   const scheduleControl = () => scheduleRouter(scheduler, () => primaryLink);
+  // Projects belong to the primary: a draining runner's agent tools wait
+  // rather than write projects.json beside it.
+  const projectControl = () => guardProjects(projects, () => (draining ? 'Threadbear is handing over to a new runner; try the project tool again in a minute.' : undefined));
   // Keeps both CLIs current (E). Its hooks call back into the runner and
   // the Restarter, made below; nothing calls them before start().
   const updates = new CliUpdates({
@@ -106,7 +111,7 @@ async function main(): Promise<void> {
     claudePath: cfg.claudePath,
     registry,
     log,
-    mcpServersFor: (threadId) => ({ [SERVER_NAME]: threadbareMcpServer(router(), threadId, scheduleControl()) }),
+    mcpServersFor: (threadId) => ({ [SERVER_NAME]: threadbareMcpServer(router(), threadId, scheduleControl(), projectControl()) }),
     alwaysAsk: ALWAYS_ASK_TOOLS,
   });
   // One app-server per live Codex thread, each starting what E says is
@@ -116,7 +121,7 @@ async function main(): Promise<void> {
     codexArgs: cfg.codexArgs,
     registry,
     log,
-    toolsFor: (threadId) => buildThreadbareTools(router(), threadId, Date.now, scheduleControl()),
+    toolsFor: (threadId) => buildThreadbareTools(router(), threadId, Date.now, scheduleControl(), projectControl()),
     onNotice: (text) => runner.notice('warning', text),
   });
   // The runner's own small-model calls. Reads the key from secrets/ on
@@ -130,7 +135,9 @@ async function main(): Promise<void> {
     notice: (level, message) => runner.notice(level, message),
     onSpend: () => settings.spendChanged(),
   });
+  const projects = new Projects({ home: cfg.home, clock: realClock, log });
   runner = new Runner({
+    projects,
     config: cfg,
     store,
     adapters: { claude, codex },
@@ -177,6 +184,11 @@ async function main(): Promise<void> {
   // runner was stopped finds its thread.
   scheduler = new Scheduler({ runner, home: cfg.home, clock: realClock, log, elsewhere: (id) => peers.owns(id) });
   scheduler.start();
+  // Projects need the threads loaded (their counts, and the thread side of
+  // membership); the librarian needs both.
+  projects.start(runner);
+  const librarian = new Librarian({ host: runner, projects, models, clock: realClock, log, home: cfg.home });
+  librarian.start();
   if (swept) runner.startupNotice('info', `Stopped ${swept === 1 ? 'a process group' : `${swept} process groups`} left running by the previous runner.`);
 
   // launch.mjs went back to this release because a newer one kept crashing
@@ -237,7 +249,7 @@ async function main(): Promise<void> {
   updaterReady = true;
 
   runner.attachClis(updates);
-  const methods = { ...restartMethods(restarter), ...scheduleMethods(scheduler), ...settingsMethods(settings), ...modelMethods(models) };
+  const methods = { ...restartMethods(restarter), ...scheduleMethods(scheduler), ...projectMethods(projects), ...librarianMethods(librarian), ...settingsMethods(settings), ...modelMethods(models) };
   // runner.status carries the CLI statuses too (protocol, "runner.status").
   const restartStatus = methods['runner.status'];
   methods['runner.status'] = (p) => {
@@ -307,6 +319,8 @@ async function main(): Promise<void> {
     peers.close();
     primaryLink?.close();
     scheduler.stop();
+    librarian.stop();
+    projects.stop();
     usage.stop();
     updates.stop();
     settings.stop();
@@ -340,6 +354,8 @@ async function main(): Promise<void> {
       cancelMarkGood();
       updater.stop();
       scheduler.stop();
+      librarian.stop();
+      projects.freeze();
       updates.stop();
       settings.stop();
       usage.stopWriting();

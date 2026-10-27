@@ -147,6 +147,73 @@ export type ThreadSummary = {
   // The sub-agents the agent has started, newest 20, oldest first. Absent
   // when it has started none.
   subagents?: Subagent[];
+  // The projects the thread is in, oldest first. Absent when none.
+  projects?: ThreadProject[];
+};
+
+// Projects (docs/protocol.md, "Projects"): a grouping above folders that
+// carries goals, state and notes forward, made by the librarian, agents or
+// Mike.
+export type ProjectMaker = 'mike' | 'agent' | 'librarian';
+
+export type ThreadProject = {
+  id: string;
+  title: string;
+  by: ProjectMaker;
+  pinned?: boolean; // the librarian won't take it out
+  at: string;
+};
+
+export type Project = {
+  id: string;
+  title: string;
+  folders: string[];
+  goals: string;
+  state: string;
+  notes: string;
+  createdBy: ProjectMaker;
+  createdByThread?: string;
+  createdAt: string;
+  updatedAt: string;
+  stateUpdatedAt?: string;
+  archived?: boolean;
+  threadCount: number;
+  lastActivityAt?: string;
+};
+
+export type LibrarianReason = 'first-turn' | 'new-folder' | 'moved' | 'catch-up' | 'asked';
+
+export type LibrarianJob = {
+  threadId: string;
+  threadTitle: string;
+  reason: LibrarianReason;
+  why: string;
+  dueAt: string;
+};
+
+export type LibrarianOutcome = 'joined' | 'created' | 'updated' | 'left' | 'nothing' | 'skipped' | 'failed';
+
+export type LibrarianEntry = {
+  id: string;
+  at: string;
+  threadId: string;
+  threadTitle: string;
+  reason: LibrarianReason;
+  outcome: LibrarianOutcome;
+  text: string;
+  projectIds?: string[];
+  costUsd?: number;
+};
+
+export type LibrarianStatus = {
+  state: 'idle' | 'working' | 'paused' | 'off';
+  reason?: string;
+  paused: boolean;
+  current?: LibrarianJob & { startedAt: string };
+  queue: LibrarianJob[];
+  recent: LibrarianEntry[];
+  looksToday: number;
+  spentTodayUsd: number;
 };
 
 export type SubagentStatus = 'running' | 'completed' | 'failed' | 'stopped';
@@ -179,6 +246,8 @@ export type Action = {
   command?: string; // kind "command"
   prompt?: string; // kind "prompt"
   patch: string;
+  folder?: string; // where the command runs; absent: the thread's folder
+  projectId?: string; // the project whose folder gave it
   note?: string;
 };
 
@@ -196,6 +265,8 @@ export type Hook = {
   edited?: string; // only after a turn that edited a file matching this glob (relative to the folder)
   tell: HookTell; // when the result goes to the agent as a message
   patch: string;
+  folder?: string; // as Action's; only edits inside it count
+  projectId?: string;
   note?: string;
 };
 
@@ -205,6 +276,8 @@ export type PatchInfo = {
   id: string;
   source: PatchSource;
   file?: string; // the module, for home and project patches
+  folder?: string; // the folder it applies from
+  projectId?: string; // set when it came from a project's folder
   error?: string; // set when the file couldn't be loaded; it then gives nothing
 };
 
@@ -217,6 +290,7 @@ export type Panel = {
   kind: PanelKind;
   url?: string; // kind "url": what the panel shows and what Open in browser opens
   patch: string; // the patch it came from: "convex", "xcode"
+  projectId?: string;
   note?: string; // one line about it: the deployment name, the booted device
 };
 
@@ -425,6 +499,7 @@ export const ErrorCode = {
   threadNotFound: -32004,
   scheduleNotFound: -32005,
   subagentNotFound: -32006,
+  projectNotFound: -32007,
   accountNotFound: -32010,
   busy: -32020,
   moved: -32030, // a draining runner has handed the thread over (Handovers)

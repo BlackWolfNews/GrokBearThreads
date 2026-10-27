@@ -405,3 +405,166 @@ public struct ScheduleRunResult: Sendable, Decodable {
     public var threadId: String?
     public var turnId: String?
 }
+
+// MARK: Projects and the librarian (docs/protocol.md, "Projects")
+
+/// A runner from before projects answers these with `-32601`, which callers
+/// read as "no projects here" and hide them.
+public extension RPCClient {
+    /// Newest activity first; archived ones only (all of them) with `archived`.
+    func listProjects(archived: Bool = false) async throws -> [Project] {
+        var params: [String: JSONValue] = [:]
+        if archived { params["archived"] = .bool(true) }
+        return try await call("projects.list", .object(params), as: ProjectsResult.self).projects
+    }
+
+    func getProject(_ projectId: String) async throws -> ProjectGetResult {
+        try await call("projects.get", .object(["projectId": .string(projectId)]), as: ProjectGetResult.self)
+    }
+
+    func createProject(_ request: NewProjectRequest) async throws -> Project {
+        try await call("projects.create", .object(request.params), as: ProjectResult.self).project
+    }
+
+    func updateProject(_ projectId: String, _ update: ProjectUpdate) async throws -> Project {
+        var params = update.params
+        params["projectId"] = .string(projectId)
+        return try await call("projects.update", .object(params), as: ProjectResult.self).project
+    }
+
+    /// Moves `projectId`'s folders and threads into `intoId` and deletes it.
+    func mergeProject(_ projectId: String, into intoId: String) async throws -> Project {
+        try await call("projects.merge", .object(["projectId": .string(projectId), "intoId": .string(intoId)]), as: ProjectResult.self).project
+    }
+
+    func deleteProject(_ projectId: String) async throws {
+        _ = try await call("projects.delete", .object(["projectId": .string(projectId)]), as: EmptyResult.self)
+    }
+
+    /// What Mike does by hand: an added project is pinned, a removed one is
+    /// never put back by the librarian.
+    func setThreadProjects(_ threadId: String, add: [String] = [], remove: [String] = []) async throws -> ThreadSummary {
+        try await call("threads.setProjects", .object(SetProjectsRequest(threadId: threadId, add: add, remove: remove).params), as: ThreadResult.self).thread
+    }
+
+    func librarianStatus() async throws -> LibrarianStatus {
+        try await call("librarian.status", .object([:]), as: LibrarianResult.self).librarian
+    }
+
+    /// A look at one thread now, or with none a backfill over every thread
+    /// it has never looked at.
+    func runLibrarian(threadId: String? = nil) async throws -> LibrarianStatus {
+        var params: [String: JSONValue] = [:]
+        if let threadId { params["threadId"] = .string(threadId) }
+        return try await call("librarian.run", .object(params), as: LibrarianResult.self).librarian
+    }
+
+    func updateLibrarian(paused: Bool) async throws -> LibrarianStatus {
+        try await call("librarian.update", .object(["paused": .bool(paused)]), as: LibrarianResult.self).librarian
+    }
+}
+
+public struct NewProjectRequest: Sendable, Hashable {
+    public var title: String
+    public var folders: [String]
+    public var goals: String?
+    public var threadIds: [String]
+
+    public init(title: String, folders: [String] = [], goals: String? = nil, threadIds: [String] = []) {
+        self.title = title
+        self.folders = folders
+        self.goals = goals
+        self.threadIds = threadIds
+    }
+
+    public var params: [String: JSONValue] {
+        var params: [String: JSONValue] = ["title": .string(title)]
+        if !folders.isEmpty { params["folders"] = .array(folders.map { .string($0) }) }
+        if let goals { params["goals"] = .string(goals) }
+        if !threadIds.isEmpty { params["threadIds"] = .array(threadIds.map { .string($0) }) }
+        return params
+    }
+}
+
+/// Fields for `projects.update`; nil ones are left out, and what's given
+/// replaces what was there.
+public struct ProjectUpdate: Sendable, Hashable {
+    public var title: String?
+    public var folders: [String]?
+    public var goals: String?
+    public var state: String?
+    public var notes: String?
+    public var archived: Bool?
+
+    public init(title: String? = nil, folders: [String]? = nil, goals: String? = nil, state: String? = nil, notes: String? = nil, archived: Bool? = nil) {
+        self.title = title
+        self.folders = folders
+        self.goals = goals
+        self.state = state
+        self.notes = notes
+        self.archived = archived
+    }
+
+    public var params: [String: JSONValue] {
+        var params: [String: JSONValue] = [:]
+        if let title { params["title"] = .string(title) }
+        if let folders { params["folders"] = .array(folders.map { .string($0) }) }
+        if let goals { params["goals"] = .string(goals) }
+        if let state { params["state"] = .string(state) }
+        if let notes { params["notes"] = .string(notes) }
+        if let archived { params["archived"] = .bool(archived) }
+        return params
+    }
+}
+
+public struct SetProjectsRequest: Sendable, Hashable {
+    public var threadId: String
+    public var add: [String]
+    public var remove: [String]
+
+    public init(threadId: String, add: [String] = [], remove: [String] = []) {
+        self.threadId = threadId
+        self.add = add
+        self.remove = remove
+    }
+
+    public var params: [String: JSONValue] {
+        var params: [String: JSONValue] = ["threadId": .string(threadId)]
+        if !add.isEmpty { params["add"] = .array(add.map { .string($0) }) }
+        if !remove.isEmpty { params["remove"] = .array(remove.map { .string($0) }) }
+        return params
+    }
+}
+
+public struct ProjectsResult: Sendable, Decodable {
+    public var projects: [Project]
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        projects = c.lossyArray(Project.self, forKey: .projects)
+    }
+
+    enum CodingKeys: String, CodingKey { case projects }
+}
+
+public struct ProjectResult: Sendable, Decodable {
+    public var project: Project
+}
+
+public struct ProjectGetResult: Sendable, Decodable {
+    public var project: Project
+    /// Its threads, newest activity first, put away ones included.
+    public var threadIds: [String]
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        project = try c.decode(Project.self, forKey: .project)
+        threadIds = c.lossyArray(String.self, forKey: .threadIds)
+    }
+
+    enum CodingKeys: String, CodingKey { case project, threadIds }
+}
+
+public struct LibrarianResult: Sendable, Decodable {
+    public var librarian: LibrarianStatus
+}

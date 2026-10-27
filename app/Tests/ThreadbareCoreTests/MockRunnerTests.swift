@@ -288,6 +288,64 @@ final class MockRunnerTests: XCTestCase {
         }
     }
 
+    /// The mock's projects and librarian: its demo, a thread taken out of a
+    /// project and put back (pinned), a merge, and an old runner's -32601.
+    func testProjectsAndTheLibrarian() async throws {
+        let client = try await connect()
+        defer { client.close() }
+        _ = try await client.hello(version: "test")
+        let projects = try await client.listProjects()
+        XCTAssertEqual(Set(projects.map(\.title)), ["Threadbear", "Photo sync", "Walkies"])
+        let threads = try await client.listThreads(include: [.inbox, .snoozed, .archived])
+        let ci = try XCTUnwrap(threads.first { $0.id == "demo_ci_slow" })
+        XCTAssertEqual(ci.projects.count, 2, "the demo has a thread in two projects")
+        XCTAssertTrue(threads.contains { $0.projects.isEmpty && !$0.isArchived }, "and some in none")
+        let dark = try XCTUnwrap(threads.first { $0.id == "demo_dark_mode" })
+        XCTAssertTrue(dark.patches.contains { $0.projectId != nil }, "a patch from a project's folder")
+
+        let tb = try XCTUnwrap(projects.first { $0.title == "Threadbear" })
+        let got = try await client.getProject(tb.id)
+        XCTAssertTrue(got.threadIds.contains("demo_settings_tabs"))
+        XCTAssertEqual(got.project.threadCount, got.threadIds.count)
+
+        var tabs = try await client.setThreadProjects("demo_settings_tabs", remove: [tb.id])
+        XCTAssertFalse(tabs.projects.contains { $0.id == tb.id })
+        tabs = try await client.setThreadProjects("demo_settings_tabs", add: [tb.id])
+        XCTAssertEqual(tabs.projects.first { $0.id == tb.id }?.pinned, true, "added by hand is pinned")
+
+        let renamed = try await client.updateProject(tb.id, ProjectUpdate(title: "Threadbare"))
+        XCTAssertEqual(renamed.title, "Threadbare")
+        let made = try await client.createProject(NewProjectRequest(title: "Scratch", threadIds: ["demo_landing_pages"]))
+        let kept = try await client.mergeProject(made.id, into: tb.id)
+        XCTAssertEqual(kept.id, tb.id)
+        let afterMerge = try await client.getProject(tb.id)
+        XCTAssertTrue(afterMerge.threadIds.contains("demo_landing_pages"))
+        do {
+            _ = try await client.getProject(made.id)
+            XCTFail("the merged one is gone")
+        } catch RPCError.server(let code, _) {
+            XCTAssertEqual(code, RPCError.projectNotFound)
+        }
+
+        var librarian = try await client.librarianStatus()
+        XCTAssertEqual(librarian.state, .working)
+        XCTAssertEqual(librarian.queue.count, 3)
+        XCTAssertEqual(librarian.recent.count, 8)
+        librarian = try await client.updateLibrarian(paused: true)
+        XCTAssertEqual(librarian.state, .paused)
+        XCTAssertNil(librarian.current)
+        librarian = try await client.runLibrarian(threadId: "demo_tunnel")
+        XCTAssertTrue(librarian.queue.contains { $0.threadId == "demo_tunnel" && $0.reason == .asked })
+
+        _ = try await client.call("mock.accounts", .object(["old": .bool(true)]), as: JSONValue.self)
+        do {
+            _ = try await client.listProjects()
+            XCTFail("an old runner has no projects")
+        } catch RPCError.server(let code, _) {
+            XCTAssertEqual(code, RPCError.methodNotFound)
+        }
+    }
+
     func testWrongTokenIsUnauthorized() async throws {
         let endpoint = try RunnerConfig.endpoint(dataDir: dataDir)
         let client = RPCClient(transport: WebSocketTransport(url: endpoint.url, token: "not-the-token"))

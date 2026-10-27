@@ -3,7 +3,7 @@ import { parseArgs } from 'node:util';
 import path from 'node:path';
 import { loadConfig, readToken, runnerUrl } from './config.ts';
 import { RunnerClient } from './client.ts';
-import type { Account, ImageRef, PersistedEvent, RunnerDefaults, Schedule, ThreadSummary } from './protocol.ts';
+import type { Account, ImageRef, LibrarianStatus, PersistedEvent, Project, RunnerDefaults, Schedule, ThreadSummary } from './protocol.ts';
 import type { Settings } from './settings.ts';
 import { usd } from './models/index.ts';
 import { backgroundFlag } from './protocol.ts';
@@ -77,13 +77,21 @@ const HELP = `tb: talk to the Threadbare runner
                                   or an ISO time) or on a cron; to a thread with --thread,
                                   otherwise to a new thread each time
   tb schedules [--json]           tb schedules run|pause|resume|delete <scheduleId>
+  tb projects [--archived] [--json]  the projects, their folders and thread counts
+  tb projects show <project>      one project: goals, state, notes, threads
+  tb projects add|remove <threadId> <project>   puts a thread in a project or takes it out, as Mike
+  tb librarian [--json]           what the librarian is doing, its queue and what it did
+  tb librarian run [<threadId>]   a look at a thread now; with none, at every recent thread it hasn't seen
+  tb librarian pause|resume
   tb settings [--json]            what the Settings window shows
   tb models [--json]              the OpenRouter key (set or not), budget and spend
   tb models key [--remove]        sets the OpenRouter key from a prompt or stdin, never an argument
   tb models try <job> "text" [--labels a,b] [--field name=description]... [--system S] [--cwd DIR]
                                   one call by hand: classify (--labels), extract (--field),
                                   summarize or generate. It spends like any other
-  tb retitle [--dry-run] [--json] a model title for every thread still named by its first line
+  tb retitle [<threadId>...] [--dry-run] [--json]
+                                  a model title for every thread still named by its first line,
+                                  or for the ones given (never one named by hand)
 
 Thread ids can be shortened to any unique prefix.
 Uses THREADBARE_HOME and THREADBARE_PORT like the runner does.
@@ -110,6 +118,8 @@ const COMMAND_FLAGS: Record<string, string[]> = {
   accounts: ['json'],
   schedule: ['at', 'cron', 'tz', 'title', 'thread', 'cwd', 'account', 'model', 'effort', 'ask', 'json'],
   schedules: ['json'],
+  projects: ['json', 'archived'],
+  librarian: ['json'],
   settings: ['json'],
   models: ['json', 'remove', 'labels', 'field', 'system', 'cwd'],
   status: ['json'],
@@ -414,6 +424,42 @@ async function run(client: RunnerClient, cmd: string, args: string[], f: Flags):
       printSchedules([r.schedule]);
       return 0;
     }
+    case 'projects': {
+      const [action, a, b] = args;
+      if (!action) {
+        const r = await client.call<{ projects: Project[] }>('projects.list', { archived: Boolean(f.archived) });
+        if (f.json) console.log(JSON.stringify(r.projects, null, 2));
+        else if (!r.projects.length) console.log('No projects yet.');
+        else for (const p of r.projects) console.log(projectLine(p));
+        return 0;
+      }
+      if (action === 'show') {
+        if (!a) throw new Error('tb projects show <project>');
+        const r = await client.call<{ project: Project; threadIds: string[] }>('projects.get', { projectId: await projectId(client, a) });
+        if (f.json) console.log(JSON.stringify(r, null, 2));
+        else printProject(r.project, r.threadIds);
+        return 0;
+      }
+      if (action === 'add' || action === 'remove') {
+        if (!a || !b) throw new Error(`tb projects ${action} <threadId> <project>`);
+        const pid = await projectId(client, b);
+        const r = await client.call<{ thread: ThreadSummary }>('threads.setProjects', { threadId: a, [action]: [pid] });
+        console.log(`${r.thread.title}: ${(r.thread.projects ?? []).map((p) => p.title).join(', ') || 'in no project'}`);
+        return 0;
+      }
+      throw new Error(`Unknown: tb projects ${action}. It's show, add or remove.`);
+    }
+    case 'librarian': {
+      const [action, id] = args;
+      let r: { librarian: LibrarianStatus };
+      if (!action) r = await client.call('librarian.status', {});
+      else if (action === 'run') r = await client.call('librarian.run', id ? { threadId: id } : {});
+      else if (action === 'pause' || action === 'resume') r = await client.call('librarian.update', { paused: action === 'pause' });
+      else throw new Error(`Unknown: tb librarian ${action}. It's run, pause or resume.`);
+      if (f.json) console.log(JSON.stringify(r.librarian, null, 2));
+      else printLibrarian(r.librarian);
+      return 0;
+    }
     case 'settings': {
       const r = await client.call<{ settings: Settings }>('settings.get', {});
       if (f.json) console.log(JSON.stringify(r.settings, null, 2));
@@ -424,7 +470,8 @@ async function run(client: RunnerClient, cmd: string, args: string[], f: Flags):
       return modelsCommand(client, args, f);
     case 'retitle': {
       const dryRun = Boolean(f['dry-run']);
-      const r = await client.call<{ threads: { threadId: string; from: string; to?: string; reason?: string }[] }>('threads.retitle', { dryRun });
+      const threadIds = args.length ? await Promise.all(args.map((a) => resolveId(client, a))) : undefined;
+      const r = await client.call<{ threads: { threadId: string; from: string; to?: string; reason?: string }[] }>('threads.retitle', { dryRun, threadIds });
       if (f.json) {
         console.log(JSON.stringify(r.threads, null, 2));
         return 0;
@@ -742,3 +789,54 @@ async function tail(
 }
 
 main(process.argv.slice(2)).then((code) => process.exit(code));
+
+// ------------------------------------------------------------- projects
+
+// A project by id, prefix or title, as the runner's own lookup would.
+async function projectId(client: RunnerClient, q: string): Promise<string> {
+  const r = await client.call<{ projects: Project[] }>('projects.list', { archived: true });
+  const hit =
+    r.projects.find((p) => p.id === q) ??
+    one(r.projects.filter((p) => p.id.startsWith(q))) ??
+    one(r.projects.filter((p) => p.title.toLowerCase() === q.toLowerCase()));
+  if (!hit) throw new Error(`No project ${q}. tb projects lists them.`);
+  return hit.id;
+}
+
+function one<T>(xs: T[]): T | undefined {
+  return xs.length === 1 ? xs[0] : undefined;
+}
+
+function projectLine(p: Project): string {
+  const bits = [`${p.id}  ${p.title}${p.archived ? ' (archived)' : ''}`, `${p.threadCount} thread${p.threadCount === 1 ? '' : 's'}`];
+  if (p.folders.length) bits.push(p.folders.map(tildePath).join(', '));
+  bits.push(`by ${p.createdBy}`);
+  return bits.join(' · ');
+}
+
+function printProject(p: Project, threadIds: string[]): void {
+  console.log(projectLine(p));
+  console.log(`Goals: ${p.goals || '(none)'}`);
+  console.log(`State: ${p.state || '(none)'}${p.stateUpdatedAt ? ` (${p.stateUpdatedAt})` : ''}`);
+  if (p.notes) console.log(`\n${p.notes}`);
+  if (threadIds.length) console.log(`\nThreads: ${threadIds.map((t) => t.slice(0, 8)).join(' ')}`);
+}
+
+function printLibrarian(l: LibrarianStatus): void {
+  const state = l.current ? `working on "${l.current.threadTitle}" (${l.current.why})` : l.state + (l.reason ? `: ${l.reason}` : '');
+  console.log(`Librarian: ${state}. ${l.looksToday} look${l.looksToday === 1 ? '' : 's'} today, $${l.spentTodayUsd.toFixed(4)}.`);
+  if (l.queue.length) {
+    console.log('\nNext:');
+    for (const j of l.queue.slice(0, 20)) console.log(`  ${j.dueAt}  ${j.threadId.slice(0, 8)} "${j.threadTitle}"  ${j.why}`);
+    if (l.queue.length > 20) console.log(`  … and ${l.queue.length - 20} more`);
+  }
+  if (l.recent.length) {
+    console.log('\nDone:');
+    for (const e of l.recent.slice(0, 15)) console.log(`  ${e.at}  ${e.threadId.slice(0, 8)} "${e.threadTitle}"  ${e.outcome}: ${e.text}`);
+  }
+}
+
+function tildePath(p: string): string {
+  const home = process.env.HOME ?? '';
+  return home && p.startsWith(home + '/') ? '~' + p.slice(home.length) : p;
+}
