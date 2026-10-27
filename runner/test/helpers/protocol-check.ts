@@ -4,9 +4,12 @@
 
 type Obj = Record<string, any>;
 
-const TOOL_KINDS = ['command', 'read', 'edit', 'write', 'search', 'web', 'mcp', 'task', 'todo', 'other'];
+const TOOL_KINDS = ['command', 'read', 'edit', 'write', 'search', 'web', 'mcp', 'task', 'todo', 'image', 'other'];
 const STATUSES = ['idle', 'starting', 'running', 'waiting', 'error', 'stopped'];
-const EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'];
+const EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max', 'ultra'];
+const PROVIDERS = ['claude', 'codex'];
+const ERROR_KINDS = ['usageLimit', 'contextWindow', 'auth'];
+const WINDOW_KINDS = ['five_hour', 'weekly', 'weekly_model', 'daily', 'monthly', 'allowance', 'other'];
 
 function isStr(v: unknown): v is string {
   return typeof v === 'string';
@@ -16,6 +19,10 @@ function isNum(v: unknown): v is number {
 }
 function isIso(v: unknown): boolean {
   return isStr(v) && !Number.isNaN(Date.parse(v)) && v.endsWith('Z');
+}
+// turn.completed's usage: token counts by name (Claude's and Codex's differ).
+function isTokenCounts(v: unknown): boolean {
+  return Boolean(v) && typeof v === 'object' && !Array.isArray(v) && Object.values(v as Obj).every(isNum);
 }
 function isImageRef(v: Obj): boolean {
   return v && isStr(v.path) && v.path.startsWith('/') && isStr(v.mediaType) && (v.width === undefined || isNum(v.width)) && (v.height === undefined || isNum(v.height));
@@ -90,9 +97,11 @@ const PERSISTED: Record<string, (e: Obj) => string | null> = {
     ['completed', 'interrupted', 'failed'].includes(e.outcome) &&
     isNum(e.durationMs) &&
     (e.costUsd === undefined || isNum(e.costUsd)) &&
-    (e.error === undefined || isStr(e.error))
+    (e.usage === undefined || isTokenCounts(e.usage)) &&
+    (e.error === undefined || isStr(e.error)) &&
+    (e.errorKind === undefined || ERROR_KINDS.includes(e.errorKind))
       ? null
-      : 'turnId, outcome, durationMs',
+      : 'turnId, outcome, durationMs, usage, errorKind',
   'system.note': (e) => (isStr(e.text) ? null : 'text'),
   error: (e) => (isStr(e.message) ? null : 'message'),
 };
@@ -143,7 +152,7 @@ export function checkSequence(events: Obj[], startAfter = 0): string[] {
 export function checkSummary(t: Obj): string[] {
   const problems: string[] = [];
   for (const k of ['id', 'title', 'cwd', 'accountId', 'preview']) if (!isStr(t[k])) problems.push(k);
-  if (t.provider !== 'claude') problems.push('provider');
+  if (!PROVIDERS.includes(t.provider)) problems.push('provider');
   if (t.permissionMode !== 'full' && t.permissionMode !== 'ask') problems.push('permissionMode');
   if (!STATUSES.includes(t.status)) problems.push('status');
   for (const k of ['live', 'needsYou']) if (typeof t[k] !== 'boolean') problems.push(k);
@@ -153,12 +162,83 @@ export function checkSummary(t: Obj): string[] {
   if (t.title.length > 200) problems.push('title');
   for (const k of ['model', 'modelInUse', 'snoozedUntil', 'archivedAt', 'nativeSessionId']) if (t[k] !== undefined && !isStr(t[k])) problems.push(k);
   for (const k of ['effort', 'effortInUse']) if (t[k] !== undefined && !EFFORTS.includes(t[k])) problems.push(k);
-  for (const k of ['contextTokens', 'costUsd']) if (t[k] !== undefined && !isNum(t[k])) problems.push(k);
+  for (const k of ['contextTokens', 'contextWindow', 'costUsd']) if (t[k] !== undefined && !isNum(t[k])) problems.push(k);
   const allowed = new Set([
     'id', 'title', 'cwd', 'accountId', 'provider', 'model', 'permissionMode', 'status', 'live', 'needsYou', 'createdAt', 'updatedAt',
     'lastActivityAt', 'snoozedUntil', 'archivedAt', 'preview', 'lastSeq', 'lastSeenSeq', 'nativeSessionId', 'contextTokens', 'costUsd',
-    'effort', 'modelInUse', 'effortInUse',
+    'effort', 'modelInUse', 'effortInUse', 'contextWindow',
   ]);
   for (const k of Object.keys(t)) if (!allowed.has(k)) problems.push(`unexpected field ${k}`);
+  return problems;
+}
+
+function checkModelChoice(m: Obj): string[] {
+  const problems: string[] = [];
+  for (const k of ['id', 'model', 'title']) if (!isStr(m?.[k])) problems.push(k);
+  if (m?.description !== undefined && !isStr(m.description)) problems.push('description');
+  if (m?.effortLevels !== undefined && !(Array.isArray(m.effortLevels) && m.effortLevels.every((l: unknown) => EFFORTS.includes(l as string)))) {
+    problems.push('effortLevels');
+  }
+  if (m?.defaultEffort !== undefined && !EFFORTS.includes(m.defaultEffort)) problems.push('defaultEffort');
+  return problems.map((p) => `models[${m?.id}].${p}`);
+}
+
+function checkUsage(u: Obj): string[] {
+  const problems: string[] = [];
+  if (!u || typeof u !== 'object') return ['usage'];
+  if (!Array.isArray(u.windows)) problems.push('usage.windows');
+  else {
+    for (const w of u.windows) {
+      if (!WINDOW_KINDS.includes(w?.kind)) problems.push('usage.windows.kind');
+      if (!isStr(w?.title)) problems.push('usage.windows.title');
+      if (!isNum(w?.remainingPercent) || w.remainingPercent < 0 || w.remainingPercent > 100) problems.push('usage.windows.remainingPercent');
+      if (w?.resetsAt !== undefined && !isIso(w.resetsAt)) problems.push('usage.windows.resetsAt');
+      if (w?.detail !== undefined && !isStr(w.detail)) problems.push('usage.windows.detail');
+    }
+  }
+  if (!isIso(u.readAt)) problems.push('usage.readAt');
+  if (u.source !== 'tokenStats' && u.source !== 'live') problems.push('usage.source');
+  for (const k of ['stale', 'blocked']) if (u[k] !== undefined && typeof u[k] !== 'boolean') problems.push(`usage.${k}`);
+  if (u.notice !== undefined && !isStr(u.notice)) problems.push('usage.notice');
+  return problems;
+}
+
+export function checkAccount(a: Obj): string[] {
+  const problems: string[] = [];
+  for (const k of ['id', 'title', 'configDir']) if (!isStr(a[k])) problems.push(k);
+  if (!PROVIDERS.includes(a.provider)) problems.push('provider');
+  for (const k of ['defaultModel', 'email', 'plan', 'note']) if (a[k] !== undefined && !isStr(a[k])) problems.push(k);
+  if (a.defaultEffort !== undefined && !EFFORTS.includes(a.defaultEffort)) problems.push('defaultEffort');
+  if (a.models !== undefined) {
+    if (!Array.isArray(a.models)) problems.push('models');
+    else for (const m of a.models) problems.push(...checkModelChoice(m));
+  }
+  if (a.usage !== undefined) problems.push(...checkUsage(a.usage));
+  return problems;
+}
+
+export function checkCliStatus(c: Obj): string[] {
+  const problems: string[] = [];
+  if (!PROVIDERS.includes(c.provider)) problems.push('provider');
+  if (!isStr(c.path)) problems.push('path');
+  if (!['threadbare', 'cli', 'none'].includes(c.managedBy)) problems.push('managedBy');
+  if (!['current', 'behind', 'held', 'unknown', 'missing'].includes(c.status)) problems.push('status');
+  if (!['auto', 'notify', 'off'].includes(c.policy)) problems.push('policy');
+  for (const k of ['installedVersion', 'latestVersion', 'previousVersion']) if (c[k] !== undefined && !isStr(c[k])) problems.push(k);
+  if (c.checkedAt !== undefined && !isIso(c.checkedAt)) problems.push('checkedAt');
+  if (!Array.isArray(c.inUse) || !c.inUse.every((u: Obj) => isStr(u?.version) && Array.isArray(u.threadIds) && u.threadIds.every(isStr))) {
+    problems.push('inUse');
+  }
+  if (c.hold !== undefined) {
+    const h = c.hold;
+    if (!isStr(h?.version) || !isStr(h?.reason) || (h.missing !== undefined && !(Array.isArray(h.missing) && h.missing.every(isStr)))) problems.push('hold');
+  }
+  if (c.update !== undefined) {
+    const u = c.update;
+    if (!['waiting', 'running', 'succeeded', 'unchanged', 'failed'].includes(u?.state)) problems.push('update.state');
+    if (u?.finishedAt !== undefined && !isIso(u.finishedAt)) problems.push('update.finishedAt');
+    for (const k of ['targetVersion', 'message']) if (u?.[k] !== undefined && !isStr(u[k])) problems.push(`update.${k}`);
+    if (u?.waitingFor !== undefined && !(Array.isArray(u.waitingFor) && u.waitingFor.every(isStr))) problems.push('update.waitingFor');
+  }
   return problems;
 }

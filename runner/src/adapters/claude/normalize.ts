@@ -1,62 +1,16 @@
 // Turns Claude Agent SDK messages into protocol events. Pure apart from the
 // injected file helpers, so it can be tested by feeding recorded SDK message
 // sequences through it.
-import fs from 'node:fs';
-import path from 'node:path';
 import type { EventBody, Hunk, ImageRef } from '../../protocol.ts';
 import { LIMITS } from '../../protocol.ts';
 import type { AdapterOutput, TurnResult } from '../types.ts';
+import type { NormalizerContext } from '../context.ts';
 import { EDIT_TOOLS, PlanTracker, computeEditDiff, toolKind, toolTitle, truncateInput } from '../../tools.ts';
 import { diffLines } from '../../diff.ts';
-import { saveBase64Image } from '../../media.ts';
 
-export type NormalizerContext = {
-  cwd: string;
-  readFile(p: string): string | null;
-  saveImage(data: string, mediaType: string, hint: string): ImageRef;
-  saveBlob(itemId: string, text: string): string;
-  // Copies a file the CLI saved big output to into the thread, so it
-  // outlives the CLI's own cleanup. Returns the copy's path.
-  copyBlob(itemId: string, src: string): string | null;
-};
-
-// Biggest CLI output file copied into blobs/.
-const MAX_BLOB_COPY = 64 * 1024 * 1024;
-
-export function fileContext(cwd: string, mediaDir: string, blobsDir: string): NormalizerContext {
-  return {
-    cwd,
-    readFile(p) {
-      try {
-        const abs = path.isAbsolute(p) ? p : path.join(cwd, p);
-        const st = fs.statSync(abs);
-        if (!st.isFile() || st.size > 4 * 1024 * 1024) return null;
-        return fs.readFileSync(abs, 'utf8');
-      } catch {
-        return null;
-      }
-    },
-    saveImage: (data, mediaType, hint) => saveBase64Image(mediaDir, data, mediaType, hint),
-    saveBlob(itemId, text) {
-      fs.mkdirSync(blobsDir, { recursive: true });
-      const file = path.join(blobsDir, `${itemId.replace(/[^a-zA-Z0-9_-]/g, '_')}.txt`);
-      fs.writeFileSync(file, text);
-      return file;
-    },
-    copyBlob(itemId, src) {
-      try {
-        const st = fs.statSync(src);
-        if (!st.isFile() || st.size > MAX_BLOB_COPY) return null;
-        fs.mkdirSync(blobsDir, { recursive: true });
-        const file = path.join(blobsDir, `${itemId.replace(/[^a-zA-Z0-9_-]/g, '_')}.txt`);
-        fs.copyFileSync(src, file);
-        return file;
-      } catch {
-        return null;
-      }
-    },
-  };
-}
+// The file helpers moved to ../context.ts so the Codex normaliser shares
+// them; re-exported for the callers and tests that import them from here.
+export { fileContext, type NormalizerContext } from '../context.ts';
 
 type AnyMsg = Record<string, any>;
 

@@ -52,13 +52,57 @@ const models = [
   { id: 'claude-haiku-4-5-20251001', model: 'claude-haiku-4-5-20251001', title: 'Haiku 4.5', description: 'Fastest for quick answers' },
   { id: 'claude-opus-5', model: 'claude-opus-5', title: 'Opus 5', description: 'Best for everyday, complex tasks', effortLevels: EFFORTS },
 ];
-const accounts = [
-  { id: 'claude-main', provider: 'claude', title: 'mike@example.com', configDir: '~/.claude', defaultModel: 'claude-fable-5-1', models },
-  { id: 'claude-3', provider: 'claude', title: 'mike+3@example.com', configDir: '~/Library/Application Support/Token Stats/Accounts/claude-3', defaultModel: 'claude-fable-5-1', models },
+// Codex's list, as its model/list gives it: its own levels (up to ultra)
+// and a default level per model.
+const CODEX_EFFORTS = ['low', 'medium', 'high', 'xhigh', 'ultra'];
+const codexModels = [
+  { id: 'gpt-6.1-sol', model: 'gpt-6.1-sol', title: 'GPT-6.1-Sol', description: 'Frontier model for complex work', effortLevels: CODEX_EFFORTS, defaultEffort: 'medium' },
+  { id: 'gpt-6-luna', model: 'gpt-6-luna', title: 'GPT-6-Luna', description: 'Fast and cheap', effortLevels: CODEX_EFFORTS, defaultEffort: 'low' },
 ];
+// Usage as the runner reports it from Token Stats' limits.json and live
+// readings, relative to now so reset times stay in the future.
+function usage(fiveHour, weekly, extra = {}) {
+  const hours = (h) => new Date(Date.now() + h * 3_600_000).toISOString();
+  return {
+    windows: [
+      { kind: 'five_hour', title: '5-hour', remainingPercent: fiveHour, resetsAt: hours(2) },
+      { kind: 'weekly', title: 'Weekly', remainingPercent: weekly, resetsAt: hours(70) },
+    ],
+    readAt: iso(),
+    source: 'tokenStats',
+    ...extra,
+  };
+}
+const accounts = [
+  {
+    id: 'claude-main', provider: 'claude', title: 'mike@example.com', configDir: '~/.claude', defaultModel: 'claude-fable-5-1', models,
+    email: 'mike@example.com', plan: 'Max', usage: usage(89, 78),
+  },
+  {
+    id: 'claude-3', provider: 'claude', title: 'mike+3@example.com', configDir: '~/Library/Application Support/Token Stats/Accounts/claude-3',
+    defaultModel: 'claude-fable-5-1', models, email: 'mike+3@example.com', plan: 'Team', note: 'Side projects', usage: usage(12, 40),
+  },
+  {
+    id: 'codex-main', provider: 'codex', title: 'Codex · mike@example.com', configDir: '~/.codex', defaultModel: 'gpt-6.1-sol',
+    defaultEffort: 'high', models: codexModels, email: 'mike@example.com', plan: 'Pro Lite',
+    usage: usage(97, 64, { source: 'live', notice: '64,390 credits' }),
+  },
+];
+const providerOf = (accountId) => accounts.find((a) => a.id === accountId)?.provider ?? 'claude';
 // The synthetic fixtures live under a made-up /Users/mike, so the default
 // folder does too: the app only shows a folder chip away from the default.
-const defaults = { cwd: '/Users/mike/dev/me/misc', accountId: 'claude-main' };
+const defaults = {
+  cwd: '/Users/mike/dev/me/misc', accountId: 'claude-main',
+  models: { codex: 'gpt-6-luna' }, efforts: { codex: 'low' },
+};
+// What clis.list reports: Claude current, Codex one version behind.
+const clis = [
+  { provider: 'claude', path: '/Users/mike/.local/bin/claude', managedBy: 'cli', installedVersion: '2.1.311', latestVersion: '2.1.311', status: 'current', policy: 'auto', inUse: [] },
+  {
+    provider: 'codex', path: '/Users/mike/Library/Application Support/Threadbare/tools/codex/current', managedBy: 'threadbare',
+    installedVersion: '0.164.0', latestVersion: '0.165.0', status: 'behind', policy: 'auto', inUse: [], previousVersion: '0.163.0',
+  },
+];
 
 /** threadId -> { summary, events: [], inProgress: Map(itemId -> {type,text}), timers: [] } */
 const threads = new Map();
@@ -141,7 +185,7 @@ async function handle(client, { id, method, params = {} }) {
 async function dispatch(client, method, p) {
   switch (method) {
     case 'hello':
-      return { runnerVersion, protocol: 1, accounts, defaults };
+      return { runnerVersion, protocol: 1, accounts, defaults, clis };
     case 'runner.status': {
       const all = [...threads.values()].map((t) => t.summary);
       const status = {
@@ -151,7 +195,22 @@ async function dispatch(client, method, p) {
         background: [],
       };
       if (pendingRestart) status.pendingRestart = pendingRestart;
+      status.clis = clis;
       return status;
+    }
+    // The CLI requests only report; nothing is checked or installed.
+    case 'clis.list':
+    case 'clis.check':
+      return { clis };
+    case 'clis.update':
+    case 'clis.setPolicy': {
+      const cli = clis.find((c) => c.provider === p.provider);
+      if (!cli) throw rpcError(-32602, 'provider must be claude or codex');
+      if (method === 'clis.setPolicy') cli.policy = p.policy;
+      else cli.update = { state: 'running', targetVersion: p.version ?? cli.latestVersion };
+      const text = JSON.stringify({ jsonrpc: '2.0', method: 'clis.updated', params: { clis } });
+      for (const c of clients) if (c.authed) c.ws.send(text);
+      return { clis };
     }
     case 'threads.list': {
       const include = new Set(p.include ?? ['inbox']);
@@ -173,9 +232,11 @@ async function dispatch(client, method, p) {
       if (!p.text) throw rpcError(-32602, 'text is required');
       const threadId = 'th_' + crypto.randomBytes(6).toString('hex');
       const now = iso();
+      const accountId = p.accountId ?? defaults.accountId;
+      const provider = providerOf(accountId);
       const summary = {
         id: threadId, title: (p.title ?? p.text.split('\n')[0]).slice(0, 60), cwd: p.cwd ?? defaults.cwd,
-        accountId: p.accountId ?? defaults.accountId, provider: 'claude', model: p.model, effort: p.effort,
+        accountId, provider, model: p.model ?? defaults.models[provider], effort: p.effort ?? defaults.efforts[provider],
         permissionMode: p.permissionMode ?? 'full', status: 'starting', live: true, needsYou: false,
         createdAt: now, updatedAt: now, lastActivityAt: now, preview: '', lastSeq: 0, lastSeenSeq: 0,
       };
@@ -198,6 +259,13 @@ async function dispatch(client, method, p) {
     case 'threads.update': {
       const t = need(p.threadId);
       const s = t.summary;
+      // Like the runner: an account of the other provider switches provider
+      // and puts model and effort back to its defaults, unless set here.
+      if (p.accountId !== undefined && providerOf(p.accountId) !== s.provider) {
+        s.provider = providerOf(p.accountId);
+        s.model = defaults.models[s.provider];
+        s.effort = defaults.efforts[s.provider];
+      }
       for (const key of ['title', 'cwd', 'accountId', 'permissionMode']) if (p[key] !== undefined) s[key] = p[key];
       if (p.model !== undefined) s.model = p.model ?? undefined;
       if (p.effort !== undefined) s.effort = p.effort ?? undefined;

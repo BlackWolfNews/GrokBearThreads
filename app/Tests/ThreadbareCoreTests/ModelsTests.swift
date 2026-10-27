@@ -125,6 +125,136 @@ final class ModelsTests: XCTestCase {
         XCTAssertEqual(result.images.map(\.path), ["/a.png"])
     }
 
+    // MARK: Step 4: Codex, accounts, usage and CLI updates
+
+    func testCodexAccountWithUsageNoteAndModelDefaults() throws {
+        let json = """
+        {"id":"codex-main","provider":"codex","title":"Codex · me@example.com","configDir":"/Users/me/.codex",
+         "email":"me@example.com","plan":"Pro Lite","note":"Side projects","defaultModel":"gpt-6.1-sol","defaultEffort":"high",
+         "models":[{"id":"gpt-6-luna","model":"gpt-6-luna","title":"GPT-6-Luna","effortLevels":["low","medium","high","ultra"],"defaultEffort":"medium"}],
+         "usage":{"windows":[
+            {"kind":"five_hour","title":"5-hour","remainingPercent":89,"resetsAt":"2026-10-27T05:00:00Z"},
+            {"kind":"allowance","title":"$250 allowance","remainingPercent":53.11612,"detail":"$132.79 left"},
+            {"kind":"hourly","title":"Hourly","remainingPercent":140},
+            {"kind":"weekly","title":"No number"}],
+          "readAt":"2026-10-27T01:00:00Z","source":"live","blocked":true,"notice":"64,390 credits","later":1},
+         "somethingNew":[1]}
+        """
+        let account = try JSONDecoder().decode(Account.self, from: Data(json.utf8))
+        XCTAssertEqual(account.provider, "codex")
+        XCTAssertEqual(account.email, "me@example.com")
+        XCTAssertEqual(account.plan, "Pro Lite")
+        XCTAssertEqual(account.note, "Side projects")
+        XCTAssertEqual(account.defaultEffort, "high")
+        XCTAssertEqual(account.models.first?.effortLevels.last, "ultra")
+        XCTAssertEqual(account.models.first?.defaultEffort, "medium")
+        let usage = try XCTUnwrap(account.usage)
+        XCTAssertEqual(usage.source, "live")
+        XCTAssertTrue(usage.blocked)
+        XCTAssertFalse(usage.stale)
+        XCTAssertEqual(usage.notice, "64,390 credits")
+        XCTAssertEqual(usage.readAt, ISO8601.parse("2026-10-27T01:00:00Z"))
+        // An unknown kind keeps its title; a percentage past 100 is capped;
+        // a window with no percentage is skipped.
+        XCTAssertEqual(usage.windows.map(\.kind), ["five_hour", "allowance", "hourly"])
+        XCTAssertEqual(usage.windows[1].remainingPercent, 53.11612, accuracy: 0.0001)
+        XCTAssertEqual(usage.windows[1].detail, "$132.79 left")
+        XCTAssertEqual(usage.windows[2].remainingPercent, 100)
+        XCTAssertNotNil(usage.windows[0].resetsAt)
+        let again = try JSONDecoder().decode(Account.self, from: JSONEncoder().encode(account))
+        XCTAssertEqual(again, account)
+    }
+
+    func testAccountFromAnOlderRunnerOrWithUnreadableUsage() throws {
+        let old = try JSONDecoder().decode(Account.self, from: Data(#"{"id":"claude-1","provider":"claude","title":"a@b.c","configDir":"/x"}"#.utf8))
+        XCTAssertNil(old.usage)
+        XCTAssertNil(old.email)
+        XCTAssertNil(old.note)
+        // A usage block or field of the wrong shape costs only that field.
+        let odd = try JSONDecoder().decode(Account.self, from: Data(#"{"id":"claude-2","usage":"soon","note":7,"defaultEffort":["x"]}"#.utf8))
+        XCTAssertEqual(odd.title, "claude-2")
+        XCTAssertNil(odd.usage)
+        XCTAssertNil(odd.note)
+        XCTAssertNil(odd.defaultEffort)
+    }
+
+    func testCodexThreadSummary() throws {
+        let json = #"{"id":"th1","provider":"codex","accountId":"codex-main","effort":"ultra","effortInUse":"ultra","contextTokens":1200,"contextWindow":258400}"#
+        let thread = try JSONDecoder().decode(ThreadSummary.self, from: Data(json.utf8))
+        XCTAssertEqual(thread.provider, "codex")
+        XCTAssertEqual(thread.effort, "ultra")
+        XCTAssertEqual(thread.contextWindow, 258_400)
+        XCTAssertNil(thread.costUsd)
+        let again = try JSONDecoder().decode(ThreadSummary.self, from: JSONEncoder().encode(thread))
+        XCTAssertEqual(again.contextWindow, 258_400)
+        XCTAssertNil(try JSONDecoder().decode(ThreadSummary.self, from: Data(#"{"id":"x","contextWindow":"big"}"#.utf8)).contextWindow)
+    }
+
+    func testHelloWithPerProviderDefaultsAndCLIs() throws {
+        let json = """
+        {"runnerVersion":"0.2.0+r9","protocol":1,"accounts":[{"id":"claude-3"},{"id":"codex-main","provider":"codex"}],
+         "defaults":{"cwd":"/w","accountId":"claude-3","model":"claude-haiku-5-5",
+                     "models":{"claude":"claude-haiku-5-5","codex":"gpt-6-luna","grok":7},"efforts":{"codex":"low"}},
+         "clis":[
+           {"provider":"codex","path":"/h/tools/codex/current","managedBy":"threadbare","installedVersion":"0.164.0","latestVersion":"0.165.0",
+            "status":"held","policy":"auto","inUse":[{"version":"0.164.0","threadIds":["th1"]},{"broken":true}],"previousVersion":"0.163.0",
+            "checkedAt":"2026-10-27T01:00:00Z","hold":{"version":"0.165.0","reason":"the app-server protocol changed","missing":["turn/steer"]},
+            "update":{"state":"failed","targetVersion":"0.165.0","finishedAt":"2026-10-27T01:01:00Z","message":"held"}},
+           {"provider":"claude","status":"behind","policy":"notify","update":{"state":"waiting","waitingFor":["th2"]},"newThing":true},
+           {"path":"no provider"}]}
+        """
+        let hello = try JSONDecoder().decode(HelloResult.self, from: Data(json.utf8))
+        XCTAssertEqual(hello.defaults.models, ["claude": "claude-haiku-5-5", "codex": "gpt-6-luna"])
+        XCTAssertEqual(hello.defaults.efforts, ["codex": "low"])
+        XCTAssertEqual(hello.defaults.model(for: "codex"), "gpt-6-luna")
+        XCTAssertEqual(hello.clis.map(\.provider), ["codex", "claude"], "a status with no provider is skipped")
+        let codex = hello.clis[0]
+        XCTAssertEqual(codex.managedBy, "threadbare")
+        XCTAssertEqual(codex.status, "held")
+        XCTAssertEqual(codex.inUse, [CliStatus.InUse(version: "0.164.0", threadIds: ["th1"])])
+        XCTAssertEqual(codex.hold?.missing, ["turn/steer"])
+        XCTAssertEqual(codex.update?.state, "failed")
+        XCTAssertNotNil(codex.update?.finishedAt)
+        XCTAssertNotNil(codex.checkedAt)
+        let claude = hello.clis[1]
+        XCTAssertEqual(claude.policy, "notify")
+        XCTAssertEqual(claude.update?.waitingFor, ["th2"])
+        XCTAssertEqual(claude.managedBy, "cli")
+    }
+
+    func testHelloFromAnOlderRunner() throws {
+        let json = #"{"runnerVersion":"0.1.0+r3","protocol":1,"accounts":[{"id":"claude-3"}],"defaults":{"cwd":"/w","accountId":"claude-3","model":"claude-haiku-5-5"}}"#
+        let hello = try JSONDecoder().decode(HelloResult.self, from: Data(json.utf8))
+        XCTAssertTrue(hello.clis.isEmpty)
+        XCTAssertTrue(hello.defaults.models.isEmpty)
+        XCTAssertEqual(hello.defaults.model(for: "claude"), "claude-haiku-5-5", "defaults.model is Claude's")
+        XCTAssertNil(hello.defaults.model(for: "codex"))
+        // Defaults of the wrong shape fall back rather than failing hello.
+        let odd = try JSONDecoder().decode(HelloResult.self, from: Data(#"{"accounts":[{"id":"claude-1"}],"defaults":{"cwd":4}}"#.utf8))
+        XCTAssertEqual(odd.defaults.accountId, "claude-1")
+    }
+
+    func testCodexTurnAndToolKinds() {
+        guard case .toolCall(let image) = E.event(1, "tool.call", ["itemId": "ig1", "name": "imageGeneration", "kind": "image", "title": "A cat", "input": [:]]).payload
+        else { return XCTFail() }
+        XCTAssertEqual(image.kind, .image)
+        // A kind newer than this app reads as other, as "image" does in apps
+        // that predate it.
+        guard case .toolCall(let future) = E.event(2, "tool.call", ["itemId": "x1", "name": "x", "kind": "hologram", "title": "x", "input": [:]]).payload
+        else { return XCTFail() }
+        XCTAssertEqual(future.kind, .other)
+        guard case .turnCompleted(let done) = E.event(3, "turn.completed", [
+            "turnId": "t1", "outcome": "failed", "durationMs": 900, "error": "Usage limit reached", "errorKind": "usageLimit",
+            "usage": ["inputTokens": 10, "cachedInputTokens": 4, "outputTokens": 2, "reasoningTokens": 1],
+        ]).payload else { return XCTFail() }
+        XCTAssertEqual(done.errorKind, .usageLimit)
+        XCTAssertNil(done.costUsd)
+        XCTAssertEqual(done.usage?["reasoningTokens"], .number(1))
+        guard case .turnCompleted(let unknown) = E.event(4, "turn.completed", ["turnId": "t2", "outcome": "failed", "durationMs": 1, "errorKind": "solarFlare"]).payload
+        else { return XCTFail("an unknown errorKind must not drop the event") }
+        XCTAssertNil(unknown.errorKind)
+    }
+
     func testUnreadablePayloadBecomesUnknownButKeepsItsSeq() {
         // `hunks` should be an array; `text` on a delta should be a string.
         let broken = E.event(7, "edit.diff", ["itemId": 12, "hunks": "nope", "path": ["x"]])

@@ -6,7 +6,11 @@ import Foundation
 
 public struct Account: Sendable, Hashable, Codable, Identifiable {
     public var id: String
+    /// "claude" or "codex"; kept as a string so a provider this app doesn't
+    /// know yet still shows.
     public var provider: String
+    /// Codex titles start "Codex · ", so apps that only show this can tell
+    /// a Codex login from a Claude one with the same address.
     public var title: String
     public var configDir: String
     /// The full id a thread with no model runs on, once the runner knows
@@ -14,24 +18,270 @@ public struct Account: Sendable, Hashable, Codable, Identifiable {
     public var defaultModel: String?
     /// The CLI's model picker, in its order, once the runner has asked it.
     public var models: [ModelChoice]
+    /// The account's own effort level; nil is each model's own.
+    public var defaultEffort: String?
+    /// The bare address, to build labels from with `provider`.
+    public var email: String?
+    /// "Max", "Team", "Pro Lite".
+    public var plan: String?
+    /// Mike's note for the account ("Convex work only").
+    public var note: String?
+    /// Nil when nothing is known, and always from runners older than step 4.
+    public var usage: AccountUsage?
 
-    public init(id: String, provider: String = "claude", title: String, configDir: String = "", defaultModel: String? = nil, models: [ModelChoice] = []) {
+    public init(
+        id: String, provider: String = "claude", title: String, configDir: String = "", defaultModel: String? = nil, models: [ModelChoice] = [],
+        defaultEffort: String? = nil, email: String? = nil, plan: String? = nil, note: String? = nil, usage: AccountUsage? = nil
+    ) {
         self.id = id
         self.provider = provider
         self.title = title
         self.configDir = configDir
         self.defaultModel = defaultModel
         self.models = models
+        self.defaultEffort = defaultEffort
+        self.email = email
+        self.plan = plan
+        self.note = note
+        self.usage = usage
     }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         id = try c.decode(String.self, forKey: .id)
-        provider = try c.decodeIfPresent(String.self, forKey: .provider) ?? "claude"
-        title = try c.decodeIfPresent(String.self, forKey: .title) ?? id
-        configDir = try c.decodeIfPresent(String.self, forKey: .configDir) ?? ""
-        defaultModel = try c.decodeIfPresent(String.self, forKey: .defaultModel)
+        provider = (try? c.decodeIfPresent(String.self, forKey: .provider)) ?? "claude"
+        title = (try? c.decodeIfPresent(String.self, forKey: .title)) ?? id
+        configDir = (try? c.decodeIfPresent(String.self, forKey: .configDir)) ?? ""
+        defaultModel = try? c.decodeIfPresent(String.self, forKey: .defaultModel)
         models = c.lossyArray(ModelChoice.self, forKey: .models)
+        defaultEffort = try? c.decodeIfPresent(String.self, forKey: .defaultEffort)
+        email = try? c.decodeIfPresent(String.self, forKey: .email)
+        plan = try? c.decodeIfPresent(String.self, forKey: .plan)
+        note = try? c.decodeIfPresent(String.self, forKey: .note)
+        // A usage block this app can't read leaves the account without one
+        // rather than dropping the account.
+        usage = try? c.decodeIfPresent(AccountUsage.self, forKey: .usage)
+    }
+}
+
+/// How much room an account has left, from Token Stats' file or the
+/// account's own turns.
+public struct AccountUsage: Sendable, Hashable, Codable {
+    public var windows: [UsageWindow]
+    /// When the newest reading in it was taken.
+    public var readAt: Date?
+    /// "tokenStats" or "live".
+    public var source: String
+    /// Token Stats has gone quiet and there's no live reading since.
+    public var stale: Bool
+    /// The provider says this login is at its limit.
+    public var blocked: Bool
+    /// Token Stats' own note ("64,390 credits · 2 limit resets available").
+    public var notice: String?
+
+    public init(windows: [UsageWindow], readAt: Date? = nil, source: String = "tokenStats", stale: Bool = false, blocked: Bool = false, notice: String? = nil) {
+        self.windows = windows
+        self.readAt = readAt
+        self.source = source
+        self.stale = stale
+        self.blocked = blocked
+        self.notice = notice
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        windows = c.lossyArray(UsageWindow.self, forKey: .windows)
+        readAt = ((try? c.decodeIfPresent(String.self, forKey: .readAt)) ?? nil).flatMap(ISO8601.parse)
+        source = (try? c.decodeIfPresent(String.self, forKey: .source)) ?? "tokenStats"
+        stale = (try? c.decodeIfPresent(Bool.self, forKey: .stale)) ?? false
+        blocked = (try? c.decodeIfPresent(Bool.self, forKey: .blocked)) ?? false
+        notice = try? c.decodeIfPresent(String.self, forKey: .notice)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(windows, forKey: .windows)
+        try c.encodeIfPresent(readAt.map(ISO8601.format), forKey: .readAt)
+        try c.encode(source, forKey: .source)
+        if stale { try c.encode(stale, forKey: .stale) }
+        if blocked { try c.encode(blocked, forKey: .blocked) }
+        try c.encodeIfPresent(notice, forKey: .notice)
+    }
+
+    enum CodingKeys: String, CodingKey { case windows, readAt, source, stale, blocked, notice }
+}
+
+/// One limit: "5-hour 89% left, resets at 1 pm".
+public struct UsageWindow: Sendable, Hashable, Codable {
+    /// "five_hour", "weekly", "weekly_model", "daily", "monthly",
+    /// "allowance" or "other"; a string so new kinds still show by title.
+    public var kind: String
+    public var title: String
+    /// 0 to 100, may be fractional.
+    public var remainingPercent: Double
+    public var resetsAt: Date?
+    /// "$132.79 left".
+    public var detail: String?
+
+    public init(kind: String, title: String, remainingPercent: Double, resetsAt: Date? = nil, detail: String? = nil) {
+        self.kind = kind
+        self.title = title
+        self.remainingPercent = remainingPercent
+        self.resetsAt = resetsAt
+        self.detail = detail
+    }
+
+    /// A window with no percentage can't be shown, so it fails and the
+    /// lossy array skips it.
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        remainingPercent = min(100, max(0, try c.decode(Double.self, forKey: .remainingPercent)))
+        kind = (try? c.decodeIfPresent(String.self, forKey: .kind)) ?? "other"
+        title = (try? c.decodeIfPresent(String.self, forKey: .title)) ?? kind
+        resetsAt = ((try? c.decodeIfPresent(String.self, forKey: .resetsAt)) ?? nil).flatMap(ISO8601.parse)
+        detail = try? c.decodeIfPresent(String.self, forKey: .detail)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(kind, forKey: .kind)
+        try c.encode(title, forKey: .title)
+        try c.encode(remainingPercent, forKey: .remainingPercent)
+        try c.encodeIfPresent(resetsAt.map(ISO8601.format), forKey: .resetsAt)
+        try c.encodeIfPresent(detail, forKey: .detail)
+    }
+
+    enum CodingKeys: String, CodingKey { case kind, title, remainingPercent, resetsAt, detail }
+}
+
+/// What the runner knows about one CLI: the version new sessions start,
+/// the latest one, and any update going on (`clis.list`, `clis.updated`).
+public struct CliStatus: Sendable, Hashable, Decodable, Identifiable {
+    public struct InUse: Sendable, Hashable, Decodable {
+        public var version: String
+        public var threadIds: [String]
+
+        public init(version: String, threadIds: [String] = []) {
+            self.version = version
+            self.threadIds = threadIds
+        }
+
+        public init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            version = try c.decode(String.self, forKey: .version)
+            threadIds = (try? c.decodeIfPresent([String].self, forKey: .threadIds)) ?? []
+        }
+
+        enum CodingKeys: String, CodingKey { case version, threadIds }
+    }
+
+    /// Why an update wasn't installed by itself.
+    public struct Hold: Sendable, Hashable, Decodable {
+        public var version: String
+        public var reason: String
+        public var missing: [String]
+
+        public init(version: String, reason: String, missing: [String] = []) {
+            self.version = version
+            self.reason = reason
+            self.missing = missing
+        }
+
+        public init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            version = (try? c.decodeIfPresent(String.self, forKey: .version)) ?? ""
+            reason = (try? c.decodeIfPresent(String.self, forKey: .reason)) ?? ""
+            missing = (try? c.decodeIfPresent([String].self, forKey: .missing)) ?? []
+        }
+
+        enum CodingKeys: String, CodingKey { case version, reason, missing }
+    }
+
+    public struct Update: Sendable, Hashable, Decodable {
+        /// "waiting", "running", "succeeded", "unchanged" or "failed".
+        public var state: String
+        public var targetVersion: String?
+        public var waitingFor: [String]
+        public var finishedAt: Date?
+        public var message: String?
+
+        public init(state: String, targetVersion: String? = nil, waitingFor: [String] = [], finishedAt: Date? = nil, message: String? = nil) {
+            self.state = state
+            self.targetVersion = targetVersion
+            self.waitingFor = waitingFor
+            self.finishedAt = finishedAt
+            self.message = message
+        }
+
+        public init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            state = (try? c.decodeIfPresent(String.self, forKey: .state)) ?? "unknown"
+            targetVersion = try? c.decodeIfPresent(String.self, forKey: .targetVersion)
+            waitingFor = (try? c.decodeIfPresent([String].self, forKey: .waitingFor)) ?? []
+            finishedAt = ((try? c.decodeIfPresent(String.self, forKey: .finishedAt)) ?? nil).flatMap(ISO8601.parse)
+            message = try? c.decodeIfPresent(String.self, forKey: .message)
+        }
+
+        enum CodingKeys: String, CodingKey { case state, targetVersion, waitingFor, finishedAt, message }
+    }
+
+    public var id: String { provider }
+    public var provider: String
+    /// The binary new sessions start.
+    public var path: String
+    /// "threadbare" (Codex's own copies), "cli" (Claude's installer) or
+    /// "none" (a path set by hand, never updated).
+    public var managedBy: String
+    public var installedVersion: String?
+    public var latestVersion: String?
+    /// "current", "behind", "held", "unknown" or "missing".
+    public var status: String
+    /// "auto", "notify" or "off".
+    public var policy: String
+    public var inUse: [InUse]
+    /// Codex: the kept version "Go back" returns to.
+    public var previousVersion: String?
+    public var checkedAt: Date?
+    public var hold: Hold?
+    public var update: Update?
+
+    public init(
+        provider: String, path: String = "", managedBy: String = "cli", installedVersion: String? = nil, latestVersion: String? = nil,
+        status: String = "unknown", policy: String = "auto", inUse: [InUse] = [], previousVersion: String? = nil,
+        checkedAt: Date? = nil, hold: Hold? = nil, update: Update? = nil
+    ) {
+        self.provider = provider
+        self.path = path
+        self.managedBy = managedBy
+        self.installedVersion = installedVersion
+        self.latestVersion = latestVersion
+        self.status = status
+        self.policy = policy
+        self.inUse = inUse
+        self.previousVersion = previousVersion
+        self.checkedAt = checkedAt
+        self.hold = hold
+        self.update = update
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        provider = try c.decode(String.self, forKey: .provider)
+        path = (try? c.decodeIfPresent(String.self, forKey: .path)) ?? ""
+        managedBy = (try? c.decodeIfPresent(String.self, forKey: .managedBy)) ?? "cli"
+        installedVersion = try? c.decodeIfPresent(String.self, forKey: .installedVersion)
+        latestVersion = try? c.decodeIfPresent(String.self, forKey: .latestVersion)
+        status = (try? c.decodeIfPresent(String.self, forKey: .status)) ?? "unknown"
+        policy = (try? c.decodeIfPresent(String.self, forKey: .policy)) ?? "auto"
+        inUse = c.lossyArray(InUse.self, forKey: .inUse)
+        previousVersion = try? c.decodeIfPresent(String.self, forKey: .previousVersion)
+        checkedAt = ((try? c.decodeIfPresent(String.self, forKey: .checkedAt)) ?? nil).flatMap(ISO8601.parse)
+        hold = try? c.decodeIfPresent(Hold.self, forKey: .hold)
+        update = try? c.decodeIfPresent(Update.self, forKey: .update)
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case provider, path, managedBy, installedVersion, latestVersion, status, policy, inUse, previousVersion, checkedAt, hold, update
     }
 }
 
@@ -44,13 +294,16 @@ public struct ModelChoice: Sendable, Hashable, Codable, Identifiable {
     public var description: String?
     /// Empty when the model takes no effort level.
     public var effortLevels: [String]
+    /// The model's own level, when the CLI says (Codex).
+    public var defaultEffort: String?
 
-    public init(id: String, model: String, title: String, description: String? = nil, effortLevels: [String] = []) {
+    public init(id: String, model: String, title: String, description: String? = nil, effortLevels: [String] = [], defaultEffort: String? = nil) {
         self.id = id
         self.model = model
         self.title = title
         self.description = description
         self.effortLevels = effortLevels
+        self.defaultEffort = defaultEffort
     }
 
     public init(from decoder: Decoder) throws {
@@ -60,6 +313,7 @@ public struct ModelChoice: Sendable, Hashable, Codable, Identifiable {
         title = try c.decodeIfPresent(String.self, forKey: .title) ?? id
         description = try c.decodeIfPresent(String.self, forKey: .description)
         effortLevels = try c.decodeIfPresent([String].self, forKey: .effortLevels) ?? []
+        defaultEffort = try? c.decodeIfPresent(String.self, forKey: .defaultEffort)
     }
 }
 
@@ -132,6 +386,8 @@ public struct ThreadSummary: Sendable, Hashable, Codable, Identifiable {
     public var lastSeenSeq: Int
     public var nativeSessionId: String?
     public var contextTokens: Int?
+    /// The model's context window, when the CLI reports it.
+    public var contextWindow: Int?
     public var costUsd: Double?
 
     public init(
@@ -142,7 +398,7 @@ public struct ThreadSummary: Sendable, Hashable, Codable, Identifiable {
         snoozedUntil: Date? = nil, archivedAt: Date? = nil, preview: String = "",
         lastSeq: Int = 0, lastSeenSeq: Int = 0, nativeSessionId: String? = nil,
         contextTokens: Int? = nil, costUsd: Double? = nil,
-        effort: String? = nil, modelInUse: String? = nil, effortInUse: String? = nil
+        effort: String? = nil, modelInUse: String? = nil, effortInUse: String? = nil, contextWindow: Int? = nil
     ) {
         self.id = id
         self.title = title
@@ -167,6 +423,7 @@ public struct ThreadSummary: Sendable, Hashable, Codable, Identifiable {
         self.lastSeenSeq = lastSeenSeq
         self.nativeSessionId = nativeSessionId
         self.contextTokens = contextTokens
+        self.contextWindow = contextWindow
         self.costUsd = costUsd
     }
 
@@ -200,6 +457,7 @@ public struct ThreadSummary: Sendable, Hashable, Codable, Identifiable {
         lastSeenSeq = try c.decodeIfPresent(Int.self, forKey: .lastSeenSeq) ?? 0
         nativeSessionId = try c.decodeIfPresent(String.self, forKey: .nativeSessionId)
         contextTokens = try c.decodeIfPresent(Double.self, forKey: .contextTokens).map { Int($0) }
+        contextWindow = ((try? c.decodeIfPresent(Double.self, forKey: .contextWindow)) ?? nil).map { Int($0) }
         costUsd = try c.decodeIfPresent(Double.self, forKey: .costUsd)
     }
 
@@ -228,13 +486,14 @@ public struct ThreadSummary: Sendable, Hashable, Codable, Identifiable {
         try c.encode(lastSeenSeq, forKey: .lastSeenSeq)
         try c.encodeIfPresent(nativeSessionId, forKey: .nativeSessionId)
         try c.encodeIfPresent(contextTokens, forKey: .contextTokens)
+        try c.encodeIfPresent(contextWindow, forKey: .contextWindow)
         try c.encodeIfPresent(costUsd, forKey: .costUsd)
     }
 
     enum CodingKeys: String, CodingKey {
         case id, title, cwd, accountId, provider, model, effort, modelInUse, effortInUse, permissionMode, status, live, needsYou
         case createdAt, updatedAt, lastActivityAt, snoozedUntil, archivedAt, preview
-        case lastSeq, lastSeenSeq, nativeSessionId, contextTokens, costUsd
+        case lastSeq, lastSeenSeq, nativeSessionId, contextTokens, contextWindow, costUsd
     }
 
     public var isArchived: Bool { archivedAt != nil }
@@ -248,15 +507,44 @@ public struct ThreadSummary: Sendable, Hashable, Codable, Identifiable {
 public struct RunnerDefaults: Sendable, Hashable, Codable {
     public var cwd: String
     public var accountId: String
-    /// The model a new thread gets when it names none (runner.json's
+    /// The model a new Claude thread gets when it names none (runner.json's
     /// `defaults.model`; a dev runner sets the cheapest). Nil: the account's.
     public var model: String?
+    /// The same per provider ("claude", "codex"); empty from older runners.
+    public var models: [String: String]
+    /// The effort a new thread gets per provider; missing: the model's own.
+    public var efforts: [String: String]
 
-    public init(cwd: String, accountId: String, model: String? = nil) {
+    public init(cwd: String, accountId: String, model: String? = nil, models: [String: String] = [:], efforts: [String: String] = [:]) {
         self.cwd = cwd
         self.accountId = accountId
         self.model = model
+        self.models = models
+        self.efforts = efforts
     }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        cwd = (try? c.decodeIfPresent(String.self, forKey: .cwd)) ?? ""
+        accountId = (try? c.decodeIfPresent(String.self, forKey: .accountId)) ?? ""
+        model = try? c.decodeIfPresent(String.self, forKey: .model)
+        models = Self.strings(c, .models)
+        efforts = Self.strings(c, .efforts)
+    }
+
+    /// The model a new thread on `provider` gets when it names none.
+    public func model(for provider: String) -> String? {
+        models[provider] ?? (provider == "claude" ? model : nil)
+    }
+
+    // A map of strings, skipping values that aren't (a provider this app
+    // doesn't know may carry something else).
+    private static func strings(_ c: KeyedDecodingContainer<CodingKeys>, _ key: CodingKeys) -> [String: String] {
+        guard let raw = (try? c.decodeIfPresent([String: JSONValue].self, forKey: key)) ?? nil else { return [:] }
+        return raw.compactMapValues(\.stringValue)
+    }
+
+    enum CodingKeys: String, CodingKey { case cwd, accountId, model, models, efforts }
 }
 
 public struct HelloResult: Sendable, Hashable, Decodable {
@@ -264,18 +552,22 @@ public struct HelloResult: Sendable, Hashable, Decodable {
     public var `protocol`: Int
     public var accounts: [Account]
     public var defaults: RunnerDefaults
+    /// Empty from runners older than step 4 (they have no `clis.*` either).
+    public var clis: [CliStatus]
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         runnerVersion = try c.decodeIfPresent(String.self, forKey: .runnerVersion) ?? "?"
         `protocol` = try c.decodeIfPresent(Int.self, forKey: .protocol) ?? 1
         accounts = try c.decodeIfPresent([Account].self, forKey: .accounts) ?? []
-        defaults = try c.decodeIfPresent(RunnerDefaults.self, forKey: .defaults)
+        defaults = (try? c.decodeIfPresent(RunnerDefaults.self, forKey: .defaults))
             ?? RunnerDefaults(cwd: "", accountId: accounts.first?.id ?? "claude-main")
+        if defaults.accountId.isEmpty { defaults.accountId = accounts.first?.id ?? "claude-main" }
+        clis = c.lossyArray(CliStatus.self, forKey: .clis)
     }
 
     enum CodingKeys: String, CodingKey {
-        case runnerVersion, `protocol`, accounts, defaults
+        case runnerVersion, `protocol`, accounts, defaults, clis
     }
 }
 

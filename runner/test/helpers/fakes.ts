@@ -128,6 +128,12 @@ export function testConfig(home: string, extra: Partial<Config> = {}): Config {
     claudeMainDir: path.join(home, 'no-claude-main'),
     claudeMainJson: path.join(home, 'no-claude-main.json'),
     tokenStatsAccountsDir: path.join(home, 'no-accounts'),
+    // Nothing under the real ~/.codex or Token Stats, and no CLI installs.
+    codexArgs: [],
+    codexMainDir: path.join(home, 'no-codex-main'),
+    tokenStatsLimitsFile: path.join(home, 'no-limits.json'),
+    cliUpdates: { claude: 'off', codex: 'off', checkMinutes: 60, keepCodexVersions: 2 },
+    accountNotes: {},
     ...extra,
   };
 }

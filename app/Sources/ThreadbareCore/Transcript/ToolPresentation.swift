@@ -15,6 +15,7 @@ public enum ToolPresentation {
         case .mcp: return "puzzlepiece.extension"
         case .task: return "person.2"
         case .todo: return "checklist"
+        case .image: return "photo"
         case .other:
             if name.hasPrefix("mcp__") { return "puzzlepiece.extension" }
             return "wrench.and.screwdriver"

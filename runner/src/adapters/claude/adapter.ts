@@ -205,7 +205,8 @@ class ClaudeSession implements AgentSession {
     const servers = deps.mcpServersFor?.(opts.threadId);
     if (servers && Object.keys(servers).length) options.mcpServers = servers;
     if (opts.model) options.model = opts.model;
-    if (opts.effort) options.effort = opts.effort;
+    const effort = claudeEffort(opts.effort);
+    if (effort) options.effort = effort;
     if (opts.allowRules?.length) options.allowedTools = [...opts.allowRules];
     if (opts.resume) options.resume = opts.sessionId;
     else options.sessionId = opts.sessionId;
@@ -367,7 +368,7 @@ class ClaudeSession implements AgentSession {
   // settings.json.
   async setEffort(effort: EffortLevel | undefined): Promise<void> {
     if (this.exited) return;
-    await this.q.applyFlagSettings({ effortLevel: effort ?? null });
+    await this.q.applyFlagSettings({ effortLevel: claudeEffort(effort) ?? null });
   }
 
   async setPermissionMode(mode: PermissionMode): Promise<void> {
@@ -446,4 +447,11 @@ function normaliseQuestions(raw: unknown): Question[] {
     if (typeof q.header === 'string') out.header = q.header;
     return out;
   });
+}
+
+// Codex's 'ultra' has no Claude equivalent. The runner drops it from Claude
+// threads with a note before it gets here; this keeps the SDK from seeing it
+// if one slips through.
+function claudeEffort(effort: EffortLevel | undefined): Exclude<EffortLevel, 'ultra'> | undefined {
+  return effort === 'ultra' ? undefined : effort;
 }

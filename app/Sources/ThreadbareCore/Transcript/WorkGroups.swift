@@ -212,7 +212,9 @@ public enum WorkSummary {
         case .web: return tool.name.localizedCaseInsensitiveContains("search") ? .search : .web
         case .task: return .agent
         case .todo: return .plan
-        case .mcp, .other:
+        // Generated images count as tools until the work line gets its own
+        // words for them.
+        case .mcp, .image, .other:
             if let call = tool.call, DiffBuilder.isEditTool(call) { return .edit }
             return .tool
         }
