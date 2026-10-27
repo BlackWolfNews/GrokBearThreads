@@ -211,6 +211,9 @@ struct ThreadRowView: View {
     let mode: SidebarMode
     /// The inbox section the row is under, so it doesn't repeat its heading.
     var section: InboxSection? = nil
+    /// The project whose heading the row is under (the Projects view), so
+    /// the row doesn't name it again.
+    var heading: String? = nil
     let select: () -> Void
     @State private var hovering = false
     @State private var pressed = false
@@ -224,34 +227,45 @@ struct ThreadRowView: View {
         // The Projects view's rows say what they're doing too: it has no
         // Needs you or Running headings to say it for them.
         let look = mode == .inbox || mode == .projects ? ThreadRowLook(thread, section: section) : ThreadRowLook(status: .time, unread: false, emphasised: false)
-        // One line: the title, then the status or time and the project. The
-        // preview and the account name under it went once projects came:
-        // Mike reads a thread by its title and where it belongs, and the
-        // second line doubled the list's height for text he didn't read.
-        HStack(alignment: .firstTextBaseline, spacing: zoomed(6)) {
-            Text(thread.title.isEmpty ? "Untitled" : thread.title)
-                .font(.system(size: TypeScale.sidebarTitle, weight: look.emphasised ? .semibold : .regular))
-                .foregroundStyle(.primary)
-                .lineLimit(1)
+        // A tile for the thread's project, two lines tall, then the title
+        // across the whole width and under it where the thread belongs and
+        // what it's doing. The preview and the account name went once
+        // projects came: Mike reads a thread by its title and its project.
+        HStack(alignment: .center, spacing: zoomed(10)) {
+            ProjectTiles(projects: ProjectMark.shown(thread, under: heading))
+                .help(ProjectMark.help(thread))
                 .overlay(alignment: .leading) {
                     if look.unread {
-                        // In the row's leading gutter, centred on the title.
+                        // In the row's leading gutter, left of the tile.
                         Circle()
                             .fill(Color.accentColor)
                             .frame(width: zoomed(7), height: zoomed(7))
-                            .offset(x: -(SidebarMetrics.leading + zoomed(7)) / 2)
+                            .offset(x: -(SidebarMetrics.leading + zoomed(7)) / 2 - zoomed(1))
                             .accessibilityLabel("Unread")
                     }
                 }
-            Spacer(minLength: zoomed(6))
-            if showsActions {
-                // Room for the hover buttons, drawn over the row so they
-                // don't change its height.
-                Color.clear.frame(width: CGFloat(mode.rowActions.count) * zoomed(24) - zoomed(6), height: 1)
-            } else {
-                trailing(look)
-                if showsProjectMark {
-                    projectMark
+            VStack(alignment: .leading, spacing: zoomed(3)) {
+                HStack(spacing: 0) {
+                    Text(thread.title.isEmpty ? "Untitled" : thread.title)
+                        .font(.system(size: TypeScale.sidebarTitle, weight: look.emphasised ? .semibold : .regular))
+                        .foregroundStyle(.primary)
+                        .lineLimit(1)
+                    Spacer(minLength: 0)
+                    if showsActions {
+                        // Room for the hover buttons, drawn over the row so
+                        // they don't change its height.
+                        Color.clear.frame(width: CGFloat(mode.rowActions.count) * zoomed(24), height: 1)
+                    }
+                }
+                HStack(alignment: .firstTextBaseline, spacing: zoomed(6)) {
+                    Text(ProjectMark.place(thread, under: heading))
+                        .font(.system(size: TypeScale.sidebarMeta + 1))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                    Spacer(minLength: zoomed(6))
+                    if !showsActions {
+                        trailing(look)
+                    }
                 }
             }
         }
@@ -266,10 +280,9 @@ struct ThreadRowView: View {
             select()
         }.onEnded { _ in pressed = false })
         // After the gesture, so clicking these never selects the row.
-        .overlay(alignment: .topTrailing) {
+        .overlay(alignment: .trailing) {
             if showsActions {
                 RowActions(thread: thread, actions: mode.rowActions)
-                    .padding(.top, zoomed(5))
                     .padding(.trailing, SidebarMetrics.trailing - zoomed(5))
             }
         }
@@ -290,31 +303,6 @@ struct ThreadRowView: View {
         if thread.snoozedUntilRestart { return "Back on restart" }
         if let until = thread.snoozedUntil { return "Back \(RelativeTime.until(until, now: app.now))" }
         return nil
-    }
-
-    /// Not in the Projects view, whose headings already name the project.
-    /// Elsewhere the slot is kept on every row once there are projects, so
-    /// the marks make a column and the times beside them line up.
-    private var showsProjectMark: Bool { mode != .projects && !app.projects.isEmpty }
-
-    /// The thread's project as a small tile. The project's icon will go here
-    /// once projects have them; for now it's the title's first letter.
-    @ViewBuilder
-    private var projectMark: some View {
-        let size = zoomed(16)
-        if let project = ProjectMark.project(thread) {
-            Text(ProjectMark.letter(project.title))
-                .font(.system(size: TypeScale.sidebarMeta - 1, weight: .semibold))
-                .foregroundStyle(.secondary)
-                .frame(width: size, height: size)
-                .background(Color.primary.opacity(0.08), in: RoundedRectangle(cornerRadius: zoomed(4)))
-                // Centred on the title's lowercase, like the spinner.
-                .alignmentGuide(.firstTextBaseline) { $0[VerticalAlignment.center] + zoomed(4) }
-                .help(ProjectMark.help(thread))
-                .accessibilityLabel("Project: \(ProjectMark.help(thread))")
-        } else {
-            Color.clear.frame(width: size, height: 1)
-        }
     }
 
     @ViewBuilder
@@ -376,6 +364,56 @@ struct ThreadRowView: View {
         Text(RelativeTime.short(mode == .archive ? thread.archivedAt ?? thread.lastActivityAt : thread.lastActivityAt, now: app.now))
             .font(.system(size: TypeScale.sidebarMeta))
             .monospacedDigit()
+    }
+}
+
+/// A row's project as a tile two lines tall: the first project it joined,
+/// with an edge of a second tile showing behind it when it's in more than
+/// one. A quiet folder when it's in none. The project's icon will go on the
+/// tile once projects have them; for now it's the title's first letter.
+private struct ProjectTiles: View {
+    let projects: [ThreadProject]
+
+    var body: some View {
+        let size = zoomed(30)
+        ZStack(alignment: .bottomLeading) {
+            if projects.count > 1 {
+                // Up and to the right, so the front tile keeps its place,
+                // with the front tile's shape (and a hairline round it) cut
+                // out: both are see-through, so the overlap would otherwise
+                // show darker, and the selected row's highlight shows
+                // through either way.
+                RoundedRectangle(cornerRadius: zoomed(7))
+                    .fill(Color.primary.opacity(0.08))
+                    .frame(width: size, height: size)
+                    .mask {
+                        ZStack {
+                            Rectangle()
+                            RoundedRectangle(cornerRadius: zoomed(8))
+                                .frame(width: size + zoomed(2), height: size + zoomed(2))
+                                .offset(x: -zoomed(4), y: zoomed(4))
+                                .blendMode(.destinationOut)
+                        }
+                        .compositingGroup()
+                    }
+                    .offset(x: zoomed(4), y: -zoomed(4))
+            }
+            Group {
+                if let project = projects.first {
+                    Text(ProjectMark.letter(project.title))
+                        .font(.system(size: zoomed(14), weight: .semibold))
+                        .foregroundStyle(.secondary)
+                } else {
+                    Image(systemName: "folder")
+                        .font(.system(size: zoomed(12)))
+                        .foregroundStyle(SidebarMetrics.faint)
+                }
+            }
+            .frame(width: size, height: size)
+            .background(Color.primary.opacity(projects.isEmpty ? 0.04 : 0.08), in: RoundedRectangle(cornerRadius: zoomed(7)))
+        }
+        .frame(width: size + zoomed(4), height: size + zoomed(4), alignment: .bottomLeading)
+        .accessibilityHidden(true)
     }
 }
 

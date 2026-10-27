@@ -273,6 +273,15 @@ enum ScreenshotRunner {
             app.usagePopoverShown = false
             try? await Task.sleep(for: .milliseconds(300))
         }
+        // 15. The sidebar's Projects view: rows under a project's heading
+        // name only the thread's other projects, or its folder.
+        if wanted("15") {
+            app.sidebarMode = .projects
+            await open(app, "demo_ci_slow")
+            try? await Task.sleep(for: .milliseconds(400))
+            await capture(window, dir.appendingPathComponent("15-projects-view.png"))
+            app.sidebarMode = .inbox
+        }
         // 11. A runner restart: the quiet banner while it waits for threads
         // to finish, the reconnecting line while the runner is down, and
         // the thread it carried on, with the runner's message as a centred
