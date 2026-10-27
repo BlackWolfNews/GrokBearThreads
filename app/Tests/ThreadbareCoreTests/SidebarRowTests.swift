@@ -132,3 +132,17 @@ final class ComposerPlacementTests: XCTestCase {
         XCTAssertEqual(ComposerPlacementMath.composerTop(paneHeight: 80, composerHeight: 110, centred: true), 0)
     }
 }
+
+final class DockBadgeTests: XCTestCase {
+    func testBadgeCountsThreadsThatNeedYouAndNothingElse() {
+        let now = Date()
+        let waiting = ThreadSummary(id: "a", title: "a", status: .waiting)
+        let unread = ThreadSummary(id: "b", title: "b", needsYou: true)
+        let running = ThreadSummary(id: "c", title: "c", status: .running)
+        let snoozed = ThreadSummary(id: "d", title: "d", needsYou: true, snoozedUntil: now.addingTimeInterval(3600))
+        let archived = ThreadSummary(id: "e", title: "e", needsYou: true, archivedAt: now)
+        XCTAssertEqual(DockBadge.label(for: [waiting, unread, running, snoozed, archived], now: now), "2")
+        XCTAssertNil(DockBadge.label(for: [running], now: now))
+        XCTAssertNil(DockBadge.label(needsYou: 0))
+    }
+}

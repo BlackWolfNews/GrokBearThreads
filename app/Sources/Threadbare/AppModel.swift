@@ -33,7 +33,9 @@ final class AppModel {
     var runnerVersion = ""
     var accounts: [Account] = []
     var defaults = RunnerDefaults(cwd: NSString("~/dev/me/misc").expandingTildeInPath, accountId: "claude-main")
-    var threads: [String: ThreadSummary] = [:]
+    var threads: [String: ThreadSummary] = [:] {
+        didSet { refreshDockBadge() }
+    }
     var selection: String?
     var sidebarMode: SidebarMode = .inbox
     var archiveQuery = ""
@@ -698,6 +700,17 @@ final class AppModel {
     func copyToPasteboard(_ text: String) {
         pasteboard.clearContents()
         pasteboard.setString(text, forType: .string)
+    }
+
+    // MARK: Dock
+
+    /// The Dock badge is the number of threads that need you (DockBadge).
+    /// Scripted runs (dev apps, perf and screenshot runs) show none, like
+    /// notifications.
+    private func refreshDockBadge() {
+        guard notificationsEnabled else { return }
+        let label = DockBadge.label(for: threads.values, now: now)
+        if NSApp.dockTile.badgeLabel != label { NSApp.dockTile.badgeLabel = label }
     }
 
     // MARK: Panels
