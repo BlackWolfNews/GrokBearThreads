@@ -22,7 +22,7 @@ export type ChatRequest = {
 
 export type ChatResponse =
   | { ok: true; text: string; inputTokens?: number; outputTokens?: number; costUsd?: number }
-  // retry: worth one more go (a network error, a 5xx, a 429).
+  // retry: worth one more go (a network error, a 5xx, a 429, a 200 with no text).
   | { ok: false; timedOut: boolean; retry: boolean; status?: number; message: string; costUsd?: number };
 
 export async function chat(req: ChatRequest): Promise<ChatResponse> {
@@ -64,9 +64,13 @@ export async function chat(req: ChatRequest): Promise<ChatResponse> {
       const message = json?.error?.message ?? (raw.slice(0, 200) || res.statusText);
       return { ok: false, timedOut: false, retry: status >= 500 || status === 429, status, message: `OpenRouter ${status}: ${message}` };
     }
-    const text = json?.choices?.[0]?.message?.content;
+    const choice = json?.choices?.[0];
+    const text = choice?.message?.content;
     if (typeof text !== 'string') {
-      return { ok: false, timedOut: false, retry: false, message: 'OpenRouter sent no text', costUsd: json?.usage?.cost };
+      // A 200 with no text is the provider failing after OpenRouter took
+      // the request (it happens under load), so it's worth another go.
+      const why = choice?.error?.message ?? (choice?.finish_reason ? `finish_reason ${choice.finish_reason}` : undefined);
+      return { ok: false, timedOut: false, retry: true, message: `OpenRouter sent no text${why ? ` (${why})` : ''}`, costUsd: json?.usage?.cost };
     }
     return {
       ok: true,
@@ -84,7 +88,7 @@ export async function chat(req: ChatRequest): Promise<ChatResponse> {
 }
 
 type OpenRouterReply = {
-  choices?: { message?: { content?: unknown } }[];
+  choices?: { message?: { content?: unknown }; finish_reason?: string; error?: { message?: string } }[];
   usage?: { prompt_tokens?: number; completion_tokens?: number; cost?: number };
   error?: { code?: number | string; message?: string };
 };

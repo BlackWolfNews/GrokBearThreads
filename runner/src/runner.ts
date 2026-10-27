@@ -1163,16 +1163,17 @@ export class Runner {
   // Asks a small model for a better title than the first line. Without a
   // key, in a private folder or over budget it says why and nothing
   // changes. A title set meanwhile (by Mike or an agent) wins.
-  private async titleFromModel(st: ThreadState, text: string): Promise<{ title: string } | { reason: string }> {
+  // `reply`, the start of the agent's first answer, is there when an older
+  // thread is named (retitle): a terse first message like "Explain thread
+  // count" means little without it.
+  private async titleFromModel(st: ThreadState, text: string, reply?: string): Promise<{ title: string } | { reason: string }> {
     if (!this.models) return { reason: 'Model calls are off in this runner.' };
     const before = st.rec.title;
     const res = await this.models.generate({
       feature: 'titles',
       cwd: st.rec.cwd,
-      system:
-        'You name chat threads. Reply with a title of 3 to 7 words for the thread that starts with the message below: ' +
-        'sentence case, no quotes, no full stop, no emoji. Name the task, not the person.',
-      prompt: text.slice(0, 4000),
+      system: TITLE_PROMPT,
+      prompt: reply ? `Message:\n${text.slice(0, 4000)}\n\nStart of the reply:\n${reply.slice(0, 1000)}` : `Message:\n${text.slice(0, 4000)}`,
       maxTokens: 30,
     });
     if (!res.ok) return { reason: res.message };
@@ -1189,21 +1190,24 @@ export class Runner {
   // Names the threads that started before there was a key (or whose call
   // failed): the ones still titled with their first message's first line
   // and never named by anyone. A model title doesn't set titleSet, so the
-  // first-line check is what keeps those from being asked again.
-  async retitle(params: { dryRun?: boolean }): Promise<{ threads: { threadId: string; from: string; to?: string; reason?: string }[] }> {
-    const due: { st: ThreadState; text: string }[] = [];
-    for (const st of this.threads.values()) {
+  // first-line check is what keeps those from being asked again. Given
+  // threadIds, it names those whatever their title, so a poor model title
+  // can be asked for again; one named by hand still stays.
+  async retitle(params: { dryRun?: boolean; threadIds?: string[] }): Promise<{ threads: { threadId: string; from: string; to?: string; reason?: string }[] }> {
+    const picked = params.threadIds?.map((id) => this.mustGet(id));
+    const due: { st: ThreadState; text: string; reply?: string }[] = [];
+    for (const st of picked ?? this.threads.values()) {
       if (st.rec.titleSet) continue;
-      const text = this.firstMessageText(st.rec.id);
+      const { text, reply } = this.opening(st.rec.id);
       const line = text?.split('\n').map((l) => l.trim()).find(Boolean);
       // titleFrom cut it at some length; an older runner may have cut it elsewhere.
-      if (line && st.rec.title && line.startsWith(st.rec.title)) due.push({ st, text: text! });
+      if (line && (picked || (st.rec.title && line.startsWith(st.rec.title)))) due.push({ st, text: text!, reply });
     }
     const threads = await Promise.all(
-      due.map(async ({ st, text }) => {
+      due.map(async ({ st, text, reply }) => {
         const from = st.rec.title;
         if (params.dryRun) return { threadId: st.rec.id, from };
-        const r = await this.titleFromModel(st, text);
+        const r = await this.titleFromModel(st, text, reply);
         return 'title' in r ? { threadId: st.rec.id, from, to: r.title } : { threadId: st.rec.id, from, reason: r.reason };
       }),
     );
@@ -1211,15 +1215,19 @@ export class Runner {
     return { threads };
   }
 
-  // The first user.message's text, read a page at a time: it's nearly
-  // always the first event, and a long thread's log is large.
-  private firstMessageText(id: string): string | undefined {
+  // The first user.message's text and the first assistant.text after it,
+  // read a page at a time from the start: both are nearly always within
+  // the first few events, and a long thread's log is large.
+  private opening(id: string): { text?: string; reply?: string } {
     const log = this.store.log(id);
-    for (let from = 1; from <= log.lastSeq; from += 50) {
-      const msg = log.read(from, from + 49).find((e) => e.type === 'user.message');
-      if (msg && msg.type === 'user.message') return msg.text;
+    let text: string | undefined;
+    for (let from = 1; from <= Math.min(log.lastSeq, 500); from += 50) {
+      for (const e of log.read(from, from + 49)) {
+        if (text === undefined && e.type === 'user.message') text = e.text;
+        else if (text !== undefined && e.type === 'assistant.text' && e.text.trim()) return { text, reply: e.text };
+      }
     }
-    return undefined;
+    return { text };
   }
 
   // origin "runner" marks a message the runner sends by itself (restart.ts),
@@ -2927,11 +2935,34 @@ export function titleFrom(text: string): string {
   return line.length > LIMITS.titleChars ? line.slice(0, LIMITS.titleChars).trimEnd() : line;
 }
 
-// A model's title, tidied: first line, no wrapping quotes or full stop.
+// What the runner asks a small model for a thread's title. The examples
+// do more than the rules: without them Haiku drifts into Title Case and
+// sometimes describes the naming job itself.
+const TITLE_PROMPT = [
+  'You name threads in Threadbare, an app for running AI agents, mostly for coding.',
+  'Reply with the title only: 2 to 6 words saying what the thread is about.',
+  'Sentence case: a capital for the first word and for names only. No quotes, no full stop, no dashes, no emoji.',
+  'Never mention titles, threads or the person asking.',
+  '',
+  'Message: can you look at why the upload test keeps failing on CI',
+  'Title: Fix the flaky upload test on CI',
+  '',
+  'Message: Hey, does the runner keep running even if we restart the UI?',
+  'Title: Does the runner outlive the app',
+  '',
+  'Message: hello there',
+  'Title: Hello',
+].join('\n');
+
+// A model's title, tidied: first line, no wrapping quotes or full stop,
+// nothing after a dash. One that runs long (rambling, or cut off by the
+// token limit) is no title at all, so the first line stays.
 export function cleanTitle(text: string): string {
   let t = (text ?? '').split('\n').map((l) => l.trim()).find(Boolean) ?? '';
-  t = t.replace(/^(title:\s*)/i, '').replace(/^["'`*]+|["'`*]+$/g, '').replace(/\.$/, '').trim();
-  return t.length > LIMITS.titleChars ? t.slice(0, LIMITS.titleChars).trimEnd() : t;
+  t = t.replace(/^(title:\s*)/i, '').split(/\s[—–-]\s/)[0];
+  t = t.replace(/^["'`*]+|["'`*]+$/g, '').replace(/\.$/, '').trim();
+  if (t.length > LIMITS.titleChars || t.split(/\s+/).length > 10) return '';
+  return t;
 }
 
 export function oneLine(text: string, max: number): string {
