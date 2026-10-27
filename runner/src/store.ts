@@ -181,18 +181,33 @@ export class ThreadStore {
     const broken: string[] = [];
     for (const name of names) {
       if (name.startsWith('.')) continue;
-      const rec = readJsonSync<ThreadRecord>(path.join(dir, name, 'thread.json'));
-      if (!rec || !rec.id || rec.id !== name) {
+      const rec = this.load(name);
+      if (!rec) {
         if (fs.existsSync(path.join(dir, name, 'events.ndjson'))) broken.push(name);
         continue;
       }
-      rec.provider ??= 'claude'; // records from before Codex
-      rec.queue ??= [];
-      rec.pendingApprovals ??= [];
-      rec.lastTurnCompletedSeq ??= 0;
       records.push(rec);
     }
     return { records, broken };
+  }
+
+  // One thread's record, or undefined when thread.json is missing or isn't
+  // that thread's.
+  load(id: string): ThreadRecord | undefined {
+    const rec = readJsonSync<ThreadRecord>(path.join(paths.threads(this.home), id, 'thread.json'));
+    if (!rec || !rec.id || rec.id !== id) return undefined;
+    rec.provider ??= 'claude'; // records from before Codex
+    rec.queue ??= [];
+    rec.pendingApprovals ??= [];
+    rec.lastTurnCompletedSeq ??= 0;
+    return rec;
+  }
+
+  // Drops the cached event log, so the next log() reads the file again:
+  // another runner (a draining one, docs/protocol.md "Handovers") may have
+  // written to it since.
+  forget(id: string): void {
+    this.logs.delete(id);
   }
 
   // Keeps an unreadable thread.json for a look later, out of the way.

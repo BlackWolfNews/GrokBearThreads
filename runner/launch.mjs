@@ -6,17 +6,18 @@
 // Node built-ins. scripts/deploy.mjs imports the state helpers from here so
 // both agree on the file format.
 //
-// Each start records a boot. A release that keeps dying at startup (3
-// boots in 10 minutes that neither stayed up long enough for main.ts to
-// mark it good nor stopped cleanly) is swapped for the last good one. Then
-// the release's src/main.ts is imported into this process, so launchd's
-// signals reach the runner as they did before. A release that hasn't
-// started listening within 90 seconds is stopped, so one that hangs at
-// startup counts as crashing too.
+// It supervises: each runner is a child process, so during a handover a
+// new release serves while the old one finishes the turns it still has
+// (main() below). Each start records a boot. A release that keeps dying at
+// startup (3 boots in 10 minutes that neither stayed up long enough for
+// main.ts to mark it good nor stopped cleanly) is swapped for the last good
+// one. A release that hasn't started listening within 90 seconds is
+// stopped, so one that hangs at startup counts as crashing too.
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { spawn } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 
 export const CRASH_BOOTS = 3;
 // Long enough to hold three starts that each hang until the watchdog below
@@ -132,82 +133,265 @@ function log(level, msg, extra) {
   }
 }
 
+// How long after a child that didn't come up the supervisor tries again,
+// when it can't leave that to launchd (another runner is still finishing
+// its turns). launchd's ThrottleInterval is 5 s too.
+export const CRASH_RETRY_MS = 5_000;
+// A runner that restarted on purpose (exit 0 after listening) is started
+// again this soon.
+export const RESTART_MS = 500;
+// After SIGTERM, how long a child that hasn't exited gets before SIGKILL:
+// the watchdog's, and the supervisor's own stop (the plist's ExitTimeOut
+// allows for it).
+export const KILL_AFTER_MS = 5_000;
+export const STOP_GRACE_MS = 20_000;
+// Printed by every runner once it's serving (main.ts, and releases from
+// before the IPC message), so either tells the supervisor it's up.
+export const LISTENING_LINE = /threadbare-runner listening on \d+/;
+
+function msEnv(name, fallback) {
+  const v = Number(process.env[name]);
+  return Number.isFinite(v) && v >= 0 ? v : fallback;
+}
+
+// The supervisor: launchd's program. Each runner is a child process
+// (`node <release>/src/main.ts`, THREADBARE_SUPERVISED=1, an IPC channel),
+// so a new release can start while an older one finishes the turns it
+// still has (a handover, docs/dev-tools.md). Only the newest child is
+// "the runner"; older ones are draining and are only waited for.
+//
+// Each start records a boot. The newest child exiting 0 after it listened
+// is a planned restart and is started again straight away; any other exit
+// is a failed start. With no other child left the supervisor exits then
+// (code 1) and launchd starts it again, as before handovers; with a
+// draining child still running it tries again itself after CRASH_RETRY_MS.
 async function main() {
   const dir = path.dirname(fileURLToPath(import.meta.url));
-  const state = readState(dir);
-  // The symlink is what deploy-runner.sh activates; state.json follows it.
-  const linked = readCurrentLink(dir);
-  if (linked) state.current = linked;
-  if (!state.current) {
-    log('ERROR', 'no release to start; build one with scripts/deploy-runner.sh or reinstall with scripts/install-runner.sh', { dir });
-    process.exit(1);
-  }
-  const plan = planBoot(state, Date.now(), (id) => releaseExists(dir, id));
-  if (plan.rolledBack) {
-    log('WARN', `release ${plan.rolledBack.from} failed to start ${CRASH_BOOTS} times in ${CRASH_WINDOW_MS / 60_000} minutes without being marked good; going back to ${plan.start}`);
-    try {
-      pointCurrent(dir, plan.start);
-    } catch (e) {
-      // Bookkeeping must never stop the runner from starting: lastGood
-      // still starts from its folder, and the next boot sees the link
-      // still on the bad release and goes back again.
-      log('ERROR', 'could not point current at the release it went back to', { release: plan.start, error: String(e) });
+  const children = new Set();
+  let newest = null;
+  let stopping = false;
+  let retry = null;
+
+  const startTimeoutMs = msEnv('THREADBARE_START_TIMEOUT_MS', START_TIMEOUT_MS);
+  const crashRetryMs = msEnv('THREADBARE_CRASH_RETRY_MS', CRASH_RETRY_MS);
+  const restartMs = msEnv('THREADBARE_RESTART_MS', RESTART_MS);
+  const killAfterMs = msEnv('THREADBARE_KILL_AFTER_MS', KILL_AFTER_MS);
+  const stopGraceMs = msEnv('THREADBARE_STOP_GRACE_MS', STOP_GRACE_MS);
+
+  // A closed stdout (a test that stopped reading) must not take the
+  // supervisor down with its children.
+  process.stdout.on('error', () => {});
+
+  // Plans a boot and starts it as the newest child. Returns the child, or
+  // null when there's nothing to start.
+  function start() {
+    const state = readState(dir);
+    // The symlink is what deploy-runner.sh activates; state.json follows it.
+    const linked = readCurrentLink(dir);
+    if (linked) state.current = linked;
+    if (!state.current) {
+      log('ERROR', 'no release to start; build one with scripts/deploy-runner.sh or reinstall with scripts/install-runner.sh', { dir });
+      return null;
     }
-  } else if (plan.stuck) {
-    log('WARN', `release ${plan.start} keeps crashing at startup and there's no other good release to go back to`, { lastGood: state.lastGood });
-  }
-  try {
-    writeState(dir, plan.state);
-  } catch (e) {
-    // Bookkeeping must never stop the runner from starting.
-    log('WARN', 'could not record the boot', { error: String(e) });
-  }
-  const root = path.join(dir, 'releases', plan.start);
-  log('INFO', 'starting release', { release: plan.start, pid: process.pid });
-  process.chdir(root);
-  // main.ts calls listening() once it is serving (src/release.ts).
-  let listened = false;
-  let watchdog;
-  globalThis.threadbareLaunch = {
-    listening() {
-      listened = true;
-      clearTimeout(watchdog);
-    },
-  };
-  const at = plan.state.boots.at(-1).at;
-  const startedMs = Date.now();
-  process.on('exit', (code) => {
-    if (code === 0 && listened) {
+    const plan = planBoot(state, Date.now(), (id) => releaseExists(dir, id), 0);
+    if (plan.rolledBack) {
+      log('WARN', `release ${plan.rolledBack.from} failed to start ${CRASH_BOOTS} times in ${CRASH_WINDOW_MS / 60_000} minutes without being marked good; going back to ${plan.start}`);
       try {
-        markBootClean(dir, at);
+        pointCurrent(dir, plan.start);
+      } catch (e) {
+        // Bookkeeping must never stop the runner from starting: lastGood
+        // still starts from its folder, and the next boot sees the link
+        // still on the bad release and goes back again.
+        log('ERROR', 'could not point current at the release it went back to', { release: plan.start, error: String(e) });
+      }
+    } else if (plan.stuck) {
+      log('WARN', `release ${plan.start} keeps crashing at startup and there's no other good release to go back to`, { lastGood: state.lastGood });
+    }
+    const root = path.join(dir, 'releases', plan.start);
+    const proc = spawn(process.execPath, [path.join(root, 'src', 'main.ts')], {
+      cwd: root,
+      env: { ...process.env, THREADBARE_SUPERVISED: '1' },
+      stdio: ['ignore', 'pipe', 'inherit', 'ipc'],
+    });
+    const boot = plan.state.boots.at(-1);
+    boot.pid = proc.pid;
+    try {
+      writeState(dir, plan.state);
+    } catch (e) {
+      // Bookkeeping must never stop the runner from starting.
+      log('WARN', 'could not record the boot', { error: String(e) });
+    }
+    log('INFO', 'starting release', { release: plan.start, pid: proc.pid });
+    const child = { proc, pid: proc.pid, release: plan.start, at: boot.at, startedMs: Date.now(), listened: false, draining: false, watchdog: null, kill: null, exited: false };
+    children.add(child);
+    newest = child;
+
+    // Forwarded unchanged; only scanned for the listening line.
+    let partial = '';
+    proc.stdout.on('data', (chunk) => {
+      process.stdout.write(chunk);
+      if (child.listened) return;
+      partial += chunk.toString('utf8');
+      if (LISTENING_LINE.test(partial)) listening(child);
+      else partial = partial.slice(partial.lastIndexOf('\n') + 1);
+    });
+    proc.on('message', (m) => {
+      if (!m || typeof m !== 'object') return;
+      if (m.type === 'listening') listening(child);
+      else if (m.type === 'handover') handover(child);
+    });
+    // A spawn that fails (no node at that path) gets 'error' and then, or
+    // instead, 'exit'.
+    proc.on('error', (e) => {
+      log('ERROR', 'could not start release', { release: child.release, error: String(e) });
+      exited(child, 1, null);
+    });
+    proc.on('exit', (code, signal) => exited(child, code, signal));
+
+    // A release that hasn't started listening in time is stopped, so one
+    // that hangs at startup counts as crashing too.
+    child.watchdog = setTimeout(() => {
+      if (child.listened || child.exited) return;
+      log('ERROR', `release ${child.release} wasn't listening after ${Math.round(startTimeoutMs / 1000)} s; stopping it so it counts as a failed start`);
+      child.timedOut = true;
+      stopChild(child);
+    }, startTimeoutMs);
+    return child;
+  }
+
+  function listening(child) {
+    if (child.listened) return;
+    child.listened = true;
+    clearTimeout(child.watchdog);
+  }
+
+  // SIGTERM, then SIGKILL if it's still there.
+  function stopChild(child, graceMs = killAfterMs) {
+    if (child.exited) return;
+    try {
+      child.proc.kill('SIGTERM');
+    } catch {
+      // gone
+    }
+    clearTimeout(child.kill);
+    child.kill = setTimeout(() => {
+      if (!child.exited) {
+        try {
+          child.proc.kill('SIGKILL');
+        } catch {
+          // gone
+        }
+      }
+    }, graceMs);
+  }
+
+  function reply(child, msg) {
+    try {
+      if (child.proc.connected) child.proc.send(msg);
+    } catch {
+      // the child is going; it falls back to a plain restart or exits
+    }
+  }
+
+  // The newest runner asks for a newer one to take over while it finishes
+  // its turns. It becomes draining and nothing starts it again.
+  function handover(child) {
+    const no = (error) => {
+      log('WARN', 'handover refused', { release: child.release, pid: child.pid, error });
+      reply(child, { type: 'handover', ok: false, error });
+    };
+    if (stopping) return no('the supervisor is stopping');
+    if (child !== newest) return no('only the newest runner can hand over');
+    if (!child.listened) return no("this runner hasn't started listening yet");
+    child.draining = true;
+    newest = null;
+    const next = start();
+    if (!next) {
+      child.draining = false;
+      newest = child;
+      return no('there is no release to start');
+    }
+    log('INFO', 'handover: a new runner takes over while the old one finishes its turns', { from: child.release, fromPid: child.pid, to: next.release, pid: next.pid });
+    reply(child, { type: 'handover', ok: true, pid: next.pid });
+  }
+
+  function exited(child, code, signal) {
+    if (child.exited) return;
+    child.exited = true;
+    clearTimeout(child.watchdog);
+    clearTimeout(child.kill);
+    children.delete(child);
+    const clean = code === 0 && child.listened && !child.timedOut;
+    if (clean) {
+      try {
+        markBootClean(dir, child.at, child.pid);
       } catch {
         // the next boot just counts this one
       }
+      if (child.draining) log('INFO', 'a draining runner finished and exited', { release: child.release, pid: child.pid });
+    } else {
+      // A release that calls process.exit leaves nothing else in the log,
+      // and after a crash rollback an agent reading tb logs needs to see
+      // which release stopped, when and how.
+      let good = false;
+      try {
+        good = readState(dir).lastGood === child.release;
+      } catch {
+        // unreadable: say it counts
+      }
+      const secs = Math.round((Date.now() - child.startedMs) / 1000);
+      const how = code !== null && code !== undefined ? `code ${code}` : `signal ${signal}`;
+      log('ERROR', `release ${child.release} exited with ${how} after ${secs} s${child.listened ? '' : ', before it was listening'}${good ? '' : ', not marked good, so it counts as a failed start'}${child.draining ? ' (it was finishing its turns after a handover)' : ''}`);
+    }
+    if (stopping) {
+      if (children.size === 0) process.exit(0);
       return;
     }
-    // A release that calls process.exit leaves nothing else in the log, and
-    // after a crash rollback an agent reading tb logs needs to see which
-    // release stopped, when and how.
-    let good = false;
-    try {
-      good = readState(dir).lastGood === plan.start;
-    } catch {
-      // unreadable: say it counts
+    if (child !== newest) return;
+    newest = null;
+    if (clean) {
+      later(restartMs);
+      return;
     }
-    const secs = Math.round((Date.now() - startedMs) / 1000);
-    log('ERROR', `release ${plan.start} exited with code ${code} after ${secs} s${listened ? '' : ', before it was listening'}${good ? '' : ', not marked good, so it counts as a failed start'}`);
-  });
-  const mod = await import(pathToFileURL(path.join(root, 'src', 'main.ts')).href);
-  // Releases from before the hook never call it, so only those that say
-  // they do get the watchdog. It keeps the process alive on purpose: a
-  // startup that stalls with nothing left to run would otherwise exit 0.
-  if (mod.REPORTS_LISTENING && !listened) {
-    const ms = Number(process.env.THREADBARE_START_TIMEOUT_MS) > 0 ? Number(process.env.THREADBARE_START_TIMEOUT_MS) : START_TIMEOUT_MS;
-    watchdog = setTimeout(() => {
-      log('ERROR', `release ${plan.start} wasn't listening after ${Math.round(ms / 1000)} s; stopping it so it counts as a failed start`);
+    if (children.size === 0) {
+      // Nothing else is running: launchd starts the supervisor again after
+      // its ThrottleInterval, as it did before handovers.
       process.exit(1);
+    }
+    later(crashRetryMs);
+  }
+
+  function later(ms) {
+    clearTimeout(retry);
+    retry = setTimeout(() => {
+      retry = null;
+      if (stopping || newest) return;
+      if (!start() && children.size === 0) process.exit(1);
     }, ms);
   }
+
+  function stopAll(signal) {
+    if (stopping) return;
+    stopping = true;
+    clearTimeout(retry);
+    log('INFO', 'stopping', { signal, children: [...children].map((c) => c.pid) });
+    if (children.size === 0) process.exit(0);
+    for (const c of children) stopChild(c, stopGraceMs);
+  }
+  for (const sig of ['SIGTERM', 'SIGINT', 'SIGHUP']) process.on(sig, () => stopAll(sig));
+  // If the supervisor itself goes some other way, its children don't
+  // outlive it (they also stop when the IPC channel closes).
+  process.on('exit', () => {
+    for (const c of children) {
+      try {
+        c.proc.kill('SIGTERM');
+      } catch {
+        // gone
+      }
+    }
+  });
+
+  if (!start()) process.exit(1);
 }
 
 // Only when run as the program, so deploy.mjs and the tests can import the

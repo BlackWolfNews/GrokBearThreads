@@ -210,9 +210,26 @@ type Runtime = {
   // keeps failing stops being told to the agent after HOOK_TELL_LIMIT, so
   // two can't go round for ever; a message from anyone else resets it.
   hookTurns?: Map<string, number>;
+  // Turn-end hooks still running; a draining runner waits for them, since
+  // one may tell the agent something and start a turn.
+  hooksRunning?: number;
 };
 
 type ThreadState = { rec: ThreadRecord; rt: Runtime };
+
+type Drain = {
+  keep: Set<string>;
+  going: Set<string>; // being let go
+  onHandedOver: (threadId: string) => void;
+  backgroundMs: number;
+  checkMs: number;
+  checkQueued: boolean;
+  timer?: TimerHandle;
+};
+
+// How often a draining runner looks again at threads it keeps for
+// background work, since that work's limit passes without an event.
+const DRAIN_CHECK_MS = 5000;
 
 export type RunnerDeps = {
   config: Config;
@@ -290,6 +307,9 @@ export class Runner {
   private flushScheduled = false;
   private snoozeTimer?: TimerHandle;
   private stopping = false;
+  // Set while this runner drains after a handover (docs/protocol.md,
+  // "Handovers"): the threads it still keeps, and who hears when one goes.
+  private draining?: Drain;
   private refusing?: string;
   private startedAt = 0;
   private startupNotices: { level: 'info' | 'warning' | 'error'; message: string }[] = [];
@@ -330,15 +350,20 @@ export class Runner {
 
   // Loads threads from disk. Threads that were mid-turn when the runner
   // stopped become `stopped`; approvals they were waiting on expire.
-  start(): void {
+  //
+  // `skip` are threads a draining runner still has (a handover): they stay
+  // on disk untouched until it hands them over and adopt() loads them.
+  start(opts: { skip?: ReadonlySet<string> } = {}): void {
     this.startedAt = this.clock.now();
     const { records, broken } = this.store.loadAll();
     for (const id of broken) {
+      if (opts.skip?.has(id)) continue;
       const rec = this.rebuild(id);
       if (rec) records.push(rec);
     }
     let stopped = 0;
     for (const rec of records) {
+      if (opts.skip?.has(rec.id)) continue;
       // thread.json is saved a moment after the event it follows; the log
       // is the truth for seq.
       rec.lastSeq = this.store.log(rec.id).lastSeq;
@@ -588,6 +613,142 @@ export class Runner {
     this.flush();
   }
 
+  // ------------------------------------------------------------- handovers
+  // docs/protocol.md, "Handovers".
+
+  // This runner is handing over to a new release. `keep` are the busy
+  // threads it goes on running; every other thread is let go now (an idle
+  // CLI exits, and the new runner resumes it by session id). Resolves once
+  // those CLIs have gone, so the new runner never resumes a session beside
+  // its old CLI. Each kept thread is let go in turn once nothing would be
+  // cut short, and onHandedOver hears its id after its thread.json is saved.
+  async beginDrain(keep: Iterable<string>, opts: { onHandedOver: (threadId: string) => void; backgroundMs: number; checkMs?: number }): Promise<void> {
+    if (this.draining) throw new Error('already draining');
+    const d: Drain = {
+      keep: new Set([...keep].filter((id) => this.threads.has(id))),
+      going: new Set(),
+      onHandedOver: opts.onHandedOver,
+      backgroundMs: opts.backgroundMs,
+      checkMs: opts.checkMs ?? DRAIN_CHECK_MS,
+      checkQueued: false,
+    };
+    this.draining = d;
+    // Accounts are the primary's to watch now.
+    this.rescanTimer?.cancel();
+    this.accountsTimer?.cancel();
+    await Promise.all([...this.threads.values()].filter((st) => !d.keep.has(st.rec.id)).map((st) => this.letGo(st)));
+    this.log.info('draining', { keeps: [...d.keep] });
+    this.checkHandovers();
+  }
+
+  // The threads a draining runner still has; undefined when not draining.
+  keeping(): string[] | undefined {
+    return this.draining ? [...this.draining.keep] : undefined;
+  }
+
+  // Whether this runner has the thread (a draining one lets them go).
+  has(threadId: string): boolean {
+    return this.threads.has(threadId);
+  }
+
+  private queueHandoverCheck(): void {
+    const d = this.draining;
+    if (!d || d.checkQueued) return;
+    d.checkQueued = true;
+    this.defer(() => {
+      d.checkQueued = false;
+      this.checkHandovers();
+    });
+  }
+
+  private checkHandovers(): void {
+    const d = this.draining;
+    if (!d || this.stopping) return;
+    d.timer?.cancel();
+    d.timer = undefined;
+    for (const id of [...d.keep]) {
+      const st = this.threads.get(id);
+      if (!st) {
+        // Deleted while kept.
+        d.keep.delete(id);
+        continue;
+      }
+      if (d.going.has(id) || !this.readyToHandOver(st, d)) continue;
+      d.going.add(id);
+      void this.letGo(st).then(
+        () => {
+          d.going.delete(id);
+          d.keep.delete(id);
+          this.log.info('handed a thread over', { threadId: id, left: d.keep.size });
+          d.onHandedOver(id);
+        },
+        (e: unknown) => {
+          d.going.delete(id);
+          this.log.error('could not hand a thread over', { threadId: id, error: String(e) });
+        },
+      );
+    }
+    // Background work's limit passes without anything else happening.
+    if (d.keep.size > d.going.size) d.timer = this.clock.setTimeout(() => this.checkHandovers(), d.checkMs);
+  }
+
+  // Nothing would be cut short by letting it go now: no turn, approval or
+  // question, wake grace, turn-end hook or action. Queued messages go with
+  // it. Background work holds it for backgroundMs after its last turn, as
+  // it holds an idle restart, and is then stopped with a note.
+  private readyToHandOver(st: ThreadState, d: Drain): boolean {
+    const { rt } = st;
+    if (rt.turn || rt.approvals.size || rt.wakeTimer || rt.hooksRunning || rt.runningActions?.size) return false;
+    return rt.tasks.length === 0 || this.clock.now() - rt.activeAt >= d.backgroundMs;
+  }
+
+  // Lets go of a thread for good: its CLI exits (background work, if any,
+  // is stopped with a note), its record is saved, and anything the old CLI
+  // still reports goes nowhere.
+  private async letGo(st: ThreadState): Promise<void> {
+    const { rt, rec } = st;
+    rt.idleTimer?.cancel();
+    rt.idleTimer = undefined;
+    this.flushDeltas(st);
+    if (rt.session && !rt.closing) this.releaseSession(st);
+    if (rt.closing) await rt.closing;
+    rt.deltaTimer?.cancel();
+    rt.wakeTimer?.cancel();
+    rt.generation++;
+    this.store.save(rec);
+    rt.deleted = true;
+    this.dirty.delete(rec.id);
+    this.threads.delete(rec.id);
+    this.store.forget(rec.id);
+  }
+
+  // Loads a thread a draining runner has handed over and carries on with
+  // it: messages queued while it was busy there start now. `crashed`: the
+  // draining runner died with it, so it's recovered as after a crash (a
+  // turn in flight ends as stopped).
+  adopt(threadId: string, opts: { crashed?: boolean } = {}): ThreadSummary | undefined {
+    const had = this.threads.get(threadId);
+    if (had) return this.summary(had);
+    this.store.forget(threadId);
+    const rec = this.store.load(threadId) ?? this.rebuild(threadId);
+    if (!rec) {
+      this.log.warn('a handed-over thread is gone', { threadId });
+      return undefined;
+    }
+    rec.lastSeq = this.store.log(rec.id).lastSeq;
+    const st: ThreadState = { rec, rt: newRuntime(Date.parse(rec.lastActivityAt) || 0) };
+    this.threads.set(rec.id, st);
+    if (opts.crashed) {
+      if (this.recover(st)) this.notice('info', `The old runner stopped while "${rec.title}" was mid-turn; send a message to carry on.`);
+    } else if (rec.queue.length && this.bucket(rec) === 'inbox') {
+      this.kickQueue(st);
+    }
+    this.markDirty(st);
+    this.armSnoozeTimer();
+    this.log.info('adopted a thread', { threadId, crashed: Boolean(opts.crashed), queued: rec.queue.length });
+    return this.summary(st);
+  }
+
   // From the moment a restart begins until the runner exits, a new turn
   // would only be cut off straight away, so sends and new threads are
   // refused with a message saying to send again in a moment.
@@ -680,6 +841,8 @@ export class Runner {
   }
 
   private notify(n: Notification): void {
+    // A kept thread's summary changing can be it becoming free to go.
+    if (this.draining && n.method === 'thread.updated') this.queueHandoverCheck();
     for (const fn of this.listeners) {
       try {
         fn(n);
@@ -842,6 +1005,8 @@ export class Runner {
     scheduleId?: string;
   }): { thread: ThreadSummary; turnId: string } {
     this.checkAccepting();
+    // New threads belong on the new release.
+    if (this.draining) throw new RpcError(ErrorCode.busy, 'This runner is handing over to a new one; start the thread there.');
     const accountId = params.accountId ?? this.defaultAccountId();
     const account = this.accounts.get(accountId);
     if (!account) throw new RpcError(ErrorCode.accountNotFound, `No account called ${accountId}`);
@@ -1005,9 +1170,10 @@ export class Runner {
       this.steer(st, msg);
       return rt.turn.turnId;
     }
-    if (rt.turn || rec.queue.length) {
+    if (rt.turn || rec.queue.length || this.draining) {
       // Behind a running turn, or behind messages that couldn't start
-      // earlier: they go first.
+      // earlier: they go first. On a draining runner a thread with no turn
+      // is about to move across, and the message goes with it.
       rec.queue.push(msg);
       this.markDirty(st);
       this.kickQueue(st);
@@ -2130,6 +2296,12 @@ export class Runner {
   // one started. One that can't be written (disk full) stays at the front.
   private kickQueue(st: ThreadState): boolean {
     if (st.rt.turn || st.rec.queue.length === 0 || this.stopping) return false;
+    // A draining runner hands a thread over with its queue rather than
+    // start another turn on the old release; the primary starts it.
+    if (this.draining) {
+      this.queueHandoverCheck();
+      return false;
+    }
     const next = st.rec.queue.shift()!;
     this.markDirty(st);
     try {
@@ -2343,6 +2515,17 @@ export class Runner {
   // the same way again is told HOOK_TELL_LIMIT times, then only posted.
   private async runHooks(st: ThreadState, turn: Turn): Promise<void> {
     const hooks = this.patchSet(st).hooks.filter((h) => h.on === 'turn.end' && hookApplies(h, turn.edited, st.rec.cwd));
+    if (!hooks.length) return;
+    st.rt.hooksRunning = (st.rt.hooksRunning ?? 0) + 1;
+    try {
+      await this.runHookList(st, hooks);
+    } finally {
+      st.rt.hooksRunning--;
+      if (this.draining) this.queueHandoverCheck();
+    }
+  }
+
+  private async runHookList(st: ThreadState, hooks: PatchSet['hooks']): Promise<void> {
     for (const hook of hooks) {
       if (st.rt.deleted || this.stopping) return;
       const outcome = await runCommand(hook.command, {

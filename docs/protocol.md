@@ -332,15 +332,15 @@ replaces whatever the deltas built up.
 | `settings.update` | `{ defaultCwd?, idleMinutes?, maxLiveCLIs?, followMain?, models?: { dailyBudgetUsd?, privateFolders? } }` | `{ settings: Settings }`. Saves what's given to `runner.json` and applies it straight away, except `followMain` (next restart). `defaultCwd` must be an existing folder, `idleMinutes` at least 1, `maxLiveCLIs` 1 to 20, `dailyBudgetUsd` 0 to 100; otherwise `-32602` saying which. Every client gets `settings.updated` |
 | `settings.setKey` | `{ provider: "openrouter", key: string \| null }` | `{ settings: Settings }`. Writes the key to `secrets/openrouter-key` (0600), or removes it for `null`. The key is never sent back, only `set` and `hint`. A key with spaces inside or under 20 characters is `-32602`. Every client gets `settings.updated` |
 | `models.run` | `{ job: "classify" \| "extract" \| "summarize" \| "generate", text: string, labels?: string[], fields?: Record<string, string>, maxWords?: number, system?: string, cwd?: string }` | `{ ok: true, value, model, costUsd? }` or `{ ok: false, reason: "no-key" \| "off" \| "private" \| "over-budget" \| "timeout" \| "provider", message }`. One model call by hand (`tb models try`), spent and counted like any other, with `feature: "tb"`. `classify` needs 2 or more `labels` and answers one of them; `extract` needs `fields` (name to a plain description) and answers an object of them, `null` where the text doesn't say |
-| `runner.status` | `{}` | `{ version, release?, branch?, pid, startedAt, home, logFile, liveClis, running: string[], background: { threadId, tasks: string[] }[], pendingRestart?: { when, reason?, release?, resumeThreadId?, requestedAt, backgroundUntil?, waitingFor: string[] }, rolledBack?: { from, at }, update?: { state, checkout?, reason?, checkedAt?, commit?, release?, logFile? }, clis?: CliStatus[] }`. `running` lists the threads that are starting, running or waiting on an approval or a question; `background` the threads whose CLI is still running background shells or subagents (`tasks` describes each). A restart waits for both. `branch` is the branch the release was built from. `rolledBack` is set when this release is running because `launch.mjs` went back to it from `from`, which kept crashing at startup (and nobody has activated it on purpose since). `update` is the runner following main by itself (docs/dev-tools.md): `state` is `off` (`reason` says why), `idle`, `checking`, `building`, `waiting` (`release` is built and starts on the pending restart) or `failed` (`reason` is the error; `logFile` has the build's output); `commit` is main's tip at the last check (`checkedAt`) |
-| `runner.restart` | `{ when?: "idle" \| "now", resume?: { threadId, text }, reason?: string, release?: string, backgroundWaitMs?: number, cancel?: boolean }` | `{ scheduled: boolean, waitingFor: string[], background?: { threadId, tasks: string[] }[], note?: string, noResume?: string }`. See Restarts below. `scheduled` is true once the restart is saved; an empty `waitingFor` means it is happening now. `background` is the background work among `waitingFor`. `release` is the release the restart should come back on (the deploy script sets it). `backgroundWaitMs` limits how long background shells and subagents hold the restart. `cancel: true` withdraws a pending restart that hasn't begun and returns `scheduled: false` (`-32020` once it has begun), with a `note` when it also put `current` back. `noResume` says why the `resume` won't be sent as things stand (the thread has already been resumed 3 times in the last hour), so whoever asked can say so rather than wait for it. A runner older than this answers `-32601` |
+| `runner.status` | `{}` | `{ version, release?, branch?, pid, startedAt, home, logFile, liveClis, running: string[], background: { threadId, tasks: string[] }[], pendingRestart?: { when, reason?, release?, resumeThreadId?, requestedAt, backgroundUntil?, waitingFor: string[] }, rolledBack?: { from, at }, draining?: { pid, version, release?, since, threads: string[] }[], update?: { state, checkout?, reason?, checkedAt?, commit?, release?, logFile? }, clis?: CliStatus[] }`. `running` lists the threads that are starting, running or waiting on an approval or a question; `background` the threads whose CLI is still running background shells or subagents (`tasks` describes each). A restart waits for both. `branch` is the branch the release was built from. `rolledBack` is set when this release is running because `launch.mjs` went back to it from `from`, which kept crashing at startup (and nobody has activated it on purpose since). `update` is the runner following main by itself (docs/dev-tools.md): `state` is `off` (`reason` says why), `idle`, `checking`, `building`, `waiting` (`release` is built and starts on the pending restart) or `failed` (`reason` is the error; `logFile` has the build's output); `commit` is main's tip at the last check (`checkedAt`) |
+| `runner.restart` | `{ when?: "idle" \| "now", resume?: { threadId, text }, reason?: string, release?: string, backgroundWaitMs?: number, cancel?: boolean }` | `{ scheduled: boolean, waitingFor: string[], background?: { threadId, tasks: string[] }[], note?: string, noResume?: string, handover?: { keeps: string[] } }`. See Restarts below; `handover` under Handovers. `scheduled` is true once the restart is saved; an empty `waitingFor` means it is happening now. `background` is the background work among `waitingFor`. `release` is the release the restart should come back on (the deploy script sets it). `backgroundWaitMs` limits how long background shells and subagents hold the restart. `cancel: true` withdraws a pending restart that hasn't begun and returns `scheduled: false` (`-32020` once it has begun), with a `note` when it also put `current` back. `noResume` says why the `resume` won't be sent as things stand (the thread has already been resumed 3 times in the last hour), so whoever asked can say so rather than wait for it. A runner older than this answers `-32601` |
 | `clis.list` | `{}` | `{ clis: CliStatus[] }` |
 | `clis.check` | `{ provider?: Provider }` | `{ clis: CliStatus[] }`. Starts a version check (both CLIs when `provider` is absent) and returns at once, with the state as it was when the call arrived; the result comes through `clis.updated` |
 | `clis.update` | `{ provider: Provider, version?: string, force?: boolean }` | `{ clis: CliStatus[] }`. Starts an update and returns at once, with `update.state` `running` or `waiting`; progress comes through `clis.updated`. `version` picks a kept Codex version (how "Go back" works). `force: true` installs a held version anyway |
 | `clis.setPolicy` | `{ provider: Provider, policy: "auto" \| "notify" \| "off" }` | `{ clis: CliStatus[] }` |
 
 Errors use JSON-RPC error objects: `-32602` bad params, `-32004` thread not
-found, `-32005` schedule not found, `-32010` account not found, `-32020` busy (e.g. two sends racing),
+found, `-32005` schedule not found, `-32010` account not found, `-32020` busy (e.g. two sends racing), `-32030` a draining runner no longer holds that thread (Handovers),
 `-32601` a method this runner doesn't have (`clis.*` on a runner older than
 them), `-32000` anything else with a readable `message`.
 
@@ -443,6 +443,60 @@ still `-32602`.)
   kept crashing at startup says so with a `warning` notice at startup and
   after every `hello` ("Release X kept crashing at startup, so the runner
   went back to Y.").
+
+### Handovers
+
+A runner started by `launch.mjs` as a supervised child
+(`THREADBARE_SUPERVISED=1`, docs/dev-tools.md) doesn't make an idle
+restart wait for busy threads. It hands over instead:
+
+- If no thread is busy, it restarts as above.
+- Otherwise the busy threads (the ones an idle restart would wait for,
+  background work included) are *kept*, and `launch.mjs` starts the new
+  release beside this one. `runner.restart` answers at once with
+  `waitingFor: []` and `handover: { keeps: string[] }`.
+- The old runner is now *draining*. It stops listening on the runner's
+  port, lets go of every thread it doesn't keep (their idle CLIs exit and
+  resume by session id on the new runner), stops its schedules, updates
+  and CLI installs, and listens on a port of its own on 127.0.0.1, written
+  to `run/drain-<pid>.json` as `{ pid, port, version, release?, since,
+  threads: string[] }`. Same token.
+- The new runner (the *primary*) reads those files at startup, connects to
+  each, and doesn't load the kept threads itself. Clients only ever talk to
+  the primary: a request about a kept thread (`threads.send`,
+  `threads.events`, `threads.subscribe`, `approvals.respond` and the rest)
+  goes to the draining runner and its answer comes back unchanged, and the
+  draining runner's `thread.updated`, `thread.event`, `thread.deleted` and
+  `runner.notice` come through the primary. `threads.list`,
+  `threads.search` and `hello` include kept threads.
+- A kept thread moves across once nothing would be cut short: no turn,
+  approval or question, background work or wake grace. Background work
+  holds it for 30 minutes after its last turn at most, and is then stopped
+  with the usual note. Messages queued for it at that moment move with it
+  and the primary starts them, so a message sent during the turn runs on
+  the new release. The draining runner saves the thread, then sends the
+  primary `drain.handedOver { threadId }`; the primary loads it and carries
+  on (the same seqs; a client's subscription keeps going). Once it keeps
+  nothing, the draining runner exits.
+- A request for a thread the draining runner has already let go answers
+  `-32030` ("moved"), and the primary handles it itself.
+- The threadbare tools in a kept thread's session reach the primary over
+  the runner's port for anything about other threads, and its schedules.
+- A `resume` for a kept thread is sent when the thread moves across,
+  rather than when the new runner starts, and the 15-minute limit counts
+  from then.
+- If a draining runner dies, the primary takes its threads as after a
+  crash (a turn in flight ends as `stopped`) and stops the process groups
+  it left (`run/children-<pid>.json`).
+- `runner.status` on the primary lists draining runners as `draining: {
+  pid, version, release?, since, threads: string[] }[]`.
+- `when: "now"` restarts the primary straight away and tells each draining
+  runner to stop too (`drain.stop`).
+- Another handover while one is draining makes the primary a draining
+  runner as well; draining runners don't hand over again.
+
+The methods between runners (`drain.hello`, `drain.stop`) and
+`drain.handedOver` are for runners only.
 
 ## Settings and models
 

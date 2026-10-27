@@ -402,6 +402,7 @@ export const ErrorCode = {
   scheduleNotFound: -32005,
   accountNotFound: -32010,
   busy: -32020,
+  moved: -32030, // a draining runner has handed the thread over (Handovers)
   other: -32000,
 } as const;
 
