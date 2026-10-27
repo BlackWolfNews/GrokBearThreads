@@ -28,6 +28,8 @@ type Async<T, K extends keyof T> = { [P in K]: T[P] extends (...a: infer A) => i
 export type ThreadControl = {
   hello: Runner['hello'];
   createReview?: (...args: Parameters<Runner['createReview']>) => Aw<ReturnType<Runner['createReview']>>;
+  pin?: (...args: Parameters<Runner['pin']>) => Aw<ReturnType<Runner['pin']>>;
+  unpin?: (...args: Parameters<Runner['unpin']>) => Aw<ReturnType<Runner['unpin']>>;
 } & Async<Runner, 'list' | 'search' | 'get' | 'events' | 'create' | 'send' | 'update' | 'interrupt' | 'delete'>;
 
 export type ScheduleControl = Async<Scheduler, 'create' | 'list' | 'find' | 'update' | 'delete'>;
@@ -199,6 +201,37 @@ export function buildThreadbareTools(control: ThreadControl, selfId: string, now
         if (!control.createReview) throw new Error('This runner does not support image reviews yet.');
         const { review } = await control.createReview(selfId, input);
         return `Review ${review.id}: ${review.title} (${review.options.length} images). Mike can compare them and send a choice or notes. You can finish this turn; his reply will arrive as a later message.`;
+      }),
+    ),
+  ];
+
+  // Highlights (docs/protocol.md): the list beside the transcript of what
+  // the thread made and shared. Always this thread's own.
+  const highlightTools = [
+    tool(
+      'pin',
+      "Pins a file or link to this thread's Highlights, the list beside the transcript in Threadbear, so Mike can find it without scrolling: something you made for him to review (a mockup, a doc, a screenshot), a preview URL, a PR. Prefer this to running `open` on a file or page meant for Mike; with show: true it opens in the app's side pane straight away instead of taking over his screen. Files you write and links you mention are listed by themselves, so pin only what matters most, with a note saying why.",
+      {
+        path: z.string().optional().describe('A file, absolute or relative to this thread’s folder. Give path or url.'),
+        url: z.string().optional().describe('A link, with its scheme (https://, http://localhost:5173).'),
+        title: z.string().max(200).optional().describe('What to call it. Default: the file name or the link.'),
+        note: z.string().max(500).optional().describe('One line on why Mike should look at it.'),
+        show: z.boolean().optional().describe('Open it in the side pane now.'),
+      },
+      handle(async (input) => {
+        if (!control.pin) throw new Error("This runner doesn't keep highlights yet.");
+        const { id } = await control.pin(selfId, input);
+        return `Pinned (${id})${input.show ? ', and shown in the side pane' : ''}.`;
+      }),
+    ),
+    tool(
+      'unpin',
+      "Takes a pin off this thread's Highlights, by the id `pin` returned.",
+      { id: z.string().min(1).describe('The id pin returned, e.g. file:/Users/.../mock.html.') },
+      handle(async ({ id }) => {
+        if (!control.unpin) throw new Error("This runner doesn't keep highlights yet.");
+        const { removed } = await control.unpin(selfId, id);
+        return removed ? 'Unpinned.' : `Nothing pinned as ${id}.`;
       }),
     ),
   ];
@@ -455,6 +488,7 @@ export function buildThreadbareTools(control: ThreadControl, selfId: string, now
       handle(async ({ needs }) => (needs === 'you' ? 'Noted: this thread will wait in Needs you. End the turn now, with no more text.' : 'Noted: this thread is done. End the turn now, with no more text.')),
     ),
     ...reviewTools,
+    ...highlightTools,
     ...(schedules ? scheduleTools : []),
     ...(projects ? projectTools : []),
     tool(

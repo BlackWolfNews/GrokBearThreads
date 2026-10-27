@@ -1,3 +1,4 @@
+import type { HighlightState } from './highlights.ts';
 import fs from 'node:fs';
 import path from 'node:path';
 import type { WaitingForRoom, Ask, NeedsWho, DesignReview, ReviewDraft, EffortLevel, MessageOrigin, PermissionMode, PersistedEvent, Provider, Subagent, ThreadProject, ThreadStatus, ImageRef } from './protocol.ts';
@@ -80,6 +81,11 @@ export type ThreadRecord = {
   // The projects the native session has been told about (the brief, or a
   // line when it joined one), so it hears about each once.
   projectsTold?: string[];
+  // Highlights (highlights.ts): what's been found and pinned, and the
+  // event it had read up to. Brought up to date when a client asks.
+  highlights?: HighlightState;
+  highlightsAt?: string; // a pin, a removal or a new brief
+  brief?: { text: string; at: string }; // the librarian's line on where the thread is up to
   // The thread's own git worktree (worktrees.ts), once it's made.
   worktree?: WorktreeRecord;
   // Made in a repo that asks for worktrees and not told otherwise: the

@@ -37,10 +37,22 @@ public extension RPCClient {
         return try await call("threads.send", .object(params), as: TurnResult.self).turnId
     }
 
-    /// Draws an image panel (the Simulator's screenshot). Slow: it waits
-    /// for simctl.
+    /// Draws an image panel (the Simulator's screenshot) or fills a list
+    /// panel. Slow: it waits for simctl or the patch's function (20 s at
+    /// most).
     func renderPanel(threadId: String, panelId: String) async throws -> PanelRender {
         try await call("panels.render", .object(["threadId": .string(threadId), "panelId": .string(panelId)]), as: PanelRender.self, timeout: .seconds(30))
+    }
+
+    /// What the thread has made, shared and pinned (docs/protocol.md,
+    /// "Highlights"). A runner from before highlights answers `-32601`.
+    func threadHighlights(threadId: String) async throws -> ThreadHighlights {
+        try await call("threads.highlights", .object(["threadId": .string(threadId)]), as: ThreadHighlights.self)
+    }
+
+    /// Takes one off the list for good: a later mention doesn't bring it back.
+    func removeHighlight(threadId: String, highlightId: String) async throws -> ThreadSummary {
+        try await call("threads.removeHighlight", .object(["threadId": .string(threadId), "highlightId": .string(highlightId)]), as: ThreadResult.self).thread
     }
 
     /// Runs an action from the thread's patches. A command action answers

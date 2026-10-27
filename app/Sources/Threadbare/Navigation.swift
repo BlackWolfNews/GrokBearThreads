@@ -7,13 +7,15 @@ struct NavigationPlace: Equatable, Sendable {
     var threadId: String?
     var subagent: SubagentRef?
     var projectId: String?
+    /// The Projects page of cards (`showsProjectsHome`).
+    var projectsHome = false
 }
 
 /// Back and forward, like a browser's: ⌘[ and ⌘] in the Go menu, and the
 /// side buttons on a mouse.
 extension AppModel {
     var place: NavigationPlace {
-        NavigationPlace(mode: sidebarMode, threadId: selection, subagent: subagentSelection, projectId: openProjectId)
+        NavigationPlace(mode: sidebarMode, threadId: selection, subagent: subagentSelection, projectId: openProjectId, projectsHome: showsProjectsHome)
     }
 
     /// Called by the didSet of each property that makes up `place`. One
@@ -77,6 +79,7 @@ extension AppModel {
             select(place.threadId)
         }
         openProjectId = place.projectId
+        showsProjectsHome = place.projectsHome
     }
 }
 

@@ -36,7 +36,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { execFile, spawn } from 'node:child_process';
-import type { Action, Hook, ImageRef, Panel, PatchInfo } from './protocol.ts';
+import type { Action, Hook, ImageRef, Panel, PanelItem, PatchInfo } from './protocol.ts';
 import { LIMITS } from './protocol.ts';
 import { imageRefFor } from './media.ts';
 
@@ -267,11 +267,23 @@ export function readPatchModule(id: string, source: 'home' | 'project', file: st
   if (v.panels !== undefined) {
     if (!Array.isArray(v.panels)) return problem('panels should be an array.');
     for (const [i, raw] of v.panels.entries()) {
-      const p = raw as { title?: unknown; url?: unknown; note?: unknown };
+      const p = raw as { title?: unknown; url?: unknown; note?: unknown; icon?: unknown; items?: unknown };
       if (!p || typeof p !== 'object' || typeof p.title !== 'string' || !p.title.trim()) return problem(`panels[${i}] needs a title.`);
-      // A page the web view can open: a scheme with //, or a data: page.
-      if (typeof p.url !== 'string' || !/^([a-z][a-z0-9+.-]*:\/\/\S|data:)/i.test(p.url.trim())) return problem(`panels[${i}] ("${p.title}") needs a url.`);
-      const panel: Panel = { id: `${id}.${slug(p.title)}`, title: p.title.trim(), kind: 'url', url: p.url.trim(), patch: id };
+      if (p.icon !== undefined && (typeof p.icon !== 'string' || !p.icon.trim())) return problem(`panels[${i}] ("${p.title}") has an icon that isn't an SF Symbol name.`);
+      const panelId = `${id}.${slug(p.title)}`;
+      let panel: Panel;
+      if (typeof p.items === 'function') {
+        // A list panel: rows drawn by the app, from the function, called
+        // when the app asks (panels.render).
+        if (p.url !== undefined) return problem(`panels[${i}] ("${p.title}") should have url or items, not both.`);
+        panel = { id: panelId, title: p.title.trim(), kind: 'list', patch: id };
+        listFunctions.set(listKey(file, panelId.slice(id.length)), p.items as ItemsFunction);
+      } else {
+        // A page the web view can open: a scheme with //, or a data: page.
+        if (typeof p.url !== 'string' || !/^([a-z][a-z0-9+.-]*:\/\/\S|data:)/i.test(p.url.trim())) return problem(`panels[${i}] ("${p.title}") needs a url, or an items function.`);
+        panel = { id: panelId, title: p.title.trim(), kind: 'url', url: p.url.trim(), patch: id };
+      }
+      if (typeof p.icon === 'string') panel.icon = p.icon.trim();
       if (typeof p.note === 'string' && p.note.trim()) panel.note = p.note.trim();
       panels.push(panel);
     }
@@ -365,7 +377,7 @@ export function projectPanels(cwd: string, home: string = os.homedir(), projectF
 function convexPanel(dir: string): Panel {
   const deployment = readEnvValue(dir, 'CONVEX_DEPLOYMENT');
   const { url, note } = convexDashboardUrl(deployment);
-  const panel: Panel = { id: 'convex.dashboard', title: 'Convex', kind: 'url', url, patch: 'convex' };
+  const panel: Panel = { id: 'convex.dashboard', title: 'Convex', kind: 'url', url, icon: 'cylinder.split.1x2', patch: 'convex' };
   if (note) panel.note = note;
   return panel;
 }
@@ -392,7 +404,7 @@ export function isConvexProject(dir: string): boolean {
 }
 
 function simulatorPanel(dir: string): Panel {
-  return { id: 'xcode.simulator', title: 'Simulator', kind: 'image', patch: 'xcode', note: path.basename(dir) };
+  return { id: 'xcode.simulator', title: 'Simulator', kind: 'image', icon: 'iphone', patch: 'xcode', note: path.basename(dir) };
 }
 
 function hasXcodeProject(dir: string): boolean {
@@ -463,7 +475,70 @@ export function parseEnvValue(text: string, name: string): string | undefined {
 
 // ------------------------------------------------------------- rendering
 
-export type PanelRender = { image?: ImageRef; note?: string };
+export type PanelRender = { image?: ImageRef; items?: PanelItem[]; note?: string };
+
+// ------------------------------------------------------------ list panels
+
+// What a list panel's `items` gets: where it applies, and `sh` to run a
+// command there (resolves with what it printed, rejects on failure).
+export type ItemsContext = { cwd: string; threadId: string; sh: (command: string) => Promise<string> };
+type ItemsFunction = (ctx: ItemsContext) => unknown;
+
+// The `items` functions of loaded patch files, by file and the panel's id
+// without the patch's name (".worktrees"), which stays the same when
+// addPatch puts a folder's name in front of the patch's. Kept out of the
+// Panel itself, which goes over the wire. A file that loads again
+// replaces its entries.
+const listFunctions = new Map<string, ItemsFunction>();
+const listKey = (file: string, suffix: string) => `${file}\u0000${suffix}`;
+
+export const LIST_ITEMS_KEPT = 200;
+export const LIST_TIMEOUT_MS = 20_000;
+
+// Fills a list panel by calling its patch's function. A throw, a timeout
+// or something that isn't a list of rows is a note instead.
+export async function renderListPanel(
+  panel: Panel,
+  set: PatchSet,
+  ctx: { cwd: string; threadId: string; run: (command: string, cwd: string) => Promise<CommandOutcome>; timeoutMs?: number },
+): Promise<PanelRender> {
+  const info = set.patches.find((p) => p.id === panel.patch);
+  const fn = info?.file ? listFunctions.get(listKey(info.file, panel.id.slice(panel.patch.length))) : undefined;
+  if (!fn) return { note: 'This panel has nothing to show.' };
+  // A project folder's patch runs in that folder, as its actions do.
+  const cwd = info?.folder ?? ctx.cwd;
+  const sh = async (command: string) => {
+    const out = await ctx.run(command, cwd);
+    if (!out.ok) throw new Error(`${command} failed${out.exitCode !== undefined ? ` (exit ${out.exitCode})` : ''}: ${out.text.trim().split('\n').pop() ?? ''}`);
+    return out.text;
+  };
+  let timer: NodeJS.Timeout | undefined;
+  try {
+    const value = await Promise.race([
+      Promise.resolve().then(() => fn({ cwd, threadId: ctx.threadId, sh })),
+      new Promise((_, reject) => {
+        timer = setTimeout(() => reject(new Error(`took over ${Math.round((ctx.timeoutMs ?? LIST_TIMEOUT_MS) / 1000)} seconds`)), ctx.timeoutMs ?? LIST_TIMEOUT_MS);
+      }),
+    ]);
+    if (!Array.isArray(value)) return { note: "The panel's items function didn't return a list." };
+    return { items: value.slice(0, LIST_ITEMS_KEPT).map(panelItem).filter((x): x is PanelItem => x !== undefined) };
+  } catch (e) {
+    return { note: `Couldn't fill this panel: ${firstLine(e)}` };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+function panelItem(raw: unknown): PanelItem | undefined {
+  if (typeof raw === 'string') return raw.trim() ? { title: raw.trim().slice(0, 300) } : undefined;
+  if (!raw || typeof raw !== 'object') return undefined;
+  const r = raw as Record<string, unknown>;
+  if (typeof r.title !== 'string' || !r.title.trim()) return undefined;
+  const item: PanelItem = { title: r.title.trim().slice(0, 300) };
+  for (const k of ['detail', 'url', 'path', 'icon'] as const) if (typeof r[k] === 'string' && (r[k] as string).trim()) item[k] = (r[k] as string).trim().slice(0, 2000);
+  if (r.tone === 'attention' || r.tone === 'failed' || r.tone === 'done') item.tone = r.tone;
+  return item;
+}
 
 // Takes a screenshot of the booted simulator into `file` (PNG). The real
 // one runs simctl; tests pass their own.

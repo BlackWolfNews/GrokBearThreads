@@ -68,6 +68,7 @@ import { copySessionTranscript, subagentTranscriptPath } from './transcripts.ts'
 import { readSubagentTranscript } from './adapters/claude/subagents.ts';
 import { fileContext } from './adapters/claude/normalize.ts';
 import type { Models } from './models/index.ts';
+import { emptyHighlights, observe as observeHighlights, pinItem, remove as removeHighlight, unpin as unpinHighlight, upsert as upsertHighlight, view as highlightsView, absolute, type ThreadHighlights } from './highlights.ts';
 import { SERVER_NAME, approvalTitle } from './threadbare-mcp.ts';
 import { END_TURN_TOOL, needsFromText, needsFromTool } from './needs.ts';
 import type { Needs } from './needs.ts';
@@ -78,6 +79,7 @@ import {
   isInside,
   loadPatchSet,
   projectPanels,
+  renderListPanel,
   renderPanel,
   runCommand,
   simctlScreenshot,
@@ -3364,6 +3366,7 @@ export class Runner {
     if (rec.subagents?.length) s.subagents = rec.subagents.map(publicSubagent);
     const projects = this.projects?.threadProjects(rec);
     if (projects) s.projects = projects;
+    if (rec.highlightsAt) s.highlightsAt = rec.highlightsAt;
     if (rec.worktree && !rec.worktree.removedAt) {
       s.worktree = { branch: rec.worktree.branch, mainCheckout: rec.worktree.mainCheckout, path: rec.worktree.path };
     }
@@ -3460,7 +3463,91 @@ export class Runner {
     const st = this.mustGet(threadId);
     const panel = this.patchSet(st).panels.find((p) => p.id === panelId);
     if (!panel) throw new RpcError(ErrorCode.badParams, `This thread has no panel called ${panelId}`);
+    if (panel.kind === 'list') {
+      return renderListPanel(panel, this.patchSet(st), {
+        cwd: st.rec.cwd,
+        threadId,
+        run: (command, cwd) => runCommand(command, { cwd, env: { ...process.env, ...threadEnv(threadId, this.cfg.home) }, shell: this.actionShell, timeoutMs: this.actionTimeoutMs }),
+      });
+    }
     return renderPanel(panel, paths.panels(this.cfg.home, threadId), this.screenshot);
+  }
+
+  // ------------------------------------------------------------ highlights
+
+  // What the thread has made, shared and pinned (docs/protocol.md,
+  // "Highlights"): brought up to date from the events since the last ask.
+  highlights(threadId: string): ThreadHighlights {
+    const st = this.mustGet(threadId);
+    this.catchUpHighlights(st);
+    return highlightsView(st.rec.highlights!, st.rec.brief);
+  }
+
+  removeHighlight(threadId: string, highlightId: string): { thread: ThreadSummary } {
+    const st = this.mustGet(threadId);
+    this.catchUpHighlights(st);
+    if (!removeHighlight(st.rec.highlights!, highlightId)) throw new RpcError(ErrorCode.badParams, `This thread has no highlight ${highlightId}`);
+    this.highlightsChanged(st);
+    return { thread: this.summary(st) };
+  }
+
+  // The `pin` tool: a file (relative to the thread's folder is fine) or a
+  // URL, for Mike to look at. Returns the highlight's id.
+  pin(threadId: string, target: { path?: string; url?: string; title?: string; note?: string; show?: boolean }): { id: string } {
+    const st = this.mustGet(threadId);
+    if (Boolean(target.path) === Boolean(target.url)) throw new RpcError(ErrorCode.badParams, 'Pin a path or a url, one of the two.');
+    let file: string | undefined;
+    if (target.path) {
+      file = absolute(target.path, st.rec.cwd);
+      if (!fs.statSync(file, { throwIfNoEntry: false })?.isFile()) throw new RpcError(ErrorCode.badParams, `There's no file at ${file}.`);
+    } else if (!/^[a-z][a-z0-9+.-]*:\/\/\S/i.test(target.url!)) {
+      throw new RpcError(ErrorCode.badParams, 'A url needs a scheme, like https://.');
+    }
+    this.catchUpHighlights(st);
+    const state = st.rec.highlights!;
+    const item = pinItem({ ...target, path: file }, st.rec.lastSeq, this.isoNow());
+    // Pinning something Mike removed is the agent asking again: let it.
+    state.removed = state.removed?.filter((id) => id !== item.id);
+    upsertHighlight(state, item);
+    this.highlightsChanged(st);
+    return { id: item.id };
+  }
+
+  unpin(threadId: string, highlightId: string): { removed: boolean } {
+    const st = this.mustGet(threadId);
+    this.catchUpHighlights(st);
+    const removed = unpinHighlight(st.rec.highlights!, highlightId);
+    if (removed) this.highlightsChanged(st);
+    return { removed };
+  }
+
+  // The librarian's line on where the thread is up to.
+  setBrief(threadId: string, text: string): void {
+    const st = this.threads.get(threadId);
+    if (!st || st.rt.deleted) return;
+    const clean = text.trim().slice(0, 600);
+    if (!clean || clean === st.rec.brief?.text) return;
+    st.rec.brief = { text: clean, at: this.isoNow() };
+    this.highlightsChanged(st);
+  }
+
+  private catchUpHighlights(st: ThreadState): void {
+    const state = (st.rec.highlights ??= emptyHighlights());
+    const log = this.store.log(st.rec.id);
+    if (state.seq >= log.lastSeq) return;
+    // A page at a time, so a long thread's first look doesn't hold
+    // thousands of events at once.
+    for (let from = state.seq + 1; from <= log.lastSeq; from += 500) {
+      observeHighlights(state, log.read(from, Math.min(log.lastSeq, from + 499)), { cwd: st.rec.cwd });
+    }
+    this.markDirty(st);
+  }
+
+  private highlightsChanged(st: ThreadState): void {
+    // markDirty sends the summary, whose new highlightsAt tells clients
+    // to fetch again.
+    st.rec.highlightsAt = this.isoNow();
+    this.markDirty(st);
   }
 
   // Runs the folder's turn.end hooks for a turn that just completed: each

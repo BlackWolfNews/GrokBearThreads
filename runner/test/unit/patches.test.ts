@@ -25,7 +25,7 @@ test('a folder with convex/ gets the dashboard panel for its deployment', () => 
   assert.equal(panels.length, 1);
   assert.deepEqual(checkPanel(panels[0] as never), []);
   assert.deepEqual(panels[0], {
-    id: 'convex.dashboard', title: 'Convex', kind: 'url', patch: 'convex',
+    id: 'convex.dashboard', title: 'Convex', kind: 'url', icon: 'cylinder.split.1x2', patch: 'convex',
     url: 'https://dashboard.convex.dev/d/happy-otter-123', note: 'happy-otter-123 (dev)',
   });
 });
@@ -61,7 +61,7 @@ test('an Xcode project gets the Simulator panel; both patches can apply', () => 
   const home = tmpDir();
   const ios = project(home, 'dev/Walkies', { 'Walkies.xcodeproj': null });
   const panels = projectPanels(ios, home);
-  assert.deepEqual(panels, [{ id: 'xcode.simulator', title: 'Simulator', kind: 'image', patch: 'xcode', note: 'Walkies' }]);
+  assert.deepEqual(panels, [{ id: 'xcode.simulator', title: 'Simulator', kind: 'image', icon: 'iphone', patch: 'xcode', note: 'Walkies' }]);
   assert.deepEqual(checkPanel(panels[0] as never), []);
   const both = project(home, 'dev/Both', { 'App.xcworkspace': null, convex: null, 'package.json': '{}' });
   assert.deepEqual(projectPanels(both, home).map((p) => p.id), ['convex.dashboard', 'xcode.simulator']);
@@ -161,8 +161,8 @@ test('readPatchModule: the shapes it refuses', () => {
   assert.equal(read({ actions: {} }), 'actions should be an array.');
   assert.equal(read({ actions: [{ run: 'x' }] }), 'actions[0] needs a title.');
   assert.equal(read({ actions: [{ title: 'Both', run: 'x', prompt: 'y' }] }), 'actions[0] ("Both") should have run or prompt, not both.');
-  assert.equal(read({ panels: [{ title: 'No url' }] }), 'panels[0] ("No url") needs a url.');
-  assert.equal(read({ panels: [{ title: 'Bad', url: 'localhost:3000' }] }), 'panels[0] ("Bad") needs a url.');
+  assert.equal(read({ panels: [{ title: 'No url' }] }), 'panels[0] ("No url") needs a url, or an items function.');
+  assert.equal(read({ panels: [{ title: 'Bad', url: 'localhost:3000' }] }), 'panels[0] ("Bad") needs a url, or an items function.');
   assert.equal(read({ actions: [{ title: 'Same!', run: 'a' }, { title: 'same', run: 'b' }] }), 'Two entries would both be called x.same; give them different titles.');
   assert.equal(read({}), undefined);
   assert.equal(slug('Reseed dev DB'), 'reseed-dev-db');
@@ -287,4 +287,47 @@ test("a thread inside a project's folder keeps its own patches as they were", as
   const plain = await loadPatchSet(sub, home);
   const withProject = await loadPatchSet(sub, home, new Map(), [{ folder: app, projectId: 'p_1' }]);
   assert.deepEqual(withProject, plain);
+});
+
+test('a panel with an items function is a list panel, filled by renderListPanel in its folder', async () => {
+  const { renderListPanel } = await import('../../src/patches.ts');
+  const home = tmpDir();
+  const app = project(home, 'dev/app', { 'package.json': '{}' });
+  writePatch(path.join(app, '.threadbear/patches'), 'work.ts', `
+    export default {
+      panels: [
+        { title: "Worktrees", icon: "arrow.triangle.branch", items: async ({ cwd, sh }) => [
+          { title: "main", detail: cwd, tone: "done" },
+          (await sh("echo from-sh")).trim(),
+          { title: "", detail: "dropped: no title" },
+          { title: "odd", tone: "loud", extra: 1 },
+        ] },
+        { title: "Broken", items: () => { throw new Error("no git here") } },
+        { title: "Slow", items: () => new Promise(() => {}) },
+        { title: "Not a list", items: () => 42 },
+      ],
+    };
+  `);
+  const set = await loadPatchSet(app, home);
+  const [list, broken, slow, notList] = set.panels;
+  assert.deepEqual(list, { id: 'work.worktrees', title: 'Worktrees', kind: 'list', icon: 'arrow.triangle.branch', patch: 'work' });
+  assert.deepEqual(checkPanel(list as never), []);
+  const commands: { command: string; cwd: string }[] = [];
+  const ctx = {
+    cwd: app,
+    threadId: 't1',
+    timeoutMs: 10_000,
+    run: async (command: string, cwd: string) => {
+      commands.push({ command, cwd });
+      return runCommand(command, { cwd, env: process.env });
+    },
+  };
+  assert.deepEqual(await renderListPanel(list!, set, ctx), {
+    items: [{ title: 'main', detail: app, tone: 'done' }, { title: 'from-sh' }, { title: 'odd' }],
+  });
+  assert.deepEqual(commands, [{ command: 'echo from-sh', cwd: app }]);
+  assert.deepEqual(await renderListPanel(broken!, set, ctx), { note: "Couldn't fill this panel: no git here" });
+  assert.match((await renderListPanel(slow!, set, { ...ctx, timeoutMs: 50 })).note ?? '', /took over/);
+  assert.deepEqual(await renderListPanel(notList!, set, ctx), { note: "The panel's items function didn't return a list." });
+  assert.equal(readPatchModule('x', 'project', '/x.ts', { panels: [{ title: 'Both', url: 'https://a.dev', items: () => [] }] }).info.error, 'panels[0] ("Both") should have url or items, not both.');
 });

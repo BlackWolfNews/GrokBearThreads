@@ -77,6 +77,8 @@ const HELP = `tb: talk to the Threadbare runner
   tb accounts <account> [--json]  that account's models and its default
   tb pools [--json]               the pools, their logins and room (* new threads start on it)
   tb actions <threadId> [--json]  the thread's actions, panels and patches (from its folder)
+  tb highlights <threadId> [--json]  what the thread made, shared and pinned, and the librarian's brief
+  tb panel <threadId> <panelId> [--json]  draws an image panel or fills a list panel now
   tb run <threadId> <actionId>    run one: a command's output is printed and goes into the thread
   tb schedule "text" (--at WHEN | --cron "0 9 * * 1-5") [--tz ZONE] [--title T]
               [--thread ID | --cwd DIR [--account ID] [--model M] [--effort L] [--ask]]
@@ -375,6 +377,35 @@ async function run(client: RunnerClient, cmd: string, args: string[], f: Flags):
       await client.call('threads.update', { threadId: id, archived: cmd === 'archive' });
       return 0;
     }
+    case 'highlights': {
+      const id = await resolveId(client, args[0]);
+      const h = await client.call<{ highlights: { id: string; kind: string; title: string; how: string; note?: string; url?: string; path?: string; branch?: string; pushed?: true }[]; edited: string[]; brief?: { text: string } }>('threads.highlights', { threadId: id });
+      if (f.json) {
+        console.log(JSON.stringify(h, null, 2));
+        return 0;
+      }
+      if (h.brief) console.log(`${h.brief.text}\n`);
+      if (!h.highlights.length) console.log('Nothing found or pinned yet.');
+      for (const x of h.highlights) {
+        const where = x.url ?? (x.path ? tildePath(x.path) : x.branch ? `${x.branch}${x.pushed ? ', pushed' : ''}` : '');
+        console.log(`  ${x.how.padEnd(10)} ${x.kind.padEnd(7)} ${x.title}${where && where !== x.title ? `  ${where}` : ''}${x.note ? `\n             ${x.note}` : ''}`);
+      }
+      if (h.edited.length) console.log(`\n${h.edited.length} ${h.edited.length === 1 ? 'file' : 'files'} edited`);
+      return 0;
+    }
+    case 'panel': {
+      const id = await resolveId(client, args[0]);
+      if (!args[1]) throw new Error('Which panel? tb actions <threadId> lists them.');
+      const r = await client.call<{ image?: { path: string }; items?: { title: string; detail?: string; tone?: string }[]; note?: string }>('panels.render', { threadId: id, panelId: args[1] });
+      if (f.json) {
+        console.log(JSON.stringify(r, null, 2));
+        return 0;
+      }
+      if (r.note) console.log(r.note);
+      if (r.image) console.log(r.image.path);
+      for (const item of r.items ?? []) console.log(`  ${item.tone === 'done' ? '✓' : item.tone === 'failed' ? '✗' : item.tone === 'attention' ? '!' : '·'} ${item.title}${item.detail ? `  ${item.detail}` : ''}`);
+      return 0;
+    }
     case 'actions': {
       const id = await resolveId(client, args[0]);
       const thread = (await client.call<{ threads: ThreadSummary[] }>('threads.list', { include: ['inbox', 'snoozed', 'archived'] })).threads.find((x) => x.id === id);
@@ -397,7 +428,7 @@ async function run(client: RunnerClient, cmd: string, args: string[], f: Flags):
       }
       if (panels.length) {
         console.log('Panels:');
-        for (const p of panels) console.log(`  ${p.id.padEnd(32)} ${p.title}${p.url ? `  ${p.url}` : '  (image)'}${p.note ? `  ${p.note}` : ''}`);
+        for (const p of panels) console.log(`  ${p.id.padEnd(32)} ${p.title}${p.url ? `  ${p.url}` : `  (${p.kind})`}${p.note ? `  ${p.note}` : ''}`);
       }
       if (hooks.length) {
         console.log('Hooks:');

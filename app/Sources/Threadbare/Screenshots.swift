@@ -348,6 +348,45 @@ enum ScreenshotRunner {
                 }
             }
         }
+        // 17. The pane on the right: a thread's Highlights (a pin, files,
+        // links, commits and the edited files), the pinned mockup previewed
+        // in the pane, a Markdown file in Quick Look, and a list panel.
+        if wanted("17") {
+            app.sidebarMode = .inbox
+            let thread = "demo_landing_pages"
+            await open(app, thread)
+            app.choosePanel(PaneSection.highlightsId, in: thread)
+            await waitUntil(5) { app.highlights[thread] != nil }
+            try? await Task.sleep(for: .milliseconds(400))
+            await capture(window, dir.appendingPathComponent("17a-highlights.png"))
+            if let summary = app.threads[thread], let fetched = app.highlights[thread] {
+                if let pin = fetched.highlights.first(where: \.isPinned) {
+                    app.open(pin, in: summary, external: false)
+                    // The web view loads the file after the pane appears.
+                    try? await Task.sleep(for: .milliseconds(1500))
+                    await capture(window, dir.appendingPathComponent("17b-preview-mockup.png"))
+                }
+                if let doc = fetched.highlights.first(where: { $0.path?.hasSuffix(".md") == true }) {
+                    app.open(doc, in: summary, external: false)
+                    try? await Task.sleep(for: .milliseconds(1500))
+                    await capture(window, dir.appendingPathComponent("17c-preview-markdown.png"))
+                }
+                app.closePreview(in: thread)
+                if let list = summary.panels.first(where: { $0.kind == .list }) {
+                    app.choosePanel(list.id, in: thread)
+                    try? await Task.sleep(for: .milliseconds(1000))
+                    await capture(window, dir.appendingPathComponent("17d-list-panel.png"))
+                }
+                app.choosePanel(PaneSection.highlightsId, in: thread)
+            }
+            // 17e. A thread whose last turn asked Mike for things: they
+            // lead its Highlights, with the tick boxes the card has.
+            await open(app, "demo_openrouter_key")
+            app.choosePanel(PaneSection.highlightsId, in: "demo_openrouter_key")
+            await waitUntil(5) { app.highlights["demo_openrouter_key"] != nil }
+            try? await Task.sleep(for: .milliseconds(400))
+            await capture(window, dir.appendingPathComponent("17e-needs-you.png"))
+        }
         // 11. A runner restart: the quiet banner while it waits for threads
         // to finish, the reconnecting line while the runner is down, and
         // the thread it carried on, with the runner's message as a centred

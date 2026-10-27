@@ -492,6 +492,16 @@ export class ThreadRouter implements ThreadControl {
     return e ? e.call('reviews.create', {threadId, ...input}) : this.runner.createReview(threadId, input);
   }
 
+  // Only a thread's own agent pins, and its CLI is a child of the runner
+  // that has the thread, so these never have to go elsewhere.
+  pin(threadId: string, target: Parameters<Runner['pin']>[1]): ReturnType<Runner['pin']> {
+    return this.runner.pin(threadId, target);
+  }
+
+  unpin(threadId: string, highlightId: string): ReturnType<Runner['unpin']> {
+    return this.runner.unpin(threadId, highlightId);
+  }
+
   async update(upd: Parameters<Runner['update']>[0]): Promise<ReturnType<Runner['update']>> {
     const e = this.away(upd.threadId);
     return e ? e.call('threads.update', { ...upd }) : this.runner.update(upd);

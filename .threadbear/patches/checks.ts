@@ -17,6 +17,34 @@ export default {
     { title: "Runner status", run: "runner/bin/tb status" },
     { title: "Releases", run: "runner/scripts/deploy-runner.sh --list" },
   ],
+  panels: [
+    // Several threads work on this repo at once, each in its own worktree:
+    // which ones have work that isn't on main yet, and which are dirty.
+    {
+      title: "Worktrees",
+      icon: "arrow.triangle.branch",
+      items: async ({ sh }) => {
+        const out = await sh(`git worktree list --porcelain | awk '/^worktree /{print $2}' | while read -r dir; do
+          [ -d "$dir" ] || continue
+          branch=$(git -C "$dir" branch --show-current); [ -n "$branch" ] || branch="detached"
+          ahead=$(git -C "$dir" rev-list --count main..HEAD 2>/dev/null || echo 0)
+          dirty=$(git -C "$dir" status --porcelain 2>/dev/null | wc -l | tr -d ' ')
+          printf '%s\t%s\t%s\t%s\n' "$dir" "$branch" "$ahead" "$dirty"
+        done`);
+        return out.trim().split("\n").filter(Boolean).map((line) => {
+          const [dir, branch, ahead, dirty] = line.split("\t");
+          const bits = [branch, Number(ahead) ? `${ahead} ahead of main` : "nothing ahead of main"];
+          if (Number(dirty)) bits.push(`${dirty} uncommitted`);
+          return {
+            title: dir.split("/").slice(-2).join("/"),
+            detail: bits.join(" · "),
+            icon: "folder",
+            tone: Number(dirty) ? "attention" : Number(ahead) ? undefined : "done",
+          };
+        });
+      },
+    },
+  ],
   hooks: [
     // After a turn that touched the runner's TypeScript: a few seconds, and
     // the agent hears about a type error before it moves on.

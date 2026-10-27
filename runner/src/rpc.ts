@@ -45,6 +45,8 @@ const THREAD_METHODS = new Set([
   'threads.events',
   'threads.subscribe',
   'threads.markSeen',
+  'threads.highlights',
+  'threads.removeHighlight',
   'threads.tickAsk',
   'approvals.respond',
   'panels.render',
@@ -408,6 +410,10 @@ export class RpcServer {
         return {};
       case 'threads.markSeen':
         return r.markSeen(reqString(p, 'threadId'), reqNumber(p, 'seq'));
+      case 'threads.highlights':
+        return r.highlights(reqString(p, 'threadId'));
+      case 'threads.removeHighlight':
+        return r.removeHighlight(reqString(p, 'threadId'), reqString(p, 'highlightId'));
       case 'threads.tickAsk':
         if (typeof p.ticked !== 'boolean') throw bad('ticked must be a boolean');
         return r.tickAsk(reqString(p, 'threadId'), reqNumber(p, 'asksSeq'), reqNumber(p, 'index'), p.ticked);

@@ -69,7 +69,7 @@ struct ThreadbareApp: App {
                 // folder has any (PanelsView).
                 Button(app.panelsShown ? "Hide Panels" : "Show Panels") { app.togglePanels() }
                     .keyboardShortcut("p", modifiers: [.command, .option])
-                    .disabled(app.selectedThread.map { $0.panels.isEmpty && $0.patches.isEmpty } ?? true)
+                    .disabled(app.selectedThread == nil || app.openProjectId != nil)
             }
             // Back and forward through the threads and views, as Safari
             // and Finder have them. The mouse's side buttons do the same

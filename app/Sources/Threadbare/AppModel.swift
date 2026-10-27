@@ -60,7 +60,10 @@ final class AppModel {
         didSet { if subagentSelection != oldValue { noteNavigation() } }
     }
     var sidebarMode: SidebarMode = .inbox {
-        didSet { if sidebarMode != oldValue { noteNavigation() } }
+        didSet {
+            if sidebarMode != oldValue { noteNavigation() }
+            if sidebarMode != .projects { showsProjectsHome = false }
+        }
     }
     /// Back and forward (⌘[ and ⌘], or the mouse's side buttons).
     var history = NavigationHistory<NavigationPlace>()
@@ -147,6 +150,12 @@ final class AppModel {
     var openProjectId: String? {
         didSet { if openProjectId != oldValue { noteNavigation() } }
     }
+    /// The Projects page (a card per project) in the detail area: what
+    /// clicking Projects in the activity bar opens. Picking a thread or a
+    /// project, or leaving the Projects view, closes it.
+    var showsProjectsHome = false {
+        didSet { if showsProjectsHome != oldValue { noteNavigation() } }
+    }
     /// The runner's settings for the Settings window: nil until
     /// `settings.get` answers, then replaced whole by `settings.updated`.
     var runnerSettings: RunnerSettings?
@@ -164,8 +173,8 @@ final class AppModel {
     /// run can show the hover buttons without moving the mouse.
     var hoverOverride: String?
     /// The pane beside the transcript (PanelsView). Shown for any thread
-    /// with panels unless Mike has hidden it; which panel is showing is
-    /// remembered per thread for the session.
+    /// unless Mike has hidden it; which section is showing (Highlights, a
+    /// panel, Patches) is remembered per thread for the session.
     var panelsShown = UserDefaults.standard.object(forKey: AppModel.panelsShownKey) as? Bool ?? true {
         didSet { UserDefaults.standard.set(panelsShown, forKey: Self.panelsShownKey) }
     }
@@ -180,7 +189,21 @@ final class AppModel {
         let saved = UserDefaults.standard.double(forKey: AppModel.panelWidthKey)
         return saved > 0 ? CGFloat(saved) : CGFloat(PanelChoice.defaultWidth)
     }()
+    /// A thread's chosen pane section, as `PaneSection.id`.
     var panelChoice: [String: String] = [:]
+    /// Each thread's highlights once `threads.highlights` has answered
+    /// (PaneModel.swift). Only threads Mike has opened this session.
+    var highlights: [String: ThreadHighlights] = [:]
+    /// The runner answered `threads.highlights` with -32601: the section
+    /// says so, and nothing asks again until the next connection.
+    var highlightsUnsupported = false
+    /// A file or page open in the pane in place of its section, per thread.
+    var panePreview: [String: PanePreview] = [:]
+    @ObservationIgnored var highlightFetches: [String: Task<Void, Never>] = [:]
+    /// Bumped by each request for a thread's highlights, so a change that
+    /// lands while a fetch is out gets fetched again after it.
+    @ObservationIgnored var highlightWanted: [String: Int] = [:]
+    @ObservationIgnored var highlightAutoShow = HighlightAutoShow()
     /// Actions whose command is running, as "<threadId>/<actionId>", so
     /// the chip shows it and a second click doesn't start another.
     var runningActions: Set<String> = []
@@ -362,6 +385,8 @@ final class AppModel {
                 pools = hello.pools ?? []
                 poolsSupported = hello.pools != nil
                 if hello.clis.isEmpty { loadClis() }
+                // Maybe a newer runner than last time.
+                highlightsUnsupported = false
                 lastDownReason = nil
                 AppLog.write("connection", "connected to runner \(hello.runnerVersion) at \(endpoint.url.absoluteString)")
                 // Whatever restart there was is over; a new pending one
@@ -554,6 +579,7 @@ final class AppModel {
     func select(_ threadId: String?) {
         selection = threadId
         openProjectId = nil
+        showsProjectsHome = false
         stopShowingSubagent()
         guard let threadId else { return }
         let session = session(for: threadId)
@@ -683,6 +709,7 @@ final class AppModel {
     func newThread() {
         selection = nil
         openProjectId = nil
+        showsProjectsHome = false
         stopShowingSubagent()
         sidebarMode = .inbox
         focusComposer += 1
@@ -1091,17 +1118,36 @@ final class AppModel {
 
     // MARK: Panels
 
-    /// Whether the pane is beside this thread's transcript: when the folder
-    /// gives it panels or patches (the Patches tab shows those).
-    func showsPanels(for thread: ThreadSummary) -> Bool { panelsShown && (!thread.panels.isEmpty || !thread.patches.isEmpty) }
+    /// Whether the pane is beside this thread's transcript. Every thread
+    /// has Highlights, so it's just whether Mike has hidden it.
+    func showsPanels(for thread: ThreadSummary) -> Bool { panelsShown }
 
     func activePanel(for thread: ThreadSummary) -> Panel? {
         PanelChoice.active(in: thread.panels, remembered: panelChoice[thread.id])
     }
 
+    /// The pane's section for this thread: the one chosen while it's still
+    /// there, else Highlights.
+    func paneSection(for thread: ThreadSummary) -> PaneSection {
+        PanelChoice.section(panels: thread.panels, hasPatches: !thread.patches.isEmpty, remembered: panelChoice[thread.id])
+    }
+
+    /// Shows a section of the pane (the automation's `panel`), closing any
+    /// preview over another one.
     func choosePanel(_ panelId: String, in threadId: String) {
+        if panePreview[threadId]?.from.id != panelId { panePreview[threadId] = nil }
         panelChoice[threadId] = panelId
         panelsShown = true
+    }
+
+    /// A rail button: the section that's showing collapses the pane, any
+    /// other opens it there (PanelChoice.click).
+    func clickRail(_ section: PaneSection, in thread: ThreadSummary) {
+        let showing = paneSection(for: thread)
+        let next = PanelChoice.click(section, showing: showing, shown: panelsShown)
+        if next.section != showing { panePreview[thread.id] = nil }
+        panelChoice[thread.id] = next.section.id
+        panelsShown = next.shown
     }
 
     func togglePanels() { panelsShown.toggle() }
@@ -1136,15 +1182,16 @@ final class AppModel {
         }
     }
 
-    /// An image panel's latest picture, or nil when the runner can't be
-    /// asked (not connected, an old runner).
-    func renderPanel(threadId: String, panelId: String) async -> PanelRender? {
+    /// An image panel's latest picture or a list panel's rows, or nil when
+    /// the runner can't be asked (not connected). `failure` is the note
+    /// when it couldn't answer.
+    func renderPanel(threadId: String, panelId: String, failure: String) async -> PanelRender? {
         guard let client else { return nil }
         do {
             return try await client.renderPanel(threadId: threadId, panelId: panelId)
         } catch {
             AppLog.write("panels", "render \(panelId) failed: \(error)")
-            return PanelRender(note: "Couldn't get a picture from the runner.")
+            return PanelRender(note: failure)
         }
     }
 }

@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- threadbear://pair?url=…&token=… from the QR code tb phone-token shows. -->
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>com.mikecann.threadbear.pair</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>threadbear</string>
+			</array>
+		</dict>
+	</array>
+	<!-- Which APNs gateway this build's tokens belong to (AppModel.register). -->
+	<key>ThreadbearAPSEnvironment</key>
+	<string>$(THREADBEAR_APS_ENVIRONMENT)</string>
+</dict>
+</plist>

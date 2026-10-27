@@ -2,7 +2,7 @@ import Foundation
 
 /// What a sidebar row shows at the right of its title line: the relative
 /// time, or a word for a state worth seeing at a glance.
-public enum ThreadRowStatus: Sendable, Equatable {
+public enum ThreadRowStatus: Sendable, Hashable {
     /// Nothing to say: the row shows when it was last active.
     case time
     /// A turn is running (spinner and "Working" in the accent colour).

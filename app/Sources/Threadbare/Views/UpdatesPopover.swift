@@ -4,8 +4,10 @@ import ThreadbareCore
 
 /// The rail's updates icon: there only while the app or the runner has an
 /// update on its way (or one failed), so most of the time the rail looks as
-/// it always did. A small accent dot when it needs Mike: a failed build, or
-/// a launch.mjs only he can install. Everything else happens by itself.
+/// it always did. A small accent dot only when it needs Mike: a launch.mjs
+/// only he can install. Anything else (building, ready, a failed build that
+/// retries once main is fixed) gets a grey dot, so he can see something's
+/// going on without it asking him to act.
 struct UpdatesActivityButton: View {
     @Environment(AppModel.self) private var app
     private var updater: AppUpdater { AppUpdater.shared }
@@ -15,7 +17,8 @@ struct UpdatesActivityButton: View {
         let side = UpdatesPopover.appSide(updater)
         if UpdatesText.shown(app: side, runner: app.runnerUpdates) {
             ActivityButton(symbol: "arrow.down.circle", title: UpdatesText.tooltip(app: side, runner: app.runnerUpdates),
-                           dot: UpdatesText.needsYou(app: side, runner: app.runnerUpdates), active: app.updatesPopoverShown) {
+                           dot: UpdatesText.needsYou(app: side, runner: app.runnerUpdates), quietDot: true,
+                           active: app.updatesPopoverShown) {
                 app.updatesPopoverShown.toggle()
             }
             .popover(isPresented: $app.updatesPopoverShown, arrowEdge: .trailing) {

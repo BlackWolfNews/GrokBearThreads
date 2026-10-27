@@ -258,12 +258,13 @@ export function checkSummary(t: Obj): string[] {
     const ok = w && isStr(w.branch) && isStr(w.mainCheckout) && isStr(w.path) && Object.keys(w).every((k) => ['branch', 'mainCheckout', 'path'].includes(k));
     if (!ok) problems.push('worktree');
   }
+  if (t.highlightsAt !== undefined && !isIso(t.highlightsAt)) problems.push('highlightsAt');
   const allowed = new Set([
     'id', 'title', 'cwd', 'accountId', 'provider', 'model', 'permissionMode', 'status', 'live', 'needsYou', 'createdAt', 'updatedAt',
     'lastActivityAt', 'snoozedUntil', 'snoozedUntilRestart', 'archivedAt', 'preview', 'lastSeq', 'lastSeenSeq', 'nativeSessionId', 'contextTokens', 'costUsd',
     'poolId', 'waitingForRoom',
     'effort', 'modelInUse', 'effortInUse', 'contextWindow', 'panels', 'actions', 'hooks', 'patches', 'background', 'subagents', 'projects', 'worktree',
-    'needs', 'asks', 'asksSeq',
+    'needs', 'asks', 'asksSeq', 'highlightsAt',
   ]);
   for (const k of Object.keys(t)) if (!allowed.has(k)) problems.push(`unexpected field ${k}`);
   return problems;
@@ -351,10 +352,10 @@ export function checkCliStatus(c: Obj): string[] {
 export function checkPanel(p: Obj): string[] {
   const problems: string[] = [];
   for (const k of ['id', 'title', 'patch']) if (!isStr(p[k])) problems.push(k);
-  if (p.kind !== 'url' && p.kind !== 'image') problems.push('kind');
+  if (p.kind !== 'url' && p.kind !== 'image' && p.kind !== 'list') problems.push('kind');
   if (p.kind === 'url' && !isStr(p.url)) problems.push('url (required for kind url)');
-  for (const k of ['url', 'note', 'projectId']) if (p[k] !== undefined && !isStr(p[k])) problems.push(k);
-  const allowed = new Set(['id', 'title', 'kind', 'url', 'patch', 'projectId', 'note']);
+  for (const k of ['url', 'note', 'projectId', 'icon']) if (p[k] !== undefined && !isStr(p[k])) problems.push(k);
+  const allowed = new Set(['id', 'title', 'kind', 'url', 'icon', 'patch', 'projectId', 'note']);
   for (const k of Object.keys(p)) if (!allowed.has(k)) problems.push(`unexpected field ${k}`);
   return problems;
 }

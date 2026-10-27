@@ -49,12 +49,20 @@ struct DetailView: View {
         // A project's page takes the place of the thread (and its panels)
         // until a thread is picked again.
         let project = app.openProject
+        // The Projects page of cards, from the activity bar's Projects.
+        let projectsHome = project == nil && app.showsProjectsHome
         Group {
         if let project {
             VStack(spacing: 0) {
                 ConnectionBanner()
                 ErrorBanner()
                 ProjectPage(project: project)
+            }
+        } else if projectsHome {
+            VStack(spacing: 0) {
+                ConnectionBanner()
+                ErrorBanner()
+                ProjectsHome()
             }
         } else {
         HStack(spacing: 0) {
@@ -110,12 +118,16 @@ struct DetailView: View {
             }
             }
             .frame(maxWidth: .infinity)
-            // The panels pane (PanelsView), when the thread's folder has
-            // any and Mike hasn't hidden it.
+            // The pane (PanelsView) unless Mike has hidden it, and the rail
+            // of its sections at the far right whenever a thread is open,
+            // like the activity bar on the left.
             if let paneThread {
-                PanelResizeHandle(columnWidth: widthStep)
+                PanelResizeHandle(columnWidth: widthStep - ActivityBar.width)
                 PanelPane(thread: paneThread)
-                    .frame(width: CGFloat(PanelChoice.clampedWidth(Double(app.panelWidth), paneColumnWidth: Double(widthStep))))
+                    .frame(width: CGFloat(PanelChoice.clampedWidth(Double(app.panelWidth), paneColumnWidth: Double(widthStep - ActivityBar.width))))
+            }
+            if let thread {
+                PanelRail(thread: thread)
             }
         }
         }
@@ -123,7 +135,7 @@ struct DetailView: View {
         .onGeometryChange(for: CGFloat.self) { ($0.size.width / 20).rounded(.down) * 20 } action: { widthStep = $0 }
         // The window's title (Window menu, Mission Control); the toolbar
         // shows the header below instead.
-        .navigationTitle(project?.title ?? thread.map { $0.title.isEmpty ? "Untitled" : $0.title } ?? "New thread")
+        .navigationTitle(project?.title ?? (projectsHome ? "Projects" : nil) ?? thread.map { $0.title.isEmpty ? "Untitled" : $0.title } ?? "New thread")
         .toolbar(removing: .title)
         .toolbar {
             // Both items are always there, the header empty and the menu
@@ -135,7 +147,9 @@ struct DetailView: View {
                     if let project {
                         ProjectHeaderTitle(project: project)
                     } else {
-                        HeaderTitle(thread: thread)
+                        // Nothing over the Projects page: the selected
+                        // thread isn't what's showing.
+                        HeaderTitle(thread: projectsHome ? nil : thread)
                     }
                 }
                 .frame(maxWidth: max(120, widthStep - 120), alignment: .leading)
@@ -144,10 +158,10 @@ struct DetailView: View {
             // With the system title gone nothing pushes the menu to the
             // trailing edge; it sat right after the header.
             ToolbarSpacer(.flexible)
-            // Shows or hides the panels pane. Always built, like the menu
-            // beside it, and out of sight for a thread with no panels.
+            // Shows or hides the pane. Always built, like the menu beside
+            // it, and out of sight with no thread open.
             ToolbarItem(placement: .primaryAction) {
-                let hasPanels = project == nil && (thread.map { !$0.panels.isEmpty || !$0.patches.isEmpty } ?? false)
+                let hasPanels = project == nil && !projectsHome && thread != nil
                 Button {
                     app.togglePanels()
                 } label: {
@@ -160,11 +174,11 @@ struct DetailView: View {
             }
             .sharedBackgroundVisibility(.hidden)
             ToolbarItem(placement: .primaryAction) {
-                let hasMenu = thread != nil || project != nil
+                let hasMenu = (thread != nil && !projectsHome) || project != nil
                 Menu {
                     if let project {
                         ProjectMenu(project: project)
-                    } else if let thread {
+                    } else if let thread, !projectsHome {
                         ThreadMenu(thread: thread)
                         Divider()
                         Button("Copy transcript as Markdown") { session?.copyTranscript() }
