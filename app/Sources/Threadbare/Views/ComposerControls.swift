@@ -340,9 +340,9 @@ private struct SendButton: View {
 
     var body: some View {
         // Stop only while there's nothing typed: a follow-up typed during a
-        // turn is sent (the runner queues it), so the one round button
-        // never stops a turn Mike meant to add to. ⌘. and the Thread menu
-        // still stop it.
+        // turn is sent into that turn (the runner steers the CLI), so the
+        // one round button never stops a turn Mike meant to add to. ⌘. and
+        // the Thread menu still stop it.
         if running && !canSend {
             Button(action: onStop) {
                 Image(systemName: "stop.fill").font(.system(size: 9, weight: .bold))
@@ -357,7 +357,7 @@ private struct SendButton: View {
             }
             .buttonStyle(CircleButtonStyle(filled: canSend))
             .disabled(!canSend)
-            .help(running ? "Send (goes after this turn)" : "Send (Return)")
+            .help(running ? "Send (into this turn)" : "Send (Return)")
             .accessibilityLabel("Send")
         }
     }

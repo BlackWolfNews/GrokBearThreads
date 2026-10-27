@@ -131,22 +131,169 @@ test('idle release after 30 minutes, then the next send resumes the session', as
   assert.equal(h.runner.get(thread.id).costUsd, 0.005);
 });
 
-test('a send during a turn is queued and runs when the turn ends', () => {
+test('a send during a turn goes into it: shown at once, handed to the CLI, answered by that turn', () => {
+  const h = makeHarness();
+  const { thread, turnId } = create(h);
+  const s = h.adapter.last;
+  s.init();
+  const { turnId: got } = h.runner.send(thread.id, 'second');
+  assert.equal(got, turnId, 'the reply names the running turn');
+  assert.equal(s.sent.length, 2, 'went to the CLI straight away');
+  assert.equal(s.sent[1].text, 'second');
+  assert.notEqual(s.sent[1].id, turnId, 'with an id of its own, so the CLI can say when it was answered');
+  const evs = h.events(thread.id);
+  const um = evs.filter((e) => e.type === 'user.message');
+  assert.equal(um.length, 2);
+  assert.equal(um[1].turnId, turnId, 'shown in the running turn');
+  assert.ok(evs.indexOf(um[1]) > evs.findIndex((e) => e.type === 'turn.started'));
+  assert.equal(h.runner.get(thread.id).status, 'running');
+  // The CLI folded it in: one result answers both.
+  s.result('completed', 0.01, undefined, { answered: [turnId, s.sent[1].id!], answers: s.sent[1].id });
+  const done = h.events(thread.id).filter((e) => e.type === 'turn.completed');
+  assert.equal(done.length, 1);
+  assert.equal(done[0].turnId, turnId);
+  assert.equal(h.runner.get(thread.id).status, 'idle');
+  assert.equal(h.runner.hasIdleTimer(thread.id), true);
+  assert.deepEqual(checkSequence(h.events(thread.id)), []);
+});
+
+test('a message sent during a turn that the CLI runs next keeps the turn open until it is answered', () => {
+  const h = makeHarness();
+  const { thread, turnId } = create(h);
+  const s = h.adapter.last;
+  s.init();
+  h.runner.send(thread.id, 'second');
+  const second = s.sent[1].id!;
+  s.text('m1:0', 'First answer.');
+  // The reply was already finishing, so the CLI answers the first message
+  // alone and runs the second straight after.
+  s.result('completed', 0.01, undefined, { answered: [turnId], answers: turnId, queuedTurns: 1 });
+  assert.equal(h.events(thread.id).filter((e) => e.type === 'turn.completed').length, 0, 'the turn goes on');
+  assert.equal(h.runner.get(thread.id).status, 'running');
+  assert.equal(h.runner.hasIdleTimer(thread.id), false);
+  s.init();
+  s.text('m2:0', 'Second answer.');
+  s.result('completed', 0.03, undefined, { answered: [second], answers: second, queuedTurns: 0 });
+  const evs = h.events(thread.id).filter((e) => !e.type.endsWith('.delta'));
+  assert.deepEqual(
+    evs.map((e) => e.type),
+    ['user.message', 'turn.started', 'user.message', 'assistant.text', 'assistant.text', 'turn.completed'],
+  );
+  assert.ok(evs.every((e) => e.turnId === turnId), 'one thread turn for both CLI turns');
+  assert.equal(evs.at(-1).costUsd, 0.03, 'the cost of both');
+  assert.equal(h.runner.get(thread.id).status, 'idle');
+});
+
+test('a failure part way through a turn with a message still to answer is shown, and the turn goes on', () => {
+  const h = makeHarness();
+  const { thread, turnId } = create(h);
+  const s = h.adapter.last;
+  s.init();
+  h.runner.send(thread.id, 'second');
+  const second = s.sent[1].id!;
+  s.result('failed', 0.01, 'API overloaded', { answered: [turnId], answers: turnId, queuedTurns: 1 });
+  let evs = h.events(thread.id);
+  assert.equal(evs.at(-1).type, 'error');
+  assert.equal(evs.at(-1).message, 'API overloaded');
+  assert.equal(h.runner.get(thread.id).status, 'running');
+  s.init();
+  s.result('completed', 0.02, undefined, { answered: [second], answers: second, queuedTurns: 0 });
+  evs = h.events(thread.id);
+  assert.equal(evs.at(-1).type, 'turn.completed');
+  assert.equal(evs.at(-1).outcome, 'completed');
+  assert.equal(h.runner.get(thread.id).status, 'idle');
+});
+
+test('Stop cancels a message sent during the turn; it stays in the transcript', async () => {
+  const h = makeHarness();
+  const { thread, turnId } = create(h);
+  const s = h.adapter.last;
+  s.init();
+  h.runner.send(thread.id, 'second');
+  h.runner.interrupt(thread.id);
+  await tick();
+  assert.equal(s.interrupts, 1);
+  // The CLI cancelled the queued message along with the turn.
+  s.result('interrupted', 0.01, undefined, { answered: [turnId], answers: turnId, queuedTurns: 0 });
+  const evs = h.events(thread.id);
+  assert.equal(evs.at(-1).type, 'turn.completed');
+  assert.equal(evs.at(-1).outcome, 'interrupted');
+  assert.equal(evs.filter((e) => e.type === 'user.message').length, 2);
+  assert.equal(h.runner.get(thread.id).status, 'idle');
+  assert.equal(s.sent.length, 2, 'nothing sent again');
+  // Sent after Stop was pressed, before the CLI stopped: waits for the next turn.
+  h.runner.interrupt(thread.id);
+  assert.equal(h.runner.get(thread.id).status, 'idle');
+});
+
+test('a message sent after Stop, before the CLI has stopped, waits for the next turn', async () => {
   const h = makeHarness();
   const { thread } = create(h);
   const s = h.adapter.last;
   s.init();
-  const { turnId } = h.runner.send(thread.id, 'second');
-  assert.equal(s.sent.length, 1);
-  assert.equal(h.events(thread.id).filter((e) => e.type === 'user.message').length, 1);
-  s.result();
+  h.runner.interrupt(thread.id);
+  const { turnId: next } = h.runner.send(thread.id, 'try again');
+  assert.equal(s.sent.length, 1, 'not handed to a CLI that is about to cancel its queue');
+  s.result('interrupted');
   assert.equal(s.sent.length, 2);
-  assert.equal(s.sent[1].text, 'second');
+  assert.equal(s.sent[1].id, next);
+  assert.equal(h.events(thread.id).filter((e) => e.type === 'user.message' && e.turnId === next).length, 1);
+});
+
+test('the CLI dropping a message sent during the turn ends the turn with a note', () => {
+  const h = makeHarness();
+  const { thread, turnId } = create(h);
+  const s = h.adapter.last;
+  s.init();
+  h.runner.send(thread.id, 'second');
+  s.result('failed', 0.01, 'boom', { answered: [turnId], answers: turnId, queuedTurns: 0 });
   const evs = h.events(thread.id);
-  const um = evs.filter((e) => e.type === 'user.message');
-  assert.equal(um[1].turnId, turnId);
-  assert.equal(h.runner.hasIdleTimer(thread.id), false, 'no idle timer while the queued turn runs');
-  assert.equal(h.runner.get(thread.id).status, 'running');
+  assert.deepEqual(evs.slice(-3).map((e) => e.type), ['system.note', 'error', 'turn.completed']);
+  assert.match(evs.at(-3).text, /dropped/);
+  assert.equal(h.runner.get(thread.id).status, 'error');
+});
+
+test('a message sent while the last CLI is still leaving waits for the next turn', async () => {
+  const h = makeHarness();
+  h.adapter.slowExit = true;
+  const { thread } = create(h);
+  const s = h.adapter.last;
+  s.init();
+  s.result();
+  h.clock.advance(30 * MIN);
+  assert.equal(s.ended, true, 'released when idle');
+  const { turnId: first } = h.runner.send(thread.id, 'first');
+  const { turnId: second } = h.runner.send(thread.id, 'second');
+  assert.notEqual(second, first, 'no CLI to join, so it gets a turn of its own');
+  assert.equal(h.events(thread.id).filter((e) => e.type === 'user.message').length, 2, 'the first is shown; the second waits');
+  s.exit();
+  await tick();
+  const s2 = h.adapter.last;
+  assert.notEqual(s2, s);
+  assert.deepEqual(s2.sent.map((m) => m.id), [first]);
+  s2.init();
+  s2.result('completed', undefined, undefined, { answered: [first], answers: first });
+  assert.deepEqual(s2.sent.map((m) => m.id), [first, second]);
+  const um = h.events(thread.id).filter((e) => e.type === 'user.message');
+  assert.deepEqual(um.slice(1).map((e) => e.turnId), [first, second]);
+});
+
+test('a message sent during a turn with a folder change due waits for the next turn', async () => {
+  const h = makeHarness();
+  const { thread, turnId } = create(h);
+  const s = h.adapter.last;
+  s.init();
+  const dir = tmpDir();
+  h.runner.update({ threadId: thread.id, cwd: dir });
+  const { turnId: next } = h.runner.send(thread.id, 'in the new folder');
+  assert.notEqual(next, turnId);
+  assert.equal(s.sent.length, 1, 'meant for the new folder, not this CLI');
+  s.result('completed', undefined, undefined, { answered: [turnId], answers: turnId });
+  await tick();
+  const s2 = h.adapter.last;
+  assert.notEqual(s2, s);
+  assert.equal(s2.opts.cwd, dir);
+  assert.deepEqual(s2.sent.map((m) => m.id), [next]);
 });
 
 test('interrupt asks the CLI to stop and the turn ends as interrupted', async () => {
@@ -444,17 +591,39 @@ test('startup recovery: mid-turn threads stop, approvals expire, queued text is 
   assert.equal(t.live, false);
   assert.equal(t.needsYou, true);
   const evs = h2.runner.events(thread.id).events;
+  // The message went into the turn, so it's in the transcript already and
+  // there's nothing queued to report.
   const tail = evs.slice(-3);
-  assert.deepEqual(tail.map((e) => e.type), ['approval.resolved', 'turn.completed', 'system.note']);
-  assert.equal((tail[0] as any).approvalId, approvalId);
-  assert.equal((tail[0] as any).decision, 'expired');
-  assert.equal((tail[1] as any).turnId, turnId);
-  assert.equal((tail[1] as any).outcome, 'interrupted');
-  assert.match((tail[2] as any).text, /queued while waiting/);
+  assert.deepEqual(tail.map((e) => e.type), ['user.message', 'approval.resolved', 'turn.completed']);
+  assert.equal((tail[0] as any).text, 'queued while waiting');
+  assert.equal((tail[0] as any).turnId, turnId);
+  assert.equal((tail[1] as any).approvalId, approvalId);
+  assert.equal((tail[1] as any).decision, 'expired');
+  assert.equal((tail[2] as any).turnId, turnId);
+  assert.equal((tail[2] as any).outcome, 'interrupted');
   assert.deepEqual(checkSequence(evs), []);
   // Sending again resumes the session it had.
   h2.runner.send(thread.id, 'carry on');
   assert.equal(h2.adapter.last.opts.resume, true);
+});
+
+test('startup recovery: a message still waiting for its turn is kept as a note', () => {
+  const h = makeHarness();
+  const { thread, turnId } = create(h);
+  const s = h.adapter.last;
+  s.init();
+  // A folder change is due on the next turn, so the message waits for it
+  // rather than joining this one.
+  h.runner.update({ threadId: thread.id, cwd: tmpDir() });
+  h.runner.send(thread.id, 'queued while waiting');
+  assert.equal(s.sent.length, 1);
+  const h2 = h.restart();
+  const evs = h2.runner.events(thread.id).events;
+  const tail = evs.slice(-2);
+  assert.deepEqual(tail.map((e) => e.type), ['turn.completed', 'system.note']);
+  assert.equal((tail[0] as any).turnId, turnId);
+  assert.match((tail[1] as any).text, /queued while waiting/);
+  assert.deepEqual(checkSequence(evs), []);
 });
 
 test('stopping the runner mid-turn ends the turn as stopped, not failed', async () => {
@@ -554,24 +723,51 @@ test('a turn the CLI starts by itself gets turn events, a running status and nee
   assert.equal(t.status, 'running');
   assert.equal(h.runner.hasIdleTimer(thread.id), false, 'no idle release while it runs');
   s.text('m9:0', 'The background job finished.');
-  // A message sent now waits for that turn.
-  const { turnId: queued } = h.runner.send(thread.id, 'thanks');
-  assert.equal(s.sent.length, 1);
-  s.result('completed', 0, undefined);
-  const evs = h.events(thread.id).filter((e) => !e.type.endsWith('.delta'));
-  const started = evs.filter((e) => e.type === 'turn.started');
-  const auto = started[1];
-  assert.ok(auto.turnId && auto.turnId !== queued);
-  const autoEvents = evs.filter((e) => e.turnId === auto.turnId).map((e) => e.type);
-  assert.deepEqual(autoEvents, ['turn.started', 'system.note', 'assistant.text', 'turn.completed']);
-  assert.ok(!evs.some((e) => e.type === 'user.message' && e.turnId === auto.turnId), 'no user.message for it');
-  assert.deepEqual(checkSequence(h.events(thread.id)), []);
-  // The queued message then went to the CLI.
+  // A message sent now goes into that turn, like any running turn.
+  const { turnId: got } = h.runner.send(thread.id, 'thanks');
   assert.equal(s.sent.length, 2);
-  assert.equal(s.sent[1].id, queued);
-  s.result();
+  const msgId = s.sent[1].id!;
+  const started = h.events(thread.id).filter((e) => e.type === 'turn.started');
+  const auto = started[1];
+  assert.equal(got, auto.turnId);
+  // The CLI's own turn ended before it took the message; it answers it next.
+  s.result('completed', 0, undefined, { own: true, queuedTurns: 1 });
+  assert.equal(h.runner.get(thread.id).status, 'running', 'the turn waits for the answer');
+  s.init();
+  s.text('m10:0', 'You are welcome.');
+  s.result('completed', 0, undefined, { answered: [msgId], answers: msgId, queuedTurns: 0 });
+  const evs = h.events(thread.id).filter((e) => !e.type.endsWith('.delta'));
+  const autoEvents = evs.filter((e) => e.turnId === auto.turnId).map((e) => e.type);
+  assert.deepEqual(autoEvents, ['turn.started', 'system.note', 'assistant.text', 'user.message', 'assistant.text', 'turn.completed']);
+  assert.deepEqual(checkSequence(h.events(thread.id)), []);
   assert.equal(h.runner.get(thread.id).needsYou, true);
   assert.equal(h.runner.hasIdleTimer(thread.id), true);
+});
+
+test("a message sent while a turn is only a background subagent's approval waits for that turn", async () => {
+  const h = makeHarness();
+  const { thread } = create(h, { permissionMode: 'ask' });
+  const s = h.adapter.last;
+  s.init();
+  s.result();
+  h.runner.markSeen(thread.id, h.runner.get(thread.id).lastSeq);
+  // A background subagent asks for approval with no turn running: the
+  // runner opens a turn for the card, but the CLI isn't running one.
+  const ac = new AbortController();
+  const answer = s.sink.requestApproval({ name: 'Bash', title: 'npm test', input: {}, canAlwaysAllow: true, signal: ac.signal });
+  assert.equal(h.runner.get(thread.id).status, 'waiting');
+  const { turnId: next } = h.runner.send(thread.id, 'while you wait');
+  assert.equal(s.sent.length, 1, 'nothing to join; waits');
+  const approvalId = h.events(thread.id).find((e) => e.type === 'approval.requested').approvalId;
+  h.runner.respondApproval({ threadId: thread.id, approvalId, decision: 'allow' });
+  await answer;
+  assert.equal(s.sent.length, 1, 'the turn goes on until the CLI runs one and ends it');
+  s.out({ kind: 'cliTurn' });
+  s.result('completed', 0, undefined, { own: true });
+  // That turn ended; the waiting message starts its own.
+  assert.equal(s.sent.length, 2);
+  assert.equal(s.sent[1].id, next);
+  assert.deepEqual(checkSequence(h.events(thread.id)), []);
 });
 
 test("a CLI turn that starts while the thread's message waits in the CLI doesn't end that message's turn", () => {

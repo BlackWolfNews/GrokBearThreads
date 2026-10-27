@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import type { AgentAdapter, AgentSession, SessionSink, StartSessionOptions, UserInput, AdapterOutput } from '../../src/adapters/types.ts';
+import type { AgentAdapter, AgentSession, SessionSink, StartSessionOptions, UserInput, AdapterOutput, TurnResult } from '../../src/adapters/types.ts';
 import type { Account, EffortLevel, ModelChoice, PermissionMode } from '../../src/protocol.ts';
 import type { Config } from '../../src/config.ts';
 import { ensureHome } from '../../src/config.ts';
@@ -77,8 +77,10 @@ export class FakeSession implements AgentSession {
   delta(itemId: string, text: string): void {
     this.out({ kind: 'delta', delta: { type: 'assistant.text.delta', itemId, text } });
   }
-  result(outcome: 'completed' | 'interrupted' | 'failed' = 'completed', totalCostUsd?: number, error?: string): void {
-    this.out({ kind: 'result', result: { outcome, durationMs: 10, totalCostUsd, error } });
+  // `extra` plays the CLI's lifecycle frames: which messages the turn
+  // answered (`answered`, `answers`) or that it was the CLI's own (`own`).
+  result(outcome: 'completed' | 'interrupted' | 'failed' = 'completed', totalCostUsd?: number, error?: string, extra: Partial<TurnResult> = {}): void {
+    this.out({ kind: 'result', result: { outcome, durationMs: 10, totalCostUsd, error, ...extra } });
   }
 }
 

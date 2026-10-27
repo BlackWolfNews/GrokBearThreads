@@ -1,0 +1,79 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><link rel="stylesheet" href="mac.css">
+<!-- size: 1440x980 -->
+<style>
+  body { padding: 20px; background: var(--bg); }
+  .grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 22px; width: 1400px; }
+  .cell { display: flex; flex-direction: column; gap: 8px; }
+  .caption { font-size: 12px; color: var(--tertiary); line-height: 16px; margin-left: 2px; }
+  .card { font-size: 14px; }
+  .pots { display: flex; gap: 16px; margin-top: 8px; }
+  .pot { display: flex; flex-direction: column; align-items: center; gap: 4px; font-size: 12px; color: var(--secondary); width: 96px; text-align: center; }
+  .pot svg { width: 64px; height: 64px; }
+  .pot b { color: var(--text); font-weight: 500; font-size: 13px; }
+  .pot .r { color: var(--tertiary); }
+  .menu { background: #2b2b2f; border: 0.5px solid rgba(255,255,255,0.14); border-radius: 10px; padding: 6px; width: 260px; box-shadow: 0 10px 30px rgba(0,0,0,0.45); font-size: 13px; }
+  .menu div { padding: 6px 10px; border-radius: 6px; display: flex; }
+  .menu div span { margin-left: auto; color: var(--tertiary); }
+  .menu div.on { background: var(--accent); color: #fff; }
+  .menu div.on span { color: rgba(255,255,255,0.7); }
+  .menu .hd { color: var(--tertiary); font-size: 11px; padding: 4px 10px 2px; }
+  .gold { display: flex; flex-direction: column; gap: 10px; }
+  .gold .models { display: flex; flex-direction: column; gap: 2px; }
+  .gold .m { display: flex; align-items: center; gap: 10px; padding: 7px 10px; border-radius: 8px; font-size: 13.5px; }
+  .gold .m.on { background: rgba(255,255,255,0.08); }
+  .gold .m small { color: var(--tertiary); margin-left: auto; font-size: 12px; }
+  .gold .slider { display: flex; align-items: center; gap: 10px; font-size: 12px; color: var(--secondary); margin-top: 6px; }
+  .gold .track { flex: 1; height: 4px; background: rgba(255,255,255,0.14); border-radius: 2px; position: relative; }
+  .gold .knob { position: absolute; top: -6px; width: 16px; height: 16px; border-radius: 50%; background: #e6e6e6; box-shadow: 0 1px 4px rgba(0,0,0,0.5); left: 52%; }
+  .gold .labels { display: flex; justify-content: space-between; font-size: 11px; color: var(--tertiary); }
+  .big { display: flex; align-items: center; gap: 14px; }
+  .big svg { width: 56px; height: 56px; color: #c98a3e; }
+  .empty { text-align: center; padding: 10px 0 4px; }
+  .empty > svg { width: 72px; height: 72px; color: #c98a3e; }
+  .empty h3 { font-size: 17px; font-weight: 600; margin: 8px 0 4px; }
+  .empty p { font-size: 13px; color: var(--tertiary); margin: 0; }
+  .empty .pp { display: inline-flex; gap: 8px; margin-top: 10px; }
+</style>
+</head><body>
+<script src="bears.js"></script>
+<div class="grid">
+
+  <div class="cell">
+    <div class="caption">The working line. The bear sits in the transcript while a turn runs and waves when you look. Replaces the spinner.</div>
+    <div class="card"><div class="big"><img class="bear lg" src="sprites/wave.png" alt=""><div><div style="font-weight:600">Bear with me</div><div style="color:var(--secondary);font-size:13px">Editing convex/snapshots.ts · 1m 12s</div></div></div></div>
+    <div class="caption">And when it's on you.</div>
+    <div class="card"><div class="big"><img class="bear lg" src="sprites/sit.png" alt=""><div><div style="font-weight:600">Waiting on you</div><div style="color:var(--secondary);font-size:13px">Run the test suite on Tinker Desk? · 12s</div></div></div></div>
+    <div class="caption">A failed turn is unbearable. Same card as an approval with a red bar.</div>
+    <div class="card bar red"><div class="ctitle"><img class="bear" src="sprites/dizzy.png" alt=""> Unbearable</div><div class="csub">The runner restarted mid-turn. Nothing already written is lost.</div><div class="payload mono">Stopped after 1m 40s · runner restarted</div><div class="btns"><span class="btn primary">Carry on</span><span class="btn">Show the output</span></div></div>
+  </div>
+
+  <div class="cell">
+    <div class="caption">Hibernate is snooze. The thread's CLI is released, the bear curls up in the sidebar footer, and it wakes by session id.</div>
+    <div class="menu"><div class="hd">Hibernate until</div><div>Later today<span>3:00 pm</span></div><div class="on">Tomorrow morning<span>9:00 am</span></div><div>Next week<span>Mon</span></div><div>Pick a time…</div><div class="hd">Or</div><div>Until it finishes<span>⌘⇧H</span></div></div>
+    <div class="caption">Honey pots are usage per account. The pot drains over the 5 hour window and refills on the reset.</div>
+    <div class="card"><div class="ctitle">Honey</div><div class="pots">
+      <div class="pot"><svg viewBox="0 0 64 64"><defs><clipPath id="hc72"><path d="M14 22 q-6 22 4 34 h28 q10 -12 4 -34z"/></clipPath></defs><path d="M14 22 q-6 22 4 34 h28 q10 -12 4 -34z" fill="#2c2c30" stroke="#55555a"/><rect x="0" y="32" width="64" height="40" fill="#e0a43a" clip-path="url(#hc72)"/><rect x="12" y="14" width="40" height="10" rx="3" fill="#3a3a3f" stroke="#55555a"/><rect x="16" y="9" width="32" height="7" rx="2" fill="#4a4a50"/></svg><b>claude-3</b>72% left<span class="r">refills 2h 14m</span></div>
+      <div class="pot"><svg viewBox="0 0 64 64"><defs><clipPath id="hc18"><path d="M14 22 q-6 22 4 34 h28 q10 -12 4 -34z"/></clipPath></defs><path d="M14 22 q-6 22 4 34 h28 q10 -12 4 -34z" fill="#2c2c30" stroke="#55555a"/><rect x="0" y="50" width="64" height="40" fill="#e0a43a" clip-path="url(#hc18)"/><rect x="12" y="14" width="40" height="10" rx="3" fill="#3a3a3f" stroke="#55555a"/><rect x="16" y="9" width="32" height="7" rx="2" fill="#4a4a50"/></svg><b>claude-2</b><span style="color:var(--orange)">18% left</span><span class="r">refills 41m</span></div>
+      <div class="pot"><svg viewBox="0 0 64 64"><defs><clipPath id="hc100"><path d="M14 22 q-6 22 4 34 h28 q10 -12 4 -34z"/></clipPath></defs><path d="M14 22 q-6 22 4 34 h28 q10 -12 4 -34z" fill="#2c2c30" stroke="#55555a"/><rect x="0" y="22" width="64" height="40" fill="#e0a43a" clip-path="url(#hc100)"/><rect x="12" y="14" width="40" height="10" rx="3" fill="#3a3a3f" stroke="#55555a"/><rect x="16" y="9" width="32" height="7" rx="2" fill="#4a4a50"/></svg><b>cannstudios</b>Full<span class="r">untouched</span></div>
+      <div class="pot"><svg viewBox="0 0 64 64"><defs><clipPath id="hc55"><path d="M14 22 q-6 22 4 34 h28 q10 -12 4 -34z"/></clipPath></defs><path d="M14 22 q-6 22 4 34 h28 q10 -12 4 -34z" fill="#2c2c30" stroke="#55555a"/><rect x="0" y="37" width="64" height="40" fill="#e0a43a" clip-path="url(#hc55)"/><rect x="12" y="14" width="40" height="10" rx="3" fill="#3a3a3f" stroke="#55555a"/><rect x="16" y="9" width="32" height="7" rx="2" fill="#4a4a50"/></svg><b>codex</b>55% left<span class="r">week: 60%</span></div>
+    </div></div>
+  </div>
+
+  <div class="cell">
+    <div class="caption">Goldilocks is the model and effort picker in the composer. Models by name, effort as a porridge slider.</div>
+    <div class="card gold">
+      <div class="models">
+        <div class="m">Haiku 5.5 <small>quick, cheap</small></div>
+        <div class="m on">Opus 5.5 <small>the account's default</small></div>
+        <div class="m">Fable 5.1 <small>the big one</small></div>
+        <div class="m">Fable 5.1, 1M context <small>for the long ones</small></div>
+      </div>
+      <div class="slider">Effort <div class="track"><div class="knob"></div></div></div>
+      <div class="labels"><span>too cold</span><span>just right</span><span>too hot</span></div>
+    </div>
+    <div class="caption">New thread. The bear and the project's patches, so you know what this folder can do before you type.</div>
+    <div class="card empty"><img class="bear xl" src="sprites-full/sit.png" alt=""><h3>What should we work on?</h3><p>Starts in mikes-new-tab on cannstudios</p><div class="pp"><span class="chip"><svg style="color:#7d7d83"><use href="#patch"/></svg> Dashboard</span><span class="chip"><svg style="color:#7d7d83"><use href="#patch"/></svg> Typecheck</span><span class="chip"><svg style="--patch:#9a7b4f"><use href="#patch"/></svg> Reseed</span></div></div>
+  </div>
+</div>
+</body></html>

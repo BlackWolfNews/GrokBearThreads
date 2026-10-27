@@ -65,6 +65,11 @@ type Turn = {
   auto?: boolean;
   cliStarted?: boolean; // the CLI is running a turn for it (not just an approval)
   interruptTimer?: TimerHandle;
+  // Ids of the messages the CLI has yet to answer for this turn: the one
+  // that started it (none for a turn the CLI started itself), then any
+  // sent while it ran, which go straight into the CLI. The turn ends when
+  // the CLI has answered them all.
+  messages: string[];
 };
 
 type Runtime = {
@@ -624,6 +629,14 @@ export class Runner {
     const msg: QueuedSend = { turnId, text, images: refs };
     if (origin) msg.origin = origin;
     rec.lastActivityAt = this.isoNow();
+    if (rt.turn && this.canSteer(st)) {
+      // Sent while a turn runs: it goes into that turn now, as typing into
+      // the CLI would. The CLI takes it at its next step, or straight after
+      // its reply if that was already finishing; either way the thread's
+      // turn goes on until it's answered, so the caller gets that turn's id.
+      this.steer(st, msg);
+      return rt.turn.turnId;
+    }
     if (rt.turn || rec.queue.length) {
       // Behind a running turn, or behind messages that couldn't start
       // earlier: they go first.
@@ -634,6 +647,33 @@ export class Runner {
     }
     this.startTurn(st, msg);
     return turnId;
+  }
+
+  // A message sent during a turn can go into it only while the CLI is
+  // there to take it and nothing is set to change under it: not while a
+  // CLI is still starting or leaving, not behind messages already waiting,
+  // not once a move or a fresh CLI is due on the next turn (the message is
+  // meant for that), not after Stop was pressed (the CLI would cancel it
+  // with the rest), and not into a turn opened only for a background
+  // subagent's approval, where there's no CLI turn to join.
+  private canSteer(st: ThreadState): boolean {
+    const { rec, rt } = st;
+    const turn = rt.turn;
+    if (!turn || !rt.session || rt.closing || this.stopping) return false;
+    if (rec.queue.length || rec.handoff || rt.releaseWhenIdle || turn.interruptRequested) return false;
+    return !turn.auto || Boolean(turn.cliStarted);
+  }
+
+  // Shows the message in the running turn and hands it to the CLI. If the
+  // event can't be written the message isn't sent, and the caller gets the
+  // error (the app puts the draft back).
+  private steer(st: ThreadState, msg: QueuedSend): void {
+    const { rt } = st;
+    const turn = rt.turn!;
+    this.emit(st, { type: 'user.message', text: msg.text, images: msg.images, ...(msg.origin ? { origin: msg.origin } : {}) }, turn.turnId);
+    turn.messages.push(msg.turnId);
+    this.markDirty(st);
+    rt.session!.send({ id: msg.turnId, text: msg.text, images: msg.images });
   }
 
   // Writes the turn's first events before changing any state, so if the
@@ -650,7 +690,7 @@ export class Runner {
     }
     rt.idleTimer?.cancel();
     rt.idleTimer = undefined;
-    rt.turn = { turnId: msg.turnId, startedAt: this.clock.now(), interruptRequested: false };
+    rt.turn = { turnId: msg.turnId, startedAt: this.clock.now(), interruptRequested: false, messages: [msg.turnId] };
     rt.activeAt = this.clock.now();
     rec.turnId = msg.turnId;
     rec.lastActivityAt = this.isoNow();
@@ -848,13 +888,31 @@ export class Runner {
       case 'result': {
         const r = o.result;
         const turn = rt.turn;
-        // A turn the CLI ran by itself while this thread's own message was
-        // still in its queue: the thread's turn goes on until that message
-        // is answered.
-        const other = r.answers !== undefined ? turn !== undefined && r.answers !== turn.turnId && !turn.auto : Boolean(r.own && turn && !turn.auto);
-        if (other) {
+        if (!turn) break;
+        // Which of this turn's messages the CLI's turn answered. The CLI
+        // lists them in sending order, so everything up to the last one
+        // named went with it. A CLI without lifecycle frames can only say
+        // whether the turn was its own; if not, it answered the one at the
+        // front.
+        const named = r.answered ?? (r.answers !== undefined ? [r.answers] : r.own ? [] : turn.messages.slice(0, 1));
+        const last = Math.max(-1, ...named.map((id) => turn.messages.indexOf(id)));
+        if (last >= 0) turn.messages.splice(0, last + 1);
+        if (turn.messages.length && r.queuedTurns === 0) {
+          // The CLI has nothing left to run, so a message sent during the
+          // turn went nowhere (an error ended its queue). Say so rather than
+          // wait for an answer that won't come.
+          turn.messages = [];
+          this.emit(st, { type: 'system.note', text: 'A message sent during this turn was dropped by the CLI. Send it again.' }, turn.turnId);
+        }
+        // Still something to answer: a turn the CLI ran by itself while
+        // this thread's message waited in its queue, or a message sent
+        // during the turn that the CLI runs next. The thread's turn goes on
+        // until the CLI has answered everything, unless Stop cancelled the
+        // rest. A failure in between is shown where it happened.
+        if (turn.messages.length && !turn.interruptRequested) {
           this.flushDeltas(st);
           rt.inProgress.clear();
+          if (r.outcome === 'failed' && r.error) this.emit(st, { type: 'error', message: r.error }, turn.turnId);
           break;
         }
         this.completeTurn(st, r);
@@ -880,7 +938,7 @@ export class Runner {
     this.emit(st, { type: 'turn.started', turnId }, turnId);
     rt.idleTimer?.cancel();
     rt.idleTimer = undefined;
-    rt.turn = { turnId, startedAt: this.clock.now(), interruptRequested: false, auto: true };
+    rt.turn = { turnId, startedAt: this.clock.now(), interruptRequested: false, auto: true, messages: [] };
     rt.activeAt = this.clock.now();
     rec.turnId = turnId;
     rec.status = rt.approvals.size ? 'waiting' : 'running';

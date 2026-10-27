@@ -1,0 +1,83 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><link rel="stylesheet" href="mac.css">
+<!-- size: 1440x900 -->
+<style> body { padding: 20px; } </style>
+</head><body>
+<script src="bears.js"></script>
+<div class="window wide">
+  <div class="sidebar narrow">
+    <div class="lights"><i></i><i></i><i></i></div>
+    <div class="list">
+      <div class="newrow"><span>✎</span> New thread <span class="hint">⌘N</span></div>
+      <div class="section">Needs you</div>
+      <div class="row"><div class="body"><div class="title"><b>Walkies: pause button</b><span class="when orange">4m</span></div><div class="preview">Run the test suite?</div></div></div>
+      <div class="section">Running</div>
+      <div class="row selected"><div class="body"><div class="title">Add a Convex usage card<span class="when accent">1m 12s</span></div><div class="preview">Running typecheck</div></div></div>
+      <div class="row"><div class="body"><div class="title">Nipunn edit B-roll<span class="when accent">11m</span></div><div class="preview">Rendering review clip<span class="acct">cannstudios</span></div></div></div>
+      <div class="section">Inbox</div>
+      <div class="row"><div class="body"><div class="title"><b>Fix the README typos</b><span class="when">3m</span></div><div class="preview">Fixed one typo in README.md</div></div></div>
+      <div class="row"><div class="body"><div class="title">Explain thread count<span class="when">2h</span></div><div class="preview">Start with the fibre, because it...</div></div></div>
+    </div>
+    <div class="footer">
+      <div class="frow"><img class="bear sm" src="sprites/sleep.png" alt=""> Hibernating <span class="count">7</span></div>
+      <div class="frow"><span style="font-size:15px">⌂</span> Den <span class="count">150</span></div>
+    </div>
+  </div>
+
+  <div class="main">
+    <div class="header"><span class="folder">mikes-new-tab</span><span class="sep">/</span><span class="ttl">Add a Convex usage card</span><span class="more">···</span></div>
+    <div class="transcript">
+      <div class="column" style="width:680px">
+        <div class="bubble">Add a card to the dashboard that shows this month's Convex usage for the team, with the spending limit as a line.</div>
+        <div class="work"><span>🔨</span> Read 4 files, searched twice, edited 3 files, ran 2 commands <span class="chev">›</span></div>
+        <div class="answer">Added a <code class="mono" style="font-size:13px">usage</code> table and a cron that snapshots the team's usage hourly from the Convex API, and a card on the dashboard that draws it with the limit as a dashed line. The first snapshot is in the table now.</div>
+        <div class="hook"><svg style="color:#7d7d83"><use href="#patch"/></svg> Typecheck passed <span class="ok">✓</span> <span class="src">patch: typecheck, after the turn</span></div>
+        <div class="hook"><svg style="color:#7d7d83"><use href="#patch"/></svg> Convex logs: 1 warning in <span class="mono" style="font-size:13px">snapshots:usage</span> <span class="src">patch: convex, posted into the turn</span></div>
+        <div class="work"><span>🔨</span> Read 1 file · <span class="now">Editing convex/snapshots.ts</span></div>
+        <div class="bearline"><img class="bear" src="sprites/wave.png" alt=""> Bear with me · <span class="t">1m 12s</span></div>
+      </div>
+    </div>
+    <div class="composer" style="width:680px">
+      <div class="actions">
+        <span class="chip"><svg style="color:#7d7d83"><use href="#patch"/></svg> Typecheck</span>
+        <span class="chip"><svg style="color:#7d7d83"><use href="#patch"/></svg> Open logs</span>
+        <span class="chip"><svg style="color:#7d7d83"><use href="#patch"/></svg> Deploy to prod</span>
+        <span class="chip"><svg style="--patch:#9a7b4f"><use href="#patch"/></svg> Reseed dev DB</span>
+      </div>
+      <div class="ph">Message</div>
+      <div class="controls">
+        <span class="plus">+</span>
+        <span>cannstudios</span><span class="div"></span>
+        <span>Opus 5.5</span><span class="div"></span>
+        <span>🔓 Full access</span>
+        <span class="send">■</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="tabs">
+      <span class="tab on"><svg style="color:#7d7d83"><use href="#patch"/></svg> Dashboard</span>
+      <span class="tab">Logs</span>
+      <span class="tab">Patches <span style="color:var(--tertiary)">4</span></span>
+      <span class="spacer"></span>
+      <span class="ext">↗</span>
+    </div>
+    <div class="body">
+      <div class="cvx">
+        <div class="tables">
+          <div>dashboard</div><div>notes</div><div>scratchpad</div><div>snapshots</div><div class="on">usage</div><div>videos</div>
+        </div>
+        <div class="grid">
+          <div class="top"><b>usage</b> <span class="pill">dev</span> <span class="pill">1 document</span></div>
+          <table>
+            <tr><th>_id</th><th>month</th><th>spendUsd</th><th>limitUsd</th><th>dbReadsGb</th></tr>
+            <tr><td class="k">j57c…9m2</td><td>"2026-10"</td><td>41.8</td><td>80</td><td>137.2</td></tr>
+          </table>
+          <div style="margin-top:18px; color:var(--tertiary); font-size:12px">Local dashboard from <span class="mono">convex dev</span> on port 6790. Opens the cloud one when dev isn't running.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+</body></html>

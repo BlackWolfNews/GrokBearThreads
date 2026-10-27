@@ -399,7 +399,10 @@ export class ClaudeNormalizer {
     this.afterCompact = false;
     const own = this.turn === 'own';
     const answers = this.turn === 'user' ? this.command : undefined;
-    if (this.turn === 'user' || (!this.lifecycle && !own)) this.unanswered = Math.max(0, this.unanswered - 1);
+    // Which of the runner's messages this turn took: a batch sent close
+    // together, plus any folded in while it ran.
+    const answered = this.turn === 'user' && Array.isArray(msg.user_message_uuids) ? (msg.user_message_uuids as unknown[]).filter((u): u is string => typeof u === 'string') : undefined;
+    if (this.turn === 'user' || (!this.lifecycle && !own)) this.unanswered = Math.max(0, this.unanswered - (answered?.length || 1));
     this.turn = 'none';
     this.command = undefined;
     const aborted = msg.terminal_reason === 'aborted_streaming' || msg.terminal_reason === 'aborted_tools';
@@ -410,6 +413,8 @@ export class ClaudeNormalizer {
     };
     if (own) result.own = true;
     if (answers) result.answers = answers;
+    if (answered?.length) result.answered = answered;
+    if (typeof msg.queued_turn_count === 'number') result.queuedTurns = msg.queued_turn_count;
     if (typeof msg.total_cost_usd === 'number') result.totalCostUsd = msg.total_cost_usd;
     if (msg.usage) {
       result.usage = {
