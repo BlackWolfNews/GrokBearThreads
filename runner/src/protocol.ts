@@ -177,8 +177,21 @@ export type Project = {
   updatedAt: string;
   stateUpdatedAt?: string;
   archived?: boolean;
+  icon?: ProjectIcon;
   threadCount: number;
   lastActivityAt?: string;
+};
+
+// What a project shows as its icon: a picture found in its folders (or
+// chosen), else an SF Symbol. Absent until the librarian has found one.
+export type ProjectIcon = {
+  image?: ImageRef; // a copy in the runner's data dir, at most 256 px
+  symbol?: string; // an SF Symbol name, when there's no picture
+  from?: string; // the file the picture was copied from
+  // librarian: found by itself and kept up to date; mike or agent: chosen,
+  // and left alone until set back to automatic.
+  by: ProjectMaker;
+  updatedAt: string;
 };
 
 export type LibrarianReason = 'first-turn' | 'new-folder' | 'moved' | 'catch-up' | 'asked';

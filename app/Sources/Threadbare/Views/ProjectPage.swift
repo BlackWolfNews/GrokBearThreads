@@ -14,11 +14,14 @@ struct ProjectPage: View {
         let threads = ProjectSections.threads(in: project.id, from: app.threads.values)
         ScrollView {
             VStack(alignment: .leading, spacing: zoomed(30)) {
-                VStack(alignment: .leading, spacing: zoomed(6)) {
-                    TitleField(project: project)
-                    Text(ProjectPage.madeBy(project, threads: threads.count, app: app))
-                        .font(.system(size: TypeScale.label))
-                        .foregroundStyle(Color(nsColor: Theme.faintText))
+                HStack(alignment: .center, spacing: zoomed(14)) {
+                    IconButton(project: project)
+                    VStack(alignment: .leading, spacing: zoomed(6)) {
+                        TitleField(project: project)
+                        Text(ProjectPage.madeBy(project, threads: threads.count, app: app))
+                            .font(.system(size: TypeScale.label))
+                            .foregroundStyle(Color(nsColor: Theme.faintText))
+                    }
                 }
                 TextSection(project: project, field: .goals)
                 TextSection(project: project, field: .state)
@@ -49,6 +52,46 @@ struct ProjectPage: View {
         parts.append(count == 1 ? "1 thread" : "\(count) threads")
         if project.archived { parts.append("Archived") }
         return parts.joined(separator: " · ")
+    }
+}
+
+/// The project's icon, big, with a menu to choose another or go back to
+/// the one the librarian finds. The tooltip says where it came from.
+private struct IconButton: View {
+    @Environment(AppModel.self) private var app
+    let project: Project
+    @State private var hovering = false
+
+    var body: some View {
+        Menu {
+            Button("Choose a Picture…") { app.chooseProjectIcon(project.id) }
+            if project.icon?.isChosen == true {
+                Button("Use the Librarian's Icon") { app.setProjectIconAutomatic(project.id) }
+            }
+            if let from = project.icon?.from {
+                Divider()
+                Button("Show Original in Finder") { NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: from)]) }
+            }
+        } label: {
+            ProjectIconView(project: project, size: 44)
+                .opacity(hovering ? 0.8 : 1)
+        }
+        .menuStyle(.button)
+        .buttonStyle(.plain)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .onHover { hovering = $0 }
+        .help(Self.help(project))
+    }
+
+    static func help(_ project: Project) -> String {
+        guard let icon = project.icon else { return "No icon yet: the librarian looks in the project's folders for one. Click to choose a picture." }
+        let source = icon.from.map { "from \($0.abbreviatingHome)" } ?? icon.symbol.map { "the \($0) symbol" } ?? ""
+        switch icon.by {
+        case .librarian: return "The librarian found this (\(source)) and keeps it up to date. Click to choose another."
+        case .mike: return "You chose this (\(source)). Click to change it."
+        case .agent: return "An agent chose this (\(source)). Click to change it."
+        }
     }
 }
 

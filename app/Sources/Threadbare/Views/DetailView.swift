@@ -251,6 +251,8 @@ private struct ProjectHeaderTitle: View {
             Text("/")
                 .foregroundStyle(Color(nsColor: Theme.faintText))
                 .layoutPriority(1)
+            ProjectIconView(project: project, size: 14)
+                .layoutPriority(1)
             Text(project.title)
                 .fontWeight(.semibold)
                 .foregroundStyle(.primary)
@@ -292,10 +294,14 @@ private struct ProjectChip: View {
 
     var body: some View {
         Button { app.openProjectPage(membership.id) } label: {
-            Text(title)
+            HStack(spacing: zoomed(4)) {
+                ProjectIconView(project: app.project(membership.id), title: title, size: 12)
+                Text(title)
+            }
                 .font(.system(size: TypeScale.detail))
                 .foregroundStyle(hovering ? .primary : .secondary)
-                .padding(.horizontal, zoomed(7))
+                .padding(.leading, zoomed(4))
+                .padding(.trailing, zoomed(7))
                 .padding(.vertical, zoomed(2))
                 .background(Color.primary.opacity(hovering ? 0.08 : 0.05), in: Capsule())
                 .overlay {

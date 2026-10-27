@@ -27,7 +27,7 @@ export type ThreadControl = { hello: Runner['hello'] } & Async<Runner, 'list' | 
 
 export type ScheduleControl = Async<Scheduler, 'create' | 'list' | 'find' | 'update' | 'delete'>;
 
-export type ProjectControl = Pick<Projects, 'list' | 'get' | 'find' | 'create' | 'update' | 'appendNote' | 'changeMembership'>;
+export type ProjectControl = Pick<Projects, 'list' | 'get' | 'find' | 'create' | 'update' | 'appendNote' | 'changeMembership'> & Partial<Pick<Projects, 'chooseIcon'>>;
 
 export const SERVER_NAME = 'threadbare';
 // Asked about every time, even in a thread with full access: deleting is
@@ -334,7 +334,7 @@ export function buildThreadbareTools(control: ThreadControl, selfId: string, now
     ),
     tool(
       'update_project',
-      "Changes a project: title, goals, state, notes or folders. Keep state current as work moves on (what's done, what's next, what's blocked), and add to the notes anything a later thread should know. appendNote adds a paragraph without rewriting the notes.",
+      "Changes a project: title, goals, state, notes, folders or icon. Keep state current as work moves on (what's done, what's next, what's blocked), and add to the notes anything a later thread should know. appendNote adds a paragraph without rewriting the notes. The librarian finds icons by itself from the project's folders, so only set one when Mike asks or the project gets a new app icon somewhere it wouldn't look.",
       {
         project: z.string().describe('Project id, id prefix or title.'),
         title: z.string().optional(),
@@ -344,8 +344,12 @@ export function buildThreadbareTools(control: ThreadControl, selfId: string, now
         appendNote: z.string().optional().describe('Adds a paragraph to the end of the notes.'),
         addFolders: z.array(z.string()).optional(),
         removeFolders: z.array(z.string()).optional(),
+        icon: z
+          .string()
+          .optional()
+          .describe('A path to a picture (PNG, SVG, ICNS...), an SF Symbol name such as "film", or "auto" to let the librarian find one again.'),
       },
-      handle(async ({ project: q, title, goals, state, notes, appendNote, addFolders, removeFolders }) => {
+      handle(async ({ project: q, title, goals, state, notes, appendNote, addFolders, removeFolders, icon }) => {
         const pc = mustProjects();
         const p = project(q);
         let folders: string[] | undefined;
@@ -356,6 +360,12 @@ export function buildThreadbareTools(control: ThreadControl, selfId: string, now
         }
         let out = pc.update(p.id, { title, goals, state, notes, folders });
         if (appendNote?.trim()) out = pc.appendNote(p.id, appendNote);
+        if (icon?.trim()) {
+          if (!pc.chooseIcon) throw new Error("This runner can't set project icons yet.");
+          const v = icon.trim();
+          const choice = v === 'auto' ? {} : /[/~]/.test(v) ? { path: v } : { symbol: v };
+          out = await pc.chooseIcon(p.id, choice, 'agent');
+        }
         return `Updated "${out.title}" (${out.id}).`;
       }),
     ),

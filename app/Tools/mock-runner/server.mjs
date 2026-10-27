@@ -511,6 +511,7 @@ async function dispatch(client, method, p) {
     case 'projects.get':
     case 'projects.create':
     case 'projects.update':
+    case 'projects.setIcon':
     case 'projects.merge':
     case 'projects.delete':
     case 'threads.setProjects':
@@ -1172,6 +1173,14 @@ function projectRequest(method, p) {
       broadcastProjects();
       return { project: projectView(project) };
     }
+    case 'projects.setIcon': {
+      const project = needProject(p.projectId);
+      if (p.path) project.icon = { image: { path: p.path, mediaType: 'image/png' }, from: p.path, by: 'mike', updatedAt: iso() };
+      else if (p.symbol) project.icon = { symbol: p.symbol, by: 'mike', updatedAt: iso() };
+      else delete project.icon;
+      broadcastProjects();
+      return { project: projectView(project) };
+    }
     case 'projects.merge': {
       const from = needProject(p.projectId);
       const into = needProject(p.intoId);
@@ -1307,12 +1316,16 @@ function addDemoProjects() {
     state: 'Projects and the librarian are next: protocol written, runner and app being built in parallel. Settings tabs renamed; release notes for 0.4 drafted.',
     notes: '**Checks**: `./check.sh` runs everything, `--quick` for the runner only.\n\nNever restart the live runner from a thread; merge to main and it follows.\n\nThe protocol is the contract: change `docs/protocol.md` first.',
     createdBy: 'librarian', createdByThread: 'demo_release_notes', createdAt: ago(60 * 24 * 9), updatedAt: ago(3), stateUpdatedAt: ago(41),
+    // The three kinds of icon: a picture (the app's own), a symbol, and
+    // Walkies with none yet, which shows its letter.
+    icon: { image: { path: fileURLToPath(new URL('../../icons/threadbare.png', import.meta.url)), mediaType: 'image/png' }, from: '/Users/mike/dev/me/threadbare/app/icons/threadbare.png', by: 'librarian', updatedAt: ago(60) },
   };
   const photo = {
     id: 'p_7a2c41f0', title: 'Photo sync', folders: ['/Users/mike/dev/photo-sync'],
     goals: 'Back up the family photo library to B2 without babysitting it: resumable uploads, a nightly report, and builds that don\'t take fifteen minutes.',
     state: 'Uploads resume after a crash in testing; waiting on Mike to pick the chunk size. CI is slow because the lockfile change broke the cache key.',
     notes: '', createdBy: 'librarian', createdByThread: 'demo_upload_resume', createdAt: ago(60 * 24 * 4), updatedAt: ago(41), stateUpdatedAt: ago(41),
+    icon: { symbol: 'photo', by: 'librarian', updatedAt: ago(60) },
   };
   const walkies = {
     id: 'p_c9e8d102', title: 'Walkies', folders: ['/Users/mike/dev/walkies', '/Users/mike/dev/walkies-backend'],

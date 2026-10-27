@@ -72,6 +72,7 @@ private struct ProjectHeader: View {
     var body: some View {
         Button { app.openProjectPage(project.id) } label: {
             HStack(spacing: zoomed(6)) {
+                ProjectIconView(project: project, size: 15)
                 Text(project.title)
                     .font(.system(size: TypeScale.sidebarHeading, weight: .semibold))
                     .foregroundStyle(isOpen || hovering ? .primary : .secondary)

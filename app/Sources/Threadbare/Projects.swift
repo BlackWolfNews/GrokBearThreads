@@ -1,5 +1,6 @@
 import AppKit
 import ThreadbareCore
+import UniformTypeIdentifiers
 
 /// Projects and the librarian (docs/protocol.md, "Projects"): loading them,
 /// the project page, and what Mike can do to them by hand.
@@ -99,6 +100,40 @@ extension AppModel {
         let path = url.standardizedFileURL.path
         guard !project.folders.contains(path) else { return }
         updateProject(id, ProjectUpdate(folders: project.folders + [path]))
+    }
+
+    /// Asks for a picture and makes it the project's icon, which the
+    /// librarian then leaves alone.
+    func chooseProjectIcon(_ id: String) {
+        guard let client, let project = project(id) else { return }
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = false
+        panel.canChooseFiles = true
+        panel.allowsMultipleSelection = false
+        panel.allowedContentTypes = [.png, .jpeg, .webP, .svg, .icns, .ico, .gif, .heic, .tiff]
+        panel.prompt = "Use"
+        panel.message = "Choose an icon for \(project.title)"
+        if let first = project.folders.first { panel.directoryURL = URL(fileURLWithPath: first) }
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        Task {
+            do {
+                replace(try await client.setProjectIcon(id, path: url.standardizedFileURL.path))
+            } catch {
+                show(error)
+            }
+        }
+    }
+
+    /// Back to the icon the librarian finds in the project's folders.
+    func setProjectIconAutomatic(_ id: String) {
+        guard let client else { return }
+        Task {
+            do {
+                replace(try await client.setProjectIcon(id))
+            } catch {
+                show(error)
+            }
+        }
     }
 
     func removeProjectFolder(_ id: String, _ folder: String) {

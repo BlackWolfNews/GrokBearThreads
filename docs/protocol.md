@@ -228,8 +228,22 @@ type Project = {
   updatedAt: string
   stateUpdatedAt?: string
   archived?: boolean
+  icon?: ProjectIcon    // absent until the librarian has found or picked one
   threadCount: number   // threads in it, put away ones included
   lastActivityAt?: string // its newest thread's lastActivityAt
+}
+
+// A project's icon: a picture, else an SF Symbol (see Projects, "Icons").
+// A client that can't draw either shows the title's first letter.
+type ProjectIcon = {
+  image?: ImageRef      // a copy in the runner's data dir (project-icons/),
+                        // PNG at most 256 px, or SVG ("image/svg+xml")
+  symbol?: string       // an SF Symbol name, when there's no picture
+  from?: string         // the file the picture was copied from
+  by: "mike" | "agent" | "librarian" // librarian: found by itself and kept
+                        // up to date; mike or agent: chosen, and left alone
+                        // until set back to automatic
+  updatedAt: string
 }
 
 // What the librarian (see Projects) is doing, has done and will do next.
@@ -446,6 +460,7 @@ replaces whatever the deltas built up.
 | `projects.get` | `{ projectId }` | `{ project: Project, threadIds: string[] }`, its threads newest activity first, put away ones included |
 | `projects.create` | `{ title: string, folders?: string[], goals?, state?, notes?, threadIds?: string[] }` | `{ project: Project }`, made by Mike (`createdBy: "mike"`). `threadIds` are put in it, pinned. Folders must exist (`-32602` otherwise) |
 | `projects.update` | `{ projectId, title?, folders?: string[], goals?, state?, notes?, archived?: boolean }` | `{ project: Project }`. Replaces what's given. A change of folders reloads its threads' patches |
+| `projects.setIcon` | `{ projectId, path?: string, symbol?: string }` | `{ project: Project }`. Mike's choice: `path` a picture on this Mac (PNG, JPEG, WebP, SVG, ICNS or ICO, copied in), or `symbol` an SF Symbol name; neither puts it back to automatic, and the librarian finds one again within seconds. `-32602` for a missing file or a name that isn't a symbol's |
 | `projects.merge` | `{ projectId, intoId }` | `{ project: Project }` (the one kept). Folders and threads move over, notes are joined, and `projectId` is deleted |
 | `projects.delete` | `{ projectId }` | `{}`. Its threads leave it; nothing else is touched |
 | `threads.setProjects` | `{ threadId, add?: string[], remove?: string[] }` | `{ thread: ThreadSummary }`. What Mike does by hand: an added project is pinned (adding one the thread is already in pins it, which is how "keep it here" works), a removed one is remembered so the librarian never puts the thread back in it |
@@ -822,6 +837,24 @@ Mike can take it out (`threads.setProjects`), after which it's never put
 back. It never takes out a pinned project or one an agent added. Looks
 are listed in `LibrarianStatus.recent`; without a key or budget the queue
 waits (`state: "off"`).
+
+**Icons.** The librarian gives each project an icon and keeps it up to
+date. It looks through the project's folders for the picture the project
+already has, by file name and place, no model needed: an Xcode
+`AppIcon.appiconset`, an `.icns`, an `apple-touch-icon` or `icon-512.png`,
+a Chrome extension's or Expo app's manifest icon, a picture named after the
+project in an `icons/` folder, then favicons and logos. Wide pictures,
+template (menu bar) icons, other image sets, and anything under
+`node_modules`, build output, docs or tests are passed over, as is one
+under a folder named for something else (`public/inventory/icon.svg` is
+the inventory's). The best is copied in, so the app never reads a repo. It
+looks again a few seconds after a project is made or its folders change,
+and every hour at all of them, copying again when the file has changed or
+a better one has turned up. A project with no picture gets an SF Symbol:
+one small-model call (feature `projects`, in the budget, not while paused,
+never for a private folder) choosing from a fixed list. One Mike or an
+agent chose (`projects.setIcon`, `update_project`'s `icon`) is never
+changed by the librarian.
 
 **Agents** have tools for projects (see Tools for agents):
 `list_projects`, `read_project`, `create_project`, `update_project`,
