@@ -101,6 +101,7 @@ type Harness = {
   notices: string[];
   restarts: { release: string; reason: string }[];
   deploys: number;
+  follows: string[];
   main: { commit: string; short: string; subject: string; tree: string };
   deployResult: { ok: true; id: string } | { ok: false; error: string; transient?: boolean };
   pending: boolean;
@@ -120,6 +121,7 @@ function harness(releaseExtra: Partial<ReleaseJson> = {}, depsExtra: Partial<Upd
     notices: [] as string[],
     restarts: [] as { release: string; reason: string }[],
     deploys: 0,
+    follows: [] as string[],
     main: { commit: 'c2', short: 'c2', subject: 'Steering', tree: 'x+b+c+d' },
     deployResult: { ok: true, id: 'r2' },
     pending: false,
@@ -138,8 +140,9 @@ function harness(releaseExtra: Partial<ReleaseJson> = {}, depsExtra: Partial<Upd
     },
     pendingRestart: () => h.pending,
     sync: async () => h.main,
-    deploy: async () => {
+    deploy: async (_dir, _home, _log, follow) => {
       h.deploys++;
+      h.follows.push(follow);
       if (h.deployResult.ok) {
         // As deploy.mjs would: a new release, current pointing at it.
         fs.mkdirSync(path.join(home, 'runner', 'releases', h.deployResult.id), { recursive: true });
@@ -161,6 +164,8 @@ test('a change to main is built and a restart asked for; the next check sees the
   await new Promise((r) => setImmediate(r));
   await new Promise((r) => setImmediate(r));
   assert.equal(h.deploys, 1);
+  // The new release follows the same checkout, not the clone it was built in.
+  assert.deepEqual(h.follows, [h.u.status().checkout]);
   assert.deepEqual(h.restarts, [{ release: 'r2', reason: 'Updating to main at c2: Steering' }]);
   const s = h.u.status();
   assert.equal(s.state, 'waiting');
@@ -238,7 +243,7 @@ test('a release with no tree recorded works it out from its commit', async () =>
   assert.equal(h.deploys, 1);
 });
 
-test('off: from a checkout, when switched off, when the release has no checkout, or when the checkout is gone', () => {
+test('off: from a checkout, when switched off, when the release has no checkout, when the checkout is gone, or when it is the updater\'s own clone', () => {
   const base = { home: tmpDir('tb-update-off-'), enabled: true, clock: new FakeClock(), log: nullLogger, notice: () => {}, restart: () => ({ scheduled: true, waitingFor: [] }), pendingRestart: () => false };
   const release: ReleaseJson = { id: 'r1', commit: 'c1', dirty: false, builtAt: '', node: '24', checkout: '/nonexistent/checkout', prefix: 'runner/', tree: 't' };
   const cases: [Partial<UpdateDeps>, RegExp][] = [
@@ -253,6 +258,14 @@ test('off: from a checkout, when switched off, when the release has no checkout,
     assert.equal(u.status().state, 'off');
     assert.match(u.status().reason!, why);
   }
+  // A release that names the updater's own clone would only ever fetch
+  // itself (27 Oct: stuck "up to date" for hours while main moved on).
+  const clone = path.join(base.home, 'runner', 'update', 'src');
+  fs.mkdirSync(path.join(clone, '.git'), { recursive: true });
+  const selfFollowing = new RunnerUpdater({ ...base, release: { ...release, checkout: clone } });
+  selfFollowing.start();
+  assert.equal(selfFollowing.status().state, 'off');
+  assert.match(selfFollowing.status().reason!, /updater's own clone/);
   // Before start() (the release isn't marked good yet) it says so, rather
   // than looking switched off; once following, there is no reason to show.
   const fresh = new RunnerUpdater({ ...base, release: { ...release, checkout: base.home } });

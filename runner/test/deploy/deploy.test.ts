@@ -1028,10 +1028,14 @@ test('--check gives up once a runner that stopped before it was marked good stay
   const plistFile = path.join(agents, `${LABEL}.plist`);
   // A release that never gets marked good, running under launchd.
   commit({ goodAfterMs: -1 }, 'never good');
-  let r = deploy(['--skip-checks', '--no-restart']);
+  // Built the way the runner's updater builds (from its own clone, naming
+  // the checkout it follows), so the release records that checkout.
+  const followed = path.join(home, 'followed-checkout');
+  let r = deploy(['--skip-checks', '--no-restart', '--follow', followed]);
   assert.equal(r.status, 0, out(r));
   const never = current();
   assert.notEqual(never, good);
+  assert.equal(readJson(path.join(runnerDir(), 'releases', never, 'release.json')).checkout, followed);
   assert.equal(launchctl('kickstart', '-k', TARGET), 0);
   await runsOn(never);
 

@@ -69,7 +69,7 @@ export type UpdateDeps = {
   // Replaced in tests: bringing the clone to main, and the deploy itself.
   sync?: (checkout: string, prefix: string, dir: string) => Promise<MainInfo>;
   treeOf?: (dir: string, prefix: string, commit: string) => string | undefined;
-  deploy?: (runnerDir: string, home: string, logFile: string) => Promise<DeployResult>;
+  deploy?: (runnerDir: string, home: string, logFile: string, follow: string) => Promise<DeployResult>;
 };
 
 export type Decision = { action: 'build' } | { action: 'nothing'; why: string };
@@ -104,6 +104,17 @@ export function updateFilePath(home: string): string {
 
 export function updateLogPath(home: string): string {
   return path.join(home, 'runner', 'update.log');
+}
+
+function sameDir(a: string, b: string): boolean {
+  const real = (p: string) => {
+    try {
+      return fs.realpathSync(p);
+    } catch {
+      return path.resolve(p);
+    }
+  };
+  return real(a) === real(b);
 }
 
 function git(cwd: string, args: string[]): string {
@@ -161,7 +172,11 @@ export async function syncClone(checkout: string, prefix: string, dir: string): 
 // deploy.mjs from the clone, stopping after it has pointed current at the
 // new release (--no-restart): the runner asks for the restart itself, so
 // the build never has to outlive it. Its output goes to logFile.
-export function runDeploy(runnerDir: string, home: string, logFile: string): Promise<DeployResult> {
+// follow is the checkout the running release follows: deploy.mjs records
+// it as the new release's checkout, so the release after this one still
+// follows Mike's checkout rather than this clone (which would only ever
+// fetch itself and report "up to date" for good).
+export function runDeploy(runnerDir: string, home: string, logFile: string, follow: string): Promise<DeployResult> {
   return new Promise((resolve) => {
     const env: Record<string, string | undefined> = {};
     for (const [k, v] of Object.entries(process.env)) if (!k.startsWith('THREADBARE_')) env[k] = v;
@@ -172,7 +187,7 @@ export function runDeploy(runnerDir: string, home: string, logFile: string): Pro
       resolve({ ok: false, error: `couldn't open ${logFile}: ${(e as Error).message}` });
       return;
     }
-    const child = spawn(process.execPath, [path.join(runnerDir, 'scripts', 'deploy.mjs'), '--no-restart', '--home', home], {
+    const child = spawn(process.execPath, [path.join(runnerDir, 'scripts', 'deploy.mjs'), '--no-restart', '--home', home, '--follow', follow], {
       cwd: runnerDir,
       env,
       stdio: ['ignore', fd, fd],
@@ -228,6 +243,11 @@ export class RunnerUpdater {
     if (!release) return off('running from a checkout, not a release');
     if (!release.checkout || !release.prefix) return off('this release was built before releases recorded their checkout; deploy once by hand');
     if (!fs.existsSync(path.join(release.checkout, '.git'))) return off(`the checkout it was built from, ${release.checkout}, is gone`);
+    // A release the updater built before it passed --follow names the
+    // updater's own clone, which never gets new commits.
+    if (sameDir(release.checkout, path.join(updateDir(this.deps.home), 'src'))) {
+      return off("this release was built from the updater's own clone, so it can't see main; deploy once by hand from the checkout");
+    }
     this.state = 'idle';
     this.reason = undefined;
     log.info('following main', { checkout: release.checkout, release: release.id });
@@ -290,7 +310,7 @@ export class RunnerUpdater {
       this.state = 'building';
       this.reason = undefined;
       log.info('building a release of main', { commit: main.short, subject: main.subject });
-      const result = await (this.deps.deploy ?? runDeploy)(path.join(dir, release.prefix), home, updateLogPath(home));
+      const result = await (this.deps.deploy ?? runDeploy)(path.join(dir, release.prefix), home, updateLogPath(home), release.checkout);
       if (this.stopped) return decision;
       if (!result.ok) {
         if (result.transient) {
