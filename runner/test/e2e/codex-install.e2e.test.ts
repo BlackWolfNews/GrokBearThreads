@@ -147,6 +147,8 @@ test('codex copies: install two real versions; a running app-server keeps workin
     await fresh.close();
   } finally {
     await server?.close();
-    fs.rmSync(root, { recursive: true, force: true });
+    // Retried: an app-server that has just exited can still be writing into
+    // its temp CODEX_HOME for a moment (ENOTEMPTY seen once under check.sh).
+    fs.rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
   }
 });

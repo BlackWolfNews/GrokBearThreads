@@ -475,9 +475,11 @@ export class CodexSession implements AgentSession {
         if (l) this.enqueue(() => this.sink.output(l));
       })
       .catch((e: unknown) => this.deps.log.debug('account/read failed', { threadId: this.opts.threadId, error: errText(e) }));
+    // Updates that arrive before the reply are newer than the reading.
+    const since = this.rateLimits.mark();
     this.proc
       .request<GetAccountRateLimitsResponse>('account/rateLimits/read', null)
-      .then((r) => this.enqueue(() => this.toNormalizer('account/rateLimits/updated', this.rateLimits.read(r))))
+      .then((r) => this.enqueue(() => this.toNormalizer('account/rateLimits/updated', this.rateLimits.read(r, since))))
       .catch((e: unknown) => this.deps.log.debug('account/rateLimits/read failed', { threadId: this.opts.threadId, error: errText(e) }));
   }
 
