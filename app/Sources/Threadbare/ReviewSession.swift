@@ -125,8 +125,9 @@ final class ReviewSession {
         guard dirty, review.isPending, !saving, !submitting, !conflict else { return }
         saving = true
         let sent = draft
+        let attemptedRevision = review.revision
         do {
-            let saved = try await service.save(review.revision, sent)
+            let saved = try await service.save(attemptedRevision, sent)
             if saved.revision >= review.revision { review = saved }
             dirty = normalized(draft) != (review.response ?? review.draft)
             if saved.revision < review.revision && dirty {
@@ -137,7 +138,14 @@ final class ReviewSession {
         } catch {
             self.error = "Couldn’t save the draft. Your notes are kept on this Mac. \(error.localizedDescription)"
             saving = false
-            if let latest = try? await service.load() { receive(latest) }
+            if let latest = try? await service.load() {
+                receive(latest)
+                if latest.revision > attemptedRevision, latest.draft != normalized(sent), latest.draft != normalized(draft) {
+                    conflict = true
+                    self.error = "This review changed elsewhere. Your unsent notes are kept here."
+                    cacheDraft()
+                }
+            }
         }
         saving = false
         // A newer keystroke may have arrived while the request was in flight.

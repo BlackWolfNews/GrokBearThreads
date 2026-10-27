@@ -182,4 +182,25 @@ final class ReviewSessionTests: XCTestCase {
         let recovered = ReviewSession(threadId: "thread", review: server, service: service, defaults: defaults, autosave: false)
         XCTAssertEqual(recovered.draft.notes["A"], "Second window")
     }
+
+    func testFailedSaveAfterRemoteNotificationStillRequiresConflictResolution() async {
+        var remote = review()
+        var finish: CheckedContinuation<Void, Never>?
+        let service = ReviewService(load: { remote }, save: { _, _ in
+            await withCheckedContinuation { finish = $0 }
+            throw NSError(domain: "stale revision", code: 1)
+        }, respond: { _, _ in remote }, cancel: { _ in remote })
+        let session = ReviewSession(threadId: "thread", review: remote, service: service, defaults: cache(), autosave: false)
+        session.setNote("Mine", for: "A")
+        let saving = Task { await session.saveNow() }
+        while finish == nil { await Task.yield() }
+        remote.revision += 1
+        remote.draft = ReviewDraft(notes: ["B": "Theirs"])
+        session.receive(remote)
+        finish?.resume()
+        await saving.value
+        XCTAssertTrue(session.conflict)
+        XCTAssertFalse(session.canSubmit)
+        XCTAssertEqual(session.draft.notes["A"], "Mine")
+    }
 }

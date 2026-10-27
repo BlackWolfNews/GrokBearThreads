@@ -70,12 +70,6 @@ public struct ThreadRowLook: Sendable, Equatable {
         labelled = !(status == .working && section == .running)
     }
 
-    /// An unanswered review stays actionable even after the thread is read.
-    public static func emptyPreview(_ thread: ThreadSummary) -> String {
-        if thread.hasPendingReviews { return "Waiting for your review" }
-        return thread.status == .waiting ? "Waiting for your answer" : "No reply yet"
-    }
-
     /// How long a running turn has been going, where the time would be:
     /// "53s", "4m", "1h 2m". The runner sets a thread's `lastActivityAt`
     /// when a turn starts (and when it ends or a message is sent), not on
