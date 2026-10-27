@@ -874,6 +874,29 @@ The app already inserts an image row right after the tool row (`TranscriptReduce
 - an unknown item type shown as a plain row;
 - every notification method in `real-config` either mapped or listed as ignored.
 
+### As built (B)
+
+**What A calls on `CodexNormalizer`** (`new CodexNormalizer(ctx, {log})`, one per session):
+
+- `setThread(threadId, model?)` after `thread/start` or `thread/resume`, with the model it reported in `session`, so a later `thread/settings/updated` with another model is reported again.
+- `startingTurn(runnerTurnId)` when it sends `turn/start`, and `turnAccepted(codexTurnId)` with the reply. A `turn/started` in between counts as ours. `steered(runnerId)` for a message sent with `turn/steer`.
+- `handle(method, params, from?)` for every notification of its thread, its process's thread-less ones, and its children's (with `from.childThreadId`). Server requests don't go here.
+- `lineTooLarge(head)` when the line reader skips a line over its guard, with the line's first few KB, or `handle(OVERSIZED_LINE, {method?, itemId?})` (exported, `"threadbare/oversizedLine"`) when the reader has already picked those out; with `from` for a child. If it names an open item, that item closes as "Too large to show"; if not, the turn's other open items do.
+- `closeOpen(reason)` when the session ends with rows still open (process death, hard stop). It closes background terminals too and sends `tasks: []`. It emits no `result`.
+- `interruptedCommands()` after an interrupted or failed `turn/completed`: the command item ids it closed, for `backgroundTerminals/terminate`.
+- `limitsFromRateLimits(snapshot)` takes `account/rateLimits/read`'s result or a merged update (`handle('account/rateLimits/updated', merged)` does the same), and `limitsFromAccount(result)` takes `account/read`'s.
+- `innerCommand(command)` strips `/bin/zsh -lc '...'`, for approval titles and "Always allow" rules.
+- `MAPPED_ITEM_TYPES`, `IGNORED_ITEM_TYPES`, `MAPPED_METHODS` and `IGNORED_METHODS` are exported for `surface.ts`, so its ignore list and the normaliser's can't drift.
+
+**Differences from the plan above:**
+
+- A subagent row still open when a turn completes is kept open like a background terminal (`tasks` with `kind: "agent"`), not closed as interrupted: the child is still running in the process. Its `subAgentActivity completed` closes it later.
+- The credits detail ("1,234 credits") goes on the last of the `codex` bucket's windows (the weekly one when there are both).
+- Committed fixtures are `{proc, dir, t, msg}` lines. `proc` tells the processes of a resume apart. Every fixture keeps its capture's handshake and `thread/start` lines, so a replay knows its thread.
+- Extra fixtures: `models` (`probe.ndjson`'s `model/list`, for A), and the hand-written `mcp-image` (an MCP image block, an image resource, a dynamic tool's `data:` image), since no capture had MCP servers on. The optional `close-and-resume` isn't made.
+- The sanitiser also fails on the values of the keys it drops (account ids, `installationId`, `serverName`) wherever else they appear, and on this Mac's user and host name. The hostname also appeared with a `.localdomain` suffix.
+- `context.ts` gained `truncateResultText`, the 64 KB cut with a blob, for the Codex normaliser.
+
 ## C. Runner plumbing
 
 All edits to `runner.ts`, `main.ts`, `rpc.ts`, `store.ts`, `threadbare-mcp.ts`, `cli.ts`, `tb-dev.ts` and `test/helpers/fakes.ts`. Merge main into your branch once Mike's steering change is on it, and build on its `canSteer()`, `steer()` and `Turn.messages`.
@@ -1077,6 +1100,23 @@ export function pickAccount(accounts: Account[], lastUsedId: string | undefined)
 - `diff-media-accounts.test.ts` still passes, updated by D where the account shape changed;
 - no test reads a real `auth.json` or `config.toml`.
 
+### As built (D, 27 Oct)
+
+Calls made where this section didn't say, or said otherwise:
+
+- **Codex windows are B's.** Turning `account/rateLimits/*` into `UsageWindow`s stays in B's `codex/normalize.ts`, as B's table says. D's test feeds the store a reading in the shape B makes from the real `account/rateLimits/read` (weekly only, plus a made-up second bucket as an `other` window, since no capture has one).
+- **One file.** Email and plan from a live reading (`account/read`, `account/updated`) are kept in `usage.json` with the live windows, not in a separate `accounts-cache.json`.
+- **Merge key.** `five_hour`, `weekly`, `daily` and `monthly` merge by kind. `weekly_model`, `allowance` and `other` merge by kind plus title, so Codex's extra buckets (all `other`) don't replace each other.
+- **Stale** means `generatedAt` is over 15 minutes old and the account has had no live reading in the last 15 minutes. ("No live reading since" generatedAt would never go stale again after one turn.)
+- **Blocked** comes from live readings only. Token Stats' 0% isn't a block: claude-2 (Team) shows 0% on its 5-hour window while it keeps working on extra usage. A block ends when the windows at under 1% in that reading reset, or when a later reading isn't blocked.
+- **A passed reset** also drops the window's `detail` ("$132.79 left" is old once it resets).
+- **`errorKind: "usageLimit"`** on a failed Claude turn: a `rejected` event earlier in the turn, or, for a CLI that sent none, the result text ("hit your limit", "usage limit reached", `rate_limit_error`).
+- **`onChange`** of the store reports an account when a live reading moves a window by a point or more, and for anything at all on a new `limits.json`, a reset, a block ending or going stale (one timer for the next of those). An account no client has listed yet is reported on its first reading.
+- **`pickAccount` gaps.** With no last-used account (or one that's gone), candidates are the first account's provider (Claude's come first). A tie between two accounts that aren't the last-used one goes to the first in the list. With nothing to pick and no last-used account, it returns `undefined` and the caller uses its own default. The cases are in `runner/test/fixtures/pick-account-cases.json`, in a shape F's Swift tests can read as is.
+- **Interface additions:** `UsageStore.identityFor(account)` (email and plan for titles), `UsageStore.reload()`, `usageLine(u, now?)`, and exports `accountRoom`, `MIN_ROOM_PERCENT`, `resetTime`, `parseLimitsJson`, `samePathKey`, and `rateLimitReading` from `claude/normalize.ts`. `new AccountRegistry(cfg, usage?)`, where `codexMainDir` and `accountNotes` are optional in `cfg`; `onChange(fn(accounts))`. Claude accounts now carry `email` too.
+- **`main.test.ts`** (nobody's file) now sets `THREADBARE_CODEX_MAIN_DIR` and `THREADBARE_TOKEN_STATS_LIMITS` to temp paths, so starting the real entry point never reads `~/.codex/config.toml` or the real `limits.json`.
+- **For C:** `main.ts` already passes the full `Config`, so once D is in `step4`, `codex-main` shows up in the account list before C registers the Codex adapter.
+
 ## E. CLI updates (`runner/src/updates/`)
 
 ```ts
@@ -1192,6 +1232,24 @@ The first version had a `retireCodex()` hook for the shared process. With one pr
   - `.partial` folders cleaned up after a failed install;
 - `update()` and `check()` returning at once, with state reported through `onChange`;
 - a running turn on the old process carrying on while the new version activates, and its session moving after the turn.
+
+### As built (E)
+
+**For C, wiring it in `main.ts`:**
+
+- The constructor takes `{cfg, log, clock, hooks, codex: {resolve, checkSurface, testedVersion}, notice?}`. `codex` is A's: `resolve` is `resolveCodexBinary` (only `{command, native}` is read), `checkSurface` and `testedVersion` come from `surface.ts`. They're injected because A hadn't landed when E was built, and so the tests use stubs. `notice(level, message)` is a `runner.notice`.
+- `codexBinary()` returns a start path for A's resolver, not the native binary: `codexPath`, else `<home>/tools/codex/current` (the install folder), else the fallback launcher next to the runner's Node.
+- Two methods beyond the interface: `settled()` resolves once nothing is checking or installing (for tests and shutdown), and `sessionStarted(provider, version, ok)` is how the runner reports whether a session reached `init` or `initialize`, for the "failed to start twice" warning.
+- Tests can also inject `exec`, `fetchText`, `env`, `execPath` (npm and the fallback codex sit next to it) and `random`.
+
+**Choices the plan didn't cover:**
+
+- The app's `clis.setPolicy` is kept in `<home>/updates.json`, not `runner.json`. `THREADBARE_CLI_UPDATES=off`, or `off` in `runner.json`, can't be turned on from the app, and a `codexPath` set by hand always shows `off`.
+- `off` stops the hourly checks. `clis.check` still looks the versions up.
+- A held version is installed and kept (`<v>/`, never `current`), so "Update anyway" activates it without downloading again. A hold reports `status: "held"` with `update.state: "unchanged"`, since nothing failed.
+- On a first start, a latest that fails to install or is held falls back to `testedVersion`, as it does for the gate.
+- An update left `running` or `waiting` by a runner that stopped reads as `failed` after the restart.
+- The commands and lookups are in `updates/exec.ts`, a fifth file next to the four planned.
 
 The real npm path gets one integration test, `codex-install.e2e.test.ts`, run under `--e2e` because it needs the network. It uses a temp `THREADBARE_HOME` and a temp `CODEX_HOME`, runs `app-server` only, and sends no prompts. It installs a version into a temp prefix with `npm install --prefix`, starts `app-server`, swaps in another version and checks the running process keeps working. Nothing touches the real installs: not the nvm global prefix, `~/.local/bin/codex`, `~/.local/bin/claude` or Claude's versions folder.
 

@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import type { Account, ModelChoice } from './protocol.ts';
+import { isEffortLevel, type Account, type EffortLevel, type ModelChoice } from './protocol.ts';
+import type { UsageStore } from './usage.ts';
 import type { Config } from './config.ts';
 import { isDirectory } from './fsutil.ts';
 
@@ -17,9 +18,6 @@ export function readLoginEmail(claudeJsonPath: string): string | undefined {
   }
 }
 
-// Claude logins: ~/.claude is claude-main (its .claude.json sits at
-// ~/.claude.json), and each Token Stats account folder claude-N is its own
-// CLAUDE_CONFIG_DIR with .claude.json inside.
 // The model an account's own settings.json names ("claude-fable-5-1[1m]"),
 // which the CLI uses for a session that names none. Only that one key is
 // read. Absent, blank or not a string: the CLI's own default.
@@ -52,15 +50,50 @@ export function resolveDefaultModel(settingsModel: string | undefined, learned: 
   return row?.model ?? stripModelSuffix(settingsModel);
 }
 
-export function discoverAccounts(cfg: Pick<Config, 'claudeMainDir' | 'claudeMainJson' | 'tokenStatsAccountsDir'>): Account[] {
+// The top-level `key = value` lines of a Codex config.toml, before its first
+// [table]. Only the named keys are kept; nothing else in the file is read
+// into memory past this, and there's no TOML dependency for three strings.
+export function readCodexConfig(configTomlPath: string): { model?: string; effort?: EffortLevel; credentialsStore?: string } {
+  let text: string;
+  try {
+    text = fs.readFileSync(configTomlPath, 'utf8');
+  } catch {
+    return {};
+  }
+  const out: { model?: string; effort?: EffortLevel; credentialsStore?: string } = {};
+  for (const line of text.split(/\r?\n/)) {
+    if (/^\s*\[/.test(line)) break;
+    const m = /^\s*([A-Za-z0-9_-]+)\s*=\s*(?:"((?:[^"\\]|\\.)*)"|'([^']*)')\s*(?:#.*)?$/.exec(line);
+    if (!m) continue;
+    const value = (m[2] ?? m[3] ?? '').trim();
+    if (!value) continue;
+    if (m[1] === 'model') out.model = value;
+    else if (m[1] === 'model_reasoning_effort' && isEffortLevel(value)) out.effort = value;
+    else if (m[1] === 'cli_auth_credentials_store') out.credentialsStore = value;
+  }
+  return out;
+}
+
+// A Codex home counts as a login when auth.json exists (checked, never
+// opened: it holds the tokens) or config.toml keeps them in the Keychain.
+export function isCodexLogin(dir: string): boolean {
+  if (!isDirectory(dir)) return false;
+  if (fs.existsSync(path.join(dir, 'auth.json'))) return true;
+  const store = readCodexConfig(path.join(dir, 'config.toml')).credentialsStore;
+  return store === 'keyring' || store === 'auto';
+}
+
+export type DiscoveryConfig = Pick<Config, 'claudeMainDir' | 'claudeMainJson' | 'tokenStatsAccountsDir'> &
+  Partial<Pick<Config, 'codexMainDir' | 'accountNotes'>>;
+
+// claude-main is ~/.claude (its .claude.json sits at ~/.claude.json);
+// codex-main is ~/.codex. Token Stats' Accounts folder holds claude-N and
+// codex-N, each its own CLAUDE_CONFIG_DIR or CODEX_HOME. Claude accounts
+// come first, so the first account is Claude's.
+export function discoverAccounts(cfg: DiscoveryConfig): Account[] {
   const out: Account[] = [];
   if (isDirectory(cfg.claudeMainDir)) {
-    out.push(withDefaultModel({
-      id: 'claude-main',
-      provider: 'claude',
-      title: readLoginEmail(cfg.claudeMainJson) ?? readLoginEmail(path.join(cfg.claudeMainDir, '.claude.json')) ?? 'claude-main',
-      configDir: cfg.claudeMainDir,
-    }));
+    out.push(claudeAccount('claude-main', cfg.claudeMainDir, readLoginEmail(cfg.claudeMainJson) ?? readLoginEmail(path.join(cfg.claudeMainDir, '.claude.json'))));
   }
   let names: string[] = [];
   try {
@@ -68,47 +101,96 @@ export function discoverAccounts(cfg: Pick<Config, 'claudeMainDir' | 'claudeMain
   } catch {
     names = [];
   }
-  const numbered = names
-    .map((n) => /^claude-(\d+)$/.exec(n))
-    .filter((m): m is RegExpExecArray => m !== null)
-    .sort((a, b) => Number(a[1]) - Number(b[1]));
-  for (const m of numbered) {
-    const dir = path.join(cfg.tokenStatsAccountsDir, m[0]);
-    if (!isDirectory(dir)) continue;
-    out.push(withDefaultModel({
-      id: m[0],
-      provider: 'claude',
-      title: readLoginEmail(path.join(dir, '.claude.json')) ?? m[0],
-      configDir: dir,
-    }));
+  const numbered = (prefix: string) =>
+    names
+      .map((n) => new RegExp(`^${prefix}-(\\d+)$`).exec(n))
+      .filter((m): m is RegExpExecArray => m !== null)
+      .sort((a, b) => Number(a[1]) - Number(b[1]))
+      .map((m) => ({ id: m[0], dir: path.join(cfg.tokenStatsAccountsDir, m[0]) }));
+  for (const { id, dir } of numbered('claude')) {
+    if (isDirectory(dir)) out.push(claudeAccount(id, dir, readLoginEmail(path.join(dir, '.claude.json'))));
+  }
+  const codex = cfg.codexMainDir ? [{ id: 'codex-main', dir: cfg.codexMainDir }] : [];
+  for (const { id, dir } of [...codex, ...numbered('codex')]) {
+    if (isCodexLogin(dir)) out.push(codexAccount(id, dir));
+  }
+  for (const a of out) {
+    const note = cfg.accountNotes?.[a.id];
+    if (note) a.note = note;
   }
   return out;
 }
 
-function withDefaultModel(account: Account): Account {
-  const model = resolveDefaultModel(readSettingsModel(path.join(account.configDir, 'settings.json')), undefined);
+function claudeAccount(id: string, configDir: string, email: string | undefined): Account {
+  const account: Account = { id, provider: 'claude', title: email ?? id, configDir };
+  if (email) account.email = email;
+  const model = resolveDefaultModel(readSettingsModel(path.join(configDir, 'settings.json')), undefined);
   if (model) account.defaultModel = model;
   return account;
 }
 
+function codexAccount(id: string, configDir: string): Account {
+  const account: Account = { id, provider: 'codex', title: codexTitle(undefined, id), configDir };
+  const conf = readCodexConfig(path.join(configDir, 'config.toml'));
+  if (conf.model) account.defaultModel = conf.model;
+  if (conf.effort) account.defaultEffort = conf.effort;
+  return account;
+}
+
+// "Codex · <email>", so an app that only shows titles can tell codex-main
+// from a Claude login with the same address.
+function codexTitle(email: string | undefined, id: string): string {
+  return `Codex · ${email ?? id}`;
+}
+
+// The model an account names for sessions that name none: Claude's
+// settings.json, Codex's config.toml.
+function settingsModel(account: Account): string | undefined {
+  if (account.provider === 'codex') return readCodexConfig(path.join(account.configDir, 'config.toml')).model;
+  return readSettingsModel(path.join(account.configDir, 'settings.json'));
+}
+
+// What the registry needs from the UsageStore (usage.ts).
+export type AccountUsageSource = Pick<UsageStore, 'usageFor' | 'identityFor'>;
+
 export class AccountRegistry {
-  private cfg: Pick<Config, 'claudeMainDir' | 'claudeMainJson' | 'tokenStatsAccountsDir'>;
+  private cfg: DiscoveryConfig;
+  private usage?: AccountUsageSource;
   private cache: Account[] = [];
+  private scanned = '';
   private at = 0;
   private learned = new Map<string, LearnedAccountInfo>();
+  private listeners = new Set<(accounts: Account[]) => void>();
 
-  constructor(cfg: Pick<Config, 'claudeMainDir' | 'claudeMainJson' | 'tokenStatsAccountsDir'>) {
+  constructor(cfg: DiscoveryConfig, usage?: AccountUsageSource) {
     this.cfg = cfg;
+    this.usage = usage;
+  }
+
+  // Fired when a rescan finds a different list of accounts (a login added
+  // or removed, a new email or default). Usage changes come from the
+  // UsageStore's own onChange.
+  onChange(fn: (accounts: Account[]) => void): () => void {
+    this.listeners.add(fn);
+    return () => this.listeners.delete(fn);
   }
 
   // Re-scans at most every 10 seconds so a newly added login shows up
-  // without restarting the runner.
+  // without restarting the runner. Usage is added fresh on every call.
   list(): Account[] {
     if (Date.now() - this.at > 10_000 || this.cache.length === 0) {
-      this.cache = discoverAccounts(this.cfg).map((a) => this.enrich(a));
+      const found = discoverAccounts(this.cfg);
+      const key = JSON.stringify(found);
+      const changed = this.scanned !== '' && key !== this.scanned;
+      this.scanned = key;
+      this.cache = found.map((a) => this.enrich(a));
       this.at = Date.now();
+      if (changed) {
+        const list = this.cache.map((a) => this.withUsage(a));
+        for (const fn of this.listeners) fn(list);
+      }
     }
-    return this.cache;
+    return this.cache.map((a) => this.withUsage(a));
   }
 
   // Keeps what a probe or a turn showed about an account. Returns whether
@@ -128,11 +210,24 @@ export class AccountRegistry {
     const learned = this.learned.get(account.id);
     if (!learned) return account;
     const out: Account = { ...account };
-    const settingsModel = readSettingsModel(path.join(account.configDir, 'settings.json'));
-    const model = resolveDefaultModel(settingsModel, learned);
+    const model = resolveDefaultModel(settingsModel(account), learned);
     if (model) out.defaultModel = model;
     else delete out.defaultModel;
     if (learned.models) out.models = learned.models;
+    return out;
+  }
+
+  // Email, plan and title from Token Stats or the account's last reading
+  // (they beat .claude.json, which once held a stale address), and usage.
+  private withUsage(account: Account): Account {
+    if (!this.usage) return account;
+    const out: Account = { ...account };
+    const id = this.usage.identityFor(account);
+    if (id.email) out.email = id.email;
+    if (id.plan) out.plan = id.plan;
+    out.title = out.provider === 'codex' ? codexTitle(out.email, out.id) : (out.email ?? out.id);
+    const usage = this.usage.usageFor(out);
+    if (usage) out.usage = usage;
     return out;
   }
 
