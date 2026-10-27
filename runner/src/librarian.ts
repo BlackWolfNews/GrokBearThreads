@@ -70,7 +70,7 @@ type Answer = {
 export class Librarian {
   private host: LibrarianHost;
   private projects: Projects;
-  private models?: Pick<Models, 'generate'>;
+  private models?: Pick<Models, 'generate'> & Partial<Pick<Models, 'hasKey'>>;
   private clock: Clock;
   private log: Logger;
   private file: string;
@@ -89,7 +89,7 @@ export class Librarian {
   private stopped = false;
   private unsubs: (() => void)[] = [];
 
-  constructor(deps: { host: LibrarianHost; projects: Projects; models?: Pick<Models, 'generate'>; clock: Clock; log: Logger; home: string; userHome?: string }) {
+  constructor(deps: { host: LibrarianHost; projects: Projects; models?: Pick<Models, 'generate'> & Partial<Pick<Models, 'hasKey'>>; clock: Clock; log: Logger; home: string; userHome?: string }) {
     this.host = deps.host;
     this.projects = deps.projects;
     this.models = deps.models;
@@ -131,6 +131,9 @@ export class Librarian {
 
   status(): LibrarianStatus {
     this.rollDay();
+    // No key is known without asking the model; the budget isn't.
+    if (!this.current && !this.off && this.models?.hasKey && !this.models.hasKey()) this.off = 'No OpenRouter key';
+    else if (this.off === 'No OpenRouter key' && this.models?.hasKey?.()) this.off = undefined;
     const s: LibrarianStatus = {
       state: this.current ? 'working' : this.paused ? 'paused' : this.off ? 'off' : 'idle',
       paused: this.paused,
