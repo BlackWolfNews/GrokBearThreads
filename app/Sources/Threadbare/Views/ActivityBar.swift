@@ -4,7 +4,7 @@ import ThreadbareCore
 
 /// The column of icons down the sidebar's left edge, like VS Code's activity
 /// bar: the sidebar's views at the top (threads, hibernating, archive,
-/// scheduled) and Usage and Settings at the foot. These were rows in a
+/// scheduled, projects, the librarian) and Usage and Settings at the foot. These were rows in a
 /// footer under the threads, which took about five rows' height from the list.
 struct ActivityBar: View {
     @Environment(AppModel.self) private var app
@@ -32,6 +32,19 @@ struct ActivityBar: View {
                 ActivityButton(symbol: "clock", title: "Scheduled", shortcut: "⌘4",
                                badge: app.activeScheduleCount, active: app.sidebarMode == .scheduled) {
                     app.showSchedules()
+                }
+            }
+            // Only once the runner has said it knows about projects.
+            if app.projectsSupported {
+                ActivityButton(symbol: "square.stack.3d.up", title: "Projects", shortcut: "⌘5",
+                               active: app.sidebarMode == .projects) {
+                    app.showProjects()
+                }
+                // A count while it's looking at a thread or has some
+                // waiting: what it's doing and about to do.
+                ActivityButton(symbol: "books.vertical", title: "Librarian", shortcut: "⌘6",
+                               badge: app.librarian?.pendingCount, active: app.sidebarMode == .librarian) {
+                    app.showLibrarian()
                 }
             }
             Spacer(minLength: zoomed(8))

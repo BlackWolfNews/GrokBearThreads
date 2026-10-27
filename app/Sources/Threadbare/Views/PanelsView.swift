@@ -54,7 +54,7 @@ private struct PanelTabs: View {
                 }
             }
             if !thread.patches.isEmpty {
-                tab("Patches", count: thread.patches.count, help: "What applies to this folder", active: onPatches) {
+                tab("Patches", count: thread.patches.count, help: "What applies to this thread", active: onPatches) {
                     app.choosePanel(PanelPane.patchesTab, in: thread.id)
                 }
             }
@@ -103,62 +103,97 @@ private struct PanelTabs: View {
     static var height: CGFloat { zoomed(38) }
 }
 
-/// The Patches tab: each patch that applies to the folder, where it came
+/// The Patches tab: each patch that applies to the thread, where it came
 /// from, what it gives, and its error if it couldn't load. A file opens in
-/// the default editor.
-private struct PatchesList: View {
+/// the default editor. Patches from the thread's projects' folders are
+/// grouped under each project, so it's clear why a chip or panel is there.
+struct PatchesList: View {
+    @Environment(AppModel.self) private var app
     let thread: ThreadSummary
 
     var body: some View {
+        let groups = PatchGroups.group(thread) { app.project($0)?.title }
         ScrollView {
             VStack(alignment: .leading, spacing: zoomed(14)) {
-                ForEach(thread.patches) { patch in
-                    VStack(alignment: .leading, spacing: zoomed(4)) {
-                        HStack(spacing: zoomed(6)) {
-                            Image(systemName: "square.dashed")
-                                .font(.system(size: zoomed(11), weight: .medium))
-                                .foregroundStyle(.secondary)
-                            Text(patch.id)
-                                .font(.system(size: TypeScale.label, weight: .medium))
-                            Text(PatchesList.sourceName(patch.source))
-                                .font(.system(size: TypeScale.small))
-                                .foregroundStyle(Color(nsColor: Theme.faintText))
-                        }
-                        if let error = patch.error {
-                            Text(error)
-                                .font(.system(size: TypeScale.detail))
-                                .foregroundStyle(Color(nsColor: Theme.failed))
-                                .textSelection(.enabled)
-                        } else {
-                            let gives = PatchesList.gives(patch.id, in: thread)
-                            if !gives.isEmpty {
-                                Text(gives)
-                                    .font(.system(size: TypeScale.detail))
-                                    .foregroundStyle(.secondary)
-                            }
-                        }
-                        if let file = patch.file {
-                            Button {
-                                NSWorkspace.shared.open(URL(fileURLWithPath: file))
-                            } label: {
-                                Text(file.abbreviatingHome)
-                                    .font(.system(size: TypeScale.small))
-                                    .foregroundStyle(Color(nsColor: Theme.faintText))
-                                    .lineLimit(1)
-                                    .truncationMode(.middle)
-                            }
-                            .buttonStyle(.plain)
-                            .help("Open the file")
-                        }
+                ForEach(groups) { group in
+                    if groups.count > 1 { heading(group) }
+                    ForEach(group.patches) { patch in
+                        row(patch)
                     }
                 }
-                Text("A patch is a file in .threadbear/patches (in the project, a parent folder, or ~) whose default export lists actions, panels and hooks. Ask the agent for one.")
+                Text("A patch is a file in .threadbear/patches (in the thread's folder, a parent folder, a folder of one of its projects, or ~) whose default export lists actions, panels and hooks. Ask the agent for one.")
                     .font(.system(size: TypeScale.small))
                     .foregroundStyle(Color(nsColor: Theme.faintText))
                     .padding(.top, zoomed(6))
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(zoomed(16))
+        }
+    }
+
+    /// "This thread's folder", or the project's name, which opens its page.
+    @ViewBuilder
+    private func heading(_ group: PatchGroup) -> some View {
+        HStack(spacing: zoomed(6)) {
+            if let projectId = group.projectId {
+                PlainLink(title: group.title ?? "A project", help: "Open the project") { app.openProjectPage(projectId) }
+                    .foregroundStyle(.secondary)
+            } else {
+                Text("This thread's folder").foregroundStyle(.secondary)
+            }
+            Spacer(minLength: 0)
+        }
+        .font(.system(size: TypeScale.detail, weight: .semibold))
+        .padding(.top, zoomed(4))
+        .padding(.bottom, zoomed(4))
+        .overlay(alignment: .bottom) { Rectangle().fill(Color(nsColor: Theme.hairline)).frame(height: 0.5) }
+    }
+
+    private func row(_ patch: PatchInfo) -> some View {
+        VStack(alignment: .leading, spacing: zoomed(4)) {
+            HStack(spacing: zoomed(6)) {
+                Image(systemName: "square.dashed")
+                    .font(.system(size: zoomed(11), weight: .medium))
+                    .foregroundStyle(.secondary)
+                Text(patch.id)
+                    .font(.system(size: TypeScale.label, weight: .medium))
+                Text(PatchesList.sourceName(patch.source))
+                    .font(.system(size: TypeScale.small))
+                    .foregroundStyle(Color(nsColor: Theme.faintText))
+            }
+            if let error = patch.error {
+                Text(error)
+                    .font(.system(size: TypeScale.detail))
+                    .foregroundStyle(Color(nsColor: Theme.failed))
+                    .textSelection(.enabled)
+            } else {
+                let gives = PatchesList.gives(patch.id, in: thread)
+                if !gives.isEmpty {
+                    Text(gives)
+                        .font(.system(size: TypeScale.detail))
+                        .foregroundStyle(.secondary)
+                }
+            }
+            if let file = patch.file {
+                Button {
+                    NSWorkspace.shared.open(URL(fileURLWithPath: file))
+                } label: {
+                    Text(file.abbreviatingHome)
+                        .font(.system(size: TypeScale.small))
+                        .foregroundStyle(Color(nsColor: Theme.faintText))
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
+                .buttonStyle(.plain)
+                .help("Open the file")
+            } else if let folder = patch.folder, patch.projectId != nil {
+                // A built-in from a project folder: which one.
+                Text(folder.abbreviatingHome)
+                    .font(.system(size: TypeScale.small))
+                    .foregroundStyle(Color(nsColor: Theme.faintText))
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
         }
     }
 

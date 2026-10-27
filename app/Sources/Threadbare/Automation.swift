@@ -358,6 +358,12 @@ enum Automation {
             case "archive": app.showArchive()
             case "snoozed": app.sidebarMode = .snoozed
             case "scheduled": app.showSchedules()
+            case "projects":
+                guard app.projectsSupported else { return "error this runner has no projects" }
+                app.showProjects()
+            case "librarian":
+                guard app.projectsSupported else { return "error this runner has no projects" }
+                app.showLibrarian()
             default: app.sidebarMode = .inbox
             }
             return "ok"
@@ -374,6 +380,20 @@ enum Automation {
                 app.newSchedule(from: app.selectedThread, draftKey: app.selection ?? "new")
             }
             try? await Task.sleep(for: .milliseconds(400))
+            return "ok"
+        case "project":
+            // {"cmd":"project","id":"p_…"} opens a project's page in the
+            // detail area; {"cmd":"project","close":true} closes it.
+            if c["close"] as? Bool == true {
+                app.openProjectId = nil
+                return "ok"
+            }
+            guard let id = c["id"] as? String else {
+                return "error give an id: \(app.projects.map(\.id).joined(separator: ", "))"
+            }
+            guard app.project(id) != nil else { return "error no project \(id); there are \(app.projects.map(\.id).joined(separator: ", "))" }
+            app.openProjectPage(id)
+            try? await Task.sleep(for: .milliseconds(200))
             return "ok"
         case "close-schedule":
             app.scheduleEditor = nil
