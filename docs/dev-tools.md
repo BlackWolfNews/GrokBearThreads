@@ -311,6 +311,10 @@ rollback covers a release that doesn't come up.
   release that hasn't started yet, from a runner run from a checkout, or
   from a release built before `release.json` recorded its checkout (deploy
   once by hand, or reinstall, to get one that does).
+- The updater passes `--follow <checkout>` to deploy.mjs, so each release
+  it builds records the checkout it was following, not its own clone. A
+  release that names the clone (built before 27 Oct's fix) can't see main
+  and says so in `tb status`; one deploy by hand from the checkout fixes it.
 - `followMain: false` in `runner.json`, or `THREADBARE_FOLLOW_MAIN=0`,
   switches it off. `runner.status` reports it as `update`; `tb status`
   shows the line.

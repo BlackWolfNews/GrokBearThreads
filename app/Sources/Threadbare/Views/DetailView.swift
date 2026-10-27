@@ -25,6 +25,8 @@ struct RootView: View {
         // The automation's `settings` opens the Settings window; only a
         // SwiftUI view can (AppKit's showSettingsWindow: does nothing now).
         .onChange(of: app.settingsRequest) { openSettings() }
+        // Saves where the window is, so the next launch opens it there.
+        .background(MainWindowFrameTracker())
     }
 }
 
