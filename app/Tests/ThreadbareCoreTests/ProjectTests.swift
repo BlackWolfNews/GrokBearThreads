@@ -183,6 +183,44 @@ final class ProjectTests: XCTestCase {
         XCTAssertEqual(ProjectSections.threads(in: "b", from: threads).map(\.id), ["t3", "t2"], "the page lists put away ones too")
     }
 
+    // MARK: The Projects page's cards
+
+    func testCardsCountWhatEachProjectsThreadsAreDoing() {
+        let now = Date(timeIntervalSince1970: 1_000_000)
+        let projects = [
+            Project(id: "a", title: "A", updatedAt: now.addingTimeInterval(-86_400)),
+            Project(id: "quiet", title: "Quiet", updatedAt: now.addingTimeInterval(-7 * 86_400)),
+            Project(id: "gone", title: "Gone", archived: true),
+        ]
+        let at = { (minutes: Double) in now.addingTimeInterval(-minutes * 60) }
+        let inA = [ThreadProject(id: "a", title: "A")]
+        let threads = [
+            ThreadSummary(id: "run", title: "Running", status: .running, lastActivityAt: at(1), projects: inA),
+            ThreadSummary(id: "bg", title: "", lastActivityAt: at(2),
+                          background: [BackgroundTask(kind: .shell, description: "npm test")], projects: inA),
+            ThreadSummary(id: "wait", title: "Waiting", status: .waiting, needsYou: true, lastActivityAt: at(3), projects: inA),
+            ThreadSummary(id: "new", title: "Finished", needsYou: true, lastActivityAt: at(4), projects: inA),
+            ThreadSummary(id: "bad", title: "Broke", status: .error, lastActivityAt: at(5), projects: inA),
+            ThreadSummary(id: "old", title: "Old", lastActivityAt: at(6), projects: inA),
+            ThreadSummary(id: "away", title: "Away", status: .waiting, lastActivityAt: at(7), archivedAt: now, projects: inA),
+        ]
+        let cards = ProjectCard.build(ProjectSections.build(projects: projects, threads: threads, now: now))
+        XCTAssertEqual(cards.map(\.id), ["a", "quiet"], "archived projects get no card")
+        XCTAssertEqual(cards[0].status, ProjectCardStatus(working: 2, needsYou: 1, failed: 1, unread: 1, open: 6),
+                       "background work counts as working; archived threads aren't counted")
+        XCTAssertEqual(cards[0].status.parts.map(\.text), ["1 needs you", "2 working", "1 failed", "1 new"])
+        XCTAssertEqual(cards[0].recent, ["Running", "Untitled", "Waiting"])
+        XCTAssertEqual(cards[0].lastActivityAt, at(1))
+        XCTAssertTrue(cards[1].status.isQuiet)
+        XCTAssertEqual(cards[1].status.parts, [])
+        XCTAssertEqual(cards[1].recent, [])
+
+        let both = [ThreadSummary(id: "x", title: "x", status: .running, projects: [ThreadProject(id: "a", title: "A"), ThreadProject(id: "quiet", title: "Quiet")])]
+        let sections = ProjectSections.build(projects: projects, threads: both, now: now)
+        XCTAssertEqual(ProjectCard.build(sections).map(\.status.working), [1, 1], "on both cards")
+        XCTAssertEqual(ProjectCard.overall(sections).working, 1, "but one thread working")
+    }
+
     // MARK: The Patches tab
 
     func testPatchGroupsOwnFolderFirstThenEachProject() {

@@ -300,7 +300,7 @@ struct ThreadRowView: View {
     @State private var pressed = false
 
     /// Not while one of its sub-agents is showing: that row is highlighted.
-    private var isSelected: Bool { app.selection == thread.id && app.subagentSelection == nil && app.openProjectId == nil }
+    private var isSelected: Bool { app.selection == thread.id && app.subagentSelection == nil && app.openProjectId == nil && !app.showsProjectsHome }
     /// The screenshot run shows one row as if the pointer were over it.
     private var showsActions: Bool { hovering || app.hoverOverride == thread.id }
 
