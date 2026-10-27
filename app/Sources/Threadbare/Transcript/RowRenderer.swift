@@ -405,6 +405,9 @@ enum RowRenderer {
             total += RowMetrics.answerHeight
             return RowRender(height: vertical + zoomed(4) + total, text: answerText(resolution), lineHeights: textHeights)
 
+        case .review:
+            return RowRender(height: vertical + RowMetrics.cardPad * 2 + zoomed(22 + 4 + 20 + 10) + RowMetrics.buttonHeight)
+
         case .plan(let entries):
             let text = planText(entries)
             let size = measurer.measure(text, width: width - RowMetrics.cardPad * 2)

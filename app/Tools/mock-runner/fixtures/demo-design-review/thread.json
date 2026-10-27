@@ -1,0 +1,18 @@
+{
+  "id": "demo_design_review",
+  "title": "Compare account picker designs",
+  "cwd": "/Users/mike/dev/me/threadbare",
+  "accountId": "claude-main",
+  "provider": "claude",
+  "permissionMode": "full",
+  "status": "idle",
+  "live": false,
+  "needsYou": true,
+  "pendingReviews": 1,
+  "createdAt": "2026-10-27T05:00:00.000Z",
+  "updatedAt": "2026-10-27T05:01:00.000Z",
+  "lastActivityAt": "2026-10-27T05:01:00.000Z",
+  "preview": "The four images are ready to compare. Pick an option or leave notes.",
+  "lastSeq": 7,
+  "lastSeenSeq": 7
+}

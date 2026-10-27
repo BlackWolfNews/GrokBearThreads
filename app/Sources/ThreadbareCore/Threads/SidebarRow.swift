@@ -54,12 +54,16 @@ public struct ThreadRowLook: Sendable, Equatable {
     }
 
     public init(_ thread: ThreadSummary, section: InboxSection? = nil) {
-        switch thread.status {
-        case .waiting: status = .needsYou
-        case .running, .starting: status = .working
-        case .error: status = .failed
-        case .stopped: status = .stopped
-        case .idle: status = thread.background.isEmpty ? .time : .background
+        if thread.hasPendingReviews {
+            status = .needsYou
+        } else {
+            switch thread.status {
+            case .waiting: status = .needsYou
+            case .running, .starting: status = .working
+            case .error: status = .failed
+            case .stopped: status = .stopped
+            case .idle: status = thread.background.isEmpty ? .time : .background
+            }
         }
         unread = thread.needsYou && status != .needsYou && status != .working
         emphasised = thread.needsYou || status == .needsYou
