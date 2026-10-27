@@ -560,7 +560,8 @@ it once through `settings.setKey` and only ever hears `set` and `hint`.
 - **Failures.** A call never throws: it says why it didn't answer (no key,
   private folder, over budget, timed out, provider error), and the feature
   falls back. Each call times out after 20 seconds, is tried again once
-  on a network error or a 5xx, and at most 4 are in flight at once.
+  on a network error, a 5xx or an empty answer (not one cut off by its
+  token limit), and at most 4 are in flight at once.
 
 ## Patches
 

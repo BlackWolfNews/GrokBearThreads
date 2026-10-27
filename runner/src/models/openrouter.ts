@@ -22,7 +22,8 @@ export type ChatRequest = {
 
 export type ChatResponse =
   | { ok: true; text: string; inputTokens?: number; outputTokens?: number; costUsd?: number }
-  // retry: worth one more go (a network error, a 5xx, a 429, a 200 with no text).
+  // retry: worth one more go (a network error, a 5xx, a 429, a 200 with no text
+  // that wasn't cut off by max_tokens).
   | { ok: false; timedOut: boolean; retry: boolean; status?: number; message: string; costUsd?: number };
 
 export async function chat(req: ChatRequest): Promise<ChatResponse> {
@@ -67,10 +68,11 @@ export async function chat(req: ChatRequest): Promise<ChatResponse> {
     const choice = json?.choices?.[0];
     const text = choice?.message?.content;
     if (typeof text !== 'string') {
-      // A 200 with no text is the provider failing after OpenRouter took
-      // the request (it happens under load), so it's worth another go.
+      // A 200 with no text: the provider failed after OpenRouter took the
+      // request, worth another go; or the model spent max_tokens thinking
+      // before it wrote anything, which would only happen again.
       const why = choice?.error?.message ?? (choice?.finish_reason ? `finish_reason ${choice.finish_reason}` : undefined);
-      return { ok: false, timedOut: false, retry: true, message: `OpenRouter sent no text${why ? ` (${why})` : ''}`, costUsd: json?.usage?.cost };
+      return { ok: false, timedOut: false, retry: choice?.finish_reason !== 'length', message: `OpenRouter sent no text${why ? ` (${why})` : ''}`, costUsd: json?.usage?.cost };
     }
     return {
       ok: true,

@@ -1174,7 +1174,9 @@ export class Runner {
       cwd: st.rec.cwd,
       system: TITLE_PROMPT,
       prompt: reply ? `Message:\n${text.slice(0, 4000)}\n\nStart of the reply:\n${reply.slice(0, 1000)}` : `Message:\n${text.slice(0, 4000)}`,
-      maxTokens: 30,
+      // Room for Haiku to think first: at 30 it sometimes ran out before
+      // writing a word. A long answer is turned down by cleanTitle anyway.
+      maxTokens: 300,
     });
     if (!res.ok) return { reason: res.message };
     if (st.rt.deleted) return { reason: 'Deleted meanwhile.' };
@@ -2960,7 +2962,10 @@ const TITLE_PROMPT = [
 export function cleanTitle(text: string): string {
   let t = (text ?? '').split('\n').map((l) => l.trim()).find(Boolean) ?? '';
   t = t.replace(/^(title:\s*)/i, '').split(/\s[—–-]\s/)[0];
-  t = t.replace(/^["'`*]+|["'`*]+$/g, '').replace(/\.$/, '').trim();
+  t = t.replace(/^\*+|\*+$/g, '').trim();
+  // Quotes only when they wrap the whole title; ones inside it stay.
+  if (/^(["'`]).*\1$/.test(t)) t = t.slice(1, -1);
+  t = t.replace(/\.$/, '').trim();
   if (t.length > LIMITS.titleChars || t.split(/\s+/).length > 10) return '';
   return t;
 }

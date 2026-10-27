@@ -37,7 +37,8 @@ function fakeFetch(replies: (Reply | ((c: Call) => Reply))[]) {
     // A 200 with no text: what OpenRouter sends when the provider fails
     // after the request was accepted.
     if (r.empty !== undefined) {
-      return new Response(JSON.stringify({ choices: [{ message: { content: null }, finish_reason: 'error', error: { message: r.empty } }] }), { status: 200 });
+      const choice = r.empty === 'length' ? { message: { content: null }, finish_reason: 'length' } : { message: { content: null }, finish_reason: 'error', error: { message: r.empty } };
+      return new Response(JSON.stringify({ choices: [choice] }), { status: 200 });
     }
     const status = r.status ?? 200;
     const json = status === 200 ? { choices: [{ message: { content: r.text ?? '' } }], usage: { prompt_tokens: 10, completion_tokens: 3, cost: r.cost ?? 0.0001 } } : { error: { code: status, message: r.text ?? 'nope' } };
@@ -182,6 +183,13 @@ test('models: one retry on a 5xx or a network error, none on a 4xx', async () =>
   assert.ok(rd.ok && rd.value === 'second time');
   assert.equal(d.calls.length, 2);
   assert.match(d.ledger()[0].error, /no text.*Provider returned error/);
+
+  // Out of tokens before any text (the model thought first): the same
+  // limit would run out again, so not tried again.
+  const e = setup({ replies: [{ empty: 'length' }, { text: 'unused' }] });
+  const re = await e.models.generate({ feature: 'f', prompt: 'x', maxTokens: 30 });
+  assert.ok(!re.ok && /finish_reason length/.test(re.message));
+  assert.equal(e.calls.length, 1);
 });
 
 test('models: a call that hangs times out', async () => {
@@ -468,6 +476,7 @@ test('titles: cleanTitle tidies what a model says', () => {
   assert.equal(cleanTitle('Title: "Ship the settings window."'), 'Ship the settings window');
   assert.equal(cleanTitle('\n**Debug flaky CI**\nextra'), 'Debug flaky CI');
   assert.equal(cleanTitle('Fix the upload test — a short thread about CI'), 'Fix the upload test');
+  assert.equal(cleanTitle('Fix README typo "directons"'), 'Fix README typo "directons"', 'quotes inside stay');
   // Rambling or cut off by the token limit: no title, so the first line stays.
   assert.equal(cleanTitle('x'.repeat(80)), '');
   assert.equal(cleanTitle('Adding Cmd plus and Cmd minus zoom shortcuts to the whole Threadbare window'), '');
