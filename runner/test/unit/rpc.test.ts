@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { makeHarness } from '../helpers/fakes.ts';
 import { RpcServer } from '../../src/rpc.ts';
 import { RunnerClient } from '../../src/client.ts';
+import { RpcError } from '../../src/protocol.ts';
 import { nullLogger } from '../../src/log.ts';
 import { checkSequence, checkSummary } from '../helpers/protocol-check.ts';
 
@@ -279,4 +280,51 @@ test('clis.* call CliUpdates and return at once; without it they are -32601; cli
   assert.equal((await o.call('hello', { client: 'test', version: '1' })).clis, undefined);
   o.close();
   await old.server.close();
+});
+
+// Handovers (docs/protocol.md): the primary passes a request about a
+// draining runner's thread to it, lists its threads with its own, and
+// handles the request itself if that thread has just come across.
+test('requests about a draining runner\'s thread go to it; a moved answer is handled here', async () => {
+  const away = { id: 'away-1', title: 'Busy elsewhere', status: 'running', lastActivityAt: '2099-01-01T00:00:00.000Z' } as any;
+  const calls: { threadId: string; method: string }[] = [];
+  let owns = true;
+  const remote = {
+    owns: (id: string) => owns && id === away.id,
+    call: async (threadId: string, method: string) => {
+      calls.push({ threadId, method });
+      if (method === 'threads.send') return { turnId: 'remote-turn' };
+      if (method === 'threads.subscribe') return { events: [], inProgress: [] };
+      throw new RpcError(-32030, 'That thread has moved.');
+    },
+    summaries: () => (owns ? [away] : []),
+    search: async () => (owns ? [away] : []),
+  };
+  const { h, server, url } = await serve({ remote: remote as any });
+  const local = h.runner.create({ text: 'here', accountId: 'claude-3' }).thread;
+  const c = await RunnerClient.connect(url, TOKEN);
+  try {
+    const { threads } = await c.call('threads.list', {});
+    assert.deepEqual(threads.map((t: { id: string }) => t.id), [away.id, local.id]);
+    assert.deepEqual((await c.call('threads.search', { query: 'busy' })).threads.map((t: { id: string }) => t.id), [away.id]);
+    assert.deepEqual(await c.call('threads.send', { threadId: away.id, text: 'hi' }), { turnId: 'remote-turn' });
+    await c.call('threads.subscribe', { threadId: away.id });
+    // Its live events now reach this client through the primary.
+    const got: unknown[] = [];
+    c.onNotification((m, p) => m === 'thread.event' && got.push(p));
+    h.runner.publish({ method: 'thread.event', params: { threadId: away.id, event: { type: 'system.note', text: 'from over there', seq: 9, ts: '' } } } as any);
+    await new Promise((r) => setTimeout(r, 50));
+    assert.equal(got.length, 1);
+    // Requests about this runner's own threads stay here.
+    await c.call('threads.markSeen', { threadId: local.id, seq: 1 });
+    assert.ok(!calls.some((x) => x.threadId === local.id));
+    // An error from the draining runner comes back with its code...
+    await assert.rejects(c.call('threads.interrupt', { threadId: away.id }), (e: { code: number }) => e.code === -32030);
+    // ...unless the thread has come across meanwhile: then it's handled here.
+    owns = false;
+    await assert.rejects(c.call('threads.interrupt', { threadId: away.id }), (e: { code: number }) => e.code === -32004);
+  } finally {
+    c.close();
+    await server.close();
+  }
 });

@@ -69,9 +69,13 @@ export class Scheduler {
   private timer?: TimerHandle;
   private stopped = false;
   private unlisten?: () => void;
+  // Threads a draining runner still has (docs/protocol.md, "Handovers"):
+  // they're real threads, just not loaded here yet.
+  private elsewhere: (threadId: string) => boolean;
 
-  constructor(deps: { runner: ScheduleRunner; home: string; clock: Clock; log: Logger; zone?: () => string }) {
+  constructor(deps: { runner: ScheduleRunner; home: string; clock: Clock; log: Logger; zone?: () => string; elsewhere?: (threadId: string) => boolean }) {
     this.runner = deps.runner;
+    this.elsewhere = deps.elsewhere ?? (() => false);
     this.file = path.join(deps.home, 'schedules.json');
     this.clock = deps.clock;
     this.log = deps.log;
@@ -161,7 +165,7 @@ export class Scheduler {
     else rec.cron = this.parsedCron(p.cron!).source;
     if (p.threadId) {
       // Throws thread not found for a bad id.
-      rec.threadId = this.runner.get(p.threadId).id;
+      rec.threadId = this.elsewhere(p.threadId) ? p.threadId : this.runner.get(p.threadId).id;
     } else {
       rec.cwd = this.checkedFolder(p.cwd);
       if (p.accountId) rec.accountId = this.checkedAccount(p.accountId);
@@ -277,6 +281,12 @@ export class Scheduler {
       if (outcome === 'sent') rec.runs += 1;
       this.log.info('schedule ran', { scheduleId: rec.id, outcome, threadId, note });
     };
+    // Its thread is busy on a draining runner: it's sent once the thread
+    // has come across, like a busy thread's queue.
+    if (rec.threadId && this.elsewhere(rec.threadId)) {
+      if (manual) throw new RpcError(ErrorCode.busy, 'That thread is finishing a turn on the old runner; try again in a moment.');
+      return { outcome: 'retry' };
+    }
     try {
       if (rec.threadId) {
         // queue: a busy thread finishes what it's doing first.

@@ -11,6 +11,10 @@
 //   goodAfterMs: n                mark lastGood after n ms (default 200, -1 never)
 //   crashAfterMs: n               under launch.mjs, exit 1 n ms after it
 //                                 starts listening (passes the first hello)
+//   handover: true                an idle restart with busy threads hands
+//                                 over (launch.mjs starts current beside
+//                                 it); it stops listening and exits 0 once
+//                                 fake-busy.json is empty
 // <home>/fake-busy.json lists the threads that count as running,
 // <home>/fake-background.json the background work ({ threadId, tasks }[]),
 // while <home>/fake-hang-restart exists runner.restart never answers (a
@@ -103,6 +107,12 @@ function handle(method, params) {
       }
       const waitingFor = params.when === 'now' ? [] : [...new Set([...busy(), ...background().map((b) => b.threadId)])];
       pending = { when: params.when ?? 'idle', requestedAt: new Date().toISOString(), release: params.release, resumeThreadId: params.resume?.threadId };
+      // As the real one does, it still shows the restart as pending until it
+      // lets go of the port.
+      if (mode.handover && waitingFor.length && process.env.THREADBARE_SUPERVISED === '1' && process.send) {
+        handOver();
+        return { scheduled: true, waitingFor: [], handover: { keeps: waitingFor } };
+      }
       // Like the real one: exit 0 once nothing is running, and launchd
       // (here the fake one) starts it again.
       clearInterval(timer);
@@ -121,6 +131,28 @@ function handle(method, params) {
 }
 
 const NO_REPLY = Symbol('no reply');
+
+// As main.ts does: let go of the port, ask launch.mjs for the next runner,
+// finish the busy threads, then exit 0.
+function handOver() {
+  setTimeout(() => {
+    server.close();
+    for (const s of sockets) s.destroy();
+    process.on('message', (m) => {
+      if (m?.type !== 'handover') return;
+      writeJsonAtomic(path.join(home, `fake-handover-${process.pid}.json`), m);
+      if (!m.ok) process.exit(0);
+      const t = setInterval(() => {
+        if (busy().length === 0) {
+          clearInterval(t);
+          process.exit(0);
+        }
+      }, 100);
+    });
+    process.send({ type: 'handover' });
+  }, 50);
+}
+const sockets = new Set();
 
 // The smallest WebSocket server that works with Node's WebSocket client:
 // the upgrade handshake, masked client frames in, unmasked text frames out.
@@ -143,6 +175,8 @@ server.on('upgrade', (req, socket) => {
   let buf = Buffer.alloc(0);
   let authed = false;
   socket.on('error', () => {});
+  sockets.add(socket);
+  socket.on('close', () => sockets.delete(socket));
   socket.on('data', (chunk) => {
     buf = Buffer.concat([buf, chunk]);
     for (;;) {

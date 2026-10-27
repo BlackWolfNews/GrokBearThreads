@@ -1,3 +1,4 @@
+import fs from 'node:fs';
 import path from 'node:path';
 import { spawn, execFile, execFileSync } from 'node:child_process';
 import type { SpawnOptions, SpawnedProcess } from '@anthropic-ai/claude-agent-sdk';
@@ -26,9 +27,34 @@ export class ProcessRegistry {
   private scanTimer?: NodeJS.Timeout;
   private scanning = false;
 
-  constructor(runDir: string, log: Logger) {
-    this.file = path.join(runDir, 'children.json');
+  // `name` is children.json for the runner that owns the data dir. A
+  // draining runner (docs/protocol.md, "Handovers") moves its list to
+  // children-<pid>.json, so the new runner's sweep leaves its CLIs alone,
+  // and sweeps that file only if it dies.
+  constructor(runDir: string, log: Logger, name = 'children.json') {
+    this.file = path.join(runDir, name);
     this.log = log;
+  }
+
+  // Moves the list to another file in the same folder.
+  moveTo(name: string): void {
+    const old = this.file;
+    this.file = path.join(path.dirname(old), name);
+    this.save();
+    try {
+      fs.rmSync(old, { force: true });
+    } catch {
+      // the new runner's sweep finds an old copy empty of anything alive
+    }
+  }
+
+  // Removes the list (a draining runner that has finished).
+  removeFile(): void {
+    try {
+      fs.rmSync(this.file, { force: true });
+    } catch {
+      // gone
+    }
   }
 
   private save(): void {

@@ -3,7 +3,8 @@
 // THREADBARE_PORT pointing at temp places.
 import fs from 'node:fs';
 import { loadConfig, ensureHome, readToken, paths, recordListening, DEFAULT_CWD, RUNNER_VERSION } from './config.ts';
-import { RELEASE, markGoodLater, readRelease, takeRollbackNotice, tellLaunchListening } from './release.ts';
+import { RELEASE, markGoodLater, onSupervisorGone, readRelease, requestHandover, supervised, takeRollbackNotice, tellLaunchListening } from './release.ts';
+import { Peers, PrimaryLink, ThreadRouter, drainChildrenName, peersElsewhere, primaryElsewhere, removeDrainInfo, scheduleRouter, writeDrainInfo, type Elsewhere } from './handover.ts';
 import { RunnerUpdater } from './update.ts';
 import { Restarter, restartMethods } from './restart.ts';
 import { Scheduler, scheduleMethods } from './schedules.ts';
@@ -63,6 +64,7 @@ async function main(): Promise<void> {
   if (swept) log.warn('stopped process groups left from a previous run', { count: swept });
 
   const store = new ThreadStore(cfg.home);
+  const token = readToken(cfg.home);
   // Token Stats' limits.json as a baseline, plus what the threads' own
   // turns report; the registry puts it on every account.
   const usage = new UsageStore({ limitsFile: cfg.tokenStatsLimitsFile, dataDir: cfg.home, clock: realClock, log });
@@ -73,6 +75,14 @@ async function main(): Promise<void> {
   let runner!: Runner;
   let scheduler!: Scheduler;
   let restarter!: Restarter;
+  // Where the agent tools reach threads this runner doesn't have: draining
+  // runners' (Peers) while this is the primary, the primary's once this one
+  // is draining (docs/protocol.md, "Handovers").
+  let elsewhere: Elsewhere | undefined;
+  let primaryLink: PrimaryLink | undefined;
+  const router = (): ThreadRouter => (routerCache ??= new ThreadRouter(runner, () => elsewhere));
+  let routerCache: ThreadRouter | undefined;
+  const scheduleControl = () => scheduleRouter(scheduler, () => primaryLink);
   // Keeps both CLIs current (E). Its hooks call back into the runner and
   // the Restarter, made below; nothing calls them before start().
   const updates = new CliUpdates({
@@ -92,7 +102,7 @@ async function main(): Promise<void> {
     claudePath: cfg.claudePath,
     registry,
     log,
-    mcpServersFor: (threadId) => ({ [SERVER_NAME]: threadbareMcpServer(runner, threadId, scheduler) }),
+    mcpServersFor: (threadId) => ({ [SERVER_NAME]: threadbareMcpServer(router(), threadId, scheduleControl()) }),
     alwaysAsk: ALWAYS_ASK_TOOLS,
   });
   // One app-server per live Codex thread, each starting what E says is
@@ -102,7 +112,7 @@ async function main(): Promise<void> {
     codexArgs: cfg.codexArgs,
     registry,
     log,
-    toolsFor: (threadId) => buildThreadbareTools(runner, threadId, Date.now, scheduler),
+    toolsFor: (threadId) => buildThreadbareTools(router(), threadId, Date.now, scheduleControl()),
     onNotice: (text) => runner.notice('warning', text),
   });
   // The runner's own small-model calls. Reads the key from secrets/ on
@@ -127,10 +137,34 @@ async function main(): Promise<void> {
     models,
   });
   settings = new SettingsService({ config: cfg, models, publish: (n) => runner.publish(n), clock: realClock });
-  runner.start();
+  // Runners still finishing turns after a handover: connected before the
+  // threads load, so the ones they have are left to them. Nothing after the
+  // await below yields until runner.start(), so no thread can arrive first.
+  const peers = new Peers({
+    home: cfg.home,
+    token,
+    log,
+    runner: {
+      adopt: (threadId, o) => {
+        const t = runner.adopt(threadId, o);
+        restarter?.resumeAdopted(threadId);
+        return t;
+      },
+      publish: (n) => runner.publish(n),
+    },
+    sweep: async (pid) => {
+      const theirs = new ProcessRegistry(paths.run(cfg.home), log, drainChildrenName(pid));
+      const n = await theirs.sweepOrphans();
+      theirs.removeFile();
+      if (n) log.warn('stopped process groups a draining runner left', { pid, count: n });
+    },
+  });
+  const kept = await peers.connectAll();
+  elsewhere = peersElsewhere(peers);
+  runner.start({ skip: kept });
   // After the threads are loaded, so a schedule that came due while the
   // runner was stopped finds its thread.
-  scheduler = new Scheduler({ runner, home: cfg.home, clock: realClock, log });
+  scheduler = new Scheduler({ runner, home: cfg.home, clock: realClock, log, elsewhere: (id) => peers.owns(id) });
   scheduler.start();
   if (swept) runner.startupNotice('info', `Stopped ${swept === 1 ? 'a process group' : `${swept} process groups`} left running by the previous runner.`);
 
@@ -153,6 +187,9 @@ async function main(): Promise<void> {
     rolledBackFrom: rollback?.from,
     restart: () => void stop('restart'),
     updateStatus: () => updater.status(),
+    canHandOver: () => supervised() && !draining,
+    handOver: (keeps) => void handOver(keeps),
+    elsewhere: (id) => peers.owns(id),
   });
   // Follows main once this release has been marked good (below).
   const updater = new RunnerUpdater({
@@ -170,17 +207,21 @@ async function main(): Promise<void> {
   const methods = { ...restartMethods(restarter), ...scheduleMethods(scheduler), ...settingsMethods(settings), ...modelMethods(models) };
   // runner.status carries the CLI statuses too (protocol, "runner.status").
   const restartStatus = methods['runner.status'];
-  methods['runner.status'] = (p) => ({ ...(restartStatus(p) as Record<string, unknown>), clis: updates.list() });
+  methods['runner.status'] = (p) => {
+    const draining = peers.status();
+    return { ...(restartStatus(p) as Record<string, unknown>), clis: updates.list(), ...(draining.length ? { draining } : {}) };
+  };
   const codexWarning = missingCodex(updates.codexBinary(), cfg);
   if (codexWarning) log.warn('codex CLI not found', { path: updates.codexBinary() });
   const server = new RpcServer({
     host: cfg.host,
     port: cfg.port,
-    token: readToken(cfg.home),
+    token,
     runner,
     log,
     clis: updates,
     methods,
+    remote: peers,
     helloNotices: () => {
       // Like a missing claude: said to every client, until it's there.
       const noCodex = missingCodex(updates.codexBinary(), cfg);
@@ -224,8 +265,13 @@ async function main(): Promise<void> {
     cancelMarkGood();
     updater.stop();
     log.info('runner stopping', { signal });
-    // Whatever stopped it, a pending restart has now happened.
-    restarter.stopping();
+    // Whatever stopped it, a pending restart has now happened. A draining
+    // runner's restart was the handover, which the new runner has taken.
+    if (!draining) restarter.stopping();
+    // A restart "now" stops the draining runners too (docs/protocol.md).
+    if (signal === 'restart' && restarter.status().pendingRestart?.when === 'now') await peers.stopAll();
+    peers.close();
+    primaryLink?.close();
     scheduler.stop();
     usage.stop();
     updates.stop();
@@ -233,12 +279,109 @@ async function main(): Promise<void> {
     try {
       await runner.shutdown();
       await server.close().catch(() => {});
+      await drainServer?.close().catch(() => {});
       await registry.killAll(3000);
+      if (draining) {
+        registry.removeFile();
+        removeDrainInfo(cfg.home, process.pid);
+      }
     } finally {
       log.info('runner stopped');
       process.exit(0);
     }
   };
+
+  // ------------------------------------------------------------ handover
+  // docs/protocol.md, "Handovers". This runner keeps `keeps` (busy threads)
+  // until their turns end and launch.mjs starts the current release beside
+  // it, which takes everything else. The order matters: the new runner
+  // must find this one's drain file, a free port and a free lock.
+  let draining = false;
+  let drainServer: RpcServer | undefined;
+  let primaryHeard = false;
+  const handOver = async (keeps: string[]) => {
+    if (draining || stopping) return;
+    draining = true;
+    log.info('starting the handover', { keeps });
+    try {
+      cancelMarkGood();
+      updater.stop();
+      scheduler.stop();
+      updates.stop();
+      settings.stop();
+      usage.stopWriting();
+      // Every thread not kept lets go now; resolves once their CLIs exit.
+      await runner.beginDrain(keeps, {
+        backgroundMs: BACKGROUND_HOLD_MS,
+        // Only while a new runner is connected to hear it; otherwise it
+        // would load the thread as after a crash.
+        ready: () => primaryHeard && (drainServer?.connectedClients() ?? 0) > 0,
+        onHandedOver: (threadId) => {
+          // To the primary, over the drain port.
+          runner.publish({ method: 'drain.handedOver', params: { threadId } });
+          if (runner.keeping()?.length === 0) finishDrain();
+        },
+      });
+      // The new runner sweeps children.json; this one's CLIs are listed
+      // apart so they're left alone.
+      registry.moveTo(drainChildrenName(process.pid));
+      drainServer = new RpcServer({
+        host: '127.0.0.1',
+        port: 0,
+        token,
+        runner,
+        log,
+        onlyOwn: true,
+        methods: {
+          'drain.hello': () => {
+            primaryHeard = true;
+            // After this answer, so the primary has subscribed first.
+            setTimeout(() => runner.recheckHandovers(), 1000);
+            return { pid: process.pid, version: RUNNER_VERSION, release: RELEASE.release, threads: runner.keeping() ?? [] };
+          },
+          'drain.stop': () => {
+            setImmediate(() => void stop('drain.stop'));
+            return {};
+          },
+          'runner.status': (p) => ({ ...(restartStatus(p) as Record<string, unknown>), draining: true, keeping: runner.keeping() }),
+        },
+      });
+      const { port: drainPort } = await drainServer.listen();
+      writeDrainInfo(cfg.home, { pid: process.pid, port: drainPort, version: RUNNER_VERSION, release: RELEASE.release, since: new Date().toISOString(), threads: runner.keeping() ?? [] });
+      await server.close().catch(() => {});
+      lock.release();
+      // The agent tools reach the new runner over the port from here.
+      primaryLink = new PrimaryLink(cfg.host, cfg.port, token);
+      elsewhere = primaryElsewhere(primaryLink, runner);
+      log.info('draining', { port: drainPort, keeps: runner.keeping() });
+    } catch (e) {
+      log.error('could not hand over; restarting instead', { error: (e as Error)?.stack ?? String(e) });
+      void stop('restart');
+      return;
+    }
+    const reply = await requestHandover();
+    if (!reply.ok) {
+      // Nothing can start the new runner, and this one no longer listens on
+      // the port: restart the old way, which ends the kept turns.
+      log.error('launch.mjs would not start the new runner; restarting instead', { error: reply.error });
+      void stop('restart');
+      return;
+    }
+    log.info('the new runner is starting', { pid: reply.pid });
+    if (runner.keeping()?.length === 0) finishDrain();
+  };
+  // Every kept thread has gone across: nothing left to do here.
+  let finishing = false;
+  const finishDrain = () => {
+    if (finishing) return;
+    finishing = true;
+    log.info('handed every thread over; exiting');
+    // A moment for the last drain.handedOver to reach the primary.
+    setTimeout(() => void stop('drained'), 500);
+  };
+  // The supervisor is gone: nothing would restart this runner, and its
+  // children would be orphans.
+  onSupervisorGone(() => void stop('supervisor gone'));
   process.on('SIGTERM', () => void stop('SIGTERM'));
   process.on('SIGINT', () => void stop('SIGINT'));
   process.on('SIGHUP', () => void stop('SIGHUP'));
@@ -260,6 +403,10 @@ async function main(): Promise<void> {
     }
   });
 }
+
+// How long background work holds a kept thread on a draining runner after
+// its last turn, as it holds an idle restart (update.ts uses the same).
+const BACKGROUND_HOLD_MS = 30 * 60_000;
 
 // A warning when the Codex binary new sessions would start isn't there, or
 // undefined. Threadbare's own copy may still be on its way.

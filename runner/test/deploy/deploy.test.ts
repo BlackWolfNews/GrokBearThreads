@@ -168,6 +168,28 @@ async function waitFor<T>(what: string, fn: () => T | Promise<T>, ms = 20_000): 
   }
 }
 
+// runner.status from the sandbox runner.
+async function status(): Promise<Record<string, any>> {
+  const { connectRpc } = await rpcClient;
+  const port = readJson(path.join(home, 'runner.json')).port;
+  const token = fs.readFileSync(path.join(home, 'secrets', 'runner-token'), 'utf8').trim();
+  const conn = await connectRpc(port, token, 2000);
+  try {
+    return await conn.call('runner.status', {});
+  } finally {
+    conn.close();
+  }
+}
+
+function alive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 const runsOn = (id: string) => waitFor(`the runner on ${id}`, async () => (await version()) === `9.9.9+${id}`);
 
 before(() => {
@@ -1055,6 +1077,34 @@ test('--check gives up once a runner that stopped before it was marked good stay
   r = deploy(['--rollback', '--now']);
   assert.equal(r.status, 0, out(r));
   await runsOn(good);
+});
+
+test('a handover: the new release starts beside the old runner, which exits once its threads are done', { timeout: 120_000 }, async () => {
+  commit({ handover: true }, 'hands over');
+  let r = deploy(['--skip-checks', '--now']);
+  assert.equal(r.status, 0, out(r));
+  const old = current();
+  await runsOn(old);
+  const oldPid: number = (await status()).pid;
+  setBusy(['t1']);
+  commit({ handover: true, next: true }, 'the next one');
+  r = deploy(['--skip-checks']);
+  assert.equal(r.status, 0, out(r));
+  assert.match(r.stdout, /taking over now; 1 busy thread finishes on the old one first/);
+  const next = current();
+  assert.notEqual(next, old);
+  await runsOn(next);
+  // Both run: the old one finishing t1, the new one on the port.
+  const reply = readJson(path.join(home, `fake-handover-${oldPid}.json`));
+  assert.equal(reply.ok, true);
+  assert.notEqual(reply.pid, oldPid);
+  assert.ok(alive(oldPid), 'the old runner is still finishing');
+  setBusy([]);
+  await waitFor('the old runner to exit', () => !alive(oldPid));
+  // Its exit isn't a restart: the new one stays up.
+  await sleep(1500);
+  assert.equal((await status()).pid, reply.pid);
+  assert.ok(state().boots.some((b: any) => b.pid === oldPid && b.clean), 'its exit counts as clean');
 });
 
 test('uninstall boots the job out and removes the plist', { timeout: 30_000 }, async () => {

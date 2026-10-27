@@ -405,6 +405,12 @@ export function formatStatus(s: RunnerStatus, threads: ThreadSummary[], now: num
     lines.push(`Background work: ${plural(bg.length, 'thread', 'threads')}`);
     for (const b of bg) lines.push(`  ${threadLine(b.threadId, threads, self)}: ${b.tasks.join('; ')}`);
   }
+  // Handovers: an older release finishing these threads' turns, which
+  // move here when they end.
+  for (const d of s.draining ?? []) {
+    lines.push(`Old runner ${d.version}, pid ${d.pid}, finishing ${plural(d.threads.length, 'thread', 'threads')}, handed over ${duration(now - Date.parse(d.since))} ago`);
+    for (const id of d.threads) lines.push(`  ${threadLine(id, threads, self)}`);
+  }
   const p = s.pendingRestart;
   if (p) {
     const waiting = p.waitingFor?.length ?? 0;

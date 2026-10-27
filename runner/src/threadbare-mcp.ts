@@ -17,12 +17,14 @@ import { parseWhen, relativeFuture, relativeTime } from './when.ts';
 export { parseWhen, relativeFuture, relativeTime };
 import { RUNNER_VERSION, expandHome } from './config.ts';
 
-export type ThreadControl = Pick<
-  Runner,
-  'hello' | 'list' | 'search' | 'get' | 'events' | 'create' | 'send' | 'update' | 'interrupt' | 'delete'
->;
+// What the tools drive: the Runner itself, or during a handover
+// (docs/protocol.md) a ThreadRouter (handover.ts) that reaches threads on
+// the other runner, which is why every call may be a promise.
+type Aw<T> = T | Promise<T>;
+type Async<T, K extends keyof T> = { [P in K]: T[P] extends (...a: infer A) => infer R ? (...a: A) => Aw<R> : never };
+export type ThreadControl = { hello: Runner['hello'] } & Async<Runner, 'list' | 'search' | 'get' | 'events' | 'create' | 'send' | 'update' | 'interrupt' | 'delete'>;
 
-export type ScheduleControl = Pick<Scheduler, 'create' | 'list' | 'find' | 'update' | 'delete'>;
+export type ScheduleControl = Async<Scheduler, 'create' | 'list' | 'find' | 'update' | 'delete'>;
 
 export const SERVER_NAME = 'threadbare';
 // Asked about every time, even in a thread with full access: deleting is
@@ -40,10 +42,10 @@ const providerName = (a: Pick<Account, 'provider'>): string => (a.provider === '
 const ok = (text: string): Result => ({ content: [{ type: 'text', text }] });
 const fail = (text: string): Result => ({ content: [{ type: 'text', text }], isError: true });
 
-function handle<A>(fn: (args: A) => string): (args: A) => Promise<Result> {
+function handle<A>(fn: (args: A) => string | Promise<string>): (args: A) => Promise<Result> {
   return async (args) => {
     try {
-      return ok(fn(args));
+      return ok(await fn(args));
     } catch (e) {
       return fail((e as Error).message ?? String(e));
     }
@@ -71,18 +73,18 @@ export function approvalTitle(name: string, input: Record<string, unknown>, find
 }
 
 export function buildThreadbareTools(control: ThreadControl, selfId: string, now: () => number = Date.now, schedules?: ScheduleControl) {
-  const all = (): ThreadSummary[] => control.list(['inbox', 'snoozed', 'archived']);
+  const all = async (): Promise<ThreadSummary[]> => control.list(['inbox', 'snoozed', 'archived']);
 
   // Full ids, or any unique prefix of one (the list shows 8 characters).
-  const resolve = (id: string | undefined): string => {
+  const resolve = async (id: string | undefined): Promise<string> => {
     if (!id) return selfId;
-    const hits = all().filter((t) => t.id === id || t.id.startsWith(id));
+    const hits = (await all()).filter((t) => t.id === id || t.id.startsWith(id));
     if (hits.length === 1) return hits[0].id;
     if (hits.length === 0) throw new Error(`No thread with id ${id}. list_threads shows them.`);
     throw new Error(`${id} matches ${hits.length} threads; use more of the id.`);
   };
 
-  const resolveOther = (id: string | undefined): string => {
+  const resolveOther = async (id: string | undefined): Promise<string> => {
     if (!id) throw new Error('threadId is required. list_threads shows the ids.');
     return resolve(id);
   };
@@ -91,7 +93,7 @@ export function buildThreadbareTools(control: ThreadControl, selfId: string, now
   // or "codex" / "claude" when that provider has only one. claude-1 and
   // codex-main can share an email, so a name that fits several is refused
   // rather than guessed.
-  const account = (q: string | undefined): string | undefined => {
+  const account = async (q: string | undefined): Promise<string | undefined> => {
     if (!q) return undefined;
     const accounts: Account[] = control.hello().accounts;
     const named = (a: Account) => `${a.id} (${a.title})`;
@@ -106,8 +108,8 @@ export function buildThreadbareTools(control: ThreadControl, selfId: string, now
     throw new Error(`No account ${q}. Accounts: ${accounts.map(named).join(', ')}`);
   };
 
-  const folder = (f: string): string => {
-    const base = control.get(selfId).cwd;
+  const folder = async (f: string): Promise<string> => {
+    const base = (await control.get(selfId)).cwd;
     return path.resolve(base, expandHome(f.trim()));
   };
 
@@ -137,20 +139,20 @@ export function buildThreadbareTools(control: ThreadControl, selfId: string, now
 
   // Messages an agent sends say where they came from, so whoever reads the
   // other thread (Mike or its agent) knows it wasn't Mike typing.
-  const from = (): string => `[Sent by the agent in the thread "${control.get(selfId).title}" (${selfId.slice(0, 8)})]\n\n`;
+  const from = async (): Promise<string> => `[Sent by the agent in the thread "${(await control.get(selfId)).title}" (${selfId.slice(0, 8)})]\n\n`;
 
 
-  const titleOf = (id: string): string => {
+  const titleOf = async (id: string): Promise<string> => {
     try {
-      return `"${control.get(id).title}"`;
+      return `"${(await control.get(id)).title}"`;
     } catch {
       return id.slice(0, 8);
     }
   };
 
-  const scheduleLine = (sc: Schedule): string => {
+  const scheduleLine = async (sc: Schedule): Promise<string> => {
     const state = sc.finishedAt ? 'done' : sc.paused ? 'paused' : sc.nextRunAt ? `next ${relativeFuture(sc.nextRunAt, now())} (${sc.nextRunAt})` : 'no more runs';
-    const target = sc.threadId ? (sc.threadId === selfId ? 'this thread' : `thread ${sc.threadId.slice(0, 8)} ${titleOf(sc.threadId)}`) : `a new thread in ${sc.cwd}`;
+    const target = sc.threadId ? (sc.threadId === selfId ? 'this thread' : `thread ${sc.threadId.slice(0, 8)} ${await titleOf(sc.threadId)}`) : `a new thread in ${sc.cwd}`;
     const last = sc.lastRun && sc.lastRun.outcome !== 'sent' ? `; last run ${sc.lastRun.outcome}: ${sc.lastRun.note ?? ''}` : '';
     return `${sc.id.slice(0, 8)}  ${sc.title}  [${sc.whenText}; ${state}${last}]  to ${target}`;
   };
@@ -178,13 +180,13 @@ export function buildThreadbareTools(control: ThreadControl, selfId: string, now
         effort: effortEnum.optional().describe('With new_thread: reasoning effort (ultra is Codex only).'),
         permissionMode: z.enum(['full', 'ask']).optional().describe('With new_thread: "full" (default) or "ask".'),
       },
-      handle(({ text, when, cron, timezone, title, threadId, id: alias, new_thread, folder: f, account: acc, model, effort, permissionMode }) => {
+      handle(async ({ text, when, cron, timezone, title, threadId, id: alias, new_thread, folder: f, account: acc, model, effort, permissionMode }) => {
         if ((when === undefined) === (cron === undefined)) throw new Error('Give exactly one of when (once) and cron (repeating).');
         const target = new_thread
-          ? { cwd: folder(f ?? '.'), accountId: account(acc), model, effort, permissionMode }
-          : { threadId: resolve(threadId ?? alias) };
+          ? { cwd: await folder(f ?? '.'), accountId: await account(acc), model, effort, permissionMode }
+          : { threadId: await resolve(threadId ?? alias) };
         if (!new_thread && (f || acc || model || effort || permissionMode)) throw new Error('folder, account, model, effort and permissionMode are for new_thread schedules; a thread keeps its own.');
-        const sc = mustSchedules().create({
+        const sc = await mustSchedules().create({
           text,
           title,
           ...(when !== undefined ? { at: parseWhen(when, now()) } : { cron }),
@@ -192,16 +194,16 @@ export function buildThreadbareTools(control: ThreadControl, selfId: string, now
           ...target,
           createdBy: selfId,
         });
-        return `Scheduled ${sc.id.slice(0, 8)}: ${scheduleLine(sc)}`;
+        return `Scheduled ${sc.id.slice(0, 8)}: ${await scheduleLine(sc)}`;
       }),
     ),
     tool(
       'list_schedules',
       "Lists Threadbare's schedules: short id, title, when, the next run and where it sends. By default the ones that send to this thread or that this thread made; all for every schedule.",
       { all: z.boolean().optional().describe('Every schedule, not just this thread\'s.') },
-      handle(({ all: everything }) => {
-        const list = mustSchedules().list(everything ? undefined : selfId);
-        return list.length ? list.map(scheduleLine).join('\n') : everything ? 'No schedules.' : 'No schedules for this thread. all: true shows every schedule.';
+      handle(async ({ all: everything }) => {
+        const list = await mustSchedules().list(everything ? undefined : selfId);
+        return list.length ? (await Promise.all(list.map(scheduleLine))).join('\n') : everything ? 'No schedules.' : 'No schedules for this thread. all: true shows every schedule.';
       }),
       { annotations: { readOnlyHint: true } },
     ),
@@ -217,8 +219,8 @@ export function buildThreadbareTools(control: ThreadControl, selfId: string, now
         timezone: z.string().nullable().optional().describe("IANA zone for the cron, or null for the Mac's."),
         paused: z.boolean().optional(),
       },
-      handle(({ scheduleId, text, title, when, cron, timezone, paused }) => {
-        const sc = mustSchedules().update({
+      handle(async ({ scheduleId, text, title, when, cron, timezone, paused }) => {
+        const sc = await mustSchedules().update({
           scheduleId,
           text,
           title,
@@ -227,17 +229,17 @@ export function buildThreadbareTools(control: ThreadControl, selfId: string, now
           timezone,
           paused,
         });
-        return scheduleLine(sc);
+        return await scheduleLine(sc);
       }),
     ),
     tool(
       'delete_schedule',
       'Deletes a schedule so it never sends again.',
       { scheduleId: z.string().describe('Schedule id or a unique prefix.') },
-      handle(({ scheduleId }) => {
+      handle(async ({ scheduleId }) => {
         const s = mustSchedules();
-        const sc = s.find(scheduleId);
-        s.delete(sc.id);
+        const sc = await s.find(scheduleId);
+        await s.delete(sc.id);
         return `Deleted the schedule "${sc.title}" (${sc.id.slice(0, 8)}).`;
       }),
     ),
@@ -253,8 +255,8 @@ export function buildThreadbareTools(control: ThreadControl, selfId: string, now
         query: z.string().optional().describe('Words to search for in titles and previews, across every list.'),
         limit: z.number().int().min(1).max(200).optional().describe('Most threads to return. Default 30.'),
       },
-      handle(({ include, query, limit }) => {
-        const threads = query ? control.search(query, limit ?? 30) : control.list(include ?? ['inbox']).slice(0, limit ?? 30);
+      handle(async ({ include, query, limit }) => {
+        const threads = query ? await control.search(query, limit ?? 30) : (await control.list(include ?? ['inbox'])).slice(0, limit ?? 30);
         return threads.length ? threads.map(line).join('\n') : 'No threads.';
       }),
     ),
@@ -265,15 +267,15 @@ export function buildThreadbareTools(control: ThreadControl, selfId: string, now
         ...thisOrOther,
         messages: z.number().int().min(1).max(100).optional().describe('How many recent messages. Default 10.'),
       },
-      handle(({ threadId, id: alias, messages }) => {
-        const id = resolve(threadId ?? alias);
-        const t = control.get(id);
+      handle(async ({ threadId, id: alias, messages }) => {
+        const id = await resolve(threadId ?? alias);
+        const t = await control.get(id);
         const want = messages ?? 10;
         const picked: string[] = [];
         let before: number | undefined;
         // Walk back a page at a time until there are enough messages.
         for (let pages = 0; pages < 20 && picked.length < want; pages++) {
-          const page = control.events(id, { beforeSeq: before, limit: 500 });
+          const page = await control.events(id, { beforeSeq: before, limit: 500 });
           const evs = page.events as PersistedEvent[];
           for (const e of [...evs].reverse()) {
             if (picked.length >= want) break;
@@ -293,7 +295,7 @@ export function buildThreadbareTools(control: ThreadControl, selfId: string, now
       'list_accounts',
       'Lists the Claude and Codex logins Threadbare can run threads on: provider, how much room each has left, its models, and the defaults for new threads (a new thread with no account starts on the one with the most room).',
       {},
-      handle(() => {
+      handle(async () => {
         const h = control.hello();
         const rows = h.accounts.map((a) => {
           const bits = [providerName(a), a.note ?? '', usageLine(a.usage, now()), a.id === h.defaults.accountId ? 'default for new threads' : ''].filter(Boolean);
@@ -317,12 +319,12 @@ export function buildThreadbareTools(control: ThreadControl, selfId: string, now
         effort: effortEnum.optional().describe("Reasoning effort (ultra is Codex only). Default: the model's own level."),
         permissionMode: z.enum(['full', 'ask']).optional().describe('"full" (default) or "ask" before edits and commands.'),
       },
-      handle(({ text, title, folder: f, account: acc, model, effort, permissionMode }) => {
-        const r = control.create({
-          text: from() + text,
+      handle(async ({ text, title, folder: f, account: acc, model, effort, permissionMode }) => {
+        const r = await control.create({
+          text: (await from()) + text,
           title: title?.trim() || text.split('\n').map((l) => l.trim()).find(Boolean)?.slice(0, 200),
-          cwd: folder(f ?? '.'),
-          accountId: account(acc),
+          cwd: await folder(f ?? '.'),
+          accountId: await account(acc),
           model,
           effort,
           permissionMode,
@@ -337,11 +339,11 @@ export function buildThreadbareTools(control: ThreadControl, selfId: string, now
         ...other,
         text: z.string().min(1),
       },
-      handle(({ threadId, id: alias, text }) => {
-        const id = resolveOther(threadId ?? alias);
+      handle(async ({ threadId, id: alias, text }) => {
+        const id = await resolveOther(threadId ?? alias);
         if (id === selfId) throw new Error("That's this thread. Just carry on here.");
-        control.send(id, from() + text);
-        return `Sent to ${id.slice(0, 8)} "${control.get(id).title}".`;
+        await control.send(id, (await from()) + text);
+        return `Sent to ${id.slice(0, 8)} "${(await control.get(id)).title}".`;
       }),
     ),
     tool(
@@ -356,8 +358,8 @@ export function buildThreadbareTools(control: ThreadControl, selfId: string, now
         snooze: z.string().optional().describe('Snooze until: 30m, 2h, 1d, tomorrow, an ISO time, or "off" to wake it.'),
         archived: z.boolean().optional().describe('true to archive, false to bring back to the inbox.'),
       },
-      handle(({ threadId, id: alias, title, model, effort, permissionMode, snooze, archived }) => {
-        const id = resolve(threadId ?? alias);
+      handle(async ({ threadId, id: alias, title, model, effort, permissionMode, snooze, archived }) => {
+        const id = await resolve(threadId ?? alias);
         const stops = (snooze !== undefined && snooze.trim().toLowerCase() !== 'off') || archived === true;
         if (id === selfId && stops) throw new Error("Can't snooze or archive this thread from inside its own turn. Ask Mike to, or do it when the work is done.");
         const upd: Parameters<ThreadControl['update']>[0] = { threadId: id };
@@ -367,7 +369,7 @@ export function buildThreadbareTools(control: ThreadControl, selfId: string, now
         if (permissionMode !== undefined) upd.permissionMode = permissionMode;
         if (snooze !== undefined) upd.snoozedUntil = snooze.trim().toLowerCase() === 'off' ? null : parseWhen(snooze, now());
         if (archived !== undefined) upd.archived = archived;
-        return describe(control.update(upd).thread);
+        return describe((await control.update(upd)).thread);
       }),
     ),
     tool(
@@ -379,13 +381,13 @@ export function buildThreadbareTools(control: ThreadControl, selfId: string, now
         account: z.string().optional().describe('Also move to this account (id or email), Claude or Codex. Another provider starts fresh with a summary, on that provider\'s default model.'),
         then: z.string().optional().describe('For this thread: what to do next once moved, sent as the next message.'),
       },
-      handle(({ folder: f, threadId, id: alias, account: acc, then }) => {
-        const id = resolve(threadId ?? alias);
-        const cwd = folder(f);
-        const t = control.update({ threadId: id, cwd, accountId: account(acc) }).thread;
+      handle(async ({ folder: f, threadId, id: alias, account: acc, then }) => {
+        const id = await resolve(threadId ?? alias);
+        const cwd = await folder(f);
+        const t = (await control.update({ threadId: id, cwd, accountId: await account(acc) })).thread;
         const self = id === selfId;
         if (then?.trim()) {
-          control.send(id, `[Sent by the agent before moving to ${t.cwd}]\n\n${then.trim()}`);
+          await control.send(id, `[Sent by the agent before moving to ${t.cwd}]\n\n${then.trim()}`);
         }
         const when = self ? 'when this turn ends' : 'on its next message';
         const next = then?.trim() ? (self ? ' It carries on by itself straight after.' : ' Your message waits for it.') : self ? ' It waits for Mike after that.' : '';
@@ -396,22 +398,22 @@ export function buildThreadbareTools(control: ThreadControl, selfId: string, now
       'interrupt_thread',
       'Stops the turn another thread is running, like pressing Stop in the app.',
       other,
-      handle(({ threadId, id: alias }) => {
-        const id = resolveOther(threadId ?? alias);
+      handle(async ({ threadId, id: alias }) => {
+        const id = await resolveOther(threadId ?? alias);
         if (id === selfId) throw new Error("That's this thread. Just end the turn.");
-        control.interrupt(id);
-        return `Interrupted ${id.slice(0, 8)} "${control.get(id).title}".`;
+        await control.interrupt(id);
+        return `Interrupted ${id.slice(0, 8)} "${(await control.get(id)).title}".`;
       }),
     ),
     tool(
       'delete_thread',
       "Deletes a thread: stops its CLI and moves its files to Threadbare's trash folder. Mike is always asked first. Archiving is usually what's wanted; delete only when he asked for it.",
       other,
-      handle(({ threadId, id: alias }) => {
-        const id = resolveOther(threadId ?? alias);
+      handle(async ({ threadId, id: alias }) => {
+        const id = await resolveOther(threadId ?? alias);
         if (id === selfId) throw new Error("A thread can't delete itself.");
-        const title = control.get(id).title;
-        control.delete(id);
+        const title = (await control.get(id)).title;
+        await control.delete(id);
         return `Deleted "${title}" (${id.slice(0, 8)}).`;
       }),
       { annotations: { destructiveHint: true } },

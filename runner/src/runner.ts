@@ -79,7 +79,9 @@ export type Notification =
   | { method: 'runner.notice'; params: { level: 'info' | 'warning' | 'error'; message: string } }
   | { method: 'schedules.updated'; params: { schedules: Schedule[] } }
   | { method: 'clis.updated'; params: { clis: CliStatus[] } }
-  | { method: 'settings.updated'; params: { settings: Settings } };
+  | { method: 'settings.updated'; params: { settings: Settings } }
+  // Only from a draining runner, to the primary (handover.ts).
+  | { method: 'drain.handedOver'; params: { threadId: string } };
 
 // The seams to D's and E's modules (usage.ts, updates/), as far as the
 // runner uses them. They're structural so tests can pass small fakes.
@@ -224,6 +226,7 @@ type Drain = {
   backgroundMs: number;
   checkMs: number;
   checkQueued: boolean;
+  ready: () => boolean;
   timer?: TimerHandle;
 };
 
@@ -622,7 +625,11 @@ export class Runner {
   // those CLIs have gone, so the new runner never resumes a session beside
   // its old CLI. Each kept thread is let go in turn once nothing would be
   // cut short, and onHandedOver hears its id after its thread.json is saved.
-  async beginDrain(keep: Iterable<string>, opts: { onHandedOver: (threadId: string) => void; backgroundMs: number; checkMs?: number }): Promise<void> {
+  //
+  // `ready` says whether the new runner is there to hear about one (it has
+  // connected); until it is, threads stay here, and recheckHandovers() looks
+  // again once it does.
+  async beginDrain(keep: Iterable<string>, opts: { onHandedOver: (threadId: string) => void; backgroundMs: number; checkMs?: number; ready?: () => boolean }): Promise<void> {
     if (this.draining) throw new Error('already draining');
     const d: Drain = {
       keep: new Set([...keep].filter((id) => this.threads.has(id))),
@@ -631,13 +638,14 @@ export class Runner {
       backgroundMs: opts.backgroundMs,
       checkMs: opts.checkMs ?? DRAIN_CHECK_MS,
       checkQueued: false,
+      ready: opts.ready ?? (() => true),
     };
     this.draining = d;
     // Accounts are the primary's to watch now.
     this.rescanTimer?.cancel();
     this.accountsTimer?.cancel();
     await Promise.all([...this.threads.values()].filter((st) => !d.keep.has(st.rec.id)).map((st) => this.letGo(st)));
-    this.log.info('draining', { keeps: [...d.keep] });
+    this.log.info('let go of the idle threads', { keeps: [...d.keep] });
     this.checkHandovers();
   }
 
@@ -649,6 +657,10 @@ export class Runner {
   // Whether this runner has the thread (a draining one lets them go).
   has(threadId: string): boolean {
     return this.threads.has(threadId);
+  }
+
+  recheckHandovers(): void {
+    this.queueHandoverCheck();
   }
 
   private queueHandoverCheck(): void {
@@ -666,7 +678,7 @@ export class Runner {
     if (!d || this.stopping) return;
     d.timer?.cancel();
     d.timer = undefined;
-    for (const id of [...d.keep]) {
+    for (const id of d.ready() ? [...d.keep] : []) {
       const st = this.threads.get(id);
       if (!st) {
         // Deleted while kept.
@@ -1131,6 +1143,9 @@ export class Runner {
   send(threadId: string, text: string, images: ImageRef[] = [], opts: SendOptions = {}): { turnId: string } {
     const st = this.mustGet(threadId);
     this.checkAccepting();
+    // A thread a draining runner is letting go of is about to be the new
+    // runner's; a message queued here now would be lost on the way.
+    if (this.draining && !this.draining.keep.has(threadId)) throw new RpcError(ErrorCode.busy, 'The runner is handing over to a new one; send again in a moment.');
     if (!text && images.length === 0) throw new RpcError(ErrorCode.badParams, 'text or images required');
     checkImages(images);
     return { turnId: this.sendTo(st, text, images, opts) };

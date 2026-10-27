@@ -261,7 +261,7 @@ EOF
 	<key>ThrottleInterval</key>
 	<integer>5</integer>
 	<key>ExitTimeOut</key>
-	<integer>20</integer>
+	<integer>30</integer>
 	<key>StandardOutPath</key>
 	<string>$(xml "$LOG")</string>
 	<key>StandardErrorPath</key>

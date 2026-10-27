@@ -29,7 +29,8 @@ the data dir (`<home>`, normally `~/Library/Application Support/Threadbare`):
 
 ```
 <home>/runner/
-  launch.mjs           the LaunchAgent's program: small, no dependencies
+  launch.mjs           the LaunchAgent's program and the runners' supervisor:
+                       small, no dependencies
   releases/<id>/       src/, bin/, package.json, package-lock.json,
                        node_modules/ (production only), release.json
   current -> releases/<id>
@@ -49,9 +50,32 @@ the data dir (`<home>`, normally `~/Library/Application Support/Threadbare`):
   never trip it and a hang does; see `runner/README.md`), and `lastGood`
   is a different
   release that still exists, it points `current` at `lastGood`, records
-  `rolledBack`, and logs it. Then it imports `current/src/main.ts`
-  in-process (Node 24 runs TypeScript directly), so launchd's signals
-  reach the runner as before.
+  `rolledBack`, and logs it. Then it starts `current/src/main.ts` as a
+  child process (Node 24 runs TypeScript directly) with
+  `THREADBARE_SUPERVISED=1` and an IPC channel, and supervises it (below).
+  Before 27 Oct it imported main.ts into its own process; a LaunchAgent
+  installed before then still does, and can't hand over until Mike runs
+  `install-runner.sh` once.
+- **The supervisor** (launch.mjs since 27 Oct). A child counts as up when
+  it sends `{ type: "listening" }` or prints `threadbare-runner listening
+  on <port>` (older releases only print it), within 90 s or it's stopped
+  and counts as a failed start. The newest child exiting 0 after it
+  listened is a planned restart: it starts `current` again within a
+  second. Any other exit is a failed start: with no other child running
+  the supervisor exits 1 and launchd starts it again, as before; with one
+  it tries again itself after 5 s. SIGTERM (launchctl, a reboot) goes to
+  every child, which get 20 s before SIGKILL (the plist's ExitTimeOut is
+  30). A child that loses its IPC channel stops.
+- **Handovers** (docs/protocol.md, "Handovers"). An idle restart with busy
+  threads (a deploy, the runner following main) doesn't wait for them.
+  The runner lets go of its idle threads and the port, writes
+  `run/drain-<pid>.json`, and sends `{ type: "handover" }`; the
+  supervisor starts `current` beside it and answers `{ type: "handover",
+  ok, pid }`. The new runner connects to the old one and passes it
+  requests about the threads it kept; each moves across when its turn
+  ends, and the old runner exits when it has none left. Its exit isn't a
+  restart. `tb status` shows it as "Old runner ..., finishing N threads".
+  If the supervisor refuses, the runner restarts the old way.
 - **main.ts** reports `RUNNER_VERSION` as `<package version>+<release id>`
   when a `release.json` sits next to its `src/`, else `+source`. Once it
   has been listening for 60 seconds it sets `lastGood` to its own release.
