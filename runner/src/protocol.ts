@@ -149,7 +149,12 @@ export type ThreadSummary = {
   subagents?: Subagent[];
   // The projects the thread is in, oldest first. Absent when none.
   projects?: ThreadProject[];
+  // Its own git worktree (docs/thread-worktrees.md). Absent when it has
+  // none, or once that was removed.
+  worktree?: ThreadWorktree;
 };
+
+export type ThreadWorktree = { branch: string; mainCheckout: string; path: string };
 
 // Projects (docs/protocol.md, "Projects"): a grouping above folders that
 // carries goals, state and notes forward, made by the librarian, agents or
@@ -421,7 +426,7 @@ export type EventBody =
       text: string;
       truncated: boolean;
       durationMs: number;
-      trigger?: HookTrigger; // set when a hook ran it, absent for a chip or tb run
+      trigger?: HookTrigger | 'worktree.setup'; // set when a hook or a new worktree's setup ran it, absent for a chip or tb run
     };
 
 export type DeltaType = 'assistant.text.delta' | 'reasoning.delta' | 'tool.output.delta';
