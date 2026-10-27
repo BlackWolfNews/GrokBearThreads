@@ -126,6 +126,7 @@ export type ThreadSummary = {
   updatedAt: string;
   lastActivityAt: string;
   snoozedUntil?: string;
+  snoozedUntilRestart?: boolean; // hibernating until the runner next starts
   archivedAt?: string;
   preview: string;
   lastSeq: number;
@@ -500,6 +501,7 @@ export const ErrorCode = {
   projectNotFound: -32007,
   accountNotFound: -32010,
   busy: -32020,
+  moved: -32030, // a draining runner has handed the thread over (Handovers)
   other: -32000,
 } as const;
 

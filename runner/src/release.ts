@@ -156,15 +156,85 @@ export function markGoodLater(home: string, releaseId: string | undefined, log: 
   return () => clearTimeout(timer);
 }
 
-// launch.mjs (when it started this runner) leaves this on globalThis: a
-// release that hasn't said it is listening within its time limit is
-// stopped, so one that hangs at startup is rolled back like one that
-// crashes. Runners started some other way don't have it.
+// Whether launch.mjs started this runner as a child it supervises (a
+// LaunchAgent installed since handovers): THREADBARE_SUPERVISED and an IPC
+// channel to it. Then a handover is possible.
+export function supervised(): boolean {
+  return process.env.THREADBARE_SUPERVISED === '1' && typeof process.send === 'function';
+}
+
+function sendToSupervisor(msg: unknown): boolean {
+  try {
+    if (!supervised() || !process.connected) return false;
+    process.send!(msg);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// A release that hasn't said it is listening within its time limit is
+// stopped by launch.mjs, so one that hangs at startup is rolled back like
+// one that crashes. Under the supervisor that's an IPC message; under an
+// older launch.mjs (which ran the runner in its own process) a hook it left
+// on globalThis. Runners started some other way have neither.
 export function tellLaunchListening(): void {
+  if (sendToSupervisor({ type: 'listening' })) return;
   const hook = (globalThis as { threadbareLaunch?: { listening?: () => void } }).threadbareLaunch;
   try {
     hook?.listening?.();
   } catch {
     // launch.mjs's bookkeeping must never stop the runner
   }
+}
+
+export type HandoverReply = { ok: true; pid: number } | { ok: false; error: string };
+
+// Asks the supervisor to start the current release beside this runner,
+// which then only finishes the turns it has. ok:false (not supervised, an
+// older launch.mjs, refused, no answer in time) means carry on as before
+// with a plain restart.
+export function requestHandover(timeoutMs = 10_000): Promise<HandoverReply> {
+  if (!supervised()) return Promise.resolve({ ok: false, error: 'not started by a launch.mjs that supervises' });
+  return new Promise((resolve) => {
+    let done = false;
+    const finish = (r: HandoverReply) => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      process.off('message', onMessage);
+      process.off('disconnect', onGone);
+      resolve(r);
+    };
+    const onMessage = (m: unknown) => {
+      const r = m as { type?: unknown; ok?: unknown; pid?: unknown; error?: unknown } | null;
+      if (!r || typeof r !== 'object' || r.type !== 'handover') return;
+      if (r.ok === true && typeof r.pid === 'number') finish({ ok: true, pid: r.pid });
+      else finish({ ok: false, error: typeof r.error === 'string' ? r.error : 'the supervisor refused' });
+    };
+    const onGone = () => finish({ ok: false, error: 'the supervisor went away' });
+    const timer = setTimeout(() => finish({ ok: false, error: `no answer from the supervisor in ${Math.round(timeoutMs / 1000)} s` }), timeoutMs);
+    timer.unref();
+    process.on('message', onMessage);
+    process.on('disconnect', onGone);
+    if (!sendToSupervisor({ type: 'handover' })) finish({ ok: false, error: "couldn't reach the supervisor" });
+  });
+}
+
+// Calls fn once if the supervisor's IPC channel closes (it died), so the
+// runner can stop rather than run on with nothing to restart it. Returns
+// an unsubscribe. Does nothing when not supervised.
+export function onSupervisorGone(fn: () => void): () => void {
+  if (!supervised()) return () => {};
+  let called = false;
+  const handler = () => {
+    if (called) return;
+    called = true;
+    fn();
+  };
+  process.on('disconnect', handler);
+  // A message listener keeps the channel referenced; the runner's server
+  // keeps the process alive anyway, so let the channel not hold it.
+  (process.channel as { unref?: () => void } | undefined)?.unref?.();
+  return () => process.off('disconnect', handler);
 }

@@ -168,6 +168,7 @@ export function checkSummary(t: Obj): string[] {
   if (t.preview.length > 140 || t.preview.includes('\n')) problems.push('preview too long or multi-line');
   if (t.title.length > 200) problems.push('title');
   for (const k of ['model', 'modelInUse', 'snoozedUntil', 'archivedAt', 'nativeSessionId']) if (t[k] !== undefined && !isStr(t[k])) problems.push(k);
+  if (t.snoozedUntilRestart !== undefined && (t.snoozedUntilRestart !== true || !isStr(t.snoozedUntil))) problems.push('snoozedUntilRestart');
   for (const k of ['effort', 'effortInUse']) if (t[k] !== undefined && !EFFORTS.includes(t[k])) problems.push(k);
   for (const k of ['contextTokens', 'contextWindow', 'costUsd']) if (t[k] !== undefined && !isNum(t[k])) problems.push(k);
   if (t.panels !== undefined) {
@@ -241,7 +242,7 @@ export function checkSummary(t: Obj): string[] {
   }
   const allowed = new Set([
     'id', 'title', 'cwd', 'accountId', 'provider', 'model', 'permissionMode', 'status', 'live', 'needsYou', 'createdAt', 'updatedAt',
-    'lastActivityAt', 'snoozedUntil', 'archivedAt', 'preview', 'lastSeq', 'lastSeenSeq', 'nativeSessionId', 'contextTokens', 'costUsd',
+    'lastActivityAt', 'snoozedUntil', 'snoozedUntilRestart', 'archivedAt', 'preview', 'lastSeq', 'lastSeenSeq', 'nativeSessionId', 'contextTokens', 'costUsd',
     'effort', 'modelInUse', 'effortInUse', 'contextWindow', 'panels', 'actions', 'hooks', 'patches', 'background', 'subagents', 'projects',
   ]);
   for (const k of Object.keys(t)) if (!allowed.has(k)) problems.push(`unexpected field ${k}`);

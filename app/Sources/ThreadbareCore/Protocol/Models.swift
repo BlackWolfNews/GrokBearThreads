@@ -739,6 +739,9 @@ public struct ThreadSummary: Sendable, Hashable, Codable, Identifiable {
     public var updatedAt: Date
     public var lastActivityAt: Date
     public var snoozedUntil: Date?
+    /// Hibernating until the runner next starts (snoozedUntil is then a
+    /// date far off, which the runner never reaches).
+    public var snoozedUntilRestart: Bool
     public var archivedAt: Date?
     public var preview: String
     public var lastSeq: Int
@@ -767,7 +770,7 @@ public struct ThreadSummary: Sendable, Hashable, Codable, Identifiable {
         provider: String = "claude", model: String? = nil, permissionMode: PermissionMode = .full,
         status: ThreadStatus = .idle, live: Bool = false, needsYou: Bool = false,
         createdAt: Date = Date(), updatedAt: Date = Date(), lastActivityAt: Date = Date(),
-        snoozedUntil: Date? = nil, archivedAt: Date? = nil, preview: String = "",
+        snoozedUntil: Date? = nil, snoozedUntilRestart: Bool = false, archivedAt: Date? = nil, preview: String = "",
         lastSeq: Int = 0, lastSeenSeq: Int = 0, nativeSessionId: String? = nil,
         contextTokens: Int? = nil, costUsd: Double? = nil,
         effort: String? = nil, modelInUse: String? = nil, effortInUse: String? = nil, contextWindow: Int? = nil,
@@ -791,6 +794,7 @@ public struct ThreadSummary: Sendable, Hashable, Codable, Identifiable {
         self.updatedAt = updatedAt
         self.lastActivityAt = lastActivityAt
         self.snoozedUntil = snoozedUntil
+        self.snoozedUntilRestart = snoozedUntilRestart
         self.archivedAt = archivedAt
         self.preview = preview
         self.lastSeq = lastSeq
@@ -832,6 +836,7 @@ public struct ThreadSummary: Sendable, Hashable, Codable, Identifiable {
         updatedAt = try date(.updatedAt) ?? created
         lastActivityAt = try date(.lastActivityAt) ?? updatedAt
         snoozedUntil = try date(.snoozedUntil)
+        snoozedUntilRestart = ((try? c.decodeIfPresent(Bool.self, forKey: .snoozedUntilRestart)) ?? nil) ?? false
         archivedAt = try date(.archivedAt)
         preview = try c.decodeIfPresent(String.self, forKey: .preview) ?? ""
         lastSeq = try c.decodeIfPresent(Int.self, forKey: .lastSeq) ?? 0
@@ -868,6 +873,7 @@ public struct ThreadSummary: Sendable, Hashable, Codable, Identifiable {
         try c.encode(ISO8601.format(updatedAt), forKey: .updatedAt)
         try c.encode(ISO8601.format(lastActivityAt), forKey: .lastActivityAt)
         try c.encodeIfPresent(snoozedUntil.map(ISO8601.format), forKey: .snoozedUntil)
+        if snoozedUntilRestart { try c.encode(true, forKey: .snoozedUntilRestart) }
         try c.encodeIfPresent(archivedAt.map(ISO8601.format), forKey: .archivedAt)
         try c.encode(preview, forKey: .preview)
         try c.encode(lastSeq, forKey: .lastSeq)
@@ -887,7 +893,7 @@ public struct ThreadSummary: Sendable, Hashable, Codable, Identifiable {
 
     enum CodingKeys: String, CodingKey {
         case id, title, cwd, accountId, provider, model, effort, modelInUse, effortInUse, permissionMode, status, live, needsYou
-        case createdAt, updatedAt, lastActivityAt, snoozedUntil, archivedAt, preview
+        case createdAt, updatedAt, lastActivityAt, snoozedUntil, snoozedUntilRestart, archivedAt, preview
         case lastSeq, lastSeenSeq, nativeSessionId, contextTokens, contextWindow, costUsd, panels, actions, hooks, patches, background, subagents
         case projects
     }

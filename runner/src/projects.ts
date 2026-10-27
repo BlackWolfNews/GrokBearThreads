@@ -83,6 +83,8 @@ export class Projects {
   private items = new Map<string, ProjectRecord>();
   private host?: ProjectHost;
   private unlisten?: () => void;
+  // Set on a draining runner (handover): the primary owns projects.json now.
+  private frozen = false;
 
   constructor(deps: { home: string; clock: Clock; log: Logger; userHome?: string }) {
     this.file = path.join(deps.home, 'projects.json');
@@ -109,6 +111,12 @@ export class Projects {
 
   stop(): void {
     this.unlisten?.();
+  }
+
+  // A draining runner reads projects for its kept threads but no longer
+  // changes them.
+  freeze(): void {
+    this.frozen = true;
   }
 
   // ---------------------------------------------------------------- reads
@@ -449,6 +457,7 @@ export class Projects {
   }
 
   private save(): void {
+    if (this.frozen) throw new RpcError(ErrorCode.other, 'This runner is handing over; projects are changed on the new one.');
     atomicWriteFileSync(this.file, JSON.stringify({ projects: [...this.items.values()] }, null, 2));
   }
 
@@ -543,4 +552,24 @@ function bool(p: Record<string, unknown>, k: string): boolean | undefined {
   if (v === undefined || v === null) return undefined;
   if (typeof v !== 'boolean') throw bad(`${k} must be a boolean`);
   return v;
+}
+
+// The project tools' view of Projects, refusing while `blocked` says why
+// (a draining runner during a handover).
+export function guardProjects<K extends 'list' | 'get' | 'find' | 'create' | 'update' | 'appendNote' | 'changeMembership'>(
+  projects: Projects,
+  blocked: () => string | undefined,
+): Pick<Projects, K> {
+  const writes = new Set(['create', 'update', 'appendNote', 'changeMembership']);
+  return new Proxy(projects, {
+    get(target, prop, receiver) {
+      const v = Reflect.get(target, prop, receiver);
+      if (typeof v !== 'function') return v;
+      return (...args: unknown[]) => {
+        const why = writes.has(String(prop)) ? blocked() : undefined;
+        if (why) throw new Error(why);
+        return (v as (...a: unknown[]) => unknown).apply(target, args);
+      };
+    },
+  }) as Pick<Projects, K>;
 }

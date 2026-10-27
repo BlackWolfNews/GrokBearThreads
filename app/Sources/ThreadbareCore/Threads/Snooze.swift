@@ -13,8 +13,12 @@ public struct SnoozePreset: Sendable, Hashable, Identifiable {
 }
 
 /// The snooze menu: 1 hour, this evening 6 pm, tomorrow 9 am, next Monday
-/// 9 am. "Pick a time" is a separate item in the UI.
+/// 9 am. "Pick a time" is a separate item in the UI, and so is
+/// `untilRestartTitle`, shown only while a runner restart is waiting.
 public enum Snooze {
+    /// Hibernate until the runner next starts (`snoozedUntil: "restart"`).
+    public static let untilRestartTitle = "Until the runner restarts"
+
     public static func presets(now: Date, calendar: Calendar = .current) -> [SnoozePreset] {
         var presets: [SnoozePreset] = [
             SnoozePreset(id: "hour", title: "1 hour", date: now.addingTimeInterval(3600))

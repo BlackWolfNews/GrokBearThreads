@@ -888,6 +888,30 @@ async function restartAndCheck(c, v, id, before, waitMs) {
   } else {
     const waiting = Array.isArray(res?.waitingFor) ? res.waitingFor : [];
     const background = Array.isArray(res?.background) ? res.background : [];
+    // A handover (docs/protocol.md): the new release takes over now, and
+    // the busy threads finish their turns on the old runner first.
+    const keeps = Array.isArray(res?.handover?.keeps) ? res.handover.keeps : null;
+    if (keeps && c.inThread) {
+      const mine = Boolean(c.threadId && keeps.includes(c.threadId));
+      const others = keeps.filter((t) => t !== c.threadId).length;
+      const noResume = params.resume && typeof res?.noResume === 'string' ? res.noResume : null;
+      const lines = [`Release ${id} is current, and a new runner on it is taking over now.`];
+      if (mine) {
+        const then = !params.resume ? '.' : noResume ? `, but it won't carry on by itself there: ${noResume}.` : `, where it carries on with:\n  "${params.resume.text}"`;
+        lines.push(`This thread finishes this turn on the old runner${others ? ` (as ${plural(others, 'other busy thread')} ${others === 1 ? 'does' : 'do'})` : ''}, then moves across${then}`);
+        lines.push(
+          `${tbCommand(c)} status shows the old runner and what it's finishing.`,
+          noResume
+            ? 'End your turn now (that is what moves this thread across), and say in your reply that Mike has to message this thread to check the change.'
+            : 'End your turn now; that is what moves this thread across.',
+        );
+      } else {
+        lines.push(`${plural(keeps.length, 'busy thread')} ${keeps.length === 1 ? 'finishes its turn' : 'finish their turns'} on the old runner first, then ${keeps.length === 1 ? 'moves' : 'move'} across.`);
+      }
+      say(lines.join('\n'));
+      return 0;
+    }
+    if (keeps) say(`A new runner on ${id} is taking over now; ${plural(keeps.length, 'busy thread')} ${keeps.length === 1 ? 'finishes' : 'finish'} on the old one first.`);
     if (c.inThread) {
       if (!waiting.length) {
         say(`Release ${id} is current and the runner is restarting now, which ends this turn.`);
@@ -928,7 +952,7 @@ async function restartAndCheck(c, v, id, before, waitMs) {
       // its restart then if no turn holds it, so a little longer to see it.
       startMs = waitMs + 5000;
       waited = true;
-    } else {
+    } else if (!keeps) {
       say('The runner is restarting.');
     }
   }

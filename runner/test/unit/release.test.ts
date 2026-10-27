@@ -196,6 +196,17 @@ function installLaunch(home: string, current: string): string {
   return launch;
 }
 
+// The port the nth runner the supervisor started listens on.
+async function nthListening(out: () => string, n: number, ms = 20_000): Promise<number> {
+  const end = Date.now() + ms;
+  for (;;) {
+    const ports = [...out().matchAll(/listening on (\d+)/g)].map((m) => Number(m[1]));
+    if (ports.length >= n) return ports[n - 1];
+    if (Date.now() > end) throw new Error(`no listening line #${n}:\n${out()}`);
+    await new Promise((r) => setTimeout(r, 50));
+  }
+}
+
 test('planned restarts under launch.mjs are clean stops, so several in a row are not a crash loop', async () => {
   const home = tmpDir();
   const older = '20261025T101500Z-0000001';
@@ -204,20 +215,22 @@ test('planned restarts under launch.mjs are clean stops, so several in a row are
   makeRelease(home, id);
   const launch = installLaunch(home, id);
   writeState(home, { current: id, previous: older, lastGood: older, boots: [] });
-  // launchd would start it again after each exit; three planned restarts
-  // well inside a minute, none of them long enough to be marked good.
-  for (let i = 0; i < 4; i++) {
-    const r = startRunner(launch, home, { THREADBARE_GOOD_AFTER_MS: '600000' });
-    try {
-      const port = await r.listening;
+  // The supervisor starts it again after each planned restart; four of
+  // them well inside a minute, none long enough to be marked good.
+  const r = startRunner(launch, home, { THREADBARE_GOOD_AFTER_MS: '600000', THREADBARE_RESTART_MS: '50' });
+  try {
+    for (let i = 0; i < 5; i++) {
+      const port = await nthListening(r.out, i + 1);
       const { c, hello } = await connect(home, port);
       assert.equal(hello.runnerVersion, `${PKG_VERSION}+${id}`, `start ${i + 1} runs the new release`);
-      assert.deepEqual(await c.call('runner.restart', { reason: `restart ${i + 1}` }), { scheduled: true, waitingFor: [] });
-      assert.equal(await r.exited, 0);
+      if (i < 4) assert.deepEqual(await c.call('runner.restart', { reason: `restart ${i + 1}` }), { scheduled: true, waitingFor: [] });
       c.close();
-    } finally {
-      r.proc.kill('SIGKILL');
     }
+    // Stopping the supervisor stops its runner cleanly too.
+    r.proc.kill('SIGTERM');
+    assert.equal(await r.exited, 0);
+  } finally {
+    r.proc.kill('SIGKILL');
   }
   const s = readState(home)!;
   assert.equal(s.rolledBack, undefined);
@@ -225,13 +238,10 @@ test('planned restarts under launch.mjs are clean stops, so several in a row are
   assert.equal(s.lastGood, older);
   assert.deepEqual(
     s.boots.map((b) => [b.release, b.clean]),
-    [
-      [id, true],
-      [id, true],
-      [id, true],
-      [id, true],
-    ],
+    Array.from({ length: 5 }, () => [id, true]),
   );
+  // Each boot is the child's pid, not the supervisor's.
+  assert.ok(s.boots.every((b) => typeof b.pid === 'number' && b.pid !== r.proc.pid));
 });
 
 test('launch.mjs stops a release that never starts listening, and that start counts as a crash', async () => {
@@ -253,4 +263,80 @@ test('launch.mjs stops a release that never starts listening, and that start cou
   } finally {
     r.proc.kill('SIGKILL');
   }
+});
+
+// ------------------------------------------------- the supervisor channel
+
+// Runs `code` (an ES module importing release.ts) as a child with an IPC
+// channel, the way launch.mjs starts a runner.
+function ipcChild(code: string, env: Record<string, string> = { THREADBARE_SUPERVISED: '1' }) {
+  const src = path.join(RUNNER_DIR, 'src', 'release.ts');
+  const proc = spawn(process.execPath, ['--input-type=module', '-e', `import * as release from ${JSON.stringify(src)};\n${code}`], {
+    env: { ...cleanEnv(), ...env },
+    stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
+  });
+  let out = '';
+  proc.stdout!.on('data', (d) => (out += d));
+  proc.stderr!.on('data', (d) => (out += d));
+  const messages: unknown[] = [];
+  proc.on('message', (m) => messages.push(m));
+  const exited = new Promise<number | null>((r) => proc.once('exit', (c) => r(c)));
+  return { proc, out: () => out, messages, exited };
+}
+
+async function until(what: string, fn: () => boolean, ms = 10_000): Promise<void> {
+  const end = Date.now() + ms;
+  while (!fn()) {
+    if (Date.now() > end) throw new Error(`timed out waiting for ${what}`);
+    await new Promise((r) => setTimeout(r, 20));
+  }
+}
+
+test('supervised() needs both THREADBARE_SUPERVISED and an IPC channel', async () => {
+  const a = ipcChild('console.log(JSON.stringify(release.supervised())); process.disconnect();');
+  assert.equal(await a.exited, 0, a.out());
+  assert.equal(a.out().trim(), 'true');
+  const b = ipcChild('console.log(JSON.stringify(release.supervised())); process.disconnect();', {});
+  assert.equal(await b.exited, 0, b.out());
+  assert.equal(b.out().trim(), 'false');
+  const reply = ipcChild('const r = await release.requestHandover(); console.log(JSON.stringify(r)); process.disconnect();', {});
+  assert.equal(await reply.exited, 0, reply.out());
+  assert.deepEqual(JSON.parse(reply.out()), { ok: false, error: 'not started by a launch.mjs that supervises' });
+});
+
+test('tellLaunchListening tells the supervisor over IPC', async () => {
+  const c = ipcChild('release.tellLaunchListening(); setTimeout(() => process.disconnect(), 100);');
+  assert.equal(await c.exited, 0, c.out());
+  assert.deepEqual(c.messages, [{ type: 'listening' }]);
+});
+
+test("requestHandover: the supervisor's answer, a refusal, and no answer in time", async () => {
+  const code = 'const r = await release.requestHandover(Number(process.env.WAIT_MS)); console.log(JSON.stringify(r)); process.disconnect();';
+  const ok = ipcChild(code, { THREADBARE_SUPERVISED: '1', WAIT_MS: '5000' });
+  await until('the handover request', () => ok.messages.length > 0);
+  assert.deepEqual(ok.messages, [{ type: 'handover' }]);
+  // Something else first is ignored.
+  ok.proc.send({ type: 'other' });
+  ok.proc.send({ type: 'handover', ok: true, pid: 4242 });
+  assert.equal(await ok.exited, 0, ok.out());
+  assert.deepEqual(JSON.parse(ok.out()), { ok: true, pid: 4242 });
+
+  const no = ipcChild(code, { THREADBARE_SUPERVISED: '1', WAIT_MS: '5000' });
+  await until('the handover request', () => no.messages.length > 0);
+  no.proc.send({ type: 'handover', ok: false, error: 'only the newest runner can hand over' });
+  assert.equal(await no.exited, 0, no.out());
+  assert.deepEqual(JSON.parse(no.out()), { ok: false, error: 'only the newest runner can hand over' });
+
+  const slow = ipcChild(code, { THREADBARE_SUPERVISED: '1', WAIT_MS: '200' });
+  assert.equal(await slow.exited, 0, slow.out());
+  assert.deepEqual(JSON.parse(slow.out()), { ok: false, error: 'no answer from the supervisor in 0 s' });
+});
+
+test('onSupervisorGone fires when the IPC channel closes', async () => {
+  const c = ipcChild("release.onSupervisorGone(() => { console.log('gone'); process.exit(0); }); setInterval(() => {}, 1000);");
+  await new Promise((r) => setTimeout(r, 300));
+  assert.equal(c.out(), '');
+  c.proc.disconnect();
+  assert.equal(await c.exited, 0, c.out());
+  assert.equal(c.out().trim(), 'gone');
 });

@@ -350,7 +350,10 @@ async function dispatch(client, method, p) {
       if (p.model !== undefined) s.model = p.model ?? undefined;
       if (p.effort !== undefined) s.effort = p.effort ?? undefined;
       if (p.snoozedUntil !== undefined) {
-        s.snoozedUntil = p.snoozedUntil ?? undefined;
+        // "restart": until the runner next starts, as the runner keeps it.
+        const untilRestart = p.snoozedUntil === 'restart';
+        s.snoozedUntil = untilRestart ? '9999-12-31T00:00:00.000Z' : p.snoozedUntil ?? undefined;
+        s.snoozedUntilRestart = untilRestart || undefined;
         if (s.snoozedUntil) { s.live = false; scheduleWake(s.id); }
       }
       if (p.archived !== undefined) {

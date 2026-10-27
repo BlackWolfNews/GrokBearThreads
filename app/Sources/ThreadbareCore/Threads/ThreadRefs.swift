@@ -51,6 +51,7 @@ public enum ThreadRefs {
 
     public static func status(_ thread: ThreadSummary, now: Date) -> String {
         if thread.isArchived { return "Archived" }
+        if thread.snoozedUntilRestart { return "Hibernating until the runner restarts" }
         if let until = thread.snoozedUntil, until > now { return "Hibernating until " + RelativeTime.until(until, now: now) }
         switch thread.status {
         case .running, .starting: return "Working " + ThreadRowLook.workingLabel(since: thread.lastActivityAt, now: now)

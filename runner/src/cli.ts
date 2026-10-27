@@ -63,7 +63,7 @@ const HELP = `tb: talk to the Threadbare runner
   tb interrupt <threadId>
   tb approve <threadId> <approvalId> [allow|allowAlways|deny]
   tb answer <threadId> <approvalId> "answer"
-  tb snooze <threadId> <ISO time or 30m, 2h, 1d>
+  tb snooze <threadId> <ISO time or 30m, 2h, 1d, or restart>
   tb archive <threadId>      tb unarchive <threadId>
   tb move <threadId> <folder>
   tb delete <threadId>
@@ -290,9 +290,10 @@ async function run(client: RunnerClient, cmd: string, args: string[], f: Flags):
     }
     case 'snooze': {
       const id = notSelf(await resolveId(client, args[0]), STOPS_SELF);
-      const until = parseWhen(args[1] ?? '1h');
+      // "restart": until the runner next starts.
+      const until = args[1]?.toLowerCase() === 'restart' ? 'restart' : parseWhen(args[1] ?? '1h');
       const r = await client.call<{ thread: ThreadSummary }>('threads.update', { threadId: id, snoozedUntil: until });
-      console.log(`snoozed until ${r.thread.snoozedUntil}`);
+      console.log(`snoozed until ${r.thread.snoozedUntilRestart ? 'the runner restarts' : r.thread.snoozedUntil}`);
       return 0;
     }
     case 'archive':

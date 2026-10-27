@@ -60,7 +60,7 @@ export type Background = { threadId: string; tasks: string[] };
 // did about the release the withdrawn restart was for; noResume why the
 // resume asked for won't be sent as things stand, so the scripts don't tell
 // an agent to end its turn and wait for a message that never comes.
-export type RestartResult = { scheduled: boolean; waitingFor: string[]; background?: Background[]; note?: string; noResume?: string };
+export type RestartResult = { scheduled: boolean; waitingFor: string[]; background?: Background[]; note?: string; noResume?: string; handover?: { keeps: string[] } };
 
 export type Notice = { level: 'info' | 'warning' | 'error'; message: string };
 
@@ -81,6 +81,8 @@ export type RunnerStatus = {
   // which kept crashing at startup. A deploy's health check can pass before
   // the crash, so tb status says so for as long as it holds.
   rolledBack?: { from: string; at: string };
+  // Older runners still finishing turns after a handover (main.ts adds it).
+  draining?: { pid: number; version: string; release?: string; since: string; threads: string[] }[];
   // The runner following main by itself (src/update.ts).
   update?: UpdateStatus;
 };
@@ -133,6 +135,14 @@ export type RestarterDeps = {
   log: Logger;
   // Shuts the runner down the way SIGTERM does and exits 0 (main.ts).
   restart: () => void;
+  // Handovers (docs/protocol.md): whether one is possible (launch.mjs
+  // supervises this runner), and starting one, which keeps `keeps` here
+  // until their turns end and has the new release take everything else.
+  canHandOver?: () => boolean;
+  handOver?: (keeps: string[]) => void;
+  // Threads a draining runner still has (on the primary): a resume for one
+  // waits until it comes across (resumeAdopted).
+  elsewhere?: (threadId: string) => boolean;
   version?: string;
   release?: string;
   branch?: string; // the branch the release was built from (release.json)
@@ -156,6 +166,8 @@ export class Restarter {
   private startedAt: string;
   private pending?: RestartFile;
   private restarting = false;
+  // Resumes for threads still on a draining runner, sent when they arrive.
+  private deferred = new Map<string, { saved: RestartFile; r: SavedResume; from: string; again: boolean }>();
   private checkQueued = false;
   // Re-checks when background work stops holding the restart.
   private backgroundTimer?: TimerHandle;
@@ -203,6 +215,16 @@ export class Restarter {
     this.armBackgroundTimer();
     const waitingFor = next.when === 'now' || this.restarting ? [] : this.busy();
     log.info('restart requested', { when: next.when, reason: p.reason, resumeThreadId: p.resume?.threadId, waitingFor, backgroundUntil: next.backgroundUntil });
+    // Busy threads needn't hold it: they finish here while the new release
+    // takes everything else.
+    if (!this.restarting && waitingFor.length && next.when === 'idle' && this.deps.canHandOver?.()) {
+      const out: RestartResult = { scheduled: true, waitingFor: [], handover: { keeps: waitingFor } };
+      if (p.resume && thread && resumesInLastHour(this.deps.home, p.resume.threadId, this.deps.clock.now()) >= RESUMES_PER_HOUR) {
+        out.noResume = `this thread has already been resumed ${RESUMES_PER_HOUR} times in the last hour`;
+      }
+      this.beginHandover(waitingFor);
+      return out;
+    }
     if (!this.restarting) {
       if (waitingFor.length === 0) this.begin();
       else runner.notice('info', pendingMessage(waitingFor.length, this.onYou(waitingFor)));
@@ -356,6 +378,30 @@ export class Restarter {
     });
   }
 
+  private beginHandover(keeps: string[]): void {
+    if (this.restarting || !this.pending) return;
+    this.restarting = true;
+    this.backgroundTimer?.cancel();
+    this.backgroundTimer = undefined;
+    // From here the restart counts as done for the new runner: it takes
+    // restart.json and resumes the threads (a kept one when it arrives).
+    this.pending.shutdownAt = this.isoNow();
+    this.save();
+    this.deps.log.info('handing over', { reason: this.pending.reason, keeps });
+    const n = keeps.length;
+    this.deps.runner.notice('info', `A new runner is taking over. ${n === 1 ? '1 busy thread finishes' : `${n} busy threads finish`} on this one first, then ${n === 1 ? 'moves' : 'move'} across.`);
+    this.defer(() => this.deps.handOver!(keeps));
+  }
+
+  // A thread a draining runner kept has come across: the resume it was
+  // waiting for goes now, and its 15 minutes count from now.
+  resumeAdopted(threadId: string): void {
+    const d = this.deferred.get(threadId);
+    if (!d) return;
+    this.deferred.delete(threadId);
+    this.resumeOne({ ...d.saved, shutdownAt: this.isoNow() }, { ...d.r, requestedAt: this.isoNow() }, d.from, d.again);
+  }
+
   private begin(): void {
     if (this.restarting || !this.pending) return;
     this.restarting = true;
@@ -468,6 +514,11 @@ export class Restarter {
   // restart, which shouldn't count against the thread's hourly limit.
   private resumeOne(saved: RestartFile, r: SavedResume, from: string, again = false): void {
     const { runner, log, home } = this.deps;
+    if (this.deps.elsewhere?.(r.threadId)) {
+      log.info('the thread to resume is still finishing on the old runner; resuming it when it comes across', { threadId: r.threadId });
+      this.deferred.set(r.threadId, { saved, r, from, again });
+      return;
+    }
     let thread: ThreadSummary;
     try {
       thread = runner.get(r.threadId);

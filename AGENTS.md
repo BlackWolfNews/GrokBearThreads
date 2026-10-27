@@ -77,9 +77,14 @@ if `tb` isn't found (an older runner, or outside a thread), use
 - Until `deploy-runner.sh --list` shows releases, the live runner still runs
   from the main checkout and only Mike can switch it (one
   `install-runner.sh` from a terminal). Runner changes wait for him.
-- A restart waits for other threads' turns and background jobs (tests,
-  builds, subagents; background ones for 30 minutes at most). `tb status`
-  shows what it's waiting for; don't try to hurry it.
+- Once launch.mjs supervises the runner (since Mike's `install-runner.sh`
+  after 27 Oct), a restart with busy threads is a handover: the new release
+  takes over at once, and busy threads (yours included) finish their turns
+  on the old runner, then move across. `deploy-runner.sh` says which
+  happened. Otherwise a restart waits for other threads' turns and
+  background jobs (tests, builds, subagents; background ones for 30
+  minutes at most). `tb status` shows what it's waiting for, or the old
+  runner and what it's finishing; don't try to hurry either.
 - Never pass `--now`, run `install-runner.sh`, `tb restart` the live runner,
   `launchctl kickstart` it or stop its node process: each ends your own turn
   and stops other threads' work. If one is needed, finish and tell Mike the

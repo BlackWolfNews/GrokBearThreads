@@ -86,7 +86,9 @@ export type Notification =
   | { method: 'clis.updated'; params: { clis: CliStatus[] } }
   | { method: 'settings.updated'; params: { settings: Settings } }
   | { method: 'projects.updated'; params: { projects: Project[] } }
-  | { method: 'librarian.updated'; params: { librarian: LibrarianStatus } };
+  | { method: 'librarian.updated'; params: { librarian: LibrarianStatus } }
+  // Only from a draining runner, to the primary (handover.ts).
+  | { method: 'drain.handedOver'; params: { threadId: string } };
 
 // What the librarian (librarian.ts) hears about threads: a turn that ended,
 // and a folder move.
@@ -223,9 +225,27 @@ type Runtime = {
   // keeps failing stops being told to the agent after HOOK_TELL_LIMIT, so
   // two can't go round for ever; a message from anyone else resets it.
   hookTurns?: Map<string, number>;
+  // Turn-end hooks still running; a draining runner waits for them, since
+  // one may tell the agent something and start a turn.
+  hooksRunning?: number;
 };
 
 type ThreadState = { rec: ThreadRecord; rt: Runtime };
+
+type Drain = {
+  keep: Set<string>;
+  going: Set<string>; // being let go
+  onHandedOver: (threadId: string) => void;
+  backgroundMs: number;
+  checkMs: number;
+  checkQueued: boolean;
+  ready: () => boolean;
+  timer?: TimerHandle;
+};
+
+// How often a draining runner looks again at threads it keeps for
+// background work, since that work's limit passes without an event.
+const DRAIN_CHECK_MS = 5000;
 
 export type RunnerDeps = {
   config: Config;
@@ -283,6 +303,11 @@ const ACCOUNTS_THROTTLE_MS = 5_000;
 const HOOK_TELL_LIMIT = 2;
 // How much of a hook's output goes to the agent (the transcript has it all).
 const HOOK_TELL_CHARS = 8000;
+// snoozedUntil for a thread hibernating until the runner next starts: far
+// enough off that everything reading snoozedUntil (the lists, the resume
+// after a restart, a client older than snoozedUntilRestart) sees it as
+// snoozed, and start() wakes it long before.
+export const UNTIL_RESTART = '9999-12-31T00:00:00.000Z';
 
 export class Runner {
   private cfg: Config;
@@ -311,6 +336,9 @@ export class Runner {
   private flushScheduled = false;
   private snoozeTimer?: TimerHandle;
   private stopping = false;
+  // Set while this runner drains after a handover (docs/protocol.md,
+  // "Handovers"): the threads it still keeps, and who hears when one goes.
+  private draining?: Drain;
   private refusing?: string;
   private startedAt = 0;
   private startupNotices: { level: 'info' | 'warning' | 'error'; message: string }[] = [];
@@ -353,15 +381,20 @@ export class Runner {
 
   // Loads threads from disk. Threads that were mid-turn when the runner
   // stopped become `stopped`; approvals they were waiting on expire.
-  start(): void {
+  //
+  // `skip` are threads a draining runner still has (a handover): they stay
+  // on disk untouched until it hands them over and adopt() loads them.
+  start(opts: { skip?: ReadonlySet<string> } = {}): void {
     this.startedAt = this.clock.now();
     const { records, broken } = this.store.loadAll();
     for (const id of broken) {
+      if (opts.skip?.has(id)) continue;
       const rec = this.rebuild(id);
       if (rec) records.push(rec);
     }
     let stopped = 0;
     for (const rec of records) {
+      if (opts.skip?.has(rec.id)) continue;
       // thread.json is saved a moment after the event it follows; the log
       // is the truth for seq.
       rec.lastSeq = this.store.log(rec.id).lastSeq;
@@ -370,6 +403,10 @@ export class Runner {
       if (this.recover(st)) stopped++;
     }
     if (stopped) this.startupNotice('info', `${stopped === 1 ? 'A thread was' : `${stopped} threads were`} mid-turn when the runner stopped; send a message to carry on.`);
+    // Hibernating until the runner restarts: this is the restart. Before
+    // the restart's resume (main.ts), so a thread put away while its own
+    // restart waited still gets carried on.
+    for (const st of this.threads.values()) if (st.rec.snoozedUntilRestart) this.wake(st);
     this.flush();
     this.armSnoozeTimer();
     this.log.info('runner loaded threads', { count: this.threads.size });
@@ -614,6 +651,155 @@ export class Runner {
     this.flush();
   }
 
+  // ------------------------------------------------------------- handovers
+  // docs/protocol.md, "Handovers".
+
+  // This runner is handing over to a new release. `keep` are the busy
+  // threads it goes on running; every other thread is let go now (an idle
+  // CLI exits, and the new runner resumes it by session id). Resolves once
+  // those CLIs have gone, so the new runner never resumes a session beside
+  // its old CLI. Each kept thread is let go in turn once nothing would be
+  // cut short, and onHandedOver hears its id after its thread.json is saved.
+  //
+  // `ready` says whether the new runner is there to hear about one (it has
+  // connected); until it is, threads stay here, and recheckHandovers() looks
+  // again once it does.
+  async beginDrain(keep: Iterable<string>, opts: { onHandedOver: (threadId: string) => void; backgroundMs: number; checkMs?: number; ready?: () => boolean }): Promise<void> {
+    if (this.draining) throw new Error('already draining');
+    const d: Drain = {
+      keep: new Set([...keep].filter((id) => this.threads.has(id))),
+      going: new Set(),
+      onHandedOver: opts.onHandedOver,
+      backgroundMs: opts.backgroundMs,
+      checkMs: opts.checkMs ?? DRAIN_CHECK_MS,
+      checkQueued: false,
+      ready: opts.ready ?? (() => true),
+    };
+    this.draining = d;
+    // Accounts are the primary's to watch now.
+    this.rescanTimer?.cancel();
+    this.accountsTimer?.cancel();
+    await Promise.all([...this.threads.values()].filter((st) => !d.keep.has(st.rec.id)).map((st) => this.letGo(st)));
+    this.log.info('let go of the idle threads', { keeps: [...d.keep] });
+    this.checkHandovers();
+  }
+
+  // The threads a draining runner still has; undefined when not draining.
+  keeping(): string[] | undefined {
+    return this.draining ? [...this.draining.keep] : undefined;
+  }
+
+  // Whether this runner has the thread (a draining one lets them go).
+  has(threadId: string): boolean {
+    return this.threads.has(threadId);
+  }
+
+  recheckHandovers(): void {
+    this.queueHandoverCheck();
+  }
+
+  private queueHandoverCheck(): void {
+    const d = this.draining;
+    if (!d || d.checkQueued) return;
+    d.checkQueued = true;
+    this.defer(() => {
+      d.checkQueued = false;
+      this.checkHandovers();
+    });
+  }
+
+  private checkHandovers(): void {
+    const d = this.draining;
+    if (!d || this.stopping) return;
+    d.timer?.cancel();
+    d.timer = undefined;
+    for (const id of d.ready() ? [...d.keep] : []) {
+      const st = this.threads.get(id);
+      if (!st) {
+        // Deleted while kept.
+        d.keep.delete(id);
+        continue;
+      }
+      if (d.going.has(id) || !this.readyToHandOver(st, d)) continue;
+      d.going.add(id);
+      void this.letGo(st).then(
+        () => {
+          d.going.delete(id);
+          d.keep.delete(id);
+          this.log.info('handed a thread over', { threadId: id, left: d.keep.size });
+          d.onHandedOver(id);
+        },
+        (e: unknown) => {
+          d.going.delete(id);
+          this.log.error('could not hand a thread over', { threadId: id, error: String(e) });
+        },
+      );
+    }
+    // Background work's limit passes without anything else happening.
+    if (d.keep.size > d.going.size) d.timer = this.clock.setTimeout(() => this.checkHandovers(), d.checkMs);
+  }
+
+  // Nothing would be cut short by letting it go now: no turn, approval or
+  // question, wake grace, turn-end hook or action. Queued messages go with
+  // it. Background work holds it for backgroundMs after its last turn, as
+  // it holds an idle restart, and is then stopped with a note.
+  private readyToHandOver(st: ThreadState, d: Drain): boolean {
+    const { rt } = st;
+    if (rt.turn || rt.approvals.size || rt.wakeTimer || rt.hooksRunning || rt.runningActions?.size) return false;
+    return rt.tasks.length === 0 || this.clock.now() - rt.activeAt >= d.backgroundMs;
+  }
+
+  // Lets go of a thread for good: its CLI exits (background work, if any,
+  // is stopped with a note), its record is saved, and anything the old CLI
+  // still reports goes nowhere.
+  private async letGo(st: ThreadState): Promise<void> {
+    const { rt, rec } = st;
+    rt.idleTimer?.cancel();
+    rt.idleTimer = undefined;
+    this.flushDeltas(st);
+    if (rt.session && !rt.closing) this.releaseSession(st);
+    if (rt.closing) await rt.closing;
+    rt.deltaTimer?.cancel();
+    rt.wakeTimer?.cancel();
+    rt.generation++;
+    this.store.save(rec);
+    rt.deleted = true;
+    this.dirty.delete(rec.id);
+    this.threads.delete(rec.id);
+    this.store.forget(rec.id);
+  }
+
+  // Loads a thread a draining runner has handed over and carries on with
+  // it: messages queued while it was busy there start now. `crashed`: the
+  // draining runner died with it, so it's recovered as after a crash (a
+  // turn in flight ends as stopped).
+  adopt(threadId: string, opts: { crashed?: boolean } = {}): ThreadSummary | undefined {
+    const had = this.threads.get(threadId);
+    if (had) return this.summary(had);
+    this.store.forget(threadId);
+    const rec = this.store.load(threadId) ?? this.rebuild(threadId);
+    if (!rec) {
+      this.log.warn('a handed-over thread is gone', { threadId });
+      return undefined;
+    }
+    rec.lastSeq = this.store.log(rec.id).lastSeq;
+    const st: ThreadState = { rec, rt: newRuntime(Date.parse(rec.lastActivityAt) || 0) };
+    this.threads.set(rec.id, st);
+    if (opts.crashed) {
+      if (this.recover(st)) this.notice('info', `The old runner stopped while "${rec.title}" was mid-turn; send a message to carry on.`);
+    }
+    // Hibernating until the runner restarts: for this thread, coming across
+    // is the restart.
+    if (rec.snoozedUntilRestart) this.wake(st);
+    else if (!opts.crashed && rec.queue.length && this.bucket(rec) === 'inbox') {
+      this.kickQueue(st);
+    }
+    this.markDirty(st);
+    this.armSnoozeTimer();
+    this.log.info('adopted a thread', { threadId, crashed: Boolean(opts.crashed), queued: rec.queue.length });
+    return this.summary(st);
+  }
+
   // From the moment a restart begins until the runner exits, a new turn
   // would only be cut off straight away, so sends and new threads are
   // refused with a message saying to send again in a moment.
@@ -780,6 +966,8 @@ export class Runner {
   }
 
   private notify(n: Notification): void {
+    // A kept thread's summary changing can be it becoming free to go.
+    if (this.draining && n.method === 'thread.updated') this.queueHandoverCheck();
     for (const fn of this.listeners) {
       try {
         fn(n);
@@ -963,6 +1151,8 @@ export class Runner {
     scheduleId?: string;
   }): { thread: ThreadSummary; turnId: string } {
     this.checkAccepting();
+    // New threads belong on the new release.
+    if (this.draining) throw new RpcError(ErrorCode.busy, 'This runner is handing over to a new one; start the thread there.');
     const accountId = params.accountId ?? this.defaultAccountId();
     const account = this.accounts.get(accountId);
     if (!account) throw new RpcError(ErrorCode.accountNotFound, `No account called ${accountId}`);
@@ -1127,6 +1317,9 @@ export class Runner {
   send(threadId: string, text: string, images: ImageRef[] = [], opts: SendOptions = {}): { turnId: string } {
     const st = this.mustGet(threadId);
     this.checkAccepting();
+    // A thread a draining runner is letting go of is about to be the new
+    // runner's; a message queued here now would be lost on the way.
+    if (this.draining && !this.draining.keep.has(threadId)) throw new RpcError(ErrorCode.busy, 'The runner is handing over to a new one; send again in a moment.');
     if (!text && images.length === 0) throw new RpcError(ErrorCode.badParams, 'text or images required');
     checkImages(images);
     return { turnId: this.sendTo(st, text, images, opts) };
@@ -1150,6 +1343,7 @@ export class Runner {
     // Sending to a snoozed or archived thread brings it back.
     if (rec.snoozedUntil || rec.archivedAt) {
       delete rec.snoozedUntil;
+      delete rec.snoozedUntilRestart;
       delete rec.archivedAt;
       rt.releaseWhenIdle = false;
     }
@@ -1166,9 +1360,10 @@ export class Runner {
       this.steer(st, msg);
       return rt.turn.turnId;
     }
-    if (rt.turn || rec.queue.length) {
+    if (rt.turn || rec.queue.length || this.draining) {
       // Behind a running turn, or behind messages that couldn't start
-      // earlier: they go first.
+      // earlier: they go first. On a draining runner a thread with no turn
+      // is about to move across, and the message goes with it.
       rec.queue.push(msg);
       this.markDirty(st);
       this.kickQueue(st);
@@ -1757,7 +1952,7 @@ export class Runner {
     model?: string | null;
     effort?: EffortLevel | null;
     permissionMode?: PermissionMode;
-    snoozedUntil?: string | null;
+    snoozedUntil?: string | null; // an ISO time, or 'restart' for until the runner next starts
     archived?: boolean;
   }): { thread: ThreadSummary } {
     const st = this.mustGet(params.threadId);
@@ -1884,10 +2079,15 @@ export class Runner {
       );
     }
     if (params.snoozedUntil !== undefined) {
+      delete rec.snoozedUntilRestart;
       if (params.snoozedUntil === null) delete rec.snoozedUntil;
-      else {
+      else if (params.snoozedUntil === 'restart') {
+        rec.snoozedUntil = UNTIL_RESTART;
+        rec.snoozedUntilRestart = true;
+        stop = true;
+      } else {
         const t = Date.parse(params.snoozedUntil);
-        if (Number.isNaN(t)) throw new RpcError(ErrorCode.badParams, 'snoozedUntil must be an ISO time');
+        if (Number.isNaN(t)) throw new RpcError(ErrorCode.badParams, 'snoozedUntil must be an ISO time or "restart"');
         rec.snoozedUntil = new Date(t).toISOString();
         stop = true;
       }
@@ -2296,6 +2496,7 @@ export class Runner {
 
   private wake(st: ThreadState): void {
     delete st.rec.snoozedUntil;
+    delete st.rec.snoozedUntilRestart;
     st.rec.forceUnread = true;
     st.rec.updatedAt = this.isoNow();
     this.markDirty(st);
@@ -2306,6 +2507,12 @@ export class Runner {
   // one started. One that can't be written (disk full) stays at the front.
   private kickQueue(st: ThreadState): boolean {
     if (st.rt.turn || st.rec.queue.length === 0 || this.stopping) return false;
+    // A draining runner hands a thread over with its queue rather than
+    // start another turn on the old release; the primary starts it.
+    if (this.draining) {
+      this.queueHandoverCheck();
+      return false;
+    }
     const next = st.rec.queue.shift()!;
     this.markDirty(st);
     try {
@@ -2466,6 +2673,7 @@ export class Runner {
     if (rec.modelInUse) s.modelInUse = rec.modelInUse;
     if (rec.effortInUse) s.effortInUse = rec.effortInUse;
     if (rec.snoozedUntil) s.snoozedUntil = rec.snoozedUntil;
+    if (rec.snoozedUntilRestart) s.snoozedUntilRestart = true;
     if (rec.archivedAt) s.archivedAt = rec.archivedAt;
     if (rec.nativeSessionId && rec.sessionUsed) s.nativeSessionId = rec.nativeSessionId;
     if (rec.contextTokens !== undefined) s.contextTokens = rec.contextTokens;
@@ -2584,6 +2792,17 @@ export class Runner {
   // the same way again is told HOOK_TELL_LIMIT times, then only posted.
   private async runHooks(st: ThreadState, turn: Turn): Promise<void> {
     const hooks = this.patchSet(st).hooks.filter((h) => h.on === 'turn.end' && hookApplies(h, turn.edited, st.rec.cwd));
+    if (!hooks.length) return;
+    st.rt.hooksRunning = (st.rt.hooksRunning ?? 0) + 1;
+    try {
+      await this.runHookList(st, hooks);
+    } finally {
+      st.rt.hooksRunning--;
+      if (this.draining) this.queueHandoverCheck();
+    }
+  }
+
+  private async runHookList(st: ThreadState, hooks: PatchSet['hooks']): Promise<void> {
     for (const hook of hooks) {
       if (st.rt.deleted || this.stopping) return;
       const outcome = await runCommand(hook.command, {

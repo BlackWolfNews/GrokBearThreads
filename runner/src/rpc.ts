@@ -5,7 +5,8 @@ import { WebSocketServer, WebSocket } from 'ws';
 import type { Runner, Notification, CliControl } from './runner.ts';
 import type { Logger } from './log.ts';
 import { CLI_POLICIES, EFFORT_LEVELS, ErrorCode, PROVIDERS, RpcError, isEffortLevel, isProvider } from './protocol.ts';
-import type { ApprovalDecision, CliPolicy, EffortLevel, ImageRef, PermissionMode, Provider } from './protocol.ts';
+import type { ApprovalDecision, CliPolicy, EffortLevel, ImageRef, PermissionMode, Provider, ThreadSummary } from './protocol.ts';
+import { isMoved, mergeSummaries, type Bucket } from './handover.ts';
 
 type Conn = {
   id: number;
@@ -27,6 +28,31 @@ const CLOSE_BYTES = 32 * 1024 * 1024;
 // How long close() waits for clients to finish closing before dropping them.
 const CLOSE_GRACE_MS = 1000;
 
+// Requests about one thread. During a handover (docs/protocol.md) the
+// primary passes these to the draining runner that has the thread, and a
+// draining runner answers -32030 for one it has let go.
+const THREAD_METHODS = new Set([
+  'threads.send',
+  'threads.interrupt',
+  'threads.update',
+  'threads.delete',
+  'threads.events',
+  'threads.subscribe',
+  'threads.markSeen',
+  'approvals.respond',
+  'panels.render',
+  'actions.run',
+]);
+
+// Draining runners' threads, as the primary's server sees them (handover.ts
+// Peers).
+export type RemoteThreads = {
+  owns(threadId: string): boolean;
+  call(threadId: string, method: string, params: Record<string, unknown>): Promise<unknown>;
+  summaries(include: Bucket[]): ThreadSummary[];
+  search(query: string, limit: number): Promise<ThreadSummary[]>;
+};
+
 export type RpcServerOptions = {
   host: string;
   port: number;
@@ -41,6 +67,10 @@ export type RpcServerOptions = {
   // E's CliUpdates, for clis.*. Without it they answer -32601, as an older
   // runner's would.
   clis?: CliControl;
+  // The primary's draining runners, whose threads it passes requests to.
+  remote?: RemoteThreads;
+  // A draining runner's own server: only the threads it still has.
+  onlyOwn?: boolean;
   // Tests shorten these.
   authTimeoutMs?: number;
   skipDeltasBytes?: number;
@@ -104,6 +134,14 @@ export class RpcServer {
     await new Promise<void>((r) => this.wss.close(() => r()));
     clearTimeout(cutOff);
     await new Promise<void>((r) => this.http.close(() => r()));
+  }
+
+  // Clients that have authenticated and are still connected (a draining
+  // runner's server counts the primaries listening to it).
+  connectedClients(): number {
+    let n = 0;
+    for (const c of this.conns) if (c.authed && c.ws.readyState === WebSocket.OPEN) n++;
+    return n;
   }
 
   private tokenOk(candidate: unknown): boolean {
@@ -229,6 +267,25 @@ export class RpcServer {
     }
   }
 
+  // A request about a draining runner's thread, passed to it. Its answer
+  // comes back unchanged. A subscribe starts this client's live stream in
+  // the same tick its backlog arrives: events the draining runner sent
+  // before the backlog are in it, and those after come through here. If it
+  // has just handed the thread over (-32030), this runner has it by then,
+  // and handles the request itself.
+  private forward(conn: Conn, method: string, p: Record<string, unknown>, threadId: string): Promise<unknown> {
+    return this.opts.remote!.call(threadId, method, p).then(
+      (res) => {
+        if (method === 'threads.subscribe') conn.subs.add(threadId);
+        return res;
+      },
+      (e) => {
+        if (isMoved(e) && this.opts.runner.has(threadId)) return this.dispatch(conn, method, p);
+        throw e;
+      },
+    );
+  }
+
   private mustClis(method: string): CliControl {
     if (!this.opts.clis) throw new RpcError(ErrorCode.methodNotFound, `Unknown method ${method}`);
     return this.opts.clis;
@@ -238,6 +295,11 @@ export class RpcServer {
   // its live stream happen in the same tick and nothing can slip between.
   private dispatch(conn: Conn, method: string, p: Record<string, unknown>): unknown {
     const r = this.opts.runner;
+    const tid = typeof p.threadId === 'string' ? p.threadId : undefined;
+    if (tid !== undefined && THREAD_METHODS.has(method) && !r.has(tid)) {
+      if (this.opts.remote?.owns(tid)) return this.forward(conn, method, p, tid);
+      if (this.opts.onlyOwn) throw new RpcError(ErrorCode.moved, 'This runner has handed that thread over to the new one.');
+    }
     switch (method) {
       case 'auth':
         return {};
@@ -249,10 +311,18 @@ export class RpcServer {
         for (const x of include ?? []) {
           if (x !== 'inbox' && x !== 'snoozed' && x !== 'archived') throw bad(`unknown include value ${x}`);
         }
-        return { threads: r.list(include as ('inbox' | 'snoozed' | 'archived')[] | undefined) };
+        const local = r.list(include as Bucket[] | undefined);
+        const remote = this.opts.remote?.summaries((include as Bucket[] | undefined) ?? ['inbox']);
+        return { threads: remote?.length ? mergeSummaries(local, remote) : local };
       }
-      case 'threads.search':
-        return { threads: r.search(reqString(p, 'query'), optInt(p, 'limit')) };
+      case 'threads.search': {
+        const query = reqString(p, 'query');
+        const limit = optInt(p, 'limit');
+        const local = r.search(query, limit);
+        const remote = this.opts.remote;
+        if (!remote) return { threads: local };
+        return remote.search(query, limit ?? 50).then((more) => ({ threads: mergeSummaries(local, more).slice(0, limit ?? 50) }));
+      }
       case 'threads.create': {
         const res = r.create({
           text: optString(p, 'text') ?? '',
