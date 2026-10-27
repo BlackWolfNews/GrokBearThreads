@@ -1,7 +1,7 @@
 // Turns Claude Agent SDK messages into protocol events. Pure apart from the
 // injected file helpers, so it can be tested by feeding recorded SDK message
 // sequences through it.
-import type { BackgroundKind, EventBody, Hunk, ImageRef } from '../../protocol.ts';
+import type { BackgroundKind, EventBody, Hunk, ImageRef, UsageWindow } from '../../protocol.ts';
 import { LIMITS } from '../../protocol.ts';
 import type { AdapterOutput, TurnResult } from '../types.ts';
 import type { NormalizerContext } from '../context.ts';
@@ -34,6 +34,7 @@ export class ClaudeNormalizer {
   private command?: string; // uuid of the message the CLI's current turn answers
   private unanswered = 0;
   private pendingNote?: string; // a finished background task, shown with the turn it starts
+  private limitRejected = false; // a rate_limit_event this turn said the login is at its limit
   private afterCompact = false;
 
   constructor(ctx: NormalizerContext) {
@@ -72,6 +73,9 @@ export class ClaudeNormalizer {
         break;
       case 'result':
         this.result(msg, out);
+        break;
+      case 'rate_limit_event':
+        this.rateLimit(msg, out);
         break;
       default:
         break;
@@ -341,6 +345,16 @@ export class ClaudeNormalizer {
     if (entries) out.push({ kind: 'event', event: { type: 'plan.updated', entries } });
   }
 
+  // The account's room left, which the CLI reports with every model call.
+  // It goes to the UsageStore; status "rejected" means the login is at its
+  // limit, and a turn that then fails failed on it.
+  private rateLimit(msg: AnyMsg, out: AdapterOutput[]): void {
+    const reading = rateLimitReading(msg.rate_limit_info);
+    if (!reading) return;
+    if (reading.blocked) this.limitRejected = true;
+    out.push({ kind: 'limits', ...reading });
+  }
+
   private result(msg: AnyMsg, out: AdapterOutput[]): void {
     // Text that streamed but never got a complete frame (an interrupt cut it
     // off) is kept as what the user saw.
@@ -384,9 +398,55 @@ export class ClaudeNormalizer {
     if (result.outcome === 'failed') {
       const errors = Array.isArray(msg.errors) ? (msg.errors as string[]).filter((e) => !e.startsWith('[ede_diagnostic]')) : [];
       result.error = (typeof msg.result === 'string' && msg.result) || errors.join('\n') || `Turn ended: ${msg.subtype}`;
+      if (this.limitRejected || USAGE_LIMIT_TEXT.test(result.error)) result.errorKind = 'usageLimit';
     }
+    this.limitRejected = false;
     out.push({ kind: 'result', result });
   }
+}
+
+// What a failed turn says when the login ran out, for CLIs whose
+// rate_limit_event didn't come first.
+const USAGE_LIMIT_TEXT = /hit your (usage )?limit|usage limit reached|rate_limit_error/i;
+
+// Claude's single-window rateLimitType names, as protocol windows.
+const RATE_LIMIT_WINDOWS: Record<string, { kind: UsageWindow['kind']; title: string }> = {
+  five_hour: { kind: 'five_hour', title: '5-hour' },
+  seven_day: { kind: 'weekly', title: 'Weekly' },
+  seven_day_opus: { kind: 'weekly_model', title: 'Weekly Opus' },
+  seven_day_sonnet: { kind: 'weekly_model', title: 'Weekly Sonnet' },
+};
+
+function usageWindow(type: string, utilization: unknown, resetsAt: unknown): UsageWindow | undefined {
+  const shape = RATE_LIMIT_WINDOWS[type];
+  if (!shape || typeof utilization !== 'number' || !Number.isFinite(utilization)) return undefined;
+  // utilization is a fraction used; two decimals keeps 1 - 0.62 at 38.
+  const left = Math.round(Math.max(0, Math.min(1, 1 - utilization)) * 10_000) / 100;
+  const w: UsageWindow = { ...shape, remainingPercent: left };
+  if (typeof resetsAt === 'number' && resetsAt > 0) w.resetsAt = new Date(resetsAt * 1000).toISOString();
+  return w;
+}
+
+// A rate_limit_event's rate_limit_info as a reading. The CLI sends
+// unifiedWindows (five_hour and seven_day) though sdk.d.ts doesn't list
+// it; without it, the documented single rateLimitType and utilization.
+export function rateLimitReading(info: AnyMsg | undefined): { windows: UsageWindow[]; blocked: boolean } | undefined {
+  if (!info || typeof info !== 'object') return undefined;
+  const windows: UsageWindow[] = [];
+  const unified = info.unifiedWindows;
+  if (unified && typeof unified === 'object') {
+    for (const [type, w] of Object.entries(unified as AnyMsg)) {
+      const win = w && typeof w === 'object' ? usageWindow(type, (w as AnyMsg).utilization, (w as AnyMsg).resetsAt) : undefined;
+      if (win) windows.push(win);
+    }
+  }
+  if (!windows.length && typeof info.rateLimitType === 'string') {
+    const win = usageWindow(info.rateLimitType, info.utilization, info.resetsAt);
+    if (win) windows.push(win);
+  }
+  const blocked = info.status === 'rejected';
+  if (!windows.length && typeof info.status !== 'string') return undefined;
+  return { windows, blocked };
 }
 
 function contextTokens(usage: AnyMsg | undefined): number | undefined {

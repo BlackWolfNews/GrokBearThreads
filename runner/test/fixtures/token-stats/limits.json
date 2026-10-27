@@ -1,0 +1,188 @@
+{
+  "accounts": [
+    {
+      "configDir": "~/.codex",
+      "email": "codex@example.com",
+      "label": "~/.codex",
+      "notice": "64,390 credits \u00b7 2 limit resets available",
+      "plan": "Pro Lite",
+      "provider": "Codex",
+      "usageReadAt": "2026-10-27T03:53:18Z",
+      "windows": [
+        {
+          "detail": null,
+          "kind": "weekly",
+          "remainingPercent": 93,
+          "resetsAt": "2026-11-02T06:03:07Z",
+          "title": "Weekly"
+        }
+      ]
+    },
+    {
+      "configDir": "/Users/example/Library/Application Support/Token Stats/Accounts/claude-2",
+      "email": "two@example.com",
+      "label": "claude-2",
+      "notice": "$206.84 extra usage spent",
+      "plan": "Team",
+      "provider": "Claude",
+      "usageReadAt": "2026-10-27T03:53:18Z",
+      "windows": [
+        {
+          "detail": null,
+          "kind": "five_hour",
+          "remainingPercent": 0,
+          "resetsAt": "2026-10-27T05:29:59Z",
+          "title": "5-hour"
+        },
+        {
+          "detail": null,
+          "kind": "weekly",
+          "remainingPercent": 66,
+          "resetsAt": "2026-10-27T15:59:59Z",
+          "title": "Weekly"
+        },
+        {
+          "detail": null,
+          "kind": "weekly_model",
+          "remainingPercent": 83,
+          "resetsAt": "2026-10-27T15:59:59Z",
+          "title": "Weekly Fable"
+        }
+      ]
+    },
+    {
+      "configDir": "/Users/example/Library/Application Support/Token Stats/Accounts/claude-1",
+      "email": "one@example.com",
+      "label": "claude-1",
+      "notice": "$48.85 extra usage spent",
+      "plan": "Max",
+      "provider": "Claude",
+      "usageReadAt": "2026-10-27T03:53:18Z",
+      "windows": [
+        {
+          "detail": null,
+          "kind": "five_hour",
+          "remainingPercent": 98,
+          "resetsAt": "2026-10-27T08:39:59Z",
+          "title": "5-hour"
+        },
+        {
+          "detail": null,
+          "kind": "weekly",
+          "remainingPercent": 18,
+          "resetsAt": "2026-10-29T16:59:59Z",
+          "title": "Weekly"
+        },
+        {
+          "detail": null,
+          "kind": "weekly_model",
+          "remainingPercent": 96,
+          "resetsAt": "2026-10-29T16:59:59Z",
+          "title": "Weekly Fable"
+        },
+        {
+          "detail": "$132.79 left",
+          "kind": "allowance",
+          "remainingPercent": 53.11612,
+          "resetsAt": "2026-11-05T07:59:00Z",
+          "title": "$250 allowance"
+        }
+      ]
+    },
+    {
+      "configDir": "/Users/example/.claude",
+      "email": "main@example.com",
+      "label": "~/.claude",
+      "notice": null,
+      "plan": "Max",
+      "provider": "Claude",
+      "usageReadAt": "2026-10-27T03:53:18Z",
+      "windows": [
+        {
+          "detail": null,
+          "kind": "five_hour",
+          "remainingPercent": 86,
+          "resetsAt": "2026-10-27T08:10:00Z",
+          "title": "5-hour"
+        },
+        {
+          "detail": null,
+          "kind": "weekly",
+          "remainingPercent": 13,
+          "resetsAt": "2026-10-27T21:00:00Z",
+          "title": "Weekly"
+        },
+        {
+          "detail": null,
+          "kind": "weekly_model",
+          "remainingPercent": 97,
+          "resetsAt": "2026-10-27T21:00:00Z",
+          "title": "Weekly Fable"
+        }
+      ]
+    },
+    {
+      "configDir": "/Users/example/Library/Application Support/Token Stats/Accounts/claude-3/",
+      "email": "three@example.com",
+      "label": "claude-3",
+      "notice": null,
+      "plan": "Max",
+      "provider": "Claude",
+      "usageReadAt": "2026-10-27T03:53:18Z",
+      "windows": [
+        {
+          "detail": null,
+          "kind": "five_hour",
+          "remainingPercent": 100,
+          "resetsAt": null,
+          "title": "5-hour"
+        },
+        {
+          "detail": null,
+          "kind": "weekly",
+          "remainingPercent": 62,
+          "resetsAt": "2026-10-29T04:59:59Z",
+          "title": "Weekly"
+        },
+        {
+          "detail": null,
+          "kind": "weekly_model",
+          "remainingPercent": 84,
+          "resetsAt": "2026-10-29T04:59:59Z",
+          "title": "Weekly Fable"
+        }
+      ]
+    },
+    {
+      "configDir": "/Users/example/.grok",
+      "email": "grok@example.com",
+      "label": "~/.grok",
+      "notice": null,
+      "plan": null,
+      "provider": "Grok",
+      "usageReadAt": "2026-10-27T03:53:18Z",
+      "windows": [
+        {
+          "detail": null,
+          "kind": "weekly",
+          "remainingPercent": 87,
+          "resetsAt": "2026-10-28T06:53:23Z",
+          "title": "Weekly"
+        }
+      ]
+    },
+    {
+      "configDir": "/Users/example/.config/muse",
+      "email": "muse@example.com",
+      "label": "~/.config/muse",
+      "notice": "Muse didn't report usage this time. It usually does once you've used it in the current window.",
+      "plan": "Power Usage",
+      "provider": "Muse",
+      "usageReadAt": null,
+      "windows": []
+    }
+  ],
+  "complete": true,
+  "generatedAt": "2026-10-27T03:53:19Z",
+  "version": 1
+}
