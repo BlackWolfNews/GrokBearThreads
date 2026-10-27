@@ -5,7 +5,7 @@ import path from 'node:path';
 import { makeHarness, tick, tmpDir } from '../helpers/fakes.ts';
 import { checkSummary } from '../helpers/protocol-check.ts';
 import { Projects, projectMethods, BRIEF_MAX } from '../../src/projects.ts';
-import { Librarian, librarianMethods, SETTLE_MS, CATCH_UP_MS } from '../../src/librarian.ts';
+import { Librarian, librarianMethods, mainCheckout, SETTLE_MS, CATCH_UP_MS } from '../../src/librarian.ts';
 import { buildThreadbareTools } from '../../src/threadbare-mcp.ts';
 import { FakeClock } from '../../src/clock.ts';
 import { nullLogger } from '../../src/log.ts';
@@ -382,4 +382,30 @@ test('a project the librarian makes on an asked look stays: the same look never 
   await tick(8);
   assert.deepEqual(librarian.status().recent.map((e) => e.text), ['Made Tandem and put it there']);
   assert.deepEqual(h.runner.get(thread.id).projects?.map((m) => m.title), ['Tandem']);
+});
+
+test('a git worktree counts as its main checkout, never as a folder of its own', async () => {
+  let answer: unknown = {};
+  const s = setup({ models: () => reply(answer) });
+  const { h, repo, root, create, finish, librarian, projects } = s;
+  const main = repo('dev/app');
+  const wt = path.join(root, 'dev/app-wt');
+  fs.mkdirSync(path.join(main, '.git/worktrees/wt'), { recursive: true });
+  fs.mkdirSync(wt, { recursive: true });
+  fs.writeFileSync(path.join(wt, '.git'), `gitdir: ${path.join(main, '.git/worktrees/wt')}\n`);
+  assert.equal(mainCheckout(wt), main);
+  assert.equal(mainCheckout(main), main);
+  const p = projects.create({ title: 'App', folders: [main], by: 'mike' });
+  const { thread } = create();
+  answer = { projects: [p.id], addFolders: { [p.id]: ['~/dev/app-wt'] } };
+  await finish(thread.id, [path.join(wt, 'src/x.ts')]);
+  h.clock.advance(SETTLE_MS);
+  await tick(8);
+  assert.deepEqual(projects.record(p.id)?.folders, [main], 'the worktree is not added');
+  assert.equal(librarian.status().recent[0].text, 'Put it in App');
+  // Its edits counted as the main checkout's, which the project has.
+  h.runner.send(thread.id, 'more');
+  await tick();
+  await finish(thread.id, [path.join(wt, 'src/y.ts')]);
+  assert.equal(librarian.status().queue[0].reason, 'catch-up');
 });
