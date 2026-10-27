@@ -76,11 +76,13 @@ enum AppUpdate {
         }
     }
 
-    /// Whether to restart on its own to take a staged build: nothing is
-    /// running, nothing typed would be lost, and Mike isn't in the app
-    /// (another app is in front, or he hasn't touched this one for a while).
-    static func shouldAutoRestart(staged: Bool, loaded: Bool, working: Bool, hasDrafts: Bool, active: Bool, idleFor: TimeInterval) -> Bool {
-        guard staged, loaded, !working, !hasDrafts else { return false }
+    /// Whether to restart on its own to take a staged build: nothing typed
+    /// would be lost, and Mike isn't in the app (another app is in front, or
+    /// he hasn't touched this one for a while). Running threads don't hold
+    /// it up: the runner owns the turns and the app replays what it missed
+    /// when it reconnects.
+    static func shouldAutoRestart(staged: Bool, loaded: Bool, hasDrafts: Bool, active: Bool, idleFor: TimeInterval) -> Bool {
+        guard staged, loaded, !hasDrafts else { return false }
         return !active || idleFor >= AppUpdater.autoRestartIdleTime
     }
 
@@ -113,8 +115,8 @@ enum AppUpdate {
 /// Quitting swaps the staged bundle in, so the next launch is the new app;
 /// a launch that finds one staged (the app was killed rather than quit)
 /// swaps it in and relaunches. "Restart to Update" in the app menu does it
-/// now, and the app does it by itself once no thread is running, nothing
-/// typed would be lost and Mike isn't using it (see `shouldAutoRestart`),
+/// now, and the app does it by itself once nothing typed would be lost
+/// and Mike isn't using it (see `shouldAutoRestart`),
 /// reopening the thread he had open. Only the installed app does any of this: a debug app from
 /// Tools/dev-app.sh, a perf run or a screenshot run has another bundle
 /// path or a scripted flag, and a bundle with no build.json (built before
@@ -218,14 +220,13 @@ final class AppUpdater {
     /// Restarts into the staged build when that wouldn't interrupt anything.
     func considerAutoRestart(app: AppModel) {
         guard let staged, !restarting else { return }
-        let working = app.threads.values.contains { $0.status == .running || $0.status == .starting }
         // An open schedule editor counts as something typed: a restart
         // would throw away what's in it.
         let hasDrafts = app.drafts.values.contains { !$0.text.isEmpty || !$0.images.isEmpty } || app.scheduleEditor != nil
         let active = NSApp.isActive
-        guard AppUpdate.shouldAutoRestart(staged: true, loaded: app.threadsLoaded && app.connection == .connected, working: working,
+        guard AppUpdate.shouldAutoRestart(staged: true, loaded: app.threadsLoaded && app.connection == .connected,
                                           hasDrafts: hasDrafts, active: active, idleFor: Date().timeIntervalSince(lastInput)) else { return }
-        AppLog.write("update", "restarting into \(staged.short): nothing running, nothing typed, " + (active ? "no input for a while" : "the app isn't in front"))
+        AppLog.write("update", "restarting into \(staged.short): nothing typed, " + (active ? "no input for a while" : "the app isn't in front"))
         restart(app: app, inBackground: !active)
     }
 
