@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import type { EffortLevel, MessageOrigin, PermissionMode, PersistedEvent, Provider, Subagent, ThreadProject, ThreadStatus, ImageRef } from './protocol.ts';
+import type { Ask, NeedsWho, EffortLevel, MessageOrigin, PermissionMode, PersistedEvent, Provider, Subagent, ThreadProject, ThreadStatus, ImageRef } from './protocol.ts';
 import { atomicWriteFileSync, readJsonSync } from './fsutil.ts';
 import { paths } from './config.ts';
 
@@ -45,6 +45,9 @@ export type ThreadRecord = {
   sessionCostTotal?: number; // the CLI's running total_cost_usd for this native session
   lastTurnCompletedSeq: number;
   forceUnread?: boolean; // set when a snooze ends
+  // What the last completed turn said it needs from Mike, with the seq of
+  // its turn.completed and which of its asks he has ticked.
+  needs?: { seq: number; needs: NeedsWho; asks?: Ask[]; ticked?: number[] };
   // Set when the folder or account changes, or the record had to be
   // rebuilt; the next turn starts a new native session with a note.
   // lost: the session to resume couldn't be found (never saved; only set

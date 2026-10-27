@@ -122,6 +122,11 @@ export type ThreadSummary = {
   status: ThreadStatus;
   live: boolean;
   needsYou: boolean;
+  // What the last completed turn said it needs from Mike, and its open
+  // asks (docs/protocol.md, "Needs you").
+  needs?: NeedsWho;
+  asks?: OpenAsk[];
+  asksSeq?: number;
   createdAt: string;
   updatedAt: string;
   lastActivityAt: string;
@@ -405,7 +410,12 @@ export type EventBody =
       usage?: ClaudeTurnUsage | CodexTurnUsage | Record<string, unknown>;
       error?: string;
       errorKind?: TurnErrorKind;
+      needs?: NeedsWho;
+      asks?: Ask[];
+      needsFrom?: 'tool' | 'text';
     }
+  // The ticks on a card of asks, the whole set each time. Outside any turn.
+  | { type: 'asks.ticked'; asksSeq: number; ticked: number[] }
   | { type: 'system.note'; text: string }
   | { type: 'error'; message: string }
   // A command action that ran (patches.ts): its output, truncated like a
@@ -434,6 +444,11 @@ export type Envelope = {
   turnId?: string;
 };
 
+// What a finished turn needs from Mike (docs/protocol.md, "Needs you").
+export type NeedsWho = 'you' | 'nothing';
+export type Ask = { action: string; where?: string; reply?: string };
+export type OpenAsk = Ask & { ticked?: true };
+
 export type PersistedEvent = Envelope & EventBody;
 export type TransientEvent = Envelope & DeltaBody;
 export type AnyEvent = PersistedEvent | TransientEvent;
@@ -451,6 +466,7 @@ export const PERSISTED_TYPES = new Set<string>([
   'plan.updated',
   'turn.started',
   'turn.completed',
+  'asks.ticked',
   'system.note',
   'error',
   'action.run',

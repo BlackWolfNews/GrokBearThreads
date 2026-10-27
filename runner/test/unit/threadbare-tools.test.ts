@@ -316,3 +316,20 @@ test('list_accounts shows each login\'s provider, note, room left and models; cr
   assert.equal(h.runner.get(me.id).provider, 'codex');
   assert.equal(h.runner.get(me.id).model, 'gpt-6-luna');
 });
+
+// ------------------------------------------------------------ end_turn
+
+test('end_turn only acknowledges; its description says when to call it', async () => {
+  const h = makeHarness();
+  const { thread } = start(h);
+  const { list, call } = tools(h, thread.id);
+  const t = list.find((x) => x.name === 'end_turn')!;
+  assert.match(t.description, /last thing in every turn/);
+  assert.match(t.description, /Sub-agents never call this/);
+  const r = await call('end_turn', { needs: 'you', asks: [{ action: 'Say yes' }] });
+  assert.equal(r.error, false);
+  assert.match(r.text, /Needs you/);
+  assert.match((await call('end_turn', { needs: 'nothing' })).text, /done/);
+  // The runner reads the call from the thread's events, not the handler.
+  assert.equal(h.runner.get(thread.id).needs, undefined);
+});

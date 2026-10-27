@@ -243,7 +243,7 @@ final class TranscriptController: NSObject, NSTableViewDataSource, NSTableViewDe
 
     static func cellIdentifier(for row: TranscriptRow) -> String {
         switch row.kind {
-        case .user, .assistant, .plan, .error, .footer: return "text"
+        case .user, .assistant, .plan, .asks, .error, .footer: return "text"
         // A system note folded into an open group reads as one of its lines.
         case .note: return row.inGroup ? "header" : "text"
         case .reasoning, .tool, .diff: return "header"
@@ -687,6 +687,17 @@ final class TranscriptController: NSObject, NSTableViewDataSource, NSTableViewDe
     func questionDraft(_ approvalId: String) -> [Int: Set<String>] { questionDrafts[approvalId] ?? [:] }
 
     func setQuestionDraft(_ approvalId: String, _ draft: [Int: Set<String>]) { questionDrafts[approvalId] = draft }
+
+    func askAction(_ card: AsksCard, action: String) {
+        guard let session else { return }
+        let parts = action.split(separator: ":", maxSplits: 1)
+        guard parts.count == 2, let index = Int(parts[1]), card.asks.indices.contains(index) else { return }
+        switch parts[0] {
+        case "tick": session.tickAsk(asksSeq: card.seq, index: index, ticked: !card.ticked.contains(index))
+        case "reply": if let reply = card.asks[index].reply { session.useReply(reply) }
+        default: break
+        }
+    }
 }
 
 /// SwiftUI wrapper. The controller lives as long as the window's detail view,

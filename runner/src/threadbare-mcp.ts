@@ -17,6 +17,7 @@ import { parseWhen, relativeFuture, relativeTime } from './when.ts';
 
 export { parseWhen, relativeFuture, relativeTime };
 import { RUNNER_VERSION, expandHome } from './config.ts';
+import { END_TURN_DESCRIPTION, END_TURN_TOOL } from './needs.ts';
 
 // What the tools drive: the Runner itself, or during a handover
 // (docs/protocol.md) a ThreadRouter (handover.ts) that reaches threads on
@@ -384,6 +385,28 @@ export function buildThreadbareTools(control: ThreadControl, selfId: string, now
   ];
 
   return [
+    // Says what the turn needs from Mike. The runner reads it from the
+    // thread's own tool.call when the turn completes (needs.ts), so the
+    // handler only checks it; a sub-agent's call never reaches the thread.
+    tool(
+      END_TURN_TOOL,
+      END_TURN_DESCRIPTION,
+      {
+        needs: z.enum(['you', 'nothing']).describe('"you" when Mike has to do something before this can go on; "nothing" when it is done.'),
+        asks: z
+          .array(
+            z.object({
+              action: z.string().min(1).describe('One concrete thing for Mike to do, in a short sentence: "Paste your OpenRouter key into Settings".'),
+              where: z.string().optional().describe('Where he does it: an app, site, file or person, e.g. "Threadbare › Settings › Models".'),
+              reply: z.string().optional().describe('The exact words to send back when it is done, e.g. "done" or "key set". Leave it out when the reply is his own answer (a decision, a choice).'),
+            }),
+          )
+          .max(10)
+          .optional()
+          .describe('With needs "you": each thing he has to do, most blocking first. Usually one or two.'),
+      },
+      handle(async ({ needs }) => (needs === 'you' ? 'Noted: this thread will wait in Needs you. End the turn now, with no more text.' : 'Noted: this thread is done. End the turn now, with no more text.')),
+    ),
     ...(schedules ? scheduleTools : []),
     ...(projects ? projectTools : []),
     tool(
@@ -578,7 +601,8 @@ export function threadbareMcpServer(control: ThreadControl, selfId: string, sche
     instructions:
       `This session is a thread in Threadbare, Mike's own app for running agent threads (thread id ${selfId}). ` +
       'These tools manage Threadbare itself: list and read threads, start new ones, message them, rename, snooze, archive, move and delete them, schedule messages for later (once or on a cron), and keep Mike\'s projects (groupings above folders with goals, state and notes) up to date. ' +
-      'Use move_thread when the work belongs in another folder (for example a repo), so this thread runs there from the next turn.',
+      'Use move_thread when the work belongs in another folder (for example a repo), so this thread runs there from the next turn. ' +
+      'End every turn by calling end_turn, after your final message, to say whether Mike has to do anything.',
     tools: buildThreadbareTools(control, selfId, Date.now, schedules, projects),
   });
   server.tools = [...ALWAYS_ASK_TOOLS].map((name) => ({ name: name.split('__').at(-1)!, permission_policy: 'always_ask' as const }));

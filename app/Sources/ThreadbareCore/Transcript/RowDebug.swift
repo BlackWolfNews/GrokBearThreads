@@ -33,6 +33,8 @@ public enum RowDebug {
             return item.request.questions.map(\.question).joined(separator: " / ")
         case .plan(let entries):
             return entries.map(\.text).joined(separator: "; ")
+        case .asks(let card):
+            return "\(card.isOpen ? "open" : "closed"), \(card.tickedCount) of \(card.asks.count) ticked: " + card.asks.map(\.action).joined(separator: "; ")
         case .footer(let completion):
             var text = RelativeTime.duration(milliseconds: completion.durationMs)
             if let cost = CostText.format(completion.costUsd) { text += ", " + cost }

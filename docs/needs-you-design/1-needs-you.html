@@ -1,0 +1,34 @@
+<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="app.css"><!-- size: 1240x780 --></head><body>
+<div class="caption">
+  <h1>1. A turn that needs you</h1>
+  <p>The agent ends with <code>end_turn({ needs: "you", asks })</code>. The card under its last message lists each ask with a tick box: what to do, then where on a quieter line.</p>
+  <p>Ticking only marks it done for you. It never sends anything, because sending starts a turn that costs money.</p>
+  <p>An ask with a <b>reply</b> gets a chip ("done", "fix it"). The chip puts that reply in the composer for you to send.</p>
+  <p>The sidebar row shows the <b>first open ask</b> instead of the last line of the reply, so you can see what's wanted without opening the thread.</p>
+</div>
+<div class="win"><div class="side"><div class="lights"><i></i><i></i><i></i></div><div class="search">⌕ Search threads</div>
+  <div class="sec">Needs you</div>
+  <div class="row sel"><span class="dot orange"></span><div class="t">Small-model infra: settings page</div><div class="s ask">Paste your OpenRouter key into Settings and turn on titles</div><span class="when">now</span></div>
+  <div class="row"><span class="dot orange"></span><div class="t">Fix login redirect</div><div class="s ask">Pick: merge to main or keep the branch</div><span class="when">4m</span></div>
+  <div class="row"><span class="dot orange"></span><div class="t">Add a .gitignore</div><div class="s">Wants to write .gitignore</div><span class="when">9m</span></div>
+  <div class="sec">Running</div>
+  <div class="row"><span class="dot blue"></span><div class="t">Projects design</div><div class="s">Reading docs/plan.md</div><span class="when">now</span></div>
+  <div class="sec">Inbox</div>
+  <div class="row read"><span class="mark">✓</span><div class="t">Check the Node version</div><div class="s">Node version: v24.22.1</div><span class="when">20m</span></div>
+  <div class="row read"><span class="mark">✓</span><div class="t">Fix the README typos</div><div class="s">Fixed one typo in README.md</div><span class="when">1h</span></div>
+</div>
+<div class="main">
+  <div class="head"><div class="t">Small-model infra: settings page</div><div class="s">~/dev/me/threadbare</div></div>
+  <div class="feed">
+    <div class="bubble">Can you get the settings page working with an OpenRouter key?</div>
+    <div class="tool"><span class="ok">✓</span> <b>Edited 6 files</b> +214 −12</div>
+    <div class="tool"><span class="ok">✓</span> <b>npm test</b> 412 passed</div>
+    <div class="msg"><p>The Settings window is in, with the key field, the daily budget and private folders. The runner keeps the key in <code>secrets/openrouter-key</code> and the app only ever hears whether one is set.</p>
+    <p>I've tested it with a fake key. To see a real title come back I need a real one.</p></div>
+    <div class="card"><div class="h">Needs you</div>
+      <div class="ask"><span class="box"></span><div class="body"><div class="a">Paste your OpenRouter key into Settings and turn on titles</div><div class="w">Threadbare › Settings › Models</div></div><span class="reply">done</span></div>
+      <div class="ask"><span class="box"></span><div class="body"><div class="a">Say whether a $1 daily budget is right, or give me a number</div></div></div>
+    </div>
+  </div>
+  <div class="composer">Message<div class="chips"><span>⌂ threadbare</span><span>◉ claude-3</span><span>✦ Opus 5.5</span></div></div>
+</div></div></body></html>

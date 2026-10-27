@@ -767,6 +767,13 @@ public struct ThreadSummary: Sendable, Hashable, Codable, Identifiable {
     /// The projects it's in, oldest first. Empty when it's in none (or the
     /// runner is from before projects).
     public var projects: [ThreadProject]
+    /// What the last completed turn said it needs from Mike ("you" or
+    /// "nothing"), nil when it said neither (docs/protocol.md, "Needs you").
+    public var needs: String?
+    /// That turn's asks, with Mike's ticks, while it's the open card.
+    public var asks: [Ask]
+    /// The seq of the turn.completed the asks came with.
+    public var asksSeq: Int?
 
     public init(
         id: String, title: String, cwd: String = "~/dev/me/misc", accountId: String = "claude-main",
@@ -778,7 +785,7 @@ public struct ThreadSummary: Sendable, Hashable, Codable, Identifiable {
         contextTokens: Int? = nil, costUsd: Double? = nil,
         effort: String? = nil, modelInUse: String? = nil, effortInUse: String? = nil, contextWindow: Int? = nil,
         panels: [Panel] = [], actions: [Action] = [], hooks: [Hook] = [], patches: [PatchInfo] = [], background: [BackgroundTask] = [],
-        subagents: [Subagent] = [], projects: [ThreadProject] = []
+        subagents: [Subagent] = [], projects: [ThreadProject] = [], needs: String? = nil, asks: [Ask] = [], asksSeq: Int? = nil
     ) {
         self.id = id
         self.title = title
@@ -814,6 +821,9 @@ public struct ThreadSummary: Sendable, Hashable, Codable, Identifiable {
         self.background = background
         self.subagents = subagents
         self.projects = projects
+        self.needs = needs
+        self.asks = asks
+        self.asksSeq = asksSeq
     }
 
     public init(from decoder: Decoder) throws {
@@ -857,6 +867,9 @@ public struct ThreadSummary: Sendable, Hashable, Codable, Identifiable {
         background = c.lossyArray(BackgroundTask.self, forKey: .background)
         subagents = c.lossyArray(Subagent.self, forKey: .subagents)
         projects = c.lossyArray(ThreadProject.self, forKey: .projects)
+        needs = (try? c.decodeIfPresent(String.self, forKey: .needs)) ?? nil
+        asks = c.lossyArray(Ask.self, forKey: .asks)
+        asksSeq = (try? c.decodeIfPresent(Int.self, forKey: .asksSeq)) ?? nil
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -895,14 +908,24 @@ public struct ThreadSummary: Sendable, Hashable, Codable, Identifiable {
         if !background.isEmpty { try c.encode(background, forKey: .background) }
         if !subagents.isEmpty { try c.encode(subagents, forKey: .subagents) }
         if !projects.isEmpty { try c.encode(projects, forKey: .projects) }
+        try c.encodeIfPresent(needs, forKey: .needs)
+        if !asks.isEmpty { try c.encode(asks, forKey: .asks) }
+        try c.encodeIfPresent(asksSeq, forKey: .asksSeq)
     }
 
     enum CodingKeys: String, CodingKey {
         case id, title, cwd, accountId, provider, model, effort, modelInUse, effortInUse, permissionMode, status, live, needsYou
         case createdAt, updatedAt, lastActivityAt, snoozedUntil, snoozedUntilRestart, archivedAt, onOldRunner, preview
         case lastSeq, lastSeenSeq, nativeSessionId, contextTokens, contextWindow, costUsd, panels, actions, hooks, patches, background, subagents
-        case projects
+        case projects, needs, asks, asksSeq
     }
+
+    /// The first ask Mike hasn't ticked on the open card, if any: what the
+    /// sidebar and a notification show instead of the last line of prose.
+    public var firstOpenAsk: Ask? { asksSeq == nil ? nil : asks.first { !$0.ticked } }
+
+    /// The last turn finished and said nothing waits on Mike.
+    public var saidDone: Bool { needs == "nothing" }
 
     /// Still being worked on between turns: background sub-agents or jobs
     /// are running (or just finished, with their result still to be read)
@@ -1114,5 +1137,43 @@ public enum ISO8601 {
         let doy = (153 * mp + 2) / 5 + day - 1
         let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy
         return era * 146_097 + doe - 719_468
+    }
+}
+
+/// One thing a finished turn needs Mike to do (docs/protocol.md, "Needs
+/// you"): the action, where he does it, and the words to send back.
+public struct Ask: Sendable, Hashable, Codable {
+    public var action: String
+    public var where_: String?
+    public var reply: String?
+    /// Ticked on the open card (only in a summary's `asks`).
+    public var ticked: Bool
+
+    public init(action: String, where_: String? = nil, reply: String? = nil, ticked: Bool = false) {
+        self.action = action
+        self.where_ = where_
+        self.reply = reply
+        self.ticked = ticked
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        action = try c.decode(String.self, forKey: .action)
+        where_ = (try? c.decodeIfPresent(String.self, forKey: .where_)) ?? nil
+        reply = (try? c.decodeIfPresent(String.self, forKey: .reply)) ?? nil
+        ticked = ((try? c.decodeIfPresent(Bool.self, forKey: .ticked)) ?? nil) ?? false
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(action, forKey: .action)
+        try c.encodeIfPresent(where_, forKey: .where_)
+        try c.encodeIfPresent(reply, forKey: .reply)
+        if ticked { try c.encode(true, forKey: .ticked) }
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case action, reply, ticked
+        case where_ = "where"
     }
 }

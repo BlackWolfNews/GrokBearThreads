@@ -234,7 +234,16 @@ struct ThreadRowView: View {
                 .foregroundStyle(.primary)
                 .lineLimit(1)
                 .overlay(alignment: .leading) {
-                    if look.unread {
+                    if look.done {
+                        // Finished with nothing needed: a tick where the
+                        // unread dot would be.
+                        Image(systemName: "checkmark")
+                            .font(.system(size: zoomed(9), weight: .bold))
+                            .foregroundStyle(Color.accentColor)
+                            .frame(width: zoomed(10), height: zoomed(10))
+                            .offset(x: -(SidebarMetrics.leading + zoomed(10)) / 2)
+                            .accessibilityLabel("Done, unread")
+                    } else if look.unread {
                         // In the row's leading gutter, centred on the title.
                         Circle()
                             .fill(Color.accentColor)

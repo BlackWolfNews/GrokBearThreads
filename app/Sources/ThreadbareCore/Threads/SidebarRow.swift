@@ -45,8 +45,12 @@ public struct ThreadRowLook: Sendable, Equatable {
     /// Needs you merged into the inbox, the word is what says why a row
     /// sits at the top.
     public var labelled: Bool
+    /// Unread, and its last turn said nothing waits on Mike: a tick in the
+    /// gutter instead of the dot, out of Needs you.
+    public var done: Bool
 
-    public init(status: ThreadRowStatus, unread: Bool, emphasised: Bool, labelled: Bool = true) {
+    public init(status: ThreadRowStatus, unread: Bool, emphasised: Bool, labelled: Bool = true, done: Bool = false) {
+        self.done = done
         self.status = status
         self.unread = unread
         self.emphasised = emphasised
@@ -61,8 +65,11 @@ public struct ThreadRowLook: Sendable, Equatable {
         case .stopped: status = .stopped
         case .idle: status = thread.background.isEmpty ? .time : .background
         }
-        unread = thread.needsYou && status != .needsYou && status != .working
-        emphasised = thread.needsYou || status == .needsYou
+        // A turn that said it needs nothing isn't in needsYou, but it's
+        // still new: it gets a tick rather than nothing at all.
+        done = status == .time && !thread.needsYou && thread.saidDone && thread.lastSeq > thread.lastSeenSeq
+        unread = (thread.needsYou && status != .needsYou && status != .working) || done
+        emphasised = thread.needsYou || status == .needsYou || done
         labelled = !(status == .working && section == .running)
     }
 

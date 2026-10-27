@@ -120,6 +120,11 @@ type ThreadSummary = {
   status: ThreadStatus
   live: boolean         // a CLI process is attached right now
   needsYou: boolean     // waiting, or a turn finished after lastSeenSeq
+                        // that didn't end with needs "nothing" (Needs you)
+  needs?: "you" | "nothing" // what the last completed turn said; absent
+                        // when it said neither (see Needs you)
+  asks?: OpenAsk[]      // that turn's asks, when needs is "you"
+  asksSeq?: number      // seq of the turn.completed they came with
   createdAt: string
   updatedAt: string
   lastActivityAt: string
@@ -397,7 +402,8 @@ Persisted event types (stored in `events.ndjson`, returned by `threads.events`):
 | `approval.resolved` | `approvalId`, `decision` (`allow` \| `allowAlways` \| `deny` \| `answered` \| `expired`), `message?` |
 | `plan.updated` | `entries: {text, status: "pending" \| "in_progress" \| "completed"}[]` |
 | `turn.started` | `turnId`. A turn the agent starts by itself (a background task finished, or a background subagent needs an approval) has no `user.message` before it. A `user.message` after `turn.started` was sent while the turn ran and went into it |
-| `turn.completed` | `turnId`, `outcome` (`completed` \| `interrupted` \| `failed`), `durationMs`, `costUsd?` (Codex turns have none), `usage?` (Claude: `{inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens}`; Codex: `{inputTokens, cachedInputTokens, cacheWriteTokens?, outputTokens, reasoningTokens}`), `error?`, `errorKind?` (`usageLimit` \| `contextWindow` \| `auth`, when a failed turn's cause is known, so a client can offer the fix without reading `error`) |
+| `turn.completed` | `turnId`, `outcome` (`completed` \| `interrupted` \| `failed`), `durationMs`, `costUsd?` (Codex turns have none), `usage?` (Claude: `{inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens}`; Codex: `{inputTokens, cachedInputTokens, cacheWriteTokens?, outputTokens, reasoningTokens}`), `error?`, `errorKind?` (`usageLimit` \| `contextWindow` \| `auth`, when a failed turn's cause is known, so a client can offer the fix without reading `error`), `needs?` (`you` \| `nothing`), `asks?: Ask[]`, `needsFrom?` (`tool` \| `text`): what a completed turn said it needs from Mike (Needs you) |
+| `asks.ticked` | `asksSeq`, `ticked: number[]` (indexes into that turn's `asks`, the whole set now ticked). Outside any turn. The latest one for an `asksSeq` is that card's ticks |
 | `system.note` | `text` (e.g. "Resumed session", "Compacted the conversation", "Patch reseed added: action Reseed dev DB.") |
 | `error` | `message` |
 | `action.run` | `actionId`, `patch`, `title`, `command`, `ok`, `exitCode?`, `text` (what it printed, truncated to 64 KB), `truncated`, `durationMs`, `trigger?` (`"turn.end"` when a hook ran it; absent for a chip or `tb run`). A command that `actions.run` or a hook ran; outside any turn unless one was running, in which case it carries that `turnId` |
@@ -432,6 +438,7 @@ replaces whatever the deltas built up.
 | `threads.unsubscribe` | `{ threadId }` | `{}` |
 | `threads.subagent` | `{ threadId, subagentId }` | `{ subagent?: Subagent, events: Event[] }`: what the sub-agent has done so far, read from the CLI's own record of it, as events (`user.message` for its brief, then `assistant.text`, `reasoning`, `tool.call`, `tool.result`, `edit.diff`) numbered from 1, with no `turnId`. Read again for more while it runs: thread.updated says when it has done something. `subagent` is absent once the thread's list has dropped it. `-32006` when there's no record of it (an older thread, or the CLI cleaned it up) |
 | `threads.markSeen` | `{ threadId, seq }` | `{ thread: ThreadSummary }` |
+| `threads.tickAsk` | `{ threadId, asksSeq, index, ticked: boolean }` | `{ thread: ThreadSummary }`. Ticks or unticks one of the open card's asks (Needs you), with an `asks.ticked` event. Sends nothing to the agent. `-32602` when `asksSeq` isn't the open card's or `index` is out of range |
 | `approvals.respond` | `{ threadId, approvalId, decision: "allow" \| "allowAlways" \| "deny" \| "answered", message?: string, answers?: Record<string, string> }` | `{}`. `allowAlways` allows matching requests for the rest of this thread only; it never changes the thread's permission mode or saves anything in the project. With `answered`, the app sends the chosen answers in one line as `message` too: the runner keeps it in `approval.resolved` (only `answers` goes to the CLI), so the transcript can show what was chosen |
 | `media.import` | `{ path: string }` | `{ image: ImageRef }` copies a file into `inbox/` and reads its size |
 | `actions.run` | `{ threadId, actionId }` | For a prompt action, `{ turnId }`: its prompt was sent as a message (as `threads.send`). For a command action, `{ ok, exitCode?, durationMs, seq }` once the command has finished, with its output in the transcript as the `action.run` event at `seq`. The command runs in the thread's folder through a login shell with the thread's variables (`THREADBARE_THREAD_ID` and the rest) and is stopped after 10 minutes. `-32602` for an action the thread doesn't have, `-32020` while the same action is still running |
@@ -695,6 +702,42 @@ it once through `settings.setKey` and only ever hears `set` and `hint`.
   falls back. Each call times out after 20 seconds, is tried again once
   on a network error, a 5xx or an empty answer (not one cut off by its
   token limit), and at most 4 are in flight at once.
+
+## Needs you
+
+A turn the agent finished can say whether Mike has to do anything, so
+"Needs you" only holds threads that are really waiting on him.
+
+- **The tool.** Every thread's own agent (not its sub-agents) has
+  `end_turn` in the `threadbare` tools: `{ needs: "you" | "nothing",
+  asks?: { action, where?, reply? }[] }`. `action` is one concrete thing
+  to do, `where` the app, site, file or person, and `reply` the words the
+  agent wants back ("done"). The agent calls it last, after its final
+  message. The tool's description says when, so a resumed session that
+  kept its old system prompt still hears it.
+- **The fallback.** A completed turn with no `end_turn` call is read for
+  the "What I need from you" section Mike's own instructions ask for: the
+  last line near the end that is just that heading in bold, then its
+  numbered or bulleted items, one ask each. A heading with no list whose
+  text says nothing is needed counts as `nothing`. `needsFrom` says which
+  it was. Neither found: no `needs`, and the turn counts as today.
+- **What decides `needsYou`**, in order: an approval or question waiting;
+  a thread marked unread; then a finished turn after `lastSeenSeq`,
+  unless that turn said `nothing`.
+- **Only completed turns.** An interrupted or failed turn says nothing.
+  A sub-agent's `end_turn` (Claude's are never in the thread's events;
+  Codex's carry the child's prefix, `<child>/<id>`) is ignored.
+- **The open card.** The last turn that said `you` has the open card:
+  the summary's `asks` (each with `ticked?: true`) and `asksSeq`. Any
+  later turn closes it (a completed one that says `you` opens the next),
+  and older cards keep the ticks their last `asks.ticked` gave them.
+  Ticking never sends anything: a reply is Mike's to write, and one reply
+  often answers several asks.
+
+```ts
+type Ask = { action: string; where?: string; reply?: string }
+type OpenAsk = Ask & { ticked?: true }
+```
 
 ## Patches
 

@@ -28,6 +28,8 @@ public struct TranscriptRow: Sendable, Hashable, Identifiable {
 
 public enum RowKind: String, Sendable, Hashable, CaseIterable {
     case user, assistant, reasoning, tool, diff, images, approval, question, plan, footer, note, error
+    /// What a finished turn needs Mike to do, as a checklist.
+    case asks
     /// Rows the model derives rather than reads from events: a folded run
     /// of work, the "Working for 12s" line, the "3 sub-agents working in
     /// the background" line, and the "Edited 3 files" card.
@@ -185,6 +187,8 @@ public enum RowContent: Sendable, Hashable {
     case question(QuestionItem)
     case plan([PlanEntry])
     case footer(TurnCompletion)
+    /// The asks a finished turn left for Mike, under its footer.
+    case asks(AsksCard)
     case note(String)
     /// A failed turn's message, and why it failed when the runner said
     /// (from the turn's `turn.completed`, which comes just after).
@@ -207,6 +211,7 @@ public enum RowContent: Sendable, Hashable {
         case .question: return .question
         case .plan: return .plan
         case .footer: return .footer
+        case .asks: return .asks
         case .note: return .note
         case .error: return .error
         case .group: return .group
@@ -215,4 +220,25 @@ public enum RowContent: Sendable, Hashable {
         case .changes: return .changes
         }
     }
+}
+
+/// A finished turn's asks (docs/protocol.md, "Needs you"). Only the card
+/// of the thread's last finished turn is open: ticking it goes to the
+/// runner, and its reply chips fill the composer. Older cards keep the
+/// ticks they were left with.
+public struct AsksCard: Sendable, Hashable {
+    /// The seq of the turn.completed the asks came with.
+    public var seq: Int
+    public var asks: [Ask]
+    public var ticked: Set<Int>
+    public var isOpen: Bool
+
+    public init(seq: Int, asks: [Ask], ticked: Set<Int> = [], isOpen: Bool = true) {
+        self.seq = seq
+        self.asks = asks
+        self.ticked = ticked
+        self.isOpen = isOpen
+    }
+
+    public var tickedCount: Int { asks.indices.filter { ticked.contains($0) }.count }
 }

@@ -1,0 +1,18 @@
+{
+  "id": "demo_tidy_imports",
+  "title": "Tidy the imports in the uploader",
+  "cwd": "/Users/mike/dev/me/misc",
+  "accountId": "claude-main",
+  "provider": "claude",
+  "permissionMode": "full",
+  "status": "idle",
+  "live": false,
+  "needsYou": false,
+  "createdAt": "2026-10-27T06:35:10.753Z",
+  "updatedAt": "2026-10-27T07:35:10.753Z",
+  "lastActivityAt": "2026-10-27T07:35:10.753Z",
+  "preview": "Sorted and de-duplicated the imports in all six files. The build and tests pass.",
+  "lastSeq": 4,
+  "lastSeenSeq": 3,
+  "needs": "nothing"
+}
