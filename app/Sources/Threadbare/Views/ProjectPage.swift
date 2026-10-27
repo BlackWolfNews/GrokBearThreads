@@ -81,7 +81,7 @@ private struct IconButton: View {
         .menuIndicator(.hidden)
         .fixedSize()
         .onHover { hovering = $0 }
-        .help(Self.help(project))
+        .tip(Self.help(project))
     }
 
     static func help(_ project: Project) -> String {
