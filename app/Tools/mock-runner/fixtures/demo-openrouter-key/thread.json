@@ -1,0 +1,29 @@
+{
+  "id": "demo_openrouter_key",
+  "title": "Small-model settings page",
+  "cwd": "/Users/mike/dev/me/misc",
+  "accountId": "claude-main",
+  "provider": "claude",
+  "permissionMode": "full",
+  "status": "idle",
+  "live": false,
+  "needsYou": true,
+  "createdAt": "2026-10-27T06:42:10.753Z",
+  "updatedAt": "2026-10-27T07:42:10.753Z",
+  "lastActivityAt": "2026-10-27T07:42:10.753Z",
+  "preview": "The Settings window is in, with the key field, the daily budget and private folders. The runner keeps the key in `secrets/openrouter-key` an",
+  "lastSeq": 6,
+  "lastSeenSeq": 5,
+  "needs": "you",
+  "asks": [
+    {
+      "action": "Paste your OpenRouter key into Settings and turn on titles",
+      "where": "Threadbear › Settings › Models",
+      "reply": "done"
+    },
+    {
+      "action": "Say whether a $1 daily budget is right, or give me a number"
+    }
+  ],
+  "asksSeq": 6
+}

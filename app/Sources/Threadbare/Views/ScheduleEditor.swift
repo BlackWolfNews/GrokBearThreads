@@ -23,6 +23,14 @@ struct ScheduleEditor: View {
         return !state.repeatChoice.cron.isEmpty || state.once
     }
 
+    /// Why the button is greyed out, when it is.
+    private var saveTip: String {
+        if canSave { return "Save the schedule (Return)" }
+        if saving { return "Saving…" }
+        if state.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return "Type a message first" }
+        return "Fix when it sends first"
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: zoomed(16)) {
             Text(state.isNew ? "Schedule a message" : "Edit schedule")
@@ -30,6 +38,7 @@ struct ScheduleEditor: View {
             Form {
                 message
                 TextField("Title", text: $state.title, prompt: Text(titlePrompt))
+                    .tip("Its name in the Scheduled list. Left empty, it's named after the message's first line.")
                 when
                 target
             }
@@ -92,10 +101,12 @@ struct ScheduleEditor: View {
         }
         .pickerStyle(.segmented)
         .fixedSize()
+        .tip("Send it once, or again and again")
         if state.once {
             DatePicker("At", selection: $state.at, displayedComponents: [.date, .hourAndMinute])
                 .datePickerStyle(.compact)
                 .fixedSize()
+                .tip("When to send it")
         } else {
             LabeledContent("Repeat") {
                 HStack(spacing: zoomed(6)) {
@@ -107,13 +118,14 @@ struct ScheduleEditor: View {
                     }
                     .labelsHidden()
                     .fixedSize()
+                    .tip("How often to send it")
                     repeatDetail
                 }
             }
             if state.repeatChoice.kind == .custom {
                 TextField("Cron", text: $state.repeatChoice.custom, prompt: Text("0 9 * * 1-5"))
                     .font(.system(size: zoomed(13), design: .monospaced))
-                    .help("Minute, hour, day of the month, month and day of the week")
+                    .tip("Minute, hour, day of the month, month and day of the week")
             }
         }
         LabeledContent("") { previewText }
@@ -137,6 +149,7 @@ struct ScheduleEditor: View {
             }
             .labelsHidden()
             .fixedSize()
+            .tip("Which day of the week")
             timePicker
         case .monthly:
             Text("on day").foregroundStyle(.secondary)
@@ -145,6 +158,7 @@ struct ScheduleEditor: View {
             }
             .labelsHidden()
             .fixedSize()
+            .tip("Which day of the month. Months without it are skipped.")
             timePicker
         }
     }
@@ -156,6 +170,7 @@ struct ScheduleEditor: View {
                 .labelsHidden()
                 .datePickerStyle(.compact)
                 .fixedSize()
+                .tip("What time to send it")
         }
     }
 
@@ -220,6 +235,7 @@ struct ScheduleEditor: View {
                 Text("A new thread each time").tag(String?.none)
             }
             .pickerStyle(.radioGroup)
+            .tip("Send it into this thread, or start a new thread with it each time")
         } else {
             LabeledContent("Sends to") {
                 Text(targetText).foregroundStyle(.secondary).lineLimit(1)
@@ -227,6 +243,7 @@ struct ScheduleEditor: View {
         }
         if state.threadId == nil {
             LabeledContent("Folder") { FolderMenu(cwd: $state.cwd) }
+                .tip("The folder each new thread starts in")
         }
     }
 
@@ -242,13 +259,16 @@ struct ScheduleEditor: View {
         HStack {
             if let id = state.scheduleId {
                 Button("Delete…") { app.deleteSchedule(id) }
+                    .tip("Delete this schedule")
             }
             Spacer()
             Button("Cancel") { app.scheduleEditor = nil }
                 .keyboardShortcut(.cancelAction)
+                .tip("Close without saving (Esc)")
             Button(state.isNew ? "Schedule" : "Save") { save() }
                 .keyboardShortcut(.defaultAction)
                 .disabled(!canSave)
+                .tip(saveTip)
         }
     }
 
@@ -283,7 +303,7 @@ private struct FolderMenu: View {
             Text(cwd.abbreviatingHome)
         }
         .fixedSize()
-        .help(cwd.abbreviatingHome)
+        .tip(cwd.abbreviatingHome)
     }
 
     private var recent: [String] {

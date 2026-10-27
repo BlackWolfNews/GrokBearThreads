@@ -119,7 +119,7 @@ enum Automation {
             try? await Task.sleep(for: .milliseconds(15))
         }
         guard let window = mainWindow else { return }
-        window.orderBack(nil)
+        window.tuckBehind()
         // Sizes set by a script aren't the user's: never saved as the
         // window's frame (a bundle that shares the installed app's id would
         // otherwise reopen Mike's window at them).
@@ -180,7 +180,7 @@ enum Automation {
             try? await Task.sleep(for: .milliseconds(15))
         }
         guard let window = SettingsWindow.current, window.isVisible else { return "error the Settings window didn't open" }
-        window.orderBack(nil)
+        window.tuckBehind()
         // Let the tab switch and the window's new height settle.
         try? await Task.sleep(for: .milliseconds(400))
         let shown: String
@@ -248,6 +248,23 @@ enum Automation {
         case "new":
             app.newThread()
             return "ok"
+        case "mouse-button":
+            // A mouse's back or forward button over the window, as the
+            // event AppKit gives MouseNavigation's monitor. A made-up event
+            // has no window of its own, so it's handed the main one.
+            guard let window else { return "error no window" }
+            let number: Int64
+            switch c["button"] as? String {
+            case "back": number = 3
+            case "forward": number = 4
+            default: return "error button is back or forward"
+            }
+            guard let cg = CGEvent(mouseEventSource: nil, mouseType: .otherMouseDown, mouseCursorPosition: .zero,
+                                   mouseButton: CGMouseButton(rawValue: UInt32(number)) ?? .center) else { return "error no event" }
+            guard let event = NSEvent(cgEvent: cg) else { return "error no event" }
+            guard MouseNavigation.handle(event, in: window, app: app) else { return "error not taken (not the main window?)" }
+            let place = app.place
+            return "ok \(place.mode) \(place.threadId ?? "new") back=\(app.canGoBack) forward=\(app.canGoForward)"
         case "options":
             return options(c, app: app)
         case "review":
@@ -302,6 +319,14 @@ enum Automation {
                 .filter { $0.title == title && $0.isEnabled && !$0.isHiddenOrHasHiddenAncestor }
             guard let button = buttons.last else { return "error no button \(title)" }
             button.performClick(nil)
+            return "ok"
+        case "ask":
+            // {"cmd":"ask","row":"ak:6","action":"tick:0"} clicks an open
+            // asks card's tick box (or "reply:0", its reply chip).
+            guard let id = c["row"] as? String, let action = c["action"] as? String,
+                  case .asks(let card)? = app.transcript.session?.model.row(id: id)?.content else { return "error no asks card" }
+            guard card.isOpen else { return "error that card is closed" }
+            app.transcript.askAction(card, action: action)
             return "ok"
         case "archive":
             // `id`, else the open thread. These used to ignore `id` and act
@@ -418,6 +443,14 @@ enum Automation {
             app.scheduleEditor = nil
             return "ok"
         case "expand", "collapse":
+            if let raw = c["section"] as? String {
+                // An inbox heading, as clicking it does.
+                guard let section = InboxSection(rawValue: raw) else {
+                    return "error section must be one of \(InboxSection.allCases.map(\.rawValue).joined(separator: ", "))"
+                }
+                if name == "expand" { app.collapsedSections.remove(section) } else { app.collapsedSections.insert(section) }
+                return "ok"
+            }
             return setExpanded(c, open: name == "expand", app: app)
         case "scroll":
             switch c["to"] as? String {
@@ -1129,7 +1162,7 @@ enum Automation {
         if c["save"] as? Bool == true { await session.saveNow() }
         if c["submit"] as? Bool == true { await session.submit() }
         if c["cancel"] as? Bool == true { await session.cancelReview() }
-        controller.window?.orderBack(nil)
+        controller.window?.tuckBehind()
         try? await Task.sleep(for: .milliseconds(250))
         return "ok " + json([
             "id": session.review.id, "window": controller.window?.windowNumber ?? 0,

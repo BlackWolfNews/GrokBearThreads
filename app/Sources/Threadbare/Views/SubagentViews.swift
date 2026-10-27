@@ -79,7 +79,7 @@ struct SubagentRowView: View {
             app.selectSubagent(threadId: threadId, subagentId: subagent.id)
         }.onEnded { _ in pressed = false })
         .onHover { hovering = $0 }
-        .help(tooltip)
+        .tip(tooltip)
         .accessibilityElement(children: .combine)
         .accessibilityLabel("Sub-agent \(SubagentRows.title(subagent)), \(SubagentRows.statusText(subagent))")
         .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
@@ -142,7 +142,7 @@ struct SubagentHeader: View {
                 Image(systemName: "chevron.left")
             }
             .buttonStyle(RowIconButtonStyle())
-            .help("Back to the thread")
+            .tip("Back to the thread")
             VStack(alignment: .leading, spacing: zoomed(2)) {
                 Text(subagent.map(SubagentRows.title) ?? "Sub-agent")
                     .font(.system(size: TypeScale.sidebarTitle, weight: .semibold))

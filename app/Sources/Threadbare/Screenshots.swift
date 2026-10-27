@@ -37,7 +37,7 @@ enum ScreenshotRunner {
         // Behind every other window and never activated: these runs happen
         // while Mike is working, and `screencapture -l` captures a window by
         // id even when it's covered.
-        window.orderBack(nil)
+        window.tuckBehind()
         try? await Task.sleep(for: .milliseconds(500))
 
         let only = arguments.firstIndex(of: "--only").flatMap { $0 + 1 < arguments.count ? arguments[$0 + 1] : nil }
@@ -294,7 +294,7 @@ enum ScreenshotRunner {
             }).first {
                 app.openReview(threadId: "demo_design_review", review: review)
                 if let controller = app.reviewWindows["demo_design_review/" + review.id], let compare = controller.window {
-                    compare.orderBack(nil)
+                    compare.tuckBehind()
                     controller.session.mode = .grid
                     await capture(compare, dir.appendingPathComponent("16b-design-review-grid.png"))
                     controller.session.mode = .pair

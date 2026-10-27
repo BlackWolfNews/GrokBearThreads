@@ -67,6 +67,8 @@ public struct Project: Sendable, Hashable, Decodable, Identifiable {
     public var updatedAt: Date
     public var stateUpdatedAt: Date?
     public var archived: Bool
+    /// Absent until the librarian has found or picked one.
+    public var icon: ProjectIcon?
     /// Threads in it, put away ones included.
     public var threadCount: Int
     public var lastActivityAt: Date?
@@ -74,7 +76,7 @@ public struct Project: Sendable, Hashable, Decodable, Identifiable {
     public init(
         id: String, title: String, folders: [String] = [], goals: String = "", state: String = "", notes: String = "",
         createdBy: ProjectAuthor = .librarian, createdByThread: String? = nil, createdAt: Date = Date(), updatedAt: Date = Date(),
-        stateUpdatedAt: Date? = nil, archived: Bool = false, threadCount: Int = 0, lastActivityAt: Date? = nil
+        stateUpdatedAt: Date? = nil, archived: Bool = false, icon: ProjectIcon? = nil, threadCount: Int = 0, lastActivityAt: Date? = nil
     ) {
         self.id = id
         self.title = title
@@ -88,6 +90,7 @@ public struct Project: Sendable, Hashable, Decodable, Identifiable {
         self.updatedAt = updatedAt
         self.stateUpdatedAt = stateUpdatedAt
         self.archived = archived
+        self.icon = icon
         self.threadCount = threadCount
         self.lastActivityAt = lastActivityAt
     }
@@ -108,14 +111,52 @@ public struct Project: Sendable, Hashable, Decodable, Identifiable {
         updatedAt = date(.updatedAt) ?? createdAt
         stateUpdatedAt = date(.stateUpdatedAt)
         archived = (try? c.decodeIfPresent(Bool.self, forKey: .archived)).flatMap { $0 } ?? false
+        icon = (try? c.decodeIfPresent(ProjectIcon.self, forKey: .icon)).flatMap { $0 }
         threadCount = c.lenientInt(forKey: .threadCount) ?? 0
         lastActivityAt = date(.lastActivityAt)
     }
 
     enum CodingKeys: String, CodingKey {
         case id, title, folders, goals, state, notes, createdBy, createdByThread, createdAt, updatedAt, stateUpdatedAt
-        case archived, threadCount, lastActivityAt
+        case archived, icon, threadCount, lastActivityAt
     }
+}
+
+/// A project's icon (docs/protocol.md, "Icons"): a picture copied into the
+/// runner's data dir, else an SF Symbol. One neither of those can draw is
+/// shown as the title's first letter.
+public struct ProjectIcon: Sendable, Hashable, Decodable {
+    public var image: ImageRef?
+    public var symbol: String?
+    /// The file the picture was copied from.
+    public var from: String?
+    /// The librarian's is found and kept up to date by itself; Mike's or an
+    /// agent's stays until it's set back to automatic.
+    public var by: ProjectAuthor
+    public var updatedAt: Date?
+
+    public init(image: ImageRef? = nil, symbol: String? = nil, from: String? = nil, by: ProjectAuthor = .librarian, updatedAt: Date? = nil) {
+        self.image = image
+        self.symbol = symbol
+        self.from = from
+        self.by = by
+        self.updatedAt = updatedAt
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        func string(_ key: CodingKeys) -> String? { (try? c.decodeIfPresent(String.self, forKey: key)).flatMap { $0 } }
+        image = (try? c.decodeIfPresent(ImageRef.self, forKey: .image)).flatMap { $0 }
+        symbol = string(.symbol).flatMap { $0.isEmpty ? nil : $0 }
+        from = string(.from)
+        by = (try? c.decodeIfPresent(ProjectAuthor.self, forKey: .by)).flatMap { $0 } ?? .librarian
+        updatedAt = string(.updatedAt).flatMap(ISO8601.parse)
+    }
+
+    enum CodingKeys: String, CodingKey { case image, symbol, from, by, updatedAt }
+
+    /// Chosen by Mike or an agent rather than found.
+    public var isChosen: Bool { by != .librarian }
 }
 
 // MARK: The librarian

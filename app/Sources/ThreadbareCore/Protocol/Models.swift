@@ -740,6 +740,28 @@ public struct BackgroundTask: Sendable, Hashable, Codable {
     }
 }
 
+/// A thread's own git worktree (protocol "Worktrees"): it works on its own
+/// branch, and `tb land` puts that on main in the main checkout.
+public struct ThreadWorktree: Sendable, Hashable, Codable {
+    public var branch: String
+    public var mainCheckout: String
+    public var path: String
+
+    public init(branch: String, mainCheckout: String = "", path: String = "") {
+        self.branch = branch
+        self.mainCheckout = mainCheckout
+        self.path = path
+    }
+
+    // Lenient: only the branch is needed to show it.
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        branch = try c.decode(String.self, forKey: .branch)
+        mainCheckout = (try? c.decodeIfPresent(String.self, forKey: .mainCheckout)) ?? ""
+        path = (try? c.decodeIfPresent(String.self, forKey: .path)) ?? ""
+    }
+}
+
 public struct ThreadSummary: Sendable, Hashable, Codable, Identifiable {
     public var id: String
     public var title: String
@@ -791,6 +813,16 @@ public struct ThreadSummary: Sendable, Hashable, Codable, Identifiable {
     /// The projects it's in, oldest first. Empty when it's in none (or the
     /// runner is from before projects).
     public var projects: [ThreadProject]
+    /// Its own worktree, when the repo gives each thread one; nil for most
+    /// threads, and from a runner that predates worktrees.
+    public var worktree: ThreadWorktree?
+    /// What the last completed turn said it needs from Mike ("you" or
+    /// "nothing"), nil when it said neither (docs/protocol.md, "Needs you").
+    public var needs: String?
+    /// That turn's asks, with Mike's ticks, while it's the open card.
+    public var asks: [Ask]
+    /// The seq of the turn.completed the asks came with.
+    public var asksSeq: Int?
     /// When its highlights last changed other than by a new event (a pin,
     /// a removal, the librarian's brief). The app fetches
     /// `threads.highlights` again when this or `lastSeq` moves. Nil from a
@@ -807,7 +839,8 @@ public struct ThreadSummary: Sendable, Hashable, Codable, Identifiable {
         contextTokens: Int? = nil, costUsd: Double? = nil,
         effort: String? = nil, modelInUse: String? = nil, effortInUse: String? = nil, contextWindow: Int? = nil,
         panels: [Panel] = [], actions: [Action] = [], hooks: [Hook] = [], patches: [PatchInfo] = [], background: [BackgroundTask] = [],
-        subagents: [Subagent] = [], projects: [ThreadProject] = [], pendingReviews: Int? = nil, highlightsAt: Date? = nil
+        subagents: [Subagent] = [], projects: [ThreadProject] = [], pendingReviews: Int? = nil, worktree: ThreadWorktree? = nil, needs: String? = nil, asks: [Ask] = [], asksSeq: Int? = nil,
+        highlightsAt: Date? = nil
     ) {
         self.id = id
         self.title = title
@@ -844,6 +877,10 @@ public struct ThreadSummary: Sendable, Hashable, Codable, Identifiable {
         self.background = background
         self.subagents = subagents
         self.projects = projects
+        self.worktree = worktree
+        self.needs = needs
+        self.asks = asks
+        self.asksSeq = asksSeq
         self.highlightsAt = highlightsAt
     }
 
@@ -889,6 +926,11 @@ public struct ThreadSummary: Sendable, Hashable, Codable, Identifiable {
         background = c.lossyArray(BackgroundTask.self, forKey: .background)
         subagents = c.lossyArray(Subagent.self, forKey: .subagents)
         projects = c.lossyArray(ThreadProject.self, forKey: .projects)
+        // A malformed one is as good as none, rather than losing the thread.
+        worktree = (try? c.decodeIfPresent(ThreadWorktree.self, forKey: .worktree)) ?? nil
+        needs = (try? c.decodeIfPresent(String.self, forKey: .needs)) ?? nil
+        asks = c.lossyArray(Ask.self, forKey: .asks)
+        asksSeq = (try? c.decodeIfPresent(Int.self, forKey: .asksSeq)) ?? nil
         highlightsAt = ((try? c.decodeIfPresent(String.self, forKey: .highlightsAt)) ?? nil).flatMap(ISO8601.parse)
     }
 
@@ -929,6 +971,10 @@ public struct ThreadSummary: Sendable, Hashable, Codable, Identifiable {
         if !background.isEmpty { try c.encode(background, forKey: .background) }
         if !subagents.isEmpty { try c.encode(subagents, forKey: .subagents) }
         if !projects.isEmpty { try c.encode(projects, forKey: .projects) }
+        try c.encodeIfPresent(worktree, forKey: .worktree)
+        try c.encodeIfPresent(needs, forKey: .needs)
+        if !asks.isEmpty { try c.encode(asks, forKey: .asks) }
+        try c.encodeIfPresent(asksSeq, forKey: .asksSeq)
         try c.encodeIfPresent(highlightsAt.map(ISO8601.format), forKey: .highlightsAt)
     }
 
@@ -936,8 +982,15 @@ public struct ThreadSummary: Sendable, Hashable, Codable, Identifiable {
         case id, title, cwd, accountId, provider, model, effort, modelInUse, effortInUse, permissionMode, status, live, needsYou, pendingReviews
         case createdAt, updatedAt, lastActivityAt, snoozedUntil, snoozedUntilRestart, archivedAt, onOldRunner, preview
         case lastSeq, lastSeenSeq, nativeSessionId, contextTokens, contextWindow, costUsd, panels, actions, hooks, patches, background, subagents
-        case projects, highlightsAt
+        case projects, worktree, needs, asks, asksSeq, highlightsAt
     }
+
+    /// The first ask Mike hasn't ticked on the open card, if any: what the
+    /// sidebar and a notification show instead of the last line of prose.
+    public var firstOpenAsk: Ask? { asksSeq == nil ? nil : asks.first { !$0.ticked } }
+
+    /// The last turn finished and said nothing waits on Mike.
+    public var saidDone: Bool { needs == "nothing" }
 
     /// Still being worked on between turns: background sub-agents or jobs
     /// are running (or just finished, with their result still to be read)
@@ -1151,5 +1204,43 @@ public enum ISO8601 {
         let doy = (153 * mp + 2) / 5 + day - 1
         let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy
         return era * 146_097 + doe - 719_468
+    }
+}
+
+/// One thing a finished turn needs Mike to do (docs/protocol.md, "Needs
+/// you"): the action, where he does it, and the words to send back.
+public struct Ask: Sendable, Hashable, Codable {
+    public var action: String
+    public var where_: String?
+    public var reply: String?
+    /// Ticked on the open card (only in a summary's `asks`).
+    public var ticked: Bool
+
+    public init(action: String, where_: String? = nil, reply: String? = nil, ticked: Bool = false) {
+        self.action = action
+        self.where_ = where_
+        self.reply = reply
+        self.ticked = ticked
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        action = try c.decode(String.self, forKey: .action)
+        where_ = (try? c.decodeIfPresent(String.self, forKey: .where_)) ?? nil
+        reply = (try? c.decodeIfPresent(String.self, forKey: .reply)) ?? nil
+        ticked = ((try? c.decodeIfPresent(Bool.self, forKey: .ticked)) ?? nil) ?? false
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(action, forKey: .action)
+        try c.encodeIfPresent(where_, forKey: .where_)
+        try c.encodeIfPresent(reply, forKey: .reply)
+        if ticked { try c.encode(true, forKey: .ticked) }
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case action, reply, ticked
+        case where_ = "where"
     }
 }

@@ -9,6 +9,8 @@ import { usd } from './models/index.ts';
 import { backgroundFlag } from './protocol.ts';
 import { parseWhen as parseLater, relativeFuture } from './when.ts';
 import { DEV_HELP, formatModels, logsCommand, runDev } from './tb-dev.ts';
+import { findWorktreePatch, isInside } from './patches.ts';
+import { land, landTargetFromGit, type LandTarget } from './worktrees.ts';
 
 const OPTIONS = {
   cwd: { type: 'string' },
@@ -70,6 +72,8 @@ const HELP = `tb: talk to the Threadbare runner
   tb accounts                     the Claude and Codex logins (* new threads start on it)
   tb accounts <account> [--json]  that account's models and its default
   tb actions <threadId> [--json]  the thread's actions, panels and patches (from its folder)
+  tb highlights <threadId> [--json]  what the thread made, shared and pinned, and the librarian's brief
+  tb panel <threadId> <panelId> [--json]  draws an image panel or fills a list panel now
   tb run <threadId> <actionId>    run one: a command's output is printed and goes into the thread
   tb schedule "text" (--at WHEN | --cron "0 9 * * 1-5") [--tz ZONE] [--title T]
               [--thread ID | --cwd DIR [--account ID] [--model M] [--effort L] [--ask]]
@@ -89,6 +93,9 @@ const HELP = `tb: talk to the Threadbare runner
   tb models try <job> "text" [--labels a,b] [--field name=description]... [--system S] [--cwd DIR]
                                   one call by hand: classify (--labels), extract (--field),
                                   summarize or generate. It spends like any other
+  tb land [--dry-run]             in a thread's own worktree: rebase its branch on main, run
+                                  the repo's check, then move main to it (never pushes);
+                                  --dry-run stops before main moves
   tb retitle [<threadId>...] [--dry-run] [--json]
                                   a model title for every thread still named by its first line,
                                   or for the ones given (never one named by hand)
@@ -129,6 +136,7 @@ const COMMAND_FLAGS: Record<string, string[]> = {
   logs: ['lines', 'follow', 'thread'],
   export: ['out'],
   rpc: [],
+  land: ['dry-run'],
 };
 
 // Read but never listed when a command refuses a flag: an agent that sees
@@ -178,6 +186,8 @@ async function main(argv: string[]): Promise<number> {
   }
   const cfg = loadConfig();
   if (cmd === 'logs') return logsCommand(cfg, values);
+  // Works with no runner too: from any thread/ worktree, by git alone.
+  if (cmd === 'land') return landCommand(cfg, Boolean(values['dry-run']));
   const url = runnerUrl(cfg);
   let client: RunnerClient;
   try {
@@ -198,6 +208,61 @@ async function main(argv: string[]): Promise<number> {
 }
 
 type Flags = Record<string, string | boolean | string[] | undefined>;
+
+// `tb land` (docs/thread-worktrees.md, worktrees.ts). Inside a thread
+// (THREADBARE_THREAD_ID) the runner says where the thread's worktree is;
+// otherwise, or when the thread has none, it's the git checkout this runs
+// in, if that's on a thread/ branch. The check is the one in that
+// worktree's own patch, so a branch that changes it lands under its own.
+async function landCommand(cfg: ReturnType<typeof loadConfig>, dryRun: boolean): Promise<number> {
+  const here = process.cwd();
+  let target: Omit<LandTarget, 'check'> | undefined;
+  let from = here;
+  const threadId = process.env.THREADBARE_THREAD_ID;
+  if (threadId) {
+    const t = await threadFromRunner(cfg, threadId);
+    if (t?.worktree) {
+      target = t.worktree;
+      if (!isInside(here, t.worktree.path)) from = isInside(t.cwd, t.worktree.path) ? t.cwd : t.worktree.path;
+    }
+  }
+  if (!target) {
+    const found = await landTargetFromGit(here);
+    if (!found.target) {
+      console.error(found.reason);
+      return 1;
+    }
+    target = found.target;
+  }
+  let check: string | undefined;
+  try {
+    check = (await findWorktreePatch(from))?.check;
+  } catch (e) {
+    console.error(`Couldn't read the repo's patches for its check: ${(e as Error).message}`);
+    return 1;
+  }
+  return land({ path: target.path, branch: target.branch, mainCheckout: target.mainCheckout, check }, { dryRun });
+}
+
+// The thread's summary, or undefined when the runner can't be reached or
+// doesn't know it (tb land then goes by git alone).
+async function threadFromRunner(cfg: ReturnType<typeof loadConfig>, threadId: string): Promise<ThreadSummary | undefined> {
+  let client: RunnerClient;
+  try {
+    client = await RunnerClient.connect(runnerUrl(cfg), readToken(cfg.home));
+  } catch {
+    return undefined;
+  }
+  try {
+    await client.call('hello', { client: 'tb', version: '1' });
+    const r = await client.call<{ threads: ThreadSummary[] }>('threads.list', { include: ['inbox', 'snoozed', 'archived'] });
+    return r.threads.find((t) => t.id === threadId);
+  } catch {
+    return undefined;
+  } finally {
+    client.close();
+  }
+}
 
 
 async function run(client: RunnerClient, cmd: string, args: string[], f: Flags): Promise<number> {
@@ -305,6 +370,35 @@ async function run(client: RunnerClient, cmd: string, args: string[], f: Flags):
       await client.call('threads.update', { threadId: id, archived: cmd === 'archive' });
       return 0;
     }
+    case 'highlights': {
+      const id = await resolveId(client, args[0]);
+      const h = await client.call<{ highlights: { id: string; kind: string; title: string; how: string; note?: string; url?: string; path?: string; branch?: string; pushed?: true }[]; edited: string[]; brief?: { text: string } }>('threads.highlights', { threadId: id });
+      if (f.json) {
+        console.log(JSON.stringify(h, null, 2));
+        return 0;
+      }
+      if (h.brief) console.log(`${h.brief.text}\n`);
+      if (!h.highlights.length) console.log('Nothing found or pinned yet.');
+      for (const x of h.highlights) {
+        const where = x.url ?? (x.path ? tildePath(x.path) : x.branch ? `${x.branch}${x.pushed ? ', pushed' : ''}` : '');
+        console.log(`  ${x.how.padEnd(10)} ${x.kind.padEnd(7)} ${x.title}${where && where !== x.title ? `  ${where}` : ''}${x.note ? `\n             ${x.note}` : ''}`);
+      }
+      if (h.edited.length) console.log(`\n${h.edited.length} ${h.edited.length === 1 ? 'file' : 'files'} edited`);
+      return 0;
+    }
+    case 'panel': {
+      const id = await resolveId(client, args[0]);
+      if (!args[1]) throw new Error('Which panel? tb actions <threadId> lists them.');
+      const r = await client.call<{ image?: { path: string }; items?: { title: string; detail?: string; tone?: string }[]; note?: string }>('panels.render', { threadId: id, panelId: args[1] });
+      if (f.json) {
+        console.log(JSON.stringify(r, null, 2));
+        return 0;
+      }
+      if (r.note) console.log(r.note);
+      if (r.image) console.log(r.image.path);
+      for (const item of r.items ?? []) console.log(`  ${item.tone === 'done' ? '✓' : item.tone === 'failed' ? '✗' : item.tone === 'attention' ? '!' : '·'} ${item.title}${item.detail ? `  ${item.detail}` : ''}`);
+      return 0;
+    }
     case 'actions': {
       const id = await resolveId(client, args[0]);
       const thread = (await client.call<{ threads: ThreadSummary[] }>('threads.list', { include: ['inbox', 'snoozed', 'archived'] })).threads.find((x) => x.id === id);
@@ -327,7 +421,7 @@ async function run(client: RunnerClient, cmd: string, args: string[], f: Flags):
       }
       if (panels.length) {
         console.log('Panels:');
-        for (const p of panels) console.log(`  ${p.id.padEnd(32)} ${p.title}${p.url ? `  ${p.url}` : '  (image)'}${p.note ? `  ${p.note}` : ''}`);
+        for (const p of panels) console.log(`  ${p.id.padEnd(32)} ${p.title}${p.url ? `  ${p.url}` : `  (${p.kind})`}${p.note ? `  ${p.note}` : ''}`);
       }
       if (hooks.length) {
         console.log('Hooks:');

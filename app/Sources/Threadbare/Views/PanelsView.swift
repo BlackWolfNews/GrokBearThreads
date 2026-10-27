@@ -129,7 +129,7 @@ struct PaneHeaderButton: View {
         }
         .buttonStyle(.plain)
         .onHover { hovering = $0 }
-        .help(help)
+        .tip(help)
         .accessibilityLabel(help)
     }
 }
@@ -155,9 +155,9 @@ struct PanelRail: View {
         let section = app.paneSection(for: thread)
         let shown = app.panelsShown
         VStack(spacing: zoomed(4)) {
-            // A dot here for the thread's open asks belongs with the
-            // needs-you branch (`asks` on ThreadSummary), not on this base.
-            ActivityButton(symbol: "pin", title: "Highlights", active: shown && section == .highlights) {
+            // The accent dot while the last turn's asks aren't all ticked:
+            // Highlights lists them under Needs you.
+            ActivityButton(symbol: "pin", title: "Highlights", dot: thread.firstOpenAsk != nil, active: shown && section == .highlights) {
                 app.clickRail(.highlights, in: thread)
             }
             ForEach(thread.panels) { panel in
@@ -273,7 +273,7 @@ struct PatchesList: View {
                         .truncationMode(.middle)
                 }
                 .buttonStyle(.plain)
-                .help("Open the file")
+                .tip("Open the file")
             } else if let folder = patch.folder, patch.projectId != nil {
                 // A built-in from a project folder: which one.
                 Text(folder.abbreviatingHome)
@@ -430,7 +430,7 @@ private struct ImagePanel: View {
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
                 .buttonStyle(.plain)
-                .help("Open Simulator")
+                .tip("Open Simulator")
             } else {
                 PaneNote(text: render?.note ?? "Taking a screenshot…")
             }

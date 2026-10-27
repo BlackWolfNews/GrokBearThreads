@@ -120,6 +120,11 @@ type ThreadSummary = {
   status: ThreadStatus
   live: boolean         // a CLI process is attached right now
   needsYou: boolean     // waiting, or a turn finished after lastSeenSeq
+                        // that didn't end with needs "nothing" (Needs you)
+  needs?: "you" | "nothing" // what the last completed turn said; absent
+                        // when it said neither (see Needs you)
+  asks?: OpenAsk[]      // that turn's asks, when needs is "you"
+  asksSeq?: number      // seq of the turn.completed they came with
   createdAt: string
   updatedAt: string
   lastActivityAt: string
@@ -156,6 +161,16 @@ type ThreadSummary = {
                         // new event: a pin, a removal, the librarian's
                         // brief (see Highlights). A client fetches
                         // threads.highlights again when this or lastSeq moves
+  worktree?: ThreadWorktree // the thread has a git worktree of its own
+                        // (see Worktrees). Absent when it doesn't, or once
+                        // it was removed
+}
+
+// A thread's own worktree, as its summary shows it (see Worktrees).
+type ThreadWorktree = {
+  branch: string        // "thread/ab12cd34"
+  mainCheckout: string  // the checkout with main checked out, where it lands
+  path: string          // the worktree's root folder
 }
 
 // A project a thread is in, as its summary shows it.
@@ -246,8 +261,22 @@ type Project = {
   updatedAt: string
   stateUpdatedAt?: string
   archived?: boolean
+  icon?: ProjectIcon    // absent until the librarian has found or picked one
   threadCount: number   // threads in it, put away ones included
   lastActivityAt?: string // its newest thread's lastActivityAt
+}
+
+// A project's icon: a picture, else an SF Symbol (see Projects, "Icons").
+// A client that can't draw either shows the title's first letter.
+type ProjectIcon = {
+  image?: ImageRef      // a copy in the runner's data dir (project-icons/),
+                        // PNG at most 256 px, or SVG ("image/svg+xml")
+  symbol?: string       // an SF Symbol name, when there's no picture
+  from?: string         // the file the picture was copied from
+  by: "mike" | "agent" | "librarian" // librarian: found by itself and kept
+                        // up to date; mike or agent: chosen, and left alone
+                        // until set back to automatic
+  updatedAt: string
 }
 
 // What the librarian (see Projects) is doing, has done and will do next.
@@ -499,10 +528,11 @@ Persisted event types (stored in `events.ndjson`, returned by `threads.events`):
 | `approval.resolved` | `approvalId`, `decision` (`allow` \| `allowAlways` \| `deny` \| `answered` \| `expired`), `message?` |
 | `plan.updated` | `entries: {text, status: "pending" \| "in_progress" \| "completed"}[]` |
 | `turn.started` | `turnId`. A turn the agent starts by itself (a background task finished, or a background subagent needs an approval) has no `user.message` before it. A `user.message` after `turn.started` was sent while the turn ran and went into it |
-| `turn.completed` | `turnId`, `outcome` (`completed` \| `interrupted` \| `failed`), `durationMs`, `costUsd?` (Codex turns have none), `usage?` (Claude: `{inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens}`; Codex: `{inputTokens, cachedInputTokens, cacheWriteTokens?, outputTokens, reasoningTokens}`), `error?`, `errorKind?` (`usageLimit` \| `contextWindow` \| `auth`, when a failed turn's cause is known, so a client can offer the fix without reading `error`) |
+| `turn.completed` | `turnId`, `outcome` (`completed` \| `interrupted` \| `failed`), `durationMs`, `costUsd?` (Codex turns have none), `usage?` (Claude: `{inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens}`; Codex: `{inputTokens, cachedInputTokens, cacheWriteTokens?, outputTokens, reasoningTokens}`), `error?`, `errorKind?` (`usageLimit` \| `contextWindow` \| `auth`, when a failed turn's cause is known, so a client can offer the fix without reading `error`), `needs?` (`you` \| `nothing`), `asks?: Ask[]`, `needsFrom?` (`tool` \| `text`): what a completed turn said it needs from Mike (Needs you) |
+| `asks.ticked` | `asksSeq`, `ticked: number[]` (indexes into that turn's `asks`, the whole set now ticked). Outside any turn. The latest one for an `asksSeq` is that card's ticks |
 | `system.note` | `text` (e.g. "Resumed session", "Compacted the conversation", "Patch reseed added: action Reseed dev DB.") |
 | `error` | `message` |
-| `action.run` | `actionId`, `patch`, `title`, `command`, `ok`, `exitCode?`, `text` (what it printed, truncated to 64 KB), `truncated`, `durationMs`, `trigger?` (`"turn.end"` when a hook ran it; absent for a chip or `tb run`). A command that `actions.run` or a hook ran; outside any turn unless one was running, in which case it carries that `turnId` |
+| `action.run` | `actionId`, `patch`, `title`, `command`, `ok`, `exitCode?`, `text` (what it printed, truncated to 64 KB), `truncated`, `durationMs`, `trigger?` (`"turn.end"` when a hook ran it, `"worktree.setup"` for a new worktree's `setup` (see Worktrees); absent for a chip or `tb run`). A command that `actions.run` or a hook ran; outside any turn unless one was running, in which case it carries that `turnId` |
 
 Transient events are only sent to subscribers, never persisted, and carry
 `seq` of the last persisted event (they don't consume a number):
@@ -523,7 +553,7 @@ replaces whatever the deltas built up.
 | `hello` | `{ client: string, version: string }` | `{ runnerVersion, protocol: 1, accounts: Account[], defaults: { cwd, accountId, model?, models?: { claude?, codex? }, efforts?: { claude?: EffortLevel, codex?: EffortLevel } }, clis?: CliStatus[], updates?: RunnerUpdates }`. `updates` is under Runner updates. `defaults.accountId` is the account a `threads.create` with no `accountId` uses: the one with the most room among the last-used account's provider (skipping blocked ones, ones under 10% and ones with a note), worked out again as usage changes; a client keeps its own copy of the rule rather than asking again. `defaults.models[provider]` is the model a new thread on that provider gets when it names none (`runner.json`'s `defaults.models`; a dev runner sets the cheapest); `defaults.model` is the same for Claude, kept for older apps. Absent means the account's own default (`accounts[].defaultModel` names it, when known). `defaults.efforts[provider]` likewise for effort; absent means the model's own level. `runnerVersion` is `<package version>+<release id>` when the runner runs from a release, else `<package version>+source` |
 | `threads.list` | `{ include?: ("inbox" \| "snoozed" \| "archived")[] }` (default `["inbox"]`) | `{ threads: ThreadSummary[] }` newest activity first |
 | `threads.search` | `{ query: string, limit?: number }` | `{ threads: ThreadSummary[] }` matches title and preview across all threads, archived included |
-| `threads.create` | `{ text: string, images?: ImageRef[], cwd?: string, accountId?: string, model?: string, effort?: EffortLevel, permissionMode?: "full" \| "ask", title?: string }` | `{ thread: ThreadSummary }` (the first turn starts straight away). The thread's `provider` is its account's. With no `model`, the thread gets `defaults.models[provider]` from `hello`, or `defaults.model` for Claude, or else the account's own default. With no `effort`, `defaults.efforts[provider]`, or else the model's own level. See "Models and effort across providers" |
+| `threads.create` | `{ text: string, images?: ImageRef[], cwd?: string, accountId?: string, model?: string, effort?: EffortLevel, permissionMode?: "full" \| "ask", title?: string, worktree?: boolean }` | `{ thread: ThreadSummary }` (the first turn starts straight away). In a repo that asks for worktrees (see Worktrees) the thread gets one of its own before its first turn; `worktree: false` starts it in the folder as it is. The thread's `provider` is its account's. With no `model`, the thread gets `defaults.models[provider]` from `hello`, or `defaults.model` for Claude, or else the account's own default. With no `effort`, `defaults.efforts[provider]`, or else the model's own level. See "Models and effort across providers" |
 | `threads.send` | `{ threadId, text, images?: ImageRef[] }` | `{ turnId }`. If a turn is running and its CLI is live, the message goes into that turn straight away (a `user.message` under the running `turnId`, which is returned): the agent takes it at its next step, or right after its reply if that was already finishing, and the turn doesn't complete until it has been answered. Otherwise (the CLI is still starting or leaving, messages are already waiting, a move or fresh CLI is due on the next turn, Stop has been pressed, or the turn is only an approval for a background subagent) the message is queued and starts its own turn when the running one ends |
 | `threads.interrupt` | `{ threadId }` | `{}` |
 | `threads.update` | `{ threadId, title?, cwd?, accountId?, model?: string \| null, effort?: EffortLevel \| null, permissionMode?, snoozedUntil?: string \| null, archived?: boolean }` | `{ thread: ThreadSummary }`. `snoozedUntil` is an ISO time, or `"restart"` for until the runner next starts (any start: a planned restart, a crash, a reboot), when the thread wakes before the restart's resume is sent, so a thread put away while its own restart waited is still carried on. Snoozing or archiving releases the CLI (and archives a Codex thread in Codex too). Changing account or cwd takes effect on the next turn. A model or effort change reaches a live Claude CLI straight away (`null` goes back to the default); on Codex it applies from the next turn, with a `system.note` if a turn is running. A folder change on the same Claude account copies the native session's transcript to the new folder and resumes it; on the same Codex account the session carries on in the new folder from the next turn. Otherwise (or if that fails) it starts a new native session with a short handoff note. An account of the other provider switches `provider`, resets `model` and `effort` to that provider's defaults unless the same call sets them, and clears the thread's "Always allow" rules. `model` and `effort` are checked as in "Models and effort across providers" |
@@ -534,6 +564,7 @@ replaces whatever the deltas built up.
 | `threads.unsubscribe` | `{ threadId }` | `{}` |
 | `threads.subagent` | `{ threadId, subagentId }` | `{ subagent?: Subagent, events: Event[] }`: what the sub-agent has done so far, read from the CLI's own record of it, as events (`user.message` for its brief, then `assistant.text`, `reasoning`, `tool.call`, `tool.result`, `edit.diff`) numbered from 1, with no `turnId`. Read again for more while it runs: thread.updated says when it has done something. `subagent` is absent once the thread's list has dropped it. `-32006` when there's no record of it (an older thread, or the CLI cleaned it up) |
 | `threads.markSeen` | `{ threadId, seq }` | `{ thread: ThreadSummary }` |
+| `threads.tickAsk` | `{ threadId, asksSeq, index, ticked: boolean }` | `{ thread: ThreadSummary }`. Ticks or unticks one of the open card's asks (Needs you), with an `asks.ticked` event. Sends nothing to the agent. `-32602` when `asksSeq` isn't the open card's or `index` is out of range |
 | `approvals.respond` | `{ threadId, approvalId, decision: "allow" \| "allowAlways" \| "deny" \| "answered", message?: string, answers?: Record<string, string> }` | `{}`. `allowAlways` allows matching requests for the rest of this thread only; it never changes the thread's permission mode or saves anything in the project. With `answered`, the app sends the chosen answers in one line as `message` too: the runner keeps it in `approval.resolved` (only `answers` goes to the CLI), so the transcript can show what was chosen |
 | `media.import` | `{ path: string }` | `{ image: ImageRef }` copies a file into `inbox/` and reads its size |
 | `actions.run` | `{ threadId, actionId }` | For a prompt action, `{ turnId }`: its prompt was sent as a message (as `threads.send`). For a command action, `{ ok, exitCode?, durationMs, seq }` once the command has finished, with its output in the transcript as the `action.run` event at `seq`. The command runs in the thread's folder through a login shell with the thread's variables (`THREADBARE_THREAD_ID` and the rest) and is stopped after 10 minutes. `-32602` for an action the thread doesn't have, `-32020` while the same action is still running |
@@ -550,6 +581,7 @@ replaces whatever the deltas built up.
 | `projects.get` | `{ projectId }` | `{ project: Project, threadIds: string[] }`, its threads newest activity first, put away ones included |
 | `projects.create` | `{ title: string, folders?: string[], goals?, state?, notes?, threadIds?: string[] }` | `{ project: Project }`, made by Mike (`createdBy: "mike"`). `threadIds` are put in it, pinned. Folders must exist (`-32602` otherwise) |
 | `projects.update` | `{ projectId, title?, folders?: string[], goals?, state?, notes?, archived?: boolean }` | `{ project: Project }`. Replaces what's given. A change of folders reloads its threads' patches |
+| `projects.setIcon` | `{ projectId, path?: string, symbol?: string }` | `{ project: Project }`. Mike's choice: `path` a picture on this Mac (PNG, JPEG, WebP, SVG, ICNS or ICO, copied in), or `symbol` an SF Symbol name; neither puts it back to automatic, and the librarian finds one again within seconds. `-32602` for a missing file or a name that isn't a symbol's |
 | `projects.merge` | `{ projectId, intoId }` | `{ project: Project }` (the one kept). Folders and threads move over, notes are joined, and `projectId` is deleted |
 | `projects.delete` | `{ projectId }` | `{}`. Its threads leave it; nothing else is touched |
 | `threads.setProjects` | `{ threadId, add?: string[], remove?: string[] }` | `{ thread: ThreadSummary }`. What Mike does by hand: an added project is pinned (adding one the thread is already in pins it, which is how "keep it here" works), a removed one is remembered so the librarian never puts the thread back in it |
@@ -803,6 +835,42 @@ it once through `settings.setKey` and only ever hears `set` and `hint`.
   on a network error, a 5xx or an empty answer (not one cut off by its
   token limit), and at most 4 are in flight at once.
 
+## Needs you
+
+A turn the agent finished can say whether Mike has to do anything, so
+"Needs you" only holds threads that are really waiting on him.
+
+- **The tool.** Every thread's own agent (not its sub-agents) has
+  `end_turn` in the `threadbare` tools: `{ needs: "you" | "nothing",
+  asks?: { action, where?, reply? }[] }`. `action` is one concrete thing
+  to do, `where` the app, site, file or person, and `reply` the words the
+  agent wants back ("done"). The agent calls it last, after its final
+  message. The tool's description says when, so a resumed session that
+  kept its old system prompt still hears it.
+- **The fallback.** A completed turn with no `end_turn` call is read for
+  the "What I need from you" section Mike's own instructions ask for: the
+  last line near the end that is just that heading in bold, then its
+  numbered or bulleted items, one ask each. A heading with no list whose
+  text says nothing is needed counts as `nothing`. `needsFrom` says which
+  it was. Neither found: no `needs`, and the turn counts as today.
+- **What decides `needsYou`**, in order: an approval or question waiting;
+  a thread marked unread; then a finished turn after `lastSeenSeq`,
+  unless that turn said `nothing`.
+- **Only completed turns.** An interrupted or failed turn says nothing.
+  A sub-agent's `end_turn` (Claude's are never in the thread's events;
+  Codex's carry the child's prefix, `<child>/<id>`) is ignored.
+- **The open card.** The last turn that said `you` has the open card:
+  the summary's `asks` (each with `ticked?: true`) and `asksSeq`. Any
+  later turn closes it (a completed one that says `you` opens the next),
+  and older cards keep the ticks their last `asks.ticked` gave them.
+  Ticking never sends anything: a reply is Mike's to write, and one reply
+  often answers several asks.
+
+```ts
+type Ask = { action: string; where?: string; reply?: string }
+type OpenAsk = Ask & { ticked?: true }
+```
+
 ## Patches
 
 A thread's folder can give it panels (shown beside the transcript) and
@@ -890,6 +958,7 @@ install` in it.
 |---|---|---|
 | `convex` | a folder with `convex/` | `convex.dashboard`, a `url` panel: `https://dashboard.convex.dev/d/<name>` for the `CONVEX_DEPLOYMENT` in `.env.local` (then `.env`), `http://127.0.0.1:6790` for an anonymous local deployment, the dashboard's front page with no deployment yet. Only that one line of the file is read |
 | `xcode` | a folder with an `.xcodeproj` or `.xcworkspace` | `xcode.simulator`, an `image` panel drawn by `panels.render` |
+| `worktree` | a thread with a worktree of its own (see Worktrees) | no panel: the action `worktree.land`, "Land", which runs `tb land` |
 
 A client shows what it can: a `url` panel in a web view, an `image` panel
 by asking `panels.render` now and then while it's on screen, a `list`
@@ -961,6 +1030,50 @@ again. The tools' descriptions say when to use them.
 line or two on where the thread itself is up to, kept on the thread and
 sent as `brief`. No extra model call: it's the same look.
 
+### Worktrees
+
+A repo can ask for each new thread to get a git worktree of its own
+(docs/thread-worktrees.md has the why and the details). A patch file's
+default export says so, beside its actions:
+
+```ts
+export default {
+  worktree: {
+    setup: "cd runner && npm ci",   // run in the new worktree before the first turn; optional
+    check: "./check.sh --quick",    // run by `tb land` before main moves; optional
+  },
+}
+```
+
+The first patch in the thread's own folder chain with a `worktree` wins;
+`~/.threadbear/patches/` and project folders never count. The repo is the
+git toplevel of the folder holding `.threadbear/`, and its main checkout
+is the one with `main` checked out. A malformed `worktree` (not an object,
+or a `setup` or `check` that isn't a command) is the file's `error`.
+
+A new thread in such a repo (from `threads.create`, `create_thread` or a
+schedule, unless `worktree: false`) gets, before its first turn starts:
+`git worktree add -b thread/<id8> <parent>/<repo>-threads/<id8> main` from
+the main checkout (`<id8>` is the thread id's first 8 characters), a `cwd`
+in the same subfolder of it, `setup` run in its root (an `action.run` with
+`trigger: "worktree.setup"`, under the first turn; a failure is shown and
+the turn goes on), and a few lines in the agent's appended system prompt
+saying where it is and that `tb land` puts it on main. If the worktree
+can't be made (a leftover folder or branch of that name, no checkout on
+`main`), a `system.note` says why and the thread starts in the folder
+asked for. The summary carries `worktree` from then on.
+
+`tb land`, in the worktree, refuses with uncommitted changes, rebases on
+main (a conflict aborts and names the files), runs `check`, then
+`git merge --ff-only` in the main checkout (refused, and nothing changed,
+if main's own uncommitted changes are in the way) and prints what landed.
+It never pushes. `--dry-run` stops before main moves.
+
+When the thread is archived or deleted, a worktree whose branch is on main
+(or has nothing of its own) is removed with its branch; otherwise both stay,
+with a `system.note` saying how to land or drop them. A thread whose
+worktree was removed carries on in the main checkout, with a note.
+
 ## Projects
 
 A project groups threads above folders: it can have several folders, a
@@ -1013,6 +1126,24 @@ back. It never takes out a pinned project or one an agent added. Looks
 are listed in `LibrarianStatus.recent`; without a key or budget the queue
 waits (`state: "off"`).
 
+**Icons.** The librarian gives each project an icon and keeps it up to
+date. It looks through the project's folders for the picture the project
+already has, by file name and place, no model needed: an Xcode
+`AppIcon.appiconset`, an `.icns`, an `apple-touch-icon` or `icon-512.png`,
+a Chrome extension's or Expo app's manifest icon, a picture named after the
+project in an `icons/` folder, then favicons and logos. Wide pictures,
+template (menu bar) icons, other image sets, and anything under
+`node_modules`, build output, docs or tests are passed over, as is one
+under a folder named for something else (`public/inventory/icon.svg` is
+the inventory's). The best is copied in, so the app never reads a repo. It
+looks again a few seconds after a project is made or its folders change,
+and every hour at all of them, copying again when the file has changed or
+a better one has turned up. A project with no picture gets an SF Symbol:
+one small-model call (feature `projects`, in the budget, not while paused,
+never for a private folder) choosing from a fixed list. One Mike or an
+agent chose (`projects.setIcon`, `update_project`'s `icon`) is never
+changed by the librarian.
+
 **Agents** have tools for projects (see Tools for agents):
 `list_projects`, `read_project`, `create_project`, `update_project`,
 `join_project` and `leave_project` (each for their own thread by default).
@@ -1057,6 +1188,59 @@ kept in `schedules.json` in the data dir.
   `delete_schedule`); `createdBy` is their thread. By default an agent's
   schedule sends to its own thread ("check the deploy again in 20
   minutes").
+
+## Sync
+
+The runner mirrors the phone's view of its threads to Threadbear's Convex
+project (docs/convex-backend.md, shape A: the runner owns the state,
+Convex mirrors it, the phone asks through it). It's best effort and
+one-way in this step: nothing the runner or the Mac app does waits on it,
+and the runner never reads the mirror back. The Mac app doesn't use it.
+
+- **On when** `runner.json` has `sync.url` (the deployment's
+  `https://<name>.convex.cloud`) and `secrets/convex-key` (0600) holds the
+  key the deployment's `RUNNER_KEY` was set to. `sync.enabled: false`
+  turns it off; so does `THREADBARE_SYNC=off` in the environment, which
+  check.sh sets so no test runner writes to the real project.
+  `THREADBARE_SYNC_URL` points a dev or test runner at its own deployment.
+  `sync.name` is what the phone calls this runner (default: the Mac's
+  hostname without `.local`); `sync.runnerId` is made once and written
+  back to `runner.json`, so a data dir stays one runner across releases.
+- **What's written.** One `threads` row per thread: `threadId, runnerId,
+  title, cwd, accountId, provider, model?, status, needsYou, unread,
+  preview, createdAt, lastActivityAt, snoozedUntil?, snoozedUntilRestart?,
+  archivedAt?, costUsd?` (to the cent), `projects?: { id, title }[]`,
+  `working?` (the first unfinished background task's description) and
+  `view` (`inbox`, `hibernating` or `den`, worked out the way the app's
+  lists are). Nothing else from `ThreadSummary`: no `lastSeq`, context,
+  panels, actions, hooks or sub-agents, and never an event, tool output
+  or image. Plus a `runners` row for this runner (`runnerId, name,
+  version, release?, startedAt, draining, threadCount, lastSeenAt`),
+  written once a minute.
+- **When.** A `thread.updated` whose phone view differs from the last one
+  written marks the thread dirty; dirty threads are written together, at
+  most once every 2 seconds, 50 to a mutation. A `thread.deleted` removes
+  the row. On start every thread is written once and rows of this runner
+  for threads it no longer has are pruned. A stop for good (not a restart
+  or a handover) sets the runner's `lastSeenAt` to 0 so the phone shows it
+  offline at once; a draining runner just stops, and the new release
+  writes everything again under the same `runnerId`.
+- **Failures.** A write that fails is kept and tried again after 5
+  seconds, doubling to 5 minutes, with one log line per distinct error;
+  a newer state for the same thread replaces the one waiting. Rows are
+  current state, so a long outage costs one write per changed thread
+  when it's back.
+- **Status.** `runner.status` has `sync: { state: "off" | "ok" | "error",
+  reason?, url?, runnerId?, name?, threads?, lastSyncAt?, lastError?,
+  pending?, retryAt? }` (`reason` says why it's off; `threads` is rows
+  written since start; `pending` changes waiting), and `tb status` prints
+  it as one line.
+- **Convex side.** `convex/` at the repo root (schema, `sync.ts` for the
+  runner's mutations, `phone.ts` for the phone's queries and the commands
+  it queues, `tokens.ts` for phone tokens). The phone's API is in
+  docs/convex-backend.md. Later steps add messages, approvals, projects,
+  schedules and accounts to the mirror, and the runner applying the
+  phone's commands.
 
 ## Ordering and reconnects
 

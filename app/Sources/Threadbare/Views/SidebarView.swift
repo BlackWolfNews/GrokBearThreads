@@ -57,13 +57,14 @@ private struct InboxList: View {
             sections[section].map { ($0.id, SectionRow.id(section: section.title, thread: $0.id)) }
         })
         VStack(spacing: 0) {
-            SidebarButtonRow(icon: "square.and.pencil", title: "New thread", shortcut: "⌘N", active: app.selection == nil) {
+            SidebarButtonRow(icon: "square.and.pencil", title: "New thread", shortcut: "⌘N", tip: "Start a new thread (⌘N)", active: app.selection == nil) {
                 app.newThread()
             }
-            .help("New thread (⌘N)")
             .padding(.horizontal, SidebarMetrics.outerInset)
             .padding(.top, zoomed(4))
-            ThreadList(order: sections.all.map(\.id), scrollID: { rowIDs[$0] ?? $0 }) { select in
+            // A folded section's rows aren't drawn, so the arrow keys skip them.
+            let order = InboxSection.allCases.filter { !app.collapsedSections.contains($0) }.flatMap { sections[$0].map(\.id) }
+            ThreadList(order: order, scrollID: { rowIDs[$0] ?? $0 }) { select in
                 if app.threadsLoaded {
                     ForEach(InboxSection.allCases, id: \.self) { section in
                         ThreadSection(section: section, threads: sections[section], select: select)
@@ -78,17 +79,26 @@ private struct InboxList: View {
 }
 
 /// A heading and its rows. Empty sections other than Inbox are left out.
+/// Clicking the heading folds the rows away; folded, it shows how many.
 private struct ThreadSection: View {
+    @Environment(AppModel.self) private var app
     let section: InboxSection
     let threads: [ThreadSummary]
     let select: (String) -> Void
 
     var body: some View {
         if !threads.isEmpty || section == .inbox {
-            SectionHeading(title: section.title, icon: section.icon)
-            ForEach(threads.map { SectionRow(section: section.title, thread: $0) }) { row in
-                ThreadRowView(thread: row.thread, mode: .inbox, section: section) { select(row.thread.id) }
-                SubagentList(thread: row.thread, section: section.title)
+            let collapsed = app.collapsedSections.contains(section)
+            SectionHeading(title: section.title, icon: section.icon, fold: .init(collapsed: collapsed, count: threads.count) {
+                withAnimation(.snappy(duration: 0.2)) {
+                    if collapsed { app.collapsedSections.remove(section) } else { app.collapsedSections.insert(section) }
+                }
+            })
+            if !collapsed {
+                ForEach(threads.map { SectionRow(section: section.title, thread: $0) }) { row in
+                    ThreadRowView(thread: row.thread, mode: .inbox, section: section) { select(row.thread.id) }
+                    SubagentList(thread: row.thread, section: section.title)
+                }
             }
         }
     }
@@ -112,8 +122,30 @@ struct SectionHeading: View {
     /// A small SF Symbol before the title, so the groups can be told apart
     /// at a glance.
     var icon: String? = nil
+    /// Given for a heading that folds its rows away when clicked.
+    var fold: Fold? = nil
+    @State private var hovering = false
+
+    struct Fold {
+        var collapsed: Bool
+        /// The rows under it, shown while they're folded away.
+        var count: Int
+        var toggle: () -> Void
+    }
 
     var body: some View {
+        if let fold {
+            Button(action: fold.toggle) { label }
+                .buttonStyle(.plain)
+                .onHover { hovering = $0 }
+                .tip(fold.collapsed ? "Show \(title)" : "Hide \(title)")
+                .accessibilityValue(fold.collapsed ? "Collapsed" : "Expanded")
+        } else {
+            label
+        }
+    }
+
+    private var label: some View {
         // A quiet divider rather than a bold tag: grey, at the previews'
         // size, with clear room above each group, like Codex and Claude.
         // Semibold so it isn't weaker than the rows it groups. A hairline
@@ -127,11 +159,28 @@ struct SectionHeading: View {
             }
             Text(title)
                 .font(.system(size: TypeScale.sidebarHeading, weight: .semibold))
+                .foregroundStyle(hovering ? .primary : .secondary)
                 .fixedSize()
             Rectangle()
                 .fill(Color.primary.opacity(0.08))
                 .frame(height: 1)
-                .padding(.leading, zoomed(4))
+                .padding(.horizontal, zoomed(4))
+            if let fold {
+                // Folded, the count says what's hidden; the chevron only
+                // shows while folded or on hover, so an open heading stays
+                // as quiet as the others.
+                if fold.collapsed && fold.count > 0 {
+                    Text("\(fold.count)")
+                        .font(.system(size: TypeScale.sidebarMeta))
+                        .foregroundStyle(SidebarMetrics.faint)
+                        .monospacedDigit()
+                }
+                Image(systemName: "chevron.down")
+                    .font(.system(size: zoomed(9), weight: .semibold))
+                    .foregroundStyle(SidebarMetrics.faint)
+                    .rotationEffect(.degrees(fold.collapsed ? -90 : 0))
+                    .opacity(fold.collapsed || hovering ? 1 : 0)
+            }
         }
         .foregroundStyle(.secondary)
         .padding(.leading, SidebarMetrics.leading)
@@ -139,6 +188,7 @@ struct SectionHeading: View {
         .padding(.top, zoomed(18))
         .padding(.bottom, zoomed(6))
         .frame(maxWidth: .infinity, alignment: .leading)
+        .contentShape(Rectangle())
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(.isHeader)
     }
@@ -264,9 +314,18 @@ struct ThreadRowView: View {
         // projects came: Mike reads a thread by its title and its project.
         HStack(alignment: .center, spacing: zoomed(10)) {
             ProjectTiles(projects: ProjectMark.shown(thread, under: heading))
-                .help(ProjectMark.help(thread))
+                .tip(ProjectMark.help(thread))
                 .overlay(alignment: .leading) {
-                    if look.unread {
+                    if look.done {
+                        // Finished with nothing needed: a tick where the
+                        // unread dot would be.
+                        Image(systemName: "checkmark")
+                            .font(.system(size: zoomed(9), weight: .bold))
+                            .foregroundStyle(Color.accentColor)
+                            .frame(width: zoomed(10), height: zoomed(10))
+                            .offset(x: -(SidebarMetrics.leading + zoomed(10)) / 2 - zoomed(1))
+                            .accessibilityLabel("Done, unread")
+                    } else if look.unread {
                         // In the row's leading gutter, left of the tile.
                         Circle()
                             .fill(Color.accentColor)
@@ -318,6 +377,9 @@ struct ThreadRowView: View {
             }
         }
         .onHover { hovering = $0 }
+        // The whole title, which the row often cuts short, and where it runs.
+        // The status and project marks have their own tips over this one.
+        .tip((thread.title.isEmpty ? "Untitled" : thread.title) + "\n" + thread.cwd.abbreviatingHome)
         .contextMenu { ThreadMenu(thread: thread) }
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
@@ -365,7 +427,7 @@ struct ThreadRowView: View {
             }
             .font(.system(size: TypeScale.sidebarMeta, weight: .medium))
             .foregroundStyle(Color.accentColor)
-            .help("Working")
+            .tip("Working")
         case .background:
             // Still being worked on, but by sub-agents or jobs in the
             // background: the same spinner in grey, and what's running
@@ -378,15 +440,15 @@ struct ThreadRowView: View {
             }
             .font(.system(size: TypeScale.sidebarMeta, weight: .medium))
             .foregroundStyle(.secondary)
-            .help(BackgroundWork.detail(thread.background))
+            .tip(BackgroundWork.detail(thread.background))
         case .needsYou:
             Text("Needs you").font(.system(size: TypeScale.sidebarMeta, weight: .medium)).foregroundStyle(Color(nsColor: Theme.needsYou))
         case .failed:
             Text("Failed").font(.system(size: TypeScale.sidebarMeta, weight: .medium)).foregroundStyle(Color(nsColor: Theme.failed))
-                .help("The last turn failed")
+                .tip("The last turn failed")
         case .stopped:
             Text("Stopped").font(.system(size: TypeScale.sidebarMeta)).foregroundStyle(.secondary)
-                .help("Stopped when the runner restarted")
+                .tip("Stopped when the runner restarted")
         }
     }
 
@@ -400,9 +462,10 @@ struct ThreadRowView: View {
 
 /// A row's project as a tile two lines tall: the first project it joined,
 /// with an edge of a second tile showing behind it when it's in more than
-/// one. A quiet folder when it's in none. The project's icon will go on the
-/// tile once projects have them; for now it's the title's first letter.
+/// one. A quiet folder when it's in none. The front tile is the project's
+/// icon: its picture filling the tile, or its symbol or first letter on it.
 private struct ProjectTiles: View {
+    @Environment(AppModel.self) private var app
     let projects: [ThreadProject]
 
     var body: some View {
@@ -429,19 +492,33 @@ private struct ProjectTiles: View {
                     }
                     .offset(x: zoomed(4), y: -zoomed(4))
             }
-            Group {
-                if let project = projects.first {
-                    Text(ProjectMark.letter(project.title))
-                        .font(.system(size: zoomed(14), weight: .semibold))
-                        .foregroundStyle(.secondary)
-                } else {
-                    Image(systemName: "folder")
-                        .font(.system(size: zoomed(12)))
-                        .foregroundStyle(SidebarMetrics.faint)
+            let icon = projects.first.flatMap { app.project($0.id)?.icon }
+            if let path = icon?.image?.path, let image = ProjectIconImages.image(at: path) {
+                Image(nsImage: image)
+                    .resizable()
+                    .interpolation(.high)
+                    .aspectRatio(contentMode: .fit)
+                    .frame(width: size, height: size)
+                    .clipShape(RoundedRectangle(cornerRadius: zoomed(7), style: .continuous))
+            } else {
+                Group {
+                    if let symbol = icon?.symbol, ProjectIconImages.symbolExists(symbol) {
+                        Image(systemName: symbol)
+                            .font(.system(size: zoomed(14)))
+                            .foregroundStyle(.secondary)
+                    } else if let project = projects.first {
+                        Text(ProjectMark.letter(project.title))
+                            .font(.system(size: zoomed(14), weight: .semibold))
+                            .foregroundStyle(.secondary)
+                    } else {
+                        Image(systemName: "folder")
+                            .font(.system(size: zoomed(12)))
+                            .foregroundStyle(SidebarMetrics.faint)
+                    }
                 }
+                .frame(width: size, height: size)
+                .background(Color.primary.opacity(projects.isEmpty ? 0.04 : 0.08), in: RoundedRectangle(cornerRadius: zoomed(7)))
             }
-            .frame(width: size, height: size)
-            .background(Color.primary.opacity(projects.isEmpty ? 0.04 : 0.08), in: RoundedRectangle(cornerRadius: zoomed(7)))
         }
         .frame(width: size + zoomed(4), height: size + zoomed(4), alignment: .bottomLeading)
         .accessibilityHidden(true)
@@ -468,22 +545,22 @@ private struct RowActions: View {
                     .buttonStyle(RowIconButtonStyle())
                     .menuIndicator(.hidden)
                     .fixedSize()
-                    .help("Hibernate")
+                    .tip("Hibernate")
                 case .archive:
                     Button {
                         guard BusyConfirm.allowed(.archive, threadId: thread.id, app: app) else { return }
                         app.archive(thread.id)
                     } label: { Image(systemName: "archivebox") }
                         .buttonStyle(RowIconButtonStyle())
-                        .help("Archive (⌘E)")
+                        .tip("Archive (⌘E)")
                 case .unsnooze:
                     Button { app.unsnooze(thread.id) } label: { Image(systemName: "arrow.uturn.backward") }
                         .buttonStyle(RowIconButtonStyle())
-                        .help("Wake")
+                        .tip("Wake")
                 case .unarchive:
                     Button { app.unarchive(thread.id) } label: { Image(systemName: "arrow.uturn.backward") }
                         .buttonStyle(RowIconButtonStyle())
-                        .help("Unarchive")
+                        .tip("Unarchive")
                 }
             }
         }
@@ -523,6 +600,8 @@ struct SidebarButtonRow: View {
     /// Shown at the row's end while ⌘ is held (`ShortcutHints`). It used
     /// to be printed there all the time, which Mike found noisy.
     var shortcut: String? = nil
+    /// The tooltip, if the title alone doesn't say enough.
+    var tip: String? = nil
     var active = false
     let action: () -> Void
     @State private var hovering = false
@@ -550,6 +629,7 @@ struct SidebarButtonRow: View {
         }
         .buttonStyle(.plain)
         .onHover { hovering = $0 }
+        .tip(tip ?? shortcut.map { "\(title) (\($0))" } ?? title)
     }
 
     private var background: Color {
@@ -760,6 +840,7 @@ struct SearchField: View {
             TextField(prompt, text: $text)
                 .textFieldStyle(.plain)
                 .font(.system(size: TypeScale.sidebarButton))
+                .tip(prompt)
             if !text.isEmpty {
                 Button {
                     text = ""
@@ -767,7 +848,7 @@ struct SearchField: View {
                     Image(systemName: "xmark.circle.fill").foregroundStyle(.tertiary)
                 }
                 .buttonStyle(.plain)
-                .help("Clear")
+                .tip("Clear")
             }
         }
         .padding(.leading, SidebarMetrics.leading - zoomed(2))

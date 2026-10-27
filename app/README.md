@@ -451,13 +451,14 @@ is an error. Commands marked "the open thread" act on `id` when it's given
 | `open` | `id`, `timeout` | selects a thread and waits until its rows are on screen |
 | `select` | `id` | selects it without waiting |
 | `subagent` | `thread` (default: the open one), `id`, `timeout` | shows a sub-agent's transcript, as clicking its row under the thread does, and waits until its rows are on screen |
+| `mouse-button` | `button` (`back`, `forward`) | a mouse's side-button click over the window, through the same handler as a real one; says the sidebar view, the thread and whether back and forward can go further |
 | `new`, `options` | `cwd`, `account`, `model` (`null` for the default), `effort` (`null` for the model's own), `ask` | the new-thread composer and its menus; `options` refuses anything else (a typo used to pass) and says what's set now |
 | `composer-menu` | `menu` (`model`, `account`, `permission` or `folder`; default `model`), `click` (an item's title; an account's email or id), `show` (opens the model or account picker and says its window number) | the composer chip's menu (or the model or account picker) for the open thread or a new one, as text: `[x]` the ticked item, `*` the default, the subtitle after a dash, submenus and older models indented, `#` on a section, `---` before the account picker's line about where the numbers came from; `click` picks an item as a click would |
 | `usage` | `show` (true opens the usage popover and says its window number, false closes it), `click` (`Update`, `Update anyway`, `Go back to <version>`, `Automatic`, `Ask me`, `Off` with `provider`, or `Check now`) | the usage popover as text: each account's room by provider, then the CLIs with their buttons in brackets. `dump` has the same lines while it's open |
 | `type`, `send`, `return` | `text`, `replace`, `timeout` | types into the composer (`replace` takes the place of what's there); `send` types and presses Return, and from the new-thread composer waits for the thread it starts and prints its id |
 | `paste-image` | `path` | through the instance's own pasteboard |
 | `click` | `title` | a button in the transcript: Allow, Always allow, Deny, an option, Send answer |
-| `expand`, `collapse` | `row`, `file`, `all` | a group, tool, thinking block or settled approval (one folded in a closed group opens it); `file` (path or index) in a changes card; `all` for a whole diff |
+| `expand`, `collapse` | `row`, `file`, `all`, `section` | a group, tool, thinking block or settled approval (one folded in a closed group opens it); `file` (path or index) in a changes card; `all` for a whole diff; `section` (`inbox`, `running`) folds or opens an inbox heading, as clicking it does |
 | `scroll` | `to` (`top`, `bottom`) or `row`, `offset` | |
 | `hints` | `on` (default true) | shows the keys as if ⌘ were held, or hides them |
 | `hover` | `id` (sidebar) or `row` (transcript); neither clears | draws a row as if the pointer were on it |

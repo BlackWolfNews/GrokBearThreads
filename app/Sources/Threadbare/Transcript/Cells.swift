@@ -11,6 +11,8 @@ protocol RowCellDelegate: AnyObject {
     func respond(approvalId: String, decision: ApprovalDecision, answers: [String: String]?, message: String?)
     func questionDraft(_ approvalId: String) -> [Int: Set<String>]
     func setQuestionDraft(_ approvalId: String, _ draft: [Int: Set<String>])
+    /// A click on an asks card: `tick:<index>` or `reply:<index>`.
+    func askAction(_ card: AsksCard, action: String)
     func openReview(_ review: DesignReview)
 }
 
@@ -255,6 +257,14 @@ final class TextRowCell: RowCellView {
             box.frame = NSRect(x: x, y: top + zoomed(2), width: width, height: render.textSize.height + RowMetrics.cardPad * 2 - zoomed(4))
             textView.place(box.frame.insetBy(dx: RowMetrics.cardPad, dy: RowMetrics.cardPad - zoomed(2)))
 
+        case .asks(let card):
+            // The open card is outlined like an approval waiting on Mike;
+            // a closed one is a plain card.
+            box.isHidden = false
+            box.set(fill: Theme.cardBackground, stroke: card.isOpen ? NSColor.controlAccentColor : Theme.cardBorder, radius: zoomed(10))
+            box.frame = NSRect(x: x, y: top + zoomed(2), width: width, height: render.textSize.height + RowMetrics.cardPad * 2 - zoomed(4))
+            textView.place(box.frame.insetBy(dx: RowMetrics.cardPad, dy: RowMetrics.cardPad - zoomed(2)))
+
         case .error:
             box.isHidden = false
             box.set(fill: Theme.errorBackground, stroke: nil, radius: zoomed(10))
@@ -266,6 +276,14 @@ final class TextRowCell: RowCellView {
 
         default:
             textView.place(NSRect(x: x, y: top, width: width, height: render.textSize.height))
+        }
+
+        // Pooled cells are reused for any text row, so only an asks card
+        // keeps a click handler.
+        if case .asks(let card) = row.content, card.isOpen {
+            textView.onAction = { [weak self] action in self?.delegate?.askAction(card, action: action) }
+        } else {
+            textView.onAction = nil
         }
 
         guard let text = render.text else { return }
@@ -399,7 +417,7 @@ final class HeaderRowCell: RowCellView {
         default:
             break
         }
-        if title.toolTip != tooltip { title.toolTip = tooltip }
+        title.setTip(tooltip ?? "")
         Symbols.set(icon, symbol, size: 12, tint: tint)
         icon.frame = WorkLine.iconFrame(x: x, rowHeight: header)
         title.frame = WorkLine.labelFrame(x: x, width: width, textWidth: render.textSize.width, trailing: canExpand ? zoomed(16) : 0, rowHeight: header)
@@ -631,7 +649,7 @@ final class BackgroundRowCell: RowCellView {
         let left = bear.frame.maxX + zoomed(6)
         label.frame = NSRect(x: left, y: (height - Theme.workLabelHeight) / 2, width: max(0, x + width - left), height: Theme.workLabelHeight)
         label.stringValue = BackgroundWork.lineWithDetail(status.tasks)
-        label.toolTip = BackgroundWork.detail(status.tasks)
+        label.setTip(BackgroundWork.detail(status.tasks))
     }
 }
 
@@ -879,6 +897,9 @@ final class ApprovalRowCell: RowCellView {
             button.action = action
         }
         [card, titleView, payloadBox, payloadView, allow, always, deny].forEach(addSubview)
+        allow.setTip("Let it do this once (Return)")
+        always.setTip("Allow this, and anything like it for the rest of this thread")
+        deny.setTip("Don't let it do this; the agent is told no")
     }
 
     required init?(coder: NSCoder) { fatalError() }
@@ -901,7 +922,7 @@ final class ApprovalRowCell: RowCellView {
         titleView.place(NSRect(x: left, y: y, width: inner, height: render.textSize.height))
         titleView.show(render.text ?? NSAttributedString(), width: inner)
         let path = ApprovalText.filePath(item.request).map { ToolPresentation.shortTitle($0, limit: 400) }
-        if titleView.toolTip != path { titleView.toolTip = path }
+        titleView.setTip(path ?? "")
         y += render.textSize.height + zoomed(10)
         payloadBox.set(fill: Theme.codeBackground, stroke: nil, radius: zoomed(8))
         payloadBox.frame = NSRect(x: left, y: y, width: inner, height: render.detailSize.height + RowMetrics.boxPad * 2)
@@ -986,6 +1007,7 @@ final class QuestionRowCell: RowCellView, NSTextFieldDelegate {
         other.delegate = self
         send.target = self
         send.action = #selector(sendClicked)
+        send.setTip("Send your answers to the agent")
         [card, otherBox, other, send, answerIcon, answer].forEach(addSubview)
     }
 
@@ -1049,7 +1071,7 @@ final class QuestionRowCell: RowCellView, NSTextFieldDelegate {
             let textX = left + RowMetrics.titleIndent - RowMetrics.labelInset
             let height = Theme.workLabelHeight
             answer.frame = NSRect(x: textX, y: y + (RowMetrics.answerHeight - height) / 2, width: left + inner - textX + RowMetrics.labelInset, height: height)
-            answer.toolTip = resolution.message
+            answer.setTip(resolution.message ?? "")
         } else {
             otherBox.frame = NSRect(x: left, y: y, width: inner, height: RowMetrics.otherFieldHeight)
             updateOtherBox()

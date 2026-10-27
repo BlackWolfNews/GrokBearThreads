@@ -83,6 +83,10 @@ public struct TranscriptModel: Sendable {
     /// decreases, so the rows for items from `n` on are a binary search away.
     private var rowStarts: [Int] = []
     private var planRowForTurn: [String: String] = [:]
+    /// Cards of asks by the seq of their turn.completed, and the open one
+    /// (the last finished turn's), if it has asks.
+    private var asksRowForSeq: [Int: String] = [:]
+    private var openAsksRow: String?
     /// Each turn's last error row, to learn the turn's `errorKind`.
     private var errorRowForTurn: [String: String] = [:]
     private var turnStarts: [String: Date] = [:]
@@ -268,6 +272,8 @@ public struct TranscriptModel: Sendable {
         items = []
         itemIndex = [:]
         planRowForTurn = [:]
+        asksRowForSeq = [:]
+        openAsksRow = nil
         errorRowForTurn = [:]
         turnStarts = [:]
         completedTurns = []
@@ -623,6 +629,33 @@ public struct TranscriptModel: Sendable {
                 update(id) { $0 = .footer(completion) }
             } else {
                 append(TranscriptRow(id: id, seq: seq, turnId: turnId ?? completion.turnId, content: .footer(completion)))
+                // Any finished turn closes the last card; one that needs
+                // Mike opens the next, under its footer.
+                if let open = openAsksRow {
+                    update(open) { content in
+                        if case .asks(var card) = content {
+                            card.isOpen = false
+                            content = .asks(card)
+                        }
+                    }
+                    openAsksRow = nil
+                }
+                if completion.outcome == .completed, completion.needs == "you", !completion.asks.isEmpty {
+                    let cardId = "ak:\(seq)"
+                    append(TranscriptRow(id: cardId, seq: seq, turnId: turnId ?? completion.turnId, content: .asks(AsksCard(seq: seq, asks: completion.asks))))
+                    asksRowForSeq[seq] = cardId
+                    openAsksRow = cardId
+                }
+            }
+
+        case .asksTicked(let asksSeq, let ticked):
+            if let cardId = asksRowForSeq[asksSeq] {
+                update(cardId) { content in
+                    if case .asks(var card) = content {
+                        card.ticked = Set(ticked)
+                        content = .asks(card)
+                    }
+                }
             }
 
         case .systemNote(let text):
