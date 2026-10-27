@@ -92,8 +92,8 @@ if `tb` isn't found (an older runner, or outside a thread), use
   (`app/stage-update.sh`, from its own clone under
   `~/Library/Caches/Threadbare/update`, never the working tree) and swaps
   it in when he next quits or relaunches, from "Restart to Update" in the
-  app menu, or by itself once no thread is running, nothing's typed and he
-  isn't using the app. So merge an app change to main and tell him it's waiting;
+  app menu, or by itself once nothing's typed and he isn't using the app
+  (running threads don't hold it up; the runner keeps the turn). So merge an app change to main and tell him it's waiting;
   `~/Library/Logs/threadbare-update.log` has the build output if it
   doesn't turn up.
 - `tb show <id>` reads a thread as text (`--tools` for results, each under
