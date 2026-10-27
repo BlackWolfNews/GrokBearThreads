@@ -367,7 +367,7 @@ describe('runner end to end (real Claude CLI)', { concurrency: false }, () => {
     assert.ok(back.threads.some((t: Ev) => t.id === main.id));
   });
 
-  test('a background shell finishing starts a turn the thread shows, and a send waits for it', async () => {
+  test('a background shell finishing starts a turn the thread shows, and a send goes into it', async () => {
     const t = await createThread({
       text: 'Use the Bash tool with run_in_background set to true to run: sleep 4 && echo BG-FINISHED . Do not wait for it or check on it. Reply with only: STARTED',
     });
@@ -375,21 +375,61 @@ describe('runner end to end (real Claude CLI)', { concurrency: false }, () => {
     assert.equal(first.outcome, 'completed', first.error);
     // The CLI starts a turn of its own when the job ends.
     const auto = await waitFor('CLI-started turn', () => persisted(t.id).find((e) => e.type === 'turn.started' && e.turnId !== t.turnId), 60_000);
-    // Sent while that turn runs: queued behind it, not mixed into it.
+    // Sent while that turn runs: it goes into that turn, which then lasts
+    // until the message is answered (folded in, or run straight after).
     const { turnId: next } = await client.call('threads.send', { threadId: t.id, text: 'Reply with only the word: PINEAPPLE' });
+    assert.equal(next, auto.turnId);
     const autoDone = await turnDone(t.id, auto.turnId);
     assert.equal(autoDone.outcome, 'completed', autoDone.error);
     const autoEvents = turnEvents(t.id, auto.turnId);
-    assert.ok(!autoEvents.some((e) => e.type === 'user.message'), 'no user.message in a CLI-started turn');
+    const started = autoEvents.findIndex((e) => e.type === 'turn.started');
+    const msg = autoEvents.findIndex((e) => e.type === 'user.message');
+    assert.ok(msg > started, 'the message is shown inside the turn, after its start');
     assert.ok(autoEvents.some((e) => e.type === 'system.note' && /completed|finished/i.test(e.text)), 'a note says why it started');
-    const nextDone = await turnDone(t.id, next);
-    assert.equal(nextDone.outcome, 'completed', nextDone.error);
     assert.match(replyText(t.id, next), /PINEAPPLE/);
+    assert.equal(persisted(t.id).filter((e) => e.type === 'turn.completed').length, 2, 'one completion per turn');
     // Nothing landed outside a turn.
     assert.ok(persisted(t.id).every((e) => e.turnId), 'every event belongs to a turn');
-    assert.ok(persisted(t.id).indexOf(autoDone) < persisted(t.id).findIndex((e) => e.type === 'user.message' && e.turnId === next));
     const s = await waitFor('summary', () => summaries.get(t.id)?.status === 'idle' && summaries.get(t.id));
     assert.equal(s.needsYou, true);
+    assertProtocol(t.id);
+    await client.call('threads.update', { threadId: t.id, archived: true });
+  });
+
+  test('a message sent during a turn goes into it and is answered by it', async () => {
+    const t = await createThread({
+      text: 'Use the Bash tool to run: sleep 5 . Then use the Bash tool again to run: sleep 5 . Then reply with only: DONE1',
+    });
+    await waitFor('first tool call', () => persisted(t.id).find((e) => e.type === 'tool.call' && e.turnId === t.turnId), 60_000);
+    const { turnId } = await client.call('threads.send', { threadId: t.id, text: 'Reply with only the word: PINEAPPLE' });
+    assert.equal(turnId, t.turnId, 'the running turn');
+    const shown = await waitFor('message shown', () => persisted(t.id).filter((e) => e.type === 'user.message').at(1), 5_000);
+    assert.equal(shown.turnId, t.turnId);
+    assert.ok(!persisted(t.id).some((e) => e.type === 'turn.completed'), 'shown while the turn still runs');
+    const done = await turnDone(t.id, t.turnId);
+    assert.equal(done.outcome, 'completed', done.error);
+    assert.match(replyText(t.id, t.turnId), /PINEAPPLE/);
+    assert.equal(persisted(t.id).filter((e) => e.type === 'turn.completed').length, 1);
+    assert.ok(persisted(t.id).every((e) => e.turnId), 'every event belongs to a turn');
+    const s = await waitFor('summary', () => summaries.get(t.id)?.status === 'idle' && summaries.get(t.id));
+    assert.equal(s.needsYou, true);
+    assertProtocol(t.id);
+    await client.call('threads.update', { threadId: t.id, archived: true });
+  });
+
+  test('Stop cancels a message sent during the turn too', async () => {
+    const t = await createThread({ text: 'Use the Bash tool to run: sleep 12 . Then reply with only: DONE1' });
+    await waitFor('tool call', () => persisted(t.id).find((e) => e.type === 'tool.call' && e.turnId === t.turnId), 60_000);
+    await client.call('threads.send', { threadId: t.id, text: 'Reply with only the word: PINEAPPLE' });
+    await client.call('threads.interrupt', { threadId: t.id });
+    const done = await turnDone(t.id, t.turnId);
+    assert.equal(done.outcome, 'interrupted');
+    // Nothing runs after: the thread stays idle and no new turn starts.
+    await new Promise((r) => setTimeout(r, 6000));
+    assert.equal(persisted(t.id).filter((e) => e.type === 'turn.started').length, 1, 'no turn for the cancelled message');
+    assert.ok(!/PINEAPPLE/.test(replyText(t.id, t.turnId)));
+    assert.equal(summaries.get(t.id)?.status, 'idle');
+    assert.ok(persisted(t.id).every((e) => e.turnId), 'every event belongs to a turn');
     assertProtocol(t.id);
     await client.call('threads.update', { threadId: t.id, archived: true });
   });

@@ -348,9 +348,13 @@ class ClaudeSession implements AgentSession {
     } as SDKUserMessage);
   }
 
+  // Stop means stop: a message pushed in while the turn ran and still
+  // waiting in the CLI's queue is cancelled too, or the CLI would answer
+  // it as a turn of its own straight after. (The SDK's types don't name
+  // the option yet; the CLI advertises it as interrupt_cancel_queued_v1.)
   async interrupt(): Promise<void> {
     if (this.exited) return;
-    await this.q.interrupt();
+    await (this.q.interrupt as (opts?: { cancelQueued?: boolean }) => Promise<unknown>)({ cancelQueued: true });
   }
 
   async setModel(model: string | undefined): Promise<void> {

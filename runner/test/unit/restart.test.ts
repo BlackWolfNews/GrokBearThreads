@@ -706,6 +706,9 @@ test('a snoozed thread keeps its queued message through a restart and sends it w
   const { thread } = create(h);
   const s = h.adapter.last;
   s.init();
+  // A folder change is due on the next turn, so the message waits for it
+  // rather than joining the running turn.
+  h.runner.update({ threadId: thread.id, cwd: tmpDir() });
   h.runner.send(thread.id, 'please also do X');
   h.runner.update({ threadId: thread.id, snoozedUntil: new Date(h.clock.now() + 60 * MIN).toISOString() });
   // Snoozing mid-turn interrupts it; the queue is held for the wake-up.
@@ -732,6 +735,9 @@ test('a snooze that ends while the runner is down still sends the queued message
   const { thread } = create(h);
   const s = h.adapter.last;
   s.init();
+  // A folder change is due on the next turn, so the message waits for it
+  // rather than joining the running turn.
+  h.runner.update({ threadId: thread.id, cwd: tmpDir() });
   h.runner.send(thread.id, 'please also do X');
   h.runner.update({ threadId: thread.id, snoozedUntil: new Date(h.clock.now() + 60 * MIN).toISOString() });
   s.result('interrupted');

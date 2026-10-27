@@ -314,6 +314,50 @@ test('a message queued behind a CLI turn: the CLI turn is its own, the next answ
   assert.deepEqual(results, [[true, undefined], [undefined, 'u2']]);
 });
 
+test('a message sent during a turn and folded into it: one result answers both', () => {
+  const n = new ClaudeNormalizer(ctx());
+  n.sent();
+  const outs = [life('queued', 'u1'), life('started', 'u1'), sys('init')].flatMap((m) => n.handle(m));
+  assert.ok(!outs.some((o) => o.kind === 'cliTurn'));
+  n.sent();
+  const rest = [
+    life('queued', 'u2'),
+    { type: 'assistant', message: { id: 'm1', content: [{ type: 'tool_use', id: 't1', name: 'Bash', input: { command: 'sleep 4' } }] }, parent_tool_use_id: null },
+    { type: 'user', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 't1', content: 'ok' }] }, parent_tool_use_id: null },
+    life('started', 'u2'),
+    { type: 'assistant', message: { id: 'm2', content: [{ type: 'text', text: 'PINEAPPLE' }] }, parent_tool_use_id: null },
+    result({ user_message_uuid: 'u1', user_message_uuids: ['u1', 'u2'], queued_turn_count: 0 }),
+    life('completed', 'u2'),
+    life('completed', 'u1'),
+  ].flatMap((m) => n.handle(m));
+  assert.ok(!rest.some((o) => o.kind === 'cliTurn'), 'the fold is not a turn of the CLI\'s own');
+  const results = rest.filter((o) => o.kind === 'result');
+  assert.equal(results.length, 1);
+  const r = results[0].kind === 'result' ? results[0].result : undefined;
+  assert.deepEqual([r?.own, r?.answers, r?.answered, r?.queuedTurns], [undefined, 'u2', ['u1', 'u2'], 0]);
+});
+
+test('a message sent during a turn that the CLI runs next: the first result says one is waiting', () => {
+  const n = new ClaudeNormalizer(ctx());
+  n.sent();
+  [life('queued', 'u1'), life('started', 'u1'), sys('init')].forEach((m) => n.handle(m));
+  n.sent();
+  const outs = [
+    life('queued', 'u2'),
+    { type: 'assistant', message: { id: 'm1', content: [{ type: 'text', text: '1 2 3' }] }, parent_tool_use_id: null },
+    result({ user_message_uuid: 'u1', user_message_uuids: ['u1'], queued_turn_count: 1 }),
+    life('completed', 'u1'),
+    life('started', 'u2'),
+    sys('init'),
+    { type: 'assistant', message: { id: 'm2', content: [{ type: 'text', text: 'PINEAPPLE' }] }, parent_tool_use_id: null },
+    result({ user_message_uuid: 'u2', user_message_uuids: ['u2'], queued_turn_count: 0 }),
+    life('completed', 'u2'),
+  ].flatMap((m) => n.handle(m));
+  assert.ok(!outs.some((o) => o.kind === 'cliTurn'));
+  const results = outs.filter((o) => o.kind === 'result').map((o) => (o.kind === 'result' ? [o.result.answers, o.result.answered, o.result.queuedTurns] : null));
+  assert.deepEqual(results, [['u1', ['u1'], 1], ['u2', ['u2'], 0]]);
+});
+
 test('without lifecycle frames, turns are matched by counting messages sent', () => {
   const n = new ClaudeNormalizer(ctx());
   n.sent();

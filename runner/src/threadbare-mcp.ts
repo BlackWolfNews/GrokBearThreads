@@ -226,7 +226,7 @@ export function buildThreadbareTools(control: ThreadControl, selfId: string, now
     ),
     tool(
       'send_message',
-      'Sends a message to another thread, as if typed into it. If that thread is busy the message waits until its turn ends. A snoozed or archived thread comes back to the inbox.',
+      'Sends a message to another thread, as if typed into it. If that thread is busy the message goes into its running turn, where its agent sees it at its next step (or straight after its reply). A snoozed or archived thread comes back to the inbox.',
       {
         ...other,
         text: z.string().min(1),
@@ -282,7 +282,7 @@ export function buildThreadbareTools(control: ThreadControl, selfId: string, now
           control.send(id, `[Sent by the agent before moving to ${t.cwd}]\n\n${then.trim()}`);
         }
         const when = self ? 'when this turn ends' : 'on its next message';
-        const next = then?.trim() ? (self ? ' It carries on by itself straight after.' : ' Your message is queued for it.') : self ? ' It waits for Mike after that.' : '';
+        const next = then?.trim() ? (self ? ' It carries on by itself straight after.' : ' Your message waits for it.') : self ? ' It waits for Mike after that.' : '';
         return `Moved ${self ? 'this thread' : `"${t.title}"`} to ${t.cwd}${acc ? ` on ${t.accountId}` : ''}. That takes effect ${when}.${next}`;
       }),
     ),

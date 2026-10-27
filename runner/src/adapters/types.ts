@@ -33,8 +33,17 @@ export type TurnResult = {
   // finished) rather than to answer a message the runner sent.
   own?: boolean;
   // The id (UserInput.id) of the message this turn answered, when the CLI
-  // says (command_lifecycle frames).
+  // says (command_lifecycle frames). With a message folded into the turn
+  // part way (sent while it ran), this is the last one folded in.
   answers?: string;
+  // Every message this turn answered, in the order the CLI took them:
+  // messages sent close together that ran as one turn, then any folded in
+  // while it ran. Absent from CLIs that don't report it (then `answers`).
+  answered?: string[];
+  // Messages still waiting in the CLI's queue when this result was
+  // produced, when the CLI reports it: it runs them next, without being
+  // sent anything.
+  queuedTurns?: number;
   durationMs: number;
   totalCostUsd?: number; // provider's running total for the native session
   usage?: Record<string, unknown>;
