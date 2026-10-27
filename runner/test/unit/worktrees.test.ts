@@ -495,8 +495,8 @@ test('deleting a thread removes a landed worktree; an unlanded one stays, with a
   const h = harness();
   const a = await threadWithWorktree(h, main);
   h.runner.delete(a.id);
-  await until(() => !fs.existsSync(a.w.path), 'the worktree to go');
-  assert.equal(sh(main, `git branch --list ${a.w.branch}`), '');
+  // The branch goes after the folder.
+  await until(() => !fs.existsSync(a.w.path) && sh(main, `git branch --list ${a.w.branch}`) === '', 'the worktree and branch to go');
 
   const b = await threadWithWorktree(h, main);
   commit(b.w.path, { 'runner/b.ts': '2\n' }, 'Not landed');

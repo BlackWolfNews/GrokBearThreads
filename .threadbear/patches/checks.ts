@@ -2,6 +2,14 @@
 // checks an agent or Mike runs most in this repo. Output lands in the
 // thread's transcript.
 export default {
+  // A worktree per thread (docs/thread-worktrees.md): each new thread in
+  // this repo works on a thread/<id8> branch in its own worktree, and
+  // `tb land` puts it on main once the quick check passes. Setup links
+  // node_modules to the main checkout's (see worktree-setup.sh).
+  worktree: {
+    setup: "./worktree-setup.sh",
+    check: "./check.sh --quick",
+  },
   actions: [
     { title: "Quick check", run: "./check.sh --quick", note: "Runner typecheck and unit tests, about 15 s" },
     { title: "App check", run: "./check.sh --app", note: "App build and tests" },
