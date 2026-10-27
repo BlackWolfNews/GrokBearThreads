@@ -1,0 +1,234 @@
+import Foundation
+import Observation
+import ThreadbearKit
+import UIKit
+
+/// The app's live state: who it's paired with, the runners and the three
+/// thread lists, each a Convex subscription kept open while the app runs.
+@MainActor @Observable
+final class AppModel {
+    private(set) var pairing: Pairing?
+    private(set) var backend: (any Backend)?
+    private(set) var runners: [PhoneRunner] = []
+    private(set) var inbox: [PhoneThread] = []
+    private(set) var hibernating: [PhoneThread] = []
+    private(set) var den: [PhoneThread] = []
+    private(set) var connected = true
+    /// The token was refused (expired or revoked): the app shows pairing again.
+    private(set) var authProblem: String?
+    private(set) var lastError: String?
+    /// Ticks every 15 s so "5m" and "Mac offline" stay right.
+    private(set) var now = Date.now
+    /// A thread a notification tap asked for, for the inbox to open.
+    var openThreadId: String?
+
+    private var tasks: [Task<Void, Never>] = []
+    private var apnsToken: String?
+    let isFake: Bool
+
+    init() {
+        isFake = ProcessInfo.processInfo.arguments.contains("-ThreadbearFake")
+        if isFake {
+            connect(FakeBackend(), pairing: nil)
+            // `-ThreadbearOpen <threadId>`: start on that thread, for screenshots.
+            let args = ProcessInfo.processInfo.arguments
+            if let i = args.firstIndex(of: "-ThreadbearOpen"), i + 1 < args.count { openThreadId = args[i + 1] }
+        } else if let saved = PairingStore.load() {
+            connect(ConvexBackend(deploymentURL: saved.deploymentURL, token: saved.token), pairing: saved)
+        }
+        Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(15))
+                self?.now = .now
+            }
+        }
+    }
+
+    var isPaired: Bool { backend != nil && authProblem == nil }
+
+    var sections: InboxSections { InboxSections.build(inbox, now: now) }
+
+    /// "Mac offline since 10:42" when no runner has checked in for three
+    /// minutes. Things done meanwhile wait until it's back.
+    var offlineText: String? {
+        guard !runners.isEmpty, !runners.contains(where: { $0.isOnline(at: now) }) else { return nil }
+        let newest = runners.max { $0.lastSeenAt < $1.lastSeenAt }!
+        let name = runners.count == 1 ? "Mac" : newest.name
+        return "\(name) offline since \(RelativeTime.clock(newest.lastSeenAt, now: now))"
+    }
+
+    func runnerName(_ runnerId: String) -> String? {
+        runners.count > 1 ? runners.first { $0.runnerId == runnerId }?.name : nil
+    }
+
+    // MARK: Pairing
+
+    /// From a `threadbear://pair` link: checks the token works before
+    /// keeping it.
+    func pair(with link: URL) async {
+        #if DEBUG
+        let allowLocal = true // the simulator against `npx convex dev` on this Mac
+        #else
+        let allowLocal = false
+        #endif
+        guard let pairing = Pairing.parse(link, allowLocal: allowLocal) else {
+            lastError = "That link isn't a Threadbear pairing link."
+            return
+        }
+        let backend = ConvexBackend(deploymentURL: pairing.deploymentURL, token: pairing.token)
+        do {
+            _ = try await backend.me()
+            PairingStore.save(pairing)
+            connect(backend, pairing: pairing)
+        } catch {
+            lastError = "The server didn't accept that token: \(error.localizedDescription)"
+        }
+    }
+
+    func unpair() {
+        PairingStore.clear()
+        stop()
+        backend = nil
+        pairing = nil
+        authProblem = nil
+        runners = []
+        inbox = []
+        hibernating = []
+        den = []
+    }
+
+    private func connect(_ backend: any Backend, pairing: Pairing?) {
+        stop()
+        self.backend = backend
+        self.pairing = pairing
+        authProblem = nil
+        tasks.append(follow(backend.runners()) { $0.runners = $1 })
+        tasks.append(follow(backend.threads(.inbox)) { $0.inbox = $1 })
+        tasks.append(follow(backend.threads(.hibernating)) { $0.hibernating = $1 })
+        tasks.append(follow(backend.threads(.den)) { $0.den = $1 })
+        tasks.append(Task { [weak self] in
+            for await up in backend.connectionStates() { self?.connected = up }
+        })
+        if let apnsToken { register(apnsToken) }
+    }
+
+    private func stop() {
+        tasks.forEach { $0.cancel() }
+        tasks = []
+    }
+
+    /// Keeps a live query going: on a network error it waits and
+    /// subscribes again; a refused token stops everything.
+    private func follow<T: Sendable>(_ stream: @autoclosure @escaping () -> AsyncThrowingStream<T, Error>,
+                                     _ apply: @escaping (AppModel, T) -> Void) -> Task<Void, Never> {
+        Task { [weak self] in
+            var delay: Duration = .seconds(1)
+            while !Task.isCancelled {
+                do {
+                    for try await value in stream() {
+                        guard let self else { return }
+                        apply(self, value)
+                        delay = .seconds(1)
+                    }
+                    return
+                } catch TransportError.unauthorized(let message) {
+                    self?.authProblem = message
+                    return
+                } catch {
+                    self?.lastError = error.localizedDescription
+                    try? await Task.sleep(for: delay)
+                    delay = min(delay * 2, .seconds(30))
+                }
+            }
+        }
+    }
+
+    // MARK: Push
+
+    func didRegister(apnsToken token: Data) {
+        let hex = token.map { String(format: "%02x", $0) }.joined()
+        apnsToken = hex
+        register(hex)
+    }
+
+    private func register(_ hex: String) {
+        guard let backend, !isFake else { return }
+        // A development-signed build (every install-phone.sh build) talks to
+        // APNs' sandbox; an App Store build would say production.
+        let environment = Bundle.main.object(forInfoDictionaryKey: "ThreadbearAPSEnvironment") as? String == "production"
+            ? "production" : "sandbox"
+        Task {
+            do { try await backend.registerDevice(apnsToken: hex, environment: environment) } catch {
+                self.lastError = "Couldn't turn on notifications: \(error.localizedDescription)"
+            }
+        }
+    }
+
+    func clearError() { lastError = nil }
+
+    func report(_ error: Error) {
+        if case let TransportError.unauthorized(message) = error { authProblem = message } else {
+            lastError = error.localizedDescription
+        }
+    }
+}
+
+/// The pairing, in the Keychain (the token) and UserDefaults (the URL).
+/// Quick Ask's lesson: a setup flow for another source overwrote its
+/// Keychain token, so the token here is keyed by deployment and nothing
+/// else ever writes it.
+enum PairingStore {
+    private static let urlKey = "pairing.deploymentURL"
+    private static let service = "com.mikecann.threadbear.token"
+
+    static func load() -> Pairing? {
+        guard let raw = UserDefaults.standard.string(forKey: urlKey), let url = URL(string: raw),
+              let token = Keychain.read(service: service, account: url.host() ?? raw) else { return nil }
+        return Pairing(deploymentURL: url, token: token)
+    }
+
+    static func save(_ pairing: Pairing) {
+        let account = pairing.deploymentURL.host() ?? pairing.deploymentURL.absoluteString
+        Keychain.write(pairing.token, service: service, account: account)
+        UserDefaults.standard.set(pairing.deploymentURL.absoluteString, forKey: urlKey)
+    }
+
+    static func clear() {
+        if let pairing = load() {
+            Keychain.delete(service: service, account: pairing.deploymentURL.host() ?? pairing.deploymentURL.absoluteString)
+        }
+        UserDefaults.standard.removeObject(forKey: urlKey)
+    }
+}
+
+enum Keychain {
+    static func read(service: String, account: String) -> String? {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: service,
+            kSecAttrAccount as String: account, kSecReturnData as String: true,
+        ]
+        var item: CFTypeRef?
+        guard SecItemCopyMatching(query as CFDictionary, &item) == errSecSuccess, let data = item as? Data else { return nil }
+        return String(data: data, encoding: .utf8)
+    }
+
+    static func write(_ value: String, service: String, account: String) {
+        delete(service: service, account: account)
+        let item: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: service,
+            kSecAttrAccount as String: account, kSecValueData as String: Data(value.utf8),
+            // Readable after the first unlock, so a notification tap on a
+            // locked-then-unlocked phone finds it.
+            kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly,
+        ]
+        SecItemAdd(item as CFDictionary, nil)
+    }
+
+    static func delete(service: String, account: String) {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: service,
+            kSecAttrAccount as String: account,
+        ]
+        SecItemDelete(query as CFDictionary)
+    }
+}
