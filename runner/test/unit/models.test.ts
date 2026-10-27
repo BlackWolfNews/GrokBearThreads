@@ -90,6 +90,7 @@ test('models: a call goes to OpenRouter with the key, and the usage file records
     { role: 'user', content: 'secret words in a thread' },
   ]);
   assert.deepEqual(s.calls[0].body.usage, { include: true });
+  assert.deepEqual(s.calls[0].body.provider, { zdr: true }, 'zero data retention on every call');
   const lines = s.ledger();
   assert.equal(lines.length, 1);
   assert.equal(lines[0].feature, 'titles');
@@ -194,7 +195,8 @@ test('models: extract reads fields, null for ones not given, and moves on from a
   const r = await s.models.extract({ feature: 'asks', text: 'transcript', fields: { ask: 'what the agent needs', where: 'which site' } });
   assert.ok(r.ok);
   assert.deepEqual(r.value, { ask: 'Set the API key', where: null });
-  assert.deepEqual(s.calls[0].body.provider, { options: { scaledown: { entities: { ask: 'what the agent needs', where: 'which site' } } } });
+  assert.deepEqual(s.calls[0].body.provider, { options: { scaledown: { entities: { ask: 'what the agent needs', where: 'which site' } } }, zdr: true });
+  assert.deepEqual(s.calls[1].body.provider, { zdr: true });
   const schema = s.calls[1].body.response_format.json_schema.schema;
   assert.deepEqual(schema.required, ['ask', 'where']);
   assert.deepEqual(s.ledger().map((l) => [l.model, l.ok, l.error]), [

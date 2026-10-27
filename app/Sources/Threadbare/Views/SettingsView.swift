@@ -160,7 +160,7 @@ private struct ModelSettings: View {
                 } header: {
                     Text("OpenRouter")
                 } footer: {
-                    Footnote("With a key set, Threadbear sends the start of each new thread to OpenRouter and the model's provider to write its title. Later it will send more for summaries and triage. Threads in private folders are never sent.")
+                    Footnote("With a key set, Threadbear sends the start of each new thread to OpenRouter to write its title, and later more for summaries and triage. It only uses providers that keep nothing. Threads in private folders are never sent.")
                 }
 
                 Section {

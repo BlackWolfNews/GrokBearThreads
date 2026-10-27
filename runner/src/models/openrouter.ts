@@ -30,6 +30,11 @@ export async function chat(req: ChatRequest): Promise<ChatResponse> {
   if (req.system) messages.push({ role: 'system', content: req.system });
   messages.push({ role: 'user', content: req.user });
   const body: Record<string, unknown> = { model: req.model, messages, usage: { include: true }, ...req.extra };
+  // Zero data retention on every call, whatever the account's privacy
+  // settings: OpenRouter only routes to endpoints that keep nothing (for
+  // Haiku that's Vertex and Bedrock, not Anthropic's own). Asked here
+  // rather than account-wide so Mike's other keys are left alone.
+  body.provider = { ...(req.extra?.provider as Record<string, unknown> | undefined), zdr: true };
   if (req.maxTokens) body.max_tokens = req.maxTokens;
   if (req.jsonSchema) body.response_format = { type: 'json_schema', json_schema: { name: req.jsonSchema.name, strict: true, schema: req.jsonSchema.schema } };
   const ctl = new AbortController();

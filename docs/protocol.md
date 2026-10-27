@@ -372,9 +372,11 @@ the Settings window, `tb models key`, or by writing
 it once through `settings.setKey` and only ever hears `set` and `hint`.
 
 - **Consent.** Setting a key is the go-ahead to send thread text to
-  OpenRouter and the model's provider (ScaleDown, Anthropic). With no
-  key, nothing is sent and every feature falls back to what it did
-  before.
+  OpenRouter and the model's provider (ScaleDown, or Google or Amazon
+  for Haiku). Every call asks OpenRouter for zero data retention
+  (`provider.zdr`), so it only goes to endpoints that keep nothing, with
+  no change to the account's own privacy settings. With no key, nothing
+  is sent and every feature falls back to what it did before.
 - **Private folders.** `models.privateFolders` in `runner.json` lists
   folders whose threads are never sent, for client work and the like. A
   call for a thread in one of them, or anywhere under one, doesn't go out.
