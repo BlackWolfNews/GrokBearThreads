@@ -1,0 +1,308 @@
+import AppKit
+import SwiftUI
+import ThreadbareCore
+
+/// The sheet that makes or edits a schedule: the message, when it runs
+/// (once, or a repeat preset that's only a cron string underneath), and
+/// where it goes. What the runner makes of the time shows under it as it
+/// changes, so a cron typo is plain before saving.
+struct ScheduleEditor: View {
+    @Environment(AppModel.self) private var app
+    @State private var state: ScheduleEditorState
+    @State private var preview: Result<SchedulePreview, AppModel.PreviewError>?
+    @State private var saving = false
+    @State private var saveError: String?
+
+    init(state: ScheduleEditorState) {
+        _state = State(initialValue: state)
+    }
+
+    private var canSave: Bool {
+        guard !saving, !state.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return false }
+        if case .failure? = preview { return false }
+        return !state.repeatChoice.cron.isEmpty || state.once
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text(state.isNew ? "Schedule a message" : "Edit schedule")
+                .font(.system(size: 15, weight: .semibold))
+            Form {
+                message
+                TextField("Title", text: $state.title, prompt: Text(titlePrompt))
+                when
+                target
+            }
+            .formStyle(.columns)
+            if let saveError {
+                Text(saveError)
+                    .font(.system(size: TypeScale.label))
+                    .foregroundStyle(Color(nsColor: Theme.failed))
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            buttons
+        }
+        .padding(20)
+        .frame(width: 520)
+        // Asked again whenever the time changes; the pause lets a cron
+        // being typed settle first, and a newer change cancels the ask.
+        .task(id: state.when) {
+            if case .cron(let cron) = state.when, cron.isEmpty {
+                preview = .failure(AppModel.PreviewError(message: "Type a cron, such as 0 9 * * 1-5."))
+                return
+            }
+            try? await Task.sleep(for: .milliseconds(250))
+            guard !Task.isCancelled else { return }
+            let result = await app.previewSchedule(state.when)
+            guard !Task.isCancelled else { return }
+            preview = result
+        }
+    }
+
+    /// The runner names it after the message's first line when there's no
+    /// title. Showing that line here read as a title already typed in.
+    private let titlePrompt = "Optional"
+
+    @ViewBuilder
+    private var message: some View {
+        LabeledContent("Message") {
+            VStack(alignment: .leading, spacing: 4) {
+                TextEditor(text: $state.text)
+                    .font(.system(size: 13))
+                    .scrollContentBackground(.hidden)
+                    .padding(.horizontal, 4)
+                    .padding(.vertical, 5)
+                    .frame(height: 84)
+                    .background(Color.primary.opacity(0.035), in: RoundedRectangle(cornerRadius: 6))
+                    .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(.separator, lineWidth: 0.5))
+                if state.draftImages > 0 {
+                    Text(state.draftImages == 1 ? "The image stays in the box: a schedule sends only text." : "The images stay in the box: a schedule sends only text.")
+                        .font(.system(size: TypeScale.sidebarMeta))
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var when: some View {
+        Picker("When", selection: $state.once) {
+            Text("Once").tag(true)
+            Text("Repeat").tag(false)
+        }
+        .pickerStyle(.segmented)
+        .fixedSize()
+        if state.once {
+            DatePicker("At", selection: $state.at, displayedComponents: [.date, .hourAndMinute])
+                .datePickerStyle(.compact)
+                .fixedSize()
+        } else {
+            LabeledContent("Repeat") {
+                HStack(spacing: 6) {
+                    Picker("Repeat", selection: $state.repeatChoice.kind) {
+                        ForEach(RepeatChoice.Kind.allCases) { kind in
+                            if kind == .custom { Divider() }
+                            Text(kind.title).tag(kind)
+                        }
+                    }
+                    .labelsHidden()
+                    .fixedSize()
+                    repeatDetail
+                }
+            }
+            if state.repeatChoice.kind == .custom {
+                TextField("Cron", text: $state.repeatChoice.custom, prompt: Text("0 9 * * 1-5"))
+                    .font(.system(size: 13, design: .monospaced))
+                    .help("Minute, hour, day of the month, month and day of the week")
+            }
+        }
+        LabeledContent("") { previewText }
+    }
+
+    /// The parts of a preset that change: on which day, at what time.
+    @ViewBuilder
+    private var repeatDetail: some View {
+        switch state.repeatChoice.kind {
+        case .hourly, .custom:
+            EmptyView()
+        case .daily, .weekdays:
+            timePicker
+        case .weekly:
+            Text("on").foregroundStyle(.secondary)
+            Picker("Day", selection: $state.repeatChoice.weekday) {
+                // Monday first; cron counts Sunday as 0.
+                ForEach([1, 2, 3, 4, 5, 6, 0], id: \.self) { day in
+                    Text(Calendar.current.weekdaySymbols[day]).tag(day)
+                }
+            }
+            .labelsHidden()
+            .fixedSize()
+            timePicker
+        case .monthly:
+            Text("on day").foregroundStyle(.secondary)
+            Picker("Day", selection: $state.repeatChoice.day) {
+                ForEach(1...31, id: \.self) { Text("\($0)").tag($0) }
+            }
+            .labelsHidden()
+            .fixedSize()
+            timePicker
+        }
+    }
+
+    private var timePicker: some View {
+        HStack(spacing: 6) {
+            Text("at").foregroundStyle(.secondary)
+            DatePicker("Time", selection: time, displayedComponents: .hourAndMinute)
+                .labelsHidden()
+                .datePickerStyle(.compact)
+                .fixedSize()
+        }
+    }
+
+    /// The preset's hour and minute as a date today, for the time picker.
+    private var time: Binding<Date> {
+        Binding(
+            get: {
+                Calendar.current.date(bySettingHour: state.repeatChoice.hour, minute: state.repeatChoice.minute, second: 0, of: Date()) ?? Date()
+            },
+            set: { date in
+                let parts = Calendar.current.dateComponents([.hour, .minute], from: date)
+                state.repeatChoice.hour = parts.hour ?? 9
+                state.repeatChoice.minute = parts.minute ?? 0
+            }
+        )
+    }
+
+    /// "Weekdays at 9:00", then the next three runs; or why the runner
+    /// can't read it, in the same place.
+    @ViewBuilder
+    private var previewText: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            switch preview {
+            case .success(let result)?:
+                Text(result.whenText)
+                    .foregroundStyle(.secondary)
+                if !result.runs.isEmpty {
+                    Text("Next " + result.runs.prefix(3).map(Self.runText).joined(separator: " · "))
+                        .foregroundStyle(Color(nsColor: Theme.faintText))
+                } else {
+                    Text(state.once ? "That's in the past, so it runs as soon as it's saved." : "It won't run again.")
+                        .foregroundStyle(Color(nsColor: Theme.faintText))
+                }
+            case .failure(let error)?:
+                Text(error.message)
+                    .foregroundStyle(Color(nsColor: Theme.failed))
+            case nil:
+                Text(" ")
+            }
+        }
+        .font(.system(size: TypeScale.sidebarMeta + 1))
+        .fixedSize(horizontal: false, vertical: true)
+        .frame(minHeight: 32, alignment: .top)
+    }
+
+    /// "Wed 28 Oct 9:00": short enough for three on one line.
+    static func runText(_ date: Date) -> String {
+        runFormatter.string(from: date).replacingOccurrences(of: ",", with: "").replacingOccurrences(of: " at ", with: " ")
+    }
+
+    private static let runFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.setLocalizedDateFormatFromTemplate("EEEdMMMjmm")
+        return formatter
+    }()
+
+    @ViewBuilder
+    private var target: some View {
+        if state.isNew, let from = state.fromThreadId {
+            Picker("Sends to", selection: $state.threadId) {
+                Text("This thread").tag(Optional(from))
+                Text("A new thread each time").tag(String?.none)
+            }
+            .pickerStyle(.radioGroup)
+        } else {
+            LabeledContent("Sends to") {
+                Text(targetText).foregroundStyle(.secondary).lineLimit(1)
+            }
+        }
+        if state.threadId == nil {
+            LabeledContent("Folder") { FolderMenu(cwd: $state.cwd) }
+        }
+    }
+
+    private var targetText: String {
+        if let threadId = state.threadId {
+            let title = app.threads[threadId]?.title ?? ""
+            return title.isEmpty ? "This thread" : title
+        }
+        return "A new thread each time"
+    }
+
+    private var buttons: some View {
+        HStack {
+            if let id = state.scheduleId {
+                Button("Delete…") { app.deleteSchedule(id) }
+            }
+            Spacer()
+            Button("Cancel") { app.scheduleEditor = nil }
+                .keyboardShortcut(.cancelAction)
+            Button(state.isNew ? "Schedule" : "Save") { save() }
+                .keyboardShortcut(.defaultAction)
+                .disabled(!canSave)
+        }
+    }
+
+    private func save() {
+        saving = true
+        saveError = nil
+        Task {
+            let error = await app.saveSchedule(state)
+            saving = false
+            if let error {
+                saveError = error
+            } else {
+                app.scheduleEditor = nil
+            }
+        }
+    }
+}
+
+/// The folder a new thread starts in: the recent ones, or Choose….
+private struct FolderMenu: View {
+    @Environment(AppModel.self) private var app
+    @Binding var cwd: String
+
+    var body: some View {
+        Menu {
+            ForEach(recent, id: \.self) { folder in
+                Button(folder.abbreviatingHome) { cwd = folder }
+            }
+            Divider()
+            Button("Choose…") { choose() }
+        } label: {
+            Text(cwd.abbreviatingHome)
+        }
+        .fixedSize()
+        .help(cwd.abbreviatingHome)
+    }
+
+    private var recent: [String] {
+        var seen = Set<String>()
+        var folders: [String] = []
+        for folder in [cwd, app.defaults.cwd] + app.threads.values.sorted(by: { $0.lastActivityAt > $1.lastActivityAt }).map(\.cwd) {
+            guard !folder.isEmpty, seen.insert(folder).inserted else { continue }
+            folders.append(folder)
+            if folders.count >= 8 { break }
+        }
+        return folders
+    }
+
+    private func choose() {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.allowsMultipleSelection = false
+        panel.directoryURL = URL(fileURLWithPath: cwd)
+        if panel.runModal() == .OK, let url = panel.url { cwd = url.path }
+    }
+}

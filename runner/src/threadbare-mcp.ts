@@ -8,13 +8,19 @@ import { createSdkMcpServer, tool } from '@anthropic-ai/claude-agent-sdk';
 import type { McpSdkServerConfigWithInstance } from '@anthropic-ai/claude-agent-sdk';
 import { z } from 'zod';
 import type { Runner } from './runner.ts';
-import type { Account, PersistedEvent, ThreadSummary } from './protocol.ts';
+import type { Account, PersistedEvent, Schedule, ThreadSummary } from './protocol.ts';
+import type { Scheduler } from './schedules.ts';
+import { parseWhen, relativeFuture, relativeTime } from './when.ts';
+
+export { parseWhen, relativeFuture, relativeTime };
 import { RUNNER_VERSION, expandHome } from './config.ts';
 
 export type ThreadControl = Pick<
   Runner,
   'hello' | 'list' | 'search' | 'get' | 'events' | 'create' | 'send' | 'update' | 'interrupt' | 'delete'
 >;
+
+export type ScheduleControl = Pick<Scheduler, 'create' | 'list' | 'find' | 'update' | 'delete'>;
 
 export const SERVER_NAME = 'threadbare';
 // Asked about every time, even in a thread with full access: deleting is
@@ -34,32 +40,6 @@ function handle<A>(fn: (args: A) => string): (args: A) => Promise<Result> {
       return fail((e as Error).message ?? String(e));
     }
   };
-}
-
-export function relativeTime(iso: string, now: number): string {
-  const s = Math.round((now - Date.parse(iso)) / 1000);
-  if (s < 60) return 'just now';
-  if (s < 3600) return `${Math.round(s / 60)}m ago`;
-  if (s < 86_400) return `${Math.round(s / 3600)}h ago`;
-  return `${Math.round(s / 86_400)}d ago`;
-}
-
-// "30m", "2h", "1d", "tomorrow" or an ISO time.
-export function parseWhen(s: string, now: number): string {
-  const m = /^\s*(\d+)\s*([mhd])\s*$/i.exec(s);
-  if (m) {
-    const ms = Number(m[1]) * { m: 60_000, h: 3_600_000, d: 86_400_000 }[m[2].toLowerCase() as 'm' | 'h' | 'd'];
-    return new Date(now + ms).toISOString();
-  }
-  if (/^\s*tomorrow\s*$/i.test(s)) {
-    const d = new Date(now);
-    d.setDate(d.getDate() + 1);
-    d.setHours(9, 0, 0, 0);
-    return d.toISOString();
-  }
-  const t = Date.parse(s);
-  if (Number.isNaN(t)) throw new Error(`Can't read the time "${s}". Use 30m, 2h, 1d, tomorrow or an ISO time.`);
-  return new Date(t).toISOString();
 }
 
 // Models sometimes say `id` for a thread id; take it rather than quietly
@@ -82,7 +62,7 @@ export function approvalTitle(name: string, input: Record<string, unknown>, find
   return t ? `Delete the thread "${t.title}"` : undefined;
 }
 
-export function buildThreadbareTools(control: ThreadControl, selfId: string, now: () => number = Date.now) {
+export function buildThreadbareTools(control: ThreadControl, selfId: string, now: () => number = Date.now, schedules?: ScheduleControl) {
   const all = (): ThreadSummary[] => control.list(['inbox', 'snoozed', 'archived']);
 
   // Full ids, or any unique prefix of one (the list shows 8 characters).
@@ -143,7 +123,112 @@ export function buildThreadbareTools(control: ThreadControl, selfId: string, now
   // other thread (Mike or its agent) knows it wasn't Mike typing.
   const from = (): string => `[Sent by the agent in the thread "${control.get(selfId).title}" (${selfId.slice(0, 8)})]\n\n`;
 
+
+  const titleOf = (id: string): string => {
+    try {
+      return `"${control.get(id).title}"`;
+    } catch {
+      return id.slice(0, 8);
+    }
+  };
+
+  const scheduleLine = (sc: Schedule): string => {
+    const state = sc.finishedAt ? 'done' : sc.paused ? 'paused' : sc.nextRunAt ? `next ${relativeFuture(sc.nextRunAt, now())} (${sc.nextRunAt})` : 'no more runs';
+    const target = sc.threadId ? (sc.threadId === selfId ? 'this thread' : `thread ${sc.threadId.slice(0, 8)} ${titleOf(sc.threadId)}`) : `a new thread in ${sc.cwd}`;
+    const last = sc.lastRun && sc.lastRun.outcome !== 'sent' ? `; last run ${sc.lastRun.outcome}: ${sc.lastRun.note ?? ''}` : '';
+    return `${sc.id.slice(0, 8)}  ${sc.title}  [${sc.whenText}; ${state}${last}]  to ${target}`;
+  };
+
+  const mustSchedules = (): ScheduleControl => {
+    if (!schedules) throw new Error("This runner doesn't have schedules.");
+    return schedules;
+  };
+
+  const scheduleTools = [
+    tool(
+      'schedule_message',
+      'Schedules a message to be sent later, once or over and over, like a Convex scheduled function or cron. By default it goes to this thread, so you can check back on something yourself ("look at the deploy again in 20 minutes"); it starts a turn here when it comes due (after any turn that is running then). Or send it to another thread, or set new_thread to start a fresh thread each time (for recurring jobs like a morning summary). Give exactly one of `when` (once) and `cron` (repeating). The message should be a complete instruction: when it arrives the agent may not remember why it was scheduled.',
+      {
+        text: z.string().min(1).describe('The message to send when it comes due.'),
+        when: z.string().optional().describe('Once: 30m, 2h, 1d, tomorrow (9 am) or an ISO time.'),
+        cron: z.string().optional().describe('Repeating: a 5-field cron, minute hour day-of-month month day-of-week, e.g. "0 9 * * 1-5" for weekdays at 9:00, "*/30 * * * *" for every 30 minutes; or @hourly, @daily, @weekly, @monthly. Read in the Mac\'s time zone unless timezone is set.'),
+        timezone: z.string().optional().describe('IANA zone for the cron, e.g. Australia/Perth. Default: the Mac\'s.'),
+        title: z.string().optional().describe('Short name for lists. Default: the first line of text.'),
+        ...thisOrOther,
+        new_thread: z.boolean().optional().describe('Start a new thread each time instead of sending to a thread.'),
+        folder: z.string().optional().describe("With new_thread: its working folder. Default: this thread's folder."),
+        account: z.string().optional().describe('With new_thread: account id or email. Default: the last one used.'),
+        model: z.string().optional().describe('With new_thread: model id.'),
+        effort: z.enum(['low', 'medium', 'high', 'xhigh', 'max']).optional().describe('With new_thread: reasoning effort.'),
+        permissionMode: z.enum(['full', 'ask']).optional().describe('With new_thread: "full" (default) or "ask".'),
+      },
+      handle(({ text, when, cron, timezone, title, threadId, id: alias, new_thread, folder: f, account: acc, model, effort, permissionMode }) => {
+        if ((when === undefined) === (cron === undefined)) throw new Error('Give exactly one of when (once) and cron (repeating).');
+        const target = new_thread
+          ? { cwd: folder(f ?? '.'), accountId: account(acc), model, effort, permissionMode }
+          : { threadId: resolve(threadId ?? alias) };
+        if (!new_thread && (f || acc || model || effort || permissionMode)) throw new Error('folder, account, model, effort and permissionMode are for new_thread schedules; a thread keeps its own.');
+        const sc = mustSchedules().create({
+          text,
+          title,
+          ...(when !== undefined ? { at: parseWhen(when, now()) } : { cron }),
+          timezone,
+          ...target,
+          createdBy: selfId,
+        });
+        return `Scheduled ${sc.id.slice(0, 8)}: ${scheduleLine(sc)}`;
+      }),
+    ),
+    tool(
+      'list_schedules',
+      "Lists Threadbare's schedules: short id, title, when, the next run and where it sends. By default the ones that send to this thread or that this thread made; all for every schedule.",
+      { all: z.boolean().optional().describe('Every schedule, not just this thread\'s.') },
+      handle(({ all: everything }) => {
+        const list = mustSchedules().list(everything ? undefined : selfId);
+        return list.length ? list.map(scheduleLine).join('\n') : everything ? 'No schedules.' : 'No schedules for this thread. all: true shows every schedule.';
+      }),
+      { annotations: { readOnlyHint: true } },
+    ),
+    tool(
+      'update_schedule',
+      'Changes a schedule: its message, title or time, or pauses and resumes it. Setting when makes it a one-off, setting cron makes it repeat.',
+      {
+        scheduleId: z.string().describe('Schedule id or a unique prefix (list_schedules shows them).'),
+        text: z.string().optional(),
+        title: z.string().optional(),
+        when: z.string().optional().describe('Once: 30m, 2h, 1d, tomorrow or an ISO time.'),
+        cron: z.string().optional().describe('Repeating: a 5-field cron.'),
+        timezone: z.string().nullable().optional().describe("IANA zone for the cron, or null for the Mac's."),
+        paused: z.boolean().optional(),
+      },
+      handle(({ scheduleId, text, title, when, cron, timezone, paused }) => {
+        const sc = mustSchedules().update({
+          scheduleId,
+          text,
+          title,
+          at: when === undefined ? undefined : parseWhen(when, now()),
+          cron,
+          timezone,
+          paused,
+        });
+        return scheduleLine(sc);
+      }),
+    ),
+    tool(
+      'delete_schedule',
+      'Deletes a schedule so it never sends again.',
+      { scheduleId: z.string().describe('Schedule id or a unique prefix.') },
+      handle(({ scheduleId }) => {
+        const s = mustSchedules();
+        const sc = s.find(scheduleId);
+        s.delete(sc.id);
+        return `Deleted the schedule "${sc.title}" (${sc.id.slice(0, 8)}).`;
+      }),
+    ),
+  ];
+
   return [
+    ...(schedules ? scheduleTools : []),
     tool(
       'list_threads',
       "Lists Threadbare threads, newest activity first: short id, title, status, folder, account. By default the inbox; include snoozed and archived ones to see everything. With a query, searches titles and previews across all threads.",
@@ -178,7 +263,7 @@ export function buildThreadbareTools(control: ThreadControl, selfId: string, now
             if (picked.length >= want) break;
             // The runner's own messages (the resume after a restart) aren't
             // Mike's, and an agent shouldn't take them for his instructions.
-            if (e.type === 'user.message') picked.push(`${e.origin === 'runner' ? 'Runner' : 'Mike'} (${e.ts}):\n${clip(e.text)}`);
+            if (e.type === 'user.message') picked.push(`${e.origin === 'runner' ? 'Runner' : e.origin === 'schedule' ? 'Schedule' : 'Mike'} (${e.ts}):\n${clip(e.text)}`);
             else if (e.type === 'assistant.text') picked.push(`Agent (${e.ts}):\n${clip(e.text)}`);
           }
           if (!evs.length || page.firstSeq <= 1) break;
@@ -317,15 +402,15 @@ function clip(text: string, max = 2000): string {
   return text.length > max ? `${text.slice(0, max)}… (${text.length - max} more characters)` : text;
 }
 
-export function threadbareMcpServer(control: ThreadControl, selfId: string): McpSdkServerConfigWithInstance {
+export function threadbareMcpServer(control: ThreadControl, selfId: string, schedules?: ScheduleControl): McpSdkServerConfigWithInstance {
   const server = createSdkMcpServer({
     name: SERVER_NAME,
     version: RUNNER_VERSION,
     instructions:
       `This session is a thread in Threadbare, Mike's own app for running agent threads (thread id ${selfId}). ` +
-      'These tools manage Threadbare itself: list and read threads, start new ones, message them, rename, snooze, archive, move and delete them. ' +
+      'These tools manage Threadbare itself: list and read threads, start new ones, message them, rename, snooze, archive, move and delete them, and schedule messages for later (once or on a cron). ' +
       'Use move_thread when the work belongs in another folder (for example a repo), so this thread runs there from the next turn.',
-    tools: buildThreadbareTools(control, selfId),
+    tools: buildThreadbareTools(control, selfId, Date.now, schedules),
   });
   server.tools = [...ALWAYS_ASK_TOOLS].map((name) => ({ name: name.split('__').at(-1)!, permission_policy: 'always_ask' as const }));
   return server;

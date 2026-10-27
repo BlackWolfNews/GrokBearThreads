@@ -22,6 +22,45 @@ final class TranscriptModelTests: XCTestCase {
         XCTAssertEqual(model.lastSeq, 7)
     }
 
+    /// The summary's background work is the last row while no turn runs:
+    /// it comes and goes in place, and a running turn's working line takes
+    /// its place.
+    func testBackgroundWorkIsTheLastRowBetweenTurns() {
+        var model = TranscriptModel(events: [
+            E.event(1, "turn.started", ["turnId": "t1"]),
+            E.user(2, "Rebuild the pages"),
+            E.text(3, "m1", "Sent three sub-agents off."),
+            E.done(4),
+        ])
+        XCTAssertEqual(model.rows.map(\.id), ["u:2", "a:m1", "f:t1"])
+        let cubs = [BackgroundTask(kind: .agent, description: "Page A"), BackgroundTask(kind: .agent, description: "Page B")]
+        var change = model.setBackground(cubs)
+        XCTAssertEqual(change.inserted, [3])
+        XCTAssertEqual(model.rows.map(\.id), ["u:2", "a:m1", "f:t1", "bg:"])
+        XCTAssertEqual(model.rows[3].content, .background(BackgroundStatus(tasks: cubs)))
+        XCTAssertEqual(model.rows[3].kind, .background)
+        XCTAssertTrue(model.setBackground(cubs).isEmpty, "nothing changed")
+        // One finishes: the same row, new words.
+        let version = model.rows[3].version
+        let oneDone = [cubs[0], BackgroundTask(kind: .agent, description: "Page B", finished: true)]
+        change = model.setBackground(oneDone)
+        XCTAssertEqual(change.updated, [3])
+        XCTAssertGreaterThan(model.rows[3].version, version)
+        XCTAssertEqual(RowDebug.text(model.rows[3]), "1 sub-agent working in the background, 1 just finished · Page A, Page B (finished)")
+        // The CLI starts a turn to read it: the working line replaces it.
+        change = model.apply([E.event(5, "turn.started", ["turnId": "t2"])])
+        XCTAssertEqual(model.rows.map(\.id), ["u:2", "a:m1", "f:t1", "w:t2"])
+        XCTAssertTrue(change.removed.contains(3))
+        // That turn ends with the other still out: back to the background line.
+        change = model.apply([E.text(6, "m2", "Page B is done."), E.done(7, turn: "t2")])
+        XCTAssertEqual(model.rows.map(\.id), ["u:2", "a:m1", "f:t1", "a:m2", "f:t2", "bg:"])
+        // All done and read: it goes.
+        change = model.setBackground([])
+        XCTAssertEqual(change.removed, [5])
+        XCTAssertEqual(model.rows.map(\.id), ["u:2", "a:m1", "f:t1", "a:m2", "f:t2"])
+        XCTAssertNil(MarkdownExport.message(for: TranscriptRow(id: "bg:", seq: 7, content: .background(BackgroundStatus(tasks: cubs)))))
+    }
+
     func testEmptyReasoningAndEmptyTextMakeNoRows() {
         let model = TranscriptModel(events: [
             E.event(1, "reasoning", ["itemId": "r1", "text": "  "]),

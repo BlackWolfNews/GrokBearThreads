@@ -7,6 +7,7 @@ struct RootView: View {
     static let sidebarIdealWidth: CGFloat = 330
 
     var body: some View {
+        @Bindable var app = app
         NavigationSplitView {
             // About a quarter of the window, as T3, Codex and Claude give
             // theirs: at 290 most titles were cut at about 25 characters.
@@ -16,6 +17,9 @@ struct RootView: View {
                 .navigationSplitViewColumnWidth(min: 250, ideal: Self.sidebarIdealWidth, max: 440)
         } detail: {
             DetailView()
+        }
+        .sheet(item: $app.scheduleEditor) { state in
+            ScheduleEditor(state: state)
         }
     }
 }
@@ -32,7 +36,9 @@ struct DetailView: View {
         let thread = app.selectedThread
         let session = app.selection.map { app.session(for: $0) }
         let isNew = app.selection == nil
-        VStack(spacing: 0) {
+        let paneThread = thread.flatMap { app.showsPanels(for: $0) ? $0 : nil }
+        HStack(spacing: 0) {
+            VStack(spacing: 0) {
             ConnectionBanner()
             ErrorBanner()
             ComposerPlacement(centred: isNew) {
@@ -58,6 +64,15 @@ struct DetailView: View {
                         .layoutValue(key: PaneRole.self, value: .note)
                 }
             }
+            }
+            .frame(maxWidth: .infinity)
+            // The panels pane (PanelsView), when the thread's folder has
+            // any and Mike hasn't hidden it.
+            if let paneThread {
+                PanelResizeHandle(columnWidth: widthStep)
+                PanelPane(thread: paneThread)
+                    .frame(width: CGFloat(PanelChoice.clampedWidth(Double(app.panelWidth), paneColumnWidth: Double(widthStep))))
+            }
         }
         .onGeometryChange(for: CGFloat.self) { ($0.size.width / 20).rounded(.down) * 20 } action: { widthStep = $0 }
         // The window's title (Window menu, Mission Control); the toolbar
@@ -77,6 +92,21 @@ struct DetailView: View {
             // With the system title gone nothing pushes the menu to the
             // trailing edge; it sat right after the header.
             ToolbarSpacer(.flexible)
+            // Shows or hides the panels pane. Always built, like the menu
+            // beside it, and out of sight for a thread with no panels.
+            ToolbarItem(placement: .primaryAction) {
+                let hasPanels = thread.map { !$0.panels.isEmpty || !$0.patches.isEmpty } ?? false
+                Button {
+                    app.togglePanels()
+                } label: {
+                    Label(app.panelsShown ? "Hide Panels" : "Show Panels", systemImage: "sidebar.trailing")
+                }
+                .help(app.panelsShown ? "Hide the panels" : "Show the panels")
+                .disabled(!hasPanels)
+                .opacity(hasPanels ? 1 : 0)
+                .allowsHitTesting(hasPanels)
+            }
+            .sharedBackgroundVisibility(.hidden)
             ToolbarItem(placement: .primaryAction) {
                 Menu {
                     if let thread {

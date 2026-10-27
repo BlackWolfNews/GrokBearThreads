@@ -75,6 +75,19 @@ public enum ComposerChips {
     /// The CLI's effort levels, lowest first.
     public static let effortLevels = ["low", "medium", "high", "xhigh", "max"]
 
+    /// Goldilocks: what the porridge is like at each level, under its name
+    /// in the menu. The model's own level is "just right".
+    public static func effortPorridge(_ level: String) -> String? {
+        switch level {
+        case "low": return "Too cold"
+        case "medium": return "A bit cold"
+        case "high": return "Warm"
+        case "xhigh": return "Hot"
+        case "max": return "Too hot"
+        default: return nil
+        }
+    }
+
     /// How an effort level reads in the menu and the chip.
     public static func effortTitle(_ level: String) -> String {
         switch level {

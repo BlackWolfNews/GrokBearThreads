@@ -3,8 +3,10 @@
 // THREADBARE_PORT pointing at temp places.
 import fs from 'node:fs';
 import { loadConfig, ensureHome, readToken, paths, recordListening, DEFAULT_CWD, RUNNER_VERSION } from './config.ts';
-import { RELEASE, markGoodLater, takeRollbackNotice, tellLaunchListening } from './release.ts';
+import { RELEASE, markGoodLater, readRelease, takeRollbackNotice, tellLaunchListening } from './release.ts';
+import { RunnerUpdater } from './update.ts';
 import { Restarter, restartMethods } from './restart.ts';
+import { Scheduler, scheduleMethods } from './schedules.ts';
 import { createLogger } from './log.ts';
 import { ThreadStore } from './store.ts';
 import { AccountRegistry } from './accounts.ts';
@@ -58,11 +60,12 @@ async function main(): Promise<void> {
   // Every session gets tools for driving Threadbare itself, bound to its
   // own thread. Sessions only start after the runner exists.
   let runner!: Runner;
+  let scheduler!: Scheduler;
   const claude = new ClaudeAdapter({
     claudePath: cfg.claudePath,
     registry,
     log,
-    mcpServersFor: (threadId) => ({ [SERVER_NAME]: threadbareMcpServer(runner, threadId) }),
+    mcpServersFor: (threadId) => ({ [SERVER_NAME]: threadbareMcpServer(runner, threadId, scheduler) }),
     alwaysAsk: ALWAYS_ASK_TOOLS,
   });
   runner = new Runner({
@@ -74,6 +77,10 @@ async function main(): Promise<void> {
     log,
   });
   runner.start();
+  // After the threads are loaded, so a schedule that came due while the
+  // runner was stopped finds its thread.
+  scheduler = new Scheduler({ runner, home: cfg.home, clock: realClock, log });
+  scheduler.start();
   if (swept) runner.startupNotice('info', `Stopped ${swept === 1 ? 'a process group' : `${swept} process groups`} left running by the previous runner.`);
 
   // launch.mjs went back to this release because a newer one kept crashing
@@ -94,6 +101,18 @@ async function main(): Promise<void> {
     rolledBack,
     rolledBackFrom: rollback?.from,
     restart: () => void stop('restart'),
+    updateStatus: () => updater.status(),
+  });
+  // Follows main once this release has been marked good (below).
+  const updater = new RunnerUpdater({
+    home: cfg.home,
+    release: readRelease(),
+    enabled: cfg.followMain,
+    clock: realClock,
+    log,
+    notice: (level, message) => runner.notice(level, message),
+    restart: (p) => restarter.request({ when: 'idle', ...p }),
+    pendingRestart: () => Boolean(restarter.status().pendingRestart),
   });
 
   const server = new RpcServer({
@@ -102,7 +121,7 @@ async function main(): Promise<void> {
     token: readToken(cfg.home),
     runner,
     log,
-    methods: restartMethods(restarter),
+    methods: { ...restartMethods(restarter), ...scheduleMethods(scheduler) },
     helloNotices: () => [...(rolledBack ? [{ level: 'warning' as const, message: rolledBack }] : []), ...restarter.helloNotices()],
   });
   let port: number;
@@ -121,7 +140,10 @@ async function main(): Promise<void> {
   // Tests read this line to know the runner is up.
   process.stdout.write(`threadbare-runner listening on ${port}\n`);
   tellLaunchListening();
-  const cancelMarkGood = markGoodLater(cfg.home, RELEASE.release, log, process.env, () => restarter.proven());
+  const cancelMarkGood = markGoodLater(cfg.home, RELEASE.release, log, process.env, () => {
+    restarter.proven();
+    updater.start();
+  });
   // Only once listening: a runner that can't listen exits, and the next
   // one should still find the resume.
   restarter.resumeAfterRestart();
@@ -131,9 +153,11 @@ async function main(): Promise<void> {
     if (stopping) return;
     stopping = true;
     cancelMarkGood();
+    updater.stop();
     log.info('runner stopping', { signal });
     // Whatever stopped it, a pending restart has now happened.
     restarter.stopping();
+    scheduler.stop();
     try {
       await runner.shutdown();
       await server.close().catch(() => {});

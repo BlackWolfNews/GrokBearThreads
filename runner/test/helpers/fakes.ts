@@ -134,6 +134,7 @@ export function testConfig(home: string, extra: Partial<Config> = {}): Config {
     tokenStatsLimitsFile: path.join(home, 'no-limits.json'),
     cliUpdates: { claude: 'off', codex: 'off', checkMinutes: 60, keepCodexVersions: 2 },
     accountNotes: {},
+    followMain: false,
     ...extra,
   };
 }

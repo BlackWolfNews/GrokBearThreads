@@ -3,7 +3,9 @@ import { parseArgs } from 'node:util';
 import path from 'node:path';
 import { loadConfig, readToken, runnerUrl } from './config.ts';
 import { RunnerClient } from './client.ts';
-import type { ImageRef, PersistedEvent, ThreadSummary } from './protocol.ts';
+import type { ImageRef, PersistedEvent, Schedule, ThreadSummary } from './protocol.ts';
+import { backgroundFlag } from './protocol.ts';
+import { parseWhen as parseLater, relativeFuture } from './when.ts';
 import { DEV_HELP, logsCommand, runDev } from './tb-dev.ts';
 
 const OPTIONS = {
@@ -21,6 +23,10 @@ const OPTIONS = {
   from: { type: 'string' },
   to: { type: 'string' },
   'until-done': { type: 'boolean' },
+  at: { type: 'string' },
+  cron: { type: 'string' },
+  tz: { type: 'string' },
+  title: { type: 'string' },
   // tb-dev.ts
   last: { type: 'string' },
   tools: { type: 'boolean' },
@@ -55,6 +61,14 @@ const HELP = `tb: talk to the Threadbare runner
   tb move <threadId> <folder>
   tb delete <threadId>
   tb accounts
+  tb actions <threadId> [--json]  the thread's actions, panels and patches (from its folder)
+  tb run <threadId> <actionId>    run one: a command's output is printed and goes into the thread
+  tb schedule "text" (--at WHEN | --cron "0 9 * * 1-5") [--tz ZONE] [--title T]
+              [--thread ID | --cwd DIR [--account ID] [--model M] [--effort L] [--ask]]
+                                  sends the text later: once (--at 30m, 2h, 1d, tomorrow
+                                  or an ISO time) or on a cron; to a thread with --thread,
+                                  otherwise to a new thread each time
+  tb schedules [--json]           tb schedules run|pause|resume|delete <scheduleId>
 
 Thread ids can be shortened to any unique prefix.
 Uses THREADBARE_HOME and THREADBARE_PORT like the runner does.
@@ -79,6 +93,8 @@ const COMMAND_FLAGS: Record<string, string[]> = {
   move: [],
   delete: [],
   accounts: [],
+  schedule: ['at', 'cron', 'tz', 'title', 'thread', 'cwd', 'account', 'model', 'effort', 'ask', 'json'],
+  schedules: ['json'],
   status: ['json'],
   self: ['json'],
   restart: ['now', 'force', 'resume', 'no-resume', 'cancel', 'reason', 'thread', 'max-wait'],
@@ -260,12 +276,110 @@ async function run(client: RunnerClient, cmd: string, args: string[], f: Flags):
       await client.call('threads.update', { threadId: id, archived: cmd === 'archive' });
       return 0;
     }
+    case 'actions': {
+      const id = await resolveId(client, args[0]);
+      const thread = (await client.call<{ threads: ThreadSummary[] }>('threads.list', { include: ['inbox', 'snoozed', 'archived'] })).threads.find((x) => x.id === id);
+      if (!thread) throw new Error(`No thread ${id}`);
+      if (f.json) {
+        console.log(JSON.stringify({ actions: thread.actions ?? [], panels: thread.panels ?? [], hooks: thread.hooks ?? [], patches: thread.patches ?? [] }, null, 2));
+        return 0;
+      }
+      const actions = thread.actions ?? [];
+      const panels = thread.panels ?? [];
+      const hooks = thread.hooks ?? [];
+      const patches = thread.patches ?? [];
+      if (!actions.length && !panels.length && !hooks.length && !patches.length) {
+        console.log(`No patches apply to ${thread.cwd}. Add .threadbear/patches/<name>.ts there (see docs/protocol.md, Patches).`);
+        return 0;
+      }
+      if (actions.length) {
+        console.log('Actions:');
+        for (const a of actions) console.log(`  ${a.id.padEnd(32)} ${a.title}${a.kind === 'prompt' ? '  (prompt)' : `  $ ${a.command}`}`);
+      }
+      if (panels.length) {
+        console.log('Panels:');
+        for (const p of panels) console.log(`  ${p.id.padEnd(32)} ${p.title}${p.url ? `  ${p.url}` : '  (image)'}${p.note ? `  ${p.note}` : ''}`);
+      }
+      if (hooks.length) {
+        console.log('Hooks:');
+        for (const h of hooks) console.log(`  ${h.id.padEnd(32)} ${h.title}  after a turn${h.edited ? ` that edited ${h.edited}` : ''}  $ ${h.command}  (tell ${h.tell})`);
+      }
+      console.log('Patches:');
+      for (const p of patches) console.log(`  ${p.id.padEnd(32)} ${p.source}${p.file ? `  ${p.file}` : ''}${p.error ? `  ERROR ${p.error}` : ''}`);
+      return 0;
+    }
+    case 'run': {
+      const id = await resolveId(client, args[0]);
+      if (!args[1]) throw new Error('Which action? tb actions <threadId> lists them.');
+      const before = (await client.call<{ lastSeq: number }>('threads.events', { threadId: id, limit: 1 })).lastSeq;
+      // No client-side timeout: the runner stops a command after its own limit.
+      const r = await client.call<{ turnId?: string; ok?: boolean; exitCode?: number; durationMs?: number; seq?: number }>('actions.run', { threadId: id, actionId: args[1] });
+      if (r.turnId) {
+        console.log(`Sent as a message; turn ${r.turnId}.`);
+        return 0;
+      }
+      if (r.seq !== undefined) {
+        const page = await client.call<{ events: { seq: number; type: string; text?: string }[] }>('threads.events', { threadId: id, afterSeq: Math.max(before, r.seq - 1), limit: 1 });
+        const ev = page.events.find((e) => e.seq === r.seq);
+        if (ev?.text) console.log(ev.text.trimEnd());
+      }
+      console.log(`(${r.ok ? 'ok' : 'failed'}${r.exitCode !== undefined ? `, exit ${r.exitCode}` : ''}, ${((r.durationMs ?? 0) / 1000).toFixed(1)}s)`);
+      return r.ok ? 0 : 1;
+    }
     case 'accounts': {
       const r = await client.call<{ accounts: { id: string; title: string }[]; defaults: { accountId: string; cwd: string } }>('hello', {
         client: 'tb',
         version: '1',
       });
       for (const a of r.accounts) console.log(`${a.id === r.defaults.accountId ? '*' : ' '} ${a.id.padEnd(12)} ${a.title}`);
+      return 0;
+    }
+    case 'schedule': {
+      if (!args[0]) throw new Error('What should it send? tb schedule "text" --at 30m');
+      if (Boolean(f.at) === Boolean(f.cron)) throw new Error('Give --at (once) or --cron (repeating).');
+      const params: Record<string, unknown> = { text: args[0] };
+      if (f.at) params.at = parseLater(String(f.at), Date.now());
+      if (f.cron) params.cron = f.cron;
+      if (f.tz) params.timezone = f.tz;
+      if (f.title) params.title = f.title;
+      if (f.thread) params.threadId = await resolveId(client, String(f.thread));
+      else {
+        if (f.cwd) params.cwd = path.resolve(String(f.cwd));
+        if (f.account) params.accountId = f.account;
+        if (f.model) params.model = f.model;
+        if (f.effort) params.effort = f.effort;
+        if (f.ask) params.permissionMode = 'ask';
+      }
+      // A schedule an agent makes from a thread says which one.
+      if (process.env.THREADBARE_THREAD_ID) params.createdBy = process.env.THREADBARE_THREAD_ID;
+      const r = await client.call<{ schedule: Schedule }>('schedules.create', params);
+      if (f.json) console.log(JSON.stringify(r.schedule));
+      else printSchedules([r.schedule]);
+      return 0;
+    }
+    case 'schedules': {
+      const [action, id] = args;
+      if (!action) {
+        const r = await client.call<{ schedules: Schedule[] }>('schedules.list', {});
+        if (f.json) console.log(JSON.stringify(r.schedules, null, 2));
+        else if (!r.schedules.length) console.log('No schedules.');
+        else printSchedules(r.schedules);
+        return 0;
+      }
+      if (!id) throw new Error(`tb schedules ${action} <scheduleId>`);
+      if (action === 'delete') {
+        await client.call('schedules.delete', { scheduleId: id });
+        console.log('deleted');
+        return 0;
+      }
+      if (action === 'run') {
+        const r = await client.call<{ threadId: string }>('schedules.run', { scheduleId: id });
+        console.log(`sent to ${r.threadId}`);
+        return 0;
+      }
+      if (action !== 'pause' && action !== 'resume') throw new Error(`Unknown: tb schedules ${action}. It's run, pause, resume or delete.`);
+      const r = await client.call<{ schedule: Schedule }>('schedules.update', { scheduleId: id, paused: action === 'pause' });
+      printSchedules([r.schedule]);
       return 0;
     }
     default: {
@@ -328,13 +442,22 @@ function parseWhen(s: string): string {
   return new Date(t).toISOString();
 }
 
+function printSchedules(list: Schedule[]): void {
+  for (const sc of list) {
+    const state = sc.finishedAt ? 'done' : sc.paused ? 'paused' : sc.nextRunAt ? `next ${relativeFuture(sc.nextRunAt, Date.now())}` : 'no more runs';
+    const target = sc.threadId ? `thread ${sc.threadId.slice(0, 8)}` : `new thread in ${sc.cwd}`;
+    const last = sc.lastRun && sc.lastRun.outcome !== 'sent' ? `  (last run ${sc.lastRun.outcome}: ${sc.lastRun.note ?? ''})` : '';
+    console.log(`${sc.id.slice(0, 8)}  ${sc.title}  [${sc.whenText}, ${state}]  ${target}${last}`);
+  }
+}
+
 function printThreads(threads: ThreadSummary[], json: boolean): void {
   if (json) {
     console.log(JSON.stringify(threads, null, 2));
     return;
   }
   for (const t of threads) {
-    const flags = [t.status, t.live ? 'live' : '', t.needsYou ? 'needs you' : ''].filter(Boolean).join(', ');
+    const flags = [t.status, t.live ? 'live' : '', t.needsYou ? 'needs you' : '', backgroundFlag(t.background)].filter(Boolean).join(', ');
     console.log(`${t.id.slice(0, 8)}  ${t.title}  [${flags}]  ${t.accountId}`);
     if (t.preview) console.log(`          ${t.preview}`);
   }
@@ -395,6 +518,8 @@ function printEvent(e: any, json: boolean, prefix = ''): void {
       return out(`(${e.outcome}, ${(e.durationMs / 1000).toFixed(1)}s${e.costUsd !== undefined ? `, $${e.costUsd.toFixed(4)}` : ''}${e.error ? `: ${e.error}` : ''})`);
     case 'system.note':
       return out(`(${e.text})`);
+    case 'action.run':
+      return out(`- ${e.title} (${e.trigger === 'turn.end' ? 'hook, after the turn' : 'action'}, ${e.ok ? 'ok' : 'failed'}, ${(e.durationMs / 1000).toFixed(1)}s)${e.text ? `\n  ${String(e.text).split('\n')[0].slice(0, 120)}` : ''}`);
     case 'error':
       return out(`error: ${e.message}`);
     default:

@@ -4,6 +4,7 @@
 // are the two implementations of AgentAdapter.
 import type {
   Account,
+  BackgroundKind,
   DeltaBody,
   EffortLevel,
   EventBody,
@@ -88,7 +89,9 @@ export type AdapterOutput =
   | { kind: 'allowRules'; rules: string[] }
   | { kind: 'result'; result: TurnResult };
 
-export type BackgroundTask = { id: string; type: string; description: string };
+// A background shell or subagent the CLI reports. `type` is the CLI's own
+// name for it (Claude: local_bash, local_agent, ...), `kind` the protocol's.
+export type BackgroundTask = { id: string; type: string; kind: BackgroundKind; description: string };
 
 export type ToolApprovalRequest = {
   toolUseId?: string; // left out for a subagent's tools, which have no tool.call

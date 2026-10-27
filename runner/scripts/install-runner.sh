@@ -17,7 +17,9 @@
 # anyway. It keeps the release current names only if it was built from
 # HEAD, and otherwise builds one that was. If the new runner doesn't come up
 # and stay up until it is marked good (about a minute), the old plist,
-# launch.mjs and current are put back.
+# launch.mjs and current are put back; a first install that fails is
+# removed again (the releases stay), so launchd isn't left starting a
+# program that isn't there.
 #
 # Options:
 #   --from-source  run src/main.ts straight from this checkout instead, as
@@ -420,7 +422,16 @@ fail_back() {
       echo "The old plist didn't load either. Load it by hand: launchctl bootstrap $DOMAIN $(printf '%q' "$PLIST")" >&2
     fi
   else
-    echo "There was no LaunchAgent before to go back to. To run the runner from this checkout instead:" >&2
+    # Nothing to go back to, so what this run put in comes out again: a
+    # loaded plist whose program is gone (or won't start) would otherwise
+    # be started by launchd every few seconds for good, and launch.mjs in
+    # the data dir would make deploy-runner.sh think a release could start.
+    "$LAUNCHCTL" bootout "$DOMAIN/$LABEL" 2>/dev/null || true
+    rm -f "$PLIST"
+    if [ "$SWAPPED" = 1 ]; then
+      if [ "$HAD_LAUNCH" = 1 ]; then mv -f "$PREV_LAUNCH" "$RDIR/launch.mjs"; else rm -f "$RDIR/launch.mjs"; fi
+    fi
+    echo "There was no LaunchAgent before to go back to, so $LABEL is removed again; the releases in $RDIR stay. The log above says what went wrong. To run the runner from this checkout instead:" >&2
     printf '  %q' "$RUNNER_DIR/scripts/install-runner.sh" --from-source ${ARGS[@]+"${ARGS[@]}"} >&2
     echo >&2
   fi

@@ -108,13 +108,21 @@ final class CardTextTests: XCTestCase {
     }
 
     func testHoverActionsAskBeforeStoppingATurn() {
-        XCTAssertTrue(BusyThreadAction.needsConfirm(.running))
-        XCTAssertTrue(BusyThreadAction.needsConfirm(.starting))
-        XCTAssertTrue(BusyThreadAction.needsConfirm(.waiting))
-        XCTAssertFalse(BusyThreadAction.needsConfirm(.idle))
-        XCTAssertFalse(BusyThreadAction.needsConfirm(.error))
-        XCTAssertEqual(BusyThreadAction.prompt(.archive, status: .running).title, "Archive and stop the turn?")
-        XCTAssertEqual(BusyThreadAction.prompt(.snooze, status: .waiting).detail, "This thread is waiting for you. Snoozing it now stops its turn.")
+        func thread(_ status: ThreadStatus, background: [BackgroundTask] = []) -> ThreadSummary {
+            ThreadSummary(id: "t", title: "t", status: status, background: background)
+        }
+        XCTAssertTrue(BusyThreadAction.needsConfirm(thread(.running)))
+        XCTAssertTrue(BusyThreadAction.needsConfirm(thread(.starting)))
+        XCTAssertTrue(BusyThreadAction.needsConfirm(thread(.waiting)))
+        XCTAssertFalse(BusyThreadAction.needsConfirm(thread(.idle)))
+        XCTAssertFalse(BusyThreadAction.needsConfirm(thread(.error)))
+        XCTAssertEqual(BusyThreadAction.prompt(.archive, thread: thread(.running)).title, "Archive and stop the turn?")
+        XCTAssertEqual(BusyThreadAction.prompt(.snooze, thread: thread(.waiting)).detail, "This thread is waiting for you. Hibernating it now stops its turn.")
+        // Background sub-agents or jobs are stopped too when the CLI is let go.
+        let cubs = thread(.idle, background: [BackgroundTask(kind: .agent, description: "a"), BackgroundTask(kind: .agent, description: "b")])
+        XCTAssertTrue(BusyThreadAction.needsConfirm(cubs))
+        XCTAssertEqual(BusyThreadAction.prompt(.archive, thread: cubs).title, "Archive and stop the background work?")
+        XCTAssertEqual(BusyThreadAction.prompt(.snooze, thread: cubs).detail, "This thread still has 2 sub-agents in the background. Hibernating it now stops them.")
     }
 
     // MARK: Images

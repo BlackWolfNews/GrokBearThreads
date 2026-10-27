@@ -237,6 +237,11 @@ test('install-runner.sh builds the first release and starts it through launch.mj
   assert.equal(info.dirty, false);
   assert.equal(info.node, process.versions.node);
   assert.ok(Date.parse(info.builtAt) > 0);
+  // For the runner following main by itself (src/update.ts).
+  assert.equal(info.checkout, repo);
+  assert.equal(info.prefix, 'runner/');
+  const lsTree = git('ls-tree', 'HEAD', '--', 'runner/src', 'runner/bin', 'runner/package.json', 'runner/package-lock.json');
+  assert.equal(info.tree, lsTree.split('\n').map((l) => l.split(/\s+/)[2]).join('+'));
   for (const f of ['src/main.ts', 'bin/tb', 'package.json', 'package-lock.json']) {
     assert.ok(fs.existsSync(path.join(runnerDir(), 'releases', first, f)), f);
   }
@@ -1017,6 +1022,37 @@ test('reinstalling checks everything first, builds from HEAD, and puts the old s
   await runsOn(rebuilt);
 });
 
+test('--check gives up once a runner that stopped before it was marked good stays down', { timeout: 120_000 }, async () => {
+  const good = current();
+  await waitFor('lastGood', () => state().lastGood === good);
+  const plistFile = path.join(agents, `${LABEL}.plist`);
+  // A release that never gets marked good, running under launchd.
+  commit({ goodAfterMs: -1 }, 'never good');
+  let r = deploy(['--skip-checks', '--no-restart']);
+  assert.equal(r.status, 0, out(r));
+  const never = current();
+  assert.notEqual(never, good);
+  assert.equal(launchctl('kickstart', '-k', TARGET), 0);
+  await runsOn(never);
+
+  const bg = deployInBackground(['--check']);
+  await waitFor('the good wait to start', () => /Waiting for it to stay up long enough/.test(bg.output()));
+  // The runner goes down and nothing brings it back.
+  const started = Date.now();
+  assert.equal(launchctl('bootout', TARGET), 0);
+  r = await bg.done;
+  assert.equal(r.status, 1, out(r));
+  assert.match(r.stderr, new RegExp(`The runner on ${never} stopped before it was marked good and hasn't come back in 30 s\\.`));
+  assert.ok(Date.now() - started < 60_000, 'said after the health window, not the whole good wait');
+
+  // Back on the good release for the tests after this.
+  assert.equal(launchctl('bootstrap', `gui/${process.getuid!()}`, plistFile), 0);
+  await runsOn(never);
+  r = deploy(['--rollback', '--now']);
+  assert.equal(r.status, 0, out(r));
+  await runsOn(good);
+});
+
 test('uninstall boots the job out and removes the plist', { timeout: 30_000 }, async () => {
   const sup = Number(fs.readFileSync(path.join(launchd, 'supervisor.pid'), 'utf8'));
   const r = sh('install-runner.sh', ['--uninstall', '--home', home, '--label', LABEL]);
@@ -1026,4 +1062,27 @@ test('uninstall boots the job out and removes the plist', { timeout: 30_000 }, a
   assert.throws(() => process.kill(sup, 0), 'the keep-alive loop is gone');
   assert.equal(await version(), null);
   assert.ok(fs.existsSync(path.join(runnerDir(), 'current')), 'releases stay');
+});
+
+test('a first install whose runner never comes up is removed again, not left crash-looping', { timeout: 120_000 }, async () => {
+  // A data dir nothing has installed into: no launch.mjs or releases to go back to.
+  const homeFresh = path.join(root, 'home-fresh');
+  const plistFile = path.join(agents, `${LABEL}.plist`);
+  // Passes the smoke test, crashes under launch.mjs: nothing marks it good.
+  commit({ crash: 'launched' }, 'crashes once installed');
+  let r: Run;
+  try {
+    r = sh('install-runner.sh', ['--home', homeFresh, '--label', LABEL, '--port', '0', '--path', '/usr/bin:/bin']);
+  } finally {
+    commit({}, 'back');
+  }
+  assert.equal(r.status, 1, out(r));
+  assert.match(r.stderr, /The runner didn't come up and stay up on its release\./);
+  assert.match(r.stderr, new RegExp(`There was no LaunchAgent before to go back to, so ${LABEL.replace(/\\./g, '\\\\.')} is removed again`));
+  assert.ok(!fs.existsSync(plistFile), 'the plist is gone');
+  assert.notEqual(launchctl('print', TARGET), 0, 'the job is booted out');
+  assert.ok(!fs.existsSync(path.join(homeFresh, 'runner', 'launch.mjs')), `launch.mjs is gone, so deploy-runner.sh says to install
+${out(r)}`);
+  assert.equal(fs.readdirSync(path.join(homeFresh, 'runner', 'releases')).filter((n) => ID_RE.test(n)).length, 1, 'the release stays');
+  assert.ok(!fs.existsSync(path.join(launchd, 'supervisor.pid')) || (() => { try { process.kill(Number(fs.readFileSync(path.join(launchd, 'supervisor.pid'), 'utf8')), 0); return false; } catch { return true; } })(), 'no keep-alive loop left');
 });

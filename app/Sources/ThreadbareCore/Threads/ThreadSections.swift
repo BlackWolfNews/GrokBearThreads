@@ -26,14 +26,17 @@ public struct ThreadSections: Sendable, Equatable {
     }
 
     /// Needs you: waiting on an approval or question, or finished and unread.
-    /// Running: a turn is underway. Inbox: everything else. Snoozed and
-    /// archived threads are left out. Each section is newest activity first.
+    /// Running: a turn is underway, or background sub-agents or jobs are
+    /// still going (an unread reply waits there with its dot until they're
+    /// done: the thread isn't finished yet). Inbox: everything else. Snoozed
+    /// and archived threads are left out. Each section is newest activity
+    /// first.
     public static func build(_ threads: some Sequence<ThreadSummary>, now: Date) -> ThreadSections {
         var sections = ThreadSections()
         for thread in threads where !thread.isArchived && !thread.isSnoozed(at: now) {
-            if thread.needsYou || thread.status == .waiting {
+            if thread.status == .waiting || (thread.needsYou && !thread.isWorkingInBackground) {
                 sections.needsYou.append(thread)
-            } else if thread.status == .running || thread.status == .starting {
+            } else if thread.status == .running || thread.status == .starting || thread.isWorkingInBackground {
                 sections.running.append(thread)
             } else {
                 sections.inbox.append(thread)

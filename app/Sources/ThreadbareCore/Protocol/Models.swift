@@ -360,6 +360,219 @@ public struct ImageRef: Sendable, Hashable, Codable {
     }
 }
 
+/// A panel a patch gives a thread: a page or picture shown beside the
+/// transcript (docs/protocol.md, "Panels"). The runner works them out from
+/// the thread's folder.
+public struct Panel: Sendable, Hashable, Codable, Identifiable {
+    public enum Kind: String, Sendable, Hashable, Codable {
+        case url, image
+
+        public init(from decoder: Decoder) throws {
+            let raw = try decoder.singleValueContainer().decode(String.self)
+            self = Kind(rawValue: raw) ?? .url
+        }
+    }
+
+    public var id: String
+    public var title: String
+    public var kind: Kind
+    /// What a `url` panel shows, and what Open in browser opens.
+    public var url: String?
+    /// The patch it came from: "convex", "xcode".
+    public var patch: String
+    /// One line about it: the deployment, the project.
+    public var note: String?
+
+    public init(id: String, title: String, kind: Kind = .url, url: String? = nil, patch: String = "", note: String? = nil) {
+        self.id = id
+        self.title = title
+        self.kind = kind
+        self.url = url
+        self.patch = patch
+        self.note = note
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(String.self, forKey: .id)
+        title = try c.decodeIfPresent(String.self, forKey: .title) ?? id
+        kind = try c.decodeIfPresent(Kind.self, forKey: .kind) ?? .url
+        url = try c.decodeIfPresent(String.self, forKey: .url)
+        patch = try c.decodeIfPresent(String.self, forKey: .patch) ?? ""
+        note = try c.decodeIfPresent(String.self, forKey: .note)
+    }
+
+    /// The page as a URL, when it is one.
+    public var pageURL: URL? { url.flatMap(URL.init(string:)) }
+}
+
+/// An action a patch gives a thread: a chip above the composer that runs
+/// a command in the thread's folder or sends a canned prompt.
+public struct Action: Sendable, Hashable, Codable, Identifiable {
+    public enum Kind: String, Sendable, Hashable, Codable {
+        case command, prompt
+
+        public init(from decoder: Decoder) throws {
+            let raw = try decoder.singleValueContainer().decode(String.self)
+            self = Kind(rawValue: raw) ?? .command
+        }
+    }
+
+    public var id: String
+    public var title: String
+    public var kind: Kind
+    public var command: String?
+    public var prompt: String?
+    public var patch: String
+    public var note: String?
+
+    public init(id: String, title: String, kind: Kind = .command, command: String? = nil, prompt: String? = nil, patch: String = "", note: String? = nil) {
+        self.id = id
+        self.title = title
+        self.kind = kind
+        self.command = command
+        self.prompt = prompt
+        self.patch = patch
+        self.note = note
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(String.self, forKey: .id)
+        title = try c.decodeIfPresent(String.self, forKey: .title) ?? id
+        kind = try c.decodeIfPresent(Kind.self, forKey: .kind) ?? .command
+        command = try c.decodeIfPresent(String.self, forKey: .command)
+        prompt = try c.decodeIfPresent(String.self, forKey: .prompt)
+        patch = try c.decodeIfPresent(String.self, forKey: .patch) ?? ""
+        note = try c.decodeIfPresent(String.self, forKey: .note)
+    }
+}
+
+/// A hook a patch gives a thread: a command the runner runs by itself
+/// after a turn, posted into the transcript like an action.
+public struct Hook: Sendable, Hashable, Codable, Identifiable {
+    public var id: String
+    public var title: String
+    public var on: String
+    public var command: String
+    public var edited: String?
+    public var tell: String
+    public var patch: String
+    public var note: String?
+
+    public init(id: String, title: String, on: String = "turn.end", command: String = "", edited: String? = nil, tell: String = "failures", patch: String = "", note: String? = nil) {
+        self.id = id
+        self.title = title
+        self.on = on
+        self.command = command
+        self.edited = edited
+        self.tell = tell
+        self.patch = patch
+        self.note = note
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(String.self, forKey: .id)
+        title = try c.decodeIfPresent(String.self, forKey: .title) ?? id
+        on = try c.decodeIfPresent(String.self, forKey: .on) ?? "turn.end"
+        command = try c.decodeIfPresent(String.self, forKey: .command) ?? ""
+        edited = try c.decodeIfPresent(String.self, forKey: .edited)
+        tell = try c.decodeIfPresent(String.self, forKey: .tell) ?? "failures"
+        patch = try c.decodeIfPresent(String.self, forKey: .patch) ?? ""
+        note = try c.decodeIfPresent(String.self, forKey: .note)
+    }
+}
+
+/// A patch that applies to a thread's folder: built in, from
+/// `~/.threadbear/patches`, or the project's own.
+public struct PatchInfo: Sendable, Hashable, Codable, Identifiable {
+    public var id: String
+    public var source: String
+    public var file: String?
+    public var error: String?
+
+    public init(id: String, source: String = "project", file: String? = nil, error: String? = nil) {
+        self.id = id
+        self.source = source
+        self.file = file
+        self.error = error
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(String.self, forKey: .id)
+        source = try c.decodeIfPresent(String.self, forKey: .source) ?? "project"
+        file = try c.decodeIfPresent(String.self, forKey: .file)
+        error = try c.decodeIfPresent(String.self, forKey: .error)
+    }
+}
+
+/// What `actions.run` gives back: the turn a prompt action started, or how
+/// a command action went (its output is in the transcript at `seq`).
+public struct ActionRunResult: Sendable, Hashable, Decodable {
+    public var turnId: String?
+    public var ok: Bool?
+    public var exitCode: Int?
+    public var durationMs: Double?
+    public var seq: Int?
+}
+
+/// What `panels.render` gives back for an image panel: the picture, or a
+/// note saying why there isn't one.
+public struct PanelRender: Sendable, Hashable, Decodable {
+    public var image: ImageRef?
+    public var note: String?
+
+    public init(image: ImageRef? = nil, note: String? = nil) {
+        self.image = image
+        self.note = note
+    }
+}
+
+/// Work the live CLI is still running in the background: a sub-agent or a
+/// shell job started with run_in_background, a Monitor. `finished` once it
+/// has ended and the agent is about to start a turn to read its result.
+public struct BackgroundTask: Sendable, Hashable, Codable {
+    public enum Kind: String, Sendable, Hashable, Codable {
+        case agent, shell, monitor, other
+
+        public init(from decoder: Decoder) throws {
+            let raw = try decoder.singleValueContainer().decode(String.self)
+            self = Kind(rawValue: raw) ?? .other
+        }
+    }
+
+    public var kind: Kind
+    /// The CLI's own words: the sub-agent's brief, the command. May be empty.
+    public var description: String
+    public var finished: Bool
+
+    public init(kind: Kind, description: String, finished: Bool = false) {
+        self.kind = kind
+        self.description = description
+        self.finished = finished
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        kind = try c.decodeIfPresent(Kind.self, forKey: .kind) ?? .other
+        description = try c.decodeIfPresent(String.self, forKey: .description) ?? ""
+        finished = try c.decodeIfPresent(Bool.self, forKey: .finished) ?? false
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(kind, forKey: .kind)
+        try c.encode(description, forKey: .description)
+        if finished { try c.encode(true, forKey: .finished) }
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case kind, description, finished
+    }
+}
+
 public struct ThreadSummary: Sendable, Hashable, Codable, Identifiable {
     public var id: String
     public var title: String
@@ -389,6 +602,14 @@ public struct ThreadSummary: Sendable, Hashable, Codable, Identifiable {
     /// The model's context window, when the CLI reports it.
     public var contextWindow: Int?
     public var costUsd: Double?
+    /// Panels, actions and patches from the folder; empty for most threads.
+    public var panels: [Panel]
+    public var actions: [Action]
+    public var hooks: [Hook]
+    public var patches: [PatchInfo]
+    /// Background sub-agents and shell jobs the CLI is still running (and
+    /// ones just finished whose result it's about to read). Empty when none.
+    public var background: [BackgroundTask]
 
     public init(
         id: String, title: String, cwd: String = "~/dev/me/misc", accountId: String = "claude-main",
@@ -398,7 +619,8 @@ public struct ThreadSummary: Sendable, Hashable, Codable, Identifiable {
         snoozedUntil: Date? = nil, archivedAt: Date? = nil, preview: String = "",
         lastSeq: Int = 0, lastSeenSeq: Int = 0, nativeSessionId: String? = nil,
         contextTokens: Int? = nil, costUsd: Double? = nil,
-        effort: String? = nil, modelInUse: String? = nil, effortInUse: String? = nil, contextWindow: Int? = nil
+        effort: String? = nil, modelInUse: String? = nil, effortInUse: String? = nil, contextWindow: Int? = nil,
+        panels: [Panel] = [], actions: [Action] = [], hooks: [Hook] = [], patches: [PatchInfo] = [], background: [BackgroundTask] = []
     ) {
         self.id = id
         self.title = title
@@ -425,6 +647,11 @@ public struct ThreadSummary: Sendable, Hashable, Codable, Identifiable {
         self.contextTokens = contextTokens
         self.contextWindow = contextWindow
         self.costUsd = costUsd
+        self.panels = panels
+        self.actions = actions
+        self.hooks = hooks
+        self.patches = patches
+        self.background = background
     }
 
     public init(from decoder: Decoder) throws {
@@ -459,6 +686,11 @@ public struct ThreadSummary: Sendable, Hashable, Codable, Identifiable {
         contextTokens = try c.decodeIfPresent(Double.self, forKey: .contextTokens).map { Int($0) }
         contextWindow = ((try? c.decodeIfPresent(Double.self, forKey: .contextWindow)) ?? nil).map { Int($0) }
         costUsd = try c.decodeIfPresent(Double.self, forKey: .costUsd)
+        panels = c.lossyArray(Panel.self, forKey: .panels)
+        actions = c.lossyArray(Action.self, forKey: .actions)
+        hooks = c.lossyArray(Hook.self, forKey: .hooks)
+        patches = c.lossyArray(PatchInfo.self, forKey: .patches)
+        background = c.lossyArray(BackgroundTask.self, forKey: .background)
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -488,13 +720,23 @@ public struct ThreadSummary: Sendable, Hashable, Codable, Identifiable {
         try c.encodeIfPresent(contextTokens, forKey: .contextTokens)
         try c.encodeIfPresent(contextWindow, forKey: .contextWindow)
         try c.encodeIfPresent(costUsd, forKey: .costUsd)
+        if !panels.isEmpty { try c.encode(panels, forKey: .panels) }
+        if !actions.isEmpty { try c.encode(actions, forKey: .actions) }
+        if !hooks.isEmpty { try c.encode(hooks, forKey: .hooks) }
+        if !patches.isEmpty { try c.encode(patches, forKey: .patches) }
+        if !background.isEmpty { try c.encode(background, forKey: .background) }
     }
 
     enum CodingKeys: String, CodingKey {
         case id, title, cwd, accountId, provider, model, effort, modelInUse, effortInUse, permissionMode, status, live, needsYou
         case createdAt, updatedAt, lastActivityAt, snoozedUntil, archivedAt, preview
-        case lastSeq, lastSeenSeq, nativeSessionId, contextTokens, contextWindow, costUsd
+        case lastSeq, lastSeenSeq, nativeSessionId, contextTokens, contextWindow, costUsd, panels, actions, hooks, patches, background
     }
+
+    /// Still being worked on between turns: background sub-agents or jobs
+    /// are running (or just finished, with their result still to be read)
+    /// and no turn is underway to show for it.
+    public var isWorkingInBackground: Bool { !background.isEmpty && !status.isBusy }
 
     public var isArchived: Bool { archivedAt != nil }
 

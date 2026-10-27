@@ -17,7 +17,9 @@ public enum RowDebug {
         case .user(let message):
             if message.text.isEmpty { return message.images.count == 1 ? "1 image" : "\(message.images.count) images" }
             // A dump should say it wasn't Mike, as the transcript does.
-            return message.isFromRunner ? "(sent by the runner) " + message.text : message.text
+            if message.isFromRunner { return "(sent by the runner) " + message.text }
+            if message.isFromSchedule { return "(sent by a schedule) " + message.text }
+            return message.text
         case .assistant(let item), .reasoning(let item):
             return item.text
         case .tool(let tool):
@@ -42,6 +44,8 @@ public enum RowDebug {
             return group.summary
         case .working:
             return "Working"
+        case .background(let status):
+            return BackgroundWork.lineWithDetail(status.tasks)
         case .changes(let card):
             return card.title
         }
@@ -151,6 +155,7 @@ extension TranscriptModel {
             return ["f:" + (completion.turnId.isEmpty ? (event.turnId ?? "seq\(seq)") : completion.turnId)]
         case .systemNote: return ["n:\(seq)"]
         case .error: return ["e:\(seq)"]
+        case .actionRun(let run): return ["t:" + run.itemId(seq: seq)]
         default: return []
         }
     }

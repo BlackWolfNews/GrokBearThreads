@@ -36,6 +36,18 @@ public extension RPCClient {
         return try await call("threads.send", .object(params), as: TurnResult.self).turnId
     }
 
+    /// Draws an image panel (the Simulator's screenshot). Slow: it waits
+    /// for simctl.
+    func renderPanel(threadId: String, panelId: String) async throws -> PanelRender {
+        try await call("panels.render", .object(["threadId": .string(threadId), "panelId": .string(panelId)]), as: PanelRender.self, timeout: .seconds(30))
+    }
+
+    /// Runs an action from the thread's patches. A command action answers
+    /// when the command has finished (the runner stops it after 10 minutes).
+    func runAction(threadId: String, actionId: String) async throws -> ActionRunResult {
+        try await call("actions.run", .object(["threadId": .string(threadId), "actionId": .string(actionId)]), as: ActionRunResult.self, timeout: .seconds(11 * 60))
+    }
+
     func interrupt(threadId: String) async throws {
         _ = try await call("threads.interrupt", .object(["threadId": .string(threadId)]), as: EmptyResult.self)
     }
@@ -192,4 +204,146 @@ extension ImageRef {
         if let height { object["height"] = .number(Double(height)) }
         return .object(object)
     }
+}
+
+// MARK: Schedules (docs/protocol.md, "Schedules")
+
+public extension RPCClient {
+    func listSchedules(threadId: String? = nil) async throws -> [Schedule] {
+        var params: [String: JSONValue] = [:]
+        if let threadId { params["threadId"] = .string(threadId) }
+        return try await call("schedules.list", .object(params), as: SchedulesResult.self).schedules
+    }
+
+    func createSchedule(_ request: NewScheduleRequest) async throws -> Schedule {
+        try await call("schedules.create", .object(request.params), as: ScheduleResult.self).schedule
+    }
+
+    func updateSchedule(_ scheduleId: String, _ update: ScheduleUpdate) async throws -> Schedule {
+        var params = update.params
+        params["scheduleId"] = .string(scheduleId)
+        return try await call("schedules.update", .object(params), as: ScheduleResult.self).schedule
+    }
+
+    func deleteSchedule(_ scheduleId: String) async throws {
+        _ = try await call("schedules.delete", .object(["scheduleId": .string(scheduleId)]), as: EmptyResult.self)
+    }
+
+    /// Runs it now, as if it were due, even when paused.
+    func runSchedule(_ scheduleId: String) async throws -> ScheduleRunResult {
+        try await call("schedules.run", .object(["scheduleId": .string(scheduleId)]), as: ScheduleRunResult.self)
+    }
+
+    /// What a cron or time means and when it would next run, for the
+    /// editor to show as Mike types. A cron it can't read is `-32602`.
+    func previewSchedule(_ when: ScheduleWhen, timezone: String? = nil, count: Int = 3) async throws -> SchedulePreview {
+        var params = when.params
+        if let timezone { params["timezone"] = .string(timezone) }
+        params["count"] = .number(Double(count))
+        return try await call("schedules.preview", .object(params), as: SchedulePreview.self)
+    }
+}
+
+/// When a schedule runs: once, or on a cron.
+public enum ScheduleWhen: Sendable, Hashable {
+    case at(Date)
+    case cron(String)
+
+    public var params: [String: JSONValue] {
+        switch self {
+        case .at(let date): return ["at": .string(ISO8601.format(date))]
+        case .cron(let cron): return ["cron": .string(cron)]
+        }
+    }
+}
+
+public struct NewScheduleRequest: Sendable, Hashable {
+    public var text: String
+    public var title: String?
+    public var when: ScheduleWhen
+    /// Sends here; nil starts a new thread each time with the settings below.
+    public var threadId: String?
+    public var cwd: String?
+    public var accountId: String?
+    public var model: String?
+    public var effort: String?
+    public var permissionMode: PermissionMode?
+
+    public init(text: String, title: String? = nil, when: ScheduleWhen, threadId: String? = nil, cwd: String? = nil,
+                accountId: String? = nil, model: String? = nil, effort: String? = nil, permissionMode: PermissionMode? = nil) {
+        self.text = text
+        self.title = title
+        self.when = when
+        self.threadId = threadId
+        self.cwd = cwd
+        self.accountId = accountId
+        self.model = model
+        self.effort = effort
+        self.permissionMode = permissionMode
+    }
+
+    public var params: [String: JSONValue] {
+        var params = when.params
+        params["text"] = .string(text)
+        if let title { params["title"] = .string(title) }
+        if let threadId {
+            params["threadId"] = .string(threadId)
+        } else {
+            // New-thread settings only mean something without a thread.
+            if let cwd { params["cwd"] = .string(cwd) }
+            if let accountId { params["accountId"] = .string(accountId) }
+            if let model { params["model"] = .string(model) }
+            if let effort { params["effort"] = .string(effort) }
+            if let permissionMode { params["permissionMode"] = .string(permissionMode.rawValue) }
+        }
+        return params
+    }
+}
+
+/// Fields for `schedules.update`; nil ones are left out. The target thread
+/// can't change (the runner says to make a new schedule).
+public struct ScheduleUpdate: Sendable, Hashable {
+    public var title: String?
+    public var text: String?
+    public var when: ScheduleWhen?
+    public var paused: Bool?
+    public var cwd: String?
+
+    public init(title: String? = nil, text: String? = nil, when: ScheduleWhen? = nil, paused: Bool? = nil, cwd: String? = nil) {
+        self.title = title
+        self.text = text
+        self.when = when
+        self.paused = paused
+        self.cwd = cwd
+    }
+
+    public var params: [String: JSONValue] {
+        var params = when?.params ?? [:]
+        if let title { params["title"] = .string(title) }
+        if let text { params["text"] = .string(text) }
+        if let paused { params["paused"] = .bool(paused) }
+        if let cwd { params["cwd"] = .string(cwd) }
+        return params
+    }
+}
+
+public struct SchedulesResult: Sendable, Decodable {
+    public var schedules: [Schedule]
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        schedules = c.lossyArray(Schedule.self, forKey: .schedules)
+    }
+
+    enum CodingKeys: String, CodingKey { case schedules }
+}
+
+public struct ScheduleResult: Sendable, Decodable {
+    public var schedule: Schedule
+}
+
+public struct ScheduleRunResult: Sendable, Decodable {
+    public var schedule: Schedule
+    public var threadId: String?
+    public var turnId: String?
 }

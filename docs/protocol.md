@@ -132,6 +132,68 @@ type ThreadSummary = {
   contextTokens?: number
   contextWindow?: number // the model's context window, when the CLI reports it
   costUsd?: number      // total for the thread so far, if known (Codex reports none)
+  panels?: Panel[]      // from the folder's patches (see Patches); absent when there are none
+  actions?: Action[]    // likewise
+  hooks?: Hook[]        // likewise
+  patches?: PatchInfo[] // the patches that apply to the folder; absent when there are none
+  background?: BackgroundTask[] // what the live CLI is still running in
+                        // the background: sub-agents and shell jobs
+                        // started with run_in_background, Monitor and the
+                        // like, and ones just finished whose result the
+                        // agent hasn't read yet. Absent when there's none.
+                        // Set during a turn too; between turns it's the
+                        // sign the thread is still being worked on
+}
+
+type Action = {
+  id: string            // "<patch>.<slug of the title>": "reseed.reseed-dev-db"
+  title: string
+  kind: "command" | "prompt"
+  command?: string      // kind "command": run in the thread's folder by `actions.run`
+  prompt?: string       // kind "prompt": sent to the thread as a message by `actions.run`
+  patch: string
+  note?: string
+}
+
+type Hook = {
+  id: string            // "<patch>.<slug of the title>"
+  title: string
+  on: "turn.end"        // when it runs: after a turn the agent completed (not one it was interrupted in, or failed)
+  command: string       // run in the thread's folder, as an action's command is
+  edited?: string       // only after a turn that edited a file matching this glob, relative to the folder ("**/*.ts")
+  tell: "failures" | "always" | "never"  // when its result is sent to the agent as a message (see Patches)
+  patch: string
+  note?: string
+}
+
+type PatchInfo = {
+  id: string            // "convex", "xcode", or a patch file's name without its extension
+  source: "builtin" | "home" | "project"
+  file?: string         // the module, for home and project patches
+  error?: string        // the file couldn't be loaded, and gives nothing until it's fixed
+}
+
+type Panel = {
+  id: string            // unique within the thread: "convex.dashboard", "xcode.simulator"
+  title: string         // the tab's label
+  kind: "url" | "image" // a page in a web view, or a picture the runner draws on request
+  url?: string          // kind "url": the page; also what Open in browser opens
+  patch: string         // the patch it came from: "convex", "xcode"
+  note?: string         // one line about it: the deployment, the project
+}
+
+
+type BackgroundTask = {
+  kind: "agent" | "shell" | "monitor" | "other" // a sub-agent, a shell
+                        // command, a Monitor, or anything else the CLI
+                        // runs in the background (a workflow). Clients
+                        // treat a kind they don't know as "other"
+  description: string   // the CLI's own words: the sub-agent's brief, the
+                        // command. May be empty
+  finished?: boolean    // true once it has finished and the agent is about
+                        // to start a turn of its own to read its result
+                        // (the runner counts it for up to 15 s, until that
+                        // turn starts)
 }
 
 type ImageRef = {
@@ -139,6 +201,39 @@ type ImageRef = {
   mediaType: string     // "image/png", "image/jpeg", "image/gif", "image/webp"
   width?: number
   height?: number
+}
+
+type Schedule = {
+  id: string
+  title: string         // for lists; default the first line of text
+  text: string          // the message it sends each time
+  at?: string           // a one-off: when it runs
+  cron?: string         // or repeating: a 5-field cron ("0 9 * * 1-5"), or
+                        // @hourly, @daily, @weekly, @monthly, @yearly
+  timezone?: string     // IANA zone the cron is read in; absent means the
+                        // Mac's own zone, whatever it is at the time
+  whenText: string      // "Weekdays at 9:00", "Once, Tue 28 Oct at 15:30":
+                        // the runner's words for at/cron, for every client
+  threadId?: string     // sends to this thread. Absent: starts a new thread
+                        // each time, with the settings below
+  cwd?: string          // new-thread settings, as in threads.create
+  accountId?: string
+  model?: string
+  effort?: EffortLevel
+  permissionMode?: "full" | "ask"
+  paused: boolean
+  createdAt: string
+  updatedAt: string
+  createdBy?: string    // the thread whose agent made it; absent for a person
+  nextRunAt?: string    // absent while paused, or once a one-off has run
+  finishedAt?: string   // a one-off that has run (kept for 7 days, then dropped)
+  runs: number          // how many times it has sent its message
+  lastRun?: {
+    at: string
+    outcome: "sent" | "skipped" | "failed"
+    threadId?: string   // the thread it sent to or started
+    note?: string       // why it was skipped or failed
+  }
 }
 ```
 
@@ -161,7 +256,7 @@ Persisted event types (stored in `events.ndjson`, returned by `threads.events`):
 
 | type | fields |
 |---|---|
-| `user.message` | `text`, `images: ImageRef[]`, `origin?: "runner"` (set when the runner sent the message by itself, such as the resume after a restart; absent for anything a person or client sent) |
+| `user.message` | `text`, `images: ImageRef[]`, `origin?: "runner" \| "schedule"` (`runner` when the runner sent the message by itself, such as the resume after a restart; `schedule` when a schedule sent it, with `scheduleId`; absent for anything a person or client sent), `scheduleId?` |
 | `assistant.text` | `itemId`, `text` (complete markdown for that block) |
 | `reasoning` | `itemId`, `text` (summary) |
 | `tool.call` | `itemId`, `name` (raw tool name), `kind` (`command` \| `read` \| `edit` \| `write` \| `search` \| `web` \| `mcp` \| `task` \| `todo` \| `image` \| `other`; `image` is image generation), `title` (one line, e.g. "npm test" or "Edit src/a.ts"), `input` (object, large strings truncated to 16 KB) |
@@ -173,8 +268,9 @@ Persisted event types (stored in `events.ndjson`, returned by `threads.events`):
 | `plan.updated` | `entries: {text, status: "pending" \| "in_progress" \| "completed"}[]` |
 | `turn.started` | `turnId`. A turn the agent starts by itself (a background task finished, or a background subagent needs an approval) has no `user.message` before it. A `user.message` after `turn.started` was sent while the turn ran and went into it |
 | `turn.completed` | `turnId`, `outcome` (`completed` \| `interrupted` \| `failed`), `durationMs`, `costUsd?` (Codex turns have none), `usage?` (Claude: `{inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens}`; Codex: `{inputTokens, cachedInputTokens, cacheWriteTokens?, outputTokens, reasoningTokens}`), `error?`, `errorKind?` (`usageLimit` \| `contextWindow` \| `auth`, when a failed turn's cause is known, so a client can offer the fix without reading `error`) |
-| `system.note` | `text` (e.g. "Resumed session", "Compacted the conversation") |
+| `system.note` | `text` (e.g. "Resumed session", "Compacted the conversation", "Patch reseed added: action Reseed dev DB.") |
 | `error` | `message` |
+| `action.run` | `actionId`, `patch`, `title`, `command`, `ok`, `exitCode?`, `text` (what it printed, truncated to 64 KB), `truncated`, `durationMs`, `trigger?` (`"turn.end"` when a hook ran it; absent for a chip or `tb run`). A command that `actions.run` or a hook ran; outside any turn unless one was running, in which case it carries that `turnId` |
 
 Transient events are only sent to subscribers, never persisted, and carry
 `seq` of the last persisted event (they don't consume a number):
@@ -206,7 +302,15 @@ replaces whatever the deltas built up.
 | `threads.markSeen` | `{ threadId, seq }` | `{ thread: ThreadSummary }` |
 | `approvals.respond` | `{ threadId, approvalId, decision: "allow" \| "allowAlways" \| "deny" \| "answered", message?: string, answers?: Record<string, string> }` | `{}`. `allowAlways` allows matching requests for the rest of this thread only; it never changes the thread's permission mode or saves anything in the project. With `answered`, the app sends the chosen answers in one line as `message` too: the runner keeps it in `approval.resolved` (only `answers` goes to the CLI), so the transcript can show what was chosen |
 | `media.import` | `{ path: string }` | `{ image: ImageRef }` copies a file into `inbox/` and reads its size |
-| `runner.status` | `{}` | `{ version, release?, branch?, pid, startedAt, home, logFile, liveClis, running: string[], background: { threadId, tasks: string[] }[], pendingRestart?: { when, reason?, release?, resumeThreadId?, requestedAt, backgroundUntil?, waitingFor: string[] }, rolledBack?: { from, at }, clis?: CliStatus[] }`. `running` lists the threads that are starting, running or waiting on an approval or a question; `background` the threads whose CLI is still running background shells or subagents (`tasks` describes each). A restart waits for both. `branch` is the branch the release was built from. `rolledBack` is set when this release is running because `launch.mjs` went back to it from `from`, which kept crashing at startup (and nobody has activated it on purpose since) |
+| `actions.run` | `{ threadId, actionId }` | For a prompt action, `{ turnId }`: its prompt was sent as a message (as `threads.send`). For a command action, `{ ok, exitCode?, durationMs, seq }` once the command has finished, with its output in the transcript as the `action.run` event at `seq`. The command runs in the thread's folder through a login shell with the thread's variables (`THREADBARE_THREAD_ID` and the rest) and is stopped after 10 minutes. `-32602` for an action the thread doesn't have, `-32020` while the same action is still running |
+| `panels.render` | `{ threadId, panelId }` | `{ image?: ImageRef, note?: string }` draws an `image` panel now: for `xcode.simulator`, a screenshot of the booted simulator (`xcrun simctl io booted screenshot`), written to the same file each time under the thread's `panels/`. With no device booted (or another failure) there's only `note`. Slow: it waits for the screenshot. `-32602` for a panel the thread doesn't have |
+| `schedules.list` | `{ threadId?: string }` | `{ schedules: Schedule[] }`, soonest `nextRunAt` first, then the paused and finished ones. With `threadId`, only the ones that send to that thread or were made by it |
+| `schedules.create` | `{ text: string, title?: string, at?: string, cron?: string, timezone?: string, threadId?: string, cwd?, accountId?, model?, effort?, permissionMode?, paused?: boolean, createdBy?: string }` | `{ schedule: Schedule }`. Exactly one of `at` and `cron`. An `at` in the past runs straight away. With `threadId` it sends there, otherwise it starts a new thread each time (`cwd` defaults like `threads.create`'s, checked now). A bad cron or zone is `-32602` with a message saying what's wrong |
+| `schedules.update` | `{ scheduleId, title?, text?, at?: string, cron?: string, timezone?: string \| null, paused?: boolean, cwd?, accountId?, model?: string \| null, effort?: EffortLevel \| null, permissionMode? }` | `{ schedule: Schedule }`. Setting `at` drops `cron` and the other way round. A new time works out `nextRunAt` again; so does unpausing. Setting `at` on a finished one-off makes it run again then. The target thread can't be changed (make a new schedule) |
+| `schedules.delete` | `{ scheduleId }` | `{}` |
+| `schedules.run` | `{ scheduleId }` | `{ schedule: Schedule, threadId: string, turnId: string }` runs it now, as if it were due, even when paused. A repeating schedule keeps its `nextRunAt`; a one-off is finished |
+| `schedules.preview` | `{ cron?: string, at?: string, timezone?: string, count?: number }` | `{ whenText: string, runs: string[] }`, the next `count` (default 5, at most 20) times it would run, for an editor to show as someone types. `-32602` with the reason for a cron or zone it can't read |
+| `runner.status` | `{}` | `{ version, release?, branch?, pid, startedAt, home, logFile, liveClis, running: string[], background: { threadId, tasks: string[] }[], pendingRestart?: { when, reason?, release?, resumeThreadId?, requestedAt, backgroundUntil?, waitingFor: string[] }, rolledBack?: { from, at }, update?: { state, checkout?, reason?, checkedAt?, commit?, release?, logFile? }, clis?: CliStatus[] }`. `running` lists the threads that are starting, running or waiting on an approval or a question; `background` the threads whose CLI is still running background shells or subagents (`tasks` describes each). A restart waits for both. `branch` is the branch the release was built from. `rolledBack` is set when this release is running because `launch.mjs` went back to it from `from`, which kept crashing at startup (and nobody has activated it on purpose since). `update` is the runner following main by itself (docs/dev-tools.md): `state` is `off` (`reason` says why), `idle`, `checking`, `building`, `waiting` (`release` is built and starts on the pending restart) or `failed` (`reason` is the error; `logFile` has the build's output); `commit` is main's tip at the last check (`checkedAt`) |
 | `runner.restart` | `{ when?: "idle" \| "now", resume?: { threadId, text }, reason?: string, release?: string, backgroundWaitMs?: number, cancel?: boolean }` | `{ scheduled: boolean, waitingFor: string[], background?: { threadId, tasks: string[] }[], note?: string, noResume?: string }`. See Restarts below. `scheduled` is true once the restart is saved; an empty `waitingFor` means it is happening now. `background` is the background work among `waitingFor`. `release` is the release the restart should come back on (the deploy script sets it). `backgroundWaitMs` limits how long background shells and subagents hold the restart. `cancel: true` withdraws a pending restart that hasn't begun and returns `scheduled: false` (`-32020` once it has begun), with a `note` when it also put `current` back. `noResume` says why the `resume` won't be sent as things stand (the thread has already been resumed 3 times in the last hour), so whoever asked can say so rather than wait for it. A runner older than this answers `-32601` |
 | `clis.list` | `{}` | `{ clis: CliStatus[] }` |
 | `clis.check` | `{ provider?: Provider }` | `{ clis: CliStatus[] }`. Starts a version check (both CLIs when `provider` is absent) and returns at once, with the state as it was when the call arrived; the result comes through `clis.updated` |
@@ -214,7 +318,7 @@ replaces whatever the deltas built up.
 | `clis.setPolicy` | `{ provider: Provider, policy: "auto" \| "notify" \| "off" }` | `{ clis: CliStatus[] }` |
 
 Errors use JSON-RPC error objects: `-32602` bad params, `-32004` thread not
-found, `-32010` account not found, `-32020` busy (e.g. two sends racing),
+found, `-32005` schedule not found, `-32010` account not found, `-32020` busy (e.g. two sends racing),
 `-32601` a method this runner doesn't have (`clis.*` on a runner older than
 them), `-32000` anything else with a readable `message`.
 
@@ -240,11 +344,12 @@ still `-32602`.)
 
 | method | params |
 |---|---|
-| `thread.updated` | `{ thread: ThreadSummary }` sent to every connected client whenever a summary changes |
+| `thread.updated` | `{ thread: ThreadSummary }` sent to every connected client whenever a summary changes, `background` included: a sub-agent or shell job starting or finishing sends one even when nothing else changed |
 | `thread.event` | `{ threadId, event: Event }` only for subscribed threads, persisted and transient |
 | `thread.deleted` | `{ threadId }` sent to every connected client when a thread is deleted |
 | `accounts.updated` | `{ accounts: Account[] }` sent to every connected client when the account list or what the runner knows about an account changes: a login appears or goes (checked every 10 seconds), its `models` once the CLI has been asked, its `defaultModel` once a turn has shown it, or its `usage` (Token Stats' `limits.json` changed, or a live reading moved a window by a point or more). The first change goes out at once, then at most one every 5 seconds, always ending on the latest list. Replaces the list from `hello` |
 | `clis.updated` | `{ clis: CliStatus[] }` sent to every connected client when a CLI's status changes (a check finished, an update started, moved on or ended). The latest list wins |
+| `schedules.updated` | `{ schedules: Schedule[] }` sent to every connected client whenever any schedule changes (made, edited, run, deleted, or its thread deleted). The whole list, in `schedules.list` order |
 | `runner.notice` | `{ level: "info" \| "warning" \| "error", message }`. Also sent straight after the `hello` result for things the client missed (startup problems, a missing `claude` binary) |
 
 ## Restarts
@@ -316,6 +421,120 @@ still `-32602`.)
   after every `hello` ("Release X kept crashing at startup, so the runner
   went back to Y.").
 
+## Patches
+
+A thread's folder can give it panels (shown beside the transcript) and
+actions (chips above the composer); see docs/threadbear-design/README.md.
+The runner works them out from the folder (`src/patches.ts`), nothing is
+stored, and they come in the summary's `panels`, `actions` and `patches`,
+so a client learns of them like any other change. The runner reads the
+folder again in the background when the folder changes and otherwise
+every 15 seconds at most (on the next summary it sends), and sends a new
+summary if anything differs, so a `.env.local` that `convex dev` has just
+written, or a patch file the agent has just saved, shows up within
+seconds. A patch file that appears, loads again or breaks after the first
+read is said in the transcript as a `system.note`.
+
+Patches are found by walking up from the thread's folder to the home
+folder (so a thread in a package of a monorepo gets the project's), plus
+`~/.threadbear/patches/` for every folder. Two kinds:
+
+**Patch files**: `.threadbear/patches/<name>.ts` (or `.js`, `.mjs`). The
+runner imports the module (Node runs TypeScript as it is; a changed mtime
+loads it again) and reads its default export:
+
+```ts
+// .threadbear/patches/reseed.ts
+export default {
+  actions: [
+    { title: "Reseed dev DB", run: "npx convex run seed:reset && npx convex import --replace fixtures/dev.zip" },
+    { title: "Explain the schema", prompt: "Read convex/schema.ts and explain it to me." },
+  ],
+  panels: [{ title: "Storybook", url: "http://localhost:6006", note: "while npm run storybook is up" }],
+}
+```
+
+`run` is a command for `actions.run` to run in the thread's folder,
+`prompt` a message it sends instead; one or the other. A panel needs a
+`url` with a scheme. A hook is a command the runner runs by itself:
+
+```ts
+  hooks: [
+    { title: "Typecheck", on: "turn.end", run: "npx tsc --noEmit", edited: "**/*.{ts,tsx}" },
+  ],
+```
+
+`on: "turn.end"` (the one trigger so far) runs it after each turn the
+agent completed, in the thread's folder like an action, and its output
+goes into the transcript as an `action.run` with `trigger`. With
+`edited`, only after a turn that edited or wrote a file matching that
+glob (from `edit.diff` paths and Edit and Write calls). `tell` says when
+the result also goes to the agent, as a `user.message` from the runner
+(`origin: "runner"`) that starts a turn: `"failures"` (the default) when
+the command failed, `"always"`, or `"never"`. The message names the hook
+and the patch, carries the last 8 KB of output in a code block, and asks
+the agent to fix it if it's theirs. One hook is told at most twice in a
+row (a hook that keeps failing is then only posted) and a message from
+anyone else starts the count again, so a hook and an agent can't go round
+for ever.
+
+Ids are the file's name plus a slug of the title
+(`reseed.reseed-dev-db`), and two entries in one file can't share one. A
+file whose export doesn't fit is listed in `patches` with an `error` and
+gives nothing. Loading a project's module is the same trust as `npm
+install` in it.
+
+**Built in**, from the folder alone:
+
+| patch | when | panel |
+|---|---|---|
+| `convex` | a folder with `convex/` | `convex.dashboard`, a `url` panel: `https://dashboard.convex.dev/d/<name>` for the `CONVEX_DEPLOYMENT` in `.env.local` (then `.env`), `http://127.0.0.1:6790` for an anonymous local deployment, the dashboard's front page with no deployment yet. Only that one line of the file is read |
+| `xcode` | a folder with an `.xcodeproj` or `.xcworkspace` | `xcode.simulator`, an `image` panel drawn by `panels.render` |
+
+A client shows what it can: a `url` panel in a web view, an `image` panel
+by asking `panels.render` now and then while it's on screen, and an
+unknown `kind` as a page if it has a `url`.
+
+## Schedules
+
+A schedule sends a message at a set time, once (`at`) or over and over
+(`cron`), like Convex's scheduled functions and crons. It either sends to
+a thread that already exists or starts a new thread each time. They're
+kept in `schedules.json` in the data dir.
+
+- **Cron.** Five fields: minute, hour, day of month, month, day of week
+  (0 or 7 is Sunday), with `*`, lists (`1,15`), ranges (`1-5`), steps
+  (`*/15`, `9-17/2`) and names (`jan`, `mon`). When both day fields are
+  restricted, either one matching is enough, as in standard cron. Read in
+  `timezone`, or the Mac's own zone. A time that doesn't exist on a
+  daylight-saving day runs at the first minute that does; one that happens
+  twice runs once.
+- **Sending.** The message starts with a line saying which schedule sent
+  it, `[Scheduled: "<title>", <whenText>]`, so the agent knows Mike didn't
+  just type it, and its `user.message` has `origin: "schedule"` and
+  `scheduleId`. A message for a thread that's busy waits for the running
+  turn to end (it doesn't go into it), then starts its own turn. A snoozed
+  or archived thread comes back to the inbox, as with any message.
+- **New threads** get the schedule's title and settings and are made the
+  way `threads.create` makes them. A repeating schedule whose last thread is
+  still starting, running or waiting on Mike skips that run
+  (`lastRun.outcome: "skipped"`) rather than pile up threads.
+- **Late runs.** The runner checks at least every 30 seconds, so a Mac
+  that was asleep (when timers stop) catches up soon after it wakes. A run
+  that was due while the runner was stopped or the Mac slept happens once
+  as soon as it can, however many were missed; then `nextRunAt` is the
+  next time after now. While the runner is restarting, a due run waits for
+  the new one.
+- **Failures.** A run that can't send (the folder or account has gone)
+  records `lastRun.outcome: "failed"` and a `note`, and a repeating
+  schedule carries on next time. Deleting a thread deletes the schedules
+  that send to it.
+- **Agents** make and change schedules with the `threadbare` tools
+  (`schedule_message`, `list_schedules`, `update_schedule`,
+  `delete_schedule`); `createdBy` is their thread. By default an agent's
+  schedule sends to its own thread ("check the deploy again in 20
+  minutes").
+
 ## Ordering and reconnects
 
 - Persisted events for a thread are delivered in `seq` order with no gaps.
@@ -340,9 +559,10 @@ Every session, Claude or Codex, gets an MCP server called `threadbare`
 (`runner/src/threadbare-mcp.ts`), bound to its own thread, so an agent can
 drive Threadbare itself: `list_threads`, `read_thread`, `list_accounts`,
 `create_thread`, `send_message`, `update_thread`, `move_thread`,
-`interrupt_thread` and `delete_thread`. `list_accounts` shows each
-account's provider, note and room left; `create_thread` and `move_thread`
-take Codex accounts. They call the same runner methods as
+`interrupt_thread`, `delete_thread`, and `schedule_message`,
+`list_schedules`, `update_schedule` and `delete_schedule` (see Schedules).
+`list_accounts` shows each account's provider, note and room left;
+`create_thread` and `move_thread` take Codex accounts. They call the same runner methods as
 the requests above, so once a restart has begun `create_thread` and
 `send_message` get its "send again in a moment" too. Messages an agent sends
 to another thread (or as a new thread's first message) start with a line

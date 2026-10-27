@@ -25,7 +25,15 @@ struct ComposerView: View {
             set: { app.drafts[draftKey] = $0 }
         )
         let canSend = ComposerChips.canSend(text: draft.wrappedValue.text, imageCount: draft.wrappedValue.images.count)
+        VStack(alignment: .leading, spacing: 6) {
+        if let thread, let line = ScheduleLine.line(for: thread.id, in: app.schedules, now: app.now) {
+            ScheduledLine(line: line)
+        }
         VStack(alignment: .leading, spacing: 10) {
+            // The folder's actions (patches), above the text as in the design.
+            if let thread, !thread.actions.isEmpty {
+                ActionChips(thread: thread)
+            }
             if !draft.wrappedValue.images.isEmpty || importing > 0 {
                 AttachmentStrip(images: draft.images, importing: importing)
             }
@@ -44,11 +52,13 @@ struct ComposerView: View {
                 running: thread?.status.isBusy == true,
                 canSend: canSend,
                 onAttach: { chooseImages(for: draft) },
-                onSend: { send() }
+                onSend: { send() },
+                onSchedule: { app.newSchedule(from: thread, draftKey: draftKey) }
             )
         }
         .padding(Self.padding)
         .background { card }
+        }
         // The transcript's reading column: 780 wide at most, centred, with
         // the same side insets once the window is narrower than that.
         .frame(maxWidth: Theme.maxContentWidth)
@@ -120,6 +130,38 @@ struct ComposerView: View {
             finish(panel.runModal())
         }
     }
+}
+
+/// "Scheduled: Weekdays at 9:00 · next in 3h" over the composer of a thread
+/// with schedules: quiet, and a way into them (the one schedule's editor, or
+/// the Scheduled view for several).
+private struct ScheduledLine: View {
+    @Environment(AppModel.self) private var app
+    let line: ScheduleLine.Line
+    @State private var hovering = false
+
+    var body: some View {
+        Button {
+            if let id = line.scheduleId { app.editSchedule(id) } else { app.showSchedules() }
+        } label: {
+            HStack(spacing: 5) {
+                Image(systemName: "clock")
+                    .font(.system(size: TypeScale.sidebarMeta))
+                Text(line.text)
+                    .lineLimit(1)
+            }
+            .font(.system(size: TypeScale.sidebarMeta + 1))
+            .foregroundStyle(hovering ? AnyShapeStyle(.secondary) : AnyShapeStyle(Color(nsColor: Theme.faintText)))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering = $0 }
+        .help(line.scheduleId == nil ? "Show the schedules" : "Edit the schedule")
+        // In line with the message text inside the card below.
+        .padding(.leading, Self.inset)
+    }
+
+    static let inset = ComposerView.padding
 }
 
 private struct AttachmentStrip: View {

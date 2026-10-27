@@ -219,7 +219,9 @@ final class AppUpdater {
     func considerAutoRestart(app: AppModel) {
         guard let staged, !restarting else { return }
         let working = app.threads.values.contains { $0.status == .running || $0.status == .starting }
-        let hasDrafts = app.drafts.values.contains { !$0.text.isEmpty || !$0.images.isEmpty }
+        // An open schedule editor counts as something typed: a restart
+        // would throw away what's in it.
+        let hasDrafts = app.drafts.values.contains { !$0.text.isEmpty || !$0.images.isEmpty } || app.scheduleEditor != nil
         let active = NSApp.isActive
         guard AppUpdate.shouldAutoRestart(staged: true, loaded: app.threadsLoaded && app.connection == .connected, working: working,
                                           hasDrafts: hasDrafts, active: active, idleFor: Date().timeIntervalSince(lastInput)) else { return }
@@ -239,6 +241,7 @@ final class AppUpdater {
         case .inbox: "inbox"
         case .snoozed: "snoozed"
         case .archive: "archive"
+        case .scheduled: "scheduled"
         }
         UserDefaults.standard.set(["selection": selection ?? "", "mode": modeName], forKey: restoreKey)
     }
@@ -251,6 +254,7 @@ final class AppUpdater {
         switch saved["mode"] {
         case "snoozed": app.sidebarMode = .snoozed
         case "archive": app.showArchive()
+        case "scheduled": app.showSchedules()
         default: app.sidebarMode = .inbox
         }
         if let id = saved["selection"], !id.isEmpty, app.threads[id] != nil { app.select(id) }

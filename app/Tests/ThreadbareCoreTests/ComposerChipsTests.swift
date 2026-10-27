@@ -71,6 +71,8 @@ final class ComposerChipsTests: XCTestCase {
         XCTAssertEqual(ComposerChips.effortLevels.map(ComposerChips.effortTitle), ["Low", "Medium", "High", "Extra high", "Max"])
         XCTAssertEqual(ComposerChips.effortTitle("turbo"), "Turbo")
         XCTAssertEqual(ComposerChips.effortTitle(""), "")
+        XCTAssertEqual(ComposerChips.effortLevels.map(ComposerChips.effortPorridge), ["Too cold", "A bit cold", "Warm", "Hot", "Too hot"])
+        XCTAssertNil(ComposerChips.effortPorridge("turbo"))
     }
 
     /// Blank text alone can't be sent; an image on its own can.

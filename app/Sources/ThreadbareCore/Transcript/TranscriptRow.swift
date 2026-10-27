@@ -29,8 +29,9 @@ public struct TranscriptRow: Sendable, Hashable, Identifiable {
 public enum RowKind: String, Sendable, Hashable, CaseIterable {
     case user, assistant, reasoning, tool, diff, images, approval, question, plan, footer, note, error
     /// Rows the model derives rather than reads from events: a folded run
-    /// of work, the "Working for 12s" line, and the "Edited 3 files" card.
-    case group, working, changes
+    /// of work, the "Working for 12s" line, the "3 sub-agents working in
+    /// the background" line, and the "Edited 3 files" card.
+    case group, working, background, changes
 }
 
 public struct TextItem: Sendable, Hashable {
@@ -50,7 +51,8 @@ public struct UserMessage: Sendable, Hashable {
     public var text: String
     public var images: [ImageRef]
     /// "runner" when the runner sent it by itself (the resume after a
-    /// restart), nil when a person or a client did.
+    /// restart), "schedule" when a schedule did, nil when a person or a
+    /// client did.
     public var origin: String?
 
     public init(text: String, images: [ImageRef] = [], origin: String? = nil) {
@@ -62,6 +64,17 @@ public struct UserMessage: Sendable, Hashable {
     /// Sent by the runner, not by Mike: shown as a quiet centred line, not
     /// a bubble of his own.
     public var isFromRunner: Bool { origin == "runner" }
+
+    /// Sent by a schedule (docs/protocol.md, "Schedules"): also a note, with
+    /// the schedule's name in place of the header line its text starts with.
+    public var isFromSchedule: Bool { origin == "schedule" }
+
+    /// Drawn as a centred note rather than Mike's bubble.
+    public var showsAsNote: Bool { isFromRunner || isFromSchedule }
+
+    /// The schedule's title and time from the message's first line, for
+    /// one a schedule sent.
+    public var scheduledHeader: ScheduledHeader? { isFromSchedule ? ScheduledHeader(text) : nil }
 }
 
 public struct ToolItem: Sendable, Hashable {
@@ -152,6 +165,7 @@ public enum RowContent: Sendable, Hashable {
     case error(String)
     case group(WorkGroup)
     case working(WorkingStatus)
+    case background(BackgroundStatus)
     case changes(ChangedFiles)
 
     public var kind: RowKind {
@@ -171,6 +185,7 @@ public enum RowContent: Sendable, Hashable {
         case .error: return .error
         case .group: return .group
         case .working: return .working
+        case .background: return .background
         case .changes: return .changes
         }
     }

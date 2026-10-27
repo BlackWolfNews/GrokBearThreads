@@ -9,8 +9,12 @@ import { atomicWriteFileSync, readJsonSync } from './fsutil.ts';
 import type { Logger } from './log.ts';
 
 // branch is the branch HEAD was on when it was built (older releases have
-// none), so a release from a feature branch is easy to spot.
-export type ReleaseJson = { id: string; commit: string; dirty: boolean; builtAt: string; node: string; branch?: string };
+// none), so a release from a feature branch is easy to spot. checkout is
+// the repo it was built from and prefix the runner's folder in it
+// ("runner/"); tree is what the release holds of that folder (update.ts
+// compares it with main's). Releases built before these were recorded have
+// none, and a dirty build has no tree.
+export type ReleaseJson = { id: string; commit: string; dirty: boolean; builtAt: string; node: string; branch?: string; checkout?: string; prefix?: string; tree?: string };
 
 export type RunnerState = {
   current: string;

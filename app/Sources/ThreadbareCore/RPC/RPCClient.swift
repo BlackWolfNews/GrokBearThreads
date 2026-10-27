@@ -21,6 +21,8 @@ public enum RPCError: Error, Sendable, Equatable, LocalizedError {
     }
 
     public static let threadNotFound = -32004
+    public static let scheduleNotFound = -32005
+    public static let methodNotFound = -32601
     public static let busy = -32020
 }
 
@@ -29,6 +31,8 @@ public enum RPCNotification: Sendable {
     case threadEvent(threadId: String, event: Event)
     case threadDeleted(threadId: String)
     case accountsUpdated([Account])
+    /// The whole schedule list, after any change.
+    case schedulesUpdated([Schedule])
     case runnerNotice(level: String, message: String)
     case other(method: String)
 }
@@ -214,6 +218,10 @@ public final class RPCClient: Sendable {
             guard let params = try? decoder.decode(RPCNotificationEnvelope<AccountsUpdatedParams>.self, from: data).params
             else { return nil }
             return .accountsUpdated(params.accounts)
+        case "schedules.updated":
+            guard let params = try? decoder.decode(RPCNotificationEnvelope<SchedulesResult>.self, from: data).params
+            else { return nil }
+            return .schedulesUpdated(params.schedules)
         case "runner.notice":
             guard let params = try? decoder.decode(RPCNotificationEnvelope<RunnerNoticeParams>.self, from: data).params
             else { return nil }

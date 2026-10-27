@@ -157,15 +157,41 @@ it's where the patches stack from.
 
 1. **Goldilocks and the bear working line.** Small, and the app feels
    like Threadbear straight away. Includes the hibernate menu copy and
-   the sidebar footer. About a day.
+   the sidebar footer. About a day. Landed 2026-10-27: the app is
+   called Threadbear, the working line is "Bear with me · 12s" with the
+   waving sprite, Snooze is Hibernate (Wake to undo), Archive is Den,
+   the effort menu has the porridge under each level, and the icon is
+   `mascot-a` (`app/icons/make-icon.swift` cuts it out of the tile).
 2. **Panels from a manifest.** The panel bar, web view panels, built-in
    Convex (dashboard URL) and xcode (Simulator screenshot) patches. The
-   Convex dashboard alone pays for it. A day or two.
+   Convex dashboard alone pays for it. A day or two. Landed 2026-10-27:
+   the runner's `patches.ts` gives a thread its panels in the summary
+   (`panels`), the app shows them in a pane on the right with tabs along
+   the top, an Open in browser arrow and a draggable width; the Convex
+   panel is the real dashboard for the deployment in `.env.local`, the
+   Simulator panel asks the runner for a fresh screenshot every few
+   seconds (`panels.render`). Panels are built in for now; the project's
+   own patch files are step 3.
 3. **Actions and the patch loader.** `.threadbear/patches/*.ts` loaded
    by the runner, action chips, the stitched "New patch" card, the
-   Patches tab. This is the scenario 2 moment. Two days.
+   Patches tab. This is the scenario 2 moment. Two days. Landed
+   2026-10-27, minus the card and the tab: patch files are plain modules
+   whose default export lists `actions` (`run` a command or `prompt` a
+   message) and `panels` (a `url`), the runner reads them again within 15
+   seconds of a change and says in the transcript when one appears or
+   breaks, the chips sit above the composer's text, and a command's
+   output lands in the transcript as a tool-style row with the patch
+   glyph. `tb actions` and `tb run` do the same from a shell. The patch
+   file shape question is settled: one file per patch, declarative.
 4. **Hooks.** Turn-end and file-change hooks posting into the
-   transcript; the Convex logs hook. A day.
+   transcript; the Convex logs hook. A day. Landed 2026-10-27 as
+   `hooks` in a patch file: `on: "turn.end"` with an optional `edited`
+   glob, posted into the transcript like an action and, when it fails
+   (or always, or never), sent to the agent as a message from the runner
+   so it fixes what it broke, told twice in a row at most. The Convex
+   logs hook (tailing `convex logs` into a running turn) needs a
+   long-running process per thread and a trigger while the turn runs;
+   it's the next hook trigger to add, not done yet.
 5. **Tools and honey pots** fold into step 4 of the main plan (Codex,
    accounts, usage) since both need the same plumbing.
 6. **App icon and dock states** from `mascot-a`, the dock teddy picking
@@ -173,11 +199,11 @@ it's where the patches stack from.
 
 ## Open questions for Mike
 
-- Icon: `mascot-a` (the bear) or `mascot-d` (the patch)?
+- Icon: went with `mascot-a` (the bear). Easy to swap for `mascot-d`.
 - Does the sidebar keep plain words ("Needs you", "Running", "Inbox")
   with the bear only in the transcript, dock and footer? That's what
   the mockups do, and I'd keep it that way: the bear is the app's
   mascot, not one per thread.
-- Patch file shape: `patch({...})` with four optional exports as above,
-  or one file per kind (`actions.ts`, `panels.ts`)? One file per patch
-  is easier for the agent to write and for you to delete.
+- Patch file shape: settled as one file per patch with a plain default
+  export (docs/protocol.md, Patches). Hooks and tools will join
+  `actions` and `panels` in the same object.

@@ -6,6 +6,54 @@ final class SidebarRowTests: XCTestCase {
         ThreadRowLook(ThreadSummary(id: "t", title: "t", status: status, needsYou: needsYou))
     }
 
+    /// Between turns with sub-agents or jobs still going, the row says so
+    /// (and keeps saying so under the Running heading, since the words are
+    /// what's running, not the heading's). An unread reply keeps its dot.
+    func testBackgroundWorkShowsOnTheRow() {
+        let cubs = [BackgroundTask(kind: .agent, description: "a"), BackgroundTask(kind: .agent, description: "b"), BackgroundTask(kind: .agent, description: "c")]
+        let thread = ThreadSummary(id: "t", title: "t", status: .idle, background: cubs)
+        XCTAssertEqual(ThreadRowLook(thread), ThreadRowLook(status: .background, unread: false, emphasised: false))
+        XCTAssertEqual(ThreadRowLook(thread, section: .running), ThreadRowLook(status: .background, unread: false, emphasised: false, labelled: true))
+        var unread = thread
+        unread.needsYou = true
+        XCTAssertEqual(ThreadRowLook(unread), ThreadRowLook(status: .background, unread: true, emphasised: true))
+        // A running turn is the working line, whatever's in the background.
+        var running = thread
+        running.status = .running
+        XCTAssertEqual(ThreadRowLook(running).status, .working)
+        var failed = thread
+        failed.status = .error
+        XCTAssertEqual(ThreadRowLook(failed).status, .failed)
+        XCTAssertEqual(ThreadRowStatus.background.label, "In the background")
+    }
+
+    func testBackgroundWords() {
+        let agent = { (d: String) in BackgroundTask(kind: .agent, description: d) }
+        let shell = { (d: String) in BackgroundTask(kind: .shell, description: d) }
+        XCTAssertEqual(BackgroundWork.short([agent("a"), agent("b"), agent("c")]), "3 sub-agents")
+        XCTAssertEqual(BackgroundWork.short([agent("a")]), "1 sub-agent")
+        XCTAssertEqual(BackgroundWork.short([shell("npm test")]), "1 job")
+        XCTAssertEqual(BackgroundWork.short([shell("a"), shell("b")]), "2 jobs")
+        XCTAssertEqual(BackgroundWork.short([agent("a"), shell("b")]), "2 jobs")
+        XCTAssertEqual(BackgroundWork.short([BackgroundTask(kind: .monitor, description: "")]), "1 monitor")
+        XCTAssertEqual(BackgroundWork.short([BackgroundTask(kind: .agent, description: "a", finished: true)]), "Finishing")
+        XCTAssertEqual(BackgroundWork.short([agent("a"), BackgroundTask(kind: .agent, description: "b", finished: true)]), "1 sub-agent")
+
+        XCTAssertEqual(BackgroundWork.line([agent("a"), agent("b"), agent("c")]), "3 sub-agents working in the background")
+        XCTAssertEqual(BackgroundWork.line([shell("npm test")]), "1 job running in the background")
+        XCTAssertEqual(BackgroundWork.line([agent("a"), agent("b"), shell("npm test")]), "2 sub-agents and 1 job running in the background")
+        XCTAssertEqual(BackgroundWork.line([agent("a"), shell("b"), BackgroundTask(kind: .monitor, description: "c")]), "1 sub-agent, 1 job and 1 monitor running in the background")
+        XCTAssertEqual(BackgroundWork.line([agent("a"), BackgroundTask(kind: .agent, description: "b", finished: true)]), "1 sub-agent working in the background, 1 just finished")
+        XCTAssertEqual(BackgroundWork.line([BackgroundTask(kind: .agent, description: "b", finished: true)]), "1 sub-agent just finished, about to read its result")
+        XCTAssertEqual(BackgroundWork.line([BackgroundTask(kind: .shell, description: "b", finished: true), BackgroundTask(kind: .agent, description: "c", finished: true)]), "2 jobs just finished, about to read their results")
+
+        XCTAssertEqual(BackgroundWork.detail([agent("Rebuild page A"), BackgroundTask(kind: .shell, description: "", finished: true)]), "Rebuild page A\n1 job (finished)")
+        XCTAssertEqual(BackgroundWork.lineWithDetail([agent("Rebuild page A"), agent("Rebuild page B")]), "2 sub-agents working in the background · Rebuild page A, Rebuild page B")
+        XCTAssertEqual(BackgroundWork.lineWithDetail([BackgroundTask(kind: .other, description: "")]), "1 task running in the background")
+        let long = String(repeating: "x", count: 70) + "\nsecond line"
+        XCTAssertEqual(BackgroundWork.lineWithDetail([shell(long)]), "1 job running in the background · " + String(repeating: "x", count: 59) + "…")
+    }
+
     func testStatusInWords() {
         XCTAssertEqual(look(.idle), ThreadRowLook(status: .time, unread: false, emphasised: false))
         XCTAssertEqual(look(.running), ThreadRowLook(status: .working, unread: false, emphasised: false))
@@ -130,5 +178,19 @@ final class ComposerPlacementTests: XCTestCase {
         // Too short for everything: the composer and its note stay on screen.
         XCTAssertEqual(ComposerPlacementMath.composerTop(paneHeight: 180, composerHeight: 110, centred: true, headingHeight: 30, noteHeight: 16), 54)
         XCTAssertEqual(ComposerPlacementMath.composerTop(paneHeight: 80, composerHeight: 110, centred: true), 0)
+    }
+}
+
+final class DockBadgeTests: XCTestCase {
+    func testBadgeCountsThreadsThatNeedYouAndNothingElse() {
+        let now = Date()
+        let waiting = ThreadSummary(id: "a", title: "a", status: .waiting)
+        let unread = ThreadSummary(id: "b", title: "b", needsYou: true)
+        let running = ThreadSummary(id: "c", title: "c", status: .running)
+        let snoozed = ThreadSummary(id: "d", title: "d", needsYou: true, snoozedUntil: now.addingTimeInterval(3600))
+        let archived = ThreadSummary(id: "e", title: "e", needsYou: true, archivedAt: now)
+        XCTAssertEqual(DockBadge.label(for: [waiting, unread, running, snoozed, archived], now: now), "2")
+        XCTAssertNil(DockBadge.label(for: [running], now: now))
+        XCTAssertNil(DockBadge.label(needsYou: 0))
     }
 }

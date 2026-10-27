@@ -1013,6 +1013,7 @@ class UsageStore {
   onChange(fn: (accountIds: string[]) => void): () => void
 }
 export function usageLine(u: AccountUsage | undefined): string // "5-hour 89% left, weekly 78% left, resets Thu 1 pm"
+export function pickAccount(accounts: Account[], lastUsedId: string | undefined): string | undefined // see "Picking an account for a new thread"
 ```
 
 **Reading the baseline**
@@ -1206,7 +1207,7 @@ Plain copy: no eyebrow or kicker labels, no em dashes. Build against the mock ru
 - Each item's title is the email.
 - Its subtitle is the note, if any, then the room left: "Convex work only · 5h 89% · week 78%, resets 3:40 pm", or "Limit reached, resets 3:40 pm". Accounts at their limit stay selectable.
 - At the bottom, a disabled line: "Usage from Token Stats at 7:15 am", or "Token Stats hasn't updated since 6:02 am".
-- New threads keep defaulting to the last-used account.
+- A new thread starts on the account `pickAccount` chooses (see "Picking an account for a new thread" under Decisions), until Mike picks one in this menu.
 
 **Account chip.**
 
@@ -1222,7 +1223,7 @@ Plain copy: no eyebrow or kicker labels, no em dashes. Build against the mock ru
 - The Effort section lists the chosen model's `effortLevels`, `ultra` included ("Ultra"). Its Default row's subtitle names the level that applies: the account's `defaultEffort` ("The account's default, high"), else the model's `defaultEffort` ("The model's own level, medium"), else what the last turn ran at.
 - The chip already shows the model's title and effort ("GPT-6.1-Sol · High"). `ComposerChips.model` learns `gpt-` ids ("gpt-6.1-sol" reads "GPT-6.1-Sol"), for when the list hasn't loaded.
 
-**Turn footer** (`RowRenderer.swift`). A Codex turn has no cost, so the footer shows its duration and tokens instead: "12s · 15.3k in, 220 out" from `usage` (`inputTokens`, `outputTokens`; cached input in the tooltip). Claude's footer doesn't change. The formatting lives in ThreadbareCore, next to `CostText`, with tests.
+**Turn footer** (`RowRenderer.swift`). A Codex turn has no cost, so the footer shows its duration only ("12s"). Its tokens (`inputTokens`, `cachedInputTokens`, `outputTokens`, `reasoningTokens`) go in "Copy debug info". Claude's footer doesn't change (Mike, 27 Oct).
 
 **Approval cards.** A Codex command approval's `input.reason` (the model's own question) shows under the card's title.
 
@@ -1430,20 +1431,28 @@ Capture notes:
 
 ## Decisions for Mike
 
-**Decided on 27 Oct:**
+**Decided on 27 Oct.** Mike answered the list again at 11:40, and those answers replace the earlier ones where they differ (3 and 4):
 
 1. **Codex Desktop list.** Threadbare's Codex threads may show in Codex Desktop's list. Threadbare archives them in Codex when Mike archives or deletes them in Threadbare.
 2. **Claude update channel:** `latest`.
-3. **Codex turn footer:** duration and tokens.
-4. **New threads** keep defaulting to the last-used account, for now.
-5. **`~/.local/bin/codex`** (a standalone 0.147.0 nothing updates) is left alone.
+3. **Codex turn footer: duration only.** Tokens go in "Copy debug info", not the footer (F, `RowRenderer.swift`). Claude's footer doesn't change.
+4. **New threads start on the account with the most room**, not the last-used one. See "Picking an account for a new thread" below.
+5. **`~/.local/bin/codex`** was deleted on 27 Oct at Mike's OK.
 6. **claude-2** is labelled "Convex work only" in the account menu.
 7. **Research leftovers** were deleted on 27 Oct: the probe's Codex thread and image, the Claude probe transcript and the `/tmp` scratch folders. Every spike thread was deleted too.
+8. **Token Stats' daily Codex reinstall:** yes, change Token Stats to skip `npm install` when the installed version is already the latest. That's a separate job in the Token Stats repo, not part of this branch.
+
+**Picking an account for a new thread** (decision 4). One rule, `pickAccount(accounts, lastUsedId)`, written once on each side: `runner/src/usage.ts` (D) and `ThreadbareCore/Threads/AccountUsageText.swift` (F), with the same tests.
+
+- Room is the tighter of the 5-hour and weekly windows' `remainingPercent`; with only one window (Pro Lite), that one.
+- Candidates are the accounts of the last-used account's provider, so a Claude habit stays on Claude and model and effort don't jump.
+- Skip any account that's `blocked`, under 10% room, or has a note (today only claude-2, "Convex work only": it's for work and is never picked for him).
+- Pick the most room. A tie, or an account with no usage known, goes to the last-used one. If every candidate is skipped, use the last-used one.
+- The runner uses it for `threads.create` with no `accountId` (`tb new`, `create_thread`, schedules) and sends the result as `hello.defaults.accountId`, recomputed on each `accounts.updated` (C). The app uses its own copy for the composer's default when Mike hasn't picked one, so it follows `accounts.updated` without a round trip; the account chip still overrides it, and an explicit pick sticks for that draft only.
 
 **Still open:**
 
-1. **Token Stats' daily Codex reinstall.** Threadbare no longer depends on it. But it still swaps the files under T3's and the terminal's Codex every afternoon, even when nothing changed. Should a separate job change Token Stats to skip `npm install` when the installed version is already the latest?
-2. **MCP servers in Codex threads.** With Mike's config, every open Codex thread starts all of his MCP and plugin servers: about 150 to 190 MB and 7 processes per thread, plus about 8.9k input tokens per turn. Claude threads load his MCP servers too, so the plan keeps them on. The alternatives: switch the heavy ones off per thread through `config` (for example `mcp_servers.agent-archive.enabled=false`, or plugin switches; untested), or a `codexArgs` setting he controls.
+1. **MCP servers in Codex threads.** With Mike's config, every open Codex thread starts all of his MCP and plugin servers: about 150 to 190 MB and 7 processes per thread, plus about 8.9k input tokens per turn. Claude threads load his MCP servers too, so the plan keeps them on. The alternatives: switch the heavy ones off per thread through `config` (for example `mcp_servers.agent-archive.enabled=false`, or plugin switches; untested), or a `codexArgs` setting he controls.
 
 ## Decisions
 

@@ -4,7 +4,8 @@ import Foundation
 public enum ToolPresentation {
     public static func symbol(for kind: ToolKind, name: String) -> String {
         switch kind {
-        case .command: return "terminal"
+        // An action from a patch (ActionRun) gets the patch glyph.
+        case .command: return name == "action" ? "square.dashed" : "terminal"
         case .read: return "doc.text"
         // At 12 pt the bare `pencil` drew as one diagonal stroke and read
         // as a stray "/" before the title.

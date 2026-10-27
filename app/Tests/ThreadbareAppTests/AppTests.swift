@@ -298,7 +298,14 @@ final class DraftTests: XCTestCase {
         XCTAssertEqual(app.errorMessage, "Busy")
     }
 
-    func testNewThreadSettingsResetAfterCreatingOne() async throws {
+    /// The folder and "Ask before edits" were for the one thread; the
+    /// account, model and effort are what the next thread starts on too,
+    /// and the model and effort survive a relaunch.
+    func testNewThreadSettingsAfterCreatingOne() async throws {
+        defer {
+            UserDefaults.standard.removeObject(forKey: AppModel.lastModelKey)
+            UserDefaults.standard.removeObject(forKey: AppModel.lastEffortKey)
+        }
         let app = AppModel()
         let transport = RefusingTransport()
         transport.createdThread = true
@@ -307,6 +314,7 @@ final class DraftTests: XCTestCase {
         app.useClientForTesting(client)
         app.newThreadCwd = "/tmp/somewhere"
         app.newThreadModel = "haiku"
+        app.newThreadEffort = "low"
         app.newThreadAsk = true
         app.newThreadAccount = "claude-3"
         app.drafts["new"] = Draft(text: "Start something")
@@ -316,9 +324,17 @@ final class DraftTests: XCTestCase {
         }
         XCTAssertEqual(app.selection, "th_new")
         XCTAssertNil(app.newThreadCwd)
-        XCTAssertNil(app.newThreadModel)
         XCTAssertFalse(app.newThreadAsk)
         XCTAssertEqual(app.newThreadAccount, "claude-3", "the account sticks")
+        XCTAssertEqual(app.newThreadModel, "haiku", "the model sticks")
+        XCTAssertEqual(app.newThreadEffort, "low", "the effort sticks")
+        XCTAssertEqual(AppModel().newThreadModel, "haiku", "and is remembered across launches")
+        XCTAssertEqual(AppModel().newThreadEffort, "low")
+        // Picking on an open thread is a pick too; the default row clears it.
+        app.setEffort("th_new", "max")
+        app.setModel("th_new", nil)
+        XCTAssertEqual(AppModel().newThreadEffort, "max")
+        XCTAssertNil(AppModel().newThreadModel)
     }
 }
 

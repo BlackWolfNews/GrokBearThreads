@@ -103,8 +103,12 @@ public struct TranscriptModel: Sendable {
     /// rebuilt every row after it, 30 ms a click.
     private var dirtyUpdateEnd = 0
     /// Something the working line depends on changed (an approval or
-    /// question came or went), so the rows to the end need rebuilding.
+    /// question came or went, the background work changed), so the rows to
+    /// the end need rebuilding.
     private var tailDirty = false
+    /// The thread's background sub-agents and jobs, from its summary. Shown
+    /// as the last row while no turn runs.
+    public private(set) var background: [BackgroundTask] = []
     /// The thread's working folder. File rows and the changes card name
     /// folders relative to it, so they don't repeat the project's name.
     public private(set) var root: String?
@@ -218,6 +222,15 @@ public struct TranscriptModel: Sendable {
     /// (`ChangedFiles.expansionKey`, or its `DiffPreview.allKey` to show all
     /// of the file's diff). Opening a group inserts its items under it; the
     /// group keeps its id, so its cached height survives.
+    /// The thread's summary said what's running in the background. The
+    /// line at the end comes or goes (or changes its words) in place.
+    public mutating func setBackground(_ tasks: [BackgroundTask]) -> TranscriptChange {
+        guard tasks != background else { return TranscriptChange() }
+        background = tasks
+        tailDirty = true
+        return refreshRows()
+    }
+
     public mutating func setExpanded(_ key: String, _ open: Bool) -> TranscriptChange {
         guard expanded.contains(key) != open else { return TranscriptChange() }
         DiffPreview.set(key, open: open, in: &expanded)
@@ -579,6 +592,14 @@ public struct TranscriptModel: Sendable {
         case .error(let message):
             append(TranscriptRow(id: "e:\(seq)", seq: seq, turnId: turnId, content: .error(message)))
 
+        case .actionRun(let run):
+            // A finished command, drawn like a tool call with its output.
+            let itemId = run.itemId(seq: seq)
+            var (call, result) = run.asToolCall
+            call.itemId = itemId
+            result.itemId = itemId
+            append(TranscriptRow(id: "t:\(itemId)", seq: seq, turnId: turnId, content: .tool(ToolItem(itemId: itemId, call: call, result: result, root: root))))
+
         case .unknown:
             break
         }
@@ -754,6 +775,12 @@ public struct TranscriptModel: Sendable {
         if workingLine, let turn = openTurn, !pendingCards.values.contains(turn) {
             let status = WorkingStatus(turnId: turn, startedAt: turnStarts[turn])
             out.append(derived("w:" + turn, seq: lastSeq, turnId: turn, .working(status)))
+            starts.append(items.count)
+        } else if workingLine, openTurn == nil, !background.isEmpty {
+            // Between turns with sub-agents or jobs still going: the thread
+            // is still being worked on, and this says so where the working
+            // line would be.
+            out.append(derived("bg:", seq: lastSeq, turnId: nil, .background(BackgroundStatus(tasks: background))))
             starts.append(items.count)
         }
         return (out, starts)

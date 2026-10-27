@@ -3,7 +3,7 @@ import Observation
 import ThreadbareCore
 
 enum SidebarMode: Equatable {
-    case inbox, snoozed, archive
+    case inbox, snoozed, archive, scheduled
 }
 
 enum ConnectionState: Equatable {
@@ -33,7 +33,9 @@ final class AppModel {
     var runnerVersion = ""
     var accounts: [Account] = []
     var defaults = RunnerDefaults(cwd: NSString("~/dev/me/misc").expandingTildeInPath, accountId: "claude-main")
-    var threads: [String: ThreadSummary] = [:]
+    var threads: [String: ThreadSummary] = [:] {
+        didSet { refreshDockBadge() }
+    }
     var selection: String?
     var sidebarMode: SidebarMode = .inbox
     var archiveQuery = ""
@@ -47,15 +49,47 @@ final class AppModel {
     /// The first thread list has arrived. Until then the sidebar list stays
     /// empty, so it's filled in one go.
     var threadsLoaded = false
-    /// New-thread settings shown on the composer.
+    /// New-thread settings shown on the composer. The model and effort
+    /// start as whatever was picked last, on any thread, and are kept
+    /// across launches; the folder and "Ask before edits" are for one
+    /// thread and go back to the defaults after it starts.
     var newThreadCwd: String?
     var newThreadAccount: String?
-    var newThreadModel: String?
-    var newThreadEffort: String?
+    var newThreadModel: String? = UserDefaults.standard.string(forKey: AppModel.lastModelKey) {
+        didSet { Self.remember(newThreadModel, forKey: Self.lastModelKey) }
+    }
+    var newThreadEffort: String? = UserDefaults.standard.string(forKey: AppModel.lastEffortKey) {
+        didSet { Self.remember(newThreadEffort, forKey: Self.lastEffortKey) }
+    }
     var newThreadAsk = false
+    /// Bumped to open the composer's model picker from the automation
+    /// (`composer-menu` with `show`), the way a click on the chip does.
+    var modelPickerRequest = 0
+    /// Every schedule, in the runner's order (soonest first, then the
+    /// paused and finished ones). Replaced whole by `schedules.updated`.
+    var schedules: [Schedule] = []
+    /// The runner knows about schedules: an older one answers
+    /// `schedules.list` with -32601, and then the sidebar has no Scheduled row.
+    var schedulesSupported = false
+    /// The schedule editor sheet, when it's open (ScheduleEditor).
+    var scheduleEditor: ScheduleEditorState?
     /// A sidebar row drawn as if the pointer were over it, so the screenshot
     /// run can show the hover buttons without moving the mouse.
     var hoverOverride: String?
+    /// The pane beside the transcript (PanelsView). Shown for any thread
+    /// with panels unless Mike has hidden it; which panel is showing is
+    /// remembered per thread for the session.
+    var panelsShown = UserDefaults.standard.object(forKey: AppModel.panelsShownKey) as? Bool ?? true {
+        didSet { UserDefaults.standard.set(panelsShown, forKey: Self.panelsShownKey) }
+    }
+    var panelWidth: CGFloat = {
+        let saved = UserDefaults.standard.double(forKey: AppModel.panelWidthKey)
+        return saved > 0 ? CGFloat(saved) : CGFloat(PanelChoice.defaultWidth)
+    }()
+    var panelChoice: [String: String] = [:]
+    /// Actions whose command is running, as "<threadId>/<actionId>", so
+    /// the chip shows it and a second click doesn't start another.
+    var runningActions: Set<String> = []
     /// The automation hook's `focus`: a scripted app is never in front, so
     /// it never marked anything read; with this it acts as if Mike were
     /// looking at it. Never set outside a scripted debug run.
@@ -87,6 +121,10 @@ final class AppModel {
 
     static let maxSessions = 24
     static let lastAccountKey = "lastAccountId"
+    static let lastModelKey = "lastModel"
+    static let lastEffortKey = "lastEffort"
+    static let panelsShownKey = "panelsShown"
+    static let panelWidthKey = "panelWidth"
     /// The account threads aren't labelled with. Fixed, unlike the runner's
     /// `defaults.accountId` (the last one used), so labels don't move about.
     static let mainAccountId = "claude-main"
@@ -179,6 +217,7 @@ final class AppModel {
                 threadsLoaded = true
                 archiveLoaded = true
                 onThreadsLoaded?()
+                loadSchedules()
                 for session in sessions.values where session.state == .loaded {
                     await session.subscribe()
                 }
@@ -234,6 +273,9 @@ final class AppModel {
                 // The runner learned something (its model lists, a
                 // default it saw a turn run on): replaces hello's list.
                 accounts = list
+            case .schedulesUpdated(let list):
+                schedules = list
+                schedulesSupported = true
             case .runnerNotice(let level, let message):
                 notice(level: level, message)
             case .other:
@@ -291,6 +333,9 @@ final class AppModel {
     private func receive(_ thread: ThreadSummary) {
         let previous = threads[thread.id]
         threads[thread.id] = thread
+        // The open transcript's "3 sub-agents working in the background"
+        // line follows the summary, not the events.
+        if previous?.background != thread.background { sessions[thread.id]?.setBackground(thread.background) }
         // A thread a pending restart waits for may just have finished.
         if restart.isPending, previous?.status != thread.status { refreshRunnerStatus() }
         let becameNeedy = thread.needsYou && previous?.needsYou != true
@@ -407,12 +452,10 @@ final class AppModel {
                 do {
                     let thread = try await client.createThread(request)
                     UserDefaults.standard.set(account, forKey: Self.lastAccountKey)
-                    // Folder, model and "Ask before edits" were for this
+                    // The folder and "Ask before edits" were for this
                     // thread; the next one starts from the defaults again.
-                    // The account sticks (the plan's "last-used account").
+                    // The account, model and effort stick.
                     newThreadCwd = nil
-                    newThreadModel = nil
-                    newThreadEffort = nil
                     newThreadAsk = false
                     threads[thread.id] = thread
                     select(thread.id)
@@ -484,12 +527,22 @@ final class AppModel {
         update(threadId, ThreadUpdate(permissionMode: ask ? .ask : .full))
     }
 
+    /// A model or effort picked on a thread is also what the next new
+    /// thread starts on: the picker has no default row, it remembers.
     func setModel(_ threadId: String, _ model: String?) {
+        newThreadModel = model
         update(threadId, ThreadUpdate(model: .some(model)))
     }
 
     func setEffort(_ threadId: String, _ effort: String?) {
+        newThreadEffort = effort
         update(threadId, ThreadUpdate(effort: .some(effort)))
+    }
+
+    /// Keeps a last-picked value across launches; nil (the default) clears it.
+    private static func remember(_ value: String?, forKey key: String) {
+        if let value, !value.isEmpty { UserDefaults.standard.set(value, forKey: key) }
+        else { UserDefaults.standard.removeObject(forKey: key) }
     }
 
     func account(_ id: String) -> Account? {
@@ -682,6 +735,76 @@ final class AppModel {
     func copyToPasteboard(_ text: String) {
         pasteboard.clearContents()
         pasteboard.setString(text, forType: .string)
+    }
+
+    // MARK: Dock
+
+    /// The Dock badge is the number of threads that need you (DockBadge).
+    /// Scripted runs (dev apps, perf and screenshot runs) show none, like
+    /// notifications.
+    private func refreshDockBadge() {
+        guard notificationsEnabled else { return }
+        let label = DockBadge.label(for: threads.values, now: now)
+        if NSApp.dockTile.badgeLabel != label { NSApp.dockTile.badgeLabel = label }
+    }
+
+    // MARK: Panels
+
+    /// Whether the pane is beside this thread's transcript: when the folder
+    /// gives it panels or patches (the Patches tab shows those).
+    func showsPanels(for thread: ThreadSummary) -> Bool { panelsShown && (!thread.panels.isEmpty || !thread.patches.isEmpty) }
+
+    func activePanel(for thread: ThreadSummary) -> Panel? {
+        PanelChoice.active(in: thread.panels, remembered: panelChoice[thread.id])
+    }
+
+    func choosePanel(_ panelId: String, in threadId: String) {
+        panelChoice[threadId] = panelId
+        panelsShown = true
+    }
+
+    func togglePanels() { panelsShown.toggle() }
+
+    func setPanelWidth(_ width: CGFloat, columnWidth: CGFloat) {
+        panelWidth = CGFloat(PanelChoice.clampedWidth(Double(width), paneColumnWidth: Double(columnWidth)))
+    }
+
+    func savePanelWidth() {
+        UserDefaults.standard.set(Double(panelWidth), forKey: Self.panelWidthKey)
+    }
+
+    static func actionKey(threadId: String, actionId: String) -> String { "\(threadId)/\(actionId)" }
+
+    func isRunning(action: Action, in threadId: String) -> Bool {
+        runningActions.contains(Self.actionKey(threadId: threadId, actionId: action.id))
+    }
+
+    /// Runs an action chip: the runner sends a prompt action as a message,
+    /// or runs a command action and puts its output in the transcript.
+    func runAction(_ action: Action, in threadId: String) {
+        let key = Self.actionKey(threadId: threadId, actionId: action.id)
+        guard !runningActions.contains(key), let client else { return }
+        runningActions.insert(key)
+        Task {
+            do {
+                _ = try await client.runAction(threadId: threadId, actionId: action.id)
+            } catch {
+                errorMessage = "\(action.title) didn't run: \(error.localizedDescription)"
+            }
+            runningActions.remove(key)
+        }
+    }
+
+    /// An image panel's latest picture, or nil when the runner can't be
+    /// asked (not connected, an old runner).
+    func renderPanel(threadId: String, panelId: String) async -> PanelRender? {
+        guard let client else { return nil }
+        do {
+            return try await client.renderPanel(threadId: threadId, panelId: panelId)
+        } catch {
+            AppLog.write("panels", "render \(panelId) failed: \(error)")
+            return PanelRender(note: "Couldn't get a picture from the runner.")
+        }
     }
 }
 

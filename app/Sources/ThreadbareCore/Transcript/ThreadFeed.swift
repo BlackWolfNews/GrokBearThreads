@@ -150,6 +150,12 @@ public struct ThreadFeed: Sendable {
         model.setExpanded(key, open)
     }
 
+    /// The thread's background work changed (see
+    /// `TranscriptModel.setBackground`). Queued events stay queued.
+    public mutating func setBackground(_ tasks: [BackgroundTask]) -> TranscriptChange {
+        model.setBackground(tasks)
+    }
+
     /// Swaps in a model that had an older page prepended off the main thread.
     /// Only valid if nothing was flushed since the copy was taken.
     public mutating func replaceModel(_ newModel: TranscriptModel) {

@@ -5,22 +5,27 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import type {
+  Panel,
   Account,
   AnyEvent,
   ApprovalDecision,
+  BackgroundTask as ProtocolBackgroundTask,
   DeltaBody,
   DeltaType,
   EffortLevel,
   EventBody,
   ImageRef,
   InProgressItem,
+  MessageOrigin,
   PermissionMode,
   PersistedEvent,
   Question,
   ThreadStatus,
   ThreadSummary,
+  TurnOutcome,
 } from './protocol.ts';
 import { ErrorCode, LIMITS, PROTOCOL_VERSION, RpcError } from './protocol.ts';
+import type { Schedule } from './protocol.ts';
 import type {
   AgentAdapter,
   AgentSession,
@@ -43,13 +48,27 @@ import { copyImageInto, imageRefFor } from './media.ts';
 import { isDirectory } from './fsutil.ts';
 import { copySessionTranscript } from './transcripts.ts';
 import { approvalTitle } from './threadbare-mcp.ts';
+import {
+  EMPTY_PATCH_SET,
+  hookApplies,
+  loadPatchSet,
+  projectPanels,
+  renderPanel,
+  runCommand,
+  simctlScreenshot,
+  type PanelRender,
+  type PatchCache,
+  type PatchSet,
+  type Screenshot,
+} from './patches.ts';
 
 export type Notification =
   | { method: 'thread.updated'; params: { thread: ThreadSummary } }
   | { method: 'thread.event'; params: { threadId: string; event: AnyEvent } }
   | { method: 'thread.deleted'; params: { threadId: string } }
   | { method: 'accounts.updated'; params: { accounts: Account[] } }
-  | { method: 'runner.notice'; params: { level: 'info' | 'warning' | 'error'; message: string } };
+  | { method: 'runner.notice'; params: { level: 'info' | 'warning' | 'error'; message: string } }
+  | { method: 'schedules.updated'; params: { schedules: Schedule[] } };
 
 type PendingApproval =
   | { approvalId: string; kind: 'tool'; resolve: (a: ToolApprovalAnswer) => void }
@@ -70,6 +89,9 @@ type Turn = {
   // sent while it ran, which go straight into the CLI. The turn ends when
   // the CLI has answered them all.
   messages: string[];
+  // Files the turn edited or wrote (edit.diff paths, Write and Edit calls),
+  // for hooks that run only after a change to certain files.
+  edited: Set<string>;
 };
 
 type Runtime = {
@@ -85,6 +107,10 @@ type Runtime = {
   deleted?: boolean; // anything the old CLI still reports is dropped
   turn?: Turn;
   tasks: BackgroundTask[]; // background work the live CLI is running
+  // Background work that ended and whose result the CLI hasn't started a
+  // turn to read yet. Shown as `finished` in the summary's background list
+  // while wakeTimer runs; cleared when that turn starts or the grace ends.
+  finished: BackgroundTask[];
   // Set when background work finished with no turn running: the CLI is
   // about to start a turn of its own to look at the result, and until it
   // does (or WAKE_GRACE_MS passes) the thread isn't idle.
@@ -101,6 +127,18 @@ type Runtime = {
   inProgress: Map<string, InProgressItem>;
   pendingDeltas: Map<string, { type: DeltaType; text: string }>;
   deltaTimer?: TimerHandle;
+  // What the folder's patches give the thread (patches.ts). Read again in
+  // the background when the folder changes or PATCHES_TTL_MS has passed,
+  // and a new summary goes out if anything differs, so a `convex dev` that
+  // has just written .env.local, or a patch file the agent has just
+  // written, shows up within seconds. Until the first read finishes the
+  // built-in panels stand in.
+  patches?: { cwd: string; at: number; set: PatchSet; refreshing: boolean; loaded: boolean };
+  runningActions?: Set<string>;
+  // Turns in a row that a hook's message started, per hook. A hook that
+  // keeps failing stops being told to the agent after HOOK_TELL_LIMIT, so
+  // two can't go round for ever; a message from anyone else resets it.
+  hookTurns?: Map<string, number>;
 };
 
 type ThreadState = { rec: ThreadRecord; rt: Runtime };
@@ -117,6 +155,14 @@ export type RunnerDeps = {
   // Copies a Claude session's transcript to another folder (transcripts.ts);
   // tests swap it out.
   copyTranscript?: typeof copySessionTranscript;
+  // Takes the Simulator panel's screenshot (patches.ts); tests pass a fake.
+  screenshot?: Screenshot;
+  // Where patches stop being looked for up the folder tree (the home folder).
+  panelsRoot?: string;
+  // The shell command actions run through, and how long they may take;
+  // tests pass /bin/sh -c and a short limit.
+  actionShell?: string[];
+  actionTimeoutMs?: number;
 };
 
 const DELTA_INTERVAL_MS = 33; // at most ~30 delta flushes a second per thread
@@ -128,6 +174,12 @@ const STARTUP_NOTICE_MS = 10 * 60_000;
 // How long a finished background task keeps the thread counted as busy
 // while the CLI gets round to its own turn (usually well under a second).
 const WAKE_GRACE_MS = 15_000;
+// How long a thread's patches are kept before the folder is read again.
+const PATCHES_TTL_MS = 15_000;
+// How many turns in a row one hook may start with its result.
+const HOOK_TELL_LIMIT = 2;
+// How much of a hook's output goes to the agent (the transcript has it all).
+const HOOK_TELL_CHARS = 8000;
 
 export class Runner {
   private cfg: Config;
@@ -138,6 +190,11 @@ export class Runner {
   private log: Logger;
   private defer: (fn: () => void) => void;
   private copyTranscript: typeof copySessionTranscript;
+  private screenshot: Screenshot;
+  private panelsRoot?: string;
+  private actionShell?: string[];
+  private actionTimeoutMs?: number;
+  private patchCache: PatchCache = new Map();
   private threads = new Map<string, ThreadState>();
   private listeners = new Set<(n: Notification) => void>();
   private dirty = new Set<string>();
@@ -152,6 +209,10 @@ export class Runner {
     this.cfg = deps.config;
     this.store = deps.store;
     this.copyTranscript = deps.copyTranscript ?? copySessionTranscript;
+    this.screenshot = deps.screenshot ?? simctlScreenshot;
+    this.panelsRoot = deps.panelsRoot;
+    this.actionShell = deps.actionShell;
+    this.actionTimeoutMs = deps.actionTimeoutMs;
     this.adapters = deps.adapters;
     this.accounts = deps.accounts;
     this.clock = deps.clock;
@@ -337,6 +398,7 @@ export class Runner {
       // Killing the CLIs kills their background shells and subagents too.
       // Say so in the thread, as releaseSession does, or it would wait for
       // a result that never comes with nothing to say why.
+      rt.finished = [];
       if (rt.tasks.length) {
         const what = rt.tasks.map((t) => t.description || t.type).join('; ');
         rt.tasks = [];
@@ -366,9 +428,22 @@ export class Runner {
   backgroundWork(): { threadId: string; tasks: string[] }[] {
     const out: { threadId: string; tasks: string[] }[] = [];
     for (const st of this.threads.values()) {
-      const tasks = st.rt.tasks.map((t) => t.description || t.type);
-      if (st.rt.wakeTimer) tasks.push('a background task that just finished, which the agent is about to look at');
+      const tasks = this.background(st).map((t) => (t.finished ? `${t.description || 'a background task'} (just finished, which the agent is about to look at)` : t.description || 'a background task'));
       if (tasks.length) out.push({ threadId: st.rec.id, tasks });
+    }
+    return out;
+  }
+
+  // The summary's background list: what the CLI is still running, then
+  // (while the wake grace runs) what just finished and is about to be read.
+  private background(st: ThreadState): ProtocolBackgroundTask[] {
+    const { rt } = st;
+    const out: ProtocolBackgroundTask[] = rt.tasks.map((t) => ({ kind: t.kind, description: t.description || t.type }));
+    if (rt.wakeTimer) {
+      // A grace with nothing recorded as finished (a task list the CLI
+      // replaced wholesale) still says a result is on its way.
+      const finished = rt.finished.length ? rt.finished : [{ id: '', type: 'task', kind: 'other' as const, description: '' }];
+      for (const t of finished) out.push({ kind: t.kind, description: t.description || (t.type === 'task' ? '' : t.type), finished: true });
     }
     return out;
   }
@@ -421,6 +496,11 @@ export class Runner {
   onNotification(fn: (n: Notification) => void): () => void {
     this.listeners.add(fn);
     return () => this.listeners.delete(fn);
+  }
+
+  // For the runner's neighbours (schedules.ts) to tell every client.
+  publish(n: Notification): void {
+    this.notify(n);
   }
 
   private notify(n: Notification): void {
@@ -553,6 +633,8 @@ export class Runner {
     effort?: EffortLevel;
     permissionMode?: PermissionMode;
     title?: string;
+    origin?: MessageOrigin;
+    scheduleId?: string;
   }): { thread: ThreadSummary; turnId: string } {
     this.checkAccepting();
     const accountId = params.accountId ?? this.defaultAccountId();
@@ -592,21 +674,24 @@ export class Runner {
     const st: ThreadState = { rec, rt: newRuntime(this.clock.now()) };
     this.threads.set(id, st);
     this.rememberAccount(accountId);
-    const turnId = this.sendTo(st, params.text ?? '', params.images ?? []);
+    const turnId = this.sendTo(st, params.text ?? '', params.images ?? [], { origin: params.origin, scheduleId: params.scheduleId });
     return { thread: this.summary(st), turnId };
   }
 
-  // origin "runner" marks a message the runner sends by itself (restart.ts).
-  send(threadId: string, text: string, images: ImageRef[] = [], opts: { origin?: 'runner' } = {}): { turnId: string } {
+  // origin "runner" marks a message the runner sends by itself (restart.ts),
+  // "schedule" one a schedule sent (schedules.ts). `queue` keeps it out of a
+  // running turn: it waits and starts its own.
+  send(threadId: string, text: string, images: ImageRef[] = [], opts: SendOptions = {}): { turnId: string } {
     const st = this.mustGet(threadId);
     this.checkAccepting();
     if (!text && images.length === 0) throw new RpcError(ErrorCode.badParams, 'text or images required');
     checkImages(images);
-    return { turnId: this.sendTo(st, text, images, opts.origin) };
+    return { turnId: this.sendTo(st, text, images, opts) };
   }
 
-  private sendTo(st: ThreadState, text: string, images: ImageRef[], origin?: 'runner'): string {
+  private sendTo(st: ThreadState, text: string, images: ImageRef[], opts: SendOptions = {}): string {
     const { rec, rt } = st;
+    if (opts.origin !== 'runner') rt.hookTurns = undefined;
     // Copy images into the thread's own media folder now, so a queued
     // message still works if inbox/ is cleaned before it's sent.
     const media = this.store.mediaDir(rec.id);
@@ -627,9 +712,10 @@ export class Runner {
     }
     const turnId = crypto.randomUUID();
     const msg: QueuedSend = { turnId, text, images: refs };
-    if (origin) msg.origin = origin;
+    if (opts.origin) msg.origin = opts.origin;
+    if (opts.scheduleId) msg.scheduleId = opts.scheduleId;
     rec.lastActivityAt = this.isoNow();
-    if (rt.turn && this.canSteer(st)) {
+    if (rt.turn && !opts.queue && this.canSteer(st)) {
       // Sent while a turn runs: it goes into that turn now, as typing into
       // the CLI would. The CLI takes it at its next step, or straight after
       // its reply if that was already finishing; either way the thread's
@@ -670,7 +756,7 @@ export class Runner {
   private steer(st: ThreadState, msg: QueuedSend): void {
     const { rt } = st;
     const turn = rt.turn!;
-    this.emit(st, { type: 'user.message', text: msg.text, images: msg.images, ...(msg.origin ? { origin: msg.origin } : {}) }, turn.turnId);
+    this.emit(st, userMessage(msg), turn.turnId);
     turn.messages.push(msg.turnId);
     this.markDirty(st);
     rt.session!.send({ id: msg.turnId, text: msg.text, images: msg.images });
@@ -681,7 +767,7 @@ export class Runner {
   // than stuck on a turn that never started.
   private startTurn(st: ThreadState, msg: QueuedSend): void {
     const { rec, rt } = st;
-    this.emit(st, { type: 'user.message', text: msg.text, images: msg.images, ...(msg.origin ? { origin: msg.origin } : {}) }, msg.turnId);
+    this.emit(st, userMessage(msg), msg.turnId);
     try {
       this.emit(st, { type: 'turn.started', turnId: msg.turnId }, msg.turnId);
     } catch (e) {
@@ -690,7 +776,7 @@ export class Runner {
     }
     rt.idleTimer?.cancel();
     rt.idleTimer = undefined;
-    rt.turn = { turnId: msg.turnId, startedAt: this.clock.now(), interruptRequested: false, messages: [msg.turnId] };
+    rt.turn = { turnId: msg.turnId, startedAt: this.clock.now(), interruptRequested: false, messages: [msg.turnId], edited: new Set() };
     rt.activeAt = this.clock.now();
     rec.turnId = msg.turnId;
     rec.lastActivityAt = this.isoNow();
@@ -822,6 +908,13 @@ export class Runner {
           rt.pendingDeltas.delete(ev.itemId);
         }
         if (ev.type === 'assistant.text') rec.preview = oneLine(ev.text, LIMITS.previewChars);
+        if (rt.turn) {
+          if (ev.type === 'edit.diff') rt.turn.edited.add(ev.path);
+          else if (ev.type === 'tool.call' && (ev.kind === 'edit' || ev.kind === 'write')) {
+            const file = ev.input.file_path ?? ev.input.path ?? ev.input.notebook_path;
+            if (typeof file === 'string') rt.turn.edited.add(file);
+          }
+        }
         this.emit(st, ev, rt.turn?.turnId);
         break;
       }
@@ -860,15 +953,18 @@ export class Runner {
         if (o.note) this.emit(st, { type: 'system.note', text: o.note }, rt.turn!.turnId);
         break;
       case 'tasks': {
-        const ended = rt.tasks.some((t) => !o.tasks.some((n) => n.id === t.id));
+        const endedTasks = rt.tasks.filter((t) => !o.tasks.some((n) => n.id === t.id));
+        const ended = endedTasks.length > 0;
         rt.tasks = o.tasks;
+        rt.finished.push(...endedTasks);
         // The CLI reports the list shrinking a moment before it starts the
         // turn that reads the result. A restart in between would lose that
         // turn, so the thread stays busy until it starts.
         if (ended && !rt.turn) this.startWakeGrace(st);
         else if (ended) rt.taskEndedInTurn = true;
-        // No summary field changes, but a pending restart waits on
-        // background work and re-checks on thread.updated.
+        // The summary's background list changed: the app shows it, and a
+        // pending restart waits on background work and re-checks on
+        // thread.updated.
         this.markDirty(st);
         // Background work keeps the CLI live; once it's done the idle
         // countdown starts again.
@@ -926,6 +1022,7 @@ export class Runner {
     rt.wakeTimer?.cancel();
     rt.wakeTimer = this.clock.setTimeout(() => {
       rt.wakeTimer = undefined;
+      rt.finished = [];
       this.markDirty(st);
     }, WAKE_GRACE_MS);
   }
@@ -934,11 +1031,12 @@ export class Runner {
     const { rec, rt } = st;
     rt.wakeTimer?.cancel();
     rt.wakeTimer = undefined;
+    rt.finished = [];
     const turnId = crypto.randomUUID();
     this.emit(st, { type: 'turn.started', turnId }, turnId);
     rt.idleTimer?.cancel();
     rt.idleTimer = undefined;
-    rt.turn = { turnId, startedAt: this.clock.now(), interruptRequested: false, auto: true, messages: [] };
+    rt.turn = { turnId, startedAt: this.clock.now(), interruptRequested: false, auto: true, messages: [], edited: new Set() };
     rt.activeAt = this.clock.now();
     rec.turnId = turnId;
     rec.status = rt.approvals.size ? 'waiting' : 'running';
@@ -975,13 +1073,17 @@ export class Runner {
     if (r.usage) body.usage = r.usage;
     if (outcome === 'failed' && r.error) body.error = r.error;
     const ev = this.emit(st, body, turn.turnId);
-    this.endTurn(st, ev.seq, outcome === 'failed' ? 'error' : 'idle');
+    this.endTurn(st, ev.seq, outcome === 'failed' ? 'error' : 'idle', outcome);
   }
 
-  private endTurn(st: ThreadState, completedSeq: number, status: ThreadStatus): void {
+  private endTurn(st: ThreadState, completedSeq: number, status: ThreadStatus, outcome?: TurnOutcome): void {
     const { rec, rt } = st;
+    const finished = rt.turn;
     rt.turn?.interruptTimer?.cancel();
     rt.turn = undefined;
+    // The folder's turn.end hooks, after a turn the agent finished itself
+    // (not one the runner opened for a background task's approval).
+    if (outcome === 'completed' && finished && !finished.auto && !this.stopping) void this.runHooks(st, finished);
     if (rt.taskEndedInTurn) {
       rt.taskEndedInTurn = false;
       // Only while the CLI is there to start that turn.
@@ -1028,6 +1130,7 @@ export class Runner {
     if (rt.generation !== gen) return;
     rt.session = undefined;
     rt.tasks = [];
+    rt.finished = [];
     rt.taskEndedInTurn = false;
     rt.wakeTimer?.cancel();
     rt.wakeTimer = undefined;
@@ -1404,6 +1507,7 @@ export class Runner {
       }
       rt.tasks = [];
     }
+    rt.finished = [];
     rt.releaseWhenIdle = false;
     rt.releasedGen = rt.generation;
     this.log.info('releasing CLI', { threadId: rec.id, hard });
@@ -1568,7 +1672,187 @@ export class Runner {
     if (rec.nativeSessionId && rec.sessionUsed) s.nativeSessionId = rec.nativeSessionId;
     if (rec.contextTokens !== undefined) s.contextTokens = rec.contextTokens;
     if (rec.costUsd !== undefined) s.costUsd = rec.costUsd;
+    const set = this.patchSet(st);
+    if (set.panels.length) s.panels = set.panels;
+    if (set.actions.length) s.actions = set.actions;
+    if (set.hooks.length) s.hooks = set.hooks;
+    if (set.patches.length) s.patches = set.patches;
+    const background = this.background(st);
+    if (background.length) s.background = background;
     return s;
+  }
+
+  // What the thread's folder gives it (see Runtime.patches): the last set
+  // read, with a fresh read started when it's stale.
+  private patchSet(st: ThreadState): PatchSet {
+    const { rec, rt } = st;
+    const now = this.clock.now();
+    if (!rt.patches || rt.patches.cwd !== rec.cwd) {
+      // The built-in panels straight away; the files follow.
+      let panels: PatchSet['panels'] = [];
+      try {
+        panels = projectPanels(rec.cwd, this.panelsRoot);
+      } catch (e) {
+        this.log.warn('could not read the folder for panels', { threadId: rec.id, cwd: rec.cwd, error: String(e) });
+      }
+      rt.patches = { cwd: rec.cwd, at: now, set: { ...EMPTY_PATCH_SET, panels }, refreshing: false, loaded: false };
+      void this.refreshPatches(st);
+    } else if (!rt.patches.refreshing && now - rt.patches.at > PATCHES_TTL_MS) {
+      void this.refreshPatches(st);
+    }
+    return rt.patches.set;
+  }
+
+  // Reads the folder's patches again; a change sends a new summary, and a
+  // patch file that has appeared or broken since the last read is said in
+  // the transcript (not on the first read, which would say it at startup).
+  async refreshPatches(st: ThreadState): Promise<void> {
+    const { rec, rt } = st;
+    const entry = rt.patches;
+    if (!entry || entry.refreshing) return;
+    entry.refreshing = true;
+    const cwd = rec.cwd;
+    let set: PatchSet;
+    try {
+      set = await loadPatchSet(cwd, this.panelsRoot, this.patchCache);
+    } catch (e) {
+      this.log.warn('could not read the folder for patches', { threadId: rec.id, cwd, error: String(e) });
+      set = entry.set;
+    }
+    entry.refreshing = false;
+    entry.at = this.clock.now();
+    // The folder moved on meanwhile: the next summary starts over.
+    if (rt.patches !== entry || rec.cwd !== cwd || rt.deleted) return;
+    const before = entry.set;
+    const changed = JSON.stringify(before) !== JSON.stringify(set);
+    if (entry.loaded && changed) this.notePatchChanges(st, before, set);
+    entry.set = set;
+    entry.loaded = true;
+    if (changed) this.markDirty(st);
+  }
+
+  private notePatchChanges(st: ThreadState, before: PatchSet, after: PatchSet): void {
+    const was = new Map(before.patches.map((p) => [p.id + '@' + p.source, p]));
+    for (const p of after.patches) {
+      if (p.source === 'builtin') continue;
+      const old = was.get(p.id + '@' + p.source);
+      if (p.error) {
+        if (old?.error !== p.error) this.emit(st, { type: 'system.note', text: `Patch ${p.id} couldn't load: ${p.error}` });
+        continue;
+      }
+      if (old && !old.error) continue;
+      const gives: string[] = [];
+      const actions = after.actions.filter((a) => a.patch === p.id).map((a) => a.title);
+      const panels = after.panels.filter((x) => x.patch === p.id).map((x) => x.title);
+      const hooks = after.hooks.filter((x) => x.patch === p.id).map((x) => x.title);
+      if (actions.length) gives.push(`${actions.length === 1 ? 'action' : 'actions'} ${actions.join(', ')}`);
+      if (panels.length) gives.push(`${panels.length === 1 ? 'panel' : 'panels'} ${panels.join(', ')}`);
+      if (hooks.length) gives.push(`${hooks.length === 1 ? 'hook' : 'hooks'} ${hooks.join(', ')}`);
+      this.emit(st, { type: 'system.note', text: `Patch ${p.id} ${old ? 'loads again' : 'added'}: ${gives.join(', ') || 'nothing yet'}.` });
+    }
+  }
+
+  // Draws an image panel (the Simulator's screenshot) for `panels.render`.
+  async renderPanel(threadId: string, panelId: string): Promise<PanelRender> {
+    const st = this.mustGet(threadId);
+    const panel = this.patchSet(st).panels.find((p) => p.id === panelId);
+    if (!panel) throw new RpcError(ErrorCode.badParams, `This thread has no panel called ${panelId}`);
+    return renderPanel(panel, paths.panels(this.cfg.home, threadId), this.screenshot);
+  }
+
+  // Runs the folder's turn.end hooks for a turn that just completed: each
+  // command's output goes into the transcript as an action.run, and when
+  // the hook's `tell` says so (failures by default), to the agent as a
+  // message from the runner, which starts a turn. A hook whose turn fails
+  // the same way again is told HOOK_TELL_LIMIT times, then only posted.
+  private async runHooks(st: ThreadState, turn: Turn): Promise<void> {
+    const hooks = this.patchSet(st).hooks.filter((h) => h.on === 'turn.end' && hookApplies(h, turn.edited, st.rec.cwd));
+    for (const hook of hooks) {
+      if (st.rt.deleted || this.stopping) return;
+      const outcome = await runCommand(hook.command, {
+        cwd: st.rec.cwd,
+        env: { ...process.env, ...threadEnv(st.rec.id, this.cfg.home) },
+        shell: this.actionShell,
+        timeoutMs: this.actionTimeoutMs,
+      });
+      if (st.rt.deleted || this.stopping) return;
+      const body: EventBody = {
+        type: 'action.run',
+        actionId: hook.id,
+        patch: hook.patch,
+        title: hook.title,
+        command: hook.command,
+        ok: outcome.ok,
+        text: outcome.text,
+        truncated: outcome.truncated,
+        durationMs: outcome.durationMs,
+        trigger: 'turn.end',
+      };
+      if (outcome.exitCode !== undefined) body.exitCode = outcome.exitCode;
+      this.emit(st, body, st.rt.turn?.turnId);
+      this.markDirty(st);
+      const tell = hook.tell === 'always' || (hook.tell === 'failures' && !outcome.ok);
+      if (!tell) continue;
+      const counts = (st.rt.hookTurns ??= new Map());
+      const sofar = counts.get(hook.id) ?? 0;
+      if (sofar >= HOOK_TELL_LIMIT) {
+        this.log.info('hook result not told again', { threadId: st.rec.id, hook: hook.id, times: sofar });
+        continue;
+      }
+      counts.set(hook.id, sofar + 1);
+      const shown = outcome.text.length > HOOK_TELL_CHARS ? outcome.text.slice(-HOOK_TELL_CHARS) : outcome.text;
+      const verdict = outcome.ok ? 'passed' : `failed${outcome.exitCode !== undefined ? ` (exit ${outcome.exitCode})` : ''}`;
+      const text =
+        `[Threadbear hook] ${hook.title} (patch ${hook.patch}) ran after your turn and ${verdict}:\n\n` +
+        '```\n' + (shown.trim() || '(no output)') + '\n```\n\n' +
+        (outcome.ok ? 'Nothing to do unless something above surprises you.' : 'If this is from your change, fix it; if not, say so and carry on.');
+      try {
+        this.sendTo(st, text, [], { origin: 'runner' });
+      } catch (e) {
+        this.log.warn('could not tell the agent a hook result', { threadId: st.rec.id, hook: hook.id, error: String(e) });
+      }
+    }
+  }
+
+  // Runs an action for `actions.run`: a prompt action is a message to the
+  // thread; a command action runs in its folder, and what it printed goes
+  // into the transcript as an action.run event. One run of an action at a
+  // time per thread.
+  async runAction(threadId: string, actionId: string): Promise<{ turnId?: string; ok?: boolean; exitCode?: number; durationMs?: number; seq?: number }> {
+    const st = this.mustGet(threadId);
+    const action = this.patchSet(st).actions.find((a) => a.id === actionId);
+    if (!action) throw new RpcError(ErrorCode.badParams, `This thread has no action called ${actionId}`);
+    if (action.kind === 'prompt') return this.send(threadId, action.prompt ?? '');
+    const running = (st.rt.runningActions ??= new Set());
+    if (running.has(actionId)) throw new RpcError(ErrorCode.busy, `${action.title} is already running.`);
+    running.add(actionId);
+    try {
+      const outcome = await runCommand(action.command ?? '', {
+        cwd: st.rec.cwd,
+        env: { ...process.env, ...threadEnv(threadId, this.cfg.home) },
+        shell: this.actionShell,
+        timeoutMs: this.actionTimeoutMs,
+      });
+      if (st.rt.deleted) return { ok: outcome.ok, exitCode: outcome.exitCode, durationMs: outcome.durationMs };
+      const body: EventBody = {
+        type: 'action.run',
+        actionId,
+        patch: action.patch,
+        title: action.title,
+        command: action.command ?? '',
+        ok: outcome.ok,
+        text: outcome.text,
+        truncated: outcome.truncated,
+        durationMs: outcome.durationMs,
+      };
+      if (outcome.exitCode !== undefined) body.exitCode = outcome.exitCode;
+      const event = this.emit(st, body, st.rt.turn?.turnId);
+      st.rec.lastActivityAt = this.isoNow();
+      this.markDirty(st);
+      return { ok: outcome.ok, exitCode: outcome.exitCode, durationMs: outcome.durationMs, seq: event.seq };
+    } finally {
+      running.delete(actionId);
+    }
   }
 
   // A thread by full id or unique prefix, for titles; undefined if unclear.
@@ -1662,6 +1946,18 @@ export class Runner {
   }
 }
 
+export type SendOptions = { origin?: MessageOrigin; scheduleId?: string; queue?: boolean };
+
+function userMessage(msg: QueuedSend): EventBody {
+  return {
+    type: 'user.message',
+    text: msg.text,
+    images: msg.images,
+    ...(msg.origin ? { origin: msg.origin } : {}),
+    ...(msg.scheduleId ? { scheduleId: msg.scheduleId } : {}),
+  };
+}
+
 function checkImages(images: ImageRef[]): void {
   for (const img of images) {
     if (!img || typeof img.path !== 'string' || !fs.existsSync(img.path)) {
@@ -1676,6 +1972,7 @@ function newRuntime(activeAt: number): Runtime {
     resumed: false,
     retriedFresh: false,
     tasks: [],
+    finished: [],
     activeAt,
     approvals: new Map(),
     releaseWhenIdle: false,

@@ -1,0 +1,31 @@
+{
+  "id": "demo_landing_pages",
+  "title": "Rebuild the three landing pages",
+  "cwd": "/Users/mike/dev/me/misc",
+  "accountId": "claude-main",
+  "provider": "claude",
+  "permissionMode": "full",
+  "status": "idle",
+  "live": false,
+  "needsYou": false,
+  "createdAt": "2026-10-26T15:18:01.671Z",
+  "updatedAt": "2026-10-26T16:18:01.671Z",
+  "lastActivityAt": "2026-10-26T16:18:01.671Z",
+  "preview": "Three sub-agents are on it, one page each. I'll come back here as each one finishes.",
+  "lastSeq": 10,
+  "lastSeenSeq": 10,
+  "background": [
+    {
+      "kind": "agent",
+      "description": "Rebuild the home page"
+    },
+    {
+      "kind": "agent",
+      "description": "Rebuild the pricing page"
+    },
+    {
+      "kind": "agent",
+      "description": "Rebuild the docs page"
+    }
+  ]
+}

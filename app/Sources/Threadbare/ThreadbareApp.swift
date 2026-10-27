@@ -28,7 +28,7 @@ struct ThreadbareApp: App {
     }
 
     var body: some Scene {
-        Window("Threadbare", id: "main") {
+        Window("Threadbear", id: "main") {
             RootView()
                 .environment(app)
                 .frame(minWidth: 760, minHeight: 480)
@@ -64,12 +64,18 @@ struct ThreadbareApp: App {
                 Button("Default Text Size") { zoom.reset() }
                     .keyboardShortcut("0")
                     .disabled(zoom.isDefault)
+                Divider()
+                // The panels pane beside the transcript, for threads whose
+                // folder has any (PanelsView).
+                Button(app.panelsShown ? "Hide Panels" : "Show Panels") { app.togglePanels() }
+                    .keyboardShortcut("p", modifiers: [.command, .option])
+                    .disabled(app.selectedThread.map { $0.panels.isEmpty && $0.patches.isEmpty } ?? true)
             }
             CommandMenu("Thread") {
                 Button(app.selectedThread?.isArchived == true ? "Unarchive" : "Archive") { app.toggleArchive() }
                     .keyboardShortcut("e")
                     .disabled(app.selection == nil)
-                Menu("Snooze") {
+                Menu("Hibernate") {
                     // Titles follow app.now (so the menu rebuilds as time
                     // passes); the date is worked out when the item is chosen.
                     ForEach(Snooze.presets(now: app.now)) { preset in
@@ -92,8 +98,10 @@ struct ThreadbareApp: App {
                 .disabled(app.selection == nil)
                 Divider()
                 Button("Show Inbox") { app.sidebarMode = .inbox }
-                Button("Show Snoozed") { app.sidebarMode = .snoozed }
+                Button("Show Hibernating") { app.sidebarMode = .snoozed }
                 Button("Show Archive") { app.showArchive() }
+                Button("Show Scheduled") { app.showSchedules() }
+                    .disabled(!app.schedulesSupported)
             }
         }
     }

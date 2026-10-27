@@ -64,6 +64,10 @@ export type Config = {
   tokenStatsLimitsFile: string; // Token Stats' limits.json, read only
   cliUpdates: CliUpdatesConfig;
   accountNotes: Record<string, string>;
+  // A runner on a release builds and restarts onto main by itself
+  // (src/update.ts). Off with followMain: false in runner.json or
+  // THREADBARE_FOLLOW_MAIN=0.
+  followMain: boolean;
 };
 
 export type RunnerJson = {
@@ -82,6 +86,7 @@ export type RunnerJson = {
   codexArgs?: string[];
   cliUpdates?: Partial<CliUpdatesConfig>;
   accountNotes?: Record<string, string>;
+  followMain?: boolean;
 };
 
 export function defaultHome(): string {
@@ -149,6 +154,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     tokenStatsAccountsDir: expandHome(
       env.THREADBARE_ACCOUNTS_DIR || '~/Library/Application Support/Token Stats/Accounts',
     ),
+    followMain: env.THREADBARE_FOLLOW_MAIN ? env.THREADBARE_FOLLOW_MAIN !== '0' : json.followMain !== false,
     ...(codexPath ? { codexPath: expandHome(codexPath) } : {}),
     codexArgs: Array.isArray(json.codexArgs) ? json.codexArgs.filter((a): a is string => typeof a === 'string') : [],
     codexMainDir: expandHome(env.THREADBARE_CODEX_MAIN_DIR || '~/.codex'),
@@ -214,6 +220,7 @@ export const paths = {
   thread: (home: string, id: string) => path.join(home, 'threads', id),
   media: (home: string, id: string) => path.join(home, 'threads', id, 'media'),
   blobs: (home: string, id: string) => path.join(home, 'threads', id, 'blobs'),
+  panels: (home: string, id: string) => path.join(home, 'threads', id, 'panels'),
   inbox: (home: string) => path.join(home, 'inbox'),
   run: (home: string) => path.join(home, 'run'),
 };

@@ -261,12 +261,64 @@ enum Automation {
             guard let id = target.id else { return target.error }
             app.snooze(id, until: Date().addingTimeInterval(number(c["seconds"]) ?? 3600))
             return "ok \(id)"
+        case "panel":
+            // {"cmd":"panel","id":"convex.dashboard"} shows that panel of the
+            // selected thread; {"cmd":"panel","show":false} hides the pane,
+            // {"cmd":"panel","show":true} shows it; {"cmd":"panel"} toggles.
+            guard let thread = app.selectedThread else { return "error no thread selected" }
+            if let id = c["id"] as? String {
+                guard thread.panels.contains(where: { $0.id == id }) || (id == PanelPane.patchesTab && !thread.patches.isEmpty) else {
+                    return "error no panel \(id); this thread has \((thread.panels.map(\.id) + (thread.patches.isEmpty ? [] : [PanelPane.patchesTab])).joined(separator: ", "))"
+                }
+                app.choosePanel(id, in: thread.id)
+            } else if let show = c["show"] as? Bool {
+                app.panelsShown = show
+            } else {
+                app.togglePanels()
+            }
+            // A beat for the pane (and a web view) to appear.
+            try? await Task.sleep(for: .milliseconds(200))
+            let showing = app.panelChoice[thread.id] == PanelPane.patchesTab || thread.panels.isEmpty ? PanelPane.patchesTab : (app.activePanel(for: thread)?.id ?? "nothing")
+            return "ok \(app.showsPanels(for: thread) ? "showing \(showing)" : "hidden")"
+        case "action":
+            // {"cmd":"action","id":"reseed.reseed-dev-db"} runs that action of
+            // the selected thread and waits for a command to finish.
+            guard let thread = app.selectedThread else { return "error no thread selected" }
+            guard let id = c["id"] as? String, let action = thread.actions.first(where: { $0.id == id }) else {
+                return "error no action \(c["id"] ?? ""); this thread has \(thread.actions.map(\.id).joined(separator: ", "))"
+            }
+            app.runAction(action, in: thread.id)
+            let deadline = Date().addingTimeInterval(number(c["timeout"]) ?? 60)
+            while Date() < deadline, app.isRunning(action: action, in: thread.id) {
+                try? await Task.sleep(for: .milliseconds(50))
+            }
+            if app.isRunning(action: action, in: thread.id) { return "error \(id) still running after the timeout" }
+            try? await Task.sleep(for: .milliseconds(150))
+            return "ok ran \(id)"
         case "mode":
             switch c["mode"] as? String {
             case "archive": app.showArchive()
             case "snoozed": app.sidebarMode = .snoozed
+            case "scheduled": app.showSchedules()
             default: app.sidebarMode = .inbox
             }
+            return "ok"
+        case "schedule":
+            // The schedule editor: {"id": "sc_…"} edits one; without an id
+            // it's a new one, from the open thread's composer (its draft
+            // too) unless {"from": "none"}, as the Scheduled view's button.
+            if let id = c["id"] as? String {
+                guard app.schedule(id) != nil else { return "error no schedule \(id)" }
+                app.editSchedule(id)
+            } else if c["from"] as? String == "none" {
+                app.newSchedule(from: nil)
+            } else {
+                app.newSchedule(from: app.selectedThread, draftKey: app.selection ?? "new")
+            }
+            try? await Task.sleep(for: .milliseconds(400))
+            return "ok"
+        case "close-schedule":
+            app.scheduleEditor = nil
             return "ok"
         case "expand", "collapse":
             return setExpanded(c, open: name == "expand", app: app)
@@ -361,7 +413,11 @@ enum Automation {
         case "screenshot":
             guard let path = c["path"] as? String, path.hasPrefix("/") else { return "error path must be absolute" }
             if let refused = refusesToWrite(path) { return refused }
-            guard let window else { return "error no window" }
+            guard var window else { return "error no window" }
+            if c["sheet"] as? Bool == true {
+                guard let sheet = window.attachedSheet else { return "error no sheet" }
+                window = sheet
+            }
             // A dev-app.sh instance never runs screencapture itself: its temp
             // bundle has no Screen Recording permission (the capture is
             // refused, and macOS may ask Mike for it). dev-app.sh's shot runs
@@ -374,7 +430,13 @@ enum Automation {
         case "window":
             // The window's id for `screencapture -l`, once anything pending
             // has been drawn (as `screenshot` waits).
-            guard let window else { return "error no window" }
+            guard var window else { return "error no window" }
+            // {"sheet": true}: the sheet over it (the schedule editor), a
+            // window of its own that a capture of the main one leaves out.
+            if c["sheet"] as? Bool == true {
+                guard let sheet = window.attachedSheet else { return "error no sheet" }
+                window = sheet
+            }
             window.displayIfNeeded()
             try? await Task.sleep(for: .milliseconds(300))
             let size = AppDump.contentSize(window)
@@ -593,6 +655,11 @@ enum Automation {
             hoveredCell = nil
             return "ok"
         }
+        // A schedule's row in the Scheduled view, by its id.
+        if let id = value as? String, app.schedule(id) != nil {
+            app.hoverOverride = id
+            return "ok \(id)"
+        }
         let match = thread(value, app)
         guard let id = match.id else { return match.error }
         app.hoverOverride = id
@@ -612,16 +679,29 @@ enum Automation {
         return "ok"
     }
 
-    /// The composer's model, account, permission or folder menu as the
-    /// open thread (or a new one) would get it, a JSON list of lines:
-    /// `[x]` for the ticked one, `*` for the default, the subtitle after a
-    /// dash, submenus and section headers indented. `click` picks an item
-    /// by title, as a click on it would.
+    /// The composer's model picker, or its account, permission or folder
+    /// menu, as the open thread (or a new one) would get it, a JSON list
+    /// of lines: `[x]` for the ticked one, `*` for the default, the
+    /// subtitle after a dash, submenus and older models indented, `#` on
+    /// a section (a provider column, Effort). `click` picks an item by
+    /// title, as a click on it would.
     private static func composerMenu(_ c: [String: Any], app: AppModel) -> String {
         let settings = ThreadSettings(app: app, thread: app.selectedThread)
         let menu: NSMenu
         switch c["menu"] as? String ?? "model" {
-        case "model": menu = settings.modelMenu()
+        case "model":
+            if let title = c["click"] as? String {
+                return settings.pickerClick(title) ? "ok" : "error no item \(title)"
+            }
+            if c["show"] as? Bool == true {
+                // Opens the real popover, and says its window number so a
+                // screencapture -l can take just it.
+                app.modelPickerRequest += 1
+                RunLoop.main.run(until: Date().addingTimeInterval(0.3))
+                let popover = NSApp.windows.first { String(describing: type(of: $0)).contains("Popover") && $0.isVisible }
+                return popover.map { "ok window \($0.windowNumber)" } ?? "error the picker didn't open"
+            }
+            return "ok " + json(settings.pickerLines())
         case "account": menu = settings.accountMenu()
         case "permission": menu = settings.permissionMenu()
         case "folder": menu = settings.folderMenu()

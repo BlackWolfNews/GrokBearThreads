@@ -573,6 +573,16 @@ function branchProblem(c, g) {
   return `${where} and main have each moved on; this release would ship unmerged work and leave out some of main.`;
 }
 
+// The object hashes of what a release holds, at HEAD, joined. The runner's
+// src/update.ts computes the same for main, so a commit that only touches
+// tests, scripts or docs isn't an update.
+function releaseTree(g) {
+  const r = spawnSync('git', ['-C', g.root, 'ls-tree', 'HEAD', '--', ...RELEASE_PATHS.map((p) => g.prefix + p)], { encoding: 'utf8' });
+  if (r.status !== 0) return undefined;
+  const hashes = r.stdout.split('\n').filter(Boolean).map((line) => line.split(/\s+/)[2]);
+  return hashes.length ? hashes.join('+') : undefined;
+}
+
 function newReleaseId(c, short, dirty) {
   for (;;) {
     const stamp = new Date().toISOString().replace(/[-:]/g, '').replace(/\.\d+Z$/, 'Z');
@@ -683,9 +693,16 @@ function build(c, id, g, dirty) {
   else snapshotHead(c, g, tmp);
   if (!fs.existsSync(path.join(tmp, 'src', 'main.ts'))) throw new Fail(`The snapshot has no src/main.ts; is ${c.runnerDir} the runner?`);
   installPackages(c, tmp);
+  // checkout, prefix and tree are for the runner following main by itself
+  // (src/update.ts); a dirty build has no tree, since its files aren't HEAD's.
+  const tree = dirty ? undefined : releaseTree(g);
   fs.writeFileSync(
     path.join(tmp, 'release.json'),
-    JSON.stringify({ id, commit: g.commit, branch: g.branch, dirty, builtAt: new Date().toISOString(), node: process.versions.node }, null, 2) + '\n',
+    JSON.stringify(
+      { id, commit: g.commit, branch: g.branch, dirty, builtAt: new Date().toISOString(), node: process.versions.node, checkout: g.root, prefix: g.prefix, ...(tree ? { tree } : {}) },
+      null,
+      2,
+    ) + '\n',
   );
   fs.renameSync(tmp, path.join(c.releases, id));
 }
@@ -1093,6 +1110,10 @@ async function check(c) {
   if (readState(c.dir).lastGood === id) return 0;
   say('Waiting for it to stay up long enough to be marked good (about a minute)...');
   const end = Date.now() + GOOD_WAIT_MS;
+  // A runner that stops and doesn't come back (launchd can't start its
+  // program, say) is reported after the health window, not after the whole
+  // good wait: nothing is going to mark it good.
+  let downAt = null;
   for (;;) {
     if (readState(c.dir).lastGood === id) {
       say(`${id} has been marked good.`);
@@ -1101,6 +1122,9 @@ async function check(c) {
     const p = await probe(c.home);
     if (p.state === 'up' && releaseOf(p.version) !== id) return fail(`The runner went over to ${p.version} before ${id} was marked good.`);
     if (p.state === 'up' && r.pid && p.pid && p.pid !== r.pid) return fail(`The runner on ${id} stopped and started again (pid ${r.pid}, now ${p.pid}) before it was marked good.`);
+    if (p.state === 'down') downAt ??= Date.now();
+    else if (p.state === 'up') downAt = null;
+    if (downAt !== null && Date.now() - downAt > HEALTH_MS) return fail(`The runner on ${id} stopped before it was marked good and hasn't come back in ${HEALTH_MS / 1000} s.`);
     if (Date.now() > end) return fail(`${id} wasn't marked good within ${GOOD_WAIT_MS / 1000} s.`);
     await sleep(1000);
   }

@@ -27,6 +27,8 @@ struct AppDump: Encodable {
         var needsYou: Bool
         var unread: Bool
         var hovered: Bool
+        /// What the row says is running in the background, if anything.
+        var background: String?
     }
 
     struct Section: Encodable {
@@ -113,8 +115,33 @@ struct AppDump: Encodable {
     var window: Window?
     var sidebar: Sidebar
     var selection: Thread?
+    /// The selected thread's panels and the pane (PanelsView).
+    var panels: Panels?
+    /// Its action chips (ActionChips).
+    var actions: [ActionInfo] = []
     var composer: Composer
     var transcript: Transcript?
+
+    struct ActionInfo: Codable {
+        var id: String
+        var title: String
+        var kind: String
+        var running: Bool
+    }
+
+    struct Panels: Codable {
+        struct Item: Codable {
+            var id: String
+            var title: String
+            var kind: String
+            var url: String?
+            var note: String?
+            var active: Bool
+        }
+        var shown: Bool
+        var width: Int
+        var items: [Item]
+    }
 
     static func connectionName(_ state: ConnectionState) -> String {
         switch state {
@@ -132,7 +159,8 @@ struct AppDump: Encodable {
         func thread(_ summary: ThreadSummary, section: InboxSection? = nil) -> Thread {
             let look = ThreadRowLook(summary, section: section)
             return Thread(id: summary.id, title: summary.title, status: summary.status.rawValue, needsYou: summary.needsYou,
-                          unread: look.unread, hovered: app.hoverOverride == summary.id)
+                          unread: look.unread, hovered: app.hoverOverride == summary.id,
+                          background: look.status == .background ? BackgroundWork.short(summary.background) : nil)
         }
         let sections: [Section]
         switch app.sidebarMode {
@@ -145,6 +173,12 @@ struct AppDump: Encodable {
             sections = [Section(name: "Snoozed", threads: app.snoozed.map { thread($0) })]
         case .archive:
             sections = [Section(name: "Archive", threads: app.archived.map { thread($0) })]
+        case .scheduled:
+            // Schedules in the thread shape: their state is the status.
+            sections = [Section(name: "Scheduled", threads: app.schedules.map { schedule in
+                Thread(id: schedule.id, title: schedule.title, status: schedule.paused ? "paused" : schedule.isFinished ? "finished" : "active",
+                       needsYou: false, unread: false, hovered: app.hoverOverride == schedule.id)
+            })]
         }
         let key = app.selection ?? "new"
         var transcript: Transcript?
@@ -178,9 +212,28 @@ struct AppDump: Encodable {
             sidebar: Sidebar(mode: String(describing: app.sidebarMode), sections: sections,
                              snoozed: ThreadSections.snoozed(app.threads.values, now: now).count, archived: app.archivedCount),
             selection: app.selectedThread.map { thread($0) },
+            panels: app.selectedThread.flatMap { panels($0, app: app) },
+            actions: app.selectedThread.map { thread in
+                thread.actions.map { ActionInfo(id: $0.id, title: $0.title, kind: $0.kind.rawValue, running: app.isRunning(action: $0, in: thread.id)) }
+            } ?? [],
             composer: composer(app, key: key),
             transcript: transcript
         )
+    }
+
+    @MainActor
+    private static func panels(_ thread: ThreadSummary, app: AppModel) -> Panels? {
+        guard !thread.panels.isEmpty || !thread.patches.isEmpty else { return nil }
+        let onPatches = app.panelChoice[thread.id] == PanelPane.patchesTab || thread.panels.isEmpty
+        let active = onPatches ? nil : app.activePanel(for: thread)?.id
+        var items = thread.panels.map {
+            Panels.Item(id: $0.id, title: $0.title, kind: $0.kind.rawValue, url: $0.url, note: $0.note, active: $0.id == active)
+        }
+        if !thread.patches.isEmpty {
+            let summary = thread.patches.map { $0.id + ($0.error != nil ? " (error)" : "") }.joined(separator: ", ")
+            items.append(Panels.Item(id: PanelPane.patchesTab, title: "Patches", kind: "patches", url: nil, note: summary, active: onPatches))
+        }
+        return Panels(shown: app.showsPanels(for: thread), width: Int(app.panelWidth), items: items)
     }
 
     @MainActor
@@ -244,6 +297,7 @@ struct AppDump: Encodable {
                 var flags = [thread.status]
                 if thread.unread { flags.append("unread") }
                 if thread.hovered { flags.append("hovered") }
+                if let background = thread.background { flags.append("bg: " + background) }
                 let mark = thread.id == selection?.id ? ">" : " "
                 lines.append("  \(mark) \(pad(thread.id, threadWidth)) \(pad(flags.joined(separator: " "), 16)) \(thread.title)")
             }
@@ -253,6 +307,20 @@ struct AppDump: Encodable {
             lines.append("selection: \(selection.id) \"\(selection.title)\" (\(selection.status))")
         } else {
             lines.append("selection: none (new thread)")
+        }
+        if let panels {
+            let items = panels.items.map { item in
+                var text = item.title + (item.active ? "*" : "") + " (\(item.kind)"
+                // A data: URL (the mock's page) is thousands of characters.
+                if let url = item.url { text += " " + (url.count > 80 ? String(url.prefix(77)) + "…" : url) }
+                text += ")"
+                if let note = item.note { text += " \"\(note)\"" }
+                return text
+            }
+            lines.append("panels (\(panels.shown ? "shown, \(panels.width) wide" : "hidden")): " + items.joined(separator: ", "))
+        }
+        if !actions.isEmpty {
+            lines.append("actions: " + actions.map { "\($0.id) \"\($0.title)\" (\($0.kind)\($0.running ? ", running" : ""))" }.joined(separator: ", "))
         }
         lines.append("composer (\(composer.draft)): \"\(composer.text)\"" + (composer.images > 0 ? " and \(composer.images) image(s)" : ""))
         lines.append("  \(composer.draft == "new" ? "starts" : "runs") in \(composer.cwd) on \(composer.account), model \(composer.model), "
