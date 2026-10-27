@@ -15,7 +15,7 @@ enum SidebarMetrics {
     static var corner: CGFloat { zoomed(8) }
     /// Fainter than the selected row's 0.06 to 0.08, so the two read apart.
     static let hover = Color.primary.opacity(0.03)
-    /// Times, counts and account names: quieter than a preview but readable
+    /// Times and counts: quieter than a title but readable
     /// (the system tertiary was about 2:1 here, like disabled text).
     static let faint = Color(nsColor: Theme.faintText)
 }
@@ -211,6 +211,9 @@ struct ThreadRowView: View {
     let mode: SidebarMode
     /// The inbox section the row is under, so it doesn't repeat its heading.
     var section: InboxSection? = nil
+    /// The project whose heading the row is under (the Projects view), so
+    /// the row doesn't name it again.
+    var heading: String? = nil
     let select: () -> Void
     @State private var hovering = false
     @State private var pressed = false
@@ -224,54 +227,45 @@ struct ThreadRowView: View {
         // The Projects view's rows say what they're doing too: it has no
         // Needs you or Running headings to say it for them.
         let look = mode == .inbox || mode == .projects ? ThreadRowLook(thread, section: section) : ThreadRowLook(status: .time, unread: false, emphasised: false)
-        VStack(alignment: .leading, spacing: zoomed(3)) {
-            HStack(alignment: .firstTextBaseline, spacing: zoomed(6)) {
-                Text(thread.title.isEmpty ? "Untitled" : thread.title)
-                    .font(.system(size: TypeScale.sidebarTitle, weight: look.emphasised ? .semibold : .regular))
-                    .foregroundStyle(.primary)
-                    .lineLimit(1)
-                    .overlay(alignment: .leading) {
-                        if look.unread {
-                            // In the row's leading gutter, centred on the title.
-                            Circle()
-                                .fill(Color.accentColor)
-                                .frame(width: zoomed(7), height: zoomed(7))
-                                .offset(x: -(SidebarMetrics.leading + zoomed(7)) / 2)
-                                .accessibilityLabel("Unread")
-                        }
+        // A tile for the thread's project, two lines tall, then the title
+        // across the whole width and under it where the thread belongs and
+        // what it's doing. The preview and the account name went once
+        // projects came: Mike reads a thread by its title and its project.
+        HStack(alignment: .center, spacing: zoomed(10)) {
+            ProjectTiles(projects: ProjectMark.shown(thread, under: heading))
+                .help(ProjectMark.help(thread))
+                .overlay(alignment: .leading) {
+                    if look.unread {
+                        // In the row's leading gutter, left of the tile.
+                        Circle()
+                            .fill(Color.accentColor)
+                            .frame(width: zoomed(7), height: zoomed(7))
+                            .offset(x: -(SidebarMetrics.leading + zoomed(7)) / 2 - zoomed(1))
+                            .accessibilityLabel("Unread")
                     }
-                Spacer(minLength: zoomed(6))
-                if showsActions {
-                    // Room for the hover buttons, drawn over the row so they
-                    // don't change its height.
-                    Color.clear.frame(width: CGFloat(mode.rowActions.count) * zoomed(24) - zoomed(6), height: 1)
-                } else {
-                    trailing(look)
                 }
-            }
-            HStack(alignment: .firstTextBaseline, spacing: zoomed(6)) {
-                if let line = secondLine {
-                    Text(line)
-                        .font(.system(size: TypeScale.sidebarPreview))
+            VStack(alignment: .leading, spacing: zoomed(3)) {
+                HStack(spacing: 0) {
+                    Text(thread.title.isEmpty ? "Untitled" : thread.title)
+                        .font(.system(size: TypeScale.sidebarTitle, weight: look.emphasised ? .semibold : .regular))
+                        .foregroundStyle(.primary)
+                        .lineLimit(1)
+                    Spacer(minLength: 0)
+                    if showsActions {
+                        // Room for the hover buttons, drawn over the row so
+                        // they don't change its height.
+                        Color.clear.frame(width: CGFloat(mode.rowActions.count) * zoomed(24), height: 1)
+                    }
+                }
+                HStack(alignment: .firstTextBaseline, spacing: zoomed(6)) {
+                    Text(ProjectMark.place(thread, under: heading))
+                        .font(.system(size: TypeScale.sidebarMeta + 1))
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
-                } else {
-                    // A new thread, or one that has only asked a question:
-                    // a blank line here read as a gap in the list. "Waiting
-                    // for your answer" is the row that most needs Mike, so
-                    // it's never the faintest text in the sidebar.
-                    Text(ThreadRowLook.emptyPreview(thread))
-                        .font(.system(size: TypeScale.sidebarPreview))
-                        .foregroundStyle(thread.status == .waiting ? AnyShapeStyle(.secondary) : AnyShapeStyle(SidebarMetrics.faint))
-                        .lineLimit(1)
-                }
-                Spacer(minLength: 0)
-                if app.showsAccountLabel(thread) {
-                    Text(app.accountShortTitle(thread.accountId))
-                        .font(.system(size: TypeScale.sidebarMeta))
-                        .foregroundStyle(SidebarMetrics.faint)
-                        .lineLimit(1)
-                        .help(app.accountTitle(thread.accountId))
+                    Spacer(minLength: zoomed(6))
+                    if !showsActions {
+                        trailing(look)
+                    }
                 }
             }
         }
@@ -286,10 +280,9 @@ struct ThreadRowView: View {
             select()
         }.onEnded { _ in pressed = false })
         // After the gesture, so clicking these never selects the row.
-        .overlay(alignment: .topTrailing) {
+        .overlay(alignment: .trailing) {
             if showsActions {
                 RowActions(thread: thread, actions: mode.rowActions)
-                    .padding(.top, zoomed(5))
                     .padding(.trailing, SidebarMetrics.trailing - zoomed(5))
             }
         }
@@ -305,22 +298,22 @@ struct ThreadRowView: View {
         return showsActions ? SidebarMetrics.hover : .clear
     }
 
-    private var secondLine: String? {
-        if mode == .snoozed, thread.snoozedUntilRestart {
-            return "Back when the runner restarts"
-        }
-        if mode == .snoozed, let until = thread.snoozedUntil {
-            return "Back \(RelativeTime.until(until, now: app.now))"
-        }
-        let preview = PreviewText.plain(thread.preview)
-        return preview.isEmpty ? nil : preview
+    /// A hibernating thread says when it wakes, where the time would be.
+    private var wakeText: String? {
+        if thread.snoozedUntilRestart { return "Back on restart" }
+        if let until = thread.snoozedUntil { return "Back \(RelativeTime.until(until, now: app.now))" }
+        return nil
     }
 
     @ViewBuilder
     private func trailing(_ look: ThreadRowLook) -> some View {
         switch look.status {
         case .time:
-            if mode != .snoozed {
+            if mode == .snoozed {
+                if let wakeText {
+                    Text(wakeText).font(.system(size: TypeScale.sidebarMeta)).foregroundStyle(SidebarMetrics.faint)
+                }
+            } else {
                 time.foregroundStyle(SidebarMetrics.faint)
             }
         case .working:
@@ -356,13 +349,7 @@ struct ThreadRowView: View {
             .foregroundStyle(.secondary)
             .help(BackgroundWork.detail(thread.background))
         case .needsYou:
-            if look.labelled {
-                Text("Needs you").font(.system(size: TypeScale.sidebarMeta, weight: .medium)).foregroundStyle(Color(nsColor: Theme.needsYou))
-            } else {
-                // Under the Needs you heading: how long it has been waiting.
-                time.fontWeight(.medium).foregroundStyle(Color(nsColor: Theme.needsYou))
-                    .help("Waiting for you")
-            }
+            Text("Needs you").font(.system(size: TypeScale.sidebarMeta, weight: .medium)).foregroundStyle(Color(nsColor: Theme.needsYou))
         case .failed:
             Text("Failed").font(.system(size: TypeScale.sidebarMeta, weight: .medium)).foregroundStyle(Color(nsColor: Theme.failed))
                 .help("The last turn failed")
@@ -377,6 +364,56 @@ struct ThreadRowView: View {
         Text(RelativeTime.short(mode == .archive ? thread.archivedAt ?? thread.lastActivityAt : thread.lastActivityAt, now: app.now))
             .font(.system(size: TypeScale.sidebarMeta))
             .monospacedDigit()
+    }
+}
+
+/// A row's project as a tile two lines tall: the first project it joined,
+/// with an edge of a second tile showing behind it when it's in more than
+/// one. A quiet folder when it's in none. The project's icon will go on the
+/// tile once projects have them; for now it's the title's first letter.
+private struct ProjectTiles: View {
+    let projects: [ThreadProject]
+
+    var body: some View {
+        let size = zoomed(30)
+        ZStack(alignment: .bottomLeading) {
+            if projects.count > 1 {
+                // Up and to the right, so the front tile keeps its place,
+                // with the front tile's shape (and a hairline round it) cut
+                // out: both are see-through, so the overlap would otherwise
+                // show darker, and the selected row's highlight shows
+                // through either way.
+                RoundedRectangle(cornerRadius: zoomed(7))
+                    .fill(Color.primary.opacity(0.08))
+                    .frame(width: size, height: size)
+                    .mask {
+                        ZStack {
+                            Rectangle()
+                            RoundedRectangle(cornerRadius: zoomed(8))
+                                .frame(width: size + zoomed(2), height: size + zoomed(2))
+                                .offset(x: -zoomed(4), y: zoomed(4))
+                                .blendMode(.destinationOut)
+                        }
+                        .compositingGroup()
+                    }
+                    .offset(x: zoomed(4), y: -zoomed(4))
+            }
+            Group {
+                if let project = projects.first {
+                    Text(ProjectMark.letter(project.title))
+                        .font(.system(size: zoomed(14), weight: .semibold))
+                        .foregroundStyle(.secondary)
+                } else {
+                    Image(systemName: "folder")
+                        .font(.system(size: zoomed(12)))
+                        .foregroundStyle(SidebarMetrics.faint)
+                }
+            }
+            .frame(width: size, height: size)
+            .background(Color.primary.opacity(projects.isEmpty ? 0.04 : 0.08), in: RoundedRectangle(cornerRadius: zoomed(7)))
+        }
+        .frame(width: size + zoomed(4), height: size + zoomed(4), alignment: .bottomLeading)
+        .accessibilityHidden(true)
     }
 }
 

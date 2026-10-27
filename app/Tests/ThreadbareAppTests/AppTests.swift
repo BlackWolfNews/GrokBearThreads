@@ -548,8 +548,8 @@ final class AutomationTests: XCTestCase {
             banner: AppDump.BannerInfo(style: "quiet", text: "The runner will restart when 1 thread finishes.", detail: nil),
             error: nil, window: AppDump.Window(width: 1240, height: 820, appearance: "dark"),
             sidebar: AppDump.Sidebar(mode: "inbox", sections: [
-                AppDump.Section(name: "Needs you", threads: []),
                 AppDump.Section(name: "Inbox", threads: [AppDump.Thread(id: "th1", title: "Fix it", status: "idle", needsYou: false, unread: true, hovered: false)]),
+                AppDump.Section(name: "Running", threads: []),
             ], snoozed: 0, archived: 2),
             selection: AppDump.Thread(id: "th1", title: "Fix it", status: "idle", needsYou: false, unread: false, hovered: false),
             composer: AppDump.Composer(draft: "th1", text: "hello", images: 0, cwd: "/w", account: "claude-3", model: "default (the runner's, claude-haiku-5-5)", ask: true),
@@ -561,7 +561,7 @@ final class AutomationTests: XCTestCase {
         let text = dump.text
         XCTAssertTrue(text.hasPrefix("dev app a3f9: connected, runner 0.0.0-mock, window 1240x820 dark\n"))
         XCTAssertTrue(text.contains("banner (quiet): The runner will restart when 1 thread finishes."))
-        XCTAssertFalse(text.contains("Needs you"), "empty sections are left out")
+        XCTAssertFalse(text.contains("Running"), "empty sections are left out")
         XCTAssertTrue(text.contains("  > th1"), "the selected thread is marked")
         XCTAssertTrue(text.contains("composer (th1): \"hello\""))
         XCTAssertTrue(text.contains("\n  runs in /w on claude-3, model default (the runner's, claude-haiku-5-5), asks before edits\n"), text)

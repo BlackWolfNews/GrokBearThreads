@@ -115,9 +115,10 @@ Quick Ask, Tinker Desk as a second runner, cloud sandboxes.
   (`~/dev/me/mikerosoft-tools/token-stats`); bundle id
   `com.mikerosoft.threadbare`; sign with the first "Apple Development"
   identity, falling back to ad hoc, with a stable designated requirement.
-- **Window:** `NavigationSplitView`. Sidebar sections: Needs you (waiting on
-  an approval or question, or finished and unread), Running, Inbox (the
-  rest), then a footer button for Snoozed and Archive views. Each row: title,
+- **Window:** `NavigationSplitView`. Sidebar sections: Inbox (everything not
+  running, what needs Mike first: questions and approvals, then unread
+  replies, then the rest; Needs you merged into it 27 Oct), Running at the
+  bottom, then a footer button for Snoozed and Archive views. Each row: title,
   one-line preview, relative time, small status dot, account badge only if
   it isn't the default. ⌘N new thread, ⌘E archive. (No inbox search since
   design pass 1; the Archive view keeps its own.)

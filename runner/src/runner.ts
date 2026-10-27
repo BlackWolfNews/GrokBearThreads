@@ -254,6 +254,7 @@ type Drain = {
   going: Set<string>; // being let go
   onHandedOver: (threadId: string) => void;
   backgroundMs: number;
+  agentMs: number;
   checkMs: number;
   checkQueued: boolean;
   ready: () => boolean;
@@ -263,6 +264,9 @@ type Drain = {
 // How often a draining runner looks again at threads it keeps for
 // background work, since that work's limit passes without an event.
 const DRAIN_CHECK_MS = 5000;
+// How long subagents hold a kept thread after its last turn. Long, since
+// they end by themselves; only a stuck one should ever reach it.
+const DRAIN_AGENT_MS = 4 * 60 * 60_000;
 
 export type RunnerDeps = {
   config: Config;
@@ -681,13 +685,14 @@ export class Runner {
   // `ready` says whether the new runner is there to hear about one (it has
   // connected); until it is, threads stay here, and recheckHandovers() looks
   // again once it does.
-  async beginDrain(keep: Iterable<string>, opts: { onHandedOver: (threadId: string) => void; backgroundMs: number; checkMs?: number; ready?: () => boolean }): Promise<void> {
+  async beginDrain(keep: Iterable<string>, opts: { onHandedOver: (threadId: string) => void; backgroundMs: number; agentMs?: number; checkMs?: number; ready?: () => boolean }): Promise<void> {
     if (this.draining) throw new Error('already draining');
     const d: Drain = {
       keep: new Set([...keep].filter((id) => this.threads.has(id))),
       going: new Set(),
       onHandedOver: opts.onHandedOver,
       backgroundMs: opts.backgroundMs,
+      agentMs: opts.agentMs ?? DRAIN_AGENT_MS,
       checkMs: opts.checkMs ?? DRAIN_CHECK_MS,
       checkQueued: false,
       ready: opts.ready ?? (() => true),
@@ -758,12 +763,18 @@ export class Runner {
 
   // Nothing would be cut short by letting it go now: no turn, approval or
   // question, wake grace, turn-end hook or action. Queued messages go with
-  // it. Background work holds it for backgroundMs after its last turn, as
-  // it holds an idle restart, and is then stopped with a note.
+  // it. Background shells and monitors hold it for backgroundMs after its
+  // last turn, as they hold an idle restart (a dev server never ends), and
+  // are then stopped with a note. Subagents hold it for agentMs: they
+  // finish by themselves, and stopping one throws away its work (27 Oct: a
+  // builder agent an agent left running was cut off after 30 minutes).
   private readyToHandOver(st: ThreadState, d: Drain): boolean {
     const { rt } = st;
     if (rt.turn || rt.approvals.size || rt.wakeTimer || rt.hooksRunning || rt.runningActions?.size) return false;
-    return rt.tasks.length === 0 || this.clock.now() - rt.activeAt >= d.backgroundMs;
+    if (rt.tasks.length === 0) return true;
+    const idleFor = this.clock.now() - rt.activeAt;
+    const agents = rt.tasks.some((t) => t.kind === 'agent');
+    return idleFor >= (agents ? d.agentMs : d.backgroundMs);
   }
 
   // Lets go of a thread for good: its CLI exits (background work, if any,
