@@ -327,7 +327,7 @@ export function checkCliStatus(c: Obj): string[] {
   const problems: string[] = [];
   if (!PROVIDERS.includes(c.provider)) problems.push('provider');
   if (!isStr(c.path)) problems.push('path');
-  if (!['threadbare', 'cli', 'none'].includes(c.managedBy)) problems.push('managedBy');
+  if (!['threadbear', 'cli', 'none'].includes(c.managedBy)) problems.push('managedBy');
   if (!['current', 'behind', 'held', 'unknown', 'missing'].includes(c.status)) problems.push('status');
   if (!['auto', 'notify', 'off'].includes(c.policy)) problems.push('policy');
   for (const k of ['installedVersion', 'latestVersion', 'previousVersion']) if (c[k] !== undefined && !isStr(c[k])) problems.push(k);

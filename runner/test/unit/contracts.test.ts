@@ -25,8 +25,8 @@ test('effort levels include ultra and providers include codex', () => {
 
 test('config: the step 4 settings default safely', () => {
   const home = tmpDir();
-  const cfg = loadConfig({ THREADBARE_HOME: home });
-  assert.equal(cfg.codexPath, undefined, 'unset means Threadbare picks the binary');
+  const cfg = loadConfig({ THREADBEAR_HOME: home });
+  assert.equal(cfg.codexPath, undefined, 'unset means Threadbear picks the binary');
   assert.deepEqual(cfg.codexArgs, []);
   assert.ok(cfg.codexMainDir.endsWith('/.codex'));
   assert.ok(cfg.tokenStatsLimitsFile.endsWith('/Token Stats/limits.json'));
@@ -54,7 +54,7 @@ test('config: runner.json and env set the step 4 settings', () => {
       accountNotes: { 'claude-3': 'Tests', 'claude-1': 4 },
     }),
   );
-  const cfg = loadConfig({ THREADBARE_HOME: home });
+  const cfg = loadConfig({ THREADBEAR_HOME: home });
   assert.equal(cfg.defaults.model, 'claude-haiku-5-5');
   assert.deepEqual(cfg.defaults.models, { codex: 'gpt-6-luna' }, 'blank values and unknown providers are dropped');
   assert.deepEqual(cfg.defaults.efforts, { codex: 'low' });
@@ -64,16 +64,16 @@ test('config: runner.json and env set the step 4 settings', () => {
   assert.deepEqual(cfg.accountNotes, { 'claude-3': 'Tests' }, "runner.json's notes replace the default ones");
 
   const env = loadConfig({
-    THREADBARE_HOME: home,
-    THREADBARE_CODEX_PATH: '/opt/codex',
-    THREADBARE_CODEX_MAIN_DIR: '/tmp/codex-home',
-    THREADBARE_TOKEN_STATS_LIMITS: '/tmp/limits.json',
-    THREADBARE_CLI_UPDATES: 'off',
+    THREADBEAR_HOME: home,
+    THREADBEAR_CODEX_PATH: '/opt/codex',
+    THREADBEAR_CODEX_MAIN_DIR: '/tmp/codex-home',
+    THREADBEAR_TOKEN_STATS_LIMITS: '/tmp/limits.json',
+    THREADBEAR_CLI_UPDATES: 'off',
   });
   assert.equal(env.codexPath, '/opt/codex');
   assert.equal(env.codexMainDir, '/tmp/codex-home');
   assert.equal(env.tokenStatsLimitsFile, '/tmp/limits.json');
-  assert.equal(env.cliUpdates.claude, 'off', 'THREADBARE_CLI_UPDATES=off wins over runner.json');
+  assert.equal(env.cliUpdates.claude, 'off', 'THREADBEAR_CLI_UPDATES=off wins over runner.json');
   assert.equal(env.cliUpdates.codex, 'off');
 });
 
@@ -141,7 +141,7 @@ test('protocol check: accounts with usage, notes and Codex models', () => {
 
 test('protocol check: CLI statuses', () => {
   const codex = {
-    provider: 'codex', path: '/h/tools/codex/current', managedBy: 'threadbare', installedVersion: '0.164.0', latestVersion: '0.165.0',
+    provider: 'codex', path: '/h/tools/codex/current', managedBy: 'threadbear', installedVersion: '0.164.0', latestVersion: '0.165.0',
     status: 'held', policy: 'auto', inUse: [{ version: '0.164.0', threadIds: ['th_1'] }], previousVersion: '0.163.0', checkedAt: ts,
     hold: { version: '0.165.0', reason: 'the app-server protocol changed', missing: ['turn/steer'] },
     update: { state: 'failed', targetVersion: '0.165.0', finishedAt: ts, message: 'held' },

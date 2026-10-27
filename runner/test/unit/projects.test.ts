@@ -6,7 +6,7 @@ import { makeHarness, tick, tmpDir } from '../helpers/fakes.ts';
 import { checkSummary } from '../helpers/protocol-check.ts';
 import { Projects, projectMethods, BRIEF_MAX } from '../../src/projects.ts';
 import { Librarian, librarianMethods, mainCheckout, SETTLE_MS, CATCH_UP_MS } from '../../src/librarian.ts';
-import { buildThreadbareTools } from '../../src/threadbare-mcp.ts';
+import { buildThreadbearTools } from '../../src/threadbear-mcp.ts';
 import { FakeClock } from '../../src/clock.ts';
 import { nullLogger } from '../../src/log.ts';
 import { RpcError } from '../../src/protocol.ts';
@@ -352,7 +352,7 @@ test('agent tools: make, read, update, join and leave projects', async () => {
   const { h, repo, projects, create } = setup();
   const app = repo('dev/app');
   const { thread } = create();
-  const tools = buildThreadbareTools(h.runner, thread.id, Date.now, undefined, projects);
+  const tools = buildThreadbearTools(h.runner, thread.id, Date.now, undefined, projects);
   const call = async (name: string, args: Record<string, unknown>) => {
     const t = tools.find((x) => x.name === name)!;
     const r = await t.handler(args as never, {} as never);

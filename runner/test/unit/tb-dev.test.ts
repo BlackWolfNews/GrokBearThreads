@@ -325,9 +325,9 @@ async function serve(o: { statusHome?: string; release?: string; version?: strin
 // might itself run in are dropped unless the test sets them.
 function tb(home: string, url: string, args: string[], env: Record<string, string> = {}) {
   const base: NodeJS.ProcessEnv = {};
-  for (const [k, v] of Object.entries(process.env)) if (!k.startsWith('THREADBARE_')) base[k] = v;
+  for (const [k, v] of Object.entries(process.env)) if (!/^THREADB(EAR|ARE)_/.test(k)) base[k] = v;
   let out = '';
-  const p = spawn(process.execPath, [TB, ...args], { env: { ...base, THREADBARE_HOME: home, THREADBARE_URL: url, ...env }, stdio: ['ignore', 'pipe', 'pipe'] });
+  const p = spawn(process.execPath, [TB, ...args], { env: { ...base, THREADBEAR_HOME: home, THREADBEAR_URL: url, ...env }, stdio: ['ignore', 'pipe', 'pipe'] });
   p.stdout.on('data', (d) => (out += d));
   p.stderr.on('data', (d) => (out += d));
   const exited = new Promise<number | null>((r) => p.once('exit', (code) => r(code)));
@@ -357,14 +357,14 @@ test('tb status, self, show, export and rpc against a runner', async () => {
     r = await run(h.home, url, ['status', '--json']);
     assert.equal(JSON.parse(r.out).version, '0.1.0+test');
 
-    r = await run(h.home, url, ['self'], { THREADBARE_THREAD_ID: thread.id });
+    r = await run(h.home, url, ['self'], { THREADBEAR_THREAD_ID: thread.id });
     assert.equal(r.code, 0, r.out);
     assert.match(r.out, new RegExp(`^${thread.id}\nFix the tests\nStatus: idle, CLI live\n`));
-    r = await run(h.home, url, ['self', '--json'], { THREADBARE_THREAD_ID: thread.id });
+    r = await run(h.home, url, ['self', '--json'], { THREADBEAR_THREAD_ID: thread.id });
     assert.equal(JSON.parse(r.out).id, thread.id);
     r = await run(h.home, url, ['self']);
     assert.equal(r.code, 1);
-    assert.match(r.out, /THREADBARE_THREAD_ID isn't set/);
+    assert.match(r.out, /THREADBEAR_THREAD_ID isn't set/);
 
     r = await run(h.home, url, ['show', thread.id.slice(0, 8)]);
     assert.equal(r.code, 0, r.out);
@@ -402,7 +402,7 @@ test('tb restart: waits for busy threads, resumes the calling thread, and guards
   try {
     const { thread } = h.runner.create({ text: 'Deploy', accountId: 'claude-3' });
     h.adapter.last.init();
-    const inThread = { THREADBARE_THREAD_ID: thread.id };
+    const inThread = { THREADBEAR_THREAD_ID: thread.id };
 
     let r = await run(h.home, url, ['restart', '--now'], inThread);
     assert.equal(r.code, 1);
@@ -439,7 +439,7 @@ test('tb restart: waits for busy threads, resumes the calling thread, and guards
 
     // Another thread of this runner can't withdraw it: almost always it's
     // a deploy waiting for that thread's own turn to end.
-    r = await run(h.home, url, ['restart', '--cancel'], { THREADBARE_THREAD_ID: 'someone-else' });
+    r = await run(h.home, url, ['restart', '--cancel'], { THREADBEAR_THREAD_ID: 'someone-else' });
     assert.equal(r.code, 1, r.out);
     assert.match(r.out, /^The pending restart isn't this thread's: "new release", asked [^\n]+ ago\.\n/);
     assert.ok(r.out.includes(`  It carries on: ${id8}  Deploy  [running]\n`), r.out);
@@ -453,7 +453,7 @@ test('tb restart: waits for busy threads, resumes the calling thread, and guards
 
     // A thread of another runner (tb pointed at a sandbox from a real
     // thread) isn't carried on, and --now isn't refused for it.
-    r = await run(h.home, url, ['restart'], { THREADBARE_THREAD_ID: 'a-thread-of-another-runner' });
+    r = await run(h.home, url, ['restart'], { THREADBEAR_THREAD_ID: 'a-thread-of-another-runner' });
     assert.equal(r.code, 0, r.out);
     assert.doesNotMatch(r.out, /this thread/);
     assert.ok(r.out.includes(`${TB_SH} restart --cancel withdraws it`), r.out);
@@ -498,17 +498,17 @@ test('tb logs prints the tail, filters by thread, and follows', async () => {
   const log = path.join(dir, 'runner.log');
   fs.writeFileSync(log, ['one', 'two {"threadId":"t-1"}', 'three', 'four {"threadId":"t-1"}'].join('\n') + '\n');
   // No runner at this URL: logs still work.
-  const env = { THREADBARE_LOG: log };
+  const env = { THREADBEAR_LOG: log };
   let r = await run(dir, 'ws://127.0.0.1:1/rpc', ['logs', '-n', '2'], env);
   assert.equal(r.code, 0, r.out);
   assert.equal(r.out, `==> ${log} <==\nthree\nfour {"threadId":"t-1"}\n`);
   r = await run(dir, 'ws://127.0.0.1:1/rpc', ['logs', '--thread', 't-1'], env);
   assert.equal(r.out, `==> ${log} <==\ntwo {"threadId":"t-1"}\nfour {"threadId":"t-1"}\n`);
-  // With the runner down and no THREADBARE_LOG, a dev or sandbox data dir's
+  // With the runner down and no THREADBEAR_LOG, a dev or sandbox data dir's
   // own log, not the real runner's.
   r = await run(dir, 'ws://127.0.0.1:1/rpc', ['logs', '-n', '1']);
   assert.equal(r.out, `==> ${log} <==\nfour {"threadId":"t-1"}\n`);
-  r = await run(dir, 'ws://127.0.0.1:1/rpc', ['logs'], { THREADBARE_LOG: path.join(dir, 'none.log') });
+  r = await run(dir, 'ws://127.0.0.1:1/rpc', ['logs'], { THREADBEAR_LOG: path.join(dir, 'none.log') });
   assert.equal(r.code, 1);
   assert.match(r.out, /No log at/);
 
@@ -551,7 +551,7 @@ test('tb restart and tb rpc against the live runner from one of its threads', as
   // tb takes the real data dir from HOME, so a temp HOME makes this
   // runner look like the live one without going near it.
   const fakeHome = tmpDir();
-  const real = path.join(fakeHome, 'Library', 'Application Support', 'Threadbare');
+  const real = path.join(fakeHome, 'Library', 'Application Support', 'Threadbear');
   fs.mkdirSync(real, { recursive: true });
   const env = { HOME: fakeHome };
   {
@@ -596,7 +596,7 @@ test("tb restart --now won't cut other threads short, and names the caller's own
     sm.out({ kind: 'tasks', tasks: [{ id: 'b1', type: 'local_bash', kind: 'shell', description: 'scripts/dev-runner.sh' }] });
     const other = h.runner.create({ text: 'Other work', accountId: 'claude-3' }).thread;
     h.adapter.last.init();
-    const inThread = { THREADBARE_THREAD_ID: mine.id };
+    const inThread = { THREADBEAR_THREAD_ID: mine.id };
 
     // Not from a thread even with --force, and not from a terminal without it.
     for (const [args, env, whose] of [[['restart', '--now', '--force'], inThread, "1 other thread's"], [['restart', '--now'], {}, "2 threads'"]] as const) {
@@ -646,7 +646,7 @@ test('tb restart --cancel prints what happened to the release, tb self names the
     r = await run(h.home, url, ['restart', '--cancel', '--force']);
     assert.equal(r.out, "No restart is pending now.\ncurrent points at A again (the release running now), so B won't start on the next restart.\n");
 
-    r = await run(h.home, url, ['self'], { THREADBARE_THREAD_ID: '11111111-2222', THREADBARE_RUNNER_HOME: '/elsewhere' });
+    r = await run(h.home, url, ['self'], { THREADBEAR_THREAD_ID: '11111111-2222', THREADBEAR_RUNNER_HOME: '/elsewhere' });
     assert.equal(r.code, 1);
     assert.equal(r.out, `This thread (11111111) runs on the runner at /elsewhere; this tb talks to the one at ${h.home}.\n`);
 
@@ -683,11 +683,11 @@ test("tb status says when the runner went back to this release after a crash", (
 test("tb prints commands that reach the runner it talked to", () => {
   const tb = TB_SH;
   // A dev runner's <home>/tb names itself.
-  assert.equal(tbCommand({ THREADBARE_TB: '/tmp/dev home/tb', THREADBARE_HOME: '/tmp/dev home' }), "'/tmp/dev home/tb'");
-  // THREADBARE_HOME pointed away from the thread's own runner for one
+  assert.equal(tbCommand({ THREADBEAR_TB: '/tmp/dev home/tb', THREADBEAR_HOME: '/tmp/dev home' }), "'/tmp/dev home/tb'");
+  // THREADBEAR_HOME pointed away from the thread's own runner for one
   // command: a bare tb there would be the live runner.
-  assert.equal(tbCommand({ THREADBARE_HOME: '/tmp/sbx', THREADBARE_RUNNER_HOME: '/live' }), `THREADBARE_HOME=/tmp/sbx ${tb}`);
-  assert.equal(tbCommand({ THREADBARE_HOME: '/live', THREADBARE_RUNNER_HOME: '/live' }), tb);
+  assert.equal(tbCommand({ THREADBEAR_HOME: '/tmp/sbx', THREADBEAR_RUNNER_HOME: '/live' }), `THREADBEAR_HOME=/tmp/sbx ${tb}`);
+  assert.equal(tbCommand({ THREADBEAR_HOME: '/live', THREADBEAR_RUNNER_HOME: '/live' }), tb);
   assert.equal(tbCommand({}), tb);
 });
 
@@ -696,13 +696,13 @@ test("tb rpc keeps tb's guards, flag errors never offer --force, and a resume th
   try {
     const { thread } = h.runner.create({ text: 'Deploy', accountId: 'claude-3' });
     h.adapter.last.init();
-    const inThread = { THREADBARE_THREAD_ID: thread.id };
+    const inThread = { THREADBEAR_THREAD_ID: thread.id };
 
     // runner.restart only through tb restart, --force or not.
     let r = await run(h.home, url, ['rpc', 'runner.restart', '{"when":"now"}', '--force'], inThread);
     assert.equal(r.code, 2, r.out);
     assert.equal(r.out, "tb rpc doesn't take --force.\nSee tb rpc --help.\n");
-    r = await run(h.home, url, ['rpc', 'runner.restart', '{"cancel":true}'], { THREADBARE_TB: '/tmp/dev/tb' });
+    r = await run(h.home, url, ['rpc', 'runner.restart', '{"cancel":true}'], { THREADBEAR_TB: '/tmp/dev/tb' });
     assert.equal(r.code, 1, r.out);
     assert.match(r.out, /^Use \/tmp\/dev\/tb restart \(--cancel to withdraw one\)/);
     assert.equal(fs.existsSync(restartPath(h.home)), false);
@@ -731,7 +731,7 @@ test("tb rpc keeps tb's guards, flag errors never offer --force, and a resume th
     const stamp = new Date(h.clock.now()).toISOString();
     fs.mkdirSync(path.dirname(resumesPath(h.home)), { recursive: true });
     fs.writeFileSync(resumesPath(h.home), JSON.stringify({ [thread.id]: [stamp, stamp, stamp] }));
-    r = await run(h.home, url, ['restart'], { ...inThread, THREADBARE_TB: '/tmp/dev/tb' });
+    r = await run(h.home, url, ['restart'], { ...inThread, THREADBEAR_TB: '/tmp/dev/tb' });
     assert.equal(r.code, 0, r.out);
     assert.match(r.out, /\nThe runner won't carry this thread on afterwards: this thread has already been resumed 3 times in the last hour\.\n/);
     assert.match(r.out, /End your turn now, and say in your reply that Mike has to message this thread once the runner is back/);
@@ -739,7 +739,7 @@ test("tb rpc keeps tb's guards, flag errors never offer --force, and a resume th
     assert.equal(JSON.parse(fs.readFileSync(resumesPath(h.home), 'utf8'))[thread.id].length, 3);
 
     // From a terminal the hint to withdraw it is the tb that was run.
-    r = await run(h.home, url, ['restart', '--no-resume'], { THREADBARE_TB: '/tmp/dev/tb' });
+    r = await run(h.home, url, ['restart', '--no-resume'], { THREADBEAR_TB: '/tmp/dev/tb' });
     assert.ok(r.out.endsWith('/tmp/dev/tb restart --cancel withdraws it.\n'), r.out);
   } finally {
     await server.close();

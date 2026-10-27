@@ -320,7 +320,7 @@ test('settings: update saves to runner.json, applies at once, and a bad field ch
   assert.equal(json.followMain, false);
   assert.deepEqual(json.models, { dailyBudgetUsd: 2.5, privateFolders: ['~/client'] });
   // A fresh load reads the same.
-  const cfg = loadConfig({ THREADBARE_HOME: s.home });
+  const cfg = loadConfig({ THREADBEAR_HOME: s.home });
   assert.equal(cfg.models.dailyBudgetUsd, 2.5);
   assert.equal(cfg.defaults.cwd, other);
 
@@ -331,7 +331,7 @@ test('settings: update saves to runner.json, applies at once, and a bad field ch
 });
 
 test('settings: a fresh runner.json means a $1 budget and no private folders', () => {
-  const cfg = loadConfig({ THREADBARE_HOME: tmpDir() });
+  const cfg = loadConfig({ THREADBEAR_HOME: tmpDir() });
   assert.deepEqual(cfg.models, { dailyBudgetUsd: 1, privateFolders: [] });
 });
 
@@ -479,7 +479,7 @@ test('titles: cleanTitle tidies what a model says', () => {
   assert.equal(cleanTitle('Fix README typo "directons"'), 'Fix README typo "directons"', 'quotes inside stay');
   // Rambling or cut off by the token limit: no title, so the first line stays.
   assert.equal(cleanTitle('x'.repeat(80)), '');
-  assert.equal(cleanTitle('Adding Cmd plus and Cmd minus zoom shortcuts to the whole Threadbare window'), '');
+  assert.equal(cleanTitle('Adding Cmd plus and Cmd minus zoom shortcuts to the whole Threadbear window'), '');
 });
 
 // ------------------------------------------------------------------ tb
@@ -494,7 +494,7 @@ test('tb settings and tb models key over a real socket; the key goes in by stdin
   const run = (args: string[], stdin = '') =>
     new Promise<{ code: number | null; out: string }>((resolve) => {
       let out = '';
-      const p = spawn(process.execPath, [TB, ...args], { env: { ...process.env, THREADBARE_HOME: s.home, THREADBARE_URL: url }, stdio: ['pipe', 'pipe', 'pipe'] });
+      const p = spawn(process.execPath, [TB, ...args], { env: { ...process.env, THREADBEAR_HOME: s.home, THREADBEAR_URL: url }, stdio: ['pipe', 'pipe', 'pipe'] });
       p.stdout.on('data', (d) => (out += d));
       p.stderr.on('data', (d) => (out += d));
       p.stdin.end(stdin);

@@ -1,5 +1,5 @@
-// Times in words, both ways, for the threadbare tools and tb. Kept apart
-// from threadbare-mcp.ts so tb doesn't load the Agent SDK to read "30m".
+// Times in words, both ways, for the threadbear tools and tb. Kept apart
+// from threadbear-mcp.ts so tb doesn't load the Agent SDK to read "30m".
 
 // "in 5m", "in 3h", "in 2d".
 export function relativeFuture(iso: string, now: number): string {

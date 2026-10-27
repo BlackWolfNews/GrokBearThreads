@@ -1,7 +1,7 @@
 # Needs-you concepts (27 Oct 2026)
 
 Instead of a classifier, the agent says whether it needs Mike, with an
-`end_turn` tool from the runner's `threadbare` MCP server. The asks from
+`end_turn` tool from the runner's `threadbear` MCP server. The asks from
 "What I need from you" become a tick list. Folds in the checklist idea from
 thread 52879648. Render with `./render.sh`.
 

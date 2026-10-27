@@ -439,7 +439,7 @@ test('restart params are checked', () => {
 });
 
 test('the restart notices are the sentences the Mac app reads', () => {
-  // RunnerRestart.parse (app/Sources/ThreadbareCore/RPC/RunnerRestart.swift)
+  // RunnerRestart.parse (app/Sources/ThreadbearCore/RPC/RunnerRestart.swift)
   // goes by these prefixes and adds up the numbers after "when"; the mock
   // runner has the same sentences. Change all three together.
   assert.equal(pendingMessage(0), 'The runner is restarting now.');
@@ -949,14 +949,14 @@ test('runner.restart and runner.status over the WebSocket, with the pending noti
   }
 });
 
-test('every CLI gets THREADBARE_THREAD_ID, THREADBARE_HOME and THREADBARE_RUNNER_VERSION', () => {
+test('every CLI gets THREADBEAR_THREAD_ID, THREADBEAR_HOME and THREADBEAR_RUNNER_VERSION', () => {
   const h = makeHarness();
   const { thread } = create(h);
   const env = h.adapter.last.opts.env!;
-  assert.equal(env.THREADBARE_THREAD_ID, thread.id);
-  assert.equal(env.THREADBARE_HOME, h.home);
-  assert.equal(env.THREADBARE_RUNNER_HOME, h.home);
-  assert.match(env.THREADBARE_RUNNER_VERSION, /^\d+\.\d+\.\d+\+/);
+  assert.equal(env.THREADBEAR_THREAD_ID, thread.id);
+  assert.equal(env.THREADBEAR_HOME, h.home);
+  assert.equal(env.THREADBEAR_RUNNER_HOME, h.home);
+  assert.match(env.THREADBEAR_RUNNER_VERSION, /^\d+\.\d+\.\d+\+/);
   // This runner's bin/ first, so a bare `tb` in the thread is its tb.
   assert.equal(env.PATH.split(':')[0], path.resolve(import.meta.dirname, '..', '..', 'bin'));
   assert.ok(fs.existsSync(path.join(env.PATH.split(':')[0], 'tb')));
@@ -970,8 +970,8 @@ test('every CLI gets THREADBARE_THREAD_ID, THREADBARE_HOME and THREADBARE_RUNNER
     return { async *[Symbol.asyncIterator]() {}, close() {}, interrupt: async () => {}, setModel: async () => {}, setPermissionMode: async () => {} };
   }) as any;
   const dir = tmpDir();
-  const saved = process.env.THREADBARE_THREAD_ID;
-  process.env.THREADBARE_THREAD_ID = 'the-parent-thread';
+  const saved = process.env.THREADBEAR_THREAD_ID;
+  process.env.THREADBEAR_THREAD_ID = 'the-parent-thread';
   try {
     new ClaudeAdapter({ claudePath: '/nonexistent', registry: new ProcessRegistry(dir, nullLogger), log: nullLogger, queryFn }).start(
       {
@@ -984,17 +984,17 @@ test('every CLI gets THREADBARE_THREAD_ID, THREADBARE_HOME and THREADBARE_RUNNER
         mediaDir: dir,
         blobsDir: dir,
         tmpDir: dir,
-        env: { THREADBARE_THREAD_ID: 't1', THREADBARE_HOME: '/tmp/home', THREADBARE_RUNNER_VERSION: '9.9.9+x' },
+        env: { THREADBEAR_THREAD_ID: 't1', THREADBEAR_HOME: '/tmp/home', THREADBEAR_RUNNER_VERSION: '9.9.9+x' },
       },
       { output() {}, requestApproval: async () => ({ decision: 'deny' }), requestQuestion: async () => ({ answers: null }), exited() {} },
     );
   } finally {
-    if (saved === undefined) delete process.env.THREADBARE_THREAD_ID;
-    else process.env.THREADBARE_THREAD_ID = saved;
+    if (saved === undefined) delete process.env.THREADBEAR_THREAD_ID;
+    else process.env.THREADBEAR_THREAD_ID = saved;
   }
-  assert.equal(options.env.THREADBARE_THREAD_ID, 't1');
-  assert.equal(options.env.THREADBARE_HOME, '/tmp/home');
-  assert.equal(options.env.THREADBARE_RUNNER_VERSION, '9.9.9+x');
+  assert.equal(options.env.THREADBEAR_THREAD_ID, 't1');
+  assert.equal(options.env.THREADBEAR_HOME, '/tmp/home');
+  assert.equal(options.env.THREADBEAR_RUNNER_VERSION, '9.9.9+x');
   assert.equal(options.env.CLAUDE_CONFIG_DIR, dir, 'the account still applies');
 });
 

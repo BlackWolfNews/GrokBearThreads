@@ -153,7 +153,7 @@ test('moving a Claude thread to codex-main switches provider, resets settings an
   const c = h.codex.last;
   assert.equal(c.opts.resume, false);
   assert.deepEqual(c.opts.allowRules, [], 'Claude-syntax rules are gone');
-  assert.match(c.sent[0].text, /^\[Threadbare handoff\] This conversation moved from the claude-3 login|from the three@example\.com login/);
+  assert.match(c.sent[0].text, /^\[Threadbear handoff\] This conversation moved from the claude-3 login|from the three@example\.com login/);
   assert.match(c.sent[0].text, /Assistant: Hello from Claude[\s\S]*next$/);
   // Claude's version means nothing for Codex: no "was 2.1.311" note.
   c.out({ kind: 'cliVersion', version: '0.164.0' });
@@ -276,7 +276,7 @@ test('a Codex session that can\'t be found starts fresh once, with the handoff',
   assert.notEqual(fresh, r);
   assert.equal(fresh.opts.resume, false);
   assert.equal(fresh.sent[0].id, turnId);
-  assert.match(fresh.sent[0].text, /^\[Threadbare handoff\] The earlier session couldn't be found, so here's where the thread got to\./);
+  assert.match(fresh.sent[0].text, /^\[Threadbear handoff\] The earlier session couldn't be found, so here's where the thread got to\./);
   assert.match(fresh.sent[0].text, /User: remember pineapple\n\nAssistant: Remembered\.[\s\S]*\[End of handoff\. The new message follows\.\]\n\nwhat word\?$/);
   assert.ok(notes(h, thread.id).includes("Couldn't resume the earlier session, so this is a new one."));
   fresh.init('019a-new', 'gpt-6.1-sol');
@@ -571,7 +571,7 @@ function fakeClis(start: CliStatus[]) {
   return { clis, emit: (next: CliStatus[]) => ((list = next), fns.forEach((f) => f(next))) };
 }
 
-const codexStatus = (v: string): CliStatus => ({ provider: 'codex', path: `/t/codex/${v}`, managedBy: 'threadbare', installedVersion: v, status: 'current', policy: 'auto', inUse: [] });
+const codexStatus = (v: string): CliStatus => ({ provider: 'codex', path: `/t/codex/${v}`, managedBy: 'threadbear', installedVersion: v, status: 'current', policy: 'auto', inUse: [] });
 
 test('CLI statuses reach hello and clis.updated, and a Codex update asks for the models again', async () => {
   const h = codexHarness();

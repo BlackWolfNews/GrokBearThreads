@@ -13,7 +13,7 @@
 #                deleted on Ctrl-C or kill, and kept if the runner failed)
 #
 # It writes <home>/tb, a tb that always talks to this runner (an exported
-# THREADBARE_HOME doesn't last past one command in an agent's shell), and
+# THREADBEAR_HOME doesn't last past one command in an agent's shell), and
 # prints the app/Tools/dev-app.sh command for a debug app against it. On a
 # new data dir, threads default to the folder <home>/work, account claude-3
 # and model claude-haiku-5-5, and Codex threads to gpt-6-luna at low effort
@@ -28,9 +28,11 @@
 # CLIs it started.
 set -euo pipefail
 
+# THREADBARE_* was the old name for these variables: each stands in for its new name.
+for v in $(compgen -e | grep '^THREADBARE_' || true); do n="THREADBEAR_${v#THREADBARE_}"; [ -n "${!n+x}" ] || export "$n=${!v}"; done
 RUNNER_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-NODE="${THREADBARE_NODE:-$HOME/.nvm/versions/node/v24.22.1/bin/node}"
-DEFAULT_HOME="$HOME/Library/Application Support/Threadbare"
+NODE="${THREADBEAR_NODE:-$HOME/.nvm/versions/node/v24.22.1/bin/node}"
+DEFAULT_HOME="$HOME/Library/Application Support/Threadbear"
 DATA_HOME=""
 PORT=0
 KEEP=0
@@ -47,7 +49,7 @@ while [ $# -gt 0 ]; do
 done
 
 if [ ! -x "$NODE" ]; then
-  echo "No Node binary at $NODE. Set THREADBARE_NODE to a Node 24 binary." >&2
+  echo "No Node binary at $NODE. Set THREADBEAR_NODE to a Node 24 binary." >&2
   exit 1
 fi
 
@@ -59,7 +61,7 @@ real_dir() {
 MADE_HOME=0
 if [ -z "$DATA_HOME" ]; then
   TMP_ROOT="${TMPDIR:-/tmp}"
-  DATA_HOME="$(mktemp -d "${TMP_ROOT%/}/threadbare-dev.XXXXXX")"
+  DATA_HOME="$(mktemp -d "${TMP_ROOT%/}/threadbear-dev.XXXXXX")"
   MADE_HOME=1
 fi
 case "$DATA_HOME" in /*) ;; *) DATA_HOME="$PWD/$DATA_HOME" ;; esac
@@ -99,14 +101,14 @@ if [ ! -e "$DATA_HOME/runner.json" ]; then
     "$DATA_HOME/runner.json" "$WORK"
   IN_WORK="   (in $(printf '%q' "$WORK"), on claude-haiku-5-5)"
 fi
-# THREADBARE_PORT and THREADBARE_URL go too: tb then reads the port this
-# runner wrote to runner.json. THREADBARE_TB is what tb prints in the
+# THREADBEAR_PORT and THREADBEAR_URL go too: tb then reads the port this
+# runner wrote to runner.json. THREADBEAR_TB is what tb prints in the
 # commands it suggests (restart --cancel, events), so pasting one reaches
 # this runner rather than the live one a bare tb in a thread reaches.
 {
   echo '#!/bin/bash'
   echo '# tb for the dev runner in this folder (scripts/dev-runner.sh wrote it).'
-  printf 'exec env -u THREADBARE_DATA_DIR -u THREADBARE_URL -u THREADBARE_PORT -u THREADBARE_LOG THREADBARE_HOME=%q THREADBARE_TB=%q %q %q "$@"\n' \
+  printf 'exec env -u THREADBEAR_DATA_DIR -u THREADBEAR_URL -u THREADBEAR_PORT -u THREADBEAR_LOG THREADBEAR_HOME=%q THREADBEAR_TB=%q %q %q "$@"\n' \
     "$DATA_HOME" "$TB" "$NODE" "$RUNNER_DIR/bin/tb"
 } > "$TB"
 chmod +x "$TB"
@@ -153,8 +155,8 @@ trap stop INT TERM HUP
 # Inside a thread these name the live runner and that thread; the dev
 # runner sets its own for the CLIs it starts.
 while :; do
-  env -u THREADBARE_DATA_DIR -u THREADBARE_URL -u THREADBARE_THREAD_ID -u THREADBARE_RUNNER_VERSION -u THREADBARE_RUNNER_HOME \
-    THREADBARE_HOME="$DATA_HOME" THREADBARE_PORT="$PORT" THREADBARE_LOG="$LOG" THREADBARE_LOG_STDERR=1 THREADBARE_CLI_UPDATES=off \
+  env -u THREADBEAR_DATA_DIR -u THREADBEAR_URL -u THREADBEAR_THREAD_ID -u THREADBEAR_RUNNER_VERSION -u THREADBEAR_RUNNER_HOME \
+    THREADBEAR_HOME="$DATA_HOME" THREADBEAR_PORT="$PORT" THREADBEAR_LOG="$LOG" THREADBEAR_LOG_STDERR=1 THREADBEAR_CLI_UPDATES=off \
     "$NODE" src/main.ts &
   CHILD=$!
   CODE=0

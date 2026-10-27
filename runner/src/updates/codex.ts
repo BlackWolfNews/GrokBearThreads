@@ -1,4 +1,4 @@
-// Threadbare's own Codex copies, which nothing else installs into:
+// Threadbear's own Codex copies, which nothing else installs into:
 //
 //   <home>/tools/codex/
 //     0.164.0/        an `npm install --prefix` of @openai/codex@0.164.0

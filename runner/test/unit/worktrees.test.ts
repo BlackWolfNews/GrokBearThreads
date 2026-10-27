@@ -381,7 +381,7 @@ test('tb land outside a thread goes by git: the thread/ branch, main\'s checkout
   const { main } = makeRepo(PATCH(`{ check: "echo checking in $PWD" }`));
   const t = makeBranch(main);
   commit(t.path, { 'runner/b.ts': '2\n' }, 'Add b');
-  const env = { THREADBARE_THREAD_ID: undefined, THREADBARE_HOME: fs.realpathSync(tmpDir()), THREADBARE_URL: 'ws://127.0.0.1:9/rpc' };
+  const env = { THREADBEAR_THREAD_ID: undefined, THREADBEAR_HOME: fs.realpathSync(tmpDir()), THREADBEAR_URL: 'ws://127.0.0.1:9/rpc' };
   const dry = await runTb(['land', '--dry-run'], path.join(t.path, 'runner'), env);
   assert.equal(dry.code, 0, dry.out);
   assert.match(dry.out, /^Running the check: echo checking in \$PWD\nThe check passed/);
@@ -406,7 +406,7 @@ test('tb land inside a thread asks the runner where its worktree is, wherever it
     await until(() => h.adapter.sessions.length === 1, 'the CLI to start');
     const wt = h.runner.get(thread.id).worktree!.path;
     commit(wt, { 'runner/b.ts': '2\n' }, 'Thread work');
-    const r = await runTb(['land'], fs.realpathSync(tmpDir()), { THREADBARE_THREAD_ID: thread.id, THREADBARE_HOME: h.home, THREADBARE_URL: `ws://127.0.0.1:${port}/rpc` });
+    const r = await runTb(['land'], fs.realpathSync(tmpDir()), { THREADBEAR_THREAD_ID: thread.id, THREADBEAR_HOME: h.home, THREADBEAR_URL: `ws://127.0.0.1:${port}/rpc` });
     assert.equal(r.code, 0, r.out);
     assert.match(r.out, new RegExp(`Landed on main in ${main}:\n[0-9a-f]+ Thread work\n$`));
     assert.equal(sh(main, 'git log -1 --format=%s'), 'Thread work');

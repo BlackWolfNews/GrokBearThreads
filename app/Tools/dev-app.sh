@@ -38,8 +38,8 @@
 # log      the app's own log: connection, RPC errors, automation commands.
 # stop     quits the app and its mock and deletes the instance's files.
 #
-# Instances belong to whoever started them: the Threadbare thread
-# (THREADBARE_THREAD_ID) and this checkout. Without --id a command means
+# Instances belong to whoever started them: the Threadbear thread
+# (THREADBEAR_THREAD_ID) and this checkout. Without --id a command means
 # your newest running instance, never another thread's or another
 # checkout's; stop --all stops all of yours (--everyone: every instance on
 # this Mac). status lists them all, with whose they are. An app quits after
@@ -47,21 +47,23 @@
 # up after instances whose app has quit.
 set -Eeuo pipefail
 
+# THREADBARE_* was the old name for these variables: each stands in for its new name.
+for v in $(compgen -e | grep '^THREADBARE_' || true); do n="THREADBEAR_${v#THREADBARE_}"; [ -n "${!n+x}" ] || export "$n=${!v}"; done
 TOOLS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 APP_ROOT="$(cd "$TOOLS_DIR/.." && pwd)"
 # The checkout an instance was built from, and the thread that started it.
 CHECKOUT="$(cd "$APP_ROOT/.." && pwd -P)"
-OWNER_THREAD="${THREADBARE_THREAD_ID:-}"
+OWNER_THREAD="${THREADBEAR_THREAD_ID:-}"
 TMP_ROOT="${TMPDIR:-/tmp}"
-mkdir -p "${TMP_ROOT%/}/threadbare-dev-app"
+mkdir -p "${TMP_ROOT%/}/threadbear-dev-app"
 # With symlinks resolved (/var is /private/var): it's how the app's own
 # path reads in ps and pgrep.
-STATE_ROOT="$(cd "${TMP_ROOT%/}/threadbare-dev-app" && pwd -P)"
+STATE_ROOT="$(cd "${TMP_ROOT%/}/threadbear-dev-app" && pwd -P)"
 # Build logs outlive a failed start, whose instance folder is deleted.
 BUILD_LOGS="$STATE_ROOT/build-logs"
-REAL_HOME="$HOME/Library/Application Support/Threadbare"
-BUNDLE_PREFIX="com.mikerosoft.threadbare.dev"
-CHANNEL_PREFIX="com.mikerosoft.threadbare.automation"
+REAL_HOME="$HOME/Library/Application Support/Threadbear"
+BUNDLE_PREFIX="com.mikerosoft.threadbear.dev"
+CHANNEL_PREFIX="com.mikerosoft.threadbear.automation"
 LSREGISTER="/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister"
 # An instance nobody sends a command to for this long quits by itself
 # (the variable is for testing that).
@@ -84,8 +86,8 @@ die() {
 usage() { awk 'NR > 1 && /^#/ { sub(/^# ?/, ""); print; next } NR > 1 { exit }' "$0"; }
 
 node_bin() {
-  local pinned="${THREADBARE_NODE:-$HOME/.nvm/versions/node/v24.22.1/bin/node}"
-  if [ -x "$pinned" ]; then printf '%s' "$pinned"; else command -v node || die "no node binary (set THREADBARE_NODE)"; fi
+  local pinned="${THREADBEAR_NODE:-$HOME/.nvm/versions/node/v24.22.1/bin/node}"
+  if [ -x "$pinned" ]; then printf '%s' "$pinned"; else command -v node || die "no node binary (set THREADBEAR_NODE)"; fi
 }
 
 # The folder with symlinks resolved, or as given if it doesn't exist.
@@ -106,7 +108,7 @@ alive() { [ -n "${1:-}" ] && kill -0 "$1" 2>/dev/null; }
 # the instance's own, so this never finds the installed app or another
 # instance.
 bundle_pid() {
-  pgrep -f "^$1/Contents/MacOS/Threadbare( |\$)" | head -n 1 || true
+  pgrep -f "^$1/Contents/MacOS/Threadbear( |\$)" | head -n 1 || true
 }
 
 mtime() { stat -f %m "$1" 2>/dev/null || echo 0; }
@@ -152,7 +154,7 @@ is_mine() { [ "$I_THREAD" = "$OWNER_THREAD" ] && [ "$I_CHECKOUT" = "$CHECKOUT" ]
 
 # The app is running from this instance's own bundle (a pid can be reused).
 app_running() {
-  alive "$I_PID" && ps -p "$I_PID" -o command= 2>/dev/null | grep -qF "$I_BUNDLE/Contents/MacOS/Threadbare"
+  alive "$I_PID" && ps -p "$I_PID" -o command= 2>/dev/null | grep -qF "$I_BUNDLE/Contents/MacOS/Threadbear"
 }
 
 # This instance's mock runner is still running (it serves the instance's
@@ -317,7 +319,7 @@ show_build_errors() {
 build_binary() {
   mkdir -p "$BUILD_LOGS"
   local log="$BUILD_LOGS/$1.log"
-  if ! swift build --package-path "$APP_ROOT" --product Threadbare >"$log" 2>&1; then
+  if ! swift build --package-path "$APP_ROOT" --product Threadbear >"$log" 2>&1; then
     show_build_errors "$log"
     return 1
   fi
@@ -326,12 +328,12 @@ build_binary() {
 
 # Puts the build into the instance's bundle under its own bundle id.
 install_bundle() {
-  local bin; bin="$(swift build --package-path "$APP_ROOT" --show-bin-path 2>/dev/null)/Threadbare"
+  local bin; bin="$(swift build --package-path "$APP_ROOT" --show-bin-path 2>/dev/null)/Threadbear"
   # Its own bundle id gives it its own settings (window size, sidebar
   # width, last account), so it neither reads nor changes the installed
   # app's, nor another instance's.
   mkdir -p "$I_BUNDLE/Contents/MacOS"
-  cp "$bin" "$I_BUNDLE/Contents/MacOS/Threadbare"
+  cp "$bin" "$I_BUNDLE/Contents/MacOS/Threadbear"
   cp "$APP_ROOT/Resources/Info.plist" "$I_BUNDLE/Contents/Info.plist"
   mkdir -p "$I_BUNDLE/Contents/Resources"
   # LSUIElement keeps it out of the Dock and the app switcher from launch:
@@ -339,7 +341,7 @@ install_bundle() {
   # a real turn on a dev runner.
   local plist="$I_BUNDLE/Contents/Info.plist"
   /usr/libexec/PlistBuddy -c "Set :CFBundleIdentifier $I_BUNDLE_ID" \
-    -c "Set :CFBundleName Threadbare dev $I_ID" -c "Set :CFBundleDisplayName Threadbare dev $I_ID" "$plist"
+    -c "Set :CFBundleName Threadbear dev $I_ID" -c "Set :CFBundleDisplayName Threadbear dev $I_ID" "$plist"
   /usr/libexec/PlistBuddy -c "Add :LSUIElement bool true" "$plist" 2>/dev/null || /usr/libexec/PlistBuddy -c "Set :LSUIElement true" "$plist"
   codesign --force --sign - "$I_BUNDLE" >/dev/null 2>&1
 }
@@ -423,7 +425,7 @@ cmd_start() {
   mkdir -p "$dir"
   # Written as it goes, so stop can clean up after a start that failed.
   {
-    echo "bundle=$dir/Threadbare.app"
+    echo "bundle=$dir/Threadbear.app"
     echo "bundle_id=$BUNDLE_PREFIX.$ID"
     echo "thread=$OWNER_THREAD"
     echo "checkout=$CHECKOUT"
@@ -656,7 +658,7 @@ stop_one() {
     send '{"cmd":"quit"}' 5 >/dev/null 2>&1 || true
     local i
     for i in $(seq 1 100); do alive "$I_PID" || break; sleep 0.05; done
-    if alive "$I_PID" && ps -p "$I_PID" -o command= | grep -qF "$I_BUNDLE/Contents/MacOS/Threadbare"; then
+    if alive "$I_PID" && ps -p "$I_PID" -o command= | grep -qF "$I_BUNDLE/Contents/MacOS/Threadbear"; then
       kill "$I_PID" 2>/dev/null || true
     fi
   fi

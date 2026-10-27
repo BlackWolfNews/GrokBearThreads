@@ -1,14 +1,16 @@
 #!/usr/bin/env bash
 # Builds a release app into a temp folder, starts the mock runner with the
 # fixtures (app/.fixtures from Tools/fixture-export, plus the synthetic ones
-# and 16 filler threads), runs `Threadbare --perf-run` and prints the report.
+# and 16 filler threads), runs `Threadbear --perf-run` and prints the report.
 # The report is also saved to app/.fixtures/perf/.
 #   perf-run.sh [--stream-seconds 60]
 set -euo pipefail
 
+# THREADBARE_* was the old name for these variables: each stands in for its new name.
+for v in $(compgen -e | grep '^THREADBARE_' || true); do n="THREADBEAR_${v#THREADBARE_}"; [ -n "${!n+x}" ] || export "$n=${!v}"; done
 TOOLS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 APP_ROOT="$(cd "$TOOLS_DIR/.." && pwd)"
-WORK="$(mktemp -d "${TMPDIR:-/tmp}/threadbare-perf.XXXXXX")"
+WORK="$(mktemp -d "${TMPDIR:-/tmp}/threadbear-perf.XXXXXX")"
 DATA_DIR="$WORK/data"
 OUT_DIR="$APP_ROOT/.fixtures/perf"
 STAMP="$(date +%Y%m%d-%H%M%S)"
@@ -22,13 +24,13 @@ if [[ ! -d "$TOOLS_DIR/mock-runner/node_modules" ]]; then
   (cd "$TOOLS_DIR/mock-runner" && npm install --silent)
 fi
 
-THREADBARE_APP_DIR="$WORK/Threadbare.app" THREADBARE_BUILD_CONFIGURATION=release bash "$APP_ROOT/build-app.sh" >/dev/null
+THREADBEAR_APP_DIR="$WORK/Threadbear.app" THREADBEAR_BUILD_CONFIGURATION=release bash "$APP_ROOT/build-app.sh" >/dev/null
 # Its own bundle id, so its own settings: with the installed app's id it
 # left its window size and sidebar width in Mike's preferences. Re-signed
 # ad hoc, since the plist is sealed.
-PERF_ID="com.mikerosoft.threadbare.perf.$$"
-/usr/libexec/PlistBuddy -c "Set :CFBundleIdentifier $PERF_ID" "$WORK/Threadbare.app/Contents/Info.plist"
-codesign --force --sign - "$WORK/Threadbare.app" >/dev/null 2>&1
+PERF_ID="com.mikerosoft.threadbear.perf.$$"
+/usr/libexec/PlistBuddy -c "Set :CFBundleIdentifier $PERF_ID" "$WORK/Threadbear.app/Contents/Info.plist"
+codesign --force --sign - "$WORK/Threadbear.app" >/dev/null 2>&1
 
 # 16 copies of the three biggest fixtures (same events and media, their own
 # thread ids), so the 20-thread memory step loads real-size threads rather
@@ -73,7 +75,7 @@ for _ in $(seq 1 200); do
   sleep 0.05
 done
 
-"$WORK/Threadbare.app/Contents/MacOS/Threadbare" --data-dir "$DATA_DIR" --perf-run \
+"$WORK/Threadbear.app/Contents/MacOS/Threadbear" --data-dir "$DATA_DIR" --perf-run \
   --perf-report "$OUT_DIR/perf-$STAMP.json" "$@"
 echo ""
 echo "Saved $OUT_DIR/perf-$STAMP.json and .txt"

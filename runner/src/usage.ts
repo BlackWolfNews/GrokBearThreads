@@ -1,6 +1,6 @@
 // How much room each account has left. Token Stats is the only program that
 // reads Keychain logins, renews them or calls Anthropic's usage endpoint;
-// Threadbare reads the limits.json it writes as a baseline and adds the
+// Threadbear reads the limits.json it writes as a baseline and adds the
 // readings it gets for free from its own turns (Claude's rate_limit_event,
 // Codex's account/rateLimits). It never runs `token-stats limits`.
 import fs from 'node:fs';
@@ -103,7 +103,7 @@ export function parseLimitsJson(raw: unknown): Baseline | undefined {
   for (const item of doc.accounts) {
     if (!item || typeof item !== 'object') continue;
     const a = item as Record<string, unknown>;
-    // "Claude", "Codex", and Grok and Muse, which Threadbare doesn't run.
+    // "Claude", "Codex", and Grok and Muse, which Threadbear doesn't run.
     const provider = String(a.provider ?? '').toLowerCase();
     if (provider !== 'claude' && provider !== 'codex') continue;
     const configDir = str(a.configDir);

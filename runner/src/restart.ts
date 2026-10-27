@@ -117,16 +117,20 @@ export function resumesPath(home: string): string {
 export const BIN_DIR = path.resolve(import.meta.dirname, '..', 'bin');
 
 // Every CLI gets these, so tools an agent runs (tb self, deploy-runner.sh)
-// know which thread and which runner they're in. THREADBARE_HOME is the one
-// tb reads, and agents point it at a dev runner; THREADBARE_RUNNER_HOME
+// know which thread and which runner they're in. THREADBEAR_HOME is the one
+// tb reads, and agents point it at a dev runner; THREADBEAR_RUNNER_HOME
 // always names the runner the thread is on, so the scripts' guards against
 // restarting it from inside one of its threads go by that.
 export function threadEnv(threadId: string, home: string, basePath = process.env.PATH): Record<string, string> {
   return {
+    THREADBEAR_THREAD_ID: threadId,
+    THREADBEAR_HOME: home,
+    THREADBEAR_RUNNER_HOME: home,
+    THREADBEAR_RUNNER_VERSION: RUNNER_VERSION,
+    // The old names too, for skills and scripts written before the rename.
     THREADBARE_THREAD_ID: threadId,
     THREADBARE_HOME: home,
     THREADBARE_RUNNER_HOME: home,
-    THREADBARE_RUNNER_VERSION: RUNNER_VERSION,
     PATH: basePath ? `${BIN_DIR}:${basePath}` : BIN_DIR,
   };
 }
@@ -597,7 +601,7 @@ export class Restarter {
 // The notice while a restart waits. onYou of the waiting threads are
 // waiting on Mike's answer to an approval or a question, which won't come by
 // itself, so the line says so. The Mac app reads these sentences
-// (RunnerRestart.parse in app/Sources/ThreadbareCore/RPC/RunnerRestart.swift:
+// (RunnerRestart.parse in app/Sources/ThreadbearCore/RPC/RunnerRestart.swift:
 // the prefix, and the numbers after it adding up to the count), and so does
 // the mock runner's copy; restart.test.ts pins them.
 export function pendingMessage(waiting: number, onYou = 0): string {

@@ -163,7 +163,7 @@ test('before a turn: a failed copy falls back to the handoff note; a login with 
   const s2 = h.adapter.last;
   assert.equal(s2.opts.account.id, 'claude-main');
   assert.equal(s2.opts.resume, false);
-  assert.match(s2.sent[0].text, /^\[Threadbare handoff\] This conversation moved from the three@example\.com login to main@example\.com/);
+  assert.match(s2.sent[0].text, /^\[Threadbear handoff\] This conversation moved from the three@example\.com login to main@example\.com/);
   assert.match(notes(h, thread.id)[0], /three@example\.com hit its 5-hour limit, back at /);
 });
 
@@ -303,7 +303,7 @@ test('spill: with no Claude login left, a mixed pool moves the thread to Codex a
   assert.equal(t.model, 'gpt-6-luna', "the provider's default model");
   const cx = h.codex.last;
   assert.equal(cx.opts.resume, false);
-  assert.match(cx.sent[0].text, /^\[Threadbare handoff\][\s\S]*Half done\.[\s\S]*Carry on from where you left off\.$/);
+  assert.match(cx.sent[0].text, /^\[Threadbear handoff\][\s\S]*Half done\.[\s\S]*Carry on from where you left off\.$/);
   assert.match(notes(h, thread.id)[0], /^Moved to Codex · main@example\.com: three@example\.com hit its 5-hour limit, back at .*\. It's on Codex now, with GPT-6-Luna and a summary of the thread so far\.$/);
   assert.equal(h.copies.length, 0, 'no transcript copy across providers');
   // Claude has room again later: the thread doesn't move back by itself.

@@ -1,5 +1,5 @@
 // One `codex app-server` process and the JSON-RPC it speaks over stdio.
-// Threadbare runs one of these per live Codex thread (docs/step4-plan.md,
+// Threadbear runs one of these per live Codex thread (docs/step4-plan.md,
 // "Why one process per thread"): released threads never unload inside an
 // app-server, so sharing one would only grow. Closing stdin ends the
 // process in milliseconds, with its MCP servers and running commands.
@@ -42,7 +42,7 @@ export type CodexBinary = {
   packageRoot?: string;
 };
 
-// The codex next to the runner's own Node: the npm copy Threadbare falls
+// The codex next to the runner's own Node: the npm copy Threadbear falls
 // back to until it has a copy of its own (section E), or when updates are
 // off. Never ~/.local/bin/codex, a standalone build nothing updates.
 export function fallbackCodexPath(execPath: string = process.execPath): string {
@@ -52,7 +52,7 @@ export function fallbackCodexPath(execPath: string = process.execPath): string {
 // Finds the native Codex binary behind a launcher, so each thread doesn't
 // also pay for the launcher's own Node process (about 50 MB). `start` can be
 // the npm launcher (`bin/codex`, a link to `@openai/codex/bin/codex.js`),
-// codex.js itself, an `npm install --prefix` folder (Threadbare's own copies,
+// codex.js itself, an `npm install --prefix` folder (Threadbear's own copies,
 // `<home>/tools/codex/<v>` or its `current` link), or a native binary set by
 // hand. Resolved again on every spawn, so a new process picks up a new
 // `current`. When the native binary can't be found, the launcher itself is
@@ -151,12 +151,12 @@ export function codexEnv(
   env.CODEX_MANAGED_BY_NPM = '1';
   if (packageRoot) env.CODEX_MANAGED_PACKAGE_ROOT = packageRoot;
   // As T3 does: the model catalogue refresh before initialize, and the
-  // threads Codex records, carry Threadbare's name.
-  env.CODEX_INTERNAL_ORIGINATOR_OVERRIDE = 'Threadbare';
+  // threads Codex records, carry Threadbear's name.
+  env.CODEX_INTERNAL_ORIGINATOR_OVERRIDE = 'Threadbear';
   return { ...env, ...threadEnv };
 }
 
-// "threadbare/0.164.0 (Mac OS 26.6.2; arm64) unknown (threadbare; 0.1.0)"
+// "threadbear/0.164.0 (Mac OS 26.6.2; arm64) unknown (threadbear; 0.1.0)"
 // -> "0.164.0": the part after the first "/", up to the space.
 export function parseUserAgentVersion(userAgent: unknown): string | undefined {
   if (typeof userAgent !== 'string') return undefined;
@@ -287,7 +287,7 @@ export type AppServerOptions = {
   binary: string; // resolved with resolveCodexBinary on every start
   args?: string[]; // extra `app-server` arguments (codexArgs)
   account: Account;
-  env?: Record<string, string>; // the thread's THREADBARE_* variables and PATH
+  env?: Record<string, string>; // the thread's THREADBEAR_* variables and PATH
   cwd: string;
   registry: ProcessRegistry;
   log: Logger;
@@ -426,7 +426,7 @@ export class AppServerProcess {
         onExit?.(this.closing ? undefined : new Error(what));
       });
       const params: InitializeParams = {
-        clientInfo: { name: 'threadbare', title: 'Threadbare', version: RUNNER_VERSION },
+        clientInfo: { name: 'threadbear', title: 'Threadbear', version: RUNNER_VERSION },
         capabilities: { experimentalApi: true, optOutNotificationMethods: OPT_OUT },
       };
       this.request<InitializeResponse>('initialize', params)
@@ -492,7 +492,7 @@ export class AppServerProcess {
         this.onRequest(id, method, params);
       } catch (e) {
         this.opts.log.error('codex request handler threw', { threadId: this.label, method, error: String(e) });
-        this.respondError(id, -32603, 'Threadbare could not handle this request.');
+        this.respondError(id, -32603, 'Threadbear could not handle this request.');
       }
       return;
     }

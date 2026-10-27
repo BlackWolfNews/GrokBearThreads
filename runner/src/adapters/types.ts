@@ -39,7 +39,7 @@ export type StartSessionOptions = {
   // the CLI's rule syntax ("Bash(npm test)", "Write"). Applied on start so
   // they outlast an idle release.
   allowRules?: string[];
-  // Added to the CLI's environment (THREADBARE_THREAD_ID and friends), so
+  // Added to the CLI's environment (THREADBEAR_THREAD_ID and friends), so
   // the commands it runs know which thread they belong to.
   env?: Record<string, string>;
   // Said to the agent on top of the CLI's own system prompt: the thread's

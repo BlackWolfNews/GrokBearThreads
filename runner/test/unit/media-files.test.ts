@@ -79,8 +79,8 @@ test('copyImageFileInto turns a BMP into a PNG with sips', { skip: !fs.existsSyn
 test('saveDataUrl saves a base64 image and refuses anything else', () => {
   const media = path.join(tmpDir('tb-media-'), 'media');
   const png = makePng(9, 2);
-  const ref = saveDataUrl(media, `data:image/png;base64,${png.toString('base64')}`, 'threadbare.read_thread')!;
-  assert.match(path.basename(ref.path), /^threadbare_read_thread-[0-9a-f]{10}\.png$/);
+  const ref = saveDataUrl(media, `data:image/png;base64,${png.toString('base64')}`, 'threadbear.read_thread')!;
+  assert.match(path.basename(ref.path), /^threadbear_read_thread-[0-9a-f]{10}\.png$/);
   assert.deepEqual([ref.width, ref.height], [9, 2]);
   assert.equal(saveDataUrl(media, 'data:text/plain;base64,aGVsbG8=', 'x'), null);
   assert.equal(saveDataUrl(media, 'data:image/svg+xml,<svg/>', 'x'), null);

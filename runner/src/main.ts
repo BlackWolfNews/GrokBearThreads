@@ -1,6 +1,6 @@
 // Runner entry point: `node src/main.ts`. launchd runs this (see
-// scripts/install-runner.sh); tests run it with THREADBARE_HOME and
-// THREADBARE_PORT pointing at temp places.
+// scripts/install-runner.sh); tests run it with THREADBEAR_HOME and
+// THREADBEAR_PORT pointing at temp places.
 import fs from 'node:fs';
 import { loadConfig, ensureHome, readToken, paths, recordListening, DEFAULT_CWD, RUNNER_VERSION } from './config.ts';
 import { RELEASE, markGoodLater, onSupervisorGone, readRelease, requestHandover, supervised, takeRollbackNotice, tellLaunchListening } from './release.ts';
@@ -29,7 +29,7 @@ import { removeTempFiles } from './fsutil.ts';
 import { Models } from './models/index.ts';
 import { SettingsService, modelMethods, settingsMethods } from './settings.ts';
 import { ConvexSync, ensureRunnerId, readSyncKey } from './sync.ts';
-import { ALWAYS_ASK_TOOLS, SERVER_NAME, buildThreadbareTools, threadbareMcpServer } from './threadbare-mcp.ts';
+import { ALWAYS_ASK_TOOLS, SERVER_NAME, buildThreadbearTools, threadbearMcpServer } from './threadbear-mcp.ts';
 
 // Tells launch.mjs this runner calls its listening() hook (release.ts), so
 // it may stop one that hasn't started listening in time.
@@ -38,7 +38,7 @@ export const REPORTS_LISTENING = true;
 async function main(): Promise<void> {
   const cfg = loadConfig();
   ensureHome(cfg.home);
-  const log = createLogger(cfg.logFile, { echo: process.env.THREADBARE_LOG_STDERR === '1', debug: process.env.THREADBARE_DEBUG === '1' });
+  const log = createLogger(cfg.logFile, { echo: process.env.THREADBEAR_LOG_STDERR === '1', debug: process.env.THREADBEAR_DEBUG === '1' });
   log.info('runner starting', { version: RUNNER_VERSION, home: cfg.home, port: cfg.port, pid: process.pid });
 
   // The SDK warns when canUseTool is set in bypass mode; it's deliberate
@@ -74,7 +74,7 @@ async function main(): Promise<void> {
   const usage = new UsageStore({ limitsFile: cfg.tokenStatsLimitsFile, dataDir: cfg.home, clock: realClock, log });
   usage.start();
   const accounts = new AccountRegistry(cfg, usage);
-  // Every session gets tools for driving Threadbare itself, bound to its
+  // Every session gets tools for driving Threadbear itself, bound to its
   // own thread. Sessions only start after the runner exists.
   let runner!: Runner;
   let scheduler!: Scheduler;
@@ -112,17 +112,17 @@ async function main(): Promise<void> {
     claudePath: cfg.claudePath,
     registry,
     log,
-    mcpServersFor: (threadId) => ({ [SERVER_NAME]: threadbareMcpServer(router(), threadId, scheduleControl(), projectControl()) }),
+    mcpServersFor: (threadId) => ({ [SERVER_NAME]: threadbearMcpServer(router(), threadId, scheduleControl(), projectControl()) }),
     alwaysAsk: ALWAYS_ASK_TOOLS,
   });
   // One app-server per live Codex thread, each starting what E says is
-  // current, with the same threadbare tools as dynamic tools.
+  // current, with the same threadbear tools as dynamic tools.
   const codex = new CodexAdapter({
     codexBinary: () => updates.codexBinary(),
     codexArgs: cfg.codexArgs,
     registry,
     log,
-    toolsFor: (threadId) => buildThreadbareTools(router(), threadId, Date.now, scheduleControl(), projectControl()),
+    toolsFor: (threadId) => buildThreadbearTools(router(), threadId, Date.now, scheduleControl(), projectControl()),
     onNotice: (text) => runner.notice('warning', text),
   });
   // The runner's own small-model calls. Reads the key from secrets/ on
@@ -309,7 +309,7 @@ async function main(): Promise<void> {
   recordListening(cfg.home, port, DEFAULT_CWD);
   log.info('runner listening', { url: `ws://${cfg.host}:${port}/rpc` });
   // Tests read this line to know the runner is up.
-  process.stdout.write(`threadbare-runner listening on ${port}\n`);
+  process.stdout.write(`threadbear-runner listening on ${port}\n`);
   tellLaunchListening();
   // Checks start a minute after this; installs never while a restart waits.
   updates.start();
@@ -485,12 +485,12 @@ async function main(): Promise<void> {
 const BACKGROUND_HOLD_MS = 30 * 60_000;
 
 // A warning when the Codex binary new sessions would start isn't there, or
-// undefined. Threadbare's own copy may still be on its way.
+// undefined. Threadbear's own copy may still be on its way.
 function missingCodex(start: string, cfg: ReturnType<typeof loadConfig>): string | undefined {
   const bin = resolveCodexBinary(start);
   if (fs.existsSync(bin.command)) return undefined;
   if (cfg.codexPath) return `The codex CLI isn't at ${cfg.codexPath} (codexPath in runner.json), so Codex threads can't start.`;
-  if (cfg.cliUpdates.codex !== 'off') return `The codex CLI isn't at ${start} yet, so Codex threads can't start until Threadbare has installed its own copy (Usage shows how that's going).`;
+  if (cfg.cliUpdates.codex !== 'off') return `The codex CLI isn't at ${start} yet, so Codex threads can't start until Threadbear has installed its own copy (Usage shows how that's going).`;
   return `The codex CLI isn't at ${start}, so Codex threads can't start. Install @openai/codex next to the runner's Node, or set codexPath in runner.json.`;
 }
 

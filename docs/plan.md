@@ -1,7 +1,7 @@
-# Threadbare: Mike's own agent app
+# Threadbear: Mike's own agent app
 
 Working name. It's a thread app with only the things Mike uses and nothing
-more, hence threadbare. Easy to rename while it's young.
+more, hence threadbear. Easy to rename while it's young.
 
 ## Why
 
@@ -55,16 +55,16 @@ Quick Ask, Tinker Desk as a second runner, cloud sandboxes.
 
 ## Runner details
 
-- Data dir `~/Library/Application Support/Threadbare/`:
+- Data dir `~/Library/Application Support/Threadbear/`:
   `runner.json` (port, defaults), `secrets/runner-token` (0600, random),
   `threads/<threadId>/thread.json` (summary, atomic writes),
   `threads/<threadId>/events.ndjson` (append-only persisted events),
   `threads/<threadId>/media/` (images), `threads/<threadId>/blobs/` (tool
   output over 64 KB), `inbox/` (images the app drops before sending),
-  logs in `~/Library/Logs/threadbare-runner.log`.
+  logs in `~/Library/Logs/threadbear-runner.log`.
 - Listens on `127.0.0.1:8797`, WebSocket path `/rpc`, bearer token from the
   secrets file (header on upgrade, or first-message `auth`).
-- launchd LaunchAgent `com.mikerosoft.threadbare.runner`, KeepAlive, with the
+- launchd LaunchAgent `com.mikerosoft.threadbear.runner`, KeepAlive, with the
   Node path pinned in the plist (`~/.nvm/versions/node/v24.22.1/bin/node`
   today; make it configurable). Don't use `node:sqlite` (it truncates text
   at NUL on Node 24); plain files are enough.
@@ -77,7 +77,7 @@ Quick Ask, Tinker Desk as a second runner, cloud sandboxes.
   - One `query()` per live thread in streaming-input mode (an async queue).
   - `pathToClaudeCodeExecutable` = `~/.local/bin/claude`, the shared native
     install (SDK sessions never update it: only the terminal UI,
-    `claude update` and `claude install` do, so step 4 adds Threadbare's own
+    `claude update` and `claude install` do, so step 4 adds Threadbear's own
     update checks); `env` = `{...process.env, CLAUDE_CONFIG_DIR}` for
     non-main accounts (and with `CLAUDE_CONFIG_DIR` removed for `claude-main`).
   - `cwd` per thread; `settingSources: ['user','project','local']`;
@@ -106,14 +106,14 @@ Quick Ask, Tinker Desk as a second runner, cloud sandboxes.
 
 ## App details
 
-- SwiftPM package in `app/`: `ThreadbareCore` (no AppKit/SwiftUI: protocol
+- SwiftPM package in `app/`: `ThreadbearCore` (no AppKit/SwiftUI: protocol
   models, WebSocket JSON-RPC client, event reducer that turns events into
-  transcript rows, markdown block splitter, diff builder), `Threadbare`
-  (executable: SwiftUI + AppKit), `ThreadbareCoreTests` (XCTest). swift-tools
+  transcript rows, markdown block splitter, diff builder), `Threadbear`
+  (executable: SwiftUI + AppKit), `ThreadbearCoreTests` (XCTest). swift-tools
   6.2, macOS 26. Copy Token Stats' `build-app.sh`, `restart.sh`, `kill.sh`,
   `install.sh` and launcher pattern
   (`~/dev/me/mikerosoft-tools/token-stats`); bundle id
-  `com.mikerosoft.threadbare`; sign with the first "Apple Development"
+  `com.mikerosoft.threadbear`; sign with the first "Apple Development"
   identity, falling back to ad hoc, with a stable designated requirement.
 - **Window:** `NavigationSplitView`. Sidebar sections: Inbox (everything not
   running, what needs Mike first: questions and approvals, then unread

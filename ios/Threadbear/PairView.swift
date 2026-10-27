@@ -13,7 +13,7 @@ struct PairView: View {
                 .foregroundStyle(.secondary)
             VStack(spacing: 10) {
                 Text("Pair with your Mac").font(.title2.weight(.semibold))
-                Text("On the Mac, run **swift ios/scripts/pair-qr.swift** in the threadbare repo, then scan the code it shows with the Camera.")
+                Text("On the Mac, run **swift ios/scripts/pair-qr.swift** in the threadbear repo, then scan the code it shows with the Camera.")
                     .multilineTextAlignment(.center)
                     .foregroundStyle(.secondary)
             }

@@ -55,7 +55,7 @@ const OPTIONS = {
   help: { type: 'boolean', short: 'h' },
 } as const;
 
-const HELP = `tb: talk to the Threadbare runner
+const HELP = `tb: talk to the Threadbear runner
 
   tb new "text" [--cwd DIR] [--pool ID | --account ID] [--model M] [--effort L] [--ask] [--image FILE]... [--wait]
                                   --pool runs it on a pool (the login with room, moving when
@@ -106,7 +106,7 @@ const HELP = `tb: talk to the Threadbare runner
                                   or for the ones given (never one named by hand)
 
 Thread ids can be shortened to any unique prefix.
-Uses THREADBARE_HOME and THREADBARE_PORT like the runner does.
+Uses THREADBEAR_HOME and THREADBEAR_PORT like the runner does.
 
 ${DEV_HELP}`;
 
@@ -216,7 +216,7 @@ async function main(argv: string[]): Promise<number> {
 type Flags = Record<string, string | boolean | string[] | undefined>;
 
 // `tb land` (docs/thread-worktrees.md, worktrees.ts). Inside a thread
-// (THREADBARE_THREAD_ID) the runner says where the thread's worktree is;
+// (THREADBEAR_THREAD_ID) the runner says where the thread's worktree is;
 // otherwise, or when the thread has none, it's the git checkout this runs
 // in, if that's on a thread/ branch. The check is the one in that
 // worktree's own patch, so a branch that changes it lands under its own.
@@ -224,7 +224,7 @@ async function landCommand(cfg: ReturnType<typeof loadConfig>, dryRun: boolean):
   const here = process.cwd();
   let target: Omit<LandTarget, 'check'> | undefined;
   let from = here;
-  const threadId = process.env.THREADBARE_THREAD_ID;
+  const threadId = process.env.THREADBEAR_THREAD_ID;
   if (threadId) {
     const t = await threadFromRunner(cfg, threadId);
     if (t?.worktree) {
@@ -507,7 +507,7 @@ async function run(client: RunnerClient, cmd: string, args: string[], f: Flags):
         if (f.ask) params.permissionMode = 'ask';
       }
       // A schedule an agent makes from a thread says which one.
-      if (process.env.THREADBARE_THREAD_ID) params.createdBy = process.env.THREADBARE_THREAD_ID;
+      if (process.env.THREADBEAR_THREAD_ID) params.createdBy = process.env.THREADBEAR_THREAD_ID;
       const r = await client.call<{ schedule: Schedule }>('schedules.create', params);
       if (f.json) console.log(JSON.stringify(r.schedule));
       else printSchedules([r.schedule]);
@@ -704,13 +704,13 @@ async function readSecret(prompt: string): Promise<string> {
   });
 }
 
-// Inside a thread, tb won't stop the thread it runs in, as the threadbare
-// MCP tools won't (threadbare-mcp.ts): it would end this very turn.
-// THREADBARE_THREAD_ID is only set in a thread's own CLI and what it runs.
+// Inside a thread, tb won't stop the thread it runs in, as the threadbear
+// MCP tools won't (threadbear-mcp.ts): it would end this very turn.
+// THREADBEAR_THREAD_ID is only set in a thread's own CLI and what it runs.
 const STOPS_SELF = "Can't snooze or archive the thread this runs in from inside its own turn. Ask Mike to, or do it when the work is done.";
 
 function notSelf(id: string, message: string): string {
-  if (id === process.env.THREADBARE_THREAD_ID) throw new Error(message);
+  if (id === process.env.THREADBEAR_THREAD_ID) throw new Error(message);
   return id;
 }
 

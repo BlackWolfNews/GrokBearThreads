@@ -1,6 +1,6 @@
-# Threadbare for Mac
+# Threadbear for Mac
 
-The Mac app for Threadbare: a native window onto the threads the runner
+The Mac app for Threadbear: a native window onto the threads the runner
 (`../runner`) keeps going. It holds no agent state of its own. Quitting or
 updating the app never stops a turn; the runner owns every CLI.
 
@@ -14,26 +14,26 @@ You need macOS 26, Xcode 27 (Swift 6.2 or later) and Python 3 for the
 launcher. Node is only needed for the mock runner and the fixture tools.
 
 ```bash
-bash install.sh        # release build into ~/Applications/Threadbare.app, links ~/.local/bin/threadbare
-threadbare             # open it
-threadbare restart     # debug rebuild and relaunch
-threadbare stop        # quit the app (the runner and its agents keep going)
+bash install.sh        # release build into ~/Applications/Threadbear.app, links ~/.local/bin/threadbear
+threadbear             # open it
+threadbear restart     # debug rebuild and relaunch
+threadbear stop        # quit the app (the runner and its agents keep going)
 ```
 
 The scripts:
 
-- `build-app.sh` builds and stages `~/Applications/Threadbare.app` (or
-  `THREADBARE_APP_DIR`), swapping the old bundle out in two renames.
-  `THREADBARE_BUILD_CONFIGURATION=debug` for a debug build.
+- `build-app.sh` builds and stages `~/Applications/Threadbear.app` (or
+  `THREADBEAR_APP_DIR`), swapping the old bundle out in two renames.
+  `THREADBEAR_BUILD_CONFIGURATION=debug` for a debug build.
 - It signs with the first "Apple Development" identity in your keychain
-  (override with `THREADBARE_SIGN_IDENTITY`), so the app keeps one identity
+  (override with `THREADBEAR_SIGN_IDENTITY`), so the app keeps one identity
   across rebuilds and notification permission sticks. Without one it signs ad
   hoc and pins the designated requirement to the bundle id
-  `com.mikerosoft.threadbare`, because an ad hoc requirement is the binary's
+  `com.mikerosoft.threadbear`, because an ad hoc requirement is the binary's
   hash and changes every build.
 - `restart.sh`, `kill.sh` and `install.sh` work like Token Stats'. `kill.sh`
   only matches the staged app's own binary path.
-- `icons/threadbare.png` becomes the app icon if it's there.
+- `icons/threadbear.png` becomes the app icon if it's there.
 - The bundle records what it was built from in `Contents/Resources/build.json`
   (commit, the tree hash of `app/`, the checkout), and carries
   `stage-update.sh`.
@@ -42,27 +42,27 @@ The installed app then keeps itself current (`AppUpdate.swift`). Every five
 minutes it reads main's tree hash for `app/` in the checkout it was built
 from; when that differs from what's running it builds the commit in the
 background with `stage-update.sh` (release, `nice`d, from a clone of main
-under `~/Library/Caches/Threadbare/update`, so an agent's half-done edits
-in the working tree are never built) into `~/Applications/.Threadbare.app.next`.
+under `~/Library/Caches/Threadbear/update`, so an agent's half-done edits
+in the working tree are never built) into `~/Applications/.Threadbear.app.next`.
 Quitting swaps the staged bundle into place, so the next launch is the new
 app; a launch that finds one staged (the app was killed rather than quit)
 swaps it in and relaunches; "Restart to Update to <commit>" in the app
 menu does it right away. It also restarts by itself, checked every 30 s,
 once no thread is running or starting, no composer has unsent text or
 images, and either another app is in front (it relaunches behind, with
-`open -g`) or Threadbare is in front but hasn't had a key or a click for
+`open -g`) or Threadbear is in front but hasn't had a key or a click for
 five minutes; the thread and list that were open come back after. The
 build's output goes to
-`~/Library/Logs/threadbare-update.log`; the app's own log says what it
+`~/Library/Logs/threadbear-update.log`; the app's own log says what it
 decided. Only the installed bundle path does this, not a dev app, perf or
 screenshot run, and `--no-update` turns it off for a launch. An app built
 before `build.json` existed stays as it is until `install.sh` or
 `restart.sh` is run once.
 
 The app finds the runner through its data folder,
-`~/Library/Application Support/Threadbare/` (`runner.json` for the port,
+`~/Library/Application Support/Threadbear/` (`runner.json` for the port,
 `secrets/runner-token` for the token). `--data-dir <path>` or
-`THREADBARE_DATA_DIR` points it somewhere else, which is how the mock runner
+`THREADBEAR_DATA_DIR` points it somewhere else, which is how the mock runner
 and the perf run stay away from the real one. Install the runner itself with
 `../runner/scripts/install-runner.sh` (a LaunchAgent; see the runner's README).
 
@@ -144,7 +144,7 @@ and the perf run stay away from the real one. Install the runner itself with
   after it restarted" over its text, not a bubble of yours.
 - If the runner isn't running you get "Can't reach the runner." with
   **Start runner** (`launchctl kickstart` of
-  `com.mikerosoft.threadbare.runner`; only shown when the app uses the
+  `com.mikerosoft.threadbear.runner`; only shown when the app uses the
   installed runner's data folder, never against the mock or a dev runner)
   and Try again; the reason is in its tooltip. A dropped connection says "Lost the connection to the runner.
   Reconnecting…". The app reconnects on its own with backoff (0.25 s
@@ -171,7 +171,7 @@ turn footer (duration and cost), a note or an error.
 - A turn that edited files ends with an "Edited 3 files" card (name, folder,
   +N −M); click a file for its diff.
 
-- `ThreadbareCore` turns protocol events into rows (`TranscriptModel`), keeps
+- `ThreadbearCore` turns protocol events into rows (`TranscriptModel`), keeps
   live events in seq order and spots gaps (`ThreadFeed`), splits markdown into
   blocks (`MarkdownBlocks`) and builds diffs (`DiffBuilder`). It has no AppKit
   or SwiftUI, so it's all unit tested.
@@ -258,8 +258,8 @@ line can be seen without waiting on a real sub-agent. The demo thread
 
 ```bash
 (cd Tools/mock-runner && npm install)
-threadbare mock              # the app against the mock, in a temp data folder
-threadbare mock --filler 16  # plus 16 synthetic filler threads
+threadbear mock              # the app against the mock, in a temp data folder
+threadbear mock --filler 16  # plus 16 synthetic filler threads
 ```
 
 It never touches the real runner's data folder (it refuses to).
@@ -283,7 +283,7 @@ Row counts use the same rules as the app's reducer, images included. On
 ## Perf runs
 
 ```bash
-bash Tools/perf-run.sh                       # or: threadbare perf
+bash Tools/perf-run.sh                       # or: threadbear perf
 bash Tools/perf-run.sh --stream-seconds 10   # shorter streaming step
 ```
 
@@ -311,7 +311,7 @@ filler threads, then runs the app with `--perf-run`:
    the whole run.
 
 It ends with each bar from the plan marked met or NOT MET. Intervals are
-also marked with `os_signpost` (subsystem `com.mikerosoft.threadbare`,
+also marked with `os_signpost` (subsystem `com.mikerosoft.threadbear`,
 category `perf`) for Instruments. The report prints and is saved to
 `.fixtures/perf/`. `--perf-debug` adds the transcript's cells, layer tree and
 memory regions after each open; `--perf-hold <seconds>` keeps the app open at
@@ -345,7 +345,7 @@ of a freshly signed build), older page fetch 13 ms and merge 9 ms (median).
 
 ## Screenshots
 
-`Threadbare --data-dir <mock data dir> --screenshots <folder>` opens the demo
+`Threadbear --data-dir <mock data dir> --screenshots <folder>` opens the demo
 threads and saves window-only captures (`screencapture -l` with the window's
 id, never the full screen). `--only 2` takes just one. Run the mock with
 `--fixtures Tools/mock-runner/fixtures` so only the synthetic threads are
@@ -392,8 +392,8 @@ mistake. Its mock runner runs in a session of its own: started from an
 agent's command it used to share that command's process group, which the
 live runner stops when it restarts, leaving the app with no runner.
 
-Instances belong to whoever started them: the Threadbare thread
-(`THREADBARE_THREAD_ID`) and the checkout the script is in. Several threads
+Instances belong to whoever started them: the Threadbear thread
+(`THREADBEAR_THREAD_ID`) and the checkout the script is in. Several threads
 can be using dev apps at once, so without `--id` a command means the
 caller's newest running instance, never another thread's or another
 checkout's (it says whose they are if you have none); `stop --all` stops
@@ -438,7 +438,7 @@ traffic lights are approximate, the rest matches.
 
 A build that fails prints just its errors (no colour codes or compiler
 command lines) and keeps the whole log in
-`$TMPDIR/threadbare-dev-app/build-logs/`. `rebuild` leaves the running app
+`$TMPDIR/threadbear-dev-app/build-logs/`. `rebuild` leaves the running app
 alone when the build fails.
 
 The commands (`do`), each a JSON object with `cmd`. Rows and threads can be
@@ -482,7 +482,7 @@ is an error. Commands marked "the open thread" act on `id` when it's given
 | `mock` | `method`, `params` (an object) | `mock.<method>` on the mock runner, such as `restartPending` and `restart` |
 | `status`, `sidebar`, `streaming`, `account-ids`, `quit` | | |
 
-`Tools/drive.sh` posts commands without waiting (`THREADBARE_AUTOMATION_ID`
+`Tools/drive.sh` posts commands without waiting (`THREADBEAR_AUTOMATION_ID`
 picks an instance). The integration run on 2026-10-26 used it against the
 real runner with a debug build that replaced Mike's app in `~/Applications`;
 that's his call, never an agent's, and now needs `--automation-allow-live`.
@@ -494,7 +494,7 @@ Its window-only captures are in `../docs/screenshots/`.
 swift test
 ```
 
-`ThreadbareCoreTests` covers the protocol models (including events in
+`ThreadbearCoreTests` covers the protocol models (including events in
 shapes the strict decoders used to reject), the JSON-RPC client over a fake
 transport (request order, timeouts), the reducer and feed (streaming across
 earlier finished turns, gaps and unfillable holes, paging and moved rows,
@@ -503,8 +503,8 @@ headers, the Markdown export, the runner restart's states, messages sent by
 the runner, and which events each row came from ("Copy debug info").
 `MockRunnerTests` runs the real WebSocket client against the mock runner,
 its restart included (skipped if node or the mock's `npm install` is
-missing, except under `THREADBARE_REQUIRE_MOCK=1`, which `../check.sh` sets
-after installing the mock's packages). `ThreadbareAppTests` tests the app target itself: typing into the
+missing, except under `THREADBEAR_REQUIRE_MOCK=1`, which `../check.sh` sets
+after installing the mock's packages). `ThreadbearAppTests` tests the app target itself: typing into the
 composer, question answers, incremental streaming heights against a full
 measure, the render cache, sliced tall text, drafts kept when a send fails,
 the restart banner, the runner's message as a note, and the automation
@@ -521,7 +521,7 @@ streams) and text typed into the composer reaching the draft.
   blank for a moment, and they're decoded again on each pass.
 - The app target is still in Swift 5 language mode (its TextKit measuring
   runs off the main thread with non-Sendable objects kept to one thread
-  each); `ThreadbareCore` is Swift 6.
+  each); `ThreadbearCore` is Swift 6.
 - No syntax colouring in code blocks yet.
 - The model picker lists the CLI's own rows once the runner has asked each
   account (a few seconds after it starts); until then it offers opus, sonnet

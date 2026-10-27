@@ -9,12 +9,14 @@
 #   scripts/deploy-runner.sh --list      show the releases
 #   scripts/deploy-runner.sh --rollback  back to the previous release
 #
-# THREADBARE_LAUNCHCTL replaces launchctl (the tests stub it).
+# THREADBEAR_LAUNCHCTL replaces launchctl (the tests stub it).
 set -euo pipefail
 
-NODE="${THREADBARE_NODE:-$HOME/.nvm/versions/node/v24.22.1/bin/node}"
+# THREADBARE_* was the old name for these variables: each stands in for its new name.
+for v in $(compgen -e | grep '^THREADBARE_' || true); do n="THREADBEAR_${v#THREADBARE_}"; [ -n "${!n+x}" ] || export "$n=${!v}"; done
+NODE="${THREADBEAR_NODE:-$HOME/.nvm/versions/node/v24.22.1/bin/node}"
 if [ ! -x "$NODE" ]; then
-  echo "No Node binary at $NODE. Set THREADBARE_NODE to a Node 24 binary." >&2
+  echo "No Node binary at $NODE. Set THREADBEAR_NODE to a Node 24 binary." >&2
   exit 1
 fi
 exec "$NODE" "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/deploy.mjs" "$@"

@@ -5,7 +5,7 @@ import path from 'node:path';
 import { makeHarness, tick } from '../helpers/fakes.ts';
 import { describeAt, describeCron, nextRuns, parseCron } from '../../src/cron.ts';
 import { Scheduler, scheduleMethods } from '../../src/schedules.ts';
-import { buildThreadbareTools } from '../../src/threadbare-mcp.ts';
+import { buildThreadbearTools } from '../../src/threadbear-mcp.ts';
 import { ErrorCode, RpcError } from '../../src/protocol.ts';
 import { nullLogger } from '../../src/log.ts';
 
@@ -274,7 +274,7 @@ test('the methods check what they are given', () => {
 test('agents schedule messages to their own thread by default', async () => {
   const { h, sched } = setup();
   const { thread, s } = idleThread(h);
-  const list = buildThreadbareTools(h.runner, thread.id, () => h.clock.now(), sched);
+  const list = buildThreadbearTools(h.runner, thread.id, () => h.clock.now(), sched);
   const call = async (name: string, args: Record<string, unknown>) => {
     const t = list.find((x) => x.name === name)!;
     const r = (await t.handler(args as never, {})) as { content: { text: string }[]; isError?: boolean };

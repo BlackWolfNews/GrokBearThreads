@@ -1,5 +1,5 @@
-{"proc":"A","dir":"out","t":1793061905185,"msg":{"id":1,"method":"initialize","params":{"clientInfo":{"name":"threadbare-research","title":"Threadbare research","version":"0.0.1"},"capabilities":{"experimentalApi":true}}}}
-{"proc":"A","dir":"in","t":1793061905753,"msg":{"id":1,"result":{"userAgent":"threadbare-research/0.164.0 (macOS; arm64) unknown (threadbare-research; 0.0.1)","codexHome":"/codex-home","platformFamily":"unix","platformOs":"macos"}}}
+{"proc":"A","dir":"out","t":1793061905185,"msg":{"id":1,"method":"initialize","params":{"clientInfo":{"name":"threadbear-research","title":"Threadbear research","version":"0.0.1"},"capabilities":{"experimentalApi":true}}}}
+{"proc":"A","dir":"in","t":1793061905753,"msg":{"id":1,"result":{"userAgent":"threadbear-research/0.164.0 (macOS; arm64) unknown (threadbear-research; 0.0.1)","codexHome":"/codex-home","platformFamily":"unix","platformOs":"macos"}}}
 {"proc":"A","dir":"out","t":1793061905753,"msg":{"method":"initialized"}}
 {"proc":"A","dir":"out","t":1793061905753,"msg":{"id":2,"method":"model/list","params":{"includeHidden":true}}}
 {"proc":"A","dir":"in","t":1793061905754,"msg":{"method":"remoteControl/status/changed","params":{"status":"disabled","serverName":"mac.local","installationId":"00000000-0000-0000-0000-000000000000","environmentId":null},"emittedAtMs":1793061905751}}

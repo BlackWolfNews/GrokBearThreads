@@ -4,7 +4,7 @@
 // through onChange so no RPC waits on an install.
 //
 // Updating is safe while turns run. Claude's installer keeps each version
-// in its own file. Codex runs from Threadbare's own versioned copies
+// in its own file. Codex runs from Threadbear's own versioned copies
 // (codex.ts), which nothing else touches. After an update the runner
 // releases idle sessions on the old version (hooks.releaseIdle), and the
 // rest move as their turns end; every new process starts the new version.
@@ -127,7 +127,7 @@ export class CliUpdates {
   }
 
   // What the next Codex process should start: the binary set by hand, else
-  // Threadbare's own `current`, else (before the first copy is installed,
+  // Threadbear's own `current`, else (before the first copy is installed,
   // or with updates off, as in tests and dev runners) the codex next to the
   // runner's own Node. Never ~/.local/bin/codex.
   codexBinary(): string {
@@ -209,7 +209,7 @@ export class CliUpdates {
     const out: CliStatus = {
       provider: p,
       path: binary,
-      managedBy: p === 'claude' ? 'cli' : this.cfg.codexPath ? 'none' : 'threadbare',
+      managedBy: p === 'claude' ? 'cli' : this.cfg.codexPath ? 'none' : 'threadbear',
       status,
       policy: this.policy(p),
       inUse: this.d.hooks.versionsInUse(p),
@@ -223,7 +223,7 @@ export class CliUpdates {
     return out;
   }
 
-  // THREADBARE_CLI_UPDATES=off (tests, dev runners) and runner.json's own
+  // THREADBEAR_CLI_UPDATES=off (tests, dev runners) and runner.json's own
   // "off" can't be turned on from the app; a Codex binary set by hand is
   // never updated.
   private policy(p: Provider): CliPolicy {
@@ -233,7 +233,7 @@ export class CliUpdates {
   }
 
   private configOff(p: Provider): boolean {
-    return this.env.THREADBARE_CLI_UPDATES === 'off' || this.cfg.cliUpdates[p] === 'off';
+    return this.env.THREADBEAR_CLI_UPDATES === 'off' || this.cfg.cliUpdates[p] === 'off';
   }
 
   private managedCodex(): boolean {
@@ -367,7 +367,7 @@ export class CliUpdates {
 
   private async updateCodex(o: UpdateOptions): Promise<void> {
     if (!this.managedCodex()) {
-      this.finish('codex', { state: 'failed', message: 'codexPath is set by hand, so Threadbare leaves that Codex alone.' });
+      this.finish('codex', { state: 'failed', message: 'codexPath is set by hand, so Threadbear leaves that Codex alone.' });
       return;
     }
     const target = o.version ?? this.st.codex?.latestVersion ?? (o.bootstrap ? this.d.codex.testedVersion : undefined);

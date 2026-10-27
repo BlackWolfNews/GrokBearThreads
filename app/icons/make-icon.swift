@@ -1,6 +1,6 @@
-// Makes app/icons/threadbare.png from the mascot image.
+// Makes app/icons/threadbear.png from the mascot image.
 //
-//   swift app/icons/make-icon.swift docs/threadbear-design/mascot-a.png app/icons/threadbare.png
+//   swift app/icons/make-icon.swift docs/threadbear-design/mascot-a.png app/icons/threadbear.png
 //
 // The generated mascot comes as a rounded tile drawn on a dark square, with
 // no alpha, so used as-is the Dock would show a dark square around the bear.

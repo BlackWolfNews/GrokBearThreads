@@ -14,7 +14,7 @@ import {
   type ApprovalsDeps,
 } from '../../src/adapters/codex/approvals.ts';
 import { dynamicToolSpecs, type ToolDefinition } from '../../src/adapters/codex/tools.ts';
-import { buildThreadbareTools } from '../../src/threadbare-mcp.ts';
+import { buildThreadbearTools } from '../../src/threadbear-mcp.ts';
 import { nullLogger } from '../../src/log.ts';
 import type { QuestionAnswer, QuestionRequest, ToolApprovalAnswer, ToolApprovalRequest } from '../../src/adapters/types.ts';
 import type { CommandExecutionRequestApprovalParams } from '../../src/adapters/codex/types.ts';
@@ -399,13 +399,13 @@ test('ending the session expires every open card without replying', async () => 
   assert.equal(h.replies.length, 0);
 });
 
-// ---- The threadbare tools as dynamic tools
+// ---- The threadbear tools as dynamic tools
 
-test('every threadbare tool converts to a dynamic tool with a JSON Schema', () => {
+test('every threadbear tool converts to a dynamic tool with a JSON Schema', () => {
   // Typed against the runner's real tool list, so C's wiring type-checks.
-  const tools: ToolDefinition[] = buildThreadbareTools({} as never, 'self');
+  const tools: ToolDefinition[] = buildThreadbearTools({} as never, 'self');
   const [ns] = dynamicToolSpecs(tools);
-  assert.equal(ns.name, 'threadbare');
+  assert.equal(ns.name, 'threadbear');
   assert.ok(ns.tools.length >= 9);
   for (const t of ns.tools) {
     const schema = t.inputSchema as { type?: string; properties?: unknown; $schema?: unknown };

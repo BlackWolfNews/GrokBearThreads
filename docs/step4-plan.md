@@ -6,7 +6,7 @@ Updated on 27 Oct with two things: the spike results (summed up in "Checked" nea
 
 ## Why
 
-Mike still keeps T3 Code because Threadbare is missing four things:
+Mike still keeps T3 Code because Threadbear is missing four things:
 
 - Codex threads;
 - all of his logins;
@@ -22,7 +22,7 @@ Two of his complaints about T3 shape the details.
   - T3 also ignores traffic from subagent threads, so images a subagent makes vanish the same way.
 - **Images are half broken in general.** T3 passes MCP image results through as raw JSON with base64 inside. Its history import maps no image items.
 
-Threadbare already handles images properly for Claude, with a media folder, inline thumbnails and Quick Look. This step puts Codex on the same path. Every image a Codex thread receives, looks at or makes becomes a file in the thread's media folder and shows inline. That includes images from its subagents.
+Threadbear already handles images properly for Claude, with a media folder, inline thumbnails and Quick Look. This step puts Codex on the same path. Every image a Codex thread receives, looks at or makes becomes a file in the thread's media folder and shows inline. That includes images from its subagents.
 
 **Correction to `docs/plan.md`.** One line in it is wrong: "`pathToClaudeCodeExecutable` = `~/.local/bin/claude` so the CLI keeps updating itself". SDK sessions never update the CLI. Only the terminal UI, `claude update` and `claude install` do.
 
@@ -41,7 +41,7 @@ The earlier days look the same. Those runs land in Mike's afternoon.
 - A running Codex process survives the swap.
 - The helpers it starts by path don't. These are the `apply_patch` and `codex-execve-wrapper` links in `~/.codex/tmp/arg0/`, which point into `.../@openai/codex/node_modules/.../bin/codex`. For 1 to 3 seconds they point at nothing, and after that they start the new version.
 
-So Threadbare runs Codex from its own versioned copies, which nothing else touches, and updates them itself. Claude's native installer already keeps each version in its own file, so Claude keeps using the shared install.
+So Threadbear runs Codex from its own versioned copies, which nothing else touches, and updates them itself. Claude's native installer already keeps each version in its own file, so Claude keeps using the shared install.
 
 This step adds hourly checks, shows the versions in the app, and makes updates safe for threads that are running.
 
@@ -71,7 +71,7 @@ This step adds hourly checks, shows the versions in the app, and makes updates s
 - **CLI updates.**
   - When an update lands, running turns carry on and the next turn uses the new version.
   - The thread gets a one-line note saying so.
-  - Nothing Token Stats or T3 does to their own Codex install can break a Threadbare turn.
+  - Nothing Token Stats or T3 does to their own Codex install can break a Threadbear turn.
 
 ## Starting point (main on 27 Oct)
 
@@ -95,7 +95,7 @@ Main is at `5a17e6d`. What changed since the first version of this plan (`3aea55
   - Claude's `interrupt()` cancels queued messages too ("Stop means stop");
   - the send button's help reads "Send (into this turn)".
 
-  It touches `docs/protocol.md` (`threads.send`, `turn.started`), `adapters/types.ts`, `runner.ts`, `claude/adapter.ts`, `claude/normalize.ts`, `threadbare-mcp.ts`, `ComposerControls.swift`, `test/helpers/fakes.ts` and the runner tests. Codex has to fit it: see "Messages during a turn" in A. Until it's committed, leave those hunks alone. Once it's on main, merge main into `step4` and build on it.
+  It touches `docs/protocol.md` (`threads.send`, `turn.started`), `adapters/types.ts`, `runner.ts`, `claude/adapter.ts`, `claude/normalize.ts`, `threadbear-mcp.ts`, `ComposerControls.swift`, `test/helpers/fakes.ts` and the runner tests. Codex has to fit it: see "Messages during a turn" in A. Until it's committed, leave those hunks alone. Once it's on main, merge main into `step4` and build on it.
 
 Other threads commit to main while this runs. Check `git log main` before each piece branches, and merge main into `step4` before C starts and again before landing.
 
@@ -103,17 +103,17 @@ Other threads commit to main while this runs. Check `git log main` before each p
 
 Seven pieces. Contracts goes first, on its own. The rest run in parallel. Each piece owns its files, and nobody else edits them until it has merged.
 
-All of it happens on the integration branch `step4` (worktree `~/dev/me/threadbare-step4/integrate`). Each piece works in its own worktree under `~/dev/me/threadbare-step4/`, on a branch from `step4`, and merges back into `step4` in the order under "Build order". The Land step merges `step4` into main.
+All of it happens on the integration branch `step4` (worktree `~/dev/me/threadbear-step4/integrate`). Each piece works in its own worktree under `~/dev/me/threadbear-step4/`, on a branch from `step4`, and merges back into `step4` in the order under "Build order". The Land step merges `step4` into main.
 
 | Piece | Owns |
 |---|---|
-| 0. Contracts | `docs/protocol.md`, `docs/plan.md` (line fixes), `runner/src/protocol.ts`, `runner/src/adapters/types.ts`, new `runner/src/adapters/context.ts` (it moves `NormalizerContext` and `fileContext` out of `claude/normalize.ts` and leaves a re-export there), new fields in `runner/src/config.ts`, `runner/test/helpers/protocol-check.ts`, `app/Sources/ThreadbareCore/Protocol/Models.swift` and `Event.swift`, `app/Tools/mock-runner/server.mjs` (new fields only), `app/Tests/ThreadbareCoreTests/ModelsTests.swift` |
+| 0. Contracts | `docs/protocol.md`, `docs/plan.md` (line fixes), `runner/src/protocol.ts`, `runner/src/adapters/types.ts`, new `runner/src/adapters/context.ts` (it moves `NormalizerContext` and `fileContext` out of `claude/normalize.ts` and leaves a re-export there), new fields in `runner/src/config.ts`, `runner/test/helpers/protocol-check.ts`, `app/Sources/ThreadbearCore/Protocol/Models.swift` and `Event.swift`, `app/Tools/mock-runner/server.mjs` (new fields only), `app/Tests/ThreadbearCoreTests/ModelsTests.swift` |
 | A. Codex sessions | `runner/src/adapters/codex/appserver.ts`, `adapter.ts`, `approvals.ts`, `tools.ts`, `types.ts`, `surface.ts`, `runner/scripts/codex-schema-check.sh`, `runner/test/helpers/fake-app-server.ts`, `runner/test/unit/codex-appserver.test.ts`, `codex-adapter.test.ts`, `codex-approvals.test.ts`, `runner/test/e2e/codex.e2e.test.ts` |
 | B. Codex events and images | `runner/src/adapters/codex/normalize.ts`, `runner/src/media.ts`, `runner/src/adapters/context.ts` (after Contracts creates it), `runner/scripts/sanitize-codex-recording.ts`, `runner/test/fixtures/codex/`, `runner/test/unit/codex-normalize.test.ts`, `media-files.test.ts` |
-| C. Runner plumbing | `runner/src/runner.ts`, `main.ts`, `rpc.ts`, `store.ts`, `threadbare-mcp.ts`, `cli.ts`, `tb-dev.ts`, `runner/scripts/dev-runner.sh`, `runner/test/helpers/fakes.ts`, `runner/test/unit/runner.test.ts`, `rpc.test.ts`, `threadbare-tools.test.ts`, `tb.test.ts`, `check.sh` |
+| C. Runner plumbing | `runner/src/runner.ts`, `main.ts`, `rpc.ts`, `store.ts`, `threadbear-mcp.ts`, `cli.ts`, `tb-dev.ts`, `runner/scripts/dev-runner.sh`, `runner/test/helpers/fakes.ts`, `runner/test/unit/runner.test.ts`, `rpc.test.ts`, `threadbear-tools.test.ts`, `tb.test.ts`, `check.sh` |
 | D. Accounts and usage | `runner/src/accounts.ts` (extending `4e6c270`'s `defaultModel`, `learn()` and `enrich()`), new `runner/src/usage.ts`, the rate-limit parts of `runner/src/adapters/claude/normalize.ts` (the `rate_limit_event` case and the rate-limit `errorKind`), `runner/test/unit/accounts-usage.test.ts`, the existing `diff-media-accounts.test.ts`, `runner/test/fixtures/token-stats/` |
 | E. CLI updates | new `runner/src/updates/` (`manager.ts`, `claude.ts`, `codex.ts`, `history.ts`), `runner/test/unit/updates.test.ts`, `runner/test/e2e/codex-install.e2e.test.ts` |
-| F. App | `Views/ComposerControls.swift` (extending `ThreadSettings`' menus), `Views/SidebarView.swift`, new `Views/UsagePopover.swift`, `Transcript/RowRenderer.swift` (the turn footer), `Screenshots.swift` (new scenes), `Automation.swift` and `AppDump.swift` (where the new menus and popover need to be scriptable), `AppModel.swift`, `ThreadbareCore/RPC/RunnerAPI.swift`, `RPCClient.swift`, `ThreadbareCore/Threads/ComposerChips.swift`, `SidebarRow.swift`, new `ThreadbareCore/Threads/AccountUsageText.swift`, `ThreadbareCore/Transcript/TranscriptRow.swift`, `TranscriptReducer.swift`, `ToolPresentation.swift`, `WorkGroups.swift` (summary words and the Edited files card), `ThreadbareCore/Support/ImageLayout.swift`, the mock runner's demo threads and fixtures, and the app tests for all of these (including `ComposerChipsTests.swift`) |
+| F. App | `Views/ComposerControls.swift` (extending `ThreadSettings`' menus), `Views/SidebarView.swift`, new `Views/UsagePopover.swift`, `Transcript/RowRenderer.swift` (the turn footer), `Screenshots.swift` (new scenes), `Automation.swift` and `AppDump.swift` (where the new menus and popover need to be scriptable), `AppModel.swift`, `ThreadbearCore/RPC/RunnerAPI.swift`, `RPCClient.swift`, `ThreadbearCore/Threads/ComposerChips.swift`, `SidebarRow.swift`, new `ThreadbearCore/Threads/AccountUsageText.swift`, `ThreadbearCore/Transcript/TranscriptRow.swift`, `TranscriptReducer.swift`, `ToolPresentation.swift`, `WorkGroups.swift` (summary words and the Edited files card), `ThreadbearCore/Support/ImageLayout.swift`, the mock runner's demo threads and fixtures, and the app tests for all of these (including `ComposerChipsTests.swift`) |
 
 **Who edits what:**
 
@@ -124,7 +124,7 @@ All of it happens on the integration branch `step4` (worktree `~/dev/me/threadba
 
 **Captures (done on 27 Oct).** The Codex captures were recorded again, and the spikes added their own:
 
-- They live in `~/dev/me/threadbare-step4-prep/runner/.fixtures/codex-raw/`, gitignored. Its `README.md` lists every file, the line range of every turn and what the sanitiser has to drop. The spike captures are under `spikes/<spike>/`, each with its own notes or README. The recording scripts are in `scripts/` and `spikes/<spike>/scripts/`.
+- They live in `~/dev/me/threadbear-step4-prep/runner/.fixtures/codex-raw/`, gitignored. Its `README.md` lists every file, the line range of every turn and what the sanitiser has to drop. The spike captures are under `spikes/<spike>/`, each with its own notes or README. The recording scripts are in `scripts/` and `spikes/<spike>/scripts/`.
 - Copy the folder into your worktree's `runner/.fixtures/codex-raw/` if you need it.
 - Messages are complete this time: nothing is shortened, and base64 payloads are kept as they are.
 - They still hold private data: Mike's ChatGPT account id (`accountId` and `workspaceRouting.chatgptAccountId`, in `probe.ndjson` lines 9 and 11 and `probe-images.ndjson` lines 7 and 9), credit balances, moderation metadata, `codexHome`, `/Users/m5-mike` paths, the Mac's hostname and `installationId`, and private hook text. They stay out of git until B's sanitiser has run over them.
@@ -242,7 +242,7 @@ A folder change on a Codex thread that stays on the same account carries on in t
 type CliStatus = {
   provider: Provider
   path: string                 // the binary new sessions start
-  managedBy: "threadbare" | "cli" | "none" // Codex: Threadbare's copies; Claude: its own installer; "none" when codexPath is set by hand
+  managedBy: "threadbear" | "cli" | "none" // Codex: Threadbear's copies; Claude: its own installer; "none" when codexPath is set by hand
   installedVersion?: string    // what new sessions start on
   latestVersion?: string
   status: "current" | "behind" | "held" | "unknown" | "missing"
@@ -286,7 +286,7 @@ The first change goes out at once, and after that at most one every 5 seconds, a
 
 ### Tools for agents
 
-Codex threads get the same `threadbare` tools and environment variables as Claude threads. Section A says how. `list_accounts` gains the provider, the note and the room left. The `effort` enums in `create_thread` and `update_thread` come from `EFFORT_LEVELS`, so they take `ultra` too.
+Codex threads get the same `threadbear` tools and environment variables as Claude threads. Section A says how. `list_accounts` gains the provider, the note and the room left. The `effort` enums in `create_thread` and `update_thread` come from `EFFORT_LEVELS`, so they take `ultra` too.
 
 ### Adapter seam (`adapters/types.ts`, `adapters/context.ts`)
 
@@ -321,11 +321,11 @@ B fills them in. D's rate-limit work in `claude/normalize.ts` never touches them
 
 | Setting | Env | Default |
 |---|---|---|
-| `codexPath` | `THREADBARE_CODEX_PATH` | Unset. Unset means Threadbare's own copy, `<home>/tools/codex/current` (section E). Until the first copy is installed, and whenever `cliUpdates` is off (tests, dev runners), it falls back to the `codex` next to the runner's own Node (`~/.nvm/versions/node/v24.22.1/bin/codex`, 0.164.0). Never `~/.local/bin/codex`: that's a standalone 0.147.0 that nothing updates, below T3's "broken under 0.149" line. When this is set by hand, Threadbare uses it as is and never updates it |
+| `codexPath` | `THREADBEAR_CODEX_PATH` | Unset. Unset means Threadbear's own copy, `<home>/tools/codex/current` (section E). Until the first copy is installed, and whenever `cliUpdates` is off (tests, dev runners), it falls back to the `codex` next to the runner's own Node (`~/.nvm/versions/node/v24.22.1/bin/codex`, 0.164.0). Never `~/.local/bin/codex`: that's a standalone 0.147.0 that nothing updates, below T3's "broken under 0.149" line. When this is set by hand, Threadbear uses it as is and never updates it |
 | `codexArgs` | (none) | Extra `app-server` args. The e2e uses them to switch features and MCP servers off |
-| `codexMainDir` | `THREADBARE_CODEX_MAIN_DIR` | `~/.codex` |
-| `tokenStatsLimitsFile` | `THREADBARE_TOKEN_STATS_LIMITS` | `~/Library/Application Support/Token Stats/limits.json` |
-| `cliUpdates` | `THREADBARE_CLI_UPDATES=off` | `{ claude: "auto", codex: "auto", checkMinutes: 60, keepCodexVersions: 2 }`. Off in tests and dev runners |
+| `codexMainDir` | `THREADBEAR_CODEX_MAIN_DIR` | `~/.codex` |
+| `tokenStatsLimitsFile` | `THREADBEAR_TOKEN_STATS_LIMITS` | `~/Library/Application Support/Token Stats/limits.json` |
+| `cliUpdates` | `THREADBEAR_CLI_UPDATES=off` | `{ claude: "auto", codex: "auto", checkMinutes: 60, keepCodexVersions: 2 }`. Off in tests and dev runners |
 | `defaults.models`, `defaults.efforts` | (none) | Unset. A dev runner sets `codex: "gpt-6-luna"` and effort `low` |
 | `accountNotes` | (none) | `{ "claude-2": "Convex work only" }`. A `runner.json` value replaces it. It lives in the code default so nobody has to edit Mike's real `runner.json` |
 
@@ -343,7 +343,7 @@ The adapter drives `codex app-server` the way T3 does, with one app-server proce
 
 - images handled;
 - subagent traffic routed to the parent thread;
-- the Threadbare tools passed in-process;
+- the Threadbear tools passed in-process;
 - messages sent during a turn steered into it.
 
 **Why one process per thread.** The first version of this plan shared one process per account, for one place to keep rate limits and versions, and because MCP servers might start once per process. Spikes 4, 5 and 10 showed otherwise:
@@ -365,9 +365,9 @@ So a shared process would hold every thread it had ever opened, and would need r
   - A line over the guard is skipped up to the next newline and logged with its size. The process keeps running.
   - If the skipped line was an item's completion, that item is closed at the end of its turn as failed, with "Too large to show" (section B). Only that one item fails.
 - **Handshake.**
-  - Send `initialize { clientInfo: {name: "threadbare", title: "Threadbare", version}, capabilities: { experimentalApi: true, optOutNotificationMethods: ["turn/diff/updated", "turn/moderationMetadata", "remoteControl/status/changed"] } }`, then the `initialized` notification. The opt-outs held in spike 2.
+  - Send `initialize { clientInfo: {name: "threadbear", title: "Threadbear", version}, capabilities: { experimentalApi: true, optOutNotificationMethods: ["turn/diff/updated", "turn/moderationMetadata", "remoteControl/status/changed"] } }`, then the `initialized` notification. The opt-outs held in spike 2.
   - The reply came in 70 to 90 ms. `codexHome` names the home.
-  - Its `userAgent` reads like `"threadbare-research/0.164.0 (Mac OS 26.6.2; arm64) unknown (threadbare-research; 0.0.1)"`. The Codex version is the part after the first `/`, up to the space. The process stores it as the version it runs.
+  - Its `userAgent` reads like `"threadbear-research/0.164.0 (Mac OS 26.6.2; arm64) unknown (threadbear-research; 0.0.1)"`. The Codex version is the part after the first `/`, up to the space. The process stores it as the version it runs.
   - `Thread.cliVersion` is "Version of the CLI that created the thread" (generated `v2/Thread.ts`), so it's never used as the running version.
 - **Unknown requests from Codex** get a `-32601` error straight away, so Codex never waits on us. That covers `account/chatgptAuthTokens/refresh` and `attestation/generate`.
 - **History.** `thread/read {includeTurns: true}` makes Codex send a thread-less `deprecationNotice` ("Full-history hydration is deprecated for paginated threads"). Nothing in this step reads history (resume uses `excludeTurns: true`); anything that does later pages with `thread/turns/list` and `thread/items/list`.
@@ -389,11 +389,11 @@ So a shared process would hold every thread it had ever opened, and would need r
 - **Environment.** Start from `process.env`. Drop the Claude session variables that `cliEnv` already drops, and any inherited Codex session variables. Then add:
   - `CODEX_HOME = account.configDir`, set explicitly for main too;
   - `CODEX_MANAGED_BY_NPM=1`, and `CODEX_MANAGED_PACKAGE_ROOT` set to the package folder being run. This is what the launcher sets.
-  - `CODEX_INTERNAL_ORIGINATOR_OVERRIDE=Threadbare`, as T3 does, so the model catalogue refresh before `initialize` uses our name. Spike 8 saw it work: threads show originator `Threadbare`, source `vscode`.
-  - `THREADBARE_THREAD_ID`, `THREADBARE_HOME`, `THREADBARE_RUNNER_HOME`, `THREADBARE_RUNNER_VERSION`, and `PATH` with the runner's `bin/` first.
+  - `CODEX_INTERNAL_ORIGINATOR_OVERRIDE=Threadbear`, as T3 does, so the model catalogue refresh before `initialize` uses our name. Spike 8 saw it work: threads show originator `Threadbear`, source `vscode`.
+  - `THREADBEAR_THREAD_ID`, `THREADBEAR_HOME`, `THREADBEAR_RUNNER_HOME`, `THREADBEAR_RUNNER_VERSION`, and `PATH` with the runner's `bin/` first.
 - **Arguments.** `app-server` plus `codexArgs`.
 - **Spawning.** Through `groupSpawner` (detached process group, `ProcessRegistry`, stderr tail), so the runner's exit stops it like any CLI.
-- **Retries.** An `ENOENT`, or an exit before `initialize` answers, retries every second for 10 seconds. This covers the fallback copy, which Token Stats reinstalls daily: an npm reinstall leaves no binary for 1 to 3 seconds (measured 1.0 s warm, 2.3 s cold). Threadbare's own copies never have that gap.
+- **Retries.** An `ENOENT`, or an exit before `initialize` answers, retries every second for 10 seconds. This covers the fallback copy, which Token Stats reinstalls daily: an npm reinstall leaves no binary for 1 to 3 seconds (measured 1.0 s warm, 2.3 s cold). Threadbear's own copies never have that gap.
 - **Timeouts.** 30 seconds per request, 60 for `turn/start`.
 - **Closing.** Closing stdin ends the process in 13 to 52 ms, with every MCP child and running command. If it hasn't exited 5 seconds later, kill its process group.
 
@@ -466,7 +466,7 @@ So a shared process would hold every thread it had ever opened, and would need r
      - Codex writes the rollout lazily, at the first turn. A thread whose first turn never ran can't be resumed.
      - Measured: resume takes about 160 ms, replays nothing, and the context carries over (the next turn remembered "pineapple"). A `thread/tokenUsage/updated` with the restored total arrives before the first new turn.
 3. `config` is the same for both, and is sent on every resume because the rollout doesn't store config overrides (spike 3):
-   - `"shell_environment_policy.set.THREADBARE_THREAD_ID": threadId`. Spike 3: this dotted key adds to `config.toml`'s own `[shell_environment_policy.set]` table instead of replacing it, at start and on resume, and the value sent on resume wins.
+   - `"shell_environment_policy.set.THREADBEAR_THREAD_ID": threadId`. Spike 3: this dotted key adds to `config.toml`'s own `[shell_environment_policy.set]` table instead of replacing it, at start and on resume, and the value sent on resume wins.
    - `"tools.update_plan.enabled": true`
    - `mcp_optional_startup_grace_ms: 10000`
    - `suppress_unstable_features_warning: true`. Without it, every thread gets the warning "Under-development features enabled: chronicle...", because Mike has `chronicle` on (spike 8).
@@ -508,7 +508,7 @@ So a shared process would hold every thread it had ever opened, and would need r
 
 **`archive(account, id)`** calls `thread/archive` in a short-lived process. The runner calls it, best effort, when Mike archives or deletes a Codex thread.
 
-- Without it, Threadbare's threads pile up in the Codex Desktop list (source `vscode`, originator Threadbare), as T3's 82 have. Mike is fine with them showing there as long as they're archived when he's done with them.
+- Without it, Threadbear's threads pile up in the Codex Desktop list (source `vscode`, originator Threadbear), as T3's 82 have. Mike is fine with them showing there as long as they're archived when he's done with them.
 - Resume already unarchives.
 - `thread/delete` on a parent also deletes its subagent threads (spike 9). Whether `thread/archive` covers them too is untested. Check it once with spike 9's script (`spikes/subagents-and-background/scripts/` in the captures; luna, no images, delete the threads afterwards). If it doesn't, `archive()` also archives the child ids the session saw (kept on the runtime).
 - `thread/delete` took 0.7 to 3.3 seconds before `thread/deleted`, which matters for test clean-up timeouts.
@@ -524,7 +524,7 @@ A same-account folder change on a Codex thread stays in the same Codex thread an
 
 ### Permission modes
 
-| Threadbare | `thread/start`, `thread/resume` | every `turn/start` |
+| Threadbear | `thread/start`, `thread/resume` | every `turn/start` |
 |---|---|---|
 | `full` | `approvalPolicy: "never"`, `sandbox: "danger-full-access"`, `approvalsReviewer: "user"` | `approvalPolicy: "never"`, `sandboxPolicy: {type: "dangerFullAccess"}`, `approvalsReviewer: "user"` |
 | `ask` | `approvalPolicy: "on-request"`, `sandbox: "read-only"`, `approvalsReviewer: "user"` | `approvalPolicy: "on-request"`, `sandboxPolicy: {type: "readOnly", networkAccess: false}`, `approvalsReviewer: "user"` |
@@ -548,7 +548,7 @@ A same-account folder change on a Codex thread stays in the same Codex thread an
 
 Requests from a child thread go to the parent session's sink with no `itemId`. The protocol already allows that for Claude's subagents, so the card shows and nothing hangs. Only the child's own status gains `waitingOnApproval`, so the parent thread's "waiting" comes from the routed request, as it already does for Claude.
 
-| Codex request | Threadbare | Reply |
+| Codex request | Threadbear | Reply |
 |---|---|---|
 | `item/commandExecution/requestApproval`, `kind: "command"` | `approval.requested`: name `shell`, title the inner command (`commandActions[0].command`), input `{command, cwd, reason}`, itemId the item. Sol fills `reason` with the model's own question ("Allow creating b.txt in the current directory?"), and F shows it under the card's title | allow: `accept`. allowAlways: `accept`, plus the runner's own rule (below). deny: `decline`, which works although `availableDecisions` never lists it (commands and patches end with status `declined`). expired: `cancel` |
 | the same with `kind: "writeStdin"`, or with `networkApprovalContext` or `proposedNetworkPolicyAmendments` | `approval.requested` with the input or network target in the title. Offers allow and deny only | as above. Never matched by an "Always allow" rule |
@@ -556,7 +556,7 @@ Requests from a child thread go to the parent session's sink with no `itemId`. T
 | `item/permissions/requestApproval` | `approval.requested`: name `permissions`, title from `reason`. None arrived in testing | allow: `{permissions: requested, scope: "turn"}`. allowAlways: `scope: "session"`. deny: nothing granted |
 | `item/tool/requestUserInput` | `question.requested` with header, question and options. `options: null` means free text, through the card's existing text field. `isSecret` questions are declined with a note. `isBlocking: false` questions show as usual and expire when Codex resolves them itself | `{answers: {[questionId]: {answers: [label]}}}` |
 | `mcpServer/elicitation/request` | form mode: a question. URL mode: declined, with a `system.note` | `{action: "accept", content}` or `{action: "decline", content: null}` |
-| `item/tool/call` | runs a Threadbare tool (below) | `{contentItems: [{type: "inputText", text}], success}` |
+| `item/tool/call` | runs a Threadbear tool (below) | `{contentItems: [{type: "inputText", text}], success}` |
 | `applyPatchApproval`, `execCommandApproval` (legacy) | treated like the v2 requests | legacy decision names |
 | `currentTime/read` | answered with the runner's clock | |
 | anything else | nothing shown | `-32601` straight away |
@@ -578,19 +578,19 @@ So the runner keeps its own per-thread rules in `rec.allowRules`, which outlast 
 
 Never send `acceptForSession` (nothing advertises it) or `acceptWithExecpolicyAmendment` (it saves rules that outlive the thread).
 
-### Threadbare tools for Codex (`tools.ts`)
+### Threadbear tools for Codex (`tools.ts`)
 
 Codex can't take the in-process SDK MCP server, so the tools go in as **dynamic tools** (experimental). Spike 1 settled it: tools given at `thread/start` survive `thread/resume` in a new process, even though `thread/resume` has no `dynamicTools` parameter. They're stored in the rollout's first line (`session_meta.payload.dynamic_tools`). The alternative, an HTTP MCP endpoint on the runner, isn't built.
 
-- `tools.ts` turns `buildThreadbareTools(control, threadId)` into a `DynamicToolSpec` namespace called `threadbare`, with JSON Schema from zod 4's `z.toJSONSchema`.
+- `tools.ts` turns `buildThreadbearTools(control, threadId)` into a `DynamicToolSpec` namespace called `threadbear`, with JSON Schema from zod 4's `z.toJSONSchema`.
 - It answers `item/tool/call` by running the same handler. `item/started` `dynamicToolCall` arrives just before the request, and the item id is the `callId` (`exec-<uuid>`).
 - `delete_thread` calls `sink.requestApproval` first, every time, with `canAlwaysAllow: false`. Codex doesn't ask before client-side tools, so the runner does.
-- Calls show as `mcp__threadbare__<tool>`, the same names as for Claude.
+- Calls show as `mcp__threadbear__<tool>`, the same names as for Claude.
 
 What spike 1 means for the code:
 
 1. The tools that answer a call are built for the session's own thread, again on every start and resume, and looked up by `namespace` and `tool`. A call from a subagent acts for the parent thread.
-2. A thread's tool list, descriptions and schemas are frozen at `thread/start`. Later runner versions must keep old tool names and argument shapes working, and answer a call for an unknown or removed tool with `success: false` and a sentence, not `-32601`. A new tool only reaches threads created after it ships. If that becomes a problem, the MCP endpoint can be added later through `config["mcp_servers.threadbare"]`, which is accepted on resume.
+2. A thread's tool list, descriptions and schemas are frozen at `thread/start`. Later runner versions must keep old tool names and argument shapes working, and answer a call for an unknown or removed tool with `success: false` and a sentence, not `-32601`. A new tool only reaches threads created after it ships. If that becomes a problem, the MCP endpoint can be added later through `config["mcp_servers.threadbear"]`, which is accepted on resume.
 3. Never read tools back from `state_5.sqlite`'s `thread_dynamic_tools`: it has no rows for any thread.
 
 ### Models
@@ -602,7 +602,7 @@ What spike 1 means for the code:
 - `models(account)` turns each row into a `ModelChoice`: `id` and `model` from `id`, `title` from `displayName`, `description`, `effortLevels` from `supportedReasoningEfforts`, and `defaultEffort` from `defaultReasoningEffort`.
 - The default is `config.toml`'s top-level `model` when set (`gpt-6.1-sol` for Mike), else the row with `isDefault`. D reads the former; the runner learns the latter from `models()`.
 - Context windows: 258,400 for gpt-6-luna and 475,000 for gpt-6.1-sol.
-- Service tiers are out of scope. Mike's `config.toml` sets a top-level `service_tier`; Threadbare never sends `serviceTier`, so his config's choice applies, as it does in Codex itself.
+- Service tiers are out of scope. Mike's `config.toml` sets a top-level `service_tier`; Threadbear never sends `serviceTier`, so his config's choice applies, as it does in Codex itself.
 
 **Done when** the unit tests pass against a fake app-server (`test/helpers/fake-app-server.ts`, a small Node script that replays fixture lines and answers requests). They cover:
 
@@ -641,12 +641,12 @@ Where the build made a call the plan didn't, or differs from it:
 - **What A feeds the normaliser besides Codex's own notifications:**
   - `account/read` becomes a `limits` reading through B's `limitsFromAccount` (email and plan);
   - the start-up `account/rateLimits/read` and every update go in as `account/rateLimits/updated` with the merged snapshot `{ordinaryUsageAllowed, rateLimits, rateLimitsByLimitId}` (updates are merged per `limitId`, and nulls keep what was known);
-  - a line over the guard goes in as `threadbare/oversizedLine {bytes, method?, threadId?, turnId?, itemId?, itemType?}` (B's `OVERSIZED_LINE`), routed like a notification (with `from` for a child's), so B closes that item as "Too large to show";
+  - a line over the guard goes in as `threadbear/oversizedLine {bytes, method?, threadId?, turnId?, itemId?, itemType?}` (B's `OVERSIZED_LINE`), routed like a notification (with `from` for a child's), so B closes that item as "Too large to show";
   - `closeOpen("Interrupted")` on every exit, so a background terminal left open from an earlier turn gets closed too.
 - **`configWarning`** also calls `CodexAdapterDeps.onNotice(text)`, at most once per adapter (runner run) per text. C wires it to a `runner.notice` warning.
 - **Approval card titles** use the whole unwrapped command, not `commandActions[0].command`, so a chained command shows all of it.
-- **"Always allow" rules** (tightened after review, 27 Oct): `codex:command:<JSON argv>` matches exactly the command the card showed. `codex:prefix:<JSON argv>` comes only from Codex's own `proposedExecpolicyAmendment`, when it's two words or more and starts the command. `codex:fileChange` covers edits, and a threadbare tool's full name covers that tool. A command matches only if it's made of literal words: anything zsh would run, expand or glob unquoted makes it ask (`; & | < >`, newline, backticks, `$`, `( ) { } * ? [ ] ! ~ # ^`, and `=` or `%` at the start of a word); inside double quotes, `$`, backticks, `!` and stray backslashes do too. No rule is made or matched when the first word runs other commands or code (shells, `env`, `sudo`, `xargs`, `timeout`, interpreters such as `python`, `node`, `ruby`, `perl`, `awk` and `sed`, runners such as `npx`, `uv`, `make`, `find` and `git`).
-- **Threadbare tools in ask mode** ask first unless they only read (`list_threads`, `read_thread`, `list_accounts`, `list_schedules`), using the thread's mode at call time, so an ask-mode thread can't give itself full access with `update_thread`. `delete_thread` asks in every mode, with no "Always allow".
+- **"Always allow" rules** (tightened after review, 27 Oct): `codex:command:<JSON argv>` matches exactly the command the card showed. `codex:prefix:<JSON argv>` comes only from Codex's own `proposedExecpolicyAmendment`, when it's two words or more and starts the command. `codex:fileChange` covers edits, and a threadbear tool's full name covers that tool. A command matches only if it's made of literal words: anything zsh would run, expand or glob unquoted makes it ask (`; & | < >`, newline, backticks, `$`, `( ) { } * ? [ ] ! ~ # ^`, and `=` or `%` at the start of a word); inside double quotes, `$`, backticks, `!` and stray backslashes do too. No rule is made or matched when the first word runs other commands or code (shells, `env`, `sudo`, `xargs`, `timeout`, interpreters such as `python`, `node`, `ruby`, `perl`, `awk` and `sed`, runners such as `npx`, `uv`, `make`, `find` and `git`).
+- **Threadbear tools in ask mode** ask first unless they only read (`list_threads`, `read_thread`, `list_accounts`, `list_schedules`), using the thread's mode at call time, so an ask-mode thread can't give itself full access with `update_thread`. `delete_thread` asks in every mode, with no "Always allow".
 - **Blocked lifts:** the tracker lets an explicit null clear a field, and treats a main-bucket update with `rateLimitReachedType: null` as ending a start-up `ordinaryUsageAllowed: false`. B's `limitsFromRateLimits` always sets `blocked` to true or false, so D's store clears it.
 - **No auto-accept in full access.** A request in a turn that started in ask mode still shows its card, because mode changes apply from the next turn.
 - **`archive()`** also archives the subagent threads this runner saw the session start (kept in memory per Codex thread), best effort, after the parent. That covers both answers to the open question, so the spike-9 check wasn't run.
@@ -654,8 +654,8 @@ Where the build made a call the plan didn't, or differs from it:
 - **Effort or model set back to unset** in a session sends the account's `defaultEffort`, else the model's own (or the account's `defaultModel`), because Codex keeps the last value sent.
 - **Resume** knows the thread id before `thread/resume`, so its own `notLoaded`/`idle` route while `resumePending` is set. Thread traffic before `thread/start` answers is held, then routed.
 - **Rate limits, fixed after C's merge:** the start-up `account/rateLimits/read` reply could arrive after a newer `account/rateLimits/updated`, and the older reading overwrote it. `RateLimitTracker` now applies a read as of when it was requested (`mark()` before, `read(r, mark)` after), laying the updates received since back over it.
-- **The e2e** (`test/e2e/codex.e2e.test.ts`) writes `codexArgs` and luna/low defaults into its temp `runner.json`, runs with `THREADBARE_CLI_UPDATES=off` (so Codex runs from the npm copy next to Node), and after the runner stops deletes every Codex thread it made with `thread/delete` in a short-lived app-server of its own (unarchiving first if needed), removes their `generated_images` folders and logs anything left in `sessions` or `archived_sessions`. It covers the cases the coordinator listed, plus steering and archive. The background-command case is left out: whether luna yields with a command still running is up to the model. Prompts that need a tool name it: "use the apply_patch tool (not the shell)", and in ask mode "You must actually run the shell command `touch x` yourself; an approval prompt is expected and fine", because otherwise luna writes through the shell, or replies "done" without running anything.
-- **For C and E:** `CodexAdapter.binariesInUse()` gives `codexBinariesInUse()`. `resolveCodexBinary(start)` returns `{command, args, native, packageRoot?}` (`native: true` when it found the binary behind the launcher), and `nativeBinaryFor(launcher)` and `fallbackCodexPath()` are exported too. `checkSurface(dir)` and `testedVersion` are in `surface.ts`, which takes its item and method lists from B's `MAPPED_*` and `IGNORED_*` exports, plus what the adapter reads itself and the 0.164.0 families nothing reads. `toolsFor` takes `buildThreadbareTools(...)`'s array as is (`ToolDefinition` in `tools.ts`).
+- **The e2e** (`test/e2e/codex.e2e.test.ts`) writes `codexArgs` and luna/low defaults into its temp `runner.json`, runs with `THREADBEAR_CLI_UPDATES=off` (so Codex runs from the npm copy next to Node), and after the runner stops deletes every Codex thread it made with `thread/delete` in a short-lived app-server of its own (unarchiving first if needed), removes their `generated_images` folders and logs anything left in `sessions` or `archived_sessions`. It covers the cases the coordinator listed, plus steering and archive. The background-command case is left out: whether luna yields with a command still running is up to the model. Prompts that need a tool name it: "use the apply_patch tool (not the shell)", and in ask mode "You must actually run the shell command `touch x` yourself; an approval prompt is expected and fine", because otherwise luna writes through the shell, or replies "done" without running anything.
+- **For C and E:** `CodexAdapter.binariesInUse()` gives `codexBinariesInUse()`. `resolveCodexBinary(start)` returns `{command, args, native, packageRoot?}` (`native: true` when it found the binary behind the launcher), and `nativeBinaryFor(launcher)` and `fallbackCodexPath()` are exported too. `checkSurface(dir)` and `testedVersion` are in `surface.ts`, which takes its item and method lists from B's `MAPPED_*` and `IGNORED_*` exports, plus what the adapter reads itself and the 0.164.0 families nothing reads. `toolsFor` takes `buildThreadbearTools(...)`'s array as is (`ToolDefinition` in `tools.ts`).
 
 ## B. Codex events and images (`normalize.ts`, `media.ts`)
 
@@ -670,7 +670,7 @@ Where the build made a call the plan didn't, or differs from it:
 
 Notifications for our own thread:
 
-| Codex | Threadbare |
+| Codex | Threadbear |
 |---|---|
 | `turn/started` for our turn | Nothing; the runner already emitted `turn.started` |
 | `turn/started` for any other id (goals, work Codex starts itself) | `cliTurn` |
@@ -695,7 +695,7 @@ Notifications for our own thread:
 | `item/started` mcpToolCall | `tool.call`: name `mcp__<server>__<tool>`, kind `mcp`, input the arguments |
 | `item/mcpToolCall/progress` | `tool.output.delta` |
 | `item/completed` mcpToolCall | `tool.result`: text blocks joined, image blocks saved (Images below) |
-| dynamicToolCall | As mcpToolCall. The name is `mcp__<namespace>__<tool>` (`mcp__threadbare__list_threads`), or just `<tool>` when `namespace` is null. The result text comes from `contentItems`' `inputText` entries, and `success` sets ok |
+| dynamicToolCall | As mcpToolCall. The name is `mcp__<namespace>__<tool>` (`mcp__threadbear__list_threads`), or just `<tool>` when `namespace` is null. The result text comes from `contentItems`' `inputText` entries, and `success` sets ok |
 | webSearch | `tool.call` kind `web`, title the query or URL; `tool.result` on completion |
 | imageView, imageGeneration | Images below |
 | `turn/plan/updated` | `plan.updated`: `step` becomes the text, `inProgress` becomes `in_progress`. A non-empty `explanation` that differs from the last one becomes a `system.note` |
@@ -874,7 +874,7 @@ The app already inserts an image row right after the tool row (`TranscriptReduce
 - a subagent row titled from `agentPath`, its result from the child's final answer, and the child's image placed in the parent;
 - reasoning that doesn't start with a blank line, and an empty reasoning item giving nothing;
 - a declined command and a declined patch with ok false;
-- a dynamic tool call named `mcp__threadbare__<tool>`;
+- a dynamic tool call named `mcp__threadbear__<tool>`;
 - an unknown item type shown as a plain row;
 - every notification method in `real-config` either mapped or listed as ignored.
 
@@ -885,7 +885,7 @@ The app already inserts an image row right after the tool row (`TranscriptReduce
 - `setThread(threadId, model?)` after `thread/start` or `thread/resume`, with the model it reported in `session`, so a later `thread/settings/updated` with another model is reported again.
 - `startingTurn(runnerTurnId)` when it sends `turn/start`, and `turnAccepted(codexTurnId)` with the reply. A `turn/started` in between counts as ours. `steered(runnerId)` for a message sent with `turn/steer`.
 - `handle(method, params, from?)` for every notification of its thread, its process's thread-less ones, and its children's (with `from.childThreadId`). Server requests don't go here.
-- `lineTooLarge(head)` when the line reader skips a line over its guard, with the line's first few KB, or `handle(OVERSIZED_LINE, {method?, itemId?})` (exported, `"threadbare/oversizedLine"`) when the reader has already picked those out; with `from` for a child. If it names an open item, that item closes as "Too large to show"; if not, the turn's other open items do.
+- `lineTooLarge(head)` when the line reader skips a line over its guard, with the line's first few KB, or `handle(OVERSIZED_LINE, {method?, itemId?})` (exported, `"threadbear/oversizedLine"`) when the reader has already picked those out; with `from` for a child. If it names an open item, that item closes as "Too large to show"; if not, the turn's other open items do.
 - `closeOpen(reason)` when the session ends with rows still open (process death, hard stop). It closes background terminals too and sends `tasks: []`. It emits no `result`.
 - `interruptedCommands()` after an interrupted or failed `turn/completed`: the command item ids it closed, for `backgroundTerminals/terminate`.
 - `limitsFromRateLimits(snapshot)` takes `account/rateLimits/read`'s result or a merged update (`handle('account/rateLimits/updated', merged)` does the same), and `limitsFromAccount(result)` takes `account/read`'s.
@@ -903,7 +903,7 @@ The app already inserts an image row right after the tool row (`TranscriptReduce
 
 ## C. Runner plumbing
 
-All edits to `runner.ts`, `main.ts`, `rpc.ts`, `store.ts`, `threadbare-mcp.ts`, `cli.ts`, `tb-dev.ts` and `test/helpers/fakes.ts`. Merge main into your branch once Mike's steering change is on it, and build on its `canSteer()`, `steer()` and `Turn.messages`.
+All edits to `runner.ts`, `main.ts`, `rpc.ts`, `store.ts`, `threadbear-mcp.ts`, `cli.ts`, `tb-dev.ts` and `test/helpers/fakes.ts`. Merge main into your branch once Mike's steering change is on it, and build on its `canSteer()`, `steer()` and `Turn.messages`.
 
 **Making a `ThreadRecord`.** Everywhere one is made, `provider` comes from the chosen account.
 
@@ -968,13 +968,13 @@ All edits to `runner.ts`, `main.ts`, `rpc.ts`, `store.ts`, `threadbare-mcp.ts`, 
 
 **`main.ts`**
 
-- Build `CodexAdapter` with `{codexBinary: () => updates.codexBinary(), codexArgs, registry, log, toolsFor: (threadId) => buildThreadbareTools(runner, threadId)}` (`registry` is the `ProcessRegistry`, as for Claude), and set `adapters: { claude, codex }`.
+- Build `CodexAdapter` with `{codexBinary: () => updates.codexBinary(), codexArgs, registry, log, toolsFor: (threadId) => buildThreadbearTools(runner, threadId)}` (`registry` is the `ProcessRegistry`, as for Claude), and set `adapters: { claude, codex }`.
 - Build D's `UsageStore` and hand it to the `AccountRegistry`.
 - A missing Codex binary is a startup `runner.notice` warning, like a missing `claude`.
 
 **Live CLI cap.** `maxLive` counts every live session, Codex the same as Claude. With one process per thread, a live Codex thread costs about what a Claude CLI with its MCP servers does (A, "Why one process per thread"), and a released one costs nothing.
 
-**`threadbare-mcp.ts`**
+**`threadbear-mcp.ts`**
 
 - `list_accounts` shows the provider, the note and the room left, using D's `usageLine`.
 - `create_thread` and `move_thread` accept Codex accounts.
@@ -1009,7 +1009,7 @@ A dev runner must also hold a real Codex conversation.
 
 ### As built (C, 27 Oct)
 
-A, D and E are wired in `main.ts`: `UsageStore` feeds `AccountRegistry(cfg, usage)`; `CliUpdates` gets lazy hooks into the runner and the Restarter, A's `resolveCodexBinary`, `checkSurface` and `testedVersion`, and a `notice`; `CodexAdapter` starts `updates.codexBinary()` with `buildThreadbareTools` as `toolsFor` and `onNotice` as a `runner.notice` warning. `updates.start()` runs once the runner listens, `stop()` with the rest. A missing Codex binary is a warning to every client after hello (like a missing claude), worded for a hand-set `codexPath`, Threadbare's own copy still on its way, or updates off.
+A, D and E are wired in `main.ts`: `UsageStore` feeds `AccountRegistry(cfg, usage)`; `CliUpdates` gets lazy hooks into the runner and the Restarter, A's `resolveCodexBinary`, `checkSurface` and `testedVersion`, and a `notice`; `CodexAdapter` starts `updates.codexBinary()` with `buildThreadbearTools` as `toolsFor` and `onNotice` as a `runner.notice` warning. `updates.start()` runs once the runner listens, `stop()` with the rest. A missing Codex binary is a warning to every client after hello (like a missing claude), worded for a hand-set `codexPath`, Threadbear's own copy still on its way, or updates off.
 
 Seams the runner uses:
 
@@ -1023,7 +1023,7 @@ Calls made where the section didn't say, or said otherwise:
 - **Version moves:** `releaseIdle(p, v)` marks every live session of that provider not reporting `v`, releases the idle ones now (soft only), and the rest when they next meet the rules (turn end, tasks finishing, wake grace ending). A new turn for a marked session restarts it on the new version first; a message sent during its running turn still steers into it. Claude now reports `cliVersion` from `init`'s `claude_code_version` (`claude/normalize.ts`), so `versionsInUse('claude')` works and a Claude update notes "Claude Code X from this turn on (was Y)".
 - **"Failed to start twice":** the runner calls `sessionStarted(p, version, ok)` with ok on a session's first `cliVersion`, and not ok when it exits with an error before one (not a missing session to resume, not a release), with the version E reported as installed when it started. A Codex `thread/start` that fails after `initialize` counts as a failed start too; the runner corrects models, so that should be rare.
 - **Re-asking Codex's models** happens when E's Codex `installedVersion` changes from a known one, or arrives where Codex was `missing`; E working out the installed version after it starts isn't an update (the first dev run probed twice before this).
-- **No test runner installs a CLI:** `check.sh` exports `THREADBARE_CLI_UPDATES=off`, and `main.test.ts`, both Claude e2e files and the deploy smoke test (`deploy.mjs`, which also gets temp `THREADBARE_CODEX_MAIN_DIR` and `THREADBARE_TOKEN_STATS_LIMITS`, so its model probe never starts a real codex) set it themselves.
+- **No test runner installs a CLI:** `check.sh` exports `THREADBEAR_CLI_UPDATES=off`, and `main.test.ts`, both Claude e2e files and the deploy smoke test (`deploy.mjs`, which also gets temp `THREADBEAR_CODEX_MAIN_DIR` and `THREADBEAR_TOKEN_STATS_LIMITS`, so its model probe never starts a real codex) set it themselves.
 - **Not found:** `SessionNotFoundError` retries fresh whatever the status; the old Claude text still needs `starting`. "Earlier turns" means `lastTurnCompletedSeq > 0`. The fresh-retry allowance resets once a session reports itself, so a later loss gets its own retry. Messages steered in before the loss are sent again in order.
 - **Model check on Claude** only drops Codex ids (`gpt-`, or in a Codex account's list) the Claude account doesn't list; anything else is passed on as before. A dropped effort falls back to `defaults.efforts[provider]` when the model offers it, else the model's own level.
 - **Notes:** `create`'s model and effort notes go under the first turn. A Codex folder move's "Moved to X. The session carries on there." comes at the next turn (as Claude's does), and a message sent during the turn after a move is queued, not steered into the old folder. The next-turn note lists everything in one sentence ("The move to X, GPT-6-Luna and Low effort apply from the next turn. This turn carries on as it started.").
@@ -1040,7 +1040,7 @@ Token Stats stays the only program that does any of these:
 - renews them (it writes them back to the Keychain under Claude Code's lock);
 - calls Anthropic's `api/oauth/usage` endpoint, which is prone to 429s.
 
-Threadbare reads Token Stats' file as a baseline, and adds the readings it gets for free from its own turns. It never runs `token-stats limits`, which can renew logins and doesn't even update the file.
+Threadbear reads Token Stats' file as a baseline, and adds the readings it gets for free from its own turns. It never runs `token-stats limits`, which can renew logins and doesn't even update the file.
 
 ### Discovery
 
@@ -1068,7 +1068,7 @@ Today that's four Claude logins and one Codex login (ChatGPT Pro Lite). Nothing 
 
 `limits.json`'s email wins over `.claude.json`'s because it comes from the profile endpoint. `~/.claude.json` once held a stale gmail address for the cannstudios login.
 
-`limits.json` names providers with capitals (`"Claude"`, `"Codex"`), writes `configDir` as `~/.codex` or a full path, and also lists Grok and Muse. Compare providers without case, and skip any provider Threadbare doesn't run.
+`limits.json` names providers with capitals (`"Claude"`, `"Codex"`), writes `configDir` as `~/.codex` or a full path, and also lists Grok and Muse. Compare providers without case, and skip any provider Threadbear doesn't run.
 
 Codex titles get the "Codex · " prefix (see Contracts). `codex-main` and `claude-1` are both `mike.cann@gmail.com` in `limits.json`, and an old app would otherwise show two identical entries.
 
@@ -1143,7 +1143,7 @@ Calls made where this section didn't say, or said otherwise:
 - **`onChange`** of the store reports an account when a live reading moves a window by a point or more, and for anything at all on a new `limits.json`, a reset, a block ending or going stale (one timer for the next of those). An account no client has listed yet is reported on its first reading.
 - **`pickAccount` gaps.** With no last-used account (or one that's gone), candidates are the first account's provider (Claude's come first). A tie between two accounts that aren't the last-used one goes to the first in the list. With nothing to pick and no last-used account, it returns `undefined` and the caller uses its own default. The cases are in `runner/test/fixtures/pick-account-cases.json`, in a shape F's Swift tests can read as is.
 - **Interface additions:** `UsageStore.identityFor(account)` (email and plan for titles), `UsageStore.reload()`, `usageLine(u, now?)`, and exports `accountRoom`, `MIN_ROOM_PERCENT`, `resetTime`, `parseLimitsJson`, `samePathKey`, and `rateLimitReading` from `claude/normalize.ts`. `new AccountRegistry(cfg, usage?)`, where `codexMainDir` and `accountNotes` are optional in `cfg`; `onChange(fn(accounts))`. Claude accounts now carry `email` too.
-- **`main.test.ts`** (nobody's file) now sets `THREADBARE_CODEX_MAIN_DIR` and `THREADBARE_TOKEN_STATS_LIMITS` to temp paths, so starting the real entry point never reads `~/.codex/config.toml` or the real `limits.json`.
+- **`main.test.ts`** (nobody's file) now sets `THREADBEAR_CODEX_MAIN_DIR` and `THREADBEAR_TOKEN_STATS_LIMITS` to temp paths, so starting the real entry point never reads `~/.codex/config.toml` or the real `limits.json`.
 - **For C:** `main.ts` already passes the full `Config`, so once D is in `step4`, `codex-main` shows up in the account list before C registers the Codex adapter.
 
 ## E. CLI updates (`runner/src/updates/`)
@@ -1198,7 +1198,7 @@ The first version had a `retireCodex()` hook for the shared process. With one pr
   3. Call `releaseIdle('claude', newVersion)`.
 - Token Stats running the same command daily is harmless, because the installer has its own lock.
 
-**Codex** runs from Threadbare's own copies, which nothing else installs into.
+**Codex** runs from Threadbear's own copies, which nothing else installs into.
 
 ```
 <home>/tools/codex/
@@ -1237,7 +1237,7 @@ The first version had a `retireCodex()` hook for the shared process. With one pr
 - Token Stats reinstalls it daily, even when nothing changed.
 - T3's "Update all" can replace it at any time.
 - Either swaps the tree under any running Codex that uses it.
-- Threadbare's copies make the "Codex threads are quiet" wait, the npm process check and the foreign-process check unnecessary.
+- Threadbear's copies make the "Codex threads are quiet" wait, the npm process check and the foreign-process check unnecessary.
 
 **Disk.** About 340 MB per version, so about 700 MB with two kept.
 
@@ -1273,14 +1273,14 @@ The first version had a `retireCodex()` hook for the shared process. With one pr
 
 **Choices the plan didn't cover:**
 
-- The app's `clis.setPolicy` is kept in `<home>/updates.json`, not `runner.json`. `THREADBARE_CLI_UPDATES=off`, or `off` in `runner.json`, can't be turned on from the app, and a `codexPath` set by hand always shows `off`.
+- The app's `clis.setPolicy` is kept in `<home>/updates.json`, not `runner.json`. `THREADBEAR_CLI_UPDATES=off`, or `off` in `runner.json`, can't be turned on from the app, and a `codexPath` set by hand always shows `off`.
 - `off` stops the hourly checks. `clis.check` still looks the versions up.
 - A held version is installed and kept (`<v>/`, never `current`), so "Update anyway" activates it without downloading again. A hold reports `status: "held"` with `update.state: "unchanged"`, since nothing failed.
 - On a first start, a latest that fails to install or is held falls back to `testedVersion`, as it does for the gate.
 - An update left `running` or `waiting` by a runner that stopped reads as `failed` after the restart.
 - The commands and lookups are in `updates/exec.ts`, a fifth file next to the four planned.
 
-The real npm path gets one integration test, `codex-install.e2e.test.ts`, run under `--e2e` because it needs the network. It uses a temp `THREADBARE_HOME` and a temp `CODEX_HOME`, runs `app-server` only, and sends no prompts. It installs a version into a temp prefix with `npm install --prefix`, starts `app-server`, swaps in another version and checks the running process keeps working. Nothing touches the real installs: not the nvm global prefix, `~/.local/bin/codex`, `~/.local/bin/claude` or Claude's versions folder.
+The real npm path gets one integration test, `codex-install.e2e.test.ts`, run under `--e2e` because it needs the network. It uses a temp `THREADBEAR_HOME` and a temp `CODEX_HOME`, runs `app-server` only, and sends no prompts. It installs a version into a temp prefix with `npm install --prefix`, starts `app-server`, swaps in another version and checks the running process keeps working. Nothing touches the real installs: not the nvm global prefix, `~/.local/bin/codex`, `~/.local/bin/claude` or Claude's versions folder.
 
 ## F. App
 
@@ -1425,7 +1425,7 @@ Fixtures come only from the research probes and spikes (tiny prompts in temp fol
 
 **Setup**
 
-- A temp runner data dir on port 0, a temp working folder under `/tmp`, and `THREADBARE_CLI_UPDATES=off`.
+- A temp runner data dir on port 0, a temp working folder under `/tmp`, and `THREADBEAR_CLI_UPDATES=off`.
 - Account `codex-main` (`TB_E2E_CODEX_ACCOUNT`), model `gpt-6-luna` (`TB_E2E_CODEX_MODEL`), effort low.
 - It uses Mike's real `~/.codex`, since the login lives there. So `codexArgs` switches off everything that writes to that home or starts work on its own:
   - `--disable memories --disable chronicle --disable goals`;
@@ -1442,11 +1442,11 @@ Fixtures come only from the research probes and spikes (tiny prompts in temp fol
 - Interrupting `sleep 30`. The turn ends interrupted, the command's row is closed, and the `sleep` process is gone within 5 seconds (through `backgroundTerminals/terminate`, or the session ending; `turn/interrupt` alone leaves it running).
 - A background command (`sleep 8; echo finished` run so Codex yields): the turn completes, the thread shows it in `tasks` and isn't released, and the late `tool.result` fills the row.
 - A message sent during a turn (while a `sleep 5` runs) is answered inside the same runner turn. This is the only real check of `turn/steer`. Skip it with a note if Mike's steering change isn't on main yet.
-- Resume after an idle release (`THREADBARE_IDLE_MS` small) remembers a word.
+- Resume after an idle release (`THREADBEAR_IDLE_MS` small) remembers a word.
 - Release and resume straight away: nothing reaches the thread but the answer.
 - A folder move: the next answer follows the new folder's `AGENTS.md` codeword, and the instruction sources (compared after `realpath`) name the new folder next to `~/.codex/AGENTS.md`.
 - A red PNG sent in comes back as "red".
-- A Threadbare tool call (`list_threads`) before and after a resume.
+- A Threadbear tool call (`list_threads`) before and after a resume.
 - Archive: archiving a thread archives it in Codex too.
 
 **Image generation** is opt-in with `TB_E2E_CODEX_IMAGEGEN=1`, since `gpt-image-2` costs more. It checks that:
@@ -1463,11 +1463,11 @@ Fixtures come only from the research probes and spikes (tiny prompts in temp fol
 
 ## Checked (spikes, 27 Oct)
 
-Each spike ran on codex-cli 0.164.0, in temp folders, with tiny prompts, mostly on gpt-6-luna at low effort, and deleted every thread it made. Full notes: `~/dev/me/threadbare-notes/step4-spikes.md`. Captures: `runner/.fixtures/codex-raw/spikes/` in the prep worktree.
+Each spike ran on codex-cli 0.164.0, in temp folders, with tiny prompts, mostly on gpt-6-luna at low effort, and deleted every thread it made. Full notes: `~/dev/me/threadbear-notes/step4-spikes.md`. Captures: `runner/.fixtures/codex-raw/spikes/` in the prep worktree.
 
-1. **Dynamic tools survive a resume in a new process.** They're stored in the rollout's `session_meta`. Build the dynamic-tools route; the MCP endpoint isn't needed (A, "Threadbare tools").
+1. **Dynamic tools survive a resume in a new process.** They're stored in the rollout's `session_meta`. Build the dynamic-tools route; the MCP endpoint isn't needed (A, "Threadbear tools").
 2. **Ask mode on gpt-6.1-sol** (`on-request` plus read-only) asks before every command that writes and every patch, never refuses, and runs read-only commands like `ls` in the sandbox without asking. Commands offer `[accept, acceptWithExecpolicyAmendment, cancel]`; patches offer no list. `decline` works for both. `serverRequest/resolved` follows every reply within 1 ms.
-3. **The per-thread `THREADBARE_THREAD_ID` override merges** with `config.toml`'s `[shell_environment_policy.set]` (its existing variable stayed set), at start and on resume. The resume value wins, and the rollout doesn't store overrides.
+3. **The per-thread `THREADBEAR_THREAD_ID` override merges** with `config.toml`'s `[shell_environment_policy.set]` (its existing variable stayed set), at start and on resume. The resume value wins, and the rollout doesn't store overrides.
 4. **Every thread starts its own MCP servers**: 7 stdio processes, about 124 MB footprint, plus 25 to 60 MB inside the app-server, so about 150 to 190 MB footprint (390 MB RSS) per loaded thread. An idle app-server is 84 MB. Only `thread/delete` or the process exiting frees a thread; the app-server doesn't give memory back. This is why A runs one process per thread.
 5. **Background terminals outlive `thread/unsubscribe`.** A command still running when Codex yields stays an open item past `turn/completed`; `thread/backgroundTerminals/list` reports it (Codex's own `processId`; `osPid`, CPU and RSS are always null); its output and `item/completed` arrive later with the old `turnId`. Closing the app-server's stdin kills it. Detaching with `nohup ... &` doesn't escape either.
 6. **A 9000 px `localImage` is accepted.** Codex shrinks every image itself (long side at most 2048, about 2.5 MP, same format), so the runner doesn't. `detail: "original"` costs about four times the tokens.
@@ -1525,7 +1525,7 @@ Capture notes:
 - Subagent transcripts inside the parent thread. A subagent's row, result, approvals, questions and images do come through.
 - Automatic rollback and version holds Mike sets himself. Compatibility checks beyond the schema gate and the start-failure warning.
 - Creating a second Codex login. Discovery picks up `codex-N` if Token Stats makes one. Whether Codex's SQLite is safe through T3-style shadow-home symlinks is unverified.
-- One Codex thread open in Threadbare and Codex Desktop at once (two app-servers writing one rollout).
+- One Codex thread open in Threadbear and Codex Desktop at once (two app-servers writing one rollout).
 - Tokens and cost per account. That needs Token Stats to read the `claude-N` and `codex-N` session folders and tag records by account.
 - Grok and Muse, as providers or in the usage popover, though `limits.json` lists them.
 - Starting Token Stats when it isn't running.
@@ -1536,9 +1536,9 @@ Capture notes:
 
 ## Safety during the build
 
-- Mike works in `~/dev/me/threadbare` through his own Threadbare threads, which edit main's working tree and commit to main. Never edit, build or test there (only the Land step merges there), and never stash, reset, check out over or discard anyone's uncommitted changes.
-- Nothing touches the live runner: its LaunchAgent (`com.mikerosoft.threadbare.runner`), its process, port 8797, `~/Library/Application Support/Threadbare` or `~/Applications/Threadbare.app`. Never run `install-runner.sh`, `deploy-runner.sh` against the real home, or `tb restart` on it. Trials use `dev-runner.sh` and `dev-app.sh`, and screenshots `app/Tools/screenshots.sh`. Never run `app/install.sh`, `app/restart.sh`, `app/kill.sh`, `Tools/run-mock.sh` or `Tools/perf-run.sh`.
-- Never touch Mike's real CLI installs: no npm install or update in the nvm global prefix, nothing in `~/.local/bin/claude`, `~/.local/bin/codex` or Claude's versions folder. CLI update code is tested only with temp prefixes and temp homes. Codex installs only ever go into a Threadbare home's `tools/codex/`, a temp one in tests and during the build.
+- Mike works in `~/dev/me/threadbear` through his own Threadbear threads, which edit main's working tree and commit to main. Never edit, build or test there (only the Land step merges there), and never stash, reset, check out over or discard anyone's uncommitted changes.
+- Nothing touches the live runner: its LaunchAgent (`com.mikerosoft.threadbear.runner`), its process, port 8797, `~/Library/Application Support/Threadbear` or `~/Applications/Threadbear.app`. Never run `install-runner.sh`, `deploy-runner.sh` against the real home, or `tb restart` on it. Trials use `dev-runner.sh` and `dev-app.sh`, and screenshots `app/Tools/screenshots.sh`. Never run `app/install.sh`, `app/restart.sh`, `app/kill.sh`, `Tools/run-mock.sh` or `Tools/perf-run.sh`.
+- Never touch Mike's real CLI installs: no npm install or update in the nvm global prefix, nothing in `~/.local/bin/claude`, `~/.local/bin/codex` or Claude's versions folder. CLI update code is tested only with temp prefixes and temp homes. Codex installs only ever go into a Threadbear home's `tools/codex/`, a temp one in tests and during the build.
 - Never read or print `auth.json`, Keychain items, OAuth tokens or API keys. Existence checks and the named non-secret `config.toml` keys only.
 - Real model runs:
   - Claude on claude-3 with `claude-haiku-5-5`;
@@ -1554,7 +1554,7 @@ Capture notes:
 
 **Decided on 27 Oct.** Mike answered the list again at 11:40, and those answers replace the earlier ones where they differ (3 and 4):
 
-1. **Codex Desktop list.** Threadbare's Codex threads may show in Codex Desktop's list. Threadbare archives them in Codex when Mike archives or deletes them in Threadbare.
+1. **Codex Desktop list.** Threadbear's Codex threads may show in Codex Desktop's list. Threadbear archives them in Codex when Mike archives or deletes them in Threadbear.
 2. **Claude update channel:** `latest`.
 3. **Codex turn footer: duration only.** Tokens go in "Copy debug info", not the footer (F, `RowRenderer.swift`). Claude's footer doesn't change.
 4. **New threads start on the account with the most room**, not the last-used one. See "Picking an account for a new thread" below.
@@ -1563,7 +1563,7 @@ Capture notes:
 7. **Research leftovers** were deleted on 27 Oct: the probe's Codex thread and image, the Claude probe transcript and the `/tmp` scratch folders. Every spike thread was deleted too.
 8. **Token Stats' daily Codex reinstall:** yes, change Token Stats to skip `npm install` when the installed version is already the latest. That's a separate job in the Token Stats repo, not part of this branch.
 
-**Picking an account for a new thread** (decision 4). One rule, `pickAccount(accounts, lastUsedId)`, written once on each side: `runner/src/usage.ts` (D) and `ThreadbareCore/Threads/AccountUsageText.swift` (F), with the same tests.
+**Picking an account for a new thread** (decision 4). One rule, `pickAccount(accounts, lastUsedId)`, written once on each side: `runner/src/usage.ts` (D) and `ThreadbearCore/Threads/AccountUsageText.swift` (F), with the same tests.
 
 - Room is the tighter of the 5-hour and weekly windows' `remainingPercent`; with only one window (Pro Lite), that one.
 - Candidates are the accounts of the last-used account's provider, so a Claude habit stays on Claude and model and effort don't jump.
@@ -1584,13 +1584,13 @@ How the review's points and the spike results were handled, where this plan diff
 - **Messages during a Codex turn use `turn/steer`**, falling back to holding the message for the next `turn/start`. Both fit Mike's steering change without a Codex-specific rule in the runner.
 - **`end()` closes stdin** instead of `thread/unsubscribe` and a wait for `thread/closed`, which never arrives.
 - **Folder moves pass the new `cwd` on the next turn** (spike 10), instead of releasing and resuming.
-- **Codex's own copies are the plan, not a question.** The review's other fix for Threadbare's own update flow is dropped:
+- **Codex's own copies are the plan, not a question.** The review's other fix for Threadbear's own update flow is dropped:
   - holding starts during npm;
   - waiting for Codex threads to be quiet;
   - the foreign-process check;
   - the npm process-name check.
 
-  With versioned folders that only Threadbare installs into, no install touches files a running process uses. `releaseIdle('codex')`, its rules and its tests stay, so sessions still move to the new version.
+  With versioned folders that only Threadbear installs into, no install touches files a running process uses. `releaseIdle('codex')`, its rules and its tests stay, so sessions still move to the new version.
 - **Codex `auto` updates stay on by default, behind the schema gate**, rather than defaulting to `notify`. The gate refuses any version that loses a method, item type or field we use. It also needs a separate install folder, which only the own-copies design gives.
 - **"Always allow" for commands doesn't require "no unknown actions".** Codex classes every plain command as `unknown` (`touch b.txt` is one), so that rule would make "Always allow" useless. Instead a rule matches one plain argv with no shell operators, and never matches `writeStdin` or network requests.
 - **Wrong-provider models are dropped with a note, not answered with `-32602`.** The installed app always sends a model on create and can't recover from an error.

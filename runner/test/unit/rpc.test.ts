@@ -229,7 +229,7 @@ test('panels.render answers after the screenshot, with an image or a note; unkno
 
 test('clis.* call CliUpdates and return at once; without it they are -32601; clis.updated reaches every client', async () => {
   const calls: unknown[][] = [];
-  const status = [{ provider: 'codex', path: '/t/codex', managedBy: 'threadbare', installedVersion: '0.164.0', status: 'current', policy: 'auto', inUse: [] }] as never[];
+  const status = [{ provider: 'codex', path: '/t/codex', managedBy: 'threadbear', installedVersion: '0.164.0', status: 'current', policy: 'auto', inUse: [] }] as never[];
   let changed: (c: never[]) => void = () => {};
   const clis = {
     list: () => (calls.push(['list']), status),

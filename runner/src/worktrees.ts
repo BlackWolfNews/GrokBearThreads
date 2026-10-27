@@ -13,7 +13,7 @@ import type { WorktreePatch } from './patches.ts';
 
 // What a thread's record keeps about its worktree.
 export type WorktreeRecord = {
-  repo: string; // the repo's name: the main checkout's folder name ("threadbare")
+  repo: string; // the repo's name: the main checkout's folder name ("threadbear")
   mainCheckout: string; // the checkout with main checked out, where it lands
   path: string; // the worktree's root
   branch: string; // "thread/<id8>"

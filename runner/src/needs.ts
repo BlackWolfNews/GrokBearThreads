@@ -135,7 +135,7 @@ function askFrom(item: string): Ask {
 // session keeps the system prompt it started with, but sees every tool's
 // description afresh.
 export const END_TURN_DESCRIPTION =
-  'Says whether Mike has to do anything now that this turn is over, so Threadbare can put the thread in Needs you or leave it as done. ' +
+  'Says whether Mike has to do anything now that this turn is over, so Threadbear can put the thread in Needs you or leave it as done. ' +
   'Call it once, as the very last thing in every turn, after your final message, and write nothing after it. ' +
   'needs "nothing" when the work is finished (or still going by itself) and nothing waits on Mike. ' +
   'needs "you" when it does: an approval, a decision, a key, something to look at, a question. Give one ask per thing he has to do, each a concrete action, most blocking first. ' +

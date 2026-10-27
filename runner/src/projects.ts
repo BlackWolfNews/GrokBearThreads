@@ -2,7 +2,7 @@
 // project can have several folders, a thread can be in several projects,
 // and each keeps goals, state and notes that carry forward from thread to
 // thread. Nobody has to make them: the librarian (librarian.ts) and the
-// agents (threadbare-mcp.ts) do, and Mike can fix anything by hand.
+// agents (threadbear-mcp.ts) do, and Mike can fix anything by hand.
 //
 // The projects themselves are kept in projects.json in the data dir; which
 // projects a thread is in is kept on the thread's record (store.ts), so it
@@ -200,7 +200,7 @@ export class Projects {
     return (
       '[Threadbear projects] This thread is part of the projects below. A project outlasts any one thread: ' +
       'when you learn something that should carry on (a decision, where things are up to, what is next, a gotcha), ' +
-      'update it with the threadbare tool update_project. read_project has each one\'s notes.\n\n' +
+      'update it with the threadbear tool update_project. read_project has each one\'s notes.\n\n' +
       blocks.join('\n\n')
     );
   }

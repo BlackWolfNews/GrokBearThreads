@@ -11,18 +11,18 @@ Nothing. Checked on 27 Oct:
 
 - `git log --all` and `git grep` over every branch (main, pools, step4
   and its pieces, project-icons, rename, thread-worktrees, the design
-  branches) and the 17 worktrees under `~/dev/me/threadbare-*` and
+  branches) and the 17 worktrees under `~/dev/me/threadbear-*` and
   `~/dev/me/threadbear-rename`. Every hit for "convex" is one of: the
   built-in Convex dashboard panel (`runner/src/patches.ts`), the "Convex
   work only" note on the claude-2 account, or the schedules doc saying
   cron works "like Convex's scheduled functions".
-- `~/dev/me/threadbare-notes` holds only the step 4 plan, spikes and
+- `~/dev/me/threadbear-notes` holds only the step 4 plan, spikes and
   recorder scripts.
 - No `convex/` folder, no Convex dependency, no deployment, no
   `.env.local` anywhere in the repo.
 
 The runner keeps everything as files under
-`~/Library/Application Support/Threadbare/`: `threads/<id>/thread.json`
+`~/Library/Application Support/Threadbear/`: `threads/<id>/thread.json`
 (the summary), `events.ndjson` (every event), `media/`, `blobs/`, plus
 `projects.json`, `schedules.json`, `usage.json` and `librarian.json`. The
 Mac app is a client of the runner over a loopback WebSocket and holds no
@@ -353,7 +353,7 @@ create mikec:threadbear:local --select`). When Mike has freed some:
 ```
 npx convex deployment create mikec:threadbear:dev/main --type dev --select --default --region aws-ap-southeast-2
 npx convex deployment create mikec:threadbear:production --type prod --default --region aws-ap-southeast-2
-npx convex env set RUNNER_KEY "$(cat ~/Library/Application\ Support/Threadbare/secrets/convex-key)" --prod
+npx convex env set RUNNER_KEY "$(cat ~/Library/Application\ Support/Threadbear/secrets/convex-key)" --prod
 npx convex deploy
 ```
 
@@ -364,9 +364,9 @@ on".
 
 **Working on it.** `npx convex dev` at the repo root runs the local
 backend and pushes `convex/` as it changes; `npx convex env set RUNNER_KEY
-<key>` on it once, and a dev runner with `THREADBARE_SYNC_URL` set to the
+<key>` on it once, and a dev runner with `THREADBEAR_SYNC_URL` set to the
 local URL and the same key in its secrets mirrors there. `./check.sh`
-sets `THREADBARE_SYNC=off` so no test runner ever writes to the real
+sets `THREADBEAR_SYNC=off` so no test runner ever writes to the real
 project.
 
 ## 6. The phone's API

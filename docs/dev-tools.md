@@ -1,6 +1,6 @@
-# Dev tools for working on Threadbare from inside Threadbare
+# Dev tools for working on Threadbear from inside Threadbear
 
-Mike develops Threadbare from Threadbare threads, so the runner a thread
+Mike develops Threadbear from Threadbear threads, so the runner a thread
 runs under is the thing being changed. Today that's fragile:
 
 - The LaunchAgent runs `runner/src/main.ts` straight from the main
@@ -13,8 +13,8 @@ runs under is the thing being changed. Today that's fragile:
   reproduce a rendering bug from one of Mike's real threads without
   hand-made fixtures.
 
-The built-in `threadbare` MCP server every session gets (create, update,
-delete and move threads; `runner/src/threadbare-mcp.ts`) was built
+The built-in `threadbear` MCP server every session gets (create, update,
+delete and move threads; `runner/src/threadbear-mcp.ts`) was built
 separately and merged alongside this. Both are bound to the same thread
 (see "Tools for agents" in `docs/protocol.md`). A `restart_runner` MCP
 tool would be a thin wrapper over `runner.restart` below; it isn't built,
@@ -25,7 +25,7 @@ since from a thread runner changes go out through the deploy script.
 ### 1. Runner releases
 
 The live runner runs from a snapshot, never from a checkout. Layout under
-the data dir (`<home>`, normally `~/Library/Application Support/Threadbare`):
+the data dir (`<home>`, normally `~/Library/Application Support/Threadbear`):
 
 ```
 <home>/runner/
@@ -52,12 +52,12 @@ the data dir (`<home>`, normally `~/Library/Application Support/Threadbare`):
   release that still exists, it points `current` at `lastGood`, records
   `rolledBack`, and logs it. Then it starts `current/src/main.ts` as a
   child process (Node 24 runs TypeScript directly) with
-  `THREADBARE_SUPERVISED=1` and an IPC channel, and supervises it (below).
+  `THREADBEAR_SUPERVISED=1` and an IPC channel, and supervises it (below).
   Before 27 Oct it imported main.ts into its own process; a LaunchAgent
   installed before then still does, and can't hand over until Mike runs
   `install-runner.sh` once.
 - **The supervisor** (launch.mjs since 27 Oct). A child counts as up when
-  it sends `{ type: "listening" }` or prints `threadbare-runner listening
+  it sends `{ type: "listening" }` or prints `threadbear-runner listening
   on <port>` (older releases only print it), within 90 s or it's stopped
   and counts as a failed start. The newest child exiting 0 after it
   listened is a planned restart: it starts `current` again within a
@@ -91,8 +91,8 @@ the data dir (`<home>`, normally `~/Library/Application Support/Threadbare`):
   2. Snapshot of the committed `runner/` at HEAD (refuse uncommitted
      changes under `runner/` unless `--allow-dirty`), then
      `npm ci --omit=dev` inside the release.
-  3. Smoke test: start the release with a temp `THREADBARE_HOME` and
-     `THREADBARE_PORT=0`, say hello over the WebSocket, check the version
+  3. Smoke test: start the release with a temp `THREADBEAR_HOME` and
+     `THREADBEAR_PORT=0`, say hello over the WebSocket, check the version
      carries the new id, stop it.
   4. Activate: swap the `current` symlink atomically, record `previous`.
   5. Restart (section 2).
@@ -105,7 +105,7 @@ the data dir (`<home>`, normally `~/Library/Application Support/Threadbare`):
   `node <home>/runner/launch.mjs`. `--from-source` keeps today's
   run-from-the-checkout mode for debugging. `--home`, `--label` and
   `--port` allow a sandbox install next to the real one (the plist then
-  sets `THREADBARE_HOME` and `THREADBARE_PORT`).
+  sets `THREADBEAR_HOME` and `THREADBEAR_PORT`).
 
 ### 2. Restarting without killing the turn
 
@@ -131,11 +131,11 @@ the data dir (`<home>`, normally `~/Library/Application Support/Threadbare`):
   <new version>" to that thread, then send the resume text as a new turn
   with `origin: "runner"`. At most 3 automatic resumes per thread per
   hour; past that, only the note. Delete `restart.json` once handled.
-- **Environment:** every CLI the runner starts gets `THREADBARE_THREAD_ID`,
-  `THREADBARE_HOME` and `THREADBARE_RUNNER_VERSION`.
+- **Environment:** every CLI the runner starts gets `THREADBEAR_THREAD_ID`,
+  `THREADBEAR_HOME` and `THREADBEAR_RUNNER_VERSION`.
 - **deploy-runner.sh's restart step:** by default it calls
   `runner.restart { when: "idle", resume }`. Inside a thread
-  (`THREADBARE_THREAD_ID` set) the resume defaults to "The runner restarted
+  (`THREADBEAR_THREAD_ID` set) the resume defaults to "The runner restarted
   on release <id>. Check that your change works, then carry on." `--now`
   kickstarts the LaunchAgent, and is refused inside a thread unless
   `--force`. If the live runner is older and doesn't know `runner.restart`
@@ -145,7 +145,7 @@ the data dir (`<home>`, normally `~/Library/Application Support/Threadbare`):
 ### 3. `tb` additions
 
 - `tb status [--json]`: `runner.status`, readable.
-- `tb self [--json]`: the calling thread, from `THREADBARE_THREAD_ID`.
+- `tb self [--json]`: the calling thread, from `THREADBEAR_THREAD_ID`.
 - `tb restart [--now] [--resume "text"] [--reason "text"]`.
 - `tb show <id> [--last N] [--tools]`: the thread as plain text: user and
   assistant messages, one line per tool call (with `--tools`, results
@@ -181,7 +181,7 @@ the data dir (`<home>`, normally `~/Library/Application Support/Threadbare`):
 
 ### 5. Docs
 
-`AGENTS.md` ("Working on Threadbare from inside Threadbare", kept short),
+`AGENTS.md` ("Working on Threadbear from inside Threadbear", kept short),
 `runner/README.md`, `docs/protocol.md`.
 
 ## Phase 2: app side
@@ -254,8 +254,8 @@ Three reviewers used the tools to fix planted bugs, read the code, and ran
 everything in a sandbox. What changed (2026-10-27):
 
 - tb's suggested commands (`restart --cancel`, `events`) name the tb that
-  was run: a dev runner's `<home>/tb` sets `THREADBARE_TB`, and the deploy
-  script puts `THREADBARE_HOME=<home>` in front for a sandbox. A bare tb
+  was run: a dev runner's `<home>/tb` sets `THREADBEAR_TB`, and the deploy
+  script puts `THREADBEAR_HOME=<home>` in front for a sandbox. A bare tb
   pasted in a thread reached the live runner, where `restart --cancel`
   withdrew the deploy waiting for that very turn. `tb restart --cancel` now
   only withdraws the calling thread's own restart on its own runner;
@@ -285,10 +285,10 @@ everything in a sandbox. What changed (2026-10-27):
 ## Safety during the build
 
 - Nothing touches the live runner, its LaunchAgent
-  (`com.mikerosoft.threadbare.runner`), `~/Library/Application
-  Support/Threadbare` or `~/Applications/Threadbare.app`. Trials use a temp
+  (`com.mikerosoft.threadbear.runner`), `~/Library/Application
+  Support/Threadbear` or `~/Applications/Threadbear.app`. Trials use a temp
   `--home`, a free port and a test label such as
-  `com.mikerosoft.threadbare.runner.devtest`, booted out and removed
+  `com.mikerosoft.threadbear.runner.devtest`, booted out and removed
   afterwards.
 - The real switch to releases happens after review, when no thread is
   running, through the deferred restart itself.
@@ -341,7 +341,7 @@ rollback covers a release that doesn't come up.
   it builds records the checkout it was following, not its own clone. A
   release that names the clone (built before 27 Oct's fix) can't see main
   and says so in `tb status`; one deploy by hand from the checkout fixes it.
-- `followMain: false` in `runner.json`, or `THREADBARE_FOLLOW_MAIN=0`,
+- `followMain: false` in `runner.json`, or `THREADBEAR_FOLLOW_MAIN=0`,
   switches it off. `runner.status` reports it as `update`; `tb status`
   shows the line.
 - `deploy-runner.sh` still works as before, for a deploy that shouldn't wait

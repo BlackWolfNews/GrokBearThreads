@@ -1,4 +1,4 @@
-// What Threadbare relies on in the Codex app-server protocol, by name, so a
+// What Threadbear relies on in the Codex app-server protocol, by name, so a
 // Codex update that drops or renames any of it is caught before it's used
 // (E's update gate holds the version back; scripts/codex-schema-check.sh
 // says what changed). T3's adapter silently drops what it doesn't know;
@@ -19,7 +19,7 @@ export const testedVersion = '0.164.0';
 const ADAPTER_READS = ['thread/started', 'thread/status/changed', 'thread/closed', 'serverRequest/resolved'];
 export const USED_NOTIFICATIONS: string[] = [...new Set<string>([...MAPPED_METHODS, ...ADAPTER_READS])];
 
-// Notifications 0.164.0 has that Threadbare deliberately ignores: the
+// Notifications 0.164.0 has that Threadbear deliberately ignores: the
 // normaliser's IGNORED_METHODS, and the families nothing here touches
 // (realtime, goals, queues, fuzzy search, Windows). Anything in neither
 // list after an update is reported as `added`.
@@ -167,7 +167,7 @@ export const TYPE_FIELDS: Record<string, string[]> = {
 export type SurfaceCheck = { missing: string[]; added: string[] };
 
 // Compares the generated protocol in `generatedDir` with the lists above.
-// `missing` names what Threadbare uses and the new version lacks (an update
+// `missing` names what Threadbear uses and the new version lacks (an update
 // is held for any); `added` names notifications, server requests and item
 // types the lists don't mention (shown as plain rows until mapped).
 export function checkSurface(generatedDir: string): SurfaceCheck {

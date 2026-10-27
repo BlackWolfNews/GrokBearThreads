@@ -240,7 +240,7 @@ export async function syncClone(checkout: string, prefix: string, dir: string): 
 export function runDeploy(runnerDir: string, home: string, logFile: string, follow: string): Promise<DeployResult> {
   return new Promise((resolve) => {
     const env: Record<string, string | undefined> = {};
-    for (const [k, v] of Object.entries(process.env)) if (!k.startsWith('THREADBARE_')) env[k] = v;
+    for (const [k, v] of Object.entries(process.env)) if (!/^THREADB(EAR|ARE)_/.test(k)) env[k] = v;
     let fd: number;
     try {
       fd = fs.openSync(logFile, 'w');

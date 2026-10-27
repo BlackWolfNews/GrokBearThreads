@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { makeHarness, tmpDir } from '../helpers/fakes.ts';
 import { checkSummary } from '../helpers/protocol-check.ts';
-import { buildThreadbareTools } from '../../src/threadbare-mcp.ts';
+import { buildThreadbearTools } from '../../src/threadbear-mcp.ts';
 import type { PersistedEvent } from '../../src/protocol.ts';
 import { commitsIn, emptyHighlights, linksIn, observe, openTargets, pinItem, pushedBranches, remove, unpin, upsert, view, HIGHLIGHTS_KEPT } from '../../src/highlights.ts';
 
@@ -54,7 +54,7 @@ test('open targets skip flags and the app after -a', () => {
 test('git commit and push output', () => {
   assert.deepEqual(commitsIn('[main 91aba3e] App: hold ⌘ to see the keys\n 2 files changed'), [{ branch: 'main', sha: '91aba3e', message: 'App: hold ⌘ to see the keys' }]);
   assert.deepEqual(commitsIn('[feature (root-commit) abcdef1234] First'), [{ branch: 'feature', sha: 'abcdef1', message: 'First' }]);
-  assert.deepEqual(pushedBranches('To github.com:mikecann/threadbare.git\n   d9896b4..91aba3e  main -> main\n * [new branch]      highlights -> highlights\n'), ['main', 'highlights']);
+  assert.deepEqual(pushedBranches('To github.com:mikecann/threadbear.git\n   d9896b4..91aba3e  main -> main\n * [new branch]      highlights -> highlights\n'), ['main', 'highlights']);
 });
 
 test('a thread\'s events become highlights: written review files, opens, PRs, commits and edits', () => {
@@ -148,7 +148,7 @@ test('the runner keeps a thread\'s highlights from its events, pins from the too
   assert.deepEqual(first.edited, [path.join(dir, 'mock.html')]);
   assert.equal(h.runner.get(thread.id).highlightsAt, undefined, 'found ones move lastSeq, not highlightsAt');
 
-  const tools = buildThreadbareTools(h.runner, thread.id);
+  const tools = buildThreadbearTools(h.runner, thread.id);
   const pin = tools.find((t) => t.name === 'pin')!;
   const res = await pin.handler({ path: 'mock.html', note: 'Pick a layout', show: true } as never, {} as never);
   assert.equal(res.isError, undefined, JSON.stringify(res));

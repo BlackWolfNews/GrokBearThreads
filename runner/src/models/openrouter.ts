@@ -48,7 +48,7 @@ export async function chat(req: ChatRequest): Promise<ChatResponse> {
         authorization: `Bearer ${req.key}`,
         'content-type': 'application/json',
         // OpenRouter's app attribution, so its dashboard says what spent it.
-        'x-title': 'Threadbare',
+        'x-title': 'Threadbear',
       },
       body: JSON.stringify(body),
       signal: ctl.signal,

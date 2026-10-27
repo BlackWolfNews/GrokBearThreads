@@ -7,7 +7,7 @@
 //
 // Off unless runner.json has a `sync.url` and secrets/convex-key holds the
 // key the deployment's RUNNER_KEY was set to (`npx convex env set`).
-// THREADBARE_SYNC=off turns it off whatever runner.json says, which
+// THREADBEAR_SYNC=off turns it off whatever runner.json says, which
 // check.sh sets so no test runner ever writes to the real project.
 import os from 'node:os';
 import fs from 'node:fs';

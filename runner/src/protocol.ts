@@ -76,9 +76,9 @@ export type CliUpdateState = 'waiting' | 'running' | 'succeeded' | 'unchanged' |
 export type CliStatus = {
   provider: Provider;
   path: string; // the binary new sessions start
-  // Codex: Threadbare's own copies; Claude: its own installer; 'none' when
+  // Codex: Threadbear's own copies; Claude: its own installer; 'none' when
   // codexPath is set by hand and never updated.
-  managedBy: 'threadbare' | 'cli' | 'none';
+  managedBy: 'threadbear' | 'cli' | 'none';
   installedVersion?: string;
   latestVersion?: string;
   status: 'current' | 'behind' | 'held' | 'unknown' | 'missing';

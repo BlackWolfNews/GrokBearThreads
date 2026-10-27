@@ -1,5 +1,5 @@
 #!/bin/bash
-# Sets up a thread's own worktree of Threadbare (docs/thread-worktrees.md):
+# Sets up a thread's own worktree of Threadbear (docs/thread-worktrees.md):
 # node_modules for the runner and the mock runner. The runner runs it in
 # the new worktree before the thread's first turn
 # (.threadbear/patches/checks.ts); it's safe to run again.
@@ -16,8 +16,10 @@
 # `npm ci` there. Never npm install through the link.
 set -euo pipefail
 
+# THREADBARE_* was the old name for these variables: each stands in for its new name.
+for v in $(compgen -e | grep '^THREADBARE_' || true); do n="THREADBEAR_${v#THREADBARE_}"; [ -n "${!n+x}" ] || export "$n=${!v}"; done
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-NODE="${THREADBARE_NODE:-$HOME/.nvm/versions/node/v24.22.1/bin/node}"
+NODE="${THREADBEAR_NODE:-$HOME/.nvm/versions/node/v24.22.1/bin/node}"
 NPM="$(dirname "$NODE")/npm"
 [ -x "$NPM" ] || NPM="npm"
 

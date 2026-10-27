@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Turns real Claude Code JSONL transcripts into Threadbare protocol event
+// Turns real Claude Code JSONL transcripts into Threadbear protocol event
 // fixtures for perf runs and the mock runner. Output goes to app/.fixtures/,
 // which is gitignored: these contain Mike's private conversations.
 //

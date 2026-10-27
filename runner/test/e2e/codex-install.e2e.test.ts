@@ -1,6 +1,6 @@
-// The real npm path for Threadbare's own Codex copies (src/updates/): two
+// The real npm path for Threadbear's own Codex copies (src/updates/): two
 // real versions installed from the registry with `npm install --prefix`
-// into a temp THREADBARE_HOME, an app-server started on the first with a
+// into a temp THREADBEAR_HOME, an app-server started on the first with a
 // temp CODEX_HOME, the second activated under it, and the running process
 // checked to carry on. It needs the network (about 2 x 340 MB) and sends no
 // prompts. Nothing touches a real install: not the nvm global prefix,
@@ -98,7 +98,7 @@ test('codex copies: install two real versions; a running app-server keeps workin
   fs.mkdirSync(path.join(home, 'run'), { recursive: true });
   fs.mkdirSync(codexHome, { recursive: true });
   const env: NodeJS.ProcessEnv = { ...process.env, CODEX_HOME: codexHome };
-  for (const k of Object.keys(env)) if (k.startsWith('THREADBARE_') || k === 'CLAUDE_CONFIG_DIR' || (k.startsWith('CODEX_') && k !== 'CODEX_HOME')) delete env[k];
+  for (const k of Object.keys(env)) if (/^THREADB(EAR|ARE)_/.test(k) || k === 'CLAUDE_CONFIG_DIR' || (k.startsWith('CODEX_') && k !== 'CODEX_HOME')) delete env[k];
   const released: string[] = [];
   const u = new CliUpdates({
     cfg: testConfig(home, { cliUpdates: { claude: 'off', codex: 'auto', checkMinutes: 60, keepCodexVersions: 2 } }),
@@ -121,7 +121,7 @@ test('codex copies: install two real versions; a running app-server keeps workin
     assert.ok(fs.realpathSync(oldBinary.command).startsWith(fs.realpathSync(path.join(tools, OLD))));
 
     server = new AppServer(oldBinary.command, env);
-    const init = await server.request(1, 'initialize', { clientInfo: { name: 'threadbare-e2e', title: 'Threadbare e2e', version: '0.0.0' }, capabilities: { experimentalApi: true } });
+    const init = await server.request(1, 'initialize', { clientInfo: { name: 'threadbear-e2e', title: 'Threadbear e2e', version: '0.0.0' }, capabilities: { experimentalApi: true } });
     assert.match(String(init.result?.userAgent), new RegExp(`/${OLD.replaceAll('.', '\\.')} `));
     server.send({ method: 'initialized' });
 
@@ -142,7 +142,7 @@ test('codex copies: install two real versions; a running app-server keeps workin
 
     // A new one starts the new version.
     const fresh = new AppServer(resolveNative(u.codexBinary()).command, env);
-    const init2 = await fresh.request(1, 'initialize', { clientInfo: { name: 'threadbare-e2e', title: 'Threadbare e2e', version: '0.0.0' }, capabilities: { experimentalApi: true } });
+    const init2 = await fresh.request(1, 'initialize', { clientInfo: { name: 'threadbear-e2e', title: 'Threadbear e2e', version: '0.0.0' }, capabilities: { experimentalApi: true } });
     assert.match(String(init2.result?.userAgent), new RegExp(`/${NEW.replaceAll('.', '\\.')} `));
     await fresh.close();
   } finally {

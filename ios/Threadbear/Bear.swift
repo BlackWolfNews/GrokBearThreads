@@ -106,7 +106,7 @@ struct BearView: View {
         outside.clip(to: clip, style: FillStyle(eoFill: true))
         stroke(Path(ellipseIn: body), &outside, shading)
         head(&context, shading, centre: c, radius: r, ear: 2.1)
-        // The seam down the belly, with three stitches: the threadbare bit.
+        // The seam down the belly, with three stitches: the threadbear bit.
         let a = CGPoint(x: 12, y: body.minY + 3), b = CGPoint(x: 12, y: body.maxY - 2.2)
         var seam = Path()
         seam.move(to: a)

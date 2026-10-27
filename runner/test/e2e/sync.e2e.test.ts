@@ -80,22 +80,22 @@ describe('convex mirror e2e', { skip: LOCAL ? false : 'no local Convex deploymen
     fs.mkdirSync(path.join(home, 'fake-main'), { recursive: true });
     fs.writeFileSync(path.join(home, 'fake-main.json'), JSON.stringify({ oauthAccount: { emailAddress: 'e2e@example.com' } }));
     const env = { ...process.env };
-    delete env.THREADBARE_SYNC; // check.sh sets it off for every other test
+    delete env.THREADBEAR_SYNC; // check.sh sets it off for every other test
     runner = spawn(process.execPath, ['src/main.ts'], {
       cwd: RUNNER_DIR,
       env: {
         ...env,
-        THREADBARE_HOME: home,
-        THREADBARE_PORT: '0',
-        THREADBARE_LOG: path.join(home, 'runner.log'),
-        THREADBARE_CLAUDE_PATH: '/nonexistent/claude',
-        THREADBARE_ACCOUNTS_DIR: path.join(home, 'no-accounts'),
-        THREADBARE_CLAUDE_MAIN_DIR: path.join(home, 'fake-main'),
-        THREADBARE_CLAUDE_MAIN_JSON: path.join(home, 'fake-main.json'),
-        THREADBARE_CODEX_MAIN_DIR: path.join(home, 'no-codex-main'),
-        THREADBARE_TOKEN_STATS_LIMITS: path.join(home, 'no-limits.json'),
-        THREADBARE_CLI_UPDATES: 'off',
-        THREADBARE_SYNC_URL: CONVEX_URL,
+        THREADBEAR_HOME: home,
+        THREADBEAR_PORT: '0',
+        THREADBEAR_LOG: path.join(home, 'runner.log'),
+        THREADBEAR_CLAUDE_PATH: '/nonexistent/claude',
+        THREADBEAR_ACCOUNTS_DIR: path.join(home, 'no-accounts'),
+        THREADBEAR_CLAUDE_MAIN_DIR: path.join(home, 'fake-main'),
+        THREADBEAR_CLAUDE_MAIN_JSON: path.join(home, 'fake-main.json'),
+        THREADBEAR_CODEX_MAIN_DIR: path.join(home, 'no-codex-main'),
+        THREADBEAR_TOKEN_STATS_LIMITS: path.join(home, 'no-limits.json'),
+        THREADBEAR_CLI_UPDATES: 'off',
+        THREADBEAR_SYNC_URL: CONVEX_URL,
       },
       stdio: ['ignore', 'pipe', 'pipe'],
     });

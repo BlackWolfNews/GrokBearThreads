@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { makeHarness, tick } from '../helpers/fakes.ts';
 import { makePng } from '../helpers/png.ts';
-import { buildThreadbareTools } from '../../src/threadbare-mcp.ts';
+import { buildThreadbearTools } from '../../src/threadbear-mcp.ts';
 
 function fixture() {
   const h = makeHarness();
@@ -99,7 +99,7 @@ test('accepted review reply survives restart before a busy turn finishes', async
 
 test('show_options uses the calling thread and returns a review ID without waiting', async () => {
   const {h,thread,input}=fixture();
-  const tool=buildThreadbareTools(h.runner,thread.id).find(t=>t.name==='show_options');
+  const tool=buildThreadbearTools(h.runner,thread.id).find(t=>t.name==='show_options');
   assert.ok(tool);
   const result=await tool.handler(input as any,{} as any);
   assert.equal(result.isError,undefined);
@@ -184,7 +184,7 @@ test('show_options is shared with Codex dynamic tools and routes to the runner o
   const {dynamicToolSpecs}=await import('../../src/adapters/codex/tools.ts');
   const {ThreadRouter}=await import('../../src/handover.ts');
   const {h,thread,input}=fixture();
-  const tools=buildThreadbareTools(h.runner,thread.id);
+  const tools=buildThreadbearTools(h.runner,thread.id);
   const specs=dynamicToolSpecs(tools);
   assert.match(JSON.stringify(specs),/show_options/);
   const calls:{method:string;params:unknown}[]=[];

@@ -56,10 +56,10 @@ test('a rollback is reported once', () => {
 // ------------------------------------------------- the real entry point
 
 function cleanEnv(): NodeJS.ProcessEnv {
-  // A test run from inside a Threadbare thread inherits that runner's
+  // A test run from inside a Threadbear thread inherits that runner's
   // variables; none of them may reach the runner under test.
   const env: NodeJS.ProcessEnv = {};
-  for (const [k, v] of Object.entries(process.env)) if (!k.startsWith('THREADBARE_')) env[k] = v;
+  for (const [k, v] of Object.entries(process.env)) if (!/^THREADB(EAR|ARE)_/.test(k)) env[k] = v;
   return env;
 }
 
@@ -68,13 +68,13 @@ function startRunner(entry: string, home: string, extra: Record<string, string> 
   const proc: ChildProcess = spawn(process.execPath, [entry], {
     env: {
       ...cleanEnv(),
-      THREADBARE_HOME: home,
-      THREADBARE_PORT: '0',
-      THREADBARE_LOG: path.join(home, 'runner.log'),
-      THREADBARE_CLAUDE_PATH: '/nonexistent/claude',
-      THREADBARE_ACCOUNTS_DIR: path.join(home, 'no-accounts'),
-      THREADBARE_CLAUDE_MAIN_DIR: path.join(home, 'no-main'),
-      THREADBARE_CLAUDE_MAIN_JSON: path.join(home, 'no-main.json'),
+      THREADBEAR_HOME: home,
+      THREADBEAR_PORT: '0',
+      THREADBEAR_LOG: path.join(home, 'runner.log'),
+      THREADBEAR_CLAUDE_PATH: '/nonexistent/claude',
+      THREADBEAR_ACCOUNTS_DIR: path.join(home, 'no-accounts'),
+      THREADBEAR_CLAUDE_MAIN_DIR: path.join(home, 'no-main'),
+      THREADBEAR_CLAUDE_MAIN_JSON: path.join(home, 'no-main.json'),
       ...extra,
     },
     stdio: ['ignore', 'pipe', 'pipe'],
@@ -120,7 +120,7 @@ test('a release reports its id, marks itself good, reports a rollback, and resta
   const id = '20261026T101500Z-abc1234';
   const dir = makeRelease(home, id);
   writeState(home, { current: id, previous: 'older', lastGood: 'older', boots: [{ release: id, at: new Date().toISOString() }], rolledBack: { from: 'broken', to: id, at: new Date().toISOString() } });
-  const a = startRunner(path.join(dir, 'src', 'main.ts'), home, { THREADBARE_GOOD_AFTER_MS: '300' });
+  const a = startRunner(path.join(dir, 'src', 'main.ts'), home, { THREADBEAR_GOOD_AFTER_MS: '300' });
   try {
     const port = await a.listening;
     const { c, hello, notices } = await connect(home, port);
@@ -171,7 +171,7 @@ test('a runner run from source says +source and leaves state.json alone', async 
   const home = tmpDir();
   const state = { current: 'r1', previous: null, lastGood: 'r1', boots: [] };
   writeState(home, state);
-  const r = startRunner(path.join(RUNNER_DIR, 'src', 'main.ts'), home, { THREADBARE_GOOD_AFTER_MS: '50' });
+  const r = startRunner(path.join(RUNNER_DIR, 'src', 'main.ts'), home, { THREADBEAR_GOOD_AFTER_MS: '50' });
   try {
     const port = await r.listening;
     const { c, hello } = await connect(home, port);
@@ -217,7 +217,7 @@ test('planned restarts under launch.mjs are clean stops, so several in a row are
   writeState(home, { current: id, previous: older, lastGood: older, boots: [] });
   // The supervisor starts it again after each planned restart; four of
   // them well inside a minute, none long enough to be marked good.
-  const r = startRunner(launch, home, { THREADBARE_GOOD_AFTER_MS: '600000', THREADBARE_RESTART_MS: '50' });
+  const r = startRunner(launch, home, { THREADBEAR_GOOD_AFTER_MS: '600000', THREADBEAR_RESTART_MS: '50' });
   try {
     for (let i = 0; i < 5; i++) {
       const port = await nthListening(r.out, i + 1);
@@ -253,7 +253,7 @@ test('launch.mjs stops a release that never starts listening, and that start cou
   fs.writeFileSync(path.join(dir, 'src', 'main.ts'), 'export const REPORTS_LISTENING = true;\nsetInterval(() => {}, 1000);\n');
   const launch = installLaunch(home, id);
   writeState(home, { current: id, previous: null, lastGood: null, boots: [] });
-  const r = startRunner(launch, home, { THREADBARE_START_TIMEOUT_MS: '300' });
+  const r = startRunner(launch, home, { THREADBEAR_START_TIMEOUT_MS: '300' });
   try {
     assert.equal(await r.exited, 1);
     assert.match(r.out(), new RegExp(`release ${id} wasn't listening after 0 s; stopping it so it counts as a failed start`));
@@ -269,7 +269,7 @@ test('launch.mjs stops a release that never starts listening, and that start cou
 
 // Runs `code` (an ES module importing release.ts) as a child with an IPC
 // channel, the way launch.mjs starts a runner.
-function ipcChild(code: string, env: Record<string, string> = { THREADBARE_SUPERVISED: '1' }) {
+function ipcChild(code: string, env: Record<string, string> = { THREADBEAR_SUPERVISED: '1' }) {
   const src = path.join(RUNNER_DIR, 'src', 'release.ts');
   const proc = spawn(process.execPath, ['--input-type=module', '-e', `import * as release from ${JSON.stringify(src)};\n${code}`], {
     env: { ...cleanEnv(), ...env },
@@ -292,7 +292,7 @@ async function until(what: string, fn: () => boolean, ms = 10_000): Promise<void
   }
 }
 
-test('supervised() needs both THREADBARE_SUPERVISED and an IPC channel', async () => {
+test('supervised() needs both THREADBEAR_SUPERVISED and an IPC channel', async () => {
   const a = ipcChild('console.log(JSON.stringify(release.supervised())); process.disconnect();');
   assert.equal(await a.exited, 0, a.out());
   assert.equal(a.out().trim(), 'true');
@@ -312,7 +312,7 @@ test('tellLaunchListening tells the supervisor over IPC', async () => {
 
 test("requestHandover: the supervisor's answer, a refusal, and no answer in time", async () => {
   const code = 'const r = await release.requestHandover(Number(process.env.WAIT_MS)); console.log(JSON.stringify(r)); process.disconnect();';
-  const ok = ipcChild(code, { THREADBARE_SUPERVISED: '1', WAIT_MS: '5000' });
+  const ok = ipcChild(code, { THREADBEAR_SUPERVISED: '1', WAIT_MS: '5000' });
   await until('the handover request', () => ok.messages.length > 0);
   assert.deepEqual(ok.messages, [{ type: 'handover' }]);
   // Something else first is ignored.
@@ -321,13 +321,13 @@ test("requestHandover: the supervisor's answer, a refusal, and no answer in time
   assert.equal(await ok.exited, 0, ok.out());
   assert.deepEqual(JSON.parse(ok.out()), { ok: true, pid: 4242 });
 
-  const no = ipcChild(code, { THREADBARE_SUPERVISED: '1', WAIT_MS: '5000' });
+  const no = ipcChild(code, { THREADBEAR_SUPERVISED: '1', WAIT_MS: '5000' });
   await until('the handover request', () => no.messages.length > 0);
   no.proc.send({ type: 'handover', ok: false, error: 'only the newest runner can hand over' });
   assert.equal(await no.exited, 0, no.out());
   assert.deepEqual(JSON.parse(no.out()), { ok: false, error: 'only the newest runner can hand over' });
 
-  const slow = ipcChild(code, { THREADBARE_SUPERVISED: '1', WAIT_MS: '200' });
+  const slow = ipcChild(code, { THREADBEAR_SUPERVISED: '1', WAIT_MS: '200' });
   assert.equal(await slow.exited, 0, slow.out());
   assert.deepEqual(JSON.parse(slow.out()), { ok: false, error: 'no answer from the supervisor in 0 s' });
 });

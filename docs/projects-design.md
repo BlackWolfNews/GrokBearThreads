@@ -17,7 +17,7 @@ This replaces the line in `threadbear-design/README.md` that said
 type Project = {
   id: string            // "p_threadbear"
   title: string         // "Threadbear"
-  folders: string[]     // ["~/dev/me/threadbare", "~/dev/me/threadbare-notes"]
+  folders: string[]     // ["~/dev/me/threadbear", "~/dev/me/threadbear-notes"]
   goals: string         // a few lines: what it's for, what done looks like
   state: string         // a few lines: where it's up to, what's next, what's blocked
   notes: string         // longer markdown: decisions, gotchas, commands, links
@@ -59,11 +59,11 @@ messages and the folders of the files it edited. It answers with which
 projects the thread belongs to, a new project if none fits, and a short
 `state` update when the thread moved things on. Most of the signal is
 cheap and doesn't need the model at all: a thread that edits files in
-`~/dev/me/threadbare` from a thread in `~/dev/me/misc` is almost
+`~/dev/me/threadbear` from a thread in `~/dev/me/misc` is almost
 certainly about Threadbear. A call is a few thousand tokens in, so well
 under a cent; with the daily budget spent it just stops until tomorrow.
 
-**The agents**, through the `threadbare` MCP server every session gets:
+**The agents**, through the `threadbear` MCP server every session gets:
 
 - `list_projects`, `read_project` (goals, state, notes, folders, threads)
 - `update_project` (goals, state, notes; append a note)
@@ -91,7 +91,7 @@ it) and edit any field, in the project page. He never has to.
    it's clear why a chip is there.
 
    The ids get the folder's name in front when two folders have a patch
-   of the same name (`threadbare:checks`, `poddle:checks`).
+   of the same name (`threadbear:checks`, `poddle:checks`).
 
 2. **A short brief in context.** When a session starts, the project's
    title, goals and state (a few hundred words at most, all projects

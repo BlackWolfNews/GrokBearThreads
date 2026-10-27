@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Stands in for launchctl in the deploy tests (THREADBARE_LAUNCHCTL), so
+// Stands in for launchctl in the deploy tests (THREADBEAR_LAUNCHCTL), so
 // nothing reaches the real launchd. It runs one job the way launchd would:
 // `bootstrap` reads the plist install-runner.sh wrote and starts its
 // program with the plist's environment under a keep-alive loop; `kickstart

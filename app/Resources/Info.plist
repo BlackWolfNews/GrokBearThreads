@@ -5,15 +5,15 @@
     <key>CFBundleDevelopmentRegion</key>
     <string>en</string>
     <key>CFBundleExecutable</key>
-    <string>Threadbare</string>
+    <string>Threadbear</string>
     <key>CFBundleIdentifier</key>
-    <string>com.mikerosoft.threadbare</string>
+    <string>com.mikerosoft.threadbear</string>
     <key>CFBundleName</key>
     <string>Threadbear</string>
     <key>CFBundleDisplayName</key>
     <string>Threadbear</string>
     <key>CFBundleIconFile</key>
-    <string>threadbare</string>
+    <string>threadbear</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>

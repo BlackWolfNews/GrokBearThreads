@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Builds Threadbare.app and links the `threadbare` launcher.
+# Builds Threadbear.app and links the `threadbear` launcher.
 # Re-run after moving the clone so the launcher symlink points at its new home.
 set -euo pipefail
 
@@ -9,7 +9,7 @@ TARGET_DIR="${1:-$HOME/.local/bin}"
 case "${1:-}" in
   -h|--help)
     echo "Usage: install.sh [target_bin_dir]"
-    echo "Builds Threadbare.app into ~/Applications and links threadbare (default: ~/.local/bin)."
+    echo "Builds Threadbear.app into ~/Applications and links threadbear (default: ~/.local/bin)."
     exit 0
     ;;
   -*)
@@ -29,7 +29,7 @@ for dependency in swift python3; do
   fi
 done
 
-DESTINATION="$TARGET_DIR/threadbare"
+DESTINATION="$TARGET_DIR/threadbear"
 # An existing symlink can be updated, but don't replace someone's own command.
 if [[ -e "$DESTINATION" && ! -L "$DESTINATION" ]]; then
   echo "ERROR: $DESTINATION already exists and is not a symlink." >&2
@@ -42,9 +42,9 @@ fi
 
 bash "$SCRIPT_DIR/setup_mac.sh"
 mkdir -p "$TARGET_DIR"
-chmod +x "$SCRIPT_DIR/threadbare"
-ln -sfn "$SCRIPT_DIR/threadbare" "$DESTINATION"
-echo "Linked $DESTINATION -> $SCRIPT_DIR/threadbare"
+chmod +x "$SCRIPT_DIR/threadbear"
+ln -sfn "$SCRIPT_DIR/threadbear" "$DESTINATION"
+echo "Linked $DESTINATION -> $SCRIPT_DIR/threadbear"
 
 case ":$PATH:" in
   *":$TARGET_DIR:"*) ;;

@@ -139,14 +139,14 @@ export function takeRollbackNotice(home: string, log: Logger, now = Date.now()):
 
 // A release counts as good once it has been listening this long: launch.mjs
 // rolls back one that boots 3 times in 2 minutes without getting here.
-// THREADBARE_GOOD_AFTER_MS shortens it for tests.
+// THREADBEAR_GOOD_AFTER_MS shortens it for tests.
 export const GOOD_AFTER_MS = 60_000;
 
 // Returns a cancel for main.ts's shutdown: a runner that is stopping (one
 // whose shutdown hangs, say) hasn't shown it stays up. then runs once it
 // has, release or not.
 export function markGoodLater(home: string, releaseId: string | undefined, log: Logger, env: NodeJS.ProcessEnv = process.env, then?: () => void): () => void {
-  const fromEnv = env.THREADBARE_GOOD_AFTER_MS ? Number(env.THREADBARE_GOOD_AFTER_MS) : NaN;
+  const fromEnv = env.THREADBEAR_GOOD_AFTER_MS ? Number(env.THREADBEAR_GOOD_AFTER_MS) : NaN;
   const ms = Number.isFinite(fromEnv) && fromEnv >= 0 ? fromEnv : GOOD_AFTER_MS;
   const timer = setTimeout(() => {
     markGood(home, releaseId, log);
@@ -157,10 +157,10 @@ export function markGoodLater(home: string, releaseId: string | undefined, log: 
 }
 
 // Whether launch.mjs started this runner as a child it supervises (a
-// LaunchAgent installed since handovers): THREADBARE_SUPERVISED and an IPC
+// LaunchAgent installed since handovers): THREADBEAR_SUPERVISED and an IPC
 // channel to it. Then a handover is possible.
 export function supervised(): boolean {
-  return process.env.THREADBARE_SUPERVISED === '1' && typeof process.send === 'function';
+  return process.env.THREADBEAR_SUPERVISED === '1' && typeof process.send === 'function';
 }
 
 function sendToSupervisor(msg: unknown): boolean {
@@ -180,7 +180,7 @@ function sendToSupervisor(msg: unknown): boolean {
 // on globalThis. Runners started some other way have neither.
 export function tellLaunchListening(): void {
   if (sendToSupervisor({ type: 'listening' })) return;
-  const hook = (globalThis as { threadbareLaunch?: { listening?: () => void } }).threadbareLaunch;
+  const hook = (globalThis as { threadbearLaunch?: { listening?: () => void } }).threadbearLaunch;
   try {
     hook?.listening?.();
   } catch {

@@ -31,7 +31,7 @@ if (!dataDir) {
   console.error('mock-runner: --data-dir is required (use a temp folder)');
   process.exit(2);
 }
-const realDataDir = path.join(process.env.HOME ?? '', 'Library/Application Support/Threadbare');
+const realDataDir = path.join(process.env.HOME ?? '', 'Library/Application Support/Threadbear');
 if (path.resolve(dataDir) === path.resolve(realDataDir)) {
   console.error('mock-runner: refusing to use the real runner data folder');
   process.exit(2);
@@ -193,7 +193,7 @@ const clis = [
     status: 'behind', policy: 'auto', inUse: [], checkedAt: minutesAgo(20),
   },
   {
-    provider: 'codex', path: '/Users/mike/Library/Application Support/Threadbare/tools/codex/current', managedBy: 'threadbare',
+    provider: 'codex', path: '/Users/mike/Library/Application Support/Threadbear/tools/codex/current', managedBy: 'threadbear',
     installedVersion: '0.164.0', latestVersion: '0.165.0', status: 'held', policy: 'auto', inUse: [], previousVersion: '0.163.0',
     checkedAt: minutesAgo(20),
     hold: { version: '0.165.0', reason: 'the app-server protocol changed', missing: ['thread/backgroundTerminals/list'] },
@@ -1515,14 +1515,14 @@ function addDemoProjects() {
   const ago = (minutes) => new Date(now - minutes * 60_000).toISOString();
   const soon = (seconds) => new Date(now + seconds * 1000).toISOString();
   const tb = {
-    id: 'p_3b1d9e20', title: 'Threadbear', folders: ['/Users/mike/dev/me/threadbare'],
+    id: 'p_3b1d9e20', title: 'Threadbear', folders: ['/Users/mike/dev/me/threadbear'],
     goals: 'Mike\'s own agent app: a runner that drives the Claude and Codex CLIs, and a native Mac app over it. Done is when it replaces T3 Code for everyday work.',
     state: 'Projects and the librarian are next: protocol written, runner and app being built in parallel. Settings tabs renamed; release notes for 0.4 drafted.',
     notes: '**Checks**: `./check.sh` runs everything, `--quick` for the runner only.\n\nNever restart the live runner from a thread; merge to main and it follows.\n\nThe protocol is the contract: change `docs/protocol.md` first.',
     createdBy: 'librarian', createdByThread: 'demo_release_notes', createdAt: ago(60 * 24 * 9), updatedAt: ago(3), stateUpdatedAt: ago(41),
     // The three kinds of icon: a picture (the app's own), a symbol, and
     // Walkies with none yet, which shows its letter.
-    icon: { image: { path: fileURLToPath(new URL('../../icons/threadbare.png', import.meta.url)), mediaType: 'image/png' }, from: '/Users/mike/dev/me/threadbare/app/icons/threadbare.png', by: 'librarian', updatedAt: ago(60) },
+    icon: { image: { path: fileURLToPath(new URL('../../icons/threadbear.png', import.meta.url)), mediaType: 'image/png' }, from: '/Users/mike/dev/me/threadbear/app/icons/threadbear.png', by: 'librarian', updatedAt: ago(60) },
   };
   const photo = {
     id: 'p_7a2c41f0', title: 'Photo sync', folders: ['/Users/mike/dev/photo-sync'],
@@ -1838,8 +1838,8 @@ The new hero is shorter, and every page now leads with what the app does.
       highlights: [
         { id: 'link:https://openrouter.ai/settings/keys', kind: 'link', title: 'OpenRouter keys', url: 'https://openrouter.ai/settings/keys', how: 'mentioned', seq: key.summary.lastSeq, lastSeq: key.summary.lastSeq, at },
       ],
-      edited: ['Sources/Threadbare/Views/SettingsView.swift', 'Sources/ThreadbareCore/Protocol/RunnerSettings.swift', 'runner/src/settings.ts']
-        .map((rel) => `/Users/mike/dev/me/threadbare/${rel}`),
+      edited: ['Sources/Threadbear/Views/SettingsView.swift', 'Sources/ThreadbearCore/Protocol/RunnerSettings.swift', 'runner/src/settings.ts']
+        .map((rel) => `/Users/mike/dev/me/threadbear/${rel}`),
     });
   }
   const upload = threads.get('demo_upload_resume');

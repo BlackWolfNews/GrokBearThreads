@@ -47,7 +47,7 @@ This distinguishes context from a mutually exclusive design choice.
 ## Implementation outline, after approval
 
 Change `docs/protocol.md` first. Add a review request/response contract usable
-by both Claude and Codex through the existing Threadbare MCP server. Proposed
+by both Claude and Codex through the existing Threadbear MCP server. Proposed
 tool: `show_options({ title, note?, options: [{ id, title, path, note?,
 reference? }] })`. Names and final schema remain to be decided with the
 protocol change. Import files when the review is created, not when the app
@@ -87,7 +87,7 @@ Chromium directly.
 
 ## Using V1
 
-An agent calls `threadbare.show_options` with image paths and stable option
+An agent calls `threadbear.show_options` with image paths and stable option
 IDs. For example, from this repo:
 
 ```json
@@ -125,7 +125,7 @@ closes the request without messaging the agent. An answered card reopens the
 images and sent notes read-only.
 
 Runner files: `runner/src/reviews.ts`, the review methods in `runner.ts`,
-and the shared MCP tool in `threadbare-mcp.ts`. App files: core review models
+and the shared MCP tool in `threadbear-mcp.ts`. App files: core review models
 and reduction, `ReviewSession.swift`, `ReviewRowCell.swift` and
 `Views/ReviewWindow.swift`. `app/Tools/screenshots.sh /tmp/review-shots --only 16`
 captures the card, grid, pair and readable-size views using the four original

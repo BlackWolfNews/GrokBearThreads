@@ -1,9 +1,9 @@
 # Design pass 1 (2026-10-26)
 
-Mike asked for Threadbare to look as good as the agent apps he uses every
+Mike asked for Threadbear to look as good as the agent apps he uses every
 day. This compares it with T3 Code, the Codex app and Claude's desktop app
 (window captures taken on his Mac, kept out of git because they show his
-threads) and lists what to change. Before screenshots of Threadbare are the
+threads) and lists what to change. Before screenshots of Threadbear are the
 `Tools/screenshots.sh` set taken from commit 6404ea0.
 
 ## Mike's direct asks
@@ -20,7 +20,7 @@ threads) and lists what to change. Before screenshots of Threadbare are the
 
 ## What the others do better
 
-The gap is mostly hierarchy and density. Threadbare shows everything at
+The gap is mostly hierarchy and density. Threadbear shows everything at
 the same visual weight, so a finished turn reads as a wall of grey lines
 and the sidebar's titles are dimmer than their previews.
 
@@ -31,47 +31,47 @@ and the sidebar's titles are dimmer than their previews.
   Codex folds a whole turn's work under "Worked for 1m 45s >" with a
   hairline under it, then the answer. Claude ends a turn with an "Edited 9
   files" card (file name, folder dimmed, +N −M per file, "See all").
-  Threadbare gives every thinking block and every tool call its own row
+  Threadbear gives every thinking block and every tool call its own row
   with a chevron, an icon and a long grey title, and shows every diff in
   full in the flow.
 - **Live status.** T3 shows "Working for 53s" while a turn runs; Codex shows
-  the current action. Threadbare shows a small spinner at the end of a tool
+  the current action. Threadbear shows a small spinner at the end of a tool
   row.
-- **Diffs are quiet.** The references use faint tints. Threadbare fills
+- **Diffs are quiet.** The references use faint tints. Threadbear fills
   added and removed lines with saturated green and red blocks, which is
   the loudest thing on screen.
-- **Expanded tools show content, not JSON.** Threadbare's expanded Read
+- **Expanded tools show content, not JSON.** Threadbear's expanded Read
   shows the raw input object (`{"file_path": ...}`) in bold before the file.
-- **Cards have a clear primary action.** Threadbare's approval card has
+- **Cards have a clear primary action.** Threadbear's approval card has
   three equal grey buttons inside a bright blue outline.
 - **Images sit in rounded frames** with no grey box around them.
 - **Reading rhythm.** The references use more line height (about 1.45 to
-  1.55) and more space between blocks. Threadbare is at 1.22.
+  1.55) and more space between blocks. Threadbear is at 1.22.
 
 ### Sidebar
 
 - **Title first.** In T3, Codex and Claude the title is the brightest text
-  in a row. In Threadbare the title is grey and the preview is white.
+  in a row. In Threadbear the title is grey and the preview is white.
 - **Status in words.** T3 shows "Working 53s" in the accent colour with a
-  spinner, or "Waiting 5h 43m", where the time would be. Threadbare has a
+  spinner, or "Waiting 5h 43m", where the time would be. Threadbear has a
   small coloured dot whose meaning you have to learn.
-- **Quiet extras.** Threadbare's account capsule ("mike+3") is heavier than
+- **Quiet extras.** Threadbear's account capsule ("mike+3") is heavier than
   anything else on the row.
 - **Counts at the bottom.** T3 has "Snoozed (7)" and "Settled (150)" as
-  clear footer rows. Threadbare's footer buttons are cramped together.
+  clear footer rows. Threadbear's footer buttons are cramped together.
 - **A "New thread" entry** at the top (Codex "New chat", Claude "+ New").
 
 ### Header and composer
 
 - **Header:** T3 uses one line, "misc / Design a Personal Agent Workspace".
-  Threadbare stacks a grey title over a full path (`/Users/mike/dev/...`).
+  Threadbear stacks a grey title over a full path (`/Users/mike/dev/...`).
 - **Composer:** the references float a rounded card (about 20 pt corners)
   on a slightly lighter fill, with a round send button (accent or white)
-  and a row of small, quiet controls. Threadbare's is a square-cornered
+  and a row of small, quiet controls. Threadbear's is a square-cornered
   outline with a grey square send button. Its chips show the full folder
   path and the full email address.
 - **New thread:** Codex and Claude put the composer in the middle of the
-  empty pane under a short heading. Threadbare leaves the pane empty with
+  empty pane under a short heading. Threadbear leaves the pane empty with
   centred grey text and the composer at the bottom.
 
 ## Spec
@@ -81,7 +81,7 @@ Numbers are points. Keep both light and dark mode right (check both with
 AGENTS.md: plain words, no eyebrow or kicker labels, no em dashes.
 
 Text sizes are one step above the first draft of this brief. Review round
-1 put Threadbare beside Codex and Claude and its 14 pt body read about 2
+1 put Threadbear beside Codex and Claude and its 14 pt body read about 2
 pt smaller than theirs, so every size moved up together. The sizes below
 are the ones in `TypeScale` (Theme.swift), which everything takes its
 sizes from. They're the 100% sizes: ⌘= and ⌘- in the View menu (⌘0 puts
@@ -173,7 +173,7 @@ group leaves the turn's one spinner to the working line.
 
 ### Transcript (owner: transcript)
 
-- **Work groups.** In ThreadbareCore, fold each maximal run of reasoning,
+- **Work groups.** In ThreadbearCore, fold each maximal run of reasoning,
   tool calls (with their results and diffs) and system notes inside one
   turn into a group row. Assistant text, user messages, approval and
   question cards still waiting or turned down, plan cards, images, errors

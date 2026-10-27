@@ -21,7 +21,7 @@
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-NODE="${THREADBARE_NODE:-$HOME/.nvm/versions/node/v24.22.1/bin/node}"
+NODE="${THREADBEAR_NODE:-$HOME/.nvm/versions/node/v24.22.1/bin/node}"
 QUICK=0
 APP_ONLY=0
 E2E=0
@@ -48,23 +48,25 @@ if [ "$QUICK" = 1 ] && [ "$APP_ONLY" = 1 ]; then
 fi
 
 if [ ! -x "$NODE" ]; then
-  echo "No Node binary at $NODE. Set THREADBARE_NODE to a Node 24 binary." >&2
+  echo "No Node binary at $NODE. Set THREADBEAR_NODE to a Node 24 binary." >&2
   exit 1
 fi
 export PATH="$(dirname "$NODE"):$PATH"
-export THREADBARE_NODE="$NODE"
-# Inside a Threadbare thread these name the live runner and the thread.
+export THREADBEAR_NODE="$NODE"
+# Inside a Threadbear thread these name the live runner and the thread.
 # Every test makes its own temp data dir; none may find the real one.
-unset THREADBARE_HOME THREADBARE_DATA_DIR THREADBARE_PORT THREADBARE_URL THREADBARE_LOG \
-  THREADBARE_THREAD_ID THREADBARE_RUNNER_VERSION THREADBARE_RUNNER_HOME
+unset THREADBEAR_HOME THREADBEAR_DATA_DIR THREADBEAR_PORT THREADBEAR_URL THREADBEAR_LOG \
+# And their old names, which the runner and tb would otherwise take for these.
+for v in $(compgen -e | grep '^THREADBARE_' || true); do unset "$v"; done
+  THREADBEAR_THREAD_ID THREADBEAR_RUNNER_VERSION THREADBEAR_RUNNER_HOME
 # No runner a check starts may install or update a CLI.
-export THREADBARE_CLI_UPDATES=off
+export THREADBEAR_CLI_UPDATES=off
 # Nor write to the real Convex project (the sync e2e points its own runner
-# at a local deployment with THREADBARE_SYNC_URL).
-export THREADBARE_SYNC=off
+# at a local deployment with THREADBEAR_SYNC_URL).
+export THREADBEAR_SYNC=off
 
 TMP_ROOT="${TMPDIR:-/tmp}"
-LOGS="$(mktemp -d "${TMP_ROOT%/}/threadbare-check.XXXXXX")"
+LOGS="$(mktemp -d "${TMP_ROOT%/}/threadbear-check.XXXXXX")"
 FAILED=""
 
 # step <name> <dir> <command...>: runs it with its output in a log file.
@@ -103,7 +105,7 @@ if [ "$QUICK" = 0 ]; then
     step "mock runner packages" "$ROOT/app/Tools/mock-runner" npm ci --no-audit --no-fund
   fi
   step "app build" "$ROOT/app" swift build
-  step "app tests" "$ROOT/app" env THREADBARE_REQUIRE_MOCK=1 swift test
+  step "app tests" "$ROOT/app" env THREADBEAR_REQUIRE_MOCK=1 swift test
 fi
 if [ "$E2E" = 1 ]; then
   # Claude's first, then Codex's (codex*.e2e.test.ts: the conversation

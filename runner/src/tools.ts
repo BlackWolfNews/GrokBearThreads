@@ -125,7 +125,7 @@ export function toolTitle(name: string, input: Record<string, unknown>, cwd: str
     case 'ExitPlanMode':
       return 'Finish the plan';
     default:
-      if (name.startsWith('mcp__threadbare__')) return threadbareTitle(name.slice('mcp__threadbare__'.length), input);
+      if (name.startsWith('mcp__threadbear__')) return threadbearTitle(name.slice('mcp__threadbear__'.length), input);
       if (name.startsWith('mcp__')) {
         const [, server, ...rest] = name.split('__');
         return `${server}: ${rest.join('__')}`;
@@ -134,9 +134,9 @@ export function toolTitle(name: string, input: Record<string, unknown>, cwd: str
   }
 }
 
-// The threadbare tools (threadbare-mcp.ts) in plain words, for tool rows and
+// The threadbear tools (threadbear-mcp.ts) in plain words, for tool rows and
 // approval cards.
-function threadbareTitle(tool: string, input: Record<string, unknown>): string {
+function threadbearTitle(tool: string, input: Record<string, unknown>): string {
   const id = (str(input.threadId) || str(input.id)).slice(0, 8);
   switch (tool) {
     case 'show_options':
@@ -166,7 +166,7 @@ function threadbareTitle(tool: string, input: Record<string, unknown>): string {
     case 'delete_thread':
       return `Delete thread ${id}`;
     default:
-      return `threadbare: ${tool}`;
+      return `threadbear: ${tool}`;
   }
 }
 

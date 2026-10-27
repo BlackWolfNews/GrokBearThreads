@@ -2,13 +2,13 @@
 import PackageDescription
 
 let package = Package(
-    name: "Threadbare",
+    name: "Threadbear",
     platforms: [
         .macOS(.v26)
     ],
     products: [
-        .executable(name: "Threadbare", targets: ["Threadbare"]),
-        .library(name: "ThreadbareCore", targets: ["ThreadbareCore"]),
+        .executable(name: "Threadbear", targets: ["Threadbear"]),
+        .library(name: "ThreadbearCore", targets: ["ThreadbearCore"]),
     ],
     dependencies: [
         .package(url: "https://github.com/swiftlang/swift-markdown.git", from: "0.9.0"),
@@ -17,33 +17,33 @@ let package = Package(
         // Protocol models, the JSON-RPC client, the event reducer and other
         // logic with no AppKit or SwiftUI, so it can be tested on its own.
         .target(
-            name: "ThreadbareCore",
-            path: "Sources/ThreadbareCore"
+            name: "ThreadbearCore",
+            path: "Sources/ThreadbearCore"
         ),
         .executableTarget(
-            name: "Threadbare",
+            name: "Threadbear",
             dependencies: [
-                "ThreadbareCore",
+                "ThreadbearCore",
                 .product(name: "Markdown", package: "swift-markdown"),
             ],
-            path: "Sources/Threadbare",
+            path: "Sources/Threadbear",
             // The AppKit side renders and measures text off the main thread
             // with non-Sendable TextKit objects confined to one thread each;
             // Swift 5 mode keeps that from drowning in Sendable errors.
-            // ThreadbareCore stays in Swift 6 mode.
+            // ThreadbearCore stays in Swift 6 mode.
             swiftSettings: [.swiftLanguageMode(.v5)]
         ),
         .testTarget(
-            name: "ThreadbareCoreTests",
-            dependencies: ["ThreadbareCore"],
-            path: "Tests/ThreadbareCoreTests"
+            name: "ThreadbearCoreTests",
+            dependencies: ["ThreadbearCore"],
+            path: "Tests/ThreadbearCoreTests"
         ),
         // AppKit-side checks (the composer, transcript text, renders,
         // AppModel's drafts) against the app target itself.
         .testTarget(
-            name: "ThreadbareAppTests",
-            dependencies: ["Threadbare", "ThreadbareCore"],
-            path: "Tests/ThreadbareAppTests",
+            name: "ThreadbearAppTests",
+            dependencies: ["Threadbear", "ThreadbearCore"],
+            path: "Tests/ThreadbearAppTests",
             swiftSettings: [.swiftLanguageMode(.v5)]
         ),
     ]

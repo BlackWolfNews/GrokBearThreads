@@ -78,12 +78,12 @@ test('a busy turn finishes on the old runner while the new one takes everything 
   supervisor = spawn(process.execPath, [path.join(rdir, 'launch.mjs')], {
     env: {
       ...process.env,
-      THREADBARE_HOME: home,
-      THREADBARE_PORT: String(port),
-      THREADBARE_LOG: path.join(root, 'runner.log'),
-      THREADBARE_CLI_UPDATES: 'off',
-      THREADBARE_FOLLOW_MAIN: '0',
-      THREADBARE_DEBUG: '1',
+      THREADBEAR_HOME: home,
+      THREADBEAR_PORT: String(port),
+      THREADBEAR_LOG: path.join(root, 'runner.log'),
+      THREADBEAR_CLI_UPDATES: 'off',
+      THREADBEAR_FOLLOW_MAIN: '0',
+      THREADBEAR_DEBUG: '1',
     },
     stdio: ['ignore', 'pipe', 'pipe'],
   });

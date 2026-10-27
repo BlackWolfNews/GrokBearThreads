@@ -1,6 +1,6 @@
 #!/bin/bash
-# Installs the Threadbare runner as a launchd LaunchAgent
-# (com.mikerosoft.threadbare.runner) that starts at login and is restarted
+# Installs the Threadbear runner as a launchd LaunchAgent
+# (com.mikerosoft.threadbear.runner) that starts at login and is restarted
 # if it ever exits.
 #
 #   scripts/install-runner.sh              install (or reinstall) and start it
@@ -27,26 +27,28 @@
 #   --force        replace the running copy even if threads are busy
 #   --allow-branch install from a HEAD that isn't main's tip (its launch.mjs
 #                  and release)
-#   --home DIR     data dir (default ~/Library/Application Support/Threadbare)
-#   --label LABEL  launchd label (default com.mikerosoft.threadbare.runner)
+#   --home DIR     data dir (default ~/Library/Application Support/Threadbear)
+#   --label LABEL  launchd label (default com.mikerosoft.threadbear.runner)
 #   --port N       port to listen on (default: the one in runner.json, else
 #                  8797). A sandbox next to the real runner needs its own
 #                  --home and --label; its port defaults to 0, a free one.
 #   --node PATH    Node 24 binary to pin in the plist
-#                  (default: $THREADBARE_NODE, else ~/.nvm/versions/node/v24.22.1/bin/node)
+#                  (default: $THREADBEAR_NODE, else ~/.nvm/versions/node/v24.22.1/bin/node)
 #   --path PATH    PATH for the runner and the agents it starts
 #                  (default: your login shell's PATH, captured now)
 #
-# THREADBARE_LAUNCHCTL and THREADBARE_LAUNCH_AGENTS_DIR replace launchctl
+# THREADBEAR_LAUNCHCTL and THREADBEAR_LAUNCH_AGENTS_DIR replace launchctl
 # and ~/Library/LaunchAgents (the tests use both).
 set -euo pipefail
 
-DEFAULT_LABEL="com.mikerosoft.threadbare.runner"
-DEFAULT_HOME="$HOME/Library/Application Support/Threadbare"
+# THREADBARE_* was the old name for these variables: each stands in for its new name.
+for v in $(compgen -e | grep '^THREADBARE_' || true); do n="THREADBEAR_${v#THREADBARE_}"; [ -n "${!n+x}" ] || export "$n=${!v}"; done
+DEFAULT_LABEL="com.mikerosoft.threadbear.runner"
+DEFAULT_HOME="$HOME/Library/Application Support/Threadbear"
 RUNNER_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-NODE="${THREADBARE_NODE:-$HOME/.nvm/versions/node/v24.22.1/bin/node}"
-LAUNCHCTL="${THREADBARE_LAUNCHCTL:-launchctl}"
-AGENTS_DIR="${THREADBARE_LAUNCH_AGENTS_DIR:-$HOME/Library/LaunchAgents}"
+NODE="${THREADBEAR_NODE:-$HOME/.nvm/versions/node/v24.22.1/bin/node}"
+LAUNCHCTL="${THREADBEAR_LAUNCHCTL:-launchctl}"
+AGENTS_DIR="${THREADBEAR_LAUNCH_AGENTS_DIR:-$HOME/Library/LaunchAgents}"
 LABEL="$DEFAULT_LABEL"
 DATA_HOME="$DEFAULT_HOME"
 PORT=""
@@ -102,7 +104,7 @@ if [ "$SANDBOX" = 1 ]; then
   [ -n "$PORT" ] || PORT=0
   LOG="$DATA_HOME/runner.log"
 else
-  LOG="$HOME/Library/Logs/threadbare-runner.log"
+  LOG="$HOME/Library/Logs/threadbear-runner.log"
 fi
 PLIST="$AGENTS_DIR/$LABEL.plist"
 DOMAIN="gui/$(id -u)"
@@ -128,16 +130,16 @@ is_ancestor() {
 # Reinstalling or removing the runner a thread runs on ends that thread's
 # turn, so an agent hands it to Mike instead. That's decided by the process
 # tree (which works under any runner, and whatever an agent exported) and
-# by THREADBARE_RUNNER_HOME, which the runner sets and nothing tells an
-# agent to change. THREADBARE_HOME is the one agents point at dev runners,
+# by THREADBEAR_RUNNER_HOME, which the runner sets and nothing tells an
+# agent to change. THREADBEAR_HOME is the one agents point at dev runners,
 # so it can't be trusted for this. The real runner is refused from any
 # thread at all.
 if [ "$MODE" != "print" ]; then
   IN_THREAD=0
   PID="$(runner_pid "$DATA_HOME" || true)"
   if [ -n "$PID" ] && is_ancestor "$PID"; then IN_THREAD=1; fi
-  if [ -n "${THREADBARE_THREAD_ID:-}" ]; then
-    if [ "$SANDBOX" = 0 ] || same_dir "${THREADBARE_RUNNER_HOME:-${THREADBARE_HOME:-${THREADBARE_DATA_DIR:-$DEFAULT_HOME}}}" "$DATA_HOME"; then IN_THREAD=1; fi
+  if [ -n "${THREADBEAR_THREAD_ID:-}" ]; then
+    if [ "$SANDBOX" = 0 ] || same_dir "${THREADBEAR_RUNNER_HOME:-${THREADBEAR_HOME:-${THREADBEAR_DATA_DIR:-$DEFAULT_HOME}}}" "$DATA_HOME"; then IN_THREAD=1; fi
   fi
   if [ "$IN_THREAD" = 1 ]; then
     echo "This would stop the runner this thread runs on and end this turn. Ask Mike to run it from a terminal:" >&2
@@ -146,10 +148,10 @@ if [ "$MODE" != "print" ]; then
     exit 1
   fi
 fi
-# deploy-runner.sh takes its data dir from THREADBARE_HOME; this script
+# deploy-runner.sh takes its data dir from THREADBEAR_HOME; this script
 # doesn't, so someone counting on it would reinstall the real runner.
-if [ "$HOME_GIVEN" = 0 ] && [ -n "${THREADBARE_HOME:-}" ] && ! same_dir "$THREADBARE_HOME" "$DEFAULT_HOME"; then
-  echo "THREADBARE_HOME is $THREADBARE_HOME, but install-runner.sh only goes by --home (default $DEFAULT_HOME). Pass --home." >&2
+if [ "$HOME_GIVEN" = 0 ] && [ -n "${THREADBEAR_HOME:-}" ] && ! same_dir "$THREADBEAR_HOME" "$DEFAULT_HOME"; then
+  echo "THREADBEAR_HOME is $THREADBEAR_HOME, but install-runner.sh only goes by --home (default $DEFAULT_HOME). Pass --home." >&2
   exit 1
 fi
 
@@ -178,7 +180,7 @@ if [ "$MODE" = "uninstall" ]; then
     exit 1
   fi
   if [ "$FORCE" = 0 ] && "$LAUNCHCTL" print "$DOMAIN/$LABEL" >/dev/null 2>&1 && [ -x "$NODE" ] \
-    && ! THREADBARE_NODE="$NODE" bash "$RUNNER_DIR/scripts/deploy-runner.sh" --home "$DATA_HOME" --label "$LABEL" --check-idle; then
+    && ! THREADBEAR_NODE="$NODE" bash "$RUNNER_DIR/scripts/deploy-runner.sh" --home "$DATA_HOME" --label "$LABEL" --check-idle; then
     echo "Not removing $LABEL while threads are busy: they'd be cut short. Run it again once they finish, or add --force." >&2
     exit 1
   fi
@@ -248,10 +250,10 @@ $(env_entry PATH "$AGENT_PATH")
 $(env_entry LANG en_US.UTF-8)
 EOF
   if [ "$SANDBOX" = 1 ]; then
-    env_entry THREADBARE_HOME "$DATA_HOME"
-    env_entry THREADBARE_LOG "$LOG"
+    env_entry THREADBEAR_HOME "$DATA_HOME"
+    env_entry THREADBEAR_LOG "$LOG"
   fi
-  [ -z "$PORT" ] || env_entry THREADBARE_PORT "$PORT"
+  [ -z "$PORT" ] || env_entry THREADBEAR_PORT "$PORT"
   cat <<EOF
 	</dict>
 	<key>RunAtLoad</key>
@@ -278,7 +280,7 @@ fi
 
 # deploy-runner.sh, on the Node the plist pins.
 deploy() {
-  THREADBARE_NODE="$NODE" bash "$RUNNER_DIR/scripts/deploy-runner.sh" --home "$DATA_HOME" --label "$LABEL" "$@"
+  THREADBEAR_NODE="$NODE" bash "$RUNNER_DIR/scripts/deploy-runner.sh" --home "$DATA_HOME" --label "$LABEL" "$@"
 }
 
 # Loads $PLIST and starts it. Straight after a bootout, bootstrap can fail

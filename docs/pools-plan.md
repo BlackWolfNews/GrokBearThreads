@@ -1,10 +1,10 @@
-# Pools: Threadbare picks the login
+# Pools: Threadbear picks the login
 
 Mike, 27 Oct 2026, after looking at the concepts in `docs/account-picker-design/` (thread 8af8d0d2): "pools is the right way to go. A pool can be a collection of providers. It could just be one provider, but it could also be multiple providers."
 
 ## Why
 
-Mike has four Claude logins and one Codex login. Before every thread he looks at their usage and picks one, and when a login runs dry partway through a turn the thread fails and he moves it by hand. Theo's CLI proxy hides all of that behind one endpoint. Pools do the same thing inside Threadbare: Mike picks a pool and a model, and the runner decides which login runs each turn.
+Mike has four Claude logins and one Codex login. Before every thread he looks at their usage and picks one, and when a login runs dry partway through a turn the thread fails and he moves it by hand. Theo's CLI proxy hides all of that behind one endpoint. Pools do the same thing inside Threadbear: Mike picks a pool and a model, and the runner decides which login runs each turn.
 
 ## What it's like when it's done
 
@@ -65,7 +65,7 @@ pools.save { pools: Pool[] }        -> { pools: Pool[] }   // replaces the whole
 pools.updated { pools: Pool[] }     // after pools.save, and when the login list changes the defaults
 ```
 
-`threadbare` MCP tools: `create_thread` gains `pool` (an id or title). `update_thread` gains `pool` (`null`, or `"pin"`, pins the thread). `list_accounts` also prints the pools with their logins and their room, and says which pool a new thread would start on.
+`threadbear` MCP tools: `create_thread` gains `pool` (an id or title). `update_thread` gains `pool` (`null`, or `"pin"`, pins the thread). `list_accounts` also prints the pools with their logins and their room, and says which pool a new thread would start on.
 
 `tb`: `tb pools` lists them. `tb new --pool <id>`.
 

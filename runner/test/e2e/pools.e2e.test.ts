@@ -39,12 +39,12 @@ async function startRunner(): Promise<void> {
     cwd: RUNNER_DIR,
     env: {
       ...process.env,
-      THREADBARE_HOME: home,
-      THREADBARE_PORT: '0',
-      THREADBARE_LOG: path.join(root, 'runner.log'),
-      THREADBARE_DEBUG: '1',
-      THREADBARE_CLI_UPDATES: 'off',
-      THREADBARE_FOLLOW_MAIN: '0',
+      THREADBEAR_HOME: home,
+      THREADBEAR_PORT: '0',
+      THREADBEAR_LOG: path.join(root, 'runner.log'),
+      THREADBEAR_DEBUG: '1',
+      THREADBEAR_CLI_UPDATES: 'off',
+      THREADBEAR_FOLLOW_MAIN: '0',
     },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
@@ -92,7 +92,7 @@ describe('pools end to end: a thread moved to another Claude login resumes its s
     home = path.join(root, 'home');
     cwd = path.join(root, 'work');
     fs.mkdirSync(cwd, { recursive: true });
-    assert.ok(!home.includes('Application Support/Threadbare'));
+    assert.ok(!home.includes('Application Support/Threadbear'));
     await startRunner();
   });
 

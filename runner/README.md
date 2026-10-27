@@ -1,6 +1,6 @@
-# Threadbare runner
+# Threadbear runner
 
-A small daemon that owns every agent process for Threadbare. It drives the
+A small daemon that owns every agent process for Threadbear. It drives the
 official Claude Code CLI through `@anthropic-ai/claude-agent-sdk`, keeps
 threads on disk, turns SDK messages into the events in
 [`docs/protocol.md`](../docs/protocol.md), and serves them to the Mac app
@@ -9,7 +9,7 @@ stops a turn.
 
 TypeScript on Node 24, run directly (Node strips the types, so there's no
 build step). Runtime packages: the Agent SDK (pinned to 0.3.310), `ws`, and
-`zod` for the threadbare tools' input schemas.
+`zod` for the threadbear tools' input schemas.
 No `node:sqlite`; it truncates text at NUL on Node 24, and plain files are
 enough.
 
@@ -22,7 +22,7 @@ npm start                      # listens on 127.0.0.1:8797, path /rpc
 scripts/dev-runner.sh          # the same, on a temp data dir and a free port
 ```
 
-As a LaunchAgent (`com.mikerosoft.threadbare.runner`, starts at login,
+As a LaunchAgent (`com.mikerosoft.threadbear.runner`, starts at login,
 restarted if it exits):
 
 ```sh
@@ -47,9 +47,9 @@ has come up and stayed up long enough to be marked good (about a minute),
 and puts all three back if launchd won't load the new plist (bootstrap gets
 a few tries first) or the runner doesn't get that far. The plist
 pins the Node binary (`~/.nvm/versions/node/v24.22.1/bin/node` by default;
-change it with `--node` or `THREADBARE_NODE`) and the PATH your login shell
+change it with `--node` or `THREADBEAR_NODE`) and the PATH your login shell
 has, so agents can run the same commands a terminal can. Pass `--path` to set
-it yourself. Logs go to `~/Library/Logs/threadbare-runner.log`.
+it yourself. Logs go to `~/Library/Logs/threadbear-runner.log`.
 
 A sandbox install next to the real one takes its own `--home` and `--label`
 (the script refuses a sandbox under the real label); its port defaults to 0,
@@ -103,9 +103,9 @@ carry the thread on afterwards (it has been resumed 3 times this hour; a
 crash rollback's resume replaces the crashed release's rather than counting
 twice), the script says so and that Mike has to message the thread, rather
 than promising the resume. For a sandbox `--home`, the `tb` commands it
-prints carry `THREADBARE_HOME=<home>`.
+prints carry `THREADBEAR_HOME=<home>`.
 
-Inside a Threadbare thread the restart waits for that thread's turn to end,
+Inside a Threadbear thread the restart waits for that thread's turn to end,
 so the script says so and exits: end the turn, and the runner restarts and
 sends the thread "The runner restarted on release <id>. Check that your
 change works, then carry on." (`--resume "text"` changes it). If the thread
@@ -129,9 +129,9 @@ Outside a thread the script waits for the restart (up to `--wait`). If it is
 withdrawn meanwhile (`tb restart --cancel`), the script says what `current`
 points at and exits 1.
 
-The script counts as inside a thread when `THREADBARE_THREAD_ID` is set and
-`THREADBARE_RUNNER_HOME` (which the runner sets, and agents don't change,
-unlike `THREADBARE_HOME`) names the data dir it deploys to, or when that
+The script counts as inside a thread when `THREADBEAR_THREAD_ID` is set and
+`THREADBEAR_RUNNER_HOME` (which the runner sets, and agents don't change,
+unlike `THREADBEAR_HOME`) names the data dir it deploys to, or when that
 runner's pid (`run/runner.pid`) is one of its ancestors, which also catches
 runners too old to set the variables. The real runner's label only goes
 with its own data dir, and the other way round.
@@ -218,14 +218,14 @@ and prints what to point `tb` and the app at:
 
 ```
   pid:  41234
-For tb:      /tmp/threadbare-dev.Ab12Cd/tb status
-For the app: ~/dev/me/threadbare/app/Tools/dev-app.sh start --home /tmp/threadbare-dev.Ab12Cd
+For tb:      /tmp/threadbear-dev.Ab12Cd/tb status
+For the app: ~/dev/me/threadbear/app/Tools/dev-app.sh start --home /tmp/threadbear-dev.Ab12Cd
 Stop it:     kill 41234   (never pkill: the real runner runs src/main.ts too)
 ```
 
 `<home>/tb` is `bin/tb` with that data dir built in, since an exported
-`THREADBARE_HOME` lasts one command in an agent's shell and a bare `tb`
-then reaches the real runner. It also sets `THREADBARE_TB` to itself, so
+`THREADBEAR_HOME` lasts one command in an agent's shell and a bare `tb`
+then reaches the real runner. It also sets `THREADBEAR_TB` to itself, so
 the commands tb suggests (`restart --cancel`, `events`) name it too. A temp
 data dir the script made is deleted when it stops (Ctrl-C or `kill`;
 `--keep` keeps it), and kept, with a note saying where, if the runner
@@ -263,7 +263,7 @@ model gets it, rather than the account's default (`hello` reports it). The
 installed runner leaves it out; `scripts/dev-runner.sh` sets it.
 `followMain` (default true) lets a runner that runs from a release build
 and restart onto main by itself (`docs/dev-tools.md`, "The runner updating
-itself"); `THREADBARE_FOLLOW_MAIN=0` does the same for one run.
+itself"); `THREADBEAR_FOLLOW_MAIN=0` does the same for one run.
 `models` is for the runner's own small-model calls through OpenRouter
 (`src/models/`, docs/protocol.md "Settings and models"): a daily budget in
 dollars (default 1; 0 turns them off) and folders whose threads are never
@@ -274,27 +274,27 @@ Environment variables, mainly for tests:
 
 | Variable | What it does |
 |---|---|
-| `THREADBARE_HOME` | Data dir (default `~/Library/Application Support/Threadbare`). `THREADBARE_DATA_DIR`, the app's name for it, works too. |
-| `THREADBARE_PORT` | Port to listen on. `0` picks a free one; it's written to `runner.json`. |
-| `THREADBARE_LOG` | Log file (default `~/Library/Logs/threadbare-runner.log`). |
-| `THREADBARE_IDLE_MS` | Idle release delay in ms (default 30 minutes). |
-| `THREADBARE_MAX_LIVE` | Most CLIs kept live at once (default 6, or `maxLiveCLIs` in `runner.json`). |
-| `THREADBARE_CLAUDE_PATH` | The `claude` binary (default `~/.local/bin/claude`, so the CLI keeps updating itself). |
-| `THREADBARE_ACCOUNTS_DIR` | Where `claude-N` logins live (default Token Stats' `Accounts` folder). |
-| `THREADBARE_CLAUDE_MAIN_DIR`, `THREADBARE_CLAUDE_MAIN_JSON` | The main login (default `~/.claude` and `~/.claude.json`). |
-| `THREADBARE_DEBUG=1` | Log CLI stderr and other detail. |
-| `THREADBARE_LOG_STDERR=1` | Also print the log to stderr. |
-| `THREADBARE_NODE` | The Node binary the scripts pin (default `~/.nvm/versions/node/v24.22.1/bin/node`). |
-| `THREADBARE_GOOD_AFTER_MS` | How long a release has to stay up before it is marked `lastGood` (default 60 s; the tests shorten it). |
-| `THREADBARE_START_TIMEOUT_MS` | How long `launch.mjs` gives a release to start listening before stopping it (default 90 s). |
-| `THREADBARE_LAUNCHCTL`, `THREADBARE_LAUNCH_AGENTS_DIR` | Stand-ins for `launchctl` and `~/Library/LaunchAgents` in the install and deploy scripts (the deploy tests use both). |
+| `THREADBEAR_HOME` | Data dir (default `~/Library/Application Support/Threadbear`). `THREADBEAR_DATA_DIR`, the app's name for it, works too. |
+| `THREADBEAR_PORT` | Port to listen on. `0` picks a free one; it's written to `runner.json`. |
+| `THREADBEAR_LOG` | Log file (default `~/Library/Logs/threadbear-runner.log`). |
+| `THREADBEAR_IDLE_MS` | Idle release delay in ms (default 30 minutes). |
+| `THREADBEAR_MAX_LIVE` | Most CLIs kept live at once (default 6, or `maxLiveCLIs` in `runner.json`). |
+| `THREADBEAR_CLAUDE_PATH` | The `claude` binary (default `~/.local/bin/claude`, so the CLI keeps updating itself). |
+| `THREADBEAR_ACCOUNTS_DIR` | Where `claude-N` logins live (default Token Stats' `Accounts` folder). |
+| `THREADBEAR_CLAUDE_MAIN_DIR`, `THREADBEAR_CLAUDE_MAIN_JSON` | The main login (default `~/.claude` and `~/.claude.json`). |
+| `THREADBEAR_DEBUG=1` | Log CLI stderr and other detail. |
+| `THREADBEAR_LOG_STDERR=1` | Also print the log to stderr. |
+| `THREADBEAR_NODE` | The Node binary the scripts pin (default `~/.nvm/versions/node/v24.22.1/bin/node`). |
+| `THREADBEAR_GOOD_AFTER_MS` | How long a release has to stay up before it is marked `lastGood` (default 60 s; the tests shorten it). |
+| `THREADBEAR_START_TIMEOUT_MS` | How long `launch.mjs` gives a release to start listening before stopping it (default 90 s). |
+| `THREADBEAR_LAUNCHCTL`, `THREADBEAR_LAUNCH_AGENTS_DIR` | Stand-ins for `launchctl` and `~/Library/LaunchAgents` in the install and deploy scripts (the deploy tests use both). |
 
 What the runner gives the CLIs it starts is under Tools for agents below.
 
 ## Data layout
 
 ```
-~/Library/Application Support/Threadbare/
+~/Library/Application Support/Threadbear/
   runner.json
   runner/                       releases, launch.mjs and state.json (above)
   restart.json                  a restart that's waiting for threads to finish
@@ -327,9 +327,9 @@ removed at startup.
 
 ## The tb CLI
 
-`bin/tb` talks to a running runner. It reads `THREADBARE_HOME` and the port
-from `runner.json` like the runner does (`THREADBARE_PORT`, unless it's 0,
-or `THREADBARE_URL` override it). Thread ids can be shortened to a unique
+`bin/tb` talks to a running runner. It reads `THREADBEAR_HOME` and the port
+from `runner.json` like the runner does (`THREADBEAR_PORT`, unless it's 0,
+or `THREADBEAR_URL` override it). Thread ids can be shortened to a unique
 prefix.
 
 ```sh
@@ -352,11 +352,11 @@ bin/tb models key              # set the OpenRouter key: pasted at a prompt or p
 bin/tb models try summarize "some text"   # one call by hand; also classify --labels a,b, extract --field name=desc, generate
 ```
 
-For working on Threadbare itself:
+For working on Threadbear itself:
 
 ```sh
 bin/tb status [--json]          # version, live CLIs, busy threads, background work, a pending restart
-bin/tb self [--json]            # the thread this runs in (THREADBARE_THREAD_ID)
+bin/tb self [--json]            # the thread this runs in (THREADBEAR_THREAD_ID)
 bin/tb restart [--now [--force]] [--resume "text" | --no-resume] [--reason "text"] [--max-wait 30m]
 bin/tb restart --cancel         # withdraw a pending restart (--force: someone else's, from a terminal)
 bin/tb show <id> [--last N] [--tools]   # the thread as plain text, approvals with their ids
@@ -403,7 +403,7 @@ an agent can dump, screenshot and stop) and the `tb events` one; the mock no lon
 `app/.fixtures/threads/` by default, so exports never reach design
 screenshots. A mistyped flag gets a message, not a stack trace. Messages
 print `tb` with its full path, and the one that was run: a dev runner's
-`<home>/tb`, or `THREADBARE_HOME=<home>` in front when it was pointed away
+`<home>/tb`, or `THREADBEAR_HOME=<home>` in front when it was pointed away
 from the thread's own runner.
 
 ## Tools for agents
@@ -411,8 +411,8 @@ from the thread's own runner.
 Every CLI the runner starts knows which thread it's in, two ways, and both
 name the same thread:
 
-- **The `threadbare` MCP server.** Each Claude session gets its own,
-  in-process (`src/threadbare-mcp.ts`) and built with its thread's id:
+- **The `threadbear` MCP server.** Each Claude session gets its own,
+  in-process (`src/threadbear-mcp.ts`) and built with its thread's id:
   `list_threads`, `read_thread`, `list_accounts`, `create_thread`,
   `send_message`, `update_thread`, `move_thread`, `interrupt_thread` and
   `delete_thread`, which call the runner directly. Messages an agent sends
@@ -421,8 +421,8 @@ name the same thread:
   by itself in the new folder. `delete_thread` asks Mike every time, even
   with full access, offers no "Always allow", and its card names the
   thread.
-- **The environment.** `THREADBARE_THREAD_ID`, `THREADBARE_HOME`,
-  `THREADBARE_RUNNER_HOME` and `THREADBARE_RUNNER_VERSION` (what each is
+- **The environment.** `THREADBEAR_THREAD_ID`, `THREADBEAR_HOME`,
+  `THREADBEAR_RUNNER_HOME` and `THREADBEAR_RUNNER_VERSION` (what each is
   for is in `docs/protocol.md`), with the runner's own `bin/` at the front
   of `PATH`, so `tb self`, `tb restart` and the deploy script know which
   thread and runner they're in.
@@ -572,12 +572,12 @@ through the deploy script (Releases and deploys, above).
 | `src/adapters/claude/adapter.ts` | Claude Agent SDK session: options, input queue, `canUseTool`, interrupt, release. |
 | `src/adapters/claude/normalize.ts` | SDK messages to protocol events. Pure; tested with recorded sequences. |
 | `src/tools.ts`, `src/diff.ts` | Tool kinds and titles, input truncation, edit diffs, plan tracking. |
-| `src/threadbare-mcp.ts`, `src/transcripts.ts` | The threadbare tools each session gets; copying a session's transcript when its thread moves folder. |
+| `src/threadbear-mcp.ts`, `src/transcripts.ts` | The threadbear tools each session gets; copying a session's transcript when its thread moves folder. |
 | `src/store.ts` | `thread.json` and `events.ndjson`. |
 | `src/proc.ts` | Process groups, tool command groups and orphan cleanup. |
 | `src/lock.ts` | The one-runner-per-data-dir lock. |
 | `src/accounts.ts`, `src/media.ts`, `src/config.ts` | Login discovery, image handling, config and data dir. |
-| `src/cli.ts`, `src/tb-dev.ts`, `src/client.ts` | `tb` (its working-on-Threadbare commands in `tb-dev.ts`) and the small client it and the tests use. |
+| `src/cli.ts`, `src/tb-dev.ts`, `src/client.ts` | `tb` (its working-on-Threadbear commands in `tb-dev.ts`) and the small client it and the tests use. |
 | `scripts/deploy-runner.sh`, `scripts/deploy.mjs` | Building, smoke testing, switching to and pruning releases. `scripts/rpc-client.mjs` is their dependency-free client. |
 | `scripts/install-runner.sh`, `scripts/dev-runner.sh` | The LaunchAgent, and a foreground runner on a temp data dir. |
 
@@ -622,7 +622,7 @@ limit and work ending mid-turn, held queues, resumes on the wrong release,
 a release that crashes twice before the rollback and its resume counted
 once, cancelling and putting `current` back, a deleted thread it was
 waiting for, a resume it says it won't send), planned restarts
-under `launch.mjs` and its startup watchdog, the threadbare tools (moves
+under `launch.mjs` and its startup watchdog, the threadbear tools (moves
 that carry the transcript and their fallbacks, delete, and the refusals
 for the calling thread), and `tb` (including its guards on the live runner
 and on the thread it runs in).

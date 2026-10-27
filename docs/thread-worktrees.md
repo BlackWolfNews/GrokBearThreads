@@ -1,6 +1,6 @@
 # A worktree per thread
 
-Mike, 2026-10-27: several threads work on Threadbare at once, all in the
+Mike, 2026-10-27: several threads work on Threadbear at once, all in the
 same checkout. One thread's `git add -A` has swept another's half-done work
 into a commit, merges and test runs collide, and every agent has to
 remember to make its own worktree. Instead, a repo can ask for each new
@@ -39,8 +39,8 @@ for a folder inside an opted-in repo:
    shown in the thread, and the thread starts in the main checkout as
    before.
 2. The thread's `cwd` is the same subfolder of the worktree as the folder
-   asked for (asking for `~/dev/me/threadbare/runner` gives
-   `.../threadbare-threads/<id8>/runner`).
+   asked for (asking for `~/dev/me/threadbear/runner` gives
+   `.../threadbear-threads/<id8>/runner`).
 3. `setup` runs in the worktree's root before the first turn starts. Its
    output goes in the transcript as an `action.run` event (`trigger:
    "worktree.setup"`). A failure is shown and the turn starts anyway.

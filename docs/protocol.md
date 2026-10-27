@@ -8,7 +8,7 @@ upgraded first. Times are ISO 8601 strings in UTC. Ids are strings.
 ## Auth
 
 Send `Authorization: Bearer <token>` on the upgrade request. The token is the
-contents of `~/Library/Application Support/Threadbare/secrets/runner-token`.
+contents of `~/Library/Application Support/Threadbear/secrets/runner-token`.
 If a client can't set headers, its first message may be
 `{"jsonrpc":"2.0","id":1,"method":"auth","params":{"token":"..."}}`.
 Anything else before auth (including a binary frame, or nothing for 5
@@ -76,7 +76,7 @@ type AccountUsage = {
 type CliStatus = {
   provider: Provider
   path: string          // the binary new sessions start
-  managedBy: "threadbare" | "cli" | "none" // Codex: Threadbare's own copies;
+  managedBy: "threadbear" | "cli" | "none" // Codex: Threadbear's own copies;
                         // Claude: its own installer; "none": codexPath set by
                         // hand, never updated
   installedVersion?: string // what new sessions start on
@@ -509,7 +509,7 @@ the reply. A crash between that call and the marker may replay the reply
 after restart (at-least-once dispatch). Repeated `reviews.respond` requests
 with the same response never add another reply.
 
-Both Claude and Codex receive `threadbare.show_options` through the shared
+Both Claude and Codex receive `threadbear.show_options` through the shared
 MCP tool definitions, bound to the calling thread. Its schema matches
 `reviews.create` without `threadId`; it returns the review ID and explains
 that the choice/notes will arrive as a later message. The existing URL
@@ -583,7 +583,7 @@ replaces whatever the deltas built up.
 | `threads.tickAsk` | `{ threadId, asksSeq, index, ticked: boolean }` | `{ thread: ThreadSummary }`. Ticks or unticks one of the open card's asks (Needs you), with an `asks.ticked` event. Sends nothing to the agent. `-32602` when `asksSeq` isn't the open card's or `index` is out of range |
 | `approvals.respond` | `{ threadId, approvalId, decision: "allow" \| "allowAlways" \| "deny" \| "answered", message?: string, answers?: Record<string, string> }` | `{}`. `allowAlways` allows matching requests for the rest of this thread only; it never changes the thread's permission mode or saves anything in the project. With `answered`, the app sends the chosen answers in one line as `message` too: the runner keeps it in `approval.resolved` (only `answers` goes to the CLI), so the transcript can show what was chosen |
 | `media.import` | `{ path: string }` | `{ image: ImageRef }` copies a file into `inbox/` and reads its size |
-| `actions.run` | `{ threadId, actionId }` | For a prompt action, `{ turnId }`: its prompt was sent as a message (as `threads.send`). For a command action, `{ ok, exitCode?, durationMs, seq }` once the command has finished, with its output in the transcript as the `action.run` event at `seq`. The command runs in the thread's folder through a login shell with the thread's variables (`THREADBARE_THREAD_ID` and the rest) and is stopped after 10 minutes. `-32602` for an action the thread doesn't have, `-32020` while the same action is still running |
+| `actions.run` | `{ threadId, actionId }` | For a prompt action, `{ turnId }`: its prompt was sent as a message (as `threads.send`). For a command action, `{ ok, exitCode?, durationMs, seq }` once the command has finished, with its output in the transcript as the `action.run` event at `seq`. The command runs in the thread's folder through a login shell with the thread's variables (`THREADBEAR_THREAD_ID` and the rest) and is stopped after 10 minutes. `-32602` for an action the thread doesn't have, `-32020` while the same action is still running |
 | `panels.render` | `{ threadId, panelId }` | `{ image?: ImageRef, items?: PanelItem[], note?: string }` draws an `image` panel or fills a `list` panel now. For `xcode.simulator`, a screenshot of the booted simulator (`xcrun simctl io booted screenshot`), written to the same file each time under the thread's `panels/`; with no device booted (or another failure) there's only `note`. For a `list` panel, the rows its patch's `items` function returned (at most 200), or `note` with the error when it threw or took over 20 seconds. Slow: it waits for the screenshot or the function. `-32602` for a panel the thread doesn't have |
 | `threads.highlights` | `{ threadId }` | `ThreadHighlights` (see Highlights): what the thread has made, shared and pinned, read from its events since the last call and kept with the thread |
 | `threads.removeHighlight` | `{ threadId, highlightId }` | `{ thread: ThreadSummary }` takes one off the list for good (a pin or a found one); a later mention doesn't bring it back. `-32602` for an id the thread doesn't have |
@@ -755,7 +755,7 @@ the restart is asked for.
 ### Handovers
 
 A runner started by `launch.mjs` as a supervised child
-(`THREADBARE_SUPERVISED=1`, docs/dev-tools.md) doesn't make an idle
+(`THREADBEAR_SUPERVISED=1`, docs/dev-tools.md) doesn't make an idle
 restart wait for busy threads. It hands over instead:
 
 - If no thread is busy, it restarts as above.
@@ -790,7 +790,7 @@ restart wait for busy threads. It hands over instead:
   nothing, the draining runner exits.
 - A request for a thread the draining runner has already let go answers
   `-32030` ("moved"), and the primary handles it itself.
-- The threadbare tools in a kept thread's session reach the primary over
+- The threadbear tools in a kept thread's session reach the primary over
   the runner's port for anything about other threads, and its schedules.
 - A `resume` for a kept thread is sent when the thread moves across,
   rather than when the new runner starts, and the 15-minute limit counts
@@ -929,7 +929,7 @@ A turn the agent finished can say whether Mike has to do anything, so
 "Needs you" only holds threads that are really waiting on him.
 
 - **The tool.** Every thread's own agent (not its sub-agents) has
-  `end_turn` in the `threadbare` tools: `{ needs: "you" | "nothing",
+  `end_turn` in the `threadbear` tools: `{ needs: "you" | "nothing",
   asks?: { action, where?, reply? }[] }`. `action` is one concrete thing
   to do, `where` the app, site, file or person, and `reply` the words the
   agent wants back ("done"). The agent calls it last, after its final
@@ -1272,7 +1272,7 @@ kept in `schedules.json` in the data dir.
   records `lastRun.outcome: "failed"` and a `note`, and a repeating
   schedule carries on next time. Deleting a thread deletes the schedules
   that send to it.
-- **Agents** make and change schedules with the `threadbare` tools
+- **Agents** make and change schedules with the `threadbear` tools
   (`schedule_message`, `list_schedules`, `update_schedule`,
   `delete_schedule`); `createdBy` is their thread. By default an agent's
   schedule sends to its own thread ("check the deploy again in 20
@@ -1289,9 +1289,9 @@ and the runner never reads the mirror back. The Mac app doesn't use it.
 - **On when** `runner.json` has `sync.url` (the deployment's
   `https://<name>.convex.cloud`) and `secrets/convex-key` (0600) holds the
   key the deployment's `RUNNER_KEY` was set to. `sync.enabled: false`
-  turns it off; so does `THREADBARE_SYNC=off` in the environment, which
+  turns it off; so does `THREADBEAR_SYNC=off` in the environment, which
   check.sh sets so no test runner writes to the real project.
-  `THREADBARE_SYNC_URL` points a dev or test runner at its own deployment.
+  `THREADBEAR_SYNC_URL` points a dev or test runner at its own deployment.
   `sync.name` is what the phone calls this runner (default: the Mac's
   hostname without `.local`); `sync.runnerId` is made once and written
   back to `runner.json`, so a data dir stays one runner across releases.
@@ -1348,12 +1348,12 @@ and the runner never reads the mirror back. The Mac app doesn't use it.
 ## Tools for agents
 
 Every CLI the runner starts knows which thread it belongs to, two ways: the
-`threadbare` MCP server for the agent itself, and environment variables for
+`threadbear` MCP server for the agent itself, and environment variables for
 the commands it runs (`tb`, the deploy script). Both name the same thread.
 
-Every session, Claude or Codex, gets an MCP server called `threadbare`
-(`runner/src/threadbare-mcp.ts`), bound to its own thread, so an agent can
-drive Threadbare itself: `list_threads`, `read_thread`, `list_accounts`,
+Every session, Claude or Codex, gets an MCP server called `threadbear`
+(`runner/src/threadbear-mcp.ts`), bound to its own thread, so an agent can
+drive Threadbear itself: `list_threads`, `read_thread`, `list_accounts`,
 `create_thread`, `send_message`, `update_thread`, `move_thread`,
 `interrupt_thread`, `delete_thread`, `schedule_message`,
 `list_schedules`, `update_schedule` and `delete_schedule` (see Schedules),
@@ -1375,10 +1375,10 @@ same. There's no tool for restarting the runner: that's `runner.restart`.
 
 | Variable | Value |
 |---|---|
-| `THREADBARE_THREAD_ID` | the id of the thread the CLI belongs to |
-| `THREADBARE_HOME` | the runner's data dir, where `tb` looks for a runner (agents may point it at a dev runner) |
-| `THREADBARE_RUNNER_HOME` | the runner's data dir too, which agents never change: the scripts' guards against restarting the runner a thread runs on go by it |
-| `THREADBARE_RUNNER_VERSION` | the runner's version, as in `hello` |
+| `THREADBEAR_THREAD_ID` | the id of the thread the CLI belongs to |
+| `THREADBEAR_HOME` | the runner's data dir, where `tb` looks for a runner (agents may point it at a dev runner) |
+| `THREADBEAR_RUNNER_HOME` | the runner's data dir too, which agents never change: the scripts' guards against restarting the runner a thread runs on go by it |
+| `THREADBEAR_RUNNER_VERSION` | the runner's version, as in `hello` |
 
 The runner also puts its own `bin/` (the release's, or the checkout's for a
 runner run from source) at the front of `PATH`, so a bare `tb` in a thread

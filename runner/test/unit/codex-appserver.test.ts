@@ -53,7 +53,7 @@ function proc(bin: string, extra: Partial<ConstructorParameters<typeof AppServer
     registry: new ProcessRegistry(tmp(), nullLogger),
     log: nullLogger,
     label: 'test',
-    env: { THREADBARE_THREAD_ID: 'tb-thread-1' },
+    env: { THREADBEAR_THREAD_ID: 'tb-thread-1' },
     timings: { spawnRetryMs: 100, spawnRetryForMs: 3000, closeWaitMs: 2000 },
     ...extra,
   });
@@ -62,8 +62,8 @@ function proc(bin: string, extra: Partial<ConstructorParameters<typeof AppServer
 // ---- Pure parts
 
 test('the running version comes from userAgent, not the thread', () => {
-  assert.equal(parseUserAgentVersion('threadbare/0.164.0 (Mac OS 26.6.2; arm64) unknown (threadbare; 0.1.0)'), '0.164.0');
-  assert.equal(parseUserAgentVersion('threadbare-research/0.165.0-alpha.2 (Mac OS 26.6.2; arm64)'), '0.165.0-alpha.2');
+  assert.equal(parseUserAgentVersion('threadbear/0.164.0 (Mac OS 26.6.2; arm64) unknown (threadbear; 0.1.0)'), '0.164.0');
+  assert.equal(parseUserAgentVersion('threadbear-research/0.165.0-alpha.2 (Mac OS 26.6.2; arm64)'), '0.165.0-alpha.2');
   assert.equal(parseUserAgentVersion('nonsense'), undefined);
   assert.equal(parseUserAgentVersion(undefined), undefined);
 });
@@ -159,15 +159,15 @@ test('children are learned from subAgentActivity, thread/started and collab rece
 test('the environment points CODEX_HOME at the account and drops inherited sessions', () => {
   const env = codexEnv(
     { ...account, configDir: '/accounts/codex-1' },
-    { THREADBARE_THREAD_ID: 't1', PATH: '/runner/bin:/usr/bin' },
+    { THREADBEAR_THREAD_ID: 't1', PATH: '/runner/bin:/usr/bin' },
     '/pkg/@openai/codex',
     { PATH: '/usr/bin', HOME: '/home/x', CLAUDECODE: '1', CLAUDE_CONFIG_DIR: '/c', CODEX_THREAD_ID: 'parent', CODEX_HOME: '/elsewhere', CODEX_SANDBOX: 'seatbelt' },
   );
   assert.equal(env.CODEX_HOME, '/accounts/codex-1');
   assert.equal(env.CODEX_MANAGED_BY_NPM, '1');
   assert.equal(env.CODEX_MANAGED_PACKAGE_ROOT, '/pkg/@openai/codex');
-  assert.equal(env.CODEX_INTERNAL_ORIGINATOR_OVERRIDE, 'Threadbare');
-  assert.equal(env.THREADBARE_THREAD_ID, 't1');
+  assert.equal(env.CODEX_INTERNAL_ORIGINATOR_OVERRIDE, 'Threadbear');
+  assert.equal(env.THREADBEAR_THREAD_ID, 't1');
   assert.equal(env.PATH, '/runner/bin:/usr/bin');
   assert.equal(env.HOME, '/home/x');
   for (const k of ['CLAUDECODE', 'CLAUDE_CONFIG_DIR', 'CLAUDE_AGENT_SDK_CLIENT_APP', 'CODEX_THREAD_ID', 'CODEX_SANDBOX']) assert.equal(env[k], undefined, k);
@@ -200,7 +200,7 @@ test('the native binary is found behind the launcher, hoisted or nested', { skip
     const { launcher, native, pkgRoot } = npmLayout(root, { nested });
     const fromLauncher = resolveCodexBinary(launcher);
     assert.deepEqual(fromLauncher, { command: native, args: [], native: true, packageRoot: pkgRoot }, `nested: ${nested}`);
-    // A prefix folder (Threadbare's own copies) and a link to one.
+    // A prefix folder (Threadbear's own copies) and a link to one.
     assert.equal(resolveCodexBinary(root).command, native);
     const current = path.join(tmp(), 'current');
     fs.symlinkSync(root, current);
@@ -239,10 +239,10 @@ test('handshake: initialize with the opt-outs, then initialized; version and bin
   assert.equal(p.binaryPath, f.bin);
   assert.deepEqual(conn.hello.argv, ['app-server', '--disable', 'memories']);
   assert.equal(conn.hello.env.CODEX_HOME, '/work/codex-home');
-  assert.equal(conn.hello.env.THREADBARE_THREAD_ID, 'tb-thread-1');
-  assert.equal(conn.hello.env.CODEX_INTERNAL_ORIGINATOR_OVERRIDE, 'Threadbare');
+  assert.equal(conn.hello.env.THREADBEAR_THREAD_ID, 'tb-thread-1');
+  assert.equal(conn.hello.env.CODEX_INTERNAL_ORIGINATOR_OVERRIDE, 'Threadbear');
   const params = init.params as { clientInfo: { name: string }; capabilities: { experimentalApi: boolean; optOutNotificationMethods: string[] } };
-  assert.equal(params.clientInfo.name, 'threadbare');
+  assert.equal(params.clientInfo.name, 'threadbear');
   assert.equal(params.capabilities.experimentalApi, true);
   assert.deepEqual(params.capabilities.optOutNotificationMethods, ['turn/diff/updated', 'turn/moderationMetadata', 'remoteControl/status/changed']);
   assert.equal(Object.hasOwn(init, 'jsonrpc'), false, 'no "jsonrpc" field on this wire');

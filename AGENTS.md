@@ -1,6 +1,12 @@
-# Agent guidance for threadbare
+# Agent guidance for threadbear
 
-Threadbare is Mike's own agent app: a TypeScript runner daemon (`runner/`)
+The app was called Threadbare until 27 Oct 2026. Everything was renamed then
+(repo, folders, data dir `~/Library/Application Support/Threadbear`, the
+`com.mikerosoft.threadbear.*` labels and bundle id, `THREADBEAR_*`
+variables). The old `THREADBARE_*` names still work as stand-ins for the
+new ones, and threads still get both, for skills written before.
+
+Threadbear is Mike's own agent app: a TypeScript runner daemon (`runner/`)
 that drives the official Claude Code (and later Codex) CLIs, and a native
 SwiftUI + AppKit Mac app (`app/`) that talks to it over the protocol in
 `docs/protocol.md`. Read `docs/plan.md` and `docs/protocol.md` before changing
@@ -37,12 +43,12 @@ anything.
   thread's Highlights (the pin on the right-hand rail): use the `pin`
   tool, with `show: true` to open it in the side pane, rather than `open`.
 
-## Working on Threadbare from inside Threadbare
+## Working on Threadbear from inside Threadbear
 
-Mike may be running this thread in Threadbare itself, through the installed
-runner (`com.mikerosoft.threadbare.runner`). Then you have the `threadbare`
+Mike may be running this thread in Threadbear itself, through the installed
+runner (`com.mikerosoft.threadbear.runner`). Then you have the `threadbear`
 MCP tools (list, read, start, message, move and delete threads), and
-`THREADBARE_THREAD_ID` is set, so `tb self` and `tb status` show your thread
+`THREADBEAR_THREAD_ID` is set, so `tb self` and `tb status` show your thread
 and the runner. Both are bound to this thread, and neither will delete,
 interrupt, snooze or archive it. The runner puts its own `tb` on your PATH;
 if `tb` isn't found (an older runner, or outside a thread), use
@@ -55,7 +61,7 @@ if `tb` isn't found (an older runner, or outside a thread), use
   delete them when you're done.
 - A thread started in this repo (from the app, `create_thread` or a
   schedule) gets a worktree of its own before its first turn:
-  `<parent>/threadbare-threads/<id8>` on the branch `thread/<id8>`, made
+  `<parent>/threadbear-threads/<id8>` on the branch `thread/<id8>`, made
   from main, with `node_modules` linked to the main checkout's
   (`worktree-setup.sh`). Your system prompt says where. Commit there. When
   the work is done and checked, `tb land` rebases it on main, runs
@@ -77,7 +83,7 @@ if `tb` isn't found (an older runner, or outside a thread), use
 - The live runner runs a release, a snapshot, so editing `runner/` doesn't
   change it. To try a runner change, start `runner/scripts/dev-runner.sh` in
   the background and use the `<dev home>/tb` it prints (a bare `tb` reaches
-  the live runner unless `THREADBARE_HOME` is set in that same command).
+  the live runner unless `THREADBEAR_HOME` is set in that same command).
   Its threads start in `<dev home>/work` on claude-3 and claude-haiku-5-5
   (its `runner.json` defaults), from `tb` or a debug app's composer alike.
   Stop it with the `kill <pid>` it prints, never
@@ -123,11 +129,11 @@ if `tb` isn't found (an older runner, or outside a thread), use
   (below). His installed app updates itself: a few minutes after `app/`
   changes on main it builds that commit in the background
   (`app/stage-update.sh`, from its own clone under
-  `~/Library/Caches/Threadbare/update`, never the working tree) and swaps
+  `~/Library/Caches/Threadbear/update`, never the working tree) and swaps
   it in when he next quits or relaunches, from "Restart to Update" in the
   app menu, or by itself once nothing's typed and he isn't using the app
   (running threads don't hold it up; the runner keeps the turn). So merge an app change to main and tell him it's waiting;
-  `~/Library/Logs/threadbare-update.log` has the build output if it
+  `~/Library/Logs/threadbear-update.log` has the build output if it
   doesn't turn up.
 - `tb show <id>` reads a thread as text (`--tools` for results, each under
   its own call), `tb events <id> --from N --to M` a range of events by seq,
@@ -141,7 +147,7 @@ if `tb` isn't found (an older runner, or outside a thread), use
 
 `app/Tools/dev-app.sh` runs a debug build in a temp bundle, against the
 mock runner or a dev runner, with its window kept behind Mike's. Never use
-`~/Applications/Threadbare.app` for this. Instances belong to the thread
+`~/Applications/Threadbear.app` for this. Instances belong to the thread
 and checkout that started them: without `--id`, a command means your
 newest one, never another thread's, and `stop --all` stops only yours.
 `start` prints the id; pass `--id` to every command once you have more

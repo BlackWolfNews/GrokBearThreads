@@ -494,7 +494,7 @@ test('changing account or folder starts a new native session with a handoff note
   assert.equal(s2.opts.account.id, 'claude-main');
   assert.equal(s2.opts.cwd, other);
   const sent = s2.sent[0].text;
-  assert.match(sent, /^\[Threadbare handoff\]/);
+  assert.match(sent, /^\[Threadbear handoff\]/);
   assert.match(sent, /User: Fix the tests/);
   assert.match(sent, /Assistant: The tests pass now\./);
   assert.ok(sent.endsWith('Now commit it'));
@@ -1225,7 +1225,7 @@ test('patch files give a thread actions; a command action runs in the folder and
   const project = path.join(root, 'app');
   fs.mkdirSync(path.join(project, '.threadbear/patches'), { recursive: true });
   fs.writeFileSync(path.join(project, '.threadbear/patches/tools.ts'), `export default { actions: [
-    { title: "Say hi", run: "echo hi from $PWD; echo thread $THREADBARE_THREAD_ID" },
+    { title: "Say hi", run: "echo hi from $PWD; echo thread $THREADBEAR_THREAD_ID" },
     { title: "Fail", run: "echo bad >&2; exit 2" },
     { title: "Explain", prompt: "Explain this folder." },
   ] };`);
@@ -1397,7 +1397,7 @@ test('hooks don\'t run after an interrupted or failed turn, or a turn the runner
 });
 
 // docs/protocol.md, "Needs you".
-const END_TURN = 'mcp__threadbare__end_turn';
+const END_TURN = 'mcp__threadbear__end_turn';
 
 function endTurnCall(s: ReturnType<typeof makeHarness>['adapter']['last'], itemId: string, input: Record<string, unknown>) {
   s.out({ kind: 'event', event: { type: 'tool.call', itemId, name: END_TURN, kind: 'mcp', title: 'end_turn', input } });

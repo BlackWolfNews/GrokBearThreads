@@ -2,16 +2,18 @@
 # Runs the app against the mock runner, with a temp data folder so nothing
 # touches the real runner. Extra arguments go to the mock runner
 # (for example --filler 16).
-#   THREADBARE_BIN=path/to/Threadbare  use a specific binary (default: the staged app)
+#   THREADBEAR_BIN=path/to/Threadbear  use a specific binary (default: the staged app)
 set -euo pipefail
 
+# THREADBARE_* was the old name for these variables: each stands in for its new name.
+for v in $(compgen -e | grep '^THREADBARE_' || true); do n="THREADBEAR_${v#THREADBARE_}"; [ -n "${!n+x}" ] || export "$n=${!v}"; done
 TOOLS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-APP_DIR="${THREADBARE_APP_DIR:-$HOME/Applications/Threadbare.app}"
-BIN="${THREADBARE_BIN:-$APP_DIR/Contents/MacOS/Threadbare}"
-DATA_DIR="$(mktemp -d "${TMPDIR:-/tmp}/threadbare-mock.XXXXXX")"
+APP_DIR="${THREADBEAR_APP_DIR:-$HOME/Applications/Threadbear.app}"
+BIN="${THREADBEAR_BIN:-$APP_DIR/Contents/MacOS/Threadbear}"
+DATA_DIR="$(mktemp -d "${TMPDIR:-/tmp}/threadbear-mock.XXXXXX")"
 
 if [[ ! -x "$BIN" ]]; then
-  echo "No app at $BIN. Run ./build-app.sh first or set THREADBARE_BIN." >&2
+  echo "No app at $BIN. Run ./build-app.sh first or set THREADBEAR_BIN." >&2
   exit 1
 fi
 if [[ ! -d "$TOOLS_DIR/mock-runner/node_modules" ]]; then

@@ -1,5 +1,5 @@
 // The requests Codex sends to the runner: approvals, questions, MCP
-// elicitations, Threadbare tool calls and the clock. This owns the pending
+// elicitations, Threadbear tool calls and the clock. This owns the pending
 // map, the decision mapping, serverRequest/resolved and the "Always allow"
 // rules. Every request gets an answer: a card, a rule, or a refusal at once.
 import type { Question } from '../../protocol.ts';
@@ -37,7 +37,7 @@ export function refusal(method: string): Reply {
     case 'mcpServer/elicitation/request':
       return { result: { action: 'decline', content: null, _meta: null } };
     default:
-      return { error: { code: -32601, message: `Threadbare doesn't handle ${method} here.` } };
+      return { error: { code: -32601, message: `Threadbear doesn't handle ${method} here.` } };
   }
 }
 
@@ -276,7 +276,7 @@ export class CodexApprovals {
         return this.deps.reply(id, { currentTimeAt: Math.floor(this.deps.now() / 1000) });
       default:
         this.deps.log.info('refused an unknown codex request', { threadId: this.deps.label, method });
-        return this.deps.replyError(id, -32601, `Threadbare doesn't handle ${method}.`);
+        return this.deps.replyError(id, -32601, `Threadbear doesn't handle ${method}.`);
     }
   }
 
@@ -396,7 +396,7 @@ export class CodexApprovals {
   private userInput(id: RequestId, p: ToolRequestUserInputParams, fromChild: boolean): void {
     const all = Array.isArray(p.questions) ? p.questions : [];
     const secret = all.filter((q) => q?.isSecret);
-    for (const q of secret) this.deps.note(`Codex asked for something secret (${q.header || q.question}). Threadbare doesn't take secrets in a card, so it was declined.`);
+    for (const q of secret) this.deps.note(`Codex asked for something secret (${q.header || q.question}). Threadbear doesn't take secrets in a card, so it was declined.`);
     const asked = all.filter((q) => q && !q.isSecret);
     if (!asked.length) {
       this.deps.reply(id, { answers: {} });
@@ -430,8 +430,8 @@ export class CodexApprovals {
   private elicitation(id: RequestId, p: McpServerElicitationRequestParams): void {
     const server = p.serverName || 'An MCP server';
     if (p.mode !== 'form') {
-      const what = p.mode === 'url' && p.url ? `to open ${p.url}` : `for input Threadbare can't show (${p.mode})`;
-      this.deps.note(`${server} asked ${what}${p.message ? `: ${firstLine(p.message)}` : ''}. Threadbare declined it.`);
+      const what = p.mode === 'url' && p.url ? `to open ${p.url}` : `for input Threadbear can't show (${p.mode})`;
+      this.deps.note(`${server} asked ${what}${p.message ? `: ${firstLine(p.message)}` : ''}. Threadbear declined it.`);
       this.deps.reply(id, { action: 'decline', content: null, _meta: null });
       return;
     }

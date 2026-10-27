@@ -37,7 +37,7 @@ export function cliEnv(account: Account, base: NodeJS.ProcessEnv = process.env):
   for (const k of INHERITED_SESSION_VARS) delete env[k];
   if (account.id === 'claude-main') delete env.CLAUDE_CONFIG_DIR;
   else env.CLAUDE_CONFIG_DIR = account.configDir;
-  env.CLAUDE_AGENT_SDK_CLIENT_APP = `threadbare-runner/${RUNNER_VERSION}`;
+  env.CLAUDE_AGENT_SDK_CLIENT_APP = `threadbear-runner/${RUNNER_VERSION}`;
   return env;
 }
 
@@ -82,7 +82,7 @@ export type ClaudeAdapterDeps = {
   registry: ProcessRegistry;
   log: Logger;
   queryFn?: typeof sdkQuery;
-  // In-process MCP servers for a thread's session (the threadbare tools).
+  // In-process MCP servers for a thread's session (the threadbear tools).
   mcpServersFor?: (threadId: string) => Record<string, McpServerConfig>;
   // Tools that ask Mike even in a thread with full access.
   alwaysAsk?: Set<string>;

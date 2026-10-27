@@ -7,7 +7,7 @@ import { makeHarness, tick, tmpDir } from '../helpers/fakes.ts';
 import { Projects, projectMethods } from '../../src/projects.ts';
 import { Librarian, ICON_SOON_MS, ICON_SWEEP_MS } from '../../src/librarian.ts';
 import { findIcon, imageSize, SYMBOLS } from '../../src/project-icons.ts';
-import { buildThreadbareTools } from '../../src/threadbare-mcp.ts';
+import { buildThreadbearTools } from '../../src/threadbear-mcp.ts';
 import { FakeClock } from '../../src/clock.ts';
 import { nullLogger } from '../../src/log.ts';
 import type { GenerateParams, ModelResult } from '../../src/models/index.ts';
@@ -77,8 +77,8 @@ test("finding an icon: the app icon over favicons and logos, never another thing
   assert.equal((await findIcon([ext]))?.path, path.join(ext, 'art/i128.png'));
 
   // A picture named after the project in an icons folder.
-  const named = folder(root, 'threadbare', { 'app/icons/threadbare.png': png(1024, 1024) });
-  assert.equal((await findIcon([named]))?.path, path.join(named, 'app/icons/threadbare.png'));
+  const named = folder(root, 'threadbear', { 'app/icons/threadbear.png': png(1024, 1024) });
+  assert.equal((await findIcon([named]))?.path, path.join(named, 'app/icons/threadbear.png'));
 
   // Under a folder named for something else, it's that thing's icon.
   const other = folder(root, 'cannvas', { 'public/inventory/icon.svg': '<svg viewBox="0 0 512 512"></svg>' });
@@ -185,7 +185,7 @@ test("Mike's and agents' choices stay until set back to automatic", async () => 
 
   // An agent, through update_project.
   const { thread } = s.h.runner.create({ text: 'hi', cwd: app, accountId: 'claude-3' });
-  const tools = buildThreadbareTools(s.h.runner, thread.id, Date.now, undefined, s.projects);
+  const tools = buildThreadbearTools(s.h.runner, thread.id, Date.now, undefined, s.projects);
   const update = tools.find((t) => t.name === 'update_project')!;
   await update.handler({ project: 'Tandem', icon: 'film' } as never, {} as never);
   assert.deepEqual([s.projects.list()[0].icon?.symbol, s.projects.list()[0].icon?.by], ['film', 'agent']);

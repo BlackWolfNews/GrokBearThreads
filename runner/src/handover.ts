@@ -19,7 +19,7 @@ import { ErrorCode, RpcError } from './protocol.ts';
 import type { ThreadSummary } from './protocol.ts';
 import type { Notification, Runner } from './runner.ts';
 import type { UsageReading } from './usage.ts';
-import type { ScheduleControl, ThreadControl } from './threadbare-mcp.ts';
+import type { ScheduleControl, ThreadControl } from './threadbear-mcp.ts';
 import type { Scheduler } from './schedules.ts';
 import { processInfo } from './proc.ts';
 
@@ -429,7 +429,7 @@ export function primaryElsewhere(link: PrimaryLink, runner: Pick<Runner, 'has'>)
   };
 }
 
-// What the agent tools drive (threadbare-mcp.ts's ThreadControl): this
+// What the agent tools drive (threadbear-mcp.ts's ThreadControl): this
 // runner's own threads directly, the rest wherever they are.
 export class ThreadRouter implements ThreadControl {
   private runner: Runner;

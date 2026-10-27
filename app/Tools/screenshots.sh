@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Saves the design screenshots (Sources/Threadbare/Screenshots.swift) from a
+# Saves the design screenshots (Sources/Threadbear/Screenshots.swift) from a
 # debug build running against the mock runner's demo threads. Nothing touches
 # the real runner, the staged app in ~/Applications or its settings (the
 # build gets a bundle id of its own, removed afterwards), and the window
@@ -11,6 +11,8 @@
 #   --appearance   light or dark, whatever the Mac is set to
 set -euo pipefail
 
+# THREADBARE_* was the old name for these variables: each stands in for its new name.
+for v in $(compgen -e | grep '^THREADBARE_' || true); do n="THREADBEAR_${v#THREADBARE_}"; [ -n "${!n+x}" ] || export "$n=${!v}"; done
 TOOLS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 APP_ROOT="$(cd "$TOOLS_DIR/.." && pwd)"
 usage() { awk 'NR > 1 && /^#/ { sub(/^# ?/, ""); print; next } NR > 1 { exit }' "$0"; }
@@ -34,7 +36,7 @@ while [ $# -gt 0 ]; do
   shift
 done
 [ -n "$OUT_DIR" ] || { usage >&2; exit 2; }
-WORK="$(mktemp -d "${TMPDIR:-/tmp}/threadbare-shots.XXXXXX")"
+WORK="$(mktemp -d "${TMPDIR:-/tmp}/threadbear-shots.XXXXXX")"
 DATA_DIR="$WORK/data"
 mkdir -p "$DATA_DIR" "$OUT_DIR"
 
@@ -46,14 +48,14 @@ fi
 # temp folder rather than over the app Mike is using.
 # Its output (codesign's "replacing existing signature" and the like) goes
 # to a log, shown only if the build fails.
-THREADBARE_APP_DIR="$WORK/Threadbare.app" THREADBARE_BUILD_CONFIGURATION=debug \
+THREADBEAR_APP_DIR="$WORK/Threadbear.app" THREADBEAR_BUILD_CONFIGURATION=debug \
   bash "$APP_ROOT/build-app.sh" >"$WORK/build.log" 2>&1 || { tail -n 40 "$WORK/build.log" >&2; exit 1; }
 # Its own bundle id, so its own settings: with the installed app's id it
 # read Mike's saved sidebar width and account, and left the shots' window
 # size in his preferences. Re-signed ad hoc, since the plist is sealed.
-SHOTS_ID="com.mikerosoft.threadbare.shots.$$"
-/usr/libexec/PlistBuddy -c "Set :CFBundleIdentifier $SHOTS_ID" "$WORK/Threadbare.app/Contents/Info.plist"
-codesign --force --sign - "$WORK/Threadbare.app" >/dev/null 2>&1
+SHOTS_ID="com.mikerosoft.threadbear.shots.$$"
+/usr/libexec/PlistBuddy -c "Set :CFBundleIdentifier $SHOTS_ID" "$WORK/Threadbear.app/Contents/Info.plist"
+codesign --force --sign - "$WORK/Threadbear.app" >/dev/null 2>&1
 
 # Only the demo threads: private fixtures (real transcripts, tb exports)
 # must never end up in screenshots that go on GitHub.
@@ -75,5 +77,5 @@ done
 
 # AppKit's ApplePersistenceIgnoreState line on every run is noise; anything
 # else the app says still shows.
-"$WORK/Threadbare.app/Contents/MacOS/Threadbare" --data-dir "$DATA_DIR" --screenshots "$OUT_DIR" ${APP_ARGS[@]+"${APP_ARGS[@]}"} \
+"$WORK/Threadbear.app/Contents/MacOS/Threadbear" --data-dir "$DATA_DIR" --screenshots "$OUT_DIR" ${APP_ARGS[@]+"${APP_ARGS[@]}"} \
   2> >(grep -v --line-buffered 'ApplePersistenceIgnoreState' >&2)

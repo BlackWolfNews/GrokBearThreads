@@ -69,7 +69,7 @@ import { readSubagentTranscript } from './adapters/claude/subagents.ts';
 import { fileContext } from './adapters/claude/normalize.ts';
 import type { Models } from './models/index.ts';
 import { emptyHighlights, observe as observeHighlights, pinItem, remove as removeHighlight, unpin as unpinHighlight, upsert as upsertHighlight, view as highlightsView, absolute, type ThreadHighlights } from './highlights.ts';
-import { SERVER_NAME, approvalTitle } from './threadbare-mcp.ts';
+import { SERVER_NAME, approvalTitle } from './threadbear-mcp.ts';
 import { END_TURN_TOOL, needsFromText, needsFromTool } from './needs.ts';
 import type { Needs } from './needs.ts';
 import {
@@ -3897,13 +3897,13 @@ export class Runner {
     const fromAccount = this.accounts.get(from.fromAccountId)?.title ?? from.fromAccountId;
     if (from.lost) {
       return (
-        `[Threadbare handoff] The earlier session couldn't be found, so here's where the thread got to. This is a fresh session in ${rec.cwd}. ` +
+        `[Threadbear handoff] The earlier session couldn't be found, so here's where the thread got to. This is a fresh session in ${rec.cwd}. ` +
         `Recent messages, for context:\n\n${lines.join('\n\n') || '(none)'}\n\n[End of handoff. The new message follows.]\n\n`
       );
     }
     if (from.rebuilt) {
       return (
-        `[Threadbare handoff] This conversation's earlier session couldn't be found, so this is a fresh session in ${rec.cwd}. ` +
+        `[Threadbear handoff] This conversation's earlier session couldn't be found, so this is a fresh session in ${rec.cwd}. ` +
         `Recent messages, for context:\n\n${lines.join('\n\n') || '(none)'}\n\n[End of handoff. The new message follows.]\n\n`
       );
     }
@@ -3914,7 +3914,7 @@ export class Runner {
           ? `from ${from.fromCwd} to ${rec.cwd}`
           : `from the ${fromAccount} login to ${account.title}`;
     return (
-      `[Threadbare handoff] This conversation moved ${moved}, so this is a fresh session. ` +
+      `[Threadbear handoff] This conversation moved ${moved}, so this is a fresh session. ` +
       `Recent messages, for context:\n\n${lines.join('\n\n') || '(none)'}\n\n[End of handoff. The new message follows.]\n\n`
     );
   }
@@ -4009,7 +4009,7 @@ export function titleFrom(text: string): string {
 // do more than the rules: without them Haiku drifts into Title Case and
 // sometimes describes the naming job itself.
 const TITLE_PROMPT = [
-  'You name threads in Threadbare, an app for running AI agents, mostly for coding.',
+  'You name threads in Threadbear, an app for running AI agents, mostly for coding.',
   'Reply with the title only: 2 to 6 words saying what the thread is about.',
   'Sentence case: a capital for the first word and for names only. No quotes, no full stop, no dashes, no emoji.',
   'Never mention titles, threads or the person asking.',

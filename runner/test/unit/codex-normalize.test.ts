@@ -336,7 +336,7 @@ test('mcp-image: an MCP image block and an image resource saved, a dynamic data:
   assert.equal(mr.images.length, 2);
   assert.ok(mr.images.every((i: any) => path.dirname(i.path) === e.media && i.width === 6 && i.height === 3));
   assert.match(path.basename(mr.images[0].path), /^computer-use_screenshot-[0-9a-f]{10}\.png$/);
-  const dyn = evs.find((x) => x.type === 'tool.call' && x.name === 'mcp__threadbare__read_thread');
+  const dyn = evs.find((x) => x.type === 'tool.call' && x.name === 'mcp__threadbear__read_thread');
   assert.equal(dyn.title, 'Read this thread');
   const dr = evs.find((x) => x.type === 'tool.result' && x.itemId === dyn.itemId);
   assert.equal(dr.images.length, 1);
@@ -389,11 +389,11 @@ test('reasoning: a second summary part is joined by a blank line', () => {
   assert.equal(events(outs)[0].text, '**One**\n\nfirst\n\n**Two**\n\nsecond');
 });
 
-test('dynamic-tools: a Threadbare tool call shows as mcp__threadbare__<tool>, before and after a resume', () => {
+test('dynamic-tools: a Threadbear tool call shows as mcp__threadbear__<tool>, before and after a resume', () => {
   const { outs } = run('dynamic-tools');
   const evs = events(outs);
   const calls = evs.filter((x) => x.type === 'tool.call' && x.name.startsWith('mcp__'));
-  assert.deepEqual(calls.map((c) => [c.name, c.kind]), [['mcp__threadbare__secret_word', 'mcp'], ['mcp__threadbare__secret_word', 'mcp']]);
+  assert.deepEqual(calls.map((c) => [c.name, c.kind]), [['mcp__threadbear__secret_word', 'mcp'], ['mcp__threadbear__secret_word', 'mcp']]);
   const texts = calls.map((c) => evs.find((x) => x.type === 'tool.result' && x.itemId === c.itemId)).map((r) => [r.ok, r.text]);
   assert.deepEqual(texts, [[true, 'The secret word is marmalade.'], [true, 'The secret word is quince.']]);
 });

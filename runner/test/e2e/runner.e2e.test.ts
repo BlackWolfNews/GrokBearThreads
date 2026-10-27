@@ -36,12 +36,12 @@ async function startRunner(): Promise<void> {
     cwd: RUNNER_DIR,
     env: {
       ...process.env,
-      THREADBARE_HOME: home,
-      THREADBARE_PORT: '0',
-      THREADBARE_LOG: path.join(root, 'runner.log'),
-      THREADBARE_IDLE_MS: String(IDLE_MS),
-      THREADBARE_DEBUG: '1',
-      THREADBARE_CLI_UPDATES: 'off',
+      THREADBEAR_HOME: home,
+      THREADBEAR_PORT: '0',
+      THREADBEAR_LOG: path.join(root, 'runner.log'),
+      THREADBEAR_IDLE_MS: String(IDLE_MS),
+      THREADBEAR_DEBUG: '1',
+      THREADBEAR_CLI_UPDATES: 'off',
     },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
@@ -134,7 +134,7 @@ describe('runner end to end (real Claude CLI)', { concurrency: false }, () => {
     fs.writeFileSync(path.join(cwd, 'note.txt'), 'alpha\nbeta\ngamma\n');
     fs.writeFileSync(path.join(cwd, 'red.png'), makePng(64, 48, [220, 20, 20]));
     // Never the real data dir.
-    assert.ok(!home.includes('Application Support/Threadbare'));
+    assert.ok(!home.includes('Application Support/Threadbear'));
     await startRunner();
   });
 
@@ -152,13 +152,13 @@ describe('runner end to end (real Claude CLI)', { concurrency: false }, () => {
   });
 
   test('create a thread and stream a reply', async () => {
-    main = await createThread({ text: 'Reply with exactly these words and nothing else: hello from threadbare' });
+    main = await createThread({ text: 'Reply with exactly these words and nothing else: hello from threadbear' });
     const done = await turnDone(main.id, main.turnId);
     assert.equal(done.outcome, 'completed', done.error);
     assert.ok(done.costUsd > 0);
     const evs = turnEvents(main.id, main.turnId);
     const text = evs.find((e) => e.type === 'assistant.text');
-    assert.match(text.text.toLowerCase(), /hello from threadbare/);
+    assert.match(text.text.toLowerCase(), /hello from threadbear/);
     const deltas = evs.filter((e) => e.type === 'assistant.text.delta' && e.itemId === text.itemId);
     assert.ok(deltas.length >= 1, 'streamed at least one delta');
     assert.ok(text.text.startsWith(deltas.map((d) => d.text).join('').slice(0, 5)));
@@ -170,7 +170,7 @@ describe('runner end to end (real Claude CLI)', { concurrency: false }, () => {
     assert.ok(t.nativeSessionId);
     assert.ok(t.contextTokens > 0);
     assert.equal(t.model, MODEL);
-    assert.match(t.preview, /hello from threadbare/i);
+    assert.match(t.preview, /hello from threadbear/i);
     // First line of the first message, cut to 60 characters.
     assert.equal(t.title, 'Reply with exactly these words and nothing else: hello from');
     // runner.json names the port the runner is listening on, for the app.
@@ -330,9 +330,9 @@ describe('runner end to end (real Claude CLI)', { concurrency: false }, () => {
   test('tb CLI: new --wait, list, search and archive', async () => {
     const tb = (args: string[]) =>
       new Promise<{ code: number; out: string }>((resolve) => {
-        // Only THREADBARE_HOME: tb finds the port in runner.json.
-        const env: NodeJS.ProcessEnv = { ...process.env, THREADBARE_HOME: home };
-        delete env.THREADBARE_PORT;
+        // Only THREADBEAR_HOME: tb finds the port in runner.json.
+        const env: NodeJS.ProcessEnv = { ...process.env, THREADBEAR_HOME: home };
+        delete env.THREADBEAR_PORT;
         execFile(process.execPath, [path.join(RUNNER_DIR, 'bin', 'tb'), ...args], { env, timeout: 120_000 }, (err, stdout, stderr) =>
           resolve({ code: err ? Number((err as { code?: number }).code ?? 1) : 0, out: stdout + stderr }),
         );

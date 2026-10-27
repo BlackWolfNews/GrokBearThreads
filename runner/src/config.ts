@@ -32,8 +32,8 @@ export type CliUpdatesConfig = {
 export const DEFAULT_CLI_UPDATES: CliUpdatesConfig = { claude: 'auto', codex: 'auto', checkMinutes: 60, keepCodexVersions: 2 };
 
 // Everything that differs between the real install and a test lives here, so
-// tests can point THREADBARE_HOME and THREADBARE_PORT somewhere harmless and
-// never touch ~/Library/Application Support/Threadbare.
+// tests can point THREADBEAR_HOME and THREADBEAR_PORT somewhere harmless and
+// never touch ~/Library/Application Support/Threadbear.
 export type Config = {
   home: string; // data dir
   port: number;
@@ -63,7 +63,7 @@ export type Config = {
   claudeMainJson: string;
   tokenStatsAccountsDir: string;
   // A Codex binary set by hand, used as is and never updated. Unset means
-  // Threadbare's own copy (<home>/tools/codex/current), or until there is
+  // Threadbear's own copy (<home>/tools/codex/current), or until there is
   // one the codex next to the runner's Node; never ~/.local/bin/codex.
   codexPath?: string;
   codexArgs: string[]; // extra `codex app-server` arguments
@@ -76,14 +76,14 @@ export type Config = {
   pools?: unknown[];
   // A runner on a release builds and restarts onto main by itself
   // (src/update.ts). Off with followMain: false in runner.json or
-  // THREADBARE_FOLLOW_MAIN=0.
+  // THREADBEAR_FOLLOW_MAIN=0.
   followMain: boolean;
   // The runner's own model calls (src/models/): a daily cap in dollars (0
   // turns them off) and folders whose threads are never sent.
   models: { dailyBudgetUsd: number; privateFolders: string[] };
   // The Convex mirror (src/sync.ts): the project's URL, whether it's on,
   // the name the phone shows for this runner and its id (made once).
-  // THREADBARE_SYNC=off turns it off for tests and dev runners.
+  // THREADBEAR_SYNC=off turns it off for tests and dev runners.
   sync: { enabled: boolean; url?: string; name?: string; runnerId?: string };
 };
 
@@ -117,7 +117,7 @@ export type RunnerJson = {
 };
 
 export function defaultHome(): string {
-  return path.join(os.homedir(), 'Library', 'Application Support', 'Threadbare');
+  return path.join(os.homedir(), 'Library', 'Application Support', 'Threadbear');
 }
 
 export function expandHome(p: string): string {
@@ -139,7 +139,7 @@ export function writeRunnerJson(home: string, data: RunnerJson): void {
 }
 
 // The app finds the runner through runner.json, so it always names the port
-// the runner is actually listening on (THREADBARE_PORT and port 0 included),
+// the runner is actually listening on (THREADBEAR_PORT and port 0 included),
 // and shows the default folder so it's easy to change.
 export function recordListening(home: string, port: number, defaultCwd: string): void {
   const json = readRunnerJson(home);
@@ -149,16 +149,30 @@ export function recordListening(home: string, port: number, defaultCwd: string):
   writeRunnerJson(home, json);
 }
 
+// The app was called Threadbare until 27 Oct 2026, and its variables were
+// THREADBARE_*. Threads, skills and launchd jobs from before then may still
+// set the old names, so each one stands in for its new name when that
+// isn't set. On import, so every entry point (the runner, tb) gets it.
+export function adoptOldNames(env: NodeJS.ProcessEnv): void {
+  for (const [k, v] of Object.entries(env)) {
+    if (!k.startsWith('THREADBARE_') || v === undefined) continue;
+    const name = 'THREADBEAR_' + k.slice('THREADBARE_'.length);
+    if (env[name] === undefined) env[name] = v;
+  }
+}
+adoptOldNames(process.env);
+
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
-  // THREADBARE_DATA_DIR is the name the Mac app uses for the same override.
-  const home = path.resolve(expandHome(env.THREADBARE_HOME || env.THREADBARE_DATA_DIR || defaultHome()));
+  adoptOldNames(env);
+  // THREADBEAR_DATA_DIR is the name the Mac app uses for the same override.
+  const home = path.resolve(expandHome(env.THREADBEAR_HOME || env.THREADBEAR_DATA_DIR || defaultHome()));
   const json = readRunnerJson(home);
-  const port = Number(env.THREADBARE_PORT || json.port || DEFAULT_PORT);
-  const idleMs = env.THREADBARE_IDLE_MS
-    ? Number(env.THREADBARE_IDLE_MS)
+  const port = Number(env.THREADBEAR_PORT || json.port || DEFAULT_PORT);
+  const idleMs = env.THREADBEAR_IDLE_MS
+    ? Number(env.THREADBEAR_IDLE_MS)
     : (json.idleMinutes ?? 30) * 60_000;
-  const maxLive = Number(env.THREADBARE_MAX_LIVE || json.maxLiveCLIs || DEFAULT_MAX_LIVE);
-  const codexPath = nonEmpty(env.THREADBARE_CODEX_PATH) ?? nonEmpty(json.codexPath);
+  const maxLive = Number(env.THREADBEAR_MAX_LIVE || json.maxLiveCLIs || DEFAULT_MAX_LIVE);
+  const codexPath = nonEmpty(env.THREADBEAR_CODEX_PATH) ?? nonEmpty(json.codexPath);
   const models = providerMap(json.defaults?.models, nonEmpty);
   const efforts = providerMap(json.defaults?.efforts, (v) => (isEffortLevel(v) ? v : undefined));
   return {
@@ -166,8 +180,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     port,
     host: '127.0.0.1',
     maxLive: Number.isFinite(maxLive) && maxLive >= 1 ? Math.floor(maxLive) : DEFAULT_MAX_LIVE,
-    logFile: expandHome(env.THREADBARE_LOG || path.join(os.homedir(), 'Library', 'Logs', 'threadbare-runner.log')),
-    claudePath: expandHome(env.THREADBARE_CLAUDE_PATH || json.claudePath || '~/.local/bin/claude'),
+    logFile: expandHome(env.THREADBEAR_LOG || path.join(os.homedir(), 'Library', 'Logs', 'threadbear-runner.log')),
+    claudePath: expandHome(env.THREADBEAR_CLAUDE_PATH || json.claudePath || '~/.local/bin/claude'),
     idleMs,
     defaults: {
       cwd: expandHome(json.defaults?.cwd || DEFAULT_CWD),
@@ -177,31 +191,31 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
       ...(models ? { models } : {}),
       ...(efforts ? { efforts } : {}),
     },
-    claudeMainDir: expandHome(env.THREADBARE_CLAUDE_MAIN_DIR || '~/.claude'),
-    claudeMainJson: expandHome(env.THREADBARE_CLAUDE_MAIN_JSON || '~/.claude.json'),
+    claudeMainDir: expandHome(env.THREADBEAR_CLAUDE_MAIN_DIR || '~/.claude'),
+    claudeMainJson: expandHome(env.THREADBEAR_CLAUDE_MAIN_JSON || '~/.claude.json'),
     tokenStatsAccountsDir: expandHome(
-      env.THREADBARE_ACCOUNTS_DIR || '~/Library/Application Support/Token Stats/Accounts',
+      env.THREADBEAR_ACCOUNTS_DIR || '~/Library/Application Support/Token Stats/Accounts',
     ),
-    followMain: env.THREADBARE_FOLLOW_MAIN ? env.THREADBARE_FOLLOW_MAIN !== '0' : json.followMain !== false,
+    followMain: env.THREADBEAR_FOLLOW_MAIN ? env.THREADBEAR_FOLLOW_MAIN !== '0' : json.followMain !== false,
     models: modelSettingsFrom(json),
     ...(codexPath ? { codexPath: expandHome(codexPath) } : {}),
     codexArgs: Array.isArray(json.codexArgs) ? json.codexArgs.filter((a): a is string => typeof a === 'string') : [],
-    codexMainDir: expandHome(env.THREADBARE_CODEX_MAIN_DIR || '~/.codex'),
+    codexMainDir: expandHome(env.THREADBEAR_CODEX_MAIN_DIR || '~/.codex'),
     tokenStatsLimitsFile: expandHome(
-      env.THREADBARE_TOKEN_STATS_LIMITS || '~/Library/Application Support/Token Stats/limits.json',
+      env.THREADBEAR_TOKEN_STATS_LIMITS || '~/Library/Application Support/Token Stats/limits.json',
     ),
-    cliUpdates: cliUpdatesConfig(json.cliUpdates, env.THREADBARE_CLI_UPDATES),
+    cliUpdates: cliUpdatesConfig(json.cliUpdates, env.THREADBEAR_CLI_UPDATES),
     accountNotes: stringMap(json.accountNotes) ?? { ...DEFAULT_ACCOUNT_NOTES },
     ...(Array.isArray(json.pools) && json.pools.length ? { pools: json.pools } : {}),
     sync: syncConfig(json.sync, env),
   };
 }
 
-// THREADBARE_SYNC=off wins over runner.json; THREADBARE_SYNC_URL points a
+// THREADBEAR_SYNC=off wins over runner.json; THREADBEAR_SYNC_URL points a
 // test or dev runner at its own deployment.
 function syncConfig(raw: RunnerJson['sync'], env: NodeJS.ProcessEnv): Config['sync'] {
-  const url = nonEmpty(env.THREADBARE_SYNC_URL) ?? nonEmpty(raw?.url);
-  const out: Config['sync'] = { enabled: env.THREADBARE_SYNC === 'off' ? false : raw?.enabled !== false };
+  const url = nonEmpty(env.THREADBEAR_SYNC_URL) ?? nonEmpty(raw?.url);
+  const out: Config['sync'] = { enabled: env.THREADBEAR_SYNC === 'off' ? false : raw?.enabled !== false };
   if (url) out.url = url;
   const name = nonEmpty(raw?.name);
   if (name) out.name = name;
@@ -231,7 +245,7 @@ function stringMap(raw: unknown): Record<string, string> | undefined {
   return Object.fromEntries(Object.entries(raw).filter((e): e is [string, string] => typeof e[1] === 'string'));
 }
 
-// THREADBARE_CLI_UPDATES=off turns both off whatever runner.json says: tests
+// THREADBEAR_CLI_UPDATES=off turns both off whatever runner.json says: tests
 // and dev runners must never install a CLI.
 function cliUpdatesConfig(raw: Partial<CliUpdatesConfig> | undefined, envValue: string | undefined): CliUpdatesConfig {
   const policy = (v: unknown, fallback: CliPolicy): CliPolicy =>
@@ -259,11 +273,11 @@ export function modelSettingsFrom(json: RunnerJson): Config['models'] {
   };
 }
 
-// Where a client (tb) finds the runner. THREADBARE_PORT=0 tells a runner to
+// Where a client (tb) finds the runner. THREADBEAR_PORT=0 tells a runner to
 // take any free port, and the CLIs a dev or sandbox runner starts inherit
 // it, so then the port it got, in runner.json, is the one to use.
 export function runnerUrl(cfg: Config, env: NodeJS.ProcessEnv = process.env): string {
-  if (env.THREADBARE_URL) return env.THREADBARE_URL;
+  if (env.THREADBEAR_URL) return env.THREADBEAR_URL;
   const port = cfg.port || readRunnerJson(cfg.home).port || DEFAULT_PORT;
   return `ws://127.0.0.1:${port}/rpc`;
 }
