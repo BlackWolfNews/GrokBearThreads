@@ -265,7 +265,8 @@ test('clis.* call CliUpdates and return at once; without it they are -32601; cli
   await assert.rejects(c.call('clis.setPolicy', { provider: 'codex', policy: 'sometimes' }), badParams);
   await assert.rejects(c.call('clis.check', { provider: 3 }), badParams);
   changed(status);
-  await new Promise((r) => setTimeout(r, 50));
+  // Wait for it, not a fixed time: the whole suite runs at once.
+  for (let i = 0; i < 200 && !got.some((n) => n.method === 'clis.updated'); i++) await new Promise((r) => setTimeout(r, 10));
   assert.deepEqual(got.find((n) => n.method === 'clis.updated')?.params, { clis: status });
   c.close();
   await server.close();
