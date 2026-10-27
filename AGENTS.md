@@ -22,8 +22,10 @@ anything.
 - UI copy: plain words, no eyebrow or kicker labels, no em dashes.
 - Transcript files and fixtures made from real sessions are private: keep them
   out of git (`.fixtures/` is ignored).
-- Mike's own repo: commit to main once tests pass. Several threads share
-  this checkout, so stage your own paths by name, never `git add -A`.
+- Mike's own repo: work goes to main once tests pass. A thread started in
+  this repo has a worktree of its own and lands with `tb land` (below).
+  Anywhere several threads share a checkout (the main one, a worktree made
+  by hand), stage your own paths by name, never `git add -A`.
 - A project can give Threadbear threads panels and action chips through
   `.threadbear/patches/*.ts` (docs/protocol.md, "Patches"). When Mike
   asks for a button or a panel for a project, write one of those there.
@@ -44,9 +46,27 @@ if `tb` isn't found (an older runner, or outside a thread), use
   for a change outside `runner/`). Nothing in it touches the live runner.
   A failure prints what failed and keeps the logs; it says where, so
   delete them when you're done.
-- Another thread may be editing this checkout. For a worktree of your own:
-  `git worktree add --detach <dir> main` (main is checked out here), then
-  `npm ci` in its `runner/` and `app/Tools/mock-runner/`.
+- A thread started in this repo (from the app, `create_thread` or a
+  schedule) gets a worktree of its own before its first turn:
+  `<parent>/threadbare-threads/<id8>` on the branch `thread/<id8>`, made
+  from main, with `node_modules` linked to the main checkout's
+  (`worktree-setup.sh`). Your system prompt says where. Commit there. When
+  the work is done and checked, `tb land` rebases it on main, runs
+  `./check.sh --quick` and fast-forwards main in the main checkout
+  (`--dry-run` first if you like; it never pushes). Mike's Land chip does
+  the same. If it refuses, it says why and what to fix: commit your
+  changes, sort out the conflicting files, fix the check, or wait for
+  whoever has uncommitted changes in main's checkout. You can carry on
+  after landing; the next `tb land` lands only what's new. Changing a
+  `package.json`? Replace the link first: `rm runner/node_modules` (no
+  trailing slash, so only the link goes), then `npm ci` there. The
+  worktree is removed when the thread is archived with everything landed.
+  docs/thread-worktrees.md has the details.
+- A thread started somewhere else (like `~/dev/me/misc`) still makes its
+  own worktree by hand, as another thread may be editing the main
+  checkout: `git worktree add --detach <dir> main` (main is checked out in
+  the main checkout), then `npm ci` in its `runner/` and
+  `app/Tools/mock-runner/`, and merges to main itself.
 - The live runner runs a release, a snapshot, so editing `runner/` doesn't
   change it. To try a runner change, start `runner/scripts/dev-runner.sh` in
   the background and use the `<dev home>/tb` it prints (a bare `tb` reaches
@@ -56,7 +76,8 @@ if `tb` isn't found (an older runner, or outside a thread), use
   Stop it with the `kill <pid>` it prints, never
   `pkill`, and before you deploy or end your turn: the live runner's restart
   waits for it. Its temp data dir goes with it (`--keep` keeps it).
-- To ship a runner change, merge it to main. The live runner follows main
+- To ship a runner change, merge it to main (`tb land` from a thread's
+  own worktree). The live runner follows main
   by itself: within about five minutes it builds a release of main
   (`src/update.ts`, the deploy script's steps from its own clone) and
   restarts onto it once no thread is busy, which ends your turn if it's

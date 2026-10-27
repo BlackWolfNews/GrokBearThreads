@@ -335,6 +335,7 @@ export class RpcServer {
         return remote.search(query, limit ?? 50).then((more) => ({ threads: mergeSummaries(local, more).slice(0, limit ?? 50) }));
       }
       case 'threads.create': {
+        if (p.worktree !== undefined && typeof p.worktree !== 'boolean') throw bad('worktree must be a boolean');
         const res = r.create({
           text: optString(p, 'text') ?? '',
           images: optImages(p),
@@ -344,6 +345,7 @@ export class RpcServer {
           effort: optEffort(p),
           permissionMode: optMode(p),
           title: optString(p, 'title'),
+          ...(p.worktree === false ? { worktree: false } : {}),
         });
         return { thread: res.thread, turnId: res.turnId };
       }

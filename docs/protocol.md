@@ -157,6 +157,16 @@ type ThreadSummary = {
                         // Absent when it has started none
   projects?: ThreadProject[] // the projects the thread is in (see Projects),
                         // oldest first. Absent when it's in none
+  worktree?: ThreadWorktree // the thread has a git worktree of its own
+                        // (see Worktrees). Absent when it doesn't, or once
+                        // it was removed
+}
+
+// A thread's own worktree, as its summary shows it (see Worktrees).
+type ThreadWorktree = {
+  branch: string        // "thread/ab12cd34"
+  mainCheckout: string  // the checkout with main checked out, where it lands
+  path: string          // the worktree's root folder
 }
 
 // A project a thread is in, as its summary shows it.
@@ -490,7 +500,7 @@ Persisted event types (stored in `events.ndjson`, returned by `threads.events`):
 | `asks.ticked` | `asksSeq`, `ticked: number[]` (indexes into that turn's `asks`, the whole set now ticked). Outside any turn. The latest one for an `asksSeq` is that card's ticks |
 | `system.note` | `text` (e.g. "Resumed session", "Compacted the conversation", "Patch reseed added: action Reseed dev DB.") |
 | `error` | `message` |
-| `action.run` | `actionId`, `patch`, `title`, `command`, `ok`, `exitCode?`, `text` (what it printed, truncated to 64 KB), `truncated`, `durationMs`, `trigger?` (`"turn.end"` when a hook ran it; absent for a chip or `tb run`). A command that `actions.run` or a hook ran; outside any turn unless one was running, in which case it carries that `turnId` |
+| `action.run` | `actionId`, `patch`, `title`, `command`, `ok`, `exitCode?`, `text` (what it printed, truncated to 64 KB), `truncated`, `durationMs`, `trigger?` (`"turn.end"` when a hook ran it, `"worktree.setup"` for a new worktree's `setup` (see Worktrees); absent for a chip or `tb run`). A command that `actions.run` or a hook ran; outside any turn unless one was running, in which case it carries that `turnId` |
 
 Transient events are only sent to subscribers, never persisted, and carry
 `seq` of the last persisted event (they don't consume a number):
@@ -511,7 +521,7 @@ replaces whatever the deltas built up.
 | `hello` | `{ client: string, version: string }` | `{ runnerVersion, protocol: 1, accounts: Account[], defaults: { cwd, accountId, model?, models?: { claude?, codex? }, efforts?: { claude?: EffortLevel, codex?: EffortLevel } }, clis?: CliStatus[], updates?: RunnerUpdates }`. `updates` is under Runner updates. `defaults.accountId` is the account a `threads.create` with no `accountId` uses: the one with the most room among the last-used account's provider (skipping blocked ones, ones under 10% and ones with a note), worked out again as usage changes; a client keeps its own copy of the rule rather than asking again. `defaults.models[provider]` is the model a new thread on that provider gets when it names none (`runner.json`'s `defaults.models`; a dev runner sets the cheapest); `defaults.model` is the same for Claude, kept for older apps. Absent means the account's own default (`accounts[].defaultModel` names it, when known). `defaults.efforts[provider]` likewise for effort; absent means the model's own level. `runnerVersion` is `<package version>+<release id>` when the runner runs from a release, else `<package version>+source` |
 | `threads.list` | `{ include?: ("inbox" \| "snoozed" \| "archived")[] }` (default `["inbox"]`) | `{ threads: ThreadSummary[] }` newest activity first |
 | `threads.search` | `{ query: string, limit?: number }` | `{ threads: ThreadSummary[] }` matches title and preview across all threads, archived included |
-| `threads.create` | `{ text: string, images?: ImageRef[], cwd?: string, accountId?: string, model?: string, effort?: EffortLevel, permissionMode?: "full" \| "ask", title?: string }` | `{ thread: ThreadSummary }` (the first turn starts straight away). The thread's `provider` is its account's. With no `model`, the thread gets `defaults.models[provider]` from `hello`, or `defaults.model` for Claude, or else the account's own default. With no `effort`, `defaults.efforts[provider]`, or else the model's own level. See "Models and effort across providers" |
+| `threads.create` | `{ text: string, images?: ImageRef[], cwd?: string, accountId?: string, model?: string, effort?: EffortLevel, permissionMode?: "full" \| "ask", title?: string, worktree?: boolean }` | `{ thread: ThreadSummary }` (the first turn starts straight away). In a repo that asks for worktrees (see Worktrees) the thread gets one of its own before its first turn; `worktree: false` starts it in the folder as it is. The thread's `provider` is its account's. With no `model`, the thread gets `defaults.models[provider]` from `hello`, or `defaults.model` for Claude, or else the account's own default. With no `effort`, `defaults.efforts[provider]`, or else the model's own level. See "Models and effort across providers" |
 | `threads.send` | `{ threadId, text, images?: ImageRef[] }` | `{ turnId }`. If a turn is running and its CLI is live, the message goes into that turn straight away (a `user.message` under the running `turnId`, which is returned): the agent takes it at its next step, or right after its reply if that was already finishing, and the turn doesn't complete until it has been answered. Otherwise (the CLI is still starting or leaving, messages are already waiting, a move or fresh CLI is due on the next turn, Stop has been pressed, or the turn is only an approval for a background subagent) the message is queued and starts its own turn when the running one ends |
 | `threads.interrupt` | `{ threadId }` | `{}` |
 | `threads.update` | `{ threadId, title?, cwd?, accountId?, model?: string \| null, effort?: EffortLevel \| null, permissionMode?, snoozedUntil?: string \| null, archived?: boolean }` | `{ thread: ThreadSummary }`. `snoozedUntil` is an ISO time, or `"restart"` for until the runner next starts (any start: a planned restart, a crash, a reboot), when the thread wakes before the restart's resume is sent, so a thread put away while its own restart waited is still carried on. Snoozing or archiving releases the CLI (and archives a Codex thread in Codex too). Changing account or cwd takes effect on the next turn. A model or effort change reaches a live Claude CLI straight away (`null` goes back to the default); on Codex it applies from the next turn, with a `system.note` if a turn is running. A folder change on the same Claude account copies the native session's transcript to the new folder and resumes it; on the same Codex account the session carries on in the new folder from the next turn. Otherwise (or if that fails) it starts a new native session with a short handoff note. An account of the other provider switches `provider`, resets `model` and `effort` to that provider's defaults unless the same call sets them, and clears the thread's "Always allow" rules. `model` and `effort` are checked as in "Models and effort across providers" |
@@ -896,10 +906,55 @@ install` in it.
 |---|---|---|
 | `convex` | a folder with `convex/` | `convex.dashboard`, a `url` panel: `https://dashboard.convex.dev/d/<name>` for the `CONVEX_DEPLOYMENT` in `.env.local` (then `.env`), `http://127.0.0.1:6790` for an anonymous local deployment, the dashboard's front page with no deployment yet. Only that one line of the file is read |
 | `xcode` | a folder with an `.xcodeproj` or `.xcworkspace` | `xcode.simulator`, an `image` panel drawn by `panels.render` |
+| `worktree` | a thread with a worktree of its own (see Worktrees) | no panel: the action `worktree.land`, "Land", which runs `tb land` |
 
 A client shows what it can: a `url` panel in a web view, an `image` panel
 by asking `panels.render` now and then while it's on screen, and an
 unknown `kind` as a page if it has a `url`.
+
+### Worktrees
+
+A repo can ask for each new thread to get a git worktree of its own
+(docs/thread-worktrees.md has the why and the details). A patch file's
+default export says so, beside its actions:
+
+```ts
+export default {
+  worktree: {
+    setup: "cd runner && npm ci",   // run in the new worktree before the first turn; optional
+    check: "./check.sh --quick",    // run by `tb land` before main moves; optional
+  },
+}
+```
+
+The first patch in the thread's own folder chain with a `worktree` wins;
+`~/.threadbear/patches/` and project folders never count. The repo is the
+git toplevel of the folder holding `.threadbear/`, and its main checkout
+is the one with `main` checked out. A malformed `worktree` (not an object,
+or a `setup` or `check` that isn't a command) is the file's `error`.
+
+A new thread in such a repo (from `threads.create`, `create_thread` or a
+schedule, unless `worktree: false`) gets, before its first turn starts:
+`git worktree add -b thread/<id8> <parent>/<repo>-threads/<id8> main` from
+the main checkout (`<id8>` is the thread id's first 8 characters), a `cwd`
+in the same subfolder of it, `setup` run in its root (an `action.run` with
+`trigger: "worktree.setup"`, under the first turn; a failure is shown and
+the turn goes on), and a few lines in the agent's appended system prompt
+saying where it is and that `tb land` puts it on main. If the worktree
+can't be made (a leftover folder or branch of that name, no checkout on
+`main`), a `system.note` says why and the thread starts in the folder
+asked for. The summary carries `worktree` from then on.
+
+`tb land`, in the worktree, refuses with uncommitted changes, rebases on
+main (a conflict aborts and names the files), runs `check`, then
+`git merge --ff-only` in the main checkout (refused, and nothing changed,
+if main's own uncommitted changes are in the way) and prints what landed.
+It never pushes. `--dry-run` stops before main moves.
+
+When the thread is archived or deleted, a worktree whose branch is on main
+(or has nothing of its own) is removed with its branch; otherwise both stay,
+with a `system.note` saying how to land or drop them. A thread whose
+worktree was removed carries on in the main checkout, with a note.
 
 ## Projects
 
