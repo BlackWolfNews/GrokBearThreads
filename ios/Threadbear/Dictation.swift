@@ -1,0 +1,112 @@
+import AVFoundation
+import Observation
+import Speech
+import os
+
+/// Tap the mic, talk, and the words land in the text box. On-device
+/// SFSpeechRecognizer where the phone has the model, Apple's servers if it
+/// won't start, as Quick Ask does (ClassicTranscriber). It never sends on its
+/// own: an agent reply is worth a glance before it goes.
+@MainActor @Observable
+final class Dictation {
+    private(set) var isListening = false
+    private(set) var problem: String?
+
+    private let log = Logger(subsystem: "com.mikecann.threadbear", category: "speech")
+    private let recognizer = SFSpeechRecognizer(locale: Locale.current.language.languageCode?.identifier == "en" ? .current : Locale(identifier: "en-GB"))
+    private let engine = AVAudioEngine()
+    private var request: SFSpeechAudioBufferRecognitionRequest?
+    private var task: SFSpeechRecognitionTask?
+    private var onDeviceBroken = false
+    private var generation = 0
+
+    /// `onText` gets the whole transcript so far, every time it changes.
+    func start(onText: @escaping (String) -> Void) async {
+        problem = nil
+        guard await Self.permission() else {
+            problem = "Turn on the microphone and speech recognition for Threadbear in Settings."
+            return
+        }
+        guard let recognizer, recognizer.isAvailable else {
+            problem = "Speech recognition isn't available right now."
+            return
+        }
+        stop()
+        generation += 1
+        let current = generation
+        do {
+            let session = AVAudioSession.sharedInstance()
+            try session.setCategory(.record, mode: .measurement, options: .duckOthers)
+            try session.setActive(true, options: .notifyOthersOnDeactivation)
+            let request = SFSpeechAudioBufferRecognitionRequest()
+            request.shouldReportPartialResults = true
+            request.addsPunctuation = true
+            request.taskHint = .dictation
+            request.requiresOnDeviceRecognition = recognizer.supportsOnDeviceRecognition && !onDeviceBroken
+            self.request = request
+            let input = engine.inputNode
+            input.removeTap(onBus: 0)
+            input.installTap(onBus: 0, bufferSize: 1024, format: input.outputFormat(forBus: 0)) { buffer, _ in
+                request.append(buffer)
+            }
+            engine.prepare()
+            try engine.start()
+            isListening = true
+            task = recognizer.recognitionTask(with: request) { [weak self] result, error in
+                let text = result?.bestTranscription.formattedString
+                let nsError = error as NSError?
+                Task { @MainActor in
+                    guard let self, self.generation == current else { return }
+                    if let text { onText(text) }
+                    guard let nsError, !Self.isBenign(nsError) else { return }
+                    if request.requiresOnDeviceRecognition, nsError.domain == "kLSRErrorDomain", [100, 101, 102, 300].contains(nsError.code) {
+                        self.log.error("On-device recognition wouldn't start (\(nsError.code)); using the server")
+                        self.onDeviceBroken = true
+                        self.stop()
+                        await self.start(onText: onText)
+                        return
+                    }
+                    self.log.error("Recognition error \(nsError.domain, privacy: .public) \(nsError.code)")
+                    self.problem = "Speech recognition stopped. Tap the mic to try again."
+                    self.stop()
+                }
+            }
+        } catch {
+            problem = "Couldn't start the microphone: \(error.localizedDescription)"
+            stop()
+        }
+    }
+
+    func stop() {
+        generation += 1
+        if engine.isRunning { engine.stop() }
+        engine.inputNode.removeTap(onBus: 0)
+        request?.endAudio()
+        task?.finish()
+        request = nil
+        task = nil
+        isListening = false
+        try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+    }
+
+    /// "No speech detected" and cancellation aren't worth showing.
+    private static func isBenign(_ error: NSError) -> Bool {
+        error.domain == "kAFAssistantErrorDomain" && [203, 209, 216, 301, 1110].contains(error.code)
+    }
+
+    private static func permission() async -> Bool {
+        if AVAudioApplication.shared.recordPermission == .undetermined {
+            _ = await AVAudioApplication.requestRecordPermission()
+        }
+        if SFSpeechRecognizer.authorizationStatus() == .notDetermined {
+            _ = await requestSpeech()
+        }
+        return AVAudioApplication.shared.recordPermission == .granted && SFSpeechRecognizer.authorizationStatus() == .authorized
+    }
+
+    nonisolated private static func requestSpeech() async -> SFSpeechRecognizerAuthorizationStatus {
+        await withCheckedContinuation { continuation in
+            SFSpeechRecognizer.requestAuthorization { continuation.resume(returning: $0) }
+        }
+    }
+}
