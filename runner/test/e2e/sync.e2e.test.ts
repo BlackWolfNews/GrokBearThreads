@@ -1,11 +1,13 @@
-// The Convex mirror against a real deployment: the repo's local dev
-// deployment (`npx convex deployment create mikec:threadbear:local
-// --select` wrote .env.local at the repo root; nothing here touches the
-// Sydney project). Starts `npx convex dev` for the local backend, points a
-// runner at it with its own key, and reads back what it wrote through the
-// deployment's HTTP API and the phone's queries. No CLI is spawned
-// (claudePath points nowhere) so it costs nothing. Skips without
-// .env.local.
+// The Convex mirror against a real deployment: the repo's local one, named
+// in .env.e2e at the repo root (gitignored; `npx convex deployment create
+// mikec:threadbear:local --select` writes .env.local, which is then copied
+// to .env.e2e so the Sydney dev deployment can stay selected for everyday
+// work). Every convex command here passes `--env-file .env.e2e`, so
+// nothing touches the Sydney project. Starts `npx convex dev` for the local
+// backend, points a runner at it with its own key, and reads back what it
+// wrote through the deployment's HTTP API and the phone's queries. No CLI
+// is spawned (claudePath points nowhere) so it costs nothing. Skips
+// without .env.e2e.
 import { describe, test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -19,7 +21,8 @@ import { readRunnerJson } from '../../src/config.ts';
 
 const RUNNER_DIR = path.join(import.meta.dirname, '..', '..');
 const REPO = path.join(RUNNER_DIR, '..');
-const ENV_FILE = path.join(REPO, '.env.local');
+const ENV_FILE = path.join(REPO, '.env.e2e');
+const ENV_ARGS = ['--env-file', ENV_FILE];
 const run = promisify(execFile);
 
 function readEnvLocal(): Record<string, string> {
@@ -36,7 +39,7 @@ const envLocal = readEnvLocal();
 const CONVEX_URL = envLocal.CONVEX_URL;
 const LOCAL = Boolean(CONVEX_URL && /^https?:\/\/(127\.0\.0\.1|localhost)/.test(CONVEX_URL));
 
-describe('convex mirror e2e', { skip: LOCAL ? false : 'no local Convex deployment in .env.local at the repo root' }, () => {
+describe('convex mirror e2e', { skip: LOCAL ? false : 'no local Convex deployment in .env.e2e at the repo root' }, () => {
   let convexDev: ChildProcess;
   let convexOut = '';
   let runner: ChildProcess;
@@ -44,6 +47,10 @@ describe('convex mirror e2e', { skip: LOCAL ? false : 'no local Convex deploymen
   let client: RunnerClient;
   let home: string;
   const key = 'e2e-' + crypto.randomBytes(8).toString('hex');
+  // `convex dev --env-file` still rewrites .env.local to the deployment it
+  // ran against, which would leave the repo pointed at the local one.
+  const envLocalPath = path.join(REPO, '.env.local');
+  const envLocalBefore = fs.existsSync(envLocalPath) ? fs.readFileSync(envLocalPath, 'utf8') : undefined;
 
   const api = async (kind: 'query' | 'mutation', fn: string, args: Record<string, unknown>): Promise<any> => {
     const res = await fetch(`${CONVEX_URL}/api/${kind}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path: fn, args, format: 'json' }) });
@@ -63,13 +70,13 @@ describe('convex mirror e2e', { skip: LOCAL ? false : 'no local Convex deploymen
 
   before(async () => {
     // The local backend, with the functions pushed to it.
-    convexDev = spawn('npx', ['convex', 'dev', '--tail-logs', 'disable', '--typecheck', 'disable'], { cwd: REPO, stdio: ['ignore', 'pipe', 'pipe'], detached: true });
+    convexDev = spawn('npx', ['convex', 'dev', ...ENV_ARGS, '--tail-logs', 'disable', '--typecheck', 'disable'], { cwd: REPO, stdio: ['ignore', 'pipe', 'pipe'], detached: true });
     convexDev.stdout!.on('data', (d) => (convexOut += d));
     convexDev.stderr!.on('data', (d) => (convexOut += d));
     await until('convex dev to be ready', async () => (/Convex functions ready/.test(convexOut) ? true : undefined), 180_000).catch((e) => {
       throw new Error(`${e.message}\n${convexOut}`);
     });
-    await run('npx', ['convex', 'env', 'set', 'RUNNER_KEY', key], { cwd: REPO });
+    await run('npx', ['convex', 'env', 'set', ...ENV_ARGS, 'RUNNER_KEY', key], { cwd: REPO });
 
     home = fs.mkdtempSync(path.join(os.tmpdir(), 'tb-sync-e2e-'));
     fs.mkdirSync(path.join(home, 'secrets'), { recursive: true, mode: 0o700 });
@@ -125,6 +132,8 @@ describe('convex mirror e2e', { skip: LOCAL ? false : 'no local Convex deploymen
       await new Promise((r) => setTimeout(r, 1000));
     }
     if (home) fs.rmSync(home, { recursive: true, force: true });
+    if (envLocalBefore !== undefined) fs.writeFileSync(envLocalPath, envLocalBefore);
+    else if (fs.existsSync(envLocalPath)) fs.rmSync(envLocalPath);
   });
 
   test('a thread is mirrored, updated, and removed; the runner is listed and signs off', async () => {
@@ -165,7 +174,7 @@ describe('convex mirror e2e', { skip: LOCAL ? false : 'no local Convex deploymen
     assert.ok(renamed.archivedAt);
 
     // The phone's own queries, with a token issued the documented way.
-    const { stdout } = await run('npx', ['convex', 'run', 'tokens:issue', JSON.stringify({ name: 'e2e', days: 1 })], { cwd: REPO });
+    const { stdout } = await run('npx', ['convex', 'run', ...ENV_ARGS, 'tokens:issue', JSON.stringify({ name: 'e2e', days: 1 })], { cwd: REPO });
     // convex run prints the result as pretty JSON, after any log lines.
     const issued = JSON.parse(stdout.slice(stdout.indexOf('{'))) as { token: string };
     const den = (await api('query', 'phone:threads', { token: issued.token, view: 'den' })) as any[];
@@ -174,7 +183,7 @@ describe('convex mirror e2e', { skip: LOCAL ? false : 'no local Convex deploymen
     assert.equal(one.thread.title, 'Renamed from the e2e');
     assert.deepEqual(one.messages, []);
     await assert.rejects(api('query', 'phone:threads', { token: 'tb_wrong', view: 'inbox' }), /auth|token/);
-    await run('npx', ['convex', 'run', 'tokens:revoke', JSON.stringify({ name: 'e2e' })], { cwd: REPO });
+    await run('npx', ['convex', 'run', ...ENV_ARGS, 'tokens:revoke', JSON.stringify({ name: 'e2e' })], { cwd: REPO });
 
     await client.call('threads.delete', { threadId: made.id });
     await until('the row to go', async () => {

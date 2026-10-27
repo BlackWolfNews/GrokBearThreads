@@ -343,24 +343,23 @@ dashboard panel.
   reads back through the HTTP API and the phone queries. It skips
   without a local deployment in `.env.local`.
 
-**Deployments.** The CLI can't make them yet: team `mikec` is at its
-quota of 300 deployments (159 projects, most of them `temp-*` and `tmp-*`
-with a dev and a prod deployment each). Until two are freed, the project
-has only a local dev deployment on this Mac (`.env.local`,
-`CONVEX_URL=http://127.0.0.1:3210`, made with `npx convex deployment
-create mikec:threadbear:local --select`). When Mike has freed some:
+**Deployments** (made 28 Oct, after Mike freed the team's deployment
+quota by deleting its 41 `temp-*`/`tmp-*` projects), all in Sydney
+(`aws-ap-southeast-2`):
 
-```
-npx convex deployment create mikec:threadbear:dev/main --type dev --select --default --region aws-ap-southeast-2
-npx convex deployment create mikec:threadbear:production --type prod --default --region aws-ap-southeast-2
-npx convex env set RUNNER_KEY "$(cat ~/Library/Application\ Support/Threadbear/secrets/convex-key)" --prod
-npx convex deploy
-```
+| | name | URL |
+|---|---|---|
+| prod | `opulent-moose-249` | `https://opulent-moose-249.ap-southeast-2.convex.cloud` |
+| dev | `earnest-puffin-640` | `https://earnest-puffin-640.ap-southeast-2.convex.cloud` |
+| local (e2e only) | `local-mikec-threadbear-1` | `http://127.0.0.1:3210` |
 
-then put `sync: { "url": "https://<prod name>.convex.cloud" }` in the
-live `runner.json` and a random key in `secrets/convex-key` (0600); the
-runner reads both at its next start. `tb status` shows "Convex mirror:
-on".
+`.env.local` at the repo root (gitignored) selects the dev deployment, so
+`npx convex dev` pushes there and `npx convex deploy` ships prod.
+`.env.e2e` names the local one for `runner/test/e2e/sync.e2e.test.ts`,
+which passes `--env-file .env.e2e` to every convex command it runs. Both
+cloud deployments have `RUNNER_KEY` set to the key in the live runner's
+`secrets/convex-key`, and the live `runner.json` has `sync.url` pointing
+at prod, so the mirror is on from the runner's next start.
 
 **Working on it.** `npx convex dev` at the repo root runs the local
 backend and pushes `convex/` as it changes; `npx convex env set RUNNER_KEY
@@ -422,6 +421,4 @@ step 3; until then they sit `pending`):
 Changes from the proposal: `answers` values are strings, not arrays (a
 multi-select question's choices go in one string, comma-joined, which is
 what the Mac app sends); `view` and `lastActivityMs` are on every row; a
-`title` change was added to `update`; the dev deployment URL waits on the
-quota above, so until then the local one on this Mac is the only
-deployment.
+`title` change was added to `update`.
