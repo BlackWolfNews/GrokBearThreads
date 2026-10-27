@@ -1,0 +1,89 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><link rel="stylesheet" href="mac.css">
+<!-- size: 1440x900 -->
+<style>
+  body { padding: 20px; }
+  .cubs { display: flex; align-items: center; gap: 4px; }
+  .cubs svg { width: 26px; height: 26px; color: #c98a3e; }
+  .subrow { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--secondary); padding-left: 28px; }
+  .subrow svg { width: 22px; height: 22px; color: #c98a3e; }
+  .subrow .st { margin-left: auto; font-size: 12px; color: var(--accent); }
+  .subrow .st.done { color: var(--tertiary); }
+</style>
+</head><body>
+<script src="bears.js"></script>
+<div class="window wide">
+  <div class="sidebar narrow">
+    <div class="lights"><i></i><i></i><i></i></div>
+    <div class="list">
+      <div class="newrow"><span>✎</span> New thread <span class="hint">⌘N</span></div>
+      <div class="section">Needs you</div>
+      <div class="row selected"><div class="body"><div class="title"><b>Walkies: pause button</b><span class="when orange">now</span></div><div class="preview">Run the test suite on Tinker Desk?</div></div></div>
+      <div class="section">Running</div>
+      <div class="row"><div class="body"><div class="title">Nipunn edit B-roll<span class="when accent">14m</span></div><div class="preview">Rendering review clip<span class="acct">cannstudios</span></div></div></div>
+      <div class="section">Inbox</div>
+      <div class="row"><div class="body"><div class="title">Reseed button<span class="when">6m</span></div><div class="preview">Sewn on. It's in the composer now.</div></div></div>
+      <div class="row"><div class="body"><div class="title">Add a Convex usage card<span class="when">26m</span></div><div class="preview">Added a usage table and a cron...</div></div></div>
+    </div>
+    <div class="footer">
+      <div class="frow"><svg style="color:#c98a3e"><use href="#bear-sleep"/></svg> Hibernating <span class="count">7</span></div>
+      <div class="frow"><span style="font-size:15px">⌂</span> Den <span class="count">150</span></div>
+    </div>
+  </div>
+
+  <div class="main">
+    <div class="header"><span class="folder">walkies</span><span class="sep">/</span><span class="ttl">Walkies: pause button</span><span class="more">···</span></div>
+    <div class="transcript">
+      <div class="column" style="width:680px">
+        <div class="bubble">Add a pause button to the walk screen. Pausing should stop the distance counting but keep the map following me.</div>
+        <div class="work"><span>🔨</span> Read 5 files, edited 3 files <span class="chev">›</span></div>
+        <div class="work"><span class="cubs"><svg><use href="#cub"/></svg><svg><use href="#cub"/></svg></span> Sent 2 cubs <span class="chev">⌄</span></div>
+        <div class="subrow"><svg><use href="#cub"/></svg> Review the diff for the pause state <span class="st done">done · 2 notes</span></div>
+        <div class="subrow"><svg><use href="#cub"/></svg> Check the distance counter stops on pause <span class="st">running 40s</span></div>
+        <div class="hook"><svg style="color:#7a9bb8"><use href="#patch"/></svg> Built and ran on the simulator, screenshot in the panel <span class="src">patch: xcode</span></div>
+
+        <div class="card bar orange">
+          <div class="ctitle"><svg class="patchi" style="color:#c98a3e; width:26px; height:26px"><use href="#bear-sit"/></svg> Run the test suite on Tinker Desk?</div>
+          <div class="csub">The xcode patch sends the simulator suites to Tinker Desk so the M5 stays quiet. About 4 minutes.</div>
+          <div class="payload mono">ssh tinker-desk 'cd walkies && xcodebuild test -scheme Walkies -destination "platform=iOS Simulator,name=iPhone 15 Pro Max"'</div>
+          <div class="btns"><span class="btn primary">Allow<span class="kbd">⏎</span></span><span class="btn">Always allow</span><span class="btn right">Deny</span></div>
+        </div>
+        <div class="bearline"><svg><use href="#bear-sit"/></svg> Waiting on you · <span class="t">12s</span></div>
+      </div>
+    </div>
+    <div class="composer" style="width:680px">
+      <div class="actions">
+        <span class="chip"><svg style="color:#7a9bb8"><use href="#patch"/></svg> Build and run</span>
+        <span class="chip"><svg style="color:#7a9bb8"><use href="#patch"/></svg> Run tests on Tinker Desk</span>
+        <span class="chip"><svg style="color:#7a9bb8"><use href="#patch"/></svg> Screenshot</span>
+        <span class="chip"><svg style="color:#7a9bb8"><use href="#patch"/></svg> TestFlight</span>
+      </div>
+      <div class="ph">Message</div>
+      <div class="controls">
+        <span class="plus">+</span>
+        <span>claude-3</span><span class="div"></span>
+        <span>Fable 5.1</span><span class="div"></span>
+        <span>🔒 Ask before edits</span>
+        <span class="send">■</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="tabs">
+      <span class="tab on"><svg style="color:#7a9bb8"><use href="#patch"/></svg> Simulator</span>
+      <span class="tab">Chef requests <span style="color:var(--tertiary)">3</span></span>
+      <span class="tab">Patches <span style="color:var(--tertiary)">5</span></span>
+      <span class="spacer"></span>
+      <span class="ext">↗</span>
+    </div>
+    <div class="body">
+      <div class="phone"><div class="notch"></div><div class="scr">
+        <div class="map"><div class="path"></div></div>
+        <div class="cardx"><b>Morning loop</b><div class="stats"><span>2.4 km</span><span>31:08</span><span>paused</span></div><div class="go" style="background:#e0a43a;color:#222">Resume</div></div>
+      </div></div>
+      <div style="text-align:center; font-size:12px; color:var(--tertiary); margin-top:14px">iPhone 15 Pro Max · 12s ago · click to open Simulator</div>
+    </div>
+  </div>
+</div>
+</body></html>

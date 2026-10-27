@@ -1,0 +1,101 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><link rel="stylesheet" href="mac.css">
+<!-- size: 1440x900 -->
+<style>
+  body { padding: 20px; }
+  .plist { padding: 8px 12px; }
+  .pitem { display: flex; gap: 12px; padding: 10px 6px; border-bottom: 0.5px solid var(--separator); align-items: flex-start; }
+  .pitem svg { width: 22px; height: 22px; flex: none; margin-top: 1px; }
+  .pitem .n { font-size: 13.5px; }
+  .pitem .n small { display: block; color: var(--tertiary); font-size: 12px; margin-top: 2px; line-height: 16px; }
+  .pitem .kind { margin-left: auto; font-size: 11px; color: var(--tertiary); border: 0.5px solid rgba(255,255,255,0.12); border-radius: 8px; padding: 1px 7px; white-space: nowrap; }
+  .pitem.new { background: rgba(224,164,58,0.06); border-radius: 8px; }
+  .code { font-family: "SF Mono", ui-monospace, Menlo, monospace; font-size: 12px; line-height: 18px; color: var(--secondary); background: rgba(0,0,0,0.25); border-radius: 8px; padding: 10px 12px; margin: 10px 0 0; white-space: pre; }
+  .code .kw { color: #c9a0ff; } .code .s { color: #9ad28a; } .code .c { color: var(--tertiary); }
+  .dock { position: absolute; right: 60px; bottom: 56px; display: flex; flex-direction: column; align-items: center; gap: 6px; font-size: 12px; color: var(--tertiary); }
+  .dock .tile { width: 72px; height: 72px; border-radius: 17px; background: linear-gradient(#2d2a27, #1b1a18); display: grid; place-items: center; box-shadow: 0 6px 18px rgba(0,0,0,0.5); position: relative; }
+  .dock .tile svg { width: 62px; height: 62px; color: #c98a3e; }
+  .dock .tile .np { position: absolute; right: -4px; bottom: -4px; width: 20px; height: 20px; }
+</style>
+</head><body>
+<script src="bears.js"></script>
+<div class="window wide" style="position:relative">
+  <div class="sidebar narrow">
+    <div class="lights"><i></i><i></i><i></i></div>
+    <div class="list">
+      <div class="newrow"><span>✎</span> New thread <span class="hint">⌘N</span></div>
+      <div class="section">Running</div>
+      <div class="row"><div class="body"><div class="title">Nipunn edit B-roll<span class="when accent">14m</span></div><div class="preview">Rendering review clip<span class="acct">cannstudios</span></div></div></div>
+      <div class="section">Inbox</div>
+      <div class="row selected"><div class="body"><div class="title"><b>Reseed button</b><span class="when">now</span></div><div class="preview">Sewn on. It's in the composer now.</div></div></div>
+      <div class="row"><div class="body"><div class="title">Add a Convex usage card<span class="when">20m</span></div><div class="preview">Added a usage table and a cron...</div></div></div>
+      <div class="row"><div class="body"><div class="title">Fix the README typos<span class="when">3h</span></div><div class="preview">Fixed one typo in README.md</div></div></div>
+    </div>
+    <div class="footer">
+      <div class="frow"><svg style="color:#c98a3e"><use href="#bear-sleep"/></svg> Hibernating <span class="count">7</span></div>
+      <div class="frow"><span style="font-size:15px">⌂</span> Den <span class="count">150</span></div>
+    </div>
+  </div>
+
+  <div class="main">
+    <div class="header"><span class="folder">mikes-new-tab</span><span class="sep">/</span><span class="ttl">Reseed button</span><span class="more">···</span></div>
+    <div class="transcript">
+      <div class="column" style="width:680px">
+        <div class="bubble">I keep having to reseed the dev database by hand. Can I have a button for it?</div>
+        <div class="work"><span>🔨</span> Read 3 files, wrote 1 file <span class="chev">›</span></div>
+
+        <div class="card stitched">
+          <div class="ctitle"><svg class="patchi" style="color:#b85c5c"><use href="#patch"/></svg> New patch: Reseed dev DB</div>
+          <div class="csub">An action in this project's composer. Runs the seed script against the dev deployment and posts the output into the thread.</div>
+          <div class="code"><span class="c">// .threadbear/patches/reseed.ts</span>
+<span class="kw">export default</span> patch({
+  actions: [{
+    title: <span class="s">"Reseed dev DB"</span>,
+    run: () => sh(<span class="s">"npx convex run seed:reset && npx convex import --replace fixtures/dev.zip"</span>),
+  }],
+})</div>
+          <div class="btns" style="margin-top:12px"><span class="btn primary">Try it</span><span class="btn">Open the file</span><span class="btn right" style="border:none;color:var(--tertiary)">Unpick</span></div>
+        </div>
+
+        <div class="answer">Sewn on. It's in the composer now, and checked in with the project so it'll be there on Tinker Desk too. Want one for prod as well, with an "are you sure"?</div>
+        <div class="turnfoot"><span>41s</span><span>·</span><span>$0.04</span><span>·</span><span>claude-opus-5-5</span></div>
+      </div>
+    </div>
+    <div class="composer" style="width:680px">
+      <div class="actions">
+        <span class="chip"><svg style="color:#7a9bb8"><use href="#patch"/></svg> Typecheck</span>
+        <span class="chip"><svg style="color:#7a9bb8"><use href="#patch"/></svg> Open logs</span>
+        <span class="chip"><svg style="color:#7a9bb8"><use href="#patch"/></svg> Deploy to prod</span>
+        <span class="chip new"><svg style="color:#b85c5c"><use href="#patch"/></svg> Reseed dev DB</span>
+      </div>
+      <div class="ph">Message</div>
+      <div class="controls">
+        <span class="plus">+</span>
+        <span>cannstudios</span><span class="div"></span>
+        <span>Opus 5.5</span><span class="div"></span>
+        <span>🔓 Full access</span>
+        <span class="send">↑</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="tabs">
+      <span class="tab"><svg style="color:#7a9bb8"><use href="#patch"/></svg> Dashboard</span>
+      <span class="tab">Logs</span>
+      <span class="tab on">Patches <span style="color:var(--tertiary)">4</span></span>
+      <span class="spacer"></span>
+    </div>
+    <div class="body plist">
+      <div class="pitem"><svg style="color:#7a9bb8"><use href="#patch"/></svg><div class="n">Convex dashboard<small>Panel. Built in, on because this project has a convex folder.</small></div><span class="kind">panel</span></div>
+      <div class="pitem"><svg style="color:#7a9bb8"><use href="#patch"/></svg><div class="n">Convex logs<small>Tails convex logs and posts runtime and OCC errors into the running turn.</small></div><span class="kind">hook</span></div>
+      <div class="pitem"><svg style="color:#7a9bb8"><use href="#patch"/></svg><div class="n">Typecheck<small>Runs tsc after every turn that edited a .ts file. From ~/.threadbear, applies everywhere.</small></div><span class="kind">hook</span></div>
+      <div class="pitem"><svg style="color:#7a9bb8"><use href="#patch"/></svg><div class="n">Deploy to prod<small>.threadbear/patches/deploy.ts · asks first.</small></div><span class="kind">action</span></div>
+      <div class="pitem new"><svg style="color:#b85c5c"><use href="#patch"/></svg><div class="n">Reseed dev DB<small>.threadbear/patches/reseed.ts · just now, by this thread.</small></div><span class="kind">action</span></div>
+      <div style="padding:14px 6px; font-size:12px; color:var(--tertiary); line-height:17px">Patches are TypeScript files the runner loads for any thread in this folder. Global ones live in ~/.threadbear/patches, project ones in .threadbear/patches, and they stack like CLAUDE.md.</div>
+    </div>
+  </div>
+
+  <div class="dock"><div class="tile"><svg><use href="#bear-sit"/></svg><svg class="np" style="color:#b85c5c"><use href="#patch"/></svg></div>the dock teddy picks up a patch</div>
+</div>
+</body></html>
