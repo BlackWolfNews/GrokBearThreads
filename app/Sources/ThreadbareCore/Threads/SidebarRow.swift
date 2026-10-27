@@ -147,6 +147,30 @@ public enum AccountName {
         return clashes.isEmpty ? local : full
     }
 
+    /// A login as the pools picker and a pinned thread's chip name it: the
+    /// first part of its email's domain ("gangbusters" for
+    /// mike@gangbusters.io, "gmail" for mike.cann@gmail.com), since Mike's
+    /// logins mostly share "mike" before the @. When another login of the
+    /// same provider has that domain too, the part before the @, else the
+    /// whole address. Codex reads as `short` has it.
+    public static func login(_ id: String, accounts: [Account]) -> String {
+        guard let account = accounts.first(where: { $0.id == id }) else { return id }
+        if account.provider == "codex" { return short(id, accounts: accounts) }
+        let full = title(account)
+        guard let domain = domainPart(full) else { return full }
+        let siblings = accounts.filter { $0.id != id && $0.provider == account.provider }.map(title)
+        if !siblings.contains(where: { domainPart($0) == domain }) { return domain }
+        let local = localPart(full)
+        return siblings.contains { localPart($0) == local } ? full : local
+    }
+
+    static func domainPart(_ address: String) -> String? {
+        guard let at = address.firstIndex(of: "@") else { return nil }
+        let domain = address[address.index(after: at)...]
+        let first = domain.split(separator: ".").first.map(String.init) ?? ""
+        return first.isEmpty ? nil : first
+    }
+
     static func localPart(_ address: String) -> String {
         guard let at = address.firstIndex(of: "@") else { return address }
         return String(address[..<at])

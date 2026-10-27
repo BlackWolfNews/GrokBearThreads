@@ -20,6 +20,40 @@ public enum ModelPicker {
         }
     }
 
+    /// A button in the picker's rail: a pool (title, and its logins and
+    /// best room under it) or, from a runner older than pools, a provider
+    /// (an icon).
+    public struct Column: Sendable, Equatable, Identifiable {
+        public var id: String
+        public var title: String
+        /// "3 · 61%" under a pool's title.
+        public var subtitle: String?
+        /// An SF Symbol for a provider's icon.
+        public var symbol: String?
+
+        public init(id: String, title: String, subtitle: String? = nil, symbol: String? = nil) {
+            self.id = id
+            self.title = title
+            self.subtitle = subtitle
+            self.symbol = symbol
+        }
+    }
+
+    /// One provider's models in a column. A mixed pool has one per
+    /// provider, each under its `title`; otherwise there's one, untitled.
+    public struct Section: Sendable, Equatable, Identifiable {
+        /// The provider.
+        public var id: String
+        public var title: String?
+        public var rows: [Row]
+
+        public init(id: String, title: String? = nil, rows: [Row]) {
+            self.id = id
+            self.title = title
+            self.rows = rows
+        }
+    }
+
     /// One model in the list.
     public struct Row: Sendable, Equatable, Identifiable {
         public var id: String
