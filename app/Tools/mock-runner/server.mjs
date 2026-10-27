@@ -22,6 +22,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { reviewDraft, reviewReply, sameDraft } from '../../../runner/src/reviews.ts';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const args = parseArgs(process.argv.slice(2));
@@ -396,9 +397,47 @@ async function dispatch(client, method, p) {
     case 'threads.markSeen': {
       const t = need(p.threadId);
       t.summary.lastSeenSeq = Math.max(t.summary.lastSeenSeq, p.seq ?? 0);
-      if (t.summary.status !== 'waiting') t.summary.needsYou = false;
+      if (t.summary.status !== 'waiting') t.summary.needsYou = Boolean(t.summary.pendingReviews);
       broadcastSummary(t.summary.id);
       return { thread: t.summary };
+    }
+    case 'reviews.list': {
+      const t = need(p.threadId);
+      return { reviews: [...(t.reviews?.values() ?? [])].filter((review) => review.status === 'pending').sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id)).map((review) => structuredClone(review)) };
+    }
+    case 'reviews.get': {
+      const t = need(p.threadId);
+      return { review: structuredClone(needReview(t, p.reviewId)) };
+    }
+    case 'reviews.save':
+    case 'reviews.respond':
+    case 'reviews.cancel': {
+      const t = need(p.threadId);
+      const review = needReview(t, p.reviewId);
+      const draft = method === 'reviews.cancel' ? review.draft : reviewDraft(review, p.draft, method === 'reviews.respond');
+      if (method === 'reviews.respond' && review.status === 'answered' && sameDraft(review.response, draft)) return { review, turnId: review.replyTurnId };
+      if (review.status !== 'pending') throw rpcError(-32602, `This review is ${review.status}.`);
+      if (p.revision !== review.revision) throw rpcError(-32602, 'This review changed. Reload it before saving or sending your answer.');
+      const next = { ...review, draft, revision: review.revision + 1, updatedAt: iso() };
+      if (method === 'reviews.cancel') next.status = 'cancelled';
+      if (method === 'reviews.respond') {
+        next.status = 'answered';
+        next.response = draft;
+        next.replyTurnId = 'turn_' + crypto.randomBytes(4).toString('hex');
+      }
+      t.reviews.set(next.id, next);
+      updateReviewCount(t);
+      persist(t.summary.id, { type: 'review.updated', review: next });
+      if (method === 'reviews.respond') {
+        // Receipt of the reply is a fake turn, without a CLI or model.
+        const text = reviewReply(next, draft);
+        persist(t.summary.id, { type: 'user.message', text, images: [], reviewId: next.id, reviewResponse: draft }, next.replyTurnId);
+        persist(t.summary.id, { type: 'turn.started', turnId: next.replyTurnId }, next.replyTurnId);
+        persist(t.summary.id, { type: 'assistant.text', itemId: 'review_reply_' + next.id, text: 'I received your review. This is the mock runner, so no code was changed.' }, next.replyTurnId);
+        persist(t.summary.id, { type: 'turn.completed', turnId: next.replyTurnId, outcome: 'completed', durationMs: 0 }, next.replyTurnId);
+        setStatus(t.summary.id, 'idle', true);
+      }
+      return { review: structuredClone(next), ...(next.replyTurnId ? { turnId: next.replyTurnId } : {}) };
     }
     case 'approvals.respond': {
       const t = need(p.threadId);
@@ -916,6 +955,22 @@ function wentBack() {
   return { clis };
 }
 
+function needReview(t, id) {
+  const review = t.reviews?.get(id);
+  if (!review) throw rpcError(-32602, `Review not found: ${id}`);
+  return review;
+}
+
+function updateReviewCount(t) {
+  const count = [...(t.reviews?.values() ?? [])].filter((review) => review.status === 'pending').length;
+  if (count) { t.summary.pendingReviews = count; t.summary.needsYou = true; }
+  else {
+    const hadReview = Boolean(t.summary.pendingReviews);
+    delete t.summary.pendingReviews;
+    if (hadReview && t.summary.status !== 'waiting') t.summary.needsYou = false;
+  }
+}
+
 // ---------------------------------------------------------------- events
 
 function persist(threadId, fields, turnId) {
@@ -955,6 +1010,8 @@ function setStatus(threadId, status, needsYou) {
 }
 
 function broadcastSummary(threadId) {
+  const t = threads.get(threadId);
+  if (t.summary.pendingReviews) t.summary.needsYou = true;
   const text = JSON.stringify({ jsonrpc: '2.0', method: 'thread.updated', params: { thread: threads.get(threadId).summary } });
   for (const client of clients) if (client.authed) client.ws.send(text);
 }
@@ -1544,11 +1601,16 @@ function loadFixtures() {
         const event = JSON.parse(line);
         event.threadId = summary.id;
         if (event.images) event.images = fixPaths(event.images);
+        if (event.type === 'review.updated') event.review.options = event.review.options.map((option) => ({ ...option, image: fixPaths([option.image])[0] }));
         return event;
       });
       summary.lastSeq = events.at(-1)?.seq ?? 0;
       summary.lastSeenSeq ??= summary.lastSeq;
-      loaded.push({ summary, events, inProgress: new Map(), timers: [], dir });
+      const reviews = new Map();
+      for (const event of events) if (event.type === 'review.updated') reviews.set(event.review.id, event.review);
+      const t = { summary, events, reviews, inProgress: new Map(), timers: [], dir };
+      updateReviewCount(t);
+      loaded.push(t);
     }
     // Real paths: /tmp is /private/tmp, and dev-app.sh passes the one,
     // the module's own path is the other.

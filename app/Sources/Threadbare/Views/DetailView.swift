@@ -62,6 +62,9 @@ struct DetailView: View {
             ConnectionBanner()
             ErrorBanner()
             if let thread { LimitBanner(thread: thread) }
+            if let thread, thread.hasPendingReviews, subagentRef == nil {
+                PendingReviewsButton(thread: thread)
+            }
             if let subagentRef {
                 SubagentHeader(ref: subagentRef)
             }

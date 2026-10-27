@@ -34,7 +34,7 @@ public struct ThreadSections: Sendable, Equatable {
     public static func build(_ threads: some Sequence<ThreadSummary>, now: Date) -> ThreadSections {
         var sections = ThreadSections()
         for thread in threads where !thread.isArchived && !thread.isSnoozed(at: now) {
-            if thread.status == .waiting || (thread.needsYou && !thread.isWorkingInBackground) {
+            if thread.hasPendingReviews || thread.status == .waiting || (thread.needsYou && !thread.isWorkingInBackground) {
                 sections.needsYou.append(thread)
             } else if thread.status == .running || thread.status == .starting || thread.isWorkingInBackground {
                 sections.running.append(thread)

@@ -54,12 +54,16 @@ public struct ThreadRowLook: Sendable, Equatable {
     }
 
     public init(_ thread: ThreadSummary, section: InboxSection? = nil) {
-        switch thread.status {
-        case .waiting: status = .needsYou
-        case .running, .starting: status = .working
-        case .error: status = .failed
-        case .stopped: status = .stopped
-        case .idle: status = thread.background.isEmpty ? .time : .background
+        if thread.hasPendingReviews {
+            status = .needsYou
+        } else {
+            switch thread.status {
+            case .waiting: status = .needsYou
+            case .running, .starting: status = .working
+            case .error: status = .failed
+            case .stopped: status = .stopped
+            case .idle: status = thread.background.isEmpty ? .time : .background
+            }
         }
         unread = thread.needsYou && status != .needsYou && status != .working
         emphasised = thread.needsYou || status == .needsYou
@@ -72,7 +76,8 @@ public struct ThreadRowLook: Sendable, Equatable {
     /// The second line when there's no preview yet. A thread that has only
     /// asked a question is waiting on Mike, not new.
     public static func emptyPreview(_ thread: ThreadSummary) -> String {
-        thread.status == .waiting ? "Waiting for your answer" : "No reply yet"
+        if thread.hasPendingReviews { return "Waiting for your review" }
+        return thread.status == .waiting ? "Waiting for your answer" : "No reply yet"
     }
 
     /// How long a running turn has been going, where the time would be:

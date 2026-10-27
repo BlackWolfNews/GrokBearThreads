@@ -32,6 +32,12 @@ const CLOSE_GRACE_MS = 1000;
 // primary passes these to the draining runner that has the thread, and a
 // draining runner answers -32030 for one it has let go.
 const THREAD_METHODS = new Set([
+  'reviews.list',
+  'reviews.create',
+  'reviews.get',
+  'reviews.save',
+  'reviews.respond',
+  'reviews.cancel',
   'threads.send',
   'threads.interrupt',
   'threads.update',
@@ -340,6 +346,18 @@ export class RpcServer {
         });
         return { thread: res.thread, turnId: res.turnId };
       }
+      case 'reviews.list':
+        return r.listReviews(reqString(p, 'threadId'));
+      case 'reviews.create':
+        return r.createReview(reqString(p, 'threadId'), p as Parameters<Runner['createReview']>[1]);
+      case 'reviews.get':
+        return r.getReview(reqString(p, 'threadId'), reqString(p, 'reviewId'));
+      case 'reviews.save':
+        return r.saveReview(reqString(p, 'threadId'), reqString(p, 'reviewId'), p.revision as number, p.draft as Parameters<Runner['saveReview']>[3]);
+      case 'reviews.respond':
+        return r.respondReview(reqString(p, 'threadId'), reqString(p, 'reviewId'), p.revision as number, p.draft as Parameters<Runner['respondReview']>[3]);
+      case 'reviews.cancel':
+        return r.cancelReview(reqString(p, 'threadId'), reqString(p, 'reviewId'), p.revision as number);
       case 'threads.send':
         return r.send(reqString(p, 'threadId'), optString(p, 'text') ?? '', optImages(p) ?? []);
       case 'threads.interrupt':

@@ -31,6 +31,8 @@ public enum RowDebug {
             return "\(item.request.title) (\(resolution.decision.rawValue))"
         case .question(let item):
             return item.request.questions.map(\.question).joined(separator: " / ")
+        case .review(let review):
+            return "\(review.title) · \(review.options.count) images · \(review.status)"
         case .plan(let entries):
             return entries.map(\.text).joined(separator: "; ")
         case .footer(let completion):
@@ -152,6 +154,7 @@ extension TranscriptModel {
         case .editDiff(let diff): return ["t:" + diff.itemId]
         case .approvalRequested(let request): return ["ap:" + request.approvalId]
         case .questionRequested(let request): return ["q:" + request.approvalId]
+        case .reviewUpdated(let review): return ["review:" + review.id]
         case .approvalResolved(let resolution): return ["ap:" + resolution.approvalId, "q:" + resolution.approvalId]
         case .planUpdated:
             let key = event.turnId ?? "seq\(seq)"

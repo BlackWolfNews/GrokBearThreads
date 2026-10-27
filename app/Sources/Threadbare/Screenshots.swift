@@ -273,6 +273,32 @@ enum ScreenshotRunner {
             app.usagePopoverShown = false
             try? await Task.sleep(for: .milliseconds(300))
         }
+        // 15. A durable design review, using the four actual account-picker
+        // concepts. Its modeless window stays behind Mike's work as well.
+        if wanted("15") {
+            await open(app, "demo_design_review")
+            app.transcript.scrollToBottom()
+            await capture(window, dir.appendingPathComponent("15a-design-review-card.png"))
+            if let review = app.session(for: "demo_design_review").model.items.compactMap({ row -> DesignReview? in
+                if case .review(let review) = row.content { return review }
+                return nil
+            }).first {
+                app.openReview(threadId: "demo_design_review", review: review)
+                if let controller = app.reviewWindows["demo_design_review/" + review.id], let compare = controller.window {
+                    compare.orderBack(nil)
+                    controller.session.mode = .grid
+                    await capture(compare, dir.appendingPathComponent("15b-design-review-grid.png"))
+                    controller.session.mode = .pair
+                    controller.session.pick("B")
+                    controller.session.setNote("Keep the account override easy to find.", for: "B")
+                    await controller.session.saveNow()
+                    await capture(compare, dir.appendingPathComponent("15c-design-review-pair.png"))
+                    controller.session.actualSize = true
+                    await capture(compare, dir.appendingPathComponent("15d-design-review-100-percent.png"))
+                    controller.close()
+                }
+            }
+        }
         // 11. A runner restart: the quiet banner while it waits for threads
         // to finish, the reconnecting line while the runner is down, and
         // the thread it carried on, with the runner's message as a centred

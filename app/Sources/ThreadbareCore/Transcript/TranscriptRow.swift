@@ -27,7 +27,7 @@ public struct TranscriptRow: Sendable, Hashable, Identifiable {
 }
 
 public enum RowKind: String, Sendable, Hashable, CaseIterable {
-    case user, assistant, reasoning, tool, diff, images, approval, question, plan, footer, note, error
+    case user, assistant, reasoning, tool, diff, images, approval, question, review, plan, footer, note, error
     /// Rows the model derives rather than reads from events: a folded run
     /// of work, the "Working for 12s" line, the "3 sub-agents working in
     /// the background" line, and the "Edited 3 files" card.
@@ -183,6 +183,7 @@ public enum RowContent: Sendable, Hashable {
     case images(itemId: String, images: [ImageRef], generated: Bool = false)
     case approval(ApprovalItem)
     case question(QuestionItem)
+    case review(DesignReview)
     case plan([PlanEntry])
     case footer(TurnCompletion)
     case note(String)
@@ -205,6 +206,7 @@ public enum RowContent: Sendable, Hashable {
         case .images: return .images
         case .approval: return .approval
         case .question: return .question
+        case .review: return .review
         case .plan: return .plan
         case .footer: return .footer
         case .note: return .note

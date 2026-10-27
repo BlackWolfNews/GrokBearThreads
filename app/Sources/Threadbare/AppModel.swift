@@ -62,6 +62,7 @@ final class AppModel {
     var focusComposer = 0
     var now = Date()
     var drafts: [String: Draft] = [:]
+    @ObservationIgnored var reviewWindows: [String: ReviewWindowController] = [:]
     /// The first thread list has arrived. Until then the sidebar list stays
     /// empty, so it's filled in one go.
     var threadsLoaded = false
@@ -388,6 +389,7 @@ final class AppModel {
                 receive(thread)
             case .threadEvent(let threadId, let event):
                 sessions[threadId]?.receive(event)
+                if case .reviewUpdated(let review) = event.payload { receiveReview(review, threadId: threadId) }
             case .threadDeleted(let threadId):
                 forget(threadId)
             case .accountsUpdated(let list):
