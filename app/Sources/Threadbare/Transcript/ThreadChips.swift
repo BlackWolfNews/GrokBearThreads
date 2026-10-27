@@ -51,7 +51,7 @@ struct ThreadChipCard: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 10)
-        .frame(minWidth: 180, maxWidth: 340, alignment: .leading)
+        .frame(width: 300, alignment: .leading)
         .fixedSize(horizontal: false, vertical: true)
     }
 
@@ -62,5 +62,69 @@ struct ThreadChipCard: View {
         let title = thread.title.isEmpty ? "Untitled thread" : thread.title
         let account = thread.accountId.isEmpty ? nil : AccountName.short(thread.accountId, accounts: app.accounts)
         return ThreadChipCard(title: title, detail: ThreadRefs.detail(thread, account: account, now: Date()))
+    }
+}
+
+/// The chip's hover card: a small borderless window under the chip, like
+/// a tooltip. NSPopover's glass corners (about 20 pt on macOS 26) and arrow
+/// looked heavy for a few lines of text, and it can't be made squarer.
+final class ChipCardWindow: NSPanel {
+    static let radius: CGFloat = 8
+    static let gap: CGFloat = 4
+
+    static func show(_ card: ThreadChipCard, below chip: NSRect, parent: NSWindow) -> ChipCardWindow {
+        let host = NSHostingView(rootView: card)
+        let size = host.fittingSize
+        let window = ChipCardWindow(contentRect: NSRect(origin: .zero, size: size),
+                                    styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: true)
+        window.isOpaque = false
+        window.backgroundColor = .clear
+        window.hasShadow = true
+        // Hover only: clicks go to the chip under it.
+        window.ignoresMouseEvents = true
+        window.isReleasedWhenClosed = false
+        window.appearance = parent.effectiveAppearance
+
+        let background = NSVisualEffectView(frame: NSRect(origin: .zero, size: size))
+        background.material = .popover
+        background.blendingMode = .behindWindow
+        background.state = .active
+        background.wantsLayer = true
+        background.layer?.cornerRadius = radius
+        background.layer?.cornerCurve = .continuous
+        background.layer?.masksToBounds = true
+        background.layer?.borderWidth = 0.5
+        background.layer?.borderColor = Theme.cardBorder.resolvedCGColor(for: parent.effectiveAppearance)
+        host.frame = background.bounds
+        host.autoresizingMask = [.width, .height]
+        background.addSubview(host)
+        window.contentView = background
+
+        // Under the chip, its left edge lined up with the chip's; above it
+        // when there's no room below, and kept on the screen.
+        let screen = (parent.screen ?? NSScreen.main)?.visibleFrame ?? .infinite
+        var origin = NSPoint(x: chip.minX, y: chip.minY - gap - size.height)
+        if origin.y < screen.minY { origin.y = chip.maxY + gap }
+        origin.x = min(max(origin.x, screen.minX + 4), screen.maxX - size.width - 4)
+        window.setFrameOrigin(origin)
+        parent.addChildWindow(window, ordered: .above)
+        window.orderFront(nil)
+        return window
+    }
+
+    override var canBecomeKey: Bool { false }
+    override var canBecomeMain: Bool { false }
+
+    func dismiss() {
+        parent?.removeChildWindow(self)
+        orderOut(nil)
+    }
+}
+
+private extension NSColor {
+    func resolvedCGColor(for appearance: NSAppearance) -> CGColor {
+        var color = cgColor
+        appearance.performAsCurrentDrawingAppearance { color = self.cgColor }
+        return color
     }
 }

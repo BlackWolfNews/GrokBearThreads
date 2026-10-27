@@ -327,7 +327,7 @@ final class TranscriptTextView: NSTextView {
     private var chips: [(range: NSRange, threadId: String)] = []
     private var chipObserver: NSObjectProtocol?
     private var chipTracking: NSTrackingArea?
-    private var chipCard: NSPopover?
+    private var chipCard: ChipCardWindow?
     private var hoveredChip: NSRange?
     private var chipTimer: Timer?
 
@@ -343,10 +343,7 @@ final class TranscriptTextView: NSTextView {
         for chip in chips {
             layoutManager.addTemporaryAttribute(.foregroundColor, value: Theme.chipText, forCharacterRange: chip.range)
         }
-        if had || !chips.isEmpty {
-            window?.invalidateCursorRects(for: self)
-            needsDisplay = true
-        }
+        if had || !chips.isEmpty { needsDisplay = true }
         if let hovered = hoveredChip, !chips.contains(where: { $0.range == hovered }) { closeChipCard() }
         // Only text that could hold a chip listens for new threads.
         let couldHaveChips = hasThreadRefs(storage)
@@ -387,19 +384,6 @@ final class TranscriptTextView: NSTextView {
         return first.map { $0.offsetBy(dx: origin.x, dy: origin.y) }
     }
 
-    override func resetCursorRects() {
-        super.resetCursorRects()
-        guard !chips.isEmpty, let layoutManager, let textContainer else { return }
-        let origin = textContainerOrigin
-        for chip in chips {
-            let glyphs = layoutManager.glyphRange(forCharacterRange: chip.range, actualCharacterRange: nil)
-            layoutManager.enumerateEnclosingRects(forGlyphRange: glyphs, withinSelectedGlyphRange: NSRange(location: NSNotFound, length: 0),
-                                                  in: textContainer) { rect, _ in
-                self.addCursorRect(rect.offsetBy(dx: origin.x, dy: origin.y), cursor: .pointingHand)
-            }
-        }
-    }
-
     override func updateTrackingAreas() {
         super.updateTrackingAreas()
         guard chipTracking == nil else { return }
@@ -408,9 +392,21 @@ final class TranscriptTextView: NSTextView {
         chipTracking = area
     }
 
+    // NSTextView sets the I-beam itself as the pointer moves (cursor rects
+    // added in resetCursorRects lost to it), so the hand is set after it.
     override func mouseMoved(with event: NSEvent) {
         super.mouseMoved(with: event)
-        hoverChip(chip(at: convert(event.locationInWindow, from: nil)))
+        let chip = chip(at: convert(event.locationInWindow, from: nil))
+        if chip != nil { NSCursor.pointingHand.set() }
+        hoverChip(chip)
+    }
+
+    override func cursorUpdate(with event: NSEvent) {
+        if chip(at: convert(event.locationInWindow, from: nil)) != nil {
+            NSCursor.pointingHand.set()
+        } else {
+            super.cursorUpdate(with: event)
+        }
     }
 
     override func mouseExited(with event: NSEvent) {
@@ -438,14 +434,10 @@ final class TranscriptTextView: NSTextView {
     private func showChipCard(_ chip: (range: NSRange, threadId: String)) {
         guard hoveredChip == chip.range, window != nil, let rect = chipRect(chip.range),
               let card = ThreadChipCard.make(threadId: chip.threadId) else { return }
-        let popover = NSPopover()
-        popover.behavior = .applicationDefined
-        popover.animates = false
-        let host = NSHostingController(rootView: card)
-        host.sizingOptions = [.preferredContentSize]
-        popover.contentViewController = host
-        popover.show(relativeTo: rect.insetBy(dx: -MarkdownRenderer.pillPad, dy: 0), of: self, preferredEdge: .maxY)
-        chipCard = popover
+        guard let window else { return }
+        let pill = rect.insetBy(dx: -MarkdownRenderer.pillPad, dy: -1.5)
+        let onScreen = window.convertToScreen(convert(pill, to: nil))
+        chipCard = ChipCardWindow.show(card, below: onScreen, parent: window)
     }
 
     #if DEBUG
@@ -460,7 +452,7 @@ final class TranscriptTextView: NSTextView {
         closeChipCard()
         hoveredChip = chip.range
         showChipCard(chip)
-        return chipCard?.contentViewController?.view.window?.windowNumber
+        return chipCard?.windowNumber
     }
 
     func debugClickChip(_ word: String) {
@@ -479,7 +471,7 @@ final class TranscriptTextView: NSTextView {
         chipTimer?.invalidate()
         chipTimer = nil
         hoveredChip = nil
-        chipCard?.close()
+        chipCard?.dismiss()
         chipCard = nil
     }
 
