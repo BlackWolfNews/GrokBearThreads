@@ -357,13 +357,7 @@ struct ThreadRowView: View {
             .foregroundStyle(.secondary)
             .help(BackgroundWork.detail(thread.background))
         case .needsYou:
-            if look.labelled {
-                Text("Needs you").font(.system(size: TypeScale.sidebarMeta, weight: .medium)).foregroundStyle(Color(nsColor: Theme.needsYou))
-            } else {
-                // Under the Needs you heading: how long it has been waiting.
-                time.fontWeight(.medium).foregroundStyle(Color(nsColor: Theme.needsYou))
-                    .help("Waiting for you")
-            }
+            Text("Needs you").font(.system(size: TypeScale.sidebarMeta, weight: .medium)).foregroundStyle(Color(nsColor: Theme.needsYou))
         case .failed:
             Text("Failed").font(.system(size: TypeScale.sidebarMeta, weight: .medium)).foregroundStyle(Color(nsColor: Theme.failed))
                 .help("The last turn failed")

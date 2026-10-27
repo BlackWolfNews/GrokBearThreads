@@ -138,27 +138,32 @@ final class ThreadSectionsTests: XCTestCase {
             thread("running", status: .running, minutesAgo: 4),
         ]
         let sections = ThreadSections.build(threads, now: now)
-        XCTAssertEqual(sections.needsYou.map(\.id), ["bg-waiting"])
+        XCTAssertEqual(sections.inbox.map(\.id), ["bg-waiting"])
         XCTAssertEqual(sections.running.map(\.id), ["bg-unread", "bg", "running"])
-        XCTAssertEqual(sections.inbox, [])
     }
 
+    /// One inbox, ordered by what needs Mike most: questions, then unread
+    /// failures, unread replies, read failures, then the rest, newest first
+    /// within each. Running threads are their own section.
     func testSections() {
         let now = Date(timeIntervalSince1970: 1_000_000)
         let threads = [
             thread("idle-old", minutesAgo: 50),
             thread("idle-new", minutesAgo: 5),
-            thread("waiting", status: .waiting, minutesAgo: 30),
+            thread("waiting-old", status: .waiting, minutesAgo: 30),
+            thread("waiting-new", status: .waiting, needsYou: true, minutesAgo: 20),
             thread("unread", needsYou: true, minutesAgo: 1),
+            thread("unread-failed", status: .error, needsYou: true, minutesAgo: 40),
+            thread("read-stopped", status: .stopped, minutesAgo: 45),
             thread("running", status: .running, minutesAgo: 2),
             thread("snoozed", minutesAgo: 1, snoozed: now.addingTimeInterval(60)),
             thread("woke", minutesAgo: 1, snoozed: now.addingTimeInterval(-60)),
             thread("archived", minutesAgo: 1, archived: now),
         ]
         let sections = ThreadSections.build(threads, now: now)
-        XCTAssertEqual(sections.needsYou.map(\.id), ["unread", "waiting"])
+        XCTAssertEqual(sections.inbox.map(\.id), ["waiting-new", "waiting-old", "unread-failed", "unread", "read-stopped", "woke", "idle-new", "idle-old"])
         XCTAssertEqual(sections.running.map(\.id), ["running"])
-        XCTAssertEqual(sections.inbox.map(\.id), ["woke", "idle-new", "idle-old"])
+        XCTAssertEqual(sections.needsYou.map(\.id), ["waiting-new", "waiting-old", "unread-failed", "unread"])
         XCTAssertEqual(ThreadSections.snoozed(threads, now: now).map(\.id), ["snoozed"])
     }
 

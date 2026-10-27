@@ -1,41 +1,41 @@
 import Foundation
 
-/// The inbox's sections, top to bottom.
+/// The inbox's sections, top to bottom. Inbox comes first because it's
+/// what Mike acts on; Running sits at the bottom, since there's nothing to
+/// do with those threads until they finish (Mike asked 27 Oct).
 public enum InboxSection: String, Sendable, CaseIterable {
-    case needsYou, running, inbox
+    case inbox, running
 
     public var title: String {
         switch self {
-        case .needsYou: return "Needs you"
-        case .running: return "Running"
         case .inbox: return "Inbox"
+        case .running: return "Running"
         }
     }
 }
 
-/// The sidebar's three sections.
+/// The sidebar's two sections.
 public struct ThreadSections: Sendable, Equatable {
-    public var needsYou: [ThreadSummary] = []
-    public var running: [ThreadSummary] = []
     public var inbox: [ThreadSummary] = []
+    public var running: [ThreadSummary] = []
 
-    public init(needsYou: [ThreadSummary] = [], running: [ThreadSummary] = [], inbox: [ThreadSummary] = []) {
-        self.needsYou = needsYou
-        self.running = running
+    public init(inbox: [ThreadSummary] = [], running: [ThreadSummary] = []) {
         self.inbox = inbox
+        self.running = running
     }
 
-    /// Needs you: waiting on an approval or question, or finished and unread.
     /// Running: a turn is underway, or background sub-agents or jobs are
     /// still going (an unread reply waits there with its dot until they're
-    /// done: the thread isn't finished yet). Inbox: everything else. Snoozed
-    /// and archived threads are left out. Each section is newest activity
-    /// first.
+    /// done: the thread isn't finished yet). Inbox: everything else, what
+    /// most needs Mike first (see `urgency`), newest first within that. A
+    /// question or approval goes in the inbox even with background work
+    /// going, since the thread is stuck until he answers. Snoozed and
+    /// archived threads are left out. Running is newest activity first.
     public static func build(_ threads: some Sequence<ThreadSummary>, now: Date) -> ThreadSections {
         var sections = ThreadSections()
         for thread in threads where !thread.isArchived && !thread.isSnoozed(at: now) {
             if thread.status == .waiting || (thread.needsYou && !thread.isWorkingInBackground) {
-                sections.needsYou.append(thread)
+                sections.inbox.append(thread)
             } else if thread.status == .running || thread.status == .starting || thread.isWorkingInBackground {
                 sections.running.append(thread)
             } else {
@@ -45,19 +45,34 @@ public struct ThreadSections: Sendable, Equatable {
         let newestFirst: (ThreadSummary, ThreadSummary) -> Bool = {
             $0.lastActivityAt != $1.lastActivityAt ? $0.lastActivityAt > $1.lastActivityAt : $0.id < $1.id
         }
-        sections.needsYou.sort(by: newestFirst)
+        sections.inbox.sort {
+            let (a, b) = (urgency($0), urgency($1))
+            return a != b ? a < b : newestFirst($0, $1)
+        }
         sections.running.sort(by: newestFirst)
-        sections.inbox.sort(by: newestFirst)
         return sections
     }
 
-    public var all: [ThreadSummary] { needsYou + running + inbox }
+    /// How much an inbox thread wants Mike, lowest first. 0: stuck on his
+    /// answer to a question or approval. 1: finished unread with a failure
+    /// or cut-off turn. 2: finished unread. 3: read, but its last turn
+    /// failed or was stopped, so it's still not done. 4: read and done.
+    public static func urgency(_ thread: ThreadSummary) -> Int {
+        let broken = thread.status == .error || thread.status == .stopped
+        if thread.status == .waiting { return 0 }
+        if thread.needsYou { return broken ? 1 : 2 }
+        return broken ? 3 : 4
+    }
+
+    /// The inbox threads waiting on Mike or not read yet (the Dock badge).
+    public var needsYou: [ThreadSummary] { inbox.filter { $0.status == .waiting || $0.needsYou } }
+
+    public var all: [ThreadSummary] { inbox + running }
 
     public subscript(section: InboxSection) -> [ThreadSummary] {
         switch section {
-        case .needsYou: return needsYou
-        case .running: return running
         case .inbox: return inbox
+        case .running: return running
         }
     }
 

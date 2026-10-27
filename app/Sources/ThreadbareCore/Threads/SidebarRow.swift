@@ -39,11 +39,11 @@ public struct ThreadRowLook: Sendable, Equatable {
     public var unread: Bool
     /// Semibold title: the thread needs Mike or is unread.
     public var emphasised: Bool
-    /// The status is said in words. Under a heading that already says it
-    /// ("Needs you", "Running") the row doesn't repeat it: the word took
-    /// about 60 pt of the title line, so the rows that mattered most had
-    /// the most cut-off titles. A waiting row shows how long it has waited
-    /// in the needs-you colour instead, and a running row just its spinner.
+    /// The status is said in words. Under the Running heading a working
+    /// row doesn't repeat it (the word took about 60 pt of the title line)
+    /// and shows just its spinner. Waiting rows keep "Needs you": since
+    /// Needs you merged into the inbox, the word is what says why a row
+    /// sits at the top.
     public var labelled: Bool
 
     public init(status: ThreadRowStatus, unread: Bool, emphasised: Bool, labelled: Bool = true) {
@@ -63,10 +63,7 @@ public struct ThreadRowLook: Sendable, Equatable {
         }
         unread = thread.needsYou && status != .needsYou && status != .working
         emphasised = thread.needsYou || status == .needsYou
-        switch (status, section) {
-        case (.needsYou, .needsYou?), (.working, .running?): labelled = false
-        default: labelled = true
-        }
+        labelled = !(status == .working && section == .running)
     }
 
     /// How long a running turn has been going, where the time would be:
@@ -139,6 +136,27 @@ public enum AccountName {
         let local = localPart(full)
         let clashes = siblings.filter { localPart(title($0)) == local }
         return clashes.isEmpty ? local : full
+    }
+
+    /// A name for a card, where a whole address doesn't fit: the part
+    /// before the @ when that's the only one, else the domain's first part
+    /// ("cannstudios", "gangbusters", "convex"), which is how Mike tells
+    /// his logins apart. Codex as `short`; the whole address when neither
+    /// is unique.
+    public static func label(_ id: String, accounts: [Account]) -> String {
+        guard let account = accounts.first(where: { $0.id == id }) else { return id }
+        if account.provider == "codex" { return short(id, accounts: accounts) }
+        let full = title(account)
+        guard let at = full.firstIndex(of: "@") else { return full }
+        let siblings = accounts.filter { $0.id != id && $0.provider == account.provider }.map(title)
+        let local = localPart(full)
+        if !siblings.contains(where: { localPart($0) == local }) { return local }
+        func domain(_ address: String) -> String {
+            guard let at = address.firstIndex(of: "@") else { return address }
+            return String(address[address.index(after: at)...].prefix { $0 != "." })
+        }
+        let own = domain(String(full[at...]))
+        return own.isEmpty || siblings.contains(where: { domain($0) == own }) ? full : own
     }
 
     static func localPart(_ address: String) -> String {
