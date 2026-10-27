@@ -34,6 +34,25 @@ The scripts:
 - `restart.sh`, `kill.sh` and `install.sh` work like Token Stats'. `kill.sh`
   only matches the staged app's own binary path.
 - `icons/threadbare.png` becomes the app icon if it's there.
+- The bundle records what it was built from in `Contents/Resources/build.json`
+  (commit, the tree hash of `app/`, the checkout), and carries
+  `stage-update.sh`.
+
+The installed app then keeps itself current (`AppUpdate.swift`). Every five
+minutes it reads main's tree hash for `app/` in the checkout it was built
+from; when that differs from what's running it builds the commit in the
+background with `stage-update.sh` (release, `nice`d, from a clone of main
+under `~/Library/Caches/Threadbare/update`, so an agent's half-done edits
+in the working tree are never built) into `~/Applications/.Threadbare.app.next`.
+Quitting swaps the staged bundle into place, so the next launch is the new
+app; a launch that finds one staged (the app was killed rather than quit)
+swaps it in and relaunches; "Restart to Update to <commit>" in the app
+menu does it right away. The build's output goes to
+`~/Library/Logs/threadbare-update.log`; the app's own log says what it
+decided. Only the installed bundle path does this, not a dev app, perf or
+screenshot run, and `--no-update` turns it off for a launch. An app built
+before `build.json` existed stays as it is until `install.sh` or
+`restart.sh` is run once.
 
 The app finds the runner through its data folder,
 `~/Library/Application Support/Threadbare/` (`runner.json` for the port,

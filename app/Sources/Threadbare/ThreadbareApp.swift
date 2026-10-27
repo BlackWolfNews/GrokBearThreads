@@ -8,8 +8,13 @@ struct ThreadbareApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var delegate
     @State private var app = AppModel.shared
     @State private var zoom = TextZoom.shared
+    @State private var updater = AppUpdater.shared
 
     init() {
+        // A build staged while the app was last running (and it was killed
+        // rather than quit, or quitting couldn't swap it): put it in place
+        // and start again as the new app, before anything else is set up.
+        if AppUpdater.applyStagedAtLaunch() { exit(0) }
         UserDefaults.standard.register(defaults: [
             // AppKit treats command-line arguments it can't pair up as files
             // to open, and then skips opening the window.
@@ -37,6 +42,12 @@ struct ThreadbareApp: App {
         .defaultLaunchBehavior(.presented)
         .restorationBehavior(.disabled)
         .commands {
+            CommandGroup(after: .appInfo) {
+                // Only while a newer build is staged (AppUpdater).
+                if let staged = updater.staged {
+                    Button("Restart to Update to \(staged.short)") { updater.restartToUpdate() }
+                }
+            }
             CommandGroup(replacing: .newItem) {
                 Button("New Thread") { app.newThread() }
                     .keyboardShortcut("n")
@@ -115,7 +126,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             #if DEBUG
             Automation.startIfAsked(app: app)
             #endif
+            AppUpdater.shared.start()
         }
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        MainActor.assumeIsolated { AppUpdater.shared.applyAtQuit() }
     }
 
     func applicationDidBecomeActive(_ notification: Notification) {

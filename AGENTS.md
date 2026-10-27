@@ -69,7 +69,14 @@ if `tb` isn't found (an older runner, or outside a thread), use
 - Never run `app/restart.sh` or `app/install.sh` yourself: they replace and
   relaunch Mike's own app, in front of his work, and throw away whatever
   he's typed but not sent. To see an app change, use `app/Tools/dev-app.sh`
-  (below); if his installed app needs updating, tell him the command.
+  (below). His installed app updates itself: a few minutes after `app/`
+  changes on main it builds that commit in the background
+  (`app/stage-update.sh`, from its own clone under
+  `~/Library/Caches/Threadbare/update`, never the working tree) and swaps
+  it in when he next quits or relaunches, or from "Restart to Update" in
+  the app menu. So merge an app change to main and tell him it's waiting;
+  `~/Library/Logs/threadbare-update.log` has the build output if it
+  doesn't turn up.
 - `tb show <id>` reads a thread as text (`--tools` for results, each under
   its own call), `tb events <id> --from N --to M` a range of events by seq,
   `tb logs` the runner log, and `tb export <id>` copies a thread into

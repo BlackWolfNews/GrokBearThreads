@@ -228,3 +228,16 @@ driving it from a script") and in AGENTS.md ("Seeing and driving the app").
   afterwards.
 - The real switch to releases happens after review, when no thread is
   running, through the deferred restart itself.
+
+## The app updating itself
+
+Added 2026-10-27. The runner has releases and a deploy script; the app
+needed Mike to run `restart.sh`, which also threw away his composer. Now
+the installed app follows main on its own (`app/AppUpdate.swift`,
+`app/stage-update.sh`, the README's "Build and run" section): it notices a
+change under `app/` on main within five minutes, builds it in the
+background from a clone (never the working tree), and swaps the bundle in
+on quit, at the next launch, or from "Restart to Update" in the app menu.
+Only `app/` counts: a runner or docs commit doesn't rebuild the app. The
+build is `nice`d and uses its own scratch folder, so it never waits on or
+disturbs an agent's `swift build` in the checkout.
