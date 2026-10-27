@@ -299,8 +299,26 @@ enum Automation {
             switch c["mode"] as? String {
             case "archive": app.showArchive()
             case "snoozed": app.sidebarMode = .snoozed
+            case "scheduled": app.showSchedules()
             default: app.sidebarMode = .inbox
             }
+            return "ok"
+        case "schedule":
+            // The schedule editor: {"id": "sc_…"} edits one; without an id
+            // it's a new one, from the open thread's composer (its draft
+            // too) unless {"from": "none"}, as the Scheduled view's button.
+            if let id = c["id"] as? String {
+                guard app.schedule(id) != nil else { return "error no schedule \(id)" }
+                app.editSchedule(id)
+            } else if c["from"] as? String == "none" {
+                app.newSchedule(from: nil)
+            } else {
+                app.newSchedule(from: app.selectedThread, draftKey: app.selection ?? "new")
+            }
+            try? await Task.sleep(for: .milliseconds(400))
+            return "ok"
+        case "close-schedule":
+            app.scheduleEditor = nil
             return "ok"
         case "expand", "collapse":
             return setExpanded(c, open: name == "expand", app: app)
@@ -395,7 +413,11 @@ enum Automation {
         case "screenshot":
             guard let path = c["path"] as? String, path.hasPrefix("/") else { return "error path must be absolute" }
             if let refused = refusesToWrite(path) { return refused }
-            guard let window else { return "error no window" }
+            guard var window else { return "error no window" }
+            if c["sheet"] as? Bool == true {
+                guard let sheet = window.attachedSheet else { return "error no sheet" }
+                window = sheet
+            }
             // A dev-app.sh instance never runs screencapture itself: its temp
             // bundle has no Screen Recording permission (the capture is
             // refused, and macOS may ask Mike for it). dev-app.sh's shot runs
@@ -408,7 +430,13 @@ enum Automation {
         case "window":
             // The window's id for `screencapture -l`, once anything pending
             // has been drawn (as `screenshot` waits).
-            guard let window else { return "error no window" }
+            guard var window else { return "error no window" }
+            // {"sheet": true}: the sheet over it (the schedule editor), a
+            // window of its own that a capture of the main one leaves out.
+            if c["sheet"] as? Bool == true {
+                guard let sheet = window.attachedSheet else { return "error no sheet" }
+                window = sheet
+            }
             window.displayIfNeeded()
             try? await Task.sleep(for: .milliseconds(300))
             let size = AppDump.contentSize(window)
@@ -626,6 +654,11 @@ enum Automation {
             _ = hoveredCell?.debugHover(false)
             hoveredCell = nil
             return "ok"
+        }
+        // A schedule's row in the Scheduled view, by its id.
+        if let id = value as? String, app.schedule(id) != nil {
+            app.hoverOverride = id
+            return "ok \(id)"
         }
         let match = thread(value, app)
         guard let id = match.id else { return match.error }

@@ -3,8 +3,9 @@ import { parseArgs } from 'node:util';
 import path from 'node:path';
 import { loadConfig, readToken, runnerUrl } from './config.ts';
 import { RunnerClient } from './client.ts';
-import type { ImageRef, PersistedEvent, ThreadSummary } from './protocol.ts';
+import type { ImageRef, PersistedEvent, Schedule, ThreadSummary } from './protocol.ts';
 import { backgroundFlag } from './protocol.ts';
+import { parseWhen as parseLater, relativeFuture } from './when.ts';
 import { DEV_HELP, logsCommand, runDev } from './tb-dev.ts';
 
 const OPTIONS = {
@@ -22,6 +23,10 @@ const OPTIONS = {
   from: { type: 'string' },
   to: { type: 'string' },
   'until-done': { type: 'boolean' },
+  at: { type: 'string' },
+  cron: { type: 'string' },
+  tz: { type: 'string' },
+  title: { type: 'string' },
   // tb-dev.ts
   last: { type: 'string' },
   tools: { type: 'boolean' },
@@ -58,6 +63,12 @@ const HELP = `tb: talk to the Threadbare runner
   tb accounts
   tb actions <threadId> [--json]  the thread's actions, panels and patches (from its folder)
   tb run <threadId> <actionId>    run one: a command's output is printed and goes into the thread
+  tb schedule "text" (--at WHEN | --cron "0 9 * * 1-5") [--tz ZONE] [--title T]
+              [--thread ID | --cwd DIR [--account ID] [--model M] [--effort L] [--ask]]
+                                  sends the text later: once (--at 30m, 2h, 1d, tomorrow
+                                  or an ISO time) or on a cron; to a thread with --thread,
+                                  otherwise to a new thread each time
+  tb schedules [--json]           tb schedules run|pause|resume|delete <scheduleId>
 
 Thread ids can be shortened to any unique prefix.
 Uses THREADBARE_HOME and THREADBARE_PORT like the runner does.
@@ -82,6 +93,8 @@ const COMMAND_FLAGS: Record<string, string[]> = {
   move: [],
   delete: [],
   accounts: [],
+  schedule: ['at', 'cron', 'tz', 'title', 'thread', 'cwd', 'account', 'model', 'effort', 'ask', 'json'],
+  schedules: ['json'],
   status: ['json'],
   self: ['json'],
   restart: ['now', 'force', 'resume', 'no-resume', 'cancel', 'reason', 'thread', 'max-wait'],
@@ -321,6 +334,54 @@ async function run(client: RunnerClient, cmd: string, args: string[], f: Flags):
       for (const a of r.accounts) console.log(`${a.id === r.defaults.accountId ? '*' : ' '} ${a.id.padEnd(12)} ${a.title}`);
       return 0;
     }
+    case 'schedule': {
+      if (!args[0]) throw new Error('What should it send? tb schedule "text" --at 30m');
+      if (Boolean(f.at) === Boolean(f.cron)) throw new Error('Give --at (once) or --cron (repeating).');
+      const params: Record<string, unknown> = { text: args[0] };
+      if (f.at) params.at = parseLater(String(f.at), Date.now());
+      if (f.cron) params.cron = f.cron;
+      if (f.tz) params.timezone = f.tz;
+      if (f.title) params.title = f.title;
+      if (f.thread) params.threadId = await resolveId(client, String(f.thread));
+      else {
+        if (f.cwd) params.cwd = path.resolve(String(f.cwd));
+        if (f.account) params.accountId = f.account;
+        if (f.model) params.model = f.model;
+        if (f.effort) params.effort = f.effort;
+        if (f.ask) params.permissionMode = 'ask';
+      }
+      // A schedule an agent makes from a thread says which one.
+      if (process.env.THREADBARE_THREAD_ID) params.createdBy = process.env.THREADBARE_THREAD_ID;
+      const r = await client.call<{ schedule: Schedule }>('schedules.create', params);
+      if (f.json) console.log(JSON.stringify(r.schedule));
+      else printSchedules([r.schedule]);
+      return 0;
+    }
+    case 'schedules': {
+      const [action, id] = args;
+      if (!action) {
+        const r = await client.call<{ schedules: Schedule[] }>('schedules.list', {});
+        if (f.json) console.log(JSON.stringify(r.schedules, null, 2));
+        else if (!r.schedules.length) console.log('No schedules.');
+        else printSchedules(r.schedules);
+        return 0;
+      }
+      if (!id) throw new Error(`tb schedules ${action} <scheduleId>`);
+      if (action === 'delete') {
+        await client.call('schedules.delete', { scheduleId: id });
+        console.log('deleted');
+        return 0;
+      }
+      if (action === 'run') {
+        const r = await client.call<{ threadId: string }>('schedules.run', { scheduleId: id });
+        console.log(`sent to ${r.threadId}`);
+        return 0;
+      }
+      if (action !== 'pause' && action !== 'resume') throw new Error(`Unknown: tb schedules ${action}. It's run, pause, resume or delete.`);
+      const r = await client.call<{ schedule: Schedule }>('schedules.update', { scheduleId: id, paused: action === 'pause' });
+      printSchedules([r.schedule]);
+      return 0;
+    }
     default: {
       const code = await runDev(client, cmd, args, f, (prefix) => resolveId(client, prefix));
       if (code !== undefined) return code;
@@ -379,6 +440,15 @@ function parseWhen(s: string): string {
   const t = Date.parse(s);
   if (Number.isNaN(t)) throw new Error(`Can't read the time ${s}`);
   return new Date(t).toISOString();
+}
+
+function printSchedules(list: Schedule[]): void {
+  for (const sc of list) {
+    const state = sc.finishedAt ? 'done' : sc.paused ? 'paused' : sc.nextRunAt ? `next ${relativeFuture(sc.nextRunAt, Date.now())}` : 'no more runs';
+    const target = sc.threadId ? `thread ${sc.threadId.slice(0, 8)}` : `new thread in ${sc.cwd}`;
+    const last = sc.lastRun && sc.lastRun.outcome !== 'sent' ? `  (last run ${sc.lastRun.outcome}: ${sc.lastRun.note ?? ''})` : '';
+    console.log(`${sc.id.slice(0, 8)}  ${sc.title}  [${sc.whenText}, ${state}]  ${target}${last}`);
+  }
 }
 
 function printThreads(threads: ThreadSummary[], json: boolean): void {

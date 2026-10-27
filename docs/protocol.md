@@ -144,6 +144,39 @@ type ImageRef = {
   width?: number
   height?: number
 }
+
+type Schedule = {
+  id: string
+  title: string         // for lists; default the first line of text
+  text: string          // the message it sends each time
+  at?: string           // a one-off: when it runs
+  cron?: string         // or repeating: a 5-field cron ("0 9 * * 1-5"), or
+                        // @hourly, @daily, @weekly, @monthly, @yearly
+  timezone?: string     // IANA zone the cron is read in; absent means the
+                        // Mac's own zone, whatever it is at the time
+  whenText: string      // "Weekdays at 9:00", "Once, Tue 28 Oct at 15:30":
+                        // the runner's words for at/cron, for every client
+  threadId?: string     // sends to this thread. Absent: starts a new thread
+                        // each time, with the settings below
+  cwd?: string          // new-thread settings, as in threads.create
+  accountId?: string
+  model?: string
+  effort?: EffortLevel
+  permissionMode?: "full" | "ask"
+  paused: boolean
+  createdAt: string
+  updatedAt: string
+  createdBy?: string    // the thread whose agent made it; absent for a person
+  nextRunAt?: string    // absent while paused, or once a one-off has run
+  finishedAt?: string   // a one-off that has run (kept for 7 days, then dropped)
+  runs: number          // how many times it has sent its message
+  lastRun?: {
+    at: string
+    outcome: "sent" | "skipped" | "failed"
+    threadId?: string   // the thread it sent to or started
+    note?: string       // why it was skipped or failed
+  }
+}
 ```
 
 ## Events
@@ -165,7 +198,7 @@ Persisted event types (stored in `events.ndjson`, returned by `threads.events`):
 
 | type | fields |
 |---|---|
-| `user.message` | `text`, `images: ImageRef[]`, `origin?: "runner"` (set when the runner sent the message by itself, such as the resume after a restart; absent for anything a person or client sent) |
+| `user.message` | `text`, `images: ImageRef[]`, `origin?: "runner" \| "schedule"` (`runner` when the runner sent the message by itself, such as the resume after a restart; `schedule` when a schedule sent it, with `scheduleId`; absent for anything a person or client sent), `scheduleId?` |
 | `assistant.text` | `itemId`, `text` (complete markdown for that block) |
 | `reasoning` | `itemId`, `text` (summary) |
 | `tool.call` | `itemId`, `name` (raw tool name), `kind` (`command` \| `read` \| `edit` \| `write` \| `search` \| `web` \| `mcp` \| `task` \| `todo` \| `other`), `title` (one line, e.g. "npm test" or "Edit src/a.ts"), `input` (object, large strings truncated to 16 KB) |
@@ -213,11 +246,17 @@ replaces whatever the deltas built up.
 | `media.import` | `{ path: string }` | `{ image: ImageRef }` copies a file into `inbox/` and reads its size |
 | `actions.run` | `{ threadId, actionId }` | For a prompt action, `{ turnId }`: its prompt was sent as a message (as `threads.send`). For a command action, `{ ok, exitCode?, durationMs, seq }` once the command has finished, with its output in the transcript as the `action.run` event at `seq`. The command runs in the thread's folder through a login shell with the thread's variables (`THREADBARE_THREAD_ID` and the rest) and is stopped after 10 minutes. `-32602` for an action the thread doesn't have, `-32020` while the same action is still running |
 | `panels.render` | `{ threadId, panelId }` | `{ image?: ImageRef, note?: string }` draws an `image` panel now: for `xcode.simulator`, a screenshot of the booted simulator (`xcrun simctl io booted screenshot`), written to the same file each time under the thread's `panels/`. With no device booted (or another failure) there's only `note`. Slow: it waits for the screenshot. `-32602` for a panel the thread doesn't have |
+| `schedules.list` | `{ threadId?: string }` | `{ schedules: Schedule[] }`, soonest `nextRunAt` first, then the paused and finished ones. With `threadId`, only the ones that send to that thread or were made by it |
+| `schedules.create` | `{ text: string, title?: string, at?: string, cron?: string, timezone?: string, threadId?: string, cwd?, accountId?, model?, effort?, permissionMode?, paused?: boolean, createdBy?: string }` | `{ schedule: Schedule }`. Exactly one of `at` and `cron`. An `at` in the past runs straight away. With `threadId` it sends there, otherwise it starts a new thread each time (`cwd` defaults like `threads.create`'s, checked now). A bad cron or zone is `-32602` with a message saying what's wrong |
+| `schedules.update` | `{ scheduleId, title?, text?, at?: string, cron?: string, timezone?: string \| null, paused?: boolean, cwd?, accountId?, model?: string \| null, effort?: EffortLevel \| null, permissionMode? }` | `{ schedule: Schedule }`. Setting `at` drops `cron` and the other way round. A new time works out `nextRunAt` again; so does unpausing. Setting `at` on a finished one-off makes it run again then. The target thread can't be changed (make a new schedule) |
+| `schedules.delete` | `{ scheduleId }` | `{}` |
+| `schedules.run` | `{ scheduleId }` | `{ schedule: Schedule, threadId: string, turnId: string }` runs it now, as if it were due, even when paused. A repeating schedule keeps its `nextRunAt`; a one-off is finished |
+| `schedules.preview` | `{ cron?: string, at?: string, timezone?: string, count?: number }` | `{ whenText: string, runs: string[] }`, the next `count` (default 5, at most 20) times it would run, for an editor to show as someone types. `-32602` with the reason for a cron or zone it can't read |
 | `runner.status` | `{}` | `{ version, release?, branch?, pid, startedAt, home, logFile, liveClis, running: string[], background: { threadId, tasks: string[] }[], pendingRestart?: { when, reason?, release?, resumeThreadId?, requestedAt, backgroundUntil?, waitingFor: string[] }, rolledBack?: { from, at }, update?: { state, checkout?, reason?, checkedAt?, commit?, release?, logFile? } }`. `running` lists the threads that are starting, running or waiting on an approval or a question; `background` the threads whose CLI is still running background shells or subagents (`tasks` describes each). A restart waits for both. `branch` is the branch the release was built from. `rolledBack` is set when this release is running because `launch.mjs` went back to it from `from`, which kept crashing at startup (and nobody has activated it on purpose since). `update` is the runner following main by itself (docs/dev-tools.md): `state` is `off` (`reason` says why), `idle`, `checking`, `building`, `waiting` (`release` is built and starts on the pending restart) or `failed` (`reason` is the error; `logFile` has the build's output); `commit` is main's tip at the last check (`checkedAt`) |
 | `runner.restart` | `{ when?: "idle" \| "now", resume?: { threadId, text }, reason?: string, release?: string, backgroundWaitMs?: number, cancel?: boolean }` | `{ scheduled: boolean, waitingFor: string[], background?: { threadId, tasks: string[] }[], note?: string, noResume?: string }`. See Restarts below. `scheduled` is true once the restart is saved; an empty `waitingFor` means it is happening now. `background` is the background work among `waitingFor`. `release` is the release the restart should come back on (the deploy script sets it). `backgroundWaitMs` limits how long background shells and subagents hold the restart. `cancel: true` withdraws a pending restart that hasn't begun and returns `scheduled: false` (`-32020` once it has begun), with a `note` when it also put `current` back. `noResume` says why the `resume` won't be sent as things stand (the thread has already been resumed 3 times in the last hour), so whoever asked can say so rather than wait for it. A runner older than this answers `-32601` |
 
 Errors use JSON-RPC error objects: `-32602` bad params, `-32004` thread not
-found, `-32010` account not found, `-32020` busy (e.g. two sends racing),
+found, `-32005` schedule not found, `-32010` account not found, `-32020` busy (e.g. two sends racing),
 `-32000` anything else with a readable `message`.
 
 ## Notifications (runner to app)
@@ -228,6 +267,7 @@ found, `-32010` account not found, `-32020` busy (e.g. two sends racing),
 | `thread.event` | `{ threadId, event: Event }` only for subscribed threads, persisted and transient |
 | `thread.deleted` | `{ threadId }` sent to every connected client when a thread is deleted |
 | `accounts.updated` | `{ accounts: Account[] }` sent to every connected client when what the runner knows about an account changes: its `models` once the CLI has been asked, or its `defaultModel` once a turn has shown it. Replaces the list from `hello` |
+| `schedules.updated` | `{ schedules: Schedule[] }` sent to every connected client whenever any schedule changes (made, edited, run, deleted, or its thread deleted). The whole list, in `schedules.list` order |
 | `runner.notice` | `{ level: "info" \| "warning" \| "error", message }`. Also sent straight after the `hello` result for things the client missed (startup problems, a missing `claude` binary) |
 
 ## Restarts
@@ -373,6 +413,46 @@ A client shows what it can: a `url` panel in a web view, an `image` panel
 by asking `panels.render` now and then while it's on screen, and an
 unknown `kind` as a page if it has a `url`.
 
+## Schedules
+
+A schedule sends a message at a set time, once (`at`) or over and over
+(`cron`), like Convex's scheduled functions and crons. It either sends to
+a thread that already exists or starts a new thread each time. They're
+kept in `schedules.json` in the data dir.
+
+- **Cron.** Five fields: minute, hour, day of month, month, day of week
+  (0 or 7 is Sunday), with `*`, lists (`1,15`), ranges (`1-5`), steps
+  (`*/15`, `9-17/2`) and names (`jan`, `mon`). When both day fields are
+  restricted, either one matching is enough, as in standard cron. Read in
+  `timezone`, or the Mac's own zone. A time that doesn't exist on a
+  daylight-saving day runs at the first minute that does; one that happens
+  twice runs once.
+- **Sending.** The message starts with a line saying which schedule sent
+  it, `[Scheduled: "<title>", <whenText>]`, so the agent knows Mike didn't
+  just type it, and its `user.message` has `origin: "schedule"` and
+  `scheduleId`. A message for a thread that's busy waits for the running
+  turn to end (it doesn't go into it), then starts its own turn. A snoozed
+  or archived thread comes back to the inbox, as with any message.
+- **New threads** get the schedule's title and settings and are made the
+  way `threads.create` makes them. A repeating schedule whose last thread is
+  still starting, running or waiting on Mike skips that run
+  (`lastRun.outcome: "skipped"`) rather than pile up threads.
+- **Late runs.** The runner checks at least every 30 seconds, so a Mac
+  that was asleep (when timers stop) catches up soon after it wakes. A run
+  that was due while the runner was stopped or the Mac slept happens once
+  as soon as it can, however many were missed; then `nextRunAt` is the
+  next time after now. While the runner is restarting, a due run waits for
+  the new one.
+- **Failures.** A run that can't send (the folder or account has gone)
+  records `lastRun.outcome: "failed"` and a `note`, and a repeating
+  schedule carries on next time. Deleting a thread deletes the schedules
+  that send to it.
+- **Agents** make and change schedules with the `threadbare` tools
+  (`schedule_message`, `list_schedules`, `update_schedule`,
+  `delete_schedule`); `createdBy` is their thread. By default an agent's
+  schedule sends to its own thread ("check the deploy again in 20
+  minutes").
+
 ## Ordering and reconnects
 
 - Persisted events for a thread are delivered in `seq` order with no gaps.
@@ -397,7 +477,8 @@ Every Claude session gets an in-process MCP server called `threadbare`
 (`runner/src/threadbare-mcp.ts`), bound to its own thread, so an agent can
 drive Threadbare itself: `list_threads`, `read_thread`, `list_accounts`,
 `create_thread`, `send_message`, `update_thread`, `move_thread`,
-`interrupt_thread` and `delete_thread`. They call the same runner methods as
+`interrupt_thread`, `delete_thread`, and `schedule_message`,
+`list_schedules`, `update_schedule` and `delete_schedule` (see Schedules). They call the same runner methods as
 the requests above, so once a restart has begun `create_thread` and
 `send_message` get its "send again in a moment" too. Messages an agent sends
 to another thread (or as a new thread's first message) start with a line

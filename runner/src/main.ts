@@ -6,6 +6,7 @@ import { loadConfig, ensureHome, readToken, paths, recordListening, DEFAULT_CWD,
 import { RELEASE, markGoodLater, readRelease, takeRollbackNotice, tellLaunchListening } from './release.ts';
 import { RunnerUpdater } from './update.ts';
 import { Restarter, restartMethods } from './restart.ts';
+import { Scheduler, scheduleMethods } from './schedules.ts';
 import { createLogger } from './log.ts';
 import { ThreadStore } from './store.ts';
 import { AccountRegistry } from './accounts.ts';
@@ -59,11 +60,12 @@ async function main(): Promise<void> {
   // Every session gets tools for driving Threadbare itself, bound to its
   // own thread. Sessions only start after the runner exists.
   let runner!: Runner;
+  let scheduler!: Scheduler;
   const claude = new ClaudeAdapter({
     claudePath: cfg.claudePath,
     registry,
     log,
-    mcpServersFor: (threadId) => ({ [SERVER_NAME]: threadbareMcpServer(runner, threadId) }),
+    mcpServersFor: (threadId) => ({ [SERVER_NAME]: threadbareMcpServer(runner, threadId, scheduler) }),
     alwaysAsk: ALWAYS_ASK_TOOLS,
   });
   runner = new Runner({
@@ -75,6 +77,10 @@ async function main(): Promise<void> {
     log,
   });
   runner.start();
+  // After the threads are loaded, so a schedule that came due while the
+  // runner was stopped finds its thread.
+  scheduler = new Scheduler({ runner, home: cfg.home, clock: realClock, log });
+  scheduler.start();
   if (swept) runner.startupNotice('info', `Stopped ${swept === 1 ? 'a process group' : `${swept} process groups`} left running by the previous runner.`);
 
   // launch.mjs went back to this release because a newer one kept crashing
@@ -115,7 +121,7 @@ async function main(): Promise<void> {
     token: readToken(cfg.home),
     runner,
     log,
-    methods: restartMethods(restarter),
+    methods: { ...restartMethods(restarter), ...scheduleMethods(scheduler) },
     helloNotices: () => [...(rolledBack ? [{ level: 'warning' as const, message: rolledBack }] : []), ...restarter.helloNotices()],
   });
   let port: number;
@@ -151,6 +157,7 @@ async function main(): Promise<void> {
     log.info('runner stopping', { signal });
     // Whatever stopped it, a pending restart has now happened.
     restarter.stopping();
+    scheduler.stop();
     try {
       await runner.shutdown();
       await server.close().catch(() => {});

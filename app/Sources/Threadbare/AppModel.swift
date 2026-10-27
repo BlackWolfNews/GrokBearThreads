@@ -3,7 +3,7 @@ import Observation
 import ThreadbareCore
 
 enum SidebarMode: Equatable {
-    case inbox, snoozed, archive
+    case inbox, snoozed, archive, scheduled
 }
 
 enum ConnectionState: Equatable {
@@ -55,6 +55,14 @@ final class AppModel {
     var newThreadModel: String?
     var newThreadEffort: String?
     var newThreadAsk = false
+    /// Every schedule, in the runner's order (soonest first, then the
+    /// paused and finished ones). Replaced whole by `schedules.updated`.
+    var schedules: [Schedule] = []
+    /// The runner knows about schedules: an older one answers
+    /// `schedules.list` with -32601, and then the sidebar has no Scheduled row.
+    var schedulesSupported = false
+    /// The schedule editor sheet, when it's open (ScheduleEditor).
+    var scheduleEditor: ScheduleEditorState?
     /// A sidebar row drawn as if the pointer were over it, so the screenshot
     /// run can show the hover buttons without moving the mouse.
     var hoverOverride: String?
@@ -197,6 +205,7 @@ final class AppModel {
                 threadsLoaded = true
                 archiveLoaded = true
                 onThreadsLoaded?()
+                loadSchedules()
                 for session in sessions.values where session.state == .loaded {
                     await session.subscribe()
                 }
@@ -252,6 +261,9 @@ final class AppModel {
                 // The runner learned something (its model lists, a
                 // default it saw a turn run on): replaces hello's list.
                 accounts = list
+            case .schedulesUpdated(let list):
+                schedules = list
+                schedulesSupported = true
             case .runnerNotice(let level, let message):
                 notice(level: level, message)
             case .other:

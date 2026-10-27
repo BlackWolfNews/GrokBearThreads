@@ -100,6 +100,8 @@ struct ThreadbareApp: App {
                 Button("Show Inbox") { app.sidebarMode = .inbox }
                 Button("Show Hibernating") { app.sidebarMode = .snoozed }
                 Button("Show Archive") { app.showArchive() }
+                Button("Show Scheduled") { app.showSchedules() }
+                    .disabled(!app.schedulesSupported)
             }
         }
     }

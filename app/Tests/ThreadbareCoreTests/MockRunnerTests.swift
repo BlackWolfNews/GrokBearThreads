@@ -230,6 +230,58 @@ final class MockRunnerTests: XCTestCase {
         XCTAssertTrue(message.isFromRunner)
     }
 
+    /// The mock's schedules: its demo list, a preview and a cron it can't
+    /// read, and a run that sends a schedule's message into the thread.
+    func testSchedules() async throws {
+        let client = try await connect()
+        defer { client.close() }
+        _ = try await client.hello(version: "test")
+        let list = try await client.listSchedules()
+        XCTAssertTrue(list.contains { $0.paused }, "the demo has a paused schedule")
+        let forThread = try await client.listSchedules(threadId: "demo_release_notes")
+        XCTAssertEqual(forThread.map(\.id), ["sc_demo_prs"])
+
+        let preview = try await client.previewSchedule(.cron("0 9 * * 1-5"))
+        XCTAssertEqual(preview.whenText, "Weekdays at 9:00")
+        XCTAssertEqual(preview.runs.count, 3)
+        do {
+            _ = try await client.previewSchedule(.cron("0 25 * * *"))
+            XCTFail("hour 25 should be refused")
+        } catch RPCError.server(let code, let message) {
+            XCTAssertEqual(code, -32602)
+            XCTAssertTrue(message.contains("hour"), message)
+        }
+
+        let made = try await client.createSchedule(NewScheduleRequest(text: "Check it.", title: "Check", when: .cron("0 * * * *"), threadId: "demo_settings_tabs"))
+        XCTAssertEqual(made.whenText, "Every hour")
+        XCTAssertNotNil(made.nextRunAt)
+        let paused = try await client.updateSchedule(made.id, ScheduleUpdate(paused: true))
+        XCTAssertTrue(paused.paused)
+        XCTAssertNil(paused.nextRunAt)
+
+        let before = try await client.events(threadId: "demo_settings_tabs").lastSeq
+        let run = try await client.runSchedule(made.id)
+        XCTAssertEqual(run.threadId, "demo_settings_tabs")
+        XCTAssertEqual(run.schedule.runs, 1)
+        var message: UserMessage?
+        for _ in 0..<100 where message == nil {
+            let events = try await client.events(threadId: "demo_settings_tabs", afterSeq: before).events
+            if case .user(let found)? = TranscriptModel(events: events).items.first?.content { message = found }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        XCTAssertTrue(message?.isFromSchedule == true)
+        XCTAssertEqual(message?.scheduledHeader?.title, "Check")
+        XCTAssertEqual(message?.scheduledHeader?.body, "Check it.")
+
+        try await client.deleteSchedule(made.id)
+        do {
+            try await client.deleteSchedule(made.id)
+            XCTFail("it's gone")
+        } catch RPCError.server(let code, _) {
+            XCTAssertEqual(code, RPCError.scheduleNotFound)
+        }
+    }
+
     func testWrongTokenIsUnauthorized() async throws {
         let endpoint = try RunnerConfig.endpoint(dataDir: dataDir)
         let client = RPCClient(transport: WebSocketTransport(url: endpoint.url, token: "not-the-token"))

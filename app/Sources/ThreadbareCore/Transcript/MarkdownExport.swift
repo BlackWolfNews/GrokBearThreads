@@ -19,8 +19,10 @@ public enum MarkdownExport {
     public static func section(for row: TranscriptRow) -> String? {
         switch row.content {
         case .user(let message):
-            // The resume after a restart wasn't Mike talking.
-            var text = (message.isFromRunner ? "## Runner\n\n" : "## You\n\n") + message.text
+            // The resume after a restart, or a schedule's message, wasn't
+            // Mike talking.
+            let speaker = message.isFromRunner ? "Runner" : message.isFromSchedule ? "Schedule" : "You"
+            var text = "## \(speaker)\n\n" + message.text
             for image in message.images { text += "\n\n![image](\(image.path))" }
             return text
         case .assistant(let item):

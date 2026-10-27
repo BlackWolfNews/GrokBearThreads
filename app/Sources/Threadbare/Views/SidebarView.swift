@@ -28,6 +28,7 @@ struct SidebarView: View {
         case .inbox: InboxList()
         case .snoozed: SnoozedList()
         case .archive: ArchiveList()
+        case .scheduled: ScheduledList()
         }
     }
 }
@@ -184,6 +185,7 @@ extension SidebarMode {
         case .inbox: return [.snooze, .archive]
         case .snoozed: return [.unsnooze, .archive]
         case .archive: return [.unarchive]
+        case .scheduled: return []
         }
     }
 }
@@ -431,7 +433,7 @@ struct RowIconButtonStyle: ButtonStyle {
 
 /// A full-width sidebar row that does one thing: New thread at the top,
 /// Snoozed and Archive at the bottom.
-private struct SidebarButtonRow: View {
+struct SidebarButtonRow: View {
     let icon: String
     /// Drawn instead of the symbol when set (the bear in the footer).
     var image: NSImage? = nil
@@ -499,6 +501,12 @@ private struct SidebarFooter: View {
             }
             SidebarButtonRow(icon: "archivebox", title: "Den", count: app.archiveLoaded ? app.archivedCount : nil, size: TypeScale.sidebarFooter) {
                 app.showArchive()
+            }
+            // Only once the runner has said it knows about schedules.
+            if app.schedulesSupported {
+                SidebarButtonRow(icon: "clock", title: "Scheduled", count: app.activeScheduleCount, size: TypeScale.sidebarFooter) {
+                    app.showSchedules()
+                }
             }
         }
         .padding(.horizontal, SidebarMetrics.outerInset)
@@ -628,7 +636,7 @@ private struct ArchiveList: View {
     }
 }
 
-private struct EmptyNote: View {
+struct EmptyNote: View {
     let text: String
 
     var body: some View {
@@ -642,7 +650,7 @@ private struct EmptyNote: View {
 
 /// The top of the Snoozed and Archive views, where New thread is in the
 /// inbox: a back button, the view's name and its count.
-private struct ModeHeader: View {
+struct ModeHeader: View {
     @Environment(AppModel.self) private var app
     let title: String
     let count: Int?

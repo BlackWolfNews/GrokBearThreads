@@ -173,6 +173,12 @@ struct AppDump: Encodable {
             sections = [Section(name: "Snoozed", threads: app.snoozed.map { thread($0) })]
         case .archive:
             sections = [Section(name: "Archive", threads: app.archived.map { thread($0) })]
+        case .scheduled:
+            // Schedules in the thread shape: their state is the status.
+            sections = [Section(name: "Scheduled", threads: app.schedules.map { schedule in
+                Thread(id: schedule.id, title: schedule.title, status: schedule.paused ? "paused" : schedule.isFinished ? "finished" : "active",
+                       needsYou: false, unread: false, hovered: app.hoverOverride == schedule.id)
+            })]
         }
         let key = app.selection ?? "new"
         var transcript: Transcript?

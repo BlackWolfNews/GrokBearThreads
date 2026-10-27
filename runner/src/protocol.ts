@@ -181,7 +181,7 @@ export type TurnOutcome = 'completed' | 'interrupted' | 'failed';
 export type EventBody =
   // origin is set only on messages the runner sent by itself (the resume
   // after a restart).
-  | { type: 'user.message'; text: string; images: ImageRef[]; origin?: 'runner' }
+  | { type: 'user.message'; text: string; images: ImageRef[]; origin?: MessageOrigin; scheduleId?: string }
   | { type: 'assistant.text'; itemId: string; text: string }
   | { type: 'reasoning'; itemId: string; text: string }
   | { type: 'tool.call'; itemId: string; name: string; kind: ToolKind; title: string; input: Record<string, unknown> }
@@ -272,12 +272,43 @@ export const TRANSIENT_TYPES = new Set<string>(['assistant.text.delta', 'reasoni
 export type InProgressItem = { itemId: string; type: 'assistant.text' | 'reasoning'; text: string };
 
 // JSON-RPC error codes from docs/protocol.md.
+// A message sent at a set time, once (at) or over and over (cron). See
+// "Schedules" in docs/protocol.md.
+export type Schedule = {
+  id: string;
+  title: string;
+  text: string;
+  at?: string;
+  cron?: string;
+  timezone?: string;
+  whenText: string;
+  threadId?: string;
+  cwd?: string;
+  accountId?: string;
+  model?: string;
+  effort?: EffortLevel;
+  permissionMode?: PermissionMode;
+  paused: boolean;
+  createdAt: string;
+  updatedAt: string;
+  createdBy?: string;
+  nextRunAt?: string;
+  finishedAt?: string;
+  runs: number;
+  lastRun?: { at: string; outcome: 'sent' | 'skipped' | 'failed'; threadId?: string; note?: string };
+};
+
+// Who sent a message when it wasn't a person or a client: the runner by
+// itself (the resume after a restart), or a schedule (schedules.ts).
+export type MessageOrigin = 'runner' | 'schedule';
+
 export const ErrorCode = {
   parseError: -32700,
   invalidRequest: -32600,
   methodNotFound: -32601,
   badParams: -32602,
   threadNotFound: -32004,
+  scheduleNotFound: -32005,
   accountNotFound: -32010,
   busy: -32020,
   other: -32000,

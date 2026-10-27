@@ -12,6 +12,8 @@ struct ComposerControls: View {
     let canSend: Bool
     let onAttach: () -> Void
     let onSend: () -> Void
+    /// Opens the schedule editor with the draft, instead of sending it now.
+    let onSchedule: () -> Void
 
     var body: some View {
         let settings = ThreadSettings(app: app, thread: thread)
@@ -19,7 +21,7 @@ struct ComposerControls: View {
         let account = settings.account
         let ask = settings.ask
         HStack(spacing: 4) {
-            PlusButton { settings.plusMenu(attach: onAttach) }
+            PlusButton { settings.plusMenu(attach: onAttach, schedule: app.schedulesSupported ? onSchedule : nil) }
                 // Pulls the glyph back so it lines up with the text above.
                 .padding(.leading, -7)
             if ComposerChips.showsFolder(cwd, defaultFolder: app.defaults.cwd) {
@@ -46,6 +48,10 @@ struct ComposerControls: View {
             Spacer(minLength: 8)
             SendButton(running: running, canSend: canSend, onSend: onSend, onStop: { app.interrupt() })
                 .layoutPriority(1)
+                // Right-click send for later, as Mail and Slack do.
+                .contextMenu {
+                    if app.schedulesSupported { Button("Schedule…", action: onSchedule) }
+                }
         }
         .frame(height: SendButton.size)
     }
@@ -96,9 +102,9 @@ struct ThreadSettings {
         return parts.joined(separator: ", ")
     }
 
-    /// "+": images, and the folder, which has no chip of its own while it's
-    /// the default.
-    func plusMenu(attach: @escaping () -> Void) -> NSMenu {
+    /// "+": images, the folder, which has no chip of its own while it's
+    /// the default, and sending the message later.
+    func plusMenu(attach: @escaping () -> Void, schedule: (() -> Void)? = nil) -> NSMenu {
         let menu = NSMenu()
         let images = ActionMenuItem("Attach images…", handler: attach)
         images.image = NSImage(systemSymbolName: "photo", accessibilityDescription: nil)
@@ -107,6 +113,12 @@ struct ThreadSettings {
         folder.image = NSImage(systemSymbolName: "folder", accessibilityDescription: nil)
         folder.submenu = folderMenu()
         menu.addItem(folder)
+        if let schedule {
+            menu.addItem(.separator())
+            let later = ActionMenuItem("Schedule…", handler: schedule)
+            later.image = NSImage(systemSymbolName: "clock", accessibilityDescription: nil)
+            menu.addItem(later)
+        }
         return menu
     }
 
@@ -325,8 +337,8 @@ private struct PlusButton: View {
         .buttonStyle(.plain)
         .background(MenuAnchorView(anchor: anchor))
         .onHover { hovering = $0 }
-        .help("Attach images or change the folder")
-        .accessibilityLabel("Attach images or change the folder")
+        .help("Attach images, change the folder or schedule the message")
+        .accessibilityLabel("Attach images, change the folder or schedule the message")
     }
 }
 

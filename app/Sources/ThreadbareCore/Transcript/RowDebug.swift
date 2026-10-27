@@ -17,7 +17,9 @@ public enum RowDebug {
         case .user(let message):
             if message.text.isEmpty { return message.images.count == 1 ? "1 image" : "\(message.images.count) images" }
             // A dump should say it wasn't Mike, as the transcript does.
-            return message.isFromRunner ? "(sent by the runner) " + message.text : message.text
+            if message.isFromRunner { return "(sent by the runner) " + message.text }
+            if message.isFromSchedule { return "(sent by a schedule) " + message.text }
+            return message.text
         case .assistant(let item), .reasoning(let item):
             return item.text
         case .tool(let tool):

@@ -16,6 +16,7 @@ import type {
   EventBody,
   ImageRef,
   InProgressItem,
+  MessageOrigin,
   PermissionMode,
   PersistedEvent,
   Question,
@@ -24,6 +25,7 @@ import type {
   TurnOutcome,
 } from './protocol.ts';
 import { ErrorCode, LIMITS, PROTOCOL_VERSION, RpcError } from './protocol.ts';
+import type { Schedule } from './protocol.ts';
 import type {
   AgentAdapter,
   AgentSession,
@@ -65,7 +67,8 @@ export type Notification =
   | { method: 'thread.event'; params: { threadId: string; event: AnyEvent } }
   | { method: 'thread.deleted'; params: { threadId: string } }
   | { method: 'accounts.updated'; params: { accounts: Account[] } }
-  | { method: 'runner.notice'; params: { level: 'info' | 'warning' | 'error'; message: string } };
+  | { method: 'runner.notice'; params: { level: 'info' | 'warning' | 'error'; message: string } }
+  | { method: 'schedules.updated'; params: { schedules: Schedule[] } };
 
 type PendingApproval =
   | { approvalId: string; kind: 'tool'; resolve: (a: ToolApprovalAnswer) => void }
@@ -495,6 +498,11 @@ export class Runner {
     return () => this.listeners.delete(fn);
   }
 
+  // For the runner's neighbours (schedules.ts) to tell every client.
+  publish(n: Notification): void {
+    this.notify(n);
+  }
+
   private notify(n: Notification): void {
     for (const fn of this.listeners) {
       try {
@@ -625,6 +633,8 @@ export class Runner {
     effort?: EffortLevel;
     permissionMode?: PermissionMode;
     title?: string;
+    origin?: MessageOrigin;
+    scheduleId?: string;
   }): { thread: ThreadSummary; turnId: string } {
     this.checkAccepting();
     const accountId = params.accountId ?? this.defaultAccountId();
@@ -664,22 +674,24 @@ export class Runner {
     const st: ThreadState = { rec, rt: newRuntime(this.clock.now()) };
     this.threads.set(id, st);
     this.rememberAccount(accountId);
-    const turnId = this.sendTo(st, params.text ?? '', params.images ?? []);
+    const turnId = this.sendTo(st, params.text ?? '', params.images ?? [], { origin: params.origin, scheduleId: params.scheduleId });
     return { thread: this.summary(st), turnId };
   }
 
-  // origin "runner" marks a message the runner sends by itself (restart.ts).
-  send(threadId: string, text: string, images: ImageRef[] = [], opts: { origin?: 'runner' } = {}): { turnId: string } {
+  // origin "runner" marks a message the runner sends by itself (restart.ts),
+  // "schedule" one a schedule sent (schedules.ts). `queue` keeps it out of a
+  // running turn: it waits and starts its own.
+  send(threadId: string, text: string, images: ImageRef[] = [], opts: SendOptions = {}): { turnId: string } {
     const st = this.mustGet(threadId);
     this.checkAccepting();
     if (!text && images.length === 0) throw new RpcError(ErrorCode.badParams, 'text or images required');
     checkImages(images);
-    return { turnId: this.sendTo(st, text, images, opts.origin) };
+    return { turnId: this.sendTo(st, text, images, opts) };
   }
 
-  private sendTo(st: ThreadState, text: string, images: ImageRef[], origin?: 'runner'): string {
+  private sendTo(st: ThreadState, text: string, images: ImageRef[], opts: SendOptions = {}): string {
     const { rec, rt } = st;
-    if (origin !== 'runner') rt.hookTurns = undefined;
+    if (opts.origin !== 'runner') rt.hookTurns = undefined;
     // Copy images into the thread's own media folder now, so a queued
     // message still works if inbox/ is cleaned before it's sent.
     const media = this.store.mediaDir(rec.id);
@@ -700,9 +712,10 @@ export class Runner {
     }
     const turnId = crypto.randomUUID();
     const msg: QueuedSend = { turnId, text, images: refs };
-    if (origin) msg.origin = origin;
+    if (opts.origin) msg.origin = opts.origin;
+    if (opts.scheduleId) msg.scheduleId = opts.scheduleId;
     rec.lastActivityAt = this.isoNow();
-    if (rt.turn && this.canSteer(st)) {
+    if (rt.turn && !opts.queue && this.canSteer(st)) {
       // Sent while a turn runs: it goes into that turn now, as typing into
       // the CLI would. The CLI takes it at its next step, or straight after
       // its reply if that was already finishing; either way the thread's
@@ -743,7 +756,7 @@ export class Runner {
   private steer(st: ThreadState, msg: QueuedSend): void {
     const { rt } = st;
     const turn = rt.turn!;
-    this.emit(st, { type: 'user.message', text: msg.text, images: msg.images, ...(msg.origin ? { origin: msg.origin } : {}) }, turn.turnId);
+    this.emit(st, userMessage(msg), turn.turnId);
     turn.messages.push(msg.turnId);
     this.markDirty(st);
     rt.session!.send({ id: msg.turnId, text: msg.text, images: msg.images });
@@ -754,7 +767,7 @@ export class Runner {
   // than stuck on a turn that never started.
   private startTurn(st: ThreadState, msg: QueuedSend): void {
     const { rec, rt } = st;
-    this.emit(st, { type: 'user.message', text: msg.text, images: msg.images, ...(msg.origin ? { origin: msg.origin } : {}) }, msg.turnId);
+    this.emit(st, userMessage(msg), msg.turnId);
     try {
       this.emit(st, { type: 'turn.started', turnId: msg.turnId }, msg.turnId);
     } catch (e) {
@@ -1794,7 +1807,7 @@ export class Runner {
         '```\n' + (shown.trim() || '(no output)') + '\n```\n\n' +
         (outcome.ok ? 'Nothing to do unless something above surprises you.' : 'If this is from your change, fix it; if not, say so and carry on.');
       try {
-        this.sendTo(st, text, [], 'runner');
+        this.sendTo(st, text, [], { origin: 'runner' });
       } catch (e) {
         this.log.warn('could not tell the agent a hook result', { threadId: st.rec.id, hook: hook.id, error: String(e) });
       }
@@ -1931,6 +1944,18 @@ export class Runner {
   note(threadId: string, text: string): void {
     this.emit(this.mustGet(threadId), { type: 'system.note', text });
   }
+}
+
+export type SendOptions = { origin?: MessageOrigin; scheduleId?: string; queue?: boolean };
+
+function userMessage(msg: QueuedSend): EventBody {
+  return {
+    type: 'user.message',
+    text: msg.text,
+    images: msg.images,
+    ...(msg.origin ? { origin: msg.origin } : {}),
+    ...(msg.scheduleId ? { scheduleId: msg.scheduleId } : {}),
+  };
 }
 
 function checkImages(images: ImageRef[]): void {

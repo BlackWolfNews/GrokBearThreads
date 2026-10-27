@@ -65,6 +65,9 @@ const threads = new Map();
 loadFixtures();
 addFillers(fillerCount);
 addDemoPanels();
+/** The schedules (docs/protocol.md, "Schedules"), soonest first. */
+let schedules = [];
+addDemoSchedules();
 
 const token = crypto.randomBytes(24).toString('hex');
 fs.mkdirSync(path.join(dataDir, 'secrets'), { recursive: true });
@@ -295,6 +298,54 @@ async function dispatch(client, method, p) {
       const size = imageSize(dest);
       return { image: { path: dest, mediaType: mediaType(ext), ...size } };
     }
+    case 'schedules.list': {
+      const list = sortedSchedules();
+      return { schedules: p.threadId ? list.filter((x) => x.threadId === p.threadId || x.createdBy === p.threadId) : list };
+    }
+    case 'schedules.create': {
+      if (!p.text) throw rpcError(-32602, 'text is required');
+      if (Boolean(p.at) === Boolean(p.cron)) throw rpcError(-32602, 'Give exactly one of at and cron');
+      if (p.threadId) need(p.threadId);
+      const when = readWhen(p);
+      const now = iso();
+      const schedule = {
+        id: 'sc_' + crypto.randomBytes(5).toString('hex'), title: p.title || p.text.split('\n')[0].slice(0, 60), text: p.text,
+        ...(p.at ? { at: new Date(p.at).toISOString() } : { cron: p.cron }), whenText: when.whenText,
+        ...(p.threadId ? { threadId: p.threadId } : { cwd: p.cwd ?? defaults.cwd, accountId: p.accountId ?? defaults.accountId, model: p.model, effort: p.effort, permissionMode: p.permissionMode ?? 'full' }),
+        paused: Boolean(p.paused), createdAt: now, updatedAt: now, ...(p.createdBy ? { createdBy: p.createdBy } : {}), runs: 0,
+      };
+      if (!schedule.paused) schedule.nextRunAt = when.runs[0];
+      schedules.push(schedule);
+      broadcastSchedules();
+      return { schedule };
+    }
+    case 'schedules.update': {
+      const schedule = needSchedule(p.scheduleId);
+      for (const key of ['title', 'text', 'cwd', 'accountId', 'permissionMode']) if (p[key] !== undefined) schedule[key] = p[key];
+      for (const key of ['model', 'effort', 'timezone']) if (p[key] !== undefined) schedule[key] = p[key] ?? undefined;
+      if (p.at || p.cron) {
+        const when = readWhen(p);
+        if (p.at) { schedule.at = new Date(p.at).toISOString(); delete schedule.cron; delete schedule.finishedAt; }
+        else { schedule.cron = p.cron; delete schedule.at; }
+        schedule.whenText = when.whenText;
+      }
+      if (p.paused !== undefined) schedule.paused = Boolean(p.paused);
+      schedule.nextRunAt = schedule.paused || schedule.finishedAt ? undefined : readWhen(schedule).runs[0];
+      schedule.updatedAt = iso();
+      broadcastSchedules();
+      return { schedule };
+    }
+    case 'schedules.delete':
+      needSchedule(p.scheduleId);
+      schedules = schedules.filter((x) => x.id !== p.scheduleId);
+      broadcastSchedules();
+      return {};
+    case 'schedules.run':
+      return runSchedule(needSchedule(p.scheduleId));
+    case 'schedules.preview': {
+      const when = readWhen(p, Math.min(20, p.count ?? 5));
+      return { whenText: when.whenText, runs: when.runs };
+    }
     // Mock-only helpers for perf runs, demos and screenshots.
     case 'mock.restartPending': {
       // A restart waiting for threads, as `runner.restart` leaves one:
@@ -352,13 +403,13 @@ async function dispatch(client, method, p) {
 
 // ---------------------------------------------------------------- turns
 
-async function fakeTurn(threadId, text, images, turnId = 'turn_' + crypto.randomBytes(4).toString('hex'), origin) {
+async function fakeTurn(threadId, text, images, turnId = 'turn_' + crypto.randomBytes(4).toString('hex'), origin, extra = {}) {
   const t = threads.get(threadId);
   if (!t) return;
   let interrupted = false;
   t.interrupt = () => { interrupted = true; };
   const started = Date.now();
-  persist(threadId, { type: 'user.message', text, images, ...(origin ? { origin } : {}) }, turnId);
+  persist(threadId, { type: 'user.message', text, images, ...(origin ? { origin } : {}), ...extra }, turnId);
   persist(threadId, { type: 'turn.started', turnId }, turnId);
   setStatus(threadId, 'running');
 
@@ -626,6 +677,168 @@ function scheduleWake(threadId) {
       broadcastSummary(threadId);
     }
   }, delay + 50);
+}
+
+// ---------------------------------------------------------------- schedules
+
+// The mock's cron is deliberately small: the five fields with *, lists,
+// ranges and steps (no names, no @daily), stepped a minute at a time. The
+// real runner's is the one to trust. (Constants inside the functions:
+// addDemoSchedules runs while the module is still loading.)
+function parseCron(cron) {
+  const CRON_FIELDS = [['minute', 0, 59], ['hour', 0, 23], ['day of the month', 1, 31], ['month', 1, 12], ['day of the week', 0, 7]];
+  const parts = String(cron).trim().split(/\s+/);
+  if (parts.length !== 5) throw rpcError(-32602, `A cron has five fields (minute hour day month weekday); "${cron}" has ${parts.length}`);
+  return parts.map((part, index) => {
+    const [name, min, max] = CRON_FIELDS[index];
+    const values = new Set();
+    for (const piece of part.split(',')) {
+      const match = /^(\*|(\d+)(?:-(\d+))?)(?:\/(\d+))?$/.exec(piece);
+      if (!match) throw rpcError(-32602, `Can't read the ${name} field: "${piece}"`);
+      const from = match[1] === '*' ? min : Number(match[2]);
+      const to = match[1] === '*' ? max : match[3] !== undefined ? Number(match[3]) : match[4] ? max : from;
+      const step = Number(match[4] ?? 1);
+      if (from < min || to > max || from > to || step < 1) throw rpcError(-32602, `The ${name} field "${piece}" is out of range (${min}-${max})`);
+      for (let v = from; v <= to; v += step) values.add(index === 4 ? v % 7 : v);
+    }
+    return { values, any: part === '*' };
+  });
+}
+
+function cronRuns(cron, count, after = new Date()) {
+  const [minute, hour, dom, month, dow] = parseCron(cron);
+  const runs = [];
+  const t = new Date(after);
+  t.setSeconds(0, 0);
+  t.setMinutes(t.getMinutes() + 1);
+  for (let i = 0; i < 400 * 24 * 60 && runs.length < count; i++, t.setMinutes(t.getMinutes() + 1)) {
+    if (!minute.values.has(t.getMinutes()) || !hour.values.has(t.getHours()) || !month.values.has(t.getMonth() + 1)) continue;
+    const domOk = dom.values.has(t.getDate());
+    const dowOk = dow.values.has(t.getDay());
+    // Both day fields restricted: either one is enough, as in cron.
+    if (dom.any || dow.any ? domOk && dowOk : domOk || dowOk) runs.push(t.toISOString());
+  }
+  return runs;
+}
+
+function clock(h, m) {
+  return `${h}:${String(m).padStart(2, '0')}`;
+}
+
+/** Canned words for the app's own presets; anything else is the cron itself. */
+function cronWords(cron) {
+  const DAYS = ['Sundays', 'Mondays', 'Tuesdays', 'Wednesdays', 'Thursdays', 'Fridays', 'Saturdays'];
+  const [m, h, dom, mon, dow] = String(cron).trim().split(/\s+/);
+  if (m === '0' && h === '*' && dom === '*' && mon === '*' && dow === '*') return 'Every hour';
+  if (!/^\d+$/.test(m) || !/^\d+$/.test(h) || mon !== '*') return `On the cron ${cron}`;
+  const at = clock(Number(h), Number(m));
+  if (dom === '*' && dow === '*') return `Every day at ${at}`;
+  if (dom === '*' && dow === '1-5') return `Weekdays at ${at}`;
+  if (dom === '*' && /^[0-7]$/.test(dow)) return `${DAYS[Number(dow) % 7]} at ${at}`;
+  if (/^\d+$/.test(dom) && dow === '*') return `Every month on day ${dom} at ${at}`;
+  return `On the cron ${cron}`;
+}
+
+function onceWords(date) {
+  const d = new Date(date);
+  return `Once, ${d.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' }).replace(',', '')} at ${clock(d.getHours(), d.getMinutes())}`;
+}
+
+/** { whenText, runs } for { at } or { cron }. */
+function readWhen(p, count = 5) {
+  if (p.at) {
+    const at = new Date(p.at);
+    if (Number.isNaN(at.getTime())) throw rpcError(-32602, `Can't read the time "${p.at}"`);
+    return { whenText: onceWords(at), runs: at > new Date() ? [at.toISOString()] : [] };
+  }
+  if (p.cron) return { whenText: cronWords(p.cron), runs: cronRuns(p.cron, count) };
+  throw rpcError(-32602, 'Give at or cron');
+}
+
+function needSchedule(id) {
+  const schedule = schedules.find((x) => x.id === id);
+  if (!schedule) throw rpcError(-32005, 'Schedule not found');
+  return schedule;
+}
+
+function sortedSchedules() {
+  const rank = (x) => (x.nextRunAt ? Date.parse(x.nextRunAt) : Infinity);
+  return [...schedules].sort((a, b) => rank(a) - rank(b));
+}
+
+function broadcastSchedules() {
+  const text = JSON.stringify({ jsonrpc: '2.0', method: 'schedules.updated', params: { schedules: sortedSchedules() } });
+  for (const client of clients) if (client.authed) client.ws.send(text);
+}
+
+/** Sends the schedule's message now, to its thread or a new one. */
+function runSchedule(schedule) {
+  const text = `[Scheduled: "${schedule.title}", ${schedule.whenText}]\n${schedule.text}`;
+  const turnId = 'turn_' + crypto.randomBytes(4).toString('hex');
+  let threadId = schedule.threadId;
+  if (!threadId) {
+    threadId = 'th_' + crypto.randomBytes(6).toString('hex');
+    const now = iso();
+    threads.set(threadId, { summary: {
+      id: threadId, title: schedule.title, cwd: schedule.cwd ?? defaults.cwd, accountId: schedule.accountId ?? defaults.accountId,
+      provider: 'claude', model: schedule.model, effort: schedule.effort, permissionMode: schedule.permissionMode ?? 'full',
+      status: 'starting', live: true, needsYou: false, createdAt: now, updatedAt: now, lastActivityAt: now, preview: '', lastSeq: 0, lastSeenSeq: 0,
+    }, events: [], inProgress: new Map(), timers: [] });
+    broadcastSummary(threadId);
+  }
+  setTimeout(() => fakeTurn(threadId, text, [], turnId, 'schedule', { scheduleId: schedule.id }), 10);
+  schedule.runs += 1;
+  schedule.lastRun = { at: iso(), outcome: 'sent', threadId };
+  if (!schedule.cron) { schedule.finishedAt = iso(); delete schedule.nextRunAt; }
+  schedule.updatedAt = iso();
+  broadcastSchedules();
+  return { schedule, threadId, turnId };
+}
+
+// A few schedules for the demo threads, and one message a schedule sent
+// already, so the Scheduled view, the line over a thread's composer and
+// the transcript's note all have something to show. They don't fire by
+// themselves; schedules.run sends one.
+function addDemoSchedules() {
+  const now = Date.now();
+  const ago = (minutes) => new Date(now - minutes * 60_000).toISOString();
+  const make = (fields) => {
+    const when = readWhen(fields);
+    const schedule = { createdAt: ago(60 * 24 * 3), updatedAt: ago(60 * 24), runs: 0, paused: false, whenText: when.whenText, ...fields };
+    if (!schedule.paused && !schedule.finishedAt) schedule.nextRunAt = when.runs[0];
+    schedules.push(schedule);
+    return schedule;
+  };
+  if (threads.has('demo_release_notes')) {
+    make({ id: 'sc_demo_prs', title: 'Merged PRs into the notes', text: 'List the PRs merged since yesterday and add any that matter to the 0.4 notes.',
+      cron: '0 9 * * 1-5', threadId: 'demo_release_notes', runs: 4, lastRun: { at: ago(60 * 5), outcome: 'sent', threadId: 'demo_release_notes' } });
+  }
+  if (threads.has('demo_ci_slow')) {
+    make({ id: 'sc_demo_ci', title: 'Check the CI run again', text: 'Check whether the cache change made the CI build faster.',
+      at: new Date(now + 40 * 60_000).toISOString(), threadId: 'demo_ci_slow', createdBy: 'demo_ci_slow' });
+  }
+  make({ id: 'sc_demo_deps', title: 'Weekly dependency check', text: 'Look for outdated npm and Swift packages in ~/dev/me and list the ones worth updating.',
+    cron: '0 10 * * 1', cwd: defaults.cwd, accountId: defaults.accountId, permissionMode: 'full', runs: 6,
+    lastRun: { at: ago(60 * 24 * 6), outcome: 'skipped', note: 'the last thread it started was still running' } });
+  make({ id: 'sc_demo_backup', title: 'Nightly backup report', text: 'Summarise last night\'s Backblaze log and say if anything failed.',
+    cron: '0 2 * * *', cwd: '/Users/mike/dev/old-backups', accountId: defaults.accountId, paused: true, runs: 21,
+    lastRun: { at: ago(60 * 30), outcome: 'failed', note: 'the folder /Users/mike/dev/old-backups is gone' } });
+
+  // What a schedule's message looks like once sent: at the end of the
+  // release notes thread, without moving it in the sidebar.
+  const t = threads.get('demo_release_notes');
+  if (t) {
+    let seq = t.summary.lastSeq;
+    const ts = t.events.at(-1)?.ts ?? ago(5);
+    const push = (fields) => t.events.push({ seq: ++seq, ts, threadId: t.summary.id, turnId: 'turn_sched', ...fields });
+    push({ type: 'user.message', origin: 'schedule', scheduleId: 'sc_demo_prs', images: [],
+      text: '[Scheduled: "Merged PRs into the notes", Weekdays at 9:00]\nList the PRs merged since yesterday and add any that matter to the 0.4 notes.' });
+    push({ type: 'turn.started' });
+    push({ type: 'assistant.text', itemId: 'm_sched', text: 'Two PRs merged since yesterday: **#212** (faster thread switching) and **#214** (fix for pasted images). I added both under *Improvements*.' });
+    push({ type: 'turn.completed', outcome: 'completed', durationMs: 8400, costUsd: 0.02 });
+    t.summary.lastSeq = seq;
+    t.summary.lastSeenSeq = seq;
+  }
 }
 
 // ---------------------------------------------------------------- fixtures

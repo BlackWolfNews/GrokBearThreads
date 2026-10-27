@@ -1,10 +1,10 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import type { EffortLevel, PermissionMode, PersistedEvent, Provider, ThreadStatus, ImageRef } from './protocol.ts';
+import type { EffortLevel, MessageOrigin, PermissionMode, PersistedEvent, Provider, ThreadStatus, ImageRef } from './protocol.ts';
 import { atomicWriteFileSync, readJsonSync } from './fsutil.ts';
 import { paths } from './config.ts';
 
-export type QueuedSend = { turnId: string; text: string; images: ImageRef[]; origin?: 'runner' };
+export type QueuedSend = { turnId: string; text: string; images: ImageRef[]; origin?: MessageOrigin; scheduleId?: string };
 
 // What thread.json holds: the public summary fields plus a few internal ones.
 export type ThreadRecord = {

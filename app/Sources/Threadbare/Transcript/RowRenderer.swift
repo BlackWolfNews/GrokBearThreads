@@ -294,8 +294,8 @@ enum RowRenderer {
         let width = RowMetrics.column(for: row, tableWidth: tableWidth).width
         let vertical = RowMetrics.rowTop + RowMetrics.rowBottom
         switch row.content {
-        case .user(let message) where message.isFromRunner:
-            let text = runnerMessageText(message.text)
+        case .user(let message) where message.showsAsNote:
+            let text = message.isFromSchedule ? scheduledMessageText(message) : runnerMessageText(message.text)
             let size = measurer.measure(text, width: width)
             return RowRender(height: RowMetrics.runnerTop + size.height + RowMetrics.runnerBottom, text: text, textSize: size)
 
@@ -443,6 +443,48 @@ enum RowRenderer {
             text.append(NSAttributedString(string: "\n" + body, attributes: Theme.text(Theme.labelFont, color: Theme.quietText, line: TypeScale.scaled(19), alignment: .center)))
         }
         return text
+    }
+
+    /// A schedule's message, the same kind of note: a clock and the
+    /// schedule's name and time (from the header line the runner puts on
+    /// it, which isn't repeated), then the message.
+    static func scheduledMessageText(_ message: UserMessage) -> NSAttributedString {
+        let header = message.scheduledHeader
+        let attributes = Theme.text(Theme.smallFont, color: Theme.faintText, line: TypeScale.scaled(17), alignment: .center)
+        let text = NSMutableAttributedString(attributedString: clock(font: Theme.smallFont, attributes: attributes))
+        let label = header.map { "Scheduled: \($0.title) · \($0.whenText)" } ?? "Sent by a schedule"
+        text.append(NSAttributedString(string: " " + label, attributes: attributes))
+        let body = (header?.body ?? message.text).trimmingCharacters(in: .whitespacesAndNewlines)
+        if !body.isEmpty {
+            text.append(NSAttributedString(string: "\n" + body, attributes: Theme.text(Theme.labelFont, color: Theme.quietText, line: TypeScale.scaled(19), alignment: .center)))
+        }
+        return text
+    }
+
+    /// A clock symbol as a text attachment, in the label's faint colour.
+    /// Drawn through a handler so the colour follows light and dark at draw
+    /// time, like the text beside it.
+    private static func clock(font: NSFont, attributes: [NSAttributedString.Key: Any]) -> NSAttributedString {
+        let config = NSImage.SymbolConfiguration(pointSize: font.pointSize, weight: .regular)
+        guard let symbol = NSImage(systemSymbolName: "clock", accessibilityDescription: "Scheduled")?.withSymbolConfiguration(config) else {
+            return NSAttributedString()
+        }
+        let size = symbol.size
+        let image = NSImage(size: size, flipped: false) { rect in
+            // The colour, cut to the symbol's shape: drawn over the black
+            // symbol instead, a translucent grey stayed nearly black.
+            Theme.faintText.set()
+            rect.fill(using: .copy)
+            symbol.draw(in: rect, from: .zero, operation: .destinationIn, fraction: 1)
+            return true
+        }
+        let attachment = NSTextAttachment()
+        attachment.image = image
+        // Centred on the capitals beside it.
+        attachment.bounds = NSRect(x: 0, y: ((font.capHeight - size.height) / 2).rounded(), width: size.width, height: size.height)
+        var withAttachment = attributes
+        withAttachment[.attachment] = attachment
+        return NSAttributedString(string: "\u{FFFC}", attributes: withAttachment)
     }
 
     // MARK: Work lines

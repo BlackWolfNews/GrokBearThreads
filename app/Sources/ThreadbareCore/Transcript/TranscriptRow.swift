@@ -51,7 +51,8 @@ public struct UserMessage: Sendable, Hashable {
     public var text: String
     public var images: [ImageRef]
     /// "runner" when the runner sent it by itself (the resume after a
-    /// restart), nil when a person or a client did.
+    /// restart), "schedule" when a schedule did, nil when a person or a
+    /// client did.
     public var origin: String?
 
     public init(text: String, images: [ImageRef] = [], origin: String? = nil) {
@@ -63,6 +64,17 @@ public struct UserMessage: Sendable, Hashable {
     /// Sent by the runner, not by Mike: shown as a quiet centred line, not
     /// a bubble of his own.
     public var isFromRunner: Bool { origin == "runner" }
+
+    /// Sent by a schedule (docs/protocol.md, "Schedules"): also a note, with
+    /// the schedule's name in place of the header line its text starts with.
+    public var isFromSchedule: Bool { origin == "schedule" }
+
+    /// Drawn as a centred note rather than Mike's bubble.
+    public var showsAsNote: Bool { isFromRunner || isFromSchedule }
+
+    /// The schedule's title and time from the message's first line, for
+    /// one a schedule sent.
+    public var scheduledHeader: ScheduledHeader? { isFromSchedule ? ScheduledHeader(text) : nil }
 }
 
 public struct ToolItem: Sendable, Hashable {

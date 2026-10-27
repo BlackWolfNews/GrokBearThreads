@@ -7,6 +7,7 @@ struct RootView: View {
     static let sidebarIdealWidth: CGFloat = 330
 
     var body: some View {
+        @Bindable var app = app
         NavigationSplitView {
             // About a quarter of the window, as T3, Codex and Claude give
             // theirs: at 290 most titles were cut at about 25 characters.
@@ -16,6 +17,9 @@ struct RootView: View {
                 .navigationSplitViewColumnWidth(min: 250, ideal: Self.sidebarIdealWidth, max: 440)
         } detail: {
             DetailView()
+        }
+        .sheet(item: $app.scheduleEditor) { state in
+            ScheduleEditor(state: state)
         }
     }
 }

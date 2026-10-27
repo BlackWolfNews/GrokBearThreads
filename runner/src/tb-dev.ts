@@ -537,7 +537,7 @@ export function formatThread(t: ThreadSummary, events: PersistedEvent[], opts: {
   const render = (e: PersistedEvent) => {
     switch (e.type) {
       case 'user.message':
-        lines.push('', ...block(e.origin === 'runner' ? 'Runner: ' : 'User: ', e.text, '  '));
+        lines.push('', ...block(e.origin === 'runner' ? 'Runner: ' : e.origin === 'schedule' ? 'Schedule: ' : 'User: ', e.text, '  '));
         for (const img of e.images ?? []) lines.push(imageLine(img, '  '));
         break;
       case 'assistant.text':

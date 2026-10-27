@@ -216,7 +216,7 @@ final class TextRowCell: RowCellView {
         textView.isHidden = render.text == nil
 
         switch row.content {
-        case .user(let message) where message.isFromRunner:
+        case .user(let message) where message.showsAsNote:
             textView.place(NSRect(x: x, y: RowMetrics.runnerTop, width: width, height: render.textSize.height))
 
         case .user(let message):
