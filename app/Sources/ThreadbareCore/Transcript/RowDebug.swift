@@ -80,6 +80,12 @@ public enum RowDebug {
             "kind: \(row.kind.rawValue)",
         ]
         if let turn = row.turnId, !turn.isEmpty { lines.append("turn: \(turn)") }
+        // The footer shows only the time (and Claude's cost); the turn's
+        // tokens are here.
+        if case .footer(let completion) = row.content {
+            if let tokens = TokenText.line(completion.usage) { lines.append("tokens: \(tokens)") }
+            if let kind = completion.errorKind { lines.append("error kind: \(kind.rawValue)") }
+        }
         lines.append("events: " + (seqs.isEmpty ? "none loaded" : seqRanges(seqs)))
         lines.append("runner: \(runnerVersion.isEmpty ? "unknown" : runnerVersion)")
         // The command that prints those events, ready to run.

@@ -81,20 +81,26 @@ function usage(fiveHour, weekly, { more = [], readAgoMinutes = 0, ...extra } = {
 // Token Stats reading, one at its limit, and Codex (Pro Lite has only a
 // weekly window).
 const tokenStatsAccounts = '~/Library/Application Support/Token Stats/Accounts';
+// What Token Stats writes under every account when its last check failed:
+// the app says it once, not under each one.
+const couldntCheck = "Couldn't check usage just now, so these are its last numbers.";
 let accounts = [
   {
     id: 'claude-main', provider: 'claude', title: 'mike@example.com', configDir: '~/.claude', defaultModel: 'claude-fable-5-1', models,
     email: 'mike@example.com', plan: 'Max',
-    usage: usage(89, 78, { more: [{ kind: 'weekly_model', title: 'Weekly Fable', remainingPercent: 71, resetsAt: hoursFromNow(70) }] }),
+    usage: usage(89, 78, {
+      more: [{ kind: 'weekly_model', title: 'Weekly Fable', remainingPercent: 71, resetsAt: hoursFromNow(70) }],
+      notice: `${couldntCheck} · $48.85 extra usage spent`,
+    }),
   },
   {
     id: 'claude-2', provider: 'claude', title: 'work@example.com', configDir: `${tokenStatsAccounts}/claude-2`,
-    defaultModel: 'claude-fable-5-1', models, email: 'work@example.com', plan: 'Team', note: 'Convex work only', usage: usage(95, 90),
+    defaultModel: 'claude-fable-5-1', models, email: 'work@example.com', plan: 'Team', note: 'Convex work only', usage: usage(95, 90, { notice: couldntCheck }),
   },
   {
     id: 'claude-3', provider: 'claude', title: 'mike+3@example.com', configDir: `${tokenStatsAccounts}/claude-3`,
     defaultModel: 'claude-fable-5-1', models, email: 'mike+3@example.com', plan: 'Team',
-    usage: usage(12, 40, { stale: true, readAgoMinutes: 75 }),
+    usage: usage(12, 40, { stale: true, readAgoMinutes: 75, notice: couldntCheck }),
   },
   {
     id: 'claude-4', provider: 'claude', title: 'mike+4@example.com', configDir: `${tokenStatsAccounts}/claude-4`,
@@ -113,7 +119,8 @@ let accounts = [
     usage: usage(0, 0, {
       source: 'live', notice: '64,390 credits · 2 limit resets available',
       windows: [
-        { kind: 'weekly', title: 'Weekly', remainingPercent: 64, resetsAt: hoursFromNow(96) },
+        // The credits are in the notice too: the app shows them once.
+        { kind: 'weekly', title: 'Weekly', remainingPercent: 64, resetsAt: hoursFromNow(96), detail: '64,390 credits' },
         { kind: 'other', title: 'GPT-6.1-Sol', remainingPercent: 82, resetsAt: hoursFromNow(96) },
       ],
     }),
@@ -569,6 +576,9 @@ async function dispatch(client, method, p) {
     }
     case 'mock.restart':
       return restartNow(p);
+    case 'mock.clis':
+      if (p.wentBack) return wentBack();
+      return { clis };
     case 'mock.stream':
       return startStream(need(p.threadId).summary.id, p);
     case 'mock.approval': {
@@ -833,12 +843,28 @@ function fakeCliUpdate(cli, p) {
     cli.installedVersion = target;
     if (goingBack) cli.previousVersion = was;
     else if (cli.provider === 'codex') cli.previousVersion = was;
-    if (!goingBack) delete cli.hold;
+    // Like the runner: the version gone back from is held, so it isn't
+    // installed again by itself (Update anyway still can).
+    if (goingBack) cli.hold = { version: was, reason: 'you went back from it' };
+    else delete cli.hold;
     cli.status = cli.hold ? 'held' : target === cli.latestVersion ? 'current' : 'behind';
     cli.checkedAt = iso();
     cli.update = { state: 'succeeded', targetVersion: target, finishedAt: iso() };
     broadcastClis();
   }, 2500);
+}
+
+/** mock.clis {wentBack: true}: Codex as it is after "Go back to 0.163.0"
+ * from 0.164.0: on 0.163.0, 0.164.0 kept and held because Mike went back. */
+function wentBack() {
+  const codex = clis.find((c) => c.provider === 'codex');
+  Object.assign(codex, {
+    installedVersion: '0.163.0', previousVersion: '0.164.0', latestVersion: '0.165.0', status: 'held',
+    hold: { version: '0.164.0', reason: 'you went back from it' }, checkedAt: iso(),
+  });
+  delete codex.update;
+  broadcastClis();
+  return { clis };
 }
 
 // ---------------------------------------------------------------- events

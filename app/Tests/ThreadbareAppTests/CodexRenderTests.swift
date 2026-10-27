@@ -33,6 +33,30 @@ final class CodexRenderTests: XCTestCase {
         XCTAssertEqual(screenshot.imageFrames.first?.height, RowMetrics.gridMaxHeight)
     }
 
+    /// An expanded patch names each file over its lines; edits to one file
+    /// don't get a name each.
+    func testAMultiFileDiffNamesEachFile() {
+        func diff(_ path: String, _ lines: [String]) -> EditDiff {
+            EditDiff(itemId: "p1", path: path, hunks: [DiffHunk(oldStart: 1, oldLines: 1, newStart: 1, newLines: lines.count, lines: lines)])
+        }
+        let diffs = [diff("/w/site/fruits.txt", ["+dates"]), diff("/w/notes.txt", ["-Line two.", "+Line two, edited."])]
+        let text = RowRenderer.diffText(diffs, maxLines: 100, root: "/w").0.string
+        XCTAssertTrue(text.hasPrefix("fruits.txt  site  +1 −0\n"), text)
+        XCTAssertTrue(text.contains("\nnotes.txt  +1 −1\n"), text)
+        XCTAssertFalse(text.contains("⋯"), "a name, not a break, between files")
+        let oneFile = RowRenderer.diffText([diff("/w/a.txt", ["+a"]), diff("/w/a.txt", ["+b"])], maxLines: 100, root: "/w").0.string
+        XCTAssertFalse(oneFile.contains("a.txt"), "two edits to one file stay as they were")
+    }
+
+    func testAGeneratedImagesPromptIsProse() {
+        let call = ToolCall(itemId: "ig", name: "image_generation", kind: .image, title: "Generate image")
+        let tool = ToolItem(itemId: "ig", call: call, result: ToolResult(itemId: "ig", ok: true, text: "A small, simple flat blue circle"))
+        let body = RowRenderer.toolBody(tool)
+        XCTAssertEqual(body.string, "A small, simple flat blue circle")
+        let font = body.attribute(.font, at: 0, effectiveRange: nil) as? NSFont
+        XCTAssertFalse(font?.isFixedPitch ?? true, "the reading font, not the output's monospace")
+    }
+
     func testErrorRowSaysWhatToDoWhenTheRunnerKnowsWhy() {
         let row = TranscriptRow(id: "e:1", seq: 1, content: .error("Context window exceeded", kind: .contextWindow))
         let text = RowRenderer.render(row, expanded: false, tableWidth: 900, measurer: TextMeasurer()).text?.string ?? ""

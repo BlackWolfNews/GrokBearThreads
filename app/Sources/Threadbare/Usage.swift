@@ -82,7 +82,11 @@ extension AppModel {
     func limitAdvice(for thread: ThreadSummary) -> LimitAdvice? {
         let account = account(thread.accountId)
         let blocked = account?.usage?.blocked == true
-        let failedOnLimit = thread.status == .error && loadedSession(thread.id)?.lastTurnErrorKind == .usageLimit
+        // Only while the thread is still on the account the turn failed on:
+        // after "Switch to ..." the status stays `error` until the next
+        // turn, and the line blamed the new account.
+        let failedOnLimit = thread.status == .error && failedOnAccount[thread.id] == thread.accountId
+            && loadedSession(thread.id)?.lastTurnErrorKind == .usageLimit
         guard blocked || failedOnLimit else { return nil }
         var text = "\(accountShortTitle(thread.accountId)) has reached its limit"
         if let reset = AccountUsageText.mainWindows(account?.usage).filter({ $0.remainingPercent < 1 }).compactMap(\.resetsAt).min() {
@@ -110,5 +114,15 @@ extension ThreadSession {
             }
         }
         return nil
+    }
+}
+
+/// The main window, for popovers that size themselves to fit inside it.
+@MainActor
+enum AppWindow {
+    static var contentHeight: CGFloat? {
+        let window = NSApp.windows.first { $0.isVisible && $0.contentView != nil && $0.frame.width > 600
+            && !String(describing: type(of: $0)).contains("Popover") }
+        return window.map { $0.contentLayoutRect.height }
     }
 }

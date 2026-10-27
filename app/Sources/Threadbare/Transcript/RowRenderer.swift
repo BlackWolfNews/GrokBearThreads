@@ -344,8 +344,8 @@ enum RowRenderer {
             let diffs = row.kind == .diff ? tool.effectiveDiffs.filter { !$0.hunks.isEmpty } : []
             if !diffs.isEmpty {
                 let body = showAll
-                    ? diffWithNote(diffs, maxLines: RowMetrics.maxDiffLines)
-                    : diffWithNote(diffs, maxLines: previewLines(diffs), more: DiffPreview.allKey(row.id))
+                    ? diffWithNote(diffs, maxLines: RowMetrics.maxDiffLines, root: tool.root)
+                    : diffWithNote(diffs, maxLines: previewLines(diffs), more: DiffPreview.allKey(row.id), root: tool.root)
                 let size = measurer.measure(body, width: width - RowMetrics.titleIndent - 1)
                 let box = size.height + RowMetrics.diffPadV * 2
                 return RowRender(height: RowMetrics.workHeight + box + 10, text: header, textSize: headerSize, detail: body, detailSize: size)
@@ -625,6 +625,11 @@ enum RowRenderer {
     /// What an expanded tool shows: a command and its output, a file with
     /// line numbers, a search and its matches, or the input as fields.
     static func toolBody(_ tool: ToolItem) -> NSAttributedString {
+        // A generated image's revised prompt is prose: the reading font,
+        // wrapped at words (in the output font it broke mid-word).
+        if tool.toolKind == .image, let text = tool.result?.text, !text.isEmpty {
+            return NSAttributedString(string: text, attributes: Theme.text(Theme.workFont, color: tool.failed ? Theme.failed : Theme.quietText, line: TypeScale.scaled(21)))
+        }
         let output = NSMutableAttributedString()
         // Output is ordinary text even when the tool failed: in red it read
         // as removed code and was the loudest thing in the window. Only the
@@ -736,8 +741,8 @@ enum RowRenderer {
     /// A diff and, if it was cut short, what was left out: "Show 30 more
     /// lines", which opens the rest through the expansion key `more`, or
     /// with no key (all of it is already open, up to the cap) a quiet note.
-    static func diffWithNote(_ diffs: [EditDiff], maxLines: Int, inset: CGFloat = 10, more: String? = nil) -> NSAttributedString {
-        let (diff, hidden) = diffText(diffs, maxLines: maxLines, inset: inset)
+    static func diffWithNote(_ diffs: [EditDiff], maxLines: Int, inset: CGFloat = 10, more: String? = nil, root: String? = nil) -> NSAttributedString {
+        let (diff, hidden) = diffText(diffs, maxLines: maxLines, inset: inset, root: root)
         guard hidden > 0 else { return diff }
         let body = NSMutableAttributedString(attributedString: diff)
         let lines = hidden == 1 ? "1 more line" : "\(hidden) more lines"
@@ -759,22 +764,41 @@ enum RowRenderer {
     /// How many lines of `diffs` a diff opened short shows (a break between
     /// two diffs counts as a line, as `diffText` draws it).
     static func previewLines(_ diffs: [EditDiff]) -> Int {
-        let total = diffs.reduce(0) { $0 + DiffBuilder.displayLines($1).count } + max(0, diffs.count - 1)
+        // A file-name line over each file's diff, or a break between edits
+        // to one file.
+        let between = namesFiles(diffs) ? diffs.count : max(0, diffs.count - 1)
+        let total = diffs.reduce(0) { $0 + DiffBuilder.displayLines($1).count } + between
         return DiffPreview.shown(of: total)
     }
 
     /// Diff lines with line numbers and the +/− sign in a quiet gutter, on
     /// faint tints. Returns the text and how many lines were left out.
-    static func diffText(_ diffs: [EditDiff], maxLines: Int, inset: CGFloat = 10) -> (NSAttributedString, hidden: Int) {
+    /// Whether a run of diffs is more than one file (a Codex patch), so
+    /// each gets its name over it; several edits to one file don't.
+    static func namesFiles(_ diffs: [EditDiff]) -> Bool {
+        Set(diffs.map(\.path)).count > 1
+    }
+
+    static func diffText(_ diffs: [EditDiff], maxLines: Int, inset: CGFloat = 10, root: String? = nil) -> (NSAttributedString, hidden: Int) {
         var lines: [DiffDisplayLine] = []
         var hidden = 0
+        // Line index -> the file-name line drawn there instead of a break.
+        // Without them a patch's three files ran together, split only by
+        // "⋯", with line numbers starting again.
+        var fileNames: [Int: NSAttributedString] = [:]
+        let named = namesFiles(diffs)
         for (index, diff) in diffs.enumerated() {
             let room = maxLines - lines.count
             guard room > 0 else {
                 hidden += DiffBuilder.displayLines(diff).count
                 continue
             }
-            if index > 0 { lines.append(DiffDisplayLine(kind: .hunkHeader, text: "")) }
+            if named {
+                fileNames[lines.count] = fileNameLine(diff, root: root, inset: inset, first: index == 0)
+                lines.append(DiffDisplayLine(kind: .hunkHeader, text: ""))
+            } else if index > 0 {
+                lines.append(DiffDisplayLine(kind: .hunkHeader, text: ""))
+            }
             for line in DiffBuilder.displayLines(diff, maxLines: room) {
                 if line.kind == .elided {
                     hidden += Int(line.text.split(separator: " ").first ?? "") ?? 0
@@ -815,6 +839,10 @@ enum RowRenderer {
             case .context: number = line.newNumber; sign = ""; background = nil
             case .hunkHeader, .elided: number = nil; sign = ""; background = nil
             }
+            if let name = fileNames[index] {
+                output.append(name)
+                continue
+            }
             if line.kind == .hunkHeader {
                 // A quiet break between hunks rather than the @@ header.
                 output.append(NSAttributedString(string: "\t\t⋯", attributes: gutter))
@@ -830,6 +858,23 @@ enum RowRenderer {
             }
         }
         return (output, hidden)
+    }
+
+    /// "events.html  src/pages  +1 −0" over one file's part of a patch.
+    static func fileNameLine(_ diff: EditDiff, root: String?, inset: CGFloat, first: Bool) -> NSAttributedString {
+        let (style, offset) = Theme.lines(Theme.diffLine, font: Theme.detailFont, before: first ? 0 : 8, head: inset, first: inset)
+        let line = NSMutableAttributedString(string: (diff.path as NSString).lastPathComponent, attributes: [
+            .font: Theme.detailFont, .foregroundColor: Theme.quietText, .paragraphStyle: style, .baselineOffset: offset,
+        ])
+        let folder = PathDisplay.folder(of: diff.path, relativeTo: root)
+        if !folder.isEmpty {
+            line.append(NSAttributedString(string: "  " + folder, attributes: [.font: Theme.detailFont, .foregroundColor: Theme.faintText, .paragraphStyle: style, .baselineOffset: offset]))
+        }
+        let stats = DiffBuilder.stats(diff)
+        let counts = NSMutableAttributedString(attributedString: statsText(added: stats.added, removed: stats.removed, leading: "  "))
+        counts.addAttributes([.paragraphStyle: style, .baselineOffset: offset], range: NSRange(location: 0, length: counts.length))
+        line.append(counts)
+        return line
     }
 
     // MARK: Changes card

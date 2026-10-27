@@ -532,8 +532,10 @@ private struct UsageButton: View {
             app.usagePopoverShown.toggle()
         }
         // On the model, so a script can open it and `dump` can say so.
-        // Above the button, which sits at the foot of the window.
-        .popover(isPresented: $app.usagePopoverShown, arrowEdge: .top) {
+        // Above the button, which sits at the foot of the window, and
+        // pointing at its right-hand end so the popover's wider than the
+        // sidebar stays inside the window rather than past its left edge.
+        .popover(isPresented: $app.usagePopoverShown, attachmentAnchor: .point(UnitPoint(x: 0.9, y: 0)), arrowEdge: .top) {
             UsagePopover().environment(app)
         }
     }

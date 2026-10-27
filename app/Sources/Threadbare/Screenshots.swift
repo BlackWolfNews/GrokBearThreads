@@ -216,6 +216,16 @@ enum ScreenshotRunner {
             await scroll(app, toRow: "g:t:sa_1", offset: 10)
             await capture(window, dir.appendingPathComponent("12b-codex-subagent-image.png"))
             session.setModelExpanded("g:t:sa_1", false)
+            // 12d. The patch opened, each file named over its lines, and the
+            // generated image opened to its prompt.
+            session.expanded.formUnion(["t:call_patch", "t:ig_1"])
+            session.setModelExpanded("g:t:call_patch", true)
+            app.transcript.show(nil)
+            app.transcript.show(session)
+            await scroll(app, toRow: "t:call_patch", offset: 10)
+            await capture(window, dir.appendingPathComponent("12d-codex-patch-and-prompt-open.png"))
+            session.expanded.subtract(["t:call_patch", "t:ig_1"])
+            session.setModelExpanded("g:t:call_patch", false)
             app.transcript.scrollToBottom()
             try? await Task.sleep(for: .milliseconds(400))
             await capture(window, dir.appendingPathComponent("12c-codex-limit-and-footers.png"))
@@ -251,6 +261,15 @@ enum ScreenshotRunner {
             } else {
                 print("usage popover: didn't open")
             }
+            app.usagePopoverShown = false
+            try? await Task.sleep(for: .milliseconds(300))
+            // 14b. After going back from a Codex version: it's held, with
+            // that as the reason, and there's no "Go back" to it.
+            _ = try? await app.client?.call("mock.clis", .object(["wentBack": .bool(true)]), as: JSONValue.self)
+            try? await Task.sleep(for: .milliseconds(300))
+            app.usagePopoverShown = true
+            try? await Task.sleep(for: .milliseconds(600))
+            if let popover = popoverWindow() { await capture(popover, dir.appendingPathComponent("14b-usage-went-back.png")) }
             app.usagePopoverShown = false
             try? await Task.sleep(for: .milliseconds(300))
         }
