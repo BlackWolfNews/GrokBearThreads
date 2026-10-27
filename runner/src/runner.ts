@@ -26,6 +26,7 @@ import type {
 } from './protocol.ts';
 import { ErrorCode, LIMITS, PROTOCOL_VERSION, RpcError } from './protocol.ts';
 import type { Schedule } from './protocol.ts';
+import type { Settings } from './settings.ts';
 import type {
   AgentAdapter,
   AgentSession,
@@ -47,6 +48,7 @@ import { RUNNER_VERSION, expandHome, paths, readRunnerJson, writeRunnerJson, typ
 import { copyImageInto, imageRefFor } from './media.ts';
 import { isDirectory } from './fsutil.ts';
 import { copySessionTranscript } from './transcripts.ts';
+import type { Models } from './models/index.ts';
 import { approvalTitle } from './threadbare-mcp.ts';
 import {
   EMPTY_PATCH_SET,
@@ -68,7 +70,8 @@ export type Notification =
   | { method: 'thread.deleted'; params: { threadId: string } }
   | { method: 'accounts.updated'; params: { accounts: Account[] } }
   | { method: 'runner.notice'; params: { level: 'info' | 'warning' | 'error'; message: string } }
-  | { method: 'schedules.updated'; params: { schedules: Schedule[] } };
+  | { method: 'schedules.updated'; params: { schedules: Schedule[] } }
+  | { method: 'settings.updated'; params: { settings: Settings } };
 
 type PendingApproval =
   | { approvalId: string; kind: 'tool'; resolve: (a: ToolApprovalAnswer) => void }
@@ -163,6 +166,9 @@ export type RunnerDeps = {
   // tests pass /bin/sh -c and a short limit.
   actionShell?: string[];
   actionTimeoutMs?: number;
+  // The runner's own small-model calls (models/index.ts), for titles.
+  // Absent in most tests, which then keep the first-line title.
+  models?: Pick<Models, 'generate'>;
 };
 
 const DELTA_INTERVAL_MS = 33; // at most ~30 delta flushes a second per thread
@@ -194,6 +200,7 @@ export class Runner {
   private panelsRoot?: string;
   private actionShell?: string[];
   private actionTimeoutMs?: number;
+  private models?: Pick<Models, 'generate'>;
   private patchCache: PatchCache = new Map();
   private threads = new Map<string, ThreadState>();
   private listeners = new Set<(n: Notification) => void>();
@@ -213,6 +220,7 @@ export class Runner {
     this.panelsRoot = deps.panelsRoot;
     this.actionShell = deps.actionShell;
     this.actionTimeoutMs = deps.actionTimeoutMs;
+    this.models = deps.models;
     this.adapters = deps.adapters;
     this.accounts = deps.accounts;
     this.clock = deps.clock;
@@ -675,7 +683,30 @@ export class Runner {
     this.threads.set(id, st);
     this.rememberAccount(accountId);
     const turnId = this.sendTo(st, params.text ?? '', params.images ?? [], { origin: params.origin, scheduleId: params.scheduleId });
+    if (!rec.titleSet && params.text?.trim()) void this.titleFromModel(st, params.text);
     return { thread: this.summary(st), turnId };
+  }
+
+  // Asks a small model for a better title than the first line. Without a
+  // key, in a private folder or over budget it says why and nothing
+  // changes. A title set meanwhile (by Mike or an agent) wins.
+  private async titleFromModel(st: ThreadState, text: string): Promise<void> {
+    if (!this.models) return;
+    const res = await this.models.generate({
+      feature: 'titles',
+      cwd: st.rec.cwd,
+      system:
+        'You name chat threads. Reply with a title of 3 to 7 words for the thread that starts with the message below: ' +
+        'sentence case, no quotes, no full stop, no emoji. Name the task, not the person.',
+      prompt: text.slice(0, 4000),
+      maxTokens: 30,
+    });
+    if (!res.ok || st.rt.deleted || st.rec.titleSet) return;
+    const title = cleanTitle(res.value);
+    if (!title) return;
+    st.rec.title = title;
+    st.rec.updatedAt = this.isoNow();
+    this.markDirty(st);
   }
 
   // origin "runner" marks a message the runner sends by itself (restart.ts),
@@ -1989,6 +2020,13 @@ export function titleFrom(text: string): string {
   const line = (text ?? '').split('\n').map((l) => l.trim()).find(Boolean) ?? '';
   if (!line) return 'Image';
   return line.length > LIMITS.titleChars ? line.slice(0, LIMITS.titleChars).trimEnd() : line;
+}
+
+// A model's title, tidied: first line, no wrapping quotes or full stop.
+export function cleanTitle(text: string): string {
+  let t = (text ?? '').split('\n').map((l) => l.trim()).find(Boolean) ?? '';
+  t = t.replace(/^(title:\s*)/i, '').replace(/^["'`*]+|["'`*]+$/g, '').replace(/\.$/, '').trim();
+  return t.length > LIMITS.titleChars ? t.slice(0, LIMITS.titleChars).trimEnd() : t;
 }
 
 export function oneLine(text: string, max: number): string {

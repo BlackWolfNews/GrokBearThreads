@@ -37,6 +37,9 @@ export type Config = {
   // (src/update.ts). Off with followMain: false in runner.json or
   // THREADBARE_FOLLOW_MAIN=0.
   followMain: boolean;
+  // The runner's own model calls (src/models/): a daily cap in dollars (0
+  // turns them off) and folders whose threads are never sent.
+  models: { dailyBudgetUsd: number; privateFolders: string[] };
 };
 
 export type RunnerJson = {
@@ -46,6 +49,7 @@ export type RunnerJson = {
   idleMinutes?: number;
   maxLiveCLIs?: number;
   followMain?: boolean;
+  models?: { dailyBudgetUsd?: number; privateFolders?: string[] };
 };
 
 export function defaultHome(): string {
@@ -109,6 +113,18 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
       env.THREADBARE_ACCOUNTS_DIR || '~/Library/Application Support/Token Stats/Accounts',
     ),
     followMain: env.THREADBARE_FOLLOW_MAIN ? env.THREADBARE_FOLLOW_MAIN !== '0' : json.followMain !== false,
+    models: modelSettingsFrom(json),
+  };
+}
+
+export const DEFAULT_DAILY_BUDGET_USD = 1;
+
+export function modelSettingsFrom(json: RunnerJson): Config['models'] {
+  const budget = json.models?.dailyBudgetUsd;
+  const folders = json.models?.privateFolders;
+  return {
+    dailyBudgetUsd: typeof budget === 'number' && Number.isFinite(budget) && budget >= 0 ? budget : DEFAULT_DAILY_BUDGET_USD,
+    privateFolders: Array.isArray(folders) ? folders.filter((f): f is string => typeof f === 'string' && f.trim() !== '') : [],
   };
 }
 

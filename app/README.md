@@ -466,6 +466,7 @@ is an error. Commands marked "the open thread" act on `id` when it's given
 | `dump` | `format` (`json`, `text`), `out` | |
 | `screenshot` | `path`, `inProcess` | `screencapture -l`, or drawn in-process when that gives no image; a dev-app instance always draws in-process (`shot` runs screencapture itself). `out` and `path` are refused under ~/Desktop, ~/Documents and ~/Downloads, where macOS would ask Mike to let the temp bundle in; `shot` and `dump` write in the instance's folder and move the file |
 | `window` | | the window's id (for `screencapture -l`) and size, once anything pending is drawn |
+| `settings` | `tab` (`general`, `models`), `close` | opens the Settings window (behind Mike's windows) on that tab, or closes it; says its window number and what it shows. `shot <file> --settings`, and `window` and `screenshot` with `"settings": true`, capture it |
 | `focus` | `on` (default true) | acts as if the app were in front, so an open thread gets marked read as it would for Mike; never activates it |
 | `mock` | `method`, `params` (an object) | `mock.<method>` on the mock runner, such as `restartPending` and `restart` |
 | `status`, `sidebar`, `streaming`, `account-ids`, `quit` | | |

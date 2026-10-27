@@ -250,7 +250,8 @@ holds the live runner's restart, so stop it before a deploy.
   "claudePath": "~/.local/bin/claude",
   "idleMinutes": 30,
   "maxLiveCLIs": 6,
-  "followMain": true
+  "followMain": true,
+  "models": { "dailyBudgetUsd": 1, "privateFolders": ["~/dev/client-work"] }
 }
 ```
 
@@ -263,6 +264,11 @@ installed runner leaves it out; `scripts/dev-runner.sh` sets it.
 `followMain` (default true) lets a runner that runs from a release build
 and restart onto main by itself (`docs/dev-tools.md`, "The runner updating
 itself"); `THREADBARE_FOLLOW_MAIN=0` does the same for one run.
+`models` is for the runner's own small-model calls through OpenRouter
+(`src/models/`, docs/protocol.md "Settings and models"): a daily budget in
+dollars (default 1; 0 turns them off) and folders whose threads are never
+sent. The app's Settings window and `tb settings` show and change all of
+this; the OpenRouter key itself is `secrets/openrouter-key`.
 
 Environment variables, mainly for tests:
 
@@ -294,6 +300,8 @@ What the runner gives the CLIs it starts is under Tools for agents below.
   restart.json                  a restart that's waiting for threads to finish
   restart.done.json             the last one handled, until this release is marked good
   secrets/runner-token          random bearer token, 0600 (folder 0700)
+  secrets/openrouter-key        the OpenRouter key, 0600, if one is set
+  models/usage.ndjson           one line per model call: feature, model, tokens, cost (no text)
   inbox/                        images the app imports before sending
   run/children.json             CLI process groups this runner started, and the
                                 groups their tool commands ran in
@@ -339,6 +347,9 @@ bin/tb archive <id>            bin/tb unarchive <id>
 bin/tb move <id> <folder>      # from the next message
 bin/tb delete <id>             # to trash/
 bin/tb accounts
+bin/tb settings                # what the Settings window shows
+bin/tb models key              # set the OpenRouter key: pasted at a prompt or piped in, never an argument
+bin/tb models try summarize "some text"   # one call by hand; also classify --labels a,b, extract --field name=desc, generate
 ```
 
 For working on Threadbare itself:

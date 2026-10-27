@@ -17,6 +17,8 @@ import { RpcServer } from './rpc.ts';
 import { realClock } from './clock.ts';
 import { acquireLock } from './lock.ts';
 import { removeTempFiles } from './fsutil.ts';
+import { Models } from './models/index.ts';
+import { SettingsService, modelMethods, settingsMethods } from './settings.ts';
 import { ALWAYS_ASK_TOOLS, SERVER_NAME, threadbareMcpServer } from './threadbare-mcp.ts';
 
 // Tells launch.mjs this runner calls its listening() hook (release.ts), so
@@ -68,6 +70,17 @@ async function main(): Promise<void> {
     mcpServersFor: (threadId) => ({ [SERVER_NAME]: threadbareMcpServer(runner, threadId, scheduler) }),
     alwaysAsk: ALWAYS_ASK_TOOLS,
   });
+  // The runner's own small-model calls. Reads the key from secrets/ on
+  // each call, so a key written by hand works without a restart.
+  let settings!: SettingsService;
+  const models = new Models({
+    home: cfg.home,
+    clock: realClock,
+    log,
+    settings: () => cfg.models,
+    notice: (level, message) => runner.notice(level, message),
+    onSpend: () => settings.spendChanged(),
+  });
   runner = new Runner({
     config: cfg,
     store,
@@ -75,7 +88,9 @@ async function main(): Promise<void> {
     accounts,
     clock: realClock,
     log,
+    models,
   });
+  settings = new SettingsService({ config: cfg, models, publish: (n) => runner.publish(n), clock: realClock });
   runner.start();
   // After the threads are loaded, so a schedule that came due while the
   // runner was stopped finds its thread.
@@ -121,7 +136,7 @@ async function main(): Promise<void> {
     token: readToken(cfg.home),
     runner,
     log,
-    methods: { ...restartMethods(restarter), ...scheduleMethods(scheduler) },
+    methods: { ...restartMethods(restarter), ...scheduleMethods(scheduler), ...settingsMethods(settings), ...modelMethods(models) },
     helloNotices: () => [...(rolledBack ? [{ level: 'warning' as const, message: rolledBack }] : []), ...restarter.helloNotices()],
   });
   let port: number;
@@ -158,6 +173,7 @@ async function main(): Promise<void> {
     // Whatever stopped it, a pending restart has now happened.
     restarter.stopping();
     scheduler.stop();
+    settings.stop();
     try {
       await runner.shutdown();
       await server.close().catch(() => {});

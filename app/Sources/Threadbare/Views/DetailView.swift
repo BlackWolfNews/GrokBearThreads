@@ -4,6 +4,7 @@ import ThreadbareCore
 
 struct RootView: View {
     @Environment(AppModel.self) private var app
+    @Environment(\.openSettings) private var openSettings
     static let sidebarIdealWidth: CGFloat = 330
 
     var body: some View {
@@ -21,6 +22,9 @@ struct RootView: View {
         .sheet(item: $app.scheduleEditor) { state in
             ScheduleEditor(state: state)
         }
+        // The automation's `settings` opens the Settings window; only a
+        // SwiftUI view can (AppKit's showSettingsWindow: does nothing now).
+        .onChange(of: app.settingsRequest) { openSettings() }
     }
 }
 

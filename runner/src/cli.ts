@@ -4,6 +4,8 @@ import path from 'node:path';
 import { loadConfig, readToken, runnerUrl } from './config.ts';
 import { RunnerClient } from './client.ts';
 import type { ImageRef, PersistedEvent, Schedule, ThreadSummary } from './protocol.ts';
+import type { Settings } from './settings.ts';
+import { usd } from './models/index.ts';
 import { backgroundFlag } from './protocol.ts';
 import { parseWhen as parseLater, relativeFuture } from './when.ts';
 import { DEV_HELP, logsCommand, runDev } from './tb-dev.ts';
@@ -27,6 +29,10 @@ const OPTIONS = {
   cron: { type: 'string' },
   tz: { type: 'string' },
   title: { type: 'string' },
+  labels: { type: 'string' },
+  field: { type: 'string', multiple: true },
+  system: { type: 'string' },
+  remove: { type: 'boolean' },
   // tb-dev.ts
   last: { type: 'string' },
   tools: { type: 'boolean' },
@@ -69,6 +75,12 @@ const HELP = `tb: talk to the Threadbare runner
                                   or an ISO time) or on a cron; to a thread with --thread,
                                   otherwise to a new thread each time
   tb schedules [--json]           tb schedules run|pause|resume|delete <scheduleId>
+  tb settings [--json]            what the Settings window shows
+  tb models [--json]              the OpenRouter key (set or not), budget and spend
+  tb models key [--remove]        sets the OpenRouter key from a prompt or stdin, never an argument
+  tb models try <job> "text" [--labels a,b] [--field name=description]... [--system S] [--cwd DIR]
+                                  one call by hand: classify (--labels), extract (--field),
+                                  summarize or generate. It spends like any other
 
 Thread ids can be shortened to any unique prefix.
 Uses THREADBARE_HOME and THREADBARE_PORT like the runner does.
@@ -95,6 +107,8 @@ const COMMAND_FLAGS: Record<string, string[]> = {
   accounts: [],
   schedule: ['at', 'cron', 'tz', 'title', 'thread', 'cwd', 'account', 'model', 'effort', 'ask', 'json'],
   schedules: ['json'],
+  settings: ['json'],
+  models: ['json', 'remove', 'labels', 'field', 'system', 'cwd'],
   status: ['json'],
   self: ['json'],
   restart: ['now', 'force', 'resume', 'no-resume', 'cancel', 'reason', 'thread', 'max-wait'],
@@ -382,6 +396,14 @@ async function run(client: RunnerClient, cmd: string, args: string[], f: Flags):
       printSchedules([r.schedule]);
       return 0;
     }
+    case 'settings': {
+      const r = await client.call<{ settings: Settings }>('settings.get', {});
+      if (f.json) console.log(JSON.stringify(r.settings, null, 2));
+      else printSettings(r.settings);
+      return 0;
+    }
+    case 'models':
+      return modelsCommand(client, args, f);
     default: {
       const code = await runDev(client, cmd, args, f, (prefix) => resolveId(client, prefix));
       if (code !== undefined) return code;
@@ -389,6 +411,102 @@ async function run(client: RunnerClient, cmd: string, args: string[], f: Flags):
       return 1;
     }
   }
+}
+
+function printSettings(s: Settings): void {
+  console.log(`Default folder   ${s.defaultCwd}`);
+  console.log(`Idle minutes     ${s.idleMinutes}`);
+  console.log(`Most live CLIs   ${s.maxLiveCLIs}`);
+  console.log(`Follow main      ${s.followMain ? 'on' : 'off'}`);
+  printModels(s);
+}
+
+function printModels(s: Settings): void {
+  const m = s.models;
+  console.log(`OpenRouter key   ${m.openRouterKey.set ? `set${m.openRouterKey.hint ? `, ends in ${m.openRouterKey.hint}` : ''}` : 'not set'}`);
+  console.log(`Daily budget     ${m.dailyBudgetUsd === 0 ? 'off' : usd(m.dailyBudgetUsd)}`);
+  console.log(`Spent today      ${usd(m.spentTodayUsd)}`);
+  console.log(`Spent this month ${usd(m.spentMonthUsd)}`);
+  console.log(`Private folders  ${m.privateFolders.length ? m.privateFolders.join(', ') : 'none'}`);
+}
+
+async function modelsCommand(client: RunnerClient, args: string[], f: Flags): Promise<number> {
+  const [action, ...rest] = args;
+  if (!action) {
+    const r = await client.call<{ settings: Settings }>('settings.get', {});
+    if (f.json) console.log(JSON.stringify(r.settings.models, null, 2));
+    else printModels(r.settings);
+    return 0;
+  }
+  if (action === 'key') {
+    if (rest.length) throw new Error("tb models key reads the key from a prompt or stdin, so it stays out of your shell history. Run it on its own.");
+    const key = f.remove ? null : await readSecret('OpenRouter key (hidden): ');
+    if (key === '') throw new Error('No key given; nothing changed.');
+    const r = await client.call<{ settings: Settings }>('settings.setKey', { provider: 'openrouter', key });
+    const k = r.settings.models.openRouterKey;
+    console.log(k.set ? `Key saved${k.hint ? `, ends in ${k.hint}` : ''}.` : 'Key removed.');
+    return 0;
+  }
+  if (action === 'try') {
+    const [job, text] = rest;
+    if (!job || text === undefined) throw new Error('tb models try <classify|extract|summarize|generate> "text"');
+    const params: Record<string, unknown> = { job, text };
+    if (f.labels) params.labels = String(f.labels).split(',').map((l) => l.trim()).filter(Boolean);
+    if (f.field) {
+      const fields: Record<string, string> = {};
+      for (const kv of f.field as string[]) {
+        const i = kv.indexOf('=');
+        if (i < 1) throw new Error(`--field takes name=description, not ${kv}`);
+        fields[kv.slice(0, i).trim()] = kv.slice(i + 1).trim();
+      }
+      params.fields = fields;
+    }
+    if (f.system) params.system = f.system;
+    if (f.cwd) params.cwd = path.resolve(String(f.cwd));
+    const r = await client.call<{ ok: boolean; value?: unknown; model?: string; costUsd?: number; reason?: string; message?: string }>('models.run', params);
+    if (f.json) console.log(JSON.stringify(r, null, 2));
+    else if (!r.ok) console.error(`Not sent or no answer (${r.reason}): ${r.message}`);
+    else {
+      console.log(typeof r.value === 'string' ? r.value : JSON.stringify(r.value, null, 2));
+      console.error(`(${r.model}${r.costUsd !== undefined ? `, ${usd(r.costUsd)}` : ''})`);
+    }
+    return r.ok ? 0 : 1;
+  }
+  throw new Error(`Unknown: tb models ${action}. It's key or try.`);
+}
+
+// A line from stdin; from a terminal, prompted for and not echoed.
+async function readSecret(prompt: string): Promise<string> {
+  const stdin = process.stdin;
+  if (!stdin.isTTY) {
+    let data = '';
+    for await (const chunk of stdin) data += chunk;
+    return data.trim();
+  }
+  process.stderr.write(prompt);
+  stdin.setRawMode(true);
+  stdin.resume();
+  stdin.setEncoding('utf8');
+  return new Promise((resolve, reject) => {
+    let got = '';
+    const done = (err?: Error) => {
+      stdin.setRawMode(false);
+      stdin.pause();
+      stdin.off('data', onData);
+      process.stderr.write('\n');
+      if (err) reject(err);
+      else resolve(got.trim());
+    };
+    const onData = (s: string) => {
+      for (const ch of s) {
+        if (ch === '\r' || ch === '\n') return done();
+        if (ch === '\u0003') return done(new Error('Cancelled.'));
+        if (ch === '\u007f') got = got.slice(0, -1);
+        else got += ch;
+      }
+    };
+    stdin.on('data', onData);
+  });
 }
 
 // Inside a thread, tb won't stop the thread it runs in, as the threadbare
