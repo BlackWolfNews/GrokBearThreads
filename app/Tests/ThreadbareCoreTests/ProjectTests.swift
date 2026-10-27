@@ -25,6 +25,22 @@ final class ProjectTests: XCTestCase {
         XCTAssertFalse(project.archived)
     }
 
+    func testProjectIcons() throws {
+        let picture = try decode(Project.self, """
+        {"id":"p_1","icon":{"image":{"path":"/d/project-icons/p_1-ab.png","mediaType":"image/png","width":256,"height":256},
+         "from":"/r/App/AppIcon.png","by":"librarian","updatedAt":"2026-10-27T10:00:00Z","shade":"new"}}
+        """)
+        XCTAssertEqual(picture.icon?.image?.path, "/d/project-icons/p_1-ab.png")
+        XCTAssertEqual(picture.icon?.from, "/r/App/AppIcon.png")
+        XCTAssertEqual(picture.icon?.isChosen, false)
+        let symbol = try decode(Project.self, #"{"id":"p_2","icon":{"symbol":"film","by":"mike"}}"#)
+        XCTAssertEqual(symbol.icon?.symbol, "film")
+        XCTAssertEqual(symbol.icon?.isChosen, true)
+        let broken = try decode(Project.self, #"{"id":"p_3","icon":"film"}"#)
+        XCTAssertNil(broken.icon, "an icon that isn't an object is dropped, not the project")
+        XCTAssertNil(try decode(Project.self, #"{"id":"p_4"}"#).icon)
+    }
+
     func testProjectWithOnlyAnId() throws {
         let project = try decode(Project.self, #"{"id":"p_1","createdBy":"someone-new"}"#)
         XCTAssertEqual(project.title, "Untitled project")

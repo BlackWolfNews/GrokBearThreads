@@ -11,6 +11,7 @@ import path from 'node:path';
 import type { Runner } from './runner.ts';
 import type { Clock } from './clock.ts';
 import type { Logger } from './log.ts';
+import type { SyncStatus } from './sync.ts';
 import type { ThreadStatus, ThreadSummary } from './protocol.ts';
 import { ErrorCode, RpcError } from './protocol.ts';
 import { atomicWriteFileSync, readJsonSync } from './fsutil.ts';
@@ -85,6 +86,8 @@ export type RunnerStatus = {
   draining?: { pid: number; version: string; release?: string; since: string; threads: string[] }[];
   // The runner following main by itself (src/update.ts).
   update?: UpdateStatus;
+  // The Convex mirror (src/sync.ts; main.ts adds it).
+  sync?: SyncStatus;
 };
 
 export const RESUME_MAX_AGE_MS = 15 * 60_000;

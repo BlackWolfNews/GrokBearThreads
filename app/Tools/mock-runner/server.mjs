@@ -394,6 +394,22 @@ async function dispatch(client, method, p) {
     case 'threads.unsubscribe':
       client.subs.delete(p.threadId);
       return {};
+    case 'threads.tickAsk': {
+      // docs/protocol.md, "Needs you": ticks one ask on the open card.
+      const t = need(p.threadId);
+      const s = t.summary;
+      if (!s.asks || s.asksSeq !== p.asksSeq) throw rpcError(-32602, "That isn't the thread's open card of asks.");
+      if (!Number.isInteger(p.index) || p.index < 0 || p.index >= s.asks.length) throw rpcError(-32602, 'No such ask.');
+      const ask = { ...s.asks[p.index] };
+      if (p.ticked) ask.ticked = true;
+      else delete ask.ticked;
+      s.asks = s.asks.map((a, i) => (i === p.index ? ask : a));
+      const caughtUp = s.lastSeenSeq >= s.lastSeq;
+      persist(s.id, { type: 'asks.ticked', asksSeq: s.asksSeq, ticked: s.asks.flatMap((a, i) => (a.ticked ? [i] : [])) });
+      if (caughtUp) s.lastSeenSeq = s.lastSeq;
+      broadcastSummary(s.id);
+      return { thread: s };
+    }
     case 'threads.markSeen': {
       const t = need(p.threadId);
       t.summary.lastSeenSeq = Math.max(t.summary.lastSeenSeq, p.seq ?? 0);
@@ -550,6 +566,7 @@ async function dispatch(client, method, p) {
     case 'projects.get':
     case 'projects.create':
     case 'projects.update':
+    case 'projects.setIcon':
     case 'projects.merge':
     case 'projects.delete':
     case 'threads.setProjects':
@@ -1229,6 +1246,14 @@ function projectRequest(method, p) {
       broadcastProjects();
       return { project: projectView(project) };
     }
+    case 'projects.setIcon': {
+      const project = needProject(p.projectId);
+      if (p.path) project.icon = { image: { path: p.path, mediaType: 'image/png' }, from: p.path, by: 'mike', updatedAt: iso() };
+      else if (p.symbol) project.icon = { symbol: p.symbol, by: 'mike', updatedAt: iso() };
+      else delete project.icon;
+      broadcastProjects();
+      return { project: projectView(project) };
+    }
     case 'projects.merge': {
       const from = needProject(p.projectId);
       const into = needProject(p.intoId);
@@ -1364,12 +1389,16 @@ function addDemoProjects() {
     state: 'Projects and the librarian are next: protocol written, runner and app being built in parallel. Settings tabs renamed; release notes for 0.4 drafted.',
     notes: '**Checks**: `./check.sh` runs everything, `--quick` for the runner only.\n\nNever restart the live runner from a thread; merge to main and it follows.\n\nThe protocol is the contract: change `docs/protocol.md` first.',
     createdBy: 'librarian', createdByThread: 'demo_release_notes', createdAt: ago(60 * 24 * 9), updatedAt: ago(3), stateUpdatedAt: ago(41),
+    // The three kinds of icon: a picture (the app's own), a symbol, and
+    // Walkies with none yet, which shows its letter.
+    icon: { image: { path: fileURLToPath(new URL('../../icons/threadbare.png', import.meta.url)), mediaType: 'image/png' }, from: '/Users/mike/dev/me/threadbare/app/icons/threadbare.png', by: 'librarian', updatedAt: ago(60) },
   };
   const photo = {
     id: 'p_7a2c41f0', title: 'Photo sync', folders: ['/Users/mike/dev/photo-sync'],
     goals: 'Back up the family photo library to B2 without babysitting it: resumable uploads, a nightly report, and builds that don\'t take fifteen minutes.',
     state: 'Uploads resume after a crash in testing; waiting on Mike to pick the chunk size. CI is slow because the lockfile change broke the cache key.',
     notes: '', createdBy: 'librarian', createdByThread: 'demo_upload_resume', createdAt: ago(60 * 24 * 4), updatedAt: ago(41), stateUpdatedAt: ago(41),
+    icon: { symbol: 'photo', by: 'librarian', updatedAt: ago(60) },
   };
   const walkies = {
     id: 'p_c9e8d102', title: 'Walkies', folders: ['/Users/mike/dev/walkies', '/Users/mike/dev/walkies-backend'],

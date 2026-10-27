@@ -8,6 +8,7 @@ import crypto from 'node:crypto';
 import type {
   Panel,
   Account,
+  Action,
   AnyEvent,
   ApprovalDecision,
   BackgroundTask as ProtocolBackgroundTask,
@@ -54,7 +55,8 @@ import { SessionNotFoundError } from './adapters/types.ts';
 import type { ThreadRecord, ThreadStore, QueuedSend, SubagentRecord } from './store.ts';
 import type { Clock, TimerHandle } from './clock.ts';
 import type { Logger } from './log.ts';
-import { threadEnv } from './restart.ts';
+import { BIN_DIR, threadEnv } from './restart.ts';
+import { cleanUpWorktree, makeWorktree, sameSubfolder, worktreeInstructions } from './worktrees.ts';
 import { stripModelSuffix, type AccountRegistry, type LearnedAccountInfo } from './accounts.ts';
 import { pickAccount as pickByRoom, type UsageReading } from './usage.ts';
 import { RUNNER_VERSION, expandHome, paths, readRunnerJson, writeRunnerJson, type Config } from './config.ts';
@@ -64,11 +66,15 @@ import { copySessionTranscript, subagentTranscriptPath } from './transcripts.ts'
 import { readSubagentTranscript } from './adapters/claude/subagents.ts';
 import { fileContext } from './adapters/claude/normalize.ts';
 import type { Models } from './models/index.ts';
-import { approvalTitle } from './threadbare-mcp.ts';
 import { emptyHighlights, observe as observeHighlights, pinItem, remove as removeHighlight, unpin as unpinHighlight, upsert as upsertHighlight, view as highlightsView, absolute, type ThreadHighlights } from './highlights.ts';
+import { SERVER_NAME, approvalTitle } from './threadbare-mcp.ts';
+import { END_TURN_TOOL, needsFromText, needsFromTool } from './needs.ts';
+import type { Needs } from './needs.ts';
 import {
   EMPTY_PATCH_SET,
+  findWorktreePatch,
   hookApplies,
+  isInside,
   loadPatchSet,
   projectPanels,
   renderListPanel,
@@ -79,6 +85,7 @@ import {
   type PatchCache,
   type PatchSet,
   type Screenshot,
+  worktreePatchFiles,
 } from './patches.ts';
 
 export type Notification =
@@ -179,6 +186,10 @@ type Turn = {
   // Files the turn edited or wrote (edit.diff paths, Write and Edit calls),
   // for hooks that run only after a change to certain files.
   edited: Set<string>;
+  // The agent's own end_turn input and last text, for what the turn needs
+  // from Mike (needs.ts). Never a sub-agent's.
+  endTurn?: Record<string, unknown>;
+  lastText?: string;
 };
 
 type Runtime = {
@@ -1186,6 +1197,9 @@ export class Runner {
     title?: string;
     origin?: MessageOrigin;
     scheduleId?: string;
+    // false: start in the folder as it is, even in a repo that asks for a
+    // worktree per thread.
+    worktree?: boolean;
   }): { thread: ThreadSummary; turnId: string } {
     this.checkAccepting();
     // New threads belong on the new release.
@@ -1225,6 +1239,10 @@ export class Runner {
     const checked = this.checkSettings(account, params.model || this.defaultModelFor(account.provider), params.effort ?? this.defaultEffortFor(account.provider));
     if (checked.model) rec.model = checked.model;
     if (checked.effort) rec.effort = checked.effort;
+    // Whether the first turn should look for a worktree patch. Reading the
+    // patch files is async, so it happens there; a folder with no patch
+    // files at all (most of them) starts its CLI straight away as before.
+    if (params.worktree !== false && this.mayWantWorktree(cwd)) rec.worktreePending = true;
     this.store.create(rec);
     const st: ThreadState = { rec, rt: newRuntime(this.clock.now()) };
     this.threads.set(id, st);
@@ -1485,6 +1503,14 @@ export class Runner {
     while (rt.closing) await rt.closing;
     if (rt.turn?.turnId !== msg.turnId) return; // interrupted while waiting
     let text = msg.text;
+    if (!rt.session && rec.worktreePending) {
+      await this.prepareWorktree(st, msg.turnId);
+      if (rt.turn?.turnId !== msg.turnId) return; // interrupted during setup
+    }
+    if (!rt.session) {
+      const left = this.leaveRemovedWorktree(st, msg.turnId);
+      if (left) text = `${left}\n\n${text}`;
+    }
     if (!rt.session) {
       const account = this.accounts.get(rec.accountId);
       if (!account) throw new Error(`Account ${rec.accountId} isn't available on this Mac.`);
@@ -1625,6 +1651,11 @@ export class Runner {
         }
         if (ev.type === 'assistant.text') rec.preview = oneLine(ev.text, LIMITS.previewChars);
         if (rt.turn) {
+          // A Codex child's items carry its prefix (<child>/<id>); Claude's
+          // sub-agents never reach the thread's events.
+          const own = !('itemId' in ev && ev.itemId?.includes('/'));
+          if (ev.type === 'assistant.text' && own) rt.turn.lastText = ev.text;
+          if (ev.type === 'tool.call' && own && ev.name === `mcp__${SERVER_NAME}__${END_TURN_TOOL}`) rt.turn.endTurn = ev.input;
           if (ev.type === 'edit.diff') rt.turn.edited.add(ev.path);
           else if (ev.type === 'tool.call' && (ev.kind === 'edit' || ev.kind === 'write')) {
             const file = ev.input.file_path ?? ev.input.path ?? ev.input.notebook_path;
@@ -1835,7 +1866,21 @@ export class Runner {
     // Why it failed (a limit, a full context, the login), so the app can
     // offer the fix without reading the message.
     if (outcome === 'failed' && r.errorKind) body.errorKind = r.errorKind;
+    // What it needs from Mike: its end_turn call, else its closing "What I
+    // need from you". Only a turn it finished; a stopped one says nothing.
+    const said = outcome === 'completed' ? turnNeeds(turn) : undefined;
+    if (said) {
+      body.needs = said.needs;
+      if (said.asks) body.asks = said.asks;
+      body.needsFrom = said.from;
+    }
     const ev = this.emit(st, body, turn.turnId);
+    // Any completed turn replaces the last one's card; one that said
+    // neither leaves no card, and counts as before.
+    if (outcome === 'completed') {
+      if (said) rec.needs = { seq: ev.seq, needs: said.needs, ...(said.asks ? { asks: said.asks } : {}) };
+      else delete rec.needs;
+    }
     this.endTurn(st, ev.seq, outcome === 'failed' ? 'error' : 'idle', outcome);
   }
 
@@ -2206,11 +2251,42 @@ export class Runner {
     rt.session = undefined;
     const ended = session?.end({ hard: true }).catch((e: unknown) => this.log.warn('stopping a deleted thread failed', { threadId, error: String(e) }));
     this.archiveNative(st, ended ?? rt.closing);
+    // Its worktree goes once the CLI has let go of the folder.
+    if (rec.worktree && !rec.worktree.removedAt) {
+      void Promise.resolve(ended ?? rt.closing)
+        .catch(() => undefined)
+        .then(() => this.cleanUpWorktree(st, true));
+    }
     this.store.trash(threadId, this.clock.now());
     this.log.info('thread deleted', { threadId, title: rec.title });
     this.armSnoozeTimer();
     this.notify({ method: 'thread.deleted', params: { threadId } });
     return {};
+  }
+
+  // Ticks one of the open card's asks. Nothing goes to the agent: ticks are
+  // Mike's own list, and a reply is his to write.
+  tickAsk(threadId: string, asksSeq: number, index: number, ticked: boolean): { thread: ThreadSummary } {
+    const st = this.mustGet(threadId);
+    const { rec } = st;
+    const card = rec.needs;
+    if (!card?.asks || card.seq !== asksSeq || card.seq !== rec.lastTurnCompletedSeq) throw new RpcError(ErrorCode.badParams, "That isn't the thread's open card of asks.");
+    if (!Number.isInteger(index) || index < 0 || index >= card.asks.length) throw new RpcError(ErrorCode.badParams, 'No such ask.');
+    const set = new Set(card.ticked);
+    if (ticked) set.add(index);
+    else set.delete(index);
+    card.ticked = [...set].sort((a, b) => a - b);
+    // Ticking means Mike is looking at it, so the tick doesn't make the
+    // thread unread.
+    const caughtUp = rec.lastSeenSeq >= rec.lastSeq;
+    const ev = this.emit(st, { type: 'asks.ticked', asksSeq, ticked: card.ticked });
+    if (caughtUp) rec.lastSeenSeq = ev.seq;
+    this.markDirty(st);
+    return { thread: this.summary(st) };
+  }
+
+  private saidNothing(rec: ThreadRecord): boolean {
+    return rec.needs?.needs === 'nothing' && rec.needs.seq === rec.lastTurnCompletedSeq;
   }
 
   markSeen(threadId: string, seq: number): { thread: ThreadSummary } {
@@ -2514,7 +2590,10 @@ export class Runner {
     const { rec, rt } = st;
     if (!rt.archivePending || rt.session || rt.closing || rt.deleted) return;
     rt.archivePending = false;
-    if (rec.archivedAt) this.archiveNative(st);
+    if (rec.archivedAt) {
+      this.archiveNative(st);
+      void this.cleanUpWorktree(st);
+    }
   }
 
   // Archives the native session in the CLI's own app (Codex Desktop) when
@@ -2854,7 +2933,9 @@ export class Runner {
       permissionMode: rec.permissionMode,
       status: rec.status,
       live: Boolean(rt.session),
-      needsYou: Boolean(rec.reviews?.some(r => r.status === 'pending')) || rec.status === 'waiting' || Boolean(rec.forceUnread) || (!running && rec.lastTurnCompletedSeq > rec.lastSeenSeq),
+      // A finished turn that said it needs nothing isn't waiting on Mike
+      // (docs/protocol.md, "Needs you").
+      needsYou: Boolean(rec.reviews?.some(r => r.status === 'pending')) || rec.status === 'waiting' || Boolean(rec.forceUnread) || (!running && rec.lastTurnCompletedSeq > rec.lastSeenSeq && !this.saidNothing(rec)),
       createdAt: rec.createdAt,
       updatedAt: rec.updatedAt,
       lastActivityAt: rec.lastActivityAt,
@@ -2862,6 +2943,14 @@ export class Runner {
       lastSeq: rec.lastSeq,
       lastSeenSeq: rec.lastSeenSeq,
     };
+    if (rec.needs && rec.needs.seq === rec.lastTurnCompletedSeq) {
+      s.needs = rec.needs.needs;
+      if (rec.needs.asks) {
+        const ticked = new Set(rec.needs.ticked);
+        s.asks = rec.needs.asks.map((a, i) => (ticked.has(i) ? { ...a, ticked: true as const } : a));
+        s.asksSeq = rec.needs.seq;
+      }
+    }
     const pendingReviews = rec.reviews?.filter(r => r.status === 'pending').length;
     if (pendingReviews) s.pendingReviews = pendingReviews;
     if (rec.model) s.model = rec.model;
@@ -2876,16 +2965,21 @@ export class Runner {
     if (rec.contextWindow !== undefined) s.contextWindow = rec.contextWindow;
     if (rec.costUsd !== undefined) s.costUsd = rec.costUsd;
     const set = this.patchSet(st);
+    const actions = this.actionsOf(st, set);
+    const patches = this.worktreeAction(rec) ? [...set.patches, { id: 'worktree', source: 'builtin' as const }] : set.patches;
     if (set.panels.length) s.panels = set.panels;
-    if (set.actions.length) s.actions = set.actions;
+    if (actions.length) s.actions = actions;
     if (set.hooks.length) s.hooks = set.hooks;
-    if (set.patches.length) s.patches = set.patches;
+    if (patches.length) s.patches = patches;
     const background = this.background(st);
     if (background.length) s.background = background;
     if (rec.subagents?.length) s.subagents = rec.subagents.map(publicSubagent);
     const projects = this.projects?.threadProjects(rec);
     if (projects) s.projects = projects;
     if (rec.highlightsAt) s.highlightsAt = rec.highlightsAt;
+    if (rec.worktree && !rec.worktree.removedAt) {
+      s.worktree = { branch: rec.worktree.branch, mainCheckout: rec.worktree.mainCheckout, path: rec.worktree.path };
+    }
     return s;
   }
 
@@ -3137,7 +3231,7 @@ export class Runner {
   // time per thread.
   async runAction(threadId: string, actionId: string): Promise<{ turnId?: string; ok?: boolean; exitCode?: number; durationMs?: number; seq?: number }> {
     const st = this.mustGet(threadId);
-    const action = this.patchSet(st).actions.find((a) => a.id === actionId);
+    const action = this.actionsOf(st, this.patchSet(st)).find((a) => a.id === actionId);
     if (!action) throw new RpcError(ErrorCode.badParams, `This thread has no action called ${actionId}`);
     if (action.kind === 'prompt') return this.send(threadId, action.prompt ?? '');
     const running = (st.rt.runningActions ??= new Set());
@@ -3172,6 +3266,152 @@ export class Runner {
     }
   }
 
+  // ------------------------------------------------------------ worktrees
+  // A worktree per thread (docs/thread-worktrees.md, worktrees.ts).
+
+  // Whether a new thread in `cwd` might get a worktree: there's at least
+  // one patch file in its own folder chain to read.
+  private mayWantWorktree(cwd: string): boolean {
+    try {
+      return worktreePatchFiles(cwd, this.panelsRoot).length > 0;
+    } catch {
+      return false;
+    }
+  }
+
+  // Before a new thread's first turn: if its repo's patch asks for a
+  // worktree, makes one, moves the thread into it and runs the patch's
+  // setup there. Anything going wrong is said, and the thread starts
+  // where it was asked to.
+  private async prepareWorktree(st: ThreadState, turnId: string): Promise<void> {
+    const { rec, rt } = st;
+    delete rec.worktreePending;
+    this.markDirty(st);
+    // A session already ran in the folder (a turn that failed later, say):
+    // moving it now would leave that session behind.
+    if (rec.sessionUsed || rec.worktree) return;
+    let patch;
+    try {
+      patch = await findWorktreePatch(rec.cwd, this.panelsRoot, this.patchCache);
+    } catch (e) {
+      this.log.warn('could not read patches for a worktree', { threadId: rec.id, error: String(e) });
+      return;
+    }
+    if (!patch || rt.deleted) return;
+    const asked = rec.cwd;
+    const made = await makeWorktree({ cwd: asked, threadId: rec.id, patch });
+    if (rt.deleted) return;
+    if (!made.ok) {
+      this.log.warn('could not make a worktree', { threadId: rec.id, reason: made.reason });
+      this.emit(st, { type: 'system.note', text: `Couldn't make a worktree for this thread: ${made.reason}. It starts in ${asked} instead.` }, turnId);
+      return;
+    }
+    rec.worktree = made.worktree;
+    rec.cwd = made.cwd;
+    rec.updatedAt = this.isoNow();
+    this.markDirty(st);
+    this.log.info('made a worktree', { threadId: rec.id, path: made.worktree.path, branch: made.worktree.branch });
+    this.emit(st, { type: 'system.note', text: `Working in a worktree of its own at ${made.worktree.path}, on the branch ${made.worktree.branch}. tb land puts it on main.` }, turnId);
+    if (!patch.setup) return;
+    const outcome = await runCommand(patch.setup, {
+      cwd: made.worktree.path,
+      env: { ...process.env, ...threadEnv(rec.id, this.cfg.home) },
+      shell: this.actionShell,
+      timeoutMs: this.actionTimeoutMs,
+    });
+    if (rt.deleted) return;
+    const body: EventBody = {
+      type: 'action.run',
+      actionId: `${patch.patch}.worktree-setup`,
+      patch: patch.patch,
+      title: 'Set up the worktree',
+      command: patch.setup,
+      ok: outcome.ok,
+      text: outcome.text,
+      truncated: outcome.truncated,
+      durationMs: outcome.durationMs,
+      trigger: 'worktree.setup',
+    };
+    if (outcome.exitCode !== undefined) body.exitCode = outcome.exitCode;
+    this.emit(st, body, rt.turn?.turnId ?? turnId);
+    this.markDirty(st);
+  }
+
+  // A thread whose worktree was removed (it was archived with everything
+  // landed) and has now come back carries on in the main checkout. Returns
+  // a line for the agent, whose system prompt still names the worktree.
+  private leaveRemovedWorktree(st: ThreadState, turnId: string): string | undefined {
+    const { rec } = st;
+    const w = rec.worktree;
+    if (!w?.removedAt || !isInside(rec.cwd, w.path) || isDirectory(rec.cwd)) return undefined;
+    const from = rec.cwd;
+    const to = sameSubfolder(from, w.path, w.mainCheckout);
+    if (rec.sessionUsed) {
+      if (this.adapters[rec.provider]?.movesFolders) rec.moved ??= { fromCwd: from };
+      else rec.handoff ??= { fromCwd: from, fromAccountId: rec.accountId };
+    }
+    rec.cwd = to;
+    rec.updatedAt = this.isoNow();
+    this.markDirty(st);
+    this.tellActivity({ kind: 'moved', threadId: rec.id, from, to });
+    this.emit(st, { type: 'system.note', text: `This thread's worktree was removed when it was archived, so it carries on in the main checkout, ${to}.` }, turnId);
+    return `[Threadbear] Your worktree at ${w.path} was removed after its work landed on main. You're now in the main checkout, ${to}, which other threads share: stage your own files by name.`;
+  }
+
+  // The Land chip, for a thread with a worktree of its own.
+  private worktreeAction(rec: ThreadRecord): Action | undefined {
+    const w = rec.worktree;
+    if (!w || w.removedAt) return undefined;
+    // This runner's own tb, in full: a login shell's PATH may not have it.
+    const tb = path.join(BIN_DIR, 'tb');
+    const quoted = /^[\w./-]+$/.test(tb) ? tb : `'${tb.replace(/'/g, `'\\''`)}'`;
+    return {
+      id: 'worktree.land',
+      title: 'Land',
+      kind: 'command',
+      command: `${quoted} land`,
+      patch: 'worktree',
+      note: `Rebase ${w.branch} on main, run the check, then move main to it`,
+    };
+  }
+
+  private actionsOf(st: ThreadState, set: PatchSet): Action[] {
+    const land = this.worktreeAction(st.rec);
+    return land ? [...set.actions, land] : set.actions;
+  }
+
+  // When the thread is archived or deleted: its worktree and branch go if
+  // everything on them is on main; otherwise they stay, and the thread (or,
+  // once it's deleted, a notice) says so and how to land or drop them.
+  private async cleanUpWorktree(st: ThreadState, deleted = false): Promise<void> {
+    const { rec } = st;
+    const w = rec.worktree;
+    if (!w || w.removedAt) return;
+    let result;
+    try {
+      result = await cleanUpWorktree(w);
+    } catch (e) {
+      result = { removed: false as const, reason: String((e as Error).message ?? e) };
+    }
+    this.log.info('worktree cleanup', { threadId: rec.id, path: w.path, ...result });
+    if (result.removed) {
+      w.removedAt = this.isoNow();
+      if (deleted) return;
+      this.emit(st, { type: 'system.note', text: `Removed this thread's worktree and its branch ${w.branch}: everything on it is on main.` });
+      this.markDirty(st);
+      return;
+    }
+    const how =
+      `To land it, run tb land in ${w.path}${deleted ? '' : ' (or bring the thread back and press Land)'}. ` +
+      `To drop it, git -C ${w.mainCheckout} worktree remove --force ${w.path} && git -C ${w.mainCheckout} branch -D ${w.branch}.`;
+    if (deleted) {
+      this.notice('info', `"${rec.title}" was deleted, but its worktree at ${w.path} and branch ${w.branch} stay: ${result.reason}. ${how}`);
+      return;
+    }
+    this.emit(st, { type: 'system.note', text: `This thread's worktree at ${w.path} and its branch ${w.branch} stay: ${result.reason}. ${how}` });
+    this.markDirty(st);
+  }
+
   // A thread by full id or unique prefix, for titles; undefined if unclear.
   private findThread(q: string): ThreadSummary | undefined {
     const exact = this.threads.get(q);
@@ -3203,10 +3443,16 @@ export class Runner {
   // fresh session: Claude Code keeps a resumed session's system prompt and
   // ignores an appended one, so a resume hears through projectNews.
   private briefFor(rec: ThreadRecord, resume: boolean): { instructions?: string } {
-    if (!this.projects || resume) return {};
-    rec.projectsTold = this.projects.briefIds(rec);
-    const brief = this.projects.brief(rec);
-    return brief ? { instructions: brief } : {};
+    if (resume) return {};
+    const parts: string[] = [];
+    if (this.projects) {
+      rec.projectsTold = this.projects.briefIds(rec);
+      const brief = this.projects.brief(rec);
+      if (brief) parts.push(brief);
+    }
+    // Where its worktree is and how its work gets to main.
+    if (rec.worktree && !rec.worktree.removedAt) parts.push(worktreeInstructions(rec.worktree));
+    return parts.length ? { instructions: parts.join('\n\n') } : {};
   }
 
   // The thread's projects its session hasn't been told about, as lines to
@@ -3379,6 +3625,15 @@ export function cleanTitle(text: string): string {
   t = t.replace(/\.$/, '').trim();
   if (t.length > LIMITS.titleChars || t.split(/\s+/).length > 10) return '';
   return t;
+}
+
+// What a completed turn needs from Mike: its end_turn call, then its last
+// text's "What I need from you" section, else nothing said.
+function turnNeeds(turn: Turn): (Needs & { from: 'tool' | 'text' }) | undefined {
+  const tool = turn.endTurn && needsFromTool(turn.endTurn);
+  if (tool) return { ...tool, from: 'tool' };
+  const text = turn.lastText && needsFromText(turn.lastText);
+  return text ? { ...text, from: 'text' } : undefined;
 }
 
 export function oneLine(text: string, max: number): string {

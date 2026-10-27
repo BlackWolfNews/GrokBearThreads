@@ -1395,3 +1395,125 @@ test('hooks don\'t run after an interrupted or failed turn, or a turn the runner
   await until(() => h.events(thread.id).some((e) => e.type === 'action.run'), 'the hook after a completed turn');
   assert.equal(h.events(thread.id).filter((e) => e.type === 'action.run').length, 1);
 });
+
+// docs/protocol.md, "Needs you".
+const END_TURN = 'mcp__threadbare__end_turn';
+
+function endTurnCall(s: ReturnType<typeof makeHarness>['adapter']['last'], itemId: string, input: Record<string, unknown>) {
+  s.out({ kind: 'event', event: { type: 'tool.call', itemId, name: END_TURN, kind: 'mcp', title: 'end_turn', input } });
+}
+
+test('needs you: end_turn "nothing" keeps a finished thread out of Needs you; "you" opens a card of asks', () => {
+  const h = makeHarness();
+  const { thread } = create(h);
+  let s = h.adapter.last;
+  s.init();
+  s.text('m1', 'All fixed.\n\n**What I need from you**\n\n1. This list is ignored: the tool call wins.');
+  endTurnCall(s, 't1', { needs: 'nothing' });
+  s.result('completed');
+  let t = h.runner.get(thread.id);
+  const done = h.events(thread.id).at(-1);
+  assert.equal(done.needs, 'nothing');
+  assert.equal(done.needsFrom, 'tool');
+  assert.deepEqual(checkSummary(t), []);
+  assert.equal(t.needs, 'nothing');
+  assert.equal(t.needsYou, false, 'finished and unread, but it said it needs nothing');
+  assert.ok(t.lastSeq > t.lastSeenSeq, 'still unread');
+
+  h.runner.send(thread.id, 'Now the docs');
+  s = h.adapter.last;
+  s.text('m2', 'Docs are drafted.');
+  endTurnCall(s, 't2', { needs: 'you', asks: [{ action: 'Paste the key', where: 'Settings', reply: 'done' }, { action: 'Pick a budget' }] });
+  s.result('completed');
+  t = h.runner.get(thread.id);
+  assert.deepEqual(checkSummary(t), []);
+  assert.equal(t.needsYou, true);
+  assert.equal(t.needs, 'you');
+  assert.deepEqual(t.asks, [{ action: 'Paste the key', where: 'Settings', reply: 'done' }, { action: 'Pick a budget' }]);
+  assert.equal(t.asksSeq, h.events(thread.id).at(-1).seq);
+
+  // Ticking: an asks.ticked event, nothing sent, and still read if it was.
+  h.runner.markSeen(thread.id, t.lastSeq);
+  const sent = s.sent.length;
+  t = h.runner.tickAsk(thread.id, t.asksSeq!, 0, true).thread;
+  assert.deepEqual(t.asks, [{ action: 'Paste the key', where: 'Settings', reply: 'done', ticked: true }, { action: 'Pick a budget' }]);
+  assert.equal(s.sent.length, sent);
+  const tickEv = h.events(thread.id).at(-1);
+  assert.equal(tickEv.type, 'asks.ticked');
+  assert.deepEqual(tickEv.ticked, [0]);
+  assert.equal(tickEv.turnId, undefined);
+  assert.equal(t.lastSeenSeq, t.lastSeq);
+  assert.deepEqual(checkSequence(h.events(thread.id)), []);
+  assert.throws(() => h.runner.tickAsk(thread.id, t.asksSeq! - 1, 0, true), RpcError);
+  assert.throws(() => h.runner.tickAsk(thread.id, t.asksSeq!, 2, true), RpcError);
+  t = h.runner.tickAsk(thread.id, t.asksSeq!, 0, false).thread;
+  assert.deepEqual(t.asks![0], { action: 'Paste the key', where: 'Settings', reply: 'done' });
+});
+
+test('needs you: without end_turn the closing section is read; with neither, a finished turn counts as before', () => {
+  const h = makeHarness();
+  const { thread } = create(h);
+  let s = h.adapter.last;
+  s.init();
+  s.text('m1', 'Built it.\n\n**What I need from you**\n\n1. Restart the app, then reply "done".');
+  s.result('completed');
+  let t = h.runner.get(thread.id);
+  assert.equal(h.events(thread.id).at(-1).needsFrom, 'text');
+  assert.deepEqual(t.asks, [{ action: 'Restart the app, then reply "done".', reply: 'done' }]);
+  assert.equal(t.needsYou, true);
+
+  h.runner.send(thread.id, 'done');
+  s = h.adapter.last;
+  s.text('m2', 'Works now. Nothing needed from you right now.');
+  s.result('completed');
+  t = h.runner.get(thread.id);
+  assert.equal(t.needs, 'nothing');
+  assert.equal(t.asks, undefined, 'the old card closed');
+  assert.equal(t.needsYou, false);
+
+  h.runner.send(thread.id, 'and again');
+  s = h.adapter.last;
+  s.text('m3', 'Here you go.');
+  s.result('completed');
+  t = h.runner.get(thread.id);
+  assert.equal(t.needs, undefined);
+  assert.equal(h.events(thread.id).at(-1).needs, undefined);
+  assert.equal(t.needsYou, true, 'today\'s rule: finished and unread');
+});
+
+test('needs you: an interrupted turn says nothing, and a sub-agent\'s end_turn is ignored', async () => {
+  const h = makeHarness();
+  const { thread } = create(h);
+  let s = h.adapter.last;
+  s.init();
+  s.text('m1', 'Nothing needed from you right now.');
+  endTurnCall(s, 'child-1/t1', { needs: 'nothing' });
+  s.result('interrupted');
+  let t = h.runner.get(thread.id);
+  assert.equal(t.needs, undefined);
+  assert.equal(h.events(thread.id).at(-1).needs, undefined);
+
+  h.runner.send(thread.id, 'go on');
+  s = h.adapter.last;
+  endTurnCall(s, 'child-1/t2', { needs: 'nothing' });
+  s.text('m2', 'Finished.');
+  s.result('completed');
+  t = h.runner.get(thread.id);
+  assert.equal(t.needs, undefined, "a Codex child's call isn't the thread's");
+  assert.equal(t.needsYou, true);
+});
+
+test('needs you: the card survives a reload of the thread record', () => {
+  const h = makeHarness();
+  const { thread } = create(h);
+  const s = h.adapter.last;
+  s.init();
+  endTurnCall(s, 't1', { needs: 'you', asks: [{ action: 'Say yes' }] });
+  s.result('completed');
+  const seq = h.runner.get(thread.id).asksSeq!;
+  h.runner.tickAsk(thread.id, seq, 0, true);
+  const h2 = h.restart();
+  const t = h2.runner.get(thread.id);
+  assert.deepEqual(t.asks, [{ action: 'Say yes', ticked: true }]);
+  assert.equal(t.asksSeq, seq);
+});

@@ -54,7 +54,12 @@ export const EMPTY_PATCH_SET: PatchSet = { panels: [], actions: [], hooks: [], p
 // Loaded patch files by path, so a summary refresh doesn't import a file
 // whose mtime hasn't moved. One per runner.
 export type PatchCache = Map<string, { mtimeMs: number; loaded: LoadedPatch }>;
-type LoadedPatch = { info: PatchInfo; panels: Panel[]; actions: Action[]; hooks: Hook[] };
+type LoadedPatch = { info: PatchInfo; panels: Panel[]; actions: Action[]; hooks: Hook[]; worktree?: WorktreeConfig };
+
+// A patch's `worktree`: the repo gives each new thread a git worktree of
+// its own (docs/thread-worktrees.md, worktrees.ts). Not part of PatchSet:
+// only the thread's own folder chain counts, which findWorktreePatch reads.
+export type WorktreeConfig = { setup?: string; check?: string };
 
 // A folder of one of the thread's projects.
 export type ProjectFolder = { folder: string; projectId: string };
@@ -228,7 +233,18 @@ export function readPatchModule(id: string, source: 'home' | 'project', file: st
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     return problem('The default export should be an object with actions and/or panels.');
   }
-  const v = value as { actions?: unknown; panels?: unknown; hooks?: unknown };
+  const v = value as { actions?: unknown; panels?: unknown; hooks?: unknown; worktree?: unknown };
+  let worktree: WorktreeConfig | undefined;
+  if (v.worktree !== undefined) {
+    const w = v.worktree as { setup?: unknown; check?: unknown };
+    if (!w || typeof w !== 'object' || Array.isArray(w)) return problem('worktree should be an object with setup and/or check.');
+    worktree = {};
+    for (const key of ['setup', 'check'] as const) {
+      if (w[key] === undefined) continue;
+      if (typeof w[key] !== 'string' || !w[key].trim()) return problem(`worktree.${key} should be a command.`);
+      worktree[key] = w[key];
+    }
+  }
   const actions: Action[] = [];
   const panels: Panel[] = [];
   const hooks: Hook[] = [];
@@ -294,7 +310,32 @@ export function readPatchModule(id: string, source: 'home' | 'project', file: st
     if (ids.has(x.id)) return problem(`Two entries would both be called ${x.id}; give them different titles.`);
     ids.add(x.id);
   }
-  return { info, panels, actions, hooks };
+  return worktree ? { info, panels, actions, hooks, worktree } : { info, panels, actions, hooks };
+}
+
+// The patch that gives a thread in `cwd` its own worktree: the first patch
+// file with a `worktree`, from `cwd` up (the nearest folder first). Home's
+// ~/.threadbear/patches never counts, and nor do project folders:
+// worktrees are a repo's own choice. `folder` holds the `.threadbear/`.
+export type WorktreePatch = WorktreeConfig & { patch: string; file: string; folder: string };
+
+export async function findWorktreePatch(cwd: string, home: string = os.homedir(), cache: PatchCache = new Map()): Promise<WorktreePatch | undefined> {
+  for (const file of worktreePatchFiles(cwd, home)) {
+    const loaded = await loadPatchFile(file, 'project', cache);
+    if (loaded.worktree && !loaded.info.error) {
+      return { ...loaded.worktree, patch: loaded.info.id, file, folder: path.dirname(path.dirname(path.dirname(file))) };
+    }
+  }
+  return undefined;
+}
+
+// The patch files findWorktreePatch would read, nearest folder first.
+// Synchronous, so a thread with none can start without waiting.
+export function worktreePatchFiles(cwd: string, home: string = os.homedir()): string[] {
+  return patchDirs(cwd, home)
+    .filter((d) => d.source === 'project')
+    .reverse()
+    .flatMap((d) => patchFiles(d.dir));
 }
 
 // Whether a turn's edits make a hook run: no filter, or one of the edited

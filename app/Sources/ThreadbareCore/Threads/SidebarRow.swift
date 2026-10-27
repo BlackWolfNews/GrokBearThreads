@@ -35,7 +35,9 @@ public enum ThreadRowStatus: Sendable, Equatable {
 public struct ThreadRowLook: Sendable, Equatable {
     public var status: ThreadRowStatus
     /// Finished and not looked at yet: a small accent dot before the title.
-    /// A thread waiting on Mike says so in words instead.
+    /// A thread waiting on Mike says so in words instead. Not while
+    /// sub-agents or jobs are still going either: a dot by the spinner
+    /// looked like two states at once, so it comes when they've finished.
     public var unread: Bool
     /// Semibold title: the thread needs Mike or is unread.
     public var emphasised: Bool
@@ -45,8 +47,12 @@ public struct ThreadRowLook: Sendable, Equatable {
     /// Needs you merged into the inbox, the word is what says why a row
     /// sits at the top.
     public var labelled: Bool
+    /// Unread, and its last turn said nothing waits on Mike: a tick in the
+    /// gutter instead of the dot, out of Needs you.
+    public var done: Bool
 
-    public init(status: ThreadRowStatus, unread: Bool, emphasised: Bool, labelled: Bool = true) {
+    public init(status: ThreadRowStatus, unread: Bool, emphasised: Bool, labelled: Bool = true, done: Bool = false) {
+        self.done = done
         self.status = status
         self.unread = unread
         self.emphasised = emphasised
@@ -65,8 +71,11 @@ public struct ThreadRowLook: Sendable, Equatable {
             case .idle: status = thread.background.isEmpty ? .time : .background
             }
         }
-        unread = thread.needsYou && status != .needsYou && status != .working
-        emphasised = thread.needsYou || status == .needsYou
+        // A turn that said it needs nothing isn't in needsYou, but it's
+        // still new: it gets a tick rather than nothing at all.
+        done = status == .time && !thread.needsYou && thread.saidDone && thread.lastSeq > thread.lastSeenSeq
+        unread = (thread.needsYou && status != .needsYou && status != .working && status != .background) || done
+        emphasised = thread.needsYou || status == .needsYou || done
         labelled = !(status == .working && section == .running)
     }
 

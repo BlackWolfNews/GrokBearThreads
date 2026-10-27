@@ -47,6 +47,7 @@ const THREAD_METHODS = new Set([
   'threads.markSeen',
   'threads.highlights',
   'threads.removeHighlight',
+  'threads.tickAsk',
   'approvals.respond',
   'panels.render',
   'actions.run',
@@ -336,6 +337,7 @@ export class RpcServer {
         return remote.search(query, limit ?? 50).then((more) => ({ threads: mergeSummaries(local, more).slice(0, limit ?? 50) }));
       }
       case 'threads.create': {
+        if (p.worktree !== undefined && typeof p.worktree !== 'boolean') throw bad('worktree must be a boolean');
         const res = r.create({
           text: optString(p, 'text') ?? '',
           images: optImages(p),
@@ -345,6 +347,7 @@ export class RpcServer {
           effort: optEffort(p),
           permissionMode: optMode(p),
           title: optString(p, 'title'),
+          ...(p.worktree === false ? { worktree: false } : {}),
         });
         return { thread: res.thread, turnId: res.turnId };
       }
@@ -409,6 +412,9 @@ export class RpcServer {
         return r.highlights(reqString(p, 'threadId'));
       case 'threads.removeHighlight':
         return r.removeHighlight(reqString(p, 'threadId'), reqString(p, 'highlightId'));
+      case 'threads.tickAsk':
+        if (typeof p.ticked !== 'boolean') throw bad('ticked must be a boolean');
+        return r.tickAsk(reqString(p, 'threadId'), reqNumber(p, 'asksSeq'), reqNumber(p, 'index'), p.ticked);
       case 'approvals.respond': {
         const decision = reqString(p, 'decision') as ApprovalDecision;
         if (!['allow', 'allowAlways', 'deny', 'answered'].includes(decision)) throw bad('bad decision');

@@ -122,6 +122,11 @@ export type ThreadSummary = {
   status: ThreadStatus;
   live: boolean;
   needsYou: boolean;
+  // What the last completed turn said it needs from Mike, and its open
+  // asks (docs/protocol.md, "Needs you").
+  needs?: NeedsWho;
+  asks?: OpenAsk[];
+  asksSeq?: number;
   pendingReviews?: number;
   createdAt: string;
   updatedAt: string;
@@ -154,7 +159,12 @@ export type ThreadSummary = {
   // removal, the librarian's brief): a client fetches threads.highlights
   // again when this or lastSeq moves.
   highlightsAt?: string;
+  // Its own git worktree (docs/thread-worktrees.md). Absent when it has
+  // none, or once that was removed.
+  worktree?: ThreadWorktree;
 };
+
+export type ThreadWorktree = { branch: string; mainCheckout: string; path: string };
 
 // Projects (docs/protocol.md, "Projects"): a grouping above folders that
 // carries goals, state and notes forward, made by the librarian, agents or
@@ -182,8 +192,21 @@ export type Project = {
   updatedAt: string;
   stateUpdatedAt?: string;
   archived?: boolean;
+  icon?: ProjectIcon;
   threadCount: number;
   lastActivityAt?: string;
+};
+
+// What a project shows as its icon: a picture found in its folders (or
+// chosen), else an SF Symbol. Absent until the librarian has found one.
+export type ProjectIcon = {
+  image?: ImageRef; // a copy in the runner's data dir, at most 256 px
+  symbol?: string; // an SF Symbol name, when there's no picture
+  from?: string; // the file the picture was copied from
+  // librarian: found by itself and kept up to date; mike or agent: chosen,
+  // and left alone until set back to automatic.
+  by: ProjectMaker;
+  updatedAt: string;
 };
 
 export type LibrarianReason = 'first-turn' | 'new-folder' | 'moved' | 'catch-up' | 'asked';
@@ -438,7 +461,12 @@ export type EventBody =
       usage?: ClaudeTurnUsage | CodexTurnUsage | Record<string, unknown>;
       error?: string;
       errorKind?: TurnErrorKind;
+      needs?: NeedsWho;
+      asks?: Ask[];
+      needsFrom?: 'tool' | 'text';
     }
+  // The ticks on a card of asks, the whole set each time. Outside any turn.
+  | { type: 'asks.ticked'; asksSeq: number; ticked: number[] }
   | { type: 'system.note'; text: string }
   | { type: 'error'; message: string }
   // A command action that ran (patches.ts): its output, truncated like a
@@ -454,7 +482,7 @@ export type EventBody =
       text: string;
       truncated: boolean;
       durationMs: number;
-      trigger?: HookTrigger; // set when a hook ran it, absent for a chip or tb run
+      trigger?: HookTrigger | 'worktree.setup'; // set when a hook or a new worktree's setup ran it, absent for a chip or tb run
     };
 
 export type DeltaType = 'assistant.text.delta' | 'reasoning.delta' | 'tool.output.delta';
@@ -466,6 +494,11 @@ export type Envelope = {
   threadId: string;
   turnId?: string;
 };
+
+// What a finished turn needs from Mike (docs/protocol.md, "Needs you").
+export type NeedsWho = 'you' | 'nothing';
+export type Ask = { action: string; where?: string; reply?: string };
+export type OpenAsk = Ask & { ticked?: true };
 
 export type PersistedEvent = Envelope & EventBody;
 export type TransientEvent = Envelope & DeltaBody;
@@ -485,6 +518,7 @@ export const PERSISTED_TYPES = new Set<string>([
   'plan.updated',
   'turn.started',
   'turn.completed',
+  'asks.ticked',
   'system.note',
   'error',
   'action.run',
