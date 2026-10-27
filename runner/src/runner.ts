@@ -84,8 +84,20 @@ export type Notification =
   | { method: 'schedules.updated'; params: { schedules: Schedule[] } }
   | { method: 'clis.updated'; params: { clis: CliStatus[] } }
   | { method: 'settings.updated'; params: { settings: Settings } }
+  | { method: 'runner.updates'; params: { updates: RunnerUpdates } }
   // Only from a draining runner, to the primary (handover.ts).
-  | { method: 'drain.handedOver'; params: { threadId: string } };
+  | { method: 'drain.handedOver'; params: { threadId: string } }
+  | { method: 'drain.usage'; params: { accountId: string; reading: UsageReading } };
+
+// hello's `updates` and runner.updates (docs/protocol.md, "Runner updates").
+export type RunnerUpdates = {
+  state: 'off' | 'idle' | 'checking' | 'building' | 'waiting' | 'failed';
+  commit?: string;
+  subject?: string;
+  reason?: string;
+  oldRunners: { version: string; threads: string[] }[];
+  launcherChanged?: true;
+};
 
 // The seams to D's and E's modules (usage.ts, updates/), as far as the
 // runner uses them. They're structural so tests can pass small fakes.

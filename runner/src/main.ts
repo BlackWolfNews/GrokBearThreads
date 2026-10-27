@@ -4,6 +4,7 @@
 import fs from 'node:fs';
 import { loadConfig, ensureHome, readToken, paths, recordListening, DEFAULT_CWD, RUNNER_VERSION } from './config.ts';
 import { RELEASE, markGoodLater, onSupervisorGone, readRelease, requestHandover, supervised, takeRollbackNotice, tellLaunchListening } from './release.ts';
+import type { RunnerUpdates } from './runner.ts';
 import { Peers, PrimaryLink, ThreadRouter, drainChildrenName, peersElsewhere, primaryElsewhere, removeDrainInfo, scheduleRouter, writeDrainInfo, type Elsewhere } from './handover.ts';
 import { RunnerUpdater } from './update.ts';
 import { Restarter, restartMethods } from './restart.ts';
@@ -82,6 +83,9 @@ async function main(): Promise<void> {
   let primaryLink: PrimaryLink | undefined;
   const router = (): ThreadRouter => (routerCache ??= new ThreadRouter(runner, () => elsewhere));
   let routerCache: ThreadRouter | undefined;
+  let updaterReady = false;
+  // Set once this runner has handed over and is finishing its kept turns.
+  let draining = false;
   const scheduleControl = () => scheduleRouter(scheduler, () => primaryLink);
   // Keeps both CLIs current (E). Its hooks call back into the runner and
   // the Restarter, made below; nothing calls them before start().
@@ -131,7 +135,12 @@ async function main(): Promise<void> {
     store,
     adapters: { claude, codex },
     accounts,
-    usage,
+    // A draining runner's readings go to the primary, which owns
+    // usage.json (docs/protocol.md, "Handovers").
+    usage: {
+      record: (accountId, reading) => (draining ? runner.publish({ method: 'drain.usage', params: { accountId, reading } }) : usage.record(accountId, reading)),
+      onChange: (fn) => usage.onChange(fn),
+    },
     clock: realClock,
     log,
     models,
@@ -152,6 +161,8 @@ async function main(): Promise<void> {
       },
       publish: (n) => runner.publish(n),
     },
+    usage: (accountId, reading) => usage.record(accountId, reading),
+    onChange: () => publishUpdates(),
     sweep: async (pid) => {
       const theirs = new ProcessRegistry(paths.run(cfg.home), log, drainChildrenName(pid));
       const n = await theirs.sweepOrphans();
@@ -201,7 +212,29 @@ async function main(): Promise<void> {
     notice: (level, message) => runner.notice(level, message),
     restart: (p) => restarter.request({ when: 'idle', ...p }),
     pendingRestart: () => Boolean(restarter.status().pendingRestart),
+    onChange: () => publishUpdates(),
   });
+  // runner.updates: sent when what hello's `updates` says changes.
+  let lastUpdates = '';
+  const runnerUpdates = (): RunnerUpdates => {
+    const u = updater.status();
+    const out: RunnerUpdates = { state: u.state, oldRunners: peers.status().map((d) => ({ version: d.version, threads: d.threads })) };
+    if (u.commit) out.commit = u.commit.slice(0, 7);
+    if (u.subject) out.subject = u.subject;
+    if (u.reason) out.reason = u.reason;
+    if (u.launcherChanged) out.launcherChanged = true;
+    return out;
+  };
+  function publishUpdates(): void {
+    // Peers can call this before the updater exists (at startup).
+    if (!updaterReady || draining) return;
+    const updates = runnerUpdates();
+    const key = JSON.stringify(updates);
+    if (key === lastUpdates) return;
+    lastUpdates = key;
+    runner.publish({ method: 'runner.updates', params: { updates } });
+  }
+  updaterReady = true;
 
   runner.attachClis(updates);
   const methods = { ...restartMethods(restarter), ...scheduleMethods(scheduler), ...settingsMethods(settings), ...modelMethods(models) };
@@ -222,6 +255,7 @@ async function main(): Promise<void> {
     clis: updates,
     methods,
     remote: peers,
+    updates: () => (draining ? undefined : runnerUpdates()),
     helloNotices: () => {
       // Like a missing claude: said to every client, until it's there.
       const noCodex = missingCodex(updates.codexBinary(), cfg);
@@ -296,7 +330,6 @@ async function main(): Promise<void> {
   // until their turns end and launch.mjs starts the current release beside
   // it, which takes everything else. The order matters: the new runner
   // must find this one's drain file, a free port and a free lock.
-  let draining = false;
   let drainServer: RpcServer | undefined;
   let primaryHeard = false;
   const handOver = async (keeps: string[]) => {
