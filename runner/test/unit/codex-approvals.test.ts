@@ -7,6 +7,7 @@ import {
   commandRule,
   plainArgv,
   refusal,
+  prefixRule,
   ruleFor,
   shellWords,
   unwrapShell,
@@ -29,6 +30,45 @@ test('the zsh wrapper is stripped and plain commands split into words', () => {
   assert.deepEqual(shellWords(`echo "a b" c\\ d ''`), ['echo', 'a b', 'c d', '']);
 });
 
+test('anything zsh would expand, glob or run is not plain', () => {
+  for (const cmd of [
+    'cat =(id)',
+    'diff <(ls) b',
+    'tee >(sh) x',
+    'ls *(e:\'rm -rf ~\':)',
+    'ls *.txt',
+    'ls file?',
+    'ls [ab]',
+    'echo $HOME',
+    'echo ${HOME}',
+    'echo "${HOME}"',
+    'echo "$HOME"',
+    'ls ~root',
+    'cat ~/x',
+    'echo !!',
+    'echo "!!"',
+    'echo {a,b}',
+    '(ls)',
+    'ls #x',
+    'ls ^x',
+    '=ls',
+    'kill %1',
+    'echo \\$HOME',
+    'echo "a\\$b"',
+    'echo a\u0007b',
+  ]) {
+    assert.equal(shellWords(cmd), null, cmd);
+  }
+  // Still plain: literal words, quoted specials, = and % inside a word.
+  assert.deepEqual(shellWords("echo '$HOME' '*' '~' '!!'"), ['echo', '$HOME', '*', '~', '!!']);
+  assert.deepEqual(shellWords('git commit --message=done'), ['git', 'commit', '--message=done']);
+  assert.deepEqual(shellWords('date +%Y-%m-%d'), ['date', '+%Y-%m-%d']);
+  assert.deepEqual(shellWords('touch my\\ file.txt'), ['touch', 'my file.txt']);
+  // Through the wrapper, as Codex sends them.
+  assert.equal(plainArgv(req('cat =(id)')), null);
+  assert.equal(commandAllowed(req('touch *(e:\'rm -rf ~\':)'), [prefixRule(['touch', 'x'])]), false);
+});
+
 test('chained, piped, redirected and substituted commands are not plain', () => {
   for (const cmd of [
     'touch b.txt; rm -rf ~',
@@ -38,6 +78,7 @@ test('chained, piped, redirected and substituted commands are not plain', () => 
     'make && make install',
     'sleep 5 &',
     'echo $(whoami)',
+    'echo $x',
     'echo "$(rm -rf ~)"',
     'echo `id`',
     'echo "`id`"',
@@ -57,22 +98,28 @@ const req = (command: string, extra: Partial<CommandExecutionRequestApprovalPara
   ...extra,
 });
 
-test('rules come from the proposed amendment when it is a prefix, else the exact argv', () => {
+test('rules: exactly the command shown, or Codex\'s own amendment as a prefix of two words or more', () => {
   assert.equal(ruleFor(req('touch b.txt', { proposedExecpolicyAmendment: ['touch', 'b.txt'] })), commandRule(['touch', 'b.txt']));
-  assert.equal(ruleFor(req('npm test --watch', { proposedExecpolicyAmendment: ['npm', 'test'] })), commandRule(['npm', 'test']));
+  assert.equal(ruleFor(req('npm test --watch', { proposedExecpolicyAmendment: ['npm', 'test'] })), prefixRule(['npm', 'test']));
+  assert.equal(ruleFor(req('rm -rf build', { proposedExecpolicyAmendment: ['rm'] })), commandRule(['rm', '-rf', 'build']), 'a one-word prefix is too wide');
   assert.equal(ruleFor(req('npm test', { proposedExecpolicyAmendment: ['rm', '-rf'] })), commandRule(['npm', 'test']));
   assert.equal(ruleFor(req('npm test')), commandRule(['npm', 'test']));
-  // Nothing that runs other commands, and nothing that isn't plain.
-  assert.equal(ruleFor(req('bash -c "rm -rf ~"', { proposedExecpolicyAmendment: ['bash'] })), null);
-  assert.equal(ruleFor(req('sudo ls')), null);
+  // Nothing that runs other commands or code, and nothing that isn't plain.
+  for (const cmd of ['bash x.sh', 'sudo ls', 'python3 x.py', 'node x.js', 'npx thing', 'uv run x', 'awk 1 f', 'find . -name x', 'make', 'xargs echo', 'env A=1 ls', 'timeout 5 ls', 'osascript x', 'perl x', 'bunx y', 'deno run x']) {
+    assert.equal(ruleFor(req(cmd)), null, cmd);
+  }
   assert.equal(ruleFor(req('touch a; touch b')), null);
 });
 
-test('a rule matches commands that start with its words, and nothing chained', () => {
-  const rules = [commandRule(['touch', 'b.txt']), commandRule(['npm', 'test'])];
+test('an exact rule covers only that command; a prefix rule covers what starts with it', () => {
+  const rules = [commandRule(['touch', 'b.txt']), prefixRule(['npm', 'test'])];
   assert.equal(commandAllowed(req('touch b.txt'), rules), true);
+  assert.equal(commandAllowed(req('touch b.txt c.txt'), rules), false, 'more than the card showed');
   assert.equal(commandAllowed(req('npm test -- --grep x'), rules), true);
   assert.equal(commandAllowed(req('npm install'), rules), false);
+  assert.equal(commandAllowed(req('npm'), rules), false);
+  // A prefix rule for something that runs other commands is never honoured.
+  assert.equal(commandAllowed(req('python3 -c print'), [prefixRule(['python3', '-c'])]), false);
   assert.equal(commandAllowed(req('touch b.txt; rm -rf ~'), rules), false);
   assert.equal(commandAllowed(req('touch b.txt | sh'), rules), false);
   assert.equal(commandAllowed(req('touch b.txt > /etc/x'), rules), false);

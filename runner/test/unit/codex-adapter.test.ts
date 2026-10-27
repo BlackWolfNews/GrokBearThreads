@@ -898,3 +898,117 @@ test('built as the runner builds it (no normaliser given), a turn runs on sectio
   assert.equal(h.rec.kinds().includes('cliTurn'), false);
   await h.session.end();
 });
+
+test('in ask mode every threadbare tool that changes something asks first; read-only ones run', async () => {
+  const ran: string[] = [];
+  const mk = (name: string, readOnly = false) =>
+    tool(name, `${name}.`, { threadId: z.string().optional(), permissionMode: z.string().optional() }, async () => {
+      ran.push(name);
+      return { content: [{ type: 'text', text: 'ok' }] };
+    }, readOnly ? { annotations: { readOnlyHint: true } } : undefined);
+  const tools = [mk('list_threads'), mk('read_thread', true), mk('update_thread'), mk('create_thread'), mk('send_message'), mk('move_thread'), mk('schedule_message'), mk('update_schedule'), mk('interrupt_thread'), mk('delete_thread')];
+  const h = await open({ permissionMode: 'ask', deps: { toolsFor: () => tools } });
+  await started(h);
+  h.session.send({ id: 'm1', text: 'x', images: [] });
+  await turnStarts(h, 'u1');
+  const call = (tool: string, args: Record<string, unknown> = {}, id = tool) =>
+    h.conn.serverRequest('item/tool/call', { threadId: 'th-1', turnId: 'u1', callId: `exec-${id}`, namespace: 'threadbare', tool, arguments: args });
+  const ok = (r: Record<string, unknown>) => (r.result as { success: boolean }).success;
+  // Read-only: no card.
+  assert.equal(ok(await call('list_threads')), true);
+  assert.equal(ok(await call('read_thread')), true);
+  assert.equal(h.rec.approvals.length, 0);
+  // An ask-mode thread can't give itself full access without Mike.
+  h.rec.state.approve = async () => ({ decision: 'deny' });
+  assert.equal(ok(await call('update_thread', { permissionMode: 'full' })), false);
+  assert.equal(h.rec.approvals.at(-1)!.name, 'mcp__threadbare__update_thread');
+  assert.equal(h.rec.approvals.at(-1)!.canAlwaysAllow, true);
+  for (const t of ['create_thread', 'send_message', 'move_thread', 'schedule_message', 'update_schedule', 'interrupt_thread']) {
+    assert.equal(ok(await call(t)), false, t);
+    assert.equal(h.rec.approvals.at(-1)!.name, `mcp__threadbare__${t}`);
+  }
+  assert.deepEqual(ran, ['list_threads', 'read_thread'], 'nothing that changes something ran');
+  // "Always allow" for one tool keeps a rule, and it isn't asked again.
+  h.rec.state.approve = async () => ({ decision: 'allowAlways' });
+  assert.equal(ok(await call('send_message', {}, 'a')), true);
+  assert.ok(h.rec.outputs.some((o) => o.kind === 'allowRules' && o.rules.includes('mcp__threadbare__send_message')));
+  const asked = h.rec.approvals.length;
+  assert.equal(ok(await call('send_message', {}, 'b')), true);
+  assert.equal(h.rec.approvals.length, asked);
+  // The mode now, not the turn's: switched to full, nothing asks but delete.
+  await h.session.setPermissionMode('full');
+  h.rec.state.approve = async () => ({ decision: 'deny' });
+  assert.equal(ok(await call('update_thread', {}, 'c')), true);
+  assert.equal(h.rec.approvals.length, asked);
+  assert.equal(ok(await call('delete_thread', { threadId: 'x' })), false);
+  assert.equal(h.rec.approvals.at(-1)!.canAlwaysAllow, false);
+  await h.session.end();
+});
+
+test('a message sent while the turn is ending waits for the next turn, even when a late steer is refused', async () => {
+  const h = await open();
+  await started(h);
+  h.session.send({ id: 'm1', text: 'start', images: [] });
+  await turnStarts(h, 'u1');
+  h.session.send({ id: 'm2', text: 'steer me', images: [] });
+  const steer = await h.conn.request('turn/steer');
+  // The turn completes while m2's steer is still unanswered...
+  complete(h, 'u1');
+  await waitFor(() => h.norm.calls.some((c) => c.method === 'turn/completed'));
+  // ...and m3 arrives while the end waits on it: it mustn't steer.
+  h.session.send({ id: 'm3', text: 'late', images: [] });
+  await sleep(30);
+  assert.equal(h.conn.sent('turn/steer').length, 1);
+  h.conn.fail(steer.id, -32600, 'no active turn to steer');
+  await waitFor(() => h.rec.results().length === 1);
+  assert.deepEqual(h.rec.results()[0], { outcome: 'completed', durationMs: 1200, answers: 'm1', answered: ['m1'], queuedTurns: 2 });
+  // Both start the next turn: m2 by turn/start, m3 steered into it.
+  const next = await h.conn.request('turn/start');
+  assert.equal(next.params.clientUserMessageId, 'm2');
+  h.conn.respond(next.id, { turn: { id: 'u2', status: 'inProgress' } });
+  const s3 = await h.conn.request('turn/steer');
+  assert.equal(s3.params.clientUserMessageId, 'm3');
+  h.conn.respond(s3.id, { turnId: 'u2' });
+  await sleep(10);
+  complete(h, 'u2');
+  await waitFor(() => h.rec.results().length === 2);
+  assert.deepEqual(h.rec.results()[1], { outcome: 'completed', durationMs: 1200, answers: 'm2', answered: ['m2', 'm3'], queuedTurns: 0 });
+  await h.session.end();
+});
+
+test('a steer refused after its turn has ended still starts a turn', async () => {
+  const h = await open();
+  await started(h);
+  h.session.send({ id: 'm1', text: 'start', images: [] });
+  await turnStarts(h, 'u1');
+  // Reach into the race directly: a held message while idle must go out.
+  (h.session as unknown as { held: unknown[] }).held.push({ id: 'm9', text: 'stranded', images: [] });
+  complete(h, 'u1');
+  const next = await h.conn.request('turn/start');
+  assert.equal(next.params.clientUserMessageId, 'm9');
+  await h.session.end();
+});
+
+test('end() while the process is still being retried leaves nothing running', async () => {
+  const f = await fake();
+  const rec = recorder();
+  const home = tmp();
+  const adapter = new CodexAdapter({
+    codexBinary: () => f.bin,
+    registry: new ProcessRegistry(home, nullLogger),
+    log: nullLogger,
+    timings: { spawnRetryMs: 300, spawnRetryForMs: 5000, closeWaitMs: 2000 },
+  });
+  const session = adapter.start(
+    { threadId: 'tb-r', cwd: home, account, permissionMode: 'full', sessionId: 'x', resume: false, mediaDir: home, blobsDir: home, tmpDir: home },
+    rec.sink,
+  ) as CodexSession;
+  const first = await f.next();
+  await first.request('initialize');
+  first.exit(1);
+  await first.closed;
+  await session.end();
+  assert.equal(rec.exitCount(), 1);
+  await assert.rejects(f.next(800), /no process started/);
+  assert.deepEqual(adapter.binariesInUse(), []);
+});

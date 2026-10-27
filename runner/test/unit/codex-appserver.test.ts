@@ -17,6 +17,7 @@ import {
   type OversizedLine,
 } from '../../src/adapters/codex/appserver.ts';
 import * as surface from '../../src/adapters/codex/surface.ts';
+import { limitsFromRateLimits } from '../../src/adapters/codex/normalize.ts';
 import { ProcessRegistry } from '../../src/proc.ts';
 import { nullLogger } from '../../src/log.ts';
 import type { Account } from '../../src/protocol.ts';
@@ -109,12 +110,28 @@ test('rate-limit updates are merged into the snapshot read at start', () => {
   // An update for one bucket, with nulls for what it doesn't know.
   const u = t.update({ rateLimits: { limitId: 'codex', limitName: null, primary: { usedPercent: 7, windowDurationMins: 10080, resetsAt: 100 }, secondary: null, credits: null, planType: 'prolite', rateLimitReachedType: null, spendControlReached: null } });
   assert.equal(u.rateLimits.primary?.usedPercent, 7);
-  assert.equal(u.rateLimits.spendControlReached, false, 'a null in an update keeps what was known');
+  assert.equal(u.rateLimits.spendControlReached, null, 'an explicit null clears what was known');
+  assert.equal(u.rateLimits.limitName, null);
   assert.equal(u.ordinaryUsageAllowed, true);
   assert.equal(u.rateLimitsByLimitId?.codex_other?.limitName, 'GPT-6-Astra');
   const v = t.update({ rateLimits: { limitId: 'codex_other', primary: { usedPercent: 40, windowDurationMins: 300, resetsAt: 60 } } });
   assert.equal(v.rateLimitsByLimitId?.codex_other?.primary?.usedPercent, 40);
   assert.equal(v.rateLimits.primary?.usedPercent, 7, 'the main bucket is untouched');
+  // Blocked, then a reset: the update's null rateLimitReachedType lifts it.
+  const blocked = new RateLimitTracker();
+  blocked.read({
+    ordinaryUsageAllowed: false,
+    rateLimits: { limitId: 'codex', limitName: null, primary: { usedPercent: 100, windowDurationMins: 10080, resetsAt: 100 }, secondary: null, credits: null, planType: 'prolite', rateLimitReachedType: 'rate_limit_reached' },
+    rateLimitsByLimitId: null,
+  });
+  assert.equal(limitsFromRateLimits(blocked.current())!.blocked, true);
+  const lifted = blocked.update({ rateLimits: { limitId: 'codex', limitName: null, primary: { usedPercent: 0, windowDurationMins: 10080, resetsAt: 200 }, secondary: null, credits: null, planType: 'prolite', rateLimitReachedType: null } });
+  assert.equal(lifted.rateLimits.rateLimitReachedType, null);
+  assert.equal(limitsFromRateLimits(lifted)!.blocked, false);
+  // And an update that says ordinaryUsageAllowed outright wins.
+  const said = new RateLimitTracker();
+  said.read({ ordinaryUsageAllowed: false, rateLimits: { limitId: 'codex', limitName: null, primary: null, secondary: null, credits: null, planType: null, rateLimitReachedType: 'rate_limit_reached' }, rateLimitsByLimitId: null });
+  assert.equal(limitsFromRateLimits(said.update({ ordinaryUsageAllowed: true, rateLimits: { limitId: 'codex', rateLimitReachedType: null } }))!.blocked, false);
   // A read whose reply comes after a newer update doesn't undo it.
   const raced = new RateLimitTracker();
   const since = raced.mark();
@@ -467,4 +484,20 @@ test('checkSurface on an empty folder misses everything', () => {
 const realSchema = path.join(import.meta.dirname, '..', '..', '.fixtures', 'codex-raw', 'ts-exp');
 test('checkSurface passes on the real 0.164.0 schema', { skip: !fs.existsSync(realSchema) && 'no captured schema in .fixtures' }, () => {
   assert.deepEqual(surface.checkSurface(realSchema), { missing: [], added: [] });
+});
+
+test('close() during the spawn-retry wait never spawns again', async () => {
+  const f = await fake();
+  const p = proc(f.bin, { timings: { spawnRetryMs: 300, spawnRetryForMs: 5000, closeWaitMs: 2000 } });
+  const started = p.start();
+  const first = await f.next();
+  await first.request('initialize');
+  first.exit(1);
+  await first.closed;
+  // Now in the retry wait.
+  await p.close();
+  // Either the first exit or the close is what start() reports.
+  await assert.rejects(started, CodexExitedError);
+  await assert.rejects(f.next(800), /no process started/);
+  assert.equal(p.alive, false);
 });

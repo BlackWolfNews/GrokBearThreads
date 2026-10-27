@@ -825,7 +825,9 @@ export function limitsFromRateLimits(snapshot: AnyMsg | null | undefined): Extra
     }
   }
   const out: Extract<AdapterOutput, { kind: 'limits' }> = { kind: 'limits', windows };
-  if (snapshot.ordinaryUsageAllowed === false || main.rateLimitReachedType) out.blocked = true;
+  // Always true or false, never left out: the usage store only lifts a block
+  // when a reading says false.
+  out.blocked = snapshot.ordinaryUsageAllowed === false || Boolean(main.rateLimitReachedType);
   const plan = planTitle(main.planType);
   if (plan) out.plan = plan;
   return out;

@@ -349,7 +349,7 @@ test('rate-limits: the codex bucket, credits, plan and a blocked reading', () =>
   const read = limits.find((l) => l.windows.length > 0)!;
   assert.deepEqual(read.windows, [{ kind: 'weekly', title: 'Weekly', remainingPercent: 95, resetsAt: new Date(1793599387 * 1000).toISOString(), detail: '1,234 credits' }]);
   assert.equal(read.plan, 'Pro Lite');
-  assert.equal(read.blocked, undefined);
+  assert.equal(read.blocked, false, 'always said, so a block can lift');
   assert.ok(limits.some((l) => l.windows.length === 0 && l.plan === 'Pro Lite'), 'account/read and account/updated give the plan');
   assert.ok(limits.every((l) => l.email === undefined), 'the sanitised captures have no email');
   // Both windows, another bucket, and a reached limit.

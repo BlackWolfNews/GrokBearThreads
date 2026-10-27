@@ -13,6 +13,7 @@
 //    and a sentence, never a JSON-RPC error.
 import { z } from 'zod';
 import type { ToolApprovalAnswer, ToolApprovalRequest } from '../types.ts';
+import type { PermissionMode } from '../../protocol.ts';
 import { ALWAYS_ASK_TOOLS, SERVER_NAME } from '../../threadbare-mcp.ts';
 import { toolTitle, truncateInput } from '../../tools.ts';
 import type { DynamicToolCallParams, DynamicToolCallResponse, DynamicToolSpec } from './types.ts';
@@ -25,6 +26,7 @@ export type ToolDefinition = {
   inputSchema: Record<string, unknown>; // a zod raw shape
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   handler: (args: any, extra: unknown) => Promise<{ content?: unknown[]; isError?: boolean }>;
+  annotations?: { readOnlyHint?: boolean };
 };
 
 export const NAMESPACE = SERVER_NAME;
@@ -57,11 +59,23 @@ function text(t: string, success: boolean): DynamicToolCallResponse {
   return { contentItems: [{ type: 'inputText', text: t }], success };
 }
 
+// The threadbare tools that only read. Everything else changes something
+// (another thread, this thread's own settings, schedules), so in ask mode it
+// asks first, as Claude's tools do: otherwise an ask-mode thread could give
+// itself full access with update_thread.
+export const READ_ONLY_TOOLS = new Set(['list_threads', 'read_thread', 'list_accounts', 'list_schedules']);
+
 export type CodexToolsDeps = {
-  // Asked before a tool that asks every time (delete_thread). Codex never
-  // asks before a client-side tool, so the runner does.
+  // Codex never asks before a client-side tool, so the runner does: before
+  // delete_thread always, and before any tool that changes something when
+  // the thread's mode is ask.
   requestApproval(req: ToolApprovalRequest): Promise<ToolApprovalAnswer>;
   cwd(): string;
+  // The thread's permission mode now (not the turn's).
+  mode(): PermissionMode;
+  // "Always allow" rules: a tool's full name, as for Claude.
+  rules(): Iterable<string>;
+  addRules(rules: string[]): void;
 };
 
 // Answers item/tool/call for one session's thread. A call from a subagent
@@ -92,18 +106,22 @@ export class CodexTools {
     if (!parsed.success) return text(`Those arguments don't fit ${name}: ${z.prettifyError(parsed.error)}`, false);
     const args = parsed.data as Record<string, unknown>;
     const fullName = `mcp__${NAMESPACE}__${name}`;
-    if (ALWAYS_ASK_TOOLS.has(fullName)) {
+    const alwaysAsk = ALWAYS_ASK_TOOLS.has(fullName);
+    const readOnly = READ_ONLY_TOOLS.has(name) || tool.annotations?.readOnlyHint === true;
+    const allowed = !alwaysAsk && [...this.deps.rules()].includes(fullName);
+    if (alwaysAsk || (this.deps.mode() === 'ask' && !readOnly && !allowed)) {
       const ans = await this.deps.requestApproval({
         toolUseId: o.fromChild ? undefined : params.callId,
         name: fullName,
         title: toolTitle(fullName, args, this.deps.cwd()),
         input: truncateInput(args),
-        canAlwaysAllow: false,
+        canAlwaysAllow: !alwaysAsk,
         signal: o.signal,
       });
       if (ans.decision !== 'allow' && ans.decision !== 'allowAlways') {
         return text(ans.message || (ans.decision === 'expired' ? 'The request expired before the user answered.' : 'The user denied this. Ask them how to proceed.'), false);
       }
+      if (ans.decision === 'allowAlways' && !alwaysAsk) this.deps.addRules([fullName]);
     }
     try {
       const result = await tool.handler(args, {});
