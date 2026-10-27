@@ -27,7 +27,10 @@ struct SidebarView: View {
         // VS Code style: a column of icons down the left for the views and
         // the window-wide things, and the chosen view beside it.
         HStack(spacing: 0) {
+            // Drawn over the list: its keys hang out to the right while ⌘
+            // is held (ShortcutHints).
             ActivityBar()
+                .zIndex(1)
             Group {
                 switch app.sidebarMode {
                 case .inbox: InboxList()
@@ -54,7 +57,7 @@ private struct InboxList: View {
             sections[section].map { ($0.id, SectionRow.id(section: section.title, thread: $0.id)) }
         })
         VStack(spacing: 0) {
-            SidebarButtonRow(icon: "square.and.pencil", title: "New thread", hint: "⌘N", active: app.selection == nil) {
+            SidebarButtonRow(icon: "square.and.pencil", title: "New thread", shortcut: "⌘N", active: app.selection == nil) {
                 app.newThread()
             }
             .help("New thread (⌘N)")
@@ -82,7 +85,7 @@ private struct ThreadSection: View {
 
     var body: some View {
         if !threads.isEmpty || section == .inbox {
-            SectionHeading(title: section.title)
+            SectionHeading(title: section.title, icon: section.icon)
             ForEach(threads.map { SectionRow(section: section.title, thread: $0) }) { row in
                 ThreadRowView(thread: row.thread, mode: .inbox, section: section) { select(row.thread.id) }
                 SubagentList(thread: row.thread, section: section.title)
@@ -106,19 +109,47 @@ struct SectionRow: Identifiable {
 
 struct SectionHeading: View {
     let title: String
+    /// A small SF Symbol before the title, so the groups can be told apart
+    /// at a glance.
+    var icon: String? = nil
 
     var body: some View {
         // A quiet divider rather than a bold tag: grey, at the previews'
         // size, with clear room above each group, like Codex and Claude.
-        // Semibold so it isn't weaker than the rows it groups.
-        Text(title)
-            .font(.system(size: TypeScale.sidebarHeading, weight: .semibold))
-            .foregroundStyle(.secondary)
-            .padding(.leading, SidebarMetrics.leading)
-            .padding(.top, zoomed(18))
-            .padding(.bottom, zoomed(6))
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .accessibilityAddTraits(.isHeader)
+        // Semibold so it isn't weaker than the rows it groups. A hairline
+        // runs from the title to the edge so the groups read as separate
+        // (Mike asked 27 Oct).
+        HStack(spacing: zoomed(6)) {
+            if let icon {
+                Image(systemName: icon)
+                    .font(.system(size: zoomed(11), weight: .medium))
+                    .frame(width: zoomed(14))
+            }
+            Text(title)
+                .font(.system(size: TypeScale.sidebarHeading, weight: .semibold))
+                .fixedSize()
+            Rectangle()
+                .fill(Color.primary.opacity(0.08))
+                .frame(height: 1)
+                .padding(.leading, zoomed(4))
+        }
+        .foregroundStyle(.secondary)
+        .padding(.leading, SidebarMetrics.leading)
+        .padding(.trailing, SidebarMetrics.trailing)
+        .padding(.top, zoomed(18))
+        .padding(.bottom, zoomed(6))
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(.isHeader)
+    }
+}
+
+extension InboxSection {
+    var icon: String {
+        switch self {
+        case .inbox: return "tray"
+        case .running: return "bolt"
+        }
     }
 }
 
@@ -504,7 +535,9 @@ struct RowIconButtonStyle: ButtonStyle {
 struct SidebarButtonRow: View {
     let icon: String
     let title: String
-    var hint: String? = nil
+    /// Shown at the row's end while ⌘ is held (`ShortcutHints`). It used
+    /// to be printed there all the time, which Mike found noisy.
+    var shortcut: String? = nil
     var active = false
     let action: () -> Void
     @State private var hovering = false
@@ -521,15 +554,13 @@ struct SidebarButtonRow: View {
                     .font(.system(size: TypeScale.sidebarButton))
                     .foregroundStyle(.primary)
                 Spacer(minLength: zoomed(6))
-                if let hint {
-                    Text(hint).font(.system(size: TypeScale.sidebarMeta)).foregroundStyle(SidebarMetrics.faint)
-                }
             }
             // The icon sits where thread titles start, Codex style.
             .padding(.leading, SidebarMetrics.leading - zoomed(2))
             .padding(.trailing, SidebarMetrics.trailing)
             .padding(.vertical, zoomed(7))
             .background(background, in: RoundedRectangle(cornerRadius: SidebarMetrics.corner))
+            .shortcutHint(shortcut, .insideTrailing)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)

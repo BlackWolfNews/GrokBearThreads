@@ -15,14 +15,14 @@ struct LibrarianView: View {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 0) {
                         LibrarianState(status: status)
-                        SectionHeading(title: "Next")
+                        SectionHeading(title: "Next", icon: "hourglass")
                         ForEach(status.queue, id: \.threadId) { job in
                             QueueRow(job: job)
                         }
                         if status.queue.isEmpty {
                             EmptyNote(text: "Nothing waiting.")
                         }
-                        SectionHeading(title: "Recent")
+                        SectionHeading(title: "Recent", icon: "clock.arrow.circlepath")
                         ForEach(status.recent) { entry in
                             EntryRow(entry: entry)
                         }

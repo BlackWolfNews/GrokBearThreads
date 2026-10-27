@@ -38,7 +38,7 @@ struct ProjectsList: View {
                         }
                     }
                     if !built.unfiled.isEmpty {
-                        SectionHeading(title: "Not in a project")
+                        SectionHeading(title: "Not in a project", icon: "square.dashed")
                         ForEach(built.unfiled.map { SectionRow(section: Self.unfiledId, thread: $0) }) { row in
                             ThreadRowView(thread: row.thread, mode: .projects) { select(row.thread.id) }
                         }

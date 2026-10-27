@@ -146,6 +146,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             let scripted = perf || screenshots
             #endif
             app.notificationsEnabled = !scripted
+            ShortcutHints.shared.install()
             if !scripted { Notifier.setUp(delegate: self) }
             app.onThreadsLoaded = {
                 LaunchClock.threadsLoaded()
