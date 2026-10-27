@@ -29,6 +29,9 @@ struct AppDump: Encodable {
         var hovered: Bool
         /// What the row says is running in the background, if anything.
         var background: String?
+        /// "Waiting for room · 5:00 am", for a pool thread with no login
+        /// that has room.
+        var waiting: String? = nil
         /// The sub-agent rows under it, as the sidebar shows them.
         var subagents: [SubagentInfo] = []
     }
@@ -68,6 +71,11 @@ struct AppDump: Encodable {
         var ask: Bool
         /// The effort level, or "default" for the model's own.
         var effort: String = "default"
+        /// The pool that picks its login; nil when it's pinned to
+        /// `account`, or the runner has no pools.
+        var pool: String? = nil
+        /// The model chip as it reads ("Claude · Opus 5.5 · High").
+        var chip: String = ""
     }
 
     struct Settings {
@@ -76,6 +84,18 @@ struct AppDump: Encodable {
         var model: String
         var ask: Bool
         var effort: String = "default"
+        var pool: String? = nil
+    }
+
+    /// The runner's pools as the picker's rail shows them, when it has any.
+    struct PoolInfo: Encodable {
+        var id: String
+        var title: String
+        var logins: [String]
+        var folders: [String]
+        /// "3 · 61%".
+        var rail: String
+        var status: String?
     }
 
     /// What a new thread sent from the composer would get, as the
@@ -85,7 +105,7 @@ struct AppDump: Encodable {
         let account = app.newThreadAccountId
         return Settings(cwd: app.newThreadCwd ?? app.defaults.cwd, account: account,
                         model: app.newThreadModel ?? defaultModel(app, account: account), ask: app.newThreadAsk,
-                        effort: app.newThreadEffort ?? "default")
+                        effort: app.newThreadEffort ?? "default", pool: app.newThreadPoolId)
     }
 
     /// Whose default a new thread gets, and which model that is when known.
@@ -141,6 +161,8 @@ struct AppDump: Encodable {
     /// The librarian's state in words ("Looking at ..."), when the runner
     /// has projects.
     var librarian: String? = nil
+    /// Empty from a runner older than pools.
+    var pools: [PoolInfo] = []
 
     struct ProjectInfo: Encodable {
         var id: String
@@ -200,6 +222,7 @@ struct AppDump: Encodable {
             return Thread(id: summary.id, title: summary.title, status: summary.status.rawValue, needsYou: summary.needsYou,
                           unread: look.unread, hovered: app.hoverOverride == summary.id,
                           background: look.status == .background ? BackgroundWork.short(summary.background) : nil,
+                          waiting: summary.waitingForRoom.map { Pools.waitingLine($0, now: app.now) },
                           subagents: subagents)
         }
         let sections: [Section]
@@ -282,7 +305,11 @@ struct AppDump: Encodable {
                 return ProjectInfo(id: project.id, title: project.title, folders: project.folders, threads: threads.map(\.id),
                                    patches: PatchGroups.patches(of: project.id, in: threads).map(\.patch.id), archived: project.archived)
             },
-            librarian: app.librarian.map(LibrarianText.state)
+            librarian: app.librarian.map(LibrarianText.state),
+            pools: app.usesPools ? app.pools.map { pool in
+                PoolInfo(id: pool.id, title: pool.title, logins: pool.accountIds, folders: pool.folders,
+                         rail: Pools.railSubtitle(pool, accounts: app.accounts), status: Pools.statusLine(pool, accounts: app.accounts, now: app.now))
+            } : []
         )
     }
 
@@ -348,12 +375,14 @@ struct AppDump: Encodable {
             // or the account's default.
             let model = thread.model ?? thread.modelInUse.map { "default (the account's, \($0))" } ?? defaultModel(app, account: thread.accountId)
             settings = Settings(cwd: thread.cwd, account: thread.accountId, model: model, ask: thread.permissionMode == .ask,
-                                effort: thread.effort ?? thread.effortInUse.map { "default (\($0))" } ?? "default")
+                                effort: thread.effort ?? thread.effortInUse.map { "default (\($0))" } ?? "default",
+                                pool: app.usesPools ? thread.poolId : nil)
         } else {
             settings = newThreadSettings(app)
         }
         return Composer(draft: key, text: app.drafts[key]?.text ?? "", images: app.drafts[key]?.images.count ?? 0,
-                        cwd: settings.cwd, account: settings.account, model: settings.model, ask: settings.ask, effort: settings.effort)
+                        cwd: settings.cwd, account: settings.account, model: settings.model, ask: settings.ask, effort: settings.effort,
+                        pool: settings.pool, chip: ThreadSettings(app: app, thread: app.selectedThread).modelChipTitle)
     }
 
     /// Rows a click opens: work lines, groups and settled approvals that
@@ -402,6 +431,7 @@ struct AppDump: Encodable {
                 if thread.unread { flags.append("unread") }
                 if thread.hovered { flags.append("hovered") }
                 if let background = thread.background { flags.append("bg: " + background) }
+                if let waiting = thread.waiting { flags.append(waiting) }
                 let mark = thread.id == selection?.id ? ">" : " "
                 lines.append("  \(mark) \(pad(thread.id, threadWidth)) \(pad(flags.joined(separator: " "), 16)) \(thread.title)")
                 for sub in thread.subagents {
@@ -435,8 +465,19 @@ struct AppDump: Encodable {
             lines += usage.lines.map { "  " + $0 }
         }
         lines.append("composer (\(composer.draft)): \"\(composer.text)\"" + (composer.images > 0 ? " and \(composer.images) image(s)" : ""))
-        lines.append("  \(composer.draft == "new" ? "starts" : "runs") in \(composer.cwd) on \(composer.account), model \(composer.model), "
+        let on = composer.pool.map { "pool \($0) (now \(composer.account))" } ?? (pools.isEmpty ? composer.account : "\(composer.account), pinned")
+        lines.append("  \(composer.draft == "new" ? "starts" : "runs") in \(composer.cwd) on \(on), model \(composer.model), "
             + (composer.effort == "default" ? "" : "effort \(composer.effort), ") + (composer.ask ? "asks before edits" : "full access"))
+        lines.append("  model chip: \(composer.chip)")
+        if !pools.isEmpty {
+            lines.append("pools:")
+            for pool in pools {
+                var line = "  \(pool.id) \"\(pool.title)\" \(pool.rail): " + pool.logins.joined(separator: ", ")
+                if !pool.folders.isEmpty { line += " [folders: " + pool.folders.joined(separator: ", ") + "]" }
+                if let status = pool.status { line += " (\(status))" }
+                lines.append(line)
+            }
+        }
         if let transcript {
             var about = "\(transcript.rows.count) rows, \(transcript.state)"
             if transcript.hasMoreAbove { about += ", more above" }

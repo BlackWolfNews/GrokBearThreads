@@ -138,8 +138,51 @@ const providerOf = (accountId) => accounts.find((a) => a.id === accountId)?.prov
 // folder does too: the app only shows a folder chip away from the default.
 const defaults = {
   cwd: '/Users/mike/dev/me/misc', accountId: 'claude-main',
-  models: { codex: 'gpt-6-luna' }, efforts: { codex: 'low' },
+  models: { codex: 'gpt-6-luna' }, efforts: { codex: 'low' }, poolId: 'claude',
 };
+// Pools (docs/pools-plan.md). The built-in ones as the runner works them
+// out from these logins (one per provider of the logins with no note, one
+// per noted login titled from its note), then two of Mike's own: a mixed
+// one, Codex first, and one whose only login is at its limit, so a thread
+// in it waits for room. mock.accounts {old: true} hides them all.
+let pools = [
+  { id: 'claude', title: 'Claude', accountIds: ['claude-main', 'claude-3', 'claude-4'], builtIn: true },
+  { id: 'convex', title: 'Convex', accountIds: ['claude-2'], folders: ['~/dev/convex'], builtIn: true },
+  { id: 'codex', title: 'Codex', accountIds: ['codex-main'], builtIn: true },
+  { id: 'side-projects', title: 'Side projects', accountIds: ['codex-main', 'claude-3'] },
+  { id: 'evenings', title: 'Evenings', accountIds: ['claude-4'] },
+];
+const poolOf = (id) => pools.find((pool) => pool.id === id);
+// The room a login has: the tighter of its 5-hour and weekly windows; none
+// when it's blocked. Unknown usage counts as room.
+function roomOf(account) {
+  if (account.usage?.blocked) return -1;
+  const main = (account.usage?.windows ?? []).filter((w) => w.kind === 'five_hour' || w.kind === 'weekly');
+  return main.length ? Math.min(...main.map((w) => w.remainingPercent)) : 50;
+}
+// A login in the pool on `provider` (the pool's first provider without
+// one): the current one while it has room, else the one with the most.
+function pickInPool(pool, provider, current) {
+  const own = pool.accountIds.map((id) => accounts.find((a) => a.id === id)).filter(Boolean);
+  const want = provider ?? own[0]?.provider;
+  const candidates = own.filter((a) => a.provider === want);
+  const cur = candidates.find((a) => a.id === current);
+  if (cur && roomOf(cur) >= 10) return cur.id;
+  return [...candidates].sort((a, b) => roomOf(b) - roomOf(a))[0]?.id;
+}
+// The provider whose account lists a model id, if any does.
+const providerOfModel = (model) => model && accounts.find((a) => (a.models ?? []).some((m) => m.id === model || m.model === model))?.provider;
+function validatePools(list) {
+  if (!Array.isArray(list) || list.length === 0) throw rpcError(-32602, 'pools must be a non-empty list');
+  const seen = new Set();
+  for (const pool of list) {
+    if (!pool?.id || seen.has(pool.id)) throw rpcError(-32602, `duplicate or missing pool id ${pool?.id ?? ''}`);
+    seen.add(pool.id);
+    if (!Array.isArray(pool.accountIds) || pool.accountIds.length === 0) throw rpcError(-32602, `${pool.title ?? pool.id} has no logins`);
+    const unknown = pool.accountIds.find((id) => !accounts.some((a) => a.id === id));
+    if (unknown) throw rpcError(-32602, `unknown account ${unknown}`);
+  }
+}
 // What clis.list reports: Claude one version behind, Codex's update held
 // back by the schema gate, both checked 20 minutes ago.
 const minutesAgo = (m) => new Date(Date.now() - m * 60_000).toISOString();
@@ -170,6 +213,7 @@ const threads = new Map();
 loadFixtures();
 addFillers(fillerCount);
 addDemoPanels();
+addDemoPools();
 addDemoSubagents();
 /** The schedules (docs/protocol.md, "Schedules"), soonest first. */
 let schedules = [];
@@ -257,7 +301,21 @@ async function handle(client, { id, method, params = {} }) {
 async function dispatch(client, method, p) {
   switch (method) {
     case 'hello':
-      return { runnerVersion, protocol: 1, accounts: publicAccounts(), defaults, ...(oldRunner ? {} : { clis, updates }) };
+      return {
+        runnerVersion, protocol: 1, accounts: publicAccounts(),
+        defaults: oldRunner ? { ...defaults, poolId: undefined } : defaults, ...(oldRunner ? {} : { clis, updates, pools }),
+      };
+    case 'pools.list':
+      if (oldRunner) throw rpcError(-32601, 'Method not found');
+      return { pools };
+    case 'pools.save': {
+      if (oldRunner) throw rpcError(-32601, 'Method not found');
+      validatePools(p.pools);
+      // Saved ones are runner.json's, not the code default's.
+      pools = p.pools.map(({ id, title, accountIds, folders }) => ({ id, title: title || id, accountIds, ...(folders?.length ? { folders } : {}) }));
+      broadcast('pools.updated', { pools });
+      return { pools };
+    }
     case 'runner.status': {
       const all = [...threads.values()].map((t) => t.summary);
       const status = {
@@ -314,9 +372,13 @@ async function dispatch(client, method, p) {
       if (!p.text) throw rpcError(-32602, 'text is required');
       const threadId = 'th_' + crypto.randomBytes(6).toString('hex');
       const now = iso();
-      const accountId = p.accountId ?? defaults.accountId;
+      // Like the runner: a login named pins the thread; otherwise a pool
+      // (named, else the default) picks one, on the named model's provider.
+      const pool = !oldRunner && !p.accountId ? poolOf(p.poolId ?? defaults.poolId) : undefined;
+      const accountId = p.accountId ?? (pool && pickInPool(pool, providerOfModel(p.model))) ?? defaults.accountId;
       const provider = providerOf(accountId);
       const summary = {
+        ...(pool ? { poolId: pool.id } : {}),
         id: threadId, title: (p.title ?? p.text.split('\n')[0]).slice(0, 60), cwd: p.cwd ?? defaults.cwd,
         accountId, provider, model: p.model ?? defaults.models[provider], effort: p.effort ?? defaults.efforts[provider],
         permissionMode: p.permissionMode ?? 'full', status: 'starting', live: true, needsYou: false,
@@ -349,6 +411,28 @@ async function dispatch(client, method, p) {
         s.effort = defaults.efforts[s.provider];
       }
       for (const key of ['title', 'cwd', 'accountId', 'permissionMode']) if (p[key] !== undefined) s[key] = p[key];
+      // A login named pins the thread; null pins it where it is; a pool id
+      // puts it in that pool, moving it onto one of the pool's logins if
+      // its own isn't in it.
+      if (p.accountId !== undefined || p.poolId === null) delete s.poolId;
+      if (typeof p.poolId === 'string') {
+        const pool = poolOf(p.poolId);
+        if (!pool) throw rpcError(-32602, `no pool ${p.poolId}`);
+        s.poolId = pool.id;
+        if (!pool.accountIds.includes(s.accountId)) {
+          const sameProvider = pickInPool(pool, s.provider);
+          const next = sameProvider ?? pickInPool(pool);
+          if (next) {
+            if (providerOf(next) !== s.provider) {
+              s.provider = providerOf(next);
+              s.model = defaults.models[s.provider];
+              s.effort = defaults.efforts[s.provider];
+            }
+            s.accountId = next;
+          }
+        }
+      }
+      if (s.poolId) delete s.waitingForRoom;
       if (p.model !== undefined) s.model = p.model ?? undefined;
       if (p.effort !== undefined) s.effort = p.effort ?? undefined;
       if (p.snoozedUntil !== undefined) {
@@ -621,6 +705,7 @@ async function dispatch(client, method, p) {
       if (Array.isArray(p.accounts)) accounts = p.accounts;
       if (typeof p.old === 'boolean') oldRunner = p.old;
       broadcast('accounts.updated', { accounts: publicAccounts() });
+      if (!oldRunner) broadcast('pools.updated', { pools });
       return { accounts: publicAccounts(), old: oldRunner };
     }
     case 'mock.restart':
@@ -1484,6 +1569,24 @@ function addDemoSubagents() {
     timer.unref?.();
     t.timers.push(timer);
   });
+}
+
+// Every demo thread is in the pool that has its login, as a new thread
+// would be, except the SQLite one, which stays pinned to its login, and the
+// release notes, which wait in Evenings for its one login to have room.
+function addDemoPools() {
+  for (const t of threads.values()) {
+    const s = t.summary;
+    if (s.id === 'demo_sqlite_vs_files') continue;
+    if (s.id === 'demo_release_notes') {
+      const login = accounts.find((a) => a.id === 'claude-4');
+      const reset = login?.usage?.windows?.find((w) => w.kind === 'five_hour')?.resetsAt;
+      Object.assign(s, { accountId: 'claude-4', poolId: 'evenings' });
+      if (reset) s.waitingForRoom = { until: new Date(Date.parse(reset) + 60_000).toISOString(), accountId: 'claude-4' };
+      continue;
+    }
+    s.poolId ??= pools.find((pool) => pool.accountIds.includes(s.accountId))?.id;
+  }
 }
 
 function addDemoPanels() {

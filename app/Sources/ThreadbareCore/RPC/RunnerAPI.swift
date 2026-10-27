@@ -22,6 +22,7 @@ public extension RPCClient {
         if !request.images.isEmpty { params["images"] = .array(request.images.map(\.jsonValue)) }
         if let cwd = request.cwd { params["cwd"] = .string(cwd) }
         if let accountId = request.accountId { params["accountId"] = .string(accountId) }
+        if let poolId = request.poolId { params["poolId"] = .string(poolId) }
         if let model = request.model { params["model"] = .string(model) }
         if let effort = request.effort { params["effort"] = .string(effort) }
         if let mode = request.permissionMode { params["permissionMode"] = .string(mode.rawValue) }
@@ -155,16 +156,20 @@ public struct NewThreadRequest: Sendable, Hashable {
     public var images: [ImageRef]
     public var cwd: String?
     public var accountId: String?
+    /// The pool that picks its login. With `accountId` too, the runner
+    /// pins it to that login instead.
+    public var poolId: String?
     public var model: String?
     public var effort: String?
     public var permissionMode: PermissionMode?
     public var title: String?
 
-    public init(text: String, images: [ImageRef] = [], cwd: String? = nil, accountId: String? = nil, model: String? = nil, effort: String? = nil, permissionMode: PermissionMode? = nil, title: String? = nil) {
+    public init(text: String, images: [ImageRef] = [], cwd: String? = nil, accountId: String? = nil, poolId: String? = nil, model: String? = nil, effort: String? = nil, permissionMode: PermissionMode? = nil, title: String? = nil) {
         self.text = text
         self.images = images
         self.cwd = cwd
         self.accountId = accountId
+        self.poolId = poolId
         self.model = model
         self.effort = effort
         self.permissionMode = permissionMode
@@ -186,11 +191,16 @@ public struct ThreadUpdate: Sendable, Hashable {
     /// Wins over `snoozedUntil`.
     public var snoozeUntilRestart: Bool
     public var archived: Bool?
+    /// A pool id moves the thread into that pool (and onto one of its
+    /// logins at once if its current one isn't in it); `.some(nil)` sends
+    /// null, which pins it to the login it's on. `accountId` pins too.
+    public var poolId: String??
 
-    public init(title: String? = nil, cwd: String? = nil, accountId: String? = nil, model: String?? = nil, effort: String?? = nil, permissionMode: PermissionMode? = nil, snoozedUntil: Date?? = nil, snoozeUntilRestart: Bool = false, archived: Bool? = nil) {
+    public init(title: String? = nil, cwd: String? = nil, accountId: String? = nil, model: String?? = nil, effort: String?? = nil, permissionMode: PermissionMode? = nil, snoozedUntil: Date?? = nil, snoozeUntilRestart: Bool = false, archived: Bool? = nil, poolId: String?? = nil) {
         self.title = title
         self.cwd = cwd
         self.accountId = accountId
+        self.poolId = poolId
         self.model = model
         self.effort = effort
         self.permissionMode = permissionMode
@@ -213,6 +223,7 @@ public struct ThreadUpdate: Sendable, Hashable {
             params["snoozedUntil"] = snoozedUntil.map { .string(ISO8601.format($0)) } ?? .null
         }
         if let archived { params["archived"] = .bool(archived) }
+        if let poolId { params["poolId"] = poolId.map { .string($0) } ?? .null }
         return params
     }
 }
@@ -567,4 +578,31 @@ public struct ProjectGetResult: Sendable, Decodable {
 
 public struct LibrarianResult: Sendable, Decodable {
     public var librarian: LibrarianStatus
+}
+
+// MARK: Pools (docs/pools-plan.md, "Protocol")
+
+/// A runner from before pools answers these with `-32601`; the app then
+/// keeps its account chip and provider rail.
+public extension RPCClient {
+    func listPools() async throws -> [Pool] {
+        try await call("pools.list", .object([:]), as: PoolsResult.self).pools
+    }
+
+    /// Replaces the whole list in runner.json. `-32602` for a duplicate id,
+    /// a pool with no logins, or a login the runner doesn't have.
+    func savePools(_ pools: [Pool]) async throws -> [Pool] {
+        try await call("pools.save", .object(["pools": .array(pools.map(\.jsonValue))]), as: PoolsResult.self).pools
+    }
+}
+
+public struct PoolsResult: Sendable, Decodable {
+    public var pools: [Pool]
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        pools = c.lossyArray(Pool.self, forKey: .pools)
+    }
+
+    enum CodingKeys: String, CodingKey { case pools }
 }

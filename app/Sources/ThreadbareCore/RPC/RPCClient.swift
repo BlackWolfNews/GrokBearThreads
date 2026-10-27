@@ -33,6 +33,9 @@ public enum RPCNotification: Sendable {
     case threadEvent(threadId: String, event: Event)
     case threadDeleted(threadId: String)
     case accountsUpdated([Account])
+    /// The whole pool list, after `pools.save` or when the logins change
+    /// the runner's defaults.
+    case poolsUpdated([Pool])
     /// The CLIs' versions and any update under way, whole each time.
     case clisUpdated([CliStatus])
     /// The whole schedule list, after any change.
@@ -232,6 +235,10 @@ public final class RPCClient: Sendable {
             guard let params = try? decoder.decode(RPCNotificationEnvelope<AccountsUpdatedParams>.self, from: data).params
             else { return nil }
             return .accountsUpdated(params.accounts)
+        case "pools.updated":
+            guard let params = try? decoder.decode(RPCNotificationEnvelope<PoolsResult>.self, from: data).params
+            else { return nil }
+            return .poolsUpdated(params.pools)
         case "clis.updated":
             guard let params = try? decoder.decode(RPCNotificationEnvelope<ClisResult>.self, from: data).params
             else { return nil }

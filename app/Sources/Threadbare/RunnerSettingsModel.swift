@@ -2,7 +2,7 @@ import AppKit
 import ThreadbareCore
 
 enum SettingsTab: String, Hashable, CaseIterable {
-    case general, models
+    case general, models, pools
 }
 
 /// The Settings window's side of AppModel. Everything in it is the

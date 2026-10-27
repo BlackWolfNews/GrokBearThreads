@@ -767,6 +767,13 @@ public struct ThreadSummary: Sendable, Hashable, Codable, Identifiable {
     /// The projects it's in, oldest first. Empty when it's in none (or the
     /// runner is from before projects).
     public var projects: [ThreadProject]
+    /// The pool that picks its login (docs/pools-plan.md). Nil means it's
+    /// pinned to `accountId`, which is every thread from a runner older
+    /// than pools.
+    public var poolId: String?
+    /// Every login in its pool is out of room: it carries on by itself at
+    /// `until`.
+    public var waitingForRoom: WaitingForRoom?
 
     public init(
         id: String, title: String, cwd: String = "~/dev/me/misc", accountId: String = "claude-main",
@@ -778,7 +785,7 @@ public struct ThreadSummary: Sendable, Hashable, Codable, Identifiable {
         contextTokens: Int? = nil, costUsd: Double? = nil,
         effort: String? = nil, modelInUse: String? = nil, effortInUse: String? = nil, contextWindow: Int? = nil,
         panels: [Panel] = [], actions: [Action] = [], hooks: [Hook] = [], patches: [PatchInfo] = [], background: [BackgroundTask] = [],
-        subagents: [Subagent] = [], projects: [ThreadProject] = []
+        subagents: [Subagent] = [], projects: [ThreadProject] = [], poolId: String? = nil, waitingForRoom: WaitingForRoom? = nil
     ) {
         self.id = id
         self.title = title
@@ -814,6 +821,8 @@ public struct ThreadSummary: Sendable, Hashable, Codable, Identifiable {
         self.background = background
         self.subagents = subagents
         self.projects = projects
+        self.poolId = poolId
+        self.waitingForRoom = waitingForRoom
     }
 
     public init(from decoder: Decoder) throws {
@@ -857,6 +866,8 @@ public struct ThreadSummary: Sendable, Hashable, Codable, Identifiable {
         background = c.lossyArray(BackgroundTask.self, forKey: .background)
         subagents = c.lossyArray(Subagent.self, forKey: .subagents)
         projects = c.lossyArray(ThreadProject.self, forKey: .projects)
+        poolId = ((try? c.decodeIfPresent(String.self, forKey: .poolId)) ?? nil).flatMap { $0.isEmpty ? nil : $0 }
+        waitingForRoom = (try? c.decodeIfPresent(WaitingForRoom.self, forKey: .waitingForRoom)) ?? nil
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -895,13 +906,15 @@ public struct ThreadSummary: Sendable, Hashable, Codable, Identifiable {
         if !background.isEmpty { try c.encode(background, forKey: .background) }
         if !subagents.isEmpty { try c.encode(subagents, forKey: .subagents) }
         if !projects.isEmpty { try c.encode(projects, forKey: .projects) }
+        try c.encodeIfPresent(poolId, forKey: .poolId)
+        try c.encodeIfPresent(waitingForRoom, forKey: .waitingForRoom)
     }
 
     enum CodingKeys: String, CodingKey {
         case id, title, cwd, accountId, provider, model, effort, modelInUse, effortInUse, permissionMode, status, live, needsYou
         case createdAt, updatedAt, lastActivityAt, snoozedUntil, snoozedUntilRestart, archivedAt, onOldRunner, preview
         case lastSeq, lastSeenSeq, nativeSessionId, contextTokens, contextWindow, costUsd, panels, actions, hooks, patches, background, subagents
-        case projects
+        case projects, poolId, waitingForRoom
     }
 
     /// Still being worked on between turns: background sub-agents or jobs
@@ -927,13 +940,18 @@ public struct RunnerDefaults: Sendable, Hashable, Codable {
     public var models: [String: String]
     /// The effort a new thread gets per provider; missing: the model's own.
     public var efforts: [String: String]
+    /// The pool a new thread with nothing named starts on. It doesn't look
+    /// at folders: the app applies those itself (`Pools.forFolder`). Nil
+    /// from a runner older than pools.
+    public var poolId: String?
 
-    public init(cwd: String, accountId: String, model: String? = nil, models: [String: String] = [:], efforts: [String: String] = [:]) {
+    public init(cwd: String, accountId: String, model: String? = nil, models: [String: String] = [:], efforts: [String: String] = [:], poolId: String? = nil) {
         self.cwd = cwd
         self.accountId = accountId
         self.model = model
         self.models = models
         self.efforts = efforts
+        self.poolId = poolId
     }
 
     public init(from decoder: Decoder) throws {
@@ -943,6 +961,7 @@ public struct RunnerDefaults: Sendable, Hashable, Codable {
         model = try? c.decodeIfPresent(String.self, forKey: .model)
         models = Self.strings(c, .models)
         efforts = Self.strings(c, .efforts)
+        poolId = ((try? c.decodeIfPresent(String.self, forKey: .poolId)) ?? nil).flatMap { $0.isEmpty ? nil : $0 }
     }
 
     /// The model a new thread on `provider` gets when it names none.
@@ -957,7 +976,7 @@ public struct RunnerDefaults: Sendable, Hashable, Codable {
         return raw.compactMapValues(\.stringValue)
     }
 
-    enum CodingKeys: String, CodingKey { case cwd, accountId, model, models, efforts }
+    enum CodingKeys: String, CodingKey { case cwd, accountId, model, models, efforts, poolId }
 }
 
 public struct HelloResult: Sendable, Hashable, Decodable {
@@ -970,6 +989,9 @@ public struct HelloResult: Sendable, Hashable, Decodable {
     /// The runner's own update (protocol "Runner updates"); nil from a
     /// runner older than that.
     public var updates: RunnerUpdates?
+    /// Nil from a runner older than pools: the app then works as before,
+    /// with providers in the picker's rail and an account chip.
+    public var pools: [Pool]?
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -981,10 +1003,11 @@ public struct HelloResult: Sendable, Hashable, Decodable {
         if defaults.accountId.isEmpty { defaults.accountId = accounts.first?.id ?? "claude-main" }
         clis = c.lossyArray(CliStatus.self, forKey: .clis)
         updates = try? c.decodeIfPresent(RunnerUpdates.self, forKey: .updates)
+        pools = c.contains(.pools) ? c.lossyArray(Pool.self, forKey: .pools) : nil
     }
 
     enum CodingKeys: String, CodingKey {
-        case runnerVersion, `protocol`, accounts, defaults, clis, updates
+        case runnerVersion, `protocol`, accounts, defaults, clis, updates, pools
     }
 }
 

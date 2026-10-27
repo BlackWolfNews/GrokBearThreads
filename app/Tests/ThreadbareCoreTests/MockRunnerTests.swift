@@ -346,6 +346,46 @@ final class MockRunnerTests: XCTestCase {
         }
     }
 
+    /// Pools as the mock plays them: hello lists them, a new thread with a
+    /// pool gets one of its logins, null pins, a pool id moves it back in,
+    /// and a save comes back as pools.updated. An old runner has none.
+    func testPools() async throws {
+        let client = try await connect()
+        defer { client.close() }
+        let hello = try await client.hello(version: "test")
+        XCTAssertEqual(hello.pools?.map(\.id), ["claude", "convex", "codex", "side-projects", "evenings"])
+        XCTAssertEqual(hello.defaults.poolId, "claude")
+        let created = try await client.createThread(NewThreadRequest(text: "hi", poolId: "side-projects", model: "opus"))
+        XCTAssertEqual(created.poolId, "side-projects")
+        XCTAssertEqual(created.accountId, "claude-3", "the named model's provider")
+        let pinned = try await client.updateThread(created.id, ThreadUpdate(poolId: .some(nil)))
+        XCTAssertNil(pinned.poolId)
+        XCTAssertEqual(pinned.accountId, "claude-3")
+        let moved = try await client.updateThread(created.id, ThreadUpdate(poolId: "convex"))
+        XCTAssertEqual(moved.poolId, "convex")
+        XCTAssertEqual(moved.accountId, "claude-2", "onto one of the pool's logins")
+        let byLogin = try await client.updateThread(created.id, ThreadUpdate(accountId: "claude-main"))
+        XCTAssertNil(byLogin.poolId, "naming a login pins")
+        do {
+            _ = try await client.savePools([Pool(id: "x", title: "X", accountIds: [])])
+            XCTFail("a pool with no logins is refused")
+        } catch RPCError.server(let code, _) {
+            XCTAssertEqual(code, -32602)
+        }
+        var iterator = client.notifications.makeAsyncIterator()
+        let saved = try await client.savePools([Pool(id: "all", title: "All", accountIds: ["claude-main", "codex-main"])])
+        XCTAssertEqual(saved.map(\.id), ["all"])
+        var heard: [Pool]?
+        while heard == nil, let next = await iterator.next() {
+            if case .poolsUpdated(let pools) = next { heard = pools }
+        }
+        XCTAssertEqual(heard?.map(\.id), ["all"])
+        _ = try await client.call("mock.accounts", .object(["old": .bool(true)]), as: JSONValue.self)
+        let old = try await client.hello(version: "test")
+        XCTAssertNil(old.pools, "a runner from before pools")
+        XCTAssertNil(old.defaults.poolId)
+    }
+
     func testWrongTokenIsUnauthorized() async throws {
         let endpoint = try RunnerConfig.endpoint(dataDir: dataDir)
         let client = RPCClient(transport: WebSocketTransport(url: endpoint.url, token: "not-the-token"))
