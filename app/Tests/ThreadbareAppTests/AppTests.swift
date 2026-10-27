@@ -298,13 +298,15 @@ final class DraftTests: XCTestCase {
         XCTAssertEqual(app.errorMessage, "Busy")
     }
 
-    /// The folder and "Ask before edits" were for the one thread; the
-    /// account, model and effort are what the next thread starts on too,
-    /// and the model and effort survive a relaunch.
+    /// The folder, "Ask before edits" and a picked account were for the
+    /// one thread; the model and effort are what the next thread starts on
+    /// too, and survive a relaunch. The account used becomes the last-used
+    /// one, which the next pick starts from.
     func testNewThreadSettingsAfterCreatingOne() async throws {
         defer {
             UserDefaults.standard.removeObject(forKey: AppModel.lastModelKey)
             UserDefaults.standard.removeObject(forKey: AppModel.lastEffortKey)
+            UserDefaults.standard.removeObject(forKey: AppModel.lastAccountKey)
         }
         let app = AppModel()
         let transport = RefusingTransport()
@@ -325,7 +327,9 @@ final class DraftTests: XCTestCase {
         XCTAssertEqual(app.selection, "th_new")
         XCTAssertNil(app.newThreadCwd)
         XCTAssertFalse(app.newThreadAsk)
-        XCTAssertEqual(app.newThreadAccount, "claude-3", "the account sticks")
+        XCTAssertNil(app.newThreadAccount, "a picked account is for that draft only")
+        XCTAssertEqual(app.lastAccountId, "claude-3")
+        XCTAssertEqual(app.newThreadAccountId, "claude-3", "with no usage known, the last-used one")
         XCTAssertEqual(app.newThreadModel, "haiku", "the model sticks")
         XCTAssertEqual(app.newThreadEffort, "low", "the effort sticks")
         XCTAssertEqual(AppModel().newThreadModel, "haiku", "and is remembered across launches")
@@ -335,6 +339,41 @@ final class DraftTests: XCTestCase {
         app.setModel("th_new", nil)
         XCTAssertEqual(AppModel().newThreadEffort, "max")
         XCTAssertNil(AppModel().newThreadModel)
+    }
+
+    /// A Codex pick doesn't become the next Claude thread's model, and the
+    /// composer follows the account with the most room until one is picked.
+    func testModelMemoryIsPerProviderAndTheAccountFollowsUsage() {
+        defer {
+            for key in [AppModel.lastModelKey, AppModel.lastEffortKey, AppModel.lastAccountKey, "lastModel.codex", "lastEffort.codex"] {
+                UserDefaults.standard.removeObject(forKey: key)
+            }
+        }
+        let app = AppModel()
+        func room(_ percent: Double) -> AccountUsage {
+            AccountUsage(windows: [UsageWindow(kind: "five_hour", title: "5-hour", remainingPercent: percent),
+                                   UsageWindow(kind: "weekly", title: "Weekly", remainingPercent: 90)])
+        }
+        app.accounts = [
+            Account(id: "claude-main", title: "a@x", usage: room(40)),
+            Account(id: "claude-3", title: "b@x", usage: room(70)),
+            Account(id: "codex-main", provider: "codex", title: "Codex · a@x", usage: room(99)),
+        ]
+        UserDefaults.standard.set("claude-main", forKey: AppModel.lastAccountKey)
+        XCTAssertEqual(app.newThreadAccountId, "claude-3", "most room, same provider")
+        app.remember(model: "sonnet", provider: "claude")
+        app.remember(model: "gpt-6-luna", provider: "codex")
+        app.remember(effort: "ultra", provider: "codex")
+        XCTAssertEqual(app.newThreadModel, "sonnet")
+        XCTAssertNil(app.newThreadEffort)
+        app.newThreadAccount = "codex-main"
+        XCTAssertEqual(app.newThreadModel, "gpt-6-luna")
+        XCTAssertEqual(app.newThreadEffort, "ultra")
+        XCTAssertEqual(AppModel().lastModels, ["claude": "sonnet", "codex": "gpt-6-luna"], "kept across launches")
+        // Usage moves: the default moves with it until Mike picks one.
+        app.newThreadAccount = nil
+        app.accounts[1].usage = room(20)
+        XCTAssertEqual(app.newThreadAccountId, "claude-main")
     }
 }
 

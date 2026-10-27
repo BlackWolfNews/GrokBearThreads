@@ -109,12 +109,12 @@ final class TranscriptModelTests: XCTestCase {
         ])
         XCTAssertEqual(model.rows.first?.kind, .diff)
         guard case .tool(let tool) = model.rows[0].content else { return XCTFail() }
-        XCTAssertEqual(tool.effectiveDiff?.hunks.first?.lines, ["-let a = 1", "+let a = 2"])
+        XCTAssertEqual(tool.effectiveDiffs.first?.hunks.first?.lines, ["-let a = 1", "+let a = 2"])
         _ = model.apply([E.event(2, "edit.diff", ["itemId": "c1", "path": "/a.swift", "hunks": [
             ["oldStart": 10, "oldLines": 1, "newStart": 10, "newLines": 1, "lines": ["-let a = 1", "+let a = 3"]],
         ]])])
         guard case .tool(let updated) = model.rows[0].content else { return XCTFail() }
-        XCTAssertEqual(updated.effectiveDiff?.hunks.first?.oldStart, 10)
+        XCTAssertEqual(updated.effectiveDiffs.first?.hunks.first?.oldStart, 10)
     }
 
     func testApprovalAndQuestionResolution() {

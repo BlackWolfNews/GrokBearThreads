@@ -52,13 +52,109 @@ const models = [
   { id: 'claude-haiku-4-5-20251001', model: 'claude-haiku-4-5-20251001', title: 'Haiku 4.5', description: 'Fastest for quick answers' },
   { id: 'claude-opus-5', model: 'claude-opus-5', title: 'Opus 5', description: 'Best for everyday, complex tasks', effortLevels: EFFORTS },
 ];
-const accounts = [
-  { id: 'claude-main', provider: 'claude', title: 'mike@example.com', configDir: '~/.claude', defaultModel: 'claude-fable-5-1', models },
-  { id: 'claude-3', provider: 'claude', title: 'mike+3@example.com', configDir: '~/Library/Application Support/Token Stats/Accounts/claude-3', defaultModel: 'claude-fable-5-1', models },
+// Codex's list, as its model/list gives it: its own levels (up to ultra;
+// the luna models stop at max) and a default level per model.
+const CODEX_EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max', 'ultra'];
+const codexModels = [
+  { id: 'gpt-6.1-sol', model: 'gpt-6.1-sol', title: 'GPT-6.1-Sol', description: 'Frontier model for complex work', effortLevels: CODEX_EFFORTS, defaultEffort: 'low' },
+  { id: 'gpt-6-luna', model: 'gpt-6-luna', title: 'GPT-6-Luna', description: 'Fast and affordable', effortLevels: CODEX_EFFORTS.slice(0, 5), defaultEffort: 'medium' },
 ];
+// Usage as the runner reports it from Token Stats' limits.json and live
+// readings, relative to now so reset times stay in the future. `extra`
+// overrides any field: `windows` replaces both windows, `more` adds
+// smaller ones after them, `readAgoMinutes` dates the reading.
+const hoursFromNow = (h) => new Date(Date.now() + h * 3_600_000).toISOString();
+function usage(fiveHour, weekly, { more = [], readAgoMinutes = 0, ...extra } = {}) {
+  return {
+    windows: [
+      { kind: 'five_hour', title: '5-hour', remainingPercent: fiveHour, resetsAt: hoursFromNow(2) },
+      { kind: 'weekly', title: 'Weekly', remainingPercent: weekly, resetsAt: hoursFromNow(70) },
+      ...more,
+    ],
+    readAt: new Date(Date.now() - readAgoMinutes * 60_000).toISOString(),
+    source: 'tokenStats',
+    ...extra,
+  };
+}
+// Mike's logins as the real runner lists them: the main one, claude-2 with
+// his note (it's for work, so never picked for a new thread), a stale
+// Token Stats reading, one at its limit, and Codex (Pro Lite has only a
+// weekly window).
+const tokenStatsAccounts = '~/Library/Application Support/Token Stats/Accounts';
+// What Token Stats writes under every account when its last check failed:
+// the app says it once, not under each one.
+const couldntCheck = "Couldn't check usage just now, so these are its last numbers.";
+let accounts = [
+  {
+    id: 'claude-main', provider: 'claude', title: 'mike@example.com', configDir: '~/.claude', defaultModel: 'claude-fable-5-1', models,
+    email: 'mike@example.com', plan: 'Max',
+    usage: usage(89, 78, {
+      more: [{ kind: 'weekly_model', title: 'Weekly Fable', remainingPercent: 71, resetsAt: hoursFromNow(70) }],
+      notice: `${couldntCheck} · $48.85 extra usage spent`,
+    }),
+  },
+  {
+    id: 'claude-2', provider: 'claude', title: 'work@example.com', configDir: `${tokenStatsAccounts}/claude-2`,
+    defaultModel: 'claude-fable-5-1', models, email: 'work@example.com', plan: 'Team', note: 'Convex work only', usage: usage(95, 90, { notice: couldntCheck }),
+  },
+  {
+    id: 'claude-3', provider: 'claude', title: 'mike+3@example.com', configDir: `${tokenStatsAccounts}/claude-3`,
+    defaultModel: 'claude-fable-5-1', models, email: 'mike+3@example.com', plan: 'Team',
+    usage: usage(12, 40, { stale: true, readAgoMinutes: 75, notice: couldntCheck }),
+  },
+  {
+    id: 'claude-4', provider: 'claude', title: 'mike+4@example.com', configDir: `${tokenStatsAccounts}/claude-4`,
+    defaultModel: 'claude-fable-5-1', models, email: 'mike+4@example.com', plan: 'Pro',
+    usage: usage(0, 31, {
+      blocked: true,
+      windows: [
+        { kind: 'five_hour', title: '5-hour', remainingPercent: 0, resetsAt: hoursFromNow(1.5) },
+        { kind: 'weekly', title: 'Weekly', remainingPercent: 31, resetsAt: hoursFromNow(52) },
+      ],
+    }),
+  },
+  {
+    id: 'codex-main', provider: 'codex', title: 'Codex · mike@example.com', configDir: '~/.codex', defaultModel: 'gpt-6.1-sol',
+    defaultEffort: 'high', models: codexModels, email: 'mike@example.com', plan: 'Pro Lite',
+    usage: usage(0, 0, {
+      source: 'live', notice: '64,390 credits · 2 limit resets available',
+      windows: [
+        // The credits are in the notice too: the app shows them once.
+        { kind: 'weekly', title: 'Weekly', remainingPercent: 64, resetsAt: hoursFromNow(96), detail: '64,390 credits' },
+        { kind: 'other', title: 'GPT-6.1-Sol', remainingPercent: 82, resetsAt: hoursFromNow(96) },
+      ],
+    }),
+  },
+];
+// mock.accounts {old: true}: acts like a runner from before step 4, with
+// no Codex accounts, no usage, notes or plans on the rest, and no clis.*
+// requests.
+let oldRunner = false;
+const publicAccounts = () => (oldRunner
+  ? accounts.filter((a) => a.provider !== 'codex').map(({ usage: _u, note: _n, plan: _p, email: _e, defaultEffort: _d, ...rest }) => rest)
+  : accounts);
+const providerOf = (accountId) => accounts.find((a) => a.id === accountId)?.provider ?? 'claude';
 // The synthetic fixtures live under a made-up /Users/mike, so the default
 // folder does too: the app only shows a folder chip away from the default.
-const defaults = { cwd: '/Users/mike/dev/me/misc', accountId: 'claude-main' };
+const defaults = {
+  cwd: '/Users/mike/dev/me/misc', accountId: 'claude-main',
+  models: { codex: 'gpt-6-luna' }, efforts: { codex: 'low' },
+};
+// What clis.list reports: Claude one version behind, Codex's update held
+// back by the schema gate, both checked 20 minutes ago.
+const minutesAgo = (m) => new Date(Date.now() - m * 60_000).toISOString();
+const clis = [
+  {
+    provider: 'claude', path: '/Users/mike/.local/bin/claude', managedBy: 'cli', installedVersion: '2.1.311', latestVersion: '2.1.312',
+    status: 'behind', policy: 'auto', inUse: [], checkedAt: minutesAgo(20),
+  },
+  {
+    provider: 'codex', path: '/Users/mike/Library/Application Support/Threadbare/tools/codex/current', managedBy: 'threadbare',
+    installedVersion: '0.164.0', latestVersion: '0.165.0', status: 'held', policy: 'auto', inUse: [], previousVersion: '0.163.0',
+    checkedAt: minutesAgo(20),
+    hold: { version: '0.165.0', reason: 'the app-server protocol changed', missing: ['thread/backgroundTerminals/list'] },
+  },
+];
 // The Settings window's settings, as a runner with a key set and a little
 // spent would have them, so a shot of it has something in every row.
 const settings = {
@@ -155,7 +251,7 @@ async function handle(client, { id, method, params = {} }) {
 async function dispatch(client, method, p) {
   switch (method) {
     case 'hello':
-      return { runnerVersion, protocol: 1, accounts, defaults };
+      return { runnerVersion, protocol: 1, accounts: publicAccounts(), defaults, ...(oldRunner ? {} : { clis }) };
     case 'runner.status': {
       const all = [...threads.values()].map((t) => t.summary);
       const status = {
@@ -165,7 +261,32 @@ async function dispatch(client, method, p) {
         background: all.filter((s) => s.background?.length).map((s) => ({ threadId: s.id, tasks: s.background.map((b) => b.description || b.kind) })),
       };
       if (pendingRestart) status.pendingRestart = pendingRestart;
+      if (!oldRunner) status.clis = clis;
       return status;
+    }
+    // The CLI requests only report and pretend: nothing is checked or
+    // installed. An update "runs" for a couple of seconds.
+    case 'clis.list':
+    case 'clis.check':
+    case 'clis.update':
+    case 'clis.setPolicy': {
+      if (oldRunner) throw rpcError(-32601, `Unknown method ${method}`);
+      if (method === 'clis.list') return { clis };
+      if (method === 'clis.check') {
+        for (const cli of clis) if (!p.provider || cli.provider === p.provider) cli.checkedAt = iso();
+        broadcastClis();
+        return { clis };
+      }
+      const cli = clis.find((c) => c.provider === p.provider);
+      if (!cli) throw rpcError(-32602, 'provider must be claude or codex');
+      if (method === 'clis.setPolicy') {
+        if (!['auto', 'notify', 'off'].includes(p.policy)) throw rpcError(-32602, 'policy must be auto, notify or off');
+        cli.policy = p.policy;
+        broadcastClis();
+        return { clis };
+      }
+      fakeCliUpdate(cli, p);
+      return { clis };
     }
     case 'threads.list': {
       const include = new Set(p.include ?? ['inbox']);
@@ -187,9 +308,11 @@ async function dispatch(client, method, p) {
       if (!p.text) throw rpcError(-32602, 'text is required');
       const threadId = 'th_' + crypto.randomBytes(6).toString('hex');
       const now = iso();
+      const accountId = p.accountId ?? defaults.accountId;
+      const provider = providerOf(accountId);
       const summary = {
         id: threadId, title: (p.title ?? p.text.split('\n')[0]).slice(0, 60), cwd: p.cwd ?? defaults.cwd,
-        accountId: p.accountId ?? defaults.accountId, provider: 'claude', model: p.model, effort: p.effort,
+        accountId, provider, model: p.model ?? defaults.models[provider], effort: p.effort ?? defaults.efforts[provider],
         permissionMode: p.permissionMode ?? 'full', status: 'starting', live: true, needsYou: false,
         createdAt: now, updatedAt: now, lastActivityAt: now, preview: '', lastSeq: 0, lastSeenSeq: 0,
       };
@@ -212,6 +335,13 @@ async function dispatch(client, method, p) {
     case 'threads.update': {
       const t = need(p.threadId);
       const s = t.summary;
+      // Like the runner: an account of the other provider switches provider
+      // and puts model and effort back to its defaults, unless set here.
+      if (p.accountId !== undefined && providerOf(p.accountId) !== s.provider) {
+        s.provider = providerOf(p.accountId);
+        s.model = defaults.models[s.provider];
+        s.effort = defaults.efforts[s.provider];
+      }
       for (const key of ['title', 'cwd', 'accountId', 'permissionMode']) if (p[key] !== undefined) s[key] = p[key];
       if (p.model !== undefined) s.model = p.model ?? undefined;
       if (p.effort !== undefined) s.effort = p.effort ?? undefined;
@@ -444,8 +574,19 @@ async function dispatch(client, method, p) {
       broadcastSummary(t.summary.id);
       return { thread: t.summary };
     }
+    case 'mock.accounts': {
+      // Replaces the account list ({accounts}), or plays a runner from
+      // before step 4 ({old: true}: no usage, no clis.*) until {old: false}.
+      if (Array.isArray(p.accounts)) accounts = p.accounts;
+      if (typeof p.old === 'boolean') oldRunner = p.old;
+      broadcast('accounts.updated', { accounts: publicAccounts() });
+      return { accounts: publicAccounts(), old: oldRunner };
+    }
     case 'mock.restart':
       return restartNow(p);
+    case 'mock.clis':
+      if (p.wentBack) return wentBack();
+      return { clis };
     case 'mock.stream':
       return startStream(need(p.threadId).summary.id, p);
     case 'mock.approval': {
@@ -681,6 +822,57 @@ function notice(client, level, message) {
 
 function broadcastNotice(level, message) {
   for (const client of clients) notice(client, level, message);
+}
+
+function broadcast(method, params) {
+  const text = JSON.stringify({ jsonrpc: '2.0', method, params });
+  for (const c of clients) if (c.authed) c.ws.send(text);
+}
+
+function broadcastClis() {
+  broadcast('clis.updated', { clis });
+}
+
+// clis.update: running straight away, done about 2.5 s later. A version
+// that's the kept previous one is "Go back" (the two swap); otherwise it
+// installs the latest, past a hold only with force or a version.
+function fakeCliUpdate(cli, p) {
+  const goingBack = p.version && p.version === cli.previousVersion;
+  const target = p.version ?? cli.hold?.version ?? cli.latestVersion ?? cli.installedVersion;
+  if (cli.hold && !p.force && !p.version && !goingBack) {
+    cli.update = { state: 'failed', targetVersion: target, finishedAt: iso(), message: `${target} is held back: ${cli.hold.reason}` };
+    broadcastClis();
+    return;
+  }
+  cli.update = { state: 'running', targetVersion: target };
+  broadcastClis();
+  setTimeout(() => {
+    const was = cli.installedVersion;
+    cli.installedVersion = target;
+    if (goingBack) cli.previousVersion = was;
+    else if (cli.provider === 'codex') cli.previousVersion = was;
+    // Like the runner: the version gone back from is held, so it isn't
+    // installed again by itself (Update anyway still can).
+    if (goingBack) cli.hold = { version: was, reason: 'you went back from it' };
+    else delete cli.hold;
+    cli.status = cli.hold ? 'held' : target === cli.latestVersion ? 'current' : 'behind';
+    cli.checkedAt = iso();
+    cli.update = { state: 'succeeded', targetVersion: target, finishedAt: iso() };
+    broadcastClis();
+  }, 2500);
+}
+
+/** mock.clis {wentBack: true}: Codex as it is after "Go back to 0.163.0"
+ * from 0.164.0: on 0.163.0, 0.164.0 kept and held because Mike went back. */
+function wentBack() {
+  const codex = clis.find((c) => c.provider === 'codex');
+  Object.assign(codex, {
+    installedVersion: '0.163.0', previousVersion: '0.164.0', latestVersion: '0.165.0', status: 'held',
+    hold: { version: '0.164.0', reason: 'you went back from it' }, checkedAt: iso(),
+  });
+  delete codex.update;
+  broadcastClis();
+  return { clis };
 }
 
 // ---------------------------------------------------------------- events

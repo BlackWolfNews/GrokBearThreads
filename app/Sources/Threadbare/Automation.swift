@@ -524,6 +524,12 @@ enum Automation {
             return menu(c, app: app)
         case "composer-menu":
             return composerMenu(c, app: app)
+        case "usage":
+            // The usage popover: {"show": true} opens it (and says its
+            // window, for a screencapture -l), {"click": "Update"} presses
+            // one of its buttons for a CLI ({"provider": "codex"}), and
+            // with neither it lists what it says.
+            return usage(c, app: app)
         case "debug-info":
             // What the row menu's "Copy debug info" copies, copied the same
             // way (to this instance's pasteboard).
@@ -579,8 +585,8 @@ enum Automation {
         if let value = c["effort"] {
             // null goes back to the model's own level.
             if value is NSNull { app.newThreadEffort = nil } else {
-                guard let effort = value as? String, ComposerChips.effortLevels.contains(effort)
-                else { return "error effort is one of \(ComposerChips.effortLevels.joined(separator: ", ")), or null for the default" }
+                guard let effort = value as? String, ComposerChips.codexEffortLevels.contains(effort)
+                else { return "error effort is one of \(ComposerChips.codexEffortLevels.joined(separator: ", ")), or null for the default" }
                 app.newThreadEffort = effort
             }
         }
@@ -757,21 +763,30 @@ enum Automation {
     private static func composerMenu(_ c: [String: Any], app: AppModel) -> String {
         let settings = ThreadSettings(app: app, thread: app.selectedThread)
         let menu: NSMenu
+        // Opens a chip's popover, and says its window number so a
+        // screencapture -l can take just it.
+        func show(_ bump: () -> Void) -> String {
+            bump()
+            RunLoop.main.run(until: Date().addingTimeInterval(0.4))
+            let popover = NSApp.windows.first { String(describing: type(of: $0)).contains("Popover") && $0.isVisible }
+            return popover.map { "ok window \($0.windowNumber)" } ?? "error the picker didn't open"
+        }
         switch c["menu"] as? String ?? "model" {
         case "model":
             if let title = c["click"] as? String {
                 return settings.pickerClick(title) ? "ok" : "error no item \(title)"
             }
-            if c["show"] as? Bool == true {
-                // Opens the real popover, and says its window number so a
-                // screencapture -l can take just it.
-                app.modelPickerRequest += 1
-                RunLoop.main.run(until: Date().addingTimeInterval(0.3))
-                let popover = NSApp.windows.first { String(describing: type(of: $0)).contains("Popover") && $0.isVisible }
-                return popover.map { "ok window \($0.windowNumber)" } ?? "error the picker didn't open"
-            }
+            if c["show"] as? Bool == true { return show { app.modelPickerRequest += 1 } }
             return "ok " + json(settings.pickerLines())
-        case "account": menu = settings.accountMenu()
+        case "account":
+            // An account by its email (as the picker shows it) or its id.
+            if let title = c["click"] as? String {
+                guard let item = settings.accountSections.flatMap(\.items).first(where: { $0.title == title || $0.id == title }) else { return "error no item \(title)" }
+                settings.setAccount(item.id)
+                return "ok"
+            }
+            if c["show"] as? Bool == true { return show { app.accountPickerRequest += 1 } }
+            return "ok " + json(settings.accountLines())
         case "permission": menu = settings.permissionMenu()
         case "folder": menu = settings.folderMenu()
         default: return "error menu is model, account, permission or folder"
@@ -782,6 +797,31 @@ enum Automation {
             return "ok"
         }
         return "ok " + json(describe(menu, indent: ""))
+    }
+
+    private static func usage(_ c: [String: Any], app: AppModel) -> String {
+        if let show = c["show"] as? Bool {
+            app.usagePopoverShown = show
+            guard show else { return "ok closed" }
+            RunLoop.main.run(until: Date().addingTimeInterval(0.5))
+            let popover = NSApp.windows.first { String(describing: type(of: $0)).contains("Popover") && $0.isVisible }
+            return popover.map { "ok window \($0.windowNumber)" } ?? "error the popover didn't open"
+        }
+        if let title = c["click"] as? String {
+            if title == "Check now" { app.checkClis(); return "ok" }
+            guard let provider = c["provider"] as? String, let cli = app.clis.first(where: { $0.provider == provider }) else { return "error provider is claude or codex" }
+            if title == CliText.updateTitle(cli) {
+                app.updateCli(provider, force: cli.status == "held")
+            } else if title == CliText.goBackTitle(cli), let previous = cli.previousVersion {
+                app.updateCli(provider, version: previous)
+            } else if let policy = CliText.policies.first(where: { CliText.policyTitle($0) == title }) {
+                app.setCliPolicy(provider, policy)
+            } else {
+                return "error no button \(title) for \(provider)"
+            }
+            return "ok"
+        }
+        return "ok " + json(AppDump.usageLines(app))
     }
 
     private static func allItems(_ menu: NSMenu) -> [NSMenuItem] {

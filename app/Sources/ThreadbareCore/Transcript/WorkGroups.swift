@@ -146,7 +146,7 @@ public enum DiffPreview {
 /// Words for a work group's one-line summary.
 public enum WorkSummary {
     enum Category: Hashable {
-        case read, search, edit, command, web, agent, plan, tool
+        case read, search, edit, command, web, agent, plan, imageMade, imageViewed, tool
     }
 
     /// The summary and how many tools failed. Parts come in the order the
@@ -185,11 +185,16 @@ public enum WorkSummary {
                     let path = tool.call?.input["file_path"]?.stringValue ?? tool.call?.input["path"]?.stringValue ?? tool.itemId
                     count(.read, by: readPaths.insert(path).inserted ? 1 : 0)
                 case .edit:
-                    // Not `effectiveDiff`: that builds the whole diff, and a
+                    // Not `effectiveDiffs`: that builds the whole diff, and a
                     // live group's summary is rebuilt on every streamed delta.
-                    let path = tool.diff?.path ?? tool.call?.input["file_path"]?.stringValue
-                        ?? tool.call?.input["path"]?.stringValue ?? tool.itemId
-                    count(.edit, by: editPaths.insert(path).inserted ? 1 : 0)
+                    // A Codex patch counts each file it touches.
+                    let paths = tool.editedPaths.isEmpty ? [tool.itemId] : tool.editedPaths
+                    count(.edit, by: paths.reduce(0) { $0 + (editPaths.insert($1).inserted ? 1 : 0) })
+                case .imageMade:
+                    // One that failed made nothing; the red icon says so.
+                    count(.imageMade, by: tool.failed ? 0 : max(1, tool.result?.images.count ?? 1))
+                case .imageViewed:
+                    count(.imageViewed)
                 default:
                     count(category)
                 }
@@ -216,13 +221,15 @@ public enum WorkSummary {
 
     static func category(of tool: ToolItem) -> Category {
         switch tool.toolKind {
-        case .read: return .read
+        // Codex's view_image is a read of a picture, not of a file's text.
+        case .read: return tool.name == "view_image" ? .imageViewed : .read
         case .search: return .search
         case .edit, .write: return .edit
         case .command: return .command
         case .web: return tool.name.localizedCaseInsensitiveContains("search") ? .search : .web
         case .task: return .agent
         case .todo: return .plan
+        case .image: return .imageMade
         case .mcp, .other:
             if let call = tool.call, DiffBuilder.isEditTool(call) { return .edit }
             return .tool
@@ -239,6 +246,8 @@ public enum WorkSummary {
         case .web: return n == 1 ? "fetched a page" : "fetched \(n) pages"
         case .agent: return n == 1 ? "ran an agent" : "ran \(n) agents"
         case .plan: return "updated the plan"
+        case .imageMade: return n == 1 ? "made an image" : "made \(n) images"
+        case .imageViewed: return n == 1 ? "viewed an image" : "viewed \(n) images"
         case .tool: return n == 1 ? "used a tool" : "used \(n) tools"
         }
     }

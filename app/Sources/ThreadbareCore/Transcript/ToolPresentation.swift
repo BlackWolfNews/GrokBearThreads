@@ -6,7 +6,8 @@ public enum ToolPresentation {
         switch kind {
         // An action from a patch (ActionRun) gets the patch glyph.
         case .command: return name == "action" ? "square.dashed" : "terminal"
-        case .read: return "doc.text"
+        // Codex's view_image is looking at a picture, not reading a file.
+        case .read: return name == "view_image" ? "photo" : "doc.text"
         // At 12 pt the bare `pencil` drew as one diagonal stroke and read
         // as a stray "/" before the title.
         case .edit: return "pencil.line"
@@ -16,6 +17,7 @@ public enum ToolPresentation {
         case .mcp: return "puzzlepiece.extension"
         case .task: return "person.2"
         case .todo: return "checklist"
+        case .image: return "photo"
         case .other:
             if name.hasPrefix("mcp__") { return "puzzlepiece.extension" }
             return "wrench.and.screwdriver"
@@ -48,7 +50,7 @@ public enum ToolPresentation {
     public static func fileTitle(_ tool: ToolItem) -> FileTitle? {
         let verb: String
         switch tool.toolKind {
-        case .read: verb = "Read"
+        case .read: verb = tool.name == "view_image" ? "View" : "Read"
         case .edit: verb = "Edit"
         case .write: verb = "Write"
         default: return nil

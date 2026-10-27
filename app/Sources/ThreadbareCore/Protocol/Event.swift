@@ -4,7 +4,9 @@ import os
 let protocolLog = Logger(subsystem: "com.mikerosoft.threadbare", category: "protocol")
 
 public enum ToolKind: String, Sendable, Hashable, Codable {
-    case command, read, edit, write, search, web, mcp, task, todo, other
+    /// `image` is image generation (Codex). A kind this app doesn't know
+    /// reads as `other`.
+    case command, read, edit, write, search, web, mcp, task, todo, image, other
 
     public init(from decoder: Decoder) throws {
         let raw = try decoder.singleValueContainer().decode(String.self)
@@ -300,21 +302,37 @@ public enum TurnOutcome: String, Sendable, Hashable, Codable {
     }
 }
 
+/// Why a failed turn failed, when the runner knows, so the app can offer
+/// the fix without reading the message.
+public enum TurnErrorKind: String, Sendable, Hashable, Codable {
+    case usageLimit, contextWindow, auth
+}
+
 public struct TurnCompletion: Sendable, Hashable, Decodable {
     public var turnId: String
     public var outcome: TurnOutcome
     public var durationMs: Double
+    /// Nil for Codex turns, which report no cost.
     public var costUsd: Double?
+    /// Token counts by name. Claude: inputTokens, outputTokens,
+    /// cacheReadTokens, cacheWriteTokens. Codex: inputTokens,
+    /// cachedInputTokens, cacheWriteTokens, outputTokens, reasoningTokens.
     public var usage: JSONValue?
     public var error: String?
+    /// Nil when unknown, including a kind this app doesn't know yet.
+    public var errorKind: TurnErrorKind?
 
-    public init(turnId: String, outcome: TurnOutcome, durationMs: Double, costUsd: Double? = nil, usage: JSONValue? = nil, error: String? = nil) {
+    public init(
+        turnId: String, outcome: TurnOutcome, durationMs: Double, costUsd: Double? = nil, usage: JSONValue? = nil, error: String? = nil,
+        errorKind: TurnErrorKind? = nil
+    ) {
         self.turnId = turnId
         self.outcome = outcome
         self.durationMs = durationMs
         self.costUsd = costUsd
         self.usage = usage
         self.error = error
+        self.errorKind = errorKind
     }
 
     public init(from decoder: Decoder) throws {
@@ -324,6 +342,7 @@ public struct TurnCompletion: Sendable, Hashable, Decodable {
         durationMs = (try? c.decodeIfPresent(Double.self, forKey: .durationMs)) ?? 0
         costUsd = try? c.decodeIfPresent(Double.self, forKey: .costUsd)
         usage = try? c.decodeIfPresent(JSONValue.self, forKey: .usage)
+        errorKind = ((try? c.decodeIfPresent(String.self, forKey: .errorKind)) ?? nil).flatMap(TurnErrorKind.init(rawValue:))
         // `error` may be a string or an object depending on the runner version.
         if let text = try? c.decodeIfPresent(String.self, forKey: .error) {
             error = text
@@ -334,7 +353,7 @@ public struct TurnCompletion: Sendable, Hashable, Decodable {
         }
     }
 
-    enum CodingKeys: String, CodingKey { case turnId, outcome, durationMs, costUsd, usage, error }
+    enum CodingKeys: String, CodingKey { case turnId, outcome, durationMs, costUsd, usage, error, errorKind }
 }
 
 /// A command action that ran (`action.run`): what it printed, outside any

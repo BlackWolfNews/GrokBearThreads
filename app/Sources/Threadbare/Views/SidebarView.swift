@@ -514,6 +514,7 @@ private struct SidebarFooter: View {
                     app.showSchedules()
                 }
             }
+            UsageButton()
             // The same window as ⌘, without a trip to the menu bar.
             SidebarButtonRow(icon: "gearshape", title: "Settings", size: TypeScale.sidebarFooter) {
                 openSettings()
@@ -524,6 +525,25 @@ private struct SidebarFooter: View {
         .padding(.bottom, 8)
         .overlay(alignment: .top) {
             Rectangle().fill(.separator).frame(height: 0.5).padding(.horizontal, SidebarMetrics.outerInset + 10)
+        }
+    }
+}
+
+/// "Usage": every account's room and the CLIs' versions, in a popover.
+private struct UsageButton: View {
+    @Environment(AppModel.self) private var app
+
+    var body: some View {
+        @Bindable var app = app
+        SidebarButtonRow(icon: "gauge.with.dots.needle.33percent", title: "Usage", size: TypeScale.sidebarFooter) {
+            app.usagePopoverShown.toggle()
+        }
+        // On the model, so a script can open it and `dump` can say so.
+        // Above the button, which sits at the foot of the window, and
+        // pointing at its right-hand end so the popover's wider than the
+        // sidebar stays inside the window rather than past its left edge.
+        .popover(isPresented: $app.usagePopoverShown, attachmentAnchor: .point(UnitPoint(x: 0.9, y: 0)), arrowEdge: .top) {
+            UsagePopover().environment(app)
         }
     }
 }

@@ -31,10 +31,17 @@ public enum ComposerChips {
     /// the app doesn't know, so it reads "Default". A menu alias reads as a
     /// word ("Opus") and a full Claude id as family and version
     /// ("claude-opus-5-5" is "Opus 5.5", with any date suffix dropped).
-    /// Anything else is shown as it is.
+    /// A Codex id reads the way Codex titles it ("gpt-6.1-sol" is
+    /// "GPT-6.1-Sol"), for before the account's list has loaded. Anything
+    /// else is shown as it is.
     public static func model(_ model: String?) -> String {
         guard let model, !model.isEmpty else { return "Default" }
         if model.allSatisfy(\.isLetter) { return model.capitalized }
+        if model.lowercased().hasPrefix("gpt-") {
+            return model.split(separator: "-", omittingEmptySubsequences: false).enumerated().map { index, part in
+                index == 0 ? part.uppercased() : part.prefix(1).uppercased() + part.dropFirst()
+            }.joined(separator: "-")
+        }
         var parts = model.split(separator: "-").map(String.init)
         guard parts.first == "claude" else { return model }
         parts.removeFirst()
@@ -75,6 +82,14 @@ public enum ComposerChips {
     /// The CLI's effort levels, lowest first.
     public static let effortLevels = ["low", "medium", "high", "xhigh", "max"]
 
+    /// Codex's levels: Claude's plus "ultra", its multi-agent level.
+    public static let codexEffortLevels = ["low", "medium", "high", "xhigh", "max", "ultra"]
+
+    /// The levels a provider offers when the model's own list isn't known.
+    public static func effortLevels(provider: String) -> [String] {
+        provider == "codex" ? codexEffortLevels : effortLevels
+    }
+
     /// Goldilocks: what the porridge is like at each level, under its name
     /// in the menu. The model's own level is "just right".
     public static func effortPorridge(_ level: String) -> String? {
@@ -84,6 +99,7 @@ public enum ComposerChips {
         case "high": return "Warm"
         case "xhigh": return "Hot"
         case "max": return "Too hot"
+        case "ultra": return "Scalding"
         default: return nil
         }
     }

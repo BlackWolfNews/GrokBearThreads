@@ -1,8 +1,23 @@
 // The seam between the runner and a provider CLI. The runner owns threads,
 // turns, persistence and the protocol; an adapter only drives one CLI
-// process per live thread and reports normalised output. Codex will be a
-// second implementation of AgentAdapter.
-import type { Account, BackgroundKind, SubagentStatus, DeltaBody, EffortLevel, EventBody, ImageRef, ModelChoice, PermissionMode, Question, TurnOutcome } from '../protocol.ts';
+// process per live thread and reports normalised output. Claude and Codex
+// are the two implementations of AgentAdapter.
+import type {
+  Account,
+  BackgroundKind,
+  DeltaBody,
+  EffortLevel,
+  EventBody,
+  ImageRef,
+  ModelChoice,
+  PermissionMode,
+  Provider,
+  Question,
+  SubagentStatus,
+  TurnErrorKind,
+  TurnOutcome,
+  UsageWindow,
+} from '../protocol.ts';
 
 export type StartSessionOptions = {
   threadId: string;
@@ -13,6 +28,8 @@ export type StartSessionOptions = {
   permissionMode: PermissionMode;
   // Native session id. With resume=false it's pre-assigned to a brand new
   // session; with resume=true the CLI loads that session's transcript.
+  // Codex assigns its own ids, so it ignores this when resume=false and
+  // reports the real one through the `session` output.
   sessionId: string;
   resume: boolean;
   mediaDir: string; // images from tool results are saved here
@@ -48,6 +65,7 @@ export type TurnResult = {
   totalCostUsd?: number; // provider's running total for the native session
   usage?: Record<string, unknown>;
   error?: string;
+  errorKind?: TurnErrorKind;
 };
 
 export type AdapterOutput =
@@ -56,7 +74,13 @@ export type AdapterOutput =
   | { kind: 'session'; nativeSessionId: string; model?: string }
   // The effort level the CLI applied to the turn that just ended.
   | { kind: 'effort'; level: EffortLevel }
-  | { kind: 'context'; contextTokens: number }
+  | { kind: 'context'; contextTokens: number; contextWindow?: number }
+  // A rate-limit reading for the session's account (D's UsageStore keeps
+  // it). email and plan come with it when the CLI reports them.
+  | { kind: 'limits'; windows: UsageWindow[]; blocked?: boolean; email?: string; plan?: string }
+  // The version of the CLI process actually running this session (not the
+  // one that created it).
+  | { kind: 'cliVersion'; version: string }
   // The CLI started a turn of its own; `note` says why, when it's known.
   | { kind: 'cliTurn'; note?: string }
   // Background work the CLI is running (shells, async subagents). Replaces
@@ -119,13 +143,27 @@ export interface SessionSink {
 // apart from ones it starts by itself.
 export type UserInput = { id?: string; text: string; images: ImageRef[] };
 
+// Passed to SessionSink.exited when the session to resume doesn't
+// exist (never started, deleted in the CLI's own app, a moved home): the
+// runner then starts a fresh session once, with a handoff note.
+export class SessionNotFoundError extends Error {
+  constructor(message = 'The session to resume was not found.') {
+    super(message);
+    this.name = 'SessionNotFoundError';
+  }
+}
+
 export interface AgentSession {
-  // Starts one turn. The runner never calls this while a turn is running.
+  // Starts a turn, or, sent while one runs, goes into it (steering): the
+  // CLI then lists it in TurnResult.answered or counts it in queuedTurns.
   send(input: UserInput): void;
   interrupt(): Promise<void>;
   setModel(model: string | undefined): Promise<void>;
   setEffort(effort: EffortLevel | undefined): Promise<void>;
   setPermissionMode(mode: PermissionMode): Promise<void>;
+  // Moves the session to another folder from its next turn, in the same
+  // native session. Only on adapters with movesFolders.
+  setCwd?(cwd: string): Promise<void>;
   // Ends the input so the CLI finishes and exits. Resolves once it has.
   // With hard set it stops the CLI straight away instead (background work
   // it is waiting for would otherwise keep it alive).
@@ -135,9 +173,22 @@ export interface AgentSession {
 }
 
 export interface AgentAdapter {
-  readonly provider: string;
+  readonly provider: Provider;
   start(opts: StartSessionOptions, sink: SessionSink): AgentSession;
   // What the account's CLI offers as models, without starting a turn.
   // Optional: a provider without a picker leaves it out.
   models?(account: Account): Promise<ModelChoice[]>;
+  // A same-account folder change calls setCwd on a live session, or passes
+  // the folder to the next start or resume, instead of copying the
+  // transcript and adding a handoff (Codex).
+  readonly movesFolders?: boolean;
+  // Model, effort and permission changes take effect from the next turn
+  // only, so the runner says so when one arrives mid-turn (Codex).
+  readonly settingsApplyNextTurn?: boolean;
+  // Whether the CLI starts a turn of its own when background work ends
+  // (default true). Codex doesn't, so the runner skips its wake grace.
+  readonly wakesAfterTasks?: boolean;
+  // Archives the native session in the CLI's own app when the thread is
+  // archived or deleted here. Best effort.
+  archive?(account: Account, nativeSessionId: string): Promise<void>;
 }

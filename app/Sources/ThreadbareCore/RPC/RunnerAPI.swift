@@ -102,6 +102,50 @@ public extension RPCClient {
     }
 }
 
+// MARK: CLIs (docs/protocol.md, "CLI requests")
+
+/// Each CLI request returns at once with the state when it arrived; the
+/// progress of a check or an update comes through `clis.updated`. A runner
+/// older than step 4 answers `-32601`, which callers read as "no CLI info"
+/// rather than an error.
+public extension RPCClient {
+    func listClis() async throws -> [CliStatus] {
+        try await call("clis.list", .object([:]), as: ClisResult.self).clis
+    }
+
+    /// Starts a check now; nil checks both.
+    func checkClis(provider: String? = nil) async throws -> [CliStatus] {
+        var params: [String: JSONValue] = [:]
+        if let provider { params["provider"] = .string(provider) }
+        return try await call("clis.check", .object(params), as: ClisResult.self).clis
+    }
+
+    /// Starts an update. `version` picks a kept Codex version (this is
+    /// "Go back"); `force` installs past a hold ("Update anyway").
+    func updateCli(provider: String, version: String? = nil, force: Bool = false) async throws -> [CliStatus] {
+        var params: [String: JSONValue] = ["provider": .string(provider)]
+        if let version { params["version"] = .string(version) }
+        if force { params["force"] = .bool(true) }
+        return try await call("clis.update", .object(params), as: ClisResult.self).clis
+    }
+
+    /// "auto", "notify" or "off".
+    func setCliPolicy(provider: String, policy: String) async throws -> [CliStatus] {
+        try await call("clis.setPolicy", .object(["provider": .string(provider), "policy": .string(policy)]), as: ClisResult.self).clis
+    }
+}
+
+public struct ClisResult: Sendable, Decodable {
+    public var clis: [CliStatus]
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        clis = c.lossyArray(CliStatus.self, forKey: .clis)
+    }
+
+    enum CodingKeys: String, CodingKey { case clis }
+}
+
 public enum ThreadListScope: String, Sendable, CaseIterable {
     case inbox, snoozed, archived
 }

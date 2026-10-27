@@ -17,28 +17,85 @@ seconds) closes the socket with code 4401.
 ## Types
 
 ```ts
+type Provider = "claude" | "codex"
+
 type Account = {
-  id: string            // "claude-main", "claude-1", ...
-  provider: "claude"    // "codex" later
-  title: string         // e.g. "you@example.com"
+  id: string            // "claude-main", "claude-1", "codex-main", "codex-1", ...
+  provider: Provider
+  title: string         // Claude: the email when known, else the id. Codex:
+                        // "Codex · <email>", so an app that only reads title
+                        // can tell it from a Claude login with the same address
   configDir: string
   defaultModel?: string // full id of the model a thread with no model runs on
-                        // ("claude-fable-5-1"): the account's own setting,
-                        // corrected by the first turn the runner sees. Absent
-                        // until the runner knows
+                        // ("claude-fable-5-1"): the account's own setting
+                        // (Codex: config.toml's model, else the model list's
+                        // default), corrected by the first turn the runner
+                        // sees. Absent until the runner knows
   models?: ModelChoice[] // what the account's CLI offers, in its own order,
                         // once the runner has asked it (a few seconds after
-                        // it starts)
+                        // it starts). Codex: its model list without hidden models
+  defaultEffort?: EffortLevel // the account's own level (Codex: config.toml's
+                        // model_reasoning_effort). Absent: each model's own
+  email?: string        // the bare address, when known
+  plan?: string         // "Max", "Team", "Pro Lite"
+  note?: string         // Mike's own note for the account ("Convex work only")
+  usage?: AccountUsage  // absent when nothing is known (and from older runners)
 }
 
-type EffortLevel = "low" | "medium" | "high" | "xhigh" | "max"
+// "ultra" is Codex's multi-agent level. Claude never offers it.
+type EffortLevel = "low" | "medium" | "high" | "xhigh" | "max" | "ultra"
 
 type ModelChoice = {
-  id: string            // what to send as `model` ("opus", "claude-fable-5-1[1m]")
+  id: string            // what to send as `model` ("opus", "claude-fable-5-1[1m]", "gpt-6-luna")
   model: string         // the full id it runs as ("claude-opus-5-5")
   title: string         // "Opus 5.5"
   description?: string
   effortLevels?: EffortLevel[] // absent when the model takes no effort level
+  defaultEffort?: EffortLevel  // the model's own level, when the CLI says (Codex)
+}
+
+type UsageWindow = {
+  kind: "five_hour" | "weekly" | "weekly_model" | "daily" | "monthly" | "allowance" | "other"
+  title: string         // "5-hour", "Weekly", "Weekly Fable", "$250 allowance"
+  remainingPercent: number // 0 to 100, may be fractional
+  resetsAt?: string
+  detail?: string       // "$132.79 left"
+}
+
+type AccountUsage = {
+  windows: UsageWindow[]
+  readAt: string        // when the newest reading in it was taken
+  source: "tokenStats" | "live" // where the newest reading came from: Token
+                        // Stats' limits.json, or the account's own turns
+  stale?: boolean       // Token Stats hasn't written for 15 minutes and
+                        // there's no live reading since
+  blocked?: boolean     // the provider says this login is at its limit
+  notice?: string       // Token Stats' own note ("64,390 credits · 2 limit resets available")
+}
+
+type CliStatus = {
+  provider: Provider
+  path: string          // the binary new sessions start
+  managedBy: "threadbare" | "cli" | "none" // Codex: Threadbare's own copies;
+                        // Claude: its own installer; "none": codexPath set by
+                        // hand, never updated
+  installedVersion?: string // what new sessions start on
+  latestVersion?: string
+  status: "current" | "behind" | "held" | "unknown" | "missing"
+  policy: "auto" | "notify" | "off"
+  inUse: { version: string, threadIds: string[] }[] // versions live sessions run
+  previousVersion?: string  // Codex: the kept version "Go back" returns to
+  checkedAt?: string
+  hold?: { version: string, reason: string, missing?: string[] } // why an
+                        // update wasn't installed by itself ("the app-server
+                        // protocol changed", with what it lost)
+  update?: {            // the latest update, while it runs and after
+    state: "waiting" | "running" | "succeeded" | "unchanged" | "failed"
+    targetVersion?: string
+    waitingFor?: string[]
+    finishedAt?: string
+    message?: string
+  }
 }
 
 type ThreadStatus =
@@ -54,7 +111,7 @@ type ThreadSummary = {
   title: string
   cwd: string
   accountId: string
-  provider: "claude"
+  provider: Provider    // always the account's provider
   model?: string        // undefined means the account's default
   effort?: EffortLevel  // undefined means the model's own level
   modelInUse?: string   // full id the CLI ran the last turn on, once one has run
@@ -73,7 +130,8 @@ type ThreadSummary = {
   lastSeenSeq: number
   nativeSessionId?: string
   contextTokens?: number
-  costUsd?: number      // total for the thread so far, if known
+  contextWindow?: number // the model's context window, when the CLI reports it
+  costUsd?: number      // total for the thread so far, if known (Codex reports none)
   panels?: Panel[]      // from the folder's patches (see Patches); absent when there are none
   actions?: Action[]    // likewise
   hooks?: Hook[]        // likewise
@@ -243,15 +301,15 @@ Persisted event types (stored in `events.ndjson`, returned by `threads.events`):
 | `user.message` | `text`, `images: ImageRef[]`, `origin?: "runner" \| "schedule"` (`runner` when the runner sent the message by itself, such as the resume after a restart; `schedule` when a schedule sent it, with `scheduleId`; absent for anything a person or client sent), `scheduleId?` |
 | `assistant.text` | `itemId`, `text` (complete markdown for that block) |
 | `reasoning` | `itemId`, `text` (summary) |
-| `tool.call` | `itemId`, `name` (raw tool name), `kind` (`command` \| `read` \| `edit` \| `write` \| `search` \| `web` \| `mcp` \| `task` \| `todo` \| `other`), `title` (one line, e.g. "npm test" or "Edit src/a.ts"), `input` (object, large strings truncated to 16 KB) |
+| `tool.call` | `itemId`, `name` (raw tool name), `kind` (`command` \| `read` \| `edit` \| `write` \| `search` \| `web` \| `mcp` \| `task` \| `todo` \| `image` \| `other`; `image` is image generation), `title` (one line, e.g. "npm test" or "Edit src/a.ts"), `input` (object, large strings truncated to 16 KB) |
 | `tool.result` | `itemId` (matches the call), `ok`, `text` (truncated to 64 KB), `truncated`, `blobPath?`, `images: ImageRef[]` |
-| `edit.diff` | `itemId`, `path`, `hunks: {oldStart, oldLines, newStart, newLines, lines: string[]}[]` (lines start with " ", "-" or "+"); sent after `tool.call` for Edit/MultiEdit/Write when the runner can compute it |
+| `edit.diff` | `itemId`, `path`, `hunks: {oldStart, oldLines, newStart, newLines, lines: string[]}[]` (lines start with " ", "-" or "+"); sent after `tool.call` for Edit/MultiEdit/Write when the runner can compute it. One event per file: a tool that changes several files (a Codex patch) has one per path. A later `edit.diff` with the same `itemId` and `path` replaces that file's diff; a new path adds one |
 | `approval.requested` | `approvalId`, `itemId?` (absent for a subagent's tools, which have no `tool.call`), `name`, `title`, `input`, `options: ("allow" \| "allowAlways" \| "deny")[]` |
 | `question.requested` | `approvalId`, `questions: {question, header?, multiSelect, options: {label, description?}[]}[]` |
 | `approval.resolved` | `approvalId`, `decision` (`allow` \| `allowAlways` \| `deny` \| `answered` \| `expired`), `message?` |
 | `plan.updated` | `entries: {text, status: "pending" \| "in_progress" \| "completed"}[]` |
 | `turn.started` | `turnId`. A turn the agent starts by itself (a background task finished, or a background subagent needs an approval) has no `user.message` before it. A `user.message` after `turn.started` was sent while the turn ran and went into it |
-| `turn.completed` | `turnId`, `outcome` (`completed` \| `interrupted` \| `failed`), `durationMs`, `costUsd?`, `usage?`, `error?` |
+| `turn.completed` | `turnId`, `outcome` (`completed` \| `interrupted` \| `failed`), `durationMs`, `costUsd?` (Codex turns have none), `usage?` (Claude: `{inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens}`; Codex: `{inputTokens, cachedInputTokens, cacheWriteTokens?, outputTokens, reasoningTokens}`), `error?`, `errorKind?` (`usageLimit` \| `contextWindow` \| `auth`, when a failed turn's cause is known, so a client can offer the fix without reading `error`) |
 | `system.note` | `text` (e.g. "Resumed session", "Compacted the conversation", "Patch reseed added: action Reseed dev DB.") |
 | `error` | `message` |
 | `action.run` | `actionId`, `patch`, `title`, `command`, `ok`, `exitCode?`, `text` (what it printed, truncated to 64 KB), `truncated`, `durationMs`, `trigger?` (`"turn.end"` when a hook ran it; absent for a chip or `tb run`). A command that `actions.run` or a hook ran; outside any turn unless one was running, in which case it carries that `turnId` |
@@ -272,14 +330,14 @@ replaces whatever the deltas built up.
 
 | method | params | result |
 |---|---|---|
-| `hello` | `{ client: string, version: string }` | `{ runnerVersion, protocol: 1, accounts: Account[], defaults: { cwd, accountId, model? } }`. `defaults.model` is the model a new thread gets when it names none (`runner.json`'s `defaults.model`; a dev runner sets the cheapest); absent means the account's own default (`accounts[].defaultModel` names it, when known). `runnerVersion` is `<package version>+<release id>` when the runner runs from a release, else `<package version>+source` |
+| `hello` | `{ client: string, version: string }` | `{ runnerVersion, protocol: 1, accounts: Account[], defaults: { cwd, accountId, model?, models?: { claude?, codex? }, efforts?: { claude?: EffortLevel, codex?: EffortLevel } }, clis?: CliStatus[] }`. `defaults.accountId` is the account a `threads.create` with no `accountId` uses: the one with the most room among the last-used account's provider (skipping blocked ones, ones under 10% and ones with a note), worked out again as usage changes; a client keeps its own copy of the rule rather than asking again. `defaults.models[provider]` is the model a new thread on that provider gets when it names none (`runner.json`'s `defaults.models`; a dev runner sets the cheapest); `defaults.model` is the same for Claude, kept for older apps. Absent means the account's own default (`accounts[].defaultModel` names it, when known). `defaults.efforts[provider]` likewise for effort; absent means the model's own level. `runnerVersion` is `<package version>+<release id>` when the runner runs from a release, else `<package version>+source` |
 | `threads.list` | `{ include?: ("inbox" \| "snoozed" \| "archived")[] }` (default `["inbox"]`) | `{ threads: ThreadSummary[] }` newest activity first |
 | `threads.search` | `{ query: string, limit?: number }` | `{ threads: ThreadSummary[] }` matches title and preview across all threads, archived included |
-| `threads.create` | `{ text: string, images?: ImageRef[], cwd?: string, accountId?: string, model?: string, effort?: EffortLevel, permissionMode?: "full" \| "ask", title?: string }` | `{ thread: ThreadSummary }` (the first turn starts straight away). With no `model`, the thread gets `defaults.model` from `hello` if there is one. With no `effort`, the model's own level |
+| `threads.create` | `{ text: string, images?: ImageRef[], cwd?: string, accountId?: string, model?: string, effort?: EffortLevel, permissionMode?: "full" \| "ask", title?: string }` | `{ thread: ThreadSummary }` (the first turn starts straight away). The thread's `provider` is its account's. With no `model`, the thread gets `defaults.models[provider]` from `hello`, or `defaults.model` for Claude, or else the account's own default. With no `effort`, `defaults.efforts[provider]`, or else the model's own level. See "Models and effort across providers" |
 | `threads.send` | `{ threadId, text, images?: ImageRef[] }` | `{ turnId }`. If a turn is running and its CLI is live, the message goes into that turn straight away (a `user.message` under the running `turnId`, which is returned): the agent takes it at its next step, or right after its reply if that was already finishing, and the turn doesn't complete until it has been answered. Otherwise (the CLI is still starting or leaving, messages are already waiting, a move or fresh CLI is due on the next turn, Stop has been pressed, or the turn is only an approval for a background subagent) the message is queued and starts its own turn when the running one ends |
 | `threads.interrupt` | `{ threadId }` | `{}` |
-| `threads.update` | `{ threadId, title?, cwd?, accountId?, model?: string \| null, effort?: EffortLevel \| null, permissionMode?, snoozedUntil?: string \| null, archived?: boolean }` | `{ thread: ThreadSummary }`. Snoozing or archiving releases the CLI. Changing account or cwd takes effect on the next turn. A model or effort change reaches a live CLI straight away (`null` goes back to the default). A folder change on the same account copies the native session's transcript to the new folder and resumes it; otherwise (or if that fails) it starts a new native session with a short handoff note |
-| `threads.delete` | `{ threadId }` | `{}`. Stops the thread's CLI and moves its folder to `trash/` in the data dir. Every client gets `thread.deleted` |
+| `threads.update` | `{ threadId, title?, cwd?, accountId?, model?: string \| null, effort?: EffortLevel \| null, permissionMode?, snoozedUntil?: string \| null, archived?: boolean }` | `{ thread: ThreadSummary }`. Snoozing or archiving releases the CLI (and archives a Codex thread in Codex too). Changing account or cwd takes effect on the next turn. A model or effort change reaches a live Claude CLI straight away (`null` goes back to the default); on Codex it applies from the next turn, with a `system.note` if a turn is running. A folder change on the same Claude account copies the native session's transcript to the new folder and resumes it; on the same Codex account the session carries on in the new folder from the next turn. Otherwise (or if that fails) it starts a new native session with a short handoff note. An account of the other provider switches `provider`, resets `model` and `effort` to that provider's defaults unless the same call sets them, and clears the thread's "Always allow" rules. `model` and `effort` are checked as in "Models and effort across providers" |
+| `threads.delete` | `{ threadId }` | `{}`. Stops the thread's CLI and moves its folder to `trash/` in the data dir (a Codex thread is archived in Codex too). Every client gets `thread.deleted` |
 | `threads.events` | `{ threadId, afterSeq?: number, beforeSeq?: number, limit?: number }` (default: the newest 500) | `{ events: Event[], firstSeq, lastSeq, inProgress: { itemId, type: "assistant.text" \| "reasoning", text }[] }` |
 | `threads.subscribe` | `{ threadId, afterSeq?: number }` | `{ events: Event[], inProgress: { itemId, type, text }[] }` (everything after `afterSeq`, and the text streamed so far for items still streaming), then pushes `thread.event` notifications. Deltas pushed after the reply carry on from `inProgress` |
 | `threads.unsubscribe` | `{ threadId }` | `{}` |
@@ -299,12 +357,35 @@ replaces whatever the deltas built up.
 | `settings.update` | `{ defaultCwd?, idleMinutes?, maxLiveCLIs?, followMain?, models?: { dailyBudgetUsd?, privateFolders? } }` | `{ settings: Settings }`. Saves what's given to `runner.json` and applies it straight away, except `followMain` (next restart). `defaultCwd` must be an existing folder, `idleMinutes` at least 1, `maxLiveCLIs` 1 to 20, `dailyBudgetUsd` 0 to 100; otherwise `-32602` saying which. Every client gets `settings.updated` |
 | `settings.setKey` | `{ provider: "openrouter", key: string \| null }` | `{ settings: Settings }`. Writes the key to `secrets/openrouter-key` (0600), or removes it for `null`. The key is never sent back, only `set` and `hint`. A key with spaces inside or under 20 characters is `-32602`. Every client gets `settings.updated` |
 | `models.run` | `{ job: "classify" \| "extract" \| "summarize" \| "generate", text: string, labels?: string[], fields?: Record<string, string>, maxWords?: number, system?: string, cwd?: string }` | `{ ok: true, value, model, costUsd? }` or `{ ok: false, reason: "no-key" \| "off" \| "private" \| "over-budget" \| "timeout" \| "provider", message }`. One model call by hand (`tb models try`), spent and counted like any other, with `feature: "tb"`. `classify` needs 2 or more `labels` and answers one of them; `extract` needs `fields` (name to a plain description) and answers an object of them, `null` where the text doesn't say |
-| `runner.status` | `{}` | `{ version, release?, branch?, pid, startedAt, home, logFile, liveClis, running: string[], background: { threadId, tasks: string[] }[], pendingRestart?: { when, reason?, release?, resumeThreadId?, requestedAt, backgroundUntil?, waitingFor: string[] }, rolledBack?: { from, at }, update?: { state, checkout?, reason?, checkedAt?, commit?, release?, logFile? } }`. `running` lists the threads that are starting, running or waiting on an approval or a question; `background` the threads whose CLI is still running background shells or subagents (`tasks` describes each). A restart waits for both. `branch` is the branch the release was built from. `rolledBack` is set when this release is running because `launch.mjs` went back to it from `from`, which kept crashing at startup (and nobody has activated it on purpose since). `update` is the runner following main by itself (docs/dev-tools.md): `state` is `off` (`reason` says why), `idle`, `checking`, `building`, `waiting` (`release` is built and starts on the pending restart) or `failed` (`reason` is the error; `logFile` has the build's output); `commit` is main's tip at the last check (`checkedAt`) |
+| `runner.status` | `{}` | `{ version, release?, branch?, pid, startedAt, home, logFile, liveClis, running: string[], background: { threadId, tasks: string[] }[], pendingRestart?: { when, reason?, release?, resumeThreadId?, requestedAt, backgroundUntil?, waitingFor: string[] }, rolledBack?: { from, at }, update?: { state, checkout?, reason?, checkedAt?, commit?, release?, logFile? }, clis?: CliStatus[] }`. `running` lists the threads that are starting, running or waiting on an approval or a question; `background` the threads whose CLI is still running background shells or subagents (`tasks` describes each). A restart waits for both. `branch` is the branch the release was built from. `rolledBack` is set when this release is running because `launch.mjs` went back to it from `from`, which kept crashing at startup (and nobody has activated it on purpose since). `update` is the runner following main by itself (docs/dev-tools.md): `state` is `off` (`reason` says why), `idle`, `checking`, `building`, `waiting` (`release` is built and starts on the pending restart) or `failed` (`reason` is the error; `logFile` has the build's output); `commit` is main's tip at the last check (`checkedAt`) |
 | `runner.restart` | `{ when?: "idle" \| "now", resume?: { threadId, text }, reason?: string, release?: string, backgroundWaitMs?: number, cancel?: boolean }` | `{ scheduled: boolean, waitingFor: string[], background?: { threadId, tasks: string[] }[], note?: string, noResume?: string }`. See Restarts below. `scheduled` is true once the restart is saved; an empty `waitingFor` means it is happening now. `background` is the background work among `waitingFor`. `release` is the release the restart should come back on (the deploy script sets it). `backgroundWaitMs` limits how long background shells and subagents hold the restart. `cancel: true` withdraws a pending restart that hasn't begun and returns `scheduled: false` (`-32020` once it has begun), with a `note` when it also put `current` back. `noResume` says why the `resume` won't be sent as things stand (the thread has already been resumed 3 times in the last hour), so whoever asked can say so rather than wait for it. A runner older than this answers `-32601` |
+| `clis.list` | `{}` | `{ clis: CliStatus[] }` |
+| `clis.check` | `{ provider?: Provider }` | `{ clis: CliStatus[] }`. Starts a version check (both CLIs when `provider` is absent) and returns at once, with the state as it was when the call arrived; the result comes through `clis.updated` |
+| `clis.update` | `{ provider: Provider, version?: string, force?: boolean }` | `{ clis: CliStatus[] }`. Starts an update and returns at once, with `update.state` `running` or `waiting`; progress comes through `clis.updated`. `version` picks a kept Codex version (how "Go back" works). `force: true` installs a held version anyway |
+| `clis.setPolicy` | `{ provider: Provider, policy: "auto" \| "notify" \| "off" }` | `{ clis: CliStatus[] }` |
 
 Errors use JSON-RPC error objects: `-32602` bad params, `-32004` thread not
 found, `-32005` schedule not found, `-32006` sub-agent not found, `-32010` account not found, `-32020` busy (e.g. two sends racing),
-`-32000` anything else with a readable `message`.
+`-32601` a method this runner doesn't have (`clis.*` on a runner older than
+them), `-32000` anything else with a readable `message`.
+
+### Models and effort across providers
+
+The runner checks `model` and `effort` in `threads.create` and
+`threads.update` against the thread's provider, and corrects them rather than
+answering `-32602`, because an older app always sends a model and can't
+recover from an error. (An `effort` that isn't an `EffortLevel` at all is
+still `-32602`.)
+
+- Claude models are `opus`, `sonnet`, `haiku` and anything starting
+  `claude-`. Codex models are those in a Codex account's `models`, or
+  anything starting `gpt-` before the list is known.
+- A model of the other provider, or a Codex id that isn't in the account's
+  `models` once they're known, is replaced by the provider's default, with a
+  `system.note` ("sonnet isn't a Codex model, so this thread uses
+  GPT-6.1-Sol").
+- An effort the model doesn't list in `effortLevels` (when known) is dropped
+  with a note. `ultra` on a Claude thread always is.
 
 ## Notifications (runner to app)
 
@@ -313,7 +394,8 @@ found, `-32005` schedule not found, `-32006` sub-agent not found, `-32010` accou
 | `thread.updated` | `{ thread: ThreadSummary }` sent to every connected client whenever a summary changes, `background` included: a sub-agent or shell job starting or finishing sends one even when nothing else changed |
 | `thread.event` | `{ threadId, event: Event }` only for subscribed threads, persisted and transient |
 | `thread.deleted` | `{ threadId }` sent to every connected client when a thread is deleted |
-| `accounts.updated` | `{ accounts: Account[] }` sent to every connected client when what the runner knows about an account changes: its `models` once the CLI has been asked, or its `defaultModel` once a turn has shown it. Replaces the list from `hello` |
+| `accounts.updated` | `{ accounts: Account[] }` sent to every connected client when the account list or what the runner knows about an account changes: a login appears or goes (checked every 10 seconds), its `models` once the CLI has been asked, its `defaultModel` once a turn has shown it, or its `usage` (Token Stats' `limits.json` changed, or a live reading moved a window by a point or more). The first change goes out at once, then at most one every 5 seconds, always ending on the latest list. Replaces the list from `hello` |
+| `clis.updated` | `{ clis: CliStatus[] }` sent to every connected client when a CLI's status changes (a check finished, an update started, moved on or ended). The latest list wins |
 | `schedules.updated` | `{ schedules: Schedule[] }` sent to every connected client whenever any schedule changes (made, edited, run, deleted, or its thread deleted). The whole list, in `schedules.list` order |
 | `settings.updated` | `{ settings: Settings }` sent to every connected client when a setting or the key changes, and at most once a minute while model calls are adding to the spend |
 | `runner.notice` | `{ level: "info" \| "warning" \| "error", message }`. Also sent straight after the `hello` result for things the client missed (startup problems, a missing `claude` binary) |
@@ -555,12 +637,14 @@ Every CLI the runner starts knows which thread it belongs to, two ways: the
 `threadbare` MCP server for the agent itself, and environment variables for
 the commands it runs (`tb`, the deploy script). Both name the same thread.
 
-Every Claude session gets an in-process MCP server called `threadbare`
+Every session, Claude or Codex, gets an MCP server called `threadbare`
 (`runner/src/threadbare-mcp.ts`), bound to its own thread, so an agent can
 drive Threadbare itself: `list_threads`, `read_thread`, `list_accounts`,
 `create_thread`, `send_message`, `update_thread`, `move_thread`,
 `interrupt_thread`, `delete_thread`, and `schedule_message`,
-`list_schedules`, `update_schedule` and `delete_schedule` (see Schedules). They call the same runner methods as
+`list_schedules`, `update_schedule` and `delete_schedule` (see Schedules).
+`list_accounts` shows each account's provider, note and room left;
+`create_thread` and `move_thread` take Codex accounts. They call the same runner methods as
 the requests above, so once a restart has begun `create_thread` and
 `send_message` get its "send again in a moment" too. Messages an agent sends
 to another thread (or as a new thread's first message) start with a line
@@ -579,3 +663,15 @@ same. There's no tool for restarting the runner: that's `runner.restart`.
 The runner also puts its own `bin/` (the release's, or the checkout's for a
 runner run from source) at the front of `PATH`, so a bare `tb` in a thread
 is the `tb` that matches the runner.
+
+## Older and newer clients
+
+Either side may be upgraded first, so each tolerates the other:
+
+- An app older than Codex support reads `provider: "codex"` as a plain
+  string, an unknown tool `kind` (`image`) as `other` and `ultra` as text;
+  lists Codex models under its fallback heading; and may still send a
+  Claude alias for a Codex thread, which the runner corrects (above).
+- A newer app talking to an older runner gets `-32601` from `clis.*` and
+  leaves the CLI part out, sees no `usage` on accounts and says the numbers
+  need a newer runner, and sees no Codex accounts.

@@ -2,10 +2,10 @@
 import http from 'node:http';
 import crypto from 'node:crypto';
 import { WebSocketServer, WebSocket } from 'ws';
-import type { Runner, Notification } from './runner.ts';
+import type { Runner, Notification, CliControl } from './runner.ts';
 import type { Logger } from './log.ts';
-import { EFFORT_LEVELS, ErrorCode, RpcError, isEffortLevel } from './protocol.ts';
-import type { ApprovalDecision, EffortLevel, ImageRef, PermissionMode } from './protocol.ts';
+import { CLI_POLICIES, EFFORT_LEVELS, ErrorCode, PROVIDERS, RpcError, isEffortLevel, isProvider } from './protocol.ts';
+import type { ApprovalDecision, CliPolicy, EffortLevel, ImageRef, PermissionMode, Provider } from './protocol.ts';
 
 type Conn = {
   id: number;
@@ -38,6 +38,9 @@ export type RpcServerOptions = {
   // just said hello beside the runner's.
   methods?: Record<string, (params: Record<string, unknown>) => unknown>;
   helloNotices?: () => { level: 'info' | 'warning' | 'error'; message: string }[];
+  // E's CliUpdates, for clis.*. Without it they answer -32601, as an older
+  // runner's would.
+  clis?: CliControl;
   // Tests shorten these.
   authTimeoutMs?: number;
   skipDeltasBytes?: number;
@@ -226,6 +229,11 @@ export class RpcServer {
     }
   }
 
+  private mustClis(method: string): CliControl {
+    if (!this.opts.clis) throw new RpcError(ErrorCode.methodNotFound, `Unknown method ${method}`);
+    return this.opts.clis;
+  }
+
   // Every handler is synchronous, so a subscribe's replay and the start of
   // its live stream happen in the same tick and nothing can slip between.
   private dispatch(conn: Conn, method: string, p: Record<string, unknown>): unknown {
@@ -323,6 +331,34 @@ export class RpcServer {
         return r.renderPanel(reqString(p, 'threadId'), reqString(p, 'panelId'));
       case 'actions.run':
         return r.runAction(reqString(p, 'threadId'), reqString(p, 'actionId'));
+      // Each starts its work and answers at once; progress comes through
+      // clis.updated.
+      case 'clis.list':
+        return { clis: this.mustClis(method).list() };
+      case 'clis.check': {
+        const provider = p.provider === undefined || p.provider === null ? undefined : reqProvider(p);
+        return { clis: this.mustClis(method).check(provider) };
+      }
+      case 'clis.update': {
+        const provider = reqProvider(p);
+        const o: { version?: string; force?: boolean } = {};
+        const version = optString(p, 'version');
+        if (version !== undefined) {
+          if (!/^[0-9A-Za-z.+-]+$/.test(version)) throw bad('version must be a version number like 0.164.0');
+          o.version = version;
+        }
+        if (p.force !== undefined && p.force !== null) {
+          if (typeof p.force !== 'boolean') throw bad('force must be a boolean');
+          if (p.force) o.force = true;
+        }
+        return { clis: this.mustClis(method).update(provider, o) };
+      }
+      case 'clis.setPolicy': {
+        const provider = reqProvider(p);
+        const policy = p.policy;
+        if (typeof policy !== 'string' || !(CLI_POLICIES as readonly string[]).includes(policy)) throw bad(`policy must be one of ${CLI_POLICIES.join(', ')}`);
+        return { clis: this.mustClis(method).setPolicy(provider, policy as CliPolicy) };
+      }
       default: {
         // hasOwn, so "constructor" and friends aren't methods.
         const methods = this.opts.methods;
@@ -331,6 +367,11 @@ export class RpcServer {
       }
     }
   }
+}
+
+function reqProvider(p: Record<string, unknown>): Provider {
+  if (!isProvider(p.provider)) throw bad(`provider must be one of ${PROVIDERS.join(', ')}`);
+  return p.provider;
 }
 
 function bad(message: string): RpcError {

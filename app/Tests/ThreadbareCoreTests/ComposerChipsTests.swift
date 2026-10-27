@@ -37,7 +37,9 @@ final class ComposerChipsTests: XCTestCase {
         XCTAssertEqual(ComposerChips.model("claude-sonnet-4"), "Sonnet 4")
         XCTAssertEqual(ComposerChips.model("claude-3-5-sonnet-20241022"), "claude-3-5-sonnet-20241022")
         XCTAssertEqual(ComposerChips.model("opus[1m]"), "opus[1m]")
-        XCTAssertEqual(ComposerChips.model("gpt-6"), "gpt-6")
+        XCTAssertEqual(ComposerChips.model("gpt-6"), "GPT-6")
+        XCTAssertEqual(ComposerChips.model("gpt-6.1-sol"), "GPT-6.1-Sol", "Codex ids read as Codex titles them")
+        XCTAssertEqual(ComposerChips.model("gpt-5.6-terra"), "GPT-5.6-Terra")
     }
 
     /// The chip reads the CLI's own title for a model once the list is

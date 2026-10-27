@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import type { AgentAdapter, AgentSession, SessionSink, StartSessionOptions, UserInput, AdapterOutput, TurnResult } from '../../src/adapters/types.ts';
-import type { Account, EffortLevel, ModelChoice, PermissionMode } from '../../src/protocol.ts';
+import type { Account, EffortLevel, ModelChoice, PermissionMode, Provider } from '../../src/protocol.ts';
 import type { Config } from '../../src/config.ts';
 import { ensureHome } from '../../src/config.ts';
 import { ThreadStore } from '../../src/store.ts';
@@ -22,6 +22,7 @@ export class FakeSession implements AgentSession {
   models: (string | undefined)[] = [];
   efforts: (EffortLevel | undefined)[] = [];
   modes: PermissionMode[] = [];
+  cwds: string[] = []; // setCwd calls (adapters that move folders)
   interruptError?: Error;
   // When set, end() waits for exit() like a real CLI that takes a moment
   // to shut down after its input ends.
@@ -48,6 +49,8 @@ export class FakeSession implements AgentSession {
   async setPermissionMode(mode: PermissionMode): Promise<void> {
     this.modes.push(mode);
   }
+  // Only on an adapter that moves folders (FakeAdapter sets it up).
+  setCwd?: (cwd: string) => Promise<void>;
   async end(opts: { hard?: boolean } = {}): Promise<void> {
     this.ended = true;
     this.endedHard = Boolean(opts.hard);
@@ -84,17 +87,47 @@ export class FakeSession implements AgentSession {
   }
 }
 
+// Codex's adapter flags (section A): folder moves in the same session,
+// settings from the next turn, no turn of its own after background work.
+export const CODEX_FLAGS = { movesFolders: true, settingsApplyNextTurn: true, wakesAfterTasks: false } as const;
+
 export class FakeAdapter implements AgentAdapter {
-  readonly provider = 'claude';
+  readonly provider: Provider;
+  readonly movesFolders?: boolean;
+  readonly settingsApplyNextTurn?: boolean;
+  readonly wakesAfterTasks?: boolean;
   sessions: FakeSession[] = [];
   slowExit = false;
   // Set by a test that wants the runner's model probe to find something.
   models?: (account: Account) => Promise<ModelChoice[]>;
+  archived: { accountId: string; nativeSessionId: string }[] = [];
+  archive?: (account: Account, nativeSessionId: string) => Promise<void>;
+  binaries: string[] = [];
+  constructor(provider: Provider = 'claude', flags: { movesFolders?: boolean; settingsApplyNextTurn?: boolean; wakesAfterTasks?: boolean; archives?: boolean } = {}) {
+    this.provider = provider;
+    if (flags.movesFolders !== undefined) this.movesFolders = flags.movesFolders;
+    if (flags.settingsApplyNextTurn !== undefined) this.settingsApplyNextTurn = flags.settingsApplyNextTurn;
+    if (flags.wakesAfterTasks !== undefined) this.wakesAfterTasks = flags.wakesAfterTasks;
+    if (flags.archives) {
+      this.archive = async (account, nativeSessionId) => {
+        this.archived.push({ accountId: account.id, nativeSessionId });
+      };
+    }
+  }
   start(opts: StartSessionOptions, sink: SessionSink): AgentSession {
     const s = new FakeSession(opts, sink);
     s.slowExit = this.slowExit;
+    if (this.movesFolders) {
+      s.setCwd = async (cwd) => {
+        s.cwds.push(cwd);
+      };
+    }
     this.sessions.push(s);
     return s;
+  }
+  // The binaries its live sessions run (the Codex adapter's, for E).
+  binariesInUse(): string[] {
+    return this.binaries;
   }
   get last(): FakeSession {
     return this.sessions[this.sessions.length - 1];
@@ -128,6 +161,12 @@ export function testConfig(home: string, extra: Partial<Config> = {}): Config {
     claudeMainDir: path.join(home, 'no-claude-main'),
     claudeMainJson: path.join(home, 'no-claude-main.json'),
     tokenStatsAccountsDir: path.join(home, 'no-accounts'),
+    // Nothing under the real ~/.codex or Token Stats, and no CLI installs.
+    codexArgs: [],
+    codexMainDir: path.join(home, 'no-codex-main'),
+    tokenStatsLimitsFile: path.join(home, 'no-limits.json'),
+    cliUpdates: { claude: 'off', codex: 'off', checkMinutes: 60, keepCodexVersions: 2 },
+    accountNotes: {},
     followMain: false,
     models: { dailyBudgetUsd: 1, privateFolders: [] },
     ...extra,
@@ -139,11 +178,30 @@ export const ACCOUNTS: Account[] = [
   { id: 'claude-3', provider: 'claude', title: 'three@example.com', configDir: '/tmp/three' },
 ];
 
+export const CODEX_MODELS: ModelChoice[] = [
+  { id: 'gpt-6.1-sol', model: 'gpt-6.1-sol', title: 'GPT-6.1-Sol', effortLevels: ['low', 'medium', 'high', 'xhigh', 'max', 'ultra'], defaultEffort: 'low' },
+  { id: 'gpt-6-luna', model: 'gpt-6-luna', title: 'GPT-6-Luna', effortLevels: ['low', 'medium', 'high', 'xhigh', 'max'], defaultEffort: 'medium' },
+];
+
+export const CODEX_ACCOUNT: Account = {
+  id: 'codex-main',
+  provider: 'codex',
+  title: 'Codex · main@example.com',
+  email: 'main@example.com',
+  configDir: '/tmp/codex-main',
+  defaultModel: 'gpt-6.1-sol',
+};
+
+// The Claude logins plus codex-main, with its model list (null: not known yet).
+export function withCodex(models: ModelChoice[] | null = CODEX_MODELS): Account[] {
+  return [...ACCOUNTS, { ...CODEX_ACCOUNT, ...(models ? { models } : {}) }];
+}
+
 // Stands in for AccountRegistry: a fixed list, plus what the runner learns
 // (a probe's model list, an observed default), applied the way it does.
 export class FakeAccounts {
   private learned = new Map<string, LearnedAccountInfo>();
-  private base: Account[];
+  base: Account[]; // a test can change it, as a rescan would find
   constructor(base: Account[] = ACCOUNTS) {
     this.base = base;
   }
@@ -174,6 +232,7 @@ export type Harness = {
   cfg: Config;
   clock: FakeClock;
   adapter: FakeAdapter;
+  codex: FakeAdapter; // Codex-style flags, archives
   runner: Runner;
   store: ThreadStore;
   notes: Notification[];
@@ -186,11 +245,12 @@ export function makeHarness(home = tmpDir(), cfgExtra: Partial<Config> = {}, dep
   const cfg = testConfig(home, cfgExtra);
   const clock = new FakeClock();
   const adapter = new FakeAdapter();
+  const codex = new FakeAdapter('codex', { ...CODEX_FLAGS, archives: true });
   const store = new ThreadStore(home);
   const runner = new Runner({
     config: cfg,
     store,
-    adapters: { claude: adapter },
+    adapters: { claude: adapter, codex },
     accounts: new FakeAccounts(),
     clock,
     log: nullLogger,
@@ -208,6 +268,7 @@ export function makeHarness(home = tmpDir(), cfgExtra: Partial<Config> = {}, dep
     cfg,
     clock,
     adapter,
+    codex,
     runner,
     store,
     notes,

@@ -225,3 +225,58 @@ test('panels.render answers after the screenshot, with an image or a note; unkno
   c.close();
   await server.close();
 });
+
+test('clis.* call CliUpdates and return at once; without it they are -32601; clis.updated reaches every client', async () => {
+  const calls: unknown[][] = [];
+  const status = [{ provider: 'codex', path: '/t/codex', managedBy: 'threadbare', installedVersion: '0.164.0', status: 'current', policy: 'auto', inUse: [] }] as never[];
+  let changed: (c: never[]) => void = () => {};
+  const clis = {
+    list: () => (calls.push(['list']), status),
+    check: (p?: string) => (calls.push(['check', p]), status),
+    update: (p: string, o?: object) => (calls.push(['update', p, o]), status),
+    setPolicy: (p: string, policy: string) => (calls.push(['setPolicy', p, policy]), status),
+    onChange: (fn: (c: never[]) => void) => ((changed = fn), () => {}),
+  };
+  const { h, server, url } = await serve({ clis });
+  h.runner.attachClis(clis);
+  const c = await RunnerClient.connect(url, TOKEN);
+  const got: { method: string; params: any }[] = [];
+  c.onNotification((method, params) => got.push({ method, params }));
+  const hello = await c.call('hello', { client: 'test', version: '1' });
+  assert.equal(hello.clis[0].installedVersion, '0.164.0');
+  assert.deepEqual(await c.call('clis.list'), { clis: status });
+  await c.call('clis.check', {});
+  await c.call('clis.check', { provider: 'claude' });
+  await c.call('clis.update', { provider: 'codex', version: '0.164.0', force: true });
+  await c.call('clis.update', { provider: 'claude' });
+  await c.call('clis.setPolicy', { provider: 'codex', policy: 'notify' });
+  assert.deepEqual(calls.filter((x) => x[0] !== 'list'), [
+    ['check', undefined],
+    ['check', 'claude'],
+    ['update', 'codex', { version: '0.164.0', force: true }],
+    ['update', 'claude', {}],
+    ['setPolicy', 'codex', 'notify'],
+  ]);
+  const badParams = (e: { code: number }) => e.code === -32602;
+  await assert.rejects(c.call('clis.update', { provider: 'grok' }), badParams);
+  await assert.rejects(c.call('clis.update', {}), badParams);
+  await assert.rejects(c.call('clis.update', { provider: 'codex', version: '../../evil' }), badParams);
+  await assert.rejects(c.call('clis.update', { provider: 'codex', force: 'yes' }), badParams);
+  await assert.rejects(c.call('clis.setPolicy', { provider: 'codex', policy: 'sometimes' }), badParams);
+  await assert.rejects(c.call('clis.check', { provider: 3 }), badParams);
+  changed(status);
+  // Wait for it, not a fixed time: the whole suite runs at once.
+  for (let i = 0; i < 200 && !got.some((n) => n.method === 'clis.updated'); i++) await new Promise((r) => setTimeout(r, 10));
+  assert.deepEqual(got.find((n) => n.method === 'clis.updated')?.params, { clis: status });
+  c.close();
+  await server.close();
+
+  const old = await serve();
+  const o = await RunnerClient.connect(old.url, TOKEN);
+  for (const m of ['clis.list', 'clis.check', 'clis.update', 'clis.setPolicy']) {
+    await assert.rejects(o.call(m, { provider: 'codex', policy: 'auto' }), (e: { code: number }) => e.code === -32601, m);
+  }
+  assert.equal((await o.call('hello', { client: 'test', version: '1' })).clis, undefined);
+  o.close();
+  await old.server.close();
+});

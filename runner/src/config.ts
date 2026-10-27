@@ -4,12 +4,26 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { atomicWriteFileSync } from './fsutil.ts';
 import { RELEASE } from './release.ts';
+import { CLI_POLICIES, isEffortLevel, isProvider, type CliPolicy, type EffortLevel, type Provider } from './protocol.ts';
 
 // <package version>+<release id>, or +source when run from a checkout.
 export const RUNNER_VERSION = RELEASE.version;
 export const DEFAULT_CWD = '~/dev/me/misc';
 export const DEFAULT_PORT = 8797;
 export const DEFAULT_MAX_LIVE = 6;
+
+// Notes shown with an account in the app's account menu. In the code rather
+// than Mike's runner.json so nobody has to edit that; a runner.json
+// accountNotes replaces the whole map.
+export const DEFAULT_ACCOUNT_NOTES: Record<string, string> = { 'claude-2': 'Convex work only' };
+
+export type CliUpdatesConfig = {
+  claude: CliPolicy;
+  codex: CliPolicy;
+  checkMinutes: number;
+  keepCodexVersions: number; // Codex copies kept under <home>/tools/codex
+};
+export const DEFAULT_CLI_UPDATES: CliUpdatesConfig = { claude: 'auto', codex: 'auto', checkMinutes: 60, keepCodexVersions: 2 };
 
 // Everything that differs between the real install and a test lives here, so
 // tests can point THREADBARE_HOME and THREADBARE_PORT somewhere harmless and
@@ -28,11 +42,28 @@ export type Config = {
   // model: what threads.create uses when it isn't given one (a dev runner
   // sets the cheapest, so a thread started from a debug app's composer
   // doesn't run on the account's default). Unset means the account's own.
-  defaults: { cwd: string; accountId?: string; model?: string };
+  // models and efforts are the same per provider (models.claude wins over
+  // model); unset means the account's own default or the model's own level.
+  defaults: {
+    cwd: string;
+    accountId?: string;
+    model?: string;
+    models?: Partial<Record<Provider, string>>;
+    efforts?: Partial<Record<Provider, EffortLevel>>;
+  };
   // Where accounts are discovered. Tests can narrow these.
   claudeMainDir: string;
   claudeMainJson: string;
   tokenStatsAccountsDir: string;
+  // A Codex binary set by hand, used as is and never updated. Unset means
+  // Threadbare's own copy (<home>/tools/codex/current), or until there is
+  // one the codex next to the runner's Node; never ~/.local/bin/codex.
+  codexPath?: string;
+  codexArgs: string[]; // extra `codex app-server` arguments
+  codexMainDir: string; // codex-main's CODEX_HOME
+  tokenStatsLimitsFile: string; // Token Stats' limits.json, read only
+  cliUpdates: CliUpdatesConfig;
+  accountNotes: Record<string, string>;
   // A runner on a release builds and restarts onto main by itself
   // (src/update.ts). Off with followMain: false in runner.json or
   // THREADBARE_FOLLOW_MAIN=0.
@@ -44,10 +75,24 @@ export type Config = {
 
 export type RunnerJson = {
   port?: number;
-  defaults?: { cwd?: string; accountId?: string; model?: string };
+  defaults?: {
+    cwd?: string;
+    accountId?: string;
+    // New threads start on accountId (the last one used) as it is, rather
+    // than on the account with the most room. A dev runner sets it so its
+    // threads stay on claude-3.
+    keepAccount?: boolean;
+    model?: string;
+    models?: Partial<Record<Provider, string>>;
+    efforts?: Partial<Record<Provider, EffortLevel>>;
+  };
   claudePath?: string;
   idleMinutes?: number;
   maxLiveCLIs?: number;
+  codexPath?: string;
+  codexArgs?: string[];
+  cliUpdates?: Partial<CliUpdatesConfig>;
+  accountNotes?: Record<string, string>;
   followMain?: boolean;
   models?: { dailyBudgetUsd?: number; privateFolders?: string[] };
 };
@@ -94,6 +139,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     ? Number(env.THREADBARE_IDLE_MS)
     : (json.idleMinutes ?? 30) * 60_000;
   const maxLive = Number(env.THREADBARE_MAX_LIVE || json.maxLiveCLIs || DEFAULT_MAX_LIVE);
+  const codexPath = nonEmpty(env.THREADBARE_CODEX_PATH) ?? nonEmpty(json.codexPath);
+  const models = providerMap(json.defaults?.models, nonEmpty);
+  const efforts = providerMap(json.defaults?.efforts, (v) => (isEffortLevel(v) ? v : undefined));
   return {
     home,
     port,
@@ -105,7 +153,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     defaults: {
       cwd: expandHome(json.defaults?.cwd || DEFAULT_CWD),
       accountId: json.defaults?.accountId,
-      model: typeof json.defaults?.model === 'string' && json.defaults.model.trim() ? json.defaults.model.trim() : undefined,
+      model: nonEmpty(json.defaults?.model),
+      ...(models ? { models } : {}),
+      ...(efforts ? { efforts } : {}),
     },
     claudeMainDir: expandHome(env.THREADBARE_CLAUDE_MAIN_DIR || '~/.claude'),
     claudeMainJson: expandHome(env.THREADBARE_CLAUDE_MAIN_JSON || '~/.claude.json'),
@@ -114,6 +164,52 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     ),
     followMain: env.THREADBARE_FOLLOW_MAIN ? env.THREADBARE_FOLLOW_MAIN !== '0' : json.followMain !== false,
     models: modelSettingsFrom(json),
+    ...(codexPath ? { codexPath: expandHome(codexPath) } : {}),
+    codexArgs: Array.isArray(json.codexArgs) ? json.codexArgs.filter((a): a is string => typeof a === 'string') : [],
+    codexMainDir: expandHome(env.THREADBARE_CODEX_MAIN_DIR || '~/.codex'),
+    tokenStatsLimitsFile: expandHome(
+      env.THREADBARE_TOKEN_STATS_LIMITS || '~/Library/Application Support/Token Stats/limits.json',
+    ),
+    cliUpdates: cliUpdatesConfig(json.cliUpdates, env.THREADBARE_CLI_UPDATES),
+    accountNotes: stringMap(json.accountNotes) ?? { ...DEFAULT_ACCOUNT_NOTES },
+  };
+}
+
+function nonEmpty(v: unknown): string | undefined {
+  return typeof v === 'string' && v.trim() ? v.trim() : undefined;
+}
+
+// { claude?, codex? } with only the providers that have a usable value;
+// undefined when none has, so an unset map stays absent.
+function providerMap<V>(raw: unknown, read: (v: unknown) => V | undefined): Partial<Record<Provider, V>> | undefined {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return undefined;
+  const out: Partial<Record<Provider, V>> = {};
+  for (const [p, v] of Object.entries(raw)) {
+    const value = read(v);
+    if (isProvider(p) && value !== undefined) out[p] = value;
+  }
+  return Object.keys(out).length ? out : undefined;
+}
+
+function stringMap(raw: unknown): Record<string, string> | undefined {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return undefined;
+  return Object.fromEntries(Object.entries(raw).filter((e): e is [string, string] => typeof e[1] === 'string'));
+}
+
+// THREADBARE_CLI_UPDATES=off turns both off whatever runner.json says: tests
+// and dev runners must never install a CLI.
+function cliUpdatesConfig(raw: Partial<CliUpdatesConfig> | undefined, envValue: string | undefined): CliUpdatesConfig {
+  const policy = (v: unknown, fallback: CliPolicy): CliPolicy =>
+    typeof v === 'string' && (CLI_POLICIES as readonly string[]).includes(v) ? (v as CliPolicy) : fallback;
+  const count = (v: unknown, fallback: number, min: number): number =>
+    typeof v === 'number' && Number.isFinite(v) && v >= min ? Math.floor(v) : fallback;
+  const off = envValue === 'off';
+  return {
+    claude: off ? 'off' : policy(raw?.claude, DEFAULT_CLI_UPDATES.claude),
+    codex: off ? 'off' : policy(raw?.codex, DEFAULT_CLI_UPDATES.codex),
+    checkMinutes: count(raw?.checkMinutes, DEFAULT_CLI_UPDATES.checkMinutes, 1),
+    // Fewer than 2 would leave nothing for "Go back".
+    keepCodexVersions: count(raw?.keepCodexVersions, DEFAULT_CLI_UPDATES.keepCodexVersions, 2),
   };
 }
 

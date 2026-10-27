@@ -8,7 +8,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { defaultHome, readToken, runnerUrl, type Config } from './config.ts';
 import { RunnerClient, RpcClientError } from './client.ts';
-import { ErrorCode, type ImageRef, type PersistedEvent, type ThreadSummary } from './protocol.ts';
+import { ErrorCode, type Account, type ImageRef, type PersistedEvent, type RunnerDefaults, type ThreadSummary } from './protocol.ts';
 import type { RestartResult, RunnerStatus } from './restart.ts';
 
 export const DEV_HELP = `Working on Threadbare itself:
@@ -444,17 +444,34 @@ function access(t: ThreadSummary): string {
   return t.permissionMode === 'ask' ? 'asks before edits' : 'full access';
 }
 
+// tb models: one row per model, the default starred, with its effort
+// levels; then what a new thread on the account runs on.
+export function formatModels(a: Account, defaults?: RunnerDefaults): string {
+  const lines = [`${a.id} (${a.provider === 'codex' ? 'Codex' : 'Claude'})`];
+  const isDefault = (m: { id: string; model: string }) => a.defaultModel !== undefined && (m.id === a.defaultModel || m.model === a.defaultModel);
+  if (!a.models?.length) lines.push("  The CLI hasn't been asked for its models yet.");
+  for (const m of a.models ?? []) {
+    const efforts = m.effortLevels?.length ? `  efforts: ${m.effortLevels.join(', ')}${m.defaultEffort ? ` (own level ${m.defaultEffort})` : ''}` : '';
+    lines.push(`${isDefault(m) ? '*' : ' '} ${m.id.padEnd(22)} ${m.title}${efforts}`);
+  }
+  lines.push(`Account default: ${a.defaultModel ?? 'unknown until a turn runs'}${a.defaultEffort ? `, effort ${a.defaultEffort}` : ''}`);
+  const runnerModel = defaults?.models?.[a.provider] ?? (a.provider === 'claude' ? defaults?.model : undefined);
+  const runnerEffort = defaults?.efforts?.[a.provider];
+  if (runnerModel || runnerEffort) lines.push(`New threads here get: ${[runnerModel, runnerEffort ? `effort ${runnerEffort}` : ''].filter(Boolean).join(', ')} (the runner's defaults)`);
+  return lines.join('\n');
+}
+
 export function formatSelf(t: ThreadSummary): string {
   const lines = [
     t.id,
     t.title,
     `Status: ${t.status}${t.live ? ', CLI live' : ''}`,
-    `Account: ${t.accountId}, ${t.model ? `model ${t.model}` : 'default model'}${t.modelInUse ? ` (${t.modelInUse})` : ''}, effort ${t.effort ?? 'default'}${t.effortInUse ? ` (${t.effortInUse})` : ''}, ${access(t)}`,
+    `Account: ${t.accountId} (${t.provider === 'codex' ? 'Codex' : 'Claude'}), ${t.model ? `model ${t.model}` : 'default model'}${t.modelInUse ? ` (${t.modelInUse})` : ''}, effort ${t.effort ?? 'default'}${t.effortInUse ? ` (${t.effortInUse})` : ''}, ${access(t)}`,
     `Folder: ${t.cwd}`,
     `Events: ${t.lastSeq}`,
   ];
   if (t.costUsd !== undefined) lines.push(`Cost so far: $${t.costUsd.toFixed(4)}`);
-  if (t.contextTokens !== undefined) lines.push(`Context: ${t.contextTokens} tokens`);
+  if (t.contextTokens !== undefined) lines.push(`Context: ${t.contextTokens} tokens${t.contextWindow ? ` of ${t.contextWindow}` : ''}`);
   return lines.join('\n') + '\n';
 }
 

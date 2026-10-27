@@ -115,17 +115,41 @@ public enum BusyThreadAction {
     }
 }
 
-/// Short names for accounts, for the sidebar and the new-thread line.
+/// Names for accounts, for the sidebar, the composer and its menus. Built
+/// from the account's email and provider rather than its title, so a Claude
+/// login and a Codex login with the same address (claude-1 and codex-main
+/// are both mike.cann@gmail.com) don't clash.
 public enum AccountName {
-    /// The part of the account's email before the @, unless another account
-    /// shares it (then the whole address). Ids with no account are shown as
-    /// they are.
+    /// The bare address when the runner sends one, else the title without
+    /// Codex's "Codex · " prefix (older runners), else the id.
+    public static func title(_ account: Account) -> String {
+        if let email = account.email, !email.isEmpty { return email }
+        let prefix = "Codex · "
+        if account.title.hasPrefix(prefix) { return String(account.title.dropFirst(prefix.count)) }
+        return account.title.isEmpty ? account.id : account.title
+    }
+
+    /// A Claude account: the part of its email before the @, unless another
+    /// Claude account shares it (then the whole address). A Codex account:
+    /// "Codex" when it's the only Codex login, "Codex mike.cann" when
+    /// there are several. Ids with no account are shown as they are.
     public static func short(_ id: String, accounts: [Account]) -> String {
-        let title = accounts.first(where: { $0.id == id })?.title ?? id
-        guard let at = title.firstIndex(of: "@") else { return title }
-        let local = String(title[..<at])
-        let clashes = accounts.filter { $0.id != id && $0.title.hasPrefix(local + "@") }
-        return clashes.isEmpty ? local : title
+        guard let account = accounts.first(where: { $0.id == id }) else { return id }
+        let full = title(account)
+        let siblings = accounts.filter { $0.id != id && $0.provider == account.provider }
+        if account.provider == "codex" {
+            guard !siblings.isEmpty else { return "Codex" }
+            return "Codex " + localPart(full)
+        }
+        guard full.contains("@") else { return full }
+        let local = localPart(full)
+        let clashes = siblings.filter { localPart(title($0)) == local }
+        return clashes.isEmpty ? local : full
+    }
+
+    static func localPart(_ address: String) -> String {
+        guard let at = address.firstIndex(of: "@") else { return address }
+        return String(address[..<at])
     }
 
     /// Whether a row names its account: only when it isn't the main one (or

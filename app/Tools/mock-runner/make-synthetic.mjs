@@ -314,6 +314,129 @@ function toolDetailsThread() {
   writeFixture(dir, summary, events);
 }
 
+// A Codex thread: what the Codex adapter sends (docs/step4-plan.md,
+// section B). One edit touching three files, a plan, a generated image, an
+// image Codex looked at, a subagent with its own image, a command left
+// running in the background that finishes after the turn, an interrupted
+// command and a turn that hit the usage limit. Codex turns have tokens but
+// no cost.
+function codexThread() {
+  const id = 'demo_codex_poster';
+  const dir = path.join(root, 'demo-codex-poster');
+  fs.mkdirSync(path.join(dir, 'media'), { recursive: true });
+  const poster = { w: 512, h: 512 };
+  const map = { w: 640, h: 400 };
+  const palette = { w: 384, h: 384 };
+  writePNG(path.join(dir, 'media/poster.png'), poster.w, poster.h, drawPoster());
+  writePNG(path.join(dir, 'media/venue-map.png'), map.w, map.h, drawVenueMap());
+  writePNG(path.join(dir, 'media/palette.png'), palette.w, palette.h, drawPalette());
+  const site = `${home}/dev/meetup-site`;
+
+  const events = [];
+  let seq = 0;
+  let t = 8.5;
+  const push = (turnId, fields) => events.push({ seq: ++seq, ts: minutes((t -= 0.15)), threadId: id, ...(turnId ? { turnId } : {}), ...fields });
+  const image = (file, size) => ({ path: `media/${file}`, mediaType: 'image/png', width: size.w, height: size.h });
+
+  // Turn 1
+  let turn = 'turn_1';
+  push(turn, { type: 'user.message', text: 'Make a poster for the November meetup and put it on the events page. The venue map is in docs/.', images: [] });
+  push(turn, { type: 'turn.started', turnId: turn });
+  push(turn, { type: 'reasoning', itemId: 'rs_1', text: '**Looking at the site**\n\nThe events page lists each meetup from a data file, so the poster needs an entry there, an image tag in the page and a style for it.' });
+  push(turn, { type: 'tool.call', itemId: 'call_ls', name: 'shell', kind: 'read', title: 'ls src/pages src/data', input: { command: 'ls src/pages src/data', cwd: site } });
+  push(turn, { type: 'tool.result', itemId: 'call_ls', ok: true, text: 'src/data:\nevents.json\n\nsrc/pages:\nevents.html\nindex.html\nstyles.css', truncated: false, images: [] });
+  push(turn, { type: 'plan.updated', entries: [
+    { text: 'Look at the events page', status: 'completed' },
+    { text: 'Add the November meetup with a poster', status: 'in_progress' },
+    { text: 'Make the poster', status: 'pending' },
+  ] });
+  const paths = [`${site}/src/data/events.json`, `${site}/src/pages/events.html`, `${site}/src/pages/styles.css`];
+  push(turn, { type: 'tool.call', itemId: 'call_patch', name: 'apply_patch', kind: 'edit', title: 'Edit 3 files', input: { paths } });
+  push(turn, { type: 'edit.diff', itemId: 'call_patch', path: paths[0], hunks: [{
+    oldStart: 1, oldLines: 3, newStart: 1, newLines: 9, lines: [
+      ' [',
+      '+  {',
+      '+    "title": "November meetup",',
+      '+    "date": "2026-11-19",',
+      '+    "poster": "posters/november.png"',
+      '+  },',
+      '   {',
+      '     "title": "October meetup",',
+    ] }] });
+  push(turn, { type: 'edit.diff', itemId: 'call_patch', path: paths[1], hunks: [{
+    oldStart: 12, oldLines: 3, newStart: 12, newLines: 4, lines: [
+      '   <article class="event">',
+      '     <h2>{{ title }}</h2>',
+      '+    <img class="poster" src="{{ poster }}" alt="Poster for {{ title }}">',
+      '     <time>{{ date }}</time>',
+    ] }] });
+  push(turn, { type: 'edit.diff', itemId: 'call_patch', path: paths[2], hunks: [{
+    oldStart: 40, oldLines: 2, newStart: 40, newLines: 6, lines: [
+      ' .event time { color: var(--muted); }',
+      '+.event .poster {',
+      '+  width: 100%;',
+      '+}',
+      ' ',
+    ] }] });
+  // Codex's patchUpdated: the same path again replaces its earlier diff.
+  push(turn, { type: 'edit.diff', itemId: 'call_patch', path: paths[2], hunks: [{
+    oldStart: 40, oldLines: 2, newStart: 40, newLines: 7, lines: [
+      ' .event time { color: var(--muted); }',
+      '+.event .poster {',
+      '+  width: 100%;',
+      '+  border-radius: 12px;',
+      '+}',
+      ' ',
+    ] }] });
+  push(turn, { type: 'tool.result', itemId: 'call_patch', ok: true, text: 'Success. Updated the following files:\nM src/data/events.json\nM src/pages/events.html\nM src/pages/styles.css', truncated: false, images: [] });
+  push(turn, { type: 'tool.call', itemId: 'call_map', name: 'view_image', kind: 'read', title: 'View docs/venue-map.png', input: { path: `${site}/docs/venue-map.png` } });
+  push(turn, { type: 'tool.result', itemId: 'call_map', ok: true, text: '', truncated: false, images: [image('venue-map.png', map)] });
+  push(turn, { type: 'tool.call', itemId: 'ig_1', name: 'image_generation', kind: 'image', title: 'Generate image', input: {} });
+  push(turn, { type: 'tool.result', itemId: 'ig_1', ok: true, text: 'A bold square poster for a November developer meetup: a deep blue background, an orange sun rising over three stacked rounded shapes, and space at the top for the date.', truncated: false, images: [image('poster.png', poster)] });
+  push(turn, { type: 'plan.updated', entries: [
+    { text: 'Look at the events page', status: 'completed' },
+    { text: 'Add the November meetup with a poster', status: 'completed' },
+    { text: 'Make the poster', status: 'in_progress' },
+  ] });
+  const child = '019a3c2e-child';
+  push(turn, { type: 'tool.call', itemId: 'sa_1', name: 'spawn_agent', kind: 'task', title: 'poster_colours', input: { model: 'gpt-6-luna' } });
+  push(turn, { type: 'tool.call', itemId: `${child}/ig_2`, name: 'image_generation', kind: 'image', title: 'Generate image', input: {} });
+  push(turn, { type: 'tool.result', itemId: `${child}/ig_2`, ok: true, text: 'A palette card with four swatches: deep blue, orange, cream and slate.', truncated: false, images: [image('palette.png', palette)] });
+  push(turn, { type: 'tool.result', itemId: 'sa_1', ok: true, text: 'The poster\'s blue and orange pass contrast on the cream page background. I made a palette card with the four colours.', truncated: false, images: [] });
+  push(turn, { type: 'tool.call', itemId: 'call_build', name: 'shell', kind: 'command', title: 'npm run build', input: { command: 'npm run build', cwd: site } });
+  push(turn, { type: 'assistant.text', itemId: 'msg_1', text: 'The November meetup is on the events page with its poster, and the build is still running in the background. The poster is in `public/posters/november.png`.' });
+  push(turn, { type: 'turn.completed', turnId: turn, outcome: 'completed', durationMs: 48_200,
+    usage: { inputTokens: 38_412, cachedInputTokens: 29_184, outputTokens: 2_906, reasoningTokens: 1_120 } });
+  // The build Codex left running ends after the turn: its result has no turn.
+  push(undefined, { type: 'tool.result', itemId: 'call_build', ok: true, text: '> meetup-site@1.4.0 build\n> vite build\n\nbuilt 14 pages in 8.1s', truncated: false, images: [] });
+
+  // Turn 2: stopped while the tests ran.
+  turn = 'turn_2';
+  push(turn, { type: 'user.message', text: 'Run the tests too', images: [] });
+  push(turn, { type: 'turn.started', turnId: turn });
+  push(turn, { type: 'tool.call', itemId: 'call_test', name: 'shell', kind: 'command', title: 'npm test', input: { command: 'npm test', cwd: site } });
+  push(turn, { type: 'tool.result', itemId: 'call_test', ok: false, text: 'Interrupted', truncated: false, images: [] });
+  push(turn, { type: 'turn.completed', turnId: turn, outcome: 'interrupted', durationMs: 9_300,
+    usage: { inputTokens: 41_020, cachedInputTokens: 38_016, outputTokens: 212, reasoningTokens: 64 } });
+
+  // Turn 3: the account hit its limit.
+  turn = 'turn_3';
+  const limit = 'You\'ve hit your usage limit. Try again at 3:40 pm.';
+  push(turn, { type: 'user.message', text: 'Try the tests again without watch mode.', images: [] });
+  push(turn, { type: 'turn.started', turnId: turn });
+  push(turn, { type: 'error', message: limit });
+  push(turn, { type: 'turn.completed', turnId: turn, outcome: 'failed', durationMs: 1_200, error: limit, errorKind: 'usageLimit' });
+
+  const summary = {
+    id, title: 'Make a poster for the meetup', cwd: site, accountId: 'codex-main', provider: 'codex',
+    model: 'gpt-6.1-sol', effort: 'high', modelInUse: 'gpt-6.1-sol', effortInUse: 'high',
+    permissionMode: 'full', status: 'error', live: false, needsYou: false,
+    createdAt: minutes(13), updatedAt: minutes(3), lastActivityAt: minutes(3),
+    preview: limit, lastSeq: seq, lastSeenSeq: seq, contextTokens: 41_020, contextWindow: 475_000,
+  };
+  writeFixture(dir, summary, events);
+}
+
 // ------------------------------------------------------------------ helpers
 
 function writeFixture(dir, summary, events) {
@@ -426,6 +549,38 @@ function drawChart() {
   };
 }
 
+function drawPoster() {
+  return (c) => {
+    c.fill(0, 0, c.width, c.height, [28, 44, 92, 255]);
+    c.fill(196, 150, 120, 120, [255, 149, 0, 255], 60);
+    c.fill(96, 290, 320, 46, [240, 232, 214, 255], 23);
+    c.fill(126, 350, 260, 46, [214, 120, 60, 255], 23);
+    c.fill(156, 410, 200, 46, [96, 112, 140, 255], 23);
+    c.fill(56, 48, 220, 26, [240, 232, 214, 255], 8);
+    c.fill(56, 86, 140, 14, [150, 164, 196, 255], 6);
+  };
+}
+
+function drawVenueMap() {
+  return (c) => {
+    c.fill(0, 0, c.width, c.height, [236, 238, 232, 255]);
+    c.fill(0, 180, c.width, 30, [255, 255, 255, 255]);
+    c.fill(300, 0, 26, c.height, [255, 255, 255, 255]);
+    c.fill(60, 40, 200, 110, [214, 224, 206, 255], 10);
+    c.fill(360, 240, 220, 120, [208, 214, 226, 255], 10);
+    c.fill(420, 270, 40, 40, [214, 60, 50, 255], 20);
+    c.fill(60, 250, 180, 90, [226, 220, 208, 255], 10);
+  };
+}
+
+function drawPalette() {
+  return (c) => {
+    c.fill(0, 0, c.width, c.height, [250, 248, 242, 255]);
+    const swatches = [[28, 44, 92, 255], [255, 149, 0, 255], [240, 232, 214, 255], [96, 112, 140, 255]];
+    swatches.forEach((color, i) => c.fill(32 + (i % 2) * 168, 32 + Math.floor(i / 2) * 168, 152, 152, color, 14));
+  };
+}
+
 function writePNG(file, width, height, draw) {
   const c = canvas(width, height, [250, 250, 252, 255]);
   draw(c);
@@ -458,4 +613,5 @@ function writePNG(file, width, height, draw) {
 demoThread();
 others();
 toolDetailsThread();
+codexThread();
 console.log(`wrote ${fs.readdirSync(root).length} demo threads to ${root}`);

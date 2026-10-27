@@ -75,8 +75,10 @@ Quick Ask, Tinker Desk as a second runner, cloud sandboxes.
 - **Claude adapter** (`@anthropic-ai/claude-agent-sdk`, pin the current
   version, 0.3.310 on 2026-10-26):
   - One `query()` per live thread in streaming-input mode (an async queue).
-  - `pathToClaudeCodeExecutable` = `~/.local/bin/claude` so the CLI keeps
-    updating itself; `env` = `{...process.env, CLAUDE_CONFIG_DIR}` for
+  - `pathToClaudeCodeExecutable` = `~/.local/bin/claude`, the shared native
+    install (SDK sessions never update it: only the terminal UI,
+    `claude update` and `claude install` do, so step 4 adds Threadbare's own
+    update checks); `env` = `{...process.env, CLAUDE_CONFIG_DIR}` for
     non-main accounts (and with `CLAUDE_CONFIG_DIR` removed for `claude-main`).
   - `cwd` per thread; `settingSources: ['user','project','local']`;
     `systemPrompt: {type:'preset', preset:'claude_code'}`;

@@ -29,15 +29,26 @@ export type ThreadRecord = {
   lastSeenSeq: number;
   nativeSessionId?: string;
   contextTokens?: number;
+  contextWindow?: number; // the model's window, when the CLI reports it
   costUsd?: number;
   // Internal.
+  // The version of the CLI that ran the thread's last session, so a new
+  // session on another version can say so ("Codex 0.165.0 from this turn
+  // on (was 0.164.0)") even after an idle release.
+  cliVersion?: string;
+  // Set when a same-account folder move on an adapter that moves folders
+  // itself (Codex) is waiting for the next turn, which says so. The
+  // session carries on; there's no handoff.
+  moved?: { fromCwd: string };
   sessionUsed?: boolean; // nativeSessionId has a transcript, so the next start resumes it
   sessionCostTotal?: number; // the CLI's running total_cost_usd for this native session
   lastTurnCompletedSeq: number;
   forceUnread?: boolean; // set when a snooze ends
   // Set when the folder or account changes, or the record had to be
   // rebuilt; the next turn starts a new native session with a note.
-  handoff?: { fromCwd: string; fromAccountId: string; rebuilt?: boolean };
+  // lost: the session to resume couldn't be found (never saved; only set
+  // while the fresh session's first message is put together).
+  handoff?: { fromCwd: string; fromAccountId: string; rebuilt?: boolean; lost?: boolean };
   allowRules?: string[]; // "Always allow" rules, in the CLI's syntax
   queue: QueuedSend[];
   pendingApprovals: string[];
@@ -180,6 +191,7 @@ export class ThreadStore {
         if (fs.existsSync(path.join(dir, name, 'events.ndjson'))) broken.push(name);
         continue;
       }
+      rec.provider ??= 'claude'; // records from before Codex
       rec.queue ??= [];
       rec.pendingApprovals ??= [];
       rec.lastTurnCompletedSeq ??= 0;

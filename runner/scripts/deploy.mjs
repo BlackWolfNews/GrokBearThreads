@@ -46,6 +46,9 @@ Options:
 
 For install-runner.sh:
   --no-restart      stop after step 4
+  --follow DIR      the checkout the release follows main from (default
+                    this one); the runner's updater builds from its own
+                    clone and passes the checkout it was following
   --check           only step 6, for the release current points at, then
                     wait until it has been marked good
   --check-idle      exit 1 if a thread is busy (or the runner won't say)
@@ -189,6 +192,7 @@ function setup(v) {
     // Kickstarting the default label for some other data dir would restart
     // the real runner, so a sandbox has to name its own.
     labelKnown: v.label !== undefined || isDefaultHome,
+    follow: v.follow ? path.resolve(expandHome(v.follow)) : undefined,
     target: `gui/${process.getuid()}/${label}`,
     plist: path.join(env.THREADBARE_LAUNCH_AGENTS_DIR || path.join(os.homedir(), 'Library', 'LaunchAgents'), `${label}.plist`),
     log: isDefaultHome ? path.join(os.homedir(), 'Library', 'Logs', 'threadbare-runner.log') : path.join(home, 'runner.log'),
@@ -699,7 +703,7 @@ function build(c, id, g, dirty) {
   fs.writeFileSync(
     path.join(tmp, 'release.json'),
     JSON.stringify(
-      { id, commit: g.commit, branch: g.branch, dirty, builtAt: new Date().toISOString(), node: process.versions.node, checkout: g.root, prefix: g.prefix, ...(tree ? { tree } : {}) },
+      { id, commit: g.commit, branch: g.branch, dirty, builtAt: new Date().toISOString(), node: process.versions.node, checkout: c.follow ?? g.root, prefix: g.prefix, ...(tree ? { tree } : {}) },
       null,
       2,
     ) + '\n',
@@ -729,6 +733,11 @@ async function smoke(c, id) {
       THREADBARE_ACCOUNTS_DIR: path.join(tmp, 'no-accounts'),
       THREADBARE_CLAUDE_MAIN_DIR: path.join(tmp, 'no-main'),
       THREADBARE_CLAUDE_MAIN_JSON: path.join(tmp, 'no-main.json'),
+      // Nor the real ~/.codex (its model probe would start a codex) or
+      // Token Stats' limits.json, and never a CLI install.
+      THREADBARE_CODEX_MAIN_DIR: path.join(tmp, 'no-codex-main'),
+      THREADBARE_TOKEN_STATS_LIMITS: path.join(tmp, 'no-limits.json'),
+      THREADBARE_CLI_UPDATES: 'off',
     }),
   });
   fs.closeSync(fd);
@@ -1313,6 +1322,7 @@ async function main(argv) {
         label: { type: 'string' },
         'dry-run': { type: 'boolean' },
         'no-restart': { type: 'boolean' },
+        follow: { type: 'string' },
         check: { type: 'boolean' },
         'check-idle': { type: 'boolean' },
         'check-branch': { type: 'boolean' },

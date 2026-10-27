@@ -341,10 +341,11 @@ enum RowRenderer {
             // every other tool: open groups used to pour out every diff at
             // 12 lines each, and the changes card shows them again anyway.
             guard expanded else { return RowRender(height: RowMetrics.workHeight, text: header, textSize: headerSize) }
-            if row.kind == .diff, let diff = tool.effectiveDiff, !diff.hunks.isEmpty {
+            let diffs = row.kind == .diff ? tool.effectiveDiffs.filter { !$0.hunks.isEmpty } : []
+            if !diffs.isEmpty {
                 let body = showAll
-                    ? diffWithNote([diff], maxLines: RowMetrics.maxDiffLines)
-                    : diffWithNote([diff], maxLines: previewLines([diff]), more: DiffPreview.allKey(row.id))
+                    ? diffWithNote(diffs, maxLines: RowMetrics.maxDiffLines, root: tool.root)
+                    : diffWithNote(diffs, maxLines: previewLines(diffs), more: DiffPreview.allKey(row.id), root: tool.root)
                 let size = measurer.measure(body, width: width - RowMetrics.titleIndent - 1)
                 let box = size.height + RowMetrics.diffPadV * 2
                 return RowRender(height: RowMetrics.workHeight + box + 10, text: header, textSize: headerSize, detail: body, detailSize: size)
@@ -353,8 +354,12 @@ enum RowRenderer {
             let size = measurer.measure(body, width: width - RowMetrics.titleIndent - RowMetrics.boxPad * 2)
             return RowRender(height: RowMetrics.workHeight + size.height + RowMetrics.boxPad * 2 + 10, text: header, textSize: headerSize, detail: body, detailSize: size)
 
-        case .images(_, let images):
-            let (frames, area) = imageFrames(images, maxWidth: width, maxHeight: RowMetrics.gridMaxHeight, alignRight: false)
+        case .images(_, let images, let generated):
+            // A picture the agent made is the point of the step, so it's
+            // shown large; screenshots from tools stay thumbnails.
+            let (frames, area) = generated
+                ? imageFrames(images, maxWidth: width, maxHeight: ImageLayout.generatedMaxSide, cellWidth: ImageLayout.generatedMaxSide, alignRight: false)
+                : imageFrames(images, maxWidth: width, maxHeight: RowMetrics.gridMaxHeight, alignRight: false)
             return RowRender(height: vertical + 2 + area, imageFrames: frames, imageAreaHeight: area)
 
         case .approval(let item):
@@ -415,8 +420,14 @@ enum RowRenderer {
             let size = measurer.measure(text, width: width)
             return RowRender(height: vertical + size.height, text: text, textSize: size)
 
-        case .error(let message):
-            let text = NSAttributedString(string: message, attributes: Theme.text(color: .systemRed))
+        case .error(let message, let kind):
+            let text = NSMutableAttributedString(string: message, attributes: Theme.text(color: .systemRed))
+            // What to do about it, when the runner knows why. The limit's
+            // fix (another account) is a button in the line above the
+            // transcript, which knows the accounts.
+            if let advice = errorAdvice(kind) {
+                text.append(NSAttributedString(string: "\n" + advice, attributes: Theme.text(Theme.detailFont, color: Theme.quietText, line: TypeScale.scaled(19))))
+            }
             let size = measurer.measure(text, width: width - RowMetrics.boxPad * 2)
             return RowRender(height: vertical + size.height + RowMetrics.boxPad * 2, text: text, textSize: size)
 
@@ -580,8 +591,9 @@ enum RowRenderer {
                 .font: Theme.workFont, .foregroundColor: color, .paragraphStyle: style,
             ])
         }
-        if let diff = tool.effectiveDiff, !diff.hunks.isEmpty {
-            let stats = DiffBuilder.stats(diff)
+        let diffs = tool.effectiveDiffs.filter { !$0.hunks.isEmpty }
+        if !diffs.isEmpty {
+            let stats = diffs.map(DiffBuilder.stats).reduce((added: 0, removed: 0)) { ($0.added + $1.added, $0.removed + $1.removed) }
             output.append(statsText(added: stats.added, removed: stats.removed, leading: "  "))
         }
         return output
@@ -613,6 +625,11 @@ enum RowRenderer {
     /// What an expanded tool shows: a command and its output, a file with
     /// line numbers, a search and its matches, or the input as fields.
     static func toolBody(_ tool: ToolItem) -> NSAttributedString {
+        // A generated image's revised prompt is prose: the reading font,
+        // wrapped at words (in the output font it broke mid-word).
+        if tool.toolKind == .image, let text = tool.result?.text, !text.isEmpty {
+            return NSAttributedString(string: text, attributes: Theme.text(Theme.workFont, color: tool.failed ? Theme.failed : Theme.quietText, line: TypeScale.scaled(21)))
+        }
         let output = NSMutableAttributedString()
         // Output is ordinary text even when the tool failed: in red it read
         // as removed code and was the loudest thing in the window. Only the
@@ -724,8 +741,8 @@ enum RowRenderer {
     /// A diff and, if it was cut short, what was left out: "Show 30 more
     /// lines", which opens the rest through the expansion key `more`, or
     /// with no key (all of it is already open, up to the cap) a quiet note.
-    static func diffWithNote(_ diffs: [EditDiff], maxLines: Int, inset: CGFloat = 10, more: String? = nil) -> NSAttributedString {
-        let (diff, hidden) = diffText(diffs, maxLines: maxLines, inset: inset)
+    static func diffWithNote(_ diffs: [EditDiff], maxLines: Int, inset: CGFloat = 10, more: String? = nil, root: String? = nil) -> NSAttributedString {
+        let (diff, hidden) = diffText(diffs, maxLines: maxLines, inset: inset, root: root)
         guard hidden > 0 else { return diff }
         let body = NSMutableAttributedString(attributedString: diff)
         let lines = hidden == 1 ? "1 more line" : "\(hidden) more lines"
@@ -747,22 +764,41 @@ enum RowRenderer {
     /// How many lines of `diffs` a diff opened short shows (a break between
     /// two diffs counts as a line, as `diffText` draws it).
     static func previewLines(_ diffs: [EditDiff]) -> Int {
-        let total = diffs.reduce(0) { $0 + DiffBuilder.displayLines($1).count } + max(0, diffs.count - 1)
+        // A file-name line over each file's diff, or a break between edits
+        // to one file.
+        let between = namesFiles(diffs) ? diffs.count : max(0, diffs.count - 1)
+        let total = diffs.reduce(0) { $0 + DiffBuilder.displayLines($1).count } + between
         return DiffPreview.shown(of: total)
     }
 
     /// Diff lines with line numbers and the +/− sign in a quiet gutter, on
     /// faint tints. Returns the text and how many lines were left out.
-    static func diffText(_ diffs: [EditDiff], maxLines: Int, inset: CGFloat = 10) -> (NSAttributedString, hidden: Int) {
+    /// Whether a run of diffs is more than one file (a Codex patch), so
+    /// each gets its name over it; several edits to one file don't.
+    static func namesFiles(_ diffs: [EditDiff]) -> Bool {
+        Set(diffs.map(\.path)).count > 1
+    }
+
+    static func diffText(_ diffs: [EditDiff], maxLines: Int, inset: CGFloat = 10, root: String? = nil) -> (NSAttributedString, hidden: Int) {
         var lines: [DiffDisplayLine] = []
         var hidden = 0
+        // Line index -> the file-name line drawn there instead of a break.
+        // Without them a patch's three files ran together, split only by
+        // "⋯", with line numbers starting again.
+        var fileNames: [Int: NSAttributedString] = [:]
+        let named = namesFiles(diffs)
         for (index, diff) in diffs.enumerated() {
             let room = maxLines - lines.count
             guard room > 0 else {
                 hidden += DiffBuilder.displayLines(diff).count
                 continue
             }
-            if index > 0 { lines.append(DiffDisplayLine(kind: .hunkHeader, text: "")) }
+            if named {
+                fileNames[lines.count] = fileNameLine(diff, root: root, inset: inset, first: index == 0)
+                lines.append(DiffDisplayLine(kind: .hunkHeader, text: ""))
+            } else if index > 0 {
+                lines.append(DiffDisplayLine(kind: .hunkHeader, text: ""))
+            }
             for line in DiffBuilder.displayLines(diff, maxLines: room) {
                 if line.kind == .elided {
                     hidden += Int(line.text.split(separator: " ").first ?? "") ?? 0
@@ -803,6 +839,10 @@ enum RowRenderer {
             case .context: number = line.newNumber; sign = ""; background = nil
             case .hunkHeader, .elided: number = nil; sign = ""; background = nil
             }
+            if let name = fileNames[index] {
+                output.append(name)
+                continue
+            }
             if line.kind == .hunkHeader {
                 // A quiet break between hunks rather than the @@ header.
                 output.append(NSAttributedString(string: "\t\t⋯", attributes: gutter))
@@ -818,6 +858,23 @@ enum RowRenderer {
             }
         }
         return (output, hidden)
+    }
+
+    /// "events.html  src/pages  +1 −0" over one file's part of a patch.
+    static func fileNameLine(_ diff: EditDiff, root: String?, inset: CGFloat, first: Bool) -> NSAttributedString {
+        let (style, offset) = Theme.lines(Theme.diffLine, font: Theme.detailFont, before: first ? 0 : 8, head: inset, first: inset)
+        let line = NSMutableAttributedString(string: (diff.path as NSString).lastPathComponent, attributes: [
+            .font: Theme.detailFont, .foregroundColor: Theme.quietText, .paragraphStyle: style, .baselineOffset: offset,
+        ])
+        let folder = PathDisplay.folder(of: diff.path, relativeTo: root)
+        if !folder.isEmpty {
+            line.append(NSAttributedString(string: "  " + folder, attributes: [.font: Theme.detailFont, .foregroundColor: Theme.faintText, .paragraphStyle: style, .baselineOffset: offset]))
+        }
+        let stats = DiffBuilder.stats(diff)
+        let counts = NSMutableAttributedString(attributedString: statsText(added: stats.added, removed: stats.removed, leading: "  "))
+        counts.addAttributes([.paragraphStyle: style, .baselineOffset: offset], range: NSRange(location: 0, length: counts.length))
+        line.append(counts)
+        return line
     }
 
     // MARK: Changes card
@@ -865,6 +922,11 @@ enum RowRenderer {
                 attributes[.foregroundColor] = Theme.faintText
                 output.append(NSAttributedString(string: "  " + folder, attributes: attributes))
             }
+        }
+        // Codex says why it's asking, in the model's own words ("Allow
+        // creating b.txt in the current directory?").
+        if let reason = item.request.input["reason"]?.stringValue?.trimmingCharacters(in: .whitespacesAndNewlines), !reason.isEmpty {
+            output.append(NSAttributedString(string: "\n" + reason, attributes: Theme.text(Theme.detailFont, color: Theme.quietText, line: TypeScale.scaled(19))))
         }
         return output
     }
@@ -945,6 +1007,17 @@ enum RowRenderer {
         return output
     }
 
+    /// A plain sentence for a failure whose cause the runner gave.
+    static func errorAdvice(_ kind: TurnErrorKind?) -> String? {
+        switch kind {
+        case .contextWindow?: return "The conversation is too long for this model. Start a new thread to carry on."
+        case .auth?: return "This account's login has run out. Sign in again with its CLI, then send the message again."
+        case .usageLimit?, nil: return nil
+        }
+    }
+
+    /// "12s · $0.04" for Claude, "12s" for Codex, which reports no cost
+    /// (its tokens are in "Copy debug info" instead).
     static func footerText(_ completion: TurnCompletion) -> NSAttributedString {
         var parts: [String] = []
         switch completion.outcome {
@@ -967,9 +1040,10 @@ enum RowRenderer {
     /// Lays images out in rows, each fitted to `maxHeight` and the grid's
     /// cell width, with the images in a row at one height
     /// (`ImageLayout`).
-    static func imageFrames(_ images: [ImageRef], maxWidth: CGFloat, maxHeight: CGFloat, alignRight: Bool) -> ([NSRect], CGFloat) {
+    static func imageFrames(_ images: [ImageRef], maxWidth: CGFloat, maxHeight: CGFloat, cellWidth: CGFloat = RowMetrics.gridMaxWidth,
+                            alignRight: Bool) -> ([NSRect], CGFloat) {
         let layout = ImageLayout.frames(sizes: images.map(pixelSize), maxWidth: maxWidth, maxHeight: maxHeight,
-                                        cellWidth: RowMetrics.gridMaxWidth, gap: RowMetrics.imageGap, alignRight: alignRight)
+                                        cellWidth: cellWidth, gap: RowMetrics.imageGap, alignRight: alignRight)
         return (layout.frames, layout.height)
     }
 
