@@ -36,7 +36,7 @@ struct ThreadChipCard: View {
     let detail: String
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 3) {
+        VStack(alignment: .leading, spacing: zoomed(3)) {
             Text(title)
                 .font(.system(size: TypeScale.label, weight: .semibold))
                 .lineLimit(2)
@@ -47,11 +47,11 @@ struct ThreadChipCard: View {
             Text("Click to open")
                 .font(.system(size: TypeScale.small))
                 .foregroundStyle(.tertiary)
-                .padding(.top, 3)
+                .padding(.top, zoomed(3))
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 10)
-        .frame(width: 300, alignment: .leading)
+        .padding(.horizontal, zoomed(12))
+        .padding(.vertical, zoomed(10))
+        .frame(width: zoomed(300), alignment: .leading)
         .fixedSize(horizontal: false, vertical: true)
     }
 

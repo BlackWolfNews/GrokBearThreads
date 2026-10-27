@@ -26,8 +26,8 @@ struct ScheduledList: View {
                     }
                 }
                 .padding(.horizontal, SidebarMetrics.outerInset)
-                .padding(.top, 4)
-                .padding(.bottom, 32)
+                .padding(.top, zoomed(4))
+                .padding(.bottom, zoomed(32))
             }
             .scrollIndicators(.never)
             .onExitCommand { app.sidebarMode = .inbox }
@@ -43,23 +43,23 @@ private struct ScheduleRowView: View {
     private var showsActions: Bool { hovering || app.hoverOverride == schedule.id }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 3) {
-            HStack(alignment: .firstTextBaseline, spacing: 6) {
+        VStack(alignment: .leading, spacing: zoomed(3)) {
+            HStack(alignment: .firstTextBaseline, spacing: zoomed(6)) {
                 Text(schedule.title.isEmpty ? "Untitled" : schedule.title)
                     .font(.system(size: TypeScale.sidebarTitle))
                     // A paused or finished one is there to be found, not
                     // something coming up.
                     .foregroundStyle(schedule.isActive ? .primary : .secondary)
                     .lineLimit(1)
-                Spacer(minLength: 6)
+                Spacer(minLength: zoomed(6))
                 if showsActions {
                     // Room for the hover buttons, drawn over the row.
-                    Color.clear.frame(width: 3 * 24 - 6, height: 1)
+                    Color.clear.frame(width: 3 * zoomed(24) - zoomed(6), height: 1)
                 } else {
                     state
                 }
             }
-            HStack(alignment: .firstTextBaseline, spacing: 4) {
+            HStack(alignment: .firstTextBaseline, spacing: zoomed(4)) {
                 Text(schedule.whenText)
                     .lineLimit(1)
                     .layoutPriority(1)
@@ -83,7 +83,7 @@ private struct ScheduleRowView: View {
         .overlay(alignment: .topTrailing) {
             if showsActions {
                 actions
-                    .padding(.top, 5)
+                    .padding(.top, zoomed(5))
                     .padding(.trailing, SidebarMetrics.trailing - 5)
             }
         }
@@ -130,7 +130,7 @@ private struct ScheduleRowView: View {
     }
 
     private var actions: some View {
-        HStack(spacing: 2) {
+        HStack(spacing: zoomed(2)) {
             Button { app.runSchedule(schedule.id) } label: { Image(systemName: "paperplane") }
                 .buttonStyle(RowIconButtonStyle())
                 .help("Run now")

@@ -6,13 +6,13 @@ import ThreadbareCore
 /// thread titles and the view headers all start at the same x.
 enum SidebarMetrics {
     /// From the sidebar's edges to a row's highlight.
-    static let outerInset: CGFloat = 8
+    static var outerInset: CGFloat { zoomed(8) }
     /// Inside a row's highlight, left of its text. Wider than the right side
     /// (10) to leave a gutter for the unread dot, as Mail does, so titles
     /// line up whether or not they have one.
-    static let leading: CGFloat = 18
-    static let trailing: CGFloat = 10
-    static let corner: CGFloat = 8
+    static var leading: CGFloat { zoomed(18) }
+    static var trailing: CGFloat { zoomed(10) }
+    static var corner: CGFloat { zoomed(8) }
     /// Fainter than the selected row's 0.06 to 0.08, so the two read apart.
     static let hover = Color.primary.opacity(0.03)
     /// Times, counts and account names: quieter than a preview but readable
@@ -57,7 +57,7 @@ private struct InboxList: View {
             }
             .help("New thread (⌘N)")
             .padding(.horizontal, SidebarMetrics.outerInset)
-            .padding(.top, 4)
+            .padding(.top, zoomed(4))
             ThreadList(order: sections.all.map(\.id), scrollID: { rowIDs[$0] ?? $0 }) { select in
                 if app.threadsLoaded {
                     ForEach(InboxSection.allCases, id: \.self) { section in
@@ -113,8 +113,8 @@ private struct SectionHeading: View {
             .font(.system(size: TypeScale.sidebarHeading, weight: .semibold))
             .foregroundStyle(.secondary)
             .padding(.leading, SidebarMetrics.leading)
-            .padding(.top, 18)
-            .padding(.bottom, 6)
+            .padding(.top, zoomed(18))
+            .padding(.bottom, zoomed(6))
             .frame(maxWidth: .infinity, alignment: .leading)
             .accessibilityAddTraits(.isHeader)
     }
@@ -147,7 +147,7 @@ private struct ThreadList<Content: View>: View {
                 }
                 .padding(.horizontal, SidebarMetrics.outerInset)
                 // Room for the last row to scroll clear of the fade below.
-                .padding(.bottom, 32)
+                .padding(.bottom, zoomed(32))
             }
             // With a mouse connected macOS draws a legacy scroller with a
             // track down the list, which also pushed the times left. Codex,
@@ -161,8 +161,8 @@ private struct ThreadList<Content: View>: View {
             .mask {
                 VStack(spacing: 0) {
                     Color.black
-                    LinearGradient(colors: [.black, .clear], startPoint: .top, endPoint: .bottom).frame(height: 30)
-                    Color.clear.frame(height: 4)
+                    LinearGradient(colors: [.black, .clear], startPoint: .top, endPoint: .bottom).frame(height: zoomed(30))
+                    Color.clear.frame(height: zoomed(4))
                 }
             }
             .focusable()
@@ -220,8 +220,8 @@ struct ThreadRowView: View {
 
     var body: some View {
         let look = mode == .inbox ? ThreadRowLook(thread, section: section) : ThreadRowLook(status: .time, unread: false, emphasised: false)
-        VStack(alignment: .leading, spacing: 3) {
-            HStack(alignment: .firstTextBaseline, spacing: 6) {
+        VStack(alignment: .leading, spacing: zoomed(3)) {
+            HStack(alignment: .firstTextBaseline, spacing: zoomed(6)) {
                 Text(thread.title.isEmpty ? "Untitled" : thread.title)
                     .font(.system(size: TypeScale.sidebarTitle, weight: look.emphasised ? .semibold : .regular))
                     .foregroundStyle(.primary)
@@ -231,21 +231,21 @@ struct ThreadRowView: View {
                             // In the row's leading gutter, centred on the title.
                             Circle()
                                 .fill(Color.accentColor)
-                                .frame(width: 7, height: 7)
-                                .offset(x: -(SidebarMetrics.leading / 2 + 3.5))
+                                .frame(width: zoomed(7), height: zoomed(7))
+                                .offset(x: -(SidebarMetrics.leading + zoomed(7)) / 2)
                                 .accessibilityLabel("Unread")
                         }
                     }
-                Spacer(minLength: 6)
+                Spacer(minLength: zoomed(6))
                 if showsActions {
                     // Room for the hover buttons, drawn over the row so they
                     // don't change its height.
-                    Color.clear.frame(width: CGFloat(mode.rowActions.count) * 24 - 6, height: 1)
+                    Color.clear.frame(width: CGFloat(mode.rowActions.count) * zoomed(24) - zoomed(6), height: 1)
                 } else {
                     trailing(look)
                 }
             }
-            HStack(alignment: .firstTextBaseline, spacing: 6) {
+            HStack(alignment: .firstTextBaseline, spacing: zoomed(6)) {
                 if let line = secondLine {
                     Text(line)
                         .font(.system(size: TypeScale.sidebarPreview))
@@ -271,7 +271,7 @@ struct ThreadRowView: View {
                 }
             }
         }
-        .padding(EdgeInsets(top: 8, leading: SidebarMetrics.leading, bottom: 8, trailing: SidebarMetrics.trailing))
+        .padding(EdgeInsets(top: zoomed(8), leading: SidebarMetrics.leading, bottom: zoomed(8), trailing: SidebarMetrics.trailing))
         .background(background, in: RoundedRectangle(cornerRadius: SidebarMetrics.corner))
         .contentShape(RoundedRectangle(cornerRadius: SidebarMetrics.corner))
         // Selects on mouse down, as the system list did and Mail does; a
@@ -285,8 +285,8 @@ struct ThreadRowView: View {
         .overlay(alignment: .topTrailing) {
             if showsActions {
                 RowActions(thread: thread, actions: mode.rowActions)
-                    .padding(.top, 5)
-                    .padding(.trailing, SidebarMetrics.trailing - 5)
+                    .padding(.top, zoomed(5))
+                    .padding(.trailing, SidebarMetrics.trailing - zoomed(5))
             }
         }
         .onHover { hovering = $0 }
@@ -317,14 +317,14 @@ struct ThreadRowView: View {
                 time.foregroundStyle(SidebarMetrics.faint)
             }
         case .working:
-            HStack(alignment: .firstTextBaseline, spacing: 5) {
+            HStack(alignment: .firstTextBaseline, spacing: zoomed(5)) {
                 // An accent arc turned in the render server (SpinnerView):
                 // the system mini spinner drew grey whatever the tint, and
                 // the symbol's variable colour left it a pale asterisk.
                 SpinnerMark(color: .controlAccentColor)
-                    .frame(width: 12, height: 12)
+                    .frame(width: zoomed(12), height: zoomed(12))
                     // On the text's baseline, centred on its lowercase.
-                    .alignmentGuide(.firstTextBaseline) { $0[VerticalAlignment.center] + 4 }
+                    .alignmentGuide(.firstTextBaseline) { $0[VerticalAlignment.center] + zoomed(4) }
                 // How long the turn has run, ticking once a second. Only
                 // running rows have this, and there are one to three.
                 TimelineView(.periodic(from: .now, by: 1)) { context in
@@ -339,10 +339,10 @@ struct ThreadRowView: View {
             // Still being worked on, but by sub-agents or jobs in the
             // background: the same spinner in grey, and what's running
             // instead of a clock. Visibly not a streaming turn.
-            HStack(alignment: .firstTextBaseline, spacing: 5) {
+            HStack(alignment: .firstTextBaseline, spacing: zoomed(5)) {
                 SpinnerMark(color: .secondaryLabelColor)
-                    .frame(width: 12, height: 12)
-                    .alignmentGuide(.firstTextBaseline) { $0[VerticalAlignment.center] + 4 }
+                    .frame(width: zoomed(12), height: zoomed(12))
+                    .alignmentGuide(.firstTextBaseline) { $0[VerticalAlignment.center] + zoomed(4) }
                 Text(BackgroundWork.short(thread.background))
             }
             .font(.system(size: TypeScale.sidebarMeta, weight: .medium))
@@ -380,7 +380,7 @@ private struct RowActions: View {
     let actions: [RowAction]
 
     var body: some View {
-        HStack(spacing: 2) {
+        HStack(spacing: zoomed(2)) {
             ForEach(Array(actions.enumerated()), id: \.offset) { _, action in
                 switch action {
                 case .snooze:
@@ -415,7 +415,7 @@ private struct RowActions: View {
     }
 }
 
-/// A 22 pt borderless icon button with its own faint hover square.
+/// A 22 pt (at 100%) borderless icon button with its own faint hover square.
 struct RowIconButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         RowIconButton(configuration: configuration)
@@ -427,12 +427,12 @@ struct RowIconButtonStyle: ButtonStyle {
 
         var body: some View {
             configuration.label
-                .font(.system(size: 13))
+                .font(.system(size: zoomed(13)))
                 .foregroundStyle(hovering ? .primary : .secondary)
-                .frame(width: 22, height: 22)
+                .frame(width: zoomed(22), height: zoomed(22))
                 .background(
                     Color.primary.opacity(configuration.isPressed ? 0.14 : hovering ? 0.08 : 0),
-                    in: RoundedRectangle(cornerRadius: 5)
+                    in: RoundedRectangle(cornerRadius: zoomed(5))
                 )
                 .contentShape(Rectangle())
                 .onHover { hovering = $0 }
@@ -453,23 +453,23 @@ struct SidebarButtonRow: View {
 
     var body: some View {
         Button(action: action) {
-            HStack(spacing: 8) {
+            HStack(spacing: zoomed(8)) {
                 Image(systemName: icon)
                     .font(.system(size: TypeScale.sidebarButton))
                     .foregroundStyle(.secondary)
-                    .frame(width: 16)
+                    .frame(width: zoomed(16))
                 Text(title)
                     .font(.system(size: TypeScale.sidebarButton))
                     .foregroundStyle(.primary)
-                Spacer(minLength: 6)
+                Spacer(minLength: zoomed(6))
                 if let hint {
                     Text(hint).font(.system(size: TypeScale.sidebarMeta)).foregroundStyle(SidebarMetrics.faint)
                 }
             }
             // The icon sits where thread titles start, Codex style.
-            .padding(.leading, SidebarMetrics.leading - 2)
+            .padding(.leading, SidebarMetrics.leading - zoomed(2))
             .padding(.trailing, SidebarMetrics.trailing)
-            .padding(.vertical, 7)
+            .padding(.vertical, zoomed(7))
             .background(background, in: RoundedRectangle(cornerRadius: SidebarMetrics.corner))
             .contentShape(Rectangle())
         }
@@ -586,8 +586,8 @@ private struct ArchiveList: View {
             // although the inbox has no search.
             SearchField(text: $app.archiveQuery, prompt: "Search the archive")
                 .padding(.horizontal, SidebarMetrics.outerInset)
-                .padding(.top, 4)
-                .padding(.bottom, 6)
+                .padding(.top, zoomed(4))
+                .padding(.bottom, zoomed(6))
             ThreadList(order: archived.map(\.id)) { select in
                 ForEach(archived) { thread in
                     ThreadRowView(thread: thread, mode: .archive) { select(thread.id) }
@@ -609,7 +609,7 @@ struct EmptyNote: View {
             .font(.system(size: TypeScale.sidebarPreview))
             .foregroundStyle(.secondary)
             .padding(.leading, SidebarMetrics.leading)
-            .padding(.top, 10)
+            .padding(.top, zoomed(10))
     }
 }
 
@@ -621,7 +621,7 @@ struct ModeHeader: View {
     let count: Int?
 
     var body: some View {
-        HStack(spacing: 6) {
+        HStack(spacing: zoomed(6)) {
             Text(title)
                 .font(.system(size: TypeScale.sidebarButton, weight: .semibold))
             Spacer()
@@ -632,8 +632,8 @@ struct ModeHeader: View {
         // On the same column as the titles below.
         .padding(.leading, SidebarMetrics.outerInset + SidebarMetrics.leading)
         .padding(.trailing, SidebarMetrics.outerInset + SidebarMetrics.trailing)
-        .padding(.top, 4)
-        .frame(height: 34)
+        .padding(.top, zoomed(4))
+        .frame(height: zoomed(34))
     }
 }
 
@@ -644,11 +644,11 @@ struct SearchField: View {
     var body: some View {
         // The glass and the prompt on the same columns as New thread's icon
         // and title, as SidebarButtonRow lays them out.
-        HStack(spacing: 8) {
+        HStack(spacing: zoomed(8)) {
             Image(systemName: "magnifyingglass")
-                .font(.system(size: 12.5))
+                .font(.system(size: zoomed(12.5)))
                 .foregroundStyle(SidebarMetrics.faint)
-                .frame(width: 16)
+                .frame(width: zoomed(16))
             TextField(prompt, text: $text)
                 .textFieldStyle(.plain)
                 .font(.system(size: TypeScale.sidebarButton))
@@ -662,9 +662,9 @@ struct SearchField: View {
                 .help("Clear")
             }
         }
-        .padding(.leading, SidebarMetrics.leading - 2)
-        .padding(.trailing, 9)
-        .padding(.vertical, 6)
+        .padding(.leading, SidebarMetrics.leading - zoomed(2))
+        .padding(.trailing, zoomed(9))
+        .padding(.vertical, zoomed(6))
         // A field, not a row: a lighter fill and a hairline. At the selected
         // row's fill it read as a selected item stacked on the list.
         .background(Color.primary.opacity(0.035), in: RoundedRectangle(cornerRadius: SidebarMetrics.corner))

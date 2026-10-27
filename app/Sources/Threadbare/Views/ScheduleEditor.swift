@@ -24,9 +24,9 @@ struct ScheduleEditor: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
+        VStack(alignment: .leading, spacing: zoomed(16)) {
             Text(state.isNew ? "Schedule a message" : "Edit schedule")
-                .font(.system(size: 15, weight: .semibold))
+                .font(.system(size: zoomed(15), weight: .semibold))
             Form {
                 message
                 TextField("Title", text: $state.title, prompt: Text(titlePrompt))
@@ -42,8 +42,8 @@ struct ScheduleEditor: View {
             }
             buttons
         }
-        .padding(20)
-        .frame(width: 520)
+        .padding(zoomed(20))
+        .frame(width: zoomed(520))
         // Asked again whenever the time changes; the pause lets a cron
         // being typed settle first, and a newer change cancels the ask.
         .task(id: state.when) {
@@ -66,15 +66,15 @@ struct ScheduleEditor: View {
     @ViewBuilder
     private var message: some View {
         LabeledContent("Message") {
-            VStack(alignment: .leading, spacing: 4) {
+            VStack(alignment: .leading, spacing: zoomed(4)) {
                 TextEditor(text: $state.text)
-                    .font(.system(size: 13))
+                    .font(.system(size: zoomed(13)))
                     .scrollContentBackground(.hidden)
-                    .padding(.horizontal, 4)
-                    .padding(.vertical, 5)
-                    .frame(height: 84)
-                    .background(Color.primary.opacity(0.035), in: RoundedRectangle(cornerRadius: 6))
-                    .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(.separator, lineWidth: 0.5))
+                    .padding(.horizontal, zoomed(4))
+                    .padding(.vertical, zoomed(5))
+                    .frame(height: zoomed(84))
+                    .background(Color.primary.opacity(0.035), in: RoundedRectangle(cornerRadius: zoomed(6)))
+                    .overlay(RoundedRectangle(cornerRadius: zoomed(6)).strokeBorder(.separator, lineWidth: 0.5))
                 if state.draftImages > 0 {
                     Text(state.draftImages == 1 ? "The image stays in the box: a schedule sends only text." : "The images stay in the box: a schedule sends only text.")
                         .font(.system(size: TypeScale.sidebarMeta))
@@ -98,7 +98,7 @@ struct ScheduleEditor: View {
                 .fixedSize()
         } else {
             LabeledContent("Repeat") {
-                HStack(spacing: 6) {
+                HStack(spacing: zoomed(6)) {
                     Picker("Repeat", selection: $state.repeatChoice.kind) {
                         ForEach(RepeatChoice.Kind.allCases) { kind in
                             if kind == .custom { Divider() }
@@ -112,7 +112,7 @@ struct ScheduleEditor: View {
             }
             if state.repeatChoice.kind == .custom {
                 TextField("Cron", text: $state.repeatChoice.custom, prompt: Text("0 9 * * 1-5"))
-                    .font(.system(size: 13, design: .monospaced))
+                    .font(.system(size: zoomed(13), design: .monospaced))
                     .help("Minute, hour, day of the month, month and day of the week")
             }
         }
@@ -150,7 +150,7 @@ struct ScheduleEditor: View {
     }
 
     private var timePicker: some View {
-        HStack(spacing: 6) {
+        HStack(spacing: zoomed(6)) {
             Text("at").foregroundStyle(.secondary)
             DatePicker("Time", selection: time, displayedComponents: .hourAndMinute)
                 .labelsHidden()
@@ -177,7 +177,7 @@ struct ScheduleEditor: View {
     /// can't read it, in the same place.
     @ViewBuilder
     private var previewText: some View {
-        VStack(alignment: .leading, spacing: 2) {
+        VStack(alignment: .leading, spacing: zoomed(2)) {
             switch preview {
             case .success(let result)?:
                 Text(result.whenText)
@@ -198,7 +198,7 @@ struct ScheduleEditor: View {
         }
         .font(.system(size: TypeScale.sidebarMeta + 1))
         .fixedSize(horizontal: false, vertical: true)
-        .frame(minHeight: 32, alignment: .top)
+        .frame(minHeight: zoomed(32), alignment: .top)
     }
 
     /// "Wed 28 Oct 9:00": short enough for three on one line.

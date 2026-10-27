@@ -125,7 +125,7 @@ final class ImageGridView: NSView {
         self.frames = frames
         while tiles.count < frames.count {
             let tile = CALayer()
-            tile.cornerRadius = 8
+            tile.cornerRadius = zoomed(8)
             tile.cornerCurve = .continuous
             tile.masksToBounds = true
             tile.borderWidth = 0.5

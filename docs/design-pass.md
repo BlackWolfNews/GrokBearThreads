@@ -85,8 +85,10 @@ Text sizes are one step above the first draft of this brief. Review round
 pt smaller than theirs, so every size moved up together. The sizes below
 are the ones in `TypeScale` (Theme.swift), which everything takes its
 sizes from. They're the 100% sizes: ⌘= and ⌘- in the View menu (⌘0 puts
-it back) scale every one of them, and the row heights that hold a line of
-text, through `TextZoom`; paddings, icons and the column width don't move.
+it back) scale every one of them through `TextZoom`, and with them every
+layout size that goes through `zoomed` (paddings, icons, row heights, the
+column width), so the window zooms like a browser or VS Code. Text-only
+zoom left the icons and the room around them small beside big text.
 
 A few rules changed in the design reviews after the first build, each for
 a reason given where it applies: the sidebar doesn't repeat its section

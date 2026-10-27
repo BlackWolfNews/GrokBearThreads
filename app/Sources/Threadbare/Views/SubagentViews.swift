@@ -43,19 +43,19 @@ struct SubagentRowView: View {
     private var isSelected: Bool { app.subagentSelection == SubagentRef(threadId: threadId, subagentId: subagent.id) }
 
     var body: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 7) {
+        HStack(alignment: .firstTextBaseline, spacing: zoomed(7)) {
             glyph
-                .frame(width: 11, height: 11)
+                .frame(width: zoomed(11), height: zoomed(11))
                 .alignmentGuide(.firstTextBaseline) { $0[VerticalAlignment.center] + 4 }
-            VStack(alignment: .leading, spacing: 2) {
-                HStack(alignment: .firstTextBaseline, spacing: 6) {
+            VStack(alignment: .leading, spacing: zoomed(2)) {
+                HStack(alignment: .firstTextBaseline, spacing: zoomed(6)) {
                     Text(SubagentRows.title(subagent))
                         .font(.system(size: TypeScale.sidebarPreview))
                         // A finished one steps back; the running ones are
                         // what's worth reading.
                         .foregroundStyle(subagent.isRunning || isSelected ? AnyShapeStyle(.primary) : AnyShapeStyle(.secondary))
                         .lineLimit(1)
-                    Spacer(minLength: 6)
+                    Spacer(minLength: zoomed(6))
                     duration
                         .font(.system(size: TypeScale.sidebarMeta))
                         .monospacedDigit()
@@ -99,11 +99,11 @@ struct SubagentRowView: View {
             // the thread's own turn.
             SpinnerMark(color: .secondaryLabelColor)
         case .completed:
-            Image(systemName: "checkmark").font(.system(size: 9, weight: .semibold)).foregroundStyle(SidebarMetrics.faint)
+            Image(systemName: "checkmark").font(.system(size: zoomed(9), weight: .semibold)).foregroundStyle(SidebarMetrics.faint)
         case .failed:
-            Image(systemName: "xmark").font(.system(size: 9, weight: .semibold)).foregroundStyle(Color(nsColor: Theme.failed))
+            Image(systemName: "xmark").font(.system(size: zoomed(9), weight: .semibold)).foregroundStyle(Color(nsColor: Theme.failed))
         case .stopped:
-            Image(systemName: "minus").font(.system(size: 9, weight: .semibold)).foregroundStyle(SidebarMetrics.faint)
+            Image(systemName: "minus").font(.system(size: zoomed(9), weight: .semibold)).foregroundStyle(SidebarMetrics.faint)
         }
     }
 
@@ -135,7 +135,7 @@ struct SubagentHeader: View {
     var body: some View {
         let thread = app.threads[ref.threadId]
         let subagent = thread?.subagents.first { $0.id == ref.subagentId }
-        HStack(alignment: .center, spacing: 10) {
+        HStack(alignment: .center, spacing: zoomed(10)) {
             Button {
                 app.select(ref.threadId)
             } label: {
@@ -143,7 +143,7 @@ struct SubagentHeader: View {
             }
             .buttonStyle(RowIconButtonStyle())
             .help("Back to the thread")
-            VStack(alignment: .leading, spacing: 2) {
+            VStack(alignment: .leading, spacing: zoomed(2)) {
                 Text(subagent.map(SubagentRows.title) ?? "Sub-agent")
                     .font(.system(size: TypeScale.sidebarTitle, weight: .semibold))
                     .lineLimit(1)
@@ -154,8 +154,8 @@ struct SubagentHeader: View {
             }
             Spacer(minLength: 0)
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 8)
+        .padding(.horizontal, zoomed(14))
+        .padding(.vertical, zoomed(8))
         .overlay(alignment: .bottom) {
             Rectangle().fill(.separator).frame(height: 0.5)
         }

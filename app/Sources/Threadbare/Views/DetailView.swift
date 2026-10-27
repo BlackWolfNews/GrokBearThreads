@@ -5,7 +5,7 @@ import ThreadbareCore
 struct RootView: View {
     @Environment(AppModel.self) private var app
     @Environment(\.openSettings) private var openSettings
-    static let sidebarIdealWidth: CGFloat = 360
+    static var sidebarIdealWidth: CGFloat { zoomed(360) }
 
     var body: some View {
         @Bindable var app = app
@@ -16,7 +16,7 @@ struct RootView: View {
             // 780 pt reading column and its insets. 30 wider since the
             // activity bar (44) took the left of it.
             SidebarView()
-                .navigationSplitViewColumnWidth(min: 290, ideal: Self.sidebarIdealWidth, max: 480)
+                .navigationSplitViewColumnWidth(min: zoomed(290), ideal: Self.sidebarIdealWidth, max: zoomed(480))
         } detail: {
             DetailView()
         }
@@ -65,13 +65,13 @@ struct DetailView: View {
                     } else if let session, session.subagentId != nil, session.state == .loaded, session.displayCount == 0 {
                         Text("Nothing yet.").foregroundStyle(.secondary)
                     } else if let session, session.subagentId != nil, case .failed(let message) = session.state {
-                        VStack(spacing: 8) {
+                        VStack(spacing: zoomed(8)) {
                             Text("Couldn't load this sub-agent.").font(.headline)
                             Text(message).foregroundStyle(.secondary)
                             Button("Try again") { app.selectSubagent(threadId: session.threadId, subagentId: session.subagentId ?? "") }
                         }
                     } else if let session, case .failed(let message) = session.state {
-                        VStack(spacing: 8) {
+                        VStack(spacing: zoomed(8)) {
                             Text("Couldn't load this thread.").font(.headline)
                             Text(message).foregroundStyle(.secondary)
                             Button("Try again") { app.select(session.threadId) }
@@ -170,7 +170,7 @@ private struct HeaderTitle: View {
 
     var body: some View {
         if let thread {
-            HStack(spacing: 5) {
+            HStack(spacing: zoomed(5)) {
                 Text(FolderName.short(thread.cwd))
                     .foregroundStyle(.secondary)
                     .layoutPriority(1)
@@ -190,7 +190,7 @@ private struct HeaderTitle: View {
             }
             .font(.system(size: TypeScale.header))
             .lineLimit(1)
-            .padding(.leading, 6)
+            .padding(.leading, zoomed(6))
             .help(thread.cwd.abbreviatingHome)
         } else {
             Color.clear.frame(width: 1, height: 1)
@@ -238,8 +238,8 @@ private struct ComposerPlacement: Layout {
             paneHeight: bounds.height, composerHeight: composerHeight, centred: centred,
             headingHeight: Double(heading?.sizeThatFits(width).height ?? 0), noteHeight: Double(note?.sizeThatFits(width).height ?? 0)
         )
-        heading?.place(at: CGPoint(x: bounds.minX, y: composerY - 18), anchor: .bottomLeading, proposal: width)
-        note?.place(at: CGPoint(x: bounds.minX, y: composerY + composerHeight - 2), proposal: width)
+        heading?.place(at: CGPoint(x: bounds.minX, y: composerY - zoomed(18)), anchor: .bottomLeading, proposal: width)
+        note?.place(at: CGPoint(x: bounds.minX, y: composerY + composerHeight - zoomed(2)), proposal: width)
         // Centred in its width: the composer caps its own width.
         find(.composer)?.place(
             at: CGPoint(x: bounds.minX + composerWidth / 2, y: composerY), anchor: .top,
@@ -251,10 +251,10 @@ private struct ComposerPlacement: Layout {
 private struct NewThreadHeading: View {
     var body: some View {
         Text("What should we work on?")
-            .font(.system(size: 24, weight: .semibold))
+            .font(.system(size: zoomed(24), weight: .semibold))
             .foregroundStyle(.primary)
             .multilineTextAlignment(.center)
-            .padding(.horizontal, 24)
+            .padding(.horizontal, zoomed(24))
             .frame(maxWidth: .infinity)
     }
 }
@@ -290,11 +290,11 @@ struct ConnectionBanner: View {
     /// A runner restart: grey words on the window's own background with a
     /// hairline under them, so it reads as information, not a problem.
     private func quiet(_ banner: Banner) -> some View {
-        HStack(spacing: 8) {
+        HStack(spacing: zoomed(8)) {
             if let icon = banner.icon {
                 Image(systemName: icon).foregroundStyle(.secondary)
             } else {
-                SpinnerMark(color: .secondaryLabelColor).frame(width: 13, height: 13)
+                SpinnerMark(color: .secondaryLabelColor).frame(width: zoomed(13), height: zoomed(13))
             }
             Text(banner.text).foregroundStyle(.secondary).lineLimit(1)
             Spacer(minLength: 0)
@@ -305,13 +305,13 @@ struct ConnectionBanner: View {
         }
         .font(.system(size: TypeScale.label))
         .help(banner.detail ?? "")
-        .padding(.horizontal, 14)
-        .padding(.vertical, 7)
+        .padding(.horizontal, zoomed(14))
+        .padding(.vertical, zoomed(7))
         .overlay(alignment: .bottom) { Rectangle().fill(Color(nsColor: Theme.hairline)).frame(height: 0.5) }
     }
 
     private func warning(_ banner: Banner) -> some View {
-        HStack(spacing: 8) {
+        HStack(spacing: zoomed(8)) {
             Image(systemName: banner.icon ?? "bolt.horizontal").foregroundStyle(.secondary)
             Text(banner.text).lineLimit(2).help(banner.detail ?? "")
             Spacer()
@@ -322,8 +322,8 @@ struct ConnectionBanner: View {
                 Button("Try again") { app.reconnectNow() }
             }
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 8)
+        .padding(.horizontal, zoomed(14))
+        .padding(.vertical, zoomed(8))
         .background(.yellow.opacity(0.12))
     }
 }
@@ -339,10 +339,10 @@ private struct LimitBanner: View {
 
     var body: some View {
         if let advice = app.limitAdvice(for: thread) {
-            HStack(spacing: 8) {
+            HStack(spacing: zoomed(8)) {
                 Image(systemName: "gauge.with.dots.needle.100percent").foregroundStyle(.red)
                 Text(advice.text).lineLimit(1)
-                Spacer(minLength: 6)
+                Spacer(minLength: zoomed(6))
                 if let target = advice.target {
                     Button(AccountUsageText.switchTitle(target, accounts: app.accounts)) {
                         app.switchAccount(thread.id, to: target.id)
@@ -350,8 +350,8 @@ private struct LimitBanner: View {
                 }
             }
             .font(.system(size: TypeScale.label))
-            .padding(.horizontal, 14)
-            .padding(.vertical, 7)
+            .padding(.horizontal, zoomed(14))
+            .padding(.vertical, zoomed(7))
             .overlay(alignment: .bottom) { Rectangle().fill(Color(nsColor: Theme.hairline)).frame(height: 0.5) }
         }
     }
@@ -369,8 +369,8 @@ private struct ErrorBanner: View {
                 Button("Dismiss") { app.errorMessage = nil }
                     .buttonStyle(.borderless)
             }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 7)
+            .padding(.horizontal, zoomed(14))
+            .padding(.vertical, zoomed(7))
             .background(.orange.opacity(0.1))
         }
     }

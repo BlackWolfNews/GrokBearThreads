@@ -9,10 +9,10 @@ import ThreadbareCore
 struct ActivityBar: View {
     @Environment(AppModel.self) private var app
     @Environment(\.openSettings) private var openSettings
-    static let width: CGFloat = 44
+    static var width: CGFloat { zoomed(44) }
 
     var body: some View {
-        VStack(spacing: 4) {
+        VStack(spacing: zoomed(4)) {
             ActivityButton(symbol: "bubble.left.and.bubble.right", title: "Threads", shortcut: "⌘1",
                            active: app.sidebarMode == .inbox) {
                 app.sidebarMode = .inbox
@@ -34,19 +34,19 @@ struct ActivityBar: View {
                     app.showSchedules()
                 }
             }
-            Spacer(minLength: 8)
+            Spacer(minLength: zoomed(8))
             UsageActivityButton()
             // The same window as ⌘, without a trip to the menu bar.
             ActivityButton(symbol: "gearshape", title: "Settings", shortcut: "⌘,", active: false) {
                 openSettings()
             }
         }
-        .padding(.top, 4)
-        .padding(.bottom, 10)
+        .padding(.top, zoomed(4))
+        .padding(.bottom, zoomed(10))
         .frame(width: Self.width)
         .frame(maxHeight: .infinity)
         .overlay(alignment: .trailing) {
-            Rectangle().fill(.separator).frame(width: 0.5).padding(.vertical, 4)
+            Rectangle().fill(.separator).frame(width: 0.5).padding(.vertical, zoomed(4))
         }
     }
 }
@@ -87,21 +87,21 @@ private struct ActivityButton: View {
         Button(action: action) {
             icon
                 .foregroundStyle(active || hovering ? AnyShapeStyle(.primary) : AnyShapeStyle(.secondary))
-                .frame(width: 32, height: 32)
+                .frame(width: zoomed(32), height: zoomed(32))
                 .background(background, in: RoundedRectangle(cornerRadius: SidebarMetrics.corner))
                 .overlay(alignment: .topTrailing) {
                     if let badge, badge > 0 {
                         // Grey, not accent: a count of things put away for
                         // later, not something that needs Mike.
                         Text(badge > 99 ? "99+" : "\(badge)")
-                            .font(.system(size: 9, weight: .semibold))
+                            .font(.system(size: zoomed(9), weight: .semibold))
                             .monospacedDigit()
                             .foregroundStyle(.secondary)
-                            .padding(.horizontal, 3.5)
-                            .frame(minWidth: 14, minHeight: 14)
+                            .padding(.horizontal, zoomed(3.5))
+                            .frame(minWidth: zoomed(14), minHeight: zoomed(14))
                             .background(Color(nsColor: .windowBackgroundColor), in: Capsule())
                             .overlay(Capsule().strokeBorder(.separator, lineWidth: 0.5))
-                            .offset(x: 3, y: -2)
+                            .offset(x: zoomed(3), y: -zoomed(2))
                             .allowsHitTesting(false)
                     }
                 }
@@ -123,10 +123,10 @@ private struct ActivityButton: View {
                 .renderingMode(.template)
                 .resizable()
                 .aspectRatio(contentMode: .fit)
-                .frame(width: 21, height: 21)
+                .frame(width: zoomed(21), height: zoomed(21))
         } else if let symbol {
             Image(systemName: symbol)
-                .font(.system(size: 15))
+                .font(.system(size: zoomed(15)))
         }
     }
 

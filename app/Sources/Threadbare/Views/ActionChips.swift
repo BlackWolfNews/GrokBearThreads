@@ -11,7 +11,7 @@ struct ActionChips: View {
 
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 6) {
+            HStack(spacing: zoomed(6)) {
                 ForEach(thread.actions) { action in
                     ActionChip(action: action, running: app.isRunning(action: action, in: thread.id)) {
                         app.runAction(action, in: thread.id)
@@ -30,21 +30,21 @@ private struct ActionChip: View {
 
     var body: some View {
         Button(action: run) {
-            HStack(spacing: 5) {
+            HStack(spacing: zoomed(5)) {
                 if running {
-                    SpinnerMark(color: .secondaryLabelColor).frame(width: 11, height: 11)
+                    SpinnerMark(color: .secondaryLabelColor).frame(width: zoomed(11), height: zoomed(11))
                 } else {
                     // The patch glyph for a command, a bubble for a message.
                     Image(systemName: action.kind == .prompt ? "text.bubble" : "square.dashed")
-                        .font(.system(size: 11, weight: .medium))
+                        .font(.system(size: zoomed(11), weight: .medium))
                         .foregroundStyle(.secondary)
                 }
                 Text(action.title)
                     .foregroundStyle(.primary)
             }
             .font(.system(size: TypeScale.chip))
-            .padding(.horizontal, 9)
-            .padding(.vertical, 4)
+            .padding(.horizontal, zoomed(9))
+            .padding(.vertical, zoomed(4))
             .background(Capsule().fill(Color.primary.opacity(0.06)))
             .overlay(Capsule().strokeBorder(Color(nsColor: Theme.cardBorder), lineWidth: 0.5))
             .contentShape(Capsule())

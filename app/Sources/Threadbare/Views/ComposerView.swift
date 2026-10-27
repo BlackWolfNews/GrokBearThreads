@@ -14,8 +14,8 @@ struct ComposerView: View {
     @State private var height: CGFloat = ComposerTextField.minHeight
     @State private var importing = 0
 
-    static let cornerRadius: CGFloat = 20
-    static let padding: CGFloat = 14
+    static var cornerRadius: CGFloat { zoomed(20) }
+    static var padding: CGFloat { zoomed(14) }
 
     private var draftKey: String { thread?.id ?? "new" }
 
@@ -25,11 +25,11 @@ struct ComposerView: View {
             set: { app.drafts[draftKey] = $0 }
         )
         let canSend = ComposerChips.canSend(text: draft.wrappedValue.text, imageCount: draft.wrappedValue.images.count)
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: zoomed(6)) {
         if let thread, let line = ScheduleLine.line(for: thread.id, in: app.schedules, now: app.now) {
             ScheduledLine(line: line)
         }
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: zoomed(10)) {
             // The folder's actions (patches), above the text as in the design.
             if let thread, !thread.actions.isEmpty {
                 ActionChips(thread: thread)
@@ -59,14 +59,14 @@ struct ComposerView: View {
         .padding(Self.padding)
         .background { card }
         }
-        // The transcript's reading column: 780 wide at most, centred, with
-        // the same side insets once the window is narrower than that.
+        // The transcript's reading column: 780 wide at most at 100%,
+        // centred, with the same side insets once the window is narrower.
         .frame(maxWidth: Theme.maxContentWidth)
         .padding(.horizontal, Theme.sideInset)
         // At 12 the card looked wedged against the window's rounded bottom
         // corners; Codex and T3 leave about 24.
-        .padding(.bottom, 20)
-        .padding(.top, 4)
+        .padding(.bottom, zoomed(20))
+        .padding(.top, zoomed(4))
     }
 
     /// A lighter fill on dark; on light, white lifted off the page by a
@@ -78,7 +78,7 @@ struct ComposerView: View {
             // About #2e2e2e on the #1c1c1c pane: at 0.05 the card was barely
             // lighter than the pane and read as an outline, not a card.
             .fill(dark ? Color.primary.opacity(0.085) : Color.white)
-            .shadow(color: .black.opacity(dark ? 0 : 0.08), radius: 14, y: 4)
+            .shadow(color: .black.opacity(dark ? 0 : 0.08), radius: zoomed(14), y: zoomed(4))
             .overlay(shape.strokeBorder(Color(nsColor: .separatorColor), lineWidth: 0.5))
             .contentShape(shape)
             .onTapGesture { app.focusComposer += 1 }
@@ -144,7 +144,7 @@ private struct ScheduledLine: View {
         Button {
             if let id = line.scheduleId { app.editSchedule(id) } else { app.showSchedules() }
         } label: {
-            HStack(spacing: 5) {
+            HStack(spacing: zoomed(5)) {
                 Image(systemName: "clock")
                     .font(.system(size: TypeScale.sidebarMeta))
                 Text(line.text)
@@ -161,7 +161,7 @@ private struct ScheduledLine: View {
         .padding(.leading, Self.inset)
     }
 
-    static let inset = ComposerView.padding
+    static var inset: CGFloat { ComposerView.padding }
 }
 
 private struct AttachmentStrip: View {
@@ -169,7 +169,7 @@ private struct AttachmentStrip: View {
     let importing: Int
 
     var body: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: zoomed(8)) {
             ForEach(Array(images.enumerated()), id: \.offset) { index, image in
                 AttachmentThumbnail(path: image.path) { images.remove(at: index) }
             }
@@ -190,8 +190,8 @@ struct AttachmentThumbnail: View {
     let onRemove: () -> Void
     @State private var hovering = false
 
-    static let size: CGFloat = 56
-    static let cornerRadius: CGFloat = 8
+    static var size: CGFloat { zoomed(56) }
+    static var cornerRadius: CGFloat { zoomed(8) }
     /// Screenshots show the remove badge without a real hover.
     static var debugShowRemove = false
 
@@ -205,15 +205,15 @@ struct AttachmentThumbnail: View {
                 if hovering || Self.debugShowRemove {
                     Button(action: onRemove) {
                         Image(systemName: "xmark")
-                            .font(.system(size: 8, weight: .bold))
+                            .font(.system(size: zoomed(8), weight: .bold))
                             .foregroundStyle(.white)
-                            .frame(width: 18, height: 18)
+                            .frame(width: zoomed(18), height: zoomed(18))
                             .background(Circle().fill(.black.opacity(0.72)))
                             .overlay(Circle().strokeBorder(.white.opacity(0.2), lineWidth: 0.5))
                             .contentShape(Circle())
                     }
                     .buttonStyle(.plain)
-                    .padding(4)
+                    .padding(zoomed(4))
                     .help("Remove")
                     .accessibilityLabel("Remove image")
                 }
@@ -254,7 +254,7 @@ struct ComposerTextField: NSViewRepresentable {
     var onReturnWhenEmpty: () -> Bool = { false }
     var onImages: ([URL]) -> Void
 
-    // Computed, so they follow the text zoom (`applyTypeScale` re-applies
+    // Computed, so they follow the zoom (`applyTypeScale` re-applies
     // them to a text view that's already up).
     static var font: NSFont { .systemFont(ofSize: TypeScale.composer) }
     /// The transcript's fixed body line height, glyphs centred in it, so a
@@ -424,7 +424,7 @@ final class ComposerTextView: NSTextView {
         }
     }
 
-    /// The font and line height at the current text zoom, for what's typed
+    /// The font and line height at the current zoom, for what's typed
     /// next and (after a zoom change) what's already in the box.
     func applyTypeScale() {
         let attributes = ComposerTextField.attributes

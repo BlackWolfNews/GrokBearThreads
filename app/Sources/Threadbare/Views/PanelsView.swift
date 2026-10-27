@@ -58,7 +58,7 @@ private struct PanelTabs: View {
                     app.choosePanel(PanelPane.patchesTab, in: thread.id)
                 }
             }
-            Spacer(minLength: 8)
+            Spacer(minLength: zoomed(8))
             if !onPatches, let active, let url = active.pageURL {
                 Button {
                     NSWorkspace.shared.open(url)
@@ -66,19 +66,19 @@ private struct PanelTabs: View {
                     Image(systemName: "arrow.up.right")
                         .font(.system(size: TypeScale.label, weight: .medium))
                         .foregroundStyle(.secondary)
-                        .frame(width: 28, height: PanelTabs.height)
+                        .frame(width: zoomed(28), height: PanelTabs.height)
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
                 .help("Open in browser")
             }
         }
-        .padding(.horizontal, 6)
+        .padding(.horizontal, zoomed(6))
     }
 
     private func tab(_ title: String, count: Int? = nil, help: String, active isActive: Bool, choose: @escaping () -> Void) -> some View {
         Button(action: choose) {
-            HStack(spacing: 5) {
+            HStack(spacing: zoomed(5)) {
                 Text(title)
                 if let count {
                     Text("\(count)")
@@ -87,11 +87,11 @@ private struct PanelTabs: View {
             }
             .font(.system(size: TypeScale.label, weight: isActive ? .medium : .regular))
             .foregroundStyle(isActive ? .primary : .secondary)
-            .padding(.horizontal, 10)
+            .padding(.horizontal, zoomed(10))
             .frame(height: PanelTabs.height)
             .overlay(alignment: .bottom) {
                 if isActive {
-                    Rectangle().fill(Color.primary.opacity(0.8)).frame(height: 1.5)
+                    Rectangle().fill(Color.primary.opacity(0.8)).frame(height: zoomed(1.5))
                 }
             }
             .contentShape(Rectangle())
@@ -100,7 +100,7 @@ private struct PanelTabs: View {
         .help(help)
     }
 
-    static let height: CGFloat = 38
+    static var height: CGFloat { zoomed(38) }
 }
 
 /// The Patches tab: each patch that applies to the folder, where it came
@@ -111,12 +111,12 @@ private struct PatchesList: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 14) {
+            VStack(alignment: .leading, spacing: zoomed(14)) {
                 ForEach(thread.patches) { patch in
-                    VStack(alignment: .leading, spacing: 4) {
-                        HStack(spacing: 6) {
+                    VStack(alignment: .leading, spacing: zoomed(4)) {
+                        HStack(spacing: zoomed(6)) {
                             Image(systemName: "square.dashed")
-                                .font(.system(size: 11, weight: .medium))
+                                .font(.system(size: zoomed(11), weight: .medium))
                                 .foregroundStyle(.secondary)
                             Text(patch.id)
                                 .font(.system(size: TypeScale.label, weight: .medium))
@@ -155,10 +155,10 @@ private struct PatchesList: View {
                 Text("A patch is a file in .threadbear/patches (in the project, a parent folder, or ~) whose default export lists actions, panels and hooks. Ask the agent for one.")
                     .font(.system(size: TypeScale.small))
                     .foregroundStyle(Color(nsColor: Theme.faintText))
-                    .padding(.top, 6)
+                    .padding(.top, zoomed(6))
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(16)
+            .padding(zoomed(16))
         }
     }
 
@@ -191,7 +191,7 @@ private struct PanelNote: View {
             .font(.system(size: TypeScale.label))
             .foregroundStyle(.secondary)
             .multilineTextAlignment(.center)
-            .padding(24)
+            .padding(zoomed(24))
             .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }
@@ -285,7 +285,7 @@ private struct ImagePanel: View {
                     Image(nsImage: image)
                         .resizable()
                         .aspectRatio(contentMode: .fit)
-                        .padding(16)
+                        .padding(zoomed(16))
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
                 .buttonStyle(.plain)
@@ -328,7 +328,7 @@ struct PanelResizeHandle: View {
         Rectangle()
             .fill(Color(nsColor: Theme.hairline))
             .frame(width: 0.5)
-            .frame(width: 8)
+            .frame(width: zoomed(8))
             .contentShape(Rectangle())
             .onHover { inside in
                 if inside { NSCursor.resizeLeftRight.push() } else { NSCursor.pop() }

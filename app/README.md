@@ -460,7 +460,7 @@ is an error. Commands marked "the open thread" act on `id` when it's given
 | `menu` | `row`, `click` | a transcript row's context menu, or chooses an item from it |
 | `debug-info`, `copy-thread-id`, `clipboard` | `row`, `id` | what "Copy debug info" and "Copy thread id" (the open thread) copy, copied to the instance's pasteboard as the menu items do; `clipboard` reads it back |
 | `appearance`, `resize` | `mode` (light, dark, system); `w`, `h` | |
-| `zoom` | `to` (in, out, reset) or `percent` | the text size, as ⌘=, ⌘- and ⌘0 set it; says the percent it's at |
+| `zoom` | `to` (in, out, reset) or `percent` | the window's zoom, as ⌘=, ⌘- and ⌘0 set it; says the percent it's at |
 | `archive`, `unarchive`, `snooze` | `id`, `seconds` (default 3600) | the open thread; says which thread it acted on |
 | `mode` | `mode` (`archive`, `snoozed`, `inbox`) | which list the sidebar shows |
 | `action` | `id`, `timeout` | runs that action chip of the selected thread and waits for a command to finish (default 60 s); `dump` lists the actions |

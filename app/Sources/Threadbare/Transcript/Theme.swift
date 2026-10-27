@@ -2,11 +2,13 @@ import AppKit
 import Observation
 import Synchronization
 
-/// The window's text size: ⌘= and ⌘- in the View menu step it through
-/// `steps` (percentages of the design sizes in `TypeScale`), ⌘0 puts it
-/// back, and it's remembered across launches. Like the zoom in the Electron
-/// agent apps, but only the text and the rows it sits in grow; paddings,
-/// icons and the reading column's width stay.
+/// The window's zoom: ⌘= and ⌘- in the View menu step it through `steps`
+/// (percentages of the design sizes in `TypeScale` and every `zoomed`
+/// layout size), ⌘0 puts it back, and it's remembered across launches.
+/// Like a browser's or VS Code's zoom, everything grows together: text,
+/// icons, paddings, row heights and the reading column's width. It used to
+/// be text only, which left the icons and the room around them small
+/// beside big text.
 @Observable @MainActor
 final class TextZoom {
     static let shared = TextZoom()
@@ -129,6 +131,12 @@ enum TypeScale {
     static var chip: CGFloat { scaled(13) }
 }
 
+/// A layout size (a padding, spacing, icon, frame or corner radius) at the
+/// current zoom, like a CSS pixel under a browser's zoom, rounded the same
+/// way as the text sizes. Hairline widths and half-point nudges that line
+/// things up on pixels stay as written.
+func zoomed(_ size: CGFloat) -> CGFloat { TypeScale.scaled(size) }
+
 /// Fonts, colours and spacing for the transcript. Colours are dynamic so
 /// cached attributed strings follow light and dark mode. The fonts are
 /// computed, not stored, so they follow `TextZoom` (AppKit caches system
@@ -180,8 +188,8 @@ enum Theme {
     }
 
     /// Widest the reading column gets; wider windows centre it.
-    static let maxContentWidth: CGFloat = 780
-    static let sideInset: CGFloat = 28
+    static var maxContentWidth: CGFloat { zoomed(780) }
+    static var sideInset: CGFloat { zoomed(28) }
 
     private static func dynamic(dark: NSColor, light: NSColor) -> NSColor {
         NSColor(name: nil) { appearance in

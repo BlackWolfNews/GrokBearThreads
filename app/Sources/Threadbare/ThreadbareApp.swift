@@ -55,13 +55,13 @@ struct ThreadbareApp: App {
             // In the View menu, as the Electron agent apps and Safari have
             // it. ⌘= is the key under the + sign, so ⌘+ works without shift.
             CommandGroup(after: .toolbar) {
-                Button("Bigger Text") { zoom.zoomIn() }
+                Button("Zoom In") { zoom.zoomIn() }
                     .keyboardShortcut("=")
                     .disabled(!zoom.canZoomIn)
-                Button("Smaller Text") { zoom.zoomOut() }
+                Button("Zoom Out") { zoom.zoomOut() }
                     .keyboardShortcut("-")
                     .disabled(!zoom.canZoomOut)
-                Button("Default Text Size") { zoom.reset() }
+                Button("Actual Size") { zoom.reset() }
                     .keyboardShortcut("0")
                     .disabled(zoom.isDefault)
                 Divider()

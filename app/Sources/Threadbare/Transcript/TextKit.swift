@@ -31,7 +31,7 @@ final class BackgroundLayoutManager: NSLayoutManager {
             var rect = NSRect(x: head, y: box.minY - pad, width: max(0, tail - head), height: box.height + pad * 2)
             rect.origin.y = max(0, rect.origin.y)
             rect = rect.offsetBy(dx: origin.x, dy: origin.y).insetBy(dx: 0.25, dy: 0.25)
-            let path = NSBezierPath(roundedRect: rect, xRadius: 8, yRadius: 8)
+            let path = NSBezierPath(roundedRect: rect, xRadius: zoomed(8), yRadius: zoomed(8))
             color.setFill()
             path.fill()
             Theme.cardBorder.setStroke()
@@ -81,10 +81,10 @@ final class BackgroundLayoutManager: NSLayoutManager {
                 box.size.width = max(0, box.width - kern)
             }
             let baseline = fragment.minY + self.location(forGlyphAt: part.location).y
-            box.origin.y = baseline - font.ascender - 1.5
-            box.size.height = font.ascender - font.descender + 3
+            box.origin.y = baseline - font.ascender - zoomed(1.5)
+            box.size.height = font.ascender - font.descender + zoomed(3)
             box = box.insetBy(dx: -MarkdownRenderer.pillPad, dy: 0).offsetBy(dx: origin.x, dy: origin.y)
-            NSBezierPath(roundedRect: box, xRadius: 3.5, yRadius: 3.5).fill()
+            NSBezierPath(roundedRect: box, xRadius: zoomed(3.5), yRadius: zoomed(3.5)).fill()
         }
     }
 }
@@ -311,7 +311,7 @@ final class TranscriptTextView: NSTextView {
         let local = NSPoint(x: point.x - origin.x, y: point.y - origin.y)
         let glyph = layoutManager.glyphIndex(for: local, in: textContainer)
         let box = layoutManager.boundingRect(forGlyphRange: NSRange(location: glyph, length: 1), in: textContainer)
-        guard box.insetBy(dx: -4, dy: -3).contains(local) else { return nil }
+        guard box.insetBy(dx: -zoomed(4), dy: -zoomed(3)).contains(local) else { return nil }
         let index = layoutManager.characterIndexForGlyph(at: glyph)
         return index < storage.length ? index : nil
     }
