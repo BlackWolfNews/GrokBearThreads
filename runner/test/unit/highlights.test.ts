@@ -173,3 +173,25 @@ test('the runner keeps a thread\'s highlights from its events, pins from the too
   assert.equal(rec.highlights.items.length, 1);
   assert.equal(rec.brief.text, 'Waiting on Mike to pick a layout.');
 });
+
+test('a quiet commit shown with git log --oneline, and a quiet push', () => {
+  seq = 0;
+  const state = emptyHighlights();
+  observe(state, [
+    ev({ type: 'tool.call', itemId: 'c', name: 'Bash', kind: 'command', title: 'git', input: { command: "git add -A && git commit -q -F - <<'EOF'\nFind one episode\nEOF\ngit log --oneline -1" } }),
+    ev({ type: 'tool.result', itemId: 'c', ok: true, text: '456680b (HEAD -> single-episode) Find one episode\n', truncated: false, images: [] }),
+    ev({ type: 'tool.call', itemId: 'p', name: 'Bash', kind: 'command', title: 'git', input: { command: 'git push -q -u origin single-episode' } }),
+    ev({ type: 'tool.result', itemId: 'p', ok: true, text: 'remote: https://github.com/mikecann/poddle/pull/new/single-episode\n', truncated: false, images: [] }),
+    ev({ type: 'tool.call', itemId: 'l', name: 'Bash', kind: 'command', title: 'git', input: { command: 'git log --oneline -3' } }),
+    ev({ type: 'tool.result', itemId: 'l', ok: true, text: 'aaaaaaa Not a commit this thread made\n', truncated: false, images: [] }),
+  ], ctx);
+  assert.deepEqual(view(state).highlights.map((h) => [h.id, h.title, h.branch, h.pushed]), [['commit:456680b', 'Find one episode', 'single-episode', true]]);
+});
+
+test('git commands count only when they run, not when they are words in a message', async () => {
+  const { gitRuns } = await import('../../src/highlights.ts');
+  assert.equal(gitRuns('cd x && git -C y commit -qm "a" && git log --oneline -3', 'commit'), 1);
+  assert.equal(gitRuns("cat >> t.ts <<'EOF'\n  input: { command: 'git push -q' }\nEOF", 'push'), 0);
+  assert.equal(gitRuns('git commit -m "then git push it"', 'push'), 0);
+  assert.equal(gitRuns('(cd a && git push) ; git push origin b', 'push'), 2);
+});

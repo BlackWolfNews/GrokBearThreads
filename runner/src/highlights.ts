@@ -102,7 +102,7 @@ export function observe(state: HighlightState, events: Iterable<PersistedEvent>,
               if (isFile(abs)) add({ id: `file:${abs}`, kind: 'file', title: path.basename(abs), path: abs, how: 'opened', seq: e.seq }, e);
             }
           }
-          if (/\bgit\b[^\n]*\b(commit|push)\b|\bgh\s+pr\s+create\b/.test(input.command)) {
+          if (gitRuns(input.command, 'commit') || gitRuns(input.command, 'push') || /\bgh\s+pr\s+create\b/.test(input.command)) {
             (state.pending ??= {})[e.itemId] = { command: input.command };
           }
         }
@@ -117,14 +117,29 @@ export function observe(state: HighlightState, events: Iterable<PersistedEvent>,
         if (/\bgh\s+pr\s+create\b/.test(call.command)) {
           for (const url of text.match(PR_URL_G) ?? []) add({ ...linkItem(url), how: 'created', seq: e.seq }, e);
         }
-        for (const c of commitsIn(text)) {
-          add({ id: `commit:${c.sha}`, kind: 'commit', title: c.message, sha: c.sha, branch: c.branch, how: 'committed', seq: e.seq }, e);
+        const committing = gitRuns(call.command, 'commit');
+        const commits: { branch?: string; sha: string; message: string }[] = commitsIn(text);
+        // Agents mostly commit with -q, which prints nothing, then show it
+        // with `git log --oneline -1`: the first line for each commit, as a
+        // longer log shows ones from before.
+        if (committing && !commits.length && /--oneline/.test(call.command)) commits.push(...onelineCommits(text).slice(0, committing));
+        if (committing) {
+          for (const c of commits) {
+            const item: Omit<Highlight, 'lastSeq' | 'at'> = { id: `commit:${c.sha}`, kind: 'commit', title: c.message, sha: c.sha, how: 'committed', seq: e.seq };
+            if (c.branch) item.branch = c.branch;
+            add(item, e);
+          }
         }
-        for (const branch of pushedBranches(text)) {
+        if (gitRuns(call.command, 'push') && e.ok) {
+          const branches = new Set([...pushedBranches(text), ...pushArgBranches(call.command)]);
           for (const item of state.items) {
-            if (item.kind === 'commit' && item.branch === branch && !item.pushed) {
+            if (item.kind !== 'commit' || item.pushed) continue;
+            // A push whose branch can't be told (`git push -q`) sends what
+            // the thread has just committed, near enough.
+            if (!branches.size || !item.branch || branches.has(item.branch)) {
               item.pushed = true;
               item.lastSeq = e.seq;
+              changed = true;
             }
           }
         }
@@ -302,12 +317,54 @@ export function commitsIn(text: string): { branch: string; sha: string; message:
   return out;
 }
 
+// `456680b Find one episode` (or `456680b (HEAD -> main) Find…`) from
+// `git log --oneline`.
+export function onelineCommits(text: string): { branch?: string; sha: string; message: string }[] {
+  const out: { branch?: string; sha: string; message: string }[] = [];
+  for (const m of text.matchAll(/^([0-9a-f]{7,12})(?: \(([^)]*)\))? (.+)$/gm)) {
+    const head = /HEAD -> ([^,)\s]+)/.exec(m[2] ?? '');
+    const c: { branch?: string; sha: string; message: string } = { sha: m[1]!.slice(0, 7), message: m[3]!.trim().slice(0, 200) };
+    if (head) c.branch = head[1]!;
+    out.push(c);
+  }
+  return out;
+}
+
+// The branches a push command names: `git push -u origin feat` and
+// `git push origin HEAD:feat`. Not `HEAD` alone, which says nothing.
+export function pushArgBranches(command: string): string[] {
+  const out: string[] = [];
+  for (const m of command.matchAll(/\bgit\b(?:\s+-C\s+\S+)?\s+push\b([^;&|\n]*)/g)) {
+    const words = shellWords(m[1]!.trim()).filter((w) => !w.startsWith('-'));
+    for (const w of words.slice(1)) {
+      const branch = w.includes(':') ? w.split(':').pop()! : w;
+      if (branch && branch !== 'HEAD') out.push(branch.replace(/^refs\/heads\//, ''));
+    }
+  }
+  return out;
+}
+
 // Branches a git push sent: "   a1b2c3d..e4f5a6b  main -> main" and
 // " * [new branch]      feature -> feature".
 export function pushedBranches(text: string): string[] {
   const out = new Set<string>();
   for (const m of text.matchAll(/^\s*(?:[+*]?\s*)?(?:[0-9a-f]{7,40}\.{2,3}[0-9a-f]{7,40}|\[new branch\])\s+(\S+)\s+->\s+\S+/gm)) out.add(m[1]!);
   return [...out];
+}
+
+// How many times a command runs `git <sub>` (`git -C dir commit` too), as
+// a command of its own rather than words in a message or a heredoc.
+export function gitRuns(command: string, sub: string): number {
+  let n = 0;
+  for (const segment of command.split(/&&|\|\||;|\||\n|\(|\)/)) {
+    const words = shellWords(segment.trim());
+    if (words[0] !== 'git') continue;
+    let i = 1;
+    while (words[i] === '-C' || words[i] === '-c') i += 2;
+    while (words[i]?.startsWith('-')) i++;
+    if (words[i] === sub) n++;
+  }
+  return n;
 }
 
 // Splits a command into words, minding quotes. Good enough for `open`.
