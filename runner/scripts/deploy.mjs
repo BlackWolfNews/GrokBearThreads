@@ -729,6 +729,11 @@ async function smoke(c, id) {
       THREADBARE_ACCOUNTS_DIR: path.join(tmp, 'no-accounts'),
       THREADBARE_CLAUDE_MAIN_DIR: path.join(tmp, 'no-main'),
       THREADBARE_CLAUDE_MAIN_JSON: path.join(tmp, 'no-main.json'),
+      // Nor the real ~/.codex (its model probe would start a codex) or
+      // Token Stats' limits.json, and never a CLI install.
+      THREADBARE_CODEX_MAIN_DIR: path.join(tmp, 'no-codex-main'),
+      THREADBARE_TOKEN_STATS_LIMITS: path.join(tmp, 'no-limits.json'),
+      THREADBARE_CLI_UPDATES: 'off',
     }),
   });
   fs.closeSync(fd);

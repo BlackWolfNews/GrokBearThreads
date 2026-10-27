@@ -579,8 +579,14 @@ test('CLI statuses reach hello and clis.updated, and a Codex update asks for the
   h.codex.models = async (a) => (asked.push(a.id), []);
   await tick();
   asked.length = 0;
-  const f = fakeClis([codexStatus('0.164.0')]);
+  // E works out what's installed after it's attached: not an update.
+  const unknown: CliStatus = { ...codexStatus('0.164.0'), status: 'unknown' };
+  delete unknown.installedVersion;
+  const f = fakeClis([unknown]);
   h.runner.attachClis(f.clis);
+  f.emit([codexStatus('0.164.0')]);
+  await tick();
+  assert.deepEqual(asked, []);
   assert.deepEqual(h.runner.hello().clis, [codexStatus('0.164.0')]);
   // A check that changed nothing installed: told, but no new probe.
   f.emit([{ ...codexStatus('0.164.0'), latestVersion: '0.165.0', status: 'behind' }]);
@@ -590,8 +596,19 @@ test('CLI statuses reach hello and clis.updated, and a Codex update asks for the
   await tick();
   assert.deepEqual(asked, ['codex-main']);
   const told = h.notes.filter((n) => n.method === 'clis.updated');
-  assert.equal(told.length, 2);
-  assert.equal((told[1] as any).params.clis[0].installedVersion, '0.165.0');
+  assert.equal(told.length, 3);
+  assert.equal((told[2] as any).params.clis[0].installedVersion, '0.165.0');
+  // A first copy arriving where Codex was missing asks too.
+  const h2 = codexHarness();
+  const asked2: string[] = [];
+  h2.codex.models = async (a) => (asked2.push(a.id), []);
+  await tick();
+  asked2.length = 0;
+  const g = fakeClis([{ ...unknown, status: 'missing' }]);
+  h2.runner.attachClis(g.clis);
+  g.emit([codexStatus('0.164.0')]);
+  await tick();
+  assert.deepEqual(asked2, ['codex-main']);
 });
 
 // ------------------------------------------------------- archive and delete
@@ -626,4 +643,34 @@ test('archiving or deleting a Codex thread archives it in Codex too', async () =
   h.adapter.last.result();
   h.runner.delete(c.id);
   assert.equal(CODEX_ACCOUNT.id, 'codex-main');
+});
+
+test('sessions tell CliUpdates whether they got going, on the version new sessions start on', async () => {
+  const h = codexHarness();
+  const f = fakeClis([codexStatus('0.165.0')]);
+  const told: [string, string | undefined, boolean][] = [];
+  f.clis.sessionStarted = (p, v, ok) => void told.push([p, v, ok]);
+  h.runner.attachClis(f.clis);
+  // Died before reporting a version: a failed start on the installed one.
+  const { thread } = h.runner.create({ text: 'x', accountId: 'codex-main' });
+  h.codex.last.sink.exited(new Error('codex exited before initialize'));
+  // Got going: reported once, with the version it runs.
+  h.runner.send(thread.id, 'again');
+  await tick();
+  const s = h.codex.last;
+  s.init('019a-ok', 'gpt-6.1-sol');
+  s.out({ kind: 'cliVersion', version: '0.165.0' });
+  s.out({ kind: 'cliVersion', version: '0.165.0' });
+  s.result();
+  // A missing session to resume isn't the CLI failing.
+  h.clock.advance(31 * 60 * SEC);
+  await tick();
+  h.runner.send(thread.id, 'third');
+  await tick();
+  h.codex.last.sink.exited(new SessionNotFoundError());
+  await tick();
+  assert.deepEqual(told, [
+    ['codex', '0.165.0', false],
+    ['codex', '0.165.0', true],
+  ]);
 });

@@ -57,6 +57,8 @@ export THREADBARE_NODE="$NODE"
 # Every test makes its own temp data dir; none may find the real one.
 unset THREADBARE_HOME THREADBARE_DATA_DIR THREADBARE_PORT THREADBARE_URL THREADBARE_LOG \
   THREADBARE_THREAD_ID THREADBARE_RUNNER_VERSION THREADBARE_RUNNER_HOME
+# No runner a check starts may install or update a CLI.
+export THREADBARE_CLI_UPDATES=off
 
 TMP_ROOT="${TMPDIR:-/tmp}"
 LOGS="$(mktemp -d "${TMP_ROOT%/}/threadbare-check.XXXXXX")"

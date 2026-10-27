@@ -97,6 +97,9 @@ export type CliControl = {
   update(p: Provider, o?: { version?: string; force?: boolean }): CliStatus[];
   setPolicy(p: Provider, policy: CliPolicy): CliStatus[];
   onChange(fn: (clis: CliStatus[]) => void): () => void;
+  // Whether a session on `version` got going (its CLI reported a version)
+  // or died before it did, for the "failed to start twice" warning.
+  sessionStarted?(p: Provider, version: string | undefined, ok: boolean): void;
 };
 
 // What E's CliUpdates calls back into (its constructor's `hooks`).
@@ -164,6 +167,10 @@ type Runtime = {
   // background work or wake grace), and the next message resumes on the
   // new one. Background work is never stopped for it.
   versionMove?: boolean;
+  // The installed version when the live session was started (what E says
+  // new sessions start on), and whether it has got going since.
+  startVersion?: string;
+  started?: boolean;
   // Background work that ended and whose result the CLI hasn't started a
   // turn to read yet. Shown as `finished` in the summary's background list
   // while wakeTimer runs; cleared when that turn starts or the grace ends.
@@ -281,7 +288,11 @@ export class Runner {
   private accountsTimer?: TimerHandle;
   private accountsSentAt = -Infinity;
   private accountsShown?: string; // the last list clients were sent (or got in hello's time)
-  private codexVersion?: string; // E's installed Codex version, to notice an update activating
+  // E's last Codex status, to notice an update activating (or a first
+  // copy arriving where there was none) as against E working out what's
+  // installed when it starts.
+  private codexVersion?: string;
+  private codexMissing = false;
   // The version E last asked sessions to move to, per provider.
   private wantedVersion: Partial<Record<Provider, string>> = {};
   private unsubs: (() => void)[] = [];
@@ -1123,6 +1134,8 @@ export class Runner {
     rt.resumed = resume;
     rt.cliVersion = undefined;
     rt.versionMove = false;
+    rt.started = false;
+    rt.startVersion = this.cliList()?.find((c) => c.provider === rec.provider)?.installedVersion;
     rt.session = adapter.start(
       {
         threadId: rec.id,
@@ -1211,6 +1224,10 @@ export class Runner {
         break;
       case 'cliVersion': {
         rt.cliVersion = o.version;
+        if (!rt.started) {
+          rt.started = true;
+          this.tellStarted(rec.provider, o.version, true);
+        }
         if (rec.cliVersion && rec.cliVersion !== o.version) {
           this.emit(st, { type: 'system.note', text: `${cliName(rec.provider)} ${o.version} from this turn on (was ${rec.cliVersion})` }, rt.turn?.turnId);
         }
@@ -1413,6 +1430,10 @@ export class Runner {
   private onExited(st: ThreadState, gen: number, err?: Error): void {
     const { rec, rt } = st;
     if (rt.generation !== gen) return;
+    // A CLI that died before it got going, other than one asked to stop or
+    // one whose session to resume was missing (the CLI itself was fine).
+    const missing = err && (err instanceof SessionNotFoundError || err.name === 'SessionNotFoundError' || /no conversation found/i.test(err.message));
+    if (err && !rt.started && !missing && rt.releasedGen !== gen) this.tellStarted(rec.provider, rt.startVersion, false);
     rt.session = undefined;
     rt.tasks = [];
     rt.finished = [];
@@ -1970,7 +1991,9 @@ export class Runner {
   // update that activates asks every Codex account for its models again.
   attachClis(clis: CliControl): void {
     this.clis = clis;
-    this.codexVersion = this.cliList()?.find((c) => c.provider === 'codex')?.installedVersion;
+    const codex = this.cliList()?.find((c) => c.provider === 'codex');
+    this.codexVersion = codex?.installedVersion;
+    this.codexMissing = codex?.status === 'missing';
     this.unsubs.push(clis.onChange((list) => this.clisChanged(list)));
   }
 
@@ -1984,13 +2007,24 @@ export class Runner {
     }
   }
 
+  private tellStarted(p: Provider, version: string | undefined, ok: boolean): void {
+    try {
+      this.clis?.sessionStarted?.(p, version, ok);
+    } catch (e) {
+      this.log.warn('could not report a session start', { error: String(e) });
+    }
+  }
+
   private clisChanged(list: CliStatus[]): void {
     this.notify({ method: 'clis.updated', params: { clis: list } });
-    const version = list.find((c) => c.provider === 'codex')?.installedVersion;
+    const codex = list.find((c) => c.provider === 'codex');
+    const version = codex?.installedVersion;
     if (version && version !== this.codexVersion) {
+      const changed = this.codexVersion !== undefined || this.codexMissing;
       this.codexVersion = version;
-      if (!this.stopping) void this.probeModels((a) => a.provider === 'codex');
+      if (changed && !this.stopping) void this.probeModels((a) => a.provider === 'codex');
     }
+    this.codexMissing = codex?.status === 'missing';
   }
 
   // Archives the native session in the CLI's own app (Codex Desktop) when

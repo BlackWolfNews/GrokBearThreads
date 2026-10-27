@@ -59,7 +59,7 @@ describe('threadbare tools end to end (real Claude CLI)', { concurrency: false }
     fs.writeFileSync(path.join(b, 'marker.txt'), 'you are in the new folder\n');
     runner = spawn(process.execPath, ['src/main.ts'], {
       cwd: RUNNER_DIR,
-      env: { ...process.env, THREADBARE_HOME: home, THREADBARE_PORT: '0', THREADBARE_LOG: path.join(root, 'runner.log'), THREADBARE_DEBUG: '1' },
+      env: { ...process.env, THREADBARE_HOME: home, THREADBARE_PORT: '0', THREADBARE_LOG: path.join(root, 'runner.log'), THREADBARE_DEBUG: '1', THREADBARE_CLI_UPDATES: 'off' },
       stdio: ['ignore', 'pipe', 'pipe'],
     });
     const port = await new Promise<number>((resolve, reject) => {

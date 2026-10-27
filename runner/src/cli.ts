@@ -499,6 +499,8 @@ function printEvent(e: any, json: boolean, prefix = ''): void {
       midLine = true;
       return;
     case 'reasoning.delta':
+    // A command's output as it runs (Codex streams it); its result follows.
+    case 'tool.output.delta':
       return;
     case 'user.message':
       return out(`\n> ${e.text}${e.images?.length ? ` [${e.images.length} image(s)]` : ''}`);
