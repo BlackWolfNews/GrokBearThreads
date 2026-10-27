@@ -80,9 +80,13 @@ final class ThreadSession {
                 if debug { print(String(format: "    open %@: before fetch %.0f MB", threadId, memoryMB())) }
                 let page = try await client.events(threadId: threadId, limit: Self.eventsPage)
                 if debug { print(String(format: "    after fetch %.0f MB", memoryMB())) }
+                // What the thread's summary says is running in the
+                // background, for the line at the end.
+                let background = app?.threads[threadId]?.background ?? []
                 let prepared = await Task.detached(priority: .userInitiated) { () -> (TranscriptModel, Int) in
                     var model = TranscriptModel(root: root)
                     model.load(events: page.events, inProgress: page.inProgress)
+                    _ = model.setBackground(background)
                     if debug { print(String(format: "    after model %.0f MB", memoryMB())) }
                     let start = max(0, model.rows.count - Self.initialRows)
                     TranscriptController.renders.prepare(Array(model.rows[start...]), expanded: expanded, width: width)
@@ -190,6 +194,16 @@ final class ThreadSession {
         show(change, oldStart: oldStart)
         flushCount += 1
         flushTime += CACurrentMediaTime() - started
+    }
+
+    /// The thread's summary changed what's running in the background. The
+    /// line at the end comes, goes or changes in place, like a live update.
+    func setBackground(_ tasks: [BackgroundTask]) {
+        guard state == .loaded, !rebuilding else { return }
+        let oldStart = displayStart
+        let change = feed.setBackground(tasks)
+        guard !change.isEmpty else { return }
+        show(change, oldStart: oldStart)
     }
 
     /// Opens or closes a work group or a changed file. Its rows are

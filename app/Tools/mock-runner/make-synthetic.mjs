@@ -147,7 +147,7 @@ function demoThread() {
 
 // ------------------------------------------------------------------ other threads
 
-function smallThread({ name, title, minutesAgo, status = 'idle', needsYou = false, accountId = 'claude-main', snoozedHours, archivedMinutes, turns }) {
+function smallThread({ name, title, minutesAgo, status = 'idle', needsYou = false, accountId = 'claude-main', snoozedHours, archivedMinutes, background, turns }) {
   const id = `demo_${name.replace(/-/g, '_')}`;
   const dir = path.join(root, `demo-${name}`);
   fs.mkdirSync(dir, { recursive: true });
@@ -176,6 +176,7 @@ function smallThread({ name, title, minutesAgo, status = 'idle', needsYou = fals
     preview: last ? last.text.replace(/\s+/g, ' ').slice(0, 140) : '', lastSeq: seq, lastSeenSeq: needsYou ? seq - 1 : seq,
     ...(snoozedHours ? { snoozedUntil: new Date(now + snoozedHours * 3_600_000).toISOString() } : {}),
     ...(archivedMinutes ? { archivedAt: minutes(archivedMinutes) } : {}),
+    ...(background ? { background } : {}),
   };
   writeFixture(dir, summary, events);
 }
@@ -191,6 +192,21 @@ function others() {
         { label: 'Accent blue', description: 'Matches the other toolbar buttons' }, { label: 'Green', description: 'Stands out as the main action' }, { label: 'Plain grey' }] }] },
   ] });
   runningThread();
+  // A turn that ended with three sub-agents still going: the sidebar's
+  // "3 sub-agents" row and the transcript's background line.
+  smallThread({ name: 'landing-pages', title: 'Rebuild the three landing pages', minutesAgo: 6, background: [
+    { kind: 'agent', description: 'Rebuild the home page' },
+    { kind: 'agent', description: 'Rebuild the pricing page' },
+    { kind: 'agent', description: 'Rebuild the docs page' },
+  ], turns: [
+    { user: 'Rebuild the home, pricing and docs landing pages with the new design. One sub-agent each, in the background, and tell me as each one lands.',
+      tools: [
+        { id: 'a1', name: 'Agent', kind: 'task', title: 'Rebuild the home page', input: { description: 'Rebuild the home page', run_in_background: true }, output: 'Started in the background (agent a1).' },
+        { id: 'a2', name: 'Agent', kind: 'task', title: 'Rebuild the pricing page', input: { description: 'Rebuild the pricing page', run_in_background: true }, output: 'Started in the background (agent a2).' },
+        { id: 'a3', name: 'Agent', kind: 'task', title: 'Rebuild the docs page', input: { description: 'Rebuild the docs page', run_in_background: true }, output: 'Started in the background (agent a3).' },
+      ],
+      reply: 'Three sub-agents are on it, one page each. I\'ll come back here as each one finishes.', ms: 9_000, cost: 0.03 },
+  ] });
   smallThread({ name: 'settings-tabs', title: 'Rename the Settings tabs', minutesAgo: 47, turns: [
     { user: 'Rename the Settings tabs to General, Sync and Advanced.', tools: [{ id: 'e', name: 'Edit', kind: 'edit', title: 'Edit ~/dev/photo-sync/Sources/Settings/SettingsView.swift', input: { file_path: `${home}/dev/photo-sync/Sources/Settings/SettingsView.swift`, old_string: 'Tab("Prefs")', new_string: 'Tab("General")' } }], reply: 'Done. The tabs now read **General**, **Sync** and **Advanced**.' },
   ] });

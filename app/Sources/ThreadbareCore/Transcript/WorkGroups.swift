@@ -47,6 +47,17 @@ public struct WorkingStatus: Sendable, Hashable {
     }
 }
 
+/// The line at the end of a thread whose turn is over but whose CLI still
+/// has sub-agents or jobs running in the background (from the thread's
+/// summary, not its events).
+public struct BackgroundStatus: Sendable, Hashable {
+    public var tasks: [BackgroundTask]
+
+    public init(tasks: [BackgroundTask]) {
+        self.tasks = tasks
+    }
+}
+
 /// The "Edited 3 files" card at the end of a turn that changed files.
 public struct ChangedFiles: Sendable, Hashable {
     public var turnId: String

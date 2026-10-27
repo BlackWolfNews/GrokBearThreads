@@ -42,6 +42,8 @@ public enum RowDebug {
             return group.summary
         case .working:
             return "Working"
+        case .background(let status):
+            return BackgroundWork.lineWithDetail(status.tasks)
         case .changes(let card):
             return card.title
         }

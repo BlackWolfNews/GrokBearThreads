@@ -2,7 +2,7 @@
 // turns, persistence and the protocol; an adapter only drives one CLI
 // process per live thread and reports normalised output. Codex will be a
 // second implementation of AgentAdapter.
-import type { Account, DeltaBody, EffortLevel, EventBody, ImageRef, ModelChoice, PermissionMode, Question, TurnOutcome } from '../protocol.ts';
+import type { Account, BackgroundKind, DeltaBody, EffortLevel, EventBody, ImageRef, ModelChoice, PermissionMode, Question, TurnOutcome } from '../protocol.ts';
 
 export type StartSessionOptions = {
   threadId: string;
@@ -66,7 +66,9 @@ export type AdapterOutput =
   | { kind: 'allowRules'; rules: string[] }
   | { kind: 'result'; result: TurnResult };
 
-export type BackgroundTask = { id: string; type: string; description: string };
+// A background shell or subagent the CLI reports. `type` is the CLI's own
+// name for it (Claude: local_bash, local_agent, ...), `kind` the protocol's.
+export type BackgroundTask = { id: string; type: string; kind: BackgroundKind; description: string };
 
 export type ToolApprovalRequest = {
   toolUseId?: string; // left out for a subagent's tools, which have no tool.call

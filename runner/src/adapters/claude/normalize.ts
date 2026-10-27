@@ -3,7 +3,7 @@
 // sequences through it.
 import fs from 'node:fs';
 import path from 'node:path';
-import type { EventBody, Hunk, ImageRef } from '../../protocol.ts';
+import type { BackgroundKind, EventBody, Hunk, ImageRef } from '../../protocol.ts';
 import { LIMITS } from '../../protocol.ts';
 import type { AdapterOutput, TurnResult } from '../types.ts';
 import { EDIT_TOOLS, PlanTracker, computeEditDiff, toolKind, toolTitle, truncateInput } from '../../tools.ts';
@@ -172,7 +172,10 @@ export class ClaudeNormalizer {
     } else if (msg.subtype === 'background_tasks_changed' && Array.isArray(msg.tasks)) {
       const tasks = (msg.tasks as AnyMsg[])
         .filter((t) => !t.ambient && typeof t.task_id === 'string')
-        .map((t) => ({ id: String(t.task_id), type: String(t.task_type ?? 'task'), description: String(t.description ?? '') }));
+        .map((t) => {
+          const type = String(t.task_type ?? 'task');
+          return { id: String(t.task_id), type, kind: backgroundKind(type), description: String(t.description ?? '') };
+        });
       out.push({ kind: 'tasks', tasks });
     } else if (msg.subtype === 'informational' && msg.level === 'warning' && typeof msg.content === 'string') {
       out.push({ kind: 'event', event: { type: 'system.note', text: msg.content } });
@@ -472,6 +475,17 @@ export function cutUtf8(text: string, max: number): string {
 // the marker isn't counted in oldLines/newLines, so it's dropped.
 function cleanHunks(hunks: Hunk[]): Hunk[] {
   return hunks.map((h) => ({ ...h, lines: h.lines.filter((l) => typeof l === 'string' && !l.startsWith('\\')) }));
+}
+
+// The protocol's name for one of the CLI's task types. The CLI's names
+// (its binary lists local_bash, local_agent, remote_agent,
+// in_process_teammate, monitor, workflow, local_workflow, dream) aren't a
+// contract, so anything new is "other" and the description says what it is.
+export function backgroundKind(type: string): BackgroundKind {
+  if (type === 'local_bash') return 'shell';
+  if (type === 'local_agent' || type === 'remote_agent' || type === 'in_process_teammate') return 'agent';
+  if (type === 'monitor') return 'monitor';
+  return 'other';
 }
 
 function oneLineNote(s: string): string {

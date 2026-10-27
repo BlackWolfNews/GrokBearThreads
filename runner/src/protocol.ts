@@ -65,6 +65,10 @@ export type ThreadSummary = {
   actions?: Action[]; // likewise
   hooks?: Hook[]; // likewise
   patches?: PatchInfo[]; // the patches that apply to the folder, built in and the project's; absent when none
+  // Background sub-agents and shell jobs the live CLI is still running
+  // (and ones just finished whose result it's about to read). Absent when
+  // there's none.
+  background?: BackgroundTask[];
 };
 
 // An action a patch gives a thread: a chip above the composer that runs a
@@ -118,6 +122,29 @@ export type Panel = {
   patch: string; // the patch it came from: "convex", "xcode"
   note?: string; // one line about it: the deployment name, the booted device
 };
+
+export type BackgroundKind = 'agent' | 'shell' | 'monitor' | 'other';
+
+export type BackgroundTask = {
+  kind: BackgroundKind;
+  description: string;
+  finished?: boolean;
+};
+
+// "2 sub-agents, 1 shell job in the background" for tb list's flags; '' with none.
+export function backgroundFlag(tasks: BackgroundTask[] | undefined): string {
+  if (!tasks?.length) return '';
+  const running = tasks.filter((t) => !t.finished);
+  const count = (kind: string, one: string, many: string): string => {
+    const n = running.filter((t) => t.kind === kind).length;
+    return n === 0 ? '' : n === 1 ? `1 ${one}` : `${n} ${many}`;
+  };
+  const parts = [count('agent', 'sub-agent', 'sub-agents'), count('shell', 'shell job', 'shell jobs'), count('monitor', 'monitor', 'monitors'), count('other', 'background task', 'background tasks')].filter(Boolean);
+  const finished = tasks.length - running.length;
+  if (finished) parts.push(`${finished} just finished`);
+  return parts.join(', ') + (running.length ? ' in the background' : '');
+}
+
 
 export type ImageRef = {
   path: string;

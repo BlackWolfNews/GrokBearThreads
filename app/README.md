@@ -243,6 +243,13 @@ restart waited for finish just before it (those waiting on Mike stay
 waiting), and any other running turn ends interrupted with the thread
 stopped.
 
+`mock.background` (`threadId`, `tasks: [{ kind, description, finished? }]`;
+empty clears it) sets what a thread's CLI is still running in the
+background between turns, as the real runner's `background` summary field
+does, so the sidebar's "3 sub-agents" row and the transcript's background
+line can be seen without waiting on a real sub-agent. The demo thread
+"Rebuild the three landing pages" starts that way.
+
 ```bash
 (cd Tools/mock-runner && npm install)
 threadbare mock              # the app against the mock, in a temp data folder

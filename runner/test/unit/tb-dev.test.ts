@@ -586,7 +586,7 @@ test("tb restart --now won't cut other threads short, and names the caller's own
     const mine = h.runner.create({ text: 'Deploy', accountId: 'claude-3' }).thread;
     const sm = h.adapter.last;
     sm.init();
-    sm.out({ kind: 'tasks', tasks: [{ id: 'b1', type: 'local_bash', description: 'scripts/dev-runner.sh' }] });
+    sm.out({ kind: 'tasks', tasks: [{ id: 'b1', type: 'local_bash', kind: 'shell', description: 'scripts/dev-runner.sh' }] });
     const other = h.runner.create({ text: 'Other work', accountId: 'claude-3' }).thread;
     h.adapter.last.init();
     const inThread = { THREADBARE_THREAD_ID: mine.id };

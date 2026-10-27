@@ -73,7 +73,7 @@ public enum MarkdownExport {
             return "**Error**: \(message)"
         case .group(let group):
             return "_\(group.summary)_"
-        case .working:
+        case .working, .background:
             return nil
         case .changes(let card):
             let files = card.files.map { "- `\($0.path)` +\($0.added) −\($0.removed)" }

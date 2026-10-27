@@ -4,6 +4,7 @@ import path from 'node:path';
 import { loadConfig, readToken, runnerUrl } from './config.ts';
 import { RunnerClient } from './client.ts';
 import type { ImageRef, PersistedEvent, ThreadSummary } from './protocol.ts';
+import { backgroundFlag } from './protocol.ts';
 import { DEV_HELP, logsCommand, runDev } from './tb-dev.ts';
 
 const OPTIONS = {
@@ -386,7 +387,7 @@ function printThreads(threads: ThreadSummary[], json: boolean): void {
     return;
   }
   for (const t of threads) {
-    const flags = [t.status, t.live ? 'live' : '', t.needsYou ? 'needs you' : ''].filter(Boolean).join(', ');
+    const flags = [t.status, t.live ? 'live' : '', t.needsYou ? 'needs you' : '', backgroundFlag(t.background)].filter(Boolean).join(', ');
     console.log(`${t.id.slice(0, 8)}  ${t.title}  [${flags}]  ${t.accountId}`);
     if (t.preview) console.log(`          ${t.preview}`);
   }

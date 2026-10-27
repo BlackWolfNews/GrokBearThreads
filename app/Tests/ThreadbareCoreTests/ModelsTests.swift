@@ -133,4 +133,28 @@ final class ModelsTests: XCTestCase {
         let delta = E.event(7, "assistant.text.delta", ["itemId": "m1", "text": ["not", "text"]])
         XCTAssertTrue(delta.isTransient, "a delta stays transient even if it can't be read")
     }
+
+    func testThreadSummaryBackgroundDecodesAndTakesUnknownKindsAsOther() throws {
+        let json = """
+        {"id":"th1","title":"t","cwd":"/","accountId":"a","provider":"claude","permissionMode":"full","status":"idle","live":true,"needsYou":false,
+         "createdAt":"2026-10-26T10:00:00Z","updatedAt":"2026-10-26T10:00:00Z","lastActivityAt":"2026-10-26T10:00:00Z","preview":"","lastSeq":1,"lastSeenSeq":1,
+         "background":[{"kind":"agent","description":"Rebuild page A"},{"kind":"shell","description":"npm test","finished":true},{"kind":"dream"},"junk"]}
+        """
+        let thread = try JSONDecoder().decode(ThreadSummary.self, from: Data(json.utf8))
+        XCTAssertEqual(thread.background, [
+            BackgroundTask(kind: .agent, description: "Rebuild page A"),
+            BackgroundTask(kind: .shell, description: "npm test", finished: true),
+            BackgroundTask(kind: .other, description: ""),
+        ])
+        XCTAssertTrue(thread.isWorkingInBackground)
+        let again = try JSONDecoder().decode(ThreadSummary.self, from: JSONEncoder().encode(thread))
+        XCTAssertEqual(again.background, thread.background)
+        // Absent means none, and a running turn isn't "in the background".
+        var none = try JSONDecoder().decode(ThreadSummary.self, from: Data(json.replacingOccurrences(of: "\"background\":[{\"kind\":\"agent\",\"description\":\"Rebuild page A\"},{\"kind\":\"shell\",\"description\":\"npm test\",\"finished\":true},{\"kind\":\"dream\"},\"junk\"]", with: "\"x\":1").utf8))
+        XCTAssertEqual(none.background, [])
+        XCTAssertFalse(none.isWorkingInBackground)
+        none.background = thread.background
+        none.status = .running
+        XCTAssertFalse(none.isWorkingInBackground)
+    }
 }

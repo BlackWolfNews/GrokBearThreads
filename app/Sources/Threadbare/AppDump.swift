@@ -27,6 +27,8 @@ struct AppDump: Encodable {
         var needsYou: Bool
         var unread: Bool
         var hovered: Bool
+        /// What the row says is running in the background, if anything.
+        var background: String?
     }
 
     struct Section: Encodable {
@@ -157,7 +159,8 @@ struct AppDump: Encodable {
         func thread(_ summary: ThreadSummary, section: InboxSection? = nil) -> Thread {
             let look = ThreadRowLook(summary, section: section)
             return Thread(id: summary.id, title: summary.title, status: summary.status.rawValue, needsYou: summary.needsYou,
-                          unread: look.unread, hovered: app.hoverOverride == summary.id)
+                          unread: look.unread, hovered: app.hoverOverride == summary.id,
+                          background: look.status == .background ? BackgroundWork.short(summary.background) : nil)
         }
         let sections: [Section]
         switch app.sidebarMode {
@@ -288,6 +291,7 @@ struct AppDump: Encodable {
                 var flags = [thread.status]
                 if thread.unread { flags.append("unread") }
                 if thread.hovered { flags.append("hovered") }
+                if let background = thread.background { flags.append("bg: " + background) }
                 let mark = thread.id == selection?.id ? ">" : " "
                 lines.append("  \(mark) \(pad(thread.id, threadWidth)) \(pad(flags.joined(separator: " "), 16)) \(thread.title)")
             }

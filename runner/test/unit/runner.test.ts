@@ -871,7 +871,7 @@ test('background work keeps the CLI past the idle time; release afterwards', asy
   const { thread } = create(h);
   const s = h.adapter.last;
   s.init();
-  s.out({ kind: 'tasks', tasks: [{ id: 'b1', type: 'local_bash', description: 'npm run dev' }] });
+  s.out({ kind: 'tasks', tasks: [{ id: 'b1', type: 'local_bash', kind: 'shell', description: 'npm run dev' }] });
   s.result();
   assert.equal(h.runner.hasIdleTimer(thread.id), false);
   h.clock.advance(3 * 30 * MIN);
@@ -883,12 +883,97 @@ test('background work keeps the CLI past the idle time; release afterwards', asy
   assert.equal(s.endedHard, false);
 });
 
+test('background sub-agents and shell jobs are in the summary until the agent has read their results', async () => {
+  const h = makeHarness();
+  const { thread } = create(h);
+  const s = h.adapter.last;
+  s.init();
+  const updates: any[] = [];
+  const off = h.runner.onNotification((n: any) => {
+    if (n.method === 'thread.updated' && n.params.thread.id === thread.id) updates.push(n.params.thread);
+  });
+  const agent = (n: number) => ({ id: `a${n}`, type: 'local_agent', kind: 'agent' as const, description: `Rebuild landing page ${n}` });
+  const shell = { id: 'b1', type: 'local_bash', kind: 'shell' as const, description: 'npm test' };
+  s.out({ kind: 'tasks', tasks: [agent(1), agent(2), agent(3), shell] });
+  s.result();
+  let t = h.runner.get(thread.id);
+  assert.deepEqual(checkSummary(t), []);
+  assert.equal(t.status, 'idle');
+  assert.deepEqual(t.background, [
+    { kind: 'agent', description: 'Rebuild landing page 1' },
+    { kind: 'agent', description: 'Rebuild landing page 2' },
+    { kind: 'agent', description: 'Rebuild landing page 3' },
+    { kind: 'shell', description: 'npm test' },
+  ]);
+  assert.ok(updates.some((u) => u.background?.length === 4), 'the app heard about the background work');
+  // One sub-agent finishes: it stays in the list as finished while the
+  // CLI gets round to the turn that reads its result.
+  s.out({ kind: 'tasks', tasks: [agent(2), agent(3), shell] });
+  t = h.runner.get(thread.id);
+  assert.deepEqual(checkSummary(t), []);
+  assert.deepEqual(t.background, [
+    { kind: 'agent', description: 'Rebuild landing page 2' },
+    { kind: 'agent', description: 'Rebuild landing page 3' },
+    { kind: 'shell', description: 'npm test' },
+    { kind: 'agent', description: 'Rebuild landing page 1', finished: true },
+  ]);
+  assert.deepEqual(h.runner.backgroundWork(), [{ threadId: thread.id, tasks: ['Rebuild landing page 2', 'Rebuild landing page 3', 'npm test', 'Rebuild landing page 1 (just finished, which the agent is about to look at)'] }]);
+  // The CLI starts its own turn to read it: the finished entry goes, the
+  // rest stay through the turn.
+  s.out({ kind: 'cliTurn', note: 'Agent "Rebuild landing page 1" completed' });
+  t = h.runner.get(thread.id);
+  assert.equal(t.status, 'running');
+  assert.deepEqual(t.background?.map((b) => b.description), ['Rebuild landing page 2', 'Rebuild landing page 3', 'npm test']);
+  s.result();
+  assert.deepEqual(h.runner.get(thread.id).background?.length, 3);
+  // Everything else finishes and nothing reads it in time: the grace
+  // runs out and the list clears.
+  s.out({ kind: 'tasks', tasks: [] });
+  t = h.runner.get(thread.id);
+  assert.equal(t.background?.length, 3);
+  assert.ok(t.background?.every((b) => b.finished));
+  h.clock.advance(15_000);
+  t = h.runner.get(thread.id);
+  assert.equal(t.background, undefined);
+  assert.equal(t.status, 'idle');
+  assert.ok(updates.at(-1).background === undefined, 'the app heard it clear');
+  off();
+});
+
+test('a task that ends during a turn is finished in the summary only after the turn, until the CLI reads it', async () => {
+  const h = makeHarness();
+  const { thread } = create(h);
+  const s = h.adapter.last;
+  s.init();
+  s.out({ kind: 'tasks', tasks: [{ id: 'b1', type: 'local_bash', kind: 'shell', description: 'npm test' }] });
+  s.out({ kind: 'tasks', tasks: [] });
+  // Still running the turn: the CLI may fold the result into it.
+  assert.equal(h.runner.get(thread.id).background, undefined);
+  s.result();
+  assert.deepEqual(h.runner.get(thread.id).background, [{ kind: 'shell', description: 'npm test', finished: true }]);
+  s.out({ kind: 'cliTurn', note: 'Background command "npm test" completed (exit code 0)' });
+  assert.equal(h.runner.get(thread.id).background, undefined);
+});
+
+test('releasing or losing the CLI clears the background list', async () => {
+  const h = makeHarness();
+  const { thread } = create(h);
+  const s = h.adapter.last;
+  s.init();
+  s.out({ kind: 'tasks', tasks: [{ id: 'a1', type: 'local_agent', kind: 'agent', description: 'Check the docs' }] });
+  s.result();
+  assert.equal(h.runner.get(thread.id).background?.length, 1);
+  h.runner.update({ threadId: thread.id, archived: true });
+  await tick();
+  assert.equal(h.runner.get(thread.id).background, undefined);
+});
+
 test('snoozing a thread with background work stops it straight away and says so', async () => {
   const h = makeHarness();
   const { thread } = create(h);
   const s = h.adapter.last;
   s.init();
-  s.out({ kind: 'tasks', tasks: [{ id: 'b1', type: 'local_bash', description: 'npm run dev' }] });
+  s.out({ kind: 'tasks', tasks: [{ id: 'b1', type: 'local_bash', kind: 'shell', description: 'npm run dev' }] });
   s.result();
   h.runner.update({ threadId: thread.id, snoozedUntil: new Date(h.clock.now() + 60 * MIN).toISOString() });
   assert.equal(s.ended, true);

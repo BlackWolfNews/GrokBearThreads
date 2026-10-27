@@ -78,6 +78,13 @@ type ThreadSummary = {
   actions?: Action[]    // likewise
   hooks?: Hook[]        // likewise
   patches?: PatchInfo[] // the patches that apply to the folder; absent when there are none
+  background?: BackgroundTask[] // what the live CLI is still running in
+                        // the background: sub-agents and shell jobs
+                        // started with run_in_background, Monitor and the
+                        // like, and ones just finished whose result the
+                        // agent hasn't read yet. Absent when there's none.
+                        // Set during a turn too; between turns it's the
+                        // sign the thread is still being worked on
 }
 
 type Action = {
@@ -115,6 +122,20 @@ type Panel = {
   url?: string          // kind "url": the page; also what Open in browser opens
   patch: string         // the patch it came from: "convex", "xcode"
   note?: string         // one line about it: the deployment, the project
+}
+
+
+type BackgroundTask = {
+  kind: "agent" | "shell" | "monitor" | "other" // a sub-agent, a shell
+                        // command, a Monitor, or anything else the CLI
+                        // runs in the background (a workflow). Clients
+                        // treat a kind they don't know as "other"
+  description: string   // the CLI's own words: the sub-agent's brief, the
+                        // command. May be empty
+  finished?: boolean    // true once it has finished and the agent is about
+                        // to start a turn of its own to read its result
+                        // (the runner counts it for up to 15 s, until that
+                        // turn starts)
 }
 
 type ImageRef = {
@@ -203,7 +224,7 @@ found, `-32010` account not found, `-32020` busy (e.g. two sends racing),
 
 | method | params |
 |---|---|
-| `thread.updated` | `{ thread: ThreadSummary }` sent to every connected client whenever a summary changes |
+| `thread.updated` | `{ thread: ThreadSummary }` sent to every connected client whenever a summary changes, `background` included: a sub-agent or shell job starting or finishing sends one even when nothing else changed |
 | `thread.event` | `{ threadId, event: Event }` only for subscribed threads, persisted and transient |
 | `thread.deleted` | `{ threadId }` sent to every connected client when a thread is deleted |
 | `accounts.updated` | `{ accounts: Account[] }` sent to every connected client when what the runner knows about an account changes: its `models` once the CLI has been asked, or its `defaultModel` once a turn has shown it. Replaces the list from `hello` |

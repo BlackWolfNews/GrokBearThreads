@@ -7,6 +7,10 @@ public enum ThreadRowStatus: Sendable, Equatable {
     case time
     /// A turn is running (spinner and "Working" in the accent colour).
     case working
+    /// No turn, but background sub-agents or jobs are still going (a grey
+    /// spinner and what's running: "3 sub-agents"). `BackgroundWork.short`
+    /// has the words; `label` is the generic one.
+    case background
     /// Waiting on an approval or a question ("Needs you" in orange).
     case needsYou
     /// The last turn failed.
@@ -18,6 +22,7 @@ public enum ThreadRowStatus: Sendable, Equatable {
         switch self {
         case .time: return nil
         case .working: return "Working"
+        case .background: return "In the background"
         case .needsYou: return "Needs you"
         case .failed: return "Failed"
         case .stopped: return "Stopped"
@@ -54,7 +59,7 @@ public struct ThreadRowLook: Sendable, Equatable {
         case .running, .starting: status = .working
         case .error: status = .failed
         case .stopped: status = .stopped
-        case .idle: status = .time
+        case .idle: status = thread.background.isEmpty ? .time : .background
         }
         unread = thread.needsYou && status != .needsYou && status != .working
         emphasised = thread.needsYou || status == .needsYou
@@ -92,13 +97,20 @@ public enum BusyThreadAction {
         case archive, snooze
     }
 
-    public static func needsConfirm(_ status: ThreadStatus) -> Bool { status.isBusy }
+    /// A turn underway, or background work the runner would stop.
+    public static func needsConfirm(_ thread: ThreadSummary) -> Bool { thread.status.isBusy || !thread.background.isEmpty }
 
     /// The confirmation's question and its explanation.
-    public static func prompt(_ action: Action, status: ThreadStatus) -> (title: String, detail: String) {
+    public static func prompt(_ action: Action, thread: ThreadSummary) -> (title: String, detail: String) {
         let verb = action == .archive ? "Archive" : "Hibernate"
-        let state = status == .waiting ? "is waiting for you" : "is still working"
         let doing = action == .archive ? "Archiving" : "Hibernating"
+        if !thread.status.isBusy {
+            // Only background work: sub-agents or jobs the runner stops
+            // when it lets the CLI go.
+            let what = BackgroundWork.short(thread.background).lowercased()
+            return ("\(verb) and stop the background work?", "This thread still has \(what) in the background. \(doing) it now stops them.")
+        }
+        let state = thread.status == .waiting ? "is waiting for you" : "is still working"
         return ("\(verb) and stop the turn?", "This thread \(state). \(doing) it now stops its turn.")
     }
 }

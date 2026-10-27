@@ -211,6 +211,12 @@ driving it from a script") and in AGENTS.md ("Seeing and driving the app").
   is a centred note, "Sent by the runner after it restarted" over its text.
   The mock has `runner.status`, `mock.restartPending` and `mock.restart`,
   and `Tools/screenshots.sh --only 11` shoots all three states.
+- A thread whose turn ended with background sub-agents or shell jobs
+  still going (`ThreadSummary.background`) sits under Running with a grey
+  spinner and what's running ("3 sub-agents"), and its transcript ends
+  with the bear and "3 sub-agents working in the background · ...", until
+  the CLI has read every result. The demo thread "Rebuild the three
+  landing pages" starts that way; `mock.background` sets it on any thread.
 - "Copy debug info" on every transcript row (thread, row, kind, turn, the
   seqs of the events it came from, the runner's version) and "Copy thread
   id" in the ... menu. A scripted app copies to its own pasteboard.

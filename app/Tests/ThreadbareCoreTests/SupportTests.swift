@@ -120,9 +120,27 @@ final class SnoozeTests: XCTestCase {
 }
 
 final class ThreadSectionsTests: XCTestCase {
-    func thread(_ id: String, status: ThreadStatus = .idle, needsYou: Bool = false, minutesAgo: Double, snoozed: Date? = nil, archived: Date? = nil) -> ThreadSummary {
+    func thread(_ id: String, status: ThreadStatus = .idle, needsYou: Bool = false, minutesAgo: Double, snoozed: Date? = nil, archived: Date? = nil, background: [BackgroundTask] = []) -> ThreadSummary {
         let now = Date(timeIntervalSince1970: 1_000_000)
-        return ThreadSummary(id: id, title: id, status: status, needsYou: needsYou, lastActivityAt: now.addingTimeInterval(-minutesAgo * 60), snoozedUntil: snoozed, archivedAt: archived)
+        return ThreadSummary(id: id, title: id, status: status, needsYou: needsYou, lastActivityAt: now.addingTimeInterval(-minutesAgo * 60), snoozedUntil: snoozed, archivedAt: archived, background: background)
+    }
+
+    /// A thread whose turn ended with sub-agents or jobs still going is
+    /// still being worked on, so it sits under Running, unread reply and
+    /// all; a question from it still needs Mike first.
+    func testBackgroundWorkCountsAsRunning() {
+        let now = Date(timeIntervalSince1970: 1_000_000)
+        let cubs = [BackgroundTask(kind: .agent, description: "a")]
+        let threads = [
+            thread("bg", minutesAgo: 3, background: cubs),
+            thread("bg-unread", needsYou: true, minutesAgo: 2, background: cubs),
+            thread("bg-waiting", status: .waiting, needsYou: true, minutesAgo: 1, background: cubs),
+            thread("running", status: .running, minutesAgo: 4),
+        ]
+        let sections = ThreadSections.build(threads, now: now)
+        XCTAssertEqual(sections.needsYou.map(\.id), ["bg-waiting"])
+        XCTAssertEqual(sections.running.map(\.id), ["bg-unread", "bg", "running"])
+        XCTAssertEqual(sections.inbox, [])
     }
 
     func testSections() {

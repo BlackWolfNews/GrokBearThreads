@@ -149,7 +149,7 @@ final class RenderCache: @unchecked Sendable {
     static func effectiveExpanded(_ row: TranscriptRow, _ expanded: Bool) -> Bool {
         switch row.content {
         case .group(let group): return group.isExpanded
-        case .changes, .working: return false
+        case .changes, .working, .background: return false
         default: return expanded
         }
     }
@@ -424,7 +424,7 @@ enum RowRenderer {
             let text = groupText(group)
             return RowRender(height: RowMetrics.workHeight, text: text, textSize: text.size())
 
-        case .working:
+        case .working, .background:
             return RowRender(height: RowMetrics.workingHeight)
 
         case .changes(let card):

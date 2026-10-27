@@ -9,6 +9,7 @@ import type {
   Account,
   AnyEvent,
   ApprovalDecision,
+  BackgroundTask as ProtocolBackgroundTask,
   DeltaBody,
   DeltaType,
   EffortLevel,
@@ -103,6 +104,10 @@ type Runtime = {
   deleted?: boolean; // anything the old CLI still reports is dropped
   turn?: Turn;
   tasks: BackgroundTask[]; // background work the live CLI is running
+  // Background work that ended and whose result the CLI hasn't started a
+  // turn to read yet. Shown as `finished` in the summary's background list
+  // while wakeTimer runs; cleared when that turn starts or the grace ends.
+  finished: BackgroundTask[];
   // Set when background work finished with no turn running: the CLI is
   // about to start a turn of its own to look at the result, and until it
   // does (or WAKE_GRACE_MS passes) the thread isn't idle.
@@ -390,6 +395,7 @@ export class Runner {
       // Killing the CLIs kills their background shells and subagents too.
       // Say so in the thread, as releaseSession does, or it would wait for
       // a result that never comes with nothing to say why.
+      rt.finished = [];
       if (rt.tasks.length) {
         const what = rt.tasks.map((t) => t.description || t.type).join('; ');
         rt.tasks = [];
@@ -419,9 +425,22 @@ export class Runner {
   backgroundWork(): { threadId: string; tasks: string[] }[] {
     const out: { threadId: string; tasks: string[] }[] = [];
     for (const st of this.threads.values()) {
-      const tasks = st.rt.tasks.map((t) => t.description || t.type);
-      if (st.rt.wakeTimer) tasks.push('a background task that just finished, which the agent is about to look at');
+      const tasks = this.background(st).map((t) => (t.finished ? `${t.description || 'a background task'} (just finished, which the agent is about to look at)` : t.description || 'a background task'));
       if (tasks.length) out.push({ threadId: st.rec.id, tasks });
+    }
+    return out;
+  }
+
+  // The summary's background list: what the CLI is still running, then
+  // (while the wake grace runs) what just finished and is about to be read.
+  private background(st: ThreadState): ProtocolBackgroundTask[] {
+    const { rt } = st;
+    const out: ProtocolBackgroundTask[] = rt.tasks.map((t) => ({ kind: t.kind, description: t.description || t.type }));
+    if (rt.wakeTimer) {
+      // A grace with nothing recorded as finished (a task list the CLI
+      // replaced wholesale) still says a result is on its way.
+      const finished = rt.finished.length ? rt.finished : [{ id: '', type: 'task', kind: 'other' as const, description: '' }];
+      for (const t of finished) out.push({ kind: t.kind, description: t.description || (t.type === 'task' ? '' : t.type), finished: true });
     }
     return out;
   }
@@ -921,15 +940,18 @@ export class Runner {
         if (o.note) this.emit(st, { type: 'system.note', text: o.note }, rt.turn!.turnId);
         break;
       case 'tasks': {
-        const ended = rt.tasks.some((t) => !o.tasks.some((n) => n.id === t.id));
+        const endedTasks = rt.tasks.filter((t) => !o.tasks.some((n) => n.id === t.id));
+        const ended = endedTasks.length > 0;
         rt.tasks = o.tasks;
+        rt.finished.push(...endedTasks);
         // The CLI reports the list shrinking a moment before it starts the
         // turn that reads the result. A restart in between would lose that
         // turn, so the thread stays busy until it starts.
         if (ended && !rt.turn) this.startWakeGrace(st);
         else if (ended) rt.taskEndedInTurn = true;
-        // No summary field changes, but a pending restart waits on
-        // background work and re-checks on thread.updated.
+        // The summary's background list changed: the app shows it, and a
+        // pending restart waits on background work and re-checks on
+        // thread.updated.
         this.markDirty(st);
         // Background work keeps the CLI live; once it's done the idle
         // countdown starts again.
@@ -987,6 +1009,7 @@ export class Runner {
     rt.wakeTimer?.cancel();
     rt.wakeTimer = this.clock.setTimeout(() => {
       rt.wakeTimer = undefined;
+      rt.finished = [];
       this.markDirty(st);
     }, WAKE_GRACE_MS);
   }
@@ -995,6 +1018,7 @@ export class Runner {
     const { rec, rt } = st;
     rt.wakeTimer?.cancel();
     rt.wakeTimer = undefined;
+    rt.finished = [];
     const turnId = crypto.randomUUID();
     this.emit(st, { type: 'turn.started', turnId }, turnId);
     rt.idleTimer?.cancel();
@@ -1093,6 +1117,7 @@ export class Runner {
     if (rt.generation !== gen) return;
     rt.session = undefined;
     rt.tasks = [];
+    rt.finished = [];
     rt.taskEndedInTurn = false;
     rt.wakeTimer?.cancel();
     rt.wakeTimer = undefined;
@@ -1469,6 +1494,7 @@ export class Runner {
       }
       rt.tasks = [];
     }
+    rt.finished = [];
     rt.releaseWhenIdle = false;
     rt.releasedGen = rt.generation;
     this.log.info('releasing CLI', { threadId: rec.id, hard });
@@ -1638,6 +1664,8 @@ export class Runner {
     if (set.actions.length) s.actions = set.actions;
     if (set.hooks.length) s.hooks = set.hooks;
     if (set.patches.length) s.patches = set.patches;
+    const background = this.background(st);
+    if (background.length) s.background = background;
     return s;
   }
 
@@ -1919,6 +1947,7 @@ function newRuntime(activeAt: number): Runtime {
     resumed: false,
     retriedFresh: false,
     tasks: [],
+    finished: [],
     activeAt,
     approvals: new Map(),
     releaseWhenIdle: false,

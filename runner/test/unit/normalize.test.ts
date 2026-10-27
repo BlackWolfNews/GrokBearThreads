@@ -373,7 +373,24 @@ test('background tasks: ambient ones are left out', () => {
     { task_id: 'b1', task_type: 'local_bash', description: 'npm run dev' },
     { task_id: 'w1', task_type: 'watcher', description: 'watch', ambient: true },
   ] }));
-  assert.deepEqual(outs, [{ kind: 'tasks', tasks: [{ id: 'b1', type: 'local_bash', description: 'npm run dev' }] }]);
+  assert.deepEqual(outs, [{ kind: 'tasks', tasks: [{ id: 'b1', type: 'local_bash', kind: 'shell', description: 'npm run dev' }] }]);
+});
+
+test('background tasks: the CLI\'s task types map to the protocol\'s kinds, unknown ones to other', () => {
+  const n = new ClaudeNormalizer(ctx());
+  const outs = n.handle(sys('background_tasks_changed', { tasks: [
+    { task_id: 'a1', task_type: 'local_agent', description: 'Rebuild page A' },
+    { task_id: 'a2', task_type: 'remote_agent', description: 'Review' },
+    { task_id: 'a3', task_type: 'in_process_teammate', description: 'Teammate' },
+    { task_id: 'm1', task_type: 'monitor', description: 'Watch the deploy' },
+    { task_id: 'w1', task_type: 'local_workflow', description: 'A workflow' },
+    { task_id: 'x1' },
+  ] }));
+  assert.equal(outs.length, 1);
+  assert.equal(outs[0].kind, 'tasks');
+  const tasks = (outs[0] as { kind: 'tasks'; tasks: { id: string; kind: string; type: string; description: string }[] }).tasks;
+  assert.deepEqual(tasks.map((t) => [t.id, t.kind]), [['a1', 'agent'], ['a2', 'agent'], ['a3', 'agent'], ['m1', 'monitor'], ['w1', 'other'], ['x1', 'other']]);
+  assert.deepEqual(tasks[5], { id: 'x1', type: 'task', kind: 'other', description: '' });
 });
 
 test('edit.diff drops the "No newline at end of file" markers', () => {

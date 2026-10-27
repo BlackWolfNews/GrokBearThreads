@@ -324,6 +324,19 @@ struct ThreadRowView: View {
             .font(.system(size: TypeScale.sidebarMeta, weight: .medium))
             .foregroundStyle(Color.accentColor)
             .help("Working")
+        case .background:
+            // Still being worked on, but by sub-agents or jobs in the
+            // background: the same spinner in grey, and what's running
+            // instead of a clock. Visibly not a streaming turn.
+            HStack(alignment: .firstTextBaseline, spacing: 5) {
+                SpinnerMark(color: .secondaryLabelColor)
+                    .frame(width: 12, height: 12)
+                    .alignmentGuide(.firstTextBaseline) { $0[VerticalAlignment.center] + 4 }
+                Text(BackgroundWork.short(thread.background))
+            }
+            .font(.system(size: TypeScale.sidebarMeta, weight: .medium))
+            .foregroundStyle(.secondary)
+            .help(BackgroundWork.detail(thread.background))
         case .needsYou:
             if look.labelled {
                 Text("Needs you").font(.system(size: TypeScale.sidebarMeta, weight: .medium)).foregroundStyle(Color(nsColor: Theme.needsYou))
@@ -557,8 +570,8 @@ enum BusyConfirm {
     /// Whether to go ahead: the thread isn't busy, or Mike said yes. Its
     /// status is read now, not when the row was drawn.
     static func allowed(_ action: BusyThreadAction.Action, threadId: String, app: AppModel) -> Bool {
-        guard let status = app.threads[threadId]?.status, BusyThreadAction.needsConfirm(status) else { return true }
-        let prompt = BusyThreadAction.prompt(action, status: status)
+        guard let thread = app.threads[threadId], BusyThreadAction.needsConfirm(thread) else { return true }
+        let prompt = BusyThreadAction.prompt(action, thread: thread)
         let alert = NSAlert()
         alert.messageText = prompt.title
         alert.informativeText = prompt.detail

@@ -276,6 +276,49 @@ public struct PanelRender: Sendable, Hashable, Decodable {
     }
 }
 
+/// Work the live CLI is still running in the background: a sub-agent or a
+/// shell job started with run_in_background, a Monitor. `finished` once it
+/// has ended and the agent is about to start a turn to read its result.
+public struct BackgroundTask: Sendable, Hashable, Codable {
+    public enum Kind: String, Sendable, Hashable, Codable {
+        case agent, shell, monitor, other
+
+        public init(from decoder: Decoder) throws {
+            let raw = try decoder.singleValueContainer().decode(String.self)
+            self = Kind(rawValue: raw) ?? .other
+        }
+    }
+
+    public var kind: Kind
+    /// The CLI's own words: the sub-agent's brief, the command. May be empty.
+    public var description: String
+    public var finished: Bool
+
+    public init(kind: Kind, description: String, finished: Bool = false) {
+        self.kind = kind
+        self.description = description
+        self.finished = finished
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        kind = try c.decodeIfPresent(Kind.self, forKey: .kind) ?? .other
+        description = try c.decodeIfPresent(String.self, forKey: .description) ?? ""
+        finished = try c.decodeIfPresent(Bool.self, forKey: .finished) ?? false
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(kind, forKey: .kind)
+        try c.encode(description, forKey: .description)
+        if finished { try c.encode(true, forKey: .finished) }
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case kind, description, finished
+    }
+}
+
 public struct ThreadSummary: Sendable, Hashable, Codable, Identifiable {
     public var id: String
     public var title: String
@@ -308,6 +351,9 @@ public struct ThreadSummary: Sendable, Hashable, Codable, Identifiable {
     public var actions: [Action]
     public var hooks: [Hook]
     public var patches: [PatchInfo]
+    /// Background sub-agents and shell jobs the CLI is still running (and
+    /// ones just finished whose result it's about to read). Empty when none.
+    public var background: [BackgroundTask]
 
     public init(
         id: String, title: String, cwd: String = "~/dev/me/misc", accountId: String = "claude-main",
@@ -318,7 +364,7 @@ public struct ThreadSummary: Sendable, Hashable, Codable, Identifiable {
         lastSeq: Int = 0, lastSeenSeq: Int = 0, nativeSessionId: String? = nil,
         contextTokens: Int? = nil, costUsd: Double? = nil,
         effort: String? = nil, modelInUse: String? = nil, effortInUse: String? = nil, panels: [Panel] = [],
-        actions: [Action] = [], hooks: [Hook] = [], patches: [PatchInfo] = []
+        actions: [Action] = [], hooks: [Hook] = [], patches: [PatchInfo] = [], background: [BackgroundTask] = []
     ) {
         self.id = id
         self.title = title
@@ -348,6 +394,7 @@ public struct ThreadSummary: Sendable, Hashable, Codable, Identifiable {
         self.actions = actions
         self.hooks = hooks
         self.patches = patches
+        self.background = background
     }
 
     public init(from decoder: Decoder) throws {
@@ -385,6 +432,7 @@ public struct ThreadSummary: Sendable, Hashable, Codable, Identifiable {
         actions = c.lossyArray(Action.self, forKey: .actions)
         hooks = c.lossyArray(Hook.self, forKey: .hooks)
         patches = c.lossyArray(PatchInfo.self, forKey: .patches)
+        background = c.lossyArray(BackgroundTask.self, forKey: .background)
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -417,13 +465,19 @@ public struct ThreadSummary: Sendable, Hashable, Codable, Identifiable {
         if !actions.isEmpty { try c.encode(actions, forKey: .actions) }
         if !hooks.isEmpty { try c.encode(hooks, forKey: .hooks) }
         if !patches.isEmpty { try c.encode(patches, forKey: .patches) }
+        if !background.isEmpty { try c.encode(background, forKey: .background) }
     }
 
     enum CodingKeys: String, CodingKey {
         case id, title, cwd, accountId, provider, model, effort, modelInUse, effortInUse, permissionMode, status, live, needsYou
         case createdAt, updatedAt, lastActivityAt, snoozedUntil, archivedAt, preview
-        case lastSeq, lastSeenSeq, nativeSessionId, contextTokens, costUsd, panels, actions, hooks, patches
+        case lastSeq, lastSeenSeq, nativeSessionId, contextTokens, costUsd, panels, actions, hooks, patches, background
     }
+
+    /// Still being worked on between turns: background sub-agents or jobs
+    /// are running (or just finished, with their result still to be read)
+    /// and no turn is underway to show for it.
+    public var isWorkingInBackground: Bool { !background.isEmpty && !status.isBusy }
 
     public var isArchived: Bool { archivedAt != nil }
 

@@ -309,6 +309,9 @@ final class AppModel {
     private func receive(_ thread: ThreadSummary) {
         let previous = threads[thread.id]
         threads[thread.id] = thread
+        // The open transcript's "3 sub-agents working in the background"
+        // line follows the summary, not the events.
+        if previous?.background != thread.background { sessions[thread.id]?.setBackground(thread.background) }
         // A thread a pending restart waits for may just have finished.
         if restart.isPending, previous?.status != thread.status { refreshRunnerStatus() }
         let becameNeedy = thread.needsYou && previous?.needsYou != true

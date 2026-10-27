@@ -149,7 +149,7 @@ async function dispatch(client, method, p) {
         version: runnerVersion, pid: process.pid, startedAt, home: dataDir, logFile: path.join(dataDir, 'runner.log'),
         liveClis: all.filter((s) => s.live).length,
         running: all.filter((s) => ['starting', 'running', 'waiting'].includes(s.status)).map((s) => s.id),
-        background: [],
+        background: all.filter((s) => s.background?.length).map((s) => ({ threadId: s.id, tasks: s.background.map((b) => b.description || b.kind) })),
       };
       if (pendingRestart) status.pendingRestart = pendingRestart;
       return status;
@@ -314,6 +314,23 @@ async function dispatch(client, method, p) {
       const onYou = waitingFor.filter((id) => threads.get(id)?.summary.status === 'waiting').length;
       broadcastNotice('info', pendingMessage(waitingFor.length, onYou));
       return { scheduled: true, waitingFor };
+    }
+    case 'mock.background': {
+      // What a thread's CLI is running in the background, as the real
+      // runner reports it between turns: `tasks` is the summary's
+      // `background` list ([{ kind, description, finished? }]); empty or
+      // missing clears it.
+      const t = need(p.threadId);
+      const tasks = Array.isArray(p.tasks) ? p.tasks.filter((b) => b && typeof b === 'object').map((b) => ({
+        kind: ['agent', 'shell', 'monitor', 'other'].includes(b.kind) ? b.kind : 'other',
+        description: String(b.description ?? ''),
+        ...(b.finished ? { finished: true } : {}),
+      })) : [];
+      if (tasks.length) t.summary.background = tasks;
+      else delete t.summary.background;
+      t.summary.live = tasks.length > 0 || t.summary.live;
+      broadcastSummary(t.summary.id);
+      return { thread: t.summary };
     }
     case 'mock.restart':
       return restartNow(p);

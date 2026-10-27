@@ -8,6 +8,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import { loadConfig, readToken, runnerUrl } from '../../src/config.ts';
 import { nullLogger } from '../../src/log.ts';
+import { backgroundFlag } from '../../src/protocol.ts';
 
 const TB = path.join(import.meta.dirname, '..', '..', 'bin', 'tb');
 
@@ -163,4 +164,15 @@ test('tb refuses flags its command does not read, explains one command with --he
   } finally {
     await server.close();
   }
+});
+
+test('tb list says what a thread is still running in the background', () => {
+  assert.equal(backgroundFlag(undefined), '');
+  assert.equal(backgroundFlag([]), '');
+  assert.equal(backgroundFlag([{ kind: 'agent', description: 'a' }]), '1 sub-agent in the background');
+  assert.equal(
+    backgroundFlag([{ kind: 'agent', description: 'a' }, { kind: 'agent', description: 'b' }, { kind: 'shell', description: 'npm test' }, { kind: 'agent', description: 'c', finished: true }]),
+    '2 sub-agents, 1 shell job, 1 just finished in the background',
+  );
+  assert.equal(backgroundFlag([{ kind: 'other', description: 'x', finished: true }]), '1 just finished');
 });

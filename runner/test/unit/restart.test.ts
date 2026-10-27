@@ -22,7 +22,7 @@ function withRestarter(h: Harness, version = '0.1.0+old', extra: { release?: str
   return { r, state };
 }
 
-const TASKS = [{ id: 'b1', type: 'local_bash', description: 'npm run e2e' }];
+const TASKS = [{ id: 'b1', type: 'local_bash', kind: 'shell' as const, description: 'npm run e2e' }];
 
 // The restart note and the runner's message that follows it.
 function noteAndResume(h: Harness, threadId: string): [any, any] {
@@ -544,7 +544,7 @@ test('background work holds a restart for backgroundWaitMs at most, turns for as
   const dev = create(h).thread;
   const sd = h.adapter.last;
   sd.init();
-  sd.out({ kind: 'tasks', tasks: [{ id: 'b1', type: 'local_bash', description: 'npm run dev' }] });
+  sd.out({ kind: 'tasks', tasks: [{ id: 'b1', type: 'local_bash', kind: 'shell', description: 'npm run dev' }] });
   sd.result();
   const busy = create(h).thread;
   const sb = h.adapter.last;

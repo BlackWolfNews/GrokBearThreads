@@ -7,6 +7,7 @@ type Obj = Record<string, any>;
 const TOOL_KINDS = ['command', 'read', 'edit', 'write', 'search', 'web', 'mcp', 'task', 'todo', 'other'];
 const STATUSES = ['idle', 'starting', 'running', 'waiting', 'error', 'stopped'];
 const EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'];
+const BACKGROUND_KINDS = ['agent', 'shell', 'monitor', 'other'];
 
 function isStr(v: unknown): v is string {
   return typeof v === 'string';
@@ -190,10 +191,17 @@ export function checkSummary(t: Obj): string[] {
       }
     }
   }
+  if (t.background !== undefined) {
+    const ok =
+      Array.isArray(t.background) &&
+      t.background.length > 0 &&
+      t.background.every((b: Obj) => BACKGROUND_KINDS.includes(b.kind) && isStr(b.description) && (b.finished === undefined || b.finished === true));
+    if (!ok) problems.push('background');
+  }
   const allowed = new Set([
     'id', 'title', 'cwd', 'accountId', 'provider', 'model', 'permissionMode', 'status', 'live', 'needsYou', 'createdAt', 'updatedAt',
     'lastActivityAt', 'snoozedUntil', 'archivedAt', 'preview', 'lastSeq', 'lastSeenSeq', 'nativeSessionId', 'contextTokens', 'costUsd',
-    'effort', 'modelInUse', 'effortInUse', 'panels', 'actions', 'hooks', 'patches',
+    'effort', 'modelInUse', 'effortInUse', 'panels', 'actions', 'hooks', 'patches', 'background',
   ]);
   for (const k of Object.keys(t)) if (!allowed.has(k)) problems.push(`unexpected field ${k}`);
   return problems;

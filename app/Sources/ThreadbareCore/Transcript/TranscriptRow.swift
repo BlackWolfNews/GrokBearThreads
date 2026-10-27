@@ -29,8 +29,9 @@ public struct TranscriptRow: Sendable, Hashable, Identifiable {
 public enum RowKind: String, Sendable, Hashable, CaseIterable {
     case user, assistant, reasoning, tool, diff, images, approval, question, plan, footer, note, error
     /// Rows the model derives rather than reads from events: a folded run
-    /// of work, the "Working for 12s" line, and the "Edited 3 files" card.
-    case group, working, changes
+    /// of work, the "Working for 12s" line, the "3 sub-agents working in
+    /// the background" line, and the "Edited 3 files" card.
+    case group, working, background, changes
 }
 
 public struct TextItem: Sendable, Hashable {
@@ -152,6 +153,7 @@ public enum RowContent: Sendable, Hashable {
     case error(String)
     case group(WorkGroup)
     case working(WorkingStatus)
+    case background(BackgroundStatus)
     case changes(ChangedFiles)
 
     public var kind: RowKind {
@@ -171,6 +173,7 @@ public enum RowContent: Sendable, Hashable {
         case .error: return .error
         case .group: return .group
         case .working: return .working
+        case .background: return .background
         case .changes: return .changes
         }
     }
