@@ -11,6 +11,8 @@ protocol RowCellDelegate: AnyObject {
     func respond(approvalId: String, decision: ApprovalDecision, answers: [String: String]?, message: String?)
     func questionDraft(_ approvalId: String) -> [Int: Set<String>]
     func setQuestionDraft(_ approvalId: String, _ draft: [Int: Set<String>])
+    /// A click on an asks card: `tick:<index>` or `reply:<index>`.
+    func askAction(_ card: AsksCard, action: String)
     func openReview(_ review: DesignReview)
 }
 
@@ -255,6 +257,14 @@ final class TextRowCell: RowCellView {
             box.frame = NSRect(x: x, y: top + zoomed(2), width: width, height: render.textSize.height + RowMetrics.cardPad * 2 - zoomed(4))
             textView.place(box.frame.insetBy(dx: RowMetrics.cardPad, dy: RowMetrics.cardPad - zoomed(2)))
 
+        case .asks(let card):
+            // The open card is outlined like an approval waiting on Mike;
+            // a closed one is a plain card.
+            box.isHidden = false
+            box.set(fill: Theme.cardBackground, stroke: card.isOpen ? NSColor.controlAccentColor : Theme.cardBorder, radius: zoomed(10))
+            box.frame = NSRect(x: x, y: top + zoomed(2), width: width, height: render.textSize.height + RowMetrics.cardPad * 2 - zoomed(4))
+            textView.place(box.frame.insetBy(dx: RowMetrics.cardPad, dy: RowMetrics.cardPad - zoomed(2)))
+
         case .error:
             box.isHidden = false
             box.set(fill: Theme.errorBackground, stroke: nil, radius: zoomed(10))
@@ -266,6 +276,14 @@ final class TextRowCell: RowCellView {
 
         default:
             textView.place(NSRect(x: x, y: top, width: width, height: render.textSize.height))
+        }
+
+        // Pooled cells are reused for any text row, so only an asks card
+        // keeps a click handler.
+        if case .asks(let card) = row.content, card.isOpen {
+            textView.onAction = { [weak self] action in self?.delegate?.askAction(card, action: action) }
+        } else {
+            textView.onAction = nil
         }
 
         guard let text = render.text else { return }

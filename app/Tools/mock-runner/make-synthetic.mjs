@@ -147,7 +147,7 @@ function demoThread() {
 
 // ------------------------------------------------------------------ other threads
 
-function smallThread({ name, title, minutesAgo, status = 'idle', needsYou = false, accountId = 'claude-main', snoozedHours, archivedMinutes, background, turns }) {
+function smallThread({ name, title, minutesAgo, status = 'idle', needsYou = false, unread = needsYou, accountId = 'claude-main', snoozedHours, archivedMinutes, background, turns }) {
   const id = `demo_${name.replace(/-/g, '_')}`;
   const dir = path.join(root, `demo-${name}`);
   fs.mkdirSync(dir, { recursive: true });
@@ -167,13 +167,18 @@ function smallThread({ name, title, minutesAgo, status = 'idle', needsYou = fals
       return;
     }
     events.push({ seq: ++seq, ts, threadId: id, turnId, type: 'assistant.text', itemId: `${turnId}_m`, text: turn.reply });
-    events.push({ seq: ++seq, ts, threadId: id, turnId, type: 'turn.completed', turnId, outcome: 'completed', durationMs: turn.ms ?? 18_000, costUsd: turn.cost ?? 0.05 });
+    // What the turn said it needs from Mike (docs/protocol.md, "Needs you").
+    const said = turn.needs ? { needs: turn.needs, ...(turn.asks ? { asks: turn.asks } : {}), needsFrom: 'tool' } : {};
+    events.push({ seq: ++seq, ts, threadId: id, turnId, type: 'turn.completed', turnId, outcome: 'completed', durationMs: turn.ms ?? 18_000, costUsd: turn.cost ?? 0.05, ...said });
   });
   const last = [...events].reverse().find((e) => e.type === 'assistant.text');
+  const lastDone = [...events].reverse().find((e) => e.type === 'turn.completed');
   const summary = {
     id, title, cwd: `${home}/dev/me/misc`, accountId, provider: 'claude', permissionMode: 'full', status, live: false, needsYou,
     createdAt: minutes(minutesAgo + 60), updatedAt: minutes(minutesAgo), lastActivityAt: minutes(minutesAgo),
-    preview: last ? last.text.replace(/\s+/g, ' ').slice(0, 140) : '', lastSeq: seq, lastSeenSeq: needsYou ? seq - 1 : seq,
+    preview: last ? last.text.replace(/\s+/g, ' ').slice(0, 140) : '', lastSeq: seq, lastSeenSeq: unread ? seq - 1 : seq,
+    ...(lastDone?.needs ? { needs: lastDone.needs } : {}),
+    ...(lastDone?.asks ? { asks: lastDone.asks, asksSeq: lastDone.seq } : {}),
     ...(snoozedHours ? { snoozedUntil: new Date(now + snoozedHours * 3_600_000).toISOString() } : {}),
     ...(archivedMinutes ? { archivedAt: minutes(archivedMinutes) } : {}),
     ...(background ? { background } : {}),
@@ -206,6 +211,20 @@ function others() {
         { id: 'a3', name: 'Agent', kind: 'task', title: 'Rebuild the docs page', input: { description: 'Rebuild the docs page', run_in_background: true }, output: 'Started in the background (agent a3).' },
       ],
       reply: 'Three sub-agents are on it, one page each. I\'ll come back here as each one finishes.', ms: 9_000, cost: 0.03 },
+  ] });
+  // Needs you: a turn that ended with end_turn's asks, as a checklist.
+  smallThread({ name: 'openrouter-key', title: 'Small-model settings page', minutesAgo: 2, needsYou: true, turns: [
+    { user: 'Get the settings page working with an OpenRouter key.', tools: [{ id: 't', name: 'Bash', kind: 'command', title: 'npm test', output: '412 passed' }],
+      reply: 'The Settings window is in, with the key field, the daily budget and private folders. The runner keeps the key in `secrets/openrouter-key` and the app only ever hears whether one is set.\n\nI tested it with a fake key. To see a real title come back I need a real one.',
+      needs: 'you', asks: [
+        { action: 'Paste your OpenRouter key into Settings and turn on titles', where: 'Threadbear › Settings › Models', reply: 'done' },
+        { action: 'Say whether a $1 daily budget is right, or give me a number' },
+      ] },
+  ] });
+  // Done: finished, unread, and it said nothing waits on Mike, so it's in
+  // the inbox with a tick rather than in Needs you.
+  smallThread({ name: 'tidy-imports', title: 'Tidy the imports in the uploader', minutesAgo: 9, unread: true, turns: [
+    { user: 'Tidy the imports in the uploader.', reply: 'Sorted and de-duplicated the imports in all six files. The build and tests pass.', needs: 'nothing', ms: 31_000, cost: 0.04 },
   ] });
   smallThread({ name: 'settings-tabs', title: 'Rename the Settings tabs', minutesAgo: 47, turns: [
     { user: 'Rename the Settings tabs to General, Sync and Advanced.', tools: [{ id: 'e', name: 'Edit', kind: 'edit', title: 'Edit ~/dev/photo-sync/Sources/Settings/SettingsView.swift', input: { file_path: `${home}/dev/photo-sync/Sources/Settings/SettingsView.swift`, old_string: 'Tab("Prefs")', new_string: 'Tab("General")' } }], reply: 'Done. The tabs now read **General**, **Sync** and **Advanced**.' },

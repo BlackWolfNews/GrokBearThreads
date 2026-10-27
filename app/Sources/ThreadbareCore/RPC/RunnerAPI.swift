@@ -86,6 +86,13 @@ public extension RPCClient {
         try await call("threads.markSeen", .object(["threadId": .string(threadId), "seq": .number(Double(seq))]), as: ThreadResult.self).thread
     }
 
+    /// Ticks or unticks one ask on the open card. Sends nothing to the agent.
+    func tickAsk(threadId: String, asksSeq: Int, index: Int, ticked: Bool) async throws -> ThreadSummary {
+        try await call("threads.tickAsk", .object([
+            "threadId": .string(threadId), "asksSeq": .number(Double(asksSeq)), "index": .number(Double(index)), "ticked": .bool(ticked),
+        ]), as: ThreadResult.self).thread
+    }
+
     func respond(threadId: String, approvalId: String, decision: ApprovalDecision, message: String? = nil, answers: [String: String]? = nil) async throws {
         var params: [String: JSONValue] = [
             "threadId": .string(threadId),

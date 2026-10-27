@@ -22,7 +22,12 @@ enum Notifier {
         if thread.status == .waiting {
             content.body = "Waiting for you to answer."
         } else {
-            content.body = thread.preview.isEmpty ? "Finished." : PreviewText.plain(thread.preview)
+            // What the agent asked for, rather than the last line it wrote.
+            if let ask = thread.firstOpenAsk {
+                content.body = ask.action
+            } else {
+                content.body = thread.preview.isEmpty ? "Finished." : PreviewText.plain(thread.preview)
+            }
         }
         content.userInfo = ["threadId": thread.id]
         content.threadIdentifier = thread.id

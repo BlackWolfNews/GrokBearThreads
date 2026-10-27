@@ -45,6 +45,7 @@ const THREAD_METHODS = new Set([
   'threads.events',
   'threads.subscribe',
   'threads.markSeen',
+  'threads.tickAsk',
   'approvals.respond',
   'panels.render',
   'actions.run',
@@ -405,6 +406,9 @@ export class RpcServer {
         return {};
       case 'threads.markSeen':
         return r.markSeen(reqString(p, 'threadId'), reqNumber(p, 'seq'));
+      case 'threads.tickAsk':
+        if (typeof p.ticked !== 'boolean') throw bad('ticked must be a boolean');
+        return r.tickAsk(reqString(p, 'threadId'), reqNumber(p, 'asksSeq'), reqNumber(p, 'index'), p.ticked);
       case 'approvals.respond': {
         const decision = reqString(p, 'decision') as ApprovalDecision;
         if (!['allow', 'allowAlways', 'deny', 'answered'].includes(decision)) throw bad('bad decision');

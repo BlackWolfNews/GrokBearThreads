@@ -66,7 +66,9 @@ import { copySessionTranscript, subagentTranscriptPath } from './transcripts.ts'
 import { readSubagentTranscript } from './adapters/claude/subagents.ts';
 import { fileContext } from './adapters/claude/normalize.ts';
 import type { Models } from './models/index.ts';
-import { approvalTitle } from './threadbare-mcp.ts';
+import { SERVER_NAME, approvalTitle } from './threadbare-mcp.ts';
+import { END_TURN_TOOL, needsFromText, needsFromTool } from './needs.ts';
+import type { Needs } from './needs.ts';
 import {
   EMPTY_PATCH_SET,
   findWorktreePatch,
@@ -182,6 +184,10 @@ type Turn = {
   // Files the turn edited or wrote (edit.diff paths, Write and Edit calls),
   // for hooks that run only after a change to certain files.
   edited: Set<string>;
+  // The agent's own end_turn input and last text, for what the turn needs
+  // from Mike (needs.ts). Never a sub-agent's.
+  endTurn?: Record<string, unknown>;
+  lastText?: string;
 };
 
 type Runtime = {
@@ -1643,6 +1649,11 @@ export class Runner {
         }
         if (ev.type === 'assistant.text') rec.preview = oneLine(ev.text, LIMITS.previewChars);
         if (rt.turn) {
+          // A Codex child's items carry its prefix (<child>/<id>); Claude's
+          // sub-agents never reach the thread's events.
+          const own = !('itemId' in ev && ev.itemId?.includes('/'));
+          if (ev.type === 'assistant.text' && own) rt.turn.lastText = ev.text;
+          if (ev.type === 'tool.call' && own && ev.name === `mcp__${SERVER_NAME}__${END_TURN_TOOL}`) rt.turn.endTurn = ev.input;
           if (ev.type === 'edit.diff') rt.turn.edited.add(ev.path);
           else if (ev.type === 'tool.call' && (ev.kind === 'edit' || ev.kind === 'write')) {
             const file = ev.input.file_path ?? ev.input.path ?? ev.input.notebook_path;
@@ -1853,7 +1864,21 @@ export class Runner {
     // Why it failed (a limit, a full context, the login), so the app can
     // offer the fix without reading the message.
     if (outcome === 'failed' && r.errorKind) body.errorKind = r.errorKind;
+    // What it needs from Mike: its end_turn call, else its closing "What I
+    // need from you". Only a turn it finished; a stopped one says nothing.
+    const said = outcome === 'completed' ? turnNeeds(turn) : undefined;
+    if (said) {
+      body.needs = said.needs;
+      if (said.asks) body.asks = said.asks;
+      body.needsFrom = said.from;
+    }
     const ev = this.emit(st, body, turn.turnId);
+    // Any completed turn replaces the last one's card; one that said
+    // neither leaves no card, and counts as before.
+    if (outcome === 'completed') {
+      if (said) rec.needs = { seq: ev.seq, needs: said.needs, ...(said.asks ? { asks: said.asks } : {}) };
+      else delete rec.needs;
+    }
     this.endTurn(st, ev.seq, outcome === 'failed' ? 'error' : 'idle', outcome);
   }
 
@@ -2235,6 +2260,31 @@ export class Runner {
     this.armSnoozeTimer();
     this.notify({ method: 'thread.deleted', params: { threadId } });
     return {};
+  }
+
+  // Ticks one of the open card's asks. Nothing goes to the agent: ticks are
+  // Mike's own list, and a reply is his to write.
+  tickAsk(threadId: string, asksSeq: number, index: number, ticked: boolean): { thread: ThreadSummary } {
+    const st = this.mustGet(threadId);
+    const { rec } = st;
+    const card = rec.needs;
+    if (!card?.asks || card.seq !== asksSeq || card.seq !== rec.lastTurnCompletedSeq) throw new RpcError(ErrorCode.badParams, "That isn't the thread's open card of asks.");
+    if (!Number.isInteger(index) || index < 0 || index >= card.asks.length) throw new RpcError(ErrorCode.badParams, 'No such ask.');
+    const set = new Set(card.ticked);
+    if (ticked) set.add(index);
+    else set.delete(index);
+    card.ticked = [...set].sort((a, b) => a - b);
+    // Ticking means Mike is looking at it, so the tick doesn't make the
+    // thread unread.
+    const caughtUp = rec.lastSeenSeq >= rec.lastSeq;
+    const ev = this.emit(st, { type: 'asks.ticked', asksSeq, ticked: card.ticked });
+    if (caughtUp) rec.lastSeenSeq = ev.seq;
+    this.markDirty(st);
+    return { thread: this.summary(st) };
+  }
+
+  private saidNothing(rec: ThreadRecord): boolean {
+    return rec.needs?.needs === 'nothing' && rec.needs.seq === rec.lastTurnCompletedSeq;
   }
 
   markSeen(threadId: string, seq: number): { thread: ThreadSummary } {
@@ -2881,7 +2931,9 @@ export class Runner {
       permissionMode: rec.permissionMode,
       status: rec.status,
       live: Boolean(rt.session),
-      needsYou: Boolean(rec.reviews?.some(r => r.status === 'pending')) || rec.status === 'waiting' || Boolean(rec.forceUnread) || (!running && rec.lastTurnCompletedSeq > rec.lastSeenSeq),
+      // A finished turn that said it needs nothing isn't waiting on Mike
+      // (docs/protocol.md, "Needs you").
+      needsYou: Boolean(rec.reviews?.some(r => r.status === 'pending')) || rec.status === 'waiting' || Boolean(rec.forceUnread) || (!running && rec.lastTurnCompletedSeq > rec.lastSeenSeq && !this.saidNothing(rec)),
       createdAt: rec.createdAt,
       updatedAt: rec.updatedAt,
       lastActivityAt: rec.lastActivityAt,
@@ -2889,6 +2941,14 @@ export class Runner {
       lastSeq: rec.lastSeq,
       lastSeenSeq: rec.lastSeenSeq,
     };
+    if (rec.needs && rec.needs.seq === rec.lastTurnCompletedSeq) {
+      s.needs = rec.needs.needs;
+      if (rec.needs.asks) {
+        const ticked = new Set(rec.needs.ticked);
+        s.asks = rec.needs.asks.map((a, i) => (ticked.has(i) ? { ...a, ticked: true as const } : a));
+        s.asksSeq = rec.needs.seq;
+      }
+    }
     const pendingReviews = rec.reviews?.filter(r => r.status === 'pending').length;
     if (pendingReviews) s.pendingReviews = pendingReviews;
     if (rec.model) s.model = rec.model;
@@ -3478,6 +3538,15 @@ export function cleanTitle(text: string): string {
   t = t.replace(/\.$/, '').trim();
   if (t.length > LIMITS.titleChars || t.split(/\s+/).length > 10) return '';
   return t;
+}
+
+// What a completed turn needs from Mike: its end_turn call, then its last
+// text's "What I need from you" section, else nothing said.
+function turnNeeds(turn: Turn): (Needs & { from: 'tool' | 'text' }) | undefined {
+  const tool = turn.endTurn && needsFromTool(turn.endTurn);
+  if (tool) return { ...tool, from: 'tool' };
+  const text = turn.lastText && needsFromText(turn.lastText);
+  return text ? { ...text, from: 'text' } : undefined;
 }
 
 export function oneLine(text: string, max: number): string {

@@ -320,6 +320,14 @@ enum Automation {
             guard let button = buttons.last else { return "error no button \(title)" }
             button.performClick(nil)
             return "ok"
+        case "ask":
+            // {"cmd":"ask","row":"ak:6","action":"tick:0"} clicks an open
+            // asks card's tick box (or "reply:0", its reply chip).
+            guard let id = c["row"] as? String, let action = c["action"] as? String,
+                  case .asks(let card)? = app.transcript.session?.model.row(id: id)?.content else { return "error no asks card" }
+            guard card.isOpen else { return "error that card is closed" }
+            app.transcript.askAction(card, action: action)
+            return "ok"
         case "archive":
             // `id`, else the open thread. These used to ignore `id` and act
             // on whatever was open, which against a dev runner archived (and

@@ -410,6 +410,37 @@ final class ThreadSession {
 
     // MARK: Actions
 
+    /// Ticks an ask on the open card. The runner's thread.updated and
+    /// asks.ticked event bring the change back.
+    func tickAsk(asksSeq: Int, index: Int, ticked: Bool) {
+        guard let client = app?.client else { return }
+        let threadId = threadId
+        Task {
+            do {
+                _ = try await client.tickAsk(threadId: threadId, asksSeq: asksSeq, index: index, ticked: ticked)
+            } catch {
+                app?.show(error)
+            }
+        }
+    }
+
+    /// An ask's reply chip: puts its words in the composer, after anything
+    /// already typed, and focuses it, so Return sends them. Never sends by
+    /// itself: one reply often answers several asks, and sending starts a
+    /// turn.
+    func useReply(_ reply: String) {
+        guard let app else { return }
+        var draft = app.drafts[threadId] ?? Draft()
+        let typed = draft.text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if typed.isEmpty {
+            draft.text = reply
+        } else if !typed.localizedCaseInsensitiveContains(reply) {
+            draft.text = typed + (typed.hasSuffix(".") ? " " : ". ") + reply
+        }
+        app.drafts[threadId] = draft
+        app.focusComposer += 1
+    }
+
     func respond(approvalId: String, decision: ApprovalDecision, answers: [String: String]?, message: String?) {
         guard let client = app?.client else { return }
         let threadId = threadId

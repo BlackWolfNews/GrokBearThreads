@@ -316,7 +316,16 @@ struct ThreadRowView: View {
             ProjectTiles(projects: ProjectMark.shown(thread, under: heading))
                 .tip(ProjectMark.help(thread))
                 .overlay(alignment: .leading) {
-                    if look.unread {
+                    if look.done {
+                        // Finished with nothing needed: a tick where the
+                        // unread dot would be.
+                        Image(systemName: "checkmark")
+                            .font(.system(size: zoomed(9), weight: .bold))
+                            .foregroundStyle(Color.accentColor)
+                            .frame(width: zoomed(10), height: zoomed(10))
+                            .offset(x: -(SidebarMetrics.leading + zoomed(10)) / 2 - zoomed(1))
+                            .accessibilityLabel("Done, unread")
+                    } else if look.unread {
                         // In the row's leading gutter, left of the tile.
                         Circle()
                             .fill(Color.accentColor)

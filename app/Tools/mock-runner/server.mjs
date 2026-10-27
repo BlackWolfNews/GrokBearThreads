@@ -394,6 +394,22 @@ async function dispatch(client, method, p) {
     case 'threads.unsubscribe':
       client.subs.delete(p.threadId);
       return {};
+    case 'threads.tickAsk': {
+      // docs/protocol.md, "Needs you": ticks one ask on the open card.
+      const t = need(p.threadId);
+      const s = t.summary;
+      if (!s.asks || s.asksSeq !== p.asksSeq) throw rpcError(-32602, "That isn't the thread's open card of asks.");
+      if (!Number.isInteger(p.index) || p.index < 0 || p.index >= s.asks.length) throw rpcError(-32602, 'No such ask.');
+      const ask = { ...s.asks[p.index] };
+      if (p.ticked) ask.ticked = true;
+      else delete ask.ticked;
+      s.asks = s.asks.map((a, i) => (i === p.index ? ask : a));
+      const caughtUp = s.lastSeenSeq >= s.lastSeq;
+      persist(s.id, { type: 'asks.ticked', asksSeq: s.asksSeq, ticked: s.asks.flatMap((a, i) => (a.ticked ? [i] : [])) });
+      if (caughtUp) s.lastSeenSeq = s.lastSeq;
+      broadcastSummary(s.id);
+      return { thread: s };
+    }
     case 'threads.markSeen': {
       const t = need(p.threadId);
       t.summary.lastSeenSeq = Math.max(t.summary.lastSeenSeq, p.seq ?? 0);
