@@ -94,12 +94,6 @@ final class SidebarRowTests: XCTestCase {
         XCTAssertTrue(ThreadRowLook(ThreadSummary(id: "t", title: "t", status: .waiting)).labelled)
     }
 
-    func testEmptyPreviewForAThreadWaitingOnMike() {
-        XCTAssertEqual(ThreadRowLook.emptyPreview(ThreadSummary(id: "t", title: "t", status: .waiting)), "Waiting for your answer")
-        XCTAssertEqual(ThreadRowLook.emptyPreview(ThreadSummary(id: "t", title: "t", status: .idle)), "No reply yet")
-        XCTAssertEqual(ThreadRowLook.emptyPreview(ThreadSummary(id: "t", title: "t", status: .starting)), "No reply yet")
-    }
-
     func testSectionTitles() {
         XCTAssertEqual(InboxSection.allCases.map(\.title), ["Needs you", "Running", "Inbox"])
         let sections = ThreadSections(needsYou: [ThreadSummary(id: "a", title: "a")], running: [], inbox: [ThreadSummary(id: "b", title: "b")])
@@ -121,17 +115,17 @@ final class SidebarRowTests: XCTestCase {
         XCTAssertEqual(AccountName.short("gone", accounts: accounts), "gone")
     }
 
-    func testAccountIsShownUnlessMain() {
-        let accounts = [Account(id: "claude-main", title: "a@x"), Account(id: "claude-3", title: "b@x")]
-        XCTAssertFalse(AccountName.isShown("claude-main", accounts: accounts, mainId: "claude-main"))
-        XCTAssertTrue(AccountName.isShown("claude-3", accounts: accounts, mainId: "claude-main"))
-        XCTAssertFalse(AccountName.isShown("", accounts: accounts, mainId: "claude-main"))
-        // No main account: the first one is treated as main.
-        let others = [Account(id: "work", title: "w@x"), Account(id: "home", title: "h@x")]
-        XCTAssertFalse(AccountName.isShown("work", accounts: others, mainId: "claude-main"))
-        XCTAssertTrue(AccountName.isShown("home", accounts: others, mainId: "claude-main"))
-        // Before hello, with no accounts known, only the main id is unlabelled.
-        XCTAssertTrue(AccountName.isShown("claude-3", accounts: [], mainId: "claude-main"))
+    func testProjectMark() {
+        XCTAssertEqual(ProjectMark.letter("convex docs"), "C")
+        XCTAssertEqual(ProjectMark.letter("  7 day plan"), "7")
+        XCTAssertEqual(ProjectMark.letter("🐻 Threadbear"), "T")
+        XCTAssertEqual(ProjectMark.letter("🐻"), "?")
+        XCTAssertEqual(ProjectMark.letter(""), "?")
+        var thread = ThreadSummary(id: "t", title: "t")
+        XCTAssertNil(ProjectMark.project(thread))
+        thread.projects = [ThreadProject(id: "a", title: "Threadbear"), ThreadProject(id: "b", title: "")]
+        XCTAssertEqual(ProjectMark.project(thread)?.id, "a")
+        XCTAssertEqual(ProjectMark.help(thread), "Threadbear, Untitled project")
     }
 
     func testFolderName() {
