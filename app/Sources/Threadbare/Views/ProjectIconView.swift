@@ -30,17 +30,13 @@ struct ProjectIconView: View {
                     .font(.system(size: side * 0.62, weight: .semibold, design: .rounded))
                     .foregroundStyle(.secondary)
                     .frame(width: side, height: side)
-                    .background(Color.primary.opacity(0.07), in: RoundedRectangle(cornerRadius: side * 0.26, style: .continuous))
+                    .background(Color.primary.opacity(0.08), in: RoundedRectangle(cornerRadius: side * 0.26, style: .continuous))
             }
         }
         .frame(width: side, height: side)
-        .accessibilityHidden(true)
     }
 
-    private var letter: String {
-        let name = project?.title ?? title
-        return name.first(where: { $0.isLetter || $0.isNumber }).map { String($0).uppercased() } ?? "·"
-    }
+    private var letter: String { ProjectMark.letter(project?.title ?? title) }
 }
 
 /// Pictures read once per path. Each copy the runner makes has its own

@@ -252,6 +252,7 @@ private struct ProjectHeaderTitle: View {
                 .foregroundStyle(Color(nsColor: Theme.faintText))
                 .layoutPriority(1)
             ProjectIconView(project: project, size: 14)
+                .accessibilityHidden(true)
                 .layoutPriority(1)
             Text(project.title)
                 .fontWeight(.semibold)
@@ -296,6 +297,7 @@ private struct ProjectChip: View {
         Button { app.openProjectPage(membership.id) } label: {
             HStack(spacing: zoomed(4)) {
                 ProjectIconView(project: app.project(membership.id), title: title, size: 12)
+                .accessibilityHidden(true)
                 Text(title)
             }
                 .font(.system(size: TypeScale.detail))

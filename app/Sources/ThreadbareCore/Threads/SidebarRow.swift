@@ -148,8 +148,8 @@ public enum AccountName {
 }
 
 /// The project mark at the right of a thread's row, where its account
-/// used to be named. Until projects have icons it's the project's first
-/// letter or digit on a quiet tile.
+/// used to be named: the project's icon, or for one without an icon yet
+/// its first letter or digit on a quiet tile.
 public enum ProjectMark {
     /// The project the row shows: the first it joined. A thread in two
     /// projects names both in the mark's tooltip.

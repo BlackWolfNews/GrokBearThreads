@@ -297,17 +297,13 @@ struct ThreadRowView: View {
     /// the marks make a column and the times beside them line up.
     private var showsProjectMark: Bool { mode != .projects && !app.projects.isEmpty }
 
-    /// The thread's project as a small tile. The project's icon will go here
-    /// once projects have them; for now it's the title's first letter.
+    /// The thread's project's icon, or its first letter on a tile when it
+    /// has none yet.
     @ViewBuilder
     private var projectMark: some View {
         let size = zoomed(16)
         if let project = ProjectMark.project(thread) {
-            Text(ProjectMark.letter(project.title))
-                .font(.system(size: TypeScale.sidebarMeta - 1, weight: .semibold))
-                .foregroundStyle(.secondary)
-                .frame(width: size, height: size)
-                .background(Color.primary.opacity(0.08), in: RoundedRectangle(cornerRadius: zoomed(4)))
+            ProjectIconView(project: app.project(project.id), title: project.title, size: 16)
                 // Centred on the title's lowercase, like the spinner.
                 .alignmentGuide(.firstTextBaseline) { $0[VerticalAlignment.center] + zoomed(4) }
                 .help(ProjectMark.help(thread))
