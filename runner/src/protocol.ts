@@ -69,6 +69,28 @@ export type ThreadSummary = {
   // (and ones just finished whose result it's about to read). Absent when
   // there's none.
   background?: BackgroundTask[];
+  // The sub-agents the agent has started, newest 20, oldest first. Absent
+  // when it has started none.
+  subagents?: Subagent[];
+};
+
+export type SubagentStatus = 'running' | 'completed' | 'failed' | 'stopped';
+
+// A sub-agent the thread's agent started, followed from the CLI's task
+// events. threads.subagent reads what it did from the CLI's own record.
+export type Subagent = {
+  id: string; // the CLI's task id, which also names its transcript
+  itemId?: string; // the tool.call that started it
+  parentId?: string; // the sub-agent that started this one
+  description: string;
+  agentType?: string;
+  status: SubagentStatus;
+  background: boolean;
+  activity?: string; // while running: what it's doing now
+  summary?: string; // once finished: what it reported, one line
+  toolUses?: number;
+  startedAt: string;
+  endedAt?: string;
 };
 
 // An action a patch gives a thread: a chip above the composer that runs a
@@ -309,6 +331,7 @@ export const ErrorCode = {
   badParams: -32602,
   threadNotFound: -32004,
   scheduleNotFound: -32005,
+  subagentNotFound: -32006,
   accountNotFound: -32010,
   busy: -32020,
   other: -32000,

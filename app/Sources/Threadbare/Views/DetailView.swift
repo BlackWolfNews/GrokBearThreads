@@ -40,18 +40,34 @@ struct DetailView: View {
 
     var body: some View {
         let thread = app.selectedThread
-        let session = app.selection.map { app.session(for: $0) }
+        // A sub-agent's transcript, read-only, in place of its thread's.
+        let subagentRef = app.subagentSelection
+        let session = subagentRef.map { app.subagentSession(for: $0) } ?? app.selection.map { app.session(for: $0) }
         let isNew = app.selection == nil
         let paneThread = thread.flatMap { app.showsPanels(for: $0) ? $0 : nil }
         HStack(spacing: 0) {
             VStack(spacing: 0) {
             ConnectionBanner()
             ErrorBanner()
+            if let subagentRef {
+                SubagentHeader(ref: subagentRef)
+            }
             ComposerPlacement(centred: isNew) {
                 ZStack {
                     TranscriptView(session: session, controller: app.transcript)
                     if let session, session.state == .loading, session.displayCount == 0 {
                         ProgressView().controlSize(.small)
+                    } else if let session, session.missing {
+                        Text("There's no record of what this sub-agent did.")
+                            .foregroundStyle(.secondary)
+                    } else if let session, session.subagentId != nil, session.state == .loaded, session.displayCount == 0 {
+                        Text("Nothing yet.").foregroundStyle(.secondary)
+                    } else if let session, session.subagentId != nil, case .failed(let message) = session.state {
+                        VStack(spacing: 8) {
+                            Text("Couldn't load this sub-agent.").font(.headline)
+                            Text(message).foregroundStyle(.secondary)
+                            Button("Try again") { app.selectSubagent(threadId: session.threadId, subagentId: session.subagentId ?? "") }
+                        }
                     } else if let session, case .failed(let message) = session.state {
                         VStack(spacing: 8) {
                             Text("Couldn't load this thread.").font(.headline)
@@ -61,8 +77,12 @@ struct DetailView: View {
                     }
                 }
                 .layoutValue(key: PaneRole.self, value: .transcript)
-                ComposerView(thread: thread)
-                    .layoutValue(key: PaneRole.self, value: .composer)
+                // A sub-agent can't be written to: it takes its brief from
+                // the agent that started it.
+                if subagentRef == nil {
+                    ComposerView(thread: thread)
+                        .layoutValue(key: PaneRole.self, value: .composer)
+                }
                 if isNew {
                     NewThreadHeading()
                         .layoutValue(key: PaneRole.self, value: .heading)

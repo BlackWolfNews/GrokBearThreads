@@ -276,6 +276,119 @@ public struct PanelRender: Sendable, Hashable, Decodable {
     }
 }
 
+/// A sub-agent the thread's agent started (Claude's Agent tool), foreground
+/// or background. The runner follows it from the CLI's task events, so its
+/// status and activity change while it runs; `threads.subagent` reads what
+/// it did.
+public struct Subagent: Sendable, Hashable, Codable, Identifiable {
+    public enum Status: String, Sendable, Hashable, Codable {
+        case running, completed, failed, stopped
+
+        /// A status this app doesn't know is shown as stopped.
+        public init(from decoder: Decoder) throws {
+            let raw = try decoder.singleValueContainer().decode(String.self)
+            self = Status(rawValue: raw) ?? .stopped
+        }
+    }
+
+    public var id: String
+    /// The tool.call in the thread that started it.
+    public var itemId: String?
+    /// The sub-agent that started this one, when a sub-agent did.
+    public var parentId: String?
+    public var description: String
+    /// "general-purpose", "Explore", "fork".
+    public var agentType: String?
+    public var status: Status
+    public var background: Bool
+    /// While running: what it's doing, in the CLI's words.
+    public var activity: String?
+    /// Once finished: what it reported, one line.
+    public var summary: String?
+    public var toolUses: Int?
+    public var startedAt: Date
+    public var endedAt: Date?
+
+    public init(
+        id: String, itemId: String? = nil, parentId: String? = nil, description: String, agentType: String? = nil,
+        status: Status = .running, background: Bool = false, activity: String? = nil, summary: String? = nil,
+        toolUses: Int? = nil, startedAt: Date = Date(), endedAt: Date? = nil
+    ) {
+        self.id = id
+        self.itemId = itemId
+        self.parentId = parentId
+        self.description = description
+        self.agentType = agentType
+        self.status = status
+        self.background = background
+        self.activity = activity
+        self.summary = summary
+        self.toolUses = toolUses
+        self.startedAt = startedAt
+        self.endedAt = endedAt
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(String.self, forKey: .id)
+        itemId = try c.decodeIfPresent(String.self, forKey: .itemId)
+        parentId = try c.decodeIfPresent(String.self, forKey: .parentId)
+        description = try c.decodeIfPresent(String.self, forKey: .description) ?? ""
+        agentType = try c.decodeIfPresent(String.self, forKey: .agentType)
+        status = try c.decodeIfPresent(Status.self, forKey: .status) ?? .stopped
+        background = try c.decodeIfPresent(Bool.self, forKey: .background) ?? false
+        activity = try c.decodeIfPresent(String.self, forKey: .activity)
+        summary = try c.decodeIfPresent(String.self, forKey: .summary)
+        toolUses = try c.decodeIfPresent(Double.self, forKey: .toolUses).map { Int($0) }
+        startedAt = try c.decodeIfPresent(String.self, forKey: .startedAt).flatMap(ISO8601.parse) ?? Date(timeIntervalSince1970: 0)
+        endedAt = try c.decodeIfPresent(String.self, forKey: .endedAt).flatMap(ISO8601.parse)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(id, forKey: .id)
+        try c.encodeIfPresent(itemId, forKey: .itemId)
+        try c.encodeIfPresent(parentId, forKey: .parentId)
+        try c.encode(description, forKey: .description)
+        try c.encodeIfPresent(agentType, forKey: .agentType)
+        try c.encode(status, forKey: .status)
+        try c.encode(background, forKey: .background)
+        try c.encodeIfPresent(activity, forKey: .activity)
+        try c.encodeIfPresent(summary, forKey: .summary)
+        try c.encodeIfPresent(toolUses, forKey: .toolUses)
+        try c.encode(ISO8601.format(startedAt), forKey: .startedAt)
+        try c.encodeIfPresent(endedAt.map(ISO8601.format), forKey: .endedAt)
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case id, itemId, parentId, description, agentType, status, background, activity, summary, toolUses, startedAt, endedAt
+    }
+
+    public var isRunning: Bool { status == .running }
+}
+
+/// What `threads.subagent` returns: the sub-agent as the thread's list has
+/// it (nil once the list has dropped it) and what it has done, as events.
+public struct SubagentTranscript: Sendable, Decodable {
+    public var subagent: Subagent?
+    public var events: [Event]
+
+    public init(subagent: Subagent?, events: [Event]) {
+        self.subagent = subagent
+        self.events = events
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        subagent = try? c.decodeIfPresent(Subagent.self, forKey: .subagent)
+        events = c.lossyArray(Event.self, forKey: .events)
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case subagent, events
+    }
+}
+
 /// Work the live CLI is still running in the background: a sub-agent or a
 /// shell job started with run_in_background, a Monitor. `finished` once it
 /// has ended and the agent is about to start a turn to read its result.
@@ -354,6 +467,8 @@ public struct ThreadSummary: Sendable, Hashable, Codable, Identifiable {
     /// Background sub-agents and shell jobs the CLI is still running (and
     /// ones just finished whose result it's about to read). Empty when none.
     public var background: [BackgroundTask]
+    /// The sub-agents the agent has started: the newest 20, oldest first.
+    public var subagents: [Subagent]
 
     public init(
         id: String, title: String, cwd: String = "~/dev/me/misc", accountId: String = "claude-main",
@@ -364,7 +479,8 @@ public struct ThreadSummary: Sendable, Hashable, Codable, Identifiable {
         lastSeq: Int = 0, lastSeenSeq: Int = 0, nativeSessionId: String? = nil,
         contextTokens: Int? = nil, costUsd: Double? = nil,
         effort: String? = nil, modelInUse: String? = nil, effortInUse: String? = nil, panels: [Panel] = [],
-        actions: [Action] = [], hooks: [Hook] = [], patches: [PatchInfo] = [], background: [BackgroundTask] = []
+        actions: [Action] = [], hooks: [Hook] = [], patches: [PatchInfo] = [], background: [BackgroundTask] = [],
+        subagents: [Subagent] = []
     ) {
         self.id = id
         self.title = title
@@ -395,6 +511,7 @@ public struct ThreadSummary: Sendable, Hashable, Codable, Identifiable {
         self.hooks = hooks
         self.patches = patches
         self.background = background
+        self.subagents = subagents
     }
 
     public init(from decoder: Decoder) throws {
@@ -433,6 +550,7 @@ public struct ThreadSummary: Sendable, Hashable, Codable, Identifiable {
         hooks = c.lossyArray(Hook.self, forKey: .hooks)
         patches = c.lossyArray(PatchInfo.self, forKey: .patches)
         background = c.lossyArray(BackgroundTask.self, forKey: .background)
+        subagents = c.lossyArray(Subagent.self, forKey: .subagents)
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -466,12 +584,13 @@ public struct ThreadSummary: Sendable, Hashable, Codable, Identifiable {
         if !hooks.isEmpty { try c.encode(hooks, forKey: .hooks) }
         if !patches.isEmpty { try c.encode(patches, forKey: .patches) }
         if !background.isEmpty { try c.encode(background, forKey: .background) }
+        if !subagents.isEmpty { try c.encode(subagents, forKey: .subagents) }
     }
 
     enum CodingKeys: String, CodingKey {
         case id, title, cwd, accountId, provider, model, effort, modelInUse, effortInUse, permissionMode, status, live, needsYou
         case createdAt, updatedAt, lastActivityAt, snoozedUntil, archivedAt, preview
-        case lastSeq, lastSeenSeq, nativeSessionId, contextTokens, costUsd, panels, actions, hooks, patches, background
+        case lastSeq, lastSeenSeq, nativeSessionId, contextTokens, costUsd, panels, actions, hooks, patches, background, subagents
     }
 
     /// Still being worked on between turns: background sub-agents or jobs

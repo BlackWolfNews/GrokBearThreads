@@ -198,10 +198,30 @@ export function checkSummary(t: Obj): string[] {
       t.background.every((b: Obj) => BACKGROUND_KINDS.includes(b.kind) && isStr(b.description) && (b.finished === undefined || b.finished === true));
     if (!ok) problems.push('background');
   }
+  if (t.subagents !== undefined) {
+    const SUB_STATUS = ['running', 'completed', 'failed', 'stopped'];
+    const subAllowed = new Set(['id', 'itemId', 'parentId', 'description', 'agentType', 'status', 'background', 'activity', 'summary', 'toolUses', 'startedAt', 'endedAt']);
+    const ok =
+      Array.isArray(t.subagents) &&
+      t.subagents.length > 0 &&
+      t.subagents.length <= 20 &&
+      t.subagents.every(
+        (a: Obj) =>
+          isStr(a.id) &&
+          isStr(a.description) &&
+          SUB_STATUS.includes(a.status) &&
+          typeof a.background === 'boolean' &&
+          isStr(a.startedAt) &&
+          (a.status === 'running') === (a.endedAt === undefined) &&
+          (a.activity === undefined || a.status === 'running') &&
+          Object.keys(a).every((k) => subAllowed.has(k)),
+      );
+    if (!ok) problems.push('subagents');
+  }
   const allowed = new Set([
     'id', 'title', 'cwd', 'accountId', 'provider', 'model', 'permissionMode', 'status', 'live', 'needsYou', 'createdAt', 'updatedAt',
     'lastActivityAt', 'snoozedUntil', 'archivedAt', 'preview', 'lastSeq', 'lastSeenSeq', 'nativeSessionId', 'contextTokens', 'costUsd',
-    'effort', 'modelInUse', 'effortInUse', 'panels', 'actions', 'hooks', 'patches', 'background',
+    'effort', 'modelInUse', 'effortInUse', 'panels', 'actions', 'hooks', 'patches', 'background', 'subagents',
   ]);
   for (const k of Object.keys(t)) if (!allowed.has(k)) problems.push(`unexpected field ${k}`);
   return problems;

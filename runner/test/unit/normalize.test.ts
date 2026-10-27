@@ -457,3 +457,43 @@ test('output the CLI saved to a file is copied into the thread and pointed at', 
   assert.equal(r.blobPath, '/blobs/tu2.txt');
   assert.equal(c.copied.tu2, '/acct/projects/x/tool-results/b1.txt');
 });
+
+test('sub-agents: started, progress and finish become subagent updates (recorded run)', () => {
+  const outs = run('subagents.ndjson');
+  assertProtocol(outs);
+  const ups = outs.filter((o): o is Extract<AdapterOutput, { kind: 'subagent' }> => o.kind === 'subagent').map((o) => o.update);
+  const first = ups.filter((u) => u.id === 'ab1373fe8b7475ff5');
+  assert.deepEqual(first[0], {
+    id: 'ab1373fe8b7475ff5',
+    started: true,
+    status: 'running',
+    background: true,
+    itemId: 'toolu_015X2kTTJkzTMhD6xZUAVh9C',
+    description: 'List files',
+    agentType: 'general-purpose',
+  });
+  assert.ok(first.some((u) => u.activity === 'Running List work directory then echo hello' && u.toolUses === 1));
+  assert.ok(first.some((u) => u.status === 'completed'));
+  assert.match(first.at(-1)!.summary ?? '', /ls/);
+  // The shell the second sub-agent ran is a task too, but not a sub-agent.
+  assert.deepEqual([...new Set(ups.map((u) => u.id))], ['ab1373fe8b7475ff5', 'a0129496b4393509d']);
+  // Its own messages still stay out of the thread.
+  assert.ok(!events(outs).some((e) => e.type === 'tool.call' && e.name === 'Bash'));
+});
+
+test('sub-agents: failed and killed, nested, and one a resumed CLI reports', () => {
+  const n = new ClaudeNormalizer(ctx());
+  const ups = (m: Record<string, unknown>) => n.handle(m).filter((o) => o.kind === 'subagent').map((o) => (o as any).update);
+  assert.deepEqual(ups(sys('task_started', { task_id: 'k1', task_type: 'local_agent', description: 'Kid', parent_task_id: 'p1', is_backgrounded: false })), [
+    { id: 'k1', started: true, status: 'running', background: false, parentId: 'p1', description: 'Kid' },
+  ]);
+  assert.deepEqual(ups(sys('task_updated', { task_id: 'k1', patch: { is_backgrounded: true } })), [{ id: 'k1', background: true }]);
+  assert.deepEqual(ups(sys('task_updated', { task_id: 'k1', patch: { status: 'failed', error: 'Boom' } })), [{ id: 'k1', status: 'failed', summary: 'Boom' }]);
+  assert.deepEqual(ups(sys('task_updated', { task_id: 'k2', patch: { status: 'killed' } })), [], 'unknown task');
+  assert.deepEqual(ups(sys('task_started', { task_id: 's1', task_type: 'local_bash', description: 'npm test' })), []);
+  assert.deepEqual(ups(sys('task_progress', { task_id: 's1', description: 'npm test', usage: { tool_uses: 0 } })), []);
+  assert.deepEqual(ups(sys('task_progress', { task_id: 'old', subagent_type: 'Explore', description: 'Running grep', summary: 'Reading the router', usage: { tool_uses: 4 } })), [
+    { id: 'old', activity: 'Reading the router', toolUses: 4 },
+  ]);
+  assert.deepEqual(ups(sys('task_notification', { task_id: 'old', status: 'stopped', summary: '' })), [{ id: 'old', status: 'stopped' }]);
+});

@@ -21,7 +21,14 @@ final class ThreadSession {
     nonisolated static let eventsPage = 500
 
     let threadId: String
+    /// Set for a sub-agent's transcript: read-only, read whole from
+    /// `threads.subagent` (again for more while it runs), never subscribed.
+    let subagentId: String?
     private(set) var state: LoadState = .idle
+    /// The runner has no record of the sub-agent (-32006), so there's
+    /// nothing to show rather than something that failed.
+    private(set) var missing = false
+    @ObservationIgnored private var refreshing = false
     @ObservationIgnored private(set) var feed = ThreadFeed()
     /// First model row the table shows.
     @ObservationIgnored private(set) var displayStart = 0
@@ -44,8 +51,9 @@ final class ThreadSession {
     @ObservationIgnored var onLoaded: (() -> Void)?
     @ObservationIgnored var onOlderLoaded: ((Int) -> Void)?
 
-    init(threadId: String, app: AppModel) {
+    init(threadId: String, subagentId: String? = nil, app: AppModel) {
         self.threadId = threadId
+        self.subagentId = subagentId
         self.app = app
     }
 
@@ -67,6 +75,10 @@ final class ThreadSession {
     func open(width: CGFloat) {
         guard state == .idle || state.isFailed, loadTask == nil else { return }
         guard let client = app?.client else { return }
+        if let subagentId {
+            openSubagent(subagentId, client: client, width: width)
+            return
+        }
         state = .loading
         let threadId = threadId
         let expanded = expanded
@@ -108,8 +120,69 @@ final class ThreadSession {
         }
     }
 
+    /// A sub-agent's transcript: every event it has so far, in one read.
+    private func openSubagent(_ subagentId: String, client: RPCClient, width: CGFloat) {
+        state = .loading
+        missing = false
+        let threadId = threadId
+        let expanded = expanded
+        let root = app?.threads[threadId]?.cwd
+        loadTask = Task {
+            defer { loadTask = nil }
+            do {
+                let reply = try await client.subagent(threadId: threadId, subagentId: subagentId)
+                let live = (app?.threads[threadId]?.subagents.first { $0.id == subagentId } ?? reply.subagent).flatMap { $0.isRunning ? $0.startedAt : nil }
+                let prepared = await Task.detached(priority: .userInitiated) { () -> (TranscriptModel, Int) in
+                    var model = TranscriptModel(root: root)
+                    model.load(events: reply.events, inProgress: [])
+                    if let live { _ = model.setLiveTurn("", startedAt: live) }
+                    let start = max(0, model.rows.count - Self.initialRows)
+                    TranscriptController.renders.prepare(Array(model.rows[start...]), expanded: expanded, width: width)
+                    return (model, start)
+                }.value
+                feed = ThreadFeed(model: prepared.0)
+                displayStart = prepared.1
+                state = .loaded
+                view?.reloadAll()
+                onLoaded?()
+            } catch RPCError.server(let code, _) where code == RPCError.subagentNotFound {
+                missing = true
+                state = .failed("There's no record of what this sub-agent did.")
+            } catch {
+                AppLog.write("rpc", "couldn't load sub-agent \(subagentId) of \(threadId): \(error.localizedDescription)")
+                state = .failed(error.localizedDescription)
+            }
+        }
+    }
+
+    /// Reads a running sub-agent's transcript again and adds what's new, as
+    /// a live update would. The runner numbers its events from 1 on every
+    /// read, and the CLI only ever adds to its record, so new ones are the
+    /// ones past the last seq shown.
+    func refreshSubagent() {
+        guard let subagentId, state == .loaded, !refreshing, let client = app?.client else { return }
+        refreshing = true
+        let threadId = threadId
+        Task {
+            defer { refreshing = false }
+            guard let reply = try? await client.subagent(threadId: threadId, subagentId: subagentId) else { return }
+            let fresh = reply.events.filter { $0.seq > feed.acceptedSeq }
+            if !fresh.isEmpty {
+                handle(feed.catchUp(fresh))
+                flush()
+            }
+            // Its working line goes once it has finished.
+            let subagent = app?.threads[threadId]?.subagents.first { $0.id == subagentId } ?? reply.subagent
+            let running = subagent?.isRunning ?? false
+            guard !rebuilding, (feed.model.openTurn != nil) != running else { return }
+            let oldStart = displayStart
+            let change = feed.setLiveTurn(running ? "" : nil, startedAt: subagent?.startedAt)
+            if !change.isEmpty { show(change, oldStart: oldStart) }
+        }
+    }
+
     func subscribe() async {
-        guard let client = app?.client, state == .loaded else { return }
+        guard subagentId == nil, let client = app?.client, state == .loaded else { return }
         feed.beginSubscribe()
         do {
             let reply = try await client.subscribe(threadId: threadId, afterSeq: feed.acceptedSeq)
@@ -148,6 +221,12 @@ final class ThreadSession {
         case .scheduleFlush:
             scheduleFlush()
         case .needsCatchUp(let afterSeq):
+            // A sub-agent's events come whole from threads.subagent; the
+            // next read fills any gap.
+            if subagentId != nil {
+                feed.catchUpFailed()
+                return
+            }
             guard let client = app?.client else {
                 feed.catchUpFailed()
                 return
@@ -255,7 +334,7 @@ final class ThreadSession {
             }
             return
         }
-        guard let client = app?.client else {
+        guard subagentId == nil, let client = app?.client else {
             loadingOlder = false
             return
         }

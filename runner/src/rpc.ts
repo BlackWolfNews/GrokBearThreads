@@ -285,6 +285,8 @@ export class RpcServer {
           beforeSeq: optInt(p, 'beforeSeq'),
           limit: optInt(p, 'limit'),
         });
+      case 'threads.subagent':
+        return r.subagent(reqString(p, 'threadId'), reqString(p, 'subagentId'));
       case 'threads.subscribe': {
         const threadId = reqString(p, 'threadId');
         const backlog = r.backlog(threadId, optInt(p, 'afterSeq') ?? 0);

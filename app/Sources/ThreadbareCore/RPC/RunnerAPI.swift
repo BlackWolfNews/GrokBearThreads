@@ -72,6 +72,12 @@ public extension RPCClient {
         return try await call("threads.subscribe", .object(params), as: SubscribeResult.self, timeout: .seconds(60))
     }
 
+    /// What a sub-agent has done so far, from the CLI's own record of it.
+    /// `-32006` when there's no record.
+    func subagent(threadId: String, subagentId: String) async throws -> SubagentTranscript {
+        try await call("threads.subagent", .object(["threadId": .string(threadId), "subagentId": .string(subagentId)]), as: SubagentTranscript.self, timeout: .seconds(30))
+    }
+
     func unsubscribe(threadId: String) async throws {
         _ = try await call("threads.unsubscribe", .object(["threadId": .string(threadId)]), as: EmptyResult.self)
     }

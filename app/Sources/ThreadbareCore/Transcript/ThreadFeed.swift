@@ -156,6 +156,12 @@ public struct ThreadFeed: Sendable {
         model.setBackground(tasks)
     }
 
+    /// A sub-agent started or stopped running (see
+    /// `TranscriptModel.setLiveTurn`). Queued events stay queued.
+    public mutating func setLiveTurn(_ turn: String?, startedAt: Date? = nil) -> TranscriptChange {
+        model.setLiveTurn(turn, startedAt: startedAt)
+    }
+
     /// Swaps in a model that had an older page prepended off the main thread.
     /// Only valid if nothing was flushed since the copy was taken.
     public mutating func replaceModel(_ newModel: TranscriptModel) {

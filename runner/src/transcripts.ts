@@ -50,3 +50,14 @@ export function copySessionTranscript(configDir: string, fromCwd: string, toCwd:
     return false;
   }
 }
+
+// Where the CLI keeps a sub-agent's own transcript: beside the session's,
+// in <sessionId>/subagents/agent-<id>.jsonl. Null when it isn't there.
+export function subagentTranscriptPath(configDir: string, cwd: string, sessionId: string, agentId: string): string | null {
+  if (!/^[0-9a-zA-Z-]+$/.test(sessionId) || !/^[0-9a-zA-Z_-]+$/.test(agentId)) return null;
+  for (const n of names(cwd)) {
+    const file = path.join(configDir, 'projects', n, sessionId, 'subagents', `agent-${agentId}.jsonl`);
+    if (fs.existsSync(file)) return file;
+  }
+  return null;
+}

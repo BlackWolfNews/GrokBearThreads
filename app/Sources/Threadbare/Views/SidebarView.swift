@@ -76,6 +76,7 @@ private struct ThreadSection: View {
             SectionHeading(title: section.title)
             ForEach(threads.map { SectionRow(section: section.title, thread: $0) }) { row in
                 ThreadRowView(thread: row.thread, mode: .inbox, section: section) { select(row.thread.id) }
+                SubagentList(thread: row.thread, section: section.title)
             }
         }
     }
@@ -205,7 +206,8 @@ struct ThreadRowView: View {
     @State private var hovering = false
     @State private var pressed = false
 
-    private var isSelected: Bool { app.selection == thread.id }
+    /// Not while one of its sub-agents is showing: that row is highlighted.
+    private var isSelected: Bool { app.selection == thread.id && app.subagentSelection == nil }
     /// The screenshot run shows one row as if the pointer were over it.
     private var showsActions: Bool { hovering || app.hoverOverride == thread.id }
 

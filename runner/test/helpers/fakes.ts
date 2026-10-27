@@ -197,6 +197,7 @@ export function makeHarness(home = tmpDir(), cfgExtra: Partial<Config> = {}, dep
     defer: (fn) => fn(),
     // Never touch a real Claude config dir from a test.
     copyTranscript: () => false,
+    subagentTranscript: () => null,
     ...depsExtra,
   });
   const notes: Notification[] = [];

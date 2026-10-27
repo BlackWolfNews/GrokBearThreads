@@ -74,6 +74,7 @@ const threads = new Map();
 loadFixtures();
 addFillers(fillerCount);
 addDemoPanels();
+addDemoSubagents();
 /** The schedules (docs/protocol.md, "Schedules"), soonest first. */
 let schedules = [];
 addDemoSchedules();
@@ -242,6 +243,13 @@ async function dispatch(client, method, p) {
       const after = p.afterSeq ?? t.summary.lastSeq;
       const inProgress = [...t.inProgress.entries()].map(([itemId, v]) => ({ itemId, type: v.type, text: v.text }));
       return { events: t.events.filter((e) => e.seq > after), inProgress };
+    }
+    case 'threads.subagent': {
+      const t = need(p.threadId);
+      const subagent = (t.summary.subagents ?? []).find((s) => s.id === p.subagentId);
+      const events = t.subagentEvents?.get(p.subagentId);
+      if (!events) throw rpcError(-32006, 'No record of that sub-agent');
+      return { ...(subagent ? { subagent } : {}), events: events.map((e) => ({ ...e, threadId: t.summary.id })) };
     }
     case 'threads.unsubscribe':
       client.subs.delete(p.threadId);
@@ -931,6 +939,76 @@ function shiftToNow(loaded) {
 // Two demo threads get panels, as the real runner gives a thread in a
 // Convex or Xcode project: a page (a small one of our own, so screenshots
 // need no network or login) and the Simulator picture.
+// Sub-agents for the running CI thread (docs/protocol.md, Subagent): one
+// still going whose transcript grows every few seconds, one it started
+// itself, one that has reported back and one that failed. Their
+// transcripts are what threads.subagent answers with.
+function addDemoSubagents() {
+  const t = threads.get('demo_ci_slow');
+  if (!t) return;
+  const now = Date.now();
+  const at = (secondsAgo) => new Date(now - secondsAgo * 1000).toISOString();
+  t.summary.subagents = [
+    { id: 'a_cache', itemId: 'agent_cache', description: 'Compare the cache keys', agentType: 'Explore', status: 'completed', background: false,
+      summary: 'The lockfile hash changed on 21 Oct, so every run since misses the cache.', toolUses: 4, startedAt: at(200), endedAt: at(150) },
+    { id: 'a_bisect', itemId: 'agent_bisect', description: 'Find the commit that slowed the build', agentType: 'general-purpose', status: 'running', background: true,
+      activity: 'Running git bisect on the last 40 commits', toolUses: 2, startedAt: at(95) },
+    { id: 'a_bisect_tests', parentId: 'a_bisect', description: 'Time the test step on each commit', agentType: 'fork', status: 'running', background: false,
+      activity: 'Reading run-845.log', toolUses: 1, startedAt: at(40) },
+    { id: 'a_docker', itemId: 'agent_docker', description: 'Check the Docker layer cache', agentType: 'Explore', status: 'failed', background: true,
+      summary: 'Couldn\'t reach the registry.', toolUses: 1, startedAt: at(180), endedAt: at(170) },
+  ];
+  const ev = (list) => list.map((e, i) => ({ seq: i + 1, ts: at(90 - i * 5), ...e }));
+  t.subagentEvents = new Map([
+    ['a_cache', ev([
+      { type: 'user.message', text: 'Compare the cache keys in run-812.log and run-845.log and say why the second one missed.', images: [] },
+      { type: 'tool.call', itemId: 'c1', name: 'Bash', kind: 'command', title: 'grep "cache key" run-812.log run-845.log', input: { command: 'grep "cache key" run-812.log run-845.log' } },
+      { type: 'tool.result', itemId: 'c1', ok: true, text: 'run-812.log: cache key node-modules-9f2c\nrun-845.log: cache key node-modules-41ab', truncated: false, images: [] },
+      { type: 'tool.call', itemId: 'c2', name: 'Bash', kind: 'command', title: 'git log -p package-lock.json', input: { command: 'git log --since=2026-10-20 -p package-lock.json | head -40' } },
+      { type: 'tool.result', itemId: 'c2', ok: true, text: 'commit 7d1e2a0 (21 Oct)\n    Bump sharp to 0.34', truncated: false, images: [] },
+      { type: 'assistant.text', itemId: 'm1', text: 'The keys differ because **package-lock.json** changed on 21 Oct (`7d1e2a0`, the sharp bump). The cache is keyed on the lockfile hash, so every run since misses it and installs from scratch.' },
+    ])],
+    ['a_bisect', ev([
+      { type: 'user.message', text: 'Find which commit made the CI build slow. Bisect the last 40 commits on main, timing `npm run build` on each.', images: [] },
+      { type: 'reasoning', itemId: 'r1', text: 'Forty commits is about six steps of bisect. The test step looks like the slow part, so I\'ll have a fork time that in parallel.' },
+      { type: 'tool.call', itemId: 'b1', name: 'Bash', kind: 'command', title: 'git bisect start main 7d1e2a0~5', input: { command: 'git bisect start main 7d1e2a0~5' } },
+      { type: 'tool.result', itemId: 'b1', ok: true, text: 'Bisecting: 20 revisions left to test after this (roughly 4 steps)', truncated: false, images: [] },
+      { type: 'tool.call', itemId: 'b2', name: 'Agent', kind: 'task', title: 'Time the test step on each commit', input: { description: 'Time the test step on each commit', subagent_type: 'fork' } },
+    ])],
+    ['a_bisect_tests', ev([
+      { type: 'user.message', text: 'Time the test step on each commit the bisect stops at.', images: [] },
+      { type: 'tool.call', itemId: 't1', name: 'Read', kind: 'read', title: 'Read run-845.log', input: { file_path: '/Users/mike/dev/photo-sync/run-845.log' } },
+    ])],
+    ['a_docker', ev([
+      { type: 'user.message', text: 'Check whether the Docker layer cache is being used on CI.', images: [] },
+      { type: 'tool.call', itemId: 'd1', name: 'Bash', kind: 'command', title: 'docker buildx du --builder ci', input: { command: 'docker buildx du --builder ci' } },
+      { type: 'tool.result', itemId: 'd1', ok: false, text: 'error: dial tcp registry.internal:443: i/o timeout', truncated: false, images: [] },
+      { type: 'assistant.text', itemId: 'm1', text: 'I couldn\'t reach the registry, so I can\'t say whether the layer cache is used.' },
+    ])],
+  ]);
+  // The running one does a few more things, so an open transcript has
+  // something to pick up.
+  const steps = [
+    { activity: 'Running npm run build on 3f9c2d1', call: { name: 'Bash', kind: 'command', title: 'npm run build', input: { command: 'npm run build' } }, result: 'Built in 4m 58s' },
+    { activity: 'Marking 3f9c2d1 good', call: { name: 'Bash', kind: 'command', title: 'git bisect good', input: { command: 'git bisect good' } }, result: 'Bisecting: 10 revisions left to test after this (roughly 3 steps)' },
+    { activity: 'Running npm run build on 7d1e2a0', call: { name: 'Bash', kind: 'command', title: 'npm run build', input: { command: 'npm run build' } }, result: 'Built in 13m 02s' },
+  ];
+  steps.forEach((step, i) => {
+    const timer = setTimeout(() => {
+      const list = t.subagentEvents.get('a_bisect');
+      const itemId = `b${3 + i}`;
+      list.push({ seq: list.length + 1, ts: iso(), type: 'tool.call', itemId, ...step.call });
+      list.push({ seq: list.length + 1, ts: iso(), type: 'tool.result', itemId, ok: true, text: step.result, truncated: false, images: [] });
+      const s = t.summary.subagents.find((x) => x.id === 'a_bisect');
+      s.activity = step.activity;
+      s.toolUses += 1;
+      broadcastSummary(t.summary.id);
+    }, 6000 * (i + 1));
+    timer.unref?.();
+    t.timers.push(timer);
+  });
+}
+
 function addDemoPanels() {
   const page = `<!doctype html><meta charset="utf-8"><title>Convex dashboard</title>
 <style>body{margin:0;font:13px -apple-system,system-ui;background:#1b1b1d;color:#d8d8dc;display:flex;height:100vh}

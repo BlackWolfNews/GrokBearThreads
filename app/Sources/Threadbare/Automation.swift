@@ -228,6 +228,23 @@ enum Automation {
             // A beat for the table to lay out and draw.
             try? await Task.sleep(for: .milliseconds(150))
             return "ok \(id) \(session.displayCount) rows"
+        case "subagent":
+            // Show a sub-agent's transcript, as a click on its sidebar row
+            // does: {"thread": id or prefix, "id": the sub-agent's id}.
+            let match = thread(c["thread"] ?? app.selection, app)
+            guard let threadId = match.id else { return match.error }
+            guard let subagentId = c["id"] as? String, !subagentId.isEmpty else { return "error id is the sub-agent's id" }
+            app.sidebarMode = .inbox
+            app.selectSubagent(threadId: threadId, subagentId: subagentId)
+            let session = app.subagentSession(for: SubagentRef(threadId: threadId, subagentId: subagentId))
+            let deadline = Date().addingTimeInterval(number(c["timeout"]) ?? 10)
+            while Date() < deadline, session.state != .loaded || app.transcript.session !== session {
+                if case .failed(let message) = session.state { return session.missing ? "ok \(subagentId) no record" : "error couldn't load: \(message)" }
+                try? await Task.sleep(for: .milliseconds(20))
+            }
+            guard session.state == .loaded else { return "error timed out loading \(subagentId)" }
+            try? await Task.sleep(for: .milliseconds(150))
+            return "ok \(subagentId) \(session.displayCount) rows"
         case "new":
             app.newThread()
             return "ok"

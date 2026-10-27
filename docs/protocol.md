@@ -85,6 +85,9 @@ type ThreadSummary = {
                         // agent hasn't read yet. Absent when there's none.
                         // Set during a turn too; between turns it's the
                         // sign the thread is still being worked on
+  subagents?: Subagent[] // the sub-agents the agent has started, foreground
+                        // and background: the newest 20, oldest first.
+                        // Absent when it has started none
 }
 
 type Action = {
@@ -124,6 +127,27 @@ type Panel = {
   note?: string         // one line about it: the deployment, the project
 }
 
+
+// A sub-agent the thread's agent started (Claude's Agent tool). The runner
+// follows it from the CLI's task events, so it changes while it runs: each
+// change sends thread.updated. `threads.subagent` reads what it did.
+type Subagent = {
+  id: string            // the CLI's id for it (its task id)
+  itemId?: string       // the tool.call that started it, in the thread
+  parentId?: string     // the sub-agent that started this one, when it was
+                        // started by a sub-agent rather than the thread's agent
+  description: string   // its brief's title: "Review the runner changes"
+  agentType?: string    // "general-purpose", "Explore", "fork"
+  status: "running" | "completed" | "failed" | "stopped"
+                        // clients treat a status they don't know as stopped
+  background: boolean   // the agent carried on while it ran
+  activity?: string     // while running, what it's doing in the CLI's own
+                        // words ("Running npm test")
+  summary?: string      // once finished, what it reported, one line, <= 200 chars
+  toolUses?: number     // tool calls so far
+  startedAt: string
+  endedAt?: string      // set once it's no longer running
+}
 
 type BackgroundTask = {
   kind: "agent" | "shell" | "monitor" | "other" // a sub-agent, a shell
@@ -259,6 +283,7 @@ replaces whatever the deltas built up.
 | `threads.events` | `{ threadId, afterSeq?: number, beforeSeq?: number, limit?: number }` (default: the newest 500) | `{ events: Event[], firstSeq, lastSeq, inProgress: { itemId, type: "assistant.text" \| "reasoning", text }[] }` |
 | `threads.subscribe` | `{ threadId, afterSeq?: number }` | `{ events: Event[], inProgress: { itemId, type, text }[] }` (everything after `afterSeq`, and the text streamed so far for items still streaming), then pushes `thread.event` notifications. Deltas pushed after the reply carry on from `inProgress` |
 | `threads.unsubscribe` | `{ threadId }` | `{}` |
+| `threads.subagent` | `{ threadId, subagentId }` | `{ subagent?: Subagent, events: Event[] }`: what the sub-agent has done so far, read from the CLI's own record of it, as events (`user.message` for its brief, then `assistant.text`, `reasoning`, `tool.call`, `tool.result`, `edit.diff`) numbered from 1, with no `turnId`. Read again for more while it runs: thread.updated says when it has done something. `subagent` is absent once the thread's list has dropped it. `-32006` when there's no record of it (an older thread, or the CLI cleaned it up) |
 | `threads.markSeen` | `{ threadId, seq }` | `{ thread: ThreadSummary }` |
 | `approvals.respond` | `{ threadId, approvalId, decision: "allow" \| "allowAlways" \| "deny" \| "answered", message?: string, answers?: Record<string, string> }` | `{}`. `allowAlways` allows matching requests for the rest of this thread only; it never changes the thread's permission mode or saves anything in the project. With `answered`, the app sends the chosen answers in one line as `message` too: the runner keeps it in `approval.resolved` (only `answers` goes to the CLI), so the transcript can show what was chosen |
 | `media.import` | `{ path: string }` | `{ image: ImageRef }` copies a file into `inbox/` and reads its size |
@@ -278,7 +303,7 @@ replaces whatever the deltas built up.
 | `runner.restart` | `{ when?: "idle" \| "now", resume?: { threadId, text }, reason?: string, release?: string, backgroundWaitMs?: number, cancel?: boolean }` | `{ scheduled: boolean, waitingFor: string[], background?: { threadId, tasks: string[] }[], note?: string, noResume?: string }`. See Restarts below. `scheduled` is true once the restart is saved; an empty `waitingFor` means it is happening now. `background` is the background work among `waitingFor`. `release` is the release the restart should come back on (the deploy script sets it). `backgroundWaitMs` limits how long background shells and subagents hold the restart. `cancel: true` withdraws a pending restart that hasn't begun and returns `scheduled: false` (`-32020` once it has begun), with a `note` when it also put `current` back. `noResume` says why the `resume` won't be sent as things stand (the thread has already been resumed 3 times in the last hour), so whoever asked can say so rather than wait for it. A runner older than this answers `-32601` |
 
 Errors use JSON-RPC error objects: `-32602` bad params, `-32004` thread not
-found, `-32005` schedule not found, `-32010` account not found, `-32020` busy (e.g. two sends racing),
+found, `-32005` schedule not found, `-32006` sub-agent not found, `-32010` account not found, `-32020` busy (e.g. two sends racing),
 `-32000` anything else with a readable `message`.
 
 ## Notifications (runner to app)
