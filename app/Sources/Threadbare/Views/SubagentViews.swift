@@ -16,6 +16,7 @@ struct SubagentList: View {
         let rows = SubagentRows.visible(thread, threadSelected: app.selection == thread.id, selectedSubagent: selected, now: app.now)
         ForEach(rows.map { SubagentRowID(section: section, threadId: thread.id, row: $0) }) { item in
             SubagentRowView(threadId: thread.id, row: item.row)
+                .transition(Juice.row)
         }
     }
 }
@@ -34,6 +35,7 @@ struct SubagentRowView: View {
     let row: SubagentRow
     @State private var hovering = false
     @State private var pressed = false
+    @Environment(\.sidebarRowSpace) private var rowSpace
 
     /// Each level in by about the width of the glyph and its gap, so a
     /// child's glyph sits under its parent's title.
@@ -70,7 +72,8 @@ struct SubagentRowView: View {
         // In from the thread's title, so the rows read as its own.
         .padding(EdgeInsets(top: 5, leading: SidebarMetrics.leading + 8 + Self.indent * CGFloat(row.depth),
                             bottom: 6, trailing: SidebarMetrics.trailing))
-        .background(background, in: RoundedRectangle(cornerRadius: SidebarMetrics.corner))
+        // The selection highlight slides here from the thread's row.
+        .rowHighlight(selected: isSelected, hovering: hovering, selectedColor: Color.primary.opacity(activeState == .key ? 0.08 : 0.06), space: rowSpace)
         .contentShape(RoundedRectangle(cornerRadius: SidebarMetrics.corner))
         // Selects on mouse down, as thread rows do.
         .gesture(DragGesture(minimumDistance: 0).onChanged { _ in
@@ -86,10 +89,6 @@ struct SubagentRowView: View {
         .accessibilityAction { app.selectSubagent(threadId: threadId, subagentId: subagent.id) }
     }
 
-    private var background: Color {
-        if isSelected { return Color.primary.opacity(activeState == .key ? 0.08 : 0.06) }
-        return hovering ? SidebarMetrics.hover : .clear
-    }
 
     @ViewBuilder
     private var glyph: some View {

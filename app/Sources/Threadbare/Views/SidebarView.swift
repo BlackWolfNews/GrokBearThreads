@@ -31,17 +31,26 @@ struct SidebarView: View {
             // is held (ShortcutHints).
             ActivityBar()
                 .zIndex(1)
-            Group {
-                switch app.sidebarMode {
-                case .inbox: InboxList()
-                case .snoozed: SnoozedList()
-                case .archive: ArchiveList()
-                case .scheduled: ScheduledList()
-                case .projects: ProjectsList()
-                case .librarian: LibrarianView()
+            // In a ZStack so the old view and the new one share the space
+            // while one fades out and the other fades in and settles.
+            ZStack {
+                Group {
+                    switch app.sidebarMode {
+                    case .inbox: InboxList()
+                    case .snoozed: SnoozedList()
+                    case .archive: ArchiveList()
+                    case .scheduled: ScheduledList()
+                    case .projects: ProjectsList()
+                    case .librarian: LibrarianView()
+                    }
                 }
+                .transition(Juice.reduceMotion ? .opacity : .asymmetric(
+                    insertion: .opacity.combined(with: .offset(y: zoomed(6))),
+                    removal: .opacity
+                ))
             }
             .frame(maxWidth: .infinity)
+            .animation(Juice.reduceMotion ? .easeOut(duration: 0.12) : .snappy(duration: 0.22), value: app.sidebarMode)
         }
     }
 }
@@ -64,13 +73,18 @@ private struct InboxList: View {
             .padding(.top, zoomed(4))
             // A folded section's rows aren't drawn, so the arrow keys skip them.
             let order = InboxSection.allCases.filter { !app.collapsedSections.contains($0) }.flatMap { sections[$0].map(\.id) }
-            ThreadList(order: order, scrollID: { rowIDs[$0] ?? $0 }) { select in
+            // Section and thread, so a thread changing section animates
+            // even when the order of ids alone stays the same.
+            let layout = InboxSection.allCases.filter { !app.collapsedSections.contains($0) }.flatMap { section in
+                sections[section].map { SectionRow.id(section: section.title, thread: $0.id) }
+            }
+            ThreadList(order: order, layout: layout, scrollID: { rowIDs[$0] ?? $0 }) { select in
                 if app.threadsLoaded {
                     ForEach(InboxSection.allCases, id: \.self) { section in
                         ThreadSection(section: section, threads: sections[section], select: select)
                     }
                     if sections.all.isEmpty {
-                        EmptyNote(text: "Nothing in the inbox.")
+                        InboxZero()
                     }
                 }
             }
@@ -97,6 +111,7 @@ private struct ThreadSection: View {
             if !collapsed {
                 ForEach(threads.map { SectionRow(section: section.title, thread: $0) }) { row in
                     ThreadRowView(thread: row.thread, mode: .inbox, section: section) { select(row.thread.id) }
+                        .transition(Juice.row)
                     SubagentList(thread: row.thread, section: section.title)
                 }
             }
@@ -160,6 +175,7 @@ struct SectionHeading: View {
             Text(title)
                 .font(.system(size: TypeScale.sidebarHeading, weight: .semibold))
                 .foregroundStyle(hovering ? .primary : .secondary)
+                .animation(Juice.hover, value: hovering)
                 .fixedSize()
             Rectangle()
                 .fill(Color.primary.opacity(0.08))
@@ -170,16 +186,22 @@ struct SectionHeading: View {
                 // shows while folded or on hover, so an open heading stays
                 // as quiet as the others.
                 if fold.collapsed && fold.count > 0 {
+                    // Rolls to the new number when a thread comes or goes
+                    // while the section's folded.
                     Text("\(fold.count)")
                         .font(.system(size: TypeScale.sidebarMeta))
                         .foregroundStyle(SidebarMetrics.faint)
                         .monospacedDigit()
+                        .contentTransition(.numericText(value: Double(fold.count)))
+                        .animation(Juice.swap, value: fold.count)
+                        .transition(Juice.popIn)
                 }
                 Image(systemName: "chevron.down")
                     .font(.system(size: zoomed(9), weight: .semibold))
                     .foregroundStyle(SidebarMetrics.faint)
                     .rotationEffect(.degrees(fold.collapsed ? -90 : 0))
                     .opacity(fold.collapsed || hovering ? 1 : 0)
+                    .animation(Juice.hover, value: hovering)
             }
         }
         .foregroundStyle(.secondary)
@@ -212,10 +234,14 @@ struct ThreadList<Content: View>: View {
     @Environment(AppModel.self) private var app
     /// Thread ids top to bottom, for the arrow keys.
     let order: [String]
+    /// The rows as drawn, when that says more than `order` (the inbox's
+    /// carry their section). A change to it animates the rows into place.
+    var layout: [String]? = nil
     /// The id a thread's row has in the stack, to scroll it into view.
     var scrollID: (String) -> String = { $0 }
     @ViewBuilder let content: (_ select: @escaping (String) -> Void) -> Content
     @FocusState private var focused: Bool
+    @Namespace private var rowSpace
 
     var body: some View {
         ScrollViewReader { proxy in
@@ -228,6 +254,12 @@ struct ThreadList<Content: View>: View {
                         app.select(id)
                     }
                 }
+                .environment(\.sidebarRowSpace, rowSpace)
+                // Only when rows come, go or change places, or the selection
+                // moves: text changing inside a row (a new title, the
+                // clock) isn't animated by these.
+                .animation(Juice.rows, value: layout ?? order)
+                .animation(Juice.selection, value: SelectionKey(thread: app.selection, subagent: app.subagentSelection, project: app.openProjectId))
                 .padding(.horizontal, SidebarMetrics.outerInset)
                 // Room for the last row to scroll clear of the fade below.
                 .padding(.bottom, zoomed(32))
@@ -269,6 +301,13 @@ struct ThreadList<Content: View>: View {
     }
 }
 
+/// What's selected in the sidebar, for animating the highlight's slide.
+private struct SelectionKey: Equatable {
+    let thread: String?
+    let subagent: SubagentRef?
+    let project: String?
+}
+
 /// Which list a row is in, for its hover buttons.
 extension SidebarMode {
     var rowActions: [RowAction] {
@@ -298,6 +337,13 @@ struct ThreadRowView: View {
     let select: () -> Void
     @State private var hovering = false
     @State private var pressed = false
+    /// A brief accent wash over a row that's just finished, so a reply
+    /// landing in the inbox catches the eye.
+    @State private var landed = false
+    @Environment(\.sidebarRowSpace) private var listSpace
+    /// Not in Projects: a thread in two projects has a row under each, and
+    /// two rows can't both be the one the highlight and the glide follow.
+    private var rowSpace: Namespace.ID? { mode == .projects ? nil : listSpace }
 
     /// Not while one of its sub-agents is showing: that row is highlighted.
     private var isSelected: Bool { app.selection == thread.id && app.subagentSelection == nil && app.openProjectId == nil && !app.showsProjectsHome }
@@ -318,22 +364,28 @@ struct ThreadRowView: View {
                 .overlay(alignment: .leading) {
                     if look.done {
                         // Finished with nothing needed: a tick where the
-                        // unread dot would be.
+                        // unread dot would be, drawn on as it arrives.
                         Image(systemName: "checkmark")
                             .font(.system(size: zoomed(9), weight: .bold))
                             .foregroundStyle(Color.accentColor)
                             .frame(width: zoomed(10), height: zoomed(10))
+                            .transition(Juice.reduceMotion ? .opacity : AnyTransition(SymbolEffectTransition(effect: .drawOn, options: .default)))
                             .offset(x: -(SidebarMetrics.leading + zoomed(10)) / 2 - zoomed(1))
                             .accessibilityLabel("Done, unread")
                     } else if look.unread {
-                        // In the row's leading gutter, left of the tile.
+                        // In the row's leading gutter, left of the tile. Pops
+                        // in with a little overshoot, and shrinks away once
+                        // the thread's been read.
                         Circle()
                             .fill(Color.accentColor)
                             .frame(width: zoomed(7), height: zoomed(7))
+                            .transition(Juice.popIn)
                             .offset(x: -(SidebarMetrics.leading + zoomed(7)) / 2 - zoomed(1))
                             .accessibilityLabel("Unread")
                     }
                 }
+                .animation(Juice.pop, value: look.unread)
+                .animation(Juice.pop, value: look.done)
             VStack(alignment: .leading, spacing: zoomed(3)) {
                 HStack(spacing: 0) {
                     Text(thread.title.isEmpty ? "Untitled" : thread.title)
@@ -354,14 +406,41 @@ struct ThreadRowView: View {
                         .lineLimit(1)
                     Spacer(minLength: zoomed(6))
                     if !showsActions {
+                        // A new status ("Working" to "Needs you") blurs
+                        // across rather than snapping.
                         trailing(look)
+                            .id(look.status)
+                            .transition(Juice.reduceMotion ? .opacity : AnyTransition(BlurReplaceTransition(configuration: .downUp)))
                     }
                 }
+                .animation(Juice.swap, value: look.status)
             }
         }
         .padding(EdgeInsets(top: zoomed(8), leading: SidebarMetrics.leading, bottom: zoomed(8), trailing: SidebarMetrics.trailing))
-        .background(background, in: RoundedRectangle(cornerRadius: SidebarMetrics.corner))
+        .background {
+            if landed {
+                RoundedRectangle(cornerRadius: SidebarMetrics.corner)
+                    .fill(Color.accentColor.opacity(0.14))
+                    .transition(.opacity)
+            }
+        }
+        .rowHighlight(selected: isSelected, hovering: showsActions, selectedColor: selectedColor, space: rowSpace)
         .contentShape(RoundedRectangle(cornerRadius: SidebarMetrics.corner))
+        // A slight press while the mouse is down, so a click feels like it
+        // landed on something.
+        .scaleEffect(pressed && !Juice.reduceMotion ? 0.985 : 1)
+        .animation(.snappy(duration: 0.14), value: pressed)
+        // The row and its thread's row in another section are one thing,
+        // so a move between Running and the Inbox glides.
+        .matched("row/" + thread.id, in: rowSpace)
+        .onAppear {
+            // Only a row turning up within a moment of its turn finishing,
+            // unread: a reply that's just arrived, not one scrolled to.
+            guard mode == .inbox, look.unread || look.done || look.status == .needsYou,
+                  Date().timeIntervalSince(thread.lastActivityAt) < 3 else { return }
+            landed = true
+            withAnimation(.easeOut(duration: Juice.reduceMotion ? 0.4 : 1.1).delay(0.3)) { landed = false }
+        }
         // Selects on mouse down, as the system list did and Mail does; a
         // tap gesture waits for the mouse to come back up.
         .gesture(DragGesture(minimumDistance: 0).onChanged { _ in
@@ -377,6 +456,7 @@ struct ThreadRowView: View {
             }
         }
         .onHover { hovering = $0 }
+        .animation(Juice.hover, value: showsActions)
         // The whole title, which the row often cuts short, and where it runs.
         // The status and project marks have their own tips over this one.
         .tip((thread.title.isEmpty ? "Untitled" : thread.title) + "\n" + thread.cwd.abbreviatingHome)
@@ -386,10 +466,7 @@ struct ThreadRowView: View {
         .accessibilityAction { select() }
     }
 
-    private var background: Color {
-        if isSelected { return Color.primary.opacity(activeState == .key ? 0.08 : 0.06) }
-        return showsActions ? SidebarMetrics.hover : .clear
-    }
+    private var selectedColor: Color { Color.primary.opacity(activeState == .key ? 0.08 : 0.06) }
 
     /// A hibernating thread says when it wakes, where the time would be.
     private var wakeText: String? {
@@ -422,7 +499,10 @@ struct ThreadRowView: View {
                 // running rows have this, and there are one to three.
                 TimelineView(.periodic(from: .now, by: 1)) { context in
                     let elapsed = ThreadRowLook.workingLabel(since: thread.lastActivityAt, now: context.date)
+                    // The seconds roll over like a counter.
                     Text(look.labelled ? "Working " + elapsed : elapsed).monospacedDigit()
+                        .contentTransition(.numericText(countsDown: false))
+                        .animation(Juice.swap, value: elapsed)
                 }
             }
             .font(.system(size: TypeScale.sidebarMeta, weight: .medium))
@@ -753,6 +833,7 @@ private struct SnoozedList: View {
                 ForEach(snoozed) { thread in
                     ThreadRowView(thread: thread, mode: .snoozed) { select(thread.id) }
                         .id(thread.id)
+                        .transition(Juice.row)
                 }
                 if snoozed.isEmpty {
                     EmptyNote(text: "Nothing hibernating.")
@@ -780,6 +861,7 @@ private struct ArchiveList: View {
                 ForEach(archived) { thread in
                     ThreadRowView(thread: thread, mode: .archive) { select(thread.id) }
                         .id(thread.id)
+                        .transition(Juice.row)
                 }
                 if archived.isEmpty {
                     EmptyNote(text: app.archiveLoaded ? "Nothing archived matches." : "Loading…")
