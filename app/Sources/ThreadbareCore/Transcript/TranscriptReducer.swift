@@ -579,6 +579,14 @@ public struct TranscriptModel: Sendable {
         case .error(let message):
             append(TranscriptRow(id: "e:\(seq)", seq: seq, turnId: turnId, content: .error(message)))
 
+        case .actionRun(let run):
+            // A finished command, drawn like a tool call with its output.
+            let itemId = run.itemId(seq: seq)
+            var (call, result) = run.asToolCall
+            call.itemId = itemId
+            result.itemId = itemId
+            append(TranscriptRow(id: "t:\(itemId)", seq: seq, turnId: turnId, content: .tool(ToolItem(itemId: itemId, call: call, result: result, root: root))))
+
         case .unknown:
             break
         }

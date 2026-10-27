@@ -174,7 +174,15 @@ it's where the patches stack from.
    own patch files are step 3.
 3. **Actions and the patch loader.** `.threadbear/patches/*.ts` loaded
    by the runner, action chips, the stitched "New patch" card, the
-   Patches tab. This is the scenario 2 moment. Two days.
+   Patches tab. This is the scenario 2 moment. Two days. Landed
+   2026-10-27, minus the card and the tab: patch files are plain modules
+   whose default export lists `actions` (`run` a command or `prompt` a
+   message) and `panels` (a `url`), the runner reads them again within 15
+   seconds of a change and says in the transcript when one appears or
+   breaks, the chips sit above the composer's text, and a command's
+   output lands in the transcript as a tool-style row with the patch
+   glyph. `tb actions` and `tb run` do the same from a shell. The patch
+   file shape question is settled: one file per patch, declarative.
 4. **Hooks.** Turn-end and file-change hooks posting into the
    transcript; the Convex logs hook. A day.
 5. **Tools and honey pots** fold into step 4 of the main plan (Codex,
@@ -189,6 +197,6 @@ it's where the patches stack from.
   with the bear only in the transcript, dock and footer? That's what
   the mockups do, and I'd keep it that way: the bear is the app's
   mascot, not one per thread.
-- Patch file shape: `patch({...})` with four optional exports as above,
-  or one file per kind (`actions.ts`, `panels.ts`)? One file per patch
-  is easier for the agent to write and for you to delete.
+- Patch file shape: settled as one file per patch with a plain default
+  export (docs/protocol.md, Patches). Hooks and tools will join
+  `actions` and `panels` in the same object.

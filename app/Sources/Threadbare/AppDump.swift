@@ -115,8 +115,17 @@ struct AppDump: Encodable {
     var selection: Thread?
     /// The selected thread's panels and the pane (PanelsView).
     var panels: Panels?
+    /// Its action chips (ActionChips).
+    var actions: [ActionInfo] = []
     var composer: Composer
     var transcript: Transcript?
+
+    struct ActionInfo: Codable {
+        var id: String
+        var title: String
+        var kind: String
+        var running: Bool
+    }
 
     struct Panels: Codable {
         struct Item: Codable {
@@ -195,6 +204,9 @@ struct AppDump: Encodable {
                              snoozed: ThreadSections.snoozed(app.threads.values, now: now).count, archived: app.archivedCount),
             selection: app.selectedThread.map { thread($0) },
             panels: app.selectedThread.flatMap { panels($0, app: app) },
+            actions: app.selectedThread.map { thread in
+                thread.actions.map { ActionInfo(id: $0.id, title: $0.title, kind: $0.kind.rawValue, running: app.isRunning(action: $0, in: thread.id)) }
+            } ?? [],
             composer: composer(app, key: key),
             transcript: transcript
         )
@@ -290,6 +302,9 @@ struct AppDump: Encodable {
                 return text
             }
             lines.append("panels (\(panels.shown ? "shown, \(panels.width) wide" : "hidden")): " + items.joined(separator: ", "))
+        }
+        if !actions.isEmpty {
+            lines.append("actions: " + actions.map { "\($0.id) \"\($0.title)\" (\($0.kind)\($0.running ? ", running" : ""))" }.joined(separator: ", "))
         }
         lines.append("composer (\(composer.draft)): \"\(composer.text)\"" + (composer.images > 0 ? " and \(composer.images) image(s)" : ""))
         lines.append("  \(composer.draft == "new" ? "starts" : "runs") in \(composer.cwd) on \(composer.account), model \(composer.model), "

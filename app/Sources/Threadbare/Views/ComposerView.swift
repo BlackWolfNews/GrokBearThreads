@@ -26,6 +26,10 @@ struct ComposerView: View {
         )
         let canSend = ComposerChips.canSend(text: draft.wrappedValue.text, imageCount: draft.wrappedValue.images.count)
         VStack(alignment: .leading, spacing: 10) {
+            // The folder's actions (patches), above the text as in the design.
+            if let thread, !thread.actions.isEmpty {
+                ActionChips(thread: thread)
+            }
             if !draft.wrappedValue.images.isEmpty || importing > 0 {
                 AttachmentStrip(images: draft.images, importing: importing)
             }

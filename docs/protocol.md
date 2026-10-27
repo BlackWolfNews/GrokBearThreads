@@ -74,7 +74,26 @@ type ThreadSummary = {
   nativeSessionId?: string
   contextTokens?: number
   costUsd?: number      // total for the thread so far, if known
-  panels?: Panel[]      // from the folder's patches (see Panels); absent when there are none
+  panels?: Panel[]      // from the folder's patches (see Patches); absent when there are none
+  actions?: Action[]    // likewise
+  patches?: PatchInfo[] // the patches that apply to the folder; absent when there are none
+}
+
+type Action = {
+  id: string            // "<patch>.<slug of the title>": "reseed.reseed-dev-db"
+  title: string
+  kind: "command" | "prompt"
+  command?: string      // kind "command": run in the thread's folder by `actions.run`
+  prompt?: string       // kind "prompt": sent to the thread as a message by `actions.run`
+  patch: string
+  note?: string
+}
+
+type PatchInfo = {
+  id: string            // "convex", "xcode", or a patch file's name without its extension
+  source: "builtin" | "home" | "project"
+  file?: string         // the module, for home and project patches
+  error?: string        // the file couldn't be loaded, and gives nothing until it's fixed
 }
 
 type Panel = {
@@ -125,8 +144,9 @@ Persisted event types (stored in `events.ndjson`, returned by `threads.events`):
 | `plan.updated` | `entries: {text, status: "pending" \| "in_progress" \| "completed"}[]` |
 | `turn.started` | `turnId`. A turn the agent starts by itself (a background task finished, or a background subagent needs an approval) has no `user.message` before it. A `user.message` after `turn.started` was sent while the turn ran and went into it |
 | `turn.completed` | `turnId`, `outcome` (`completed` \| `interrupted` \| `failed`), `durationMs`, `costUsd?`, `usage?`, `error?` |
-| `system.note` | `text` (e.g. "Resumed session", "Compacted the conversation") |
+| `system.note` | `text` (e.g. "Resumed session", "Compacted the conversation", "Patch reseed added: action Reseed dev DB.") |
 | `error` | `message` |
+| `action.run` | `actionId`, `patch`, `title`, `command`, `ok`, `exitCode?`, `text` (what it printed, truncated to 64 KB), `truncated`, `durationMs`. A command action that `actions.run` ran; outside any turn unless one was running, in which case it carries that `turnId` |
 
 Transient events are only sent to subscribers, never persisted, and carry
 `seq` of the last persisted event (they don't consume a number):
@@ -158,6 +178,7 @@ replaces whatever the deltas built up.
 | `threads.markSeen` | `{ threadId, seq }` | `{ thread: ThreadSummary }` |
 | `approvals.respond` | `{ threadId, approvalId, decision: "allow" \| "allowAlways" \| "deny" \| "answered", message?: string, answers?: Record<string, string> }` | `{}`. `allowAlways` allows matching requests for the rest of this thread only; it never changes the thread's permission mode or saves anything in the project. With `answered`, the app sends the chosen answers in one line as `message` too: the runner keeps it in `approval.resolved` (only `answers` goes to the CLI), so the transcript can show what was chosen |
 | `media.import` | `{ path: string }` | `{ image: ImageRef }` copies a file into `inbox/` and reads its size |
+| `actions.run` | `{ threadId, actionId }` | For a prompt action, `{ turnId }`: its prompt was sent as a message (as `threads.send`). For a command action, `{ ok, exitCode?, durationMs, seq }` once the command has finished, with its output in the transcript as the `action.run` event at `seq`. The command runs in the thread's folder through a login shell with the thread's variables (`THREADBARE_THREAD_ID` and the rest) and is stopped after 10 minutes. `-32602` for an action the thread doesn't have, `-32020` while the same action is still running |
 | `panels.render` | `{ threadId, panelId }` | `{ image?: ImageRef, note?: string }` draws an `image` panel now: for `xcode.simulator`, a screenshot of the booted simulator (`xcrun simctl io booted screenshot`), written to the same file each time under the thread's `panels/`. With no device booted (or another failure) there's only `note`. Slow: it waits for the screenshot. `-32602` for a panel the thread doesn't have |
 | `runner.status` | `{}` | `{ version, release?, branch?, pid, startedAt, home, logFile, liveClis, running: string[], background: { threadId, tasks: string[] }[], pendingRestart?: { when, reason?, release?, resumeThreadId?, requestedAt, backgroundUntil?, waitingFor: string[] }, rolledBack?: { from, at }, update?: { state, checkout?, reason?, checkedAt?, commit?, release?, logFile? } }`. `running` lists the threads that are starting, running or waiting on an approval or a question; `background` the threads whose CLI is still running background shells or subagents (`tasks` describes each). A restart waits for both. `branch` is the branch the release was built from. `rolledBack` is set when this release is running because `launch.mjs` went back to it from `from`, which kept crashing at startup (and nobody has activated it on purpose since). `update` is the runner following main by itself (docs/dev-tools.md): `state` is `off` (`reason` says why), `idle`, `checking`, `building`, `waiting` (`release` is built and starts on the pending restart) or `failed` (`reason` is the error; `logFile` has the build's output); `commit` is main's tip at the last check (`checkedAt`) |
 | `runner.restart` | `{ when?: "idle" \| "now", resume?: { threadId, text }, reason?: string, release?: string, backgroundWaitMs?: number, cancel?: boolean }` | `{ scheduled: boolean, waitingFor: string[], background?: { threadId, tasks: string[] }[], note?: string, noResume?: string }`. See Restarts below. `scheduled` is true once the restart is saved; an empty `waitingFor` means it is happening now. `background` is the background work among `waitingFor`. `release` is the release the restart should come back on (the deploy script sets it). `backgroundWaitMs` limits how long background shells and subagents hold the restart. `cancel: true` withdraws a pending restart that hasn't begun and returns `scheduled: false` (`-32020` once it has begun), with a `note` when it also put `current` back. `noResume` says why the `resume` won't be sent as things stand (the thread has already been resumed 3 times in the last hour), so whoever asked can say so rather than wait for it. A runner older than this answers `-32601` |
@@ -245,18 +266,48 @@ found, `-32010` account not found, `-32020` busy (e.g. two sends racing),
   after every `hello` ("Release X kept crashing at startup, so the runner
   went back to Y.").
 
-## Panels
+## Patches
 
-A thread's folder can give it panels: things shown beside the transcript
-(docs/threadbear-design/README.md). The runner works them out from the
-folder (`src/patches.ts`), nothing is stored, and they come in the
-summary's `panels`, so a client learns of them like any other change. The
-runner looks at the folder again when it changes and otherwise every 15
-seconds at most, on the next summary it sends, so a `.env.local` that
-`convex dev` has just written shows up soon after.
+A thread's folder can give it panels (shown beside the transcript) and
+actions (chips above the composer); see docs/threadbear-design/README.md.
+The runner works them out from the folder (`src/patches.ts`), nothing is
+stored, and they come in the summary's `panels`, `actions` and `patches`,
+so a client learns of them like any other change. The runner reads the
+folder again in the background when the folder changes and otherwise
+every 15 seconds at most (on the next summary it sends), and sends a new
+summary if anything differs, so a `.env.local` that `convex dev` has just
+written, or a patch file the agent has just saved, shows up within
+seconds. A patch file that appears, loads again or breaks after the first
+read is said in the transcript as a `system.note`.
 
-Built-in patches, found by walking up from the thread's folder to the home
-folder (so a thread in a package of a monorepo gets the project's panels):
+Patches are found by walking up from the thread's folder to the home
+folder (so a thread in a package of a monorepo gets the project's), plus
+`~/.threadbear/patches/` for every folder. Two kinds:
+
+**Patch files**: `.threadbear/patches/<name>.ts` (or `.js`, `.mjs`). The
+runner imports the module (Node runs TypeScript as it is; a changed mtime
+loads it again) and reads its default export:
+
+```ts
+// .threadbear/patches/reseed.ts
+export default {
+  actions: [
+    { title: "Reseed dev DB", run: "npx convex run seed:reset && npx convex import --replace fixtures/dev.zip" },
+    { title: "Explain the schema", prompt: "Read convex/schema.ts and explain it to me." },
+  ],
+  panels: [{ title: "Storybook", url: "http://localhost:6006", note: "while npm run storybook is up" }],
+}
+```
+
+`run` is a command for `actions.run` to run in the thread's folder,
+`prompt` a message it sends instead; one or the other. A panel needs a
+`url` with a scheme. Ids are the file's name plus a slug of the title
+(`reseed.reseed-dev-db`), and two entries in one file can't share one. A
+file whose export doesn't fit is listed in `patches` with an `error` and
+gives nothing. Loading a project's module is the same trust as `npm
+install` in it.
+
+**Built in**, from the folder alone:
 
 | patch | when | panel |
 |---|---|---|

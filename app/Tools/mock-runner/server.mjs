@@ -258,6 +258,24 @@ async function dispatch(client, method, p) {
       }
       return {};
     }
+    case 'actions.run': {
+      // A command action "runs" for a moment and its output lands in the
+      // transcript; a prompt action is a message, as in the real runner.
+      const t = need(p.threadId);
+      const action = (t.summary.actions ?? []).find((x) => x.id === p.actionId);
+      if (!action) throw rpcError(-32602, `This thread has no action called ${p.actionId}`);
+      if (action.kind === 'prompt') return dispatch(client, 'threads.send', { threadId: t.summary.id, text: action.prompt });
+      await new Promise((r) => setTimeout(r, 900));
+      const ok = action.id !== 'tools.typecheck';
+      const text = ok
+        ? `$ ${action.command}\nDone in 2.1s.\n`
+        : 'src/dashboard/UsageCard.tsx(42,7): error TS2322: Type \'string\' is not assignable to type \'number\'.\n\nFound 1 error in src/dashboard/UsageCard.tsx:42\n';
+      const event = persist(t.summary.id, {
+        type: 'action.run', actionId: action.id, patch: action.patch, title: action.title, command: action.command,
+        ok, exitCode: ok ? 0 : 2, text, truncated: false, durationMs: 2100,
+      });
+      return { ok, exitCode: ok ? 0 : 2, durationMs: 2100, seq: event.seq };
+    }
     case 'panels.render': {
       // The Simulator panel's picture: a fixture image, as if simctl took it.
       const t = need(p.threadId);
@@ -644,6 +662,17 @@ p{color:#8a8a90;font-size:12px;line-height:1.5;margin-top:18px}
       id: 'convex.dashboard', title: 'Convex', kind: 'url', patch: 'convex',
       url: 'data:text/html;charset=utf-8,' + encodeURIComponent(page), note: 'happy-otter-123 (dev)',
     }];
+    // As a project's .threadbear/patches/tools.ts would give it.
+    convex.summary.actions = [
+      { id: 'tools.typecheck', title: 'Typecheck', kind: 'command', command: 'npx tsc --noEmit', patch: 'tools' },
+      { id: 'tools.open-logs', title: 'Open logs', kind: 'prompt', prompt: 'Tail the Convex logs and tell me about any errors.', patch: 'tools' },
+      { id: 'tools.deploy-to-prod', title: 'Deploy to prod', kind: 'command', command: 'npx convex deploy', patch: 'tools', note: 'Asks nothing; be sure' },
+      { id: 'tools.reseed-dev-db', title: 'Reseed dev DB', kind: 'command', command: 'npx convex run seed:reset && npx convex import --replace fixtures/dev.zip', patch: 'tools' },
+    ];
+    convex.summary.patches = [
+      { id: 'convex', source: 'builtin' },
+      { id: 'tools', source: 'project', file: '/Users/mike/dev/me/misc/.threadbear/patches/tools.ts' },
+    ];
   }
   const ios = threads.get('demo_button_colour');
   if (ios) {

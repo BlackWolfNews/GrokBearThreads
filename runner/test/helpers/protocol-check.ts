@@ -95,6 +95,11 @@ const PERSISTED: Record<string, (e: Obj) => string | null> = {
       : 'turnId, outcome, durationMs',
   'system.note': (e) => (isStr(e.text) ? null : 'text'),
   error: (e) => (isStr(e.message) ? null : 'message'),
+  'action.run': (e) =>
+    isStr(e.actionId) && isStr(e.patch) && isStr(e.title) && isStr(e.command) && typeof e.ok === 'boolean' &&
+    (e.exitCode === undefined || isNum(e.exitCode)) && isStr(e.text) && typeof e.truncated === 'boolean' && isNum(e.durationMs)
+      ? null
+      : 'actionId, patch, title, command, ok, exitCode?, text, truncated, durationMs',
 };
 
 const TRANSIENT: Record<string, (e: Obj) => string | null> = {
@@ -158,10 +163,24 @@ export function checkSummary(t: Obj): string[] {
     if (!Array.isArray(t.panels) || t.panels.length === 0) problems.push('panels (absent when empty)');
     else for (const p of t.panels) problems.push(...checkPanel(p).map((x) => `panels: ${x}`));
   }
+  if (t.actions !== undefined) {
+    if (!Array.isArray(t.actions) || t.actions.length === 0) problems.push('actions (absent when empty)');
+    else for (const a of t.actions) problems.push(...checkAction(a).map((x) => `actions: ${x}`));
+  }
+  if (t.patches !== undefined) {
+    if (!Array.isArray(t.patches) || t.patches.length === 0) problems.push('patches (absent when empty)');
+    else {
+      for (const p of t.patches) {
+        if (!isStr(p.id) || !['builtin', 'home', 'project'].includes(p.source)) problems.push('patches: id, source');
+        for (const k of ['file', 'error']) if (p[k] !== undefined && !isStr(p[k])) problems.push(`patches: ${k}`);
+        for (const k of Object.keys(p)) if (!['id', 'source', 'file', 'error'].includes(k)) problems.push(`patches: unexpected field ${k}`);
+      }
+    }
+  }
   const allowed = new Set([
     'id', 'title', 'cwd', 'accountId', 'provider', 'model', 'permissionMode', 'status', 'live', 'needsYou', 'createdAt', 'updatedAt',
     'lastActivityAt', 'snoozedUntil', 'archivedAt', 'preview', 'lastSeq', 'lastSeenSeq', 'nativeSessionId', 'contextTokens', 'costUsd',
-    'effort', 'modelInUse', 'effortInUse', 'panels',
+    'effort', 'modelInUse', 'effortInUse', 'panels', 'actions', 'patches',
   ]);
   for (const k of Object.keys(t)) if (!allowed.has(k)) problems.push(`unexpected field ${k}`);
   return problems;
@@ -175,5 +194,17 @@ export function checkPanel(p: Obj): string[] {
   for (const k of ['url', 'note']) if (p[k] !== undefined && !isStr(p[k])) problems.push(k);
   const allowed = new Set(['id', 'title', 'kind', 'url', 'patch', 'note']);
   for (const k of Object.keys(p)) if (!allowed.has(k)) problems.push(`unexpected field ${k}`);
+  return problems;
+}
+
+export function checkAction(a: Obj): string[] {
+  const problems: string[] = [];
+  for (const k of ['id', 'title', 'patch']) if (!isStr(a[k])) problems.push(k);
+  if (a.kind !== 'command' && a.kind !== 'prompt') problems.push('kind');
+  if (a.kind === 'command' && !isStr(a.command)) problems.push('command (required for kind command)');
+  if (a.kind === 'prompt' && !isStr(a.prompt)) problems.push('prompt (required for kind prompt)');
+  for (const k of ['command', 'prompt', 'note']) if (a[k] !== undefined && !isStr(a[k])) problems.push(k);
+  const allowed = new Set(['id', 'title', 'kind', 'command', 'prompt', 'patch', 'note']);
+  for (const k of Object.keys(a)) if (!allowed.has(k)) problems.push(`unexpected field ${k}`);
   return problems;
 }

@@ -62,6 +62,31 @@ export type ThreadSummary = {
   contextTokens?: number;
   costUsd?: number;
   panels?: Panel[]; // absent when the folder has none
+  actions?: Action[]; // likewise
+  patches?: PatchInfo[]; // the patches that apply to the folder, built in and the project's; absent when none
+};
+
+// An action a patch gives a thread: a chip above the composer that runs a
+// command in the thread's folder (its output goes into the transcript as an
+// action.run event) or sends a canned prompt.
+export type ActionKind = 'command' | 'prompt';
+export type Action = {
+  id: string; // "<patch>.<slug of the title>"
+  title: string;
+  kind: ActionKind;
+  command?: string; // kind "command"
+  prompt?: string; // kind "prompt"
+  patch: string;
+  note?: string;
+};
+
+// A patch that applies to a thread's folder and where it came from.
+export type PatchSource = 'builtin' | 'home' | 'project';
+export type PatchInfo = {
+  id: string;
+  source: PatchSource;
+  file?: string; // the module, for home and project patches
+  error?: string; // set when the file couldn't be loaded; it then gives nothing
 };
 
 // A panel a patch gives a thread (docs/protocol.md, "Panels"). The runner
@@ -148,7 +173,21 @@ export type EventBody =
       error?: string;
     }
   | { type: 'system.note'; text: string }
-  | { type: 'error'; message: string };
+  | { type: 'error'; message: string }
+  // A command action that ran (patches.ts): its output, truncated like a
+  // tool result. Outside any turn.
+  | {
+      type: 'action.run';
+      actionId: string;
+      patch: string;
+      title: string;
+      command: string;
+      ok: boolean;
+      exitCode?: number;
+      text: string;
+      truncated: boolean;
+      durationMs: number;
+    };
 
 export type DeltaType = 'assistant.text.delta' | 'reasoning.delta' | 'tool.output.delta';
 export type DeltaBody = { type: DeltaType; itemId: string; text: string };
@@ -179,6 +218,7 @@ export const PERSISTED_TYPES = new Set<string>([
   'turn.completed',
   'system.note',
   'error',
+  'action.run',
 ]);
 
 export const TRANSIENT_TYPES = new Set<string>(['assistant.text.delta', 'reasoning.delta', 'tool.output.delta']);

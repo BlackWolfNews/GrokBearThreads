@@ -55,6 +55,8 @@ const HELP = `tb: talk to the Threadbare runner
   tb move <threadId> <folder>
   tb delete <threadId>
   tb accounts
+  tb actions <threadId> [--json]  the thread's actions, panels and patches (from its folder)
+  tb run <threadId> <actionId>    run one: a command's output is printed and goes into the thread
 
 Thread ids can be shortened to any unique prefix.
 Uses THREADBARE_HOME and THREADBARE_PORT like the runner does.
@@ -260,6 +262,51 @@ async function run(client: RunnerClient, cmd: string, args: string[], f: Flags):
       await client.call('threads.update', { threadId: id, archived: cmd === 'archive' });
       return 0;
     }
+    case 'actions': {
+      const id = await resolveId(client, args[0]);
+      const thread = (await client.call<{ threads: ThreadSummary[] }>('threads.list', { include: ['inbox', 'snoozed', 'archived'] })).threads.find((x) => x.id === id);
+      if (!thread) throw new Error(`No thread ${id}`);
+      if (f.json) {
+        console.log(JSON.stringify({ actions: thread.actions ?? [], panels: thread.panels ?? [], patches: thread.patches ?? [] }, null, 2));
+        return 0;
+      }
+      const actions = thread.actions ?? [];
+      const panels = thread.panels ?? [];
+      const patches = thread.patches ?? [];
+      if (!actions.length && !panels.length && !patches.length) {
+        console.log(`No patches apply to ${thread.cwd}. Add .threadbear/patches/<name>.ts there (see docs/protocol.md, Patches).`);
+        return 0;
+      }
+      if (actions.length) {
+        console.log('Actions:');
+        for (const a of actions) console.log(`  ${a.id.padEnd(32)} ${a.title}${a.kind === 'prompt' ? '  (prompt)' : `  $ ${a.command}`}`);
+      }
+      if (panels.length) {
+        console.log('Panels:');
+        for (const p of panels) console.log(`  ${p.id.padEnd(32)} ${p.title}${p.url ? `  ${p.url}` : '  (image)'}${p.note ? `  ${p.note}` : ''}`);
+      }
+      console.log('Patches:');
+      for (const p of patches) console.log(`  ${p.id.padEnd(32)} ${p.source}${p.file ? `  ${p.file}` : ''}${p.error ? `  ERROR ${p.error}` : ''}`);
+      return 0;
+    }
+    case 'run': {
+      const id = await resolveId(client, args[0]);
+      if (!args[1]) throw new Error('Which action? tb actions <threadId> lists them.');
+      const before = (await client.call<{ lastSeq: number }>('threads.events', { threadId: id, limit: 1 })).lastSeq;
+      // No client-side timeout: the runner stops a command after its own limit.
+      const r = await client.call<{ turnId?: string; ok?: boolean; exitCode?: number; durationMs?: number; seq?: number }>('actions.run', { threadId: id, actionId: args[1] });
+      if (r.turnId) {
+        console.log(`Sent as a message; turn ${r.turnId}.`);
+        return 0;
+      }
+      if (r.seq !== undefined) {
+        const page = await client.call<{ events: { seq: number; type: string; text?: string }[] }>('threads.events', { threadId: id, afterSeq: Math.max(before, r.seq - 1), limit: 1 });
+        const ev = page.events.find((e) => e.seq === r.seq);
+        if (ev?.text) console.log(ev.text.trimEnd());
+      }
+      console.log(`(${r.ok ? 'ok' : 'failed'}${r.exitCode !== undefined ? `, exit ${r.exitCode}` : ''}, ${((r.durationMs ?? 0) / 1000).toFixed(1)}s)`);
+      return r.ok ? 0 : 1;
+    }
     case 'accounts': {
       const r = await client.call<{ accounts: { id: string; title: string }[]; defaults: { accountId: string; cwd: string } }>('hello', {
         client: 'tb',
@@ -395,6 +442,8 @@ function printEvent(e: any, json: boolean, prefix = ''): void {
       return out(`(${e.outcome}, ${(e.durationMs / 1000).toFixed(1)}s${e.costUsd !== undefined ? `, $${e.costUsd.toFixed(4)}` : ''}${e.error ? `: ${e.error}` : ''})`);
     case 'system.note':
       return out(`(${e.text})`);
+    case 'action.run':
+      return out(`- ${e.title} (action, ${e.ok ? 'ok' : 'failed'}, ${(e.durationMs / 1000).toFixed(1)}s)${e.text ? `\n  ${String(e.text).split('\n')[0].slice(0, 120)}` : ''}`);
     case 'error':
       return out(`error: ${e.message}`);
     default:

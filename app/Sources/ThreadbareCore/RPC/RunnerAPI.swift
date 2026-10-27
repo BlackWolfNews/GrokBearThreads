@@ -42,6 +42,12 @@ public extension RPCClient {
         try await call("panels.render", .object(["threadId": .string(threadId), "panelId": .string(panelId)]), as: PanelRender.self, timeout: .seconds(30))
     }
 
+    /// Runs an action from the thread's patches. A command action answers
+    /// when the command has finished (the runner stops it after 10 minutes).
+    func runAction(threadId: String, actionId: String) async throws -> ActionRunResult {
+        try await call("actions.run", .object(["threadId": .string(threadId), "actionId": .string(actionId)]), as: ActionRunResult.self, timeout: .seconds(11 * 60))
+    }
+
     func interrupt(threadId: String) async throws {
         _ = try await call("threads.interrupt", .object(["threadId": .string(threadId)]), as: EmptyResult.self)
     }

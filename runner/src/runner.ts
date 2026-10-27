@@ -44,7 +44,18 @@ import { copyImageInto, imageRefFor } from './media.ts';
 import { isDirectory } from './fsutil.ts';
 import { copySessionTranscript } from './transcripts.ts';
 import { approvalTitle } from './threadbare-mcp.ts';
-import { projectPanels, renderPanel, simctlScreenshot, type PanelRender, type Screenshot } from './patches.ts';
+import {
+  EMPTY_PATCH_SET,
+  loadPatchSet,
+  projectPanels,
+  renderPanel,
+  runCommand,
+  simctlScreenshot,
+  type PanelRender,
+  type PatchCache,
+  type PatchSet,
+  type Screenshot,
+} from './patches.ts';
 
 export type Notification =
   | { method: 'thread.updated'; params: { thread: ThreadSummary } }
@@ -103,10 +114,14 @@ type Runtime = {
   inProgress: Map<string, InProgressItem>;
   pendingDeltas: Map<string, { type: DeltaType; text: string }>;
   deltaTimer?: TimerHandle;
-  // The folder's panels (patches.ts), looked up again when the folder
-  // changes or PANELS_TTL_MS has passed, so a `convex dev` that has just
-  // written .env.local shows up on the next summary.
-  panels?: { cwd: string; at: number; panels: Panel[] };
+  // What the folder's patches give the thread (patches.ts). Read again in
+  // the background when the folder changes or PATCHES_TTL_MS has passed,
+  // and a new summary goes out if anything differs, so a `convex dev` that
+  // has just written .env.local, or a patch file the agent has just
+  // written, shows up within seconds. Until the first read finishes the
+  // built-in panels stand in.
+  patches?: { cwd: string; at: number; set: PatchSet; refreshing: boolean; loaded: boolean };
+  runningActions?: Set<string>;
 };
 
 type ThreadState = { rec: ThreadRecord; rt: Runtime };
@@ -125,8 +140,12 @@ export type RunnerDeps = {
   copyTranscript?: typeof copySessionTranscript;
   // Takes the Simulator panel's screenshot (patches.ts); tests pass a fake.
   screenshot?: Screenshot;
-  // Where projectPanels stops looking up the folder tree (the home folder).
+  // Where patches stop being looked for up the folder tree (the home folder).
   panelsRoot?: string;
+  // The shell command actions run through, and how long they may take;
+  // tests pass /bin/sh -c and a short limit.
+  actionShell?: string[];
+  actionTimeoutMs?: number;
 };
 
 const DELTA_INTERVAL_MS = 33; // at most ~30 delta flushes a second per thread
@@ -138,8 +157,8 @@ const STARTUP_NOTICE_MS = 10 * 60_000;
 // How long a finished background task keeps the thread counted as busy
 // while the CLI gets round to its own turn (usually well under a second).
 const WAKE_GRACE_MS = 15_000;
-// How long a thread's panels are kept before the folder is looked at again.
-const PANELS_TTL_MS = 15_000;
+// How long a thread's patches are kept before the folder is read again.
+const PATCHES_TTL_MS = 15_000;
 
 export class Runner {
   private cfg: Config;
@@ -152,6 +171,9 @@ export class Runner {
   private copyTranscript: typeof copySessionTranscript;
   private screenshot: Screenshot;
   private panelsRoot?: string;
+  private actionShell?: string[];
+  private actionTimeoutMs?: number;
+  private patchCache: PatchCache = new Map();
   private threads = new Map<string, ThreadState>();
   private listeners = new Set<(n: Notification) => void>();
   private dirty = new Set<string>();
@@ -168,6 +190,8 @@ export class Runner {
     this.copyTranscript = deps.copyTranscript ?? copySessionTranscript;
     this.screenshot = deps.screenshot ?? simctlScreenshot;
     this.panelsRoot = deps.panelsRoot;
+    this.actionShell = deps.actionShell;
+    this.actionTimeoutMs = deps.actionTimeoutMs;
     this.adapters = deps.adapters;
     this.accounts = deps.accounts;
     this.clock = deps.clock;
@@ -1584,33 +1608,128 @@ export class Runner {
     if (rec.nativeSessionId && rec.sessionUsed) s.nativeSessionId = rec.nativeSessionId;
     if (rec.contextTokens !== undefined) s.contextTokens = rec.contextTokens;
     if (rec.costUsd !== undefined) s.costUsd = rec.costUsd;
-    const panels = this.panels(st);
-    if (panels.length) s.panels = panels;
+    const set = this.patchSet(st);
+    if (set.panels.length) s.panels = set.panels;
+    if (set.actions.length) s.actions = set.actions;
+    if (set.patches.length) s.patches = set.patches;
     return s;
   }
 
-  // The thread's panels, from its folder (see Runtime.panels).
-  private panels(st: ThreadState): Panel[] {
+  // What the thread's folder gives it (see Runtime.patches): the last set
+  // read, with a fresh read started when it's stale.
+  private patchSet(st: ThreadState): PatchSet {
     const { rec, rt } = st;
     const now = this.clock.now();
-    if (!rt.panels || rt.panels.cwd !== rec.cwd || now - rt.panels.at > PANELS_TTL_MS) {
-      let panels: Panel[] = [];
+    if (!rt.patches || rt.patches.cwd !== rec.cwd) {
+      // The built-in panels straight away; the files follow.
+      let panels: PatchSet['panels'] = [];
       try {
         panels = projectPanels(rec.cwd, this.panelsRoot);
       } catch (e) {
         this.log.warn('could not read the folder for panels', { threadId: rec.id, cwd: rec.cwd, error: String(e) });
       }
-      rt.panels = { cwd: rec.cwd, at: now, panels };
+      rt.patches = { cwd: rec.cwd, at: now, set: { ...EMPTY_PATCH_SET, panels }, refreshing: false, loaded: false };
+      void this.refreshPatches(st);
+    } else if (!rt.patches.refreshing && now - rt.patches.at > PATCHES_TTL_MS) {
+      void this.refreshPatches(st);
     }
-    return rt.panels.panels;
+    return rt.patches.set;
+  }
+
+  // Reads the folder's patches again; a change sends a new summary, and a
+  // patch file that has appeared or broken since the last read is said in
+  // the transcript (not on the first read, which would say it at startup).
+  async refreshPatches(st: ThreadState): Promise<void> {
+    const { rec, rt } = st;
+    const entry = rt.patches;
+    if (!entry || entry.refreshing) return;
+    entry.refreshing = true;
+    const cwd = rec.cwd;
+    let set: PatchSet;
+    try {
+      set = await loadPatchSet(cwd, this.panelsRoot, this.patchCache);
+    } catch (e) {
+      this.log.warn('could not read the folder for patches', { threadId: rec.id, cwd, error: String(e) });
+      set = entry.set;
+    }
+    entry.refreshing = false;
+    entry.at = this.clock.now();
+    // The folder moved on meanwhile: the next summary starts over.
+    if (rt.patches !== entry || rec.cwd !== cwd || rt.deleted) return;
+    const before = entry.set;
+    const changed = JSON.stringify(before) !== JSON.stringify(set);
+    if (entry.loaded && changed) this.notePatchChanges(st, before, set);
+    entry.set = set;
+    entry.loaded = true;
+    if (changed) this.markDirty(st);
+  }
+
+  private notePatchChanges(st: ThreadState, before: PatchSet, after: PatchSet): void {
+    const was = new Map(before.patches.map((p) => [p.id + '@' + p.source, p]));
+    for (const p of after.patches) {
+      if (p.source === 'builtin') continue;
+      const old = was.get(p.id + '@' + p.source);
+      if (p.error) {
+        if (old?.error !== p.error) this.emit(st, { type: 'system.note', text: `Patch ${p.id} couldn't load: ${p.error}` });
+        continue;
+      }
+      if (old && !old.error) continue;
+      const gives: string[] = [];
+      const actions = after.actions.filter((a) => a.patch === p.id).map((a) => a.title);
+      const panels = after.panels.filter((x) => x.patch === p.id).map((x) => x.title);
+      if (actions.length) gives.push(`${actions.length === 1 ? 'action' : 'actions'} ${actions.join(', ')}`);
+      if (panels.length) gives.push(`${panels.length === 1 ? 'panel' : 'panels'} ${panels.join(', ')}`);
+      this.emit(st, { type: 'system.note', text: `Patch ${p.id} ${old ? 'loads again' : 'added'}: ${gives.join(' and ') || 'nothing yet'}.` });
+    }
   }
 
   // Draws an image panel (the Simulator's screenshot) for `panels.render`.
   async renderPanel(threadId: string, panelId: string): Promise<PanelRender> {
     const st = this.mustGet(threadId);
-    const panel = this.panels(st).find((p) => p.id === panelId);
+    const panel = this.patchSet(st).panels.find((p) => p.id === panelId);
     if (!panel) throw new RpcError(ErrorCode.badParams, `This thread has no panel called ${panelId}`);
     return renderPanel(panel, paths.panels(this.cfg.home, threadId), this.screenshot);
+  }
+
+  // Runs an action for `actions.run`: a prompt action is a message to the
+  // thread; a command action runs in its folder, and what it printed goes
+  // into the transcript as an action.run event. One run of an action at a
+  // time per thread.
+  async runAction(threadId: string, actionId: string): Promise<{ turnId?: string; ok?: boolean; exitCode?: number; durationMs?: number; seq?: number }> {
+    const st = this.mustGet(threadId);
+    const action = this.patchSet(st).actions.find((a) => a.id === actionId);
+    if (!action) throw new RpcError(ErrorCode.badParams, `This thread has no action called ${actionId}`);
+    if (action.kind === 'prompt') return this.send(threadId, action.prompt ?? '');
+    const running = (st.rt.runningActions ??= new Set());
+    if (running.has(actionId)) throw new RpcError(ErrorCode.busy, `${action.title} is already running.`);
+    running.add(actionId);
+    try {
+      const outcome = await runCommand(action.command ?? '', {
+        cwd: st.rec.cwd,
+        env: { ...process.env, ...threadEnv(threadId, this.cfg.home) },
+        shell: this.actionShell,
+        timeoutMs: this.actionTimeoutMs,
+      });
+      if (st.rt.deleted) return { ok: outcome.ok, exitCode: outcome.exitCode, durationMs: outcome.durationMs };
+      const body: EventBody = {
+        type: 'action.run',
+        actionId,
+        patch: action.patch,
+        title: action.title,
+        command: action.command ?? '',
+        ok: outcome.ok,
+        text: outcome.text,
+        truncated: outcome.truncated,
+        durationMs: outcome.durationMs,
+      };
+      if (outcome.exitCode !== undefined) body.exitCode = outcome.exitCode;
+      const event = this.emit(st, body, st.rt.turn?.turnId);
+      st.rec.lastActivityAt = this.isoNow();
+      this.markDirty(st);
+      return { ok: outcome.ok, exitCode: outcome.exitCode, durationMs: outcome.durationMs, seq: event.seq };
+    } finally {
+      running.delete(actionId);
+    }
   }
 
   // A thread by full id or unique prefix, for titles; undefined if unclear.

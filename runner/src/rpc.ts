@@ -319,6 +319,8 @@ export class RpcServer {
         return r.importMedia(reqString(p, 'path'));
       case 'panels.render':
         return r.renderPanel(reqString(p, 'threadId'), reqString(p, 'panelId'));
+      case 'actions.run':
+        return r.runAction(reqString(p, 'threadId'), reqString(p, 'actionId'));
       default: {
         // hasOwn, so "constructor" and friends aren't methods.
         const methods = this.opts.methods;

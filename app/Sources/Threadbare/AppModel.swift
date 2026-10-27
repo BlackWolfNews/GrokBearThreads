@@ -67,6 +67,9 @@ final class AppModel {
         return saved > 0 ? CGFloat(saved) : CGFloat(PanelChoice.defaultWidth)
     }()
     var panelChoice: [String: String] = [:]
+    /// Actions whose command is running, as "<threadId>/<actionId>", so
+    /// the chip shows it and a second click doesn't start another.
+    var runningActions: Set<String> = []
     /// The automation hook's `focus`: a scripted app is never in front, so
     /// it never marked anything read; with this it acts as if Mike were
     /// looking at it. Never set outside a scripted debug run.
@@ -719,6 +722,28 @@ final class AppModel {
 
     func savePanelWidth() {
         UserDefaults.standard.set(Double(panelWidth), forKey: Self.panelWidthKey)
+    }
+
+    static func actionKey(threadId: String, actionId: String) -> String { "\(threadId)/\(actionId)" }
+
+    func isRunning(action: Action, in threadId: String) -> Bool {
+        runningActions.contains(Self.actionKey(threadId: threadId, actionId: action.id))
+    }
+
+    /// Runs an action chip: the runner sends a prompt action as a message,
+    /// or runs a command action and puts its output in the transcript.
+    func runAction(_ action: Action, in threadId: String) {
+        let key = Self.actionKey(threadId: threadId, actionId: action.id)
+        guard !runningActions.contains(key), let client else { return }
+        runningActions.insert(key)
+        Task {
+            do {
+                _ = try await client.runAction(threadId: threadId, actionId: action.id)
+            } catch {
+                errorMessage = "\(action.title) didn't run: \(error.localizedDescription)"
+            }
+            runningActions.remove(key)
+        }
     }
 
     /// An image panel's latest picture, or nil when the runner can't be

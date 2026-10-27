@@ -1,23 +1,195 @@
 // Patches: what a thread's folder gives the app beyond the transcript
-// (docs/threadbear-design/README.md). This is the built-in set, worked out
-// from the folder alone; patches written in the project come in step 3.
+// (docs/threadbear-design/README.md): panels beside it and actions above
+// the composer. Two kinds:
 //
-// A panel is found by walking up from the thread's folder to the home
-// folder (or the root), so a thread started in a package of a monorepo
-// still gets the project's panels. The first folder with a project wins
-// for each patch.
+// - Built in, worked out from the folder alone: a `convex/` folder gives
+//   the dashboard, an Xcode project the Simulator.
+// - Patch files, `.threadbear/patches/*.ts` (or .js, .mjs) in the project
+//   and in `~/.threadbear/patches/` for every project. Each is a module
+//   whose default export says what it adds:
+//
+//     export default {
+//       actions: [
+//         { title: "Reseed dev DB", run: "npx convex run seed:reset" },
+//         { title: "Explain the schema", prompt: "Read convex/schema.ts and explain it." },
+//       ],
+//       panels: [{ title: "Storybook", url: "http://localhost:6006" }],
+//     }
+//
+//   The runner imports the file (Node runs TypeScript as it is) and reads
+//   that object; a file that can't be loaded is listed with its error and
+//   gives nothing. Loading a project's module is the same trust as `npm
+//   install` in it, and these are Mike's own repos.
+//
+// Patches are found by walking up from the thread's folder to the home
+// folder, so a thread started in a package of a monorepo still gets the
+// project's; a parent folder's patches apply to every project under it.
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { execFile } from 'node:child_process';
-import type { ImageRef, Panel } from './protocol.ts';
+import { pathToFileURL } from 'node:url';
+import { execFile, spawn } from 'node:child_process';
+import type { Action, ImageRef, Panel, PatchInfo } from './protocol.ts';
+import { LIMITS } from './protocol.ts';
 import { imageRefFor } from './media.ts';
 
 export const CONVEX_DASHBOARD = 'https://dashboard.convex.dev';
 // `npx convex dev` on an anonymous (no account) deployment serves the
 // dashboard itself, from this port unless it's taken.
 export const CONVEX_LOCAL_DASHBOARD = 'http://127.0.0.1:6790';
+export const PATCH_DIR = path.join('.threadbear', 'patches');
+export const PATCH_EXTENSIONS = ['.ts', '.js', '.mjs'];
 
+// Everything the folder's patches give a thread.
+export type PatchSet = { panels: Panel[]; actions: Action[]; patches: PatchInfo[] };
+export const EMPTY_PATCH_SET: PatchSet = { panels: [], actions: [], patches: [] };
+
+// Loaded patch files by path, so a summary refresh doesn't import a file
+// whose mtime hasn't moved. One per runner.
+export type PatchCache = Map<string, { mtimeMs: number; loaded: LoadedPatch }>;
+type LoadedPatch = { info: PatchInfo; panels: Panel[]; actions: Action[] };
+
+export async function loadPatchSet(cwd: string, home: string = os.homedir(), cache: PatchCache = new Map()): Promise<PatchSet> {
+  const set: PatchSet = { panels: [], actions: [], patches: [] };
+  // Built in first, so their panels come first.
+  const convexDir = findUp(cwd, home, (dir) => isDir(path.join(dir, 'convex')));
+  if (convexDir) {
+    set.panels.push(convexPanel(convexDir));
+    set.patches.push({ id: 'convex', source: 'builtin' });
+  }
+  const xcodeDir = findUp(cwd, home, hasXcodeProject);
+  if (xcodeDir) {
+    set.panels.push(simulatorPanel(xcodeDir));
+    set.patches.push({ id: 'xcode', source: 'builtin' });
+  }
+  for (const { dir, source } of patchDirs(cwd, home)) {
+    for (const file of patchFiles(dir)) {
+      const loaded = await loadPatchFile(file, source, cache);
+      set.patches.push(loaded.info);
+      set.panels.push(...loaded.panels);
+      set.actions.push(...loaded.actions);
+    }
+  }
+  return set;
+}
+
+// The patch folders that apply to `cwd`: the home one, then each folder
+// from the top down to `cwd` itself (a deeper file wins a clash of ids, as
+// the later one in the list).
+export function patchDirs(cwd: string, home: string): { dir: string; source: 'home' | 'project' }[] {
+  const out: { dir: string; source: 'home' | 'project' }[] = [];
+  const homeDir = path.join(path.resolve(home), PATCH_DIR);
+  if (isDir(homeDir)) out.push({ dir: homeDir, source: 'home' });
+  const chain: string[] = [];
+  findUp(cwd, home, (dir) => {
+    chain.unshift(dir);
+    return false;
+  });
+  for (const dir of chain) {
+    const patchDir = path.join(dir, PATCH_DIR);
+    if (patchDir !== homeDir && isDir(patchDir)) out.push({ dir: patchDir, source: 'project' });
+  }
+  return out;
+}
+
+function patchFiles(dir: string): string[] {
+  let names: string[];
+  try {
+    names = fs.readdirSync(dir);
+  } catch {
+    return [];
+  }
+  return names
+    .filter((n) => PATCH_EXTENSIONS.includes(path.extname(n)) && !n.endsWith('.d.ts') && !n.startsWith('.'))
+    .sort()
+    .map((n) => path.join(dir, n));
+}
+
+async function loadPatchFile(file: string, source: 'home' | 'project', cache: PatchCache): Promise<LoadedPatch> {
+  const id = path.basename(file, path.extname(file));
+  let mtimeMs: number;
+  try {
+    mtimeMs = fs.statSync(file).mtimeMs;
+  } catch (e) {
+    return { info: { id, source, file, error: String((e as Error).message ?? e) }, panels: [], actions: [] };
+  }
+  const hit = cache.get(file);
+  if (hit && hit.mtimeMs === mtimeMs) return hit.loaded;
+  let loaded: LoadedPatch;
+  try {
+    // The query makes Node load the file again after an edit: a module URL
+    // is loaded once per process.
+    const mod = (await import(`${pathToFileURL(file).href}?mtime=${mtimeMs}`)) as { default?: unknown };
+    loaded = readPatchModule(id, source, file, mod.default);
+  } catch (e) {
+    loaded = { info: { id, source, file, error: firstLine(e) }, panels: [], actions: [] };
+  }
+  cache.set(file, { mtimeMs, loaded });
+  return loaded;
+}
+
+// Turns a patch module's default export into actions and panels, with ids
+// from the patch's name and each title. Anything malformed is an error
+// for the whole file: a half-loaded patch would be confusing.
+export function readPatchModule(id: string, source: 'home' | 'project', file: string, value: unknown): LoadedPatch {
+  const info: PatchInfo = { id, source, file };
+  const problem = (text: string): LoadedPatch => ({ info: { ...info, error: text }, panels: [], actions: [] });
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return problem('The default export should be an object with actions and/or panels.');
+  }
+  const v = value as { actions?: unknown; panels?: unknown };
+  const actions: Action[] = [];
+  const panels: Panel[] = [];
+  if (v.actions !== undefined) {
+    if (!Array.isArray(v.actions)) return problem('actions should be an array.');
+    for (const [i, raw] of v.actions.entries()) {
+      const a = raw as { title?: unknown; run?: unknown; prompt?: unknown; note?: unknown };
+      if (!a || typeof a !== 'object' || typeof a.title !== 'string' || !a.title.trim()) return problem(`actions[${i}] needs a title.`);
+      const run = typeof a.run === 'string' && a.run.trim() ? a.run : undefined;
+      const prompt = typeof a.prompt === 'string' && a.prompt.trim() ? a.prompt : undefined;
+      if (!run && !prompt) return problem(`actions[${i}] ("${a.title}") needs run (a command) or prompt (a message).`);
+      if (run && prompt) return problem(`actions[${i}] ("${a.title}") should have run or prompt, not both.`);
+      const action: Action = { id: `${id}.${slug(a.title)}`, title: a.title.trim(), kind: run ? 'command' : 'prompt', patch: id };
+      if (run) action.command = run;
+      if (prompt) action.prompt = prompt;
+      if (typeof a.note === 'string' && a.note.trim()) action.note = a.note.trim();
+      actions.push(action);
+    }
+  }
+  if (v.panels !== undefined) {
+    if (!Array.isArray(v.panels)) return problem('panels should be an array.');
+    for (const [i, raw] of v.panels.entries()) {
+      const p = raw as { title?: unknown; url?: unknown; note?: unknown };
+      if (!p || typeof p !== 'object' || typeof p.title !== 'string' || !p.title.trim()) return problem(`panels[${i}] needs a title.`);
+      // A page the web view can open: a scheme with //, or a data: page.
+      if (typeof p.url !== 'string' || !/^([a-z][a-z0-9+.-]*:\/\/\S|data:)/i.test(p.url.trim())) return problem(`panels[${i}] ("${p.title}") needs a url.`);
+      const panel: Panel = { id: `${id}.${slug(p.title)}`, title: p.title.trim(), kind: 'url', url: p.url.trim(), patch: id };
+      if (typeof p.note === 'string' && p.note.trim()) panel.note = p.note.trim();
+      panels.push(panel);
+    }
+  }
+  const ids = new Set<string>();
+  for (const x of [...actions, ...panels]) {
+    if (ids.has(x.id)) return problem(`Two entries would both be called ${x.id}; give them different titles.`);
+    ids.add(x.id);
+  }
+  return { info, panels, actions };
+}
+
+export function slug(title: string): string {
+  return title
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '') || 'untitled';
+}
+
+function firstLine(e: unknown): string {
+  const text = String((e as Error)?.message ?? e);
+  return text.split('\n').find((l) => l.trim()) ?? 'Unknown error';
+}
+
+// The built-in set alone, synchronous: what the first summary of a thread
+// shows before its patch files have been read.
 export function projectPanels(cwd: string, home: string = os.homedir()): Panel[] {
   const panels: Panel[] = [];
   const convexDir = findUp(cwd, home, (dir) => isDir(path.join(dir, 'convex')));
@@ -74,8 +246,6 @@ export function findUp(start: string, home: string, test: (dir: string) => boole
     if (dir === stopAt) return undefined;
     const parent = path.dirname(dir);
     if (parent === dir) return undefined;
-    // Left home without passing through it (a folder outside it): stop at
-    // the root, but don't climb into other users' folders.
     dir = parent;
   }
 }
@@ -161,4 +331,84 @@ export async function renderPanel(panel: Panel, dir: string, screenshot: Screens
     return { note: `Couldn't take a screenshot: ${message.split('\n')[0]}` };
   }
   return { image: imageRefFor(file, 'image/png') };
+}
+
+// --------------------------------------------------------------- actions
+
+export type CommandOutcome = { ok: boolean; exitCode?: number; text: string; truncated: boolean; durationMs: number };
+
+// How long a command action may run. Long enough for a test suite, short
+// enough that a dev server started by mistake doesn't hold on for ever.
+export const ACTION_TIMEOUT_MS = 10 * 60_000;
+
+// Runs a command action's command in the thread's folder through a login
+// shell (so Mike's PATH, nvm and the like apply, as in a terminal), with the
+// thread's own variables, and collects what it printed. Tests pass a plain
+// shell and a short timeout.
+export function runCommand(
+  command: string,
+  opts: { cwd: string; env: Record<string, string | undefined>; shell?: string[]; timeoutMs?: number },
+): Promise<CommandOutcome> {
+  const started = Date.now();
+  const [bin, ...args] = opts.shell ?? ['/bin/zsh', '-lc'];
+  return new Promise((resolve) => {
+    const chunks: Buffer[] = [];
+    let size = 0;
+    let truncated = false;
+    const limit = LIMITS.toolResultText;
+    const take = (chunk: Buffer) => {
+      if (size >= limit) {
+        truncated = true;
+        return;
+      }
+      const room = limit - size;
+      if (chunk.length > room) {
+        chunks.push(chunk.subarray(0, room));
+        size += room;
+        truncated = true;
+      } else {
+        chunks.push(chunk);
+        size += chunk.length;
+      }
+    };
+    let child;
+    try {
+      child = spawn(bin, [...args, command], { cwd: opts.cwd, env: opts.env as NodeJS.ProcessEnv, stdio: ['ignore', 'pipe', 'pipe'], detached: true });
+    } catch (e) {
+      resolve({ ok: false, text: String((e as Error).message ?? e), truncated: false, durationMs: Date.now() - started });
+      return;
+    }
+    const timeoutMs = opts.timeoutMs ?? ACTION_TIMEOUT_MS;
+    let timedOut = false;
+    const timer = setTimeout(() => {
+      timedOut = true;
+      // The whole process group: a shell's children too.
+      try {
+        process.kill(-child.pid!, 'SIGTERM');
+      } catch {
+        child.kill('SIGTERM');
+      }
+    }, timeoutMs);
+    child.stdout.on('data', take);
+    child.stderr.on('data', take);
+    const finish = (code: number | null, error?: string) => {
+      clearTimeout(timer);
+      let text = Buffer.concat(chunks).toString('utf8');
+      if (error) text = text ? `${text}\n${error}` : error;
+      if (timedOut) {
+        const seconds = timeoutMs >= 10_000 ? String(Math.round(timeoutMs / 1000)) : String(timeoutMs / 1000);
+        text = text.replace(/\n$/, '');
+        text = `${text}${text ? '\n' : ''}Stopped after ${seconds} s.`;
+      }
+      resolve({
+        ok: code === 0 && !timedOut && !error,
+        exitCode: code ?? undefined,
+        text,
+        truncated,
+        durationMs: Date.now() - started,
+      });
+    };
+    child.on('error', (e) => finish(null, e.message));
+    child.on('close', (code) => finish(code));
+  });
 }

@@ -152,6 +152,82 @@ public struct Panel: Sendable, Hashable, Codable, Identifiable {
     public var pageURL: URL? { url.flatMap(URL.init(string:)) }
 }
 
+/// An action a patch gives a thread: a chip above the composer that runs
+/// a command in the thread's folder or sends a canned prompt.
+public struct Action: Sendable, Hashable, Codable, Identifiable {
+    public enum Kind: String, Sendable, Hashable, Codable {
+        case command, prompt
+
+        public init(from decoder: Decoder) throws {
+            let raw = try decoder.singleValueContainer().decode(String.self)
+            self = Kind(rawValue: raw) ?? .command
+        }
+    }
+
+    public var id: String
+    public var title: String
+    public var kind: Kind
+    public var command: String?
+    public var prompt: String?
+    public var patch: String
+    public var note: String?
+
+    public init(id: String, title: String, kind: Kind = .command, command: String? = nil, prompt: String? = nil, patch: String = "", note: String? = nil) {
+        self.id = id
+        self.title = title
+        self.kind = kind
+        self.command = command
+        self.prompt = prompt
+        self.patch = patch
+        self.note = note
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(String.self, forKey: .id)
+        title = try c.decodeIfPresent(String.self, forKey: .title) ?? id
+        kind = try c.decodeIfPresent(Kind.self, forKey: .kind) ?? .command
+        command = try c.decodeIfPresent(String.self, forKey: .command)
+        prompt = try c.decodeIfPresent(String.self, forKey: .prompt)
+        patch = try c.decodeIfPresent(String.self, forKey: .patch) ?? ""
+        note = try c.decodeIfPresent(String.self, forKey: .note)
+    }
+}
+
+/// A patch that applies to a thread's folder: built in, from
+/// `~/.threadbear/patches`, or the project's own.
+public struct PatchInfo: Sendable, Hashable, Codable, Identifiable {
+    public var id: String
+    public var source: String
+    public var file: String?
+    public var error: String?
+
+    public init(id: String, source: String = "project", file: String? = nil, error: String? = nil) {
+        self.id = id
+        self.source = source
+        self.file = file
+        self.error = error
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(String.self, forKey: .id)
+        source = try c.decodeIfPresent(String.self, forKey: .source) ?? "project"
+        file = try c.decodeIfPresent(String.self, forKey: .file)
+        error = try c.decodeIfPresent(String.self, forKey: .error)
+    }
+}
+
+/// What `actions.run` gives back: the turn a prompt action started, or how
+/// a command action went (its output is in the transcript at `seq`).
+public struct ActionRunResult: Sendable, Hashable, Decodable {
+    public var turnId: String?
+    public var ok: Bool?
+    public var exitCode: Int?
+    public var durationMs: Double?
+    public var seq: Int?
+}
+
 /// What `panels.render` gives back for an image panel: the picture, or a
 /// note saying why there isn't one.
 public struct PanelRender: Sendable, Hashable, Decodable {
@@ -191,8 +267,10 @@ public struct ThreadSummary: Sendable, Hashable, Codable, Identifiable {
     public var nativeSessionId: String?
     public var contextTokens: Int?
     public var costUsd: Double?
-    /// Panels from the folder's patches; empty for most threads.
+    /// Panels, actions and patches from the folder; empty for most threads.
     public var panels: [Panel]
+    public var actions: [Action]
+    public var patches: [PatchInfo]
 
     public init(
         id: String, title: String, cwd: String = "~/dev/me/misc", accountId: String = "claude-main",
@@ -202,7 +280,8 @@ public struct ThreadSummary: Sendable, Hashable, Codable, Identifiable {
         snoozedUntil: Date? = nil, archivedAt: Date? = nil, preview: String = "",
         lastSeq: Int = 0, lastSeenSeq: Int = 0, nativeSessionId: String? = nil,
         contextTokens: Int? = nil, costUsd: Double? = nil,
-        effort: String? = nil, modelInUse: String? = nil, effortInUse: String? = nil, panels: [Panel] = []
+        effort: String? = nil, modelInUse: String? = nil, effortInUse: String? = nil, panels: [Panel] = [],
+        actions: [Action] = [], patches: [PatchInfo] = []
     ) {
         self.id = id
         self.title = title
@@ -229,6 +308,8 @@ public struct ThreadSummary: Sendable, Hashable, Codable, Identifiable {
         self.contextTokens = contextTokens
         self.costUsd = costUsd
         self.panels = panels
+        self.actions = actions
+        self.patches = patches
     }
 
     public init(from decoder: Decoder) throws {
@@ -263,6 +344,8 @@ public struct ThreadSummary: Sendable, Hashable, Codable, Identifiable {
         contextTokens = try c.decodeIfPresent(Double.self, forKey: .contextTokens).map { Int($0) }
         costUsd = try c.decodeIfPresent(Double.self, forKey: .costUsd)
         panels = c.lossyArray(Panel.self, forKey: .panels)
+        actions = c.lossyArray(Action.self, forKey: .actions)
+        patches = c.lossyArray(PatchInfo.self, forKey: .patches)
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -292,12 +375,14 @@ public struct ThreadSummary: Sendable, Hashable, Codable, Identifiable {
         try c.encodeIfPresent(contextTokens, forKey: .contextTokens)
         try c.encodeIfPresent(costUsd, forKey: .costUsd)
         if !panels.isEmpty { try c.encode(panels, forKey: .panels) }
+        if !actions.isEmpty { try c.encode(actions, forKey: .actions) }
+        if !patches.isEmpty { try c.encode(patches, forKey: .patches) }
     }
 
     enum CodingKeys: String, CodingKey {
         case id, title, cwd, accountId, provider, model, effort, modelInUse, effortInUse, permissionMode, status, live, needsYou
         case createdAt, updatedAt, lastActivityAt, snoozedUntil, archivedAt, preview
-        case lastSeq, lastSeenSeq, nativeSessionId, contextTokens, costUsd, panels
+        case lastSeq, lastSeenSeq, nativeSessionId, contextTokens, costUsd, panels, actions, patches
     }
 
     public var isArchived: Bool { archivedAt != nil }

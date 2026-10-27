@@ -396,7 +396,7 @@ Tools/dev-app.sh start --mock                    # the demo threads; prints the 
 Tools/dev-app.sh start --mock --fixtures .fixtures/threads/<id>   # a tb export
 Tools/dev-app.sh start --home <dev runner home>  # runner/scripts/dev-runner.sh
 Tools/dev-app.sh do '{"cmd":"open","id":"demo_upload"}' '{"cmd":"expand","row":"g:"}'
-Tools/dev-app.sh dump            # sidebar, rows (id, kind, height, open, text), panels, composer, banner
+Tools/dev-app.sh dump            # sidebar, rows (id, kind, height, open, text), panels, actions, composer, banner
 Tools/dev-app.sh shot /tmp/a.png # the window alone
 Tools/dev-app.sh rebuild         # a new build, same options and runner, same thread open
 Tools/dev-app.sh log             # the app's own log
@@ -451,6 +451,7 @@ is an error. Commands marked "the open thread" act on `id` when it's given
 | `zoom` | `to` (in, out, reset) or `percent` | the text size, as ⌘=, ⌘- and ⌘0 set it; says the percent it's at |
 | `archive`, `unarchive`, `snooze` | `id`, `seconds` (default 3600) | the open thread; says which thread it acted on |
 | `mode` | `mode` (`archive`, `snoozed`, `inbox`) | which list the sidebar shows |
+| `action` | `id`, `timeout` | runs that action chip of the selected thread and waits for a command to finish (default 60 s); `dump` lists the actions |
 | `panel` | `id`, `show` | the panels pane of the selected thread: `id` shows that panel (an error names the ones it has), `show` true/false shows or hides the pane, neither toggles it; `dump` lists the panels, the active one starred |
 | `waitFor` | `row`, `kind`, `status` (and `thread`), `text`, `banner` (`""` for none), `connection`, `loaded`, `ready`, `not`, `timeout` | until every condition given holds (default 10 s) |
 | `dump` | `format` (`json`, `text`), `out` | |

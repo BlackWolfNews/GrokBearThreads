@@ -1052,7 +1052,7 @@ test('blank folders, search limit 0 and startup notices', () => {
   assert.ok(!h2.runner.noticesForNewClient().some((n) => /mid-turn/.test(n.message)));
 });
 
-test('a thread in a Convex project has the dashboard panel; a folder change refreshes them', () => {
+test('a thread in a Convex project has the dashboard panel; a folder change refreshes them', async () => {
   const root = tmpDir();
   const project = path.join(root, 'app');
   fs.mkdirSync(path.join(project, 'convex'), { recursive: true });
@@ -1065,14 +1065,105 @@ test('a thread in a Convex project has the dashboard panel; a folder change refr
   assert.deepEqual(thread.panels, [
     { id: 'convex.dashboard', title: 'Convex', kind: 'url', url: 'https://dashboard.convex.dev/d/quick-fox-77', patch: 'convex', note: 'quick-fox-77 (dev)' },
   ]);
-  // The folder is read again only now and then, unless the folder changes.
+  // The folder is read again only now and then (in the background), unless
+  // the folder changes.
   fs.rmSync(path.join(project, 'convex'), { recursive: true });
+  await tick();
   assert.equal(h.runner.get(thread.id).panels?.length, 1, 'still cached');
   h.clock.advance(16_000);
+  h.runner.get(thread.id);
+  await tick();
   assert.equal(h.runner.get(thread.id).panels, undefined, 'gone after the TTL');
+  assert.equal(h.notes.filter((n) => n.method === 'thread.updated').at(-1)?.params.thread.panels, undefined, 'a summary went out for the change');
   fs.mkdirSync(path.join(project, 'convex'));
   const moved = h.runner.update({ threadId: thread.id, cwd: plain }).thread;
   assert.equal(moved.panels, undefined);
   const back = h.runner.update({ threadId: thread.id, cwd: project }).thread;
   assert.equal(back.panels?.[0].id, 'convex.dashboard');
+});
+
+test('patch files give a thread actions; a command action runs in the folder and lands in the transcript', async () => {
+  const root = tmpDir();
+  const project = path.join(root, 'app');
+  fs.mkdirSync(path.join(project, '.threadbear/patches'), { recursive: true });
+  fs.writeFileSync(path.join(project, '.threadbear/patches/tools.ts'), `export default { actions: [
+    { title: "Say hi", run: "echo hi from $PWD; echo thread $THREADBARE_THREAD_ID" },
+    { title: "Fail", run: "echo bad >&2; exit 2" },
+    { title: "Explain", prompt: "Explain this folder." },
+  ] };`);
+  const h = makeHarness(undefined, {}, { panelsRoot: root, actionShell: ['/bin/sh', '-c'], actionTimeoutMs: 5000 });
+  const { thread } = create(h, { cwd: project });
+  // The first summary has the built-in bits only; the files follow.
+  assert.equal(thread.actions, undefined);
+  await tick();
+  const loaded = h.runner.get(thread.id);
+  assert.deepEqual(checkSummary(loaded), []);
+  assert.deepEqual(loaded.actions?.map((a) => a.id), ['tools.say-hi', 'tools.fail', 'tools.explain']);
+  assert.deepEqual(loaded.patches, [{ id: 'tools', source: 'project', file: path.join(project, '.threadbear/patches/tools.ts') }]);
+  // No note for patches found on the first read.
+  assert.ok(!h.events(thread.id).some((e) => e.type === 'system.note'));
+
+  const r = await h.runner.runAction(thread.id, 'tools.say-hi');
+  assert.equal(r.ok, true);
+  assert.equal(r.exitCode, 0);
+  const run = h.events(thread.id).find((e) => e.type === 'action.run');
+  assert.ok(run);
+  assert.equal(run.seq, r.seq);
+  assert.deepEqual(checkSequence(h.events(thread.id).filter((e) => !e.type.endsWith('.delta'))), []);
+  assert.equal(run.actionId, 'tools.say-hi');
+  assert.equal(run.title, 'Say hi');
+  assert.equal(run.patch, 'tools');
+  assert.match(run.text, new RegExp(`hi from ${fs.realpathSync(project)}\nthread ${thread.id}`));
+  assert.equal(run.ok, true);
+
+  const bad = await h.runner.runAction(thread.id, 'tools.fail');
+  assert.equal(bad.ok, false);
+  assert.equal(bad.exitCode, 2);
+  const failed = h.events(thread.id).filter((e) => e.type === 'action.run').at(-1);
+  assert.equal(failed.ok, false);
+  assert.equal(failed.text.trim(), 'bad');
+
+  // A prompt action is a message.
+  const sent = await h.runner.runAction(thread.id, 'tools.explain');
+  assert.ok(sent.turnId);
+  const messages = h.events(thread.id).filter((e) => e.type === 'user.message');
+  assert.equal(messages.at(-1).text, 'Explain this folder.');
+
+  await assert.rejects(h.runner.runAction(thread.id, 'tools.nope'), (e: RpcError) => e.code === -32602);
+});
+
+test('a patch file written later is noticed within the TTL and said in the transcript; two runs of one action at once are refused', async () => {
+  const root = tmpDir();
+  const project = path.join(root, 'app');
+  fs.mkdirSync(project, { recursive: true });
+  const h = makeHarness(undefined, {}, { panelsRoot: root, actionShell: ['/bin/sh', '-c'], actionTimeoutMs: 5000 });
+  const { thread } = create(h, { cwd: project });
+  await tick();
+  assert.equal(h.runner.get(thread.id).patches, undefined);
+  fs.mkdirSync(path.join(project, '.threadbear/patches'), { recursive: true });
+  fs.writeFileSync(path.join(project, '.threadbear/patches/slow.ts'), `export default { actions: [{ title: "Wait", run: "sleep 1" }], panels: [{ title: "Docs", url: "http://localhost:8000" }] };`);
+  h.clock.advance(16_000);
+  h.runner.get(thread.id);
+  await tick();
+  const notes = h.events(thread.id).filter((e) => e.type === 'system.note').map((e) => e.text);
+  assert.deepEqual(notes, ['Patch slow added: action Wait and panel Docs.']);
+  assert.equal(h.runner.get(thread.id).panels?.[0].id, 'slow.docs');
+
+  const first = h.runner.runAction(thread.id, 'slow.wait');
+  await tick();
+  await assert.rejects(h.runner.runAction(thread.id, 'slow.wait'), (e: RpcError) => e.code === -32020 && /already running/.test(e.message));
+  assert.equal((await first).ok, true);
+
+  // Broken later: said once, not on every read.
+  fs.writeFileSync(path.join(project, '.threadbear/patches/slow.ts'), `export default 42;`);
+  const later = new Date(Date.now() + 5000);
+  fs.utimesSync(path.join(project, '.threadbear/patches/slow.ts'), later, later);
+  for (let i = 0; i < 2; i++) {
+    h.clock.advance(16_000);
+    h.runner.get(thread.id);
+    await tick();
+  }
+  const after = h.events(thread.id).filter((e) => e.type === 'system.note').map((e) => e.text);
+  assert.deepEqual(after.slice(1), ['Patch slow couldn\'t load: The default export should be an object with actions and/or panels.']);
+  assert.equal(h.runner.get(thread.id).actions, undefined);
 });

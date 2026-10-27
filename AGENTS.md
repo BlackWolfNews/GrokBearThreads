@@ -22,7 +22,11 @@ anything.
 - UI copy: plain words, no eyebrow or kicker labels, no em dashes.
 - Transcript files and fixtures made from real sessions are private: keep them
   out of git (`.fixtures/` is ignored).
-- Mike's own repo: commit to main once tests pass.
+- Mike's own repo: commit to main once tests pass. Several threads share
+  this checkout, so stage your own paths by name, never `git add -A`.
+- A project can give Threadbear threads panels and action chips through
+  `.threadbear/patches/*.ts` (docs/protocol.md, "Patches"). When Mike
+  asks for a button or a panel for a project, write one of those there.
 
 ## Working on Threadbare from inside Threadbare
 

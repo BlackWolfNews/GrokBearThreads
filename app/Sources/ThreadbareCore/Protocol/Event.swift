@@ -337,6 +337,58 @@ public struct TurnCompletion: Sendable, Hashable, Decodable {
     enum CodingKeys: String, CodingKey { case turnId, outcome, durationMs, costUsd, usage, error }
 }
 
+/// A command action that ran (`action.run`): what it printed, outside any
+/// turn. Shown as a tool row.
+public struct ActionRun: Sendable, Hashable, Decodable {
+    public var actionId: String
+    public var patch: String
+    public var title: String
+    public var command: String
+    public var ok: Bool
+    public var exitCode: Int?
+    public var text: String
+    public var truncated: Bool
+    public var durationMs: Double
+
+    public init(actionId: String, patch: String = "", title: String, command: String = "", ok: Bool = true, exitCode: Int? = nil, text: String = "", truncated: Bool = false, durationMs: Double = 0) {
+        self.actionId = actionId
+        self.patch = patch
+        self.title = title
+        self.command = command
+        self.ok = ok
+        self.exitCode = exitCode
+        self.text = text
+        self.truncated = truncated
+        self.durationMs = durationMs
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        actionId = (try? c.decodeIfPresent(String.self, forKey: .actionId)) ?? ""
+        patch = (try? c.decodeIfPresent(String.self, forKey: .patch)) ?? ""
+        title = (try? c.decodeIfPresent(String.self, forKey: .title)) ?? actionId
+        command = (try? c.decodeIfPresent(String.self, forKey: .command)) ?? ""
+        ok = (try? c.decodeIfPresent(Bool.self, forKey: .ok)) ?? true
+        exitCode = c.lenientInt(forKey: .exitCode)
+        text = (try? c.decodeIfPresent(String.self, forKey: .text)) ?? ""
+        truncated = (try? c.decodeIfPresent(Bool.self, forKey: .truncated)) ?? false
+        durationMs = (try? c.decodeIfPresent(Double.self, forKey: .durationMs)) ?? 0
+    }
+
+    enum CodingKeys: String, CodingKey { case actionId, patch, title, command, ok, exitCode, text, truncated, durationMs }
+
+    /// The row's item id: one per run.
+    public func itemId(seq: Int) -> String { "action:\(seq)" }
+
+    /// The run as the tool call and result the transcript draws.
+    public var asToolCall: (ToolCall, ToolResult) {
+        let title = ok ? self.title : "\(self.title) failed" + (exitCode.map { " (exit \($0))" } ?? "")
+        let call = ToolCall(itemId: "", name: "action", kind: .command, title: title,
+                            input: .object(["command": .string(command), "patch": .string(patch), "actionId": .string(actionId)]))
+        return (call, ToolResult(itemId: "", ok: ok, text: text, truncated: truncated))
+    }
+}
+
 public enum EventPayload: Sendable, Hashable {
     /// `origin` is "runner" for a message the runner sent by itself (the
     /// resume after a restart); nil for anything a person or client sent.
@@ -354,6 +406,7 @@ public enum EventPayload: Sendable, Hashable {
     case turnCompleted(TurnCompletion)
     case systemNote(String)
     case error(String)
+    case actionRun(ActionRun)
     case assistantTextDelta(itemId: String, text: String)
     case reasoningDelta(itemId: String, text: String)
     case toolOutputDelta(itemId: String, text: String)
@@ -479,6 +532,8 @@ public struct Event: Sendable, Hashable, Decodable {
         case "error":
             let fields = try text()
             return .error(fields.message ?? fields.text ?? "Something went wrong")
+        case "action.run":
+            return .actionRun(try ActionRun(from: decoder))
         case "assistant.text.delta":
             let fields = try text()
             return .assistantTextDelta(itemId: fields.itemId ?? "", text: fields.text ?? "")

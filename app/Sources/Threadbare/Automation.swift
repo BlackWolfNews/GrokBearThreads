@@ -279,6 +279,21 @@ enum Automation {
             // A beat for the pane (and a web view) to appear.
             try? await Task.sleep(for: .milliseconds(200))
             return "ok \(app.showsPanels(for: thread) ? "showing \(app.activePanel(for: thread)?.id ?? "nothing")" : "hidden")"
+        case "action":
+            // {"cmd":"action","id":"reseed.reseed-dev-db"} runs that action of
+            // the selected thread and waits for a command to finish.
+            guard let thread = app.selectedThread else { return "error no thread selected" }
+            guard let id = c["id"] as? String, let action = thread.actions.first(where: { $0.id == id }) else {
+                return "error no action \(c["id"] ?? ""); this thread has \(thread.actions.map(\.id).joined(separator: ", "))"
+            }
+            app.runAction(action, in: thread.id)
+            let deadline = Date().addingTimeInterval(number(c["timeout"]) ?? 60)
+            while Date() < deadline, app.isRunning(action: action, in: thread.id) {
+                try? await Task.sleep(for: .milliseconds(50))
+            }
+            if app.isRunning(action: action, in: thread.id) { return "error \(id) still running after the timeout" }
+            try? await Task.sleep(for: .milliseconds(150))
+            return "ok ran \(id)"
         case "mode":
             switch c["mode"] as? String {
             case "archive": app.showArchive()
