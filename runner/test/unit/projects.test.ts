@@ -372,3 +372,14 @@ test('agent tools: make, read, update, join and leave projects', async () => {
   assert.equal(rec(h, thread.id)?.projectsLeft?.[0], p.id);
   assert.equal((await call('read_project', { project: 'nope' })).error, true);
 });
+
+test('a project the librarian makes on an asked look stays: the same look never takes the thread out of it', async () => {
+  const s = setup({ models: () => reply({ projects: [], new: { title: 'Tandem', folders: [], goals: 'A video editor', state: '' } }) });
+  const { h, create, finish, librarian } = s;
+  const { thread } = create();
+  await finish(thread.id);
+  librarian.run(thread.id);
+  await tick(8);
+  assert.deepEqual(librarian.status().recent.map((e) => e.text), ['Made Tandem and put it there']);
+  assert.deepEqual(h.runner.get(thread.id).projects?.map((m) => m.title), ['Tandem']);
+});

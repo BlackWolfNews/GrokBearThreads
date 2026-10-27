@@ -370,7 +370,8 @@ export class Librarian {
     // Only a move or a direct ask takes the thread out of one of the
     // librarian's own guesses; turns alone shouldn't make it flap.
     if (job.reason === 'moved' || job.reason === 'asked') {
-      const stale = (rec.projects ?? []).filter((m) => m.by === 'librarian' && !m.pinned && !wanted.includes(m.id)).map((m) => m.id);
+      // Not one it has just made (ids) for this very thread.
+      const stale = (rec.projects ?? []).filter((m) => m.by === 'librarian' && !m.pinned && !wanted.includes(m.id) && !ids.has(m.id)).map((m) => m.id);
       if (stale.length && Array.isArray(a.projects)) {
         const r = this.projects.changeMembership(rec.id, { remove: stale, by: 'librarian' });
         if (r.left.length) {
