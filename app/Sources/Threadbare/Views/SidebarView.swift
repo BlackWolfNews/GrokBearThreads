@@ -138,7 +138,7 @@ struct SectionHeading: View {
             Button(action: fold.toggle) { label }
                 .buttonStyle(.plain)
                 .onHover { hovering = $0 }
-                .help(fold.collapsed ? "Show \(title)" : "Hide \(title)")
+                .tip(fold.collapsed ? "Show \(title)" : "Hide \(title)")
                 .accessibilityValue(fold.collapsed ? "Collapsed" : "Expanded")
         } else {
             label
