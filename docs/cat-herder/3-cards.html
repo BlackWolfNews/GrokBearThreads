@@ -1,0 +1,108 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><link rel="stylesheet" href="mac.css">
+<!-- size: 1220x980 -->
+<style>
+  body { padding: 20px; background: var(--bg); }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; width: 1180px; }
+  .card { font-size: 14px; }
+  .caption { font-size: 12px; color: var(--tertiary); margin: 0 0 8px 2px; }
+  .cell { display: flex; flex-direction: column; }
+  .bowls { display: flex; gap: 22px; margin-top: 8px; }
+  .bowl { display: flex; flex-direction: column; align-items: center; gap: 6px; font-size: 12px; color: var(--secondary); width: 110px; text-align: center; }
+  .bowl svg { width: 84px; height: 56px; }
+  .bowl b { color: var(--text); font-weight: 500; font-size: 13px; }
+  .bowl .r { color: var(--tertiary); }
+  .opt { display: flex; gap: 10px; padding: 7px 0; align-items: flex-start; }
+  .opt i { width: 16px; height: 16px; border-radius: 50%; border: 1.5px solid rgba(255,255,255,0.3); flex: none; margin-top: 2px; }
+  .opt i.on { border-color: var(--accent); background: radial-gradient(var(--accent) 45%, transparent 50%); }
+  .opt .d { color: var(--secondary); font-size: 13px; }
+  .flap { display: flex; align-items: center; gap: 12px; padding: 9px 0; border-top: 0.5px solid var(--separator); }
+  .flap:first-of-type { border-top: none; }
+  .flap svg { width: 30px; height: 30px; }
+  .flap .n { flex: 1; }
+  .flap .n small { display: block; color: var(--tertiary); font-size: 12px; }
+  .flap .s { font-size: 12px; color: var(--green); }
+  .flap .s.off { color: var(--tertiary); }
+  .notif { width: 360px; background: #2b2b2f; border: 0.5px solid rgba(255,255,255,0.14); border-radius: 14px; padding: 12px 14px; display: flex; gap: 12px; align-items: center; box-shadow: 0 10px 30px rgba(0,0,0,0.45); }
+  .notif .icon { width: 40px; height: 40px; border-radius: 9px; background: #e5953f; display: grid; place-items: center; flex: none; }
+  .notif .icon svg { width: 32px; height: 32px; color: #1f1f21; }
+  .notif .t { font-size: 13px; font-weight: 600; }
+  .notif .b { font-size: 13px; color: var(--secondary); }
+  .notif .when { margin-left: auto; font-size: 11px; color: var(--tertiary); align-self: flex-start; }
+  .seg { display: inline-flex; background: rgba(255,255,255,0.06); border-radius: 7px; padding: 2px; font-size: 13px; }
+  .seg span { padding: 4px 12px; border-radius: 5px; color: var(--secondary); }
+  .seg span.on { background: rgba(255,255,255,0.14); color: var(--text); }
+  .setting { display: flex; align-items: center; gap: 14px; }
+  .setting .l { flex: 1; }
+  .setting .l small { display: block; color: var(--tertiary); font-size: 12px; margin-top: 2px; line-height: 16px; }
+  .foot { display: flex; align-items: center; gap: 8px; color: var(--tertiary); font-size: 11px; }
+</style>
+</head><body>
+<script src="cats.js"></script>
+<div class="grid">
+
+  <div class="cell">
+    <div class="caption">Usage, in the account menu and in Settings. A bowl per account; it empties as the 5 hour window is used and refills on the reset.</div>
+    <div class="card">
+      <div class="ctitle">Food bowls</div>
+      <div class="csub">Refills are the Anthropic and OpenAI usage windows. The CLI tells us how full they are.</div>
+      <div class="bowls">
+        <div class="bowl"><svg viewBox="0 0 84 56"><defs><clipPath id="b1"><path d="M6 14 L78 14 L68 50 L16 50 Z"/></clipPath></defs><path d="M6 14 L78 14 L68 50 L16 50 Z" fill="#2c2c30" stroke="#55555a"/><rect x="0" y="24" width="84" height="30" fill="#c58a3c" clip-path="url(#b1)"/><ellipse cx="42" cy="14" rx="36" ry="6" fill="#39393e" stroke="#55555a"/></svg><b>claude-3</b>72% left<span class="r">refills in 2h 14m</span></div>
+        <div class="bowl"><svg viewBox="0 0 84 56"><defs><clipPath id="b2"><path d="M6 14 L78 14 L68 50 L16 50 Z"/></clipPath></defs><path d="M6 14 L78 14 L68 50 L16 50 Z" fill="#2c2c30" stroke="#55555a"/><rect x="0" y="44" width="84" height="10" fill="#c58a3c" clip-path="url(#b2)"/><ellipse cx="42" cy="14" rx="36" ry="6" fill="#39393e" stroke="#55555a"/></svg><b>claude-2</b><span style="color:var(--orange)">18% left</span><span class="r">refills in 41m</span></div>
+        <div class="bowl"><svg viewBox="0 0 84 56"><defs><clipPath id="b3"><path d="M6 14 L78 14 L68 50 L16 50 Z"/></clipPath></defs><path d="M6 14 L78 14 L68 50 L16 50 Z" fill="#2c2c30" stroke="#55555a"/><rect x="0" y="16" width="84" height="40" fill="#c58a3c" clip-path="url(#b3)"/><ellipse cx="42" cy="14" rx="36" ry="6" fill="#39393e" stroke="#55555a"/></svg><b>cannstudios</b>Full<span class="r">nobody's eaten</span></div>
+        <div class="bowl"><svg viewBox="0 0 84 56"><defs><clipPath id="b4"><path d="M6 14 L78 14 L68 50 L16 50 Z"/></clipPath></defs><path d="M6 14 L78 14 L68 50 L16 50 Z" fill="#2c2c30" stroke="#55555a"/><rect x="0" y="32" width="84" height="24" fill="#8fb37a" clip-path="url(#b4)"/><ellipse cx="42" cy="14" rx="36" ry="6" fill="#39393e" stroke="#55555a"/></svg><b>codex</b>55% left<span class="r">week: 60% left</span></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="cell">
+    <div class="caption">A failed turn. Same card shape as approvals, red bar, the cat looks sheepish, the error is still right there.</div>
+    <div class="card bar red">
+      <div class="ctitle"><svg class="cat" style="color:#6e7a8a"><use href="#cat-hairball"/></svg> Claude coughed up a hairball</div>
+      <div class="csub">The runner restarted while this turn was running, so the cat lost its place. Nothing it had already written is lost.</div>
+      <div class="payload mono">Stopped after 1m 40s · runner restarted (launchctl kickstart)</div>
+      <div class="btns"><span class="btn primary">Carry on</span><span class="btn">Show the mess</span></div>
+    </div>
+    <div style="height:18px"></div>
+    <div class="caption">And the turn footer when things went fine. Cost is treats.</div>
+    <div class="card" style="padding:10px 16px"><div class="foot"><span>2m 10s</span><span>·</span><span>4 treats</span><span>·</span><span>$0.12</span><span>·</span><span>claude-haiku-5-5</span></div></div>
+  </div>
+
+  <div class="cell">
+    <div class="caption">A question card. The structure doesn't change, only the cat and one line of its voice.</div>
+    <div class="card bar orange">
+      <div class="ctitle"><svg class="cat" style="color:#9aa0a6"><use href="#cat-door"/></svg> Which colour should the shed be?</div>
+      <div class="csub">The cat is looking at you expectantly.</div>
+      <div style="margin-top:10px">
+        <div class="opt"><i class="on"></i><div>Green<div class="d">Paint the shed green.</div></div></div>
+        <div class="opt"><i></i><div>Blue<div class="d">Paint the shed blue.</div></div></div>
+        <div class="opt"><i></i><div>Red<div class="d">Paint the shed red.</div></div></div>
+      </div>
+      <div class="payload" style="color:var(--tertiary)">Something else</div>
+      <div class="btns"><span class="btn primary">Send answer<span class="kbd">⏎</span></span></div>
+    </div>
+  </div>
+
+  <div class="cell">
+    <div class="caption">Runners in Settings. Each machine is a cat flap; a closed one is a runner we can't reach.</div>
+    <div class="card">
+      <div class="ctitle">Cat flaps</div>
+      <div class="csub" style="margin-bottom:8px">Where cats can get in. Threads start on the flap you pick in the composer.</div>
+      <div class="flap"><svg style="color:#e5953f"><use href="#cat-sit"/></svg><div class="n">MacBook (this Mac)<small>6 cats about · Claude 2.1.14 · Node 24.22.1</small></div><span class="s">Open</span></div>
+      <div class="flap"><svg style="color:#9aa0a6"><use href="#cat-sit"/></svg><div class="n">Tinker Desk<small>3 cats about · over Tailscale</small></div><span class="s">Open</span></div>
+      <div class="flap"><svg style="color:#5a5a60"><use href="#cat-sleep"/></svg><div class="n">Bruce<small>Not answering since 07:40</small></div><span class="s off">Closed</span></div>
+    </div>
+    <div style="height:18px"></div>
+    <div class="caption">The macOS notification when a thread finishes.</div>
+    <div class="notif"><div class="icon"><svg><use href="#cat-gift"/></svg></div><div><div class="t">Fix the README typos</div><div class="b">Brought you something: fixed one typo in README.md</div></div><span class="when">now</span></div>
+  </div>
+
+  <div class="cell" style="grid-column: 1 / -1">
+    <div class="caption">The dial, in Settings. Mike's own copy rule is plain words, so the cat voice has to be something you can turn down on a bad day.</div>
+    <div class="card">
+      <div class="setting"><div class="l">Cats<small>Full: cats, places and the cat's own lines. Some: cat avatars and postures, plain words everywhere else. Off: dots and "Needs you".</small></div><div class="seg"><span class="on">Full</span><span>Some</span><span>Off</span></div></div>
+      <div class="setting" style="margin-top:14px"><div class="l">Sounds<small>One quiet "mrrp" when a cat comes to the door. Never while you're typing, never more than once a minute.</small></div><div class="seg"><span>On</span><span class="on">Off</span></div></div>
+    </div>
+  </div>
+</div>
+</body></html>
