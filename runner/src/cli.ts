@@ -3,7 +3,8 @@ import { parseArgs } from 'node:util';
 import path from 'node:path';
 import { loadConfig, readToken, runnerUrl } from './config.ts';
 import { RunnerClient } from './client.ts';
-import type { Account, ImageRef, LibrarianStatus, PersistedEvent, Project, RunnerDefaults, Schedule, ThreadSummary } from './protocol.ts';
+import { poolLine } from './pools.ts';
+import type { Account, ImageRef, Pool, LibrarianStatus, PersistedEvent, Project, RunnerDefaults, Schedule, ThreadSummary } from './protocol.ts';
 import type { Settings } from './settings.ts';
 import { usd } from './models/index.ts';
 import { backgroundFlag } from './protocol.ts';
@@ -13,6 +14,7 @@ import { DEV_HELP, formatModels, logsCommand, runDev } from './tb-dev.ts';
 const OPTIONS = {
   cwd: { type: 'string' },
   account: { type: 'string' },
+  pool: { type: 'string' },
   model: { type: 'string' },
   effort: { type: 'string' },
   ask: { type: 'boolean' },
@@ -53,7 +55,9 @@ const OPTIONS = {
 
 const HELP = `tb: talk to the Threadbare runner
 
-  tb new "text" [--cwd DIR] [--account ID] [--model M] [--effort L] [--ask] [--image FILE]... [--wait]
+  tb new "text" [--cwd DIR] [--pool ID | --account ID] [--model M] [--effort L] [--ask] [--image FILE]... [--wait]
+                                  --pool runs it on a pool (the login with room, moving when
+                                  one runs dry); --account pins it to one login
   tb send <threadId> "text" [--image FILE]... [--wait]
   tb list [--snoozed] [--archived] [--all] [--json]
   tb search "words" [--json]
@@ -69,6 +73,7 @@ const HELP = `tb: talk to the Threadbare runner
   tb delete <threadId>
   tb accounts                     the Claude and Codex logins (* new threads start on it)
   tb accounts <account> [--json]  that account's models and its default
+  tb pools [--json]               the pools, their logins and room (* new threads start on it)
   tb actions <threadId> [--json]  the thread's actions, panels and patches (from its folder)
   tb run <threadId> <actionId>    run one: a command's output is printed and goes into the thread
   tb schedule "text" (--at WHEN | --cron "0 9 * * 1-5") [--tz ZONE] [--title T]
@@ -101,7 +106,7 @@ ${DEV_HELP}`;
 // The flags each command reads. Any other is refused rather than ignored:
 // `tb events <id> --from 3` used to print every event as if it had worked.
 const COMMAND_FLAGS: Record<string, string[]> = {
-  new: ['cwd', 'account', 'model', 'effort', 'ask', 'image', 'wait', 'json'],
+  new: ['cwd', 'account', 'pool', 'model', 'effort', 'ask', 'image', 'wait', 'json'],
   send: ['image', 'wait', 'json'],
   list: ['snoozed', 'archived', 'all', 'json'],
   search: ['json'],
@@ -116,6 +121,7 @@ const COMMAND_FLAGS: Record<string, string[]> = {
   move: [],
   delete: [],
   accounts: ['json'],
+  pools: ['json'],
   schedule: ['at', 'cron', 'tz', 'title', 'thread', 'cwd', 'account', 'model', 'effort', 'ask', 'json'],
   schedules: ['json'],
   projects: ['json', 'archived'],
@@ -214,6 +220,7 @@ async function run(client: RunnerClient, cmd: string, args: string[], f: Flags):
       const params: Record<string, unknown> = { text: args[0] ?? '', images: await images() };
       if (f.cwd) params.cwd = path.resolve(String(f.cwd));
       if (f.account) params.accountId = f.account;
+      if (f.pool) params.poolId = f.pool;
       if (f.model) params.model = f.model;
       if (f.effort) params.effort = f.effort;
       if (f.ask) params.permissionMode = 'ask';
@@ -373,6 +380,19 @@ async function run(client: RunnerClient, cmd: string, args: string[], f: Flags):
         // The provider has its own column, so not "Codex · " again.
         const who = a.email ?? a.title.replace(/^Codex · /, '');
         console.log(`${a.id === r.defaults.accountId ? '*' : ' '} ${a.id.padEnd(12)} ${(a.provider === 'codex' ? 'Codex' : 'Claude').padEnd(7)}${who}${note}`);
+      }
+      return 0;
+    }
+    case 'pools': {
+      const r = await client.call<{ accounts: Account[]; pools?: Pool[]; defaults: RunnerDefaults }>('hello', { client: 'tb', version: '1' });
+      if (!r.pools) throw new Error('This runner is older than pools.');
+      if (f.json) {
+        console.log(JSON.stringify({ pools: r.pools, defaultPoolId: r.defaults.poolId }, null, 2));
+        return 0;
+      }
+      for (const p of r.pools) {
+        const folders = p.folders?.length ? `  (folders: ${p.folders.join(', ')})` : '';
+        console.log(`${p.id === r.defaults.poolId ? '*' : ' '} ${p.id.padEnd(12)} ${p.title.padEnd(10)} ${poolLine(p, r.accounts, Date.now())}${folders}`);
       }
       return 0;
     }

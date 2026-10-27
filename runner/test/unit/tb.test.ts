@@ -220,3 +220,29 @@ test('tb new on codex-main with a model and effort, tb accounts with and without
     await server.close();
   }
 });
+
+test('tb pools lists the pools with their logins, and tb new --pool starts a thread on one', async () => {
+  const h = makeHarness(undefined, {}, { accounts: new FakeAccounts(withCodex()) });
+  const server = new RpcServer({ host: '127.0.0.1', port: 0, token: readToken(h.home), runner: h.runner, log: nullLogger });
+  const { port } = await server.listen();
+  const url = `ws://127.0.0.1:${port}/rpc`;
+  try {
+    const p = tb(h, url, ['pools']);
+    assert.equal(await p.exited, 0, p.out());
+    assert.match(p.out(), /^\* claude +Claude +claude-main room unknown, claude-3 room unknown$/m);
+    assert.match(p.out(), /^ {2}codex +Codex +codex-main room unknown$/m);
+    const j = tb(h, url, ['pools', '--json']);
+    assert.equal(await j.exited, 0);
+    assert.equal(JSON.parse(j.out()).defaultPoolId, 'claude');
+    const n = tb(h, url, ['new', 'draw a bear', '--pool', 'codex']);
+    assert.equal(await n.exited, 0, n.out());
+    const t = h.runner.get(n.out().trim());
+    assert.equal(t.poolId, 'codex');
+    assert.equal(t.provider, 'codex');
+    const bad = tb(h, url, ['new', 'x', '--pool', 'nope']);
+    assert.equal(await bad.exited, 1);
+    assert.match(bad.out(), /No pool called nope/);
+  } finally {
+    await server.close();
+  }
+});

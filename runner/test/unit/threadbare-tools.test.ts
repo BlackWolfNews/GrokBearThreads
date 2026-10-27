@@ -332,7 +332,7 @@ test('list_accounts shows each login\'s provider, note, room left and models; cr
   // "codex" names the one Codex login; ultra passes the schema.
   const made = await t.call('create_thread', { text: 'Draw a bear', account: 'codex', effort: 'ultra' });
   assert.equal(made.error, false, made.text);
-  assert.match(made.text, /on codex-main\./);
+  assert.match(made.text, /on codex-main \(gpt-6-luna\)\.$/);
   const child = h.runner.list().find((x) => x.title === 'Draw a bear')!;
   assert.equal(child.provider, 'codex');
   assert.equal(child.model, 'gpt-6-luna');
@@ -347,4 +347,36 @@ test('list_accounts shows each login\'s provider, note, room left and models; cr
   assert.equal(moved.error, false, moved.text);
   assert.equal(h.runner.get(me.id).provider, 'codex');
   assert.equal(h.runner.get(me.id).model, 'gpt-6-luna');
+});
+
+test('pools in the tools: list_accounts prints them, create_thread and update_thread take a pool, and a named model picks its provider', async () => {
+  const h = makeHarness(undefined, {}, { accounts: new FakeAccounts(withCodex()) });
+  const { thread: me } = h.runner.create({ text: 'Boss', accountId: 'claude-main' });
+  h.adapter.last.init();
+  const t = tools(h, me.id);
+  const list = (await t.call('list_accounts')).text;
+  assert.match(list, /Pools \(a new thread in a pool's folder starts on that pool\):\nclaude {2}Claude: claude-main room unknown, claude-3 room unknown {2}\[new threads start here\]\ncodex {2}Codex: codex-main room unknown/);
+  // A Claude model with no account or pool, while Codex is the default: Claude.
+  h.runner.create({ text: 'x', accountId: 'codex-main' });
+  const opus = await t.call('create_thread', { text: 'Use Opus', model: 'claude-opus-5-5' });
+  assert.equal(opus.error, false, opus.text);
+  const o = h.runner.list().find((x) => x.title === 'Use Opus')!;
+  assert.equal(o.provider, 'claude');
+  assert.equal(o.poolId, 'claude');
+  assert.equal(o.model, 'claude-opus-5-5');
+  assert.match(opus.text, /\(claude-opus-5-5\)\. It's in the claude pool/);
+  // By title, ignoring case; an unknown one says which there are.
+  const made = await t.call('create_thread', { text: 'On Codex', pool: 'CODEX' });
+  assert.equal(made.error, false, made.text);
+  assert.equal(h.runner.list().find((x) => x.title === 'On Codex')!.poolId, 'codex');
+  const bad = await t.call('create_thread', { text: 'y', pool: 'grok' });
+  assert.equal(bad.error, true);
+  assert.match(bad.text, /No pool grok\. Pools: claude \(Claude\), codex \(Codex\)/);
+  // update_thread: "pin" pins, a pool puts it back.
+  const pinned = await t.call('update_thread', { threadId: o.id, pool: 'pin' });
+  assert.match(pinned.text, /pool: none \(pinned to its account\)/);
+  const back = await t.call('update_thread', { threadId: o.id, pool: 'claude' });
+  assert.match(back.text, /pool: claude/);
+  assert.equal((await t.call('update_thread', { threadId: o.id, pool: null })).error, false);
+  assert.equal(h.runner.get(o.id).poolId, undefined);
 });
