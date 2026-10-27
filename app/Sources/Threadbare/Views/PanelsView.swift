@@ -17,7 +17,9 @@ struct PanelPane: View {
         VStack(spacing: 0) {
             PanelTabs(thread: thread, active: active)
             Rectangle().fill(Color(nsColor: Theme.hairline)).frame(height: 0.5)
-            if let active {
+            if app.panelChoice[thread.id] == PanelPane.patchesTab || active == nil {
+                PatchesList(thread: thread)
+            } else if let active {
                 switch active.kind {
                 case .url:
                     if let url = active.pageURL {
@@ -32,6 +34,9 @@ struct PanelPane: View {
         }
         .background(Color(nsColor: .windowBackgroundColor))
     }
+
+    /// The pane's own last tab: what applies to the folder (PatchesList).
+    static let patchesTab = "threadbear.patches"
 }
 
 /// The panel titles, the active one underlined, then Open in browser.
@@ -41,29 +46,20 @@ private struct PanelTabs: View {
     let active: Panel?
 
     var body: some View {
+        let onPatches = app.panelChoice[thread.id] == PanelPane.patchesTab || active == nil
         HStack(spacing: 0) {
             ForEach(thread.panels) { panel in
-                let isActive = panel.id == active?.id
-                Button {
+                tab(panel.title, help: panel.note ?? panel.title, active: !onPatches && panel.id == active?.id) {
                     app.choosePanel(panel.id, in: thread.id)
-                } label: {
-                    Text(panel.title)
-                        .font(.system(size: TypeScale.label, weight: isActive ? .medium : .regular))
-                        .foregroundStyle(isActive ? .primary : .secondary)
-                        .padding(.horizontal, 10)
-                        .frame(height: PanelTabs.height)
-                        .overlay(alignment: .bottom) {
-                            if isActive {
-                                Rectangle().fill(Color.primary.opacity(0.8)).frame(height: 1.5)
-                            }
-                        }
-                        .contentShape(Rectangle())
                 }
-                .buttonStyle(.plain)
-                .help(panel.note ?? panel.title)
+            }
+            if !thread.patches.isEmpty {
+                tab("Patches", count: thread.patches.count, help: "What applies to this folder", active: onPatches) {
+                    app.choosePanel(PanelPane.patchesTab, in: thread.id)
+                }
             }
             Spacer(minLength: 8)
-            if let active, let url = active.pageURL {
+            if !onPatches, let active, let url = active.pageURL {
                 Button {
                     NSWorkspace.shared.open(url)
                 } label: {
@@ -80,7 +76,111 @@ private struct PanelTabs: View {
         .padding(.horizontal, 6)
     }
 
+    private func tab(_ title: String, count: Int? = nil, help: String, active isActive: Bool, choose: @escaping () -> Void) -> some View {
+        Button(action: choose) {
+            HStack(spacing: 5) {
+                Text(title)
+                if let count {
+                    Text("\(count)")
+                        .foregroundStyle(Color(nsColor: Theme.faintText))
+                }
+            }
+            .font(.system(size: TypeScale.label, weight: isActive ? .medium : .regular))
+            .foregroundStyle(isActive ? .primary : .secondary)
+            .padding(.horizontal, 10)
+            .frame(height: PanelTabs.height)
+            .overlay(alignment: .bottom) {
+                if isActive {
+                    Rectangle().fill(Color.primary.opacity(0.8)).frame(height: 1.5)
+                }
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help(help)
+    }
+
     static let height: CGFloat = 38
+}
+
+/// The Patches tab: each patch that applies to the folder, where it came
+/// from, what it gives, and its error if it couldn't load. A file opens in
+/// the default editor.
+private struct PatchesList: View {
+    let thread: ThreadSummary
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 14) {
+                ForEach(thread.patches) { patch in
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack(spacing: 6) {
+                            Image(systemName: "square.dashed")
+                                .font(.system(size: 11, weight: .medium))
+                                .foregroundStyle(.secondary)
+                            Text(patch.id)
+                                .font(.system(size: TypeScale.label, weight: .medium))
+                            Text(PatchesList.sourceName(patch.source))
+                                .font(.system(size: TypeScale.small))
+                                .foregroundStyle(Color(nsColor: Theme.faintText))
+                        }
+                        if let error = patch.error {
+                            Text(error)
+                                .font(.system(size: TypeScale.detail))
+                                .foregroundStyle(Color(nsColor: Theme.failed))
+                                .textSelection(.enabled)
+                        } else {
+                            let gives = PatchesList.gives(patch.id, in: thread)
+                            if !gives.isEmpty {
+                                Text(gives)
+                                    .font(.system(size: TypeScale.detail))
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                        if let file = patch.file {
+                            Button {
+                                NSWorkspace.shared.open(URL(fileURLWithPath: file))
+                            } label: {
+                                Text(file.abbreviatingHome)
+                                    .font(.system(size: TypeScale.small))
+                                    .foregroundStyle(Color(nsColor: Theme.faintText))
+                                    .lineLimit(1)
+                                    .truncationMode(.middle)
+                            }
+                            .buttonStyle(.plain)
+                            .help("Open the file")
+                        }
+                    }
+                }
+                Text("A patch is a file in .threadbear/patches (in the project, a parent folder, or ~) whose default export lists actions, panels and hooks. Ask the agent for one.")
+                    .font(.system(size: TypeScale.small))
+                    .foregroundStyle(Color(nsColor: Theme.faintText))
+                    .padding(.top, 6)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(16)
+        }
+    }
+
+    static func sourceName(_ source: String) -> String {
+        switch source {
+        case "builtin": return "built in"
+        case "home": return "~/.threadbear"
+        default: return "project"
+        }
+    }
+
+    /// "actions Typecheck, Reseed · panel Storybook · hook Typecheck".
+    static func gives(_ patchId: String, in thread: ThreadSummary) -> String {
+        var parts: [String] = []
+        let actions = thread.actions.filter { $0.patch == patchId }.map(\.title)
+        let panels = thread.panels.filter { $0.patch == patchId }.map(\.title)
+        let hooks = thread.hooks.filter { $0.patch == patchId }.map(\.title)
+        if !actions.isEmpty { parts.append((actions.count == 1 ? "action " : "actions ") + actions.joined(separator: ", ")) }
+        if !panels.isEmpty { parts.append((panels.count == 1 ? "panel " : "panels ") + panels.joined(separator: ", ")) }
+        if !hooks.isEmpty { parts.append((hooks.count == 1 ? "hook " : "hooks ") + hooks.joined(separator: ", ")) }
+        return parts.joined(separator: " · ")
+    }
 }
 
 private struct PanelNote: View {

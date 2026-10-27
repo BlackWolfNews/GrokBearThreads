@@ -702,8 +702,9 @@ final class AppModel {
 
     // MARK: Panels
 
-    /// Whether the pane is beside this thread's transcript.
-    func showsPanels(for thread: ThreadSummary) -> Bool { panelsShown && !thread.panels.isEmpty }
+    /// Whether the pane is beside this thread's transcript: when the folder
+    /// gives it panels or patches (the Patches tab shows those).
+    func showsPanels(for thread: ThreadSummary) -> Bool { panelsShown && (!thread.panels.isEmpty || !thread.patches.isEmpty) }
 
     func activePanel(for thread: ThreadSummary) -> Panel? {
         PanelChoice.active(in: thread.panels, remembered: panelChoice[thread.id])

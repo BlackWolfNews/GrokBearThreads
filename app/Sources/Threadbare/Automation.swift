@@ -267,8 +267,8 @@ enum Automation {
             // {"cmd":"panel","show":true} shows it; {"cmd":"panel"} toggles.
             guard let thread = app.selectedThread else { return "error no thread selected" }
             if let id = c["id"] as? String {
-                guard thread.panels.contains(where: { $0.id == id }) else {
-                    return "error no panel \(id); this thread has \(thread.panels.map(\.id).joined(separator: ", "))"
+                guard thread.panels.contains(where: { $0.id == id }) || (id == PanelPane.patchesTab && !thread.patches.isEmpty) else {
+                    return "error no panel \(id); this thread has \((thread.panels.map(\.id) + (thread.patches.isEmpty ? [] : [PanelPane.patchesTab])).joined(separator: ", "))"
                 }
                 app.choosePanel(id, in: thread.id)
             } else if let show = c["show"] as? Bool {
@@ -278,7 +278,8 @@ enum Automation {
             }
             // A beat for the pane (and a web view) to appear.
             try? await Task.sleep(for: .milliseconds(200))
-            return "ok \(app.showsPanels(for: thread) ? "showing \(app.activePanel(for: thread)?.id ?? "nothing")" : "hidden")"
+            let showing = app.panelChoice[thread.id] == PanelPane.patchesTab || thread.panels.isEmpty ? PanelPane.patchesTab : (app.activePanel(for: thread)?.id ?? "nothing")
+            return "ok \(app.showsPanels(for: thread) ? "showing \(showing)" : "hidden")"
         case "action":
             // {"cmd":"action","id":"reseed.reseed-dev-db"} runs that action of
             // the selected thread and waits for a command to finish.

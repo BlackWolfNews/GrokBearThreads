@@ -214,11 +214,17 @@ struct AppDump: Encodable {
 
     @MainActor
     private static func panels(_ thread: ThreadSummary, app: AppModel) -> Panels? {
-        guard !thread.panels.isEmpty else { return nil }
-        let active = app.activePanel(for: thread)?.id
-        return Panels(shown: app.showsPanels(for: thread), width: Int(app.panelWidth), items: thread.panels.map {
+        guard !thread.panels.isEmpty || !thread.patches.isEmpty else { return nil }
+        let onPatches = app.panelChoice[thread.id] == PanelPane.patchesTab || thread.panels.isEmpty
+        let active = onPatches ? nil : app.activePanel(for: thread)?.id
+        var items = thread.panels.map {
             Panels.Item(id: $0.id, title: $0.title, kind: $0.kind.rawValue, url: $0.url, note: $0.note, active: $0.id == active)
-        })
+        }
+        if !thread.patches.isEmpty {
+            let summary = thread.patches.map { $0.id + ($0.error != nil ? " (error)" : "") }.joined(separator: ", ")
+            items.append(Panels.Item(id: PanelPane.patchesTab, title: "Patches", kind: "patches", url: nil, note: summary, active: onPatches))
+        }
+        return Panels(shown: app.showsPanels(for: thread), width: Int(app.panelWidth), items: items)
     }
 
     @MainActor

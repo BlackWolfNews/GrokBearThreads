@@ -91,7 +91,7 @@ struct DetailView: View {
             // Shows or hides the panels pane. Always built, like the menu
             // beside it, and out of sight for a thread with no panels.
             ToolbarItem(placement: .primaryAction) {
-                let hasPanels = thread?.panels.isEmpty == false
+                let hasPanels = thread.map { !$0.panels.isEmpty || !$0.patches.isEmpty } ?? false
                 Button {
                     app.togglePanels()
                 } label: {
