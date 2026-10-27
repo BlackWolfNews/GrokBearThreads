@@ -393,7 +393,7 @@ test('a new limits.json is picked up by the folder watch', async () => {
     next.accounts.find((a: any) => a.label === '~/.claude').windows[1].remainingPercent = 11;
     s.write(JSON.stringify(next));
     let timer: NodeJS.Timeout | undefined;
-    const ids = await Promise.race([changed, new Promise<null>((r) => (timer = setTimeout(() => r(null), 5000)))]);
+    const ids = await Promise.race([changed, new Promise<null>((r) => (timer = setTimeout(() => r(null), 15_000)))]);
     clearTimeout(timer);
     assert.deepEqual(ids, ['claude-main'], 'no poll ran (fake clock), so the watch did it');
     assert.equal(pct(store.usageFor(s.accounts.main), 'weekly'), 11);

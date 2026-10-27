@@ -177,10 +177,9 @@ export class UsageStore {
     // Token Stats replaces limits.json by rename, so watch the folder.
     try {
       const dir = path.dirname(this.limitsFile);
-      const name = path.basename(this.limitsFile);
-      this.watcher = fs.watch(dir, { persistent: false }, (_event, file) => {
-        if (!file || file.toString() === name) this.reload();
-      });
+      // Any event in the folder reloads: a rename can be reported under the
+      // temp file's name only, and reload() just compares stat() stamps.
+      this.watcher = fs.watch(dir, { persistent: false }, () => this.reload());
       this.watcher.on('error', () => {
         this.watcher?.close();
         this.watcher = undefined;
