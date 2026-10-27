@@ -192,6 +192,8 @@ const startedAt = iso();
 // A restart waiting for threads (mock.restartPending): { when, reason?,
 // resumeThreadId?, requestedAt, waitingFor: string[] }.
 let pendingRestart;
+// The runner's own update (protocol "Runner updates"), set by mock.updates.
+let updates = { state: 'idle', oldRunners: [] };
 
 /** @type {Set<{ws: any, subs: Set<string>, authed: boolean}>} */
 const clients = new Set();
@@ -255,7 +257,7 @@ async function handle(client, { id, method, params = {} }) {
 async function dispatch(client, method, p) {
   switch (method) {
     case 'hello':
-      return { runnerVersion, protocol: 1, accounts: publicAccounts(), defaults, ...(oldRunner ? {} : { clis }) };
+      return { runnerVersion, protocol: 1, accounts: publicAccounts(), defaults, ...(oldRunner ? {} : { clis, updates }) };
     case 'runner.status': {
       const all = [...threads.values()].map((t) => t.summary);
       const status = {
@@ -577,6 +579,24 @@ async function dispatch(client, method, p) {
       const onYou = waitingFor.filter((id) => threads.get(id)?.summary.status === 'waiting').length;
       broadcastNotice('info', pendingMessage(waitingFor.length, onYou));
       return { scheduled: true, waitingFor };
+    }
+    case 'mock.updates': {
+      // The runner's own update, as hello and runner.updates carry it:
+      // { state, commit?, subject?, reason?, oldRunners?, launcherChanged? }.
+      // Threads named in oldRunners get onOldRunner in their summaries, as
+      // the real primary marks a draining runner's threads.
+      updates = { state: p.state ?? 'idle', oldRunners: Array.isArray(p.oldRunners) ? p.oldRunners : [] };
+      for (const k of ['commit', 'subject', 'reason']) if (typeof p[k] === 'string') updates[k] = p[k];
+      if (p.launcherChanged) updates.launcherChanged = true;
+      const old = new Set(updates.oldRunners.flatMap((r) => r.threads ?? []));
+      for (const t of threads.values()) {
+        const was = Boolean(t.summary.onOldRunner);
+        if (old.has(t.summary.id)) t.summary.onOldRunner = true;
+        else delete t.summary.onOldRunner;
+        if (was !== old.has(t.summary.id)) broadcastSummary(t.summary.id);
+      }
+      broadcast('runner.updates', { updates });
+      return { updates };
     }
     case 'mock.background': {
       // What a thread's CLI is running in the background, as the real

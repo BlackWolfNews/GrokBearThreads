@@ -18,6 +18,7 @@ import { RunnerClient, RpcClientError } from './client.ts';
 import { ErrorCode, RpcError } from './protocol.ts';
 import type { ThreadSummary } from './protocol.ts';
 import type { Notification, Runner } from './runner.ts';
+import type { UsageReading } from './usage.ts';
 import type { ScheduleControl, ThreadControl } from './threadbare-mcp.ts';
 import type { Scheduler } from './schedules.ts';
 import { processInfo } from './proc.ts';
@@ -91,6 +92,12 @@ function asRpcError(e: unknown): RpcError {
   return new RpcError(ErrorCode.busy, `The other runner couldn't be reached (${(e as Error)?.message ?? e}); try again in a moment.`);
 }
 
+// A draining runner's thread as the primary shows it: still on the old
+// release until its turn ends.
+function marked(t: ThreadSummary): ThreadSummary {
+  return { ...t, onOldRunner: true };
+}
+
 export function isMoved(e: unknown): boolean {
   return (e instanceof RpcError || e instanceof RpcClientError) && e.code === ErrorCode.moved;
 }
@@ -108,6 +115,10 @@ export type PeersDeps = {
   // Where handed-over threads go, and how the peers' notifications reach
   // this runner's clients (and its schedules and restarter).
   runner: Pick<Runner, 'adopt' | 'publish'>;
+  // Usage readings from the draining runners' turns (drain.usage).
+  usage?: (accountId: string, reading: UsageReading) => void;
+  // Whenever what status() says changes (runner.updates, main.ts).
+  onChange?: () => void;
   // Stops the process groups a dead draining runner left.
   sweep: (pid: number) => Promise<void>;
   // Tests replace these.
@@ -170,7 +181,7 @@ export class Peers {
       peer.info = { ...info, threads: hello.threads, version: hello.version ?? info.version, release: hello.release ?? info.release };
       const { threads } = await client.call<{ threads: ThreadSummary[] }>('threads.list', { include: ALL_BUCKETS });
       const keeps = new Set(hello.threads);
-      for (const t of threads) if (keeps.has(t.id)) peer.threads.set(t.id, t);
+      for (const t of threads) if (keeps.has(t.id)) peer.threads.set(t.id, marked(t));
       // Live events for each, from here on. The backlog isn't needed: a
       // client that subscribes gets its own through threads.subscribe.
       for (const id of peer.threads.keys()) await client.call('threads.subscribe', { threadId: id, afterSeq: Number.MAX_SAFE_INTEGER });
@@ -180,6 +191,7 @@ export class Peers {
       return undefined;
     }
     this.peers.set(info.pid, peer);
+    this.deps.onChange?.();
     this.deps.log.info('connected to a draining runner', { pid: info.pid, version: peer.info.version, threads: [...peer.threads.keys()] });
     void client.waitClosed().then(() => this.lost(peer));
     return peer;
@@ -194,17 +206,25 @@ export class Peers {
         this.deps.log.info('a thread came across from the draining runner', { threadId, pid: peer.info.pid });
         // Loads it from disk; its thread.updated goes out from here.
         this.deps.runner.adopt(threadId);
+        this.deps.onChange?.();
         return;
       }
-      case 'thread.updated':
+      case 'drain.usage':
+        if (typeof params?.accountId === 'string' && params.reading) this.deps.usage?.(params.accountId, params.reading);
+        return;
+      case 'thread.updated': {
         if (typeof id !== 'string' || !peer.threads.has(id)) return;
-        peer.threads.set(id, params.thread);
-        break;
+        const thread = marked(params.thread);
+        peer.threads.set(id, thread);
+        this.deps.runner.publish({ method, params: { thread } });
+        return;
+      }
       case 'thread.event':
         if (typeof id !== 'string' || !peer.threads.has(id)) return;
         break;
       case 'thread.deleted':
         if (typeof id !== 'string' || !peer.threads.delete(id)) return;
+        this.deps.onChange?.();
         break;
       case 'runner.notice':
         break;
@@ -222,6 +242,7 @@ export class Peers {
     if (this.closing || peer.gone) return;
     peer.gone = true;
     this.peers.delete(peer.info.pid);
+    this.deps.onChange?.();
     const left = [...peer.threads.keys()];
     if (left.length === 0) {
       this.deps.log.info('a draining runner finished', { pid: peer.info.pid });

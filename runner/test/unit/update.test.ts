@@ -6,7 +6,7 @@ import path from 'node:path';
 import { tmpDir } from '../helpers/fakes.ts';
 import { FakeClock } from '../../src/clock.ts';
 import { nullLogger } from '../../src/log.ts';
-import { CHECK_INTERVAL_MS, FIRST_CHECK_MS, RunnerUpdater, decideUpdate, releaseTreeAt, syncClone, updateFilePath, type UpdateDeps } from '../../src/update.ts';
+import { CHECK_INTERVAL_MS, FIRST_CHECK_MS, SOON_MS, RunnerUpdater, launcherDiffers, watchMainRef, decideUpdate, releaseTreeAt, syncClone, updateFilePath, type UpdateDeps } from '../../src/update.ts';
 import type { ReleaseJson } from '../../src/release.ts';
 
 const running = { id: 'r1', tree: 'a+b+c+d' };
@@ -276,4 +276,63 @@ test('off: from a checkout, when switched off, when the release has no checkout,
   assert.equal(fresh.status().state, 'idle');
   assert.equal(fresh.status().reason, undefined);
   fresh.stop();
+});
+
+test('main moving in the checkout is checked within seconds, not at the next five-minute look', async () => {
+  let fire = () => {};
+  const changes: number[] = [];
+  const h = harness({}, { watch: (_checkout, onChange) => ((fire = onChange), () => {}), onChange: () => changes.push(1) });
+  // Up to date to begin with.
+  h.main = { ...h.main, tree: 'a+b+c+d' };
+  h.u.start();
+  h.clock.advance(FIRST_CHECK_MS);
+  await new Promise((r) => setImmediate(r));
+  assert.equal(h.deploys, 0);
+  // A merge lands: two ref writes close together make one check.
+  h.main = { commit: 'c3', short: 'c3', subject: 'Faster', tree: 'z+b+c+d' };
+  fire();
+  h.clock.advance(1000);
+  fire();
+  h.clock.advance(SOON_MS);
+  await new Promise((r) => setImmediate(r));
+  await new Promise((r) => setImmediate(r));
+  assert.equal(h.deploys, 1);
+  assert.deepEqual(h.restarts, [{ release: 'r2', reason: 'Updating to main at c3: Faster' }]);
+  assert.equal(h.u.status().subject, 'Faster');
+  assert.ok(changes.length >= 3, 'tells main.ts as it goes');
+  h.u.stop();
+});
+
+test('watchMainRef hears a commit on main, from a worktree too', async () => {
+  const { repo, commit } = makeRepo();
+  let heard = 0;
+  const stop = watchMainRef(repo, () => heard++);
+  try {
+    commit('second', 'notes.md', 'hello');
+    for (let i = 0; i < 40 && !heard; i++) await new Promise((r) => setTimeout(r, 50));
+    assert.ok(heard > 0, 'a commit in the checkout');
+    const wt = path.join(tmpDir('tb-update-wt-'), 'wt');
+    const added = spawnSync('git', ['-C', repo, 'worktree', 'add', '-q', '--detach', wt], { encoding: 'utf8' });
+    assert.equal(added.status, 0, `${added.stdout}${added.stderr}${added.error ?? ''}`);
+    heard = 0;
+    const env = { ...process.env, GIT_CONFIG_GLOBAL: '/dev/null', GIT_AUTHOR_NAME: 'T', GIT_AUTHOR_EMAIL: 't@example.com', GIT_COMMITTER_NAME: 'T', GIT_COMMITTER_EMAIL: 't@example.com' };
+    spawnSync('git', ['-C', wt, 'commit', '-q', '--allow-empty', '-m', 'from a worktree'], { env });
+    spawnSync('git', ['-C', wt, 'update-ref', 'refs/heads/main', 'HEAD'], { env });
+    for (let i = 0; i < 40 && !heard; i++) await new Promise((r) => setTimeout(r, 50));
+    assert.ok(heard > 0, 'main moved from a worktree');
+  } finally {
+    stop();
+  }
+});
+
+test('launcherDiffers: only when both files are there and differ', () => {
+  const dir = tmpDir('tb-update-launch-');
+  const a = path.join(dir, 'a.mjs');
+  const b = path.join(dir, 'b.mjs');
+  assert.equal(launcherDiffers(a, b), false);
+  fs.writeFileSync(a, 'one');
+  fs.writeFileSync(b, 'one');
+  assert.equal(launcherDiffers(a, b), false);
+  fs.writeFileSync(b, 'two');
+  assert.equal(launcherDiffers(a, b), true);
 });

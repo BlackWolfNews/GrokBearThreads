@@ -85,10 +85,22 @@ export type Notification =
   | { method: 'schedules.updated'; params: { schedules: Schedule[] } }
   | { method: 'clis.updated'; params: { clis: CliStatus[] } }
   | { method: 'settings.updated'; params: { settings: Settings } }
+  | { method: 'runner.updates'; params: { updates: RunnerUpdates } }
   | { method: 'projects.updated'; params: { projects: Project[] } }
   | { method: 'librarian.updated'; params: { librarian: LibrarianStatus } }
   // Only from a draining runner, to the primary (handover.ts).
-  | { method: 'drain.handedOver'; params: { threadId: string } };
+  | { method: 'drain.handedOver'; params: { threadId: string } }
+  | { method: 'drain.usage'; params: { accountId: string; reading: UsageReading } };
+
+// hello's `updates` and runner.updates (docs/protocol.md, "Runner updates").
+export type RunnerUpdates = {
+  state: 'off' | 'idle' | 'checking' | 'building' | 'waiting' | 'failed';
+  commit?: string;
+  subject?: string;
+  reason?: string;
+  oldRunners: { version: string; threads: string[] }[];
+  launcherChanged?: true;
+};
 
 // What the librarian (librarian.ts) hears about threads: a turn that ended,
 // and a folder move.

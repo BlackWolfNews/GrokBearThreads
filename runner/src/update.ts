@@ -19,6 +19,10 @@ import type { RestartResult } from './restart.ts';
 import { atomicWriteFileSync, readJsonSync } from './fsutil.ts';
 
 export const CHECK_INTERVAL_MS = 5 * 60_000;
+// After main's ref changes in the checkout (a commit or merge landing), the
+// check runs this soon, rather than at the next five-minute look. A burst
+// of ref writes (a merge, then a push's packed-refs) makes one check.
+export const SOON_MS = 3000;
 // After this release is marked good: a release about to be rolled back
 // should never deploy anything.
 export const FIRST_CHECK_MS = 30_000;
@@ -43,8 +47,12 @@ export type UpdateStatus = {
   // The commit on main the last check saw, and the release built from it
   // (waiting to start) when there is one.
   commit?: string;
+  subject?: string; // the commit's subject line
   release?: string;
   logFile?: string;
+  // launch.mjs on main differs from the installed one (only
+  // install-runner.sh replaces it).
+  launcherChanged?: boolean;
 };
 
 export type MainInfo = { commit: string; short: string; subject: string; tree: string };
@@ -70,6 +78,9 @@ export type UpdateDeps = {
   sync?: (checkout: string, prefix: string, dir: string) => Promise<MainInfo>;
   treeOf?: (dir: string, prefix: string, commit: string) => string | undefined;
   deploy?: (runnerDir: string, home: string, logFile: string, follow: string) => Promise<DeployResult>;
+  watch?: (checkout: string, onChange: () => void) => () => void;
+  // Whenever status() may have changed (runner.updates, main.ts).
+  onChange?: () => void;
 };
 
 export type Decision = { action: 'build' } | { action: 'nothing'; why: string };
@@ -92,6 +103,36 @@ export function decideUpdate(i: {
   if (i.failed?.tree === i.mainTree) return { action: 'nothing', why: 'the last build of this tree failed; waiting for main to change' };
   if (i.crashedTrees.has(i.mainTree)) return { action: 'nothing', why: 'a release of this tree crashed at startup; waiting for main to change' };
   return { action: 'build' };
+}
+
+// Calls onChange when main's ref moves in the checkout: refs/heads/main
+// (written through main.lock) or packed-refs, in the repository's common
+// dir, which worktrees share, so a commit from any of them counts.
+export function watchMainRef(checkout: string, onChange: () => void): () => void {
+  let common: string;
+  try {
+    common = path.resolve(checkout, git(checkout, ['rev-parse', '--git-common-dir']));
+  } catch {
+    return () => {};
+  }
+  const watchers: fs.FSWatcher[] = [];
+  const watch = (dir: string, match: RegExp) => {
+    try {
+      const w = fs.watch(dir, (_event, file) => {
+        if (!file || match.test(String(file))) onChange();
+      });
+      // A folder that goes away (a repack) just stops this one.
+      w.on('error', () => w.close());
+      watchers.push(w);
+    } catch {
+      // not there: the five-minute look still finds the change
+    }
+  };
+  watch(path.join(common, 'refs', 'heads'), /^main(\.lock)?$/);
+  watch(common, /^packed-refs$/);
+  return () => {
+    for (const w of watchers) w.close();
+  };
 }
 
 export function updateDir(home: string): string {
@@ -220,9 +261,14 @@ export class RunnerUpdater {
   private reason?: string;
   private checkedAt?: string;
   private commit?: string;
+  private subject?: string;
+  private launcherChanged = false;
   private releaseBuilt?: string;
   private busy = false;
   private stopped = false;
+  private unwatch?: () => void;
+  private soonTimer?: TimerHandle;
+  private again = false;
 
   constructor(deps: UpdateDeps) {
     this.deps = deps;
@@ -238,6 +284,7 @@ export class RunnerUpdater {
       this.state = 'off';
       this.reason = why;
       log.info('not following main', { why });
+      this.deps.onChange?.();
     };
     if (!enabled) return off('followMain is off in runner.json');
     if (!release) return off('running from a checkout, not a release');
@@ -252,12 +299,34 @@ export class RunnerUpdater {
     this.reason = undefined;
     log.info('following main', { checkout: release.checkout, release: release.id });
     this.timer = this.deps.clock.setTimeout(() => this.tick(), FIRST_CHECK_MS);
+    this.unwatch = (this.deps.watch ?? watchMainRef)(release.checkout, () => this.soon());
+    this.deps.onChange?.();
   }
 
   stop(): void {
     this.stopped = true;
     this.timer?.cancel();
     this.timer = undefined;
+    this.soonTimer?.cancel();
+    this.soonTimer = undefined;
+    this.unwatch?.();
+    this.unwatch = undefined;
+  }
+
+  // Main moved: look in a moment instead of at the next five-minute check.
+  // One already running looks again once it's done.
+  private soon(): void {
+    if (this.stopped || this.state === 'off') return;
+    this.soonTimer?.cancel();
+    this.soonTimer = this.deps.clock.setTimeout(() => {
+      this.soonTimer = undefined;
+      if (this.busy) {
+        this.again = true;
+        return;
+      }
+      this.timer?.cancel();
+      this.tick();
+    }, SOON_MS);
   }
 
   status(): UpdateStatus {
@@ -266,7 +335,9 @@ export class RunnerUpdater {
     if (this.reason) out.reason = this.reason;
     if (this.checkedAt) out.checkedAt = this.checkedAt;
     if (this.commit) out.commit = this.commit;
+    if (this.subject) out.subject = this.subject;
     if (this.releaseBuilt) out.release = this.releaseBuilt;
+    if (this.launcherChanged) out.launcherChanged = true;
     if (this.state !== 'off') out.logFile = updateLogPath(this.deps.home);
     return out;
   }
@@ -274,7 +345,13 @@ export class RunnerUpdater {
   private tick(): void {
     this.timer = undefined;
     void this.check().finally(() => {
-      if (!this.stopped && this.state !== 'off') this.timer = this.deps.clock.setTimeout(() => this.tick(), CHECK_INTERVAL_MS);
+      if (this.stopped || this.state === 'off') return;
+      if (this.again) {
+        this.again = false;
+        this.tick();
+        return;
+      }
+      this.timer = this.deps.clock.setTimeout(() => this.tick(), CHECK_INTERVAL_MS);
     });
   }
 
@@ -290,6 +367,8 @@ export class RunnerUpdater {
       const main = await (this.deps.sync ?? syncClone)(release.checkout, release.prefix, dir);
       this.checkedAt = new Date(this.deps.clock.now()).toISOString();
       this.commit = main.commit;
+      this.subject = main.subject;
+      this.launcherChanged = launcherDiffers(path.join(dir, release.prefix, 'launch.mjs'), path.join(home, 'runner', 'launch.mjs'));
       const treeOf = this.deps.treeOf ?? releaseTreeAt;
       const running = { id: release.id, tree: release.tree ?? (release.dirty ? undefined : treeOf(dir, release.prefix, release.commit)) };
       const file = readJsonSync<UpdateFile>(updateFilePath(home));
@@ -309,6 +388,7 @@ export class RunnerUpdater {
       }
       this.state = 'building';
       this.reason = undefined;
+      this.deps.onChange?.();
       log.info('building a release of main', { commit: main.short, subject: main.subject });
       const result = await (this.deps.deploy ?? runDeploy)(path.join(dir, release.prefix), home, updateLogPath(home), release.checkout);
       if (this.stopped) return decision;
@@ -337,6 +417,7 @@ export class RunnerUpdater {
       return undefined;
     } finally {
       this.busy = false;
+      this.deps.onChange?.();
     }
   }
 
@@ -356,5 +437,16 @@ export class RunnerUpdater {
       if (tree) out.add(tree);
     }
     return out;
+  }
+}
+
+// Whether main's launch.mjs (in the clone) isn't the installed one. Only
+// for a runner installed with one: without either file there's nothing to
+// say.
+export function launcherDiffers(onMain: string, installed: string): boolean {
+  try {
+    return !fs.readFileSync(onMain).equals(fs.readFileSync(installed));
+  } catch {
+    return false;
   }
 }

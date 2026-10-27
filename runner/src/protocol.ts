@@ -127,6 +127,7 @@ export type ThreadSummary = {
   lastActivityAt: string;
   snoozedUntil?: string;
   snoozedUntilRestart?: boolean; // hibernating until the runner next starts
+  onOldRunner?: boolean; // finishing a turn on a runner that handed over (Handovers)
   archivedAt?: string;
   preview: string;
   lastSeq: number;

@@ -389,7 +389,10 @@ export class Restarter {
     this.save();
     this.deps.log.info('handing over', { reason: this.pending.reason, keeps });
     const n = keeps.length;
-    this.deps.runner.notice('info', `A new runner is taking over. ${n === 1 ? '1 busy thread finishes' : `${n} busy threads finish`} on this one first, then ${n === 1 ? 'moves' : 'move'} across.`);
+    // "The runner is restarting" first: the app reads that as a restart
+    // under way (RunnerRestart.parse) and keeps its banner quiet while the
+    // connection moves to the new runner.
+    this.deps.runner.notice('info', `The runner is restarting onto a new release. ${n === 1 ? '1 busy thread finishes its turn' : `${n} busy threads finish their turns`} on the old one first, then ${n === 1 ? 'moves' : 'move'} across.`);
     this.defer(() => this.deps.handOver!(keeps));
   }
 

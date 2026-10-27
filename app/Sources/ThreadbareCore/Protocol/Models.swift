@@ -743,6 +743,9 @@ public struct ThreadSummary: Sendable, Hashable, Codable, Identifiable {
     /// date far off, which the runner never reaches).
     public var snoozedUntilRestart: Bool
     public var archivedAt: Date?
+    /// Finishing a turn on the runner that handed over to a new release
+    /// (protocol "Handovers"); it moves across when the turn ends.
+    public var onOldRunner: Bool
     public var preview: String
     public var lastSeq: Int
     public var lastSeenSeq: Int
@@ -770,7 +773,7 @@ public struct ThreadSummary: Sendable, Hashable, Codable, Identifiable {
         provider: String = "claude", model: String? = nil, permissionMode: PermissionMode = .full,
         status: ThreadStatus = .idle, live: Bool = false, needsYou: Bool = false,
         createdAt: Date = Date(), updatedAt: Date = Date(), lastActivityAt: Date = Date(),
-        snoozedUntil: Date? = nil, snoozedUntilRestart: Bool = false, archivedAt: Date? = nil, preview: String = "",
+        snoozedUntil: Date? = nil, snoozedUntilRestart: Bool = false, archivedAt: Date? = nil, onOldRunner: Bool = false, preview: String = "",
         lastSeq: Int = 0, lastSeenSeq: Int = 0, nativeSessionId: String? = nil,
         contextTokens: Int? = nil, costUsd: Double? = nil,
         effort: String? = nil, modelInUse: String? = nil, effortInUse: String? = nil, contextWindow: Int? = nil,
@@ -796,6 +799,7 @@ public struct ThreadSummary: Sendable, Hashable, Codable, Identifiable {
         self.snoozedUntil = snoozedUntil
         self.snoozedUntilRestart = snoozedUntilRestart
         self.archivedAt = archivedAt
+        self.onOldRunner = onOldRunner
         self.preview = preview
         self.lastSeq = lastSeq
         self.lastSeenSeq = lastSeenSeq
@@ -838,6 +842,7 @@ public struct ThreadSummary: Sendable, Hashable, Codable, Identifiable {
         snoozedUntil = try date(.snoozedUntil)
         snoozedUntilRestart = ((try? c.decodeIfPresent(Bool.self, forKey: .snoozedUntilRestart)) ?? nil) ?? false
         archivedAt = try date(.archivedAt)
+        onOldRunner = ((try? c.decodeIfPresent(Bool.self, forKey: .onOldRunner)) ?? nil) ?? false
         preview = try c.decodeIfPresent(String.self, forKey: .preview) ?? ""
         lastSeq = try c.decodeIfPresent(Int.self, forKey: .lastSeq) ?? 0
         lastSeenSeq = try c.decodeIfPresent(Int.self, forKey: .lastSeenSeq) ?? 0
@@ -875,6 +880,7 @@ public struct ThreadSummary: Sendable, Hashable, Codable, Identifiable {
         try c.encodeIfPresent(snoozedUntil.map(ISO8601.format), forKey: .snoozedUntil)
         if snoozedUntilRestart { try c.encode(true, forKey: .snoozedUntilRestart) }
         try c.encodeIfPresent(archivedAt.map(ISO8601.format), forKey: .archivedAt)
+        if onOldRunner { try c.encode(true, forKey: .onOldRunner) }
         try c.encode(preview, forKey: .preview)
         try c.encode(lastSeq, forKey: .lastSeq)
         try c.encode(lastSeenSeq, forKey: .lastSeenSeq)
@@ -893,7 +899,7 @@ public struct ThreadSummary: Sendable, Hashable, Codable, Identifiable {
 
     enum CodingKeys: String, CodingKey {
         case id, title, cwd, accountId, provider, model, effort, modelInUse, effortInUse, permissionMode, status, live, needsYou
-        case createdAt, updatedAt, lastActivityAt, snoozedUntil, snoozedUntilRestart, archivedAt, preview
+        case createdAt, updatedAt, lastActivityAt, snoozedUntil, snoozedUntilRestart, archivedAt, onOldRunner, preview
         case lastSeq, lastSeenSeq, nativeSessionId, contextTokens, contextWindow, costUsd, panels, actions, hooks, patches, background, subagents
         case projects
     }
@@ -961,6 +967,9 @@ public struct HelloResult: Sendable, Hashable, Decodable {
     public var defaults: RunnerDefaults
     /// Empty from runners older than step 4 (they have no `clis.*` either).
     public var clis: [CliStatus]
+    /// The runner's own update (protocol "Runner updates"); nil from a
+    /// runner older than that.
+    public var updates: RunnerUpdates?
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -971,11 +980,75 @@ public struct HelloResult: Sendable, Hashable, Decodable {
             ?? RunnerDefaults(cwd: "", accountId: accounts.first?.id ?? "claude-main")
         if defaults.accountId.isEmpty { defaults.accountId = accounts.first?.id ?? "claude-main" }
         clis = c.lossyArray(CliStatus.self, forKey: .clis)
+        updates = try? c.decodeIfPresent(RunnerUpdates.self, forKey: .updates)
     }
 
     enum CodingKeys: String, CodingKey {
-        case runnerVersion, `protocol`, accounts, defaults, clis
+        case runnerVersion, `protocol`, accounts, defaults, clis, updates
     }
+}
+
+/// What the runner's own update is doing (protocol "Runner updates"): hello's
+/// `updates` and `runner.updates`. Read leniently.
+public struct RunnerUpdates: Sendable, Hashable, Decodable {
+    public struct OldRunner: Sendable, Hashable, Decodable {
+        public var version: String
+        public var threads: [String]
+
+        public init(version: String, threads: [String]) {
+            self.version = version
+            self.threads = threads
+        }
+
+        public init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            version = ((try? c.decodeIfPresent(String.self, forKey: .version)) ?? nil) ?? "?"
+            threads = ((try? c.decodeIfPresent([String].self, forKey: .threads)) ?? nil) ?? []
+        }
+
+        enum CodingKeys: String, CodingKey { case version, threads }
+    }
+
+    /// off, idle, checking, building, waiting or failed.
+    public var state: String
+    public var commit: String?
+    public var subject: String?
+    public var reason: String?
+    public var oldRunners: [OldRunner]
+    public var launcherChanged: Bool
+
+    public init(state: String = "idle", commit: String? = nil, subject: String? = nil, reason: String? = nil, oldRunners: [OldRunner] = [], launcherChanged: Bool = false) {
+        self.state = state
+        self.commit = commit
+        self.subject = subject
+        self.reason = reason
+        self.oldRunners = oldRunners
+        self.launcherChanged = launcherChanged
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        state = ((try? c.decodeIfPresent(String.self, forKey: .state)) ?? nil) ?? "idle"
+        commit = (try? c.decodeIfPresent(String.self, forKey: .commit)) ?? nil
+        subject = (try? c.decodeIfPresent(String.self, forKey: .subject)) ?? nil
+        reason = (try? c.decodeIfPresent(String.self, forKey: .reason)) ?? nil
+        oldRunners = c.lossyArray(OldRunner.self, forKey: .oldRunners)
+        launcherChanged = ((try? c.decodeIfPresent(Bool.self, forKey: .launcherChanged)) ?? nil) ?? false
+    }
+
+    enum CodingKeys: String, CodingKey { case state, commit, subject, reason, oldRunners, launcherChanged }
+
+    /// Something's on its way: a release being built or about to start, an
+    /// old runner still finishing turns, or a launch.mjs to install.
+    public var isPending: Bool {
+        state == "building" || state == "waiting" || !oldRunners.isEmpty || launcherChanged
+    }
+
+    public var failed: Bool { state == "failed" }
+}
+
+struct RunnerUpdatesParams: Decodable {
+    var updates: RunnerUpdates
 }
 
 /// Fast parser and formatter for the protocol's ISO 8601 UTC strings.

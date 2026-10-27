@@ -186,3 +186,45 @@ test('a kept thread hibernated until the runner restarts wakes when it comes acr
   assert.equal(adopted.snoozedUntil, undefined);
   assert.equal(adopted.snoozedUntilRestart, undefined);
 });
+
+test('Peers: a draining runner\'s threads are marked onOldRunner, its usage readings come here, and changes are told', async () => {
+  const h = makeHarness();
+  const home = h.home;
+  const { writeDrainInfo, Peers } = await import('../../src/handover.ts');
+  writeDrainInfo(home, { pid: 424242, port: 1, version: 'old', since: new Date().toISOString(), threads: ['t-old'] });
+  let notify: (m: string, p: any) => void = () => {};
+  const client = {
+    call: async (method: string) => {
+      if (method === 'drain.hello') return { threads: ['t-old'], version: 'old' };
+      if (method === 'threads.list') return { threads: [{ id: 't-old', title: 'Old', status: 'running', lastActivityAt: '2026-01-01T00:00:00Z' }] };
+      return {};
+    },
+    onNotification: (fn: (m: string, p: any) => void) => ((notify = fn), () => {}),
+    waitClosed: () => new Promise<never>(() => {}),
+    close: () => {},
+  };
+  const published: any[] = [];
+  const readings: string[] = [];
+  let changes = 0;
+  const peers = new Peers({
+    home,
+    token: 't',
+    log: nullLogger,
+    runner: { adopt: () => undefined, publish: (n) => published.push(n) },
+    sweep: async () => {},
+    connect: async () => client as any,
+    alive: () => true,
+    usage: (accountId) => readings.push(accountId),
+    onChange: () => changes++,
+  });
+  assert.deepEqual([...(await peers.connectAll())], ['t-old']);
+  assert.equal(changes, 1);
+  assert.equal(peers.find('t-old')!.onOldRunner, true);
+  notify('thread.updated', { thread: { id: 't-old', title: 'Old', status: 'idle', lastActivityAt: '2026-01-01T00:01:00Z' } });
+  assert.equal(published.at(-1).params.thread.onOldRunner, true);
+  notify('drain.usage', { accountId: 'claude-3', reading: { windows: [] } });
+  assert.deepEqual(readings, ['claude-3']);
+  notify('drain.handedOver', { threadId: 't-old' });
+  assert.equal(changes, 2);
+  assert.deepEqual(peers.status()[0].threads, []);
+});

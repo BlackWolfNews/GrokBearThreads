@@ -127,6 +127,8 @@ type ThreadSummary = {
   snoozedUntilRestart?: true // hibernating until the runner next starts;
                         // snoozedUntil is then 9999-12-31T00:00:00.000Z
   archivedAt?: string
+  onOldRunner?: true    // finishing a turn on the runner that handed over
+                        // (Handovers); moves across when the turn ends
   preview: string       // last assistant text, one line, <= 140 chars
   lastSeq: number       // seq of the newest persisted event
   lastSeenSeq: number
@@ -416,7 +418,7 @@ replaces whatever the deltas built up.
 
 | method | params | result |
 |---|---|---|
-| `hello` | `{ client: string, version: string }` | `{ runnerVersion, protocol: 1, accounts: Account[], defaults: { cwd, accountId, model?, models?: { claude?, codex? }, efforts?: { claude?: EffortLevel, codex?: EffortLevel } }, clis?: CliStatus[] }`. `defaults.accountId` is the account a `threads.create` with no `accountId` uses: the one with the most room among the last-used account's provider (skipping blocked ones, ones under 10% and ones with a note), worked out again as usage changes; a client keeps its own copy of the rule rather than asking again. `defaults.models[provider]` is the model a new thread on that provider gets when it names none (`runner.json`'s `defaults.models`; a dev runner sets the cheapest); `defaults.model` is the same for Claude, kept for older apps. Absent means the account's own default (`accounts[].defaultModel` names it, when known). `defaults.efforts[provider]` likewise for effort; absent means the model's own level. `runnerVersion` is `<package version>+<release id>` when the runner runs from a release, else `<package version>+source` |
+| `hello` | `{ client: string, version: string }` | `{ runnerVersion, protocol: 1, accounts: Account[], defaults: { cwd, accountId, model?, models?: { claude?, codex? }, efforts?: { claude?: EffortLevel, codex?: EffortLevel } }, clis?: CliStatus[], updates?: RunnerUpdates }`. `updates` is under Runner updates. `defaults.accountId` is the account a `threads.create` with no `accountId` uses: the one with the most room among the last-used account's provider (skipping blocked ones, ones under 10% and ones with a note), worked out again as usage changes; a client keeps its own copy of the rule rather than asking again. `defaults.models[provider]` is the model a new thread on that provider gets when it names none (`runner.json`'s `defaults.models`; a dev runner sets the cheapest); `defaults.model` is the same for Claude, kept for older apps. Absent means the account's own default (`accounts[].defaultModel` names it, when known). `defaults.efforts[provider]` likewise for effort; absent means the model's own level. `runnerVersion` is `<package version>+<release id>` when the runner runs from a release, else `<package version>+source` |
 | `threads.list` | `{ include?: ("inbox" \| "snoozed" \| "archived")[] }` (default `["inbox"]`) | `{ threads: ThreadSummary[] }` newest activity first |
 | `threads.search` | `{ query: string, limit?: number }` | `{ threads: ThreadSummary[] }` matches title and preview across all threads, archived included |
 | `threads.create` | `{ text: string, images?: ImageRef[], cwd?: string, accountId?: string, model?: string, effort?: EffortLevel, permissionMode?: "full" \| "ask", title?: string }` | `{ thread: ThreadSummary }` (the first turn starts straight away). The thread's `provider` is its account's. With no `model`, the thread gets `defaults.models[provider]` from `hello`, or `defaults.model` for Claude, or else the account's own default. With no `effort`, `defaults.efforts[provider]`, or else the model's own level. See "Models and effort across providers" |
@@ -498,6 +500,33 @@ still `-32602`.)
 | `librarian.updated` | `{ librarian: LibrarianStatus }` sent to every connected client when the librarian's status changes |
 | `settings.updated` | `{ settings: Settings }` sent to every connected client when a setting or the key changes, and at most once a minute while model calls are adding to the spend |
 | `runner.notice` | `{ level: "info" \| "warning" \| "error", message }`. Also sent straight after the `hello` result for things the client missed (startup problems, a missing `claude` binary) |
+| `runner.updates` | `{ updates: RunnerUpdates }` sent to every connected client when the runner's own update state changes (below). Replaces the one from `hello` |
+
+## Runner updates
+
+`hello` carries `updates?: RunnerUpdates`, and `runner.updates` sends it
+again whenever it changes, so a client can show that the runner is
+updating itself (docs/dev-tools.md, "The runner updating itself").
+
+```ts
+type RunnerUpdates = {
+  // The runner following main (runner.status's update.state).
+  state: "off" | "idle" | "checking" | "building" | "waiting" | "failed"
+  commit?: string       // main's short commit it last saw or is building
+  subject?: string      // that commit's subject line
+  reason?: string       // off: why; failed: what went wrong
+  // Runners that handed over and are still finishing turns (Handovers).
+  oldRunners: { version: string; threads: string[] }[]
+  // launch.mjs on main differs from the installed one, which only
+  // install-runner.sh replaces.
+  launcherChanged?: true
+}
+```
+
+"Pending" for a client means `building`, `waiting`, any `oldRunners`, or
+`launcherChanged`; `failed` is worth a look too. `waiting` is brief once
+handovers are on: the release is built and the switch starts as soon as
+the restart is asked for.
 
 ## Restarts
 
@@ -619,8 +648,16 @@ restart wait for busy threads. It hands over instead:
 - Another handover while one is draining makes the primary a draining
   runner as well; draining runners don't hand over again.
 
+- The primary's summaries of kept threads carry `onOldRunner: true`, so a
+  client can say a thread is finishing on the old release. The flag goes
+  when the thread comes across.
+- Usage readings from kept threads' turns go to the primary
+  (`drain.usage { accountId, reading }`), which owns `usage.json`.
+- The runner's notice when it hands over starts "The runner is restarting
+  onto a new release", which clients already read as a restart under way.
+
 The methods between runners (`drain.hello`, `drain.stop`) and
-`drain.handedOver` are for runners only.
+`drain.handedOver` and `drain.usage` are for runners only.
 
 ## Settings and models
 

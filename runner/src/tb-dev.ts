@@ -423,6 +423,8 @@ export function formatStatus(s: RunnerStatus, threads: ThreadSummary[], now: num
   }
   const u = s.update;
   if (u) lines.push(formatUpdate(u, now));
+  // Releases never replace launch.mjs; only Mike's install-runner.sh does.
+  if (u?.launcherChanged) lines.push(`launch.mjs on main differs from the installed one: Mike runs ${u.checkout ? `${u.checkout}/runner/` : 'runner/'}scripts/install-runner.sh once nothing is busy.`);
   return lines.join('\n') + '\n';
 }
 
@@ -706,11 +708,16 @@ export async function logsCommand(cfg: Config, f: Flags): Promise<number> {
       console.error(`No log at ${file}`);
       return 1;
     }
-  } else {
-    for (const line of lastLines(file, n, filter)) console.log(line);
+  }
+  // Where following starts: the size the tail was read at, so a line
+  // written between the two is neither lost nor printed twice.
+  let from = 0;
+  if (fs.existsSync(file)) {
+    from = fs.statSync(file).size;
+    for (const line of lastLines(file, n, filter, from)) console.log(line);
   }
   if (!f.follow) return 0;
-  await follow(file, filter);
+  await follow(file, filter, from);
   return 0;
 }
 
@@ -750,11 +757,12 @@ async function runnerLogFile(cfg: Config): Promise<string | undefined> {
 
 // The last n lines (that contain filter, if given), reading back from the
 // end a block at a time so a big log isn't read whole.
-export function lastLines(file: string, n: number, filter?: string): string[] {
+// `upTo`: read as if the file ended there (where a follow then starts).
+export function lastLines(file: string, n: number, filter?: string, upTo?: number): string[] {
   if (n === 0) return [];
   const fd = fs.openSync(file, 'r');
   try {
-    let pos = fs.fstatSync(fd).size;
+    let pos = Math.min(upTo ?? Infinity, fs.fstatSync(fd).size);
     let tail = '';
     let found: string[] = [];
     const BLOCK = 64 * 1024;
@@ -779,8 +787,8 @@ export function lastLines(file: string, n: number, filter?: string): string[] {
 
 // Prints lines as they're added, until interrupted. A log that shrinks
 // (rotated or cleared) is read again from the start.
-function follow(file: string, filter?: string): Promise<void> {
-  let pos = fs.existsSync(file) ? fs.statSync(file).size : 0;
+function follow(file: string, filter: string | undefined, from: number): Promise<void> {
+  let pos = from;
   let partial = '';
   return new Promise((resolve) => {
     const timer = setInterval(() => {

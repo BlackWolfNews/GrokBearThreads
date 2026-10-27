@@ -514,7 +514,10 @@ test('tb logs prints the tail, filters by thread, and follows', async () => {
 
   const f = tb(dir, 'ws://127.0.0.1:1/rpc', ['logs', '-f', '-n', '1', '--thread', 't-2'], env);
   try {
-    await new Promise((res) => setTimeout(res, 400));
+    // Following from here on: the header comes out just before the tail is
+    // read. A fixed wait lost this race on a busy machine.
+    for (let i = 0; i < 100 && !f.out().includes('<=='); i++) await new Promise((res) => setTimeout(res, 50));
+    await new Promise((res) => setTimeout(res, 300));
     fs.appendFileSync(log, 'five {"threadId":"t-2"}\nsix\nseven {"threadId":"t-2"}\n');
     for (let i = 0; i < 40 && !f.out().includes('seven'); i++) await new Promise((res) => setTimeout(res, 50));
     assert.equal(f.out(), `==> ${log} <==\nfive {"threadId":"t-2"}\nseven {"threadId":"t-2"}\n`);

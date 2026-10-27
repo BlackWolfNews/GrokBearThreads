@@ -71,6 +71,8 @@ export type RpcServerOptions = {
   remote?: RemoteThreads;
   // A draining runner's own server: only the threads it still has.
   onlyOwn?: boolean;
+  // hello's `updates` (docs/protocol.md, "Runner updates").
+  updates?: () => unknown;
   // Tests shorten these.
   authTimeoutMs?: number;
   skipDeltasBytes?: number;
@@ -303,9 +305,11 @@ export class RpcServer {
     switch (method) {
       case 'auth':
         return {};
-      case 'hello':
+      case 'hello': {
         conn.client = optString(p, 'client');
-        return r.hello();
+        const updates = this.opts.updates?.();
+        return updates ? { ...r.hello(), updates } : r.hello();
+      }
       case 'threads.list': {
         const include = p.include === undefined ? undefined : stringArray(p, 'include');
         for (const x of include ?? []) {
