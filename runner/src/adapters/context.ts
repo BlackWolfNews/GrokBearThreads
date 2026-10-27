@@ -5,7 +5,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import type { ImageRef } from '../protocol.ts';
-import { saveBase64Image } from '../media.ts';
+import { LIMITS } from '../protocol.ts';
+import { copyImageFileInto, saveBase64Image, saveDataUrl } from '../media.ts';
 
 export type NormalizerContext = {
   cwd: string;
@@ -40,6 +41,8 @@ export function fileContext(cwd: string, mediaDir: string, blobsDir: string): No
       }
     },
     saveImage: (data, mediaType, hint) => saveBase64Image(mediaDir, data, mediaType, hint),
+    copyImage: (src, hint) => copyImageFileInto(mediaDir, src, hint),
+    saveDataUrl: (url, hint) => saveDataUrl(mediaDir, url, hint),
     saveBlob(itemId, text) {
       fs.mkdirSync(blobsDir, { recursive: true });
       const file = path.join(blobsDir, `${itemId.replace(/[^a-zA-Z0-9_-]/g, '_')}.txt`);
@@ -59,4 +62,22 @@ export function fileContext(cwd: string, mediaDir: string, blobsDir: string): No
       }
     },
   };
+}
+
+// A tool result's text cut to the protocol's 64 KB, with the whole of it
+// saved to a blob when it's longer.
+export function truncateResultText(text: string, itemId: string, ctx: NormalizerContext): { text: string; truncated: boolean; blobPath?: string } {
+  const buf = Buffer.from(text, 'utf8');
+  if (buf.length <= LIMITS.toolResultText) return { text, truncated: false };
+  let blobPath: string | undefined;
+  try {
+    blobPath = ctx.saveBlob(itemId, text);
+  } catch {
+    blobPath = undefined;
+  }
+  // Back up over UTF-8 continuation bytes so the cut never splits a character.
+  let end = LIMITS.toolResultText;
+  while (end > 0 && (buf[end] & 0xc0) === 0x80) end--;
+  const cut = buf.subarray(0, end).toString('utf8');
+  return blobPath ? { text: cut, truncated: true, blobPath } : { text: cut, truncated: true };
 }

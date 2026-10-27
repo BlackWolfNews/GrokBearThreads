@@ -853,6 +853,29 @@ The app already inserts an image row right after the tool row (`TranscriptReduce
 - an unknown item type shown as a plain row;
 - every notification method in `real-config` either mapped or listed as ignored.
 
+### As built (B)
+
+**What A calls on `CodexNormalizer`** (`new CodexNormalizer(ctx, {log})`, one per session):
+
+- `setThread(threadId, model?)` after `thread/start` or `thread/resume`, with the model it reported in `session`, so a later `thread/settings/updated` with another model is reported again.
+- `startingTurn(runnerTurnId)` when it sends `turn/start`, and `turnAccepted(codexTurnId)` with the reply. A `turn/started` in between counts as ours. `steered(runnerId)` for a message sent with `turn/steer`.
+- `handle(method, params, from?)` for every notification of its thread, its process's thread-less ones, and its children's (with `from.childThreadId`). Server requests don't go here.
+- `lineTooLarge(head)` when the line reader skips a line over its guard, with the line's first few KB. If it names an open item, that item closes as "Too large to show"; if not, the turn's other open items do.
+- `closeOpen(reason)` when the session ends with rows still open (process death, hard stop). It closes background terminals too and sends `tasks: []`. It emits no `result`.
+- `interruptedCommands()` after an interrupted or failed `turn/completed`: the command item ids it closed, for `backgroundTerminals/terminate`.
+- `limitsFromRateLimits(snapshot)` takes `account/rateLimits/read`'s result or a merged update (`handle('account/rateLimits/updated', merged)` does the same), and `limitsFromAccount(result)` takes `account/read`'s.
+- `innerCommand(command)` strips `/bin/zsh -lc '...'`, for approval titles and "Always allow" rules.
+- `MAPPED_ITEM_TYPES`, `IGNORED_ITEM_TYPES`, `MAPPED_METHODS` and `IGNORED_METHODS` are exported for `surface.ts`, so its ignore list and the normaliser's can't drift.
+
+**Differences from the plan above:**
+
+- A subagent row still open when a turn completes is kept open like a background terminal (`tasks` with `kind: "agent"`), not closed as interrupted: the child is still running in the process. Its `subAgentActivity completed` closes it later.
+- The credits detail ("1,234 credits") goes on the last of the `codex` bucket's windows (the weekly one when there are both).
+- Committed fixtures are `{proc, dir, t, msg}` lines. `proc` tells the processes of a resume apart. Every fixture keeps its capture's handshake and `thread/start` lines, so a replay knows its thread.
+- Extra fixtures: `models` (`probe.ndjson`'s `model/list`, for A), and the hand-written `mcp-image` (an MCP image block, an image resource, a dynamic tool's `data:` image), since no capture had MCP servers on. The optional `close-and-resume` isn't made.
+- The sanitiser also fails on the values of the keys it drops (account ids, `installationId`, `serverName`) wherever else they appear, and on this Mac's user and host name. The hostname also appeared with a `.localdomain` suffix.
+- `context.ts` gained `truncateResultText`, the 64 KB cut with a blob, for the Codex normaliser.
+
 ## C. Runner plumbing
 
 All edits to `runner.ts`, `main.ts`, `rpc.ts`, `store.ts`, `threadbare-mcp.ts`, `cli.ts`, `tb-dev.ts` and `test/helpers/fakes.ts`. Merge main into your branch once Mike's steering change is on it, and build on its `canSteer()`, `steer()` and `Turn.messages`.

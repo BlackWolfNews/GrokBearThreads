@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { execFileSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import type { ImageRef } from './protocol.ts';
 
 export type ImageInfo = { mediaType: string; width?: number; height?: number };
@@ -148,6 +149,89 @@ export function prepareImageForModel(ref: ImageRef, tmpDir: string): { data: Buf
   } catch {
     return { data, mediaType: ref.mediaType };
   }
+}
+
+// Copies an image file a CLI saved or looked at (Codex's generated images,
+// a file it viewed) into a media folder, named like saveBase64Image's so the
+// same image always lands on the same file: a replay or a reconnect never
+// duplicates it. HEIC, TIFF and BMP become PNG through sips, since the app
+// and the models only take the common web formats. Null when it isn't a
+// readable image.
+export function copyImageFileInto(dir: string, src: string, hint: string): ImageRef | null {
+  try {
+    const file = localPath(src);
+    if (!file) return null;
+    const st = fs.statSync(file);
+    if (!st.isFile() || st.size > MAX_IMAGE_BYTES) return null;
+    const buf = fs.readFileSync(file);
+    const sha = crypto.createHash('sha1').update(buf).digest('hex').slice(0, 10);
+    const info = sniffImage(buf);
+    fs.mkdirSync(dir, { recursive: true });
+    if (info) {
+      const out = path.join(dir, `${safeName(hint)}-${sha}.${extForMediaType(info.mediaType)}`);
+      if (!fs.existsSync(out)) fs.copyFileSync(file, out);
+      return refFrom(out, info);
+    }
+    if (!needsConversion(buf)) return null;
+    const out = path.join(dir, `${safeName(hint)}-${sha}.png`);
+    if (!fs.existsSync(out)) {
+      // Converted next to the target first, so a failed sips run never
+      // leaves a half-written file under the final name.
+      const tmp = `${out}.${process.pid}.tmp.png`;
+      try {
+        execFileSync('/usr/bin/sips', ['-s', 'format', 'png', file, '--out', tmp], { stdio: 'ignore', timeout: 30_000 });
+        fs.renameSync(tmp, out);
+      } finally {
+        fs.rmSync(tmp, { force: true });
+      }
+    }
+    const converted = readImageInfo(out);
+    return converted ? refFrom(out, converted) : null;
+  } catch {
+    return null;
+  }
+}
+
+// Saves a `data:<type>;base64,<data>` image into a media folder. Null when
+// it isn't a base64 data URL of an image.
+export function saveDataUrl(dir: string, url: string, hint: string): ImageRef | null {
+  const m = /^data:([\w.+-]+\/[\w.+-]+)?((?:;[\w-]+=[^;,]*)*);base64,/i.exec(url);
+  if (!m) return null;
+  const data = url.slice(m[0].length);
+  if (!sniffImage(Buffer.from(data.slice(0, 64 * 1024), 'base64'))) return null;
+  try {
+    return saveBase64Image(dir, data, m[1] ?? 'image/png', hint);
+  } catch {
+    return null;
+  }
+}
+
+// A plain path, or a file:// URL as Codex's rollouts write them.
+function localPath(src: string): string | null {
+  if (src.startsWith('file://')) {
+    try {
+      return fileURLToPath(src);
+    } catch {
+      return null;
+    }
+  }
+  return path.isAbsolute(src) ? src : null;
+}
+
+// HEIC/HEIF (an ISO box with a heic-family brand), TIFF and BMP.
+function needsConversion(buf: Buffer): boolean {
+  if (buf.length < 12) return false;
+  const tiff = (buf[0] === 0x49 && buf[1] === 0x49 && buf[2] === 0x2a && buf[3] === 0) || (buf[0] === 0x4d && buf[1] === 0x4d && buf[2] === 0 && buf[3] === 0x2a);
+  const bmp = buf[0] === 0x42 && buf[1] === 0x4d;
+  const heic = buf.toString('ascii', 4, 8) === 'ftyp' && /^(heic|heix|hevc|hevx|heim|heis|mif1|msf1)$/.test(buf.toString('ascii', 8, 12));
+  return tiff || bmp || heic;
+}
+
+function refFrom(file: string, info: ImageInfo): ImageRef {
+  const ref: ImageRef = { path: file, mediaType: info.mediaType };
+  if (info.width) ref.width = info.width;
+  if (info.height) ref.height = info.height;
+  return ref;
 }
 
 function safeName(s: string): string {
