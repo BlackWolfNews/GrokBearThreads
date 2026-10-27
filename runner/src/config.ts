@@ -75,6 +75,10 @@ export type RunnerJson = {
   defaults?: {
     cwd?: string;
     accountId?: string;
+    // New threads start on accountId (the last one used) as it is, rather
+    // than on the account with the most room. A dev runner sets it so its
+    // threads stay on claude-3.
+    keepAccount?: boolean;
     model?: string;
     models?: Partial<Record<Provider, string>>;
     efforts?: Partial<Record<Provider, EffortLevel>>;

@@ -26,6 +26,7 @@ function startRunner(home: string, port = 0): { proc: ChildProcess; out: () => s
       // Never the real ~/.codex (its config.toml) or Token Stats' limits.json.
       THREADBARE_CODEX_MAIN_DIR: path.join(home, 'no-codex-main'),
       THREADBARE_TOKEN_STATS_LIMITS: path.join(home, 'no-limits.json'),
+      THREADBARE_CLI_UPDATES: 'off',
     },
     stdio: ['ignore', 'pipe', 'pipe'],
   });

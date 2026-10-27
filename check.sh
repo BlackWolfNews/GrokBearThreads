@@ -12,8 +12,10 @@
 #   --app         the app's swift build and swift test only, for a change
 #                 that doesn't touch runner/ (about 30 seconds)
 #   --e2e         also the runner's end-to-end tests: the real claude CLI on
-#                 claude-haiku-5-5 and account claude-3, in temp folders
-#                 (about three minutes, a few cents)
+#                 claude-haiku-5-5 and account claude-3, then Codex on
+#                 gpt-6-luna at low effort and a Codex install into a temp
+#                 folder, all in temp folders (several minutes, a few cents;
+#                 TB_E2E_SKIP_CODEX=1 leaves the Codex ones out)
 #   --shots DIR   also save the app's design screenshots to DIR
 #                 (app/Tools/screenshots.sh; look at them afterwards)
 set -uo pipefail
@@ -55,6 +57,8 @@ export THREADBARE_NODE="$NODE"
 # Every test makes its own temp data dir; none may find the real one.
 unset THREADBARE_HOME THREADBARE_DATA_DIR THREADBARE_PORT THREADBARE_URL THREADBARE_LOG \
   THREADBARE_THREAD_ID THREADBARE_RUNNER_VERSION THREADBARE_RUNNER_HOME
+# No runner a check starts may install or update a CLI.
+export THREADBARE_CLI_UPDATES=off
 
 TMP_ROOT="${TMPDIR:-/tmp}"
 LOGS="$(mktemp -d "${TMP_ROOT%/}/threadbare-check.XXXXXX")"
@@ -93,7 +97,22 @@ if [ "$QUICK" = 0 ]; then
   step "app build" "$ROOT/app" swift build
   step "app tests" "$ROOT/app" env THREADBARE_REQUIRE_MOCK=1 swift test
 fi
-[ "$E2E" = 0 ] || step "runner e2e" "$ROOT/runner" npm run test:e2e
+if [ "$E2E" = 1 ]; then
+  # Claude's first, then Codex's (codex*.e2e.test.ts: the conversation
+  # tests and the install test), which TB_E2E_SKIP_CODEX=1 leaves out.
+  E2E_RUN=(node --test --test-reporter=spec --test-concurrency=1 --test-timeout=600000)
+  CLAUDE_E2E=()
+  CODEX_E2E=()
+  for f in "$ROOT"/runner/test/e2e/*.test.ts; do
+    case "$(basename "$f")" in codex*) CODEX_E2E+=("$f") ;; *) CLAUDE_E2E+=("$f") ;; esac
+  done
+  step "runner e2e" "$ROOT/runner" "${E2E_RUN[@]}" "${CLAUDE_E2E[@]}"
+  if [ "${TB_E2E_SKIP_CODEX:-0}" = 1 ]; then
+    echo "skip  codex e2e            (TB_E2E_SKIP_CODEX=1)"
+  elif [ "${#CODEX_E2E[@]}" -gt 0 ]; then
+    step "codex e2e" "$ROOT/runner" "${E2E_RUN[@]}" "${CODEX_E2E[@]}"
+  fi
+fi
 [ -z "$SHOTS" ] || step "app screenshots" "$ROOT/app" bash Tools/screenshots.sh "$SHOTS"
 
 if [ -n "$FAILED" ]; then

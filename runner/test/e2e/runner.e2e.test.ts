@@ -41,6 +41,7 @@ async function startRunner(): Promise<void> {
       THREADBARE_LOG: path.join(root, 'runner.log'),
       THREADBARE_IDLE_MS: String(IDLE_MS),
       THREADBARE_DEBUG: '1',
+      THREADBARE_CLI_UPDATES: 'off',
     },
     stdio: ['ignore', 'pipe', 'pipe'],
   });

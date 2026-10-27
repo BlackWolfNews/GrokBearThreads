@@ -13,11 +13,16 @@ import { AccountRegistry } from './accounts.ts';
 import { ClaudeAdapter } from './adapters/claude/adapter.ts';
 import { ProcessRegistry } from './proc.ts';
 import { Runner } from './runner.ts';
+import { CodexAdapter } from './adapters/codex/adapter.ts';
+import { resolveCodexBinary } from './adapters/codex/appserver.ts';
+import { checkSurface, testedVersion } from './adapters/codex/surface.ts';
+import { CliUpdates } from './updates/manager.ts';
+import { UsageStore } from './usage.ts';
 import { RpcServer } from './rpc.ts';
 import { realClock } from './clock.ts';
 import { acquireLock } from './lock.ts';
 import { removeTempFiles } from './fsutil.ts';
-import { ALWAYS_ASK_TOOLS, SERVER_NAME, threadbareMcpServer } from './threadbare-mcp.ts';
+import { ALWAYS_ASK_TOOLS, SERVER_NAME, buildThreadbareTools, threadbareMcpServer } from './threadbare-mcp.ts';
 
 // Tells launch.mjs this runner calls its listening() hook (release.ts), so
 // it may stop one that hasn't started listening in time.
@@ -56,11 +61,31 @@ async function main(): Promise<void> {
   if (swept) log.warn('stopped process groups left from a previous run', { count: swept });
 
   const store = new ThreadStore(cfg.home);
-  const accounts = new AccountRegistry(cfg);
+  // Token Stats' limits.json as a baseline, plus what the threads' own
+  // turns report; the registry puts it on every account.
+  const usage = new UsageStore({ limitsFile: cfg.tokenStatsLimitsFile, dataDir: cfg.home, clock: realClock, log });
+  usage.start();
+  const accounts = new AccountRegistry(cfg, usage);
   // Every session gets tools for driving Threadbare itself, bound to its
   // own thread. Sessions only start after the runner exists.
   let runner!: Runner;
   let scheduler!: Scheduler;
+  let restarter!: Restarter;
+  // Keeps both CLIs current (E). Its hooks call back into the runner and
+  // the Restarter, made below; nothing calls them before start().
+  const updates = new CliUpdates({
+    cfg,
+    log,
+    clock: realClock,
+    hooks: {
+      restartPending: () => Boolean(restarter?.status().pendingRestart),
+      releaseIdle: (p, v) => runner.releaseIdle(p, v),
+      versionsInUse: (p) => runner.versionsInUse(p),
+      codexBinariesInUse: () => runner.codexBinariesInUse(),
+    },
+    codex: { resolve: (start) => resolveCodexBinary(start), checkSurface, testedVersion },
+    notice: (level, message) => runner.notice(level, message),
+  });
   const claude = new ClaudeAdapter({
     claudePath: cfg.claudePath,
     registry,
@@ -68,11 +93,22 @@ async function main(): Promise<void> {
     mcpServersFor: (threadId) => ({ [SERVER_NAME]: threadbareMcpServer(runner, threadId, scheduler) }),
     alwaysAsk: ALWAYS_ASK_TOOLS,
   });
+  // One app-server per live Codex thread, each starting what E says is
+  // current, with the same threadbare tools as dynamic tools.
+  const codex = new CodexAdapter({
+    codexBinary: () => updates.codexBinary(),
+    codexArgs: cfg.codexArgs,
+    registry,
+    log,
+    toolsFor: (threadId) => buildThreadbareTools(runner, threadId, Date.now, scheduler),
+    onNotice: (text) => runner.notice('warning', text),
+  });
   runner = new Runner({
     config: cfg,
     store,
-    adapters: { claude },
+    adapters: { claude, codex },
     accounts,
+    usage,
     clock: realClock,
     log,
   });
@@ -90,7 +126,7 @@ async function main(): Promise<void> {
   const rolledBack = rollback?.message;
   // runner.restart: when it's time, stop the same way SIGTERM does and
   // exit 0 so launchd starts the runner again.
-  const restarter = new Restarter({
+  restarter = new Restarter({
     runner,
     home: cfg.home,
     clock: realClock,
@@ -115,14 +151,30 @@ async function main(): Promise<void> {
     pendingRestart: () => Boolean(restarter.status().pendingRestart),
   });
 
+  runner.attachClis(updates);
+  const methods = { ...restartMethods(restarter), ...scheduleMethods(scheduler) };
+  // runner.status carries the CLI statuses too (protocol, "runner.status").
+  const restartStatus = methods['runner.status'];
+  methods['runner.status'] = (p) => ({ ...(restartStatus(p) as Record<string, unknown>), clis: updates.list() });
+  const codexWarning = missingCodex(updates.codexBinary(), cfg);
+  if (codexWarning) log.warn('codex CLI not found', { path: updates.codexBinary() });
   const server = new RpcServer({
     host: cfg.host,
     port: cfg.port,
     token: readToken(cfg.home),
     runner,
     log,
-    methods: { ...restartMethods(restarter), ...scheduleMethods(scheduler) },
-    helloNotices: () => [...(rolledBack ? [{ level: 'warning' as const, message: rolledBack }] : []), ...restarter.helloNotices()],
+    clis: updates,
+    methods,
+    helloNotices: () => {
+      // Like a missing claude: said to every client, until it's there.
+      const noCodex = missingCodex(updates.codexBinary(), cfg);
+      return [
+        ...(rolledBack ? [{ level: 'warning' as const, message: rolledBack }] : []),
+        ...(noCodex ? [{ level: 'warning' as const, message: noCodex }] : []),
+        ...restarter.helloNotices(),
+      ];
+    },
   });
   let port: number;
   try {
@@ -140,6 +192,8 @@ async function main(): Promise<void> {
   // Tests read this line to know the runner is up.
   process.stdout.write(`threadbare-runner listening on ${port}\n`);
   tellLaunchListening();
+  // Checks start a minute after this; installs never while a restart waits.
+  updates.start();
   const cancelMarkGood = markGoodLater(cfg.home, RELEASE.release, log, process.env, () => {
     restarter.proven();
     updater.start();
@@ -158,6 +212,8 @@ async function main(): Promise<void> {
     // Whatever stopped it, a pending restart has now happened.
     restarter.stopping();
     scheduler.stop();
+    usage.stop();
+    updates.stop();
     try {
       await runner.shutdown();
       await server.close().catch(() => {});
@@ -187,6 +243,16 @@ async function main(): Promise<void> {
       }
     }
   });
+}
+
+// A warning when the Codex binary new sessions would start isn't there, or
+// undefined. Threadbare's own copy may still be on its way.
+function missingCodex(start: string, cfg: ReturnType<typeof loadConfig>): string | undefined {
+  const bin = resolveCodexBinary(start);
+  if (fs.existsSync(bin.command)) return undefined;
+  if (cfg.codexPath) return `The codex CLI isn't at ${cfg.codexPath} (codexPath in runner.json), so Codex threads can't start.`;
+  if (cfg.cliUpdates.codex !== 'off') return `The codex CLI isn't at ${start} yet, so Codex threads can't start until Threadbare has installed its own copy (Usage shows how that's going).`;
+  return `The codex CLI isn't at ${start}, so Codex threads can't start. Install @openai/codex next to the runner's Node, or set codexPath in runner.json.`;
 }
 
 main().catch((e) => {

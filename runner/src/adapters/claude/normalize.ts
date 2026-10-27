@@ -116,6 +116,9 @@ export class ClaudeNormalizer {
   private system(msg: AnyMsg, out: AdapterOutput[]): void {
     if (msg.subtype === 'init' && typeof msg.session_id === 'string') {
       out.push({ kind: 'session', nativeSessionId: msg.session_id, model: msg.model });
+      // The version of the CLI running this session, so CLI updates know
+      // which versions are in use (the runner notes a change).
+      if (typeof msg.claude_code_version === 'string' && msg.claude_code_version) out.push({ kind: 'cliVersion', version: msg.claude_code_version });
       this.turnStarting(out);
     } else if (msg.subtype === 'compact_boundary') {
       this.afterCompact = true;

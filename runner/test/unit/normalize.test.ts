@@ -457,3 +457,15 @@ test('output the CLI saved to a file is copied into the thread and pointed at', 
   assert.equal(r.blobPath, '/blobs/tu2.txt');
   assert.equal(c.copied.tu2, '/acct/projects/x/tool-results/b1.txt');
 });
+
+test('init reports the session and the version of the CLI running it', () => {
+  const n = new ClaudeNormalizer(ctx());
+  n.sent();
+  const out = n.handle({ type: 'system', subtype: 'init', session_id: 's1', model: 'claude-haiku-5-5', claude_code_version: '2.1.311' });
+  assert.deepEqual(out.filter((o) => o.kind !== 'event'), [
+    { kind: 'session', nativeSessionId: 's1', model: 'claude-haiku-5-5' },
+    { kind: 'cliVersion', version: '2.1.311' },
+  ]);
+  // An older CLI without the field just reports the session.
+  assert.ok(!n.handle({ type: 'system', subtype: 'init', session_id: 's1', model: 'x' }).some((o) => o.kind === 'cliVersion'));
+});
