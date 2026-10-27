@@ -959,6 +959,27 @@ All edits to `runner.ts`, `main.ts`, `rpc.ts`, `store.ts`, `threadbare-mcp.ts`, 
 
 A dev runner must also hold a real Codex conversation.
 
+### As built (C, 27 Oct, before A and E)
+
+D is wired for real (`UsageStore`, `AccountRegistry(cfg, usage)`, `pickAccount`, `usageLine`). A's `CodexAdapter` and E's `CliUpdates` are the marked "STEP 4 WIRING" lines in `main.ts`; everything around them is built and tested with fakes.
+
+Seams the runner expects:
+
+- **E:** `runner.cliHooks(restartPending)` returns E's `hooks`; `runner.attachClis(updates)` (statuses in `hello` and `clis.updated`, Codex models asked again when Codex's `installedVersion` changes); `RpcServer`'s `clis` option serves `clis.*` (`-32601` without it); `main.ts` adds `clis` to `runner.status`. The runner only needs `list/check/update/setPolicy/onChange` (`CliControl` in `runner.ts`).
+- **A:** the adapter flags and `archive` as in Contracts, `SessionNotFoundError` on a resume that can't find the thread, and an optional `binariesInUse(): string[]` on the adapter object (the real binary paths its live processes run), which `codexBinariesInUse()` passes to E. A's own `setCwd` must resolve; if it rejects, the runner falls back to releasing the session so it resumes in the new folder.
+
+Calls made where the section didn't say, or said otherwise:
+
+- **A provider with no adapter is refused.** `threads.create` and a `threads.update` to such an account answer `-32602` ("This runner can't run Codex threads yet, so codex-main can't be used."), and `pickAccount` only sees accounts the runner can run. Until A is wired, `codex-main` is listed but can't be used.
+- **`defaults.keepAccount`** (new `runner.json` field): new threads start on `defaults.accountId` as it is, not the account with the most room. `dev-runner.sh` sets it so its threads stay on claude-3.
+- **Version moves** don't need `cliVersion`: `releaseIdle(p, v)` marks every live session of that provider not reporting `v`, releases the idle ones now (soft only), and the rest when they next meet the rules (turn end, tasks finishing, wake grace ending). A message arriving for a marked session also restarts it on the new version first. **Claude doesn't emit `cliVersion` yet**, so `versionsInUse('claude')` is empty and every live Claude session counts as old on a Claude update; one line in `claude/normalize.ts` (`init`'s `claude_code_version`) would fix that, but that file isn't C's.
+- **Not found:** `SessionNotFoundError` retries fresh whatever the status; the old Claude text still needs `starting`. "Earlier turns" means `lastTurnCompletedSeq > 0`. The fresh-retry allowance resets once a session reports itself, so a later loss gets its own retry. Messages steered in before the loss are sent again in order.
+- **Model check on Claude** only drops Codex ids (`gpt-`, or in a Codex account's list) the Claude account doesn't list; anything else is passed on as before. A dropped effort falls back to `defaults.efforts[provider]` when the model offers it, else the model's own level.
+- **Notes:** `create`'s model and effort notes go under the first turn. A Codex folder move's "Moved to X. The session carries on there." comes at the next turn (as Claude's does), and a message sent during the turn after a move is queued, not steered into the old folder. The next-turn note lists everything in one sentence ("The move to X, GPT-6-Luna and Low effort apply from the next turn. This turn carries on as it started.").
+- **Archive** runs only when a thread becomes archived (not on a repeat), after the session's release settles; delete after its hard stop.
+- **`accounts.updated`** sends nothing when the list is the same as the last one sent; the 10 s rescan uses that to notice a change even without D's `onChange`.
+- **`tb accounts`** shows the provider and note; **`tb models <account> [--json]`** is in `tb-dev.ts`'s `formatModels`. `check.sh --e2e` runs `codex*.e2e.test.ts` as its own step after Claude's.
+
 ## D. Accounts and usage (`accounts.ts`, `usage.ts`)
 
 Token Stats stays the only program that does any of these:

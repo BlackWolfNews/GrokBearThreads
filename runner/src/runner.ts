@@ -28,7 +28,6 @@ import type {
   ThreadStatus,
   ThreadSummary,
   TurnOutcome,
-  UsageWindow,
 } from './protocol.ts';
 import { ErrorCode, LIMITS, PROTOCOL_VERSION, RpcError } from './protocol.ts';
 import type { Schedule } from './protocol.ts';
@@ -50,6 +49,7 @@ import type { Clock, TimerHandle } from './clock.ts';
 import type { Logger } from './log.ts';
 import { threadEnv } from './restart.ts';
 import { stripModelSuffix, type AccountRegistry, type LearnedAccountInfo } from './accounts.ts';
+import { pickAccount as pickByRoom, type UsageReading } from './usage.ts';
 import { RUNNER_VERSION, expandHome, paths, readRunnerJson, writeRunnerJson, type Config } from './config.ts';
 import { copyImageInto, imageRefFor } from './media.ts';
 import { isDirectory } from './fsutil.ts';
@@ -81,9 +81,8 @@ export type Notification =
 // The seams to D's and E's modules (usage.ts, updates/), as far as the
 // runner uses them. They're structural so tests can pass small fakes.
 
-// A rate-limit reading from a session (the `limits` output), for D's
-// UsageStore.record().
-export type UsageReading = { windows: UsageWindow[]; blocked?: boolean; email?: string; plan?: string };
+// D's UsageStore, as the runner uses it: a session's `limits` output goes
+// to record().
 export type UsageSink = {
   record(accountId: string, reading: UsageReading): void;
   // Fired when what it knows changes enough to tell clients (UsageStore's
@@ -208,7 +207,8 @@ export type RunnerDeps = {
   accounts: AccountSource;
   // D's UsageStore: live readings go to it, and its changes reach clients.
   usage?: UsageSink;
-  // D's pickAccount. Without it a new thread starts on the last account used.
+  // Which account a thread made without one starts on; usage.ts's
+  // pickAccount (the most room) unless a test swaps it.
   pickAccount?: AccountPicker;
   clock: Clock;
   log: Logger;
@@ -297,7 +297,7 @@ export class Runner {
     this.adapters = deps.adapters;
     this.accounts = deps.accounts;
     this.usage = deps.usage;
-    this.pickAccount = deps.pickAccount ?? ((_accounts, last) => last);
+    this.pickAccount = deps.pickAccount ?? pickByRoom;
     this.clock = deps.clock;
     this.log = deps.log;
     this.defer = deps.defer ?? ((fn) => setImmediate(fn));
@@ -707,7 +707,9 @@ export class Runner {
   // among the last-used account's provider (usage.ts, pickAccount), worked
   // out again each time so it follows usage. Without usage it's the last
   // one used.
-  private defaultAccountId(accounts = this.accounts.list()): string {
+  private defaultAccountId(all = this.accounts.list()): string {
+    // Only accounts this runner can start a CLI for.
+    const accounts = all.filter((a) => this.adapters[a.provider]);
     const json = readRunnerJson(this.cfg.home).defaults;
     const saved = json?.accountId ?? this.cfg.defaults.accountId;
     const last = saved && accounts.some((a) => a.id === saved) ? saved : (accounts.find((a) => a.id === 'claude-main')?.id ?? accounts[0]?.id);
@@ -820,6 +822,7 @@ export class Runner {
     const accountId = params.accountId ?? this.defaultAccountId();
     const account = this.accounts.get(accountId);
     if (!account) throw new RpcError(ErrorCode.accountNotFound, `No account called ${accountId}`);
+    this.checkProvider(account);
     // A blank folder means the default, not the runner's own folder.
     const cwd = path.resolve(expandHome(params.cwd?.trim() ? params.cwd.trim() : this.cfg.defaults.cwd));
     if (!isDirectory(cwd)) throw new RpcError(ErrorCode.badParams, `Folder not found: ${cwd}`);
@@ -859,6 +862,15 @@ export class Runner {
     // Under the first turn, so they read as part of starting it.
     for (const text of checked.notes) this.emit(st, { type: 'system.note', text }, st.rt.turn?.turnId ?? turnId);
     return { thread: this.summary(st), turnId };
+  }
+
+  // An account whose CLI this runner can't drive (a Codex login found
+  // before the Codex adapter is wired) is refused up front, rather than
+  // making a thread whose first turn can only fail.
+  private checkProvider(account: Account): void {
+    if (!this.adapters[account.provider]) {
+      throw new RpcError(ErrorCode.badParams, `This runner can't run ${providerName(account.provider)} threads yet, so ${account.id} can't be used.`);
+    }
   }
 
   // Checks a model and effort against the account's provider (protocol,
@@ -970,7 +982,7 @@ export class Runner {
     const { rec, rt } = st;
     const turn = rt.turn;
     if (!turn || !rt.session || rt.closing || this.stopping) return false;
-    if (rec.queue.length || rec.handoff || rec.moved || rt.releaseWhenIdle || rt.versionMove || turn.interruptRequested) return false;
+    if (rec.queue.length || rec.handoff || rec.moved || rt.releaseWhenIdle || turn.interruptRequested) return false;
     return !turn.auto || Boolean(turn.cliStarted);
   }
 
@@ -1088,7 +1100,7 @@ export class Runner {
   private startSession(st: ThreadState, account: Account): void {
     const { rec, rt } = st;
     const adapter = this.adapters[rec.provider];
-    if (!adapter) throw new Error(`No adapter for ${rec.provider}`);
+    if (!adapter) throw new Error(`This runner can't run ${providerName(rec.provider)} threads.`);
     if (!rec.nativeSessionId) rec.nativeSessionId = crypto.randomUUID();
     const gen = ++rt.generation;
     const resume = Boolean(rec.sessionUsed);
@@ -1527,6 +1539,7 @@ export class Runner {
     if (params.accountId !== undefined && !newAccount) {
       throw new RpcError(ErrorCode.accountNotFound, `No account called ${params.accountId}`);
     }
+    if (newAccount && params.accountId !== rec.accountId) this.checkProvider(newAccount);
     const cwdChanged = newCwd !== undefined && newCwd !== rec.cwd;
     const accountChanged = params.accountId !== undefined && params.accountId !== rec.accountId;
     const providerChanged = accountChanged && newAccount!.provider !== rec.provider;

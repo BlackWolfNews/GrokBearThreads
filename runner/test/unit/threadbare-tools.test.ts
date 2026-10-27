@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import { makeHarness, tick, tmpDir } from '../helpers/fakes.ts';
+import { FakeAccounts, makeHarness, tick, tmpDir, withCodex } from '../helpers/fakes.ts';
 import { copySessionTranscript, projectDirName } from '../../src/transcripts.ts';
 import { buildThreadbareTools, parseWhen } from '../../src/threadbare-mcp.ts';
 import { toolTitle } from '../../src/tools.ts';
@@ -276,4 +276,43 @@ test('parseWhen and tool titles', () => {
   assert.throws(() => parseWhen('soonish', now));
   assert.equal(toolTitle('mcp__threadbare__move_thread', { folder: '~/dev/x' }, '/'), 'Move this thread to ~/dev/x');
   assert.equal(toolTitle('mcp__threadbare__delete_thread', { threadId: 'abcdef123456' }, '/'), 'Delete thread abcdef12');
+});
+
+test('list_accounts shows each login\'s provider, note, room left and models; create and move take Codex accounts', async () => {
+  const usage = { windows: [{ kind: 'five_hour' as const, title: '5-hour', remainingPercent: 89 }, { kind: 'weekly' as const, title: 'Weekly', remainingPercent: 78 }], readAt: '2026-10-26T12:00:00Z', source: 'tokenStats' as const };
+  const accounts = withCodex().map((a) =>
+    a.id === 'claude-3' ? { ...a, note: 'Convex work only', email: 'three@example.com', usage } : a.id === 'claude-main' ? { ...a, email: 'main@example.com' } : a,
+  );
+  const h = makeHarness(undefined, { defaults: { cwd: '', models: { codex: 'gpt-6-luna' } } }, { accounts: new FakeAccounts(accounts) });
+  h.cfg.defaults.cwd = path.join(h.home, 'work');
+  const { thread: me } = h.runner.create({ text: 'Boss', accountId: 'claude-main' });
+  h.adapter.last.init();
+  const t = tools(h, me.id);
+  const list = (await t.call('list_accounts')).text;
+  assert.match(list, /claude-main {2}main@example\.com {2}\[Claude; usage unknown; default for new threads\]/);
+  assert.match(list, /claude-3 {2}three@example\.com {2}\[Claude; Convex work only; 5-hour 89% left, weekly 78% left\]/);
+  assert.match(list, /codex-main {2}Codex · main@example\.com {2}\[Codex; usage unknown\]\n {4}models: gpt-6\.1-sol \(default\), gpt-6-luna/);
+
+  // claude-main and codex-main share an email: that's refused, not guessed.
+  const clash = await t.call('create_thread', { text: 'x', account: 'main@example.com' });
+  assert.equal(clash.error, true);
+  assert.match(clash.text, /fits claude-main .* and codex-main .*; use the id/);
+  // "codex" names the one Codex login; ultra passes the schema.
+  const made = await t.call('create_thread', { text: 'Draw a bear', account: 'codex', effort: 'ultra' });
+  assert.equal(made.error, false, made.text);
+  assert.match(made.text, /on codex-main\./);
+  const child = h.runner.list().find((x) => x.title === 'Draw a bear')!;
+  assert.equal(child.provider, 'codex');
+  assert.equal(child.model, 'gpt-6-luna');
+  assert.equal(child.effort, undefined, 'luna has no ultra: dropped with a note');
+  assert.equal(h.codex.last.opts.account.id, 'codex-main');
+  const read = await t.call('read_thread', { threadId: child.id });
+  assert.match(read.text, /account: codex-main \(Codex\)/);
+
+  // move_thread to the Codex login: fresh session there, on its defaults.
+  h.adapter.last.result();
+  const moved = await t.call('move_thread', { threadId: me.id, folder: '.', account: 'codex-main' });
+  assert.equal(moved.error, false, moved.text);
+  assert.equal(h.runner.get(me.id).provider, 'codex');
+  assert.equal(h.runner.get(me.id).model, 'gpt-6-luna');
 });

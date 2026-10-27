@@ -12,7 +12,8 @@ import { ThreadStore } from './store.ts';
 import { AccountRegistry } from './accounts.ts';
 import { ClaudeAdapter } from './adapters/claude/adapter.ts';
 import { ProcessRegistry } from './proc.ts';
-import { Runner, type AccountPicker, type CliControl, type UsageSink } from './runner.ts';
+import { Runner, type CliControl } from './runner.ts';
+import { UsageStore } from './usage.ts';
 import { RpcServer } from './rpc.ts';
 import { realClock } from './clock.ts';
 import { acquireLock } from './lock.ts';
@@ -56,13 +57,11 @@ async function main(): Promise<void> {
   if (swept) log.warn('stopped process groups left from a previous run', { count: swept });
 
   const store = new ThreadStore(cfg.home);
-  // STEP 4 WIRING (waits for D and E on step4), in this order:
-  //   const usage = new UsageStore({ limitsFile: cfg.tokenStatsLimitsFile, dataDir: cfg.home, clock: realClock, log });
-  //   const accounts = new AccountRegistry(cfg, usage);  // D: list() carries usage, onChange on a rescan change
-  //   pickAccount = D's pickAccount (usage.ts); usage.start() here, usage.stop() in stop()
-  const usage: UsageSink | undefined = undefined;
-  const pickAccount: AccountPicker | undefined = undefined;
-  const accounts = new AccountRegistry(cfg);
+  // Token Stats' limits.json as a baseline, plus what the threads' own
+  // turns report; the registry puts it on every account.
+  const usage = new UsageStore({ limitsFile: cfg.tokenStatsLimitsFile, dataDir: cfg.home, clock: realClock, log });
+  usage.start();
+  const accounts = new AccountRegistry(cfg, usage);
   // Every session gets tools for driving Threadbare itself, bound to its
   // own thread. Sessions only start after the runner exists.
   let runner!: Runner;
@@ -85,7 +84,6 @@ async function main(): Promise<void> {
     adapters: { claude },
     accounts,
     usage,
-    pickAccount,
     clock: realClock,
     log,
   });
@@ -187,6 +185,7 @@ async function main(): Promise<void> {
     // Whatever stopped it, a pending restart has now happened.
     restarter.stopping();
     scheduler.stop();
+    usage.stop();
     try {
       await runner.shutdown();
       await server.close().catch(() => {});

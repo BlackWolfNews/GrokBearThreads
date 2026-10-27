@@ -8,7 +8,8 @@ import { createSdkMcpServer, tool } from '@anthropic-ai/claude-agent-sdk';
 import type { McpSdkServerConfigWithInstance } from '@anthropic-ai/claude-agent-sdk';
 import { z } from 'zod';
 import type { Runner } from './runner.ts';
-import type { Account, AccountUsage, EffortLevel, PersistedEvent, Schedule, ThreadSummary } from './protocol.ts';
+import type { Account, EffortLevel, PersistedEvent, Schedule, ThreadSummary } from './protocol.ts';
+import { usageLine } from './usage.ts';
 import { EFFORT_LEVELS } from './protocol.ts';
 import type { Scheduler } from './schedules.ts';
 import { parseWhen, relativeFuture, relativeTime } from './when.ts';
@@ -35,18 +36,6 @@ type Result = { content: { type: 'text'; text: string }[]; isError?: boolean };
 const effortEnum = z.enum(EFFORT_LEVELS as unknown as [EffortLevel, ...EffortLevel[]]);
 
 const providerName = (a: Pick<Account, 'provider'>): string => (a.provider === 'codex' ? 'Codex' : 'Claude');
-
-// "5-hour 89% left, weekly 78% left". Step 4 wiring: replace with D's
-// usageLine from usage.ts once it's on the branch, so this and the app
-// word it the same way.
-export function roomLeft(u: AccountUsage | undefined): string {
-  if (!u) return '';
-  if (u.blocked) return 'limit reached';
-  const parts = u.windows
-    .filter((w) => w.kind === 'five_hour' || w.kind === 'weekly')
-    .map((w) => `${w.kind === 'five_hour' ? '5-hour' : 'weekly'} ${Math.round(w.remainingPercent)}% left`);
-  return parts.length ? parts.join(', ') + (u.stale ? ' (not updated lately)' : '') : '';
-}
 
 const ok = (text: string): Result => ({ content: [{ type: 'text', text }] });
 const fail = (text: string): Result => ({ content: [{ type: 'text', text }], isError: true });
@@ -307,7 +296,7 @@ export function buildThreadbareTools(control: ThreadControl, selfId: string, now
       handle(() => {
         const h = control.hello();
         const rows = h.accounts.map((a) => {
-          const bits = [providerName(a), a.note ?? '', roomLeft(a.usage), a.id === h.defaults.accountId ? 'default for new threads' : ''].filter(Boolean);
+          const bits = [providerName(a), a.note ?? '', usageLine(a.usage, now()), a.id === h.defaults.accountId ? 'default for new threads' : ''].filter(Boolean);
           const head = `${a.id}  ${a.title}  [${bits.join('; ')}]`;
           const models = a.models?.length ? `\n    models: ${a.models.map((m) => (m.model === a.defaultModel || m.id === a.defaultModel ? `${m.id} (default)` : m.id)).join(', ')}` : '';
           return head + models;

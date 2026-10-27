@@ -191,8 +191,8 @@ export const CODEX_ACCOUNT: Account = {
   defaultModel: 'gpt-6.1-sol',
 };
 
-// The Claude logins plus codex-main (with its model list unless told not to).
-export function withCodex(models: ModelChoice[] | undefined = CODEX_MODELS): Account[] {
+// The Claude logins plus codex-main, with its model list (null: not known yet).
+export function withCodex(models: ModelChoice[] | null = CODEX_MODELS): Account[] {
   return [...ACCOUNTS, { ...CODEX_ACCOUNT, ...(models ? { models } : {}) }];
 }
 
