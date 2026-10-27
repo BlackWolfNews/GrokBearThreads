@@ -222,6 +222,10 @@ struct AppDump: Encodable {
         if let error { lines.append("error banner: \(error)") }
         lines.append("")
         lines.append("sidebar, \(sidebar.mode) (\(sidebar.snoozed) snoozed, \(sidebar.archived) archived):")
+        // Columns as wide as the longest id: a real runner's ids are 36
+        // character UUIDs, and fixed widths pushed every later column out
+        // of line.
+        let threadWidth = max(12, sidebar.sections.flatMap(\.threads).map(\.id.count).max() ?? 0)
         for section in sidebar.sections where !section.threads.isEmpty {
             lines.append("  \(section.name)")
             for thread in section.threads {
@@ -229,7 +233,7 @@ struct AppDump: Encodable {
                 if thread.unread { flags.append("unread") }
                 if thread.hovered { flags.append("hovered") }
                 let mark = thread.id == selection?.id ? ">" : " "
-                lines.append("  \(mark) \(pad(thread.id, 22)) \(pad(flags.joined(separator: " "), 16)) \(thread.title)")
+                lines.append("  \(mark) \(pad(thread.id, threadWidth)) \(pad(flags.joined(separator: " "), 16)) \(thread.title)")
             }
         }
         lines.append("")
@@ -247,10 +251,11 @@ struct AppDump: Encodable {
             about += transcript.atBottom ? ", at the bottom" : ", scrolled up"
             lines.append("")
             lines.append("transcript \(transcript.threadId): \(about)")
-            for row in transcript.rows {
+            let ids = transcript.rows.map { ($0.inGroup ? "  " : "") + $0.id }
+            let rowWidth = max(12, ids.map(\.count).max() ?? 0)
+            for (row, id) in zip(transcript.rows, ids) {
                 let open = row.expanded.map { $0 ? "open" : "closed" } ?? ""
-                let id = (row.inGroup ? "  " : "") + row.id
-                lines.append("\(row.onScreen ? ">" : " ") \(pad(id, 24)) \(pad(row.kind, 10)) \(pad(String(row.height), 5)) \(pad(open, 7)) \(row.text)")
+                lines.append("\(row.onScreen ? ">" : " ") \(pad(id, rowWidth)) \(pad(row.kind, 10)) \(pad(String(row.height), 5)) \(pad(open, 7)) \(row.text)")
             }
         }
         return lines.joined(separator: "\n") + "\n"

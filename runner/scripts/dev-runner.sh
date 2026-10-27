@@ -2,12 +2,15 @@
 # Runs this working tree's runner in the foreground on a throwaway data dir,
 # to try a change without touching the installed runner.
 #
-#   scripts/dev-runner.sh [--home DIR] [--port N]
+#   scripts/dev-runner.sh [--home DIR] [--port N] [--keep]
 #
 #   --home DIR   data dir (default: a new temp folder). The real one, and any
 #                data dir an installed runner uses, are refused.
 #   --port N     port (default 0: a free one, written to <home>/runner.json
 #                where tb and the app find it)
+#   --keep       keep the temp data dir when it stops (it holds the threads'
+#                conversations and runner.log; by default a temp one is
+#                deleted on Ctrl-C or kill, and kept if the runner failed)
 #
 # It writes <home>/tb, a tb that always talks to this runner (an exported
 # THREADBARE_HOME doesn't last past one command in an agent's shell), and
@@ -26,11 +29,13 @@ NODE="${THREADBARE_NODE:-$HOME/.nvm/versions/node/v24.22.1/bin/node}"
 DEFAULT_HOME="$HOME/Library/Application Support/Threadbare"
 DATA_HOME=""
 PORT=0
+KEEP=0
 
 while [ $# -gt 0 ]; do
   case "$1" in
     --home) DATA_HOME="${2:?--home needs a folder}"; shift ;;
     --port) PORT="${2:?--port needs a number}"; shift ;;
+    --keep) KEEP=1 ;;
     -h|--help) awk 'NR > 1 && /^#/ { sub(/^# ?/, ""); print; next } NR > 1 { exit }' "$0"; exit 0 ;;
     *) echo "Unknown option: $1" >&2; exit 1 ;;
   esac
@@ -47,9 +52,11 @@ real_dir() {
   if [ -d "$1" ]; then (cd "$1" && pwd -P); else printf '%s' "${1%/}"; fi
 }
 
+MADE_HOME=0
 if [ -z "$DATA_HOME" ]; then
   TMP_ROOT="${TMPDIR:-/tmp}"
   DATA_HOME="$(mktemp -d "${TMP_ROOT%/}/threadbare-dev.XXXXXX")"
+  MADE_HOME=1
 fi
 case "$DATA_HOME" in /*) ;; *) DATA_HOME="$PWD/$DATA_HOME" ;; esac
 if [ "$(real_dir "$DATA_HOME")" = "$(real_dir "$DEFAULT_HOME")" ]; then
@@ -86,17 +93,23 @@ if [ ! -e "$DATA_HOME/runner.json" ]; then
   IN_WORK="   (in $(printf '%q' "$WORK"), on claude-haiku-5-5)"
 fi
 # THREADBARE_PORT and THREADBARE_URL go too: tb then reads the port this
-# runner wrote to runner.json.
+# runner wrote to runner.json. THREADBARE_TB is what tb prints in the
+# commands it suggests (restart --cancel, events), so pasting one reaches
+# this runner rather than the live one a bare tb in a thread reaches.
 {
   echo '#!/bin/bash'
   echo '# tb for the dev runner in this folder (scripts/dev-runner.sh wrote it).'
-  printf 'exec env -u THREADBARE_DATA_DIR -u THREADBARE_URL -u THREADBARE_PORT -u THREADBARE_LOG THREADBARE_HOME=%q %q %q "$@"\n' \
-    "$DATA_HOME" "$NODE" "$RUNNER_DIR/bin/tb"
+  printf 'exec env -u THREADBARE_DATA_DIR -u THREADBARE_URL -u THREADBARE_PORT -u THREADBARE_LOG THREADBARE_HOME=%q THREADBARE_TB=%q %q %q "$@"\n' \
+    "$DATA_HOME" "$TB" "$NODE" "$RUNNER_DIR/bin/tb"
 } > "$TB"
 chmod +x "$TB"
 
 echo "Dev runner: $RUNNER_DIR (working tree)"
-echo "  data: $DATA_HOME"
+if [ "$MADE_HOME" = 1 ] && [ "$KEEP" = 0 ]; then
+  echo "  data: $DATA_HOME (deleted when it stops; --keep keeps it)"
+else
+  echo "  data: $DATA_HOME"
+fi
 echo "  log:  $LOG (also shown here)"
 echo "  pid:  $$"
 echo "For tb:      $(printf '%q' "$TB") status"
@@ -107,12 +120,24 @@ echo
 
 cd "$RUNNER_DIR"
 CHILD=""
+# A temp data dir holds the dev threads' conversations and log. Left behind
+# after every session, they piled up in $TMPDIR with nothing saying so.
+forget_home() {
+  if [ "$MADE_HOME" = 1 ] && [ "$KEEP" = 0 ]; then
+    rm -rf "$DATA_HOME"
+    echo "Deleted its data dir, $DATA_HOME."
+  else
+    echo "Its data (threads, runner.log) is in $DATA_HOME; rm -rf it when you're done."
+  fi
+}
 stop() {
   trap - INT TERM HUP
   if [ -n "$CHILD" ]; then
     kill -TERM "$CHILD" 2>/dev/null || true
     wait "$CHILD" 2>/dev/null || true
   fi
+  echo "The dev runner stopped."
+  forget_home
   exit 0
 }
 trap stop INT TERM HUP
@@ -129,6 +154,8 @@ while :; do
   CHILD=""
   if [ "$CODE" != 0 ]; then
     echo "The dev runner exited with $CODE; not starting it again." >&2
+    # Kept, since its log says why.
+    echo "Its data (threads, runner.log) is in $DATA_HOME; rm -rf it when you're done." >&2
     exit "$CODE"
   fi
   # Exit 0 is a restart (runner.restart), which launchd would answer by

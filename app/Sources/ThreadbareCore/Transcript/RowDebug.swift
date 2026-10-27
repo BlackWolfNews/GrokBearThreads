@@ -53,9 +53,21 @@ public enum RowDebug {
         return String(words.prefix(max(0, limit - 1))) + "…"
     }
 
+    /// Where an agent finds a row's events. A bare `tb` reaches the runner
+    /// a thread runs on (the installed one), so an app on a dev runner names
+    /// that runner's own `<home>/tb`, and under the mock they're lines of the
+    /// fixture's events.ndjson (a `tb events` there would ask the live
+    /// runner for a thread it doesn't have).
+    public enum EventsSource: Equatable, Sendable {
+        /// The tb to run, as it would be typed: `tb`, a path, or with
+        /// `THREADBARE_HOME=...` in front.
+        case tb(String)
+        case fixture
+    }
+
     /// "Copy debug info": one `key: value` per line, so it reads well
     /// pasted into a message and an agent can pick it apart.
-    public static func info(threadId: String, row: TranscriptRow, seqs: [Int], runnerVersion: String) -> String {
+    public static func info(threadId: String, row: TranscriptRow, seqs: [Int], runnerVersion: String, source: EventsSource = .tb("tb")) -> String {
         var lines = [
             "thread: \(threadId)",
             "row: \(row.id)",
@@ -66,7 +78,13 @@ public enum RowDebug {
         lines.append("runner: \(runnerVersion.isEmpty ? "unknown" : runnerVersion)")
         // The command that prints those events, ready to run.
         if let first = seqs.min(), let last = seqs.max() {
-            lines.append("see: tb events \(threadId) --from \(first) --to \(last)")
+            switch source {
+            case .tb(let tb):
+                lines.append("see: \(tb) events \(threadId) --from \(first) --to \(last)")
+            case .fixture:
+                let range = first == last ? "line \(first)" : "lines \(first)-\(last)"
+                lines.append("see: \(range) of events.ndjson in the thread's fixture folder (line N is seq N)")
+            }
         }
         return lines.joined(separator: "\n") + "\n"
     }

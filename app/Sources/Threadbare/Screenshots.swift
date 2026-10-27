@@ -220,9 +220,13 @@ enum ScreenshotRunner {
             await waitUntil(5) { app.connection != .connected }
             await capture(window, dir.appendingPathComponent("11b-restart-reconnecting.png"))
             let before = app.threads[thread]?.lastSeq ?? 0
+            // Mike would be looking at the thread it carries on, so it's read
+            // when its turn ends; a scripted app never is in front, and the
+            // shot showed it jump to Needs you with an unread dot.
+            app.actsActive = true
             await waitUntil(20) {
                 guard app.connection == .connected, let summary = app.threads[thread] else { return false }
-                return summary.lastSeq > before && summary.status == .idle
+                return summary.lastSeq > before && summary.status == .idle && !summary.needsYou
             }
             try? await Task.sleep(for: .milliseconds(400))
             app.transcript.scrollToBottom()

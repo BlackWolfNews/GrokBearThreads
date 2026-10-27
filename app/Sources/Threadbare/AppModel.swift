@@ -645,6 +645,24 @@ final class AppModel {
         dataDir.standardizedFileURL.path == RunnerConfig.defaultDataDir.standardizedFileURL.path
     }
 
+    /// What "Copy debug info" says to run for a row's events: a bare `tb`
+    /// for the installed runner, a dev runner's own `<home>/tb`
+    /// (dev-runner.sh writes one), the data folder in front of `tb` for any
+    /// other runner, and the fixture's lines for the mock.
+    var eventsSource: RowDebug.EventsSource {
+        if runnerVersion.hasPrefix("0.0.0-mock") { return .fixture }
+        if canStartRunner { return .tb("tb") }
+        let own = dataDir.appendingPathComponent("tb").path
+        if FileManager.default.isExecutableFile(atPath: own) { return .tb(Self.shellQuoted(own)) }
+        return .tb("THREADBARE_HOME=\(Self.shellQuoted(dataDir.path)) tb")
+    }
+
+    /// As a shell would need it typed: the default data folder has a space.
+    static func shellQuoted(_ text: String) -> String {
+        if text.range(of: #"^[A-Za-z0-9_@%+=:,./-]+$"#, options: .regularExpression) != nil { return text }
+        return "'" + text.replacingOccurrences(of: "'", with: #"'\''"#) + "'"
+    }
+
     // MARK: Copying
 
     func copyToPasteboard(_ text: String) {

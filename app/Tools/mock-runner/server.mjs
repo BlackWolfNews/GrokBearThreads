@@ -457,6 +457,30 @@ function restartNow(p) {
   const oldVersion = runnerVersion;
   const newVersion = `0.0.0-mock+r${restarts + 1}`;
   const text = p.resume?.text ?? 'The runner restarted on release 20261027T101500Z-abc1234. Check that your change works, then carry on.';
+  // The real runner never restarts with a turn running: an idle restart
+  // waits for the threads it named, and "now" stops them. A pending idle
+  // restart's threads finish first here (as if they just had), anything
+  // else busy is stopped. Before, the CI demo thread stayed Running through
+  // the restart in the design shots.
+  const waited = new Set(pendingRestart?.when === 'idle' ? pendingRestart.waitingFor : []);
+  for (const [id, t] of threads) {
+    const s = t.summary;
+    if (!['starting', 'running', 'waiting'].includes(s.status)) continue;
+    const turnId = t.events.findLast((e) => e.type === 'turn.started')?.turnId;
+    const startedAt = Date.parse(t.events.findLast((e) => e.type === 'turn.started')?.ts ?? '') || Date.now();
+    if (waited.has(id) && s.status !== 'waiting') {
+      persist(id, { type: 'turn.completed', outcome: 'completed', durationMs: Date.now() - startedAt }, turnId);
+      setStatus(id, 'idle', true);
+    } else if (!waited.has(id)) {
+      // Cards still open expire, as the real runner's do when it stops.
+      const answered = new Set(t.events.filter((e) => e.type === 'approval.resolved').map((e) => e.approvalId));
+      for (const e of t.events.filter((e) => (e.type === 'approval.requested' || e.type === 'question.requested') && !answered.has(e.approvalId))) {
+        persist(id, { type: 'approval.resolved', approvalId: e.approvalId, decision: 'expired' }, turnId);
+      }
+      persist(id, { type: 'turn.completed', outcome: 'interrupted', durationMs: Date.now() - startedAt }, turnId);
+      setStatus(id, 'stopped', false);
+    }
+  }
   broadcastNotice('info', pendingMessage(0));
   pendingRestart = { when: 'now', requestedAt: iso(), waitingFor: [] };
   setTimeout(() => {
@@ -557,9 +581,28 @@ function defaultFixtureDirs() {
   return dirs;
 }
 
+// The demo threads were made with times "n minutes ago" (make-synthetic.mjs,
+// newest a minute old). Moved so that's true whenever the mock runs: fixed
+// times aged every design shot by the hour, and the sidebar's truncation
+// changed with them, so shots never matched their baseline. Real exports
+// keep their times. (Functions, not module constants: loadFixtures runs
+// while the module is still loading.)
+function shiftToNow(loaded) {
+  const TIME_FIELDS = ['createdAt', 'updatedAt', 'lastActivityAt', 'snoozedUntil', 'archivedAt'];
+  const newest = Math.max(...loaded.map((t) => Date.parse(t.summary.lastActivityAt)).filter(Number.isFinite));
+  if (!Number.isFinite(newest)) return;
+  const by = Date.now() - 60_000 - newest;
+  const move = (iso) => (typeof iso === 'string' && Number.isFinite(Date.parse(iso)) ? new Date(Date.parse(iso) + by).toISOString() : iso);
+  for (const t of loaded) {
+    for (const k of TIME_FIELDS) if (t.summary[k] !== undefined) t.summary[k] = move(t.summary[k]);
+    for (const e of t.events) e.ts = move(e.ts);
+  }
+}
+
 function loadFixtures() {
   for (const root of fixtureDirs) {
     if (!fs.existsSync(root)) continue;
+    const loaded = [];
     // A folder of fixtures, or one fixture itself (what `tb export` prints).
     const names = fs.existsSync(path.join(root, 'thread.json')) ? ['.'] : fs.readdirSync(root).sort();
     for (const name of names) {
@@ -578,6 +621,13 @@ function loadFixtures() {
       });
       summary.lastSeq = events.at(-1)?.seq ?? 0;
       summary.lastSeenSeq ??= summary.lastSeq;
+      loaded.push({ summary, events, inProgress: new Map(), timers: [], dir });
+    }
+    // Real paths: /tmp is /private/tmp, and dev-app.sh passes the one,
+    // the module's own path is the other.
+    if (fs.realpathSync(root) === fs.realpathSync(path.join(here, 'fixtures'))) shiftToNow(loaded);
+    for (const t of loaded) {
+      const { summary, events } = t;
       // A fixture caught mid-turn: start its clock a few seconds ago, so the
       // app's "Working for" line reads like a live turn whenever it's run.
       if (summary.status === 'running') {
@@ -591,7 +641,7 @@ function loadFixtures() {
       // something in every section; tb export makes real ones idle.
       summary.status ??= 'idle';
       summary.live = false;
-      threads.set(summary.id, { summary, events, inProgress: new Map(), timers: [], dir });
+      threads.set(summary.id, t);
     }
   }
 }

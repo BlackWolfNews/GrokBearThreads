@@ -160,6 +160,11 @@ test('list, read and account tools', async () => {
   const self = await t.call('read_thread');
   assert.match(self.text, /Mike \(.*\):\nFirst thread/);
   assert.match(self.text, /Agent \(.*\):\nHello from the agent/);
+  // The runner's resume after a restart isn't Mike's.
+  h.runner.send(a.id, 'The runner restarted on release R. Check your change.', [], { origin: 'runner' });
+  const resumed = await t.call('read_thread');
+  assert.match(resumed.text, /Runner \(.*\):\nThe runner restarted on release R/);
+  assert.doesNotMatch(resumed.text, /Mike \(.*\):\nThe runner restarted/);
   assert.match((await t.call('list_accounts')).text, /claude-3 {2}three@example\.com/);
   assert.match((await t.call('list_threads', { query: 'Second' })).text, /Second thread/);
   const missing = await t.call('read_thread', { threadId: 'zzzz' });

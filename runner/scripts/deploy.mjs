@@ -58,6 +58,12 @@ const DEFAULT_HOME = path.join(os.homedir(), 'Library', 'Application Support', '
 const RELEASE_PATHS = ['src', 'bin', 'package.json', 'package-lock.json'];
 const KEEP_RELEASES = 5;
 const HEALTH_MS = 30_000;
+// How long a release that came up has to stay up before the deploy says so
+// (less once it's marked good). One that died 8 s after it started
+// listening used to pass the health check, and launch.mjs rolled it back
+// after the deploy had reported success. THREADBARE_DEPLOY_SETTLE_MS
+// shortens it for tests.
+const SETTLE_MS = 20_000;
 const ID_RE = /^\d{8}T\d{6}Z-[0-9a-f]+(-dirty)?$/;
 const BUSY = new Set(['starting', 'running', 'waiting']);
 // A runner that answers slower than the first try's 3 s is busy, not down:
@@ -116,6 +122,11 @@ function parseDuration(s) {
 
 function fmtDuration(ms) {
   return ms >= 3_600_000 && ms % 3_600_000 === 0 ? `${ms / 3_600_000}h` : ms >= 60_000 && ms % 60_000 === 0 ? `${ms / 60_000}m` : `${Math.round(ms / 1000)}s`;
+}
+
+// For commands printed to paste into a shell; the default data dir has a space.
+function shq(s) {
+  return /^[\w@%+=:,./-]+$/.test(s) ? s : `'${s.replace(/'/g, `'\\''`)}'`;
 }
 
 function plural(n, word) {
@@ -439,9 +450,14 @@ function activate(c, id, previous) {
   say(`current now points at ${id}${was ? ` (was ${was})` : ''}.`);
 }
 
-function restore(c, before) {
+// failed: a release that came up and then died, which --list then marks
+// as crashed, --rollback won't go back to and pruning drops first. (One
+// that crash-looped is already in rolledBack.)
+function restore(c, before, failed) {
   pointCurrent(c.dir, before.current);
-  saveState(c, { ...readState(c.dir), current: before.current, previous: before.previous });
+  const state = readState(c.dir);
+  const crashed = Array.isArray(state.crashed) ? state.crashed : [];
+  saveState(c, { ...state, current: before.current, previous: before.previous, ...(failed ? { crashed: [...crashed, failed] } : {}) });
 }
 
 // The releases that crashed at startup since they were last activated.
@@ -471,8 +487,14 @@ function pruneList(c, extraKeep = []) {
   const state = readState(c.dir);
   const ids = listReleases(c);
   // The newest 5 plus lastGood, as specced, and never anything current,
-  // previous or still running points at, whatever its age.
-  const keep = new Set([...ids.slice(0, KEEP_RELEASES), state.lastGood, state.current, state.previous, currentId(c), ...extraKeep]);
+  // previous or still running points at, whatever its age. Releases that
+  // crashed at startup go first and don't count towards the 5: a run of
+  // broken deploys used to push out the good releases there were to go
+  // back to. The newest of them stays, for --rollback --force.
+  const crashed = crashedReleases(state);
+  const good = ids.filter((id) => !crashed.has(id));
+  const newestCrashed = ids.find((id) => crashed.has(id));
+  const keep = new Set([...good.slice(0, KEEP_RELEASES), newestCrashed, state.lastGood, state.current, state.previous, currentId(c), ...extraKeep]);
   return ids.filter((id) => !keep.has(id));
 }
 
@@ -742,9 +764,13 @@ function restartCommand(c) {
 }
 
 // The tb that goes with this checkout, written out in full in what the
-// script prints: a bare `tb` isn't on PATH in every shell.
+// script prints: a bare `tb` isn't on PATH in every shell. For a sandbox it
+// carries the data dir: a bare tb follows THREADBARE_HOME, which in a
+// thread names the live runner, and `restart --cancel` there would withdraw
+// someone else's deploy.
 function tbCommand(c) {
-  return path.join(c.runnerDir, 'bin', 'tb');
+  const tb = shq(path.join(c.runnerDir, 'bin', 'tb'));
+  return c.isDefaultHome ? tb : `THREADBARE_HOME=${shq(c.home)} ${tb}`;
 }
 
 // --now stops every turn and background job on the runner. Cutting other
@@ -844,7 +870,11 @@ async function restartAndCheck(c, v, id, before, waitMs) {
       const mine = c.threadId && waiting.includes(c.threadId);
       const others = waiting.filter((t) => t !== c.threadId).length;
       const when = mine ? (others ? `this turn ends and ${finish(others).replace('thread', 'other thread')}` : 'this turn ends') : finish(waiting.length);
-      const lines = [`Release ${id} is current. The runner restarts when ${when}${params.resume ? `, then resumes this thread with:\n  "${params.resume.text}"` : '.'}`];
+      // The runner says when it won't send the resume (3 this hour), so the
+      // agent doesn't end its turn waiting for a message that never comes.
+      const noResume = params.resume && typeof res?.noResume === 'string' ? res.noResume : null;
+      const then = !params.resume ? '.' : noResume ? `, but it won't carry this thread on afterwards: ${noResume}.` : `, then resumes this thread with:\n  "${params.resume.text}"`;
+      const lines = [`Release ${id} is current. The runner restarts when ${when}${then}`];
       // Ending the turn doesn't stop these, and the restart waits for them.
       const own = background.find((b) => b.threadId === c.threadId);
       if (own?.tasks?.length) {
@@ -855,7 +885,12 @@ async function restartAndCheck(c, v, id, before, waitMs) {
       } else if (others) {
         lines.push('It also waits for the other threads\' turns, background shells and subagents.');
       }
-      lines.push(`${tbCommand(c)} status shows what it's waiting for.`, "End your turn now; there's nothing more to do here until then.");
+      lines.push(
+        `${tbCommand(c)} status shows what it's waiting for.`,
+        noResume
+          ? 'End your turn now, and say in your reply that Mike has to message this thread once the runner is back, to check the change.'
+          : "End your turn now; there's nothing more to do here until then.",
+      );
       say(lines.join('\n'));
       return 0;
     }
@@ -874,6 +909,8 @@ async function restartAndCheck(c, v, id, before, waitMs) {
 
   const r = await awaitRelease(c.home, id, running, startMs, Boolean(res));
   if (r.result === 'ok') {
+    const s = await settle(c, id, r.pid);
+    if (s.result !== 'ok') return wentWrong(c, id, before, s, waitMs);
     say(`The runner is up on ${id}${r.pid ? ` (pid ${r.pid})` : ''}.`);
     return 0;
   }
@@ -899,18 +936,42 @@ async function restartAndCheck(c, v, id, before, waitMs) {
   return wentWrong(c, id, before, r, waitMs);
 }
 
+// Watches a release that has just come up until it's marked good or has
+// stayed up SETTLE_MS: 'ok', or 'stopped' (down, or a new pid or release)
+// with how long it lasted. A runner that's there but slow to answer is busy,
+// not gone.
+async function settle(c, id, pid) {
+  const env = Number(process.env.THREADBARE_DEPLOY_SETTLE_MS);
+  const ms = Number.isFinite(env) && env >= 0 ? env : SETTLE_MS;
+  const start = Date.now();
+  process.stdout.write('Checking it stays up... ');
+  while (Date.now() - start < ms && readState(c.dir).lastGood !== id) {
+    await sleep(Math.min(500, ms));
+    const p = await probe(c.home);
+    if (p.state === 'unknown') continue;
+    if (p.state === 'down' || releaseOf(p.version) !== id || (pid && p.pid && p.pid !== pid)) {
+      say('no');
+      return { result: 'stopped', after: Date.now() - start, ...p };
+    }
+  }
+  say('ok');
+  return { result: 'ok' };
+}
+
 // Health check failed: go back to the release that was running before and
 // show the end of the runner's log.
 async function wentWrong(c, id, before, r, waitMs) {
   console.error(
     r.result === 'other'
       ? `The runner came back on ${releaseOf(r.version) ?? r.version} instead of ${id}.`
-      : `The runner didn't come back on ${id} within ${HEALTH_MS / 1000} s of the restart.`,
+      : r.result === 'stopped'
+        ? `The runner came up on ${id} but stopped again within ${Math.max(1, Math.round(r.after / 1000))} s.`
+        : `The runner didn't come back on ${id} within ${HEALTH_MS / 1000} s of the restart.`,
   );
   const rolledBack = readState(c.dir).rolledBack;
   if (rolledBack?.from === id) console.error(`launch.mjs went back to ${rolledBack.to} after ${id} kept crashing at startup.`);
   if (before.current && before.current !== id && releaseExists(c.dir, before.current)) {
-    restore(c, before);
+    restore(c, before, r.result === 'stopped' ? id : undefined);
     console.error(`current points at ${before.current} again.`);
     const now = await probe(c.home);
     if (now.state === 'up' && releaseOf(now.version) === before.current) {
@@ -1147,6 +1208,10 @@ async function deploy(c, v, waitMs) {
   const off = branchProblem(c, g);
   if (off && !v['allow-branch']) throw new Fail(`${off}\nMerge to main and deploy from there, or pass --allow-branch.`);
   const dirty = g.changes.length > 0;
+  // A redeploy of a commit whose release crashed is most likely the same
+  // crash again (the cause may be outside the runner, so it's only said).
+  const crashedSame = dirty ? [] : [...crashedReleases(readState(c.dir))].filter((r) => r.endsWith(`-${g.short}`)).sort();
+  if (crashedSame.length) say(`Note: ${crashedSame.at(-1)}, built from this same commit, crashed at startup (deploy-runner.sh --list marks it), so this one probably will too. Why is in ${c.log}.`);
   if (v['dry-run']) {
     const id = newReleaseId(c, g.short, dirty);
     say('Dry run: nothing changes.');

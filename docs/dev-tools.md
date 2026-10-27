@@ -218,6 +218,40 @@ driving it from a script") and in AGENTS.md ("Seeing and driving the app").
   folder, so a debug app against the mock or a dev runner can't kickstart
   the live one.
 
+## After the phase 2 reviews
+
+Three reviewers used the tools to fix planted bugs, read the code, and ran
+everything in a sandbox. What changed (2026-10-27):
+
+- tb's suggested commands (`restart --cancel`, `events`) name the tb that
+  was run: a dev runner's `<home>/tb` sets `THREADBARE_TB`, and the deploy
+  script puts `THREADBARE_HOME=<home>` in front for a sandbox. A bare tb
+  pasted in a thread reached the live runner, where `restart --cancel`
+  withdrew the deploy waiting for that very turn. `tb restart --cancel` now
+  only withdraws the calling thread's own restart on its own runner;
+  `tb rpc runner.restart` is always refused, `tb rpc threads.update` won't
+  snooze or archive its own thread, and flag errors never list `--force`.
+- The deploy watches a new release for 20 s (or until it's marked good)
+  before saying it's up, `runner.status` and `tb status` say when the
+  runner went back to its release after a crash, `launch.mjs` logs an
+  unclean exit, a redeploy of a commit that crashed gets a note, and
+  pruning drops crashed releases first.
+- A crash rollback's resume replaces the crashed release's in the hourly
+  count, and `runner.restart` returns `noResume` when the resume won't be
+  sent, so the deploy script and tb say so instead of promising it.
+- dev-app.sh's mock runs in its own session (a live runner restart used to
+  stop it), `status` and the commands notice a stopped runner, `rebuild`
+  can't lose the mock, the bundle is `LSUIElement`, and in-process shots
+  are moved from the agent's shell. Automation commands that act on a
+  thread take `id` or the open thread and refuse an ambiguous one, `send`
+  prints a new thread's id, `debug-info` copies, `mock` refuses params
+  that aren't an object (they crashed the app), and dump's columns fit
+  real ids. Copy debug info names the runner the app is on.
+- `./check.sh` prints what failed before the end of the log;
+  `screenshots.sh` takes `--help` and options in any order; dev-runner.sh
+  deletes the temp home it made when it stops; the mock moves the demo
+  threads' times to now and finishes the threads a restart waited for.
+
 ## Safety during the build
 
 - Nothing touches the live runner, its LaunchAgent

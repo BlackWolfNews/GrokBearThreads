@@ -15,7 +15,7 @@ import type { ThreadStatus, ThreadSummary } from './protocol.ts';
 import { ErrorCode, RpcError } from './protocol.ts';
 import { atomicWriteFileSync, readJsonSync } from './fsutil.ts';
 import { paths, RUNNER_VERSION } from './config.ts';
-import { currentLink, pointCurrentAt, releaseExists } from './release.ts';
+import { currentLink, pointCurrentAt, readState, releaseExists } from './release.ts';
 import type { TimerHandle } from './clock.ts';
 
 export type RestartWhen = 'idle' | 'now';
@@ -56,8 +56,10 @@ export type Background = { threadId: string; tasks: string[] };
 
 // runner.restart's result. background is the background work among the
 // threads it waits for, so the scripts can name it; note says what a cancel
-// did about the release the withdrawn restart was for.
-export type RestartResult = { scheduled: boolean; waitingFor: string[]; background?: Background[]; note?: string };
+// did about the release the withdrawn restart was for; noResume why the
+// resume asked for won't be sent as things stand, so the scripts don't tell
+// an agent to end its turn and wait for a message that never comes.
+export type RestartResult = { scheduled: boolean; waitingFor: string[]; background?: Background[]; note?: string; noResume?: string };
 
 export type Notice = { level: 'info' | 'warning' | 'error'; message: string };
 
@@ -74,6 +76,10 @@ export type RunnerStatus = {
   running: string[]; // starting, running or waiting on an approval or a question
   background?: Background[]; // background shells and subagents still going
   pendingRestart?: { when: RestartWhen; reason?: string; release?: string; resumeThreadId?: string; requestedAt: string; backgroundUntil?: string; waitingFor: string[] };
+  // This release is running because launch.mjs went back to it from `from`,
+  // which kept crashing at startup. A deploy's health check can pass before
+  // the crash, so tb status says so for as long as it holds.
+  rolledBack?: { from: string; at: string };
 };
 
 export const RESUME_MAX_AGE_MS = 15 * 60_000;
@@ -198,7 +204,12 @@ export class Restarter {
       else runner.notice('info', pendingMessage(waitingFor.length, this.onYou(waitingFor)));
     }
     const background = waitingFor.length ? runner.backgroundWork().filter((b) => waitingFor.includes(b.threadId)) : [];
-    return background.length ? { scheduled: true, waitingFor, background } : { scheduled: true, waitingFor };
+    const out: RestartResult = background.length ? { scheduled: true, waitingFor, background } : { scheduled: true, waitingFor };
+    // Checked without using one up: the restart may still be an hour off.
+    if (p.resume && thread && resumesInLastHour(this.deps.home, p.resume.threadId, this.deps.clock.now()) >= RESUMES_PER_HOUR) {
+      out.noResume = `this thread has already been resumed ${RESUMES_PER_HOUR} times in the last hour`;
+    }
+    return out;
   }
 
   // Withdraws a restart that hasn't begun (tb restart --cancel). A deploy
@@ -254,6 +265,8 @@ export class Restarter {
     };
     if (this.deps.release) out.release = this.deps.release;
     if (this.deps.branch) out.branch = this.deps.branch;
+    const rolledBack = this.rolledBackOnto();
+    if (rolledBack) out.rolledBack = rolledBack;
     if (this.deps.logFile) out.logFile = this.deps.logFile;
     const p = this.pending;
     if (p) {
@@ -266,6 +279,20 @@ export class Restarter {
       out.pendingRestart = pr;
     }
     return out;
+  }
+
+  // launch.mjs's last crash rollback, if it went back to this release and
+  // nobody has activated this release on purpose since (deploy-runner.sh
+  // --rollback onto it is a choice, not a crash).
+  private rolledBackOnto(): RunnerStatus['rolledBack'] {
+    const mine = this.deps.release;
+    if (!mine) return undefined;
+    const s = readState(this.deps.home);
+    const rb = s?.rolledBack;
+    if (!rb || typeof rb !== 'object' || rb.to !== mine || typeof rb.from !== 'string' || typeof rb.at !== 'string') return undefined;
+    const act = s?.activated;
+    if (act && act.release === mine && Date.parse(act.at) > Date.parse(rb.at)) return undefined;
+    return { from: rb.from, at: rb.at };
   }
 
   // Sent after each hello, so an app that connects while a restart waits
@@ -426,11 +453,14 @@ export class Restarter {
     log.info('restarted', { from, to: this.version, reason: saved.reason, again });
     for (const r of Array.isArray(saved.resumes) ? saved.resumes : []) {
       if (!r || typeof r.threadId !== 'string' || typeof r.text !== 'string') continue;
-      this.resumeOne(saved, r, from);
+      this.resumeOne(saved, r, from, again);
     }
   }
 
-  private resumeOne(saved: RestartFile, r: SavedResume, from: string): void {
+  // again: this is the resume after a crash rollback, standing in for the
+  // one the crashed release sent (or never got to send) for the same
+  // restart, which shouldn't count against the thread's hourly limit.
+  private resumeOne(saved: RestartFile, r: SavedResume, from: string, again = false): void {
     const { runner, log, home } = this.deps;
     let thread: ThreadSummary;
     try {
@@ -458,7 +488,7 @@ export class Restarter {
             ? 'this thread is snoozed'
             : this.spokenSince(r)
               ? 'a message was sent to this thread after the restart was asked for'
-              : !takeResume(home, r.threadId, now)
+              : !takeResume(home, r.threadId, now, again ? Date.parse(saved.shutdownAt ?? r.requestedAt ?? saved.requestedAt) : undefined)
                 ? `this thread has already been resumed ${RESUMES_PER_HOUR} times in the last hour`
                 : undefined;
       if (why) note += `\n\nNot carrying on by itself: ${why}.`;
@@ -520,9 +550,29 @@ export function pendingMessage(waiting: number, onYou = 0): string {
 // At most RESUMES_PER_HOUR automatic resumes per thread in any hour, kept in
 // run/resumes.json so a restart loop (an agent that deploys, resumes and
 // deploys again) stops by itself. Returns false when the thread is over.
-export function takeResume(home: string, threadId: string, now: number): boolean {
+// replacesSince: resumes recorded from then on are dropped first. After a
+// crash rollback the release that crashed resumed the thread once already
+// for the same restart, and the one going back resumes it again; counting
+// both stopped an agent at good deploy, broken deploy, fix.
+export function takeResume(home: string, threadId: string, now: number, replacesSince?: number): boolean {
   const file = resumesPath(home);
-  const all = readJsonSync<Record<string, string[]>>(file) ?? {};
+  const out = recentResumes(home, now);
+  let mine = out[threadId] ?? [];
+  if (replacesSince !== undefined && Number.isFinite(replacesSince)) mine = mine.filter((t) => Date.parse(t) < replacesSince);
+  if (mine.length >= RESUMES_PER_HOUR) return false;
+  out[threadId] = [...mine, new Date(now).toISOString()];
+  atomicWriteFileSync(file, JSON.stringify(out, null, 2) + '\n');
+  return true;
+}
+
+// How many times the thread has been resumed in the last hour, without
+// recording anything.
+export function resumesInLastHour(home: string, threadId: string, now: number): number {
+  return (recentResumes(home, now)[threadId] ?? []).length;
+}
+
+function recentResumes(home: string, now: number): Record<string, string[]> {
+  const all = readJsonSync<Record<string, string[]>>(resumesPath(home)) ?? {};
   const recent = (ts: unknown): string[] =>
     Array.isArray(ts) ? ts.filter((t): t is string => typeof t === 'string' && now - Date.parse(t) < HOUR_MS) : [];
   const out: Record<string, string[]> = {};
@@ -530,11 +580,7 @@ export function takeResume(home: string, threadId: string, now: number): boolean
     const kept = recent(ts);
     if (kept.length) out[id] = kept;
   }
-  const mine = out[threadId] ?? [];
-  if (mine.length >= RESUMES_PER_HOUR) return false;
-  out[threadId] = [...mine, new Date(now).toISOString()];
-  atomicWriteFileSync(file, JSON.stringify(out, null, 2) + '\n');
-  return true;
+  return out;
 }
 
 // ----------------------------------------------------------------- RPC

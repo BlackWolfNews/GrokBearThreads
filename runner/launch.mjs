@@ -122,8 +122,14 @@ export function markBootClean(dir, at, pid = process.pid) {
 
 function log(level, msg, extra) {
   // Same line format as the runner's log (src/log.ts); launchd sends
-  // stderr to the runner's log file.
-  process.stderr.write(`${new Date().toISOString()} ${level} launch: ${msg}${extra ? ' ' + JSON.stringify(extra) : ''}\n`);
+  // stderr to the runner's log file. Written straight to the fd so a line
+  // logged from the 'exit' handler isn't lost.
+  const line = `${new Date().toISOString()} ${level} launch: ${msg}${extra ? ' ' + JSON.stringify(extra) : ''}\n`;
+  try {
+    fs.writeSync(2, line);
+  } catch {
+    // no stderr to write to
+  }
 }
 
 async function main() {
@@ -169,13 +175,27 @@ async function main() {
     },
   };
   const at = plan.state.boots.at(-1).at;
+  const startedMs = Date.now();
   process.on('exit', (code) => {
-    if (code !== 0 || !listened) return;
-    try {
-      markBootClean(dir, at);
-    } catch {
-      // the next boot just counts this one
+    if (code === 0 && listened) {
+      try {
+        markBootClean(dir, at);
+      } catch {
+        // the next boot just counts this one
+      }
+      return;
     }
+    // A release that calls process.exit leaves nothing else in the log, and
+    // after a crash rollback an agent reading tb logs needs to see which
+    // release stopped, when and how.
+    let good = false;
+    try {
+      good = readState(dir).lastGood === plan.start;
+    } catch {
+      // unreadable: say it counts
+    }
+    const secs = Math.round((Date.now() - startedMs) / 1000);
+    log('ERROR', `release ${plan.start} exited with code ${code} after ${secs} s${listened ? '' : ', before it was listening'}${good ? '' : ', not marked good, so it counts as a failed start'}`);
   });
   const mod = await import(pathToFileURL(path.join(root, 'src', 'main.ts')).href);
   // Releases from before the hook never call it, so only those that say

@@ -87,11 +87,23 @@ branch. `deploy-runner.sh`:
 5. asks the runner to restart once no thread is running (`runner.restart`;
    background shells and subagents hold it for `--wait`, 30 minutes, at
    most),
-6. checks the runner comes back on the new release within 30 s, and if it
-   doesn't, points `current` back at the release that was running, restarts,
-   prints the end of the log and exits 1,
+6. checks the runner comes back on the new release within 30 s and stays
+   up (20 s, or until it's marked good): one that died a few seconds after
+   it started listening used to pass. If it doesn't, it points `current`
+   back at the release that was running, restarts, prints the end of the
+   log and exits 1,
 7. keeps the newest 5 releases plus the last good one (and anything
-   current, previous or still running).
+   current, previous or still running). Releases that crashed at startup
+   go first and don't count towards the 5; the newest of them stays, for
+   `--rollback --force`.
+
+Deploying a commit whose release crashed at startup gets a note saying so
+before anything is built. Inside a thread, if the runner says it won't
+carry the thread on afterwards (it has been resumed 3 times this hour; a
+crash rollback's resume replaces the crashed release's rather than counting
+twice), the script says so and that Mike has to message the thread, rather
+than promising the resume. For a sandbox `--home`, the `tb` commands it
+prints carry `THREADBARE_HOME=<home>`.
 
 Inside a Threadbare thread the restart waits for that thread's turn to end,
 so the script says so and exits: end the turn, and the runner restarts and
@@ -149,7 +161,11 @@ listened and then exited 0 (a planned restart, `launchctl kickstart`, a
 reboot) is marked `clean` and doesn't count, and a start that isn't
 listening after 90 s is stopped and does, so a release that hangs at
 startup is rolled back too. The runner adds `rolledBack.reportedAt` once it
-has reported it, so only the first start after a rollback does. A change to
+has reported it, so only the first start after a rollback does; `tb status`
+(`runner.status`'s `rolledBack`) says so for as long as that release runs.
+When a release exits uncleanly, `launch.mjs` logs which, with its exit code
+and how long it ran, since a release that calls `process.exit` leaves
+nothing else in the log. A change to
 `launch.mjs` itself only reaches the LaunchAgent through
 `install-runner.sh`; the deploy script says when the installed copy is out
 of date.
@@ -196,9 +212,9 @@ the details.
 
 ## A dev runner
 
-`scripts/dev-runner.sh [--home DIR] [--port N]` runs the working tree's
-runner in the foreground on a temp data dir (it refuses the real one) and
-prints what to point `tb` and the app at:
+`scripts/dev-runner.sh [--home DIR] [--port N] [--keep]` runs the working
+tree's runner in the foreground on a temp data dir (it refuses the real one)
+and prints what to point `tb` and the app at:
 
 ```
   pid:  41234
@@ -209,7 +225,11 @@ Stop it:     kill 41234   (never pkill: the real runner runs src/main.ts too)
 
 `<home>/tb` is `bin/tb` with that data dir built in, since an exported
 `THREADBARE_HOME` lasts one command in an agent's shell and a bare `tb`
-then reaches the real runner. Like launchd, the script starts the runner
+then reaches the real runner. It also sets `THREADBARE_TB` to itself, so
+the commands tb suggests (`restart --cancel`, `events`) name it too. A temp
+data dir the script made is deleted when it stops (Ctrl-C or `kill`;
+`--keep` keeps it), and kept, with a note saying where, if the runner
+failed. Like launchd, the script starts the runner
 again when it exits 0 (`tb restart`), and stops when it exits with an
 error. It uses your real logins, so threads in it cost like any other. On a
 new data dir it writes a `runner.json` whose threads default to the folder
@@ -323,19 +343,26 @@ For working on Threadbare itself:
 bin/tb status [--json]          # version, live CLIs, busy threads, background work, a pending restart
 bin/tb self [--json]            # the thread this runs in (THREADBARE_THREAD_ID)
 bin/tb restart [--now [--force]] [--resume "text" | --no-resume] [--reason "text"] [--max-wait 30m]
-bin/tb restart --cancel         # withdraw a pending restart
+bin/tb restart --cancel         # withdraw a pending restart (--force: someone else's, from a terminal)
 bin/tb show <id> [--last N] [--tools]   # the thread as plain text, approvals with their ids
 bin/tb logs [-f] [-n 200] [--thread ID]
 bin/tb export <id> [--out DIR]  # a mock-runner fixture in app/.fixtures/threads/<id>
 bin/tb rpc <method> ['{"json": "params"}']
 ```
 
-`tb restart` is for dev runners and sandboxes. It refuses the live runner
+`tb restart` is for dev runners and sandboxes. `--force` is Mike's, from a
+terminal: `tb --help` and the flag errors never mention it. It refuses the live runner
 (the default data dir) from that runner's own threads (the deploy script
 ships and restarts it), and a live runner run from a checkout from anywhere,
 since that would come back on whatever is in the checkout, untested; from a
-thread that holds even with `--force`. `tb rpc runner.restart` points at
-`tb restart`. Inside a thread, `tb restart` carries that thread on
+thread that holds even with `--force`. `tb rpc runner.restart` is always
+refused in favour of `tb restart`, which has those guards. From a thread
+of the runner it would cancel, `tb restart --cancel` only withdraws that
+thread's own restart: anyone else's is almost always a deploy waiting for
+this very turn, and withdrawing it would undo the deploy and leave its
+thread waiting (`--force`, from a terminal, does it anyway). When the
+runner says it won't send the resume (3 this hour), `tb restart` says so
+instead of promising it. Inside a thread, `tb restart` carries that thread on
 afterwards by default and says to end the turn, since the restart waits for
 it, and lists any background work of the thread's own that would outlast
 the turn. `--now` is refused inside a thread, and while other threads are
@@ -347,9 +374,11 @@ parallel calls' results don't land under the wrong call; `--tools` prints
 Bash commands whole. `tb events --from --to` prints a seq range (the
 "events: 5, 8-9" in the app's Copy debug info, which also gives the
 command). Inside a thread, `tb approve` and `tb answer` refuse that
-thread's own cards, as `tb rpc approvals.respond` does: they're Mike's. Each
+thread's own cards, as `tb rpc approvals.respond` does: they're Mike's,
+and `tb rpc threads.update` won't snooze or archive the thread it runs in,
+as `tb snooze` and `tb archive` won't. Each
 command refuses flags it doesn't read (`tb events --last` used to be
-ignored), and `tb <command> --help` shows just that command. `tb logs` says which file it
+ignored), naming the ones it takes (never `--force`), and `tb <command> --help` shows just that command. `tb logs` says which file it
 reads; with the runner down it reads `<home>/runner.log` for a dev runner or
 sandbox, and `--thread` includes the CLI's spawn and exit lines. `tb export`
 writes the thread as idle (a mid-turn export would otherwise look stuck)
@@ -358,7 +387,9 @@ it (a debug app kept behind Mike's windows, with its own mock runner, which
 an agent can dump, screenshot and stop) and the `tb events` one; the mock no longer loads
 `app/.fixtures/threads/` by default, so exports never reach design
 screenshots. A mistyped flag gets a message, not a stack trace. Messages
-print `tb` with its full path.
+print `tb` with its full path, and the one that was run: a dev runner's
+`<home>/tb`, or `THREADBARE_HOME=<home>` in front when it was pointed away
+from the thread's own runner.
 
 ## Tools for agents
 
@@ -558,7 +589,9 @@ running release, a runner too slow to answer (no kickstart), the main
 branch check, an older runner (wait for idle, then kickstart),
 `--rollback` (and its refusal after a crash rollback), a smoke test
 failure, uncommitted changes, a release that crash-loops back to
-`lastGood` (also when the link can't be moved), pruning, `--list`,
+`lastGood` (also when the link can't be moved), one that dies a second
+after it starts listening, a resume the runner won't send, pruning (crashed
+releases first), `--list`,
 `--dry-run`, LaunchAgents that don't run releases, the install guards, a
 reinstall (busy, a branch, a `launch.mjs` that doesn't load, a stale
 release, a bootstrap that fails, a `launch.mjs` that can't start a runner)
@@ -571,8 +604,9 @@ background work, the live CLI cap, disk errors, the RPC server (auth
 timeout, backpressure), process groups and the lock (with real processes),
 two runners starting on one data dir, restarts (background work, its time
 limit and work ending mid-turn, held queues, resumes on the wrong release,
-a release that crashes twice before the rollback, cancelling and putting
-`current` back, a deleted thread it was waiting for), planned restarts
+a release that crashes twice before the rollback and its resume counted
+once, cancelling and putting `current` back, a deleted thread it was
+waiting for, a resume it says it won't send), planned restarts
 under `launch.mjs` and its startup watchdog, the threadbare tools (moves
 that carry the transcript and their fallbacks, delete, and the refusals
 for the calling thread), and `tb` (including its guards on the live runner

@@ -850,6 +850,8 @@ test('a release that crashes after handling the restart: the one launch.mjs goes
   assert.match(msg.text, /^Note from the runner: Release B kept crashing at startup.*\n\ncheck B$/s);
   assert.equal(resumed(h3), 2);
   assert.equal(fs.existsSync(donePath(h.home)), false, 'only once');
+  // The second resume stands in for B's: one counted against the hour, not two.
+  assert.equal(JSON.parse(fs.readFileSync(resumesPath(h.home), 'utf8'))[thread.id].length, 1);
 
   // A rollback from some other release doesn't count: B didn't crash.
   fs.rmSync(resumesPath(h.home), { force: true });
@@ -973,4 +975,61 @@ test('every CLI gets THREADBARE_THREAD_ID, THREADBARE_HOME and THREADBARE_RUNNER
   assert.equal(options.env.THREADBARE_HOME, '/tmp/home');
   assert.equal(options.env.THREADBARE_RUNNER_VERSION, '9.9.9+x');
   assert.equal(options.env.CLAUDE_CONFIG_DIR, dir, 'the account still applies');
+});
+
+test("a crash rollback's resume replaces the crashed release's in the hourly count", () => {
+  const h = makeHarness();
+  const { thread } = create(h);
+  h.adapter.last.init();
+  h.adapter.last.result();
+  // Good deploy, broken deploy: two resumes already this hour.
+  const earlier = new Date(h.clock.now() - 20 * MIN).toISOString();
+  fs.mkdirSync(path.dirname(resumesPath(h.home)), { recursive: true });
+  fs.writeFileSync(resumesPath(h.home), JSON.stringify({ [thread.id]: [earlier, earlier] }));
+  saveRestart(h, thread.id, { fromVersion: '0.1.0+A' }, { release: 'B', text: 'check B' });
+  // B resumes it (the third), then crashes; launch.mjs goes back to A.
+  withRestarter(h, '0.1.0+B', { release: 'B' }).r.resumeAfterRestart();
+  const h2 = h.restart();
+  h2.clock.advance(20_000);
+  withRestarter(h2, '0.1.0+A', { release: 'A', rolledBack: 'Release B kept crashing at startup, so the runner went back to A.', rolledBackFrom: 'B' }).r.resumeAfterRestart();
+  const evs = h2.events(thread.id);
+  const note = evs.findLast((e) => e.type === 'system.note' && e.text.startsWith('Runner restarted'));
+  assert.doesNotMatch(note.text, /Not carrying on/, 'A still carries it on');
+  assert.equal(evs.findLast((e) => e.type === 'user.message')?.origin, 'runner');
+  assert.equal(JSON.parse(fs.readFileSync(resumesPath(h.home), 'utf8'))[thread.id].length, 3);
+});
+
+test('runner.restart says when the resume it was asked for will not be sent, without using one up', () => {
+  const h = makeHarness();
+  const { r } = withRestarter(h);
+  const { thread } = create(h);
+  h.adapter.last.init();
+  assert.equal(r.request({ resume: { threadId: thread.id, text: 'go' } }).noResume, undefined);
+  const stamp = new Date(h.clock.now()).toISOString();
+  fs.mkdirSync(path.dirname(resumesPath(h.home)), { recursive: true });
+  fs.writeFileSync(resumesPath(h.home), JSON.stringify({ [thread.id]: [stamp, stamp, stamp] }));
+  const res = r.request({ resume: { threadId: thread.id, text: 'go' } });
+  assert.equal(res.noResume, 'this thread has already been resumed 3 times in the last hour');
+  assert.deepEqual(res.waitingFor, [thread.id]);
+  assert.equal(JSON.parse(fs.readFileSync(resumesPath(h.home), 'utf8'))[thread.id].length, 3, 'only checked');
+  // No resume asked for, nothing to say.
+  assert.equal(r.request({}).noResume, undefined);
+});
+
+test('runner.status names the release launch.mjs went back from, while this one runs because of it', () => {
+  const h = makeHarness();
+  const dir = path.join(h.home, 'runner');
+  fs.mkdirSync(dir, { recursive: true });
+  const at = new Date(h.clock.now()).toISOString();
+  const write = (extra: Record<string, unknown>) =>
+    fs.writeFileSync(path.join(dir, 'state.json'), JSON.stringify({ current: 'A', previous: 'B', lastGood: 'A', boots: [], rolledBack: { from: 'B', to: 'A', at, reportedAt: at }, ...extra }));
+  write({});
+  assert.deepEqual(withRestarter(h, '0.1.0+A', { release: 'A' }).r.status().rolledBack, { from: 'B', at });
+  // Another release running: not about this one.
+  assert.equal(withRestarter(h, '0.1.0+C', { release: 'C' }).r.status().rolledBack, undefined);
+  // Activated on purpose since (deploy-runner.sh --rollback onto A).
+  write({ activated: { release: 'A', at: new Date(h.clock.now() + MIN).toISOString() } });
+  assert.equal(withRestarter(h, '0.1.0+A', { release: 'A' }).r.status().rolledBack, undefined);
+  // From source, there are no releases.
+  assert.equal(withRestarter(h, '0.1.0+source', { release: undefined }).r.status().rolledBack, undefined);
 });

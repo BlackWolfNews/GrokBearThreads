@@ -175,7 +175,9 @@ export function buildThreadbareTools(control: ThreadControl, selfId: string, now
           const evs = page.events as PersistedEvent[];
           for (const e of [...evs].reverse()) {
             if (picked.length >= want) break;
-            if (e.type === 'user.message') picked.push(`Mike (${e.ts}):\n${clip(e.text)}`);
+            // The runner's own messages (the resume after a restart) aren't
+            // Mike's, and an agent shouldn't take them for his instructions.
+            if (e.type === 'user.message') picked.push(`${e.origin === 'runner' ? 'Runner' : 'Mike'} (${e.ts}):\n${clip(e.text)}`);
             else if (e.type === 'assistant.text') picked.push(`Agent (${e.ts}):\n${clip(e.text)}`);
           }
           if (!evs.length || page.firstSeq <= 1) break;
@@ -204,7 +206,7 @@ export function buildThreadbareTools(control: ThreadControl, selfId: string, now
         title: z.string().optional().describe('Title for the sidebar. Default: the first line of text.'),
         folder: z.string().optional().describe("Working folder. Default: this thread's folder. Relative paths are from this thread's folder."),
         account: z.string().optional().describe('Account id or email (see list_accounts). Default: the last one used.'),
-        model: z.string().optional().describe("Model id. Default: the account's default."),
+        model: z.string().optional().describe("Model id. Default: the runner's default model if it has one (a dev runner's is the cheapest), else the account's."),
         permissionMode: z.enum(['full', 'ask']).optional().describe('"full" (default) or "ask" before edits and commands.'),
       },
       handle(({ text, title, folder: f, account: acc, model, permissionMode }) => {

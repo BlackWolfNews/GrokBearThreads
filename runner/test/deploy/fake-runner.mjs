@@ -9,10 +9,13 @@
 //                                 launch.mjs (not in the smoke test)
 //   oldRunner: true               no runner.restart, like runners before it
 //   goodAfterMs: n                mark lastGood after n ms (default 200, -1 never)
+//   crashAfterMs: n               under launch.mjs, exit 1 n ms after it
+//                                 starts listening (passes the first hello)
 // <home>/fake-busy.json lists the threads that count as running,
 // <home>/fake-background.json the background work ({ threadId, tasks }[]),
-// and while <home>/fake-hang-restart exists runner.restart never answers (a
-// runner too busy to reply).
+// while <home>/fake-hang-restart exists runner.restart never answers (a
+// runner too busy to reply), and while <home>/fake-no-resume exists it says
+// it won't send the resume (as for a thread resumed 3 times this hour).
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import http from 'node:http';
@@ -110,7 +113,8 @@ function handle(method, params) {
         }
       }, 100);
       const bg = background().filter((b) => waitingFor.includes(b.threadId));
-      return bg.length ? { scheduled: true, waitingFor, background: bg } : { scheduled: true, waitingFor };
+      const noResume = params.resume && fs.existsSync(path.join(home, 'fake-no-resume')) ? { noResume: 'fake: resumed too often' } : {};
+      return { scheduled: true, waitingFor, ...(bg.length ? { background: bg } : {}), ...noResume };
     }
   }
   throw Object.assign(new Error(`Unknown method ${method}`), { code: -32601 });
@@ -193,6 +197,12 @@ server.listen(Number(process.env.THREADBARE_PORT ?? 0), '127.0.0.1', () => {
   writeJsonAtomic(path.join(home, 'runner.json'), { port });
   console.log(`threadbare-runner listening on ${port}`);
   globalThis.threadbareLaunch?.listening?.();
+  if (launched && typeof mode.crashAfterMs === 'number') {
+    setTimeout(() => {
+      console.log('fake runner: dying after it started, on purpose');
+      process.exit(1);
+    }, mode.crashAfterMs);
+  }
   const goodAfter = mode.goodAfterMs ?? 200;
   // main.ts does this after 60 s; the tests can't wait that long.
   if (launched && release && goodAfter >= 0) {

@@ -1,7 +1,7 @@
 #!/bin/bash
 # Checks the runner and the app on the pinned Node 24: one line per step,
-# the end of the log for each step that failed, and a nonzero exit if any
-# did.
+# what failed and the end of the log for each step that failed, and a
+# nonzero exit if any did.
 #
 #   ./check.sh [--quick | --app] [--e2e] [--shots DIR]
 #
@@ -98,10 +98,23 @@ fi
 
 if [ -n "$FAILED" ]; then
   printf '%s' "$FAILED" | while IFS='|' read -r name log; do
+    # The failures themselves first: swift test runs the core tests before
+    # the app's, so a failing core test is hundreds of lines above the end
+    # of its log (XCTest's "error:" and "failed (", Swift Testing's ✘, the
+    # node test runner's ✖ and "not ok", tsc's "error TS").
+    # (swift colours its output even into a file, so that comes off first.)
+    failures="$(sed -E $'s/\x1b\\[[0-9;]*[A-Za-z]//g' "$log" | grep -nE ': error[: ]|error TS[0-9]|'"'"' failed \(|^not ok|✖|✘' | head -n 20)"
+    if [ -n "$failures" ]; then
+      echo
+      echo "--- $name: what failed (line: text) in $log"
+      printf '%s\n' "$failures"
+    fi
     echo
     echo "--- $name: end of $log"
     tail -n 30 "$log"
   done
+  echo
+  echo "Logs kept in $LOGS; rm -rf it when you're done."
   exit 1
 fi
 rm -rf "$LOGS"

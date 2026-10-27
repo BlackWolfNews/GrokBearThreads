@@ -155,6 +155,22 @@ app_running() {
   alive "$I_PID" && ps -p "$I_PID" -o command= 2>/dev/null | grep -qF "$I_BUNDLE/Contents/MacOS/Threadbare"
 }
 
+# This instance's mock runner is still running (it serves the instance's
+# own data folder, so a reused pid won't match).
+mock_running() {
+  alive "$I_MOCK_PID" && ps -p "$I_MOCK_PID" -o command= 2>/dev/null | grep -qF "$I_DIR/data"
+}
+
+# Something holds the runner lock in a --home instance's data folder
+# (run/runner.pid, {"pid":N,...} or a bare pid from older runners).
+home_runner_running() {
+  local raw pid
+  raw="$(cat "$I_DATA/run/runner.pid" 2>/dev/null)" || return 1
+  pid="$(printf '%s' "$raw" | sed -n 's/.*"pid": *\([0-9][0-9]*\).*/\1/p')"
+  [ -n "$pid" ] || pid="$(printf '%s' "$raw" | tr -dc '0-9')"
+  alive "$pid"
+}
+
 # "yours", or the thread and checkout that started it.
 whose() {
   if is_mine; then printf 'yours'; return; fi
@@ -282,10 +298,13 @@ JXA
 }
 
 # The error lines of a failed build, with a little context: no colour
-# codes, and no compiler command lines (several KB each) to wade through.
+# codes, and no compiler command lines (several KB each, or a short
+# "... failed with a nonzero exit code. Command line: cd ..." that says
+# nothing the error lines don't) to wade through.
 show_build_errors() {
   sed -E $'s/\x1b\\[[0-9;]*[A-Za-z]//g' "$1" | awk '
     length($0) > 400 { next }
+    /Command line:/ { next }
     /error:/ { keep = 4 }
     keep > 0 { if (!seen[$0]++) { print; shown++ } keep-- }
     shown >= 60 { exit }
@@ -314,8 +333,13 @@ install_bundle() {
   mkdir -p "$I_BUNDLE/Contents/MacOS"
   cp "$bin" "$I_BUNDLE/Contents/MacOS/Threadbare"
   cp "$APP_ROOT/Resources/Info.plist" "$I_BUNDLE/Contents/Info.plist"
+  # LSUIElement keeps it out of the Dock and the app switcher from launch:
+  # Cmd-Tabbing into one by mistake and typing into its composer would start
+  # a real turn on a dev runner.
+  local plist="$I_BUNDLE/Contents/Info.plist"
   /usr/libexec/PlistBuddy -c "Set :CFBundleIdentifier $I_BUNDLE_ID" \
-    -c "Set :CFBundleName Threadbare dev $I_ID" -c "Set :CFBundleDisplayName Threadbare dev $I_ID" "$I_BUNDLE/Contents/Info.plist"
+    -c "Set :CFBundleName Threadbare dev $I_ID" -c "Set :CFBundleDisplayName Threadbare dev $I_ID" "$plist"
+  /usr/libexec/PlistBuddy -c "Add :LSUIElement bool true" "$plist" 2>/dev/null || /usr/libexec/PlistBuddy -c "Set :LSUIElement true" "$plist"
   codesign --force --sign - "$I_BUNDLE" >/dev/null 2>&1
 }
 
@@ -428,11 +452,26 @@ cmd_start() {
     if [ ${#fixtures[@]} -eq 0 ]; then fixtures=("$TOOLS_DIR/mock-runner/fixtures"); fi
     for fixture in "${fixtures[@]}"; do args+=(--fixtures "$fixture"); done
     # It exits once the app has quit (app.pid), so an instance that's
-    # never stopped doesn't leave a mock running.
-    nohup "$node" "$TOOLS_DIR/mock-runner/server.mjs" --data-dir "$data" "${args[@]}" --ready-file "$dir/mock.port" \
-      --exit-with-pid-file "$dir/app.pid" >"$dir/mock.log" 2>&1 </dev/null &
-    echo "mock_pid=$!" >>"$dir/instance"
+    # never stopped doesn't leave a mock running. It runs in a session of
+    # its own, forked away from this script: started from an agent's Bash
+    # command it would otherwise stay in that command's process group,
+    # which the live runner notes and stops whenever it restarts (the app,
+    # launched through open, survived that and lost its runner).
+    /usr/bin/perl -MPOSIX -e '
+      my $pidfile = shift;
+      defined(my $pid = fork) or die "fork: $!";
+      exit 0 if $pid;
+      POSIX::setsid();
+      open(my $f, ">", $pidfile) or die "$pidfile: $!";
+      print $f $$;
+      close $f;
+      exec @ARGV or die "exec: $!";
+    ' "$dir/mock.pid" "$node" "$TOOLS_DIR/mock-runner/server.mjs" --data-dir "$data" "${args[@]}" --ready-file "$dir/mock.port" \
+      --exit-with-pid-file "$dir/app.pid" >"$dir/mock.log" 2>&1 </dev/null
     local i
+    for i in $(seq 1 200); do [ -s "$dir/mock.pid" ] && break; sleep 0.05; done
+    [ -s "$dir/mock.pid" ] || { tail -n 20 "$dir/mock.log" >&2; die "the mock runner didn't start"; }
+    echo "mock_pid=$(cat "$dir/mock.pid")" >>"$dir/instance"
     for i in $(seq 1 200); do [ -f "$dir/mock.port" ] && break; sleep 0.05; done
     [ -f "$dir/mock.port" ] || { tail -n 20 "$dir/mock.log" >&2; die "the mock runner didn't start"; }
   else
@@ -466,9 +505,12 @@ cmd_start() {
   echo "  Tools/dev-app.sh --id $ID do '{\"cmd\":\"open\",\"id\":\"<thread>\"}'   dump   shot <file.png>   rebuild   log   stop"
 }
 
-# do, shot, dump and rebuild need the app up.
+# do, shot, dump and rebuild need the app up, and a mock instance its mock.
 require_running() {
   app_running || die "dev app $I_ID has quit (after 60 minutes with no command, or it crashed: Tools/dev-app.sh --id $I_ID log). Stop it and start a new one."
+  if [ "$I_RUNNER" = mock ] && ! mock_running; then
+    die "dev app $I_ID's mock runner has stopped (Tools/dev-app.sh --id $I_ID log --mock says why), so the app can't reach a runner. Stop it and start a new one."
+  fi
 }
 
 cmd_do() {
@@ -516,7 +558,14 @@ cmd_shot() {
     return 0
   fi
   rm -f "$file"
-  send "{\"cmd\":\"screenshot\",\"inProcess\":true,\"path\":$(json_string "$file")}" || exit 1
+  # The app draws it into its own folder and this shell moves it: the temp
+  # bundle writing into Desktop, Documents or Downloads would put a macOS
+  # access prompt in front of Mike.
+  local drawn="$I_DIR/shot.png"
+  rm -f "$drawn"
+  send "{\"cmd\":\"screenshot\",\"inProcess\":true,\"path\":$(json_string "$drawn")}" >/dev/null || exit 1
+  mv "$drawn" "$file"
+  echo "screenshot ok $file (in-process)"
   echo "dev-app: screencapture gave no image (the screen is locked or asleep, or this shell has no Screen Recording permission), so that's the app's own drawing: the sidebar's glass is a flat fill and the traffic lights are approximate." >&2
 }
 
@@ -554,13 +603,16 @@ cmd_rebuild() {
   echo "Building the debug app..."
   # The running app stays up if the build fails.
   build_binary "$I_ID" || exit 1
+  # Before the quit: the mock checks app.pid every 2 s and exits once that
+  # app is gone, and a check landing between the quit and the removal used
+  # to take the mock (and its state) down with the old build. A missing
+  # file is fine for 2 minutes.
+  rm -f "$I_DIR/app.pid"
   send '{"cmd":"quit"}' 5 >/dev/null 2>&1 || true
   local i
   for i in $(seq 1 100); do alive "$I_PID" || break; sleep 0.05; done
   app_running && kill "$I_PID" 2>/dev/null || true
   for i in $(seq 1 100); do alive "$I_PID" || break; sleep 0.05; done
-  # The mock waits for the new pid rather than exiting with the old app.
-  rm -f "$I_DIR/app.pid"
   install_bundle
   launch_app
   if [ -n "$selection" ]; then
@@ -657,7 +709,14 @@ cmd_status() {
     found=1
     load_instance "$id"
     local state="quit (stop cleans it up)"
-    app_running && state="running, pid $I_PID"
+    if app_running; then
+      state="running, pid $I_PID"
+      # The app outlives its runner: the mock stopped (a runner restart used
+      # to stop it), or the dev runner was killed. Only dump said so.
+      if [ "$I_RUNNER" = mock ]; then mock_running || state="$state, but its mock runner has stopped"
+      elif [ -n "$I_DATA" ]; then home_runner_running || state="$state, but its runner isn't running"
+      fi
+    fi
     [ -n "$I_PID" ] || state="starting"
     printf '%s %-8s %s; %s; %s\n' "$( [ "$id" = "$default" ] && echo '*' || echo ' ')" "$id" "$state" \
       "$( [ "$I_RUNNER" = mock ] && echo "mock runner (data $I_DATA)" || echo "runner at ${I_RUNNER#home }")" "$(whose)"

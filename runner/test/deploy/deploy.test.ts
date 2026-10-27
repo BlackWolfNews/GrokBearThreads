@@ -46,6 +46,9 @@ function env(extra: Record<string, string> = {}): NodeJS.ProcessEnv {
     ...out,
     PATH: `${path.dirname(NODE)}:${process.env.PATH}`,
     THREADBARE_NODE: NODE,
+    // How long a deploy watches a release that came up (20 s for real); the
+    // fake runner is marked good after 200 ms, which ends it sooner.
+    THREADBARE_DEPLOY_SETTLE_MS: '1500',
     THREADBARE_LAUNCHCTL: FAKE_LAUNCHCTL,
     THREADBARE_LAUNCH_AGENTS_DIR: agents,
     FAKE_LAUNCHD_DIR: launchd,
@@ -329,6 +332,26 @@ test("the real runner's label is refused for a sandbox, and a thread is spotted 
   assert.match(r.stderr, /--now would stop the runner this thread runs on/);
 });
 
+test("inside a thread, a resume the runner won't send is said rather than promised", { timeout: 60_000 }, async () => {
+  const inThread = { THREADBARE_THREAD_ID: 'thread-1', THREADBARE_HOME: home };
+  setBusy(['thread-1']);
+  fs.writeFileSync(path.join(home, 'fake-no-resume'), '');
+  commit({ v: 'no-resume' }, 'no resume');
+  let r: Run;
+  try {
+    r = deploy(['--skip-checks'], inThread);
+  } finally {
+    fs.rmSync(path.join(home, 'fake-no-resume'));
+  }
+  assert.equal(r.status, 0, out(r));
+  assert.match(r.stdout, /The runner restarts when this turn ends, but it won't carry this thread on afterwards: fake: resumed too often\.\n/);
+  assert.match(r.stdout, /End your turn now, and say in your reply that Mike has to message this thread once the runner is back/);
+  assert.doesNotMatch(r.stdout, /resumes this thread with/);
+  const id = current();
+  setBusy([]);
+  await runsOn(id);
+});
+
 test('--now --force inside a thread restarts through runner.restart and still carries the thread on', { timeout: 60_000 }, async () => {
   commit({ v: 'now' }, 'now');
   const kicks = kickstarts();
@@ -369,7 +392,9 @@ test('--now never cuts other threads short from a thread, and a thread hears abo
   assert.match(r.stdout, /The runner restarts when this turn ends, then resumes this thread with:/);
   assert.match(r.stdout, /It also waits for this thread's background work, which ending the turn doesn't stop:\n  scripts\/dev-runner\.sh\n/);
   assert.match(r.stdout, /goes ahead after 5m and stops it\./);
-  assert.ok(r.stdout.includes(`${path.join(rdir, 'bin', 'tb')} status shows what it's waiting for`), r.stdout);
+  // For a sandbox the data dir goes in front: a bare tb in a thread is the
+  // live runner's.
+  assert.ok(r.stdout.includes(`THREADBARE_HOME=${home} ${path.join(rdir, 'bin', 'tb')} status shows what it's waiting for`), r.stdout);
   assert.equal(restartCalls().at(-1)!.backgroundWaitMs, 5 * 60_000);
   const id = current();
   setBusy([]);
@@ -410,7 +435,7 @@ test("a deploy while another deploy's restart is pending is refused unless --for
   r = deploy(['--skip-checks', '--force', '--wait', '1s']);
   assert.equal(r.status, 0, out(r));
   assert.match(r.stdout, new RegExp(`Replacing release ${waiting}, which never started`));
-  assert.ok(r.stdout.includes(`${path.join(rdir, 'bin', 'tb')} restart --cancel`), r.stdout);
+  assert.ok(r.stdout.includes(`THREADBARE_HOME=${home} ${path.join(rdir, 'bin', 'tb')} restart --cancel`), r.stdout);
   const replaced = current();
   assert.equal(state().previous, running, 'previous is the release that ran, not the one that never did');
   setBusy([]);
@@ -765,7 +790,34 @@ test('planBoot: the crash-loop rules', async () => {
   assert.equal(p.state.boots.at(-1).release, 'B');
 });
 
-test('pruning keeps the newest 5 releases plus lastGood', { timeout: 120_000 }, async () => {
+let died: string;
+
+test('a release that dies a few seconds after it starts is caught, not reported as up', { timeout: 90_000 }, async () => {
+  const running = current();
+  await waitFor('lastGood', () => state().lastGood === running);
+  // It answers the first hello, then exits: the health check alone passed it.
+  commit({ crashAfterMs: 1000, goodAfterMs: -1 }, 'dies after starting');
+  const r = deploy(['--skip-checks']);
+  assert.equal(r.status, 1, out(r));
+  died = releases().at(-1)!;
+  assert.notEqual(died, running);
+  assert.match(r.stdout, /Checking it stays up\.\.\. no\n/);
+  assert.doesNotMatch(r.stdout, /The runner is up on/);
+  assert.match(r.stderr, new RegExp(`The runner came up on ${died} but stopped again within \\d+ s\\.`));
+  assert.match(r.stderr, new RegExp(`current points at ${running} again`));
+  // launch.mjs says which release stopped and how, which the dying
+  // release itself didn't.
+  assert.match(r.stderr, new RegExp(`release ${died} exited with code 1 after \\d+ s, not marked good, so it counts as a failed start`));
+  assert.equal(current(), running);
+  await runsOn(running);
+  assert.match(deploy(['--list']).stdout, new RegExp(`${died}\\s+crashed at startup`));
+  // Shipping the same commit again is warned about before anything is built.
+  const again = deploy(['--skip-checks', '--dry-run']);
+  assert.equal(again.status, 0, out(again));
+  assert.match(again.stdout, new RegExp(`Note: ${died}, built from this same commit, crashed at startup`));
+});
+
+test('pruning keeps the newest 5 releases plus lastGood, and drops crashed ones first', { timeout: 120_000 }, async () => {
   const lastGood = state().lastGood!;
   assert.equal(lastGood, good);
   const built: string[] = [];
@@ -778,8 +830,10 @@ test('pruning keeps the newest 5 releases plus lastGood', { timeout: 120_000 }, 
   }
   await runsOn(built.at(-1)!);
   assert.equal(state().lastGood, lastGood);
-  assert.deepEqual(releases(), [lastGood, ...built].sort());
-  assert.ok(!releases().includes(bad), 'the crashing release is gone');
+  // Two releases crashed: only the newest is kept (for --rollback --force),
+  // and neither counted towards the 5.
+  assert.deepEqual(releases(), [lastGood, died, ...built].sort());
+  assert.ok(!releases().includes(bad), 'the older crashing release is gone');
 });
 
 test('--list and --dry-run change nothing', { timeout: 60_000 }, async () => {

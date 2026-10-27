@@ -204,6 +204,13 @@ final class RowDebugTests: XCTestCase {
         see: tb events th1 --from 5 --to 9
 
         """)
+        // A dev runner's own tb, and the mock's fixture: a bare tb from a
+        // thread would ask the live runner.
+        XCTAssertTrue(RowDebug.info(threadId: "th1", row: row, seqs: [5, 8, 9], runnerVersion: "0.1.0+source", source: .tb("/tmp/dev/tb"))
+            .hasSuffix("see: /tmp/dev/tb events th1 --from 5 --to 9\n"))
+        XCTAssertTrue(RowDebug.info(threadId: "th1", row: row, seqs: [5, 8, 9], runnerVersion: "0.0.0-mock", source: .fixture)
+            .hasSuffix("see: lines 5-9 of events.ndjson in the thread's fixture folder (line N is seq N)\n"))
+        XCTAssertTrue(RowDebug.info(threadId: "th1", row: row, seqs: [7], runnerVersion: "0.0.0-mock", source: .fixture).contains("see: line 7 of events.ndjson"))
         let note = try XCTUnwrap(model.item(id: "n:13"))
         XCTAssertEqual(RowDebug.info(threadId: "th1", row: note, seqs: [], runnerVersion: ""), """
         thread: th1

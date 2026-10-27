@@ -38,6 +38,11 @@ if `tb` isn't found (an older runner, or outside a thread), use
 - `./check.sh` runs every check, about two and a half minutes (`--quick`:
   the runner's typecheck and unit tests; `--app`: the app's build and tests,
   for a change outside `runner/`). Nothing in it touches the live runner.
+  A failure prints what failed and keeps the logs; it says where, so
+  delete them when you're done.
+- Another thread may be editing this checkout. For a worktree of your own:
+  `git worktree add --detach <dir> main` (main is checked out here), then
+  `npm ci` in its `runner/` and `app/Tools/mock-runner/`.
 - The live runner runs a release, a snapshot, so editing `runner/` doesn't
   change it. To try a runner change, start `runner/scripts/dev-runner.sh` in
   the background and use the `<dev home>/tb` it prints (a bare `tb` reaches
@@ -46,12 +51,13 @@ if `tb` isn't found (an older runner, or outside a thread), use
   (its `runner.json` defaults), from `tb` or a debug app's composer alike.
   Stop it with the `kill <pid>` it prints, never
   `pkill`, and before you deploy or end your turn: the live runner's restart
-  waits for it.
+  waits for it. Its temp data dir goes with it (`--keep` keeps it).
 - To ship a runner change, merge it to main, then from main run
   `runner/scripts/deploy-runner.sh --dry-run` and
   `runner/scripts/deploy-runner.sh`, which ships HEAD of this checkout.
   When it says so, end your turn: the runner restarts once no thread is
-  busy and resumes this thread so you can check the change
+  busy and resumes this thread so you can check the change (if it says it
+  won't resume this thread, tell Mike in your reply)
   (`deploy-runner.sh --list` shows what's running). If the message that
   resumes you says your release isn't running, read `tb logs` before doing
   anything else. To undo a deploy, `deploy-runner.sh --rollback`; after an

@@ -111,8 +111,10 @@ and the perf run stay away from the real one. Install the runner itself with
   "Copy debug info" (on every row's menu) copies the thread id, the row's id
   and kind, its turn, the seqs of the events it was built from and the
   runner's version, one `key: value` a line, and the `tb events <thread>
-  --from N --to M` command that prints those events (or read them in a `tb
-  export`'s events.ndjson, where line N is seq N).
+  --from N --to M` command that prints those events. Against a dev runner
+  it names that runner's own `<home>/tb` (a bare `tb` in a thread reaches
+  the live one); against the mock, the lines of the fixture's events.ndjson
+  (line N is seq N).
 - **Images** in the transcript are thumbnails; click one for Quick Look.
 - **Runner restarts** (`runner.restart`, the deploy script) show as a
   quiet grey line under the toolbar, not the yellow banner: "The runner
@@ -213,7 +215,9 @@ with `node Tools/mock-runner/make-synthetic.mjs`) plus any private fixtures in
 `.fixtures/`, fakes a turn when you send a message (say "approval" or
 "question" in it to get a card), and has a `mock.stream` method that replays
 a 30 Hz stream for perf runs. `--fixtures DIR` (repeatable) serves only
-those: a folder of fixtures, or one `tb export` folder.
+those: a folder of fixtures, or one `tb export` folder. The demo threads'
+times are moved at load so the newest is a minute old, as when they were
+made, so design shots don't age by the hour; exports keep their own.
 
 It also answers `runner.status`, and fakes a runner restart for the app's
 restart states: `mock.restartPending` (`waitingFor`, default the busy
@@ -222,7 +226,11 @@ notice, and `mock.restart` (`downMs`, default 3000; `resume: {threadId,
 text}`) sends "The runner is restarting now.", drops every connection,
 closes the port for `downMs`, comes back on the same port as
 `0.0.0-mock+r1`, and carries the resumed thread on with the "Runner
-restarted" note and a turn whose message has `origin: "runner"`.
+restarted" note and a turn whose message has `origin: "runner"`. As with
+the real runner, nothing is mid-turn across it: the threads a pending idle
+restart waited for finish just before it (those waiting on Mike stay
+waiting), and any other running turn ends interrupted with the thread
+stopped.
 
 ```bash
 (cd Tools/mock-runner && npm install)
@@ -327,7 +335,7 @@ answered cards, and 11 a runner restart (the quiet banner while it waits,
 reconnecting while it's down, and the thread it carried on, with the
 runner's message as a note; last, since it restarts the mock).
 `Tools/screenshots.sh <dir> [--only <prefix>] [--appearance light|dark]`
-does all of this in a temp folder with the window kept behind yours, under
+(options in any order, `--help` for the usage) does all of this in a temp folder with the window kept behind yours, under
 a bundle id of its own (so it never reads or writes the installed app's
 settings; it used to leave its window size in them). It runs the binary
 from your shell, so screencapture has the shell's Screen Recording
@@ -354,7 +362,11 @@ command. Release builds don't include it.
 its own temp bundle with its own bundle id (so its own settings), data
 folder, notification name and pasteboard (`--automation-id`), so several
 run at once; its window opens with `open -g` and goes behind everything as
-soon as it's there.
+soon as it's there. It's never in the Dock or the app switcher (the bundle
+is `LSUIElement`), so Mike can't Cmd-Tab into one and type into it by
+mistake. Its mock runner runs in a session of its own: started from an
+agent's command it used to share that command's process group, which the
+live runner stops when it restarts, leaving the app with no runner.
 
 Instances belong to whoever started them: the Threadbare thread
 (`THREADBARE_THREAD_ID`) and the checkout the script is in. Several threads
@@ -382,7 +394,9 @@ Tools/dev-app.sh stop            # quits it, stops its mock, deletes its files a
 
 `start` also takes `--appearance light|dark`, `--size WxH` and `--id NAME`;
 every other command takes `--id` (default: your newest), and `status` lists
-them. `do` waits for each result and exits 1 on an error or a timeout.
+them, saying when an app's runner has stopped (`do`, `shot`, `dump` and
+`rebuild` refuse a mock instance whose mock has). `do` waits for each
+result and exits 1 on an error or a timeout.
 `--home` refuses the live runner's data folder; against a dev runner whose
 `runner.json` has no default model it sets the composer's to
 claude-haiku-5-5 and says so, since a thread sent from it is a real turn.
@@ -394,8 +408,9 @@ the script, in your shell: the temp bundle has no Screen Recording
 permission of its own, so screencapture from inside the app always failed
 (and macOS could ask Mike for it). When that gives no image (the screen is
 locked, or your shell has no permission either) it falls back to the
-app's own drawing and says so on stderr: the sidebar's glass is a flat fill
-and the traffic lights are approximate, the rest matches.
+app's own drawing, saved in the instance's folder and moved from your
+shell, and says so on stderr: the sidebar's glass is a flat fill and the
+traffic lights are approximate, the rest matches.
 
 A build that fails prints just its errors (no colour codes or compiler
 command lines) and keeps the whole log in
@@ -403,30 +418,33 @@ command lines) and keeps the whole log in
 alone when the build fails.
 
 The commands (`do`), each a JSON object with `cmd`. Rows and threads can be
-named by the start of their id.
+named by the start of their id; a start that matches more than one thread
+is an error. Commands marked "the open thread" act on `id` when it's given
+(an error if it names no thread) and otherwise on the thread that's open.
 
 | cmd | fields | |
 |---|---|---|
 | `open` | `id`, `timeout` | selects a thread and waits until its rows are on screen |
 | `select` | `id` | selects it without waiting |
 | `new`, `options` | `cwd`, `account`, `model` (`null` for the default), `ask` | the new-thread composer and its menus; `options` refuses anything else (a typo used to pass) and says what's set now |
-| `type`, `send`, `return` | `text`, `replace` | types into the composer; `send` types and presses Return |
+| `type`, `send`, `return` | `text`, `replace`, `timeout` | types into the composer (`replace` takes the place of what's there); `send` types and presses Return, and from the new-thread composer waits for the thread it starts and prints its id |
 | `paste-image` | `path` | through the instance's own pasteboard |
 | `click` | `title` | a button in the transcript: Allow, Always allow, Deny, an option, Send answer |
 | `expand`, `collapse` | `row`, `file`, `all` | a group, tool, thinking block or settled approval (one folded in a closed group opens it); `file` (path or index) in a changes card; `all` for a whole diff |
 | `scroll` | `to` (`top`, `bottom`) or `row`, `offset` | |
 | `hover` | `id` (sidebar) or `row` (transcript); neither clears | draws a row as if the pointer were on it |
 | `menu` | `row`, `click` | a transcript row's context menu, or chooses an item from it |
-| `debug-info`, `copy-thread-id`, `clipboard` | `row`, `id` | what "Copy debug info" and "Copy thread id" copy, and the instance's pasteboard |
+| `debug-info`, `copy-thread-id`, `clipboard` | `row`, `id` | what "Copy debug info" and "Copy thread id" (the open thread) copy, copied to the instance's pasteboard as the menu items do; `clipboard` reads it back |
 | `appearance`, `resize` | `mode` (light, dark, system); `w`, `h` | |
 | `zoom` | `to` (in, out, reset) or `percent` | the text size, as ⌘=, ⌘- and ⌘0 set it; says the percent it's at |
-| `archive`, `unarchive`, `snooze`, `mode` | `id`, `seconds`, `mode` | |
+| `archive`, `unarchive`, `snooze` | `id`, `seconds` (default 3600) | the open thread; says which thread it acted on |
+| `mode` | `mode` (`archive`, `snoozed`, `inbox`) | which list the sidebar shows |
 | `waitFor` | `row`, `kind`, `status` (and `thread`), `text`, `banner` (`""` for none), `connection`, `loaded`, `ready`, `not`, `timeout` | until every condition given holds (default 10 s) |
 | `dump` | `format` (`json`, `text`), `out` | |
-| `screenshot` | `path`, `inProcess` | `screencapture -l`, or drawn in-process when that gives no image; a dev-app instance always draws in-process (`shot` runs screencapture itself) |
+| `screenshot` | `path`, `inProcess` | `screencapture -l`, or drawn in-process when that gives no image; a dev-app instance always draws in-process (`shot` runs screencapture itself). `out` and `path` are refused under ~/Desktop, ~/Documents and ~/Downloads, where macOS would ask Mike to let the temp bundle in; `shot` and `dump` write in the instance's folder and move the file |
 | `window` | | the window's id (for `screencapture -l`) and size, once anything pending is drawn |
 | `focus` | `on` (default true) | acts as if the app were in front, so an open thread gets marked read as it would for Mike; never activates it |
-| `mock` | `method`, `params` | `mock.<method>` on the mock runner, such as `restartPending` and `restart` |
+| `mock` | `method`, `params` (an object) | `mock.<method>` on the mock runner, such as `restartPending` and `restart` |
 | `status`, `sidebar`, `streaming`, `account-ids`, `quit` | | |
 
 `Tools/drive.sh` posts commands without waiting (`THREADBARE_AUTOMATION_ID`

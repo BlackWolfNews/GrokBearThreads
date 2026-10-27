@@ -84,8 +84,13 @@ const COMMAND_FLAGS: Record<string, string[]> = {
   show: ['last', 'tools'],
   logs: ['lines', 'follow', 'thread'],
   export: ['out'],
-  rpc: ['force'],
+  rpc: [],
 };
+
+// Read but never listed when a command refuses a flag: an agent that sees
+// --force in "It takes ..." learns to cut every thread's work short (tb
+// restart --now --force) or withdraw someone else's deploy.
+const HIDDEN_FLAGS = new Set(['force']);
 
 // `tb show --help`: the help lines for that command (its usage line and
 // the indented lines under it), or undefined for a command it doesn't know.
@@ -122,7 +127,8 @@ async function main(argv: string[]): Promise<number> {
     const wrong = Object.keys(values).filter((k) => values[k as keyof typeof values] !== undefined && !allowed.includes(k));
     if (wrong.length) {
       const names = wrong.map((k) => `--${k}`).join(', ');
-      console.error(`tb ${cmd} doesn't take ${names}.${allowed.length ? ` It takes ${allowed.map((k) => `--${k}`).join(', ')}.` : ''}\nSee tb ${cmd} --help.`);
+      const shown = allowed.filter((k) => !HIDDEN_FLAGS.has(k));
+      console.error(`tb ${cmd} doesn't take ${names}.${shown.length ? ` It takes ${shown.map((k) => `--${k}`).join(', ')}.` : ''}\nSee tb ${cmd} --help.`);
       return 2;
     }
   }

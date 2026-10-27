@@ -73,6 +73,11 @@ enum Automation {
     static func startIfAsked(app: AppModel) {
         guard let path = argument(after: "--automation") else { return }
         instanceId = argument(after: "--automation-id")
+        // A dev-app.sh instance stays out of the Dock and the app switcher:
+        // Mike Cmd-Tabbing into one by mistake and typing into its composer
+        // would start a real turn on a dev runner. (dev-app.sh also marks
+        // its bundle LSUIElement, so it's never there even at launch.)
+        if instanceId != nil { NSApp.setActivationPolicy(.accessory) }
         let logURL = URL(fileURLWithPath: path)
         self.logURL = logURL
         FileManager.default.createFile(atPath: logURL.path, contents: nil)
@@ -160,12 +165,14 @@ enum Automation {
         let window = mainWindow
         switch name {
         case "select":
-            guard let id = thread(c["id"], app) else { return "error no such thread" }
+            let match = thread(c["id"], app)
+            guard let id = match.id else { return match.error }
             app.select(id)
             return "ok \(id)"
         case "open":
             // Select and wait until the thread's rows are on screen.
-            guard let id = thread(c["id"], app) else { return "error no such thread" }
+            let match = thread(c["id"], app)
+            guard let id = match.id else { return match.error }
             if let thread = app.threads[id] {
                 app.sidebarMode = thread.isArchived ? .archive : thread.isSnoozed(at: Date()) ? .snoozed : .inbox
             }
@@ -197,13 +204,30 @@ enum Automation {
         case "return":
             return pressReturn(window)
         case "send":
-            // Types `text` (if given) and presses Return, as Mike would.
+            // Types `text` (if given, replacing the draft with `replace` as
+            // `type` does) and presses Return, as Mike would.
             if let text = c["text"] as? String {
                 guard let composer = find(ComposerTextView.self, in: window?.contentView) else { return "error no composer" }
                 window?.makeFirstResponder(composer)
-                composer.insertText(text, replacementRange: composer.selectedRange())
+                let range = c["replace"] as? Bool == true ? NSRange(location: 0, length: (composer.string as NSString).length) : composer.selectedRange()
+                composer.insertText(text, replacementRange: range)
             }
-            return pressReturn(window)
+            let fromNew = app.selection == nil
+            let known = Set(app.threads.keys)
+            let pressed = pressReturn(window)
+            guard pressed == "ok" else { return pressed }
+            guard fromNew else { return "ok \(app.selection ?? "")" }
+            // From the new-thread composer: wait for the thread it made, so
+            // its id is there for tb show, tb export or waitFor's thread.
+            let wait = number(c["timeout"]) ?? 10
+            let deadline = Date().addingTimeInterval(wait)
+            while Date() < deadline {
+                if let id = app.selection, !known.contains(id) { return "ok \(id)" }
+                // A refused send puts the text back in the box with a banner.
+                if let message = app.errorMessage, app.drafts["new"].map({ !$0.text.isEmpty }) == true { return "error not sent: \(message)" }
+                try? await Task.sleep(for: .milliseconds(50))
+            }
+            return "error sent, but no new thread showed up within \(Int(wait)) s"
         case "paste-image":
             guard let path = c["path"] as? String,
                   let composer = find(ComposerTextView.self, in: window?.contentView) else { return "error no composer" }
@@ -220,15 +244,23 @@ enum Automation {
             button.performClick(nil)
             return "ok"
         case "archive":
-            app.archive()
-            return "ok"
+            // `id`, else the open thread. These used to ignore `id` and act
+            // on whatever was open, which against a dev runner archived (and
+            // interrupted) a thread the agent never named.
+            let target = target(c, app)
+            guard let id = target.id else { return target.error }
+            app.archive(id)
+            return "ok \(id)"
         case "unarchive":
-            guard let id = thread(c["id"], app) else { return "error no such thread" }
+            let target = target(c, app)
+            guard let id = target.id else { return target.error }
             app.unarchive(id)
-            return "ok"
+            return "ok \(id)"
         case "snooze":
-            app.snooze(until: Date().addingTimeInterval(number(c["seconds"]) ?? 3600))
-            return "ok"
+            let target = target(c, app)
+            guard let id = target.id else { return target.error }
+            app.snooze(id, until: Date().addingTimeInterval(number(c["seconds"]) ?? 3600))
+            return "ok \(id)"
         case "mode":
             switch c["mode"] as? String {
             case "archive": app.showArchive()
@@ -317,6 +349,7 @@ enum Automation {
             let dump = AppDump.make(app: app, window: window, instance: instanceId)
             let text = c["format"] as? String == "text" ? dump.text : dump.json(pretty: c["out"] != nil)
             guard let out = c["out"] as? String else { return "ok " + dump.json(pretty: false) }
+            if let refused = refusesToWrite(out) { return refused }
             do {
                 try text.write(toFile: out, atomically: true, encoding: .utf8)
             } catch {
@@ -325,6 +358,7 @@ enum Automation {
             return "ok \(out)"
         case "screenshot":
             guard let path = c["path"] as? String, path.hasPrefix("/") else { return "error path must be absolute" }
+            if let refused = refusesToWrite(path) { return refused }
             guard let window else { return "error no window" }
             // A dev-app.sh instance never runs screencapture itself: its temp
             // bundle has no Screen Recording permission (the capture is
@@ -356,11 +390,15 @@ enum Automation {
         case "menu":
             return menu(c, app: app)
         case "debug-info":
+            // What the row menu's "Copy debug info" copies, copied the same
+            // way (to this instance's pasteboard).
             guard let id = displayedRow(c["row"] as? String, app)?.id, let text = app.transcript.debugInfo(rowId: id) else { return "error no such row" }
+            app.copyToPasteboard(text)
             return "ok " + json(text)
         case "copy-thread-id":
             // What the ... menu's "Copy thread id" does.
-            guard let id = c["id"].flatMap({ thread($0, app) }) ?? app.selection else { return "error no thread" }
+            let target = target(c, app)
+            guard let id = target.id else { return target.error }
             app.copyToPasteboard(id)
             return "ok \(id)"
         case "clipboard":
@@ -430,11 +468,47 @@ enum Automation {
         }
     }
 
-    /// A thread by id or the start of one.
-    private static func thread(_ value: Any?, _ app: AppModel) -> String? {
-        guard let prefix = value as? String, !prefix.isEmpty else { return nil }
-        if app.threads[prefix] != nil { return prefix }
-        return app.threads.keys.sorted().first { $0.hasPrefix(prefix) }
+    /// The thread `value` names, by id or the start of one, or why not as
+    /// an error result. A start that matches several is an error, as in tb
+    /// and the threadbare tools: it used to take the first in sorted order.
+    static func thread(_ value: Any?, in threads: some Collection<String>) -> (id: String?, error: String) {
+        guard let prefix = value as? String, !prefix.isEmpty else { return (nil, "error id is a thread id or the start of one") }
+        if threads.contains(prefix) { return (prefix, "") }
+        let hits = threads.filter { $0.hasPrefix(prefix) }
+        if hits.count == 1 { return (hits.first, "") }
+        return (nil, hits.isEmpty ? "error no such thread \(prefix)" : "error \(prefix) matches \(hits.count) threads")
+    }
+
+    private static func thread(_ value: Any?, _ app: AppModel) -> (id: String?, error: String) {
+        thread(value, in: app.threads.keys)
+    }
+
+    /// The thread a command acts on: `id` when it's given (an error if it
+    /// doesn't name exactly one), else the open one.
+    static func target(_ c: [String: Any], threads: some Collection<String>, selection: String?) -> (id: String?, error: String) {
+        if let value = c["id"], !(value is NSNull) { return thread(value, in: threads) }
+        guard let selection else { return (nil, "error no thread: pass id, or open one first") }
+        return (selection, "")
+    }
+
+    private static func target(_ c: [String: Any], _ app: AppModel) -> (id: String?, error: String) {
+        target(c, threads: app.threads.keys, selection: app.selection)
+    }
+
+    /// The temp bundle has no privacy permissions, so writing into Desktop,
+    /// Documents or Downloads would put a macOS access prompt in front of
+    /// Mike's work (again for every instance). dev-app.sh's shot and dump
+    /// have the app write into the instance's folder and move the file from
+    /// the agent's shell.
+    static func refusesToWrite(_ path: String, home: String = NSHomeDirectory()) -> String? {
+        let full = URL(fileURLWithPath: path).standardizedFileURL.path
+        for folder in ["Desktop", "Documents", "Downloads"] {
+            let protected = URL(fileURLWithPath: home).appendingPathComponent(folder).standardizedFileURL.path
+            if full == protected || full.hasPrefix(protected + "/") {
+                return "error won't write into ~/\(folder): macOS would ask Mike to let this dev app in. Use a temp folder (dev-app.sh shot and dump move the file for you)"
+            }
+        }
+        return nil
     }
 
     /// A row on screen in the open thread, by id or the start of one.
@@ -507,7 +581,8 @@ enum Automation {
             hoveredCell = nil
             return "ok"
         }
-        guard let id = thread(value, app) else { return "error no such thread" }
+        let match = thread(value, app)
+        guard let id = match.id else { return match.error }
         app.hoverOverride = id
         return "ok \(id)"
     }
@@ -530,13 +605,8 @@ enum Automation {
     /// real runner answers belongs to `tb`.
     private static func mock(_ c: [String: Any], app: AppModel) async -> String {
         guard let method = c["method"] as? String, !method.isEmpty else { return "error no method" }
+        guard let params = mockParams(c["params"]) else { return "error params is an object" }
         guard let client = app.client else { return "error not connected" }
-        let params: JSONValue
-        if let raw = c["params"], let data = try? JSONSerialization.data(withJSONObject: raw), let value = try? JSONDecoder().decode(JSONValue.self, from: data) {
-            params = value
-        } else {
-            params = .object([:])
-        }
         do {
             let result = try await client.call("mock." + method, params, as: JSONValue.self)
             let data = (try? JSONEncoder().encode(result)) ?? Data()
@@ -544,6 +614,18 @@ enum Automation {
         } catch {
             return "error \(error.localizedDescription)"
         }
+    }
+
+    /// `params` for a mock call: an object, or nothing (null counts as
+    /// nothing). Anything else is refused here: JSONSerialization raises an
+    /// Objective-C exception for a top level that isn't an array or an
+    /// object, which `try?` can't catch, and that crashed the app.
+    static func mockParams(_ raw: Any?) -> JSONValue? {
+        guard let raw, !(raw is NSNull) else { return .object([:]) }
+        guard raw is [String: Any], JSONSerialization.isValidJSONObject(raw),
+              let data = try? JSONSerialization.data(withJSONObject: raw),
+              let value = try? JSONDecoder().decode(JSONValue.self, from: data) else { return nil }
+        return value
     }
 
     // MARK: waitFor

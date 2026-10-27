@@ -4,13 +4,36 @@
 # the real runner, the staged app in ~/Applications or its settings (the
 # build gets a bundle id of its own, removed afterwards), and the window
 # stays behind whatever you're working in.
+#
 #   Tools/screenshots.sh <out dir> [--only <prefix>] [--appearance light|dark]
+#
+#   --only 11      just the shots whose names start with 11
+#   --appearance   light or dark, whatever the Mac is set to
 set -euo pipefail
 
 TOOLS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 APP_ROOT="$(cd "$TOOLS_DIR/.." && pwd)"
-OUT_DIR="${1:?usage: Tools/screenshots.sh <out dir> [--only <prefix>]}"
-shift
+usage() { awk 'NR > 1 && /^#/ { sub(/^# ?/, ""); print; next } NR > 1 { exit }' "$0"; }
+
+# Options in any order. A first argument that looked like an option used to
+# become the output folder: --help ran the whole set into app/--help.
+OUT_DIR=""
+APP_ARGS=()
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -h|--help) usage; exit 0 ;;
+    --only|--appearance)
+      [ $# -ge 2 ] && [ "${2#-}" = "$2" ] || { echo "$1 needs a value" >&2; exit 2; }
+      APP_ARGS+=("$1" "$2")
+      shift ;;
+    -*) echo "Unknown option: $1" >&2; usage >&2; exit 2 ;;
+    *)
+      [ -z "$OUT_DIR" ] || { echo "One output folder, please (got $OUT_DIR and $1)." >&2; exit 2; }
+      OUT_DIR="$1" ;;
+  esac
+  shift
+done
+[ -n "$OUT_DIR" ] || { usage >&2; exit 2; }
 WORK="$(mktemp -d "${TMPDIR:-/tmp}/threadbare-shots.XXXXXX")"
 DATA_DIR="$WORK/data"
 mkdir -p "$DATA_DIR" "$OUT_DIR"
@@ -21,8 +44,10 @@ fi
 
 # A bundle (not the bare binary) so the app has its Info.plist, staged in the
 # temp folder rather than over the app Mike is using.
+# Its output (codesign's "replacing existing signature" and the like) goes
+# to a log, shown only if the build fails.
 THREADBARE_APP_DIR="$WORK/Threadbare.app" THREADBARE_BUILD_CONFIGURATION=debug \
-  bash "$APP_ROOT/build-app.sh" >/dev/null
+  bash "$APP_ROOT/build-app.sh" >"$WORK/build.log" 2>&1 || { tail -n 40 "$WORK/build.log" >&2; exit 1; }
 # Its own bundle id, so its own settings: with the installed app's id it
 # read Mike's saved sidebar width and account, and left the shots' window
 # size in his preferences. Re-signed ad hoc, since the plist is sealed.
@@ -48,4 +73,7 @@ for _ in $(seq 1 100); do
   sleep 0.05
 done
 
-"$WORK/Threadbare.app/Contents/MacOS/Threadbare" --data-dir "$DATA_DIR" --screenshots "$OUT_DIR" "$@"
+# AppKit's ApplePersistenceIgnoreState line on every run is noise; anything
+# else the app says still shows.
+"$WORK/Threadbare.app/Contents/MacOS/Threadbare" --data-dir "$DATA_DIR" --screenshots "$OUT_DIR" ${APP_ARGS[@]+"${APP_ARGS[@]}"} \
+  2> >(grep -v --line-buffered 'ApplePersistenceIgnoreState' >&2)

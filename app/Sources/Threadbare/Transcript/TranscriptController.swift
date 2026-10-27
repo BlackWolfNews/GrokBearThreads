@@ -652,7 +652,7 @@ final class TranscriptController: NSObject, NSTableViewDataSource, NSTableViewDe
     func debugInfo(rowId: String) -> String? {
         guard let session, let index = session.displayIndex(of: rowId), let row = row(at: index) else { return nil }
         return RowDebug.info(threadId: session.threadId, row: row, seqs: session.model.sourceSeqs(of: row.id),
-                             runnerVersion: session.app?.runnerVersion ?? "")
+                             runnerVersion: session.app?.runnerVersion ?? "", source: session.app?.eventsSource ?? .tb("tb"))
     }
 
     @objc private func toggleFromMenu(_ sender: NSMenuItem) {
