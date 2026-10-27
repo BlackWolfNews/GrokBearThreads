@@ -34,7 +34,7 @@ struct ProjectsList: View {
                     ForEach(built.sections) { section in
                         ProjectHeader(project: section.project, count: section.threads.count)
                         ForEach(section.threads.map { SectionRow(section: section.id, thread: $0) }) { row in
-                            ThreadRowView(thread: row.thread, mode: .projects) { select(row.thread.id) }
+                            ThreadRowView(thread: row.thread, mode: .projects, heading: section.project.id) { select(row.thread.id) }
                         }
                     }
                     if !built.unfiled.isEmpty {
