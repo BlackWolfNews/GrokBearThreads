@@ -973,8 +973,9 @@ export class Runner {
   // Asks a small model for a better title than the first line. Without a
   // key, in a private folder or over budget it says why and nothing
   // changes. A title set meanwhile (by Mike or an agent) wins.
-  private async titleFromModel(st: ThreadState, text: string): Promise<void> {
-    if (!this.models) return;
+  private async titleFromModel(st: ThreadState, text: string): Promise<{ title: string } | { reason: string }> {
+    if (!this.models) return { reason: 'Model calls are off in this runner.' };
+    const before = st.rec.title;
     const res = await this.models.generate({
       feature: 'titles',
       cwd: st.rec.cwd,
@@ -984,12 +985,51 @@ export class Runner {
       prompt: text.slice(0, 4000),
       maxTokens: 30,
     });
-    if (!res.ok || st.rt.deleted || st.rec.titleSet) return;
+    if (!res.ok) return { reason: res.message };
+    if (st.rt.deleted) return { reason: 'Deleted meanwhile.' };
+    if (st.rec.titleSet || st.rec.title !== before) return { reason: 'Renamed meanwhile.' };
     const title = cleanTitle(res.value);
-    if (!title) return;
+    if (!title) return { reason: 'The model gave no title.' };
     st.rec.title = title;
     st.rec.updatedAt = this.isoNow();
     this.markDirty(st);
+    return { title };
+  }
+
+  // Names the threads that started before there was a key (or whose call
+  // failed): the ones still titled with their first message's first line
+  // and never named by anyone. A model title doesn't set titleSet, so the
+  // first-line check is what keeps those from being asked again.
+  async retitle(params: { dryRun?: boolean }): Promise<{ threads: { threadId: string; from: string; to?: string; reason?: string }[] }> {
+    const due: { st: ThreadState; text: string }[] = [];
+    for (const st of this.threads.values()) {
+      if (st.rec.titleSet) continue;
+      const text = this.firstMessageText(st.rec.id);
+      const line = text?.split('\n').map((l) => l.trim()).find(Boolean);
+      // titleFrom cut it at some length; an older runner may have cut it elsewhere.
+      if (line && st.rec.title && line.startsWith(st.rec.title)) due.push({ st, text: text! });
+    }
+    const threads = await Promise.all(
+      due.map(async ({ st, text }) => {
+        const from = st.rec.title;
+        if (params.dryRun) return { threadId: st.rec.id, from };
+        const r = await this.titleFromModel(st, text);
+        return 'title' in r ? { threadId: st.rec.id, from, to: r.title } : { threadId: st.rec.id, from, reason: r.reason };
+      }),
+    );
+    this.log.info('retitle', { dryRun: Boolean(params.dryRun), found: threads.length, named: threads.filter((t) => t.to).length });
+    return { threads };
+  }
+
+  // The first user.message's text, read a page at a time: it's nearly
+  // always the first event, and a long thread's log is large.
+  private firstMessageText(id: string): string | undefined {
+    const log = this.store.log(id);
+    for (let from = 1; from <= log.lastSeq; from += 50) {
+      const msg = log.read(from, from + 49).find((e) => e.type === 'user.message');
+      if (msg && msg.type === 'user.message') return msg.text;
+    }
+    return undefined;
   }
 
   // origin "runner" marks a message the runner sends by itself (restart.ts),

@@ -33,6 +33,7 @@ const OPTIONS = {
   field: { type: 'string', multiple: true },
   system: { type: 'string' },
   remove: { type: 'boolean' },
+  'dry-run': { type: 'boolean' },
   // tb-dev.ts
   last: { type: 'string' },
   tools: { type: 'boolean' },
@@ -82,6 +83,7 @@ const HELP = `tb: talk to the Threadbare runner
   tb models try <job> "text" [--labels a,b] [--field name=description]... [--system S] [--cwd DIR]
                                   one call by hand: classify (--labels), extract (--field),
                                   summarize or generate. It spends like any other
+  tb retitle [--dry-run] [--json] a model title for every thread still named by its first line
 
 Thread ids can be shortened to any unique prefix.
 Uses THREADBARE_HOME and THREADBARE_PORT like the runner does.
@@ -419,6 +421,22 @@ async function run(client: RunnerClient, cmd: string, args: string[], f: Flags):
     }
     case 'models':
       return modelsCommand(client, args, f);
+    case 'retitle': {
+      const dryRun = Boolean(f['dry-run']);
+      const r = await client.call<{ threads: { threadId: string; from: string; to?: string; reason?: string }[] }>('threads.retitle', { dryRun });
+      if (f.json) {
+        console.log(JSON.stringify(r.threads, null, 2));
+        return 0;
+      }
+      if (!r.threads.length) console.log('Every thread already has a name.');
+      for (const t of r.threads) {
+        const what = dryRun ? '' : t.to ? `  ->  ${t.to}` : `  (kept: ${t.reason})`;
+        console.log(`${t.threadId.slice(0, 8)}  ${t.from}${what}`);
+      }
+      const named = r.threads.filter((t) => t.to).length;
+      if (r.threads.length) console.log(dryRun ? `\n${r.threads.length} to name. Run tb retitle to name them.` : `\nNamed ${named} of ${r.threads.length}.`);
+      return named === r.threads.length || dryRun ? 0 : 1;
+    }
     default: {
       const code = await runDev(client, cmd, args, f, (prefix) => resolveId(client, prefix));
       if (code !== undefined) return code;

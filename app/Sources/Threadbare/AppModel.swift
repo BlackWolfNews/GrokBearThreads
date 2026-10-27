@@ -56,7 +56,7 @@ final class AppModel {
     var sidebarMode: SidebarMode = .inbox
     var archiveQuery = ""
     /// Archived threads are in `threads` (the first list includes them, for
-    /// the Archive count in the sidebar's footer).
+    /// the Archive view's count).
     var archiveLoaded = false
     var errorMessage: String?
     var focusComposer = 0
@@ -304,7 +304,7 @@ final class AppModel {
                 refreshRunnerStatus()
                 clearConnectionError()
                 backoff.reset()
-                // Archived threads come too: the sidebar's footer shows how
+                // Archived threads come too: the Archive view shows how
                 // many there are, and they open as fast as live ones.
                 let list = try await client.listThreads(include: [.inbox, .snoozed, .archived])
                 var fresh: [String: ThreadSummary] = [:]

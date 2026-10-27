@@ -371,6 +371,61 @@ test('titles: a model title replaces the first line, unless one was set meanwhil
   assert.equal(h3.runner.get(t3.id)!.title, 'first line');
 });
 
+test('titles: retitle names the threads still on their first line, and only those', async () => {
+  // No key at first, so every thread keeps its first line, as before there was one.
+  let keyed = false;
+  const asked: string[] = [];
+  const models = {
+    generate: async (p: any) => {
+      if (!keyed) return { ok: false as const, reason: 'no-key' as const, message: 'No key' };
+      asked.push(p.prompt);
+      if (p.prompt.startsWith('client')) return { ok: false as const, reason: 'private' as const, message: 'private folder' };
+      return { ok: true as const, value: `Named: ${p.prompt.split('\n')[0].slice(0, 20)}`, model: HAIKU };
+    },
+  };
+  const h = makeHarness(undefined, {}, { models });
+  const make = (text: string, extra: Record<string, unknown> = {}) => h.runner.create({ text, accountId: 'claude-3', ...extra }).thread.id;
+  const plain = make('can you look at why the upload test keeps failing on CI');
+  const long = make('x'.repeat(90) + '\nsecond line');
+  const archived = make('tidy the readme');
+  h.runner.update({ threadId: archived, archived: true });
+  const given = make('started by a schedule', { title: 'Morning digest' });
+  const renamed = make('something I renamed');
+  h.runner.update({ threadId: renamed, title: 'My name for it' });
+  const client = make('client work in a private folder');
+  await tick();
+
+  // Already named by a model: its title no longer matches its first line.
+  keyed = true;
+  const named = make('this one got a model title when it started');
+  await tick();
+  assert.equal(h.runner.get(named).title, 'Named: this one got a model');
+  asked.length = 0;
+
+  const dry = await h.runner.retitle({ dryRun: true });
+  assert.deepEqual(dry.threads.map((t) => t.threadId).sort(), [plain, long, archived, client].sort());
+  assert.ok(dry.threads.every((t) => t.to === undefined && t.reason === undefined));
+  assert.equal(asked.length, 0, 'a dry run asks nothing');
+
+  const res = await h.runner.retitle({});
+  const by = new Map(res.threads.map((t) => [t.threadId, t]));
+  assert.equal(by.get(plain)!.from, 'can you look at why the upload test keeps failing on CI');
+  assert.equal(by.get(plain)!.to, 'Named: can you look at why');
+  assert.equal(h.runner.get(plain).title, 'Named: can you look at why');
+  assert.equal(h.runner.get(long).title, 'Named: xxxxxxxxxxxxxxxxxxxx', 'a first line cut to 60 characters still counts');
+  assert.equal(h.runner.get(archived).title, 'Named: tidy the readme');
+  assert.equal(by.get(client)!.reason, 'private folder');
+  assert.equal(h.runner.get(client).title, 'client work in a private folder');
+  for (const id of [given, renamed, named]) assert.ok(!by.has(id));
+  assert.equal(h.runner.get(given).title, 'Morning digest');
+  assert.equal(h.runner.get(renamed).title, 'My name for it');
+
+  // Run again: only the one that failed is left.
+  asked.length = 0;
+  const again = await h.runner.retitle({});
+  assert.deepEqual(again.threads.map((t) => t.threadId), [client]);
+});
+
 test('titles: cleanTitle tidies what a model says', () => {
   assert.equal(cleanTitle('Title: "Ship the settings window."'), 'Ship the settings window');
   assert.equal(cleanTitle('\n**Debug flaky CI**\nextra'), 'Debug flaky CI');
