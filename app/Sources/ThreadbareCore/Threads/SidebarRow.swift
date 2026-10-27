@@ -35,7 +35,9 @@ public enum ThreadRowStatus: Sendable, Equatable {
 public struct ThreadRowLook: Sendable, Equatable {
     public var status: ThreadRowStatus
     /// Finished and not looked at yet: a small accent dot before the title.
-    /// A thread waiting on Mike says so in words instead.
+    /// A thread waiting on Mike says so in words instead. Not while
+    /// sub-agents or jobs are still going either: a dot by the spinner
+    /// looked like two states at once, so it comes when they've finished.
     public var unread: Bool
     /// Semibold title: the thread needs Mike or is unread.
     public var emphasised: Bool
@@ -65,7 +67,7 @@ public struct ThreadRowLook: Sendable, Equatable {
             case .idle: status = thread.background.isEmpty ? .time : .background
             }
         }
-        unread = thread.needsYou && status != .needsYou && status != .working
+        unread = thread.needsYou && status != .needsYou && status != .working && status != .background
         emphasised = thread.needsYou || status == .needsYou
         labelled = !(status == .working && section == .running)
     }

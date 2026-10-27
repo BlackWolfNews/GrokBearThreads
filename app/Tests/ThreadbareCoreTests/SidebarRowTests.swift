@@ -8,7 +8,9 @@ final class SidebarRowTests: XCTestCase {
 
     /// Between turns with sub-agents or jobs still going, the row says so
     /// (and keeps saying so under the Running heading, since the words are
-    /// what's running, not the heading's). An unread reply keeps its dot.
+    /// what's running, not the heading's). An unread reply waits for its
+    /// dot until the work's done: a dot by a spinner read as two states at
+    /// once (Mike, 27 Oct). The bold title still says there's a reply.
     func testBackgroundWorkShowsOnTheRow() {
         let cubs = [BackgroundTask(kind: .agent, description: "a"), BackgroundTask(kind: .agent, description: "b"), BackgroundTask(kind: .agent, description: "c")]
         let thread = ThreadSummary(id: "t", title: "t", status: .idle, background: cubs)
@@ -16,7 +18,9 @@ final class SidebarRowTests: XCTestCase {
         XCTAssertEqual(ThreadRowLook(thread, section: .running), ThreadRowLook(status: .background, unread: false, emphasised: false, labelled: true))
         var unread = thread
         unread.needsYou = true
-        XCTAssertEqual(ThreadRowLook(unread), ThreadRowLook(status: .background, unread: true, emphasised: true))
+        XCTAssertEqual(ThreadRowLook(unread), ThreadRowLook(status: .background, unread: false, emphasised: true))
+        unread.background = []
+        XCTAssertEqual(ThreadRowLook(unread), ThreadRowLook(status: .time, unread: true, emphasised: true))
         // A running turn is the working line, whatever's in the background.
         var running = thread
         running.status = .running
