@@ -81,6 +81,17 @@ extension AppModel {
 
     func limitAdvice(for thread: ThreadSummary) -> LimitAdvice? {
         let account = account(thread.accountId)
+        // A pool thread is the runner's to move: say nothing while its pool
+        // has a login with room, and say when it carries on once it's
+        // waiting. The button still offers a login outside the pool, which
+        // pins it there.
+        if usesPools, let poolId = thread.poolId, let pool = pool(poolId) {
+            if let waiting = thread.waitingForRoom {
+                return LimitAdvice(text: Pools.waitingSentence(poolTitle: pool.title, waiting, now: now),
+                                   target: AccountUsageText.switchTarget(accounts, from: thread.accountId))
+            }
+            if Pools.logins(pool, accounts: accounts).contains(where: Pools.hasRoom) { return nil }
+        }
         let blocked = account?.usage?.blocked == true
         // Only while the thread is still on the account the turn failed on:
         // after "Switch to ..." the status stays `error` until the next

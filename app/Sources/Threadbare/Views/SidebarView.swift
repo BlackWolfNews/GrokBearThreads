@@ -312,6 +312,10 @@ struct ThreadRowView: View {
         if mode == .snoozed, let until = thread.snoozedUntil {
             return "Back \(RelativeTime.until(until, now: app.now))"
         }
+        // Every login in its pool is out of room; it carries on by itself.
+        if let waiting = thread.waitingForRoom, !thread.isArchived {
+            return Pools.waitingLine(waiting, now: app.now)
+        }
         let preview = PreviewText.plain(thread.preview)
         return preview.isEmpty ? nil : preview
     }

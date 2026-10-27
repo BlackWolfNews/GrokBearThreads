@@ -389,17 +389,21 @@ private struct NewThreadHeading: View {
 }
 
 /// "Starts in misc on cannstudios": the folder and account the composer's
-/// menus are set to.
+/// menus are set to. With pools, "on the Claude pool", or the login a
+/// pinned draft is on.
 private struct NewThreadNote: View {
     @Environment(AppModel.self) private var app
 
     var body: some View {
         let cwd = app.newThreadCwd ?? app.defaults.cwd
         let account = app.newThreadAccountId
-        Text("Starts in \(FolderName.short(cwd)) on \(app.accountShortTitle(account))")
+        let pool = app.newThreadPoolId.flatMap(app.pool)
+        let on = pool.map { "the \($0.title) pool" }
+            ?? (app.usesPools ? AccountName.login(account, accounts: app.accounts) : app.accountShortTitle(account))
+        Text("Starts in \(FolderName.short(cwd)) on \(on)")
             .font(.system(size: TypeScale.label))
             .foregroundStyle(Color(nsColor: Theme.faintText))
-            .help("\(cwd.abbreviatingHome) on \(app.accountTitle(account))")
+            .help("\(cwd.abbreviatingHome) on " + (pool.map { "the \($0.title) pool, which picks the login" } ?? app.accountTitle(account)))
             .frame(maxWidth: .infinity)
     }
 }
@@ -468,12 +472,21 @@ private struct LimitBanner: View {
 
     var body: some View {
         if let advice = app.limitAdvice(for: thread) {
+            // A pool thread waiting for room carries on by itself: a quiet
+            // clock rather than the red limit gauge, and the button pins it
+            // to a login outside the pool, so it says so.
+            let waiting = thread.waitingForRoom != nil && app.usesPools
             HStack(spacing: zoomed(8)) {
-                Image(systemName: "gauge.with.dots.needle.100percent").foregroundStyle(.red)
+                if waiting {
+                    Image(systemName: "clock").foregroundStyle(.secondary)
+                } else {
+                    Image(systemName: "gauge.with.dots.needle.100percent").foregroundStyle(.red)
+                }
                 Text(advice.text).lineLimit(1)
                 Spacer(minLength: zoomed(6))
                 if let target = advice.target {
-                    Button(AccountUsageText.switchTitle(target, accounts: app.accounts)) {
+                    let title = AccountUsageText.switchTitle(target, accounts: app.accounts)
+                    Button(waiting ? title.replacingOccurrences(of: "Switch to", with: "Pin to") : title) {
                         app.switchAccount(thread.id, to: target.id)
                     }
                 }

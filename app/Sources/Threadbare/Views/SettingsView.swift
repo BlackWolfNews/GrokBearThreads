@@ -17,6 +17,9 @@ struct SettingsView: View {
             ModelSettings()
                 .tabItem { Label("Models", systemImage: "sparkles") }
                 .tag(SettingsTab.models)
+            PoolSettings()
+                .tabItem { Label("Pools", systemImage: "square.stack") }
+                .tag(SettingsTab.pools)
         }
         .frame(width: 540)
         .background(SettingsWindowFinder())
@@ -291,6 +294,301 @@ private struct ModelSettings: View {
             if !folders.contains(folder) { folders.append(folder) }
         }
         app.updateSettings(SettingsUpdate(privateFolders: folders))
+    }
+}
+
+// MARK: Pools
+
+/// Settings › Pools (docs/pools-plan.md): the pools, and for the one picked,
+/// its name, which logins are in it and in what order, and the folders
+/// whose new threads start on it. A change is saved (`pools.save`, which
+/// writes runner.json) as soon as the list is one the runner would take;
+/// until then the window says what's missing.
+private struct PoolSettings: View {
+    @Environment(AppModel.self) private var app
+    /// What's shown, which can run ahead of the runner's list while a new
+    /// pool has no logins yet.
+    @State private var draft: [Pool] = []
+    @State private var selected: String?
+    @State private var titleDraft = ""
+
+    var body: some View {
+        if !app.poolsSupported {
+            Form {
+                Text(app.connection == .connected ? "This runner is too old for pools. It gets them when it next updates." : "Not connected to the runner.")
+                    .foregroundStyle(.secondary)
+            }
+            .formStyle(.grouped)
+            .frame(height: 140)
+        } else {
+            form
+                .onAppear { reset(to: app.pools) }
+                // The runner's list wins, unless Mike is part way through
+                // a change it wouldn't take yet.
+                .onChange(of: app.pools) { _, pools in
+                    if Pools.problem(draft, accounts: app.accounts) == nil { reset(to: pools) }
+                }
+        }
+    }
+
+    private var form: some View {
+        Form {
+            Section {
+                ForEach(draft) { pool in
+                    PoolListRow(pool: pool, accounts: app.accounts, selected: pool.id == selected) { choose(pool.id) }
+                }
+                HStack(spacing: 8) {
+                    Button("Add Pool", action: add)
+                    Spacer()
+                    if let pool = current {
+                        Button("Delete \(pool.title)…") { delete(pool) }
+                            .disabled(draft.count < 2)
+                    }
+                }
+            } header: {
+                Text("Pools")
+            } footer: {
+                Footnote("A new thread starts on its folder's pool, or else the one you picked last. The pool picks a login with room for each turn and moves the thread when one runs out.")
+            }
+
+            if let pool = current {
+                Section {
+                    LabeledContent("Name") {
+                        TextField("Name", text: $titleDraft)
+                            .labelsHidden()
+                            .textFieldStyle(.roundedBorder)
+                            .frame(maxWidth: 220)
+                            .onSubmit(commitTitle)
+                    }
+                }
+
+                Section {
+                    let list = Pools.loginList(pool, accounts: app.accounts)
+                    ForEach(list, id: \.account.id) { entry in
+                        LoginToggleRow(account: entry.account, accounts: app.accounts, included: entry.included,
+                                       canMoveUp: entry.included && pool.accountIds.first != entry.account.id,
+                                       canMoveDown: entry.included && pool.accountIds.last != entry.account.id,
+                                       toggle: { change(Pools.setting(pool, login: entry.account.id, included: $0)) },
+                                       move: { change(Pools.moving(pool, login: entry.account.id, by: $0)) },
+                                       drop: { change(Pools.moving(pool, login: $0, onto: entry.account.id)) })
+                    }
+                } header: {
+                    Text("Logins")
+                } footer: {
+                    Footnote("The order decides which provider a mixed pool tries first. Within one provider, the login with the most room runs the turn.")
+                }
+
+                Section {
+                    if pool.folders.isEmpty {
+                        Text("None")
+                            .foregroundStyle(.secondary)
+                    }
+                    ForEach(pool.folders, id: \.self) { folder in
+                        HStack {
+                            Image(systemName: "folder")
+                                .foregroundStyle(.secondary)
+                            Text(folder)
+                                .lineLimit(1)
+                                .truncationMode(.middle)
+                            Spacer()
+                            Button {
+                                var changed = pool
+                                changed.folders.removeAll { $0 == folder }
+                                change(changed)
+                            } label: {
+                                Image(systemName: "minus.circle")
+                            }
+                            .buttonStyle(.borderless)
+                            .help("Remove")
+                        }
+                    }
+                    Button("Add Folder…") { addFolders(to: pool) }
+                } header: {
+                    Text("Folders")
+                } footer: {
+                    Footnote("A new thread in one of these, or in a folder inside one, starts on \(pool.title).")
+                }
+            }
+
+            if let problem = Pools.problem(draft, accounts: app.accounts) {
+                Section {
+                    Label(problem, systemImage: "info.circle")
+                        .foregroundStyle(.secondary)
+                }
+            } else if let error = app.poolsError {
+                Section {
+                    Label(error, systemImage: "exclamationmark.triangle")
+                        .foregroundStyle(.red)
+                }
+            }
+        }
+        .formStyle(.grouped)
+        .fixedSize(horizontal: false, vertical: true)
+        .scrollIndicators(.never)
+        .scrollDisabled(true)
+    }
+
+    private var current: Pool? { draft.first { $0.id == selected } ?? draft.first }
+
+    private func reset(to pools: [Pool]) {
+        draft = pools
+        if selected == nil || !pools.contains(where: { $0.id == selected }) { selected = pools.first?.id }
+        titleDraft = current?.title ?? ""
+    }
+
+    private func choose(_ id: String) {
+        commitTitle()
+        selected = id
+        titleDraft = current?.title ?? ""
+    }
+
+    /// Replaces one pool in the draft, and saves the draft if the runner
+    /// would take it.
+    private func change(_ pool: Pool) {
+        guard let index = draft.firstIndex(where: { $0.id == pool.id }) else { return }
+        draft[index] = pool
+        save()
+    }
+
+    private func save() {
+        guard Pools.problem(draft, accounts: app.accounts) == nil else { return }
+        let list = draft
+        Task { await app.savePools(list) }
+    }
+
+    private func commitTitle() {
+        guard var pool = current else { return }
+        let title = titleDraft.trimmingCharacters(in: .whitespaces)
+        guard !title.isEmpty, title != pool.title else { return }
+        pool.title = title
+        change(pool)
+    }
+
+    private func add() {
+        commitTitle()
+        let pool = Pool(id: Pools.newId(title: "New pool", taken: draft.map(\.id)), title: "New pool", accountIds: [])
+        draft.append(pool)
+        selected = pool.id
+        titleDraft = pool.title
+    }
+
+    private func delete(_ pool: Pool) {
+        let alert = NSAlert()
+        alert.messageText = "Delete \(pool.title)?"
+        alert.informativeText = "Threads on it carry on with the login they're on, pinned to it."
+        alert.addButton(withTitle: "Delete")
+        alert.addButton(withTitle: "Cancel")
+        alert.buttons.first?.hasDestructiveAction = true
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        draft.removeAll { $0.id == pool.id }
+        selected = draft.first?.id
+        titleDraft = current?.title ?? ""
+        save()
+    }
+
+    private func addFolders(to pool: Pool) {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.allowsMultipleSelection = true
+        panel.prompt = "Add"
+        guard panel.runModal() == .OK else { return }
+        var changed = pool
+        for url in panel.urls {
+            let folder = SettingsText.folder(url.path)
+            if !changed.folders.contains(folder) { changed.folders.append(folder) }
+        }
+        change(changed)
+    }
+}
+
+/// A pool in Settings' list: its name, and its logins and folders in grey.
+private struct PoolListRow: View {
+    let pool: Pool
+    let accounts: [Account]
+    let selected: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 8) {
+                Text(pool.title)
+                    .foregroundStyle(.primary)
+                    .layoutPriority(1)
+                Spacer(minLength: 12)
+                Text(detail)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                Image(systemName: "checkmark")
+                    .foregroundStyle(.secondary)
+                    .opacity(selected ? 1 : 0)
+                    .accessibilityHidden(!selected)
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(pool.title + (selected ? ", showing" : ""))
+    }
+
+    /// "gangbusters, gmail, cannstudios · ~/dev/convex".
+    private var detail: String {
+        let logins = pool.accountIds.map { AccountName.login($0, accounts: accounts) }
+        var text = logins.isEmpty ? "No logins yet" : logins.joined(separator: ", ")
+        if !pool.folders.isEmpty { text += " · " + pool.folders.joined(separator: ", ") }
+        return text
+    }
+}
+
+/// A login in a pool: ticked if it's in, dragged (or moved with its
+/// arrows) into order.
+private struct LoginToggleRow: View {
+    let account: Account
+    let accounts: [Account]
+    let included: Bool
+    let canMoveUp: Bool
+    let canMoveDown: Bool
+    let toggle: (Bool) -> Void
+    let move: (Int) -> Void
+    /// Another ticked login dropped here takes this one's place.
+    let drop: (String) -> Void
+
+    var body: some View {
+        row
+            // Ticked logins drag into order; the arrows do the same for
+            // anyone who'd rather click.
+            .draggable(account.id)
+            .dropDestination(for: String.self) { ids, _ in
+                guard included, let id = ids.first, id != account.id else { return false }
+                drop(id)
+                return true
+            }
+    }
+
+    private var row: some View {
+        HStack(spacing: 6) {
+            Toggle(isOn: Binding(get: { included }, set: toggle)) {
+                Text(AccountName.title(account)) + Text("  " + detail).foregroundStyle(.secondary)
+            }
+            .toggleStyle(.checkbox)
+            .lineLimit(1)
+            Spacer()
+            if included {
+                Button { move(-1) } label: { Image(systemName: "chevron.up") }
+                    .buttonStyle(.borderless)
+                    .disabled(!canMoveUp)
+                    .help("Earlier in the order")
+                Button { move(1) } label: { Image(systemName: "chevron.down") }
+                    .buttonStyle(.borderless)
+                    .disabled(!canMoveDown)
+                    .help("Later in the order")
+            }
+        }
+    }
+
+    /// "Claude · Convex work only".
+    private var detail: String {
+        [ModelPicker.providerTitle(account.provider), account.note].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · ")
     }
 }
 

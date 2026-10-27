@@ -72,7 +72,23 @@ final class AppModel {
     var newThreadCwd: String?
     /// The account Mike picked for the next new thread, for that draft only:
     /// with none picked it's the one with the most room (`newThreadAccountId`).
+    /// With pools, a pick here pins the new thread to that login.
     var newThreadAccount: String?
+    /// The runner's pools (docs/pools-plan.md), in its order. Replaced whole
+    /// by `pools.updated`.
+    var pools: [Pool] = []
+    /// The runner has pools. False for an older one, which sends none in
+    /// hello: then the composer keeps its account chip and the picker's
+    /// rail lists providers, as before.
+    var poolsSupported = false
+    /// The pool Mike picked for the next new thread, for that draft only.
+    /// With none, the folder's pool or the one he last picked
+    /// (`newThreadPoolId`).
+    var newThreadPool: String?
+    /// The provider whose model Mike picked for the draft in a mixed pool.
+    var newThreadProvider: String?
+    /// Why the last `pools.save` didn't take, for Settings › Pools.
+    var poolsError: String?
     /// The last model and effort picked, per provider ("claude", "codex"),
     /// kept across launches: a Codex model is no use to a Claude thread.
     private(set) var lastModels: [String: String] = AppModel.loadMemory(AppModel.lastModelKey)
@@ -95,6 +111,9 @@ final class AppModel {
     var modelPickerRequest = 0
     /// The same for the account picker.
     var accountPickerRequest = 0
+    /// The model picker's "Pin to a login" list is open. On the model, so
+    /// the automation and the screenshots can open it as a click does.
+    var pickerShowsLogins = false
     /// Every schedule, in the runner's order (soonest first, then the
     /// paused and finished ones). Replaced whole by `schedules.updated`.
     var schedules: [Schedule] = []
@@ -183,6 +202,10 @@ final class AppModel {
 
     static let maxSessions = 24
     static let lastAccountKey = "lastAccountId"
+    /// The last pool Mike picked, and the provider he last picked a model
+    /// of in each pool (a mixed one has two).
+    static let lastPoolKey = "lastPoolId"
+    static let lastPoolProvidersKey = "lastPoolProviders"
     /// Claude's keys keep their old names, so a model picked before Codex
     /// came along is still remembered; other providers add ".<provider>".
     static let lastModelKey = "lastModel"
@@ -226,7 +249,14 @@ final class AppModel {
     /// (`AccountUsageText.pickAccount`, the runner's rule too). Follows
     /// `accounts.updated`, so it moves as usage does until he picks one.
     var newThreadAccountId: String {
-        newThreadAccount ?? AccountUsageText.pickAccount(accounts, lastUsedId: lastAccountId) ?? lastAccountId
+        if let newThreadAccount { return newThreadAccount }
+        // With pools, the login the runner would pick in the new thread's
+        // pool, so the picker lists that provider's models.
+        if let poolId = newThreadPoolId, let pool = pool(poolId) {
+            let provider = newThreadProvider(in: poolId)
+            if let login = Pools.pickLogin(pool, accounts: accounts, provider: provider, current: lastAccountId(provider: provider)) { return login }
+        }
+        return AccountUsageText.pickAccount(accounts, lastUsedId: lastAccountId) ?? lastAccountId
     }
 
     func provider(ofAccount id: String) -> String { account(id)?.provider ?? "claude" }
@@ -314,6 +344,10 @@ final class AppModel {
                 clis = hello.clis
                 clisSupported = hello.clis.isEmpty ? nil : true
                 runnerUpdates = hello.updates
+                // An older runner sends no pools; the app then works as it
+                // did before them.
+                pools = hello.pools ?? []
+                poolsSupported = hello.pools != nil
                 if hello.clis.isEmpty { loadClis() }
                 lastDownReason = nil
                 AppLog.write("connection", "connected to runner \(hello.runnerVersion) at \(endpoint.url.absoluteString)")
@@ -395,6 +429,9 @@ final class AppModel {
                 // default it saw a turn run on, new usage): replaces
                 // hello's list.
                 accounts = list
+            case .poolsUpdated(let list):
+                pools = list
+                poolsSupported = true
             case .clisUpdated(let list):
                 clis = list
                 clisSupported = true
@@ -662,22 +699,22 @@ final class AppModel {
             }
         } else {
             let account = newThreadAccountId
-            let provider = provider(ofAccount: account)
-            let request = NewThreadRequest(
-                text: trimmed, images: draft.images, cwd: newThreadCwd ?? defaults.cwd, accountId: account,
-                model: lastModels[provider], effort: lastEfforts[provider], permissionMode: newThreadAsk ? .ask : .full
-            )
+            let request = newThreadRequest(text: trimmed, images: draft.images)
             Task {
                 do {
                     let thread = try await client.createThread(request)
-                    rememberLastAccount(account)
+                    // In a pool the runner picked the login; that's the one
+                    // that counts as used.
+                    rememberLastAccount(request.poolId == nil ? account : thread.accountId)
                     // The folder, "Ask before edits" and a picked account
-                    // were for this thread; the next one starts from the
-                    // defaults again, on whichever account then has the
-                    // most room. The model and effort stick.
+                    // or pool were for this thread; the next one starts
+                    // from the defaults again, on whichever account then
+                    // has the most room. The model and effort stick.
                     newThreadCwd = nil
                     newThreadAsk = false
                     newThreadAccount = nil
+                    newThreadPool = nil
+                    newThreadProvider = nil
                     threads[thread.id] = thread
                     select(thread.id)
                 } catch {
