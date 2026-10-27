@@ -82,7 +82,11 @@ extension AppModel {
     func limitAdvice(for thread: ThreadSummary) -> LimitAdvice? {
         let account = account(thread.accountId)
         let blocked = account?.usage?.blocked == true
-        let failedOnLimit = thread.status == .error && loadedSession(thread.id)?.lastTurnErrorKind == .usageLimit
+        // Only while the thread is still on the account the turn failed on:
+        // after "Switch to ..." the status stays `error` until the next
+        // turn, and the line blamed the new account.
+        let failedOnLimit = thread.status == .error && failedOnAccount[thread.id] == thread.accountId
+            && loadedSession(thread.id)?.lastTurnErrorKind == .usageLimit
         guard blocked || failedOnLimit else { return nil }
         var text = "\(accountShortTitle(thread.accountId)) has reached its limit"
         if let reset = AccountUsageText.mainWindows(account?.usage).filter({ $0.remainingPercent < 1 }).compactMap(\.resetsAt).min() {

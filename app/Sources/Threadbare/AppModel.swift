@@ -34,8 +34,16 @@ final class AppModel {
     var accounts: [Account] = []
     var defaults = RunnerDefaults(cwd: NSString("~/dev/me/misc").expandingTildeInPath, accountId: "claude-main")
     var threads: [String: ThreadSummary] = [:] {
-        didSet { refreshDockBadge() }
+        didSet {
+            refreshDockBadge()
+            noteFailedAccounts(from: oldValue)
+        }
     }
+    /// For a thread whose last turn failed: the account it failed on, as it
+    /// was when the thread went into `error`. Moving the thread to another
+    /// account doesn't clear the status, so this is how the limit line
+    /// knows the new account isn't the one that ran out.
+    @ObservationIgnored private(set) var failedOnAccount: [String: String] = [:]
     var selection: String?
     var sidebarMode: SidebarMode = .inbox
     var archiveQuery = ""
@@ -539,7 +547,7 @@ final class AppModel {
             Task {
                 do {
                     let thread = try await client.createThread(request)
-                    UserDefaults.standard.set(account, forKey: Self.lastAccountKey)
+                    rememberLastAccount(account)
                     // The folder, "Ask before edits" and a picked account
                     // were for this thread; the next one starts from the
                     // defaults again, on whichever account then has the
@@ -640,8 +648,56 @@ final class AppModel {
     }
 
     func setAccount(_ threadId: String, _ accountId: String) {
-        UserDefaults.standard.set(accountId, forKey: Self.lastAccountKey)
+        rememberLastAccount(accountId)
         update(threadId, ThreadUpdate(accountId: accountId))
+    }
+
+    /// A model picked from another provider's column: the account and the
+    /// model in one `threads.update`, so they can't arrive in the wrong
+    /// order (two calls from two tasks could, and the pick was lost), and
+    /// the model remembered under the provider it was picked from, not the
+    /// one the thread was on. The provider's remembered effort goes too,
+    /// since the runner resets effort on a provider change.
+    func moveThread(_ threadId: String, toAccount accountId: String, model: String?) {
+        let provider = provider(ofAccount: accountId)
+        rememberLastAccount(accountId)
+        remember(model: model, provider: provider)
+        var change = ThreadUpdate(accountId: accountId, model: .some(model))
+        if let effort = lastEfforts[provider] { change.effort = .some(effort) }
+        update(threadId, change)
+    }
+
+    /// The last account used, overall (what `pickAccount` starts from) and
+    /// per provider (which account another provider's column moves to).
+    func rememberLastAccount(_ accountId: String) {
+        UserDefaults.standard.set(accountId, forKey: Self.lastAccountKey)
+        UserDefaults.standard.set(accountId, forKey: Self.memoryKey(Self.lastAccountKey, provider: provider(ofAccount: accountId)) + ".byProvider")
+    }
+
+    func lastAccountId(provider: String) -> String? {
+        UserDefaults.standard.string(forKey: Self.memoryKey(Self.lastAccountKey, provider: provider) + ".byProvider")
+    }
+
+    /// The account a pick in a provider's column moves to: that provider's
+    /// account with the most room (`pickAccount` over its accounts alone,
+    /// from the last one used there), never a noted, blocked or nearly
+    /// empty one while a better one exists; the provider's first account
+    /// when nothing is known.
+    func accountForProvider(_ provider: String) -> String? {
+        let own = accounts.filter { $0.provider == provider }
+        return AccountUsageText.pickAccount(own, lastUsedId: lastAccountId(provider: provider)) ?? own.first?.id
+    }
+
+    private func noteFailedAccounts(from old: [String: ThreadSummary]) {
+        for (id, thread) in threads {
+            let before = old[id]
+            if thread.status == .error {
+                if before?.status != .error || failedOnAccount[id] == nil { failedOnAccount[id] = thread.accountId }
+            } else if failedOnAccount[id] != nil {
+                failedOnAccount[id] = nil
+            }
+        }
+        for id in failedOnAccount.keys where threads[id] == nil { failedOnAccount[id] = nil }
     }
 
     func setCwd(_ threadId: String, _ cwd: String) {

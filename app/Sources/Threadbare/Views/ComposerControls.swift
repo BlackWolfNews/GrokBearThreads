@@ -169,7 +169,7 @@ struct ThreadSettings {
     /// own when it's on that provider, else the provider's first.
     func listedAccount(for providerId: String) -> String? {
         if self.providerId == providerId { return account }
-        return providers.first { $0.id == providerId }?.accountIds.first
+        return app.accountForProvider(providerId) ?? providers.first { $0.id == providerId }?.accountIds.first
     }
 
     /// The rows of a provider's column. The default and the selection are
@@ -193,8 +193,14 @@ struct ThreadSettings {
     /// from another provider's column moves the thread to that provider's
     /// account first.
     func pick(_ row: ModelPicker.Row, in providerId: String) {
-        if let listed = listedAccount(for: providerId), listed != account { setAccount(listed) }
-        setModel(row.isDefault ? nil : row.id)
+        let model = row.isDefault ? nil : row.id
+        guard let listed = listedAccount(for: providerId), listed != account else { return setModel(model) }
+        if let thread {
+            app.moveThread(thread.id, toAccount: listed, model: model)
+        } else {
+            app.newThreadAccount = listed
+            app.remember(model: model, provider: providerId)
+        }
     }
 
     /// The picker as text, for the automation's `composer-menu`: a `#`
