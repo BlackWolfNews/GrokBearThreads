@@ -355,6 +355,10 @@ export class RpcServer {
         }
         return r.update(upd);
       }
+      case 'threads.retitle': {
+        if (p.dryRun !== undefined && typeof p.dryRun !== 'boolean') throw bad('dryRun must be a boolean');
+        return r.retitle({ dryRun: p.dryRun === true });
+      }
       case 'threads.delete':
         return r.delete(reqString(p, 'threadId'));
       case 'threads.events':
@@ -363,6 +367,8 @@ export class RpcServer {
           beforeSeq: optInt(p, 'beforeSeq'),
           limit: optInt(p, 'limit'),
         });
+      case 'threads.subagent':
+        return r.subagent(reqString(p, 'threadId'), reqString(p, 'subagentId'));
       case 'threads.subscribe': {
         const threadId = reqString(p, 'threadId');
         const backlog = r.backlog(threadId, optInt(p, 'afterSeq') ?? 0);

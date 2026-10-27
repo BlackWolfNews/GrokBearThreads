@@ -3,68 +3,70 @@ import Synchronization
 import ThreadbareCore
 
 /// Layout numbers shared by height measurement and the cell views, so the
-/// two always agree. Heights that hold a line of text follow `TextZoom`
-/// (`TypeScale.scaled`); paddings, radii and image sizes don't.
+/// two always agree. Every one follows `TextZoom` (`zoomed`), like a page
+/// under a browser's zoom: paddings, radii and image sizes as well as the
+/// heights that hold a line of text.
 enum RowMetrics {
-    static let rowTop: CGFloat = 6
-    static let rowBottom: CGFloat = 6
+    static var rowTop: CGFloat { zoomed(6) }
+    static var rowBottom: CGFloat { zoomed(6) }
     /// Space above a user message, which starts a turn: the biggest gap in
     /// the transcript, so turns read apart.
-    static let userTop: CGFloat = 26
+    static var userTop: CGFloat { zoomed(26) }
     /// Space under the bubble before the turn's work. At 10 the message sat
     /// right on top of the reply, closer than the gaps inside a turn; T3
     /// and Codex leave a clear pause there.
-    static let userBottom: CGFloat = 22
+    static var userBottom: CGFloat { zoomed(22) }
     /// One line of work: a group summary, a tool call, a thinking block.
-    static var workHeight: CGFloat { TypeScale.scaled(32) }
-    static var workingHeight: CGFloat { TypeScale.scaled(34) }
-    static let bubblePadH: CGFloat = 14
-    static let bubblePadV: CGFloat = 10
-    static let bubbleRadius: CGFloat = 18
+    static var workHeight: CGFloat { zoomed(32) }
+    static var workingHeight: CGFloat { zoomed(34) }
+    static var bubblePadH: CGFloat { zoomed(14) }
+    static var bubblePadV: CGFloat { zoomed(10) }
+    static var bubbleRadius: CGFloat { zoomed(18) }
     /// The widest a user bubble gets, as a share of the column.
     static let bubbleShare: CGFloat = 0.8
-    static let boxPad: CGFloat = 10
-    static let diffPadV: CGFloat = 6
+    static var boxPad: CGFloat { zoomed(10) }
+    static var diffPadV: CGFloat { zoomed(6) }
     /// Where a work line's text starts, after its icon. Every work line
     /// (group, tool, thinking, the working line) has its icon or spinner in
     /// the slot before it, so their text shares one edge.
-    static let titleIndent: CGFloat = 22
+    static var titleIndent: CGFloat { zoomed(22) }
     /// An NSTextField label draws its text this far in from its frame;
     /// work line labels start this much left so their glyphs line up.
+    /// AppKit's own inset, so it stays put at any zoom.
     static let labelInset: CGFloat = 2
     /// How far an open group's items sit in from its summary line.
-    static let groupIndent: CGFloat = 18
-    static let cardPad: CGFloat = 14
-    static let cardRadius: CGFloat = 12
-    static let accentBar: CGFloat = 3
-    static var buttonHeight: CGFloat { TypeScale.scaled(28) }
-    static var optionHeight: CGFloat { TypeScale.scaled(24) }
-    static var optionDescription: CGFloat { TypeScale.scaled(17) }
+    static var groupIndent: CGFloat { zoomed(18) }
+    static var cardPad: CGFloat { zoomed(14) }
+    static var cardRadius: CGFloat { zoomed(12) }
+    static var accentBar: CGFloat { zoomed(3) }
+    static var buttonHeight: CGFloat { zoomed(28) }
+    static var optionHeight: CGFloat { zoomed(24) }
+    static var optionDescription: CGFloat { zoomed(17) }
     /// The question card's "Something else" field.
-    static var otherFieldHeight: CGFloat { TypeScale.scaled(30) }
+    static var otherFieldHeight: CGFloat { zoomed(30) }
     /// An answered question: the space under each question, and the line
     /// with the answer.
-    static let answeredGap: CGFloat = 6
-    static var answerHeight: CGFloat { TypeScale.scaled(20) }
-    static let userThumbHeight: CGFloat = 120
-    static let gridMaxHeight: CGFloat = 240
-    static let gridMaxWidth: CGFloat = 320
-    static let imageGap: CGFloat = 8
+    static var answeredGap: CGFloat { zoomed(6) }
+    static var answerHeight: CGFloat { zoomed(20) }
+    static var userThumbHeight: CGFloat { zoomed(120) }
+    static var gridMaxHeight: CGFloat { zoomed(240) }
+    static var gridMaxWidth: CGFloat { zoomed(320) }
+    static var imageGap: CGFloat { zoomed(8) }
     /// The most lines an opened diff shows in the flow once Mike asks for
     /// all of it (it opens at `DiffPreview.lines`).
     static let maxDiffLines = 1500
-    static var footerHeight: CGFloat { TypeScale.scaled(27) }
+    static var footerHeight: CGFloat { zoomed(27) }
     /// A message the runner sent by itself after a restart: a centred note
     /// right under the restart's own note, with room before the work it
     /// starts.
-    static let runnerTop: CGFloat = 4
-    static let runnerBottom: CGFloat = 18
-    static var changesHeader: CGFloat { TypeScale.scaled(42) }
-    static var changesFile: CGFloat { TypeScale.scaled(34) }
+    static var runnerTop: CGFloat { zoomed(4) }
+    static var runnerBottom: CGFloat { zoomed(18) }
+    static var changesHeader: CGFloat { zoomed(42) }
+    static var changesFile: CGFloat { zoomed(34) }
 
     /// The reading column for a given table width: (x, width).
     static func column(tableWidth: CGFloat) -> (x: CGFloat, width: CGFloat) {
-        let width = max(200, min(tableWidth - Theme.sideInset * 2, Theme.maxContentWidth))
+        let width = max(zoomed(200), min(tableWidth - Theme.sideInset * 2, Theme.maxContentWidth))
         return (floor((tableWidth - width) / 2), floor(width))
     }
 
@@ -323,16 +325,16 @@ enum RowRenderer {
             size.height += rendered.trailingPad
             // Only a streaming row needs its blocks (for in-place updates);
             // a finished one would just hold a second copy of its markdown.
-            return RowRender(height: RowMetrics.rowTop + size.height + 10, text: rendered.string, textSize: size,
+            return RowRender(height: RowMetrics.rowTop + size.height + zoomed(10), text: rendered.string, textSize: size,
                              blocks: item.isStreaming ? rendered.blocks : [], blockStarts: item.isStreaming ? rendered.starts : [])
 
         case .reasoning(let item):
             let header = headerText(title: item.isStreaming ? "Thinking" : "Thought", subtitle: WorkSummary.thought(item.text))
             let headerSize = header.size()
             guard expanded else { return RowRender(height: RowMetrics.workHeight, text: header, textSize: headerSize) }
-            let body = NSAttributedString(string: item.text, attributes: Theme.text(Theme.workFont, color: Theme.quietText, line: TypeScale.scaled(21), spacing: 6))
+            let body = NSAttributedString(string: item.text, attributes: Theme.text(Theme.workFont, color: Theme.quietText, line: TypeScale.scaled(21), spacing: zoomed(6)))
             let size = measurer.measure(body, width: width - RowMetrics.titleIndent)
-            return RowRender(height: RowMetrics.workHeight + size.height + 12, text: header, textSize: headerSize, detail: body, detailSize: size)
+            return RowRender(height: RowMetrics.workHeight + size.height + zoomed(12), text: header, textSize: headerSize, detail: body, detailSize: size)
 
         case .tool(let tool):
             let header = toolHeader(tool)
@@ -348,19 +350,19 @@ enum RowRenderer {
                     : diffWithNote(diffs, maxLines: previewLines(diffs), more: DiffPreview.allKey(row.id), root: tool.root)
                 let size = measurer.measure(body, width: width - RowMetrics.titleIndent - 1)
                 let box = size.height + RowMetrics.diffPadV * 2
-                return RowRender(height: RowMetrics.workHeight + box + 10, text: header, textSize: headerSize, detail: body, detailSize: size)
+                return RowRender(height: RowMetrics.workHeight + box + zoomed(10), text: header, textSize: headerSize, detail: body, detailSize: size)
             }
             let body = toolBody(tool)
             let size = measurer.measure(body, width: width - RowMetrics.titleIndent - RowMetrics.boxPad * 2)
-            return RowRender(height: RowMetrics.workHeight + size.height + RowMetrics.boxPad * 2 + 10, text: header, textSize: headerSize, detail: body, detailSize: size)
+            return RowRender(height: RowMetrics.workHeight + size.height + RowMetrics.boxPad * 2 + zoomed(10), text: header, textSize: headerSize, detail: body, detailSize: size)
 
         case .images(_, let images, let generated):
             // A picture the agent made is the point of the step, so it's
             // shown large; screenshots from tools stay thumbnails.
             let (frames, area) = generated
-                ? imageFrames(images, maxWidth: width, maxHeight: ImageLayout.generatedMaxSide, cellWidth: ImageLayout.generatedMaxSide, alignRight: false)
+                ? imageFrames(images, maxWidth: width, maxHeight: zoomed(ImageLayout.generatedMaxSide), cellWidth: zoomed(ImageLayout.generatedMaxSide), alignRight: false)
                 : imageFrames(images, maxWidth: width, maxHeight: RowMetrics.gridMaxHeight, alignRight: false)
-            return RowRender(height: vertical + 2 + area, imageFrames: frames, imageAreaHeight: area)
+            return RowRender(height: vertical + zoomed(2) + area, imageFrames: frames, imageAreaHeight: area)
 
         case .approval(let item):
             if let resolution = item.resolution {
@@ -373,7 +375,7 @@ enum RowRenderer {
                 guard expanded, item.opens else { return RowRender(height: RowMetrics.workHeight, text: header, textSize: headerSize) }
                 let body = approvalPayload(item.request)
                 let size = measurer.measure(body, width: width - RowMetrics.titleIndent - RowMetrics.boxPad * 2)
-                return RowRender(height: RowMetrics.workHeight + size.height + RowMetrics.boxPad * 2 + 10, text: header, textSize: headerSize,
+                return RowRender(height: RowMetrics.workHeight + size.height + RowMetrics.boxPad * 2 + zoomed(10), text: header, textSize: headerSize,
                                  detail: body, detailSize: size)
             }
             let inner = width - RowMetrics.cardPad * 2 - RowMetrics.accentBar
@@ -381,8 +383,8 @@ enum RowRenderer {
             let titleSize = measurer.measure(title, width: inner)
             let payload = approvalPayload(item.request)
             let payloadSize = measurer.measure(payload, width: inner - RowMetrics.boxPad * 2)
-            let height = RowMetrics.cardPad * 2 + titleSize.height + 10 + payloadSize.height + RowMetrics.boxPad * 2 + 12 + RowMetrics.buttonHeight
-            return RowRender(height: vertical + 4 + height, text: title, textSize: titleSize, detail: payload, detailSize: payloadSize)
+            let height = RowMetrics.cardPad * 2 + titleSize.height + zoomed(10) + payloadSize.height + RowMetrics.boxPad * 2 + zoomed(12) + RowMetrics.buttonHeight
+            return RowRender(height: vertical + zoomed(4) + height, text: title, textSize: titleSize, detail: payload, detailSize: payloadSize)
 
         case .question(let item):
             let inner = width - RowMetrics.cardPad * 2 - RowMetrics.accentBar
@@ -395,18 +397,18 @@ enum RowRenderer {
                 total += answered ? textHeight + RowMetrics.answeredGap : questionHeight(question, textHeight: textHeight)
             }
             guard let resolution = item.resolution else {
-                total += RowMetrics.otherFieldHeight + 2 + 12 + RowMetrics.buttonHeight
-                return RowRender(height: vertical + 4 + total, lineHeights: textHeights)
+                total += RowMetrics.otherFieldHeight + zoomed(2) + zoomed(12) + RowMetrics.buttonHeight
+                return RowRender(height: vertical + zoomed(4) + total, lineHeights: textHeights)
             }
             // Answered: the question and the answer, not every option
             // greyed out with none of them ticked.
             total += RowMetrics.answerHeight
-            return RowRender(height: vertical + 4 + total, text: answerText(resolution), lineHeights: textHeights)
+            return RowRender(height: vertical + zoomed(4) + total, text: answerText(resolution), lineHeights: textHeights)
 
         case .plan(let entries):
             let text = planText(entries)
             let size = measurer.measure(text, width: width - RowMetrics.cardPad * 2)
-            return RowRender(height: vertical + 4 + size.height + RowMetrics.cardPad * 2 - 4, text: text, textSize: size)
+            return RowRender(height: vertical + zoomed(4) + size.height + RowMetrics.cardPad * 2 - zoomed(4), text: text, textSize: size)
 
         case .footer(let completion):
             return RowRender(height: RowMetrics.footerHeight, text: footerText(completion))
@@ -641,7 +643,7 @@ enum RowRenderer {
             hasOutput = true
             if output.length > 0 {
                 output.append(mono("\n", outputColor))
-                output.append(gap(8))
+                output.append(gap(zoomed(8)))
             }
             guard tool.failed else { return output.append(mono(text, outputColor)) }
             // Runs of lines in one colour, so long output stays a few runs.
@@ -685,7 +687,7 @@ enum RowRenderer {
         }
         if tool.result?.truncated == true {
             output.append(mono("\n", .labelColor))
-            output.append(gap(6))
+            output.append(gap(zoomed(6)))
             output.append(NSAttributedString(string: "Output shortened", attributes: Theme.text(Theme.smallFont, color: Theme.faintText, line: TypeScale.scaled(17))))
         } else if !hasOutput {
             if output.length > 0 { output.append(mono("\n", .labelColor)) }
@@ -720,10 +722,10 @@ enum RowRenderer {
     /// File lines with their numbers right-aligned in a gutter.
     static func numbered(_ lines: [ToolPresentation.NumberedLine]) -> NSAttributedString {
         let digits = max(3, String(lines.compactMap(\.number).max() ?? 0).count)
-        let gutter = CGFloat(digits) * Theme.digitWidth(monoFont) + 2
+        let gutter = CGFloat(digits) * Theme.digitWidth(monoFont) + zoomed(2)
         // Wrapped lines hang under the text, past the number.
-        let (style, offset) = Theme.lines(TypeScale.outputLine, font: monoFont, head: gutter + 14, first: 0)
-        style.tabStops = [NSTextTab(textAlignment: .right, location: gutter), NSTextTab(textAlignment: .left, location: gutter + 14)]
+        let (style, offset) = Theme.lines(TypeScale.outputLine, font: monoFont, head: gutter + zoomed(14), first: 0)
+        style.tabStops = [NSTextTab(textAlignment: .right, location: gutter), NSTextTab(textAlignment: .left, location: gutter + zoomed(14))]
         style.lineBreakMode = .byCharWrapping
         let numberAttributes: [NSAttributedString.Key: Any] = [.font: monoFont, .foregroundColor: Theme.faintText, .paragraphStyle: style, .baselineOffset: offset]
         let textAttributes: [NSAttributedString.Key: Any] = [.font: monoFont, .foregroundColor: Theme.quietText, .paragraphStyle: style, .baselineOffset: offset]
@@ -741,7 +743,7 @@ enum RowRenderer {
     /// A diff and, if it was cut short, what was left out: "Show 30 more
     /// lines", which opens the rest through the expansion key `more`, or
     /// with no key (all of it is already open, up to the cap) a quiet note.
-    static func diffWithNote(_ diffs: [EditDiff], maxLines: Int, inset: CGFloat = 10, more: String? = nil, root: String? = nil) -> NSAttributedString {
+    static func diffWithNote(_ diffs: [EditDiff], maxLines: Int, inset: CGFloat = zoomed(10), more: String? = nil, root: String? = nil) -> NSAttributedString {
         let (diff, hidden) = diffText(diffs, maxLines: maxLines, inset: inset, root: root)
         guard hidden > 0 else { return diff }
         let body = NSMutableAttributedString(attributedString: diff)
@@ -779,7 +781,7 @@ enum RowRenderer {
         Set(diffs.map(\.path)).count > 1
     }
 
-    static func diffText(_ diffs: [EditDiff], maxLines: Int, inset: CGFloat = 10, root: String? = nil) -> (NSAttributedString, hidden: Int) {
+    static func diffText(_ diffs: [EditDiff], maxLines: Int, inset: CGFloat = zoomed(10), root: String? = nil) -> (NSAttributedString, hidden: Int) {
         var lines: [DiffDisplayLine] = []
         var hidden = 0
         // Line index -> the file-name line drawn there instead of a break.
@@ -813,8 +815,8 @@ enum RowRenderer {
         // A new file is all additions: shown as plain content with green
         // signs rather than a solid green slab, the loudest thing on screen.
         let newFile = lines.allSatisfy { $0.kind != .removed && $0.kind != .context }
-        let signAt = numberEnd + 10
-        let textAt = signAt + 14
+        let signAt = numberEnd + zoomed(10)
+        let textAt = signAt + zoomed(14)
         // Wrapped lines stop as far from the box's right edge as the
         // numbers start from its left; they ran right up to the border.
         let (style, offset) = Theme.lines(Theme.diffLine, font: Theme.diffFont, head: textAt, first: 0, tail: -inset)
@@ -862,7 +864,7 @@ enum RowRenderer {
 
     /// "events.html  src/pages  +1 −0" over one file's part of a patch.
     static func fileNameLine(_ diff: EditDiff, root: String?, inset: CGFloat, first: Bool) -> NSAttributedString {
-        let (style, offset) = Theme.lines(Theme.diffLine, font: Theme.detailFont, before: first ? 0 : 8, head: inset, first: inset)
+        let (style, offset) = Theme.lines(Theme.diffLine, font: Theme.detailFont, before: first ? 0 : zoomed(8), head: inset, first: inset)
         let line = NSMutableAttributedString(string: (diff.path as NSString).lastPathComponent, attributes: [
             .font: Theme.detailFont, .foregroundColor: Theme.quietText, .paragraphStyle: style, .baselineOffset: offset,
         ])
@@ -897,13 +899,13 @@ enum RowRenderer {
                     ? diffWithNote(file.diffs, maxLines: 600, inset: RowMetrics.cardPad)
                     : diffWithNote(file.diffs, maxLines: previewLines(file.diffs), inset: RowMetrics.cardPad, more: DiffPreview.allKey(key))
                 part.body = body
-                part.bodyHeight = measurer.measure(body, width: width - 1).height + 8
+                part.bodyHeight = measurer.measure(body, width: width - 1).height + zoomed(8)
                 height += part.bodyHeight
             }
             parts.append(part)
         }
-        height += 6
-        return RowRender(height: 8 + height + 6, text: title, detail: total, parts: parts)
+        height += zoomed(6)
+        return RowRender(height: zoomed(8) + height + zoomed(6), text: title, detail: total, parts: parts)
     }
 
     // MARK: Cards
@@ -972,25 +974,25 @@ enum RowRenderer {
 
     static func questionHeight(_ question: Question, textHeight: CGFloat) -> CGFloat {
         // The question's short `header` isn't shown: it would read as an eyebrow label.
-        var height: CGFloat = textHeight + 8
+        var height: CGFloat = textHeight + zoomed(8)
         for option in question.options {
             height += RowMetrics.optionHeight
             if let description = option.description, !description.isEmpty { height += RowMetrics.optionDescription }
         }
-        return height + 12
+        return height + zoomed(12)
     }
 
     /// "2 of 5 steps done", then the steps. Every card starts with a
     /// one-line title; without one the plan read as an orphaned box of
     /// struck-through lines.
     static func planText(_ entries: [PlanEntry]) -> NSAttributedString {
-        let (titleStyle, titleOffset) = Theme.lines(TypeScale.workLine, font: Theme.changesTitleFont, spacing: 8)
+        let (titleStyle, titleOffset) = Theme.lines(TypeScale.workLine, font: Theme.changesTitleFont, spacing: zoomed(8))
         let output = NSMutableAttributedString(string: PlanSummary.title(entries), attributes: [
             .font: Theme.changesTitleFont, .foregroundColor: NSColor.labelColor, .paragraphStyle: titleStyle, .baselineOffset: titleOffset,
         ])
         let font = Theme.bodyFont
-        let (style, offset) = Theme.lines(TypeScale.scaled(22), font: font, spacing: 4, head: 24, first: 0)
-        style.tabStops = [NSTextTab(textAlignment: .left, location: 24)]
+        let (style, offset) = Theme.lines(TypeScale.scaled(22), font: font, spacing: zoomed(4), head: zoomed(24), first: 0)
+        style.tabStops = [NSTextTab(textAlignment: .left, location: zoomed(24))]
         output.append(NSAttributedString(string: "\n", attributes: [.font: Theme.changesTitleFont, .paragraphStyle: titleStyle]))
         for (index, entry) in entries.enumerated() {
             if index > 0 { output.append(NSAttributedString(string: "\n", attributes: [.font: font, .paragraphStyle: style, .baselineOffset: offset])) }

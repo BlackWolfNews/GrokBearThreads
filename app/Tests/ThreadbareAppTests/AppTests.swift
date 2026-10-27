@@ -40,6 +40,26 @@ final class TextZoomTests: XCTestCase {
         XCTAssertEqual(TypeScale.body, 15)
     }
 
+    /// Like a browser's zoom: icons, paddings and the column grow with the
+    /// text, not just the text.
+    func testLayoutSizesZoomWithTheText() {
+        let zoom = TextZoom.shared
+        zoom.reset()
+        XCTAssertEqual(zoomed(16), 16)
+        XCTAssertEqual(ActivityBar.width, 44)
+        XCTAssertEqual(SidebarMetrics.leading, 18)
+        XCTAssertEqual(Theme.maxContentWidth, 780)
+        zoom.set(200)
+        XCTAssertEqual(zoomed(16), 32)
+        XCTAssertEqual(ActivityBar.width, 88)
+        XCTAssertEqual(SidebarMetrics.leading, 36)
+        XCTAssertEqual(Theme.maxContentWidth, 1560)
+        XCTAssertEqual(RowMetrics.bubblePadH, 28)
+        XCTAssertEqual(RowMetrics.workHeight, 64)
+        zoom.set(110)
+        XCTAssertEqual(zoomed(18), 20) // 19.8 rounded
+    }
+
     func testStopsAtTheEnds() {
         let zoom = TextZoom.shared
         for _ in 0..<20 { zoom.zoomIn() }

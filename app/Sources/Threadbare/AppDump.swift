@@ -29,6 +29,17 @@ struct AppDump: Encodable {
         var hovered: Bool
         /// What the row says is running in the background, if anything.
         var background: String?
+        /// The sub-agent rows under it, as the sidebar shows them.
+        var subagents: [SubagentInfo] = []
+    }
+
+    struct SubagentInfo: Encodable {
+        var id: String
+        var depth: Int
+        var status: String
+        var title: String
+        var detail: String
+        var selected: Bool
     }
 
     struct Section: Encodable {
@@ -115,6 +126,8 @@ struct AppDump: Encodable {
     var window: Window?
     var sidebar: Sidebar
     var selection: Thread?
+    /// The sub-agent whose transcript is showing, if one is.
+    var subagent: String?
     /// The selected thread's panels and the pane (PanelsView).
     var panels: Panels?
     /// Its action chips (ActionChips).
@@ -165,9 +178,15 @@ struct AppDump: Encodable {
         let now = Date()
         func thread(_ summary: ThreadSummary, section: InboxSection? = nil) -> Thread {
             let look = ThreadRowLook(summary, section: section)
+            let selectedSub = app.subagentSelection?.threadId == summary.id ? app.subagentSelection?.subagentId : nil
+            let subagents = section == nil ? [] : SubagentRows.visible(summary, threadSelected: app.selection == summary.id, selectedSubagent: selectedSub, now: app.now).map {
+                SubagentInfo(id: $0.id, depth: $0.depth, status: $0.subagent.status.rawValue, title: SubagentRows.title($0.subagent),
+                             detail: SubagentRows.detail($0.subagent), selected: $0.id == selectedSub)
+            }
             return Thread(id: summary.id, title: summary.title, status: summary.status.rawValue, needsYou: summary.needsYou,
                           unread: look.unread, hovered: app.hoverOverride == summary.id,
-                          background: look.status == .background ? BackgroundWork.short(summary.background) : nil)
+                          background: look.status == .background ? BackgroundWork.short(summary.background) : nil,
+                          subagents: subagents)
         }
         let sections: [Section]
         switch app.sidebarMode {
@@ -219,6 +238,7 @@ struct AppDump: Encodable {
             sidebar: Sidebar(mode: String(describing: app.sidebarMode), sections: sections,
                              snoozed: ThreadSections.snoozed(app.threads.values, now: now).count, archived: app.archivedCount),
             selection: app.selectedThread.map { thread($0) },
+            subagent: app.subagentSelection?.subagentId,
             panels: app.selectedThread.flatMap { panels($0, app: app) },
             actions: app.selectedThread.map { thread in
                 thread.actions.map { ActionInfo(id: $0.id, title: $0.title, kind: $0.kind.rawValue, running: app.isRunning(action: $0, in: thread.id)) }
@@ -347,11 +367,15 @@ struct AppDump: Encodable {
                 if let background = thread.background { flags.append("bg: " + background) }
                 let mark = thread.id == selection?.id ? ">" : " "
                 lines.append("  \(mark) \(pad(thread.id, threadWidth)) \(pad(flags.joined(separator: " "), 16)) \(thread.title)")
+                for sub in thread.subagents {
+                    let indent = String(repeating: "  ", count: sub.depth + 1)
+                    lines.append("  \(sub.selected ? ">" : " ") \(indent)sub \(sub.id) [\(sub.status)] \(sub.title): \(sub.detail)")
+                }
             }
         }
         lines.append("")
         if let selection {
-            lines.append("selection: \(selection.id) \"\(selection.title)\" (\(selection.status))")
+            lines.append("selection: \(selection.id) \"\(selection.title)\" (\(selection.status))" + (subagent.map { ", showing sub-agent \($0)" } ?? ""))
         } else {
             lines.append("selection: none (new thread)")
         }

@@ -169,3 +169,20 @@ test('a thread left by a draining runner that died is adopted as after a crash',
   assert.equal(last.type, 'turn.completed');
   assert.equal(last.outcome, 'interrupted');
 });
+
+test('a kept thread hibernated until the runner restarts wakes when it comes across', async () => {
+  const h = makeHarness();
+  const t = create(h).thread;
+  const s = h.adapter.last;
+  s.init();
+  const handed: string[] = [];
+  await h.runner.beginDrain([t.id], { onHandedOver: (id) => handed.push(id), backgroundMs: 30 * MIN });
+  h.runner.update({ threadId: t.id, snoozedUntil: 'restart' });
+  s.result('interrupted');
+  await tick();
+  assert.deepEqual(handed, [t.id]);
+  const b = primary(h, [t.id]);
+  const adopted = b.runner.adopt(t.id)!;
+  assert.equal(adopted.snoozedUntil, undefined);
+  assert.equal(adopted.snoozedUntilRestart, undefined);
+});

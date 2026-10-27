@@ -2,11 +2,13 @@ import AppKit
 import Observation
 import Synchronization
 
-/// The window's text size: ⌘= and ⌘- in the View menu step it through
-/// `steps` (percentages of the design sizes in `TypeScale`), ⌘0 puts it
-/// back, and it's remembered across launches. Like the zoom in the Electron
-/// agent apps, but only the text and the rows it sits in grow; paddings,
-/// icons and the reading column's width stay.
+/// The window's zoom: ⌘= and ⌘- in the View menu step it through `steps`
+/// (percentages of the design sizes in `TypeScale` and every `zoomed`
+/// layout size), ⌘0 puts it back, and it's remembered across launches.
+/// Like a browser's or VS Code's zoom, everything grows together: text,
+/// icons, paddings, row heights and the reading column's width. It used to
+/// be text only, which left the icons and the room around them small
+/// beside big text.
 @Observable @MainActor
 final class TextZoom {
     static let shared = TextZoom()
@@ -129,6 +131,12 @@ enum TypeScale {
     static var chip: CGFloat { scaled(13) }
 }
 
+/// A layout size (a padding, spacing, icon, frame or corner radius) at the
+/// current zoom, like a CSS pixel under a browser's zoom, rounded the same
+/// way as the text sizes. Hairline widths and half-point nudges that line
+/// things up on pixels stay as written.
+func zoomed(_ size: CGFloat) -> CGFloat { TypeScale.scaled(size) }
+
 /// Fonts, colours and spacing for the transcript. Colours are dynamic so
 /// cached attributed strings follow light and dark mode. The fonts are
 /// computed, not stored, so they follow `TextZoom` (AppKit caches system
@@ -180,8 +188,8 @@ enum Theme {
     }
 
     /// Widest the reading column gets; wider windows centre it.
-    static let maxContentWidth: CGFloat = 780
-    static let sideInset: CGFloat = 28
+    static var maxContentWidth: CGFloat { zoomed(780) }
+    static var sideInset: CGFloat { zoomed(28) }
 
     private static func dynamic(dark: NSColor, light: NSColor) -> NSColor {
         NSColor(name: nil) { appearance in
@@ -221,6 +229,14 @@ enum Theme {
         func mix(_ channel: CGFloat) -> CGFloat { (channel * accentAlpha + base * baseAlpha * (1 - accentAlpha)) / alpha }
         return NSColor(srgbRed: mix(accent.redComponent), green: mix(accent.greenComponent), blue: mix(accent.blueComponent), alpha: alpha)
     }
+
+    /// A thread chip (a thread id in a reply that names a real thread):
+    /// accent text on a faint accent pill, since it opens on a click.
+    static let chipBackground = NSColor(name: nil) { appearance in
+        let dark = appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+        return NSColor.controlAccentColor.withAlphaComponent(dark ? 0.2 : 0.12)
+    }
+    static let chipText = NSColor.controlAccentColor
 
     /// Diff line tints: about 11%, so a diff isn't the loudest thing on screen.
     static let addedBackground = dynamic(dark: NSColor(srgbRed: 0.25, green: 0.78, blue: 0.4, alpha: 0.12),
@@ -288,4 +304,7 @@ extension NSAttributedString.Key {
     /// Clicking the run does something in its row ("Show 30 more lines"):
     /// the value is passed to the text view's `onAction`.
     static let tbAction = NSAttributedString.Key("tbAction")
+    /// A word shaped like a thread id (`ThreadRefs`). The value is the word;
+    /// it's drawn as a chip only if it names a thread (`ThreadChips`).
+    static let tbThreadRef = NSAttributedString.Key("tbThreadRef")
 }

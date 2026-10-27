@@ -228,6 +228,23 @@ enum Automation {
             // A beat for the table to lay out and draw.
             try? await Task.sleep(for: .milliseconds(150))
             return "ok \(id) \(session.displayCount) rows"
+        case "subagent":
+            // Show a sub-agent's transcript, as a click on its sidebar row
+            // does: {"thread": id or prefix, "id": the sub-agent's id}.
+            let match = thread(c["thread"] ?? app.selection, app)
+            guard let threadId = match.id else { return match.error }
+            guard let subagentId = c["id"] as? String, !subagentId.isEmpty else { return "error id is the sub-agent's id" }
+            app.sidebarMode = .inbox
+            app.selectSubagent(threadId: threadId, subagentId: subagentId)
+            let session = app.subagentSession(for: SubagentRef(threadId: threadId, subagentId: subagentId))
+            let deadline = Date().addingTimeInterval(number(c["timeout"]) ?? 10)
+            while Date() < deadline, session.state != .loaded || app.transcript.session !== session {
+                if case .failed(let message) = session.state { return session.missing ? "ok \(subagentId) no record" : "error couldn't load: \(message)" }
+                try? await Task.sleep(for: .milliseconds(20))
+            }
+            guard session.state == .loaded else { return "error timed out loading \(subagentId)" }
+            try? await Task.sleep(for: .milliseconds(150))
+            return "ok \(subagentId) \(session.displayCount) rows"
         case "new":
             app.newThread()
             return "ok"
@@ -409,6 +426,8 @@ enum Automation {
             return "ok \(zoom.percent)"
         case "hover":
             return hover(c, app: app)
+        case "chip":
+            return chip(c, app: app)
         case "account-ids":
             // For screenshots: accounts are titled by their email address,
             // so show their ids instead. Lasts until the next reconnect.
@@ -722,6 +741,34 @@ enum Automation {
         guard let id = match.id else { return match.error }
         app.hoverOverride = id
         return "ok \(id)"
+    }
+
+    /// Thread chips in a transcript row's text: `{"row": id}` lists them
+    /// (word, then the thread it opens); with `"word"`, `"show": true`
+    /// shows that chip's hover card (and says its window number, for
+    /// `screencapture -l`), `false` closes it, and `"click": true` clicks it.
+    private static func chip(_ c: [String: Any], app: AppModel) -> String {
+        guard let prefix = c["row"] as? String else { return "error row is required" }
+        guard let row = displayedRow(prefix, app), let index = app.transcript.session?.displayIndex(of: row.id) else { return "error no such row" }
+        app.transcript.scroll(toRow: index, offset: 120)
+        guard let cell = app.transcript.tableView.view(atColumn: 0, row: index, makeIfNecessary: true) as? TextRowCell else {
+            return "error \(row.id) isn't a text row"
+        }
+        let chips = cell.textView.debugChips()
+        guard let word = c["word"] as? String else {
+            return chips.isEmpty ? "ok none" : "ok " + chips.map { "\($0.word)=\($0.threadId)" }.joined(separator: " ")
+        }
+        guard chips.contains(where: { $0.word == word }) else { return "error \(word) isn't a chip in \(row.id)" }
+        if c["click"] as? Bool == true {
+            cell.textView.debugClickChip(word)
+            return "ok opened \(app.selection ?? "nothing")"
+        }
+        if c["show"] as? Bool == false {
+            cell.textView.closeChipCard()
+            return "ok"
+        }
+        guard let window = cell.textView.debugShowChip(word) else { return "error the card didn't show" }
+        return "ok window \(window)"
     }
 
     /// A row's context menu: `{"row": id}` lists its items, and with

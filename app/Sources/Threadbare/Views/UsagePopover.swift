@@ -1,7 +1,7 @@
 import SwiftUI
 import ThreadbareCore
 
-/// "Usage" in the sidebar's footer: every account's limits, grouped by
+/// "Usage" in the sidebar's activity bar: every account's limits, grouped by
 /// provider, then the two CLIs' versions with what can be done about them.
 /// Everything comes from `accounts.updated` and `clis.updated`; the times
 /// follow `app.now`, which ticks without asking the runner anything.
@@ -17,16 +17,16 @@ struct UsagePopover: View {
             // Only the accounts scroll: the CLIs stay in view at the bottom
             // however many logins there are.
             ScrollView {
-                VStack(alignment: .leading, spacing: 12) {
+                VStack(alignment: .leading, spacing: zoomed(12)) {
                     if sections.isEmpty || !sections.contains(where: { $0.accounts.contains { $0.usage != nil } }) {
                         Text("The usage numbers need a newer runner.")
-                            .font(.system(size: 12))
+                            .font(.system(size: zoomed(12)))
                             .foregroundStyle(.secondary)
                     }
                     ForEach(sections, id: \.provider) { section in
-                        VStack(alignment: .leading, spacing: 9) {
+                        VStack(alignment: .leading, spacing: zoomed(9)) {
                             Text(ModelPicker.providerTitle(section.provider))
-                                .font(.system(size: 11, weight: .medium))
+                                .font(.system(size: zoomed(11), weight: .medium))
                                 .foregroundStyle(.tertiary)
                                 .accessibilityAddTraits(.isHeader)
                             ForEach(section.accounts) { account in
@@ -39,18 +39,18 @@ struct UsagePopover: View {
                     let source = [AccountUsageText.sourceLine(app.accounts, now: app.now), notices.shared].compactMap { $0 }
                     if !source.isEmpty {
                         Text(source.joined(separator: ". "))
-                            .font(.system(size: 11))
+                            .font(.system(size: zoomed(11)))
                             .foregroundStyle(.tertiary)
                             .fixedSize(horizontal: false, vertical: true)
                     }
                 }
-                .padding(16)
+                .padding(zoomed(16))
             }
             .frame(maxHeight: Self.accountsMaxHeight)
             .fixedSize(horizontal: false, vertical: true)
-            Divider().padding(.horizontal, 16)
+            Divider().padding(.horizontal, zoomed(16))
             CliSection()
-                .padding(16)
+                .padding(zoomed(16))
         }
         .frame(width: Self.width)
     }
@@ -86,22 +86,22 @@ private struct AccountUsageView: View {
 
     var body: some View {
         let usage = account.usage
-        VStack(alignment: .leading, spacing: 4) {
-            HStack(alignment: .firstTextBaseline, spacing: 6) {
+        VStack(alignment: .leading, spacing: zoomed(4)) {
+            HStack(alignment: .firstTextBaseline, spacing: zoomed(6)) {
                 Text(AccountName.title(account))
-                    .font(.system(size: 13, weight: .medium))
+                    .font(.system(size: zoomed(13), weight: .medium))
                     .lineLimit(1)
                 // The plan, and Mike's note for the account, quietly after it.
                 let about = [account.plan, account.note].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · ")
                 if !about.isEmpty {
-                    Text(about).font(.system(size: 11)).foregroundStyle(.tertiary).lineLimit(1)
+                    Text(about).font(.system(size: zoomed(11))).foregroundStyle(.tertiary).lineLimit(1)
                 }
-                Spacer(minLength: 4)
+                Spacer(minLength: zoomed(4))
                 if usage?.blocked == true {
-                    Text("Limit reached").font(.system(size: 11, weight: .medium)).foregroundStyle(.red)
+                    Text("Limit reached").font(.system(size: zoomed(11), weight: .medium)).foregroundStyle(.red)
                 } else if usage?.stale == true, let readAt = usage?.readAt {
                     Text("From " + AccountUsageText.when(readAt, now: now))
-                        .font(.system(size: 11))
+                        .font(.system(size: zoomed(11)))
                         .foregroundStyle(.tertiary)
                         .help("Token Stats hasn't updated this account since then")
                 }
@@ -111,14 +111,14 @@ private struct AccountUsageView: View {
             }
             ForEach(AccountUsageText.extraWindows(usage), id: \.title) { window in
                 Text("\(window.title) \(AccountUsageText.windowLine(window, now: now, notice: usage?.notice))")
-                    .font(.system(size: 11))
+                    .font(.system(size: zoomed(11)))
                     .foregroundStyle(.secondary)
             }
             if let notice, !notice.isEmpty {
-                Text(notice).font(.system(size: 11)).foregroundStyle(.tertiary)
+                Text(notice).font(.system(size: zoomed(11))).foregroundStyle(.tertiary)
             }
             if usage == nil {
-                Text("Nothing known yet").font(.system(size: 11)).foregroundStyle(.tertiary)
+                Text("Nothing known yet").font(.system(size: zoomed(11))).foregroundStyle(.tertiary)
             }
         }
     }
@@ -132,11 +132,11 @@ private struct UsageBar: View {
     let now: Date
 
     var body: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: zoomed(8)) {
             Text(window.title)
-                .font(.system(size: 11))
+                .font(.system(size: zoomed(11)))
                 .foregroundStyle(.secondary)
-                .frame(width: 52, alignment: .leading)
+                .frame(width: zoomed(52), alignment: .leading)
             GeometryReader { geometry in
                 ZStack(alignment: .leading) {
                     Capsule().fill(Color.primary.opacity(0.08))
@@ -144,11 +144,11 @@ private struct UsageBar: View {
                         .frame(width: max(0, geometry.size.width * window.remainingPercent / 100))
                 }
             }
-            .frame(width: 96, height: 4)
+            .frame(width: zoomed(96), height: zoomed(4))
             // The rest of the row, on one line: it wrapped at 150 pt
             // ("66%, resets tomorrow / 12 am").
             Text(AccountUsageText.windowLine(window, now: now, notice: notice).replacingOccurrences(of: " left", with: ""))
-                .font(.system(size: 11))
+                .font(.system(size: zoomed(11)))
                 .foregroundStyle(.secondary)
                 .monospacedDigit()
                 .lineLimit(1)
@@ -175,10 +175,10 @@ private struct CliSection: View {
     @Environment(AppModel.self) private var app
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: zoomed(12)) {
             if app.clisSupported == false || (app.clisSupported == nil && app.clis.isEmpty) {
                 Text("The CLI versions need a newer runner.")
-                    .font(.system(size: 12))
+                    .font(.system(size: zoomed(12)))
                     .foregroundStyle(.secondary)
             } else {
                 ForEach(app.clis) { cli in
@@ -186,12 +186,12 @@ private struct CliSection: View {
                 }
                 HStack {
                     if let checked = CliText.checkedLine(app.clis, now: app.now) {
-                        Text(checked).font(.system(size: 11)).foregroundStyle(.tertiary)
+                        Text(checked).font(.system(size: zoomed(11))).foregroundStyle(.tertiary)
                     }
                     Spacer()
                     Button("Check now") { app.checkClis() }
                         .buttonStyle(.borderless)
-                        .font(.system(size: 11))
+                        .font(.system(size: zoomed(11)))
                 }
             }
         }
@@ -203,44 +203,44 @@ private struct CliRow: View {
     let cli: CliStatus
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: zoomed(6)) {
             HStack(alignment: .firstTextBaseline) {
                 Text(CliText.statusLine(cli))
-                    .font(.system(size: 12))
+                    .font(.system(size: zoomed(12)))
                     .foregroundStyle(cli.status == "held" ? AnyShapeStyle(Color.orange) : AnyShapeStyle(.primary))
                     .fixedSize(horizontal: false, vertical: true)
-                Spacer(minLength: 6)
+                Spacer(minLength: zoomed(6))
                 if let title = CliText.updateTitle(cli) {
                     Button(title) { app.updateCli(cli.provider, force: cli.status == "held") }
                         .controlSize(.small)
                 }
             }
             if let text = CliText.isUpdating(cli) ? CliText.bannerText(cli) : nil {
-                Text(text).font(.system(size: 11)).foregroundStyle(.secondary)
+                Text(text).font(.system(size: zoomed(11))).foregroundStyle(.secondary)
             }
             if let missing = cli.hold?.missing, !missing.isEmpty {
                 Text("Missing: " + missing.joined(separator: ", "))
-                    .font(.system(size: 11))
+                    .font(.system(size: zoomed(11)))
                     .foregroundStyle(.tertiary)
                     .lineLimit(2)
             }
             if let managed = CliText.managedLine(cli) {
-                Text(managed).font(.system(size: 11)).foregroundStyle(.tertiary)
+                Text(managed).font(.system(size: zoomed(11))).foregroundStyle(.tertiary)
             }
-            HStack(spacing: 8) {
+            HStack(spacing: zoomed(8)) {
                 Picker("Updates", selection: Binding(get: { cli.policy }, set: { app.setCliPolicy(cli.provider, $0) })) {
                     ForEach(CliText.policies, id: \.self) { Text(CliText.policyTitle($0)).tag($0) }
                 }
                 .pickerStyle(.segmented)
                 .labelsHidden()
                 .controlSize(.small)
-                .frame(width: 200)
+                .frame(width: zoomed(200))
                 .help("Whether new versions install by themselves")
                 Spacer()
                 if let back = CliText.goBackTitle(cli), let previous = cli.previousVersion {
                     Button(back) { app.updateCli(cli.provider, version: previous) }
                         .buttonStyle(.borderless)
-                        .font(.system(size: 11))
+                        .font(.system(size: zoomed(11)))
                 }
             }
         }

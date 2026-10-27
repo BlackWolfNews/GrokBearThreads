@@ -1,9 +1,9 @@
 // Turns Claude Agent SDK messages into protocol events. Pure apart from the
 // injected file helpers, so it can be tested by feeding recorded SDK message
 // sequences through it.
-import type { BackgroundKind, EventBody, Hunk, ImageRef, UsageWindow } from '../../protocol.ts';
+import type { BackgroundKind, EventBody, Hunk, ImageRef, SubagentStatus, UsageWindow } from '../../protocol.ts';
 import { LIMITS } from '../../protocol.ts';
-import type { AdapterOutput, TurnResult } from '../types.ts';
+import type { AdapterOutput, SubagentUpdate, TurnResult } from '../types.ts';
 import type { NormalizerContext } from '../context.ts';
 import { EDIT_TOOLS, PlanTracker, computeEditDiff, toolKind, toolTitle, truncateInput } from '../../tools.ts';
 import { diffLines } from '../../diff.ts';
@@ -36,6 +36,7 @@ export class ClaudeNormalizer {
   private pendingNote?: string; // a finished background task, shown with the turn it starts
   private limitRejected = false; // a rate_limit_event this turn said the login is at its limit
   private afterCompact = false;
+  private agentTasks = new Set<string>(); // task ids that are sub-agents
 
   constructor(ctx: NormalizerContext) {
     this.ctx = ctx;
@@ -114,6 +115,7 @@ export class ClaudeNormalizer {
   }
 
   private system(msg: AnyMsg, out: AdapterOutput[]): void {
+    if (typeof msg.subtype === 'string' && msg.subtype.startsWith('task_')) this.subagentTask(msg, out);
     if (msg.subtype === 'init' && typeof msg.session_id === 'string') {
       out.push({ kind: 'session', nativeSessionId: msg.session_id, model: msg.model });
       // The version of the CLI running this session, so CLI updates know
@@ -140,6 +142,55 @@ export class ClaudeNormalizer {
       out.push({ kind: 'tasks', tasks });
     } else if (msg.subtype === 'informational' && msg.level === 'warning' && typeof msg.content === 'string') {
       out.push({ kind: 'event', event: { type: 'system.note', text: msg.content } });
+    }
+  }
+
+  // The CLI's task events for a sub-agent (task_type local_agent), as
+  // changes to the thread's list of them. Shells and monitors are tasks too,
+  // and only show up in the background list.
+  private subagentTask(msg: AnyMsg, out: AdapterOutput[]): void {
+    const id = typeof msg.task_id === 'string' ? msg.task_id : '';
+    if (!id) return;
+    if (msg.subtype === 'task_started') {
+      if (msg.task_type !== 'local_agent' && msg.task_type !== 'remote_agent' && !msg.subagent_type) return;
+      if (msg.ambient || msg.skip_transcript) return;
+      this.agentTasks.add(id);
+      const update: SubagentUpdate = { id, started: true, status: 'running', background: msg.is_backgrounded === true };
+      if (typeof msg.tool_use_id === 'string') update.itemId = msg.tool_use_id;
+      if (typeof msg.parent_task_id === 'string') update.parentId = msg.parent_task_id;
+      if (typeof msg.description === 'string') update.description = msg.description;
+      if (typeof msg.subagent_type === 'string') update.agentType = msg.subagent_type;
+      out.push({ kind: 'subagent', update });
+      return;
+    }
+    // A CLI that was resumed can report a sub-agent it didn't start this
+    // time; subagent_type says it's one.
+    if (!this.agentTasks.has(id)) {
+      if (msg.subtype !== 'task_progress' || typeof msg.subagent_type !== 'string') return;
+      this.agentTasks.add(id);
+    }
+    if (msg.subtype === 'task_progress') {
+      // description here is the CLI's running line ("Running npm test");
+      // summary, when the CLI makes one, says it better.
+      const update: SubagentUpdate = { id };
+      const activity = typeof msg.summary === 'string' && msg.summary.trim() ? msg.summary : msg.description;
+      if (typeof activity === 'string' && activity.trim()) update.activity = oneLineNote(activity);
+      if (typeof msg.usage?.tool_uses === 'number') update.toolUses = msg.usage.tool_uses;
+      out.push({ kind: 'subagent', update });
+    } else if (msg.subtype === 'task_updated') {
+      const p = (msg.patch ?? {}) as AnyMsg;
+      const update: SubagentUpdate = { id };
+      const status = subagentStatus(p.status);
+      if (status) update.status = status;
+      if (p.is_backgrounded === true) update.background = true;
+      if (typeof p.description === 'string' && p.description) update.description = p.description;
+      if (status === 'failed' && typeof p.error === 'string' && p.error) update.summary = oneLineNote(p.error);
+      if (update.status || update.background || update.description) out.push({ kind: 'subagent', update });
+    } else if (msg.subtype === 'task_notification') {
+      const update: SubagentUpdate = { id, status: subagentStatus(msg.status) ?? 'completed' };
+      if (typeof msg.summary === 'string' && msg.summary.trim()) update.summary = oneLineNote(msg.summary);
+      if (typeof msg.usage?.tool_uses === 'number') update.toolUses = msg.usage.tool_uses;
+      out.push({ kind: 'subagent', update });
     }
   }
 
@@ -503,6 +554,14 @@ export function backgroundKind(type: string): BackgroundKind {
   if (type === 'local_agent' || type === 'remote_agent' || type === 'in_process_teammate') return 'agent';
   if (type === 'monitor') return 'monitor';
   return 'other';
+}
+
+function subagentStatus(s: unknown): SubagentStatus | undefined {
+  if (s === 'running' || s === 'pending') return 'running';
+  if (s === 'completed') return 'completed';
+  if (s === 'failed') return 'failed';
+  if (s === 'killed' || s === 'stopped') return 'stopped';
+  return undefined;
 }
 
 function oneLineNote(s: string): string {

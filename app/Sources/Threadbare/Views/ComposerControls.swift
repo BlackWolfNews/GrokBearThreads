@@ -20,10 +20,10 @@ struct ComposerControls: View {
         let cwd = settings.cwd
         let account = settings.account
         let ask = settings.ask
-        HStack(spacing: 4) {
+        HStack(spacing: zoomed(4)) {
             PlusButton { settings.plusMenu(attach: onAttach, schedule: app.schedulesSupported ? onSchedule : nil) }
                 // Pulls the glyph back so it lines up with the text above.
-                .padding(.leading, -7)
+                .padding(.leading, -zoomed(7))
             if ComposerChips.showsFolder(cwd, defaultFolder: app.defaults.cwd) {
                 ComposerChip(icon: "folder", title: ComposerChips.folder(cwd), help: cwd.abbreviatingHome) {
                     settings.folderMenu()
@@ -48,7 +48,7 @@ struct ComposerControls: View {
             ) {
                 settings.permissionMenu()
             }
-            Spacer(minLength: 8)
+            Spacer(minLength: zoomed(8))
             SendButton(running: running, canSend: canSend, onSend: onSend, onStop: { app.interrupt() })
                 .layoutPriority(1)
                 // Right-click send for later, as Mail and Slack do.
@@ -322,7 +322,7 @@ private struct ComposerChip: View {
         Button {
             open()
         } label: {
-            HStack(spacing: 4) {
+            HStack(spacing: zoomed(4)) {
                 Image(systemName: icon)
                     .font(.system(size: TypeScale.chip - 1))
                     .foregroundStyle(Color(nsColor: Theme.faintIcon))
@@ -345,13 +345,13 @@ private struct ComposerChip: View {
                     EmptyView()
                 }
                 Image(systemName: "chevron.down")
-                    .font(.system(size: 7.5, weight: .bold))
+                    .font(.system(size: zoomed(7.5), weight: .bold))
                     .foregroundStyle(Color(nsColor: Theme.faintIcon))
             }
-            .padding(.horizontal, 7)
-            .frame(height: 26)
+            .padding(.horizontal, zoomed(7))
+            .frame(height: zoomed(26))
             .background(
-                RoundedRectangle(cornerRadius: 7, style: .continuous)
+                RoundedRectangle(cornerRadius: zoomed(7), style: .continuous)
                     .fill(Color.primary.opacity(hovering ? 0.07 : 0))
             )
             .contentShape(Rectangle())
@@ -373,7 +373,7 @@ private struct ChipDivider: View {
     var body: some View {
         Rectangle()
             .fill(Color.primary.opacity(0.12))
-            .frame(width: 1, height: 12)
+            .frame(width: 1, height: zoomed(12))
     }
 }
 
@@ -388,9 +388,9 @@ private struct PlusButton: View {
             anchor.popUp(menu())
         } label: {
             Image(systemName: "plus")
-                .font(.system(size: 15, weight: .regular))
+                .font(.system(size: zoomed(15), weight: .regular))
                 .foregroundStyle(.secondary)
-                .frame(width: 26, height: 26)
+                .frame(width: zoomed(26), height: zoomed(26))
                 .background(Circle().fill(Color.primary.opacity(hovering ? 0.08 : 0)))
                 .contentShape(Circle())
         }
@@ -402,7 +402,7 @@ private struct PlusButton: View {
     }
 }
 
-/// A 28 pt circle: filled with the text colour when there's something to
+/// A 28 pt circle (at 100%): filled with the text colour when there's something to
 /// send (or a turn to stop), faint and empty-looking when there isn't.
 private struct SendButton: View {
     let running: Bool
@@ -410,7 +410,7 @@ private struct SendButton: View {
     let onSend: () -> Void
     let onStop: () -> Void
 
-    static let size: CGFloat = 28
+    static var size: CGFloat { zoomed(28) }
 
     var body: some View {
         // Stop only while there's nothing typed: a follow-up typed during a
@@ -419,7 +419,7 @@ private struct SendButton: View {
         // the Thread menu still stop it.
         if running && !canSend {
             Button(action: onStop) {
-                Image(systemName: "stop.fill").font(.system(size: 9, weight: .bold))
+                Image(systemName: "stop.fill").font(.system(size: zoomed(9), weight: .bold))
             }
             .buttonStyle(CircleButtonStyle(filled: true))
             .help("Stop (⌘.)")
@@ -427,7 +427,7 @@ private struct SendButton: View {
             .keyboardShortcut(".", modifiers: .command)
         } else {
             Button(action: onSend) {
-                Image(systemName: "arrow.up").font(.system(size: 13, weight: .semibold))
+                Image(systemName: "arrow.up").font(.system(size: zoomed(13), weight: .semibold))
             }
             .buttonStyle(CircleButtonStyle(filled: canSend))
             .disabled(!canSend)
@@ -461,7 +461,7 @@ private final class MenuAnchor {
     /// window; AppKit moves it if there isn't room.
     func popUp(_ menu: NSMenu) {
         guard let view else { return }
-        let gap: CGFloat = 4
+        let gap = zoomed(4)
         let top = view.isFlipped ? -menu.size.height - gap : view.bounds.height + menu.size.height + gap
         menu.popUp(positioning: nil, at: NSPoint(x: 0, y: top), in: view)
     }
@@ -533,15 +533,15 @@ struct ModelPickerView: View {
     @State private var providerId: String?
     @FocusState private var searching: Bool
 
-    static let width: CGFloat = 380
-    static let railWidth: CGFloat = 44
+    static var width: CGFloat { zoomed(380) }
+    static var railWidth: CGFloat { zoomed(44) }
 
-    /// The model list scrolls past this: 320 pt, less in a short window, so
+    /// The model list scrolls past this: 320 pt at 100%, less in a short window, so
     /// the picker (search above, effort below) stays inside it. At 800 pt
     /// it ran off the bottom over the composer's chips.
     static var listMaxHeight: CGFloat {
         let window = AppWindow.contentHeight ?? 800
-        return max(140, min(320, window - 330))
+        return max(zoomed(140), min(zoomed(320), window - zoomed(330)))
     }
 
     private var settings: ThreadSettings { ThreadSettings(app: app, thread: threadId.flatMap { app.threads[$0] }) }
@@ -556,13 +556,13 @@ struct ModelPickerView: View {
         // height a guess, and a short list (Codex's two models) floated in
         // the middle of a popover sized for a longer one.
         VStack(spacing: 0) {
-                HStack(spacing: 6) {
+                HStack(spacing: zoomed(6)) {
                     Image(systemName: "magnifyingglass")
-                        .font(.system(size: 12))
+                        .font(.system(size: zoomed(12)))
                         .foregroundStyle(.tertiary)
                     TextField("Search models", text: $query)
                         .textFieldStyle(.plain)
-                        .font(.system(size: 13))
+                        .font(.system(size: zoomed(13)))
                         .focused($searching)
                         .onSubmit {
                             // Return takes the first match.
@@ -571,15 +571,15 @@ struct ModelPickerView: View {
                             close()
                         }
                 }
-                .padding(.horizontal, 12)
-                .frame(height: 36)
+                .padding(.horizontal, zoomed(12))
+                .frame(height: zoomed(36))
                 Divider()
                 ScrollView {
                     // Not lazy: a list this short costs nothing to build,
                     // and a lazy stack's guessed height left a short list
                     // (Codex's two models) floating in a popover sized for
                     // more.
-                    VStack(alignment: .leading, spacing: 1) {
+                    VStack(alignment: .leading, spacing: zoomed(1)) {
                         ForEach(rows.filter { !$0.isOlder }) { row in
                             ModelRow(row: row) {
                                 settings.pick(row, in: column)
@@ -589,11 +589,11 @@ struct ModelPickerView: View {
                         let older = rows.filter(\.isOlder)
                         if !older.isEmpty {
                             Text("Older")
-                                .font(.system(size: 11, weight: .medium))
+                                .font(.system(size: zoomed(11), weight: .medium))
                                 .foregroundStyle(.tertiary)
-                                .padding(.horizontal, 10)
-                                .padding(.top, 8)
-                                .padding(.bottom, 2)
+                                .padding(.horizontal, zoomed(10))
+                                .padding(.top, zoomed(8))
+                                .padding(.bottom, zoomed(2))
                             ForEach(older) { row in
                                 ModelRow(row: row) {
                                     settings.pick(row, in: column)
@@ -603,12 +603,12 @@ struct ModelPickerView: View {
                         }
                         if rows.isEmpty {
                             Text(query.isEmpty ? "No models listed yet" : "Nothing matches")
-                                .font(.system(size: 13))
+                                .font(.system(size: zoomed(13)))
                                 .foregroundStyle(.secondary)
-                                .padding(10)
+                                .padding(zoomed(10))
                         }
                     }
-                    .padding(6)
+                    .padding(zoomed(6))
                 }
                 .frame(maxHeight: Self.listMaxHeight)
                 .fixedSize(horizontal: false, vertical: true)
@@ -637,7 +637,7 @@ private struct ProviderRail: View {
     let choose: (String) -> Void
 
     var body: some View {
-        VStack(spacing: 4) {
+        VStack(spacing: zoomed(4)) {
             ForEach(providers) { provider in
                 RailButton(symbol: ModelPicker.providerSymbol(provider.id), title: provider.title, active: provider.id == selected) {
                     choose(provider.id)
@@ -645,7 +645,7 @@ private struct ProviderRail: View {
             }
             Spacer(minLength: 0)
         }
-        .padding(.vertical, 6)
+        .padding(.vertical, zoomed(6))
         .frame(width: ModelPickerView.railWidth)
         .frame(maxHeight: .infinity)
         .background(Color.primary.opacity(0.03))
@@ -661,11 +661,11 @@ private struct ProviderRail: View {
         var body: some View {
             Button(action: action) {
                 Image(systemName: symbol)
-                    .font(.system(size: 14, weight: .medium))
+                    .font(.system(size: zoomed(14), weight: .medium))
                     .foregroundStyle(active ? .primary : .secondary)
-                    .frame(width: 30, height: 30)
+                    .frame(width: zoomed(30), height: zoomed(30))
                     .background(
-                        RoundedRectangle(cornerRadius: 7, style: .continuous)
+                        RoundedRectangle(cornerRadius: zoomed(7), style: .continuous)
                             .fill(Color.primary.opacity(active ? 0.1 : hovering ? 0.06 : 0))
                     )
                     .contentShape(Rectangle())
@@ -687,36 +687,36 @@ private struct ModelRow: View {
 
     var body: some View {
         Button(action: action) {
-            HStack(spacing: 8) {
-                VStack(alignment: .leading, spacing: 1) {
+            HStack(spacing: zoomed(8)) {
+                VStack(alignment: .leading, spacing: zoomed(1)) {
                     Text(row.title)
-                        .font(.system(size: 13, weight: .medium))
+                        .font(.system(size: zoomed(13), weight: .medium))
                         .foregroundStyle(.primary)
                     if let subtitle = row.subtitle, !subtitle.isEmpty {
                         Text(subtitle)
-                            .font(.system(size: 11))
+                            .font(.system(size: zoomed(11)))
                             .foregroundStyle(.secondary)
                             .lineLimit(1)
                     }
                 }
-                Spacer(minLength: 8)
+                Spacer(minLength: zoomed(8))
                 if row.isDefault {
                     Image(systemName: "star.fill")
-                        .font(.system(size: 9))
+                        .font(.system(size: zoomed(9)))
                         .foregroundStyle(.tertiary)
                         .help("The default")
                         .accessibilityLabel("Default")
                 }
                 Image(systemName: "checkmark")
-                    .font(.system(size: 11, weight: .semibold))
+                    .font(.system(size: zoomed(11), weight: .semibold))
                     .foregroundStyle(.primary)
                     .opacity(row.isSelected ? 1 : 0)
                     .accessibilityHidden(!row.isSelected)
             }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 5)
+            .padding(.horizontal, zoomed(10))
+            .padding(.vertical, zoomed(5))
             .background(
-                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                RoundedRectangle(cornerRadius: zoomed(6), style: .continuous)
                     .fill(Color.primary.opacity(hovering ? 0.06 : 0))
             )
             .contentShape(Rectangle())
@@ -735,32 +735,32 @@ private struct EffortRow: View {
     let choose: (String) -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: zoomed(6)) {
             HStack {
                 Text("Effort")
-                    .font(.system(size: 11, weight: .medium))
+                    .font(.system(size: zoomed(11), weight: .medium))
                     .foregroundStyle(.secondary)
                 Spacer()
                 if let chosen, let porridge = ComposerChips.effortPorridge(chosen) {
                     Text(porridge)
-                        .font(.system(size: 11))
+                        .font(.system(size: zoomed(11)))
                         .foregroundStyle(.tertiary)
                 }
             }
-            HStack(spacing: 2) {
+            HStack(spacing: zoomed(2)) {
                 ForEach(levels, id: \.self) { level in
                     Segment(title: ComposerChips.effortTitle(level), active: level == chosen) { choose(level) }
                         .help(ComposerChips.effortPorridge(level) ?? ComposerChips.effortTitle(level))
                 }
             }
-            .padding(2)
+            .padding(zoomed(2))
             .background(
-                RoundedRectangle(cornerRadius: 7, style: .continuous)
+                RoundedRectangle(cornerRadius: zoomed(7), style: .continuous)
                     .fill(Color.primary.opacity(0.05))
             )
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 10)
+        .padding(.horizontal, zoomed(12))
+        .padding(.vertical, zoomed(10))
     }
 
     private struct Segment: View {
@@ -772,14 +772,14 @@ private struct EffortRow: View {
         var body: some View {
             Button(action: action) {
                 Text(title)
-                    .font(.system(size: 11, weight: active ? .semibold : .regular))
+                    .font(.system(size: zoomed(11), weight: active ? .semibold : .regular))
                     .foregroundStyle(active ? .primary : .secondary)
                     .lineLimit(1)
                     .minimumScaleFactor(0.8)
                     .frame(maxWidth: .infinity)
-                    .frame(height: 22)
+                    .frame(height: zoomed(22))
                     .background(
-                        RoundedRectangle(cornerRadius: 5, style: .continuous)
+                        RoundedRectangle(cornerRadius: zoomed(5), style: .continuous)
                             .fill(active ? Color(nsColor: .controlBackgroundColor) : Color.primary.opacity(hovering ? 0.05 : 0))
                             .shadow(color: .black.opacity(active ? 0.12 : 0), radius: 1, y: 0.5)
                     )
@@ -803,7 +803,7 @@ struct AccountPickerView: View {
     let threadId: String?
     let close: () -> Void
 
-    static let width: CGFloat = 360
+    static var width: CGFloat { zoomed(360) }
 
     private var settings: ThreadSettings { ThreadSettings(app: app, thread: threadId.flatMap { app.threads[$0] }) }
 
@@ -812,14 +812,14 @@ struct AccountPickerView: View {
         let sections = settings.accountSections
         VStack(alignment: .leading, spacing: 0) {
             ScrollView {
-                VStack(alignment: .leading, spacing: 1) {
+                VStack(alignment: .leading, spacing: zoomed(1)) {
                     ForEach(sections) { section in
                         Text(section.title)
-                            .font(.system(size: 11, weight: .medium))
+                            .font(.system(size: zoomed(11), weight: .medium))
                             .foregroundStyle(.tertiary)
-                            .padding(.horizontal, 10)
-                            .padding(.top, section.id == sections.first?.id ? 2 : 10)
-                            .padding(.bottom, 2)
+                            .padding(.horizontal, zoomed(10))
+                            .padding(.top, zoomed(section.id == sections.first?.id ? 2 : 10))
+                            .padding(.bottom, zoomed(2))
                             .accessibilityAddTraits(.isHeader)
                         ForEach(section.items) { item in
                             AccountRow(item: item) {
@@ -830,22 +830,22 @@ struct AccountPickerView: View {
                     }
                     if sections.isEmpty {
                         Text("No accounts yet")
-                            .font(.system(size: 13))
+                            .font(.system(size: zoomed(13)))
                             .foregroundStyle(.secondary)
-                            .padding(10)
+                            .padding(zoomed(10))
                     }
                 }
-                .padding(6)
+                .padding(zoomed(6))
             }
-            .frame(maxHeight: max(160, min(420, (AppWindow.contentHeight ?? 800) - 300)))
+            .frame(maxHeight: max(zoomed(160), min(zoomed(420), (AppWindow.contentHeight ?? 800) - zoomed(300))))
             .fixedSize(horizontal: false, vertical: true)
             if let footer = settings.accountFooter {
                 Divider()
                 Text(footer)
-                    .font(.system(size: 11))
+                    .font(.system(size: zoomed(11)))
                     .foregroundStyle(.tertiary)
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 8)
+                    .padding(.horizontal, zoomed(16))
+                    .padding(.vertical, zoomed(8))
             }
         }
         .frame(width: Self.width)
@@ -858,32 +858,32 @@ struct AccountPickerView: View {
 
         var body: some View {
             Button(action: action) {
-                HStack(spacing: 8) {
-                    VStack(alignment: .leading, spacing: 1) {
+                HStack(spacing: zoomed(8)) {
+                    VStack(alignment: .leading, spacing: zoomed(1)) {
                         Text(item.title)
-                            .font(.system(size: 13, weight: .medium))
+                            .font(.system(size: zoomed(13), weight: .medium))
                             .foregroundStyle(.primary)
                             .lineLimit(1)
                         if let subtitle = item.subtitle {
                             // Two lines rather than "resets t…".
                             Text(subtitle)
-                                .font(.system(size: 11))
+                                .font(.system(size: zoomed(11)))
                                 .foregroundStyle(subtitleStyle)
                                 .lineLimit(2)
                                 .fixedSize(horizontal: false, vertical: true)
                         }
                     }
-                    Spacer(minLength: 8)
+                    Spacer(minLength: zoomed(8))
                     Image(systemName: "checkmark")
-                        .font(.system(size: 11, weight: .semibold))
+                        .font(.system(size: zoomed(11), weight: .semibold))
                         .foregroundStyle(.primary)
                         .opacity(item.isSelected ? 1 : 0)
                         .accessibilityHidden(!item.isSelected)
                 }
-                .padding(.horizontal, 10)
-                .padding(.vertical, 5)
+                .padding(.horizontal, zoomed(10))
+                .padding(.vertical, zoomed(5))
                 .background(
-                    RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    RoundedRectangle(cornerRadius: zoomed(6), style: .continuous)
                         .fill(Color.primary.opacity(hovering ? 0.06 : 0))
                 )
                 .contentShape(Rectangle())

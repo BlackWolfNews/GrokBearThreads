@@ -124,6 +124,8 @@ type ThreadSummary = {
   updatedAt: string
   lastActivityAt: string
   snoozedUntil?: string
+  snoozedUntilRestart?: true // hibernating until the runner next starts;
+                        // snoozedUntil is then 9999-12-31T00:00:00.000Z
   archivedAt?: string
   preview: string       // last assistant text, one line, <= 140 chars
   lastSeq: number       // seq of the newest persisted event
@@ -143,6 +145,9 @@ type ThreadSummary = {
                         // agent hasn't read yet. Absent when there's none.
                         // Set during a turn too; between turns it's the
                         // sign the thread is still being worked on
+  subagents?: Subagent[] // the sub-agents the agent has started, foreground
+                        // and background: the newest 20, oldest first.
+                        // Absent when it has started none
 }
 
 type Action = {
@@ -182,6 +187,27 @@ type Panel = {
   note?: string         // one line about it: the deployment, the project
 }
 
+
+// A sub-agent the thread's agent started (Claude's Agent tool). The runner
+// follows it from the CLI's task events, so it changes while it runs: each
+// change sends thread.updated. `threads.subagent` reads what it did.
+type Subagent = {
+  id: string            // the CLI's id for it (its task id)
+  itemId?: string       // the tool.call that started it, in the thread
+  parentId?: string     // the sub-agent that started this one, when it was
+                        // started by a sub-agent rather than the thread's agent
+  description: string   // its brief's title: "Review the runner changes"
+  agentType?: string    // "general-purpose", "Explore", "fork"
+  status: "running" | "completed" | "failed" | "stopped"
+                        // clients treat a status they don't know as stopped
+  background: boolean   // the agent carried on while it ran
+  activity?: string     // while running, what it's doing in the CLI's own
+                        // words ("Running npm test")
+  summary?: string      // once finished, what it reported, one line, <= 200 chars
+  toolUses?: number     // tool calls so far
+  startedAt: string
+  endedAt?: string      // set once it's no longer running
+}
 
 type BackgroundTask = {
   kind: "agent" | "shell" | "monitor" | "other" // a sub-agent, a shell
@@ -312,11 +338,13 @@ replaces whatever the deltas built up.
 | `threads.create` | `{ text: string, images?: ImageRef[], cwd?: string, accountId?: string, model?: string, effort?: EffortLevel, permissionMode?: "full" \| "ask", title?: string }` | `{ thread: ThreadSummary }` (the first turn starts straight away). The thread's `provider` is its account's. With no `model`, the thread gets `defaults.models[provider]` from `hello`, or `defaults.model` for Claude, or else the account's own default. With no `effort`, `defaults.efforts[provider]`, or else the model's own level. See "Models and effort across providers" |
 | `threads.send` | `{ threadId, text, images?: ImageRef[] }` | `{ turnId }`. If a turn is running and its CLI is live, the message goes into that turn straight away (a `user.message` under the running `turnId`, which is returned): the agent takes it at its next step, or right after its reply if that was already finishing, and the turn doesn't complete until it has been answered. Otherwise (the CLI is still starting or leaving, messages are already waiting, a move or fresh CLI is due on the next turn, Stop has been pressed, or the turn is only an approval for a background subagent) the message is queued and starts its own turn when the running one ends |
 | `threads.interrupt` | `{ threadId }` | `{}` |
-| `threads.update` | `{ threadId, title?, cwd?, accountId?, model?: string \| null, effort?: EffortLevel \| null, permissionMode?, snoozedUntil?: string \| null, archived?: boolean }` | `{ thread: ThreadSummary }`. Snoozing or archiving releases the CLI (and archives a Codex thread in Codex too). Changing account or cwd takes effect on the next turn. A model or effort change reaches a live Claude CLI straight away (`null` goes back to the default); on Codex it applies from the next turn, with a `system.note` if a turn is running. A folder change on the same Claude account copies the native session's transcript to the new folder and resumes it; on the same Codex account the session carries on in the new folder from the next turn. Otherwise (or if that fails) it starts a new native session with a short handoff note. An account of the other provider switches `provider`, resets `model` and `effort` to that provider's defaults unless the same call sets them, and clears the thread's "Always allow" rules. `model` and `effort` are checked as in "Models and effort across providers" |
+| `threads.update` | `{ threadId, title?, cwd?, accountId?, model?: string \| null, effort?: EffortLevel \| null, permissionMode?, snoozedUntil?: string \| null, archived?: boolean }` | `{ thread: ThreadSummary }`. `snoozedUntil` is an ISO time, or `"restart"` for until the runner next starts (any start: a planned restart, a crash, a reboot), when the thread wakes before the restart's resume is sent, so a thread put away while its own restart waited is still carried on. Snoozing or archiving releases the CLI (and archives a Codex thread in Codex too). Changing account or cwd takes effect on the next turn. A model or effort change reaches a live Claude CLI straight away (`null` goes back to the default); on Codex it applies from the next turn, with a `system.note` if a turn is running. A folder change on the same Claude account copies the native session's transcript to the new folder and resumes it; on the same Codex account the session carries on in the new folder from the next turn. Otherwise (or if that fails) it starts a new native session with a short handoff note. An account of the other provider switches `provider`, resets `model` and `effort` to that provider's defaults unless the same call sets them, and clears the thread's "Always allow" rules. `model` and `effort` are checked as in "Models and effort across providers" |
+| `threads.retitle` | `{ dryRun?: boolean }` | `{ threads: { threadId, from: string, to?: string, reason?: string }[] }`. Gives a model title to every thread, archived and snoozed included, whose title is still its first message's first line and that nobody has named (`titleSet`); see "Titles" under "Settings and models". One entry per such thread: `to` when it was renamed, `reason` when it wasn't (no key, private folder, over budget, renamed meanwhile). `dryRun` lists them without asking the model (`tb retitle`) |
 | `threads.delete` | `{ threadId }` | `{}`. Stops the thread's CLI and moves its folder to `trash/` in the data dir (a Codex thread is archived in Codex too). Every client gets `thread.deleted` |
 | `threads.events` | `{ threadId, afterSeq?: number, beforeSeq?: number, limit?: number }` (default: the newest 500) | `{ events: Event[], firstSeq, lastSeq, inProgress: { itemId, type: "assistant.text" \| "reasoning", text }[] }` |
 | `threads.subscribe` | `{ threadId, afterSeq?: number }` | `{ events: Event[], inProgress: { itemId, type, text }[] }` (everything after `afterSeq`, and the text streamed so far for items still streaming), then pushes `thread.event` notifications. Deltas pushed after the reply carry on from `inProgress` |
 | `threads.unsubscribe` | `{ threadId }` | `{}` |
+| `threads.subagent` | `{ threadId, subagentId }` | `{ subagent?: Subagent, events: Event[] }`: what the sub-agent has done so far, read from the CLI's own record of it, as events (`user.message` for its brief, then `assistant.text`, `reasoning`, `tool.call`, `tool.result`, `edit.diff`) numbered from 1, with no `turnId`. Read again for more while it runs: thread.updated says when it has done something. `subagent` is absent once the thread's list has dropped it. `-32006` when there's no record of it (an older thread, or the CLI cleaned it up) |
 | `threads.markSeen` | `{ threadId, seq }` | `{ thread: ThreadSummary }` |
 | `approvals.respond` | `{ threadId, approvalId, decision: "allow" \| "allowAlways" \| "deny" \| "answered", message?: string, answers?: Record<string, string> }` | `{}`. `allowAlways` allows matching requests for the rest of this thread only; it never changes the thread's permission mode or saves anything in the project. With `answered`, the app sends the chosen answers in one line as `message` too: the runner keeps it in `approval.resolved` (only `answers` goes to the CLI), so the transcript can show what was chosen |
 | `media.import` | `{ path: string }` | `{ image: ImageRef }` copies a file into `inbox/` and reads its size |
@@ -340,7 +368,7 @@ replaces whatever the deltas built up.
 | `clis.setPolicy` | `{ provider: Provider, policy: "auto" \| "notify" \| "off" }` | `{ clis: CliStatus[] }` |
 
 Errors use JSON-RPC error objects: `-32602` bad params, `-32004` thread not
-found, `-32005` schedule not found, `-32010` account not found, `-32020` busy (e.g. two sends racing), `-32030` a draining runner no longer holds that thread (Handovers),
+found, `-32005` schedule not found, `-32006` sub-agent not found, `-32010` account not found, `-32020` busy (e.g. two sends racing), `-32030` a draining runner no longer holds that thread (Handovers),
 `-32601` a method this runner doesn't have (`clis.*` on a runner older than
 them), `-32000` anything else with a readable `message`.
 
@@ -526,7 +554,9 @@ it once through `settings.setKey` and only ever hears `set` and `hint`.
   these up.
 - **Titles.** A new thread's title is the first line of its first
   message, as before; with a key, a few seconds later a small model's
-  title replaces it, unless someone has set one meanwhile.
+  title replaces it, unless someone has set one meanwhile. Threads from
+  before there was a key keep their first line until `threads.retitle`
+  names them too.
 - **Failures.** A call never throws: it says why it didn't answer (no key,
   private folder, over budget, timed out, provider error), and the feature
   falls back. Each call times out after 20 seconds, is tried again once

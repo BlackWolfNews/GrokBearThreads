@@ -233,6 +233,21 @@ public struct TranscriptModel: Sendable {
         return refreshRows()
     }
 
+    /// Marks the transcript as having a turn underway with no
+    /// `turn.started` for it: a sub-agent's events (from `threads.subagent`)
+    /// carry no turns, but while it runs it should read like one, with its
+    /// last group live and the working line after it. `turn` "" matches
+    /// events with no turnId. Nil ends it.
+    public mutating func setLiveTurn(_ turn: String?, startedAt: Date? = nil) -> TranscriptChange {
+        guard turn != openTurn else { return TranscriptChange() }
+        openTurn = turn
+        if let turn, let startedAt { turnStarts[turn] = startedAt }
+        tailDirty = true
+        // The last run of work becomes (or stops being) the live group.
+        if !items.isEmpty { markInserted(items.count - 1) }
+        return refreshRows()
+    }
+
     public mutating func setExpanded(_ key: String, _ open: Bool) -> TranscriptChange {
         guard expanded.contains(key) != open else { return TranscriptChange() }
         DiffPreview.set(key, open: open, in: &expanded)

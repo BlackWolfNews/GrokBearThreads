@@ -22,6 +22,7 @@ public enum RPCError: Error, Sendable, Equatable, LocalizedError {
 
     public static let threadNotFound = -32004
     public static let scheduleNotFound = -32005
+    public static let subagentNotFound = -32006
     public static let methodNotFound = -32601
     public static let busy = -32020
 }

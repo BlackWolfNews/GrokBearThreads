@@ -55,13 +55,13 @@ struct ThreadbareApp: App {
             // In the View menu, as the Electron agent apps and Safari have
             // it. ⌘= is the key under the + sign, so ⌘+ works without shift.
             CommandGroup(after: .toolbar) {
-                Button("Bigger Text") { zoom.zoomIn() }
+                Button("Zoom In") { zoom.zoomIn() }
                     .keyboardShortcut("=")
                     .disabled(!zoom.canZoomIn)
-                Button("Smaller Text") { zoom.zoomOut() }
+                Button("Zoom Out") { zoom.zoomOut() }
                     .keyboardShortcut("-")
                     .disabled(!zoom.canZoomOut)
-                Button("Default Text Size") { zoom.reset() }
+                Button("Actual Size") { zoom.reset() }
                     .keyboardShortcut("0")
                     .disabled(zoom.isDefault)
                 Divider()
@@ -81,6 +81,9 @@ struct ThreadbareApp: App {
                     ForEach(Snooze.presets(now: app.now)) { preset in
                         Button(preset.title) { app.snooze(until: Snooze.date(for: preset.id, now: Date())) }
                     }
+                    if app.restartPending {
+                        Button(Snooze.untilRestartTitle) { app.snoozeUntilRestart() }
+                    }
                     Divider()
                     Button("Pick a time…") {
                         if let id = app.selection { SnoozePicker.show(threadId: id, app: app) }
@@ -97,10 +100,16 @@ struct ThreadbareApp: App {
                 .keyboardShortcut("c", modifiers: [.command, .shift])
                 .disabled(app.selection == nil)
                 Divider()
+                // ⌘1 to ⌘4 in the activity bar's order, as VS Code numbers
+                // its views.
                 Button("Show Inbox") { app.sidebarMode = .inbox }
+                    .keyboardShortcut("1")
                 Button("Show Hibernating") { app.sidebarMode = .snoozed }
+                    .keyboardShortcut("2")
                 Button("Show Archive") { app.showArchive() }
+                    .keyboardShortcut("3")
                 Button("Show Scheduled") { app.showSchedules() }
+                    .keyboardShortcut("4")
                     .disabled(!app.schedulesSupported)
             }
         }

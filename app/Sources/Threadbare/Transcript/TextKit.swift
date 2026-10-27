@@ -1,4 +1,5 @@
 import AppKit
+import SwiftUI
 
 /// TextKit 1 layout manager that also draws the transcript's custom
 /// backgrounds: rounded boxes behind code blocks and full-width line fills
@@ -30,7 +31,7 @@ final class BackgroundLayoutManager: NSLayoutManager {
             var rect = NSRect(x: head, y: box.minY - pad, width: max(0, tail - head), height: box.height + pad * 2)
             rect.origin.y = max(0, rect.origin.y)
             rect = rect.offsetBy(dx: origin.x, dy: origin.y).insetBy(dx: 0.25, dy: 0.25)
-            let path = NSBezierPath(roundedRect: rect, xRadius: 8, yRadius: 8)
+            let path = NSBezierPath(roundedRect: rect, xRadius: zoomed(8), yRadius: zoomed(8))
             color.setFill()
             path.fill()
             Theme.cardBorder.setStroke()
@@ -40,27 +41,16 @@ final class BackgroundLayoutManager: NSLayoutManager {
 
         storage.enumerateAttribute(.tbInlineBackground, in: characters) { value, range, _ in
             guard let color = value as? NSColor else { return }
-            let font = storage.attribute(.font, at: range.location, effectiveRange: nil) as? NSFont ?? Theme.codeFont
-            let glyphs = glyphRange(forCharacterRange: range, actualCharacterRange: nil)
-            color.setFill()
-            // One pill per line the run covers, sized to the font rather than
-            // the line (which includes the paragraph's extra line height).
-            enumerateLineFragments(forGlyphRange: glyphs) { fragment, _, textContainer, lineGlyphs, _ in
-                let part = NSIntersectionRange(lineGlyphs, glyphs)
-                guard part.length > 0 else { return }
-                var box = self.boundingRect(forGlyphRange: part, in: textContainer)
-                // The run's last character is kerned to make room for the
-                // pill (MarkdownRenderer); that space isn't part of the glyphs.
-                let last = self.characterIndexForGlyph(at: NSMaxRange(part) - 1)
-                if let kern = storage.attribute(.kern, at: last, effectiveRange: nil) as? CGFloat {
-                    box.size.width = max(0, box.width - kern)
-                }
-                let baseline = fragment.minY + self.location(forGlyphAt: part.location).y
-                box.origin.y = baseline - font.ascender - 1.5
-                box.size.height = font.ascender - font.descender + 3
-                box = box.insetBy(dx: -MarkdownRenderer.pillPad, dy: 0).offsetBy(dx: origin.x, dy: origin.y)
-                NSBezierPath(roundedRect: box, xRadius: 3.5, yRadius: 3.5).fill()
-            }
+            // Inline code that's just a thread id is drawn as its chip instead.
+            var ref = NSRange()
+            if let word = storage.attribute(.tbThreadRef, at: range.location, longestEffectiveRange: &ref, in: range) as? String,
+               ref == range, ThreadChips.resolve(word) != nil { return }
+            drawPill(range, color: color, storage: storage, origin: origin)
+        }
+
+        storage.enumerateAttribute(.tbThreadRef, in: characters) { value, range, _ in
+            guard let word = value as? String, ThreadChips.resolve(word) != nil else { return }
+            drawPill(range, color: Theme.chipBackground, storage: storage, origin: origin)
         }
 
         storage.enumerateAttribute(.tbLineBackground, in: characters) { value, range, _ in
@@ -70,6 +60,31 @@ final class BackgroundLayoutManager: NSLayoutManager {
             enumerateLineFragments(forGlyphRange: glyphs) { rect, _, _, _, _ in
                 NSRect(x: origin.x, y: rect.minY + origin.y, width: width, height: rect.height).fill()
             }
+        }
+    }
+
+    /// A small rounded fill behind just a run's glyphs (inline code, chips).
+    private func drawPill(_ range: NSRange, color: NSColor, storage: NSTextStorage, origin: NSPoint) {
+        let font = storage.attribute(.font, at: range.location, effectiveRange: nil) as? NSFont ?? Theme.codeFont
+        let glyphs = glyphRange(forCharacterRange: range, actualCharacterRange: nil)
+        color.setFill()
+        // One pill per line the run covers, sized to the font rather than
+        // the line (which includes the paragraph's extra line height).
+        enumerateLineFragments(forGlyphRange: glyphs) { fragment, _, textContainer, lineGlyphs, _ in
+            let part = NSIntersectionRange(lineGlyphs, glyphs)
+            guard part.length > 0 else { return }
+            var box = self.boundingRect(forGlyphRange: part, in: textContainer)
+            // The run's last character is kerned to make room for the
+            // pill (MarkdownRenderer); that space isn't part of the glyphs.
+            let last = self.characterIndexForGlyph(at: NSMaxRange(part) - 1)
+            if let kern = storage.attribute(.kern, at: last, effectiveRange: nil) as? CGFloat {
+                box.size.width = max(0, box.width - kern)
+            }
+            let baseline = fragment.minY + self.location(forGlyphAt: part.location).y
+            box.origin.y = baseline - font.ascender - zoomed(1.5)
+            box.size.height = font.ascender - font.descender + zoomed(3)
+            box = box.insetBy(dx: -MarkdownRenderer.pillPad, dy: 0).offsetBy(dx: origin.x, dy: origin.y)
+            NSBezierPath(roundedRect: box, xRadius: zoomed(3.5), yRadius: zoomed(3.5)).fill()
         }
     }
 }
@@ -238,6 +253,7 @@ final class TranscriptTextView: NSTextView {
         guard let storage = textStorage else { return }
         if storage.length == string.length, storage.isEqual(to: string) { return }
         storage.setAttributedString(string)
+        refreshChips()
         // The pointing hand over "Show 30 more lines" (always the last run)
         // only shows once the view rebuilds its cursor rects.
         if string.length > 0, string.attribute(.tbAction, at: string.length - 1, effectiveRange: nil) != nil {
@@ -249,6 +265,7 @@ final class TranscriptTextView: NSTextView {
     func clear() {
         guard let storage = textStorage, storage.length > 0 else { return }
         storage.setAttributedString(NSAttributedString())
+        refreshChips()
     }
 
     /// Replaces everything from `offset` on, so TextKit only lays out the tail.
@@ -258,6 +275,7 @@ final class TranscriptTextView: NSTextView {
         storage.beginEditing()
         storage.replaceCharacters(in: NSRange(location: start, length: storage.length - start), with: tail)
         storage.endEditing()
+        refreshChips()
     }
 
     var usedHeight: CGFloat {
@@ -272,31 +290,198 @@ final class TranscriptTextView: NSTextView {
     var onAction: ((String) -> Void)?
 
     override func mouseDown(with event: NSEvent) {
-        if let onAction, let action = action(at: convert(event.locationInWindow, from: nil)) {
+        let point = convert(event.locationInWindow, from: nil)
+        if let onAction, let action = character(at: point).flatMap({ textStorage?.attribute(.tbAction, at: $0, effectiveRange: nil) as? String }) {
             onAction(action)
+            return
+        }
+        if let chip = chip(at: point) {
+            closeChipCard()
+            AppModel.shared.openThread(chip.threadId)
             return
         }
         super.mouseDown(with: event)
     }
 
-    /// The `.tbAction` under `point` (view coordinates, which already
-    /// include a slice's bounds offset), if the point is on its glyphs.
-    private func action(at point: NSPoint) -> String? {
+    /// The character under `point` (view coordinates, which already
+    /// include a slice's bounds offset), if the point is on its glyph.
+    private func character(at point: NSPoint) -> Int? {
         guard let layoutManager, let textContainer, let storage = textStorage, storage.length > 0 else { return nil }
         let origin = textContainerOrigin
         let local = NSPoint(x: point.x - origin.x, y: point.y - origin.y)
         let glyph = layoutManager.glyphIndex(for: local, in: textContainer)
         let box = layoutManager.boundingRect(forGlyphRange: NSRange(location: glyph, length: 1), in: textContainer)
-        guard box.insetBy(dx: -4, dy: -3).contains(local) else { return nil }
+        guard box.insetBy(dx: -zoomed(4), dy: -zoomed(3)).contains(local) else { return nil }
         let index = layoutManager.characterIndexForGlyph(at: glyph)
-        guard index < storage.length else { return nil }
-        return storage.attribute(.tbAction, at: index, effectiveRange: nil) as? String
+        return index < storage.length ? index : nil
+    }
+
+    // MARK: Thread chips
+    //
+    // A thread id in a reply that names a real thread (ThreadChips) is drawn
+    // as a chip: accent text on a pill (BackgroundLayoutManager), a pointing
+    // hand, a card saying what the thread is on hover, and a click opens it.
+    // The colour is a temporary attribute so the rendered (and cached) text
+    // doesn't depend on the thread list.
+
+    private var chips: [(range: NSRange, threadId: String)] = []
+    private var chipObserver: NSObjectProtocol?
+    private var chipTracking: NSTrackingArea?
+    private var chipCard: ChipCardWindow?
+    private var hoveredChip: NSRange?
+    private var chipTimer: Timer?
+
+    /// Works out which id-shaped words are chips now, after the text or
+    /// the thread list changed.
+    func refreshChips() {
+        guard let layoutManager, let storage = textStorage else { return }
+        let had = !chips.isEmpty
+        chips = ThreadChips.chips(in: storage)
+        if had {
+            layoutManager.removeTemporaryAttribute(.foregroundColor, forCharacterRange: NSRange(location: 0, length: storage.length))
+        }
+        for chip in chips {
+            layoutManager.addTemporaryAttribute(.foregroundColor, value: Theme.chipText, forCharacterRange: chip.range)
+        }
+        if had || !chips.isEmpty { needsDisplay = true }
+        if let hovered = hoveredChip, !chips.contains(where: { $0.range == hovered }) { closeChipCard() }
+        // Only text that could hold a chip listens for new threads.
+        let couldHaveChips = hasThreadRefs(storage)
+        if couldHaveChips, chipObserver == nil {
+            chipObserver = NotificationCenter.default.addObserver(forName: ThreadChips.changed, object: nil, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { self?.refreshChips() }
+            }
+        } else if !couldHaveChips, let observer = chipObserver {
+            NotificationCenter.default.removeObserver(observer)
+            chipObserver = nil
+        }
+    }
+
+    private func hasThreadRefs(_ storage: NSTextStorage) -> Bool {
+        var found = false
+        storage.enumerateAttribute(.tbThreadRef, in: NSRange(location: 0, length: storage.length)) { value, _, stop in
+            if value != nil { found = true; stop.pointee = true }
+        }
+        return found
+    }
+
+    private func chip(at point: NSPoint) -> (range: NSRange, threadId: String)? {
+        guard !chips.isEmpty, let index = character(at: point) else { return nil }
+        return chips.first { NSLocationInRange(index, $0.range) }
+    }
+
+    /// The chip's box on its first line, in view coordinates.
+    private func chipRect(_ range: NSRange) -> NSRect? {
+        guard let layoutManager, let textContainer else { return nil }
+        let glyphs = layoutManager.glyphRange(forCharacterRange: range, actualCharacterRange: nil)
+        var first: NSRect?
+        layoutManager.enumerateEnclosingRects(forGlyphRange: glyphs, withinSelectedGlyphRange: NSRange(location: NSNotFound, length: 0),
+                                              in: textContainer) { rect, stop in
+            first = rect
+            stop.pointee = true
+        }
+        let origin = textContainerOrigin
+        return first.map { $0.offsetBy(dx: origin.x, dy: origin.y) }
+    }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        guard chipTracking == nil else { return }
+        let area = NSTrackingArea(rect: .zero, options: [.mouseEnteredAndExited, .mouseMoved, .activeInKeyWindow, .inVisibleRect], owner: self)
+        addTrackingArea(area)
+        chipTracking = area
+    }
+
+    // NSTextView sets the I-beam itself as the pointer moves (cursor rects
+    // added in resetCursorRects lost to it), so the hand is set after it.
+    override func mouseMoved(with event: NSEvent) {
+        super.mouseMoved(with: event)
+        let chip = chip(at: convert(event.locationInWindow, from: nil))
+        if chip != nil { NSCursor.pointingHand.set() }
+        hoverChip(chip)
+    }
+
+    override func cursorUpdate(with event: NSEvent) {
+        if chip(at: convert(event.locationInWindow, from: nil)) != nil {
+            NSCursor.pointingHand.set()
+        } else {
+            super.cursorUpdate(with: event)
+        }
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        super.mouseExited(with: event)
+        hoverChip(nil)
+    }
+
+    override func viewWillMove(toWindow newWindow: NSWindow?) {
+        super.viewWillMove(toWindow: newWindow)
+        if newWindow == nil { closeChipCard() }
+    }
+
+    /// The card shows after the pointer rests on a chip for a moment, like
+    /// a tooltip, and goes when it leaves.
+    private func hoverChip(_ chip: (range: NSRange, threadId: String)?) {
+        guard chip?.range != hoveredChip else { return }
+        closeChipCard()
+        guard let chip else { return }
+        hoveredChip = chip.range
+        chipTimer = Timer.scheduledTimer(withTimeInterval: 0.35, repeats: false) { [weak self] _ in
+            MainActor.assumeIsolated { self?.showChipCard(chip) }
+        }
+    }
+
+    private func showChipCard(_ chip: (range: NSRange, threadId: String)) {
+        guard hoveredChip == chip.range, window != nil, let rect = chipRect(chip.range),
+              let card = ThreadChipCard.make(threadId: chip.threadId) else { return }
+        guard let window else { return }
+        let pill = rect.insetBy(dx: -MarkdownRenderer.pillPad, dy: -1.5)
+        let onScreen = window.convertToScreen(convert(pill, to: nil))
+        chipCard = ChipCardWindow.show(card, below: onScreen, parent: window)
+    }
+
+    #if DEBUG
+    func debugChips() -> [(word: String, threadId: String)] {
+        guard let storage = textStorage else { return [] }
+        return chips.map { (storage.attributedSubstring(from: $0.range).string, $0.threadId) }
+    }
+
+    /// Shows a chip's card as a hover would; returns its window number.
+    func debugShowChip(_ word: String) -> Int? {
+        guard let chip = debugChip(word) else { return nil }
+        closeChipCard()
+        hoveredChip = chip.range
+        showChipCard(chip)
+        return chipCard?.windowNumber
+    }
+
+    func debugClickChip(_ word: String) {
+        guard let chip = debugChip(word) else { return }
+        closeChipCard()
+        AppModel.shared.openThread(chip.threadId)
+    }
+
+    private func debugChip(_ word: String) -> (range: NSRange, threadId: String)? {
+        guard let storage = textStorage else { return nil }
+        return chips.first { storage.attributedSubstring(from: $0.range).string == word }
+    }
+    #endif
+
+    func closeChipCard() {
+        chipTimer?.invalidate()
+        chipTimer = nil
+        hoveredChip = nil
+        chipCard?.dismiss()
+        chipCard = nil
     }
 
     // Don't let a row's text view swallow scroll-wheel events or show an
     // insertion point; the table owns scrolling.
     override var acceptsFirstResponder: Bool { true }
-    override func scrollWheel(with event: NSEvent) { nextResponder?.scrollWheel(with: event) }
+    override func scrollWheel(with event: NSEvent) {
+        closeChipCard()
+        nextResponder?.scrollWheel(with: event)
+    }
 
     override func menu(for event: NSEvent) -> NSMenu? {
         // Defer to the table's row menu (Copy message, Copy transcript) with

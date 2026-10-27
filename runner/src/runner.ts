@@ -25,6 +25,7 @@ import type {
   Provider,
   Question,
   RunnerDefaults,
+  Subagent,
   ThreadStatus,
   ThreadSummary,
   TurnOutcome,
@@ -40,12 +41,13 @@ import type {
   QuestionAnswer,
   QuestionRequest,
   SessionSink,
+  SubagentUpdate,
   ToolApprovalAnswer,
   ToolApprovalRequest,
   TurnResult,
 } from './adapters/types.ts';
 import { SessionNotFoundError } from './adapters/types.ts';
-import type { ThreadRecord, ThreadStore, QueuedSend } from './store.ts';
+import type { ThreadRecord, ThreadStore, QueuedSend, SubagentRecord } from './store.ts';
 import type { Clock, TimerHandle } from './clock.ts';
 import type { Logger } from './log.ts';
 import { threadEnv } from './restart.ts';
@@ -54,7 +56,9 @@ import { pickAccount as pickByRoom, type UsageReading } from './usage.ts';
 import { RUNNER_VERSION, expandHome, paths, readRunnerJson, writeRunnerJson, type Config } from './config.ts';
 import { copyImageInto, imageRefFor } from './media.ts';
 import { isDirectory } from './fsutil.ts';
-import { copySessionTranscript } from './transcripts.ts';
+import { copySessionTranscript, subagentTranscriptPath } from './transcripts.ts';
+import { readSubagentTranscript } from './adapters/claude/subagents.ts';
+import { fileContext } from './adapters/claude/normalize.ts';
 import type { Models } from './models/index.ts';
 import { approvalTitle } from './threadbare-mcp.ts';
 import {
@@ -251,6 +255,8 @@ export type RunnerDeps = {
   // Copies a Claude session's transcript to another folder (transcripts.ts);
   // tests swap it out.
   copyTranscript?: typeof copySessionTranscript;
+  // Where a sub-agent's transcript is (transcripts.ts); tests point it at a fixture.
+  subagentTranscript?: typeof subagentTranscriptPath;
   // Takes the Simulator panel's screenshot (patches.ts); tests pass a fake.
   screenshot?: Screenshot;
   // Where patches stop being looked for up the folder tree (the home folder).
@@ -285,6 +291,11 @@ const ACCOUNTS_THROTTLE_MS = 5_000;
 const HOOK_TELL_LIMIT = 2;
 // How much of a hook's output goes to the agent (the transcript has it all).
 const HOOK_TELL_CHARS = 8000;
+// snoozedUntil for a thread hibernating until the runner next starts: far
+// enough off that everything reading snoozedUntil (the lists, the resume
+// after a restart, a client older than snoozedUntilRestart) sees it as
+// snoozed, and start() wakes it long before.
+export const UNTIL_RESTART = '9999-12-31T00:00:00.000Z';
 
 export class Runner {
   private cfg: Config;
@@ -298,6 +309,7 @@ export class Runner {
   private log: Logger;
   private defer: (fn: () => void) => void;
   private copyTranscript: typeof copySessionTranscript;
+  private subagentTranscript: typeof subagentTranscriptPath;
   private screenshot: Screenshot;
   private panelsRoot?: string;
   private actionShell?: string[];
@@ -335,6 +347,7 @@ export class Runner {
     this.cfg = deps.config;
     this.store = deps.store;
     this.copyTranscript = deps.copyTranscript ?? copySessionTranscript;
+    this.subagentTranscript = deps.subagentTranscript ?? subagentTranscriptPath;
     this.screenshot = deps.screenshot ?? simctlScreenshot;
     this.panelsRoot = deps.panelsRoot;
     this.actionShell = deps.actionShell;
@@ -375,6 +388,10 @@ export class Runner {
       if (this.recover(st)) stopped++;
     }
     if (stopped) this.startupNotice('info', `${stopped === 1 ? 'A thread was' : `${stopped} threads were`} mid-turn when the runner stopped; send a message to carry on.`);
+    // Hibernating until the runner restarts: this is the restart. Before
+    // the restart's resume (main.ts), so a thread put away while its own
+    // restart waited still gets carried on.
+    for (const st of this.threads.values()) if (st.rec.snoozedUntilRestart) this.wake(st);
     this.flush();
     this.armSnoozeTimer();
     this.log.info('runner loaded threads', { count: this.threads.size });
@@ -527,6 +544,8 @@ export class Runner {
   // Returns true if the thread was mid-turn.
   private recover(st: ThreadState): boolean {
     const { rec } = st;
+    // A sub-agent can't outlive the runner that started its CLI.
+    this.stopSubagents(st);
     const midTurn = rec.status === 'starting' || rec.status === 'running' || rec.status === 'waiting';
     if (!midTurn && rec.pendingApprovals.length === 0 && rec.queue.length === 0) return false;
     // The turn may have ended on disk just before a crash stopped
@@ -603,6 +622,7 @@ export class Runner {
       // Say so in the thread, as releaseSession does, or it would wait for
       // a result that never comes with nothing to say why.
       rt.finished = [];
+      this.stopSubagents(st);
       if (rt.tasks.length) {
         const what = rt.tasks.map((t) => t.description || t.type).join('; ');
         rt.tasks = [];
@@ -752,7 +772,11 @@ export class Runner {
     this.threads.set(rec.id, st);
     if (opts.crashed) {
       if (this.recover(st)) this.notice('info', `The old runner stopped while "${rec.title}" was mid-turn; send a message to carry on.`);
-    } else if (rec.queue.length && this.bucket(rec) === 'inbox') {
+    }
+    // Hibernating until the runner restarts: for this thread, coming across
+    // is the restart.
+    if (rec.snoozedUntilRestart) this.wake(st);
+    else if (!opts.crashed && rec.queue.length && this.bucket(rec) === 'inbox') {
       this.kickQueue(st);
     }
     this.markDirty(st);
@@ -962,6 +986,27 @@ export class Runner {
     return this.summary(this.mustGet(threadId));
   }
 
+  // What a sub-agent has done so far, from the CLI's transcript of it.
+  subagent(threadId: string, subagentId: string): { subagent?: Subagent; events: PersistedEvent[] } {
+    const { rec } = this.mustGet(threadId);
+    const known = rec.subagents?.find((a) => a.id === subagentId);
+    const cwd = known?.cwd ?? rec.cwd;
+    const account = this.accounts.get(known?.accountId ?? rec.accountId);
+    const sessionId = known?.sessionId ?? rec.nativeSessionId;
+    const file = account && sessionId ? this.subagentTranscript(account.configDir, cwd, sessionId, subagentId) : null;
+    if (!file) throw new RpcError(ErrorCode.subagentNotFound, `There's no record of sub-agent ${subagentId} in this thread`);
+    const ctx = fileContext(cwd, this.store.mediaDir(rec.id), path.join(this.store.blobsDir(rec.id), 'subagents'));
+    let read: ReturnType<typeof readSubagentTranscript>;
+    try {
+      read = readSubagentTranscript(file, ctx);
+    } catch (e) {
+      throw new RpcError(ErrorCode.subagentNotFound, `Couldn't read sub-agent ${subagentId}'s transcript: ${String(e)}`);
+    }
+    const now = this.isoNow();
+    const events = read.map((e, i) => ({ seq: i + 1, ts: e.ts ?? now, threadId, ...e.body }) as PersistedEvent);
+    return known ? { subagent: publicSubagent(known), events } : { events };
+  }
+
   events(threadId: string, opts: { afterSeq?: number; beforeSeq?: number; limit?: number } = {}) {
     const st = this.mustGet(threadId);
     const log = this.store.log(threadId);
@@ -1118,8 +1163,9 @@ export class Runner {
   // Asks a small model for a better title than the first line. Without a
   // key, in a private folder or over budget it says why and nothing
   // changes. A title set meanwhile (by Mike or an agent) wins.
-  private async titleFromModel(st: ThreadState, text: string): Promise<void> {
-    if (!this.models) return;
+  private async titleFromModel(st: ThreadState, text: string): Promise<{ title: string } | { reason: string }> {
+    if (!this.models) return { reason: 'Model calls are off in this runner.' };
+    const before = st.rec.title;
     const res = await this.models.generate({
       feature: 'titles',
       cwd: st.rec.cwd,
@@ -1129,12 +1175,51 @@ export class Runner {
       prompt: text.slice(0, 4000),
       maxTokens: 30,
     });
-    if (!res.ok || st.rt.deleted || st.rec.titleSet) return;
+    if (!res.ok) return { reason: res.message };
+    if (st.rt.deleted) return { reason: 'Deleted meanwhile.' };
+    if (st.rec.titleSet || st.rec.title !== before) return { reason: 'Renamed meanwhile.' };
     const title = cleanTitle(res.value);
-    if (!title) return;
+    if (!title) return { reason: 'The model gave no title.' };
     st.rec.title = title;
     st.rec.updatedAt = this.isoNow();
     this.markDirty(st);
+    return { title };
+  }
+
+  // Names the threads that started before there was a key (or whose call
+  // failed): the ones still titled with their first message's first line
+  // and never named by anyone. A model title doesn't set titleSet, so the
+  // first-line check is what keeps those from being asked again.
+  async retitle(params: { dryRun?: boolean }): Promise<{ threads: { threadId: string; from: string; to?: string; reason?: string }[] }> {
+    const due: { st: ThreadState; text: string }[] = [];
+    for (const st of this.threads.values()) {
+      if (st.rec.titleSet) continue;
+      const text = this.firstMessageText(st.rec.id);
+      const line = text?.split('\n').map((l) => l.trim()).find(Boolean);
+      // titleFrom cut it at some length; an older runner may have cut it elsewhere.
+      if (line && st.rec.title && line.startsWith(st.rec.title)) due.push({ st, text: text! });
+    }
+    const threads = await Promise.all(
+      due.map(async ({ st, text }) => {
+        const from = st.rec.title;
+        if (params.dryRun) return { threadId: st.rec.id, from };
+        const r = await this.titleFromModel(st, text);
+        return 'title' in r ? { threadId: st.rec.id, from, to: r.title } : { threadId: st.rec.id, from, reason: r.reason };
+      }),
+    );
+    this.log.info('retitle', { dryRun: Boolean(params.dryRun), found: threads.length, named: threads.filter((t) => t.to).length });
+    return { threads };
+  }
+
+  // The first user.message's text, read a page at a time: it's nearly
+  // always the first event, and a long thread's log is large.
+  private firstMessageText(id: string): string | undefined {
+    const log = this.store.log(id);
+    for (let from = 1; from <= log.lastSeq; from += 50) {
+      const msg = log.read(from, from + 49).find((e) => e.type === 'user.message');
+      if (msg && msg.type === 'user.message') return msg.text;
+    }
+    return undefined;
   }
 
   // origin "runner" marks a message the runner sends by itself (restart.ts),
@@ -1169,6 +1254,7 @@ export class Runner {
     // Sending to a snoozed or archived thread brings it back.
     if (rec.snoozedUntil || rec.archivedAt) {
       delete rec.snoozedUntil;
+      delete rec.snoozedUntilRestart;
       delete rec.archivedAt;
       rt.releaseWhenIdle = false;
     }
@@ -1490,6 +1576,9 @@ export class Runner {
         } else if (!rt.turn) this.scheduleIdle(st);
         break;
       }
+      case 'subagent':
+        this.updateSubagent(st, o.update);
+        break;
       case 'allowRules': {
         const rules = new Set(rec.allowRules ?? []);
         for (const r of o.rules) rules.add(r);
@@ -1657,6 +1746,8 @@ export class Runner {
     rt.tasks = [];
     rt.finished = [];
     rt.taskEndedInTurn = false;
+    // Its sub-agents went with it.
+    this.stopSubagents(st);
     rt.wakeTimer?.cancel();
     rt.wakeTimer = undefined;
     rt.idleTimer?.cancel();
@@ -1764,7 +1855,7 @@ export class Runner {
     model?: string | null;
     effort?: EffortLevel | null;
     permissionMode?: PermissionMode;
-    snoozedUntil?: string | null;
+    snoozedUntil?: string | null; // an ISO time, or 'restart' for until the runner next starts
     archived?: boolean;
   }): { thread: ThreadSummary } {
     const st = this.mustGet(params.threadId);
@@ -1889,10 +1980,15 @@ export class Runner {
       );
     }
     if (params.snoozedUntil !== undefined) {
+      delete rec.snoozedUntilRestart;
       if (params.snoozedUntil === null) delete rec.snoozedUntil;
-      else {
+      else if (params.snoozedUntil === 'restart') {
+        rec.snoozedUntil = UNTIL_RESTART;
+        rec.snoozedUntilRestart = true;
+        stop = true;
+      } else {
         const t = Date.parse(params.snoozedUntil);
-        if (Number.isNaN(t)) throw new RpcError(ErrorCode.badParams, 'snoozedUntil must be an ISO time');
+        if (Number.isNaN(t)) throw new RpcError(ErrorCode.badParams, 'snoozedUntil must be an ISO time or "restart"');
         rec.snoozedUntil = new Date(t).toISOString();
         stop = true;
       }
@@ -2301,6 +2397,7 @@ export class Runner {
 
   private wake(st: ThreadState): void {
     delete st.rec.snoozedUntil;
+    delete st.rec.snoozedUntilRestart;
     st.rec.forceUnread = true;
     st.rec.updatedAt = this.isoNow();
     this.markDirty(st);
@@ -2380,6 +2477,53 @@ export class Runner {
 
   // --------------------------------------------------------------- helpers
 
+  // A sub-agent started or changed (AdapterOutput 'subagent').
+  private updateSubagent(st: ThreadState, u: SubagentUpdate): void {
+    const { rec } = st;
+    const list = (rec.subagents ??= []);
+    let a = list.find((x) => x.id === u.id);
+    if (!a) {
+      // An update for one the list doesn't have (a resumed CLI reporting a
+      // sub-agent from before) still gets a row.
+      a = { id: u.id, description: '', status: 'running', background: false, startedAt: this.isoNow(), accountId: rec.accountId, cwd: rec.cwd };
+      if (rec.nativeSessionId) a.sessionId = rec.nativeSessionId;
+      list.push(a);
+      // Keep the newest SUBAGENTS_KEPT, dropping finished ones first.
+      while (list.length > SUBAGENTS_KEPT) {
+        const i = list.findIndex((x) => x.status !== 'running');
+        list.splice(i >= 0 ? i : 0, 1);
+      }
+    }
+    if (u.itemId) a.itemId = u.itemId;
+    if (u.parentId) a.parentId = u.parentId;
+    if (u.description) a.description = u.description;
+    if (u.agentType) a.agentType = u.agentType;
+    if (u.background) a.background = true;
+    if (u.toolUses !== undefined) a.toolUses = u.toolUses;
+    if (u.summary) a.summary = u.summary;
+    if (u.status) {
+      if (u.status !== 'running' && a.status === 'running') a.endedAt = this.isoNow();
+      a.status = u.status;
+    }
+    if (a.status !== 'running') delete a.activity;
+    else if (u.activity) a.activity = u.activity;
+    this.markDirty(st);
+  }
+
+  // Marks the thread's running sub-agents stopped once the CLI running them
+  // has gone.
+  private stopSubagents(st: ThreadState): void {
+    let any = false;
+    for (const a of st.rec.subagents ?? []) {
+      if (a.status !== 'running') continue;
+      a.status = 'stopped';
+      a.endedAt = this.isoNow();
+      delete a.activity;
+      any = true;
+    }
+    if (any) this.markDirty(st);
+  }
+
   private markDirty(st: ThreadState): void {
     if (st.rt.deleted) return;
     this.dirty.add(st.rec.id);
@@ -2430,6 +2574,7 @@ export class Runner {
     if (rec.modelInUse) s.modelInUse = rec.modelInUse;
     if (rec.effortInUse) s.effortInUse = rec.effortInUse;
     if (rec.snoozedUntil) s.snoozedUntil = rec.snoozedUntil;
+    if (rec.snoozedUntilRestart) s.snoozedUntilRestart = true;
     if (rec.archivedAt) s.archivedAt = rec.archivedAt;
     if (rec.nativeSessionId && rec.sessionUsed) s.nativeSessionId = rec.nativeSessionId;
     if (rec.contextTokens !== undefined) s.contextTokens = rec.contextTokens;
@@ -2442,6 +2587,7 @@ export class Runner {
     if (set.patches.length) s.patches = set.patches;
     const background = this.background(st);
     if (background.length) s.background = background;
+    if (rec.subagents?.length) s.subagents = rec.subagents.map(publicSubagent);
     return s;
   }
 
@@ -2729,6 +2875,14 @@ export class Runner {
 }
 
 export type SendOptions = { origin?: MessageOrigin; scheduleId?: string; queue?: boolean };
+
+// How many sub-agents a thread keeps in its summary.
+const SUBAGENTS_KEPT = 20;
+
+function publicSubagent(a: SubagentRecord): Subagent {
+  const { sessionId: _s, cwd: _c, accountId: _a, ...rest } = a;
+  return rest;
+}
 
 function userMessage(msg: QueuedSend): EventBody {
   return {

@@ -14,7 +14,9 @@ final class SpinnerView: NSView {
 
     private let arc = CAShapeLayer()
     private var spinning = false
-    static let lineWidth: CGFloat = 1.6
+    /// Grows with the zoom, like an icon's strokes; set again in `layout`,
+    /// which a zoom change brings with the new frame.
+    static var lineWidth: CGFloat { zoomed(1.6) }
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -35,7 +37,8 @@ final class SpinnerView: NSView {
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         arc.frame = bounds
-        let side = min(bounds.width, bounds.height) - 3
+        arc.lineWidth = Self.lineWidth
+        let side = min(bounds.width, bounds.height) - zoomed(3)
         let ring = NSRect(x: (bounds.width - side) / 2, y: (bounds.height - side) / 2, width: side, height: side)
         arc.path = CGPath(ellipseIn: ring, transform: nil)
         CATransaction.commit()

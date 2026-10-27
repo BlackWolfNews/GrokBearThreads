@@ -446,6 +446,7 @@ is an error. Commands marked "the open thread" act on `id` when it's given
 |---|---|---|
 | `open` | `id`, `timeout` | selects a thread and waits until its rows are on screen |
 | `select` | `id` | selects it without waiting |
+| `subagent` | `thread` (default: the open one), `id`, `timeout` | shows a sub-agent's transcript, as clicking its row under the thread does, and waits until its rows are on screen |
 | `new`, `options` | `cwd`, `account`, `model` (`null` for the default), `effort` (`null` for the model's own), `ask` | the new-thread composer and its menus; `options` refuses anything else (a typo used to pass) and says what's set now |
 | `composer-menu` | `menu` (`model`, `account`, `permission` or `folder`; default `model`), `click` (an item's title; an account's email or id), `show` (opens the model or account picker and says its window number) | the composer chip's menu (or the model or account picker) for the open thread or a new one, as text: `[x]` the ticked item, `*` the default, the subtitle after a dash, submenus and older models indented, `#` on a section, `---` before the account picker's line about where the numbers came from; `click` picks an item as a click would |
 | `usage` | `show` (true opens the usage popover and says its window number, false closes it), `click` (`Update`, `Update anyway`, `Go back to <version>`, `Automatic`, `Ask me`, `Off` with `provider`, or `Check now`) | the usage popover as text: each account's room by provider, then the CLIs with their buttons in brackets. `dump` has the same lines while it's open |
@@ -455,10 +456,11 @@ is an error. Commands marked "the open thread" act on `id` when it's given
 | `expand`, `collapse` | `row`, `file`, `all` | a group, tool, thinking block or settled approval (one folded in a closed group opens it); `file` (path or index) in a changes card; `all` for a whole diff |
 | `scroll` | `to` (`top`, `bottom`) or `row`, `offset` | |
 | `hover` | `id` (sidebar) or `row` (transcript); neither clears | draws a row as if the pointer were on it |
+| `chip` | `row`, `word`, `show`, `click` | thread chips in a row's text: lists them (word=thread id); with `word`, `show` true shows its hover card and says its window number, false closes it, `click` true opens its thread |
 | `menu` | `row`, `click` | a transcript row's context menu, or chooses an item from it |
 | `debug-info`, `copy-thread-id`, `clipboard` | `row`, `id` | what "Copy debug info" and "Copy thread id" (the open thread) copy, copied to the instance's pasteboard as the menu items do; `clipboard` reads it back |
 | `appearance`, `resize` | `mode` (light, dark, system); `w`, `h` | |
-| `zoom` | `to` (in, out, reset) or `percent` | the text size, as ⌘=, ⌘- and ⌘0 set it; says the percent it's at |
+| `zoom` | `to` (in, out, reset) or `percent` | the window's zoom, as ⌘=, ⌘- and ⌘0 set it; says the percent it's at |
 | `archive`, `unarchive`, `snooze` | `id`, `seconds` (default 3600) | the open thread; says which thread it acted on |
 | `mode` | `mode` (`archive`, `snoozed`, `inbox`) | which list the sidebar shows |
 | `action` | `id`, `timeout` | runs that action chip of the selected thread and waits for a command to finish (default 60 s); `dump` lists the actions |

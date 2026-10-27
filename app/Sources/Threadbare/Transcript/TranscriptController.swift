@@ -89,7 +89,7 @@ final class TranscriptController: NSObject, NSTableViewDataSource, NSTableViewDe
         // the bottom shows its last row whole. At the top, every row starts
         // with at least 5 pt of its own padding, so 10 here keeps a thread
         // scrolled to its top clear of the top fade.
-        scrollView.contentInsets = NSEdgeInsets(top: 10, left: 0, bottom: Self.fadeHeight + 4, right: 0)
+        applyInsets()
         scrollView.wantsLayer = true
         scrollView.contentView.postsBoundsChangedNotifications = true
         scrollView.contentView.postsFrameChangedNotifications = true
@@ -108,11 +108,17 @@ final class TranscriptController: NSObject, NSTableViewDataSource, NSTableViewDe
     /// Tall enough that a bright image passing under the composer fades
     /// out rather than turning into a grey strip with its corners floating
     /// above the card (Codex fades over about 40 pt).
-    static let fadeHeight: CGFloat = 36
-    static let topFadeHeight: CGFloat = 14
+    static var fadeHeight: CGFloat { zoomed(36) }
+    static var topFadeHeight: CGFloat { zoomed(14) }
     private let fadeMask = CALayer()
     private let fadeGradient = CAGradientLayer()
     private let fadeScroller = CALayer()
+
+    /// Set again on a zoom change: the composer card the bottom inset
+    /// clears grows with everything else.
+    private func applyInsets() {
+        scrollView.contentInsets = NSEdgeInsets(top: zoomed(10), left: 0, bottom: Self.fadeHeight + zoomed(4), right: 0)
+    }
 
     private func updateFade() {
         guard let layer = scrollView.layer else { return }
@@ -129,6 +135,7 @@ final class TranscriptController: NSObject, NSTableViewDataSource, NSTableViewDe
         let bounds = scrollView.bounds
         guard bounds.height > 0 else { return }
         // The scroller strip on the right stays whole; only the text fades.
+        // AppKit's scroller, so its width doesn't follow the zoom.
         let scroller: CGFloat = 16
         let top = max(0, min(0.5, Self.topFadeHeight / bounds.height))
         let bottom = max(0, min(0.5, Self.fadeHeight / bounds.height))
@@ -567,6 +574,8 @@ final class TranscriptController: NSObject, NSTableViewDataSource, NSTableViewDe
     /// (rather than re-configuring the cells on screen) drops every cell's
     /// own text layout, which was done at the old sizes.
     @objc private func zoomChanged() {
+        applyInsets()
+        updateFade()
         guard let session else { return }
         let memory = captureMemory()
         let count = session.displayCount

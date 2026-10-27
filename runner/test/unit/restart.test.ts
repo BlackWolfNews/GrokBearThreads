@@ -401,6 +401,21 @@ test('snoozed or archived threads get the note, saying why, but are not woken by
   assert.match(h.events(t2.id).at(-1).text, /Not carrying on by itself: this thread is snoozed\.$/);
 });
 
+test('a thread hibernating until the restart wakes before the resume, so it is carried on', () => {
+  const h = makeHarness();
+  const { thread } = create(h);
+  h.adapter.last.init();
+  h.adapter.last.result();
+  h.runner.update({ threadId: thread.id, snoozedUntil: 'restart' });
+  saveRestart(h, thread.id);
+  const h2 = h.restart();
+  withRestarter(h2, 'b').r.resumeAfterRestart();
+  const [note, resume] = noteAndResume(h2, thread.id);
+  assert.equal(note.text, 'Runner restarted: a to b');
+  assert.equal(resume.text, 'go on');
+  assert.equal(h2.runner.get(thread.id).snoozedUntil, undefined);
+});
+
 test('an unreadable restart.json, or one for a deleted thread, is dropped without harm', () => {
   const h = makeHarness();
   fs.writeFileSync(restartPath(h.home), '{ not json');

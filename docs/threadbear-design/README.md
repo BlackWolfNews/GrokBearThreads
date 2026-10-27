@@ -153,6 +153,10 @@ Thread stays on one cwd. A thread that needs two projects runs in a
 worktree or a parent folder; "multiple projects" isn't a thread concept,
 it's where the patches stack from.
 
+(2026-10-27: superseded by `docs/projects-design.md`. A thread can now be
+in several projects, each with several folders, and loads patches from
+all of them.)
+
 ## Build order
 
 1. **Goldilocks and the bear working line.** Small, and the app feels

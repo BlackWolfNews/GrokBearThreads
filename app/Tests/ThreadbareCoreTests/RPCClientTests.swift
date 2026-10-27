@@ -212,6 +212,7 @@ final class RPCClientTests: XCTestCase {
         XCTAssertNil(update.params["title"])
         let snooze = ThreadUpdate(snoozedUntil: Date(timeIntervalSince1970: 0))
         XCTAssertEqual(snooze.params["snoozedUntil"]?.stringValue, "1970-01-01T00:00:00.000Z")
+        XCTAssertEqual(ThreadUpdate(snoozeUntilRestart: true).params["snoozedUntil"], .string("restart"))
     }
 
     func testJSONPeek() {

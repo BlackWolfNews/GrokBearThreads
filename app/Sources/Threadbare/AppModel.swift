@@ -37,6 +37,10 @@ final class AppModel {
         didSet {
             refreshDockBadge()
             noteFailedAccounts(from: oldValue)
+            // Most updates change a thread, not which threads there are.
+            if threads.count != oldValue.count || threads.keys.contains(where: { oldValue[$0] == nil }) {
+                ThreadChips.update(threads.keys)
+            }
         }
     }
     /// For a thread whose last turn failed: the account it failed on, as it
@@ -45,10 +49,14 @@ final class AppModel {
     /// knows the new account isn't the one that ran out.
     @ObservationIgnored private(set) var failedOnAccount: [String: String] = [:]
     var selection: String?
+    /// A sub-agent's transcript is showing instead of its thread's. The
+    /// thread stays `selection`, so the sidebar keeps its sub-agents listed
+    /// and the toolbar still names it.
+    var subagentSelection: SubagentRef?
     var sidebarMode: SidebarMode = .inbox
     var archiveQuery = ""
     /// Archived threads are in `threads` (the first list includes them, for
-    /// the Archive count in the sidebar's footer).
+    /// the Archive view's count).
     var archiveLoaded = false
     var errorMessage: String?
     var focusComposer = 0
@@ -135,6 +143,9 @@ final class AppModel {
 
     @ObservationIgnored private(set) var client: RPCClient?
     @ObservationIgnored private var sessions: [String: ThreadSession] = [:]
+    /// Sub-agent transcripts, keyed by `SubagentRef.key`. A handful at most.
+    @ObservationIgnored private var subagentSessions: [String: ThreadSession] = [:]
+    @ObservationIgnored private var subagentPoll: Task<Void, Never>?
     @ObservationIgnored private var connectTask: Task<Void, Never>?
     @ObservationIgnored private var markSeenTask: Task<Void, Never>?
     @ObservationIgnored private var backoff = Backoff()
@@ -293,7 +304,7 @@ final class AppModel {
                 refreshRunnerStatus()
                 clearConnectionError()
                 backoff.reset()
-                // Archived threads come too: the sidebar's footer shows how
+                // Archived threads come too: the Archive view shows how
                 // many there are, and they open as fast as live ones.
                 let list = try await client.listThreads(include: [.inbox, .snoozed, .archived])
                 var fresh: [String: ThreadSummary] = [:]
@@ -309,6 +320,10 @@ final class AppModel {
                 }
                 for session in sessions.values where session.state != .loaded {
                     session.open(width: transcript.width > 0 ? transcript.width : transcript.currentTableWidth)
+                }
+                if let ref = subagentSelection {
+                    let session = subagentSession(for: ref)
+                    if session.state == .loaded { session.refreshSubagent() } else { session.open(width: transcript.width > 0 ? transcript.width : transcript.currentTableWidth) }
                 }
                 await pump(client)
                 client.close()
@@ -428,10 +443,15 @@ final class AppModel {
         // The open transcript's "3 sub-agents working in the background"
         // line follows the summary, not the events.
         if previous?.background != thread.background { sessions[thread.id]?.setBackground(thread.background) }
+        // The open sub-agent did something: read its transcript again.
+        if let ref = subagentSelection, ref.threadId == thread.id,
+           previous?.subagents.first(where: { $0.id == ref.subagentId }) != thread.subagents.first(where: { $0.id == ref.subagentId }) {
+            subagentSessions[ref.key]?.refreshSubagent()
+        }
         // A thread a pending restart waits for may just have finished.
         if restart.isPending, previous?.status != thread.status { refreshRunnerStatus() }
         let becameNeedy = thread.needsYou && previous?.needsYou != true
-        let showing = isLooking && selection == thread.id
+        let showing = isLooking && selection == thread.id && subagentSelection == nil
         if becameNeedy && !showing && notificationsEnabled {
             Notifier.post(thread: thread)
         }
@@ -447,12 +467,15 @@ final class AppModel {
         drafts[threadId] = nil
         if let session = sessions.removeValue(forKey: threadId) { session.unsubscribe() }
         if selection == threadId { selection = nil }
+        if subagentSelection?.threadId == threadId { subagentSelection = nil }
+        for key in subagentSessions.keys where key.hasPrefix(threadId + "/") { subagentSessions[key] = nil }
     }
 
     // MARK: Selection and sessions
 
     func select(_ threadId: String?) {
         selection = threadId
+        stopShowingSubagent()
         guard let threadId else { return }
         let session = session(for: threadId)
         if session.state == .idle || session.state.isFailed {
@@ -460,6 +483,76 @@ final class AppModel {
         }
         if let thread = threads[threadId], thread.needsYou || thread.lastSeq > thread.lastSeenSeq {
             scheduleMarkSeen(threadId)
+        }
+    }
+
+    /// Opens a thread from a chip in a reply, showing the sidebar list it's
+    /// in (Archive or Hibernating for one that's put away).
+    func openThread(_ threadId: String) {
+        guard let thread = threads[threadId] else { return }
+        if thread.isArchived {
+            if sidebarMode != .archive { showArchive() }
+        } else if let until = thread.snoozedUntil, until > Date() {
+            sidebarMode = .snoozed
+        } else {
+            sidebarMode = .inbox
+        }
+        select(threadId)
+    }
+
+    /// Shows a sub-agent's transcript. Its thread becomes the selection.
+    func selectSubagent(threadId: String, subagentId: String) {
+        let ref = SubagentRef(threadId: threadId, subagentId: subagentId)
+        if selection != threadId { select(threadId) }
+        subagentSelection = ref
+        let session = subagentSession(for: ref)
+        if session.state == .idle || session.state.isFailed {
+            session.open(width: transcript.width > 0 ? transcript.width : transcript.currentTableWidth)
+        } else {
+            session.refreshSubagent()
+        }
+        pollSubagent(ref)
+    }
+
+    func subagentSession(for ref: SubagentRef) -> ThreadSession {
+        if let existing = subagentSessions[ref.key] {
+            existing.lastUsed = Date()
+            return existing
+        }
+        let session = ThreadSession(threadId: ref.threadId, subagentId: ref.subagentId, app: self)
+        subagentSessions[ref.key] = session
+        // Old ones go; reading them again is cheap.
+        if subagentSessions.count > 6, let oldest = subagentSessions.filter({ $0.key != ref.key }).min(by: { $0.value.lastUsed < $1.value.lastUsed }) {
+            subagentSessions[oldest.key] = nil
+        }
+        return session
+    }
+
+    var selectedSubagent: Subagent? {
+        guard let ref = subagentSelection else { return nil }
+        return threads[ref.threadId]?.subagents.first { $0.id == ref.subagentId }
+    }
+
+    private func stopShowingSubagent() {
+        subagentSelection = nil
+        subagentPoll?.cancel()
+        subagentPoll = nil
+    }
+
+    /// thread.updated says when a sub-agent has done something, but a
+    /// thinking step doesn't change its summary, so while it runs its
+    /// transcript is also read every 3 s. Once it has finished, one last
+    /// read picks up its reply and the polling stops.
+    private func pollSubagent(_ ref: SubagentRef) {
+        subagentPoll?.cancel()
+        subagentPoll = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(3))
+                guard let self, !Task.isCancelled, self.subagentSelection == ref else { return }
+                let running = self.selectedSubagent?.isRunning ?? false
+                self.subagentSessions[ref.key]?.refreshSubagent()
+                if !running { return }
+            }
         }
     }
 
@@ -495,7 +588,7 @@ final class AppModel {
         markSeenTask?.cancel()
         markSeenTask = Task {
             try? await Task.sleep(for: .milliseconds(400))
-            guard !Task.isCancelled, let client, let thread = threads[threadId], isLooking, selection == threadId else { return }
+            guard !Task.isCancelled, let client, let thread = threads[threadId], isLooking, selection == threadId, subagentSelection == nil else { return }
             if let updated = try? await client.markSeen(threadId: threadId, seq: thread.lastSeq) {
                 threads[threadId] = updated
             }
@@ -503,13 +596,14 @@ final class AppModel {
     }
 
     func appBecameActive() {
-        if let selection, let thread = threads[selection], thread.needsYou { scheduleMarkSeen(selection) }
+        if subagentSelection == nil, let selection, let thread = threads[selection], thread.needsYou { scheduleMarkSeen(selection) }
     }
 
     // MARK: Thread actions
 
     func newThread() {
         selection = nil
+        stopShowingSubagent()
         sidebarMode = .inbox
         focusComposer += 1
     }
@@ -615,6 +709,22 @@ final class AppModel {
         let next = neighbour(of: threadId)
         update(threadId, ThreadUpdate(snoozedUntil: .some(date)))
         if selection == threadId { select(next) }
+    }
+
+    /// Hibernate until the runner next starts. Offered while a restart is
+    /// waiting for threads: one that's holding it up can go away now (its
+    /// turn stops, so the restart can go ahead) and come back after.
+    func snoozeUntilRestart(_ threadId: String? = nil) {
+        guard let threadId = threadId ?? selection else { return }
+        let next = neighbour(of: threadId)
+        update(threadId, ThreadUpdate(snoozeUntilRestart: true))
+        if selection == threadId { select(next) }
+    }
+
+    /// A runner restart is waiting for threads to finish.
+    var restartPending: Bool {
+        if case .pending = restart.phase { return true }
+        return false
     }
 
     func unsnooze(_ threadId: String) {

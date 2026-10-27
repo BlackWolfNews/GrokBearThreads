@@ -175,6 +175,12 @@ final class MockRunnerTests: XCTestCase {
         XCTAssertTrue(snoozedList.contains { $0.id == "demo_settings_tabs" })
         let woken = try await client.updateThread("demo_settings_tabs", ThreadUpdate(snoozedUntil: .some(nil)))
         XCTAssertNil(woken.snoozedUntil)
+        let untilRestart = try await client.updateThread("demo_settings_tabs", ThreadUpdate(snoozeUntilRestart: true))
+        XCTAssertTrue(untilRestart.snoozedUntilRestart)
+        XCTAssertTrue(untilRestart.isSnoozed(at: Date()))
+        XCTAssertEqual(ThreadRefs.status(untilRestart, now: Date()), "Hibernating until the runner restarts")
+        let dated = try await client.updateThread("demo_settings_tabs", ThreadUpdate(snoozedUntil: .some(nil)))
+        XCTAssertFalse(dated.snoozedUntilRestart)
 
         let png = Self.appRoot.appendingPathComponent("Tools/mock-runner/fixtures/demo-upload-resume/media/upload-times.png")
         let image = try await client.importMedia(path: png.path)

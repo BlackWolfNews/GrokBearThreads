@@ -13,6 +13,7 @@ import type {
   PermissionMode,
   Provider,
   Question,
+  SubagentStatus,
   TurnErrorKind,
   TurnOutcome,
   UsageWindow,
@@ -85,6 +86,9 @@ export type AdapterOutput =
   // Background work the CLI is running (shells, async subagents). Replaces
   // the previous list.
   | { kind: 'tasks'; tasks: BackgroundTask[] }
+  // A sub-agent started or changed. Only the fields that changed are set;
+  // the runner keeps the list and stamps the times.
+  | { kind: 'subagent'; update: SubagentUpdate }
   // "Always allow" rules to keep for this thread.
   | { kind: 'allowRules'; rules: string[] }
   | { kind: 'result'; result: TurnResult };
@@ -92,6 +96,20 @@ export type AdapterOutput =
 // A background shell or subagent the CLI reports. `type` is the CLI's own
 // name for it (Claude: local_bash, local_agent, ...), `kind` the protocol's.
 export type BackgroundTask = { id: string; type: string; kind: BackgroundKind; description: string };
+
+export type SubagentUpdate = {
+  id: string;
+  started?: boolean; // the first report of it
+  itemId?: string;
+  parentId?: string;
+  description?: string;
+  agentType?: string;
+  status?: SubagentStatus;
+  background?: boolean;
+  activity?: string;
+  summary?: string;
+  toolUses?: number;
+};
 
 export type ToolApprovalRequest = {
   toolUseId?: string; // left out for a subagent's tools, which have no tool.call

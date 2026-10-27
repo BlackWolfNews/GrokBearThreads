@@ -19,11 +19,11 @@ enum MarkdownRenderer {
     }
 
     /// How far a code block's box reaches past its text.
-    static let codePad: CGFloat = 12
+    static var codePad: CGFloat { zoomed(12) }
     /// How far an inline code pill reaches past its glyphs on each side,
     /// and the space kerned in either side of the run to make room for it.
-    static let pillPad: CGFloat = 2.5
-    static let pillKern: CGFloat = 4
+    static var pillPad: CGFloat { zoomed(2.5) }
+    static var pillKern: CGFloat { zoomed(4) }
 
     nonisolated(unsafe) private static let cache: NSCache<NSString, NSAttributedString> = {
         let cache = NSCache<NSString, NSAttributedString>()
@@ -133,8 +133,8 @@ enum MarkdownRenderer {
         }
 
         /// Gap after a paragraph, and between list items.
-        static let paragraphGap: CGFloat = 10
-        static let itemGap: CGFloat = 6
+        static var paragraphGap: CGFloat { zoomed(10) }
+        static var itemGap: CGFloat { zoomed(6) }
 
         func paragraphStyle(_ context: Context, spacing: CGFloat? = nil, before: CGFloat = 0, first: CGFloat? = nil, tabs: [CGFloat] = [],
                             line: CGFloat = Theme.bodyLine, font: NSFont = Theme.bodyFont) -> (style: NSParagraphStyle, offset: CGFloat) {
@@ -142,7 +142,7 @@ enum MarkdownRenderer {
                                               before: before, head: context.indent, first: first)
             if !tabs.isEmpty {
                 style.tabStops = tabs.map { NSTextTab(textAlignment: .left, location: $0) }
-                style.defaultTabInterval = 28
+                style.defaultTabInterval = zoomed(28)
             }
             return (style, offset)
         }
@@ -179,14 +179,14 @@ enum MarkdownRenderer {
                 inlines(heading.children, inner)
                 // 16 above in all (the paragraph before leaves 10), 6 below.
                 let font = Self.headingFont(heading.level)
-                finishParagraph(from: start, style: paragraphStyle(context, spacing: 6, before: 6, line: ceil(font.pointSize * 1.4), font: font))
+                finishParagraph(from: start, style: paragraphStyle(context, spacing: zoomed(6), before: zoomed(6), line: ceil(font.pointSize * 1.4), font: font))
 
             case let code as CodeBlock:
                 codeBlock(code.code, context)
 
             case let quote as BlockQuote:
                 var inner = context
-                inner.indent += 14
+                inner.indent += zoomed(14)
                 inner.color = .secondaryLabelColor
                 for child in quote.children { block(child, inner) }
 
@@ -243,12 +243,12 @@ enum MarkdownRenderer {
         /// How far a list's text sits in from its parent's. At 22, with the
         /// marker 2 pt from the column edge, lists looked cramped against
         /// the paragraphs around them; Claude's sit clearly in.
-        static let listIndent: CGFloat = 30
+        static var listIndent: CGFloat { zoomed(30) }
 
         /// Where an item's marker starts: a bullet 18 pt before the text, a
         /// number a little further out so "10." still fits before it.
         static func markerStart(_ marker: String, indent: CGFloat) -> CGFloat {
-            max(0, indent - (marker == "•" ? 18 : 22))
+            max(0, indent - zoomed(marker == "•" ? 18 : 22))
         }
 
         /// A list marker and the tab to the item's text. The bullet is drawn
@@ -278,7 +278,7 @@ enum MarkdownRenderer {
                             let start = output.length
                             let mark = marker(index, item)
                             append(mark, itemContext)
-                            finishParagraph(from: start, style: paragraphStyle(itemContext, spacing: 2, first: Self.markerStart(mark, indent: itemContext.indent)))
+                            finishParagraph(from: start, style: paragraphStyle(itemContext, spacing: zoomed(2), first: Self.markerStart(mark, indent: itemContext.indent)))
                         }
                         block(child, itemContext)
                     }
@@ -314,8 +314,8 @@ enum MarkdownRenderer {
 
         /// Space either side of a column boundary, and above and below a
         /// row's text (its rule sits in the middle of the gap).
-        static let cellPadH: CGFloat = 12
-        static let cellPadV: CGFloat = 4
+        static var cellPadH: CGFloat { zoomed(12) }
+        static var cellPadV: CGFloat { zoomed(4) }
 
         /// A grid like the references draw: a rule under the header and
         /// hairlines between rows. Each cell is its own paragraph in an
@@ -405,6 +405,19 @@ enum MarkdownRenderer {
 
         // MARK: Inlines
 
+        /// Marks thread-id-shaped words appended since `start`. Whether one
+        /// is a real thread is only known when it's drawn (the thread list
+        /// changes; renders are cached by their text), so this is just the
+        /// shape. A link keeps its own destination.
+        func markThreadRefs(from start: Int, _ context: Context) {
+            guard context.link == nil, output.length > start else { return }
+            let text = output.mutableString.substring(from: start)
+            for found in ThreadRefs.candidates(in: text) {
+                let range = NSRange(location: start + found.location, length: found.length)
+                output.addAttribute(.tbThreadRef, value: output.mutableString.substring(with: range), range: range)
+            }
+        }
+
         mutating func inlines(_ children: MarkupChildren, _ context: Context) {
             for child in children { inline(child, context) }
         }
@@ -412,7 +425,9 @@ enum MarkdownRenderer {
         mutating func inline(_ markup: Markup, _ context: Context) {
             switch markup {
             case let text as Markdown.Text:
+                let start = output.length
                 append(text.string, context)
+                markThreadRefs(from: start, context)
             case let emphasis as Emphasis:
                 var inner = context
                 inner.italic = true
@@ -437,6 +452,7 @@ enum MarkdownRenderer {
                     output.addAttribute(.kern, value: MarkdownRenderer.pillKern, range: NSRange(location: start - 1, length: 1))
                 }
                 append(code.code, inner)
+                markThreadRefs(from: start, context)
                 if output.length > start {
                     output.addAttribute(.kern, value: MarkdownRenderer.pillKern, range: NSRange(location: output.length - 1, length: 1))
                 }
