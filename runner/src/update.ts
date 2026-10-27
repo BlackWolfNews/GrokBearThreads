@@ -211,6 +211,9 @@ export class RunnerUpdater {
 
   constructor(deps: UpdateDeps) {
     this.deps = deps;
+    // Until start(): a fresh release shows why it isn't looking yet, so
+    // "off" right after a restart doesn't read as the feature being off.
+    this.reason = 'not until this release has been marked good, about a minute after it starts';
   }
 
   // Called once this release has been marked good.
@@ -226,6 +229,7 @@ export class RunnerUpdater {
     if (!release.checkout || !release.prefix) return off('this release was built before releases recorded their checkout; deploy once by hand');
     if (!fs.existsSync(path.join(release.checkout, '.git'))) return off(`the checkout it was built from, ${release.checkout}, is gone`);
     this.state = 'idle';
+    this.reason = undefined;
     log.info('following main', { checkout: release.checkout, release: release.id });
     this.timer = this.deps.clock.setTimeout(() => this.tick(), FIRST_CHECK_MS);
   }

@@ -253,4 +253,14 @@ test('off: from a checkout, when switched off, when the release has no checkout,
     assert.equal(u.status().state, 'off');
     assert.match(u.status().reason!, why);
   }
+  // Before start() (the release isn't marked good yet) it says so, rather
+  // than looking switched off; once following, there is no reason to show.
+  const fresh = new RunnerUpdater({ ...base, release: { ...release, checkout: base.home } });
+  assert.equal(fresh.status().state, 'off');
+  assert.match(fresh.status().reason!, /not until this release has been marked good/);
+  fs.mkdirSync(path.join(base.home, '.git'), { recursive: true });
+  fresh.start();
+  assert.equal(fresh.status().state, 'idle');
+  assert.equal(fresh.status().reason, undefined);
+  fresh.stop();
 });

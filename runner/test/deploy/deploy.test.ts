@@ -1065,13 +1065,14 @@ test('uninstall boots the job out and removes the plist', { timeout: 30_000 }, a
 });
 
 test('a first install whose runner never comes up is removed again, not left crash-looping', { timeout: 120_000 }, async () => {
-  const home4 = path.join(root, 'home4');
+  // A data dir nothing has installed into: no launch.mjs or releases to go back to.
+  const homeFresh = path.join(root, 'home-fresh');
   const plistFile = path.join(agents, `${LABEL}.plist`);
   // Passes the smoke test, crashes under launch.mjs: nothing marks it good.
   commit({ crash: 'launched' }, 'crashes once installed');
   let r: Run;
   try {
-    r = sh('install-runner.sh', ['--home', home4, '--label', LABEL, '--port', '0', '--path', '/usr/bin:/bin']);
+    r = sh('install-runner.sh', ['--home', homeFresh, '--label', LABEL, '--port', '0', '--path', '/usr/bin:/bin']);
   } finally {
     commit({}, 'back');
   }
@@ -1080,7 +1081,8 @@ test('a first install whose runner never comes up is removed again, not left cra
   assert.match(r.stderr, new RegExp(`There was no LaunchAgent before to go back to, so ${LABEL.replace(/\\./g, '\\\\.')} is removed again`));
   assert.ok(!fs.existsSync(plistFile), 'the plist is gone');
   assert.notEqual(launchctl('print', TARGET), 0, 'the job is booted out');
-  assert.ok(!fs.existsSync(path.join(home4, 'runner', 'launch.mjs')), 'launch.mjs is gone, so deploy-runner.sh says to install');
-  assert.equal(fs.readdirSync(path.join(home4, 'runner', 'releases')).filter((n) => ID_RE.test(n)).length, 1, 'the release stays');
+  assert.ok(!fs.existsSync(path.join(homeFresh, 'runner', 'launch.mjs')), `launch.mjs is gone, so deploy-runner.sh says to install
+${out(r)}`);
+  assert.equal(fs.readdirSync(path.join(homeFresh, 'runner', 'releases')).filter((n) => ID_RE.test(n)).length, 1, 'the release stays');
   assert.ok(!fs.existsSync(path.join(launchd, 'supervisor.pid')) || (() => { try { process.kill(Number(fs.readFileSync(path.join(launchd, 'supervisor.pid'), 'utf8')), 0); return false; } catch { return true; } })(), 'no keep-alive loop left');
 });
