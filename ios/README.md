@@ -24,7 +24,7 @@ Make one with `npx convex run tokens:issue '{"name":"iphone","days":90}'`
 
     threadbear://pair?url=<https://….convex.cloud>&token=<tb_…>
 
-shown as a QR code the Camera opens, or pasted from the phone's own
+shown as a QR code the Camera opens (`swift ios/scripts/pair-qr.swift` does all of this, never printing the token), or pasted from the phone's own
 clipboard ("Paste a pairing link"). Not through the Mac clipboard: Quick
 Ask's key leaked that way. The app checks the token with `phone:me` before
 keeping it, in the Keychain keyed by deployment. Debug builds also take
