@@ -328,7 +328,9 @@ rollback covers a release that doesn't come up.
 
 - A build that fails is said once (a `runner.notice` warning, and `tb
   status`), kept in `<home>/runner/update.json`, and not tried again until
-  main changes; its output is in `<home>/runner/update.log`. A tree whose
+  something under `runner/` changes on main. That includes a fix to a
+  test alone, though it changes nothing that runs: a failure in the checks
+  is often fixed that way. Its output is in `<home>/runner/update.log`. A tree whose
   release crashed at startup isn't built again either. A deploy that
   couldn't run (another deploy holds the lock) is just tried next time.
 - Nothing happens while a restart is pending, while `current` names a

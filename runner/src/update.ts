@@ -6,8 +6,10 @@
 // deploy-runner.sh does (checks, snapshot, smoke test, point current at
 // it), from its own clone under <home>/runner/update/src so nothing an
 // agent has going in the checkout is built or disturbed, and then asks for
-// the usual restart once no thread is busy. A tree whose build failed, or
-// whose release crashed at startup, isn't tried again until main changes.
+// the usual restart once no thread is busy. A build that failed isn't
+// tried again until something it builds or checks changes on main (a fix
+// to a test counts, though it changes nothing that runs), and a tree whose
+// release crashed at startup isn't tried again until main changes.
 import { spawn, spawnSync } from 'node:child_process';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
@@ -55,12 +57,16 @@ export type UpdateStatus = {
   launcherChanged?: boolean;
 };
 
-export type MainInfo = { commit: string; short: string; subject: string; tree: string };
+// tree is what a release of main would hold (RELEASE_PATHS); buildTree is
+// the whole of runner/ (tests, scripts, configs too), everything a build
+// reads, so a failed build can be retried when only a test was fixed.
+export type MainInfo = { commit: string; short: string; subject: string; tree: string; buildTree?: string };
 export type DeployResult = { ok: true; id: string } | { ok: false; error: string; transient?: boolean };
 
 // <home>/runner/update.json: the build that failed, so it isn't retried
 // every five minutes.
-export type UpdateFile = { failed?: { tree: string; commit: string; at: string; error: string } };
+// buildTree is missing in files written before it was kept.
+export type UpdateFile = { failed?: { tree: string; buildTree?: string; commit: string; at: string; error: string } };
 
 export type UpdateDeps = {
   home: string;
@@ -90,19 +96,32 @@ export type Decision = { action: 'build' } | { action: 'nothing'; why: string };
 // current link names.
 export function decideUpdate(i: {
   mainTree: string;
+  mainBuildTree?: string;
   running: { id: string; tree?: string };
   current?: string;
   pendingRestart: boolean;
-  failed?: { tree: string };
+  failed?: { tree: string; buildTree?: string };
   crashedTrees: Set<string>;
 }): Decision {
   if (!i.running.tree) return { action: 'nothing', why: "can't tell what this release was built from" };
   if (i.pendingRestart) return { action: 'nothing', why: 'a restart is already pending' };
   if (i.current && i.current !== i.running.id) return { action: 'nothing', why: `release ${i.current} is current and waiting to start` };
   if (i.mainTree === i.running.tree) return { action: 'nothing', why: 'up to date with main' };
-  if (i.failed?.tree === i.mainTree) return { action: 'nothing', why: 'the last build of this tree failed; waiting for main to change' };
+  if (failedAlready(i.failed, { tree: i.mainTree, buildTree: i.mainBuildTree })) {
+    return { action: 'nothing', why: 'the last build of this tree failed; waiting for main to change' };
+  }
   if (i.crashedTrees.has(i.mainTree)) return { action: 'nothing', why: 'a release of this tree crashed at startup; waiting for main to change' };
   return { action: 'build' };
+}
+
+// Whether main is what the last failed build was built from. Compared by
+// the whole of runner/ when both sides have it: a failure in the checks is
+// often fixed in a test alone, which leaves the release paths as they were
+// and would otherwise never be built again (4428543 sat unshipped that way).
+export function failedAlready(failed: { tree: string; buildTree?: string } | undefined, main: { tree: string; buildTree?: string }): boolean {
+  if (!failed) return false;
+  if (failed.buildTree && main.buildTree) return failed.buildTree === main.buildTree;
+  return failed.tree === main.tree;
 }
 
 // Calls onChange when main's ref moves in the checkout: refs/heads/main
@@ -207,7 +226,8 @@ export async function syncClone(checkout: string, prefix: string, dir: string): 
   }
   const tree = releaseTreeAt(dir, prefix, 'HEAD');
   if (!tree) throw new Error(`main in ${checkout} has no ${prefix}src to build`);
-  return { commit: git(dir, ['rev-parse', 'HEAD']), short: git(dir, ['rev-parse', '--short', 'HEAD']), subject: git(dir, ['log', '-1', '--format=%s']), tree };
+  const buildTree = git(dir, ['rev-parse', `HEAD:${prefix.replace(/\/$/, '')}`]);
+  return { commit: git(dir, ['rev-parse', 'HEAD']), short: git(dir, ['rev-parse', '--short', 'HEAD']), subject: git(dir, ['log', '-1', '--format=%s']), tree, buildTree };
 }
 
 // deploy.mjs from the clone, stopping after it has pointed current at the
@@ -374,6 +394,7 @@ export class RunnerUpdater {
       const file = readJsonSync<UpdateFile>(updateFilePath(home));
       const decision = decideUpdate({
         mainTree: main.tree,
+        mainBuildTree: main.buildTree,
         running,
         current: currentLink(home),
         pendingRestart: this.deps.pendingRestart(),
@@ -383,7 +404,7 @@ export class RunnerUpdater {
       if (decision.action === 'nothing') {
         log.debug('main checked', { commit: main.short, why: decision.why });
         // A failure stays on show until main moves on from it.
-        this.state = wasFailed && file?.failed?.tree === main.tree ? 'failed' : 'idle';
+        this.state = wasFailed && failedAlready(file?.failed, main) ? 'failed' : 'idle';
         return decision;
       }
       this.state = 'building';
@@ -400,7 +421,7 @@ export class RunnerUpdater {
         }
         this.state = 'failed';
         this.reason = result.error;
-        atomicWriteFileSync(updateFilePath(home), JSON.stringify({ failed: { tree: main.tree, commit: main.commit, at: this.checkedAt, error: result.error } } as UpdateFile, null, 2) + '\n');
+        atomicWriteFileSync(updateFilePath(home), JSON.stringify({ failed: { tree: main.tree, buildTree: main.buildTree, commit: main.commit, at: this.checkedAt, error: result.error } } as UpdateFile, null, 2) + '\n');
         log.error('could not build a release of main', { commit: main.short, error: result.error });
         this.deps.notice('warning', `The runner couldn't update to main at ${main.short} (${main.subject}): ${result.error}. The output is in ${updateLogPath(home)}.`);
         return decision;

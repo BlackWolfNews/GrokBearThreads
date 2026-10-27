@@ -6,7 +6,7 @@ import path from 'node:path';
 import { tmpDir } from '../helpers/fakes.ts';
 import { FakeClock } from '../../src/clock.ts';
 import { nullLogger } from '../../src/log.ts';
-import { CHECK_INTERVAL_MS, FIRST_CHECK_MS, SOON_MS, RunnerUpdater, launcherDiffers, watchMainRef, decideUpdate, releaseTreeAt, syncClone, updateFilePath, type UpdateDeps } from '../../src/update.ts';
+import { CHECK_INTERVAL_MS, FIRST_CHECK_MS, SOON_MS, RunnerUpdater, launcherDiffers, watchMainRef, decideUpdate, failedAlready, releaseTreeAt, syncClone, updateFilePath, type UpdateDeps } from '../../src/update.ts';
 import type { ReleaseJson } from '../../src/release.ts';
 
 const running = { id: 'r1', tree: 'a+b+c+d' };
@@ -22,6 +22,18 @@ test('decideUpdate: builds only when main differs and nothing stands in the way'
   assert.equal(decideUpdate({ mainTree: 'x+b+c+d', running, ...none, failed: { tree: 'x+b+c+d' } }).action, 'nothing', 'failed before');
   assert.equal(decideUpdate({ mainTree: 'y+b+c+d', running, ...none, failed: { tree: 'x+b+c+d' } }).action, 'build', 'main moved on');
   assert.equal(decideUpdate({ mainTree: 'x+b+c+d', running, ...none, crashedTrees: new Set(['x+b+c+d']) }).action, 'nothing', 'crashed before');
+  // A failure is kept with the whole of runner/: a fix to a test alone is built again.
+  const failed = { tree: 'x+b+c+d', buildTree: 'B1' };
+  assert.equal(decideUpdate({ mainTree: 'x+b+c+d', mainBuildTree: 'B1', running, ...none, failed }).action, 'nothing', 'same build tree');
+  assert.equal(decideUpdate({ mainTree: 'x+b+c+d', mainBuildTree: 'B2', running, ...none, failed }).action, 'build', 'only a test changed');
+});
+
+test('failedAlready: by the whole of runner/ when both have it, by the release tree for older update.json files', () => {
+  assert.equal(failedAlready(undefined, { tree: 't' }), false);
+  assert.equal(failedAlready({ tree: 't', buildTree: 'B1' }, { tree: 't', buildTree: 'B1' }), true);
+  assert.equal(failedAlready({ tree: 't', buildTree: 'B1' }, { tree: 't', buildTree: 'B2' }), false);
+  assert.equal(failedAlready({ tree: 't' }, { tree: 't', buildTree: 'B2' }), true, 'written before buildTree was kept');
+  assert.equal(failedAlready({ tree: 't' }, { tree: 'u', buildTree: 'B2' }), false);
 });
 
 // A throwaway repo laid out like this one: runner/src, runner/bin and the
@@ -73,6 +85,9 @@ test('syncClone brings a clone to main and reports its release tree; docs and te
   const b = await syncClone(repo, 'runner/', dir);
   assert.notEqual(b.commit, a.commit);
   assert.equal(b.tree, a.tree);
+  // ...but the whole of runner/ did, which is what a failed build is kept by.
+  assert.ok(a.buildTree && b.buildTree);
+  assert.notEqual(b.buildTree, a.buildTree);
   // A source change: a new tree, and the clone has it.
   const third = commit('code', 'runner/src/main.ts', 'console.log(2)\n');
   const c = await syncClone(repo, 'runner/', dir);
@@ -102,7 +117,7 @@ type Harness = {
   restarts: { release: string; reason: string }[];
   deploys: number;
   follows: string[];
-  main: { commit: string; short: string; subject: string; tree: string };
+  main: { commit: string; short: string; subject: string; tree: string; buildTree?: string };
   deployResult: { ok: true; id: string } | { ok: false; error: string; transient?: boolean };
   pending: boolean;
 };
@@ -206,6 +221,23 @@ test('a failed build is said once and not tried again until main moves on', asyn
   assert.equal(h.notices.length, 1);
   // A fix on main: built again.
   h.main = { commit: 'c3', short: 'c3', subject: 'Fix', tree: 'z+b+c+d' };
+  h.deployResult = { ok: true, id: 'r3' };
+  await h.u.check();
+  assert.equal(h.deploys, 2);
+  assert.equal(h.u.status().state, 'waiting');
+});
+
+test('a build that failed its checks is tried again when only a test is fixed', async () => {
+  const h = harness();
+  h.main = { ...h.main, buildTree: 'B1' };
+  h.deployResult = { ok: false, error: 'Unit tests failed; the whole output is in /tmp/x.log' };
+  h.u.start();
+  await h.u.check();
+  assert.equal(JSON.parse(fs.readFileSync(updateFilePath(h.home), 'utf8')).failed.buildTree, 'B1');
+  await h.u.check();
+  assert.equal(h.deploys, 1, 'not retried while nothing changed');
+  // The test fixed on main: the release paths are the same, runner/ isn't.
+  h.main = { ...h.main, commit: 'c3', short: 'c3', subject: 'Fix the test', buildTree: 'B2' };
   h.deployResult = { ok: true, id: 'r3' };
   await h.u.check();
   assert.equal(h.deploys, 2);
