@@ -195,6 +195,8 @@ enum Automation {
                 "dailyBudgetUsd": settings.models.dailyBudgetUsd,
                 "privateFolders": settings.models.privateFolders,
                 "error": app.settingsError ?? "",
+                "pools": app.pools.map { "\($0.id) \"\($0.title)\": " + $0.accountIds.joined(separator: ", ") + ($0.folders.isEmpty ? "" : " [" + $0.folders.joined(separator: ", ") + "]") },
+                "poolsError": app.poolsError ?? "",
             ] as [String: Any])
         } else {
             shown = json(["tab": app.settingsTab.rawValue, "unsupported": app.settingsUnsupported] as [String: Any])
@@ -597,9 +599,26 @@ enum Automation {
     /// silent "ok" (a typo like "models" would leave the account's default
     /// model in place), and the answer says what's set now.
     private static func options(_ c: [String: Any], app: AppModel) -> String {
-        let known: Set<String> = ["cmd", "rid", "cwd", "account", "model", "effort", "ask"]
+        let known: Set<String> = ["cmd", "rid", "cwd", "account", "model", "effort", "ask", "pool", "provider"]
         let unknown = c.keys.filter { !known.contains($0) }.sorted()
-        guard unknown.isEmpty else { return "error options takes cwd, account, model, effort and ask, not \(unknown.joined(separator: ", "))" }
+        guard unknown.isEmpty else { return "error options takes cwd, account, pool, provider, model, effort and ask, not \(unknown.joined(separator: ", "))" }
+        // A pool picked for the draft (null: back to the folder's or the
+        // last one), and which of a mixed pool's providers. Both unpin it.
+        if let value = c["pool"] {
+            if value is NSNull { app.newThreadPool = nil } else {
+                guard let pool = value as? String, app.pool(pool) != nil else {
+                    return "error pool is one of \(app.pools.map(\.id).joined(separator: ", ")), or null"
+                }
+                app.newThreadPool = pool
+            }
+            app.newThreadAccount = nil
+        }
+        if let value = c["provider"] {
+            if value is NSNull { app.newThreadProvider = nil } else {
+                guard let provider = value as? String else { return "error provider is claude or codex, or null" }
+                app.newThreadProvider = provider
+            }
+        }
         if let value = c["cwd"] {
             guard let cwd = value as? String, !cwd.isEmpty else { return "error cwd is a folder path" }
             app.newThreadCwd = cwd
@@ -631,7 +650,8 @@ enum Automation {
             app.newThreadAsk = ask
         }
         let settings = AppDump.newThreadSettings(app)
-        return "ok cwd=\(settings.cwd) account=\(settings.account) model=\(settings.model) effort=\(settings.effort) ask=\(settings.ask)"
+        return "ok cwd=\(settings.cwd) account=\(settings.account)" + (settings.pool.map { " pool=\($0)" } ?? "")
+            + " model=\(settings.model) effort=\(settings.effort) ask=\(settings.ask)"
     }
 
     private static func pressReturn(_ window: NSWindow?) -> String {
@@ -838,8 +858,12 @@ enum Automation {
         switch c["menu"] as? String ?? "model" {
         case "model":
             if let title = c["click"] as? String {
-                return settings.pickerClick(title) ? "ok" : "error no item \(title)"
+                // With pools, `pool` says which pool's column to pick from.
+                return settings.pickerClick(title, column: c["pool"] as? String) ? "ok" : "error no item \(title)"
             }
+            // `logins: true` or false opens or shuts "Pin to a login", in
+            // an open picker or the next one.
+            if let logins = c["logins"] as? Bool { app.pickerShowsLogins = logins }
             if c["show"] as? Bool == true { return show { app.modelPickerRequest += 1 } }
             return "ok " + json(settings.pickerLines())
         case "account":
@@ -851,9 +875,20 @@ enum Automation {
             }
             if c["show"] as? Bool == true { return show { app.accountPickerRequest += 1 } }
             return "ok " + json(settings.accountLines())
+        case "pin":
+            // The picker's "Pin to a login" list: a login by its email or
+            // id pins the thread (or the draft) to it; "Unpin" unpins.
+            guard settings.usesPools else { return "error the runner has no pools; use menu account" }
+            if let title = c["click"] as? String {
+                if title == "Unpin" { return settings.pickerClick("Unpin") ? "ok" : "error it isn't pinned" }
+                guard let item = settings.pinSections.flatMap(\.items).first(where: { $0.title == title || $0.id == title }) else { return "error no item \(title)" }
+                settings.pin(item.id)
+                return "ok"
+            }
+            return "ok " + json(AccountMenu.lines(settings.pinSections, footer: settings.pinnedLine))
         case "permission": menu = settings.permissionMenu()
         case "folder": menu = settings.folderMenu()
-        default: return "error menu is model, account, permission or folder"
+        default: return "error menu is model, account, pin, permission or folder"
         }
         if let title = c["click"] as? String {
             guard let item = allItems(menu).first(where: { $0.title == title }), let action = item.action else { return "error no item \(title)" }

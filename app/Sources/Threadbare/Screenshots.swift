@@ -230,12 +230,15 @@ enum ScreenshotRunner {
             try? await Task.sleep(for: .milliseconds(400))
             await capture(window, dir.appendingPathComponent("12c-codex-limit-and-footers.png"))
         }
-        // 13. The composer's pickers for a new thread: the accounts with
-        // the room each has, then the model picker on Claude and on Codex
-        // (its models, efforts up to Ultra).
+        // 13. The composer's pickers for a new thread with a runner older
+        // than pools: the accounts with the room each has, then the model
+        // picker on Claude and on Codex (its models, efforts up to Ultra).
         if wanted("13") {
             app.sidebarMode = .inbox
             app.select(nil)
+            let hadPools = app.poolsSupported
+            app.poolsSupported = false
+            defer { app.poolsSupported = hadPools }
             try? await Task.sleep(for: .milliseconds(400))
             await capturePopover(window, dir.appendingPathComponent("13a-account-picker.png")) { app.accountPickerRequest += 1 }
             await capturePopover(window, dir.appendingPathComponent("13b-model-picker-claude.png")) { app.modelPickerRequest += 1 }
@@ -250,6 +253,43 @@ enum ScreenshotRunner {
             app.remember(model: nil, provider: "codex")
             app.remember(effort: nil, provider: "codex")
             app.newThreadAccount = nil
+        }
+        // 15. Pools (docs/pools-plan.md). The new-thread composer on the
+        // Claude pool and its picker, the picker on a mixed pool (models
+        // under each provider), a thread pinned to one login with the
+        // picker's login list open, a thread waiting for room, and
+        // Settings › Pools.
+        if wanted("15") {
+            app.sidebarMode = .inbox
+            app.select(nil)
+            try? await Task.sleep(for: .milliseconds(400))
+            await capture(window, dir.appendingPathComponent("15a-composer-on-a-pool.png"))
+            await capturePopover(window, dir.appendingPathComponent("15b-picker-claude-pool.png")) { app.modelPickerRequest += 1 }
+            app.newThreadPool = "side-projects"
+            try? await Task.sleep(for: .milliseconds(300))
+            await capturePopover(window, dir.appendingPathComponent("15c-picker-mixed-pool.png")) { app.modelPickerRequest += 1 }
+            app.newThreadPool = nil
+            await open(app, "demo_sqlite_vs_files")
+            app.transcript.scrollToBottom()
+            await capture(window, dir.appendingPathComponent("15d-pinned-thread.png"))
+            // Opened as a click on "Pin to a login" does, once it's showing.
+            await capturePopover(window, dir.appendingPathComponent("15e-picker-pinned.png"), after: { app.pickerShowsLogins = true }) {
+                app.modelPickerRequest += 1
+            }
+            await open(app, "demo_release_notes")
+            app.transcript.scrollToBottom()
+            await capture(window, dir.appendingPathComponent("15f-waiting-for-room.png"))
+            app.settingsTab = .pools
+            app.settingsRequest += 1
+            await waitUntil(5) { SettingsWindow.current?.isVisible == true }
+            if let settings = SettingsWindow.current {
+                settings.orderBack(nil)
+                try? await Task.sleep(for: .milliseconds(600))
+                await capture(settings, dir.appendingPathComponent("15g-settings-pools.png"))
+                settings.close()
+            } else {
+                print("settings: the window didn't open")
+            }
         }
         // 14. The usage popover from the activity bar: every account's
         // room, then the CLIs (Claude behind, Codex held back).
@@ -311,9 +351,13 @@ enum ScreenshotRunner {
     /// A composer chip's popover, opened by `open` (a request the chip
     /// watches) and closed again the same way. It's a window of its own,
     /// so it's captured by its own id.
-    private static func capturePopover(_ window: NSWindow, _ url: URL, open: () -> Void) async {
+    private static func capturePopover(_ window: NSWindow, _ url: URL, after: (() -> Void)? = nil, open: () -> Void) async {
         open()
         try? await Task.sleep(for: .milliseconds(600))
+        if let after {
+            after()
+            try? await Task.sleep(for: .milliseconds(600))
+        }
         guard let popover = popoverWindow() else { return print("could not save \(url.path): the popover didn't open") }
         await capture(popover, url)
         open()
