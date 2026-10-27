@@ -423,9 +423,20 @@ export function formatStatus(s: RunnerStatus, threads: ThreadSummary[], now: num
   }
   const u = s.update;
   if (u) lines.push(formatUpdate(u, now));
+  if (s.sync) lines.push(formatSync(s.sync, now));
   // Releases never replace launch.mjs; only Mike's install-runner.sh does.
   if (u?.launcherChanged) lines.push(`launch.mjs on main differs from the installed one: Mike runs ${u.checkout ? `${u.checkout}/runner/` : 'runner/'}scripts/install-runner.sh once nothing is busy.`);
   return lines.join('\n') + '\n';
+}
+
+// The Convex mirror (src/sync.ts), one line.
+function formatSync(y: NonNullable<RunnerStatus['sync']>, now: number): string {
+  if (y.state === 'off') return `Convex mirror: off${y.reason ? ` (${y.reason})` : ''}`;
+  const where = y.url ? ` to ${y.url}` : '';
+  const last = y.lastSyncAt ? `, last write ${duration(now - Date.parse(y.lastSyncAt))} ago` : ', nothing written yet';
+  const pending = y.pending ? `, ${plural(y.pending, 'change', 'changes')} waiting` : '';
+  if (y.state === 'error') return `Convex mirror: failing${where}: ${y.lastError ?? 'unknown error'}${y.retryAt ? `, retrying in ${duration(Math.max(0, Date.parse(y.retryAt) - now))}` : ''}${pending}`;
+  return `Convex mirror: on${where} as ${y.name ?? y.runnerId ?? 'this runner'}${last}${pending}`;
 }
 
 // The runner following main by itself (src/update.ts), one line.
