@@ -448,6 +448,10 @@ enum Automation {
             return "ok \(zoom.percent)"
         case "hover":
             return hover(c, app: app)
+        case "hints":
+            ShortcutHints.shared.setShowing(c["on"] as? Bool ?? true)
+            try? await Task.sleep(for: .milliseconds(100))
+            return "ok \(ShortcutHints.shared.showing)"
         case "chip":
             return chip(c, app: app)
         case "account-ids":
