@@ -69,12 +69,6 @@ public struct ThreadRowLook: Sendable, Equatable {
         }
     }
 
-    /// The second line when there's no preview yet. A thread that has only
-    /// asked a question is waiting on Mike, not new.
-    public static func emptyPreview(_ thread: ThreadSummary) -> String {
-        thread.status == .waiting ? "Waiting for your answer" : "No reply yet"
-    }
-
     /// How long a running turn has been going, where the time would be:
     /// "53s", "4m", "1h 2m". The runner sets a thread's `lastActivityAt`
     /// when a turn starts (and when it ends or a message is sent), not on
@@ -151,14 +145,26 @@ public enum AccountName {
         guard let at = address.firstIndex(of: "@") else { return address }
         return String(address[..<at])
     }
+}
 
-    /// Whether a row names its account: only when it isn't the main one (or
-    /// the first account, if there's no main). Fixed, unlike the runner's
-    /// default (the last one used), so the labels don't move about.
-    public static func isShown(_ accountId: String, accounts: [Account], mainId: String) -> Bool {
-        guard !accountId.isEmpty else { return false }
-        let main = accounts.isEmpty || accounts.contains { $0.id == mainId } ? mainId : accounts[0].id
-        return accountId != main
+/// The project mark at the right of a thread's row, where its account
+/// used to be named. Until projects have icons it's the project's first
+/// letter or digit on a quiet tile.
+public enum ProjectMark {
+    /// The project the row shows: the first it joined. A thread in two
+    /// projects names both in the mark's tooltip.
+    public static func project(_ thread: ThreadSummary) -> ThreadProject? { thread.projects.first }
+
+    /// "C" for "Convex docs", "7" for "7 day plan", "?" for a title with
+    /// neither (all emoji, or empty).
+    public static func letter(_ title: String) -> String {
+        guard let first = title.first(where: { $0.isLetter || $0.isNumber }) else { return "?" }
+        return String(first).uppercased()
+    }
+
+    /// The tooltip: every project the thread is in.
+    public static func help(_ thread: ThreadSummary) -> String {
+        thread.projects.map { $0.title.isEmpty ? "Untitled project" : $0.title }.joined(separator: ", ")
     }
 }
 

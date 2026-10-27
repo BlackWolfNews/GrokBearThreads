@@ -201,7 +201,5 @@ final class AccountUsageTests: XCTestCase {
         let two = accounts + [Account(id: "codex-1", provider: "codex", title: "Codex · m@work.example", email: "m@work.example")]
         XCTAssertEqual(AccountName.short("codex-main", accounts: two), "Codex mike.cann")
         XCTAssertEqual(AccountName.short("codex-1", accounts: two), "Codex m")
-        // Codex rows are labelled, as any account other than main is.
-        XCTAssertTrue(AccountName.isShown("codex-main", accounts: accounts, mainId: "claude-main"))
     }
 }

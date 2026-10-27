@@ -190,9 +190,6 @@ final class AppModel {
     static let memoryProviders = ["claude", "codex"]
     static let panelsShownKey = "panelsShown"
     static let panelWidthKey = "panelWidth"
-    /// The account threads aren't labelled with. Fixed, unlike the runner's
-    /// `defaults.accountId` (the last one used), so labels don't move about.
-    static let mainAccountId = "claude-main"
     /// The error banner text shown for a connection problem, so it can be
     /// cleared when the connection comes back.
     @ObservationIgnored private var connectionErrorMessage: String?
@@ -272,12 +269,6 @@ final class AppModel {
     /// The part of the account's email before the @ (see `AccountName`).
     func accountShortTitle(_ id: String) -> String {
         AccountName.short(id, accounts: accounts)
-    }
-
-    /// Whether a thread's row names its account: only when it isn't on the
-    /// main account.
-    func showsAccountLabel(_ thread: ThreadSummary) -> Bool {
-        AccountName.isShown(thread.accountId, accounts: accounts, mainId: Self.mainAccountId)
     }
 
     // MARK: Connection
