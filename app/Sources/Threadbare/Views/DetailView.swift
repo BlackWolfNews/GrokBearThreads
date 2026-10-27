@@ -231,7 +231,7 @@ private struct HeaderTitle: View {
                     Text("·  \(worktree.branch)")
                         .foregroundStyle(Color(nsColor: Theme.faintText))
                         .layoutPriority(1)
-                        .help("Works on its own branch in a worktree. tb land, or the Land chip, puts it on main in \(worktree.mainCheckout.abbreviatingHome).")
+                        .tip("Works on its own branch in a worktree. tb land, or the Land chip, puts it on main in \(worktree.mainCheckout.abbreviatingHome).")
                 }
                 if app.projectsSupported, !thread.projects.isEmpty {
                     ProjectChips(thread: thread)
