@@ -137,6 +137,13 @@ final class AppModel {
     var panelsShown = UserDefaults.standard.object(forKey: AppModel.panelsShownKey) as? Bool ?? true {
         didSet { UserDefaults.standard.set(panelsShown, forKey: Self.panelsShownKey) }
     }
+    /// Inbox sections folded away under their heading, remembered across
+    /// launches (Mike asked 27 Oct).
+    var collapsedSections: Set<InboxSection> = Set(
+        (UserDefaults.standard.stringArray(forKey: AppModel.collapsedSectionsKey) ?? []).compactMap(InboxSection.init(rawValue:))
+    ) {
+        didSet { UserDefaults.standard.set(collapsedSections.map(\.rawValue).sorted(), forKey: Self.collapsedSectionsKey) }
+    }
     var panelWidth: CGFloat = {
         let saved = UserDefaults.standard.double(forKey: AppModel.panelWidthKey)
         return saved > 0 ? CGFloat(saved) : CGFloat(PanelChoice.defaultWidth)
@@ -191,6 +198,7 @@ final class AppModel {
     static let memoryProviders = ["claude", "codex"]
     static let panelsShownKey = "panelsShown"
     static let panelWidthKey = "panelWidth"
+    static let collapsedSectionsKey = "collapsedSections"
     /// The error banner text shown for a connection problem, so it can be
     /// cleared when the connection comes back.
     @ObservationIgnored private var connectionErrorMessage: String?

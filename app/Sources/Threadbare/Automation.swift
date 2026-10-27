@@ -409,6 +409,14 @@ enum Automation {
             app.scheduleEditor = nil
             return "ok"
         case "expand", "collapse":
+            if let raw = c["section"] as? String {
+                // An inbox heading, as clicking it does.
+                guard let section = InboxSection(rawValue: raw) else {
+                    return "error section must be one of \(InboxSection.allCases.map(\.rawValue).joined(separator: ", "))"
+                }
+                if name == "expand" { app.collapsedSections.remove(section) } else { app.collapsedSections.insert(section) }
+                return "ok"
+            }
             return setExpanded(c, open: name == "expand", app: app)
         case "scroll":
             switch c["to"] as? String {
