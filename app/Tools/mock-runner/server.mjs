@@ -171,6 +171,9 @@ const threads = new Map();
 loadFixtures();
 addFillers(fillerCount);
 addDemoPanels();
+/** threadId -> ThreadHighlights (docs/protocol.md, "Highlights"). */
+const highlights = new Map();
+addDemoHighlights();
 addDemoSubagents();
 /** The schedules (docs/protocol.md, "Schedules"), soonest first. */
 let schedules = [];
@@ -479,10 +482,44 @@ async function dispatch(client, method, p) {
       const t = need(p.threadId);
       const panel = (t.summary.panels ?? []).find((x) => x.id === p.panelId);
       if (!panel) throw rpcError(-32602, `This thread has no panel called ${p.panelId}`);
+      if (panel.kind === 'list') {
+        await new Promise((r) => setTimeout(r, 200));
+        return { items: panel.mockItems ?? [] };
+      }
       if (panel.kind !== 'image') return { note: 'This panel has nothing to render.' };
       const file = path.join(here, 'fixtures/demo-upload-resume/media/progress-after.png');
       await new Promise((r) => setTimeout(r, 300));
       return { image: { path: file, mediaType: 'image/png', ...imageSize(file) } };
+    }
+    case 'threads.highlights': {
+      const t = need(p.threadId);
+      return highlights.get(t.summary.id) ?? { highlights: [], edited: [] };
+    }
+    case 'threads.removeHighlight': {
+      const t = need(p.threadId);
+      const list = highlights.get(t.summary.id);
+      if (!list?.highlights.some((h) => h.id === p.highlightId)) throw rpcError(-32602, `This thread has no highlight ${p.highlightId}`);
+      list.highlights = list.highlights.filter((h) => h.id !== p.highlightId);
+      t.summary.highlightsAt = iso();
+      broadcastSummary(t.summary.id);
+      return { thread: t.summary };
+    }
+    case 'mock.pin': {
+      // As the agent's `pin` tool would: {threadId, path | url, title?, note?, show?}.
+      // For trying the pane opening a pin by itself.
+      const t = need(p.threadId);
+      const list = highlights.get(t.summary.id) ?? { highlights: [], edited: [] };
+      highlights.set(t.summary.id, list);
+      const kind = p.path ? 'file' : 'link';
+      const id = `${kind}:${p.path ?? p.url}`;
+      list.highlights = list.highlights.filter((h) => h.id !== id);
+      list.highlights.unshift({
+        id, kind, title: p.title ?? (p.path ? path.basename(p.path) : p.url), path: p.path, url: p.url, how: 'pinned',
+        note: p.note, ...(p.show ? { show: true } : {}), seq: t.summary.lastSeq, lastSeq: t.summary.lastSeq, at: iso(),
+      });
+      t.summary.highlightsAt = iso();
+      broadcastSummary(t.summary.id);
+      return { highlight: list.highlights[0] };
     }
     case 'media.import': {
       const source = String(p.path ?? '');
@@ -1581,6 +1618,115 @@ p{color:#8a8a90;font-size:12px;line-height:1.5;margin-top:18px}
       { id: 'convex.dashboard', title: 'Convex', kind: 'url', patch: 'convex', url: 'data:text/html;charset=utf-8,' + encodeURIComponent(page), note: 'walkies-dev (dev)' },
     ];
   }
+}
+
+// The landing pages thread works in a real folder under the data dir, so its
+// highlights are files the app can preview: a mockup it pinned, a doc it
+// wrote, a screenshot it opened. Its other threads' highlights are only
+// listed (their folders are made up).
+function addDemoHighlights() {
+  const site = threads.get('demo_landing_pages');
+  if (site) {
+    const root = path.join(path.resolve(dataDir), 'work', 'site');
+    const file = (rel, text) => {
+      const full = path.join(root, rel);
+      fs.mkdirSync(path.dirname(full), { recursive: true });
+      if (typeof text === 'string') fs.writeFileSync(full, text); else fs.copyFileSync(text.copy, full);
+      return full;
+    };
+    const home = file('mockups/home.html', homeMockup());
+    const pricing = file('mockups/pricing.html', homeMockup('Pricing'));
+    const review = file('docs/copy-review.md', `# Copy review: home, pricing, docs
+
+The new hero is shorter, and every page now leads with what the app does.
+
+## Home
+- Headline: "Your agents, on a desk you can see." Nine words, down from twenty.
+- The three cards say what you get, not how it works.
+
+## Pricing
+- Plan names stay as they are.
+- The prices are placeholders until Mike sends the real ones.
+
+## Docs
+- Search moves to the top of the page.
+`);
+    const before = file('screens/pricing-before.png', { copy: path.join(here, 'fixtures/demo-upload-resume/media/progress-before.png') });
+    file('logs/docs-build.txt', 'Error: Could not resolve image /docs/hero.png\n  at src/pages/docs.astro:12\nBuild failed in 14.2s.\n');
+    site.summary.cwd = root;
+    const at = (seq) => site.events.find((e) => e.seq === seq)?.ts ?? iso();
+    const h = (seq, fields) => ({ seq, lastSeq: seq, at: at(seq), ...fields });
+    highlights.set(site.summary.id, {
+      highlights: [
+        h(9, { id: `file:${home}`, kind: 'file', title: 'home.html', path: home, how: 'pinned', show: true,
+          note: 'The new hero with the three plan cards under it. Is the headline too long?' }),
+        h(9, { id: 'pr:https://github.com/mikecann/site/pull/48', kind: 'pr', title: 'mikecann/site#48', url: 'https://github.com/mikecann/site/pull/48', how: 'created' }),
+        // No branch: an agent's `git commit -q` then `git log --oneline -1`
+        // prints none, which is most commits in real threads.
+        h(8, { id: 'commit:4b7d0a8', kind: 'commit', title: 'Pricing cards from the new design', sha: '4b7d0a8', how: 'committed' }),
+        h(7, { id: `file:${review}`, kind: 'file', title: 'copy-review.md', path: review, how: 'written' }),
+        h(7, { id: `file:${pricing}`, kind: 'file', title: 'pricing.html', path: pricing, how: 'written' }),
+        h(6, { id: 'link:http://localhost:4321/', kind: 'link', title: 'localhost:4321', url: 'http://localhost:4321/', how: 'opened' }),
+        h(5, { id: 'commit:9f3c2e1', kind: 'commit', title: 'Rebuild the home page on the new hero', sha: '9f3c2e1', branch: 'landing-rebuild', pushed: true, how: 'committed' }),
+        h(4, { id: `file:${before}`, kind: 'file', title: 'pricing-before.png', path: before, how: 'opened' }),
+        h(3, { id: 'link:https://developer.apple.com/design/human-interface-guidelines/typography', kind: 'link', title: 'Typography',
+          url: 'https://developer.apple.com/design/human-interface-guidelines/typography', how: 'mentioned' }),
+      ],
+      edited: ['src/components/PlanCard.astro', 'src/pages/pricing.astro', 'src/components/Hero.astro', 'src/pages/index.astro', 'src/styles/landing.css']
+        .map((rel) => path.join(root, rel)),
+      brief: { text: 'The home page is rebuilt and pushed. Pricing and docs are still with their sub-agents, and the plan prices are placeholders until Mike sends the real ones.', at: iso() },
+    });
+    // A list panel, as a project's patch with an `items` function gives one.
+    site.summary.panels = [{
+      id: 'deploys.previews', title: 'Previews', kind: 'list', icon: 'paperplane', patch: 'deploys', note: 'landing-rebuild',
+      mockItems: [
+        { title: 'Home', detail: 'Ready 4 minutes ago', url: 'https://site-git-landing-rebuild.vercel.app', icon: 'globe', tone: 'done' },
+        { title: 'Pricing', detail: 'Waiting on the plan prices', url: 'https://site-git-landing-rebuild.vercel.app/pricing', icon: 'globe', tone: 'attention' },
+        { title: 'Docs', detail: 'Build failed: no image at /docs/hero.png', path: path.join(root, 'logs/docs-build.txt'), icon: 'globe', tone: 'failed' },
+        { title: 'Local', detail: 'astro dev on port 4321', url: 'http://localhost:4321/', icon: 'laptopcomputer' },
+        { title: 'Production', detail: 'main, deployed 2 days ago', url: 'https://example.com', icon: 'globe' },
+      ],
+    }];
+    site.summary.patches = [{ id: 'deploys', source: 'project', file: path.join(root, '.threadbear/patches/deploys.ts') }];
+  }
+  const upload = threads.get('demo_upload_resume');
+  if (upload) {
+    const repo = upload.summary.cwd;
+    const at = (seq) => upload.events.find((e) => e.seq === seq)?.ts ?? iso();
+    const h = (seq, fields) => ({ seq, lastSeq: seq, at: at(seq), ...fields });
+    highlights.set(upload.summary.id, {
+      highlights: [
+        h(20, { id: `file:${repo}/docs/resume-design.md`, kind: 'file', title: 'resume-design.md', path: `${repo}/docs/resume-design.md`, how: 'written' }),
+        h(12, { id: 'link:https://developer.apple.com/documentation/foundation/urlsession', kind: 'link', title: 'URLSession', url: 'https://developer.apple.com/documentation/foundation/urlsession', how: 'mentioned' }),
+      ],
+      edited: [`${repo}/Sources/Upload/UploadTask.swift`, `${repo}/Sources/Upload/ChunkStore.swift`, `${repo}/Tests/UploadTests/ResumeTests.swift`],
+    });
+  }
+}
+
+/// A landing page mockup, light and dark, as an agent might write one.
+function homeMockup(page = 'Home') {
+  return `<!doctype html><meta charset="utf-8"><title>${page} mockup</title>
+<style>
+:root{--bg:#fbfaf7;--fg:#1d1c1a;--muted:#6d6a64;--card:#fff;--line:#e8e5de;--accent:#c46a2b}
+@media (prefers-color-scheme: dark){:root{--bg:#1c1b1a;--fg:#ecebe8;--muted:#9c988f;--card:#252422;--line:#34322f;--accent:#e08a4a}}
+body{margin:0;font:15px/1.5 -apple-system,system-ui;background:var(--bg);color:var(--fg)}
+nav{display:flex;gap:18px;padding:16px 28px;font-size:13px;color:var(--muted)}nav b{color:var(--fg);margin-right:auto}
+header{padding:36px 28px 24px}h1{font-size:30px;line-height:1.15;margin:0 0 10px;letter-spacing:-.01em}
+header p{color:var(--muted);margin:0 0 18px;max-width:30em}
+.cta{display:inline-block;background:var(--accent);color:#fff;border-radius:8px;padding:8px 14px;font-size:14px}
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;padding:8px 28px 28px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px}.card h3{margin:0 0 4px;font-size:14px}
+.card p{margin:0;color:var(--muted);font-size:13px}
+</style>
+<nav><b>Threadbear</b><span>${page === 'Home' ? 'Pricing' : 'Home'}</span><span>Docs</span></nav>
+<header><h1>Your agents, on a desk you can see.</h1>
+<p>Every thread, what it made and what it needs from you, in one quiet window.</p><span class="cta">Download for Mac</span></header>
+<section class="cards">
+<div class="card"><h3>Threads</h3><p>Claude and Codex side by side, on any of your accounts.</p></div>
+<div class="card"><h3>Highlights</h3><p>Files, links and commits stay put while the transcript scrolls.</p></div>
+<div class="card"><h3>Patches</h3><p>Buttons and panels your project gives its threads.</p></div>
+</section>`;
 }
 
 function loadFixtures() {

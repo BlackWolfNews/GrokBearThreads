@@ -108,12 +108,16 @@ struct DetailView: View {
             }
             }
             .frame(maxWidth: .infinity)
-            // The panels pane (PanelsView), when the thread's folder has
-            // any and Mike hasn't hidden it.
+            // The pane (PanelsView) unless Mike has hidden it, and the rail
+            // of its sections at the far right whenever a thread is open,
+            // like the activity bar on the left.
             if let paneThread {
-                PanelResizeHandle(columnWidth: widthStep)
+                PanelResizeHandle(columnWidth: widthStep - ActivityBar.width)
                 PanelPane(thread: paneThread)
-                    .frame(width: CGFloat(PanelChoice.clampedWidth(Double(app.panelWidth), paneColumnWidth: Double(widthStep))))
+                    .frame(width: CGFloat(PanelChoice.clampedWidth(Double(app.panelWidth), paneColumnWidth: Double(widthStep - ActivityBar.width))))
+            }
+            if let thread {
+                PanelRail(thread: thread)
             }
         }
         }
@@ -142,10 +146,10 @@ struct DetailView: View {
             // With the system title gone nothing pushes the menu to the
             // trailing edge; it sat right after the header.
             ToolbarSpacer(.flexible)
-            // Shows or hides the panels pane. Always built, like the menu
-            // beside it, and out of sight for a thread with no panels.
+            // Shows or hides the pane. Always built, like the menu beside
+            // it, and out of sight with no thread open.
             ToolbarItem(placement: .primaryAction) {
-                let hasPanels = project == nil && (thread.map { !$0.panels.isEmpty || !$0.patches.isEmpty } ?? false)
+                let hasPanels = project == nil && thread != nil
                 Button {
                     app.togglePanels()
                 } label: {

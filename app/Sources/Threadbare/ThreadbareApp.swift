@@ -69,7 +69,7 @@ struct ThreadbareApp: App {
                 // folder has any (PanelsView).
                 Button(app.panelsShown ? "Hide Panels" : "Show Panels") { app.togglePanels() }
                     .keyboardShortcut("p", modifiers: [.command, .option])
-                    .disabled(app.selectedThread.map { $0.panels.isEmpty && $0.patches.isEmpty } ?? true)
+                    .disabled(app.selectedThread == nil || app.openProjectId != nil)
             }
             CommandMenu("Thread") {
                 Button(app.selectedThread?.isArchived == true ? "Unarchive" : "Archive") { app.toggleArchive() }

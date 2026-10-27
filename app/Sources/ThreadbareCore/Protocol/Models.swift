@@ -360,13 +360,17 @@ public struct ImageRef: Sendable, Hashable, Codable {
     }
 }
 
-/// A panel a patch gives a thread: a page or picture shown beside the
-/// transcript (docs/protocol.md, "Panels"). The runner works them out from
-/// the thread's folder.
+/// A panel a patch gives a thread: a page, a picture or a list of rows
+/// shown beside the transcript (docs/protocol.md, "Patches"). The runner
+/// works them out from the thread's folders.
 public struct Panel: Sendable, Hashable, Codable, Identifiable {
     public enum Kind: String, Sendable, Hashable, Codable {
-        case url, image
+        /// `list`: rows the runner gets from the patch on request
+        /// (`panels.render`), drawn natively.
+        case url, image, list
 
+        /// An unknown kind is shown as a page if it has a url, the one thing
+        /// every panel can be.
         public init(from decoder: Decoder) throws {
             let raw = try decoder.singleValueContainer().decode(String.self)
             self = Kind(rawValue: raw) ?? .url
@@ -378,6 +382,9 @@ public struct Panel: Sendable, Hashable, Codable, Identifiable {
     public var kind: Kind
     /// What a `url` panel shows, and what Open in browser opens.
     public var url: String?
+    /// An SF Symbol for its button on the right-hand rail; nil leaves it to
+    /// the app (PanelIcon).
+    public var icon: String?
     /// The patch it came from: "convex", "xcode".
     public var patch: String
     /// One line about it: the deployment, the project.
@@ -386,11 +393,12 @@ public struct Panel: Sendable, Hashable, Codable, Identifiable {
     /// the thread's own folder.
     public var projectId: String?
 
-    public init(id: String, title: String, kind: Kind = .url, url: String? = nil, patch: String = "", note: String? = nil, projectId: String? = nil) {
+    public init(id: String, title: String, kind: Kind = .url, url: String? = nil, icon: String? = nil, patch: String = "", note: String? = nil, projectId: String? = nil) {
         self.id = id
         self.title = title
         self.kind = kind
         self.url = url
+        self.icon = icon
         self.patch = patch
         self.note = note
         self.projectId = projectId
@@ -402,6 +410,7 @@ public struct Panel: Sendable, Hashable, Codable, Identifiable {
         title = try c.decodeIfPresent(String.self, forKey: .title) ?? id
         kind = try c.decodeIfPresent(Kind.self, forKey: .kind) ?? .url
         url = try c.decodeIfPresent(String.self, forKey: .url)
+        icon = (try? c.decodeIfPresent(String.self, forKey: .icon)) ?? nil
         patch = try c.decodeIfPresent(String.self, forKey: .patch) ?? ""
         note = try c.decodeIfPresent(String.self, forKey: .note)
         projectId = (try? c.decodeIfPresent(String.self, forKey: .projectId)) ?? nil
@@ -551,16 +560,28 @@ public struct ActionRunResult: Sendable, Hashable, Decodable {
     public var seq: Int?
 }
 
-/// What `panels.render` gives back for an image panel: the picture, or a
-/// note saying why there isn't one.
+/// What `panels.render` gives back: an image panel's picture or a list
+/// panel's rows, or a note saying why there aren't any.
 public struct PanelRender: Sendable, Hashable, Decodable {
     public var image: ImageRef?
+    /// A list panel's rows; nil from an image panel (or an older runner).
+    public var items: [PanelItem]?
     public var note: String?
 
-    public init(image: ImageRef? = nil, note: String? = nil) {
+    public init(image: ImageRef? = nil, items: [PanelItem]? = nil, note: String? = nil) {
         self.image = image
+        self.items = items
         self.note = note
     }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        image = (try? c.decodeIfPresent(ImageRef.self, forKey: .image)) ?? nil
+        items = c.contains(.items) ? c.lossyArray(PanelItem.self, forKey: .items) : nil
+        note = (try? c.decodeIfPresent(String.self, forKey: .note)) ?? nil
+    }
+
+    enum CodingKeys: String, CodingKey { case image, items, note }
 }
 
 /// A sub-agent the thread's agent started (Claude's Agent tool), foreground
@@ -770,6 +791,11 @@ public struct ThreadSummary: Sendable, Hashable, Codable, Identifiable {
     /// The projects it's in, oldest first. Empty when it's in none (or the
     /// runner is from before projects).
     public var projects: [ThreadProject]
+    /// When its highlights last changed other than by a new event (a pin,
+    /// a removal, the librarian's brief). The app fetches
+    /// `threads.highlights` again when this or `lastSeq` moves. Nil from a
+    /// runner from before highlights, or before anything changed.
+    public var highlightsAt: Date?
 
     public init(
         id: String, title: String, cwd: String = "~/dev/me/misc", accountId: String = "claude-main",
@@ -781,7 +807,7 @@ public struct ThreadSummary: Sendable, Hashable, Codable, Identifiable {
         contextTokens: Int? = nil, costUsd: Double? = nil,
         effort: String? = nil, modelInUse: String? = nil, effortInUse: String? = nil, contextWindow: Int? = nil,
         panels: [Panel] = [], actions: [Action] = [], hooks: [Hook] = [], patches: [PatchInfo] = [], background: [BackgroundTask] = [],
-        subagents: [Subagent] = [], projects: [ThreadProject] = [], pendingReviews: Int? = nil
+        subagents: [Subagent] = [], projects: [ThreadProject] = [], pendingReviews: Int? = nil, highlightsAt: Date? = nil
     ) {
         self.id = id
         self.title = title
@@ -818,6 +844,7 @@ public struct ThreadSummary: Sendable, Hashable, Codable, Identifiable {
         self.background = background
         self.subagents = subagents
         self.projects = projects
+        self.highlightsAt = highlightsAt
     }
 
     public init(from decoder: Decoder) throws {
@@ -862,6 +889,7 @@ public struct ThreadSummary: Sendable, Hashable, Codable, Identifiable {
         background = c.lossyArray(BackgroundTask.self, forKey: .background)
         subagents = c.lossyArray(Subagent.self, forKey: .subagents)
         projects = c.lossyArray(ThreadProject.self, forKey: .projects)
+        highlightsAt = ((try? c.decodeIfPresent(String.self, forKey: .highlightsAt)) ?? nil).flatMap(ISO8601.parse)
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -901,13 +929,14 @@ public struct ThreadSummary: Sendable, Hashable, Codable, Identifiable {
         if !background.isEmpty { try c.encode(background, forKey: .background) }
         if !subagents.isEmpty { try c.encode(subagents, forKey: .subagents) }
         if !projects.isEmpty { try c.encode(projects, forKey: .projects) }
+        try c.encodeIfPresent(highlightsAt.map(ISO8601.format), forKey: .highlightsAt)
     }
 
     enum CodingKeys: String, CodingKey {
         case id, title, cwd, accountId, provider, model, effort, modelInUse, effortInUse, permissionMode, status, live, needsYou, pendingReviews
         case createdAt, updatedAt, lastActivityAt, snoozedUntil, snoozedUntilRestart, archivedAt, onOldRunner, preview
         case lastSeq, lastSeenSeq, nativeSessionId, contextTokens, contextWindow, costUsd, panels, actions, hooks, patches, background, subagents
-        case projects
+        case projects, highlightsAt
     }
 
     /// Still being worked on between turns: background sub-agents or jobs

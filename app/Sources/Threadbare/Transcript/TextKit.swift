@@ -126,11 +126,16 @@ final class TextMeasurer {
 
 /// A read-only, selectable TextKit 1 text view for transcript text.
 final class TranscriptTextView: NSTextView {
-    var openFileLink: (URL) -> Bool = { NSWorkspace.shared.open($0) }
+    /// A mockup, doc or picture previews in the pane beside the transcript
+    /// (AppModel.openTranscriptFileLink); ⌘-click and other files open in
+    /// the app macOS associates with them.
+    var openFileLink: (URL) -> Bool = { url in
+        let commandKey = NSApp.currentEvent?.modifierFlags.contains(.command) ?? false
+        return MainActor.assumeIsolated { AppModel.shared.openTranscriptFileLink(url, commandKey: commandKey) }
+    }
 
     override func clicked(onLink link: Any, at charIndex: Int) {
         // NSTextView follows web links itself, but ignores file URLs.
-        // Open local artifacts in the app macOS associates with the file.
         if let url = link as? URL, url.isFileURL {
             _ = openFileLink(url)
         } else {

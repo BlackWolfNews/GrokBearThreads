@@ -175,6 +175,10 @@ struct AppDump: Encodable {
         var shown: Bool
         var width: Int
         var items: [Item]
+        /// A file or page open over the section: "file /path" or "page <url>".
+        var preview: String?
+        /// What the Highlights section has: "3 pinned, 2 files, ..." or why not.
+        var highlights: String?
     }
 
     static func connectionName(_ state: ConnectionState) -> String {
@@ -288,17 +292,35 @@ struct AppDump: Encodable {
 
     @MainActor
     private static func panels(_ thread: ThreadSummary, app: AppModel) -> Panels? {
-        guard !thread.panels.isEmpty || !thread.patches.isEmpty else { return nil }
-        let onPatches = app.panelChoice[thread.id] == PanelPane.patchesTab || thread.panels.isEmpty
-        let active = onPatches ? nil : app.activePanel(for: thread)?.id
-        var items = thread.panels.map {
-            Panels.Item(id: $0.id, title: $0.title, kind: $0.kind.rawValue, url: $0.url, note: $0.note, active: $0.id == active)
+        let section = app.paneSection(for: thread)
+        var items = [Panels.Item(id: PaneSection.highlightsId, title: "Highlights", kind: "highlights", url: nil, note: nil, active: section == .highlights)]
+        items += thread.panels.map {
+            Panels.Item(id: $0.id, title: $0.title, kind: $0.kind.rawValue, url: $0.url, note: $0.note, active: section == .panel($0.id))
         }
         if !thread.patches.isEmpty {
             let summary = thread.patches.map { $0.id + ($0.error != nil ? " (error)" : "") }.joined(separator: ", ")
-            items.append(Panels.Item(id: PanelPane.patchesTab, title: "Patches", kind: "patches", url: nil, note: summary, active: onPatches))
+            items.append(Panels.Item(id: PaneSection.patchesId, title: "Patches", kind: "patches", url: nil, note: summary, active: section == .patches))
         }
-        return Panels(shown: app.showsPanels(for: thread), width: Int(app.panelWidth), items: items)
+        let preview: String? = app.panePreview[thread.id].map { preview in
+            switch preview.target {
+            case .file(let path): "file \(path)"
+            case .page(let url): "page \(url.absoluteString)"
+            }
+        }
+        return Panels(shown: app.showsPanels(for: thread), width: Int(app.panelWidth), items: items, preview: preview,
+                      highlights: highlightsLine(app, thread.id))
+    }
+
+    @MainActor
+    private static func highlightsLine(_ app: AppModel, _ threadId: String) -> String {
+        if app.highlightsUnsupported { return "not kept by this runner" }
+        guard let fetched = app.highlights[threadId] else { return "not fetched" }
+        let sections = HighlightSections.build(fetched)
+        if sections.isEmpty { return "empty" }
+        let parts = [("pinned", sections.pinned.count), ("files", sections.files.count), ("links", sections.links.count),
+                     ("commits", sections.commits.count), ("edited", sections.edited.count)]
+        let counts = parts.filter { $0.1 > 0 }.map { "\($0.1) \($0.0)" }
+        return ((sections.brief != nil ? ["a brief"] : []) + counts).joined(separator: ", ")
     }
 
     /// What the usage popover says: each account's room by provider, then
@@ -426,6 +448,8 @@ struct AppDump: Encodable {
                 return text
             }
             lines.append("panels (\(panels.shown ? "shown, \(panels.width) wide" : "hidden")): " + items.joined(separator: ", "))
+            if let preview = panels.preview { lines.append("pane preview: \(preview)") }
+            if let highlights = panels.highlights { lines.append("highlights: \(highlights)") }
         }
         if !actions.isEmpty {
             lines.append("actions: " + actions.map { "\($0.id) \"\($0.title)\" (\($0.kind)\($0.running ? ", running" : ""))" }.joined(separator: ", "))

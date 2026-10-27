@@ -322,14 +322,15 @@ enum Automation {
             app.snooze(id, until: Date().addingTimeInterval(number(c["seconds"]) ?? 3600))
             return "ok \(id)"
         case "panel":
-            // {"cmd":"panel","id":"convex.dashboard"} shows that panel of the
-            // selected thread; {"cmd":"panel","show":false} hides the pane,
-            // {"cmd":"panel","show":true} shows it; {"cmd":"panel"} toggles.
+            // {"cmd":"panel","id":"convex.dashboard"} shows that section of
+            // the selected thread's pane (threadbear.highlights and
+            // threadbear.patches are the rail's own); {"cmd":"panel","show":false}
+            // hides the pane, {"cmd":"panel","show":true} shows it;
+            // {"cmd":"panel"} toggles.
             guard let thread = app.selectedThread else { return "error no thread selected" }
             if let id = c["id"] as? String {
-                guard thread.panels.contains(where: { $0.id == id }) || (id == PanelPane.patchesTab && !thread.patches.isEmpty) else {
-                    return "error no panel \(id); this thread has \((thread.panels.map(\.id) + (thread.patches.isEmpty ? [] : [PanelPane.patchesTab])).joined(separator: ", "))"
-                }
+                let ids = [PaneSection.highlightsId] + thread.panels.map(\.id) + (thread.patches.isEmpty ? [] : [PaneSection.patchesId])
+                guard ids.contains(id) else { return "error no panel \(id); this thread has \(ids.joined(separator: ", "))" }
                 app.choosePanel(id, in: thread.id)
             } else if let show = c["show"] as? Bool {
                 app.panelsShown = show
@@ -338,8 +339,24 @@ enum Automation {
             }
             // A beat for the pane (and a web view) to appear.
             try? await Task.sleep(for: .milliseconds(200))
-            let showing = app.panelChoice[thread.id] == PanelPane.patchesTab || thread.panels.isEmpty ? PanelPane.patchesTab : (app.activePanel(for: thread)?.id ?? "nothing")
-            return "ok \(app.showsPanels(for: thread) ? "showing \(showing)" : "hidden")"
+            return "ok \(app.showsPanels(for: thread) ? "showing \(app.paneSection(for: thread).id)" : "hidden")"
+        case "preview":
+            // {"cmd":"preview","path":"/abs/file.md"} or {"cmd":"preview",
+            // "url":"http://localhost:3000"} opens it in the selected
+            // thread's pane, as a highlight's click does; {"cmd":"preview",
+            // "close":true} goes back to the section.
+            guard let thread = app.selectedThread else { return "error no thread selected" }
+            if c["close"] as? Bool == true {
+                app.closePreview(in: thread.id)
+            } else if let path = c["path"] as? String {
+                app.preview(path: path, in: thread)
+            } else if let text = c["url"] as? String, let url = URL(string: text) {
+                app.openLink(url, in: thread)
+            } else {
+                return "error preview needs path, url or close"
+            }
+            try? await Task.sleep(for: .milliseconds(300))
+            return "ok \(app.panePreview[thread.id].map { "showing \($0.title)" } ?? "no preview")"
         case "action":
             // {"cmd":"action","id":"reseed.reseed-dev-db"} runs that action of
             // the selected thread and waits for a command to finish.

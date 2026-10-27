@@ -346,6 +346,32 @@ final class MockRunnerTests: XCTestCase {
         }
     }
 
+    func testHighlightsAndListPanels() async throws {
+        let client = try await connect()
+        defer { client.close() }
+        _ = try await client.hello(version: "test")
+        let fetched = try await client.threadHighlights(threadId: "demo_landing_pages")
+        let sections = HighlightSections.build(fetched)
+        XCTAssertNotNil(sections.brief)
+        XCTAssertEqual(sections.pinned.count, 1)
+        XCTAssertTrue(sections.pinned[0].show)
+        // The mock's files are real, so the app can preview them.
+        let pin = try XCTUnwrap(sections.pinned[0].path)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: pin))
+        XCTAssertEqual(sections.commits.map(\.pushed), [false, true])
+        XCTAssertFalse(sections.edited.isEmpty)
+        let review = try XCTUnwrap(sections.files.first { $0.title == "copy-review.md" })
+        let thread = try await client.removeHighlight(threadId: "demo_landing_pages", highlightId: review.id)
+        XCTAssertNotNil(thread.highlightsAt)
+        let after = try await client.threadHighlights(threadId: "demo_landing_pages")
+        XCTAssertFalse(after.highlights.contains { $0.id == review.id })
+        // A thread with none, and the list panel's rows.
+        let none = try await client.threadHighlights(threadId: "demo_tunnel")
+        XCTAssertEqual(none, ThreadHighlights())
+        let render = try await client.renderPanel(threadId: "demo_landing_pages", panelId: "deploys.previews")
+        XCTAssertEqual(render.items?.map(\.tone), [.done, .attention, .failed, nil, nil])
+    }
+
     func testWrongTokenIsUnauthorized() async throws {
         let endpoint = try RunnerConfig.endpoint(dataDir: dataDir)
         let client = RPCClient(transport: WebSocketTransport(url: endpoint.url, token: "not-the-token"))
