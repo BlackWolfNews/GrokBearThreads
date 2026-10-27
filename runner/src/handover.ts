@@ -198,6 +198,8 @@ export class Peers {
   }
 
   private onNotification(peer: Peer, method: string, params: any): void {
+    // Closed because this runner is draining now: the primary takes these.
+    if (this.closing) return;
     const id: unknown = params?.threadId ?? params?.thread?.id;
     switch (method) {
       case 'drain.handedOver': {
