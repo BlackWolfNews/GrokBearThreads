@@ -152,6 +152,10 @@ type ThreadSummary = {
                         // Absent when it has started none
   projects?: ThreadProject[] // the projects the thread is in (see Projects),
                         // oldest first. Absent when it's in none
+  highlightsAt?: string // when its highlights last changed other than by a
+                        // new event: a pin, a removal, the librarian's
+                        // brief (see Highlights). A client fetches
+                        // threads.highlights again when this or lastSeq moves
 }
 
 // A project a thread is in, as its summary shows it.
@@ -206,11 +210,25 @@ type PatchInfo = {
 type Panel = {
   id: string            // unique within the thread: "convex.dashboard", "xcode.simulator"
   title: string         // the tab's label
-  kind: "url" | "image" // a page in a web view, or a picture the runner draws on request
+  kind: "url" | "image" | "list" // a page in a web view, a picture the runner
+                        // draws on request, or rows the runner gets from the
+                        // patch on request (see Patches)
   url?: string          // kind "url": the page; also what Open in browser opens
+  icon?: string         // an SF Symbol name for its button on the right-hand
+                        // rail; absent: the client picks one by kind
   patch: string         // the patch it came from: "convex", "xcode"
   projectId?: string    // as Action's
   note?: string         // one line about it: the deployment, the project
+}
+
+// One row of a `list` panel (panels.render).
+type PanelItem = {
+  title: string
+  detail?: string       // a second line, grey
+  url?: string          // a click opens it (a web page, or a localhost page in the pane)
+  path?: string         // a click previews the file in the pane
+  icon?: string         // an SF Symbol name
+  tone?: "attention" | "failed" | "done" // orange, red or a tick; absent: plain
 }
 
 // A grouping above folders that carries goals, state and notes forward
@@ -519,7 +537,9 @@ replaces whatever the deltas built up.
 | `approvals.respond` | `{ threadId, approvalId, decision: "allow" \| "allowAlways" \| "deny" \| "answered", message?: string, answers?: Record<string, string> }` | `{}`. `allowAlways` allows matching requests for the rest of this thread only; it never changes the thread's permission mode or saves anything in the project. With `answered`, the app sends the chosen answers in one line as `message` too: the runner keeps it in `approval.resolved` (only `answers` goes to the CLI), so the transcript can show what was chosen |
 | `media.import` | `{ path: string }` | `{ image: ImageRef }` copies a file into `inbox/` and reads its size |
 | `actions.run` | `{ threadId, actionId }` | For a prompt action, `{ turnId }`: its prompt was sent as a message (as `threads.send`). For a command action, `{ ok, exitCode?, durationMs, seq }` once the command has finished, with its output in the transcript as the `action.run` event at `seq`. The command runs in the thread's folder through a login shell with the thread's variables (`THREADBARE_THREAD_ID` and the rest) and is stopped after 10 minutes. `-32602` for an action the thread doesn't have, `-32020` while the same action is still running |
-| `panels.render` | `{ threadId, panelId }` | `{ image?: ImageRef, note?: string }` draws an `image` panel now: for `xcode.simulator`, a screenshot of the booted simulator (`xcrun simctl io booted screenshot`), written to the same file each time under the thread's `panels/`. With no device booted (or another failure) there's only `note`. Slow: it waits for the screenshot. `-32602` for a panel the thread doesn't have |
+| `panels.render` | `{ threadId, panelId }` | `{ image?: ImageRef, items?: PanelItem[], note?: string }` draws an `image` panel or fills a `list` panel now. For `xcode.simulator`, a screenshot of the booted simulator (`xcrun simctl io booted screenshot`), written to the same file each time under the thread's `panels/`; with no device booted (or another failure) there's only `note`. For a `list` panel, the rows its patch's `items` function returned (at most 200), or `note` with the error when it threw or took over 20 seconds. Slow: it waits for the screenshot or the function. `-32602` for a panel the thread doesn't have |
+| `threads.highlights` | `{ threadId }` | `ThreadHighlights` (see Highlights): what the thread has made, shared and pinned, read from its events since the last call and kept with the thread |
+| `threads.removeHighlight` | `{ threadId, highlightId }` | `{ thread: ThreadSummary }` takes one off the list for good (a pin or a found one); a later mention doesn't bring it back. `-32602` for an id the thread doesn't have |
 | `schedules.list` | `{ threadId?: string }` | `{ schedules: Schedule[] }`, soonest `nextRunAt` first, then the paused and finished ones. With `threadId`, only the ones that send to that thread or were made by it |
 | `schedules.create` | `{ text: string, title?: string, at?: string, cron?: string, timezone?: string, threadId?: string, cwd?, accountId?, model?, effort?, permissionMode?, paused?: boolean, createdBy?: string }` | `{ schedule: Schedule }`. Exactly one of `at` and `cron`. An `at` in the past runs straight away. With `threadId` it sends there, otherwise it starts a new thread each time (`cwd` defaults like `threads.create`'s, checked now). A bad cron or zone is `-32602` with a message saying what's wrong |
 | `schedules.update` | `{ scheduleId, title?, text?, at?: string, cron?: string, timezone?: string \| null, paused?: boolean, cwd?, accountId?, model?: string \| null, effort?: EffortLevel \| null, permissionMode? }` | `{ schedule: Schedule }`. Setting `at` drops `cron` and the other way round. A new time works out `nextRunAt` again; so does unpausing. Setting `at` on a finished one-off makes it run again then. The target thread can't be changed (make a new schedule) |
@@ -819,7 +839,24 @@ export default {
 
 `run` is a command for `actions.run` to run in the thread's folder,
 `prompt` a message it sends instead; one or the other. A panel needs a
-`url` with a scheme. A hook is a command the runner runs by itself:
+`url` with a scheme, or an `items` function, which makes it a `list`
+panel: rows drawn natively, with no page to serve.
+
+```ts
+  panels: [{
+    title: "Worktrees", icon: "arrow.triangle.branch",
+    // Called by panels.render, in the folder the patch applies from.
+    items: async ({ cwd, threadId, sh }) =>
+      (await sh("git worktree list")).split("\n").filter(Boolean)
+        .map((line) => ({ title: line.split(/\s+/)[0], detail: line })),
+  }],
+```
+
+`items` gets `{ cwd, threadId, sh }`, where `sh(command)` runs a command
+in `cwd` through a login shell and resolves with what it printed (it
+rejects on a non-zero exit). It returns `PanelItem`s (or a promise of
+them). A panel can have an `icon`, an SF Symbol name for its button on
+the rail. A hook is a command the runner runs by itself:
 
 ```ts
   hooks: [
@@ -855,8 +892,74 @@ install` in it.
 | `xcode` | a folder with an `.xcodeproj` or `.xcworkspace` | `xcode.simulator`, an `image` panel drawn by `panels.render` |
 
 A client shows what it can: a `url` panel in a web view, an `image` panel
-by asking `panels.render` now and then while it's on screen, and an
-unknown `kind` as a page if it has a `url`.
+by asking `panels.render` now and then while it's on screen, a `list`
+panel the same way (when it's shown and every 15 seconds while it is),
+and an unknown `kind` as a page if it has a `url`.
+
+## Highlights
+
+The Mac app's right-hand rail (like VS Code's secondary side bar) has a
+button per panel, Patches at its foot, and Highlights at its head: what a
+thread has made, shared and pinned for Mike, so it doesn't scroll away
+with the transcript.
+
+```ts
+type HighlightKind = "file" | "link" | "pr" | "commit"
+type Highlight = {
+  id: string            // "<kind>:<path, url or sha>"
+  kind: HighlightKind
+  title: string         // the file's name, a link's text (else host and
+                        // path), "owner/repo#12", a commit's first line
+  url?: string          // link, pr
+  path?: string         // file: absolute
+  how: "pinned" | "written" | "opened" | "mentioned" | "created" | "committed"
+  note?: string         // a pin's reason, in the agent's words
+  show?: true           // a pin the agent asked to have shown straight away
+  sha?: string          // commit: short sha
+  branch?: string       // commit
+  pushed?: true         // commit: a later git push in the thread sent its branch
+  seq: number           // the event it was first seen in (a pin: lastSeq then)
+  lastSeq: number       // the latest event that mentioned it
+  at: string            // when it was first seen
+}
+type ThreadHighlights = {
+  highlights: Highlight[] // pins first, then the rest newest first: at
+                        // most 80 (pins are always kept)
+  edited: string[]      // files the thread edited, absolute, newest first,
+                        // at most 200
+  brief?: { text: string; at: string } // the librarian's line on where
+                        // the thread is up to (see Projects)
+}
+```
+
+The runner finds them in the thread's events, with no model, the first
+time a client asks and then from where it got to:
+
+- **Files written**: a `Write` (or Codex file change) of something Mike
+  would look at rather than code: `.md`, `.html`, `.pdf`, images, video,
+  `.csv`, `.txt`. Code goes in `edited`.
+- **Opened**: each file or URL a command passed to `open` (`open -a App`
+  skips the app). A relative path is taken from the thread's folder and
+  must exist.
+- **Mentioned**: links in an `assistant.text` (Markdown links and bare
+  URLs) and absolute or `~/` paths of files that exist (in a link or in
+  backticks). A GitHub pull request's URL is a `pr`.
+- **PRs created**: pull request URLs in the output of a command that ran
+  `gh pr create`.
+- **Commits**: the `[branch sha] message` line `git commit` prints. A
+  later `git push` that prints `a..b branch -> branch` (or `[new branch]`)
+  marks that branch's commits `pushed`.
+
+**Pins.** An agent pins with the `pin` tool: `{ path? | url?, title?,
+note?, show? }` (a path relative to its folder is fine; it must exist).
+A pin of something already found is the same item, now pinned. `show`
+asks the app to open it in the pane now, so an agent shows Mike a
+mockup there instead of running `open`. `unpin { id }` takes one off
+again. The tools' descriptions say when to use them.
+
+**The brief.** The librarian's look (see Projects) also answers with a
+line or two on where the thread itself is up to, kept on the thread and
+sent as `brief`. No extra model call: it's the same look.
 
 ## Projects
 
@@ -982,7 +1085,8 @@ drive Threadbare itself: `list_threads`, `read_thread`, `list_accounts`,
 `interrupt_thread`, `delete_thread`, `schedule_message`,
 `list_schedules`, `update_schedule` and `delete_schedule` (see Schedules),
 and `list_projects`, `read_project`, `create_project`, `update_project`,
-`join_project` and `leave_project` (see Projects).
+`join_project` and `leave_project` (see Projects), and `pin` and
+`unpin` (see Highlights).
 `list_accounts` shows each account's provider, note and room left;
 `create_thread` and `move_thread` take Codex accounts. They call the same runner methods as
 the requests above, so once a restart has begun `create_thread` and
