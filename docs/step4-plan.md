@@ -1056,6 +1056,23 @@ export function pickAccount(accounts: Account[], lastUsedId: string | undefined)
 - `diff-media-accounts.test.ts` still passes, updated by D where the account shape changed;
 - no test reads a real `auth.json` or `config.toml`.
 
+### As built (D, 27 Oct)
+
+Calls made where this section didn't say, or said otherwise:
+
+- **Codex windows are B's.** Turning `account/rateLimits/*` into `UsageWindow`s stays in B's `codex/normalize.ts`, as B's table says. D's test feeds the store a reading in the shape B makes from the real `account/rateLimits/read` (weekly only, plus a made-up second bucket as an `other` window, since no capture has one).
+- **One file.** Email and plan from a live reading (`account/read`, `account/updated`) are kept in `usage.json` with the live windows, not in a separate `accounts-cache.json`.
+- **Merge key.** `five_hour`, `weekly`, `daily` and `monthly` merge by kind. `weekly_model`, `allowance` and `other` merge by kind plus title, so Codex's extra buckets (all `other`) don't replace each other.
+- **Stale** means `generatedAt` is over 15 minutes old and the account has had no live reading in the last 15 minutes. ("No live reading since" generatedAt would never go stale again after one turn.)
+- **Blocked** comes from live readings only. Token Stats' 0% isn't a block: claude-2 (Team) shows 0% on its 5-hour window while it keeps working on extra usage. A block ends when the windows at under 1% in that reading reset, or when a later reading isn't blocked.
+- **A passed reset** also drops the window's `detail` ("$132.79 left" is old once it resets).
+- **`errorKind: "usageLimit"`** on a failed Claude turn: a `rejected` event earlier in the turn, or, for a CLI that sent none, the result text ("hit your limit", "usage limit reached", `rate_limit_error`).
+- **`onChange`** of the store reports an account when a live reading moves a window by a point or more, and for anything at all on a new `limits.json`, a reset, a block ending or going stale (one timer for the next of those). An account no client has listed yet is reported on its first reading.
+- **`pickAccount` gaps.** With no last-used account (or one that's gone), candidates are the first account's provider (Claude's come first). A tie between two accounts that aren't the last-used one goes to the first in the list. With nothing to pick and no last-used account, it returns `undefined` and the caller uses its own default. The cases are in `runner/test/fixtures/pick-account-cases.json`, in a shape F's Swift tests can read as is.
+- **Interface additions:** `UsageStore.identityFor(account)` (email and plan for titles), `UsageStore.reload()`, `usageLine(u, now?)`, and exports `accountRoom`, `MIN_ROOM_PERCENT`, `resetTime`, `parseLimitsJson`, `samePathKey`, and `rateLimitReading` from `claude/normalize.ts`. `new AccountRegistry(cfg, usage?)`, where `codexMainDir` and `accountNotes` are optional in `cfg`; `onChange(fn(accounts))`. Claude accounts now carry `email` too.
+- **`main.test.ts`** (nobody's file) now sets `THREADBARE_CODEX_MAIN_DIR` and `THREADBARE_TOKEN_STATS_LIMITS` to temp paths, so starting the real entry point never reads `~/.codex/config.toml` or the real `limits.json`.
+- **For C:** `main.ts` already passes the full `Config`, so once D is in `step4`, `codex-main` shows up in the account list before C registers the Codex adapter.
+
 ## E. CLI updates (`runner/src/updates/`)
 
 ```ts

@@ -82,8 +82,8 @@ test('account discovery reads only the login email', () => {
   fs.writeFileSync(path.join(accts, 'claude-2', '.claude.json'), JSON.stringify({ oauthAccount: { emailAddress: 'two@example.com' } }));
   const found = discoverAccounts({ claudeMainDir: main, claudeMainJson: path.join(root, 'claude.json'), tokenStatsAccountsDir: accts });
   assert.deepEqual(found, [
-    { id: 'claude-main', provider: 'claude', title: 'main@example.com', configDir: main },
-    { id: 'claude-2', provider: 'claude', title: 'two@example.com', configDir: path.join(accts, 'claude-2') },
+    { id: 'claude-main', provider: 'claude', title: 'main@example.com', email: 'main@example.com', configDir: main },
+    { id: 'claude-2', provider: 'claude', title: 'two@example.com', email: 'two@example.com', configDir: path.join(accts, 'claude-2') },
     { id: 'claude-10', provider: 'claude', title: 'claude-10', configDir: path.join(accts, 'claude-10') },
   ]);
   assert.ok(!JSON.stringify(found).includes('SHOULD-NOT-APPEAR'));
