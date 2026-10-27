@@ -3,6 +3,7 @@ import path from 'node:path';
 import type { DesignReview, ReviewDraft, EffortLevel, MessageOrigin, PermissionMode, PersistedEvent, Provider, Subagent, ThreadProject, ThreadStatus, ImageRef } from './protocol.ts';
 import { atomicWriteFileSync, readJsonSync } from './fsutil.ts';
 import { paths } from './config.ts';
+import type { WorktreeRecord } from './worktrees.ts';
 
 export type QueuedSend = { turnId: string; text: string; images: ImageRef[]; origin?: MessageOrigin; scheduleId?: string; reviewId?: string; reviewResponse?: ReviewDraft };
 
@@ -66,6 +67,11 @@ export type ThreadRecord = {
   // The projects the native session has been told about (the brief, or a
   // line when it joined one), so it hears about each once.
   projectsTold?: string[];
+  // The thread's own git worktree (worktrees.ts), once it's made.
+  worktree?: WorktreeRecord;
+  // Made in a repo that asks for worktrees and not told otherwise: the
+  // first turn makes one (and runs its setup) before the CLI starts.
+  worktreePending?: boolean;
 };
 
 export type ThreadProjectRecord = Omit<ThreadProject, 'title'>;

@@ -2,6 +2,22 @@ import XCTest
 @testable import ThreadbareCore
 
 final class ModelsTests: XCTestCase {
+    func testThreadSummaryWorktreeDecodesLeniently() throws {
+        let json = #"{"id":"t1","title":"x","worktree":{"branch":"thread/ab12cd34","mainCheckout":"/Users/m/dev/me/threadbare","path":"/Users/m/dev/me/threadbare-threads/ab12cd34","later":1}}"#
+        let thread = try JSONDecoder().decode(ThreadSummary.self, from: Data(json.utf8))
+        XCTAssertEqual(thread.worktree, ThreadWorktree(branch: "thread/ab12cd34", mainCheckout: "/Users/m/dev/me/threadbare", path: "/Users/m/dev/me/threadbare-threads/ab12cd34"))
+        let again = try JSONDecoder().decode(ThreadSummary.self, from: JSONEncoder().encode(thread))
+        XCTAssertEqual(again.worktree, thread.worktree)
+        // Absent from an older runner; a branch alone is enough to show; a
+        // malformed one is dropped rather than losing the thread.
+        XCTAssertNil(try JSONDecoder().decode(ThreadSummary.self, from: Data(#"{"id":"t1","title":"x"}"#.utf8)).worktree)
+        XCTAssertEqual(try JSONDecoder().decode(ThreadSummary.self, from: Data(#"{"id":"t1","worktree":{"branch":"thread/1"}}"#.utf8)).worktree?.branch, "thread/1")
+        let odd = try JSONDecoder().decode(ThreadSummary.self, from: Data(#"{"id":"t1","title":"y","worktree":{"path":3}}"#.utf8))
+        XCTAssertNil(odd.worktree)
+        XCTAssertEqual(odd.title, "y")
+        XCTAssertNil(try JSONDecoder().decode(ThreadSummary.self, from: Data(#"{"id":"t1","worktree":"thread/1"}"#.utf8)).worktree)
+    }
+
     func testThreadSummaryDecodesFullAndToleratesUnknownFields() throws {
         let json = """
         {"id":"th1","title":"Fix the flaky test","cwd":"/Users/m/dev/me/misc","accountId":"claude-2","provider":"claude",
