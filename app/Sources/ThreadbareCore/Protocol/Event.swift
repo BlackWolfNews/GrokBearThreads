@@ -433,6 +433,7 @@ public enum EventPayload: Sendable, Hashable {
     case editDiff(EditDiff)
     case approvalRequested(ApprovalRequest)
     case questionRequested(QuestionRequest)
+    case reviewUpdated(DesignReview)
     case approvalResolved(ApprovalResolution)
     case planUpdated([PlanEntry])
     case turnStarted
@@ -555,6 +556,9 @@ public struct Event: Sendable, Hashable, Decodable {
             return .approvalRequested(try ApprovalRequest(from: decoder))
         case "question.requested":
             return .questionRequested(try QuestionRequest(from: decoder))
+        case "review.updated":
+            let c = try decoder.container(keyedBy: ReviewFields.self)
+            return .reviewUpdated(try c.decode(DesignReview.self, forKey: .review))
         case "approval.resolved":
             return .approvalResolved(try ApprovalResolution(from: decoder))
         case "plan.updated":
@@ -586,6 +590,8 @@ public struct Event: Sendable, Hashable, Decodable {
             return .unknown
         }
     }
+
+    private enum ReviewFields: String, CodingKey { case review }
 }
 
 /// Result of `threads.events`.

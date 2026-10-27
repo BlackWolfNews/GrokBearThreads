@@ -27,7 +27,7 @@ public struct TranscriptRow: Sendable, Hashable, Identifiable {
 }
 
 public enum RowKind: String, Sendable, Hashable, CaseIterable {
-    case user, assistant, reasoning, tool, diff, images, approval, question, plan, footer, note, error
+    case user, assistant, reasoning, tool, diff, images, approval, question, review, plan, footer, note, error
     /// What a finished turn needs Mike to do, as a checklist.
     case asks
     /// Rows the model derives rather than reads from events: a folded run
@@ -185,6 +185,7 @@ public enum RowContent: Sendable, Hashable {
     case images(itemId: String, images: [ImageRef], generated: Bool = false)
     case approval(ApprovalItem)
     case question(QuestionItem)
+    case review(DesignReview)
     case plan([PlanEntry])
     case footer(TurnCompletion)
     /// The asks a finished turn left for Mike, under its footer.
@@ -209,6 +210,7 @@ public enum RowContent: Sendable, Hashable {
         case .images: return .images
         case .approval: return .approval
         case .question: return .question
+        case .review: return .review
         case .plan: return .plan
         case .footer: return .footer
         case .asks: return .asks

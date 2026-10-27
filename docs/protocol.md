@@ -374,6 +374,90 @@ type Settings = {
 
 ## Events
 
+### Design reviews
+
+`show_options` gives the calling thread a durable image review. It returns
+promptly; the agent may finish its turn while Mike reviews the options.
+The app shows a compact card outside work groups. Opening it opens a
+resizable, modeless comparison window; arrival never steals focus.
+
+```ts
+type ReviewDraft = { pickedId?: string, notes: Record<string, string> }
+type DesignReview = {
+  id: string
+  title: string
+  note?: string
+  options: {
+    id: string          // stable within this review
+    title: string
+    note?: string
+    reference?: boolean // can have notes, cannot be picked
+    image: ImageRef     // a copy owned by the thread, never the source path
+  }[]
+  status: "pending" | "answered" | "cancelled"
+  revision: number     // optimistic concurrency for saves and submission
+  createdAt: string
+  updatedAt: string
+  draft: ReviewDraft
+  response?: ReviewDraft
+  replyTurnId?: string
+}
+```
+
+The following RPCs take full thread/review IDs. Unknown IDs are errors.
+
+| method | params | result |
+|---|---|---|
+| `reviews.create` | `{ threadId, title, note?, options: { id, title, path, note?, reference? }[] }` | `{ review: DesignReview }` |
+| `reviews.get` | `{ threadId, reviewId }` | `{ review: DesignReview }` |
+| `reviews.list` | `{ threadId }` | `{ reviews: DesignReview[] }` pending reviews only, oldest first |
+| `reviews.save` | `{ threadId, reviewId, revision, draft: ReviewDraft }` | `{ review: DesignReview }` |
+| `reviews.respond` | `{ threadId, reviewId, revision, draft: ReviewDraft }` | `{ review: DesignReview, turnId?: string }` |
+| `reviews.cancel` | `{ threadId, reviewId, revision }` | `{ review: DesignReview }` |
+
+Creation validates the whole request and imports supported image files
+before publishing the card. Paths can be absolute, home-relative or
+relative to the thread's folder. Limit: 12 images, each at most 25 MB,
+nonempty unique option IDs and titles, title/note at most 200/4000
+characters. Draft notes are at most 4000 characters per image; unknown
+option IDs and picks of reference images are invalid. A response needs a
+pick or at least one nonblank note. Saving an empty draft is allowed.
+
+Every change persists a `review.updated` event with `{ review: DesignReview }`.
+Its stable card ID is the review ID; later snapshots update that card in
+place even when the original event is outside the loaded transcript page.
+`ThreadSummary.pendingReviews?: number` counts pending reviews and makes
+`needsYou` true even after mark-read, turn-end and runner restart. It does
+not hold a CLI open or prevent an update. Cancelling closes the request
+without sending an agent message. Closing a window only keeps the draft.
+The thread header can open pending reviews from `reviews.list`, including
+requests older than the transcript's loaded event page; Mike does not need
+to scroll back through earlier turns to find what still needs an answer.
+
+Save and submit reject a stale revision with `-32602`; the client reloads
+and preserves its unsaved text for retry. Answered/cancelled reviews are
+read-only. Retrying an identical response to an answered review returns
+the original result and never sends twice; a different response is an
+error. The runner durably queues the submitted reply with its review ID
+and structured response, alongside readable text naming the review and
+each option. An idle agent resumes; a busy one receives it after its turn.
+The queue survives restart. The response and queue are persisted together
+before acknowledging submission. `user.message` may include `reviewId`
+and `reviewResponse: ReviewDraft`; these identify the review that prompted
+the reply. The same fields accompany queued replies on disk.
+
+An internal delivery marker is saved after the CLI's `session.send` accepts
+the reply. A crash between that call and the marker may replay the reply
+after restart (at-least-once dispatch). Repeated `reviews.respond` requests
+with the same response never add another reply.
+
+Both Claude and Codex receive `threadbare.show_options` through the shared
+MCP tool definitions, bound to the calling thread. Its schema matches
+`reviews.create` without `threadId`; it returns the review ID and explains
+that the choice/notes will arrive as a later message. The existing URL
+patch panels are independent of these review windows. V1 accepts images;
+HTML previews and overlays are deferred.
+
 Every persisted event has an envelope:
 
 ```ts
@@ -630,9 +714,11 @@ restart wait for busy threads. It hands over instead:
   `runner.notice` come through the primary. `threads.list`,
   `threads.search` and `hello` include kept threads.
 - A kept thread moves across once nothing would be cut short: no turn,
-  approval or question, background work or wake grace. Background work
-  holds it for 30 minutes after its last turn at most, and is then stopped
-  with the usual note. Messages queued for it at that moment move with it
+  approval or question, background work or wake grace. Background shells
+  and monitors hold it for 30 minutes after its last turn at most (a dev
+  server never ends), and are then stopped with the usual note. Subagents
+  hold it until they finish, up to 4 hours: they end by themselves, and
+  stopping one throws its work away. Messages queued for it at that moment move with it
   and the primary starts them, so a message sent during the turn runs on
   the new release. The draining runner saves the thread, then sends the
   primary `drain.handedOver { threadId }`; the primary loads it and carries
@@ -653,7 +739,8 @@ restart wait for busy threads. It hands over instead:
 - `when: "now"` restarts the primary straight away and tells each draining
   runner to stop too (`drain.stop`).
 - Another handover while one is draining makes the primary a draining
-  runner as well; draining runners don't hand over again.
+  runner as well; draining runners don't hand over again, and close their
+  own connections to older ones, which the new primary connects to.
 
 - The primary's summaries of kept threads carry `onOldRunner: true`, so a
   client can say a thread is finishing on the old release. The flag goes

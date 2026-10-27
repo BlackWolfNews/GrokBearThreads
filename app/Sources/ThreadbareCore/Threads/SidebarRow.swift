@@ -58,12 +58,16 @@ public struct ThreadRowLook: Sendable, Equatable {
     }
 
     public init(_ thread: ThreadSummary, section: InboxSection? = nil) {
-        switch thread.status {
-        case .waiting: status = .needsYou
-        case .running, .starting: status = .working
-        case .error: status = .failed
-        case .stopped: status = .stopped
-        case .idle: status = thread.background.isEmpty ? .time : .background
+        if thread.hasPendingReviews {
+            status = .needsYou
+        } else {
+            switch thread.status {
+            case .waiting: status = .needsYou
+            case .running, .starting: status = .working
+            case .error: status = .failed
+            case .stopped: status = .stopped
+            case .idle: status = thread.background.isEmpty ? .time : .background
+            }
         }
         // A turn that said it needs nothing isn't in needsYou, but it's
         // still new: it gets a tick rather than nothing at all.
@@ -172,13 +176,23 @@ public enum AccountName {
     }
 }
 
-/// The project mark at the right of a thread's row, where its account
-/// used to be named. Until projects have icons it's the project's first
-/// letter or digit on a quiet tile.
+/// The tile at the start of a thread's row and the line under its title:
+/// the projects it's in, or its folder when it's in none. Until projects
+/// have icons a tile is the project's first letter or digit.
 public enum ProjectMark {
-    /// The project the row shows: the first it joined. A thread in two
-    /// projects names both in the mark's tooltip.
-    public static func project(_ thread: ThreadSummary) -> ThreadProject? { thread.projects.first }
+    /// The projects the row names, oldest first. A row under a project's
+    /// heading (the Projects view) leaves that one out: the heading says it.
+    public static func shown(_ thread: ThreadSummary, under heading: String? = nil) -> [ThreadProject] {
+        thread.projects.filter { $0.id != heading }
+    }
+
+    /// The line under the title: "Threadbear", "Threadbear, Photo sync"
+    /// for a thread in two, or the folder ("misc") for one in none.
+    public static func place(_ thread: ThreadSummary, under heading: String? = nil) -> String {
+        let projects = shown(thread, under: heading)
+        guard !projects.isEmpty else { return FolderName.short(thread.cwd) }
+        return projects.map { title($0) }.joined(separator: ", ")
+    }
 
     /// "C" for "Convex docs", "7" for "7 day plan", "?" for a title with
     /// neither (all emoji, or empty).
@@ -187,10 +201,12 @@ public enum ProjectMark {
         return String(first).uppercased()
     }
 
-    /// The tooltip: every project the thread is in.
+    /// The tooltip: every project the thread is in, or its whole folder.
     public static func help(_ thread: ThreadSummary) -> String {
-        thread.projects.map { $0.title.isEmpty ? "Untitled project" : $0.title }.joined(separator: ", ")
+        thread.projects.isEmpty ? thread.cwd : thread.projects.map { title($0) }.joined(separator: ", ")
     }
+
+    static func title(_ project: ThreadProject) -> String { project.title.isEmpty ? "Untitled project" : project.title }
 }
 
 /// A working folder as the sidebar header and the new-thread line name it:

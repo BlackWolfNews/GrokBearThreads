@@ -250,6 +250,8 @@ enum Automation {
             return "ok"
         case "options":
             return options(c, app: app)
+        case "review":
+            return await designReview(c, app: app)
         case "type":
             guard let composer = find(ComposerTextView.self, in: window?.contentView) else { return "error no composer" }
             window?.makeFirstResponder(composer)
@@ -454,6 +456,10 @@ enum Automation {
             return "ok \(zoom.percent)"
         case "hover":
             return hover(c, app: app)
+        case "hints":
+            ShortcutHints.shared.setShowing(c["on"] as? Bool ?? true)
+            try? await Task.sleep(for: .milliseconds(100))
+            return "ok \(ShortcutHints.shared.showing)"
         case "chip":
             return chip(c, app: app)
         case "account-ids":
@@ -502,6 +508,10 @@ enum Automation {
             guard let path = c["path"] as? String, path.hasPrefix("/") else { return "error path must be absolute" }
             if let refused = refusesToWrite(path) { return refused }
             guard var window else { return "error no window" }
+            if let id = c["review"] as? String {
+                guard let review = app.reviewWindows.values.first(where: { $0.session.review.id == id })?.window else { return "error the review window isn't open" }
+                window = review
+            }
             if c["sheet"] as? Bool == true {
                 guard let sheet = window.attachedSheet else { return "error no sheet" }
                 window = sheet
@@ -523,6 +533,10 @@ enum Automation {
             // The window's id for `screencapture -l`, once anything pending
             // has been drawn (as `screenshot` waits).
             guard var window else { return "error no window" }
+            if let id = c["review"] as? String {
+                guard let review = app.reviewWindows.values.first(where: { $0.session.review.id == id })?.window else { return "error the review window isn't open" }
+                window = review
+            }
             // {"sheet": true}: the sheet over it (the schedule editor), a
             // window of its own that a capture of the main one leaves out.
             if c["sheet"] as? Bool == true {
@@ -1077,6 +1091,44 @@ enum Automation {
             if let found = find(type, in: sub) { return found }
         }
         return nil
+    }
+
+    /// Drives the same session as the comparison controls. Replies still
+    /// go through the dev/mock runner, never the installed runner.
+    private static func designReview(_ c: [String: Any], app: AppModel) async -> String {
+        guard let threadId = app.selection else { return "error open a thread first" }
+        let snapshot = app.session(for: threadId).model.items.compactMap { row -> DesignReview? in
+            if case .review(let review) = row.content { return review }
+            return nil
+        }.first { c["id"] as? String == nil || $0.id == c["id"] as? String }
+        guard let snapshot else { return "error no review in this thread" }
+        let key = threadId + "/" + snapshot.id
+        if c["close"] as? Bool == true {
+            app.reviewWindows[key]?.close()
+            return "ok closed"
+        }
+        app.openReview(threadId: threadId, review: snapshot)
+        guard let controller = app.reviewWindows[key] else { return "error couldn't open review" }
+        let session = controller.session
+        await session.refresh()
+        if let mode = c["mode"] as? String, let view = ReviewMode(rawValue: mode) { session.mode = view }
+        if let actual = c["actual"] as? Bool { session.actualSize = actual }
+        if let left = c["left"] as? Int { session.show(left, slot: 0) }
+        if let right = c["right"] as? Int { session.show(right, slot: 1) }
+        if let notes = c["notes"] as? [String: String] { for (id, text) in notes { session.setNote(text, for: id) } }
+        if let pick = c["pick"] as? String { session.pick(pick) }
+        if c["save"] as? Bool == true { await session.saveNow() }
+        if c["submit"] as? Bool == true { await session.submit() }
+        if c["cancel"] as? Bool == true { await session.cancelReview() }
+        controller.window?.orderBack(nil)
+        try? await Task.sleep(for: .milliseconds(250))
+        return "ok " + json([
+            "id": session.review.id, "window": controller.window?.windowNumber ?? 0,
+            "status": session.review.status, "revision": session.review.revision,
+            "mode": session.mode.rawValue, "actual": session.actualSize,
+            "pickedId": session.draft.pickedId ?? "", "notes": session.draft.notes,
+            "dirty": session.dirty, "error": session.error ?? "",
+        ] as [String: Any])
     }
 
     private static func all<T: NSView>(_ type: T.Type, in view: NSView?) -> [T] {

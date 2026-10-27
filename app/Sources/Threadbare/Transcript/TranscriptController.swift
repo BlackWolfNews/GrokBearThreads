@@ -253,6 +253,7 @@ final class TranscriptController: NSObject, NSTableViewDataSource, NSTableViewDe
             if case .approval(let item) = row.content, item.resolution != nil { return "header" }
             return "approval"
         case .question: return "question"
+        case .review: return "review"
         case .group: return "group"
         case .working: return "working"
         case .background: return "background"
@@ -270,6 +271,7 @@ final class TranscriptController: NSObject, NSTableViewDataSource, NSTableViewDe
         case "header": cell = HeaderRowCell(frame: .zero)
         case "images": cell = ImagesRowCell(frame: .zero)
         case "approval": cell = ApprovalRowCell(frame: .zero)
+        case "review": cell = ReviewRowCell(frame: .zero)
         case "group": cell = GroupRowCell(frame: .zero)
         case "working": cell = WorkingRowCell(frame: .zero)
         case "background": cell = BackgroundRowCell(frame: .zero)
@@ -697,6 +699,11 @@ final class TranscriptController: NSObject, NSTableViewDataSource, NSTableViewDe
         case "reply": if let reply = card.asks[index].reply { session.useReply(reply) }
         default: break
         }
+    }
+
+    func openReview(_ review: DesignReview) {
+        guard let session else { return }
+        session.app?.openReview(threadId: session.threadId, review: review)
     }
 }
 

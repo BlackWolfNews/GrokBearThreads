@@ -459,6 +459,7 @@ is an error. Commands marked "the open thread" act on `id` when it's given
 | `click` | `title` | a button in the transcript: Allow, Always allow, Deny, an option, Send answer |
 | `expand`, `collapse` | `row`, `file`, `all` | a group, tool, thinking block or settled approval (one folded in a closed group opens it); `file` (path or index) in a changes card; `all` for a whole diff |
 | `scroll` | `to` (`top`, `bottom`) or `row`, `offset` | |
+| `hints` | `on` (default true) | shows the keys as if ⌘ were held, or hides them |
 | `hover` | `id` (sidebar) or `row` (transcript); neither clears | draws a row as if the pointer were on it |
 | `chip` | `row`, `word`, `show`, `click` | thread chips in a row's text: lists them (word=thread id); with `word`, `show` true shows its hover card and says its window number, false closes it, `click` true opens its thread |
 | `menu` | `row`, `click` | a transcript row's context menu, or chooses an item from it |
@@ -474,6 +475,7 @@ is an error. Commands marked "the open thread" act on `id` when it's given
 | `screenshot` | `path`, `inProcess` | `screencapture -l`, or drawn in-process when that gives no image; a dev-app instance always draws in-process (`shot` runs screencapture itself). `out` and `path` are refused under ~/Desktop, ~/Documents and ~/Downloads, where macOS would ask Mike to let the temp bundle in; `shot` and `dump` write in the instance's folder and move the file |
 | `window` | | the window's id (for `screencapture -l`) and size, once anything pending is drawn |
 | `settings` | `tab` (`general`, `models`), `close` | opens the Settings window (behind Mike's windows) on that tab, or closes it; says its window number and what it shows. `shot <file> --settings`, and `window` and `screenshot` with `"settings": true`, capture it |
+| `review` | `id` (optional), `mode` (`Grid`, `2-up`, `Single`), `actual` (100%), `left`, `right` (zero-based), `pick` (option ID, toggles), `notes` (object keyed by ID), `save`, `submit`, `cancel`, `close` | opens a review from the selected thread in a native window kept behind Mike's work; edits and sends through the same session as the UI. Returns the draft, status and window number. `window` and `screenshot` with `"review": "<review ID>"` target that window |
 | `focus` | `on` (default true) | acts as if the app were in front, so an open thread gets marked read as it would for Mike; never activates it |
 | `mock` | `method`, `params` (an object) | `mock.<method>` on the mock runner, such as `restartPending` and `restart` |
 | `status`, `sidebar`, `streaming`, `account-ids`, `quit` | | |

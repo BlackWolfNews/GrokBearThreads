@@ -409,6 +409,8 @@ enum RowRenderer {
             let text = asksText(card)
             let size = measurer.measure(text, width: width - RowMetrics.cardPad * 2)
             return RowRender(height: vertical + zoomed(4) + size.height + RowMetrics.cardPad * 2 - zoomed(4), text: text, textSize: size)
+        case .review:
+            return RowRender(height: vertical + RowMetrics.cardPad * 2 + zoomed(22 + 4 + 20 + 10) + RowMetrics.buttonHeight)
 
         case .plan(let entries):
             let text = planText(entries)

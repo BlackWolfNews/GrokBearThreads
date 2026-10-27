@@ -162,6 +162,9 @@ async function main(): Promise<void> {
     log,
     runner: {
       adopt: (threadId, o) => {
+        // Only the primary takes threads in. A draining runner has closed
+        // its peers, but one already on its way in mustn't land here.
+        if (draining) return undefined;
         const t = runner.adopt(threadId, o);
         restarter?.resumeAdopted(threadId);
         return t;
@@ -359,6 +362,11 @@ async function main(): Promise<void> {
       updates.stop();
       settings.stop();
       usage.stopWriting();
+      // The older runners it was connected to are the new primary's now:
+      // it connects to every one of them, and each thread they hand over
+      // must go only there (27 Oct: three runners adopted the same one).
+      peers.close();
+      elsewhere = undefined;
       // Every thread not kept lets go now; resolves once their CLIs exit.
       await runner.beginDrain(keeps, {
         backgroundMs: BACKGROUND_HOLD_MS,

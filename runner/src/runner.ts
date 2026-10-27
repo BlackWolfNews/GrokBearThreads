@@ -2,6 +2,7 @@
 // release and snoozes. Providers plug in through AgentAdapter; the WebSocket
 // server in rpc.ts is a thin layer over the public methods here.
 import fs from 'node:fs';
+import { reviewInput, reviewDraft, reviewReply, sameDraft, type ReviewInput } from './reviews.ts';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import type {
@@ -14,6 +15,8 @@ import type {
   CliStatus,
   DeltaBody,
   DeltaType,
+  DesignReview,
+  ReviewDraft,
   EffortLevel,
   EventBody,
   ImageRef,
@@ -255,6 +258,7 @@ type Drain = {
   going: Set<string>; // being let go
   onHandedOver: (threadId: string) => void;
   backgroundMs: number;
+  agentMs: number;
   checkMs: number;
   checkQueued: boolean;
   ready: () => boolean;
@@ -264,6 +268,9 @@ type Drain = {
 // How often a draining runner looks again at threads it keeps for
 // background work, since that work's limit passes without an event.
 const DRAIN_CHECK_MS = 5000;
+// How long subagents hold a kept thread after its last turn. Long, since
+// they end by themselves; only a stuck one should ever reach it.
+const DRAIN_AGENT_MS = 4 * 60 * 60_000;
 
 export type RunnerDeps = {
   config: Config;
@@ -418,6 +425,7 @@ export class Runner {
       rec.lastSeq = this.store.log(rec.id).lastSeq;
       const st: ThreadState = { rec, rt: newRuntime(Date.parse(rec.lastActivityAt) || 0) };
       this.threads.set(rec.id, st);
+      this.recoverReviews(st);
       if (this.recover(st)) stopped++;
     }
     if (stopped) this.startupNotice('info', `${stopped === 1 ? 'A thread was' : `${stopped} threads were`} mid-turn when the runner stopped; send a message to carry on.`);
@@ -426,6 +434,7 @@ export class Runner {
     // restart waited still gets carried on.
     for (const st of this.threads.values()) if (st.rec.snoozedUntilRestart) this.wake(st);
     this.flush();
+    for (const st of this.threads.values()) if (st.rec.queue.some(q => q.reviewId) && this.bucket(st.rec) === 'inbox') this.kickQueue(st);
     this.armSnoozeTimer();
     this.log.info('runner loaded threads', { count: this.threads.size });
     this.accountsShown = accountsKey(this.safeAccounts());
@@ -558,6 +567,9 @@ export class Runner {
       pendingApprovals: [],
       handoff: { fromCwd: this.cfg.defaults.cwd, fromAccountId: accountId, rebuilt: true },
     };
+    const reviews = new Map<string, DesignReview>();
+    for (const event of events) if (event.type === 'review.updated') reviews.set(event.review.id, event.review);
+    if (reviews.size) rec.reviews = [...reviews.values()];
     if (open && lastStarted) rec.turnId = lastStarted.turnId;
     this.log.warn('thread.json was unreadable; rebuilt it from the event log', { threadId: id });
     this.store.setAside(id);
@@ -614,6 +626,8 @@ export class Runner {
       this.markDirty(st);
       return false;
     }
+    const reviewQueue = rec.queue.filter(q => q.reviewId);
+    rec.queue = rec.queue.filter(q => !q.reviewId);
     if (rec.queue.length) {
       const texts = rec.queue.map((q) => q.text).filter(Boolean);
       this.emit(st, {
@@ -622,6 +636,7 @@ export class Runner {
       });
       rec.queue = [];
     }
+    rec.queue.push(...reviewQueue);
     this.markDirty(st);
     return midTurn && !ended;
   }
@@ -682,13 +697,14 @@ export class Runner {
   // `ready` says whether the new runner is there to hear about one (it has
   // connected); until it is, threads stay here, and recheckHandovers() looks
   // again once it does.
-  async beginDrain(keep: Iterable<string>, opts: { onHandedOver: (threadId: string) => void; backgroundMs: number; checkMs?: number; ready?: () => boolean }): Promise<void> {
+  async beginDrain(keep: Iterable<string>, opts: { onHandedOver: (threadId: string) => void; backgroundMs: number; agentMs?: number; checkMs?: number; ready?: () => boolean }): Promise<void> {
     if (this.draining) throw new Error('already draining');
     const d: Drain = {
       keep: new Set([...keep].filter((id) => this.threads.has(id))),
       going: new Set(),
       onHandedOver: opts.onHandedOver,
       backgroundMs: opts.backgroundMs,
+      agentMs: opts.agentMs ?? DRAIN_AGENT_MS,
       checkMs: opts.checkMs ?? DRAIN_CHECK_MS,
       checkQueued: false,
       ready: opts.ready ?? (() => true),
@@ -759,12 +775,18 @@ export class Runner {
 
   // Nothing would be cut short by letting it go now: no turn, approval or
   // question, wake grace, turn-end hook or action. Queued messages go with
-  // it. Background work holds it for backgroundMs after its last turn, as
-  // it holds an idle restart, and is then stopped with a note.
+  // it. Background shells and monitors hold it for backgroundMs after its
+  // last turn, as they hold an idle restart (a dev server never ends), and
+  // are then stopped with a note. Subagents hold it for agentMs: they
+  // finish by themselves, and stopping one throws away its work (27 Oct: a
+  // builder agent an agent left running was cut off after 30 minutes).
   private readyToHandOver(st: ThreadState, d: Drain): boolean {
     const { rt } = st;
     if (rt.turn || rt.approvals.size || rt.wakeTimer || rt.hooksRunning || rt.runningActions?.size) return false;
-    return rt.tasks.length === 0 || this.clock.now() - rt.activeAt >= d.backgroundMs;
+    if (rt.tasks.length === 0) return true;
+    const idleFor = this.clock.now() - rt.activeAt;
+    const agents = rt.tasks.some((t) => t.kind === 'agent');
+    return idleFor >= (agents ? d.agentMs : d.backgroundMs);
   }
 
   // Lets go of a thread for good: its CLI exits (background work, if any,
@@ -803,13 +825,14 @@ export class Runner {
     rec.lastSeq = this.store.log(rec.id).lastSeq;
     const st: ThreadState = { rec, rt: newRuntime(Date.parse(rec.lastActivityAt) || 0) };
     this.threads.set(rec.id, st);
+    this.recoverReviews(st);
     if (opts.crashed) {
       if (this.recover(st)) this.notice('info', `The old runner stopped while "${rec.title}" was mid-turn; send a message to carry on.`);
     }
     // Hibernating until the runner restarts: for this thread, coming across
     // is the restart.
     if (rec.snoozedUntilRestart) this.wake(st);
-    else if (!opts.crashed && rec.queue.length && this.bucket(rec) === 'inbox') {
+    else if (rec.queue.length && this.bucket(rec) === 'inbox') {
       this.kickQueue(st);
     }
     this.markDirty(st);
@@ -1433,7 +1456,10 @@ export class Runner {
   // than stuck on a turn that never started.
   private startTurn(st: ThreadState, msg: QueuedSend): void {
     const { rec, rt } = st;
-    this.emit(st, userMessage(msg), msg.turnId);
+    // A review can be replayed after a failed turn.started append. Its
+    // stable message ID keeps the original user row rather than duplicating it.
+    const hasReviewMessage = msg.reviewId && this.store.log(rec.id).read(1, rec.lastSeq).some(e => e.type === 'user.message' && e.reviewId === msg.reviewId && e.turnId === msg.turnId);
+    if (!hasReviewMessage) this.emit(st, userMessage(msg), msg.turnId);
     try {
       this.emit(st, { type: 'turn.started', turnId: msg.turnId }, msg.turnId);
     } catch (e) {
@@ -1496,6 +1522,15 @@ export class Runner {
       delete rec.moved;
     }
     rt.session!.send({ id: msg.turnId, text, images: msg.images });
+    if (msg.reviewId && !rec.reviewDeliveries?.includes(msg.reviewId)) {
+      (rec.reviewDeliveries ??= []).push(msg.reviewId);
+      // A persisted transcript row is not proof of dispatch: both initial
+      // events are written before session.send. Mark receipt only afterwards.
+      try { this.store.save(rec); } catch (e) {
+        this.log.error('could not save review delivery', {threadId: rec.id, reviewId: msg.reviewId, error: String(e)});
+      }
+      this.markDirty(st);
+    }
   }
 
   // Keeps the number of live CLIs at cfg.maxLive by releasing the one idle
@@ -2598,6 +2633,141 @@ export class Runner {
     }
   }
 
+  // ---------------------------------------------------------- design reviews
+
+  createReview(threadId: string, raw: ReviewInput): { review: DesignReview } {
+    const st = this.mustGet(threadId);
+    this.checkAccepting();
+    const input = reviewInput(raw, st.rec.cwd);
+    const id = crypto.randomUUID();
+    const dir = path.join(this.store.mediaDir(threadId), 'reviews', id);
+    const now = this.isoNow();
+    try {
+      const options = input.options.map(({path: source, ...option}) => ({...option, image: copyImageInto(dir, source)}));
+      const review: DesignReview = { id, title: input.title, ...(input.note ? {note: input.note} : {}), options,
+        status: 'pending', revision: 0, createdAt: now, updatedAt: now, draft: {notes: {}} };
+      this.persistReview(st, review);
+      return {review: structuredClone(review)};
+    } catch (e) {
+      // Only remove imports if the review was not committed. If an event
+      // append failed after the record save, startup repairs its card.
+      if (!st.rec.reviews?.some(r => r.id === id)) fs.rmSync(dir, {recursive: true, force: true});
+      throw e;
+    }
+  }
+
+  listReviews(threadId: string): { reviews: DesignReview[] } {
+    return { reviews: structuredClone((this.mustGet(threadId).rec.reviews ?? [])
+      .filter(review => review.status === 'pending')
+      .sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id))) };
+  }
+
+  getReview(threadId: string, reviewId: string): { review: DesignReview } {
+    return {review: structuredClone(this.mustReview(this.mustGet(threadId), reviewId))};
+  }
+
+  saveReview(threadId: string, reviewId: string, revision: number, raw: ReviewDraft): { review: DesignReview } {
+    const st = this.mustGet(threadId);
+    this.checkAccepting();
+    const review = this.mustReview(st, reviewId);
+    this.checkReviewRevision(review, revision);
+    const draft = reviewDraft(review, raw);
+    const next = {...review, draft, revision: review.revision + 1, updatedAt: this.isoNow()};
+    this.persistReview(st, next);
+    return {review: structuredClone(next)};
+  }
+
+  respondReview(threadId: string, reviewId: string, revision: number, raw: ReviewDraft): { review: DesignReview; turnId?: string } {
+    const st = this.mustGet(threadId);
+    const review = this.mustReview(st, reviewId);
+    const draft = reviewDraft(review, raw, true);
+    // A dropped WebSocket response must not send Mike's answer twice.
+    if (review.status === 'answered' && sameDraft(review.response, draft)) {
+      this.kickQueue(st);
+      return {review: structuredClone(review), turnId: review.replyTurnId};
+    }
+    this.checkAccepting();
+    this.checkReviewRevision(review, revision);
+    const turnId = crypto.randomUUID();
+    const next: DesignReview = {...review, draft, response: draft, status: 'answered', revision: review.revision + 1, updatedAt: this.isoNow(), replyTurnId: turnId};
+    const message: QueuedSend = {turnId, text: reviewReply(review, draft), images: [], reviewId, reviewResponse: draft};
+    // The answer and outbox live in one atomic thread.json write. Publish
+    // the card only after it succeeds, then start the queued reply.
+    this.persistReview(st, next, [...st.rec.queue, message], true);
+    st.rt.releaseWhenIdle = false;
+    this.markDirty(st);
+    this.kickQueue(st);
+    return {review: structuredClone(next), turnId};
+  }
+
+  cancelReview(threadId: string, reviewId: string, revision: number): {review: DesignReview} {
+    const st = this.mustGet(threadId);
+    this.checkAccepting();
+    const review = this.mustReview(st, reviewId);
+    this.checkReviewRevision(review, revision);
+    const next: DesignReview = {...review, status: 'cancelled', revision: review.revision + 1, updatedAt: this.isoNow()};
+    this.persistReview(st, next);
+    return {review: structuredClone(next)};
+  }
+
+  private mustReview(st: ThreadState, id: string): DesignReview {
+    const review = st.rec.reviews?.find(r => r.id === id);
+    if (!review) throw new RpcError(ErrorCode.badParams, `Review not found: ${id}`);
+    return review;
+  }
+
+  private checkReviewRevision(review: DesignReview, revision: number): void {
+    if (review.status !== 'pending') throw new RpcError(ErrorCode.badParams, `This review is ${review.status}.`);
+    if (!Number.isSafeInteger(revision) || review.revision !== revision) throw new RpcError(ErrorCode.badParams, 'This review changed. Reload it before saving or sending your answer.');
+  }
+
+  private persistReview(st: ThreadState, review: DesignReview, queue = st.rec.queue, wake = false): void {
+    const previous = st.rec.reviews ?? [];
+    const reviews = previous.some(r => r.id === review.id)
+      ? previous.map(r => r.id === review.id ? review : r)
+      : [...previous, review];
+    const next = {...st.rec, reviews, queue};
+    if (wake) {
+      delete next.snoozedUntil;
+      delete next.snoozedUntilRestart;
+      delete next.archivedAt;
+    }
+    this.store.save(next);
+    if (wake) {
+      delete st.rec.snoozedUntil;
+      delete st.rec.snoozedUntilRestart;
+      delete st.rec.archivedAt;
+    }
+    // Preserve the record object used by any in-flight deliver() callback.
+    Object.assign(st.rec, next);
+    this.emit(st, {type: 'review.updated', review});
+  }
+
+  private recoverReviews(st: ThreadState): void {
+    // Reviews save their record before their event. Threads without reviews
+    // need no extra log scan (the common case, including long transcripts).
+    if (!st.rec.reviews?.length && !st.rec.queue.some(q => q.reviewId)) return;
+    const log = this.store.log(st.rec.id);
+    const latest = new Map<string, DesignReview>();
+    const sent = new Set(st.rec.reviewDeliveries ?? []);
+    for (const event of log.read(1, log.lastSeq)) {
+      if (event.type === 'review.updated') latest.set(event.review.id, event.review);
+    }
+    const reviews = new Map((st.rec.reviews ?? []).map(r => [r.id, r]));
+    for (const [id, review] of latest) if (!reviews.has(id) || reviews.get(id)!.revision < review.revision) reviews.set(id, review);
+    if (reviews.size) st.rec.reviews = [...reviews.values()];
+    // The delivery marker is written after session.send, not merely after
+    // user.message. A failed turn.started append leaves the answer unsent.
+    st.rec.queue = st.rec.queue.filter(q => !q.reviewId || !sent.has(q.reviewId));
+    for (const [id, review] of reviews) {
+      if (review.status === 'answered' && review.replyTurnId && review.response && !sent.has(id) && !st.rec.queue.some(q => q.reviewId === id)) {
+        st.rec.queue.push({turnId: review.replyTurnId, text: reviewReply(review, review.response), images: [], reviewId: id, reviewResponse: review.response});
+      }
+      if (latest.get(id)?.revision !== review.revision) this.emit(st, {type: 'review.updated', review});
+    }
+    if (reviews.size) this.markDirty(st);
+  }
+
   // ---------------------------------------------------------------- events
 
   private emit(st: ThreadState, body: EventBody, turnId?: string): PersistedEvent {
@@ -2734,7 +2904,7 @@ export class Runner {
       live: Boolean(rt.session),
       // A finished turn that said it needs nothing isn't waiting on Mike
       // (docs/protocol.md, "Needs you").
-      needsYou: rec.status === 'waiting' || Boolean(rec.forceUnread) || (!running && rec.lastTurnCompletedSeq > rec.lastSeenSeq && !this.saidNothing(rec)),
+      needsYou: Boolean(rec.reviews?.some(r => r.status === 'pending')) || rec.status === 'waiting' || Boolean(rec.forceUnread) || (!running && rec.lastTurnCompletedSeq > rec.lastSeenSeq && !this.saidNothing(rec)),
       createdAt: rec.createdAt,
       updatedAt: rec.updatedAt,
       lastActivityAt: rec.lastActivityAt,
@@ -2750,6 +2920,8 @@ export class Runner {
         s.asksSeq = rec.needs.seq;
       }
     }
+    const pendingReviews = rec.reviews?.filter(r => r.status === 'pending').length;
+    if (pendingReviews) s.pendingReviews = pendingReviews;
     if (rec.model) s.model = rec.model;
     if (rec.effort) s.effort = rec.effort;
     if (rec.modelInUse) s.modelInUse = rec.modelInUse;
@@ -3112,6 +3284,7 @@ function userMessage(msg: QueuedSend): EventBody {
     images: msg.images,
     ...(msg.origin ? { origin: msg.origin } : {}),
     ...(msg.scheduleId ? { scheduleId: msg.scheduleId } : {}),
+    ...(msg.reviewId ? { reviewId: msg.reviewId, reviewResponse: msg.reviewResponse } : {}),
   };
 }
 

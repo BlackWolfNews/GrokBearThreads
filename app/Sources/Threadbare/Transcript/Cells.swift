@@ -13,6 +13,11 @@ protocol RowCellDelegate: AnyObject {
     func setQuestionDraft(_ approvalId: String, _ draft: [Int: Set<String>])
     /// A click on an asks card: `tick:<index>` or `reply:<index>`.
     func askAction(_ card: AsksCard, action: String)
+    func openReview(_ review: DesignReview)
+}
+
+extension RowCellDelegate {
+    func openReview(_ review: DesignReview) {}
 }
 
 /// Base for transcript cells: flipped, so layout reads top-down.
