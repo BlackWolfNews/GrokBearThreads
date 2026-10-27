@@ -81,6 +81,9 @@ struct ThreadbareApp: App {
                     ForEach(Snooze.presets(now: app.now)) { preset in
                         Button(preset.title) { app.snooze(until: Snooze.date(for: preset.id, now: Date())) }
                     }
+                    if app.restartPending {
+                        Button(Snooze.untilRestartTitle) { app.snoozeUntilRestart() }
+                    }
                     Divider()
                     Button("Pick a time…") {
                         if let id = app.selection { SnoozePicker.show(threadId: id, app: app) }

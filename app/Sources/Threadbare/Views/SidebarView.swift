@@ -302,6 +302,9 @@ struct ThreadRowView: View {
     }
 
     private var secondLine: String? {
+        if mode == .snoozed, thread.snoozedUntilRestart {
+            return "Back when the runner restarts"
+        }
         if mode == .snoozed, let until = thread.snoozedUntil {
             return "Back \(RelativeTime.until(until, now: app.now))"
         }
@@ -523,6 +526,12 @@ struct SnoozeMenuItems: View {
             Button(preset.title) {
                 guard allowed() else { return }
                 app.snooze(threadId, until: Snooze.date(for: preset.id, now: Date()))
+            }
+        }
+        if app.restartPending {
+            Button(Snooze.untilRestartTitle) {
+                guard allowed() else { return }
+                app.snoozeUntilRestart(threadId)
             }
         }
         Divider()

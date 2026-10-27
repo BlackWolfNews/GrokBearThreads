@@ -6,6 +6,7 @@ import { makeHarness, tick, tmpDir } from '../helpers/fakes.ts';
 import { checkSequence, checkSummary } from '../helpers/protocol-check.ts';
 import { makePng } from '../helpers/png.ts';
 import { RpcError } from '../../src/protocol.ts';
+import { UNTIL_RESTART } from '../../src/runner.ts';
 
 const MIN = 60_000;
 
@@ -413,6 +414,48 @@ test('snooze releases the CLI, hides the thread, and brings it back unread', asy
   assert.equal(t.snoozedUntil, undefined);
   assert.equal(t.needsYou, true);
   assert.equal(h.runner.markSeen(thread.id, t.lastSeq).thread.needsYou, false);
+});
+
+test('hibernating until a restart stops the turn, holds the restart no longer, and wakes on the next start', async () => {
+  const h = makeHarness();
+  const { thread } = create(h);
+  const s = h.adapter.last;
+  s.init();
+  assert.equal(h.runner.get(thread.id).status, 'running');
+  const res = h.runner.update({ threadId: thread.id, snoozedUntil: 'restart' });
+  assert.equal(res.thread.snoozedUntilRestart, true);
+  assert.equal(res.thread.snoozedUntil, UNTIL_RESTART);
+  await tick();
+  assert.equal(s.interrupts, 1);
+  s.result('failed');
+  // Not busy and no CLI left, so a pending restart no longer waits for it.
+  assert.equal(s.ended, true);
+  assert.notEqual(h.runner.get(thread.id).status, 'running');
+  // A day on it's still away; only a start brings it back.
+  h.clock.advance(24 * 60 * MIN);
+  assert.deepEqual(h.runner.list(['snoozed']).map((t) => t.id), [thread.id]);
+  const h2 = h.restart();
+  const t = h2.runner.get(thread.id);
+  assert.equal(t.snoozedUntil, undefined);
+  assert.equal(t.snoozedUntilRestart, undefined);
+  assert.equal(t.needsYou, true);
+  assert.deepEqual(h2.runner.list().map((x) => x.id), [thread.id]);
+});
+
+test('a dated snooze or a message clears an until-restart snooze', () => {
+  const h = makeHarness();
+  const { thread } = create(h);
+  h.adapter.last.init();
+  h.adapter.last.result();
+  h.runner.update({ threadId: thread.id, snoozedUntil: 'restart' });
+  const until = new Date(h.clock.now() + 60 * MIN).toISOString();
+  const dated = h.runner.update({ threadId: thread.id, snoozedUntil: until }).thread;
+  assert.equal(dated.snoozedUntil, until);
+  assert.equal(dated.snoozedUntilRestart, undefined);
+  h.runner.update({ threadId: thread.id, snoozedUntil: 'restart' });
+  h.runner.send(thread.id, 'back to it');
+  assert.equal(h.runner.get(thread.id).snoozedUntilRestart, undefined);
+  assert.throws(() => h.runner.update({ threadId: thread.id, snoozedUntil: 'later' }), /ISO time or "restart"/);
 });
 
 test('archive mid-turn interrupts, then releases the CLI; unarchive brings it back', async () => {

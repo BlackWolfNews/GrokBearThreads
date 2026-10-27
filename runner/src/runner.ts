@@ -271,6 +271,11 @@ const ACCOUNTS_THROTTLE_MS = 5_000;
 const HOOK_TELL_LIMIT = 2;
 // How much of a hook's output goes to the agent (the transcript has it all).
 const HOOK_TELL_CHARS = 8000;
+// snoozedUntil for a thread hibernating until the runner next starts: far
+// enough off that everything reading snoozedUntil (the lists, the resume
+// after a restart, a client older than snoozedUntilRestart) sees it as
+// snoozed, and start() wakes it long before.
+export const UNTIL_RESTART = '9999-12-31T00:00:00.000Z';
 
 export class Runner {
   private cfg: Config;
@@ -355,6 +360,10 @@ export class Runner {
       if (this.recover(st)) stopped++;
     }
     if (stopped) this.startupNotice('info', `${stopped === 1 ? 'A thread was' : `${stopped} threads were`} mid-turn when the runner stopped; send a message to carry on.`);
+    // Hibernating until the runner restarts: this is the restart. Before
+    // the restart's resume (main.ts), so a thread put away while its own
+    // restart waited still gets carried on.
+    for (const st of this.threads.values()) if (st.rec.snoozedUntilRestart) this.wake(st);
     this.flush();
     this.armSnoozeTimer();
     this.log.info('runner loaded threads', { count: this.threads.size });
@@ -1061,6 +1070,7 @@ export class Runner {
     // Sending to a snoozed or archived thread brings it back.
     if (rec.snoozedUntil || rec.archivedAt) {
       delete rec.snoozedUntil;
+      delete rec.snoozedUntilRestart;
       delete rec.archivedAt;
       rt.releaseWhenIdle = false;
     }
@@ -1660,7 +1670,7 @@ export class Runner {
     model?: string | null;
     effort?: EffortLevel | null;
     permissionMode?: PermissionMode;
-    snoozedUntil?: string | null;
+    snoozedUntil?: string | null; // an ISO time, or 'restart' for until the runner next starts
     archived?: boolean;
   }): { thread: ThreadSummary } {
     const st = this.mustGet(params.threadId);
@@ -1785,10 +1795,15 @@ export class Runner {
       );
     }
     if (params.snoozedUntil !== undefined) {
+      delete rec.snoozedUntilRestart;
       if (params.snoozedUntil === null) delete rec.snoozedUntil;
-      else {
+      else if (params.snoozedUntil === 'restart') {
+        rec.snoozedUntil = UNTIL_RESTART;
+        rec.snoozedUntilRestart = true;
+        stop = true;
+      } else {
         const t = Date.parse(params.snoozedUntil);
-        if (Number.isNaN(t)) throw new RpcError(ErrorCode.badParams, 'snoozedUntil must be an ISO time');
+        if (Number.isNaN(t)) throw new RpcError(ErrorCode.badParams, 'snoozedUntil must be an ISO time or "restart"');
         rec.snoozedUntil = new Date(t).toISOString();
         stop = true;
       }
@@ -2197,6 +2212,7 @@ export class Runner {
 
   private wake(st: ThreadState): void {
     delete st.rec.snoozedUntil;
+    delete st.rec.snoozedUntilRestart;
     st.rec.forceUnread = true;
     st.rec.updatedAt = this.isoNow();
     this.markDirty(st);
@@ -2367,6 +2383,7 @@ export class Runner {
     if (rec.modelInUse) s.modelInUse = rec.modelInUse;
     if (rec.effortInUse) s.effortInUse = rec.effortInUse;
     if (rec.snoozedUntil) s.snoozedUntil = rec.snoozedUntil;
+    if (rec.snoozedUntilRestart) s.snoozedUntilRestart = true;
     if (rec.archivedAt) s.archivedAt = rec.archivedAt;
     if (rec.nativeSessionId && rec.sessionUsed) s.nativeSessionId = rec.nativeSessionId;
     if (rec.contextTokens !== undefined) s.contextTokens = rec.contextTokens;

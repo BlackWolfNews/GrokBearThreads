@@ -182,9 +182,12 @@ public struct ThreadUpdate: Sendable, Hashable {
     public var effort: String??
     public var permissionMode: PermissionMode?
     public var snoozedUntil: Date??
+    /// Hibernate until the runner next starts (`snoozedUntil: "restart"`).
+    /// Wins over `snoozedUntil`.
+    public var snoozeUntilRestart: Bool
     public var archived: Bool?
 
-    public init(title: String? = nil, cwd: String? = nil, accountId: String? = nil, model: String?? = nil, effort: String?? = nil, permissionMode: PermissionMode? = nil, snoozedUntil: Date?? = nil, archived: Bool? = nil) {
+    public init(title: String? = nil, cwd: String? = nil, accountId: String? = nil, model: String?? = nil, effort: String?? = nil, permissionMode: PermissionMode? = nil, snoozedUntil: Date?? = nil, snoozeUntilRestart: Bool = false, archived: Bool? = nil) {
         self.title = title
         self.cwd = cwd
         self.accountId = accountId
@@ -192,6 +195,7 @@ public struct ThreadUpdate: Sendable, Hashable {
         self.effort = effort
         self.permissionMode = permissionMode
         self.snoozedUntil = snoozedUntil
+        self.snoozeUntilRestart = snoozeUntilRestart
         self.archived = archived
     }
 
@@ -203,7 +207,11 @@ public struct ThreadUpdate: Sendable, Hashable {
         if let model { params["model"] = model.map { .string($0) } ?? .null }
         if let effort { params["effort"] = effort.map { .string($0) } ?? .null }
         if let permissionMode { params["permissionMode"] = .string(permissionMode.rawValue) }
-        if let snoozedUntil { params["snoozedUntil"] = snoozedUntil.map { .string(ISO8601.format($0)) } ?? .null }
+        if snoozeUntilRestart {
+            params["snoozedUntil"] = .string("restart")
+        } else if let snoozedUntil {
+            params["snoozedUntil"] = snoozedUntil.map { .string(ISO8601.format($0)) } ?? .null
+        }
         if let archived { params["archived"] = .bool(archived) }
         return params
     }

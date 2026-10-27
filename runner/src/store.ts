@@ -23,6 +23,7 @@ export type ThreadRecord = {
   updatedAt: string;
   lastActivityAt: string;
   snoozedUntil?: string;
+  snoozedUntilRestart?: boolean; // snoozedUntil is UNTIL_RESTART; start() wakes it
   archivedAt?: string;
   preview: string;
   lastSeq: number;

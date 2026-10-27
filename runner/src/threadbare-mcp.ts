@@ -112,7 +112,7 @@ export function buildThreadbareTools(control: ThreadControl, selfId: string, now
   };
 
   const line = (t: ThreadSummary): string => {
-    const where = t.archivedAt ? 'archived' : t.snoozedUntil ? `snoozed until ${t.snoozedUntil}` : 'inbox';
+    const where = t.archivedAt ? 'archived' : t.snoozedUntil ? `snoozed until ${snoozeEnd(t)}` : 'inbox';
     const flags = [t.status, where, t.needsYou ? 'needs Mike' : '', t.id === selfId ? 'this thread' : ''].filter(Boolean).join(', ');
     return `${t.id.slice(0, 8)}  ${t.title}  [${flags}]  ${t.cwd}  ${t.accountId}  ${relativeTime(t.lastActivityAt, now())}`;
   };
@@ -127,7 +127,7 @@ export function buildThreadbareTools(control: ThreadControl, selfId: string, now
       `model: ${t.model ?? 'default'}${t.modelInUse ? ` (running as ${t.modelInUse})` : ''}`,
       `effort: ${t.effort ?? 'default'}${t.effortInUse ? ` (${t.effortInUse} last turn)` : ''}`,
       `permissions: ${t.permissionMode === 'full' ? 'full access' : 'ask before edits'}`,
-      t.snoozedUntil ? `snoozed until: ${t.snoozedUntil}` : '',
+      t.snoozedUntil ? `snoozed until: ${snoozeEnd(t)}` : '',
       t.archivedAt ? `archived: ${t.archivedAt}` : '',
       `last activity: ${relativeTime(t.lastActivityAt, now())}`,
       t.costUsd !== undefined ? `cost so far: $${t.costUsd.toFixed(2)}` : '',
@@ -353,7 +353,7 @@ export function buildThreadbareTools(control: ThreadControl, selfId: string, now
         model: z.string().nullable().optional().describe('Model id, or null for the account default.'),
         effort: effortEnum.nullable().optional().describe("Reasoning effort, or null for the model's own level (ultra is Codex only)."),
         permissionMode: z.enum(['full', 'ask']).optional(),
-        snooze: z.string().optional().describe('Snooze until: 30m, 2h, 1d, tomorrow, an ISO time, or "off" to wake it.'),
+        snooze: z.string().optional().describe('Snooze until: 30m, 2h, 1d, tomorrow, an ISO time, "restart" (until the runner next starts), or "off" to wake it.'),
         archived: z.boolean().optional().describe('true to archive, false to bring back to the inbox.'),
       },
       handle(({ threadId, id: alias, title, model, effort, permissionMode, snooze, archived }) => {
@@ -365,7 +365,10 @@ export function buildThreadbareTools(control: ThreadControl, selfId: string, now
         if (model !== undefined) upd.model = model;
         if (effort !== undefined) upd.effort = effort;
         if (permissionMode !== undefined) upd.permissionMode = permissionMode;
-        if (snooze !== undefined) upd.snoozedUntil = snooze.trim().toLowerCase() === 'off' ? null : parseWhen(snooze, now());
+        if (snooze !== undefined) {
+          const word = snooze.trim().toLowerCase();
+          upd.snoozedUntil = word === 'off' ? null : word === 'restart' ? 'restart' : parseWhen(snooze, now());
+        }
         if (archived !== undefined) upd.archived = archived;
         return describe(control.update(upd).thread);
       }),
@@ -417,6 +420,10 @@ export function buildThreadbareTools(control: ThreadControl, selfId: string, now
       { annotations: { destructiveHint: true } },
     ),
   ];
+}
+
+function snoozeEnd(t: ThreadSummary): string {
+  return t.snoozedUntilRestart ? 'the runner restarts' : t.snoozedUntil ?? '';
 }
 
 function clip(text: string, max = 2000): string {

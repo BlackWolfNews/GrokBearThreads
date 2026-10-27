@@ -711,6 +711,22 @@ final class AppModel {
         if selection == threadId { select(next) }
     }
 
+    /// Hibernate until the runner next starts. Offered while a restart is
+    /// waiting for threads: one that's holding it up can go away now (its
+    /// turn stops, so the restart can go ahead) and come back after.
+    func snoozeUntilRestart(_ threadId: String? = nil) {
+        guard let threadId = threadId ?? selection else { return }
+        let next = neighbour(of: threadId)
+        update(threadId, ThreadUpdate(snoozeUntilRestart: true))
+        if selection == threadId { select(next) }
+    }
+
+    /// A runner restart is waiting for threads to finish.
+    var restartPending: Bool {
+        if case .pending = restart.phase { return true }
+        return false
+    }
+
     func unsnooze(_ threadId: String) {
         update(threadId, ThreadUpdate(snoozedUntil: .some(nil)))
     }
