@@ -5,6 +5,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import type {
+  Panel,
   Account,
   AnyEvent,
   ApprovalDecision,
@@ -43,6 +44,7 @@ import { copyImageInto, imageRefFor } from './media.ts';
 import { isDirectory } from './fsutil.ts';
 import { copySessionTranscript } from './transcripts.ts';
 import { approvalTitle } from './threadbare-mcp.ts';
+import { projectPanels, renderPanel, simctlScreenshot, type PanelRender, type Screenshot } from './patches.ts';
 
 export type Notification =
   | { method: 'thread.updated'; params: { thread: ThreadSummary } }
@@ -101,6 +103,10 @@ type Runtime = {
   inProgress: Map<string, InProgressItem>;
   pendingDeltas: Map<string, { type: DeltaType; text: string }>;
   deltaTimer?: TimerHandle;
+  // The folder's panels (patches.ts), looked up again when the folder
+  // changes or PANELS_TTL_MS has passed, so a `convex dev` that has just
+  // written .env.local shows up on the next summary.
+  panels?: { cwd: string; at: number; panels: Panel[] };
 };
 
 type ThreadState = { rec: ThreadRecord; rt: Runtime };
@@ -117,6 +123,10 @@ export type RunnerDeps = {
   // Copies a Claude session's transcript to another folder (transcripts.ts);
   // tests swap it out.
   copyTranscript?: typeof copySessionTranscript;
+  // Takes the Simulator panel's screenshot (patches.ts); tests pass a fake.
+  screenshot?: Screenshot;
+  // Where projectPanels stops looking up the folder tree (the home folder).
+  panelsRoot?: string;
 };
 
 const DELTA_INTERVAL_MS = 33; // at most ~30 delta flushes a second per thread
@@ -128,6 +138,8 @@ const STARTUP_NOTICE_MS = 10 * 60_000;
 // How long a finished background task keeps the thread counted as busy
 // while the CLI gets round to its own turn (usually well under a second).
 const WAKE_GRACE_MS = 15_000;
+// How long a thread's panels are kept before the folder is looked at again.
+const PANELS_TTL_MS = 15_000;
 
 export class Runner {
   private cfg: Config;
@@ -138,6 +150,8 @@ export class Runner {
   private log: Logger;
   private defer: (fn: () => void) => void;
   private copyTranscript: typeof copySessionTranscript;
+  private screenshot: Screenshot;
+  private panelsRoot?: string;
   private threads = new Map<string, ThreadState>();
   private listeners = new Set<(n: Notification) => void>();
   private dirty = new Set<string>();
@@ -152,6 +166,8 @@ export class Runner {
     this.cfg = deps.config;
     this.store = deps.store;
     this.copyTranscript = deps.copyTranscript ?? copySessionTranscript;
+    this.screenshot = deps.screenshot ?? simctlScreenshot;
+    this.panelsRoot = deps.panelsRoot;
     this.adapters = deps.adapters;
     this.accounts = deps.accounts;
     this.clock = deps.clock;
@@ -1568,7 +1584,33 @@ export class Runner {
     if (rec.nativeSessionId && rec.sessionUsed) s.nativeSessionId = rec.nativeSessionId;
     if (rec.contextTokens !== undefined) s.contextTokens = rec.contextTokens;
     if (rec.costUsd !== undefined) s.costUsd = rec.costUsd;
+    const panels = this.panels(st);
+    if (panels.length) s.panels = panels;
     return s;
+  }
+
+  // The thread's panels, from its folder (see Runtime.panels).
+  private panels(st: ThreadState): Panel[] {
+    const { rec, rt } = st;
+    const now = this.clock.now();
+    if (!rt.panels || rt.panels.cwd !== rec.cwd || now - rt.panels.at > PANELS_TTL_MS) {
+      let panels: Panel[] = [];
+      try {
+        panels = projectPanels(rec.cwd, this.panelsRoot);
+      } catch (e) {
+        this.log.warn('could not read the folder for panels', { threadId: rec.id, cwd: rec.cwd, error: String(e) });
+      }
+      rt.panels = { cwd: rec.cwd, at: now, panels };
+    }
+    return rt.panels.panels;
+  }
+
+  // Draws an image panel (the Simulator's screenshot) for `panels.render`.
+  async renderPanel(threadId: string, panelId: string): Promise<PanelRender> {
+    const st = this.mustGet(threadId);
+    const panel = this.panels(st).find((p) => p.id === panelId);
+    if (!panel) throw new RpcError(ErrorCode.badParams, `This thread has no panel called ${panelId}`);
+    return renderPanel(panel, paths.panels(this.cfg.home, threadId), this.screenshot);
   }
 
   // A thread by full id or unique prefix, for titles; undefined if unclear.

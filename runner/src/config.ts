@@ -128,6 +128,7 @@ export const paths = {
   thread: (home: string, id: string) => path.join(home, 'threads', id),
   media: (home: string, id: string) => path.join(home, 'threads', id, 'media'),
   blobs: (home: string, id: string) => path.join(home, 'threads', id, 'blobs'),
+  panels: (home: string, id: string) => path.join(home, 'threads', id, 'panels'),
   inbox: (home: string) => path.join(home, 'inbox'),
   run: (home: string) => path.join(home, 'run'),
 };

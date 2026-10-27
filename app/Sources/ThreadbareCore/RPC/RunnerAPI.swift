@@ -36,6 +36,12 @@ public extension RPCClient {
         return try await call("threads.send", .object(params), as: TurnResult.self).turnId
     }
 
+    /// Draws an image panel (the Simulator's screenshot). Slow: it waits
+    /// for simctl.
+    func renderPanel(threadId: String, panelId: String) async throws -> PanelRender {
+        try await call("panels.render", .object(["threadId": .string(threadId), "panelId": .string(panelId)]), as: PanelRender.self, timeout: .seconds(30))
+    }
+
     func interrupt(threadId: String) async throws {
         _ = try await call("threads.interrupt", .object(["threadId": .string(threadId)]), as: EmptyResult.self)
     }

@@ -61,6 +61,19 @@ export type ThreadSummary = {
   nativeSessionId?: string;
   contextTokens?: number;
   costUsd?: number;
+  panels?: Panel[]; // absent when the folder has none
+};
+
+// A panel a patch gives a thread (docs/protocol.md, "Panels"). The runner
+// works them out from the thread's folder; nothing is persisted.
+export type PanelKind = 'url' | 'image';
+export type Panel = {
+  id: string; // unique within the thread, e.g. "convex.dashboard"
+  title: string; // the tab's label
+  kind: PanelKind;
+  url?: string; // kind "url": what the panel shows and what Open in browser opens
+  patch: string; // the patch it came from: "convex", "xcode"
+  note?: string; // one line about it: the deployment name, the booted device
 };
 
 export type ImageRef = {

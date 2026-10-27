@@ -56,6 +56,17 @@ final class AppModel {
     /// A sidebar row drawn as if the pointer were over it, so the screenshot
     /// run can show the hover buttons without moving the mouse.
     var hoverOverride: String?
+    /// The pane beside the transcript (PanelsView). Shown for any thread
+    /// with panels unless Mike has hidden it; which panel is showing is
+    /// remembered per thread for the session.
+    var panelsShown = UserDefaults.standard.object(forKey: AppModel.panelsShownKey) as? Bool ?? true {
+        didSet { UserDefaults.standard.set(panelsShown, forKey: Self.panelsShownKey) }
+    }
+    var panelWidth: CGFloat = {
+        let saved = UserDefaults.standard.double(forKey: AppModel.panelWidthKey)
+        return saved > 0 ? CGFloat(saved) : CGFloat(PanelChoice.defaultWidth)
+    }()
+    var panelChoice: [String: String] = [:]
     /// The automation hook's `focus`: a scripted app is never in front, so
     /// it never marked anything read; with this it acts as if Mike were
     /// looking at it. Never set outside a scripted debug run.
@@ -87,6 +98,8 @@ final class AppModel {
 
     static let maxSessions = 24
     static let lastAccountKey = "lastAccountId"
+    static let panelsShownKey = "panelsShown"
+    static let panelWidthKey = "panelWidth"
     /// The account threads aren't labelled with. Fixed, unlike the runner's
     /// `defaults.accountId` (the last one used), so labels don't move about.
     static let mainAccountId = "claude-main"
@@ -682,6 +695,42 @@ final class AppModel {
     func copyToPasteboard(_ text: String) {
         pasteboard.clearContents()
         pasteboard.setString(text, forType: .string)
+    }
+
+    // MARK: Panels
+
+    /// Whether the pane is beside this thread's transcript.
+    func showsPanels(for thread: ThreadSummary) -> Bool { panelsShown && !thread.panels.isEmpty }
+
+    func activePanel(for thread: ThreadSummary) -> Panel? {
+        PanelChoice.active(in: thread.panels, remembered: panelChoice[thread.id])
+    }
+
+    func choosePanel(_ panelId: String, in threadId: String) {
+        panelChoice[threadId] = panelId
+        panelsShown = true
+    }
+
+    func togglePanels() { panelsShown.toggle() }
+
+    func setPanelWidth(_ width: CGFloat, columnWidth: CGFloat) {
+        panelWidth = CGFloat(PanelChoice.clampedWidth(Double(width), paneColumnWidth: Double(columnWidth)))
+    }
+
+    func savePanelWidth() {
+        UserDefaults.standard.set(Double(panelWidth), forKey: Self.panelWidthKey)
+    }
+
+    /// An image panel's latest picture, or nil when the runner can't be
+    /// asked (not connected, an old runner).
+    func renderPanel(threadId: String, panelId: String) async -> PanelRender? {
+        guard let client else { return nil }
+        do {
+            return try await client.renderPanel(threadId: threadId, panelId: panelId)
+        } catch {
+            AppLog.write("panels", "render \(panelId) failed: \(error)")
+            return PanelRender(note: "Couldn't get a picture from the runner.")
+        }
     }
 }
 

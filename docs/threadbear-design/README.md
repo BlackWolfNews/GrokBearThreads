@@ -164,7 +164,14 @@ it's where the patches stack from.
    `mascot-a` (`app/icons/make-icon.swift` cuts it out of the tile).
 2. **Panels from a manifest.** The panel bar, web view panels, built-in
    Convex (dashboard URL) and xcode (Simulator screenshot) patches. The
-   Convex dashboard alone pays for it. A day or two.
+   Convex dashboard alone pays for it. A day or two. Landed 2026-10-27:
+   the runner's `patches.ts` gives a thread its panels in the summary
+   (`panels`), the app shows them in a pane on the right with tabs along
+   the top, an Open in browser arrow and a draggable width; the Convex
+   panel is the real dashboard for the deployment in `.env.local`, the
+   Simulator panel asks the runner for a fresh screenshot every few
+   seconds (`panels.render`). Panels are built in for now; the project's
+   own patch files are step 3.
 3. **Actions and the patch loader.** `.threadbear/patches/*.ts` loaded
    by the runner, action chips, the stitched "New patch" card, the
    Patches tab. This is the scenario 2 moment. Two days.

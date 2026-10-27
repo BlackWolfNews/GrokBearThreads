@@ -261,6 +261,24 @@ enum Automation {
             guard let id = target.id else { return target.error }
             app.snooze(id, until: Date().addingTimeInterval(number(c["seconds"]) ?? 3600))
             return "ok \(id)"
+        case "panel":
+            // {"cmd":"panel","id":"convex.dashboard"} shows that panel of the
+            // selected thread; {"cmd":"panel","show":false} hides the pane,
+            // {"cmd":"panel","show":true} shows it; {"cmd":"panel"} toggles.
+            guard let thread = app.selectedThread else { return "error no thread selected" }
+            if let id = c["id"] as? String {
+                guard thread.panels.contains(where: { $0.id == id }) else {
+                    return "error no panel \(id); this thread has \(thread.panels.map(\.id).joined(separator: ", "))"
+                }
+                app.choosePanel(id, in: thread.id)
+            } else if let show = c["show"] as? Bool {
+                app.panelsShown = show
+            } else {
+                app.togglePanels()
+            }
+            // A beat for the pane (and a web view) to appear.
+            try? await Task.sleep(for: .milliseconds(200))
+            return "ok \(app.showsPanels(for: thread) ? "showing \(app.activePanel(for: thread)?.id ?? "nothing")" : "hidden")"
         case "mode":
             switch c["mode"] as? String {
             case "archive": app.showArchive()

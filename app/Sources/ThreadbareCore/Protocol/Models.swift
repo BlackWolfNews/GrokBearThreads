@@ -106,6 +106,64 @@ public struct ImageRef: Sendable, Hashable, Codable {
     }
 }
 
+/// A panel a patch gives a thread: a page or picture shown beside the
+/// transcript (docs/protocol.md, "Panels"). The runner works them out from
+/// the thread's folder.
+public struct Panel: Sendable, Hashable, Codable, Identifiable {
+    public enum Kind: String, Sendable, Hashable, Codable {
+        case url, image
+
+        public init(from decoder: Decoder) throws {
+            let raw = try decoder.singleValueContainer().decode(String.self)
+            self = Kind(rawValue: raw) ?? .url
+        }
+    }
+
+    public var id: String
+    public var title: String
+    public var kind: Kind
+    /// What a `url` panel shows, and what Open in browser opens.
+    public var url: String?
+    /// The patch it came from: "convex", "xcode".
+    public var patch: String
+    /// One line about it: the deployment, the project.
+    public var note: String?
+
+    public init(id: String, title: String, kind: Kind = .url, url: String? = nil, patch: String = "", note: String? = nil) {
+        self.id = id
+        self.title = title
+        self.kind = kind
+        self.url = url
+        self.patch = patch
+        self.note = note
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(String.self, forKey: .id)
+        title = try c.decodeIfPresent(String.self, forKey: .title) ?? id
+        kind = try c.decodeIfPresent(Kind.self, forKey: .kind) ?? .url
+        url = try c.decodeIfPresent(String.self, forKey: .url)
+        patch = try c.decodeIfPresent(String.self, forKey: .patch) ?? ""
+        note = try c.decodeIfPresent(String.self, forKey: .note)
+    }
+
+    /// The page as a URL, when it is one.
+    public var pageURL: URL? { url.flatMap(URL.init(string:)) }
+}
+
+/// What `panels.render` gives back for an image panel: the picture, or a
+/// note saying why there isn't one.
+public struct PanelRender: Sendable, Hashable, Decodable {
+    public var image: ImageRef?
+    public var note: String?
+
+    public init(image: ImageRef? = nil, note: String? = nil) {
+        self.image = image
+        self.note = note
+    }
+}
+
 public struct ThreadSummary: Sendable, Hashable, Codable, Identifiable {
     public var id: String
     public var title: String
@@ -133,6 +191,8 @@ public struct ThreadSummary: Sendable, Hashable, Codable, Identifiable {
     public var nativeSessionId: String?
     public var contextTokens: Int?
     public var costUsd: Double?
+    /// Panels from the folder's patches; empty for most threads.
+    public var panels: [Panel]
 
     public init(
         id: String, title: String, cwd: String = "~/dev/me/misc", accountId: String = "claude-main",
@@ -142,7 +202,7 @@ public struct ThreadSummary: Sendable, Hashable, Codable, Identifiable {
         snoozedUntil: Date? = nil, archivedAt: Date? = nil, preview: String = "",
         lastSeq: Int = 0, lastSeenSeq: Int = 0, nativeSessionId: String? = nil,
         contextTokens: Int? = nil, costUsd: Double? = nil,
-        effort: String? = nil, modelInUse: String? = nil, effortInUse: String? = nil
+        effort: String? = nil, modelInUse: String? = nil, effortInUse: String? = nil, panels: [Panel] = []
     ) {
         self.id = id
         self.title = title
@@ -168,6 +228,7 @@ public struct ThreadSummary: Sendable, Hashable, Codable, Identifiable {
         self.nativeSessionId = nativeSessionId
         self.contextTokens = contextTokens
         self.costUsd = costUsd
+        self.panels = panels
     }
 
     public init(from decoder: Decoder) throws {
@@ -201,6 +262,7 @@ public struct ThreadSummary: Sendable, Hashable, Codable, Identifiable {
         nativeSessionId = try c.decodeIfPresent(String.self, forKey: .nativeSessionId)
         contextTokens = try c.decodeIfPresent(Double.self, forKey: .contextTokens).map { Int($0) }
         costUsd = try c.decodeIfPresent(Double.self, forKey: .costUsd)
+        panels = c.lossyArray(Panel.self, forKey: .panels)
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -229,12 +291,13 @@ public struct ThreadSummary: Sendable, Hashable, Codable, Identifiable {
         try c.encodeIfPresent(nativeSessionId, forKey: .nativeSessionId)
         try c.encodeIfPresent(contextTokens, forKey: .contextTokens)
         try c.encodeIfPresent(costUsd, forKey: .costUsd)
+        if !panels.isEmpty { try c.encode(panels, forKey: .panels) }
     }
 
     enum CodingKeys: String, CodingKey {
         case id, title, cwd, accountId, provider, model, effort, modelInUse, effortInUse, permissionMode, status, live, needsYou
         case createdAt, updatedAt, lastActivityAt, snoozedUntil, archivedAt, preview
-        case lastSeq, lastSeenSeq, nativeSessionId, contextTokens, costUsd
+        case lastSeq, lastSeenSeq, nativeSessionId, contextTokens, costUsd, panels
     }
 
     public var isArchived: Bool { archivedAt != nil }

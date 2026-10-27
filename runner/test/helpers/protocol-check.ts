@@ -154,11 +154,26 @@ export function checkSummary(t: Obj): string[] {
   for (const k of ['model', 'modelInUse', 'snoozedUntil', 'archivedAt', 'nativeSessionId']) if (t[k] !== undefined && !isStr(t[k])) problems.push(k);
   for (const k of ['effort', 'effortInUse']) if (t[k] !== undefined && !EFFORTS.includes(t[k])) problems.push(k);
   for (const k of ['contextTokens', 'costUsd']) if (t[k] !== undefined && !isNum(t[k])) problems.push(k);
+  if (t.panels !== undefined) {
+    if (!Array.isArray(t.panels) || t.panels.length === 0) problems.push('panels (absent when empty)');
+    else for (const p of t.panels) problems.push(...checkPanel(p).map((x) => `panels: ${x}`));
+  }
   const allowed = new Set([
     'id', 'title', 'cwd', 'accountId', 'provider', 'model', 'permissionMode', 'status', 'live', 'needsYou', 'createdAt', 'updatedAt',
     'lastActivityAt', 'snoozedUntil', 'archivedAt', 'preview', 'lastSeq', 'lastSeenSeq', 'nativeSessionId', 'contextTokens', 'costUsd',
-    'effort', 'modelInUse', 'effortInUse',
+    'effort', 'modelInUse', 'effortInUse', 'panels',
   ]);
   for (const k of Object.keys(t)) if (!allowed.has(k)) problems.push(`unexpected field ${k}`);
+  return problems;
+}
+
+export function checkPanel(p: Obj): string[] {
+  const problems: string[] = [];
+  for (const k of ['id', 'title', 'patch']) if (!isStr(p[k])) problems.push(k);
+  if (p.kind !== 'url' && p.kind !== 'image') problems.push('kind');
+  if (p.kind === 'url' && !isStr(p.url)) problems.push('url (required for kind url)');
+  for (const k of ['url', 'note']) if (p[k] !== undefined && !isStr(p[k])) problems.push(k);
+  const allowed = new Set(['id', 'title', 'kind', 'url', 'patch', 'note']);
+  for (const k of Object.keys(p)) if (!allowed.has(k)) problems.push(`unexpected field ${k}`);
   return problems;
 }

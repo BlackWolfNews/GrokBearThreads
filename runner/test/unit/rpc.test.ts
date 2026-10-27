@@ -194,3 +194,34 @@ test('close does not wait long for a client that never answers the close', async
   (silent as any).ws._socket.resume();
   await silent.waitClosed();
 });
+
+test('panels.render answers after the screenshot, with an image or a note; unknown panels are bad params', async () => {
+  const root = (await import('../helpers/fakes.ts')).tmpDir();
+  const project = `${root}/Walkies`;
+  const fs = await import('node:fs');
+  fs.mkdirSync(`${project}/Walkies.xcodeproj`, { recursive: true });
+  let shots = 0;
+  const h = makeHarness(undefined, {}, {
+    panelsRoot: root,
+    screenshot: async (file: string) => {
+      shots++;
+      if (shots > 1) throw new Error('No devices are booted.');
+      fs.writeFileSync(file, (await import('../helpers/png.ts')).makePng(20, 10));
+    },
+  });
+  const server = new RpcServer({ host: '127.0.0.1', port: 0, token: TOKEN, runner: h.runner, log: nullLogger });
+  const { port } = await server.listen();
+  const c = await RunnerClient.connect(`ws://127.0.0.1:${port}/rpc`, TOKEN);
+  const { thread } = await c.call('threads.create', { text: 'hi', cwd: project });
+  assert.deepEqual(thread.panels.map((p: { id: string }) => p.id), ['xcode.simulator']);
+  const first = await c.call('panels.render', { threadId: thread.id, panelId: 'xcode.simulator' });
+  assert.equal(first.image.width, 20);
+  assert.equal(first.note, undefined);
+  const second = await c.call('panels.render', { threadId: thread.id, panelId: 'xcode.simulator' });
+  assert.equal(second.image, undefined);
+  assert.match(second.note, /No simulator is booted/);
+  await assert.rejects(c.call('panels.render', { threadId: thread.id, panelId: 'nope' }), (e: { code: number }) => e.code === -32602);
+  await assert.rejects(c.call('panels.render', { threadId: 'missing', panelId: 'nope' }), (e: { code: number }) => e.code === -32004);
+  c.close();
+  await server.close();
+});

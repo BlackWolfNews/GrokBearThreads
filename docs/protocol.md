@@ -74,6 +74,16 @@ type ThreadSummary = {
   nativeSessionId?: string
   contextTokens?: number
   costUsd?: number      // total for the thread so far, if known
+  panels?: Panel[]      // from the folder's patches (see Panels); absent when there are none
+}
+
+type Panel = {
+  id: string            // unique within the thread: "convex.dashboard", "xcode.simulator"
+  title: string         // the tab's label
+  kind: "url" | "image" // a page in a web view, or a picture the runner draws on request
+  url?: string          // kind "url": the page; also what Open in browser opens
+  patch: string         // the patch it came from: "convex", "xcode"
+  note?: string         // one line about it: the deployment, the project
 }
 
 type ImageRef = {
@@ -148,6 +158,7 @@ replaces whatever the deltas built up.
 | `threads.markSeen` | `{ threadId, seq }` | `{ thread: ThreadSummary }` |
 | `approvals.respond` | `{ threadId, approvalId, decision: "allow" \| "allowAlways" \| "deny" \| "answered", message?: string, answers?: Record<string, string> }` | `{}`. `allowAlways` allows matching requests for the rest of this thread only; it never changes the thread's permission mode or saves anything in the project. With `answered`, the app sends the chosen answers in one line as `message` too: the runner keeps it in `approval.resolved` (only `answers` goes to the CLI), so the transcript can show what was chosen |
 | `media.import` | `{ path: string }` | `{ image: ImageRef }` copies a file into `inbox/` and reads its size |
+| `panels.render` | `{ threadId, panelId }` | `{ image?: ImageRef, note?: string }` draws an `image` panel now: for `xcode.simulator`, a screenshot of the booted simulator (`xcrun simctl io booted screenshot`), written to the same file each time under the thread's `panels/`. With no device booted (or another failure) there's only `note`. Slow: it waits for the screenshot. `-32602` for a panel the thread doesn't have |
 | `runner.status` | `{}` | `{ version, release?, branch?, pid, startedAt, home, logFile, liveClis, running: string[], background: { threadId, tasks: string[] }[], pendingRestart?: { when, reason?, release?, resumeThreadId?, requestedAt, backgroundUntil?, waitingFor: string[] }, rolledBack?: { from, at }, update?: { state, checkout?, reason?, checkedAt?, commit?, release?, logFile? } }`. `running` lists the threads that are starting, running or waiting on an approval or a question; `background` the threads whose CLI is still running background shells or subagents (`tasks` describes each). A restart waits for both. `branch` is the branch the release was built from. `rolledBack` is set when this release is running because `launch.mjs` went back to it from `from`, which kept crashing at startup (and nobody has activated it on purpose since). `update` is the runner following main by itself (docs/dev-tools.md): `state` is `off` (`reason` says why), `idle`, `checking`, `building`, `waiting` (`release` is built and starts on the pending restart) or `failed` (`reason` is the error; `logFile` has the build's output); `commit` is main's tip at the last check (`checkedAt`) |
 | `runner.restart` | `{ when?: "idle" \| "now", resume?: { threadId, text }, reason?: string, release?: string, backgroundWaitMs?: number, cancel?: boolean }` | `{ scheduled: boolean, waitingFor: string[], background?: { threadId, tasks: string[] }[], note?: string, noResume?: string }`. See Restarts below. `scheduled` is true once the restart is saved; an empty `waitingFor` means it is happening now. `background` is the background work among `waitingFor`. `release` is the release the restart should come back on (the deploy script sets it). `backgroundWaitMs` limits how long background shells and subagents hold the restart. `cancel: true` withdraws a pending restart that hasn't begun and returns `scheduled: false` (`-32020` once it has begun), with a `note` when it also put `current` back. `noResume` says why the `resume` won't be sent as things stand (the thread has already been resumed 3 times in the last hour), so whoever asked can say so rather than wait for it. A runner older than this answers `-32601` |
 
@@ -233,6 +244,28 @@ found, `-32010` account not found, `-32020` busy (e.g. two sends racing),
   kept crashing at startup says so with a `warning` notice at startup and
   after every `hello` ("Release X kept crashing at startup, so the runner
   went back to Y.").
+
+## Panels
+
+A thread's folder can give it panels: things shown beside the transcript
+(docs/threadbear-design/README.md). The runner works them out from the
+folder (`src/patches.ts`), nothing is stored, and they come in the
+summary's `panels`, so a client learns of them like any other change. The
+runner looks at the folder again when it changes and otherwise every 15
+seconds at most, on the next summary it sends, so a `.env.local` that
+`convex dev` has just written shows up soon after.
+
+Built-in patches, found by walking up from the thread's folder to the home
+folder (so a thread in a package of a monorepo gets the project's panels):
+
+| patch | when | panel |
+|---|---|---|
+| `convex` | a folder with `convex/` | `convex.dashboard`, a `url` panel: `https://dashboard.convex.dev/d/<name>` for the `CONVEX_DEPLOYMENT` in `.env.local` (then `.env`), `http://127.0.0.1:6790` for an anonymous local deployment, the dashboard's front page with no deployment yet. Only that one line of the file is read |
+| `xcode` | a folder with an `.xcodeproj` or `.xcworkspace` | `xcode.simulator`, an `image` panel drawn by `panels.render` |
+
+A client shows what it can: a `url` panel in a web view, an `image` panel
+by asking `panels.render` now and then while it's on screen, and an
+unknown `kind` as a page if it has a `url`.
 
 ## Ordering and reconnects
 

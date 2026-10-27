@@ -64,6 +64,7 @@ const defaults = { cwd: '/Users/mike/dev/me/misc', accountId: 'claude-main' };
 const threads = new Map();
 loadFixtures();
 addFillers(fillerCount);
+addDemoPanels();
 
 const token = crypto.randomBytes(24).toString('hex');
 fs.mkdirSync(path.join(dataDir, 'secrets'), { recursive: true });
@@ -256,6 +257,16 @@ async function dispatch(client, method, p) {
         setStatus(t.summary.id, 'idle');
       }
       return {};
+    }
+    case 'panels.render': {
+      // The Simulator panel's picture: a fixture image, as if simctl took it.
+      const t = need(p.threadId);
+      const panel = (t.summary.panels ?? []).find((x) => x.id === p.panelId);
+      if (!panel) throw rpcError(-32602, `This thread has no panel called ${p.panelId}`);
+      if (panel.kind !== 'image') return { note: 'This panel has nothing to render.' };
+      const file = path.join(here, 'fixtures/demo-upload-resume/media/progress-after.png');
+      await new Promise((r) => setTimeout(r, 300));
+      return { image: { path: file, mediaType: 'image/png', ...imageSize(file) } };
     }
     case 'media.import': {
       const source = String(p.path ?? '');
@@ -608,6 +619,38 @@ function shiftToNow(loaded) {
   for (const t of loaded) {
     for (const k of TIME_FIELDS) if (t.summary[k] !== undefined) t.summary[k] = move(t.summary[k]);
     for (const e of t.events) e.ts = move(e.ts);
+  }
+}
+
+// Two demo threads get panels, as the real runner gives a thread in a
+// Convex or Xcode project: a page (a small one of our own, so screenshots
+// need no network or login) and the Simulator picture.
+function addDemoPanels() {
+  const page = `<!doctype html><meta charset="utf-8"><title>Convex dashboard</title>
+<style>body{margin:0;font:13px -apple-system,system-ui;background:#1b1b1d;color:#d8d8dc;display:flex;height:100vh}
+nav{width:150px;border-right:1px solid #2b2b2e;padding:14px 0}nav div{padding:6px 16px;color:#9a9aa0}nav .on{background:#28282b;color:#e8e8ec;border-radius:6px;margin:0 8px;padding:6px 8px}
+main{flex:1;padding:16px 18px}h1{font-size:14px;margin:0 0 12px;display:flex;gap:8px;align-items:center}
+.tag{font-size:11px;color:#9a9aa0;border:1px solid #39393d;border-radius:10px;padding:1px 7px;font-weight:400}
+table{border-collapse:collapse;font:12px ui-monospace,Menlo,monospace;color:#c8c8cc}td,th{text-align:left;padding:4px 10px 4px 0;border-bottom:1px solid #2b2b2e}th{color:#8a8a90;font-weight:500}
+p{color:#8a8a90;font-size:12px;line-height:1.5;margin-top:18px}
+@media (prefers-color-scheme: light){body{background:#fff;color:#222}nav{border-color:#e6e6e8}nav div{color:#666}nav .on{background:#f0f0f2;color:#111}table{color:#333}td,th{border-color:#ececef}th,p,.tag{color:#777}.tag{border-color:#ddd}}</style>
+<nav><div>dashboard</div><div>notes</div><div>scratchpad</div><div>snapshots</div><div class="on">usage</div><div>videos</div></nav>
+<main><h1>usage <span class="tag">dev</span><span class="tag">1 document</span></h1>
+<table><tr><th>_id</th><th>month</th><th>spendUsd</th><th>limitUsd</th></tr><tr><td>j57c…9m2</td><td>"2026-10"</td><td>41.8</td><td>80</td></tr></table>
+<p>The mock runner's stand-in for the Convex dashboard. A real thread in a Convex project gets dashboard.convex.dev for its deployment here.</p></main>`;
+  const convex = threads.get('demo_dark_mode');
+  if (convex) {
+    convex.summary.panels = [{
+      id: 'convex.dashboard', title: 'Convex', kind: 'url', patch: 'convex',
+      url: 'data:text/html;charset=utf-8,' + encodeURIComponent(page), note: 'happy-otter-123 (dev)',
+    }];
+  }
+  const ios = threads.get('demo_button_colour');
+  if (ios) {
+    ios.summary.panels = [
+      { id: 'xcode.simulator', title: 'Simulator', kind: 'image', patch: 'xcode', note: 'Walkies' },
+      { id: 'convex.dashboard', title: 'Convex', kind: 'url', patch: 'convex', url: 'data:text/html;charset=utf-8,' + encodeURIComponent(page), note: 'walkies-dev (dev)' },
+    ];
   }
 }
 

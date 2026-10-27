@@ -113,8 +113,24 @@ struct AppDump: Encodable {
     var window: Window?
     var sidebar: Sidebar
     var selection: Thread?
+    /// The selected thread's panels and the pane (PanelsView).
+    var panels: Panels?
     var composer: Composer
     var transcript: Transcript?
+
+    struct Panels: Codable {
+        struct Item: Codable {
+            var id: String
+            var title: String
+            var kind: String
+            var url: String?
+            var note: String?
+            var active: Bool
+        }
+        var shown: Bool
+        var width: Int
+        var items: [Item]
+    }
 
     static func connectionName(_ state: ConnectionState) -> String {
         switch state {
@@ -178,9 +194,19 @@ struct AppDump: Encodable {
             sidebar: Sidebar(mode: String(describing: app.sidebarMode), sections: sections,
                              snoozed: ThreadSections.snoozed(app.threads.values, now: now).count, archived: app.archivedCount),
             selection: app.selectedThread.map { thread($0) },
+            panels: app.selectedThread.flatMap { panels($0, app: app) },
             composer: composer(app, key: key),
             transcript: transcript
         )
+    }
+
+    @MainActor
+    private static func panels(_ thread: ThreadSummary, app: AppModel) -> Panels? {
+        guard !thread.panels.isEmpty else { return nil }
+        let active = app.activePanel(for: thread)?.id
+        return Panels(shown: app.showsPanels(for: thread), width: Int(app.panelWidth), items: thread.panels.map {
+            Panels.Item(id: $0.id, title: $0.title, kind: $0.kind.rawValue, url: $0.url, note: $0.note, active: $0.id == active)
+        })
     }
 
     @MainActor
@@ -253,6 +279,17 @@ struct AppDump: Encodable {
             lines.append("selection: \(selection.id) \"\(selection.title)\" (\(selection.status))")
         } else {
             lines.append("selection: none (new thread)")
+        }
+        if let panels {
+            let items = panels.items.map { item in
+                var text = item.title + (item.active ? "*" : "") + " (\(item.kind)"
+                // A data: URL (the mock's page) is thousands of characters.
+                if let url = item.url { text += " " + (url.count > 80 ? String(url.prefix(77)) + "…" : url) }
+                text += ")"
+                if let note = item.note { text += " \"\(note)\"" }
+                return text
+            }
+            lines.append("panels (\(panels.shown ? "shown, \(panels.width) wide" : "hidden")): " + items.joined(separator: ", "))
         }
         lines.append("composer (\(composer.draft)): \"\(composer.text)\"" + (composer.images > 0 ? " and \(composer.images) image(s)" : ""))
         lines.append("  \(composer.draft == "new" ? "starts" : "runs") in \(composer.cwd) on \(composer.account), model \(composer.model), "

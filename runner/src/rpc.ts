@@ -197,6 +197,25 @@ export class RpcServer {
       this.opts.log.error('request failed', { method: msg.method, error: String(e) });
       return this.send(conn, { jsonrpc: '2.0', id, error: { code: ErrorCode.other, message: (e as Error)?.message ?? String(e) } });
     }
+    // A handler that has to wait (panels.render takes a screenshot) returns
+    // a promise; everything else answers in this tick.
+    if (result instanceof Promise) {
+      result.then(
+        (value) => {
+          if (id !== null) this.send(conn, { jsonrpc: '2.0', id, result: value });
+        },
+        (e) => {
+          if (id === null) return;
+          if (e instanceof RpcError) {
+            this.send(conn, { jsonrpc: '2.0', id, error: { code: e.code, message: e.message, ...(e.data ? { data: e.data } : {}) } });
+          } else {
+            this.opts.log.error('request failed', { method: msg.method, error: String(e) });
+            this.send(conn, { jsonrpc: '2.0', id, error: { code: ErrorCode.other, message: (e as Error)?.message ?? String(e) } });
+          }
+        },
+      );
+      return;
+    }
     if (id !== null) this.send(conn, { jsonrpc: '2.0', id, result });
     // Things the app should know about that happened before it connected
     // (a missing claude binary, CLIs stopped at startup).
@@ -298,6 +317,8 @@ export class RpcServer {
       }
       case 'media.import':
         return r.importMedia(reqString(p, 'path'));
+      case 'panels.render':
+        return r.renderPanel(reqString(p, 'threadId'), reqString(p, 'panelId'));
       default: {
         // hasOwn, so "constructor" and friends aren't methods.
         const methods = this.opts.methods;

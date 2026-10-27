@@ -64,6 +64,12 @@ struct ThreadbareApp: App {
                 Button("Default Text Size") { zoom.reset() }
                     .keyboardShortcut("0")
                     .disabled(zoom.isDefault)
+                Divider()
+                // The panels pane beside the transcript, for threads whose
+                // folder has any (PanelsView).
+                Button(app.panelsShown ? "Hide Panels" : "Show Panels") { app.togglePanels() }
+                    .keyboardShortcut("p", modifiers: [.command, .option])
+                    .disabled(app.selectedThread?.panels.isEmpty != false)
             }
             CommandMenu("Thread") {
                 Button(app.selectedThread?.isArchived == true ? "Unarchive" : "Archive") { app.toggleArchive() }

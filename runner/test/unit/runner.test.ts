@@ -1051,3 +1051,28 @@ test('blank folders, search limit 0 and startup notices', () => {
   h2.clock.advance(11 * MIN);
   assert.ok(!h2.runner.noticesForNewClient().some((n) => /mid-turn/.test(n.message)));
 });
+
+test('a thread in a Convex project has the dashboard panel; a folder change refreshes them', () => {
+  const root = tmpDir();
+  const project = path.join(root, 'app');
+  fs.mkdirSync(path.join(project, 'convex'), { recursive: true });
+  fs.writeFileSync(path.join(project, '.env.local'), 'CONVEX_DEPLOYMENT=dev:quick-fox-77\n');
+  const plain = path.join(root, 'plain');
+  fs.mkdirSync(plain);
+  const h = makeHarness(undefined, {}, { panelsRoot: root });
+  const { thread } = create(h, { cwd: project });
+  assert.deepEqual(checkSummary(thread), []);
+  assert.deepEqual(thread.panels, [
+    { id: 'convex.dashboard', title: 'Convex', kind: 'url', url: 'https://dashboard.convex.dev/d/quick-fox-77', patch: 'convex', note: 'quick-fox-77 (dev)' },
+  ]);
+  // The folder is read again only now and then, unless the folder changes.
+  fs.rmSync(path.join(project, 'convex'), { recursive: true });
+  assert.equal(h.runner.get(thread.id).panels?.length, 1, 'still cached');
+  h.clock.advance(16_000);
+  assert.equal(h.runner.get(thread.id).panels, undefined, 'gone after the TTL');
+  fs.mkdirSync(path.join(project, 'convex'));
+  const moved = h.runner.update({ threadId: thread.id, cwd: plain }).thread;
+  assert.equal(moved.panels, undefined);
+  const back = h.runner.update({ threadId: thread.id, cwd: project }).thread;
+  assert.equal(back.panels?.[0].id, 'convex.dashboard');
+});
