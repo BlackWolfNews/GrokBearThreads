@@ -432,7 +432,7 @@ struct RowIconButtonStyle: ButtonStyle {
 }
 
 /// A full-width sidebar row that does one thing: New thread at the top,
-/// Hibernating and Archive at the bottom.
+/// Hibernating, Archive, Scheduled and Settings at the bottom.
 struct SidebarButtonRow: View {
     let icon: String
     /// Drawn instead of the symbol when set (the bear in the footer).
@@ -496,6 +496,7 @@ struct SidebarButtonRow: View {
 
 private struct SidebarFooter: View {
     @Environment(AppModel.self) private var app
+    @Environment(\.openSettings) private var openSettings
 
     var body: some View {
         VStack(spacing: 0) {
@@ -512,6 +513,10 @@ private struct SidebarFooter: View {
                 }
             }
             UsageButton()
+            // The same window as ⌘, without a trip to the menu bar.
+            SidebarButtonRow(icon: "gearshape", title: "Settings", size: TypeScale.sidebarFooter) {
+                openSettings()
+            }
         }
         .padding(.horizontal, SidebarMetrics.outerInset)
         .padding(.top, 6)
