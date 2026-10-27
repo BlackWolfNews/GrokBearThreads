@@ -191,4 +191,22 @@ final class ScheduleTests: XCTestCase {
         XCTAssertFalse(UserMessage(text: "[Scheduled: \"T\", Every hour]").showsAsNote, "Mike typing the header is still Mike")
         XCTAssertNil(UserMessage(text: "[Scheduled: \"T\", Every hour]").scheduledHeader)
     }
+
+    func testStartedByScheduleTip() {
+        let origin = ThreadSchedule(id: "sc1", title: "Quarterly invoice export")
+        let live = Schedule(id: "sc1", title: "Invoices", whenText: "Weekdays at 9:00")
+        XCTAssertEqual(StartedBySchedule.tip(origin, current: live), "Started by a schedule: Quarterly invoice export (Weekdays at 9:00). Click to edit it.")
+        XCTAssertEqual(StartedBySchedule.tip(origin, current: Schedule(id: "sc1", title: "x", whenText: "Every hour", paused: true)),
+                       "Started by a schedule: Quarterly invoice export (paused). Click to edit it.")
+        XCTAssertEqual(StartedBySchedule.tip(origin, current: nil), "Started by a schedule: Quarterly invoice export. It has since been deleted.")
+    }
+
+    func testThreadSummaryScheduleDecodesLeniently() throws {
+        let thread = try JSONDecoder().decode(ThreadSummary.self, from: Data(#"{"id":"t1","title":"x","schedule":{"id":"sc1","title":"Daily brief","later":1}}"#.utf8))
+        XCTAssertEqual(thread.schedule, ThreadSchedule(id: "sc1", title: "Daily brief"))
+        XCTAssertEqual(try JSONDecoder().decode(ThreadSummary.self, from: JSONEncoder().encode(thread)).schedule, thread.schedule)
+        XCTAssertNil(try JSONDecoder().decode(ThreadSummary.self, from: Data(#"{"id":"t1"}"#.utf8)).schedule)
+        // A malformed one is dropped rather than losing the thread.
+        XCTAssertNil(try JSONDecoder().decode(ThreadSummary.self, from: Data(#"{"id":"t1","schedule":"sc1"}"#.utf8)).schedule)
+    }
 }

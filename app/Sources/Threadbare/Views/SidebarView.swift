@@ -400,10 +400,20 @@ struct ThreadRowView: View {
                     }
                 }
                 HStack(alignment: .firstTextBaseline, spacing: zoomed(6)) {
-                    Text(ProjectMark.place(thread, under: heading))
-                        .font(.system(size: TypeScale.sidebarMeta + 1))
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
+                    HStack(alignment: .firstTextBaseline, spacing: zoomed(4)) {
+                        if let origin = thread.schedule {
+                            // A schedule started it, rather than Mike: the
+                            // same clock as the Scheduled view's.
+                            Image(systemName: "clock")
+                                .font(.system(size: TypeScale.sidebarMeta))
+                                .tip(StartedBySchedule.tip(origin, current: app.schedule(origin.id)))
+                                .accessibilityLabel("Scheduled")
+                        }
+                        Text(ProjectMark.place(thread, under: heading))
+                            .font(.system(size: TypeScale.sidebarMeta + 1))
+                            .lineLimit(1)
+                    }
+                    .foregroundStyle(.secondary)
                     Spacer(minLength: zoomed(6))
                     if !showsActions {
                         // A new status ("Working" to "Needs you") blurs

@@ -177,6 +177,9 @@ type ThreadSummary = {
   worktree?: ThreadWorktree // the thread has a git worktree of its own
                         // (see Worktrees). Absent when it doesn't, or once
                         // it was removed
+  schedule?: { id: string, title: string } // the schedule that started the
+                        // thread (see Schedules), with its title as it was
+                        // then. Absent for one a person or agent started
 }
 
 // A thread's own worktree, as its summary shows it (see Worktrees).
@@ -1255,7 +1258,8 @@ kept in `schedules.json` in the data dir.
   turn to end (it doesn't go into it), then starts its own turn. A snoozed
   or archived thread comes back to the inbox, as with any message.
 - **New threads** get the schedule's title and settings and are made the
-  way `threads.create` makes them. A repeating schedule whose last thread is
+  way `threads.create` makes them. Their summary's `schedule` says which
+  schedule started them, so a client can mark them as scheduled. A repeating schedule whose last thread is
   still starting, running or waiting on Mike skips that run
   (`lastRun.outcome: "skipped"`) rather than pile up threads.
 - **Late runs.** The runner checks at least every 30 seconds, so a Mac

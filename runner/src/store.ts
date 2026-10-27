@@ -1,7 +1,7 @@
 import type { HighlightState } from './highlights.ts';
 import fs from 'node:fs';
 import path from 'node:path';
-import type { WaitingForRoom, Ask, NeedsWho, DesignReview, ReviewDraft, EffortLevel, MessageOrigin, PermissionMode, PersistedEvent, Provider, Subagent, ThreadProject, ThreadStatus, ImageRef } from './protocol.ts';
+import type { WaitingForRoom, Ask, NeedsWho, DesignReview, ReviewDraft, EffortLevel, MessageOrigin, PermissionMode, PersistedEvent, Provider, Subagent, ThreadProject, ThreadSchedule, ThreadStatus, ImageRef } from './protocol.ts';
 import { atomicWriteFileSync, readJsonSync } from './fsutil.ts';
 import { paths } from './config.ts';
 import type { WorktreeRecord } from './worktrees.ts';
@@ -91,6 +91,9 @@ export type ThreadRecord = {
   // Made in a repo that asks for worktrees and not told otherwise: the
   // first turn makes one (and runs its setup) before the CLI starts.
   worktreePending?: boolean;
+  // The schedule that started the thread, with its title then (the
+  // schedule may be renamed or deleted later).
+  schedule?: ThreadSchedule;
 };
 
 export type ThreadProjectRecord = Omit<ThreadProject, 'title'>;

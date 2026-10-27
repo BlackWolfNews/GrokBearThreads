@@ -247,6 +247,11 @@ private struct HeaderTitle: View {
                         .layoutPriority(1)
                         .tip("Works on its own branch in a worktree. tb land, or the Land chip, puts it on main in \(worktree.mainCheckout.abbreviatingHome).")
                 }
+                if let origin = thread.schedule {
+                    ScheduleChip(origin: origin)
+                        .padding(.leading, zoomed(4))
+                        .layoutPriority(1)
+                }
                 if app.projectsSupported, !thread.projects.isEmpty {
                     ProjectChips(thread: thread)
                         .padding(.leading, zoomed(4))
@@ -291,6 +296,37 @@ private struct ProjectHeaderTitle: View {
         .font(.system(size: TypeScale.header))
         .lineLimit(1)
         .padding(.leading, zoomed(6))
+    }
+}
+
+/// "Scheduled" after the title of a thread a schedule started, as a chip
+/// like the projects'. A click opens the schedule's editor while the
+/// schedule's still there.
+private struct ScheduleChip: View {
+    @Environment(AppModel.self) private var app
+    let origin: ThreadSchedule
+    @State private var hovering = false
+
+    var body: some View {
+        let current = app.schedule(origin.id)
+        Button { app.editSchedule(origin.id) } label: {
+            HStack(spacing: zoomed(4)) {
+                Image(systemName: "clock")
+                    .accessibilityHidden(true)
+                Text("Scheduled")
+            }
+            .font(.system(size: TypeScale.detail))
+            .foregroundStyle(hovering && current != nil ? .primary : .secondary)
+            .padding(.leading, zoomed(5))
+            .padding(.trailing, zoomed(7))
+            .padding(.vertical, zoomed(2))
+            .background(Color.primary.opacity(hovering && current != nil ? 0.08 : 0.05), in: Capsule())
+            .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .disabled(current == nil)
+        .onHover { hovering = $0 }
+        .tip(StartedBySchedule.tip(origin, current: current))
     }
 }
 
