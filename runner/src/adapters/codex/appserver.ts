@@ -603,25 +603,43 @@ export async function withShortLivedProcess<T>(opts: AppServerOptions, fn: (p: A
 // the merged picture: the account/rateLimits/read taken at start, with each
 // update laid over it. The normaliser turns the merged snapshot into a
 // `limits` reading.
+//
+// The read's reply can arrive after an update that Codex sent later than it
+// took the reading, so a read is applied as of when it was asked for: the
+// updates received since then are laid over it again (mark() before the
+// request, read(r, mark) with the reply).
 export class RateLimitTracker {
+  private seq = 0;
+  private recent: { seq: number; snap: RateLimitSnapshot }[] = [];
   private snapshot: { ordinaryUsageAllowed: boolean | null; rateLimits: RateLimitSnapshot | null; rateLimitsByLimitId: Record<string, RateLimitSnapshot> } = {
     ordinaryUsageAllowed: null,
     rateLimits: null,
     rateLimitsByLimitId: {},
   };
 
-  read(r: GetAccountRateLimitsResponse): GetAccountRateLimitsResponse {
+  // Where the updates stand now, for a read about to be requested.
+  mark(): number {
+    return this.seq;
+  }
+
+  read(r: GetAccountRateLimitsResponse, since = this.seq): GetAccountRateLimitsResponse {
     if (r && typeof r === 'object') {
       if (typeof r.ordinaryUsageAllowed === 'boolean') this.snapshot.ordinaryUsageAllowed = r.ordinaryUsageAllowed;
       for (const [id, snap] of Object.entries(r.rateLimitsByLimitId ?? {})) if (snap) this.merge(snap, id);
       if (r.rateLimits) this.merge(r.rateLimits);
+      // Newer than the reading: put back on top.
+      for (const u of this.recent) if (u.seq > since) this.merge(u.snap);
     }
     return this.current();
   }
 
   update(params: unknown): GetAccountRateLimitsResponse {
     const snap = (params as { rateLimits?: RateLimitSnapshot })?.rateLimits;
-    if (snap && typeof snap === 'object') this.merge(snap);
+    if (snap && typeof snap === 'object') {
+      this.merge(snap);
+      this.recent.push({ seq: ++this.seq, snap });
+      if (this.recent.length > 50) this.recent.shift();
+    }
     return this.current();
   }
 

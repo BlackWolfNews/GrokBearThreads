@@ -115,6 +115,13 @@ test('rate-limit updates are merged into the snapshot read at start', () => {
   const v = t.update({ rateLimits: { limitId: 'codex_other', primary: { usedPercent: 40, windowDurationMins: 300, resetsAt: 60 } } });
   assert.equal(v.rateLimitsByLimitId?.codex_other?.primary?.usedPercent, 40);
   assert.equal(v.rateLimits.primary?.usedPercent, 7, 'the main bucket is untouched');
+  // A read whose reply comes after a newer update doesn't undo it.
+  const raced = new RateLimitTracker();
+  const since = raced.mark();
+  raced.update({ rateLimits: { limitId: 'codex', primary: { usedPercent: 9, windowDurationMins: 10080, resetsAt: 100 }, secondary: null } });
+  const late = raced.read({ ordinaryUsageAllowed: true, rateLimits: { limitId: 'codex', limitName: null, primary: { usedPercent: 5, windowDurationMins: 10080, resetsAt: 100 }, secondary: null, credits: { balance: '1' }, planType: 'prolite', rateLimitReachedType: null } as never, rateLimitsByLimitId: null }, since);
+  assert.equal(late.rateLimits.primary?.usedPercent, 9);
+  assert.deepEqual(late.rateLimits.credits, { balance: '1' }, 'what only the read knows is kept');
   // An update before any read still makes a snapshot.
   const fresh = new RateLimitTracker().update({ rateLimits: { limitId: null, primary: { usedPercent: 3, windowDurationMins: 300, resetsAt: 1 }, secondary: null } });
   assert.equal(fresh.rateLimits.limitId, 'codex');

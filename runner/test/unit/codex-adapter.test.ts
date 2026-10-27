@@ -707,12 +707,19 @@ test('a child whose spawn was missed is found by rootTurnId, or by thread/read',
 test('notifications with no thread id belong to the session; configWarning is a runner notice once', async () => {
   const notices: string[] = [];
   const h = await open({ deps: { onNotice: (t) => notices.push(t) } });
+  // The start-up read is answered by hand, after a newer update (the order
+  // that used to let the older reading win).
+  const readAnswer = h.conn.auto.get('account/rateLimits/read')!;
+  h.conn.auto.delete('account/rateLimits/read');
   h.conn.notify('configWarning', { summary: 'bad key in config.toml', details: 'line 3' });
   await started(h);
+  const read = await h.conn.request('account/rateLimits/read');
   h.conn.notify('warning', { threadId: null, message: 'something' });
   h.conn.notify('deprecationNotice', { summary: 'old thing', details: null });
   h.conn.notify('account/rateLimits/updated', { rateLimits: { limitId: 'codex', primary: { usedPercent: 9, windowDurationMins: 10080, resetsAt: 1 }, secondary: null } });
-  await waitFor(() => h.norm.calls.filter((c) => c.method === 'account/rateLimits/updated').length >= 2);
+  await waitFor(() => h.norm.calls.filter((c) => c.method === 'account/rateLimits/updated').length === 1);
+  h.conn.respond(read.id, readAnswer(read.params, read));
+  await waitFor(() => h.norm.calls.filter((c) => c.method === 'account/rateLimits/updated').length === 2);
   const methods = h.norm.calls.map((c) => c.method);
   for (const m of ['configWarning', 'warning', 'deprecationNotice']) assert.ok(methods.includes(m), m);
   const last = h.norm.calls.filter((c) => c.method === 'account/rateLimits/updated').at(-1)!.params as { rateLimits: { primary: { usedPercent: number } }; ordinaryUsageAllowed: boolean };
