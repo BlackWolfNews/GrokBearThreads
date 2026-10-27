@@ -1,7 +1,7 @@
 import SwiftUI
 import ThreadbareCore
 
-/// "Usage" in the sidebar's footer: every account's limits, grouped by
+/// "Usage" in the sidebar's activity bar: every account's limits, grouped by
 /// provider, then the two CLIs' versions with what can be done about them.
 /// Everything comes from `accounts.updated` and `clis.updated`; the times
 /// follow `app.now`, which ticks without asking the runner anything.

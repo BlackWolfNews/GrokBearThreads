@@ -5,7 +5,7 @@ import ThreadbareCore
 struct RootView: View {
     @Environment(AppModel.self) private var app
     @Environment(\.openSettings) private var openSettings
-    static let sidebarIdealWidth: CGFloat = 330
+    static let sidebarIdealWidth: CGFloat = 360
 
     var body: some View {
         @Bindable var app = app
@@ -13,9 +13,10 @@ struct RootView: View {
             // About a quarter of the window, as T3, Codex and Claude give
             // theirs: at 290 most titles were cut at about 25 characters.
             // At the default 1180 pt window the detail pane still fits the
-            // 780 pt reading column and its insets.
+            // 780 pt reading column and its insets. 30 wider since the
+            // activity bar (44) took the left of it.
             SidebarView()
-                .navigationSplitViewColumnWidth(min: 250, ideal: Self.sidebarIdealWidth, max: 440)
+                .navigationSplitViewColumnWidth(min: 290, ideal: Self.sidebarIdealWidth, max: 480)
         } detail: {
             DetailView()
         }

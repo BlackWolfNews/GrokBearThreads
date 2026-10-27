@@ -251,7 +251,7 @@ enum ScreenshotRunner {
             app.remember(effort: nil, provider: "codex")
             app.newThreadAccount = nil
         }
-        // 14. The usage popover from the sidebar's footer: every account's
+        // 14. The usage popover from the activity bar: every account's
         // room, then the CLIs (Claude behind, Codex held back).
         if wanted("14") {
             app.usagePopoverShown = true

@@ -3,7 +3,7 @@ import SwiftUI
 import ThreadbareCore
 
 /// Sizes the sidebar's rows share, so the new-thread row, the headings, the
-/// thread titles and the footer all start at the same x.
+/// thread titles and the view headers all start at the same x.
 enum SidebarMetrics {
     /// From the sidebar's edges to a row's highlight.
     static let outerInset: CGFloat = 8
@@ -24,11 +24,19 @@ struct SidebarView: View {
     @Environment(AppModel.self) private var app
 
     var body: some View {
-        switch app.sidebarMode {
-        case .inbox: InboxList()
-        case .snoozed: SnoozedList()
-        case .archive: ArchiveList()
-        case .scheduled: ScheduledList()
+        // VS Code style: a column of icons down the left for the views and
+        // the window-wide things, and the chosen view beside it.
+        HStack(spacing: 0) {
+            ActivityBar()
+            Group {
+                switch app.sidebarMode {
+                case .inbox: InboxList()
+                case .snoozed: SnoozedList()
+                case .archive: ArchiveList()
+                case .scheduled: ScheduledList()
+                }
+            }
+            .frame(maxWidth: .infinity)
         }
     }
 }
@@ -60,7 +68,6 @@ private struct InboxList: View {
                     }
                 }
             }
-            SidebarFooter()
         }
     }
 }
@@ -146,7 +153,7 @@ private struct ThreadList<Content: View>: View {
             // track down the list, which also pushed the times left. Codex,
             // Claude and T3 show none; the list scrolls the same without it.
             .scrollIndicators(.never)
-            // The last row fades into the footer rather than being cut
+            // The last row fades out at the foot rather than being cut
             // through its text at the hairline, as the transcript does above
             // the composer. About a title and a preview tall, and clear just
             // before the hairline: at 16 pt a row still showed half its
@@ -433,17 +440,13 @@ struct RowIconButtonStyle: ButtonStyle {
     }
 }
 
-/// A full-width sidebar row that does one thing: New thread at the top,
-/// Hibernating, Archive, Scheduled and Settings at the bottom.
+/// A full-width sidebar row that does one thing: New thread at the top of
+/// the inbox, New schedule at the top of Scheduled.
 struct SidebarButtonRow: View {
     let icon: String
-    /// Drawn instead of the symbol when set (the bear in the footer).
-    var image: NSImage? = nil
     let title: String
     var hint: String? = nil
-    var count: Int? = nil
     var active = false
-    var size: CGFloat = TypeScale.sidebarButton
     let action: () -> Void
     @State private var hovering = false
     @Environment(\.controlActiveState) private var activeState
@@ -451,38 +454,22 @@ struct SidebarButtonRow: View {
     var body: some View {
         Button(action: action) {
             HStack(spacing: 8) {
-                if let image {
-                    // The bear, drawn in the same grey as the symbols.
-                    Image(nsImage: image)
-                        .renderingMode(.template)
-                        .resizable()
-                        .aspectRatio(contentMode: .fit)
-                        .foregroundStyle(.secondary)
-                        .frame(width: 19, height: 19)
-                        .frame(width: 16)
-                } else {
-                    Image(systemName: icon)
-                        .font(.system(size: size))
-                        .foregroundStyle(.secondary)
-                        .frame(width: 16)
-                }
-                // The footer's rows are navigation, quieter than the threads
-                // above them; New thread stays primary.
+                Image(systemName: icon)
+                    .font(.system(size: TypeScale.sidebarButton))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 16)
                 Text(title)
-                    .font(.system(size: size))
-                    .foregroundStyle(size < TypeScale.sidebarButton ? .secondary : .primary)
+                    .font(.system(size: TypeScale.sidebarButton))
+                    .foregroundStyle(.primary)
                 Spacer(minLength: 6)
                 if let hint {
                     Text(hint).font(.system(size: TypeScale.sidebarMeta)).foregroundStyle(SidebarMetrics.faint)
-                }
-                if let count, count > 0 {
-                    Text("\(count)").font(.system(size: size)).foregroundStyle(SidebarMetrics.faint).monospacedDigit()
                 }
             }
             // The icon sits where thread titles start, Codex style.
             .padding(.leading, SidebarMetrics.leading - 2)
             .padding(.trailing, SidebarMetrics.trailing)
-            .padding(.vertical, size >= TypeScale.sidebarButton ? 7 : 6)
+            .padding(.vertical, 7)
             .background(background, in: RoundedRectangle(cornerRadius: SidebarMetrics.corner))
             .contentShape(Rectangle())
         }
@@ -493,58 +480,6 @@ struct SidebarButtonRow: View {
     private var background: Color {
         if active { return Color.primary.opacity(activeState == .key ? 0.08 : 0.06) }
         return hovering ? SidebarMetrics.hover : .clear
-    }
-}
-
-private struct SidebarFooter: View {
-    @Environment(AppModel.self) private var app
-    @Environment(\.openSettings) private var openSettings
-
-    var body: some View {
-        VStack(spacing: 0) {
-            SidebarButtonRow(icon: "moon.zzz", image: Bear.image(.sleep), title: "Hibernating", count: app.snoozed.count, size: TypeScale.sidebarFooter) {
-                app.sidebarMode = .snoozed
-            }
-            SidebarButtonRow(icon: "archivebox", title: "Archive", count: app.archiveLoaded ? app.archivedCount : nil, size: TypeScale.sidebarFooter) {
-                app.showArchive()
-            }
-            // Only once the runner has said it knows about schedules.
-            if app.schedulesSupported {
-                SidebarButtonRow(icon: "clock", title: "Scheduled", count: app.activeScheduleCount, size: TypeScale.sidebarFooter) {
-                    app.showSchedules()
-                }
-            }
-            UsageButton()
-            // The same window as ⌘, without a trip to the menu bar.
-            SidebarButtonRow(icon: "gearshape", title: "Settings", size: TypeScale.sidebarFooter) {
-                openSettings()
-            }
-        }
-        .padding(.horizontal, SidebarMetrics.outerInset)
-        .padding(.top, 6)
-        .padding(.bottom, 8)
-        .overlay(alignment: .top) {
-            Rectangle().fill(.separator).frame(height: 0.5).padding(.horizontal, SidebarMetrics.outerInset + 10)
-        }
-    }
-}
-
-/// "Usage": every account's room and the CLIs' versions, in a popover.
-private struct UsageButton: View {
-    @Environment(AppModel.self) private var app
-
-    var body: some View {
-        @Bindable var app = app
-        SidebarButtonRow(icon: "gauge.with.dots.needle.33percent", title: "Usage", size: TypeScale.sidebarFooter) {
-            app.usagePopoverShown.toggle()
-        }
-        // On the model, so a script can open it and `dump` can say so.
-        // Above the button, which sits at the foot of the window, and
-        // pointing at its right-hand end so the popover's wider than the
-        // sidebar stays inside the window rather than past its left edge.
-        .popover(isPresented: $app.usagePopoverShown, attachmentAnchor: .point(UnitPoint(x: 0.9, y: 0)), arrowEdge: .top) {
-            UsagePopover().environment(app)
-        }
     }
 }
 
@@ -678,22 +613,15 @@ struct EmptyNote: View {
     }
 }
 
-/// The top of the Snoozed and Archive views, where New thread is in the
-/// inbox: a back button, the view's name and its count.
+/// The top of the Hibernating, Archive and Scheduled views: the view's name
+/// and its count. The activity bar's top icon (or Esc) goes back to the
+/// inbox, so there's no back button.
 struct ModeHeader: View {
-    @Environment(AppModel.self) private var app
     let title: String
     let count: Int?
 
     var body: some View {
         HStack(spacing: 6) {
-            Button {
-                app.sidebarMode = .inbox
-            } label: {
-                Image(systemName: "chevron.left")
-            }
-            .buttonStyle(RowIconButtonStyle())
-            .help("Back to the inbox (Esc)")
             Text(title)
                 .font(.system(size: TypeScale.sidebarButton, weight: .semibold))
             Spacer()
@@ -701,8 +629,8 @@ struct ModeHeader: View {
                 Text("\(count)").font(.system(size: TypeScale.sidebarFooter)).foregroundStyle(SidebarMetrics.faint).monospacedDigit()
             }
         }
-        // The chevron's glyph lines up with the icons and titles below.
-        .padding(.leading, SidebarMetrics.outerInset + SidebarMetrics.leading - 8)
+        // On the same column as the titles below.
+        .padding(.leading, SidebarMetrics.outerInset + SidebarMetrics.leading)
         .padding(.trailing, SidebarMetrics.outerInset + SidebarMetrics.trailing)
         .padding(.top, 4)
         .frame(height: 34)
