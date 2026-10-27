@@ -57,6 +57,7 @@ struct PendingReviewsButton: View {
             } label: {
                 Label("Review design options (\(thread.pendingReviews ?? 0))", systemImage: "rectangle.on.rectangle")
             }.buttonStyle(.plain).foregroundStyle(.secondary)
+                .tip("Compare the images the agent made side by side, and reply")
             Spacer()
         }
         .font(.system(size: TypeScale.work)).padding(.horizontal, 20).padding(.vertical, 9)
@@ -76,6 +77,7 @@ struct PendingReviewsButton: View {
                             Text("\(review.options.count) images").foregroundStyle(.secondary)
                         }.contentShape(Rectangle())
                     }.buttonStyle(.plain)
+                        .tip("Open this review")
                 }
                 if !loading && reviews.isEmpty && error == nil { Text("No reviews waiting.").foregroundStyle(.secondary) }
             }.font(.system(size: TypeScale.work)).padding(16).frame(minWidth: 300)
@@ -118,7 +120,7 @@ final class ReviewWindowController: NSWindowController, NSWindowDelegate {
     func present() {
         #if DEBUG
         if Automation.instanceId != nil {
-            window?.orderBack(nil)
+            window?.tuckBehind()
             return
         }
         #endif
@@ -171,8 +173,10 @@ struct ReviewWindow: View {
                     Spacer()
                     if session.conflict && session.review.isPending {
                         Button("Save my draft") { Task { await session.keepMyDraft() } }
+                            .tip("Keep what you have here, over the copy that changed elsewhere")
                     } else if session.review.isPending {
                         Button("Try saving again") { Task { await session.saveNow() } }
+                            .tip("Save the draft to the runner again")
                     }
                 }.padding(12).background(Color.orange.opacity(0.1))
             }
@@ -208,14 +212,16 @@ struct ReviewWindow: View {
             Picker("View", selection: $session.mode) {
                 ForEach(ReviewMode.allCases, id: \.self) { Text($0.rawValue).tag($0) }
             }.pickerStyle(.segmented).labelsHidden().frame(width: 228)
+                .tip("All the images, two side by side, or one at a time (← → to move)")
             Text("\(session.review.options.count) images").foregroundStyle(.secondary)
             Spacer(minLength: 10)
             Picker("Zoom", selection: $session.actualSize) {
                 Text("Fit").tag(false)
                 Text("100%").tag(true)
             }.pickerStyle(.segmented).labelsHidden().frame(width: 140)
-                .help("100% shows one image pixel per screen pixel. Scroll to read the rest.")
+                .tip("100% shows one image pixel per screen pixel. Scroll to read the rest.")
             Button("Back to thread", systemImage: "arrow.up.backward") { back() }
+                .tip("Show the thread this review came from")
         }.font(.system(size: TypeScale.work)).padding(16)
     }
 
@@ -251,6 +257,7 @@ struct ReviewWindow: View {
                             Text("\(item.id). \(item.title)").tag(i)
                         }
                     }.labelsHidden().frame(maxWidth: .infinity)
+                        .tip("Which image to show here")
                 }
                 Spacer(minLength: 4)
                 if option.reference {
@@ -262,6 +269,7 @@ struct ReviewWindow: View {
                         Text(session.draft.pickedId == option.id ? "✓ Picked" : "Pick this")
                             .foregroundStyle(session.draft.pickedId == option.id ? Color.accentColor : Color.primary)
                     }.disabled(!session.editable)
+                        .tip(session.draft.pickedId == option.id ? "Your pick" : "Pick this one. Your reply says which you picked.")
                 }
             }.font(.system(size: TypeScale.work)).padding(12)
             Divider()
@@ -278,6 +286,7 @@ struct ReviewWindow: View {
                         session.show(index, slot: 0)
                         session.mode = .single
                     }
+                    .tip("Show this image on its own, with its notes")
                 }.font(.system(size: TypeScale.detail)).padding(10)
             } else {
                 VStack(alignment: .leading, spacing: 6) {
@@ -315,6 +324,7 @@ struct ReviewWindow: View {
                         }.padding(8).frame(width: 225, alignment: .leading)
                             .background(Color.primary.opacity(session.visibleIndices.contains(index) ? 0.07 : 0.025), in: RoundedRectangle(cornerRadius: 8))
                     }.buttonStyle(.plain)
+                        .tip("\(option.id). \(option.title)")
                 }
             }.padding(16)
         }.fixedSize(horizontal: false, vertical: true)
@@ -332,11 +342,15 @@ struct ReviewWindow: View {
                 Menu {
                     Button("Cancel review", role: .destructive) { confirmingCancel = true }
                 } label: { Image(systemName: "ellipsis") }.menuStyle(.borderlessButton).fixedSize()
+                    .tip("More")
                 Button("Review later") { close() }.disabled(session.submitting)
+                    .tip("Close the window. Your draft is kept.")
                 Button(session.submitting ? "Sending…" : "Send reply") { Task { await session.submit() } }
                     .buttonStyle(.borderedProminent).disabled(!session.canSubmit)
+                    .tip("Send your pick and notes to the agent")
             } else {
                 Button("Done") { close() }
+                    .tip("Close the window")
             }
         }.padding(16).overlay(alignment: .top) { Divider() }
     }
@@ -419,11 +433,11 @@ private final class ReviewImageScroll: NSScrollView {
         ThumbnailLoader.shared.load(path: reference.path, maxPixels: pixels) { [weak self] cg in
             guard let self, self.loadedKey == key else { return }
             guard let cg else {
-                self.picture.toolTip = "Couldn’t load this image. The saved file may be missing."
+                self.picture.setTip("Couldn’t load this image. The saved file may be missing.")
                 self.picture.image = NSImage(systemSymbolName: "photo.badge.exclamationmark", accessibilityDescription: "Image unavailable")
                 return
             }
-            self.picture.toolTip = nil
+            self.picture.setTip("")
             // ImageIO applied EXIF orientation while decoding. Preserve its
             // ratio instead of assigning the file header's unrotated size.
             let ratio = max(source.width, source.height) / CGFloat(max(cg.width, cg.height))

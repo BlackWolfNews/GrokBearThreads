@@ -115,7 +115,7 @@ private struct TitleField: View {
                 draft = project.title
                 focused = false
             }
-            .help("The project's name")
+            .tip("The project's name")
     }
 
     private func save() {
@@ -207,6 +207,7 @@ private struct TextSection: View {
                 if !editing {
                     Button("Edit") { start() }
                         .buttonStyle(.borderless)
+                        .tip("Edit the \(field.title.lowercased()) (or double-click it)")
                         .font(.system(size: TypeScale.detail))
                         .opacity(hovering ? 1 : 0.6)
                 }
@@ -223,8 +224,10 @@ private struct TextSection: View {
                     HStack(spacing: zoomed(8)) {
                         Button("Cancel") { editing = false }
                             .keyboardShortcut(.cancelAction)
+                            .tip("Put it back as it was (Esc)")
                         Button("Save") { save() }
                             .keyboardShortcut(.return, modifiers: .command)
+                            .tip("Save (⌘Return)")
                     }
                     .controlSize(.small)
                 }
@@ -278,6 +281,7 @@ private struct FoldersSection: View {
             PageHeading(title: "Folders") {
                 Button("Add folder…") { app.addProjectFolder(project.id) }
                     .buttonStyle(.borderless)
+                    .tip("Add a folder: the project's threads get the patches in it")
                     .font(.system(size: TypeScale.detail))
             }
             ForEach(project.folders, id: \.self) { folder in
@@ -311,7 +315,7 @@ private struct FolderRow: View {
             Spacer(minLength: zoomed(8))
             Button { app.removeProjectFolder(project.id, folder) } label: { Image(systemName: "minus.circle") }
                 .buttonStyle(RowIconButtonStyle())
-                .help("Take this folder out of the project")
+                .tip("Take this folder out of the project")
                 .opacity(hovering ? 1 : 0)
         }
         .padding(.vertical, zoomed(3))
@@ -373,7 +377,7 @@ private struct ProjectThreadRow: View {
         .contentShape(Rectangle())
         .onTapGesture { app.openThread(thread.id) }
         .onHover { hovering = $0 }
-        .help(by)
+        .tip(by)
         .contextMenu {
             Button("Open") { app.openThread(thread.id) }
             if membership?.pinned == false {

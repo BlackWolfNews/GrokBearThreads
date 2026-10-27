@@ -76,8 +76,9 @@ private struct GeneralSettings: View {
                             Text(SettingsText.folder(settings.defaultCwd))
                                 .lineLimit(1)
                                 .truncationMode(.middle)
-                                .help(settings.defaultCwd)
+                                .tip(settings.defaultCwd)
                             Button("Choose…") { chooseFolder(from: settings.defaultCwd) }
+                                .tip("Pick the folder new threads start in")
                         }
                     }
                 } footer: {
@@ -90,12 +91,14 @@ private struct GeneralSettings: View {
                             Text(settings.idleMinutes == 1 ? "1 minute" : "\(settings.idleMinutes) minutes")
                                 .monospacedDigit()
                         }
+                        .tip("A thread's CLI is stopped after this long with nothing to do, and picks up where it left off when you next send")
                     }
                     LabeledContent("Most CLIs live at once") {
                         Stepper(value: binding(settings.maxLiveCLIs) { SettingsUpdate(maxLiveCLIs: $0) }, in: 1...20) {
                             Text("\(settings.maxLiveCLIs)")
                                 .monospacedDigit()
                         }
+                        .tip("How many threads can have a CLI running at once")
                     }
                 } footer: {
                     Footnote("Each live CLI uses about 400 MB. Past the limit, the one that's been idle longest is released early.")
@@ -103,6 +106,7 @@ private struct GeneralSettings: View {
 
                 Section {
                     Toggle("Follow main", isOn: binding(settings.followMain) { SettingsUpdate(followMain: $0) })
+                        .tip("Update the runner by itself from each new commit on main")
                 } footer: {
                     Footnote("The runner builds each new commit on main and restarts onto it once no thread is busy. A change here takes effect when the runner next restarts.")
                 }
@@ -176,6 +180,7 @@ private struct ModelSettings: View {
                                 .multilineTextAlignment(.trailing)
                                 .frame(width: 70)
                                 .onSubmit { saveBudget(settings) }
+                                .tip("Most to spend on OpenRouter in a day, in US dollars. Return saves it.")
                         }
                     }
                     LabeledContent("Spent today", value: SettingsText.money(settings.models.spentTodayUsd))
@@ -207,10 +212,11 @@ private struct ModelSettings: View {
                                 Image(systemName: "minus.circle")
                             }
                             .buttonStyle(.borderless)
-                            .help("Remove")
+                            .tip("Stop keeping this folder private")
                         }
                     }
                     Button("Add Folder…") { addPrivateFolder(settings.models.privateFolders) }
+                        .tip("Keep a folder's threads from ever being sent to OpenRouter")
                 } header: {
                     Text("Private folders")
                 } footer: {
@@ -236,7 +242,9 @@ private struct ModelSettings: View {
                     Text(key.hint.map { "Set, ends in \($0)" } ?? "Set")
                         .foregroundStyle(.secondary)
                     Button("Change") { changingKey = true }
+                        .tip("Put in a different key")
                     Button("Remove") { Task { await app.setOpenRouterKey(nil) } }
+                        .tip("Forget the key: titles and summaries stop until there's a new one")
                 }
             }
         } else {
@@ -246,13 +254,16 @@ private struct ModelSettings: View {
                         .labelsHidden()
                         .frame(maxWidth: 220)
                         .onSubmit(saveKey)
+                        .tip("Your OpenRouter API key. It goes to the runner, not this app.")
                     if changingKey {
                         Button("Cancel") {
                             keyDraft = ""
                             changingKey = false
                         }
+                        .tip("Keep the key you have")
                     }
                     Button("Save", action: saveKey)
+                        .tip("Send the key to the runner")
                         .disabled(keyDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || savingKey)
                 }
             }

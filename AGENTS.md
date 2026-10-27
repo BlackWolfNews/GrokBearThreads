@@ -20,6 +20,8 @@ anything.
 - Screenshots: capture the app window only (by window id), never the full
   screen, and delete them when done unless they're for a PR.
 - UI copy: plain words, no eyebrow or kicker labels, no em dashes.
+- Every control gets a tooltip, with `.tip("…")` (SwiftUI) or `setTip` (AppKit).
+  `.help` and `toolTip` never show in this app; TipsTests fails on them.
 - Transcript files and fixtures made from real sessions are private: keep them
   out of git (`.fixtures/` is ignored).
 - Mike's own repo: work goes to main once tests pass. A thread started in

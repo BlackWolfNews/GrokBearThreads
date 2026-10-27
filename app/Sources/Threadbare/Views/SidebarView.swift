@@ -57,10 +57,9 @@ private struct InboxList: View {
             sections[section].map { ($0.id, SectionRow.id(section: section.title, thread: $0.id)) }
         })
         VStack(spacing: 0) {
-            SidebarButtonRow(icon: "square.and.pencil", title: "New thread", shortcut: "⌘N", active: app.selection == nil) {
+            SidebarButtonRow(icon: "square.and.pencil", title: "New thread", shortcut: "⌘N", tip: "Start a new thread (⌘N)", active: app.selection == nil) {
                 app.newThread()
             }
-            .help("New thread (⌘N)")
             .padding(.horizontal, SidebarMetrics.outerInset)
             .padding(.top, zoomed(4))
             // A folded section's rows aren't drawn, so the arrow keys skip them.
@@ -315,7 +314,7 @@ struct ThreadRowView: View {
         // projects came: Mike reads a thread by its title and its project.
         HStack(alignment: .center, spacing: zoomed(10)) {
             ProjectTiles(projects: ProjectMark.shown(thread, under: heading))
-                .help(ProjectMark.help(thread))
+                .tip(ProjectMark.help(thread))
                 .overlay(alignment: .leading) {
                     if look.unread {
                         // In the row's leading gutter, left of the tile.
@@ -369,6 +368,9 @@ struct ThreadRowView: View {
             }
         }
         .onHover { hovering = $0 }
+        // The whole title, which the row often cuts short, and where it runs.
+        // The status and project marks have their own tips over this one.
+        .tip((thread.title.isEmpty ? "Untitled" : thread.title) + "\n" + thread.cwd.abbreviatingHome)
         .contextMenu { ThreadMenu(thread: thread) }
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
@@ -416,7 +418,7 @@ struct ThreadRowView: View {
             }
             .font(.system(size: TypeScale.sidebarMeta, weight: .medium))
             .foregroundStyle(Color.accentColor)
-            .help("Working")
+            .tip("Working")
         case .background:
             // Still being worked on, but by sub-agents or jobs in the
             // background: the same spinner in grey, and what's running
@@ -429,15 +431,15 @@ struct ThreadRowView: View {
             }
             .font(.system(size: TypeScale.sidebarMeta, weight: .medium))
             .foregroundStyle(.secondary)
-            .help(BackgroundWork.detail(thread.background))
+            .tip(BackgroundWork.detail(thread.background))
         case .needsYou:
             Text("Needs you").font(.system(size: TypeScale.sidebarMeta, weight: .medium)).foregroundStyle(Color(nsColor: Theme.needsYou))
         case .failed:
             Text("Failed").font(.system(size: TypeScale.sidebarMeta, weight: .medium)).foregroundStyle(Color(nsColor: Theme.failed))
-                .help("The last turn failed")
+                .tip("The last turn failed")
         case .stopped:
             Text("Stopped").font(.system(size: TypeScale.sidebarMeta)).foregroundStyle(.secondary)
-                .help("Stopped when the runner restarted")
+                .tip("Stopped when the runner restarted")
         }
     }
 
@@ -534,22 +536,22 @@ private struct RowActions: View {
                     .buttonStyle(RowIconButtonStyle())
                     .menuIndicator(.hidden)
                     .fixedSize()
-                    .help("Hibernate")
+                    .tip("Hibernate")
                 case .archive:
                     Button {
                         guard BusyConfirm.allowed(.archive, threadId: thread.id, app: app) else { return }
                         app.archive(thread.id)
                     } label: { Image(systemName: "archivebox") }
                         .buttonStyle(RowIconButtonStyle())
-                        .help("Archive (⌘E)")
+                        .tip("Archive (⌘E)")
                 case .unsnooze:
                     Button { app.unsnooze(thread.id) } label: { Image(systemName: "arrow.uturn.backward") }
                         .buttonStyle(RowIconButtonStyle())
-                        .help("Wake")
+                        .tip("Wake")
                 case .unarchive:
                     Button { app.unarchive(thread.id) } label: { Image(systemName: "arrow.uturn.backward") }
                         .buttonStyle(RowIconButtonStyle())
-                        .help("Unarchive")
+                        .tip("Unarchive")
                 }
             }
         }
@@ -589,6 +591,8 @@ struct SidebarButtonRow: View {
     /// Shown at the row's end while ⌘ is held (`ShortcutHints`). It used
     /// to be printed there all the time, which Mike found noisy.
     var shortcut: String? = nil
+    /// The tooltip, if the title alone doesn't say enough.
+    var tip: String? = nil
     var active = false
     let action: () -> Void
     @State private var hovering = false
@@ -616,6 +620,7 @@ struct SidebarButtonRow: View {
         }
         .buttonStyle(.plain)
         .onHover { hovering = $0 }
+        .tip(tip ?? shortcut.map { "\(title) (\($0))" } ?? title)
     }
 
     private var background: Color {
@@ -826,6 +831,7 @@ struct SearchField: View {
             TextField(prompt, text: $text)
                 .textFieldStyle(.plain)
                 .font(.system(size: TypeScale.sidebarButton))
+                .tip(prompt)
             if !text.isEmpty {
                 Button {
                     text = ""
@@ -833,7 +839,7 @@ struct SearchField: View {
                     Image(systemName: "xmark.circle.fill").foregroundStyle(.tertiary)
                 }
                 .buttonStyle(.plain)
-                .help("Clear")
+                .tip("Clear")
             }
         }
         .padding(.leading, SidebarMetrics.leading - zoomed(2))

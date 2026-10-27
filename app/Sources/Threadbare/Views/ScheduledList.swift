@@ -12,7 +12,7 @@ struct ScheduledList: View {
         let schedules = app.schedules
         VStack(spacing: 0) {
             ModeHeader(title: "Scheduled", count: app.activeScheduleCount)
-            SidebarButtonRow(icon: "plus", title: "New schedule") {
+            SidebarButtonRow(icon: "plus", title: "New schedule", tip: "Schedule a message for later") {
                 app.newSchedule(from: nil)
             }
             .padding(.horizontal, SidebarMetrics.outerInset)
@@ -73,13 +73,15 @@ private struct ScheduleRowView: View {
                     .font(.system(size: TypeScale.sidebarMeta))
                     .foregroundStyle(problem.failed ? Color(nsColor: Theme.failed) : SidebarMetrics.faint)
                     .lineLimit(1)
-                    .help(problem.text)
+                    .tip(problem.text)
             }
         }
         .padding(EdgeInsets(top: 8, leading: SidebarMetrics.leading, bottom: 8, trailing: SidebarMetrics.trailing))
         .background(showsActions ? SidebarMetrics.hover : .clear, in: RoundedRectangle(cornerRadius: SidebarMetrics.corner))
         .contentShape(RoundedRectangle(cornerRadius: SidebarMetrics.corner))
         .onTapGesture { app.editSchedule(schedule.id) }
+        // What it sends, which the row doesn't show. Click to edit it.
+        .tip(String(schedule.text.prefix(300)))
         .overlay(alignment: .topTrailing) {
             if showsActions {
                 actions
@@ -113,7 +115,7 @@ private struct ScheduleRowView: View {
                 Text("Done").foregroundStyle(SidebarMetrics.faint)
             } else if let next = schedule.nextRunAt {
                 Text(ScheduleTime.relative(next, now: app.now)).foregroundStyle(SidebarMetrics.faint).monospacedDigit()
-                    .help(next.formatted(date: .abbreviated, time: .shortened))
+                    .tip(next.formatted(date: .abbreviated, time: .shortened))
             }
         }
         .font(.system(size: TypeScale.sidebarMeta))
@@ -133,17 +135,17 @@ private struct ScheduleRowView: View {
         HStack(spacing: zoomed(2)) {
             Button { app.runSchedule(schedule.id) } label: { Image(systemName: "paperplane") }
                 .buttonStyle(RowIconButtonStyle())
-                .help("Run now")
+                .tip("Run now")
             if !schedule.isFinished {
                 Button { app.setSchedulePaused(schedule.id, !schedule.paused) } label: {
                     Image(systemName: schedule.paused ? "play" : "pause")
                 }
                 .buttonStyle(RowIconButtonStyle())
-                .help(schedule.paused ? "Resume" : "Pause")
+                .tip(schedule.paused ? "Resume" : "Pause")
             }
             Button { app.deleteSchedule(schedule.id) } label: { Image(systemName: "trash") }
                 .buttonStyle(RowIconButtonStyle())
-                .help("Delete")
+                .tip("Delete")
         }
     }
 }
@@ -168,7 +170,7 @@ private struct TargetButton: View {
             }
             .buttonStyle(.plain)
             .onHover { hovering = $0 }
-            .help(schedule.threadId == nil ? "Open the last thread it started" : "Open the thread")
+            .tip(schedule.threadId == nil ? "Open the last thread it started" : "Open the thread")
         } else {
             label
         }

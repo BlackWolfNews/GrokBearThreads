@@ -75,12 +75,12 @@ private struct LibrarianState: View {
                 .font(.system(size: TypeScale.sidebarMeta))
                 .foregroundStyle(SidebarMetrics.faint)
                 .monospacedDigit()
-                .help("Looks it has taken today, and its share of today's model spend")
+                .tip("Looks it has taken today, and its share of today's model spend")
             HStack(spacing: zoomed(8)) {
                 Button(status.paused ? "Resume" : "Pause") { app.setLibrarianPaused(!status.paused) }
-                    .help(status.paused ? "Let it look at threads again" : "Stop looking at threads; what's queued waits")
+                    .tip(status.paused ? "Let it look at threads again" : "Stop looking at threads; what's queued waits")
                 Button("Look at everything") { app.runLibrarian() }
-                    .help("Queue a look at every thread it hasn't looked at yet, newest first")
+                    .tip("Queue a look at every thread it hasn't looked at yet, newest first")
             }
             .controlSize(.small)
             .padding(.top, zoomed(4))
@@ -128,7 +128,7 @@ private struct QueueRow: View {
                     .font(.system(size: TypeScale.sidebarMeta))
                     .foregroundStyle(SidebarMetrics.faint)
                     .monospacedDigit()
-                    .help(job.dueAt?.formatted(date: .abbreviated, time: .shortened) ?? "")
+                    .tip(job.dueAt?.formatted(date: .abbreviated, time: .shortened) ?? "")
             }
             Text(LibrarianText.why(job))
                 .font(.system(size: TypeScale.sidebarPreview))
@@ -159,7 +159,7 @@ private struct EntryRow: View {
                         .font(.system(size: TypeScale.sidebarMeta))
                         .foregroundStyle(SidebarMetrics.faint)
                         .monospacedDigit()
-                        .help(at.formatted(date: .abbreviated, time: .shortened))
+                        .tip(at.formatted(date: .abbreviated, time: .shortened))
                 }
             }
             // The thread, then the projects it touched.
@@ -178,7 +178,7 @@ private struct EntryRow: View {
         }
         .padding(EdgeInsets(top: zoomed(7), leading: SidebarMetrics.leading, bottom: zoomed(7), trailing: SidebarMetrics.trailing))
         .frame(maxWidth: .infinity, alignment: .leading)
-        .help(EntryRow.help(entry))
+        .tip(EntryRow.help(entry))
     }
 
     static func outcomeWords(_ outcome: LibrarianEntry.Outcome) -> String {
@@ -231,6 +231,6 @@ struct PlainLink: View {
         }
         .buttonStyle(.plain)
         .onHover { hovering = $0 }
-        .help(help)
+        .tip(help)
     }
 }
