@@ -10,7 +10,9 @@ import { z } from 'zod';
 import { tool } from '@anthropic-ai/claude-agent-sdk';
 import { CodexAdapter, CodexSession, codexModelChoices, type CodexAdapterDeps } from '../../src/adapters/codex/adapter.ts';
 import { OVERSIZED_LINE } from '../../src/adapters/codex/appserver.ts';
-import type { CodexNormalizer } from '../../src/adapters/codex/types.ts';
+import type { CodexNormalizerLike } from '../../src/adapters/codex/types.ts';
+import { CodexNormalizer } from '../../src/adapters/codex/normalize.ts';
+import type { NormalizerContext } from '../../src/adapters/context.ts';
 import { SessionNotFoundError, type AdapterOutput, type QuestionRequest, type SessionSink, type StartSessionOptions, type ToolApprovalAnswer, type ToolApprovalRequest, type TurnResult } from '../../src/adapters/types.ts';
 import { ProcessRegistry } from '../../src/proc.ts';
 import { nullLogger } from '../../src/log.ts';
@@ -44,34 +46,31 @@ const account: Account = {
 
 type Call = { method: string; params: unknown; from?: { childThreadId: string } };
 
-// A stand-in for section B's normaliser. It does just enough to see what
-// the adapter feeds it and what the adapter does with its outputs: it
-// emits a cliTurn for every turn/started and a result (with ownership the
-// adapter must correct) for every turn/completed.
-function stubNormalizer() {
+// Section B's real normaliser, with every call recorded, so the tests see
+// what the adapter feeds it as well as what comes out.
+function spyNormalizer() {
   const calls: Call[] = [];
-  const n: CodexNormalizer & { calls: Call[] } = {
+  let inner!: CodexNormalizer;
+  const spy: CodexNormalizerLike & { calls: Call[] } = {
     calls,
     handle(method, params, from) {
       calls.push(from ? { method, params, from } : { method, params });
-      const p = params as { turn?: { status?: string }; item?: { type?: string; id?: string } };
-      if (method === 'turn/started') return [{ kind: 'cliTurn' }];
-      if (method === 'turn/completed') {
-        const s = p.turn?.status;
-        return [
-          { kind: 'event', event: { type: 'system.note', text: `turn ${s}` } },
-          { kind: 'result', result: { outcome: s === 'interrupted' ? 'interrupted' : s === 'failed' ? 'failed' : 'completed', durationMs: 7, own: true, answers: 'wrong' } },
-        ];
-      }
-      if (method === 'item/completed' && from) return [{ kind: 'event', event: { type: 'system.note', text: `child ${p.item?.type}` } }, { kind: 'result', result: { outcome: 'completed', durationMs: 1 } }];
-      return [];
+      return inner.handle(method, params, from);
     },
     closeOpen(reason) {
       calls.push({ method: 'closeOpen', params: reason });
-      return [{ kind: 'event', event: { type: 'system.note', text: `closed: ${reason}` } }];
+      return inner.closeOpen(reason);
     },
+    setThread: (t, m) => inner.setThread(t, m),
+    startingTurn: (id) => inner.startingTurn(id),
+    turnAccepted: (id) => inner.turnAccepted(id),
+    steered: (id) => inner.steered(id),
   };
-  return n;
+  const factory = (ctx: NormalizerContext) => {
+    inner = new CodexNormalizer(ctx);
+    return spy;
+  };
+  return { spy, factory };
 }
 
 function recorder() {
@@ -110,6 +109,10 @@ function recorder() {
     results: (): TurnResult[] => outputs.filter((o): o is Extract<AdapterOutput, { kind: 'result' }> => o.kind === 'result').map((o) => o.result),
     notes: (): string[] => outputs.flatMap((o) => (o.kind === 'event' && o.event.type === 'system.note' ? [o.event.text] : [])),
     kinds: (): string[] => outputs.map((o) => o.kind),
+    // tool.result events, as [itemId, ok, text].
+    toolResults: (): [string, boolean, string | undefined][] =>
+      outputs.flatMap((o) => (o.kind === 'event' && o.event.type === 'tool.result' ? [[o.event.itemId, o.event.ok, o.event.text] as [string, boolean, string | undefined]] : [])),
+    itemIds: (): string[] => outputs.flatMap((o) => (o.kind === 'event' && 'itemId' in o.event ? [String((o.event as { itemId: unknown }).itemId)] : [])),
   };
 }
 
@@ -117,7 +120,7 @@ type Harness = Awaited<ReturnType<typeof open>>;
 
 async function open(o: Partial<StartSessionOptions> & { deps?: Partial<CodexAdapterDeps>; adapter?: CodexAdapter } = {}) {
   const f = await fake();
-  const norm = stubNormalizer();
+  const { spy: norm, factory } = spyNormalizer();
   const rec = recorder();
   const home = tmp();
   const adapter =
@@ -126,7 +129,7 @@ async function open(o: Partial<StartSessionOptions> & { deps?: Partial<CodexAdap
       codexBinary: () => f.bin,
       registry: new ProcessRegistry(home, nullLogger),
       log: nullLogger,
-      normalizer: () => norm,
+      normalizer: factory,
       timings: { reinterruptMs: 100, finishWaitMs: 500, closingRetryStartMs: 20, closingRetryForMs: 1000, terminateMs: 500, closeWaitMs: 2000 },
       ...o.deps,
     });
@@ -220,9 +223,8 @@ test('a new thread: thread/start with the policy, config and tools; then session
     { kind: 'effort', level: 'high' },
   ]);
   // The account's login and limits go to the normaliser.
-  await waitFor(() => h.norm.calls.some((c) => c.method === 'account/rateLimits/updated') && h.norm.calls.some((c) => c.method === 'account/updated'));
-  const acct = h.norm.calls.find((c) => c.method === 'account/updated')!.params as Record<string, unknown>;
-  assert.deepEqual(acct, { authMode: 'chatgpt', planType: 'prolite', email: 'someone@example.com' });
+  await waitFor(() => h.norm.calls.some((c) => c.method === 'account/rateLimits/updated') && h.rec.kinds().includes('limits'));
+  assert.ok(h.rec.outputs.some((o) => o.kind === 'limits' && o.email === 'someone@example.com' && o.plan === 'Pro Lite'));
   const rl = h.norm.calls.find((c) => c.method === 'account/rateLimits/updated')!.params as { rateLimits: { primary: { usedPercent: number } } };
   assert.equal(rl.rateLimits.primary.usedPercent, 5);
   await h.session.end();
@@ -333,8 +335,7 @@ test('our own turn: no cliTurn, and the result answers our message', async () =>
   complete(h, 'u1');
   await waitFor(() => h.rec.results().length === 1);
   assert.equal(h.rec.kinds().includes('cliTurn'), false);
-  assert.deepEqual(h.rec.results()[0], { outcome: 'completed', durationMs: 7, answers: 'm1', answered: ['m1'], queuedTurns: 0 });
-  assert.deepEqual(h.rec.notes(), ['turn completed']);
+  assert.deepEqual(h.rec.results()[0], { outcome: 'completed', durationMs: 1200, answers: 'm1', answered: ['m1'], queuedTurns: 0 });
   // The next message starts a new turn.
   h.session.send({ id: 'm2', text: 'again', images: [] });
   const req = await h.conn.request('turn/start');
@@ -364,7 +365,7 @@ test('a turn Codex starts by itself is a cliTurn, and its result is its own', as
   await waitFor(() => h.rec.kinds().includes('cliTurn'));
   complete(h, 'goal-1');
   await waitFor(() => h.rec.results().length === 1);
-  assert.deepEqual(h.rec.results()[0], { outcome: 'completed', durationMs: 7, own: true, queuedTurns: 0 });
+  assert.deepEqual(h.rec.results()[0], { outcome: 'completed', durationMs: 1200, own: true, queuedTurns: 0 });
   await h.session.end();
 });
 
@@ -380,7 +381,7 @@ test('steering: a send during the turn becomes turn/steer and shows in answered'
   await sleep(20);
   complete(h, 'u1');
   await waitFor(() => h.rec.results().length === 1);
-  assert.deepEqual(h.rec.results()[0], { outcome: 'completed', durationMs: 7, answers: 'm1', answered: ['m1', 'm2'], queuedTurns: 0 });
+  assert.deepEqual(h.rec.results()[0], { outcome: 'completed', durationMs: 1200, answers: 'm1', answered: ['m1', 'm2'], queuedTurns: 0 });
   await sleep(30);
   assert.equal(h.conn.pending('turn/start').length, 0, 'nothing left to start');
   await h.session.end();
@@ -418,13 +419,13 @@ test('a refused steer is held, counted in queuedTurns, and starts the next turn'
   assert.equal(h.rec.results().length, 0, 'the result waits for the steer to settle');
   h.conn.fail(steer.id, -32600, 'expected turn u1 is not active');
   await waitFor(() => h.rec.results().length === 1);
-  assert.deepEqual(h.rec.results()[0], { outcome: 'completed', durationMs: 7, answers: 'm1', answered: ['m1'], queuedTurns: 1 });
+  assert.deepEqual(h.rec.results()[0], { outcome: 'completed', durationMs: 1200, answers: 'm1', answered: ['m1'], queuedTurns: 1 });
   const next = await h.conn.request('turn/start');
   assert.equal(next.params.clientUserMessageId, 'm2');
   h.conn.respond(next.id, { turn: { id: 'u2', status: 'inProgress' } });
   complete(h, 'u2');
   await waitFor(() => h.rec.results().length === 2);
-  assert.deepEqual(h.rec.results()[1], { outcome: 'completed', durationMs: 7, answers: 'm2', answered: ['m2'], queuedTurns: 0 });
+  assert.deepEqual(h.rec.results()[1], { outcome: 'completed', durationMs: 1200, answers: 'm2', answered: ['m2'], queuedTurns: 0 });
   await h.session.end();
 });
 
@@ -486,7 +487,7 @@ test('interrupt before the turn id is known waits for it, then interrupts that t
   h.conn.respond(intr.id, {});
   complete(h, 'u1', 'interrupted');
   await waitFor(() => h.rec.results().length === 1);
-  assert.deepEqual(h.rec.results()[0], { outcome: 'interrupted', durationMs: 7, answers: 'm1', answered: ['m1', 'm2'], queuedTurns: 0 });
+  assert.deepEqual(h.rec.results()[0], { outcome: 'interrupted', durationMs: 1200, answers: 'm1', answered: ['m1', 'm2'], queuedTurns: 0 });
   assert.equal(h.conn.sent('turn/steer').length, 0, 'the dropped message was never steered');
   await h.session.end();
 });
@@ -521,7 +522,7 @@ test('when the command can\'t be stopped the session ends, which stops it', asyn
   await started(h);
   h.session.send({ id: 'm1', text: 'sleep 30', images: [] });
   await turnStarts(h, 'u1');
-  h.conn.notify('item/started', { threadId: 'th-1', turnId: 'u1', item: { type: 'commandExecution', id: 'exec-1' } });
+  h.conn.notify('item/started', { threadId: 'th-1', turnId: 'u1', item: { type: 'commandExecution', id: 'exec-1', command: "/bin/zsh -lc 'sleep 30'", cwd: '/w', status: 'inProgress', commandActions: [] } });
   await sleep(20);
   const stopping = h.session.interrupt();
   h.conn.respond((await h.conn.request('turn/interrupt')).id, {});
@@ -537,7 +538,7 @@ test('when the command can\'t be stopped the session ends, which stops it', asyn
   // The runner's turn ends with exited() (as interrupted, since Stop was
   // pressed); the next message resumes in a fresh process.
   assert.equal(h.rec.results().length, 0);
-  assert.ok(h.rec.notes().includes('turn interrupted'), "the normaliser's other outputs still go out");
+  assert.deepEqual(h.rec.toolResults(), [['exec-1', false, 'Interrupted']], "the normaliser's other outputs still go out");
 });
 
 test('a message behind an interrupted turn that hasn\'t finished waits, re-interrupting, then starts', async () => {
@@ -557,7 +558,7 @@ test('a message behind an interrupted turn that hasn\'t finished waits, re-inter
   assert.equal(h.conn.sent('turn/steer').length, 0);
   complete(h, 'u1', 'interrupted');
   await waitFor(() => h.rec.results().length === 1);
-  assert.deepEqual(h.rec.results()[0], { outcome: 'interrupted', durationMs: 7, answers: 'm1', answered: ['m1'], queuedTurns: 1 });
+  assert.deepEqual(h.rec.results()[0], { outcome: 'interrupted', durationMs: 1200, answers: 'm1', answered: ['m1'], queuedTurns: 1 });
   const next = await h.conn.request('turn/start');
   assert.equal(next.params.clientUserMessageId, 'm2');
   await h.session.end();
@@ -595,8 +596,10 @@ test('end({hard}) during a turn closes its open items; kill() reports at once', 
   await started(h);
   h.session.send({ id: 'm1', text: 'x', images: [] });
   await turnStarts(h, 'u1');
+  h.conn.notify('item/started', { threadId: 'th-1', turnId: 'u1', item: { type: 'commandExecution', id: 'exec-1', command: "/bin/zsh -lc 'sleep 30'", cwd: '/w', status: 'inProgress', commandActions: [] } });
+  await waitFor(() => h.rec.itemIds().includes('exec-1'));
   await h.session.end({ hard: true });
-  assert.ok(h.rec.notes().includes('closed: Interrupted'));
+  assert.deepEqual(h.rec.toolResults(), [['exec-1', false, 'Interrupted']]);
   assert.equal(h.rec.exitCount(), 1);
 
   const k = await open();
@@ -615,7 +618,7 @@ test('a process that dies ends the session with the error, closing the turn', as
   h.conn.exit(9);
   const e = await h.rec.exited;
   assert.match(e!.message, /code 9/);
-  assert.ok(h.rec.notes().includes('closed: Interrupted'));
+  assert.ok(h.norm.calls.some((c) => c.method === 'closeOpen'));
   await assert.rejects(h.session.interrupt(), /already exited/);
 });
 
@@ -644,10 +647,11 @@ test('subagents: traffic is marked with the child id, approvals reach this sink 
   await turnStarts(h, 'u1');
   h.conn.notify('item/started', { threadId: 'th-1', turnId: 'u1', item: { type: 'subAgentActivity', id: 'sa-1', kind: 'started', agentThreadId: 'child-1', agentPath: '/root/image_color' } });
   h.conn.notify('turn/started', { threadId: 'child-1', turn: { id: 'cu1', rootTurnId: 'u1', status: 'inProgress' } });
+  h.conn.notify('item/started', { threadId: 'child-1', turnId: 'cu1', item: { type: 'imageView', id: 'exec-v', path: '/w/swatch.png' } });
   h.conn.notify('item/completed', { threadId: 'child-1', turnId: 'cu1', item: { type: 'imageView', id: 'exec-v', path: '/w/swatch.png' } });
-  await waitFor(() => h.rec.notes().includes('child imageView'));
+  await waitFor(() => h.rec.itemIds().includes('child-1/exec-v'));
   const childCalls = h.norm.calls.filter((c) => c.from);
-  assert.deepEqual(childCalls.map((c) => [c.method, c.from!.childThreadId]), [['turn/started', 'child-1'], ['item/completed', 'child-1']]);
+  assert.deepEqual(childCalls.map((c) => [c.method, c.from!.childThreadId]), [['turn/started', 'child-1'], ['item/started', 'child-1'], ['item/completed', 'child-1']]);
   assert.equal(h.rec.kinds().includes('cliTurn'), false, "a child's turn is never a cliTurn");
   assert.equal(h.rec.results().length, 0, "a child's result never reaches the runner");
   // The child's approval: request id 0, threadId the child's.
@@ -813,7 +817,7 @@ test('threadbare tools: a known one runs, an unknown one says so, delete_thread 
 
 test('models() asks a short-lived process for model/list without hidden models', async () => {
   const f = await fake();
-  const adapter = new CodexAdapter({ codexBinary: () => f.bin, registry: new ProcessRegistry(tmp(), nullLogger), log: nullLogger, normalizer: () => stubNormalizer() });
+  const adapter = new CodexAdapter({ codexBinary: () => f.bin, registry: new ProcessRegistry(tmp(), nullLogger), log: nullLogger, normalizer: spyNormalizer().factory });
   const p = adapter.models(account);
   const conn = await f.next();
   await conn.init();
@@ -841,7 +845,7 @@ test('models() asks a short-lived process for model/list without hidden models',
 
 test('archive() archives in a short-lived process and closes it', async () => {
   const f = await fake();
-  const adapter = new CodexAdapter({ codexBinary: () => f.bin, registry: new ProcessRegistry(tmp(), nullLogger), log: nullLogger, normalizer: () => stubNormalizer() });
+  const adapter = new CodexAdapter({ codexBinary: () => f.bin, registry: new ProcessRegistry(tmp(), nullLogger), log: nullLogger, normalizer: spyNormalizer().factory });
   const p = adapter.archive(account, 'th-9');
   const conn = await f.next();
   await conn.init();
@@ -868,4 +872,22 @@ test('binariesInUse lists live sessions until they end', async () => {
   assert.equal(h.adapter.wakesAfterTasks, false);
   await h.session.end();
   assert.deepEqual(h.adapter.binariesInUse(), []);
+});
+
+test('built as the runner builds it (no normaliser given), a turn runs on section B\'s normaliser', async () => {
+  const f = await fake();
+  const adapter = new CodexAdapter({ codexBinary: () => f.bin, codexArgs: ['--disable', 'memories'], registry: new ProcessRegistry(tmp(), nullLogger), log: nullLogger, toolsFor: () => [] });
+  const h = await open({ adapter });
+  assert.deepEqual(h.conn.hello.argv, ['app-server', '--disable', 'memories']);
+  await started(h);
+  h.session.send({ id: 'm1', text: 'hi', images: [] });
+  await turnStarts(h, 'u1');
+  h.conn.notify('item/agentMessage/delta', { threadId: 'th-1', turnId: 'u1', itemId: 'msg-1', delta: 'hel' });
+  h.conn.notify('item/completed', { threadId: 'th-1', turnId: 'u1', item: { type: 'agentMessage', id: 'msg-1', text: 'hello', phase: 'final_answer' } });
+  complete(h, 'u1');
+  await waitFor(() => h.rec.results().length === 1);
+  assert.ok(h.rec.outputs.some((o) => o.kind === 'event' && o.event.type === 'assistant.text'));
+  assert.deepEqual(h.rec.results()[0], { outcome: 'completed', durationMs: 1200, answers: 'm1', answered: ['m1'], queuedTurns: 0 });
+  assert.equal(h.rec.kinds().includes('cliTurn'), false);
+  await h.session.end();
 });

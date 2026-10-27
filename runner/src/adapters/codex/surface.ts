@@ -9,50 +9,22 @@
 // and needs no login.
 import fs from 'node:fs';
 import path from 'node:path';
+import { IGNORED_ITEM_TYPES, IGNORED_METHODS, MAPPED_ITEM_TYPES, MAPPED_METHODS } from './normalize.ts';
 
 // The version these lists were checked against.
 export const testedVersion = '0.164.0';
 
-// Notifications the adapter or the normaliser reads.
-export const USED_NOTIFICATIONS = [
-  'error',
-  'warning',
-  'configWarning',
-  'deprecationNotice',
-  'guardianWarning',
-  'model/rerouted',
-  'thread/started',
-  'thread/status/changed',
-  'thread/closed',
-  'thread/settings/updated',
-  'thread/tokenUsage/updated',
-  'thread/compacted',
-  'turn/started',
-  'turn/completed',
-  'turn/plan/updated',
-  'item/started',
-  'item/completed',
-  'item/agentMessage/delta',
-  'item/reasoning/summaryTextDelta',
-  'item/reasoning/summaryPartAdded',
-  'item/commandExecution/outputDelta',
-  'item/fileChange/patchUpdated',
-  'item/mcpToolCall/progress',
-  'serverRequest/resolved',
-  'mcpServer/startupStatus/updated',
-  'account/updated',
-  'account/rateLimits/updated',
-];
+// Notifications the normaliser maps (its MAPPED_METHODS), plus the ones the
+// adapter itself reads although the normaliser ignores them.
+const ADAPTER_READS = ['thread/started', 'thread/status/changed', 'thread/closed', 'serverRequest/resolved'];
+export const USED_NOTIFICATIONS: string[] = [...new Set<string>([...MAPPED_METHODS, ...ADAPTER_READS])];
 
-// Notifications 0.164.0 has that Threadbare deliberately ignores. Anything
-// in neither list after an update is reported as `added`.
-export const IGNORED_NOTIFICATIONS = [
-  'thread/readState/changed',
-  'thread/archived',
-  'thread/deleted',
-  'thread/unarchived',
+// Notifications 0.164.0 has that Threadbare deliberately ignores: the
+// normaliser's IGNORED_METHODS, and the families nothing here touches
+// (realtime, goals, queues, fuzzy search, Windows). Anything in neither
+// list after an update is reported as `added`.
+const NOTHING_HERE_READS = [
   'thread/reverted',
-  'thread/name/updated',
   'thread/attachment/updated',
   'thread/goal/updated',
   'thread/goal/cleared',
@@ -63,33 +35,20 @@ export const IGNORED_NOTIFICATIONS = [
   'thread/environment/disconnected',
   'project/changed',
   'skills/changed',
-  'hook/started',
-  'hook/completed',
-  'turn/diff/updated',
-  'turn/moderationMetadata',
-  'item/autoApprovalReview/started',
-  'item/autoApprovalReview/completed',
   'autoApprovalReview/strictReviewRequired',
   'rawResponseItem/completed',
   'rawResponse/completed',
-  'item/plan/delta',
   'command/exec/outputDelta',
   'process/outputDelta',
   'process/exited',
-  'item/commandExecution/terminalInteraction',
-  'item/fileChange/outputDelta',
-  'item/reasoning/textDelta',
   'mcpServer/oauthLogin/completed',
   'mcpServer/event/stream/notification',
   'account/gatewayOAuth/changed',
   'account/login/completed',
   'app/list/updated',
-  'remoteControl/status/changed',
   'externalAgentConfig/import/progress',
   'externalAgentConfig/import/completed',
   'fs/changed',
-  'model/verification',
-  'model/safetyBuffering/updated',
   'modelProvider/authRecoveryStarted',
   'modelProvider/authRecoveryCompleted',
   'fuzzyFileSearch/sessionUpdated',
@@ -108,6 +67,7 @@ export const IGNORED_NOTIFICATIONS = [
   'windows/worldWritableWarning',
   'windowsSandbox/setupCompleted',
 ];
+export const IGNORED_NOTIFICATIONS: string[] = [...new Set<string>([...IGNORED_METHODS, ...NOTHING_HERE_READS])].filter((m) => !USED_NOTIFICATIONS.includes(m));
 
 // Requests the runner sends.
 export const CLIENT_REQUESTS = [
@@ -145,8 +105,8 @@ export const SERVER_REQUESTS = [
 // Requests Codex can send that the runner refuses with -32601 on purpose.
 export const REFUSED_SERVER_REQUESTS = ['account/chatgptAuthTokens/refresh', 'attestation/generate'];
 
-// ThreadItem types, with the fields the normaliser reads from each.
-export const ITEM_FIELDS: Record<string, string[]> = {
+// The fields the normaliser reads from each item type it maps.
+const FIELDS: Record<string, string[]> = {
   agentMessage: ['text', 'phase'],
   reasoning: ['summary'],
   commandExecution: ['command', 'cwd', 'processId', 'source', 'status', 'commandActions', 'aggregatedOutput', 'exitCode', 'durationMs'],
@@ -161,11 +121,13 @@ export const ITEM_FIELDS: Record<string, string[]> = {
   sleep: ['durationMs'],
   enteredReviewMode: ['review'],
   exitedReviewMode: ['review'],
-  contextCompaction: [],
 };
 
-// ThreadItem types deliberately not shown.
-export const IGNORED_ITEMS = ['userMessage', 'hookPrompt', 'functionCallOutput', 'plan'];
+// ThreadItem types the normaliser maps (MAPPED_ITEM_TYPES), with their fields.
+export const ITEM_FIELDS: Record<string, string[]> = Object.fromEntries(MAPPED_ITEM_TYPES.map((t) => [t, FIELDS[t] ?? []]));
+
+// ThreadItem types deliberately not shown (the normaliser's IGNORED_ITEM_TYPES).
+export const IGNORED_ITEMS: string[] = [...IGNORED_ITEM_TYPES];
 
 // Fields of other generated types (file name without .ts) that the runner
 // sends or reads.

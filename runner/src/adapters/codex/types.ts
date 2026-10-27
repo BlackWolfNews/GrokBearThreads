@@ -210,16 +210,22 @@ export type DynamicToolCallResponse = { contentItems: { type: 'inputText'; text:
 export type ExecCommandApprovalParams = { conversationId: string; callId: string; command: string[]; cwd: string; reason: string | null };
 export type ApplyPatchApprovalParams = { conversationId: string; callId: string; fileChanges: Record<string, unknown>; reason: string | null };
 
-// ---- The normaliser (section B owns the implementation, normalize.ts)
+// ---- The normaliser (section B's CodexNormalizer in normalize.ts)
 
-// Turns Codex notifications into adapter outputs. `from` marks traffic from
-// a subagent's thread, which arrives on the parent's connection. The adapter
-// is the authority on which turns are its own: it drops any `cliTurn` the
-// normaliser emits and emits its own for turns it didn't start, and it fills
-// in `own`, `answers`, `answered` and `queuedTurns` on every `result`.
-export interface CodexNormalizer {
-  handle(method: string, params: unknown, from?: { childThreadId: string }): AdapterOutput[];
-  // Closes items still open when a turn ends without turn/completed (the
-  // process died or was stopped).
+// What the session needs of a normaliser, so tests can wrap or replace it.
+// `from` marks traffic from a subagent's thread, which arrives on the
+// parent's connection. The adapter is the authority on which turns are its
+// own: it drops any `cliTurn` the normaliser emits and emits its own for
+// turns it didn't start, and it fills in `own`, `answers`, `answered` and
+// `queuedTurns` on every `result`. The hooks tell the normaliser the same,
+// so it keeps its own bookkeeping (usage per turn, userMessage echoes).
+export interface CodexNormalizerLike {
+  handle(method: string, params: any, from?: { childThreadId: string }): AdapterOutput[];
+  // Closes items still open when the session ends without Codex closing
+  // them (the process died or was stopped).
   closeOpen(reason: string): AdapterOutput[];
+  setThread?(threadId: string, model?: string): void;
+  startingTurn?(runnerId?: string): void;
+  turnAccepted?(codexTurnId: string): void;
+  steered?(runnerId: string): void;
 }

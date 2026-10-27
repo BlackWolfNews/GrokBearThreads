@@ -27,8 +27,9 @@ import {
 } from './appserver.ts';
 import { CodexApprovals } from './approvals.ts';
 import { CodexTools, dynamicToolSpecs, type ToolDefinition } from './tools.ts';
+import { CodexNormalizer, limitsFromAccount } from './normalize.ts';
 import type {
-  CodexNormalizer,
+  CodexNormalizerLike,
   GetAccountRateLimitsResponse,
   GetAccountResponse,
   ModelListResponse,
@@ -64,7 +65,7 @@ export const DEFAULT_CODEX_TIMINGS: CodexTimings = {
   terminateMs: 5000,
 };
 
-export type NormalizerFactory = (ctx: NormalizerContext, o: { threadId: string }) => CodexNormalizer;
+export type NormalizerFactory = (ctx: NormalizerContext, o: { threadId: string }) => CodexNormalizerLike;
 
 export type CodexAdapterDeps = {
   // What the next process starts (E's codexBinary(): Threadbare's own copy,
@@ -75,7 +76,8 @@ export type CodexAdapterDeps = {
   log: Logger;
   // The threadbare tools for a thread, given to new threads as dynamic tools.
   toolsFor?: (threadId: string) => ToolDefinition[];
-  normalizer: NormalizerFactory;
+  // Section B's CodexNormalizer unless a test passes its own.
+  normalizer?: NormalizerFactory;
   // A runner.notice warning (configWarning: a broken config.toml).
   onNotice?: (text: string) => void;
   timings?: Partial<CodexTimings>;
@@ -287,7 +289,7 @@ export class CodexSession implements AgentSession {
   private t: CodexTimings;
   private now: () => number;
   private proc: AppServerProcess;
-  private normalizer: CodexNormalizer;
+  private normalizer: CodexNormalizerLike;
   private ctx: NormalizerContext;
   private approvals: CodexApprovals;
   private tools: CodexTools;
@@ -336,7 +338,7 @@ export class CodexSession implements AgentSession {
     // read against the current one.
     const ctx: NormalizerContext = { ...base, readFile: (p) => base.readFile(path.isAbsolute(p) ? p : path.join(ctx.cwd, p)) };
     this.ctx = ctx;
-    this.normalizer = deps.normalizer(ctx, { threadId: opts.threadId });
+    this.normalizer = deps.normalizer ? deps.normalizer(ctx, { threadId: opts.threadId }) : new CodexNormalizer(ctx, { log: deps.log });
     this.tools = new CodexTools(deps.toolsFor?.(opts.threadId) ?? [], {
       requestApproval: (req) => this.sink.requestApproval(req),
       cwd: () => this.cwd,
@@ -415,6 +417,7 @@ export class CodexSession implements AgentSession {
     if (!thread || typeof thread.id !== 'string') throw new Error('Codex started a thread without an id');
     this.threadId = thread.id;
     this.sentCwd = opts.cwd;
+    this.normalizer.setThread?.(thread.id, typeof res.model === 'string' ? res.model : undefined);
     this.sink.output({ kind: 'session', nativeSessionId: thread.id, ...(typeof res.model === 'string' ? { model: res.model } : {}) });
     if (this.proc.version) this.sink.output({ kind: 'cliVersion', version: this.proc.version });
     if (isEffortLevel(res.reasoningEffort)) this.sink.output({ kind: 'effort', level: res.reasoningEffort });
@@ -461,17 +464,15 @@ export class CodexSession implements AgentSession {
     }
   }
 
-  // The account's login and limits, read once per process. The answers go
-  // through the normaliser as if Codex had sent them, so it makes `limits`.
+  // The account's login and limits, read once per process. The limits go
+  // through the normaliser as a merged account/rateLimits/updated, so later
+  // partial updates land on top of them.
   private readAccount(): void {
     this.proc
       .request<GetAccountResponse>('account/read', {})
       .then((r) => {
-        const a = r?.account;
-        if (!a) return;
-        const params: Record<string, unknown> = { authMode: a.type ?? null, planType: a.planType ?? null };
-        if (typeof a.email === 'string' && a.email) params.email = a.email;
-        this.enqueue(() => this.toNormalizer('account/updated', params));
+        const l = limitsFromAccount(r as never);
+        if (l) this.enqueue(() => this.sink.output(l));
       })
       .catch((e: unknown) => this.deps.log.debug('account/read failed', { threadId: this.opts.threadId, error: errText(e) }));
     this.proc
@@ -721,6 +722,7 @@ export class CodexSession implements AgentSession {
     this.state = 'turnPending';
     const params = this.turnParams(input);
     if (params.cwd) this.sentCwd = params.cwd;
+    this.normalizer.startingTurn?.(input.id);
     this.turnStart(params)
       .then((res) => this.enqueue(() => this.turnStartAnswered(turn, res)))
       .catch((e: unknown) => this.enqueue(() => this.turnStartFailed(turn, e)));
@@ -747,7 +749,10 @@ export class CodexSession implements AgentSession {
   private turnStartAnswered(turn: ActiveTurn, res: TurnStartResponse): void {
     if (this.turn !== turn) return;
     const id = res?.turn?.id;
-    if (typeof id === 'string' && !turn.codexTurnId) turn.codexTurnId = id;
+    if (typeof id === 'string') {
+      if (!turn.codexTurnId) turn.codexTurnId = id;
+      this.normalizer.turnAccepted?.(id);
+    }
     this.activate(turn);
   }
 
@@ -811,7 +816,10 @@ export class CodexSession implements AgentSession {
         input: inputItems(input),
       })
       .then(() => {
-        if (input.id) turn.ids.push(input.id);
+        if (input.id) {
+          turn.ids.push(input.id);
+          this.normalizer.steered?.(input.id);
+        }
       })
       .catch((e: unknown) => {
         this.deps.log.info('codex refused a steer; holding the message for the next turn', { threadId: this.opts.threadId, error: errText(e) });

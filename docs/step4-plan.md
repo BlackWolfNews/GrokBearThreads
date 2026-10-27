@@ -636,12 +636,12 @@ These unit tests merge before C. The e2e (Tests, below) is a second A change, me
 
 Where the build made a call the plan didn't, or differs from it:
 
-- **The normaliser is injected.** `CodexAdapterDeps.normalizer: (ctx, {threadId}) => CodexNormalizer` (the interface is in `codex/types.ts`), so A doesn't import B's file. C wires it in `main.ts` with B's class. The context's `cwd` follows `setCwd`.
+- **The normaliser is B's `CodexNormalizer`** by default. `CodexAdapterDeps.normalizer` is optional (tests pass a spy that wraps it), so C builds `new CodexAdapter({codexBinary, codexArgs, registry, log, toolsFor})` with nothing more. The session calls `setThread`, `startingTurn`, `turnAccepted` and `steered` (`CodexNormalizerLike` in `codex/types.ts`). The context's `cwd` follows `setCwd`.
 - **A owns turn ownership.** The adapter drops every `cliTurn` and `result` the normaliser emits. It emits its own `cliTurn` for a turn it didn't start, and builds each `result` from the normaliser's (outcome, duration, usage, error, `errorKind`), setting `own`, `answers`, `answered` and `queuedTurns` itself. B can always emit a `result` on `turn/completed` without knowing whose turn it was. If B emits none, A makes a plain one from `turn.status`.
 - **What A feeds the normaliser besides Codex's own notifications:**
-  - `account/read` goes in as `account/updated {authMode, planType, email?}`;
+  - `account/read` becomes a `limits` reading through B's `limitsFromAccount` (email and plan);
   - the start-up `account/rateLimits/read` and every update go in as `account/rateLimits/updated` with the merged snapshot `{ordinaryUsageAllowed, rateLimits, rateLimitsByLimitId}` (updates are merged per `limitId`, and nulls keep what was known);
-  - a line over the guard goes in as `threadbare/oversizedLine {bytes, method?, threadId?, turnId?, itemId?, itemType?}` (`OVERSIZED_LINE` in `appserver.ts`), routed like a notification, so B can close that item as "Too large to show";
+  - a line over the guard goes in as `threadbare/oversizedLine {bytes, method?, threadId?, turnId?, itemId?, itemType?}` (B's `OVERSIZED_LINE`), routed like a notification (with `from` for a child's), so B closes that item as "Too large to show";
   - `closeOpen("Interrupted")` on every exit, so a background terminal left open from an earlier turn gets closed too.
 - **`configWarning`** also calls `CodexAdapterDeps.onNotice(text)`, at most once per adapter (runner run) per text. C wires it to a `runner.notice` warning.
 - **Approval card titles** use the whole unwrapped command, not `commandActions[0].command`, so a chained command shows all of it.
@@ -651,7 +651,7 @@ Where the build made a call the plan didn't, or differs from it:
 - **An interrupt whose command can't be terminated** emits the normaliser's outputs except the `result`, then ends the process. `exited()` closes the runner's turn as interrupted, and the next message resumes.
 - **Effort or model set back to unset** in a session sends the account's `defaultEffort`, else the model's own (or the account's `defaultModel`), because Codex keeps the last value sent.
 - **Resume** knows the thread id before `thread/resume`, so its own `notLoaded`/`idle` route while `resumePending` is set. Thread traffic before `thread/start` answers is held, then routed.
-- **For C and E:** `CodexAdapter.binariesInUse()` gives `codexBinariesInUse()`. `resolveCodexBinary(start)` returns `{command, args, native, packageRoot?}` (`native: true` when it found the binary behind the launcher), and `nativeBinaryFor(launcher)` and `fallbackCodexPath()` are exported too. `checkSurface(dir)` and `testedVersion` are in `surface.ts`. `toolsFor` takes `buildThreadbareTools(...)`'s array as is (`ToolDefinition` in `tools.ts`).
+- **For C and E:** `CodexAdapter.binariesInUse()` gives `codexBinariesInUse()`. `resolveCodexBinary(start)` returns `{command, args, native, packageRoot?}` (`native: true` when it found the binary behind the launcher), and `nativeBinaryFor(launcher)` and `fallbackCodexPath()` are exported too. `checkSurface(dir)` and `testedVersion` are in `surface.ts`, which takes its item and method lists from B's `MAPPED_*` and `IGNORED_*` exports, plus what the adapter reads itself and the 0.164.0 families nothing reads. `toolsFor` takes `buildThreadbareTools(...)`'s array as is (`ToolDefinition` in `tools.ts`).
 
 ## B. Codex events and images (`normalize.ts`, `media.ts`)
 

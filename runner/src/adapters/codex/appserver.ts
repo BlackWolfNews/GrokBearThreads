@@ -13,6 +13,7 @@ import { groupSpawner, groupAlive, killGroup, type ProcessRegistry } from '../..
 import { RUNNER_VERSION } from '../../config.ts';
 import { cliEnv } from '../claude/adapter.ts';
 import { refusal } from './approvals.ts';
+import { OVERSIZED_LINE } from './normalize.ts';
 import type {
   GetAccountRateLimitsResponse,
   InitializeParams,
@@ -175,7 +176,7 @@ const PEEK = 64 * 1024;
 // hands it to the normaliser as OVERSIZED_LINE, so the item it completed is
 // closed as "Too large to show" and nothing else fails.
 export type OversizedLine = { bytes: number; method?: string; threadId?: string; turnId?: string; itemId?: string; itemType?: string };
-export const OVERSIZED_LINE = 'threadbare/oversizedLine';
+export { OVERSIZED_LINE };
 
 export class LineReader {
   private chunks: Buffer[] = [];
