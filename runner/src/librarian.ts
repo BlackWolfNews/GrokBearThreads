@@ -612,10 +612,13 @@ export class Librarian {
     if (this.day.date !== date) this.day = { date, looks: 0, spentUsd: 0 };
   }
 
-  // The repo a file belongs to (the nearest folder with .git), else its folder.
+  // The repo a file belongs to (the nearest folder with .git), else its
+  // folder. A git worktree counts as its main checkout: worktrees come and
+  // go, and the main one is where the project's patches live.
   private repoOf(file: string): string {
     const dir = path.dirname(file);
-    return findUp(dir, this.home, (d) => fs.existsSync(path.join(d, '.git'))) ?? dir;
+    const repo = findUp(dir, this.home, (d) => fs.existsSync(path.join(d, '.git')));
+    return repo ? mainCheckout(repo) : dir;
   }
 
   private isRepo(dir: string): boolean {
@@ -626,6 +629,7 @@ export class Librarian {
   // of its own, never home or a catch-all folder of repos.
   private isProjectFolder(dir: string): boolean {
     if (dir === this.home || !isInside(dir, this.home)) return false;
+    if (mainCheckout(dir) !== dir) return false;
     try {
       if (!fs.statSync(dir).isDirectory()) return false;
     } catch {
@@ -643,6 +647,21 @@ export class Librarian {
   private tilde(p: string): string {
     return p === this.home || p.startsWith(this.home + path.sep) ? '~' + p.slice(this.home.length) : p;
   }
+}
+
+// The main checkout of a git worktree (its .git is a file naming
+// <main>/.git/worktrees/<name>), else the folder itself.
+export function mainCheckout(dir: string): string {
+  try {
+    const text = fs.readFileSync(path.join(dir, '.git'), 'utf8');
+    const m = /^gitdir:\s*(.+?)\s*$/m.exec(text);
+    const gitdir = m ? path.resolve(dir, m[1]) : undefined;
+    const marker = `${path.sep}.git${path.sep}worktrees${path.sep}`;
+    if (gitdir && gitdir.includes(marker)) return gitdir.slice(0, gitdir.indexOf(marker));
+  } catch {
+    // A .git folder (EISDIR) or none: the folder is its own checkout.
+  }
+  return dir;
 }
 
 const PROJECT_MARKERS = ['.git', 'package.json', 'Package.swift', 'pyproject.toml', 'Cargo.toml', 'go.mod', 'AGENTS.md', 'CLAUDE.md'];
