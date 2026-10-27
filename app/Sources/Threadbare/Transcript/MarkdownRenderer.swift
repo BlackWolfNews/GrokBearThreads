@@ -405,6 +405,19 @@ enum MarkdownRenderer {
 
         // MARK: Inlines
 
+        /// Marks thread-id-shaped words appended since `start`. Whether one
+        /// is a real thread is only known when it's drawn (the thread list
+        /// changes; renders are cached by their text), so this is just the
+        /// shape. A link keeps its own destination.
+        func markThreadRefs(from start: Int, _ context: Context) {
+            guard context.link == nil, output.length > start else { return }
+            let text = output.mutableString.substring(from: start)
+            for found in ThreadRefs.candidates(in: text) {
+                let range = NSRange(location: start + found.location, length: found.length)
+                output.addAttribute(.tbThreadRef, value: output.mutableString.substring(with: range), range: range)
+            }
+        }
+
         mutating func inlines(_ children: MarkupChildren, _ context: Context) {
             for child in children { inline(child, context) }
         }
@@ -412,7 +425,9 @@ enum MarkdownRenderer {
         mutating func inline(_ markup: Markup, _ context: Context) {
             switch markup {
             case let text as Markdown.Text:
+                let start = output.length
                 append(text.string, context)
+                markThreadRefs(from: start, context)
             case let emphasis as Emphasis:
                 var inner = context
                 inner.italic = true
@@ -437,6 +452,7 @@ enum MarkdownRenderer {
                     output.addAttribute(.kern, value: MarkdownRenderer.pillKern, range: NSRange(location: start - 1, length: 1))
                 }
                 append(code.code, inner)
+                markThreadRefs(from: start, context)
                 if output.length > start {
                     output.addAttribute(.kern, value: MarkdownRenderer.pillKern, range: NSRange(location: output.length - 1, length: 1))
                 }

@@ -37,6 +37,10 @@ final class AppModel {
         didSet {
             refreshDockBadge()
             noteFailedAccounts(from: oldValue)
+            // Most updates change a thread, not which threads there are.
+            if threads.count != oldValue.count || threads.keys.contains(where: { oldValue[$0] == nil }) {
+                ThreadChips.update(threads.keys)
+            }
         }
     }
     /// For a thread whose last turn failed: the account it failed on, as it
@@ -480,6 +484,20 @@ final class AppModel {
         if let thread = threads[threadId], thread.needsYou || thread.lastSeq > thread.lastSeenSeq {
             scheduleMarkSeen(threadId)
         }
+    }
+
+    /// Opens a thread from a chip in a reply, showing the sidebar list it's
+    /// in (Archive or Hibernating for one that's put away).
+    func openThread(_ threadId: String) {
+        guard let thread = threads[threadId] else { return }
+        if thread.isArchived {
+            if sidebarMode != .archive { showArchive() }
+        } else if let until = thread.snoozedUntil, until > Date() {
+            sidebarMode = .snoozed
+        } else {
+            sidebarMode = .inbox
+        }
+        select(threadId)
     }
 
     /// Shows a sub-agent's transcript. Its thread becomes the selection.

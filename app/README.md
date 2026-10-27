@@ -456,6 +456,7 @@ is an error. Commands marked "the open thread" act on `id` when it's given
 | `expand`, `collapse` | `row`, `file`, `all` | a group, tool, thinking block or settled approval (one folded in a closed group opens it); `file` (path or index) in a changes card; `all` for a whole diff |
 | `scroll` | `to` (`top`, `bottom`) or `row`, `offset` | |
 | `hover` | `id` (sidebar) or `row` (transcript); neither clears | draws a row as if the pointer were on it |
+| `chip` | `row`, `word`, `show`, `click` | thread chips in a row's text: lists them (word=thread id); with `word`, `show` true shows its hover card and says its window number, false closes it, `click` true opens its thread |
 | `menu` | `row`, `click` | a transcript row's context menu, or chooses an item from it |
 | `debug-info`, `copy-thread-id`, `clipboard` | `row`, `id` | what "Copy debug info" and "Copy thread id" (the open thread) copy, copied to the instance's pasteboard as the menu items do; `clipboard` reads it back |
 | `appearance`, `resize` | `mode` (light, dark, system); `w`, `h` | |

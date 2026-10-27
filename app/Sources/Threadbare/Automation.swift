@@ -426,6 +426,8 @@ enum Automation {
             return "ok \(zoom.percent)"
         case "hover":
             return hover(c, app: app)
+        case "chip":
+            return chip(c, app: app)
         case "account-ids":
             // For screenshots: accounts are titled by their email address,
             // so show their ids instead. Lasts until the next reconnect.
@@ -739,6 +741,34 @@ enum Automation {
         guard let id = match.id else { return match.error }
         app.hoverOverride = id
         return "ok \(id)"
+    }
+
+    /// Thread chips in a transcript row's text: `{"row": id}` lists them
+    /// (word, then the thread it opens); with `"word"`, `"show": true`
+    /// shows that chip's hover card (and says its window number, for
+    /// `screencapture -l`), `false` closes it, and `"click": true` clicks it.
+    private static func chip(_ c: [String: Any], app: AppModel) -> String {
+        guard let prefix = c["row"] as? String else { return "error row is required" }
+        guard let row = displayedRow(prefix, app), let index = app.transcript.session?.displayIndex(of: row.id) else { return "error no such row" }
+        app.transcript.scroll(toRow: index, offset: 120)
+        guard let cell = app.transcript.tableView.view(atColumn: 0, row: index, makeIfNecessary: true) as? TextRowCell else {
+            return "error \(row.id) isn't a text row"
+        }
+        let chips = cell.textView.debugChips()
+        guard let word = c["word"] as? String else {
+            return chips.isEmpty ? "ok none" : "ok " + chips.map { "\($0.word)=\($0.threadId)" }.joined(separator: " ")
+        }
+        guard chips.contains(where: { $0.word == word }) else { return "error \(word) isn't a chip in \(row.id)" }
+        if c["click"] as? Bool == true {
+            cell.textView.debugClickChip(word)
+            return "ok opened \(app.selection ?? "nothing")"
+        }
+        if c["show"] as? Bool == false {
+            cell.textView.closeChipCard()
+            return "ok"
+        }
+        guard let window = cell.textView.debugShowChip(word) else { return "error the card didn't show" }
+        return "ok window \(window)"
     }
 
     /// A row's context menu: `{"row": id}` lists its items, and with

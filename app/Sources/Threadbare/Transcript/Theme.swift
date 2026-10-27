@@ -222,6 +222,14 @@ enum Theme {
         return NSColor(srgbRed: mix(accent.redComponent), green: mix(accent.greenComponent), blue: mix(accent.blueComponent), alpha: alpha)
     }
 
+    /// A thread chip (a thread id in a reply that names a real thread):
+    /// accent text on a faint accent pill, since it opens on a click.
+    static let chipBackground = NSColor(name: nil) { appearance in
+        let dark = appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+        return NSColor.controlAccentColor.withAlphaComponent(dark ? 0.2 : 0.12)
+    }
+    static let chipText = NSColor.controlAccentColor
+
     /// Diff line tints: about 11%, so a diff isn't the loudest thing on screen.
     static let addedBackground = dynamic(dark: NSColor(srgbRed: 0.25, green: 0.78, blue: 0.4, alpha: 0.12),
                                          light: NSColor(srgbRed: 0.1, green: 0.62, blue: 0.25, alpha: 0.1))
@@ -288,4 +296,7 @@ extension NSAttributedString.Key {
     /// Clicking the run does something in its row ("Show 30 more lines"):
     /// the value is passed to the text view's `onAction`.
     static let tbAction = NSAttributedString.Key("tbAction")
+    /// A word shaped like a thread id (`ThreadRefs`). The value is the word;
+    /// it's drawn as a chip only if it names a thread (`ThreadChips`).
+    static let tbThreadRef = NSAttributedString.Key("tbThreadRef")
 }
