@@ -285,6 +285,10 @@ export class RpcServer {
         }
         return r.update(upd);
       }
+      case 'threads.retitle': {
+        if (p.dryRun !== undefined && typeof p.dryRun !== 'boolean') throw bad('dryRun must be a boolean');
+        return r.retitle({ dryRun: p.dryRun === true });
+      }
       case 'threads.delete':
         return r.delete(reqString(p, 'threadId'));
       case 'threads.events':
