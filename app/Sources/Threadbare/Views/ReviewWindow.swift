@@ -118,7 +118,7 @@ final class ReviewWindowController: NSWindowController, NSWindowDelegate {
     func present() {
         #if DEBUG
         if Automation.instanceId != nil {
-            window?.orderBack(nil)
+            window?.tuckBehind()
             return
         }
         #endif

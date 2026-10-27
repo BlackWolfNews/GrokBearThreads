@@ -119,7 +119,7 @@ enum Automation {
             try? await Task.sleep(for: .milliseconds(15))
         }
         guard let window = mainWindow else { return }
-        window.orderBack(nil)
+        window.tuckBehind()
         // Sizes set by a script aren't the user's: never saved as the
         // window's frame (a bundle that shares the installed app's id would
         // otherwise reopen Mike's window at them).
@@ -180,7 +180,7 @@ enum Automation {
             try? await Task.sleep(for: .milliseconds(15))
         }
         guard let window = SettingsWindow.current, window.isVisible else { return "error the Settings window didn't open" }
-        window.orderBack(nil)
+        window.tuckBehind()
         // Let the tab switch and the window's new height settle.
         try? await Task.sleep(for: .milliseconds(400))
         let shown: String
@@ -1112,7 +1112,7 @@ enum Automation {
         if c["save"] as? Bool == true { await session.saveNow() }
         if c["submit"] as? Bool == true { await session.submit() }
         if c["cancel"] as? Bool == true { await session.cancelReview() }
-        controller.window?.orderBack(nil)
+        controller.window?.tuckBehind()
         try? await Task.sleep(for: .milliseconds(250))
         return "ok " + json([
             "id": session.review.id, "window": controller.window?.windowNumber ?? 0,
