@@ -3,7 +3,8 @@
 // THREADBARE_PORT pointing at temp places.
 import fs from 'node:fs';
 import { loadConfig, ensureHome, readToken, paths, recordListening, DEFAULT_CWD, RUNNER_VERSION } from './config.ts';
-import { RELEASE, markGoodLater, takeRollbackNotice, tellLaunchListening } from './release.ts';
+import { RELEASE, markGoodLater, readRelease, takeRollbackNotice, tellLaunchListening } from './release.ts';
+import { RunnerUpdater } from './update.ts';
 import { Restarter, restartMethods } from './restart.ts';
 import { createLogger } from './log.ts';
 import { ThreadStore } from './store.ts';
@@ -94,6 +95,18 @@ async function main(): Promise<void> {
     rolledBack,
     rolledBackFrom: rollback?.from,
     restart: () => void stop('restart'),
+    updateStatus: () => updater.status(),
+  });
+  // Follows main once this release has been marked good (below).
+  const updater = new RunnerUpdater({
+    home: cfg.home,
+    release: readRelease(),
+    enabled: cfg.followMain,
+    clock: realClock,
+    log,
+    notice: (level, message) => runner.notice(level, message),
+    restart: (p) => restarter.request({ when: 'idle', ...p }),
+    pendingRestart: () => Boolean(restarter.status().pendingRestart),
   });
 
   const server = new RpcServer({
@@ -121,7 +134,10 @@ async function main(): Promise<void> {
   // Tests read this line to know the runner is up.
   process.stdout.write(`threadbare-runner listening on ${port}\n`);
   tellLaunchListening();
-  const cancelMarkGood = markGoodLater(cfg.home, RELEASE.release, log, process.env, () => restarter.proven());
+  const cancelMarkGood = markGoodLater(cfg.home, RELEASE.release, log, process.env, () => {
+    restarter.proven();
+    updater.start();
+  });
   // Only once listening: a runner that can't listen exits, and the next
   // one should still find the resume.
   restarter.resumeAfterRestart();
@@ -131,6 +147,7 @@ async function main(): Promise<void> {
     if (stopping) return;
     stopping = true;
     cancelMarkGood();
+    updater.stop();
     log.info('runner stopping', { signal });
     // Whatever stopped it, a pending restart has now happened.
     restarter.stopping();

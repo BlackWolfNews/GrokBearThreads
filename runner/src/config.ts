@@ -33,6 +33,10 @@ export type Config = {
   claudeMainDir: string;
   claudeMainJson: string;
   tokenStatsAccountsDir: string;
+  // A runner on a release builds and restarts onto main by itself
+  // (src/update.ts). Off with followMain: false in runner.json or
+  // THREADBARE_FOLLOW_MAIN=0.
+  followMain: boolean;
 };
 
 export type RunnerJson = {
@@ -41,6 +45,7 @@ export type RunnerJson = {
   claudePath?: string;
   idleMinutes?: number;
   maxLiveCLIs?: number;
+  followMain?: boolean;
 };
 
 export function defaultHome(): string {
@@ -103,6 +108,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     tokenStatsAccountsDir: expandHome(
       env.THREADBARE_ACCOUNTS_DIR || '~/Library/Application Support/Token Stats/Accounts',
     ),
+    followMain: env.THREADBARE_FOLLOW_MAIN ? env.THREADBARE_FOLLOW_MAIN !== '0' : json.followMain !== false,
   };
 }
 

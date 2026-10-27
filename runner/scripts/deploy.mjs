@@ -573,6 +573,16 @@ function branchProblem(c, g) {
   return `${where} and main have each moved on; this release would ship unmerged work and leave out some of main.`;
 }
 
+// The object hashes of what a release holds, at HEAD, joined. The runner's
+// src/update.ts computes the same for main, so a commit that only touches
+// tests, scripts or docs isn't an update.
+function releaseTree(g) {
+  const r = spawnSync('git', ['-C', g.root, 'ls-tree', 'HEAD', '--', ...RELEASE_PATHS.map((p) => g.prefix + p)], { encoding: 'utf8' });
+  if (r.status !== 0) return undefined;
+  const hashes = r.stdout.split('\n').filter(Boolean).map((line) => line.split(/\s+/)[2]);
+  return hashes.length ? hashes.join('+') : undefined;
+}
+
 function newReleaseId(c, short, dirty) {
   for (;;) {
     const stamp = new Date().toISOString().replace(/[-:]/g, '').replace(/\.\d+Z$/, 'Z');
@@ -683,9 +693,16 @@ function build(c, id, g, dirty) {
   else snapshotHead(c, g, tmp);
   if (!fs.existsSync(path.join(tmp, 'src', 'main.ts'))) throw new Fail(`The snapshot has no src/main.ts; is ${c.runnerDir} the runner?`);
   installPackages(c, tmp);
+  // checkout, prefix and tree are for the runner following main by itself
+  // (src/update.ts); a dirty build has no tree, since its files aren't HEAD's.
+  const tree = dirty ? undefined : releaseTree(g);
   fs.writeFileSync(
     path.join(tmp, 'release.json'),
-    JSON.stringify({ id, commit: g.commit, branch: g.branch, dirty, builtAt: new Date().toISOString(), node: process.versions.node }, null, 2) + '\n',
+    JSON.stringify(
+      { id, commit: g.commit, branch: g.branch, dirty, builtAt: new Date().toISOString(), node: process.versions.node, checkout: g.root, prefix: g.prefix, ...(tree ? { tree } : {}) },
+      null,
+      2,
+    ) + '\n',
   );
   fs.renameSync(tmp, path.join(c.releases, id));
 }

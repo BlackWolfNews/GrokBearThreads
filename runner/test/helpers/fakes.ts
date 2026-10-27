@@ -128,6 +128,7 @@ export function testConfig(home: string, extra: Partial<Config> = {}): Config {
     claudeMainDir: path.join(home, 'no-claude-main'),
     claudeMainJson: path.join(home, 'no-claude-main.json'),
     tokenStatsAccountsDir: path.join(home, 'no-accounts'),
+    followMain: false,
     ...extra,
   };
 }

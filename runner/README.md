@@ -249,7 +249,8 @@ holds the live runner's restart, so stop it before a deploy.
   "defaults": { "cwd": "~/dev/me/misc", "accountId": "claude-3", "model": "claude-haiku-5-5" },
   "claudePath": "~/.local/bin/claude",
   "idleMinutes": 30,
-  "maxLiveCLIs": 6
+  "maxLiveCLIs": 6,
+  "followMain": true
 }
 ```
 
@@ -259,6 +260,9 @@ a thread is created on, or moved to, an account, so new threads start on
 the last one used. `defaults.model` is optional: a new thread that names no
 model gets it, rather than the account's default (`hello` reports it). The
 installed runner leaves it out; `scripts/dev-runner.sh` sets it.
+`followMain` (default true) lets a runner that runs from a release build
+and restart onto main by itself (`docs/dev-tools.md`, "The runner updating
+itself"); `THREADBARE_FOLLOW_MAIN=0` does the same for one run.
 
 Environment variables, mainly for tests:
 

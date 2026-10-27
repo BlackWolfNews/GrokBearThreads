@@ -12,6 +12,7 @@ import { RunnerClient } from '../../src/client.ts';
 import { readToken } from '../../src/config.ts';
 import { nullLogger } from '../../src/log.ts';
 import type { PersistedEvent, ThreadSummary } from '../../src/protocol.ts';
+import type { RunnerStatus } from '../../src/restart.ts';
 
 const TB = path.resolve(import.meta.dirname, '..', '..', 'bin', 'tb');
 const MOCK = path.join(import.meta.dirname, '..', '..', '..', 'app', 'Tools', 'mock-runner');
@@ -736,4 +737,19 @@ test("tb rpc keeps tb's guards, flag errors never offer --force, and a resume th
   } finally {
     await server.close();
   }
+});
+
+test('formatStatus: the line for the runner following main', () => {
+  const now = Date.parse('2026-10-27T12:00:00.000Z');
+  const base = { version: '0.1.0+r1', pid: 1, startedAt: '2026-10-27T11:00:00.000Z', home: '/h', liveClis: 0, running: [] };
+  const line = (update: NonNullable<RunnerStatus['update']>) => formatStatus({ ...base, update }, [], now).trim().split('\n').at(-1);
+  assert.equal(line({ state: 'off', reason: 'running from a checkout, not a release' }), 'Following main: off (running from a checkout, not a release)');
+  assert.equal(line({ state: 'idle', commit: 'bbabc59abcdef', checkedAt: '2026-10-27T11:58:00.000Z' }), 'Following main: up to date at bbabc59, checked 2m ago');
+  assert.equal(line({ state: 'building', commit: 'bbabc59abcdef' }), 'Following main: building a release of main at bbabc59');
+  assert.equal(line({ state: 'waiting', commit: 'bbabc59abcdef', release: '20261027T120000Z-bbabc59' }), 'Following main: release 20261027T120000Z-bbabc59 of main at bbabc59 is built and starts on the pending restart');
+  assert.equal(
+    line({ state: 'failed', commit: 'bbabc59abcdef', checkedAt: '2026-10-27T11:58:00.000Z', reason: 'Unit tests failed', logFile: '/h/runner/update.log' }),
+    'Following main: the build of main at bbabc59 failed, checked 2m ago: Unit tests failed (output in /h/runner/update.log)',
+  );
+  assert.ok(!formatStatus(base, [], now).includes('Following main'), 'an older runner says nothing');
 });

@@ -415,7 +415,29 @@ export function formatStatus(s: RunnerStatus, threads: ThreadSummary[], now: num
     if (p.reason) lines.push(`  Reason: ${p.reason}`);
     if (p.resumeThreadId) lines.push(`  Then carries on: ${threadLine(p.resumeThreadId, threads, self)}`);
   }
+  const u = s.update;
+  if (u) lines.push(formatUpdate(u, now));
   return lines.join('\n') + '\n';
+}
+
+// The runner following main by itself (src/update.ts), one line.
+function formatUpdate(u: NonNullable<RunnerStatus['update']>, now: number): string {
+  const checked = u.checkedAt ? `, checked ${duration(now - Date.parse(u.checkedAt))} ago` : '';
+  const at = u.commit ? ` at ${u.commit.slice(0, 7)}` : '';
+  switch (u.state) {
+    case 'off':
+      return `Following main: off${u.reason ? ` (${u.reason})` : ''}`;
+    case 'checking':
+      return `Following main: checking it now`;
+    case 'building':
+      return `Following main: building a release of main${at}`;
+    case 'waiting':
+      return `Following main: release ${u.release ?? '?'} of main${at} is built and starts on the pending restart`;
+    case 'failed':
+      return `Following main: the build of main${at} failed${checked}: ${u.reason ?? 'unknown error'}${u.logFile ? ` (output in ${u.logFile})` : ''}`;
+    default:
+      return `Following main: up to date${at}${checked}`;
+  }
 }
 
 function access(t: ThreadSummary): string {

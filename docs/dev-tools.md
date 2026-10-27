@@ -277,3 +277,37 @@ isn't in the app (reopening the thread he had open).
 Only `app/` counts: a runner or docs commit doesn't rebuild the app. The
 build is `nice`d and uses its own scratch folder, so it never waits on or
 disturbs an agent's `swift build` in the checkout.
+
+## The runner updating itself
+
+Added 2026-10-27, the same day. A runner that runs from a release follows
+main too (`runner/src/update.ts`). Starting 30 seconds after its release
+is marked good, and every five minutes after that, it brings its own clone
+of the checkout it was built from (`release.json`'s `checkout`, under
+`<home>/runner/update/src`) to main and compares what a release holds of
+`runner/` there (`src`, `bin`, `package.json`, `package-lock.json`: the
+`tree` in `release.json`, the joined `git ls-tree` hashes) with what's
+running. A commit that only touches tests, scripts or docs changes nothing.
+When main differs it runs `deploy.mjs --no-restart` from the clone, which
+is the deploy script's own steps (typecheck and unit tests in the clone,
+snapshot, smoke test, point `current` at the release) and nothing from
+the working tree, then asks `runner.restart` for the usual restart once no
+thread is busy (background work holds it 30 minutes at most) with the
+reason "Updating to main at <short>: <subject>". `launch.mjs`'s crash
+rollback covers a release that doesn't come up.
+
+- A build that fails is said once (a `runner.notice` warning, and `tb
+  status`), kept in `<home>/runner/update.json`, and not tried again until
+  main changes; its output is in `<home>/runner/update.log`. A tree whose
+  release crashed at startup isn't built again either. A deploy that
+  couldn't run (another deploy holds the lock) is just tried next time.
+- Nothing happens while a restart is pending, while `current` names a
+  release that hasn't started yet, from a runner run from a checkout, or
+  from a release built before `release.json` recorded its checkout (deploy
+  once by hand, or reinstall, to get one that does).
+- `followMain: false` in `runner.json`, or `THREADBARE_FOLLOW_MAIN=0`,
+  switches it off. `runner.status` reports it as `update`; `tb status`
+  shows the line.
+- `deploy-runner.sh` still works as before, for a deploy that shouldn't wait
+  five minutes, a branch, or a dirty build; the updater sees the release
+  waiting and stays out of the way until it's running.

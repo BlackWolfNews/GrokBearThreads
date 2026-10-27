@@ -17,6 +17,7 @@ import { atomicWriteFileSync, readJsonSync } from './fsutil.ts';
 import { paths, RUNNER_VERSION } from './config.ts';
 import { currentLink, pointCurrentAt, readState, releaseExists } from './release.ts';
 import type { TimerHandle } from './clock.ts';
+import type { UpdateStatus } from './update.ts';
 
 export type RestartWhen = 'idle' | 'now';
 export type ResumeRequest = { threadId: string; text: string };
@@ -80,6 +81,8 @@ export type RunnerStatus = {
   // which kept crashing at startup. A deploy's health check can pass before
   // the crash, so tb status says so for as long as it holds.
   rolledBack?: { from: string; at: string };
+  // The runner following main by itself (src/update.ts).
+  update?: UpdateStatus;
 };
 
 export const RESUME_MAX_AGE_MS = 15 * 60_000;
@@ -139,6 +142,7 @@ export type RestarterDeps = {
   // the new one, so its note says so.
   rolledBack?: string;
   rolledBackFrom?: string; // the release launch.mjs went back from
+  updateStatus?: () => UpdateStatus | undefined;
   // The idle check and the restart run after the current tick: a turn that
   // ends and the queued message that starts straight after it never look
   // idle, and the runner.restart reply goes out before the runner stops.
@@ -268,6 +272,8 @@ export class Restarter {
     const rolledBack = this.rolledBackOnto();
     if (rolledBack) out.rolledBack = rolledBack;
     if (this.deps.logFile) out.logFile = this.deps.logFile;
+    const update = this.deps.updateStatus?.();
+    if (update) out.update = update;
     const p = this.pending;
     if (p) {
       const pr: NonNullable<RunnerStatus['pendingRestart']> = { when: p.when, requestedAt: p.requestedAt, waitingFor: p.when === 'now' || this.restarting ? [] : this.busy() };

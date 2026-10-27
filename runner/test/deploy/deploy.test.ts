@@ -237,6 +237,11 @@ test('install-runner.sh builds the first release and starts it through launch.mj
   assert.equal(info.dirty, false);
   assert.equal(info.node, process.versions.node);
   assert.ok(Date.parse(info.builtAt) > 0);
+  // For the runner following main by itself (src/update.ts).
+  assert.equal(info.checkout, repo);
+  assert.equal(info.prefix, 'runner/');
+  const lsTree = git('ls-tree', 'HEAD', '--', 'runner/src', 'runner/bin', 'runner/package.json', 'runner/package-lock.json');
+  assert.equal(info.tree, lsTree.split('\n').map((l) => l.split(/\s+/)[2]).join('+'));
   for (const f of ['src/main.ts', 'bin/tb', 'package.json', 'package-lock.json']) {
     assert.ok(fs.existsSync(path.join(runnerDir(), 'releases', first, f)), f);
   }

@@ -52,7 +52,13 @@ if `tb` isn't found (an older runner, or outside a thread), use
   Stop it with the `kill <pid>` it prints, never
   `pkill`, and before you deploy or end your turn: the live runner's restart
   waits for it. Its temp data dir goes with it (`--keep` keeps it).
-- To ship a runner change, merge it to main, then from main run
+- To ship a runner change, merge it to main. The live runner follows main
+  by itself: within about five minutes it builds a release of main
+  (`src/update.ts`, the deploy script's steps from its own clone) and
+  restarts onto it once no thread is busy, which ends your turn if it's
+  still running then (`tb status` shows the update's state and the
+  pending restart; `tb logs` the result). To ship it sooner, or to get a
+  resume into this thread afterwards, run from main
   `runner/scripts/deploy-runner.sh --dry-run` and
   `runner/scripts/deploy-runner.sh`, which ships HEAD of this checkout.
   When it says so, end your turn: the runner restarts once no thread is
@@ -61,7 +67,9 @@ if `tb` isn't found (an older runner, or outside a thread), use
   (`deploy-runner.sh --list` shows what's running). If the message that
   resumes you says your release isn't running, read `tb logs` before doing
   anything else. To undo a deploy, `deploy-runner.sh --rollback`; after an
-  automatic crash rollback there's nothing to undo.
+  automatic crash rollback there's nothing to undo. A release that failed
+  to build from main is said once in the app and in `tb status`, with its
+  output in `<home>/runner/update.log`; fix it on main and it tries again.
 - Until `deploy-runner.sh --list` shows releases, the live runner still runs
   from the main checkout and only Mike can switch it (one
   `install-runner.sh` from a terminal). Runner changes wait for him.
