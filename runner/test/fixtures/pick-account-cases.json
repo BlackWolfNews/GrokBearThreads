@@ -1,0 +1,208 @@
+{
+  "about": "Cases for pickAccount(accounts, lastUsedId): which account a new thread starts on. The runner (runner/src/usage.ts, test/unit/accounts-usage.test.ts) and the app (AccountUsageText.swift) both run every case. Each account is short: id, provider, note, blocked, and windows as [kind, remainingPercent]. expected null means none.",
+  "cases": [
+    {
+      "name": "the most room wins",
+      "lastUsedId": "claude-main",
+      "accounts": [
+        { "id": "claude-main", "provider": "claude", "windows": [["five_hour", 50], ["weekly", 40]] },
+        { "id": "claude-1", "provider": "claude", "windows": [["five_hour", 90], ["weekly", 80]] },
+        { "id": "claude-3", "provider": "claude", "windows": [["five_hour", 100], ["weekly", 62]] }
+      ],
+      "expected": "claude-1"
+    },
+    {
+      "name": "room is the tighter of 5-hour and weekly",
+      "lastUsedId": "claude-main",
+      "accounts": [
+        { "id": "claude-main", "provider": "claude", "windows": [["five_hour", 30], ["weekly", 30]] },
+        { "id": "claude-1", "provider": "claude", "windows": [["five_hour", 20], ["weekly", 95]] },
+        { "id": "claude-3", "provider": "claude", "windows": [["five_hour", 60], ["weekly", 60]] }
+      ],
+      "expected": "claude-3"
+    },
+    {
+      "name": "per-model and allowance windows don't count",
+      "lastUsedId": "claude-main",
+      "accounts": [
+        { "id": "claude-main", "provider": "claude", "windows": [["five_hour", 50], ["weekly", 50], ["weekly_model", 5]] },
+        { "id": "claude-1", "provider": "claude", "windows": [["five_hour", 45], ["weekly", 45], ["weekly_model", 99], ["allowance", 99]] }
+      ],
+      "expected": "claude-main"
+    },
+    {
+      "name": "only the last-used account's provider: a Claude habit stays on Claude",
+      "lastUsedId": "claude-main",
+      "accounts": [
+        { "id": "claude-main", "provider": "claude", "windows": [["five_hour", 30], ["weekly", 30]] },
+        { "id": "codex-main", "provider": "codex", "windows": [["weekly", 99]] }
+      ],
+      "expected": "claude-main"
+    },
+    {
+      "name": "only the last-used account's provider: a Codex habit stays on Codex",
+      "lastUsedId": "codex-main",
+      "accounts": [
+        { "id": "claude-main", "provider": "claude", "windows": [["five_hour", 99], ["weekly", 99]] },
+        { "id": "codex-main", "provider": "codex", "windows": [["weekly", 40]] }
+      ],
+      "expected": "codex-main"
+    },
+    {
+      "name": "a single weekly window (Pro Lite) is the room",
+      "lastUsedId": "codex-main",
+      "accounts": [
+        { "id": "codex-main", "provider": "codex", "windows": [["weekly", 40]] },
+        { "id": "codex-1", "provider": "codex", "windows": [["weekly", 70]] }
+      ],
+      "expected": "codex-1"
+    },
+    {
+      "name": "a blocked account is skipped, however much room it shows",
+      "lastUsedId": "claude-main",
+      "accounts": [
+        { "id": "claude-main", "provider": "claude", "windows": [["five_hour", 50], ["weekly", 50]] },
+        { "id": "claude-1", "provider": "claude", "blocked": true, "windows": [["five_hour", 95], ["weekly", 95]] }
+      ],
+      "expected": "claude-main"
+    },
+    {
+      "name": "under 10% is skipped, even the last-used one",
+      "lastUsedId": "claude-main",
+      "accounts": [
+        { "id": "claude-main", "provider": "claude", "windows": [["five_hour", 8], ["weekly", 90]] },
+        { "id": "claude-1", "provider": "claude", "windows": [["five_hour", 9.9], ["weekly", 99]] },
+        { "id": "claude-3", "provider": "claude", "windows": [["five_hour", 30], ["weekly", 30]] }
+      ],
+      "expected": "claude-3"
+    },
+    {
+      "name": "exactly 10% is not under 10%",
+      "lastUsedId": "claude-main",
+      "accounts": [
+        { "id": "claude-main", "provider": "claude", "windows": [["five_hour", 5], ["weekly", 90]] },
+        { "id": "claude-3", "provider": "claude", "windows": [["five_hour", 10], ["weekly", 90]] }
+      ],
+      "expected": "claude-3"
+    },
+    {
+      "name": "an account with a note (claude-2, Convex work only) is never picked",
+      "lastUsedId": "claude-main",
+      "accounts": [
+        { "id": "claude-main", "provider": "claude", "windows": [["five_hour", 40], ["weekly", 40]] },
+        { "id": "claude-2", "provider": "claude", "note": "Convex work only", "windows": [["five_hour", 100], ["weekly", 100]] }
+      ],
+      "expected": "claude-main"
+    },
+    {
+      "name": "last used on the noted account: the next thread goes to the most room elsewhere",
+      "lastUsedId": "claude-2",
+      "accounts": [
+        { "id": "claude-main", "provider": "claude", "windows": [["five_hour", 40], ["weekly", 40]] },
+        { "id": "claude-2", "provider": "claude", "note": "Convex work only", "windows": [["five_hour", 100], ["weekly", 100]] },
+        { "id": "claude-3", "provider": "claude", "windows": [["five_hour", 60], ["weekly", 60]] }
+      ],
+      "expected": "claude-3"
+    },
+    {
+      "name": "a tie goes to the last-used one",
+      "lastUsedId": "claude-3",
+      "accounts": [
+        { "id": "claude-1", "provider": "claude", "windows": [["five_hour", 60], ["weekly", 70]] },
+        { "id": "claude-3", "provider": "claude", "windows": [["five_hour", 60], ["weekly", 60]] }
+      ],
+      "expected": "claude-3"
+    },
+    {
+      "name": "a tie between two others goes to the first in the list",
+      "lastUsedId": "claude-main",
+      "accounts": [
+        { "id": "claude-main", "provider": "claude", "windows": [["five_hour", 50], ["weekly", 50]] },
+        { "id": "claude-1", "provider": "claude", "windows": [["five_hour", 70], ["weekly", 70]] },
+        { "id": "claude-3", "provider": "claude", "windows": [["five_hour", 70], ["weekly", 90]] }
+      ],
+      "expected": "claude-1"
+    },
+    {
+      "name": "fractional room counts",
+      "lastUsedId": "claude-main",
+      "accounts": [
+        { "id": "claude-main", "provider": "claude", "windows": [["five_hour", 53], ["weekly", 53]] },
+        { "id": "claude-1", "provider": "claude", "windows": [["five_hour", 53.1], ["weekly", 60]] }
+      ],
+      "expected": "claude-1"
+    },
+    {
+      "name": "no usage known for the last-used one: stay on it",
+      "lastUsedId": "claude-3",
+      "accounts": [
+        { "id": "claude-1", "provider": "claude", "windows": [["five_hour", 95], ["weekly", 95]] },
+        { "id": "claude-3", "provider": "claude" }
+      ],
+      "expected": "claude-3"
+    },
+    {
+      "name": "another account with no usage known isn't picked",
+      "lastUsedId": "claude-main",
+      "accounts": [
+        { "id": "claude-main", "provider": "claude", "windows": [["five_hour", 40], ["weekly", 40]] },
+        { "id": "claude-1", "provider": "claude" }
+      ],
+      "expected": "claude-main"
+    },
+    {
+      "name": "only per-model windows known counts as unknown",
+      "lastUsedId": "claude-main",
+      "accounts": [
+        { "id": "claude-main", "provider": "claude", "windows": [["five_hour", 40], ["weekly", 40]] },
+        { "id": "claude-1", "provider": "claude", "windows": [["weekly_model", 99]] }
+      ],
+      "expected": "claude-main"
+    },
+    {
+      "name": "every candidate skipped: the last-used one",
+      "lastUsedId": "claude-main",
+      "accounts": [
+        { "id": "claude-main", "provider": "claude", "blocked": true, "windows": [["five_hour", 0], ["weekly", 50]] },
+        { "id": "claude-1", "provider": "claude", "windows": [["five_hour", 5], ["weekly", 50]] },
+        { "id": "claude-2", "provider": "claude", "note": "Convex work only", "windows": [["five_hour", 100], ["weekly", 100]] },
+        { "id": "codex-main", "provider": "codex", "windows": [["weekly", 99]] }
+      ],
+      "expected": "claude-main"
+    },
+    {
+      "name": "no last-used account: the first account's provider",
+      "lastUsedId": null,
+      "accounts": [
+        { "id": "claude-main", "provider": "claude", "windows": [["five_hour", 40], ["weekly", 40]] },
+        { "id": "claude-3", "provider": "claude", "windows": [["five_hour", 70], ["weekly", 70]] },
+        { "id": "codex-main", "provider": "codex", "windows": [["weekly", 99]] }
+      ],
+      "expected": "claude-3"
+    },
+    {
+      "name": "a last-used id that's gone counts as none",
+      "lastUsedId": "claude-9",
+      "accounts": [
+        { "id": "claude-main", "provider": "claude", "windows": [["five_hour", 40], ["weekly", 40]] },
+        { "id": "claude-3", "provider": "claude", "windows": [["five_hour", 70], ["weekly", 70]] }
+      ],
+      "expected": "claude-3"
+    },
+    {
+      "name": "no last-used account and nothing to pick: none",
+      "lastUsedId": null,
+      "accounts": [
+        { "id": "claude-main", "provider": "claude", "blocked": true, "windows": [["five_hour", 0], ["weekly", 40]] },
+        { "id": "claude-1", "provider": "claude" }
+      ],
+      "expected": null
+    },
+    {
+      "name": "no accounts: none",
+      "lastUsedId": "claude-main",
+      "accounts": [],
+      "expected": null
+    }
+  ]
+}
