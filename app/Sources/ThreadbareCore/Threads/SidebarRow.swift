@@ -39,11 +39,11 @@ public struct ThreadRowLook: Sendable, Equatable {
     public var unread: Bool
     /// Semibold title: the thread needs Mike or is unread.
     public var emphasised: Bool
-    /// The status is said in words. Under a heading that already says it
-    /// ("Needs you", "Running") the row doesn't repeat it: the word took
-    /// about 60 pt of the title line, so the rows that mattered most had
-    /// the most cut-off titles. A waiting row shows how long it has waited
-    /// in the needs-you colour instead, and a running row just its spinner.
+    /// The status is said in words. Under the Running heading a working
+    /// row doesn't repeat it (the word took about 60 pt of the title line)
+    /// and shows just its spinner. Waiting rows keep "Needs you": since
+    /// Needs you merged into the inbox, the word is what says why a row
+    /// sits at the top.
     public var labelled: Bool
 
     public init(status: ThreadRowStatus, unread: Bool, emphasised: Bool, labelled: Bool = true) {
@@ -67,14 +67,10 @@ public struct ThreadRowLook: Sendable, Equatable {
         }
         unread = thread.needsYou && status != .needsYou && status != .working
         emphasised = thread.needsYou || status == .needsYou
-        switch (status, section) {
-        case (.needsYou, .needsYou?), (.working, .running?): labelled = false
-        default: labelled = true
-        }
+        labelled = !(status == .working && section == .running)
     }
 
-    /// The second line when there's no preview yet. A thread that has only
-    /// asked a question is waiting on Mike, not new.
+    /// An unanswered review stays actionable even after the thread is read.
     public static func emptyPreview(_ thread: ThreadSummary) -> String {
         if thread.hasPendingReviews { return "Waiting for your review" }
         return thread.status == .waiting ? "Waiting for your answer" : "No reply yet"
@@ -152,18 +148,51 @@ public enum AccountName {
         return clashes.isEmpty ? local : full
     }
 
+    /// A name for a card, where a whole address doesn't fit: the part
+    /// before the @ when that's the only one, else the domain's first part
+    /// ("cannstudios", "gangbusters", "convex"), which is how Mike tells
+    /// his logins apart. Codex as `short`; the whole address when neither
+    /// is unique.
+    public static func label(_ id: String, accounts: [Account]) -> String {
+        guard let account = accounts.first(where: { $0.id == id }) else { return id }
+        if account.provider == "codex" { return short(id, accounts: accounts) }
+        let full = title(account)
+        guard let at = full.firstIndex(of: "@") else { return full }
+        let siblings = accounts.filter { $0.id != id && $0.provider == account.provider }.map(title)
+        let local = localPart(full)
+        if !siblings.contains(where: { localPart($0) == local }) { return local }
+        func domain(_ address: String) -> String {
+            guard let at = address.firstIndex(of: "@") else { return address }
+            return String(address[address.index(after: at)...].prefix { $0 != "." })
+        }
+        let own = domain(String(full[at...]))
+        return own.isEmpty || siblings.contains(where: { domain($0) == own }) ? full : own
+    }
+
     static func localPart(_ address: String) -> String {
         guard let at = address.firstIndex(of: "@") else { return address }
         return String(address[..<at])
     }
+}
 
-    /// Whether a row names its account: only when it isn't the main one (or
-    /// the first account, if there's no main). Fixed, unlike the runner's
-    /// default (the last one used), so the labels don't move about.
-    public static func isShown(_ accountId: String, accounts: [Account], mainId: String) -> Bool {
-        guard !accountId.isEmpty else { return false }
-        let main = accounts.isEmpty || accounts.contains { $0.id == mainId } ? mainId : accounts[0].id
-        return accountId != main
+/// The project mark at the right of a thread's row, where its account
+/// used to be named. Until projects have icons it's the project's first
+/// letter or digit on a quiet tile.
+public enum ProjectMark {
+    /// The project the row shows: the first it joined. A thread in two
+    /// projects names both in the mark's tooltip.
+    public static func project(_ thread: ThreadSummary) -> ThreadProject? { thread.projects.first }
+
+    /// "C" for "Convex docs", "7" for "7 day plan", "?" for a title with
+    /// neither (all emoji, or empty).
+    public static func letter(_ title: String) -> String {
+        guard let first = title.first(where: { $0.isLetter || $0.isNumber }) else { return "?" }
+        return String(first).uppercased()
+    }
+
+    /// The tooltip: every project the thread is in.
+    public static func help(_ thread: ThreadSummary) -> String {
+        thread.projects.map { $0.title.isEmpty ? "Untitled project" : $0.title }.joined(separator: ", ")
     }
 }
 

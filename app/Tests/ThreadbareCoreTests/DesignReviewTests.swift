@@ -99,8 +99,9 @@ final class DesignReviewTests: XCTestCase {
             let sections = ThreadSections.build([thread], now: now)
             XCTAssertEqual(sections.needsYou.map(\.id), [thread.id], "\(status): a review is still waiting after mark-read")
             XCTAssertTrue(sections.running.isEmpty)
-            XCTAssertEqual(ThreadRowLook(thread, section: .needsYou),
-                           ThreadRowLook(status: .needsYou, unread: false, emphasised: true, labelled: false))
+            XCTAssertEqual(ThreadSections.urgency(thread), 0)
+            XCTAssertEqual(ThreadRowLook(thread, section: .inbox),
+                           ThreadRowLook(status: .needsYou, unread: false, emphasised: true, labelled: true))
             XCTAssertEqual(ThreadRowLook.emptyPreview(thread), "Waiting for your review")
             XCTAssertEqual(DockBadge.label(for: [thread], now: now), "1", "the badge counts threads, not pending reviews")
         }
