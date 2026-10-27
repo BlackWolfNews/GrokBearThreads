@@ -174,6 +174,10 @@ type Runtime = {
   // new sessions start on), and whether it has got going since.
   startVersion?: string;
   started?: boolean;
+  // Archived here while its CLI was live: archived in the CLI's own app
+  // once that CLI has exited, so a second process never touches the thread
+  // while the live one still has it loaded.
+  archivePending?: boolean;
   // Background work that ended and whose result the CLI hasn't started a
   // turn to read yet. Shown as `finished` in the summary's background list
   // while wakeTimer runs; cleared when that turn starts or the grace ends.
@@ -1405,6 +1409,9 @@ export class Runner {
     if (turnCost !== undefined) body.costUsd = turnCost;
     if (r.usage) body.usage = r.usage;
     if (outcome === 'failed' && r.error) body.error = r.error;
+    // Why it failed (a limit, a full context, the login), so the app can
+    // offer the fix without reading the message.
+    if (outcome === 'failed' && r.errorKind) body.errorKind = r.errorKind;
     const ev = this.emit(st, body, turn.turnId);
     this.endTurn(st, ev.seq, outcome === 'failed' ? 'error' : 'idle', outcome);
   }
@@ -1536,6 +1543,9 @@ export class Runner {
     } else {
       this.markDirty(st);
     }
+    // A CLI that exited by itself (not released) may have been all an
+    // archive was waiting for.
+    this.archiveWhenGone(st);
   }
 
   interrupt(threadId: string): Record<string, never> {
@@ -1726,8 +1736,12 @@ export class Runner {
       if (!rt.turn) this.releaseSession(st);
     }
     // Archived here, archived in the CLI's own app too (Codex Desktop's
-    // list), once the session has let go of it. Resuming unarchives.
-    if (archiving) this.archiveNative(st, rt.closing);
+    // list), once the session has let go of it: a turn is interrupted
+    // first, then released, so that can take a moment. Resuming unarchives.
+    if (archiving) {
+      rt.archivePending = true;
+      this.archiveWhenGone(st);
+    }
     rec.updatedAt = this.isoNow();
     this.markDirty(st);
     return { thread: this.summary(st) };
@@ -1950,6 +1964,7 @@ export class Runner {
           rt.session = undefined;
         }
         this.markDirty(st);
+        this.archiveWhenGone(st);
       });
   }
 
@@ -2056,6 +2071,15 @@ export class Runner {
       if (changed && !this.stopping) void this.probeModels((a) => a.provider === 'codex');
     }
     this.codexMissing = codex?.status === 'missing';
+  }
+
+  // Runs a pending archive once no CLI has the session: none live and none
+  // closing. Skipped if the thread came back meanwhile.
+  private archiveWhenGone(st: ThreadState): void {
+    const { rec, rt } = st;
+    if (!rt.archivePending || rt.session || rt.closing || rt.deleted) return;
+    rt.archivePending = false;
+    if (rec.archivedAt) this.archiveNative(st);
   }
 
   // Archives the native session in the CLI's own app (Codex Desktop) when
@@ -2424,7 +2448,9 @@ export class Runner {
   private rememberAccount(accountId: string): void {
     try {
       const json = readRunnerJson(this.cfg.home);
-      if (json.defaults?.accountId === accountId) return;
+      // keepAccount pins the default (a dev runner's claude-3): using
+      // another account once mustn't move it.
+      if (json.defaults?.keepAccount || json.defaults?.accountId === accountId) return;
       json.defaults = { ...json.defaults, accountId };
       writeRunnerJson(this.cfg.home, json);
     } catch (e) {

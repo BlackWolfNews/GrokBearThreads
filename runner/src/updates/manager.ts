@@ -388,6 +388,11 @@ export class CliUpdates {
 
   private async installCodex(target: string, o: UpdateOptions): Promise<void> {
     const state = this.copies.state();
+    // "Go back": an older version asked for by name. The one left behind
+    // is held, or the next check would put it straight back from its kept
+    // folder. A newer one still goes through the gate; force installs it.
+    const from = this.copies.currentVersion();
+    const wentBackFrom = o.version !== undefined && from && compareVersions(target, from) < 0 ? from : undefined;
     if (this.copies.currentVersion() === target) {
       this.finish('codex', { state: 'unchanged', targetVersion: target });
       return;
@@ -395,11 +400,11 @@ export class CliUpdates {
     // A kept version ("Go back", or a held one being forced) is already
     // here: no download, and it passed the checks when it was installed.
     if (this.copies.has(target) && (o.force || state.hold?.version !== target)) {
-      this.activateCodex(target, []);
+      this.activateCodex(target, [], wentBackFrom);
       return;
     }
     if (this.copies.has(target) && state.hold?.version === target) {
-      this.finish('codex', { state: 'unchanged', targetVersion: target, message: `Codex ${target} is held back because the app-server protocol changed.` });
+      this.finish('codex', { state: 'unchanged', targetVersion: target, message: `Codex ${target} is held back because ${state.hold.reason}.` });
       return;
     }
     this.setUpdate('codex', { state: 'running', targetVersion: target, message: `Installing Codex ${target}` });
@@ -424,11 +429,16 @@ export class CliUpdates {
       this.finish('codex', { state: 'unchanged', targetVersion: target, message: `Codex ${target} is held back because ${reason}.` });
       return;
     }
-    this.activateCodex(target, r.added);
+    this.activateCodex(target, r.added, wentBackFrom);
   }
 
-  private activateCodex(version: string, added: string[]): void {
+  private activateCodex(version: string, added: string[], wentBackFrom?: string): void {
     const { previous } = this.copies.activate(version);
+    if (wentBackFrom) {
+      const reason = 'you went back from it';
+      this.copies.setHold({ version: wentBackFrom, reason });
+      this.history.append({ at: this.iso(), provider: 'codex', action: 'hold', ok: true, version: wentBackFrom, message: reason });
+    }
     this.installed.codex = version;
     this.history.append({ at: this.iso(), provider: 'codex', action: 'activate', ok: true, version, message: previous ? `from ${previous}` : undefined, ...(added.length ? { added } : {}) });
     this.finish('codex', { state: 'succeeded', targetVersion: version });

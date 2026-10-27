@@ -674,3 +674,83 @@ test('sessions tell CliUpdates whether they got going, on the version new sessio
     ['codex', '0.165.0', true],
   ]);
 });
+
+// ------------------------------------------------------- review fixes
+
+test('a failed turn keeps its errorKind on turn.completed', () => {
+  const h = codexHarness();
+  const { thread } = h.runner.create({ text: 'x', accountId: 'codex-main' });
+  const s = h.codex.last;
+  s.init('019a-limit', 'gpt-6.1-sol');
+  s.result('failed', undefined, "You've hit your usage limit.", { errorKind: 'usageLimit' });
+  const done = h.events(thread.id).at(-1);
+  assert.equal(done.type, 'turn.completed');
+  assert.equal(done.outcome, 'failed');
+  assert.equal(done.errorKind, 'usageLimit');
+  // Claude's too, and only on a failure.
+  const c = h.runner.create({ text: 'x', accountId: 'claude-3' }).thread;
+  h.adapter.last.init();
+  h.adapter.last.result('failed', 0.01, 'prompt is too long', { errorKind: 'contextWindow' });
+  assert.equal(h.events(c.id).at(-1).errorKind, 'contextWindow');
+  const ok = h.runner.create({ text: 'x', accountId: 'claude-3' }).thread;
+  h.adapter.last.init();
+  h.adapter.last.result('completed', 0.01, undefined, { errorKind: 'usageLimit' });
+  assert.equal(h.events(ok.id).at(-1).errorKind, undefined);
+});
+
+test('with keepAccount, using another account once leaves the default where it is', () => {
+  const h = codexHarness();
+  writeRunnerJson(h.home, { defaults: { accountId: 'claude-3', keepAccount: true } });
+  h.runner.create({ text: 'x', accountId: 'codex-main' });
+  const json = JSON.parse(fs.readFileSync(path.join(h.home, 'runner.json'), 'utf8'));
+  assert.equal(json.defaults.accountId, 'claude-3');
+  const next = h.runner.create({ text: 'y' }).thread;
+  assert.equal(next.accountId, 'claude-3');
+  assert.equal(next.provider, 'claude');
+  // Without it, the last one used is remembered as before.
+  writeRunnerJson(h.home, { defaults: { accountId: 'claude-3' } });
+  h.runner.create({ text: 'z', accountId: 'claude-main' });
+  assert.equal(JSON.parse(fs.readFileSync(path.join(h.home, 'runner.json'), 'utf8')).defaults.accountId, 'claude-main');
+});
+
+test('archiving during a turn archives in Codex only once the live CLI has exited', async () => {
+  const h = codexHarness();
+  h.codex.slowExit = true;
+  const { thread } = h.runner.create({ text: 'x', accountId: 'codex-main' });
+  const s = h.codex.last;
+  s.init('019a-busy', 'gpt-6.1-sol');
+  h.runner.update({ threadId: thread.id, archived: true });
+  await tick();
+  assert.equal(s.interrupts, 1, 'the turn is stopped first');
+  assert.deepEqual(h.codex.archived, [], 'not while the turn runs');
+  s.result('interrupted');
+  await tick();
+  assert.equal(s.ended, true, 'released after the turn');
+  assert.deepEqual(h.codex.archived, [], 'not while the CLI is still exiting');
+  s.exit();
+  await tick();
+  assert.deepEqual(h.codex.archived, [{ accountId: 'codex-main', nativeSessionId: '019a-busy' }]);
+
+  // A CLI that dies by itself counts as gone too.
+  const b = h.runner.create({ text: 'x', accountId: 'codex-main' }).thread;
+  const sb = h.codex.last;
+  sb.init('019a-dies', 'gpt-6.1-sol');
+  h.runner.update({ threadId: b.id, archived: true });
+  await tick();
+  sb.sink.exited(new Error('codex crashed'));
+  await tick();
+  assert.deepEqual(h.codex.archived.at(-1), { accountId: 'codex-main', nativeSessionId: '019a-dies' });
+
+  // Brought back before the CLI exited: not archived in Codex.
+  const c = h.runner.create({ text: 'x', accountId: 'codex-main' }).thread;
+  const sc = h.codex.last;
+  sc.init('019a-back', 'gpt-6.1-sol');
+  h.runner.update({ threadId: c.id, archived: true });
+  sc.result('interrupted');
+  await tick();
+  h.runner.update({ threadId: c.id, archived: false });
+  sc.exit();
+  await tick();
+  const archived: { nativeSessionId: string }[] = h.codex.archived;
+  assert.ok(!archived.some((a) => a.nativeSessionId === '019a-back'));
+});
