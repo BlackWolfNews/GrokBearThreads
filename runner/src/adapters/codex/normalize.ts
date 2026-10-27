@@ -95,6 +95,10 @@ export const IGNORED_METHODS = [
   'remoteControl/status/changed',
 ] as const;
 
+// What the adapter's line reader sends through handle() for a line over its
+// size guard: {method?, itemId?} from the start of the skipped line.
+export const OVERSIZED_LINE = 'threadbare/oversizedLine';
+
 const MAPPED_ITEMS = new Set<string>(MAPPED_ITEM_TYPES);
 const IGNORED_ITEMS = new Set<string>(IGNORED_ITEM_TYPES);
 const KNOWN_METHODS = new Set<string>([...MAPPED_METHODS, ...IGNORED_METHODS]);
@@ -200,9 +204,13 @@ export class CodexNormalizer {
   // "Too large to show" when the turn ends instead of as interrupted.
   lineTooLarge(head: string): void {
     const method = /"method"\s*:\s*"([^"]+)"/.exec(head)?.[1];
-    if (method && method !== 'item/completed') return;
     const at = head.indexOf('"item"');
     const id = at >= 0 ? /"id"\s*:\s*"([^"]+)"/.exec(head.slice(at))?.[1] : undefined;
+    this.tooLarge(method, id);
+  }
+
+  private tooLarge(method: string | undefined, id: string | undefined): void {
+    if (method && method !== 'item/completed') return;
     const item = id ? [...this.open.values()].find((o) => o.itemId === id || o.itemId.endsWith(`/${id}`)) : undefined;
     if (item) item.tooLarge = true;
     else this.unknownSkipped = true;
@@ -227,6 +235,13 @@ export class CodexNormalizer {
   handle(method: string, params: AnyMsg | null | undefined, from?: { childThreadId: string }): AdapterOutput[] {
     const out: AdapterOutput[] = [];
     const p = params ?? {};
+    if (method === OVERSIZED_LINE) {
+      // The same as lineTooLarge, from a reader that has already picked the
+      // method and item id out of the skipped line's start.
+      const id = typeof p.itemId === 'string' ? (from?.childThreadId ? `${from.childThreadId}/${p.itemId}` : p.itemId) : undefined;
+      this.tooLarge(typeof p.method === 'string' ? p.method : undefined, id);
+      return out;
+    }
     if (from?.childThreadId) {
       this.child(method, p, from.childThreadId, out);
       return out;

@@ -9,6 +9,7 @@ import {
   CodexNormalizer,
   IGNORED_METHODS,
   MAPPED_METHODS,
+  OVERSIZED_LINE,
   innerCommand,
   limitsFromAccount,
   limitsFromRateLimits,
@@ -591,6 +592,12 @@ test('lineTooLarge: an item whose completion line was skipped closes as "Too lar
   n.lineTooLarge('{"garbage');
   const r2 = events(n.handle('turn/completed', { threadId: 'th', turn: { id: 't2', status: 'completed' } })).find((x) => x.type === 'tool.result');
   assert.equal(r2.text, 'Too large to show');
+  // The same through handle(), as the adapter's line reader reports it.
+  n.handle('turn/started', { threadId: 'th', turn: { id: 't3' } });
+  n.handle('item/started', { threadId: 'child', item: { type: 'imageView', id: 'v', path: '/nope.png' } }, { childThreadId: 'child' });
+  n.handle(OVERSIZED_LINE, { bytes: 300_000_000, method: 'item/completed', itemId: 'v' }, { childThreadId: 'child' });
+  const r3 = events(n.handle('turn/completed', { threadId: 'th', turn: { id: 't3', status: 'completed' } })).find((x) => x.type === 'tool.result');
+  assert.deepEqual([r3.itemId, r3.text], ['child/v', 'Too large to show']);
 });
 
 test('a 2.5 MB image completion line decodes and saves, and closeOpen ends what is left', () => {
