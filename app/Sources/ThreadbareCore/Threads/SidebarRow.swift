@@ -138,6 +138,27 @@ public enum AccountName {
         return clashes.isEmpty ? local : full
     }
 
+    /// A name for a card, where a whole address doesn't fit: the part
+    /// before the @ when that's the only one, else the domain's first part
+    /// ("cannstudios", "gangbusters", "convex"), which is how Mike tells
+    /// his logins apart. Codex as `short`; the whole address when neither
+    /// is unique.
+    public static func label(_ id: String, accounts: [Account]) -> String {
+        guard let account = accounts.first(where: { $0.id == id }) else { return id }
+        if account.provider == "codex" { return short(id, accounts: accounts) }
+        let full = title(account)
+        guard let at = full.firstIndex(of: "@") else { return full }
+        let siblings = accounts.filter { $0.id != id && $0.provider == account.provider }.map(title)
+        let local = localPart(full)
+        if !siblings.contains(where: { localPart($0) == local }) { return local }
+        func domain(_ address: String) -> String {
+            guard let at = address.firstIndex(of: "@") else { return address }
+            return String(address[address.index(after: at)...].prefix { $0 != "." })
+        }
+        let own = domain(String(full[at...]))
+        return own.isEmpty || siblings.contains(where: { domain($0) == own }) ? full : own
+    }
+
     static func localPart(_ address: String) -> String {
         guard let at = address.firstIndex(of: "@") else { return address }
         return String(address[..<at])

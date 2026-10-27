@@ -8,7 +8,7 @@ import ThreadbareCore
 struct UsagePopover: View {
     @Environment(AppModel.self) private var app
 
-    static let width: CGFloat = 380
+    static let width: CGFloat = 400
 
     var body: some View {
         let sections = UsageSections.build(app.accounts)
@@ -23,17 +23,7 @@ struct UsagePopover: View {
                             .font(.system(size: zoomed(12)))
                             .foregroundStyle(.secondary)
                     }
-                    ForEach(sections, id: \.provider) { section in
-                        VStack(alignment: .leading, spacing: zoomed(9)) {
-                            Text(ModelPicker.providerTitle(section.provider))
-                                .font(.system(size: zoomed(11), weight: .medium))
-                                .foregroundStyle(.tertiary)
-                                .accessibilityAddTraits(.isHeader)
-                            ForEach(section.accounts) { account in
-                                AccountUsageView(account: account, notice: notices.own[account.id], now: app.now)
-                            }
-                        }
-                    }
+                    UsageTable(sections: sections, notices: notices.own, now: app.now)
                     // Where the numbers came from, and what Token Stats says
                     // about all of them, once.
                     let source = [AccountUsageText.sourceLine(app.accounts, now: app.now), notices.shared].compactMap { $0 }
@@ -77,92 +67,129 @@ enum UsageSections {
     }
 }
 
-private struct AccountUsageView: View {
+/// One provider's accounts as a small table: the name, then what's left
+/// of the 5-hour and weekly windows, with "left" said once in the header
+/// (a bare "54%" read as used as easily as left). Under an account, only
+/// what's worth knowing: its note, that it's at its limit or its numbers
+/// are old, when a short window comes back, and the extras that decide
+/// something (`AccountUsageText.extraLines`).
+/// Claude and Codex share one grid so their columns line up.
+private struct UsageTable: View {
+    let sections: [UsageSections.Section]
+    let notices: [String: String]
+    let now: Date
+
+    var body: some View {
+        let hasFiveHour = sections.contains { $0.accounts.contains { AccountUsageText.mainWindows($0.usage).contains { $0.kind == "five_hour" } } }
+        Grid(alignment: .leading, horizontalSpacing: zoomed(14), verticalSpacing: zoomed(6)) {
+            ForEach(sections, id: \.provider) { section in
+            GridRow {
+                Text(ModelPicker.providerTitle(section.provider))
+                    .accessibilityAddTraits(.isHeader)
+                // Codex's Pro Lite has only a week: its column stays, empty.
+                if hasFiveHour {
+                    Text(section.accounts.contains { AccountUsageText.mainWindows($0.usage).contains { $0.kind == "five_hour" } } ? "5-hour left" : "")
+                }
+                Text("Weekly left")
+            }
+            .font(.system(size: zoomed(11), weight: .medium))
+            .foregroundStyle(.tertiary)
+            .padding(.top, section.provider == sections.first?.provider ? 0 : zoomed(8))
+            ForEach(section.accounts) { account in
+                let windows = AccountUsageText.mainWindows(account.usage)
+                GridRow(alignment: .firstTextBaseline) {
+                    AccountNameCell(account: account, now: now)
+                    if hasFiveHour { RoomCell(window: windows.first { $0.kind == "five_hour" }, now: now) }
+                    RoomCell(window: windows.first { $0.kind == "weekly" }, now: now)
+                }
+                let more = moreLines(account)
+                if !more.isEmpty {
+                    GridRow {
+                        VStack(alignment: .leading, spacing: zoomed(2)) {
+                            ForEach(more, id: \.text) { line in
+                                Text(line.text)
+                                    .foregroundStyle(line.loud ? AnyShapeStyle(Color.orange) : AnyShapeStyle(.tertiary))
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                        }
+                        .font(.system(size: zoomed(11)))
+                        .padding(.top, zoomed(-3))
+                        .gridCellColumns(hasFiveHour ? 3 : 2)
+                    }
+                }
+            }
+            }
+        }
+    }
+
+    private func moreLines(_ account: Account) -> [(text: String, loud: Bool)] {
+        if account.usage == nil { return [("Nothing known yet", false)] }
+        var lines: [(text: String, loud: Bool)] = []
+        if let reset = AccountUsageText.resetLine(account.usage, now: now) { lines.append((reset, true)) }
+        lines += AccountUsageText.extraLines(account.usage, notice: notices[account.id], now: now).map { ($0, false) }
+        return lines
+    }
+}
+
+/// The address, with the note ("Convex work only") or what's wrong under
+/// it. The plan is in the tooltip: it never changed what Mike did.
+private struct AccountNameCell: View {
     let account: Account
-    /// This account's own part of Token Stats' notice; the part every
-    /// account shares is said once at the bottom.
-    let notice: String?
     let now: Date
 
     var body: some View {
         let usage = account.usage
-        VStack(alignment: .leading, spacing: zoomed(4)) {
-            HStack(alignment: .firstTextBaseline, spacing: zoomed(6)) {
-                Text(AccountName.title(account))
-                    .font(.system(size: zoomed(13), weight: .medium))
-                    .lineLimit(1)
-                // The plan, and Mike's note for the account, quietly after it.
-                let about = [account.plan, account.note].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · ")
-                if !about.isEmpty {
-                    Text(about).font(.system(size: zoomed(11))).foregroundStyle(.tertiary).lineLimit(1)
-                }
-                Spacer(minLength: zoomed(4))
-                if usage?.blocked == true {
-                    Text("Limit reached").font(.system(size: zoomed(11), weight: .medium)).foregroundStyle(.red)
-                } else if usage?.stale == true, let readAt = usage?.readAt {
-                    Text("From " + AccountUsageText.when(readAt, now: now))
-                        .font(.system(size: zoomed(11)))
-                        .foregroundStyle(.tertiary)
-                        .help("Token Stats hasn't updated this account since then")
-                }
-            }
-            ForEach(AccountUsageText.mainWindows(usage), id: \.kind) { window in
-                UsageBar(window: window, notice: usage?.notice, now: now)
-            }
-            ForEach(AccountUsageText.extraWindows(usage), id: \.title) { window in
-                Text("\(window.title) \(AccountUsageText.windowLine(window, now: now, notice: usage?.notice))")
+        VStack(alignment: .leading, spacing: zoomed(1)) {
+            Text(AccountName.title(account))
+                .font(.system(size: zoomed(12.5), weight: .medium))
+                .lineLimit(1)
+                .truncationMode(.middle)
+            if usage?.blocked == true {
+                Text("Limit reached").font(.system(size: zoomed(11), weight: .medium)).foregroundStyle(.red)
+            } else if usage?.stale == true, let readAt = usage?.readAt {
+                Text("Numbers from " + AccountUsageText.when(readAt, now: now))
                     .font(.system(size: zoomed(11)))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(.tertiary)
+                    .help("Token Stats hasn't updated this account since then")
             }
-            if let notice, !notice.isEmpty {
-                Text(notice).font(.system(size: zoomed(11))).foregroundStyle(.tertiary)
-            }
-            if usage == nil {
-                Text("Nothing known yet").font(.system(size: zoomed(11))).foregroundStyle(.tertiary)
+            if let note = account.note, !note.isEmpty {
+                Text(note).font(.system(size: zoomed(11))).foregroundStyle(.tertiary).lineLimit(1)
             }
         }
+        .help([AccountName.title(account), account.plan].compactMap { $0 }.joined(separator: ", "))
     }
 }
 
-/// One line per window: "5-hour", a thin bar of what's left, and "89%,
-/// resets 3:40 pm".
-private struct UsageBar: View {
-    let window: UsageWindow
-    let notice: String?
+/// A thin bar of what's left and the percentage, the reset in its tooltip.
+/// Grey while there's room; orange under a quarter; red when it's used up.
+private struct RoomCell: View {
+    let window: UsageWindow?
     let now: Date
 
     var body: some View {
-        HStack(spacing: zoomed(8)) {
-            Text(window.title)
-                .font(.system(size: zoomed(11)))
-                .foregroundStyle(.secondary)
-                .frame(width: zoomed(52), alignment: .leading)
-            GeometryReader { geometry in
+        if let window {
+            HStack(spacing: zoomed(6)) {
                 ZStack(alignment: .leading) {
                     Capsule().fill(Color.primary.opacity(0.08))
-                    Capsule().fill(fill)
-                        .frame(width: max(0, geometry.size.width * window.remainingPercent / 100))
+                    Capsule().fill(fill(window))
+                        .frame(width: max(0, zoomed(44) * window.remainingPercent / 100))
                 }
+                .frame(width: zoomed(44), height: zoomed(4))
+                Text(AccountUsageText.percent(window.remainingPercent))
+                    .font(.system(size: zoomed(12)))
+                    .monospacedDigit()
+                    .foregroundStyle(window.remainingPercent < AccountUsageText.chipWarning ? AnyShapeStyle(fill(window)) : AnyShapeStyle(.secondary))
+                    .frame(minWidth: zoomed(30), alignment: .trailing)
             }
-            .frame(width: zoomed(96), height: zoomed(4))
-            // The rest of the row, on one line: it wrapped at 150 pt
-            // ("66%, resets tomorrow / 12 am").
-            Text(AccountUsageText.windowLine(window, now: now, notice: notice).replacingOccurrences(of: " left", with: ""))
-                .font(.system(size: zoomed(11)))
-                .foregroundStyle(.secondary)
-                .monospacedDigit()
-                .lineLimit(1)
-                .minimumScaleFactor(0.85)
-                .frame(maxWidth: .infinity, alignment: .trailing)
+            .help("\(window.title): " + AccountUsageText.windowLine(window, now: now))
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("\(window.title): \(AccountUsageText.windowLine(window, now: now))")
+        } else {
+            Color.clear.frame(width: 1, height: 1)
         }
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel("\(window.title): \(AccountUsageText.windowLine(window, now: now))")
     }
 
-    /// Grey while there's room; orange under a quarter; red when it's
-    /// used up. Only the window that ran out is red, not the account's
-    /// other one.
-    private var fill: Color {
+    private func fill(_ window: UsageWindow) -> Color {
         if window.remainingPercent < 1 { return .red }
         if window.remainingPercent < AccountUsageText.chipWarning { return .orange }
         return Color.primary.opacity(0.45)
@@ -228,13 +255,23 @@ private struct CliRow: View {
                 Text(managed).font(.system(size: zoomed(11))).foregroundStyle(.tertiary)
             }
             HStack(spacing: zoomed(8)) {
-                Picker("Updates", selection: Binding(get: { cli.policy }, set: { app.setCliPolicy(cli.provider, $0) })) {
-                    ForEach(CliText.policies, id: \.self) { Text(CliText.policyTitle($0)).tag($0) }
+                // A menu, not a segmented control: two rows of three
+                // buttons were most of the popover's noise, and the choice
+                // is set once and left.
+                Menu {
+                    ForEach(CliText.policies, id: \.self) { policy in
+                        Button { app.setCliPolicy(cli.provider, policy) } label: {
+                            if policy == cli.policy { Label(CliText.policyTitle(policy), systemImage: "checkmark") } else { Text(CliText.policyTitle(policy)) }
+                        }
+                    }
+                } label: {
+                    Text("Updates: " + CliText.policyTitle(cli.policy))
                 }
-                .pickerStyle(.segmented)
-                .labelsHidden()
+                .menuStyle(.borderlessButton)
+                .menuIndicator(.visible)
                 .controlSize(.small)
-                .frame(width: zoomed(200))
+                .fixedSize()
+                .foregroundStyle(.secondary)
                 .help("Whether new versions install by themselves")
                 Spacer()
                 if let back = CliText.goBackTitle(cli), let previous = cli.previousVersion {

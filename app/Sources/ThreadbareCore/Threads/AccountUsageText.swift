@@ -130,6 +130,56 @@ public enum AccountUsageText {
         return line
     }
 
+    /// Room in a few words for the new-thread page's account cards: "5h 89%
+    /// · week 78% left", or "Limit reached" for a blocked account. Nil with
+    /// nothing known.
+    public static func roomLine(_ usage: AccountUsage?) -> String? {
+        guard let usage else { return nil }
+        if usage.blocked { return "Limit reached" }
+        let main = mainWindows(usage)
+        guard !main.isEmpty else { return nil }
+        return main.map { shortName($0) + " " + percent($0.remainingPercent) }.joined(separator: " · ") + " left"
+    }
+
+    /// When the account gets its room back, said only when that's worth
+    /// knowing: it's at its limit, or a main window is under a quarter.
+    /// "Weekly resets tomorrow 5 am". Nil otherwise, so a healthy account is
+    /// just its two bars.
+    public static func resetLine(_ usage: AccountUsage?, now: Date, calendar: Calendar = .current) -> String? {
+        guard let usage, let tight = tightest(usage) else { return nil }
+        guard usage.blocked || tight.remainingPercent < chipWarning, let reset = tight.resetsAt else { return nil }
+        return "\(tight.title) resets " + resetTime(reset, now: now, calendar: calendar)
+    }
+
+    /// The quiet lines under an account in the usage popover, after its two
+    /// bars. A model's own weekly limit ("Weekly Fable") only when it's
+    /// tighter than the main windows, since otherwise it never decides
+    /// anything; any other window by its detail ("$250 allowance: $132.79
+    /// left"); then the account's own part of Token Stats' notice.
+    public static func extraLines(_ usage: AccountUsage?, notice: String?, now: Date, calendar: Calendar = .current) -> [String] {
+        guard let usage else { return [] }
+        let room = room(usage) ?? 100
+        var lines: [String] = []
+        var money: [String] = []
+        for window in extraWindows(usage) {
+            // A bare percentage (a model's own week, Codex's other
+            // buckets) only matters when it runs out before the main ones.
+            if (window.detail ?? "").isEmpty && window.kind != "allowance" {
+                guard window.remainingPercent < room else { continue }
+                var line = "\(window.title) \(percent(window.remainingPercent)) left"
+                if let reset = window.resetsAt { line += ", resets " + resetTime(reset, now: now, calendar: calendar) }
+                lines.append(line)
+            } else if let detail = window.detail, !detail.isEmpty {
+                if !(notice ?? "").contains(detail) { money.append("\(window.title): \(detail)") }
+            } else {
+                money.append("\(window.title): \(percent(window.remainingPercent)) left")
+            }
+        }
+        if let notice, !notice.isEmpty { money.insert(notice, at: 0) }
+        if !money.isEmpty { lines.append(money.joined(separator: " · ")) }
+        return lines
+    }
+
     /// Token Stats' notices, with what several accounts say said once:
     /// "Couldn't check usage just now, so these are from 1:19 pm." under
     /// each of four accounts read as four problems. A notice is split on

@@ -389,18 +389,106 @@ private struct NewThreadHeading: View {
 }
 
 /// "Starts in misc on cannstudios": the folder and account the composer's
-/// menus are set to.
+/// menus are set to. Then every account as a card with the room it has
+/// left, so which login to start on is decided looking at the numbers
+/// rather than from the usage popover; a click picks it, like the
+/// composer's account menu.
 private struct NewThreadNote: View {
     @Environment(AppModel.self) private var app
 
     var body: some View {
         let cwd = app.newThreadCwd ?? app.defaults.cwd
         let account = app.newThreadAccountId
-        Text("Starts in \(FolderName.short(cwd)) on \(app.accountShortTitle(account))")
-            .font(.system(size: TypeScale.label))
-            .foregroundStyle(Color(nsColor: Theme.faintText))
-            .help("\(cwd.abbreviatingHome) on \(app.accountTitle(account))")
-            .frame(maxWidth: .infinity)
+        VStack(spacing: zoomed(14)) {
+            Text("Starts in \(FolderName.short(cwd)) on \(app.accountShortTitle(account))")
+                .font(.system(size: TypeScale.label))
+                .foregroundStyle(Color(nsColor: Theme.faintText))
+                .help("\(cwd.abbreviatingHome) on \(app.accountTitle(account))")
+            // Only once there's something to compare: an older runner sends
+            // no usage, and one account has nothing to choose between.
+            let accounts = UsageSections.build(app.accounts).flatMap(\.accounts)
+            if accounts.count > 1, accounts.contains(where: { $0.usage != nil }) {
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: zoomed(140), maximum: zoomed(200)), spacing: zoomed(8), alignment: .top)], spacing: zoomed(8)) {
+                    ForEach(accounts) { item in
+                        AccountRoomCard(account: item, accounts: app.accounts, selected: item.id == account, now: app.now) {
+                            app.newThreadAccount = item.id
+                        }
+                    }
+                }
+                .frame(maxWidth: Theme.maxContentWidth)
+                .padding(.horizontal, zoomed(24))
+            }
+        }
+        .frame(maxWidth: .infinity)
+    }
+}
+
+/// One account on the new-thread page: its name (the domain when two
+/// share the part before the @), a bar of the
+/// tighter window, and "5h 89% · week 78% left".
+private struct AccountRoomCard: View {
+    let account: Account
+    let accounts: [Account]
+    let selected: Bool
+    let now: Date
+    let pick: () -> Void
+    @State private var hovering = false
+
+    var body: some View {
+        let usage = account.usage
+        let tight = AccountUsageText.tightest(usage)
+        Button(action: pick) {
+            VStack(alignment: .leading, spacing: zoomed(5)) {
+                // The note ("Convex work only") beside the name rather than
+                // under it, so every card is the same height.
+                HStack(alignment: .firstTextBaseline, spacing: zoomed(6)) {
+                    Text(AccountName.label(account.id, accounts: accounts))
+                        .font(.system(size: zoomed(12), weight: .medium))
+                        .foregroundStyle(.primary)
+                        .lineLimit(1)
+                        .layoutPriority(1)
+                    if let note = account.note, !note.isEmpty {
+                        Text(note).font(.system(size: zoomed(11))).foregroundStyle(.tertiary).lineLimit(1)
+                    }
+                }
+                ZStack(alignment: .leading) {
+                    Capsule().fill(Color.primary.opacity(0.08))
+                    GeometryReader { geometry in
+                        Capsule().fill(fill(usage, tight))
+                            .frame(width: max(0, geometry.size.width * (tight?.remainingPercent ?? 0) / 100))
+                    }
+                }
+                .frame(height: zoomed(3))
+                Text(AccountUsageText.roomLine(usage) ?? "Nothing known yet")
+                    .font(.system(size: zoomed(11)))
+                    .monospacedDigit()
+                    .foregroundStyle(usage?.blocked == true ? AnyShapeStyle(Color.red) : AnyShapeStyle(.secondary))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.85)
+            }
+            .padding(.horizontal, zoomed(10))
+            .padding(.vertical, zoomed(8))
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color.primary.opacity(selected ? 0.07 : hovering ? 0.05 : 0.025), in: RoundedRectangle(cornerRadius: zoomed(8)))
+            .overlay {
+                RoundedRectangle(cornerRadius: zoomed(8))
+                    .strokeBorder(selected ? Color.accentColor.opacity(0.7) : Color.primary.opacity(0.06), lineWidth: selected ? 1 : 0.5)
+            }
+            .contentShape(RoundedRectangle(cornerRadius: zoomed(8)))
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering = $0 }
+        .help(AccountUsageText.tooltip(account, fallback: AccountName.title(account), now: now))
+        .accessibilityAddTraits(selected ? .isSelected : [])
+    }
+
+    /// The same colours as the usage popover: grey with room, orange under
+    /// a quarter, red at the limit.
+    private func fill(_ usage: AccountUsage?, _ tight: UsageWindow?) -> Color {
+        guard let tight else { return .clear }
+        if usage?.blocked == true || tight.remainingPercent < 1 { return .red }
+        if tight.remainingPercent < AccountUsageText.chipWarning { return .orange }
+        return Color.primary.opacity(0.4)
     }
 }
 
