@@ -43,16 +43,21 @@ public enum MarkdownExport {
             return item.text.split(separator: "\n", omittingEmptySubsequences: false).map { "> " + $0 }.joined(separator: "\n")
         case .tool(let tool):
             var text = "**\(tool.name)**: `\(tool.title.replacingOccurrences(of: "`", with: "'"))`"
-            if let diff = tool.effectiveDiff, !diff.hunks.isEmpty {
-                let body = diff.hunks.map { hunk in
-                    (["@@ -\(hunk.oldStart),\(hunk.oldLines) +\(hunk.newStart),\(hunk.newLines) @@"] + hunk.lines).joined(separator: "\n")
-                }.joined(separator: "\n")
-                text += "\n\n```diff\n\(body)\n```"
+            let diffs = tool.effectiveDiffs.filter { !$0.hunks.isEmpty }
+            if !diffs.isEmpty {
+                for diff in diffs {
+                    let body = diff.hunks.map { hunk in
+                        (["@@ -\(hunk.oldStart),\(hunk.oldLines) +\(hunk.newStart),\(hunk.newLines) @@"] + hunk.lines).joined(separator: "\n")
+                    }.joined(separator: "\n")
+                    // Each file's name, when there are several.
+                    let header = diffs.count > 1 && !diff.path.isEmpty ? "--- \(diff.path)\n" : ""
+                    text += "\n\n```diff\n\(header)\(body)\n```"
+                }
             } else if let result = tool.result, !result.text.isEmpty {
                 text += "\n\n" + fenced(result.text)
             }
             return text
-        case .images(_, let images):
+        case .images(_, let images, _):
             return images.map { "![image](\($0.path))" }.joined(separator: "\n")
         case .approval(let item):
             let decision = item.resolution.map { " (\(label(for: $0.decision)))" } ?? ""
@@ -71,7 +76,7 @@ public enum MarkdownExport {
             return text + "_"
         case .note(let text):
             return "_\(text)_"
-        case .error(let message):
+        case .error(let message, _):
             return "**Error**: \(message)"
         case .group(let group):
             return "_\(group.summary)_"

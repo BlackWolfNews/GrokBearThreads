@@ -71,7 +71,7 @@ struct AppDump: Encodable {
     /// composer's menus show it (`ThreadSettings` in ComposerControls).
     @MainActor
     static func newThreadSettings(_ app: AppModel) -> Settings {
-        let account = app.newThreadAccount ?? app.lastAccountId
+        let account = app.newThreadAccountId
         return Settings(cwd: app.newThreadCwd ?? app.defaults.cwd, account: account,
                         model: app.newThreadModel ?? defaultModel(app, account: account), ask: app.newThreadAsk,
                         effort: app.newThreadEffort ?? "default")
@@ -80,7 +80,7 @@ struct AppDump: Encodable {
     /// Whose default a new thread gets, and which model that is when known.
     @MainActor
     static func defaultModel(_ app: AppModel, account: String) -> String {
-        if let model = app.defaults.model { return "default (the runner's, \(model))" }
+        if let model = app.defaults.model(for: app.provider(ofAccount: account)) { return "default (the runner's, \(model))" }
         if let model = app.account(account)?.defaultModel { return "default (the account's, \(model))" }
         return "default (the account's)"
     }
@@ -121,6 +121,13 @@ struct AppDump: Encodable {
     var actions: [ActionInfo] = []
     var composer: Composer
     var transcript: Transcript?
+    /// The usage popover's content as lines, and whether it's open.
+    var usage: Usage? = nil
+
+    struct Usage: Encodable {
+        var shown: Bool
+        var lines: [String]
+    }
 
     struct ActionInfo: Codable {
         var id: String
@@ -217,7 +224,8 @@ struct AppDump: Encodable {
                 thread.actions.map { ActionInfo(id: $0.id, title: $0.title, kind: $0.kind.rawValue, running: app.isRunning(action: $0, in: thread.id)) }
             } ?? [],
             composer: composer(app, key: key),
-            transcript: transcript
+            transcript: transcript,
+            usage: Usage(shown: app.usagePopoverShown, lines: usageLines(app))
         )
     }
 
@@ -234,6 +242,45 @@ struct AppDump: Encodable {
             items.append(Panels.Item(id: PanelPane.patchesTab, title: "Patches", kind: "patches", url: nil, note: summary, active: onPatches))
         }
         return Panels(shown: app.showsPanels(for: thread), width: Int(app.panelWidth), items: items)
+    }
+
+    /// What the usage popover says: each account's room by provider, then
+    /// the CLIs (`UsagePopover`).
+    @MainActor
+    static func usageLines(_ app: AppModel) -> [String] {
+        var lines: [String] = []
+        for section in UsageSections.build(app.accounts) {
+            lines.append("# " + ModelPicker.providerTitle(section.provider))
+            for account in section.accounts {
+                var line = AccountName.title(account)
+                if let plan = account.plan { line += " (\(plan))" }
+                if let note = account.note { line += ", " + note }
+                if let usage = account.usage {
+                    if usage.blocked { line += ", limit reached" }
+                    if usage.stale { line += ", stale" }
+                    let windows = usage.windows.map { "\($0.title) \(AccountUsageText.percent($0.remainingPercent))" }
+                    if !windows.isEmpty { line += ": " + windows.joined(separator: ", ") }
+                    if let notice = usage.notice { line += " [\(notice)]" }
+                } else {
+                    line += ": nothing known"
+                }
+                lines.append(line)
+            }
+        }
+        if let source = AccountUsageText.sourceLine(app.accounts, now: app.now) { lines.append(source) }
+        lines.append("# CLIs")
+        if app.clisSupported == false || (app.clisSupported == nil && app.clis.isEmpty) {
+            lines.append("needs a newer runner")
+        } else {
+            for cli in app.clis {
+                var line = CliText.statusLine(cli) + " (" + CliText.policyTitle(cli.policy).lowercased() + ")"
+                if let button = CliText.updateTitle(cli) { line += " [\(button)]" }
+                if let back = CliText.goBackTitle(cli) { line += " [\(back)]" }
+                if CliText.isUpdating(cli), let text = CliText.bannerText(cli) { line += ": " + text }
+                lines.append(line)
+            }
+        }
+        return lines
     }
 
     @MainActor
@@ -321,6 +368,10 @@ struct AppDump: Encodable {
         }
         if !actions.isEmpty {
             lines.append("actions: " + actions.map { "\($0.id) \"\($0.title)\" (\($0.kind)\($0.running ? ", running" : ""))" }.joined(separator: ", "))
+        }
+        if let usage, usage.shown {
+            lines.append("usage popover:")
+            lines += usage.lines.map { "  " + $0 }
         }
         lines.append("composer (\(composer.draft)): \"\(composer.text)\"" + (composer.images > 0 ? " and \(composer.images) image(s)" : ""))
         lines.append("  \(composer.draft == "new" ? "starts" : "runs") in \(composer.cwd) on \(composer.account), model \(composer.model), "

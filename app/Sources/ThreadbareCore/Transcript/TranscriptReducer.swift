@@ -83,6 +83,8 @@ public struct TranscriptModel: Sendable {
     /// decreases, so the rows for items from `n` on are a binary search away.
     private var rowStarts: [Int] = []
     private var planRowForTurn: [String: String] = [:]
+    /// Each turn's last error row, to learn the turn's `errorKind`.
+    private var errorRowForTurn: [String: String] = [:]
     private var turnStarts: [String: Date] = [:]
     private var completedTurns: Set<String> = []
     /// Edit and Write tool items per turn, in order, for the changes card.
@@ -251,6 +253,7 @@ public struct TranscriptModel: Sendable {
         items = []
         itemIndex = [:]
         planRowForTurn = [:]
+        errorRowForTurn = [:]
         turnStarts = [:]
         completedTurns = []
         editsByTurn = [:]
@@ -308,7 +311,7 @@ public struct TranscriptModel: Sendable {
         dirtyUpdate = min(dirtyUpdate ?? itemIndex, itemIndex)
         dirtyUpdateEnd = max(dirtyUpdateEnd, runEnd(itemIndex))
         // An edit in a finished turn changes its changes card too.
-        if case .tool(let tool) = items[itemIndex].content, tool.diff != nil || tool.call.map(DiffBuilder.isEditTool) == true,
+        if case .tool(let tool) = items[itemIndex].content, !tool.diffs.isEmpty || tool.call.map(DiffBuilder.isEditTool) == true,
            let footer = self.itemIndex["f:" + (items[itemIndex].turnId ?? "")] {
             dirtyUpdateEnd = max(dirtyUpdateEnd, footer + 1)
         }
@@ -482,10 +485,13 @@ public struct TranscriptModel: Sendable {
             }
             if !result.images.isEmpty {
                 let imagesId = "i:\(result.itemId)"
+                var generated = false
+                if case .tool(let tool)? = item(id: id)?.content { generated = tool.toolKind == .image }
+                let content = RowContent.images(itemId: result.itemId, images: result.images, generated: generated)
                 if itemIndex[imagesId] != nil {
-                    update(imagesId) { $0 = .images(itemId: result.itemId, images: result.images) }
+                    update(imagesId) { $0 = content }
                 } else {
-                    insert(TranscriptRow(id: imagesId, seq: seq, turnId: turnId, content: .images(itemId: result.itemId, images: result.images)), after: id)
+                    insert(TranscriptRow(id: imagesId, seq: seq, turnId: turnId, content: content), after: id)
                 }
             }
 
@@ -509,12 +515,12 @@ public struct TranscriptModel: Sendable {
             if itemIndex[id] != nil {
                 update(id) { content in
                     if case .tool(var tool) = content {
-                        tool.diff = diff
+                        tool.add(diff)
                         content = .tool(tool)
                     }
                 }
             } else {
-                append(TranscriptRow(id: id, seq: seq, turnId: turnId, content: .tool(ToolItem(itemId: diff.itemId, diff: diff, root: root))))
+                append(TranscriptRow(id: id, seq: seq, turnId: turnId, content: .tool(ToolItem(itemId: diff.itemId, diffs: [diff], root: root))))
                 noteToolRow(id)
             }
             noteEdit(id, turnId: turnId)
@@ -579,6 +585,12 @@ public struct TranscriptModel: Sendable {
             if let open = openTurn, open == key || open == turnId || completion.turnId.isEmpty {
                 openTurn = nil
             }
+            // The error row just before says why, once the runner knows.
+            if let kind = completion.errorKind, let errorId = errorRowForTurn[key] ?? turnId.flatMap({ errorRowForTurn[$0] }) {
+                update(errorId) { content in
+                    if case .error(let message, _) = content { content = .error(message, kind: kind) }
+                }
+            }
             let id = "f:\(key)"
             if itemIndex[id] != nil {
                 update(id) { $0 = .footer(completion) }
@@ -591,6 +603,7 @@ public struct TranscriptModel: Sendable {
 
         case .error(let message):
             append(TranscriptRow(id: "e:\(seq)", seq: seq, turnId: turnId, content: .error(message)))
+            if let turnId { errorRowForTurn[turnId] = "e:\(seq)" }
 
         case .actionRun(let run):
             // A finished command, drawn like a tool call with its output.
@@ -793,20 +806,22 @@ public struct TranscriptModel: Sendable {
         var order: [String] = []
         var files: [String: ChangedFile] = [:]
         for id in ids {
-            guard let i = itemIndex[id], case .tool(let tool) = items[i].content, !tool.failed,
-                  let diff = tool.effectiveDiff, !diff.hunks.isEmpty else { continue }
-            let path = diff.path.isEmpty ? tool.title : diff.path
-            let stats = DiffBuilder.stats(diff)
-            if var file = files[path] {
-                file.added += stats.added
-                file.removed += stats.removed
-                file.diffs.append(diff)
-                files[path] = file
-            } else {
-                order.append(path)
-                let key = ChangedFiles.expansionKey(turnId: turn, path: path)
-                files[path] = ChangedFile(path: path, added: stats.added, removed: stats.removed, diffs: [diff],
-                                          isExpanded: expanded.contains(key), showsAll: expanded.contains(DiffPreview.allKey(key)), root: root)
+            guard let i = itemIndex[id], case .tool(let tool) = items[i].content, !tool.failed else { continue }
+            // Every file a tool changed: a Codex patch can touch several.
+            for diff in tool.effectiveDiffs where !diff.hunks.isEmpty {
+                let path = diff.path.isEmpty ? tool.title : diff.path
+                let stats = DiffBuilder.stats(diff)
+                if var file = files[path] {
+                    file.added += stats.added
+                    file.removed += stats.removed
+                    file.diffs.append(diff)
+                    files[path] = file
+                } else {
+                    order.append(path)
+                    let key = ChangedFiles.expansionKey(turnId: turn, path: path)
+                    files[path] = ChangedFile(path: path, added: stats.added, removed: stats.removed, diffs: [diff],
+                                              isExpanded: expanded.contains(key), showsAll: expanded.contains(DiffPreview.allKey(key)), root: root)
+                }
             }
         }
         guard !order.isEmpty else { return nil }

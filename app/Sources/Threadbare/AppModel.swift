@@ -54,17 +54,31 @@ final class AppModel {
     /// across launches; the folder and "Ask before edits" are for one
     /// thread and go back to the defaults after it starts.
     var newThreadCwd: String?
+    /// The account Mike picked for the next new thread, for that draft only:
+    /// with none picked it's the one with the most room (`newThreadAccountId`).
     var newThreadAccount: String?
-    var newThreadModel: String? = UserDefaults.standard.string(forKey: AppModel.lastModelKey) {
-        didSet { Self.remember(newThreadModel, forKey: Self.lastModelKey) }
-    }
-    var newThreadEffort: String? = UserDefaults.standard.string(forKey: AppModel.lastEffortKey) {
-        didSet { Self.remember(newThreadEffort, forKey: Self.lastEffortKey) }
-    }
+    /// The last model and effort picked, per provider ("claude", "codex"),
+    /// kept across launches: a Codex model is no use to a Claude thread.
+    private(set) var lastModels: [String: String] = AppModel.loadMemory(AppModel.lastModelKey)
+    private(set) var lastEfforts: [String: String] = AppModel.loadMemory(AppModel.lastEffortKey)
     var newThreadAsk = false
+    /// What the runner says about the Claude and Codex CLIs (`clis.list`,
+    /// `clis.updated`). Empty until it's said anything.
+    var clis: [CliStatus] = []
+    /// Nil until asked; false for a runner older than step 4, which has no
+    /// `clis.*` (the usage popover leaves the CLI part out).
+    var clisSupported: Bool?
+    /// Update failures Mike has dismissed, by "<provider>|<finishedAt>",
+    /// so the line under the toolbar stays gone for that failure.
+    var dismissedCliFailures: Set<String> = []
+    /// The usage popover is open (the sidebar's Usage button, or the
+    /// automation's `usage`).
+    var usagePopoverShown = false
     /// Bumped to open the composer's model picker from the automation
     /// (`composer-menu` with `show`), the way a click on the chip does.
     var modelPickerRequest = 0
+    /// The same for the account picker.
+    var accountPickerRequest = 0
     /// Every schedule, in the runner's order (soonest first, then the
     /// paused and finished ones). Replaced whole by `schedules.updated`.
     var schedules: [Schedule] = []
@@ -121,8 +135,11 @@ final class AppModel {
 
     static let maxSessions = 24
     static let lastAccountKey = "lastAccountId"
+    /// Claude's keys keep their old names, so a model picked before Codex
+    /// came along is still remembered; other providers add ".<provider>".
     static let lastModelKey = "lastModel"
     static let lastEffortKey = "lastEffort"
+    static let memoryProviders = ["claude", "codex"]
     static let panelsShownKey = "panelsShown"
     static let panelWidthKey = "panelWidth"
     /// The account threads aren't labelled with. Fixed, unlike the runner's
@@ -156,8 +173,52 @@ final class AppModel {
         UserDefaults.standard.string(forKey: Self.lastAccountKey) ?? defaults.accountId
     }
 
+    /// The account the next new thread starts on: Mike's pick for this
+    /// draft, else the one with the most room on the provider he last used
+    /// (`AccountUsageText.pickAccount`, the runner's rule too). Follows
+    /// `accounts.updated`, so it moves as usage does until he picks one.
+    var newThreadAccountId: String {
+        newThreadAccount ?? AccountUsageText.pickAccount(accounts, lastUsedId: lastAccountId) ?? lastAccountId
+    }
+
+    func provider(ofAccount id: String) -> String { account(id)?.provider ?? "claude" }
+
+    /// The model and effort the next new thread starts on, for the
+    /// provider of the account it starts on.
+    var newThreadModel: String? {
+        get { lastModels[provider(ofAccount: newThreadAccountId)] }
+        set { remember(model: newValue, provider: provider(ofAccount: newThreadAccountId)) }
+    }
+
+    var newThreadEffort: String? {
+        get { lastEfforts[provider(ofAccount: newThreadAccountId)] }
+        set { remember(effort: newValue, provider: provider(ofAccount: newThreadAccountId)) }
+    }
+
+    func remember(model: String?, provider: String) {
+        lastModels[provider] = model.flatMap { $0.isEmpty ? nil : $0 }
+        Self.remember(model, forKey: Self.memoryKey(Self.lastModelKey, provider: provider))
+    }
+
+    func remember(effort: String?, provider: String) {
+        lastEfforts[provider] = effort.flatMap { $0.isEmpty ? nil : $0 }
+        Self.remember(effort, forKey: Self.memoryKey(Self.lastEffortKey, provider: provider))
+    }
+
+    static func memoryKey(_ base: String, provider: String) -> String {
+        provider == "claude" || provider.isEmpty ? base : base + "." + provider
+    }
+
+    private static func loadMemory(_ base: String) -> [String: String] {
+        var memory: [String: String] = [:]
+        for provider in memoryProviders {
+            if let value = UserDefaults.standard.string(forKey: memoryKey(base, provider: provider)), !value.isEmpty { memory[provider] = value }
+        }
+        return memory
+    }
+
     func accountTitle(_ id: String) -> String {
-        accounts.first(where: { $0.id == id })?.title ?? id
+        account(id).map(AccountName.title) ?? id
     }
 
     /// The part of the account's email before the @ (see `AccountName`).
@@ -200,6 +261,11 @@ final class AppModel {
                 accounts = hello.accounts
                 defaults = hello.defaults
                 connection = .connected
+                // A step 4 runner puts its CLIs in hello; an older one has
+                // none, and `clis.list` tells which.
+                clis = hello.clis
+                clisSupported = hello.clis.isEmpty ? nil : true
+                if hello.clis.isEmpty { loadClis() }
                 lastDownReason = nil
                 AppLog.write("connection", "connected to runner \(hello.runnerVersion) at \(endpoint.url.absoluteString)")
                 // Whatever restart there was is over; a new pending one
@@ -271,8 +337,12 @@ final class AppModel {
                 forget(threadId)
             case .accountsUpdated(let list):
                 // The runner learned something (its model lists, a
-                // default it saw a turn run on): replaces hello's list.
+                // default it saw a turn run on, new usage): replaces
+                // hello's list.
                 accounts = list
+            case .clisUpdated(let list):
+                clis = list
+                clisSupported = true
             case .schedulesUpdated(let list):
                 schedules = list
                 schedulesSupported = true
@@ -384,6 +454,9 @@ final class AppModel {
 
     var loadedSessionCount: Int { sessions.count }
 
+    /// A thread's session if it's open already, without opening one.
+    func loadedSession(_ threadId: String) -> ThreadSession? { sessions[threadId] }
+
     private func evictSessions() {
         guard sessions.count > Self.maxSessions else { return }
         let victims = sessions.values
@@ -443,20 +516,23 @@ final class AppModel {
                 }
             }
         } else {
-            let account = newThreadAccount ?? lastAccountId
+            let account = newThreadAccountId
+            let provider = provider(ofAccount: account)
             let request = NewThreadRequest(
                 text: trimmed, images: draft.images, cwd: newThreadCwd ?? defaults.cwd, accountId: account,
-                model: newThreadModel, effort: newThreadEffort, permissionMode: newThreadAsk ? .ask : .full
+                model: lastModels[provider], effort: lastEfforts[provider], permissionMode: newThreadAsk ? .ask : .full
             )
             Task {
                 do {
                     let thread = try await client.createThread(request)
                     UserDefaults.standard.set(account, forKey: Self.lastAccountKey)
-                    // The folder and "Ask before edits" were for this
-                    // thread; the next one starts from the defaults again.
-                    // The account, model and effort stick.
+                    // The folder, "Ask before edits" and a picked account
+                    // were for this thread; the next one starts from the
+                    // defaults again, on whichever account then has the
+                    // most room. The model and effort stick.
                     newThreadCwd = nil
                     newThreadAsk = false
+                    newThreadAccount = nil
                     threads[thread.id] = thread
                     select(thread.id)
                 } catch {
@@ -530,12 +606,12 @@ final class AppModel {
     /// A model or effort picked on a thread is also what the next new
     /// thread starts on: the picker has no default row, it remembers.
     func setModel(_ threadId: String, _ model: String?) {
-        newThreadModel = model
+        remember(model: model, provider: threads[threadId]?.provider ?? "claude")
         update(threadId, ThreadUpdate(model: .some(model)))
     }
 
     func setEffort(_ threadId: String, _ effort: String?) {
-        newThreadEffort = effort
+        remember(effort: effort, provider: threads[threadId]?.provider ?? "claude")
         update(threadId, ThreadUpdate(effort: .some(effort)))
     }
 
@@ -683,6 +759,11 @@ final class AppModel {
                 return Banner(style: .quiet, icon: "arrow.clockwise", text: text,
                               detail: restart.waitingForText { self.threads[$0]?.title })
             }
+            // A CLI update under way (a spinner), or one that failed, which
+            // stays until it's dismissed.
+            if let cli = cliBanner {
+                return Banner(style: .quiet, icon: cli.failedKey == nil ? nil : "exclamationmark.triangle", text: cli.text, dismissKey: cli.failedKey)
+            }
             return nil
         case .connecting, .lost, .runnerDown:
             // While a restart is under way the runner is meant to be down
@@ -824,6 +905,8 @@ struct Banner: Equatable {
     var detail: String?
     var showStart = false
     var showRetry = false
+    /// A failed CLI update: the line has a Dismiss button, which forgets it.
+    var dismissKey: String?
 }
 
 private extension RunnerRestart.Phase {

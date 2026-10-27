@@ -201,6 +201,59 @@ enum ScreenshotRunner {
             await scroll(app, toRow: "t:w", offset: 20)
             await capture(window, dir.appendingPathComponent("10b-answered-cards.png"))
         }
+        // 12. A Codex thread: the plan and the pictures it looked at and
+        // made, its sub-agent's picture under the agent's line, and the end:
+        // the turn that hit the usage limit with the line offering another
+        // account, and footers with the time only.
+        if wanted("12") {
+            app.sidebarMode = .inbox
+            let codex = "demo_codex_poster"
+            await open(app, codex)
+            await scroll(app, toRow: "p:", offset: 10)
+            await capture(window, dir.appendingPathComponent("12a-codex-plan-and-images.png"))
+            let session = app.session(for: codex)
+            session.setModelExpanded("g:t:sa_1", true)
+            await scroll(app, toRow: "g:t:sa_1", offset: 10)
+            await capture(window, dir.appendingPathComponent("12b-codex-subagent-image.png"))
+            session.setModelExpanded("g:t:sa_1", false)
+            app.transcript.scrollToBottom()
+            try? await Task.sleep(for: .milliseconds(400))
+            await capture(window, dir.appendingPathComponent("12c-codex-limit-and-footers.png"))
+        }
+        // 13. The composer's pickers for a new thread: the accounts with
+        // the room each has, then the model picker on Claude and on Codex
+        // (its models, efforts up to Ultra).
+        if wanted("13") {
+            app.sidebarMode = .inbox
+            app.select(nil)
+            try? await Task.sleep(for: .milliseconds(400))
+            await capturePopover(window, dir.appendingPathComponent("13a-account-picker.png")) { app.accountPickerRequest += 1 }
+            await capturePopover(window, dir.appendingPathComponent("13b-model-picker-claude.png")) { app.modelPickerRequest += 1 }
+            // GPT-6.1-Sol at Ultra, the level only Codex has. Kept in this
+            // run's own settings, which screenshots.sh throws away.
+            app.newThreadAccount = "codex-main"
+            app.remember(model: "gpt-6.1-sol", provider: "codex")
+            app.remember(effort: "ultra", provider: "codex")
+            try? await Task.sleep(for: .milliseconds(300))
+            await capture(window, dir.appendingPathComponent("13c-composer-on-codex.png"))
+            await capturePopover(window, dir.appendingPathComponent("13d-model-picker-codex.png")) { app.modelPickerRequest += 1 }
+            app.remember(model: nil, provider: "codex")
+            app.remember(effort: nil, provider: "codex")
+            app.newThreadAccount = nil
+        }
+        // 14. The usage popover from the sidebar's footer: every account's
+        // room, then the CLIs (Claude behind, Codex held back).
+        if wanted("14") {
+            app.usagePopoverShown = true
+            try? await Task.sleep(for: .milliseconds(600))
+            if let popover = popoverWindow() {
+                await capture(popover, dir.appendingPathComponent("14-usage-popover.png"))
+            } else {
+                print("usage popover: didn't open")
+            }
+            app.usagePopoverShown = false
+            try? await Task.sleep(for: .milliseconds(300))
+        }
         // 11. A runner restart: the quiet banner while it waits for threads
         // to finish, the reconnecting line while the runner is down, and
         // the thread it carried on, with the runner's message as a centred
@@ -236,6 +289,22 @@ enum ScreenshotRunner {
         NSApp.terminate(nil)
     }
 
+    /// A composer chip's popover, opened by `open` (a request the chip
+    /// watches) and closed again the same way. It's a window of its own,
+    /// so it's captured by its own id.
+    private static func capturePopover(_ window: NSWindow, _ url: URL, open: () -> Void) async {
+        open()
+        try? await Task.sleep(for: .milliseconds(600))
+        guard let popover = popoverWindow() else { return print("could not save \(url.path): the popover didn't open") }
+        await capture(popover, url)
+        open()
+        try? await Task.sleep(for: .milliseconds(300))
+    }
+
+    private static func popoverWindow() -> NSWindow? {
+        NSApp.windows.first { String(describing: type(of: $0)).contains("Popover") && $0.isVisible }
+    }
+
     private static func waitUntil(_ seconds: Double, _ condition: () -> Bool) async {
         let deadline = Date().addingTimeInterval(seconds)
         while !condition(), Date() < deadline {
@@ -264,7 +333,7 @@ enum ScreenshotRunner {
         for index in 0..<session.displayCount {
             switch session.displayRow(index).content {
             case .user(let message) where !message.images.isEmpty: return message.images[0].path
-            case .images(_, let images) where !images.isEmpty: return images[0].path
+            case .images(_, let images, _) where !images.isEmpty: return images[0].path
             default: continue
             }
         }

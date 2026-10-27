@@ -83,18 +83,31 @@ public struct ToolItem: Sendable, Hashable {
     public var result: ToolResult?
     /// Live output from `tool.output.delta`, dropped once the result lands.
     public var liveOutput: String
-    public var diff: EditDiff?
+    /// The runner's `edit.diff`s for this item, one per path, in the order
+    /// the paths first came. A Codex patch can touch several files.
+    public var diffs: [EditDiff]
     /// The thread's working folder, so a file row names its folder from
     /// there ("scripts", not "photo-sync/scripts").
     public var root: String?
 
-    public init(itemId: String, call: ToolCall? = nil, result: ToolResult? = nil, liveOutput: String = "", diff: EditDiff? = nil, root: String? = nil) {
+    public init(itemId: String, call: ToolCall? = nil, result: ToolResult? = nil, liveOutput: String = "", diffs: [EditDiff] = [], root: String? = nil) {
         self.itemId = itemId
         self.call = call
         self.result = result
         self.liveOutput = liveOutput
-        self.diff = diff
+        self.diffs = diffs
         self.root = root
+    }
+
+    /// Adds an `edit.diff`: one for a path already here replaces that
+    /// path's diff (Codex sends a patch again as it changes), a new path
+    /// adds one.
+    public mutating func add(_ diff: EditDiff) {
+        if let index = diffs.firstIndex(where: { $0.path == diff.path }) {
+            diffs[index] = diff
+        } else {
+            diffs.append(diff)
+        }
     }
 
     public var name: String { call?.name ?? "Tool" }
@@ -103,12 +116,21 @@ public struct ToolItem: Sendable, Hashable {
     public var isFinished: Bool { result != nil }
     public var failed: Bool { result.map { !$0.ok } ?? false }
 
-    /// The diff to show: the runner's `edit.diff` if it sent one, otherwise
-    /// one built from the Edit/MultiEdit/Write input.
-    public var effectiveDiff: EditDiff? {
-        if let diff { return diff }
-        guard let call else { return nil }
-        return DiffBuilder.diff(forTool: call)
+    /// The diffs to show: the runner's `edit.diff`s if it sent any,
+    /// otherwise one built from the Edit/MultiEdit/Write input.
+    public var effectiveDiffs: [EditDiff] {
+        if !diffs.isEmpty { return diffs }
+        guard let call, let built = DiffBuilder.diff(forTool: call) else { return [] }
+        return [built]
+    }
+
+    /// The paths it changes, cheaply (no diff is built): the runner's
+    /// diffs, else the input's file path, else Codex's `paths` list.
+    public var editedPaths: [String] {
+        if !diffs.isEmpty { return diffs.map(\.path) }
+        let input = call?.input
+        if let path = input?["file_path"]?.stringValue ?? input?["path"]?.stringValue { return [path] }
+        return input?["paths"]?.arrayValue?.compactMap(\.stringValue) ?? []
     }
 }
 
@@ -156,13 +178,17 @@ public enum RowContent: Sendable, Hashable {
     case assistant(TextItem)
     case reasoning(TextItem)
     case tool(ToolItem)
-    case images(itemId: String, images: [ImageRef])
+    /// A tool's pictures, under its row. `generated` is an image the agent
+    /// made (Codex's image generation), shown larger than a screenshot.
+    case images(itemId: String, images: [ImageRef], generated: Bool = false)
     case approval(ApprovalItem)
     case question(QuestionItem)
     case plan([PlanEntry])
     case footer(TurnCompletion)
     case note(String)
-    case error(String)
+    /// A failed turn's message, and why it failed when the runner said
+    /// (from the turn's `turn.completed`, which comes just after).
+    case error(String, kind: TurnErrorKind? = nil)
     case group(WorkGroup)
     case working(WorkingStatus)
     case background(BackgroundStatus)
@@ -174,7 +200,7 @@ public enum RowContent: Sendable, Hashable {
         case .assistant: return .assistant
         case .reasoning: return .reasoning
         case .tool(let tool):
-            if tool.call.map(DiffBuilder.isEditTool) == true || tool.diff != nil { return .diff }
+            if tool.call.map(DiffBuilder.isEditTool) == true || !tool.diffs.isEmpty { return .diff }
             return .tool
         case .images: return .images
         case .approval: return .approval

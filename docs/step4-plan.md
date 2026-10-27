@@ -1367,6 +1367,18 @@ The app never polls. It redraws relative times once a minute.
   - the `WorkSummary` image words;
 - screenshots of the composer menus, the usage popover and the Codex demo thread look right in light and dark.
 
+**As built (F, 27 Oct).** Where the build differs from the text above, and why:
+
+- **The account menu is a popover** (`AccountPickerView` in `ComposerControls.swift`), like the model picker beside it, built from `AccountMenu` in `AccountUsageText.swift`. An `NSMenu` can't be captured by window id without popping up over Mike's work and taking his mouse, and its rows could only hold a title and one subtitle. The sections, titles, subtitles and the "Usage from Token Stats" line are as planned; `composer-menu {"menu": "account"}` lists and clicks it, `show` opens it.
+- **The model picker had moved on** (`f542719`): it's a popover with a provider rail and no Default effort row (the level picked last is remembered). So "the Default row's subtitle" became the chip and picker showing the level that applies when none is chosen (`ModelPicker.impliedEffort`: the runner's default for a new thread, else the account's `defaultEffort`, else the model's). The last model and effort picked are now remembered per provider (`lastModel`/`lastEffort` for Claude, as before, plus `.codex`), so a Codex pick never becomes a Claude thread's model.
+- **The limit fix is a line above the transcript**, not a button in the error row: "Codex has reached its limit." with "Switch to mike (78% left)" (`LimitBanner` in `DetailView.swift`, `AppModel.limitAdvice`). Transcript rows are drawn from cached renders that know nothing of accounts, so a name and a percentage there would go stale. It shows while the thread's account is `blocked` or its last turn failed with `usageLimit`. `contextWindow` and `auth` add a plain sentence under the error row's message (the error row learns the kind from the `turn.completed` after it). `switchTarget` skips accounts with a note or under 10%.
+- **A picked account is for that draft only**: after a new thread starts, the composer goes back to `pickAccount`, which starts from the account just used.
+- **`pickAccount`** runs D's 22 cases from `runner/test/fixtures/pick-account-cases.json`, copied to `app/Tests/Fixtures/`; a test fails if the two copies differ once both are in one tree.
+- **Codex footer**: the duration only, as decided; "Copy debug info" (and `dump`) adds the tokens for either provider ("24,177 in (12,032 cached), 310 out, 120 reasoning").
+- **Generated images** fit a 420 pt box (screenshots stay at 320 by 240), from a `generated` flag on the image row set when its tool is `kind: "image"`.
+- **The Usage popover opens above its button** and has no footer hint. CLI update progress and failures use the quiet line under the toolbar, with Dismiss on a failure (a small edit to `DetailView.swift`, which no other piece touches).
+- **Mock runner**: `mock.accounts {accounts}` replaces the list and `{old: true}` plays a pre-step-4 runner (no usage, no Codex accounts, `clis.*` answer -32601). `clis.update` reports `running`, then `succeeded` 2.5 s later; on a held Codex it needs `force` or a `version`.
+
 ## Tests
 
 **Unit (`./check.sh --quick`, no network):**
