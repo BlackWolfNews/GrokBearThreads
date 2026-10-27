@@ -405,6 +405,13 @@ enum RowRenderer {
             total += RowMetrics.answerHeight
             return RowRender(height: vertical + zoomed(4) + total, text: answerText(resolution), lineHeights: textHeights)
 
+        case .asks(let card):
+            let text = asksText(card)
+            let size = measurer.measure(text, width: width - RowMetrics.cardPad * 2)
+            return RowRender(height: vertical + zoomed(4) + size.height + RowMetrics.cardPad * 2 - zoomed(4), text: text, textSize: size)
+        case .review:
+            return RowRender(height: vertical + RowMetrics.cardPad * 2 + zoomed(22 + 4 + 20 + 10) + RowMetrics.buttonHeight)
+
         case .plan(let entries):
             let text = planText(entries)
             let size = measurer.measure(text, width: width - RowMetrics.cardPad * 2)
@@ -1009,6 +1016,58 @@ enum RowRenderer {
         return output
     }
 
+    /// "Needs you · 1 of 2 done", then each ask as a tick box, its action,
+    /// where on a quieter line, and a "Reply “done”" chip. Ticks and chips
+    /// are `.tbAction` runs (`tick:<i>`, `reply:<i>`), live only while the
+    /// card is open.
+    static func asksText(_ card: AsksCard) -> NSAttributedString {
+        let (titleStyle, titleOffset) = Theme.lines(TypeScale.workLine, font: Theme.changesTitleFont, spacing: zoomed(8))
+        let output = NSMutableAttributedString(string: card.isOpen ? "Needs you" : "Needed you", attributes: [
+            .font: Theme.changesTitleFont, .foregroundColor: card.isOpen ? NSColor.labelColor : NSColor.secondaryLabelColor,
+            .paragraphStyle: titleStyle, .baselineOffset: titleOffset,
+        ])
+        if card.tickedCount > 0 {
+            output.append(NSAttributedString(string: "   \(card.tickedCount) of \(card.asks.count) done", attributes: [
+                .font: Theme.smallFont, .foregroundColor: Theme.faintText, .paragraphStyle: titleStyle, .baselineOffset: titleOffset,
+            ]))
+        }
+        let font = Theme.bodyFont
+        let (style, offset) = Theme.lines(TypeScale.scaled(22), font: font, spacing: zoomed(6), head: zoomed(26), first: 0)
+        style.tabStops = [NSTextTab(textAlignment: .left, location: zoomed(26))]
+        output.append(NSAttributedString(string: "\n", attributes: [.font: Theme.changesTitleFont, .paragraphStyle: titleStyle]))
+        for (index, ask) in card.asks.enumerated() {
+            let ticked = card.ticked.contains(index)
+            if index > 0 { output.append(NSAttributedString(string: "\n", attributes: [.font: font, .paragraphStyle: style, .baselineOffset: offset])) }
+            // A size up from the text: at body size the box read as a dot.
+            var mark: [NSAttributedString.Key: Any] = [
+                .font: NSFont.systemFont(ofSize: font.pointSize * 1.3), .foregroundColor: ticked ? NSColor.controlAccentColor : Theme.faintText, .paragraphStyle: style, .baselineOffset: offset,
+            ]
+            if card.isOpen { mark[.tbAction] = "tick:\(index)" }
+            output.append(NSAttributedString(string: ticked ? "☑" : "☐", attributes: mark))
+            output.append(NSAttributedString(string: "\t", attributes: [.font: font, .paragraphStyle: style]))
+            var attributes: [NSAttributedString.Key: Any] = [
+                .font: font, .foregroundColor: ticked || !card.isOpen ? NSColor.secondaryLabelColor : NSColor.labelColor,
+                .paragraphStyle: style, .baselineOffset: offset,
+            ]
+            if ticked { attributes[.strikethroughStyle] = NSUnderlineStyle.single.rawValue }
+            output.append(NSAttributedString(string: ask.action, attributes: attributes))
+            if let reply = ask.reply, card.isOpen, !ticked {
+                output.append(NSAttributedString(string: "  ", attributes: [.font: font, .paragraphStyle: style]))
+                output.append(NSAttributedString(string: "Reply “\(reply)”", attributes: [
+                    .font: Theme.smallFont, .foregroundColor: NSColor.controlAccentColor, .paragraphStyle: style, .baselineOffset: offset,
+                    .tbAction: "reply:\(index)",
+                ]))
+            }
+            // Where, on a quieter line of the same paragraph, under the action.
+            if let place = ask.where_, !place.isEmpty {
+                output.append(NSAttributedString(string: "\u{2028}" + place, attributes: [
+                    .font: Theme.smallFont, .foregroundColor: Theme.faintText, .paragraphStyle: style, .baselineOffset: offset,
+                ]))
+            }
+        }
+        return output
+    }
+
     /// A plain sentence for a failure whose cause the runner gave.
     static func errorAdvice(_ kind: TurnErrorKind?) -> String? {
         switch kind {
@@ -1022,6 +1081,8 @@ enum RowRenderer {
     /// (its tokens are in "Copy debug info" instead).
     static func footerText(_ completion: TurnCompletion) -> NSAttributedString {
         var parts: [String] = []
+        // The agent said it's finished and nothing waits on Mike.
+        if completion.outcome == .completed, completion.needs == "nothing" { parts.append("Nothing needed from you") }
         switch completion.outcome {
         case .completed: parts.append(RelativeTime.duration(milliseconds: completion.durationMs))
         case .interrupted: parts.append("Stopped after \(RelativeTime.duration(milliseconds: completion.durationMs))")

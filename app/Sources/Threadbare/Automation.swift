@@ -119,7 +119,7 @@ enum Automation {
             try? await Task.sleep(for: .milliseconds(15))
         }
         guard let window = mainWindow else { return }
-        window.orderBack(nil)
+        window.tuckBehind()
         // Sizes set by a script aren't the user's: never saved as the
         // window's frame (a bundle that shares the installed app's id would
         // otherwise reopen Mike's window at them).
@@ -180,7 +180,7 @@ enum Automation {
             try? await Task.sleep(for: .milliseconds(15))
         }
         guard let window = SettingsWindow.current, window.isVisible else { return "error the Settings window didn't open" }
-        window.orderBack(nil)
+        window.tuckBehind()
         // Let the tab switch and the window's new height settle.
         try? await Task.sleep(for: .milliseconds(400))
         let shown: String
@@ -250,8 +250,27 @@ enum Automation {
         case "new":
             app.newThread()
             return "ok"
+        case "mouse-button":
+            // A mouse's back or forward button over the window, as the
+            // event AppKit gives MouseNavigation's monitor. A made-up event
+            // has no window of its own, so it's handed the main one.
+            guard let window else { return "error no window" }
+            let number: Int64
+            switch c["button"] as? String {
+            case "back": number = 3
+            case "forward": number = 4
+            default: return "error button is back or forward"
+            }
+            guard let cg = CGEvent(mouseEventSource: nil, mouseType: .otherMouseDown, mouseCursorPosition: .zero,
+                                   mouseButton: CGMouseButton(rawValue: UInt32(number)) ?? .center) else { return "error no event" }
+            guard let event = NSEvent(cgEvent: cg) else { return "error no event" }
+            guard MouseNavigation.handle(event, in: window, app: app) else { return "error not taken (not the main window?)" }
+            let place = app.place
+            return "ok \(place.mode) \(place.threadId ?? "new") back=\(app.canGoBack) forward=\(app.canGoForward)"
         case "options":
             return options(c, app: app)
+        case "review":
+            return await designReview(c, app: app)
         case "type":
             guard let composer = find(ComposerTextView.self, in: window?.contentView) else { return "error no composer" }
             window?.makeFirstResponder(composer)
@@ -302,6 +321,14 @@ enum Automation {
                 .filter { $0.title == title && $0.isEnabled && !$0.isHiddenOrHasHiddenAncestor }
             guard let button = buttons.last else { return "error no button \(title)" }
             button.performClick(nil)
+            return "ok"
+        case "ask":
+            // {"cmd":"ask","row":"ak:6","action":"tick:0"} clicks an open
+            // asks card's tick box (or "reply:0", its reply chip).
+            guard let id = c["row"] as? String, let action = c["action"] as? String,
+                  case .asks(let card)? = app.transcript.session?.model.row(id: id)?.content else { return "error no asks card" }
+            guard card.isOpen else { return "error that card is closed" }
+            app.transcript.askAction(card, action: action)
             return "ok"
         case "archive":
             // `id`, else the open thread. These used to ignore `id` and act
@@ -401,6 +428,14 @@ enum Automation {
             app.scheduleEditor = nil
             return "ok"
         case "expand", "collapse":
+            if let raw = c["section"] as? String {
+                // An inbox heading, as clicking it does.
+                guard let section = InboxSection(rawValue: raw) else {
+                    return "error section must be one of \(InboxSection.allCases.map(\.rawValue).joined(separator: ", "))"
+                }
+                if name == "expand" { app.collapsedSections.remove(section) } else { app.collapsedSections.insert(section) }
+                return "ok"
+            }
             return setExpanded(c, open: name == "expand", app: app)
         case "scroll":
             switch c["to"] as? String {
@@ -448,6 +483,10 @@ enum Automation {
             return "ok \(zoom.percent)"
         case "hover":
             return hover(c, app: app)
+        case "hints":
+            ShortcutHints.shared.setShowing(c["on"] as? Bool ?? true)
+            try? await Task.sleep(for: .milliseconds(100))
+            return "ok \(ShortcutHints.shared.showing)"
         case "chip":
             return chip(c, app: app)
         case "account-ids":
@@ -496,6 +535,10 @@ enum Automation {
             guard let path = c["path"] as? String, path.hasPrefix("/") else { return "error path must be absolute" }
             if let refused = refusesToWrite(path) { return refused }
             guard var window else { return "error no window" }
+            if let id = c["review"] as? String {
+                guard let review = app.reviewWindows.values.first(where: { $0.session.review.id == id })?.window else { return "error the review window isn't open" }
+                window = review
+            }
             if c["sheet"] as? Bool == true {
                 guard let sheet = window.attachedSheet else { return "error no sheet" }
                 window = sheet
@@ -517,6 +560,10 @@ enum Automation {
             // The window's id for `screencapture -l`, once anything pending
             // has been drawn (as `screenshot` waits).
             guard var window else { return "error no window" }
+            if let id = c["review"] as? String {
+                guard let review = app.reviewWindows.values.first(where: { $0.session.review.id == id })?.window else { return "error the review window isn't open" }
+                window = review
+            }
             // {"sheet": true}: the sheet over it (the schedule editor), a
             // window of its own that a capture of the main one leaves out.
             if c["sheet"] as? Bool == true {
@@ -1104,6 +1151,44 @@ enum Automation {
             if let found = find(type, in: sub) { return found }
         }
         return nil
+    }
+
+    /// Drives the same session as the comparison controls. Replies still
+    /// go through the dev/mock runner, never the installed runner.
+    private static func designReview(_ c: [String: Any], app: AppModel) async -> String {
+        guard let threadId = app.selection else { return "error open a thread first" }
+        let snapshot = app.session(for: threadId).model.items.compactMap { row -> DesignReview? in
+            if case .review(let review) = row.content { return review }
+            return nil
+        }.first { c["id"] as? String == nil || $0.id == c["id"] as? String }
+        guard let snapshot else { return "error no review in this thread" }
+        let key = threadId + "/" + snapshot.id
+        if c["close"] as? Bool == true {
+            app.reviewWindows[key]?.close()
+            return "ok closed"
+        }
+        app.openReview(threadId: threadId, review: snapshot)
+        guard let controller = app.reviewWindows[key] else { return "error couldn't open review" }
+        let session = controller.session
+        await session.refresh()
+        if let mode = c["mode"] as? String, let view = ReviewMode(rawValue: mode) { session.mode = view }
+        if let actual = c["actual"] as? Bool { session.actualSize = actual }
+        if let left = c["left"] as? Int { session.show(left, slot: 0) }
+        if let right = c["right"] as? Int { session.show(right, slot: 1) }
+        if let notes = c["notes"] as? [String: String] { for (id, text) in notes { session.setNote(text, for: id) } }
+        if let pick = c["pick"] as? String { session.pick(pick) }
+        if c["save"] as? Bool == true { await session.saveNow() }
+        if c["submit"] as? Bool == true { await session.submit() }
+        if c["cancel"] as? Bool == true { await session.cancelReview() }
+        controller.window?.tuckBehind()
+        try? await Task.sleep(for: .milliseconds(250))
+        return "ok " + json([
+            "id": session.review.id, "window": controller.window?.windowNumber ?? 0,
+            "status": session.review.status, "revision": session.review.revision,
+            "mode": session.mode.rawValue, "actual": session.actualSize,
+            "pickedId": session.draft.pickedId ?? "", "notes": session.draft.notes,
+            "dirty": session.dirty, "error": session.error ?? "",
+        ] as [String: Any])
     }
 
     private static func all<T: NSView>(_ type: T.Type, in view: NSView?) -> [T] {

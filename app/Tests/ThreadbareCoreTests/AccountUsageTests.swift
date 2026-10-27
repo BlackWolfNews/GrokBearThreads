@@ -184,6 +184,44 @@ final class AccountUsageTests: XCTestCase {
         XCTAssertEqual(AccountUsageText.windowLine(weekly, now: now), "93% left (64,390 credits)")
     }
 
+    func testRoomLine() {
+        XCTAssertEqual(AccountUsageText.roomLine(usage(89.6, 78)), "5h 89% · week 78% left")
+        XCTAssertEqual(AccountUsageText.roomLine(usage(nil, 64)), "week 64% left")
+        XCTAssertEqual(AccountUsageText.roomLine(usage(0, 31, blocked: true)), "Limit reached")
+        XCTAssertNil(AccountUsageText.roomLine(nil))
+    }
+
+    func testResetLineOnlyWhenRoomIsShort() {
+        // Mike's cannstudios on 27 Oct: 54% and 7%, the week back tomorrow.
+        XCTAssertEqual(AccountUsageText.resetLine(usage(54, 7, reset: at(16, 10), weeklyReset: at(day: 28, 5)), now: now, calendar: calendar),
+                       "Weekly resets tomorrow 5 am")
+        XCTAssertNil(AccountUsageText.resetLine(usage(90, 60, reset: at(16, 40), weeklyReset: at(day: 29, 13)), now: now, calendar: calendar))
+        XCTAssertEqual(AccountUsageText.resetLine(usage(0, 31, blocked: true, reset: at(15, 30), weeklyReset: at(day: 29, 13)), now: now, calendar: calendar),
+                       "5-hour resets 3:30 pm")
+    }
+
+    func testExtraLinesKeepOnlyWhatDecidesSomething() {
+        // Mike's gmail account: Fable's own week has more room than the
+        // whole week, so it's left out; the allowance and the spend are one line.
+        var gmail = usage(90, 16, weeklyReset: at(day: 30, 1))
+        gmail.windows += [
+            UsageWindow(kind: "weekly_model", title: "Weekly Fable", remainingPercent: 96, resetsAt: at(day: 30, 1)),
+            UsageWindow(kind: "allowance", title: "$250 allowance", remainingPercent: 53.1, resetsAt: at(day: 35, 8), detail: "$132.79 left"),
+        ]
+        XCTAssertEqual(AccountUsageText.extraLines(gmail, notice: "$48.85 extra usage spent", now: now, calendar: calendar),
+                       ["$48.85 extra usage spent · $250 allowance: $132.79 left"])
+        // A model limit tighter than the main windows is the one that bites.
+        var tight = usage(90, 60)
+        tight.windows.append(UsageWindow(kind: "weekly_model", title: "Weekly Fable", remainingPercent: 5, resetsAt: at(day: 29, 13)))
+        XCTAssertEqual(AccountUsageText.extraLines(tight, notice: nil, now: now, calendar: calendar), ["Weekly Fable 5% left, resets Thu 1 pm"])
+        XCTAssertEqual(AccountUsageText.extraLines(usage(90, 60), notice: nil, now: now, calendar: calendar), [])
+        // Codex's credits come in the notice; a window repeating them doesn't say them again.
+        var codex = usage(nil, 89)
+        codex.windows.append(UsageWindow(kind: "other", title: "Credits", remainingPercent: 100, detail: "64,390 credits"))
+        XCTAssertEqual(AccountUsageText.extraLines(codex, notice: "64,390 credits · 2 limit resets available", now: now, calendar: calendar),
+                       ["64,390 credits · 2 limit resets available"])
+    }
+
     // MARK: Names
 
     func testAccountNamesAreProviderAware() {
@@ -201,7 +239,21 @@ final class AccountUsageTests: XCTestCase {
         let two = accounts + [Account(id: "codex-1", provider: "codex", title: "Codex · m@work.example", email: "m@work.example")]
         XCTAssertEqual(AccountName.short("codex-main", accounts: two), "Codex mike.cann")
         XCTAssertEqual(AccountName.short("codex-1", accounts: two), "Codex m")
-        // Codex rows are labelled, as any account other than main is.
-        XCTAssertTrue(AccountName.isShown("codex-main", accounts: accounts, mainId: "claude-main"))
+    }
+
+    func testCardLabelsUseTheDomainWhenNamesClash() {
+        // Mike's four Claude logins: two "mike@" and two "mike.cann@".
+        let accounts = [
+            Account(id: "claude-main", title: "", email: "mike@cannstudios.com"),
+            Account(id: "claude-1", title: "", email: "mike.cann@gmail.com"),
+            Account(id: "claude-2", title: "", email: "mike.cann@convex.dev"),
+            Account(id: "claude-3", title: "", email: "mike@gangbusters.io"),
+            Account(id: "codex-main", provider: "codex", title: "", email: "mike.cann@gmail.com"),
+        ]
+        XCTAssertEqual(accounts.map { AccountName.label($0.id, accounts: accounts) }, ["cannstudios", "gmail", "convex", "gangbusters", "Codex"])
+        let unique = [accounts[0], accounts[1]]
+        XCTAssertEqual(unique.map { AccountName.label($0.id, accounts: unique) }, ["mike", "mike.cann"])
+        let sameDomain = [Account(id: "a", title: "", email: "a@x.com"), Account(id: "b", title: "", email: "a@x.org")]
+        XCTAssertEqual(AccountName.label("a", accounts: sameDomain), "a@x.com")
     }
 }

@@ -243,7 +243,7 @@ final class TranscriptController: NSObject, NSTableViewDataSource, NSTableViewDe
 
     static func cellIdentifier(for row: TranscriptRow) -> String {
         switch row.kind {
-        case .user, .assistant, .plan, .error, .footer: return "text"
+        case .user, .assistant, .plan, .asks, .error, .footer: return "text"
         // A system note folded into an open group reads as one of its lines.
         case .note: return row.inGroup ? "header" : "text"
         case .reasoning, .tool, .diff: return "header"
@@ -253,6 +253,7 @@ final class TranscriptController: NSObject, NSTableViewDataSource, NSTableViewDe
             if case .approval(let item) = row.content, item.resolution != nil { return "header" }
             return "approval"
         case .question: return "question"
+        case .review: return "review"
         case .group: return "group"
         case .working: return "working"
         case .background: return "background"
@@ -270,6 +271,7 @@ final class TranscriptController: NSObject, NSTableViewDataSource, NSTableViewDe
         case "header": cell = HeaderRowCell(frame: .zero)
         case "images": cell = ImagesRowCell(frame: .zero)
         case "approval": cell = ApprovalRowCell(frame: .zero)
+        case "review": cell = ReviewRowCell(frame: .zero)
         case "group": cell = GroupRowCell(frame: .zero)
         case "working": cell = WorkingRowCell(frame: .zero)
         case "background": cell = BackgroundRowCell(frame: .zero)
@@ -687,6 +689,22 @@ final class TranscriptController: NSObject, NSTableViewDataSource, NSTableViewDe
     func questionDraft(_ approvalId: String) -> [Int: Set<String>] { questionDrafts[approvalId] ?? [:] }
 
     func setQuestionDraft(_ approvalId: String, _ draft: [Int: Set<String>]) { questionDrafts[approvalId] = draft }
+
+    func askAction(_ card: AsksCard, action: String) {
+        guard let session else { return }
+        let parts = action.split(separator: ":", maxSplits: 1)
+        guard parts.count == 2, let index = Int(parts[1]), card.asks.indices.contains(index) else { return }
+        switch parts[0] {
+        case "tick": session.tickAsk(asksSeq: card.seq, index: index, ticked: !card.ticked.contains(index))
+        case "reply": if let reply = card.asks[index].reply { session.useReply(reply) }
+        default: break
+        }
+    }
+
+    func openReview(_ review: DesignReview) {
+        guard let session else { return }
+        session.app?.openReview(threadId: session.threadId, review: review)
+    }
 }
 
 /// SwiftUI wrapper. The controller lives as long as the window's detail view,

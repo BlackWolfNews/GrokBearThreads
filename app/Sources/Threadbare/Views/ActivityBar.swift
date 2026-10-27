@@ -133,8 +133,9 @@ struct ActivityButton: View {
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .shortcutHint(shortcut, .after)
         .onHover { hovering = $0 }
-        .help(shortcut.map { "\(title) (\($0))" } ?? title)
+        .tip(shortcut.map { "\(title) (\($0))" } ?? title)
         .accessibilityLabel(title)
         .accessibilityValue(dot ? "Needs you" : badge.map { $0 > 0 ? "\($0)" : "" } ?? "")
         .accessibilityAddTraits(active ? [.isSelected] : [])

@@ -48,6 +48,8 @@ struct AppDump: Encodable {
     struct Section: Encodable {
         var name: String
         var threads: [Thread]
+        /// Inbox sections only: folded away under their heading.
+        var collapsed: Bool? = nil
     }
 
     struct Sidebar: Encodable {
@@ -230,7 +232,8 @@ struct AppDump: Encodable {
         case .inbox:
             let built = app.sections
             sections = InboxSection.allCases.map { section in
-                Section(name: section.title, threads: built[section].map { thread($0, section: section) })
+                Section(name: section.title, threads: built[section].map { thread($0, section: section) },
+                        collapsed: app.collapsedSections.contains(section))
             }
         case .snoozed:
             sections = [Section(name: "Snoozed", threads: app.snoozed.map { thread($0) })]
@@ -425,7 +428,7 @@ struct AppDump: Encodable {
         // of line.
         let threadWidth = max(12, sidebar.sections.flatMap(\.threads).map(\.id.count).max() ?? 0)
         for section in sidebar.sections where !section.threads.isEmpty {
-            lines.append("  \(section.name)")
+            lines.append("  \(section.name)" + (section.collapsed == true ? " (collapsed)" : ""))
             for thread in section.threads {
                 var flags = [thread.status]
                 if thread.unread { flags.append("unread") }

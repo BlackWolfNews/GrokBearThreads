@@ -28,6 +28,7 @@ import { acquireLock } from './lock.ts';
 import { removeTempFiles } from './fsutil.ts';
 import { Models } from './models/index.ts';
 import { SettingsService, modelMethods, settingsMethods } from './settings.ts';
+import { ConvexSync, ensureRunnerId, readSyncKey } from './sync.ts';
 import { ALWAYS_ASK_TOOLS, SERVER_NAME, buildThreadbareTools, threadbareMcpServer } from './threadbare-mcp.ts';
 
 // Tells launch.mjs this runner calls its listening() hook (release.ts), so
@@ -162,6 +163,9 @@ async function main(): Promise<void> {
     log,
     runner: {
       adopt: (threadId, o) => {
+        // Only the primary takes threads in. A draining runner has closed
+        // its peers, but one already on its way in mustn't land here.
+        if (draining) return undefined;
         const t = runner.adopt(threadId, o);
         restarter?.resumeAdopted(threadId);
         return t;
@@ -189,6 +193,19 @@ async function main(): Promise<void> {
   projects.start(runner);
   const librarian = new Librarian({ host: runner, projects, models, clock: realClock, log, home: cfg.home });
   librarian.start();
+  // The Convex mirror the phone reads (docs/convex-backend.md). Best
+  // effort: off without a URL and key, and never in the way of a turn.
+  const sync = new ConvexSync({
+    config: { ...cfg.sync, runnerId: cfg.sync.runnerId ?? ensureRunnerId(cfg.home) },
+    key: readSyncKey(cfg.home),
+    runner,
+    version: RUNNER_VERSION,
+    release: RELEASE.release,
+    startedAt: new Date().toISOString(),
+    clock: realClock,
+    log,
+  });
+  sync.start();
   if (swept) runner.startupNotice('info', `Stopped ${swept === 1 ? 'a process group' : `${swept} process groups`} left running by the previous runner.`);
 
   // launch.mjs went back to this release because a newer one kept crashing
@@ -254,7 +271,7 @@ async function main(): Promise<void> {
   const restartStatus = methods['runner.status'];
   methods['runner.status'] = (p) => {
     const draining = peers.status();
-    return { ...(restartStatus(p) as Record<string, unknown>), clis: updates.list(), ...(draining.length ? { draining } : {}) };
+    return { ...(restartStatus(p) as Record<string, unknown>), clis: updates.list(), sync: sync.status(), ...(draining.length ? { draining } : {}) };
   };
   const codexWarning = missingCodex(updates.codexBinary(), cfg);
   if (codexWarning) log.warn('codex CLI not found', { path: updates.codexBinary() });
@@ -324,6 +341,9 @@ async function main(): Promise<void> {
     usage.stop();
     updates.stop();
     settings.stop();
+    // A restart's new release writes everything again under the same
+    // runnerId; only a stop for good tells the phone this runner is gone.
+    await sync.stop({ bye: signal !== 'restart' && !draining });
     try {
       await runner.shutdown();
       await server.close().catch(() => {});
@@ -359,6 +379,13 @@ async function main(): Promise<void> {
       updates.stop();
       settings.stop();
       usage.stopWriting();
+      // The new release mirrors from here on.
+      void sync.stop();
+      // The older runners it was connected to are the new primary's now:
+      // it connects to every one of them, and each thread they hand over
+      // must go only there (27 Oct: three runners adopted the same one).
+      peers.close();
+      elsewhere = undefined;
       // Every thread not kept lets go now; resolves once their CLIs exit.
       await runner.beginDrain(keeps, {
         backgroundMs: BACKGROUND_HOLD_MS,

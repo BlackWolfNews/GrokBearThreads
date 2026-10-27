@@ -1,10 +1,11 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import type { WaitingForRoom, EffortLevel, MessageOrigin, PermissionMode, PersistedEvent, Provider, Subagent, ThreadProject, ThreadStatus, ImageRef } from './protocol.ts';
+import type { WaitingForRoom, Ask, NeedsWho, DesignReview, ReviewDraft, EffortLevel, MessageOrigin, PermissionMode, PersistedEvent, Provider, Subagent, ThreadProject, ThreadStatus, ImageRef } from './protocol.ts';
 import { atomicWriteFileSync, readJsonSync } from './fsutil.ts';
 import { paths } from './config.ts';
+import type { WorktreeRecord } from './worktrees.ts';
 
-export type QueuedSend = { turnId: string; text: string; images: ImageRef[]; origin?: MessageOrigin; scheduleId?: string };
+export type QueuedSend = { turnId: string; text: string; images: ImageRef[]; origin?: MessageOrigin; scheduleId?: string; reviewId?: string; reviewResponse?: ReviewDraft };
 
 // What thread.json holds: the public summary fields plus a few internal ones.
 export type ThreadRecord = {
@@ -42,6 +43,8 @@ export type ThreadRecord = {
   contextTokens?: number;
   contextWindow?: number; // the model's window, when the CLI reports it
   costUsd?: number;
+  reviews?: DesignReview[];
+  reviewDeliveries?: string[]; // review IDs whose reply reached session.send
   // Internal.
   // The version of the CLI that ran the thread's last session, so a new
   // session on another version can say so ("Codex 0.165.0 from this turn
@@ -55,6 +58,9 @@ export type ThreadRecord = {
   sessionCostTotal?: number; // the CLI's running total_cost_usd for this native session
   lastTurnCompletedSeq: number;
   forceUnread?: boolean; // set when a snooze ends
+  // What the last completed turn said it needs from Mike, with the seq of
+  // its turn.completed and which of its asks he has ticked.
+  needs?: { seq: number; needs: NeedsWho; asks?: Ask[]; ticked?: number[] };
   // Set when the folder or account changes, or the record had to be
   // rebuilt; the next turn starts a new native session with a note.
   // lost: the session to resume couldn't be found (never saved; only set
@@ -74,6 +80,11 @@ export type ThreadRecord = {
   // The projects the native session has been told about (the brief, or a
   // line when it joined one), so it hears about each once.
   projectsTold?: string[];
+  // The thread's own git worktree (worktrees.ts), once it's made.
+  worktree?: WorktreeRecord;
+  // Made in a repo that asks for worktrees and not told otherwise: the
+  // first turn makes one (and runs its setup) before the CLI starts.
+  worktreePending?: boolean;
 };
 
 export type ThreadProjectRecord = Omit<ThreadProject, 'title'>;

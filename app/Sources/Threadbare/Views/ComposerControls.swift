@@ -541,7 +541,7 @@ private struct ComposerChip: View {
         .background(MenuAnchorView(anchor: anchor))
         .onHover { hovering = $0 }
         .onChange(of: openRequest) { _, _ in open() }
-        .help(help)
+        .tip(help)
     }
 
     private func open() {
@@ -578,7 +578,7 @@ private struct PlusButton: View {
         .buttonStyle(.plain)
         .background(MenuAnchorView(anchor: anchor))
         .onHover { hovering = $0 }
-        .help("Attach images, change the folder or schedule the message")
+        .tip("Attach images, change the folder or schedule the message")
         .accessibilityLabel("Attach images, change the folder or schedule the message")
     }
 }
@@ -603,7 +603,8 @@ private struct SendButton: View {
                 Image(systemName: "stop.fill").font(.system(size: zoomed(9), weight: .bold))
             }
             .buttonStyle(CircleButtonStyle(filled: true))
-            .help("Stop (⌘.)")
+            .shortcutHint("⌘.", .before)
+            .tip("Stop (⌘.)")
             .accessibilityLabel("Stop")
             .keyboardShortcut(".", modifiers: .command)
         } else {
@@ -612,7 +613,7 @@ private struct SendButton: View {
             }
             .buttonStyle(CircleButtonStyle(filled: canSend))
             .disabled(!canSend)
-            .help(running ? "Send (into this turn)" : "Send (Return)")
+            .tip(running ? "Send (into this turn)" : "Send (Return)")
             .accessibilityLabel("Send")
         }
     }
@@ -761,6 +762,7 @@ struct ModelPickerView: View {
                     TextField("Search models", text: $query)
                         .textFieldStyle(.plain)
                         .font(.system(size: zoomed(13)))
+                        .tip("Search by name or id. Return picks the first match.")
                         .focused($searching)
                         .onSubmit {
                             // Return takes the first match.
@@ -899,7 +901,7 @@ private struct PickerRail: View {
             }
             .buttonStyle(.plain)
             .onHover { hovering = $0 }
-            .help(title)
+            .tip(title)
             .accessibilityLabel(title)
         }
     }
@@ -941,7 +943,7 @@ private struct PickerRail: View {
             .buttonStyle(.plain)
             .padding(.horizontal, zoomed(6))
             .onHover { hovering = $0 }
-            .help(column.title + (column.subtitle.map { ": \($0)" } ?? ""))
+            .tip(column.title + (column.subtitle.map { ": \($0)" } ?? ""))
             .accessibilityLabel(column.title + (active ? ", chosen" : ""))
         }
     }
@@ -970,7 +972,7 @@ private struct PoolFooter: View {
                     Button(pinned, action: showPinned)
                         .buttonStyle(.plain)
                         .foregroundStyle(.secondary)
-                        .help("Show this login's models")
+                        .tip("Show this login's models")
                     Text("·").foregroundStyle(.tertiary)
                     Button("Unpin") {
                         settings.unpin()
@@ -978,7 +980,7 @@ private struct PoolFooter: View {
                     }
                     .buttonStyle(.plain)
                     .foregroundStyle(.primary)
-                    .help("Let the pool pick the login again")
+                    .tip("Let the pool pick the login again")
                 }
                 .font(.system(size: zoomed(11)))
             }
@@ -996,7 +998,7 @@ private struct PoolFooter: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .help("Keep this thread on one login, which the runner never moves")
+            .tip("Keep this thread on one login, which the runner never moves")
             if showsLogins {
                 let sections = settings.pinSections
                 ScrollView {
@@ -1050,7 +1052,7 @@ private struct ModelRow: View {
                     Image(systemName: "star.fill")
                         .font(.system(size: zoomed(9)))
                         .foregroundStyle(.tertiary)
-                        .help("The default")
+                        .tip("The default")
                         .accessibilityLabel("Default")
                 }
                 Image(systemName: "checkmark")
@@ -1069,6 +1071,8 @@ private struct ModelRow: View {
         }
         .buttonStyle(.plain)
         .onHover { hovering = $0 }
+        // The id the CLI is given, which the name hides.
+        .tip(row.id)
         .accessibilityLabel(row.title + (row.isSelected ? ", chosen" : ""))
     }
 }
@@ -1096,7 +1100,7 @@ private struct EffortRow: View {
             HStack(spacing: zoomed(2)) {
                 ForEach(levels, id: \.self) { level in
                     Segment(title: ComposerChips.effortTitle(level), active: level == chosen) { choose(level) }
-                        .help(ComposerChips.effortPorridge(level) ?? ComposerChips.effortTitle(level))
+                        .tip(ComposerChips.effortPorridge(level) ?? ComposerChips.effortTitle(level))
                 }
             }
             .padding(zoomed(2))
@@ -1239,7 +1243,7 @@ private struct LoginRow: View {
         }
         .buttonStyle(.plain)
         .onHover { hovering = $0 }
-        .help(item.subtitle ?? item.title)
+        .tip(item.subtitle ?? item.title)
         .accessibilityLabel(item.title + (item.isSelected ? ", chosen" : ""))
     }
 

@@ -10,6 +10,8 @@ import { usd } from './models/index.ts';
 import { backgroundFlag } from './protocol.ts';
 import { parseWhen as parseLater, relativeFuture } from './when.ts';
 import { DEV_HELP, formatModels, logsCommand, runDev } from './tb-dev.ts';
+import { findWorktreePatch, isInside } from './patches.ts';
+import { land, landTargetFromGit, type LandTarget } from './worktrees.ts';
 
 const OPTIONS = {
   cwd: { type: 'string' },
@@ -94,6 +96,9 @@ const HELP = `tb: talk to the Threadbare runner
   tb models try <job> "text" [--labels a,b] [--field name=description]... [--system S] [--cwd DIR]
                                   one call by hand: classify (--labels), extract (--field),
                                   summarize or generate. It spends like any other
+  tb land [--dry-run]             in a thread's own worktree: rebase its branch on main, run
+                                  the repo's check, then move main to it (never pushes);
+                                  --dry-run stops before main moves
   tb retitle [<threadId>...] [--dry-run] [--json]
                                   a model title for every thread still named by its first line,
                                   or for the ones given (never one named by hand)
@@ -135,6 +140,7 @@ const COMMAND_FLAGS: Record<string, string[]> = {
   logs: ['lines', 'follow', 'thread'],
   export: ['out'],
   rpc: [],
+  land: ['dry-run'],
 };
 
 // Read but never listed when a command refuses a flag: an agent that sees
@@ -184,6 +190,8 @@ async function main(argv: string[]): Promise<number> {
   }
   const cfg = loadConfig();
   if (cmd === 'logs') return logsCommand(cfg, values);
+  // Works with no runner too: from any thread/ worktree, by git alone.
+  if (cmd === 'land') return landCommand(cfg, Boolean(values['dry-run']));
   const url = runnerUrl(cfg);
   let client: RunnerClient;
   try {
@@ -204,6 +212,61 @@ async function main(argv: string[]): Promise<number> {
 }
 
 type Flags = Record<string, string | boolean | string[] | undefined>;
+
+// `tb land` (docs/thread-worktrees.md, worktrees.ts). Inside a thread
+// (THREADBARE_THREAD_ID) the runner says where the thread's worktree is;
+// otherwise, or when the thread has none, it's the git checkout this runs
+// in, if that's on a thread/ branch. The check is the one in that
+// worktree's own patch, so a branch that changes it lands under its own.
+async function landCommand(cfg: ReturnType<typeof loadConfig>, dryRun: boolean): Promise<number> {
+  const here = process.cwd();
+  let target: Omit<LandTarget, 'check'> | undefined;
+  let from = here;
+  const threadId = process.env.THREADBARE_THREAD_ID;
+  if (threadId) {
+    const t = await threadFromRunner(cfg, threadId);
+    if (t?.worktree) {
+      target = t.worktree;
+      if (!isInside(here, t.worktree.path)) from = isInside(t.cwd, t.worktree.path) ? t.cwd : t.worktree.path;
+    }
+  }
+  if (!target) {
+    const found = await landTargetFromGit(here);
+    if (!found.target) {
+      console.error(found.reason);
+      return 1;
+    }
+    target = found.target;
+  }
+  let check: string | undefined;
+  try {
+    check = (await findWorktreePatch(from))?.check;
+  } catch (e) {
+    console.error(`Couldn't read the repo's patches for its check: ${(e as Error).message}`);
+    return 1;
+  }
+  return land({ path: target.path, branch: target.branch, mainCheckout: target.mainCheckout, check }, { dryRun });
+}
+
+// The thread's summary, or undefined when the runner can't be reached or
+// doesn't know it (tb land then goes by git alone).
+async function threadFromRunner(cfg: ReturnType<typeof loadConfig>, threadId: string): Promise<ThreadSummary | undefined> {
+  let client: RunnerClient;
+  try {
+    client = await RunnerClient.connect(runnerUrl(cfg), readToken(cfg.home));
+  } catch {
+    return undefined;
+  }
+  try {
+    await client.call('hello', { client: 'tb', version: '1' });
+    const r = await client.call<{ threads: ThreadSummary[] }>('threads.list', { include: ['inbox', 'snoozed', 'archived'] });
+    return r.threads.find((t) => t.id === threadId);
+  } catch {
+    return undefined;
+  } finally {
+    client.close();
+  }
+}
 
 
 async function run(client: RunnerClient, cmd: string, args: string[], f: Flags): Promise<number> {

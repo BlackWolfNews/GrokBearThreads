@@ -24,6 +24,7 @@ import type { ThreadRecord } from './store.ts';
 import type { ProjectRecord, Projects } from './projects.ts';
 import { atomicWriteFileSync, readJsonSync } from './fsutil.ts';
 import { findUp, isInside } from './patches.ts';
+import { SYMBOLS, fileHash, findIcon, storeIcon } from './project-icons.ts';
 
 // What the librarian needs from the runner.
 export type LibrarianHost = {
@@ -45,6 +46,11 @@ const OFF_RETRY_MS = 10 * 60_000;
 const RECENT_KEPT = 50;
 // A backfill looks at threads active this recently.
 const BACKFILL_DAYS = 30;
+// Icons: every project's folders are looked through again this often, so
+// a repo that gets a new app icon shows it; a new project or one whose
+// folders changed is looked at after ICON_SOON_MS.
+export const ICON_SWEEP_MS = 60 * 60_000;
+export const ICON_SOON_MS = 3_000;
 
 // Which reason wins when a thread is queued twice.
 const RANK: Record<LibrarianReason, number> = { asked: 0, moved: 1, 'new-folder': 2, 'first-turn': 3, 'catch-up': 4 };
@@ -88,6 +94,14 @@ export class Librarian {
   private timerAt = Infinity;
   private stopped = false;
   private unsubs: (() => void)[] = [];
+  // What each project's icon was last worked out from (folders, title, who
+  // set it), so only a changed one is looked at between sweeps.
+  private iconSeen = new Map<string, string>();
+  private iconTimer?: TimerHandle;
+  private iconTimerAt = Infinity;
+  private iconRun?: Promise<void>;
+  private iconAgain = false;
+  private iconFullDue = 0;
 
   constructor(deps: { host: LibrarianHost; projects: Projects; models?: Pick<Models, 'generate'> & Partial<Pick<Models, 'hasKey'>>; clock: Clock; log: Logger; home: string; userHome?: string }) {
     this.host = deps.host;
@@ -111,6 +125,7 @@ export class Librarian {
     this.unsubs.push(this.host.onThreadActivity((a) => this.onActivity(a)));
     this.unsubs.push(
       this.host.onNotification((n) => {
+        if (n.method === 'projects.updated') this.iconsSoon();
         if (n.method !== 'thread.deleted') return;
         const id = n.params.threadId;
         delete this.looks[id];
@@ -119,11 +134,13 @@ export class Librarian {
       }),
     );
     this.schedule();
+    this.iconsSoon();
   }
 
   stop(): void {
     this.stopped = true;
     this.timer?.cancel();
+    this.iconTimer?.cancel();
     for (const u of this.unsubs) u();
   }
 
@@ -176,6 +193,11 @@ export class Librarian {
     if (params.paused !== undefined && params.paused !== this.paused) {
       this.paused = params.paused;
       this.log.info(this.paused ? 'librarian paused' : 'librarian resumed');
+      // Symbols wait while paused: look at every project again now.
+      if (!this.paused) {
+        this.iconFullDue = 0;
+        this.iconsSoon();
+      }
       this.changed();
     }
     return this.status();
@@ -439,6 +461,124 @@ export class Librarian {
     this.log.info('librarian looked', { threadId: job.threadId, reason: job.reason, outcome, text });
   }
 
+  // ------------------------------------------------------------- icons
+
+  // A look at icons shortly, for new or changed projects (or all of them
+  // when the hourly sweep is due).
+  private iconsSoon(): void {
+    this.iconTimerSet(this.clock.now() + ICON_SOON_MS);
+  }
+
+  private iconTimerSet(at: number): void {
+    if (this.stopped) return;
+    if (this.iconTimer && this.iconTimerAt <= at) return;
+    this.iconTimer?.cancel();
+    this.iconTimerAt = at;
+    this.iconTimer = this.clock.setTimeout(() => {
+      this.iconTimer = undefined;
+      this.iconTimerAt = Infinity;
+      void this.keepIcons();
+    }, Math.max(0, at - this.clock.now()));
+  }
+
+  // Finds, refreshes or picks every project's icon that needs it. One run
+  // at a time; a change during a run means another straight after.
+  keepIcons(): Promise<void> {
+    if (this.iconRun) {
+      this.iconAgain = true;
+      return this.iconRun;
+    }
+    this.iconRun = (async () => {
+      do {
+        this.iconAgain = false;
+        const now = this.clock.now();
+        const full = now >= this.iconFullDue;
+        if (full) this.iconFullDue = now + ICON_SWEEP_MS;
+        for (const p of this.projects.list()) {
+          if (this.stopped) return;
+          const rec = this.projects.record(p.id);
+          if (!rec) continue;
+          const sig = JSON.stringify([rec.folders, rec.title, rec.icon?.by ?? '', rec.icon?.image?.path ?? rec.icon?.symbol ?? '']);
+          if (!full && this.iconSeen.get(rec.id) === sig) continue;
+          try {
+            await this.keepIcon(rec.id);
+          } catch (e) {
+            this.log.warn('librarian could not keep an icon', { projectId: rec.id, error: String(e) });
+          }
+          // As it is now, after any change this made, so that isn't
+          // looked at again.
+          const after = this.projects.record(rec.id);
+          if (after) this.iconSeen.set(rec.id, JSON.stringify([after.folders, after.title, after.icon?.by ?? '', after.icon?.image?.path ?? after.icon?.symbol ?? '']));
+        }
+      } while (this.iconAgain && !this.stopped);
+    })().finally(() => {
+      this.iconRun = undefined;
+      if (!this.stopped) this.iconTimerSet(this.iconFullDue);
+    });
+    return this.iconRun;
+  }
+
+  // One project: the best picture in its folders, copied again when it's
+  // a different file or the file has changed; with none, a symbol from the
+  // small model. Never one Mike or an agent chose.
+  private async keepIcon(projectId: string): Promise<void> {
+    const rec = this.projects.record(projectId);
+    if (!rec || (rec.icon && rec.icon.by !== 'librarian')) return;
+    const found = rec.folders.length ? await findIcon(rec.folders, [rec.title]) : undefined;
+    if (found) {
+      const hash = await fileHash(found.path);
+      if (!hash) return;
+      const had = rec.icon?.image;
+      if (had && rec.icon?.from === found.path && rec.icon.hash === hash && fs.existsSync(had.path)) return;
+      const image = await storeIcon(found.path, this.projects.iconDir, rec.id, hash);
+      if (this.stopped) return;
+      this.projects.setFoundIcon(rec.id, { image, from: found.path, hash });
+      this.log.info('librarian found an icon', { projectId: rec.id, from: found.path });
+      return;
+    }
+    // A picture whose folder has left the project goes; one whose file has
+    // just gone from a repo that's still there stays until there's another.
+    if (rec.icon?.image) {
+      const from = rec.icon.from;
+      if (from && rec.folders.some((f) => isInside(from, f)) && fs.existsSync(rec.icon.image.path)) return;
+    } else if (rec.icon?.symbol) {
+      return;
+    }
+    const symbol = await this.pickSymbol(rec);
+    if (this.stopped) return;
+    if (symbol) {
+      this.projects.setFoundIcon(rec.id, { symbol });
+      this.log.info('librarian picked a symbol', { projectId: rec.id, symbol });
+    } else if (rec.icon?.image) {
+      // Its picture's folder went and there's no symbol yet: the app's letter.
+      this.projects.chooseIcon(rec.id, {}, 'librarian').catch(() => {});
+    }
+  }
+
+  // A symbol for a project with no picture, from SYMBOLS. Not while paused,
+  // and like a look, inside the budget and never for a private folder.
+  private async pickSymbol(rec: ProjectRecord): Promise<string | undefined> {
+    if (!this.models || this.paused) return undefined;
+    const prompt = [
+      `Project "${rec.title}"`,
+      rec.folders.length ? `Folders: ${rec.folders.map((f) => this.tilde(f)).join(', ')}` : '',
+      rec.goals ? `Goals: ${rec.goals.slice(0, 400)}` : '',
+      '',
+      `Symbols: ${SYMBOLS.join(' ')}`,
+    ]
+      .filter((l) => l !== undefined)
+      .join('\n');
+    const res = await this.models.generate({ feature: 'projects', cwd: rec.folders[0], system: SYMBOL_SYSTEM, prompt, maxTokens: 1000 });
+    if (!res.ok) {
+      if (!WAIT_FOR.includes(res.reason)) this.log.info('librarian could not pick a symbol', { projectId: rec.id, reason: res.reason });
+      return undefined;
+    }
+    this.rollDay();
+    this.day.spentUsd += res.costUsd ?? 0;
+    const words = res.value.toLowerCase().match(/[a-z0-9.]+/g) ?? [];
+    return words.map((w) => w.replace(/\.+$/, '')).find((w) => SYMBOLS.includes(w));
+  }
+
   // ------------------------------------------------------------- helpers
 
   private sortedQueue(): LibrarianJob[] {
@@ -472,10 +612,13 @@ export class Librarian {
     if (this.day.date !== date) this.day = { date, looks: 0, spentUsd: 0 };
   }
 
-  // The repo a file belongs to (the nearest folder with .git), else its folder.
+  // The repo a file belongs to (the nearest folder with .git), else its
+  // folder. A git worktree counts as its main checkout: worktrees come and
+  // go, and the main one is where the project's patches live.
   private repoOf(file: string): string {
     const dir = path.dirname(file);
-    return findUp(dir, this.home, (d) => fs.existsSync(path.join(d, '.git'))) ?? dir;
+    const repo = findUp(dir, this.home, (d) => fs.existsSync(path.join(d, '.git')));
+    return repo ? mainCheckout(repo) : dir;
   }
 
   private isRepo(dir: string): boolean {
@@ -486,6 +629,7 @@ export class Librarian {
   // of its own, never home or a catch-all folder of repos.
   private isProjectFolder(dir: string): boolean {
     if (dir === this.home || !isInside(dir, this.home)) return false;
+    if (mainCheckout(dir) !== dir) return false;
     try {
       if (!fs.statSync(dir).isDirectory()) return false;
     } catch {
@@ -503,6 +647,21 @@ export class Librarian {
   private tilde(p: string): string {
     return p === this.home || p.startsWith(this.home + path.sep) ? '~' + p.slice(this.home.length) : p;
   }
+}
+
+// The main checkout of a git worktree (its .git is a file naming
+// <main>/.git/worktrees/<name>), else the folder itself.
+export function mainCheckout(dir: string): string {
+  try {
+    const text = fs.readFileSync(path.join(dir, '.git'), 'utf8');
+    const m = /^gitdir:\s*(.+?)\s*$/m.exec(text);
+    const gitdir = m ? path.resolve(dir, m[1]) : undefined;
+    const marker = `${path.sep}.git${path.sep}worktrees${path.sep}`;
+    if (gitdir && gitdir.includes(marker)) return gitdir.slice(0, gitdir.indexOf(marker));
+  } catch {
+    // A .git folder (EISDIR) or none: the folder is its own checkout.
+  }
+  return dir;
 }
 
 const PROJECT_MARKERS = ['.git', 'package.json', 'Package.swift', 'pyproject.toml', 'Cargo.toml', 'go.mod', 'AGENTS.md', 'CLAUDE.md'];
@@ -528,6 +687,8 @@ Reply with JSON only, no prose and no code fence:
  "why": "one short line"}
 
 Folders are repos the work lives in (the thread's folder when it's a repo, and the repos it edited), never a catch-all folder. State is two to four plain sentences about the whole project, not this thread: what's done, what's next, what's blocked. Start from the current state, keep what's still true and fold the change in; don't replace it with this thread's details. Ideas and plans that aren't built yet don't change the state.`;
+
+const SYMBOL_SYSTEM = `You pick an icon for a project in Threadbear, Mike's app for running AI coding agents. Given the project and a list of SF Symbol names, reply with the one name from the list that best shows what the project is about, and nothing else.`;
 
 function parseAnswer(text: string): Answer | undefined {
   const t = text.trim().replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/, '');

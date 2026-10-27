@@ -22,6 +22,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { reviewDraft, reviewReply, sameDraft } from '../../../runner/src/reviews.ts';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const args = parseArgs(process.argv.slice(2));
@@ -477,12 +478,66 @@ async function dispatch(client, method, p) {
     case 'threads.unsubscribe':
       client.subs.delete(p.threadId);
       return {};
+    case 'threads.tickAsk': {
+      // docs/protocol.md, "Needs you": ticks one ask on the open card.
+      const t = need(p.threadId);
+      const s = t.summary;
+      if (!s.asks || s.asksSeq !== p.asksSeq) throw rpcError(-32602, "That isn't the thread's open card of asks.");
+      if (!Number.isInteger(p.index) || p.index < 0 || p.index >= s.asks.length) throw rpcError(-32602, 'No such ask.');
+      const ask = { ...s.asks[p.index] };
+      if (p.ticked) ask.ticked = true;
+      else delete ask.ticked;
+      s.asks = s.asks.map((a, i) => (i === p.index ? ask : a));
+      const caughtUp = s.lastSeenSeq >= s.lastSeq;
+      persist(s.id, { type: 'asks.ticked', asksSeq: s.asksSeq, ticked: s.asks.flatMap((a, i) => (a.ticked ? [i] : [])) });
+      if (caughtUp) s.lastSeenSeq = s.lastSeq;
+      broadcastSummary(s.id);
+      return { thread: s };
+    }
     case 'threads.markSeen': {
       const t = need(p.threadId);
       t.summary.lastSeenSeq = Math.max(t.summary.lastSeenSeq, p.seq ?? 0);
-      if (t.summary.status !== 'waiting') t.summary.needsYou = false;
+      if (t.summary.status !== 'waiting') t.summary.needsYou = Boolean(t.summary.pendingReviews);
       broadcastSummary(t.summary.id);
       return { thread: t.summary };
+    }
+    case 'reviews.list': {
+      const t = need(p.threadId);
+      return { reviews: [...(t.reviews?.values() ?? [])].filter((review) => review.status === 'pending').sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id)).map((review) => structuredClone(review)) };
+    }
+    case 'reviews.get': {
+      const t = need(p.threadId);
+      return { review: structuredClone(needReview(t, p.reviewId)) };
+    }
+    case 'reviews.save':
+    case 'reviews.respond':
+    case 'reviews.cancel': {
+      const t = need(p.threadId);
+      const review = needReview(t, p.reviewId);
+      const draft = method === 'reviews.cancel' ? review.draft : reviewDraft(review, p.draft, method === 'reviews.respond');
+      if (method === 'reviews.respond' && review.status === 'answered' && sameDraft(review.response, draft)) return { review, turnId: review.replyTurnId };
+      if (review.status !== 'pending') throw rpcError(-32602, `This review is ${review.status}.`);
+      if (p.revision !== review.revision) throw rpcError(-32602, 'This review changed. Reload it before saving or sending your answer.');
+      const next = { ...review, draft, revision: review.revision + 1, updatedAt: iso() };
+      if (method === 'reviews.cancel') next.status = 'cancelled';
+      if (method === 'reviews.respond') {
+        next.status = 'answered';
+        next.response = draft;
+        next.replyTurnId = 'turn_' + crypto.randomBytes(4).toString('hex');
+      }
+      t.reviews.set(next.id, next);
+      updateReviewCount(t);
+      persist(t.summary.id, { type: 'review.updated', review: next });
+      if (method === 'reviews.respond') {
+        // Receipt of the reply is a fake turn, without a CLI or model.
+        const text = reviewReply(next, draft);
+        persist(t.summary.id, { type: 'user.message', text, images: [], reviewId: next.id, reviewResponse: draft }, next.replyTurnId);
+        persist(t.summary.id, { type: 'turn.started', turnId: next.replyTurnId }, next.replyTurnId);
+        persist(t.summary.id, { type: 'assistant.text', itemId: 'review_reply_' + next.id, text: 'I received your review. This is the mock runner, so no code was changed.' }, next.replyTurnId);
+        persist(t.summary.id, { type: 'turn.completed', turnId: next.replyTurnId, outcome: 'completed', durationMs: 0 }, next.replyTurnId);
+        setStatus(t.summary.id, 'idle', true);
+      }
+      return { review: structuredClone(next), ...(next.replyTurnId ? { turnId: next.replyTurnId } : {}) };
     }
     case 'approvals.respond': {
       const t = need(p.threadId);
@@ -595,6 +650,7 @@ async function dispatch(client, method, p) {
     case 'projects.get':
     case 'projects.create':
     case 'projects.update':
+    case 'projects.setIcon':
     case 'projects.merge':
     case 'projects.delete':
     case 'threads.setProjects':
@@ -1001,6 +1057,22 @@ function wentBack() {
   return { clis };
 }
 
+function needReview(t, id) {
+  const review = t.reviews?.get(id);
+  if (!review) throw rpcError(-32602, `Review not found: ${id}`);
+  return review;
+}
+
+function updateReviewCount(t) {
+  const count = [...(t.reviews?.values() ?? [])].filter((review) => review.status === 'pending').length;
+  if (count) { t.summary.pendingReviews = count; t.summary.needsYou = true; }
+  else {
+    const hadReview = Boolean(t.summary.pendingReviews);
+    delete t.summary.pendingReviews;
+    if (hadReview && t.summary.status !== 'waiting') t.summary.needsYou = false;
+  }
+}
+
 // ---------------------------------------------------------------- events
 
 function persist(threadId, fields, turnId) {
@@ -1040,6 +1112,8 @@ function setStatus(threadId, status, needsYou) {
 }
 
 function broadcastSummary(threadId) {
+  const t = threads.get(threadId);
+  if (t.summary.pendingReviews) t.summary.needsYou = true;
   const text = JSON.stringify({ jsonrpc: '2.0', method: 'thread.updated', params: { thread: threads.get(threadId).summary } });
   for (const client of clients) if (client.authed) client.ws.send(text);
 }
@@ -1257,6 +1331,14 @@ function projectRequest(method, p) {
       broadcastProjects();
       return { project: projectView(project) };
     }
+    case 'projects.setIcon': {
+      const project = needProject(p.projectId);
+      if (p.path) project.icon = { image: { path: p.path, mediaType: 'image/png' }, from: p.path, by: 'mike', updatedAt: iso() };
+      else if (p.symbol) project.icon = { symbol: p.symbol, by: 'mike', updatedAt: iso() };
+      else delete project.icon;
+      broadcastProjects();
+      return { project: projectView(project) };
+    }
     case 'projects.merge': {
       const from = needProject(p.projectId);
       const into = needProject(p.intoId);
@@ -1392,12 +1474,16 @@ function addDemoProjects() {
     state: 'Projects and the librarian are next: protocol written, runner and app being built in parallel. Settings tabs renamed; release notes for 0.4 drafted.',
     notes: '**Checks**: `./check.sh` runs everything, `--quick` for the runner only.\n\nNever restart the live runner from a thread; merge to main and it follows.\n\nThe protocol is the contract: change `docs/protocol.md` first.',
     createdBy: 'librarian', createdByThread: 'demo_release_notes', createdAt: ago(60 * 24 * 9), updatedAt: ago(3), stateUpdatedAt: ago(41),
+    // The three kinds of icon: a picture (the app's own), a symbol, and
+    // Walkies with none yet, which shows its letter.
+    icon: { image: { path: fileURLToPath(new URL('../../icons/threadbare.png', import.meta.url)), mediaType: 'image/png' }, from: '/Users/mike/dev/me/threadbare/app/icons/threadbare.png', by: 'librarian', updatedAt: ago(60) },
   };
   const photo = {
     id: 'p_7a2c41f0', title: 'Photo sync', folders: ['/Users/mike/dev/photo-sync'],
     goals: 'Back up the family photo library to B2 without babysitting it: resumable uploads, a nightly report, and builds that don\'t take fifteen minutes.',
     state: 'Uploads resume after a crash in testing; waiting on Mike to pick the chunk size. CI is slow because the lockfile change broke the cache key.',
     notes: '', createdBy: 'librarian', createdByThread: 'demo_upload_resume', createdAt: ago(60 * 24 * 4), updatedAt: ago(41), stateUpdatedAt: ago(41),
+    icon: { symbol: 'photo', by: 'librarian', updatedAt: ago(60) },
   };
   const walkies = {
     id: 'p_c9e8d102', title: 'Walkies', folders: ['/Users/mike/dev/walkies', '/Users/mike/dev/walkies-backend'],
@@ -1647,11 +1733,16 @@ function loadFixtures() {
         const event = JSON.parse(line);
         event.threadId = summary.id;
         if (event.images) event.images = fixPaths(event.images);
+        if (event.type === 'review.updated') event.review.options = event.review.options.map((option) => ({ ...option, image: fixPaths([option.image])[0] }));
         return event;
       });
       summary.lastSeq = events.at(-1)?.seq ?? 0;
       summary.lastSeenSeq ??= summary.lastSeq;
-      loaded.push({ summary, events, inProgress: new Map(), timers: [], dir });
+      const reviews = new Map();
+      for (const event of events) if (event.type === 'review.updated') reviews.set(event.review.id, event.review);
+      const t = { summary, events, reviews, inProgress: new Map(), timers: [], dir };
+      updateReviewCount(t);
+      loaded.push(t);
     }
     // Real paths: /tmp is /private/tmp, and dev-app.sh passes the one,
     // the module's own path is the other.

@@ -100,15 +100,19 @@ const PERSISTED: Record<string, (e: Obj) => string | null> = {
     (e.costUsd === undefined || isNum(e.costUsd)) &&
     (e.usage === undefined || isTokenCounts(e.usage)) &&
     (e.error === undefined || isStr(e.error)) &&
-    (e.errorKind === undefined || ERROR_KINDS.includes(e.errorKind))
+    (e.errorKind === undefined || ERROR_KINDS.includes(e.errorKind)) &&
+    (e.needs === undefined || ['you', 'nothing'].includes(e.needs)) &&
+    (e.asks === undefined || isAsks(e.asks)) &&
+    (e.needsFrom === undefined || ['tool', 'text'].includes(e.needsFrom))
       ? null
-      : 'turnId, outcome, durationMs, usage, errorKind',
+      : 'turnId, outcome, durationMs, usage, errorKind, needs, asks, needsFrom',
+  'asks.ticked': (e) => (isNum(e.asksSeq) && Array.isArray(e.ticked) && e.ticked.every(isNum) ? null : 'asksSeq, ticked'),
   'system.note': (e) => (isStr(e.text) ? null : 'text'),
   error: (e) => (isStr(e.message) ? null : 'message'),
   'action.run': (e) =>
     isStr(e.actionId) && isStr(e.patch) && isStr(e.title) && isStr(e.command) && typeof e.ok === 'boolean' &&
     (e.exitCode === undefined || isNum(e.exitCode)) && isStr(e.text) && typeof e.truncated === 'boolean' && isNum(e.durationMs) &&
-    (e.trigger === undefined || e.trigger === 'turn.end')
+    (e.trigger === undefined || e.trigger === 'turn.end' || e.trigger === 'worktree.setup')
       ? null
       : 'actionId, patch, title, command, ok, exitCode?, text, truncated, durationMs, trigger?',
 };
@@ -246,14 +250,31 @@ export function checkSummary(t: Obj): string[] {
       );
     if (!ok) problems.push('projects');
   }
+  if (t.needs !== undefined && !['you', 'nothing'].includes(t.needs)) problems.push('needs');
+  if (t.asks !== undefined && !(isAsks(t.asks) && t.asks.every((a: Obj) => a.ticked === undefined || a.ticked === true))) problems.push('asks');
+  if ((t.asks === undefined) !== (t.asksSeq === undefined) || (t.asksSeq !== undefined && !isNum(t.asksSeq))) problems.push('asksSeq');
+  if (t.worktree !== undefined) {
+    const w = t.worktree;
+    const ok = w && isStr(w.branch) && isStr(w.mainCheckout) && isStr(w.path) && Object.keys(w).every((k) => ['branch', 'mainCheckout', 'path'].includes(k));
+    if (!ok) problems.push('worktree');
+  }
   const allowed = new Set([
     'id', 'title', 'cwd', 'accountId', 'provider', 'model', 'permissionMode', 'status', 'live', 'needsYou', 'createdAt', 'updatedAt',
     'lastActivityAt', 'snoozedUntil', 'snoozedUntilRestart', 'archivedAt', 'preview', 'lastSeq', 'lastSeenSeq', 'nativeSessionId', 'contextTokens', 'costUsd',
     'poolId', 'waitingForRoom',
-    'effort', 'modelInUse', 'effortInUse', 'contextWindow', 'panels', 'actions', 'hooks', 'patches', 'background', 'subagents', 'projects',
+    'effort', 'modelInUse', 'effortInUse', 'contextWindow', 'panels', 'actions', 'hooks', 'patches', 'background', 'subagents', 'projects', 'worktree',
+    'needs', 'asks', 'asksSeq',
   ]);
   for (const k of Object.keys(t)) if (!allowed.has(k)) problems.push(`unexpected field ${k}`);
   return problems;
+}
+
+function isAsks(v: unknown): boolean {
+  return (
+    Array.isArray(v) &&
+    v.every((a: Obj) => isStr(a?.action) && (a.where === undefined || isStr(a.where)) && (a.reply === undefined || isStr(a.reply)) &&
+      Object.keys(a).every((k) => ['action', 'where', 'reply', 'ticked'].includes(k)))
+  );
 }
 
 function checkModelChoice(m: Obj): string[] {

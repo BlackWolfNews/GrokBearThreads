@@ -81,6 +81,10 @@ export type Config = {
   // The runner's own model calls (src/models/): a daily cap in dollars (0
   // turns them off) and folders whose threads are never sent.
   models: { dailyBudgetUsd: number; privateFolders: string[] };
+  // The Convex mirror (src/sync.ts): the project's URL, whether it's on,
+  // the name the phone shows for this runner and its id (made once).
+  // THREADBARE_SYNC=off turns it off for tests and dev runners.
+  sync: { enabled: boolean; url?: string; name?: string; runnerId?: string };
 };
 
 export type RunnerJson = {
@@ -109,6 +113,7 @@ export type RunnerJson = {
   pools?: unknown[];
   followMain?: boolean;
   models?: { dailyBudgetUsd?: number; privateFolders?: string[] };
+  sync?: { enabled?: boolean; url?: string; name?: string; runnerId?: string };
 };
 
 export function defaultHome(): string {
@@ -188,7 +193,21 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     cliUpdates: cliUpdatesConfig(json.cliUpdates, env.THREADBARE_CLI_UPDATES),
     accountNotes: stringMap(json.accountNotes) ?? { ...DEFAULT_ACCOUNT_NOTES },
     ...(Array.isArray(json.pools) && json.pools.length ? { pools: json.pools } : {}),
+    sync: syncConfig(json.sync, env),
   };
+}
+
+// THREADBARE_SYNC=off wins over runner.json; THREADBARE_SYNC_URL points a
+// test or dev runner at its own deployment.
+function syncConfig(raw: RunnerJson['sync'], env: NodeJS.ProcessEnv): Config['sync'] {
+  const url = nonEmpty(env.THREADBARE_SYNC_URL) ?? nonEmpty(raw?.url);
+  const out: Config['sync'] = { enabled: env.THREADBARE_SYNC === 'off' ? false : raw?.enabled !== false };
+  if (url) out.url = url;
+  const name = nonEmpty(raw?.name);
+  if (name) out.name = name;
+  const runnerId = nonEmpty(raw?.runnerId);
+  if (runnerId) out.runnerId = runnerId;
+  return out;
 }
 
 function nonEmpty(v: unknown): string | undefined {

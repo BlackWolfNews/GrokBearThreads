@@ -32,6 +32,12 @@ const CLOSE_GRACE_MS = 1000;
 // primary passes these to the draining runner that has the thread, and a
 // draining runner answers -32030 for one it has let go.
 const THREAD_METHODS = new Set([
+  'reviews.list',
+  'reviews.create',
+  'reviews.get',
+  'reviews.save',
+  'reviews.respond',
+  'reviews.cancel',
   'threads.send',
   'threads.interrupt',
   'threads.update',
@@ -39,6 +45,7 @@ const THREAD_METHODS = new Set([
   'threads.events',
   'threads.subscribe',
   'threads.markSeen',
+  'threads.tickAsk',
   'approvals.respond',
   'panels.render',
   'actions.run',
@@ -328,6 +335,7 @@ export class RpcServer {
         return remote.search(query, limit ?? 50).then((more) => ({ threads: mergeSummaries(local, more).slice(0, limit ?? 50) }));
       }
       case 'threads.create': {
+        if (p.worktree !== undefined && typeof p.worktree !== 'boolean') throw bad('worktree must be a boolean');
         const res = r.create({
           text: optString(p, 'text') ?? '',
           images: optImages(p),
@@ -338,9 +346,22 @@ export class RpcServer {
           effort: optEffort(p),
           permissionMode: optMode(p),
           title: optString(p, 'title'),
+          ...(p.worktree === false ? { worktree: false } : {}),
         });
         return { thread: res.thread, turnId: res.turnId };
       }
+      case 'reviews.list':
+        return r.listReviews(reqString(p, 'threadId'));
+      case 'reviews.create':
+        return r.createReview(reqString(p, 'threadId'), p as Parameters<Runner['createReview']>[1]);
+      case 'reviews.get':
+        return r.getReview(reqString(p, 'threadId'), reqString(p, 'reviewId'));
+      case 'reviews.save':
+        return r.saveReview(reqString(p, 'threadId'), reqString(p, 'reviewId'), p.revision as number, p.draft as Parameters<Runner['saveReview']>[3]);
+      case 'reviews.respond':
+        return r.respondReview(reqString(p, 'threadId'), reqString(p, 'reviewId'), p.revision as number, p.draft as Parameters<Runner['respondReview']>[3]);
+      case 'reviews.cancel':
+        return r.cancelReview(reqString(p, 'threadId'), reqString(p, 'reviewId'), p.revision as number);
       case 'threads.send':
         return r.send(reqString(p, 'threadId'), optString(p, 'text') ?? '', optImages(p) ?? []);
       case 'threads.interrupt':
@@ -387,6 +408,9 @@ export class RpcServer {
         return {};
       case 'threads.markSeen':
         return r.markSeen(reqString(p, 'threadId'), reqNumber(p, 'seq'));
+      case 'threads.tickAsk':
+        if (typeof p.ticked !== 'boolean') throw bad('ticked must be a boolean');
+        return r.tickAsk(reqString(p, 'threadId'), reqNumber(p, 'asksSeq'), reqNumber(p, 'index'), p.ticked);
       case 'approvals.respond': {
         const decision = reqString(p, 'decision') as ApprovalDecision;
         if (!['allow', 'allowAlways', 'deny', 'answered'].includes(decision)) throw bad('bad decision');

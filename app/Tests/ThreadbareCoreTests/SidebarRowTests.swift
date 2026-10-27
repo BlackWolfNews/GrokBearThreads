@@ -8,7 +8,9 @@ final class SidebarRowTests: XCTestCase {
 
     /// Between turns with sub-agents or jobs still going, the row says so
     /// (and keeps saying so under the Running heading, since the words are
-    /// what's running, not the heading's). An unread reply keeps its dot.
+    /// what's running, not the heading's). An unread reply waits for its
+    /// dot until the work's done: a dot by a spinner read as two states at
+    /// once (Mike, 27 Oct). The bold title still says there's a reply.
     func testBackgroundWorkShowsOnTheRow() {
         let cubs = [BackgroundTask(kind: .agent, description: "a"), BackgroundTask(kind: .agent, description: "b"), BackgroundTask(kind: .agent, description: "c")]
         let thread = ThreadSummary(id: "t", title: "t", status: .idle, background: cubs)
@@ -16,7 +18,9 @@ final class SidebarRowTests: XCTestCase {
         XCTAssertEqual(ThreadRowLook(thread, section: .running), ThreadRowLook(status: .background, unread: false, emphasised: false, labelled: true))
         var unread = thread
         unread.needsYou = true
-        XCTAssertEqual(ThreadRowLook(unread), ThreadRowLook(status: .background, unread: true, emphasised: true))
+        XCTAssertEqual(ThreadRowLook(unread), ThreadRowLook(status: .background, unread: false, emphasised: true))
+        unread.background = []
+        XCTAssertEqual(ThreadRowLook(unread), ThreadRowLook(status: .time, unread: true, emphasised: true))
         // A running turn is the working line, whatever's in the background.
         var running = thread
         running.status = .running
@@ -75,36 +79,29 @@ final class SidebarRowTests: XCTestCase {
         XCTAssertFalse(look(.running, needsYou: true).unread)
     }
 
-    /// Under "Needs you" and "Running" a row doesn't say its section's
-    /// word again; a row whose state differs from its section still does.
+    /// Under "Running" a working row doesn't say "Working" again; a row
+    /// whose state differs from its section still says its word. Waiting
+    /// rows in the inbox say "Needs you", since that's why they're on top.
     func testSectionWordsAreNotRepeated() {
         func look(_ status: ThreadStatus, needsYou: Bool = false, in section: InboxSection) -> ThreadRowLook {
             ThreadRowLook(ThreadSummary(id: "t", title: "t", status: status, needsYou: needsYou), section: section)
         }
-        XCTAssertEqual(look(.waiting, in: .needsYou), ThreadRowLook(status: .needsYou, unread: false, emphasised: true, labelled: false))
         XCTAssertEqual(look(.running, in: .running), ThreadRowLook(status: .working, unread: false, emphasised: false, labelled: false))
         XCTAssertEqual(look(.starting, in: .running).labelled, false)
-        // Finished and unread under Needs you: the dot and the time, as before.
-        XCTAssertEqual(look(.idle, needsYou: true, in: .needsYou), ThreadRowLook(status: .time, unread: true, emphasised: true))
-        // A failed thread under Needs you, or anything in the inbox, keeps its word.
-        XCTAssertTrue(look(.error, needsYou: true, in: .needsYou).labelled)
+        XCTAssertEqual(look(.waiting, in: .inbox), ThreadRowLook(status: .needsYou, unread: false, emphasised: true, labelled: true))
+        XCTAssertEqual(look(.idle, needsYou: true, in: .inbox), ThreadRowLook(status: .time, unread: true, emphasised: true))
+        XCTAssertTrue(look(.error, needsYou: true, in: .inbox).labelled)
         XCTAssertTrue(look(.stopped, in: .inbox).labelled)
-        XCTAssertTrue(look(.waiting, in: .inbox).labelled)
         // Outside the inbox (snoozed, archived) there's no section to lean on.
         XCTAssertTrue(ThreadRowLook(ThreadSummary(id: "t", title: "t", status: .waiting)).labelled)
     }
 
-    func testEmptyPreviewForAThreadWaitingOnMike() {
-        XCTAssertEqual(ThreadRowLook.emptyPreview(ThreadSummary(id: "t", title: "t", status: .waiting)), "Waiting for your answer")
-        XCTAssertEqual(ThreadRowLook.emptyPreview(ThreadSummary(id: "t", title: "t", status: .idle)), "No reply yet")
-        XCTAssertEqual(ThreadRowLook.emptyPreview(ThreadSummary(id: "t", title: "t", status: .starting)), "No reply yet")
-    }
-
     func testSectionTitles() {
-        XCTAssertEqual(InboxSection.allCases.map(\.title), ["Needs you", "Running", "Inbox"])
-        let sections = ThreadSections(needsYou: [ThreadSummary(id: "a", title: "a")], running: [], inbox: [ThreadSummary(id: "b", title: "b")])
-        XCTAssertEqual(sections[.needsYou].map(\.id), ["a"])
+        XCTAssertEqual(InboxSection.allCases.map(\.title), ["Inbox", "Running"])
+        let sections = ThreadSections(inbox: [ThreadSummary(id: "b", title: "b")], running: [ThreadSummary(id: "a", title: "a")])
+        XCTAssertEqual(sections[.running].map(\.id), ["a"])
         XCTAssertEqual(sections[.inbox].map(\.id), ["b"])
+        XCTAssertEqual(sections.all.map(\.id), ["b", "a"])
     }
 
     func testAccountShortNames() {
@@ -121,17 +118,31 @@ final class SidebarRowTests: XCTestCase {
         XCTAssertEqual(AccountName.short("gone", accounts: accounts), "gone")
     }
 
-    func testAccountIsShownUnlessMain() {
-        let accounts = [Account(id: "claude-main", title: "a@x"), Account(id: "claude-3", title: "b@x")]
-        XCTAssertFalse(AccountName.isShown("claude-main", accounts: accounts, mainId: "claude-main"))
-        XCTAssertTrue(AccountName.isShown("claude-3", accounts: accounts, mainId: "claude-main"))
-        XCTAssertFalse(AccountName.isShown("", accounts: accounts, mainId: "claude-main"))
-        // No main account: the first one is treated as main.
-        let others = [Account(id: "work", title: "w@x"), Account(id: "home", title: "h@x")]
-        XCTAssertFalse(AccountName.isShown("work", accounts: others, mainId: "claude-main"))
-        XCTAssertTrue(AccountName.isShown("home", accounts: others, mainId: "claude-main"))
-        // Before hello, with no accounts known, only the main id is unlabelled.
-        XCTAssertTrue(AccountName.isShown("claude-3", accounts: [], mainId: "claude-main"))
+    func testProjectMark() {
+        XCTAssertEqual(ProjectMark.letter("convex docs"), "C")
+        XCTAssertEqual(ProjectMark.letter("  7 day plan"), "7")
+        XCTAssertEqual(ProjectMark.letter("🐻 Threadbear"), "T")
+        XCTAssertEqual(ProjectMark.letter("🐻"), "?")
+        XCTAssertEqual(ProjectMark.letter(""), "?")
+    }
+
+    func testProjectMarkForNoneOneAndTwoProjects() {
+        var thread = ThreadSummary(id: "t", title: "t", cwd: "/Users/mike/dev/me/misc")
+        XCTAssertEqual(ProjectMark.shown(thread), [])
+        XCTAssertEqual(ProjectMark.place(thread), "misc", "no project: the folder")
+        XCTAssertEqual(ProjectMark.help(thread), "/Users/mike/dev/me/misc")
+        thread.projects = [ThreadProject(id: "a", title: "Threadbear")]
+        XCTAssertEqual(ProjectMark.place(thread), "Threadbear")
+        thread.projects.append(ThreadProject(id: "b", title: ""))
+        XCTAssertEqual(ProjectMark.shown(thread).map(\.id), ["a", "b"])
+        XCTAssertEqual(ProjectMark.place(thread), "Threadbear, Untitled project")
+        XCTAssertEqual(ProjectMark.help(thread), "Threadbear, Untitled project")
+        // Under a project's heading the row names only the others, and its
+        // folder when there are none.
+        XCTAssertEqual(ProjectMark.place(thread, under: "a"), "Untitled project")
+        XCTAssertEqual(ProjectMark.shown(thread, under: "b").map(\.id), ["a"])
+        thread.projects.removeLast()
+        XCTAssertEqual(ProjectMark.place(thread, under: "a"), "misc")
     }
 
     func testFolderName() {

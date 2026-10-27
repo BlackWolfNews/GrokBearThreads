@@ -109,8 +109,9 @@ group leaves the turn's one spinner to the working line.
   - failed: "Failed" in red; cut off by a runner restart: "Stopped",
   - finished and unread: a 7 pt accent dot before the title (Mail style).
 - A row says its status in words ("Working 37s", "Needs you") only when
-  it isn't under the heading that already says it. Under "Running" and
-  "Needs you" the word took about 60 pt of the title line, so the rows
+  it isn't under the heading that already says it. (Since 27 Oct there's
+  no Needs you heading: it merged into Inbox, so waiting rows say "Needs
+  you" again.) Under "Running" and "Needs you" the word took about 60 pt of the title line, so the rows
   that mattered most had the most cut-off titles; the heading, the accent
   spinner and the orange time say it there. The tooltip still says
   "Working" or "Waiting for you". Rows in the Snoozed and Archive lists

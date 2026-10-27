@@ -87,6 +87,13 @@ public extension RPCClient {
         try await call("threads.markSeen", .object(["threadId": .string(threadId), "seq": .number(Double(seq))]), as: ThreadResult.self).thread
     }
 
+    /// Ticks or unticks one ask on the open card. Sends nothing to the agent.
+    func tickAsk(threadId: String, asksSeq: Int, index: Int, ticked: Bool) async throws -> ThreadSummary {
+        try await call("threads.tickAsk", .object([
+            "threadId": .string(threadId), "asksSeq": .number(Double(asksSeq)), "index": .number(Double(index)), "ticked": .bool(ticked),
+        ]), as: ThreadResult.self).thread
+    }
+
     func respond(threadId: String, approvalId: String, decision: ApprovalDecision, message: String? = nil, answers: [String: String]? = nil) async throws {
         var params: [String: JSONValue] = [
             "threadId": .string(threadId),
@@ -441,6 +448,15 @@ public extension RPCClient {
         var params = update.params
         params["projectId"] = .string(projectId)
         return try await call("projects.update", .object(params), as: ProjectResult.self).project
+    }
+
+    /// Mike's icon for a project: a picture file, an SF Symbol, or neither
+    /// for automatic again (the librarian finds one).
+    func setProjectIcon(_ projectId: String, path: String? = nil, symbol: String? = nil) async throws -> Project {
+        var params: [String: JSONValue] = ["projectId": .string(projectId)]
+        if let path { params["path"] = .string(path) }
+        if let symbol { params["symbol"] = .string(symbol) }
+        return try await call("projects.setIcon", .object(params), as: ProjectResult.self).project
     }
 
     /// Moves `projectId`'s folders and threads into `intoId` and deletes it.

@@ -25,7 +25,7 @@ struct ProjectsList: View {
         }
         return VStack(spacing: 0) {
             ModeHeader(title: "Projects", count: built.sections.count)
-            SidebarButtonRow(icon: "plus", title: "New project") {
+            SidebarButtonRow(icon: "plus", title: "New project", tip: "Make a new project") {
                 app.newProject(with: nil)
             }
             .padding(.horizontal, SidebarMetrics.outerInset)
@@ -34,11 +34,11 @@ struct ProjectsList: View {
                     ForEach(built.sections) { section in
                         ProjectHeader(project: section.project, count: section.threads.count)
                         ForEach(section.threads.map { SectionRow(section: section.id, thread: $0) }) { row in
-                            ThreadRowView(thread: row.thread, mode: .projects) { select(row.thread.id) }
+                            ThreadRowView(thread: row.thread, mode: .projects, heading: section.project.id) { select(row.thread.id) }
                         }
                     }
                     if !built.unfiled.isEmpty {
-                        SectionHeading(title: "Not in a project")
+                        SectionHeading(title: "Not in a project", icon: "square.dashed")
                         ForEach(built.unfiled.map { SectionRow(section: Self.unfiledId, thread: $0) }) { row in
                             ThreadRowView(thread: row.thread, mode: .projects) { select(row.thread.id) }
                         }
@@ -72,6 +72,8 @@ private struct ProjectHeader: View {
     var body: some View {
         Button { app.openProjectPage(project.id) } label: {
             HStack(spacing: zoomed(6)) {
+                ProjectIconView(project: project, size: 15)
+                .accessibilityHidden(true)
                 Text(project.title)
                     .font(.system(size: TypeScale.sidebarHeading, weight: .semibold))
                     .foregroundStyle(isOpen || hovering ? .primary : .secondary)
@@ -99,7 +101,7 @@ private struct ProjectHeader: View {
         // The same room above each group as the inbox's headings.
         .padding(.top, zoomed(12))
         .padding(.bottom, zoomed(2))
-        .help("Open \(project.title)")
+        .tip("Open \(project.title)")
         .contextMenu { ProjectMenu(project: project) }
         .accessibilityAddTraits(.isHeader)
     }
@@ -134,9 +136,10 @@ private struct ArchivedProjects: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .tip(shown ? "Hide archived projects" : "Show archived projects")
         if shown {
             ForEach(projects) { project in
-                SidebarButtonRow(icon: "archivebox", title: project.title, active: app.openProjectId == project.id) {
+                SidebarButtonRow(icon: "archivebox", title: project.title, tip: "Open \(project.title)", active: app.openProjectId == project.id) {
                     app.openProjectPage(project.id)
                 }
             }

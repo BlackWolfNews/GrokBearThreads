@@ -139,6 +139,8 @@ export function toolTitle(name: string, input: Record<string, unknown>, cwd: str
 function threadbareTitle(tool: string, input: Record<string, unknown>): string {
   const id = (str(input.threadId) || str(input.id)).slice(0, 8);
   switch (tool) {
+    case 'show_options':
+      return `Compare options: ${firstLine(str(input.title), 80)}`;
     case 'list_threads':
       return str(input.query) ? `Search threads: ${firstLine(str(input.query), 80)}` : 'List threads';
     case 'read_thread':

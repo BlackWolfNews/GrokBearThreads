@@ -156,7 +156,7 @@ private struct ScheduledLine: View {
         }
         .buttonStyle(.plain)
         .onHover { hovering = $0 }
-        .help(line.scheduleId == nil ? "Show the schedules" : "Edit the schedule")
+        .tip(line.scheduleId == nil ? "Show the schedules" : "Edit the schedule")
         // In line with the message text inside the card below.
         .padding(.leading, Self.inset)
     }
@@ -214,7 +214,7 @@ struct AttachmentThumbnail: View {
                     }
                     .buttonStyle(.plain)
                     .padding(zoomed(4))
-                    .help("Remove")
+                    .tip("Remove")
                     .accessibilityLabel("Remove image")
                 }
             }

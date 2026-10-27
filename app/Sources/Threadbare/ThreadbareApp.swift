@@ -71,6 +71,17 @@ struct ThreadbareApp: App {
                     .keyboardShortcut("p", modifiers: [.command, .option])
                     .disabled(app.selectedThread.map { $0.panels.isEmpty && $0.patches.isEmpty } ?? true)
             }
+            // Back and forward through the threads and views, as Safari
+            // and Finder have them. The mouse's side buttons do the same
+            // (MouseNavigation).
+            CommandMenu("Go") {
+                Button("Back") { app.goBack() }
+                    .keyboardShortcut("[")
+                    .disabled(!app.canGoBack)
+                Button("Forward") { app.goForward() }
+                    .keyboardShortcut("]")
+                    .disabled(!app.canGoForward)
+            }
             CommandMenu("Thread") {
                 Button(app.selectedThread?.isArchived == true ? "Unarchive" : "Archive") { app.toggleArchive() }
                     .keyboardShortcut("e")
@@ -146,6 +157,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             let scripted = perf || screenshots
             #endif
             app.notificationsEnabled = !scripted
+            ShortcutHints.shared.install()
             if !scripted { Notifier.setUp(delegate: self) }
             app.onThreadsLoaded = {
                 LaunchClock.threadsLoaded()
@@ -154,6 +166,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
                 AppUpdater.restoreAfterRestart(app: app)
             }
             app.start()
+            MouseNavigation.install(app: app)
             if perf { PerfRunner.start(app: app) }
             if screenshots { ScreenshotRunner.start(app: app) }
             #if DEBUG

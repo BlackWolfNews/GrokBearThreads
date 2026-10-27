@@ -62,6 +62,9 @@ struct DetailView: View {
             ConnectionBanner()
             ErrorBanner()
             if let thread { LimitBanner(thread: thread) }
+            if let thread, thread.hasPendingReviews, subagentRef == nil {
+                PendingReviewsButton(thread: thread)
+            }
             if let subagentRef {
                 SubagentHeader(ref: subagentRef)
             }
@@ -80,12 +83,14 @@ struct DetailView: View {
                             Text("Couldn't load this sub-agent.").font(.headline)
                             Text(message).foregroundStyle(.secondary)
                             Button("Try again") { app.selectSubagent(threadId: session.threadId, subagentId: session.subagentId ?? "") }
+                                .tip("Load the sub-agent's transcript again")
                         }
                     } else if let session, case .failed(let message) = session.state {
                         VStack(spacing: zoomed(8)) {
                             Text("Couldn't load this thread.").font(.headline)
                             Text(message).foregroundStyle(.secondary)
                             Button("Try again") { app.select(session.threadId) }
+                                .tip("Load the thread again")
                         }
                     }
                 }
@@ -148,7 +153,7 @@ struct DetailView: View {
                 } label: {
                     Label(app.panelsShown ? "Hide Panels" : "Show Panels", systemImage: "sidebar.trailing")
                 }
-                .help(app.panelsShown ? "Hide the panels" : "Show the panels")
+                .tip(app.panelsShown ? "Hide the panels" : "Show the panels")
                 .disabled(!hasPanels)
                 .opacity(hasPanels ? 1 : 0)
                 .allowsHitTesting(hasPanels)
@@ -170,7 +175,7 @@ struct DetailView: View {
                     Label("More", systemImage: "ellipsis")
                 }
                 .menuIndicator(.hidden)
-                .help("More")
+                .tip("More")
                 .disabled(!hasMenu)
                 // Still built (see above), but out of sight with nothing to
                 // act on: a dimmed "..." alone in an empty new thread's
@@ -218,7 +223,15 @@ private struct HeaderTitle: View {
                     Text("·  Finishing on the previous version")
                         .foregroundStyle(Color(nsColor: Theme.faintText))
                         .layoutPriority(1)
-                        .help("This turn started before the runner updated, so it runs on the previous version. The thread moves to the new one when the turn ends.")
+                        .tip("This turn started before the runner updated, so it runs on the previous version. The thread moves to the new one when the turn ends.")
+                }
+                if let worktree = thread.worktree {
+                    // Its own worktree (protocol "Worktrees"): the branch,
+                    // quietly, as the folder above is the worktree's.
+                    Text("·  \(worktree.branch)")
+                        .foregroundStyle(Color(nsColor: Theme.faintText))
+                        .layoutPriority(1)
+                        .tip("Works on its own branch in a worktree. tb land, or the Land chip, puts it on main in \(worktree.mainCheckout.abbreviatingHome).")
                 }
                 if app.projectsSupported, !thread.projects.isEmpty {
                     ProjectChips(thread: thread)
@@ -229,7 +242,7 @@ private struct HeaderTitle: View {
             .font(.system(size: TypeScale.header))
             .lineLimit(1)
             .padding(.leading, zoomed(6))
-            .help(thread.cwd.abbreviatingHome)
+            .tip(thread.cwd.abbreviatingHome)
         } else {
             Color.clear.frame(width: 1, height: 1)
         }
@@ -246,10 +259,13 @@ private struct ProjectHeaderTitle: View {
             Button("Projects") { app.showProjects() }
                 .buttonStyle(.plain)
                 .foregroundStyle(.secondary)
-                .help("Show the Projects view")
+                .tip("Show the Projects view")
                 .layoutPriority(1)
             Text("/")
                 .foregroundStyle(Color(nsColor: Theme.faintText))
+                .layoutPriority(1)
+            ProjectIconView(project: project, size: 14)
+                .accessibilityHidden(true)
                 .layoutPriority(1)
             Text(project.title)
                 .fontWeight(.semibold)
@@ -292,10 +308,15 @@ private struct ProjectChip: View {
 
     var body: some View {
         Button { app.openProjectPage(membership.id) } label: {
-            Text(title)
+            HStack(spacing: zoomed(4)) {
+                ProjectIconView(project: app.project(membership.id), title: title, size: 12)
+                .accessibilityHidden(true)
+                Text(title)
+            }
                 .font(.system(size: TypeScale.detail))
                 .foregroundStyle(hovering ? .primary : .secondary)
-                .padding(.horizontal, zoomed(7))
+                .padding(.leading, zoomed(4))
+                .padding(.trailing, zoomed(7))
                 .padding(.vertical, zoomed(2))
                 .background(Color.primary.opacity(hovering ? 0.08 : 0.05), in: Capsule())
                 .overlay {
@@ -307,7 +328,7 @@ private struct ProjectChip: View {
         }
         .buttonStyle(.plain)
         .onHover { hovering = $0 }
-        .help(guessed ? "The librarian put this thread in \(title). Right-click to keep it there or take it out." : "Open \(title)")
+        .tip(guessed ? "The librarian put this thread in \(title). Right-click to keep it there or take it out." : "Open \(title)")
         .contextMenu {
             Button("Open \(title)") { app.openProjectPage(membership.id) }
             Divider()
@@ -389,8 +410,11 @@ private struct NewThreadHeading: View {
 }
 
 /// "Starts in misc on cannstudios": the folder and account the composer's
-/// menus are set to. With pools, "on the Claude pool", or the login a
-/// pinned draft is on.
+/// menus are set to (with pools, "on the Claude pool", or the login a
+/// pinned draft is on). Then each login as a card with the room it has
+/// left: the pool's logins, or every one when the draft isn't in a pool.
+/// A click pins the draft to that login, like the picker's "Pin to a
+/// login".
 private struct NewThreadNote: View {
     @Environment(AppModel.self) private var app
 
@@ -400,11 +424,100 @@ private struct NewThreadNote: View {
         let pool = app.newThreadPoolId.flatMap(app.pool)
         let on = pool.map { "the \($0.title) pool" }
             ?? (app.usesPools ? AccountName.login(account, accounts: app.accounts) : app.accountShortTitle(account))
-        Text("Starts in \(FolderName.short(cwd)) on \(on)")
-            .font(.system(size: TypeScale.label))
-            .foregroundStyle(Color(nsColor: Theme.faintText))
-            .help("\(cwd.abbreviatingHome) on " + (pool.map { "the \($0.title) pool, which picks the login" } ?? app.accountTitle(account)))
-            .frame(maxWidth: .infinity)
+        VStack(spacing: zoomed(14)) {
+            Text("Starts in \(FolderName.short(cwd)) on \(on)")
+                .font(.system(size: TypeScale.label))
+                .foregroundStyle(Color(nsColor: Theme.faintText))
+                .tip("\(cwd.abbreviatingHome) on " + (pool.map { "the \($0.title) pool, which picks the login" } ?? app.accountTitle(account)))
+            // Only once there's something to compare: an older runner sends
+            // no usage, and one account has nothing to choose between.
+            let accounts = UsageSections.build(app.accounts).flatMap(\.accounts)
+                .filter { item in pool.map { $0.accountIds.contains(item.id) } ?? true }
+            if accounts.count > 1, accounts.contains(where: { $0.usage != nil }) {
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: zoomed(140), maximum: zoomed(200)), spacing: zoomed(8), alignment: .top)], spacing: zoomed(8)) {
+                    ForEach(accounts) { item in
+                        // In a pool none is ringed: the pool picks. A click pins.
+                        AccountRoomCard(account: item, accounts: app.accounts, selected: pool == nil && item.id == account, now: app.now) {
+                            app.newThreadPool = nil
+                            app.newThreadProvider = nil
+                            app.newThreadAccount = item.id
+                        }
+                    }
+                }
+                .frame(maxWidth: Theme.maxContentWidth)
+                .padding(.horizontal, zoomed(24))
+            }
+        }
+        .frame(maxWidth: .infinity)
+    }
+}
+
+/// One account on the new-thread page: its name (the domain when two
+/// share the part before the @), a bar of the
+/// tighter window, and "5h 89% · week 78% left".
+private struct AccountRoomCard: View {
+    let account: Account
+    let accounts: [Account]
+    let selected: Bool
+    let now: Date
+    let pick: () -> Void
+    @State private var hovering = false
+
+    var body: some View {
+        let usage = account.usage
+        let tight = AccountUsageText.tightest(usage)
+        Button(action: pick) {
+            VStack(alignment: .leading, spacing: zoomed(5)) {
+                // The note ("Convex work only") beside the name rather than
+                // under it, so every card is the same height.
+                HStack(alignment: .firstTextBaseline, spacing: zoomed(6)) {
+                    Text(AccountName.label(account.id, accounts: accounts))
+                        .font(.system(size: zoomed(12), weight: .medium))
+                        .foregroundStyle(.primary)
+                        .lineLimit(1)
+                        .layoutPriority(1)
+                    if let note = account.note, !note.isEmpty {
+                        Text(note).font(.system(size: zoomed(11))).foregroundStyle(.tertiary).lineLimit(1)
+                    }
+                }
+                ZStack(alignment: .leading) {
+                    Capsule().fill(Color.primary.opacity(0.08))
+                    GeometryReader { geometry in
+                        Capsule().fill(fill(usage, tight))
+                            .frame(width: max(0, geometry.size.width * (tight?.remainingPercent ?? 0) / 100))
+                    }
+                }
+                .frame(height: zoomed(3))
+                Text(AccountUsageText.roomLine(usage) ?? "Nothing known yet")
+                    .font(.system(size: zoomed(11)))
+                    .monospacedDigit()
+                    .foregroundStyle(usage?.blocked == true ? AnyShapeStyle(Color.red) : AnyShapeStyle(.secondary))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.85)
+            }
+            .padding(.horizontal, zoomed(10))
+            .padding(.vertical, zoomed(8))
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color.primary.opacity(selected ? 0.07 : hovering ? 0.05 : 0.025), in: RoundedRectangle(cornerRadius: zoomed(8)))
+            .overlay {
+                RoundedRectangle(cornerRadius: zoomed(8))
+                    .strokeBorder(selected ? Color.accentColor.opacity(0.7) : Color.primary.opacity(0.06), lineWidth: selected ? 1 : 0.5)
+            }
+            .contentShape(RoundedRectangle(cornerRadius: zoomed(8)))
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering = $0 }
+        .tip(AccountUsageText.tooltip(account, fallback: AccountName.title(account), now: now))
+        .accessibilityAddTraits(selected ? .isSelected : [])
+    }
+
+    /// The same colours as the usage popover: grey with room, orange under
+    /// a quarter, red at the limit.
+    private func fill(_ usage: AccountUsage?, _ tight: UsageWindow?) -> Color {
+        guard let tight else { return .clear }
+        if usage?.blocked == true || tight.remainingPercent < 1 { return .red }
+        if tight.remainingPercent < AccountUsageText.chipWarning { return .orange }
+        return Color.primary.opacity(0.4)
     }
 }
 
@@ -434,10 +547,11 @@ struct ConnectionBanner: View {
             if let key = banner.dismissKey {
                 Button("Dismiss") { app.dismissCliFailure(key) }
                     .buttonStyle(.borderless)
+                    .tip("Hide this until it happens again")
             }
         }
         .font(.system(size: TypeScale.label))
-        .help(banner.detail ?? "")
+        .tip(banner.detail ?? "")
         .padding(.horizontal, zoomed(14))
         .padding(.vertical, zoomed(7))
         .overlay(alignment: .bottom) { Rectangle().fill(Color(nsColor: Theme.hairline)).frame(height: 0.5) }
@@ -446,13 +560,15 @@ struct ConnectionBanner: View {
     private func warning(_ banner: Banner) -> some View {
         HStack(spacing: zoomed(8)) {
             Image(systemName: banner.icon ?? "bolt.horizontal").foregroundStyle(.secondary)
-            Text(banner.text).lineLimit(2).help(banner.detail ?? "")
+            Text(banner.text).lineLimit(2).tip(banner.detail ?? "")
             Spacer()
             if banner.showStart {
                 Button("Start runner") { app.startRunner() }
+                    .tip("Start the runner's background service")
             }
             if banner.showRetry {
                 Button("Try again") { app.reconnectNow() }
+                    .tip("Try to reach the runner now rather than waiting")
             }
         }
         .padding(.horizontal, zoomed(14))
@@ -482,13 +598,14 @@ private struct LimitBanner: View {
                 } else {
                     Image(systemName: "gauge.with.dots.needle.100percent").foregroundStyle(.red)
                 }
-                Text(advice.text).lineLimit(1)
+                Text(advice.text).lineLimit(1).tip(advice.text)
                 Spacer(minLength: zoomed(6))
                 if let target = advice.target {
                     let title = AccountUsageText.switchTitle(target, accounts: app.accounts)
                     Button(waiting ? title.replacingOccurrences(of: "Switch to", with: "Pin to") : title) {
                         app.switchAccount(thread.id, to: target.id)
                     }
+                    .tip("Carry on this thread on that account, from where it is")
                 }
             }
             .font(.system(size: TypeScale.label))
@@ -506,10 +623,11 @@ private struct ErrorBanner: View {
         if let message = app.errorMessage {
             HStack {
                 Image(systemName: "exclamationmark.triangle").foregroundStyle(.orange)
-                Text(message).lineLimit(2)
+                Text(message).lineLimit(2).tip(message)
                 Spacer()
                 Button("Dismiss") { app.errorMessage = nil }
                     .buttonStyle(.borderless)
+                    .tip("Hide this message")
             }
             .padding(.horizontal, zoomed(14))
             .padding(.vertical, zoomed(7))

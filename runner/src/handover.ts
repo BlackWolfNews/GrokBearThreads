@@ -198,6 +198,8 @@ export class Peers {
   }
 
   private onNotification(peer: Peer, method: string, params: any): void {
+    // Closed because this runner is draining now: the primary takes these.
+    if (this.closing) return;
     const id: unknown = params?.threadId ?? params?.thread?.id;
     switch (method) {
       case 'drain.handedOver': {
@@ -483,6 +485,11 @@ export class ThreadRouter implements ThreadControl {
   async send(threadId: string, text: string, images: Parameters<Runner['send']>[2] = [], opts: Parameters<Runner['send']>[3] = {}): Promise<{ turnId: string }> {
     const e = this.away(threadId);
     return e ? e.call('threads.send', { threadId, text, images }) : this.runner.send(threadId, text, images, opts);
+  }
+
+  async createReview(threadId: string, input: Parameters<Runner['createReview']>[1]): Promise<ReturnType<Runner['createReview']>> {
+    const e = this.away(threadId);
+    return e ? e.call('reviews.create', {threadId, ...input}) : this.runner.createReview(threadId, input);
   }
 
   async update(upd: Parameters<Runner['update']>[0]): Promise<ReturnType<Runner['update']>> {

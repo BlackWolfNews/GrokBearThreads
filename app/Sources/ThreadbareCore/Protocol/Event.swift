@@ -321,11 +321,17 @@ public struct TurnCompletion: Sendable, Hashable, Decodable {
     public var error: String?
     /// Nil when unknown, including a kind this app doesn't know yet.
     public var errorKind: TurnErrorKind?
+    /// What the turn said it needs from Mike: "you" (with `asks`),
+    /// "nothing", or nil when it said neither.
+    public var needs: String?
+    public var asks: [Ask]
 
     public init(
         turnId: String, outcome: TurnOutcome, durationMs: Double, costUsd: Double? = nil, usage: JSONValue? = nil, error: String? = nil,
-        errorKind: TurnErrorKind? = nil
+        errorKind: TurnErrorKind? = nil, needs: String? = nil, asks: [Ask] = []
     ) {
+        self.needs = needs
+        self.asks = asks
         self.turnId = turnId
         self.outcome = outcome
         self.durationMs = durationMs
@@ -343,6 +349,8 @@ public struct TurnCompletion: Sendable, Hashable, Decodable {
         costUsd = try? c.decodeIfPresent(Double.self, forKey: .costUsd)
         usage = try? c.decodeIfPresent(JSONValue.self, forKey: .usage)
         errorKind = ((try? c.decodeIfPresent(String.self, forKey: .errorKind)) ?? nil).flatMap(TurnErrorKind.init(rawValue:))
+        needs = (try? c.decodeIfPresent(String.self, forKey: .needs)) ?? nil
+        asks = c.lossyArray(Ask.self, forKey: .asks)
         // `error` may be a string or an object depending on the runner version.
         if let text = try? c.decodeIfPresent(String.self, forKey: .error) {
             error = text
@@ -353,7 +361,7 @@ public struct TurnCompletion: Sendable, Hashable, Decodable {
         }
     }
 
-    enum CodingKeys: String, CodingKey { case turnId, outcome, durationMs, costUsd, usage, error, errorKind }
+    enum CodingKeys: String, CodingKey { case turnId, outcome, durationMs, costUsd, usage, error, errorKind, needs, asks }
 }
 
 /// A command action that ran (`action.run`): what it printed, outside any
@@ -425,6 +433,7 @@ public enum EventPayload: Sendable, Hashable {
     case editDiff(EditDiff)
     case approvalRequested(ApprovalRequest)
     case questionRequested(QuestionRequest)
+    case reviewUpdated(DesignReview)
     case approvalResolved(ApprovalResolution)
     case planUpdated([PlanEntry])
     case turnStarted
@@ -432,6 +441,9 @@ public enum EventPayload: Sendable, Hashable {
     case systemNote(String)
     case error(String)
     case actionRun(ActionRun)
+    /// The ticks on the card of asks that came with the turn.completed at
+    /// `asksSeq`: the whole set each time.
+    case asksTicked(asksSeq: Int, ticked: [Int])
     case assistantTextDelta(itemId: String, text: String)
     case reasoningDelta(itemId: String, text: String)
     case toolOutputDelta(itemId: String, text: String)
@@ -544,6 +556,9 @@ public struct Event: Sendable, Hashable, Decodable {
             return .approvalRequested(try ApprovalRequest(from: decoder))
         case "question.requested":
             return .questionRequested(try QuestionRequest(from: decoder))
+        case "review.updated":
+            let c = try decoder.container(keyedBy: ReviewFields.self)
+            return .reviewUpdated(try c.decode(DesignReview.self, forKey: .review))
         case "approval.resolved":
             return .approvalResolved(try ApprovalResolution(from: decoder))
         case "plan.updated":
@@ -559,6 +574,9 @@ public struct Event: Sendable, Hashable, Decodable {
             return .error(fields.message ?? fields.text ?? "Something went wrong")
         case "action.run":
             return .actionRun(try ActionRun(from: decoder))
+        case "asks.ticked":
+            let fields = try AsksTickedFields(from: decoder)
+            return .asksTicked(asksSeq: fields.asksSeq, ticked: fields.ticked ?? [])
         case "assistant.text.delta":
             let fields = try text()
             return .assistantTextDelta(itemId: fields.itemId ?? "", text: fields.text ?? "")
@@ -572,6 +590,8 @@ public struct Event: Sendable, Hashable, Decodable {
             return .unknown
         }
     }
+
+    private enum ReviewFields: String, CodingKey { case review }
 }
 
 /// Result of `threads.events`.
@@ -645,4 +665,9 @@ extension KeyedDecodingContainer {
         if let text = try? decodeIfPresent(String.self, forKey: key) { return Int(text) }
         return nil
     }
+}
+
+private struct AsksTickedFields: Decodable {
+    var asksSeq: Int
+    var ticked: [Int]?
 }

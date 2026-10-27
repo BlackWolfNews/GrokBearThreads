@@ -11,6 +11,8 @@ import SwiftUI
 enum MainWindowFrame {
     nonisolated static let defaultName = "main"
     private static var tracked: ObjectIdentifier?
+    /// The main window, for things that only act on it (MouseNavigation).
+    static weak var window: NSWindow?
     private static var observers: [NSObjectProtocol] = []
 
     /// Scripted runs size and place the window for their own ends; those
@@ -64,7 +66,9 @@ struct MainWindowFrameTracker: NSViewRepresentable {
     func makeNSView(context: Context) -> NSView {
         let view = NSView()
         DispatchQueue.main.async {
-            if let window = view.window, !MainWindowFrame.scripted { MainWindowFrame.track(window) }
+            guard let window = view.window else { return }
+            MainWindowFrame.window = window
+            if !MainWindowFrame.scripted { MainWindowFrame.track(window) }
         }
         return view
     }

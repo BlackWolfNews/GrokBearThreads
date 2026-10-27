@@ -18,17 +18,21 @@ import { parseWhen, relativeFuture, relativeTime } from './when.ts';
 
 export { parseWhen, relativeFuture, relativeTime };
 import { RUNNER_VERSION, expandHome } from './config.ts';
+import { END_TURN_DESCRIPTION, END_TURN_TOOL } from './needs.ts';
 
 // What the tools drive: the Runner itself, or during a handover
 // (docs/protocol.md) a ThreadRouter (handover.ts) that reaches threads on
 // the other runner, which is why every call may be a promise.
 type Aw<T> = T | Promise<T>;
 type Async<T, K extends keyof T> = { [P in K]: T[P] extends (...a: infer A) => infer R ? (...a: A) => Aw<R> : never };
-export type ThreadControl = { hello: Runner['hello'] } & Async<Runner, 'list' | 'search' | 'get' | 'events' | 'create' | 'send' | 'update' | 'interrupt' | 'delete'>;
+export type ThreadControl = {
+  hello: Runner['hello'];
+  createReview?: (...args: Parameters<Runner['createReview']>) => Aw<ReturnType<Runner['createReview']>>;
+} & Async<Runner, 'list' | 'search' | 'get' | 'events' | 'create' | 'send' | 'update' | 'interrupt' | 'delete'>;
 
 export type ScheduleControl = Async<Scheduler, 'create' | 'list' | 'find' | 'update' | 'delete'>;
 
-export type ProjectControl = Pick<Projects, 'list' | 'get' | 'find' | 'create' | 'update' | 'appendNote' | 'changeMembership'>;
+export type ProjectControl = Pick<Projects, 'list' | 'get' | 'find' | 'create' | 'update' | 'appendNote' | 'changeMembership'> & Partial<Pick<Projects, 'chooseIcon'>>;
 
 export const SERVER_NAME = 'threadbare';
 // Asked about every time, even in a thread with full access: deleting is
@@ -175,6 +179,29 @@ export function buildThreadbareTools(control: ThreadControl, selfId: string, now
     if (!schedules) throw new Error("This runner doesn't have schedules.");
     return schedules;
   };
+
+  const reviewTools = [
+    tool(
+      'show_options',
+      'Shows Mike a set of images to compare side by side in a review window, with an optional pick and notes per image. Use this for design alternatives instead of reading every image into the transcript. Returns a review ID promptly; finish your turn and Mike’s answer arrives later as a message. Images are copied into the thread. Reference images can receive notes but cannot be picked.',
+      {
+        title: z.string().min(1).max(200).describe('What Mike is reviewing.'),
+        note: z.string().max(4000).optional().describe('A short explanation or question for the whole review.'),
+        options: z.array(z.object({
+          id: z.string().min(1).max(200).describe('Stable option ID, such as A or B.'),
+          title: z.string().min(1).max(200),
+          path: z.string().min(1).describe('Image path, absolute or relative to this thread’s folder.'),
+          note: z.string().max(4000).optional(),
+          reference: z.boolean().optional().describe('Context image that can receive notes but cannot be picked.'),
+        })).min(1).max(12),
+      },
+      handle(async (input) => {
+        if (!control.createReview) throw new Error('This runner does not support image reviews yet.');
+        const { review } = await control.createReview(selfId, input);
+        return `Review ${review.id}: ${review.title} (${review.options.length} images). Mike can compare them and send a choice or notes. You can finish this turn; his reply will arrive as a later message.`;
+      }),
+    ),
+  ];
 
   const scheduleTools = [
     tool(
@@ -345,7 +372,7 @@ export function buildThreadbareTools(control: ThreadControl, selfId: string, now
     ),
     tool(
       'update_project',
-      "Changes a project: title, goals, state, notes or folders. Keep state current as work moves on (what's done, what's next, what's blocked), and add to the notes anything a later thread should know. appendNote adds a paragraph without rewriting the notes.",
+      "Changes a project: title, goals, state, notes, folders or icon. Keep state current as work moves on (what's done, what's next, what's blocked), and add to the notes anything a later thread should know. appendNote adds a paragraph without rewriting the notes. The librarian finds icons by itself from the project's folders, so only set one when Mike asks or the project gets a new app icon somewhere it wouldn't look.",
       {
         project: z.string().describe('Project id, id prefix or title.'),
         title: z.string().optional(),
@@ -355,8 +382,12 @@ export function buildThreadbareTools(control: ThreadControl, selfId: string, now
         appendNote: z.string().optional().describe('Adds a paragraph to the end of the notes.'),
         addFolders: z.array(z.string()).optional(),
         removeFolders: z.array(z.string()).optional(),
+        icon: z
+          .string()
+          .optional()
+          .describe('A path to a picture (PNG, SVG, ICNS...), an SF Symbol name such as "film", or "auto" to let the librarian find one again.'),
       },
-      handle(async ({ project: q, title, goals, state, notes, appendNote, addFolders, removeFolders }) => {
+      handle(async ({ project: q, title, goals, state, notes, appendNote, addFolders, removeFolders, icon }) => {
         const pc = mustProjects();
         const p = project(q);
         let folders: string[] | undefined;
@@ -367,6 +398,12 @@ export function buildThreadbareTools(control: ThreadControl, selfId: string, now
         }
         let out = pc.update(p.id, { title, goals, state, notes, folders });
         if (appendNote?.trim()) out = pc.appendNote(p.id, appendNote);
+        if (icon?.trim()) {
+          if (!pc.chooseIcon) throw new Error("This runner can't set project icons yet.");
+          const v = icon.trim();
+          const choice = v === 'auto' ? {} : /[/~]/.test(v) ? { path: v } : { symbol: v };
+          out = await pc.chooseIcon(p.id, choice, 'agent');
+        }
         return `Updated "${out.title}" (${out.id}).`;
       }),
     ),
@@ -395,6 +432,29 @@ export function buildThreadbareTools(control: ThreadControl, selfId: string, now
   ];
 
   return [
+    // Says what the turn needs from Mike. The runner reads it from the
+    // thread's own tool.call when the turn completes (needs.ts), so the
+    // handler only checks it; a sub-agent's call never reaches the thread.
+    tool(
+      END_TURN_TOOL,
+      END_TURN_DESCRIPTION,
+      {
+        needs: z.enum(['you', 'nothing']).describe('"you" when Mike has to do something before this can go on; "nothing" when it is done.'),
+        asks: z
+          .array(
+            z.object({
+              action: z.string().min(1).describe('One concrete thing for Mike to do, in a short sentence: "Paste your OpenRouter key into Settings".'),
+              where: z.string().optional().describe('Where he does it: an app, site, file or person, e.g. "Threadbare › Settings › Models".'),
+              reply: z.string().optional().describe('The exact words to send back when it is done, e.g. "done" or "key set". Leave it out when the reply is his own answer (a decision, a choice).'),
+            }),
+          )
+          .max(10)
+          .optional()
+          .describe('With needs "you": each thing he has to do, most blocking first. Usually one or two.'),
+      },
+      handle(async ({ needs }) => (needs === 'you' ? 'Noted: this thread will wait in Needs you. End the turn now, with no more text.' : 'Noted: this thread is done. End the turn now, with no more text.')),
+    ),
+    ...reviewTools,
     ...(schedules ? scheduleTools : []),
     ...(projects ? projectTools : []),
     tool(
@@ -599,7 +659,8 @@ export function threadbareMcpServer(control: ThreadControl, selfId: string, sche
     instructions:
       `This session is a thread in Threadbare, Mike's own app for running agent threads (thread id ${selfId}). ` +
       'These tools manage Threadbare itself: list and read threads, start new ones, message them, rename, snooze, archive, move and delete them, schedule messages for later (once or on a cron), and keep Mike\'s projects (groupings above folders with goals, state and notes) up to date. ' +
-      'Use move_thread when the work belongs in another folder (for example a repo), so this thread runs there from the next turn.',
+      'Use move_thread when the work belongs in another folder (for example a repo), so this thread runs there from the next turn. ' +
+      'End every turn by calling end_turn, after your final message, to say whether Mike has to do anything.',
     tools: buildThreadbareTools(control, selfId, Date.now, schedules, projects),
   });
   server.tools = [...ALWAYS_ASK_TOOLS].map((name) => ({ name: name.split('__').at(-1)!, permission_policy: 'always_ask' as const }));
