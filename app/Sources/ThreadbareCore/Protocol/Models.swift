@@ -719,6 +719,28 @@ public struct BackgroundTask: Sendable, Hashable, Codable {
     }
 }
 
+/// A thread's own git worktree (protocol "Worktrees"): it works on its own
+/// branch, and `tb land` puts that on main in the main checkout.
+public struct ThreadWorktree: Sendable, Hashable, Codable {
+    public var branch: String
+    public var mainCheckout: String
+    public var path: String
+
+    public init(branch: String, mainCheckout: String = "", path: String = "") {
+        self.branch = branch
+        self.mainCheckout = mainCheckout
+        self.path = path
+    }
+
+    // Lenient: only the branch is needed to show it.
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        branch = try c.decode(String.self, forKey: .branch)
+        mainCheckout = (try? c.decodeIfPresent(String.self, forKey: .mainCheckout)) ?? ""
+        path = (try? c.decodeIfPresent(String.self, forKey: .path)) ?? ""
+    }
+}
+
 public struct ThreadSummary: Sendable, Hashable, Codable, Identifiable {
     public var id: String
     public var title: String
@@ -767,6 +789,9 @@ public struct ThreadSummary: Sendable, Hashable, Codable, Identifiable {
     /// The projects it's in, oldest first. Empty when it's in none (or the
     /// runner is from before projects).
     public var projects: [ThreadProject]
+    /// Its own worktree, when the repo gives each thread one; nil for most
+    /// threads, and from a runner that predates worktrees.
+    public var worktree: ThreadWorktree?
 
     public init(
         id: String, title: String, cwd: String = "~/dev/me/misc", accountId: String = "claude-main",
@@ -778,7 +803,7 @@ public struct ThreadSummary: Sendable, Hashable, Codable, Identifiable {
         contextTokens: Int? = nil, costUsd: Double? = nil,
         effort: String? = nil, modelInUse: String? = nil, effortInUse: String? = nil, contextWindow: Int? = nil,
         panels: [Panel] = [], actions: [Action] = [], hooks: [Hook] = [], patches: [PatchInfo] = [], background: [BackgroundTask] = [],
-        subagents: [Subagent] = [], projects: [ThreadProject] = []
+        subagents: [Subagent] = [], projects: [ThreadProject] = [], worktree: ThreadWorktree? = nil
     ) {
         self.id = id
         self.title = title
@@ -814,6 +839,7 @@ public struct ThreadSummary: Sendable, Hashable, Codable, Identifiable {
         self.background = background
         self.subagents = subagents
         self.projects = projects
+        self.worktree = worktree
     }
 
     public init(from decoder: Decoder) throws {
@@ -857,6 +883,8 @@ public struct ThreadSummary: Sendable, Hashable, Codable, Identifiable {
         background = c.lossyArray(BackgroundTask.self, forKey: .background)
         subagents = c.lossyArray(Subagent.self, forKey: .subagents)
         projects = c.lossyArray(ThreadProject.self, forKey: .projects)
+        // A malformed one is as good as none, rather than losing the thread.
+        worktree = (try? c.decodeIfPresent(ThreadWorktree.self, forKey: .worktree)) ?? nil
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -895,13 +923,14 @@ public struct ThreadSummary: Sendable, Hashable, Codable, Identifiable {
         if !background.isEmpty { try c.encode(background, forKey: .background) }
         if !subagents.isEmpty { try c.encode(subagents, forKey: .subagents) }
         if !projects.isEmpty { try c.encode(projects, forKey: .projects) }
+        try c.encodeIfPresent(worktree, forKey: .worktree)
     }
 
     enum CodingKeys: String, CodingKey {
         case id, title, cwd, accountId, provider, model, effort, modelInUse, effortInUse, permissionMode, status, live, needsYou
         case createdAt, updatedAt, lastActivityAt, snoozedUntil, snoozedUntilRestart, archivedAt, onOldRunner, preview
         case lastSeq, lastSeenSeq, nativeSessionId, contextTokens, contextWindow, costUsd, panels, actions, hooks, patches, background, subagents
-        case projects
+        case projects, worktree
     }
 
     /// Still being worked on between turns: background sub-agents or jobs

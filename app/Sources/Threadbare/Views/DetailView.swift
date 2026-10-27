@@ -220,6 +220,14 @@ private struct HeaderTitle: View {
                         .layoutPriority(1)
                         .help("This turn started before the runner updated, so it runs on the previous version. The thread moves to the new one when the turn ends.")
                 }
+                if let worktree = thread.worktree {
+                    // Its own worktree (protocol "Worktrees"): the branch,
+                    // quietly, as the folder above is the worktree's.
+                    Text("·  \(worktree.branch)")
+                        .foregroundStyle(Color(nsColor: Theme.faintText))
+                        .layoutPriority(1)
+                        .help("Works on its own branch in a worktree. tb land, or the Land chip, puts it on main in \(worktree.mainCheckout.abbreviatingHome).")
+                }
                 if app.projectsSupported, !thread.projects.isEmpty {
                     ProjectChips(thread: thread)
                         .padding(.leading, zoomed(4))
