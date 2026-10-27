@@ -432,7 +432,7 @@ struct RowIconButtonStyle: ButtonStyle {
 }
 
 /// A full-width sidebar row that does one thing: New thread at the top,
-/// Snoozed and Archive at the bottom.
+/// Hibernating and Archive at the bottom.
 struct SidebarButtonRow: View {
     let icon: String
     /// Drawn instead of the symbol when set (the bear in the footer).
@@ -450,10 +450,13 @@ struct SidebarButtonRow: View {
         Button(action: action) {
             HStack(spacing: 8) {
                 if let image {
+                    // The bear, drawn in the same grey as the symbols.
                     Image(nsImage: image)
+                        .renderingMode(.template)
                         .resizable()
                         .aspectRatio(contentMode: .fit)
-                        .frame(width: 18, height: 18)
+                        .foregroundStyle(.secondary)
+                        .frame(width: 19, height: 19)
                         .frame(width: 16)
                 } else {
                     Image(systemName: icon)
@@ -499,7 +502,7 @@ private struct SidebarFooter: View {
             SidebarButtonRow(icon: "moon.zzz", image: Bear.image(.sleep), title: "Hibernating", count: app.snoozed.count, size: TypeScale.sidebarFooter) {
                 app.sidebarMode = .snoozed
             }
-            SidebarButtonRow(icon: "archivebox", title: "Den", count: app.archiveLoaded ? app.archivedCount : nil, size: TypeScale.sidebarFooter) {
+            SidebarButtonRow(icon: "archivebox", title: "Archive", count: app.archiveLoaded ? app.archivedCount : nil, size: TypeScale.sidebarFooter) {
                 app.showArchive()
             }
             // Only once the runner has said it knows about schedules.

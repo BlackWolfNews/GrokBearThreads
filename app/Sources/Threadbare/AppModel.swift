@@ -49,12 +49,22 @@ final class AppModel {
     /// The first thread list has arrived. Until then the sidebar list stays
     /// empty, so it's filled in one go.
     var threadsLoaded = false
-    /// New-thread settings shown on the composer.
+    /// New-thread settings shown on the composer. The model and effort
+    /// start as whatever was picked last, on any thread, and are kept
+    /// across launches; the folder and "Ask before edits" are for one
+    /// thread and go back to the defaults after it starts.
     var newThreadCwd: String?
     var newThreadAccount: String?
-    var newThreadModel: String?
-    var newThreadEffort: String?
+    var newThreadModel: String? = UserDefaults.standard.string(forKey: AppModel.lastModelKey) {
+        didSet { Self.remember(newThreadModel, forKey: Self.lastModelKey) }
+    }
+    var newThreadEffort: String? = UserDefaults.standard.string(forKey: AppModel.lastEffortKey) {
+        didSet { Self.remember(newThreadEffort, forKey: Self.lastEffortKey) }
+    }
     var newThreadAsk = false
+    /// Bumped to open the composer's model picker from the automation
+    /// (`composer-menu` with `show`), the way a click on the chip does.
+    var modelPickerRequest = 0
     /// Every schedule, in the runner's order (soonest first, then the
     /// paused and finished ones). Replaced whole by `schedules.updated`.
     var schedules: [Schedule] = []
@@ -111,6 +121,8 @@ final class AppModel {
 
     static let maxSessions = 24
     static let lastAccountKey = "lastAccountId"
+    static let lastModelKey = "lastModel"
+    static let lastEffortKey = "lastEffort"
     static let panelsShownKey = "panelsShown"
     static let panelWidthKey = "panelWidth"
     /// The account threads aren't labelled with. Fixed, unlike the runner's
@@ -440,12 +452,10 @@ final class AppModel {
                 do {
                     let thread = try await client.createThread(request)
                     UserDefaults.standard.set(account, forKey: Self.lastAccountKey)
-                    // Folder, model and "Ask before edits" were for this
+                    // The folder and "Ask before edits" were for this
                     // thread; the next one starts from the defaults again.
-                    // The account sticks (the plan's "last-used account").
+                    // The account, model and effort stick.
                     newThreadCwd = nil
-                    newThreadModel = nil
-                    newThreadEffort = nil
                     newThreadAsk = false
                     threads[thread.id] = thread
                     select(thread.id)
@@ -517,12 +527,22 @@ final class AppModel {
         update(threadId, ThreadUpdate(permissionMode: ask ? .ask : .full))
     }
 
+    /// A model or effort picked on a thread is also what the next new
+    /// thread starts on: the picker has no default row, it remembers.
     func setModel(_ threadId: String, _ model: String?) {
+        newThreadModel = model
         update(threadId, ThreadUpdate(model: .some(model)))
     }
 
     func setEffort(_ threadId: String, _ effort: String?) {
+        newThreadEffort = effort
         update(threadId, ThreadUpdate(effort: .some(effort)))
+    }
+
+    /// Keeps a last-picked value across launches; nil (the default) clears it.
+    private static func remember(_ value: String?, forKey key: String) {
+        if let value, !value.isEmpty { UserDefaults.standard.set(value, forKey: key) }
+        else { UserDefaults.standard.removeObject(forKey: key) }
     }
 
     func account(_ id: String) -> Account? {

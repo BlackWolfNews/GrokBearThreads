@@ -679,16 +679,29 @@ enum Automation {
         return "ok"
     }
 
-    /// The composer's model, account, permission or folder menu as the
-    /// open thread (or a new one) would get it, a JSON list of lines:
-    /// `[x]` for the ticked one, `*` for the default, the subtitle after a
-    /// dash, submenus and section headers indented. `click` picks an item
-    /// by title, as a click on it would.
+    /// The composer's model picker, or its account, permission or folder
+    /// menu, as the open thread (or a new one) would get it, a JSON list
+    /// of lines: `[x]` for the ticked one, `*` for the default, the
+    /// subtitle after a dash, submenus and older models indented, `#` on
+    /// a section (a provider column, Effort). `click` picks an item by
+    /// title, as a click on it would.
     private static func composerMenu(_ c: [String: Any], app: AppModel) -> String {
         let settings = ThreadSettings(app: app, thread: app.selectedThread)
         let menu: NSMenu
         switch c["menu"] as? String ?? "model" {
-        case "model": menu = settings.modelMenu()
+        case "model":
+            if let title = c["click"] as? String {
+                return settings.pickerClick(title) ? "ok" : "error no item \(title)"
+            }
+            if c["show"] as? Bool == true {
+                // Opens the real popover, and says its window number so a
+                // screencapture -l can take just it.
+                app.modelPickerRequest += 1
+                RunLoop.main.run(until: Date().addingTimeInterval(0.3))
+                let popover = NSApp.windows.first { String(describing: type(of: $0)).contains("Popover") && $0.isVisible }
+                return popover.map { "ok window \($0.windowNumber)" } ?? "error the picker didn't open"
+            }
+            return "ok " + json(settings.pickerLines())
         case "account": menu = settings.accountMenu()
         case "permission": menu = settings.permissionMenu()
         case "folder": menu = settings.folderMenu()

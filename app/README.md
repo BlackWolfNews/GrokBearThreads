@@ -86,17 +86,19 @@ and the perf run stay away from the real one. Install the runner itself with
   middle of the pane under "What should we work on?", with where the thread
   will start ("Starts in misc on mike") under it, and drops to the bottom
   once you send. It starts in `~/dev/me/misc` on the last account you used.
-  The account, model and "Ask before edits" are small menus on the
-  composer, and "+" > Folder changes the folder; the folder only gets a chip
-  of its own when it isn't the runner's default. The model chip names the
-  model a thread really runs on ("Fable 5.1", not "Default") and the effort
-  level once one is chosen or the CLI has reported it ("Fable 5.1 · High").
-  Its menu lists what the account's CLI offers, by the CLI's own names, with
-  a star on the default, older models in a submenu, and the effort level
-  (Default for the model's own, then Low to Max) under that. Change them if
-  you want, you never have to. Folder, model, effort and "Ask before edits"
-  apply to that one thread; the next starts from the defaults again. The
-  account sticks.
+  The account and "Ask before edits" are small menus on the composer,
+  and "+" > Folder changes the folder; the folder only gets a chip of its
+  own when it isn't the runner's default. The model chip names the model a
+  thread really runs on ("Fable 5.1", not "Default") and the effort level
+  once one is chosen or the CLI has reported it ("Fable 5.1 · High"). It
+  opens a picker laid out like T3 Code's: providers down the left (Claude
+  for now; Codex and others are columns of their own when they come), a
+  search box, what the account's CLI offers by the CLI's own names with a
+  star on the default and older models under the rest, and the effort
+  level (Low to Max) along the bottom. Change them if you want, you never
+  have to. The folder and "Ask before edits" apply to that one thread; the
+  next starts from the defaults again. The account, model and effort stick:
+  whatever you picked last, on any thread, is what the next one starts on.
 - **Composer.** Return sends, Shift-Return adds a line. Paste or drop images,
   or "+" > "Attach images…";
   they go through `media.import` into the runner's `inbox/` and show as
@@ -445,7 +447,7 @@ is an error. Commands marked "the open thread" act on `id` when it's given
 | `open` | `id`, `timeout` | selects a thread and waits until its rows are on screen |
 | `select` | `id` | selects it without waiting |
 | `new`, `options` | `cwd`, `account`, `model` (`null` for the default), `effort` (`null` for the model's own), `ask` | the new-thread composer and its menus; `options` refuses anything else (a typo used to pass) and says what's set now |
-| `composer-menu` | `menu` (`model`, `account`, `permission` or `folder`; default `model`), `click` (an item's title) | the composer chip's menu for the open thread or a new one, as text: `[x]` the ticked item, `*` the default, the subtitle after a dash, submenus indented; `click` picks an item as a click would |
+| `composer-menu` | `menu` (`model`, `account`, `permission` or `folder`; default `model`), `click` (an item's title), `show` (opens the model picker and says its window number) | the composer chip's menu (or the model picker) for the open thread or a new one, as text: `[x]` the ticked item, `*` the default, the subtitle after a dash, submenus and older models indented, `#` on a section; `click` picks an item as a click would |
 | `type`, `send`, `return` | `text`, `replace`, `timeout` | types into the composer (`replace` takes the place of what's there); `send` types and presses Return, and from the new-thread composer waits for the thread it starts and prints its id |
 | `paste-image` | `path` | through the instance's own pasteboard |
 | `click` | `title` | a button in the transcript: Allow, Always allow, Deny, an option, Send answer |
@@ -509,6 +511,6 @@ streams) and text typed into the composer reaching the draft.
   runs off the main thread with non-Sendable objects kept to one thread
   each); `ThreadbareCore` is Swift 6.
 - No syntax colouring in code blocks yet.
-- The model menu lists the CLI's own rows once the runner has asked each
+- The model picker lists the CLI's own rows once the runner has asked each
   account (a few seconds after it starts); until then it offers opus, sonnet
   and haiku by name. The runner passes the row's id through to the CLI.

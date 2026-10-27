@@ -34,9 +34,11 @@ struct ComposerControls: View {
                 settings.accountMenu()
             }
             ChipDivider()
-            ComposerChip(icon: "sparkle", title: settings.modelChipTitle, help: settings.modelChipHelp) {
-                settings.modelMenu()
-            }
+            ComposerChip(icon: "sparkle", title: settings.modelChipTitle, help: settings.modelChipHelp, popover: {
+                // The picker reads the thread live, so a pick made while
+                // it's open shows straight away.
+                NSHostingController(rootView: ModelPickerView(threadId: thread?.id, close: $0).environment(app))
+            }, openRequest: app.modelPickerRequest)
             ChipDivider()
             ComposerChip(
                 icon: ask ? "lock" : "lock.open",
@@ -149,67 +151,81 @@ struct ThreadSettings {
         return menu
     }
 
-    /// The models by name, the default one starred, then the effort level.
-    /// Picking the default row leaves the thread on the default (so it
-    /// follows the account's setting), any other pins that model.
-    func modelMenu() -> NSMenu {
-        let menu = NSMenu()
-        let effective = effectiveModel
-        let defaultId = defaultModel
-        // The CLI's list once known; the three aliases until then.
-        let known = choices.isEmpty ? ["opus", "sonnet", "haiku"].map { ModelChoice(id: $0, model: $0, title: ComposerChips.model($0)) } : choices
-        // The picker's main rows: the aliases (a word), and whatever the
-        // default is. Dated and old full ids go under "Older models".
-        let isMain = { (c: ModelChoice) -> Bool in
-            c.id.allSatisfy(\.isLetter) || Self.matches(c, defaultId) || Self.matches(c, effective)
-        }
-        var main = known.filter(isMain)
-        let older = known.filter { !isMain($0) }
-        if let effective, !known.contains(where: { Self.matches($0, effective) }) {
-            // A model set some other way (a full id) still shows, ticked.
-            main.append(ModelChoice(id: effective, model: effective, title: ComposerChips.model(effective)))
-        }
-        var seenModels = Set<String>()
-        for c in main {
-            // The CLI lists "opus" and the default both as Opus 5.5: one row.
-            guard seenModels.insert(c.model).inserted else { continue }
-            let isDefault = Self.matches(c, defaultId)
-            let item = ActionMenuItem(c.title, checked: Self.matches(c, effective)) { setModel(isDefault ? nil : c.id) }
-            item.image = isDefault ? NSImage(systemSymbolName: "star.fill", accessibilityDescription: "Default") : NSImage(size: NSSize(width: 16, height: 16), flipped: false) { _ in true }
-            if isDefault {
-                item.subtitle = app.defaults.model != nil && thread == nil ? "The runner's default" : "The account's default"
-            } else if let description = c.description {
-                item.subtitle = description
-            }
-            menu.addItem(item)
-        }
-        if !older.isEmpty {
-            let more = NSMenuItem(title: "Older models", action: nil, keyEquivalent: "")
-            let sub = NSMenu()
-            for c in older {
-                sub.addItem(ActionMenuItem(c.title, checked: Self.matches(c, effective)) { setModel(c.id) })
-            }
-            more.submenu = sub
-            menu.addItem(more)
-        }
-        menu.addItem(.separator())
-        menu.addItem(.sectionHeader(title: "Effort"))
-        let chosen = effort
-        let own = ActionMenuItem("Default", checked: chosen == nil) { setEffort(nil) }
-        own.subtitle = thread?.effortInUse.map { "Just right: the model's own level, \(ComposerChips.effortTitle($0).lowercased()) last turn" } ?? "Just right: the model's own level"
-        menu.addItem(own)
-        let levels = effective.flatMap { ComposerChips.choice(for: $0, in: choices)?.effortLevels }.flatMap { $0.isEmpty ? nil : $0 } ?? ComposerChips.effortLevels
-        for level in levels {
-            let item = ActionMenuItem(ComposerChips.effortTitle(level), checked: chosen == level) { setEffort(level) }
-            item.subtitle = ComposerChips.effortPorridge(level)
-            menu.addItem(item)
-        }
-        return menu
+    /// The providers in the picker's rail, and which column opens: the
+    /// account's own provider.
+    var providers: [ModelPicker.Provider] { ModelPicker.providers(app.accounts) }
+    var providerId: String { app.account(account)?.provider ?? "claude" }
+
+    /// The account whose models a provider's column lists: the thread's
+    /// own when it's on that provider, else the provider's first.
+    func listedAccount(for providerId: String) -> String? {
+        if self.providerId == providerId { return account }
+        return providers.first { $0.id == providerId }?.accountIds.first
     }
 
-    private static func matches(_ c: ModelChoice, _ id: String?) -> Bool {
-        guard let id, !id.isEmpty else { return false }
-        return c.id == id || c.model == id
+    /// The rows of a provider's column. The default and the selection are
+    /// only known for the thread's own account; another provider's column
+    /// is a plain list until a model there is picked.
+    func rows(for providerId: String, query: String = "") -> [ModelPicker.Row] {
+        guard let listed = listedAccount(for: providerId) else {
+            return ModelPicker.rows(choices: [], defaultId: nil, selected: nil, query: query)
+        }
+        let own = listed == account
+        let choices = app.account(listed)?.models ?? []
+        let defaultId = own ? defaultModel : app.account(listed)?.defaultModel
+        return ModelPicker.rows(choices: choices, defaultId: defaultId, selected: own ? effectiveModel : nil, query: query)
+    }
+
+    /// The levels the effort row offers for the model in use.
+    var effortLevels: [String] { ModelPicker.effortLevels(for: effectiveModel, in: choices) }
+
+    /// Picks a row: the default row leaves the thread on the default (so
+    /// it follows the account's setting), any other pins that model. A row
+    /// from another provider's column moves the thread to that provider's
+    /// account first.
+    func pick(_ row: ModelPicker.Row, in providerId: String) {
+        if let listed = listedAccount(for: providerId), listed != account { setAccount(listed) }
+        setModel(row.isDefault ? nil : row.id)
+    }
+
+    /// The picker as text, for the automation's `composer-menu`: a `#`
+    /// line per provider column, `[x]` on the chosen row, `*` on the
+    /// default, the description after a dash, older rows indented, then
+    /// the effort levels.
+    func pickerLines() -> [String] {
+        var lines: [String] = []
+        for provider in providers {
+            lines.append("# " + provider.title)
+            for row in rows(for: provider.id) {
+                var line = (row.isOlder ? "    " : "") + (row.isSelected ? "[x] " : "[ ] ") + row.title
+                if row.isDefault { line += " *" }
+                if let subtitle = row.subtitle, !subtitle.isEmpty { line += " - " + subtitle }
+                lines.append(line)
+            }
+        }
+        lines.append("# Effort")
+        let chosen = effectiveEffort
+        for level in effortLevels {
+            var line = (chosen == level ? "[x] " : "[ ] ") + ComposerChips.effortTitle(level)
+            if let porridge = ComposerChips.effortPorridge(level) { line += " - " + porridge }
+            lines.append(line)
+        }
+        return lines
+    }
+
+    /// Picks a model or effort row by its title, as a click on it would.
+    func pickerClick(_ title: String) -> Bool {
+        for provider in providers {
+            if let row = rows(for: provider.id).first(where: { $0.title == title }) {
+                pick(row, in: provider.id)
+                return true
+            }
+        }
+        if let level = effortLevels.first(where: { ComposerChips.effortTitle($0) == title }) {
+            setEffort(level)
+            return true
+        }
+        return false
     }
 
     func permissionMenu() -> NSMenu {
@@ -249,15 +265,15 @@ struct ThreadSettings {
         if let thread { app.setCwd(thread.id, folder) } else { app.newThreadCwd = folder }
     }
 
-    private func setAccount(_ id: String) {
+    func setAccount(_ id: String) {
         if let thread { app.setAccount(thread.id, id) } else { app.newThreadAccount = id }
     }
 
-    private func setModel(_ model: String?) {
+    func setModel(_ model: String?) {
         if let thread { app.setModel(thread.id, model) } else { app.newThreadModel = model }
     }
 
-    private func setEffort(_ effort: String?) {
+    func setEffort(_ effort: String?) {
         if let thread { app.setEffort(thread.id, effort) } else { app.newThreadEffort = effort }
     }
 
@@ -274,13 +290,19 @@ private struct ComposerChip: View {
     let icon: String
     let title: String
     let help: String
-    let menu: () -> NSMenu
+    var menu: (() -> NSMenu)? = nil
+    /// Instead of a menu: a popover above the chip, given a way to close
+    /// itself.
+    var popover: ((@escaping () -> Void) -> NSViewController)? = nil
     @State private var hovering = false
     @State private var anchor = MenuAnchor()
 
+    /// Opening from outside (the automation), when set.
+    var openRequest: Int = 0
+
     var body: some View {
         Button {
-            anchor.popUp(menu())
+            open()
         } label: {
             HStack(spacing: 4) {
                 Image(systemName: icon)
@@ -305,7 +327,13 @@ private struct ComposerChip: View {
         .buttonStyle(.plain)
         .background(MenuAnchorView(anchor: anchor))
         .onHover { hovering = $0 }
+        .onChange(of: openRequest) { _, _ in open() }
         .help(help)
+    }
+
+    private func open() {
+        if let menu { anchor.popUp(menu()) }
+        else if let popover { anchor.show(popover) }
     }
 }
 
@@ -395,6 +423,8 @@ private struct CircleButtonStyle: ButtonStyle {
 private final class MenuAnchor {
     weak var view: NSView?
 
+    private var popover: NSPopover?
+
     /// Opens above the chip, since the composer sits at the bottom of the
     /// window; AppKit moves it if there isn't room.
     func popUp(_ menu: NSMenu) {
@@ -402,6 +432,21 @@ private final class MenuAnchor {
         let gap: CGFloat = 4
         let top = view.isFlipped ? -menu.size.height - gap : view.bounds.height + menu.size.height + gap
         menu.popUp(positioning: nil, at: NSPoint(x: 0, y: top), in: view)
+    }
+
+    /// A popover above the chip that goes away on a click outside or Esc.
+    /// A second click on the chip while it's open closes it.
+    func show(_ make: (@escaping () -> Void) -> NSViewController) {
+        guard let view else { return }
+        if let popover, popover.isShown {
+            popover.close()
+            return
+        }
+        let popover = NSPopover()
+        popover.behavior = .transient
+        popover.contentViewController = make { [weak popover] in popover?.close() }
+        popover.show(relativeTo: view.bounds, of: view, preferredEdge: .maxY)
+        self.popover = popover
     }
 }
 
@@ -438,4 +483,259 @@ private final class ActionMenuItem: NSMenuItem {
     required init(coder: NSCoder) { fatalError() }
 
     @objc private func run() { handler() }
+}
+
+// MARK: - Model picker
+
+/// The model picker, laid out like T3 Code's so other providers can join
+/// without a redesign: a rail of providers down the left, a search box, the
+/// column's models with the default starred and the chosen one ticked, and
+/// the effort level along the bottom. There's no "default" effort any
+/// more: the level picked last is what a new thread starts on.
+struct ModelPickerView: View {
+    @Environment(AppModel.self) private var app
+    /// Nil for the new-thread composer.
+    let threadId: String?
+    let close: () -> Void
+    @State private var query = ""
+    @State private var providerId: String?
+    @FocusState private var searching: Bool
+
+    static let width: CGFloat = 380
+    static let railWidth: CGFloat = 44
+
+    private var settings: ThreadSettings { ThreadSettings(app: app, thread: threadId.flatMap { app.threads[$0] }) }
+
+    var body: some View {
+        let settings = settings
+        let providers = settings.providers
+        let column = providerId ?? settings.providerId
+        let rows = settings.rows(for: column, query: query)
+        HStack(spacing: 0) {
+            ProviderRail(providers: providers, selected: column) { id in
+                providerId = id
+                query = ""
+            }
+            Divider()
+            VStack(spacing: 0) {
+                HStack(spacing: 6) {
+                    Image(systemName: "magnifyingglass")
+                        .font(.system(size: 12))
+                        .foregroundStyle(.tertiary)
+                    TextField("Search models", text: $query)
+                        .textFieldStyle(.plain)
+                        .font(.system(size: 13))
+                        .focused($searching)
+                        .onSubmit {
+                            // Return takes the first match.
+                            guard let first = rows.first else { return }
+                            settings.pick(first, in: column)
+                            close()
+                        }
+                }
+                .padding(.horizontal, 12)
+                .frame(height: 36)
+                Divider()
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 1) {
+                        ForEach(rows.filter { !$0.isOlder }) { row in
+                            ModelRow(row: row) {
+                                settings.pick(row, in: column)
+                                close()
+                            }
+                        }
+                        let older = rows.filter(\.isOlder)
+                        if !older.isEmpty {
+                            Text("Older")
+                                .font(.system(size: 11, weight: .medium))
+                                .foregroundStyle(.tertiary)
+                                .padding(.horizontal, 10)
+                                .padding(.top, 8)
+                                .padding(.bottom, 2)
+                            ForEach(older) { row in
+                                ModelRow(row: row) {
+                                    settings.pick(row, in: column)
+                                    close()
+                                }
+                            }
+                        }
+                        if rows.isEmpty {
+                            Text(query.isEmpty ? "No models listed yet" : "Nothing matches")
+                                .font(.system(size: 13))
+                                .foregroundStyle(.secondary)
+                                .padding(10)
+                        }
+                    }
+                    .padding(6)
+                }
+                .frame(maxHeight: 320)
+                .fixedSize(horizontal: false, vertical: true)
+                Divider()
+                EffortRow(levels: settings.effortLevels, chosen: settings.effectiveEffort) { settings.setEffort($0) }
+            }
+        }
+        .frame(width: Self.width)
+        .onAppear { searching = true }
+    }
+}
+
+/// One icon per provider; the open column is filled in.
+private struct ProviderRail: View {
+    let providers: [ModelPicker.Provider]
+    let selected: String
+    let choose: (String) -> Void
+
+    var body: some View {
+        VStack(spacing: 4) {
+            ForEach(providers) { provider in
+                RailButton(symbol: ModelPicker.providerSymbol(provider.id), title: provider.title, active: provider.id == selected) {
+                    choose(provider.id)
+                }
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.vertical, 6)
+        .frame(width: ModelPickerView.railWidth)
+        .frame(maxHeight: .infinity)
+        .background(Color.primary.opacity(0.03))
+    }
+
+    private struct RailButton: View {
+        let symbol: String
+        let title: String
+        let active: Bool
+        let action: () -> Void
+        @State private var hovering = false
+
+        var body: some View {
+            Button(action: action) {
+                Image(systemName: symbol)
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundStyle(active ? .primary : .secondary)
+                    .frame(width: 30, height: 30)
+                    .background(
+                        RoundedRectangle(cornerRadius: 7, style: .continuous)
+                            .fill(Color.primary.opacity(active ? 0.1 : hovering ? 0.06 : 0))
+                    )
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .onHover { hovering = $0 }
+            .help(title)
+            .accessibilityLabel(title)
+        }
+    }
+}
+
+/// A model: its name and the CLI's line about it, a star when it's the
+/// default and a tick when it's the one in use.
+private struct ModelRow: View {
+    let row: ModelPicker.Row
+    let action: () -> Void
+    @State private var hovering = false
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 8) {
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(row.title)
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(.primary)
+                    if let subtitle = row.subtitle, !subtitle.isEmpty {
+                        Text(subtitle)
+                            .font(.system(size: 11))
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+                }
+                Spacer(minLength: 8)
+                if row.isDefault {
+                    Image(systemName: "star.fill")
+                        .font(.system(size: 9))
+                        .foregroundStyle(.tertiary)
+                        .help("The default")
+                        .accessibilityLabel("Default")
+                }
+                Image(systemName: "checkmark")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(.primary)
+                    .opacity(row.isSelected ? 1 : 0)
+                    .accessibilityHidden(!row.isSelected)
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 5)
+            .background(
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .fill(Color.primary.opacity(hovering ? 0.06 : 0))
+            )
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering = $0 }
+        .accessibilityLabel(row.title + (row.isSelected ? ", chosen" : ""))
+    }
+}
+
+/// The effort level as a row of segments, the chosen one filled, with
+/// Goldilocks's word for it alongside.
+private struct EffortRow: View {
+    let levels: [String]
+    let chosen: String?
+    let choose: (String) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Text("Effort")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(.secondary)
+                Spacer()
+                if let chosen, let porridge = ComposerChips.effortPorridge(chosen) {
+                    Text(porridge)
+                        .font(.system(size: 11))
+                        .foregroundStyle(.tertiary)
+                }
+            }
+            HStack(spacing: 2) {
+                ForEach(levels, id: \.self) { level in
+                    Segment(title: ComposerChips.effortTitle(level), active: level == chosen) { choose(level) }
+                        .help(ComposerChips.effortPorridge(level) ?? ComposerChips.effortTitle(level))
+                }
+            }
+            .padding(2)
+            .background(
+                RoundedRectangle(cornerRadius: 7, style: .continuous)
+                    .fill(Color.primary.opacity(0.05))
+            )
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+    }
+
+    private struct Segment: View {
+        let title: String
+        let active: Bool
+        let action: () -> Void
+        @State private var hovering = false
+
+        var body: some View {
+            Button(action: action) {
+                Text(title)
+                    .font(.system(size: 11, weight: active ? .semibold : .regular))
+                    .foregroundStyle(active ? .primary : .secondary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 22)
+                    .background(
+                        RoundedRectangle(cornerRadius: 5, style: .continuous)
+                            .fill(active ? Color(nsColor: .controlBackgroundColor) : Color.primary.opacity(hovering ? 0.05 : 0))
+                            .shadow(color: .black.opacity(active ? 0.12 : 0), radius: 1, y: 0.5)
+                    )
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .onHover { hovering = $0 }
+        }
+    }
 }

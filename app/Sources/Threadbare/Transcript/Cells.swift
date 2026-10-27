@@ -508,32 +508,23 @@ final class GroupRowCell: RowCellView {
 
 /// "Bear with me · 12s" with the bear at the end of a running turn: the
 /// turn's one status line. Counts by itself once a second while it's in a
-/// window, so the row never re-renders as time passes. Without the sprite
-/// (a build outside a bundle) it's the spinner and "Working for 12s".
+/// window, so the row never re-renders as time passes.
 final class WorkingRowCell: RowCellView {
-    let spinner = SpinnerView()
     let bear = NSImageView()
-    private let hasBear: Bool
     let label = makeLabel()
     private var startedAt: Date?
     private var timer: Timer?
 
     override init(frame frameRect: NSRect) {
-        // Resolved before super.init: a stored let has to be set first, and
-        // the sprite lookup needs nothing from the view.
-        let waving = Bear.image(.wave)
-        hasBear = waving != nil
         super.init(frame: frameRect)
-        // The same tier as the label beside it: the system spinner's
-        // palest spokes were about 1.6:1 on white.
-        spinner.color = Theme.quietText
         // Body-sized secondary text, not the faintest grey in the window:
         // this line is what Mike watches while a turn runs.
         label.font = Theme.workFont
         label.textColor = Theme.quietText
-        bear.image = waving
+        bear.image = Bear.image(.wave)
+        bear.contentTintColor = Theme.quietText
         bear.imageScaling = .scaleProportionallyUpOrDown
-        if hasBear { addSubview(bear) } else { addSubview(spinner) }
+        addSubview(bear)
         addSubview(label)
     }
 
@@ -544,17 +535,12 @@ final class WorkingRowCell: RowCellView {
         guard case .working(let status) = row.content else { return }
         let (x, width) = RowMetrics.column(for: row, tableWidth: tableWidth)
         let height = RowMetrics.workingHeight
-        if hasBear {
-            // The bear is a little bigger than a tool icon and sits a touch
-            // left of the icon column so its feet line up with the icons.
-            let side = Bear.workingSide
-            bear.frame = NSRect(x: x - 3, y: (height - side) / 2, width: side, height: side)
-            let left = bear.frame.maxX + 6
-            label.frame = NSRect(x: left, y: (height - Theme.workLabelHeight) / 2, width: max(0, x + width - left), height: Theme.workLabelHeight)
-        } else {
-            spinner.frame = WorkLine.spinnerFrame(x: x, rowHeight: height)
-            label.frame = WorkLine.labelFrame(x: x, width: width, textWidth: width, trailing: 0, rowHeight: height)
-        }
+        // The bear is a little bigger than a tool icon and sits a touch
+        // left of the icon column so its feet line up with the icons.
+        let side = Bear.workingSide
+        bear.frame = NSRect(x: x - 3, y: (height - side) / 2, width: side, height: side)
+        let left = bear.frame.maxX + 6
+        label.frame = NSRect(x: left, y: (height - Theme.workLabelHeight) / 2, width: max(0, x + width - left), height: Theme.workLabelHeight)
         startedAt = status.startedAt
         tick()
         startIfVisible()
@@ -568,9 +554,7 @@ final class WorkingRowCell: RowCellView {
     override func releaseContent() { stop() }
 
     private func startIfVisible() {
-        guard window != nil else { return }
-        if !hasBear { spinner.start() }
-        guard timer == nil, startedAt != nil else { return }
+        guard window != nil, timer == nil, startedAt != nil else { return }
         let timer = Timer(timeInterval: 1, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated { self?.tick() }
         }
@@ -582,17 +566,15 @@ final class WorkingRowCell: RowCellView {
     private func stop() {
         timer?.invalidate()
         timer = nil
-        spinner.stop()
     }
 
     private func tick() {
         let text: String
-        let lead = hasBear ? "Bear with me · " : "Working for "
         if let startedAt {
             let elapsed = max(0, Date().timeIntervalSince(startedAt))
-            text = lead + RelativeTime.duration(milliseconds: max(1000, elapsed * 1000))
+            text = "Bear with me · " + RelativeTime.duration(milliseconds: max(1000, elapsed * 1000))
         } else {
-            text = hasBear ? "Bear with me" : "Working"
+            text = "Bear with me"
         }
         if label.stringValue != text { label.stringValue = text }
     }
@@ -604,24 +586,19 @@ final class WorkingRowCell: RowCellView {
 /// end of a thread whose turn is over but whose CLI still has work going
 /// (`ThreadSummary.background`). Deliberately not the working line: the
 /// bear sits (a cub when sub-agents are out) rather than waves, nothing
-/// ticks, and the words say what's running. Without the sprites it's a
-/// grey still mark and the words.
+/// ticks, and the words say what's running.
 final class BackgroundRowCell: RowCellView {
-    let mark = NSImageView()
     let bear = NSImageView()
-    private let hasBear: Bool
     let label = makeLabel()
 
     override init(frame frameRect: NSRect) {
-        hasBear = Bear.image(.sit) != nil
         super.init(frame: frameRect)
         label.font = Theme.workFont
         label.textColor = Theme.quietText
         label.lineBreakMode = .byTruncatingTail
+        bear.contentTintColor = Theme.quietText
         bear.imageScaling = .scaleProportionallyUpOrDown
-        mark.image = NSImage(systemSymbolName: "circle.dotted", accessibilityDescription: nil)
-        mark.contentTintColor = Theme.quietText
-        if hasBear { addSubview(bear) } else { addSubview(mark) }
+        addSubview(bear)
         addSubview(label)
     }
 
@@ -632,19 +609,14 @@ final class BackgroundRowCell: RowCellView {
         guard case .background(let status) = row.content else { return }
         let (x, width) = RowMetrics.column(for: row, tableWidth: tableWidth)
         let height = RowMetrics.workingHeight
-        if hasBear {
-            // A cub while sub-agents are out, else the bear sat waiting;
-            // placed as the working line's bear so the two lines match.
-            let cubs = status.tasks.contains { $0.kind == .agent && !$0.finished }
-            bear.image = Bear.image(cubs ? .cub : .sit)
-            let side = Bear.workingSide
-            bear.frame = NSRect(x: x - 3, y: (height - side) / 2, width: side, height: side)
-            let left = bear.frame.maxX + 6
-            label.frame = NSRect(x: left, y: (height - Theme.workLabelHeight) / 2, width: max(0, x + width - left), height: Theme.workLabelHeight)
-        } else {
-            mark.frame = WorkLine.spinnerFrame(x: x, rowHeight: height)
-            label.frame = WorkLine.labelFrame(x: x, width: width, textWidth: width, trailing: 0, rowHeight: height)
-        }
+        // A cub while sub-agents are out, else the bear sat waiting;
+        // placed as the working line's bear so the two lines match.
+        let cubs = status.tasks.contains { $0.kind == .agent && !$0.finished }
+        bear.image = Bear.image(cubs ? .cub : .sit)
+        let side = Bear.workingSide
+        bear.frame = NSRect(x: x - 3, y: (height - side) / 2, width: side, height: side)
+        let left = bear.frame.maxX + 6
+        label.frame = NSRect(x: left, y: (height - Theme.workLabelHeight) / 2, width: max(0, x + width - left), height: Theme.workLabelHeight)
         label.stringValue = BackgroundWork.lineWithDetail(status.tasks)
         label.toolTip = BackgroundWork.detail(status.tasks)
     }
