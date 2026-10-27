@@ -522,11 +522,11 @@ Given the project list and one thread, decide which projects the thread belongs 
 Reply with JSON only, no prose and no code fence:
 {"projects": ["<ids of existing projects the thread belongs in, or []>"],
  "new": null or {"title": "short name, as Mike would say it", "folders": ["~/path of its repo(s)"], "goals": "one or two sentences: what it's for", "state": "one or two sentences: where it's up to"},
- "state": {"<project id>": "where that project is up to now, one to three sentences"} for projects this thread clearly moved on, else {},
+ "state": {"<project id>": "the project's new state"} only when this thread changed where the whole project stands (shipped or finished something, made a decision, hit a blocker), else {},
  "addFolders": {"<project id>": ["~/path"]} for repos this thread shows belong to a project it's in, else {},
  "why": "one short line"}
 
-Folders are repos the work lives in (the thread's folder when it's a repo, and the repos it edited), never a catch-all folder. State is plain words about the project, not the thread: what's done, what's next, what's blocked.`;
+Folders are repos the work lives in (the thread's folder when it's a repo, and the repos it edited), never a catch-all folder. State is two to four plain sentences about the whole project, not this thread: what's done, what's next, what's blocked. Start from the current state, keep what's still true and fold the change in; don't replace it with this thread's details. Ideas and plans that aren't built yet don't change the state.`;
 
 function parseAnswer(text: string): Answer | undefined {
   const t = text.trim().replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/, '');
