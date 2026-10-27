@@ -150,6 +150,10 @@ export type ThreadSummary = {
   subagents?: Subagent[];
   // The projects the thread is in, oldest first. Absent when none.
   projects?: ThreadProject[];
+  // When its highlights last changed other than by a new event (a pin, a
+  // removal, the librarian's brief): a client fetches threads.highlights
+  // again when this or lastSeq moves.
+  highlightsAt?: string;
 };
 
 // Projects (docs/protocol.md, "Projects"): a grouping above folders that
@@ -284,15 +288,26 @@ export type PatchInfo = {
 
 // A panel a patch gives a thread (docs/protocol.md, "Panels"). The runner
 // works them out from the thread's folder; nothing is persisted.
-export type PanelKind = 'url' | 'image';
+export type PanelKind = 'url' | 'image' | 'list';
 export type Panel = {
   id: string; // unique within the thread, e.g. "convex.dashboard"
   title: string; // the tab's label
   kind: PanelKind;
   url?: string; // kind "url": what the panel shows and what Open in browser opens
+  icon?: string; // an SF Symbol name for its button on the app's right-hand rail
   patch: string; // the patch it came from: "convex", "xcode"
   projectId?: string;
   note?: string; // one line about it: the deployment name, the booted device
+};
+
+// One row of a `list` panel, as its patch's `items` function returns it.
+export type PanelItem = {
+  title: string;
+  detail?: string;
+  url?: string;
+  path?: string;
+  icon?: string;
+  tone?: 'attention' | 'failed' | 'done';
 };
 
 export type BackgroundKind = 'agent' | 'shell' | 'monitor' | 'other';

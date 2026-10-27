@@ -33,6 +33,9 @@ export type LibrarianHost = {
   onThreadActivity(fn: (a: ThreadActivity) => void): () => void;
   onNotification(fn: (n: Notification) => void): () => void;
   publish(n: Notification): void;
+  // Keeps the look's line on where the thread is up to, shown at the top
+  // of its Highlights (docs/protocol.md).
+  setBrief?(threadId: string, text: string): void;
 };
 
 // How long after a turn ends before a look, so a quick follow-up turn
@@ -64,6 +67,7 @@ type Answer = {
   new?: unknown;
   state?: unknown;
   addFolders?: unknown;
+  thread?: unknown;
   why?: unknown;
 };
 
@@ -412,6 +416,8 @@ export class Librarian {
         bump('updated');
       }
     }
+    // Not a change to any project, so not in what the look says it did.
+    if (typeof a.thread === 'string' && a.thread.trim()) this.host.setBrief?.(rec.id, a.thread);
     const why = typeof a.why === 'string' ? a.why.trim().slice(0, 200) : '';
     const text = said.length ? said.join('. ') : why ? `Nothing to change: ${lowerFirst(why)}` : 'Nothing to change';
     this.note(job, outcome, text, [...ids], costUsd);
@@ -544,9 +550,12 @@ Reply with JSON only, no prose and no code fence:
  "new": null or {"title": "short name, as Mike would say it", "folders": ["~/path of its repo(s)"], "goals": "one or two sentences: what it's for", "state": "one or two sentences: where it's up to"},
  "state": {"<project id>": "the project's new state"} only when this thread changed where the whole project stands (shipped or finished something, made a decision, hit a blocker), else {},
  "addFolders": {"<project id>": ["~/path"]} for repos this thread shows belong to a project it's in, else {},
+ "thread": "one or two plain sentences on where this thread itself is up to: what it did or found, and what it's waiting on or doing next",
  "why": "one short line"}
 
-Folders are repos the work lives in (the thread's folder when it's a repo, and the repos it edited), never a catch-all folder. State is two to four plain sentences about the whole project, not this thread: what's done, what's next, what's blocked. Start from the current state, keep what's still true and fold the change in; don't replace it with this thread's details. Ideas and plans that aren't built yet don't change the state.`;
+Folders are repos the work lives in (the thread's folder when it's a repo, and the repos it edited), never a catch-all folder. State is two to four plain sentences about the whole project, not this thread: what's done, what's next, what's blocked. Start from the current state, keep what's still true and fold the change in; don't replace it with this thread's details. Ideas and plans that aren't built yet don't change the state.
+
+The thread line is for Mike glancing at the thread later: concrete, in his plain words, no more than 40 words. Say who's waiting on whom ("Waiting on Mike to pick a design", "Fixing the last failing test").`;
 
 function parseAnswer(text: string): Answer | undefined {
   const t = text.trim().replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/, '');

@@ -27,6 +27,11 @@ anything.
 - A project can give Threadbear threads panels and action chips through
   `.threadbear/patches/*.ts` (docs/protocol.md, "Patches"). When Mike
   asks for a button or a panel for a project, write one of those there.
+  A panel with an `items` function is a native list (rows, no page to
+  serve); `.threadbear/patches/checks.ts` has one, Worktrees.
+- Files and links an agent makes for Mike to look at belong in the
+  thread's Highlights (the pin on the right-hand rail): use the `pin`
+  tool, with `show: true` to open it in the side pane, rather than `open`.
 
 ## Working on Threadbare from inside Threadbare
 

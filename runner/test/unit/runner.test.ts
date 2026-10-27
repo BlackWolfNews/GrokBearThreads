@@ -1201,7 +1201,7 @@ test('a thread in a Convex project has the dashboard panel; a folder change refr
   const { thread } = create(h, { cwd: project });
   assert.deepEqual(checkSummary(thread), []);
   assert.deepEqual(thread.panels, [
-    { id: 'convex.dashboard', title: 'Convex', kind: 'url', url: 'https://dashboard.convex.dev/d/quick-fox-77', patch: 'convex', note: 'quick-fox-77 (dev)' },
+    { id: 'convex.dashboard', title: 'Convex', kind: 'url', url: 'https://dashboard.convex.dev/d/quick-fox-77', icon: 'cylinder.split.1x2', patch: 'convex', note: 'quick-fox-77 (dev)' },
   ]);
   // The folder is read again only now and then (in the background), unless
   // the folder changes.

@@ -45,6 +45,8 @@ const THREAD_METHODS = new Set([
   'threads.events',
   'threads.subscribe',
   'threads.markSeen',
+  'threads.highlights',
+  'threads.removeHighlight',
   'approvals.respond',
   'panels.render',
   'actions.run',
@@ -403,6 +405,10 @@ export class RpcServer {
         return {};
       case 'threads.markSeen':
         return r.markSeen(reqString(p, 'threadId'), reqNumber(p, 'seq'));
+      case 'threads.highlights':
+        return r.highlights(reqString(p, 'threadId'));
+      case 'threads.removeHighlight':
+        return r.removeHighlight(reqString(p, 'threadId'), reqString(p, 'highlightId'));
       case 'approvals.respond': {
         const decision = reqString(p, 'decision') as ApprovalDecision;
         if (!['allow', 'allowAlways', 'deny', 'answered'].includes(decision)) throw bad('bad decision');

@@ -141,6 +141,12 @@ function threadbareTitle(tool: string, input: Record<string, unknown>): string {
   switch (tool) {
     case 'show_options':
       return `Compare options: ${firstLine(str(input.title), 80)}`;
+    case 'pin': {
+      const what = str(input.title) || (str(input.path) ? path.basename(str(input.path)) : str(input.url));
+      return `${input.show ? 'Show and pin' : 'Pin'} ${firstLine(what, 80)}`;
+    }
+    case 'unpin':
+      return 'Unpin a highlight';
     case 'list_threads':
       return str(input.query) ? `Search threads: ${firstLine(str(input.query), 80)}` : 'List threads';
     case 'read_thread':
