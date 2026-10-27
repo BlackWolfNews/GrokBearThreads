@@ -41,13 +41,28 @@ test('copySessionTranscript copies the jsonl and the subagent folder, using real
   fs.mkdirSync(path.join(src, sid, 'subagents'), { recursive: true });
   fs.writeFileSync(path.join(src, `${sid}.jsonl`), '{"x":1}\n');
   fs.writeFileSync(path.join(src, sid, 'subagents', 'agent-1.jsonl'), '{}\n');
-  assert.equal(copySessionTranscript(config, a, b, sid), true);
+  assert.equal(copySessionTranscript(config, config, a, b, sid), true);
   const dest = path.join(config, 'projects', projectDirName(fs.realpathSync(b)));
   assert.equal(fs.readFileSync(path.join(dest, `${sid}.jsonl`), 'utf8'), '{"x":1}\n');
   assert.ok(fs.existsSync(path.join(dest, sid, 'subagents', 'agent-1.jsonl')));
   assert.ok(fs.existsSync(path.join(src, `${sid}.jsonl`)), 'the original stays');
-  assert.equal(copySessionTranscript(config, a, b, 'not-there'), false);
-  assert.equal(copySessionTranscript(config, a, b, '../evil'), false);
+  assert.equal(copySessionTranscript(config, config, a, b, 'not-there'), false);
+  assert.equal(copySessionTranscript(config, config, a, b, '../evil'), false);
+});
+
+test('copySessionTranscript copies into another login\'s config dir, in the same folder', () => {
+  const from = tmpDir();
+  const to = tmpDir();
+  const cwd = fs.realpathSync(tmpDir());
+  const sid = '0b7a4c1e-1111-2222-3333-777788889999';
+  const src = path.join(from, 'projects', projectDirName(cwd));
+  fs.mkdirSync(src, { recursive: true });
+  fs.writeFileSync(path.join(src, `${sid}.jsonl`), '{"y":2}\n');
+  assert.equal(copySessionTranscript(from, to, cwd, cwd, sid), true);
+  assert.equal(fs.readFileSync(path.join(to, 'projects', projectDirName(cwd), `${sid}.jsonl`), 'utf8'), '{"y":2}\n');
+  assert.ok(fs.existsSync(path.join(src, `${sid}.jsonl`)), 'the original stays');
+  // Nothing in the old login's folder: nothing to carry.
+  assert.equal(copySessionTranscript(to, from, tmpDir(), cwd, sid), false);
 });
 
 // ------------------------------------------------------ moving a thread
@@ -55,8 +70,8 @@ test('copySessionTranscript copies the jsonl and the subagent folder, using real
 test('a folder move on the same account carries the transcript and resumes the same session', async () => {
   const copies: string[][] = [];
   const h = makeHarness(undefined, {}, {
-    copyTranscript: (configDir, from, to, sid) => {
-      copies.push([configDir, from, to, sid]);
+    copyTranscript: (fromConfig, toConfig, from, to, sid) => {
+      copies.push([fromConfig, toConfig, from, to, sid]);
       return true;
     },
   });
@@ -73,31 +88,48 @@ test('a folder move on the same account carries the transcript and resumes the s
   assert.equal(s2.opts.resume, true, 'resumes rather than starting fresh');
   assert.equal(s2.opts.sessionId, s.opts.sessionId);
   assert.equal(s2.sent[0].text, 'Now commit it', 'no handoff note');
-  assert.deepEqual(copies, [['/tmp/three', h.cfg.defaults.cwd, other, s.opts.sessionId]]);
+  assert.deepEqual(copies, [['/tmp/three', '/tmp/three', h.cfg.defaults.cwd, other, s.opts.sessionId]]);
   assert.ok(h.events(thread.id).some((e) => e.type === 'system.note' && /^Moved to /.test(e.text)));
 });
 
-test('a move falls back to the handoff note when the transcript cannot be carried, or the account changes', async () => {
-  for (const how of ['missing', 'account'] as const) {
-    let called = 0;
-    const h = makeHarness(undefined, {}, {
-      copyTranscript: () => {
-        called++;
-        return how !== 'missing';
-      },
-    });
-    const { thread, s } = start(h);
-    s.text('m1:0', 'Done.');
-    s.result();
-    h.runner.update({ threadId: thread.id, cwd: tmpDir(), ...(how === 'account' ? { accountId: 'claude-main' } : {}) });
-    await tick();
-    h.runner.send(thread.id, 'next');
-    await tick();
-    const s2 = h.adapter.last;
-    assert.equal(s2.opts.resume, false, how);
-    assert.match(s2.sent[0].text, /^\[Threadbare handoff\]/, how);
-    assert.equal(called, how === 'missing' ? 1 : 0, `${how}: copy attempts`);
-  }
+test('a move falls back to the handoff note when the transcript cannot be carried', async () => {
+  let called = 0;
+  const h = makeHarness(undefined, {}, {
+    copyTranscript: () => {
+      called++;
+      return false;
+    },
+  });
+  const { thread, s } = start(h);
+  s.text('m1:0', 'Done.');
+  s.result();
+  h.runner.update({ threadId: thread.id, cwd: tmpDir() });
+  await tick();
+  h.runner.send(thread.id, 'next');
+  await tick();
+  const s2 = h.adapter.last;
+  assert.equal(s2.opts.resume, false);
+  assert.match(s2.sent[0].text, /^\[Threadbare handoff\]/);
+  assert.equal(called, 1, 'copy attempts');
+});
+
+test('a move to another Claude login carries the transcript into its config dir and resumes there', async () => {
+  const copies: string[][] = [];
+  const h = makeHarness(undefined, {}, { copyTranscript: (fc, tc, f, t, sid) => (copies.push([fc, tc, f, t, sid]), true) });
+  const { thread, s } = start(h);
+  s.text('m1:0', 'Done.');
+  s.result();
+  h.runner.update({ threadId: thread.id, accountId: 'claude-main' });
+  await tick();
+  h.runner.send(thread.id, 'next');
+  await tick();
+  const s2 = h.adapter.last;
+  assert.equal(s2.opts.account.id, 'claude-main');
+  assert.equal(s2.opts.resume, true);
+  assert.equal(s2.opts.sessionId, s.opts.sessionId);
+  assert.equal(s2.sent[0].text, 'next', 'no handoff note');
+  assert.deepEqual(copies, [['/tmp/three', '/tmp/main', h.cfg.defaults.cwd, h.cfg.defaults.cwd, s.opts.sessionId]]);
+  assert.ok(h.events(thread.id).some((e) => e.type === 'system.note' && e.text === 'Resumed the session on main@example.com, with the whole conversation.'));
 });
 
 test('if the carried transcript will not resume, the fresh session gets the handoff note', async () => {
@@ -300,7 +332,7 @@ test('list_accounts shows each login\'s provider, note, room left and models; cr
   // "codex" names the one Codex login; ultra passes the schema.
   const made = await t.call('create_thread', { text: 'Draw a bear', account: 'codex', effort: 'ultra' });
   assert.equal(made.error, false, made.text);
-  assert.match(made.text, /on codex-main\./);
+  assert.match(made.text, /on codex-main \(gpt-6-luna\)\.$/);
   const child = h.runner.list().find((x) => x.title === 'Draw a bear')!;
   assert.equal(child.provider, 'codex');
   assert.equal(child.model, 'gpt-6-luna');
@@ -315,4 +347,36 @@ test('list_accounts shows each login\'s provider, note, room left and models; cr
   assert.equal(moved.error, false, moved.text);
   assert.equal(h.runner.get(me.id).provider, 'codex');
   assert.equal(h.runner.get(me.id).model, 'gpt-6-luna');
+});
+
+test('pools in the tools: list_accounts prints them, create_thread and update_thread take a pool, and a named model picks its provider', async () => {
+  const h = makeHarness(undefined, {}, { accounts: new FakeAccounts(withCodex()) });
+  const { thread: me } = h.runner.create({ text: 'Boss', accountId: 'claude-main' });
+  h.adapter.last.init();
+  const t = tools(h, me.id);
+  const list = (await t.call('list_accounts')).text;
+  assert.match(list, /Pools \(a new thread in a pool's folder starts on that pool\):\nclaude {2}Claude: claude-main room unknown, claude-3 room unknown {2}\[new threads start here\]\ncodex {2}Codex: codex-main room unknown/);
+  // A Claude model with no account or pool, while Codex is the default: Claude.
+  h.runner.create({ text: 'x', accountId: 'codex-main' });
+  const opus = await t.call('create_thread', { text: 'Use Opus', model: 'claude-opus-5-5' });
+  assert.equal(opus.error, false, opus.text);
+  const o = h.runner.list().find((x) => x.title === 'Use Opus')!;
+  assert.equal(o.provider, 'claude');
+  assert.equal(o.poolId, 'claude');
+  assert.equal(o.model, 'claude-opus-5-5');
+  assert.match(opus.text, /\(claude-opus-5-5\)\. It's in the claude pool/);
+  // By title, ignoring case; an unknown one says which there are.
+  const made = await t.call('create_thread', { text: 'On Codex', pool: 'CODEX' });
+  assert.equal(made.error, false, made.text);
+  assert.equal(h.runner.list().find((x) => x.title === 'On Codex')!.poolId, 'codex');
+  const bad = await t.call('create_thread', { text: 'y', pool: 'grok' });
+  assert.equal(bad.error, true);
+  assert.match(bad.text, /No pool grok\. Pools: claude \(Claude\), codex \(Codex\)/);
+  // update_thread: "pin" pins, a pool puts it back.
+  const pinned = await t.call('update_thread', { threadId: o.id, pool: 'pin' });
+  assert.match(pinned.text, /pool: none \(pinned to its account\)/);
+  const back = await t.call('update_thread', { threadId: o.id, pool: 'claude' });
+  assert.match(back.text, /pool: claude/);
+  assert.equal((await t.call('update_thread', { threadId: o.id, pool: null })).error, false);
+  assert.equal(h.runner.get(o.id).poolId, undefined);
 });

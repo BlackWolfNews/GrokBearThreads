@@ -98,6 +98,15 @@ type CliStatus = {
   }
 }
 
+// A named, ordered list of logins (see Pools).
+type Pool = {
+  id: string            // "claude", "codex", "convex", or a slug Mike made
+  title: string         // "Claude"
+  accountIds: string[]  // in order; may mix providers
+  folders?: string[]    // ~ allowed; a new thread under one starts on this pool
+  builtIn?: boolean     // from the code default, not runner.json
+}
+
 type ThreadStatus =
   | "idle"              // no turn running (CLI may or may not be live)
   | "starting"          // CLI spawning or resuming
@@ -110,7 +119,11 @@ type ThreadSummary = {
   id: string
   title: string
   cwd: string
-  accountId: string
+  accountId: string     // the login it runs on now (a pool thread's can change; see Pools)
+  poolId?: string       // the pool that picks its login. Absent: pinned to accountId
+  waitingForRoom?: { until: string, accountId?: string } // every login in its
+                        // pool is out of room; it carries on by itself at
+                        // `until`. accountId: the login it's waiting on
   provider: Provider    // always the account's provider
   model?: string        // undefined means the account's default
   effort?: EffortLevel  // undefined means the model's own level
@@ -418,13 +431,13 @@ replaces whatever the deltas built up.
 
 | method | params | result |
 |---|---|---|
-| `hello` | `{ client: string, version: string }` | `{ runnerVersion, protocol: 1, accounts: Account[], defaults: { cwd, accountId, model?, models?: { claude?, codex? }, efforts?: { claude?: EffortLevel, codex?: EffortLevel } }, clis?: CliStatus[], updates?: RunnerUpdates }`. `updates` is under Runner updates. `defaults.accountId` is the account a `threads.create` with no `accountId` uses: the one with the most room among the last-used account's provider (skipping blocked ones, ones under 10% and ones with a note), worked out again as usage changes; a client keeps its own copy of the rule rather than asking again. `defaults.models[provider]` is the model a new thread on that provider gets when it names none (`runner.json`'s `defaults.models`; a dev runner sets the cheapest); `defaults.model` is the same for Claude, kept for older apps. Absent means the account's own default (`accounts[].defaultModel` names it, when known). `defaults.efforts[provider]` likewise for effort; absent means the model's own level. `runnerVersion` is `<package version>+<release id>` when the runner runs from a release, else `<package version>+source` |
+| `hello` | `{ client: string, version: string }` | `{ runnerVersion, protocol: 1, accounts: Account[], pools?: Pool[], defaults: { cwd, accountId, poolId?, model?, models?: { claude?, codex? }, efforts?: { claude?: EffortLevel, codex?: EffortLevel } }, clis?: CliStatus[], updates?: RunnerUpdates }`. `updates` is under Runner updates; `pools` and `defaults.poolId` under Pools. `defaults.accountId` is the account a `threads.create` with no `accountId` uses: the one with the most room among the last-used account's provider (skipping blocked ones, ones under 10% and ones with a note), worked out again as usage changes; a client keeps its own copy of the rule rather than asking again. `defaults.models[provider]` is the model a new thread on that provider gets when it names none (`runner.json`'s `defaults.models`; a dev runner sets the cheapest); `defaults.model` is the same for Claude, kept for older apps. Absent means the account's own default (`accounts[].defaultModel` names it, when known). `defaults.efforts[provider]` likewise for effort; absent means the model's own level. `runnerVersion` is `<package version>+<release id>` when the runner runs from a release, else `<package version>+source` |
 | `threads.list` | `{ include?: ("inbox" \| "snoozed" \| "archived")[] }` (default `["inbox"]`) | `{ threads: ThreadSummary[] }` newest activity first |
 | `threads.search` | `{ query: string, limit?: number }` | `{ threads: ThreadSummary[] }` matches title and preview across all threads, archived included |
-| `threads.create` | `{ text: string, images?: ImageRef[], cwd?: string, accountId?: string, model?: string, effort?: EffortLevel, permissionMode?: "full" \| "ask", title?: string }` | `{ thread: ThreadSummary }` (the first turn starts straight away). The thread's `provider` is its account's. With no `model`, the thread gets `defaults.models[provider]` from `hello`, or `defaults.model` for Claude, or else the account's own default. With no `effort`, `defaults.efforts[provider]`, or else the model's own level. See "Models and effort across providers" |
+| `threads.create` | `{ text: string, images?: ImageRef[], cwd?: string, accountId?: string, poolId?: string, model?: string, effort?: EffortLevel, permissionMode?: "full" \| "ask", title?: string }` | `{ thread: ThreadSummary }` (the first turn starts straight away). The thread's `provider` is its account's. With `accountId` the thread is pinned to that login (`accountId` wins if both are given); otherwise it's a pool thread, and the pool and login are picked as under Pools (an unknown `poolId` is `-32602`). With no `model`, the thread gets `defaults.models[provider]` from `hello`, or `defaults.model` for Claude, or else the account's own default. With no `effort`, `defaults.efforts[provider]`, or else the model's own level. See "Models and effort across providers" |
 | `threads.send` | `{ threadId, text, images?: ImageRef[] }` | `{ turnId }`. If a turn is running and its CLI is live, the message goes into that turn straight away (a `user.message` under the running `turnId`, which is returned): the agent takes it at its next step, or right after its reply if that was already finishing, and the turn doesn't complete until it has been answered. Otherwise (the CLI is still starting or leaving, messages are already waiting, a move or fresh CLI is due on the next turn, Stop has been pressed, or the turn is only an approval for a background subagent) the message is queued and starts its own turn when the running one ends |
 | `threads.interrupt` | `{ threadId }` | `{}` |
-| `threads.update` | `{ threadId, title?, cwd?, accountId?, model?: string \| null, effort?: EffortLevel \| null, permissionMode?, snoozedUntil?: string \| null, archived?: boolean }` | `{ thread: ThreadSummary }`. `snoozedUntil` is an ISO time, or `"restart"` for until the runner next starts (any start: a planned restart, a crash, a reboot), when the thread wakes before the restart's resume is sent, so a thread put away while its own restart waited is still carried on. Snoozing or archiving releases the CLI (and archives a Codex thread in Codex too). Changing account or cwd takes effect on the next turn. A model or effort change reaches a live Claude CLI straight away (`null` goes back to the default); on Codex it applies from the next turn, with a `system.note` if a turn is running. A folder change on the same Claude account copies the native session's transcript to the new folder and resumes it; on the same Codex account the session carries on in the new folder from the next turn. Otherwise (or if that fails) it starts a new native session with a short handoff note. An account of the other provider switches `provider`, resets `model` and `effort` to that provider's defaults unless the same call sets them, and clears the thread's "Always allow" rules. `model` and `effort` are checked as in "Models and effort across providers" |
+| `threads.update` | `{ threadId, title?, cwd?, accountId?, poolId?: string \| null, model?: string \| null, effort?: EffortLevel \| null, permissionMode?, snoozedUntil?: string \| null, archived?: boolean }` | `{ thread: ThreadSummary }`. `snoozedUntil` is an ISO time, or `"restart"` for until the runner next starts (any start: a planned restart, a crash, a reboot), when the thread wakes before the restart's resume is sent, so a thread put away while its own restart waited is still carried on. Snoozing or archiving releases the CLI (and archives a Codex thread in Codex too). Changing account or cwd takes effect on the next turn. A model or effort change reaches a live Claude CLI straight away (`null` goes back to the default); on Codex it applies from the next turn, with a `system.note` if a turn is running. A folder change on the same Claude account copies the native session's transcript to the new folder and resumes it; on the same Codex account the session carries on in the new folder from the next turn. Otherwise (or if that fails) it starts a new native session with a short handoff note. An account of the other provider switches `provider`, resets `model` and `effort` to that provider's defaults unless the same call sets them, and clears the thread's "Always allow" rules. `model` and `effort` are checked as in "Models and effort across providers". `accountId` pins the thread to that login (clearing `poolId`). `poolId: null` pins it to its current login; a pool id puts it in that pool, and moves it onto one of the pool's logins at once (from the next turn) if its current one isn't in it; an unknown one is `-32602`. A move from one Claude login to another copies the session's transcript into the new login's config folder and resumes it there, as a folder move does |
 | `threads.retitle` | `{ dryRun?: boolean, threadIds?: string[] }` | `{ threads: { threadId, from: string, to?: string, reason?: string }[] }`. Gives a model title to every thread, archived and snoozed included, whose title is still its first message's first line and that nobody has named (`titleSet`); see "Titles" under "Settings and models". One entry per such thread: `to` when it was renamed, `reason` when it wasn't (no key, private folder, over budget, renamed meanwhile). With `threadIds`, those threads whatever their title (a poor model title can be asked for again), still never one named by hand. The model also gets the start of the thread's first reply. `dryRun` lists them without asking the model (`tb retitle`) |
 | `threads.delete` | `{ threadId }` | `{}`. Stops the thread's CLI and moves its folder to `trash/` in the data dir (a Codex thread is archived in Codex too). Every client gets `thread.deleted` |
 | `threads.events` | `{ threadId, afterSeq?: number, beforeSeq?: number, limit?: number }` (default: the newest 500) | `{ events: Event[], firstSeq, lastSeq, inProgress: { itemId, type: "assistant.text" \| "reasoning", text }[] }` |
@@ -452,6 +465,8 @@ replaces whatever the deltas built up.
 | `librarian.status` | `{}` | `{ librarian: LibrarianStatus }` |
 | `librarian.run` | `{ threadId?: string }` | `{ librarian: LibrarianStatus }`. Queues a look at the thread now (reason `asked`), or with no `threadId`, at every thread it has never looked at (a backfill, newest first) |
 | `librarian.update` | `{ paused?: boolean }` | `{ librarian: LibrarianStatus }` |
+| `pools.list` | `{}` | `{ pools: Pool[] }` (see Pools) |
+| `pools.save` | `{ pools: Pool[] }` | `{ pools: Pool[] }`. Replaces the whole list in `runner.json` (`builtIn` is dropped; an empty list goes back to the built-in ones). `-32602` for a duplicate id, a blank id or title, an empty `accountIds`, or an account id the runner doesn't know. Every client gets `pools.updated` |
 | `settings.get` | `{}` | `{ settings: Settings }` |
 | `settings.update` | `{ defaultCwd?, idleMinutes?, maxLiveCLIs?, followMain?, models?: { dailyBudgetUsd?, privateFolders? } }` | `{ settings: Settings }`. Saves what's given to `runner.json` and applies it straight away, except `followMain` (next restart). `defaultCwd` must be an existing folder, `idleMinutes` at least 1, `maxLiveCLIs` 1 to 20, `dailyBudgetUsd` 0 to 100; otherwise `-32602` saying which. Every client gets `settings.updated` |
 | `settings.setKey` | `{ provider: "openrouter", key: string \| null }` | `{ settings: Settings }`. Writes the key to `secrets/openrouter-key` (0600), or removes it for `null`. The key is never sent back, only `set` and `hint`. A key with spaces inside or under 20 characters is `-32602`. Every client gets `settings.updated` |
@@ -494,6 +509,7 @@ still `-32602`.)
 | `thread.event` | `{ threadId, event: Event }` only for subscribed threads, persisted and transient |
 | `thread.deleted` | `{ threadId }` sent to every connected client when a thread is deleted |
 | `accounts.updated` | `{ accounts: Account[] }` sent to every connected client when the account list or what the runner knows about an account changes: a login appears or goes (checked every 10 seconds), its `models` once the CLI has been asked, its `defaultModel` once a turn has shown it, or its `usage` (Token Stats' `limits.json` changed, or a live reading moved a window by a point or more). The first change goes out at once, then at most one every 5 seconds, always ending on the latest list. Replaces the list from `hello` |
+| `pools.updated` | `{ pools: Pool[] }` sent to every connected client after `pools.save`, and when a change in the login list changes the built-in pools. Replaces the list from `hello` |
 | `clis.updated` | `{ clis: CliStatus[] }` sent to every connected client when a CLI's status changes (a check finished, an update started, moved on or ended). The latest list wins |
 | `schedules.updated` | `{ schedules: Schedule[] }` sent to every connected client whenever any schedule changes (made, edited, run, deleted, or its thread deleted). The whole list, in `schedules.list` order |
 | `projects.updated` | `{ projects: Project[] }` sent to every connected client when any project changes, as `projects.list` with `archived: true` would answer. Thread membership changes come as `thread.updated` |
@@ -696,6 +712,75 @@ it once through `settings.setKey` and only ever hears `set` and `hint`.
   on a network error, a 5xx or an empty answer (not one cut off by its
   token limit), and at most 4 are in flight at once.
 
+## Pools
+
+A pool is a named, ordered list of logins, of any provider. Mike picks a
+pool and a model; the runner picks which login runs each turn, and moves a
+thread to another login when the one it's on runs out of room.
+
+- **The list.** Built in, worked out from the logins the runner finds: one
+  pool per provider (`claude`, `codex`) holding every login of that
+  provider without a note, and one per noted login, titled from its note's
+  first word (`convex` for claude-2's "Convex work only", with folders
+  `["~/dev/convex"]` from the code). `runner.json`'s `pools` replaces the
+  whole list; `pools.save` writes it. A pool's `accountIds` order only
+  decides which provider comes first; within one provider the runner goes
+  by room.
+- **New threads.** A `threads.create` without `accountId` picks the pool:
+  `poolId` if given, else the pool whose `folders` holds `cwd` (the
+  longest match), else `defaults.poolId` (`runner.json`'s, the pool last
+  named in a `threads.create`; failing that, the pool holding
+  `defaults.accountId`). Then, if a `model` is named whose provider has no
+  login in that pool (and no `poolId` was given), the first pool that has
+  one. The thread's provider is its model's, or the pool's first provider;
+  its login is the one of that provider in the pool with the most room
+  (a login with room unknown counts, after those with room known). A dev
+  runner's `keepAccount` pins new threads to its account instead.
+  `defaults.poolId` in `hello` is folder-blind: the app applies folders
+  itself (`poolForFolder`, with the shared cases in
+  `runner/test/fixtures/pool-folder-cases.json`).
+- **OK to run on.** A login is OK when it isn't blocked and its room (the
+  tighter of the 5-hour and weekly windows) is at least 10%, or its usage
+  isn't known.
+- **Before a turn** (a send, a queued message, a schedule): if the thread's
+  login isn't OK, or isn't in its pool any more, it moves first. A thread
+  stays on one login as long as it can, since every move costs a cold
+  prompt cache.
+- **Where it moves.** The pool login of the thread's provider with the
+  most room. If none has room, the first other provider in pool order that
+  has a login with room: a cross-provider move, a handoff like any
+  provider change, onto that provider's default model
+  (`defaults.models[provider]`, else the account's own) and effort. A
+  thread that spilled over stays there; it doesn't move back by itself. If
+  nothing in the pool has room before a turn, the turn starts where it is.
+- **A turn that hits the limit.** A pool thread's turn that ends `failed`
+  with `errorKind: "usageLimit"` marks its login blocked (until the window
+  at its limit resets, or 30 minutes if no reset is known), moves, and
+  sends a runner-origin message: "Your last login hit its usage limit
+  partway through that turn, so this thread has moved to another one.
+  Carry on from where you left off." Only once per turn: if that carry-on
+  turn hits the limit too, the thread waits rather than move again.
+- **Waiting.** When nothing in the pool has room the thread gets
+  `waitingForRoom: { until, accountId? }`: the earliest time one of the
+  pool's logins is back, plus a minute (30 minutes from now if no reset
+  time is known). At `until` it looks again: if a login has room it moves
+  there if need be and carries on by itself; if not, it waits again. Any
+  message that starts a turn ends the wait (and goes through the before-a-
+  turn check). The wait is kept in `thread.json`, so it survives a restart.
+- **Moves in the transcript.** Each move and wait is a `system.note`:
+  "Moved to mike@gangbusters.io: mike.cann@gmail.com hit its 5-hour limit,
+  back at 6:10 pm." or "Every login in Claude is out of room. Carrying on
+  at 5:00 am when mike@cannstudios.com is back."
+- **Claude to Claude.** A move between two Claude logins copies the
+  session's transcript from the old login's `projects/` folder to the new
+  one's and resumes it there, so nothing is lost (a real e2e checks the
+  CLI resumes another login's transcript). If the copy or the resume
+  fails, the new session starts with a short handoff note instead.
+- **Pinning.** A thread with no `poolId` is pinned to its `accountId` and
+  never moves. Threads from before pools stay pinned. A pool's logins
+  include noted ones only when it lists them, so a "Convex work only"
+  login only runs threads in a pool that names it.
+
 ## Patches
 
 A thread's folder can give it panels (shown beside the transcript) and
@@ -896,8 +981,11 @@ drive Threadbare itself: `list_threads`, `read_thread`, `list_accounts`,
 `list_schedules`, `update_schedule` and `delete_schedule` (see Schedules),
 and `list_projects`, `read_project`, `create_project`, `update_project`,
 `join_project` and `leave_project` (see Projects).
-`list_accounts` shows each account's provider, note and room left;
-`create_thread` and `move_thread` take Codex accounts. They call the same runner methods as
+`list_accounts` shows each account's provider, note and room left, then
+the pools with their logins and room, and which pool a new thread starts
+on; `create_thread` and `move_thread` take Codex accounts, and
+`create_thread` and `update_thread` take a `pool` (an id or title;
+`update_thread`'s `null` or `"pin"` pins the thread to its login). They call the same runner methods as
 the requests above, so once a restart has begun `create_thread` and
 `send_message` get its "send again in a moment" too. Messages an agent sends
 to another thread (or as a new thread's first message) start with a line
@@ -928,3 +1016,8 @@ Either side may be upgraded first, so each tolerates the other:
 - A newer app talking to an older runner gets `-32601` from `clis.*` and
   leaves the CLI part out, sees no `usage` on accounts and says the numbers
   need a newer runner, and sees no Codex accounts.
+- An app older than pools sends `accountId` with every `threads.create`,
+  so its threads are pinned as before, and it ignores `pools`, `poolId`,
+  `waitingForRoom` and `pools.updated`. A newer app talking to a runner
+  older than pools sees no `pools` in `hello` (and `-32601` from
+  `pools.*`), and shows logins as before.

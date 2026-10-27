@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import type { EffortLevel, MessageOrigin, PermissionMode, PersistedEvent, Provider, Subagent, ThreadProject, ThreadStatus, ImageRef } from './protocol.ts';
+import type { WaitingForRoom, EffortLevel, MessageOrigin, PermissionMode, PersistedEvent, Provider, Subagent, ThreadProject, ThreadStatus, ImageRef } from './protocol.ts';
 import { atomicWriteFileSync, readJsonSync } from './fsutil.ts';
 import { paths } from './config.ts';
 
@@ -12,6 +12,16 @@ export type ThreadRecord = {
   title: string;
   cwd: string;
   accountId: string;
+  // The pool that picks the login (pools.ts). Absent: pinned to accountId,
+  // never moved; every thread from before pools.
+  poolId?: string;
+  // Every login in the pool is out of room: the thread carries on by
+  // itself at `until` (an ISO time). Kept here so the wait survives a
+  // restart; start() re-arms its timer.
+  waitingForRoom?: WaitingForRoom;
+  // The id of the runner's own carry-on turn after a login ran dry, so a
+  // carry-on that runs dry straight away waits rather than move again.
+  autoCarryOn?: string;
   provider: Provider;
   model?: string;
   effort?: EffortLevel;

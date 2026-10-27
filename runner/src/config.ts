@@ -17,6 +17,12 @@ export const DEFAULT_MAX_LIVE = 6;
 // accountNotes replaces the whole map.
 export const DEFAULT_ACCOUNT_NOTES: Record<string, string> = { 'claude-2': 'Convex work only' };
 
+// Folders whose new threads start on a built-in pool, by the login that
+// pool is made from (pools.ts, defaultPools): claude-2's pool, Convex,
+// takes anything under ~/dev/convex. In the code for the same reason as
+// the notes; a runner.json `pools` list carries its own folders.
+export const DEFAULT_POOL_FOLDERS: Record<string, string[]> = { 'claude-2': ['~/dev/convex'] };
+
 export type CliUpdatesConfig = {
   claude: CliPolicy;
   codex: CliPolicy;
@@ -47,6 +53,7 @@ export type Config = {
   defaults: {
     cwd: string;
     accountId?: string;
+    poolId?: string;
     model?: string;
     models?: Partial<Record<Provider, string>>;
     efforts?: Partial<Record<Provider, EffortLevel>>;
@@ -64,6 +71,9 @@ export type Config = {
   tokenStatsLimitsFile: string; // Token Stats' limits.json, read only
   cliUpdates: CliUpdatesConfig;
   accountNotes: Record<string, string>;
+  // runner.json's pools as written (pools.ts readPools checks each);
+  // absent means the built-in ones. pools.save replaces it.
+  pools?: unknown[];
   // A runner on a release builds and restarts onto main by itself
   // (src/update.ts). Off with followMain: false in runner.json or
   // THREADBARE_FOLLOW_MAIN=0.
@@ -82,6 +92,9 @@ export type RunnerJson = {
     // than on the account with the most room. A dev runner sets it so its
     // threads stay on claude-3.
     keepAccount?: boolean;
+    // The pool a new thread with nothing named starts on: the last one
+    // named in threads.create (Runner.rememberPool).
+    poolId?: string;
     model?: string;
     models?: Partial<Record<Provider, string>>;
     efforts?: Partial<Record<Provider, EffortLevel>>;
@@ -93,6 +106,7 @@ export type RunnerJson = {
   codexArgs?: string[];
   cliUpdates?: Partial<CliUpdatesConfig>;
   accountNotes?: Record<string, string>;
+  pools?: unknown[];
   followMain?: boolean;
   models?: { dailyBudgetUsd?: number; privateFolders?: string[] };
 };
@@ -153,6 +167,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     defaults: {
       cwd: expandHome(json.defaults?.cwd || DEFAULT_CWD),
       accountId: json.defaults?.accountId,
+      ...(nonEmpty(json.defaults?.poolId) ? { poolId: nonEmpty(json.defaults?.poolId) } : {}),
       model: nonEmpty(json.defaults?.model),
       ...(models ? { models } : {}),
       ...(efforts ? { efforts } : {}),
@@ -172,6 +187,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     ),
     cliUpdates: cliUpdatesConfig(json.cliUpdates, env.THREADBARE_CLI_UPDATES),
     accountNotes: stringMap(json.accountNotes) ?? { ...DEFAULT_ACCOUNT_NOTES },
+    ...(Array.isArray(json.pools) && json.pools.length ? { pools: json.pools } : {}),
   };
 }
 

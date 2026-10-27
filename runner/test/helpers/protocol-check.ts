@@ -168,6 +168,12 @@ export function checkSummary(t: Obj): string[] {
   if (t.preview.length > 140 || t.preview.includes('\n')) problems.push('preview too long or multi-line');
   if (t.title.length > 200) problems.push('title');
   for (const k of ['model', 'modelInUse', 'snoozedUntil', 'archivedAt', 'nativeSessionId']) if (t[k] !== undefined && !isStr(t[k])) problems.push(k);
+  if (t.poolId !== undefined && (!isStr(t.poolId) || !t.poolId)) problems.push('poolId');
+  if (t.waitingForRoom !== undefined) {
+    const w = t.waitingForRoom;
+    const ok = w && typeof w === 'object' && isIso(w.until) && (w.accountId === undefined || isStr(w.accountId)) && Object.keys(w).every((k) => ['until', 'accountId'].includes(k));
+    if (!ok) problems.push('waitingForRoom');
+  }
   if (t.snoozedUntilRestart !== undefined && (t.snoozedUntilRestart !== true || !isStr(t.snoozedUntil))) problems.push('snoozedUntilRestart');
   for (const k of ['effort', 'effortInUse']) if (t[k] !== undefined && !EFFORTS.includes(t[k])) problems.push(k);
   for (const k of ['contextTokens', 'contextWindow', 'costUsd']) if (t[k] !== undefined && !isNum(t[k])) problems.push(k);
@@ -243,6 +249,7 @@ export function checkSummary(t: Obj): string[] {
   const allowed = new Set([
     'id', 'title', 'cwd', 'accountId', 'provider', 'model', 'permissionMode', 'status', 'live', 'needsYou', 'createdAt', 'updatedAt',
     'lastActivityAt', 'snoozedUntil', 'snoozedUntilRestart', 'archivedAt', 'preview', 'lastSeq', 'lastSeenSeq', 'nativeSessionId', 'contextTokens', 'costUsd',
+    'poolId', 'waitingForRoom',
     'effort', 'modelInUse', 'effortInUse', 'contextWindow', 'panels', 'actions', 'hooks', 'patches', 'background', 'subagents', 'projects',
   ]);
   for (const k of Object.keys(t)) if (!allowed.has(k)) problems.push(`unexpected field ${k}`);

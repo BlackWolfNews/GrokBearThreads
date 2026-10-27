@@ -96,11 +96,30 @@ export type CliStatus = {
   };
 };
 
+// A named, ordered list of logins of any provider (docs/protocol.md,
+// "Pools"). A thread in a pool runs each turn on whichever of its logins
+// has room; the order of accountIds only decides which provider comes
+// first.
+export type Pool = {
+  id: string; // "claude", "codex", "convex", or a slug Mike made
+  title: string; // "Claude"
+  accountIds: string[]; // in order; may mix providers
+  folders?: string[]; // ~ allowed; a new thread under one starts here
+  builtIn?: boolean; // from the code default, not runner.json
+};
+
+// Set on a pool thread while every login in its pool is out of room; it
+// carries on by itself at `until`. accountId is the login it's waiting on.
+export type WaitingForRoom = { until: string; accountId?: string };
+
 // hello's `defaults`. `model` is Claude's, kept for apps that predate
 // `models`.
 export type RunnerDefaults = {
   cwd: string;
   accountId: string;
+  // The pool a new thread with nothing named starts on (folder-blind: the
+  // app applies a pool's folders itself).
+  poolId?: string;
   model?: string;
   models?: Partial<Record<Provider, string>>;
   efforts?: Partial<Record<Provider, EffortLevel>>;
@@ -113,6 +132,8 @@ export type ThreadSummary = {
   title: string;
   cwd: string;
   accountId: string;
+  poolId?: string; // absent: pinned to accountId
+  waitingForRoom?: WaitingForRoom;
   provider: Provider;
   model?: string;
   effort?: EffortLevel;

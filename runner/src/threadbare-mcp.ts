@@ -10,6 +10,7 @@ import { z } from 'zod';
 import type { Runner } from './runner.ts';
 import type { Account, EffortLevel, PersistedEvent, Schedule, ThreadSummary } from './protocol.ts';
 import { usageLine } from './usage.ts';
+import { findPool, poolLine } from './pools.ts';
 import { EFFORT_LEVELS } from './protocol.ts';
 import type { Scheduler } from './schedules.ts';
 import type { Projects } from './projects.ts';
@@ -111,6 +112,14 @@ export function buildThreadbareTools(control: ThreadControl, selfId: string, now
     throw new Error(`No account ${q}. Accounts: ${accounts.map(named).join(', ')}`);
   };
 
+  // A pool by id or title (docs/protocol.md, "Pools").
+  const pool = (q: string): string => {
+    const pools = control.hello().pools ?? [];
+    const hit = findPool(pools, q);
+    if (!hit) throw new Error(`No pool ${q}. Pools: ${pools.map((p) => `${p.id} (${p.title})`).join(', ') || 'none'}`);
+    return hit.id;
+  };
+
   const folder = async (f: string): Promise<string> => {
     const base = (await control.get(selfId)).cwd;
     return path.resolve(base, expandHome(f.trim()));
@@ -129,6 +138,8 @@ export function buildThreadbareTools(control: ThreadControl, selfId: string, now
       `status: ${t.status}${t.needsYou ? ' (needs Mike)' : ''}`,
       `folder: ${t.cwd}`,
       `account: ${t.accountId} (${providerName(t)})`,
+      `pool: ${t.poolId ?? 'none (pinned to its account)'}`,
+      t.waitingForRoom ? `waiting for room until: ${t.waitingForRoom.until}` : '',
       `model: ${t.model ?? 'default'}${t.modelInUse ? ` (running as ${t.modelInUse})` : ''}`,
       `effort: ${t.effort ?? 'default'}${t.effortInUse ? ` (${t.effortInUse} last turn)` : ''}`,
       `permissions: ${t.permissionMode === 'full' ? 'full access' : 'ask before edits'}`,
@@ -432,7 +443,7 @@ export function buildThreadbareTools(control: ThreadControl, selfId: string, now
     ),
     tool(
       'list_accounts',
-      'Lists the Claude and Codex logins Threadbare can run threads on: provider, how much room each has left, its models, and the defaults for new threads (a new thread with no account starts on the one with the most room).',
+      'Lists the Claude and Codex logins Threadbare can run threads on (provider, how much room each has left, its models), then the pools: named lists of logins a thread can run on, where the runner picks the login with room for each turn and moves the thread when one runs dry. Says which pool a new thread with no account or pool starts on.',
       {},
       handle(async () => {
         const h = control.hello();
@@ -442,7 +453,12 @@ export function buildThreadbareTools(control: ThreadControl, selfId: string, now
           const models = a.models?.length ? `\n    models: ${a.models.map((m) => (m.model === a.defaultModel || m.id === a.defaultModel ? `${m.id} (default)` : m.id)).join(', ')}` : '';
           return head + models;
         });
-        return `${rows.join('\n')}\n\nDefault folder: ${h.defaults.cwd}`;
+        const pools = (h.pools ?? []).map((p) => {
+          const flags = [p.folders?.length ? `folders: ${p.folders.join(', ')}` : '', p.id === h.defaults.poolId ? 'new threads start here' : ''].filter(Boolean);
+          return `${p.id}  ${p.title}: ${poolLine(p, h.accounts, now())}${flags.length ? `  [${flags.join('; ')}]` : ''}`;
+        });
+        const poolText = pools.length ? `\n\nPools (a new thread in a pool's folder starts on that pool):\n${pools.join('\n')}` : '';
+        return `${rows.join('\n')}${poolText}\n\nDefault folder: ${h.defaults.cwd}`;
       }),
       { annotations: { readOnlyHint: true } },
     ),
@@ -453,22 +469,25 @@ export function buildThreadbareTools(control: ThreadControl, selfId: string, now
         text: z.string().min(1).describe('The first message: a complete brief, since the new thread knows nothing else.'),
         title: z.string().optional().describe('Title for the sidebar. Default: the first line of text.'),
         folder: z.string().optional().describe("Working folder. Default: this thread's folder. Relative paths are from this thread's folder."),
-        account: z.string().optional().describe('Account id or email, Claude or Codex (see list_accounts). Default: the one with the most room, on the provider last used.'),
-        model: z.string().optional().describe("Model id, one of the account's (list_accounts shows them; Codex ones look like gpt-6-luna). Default: the runner's default model for the provider if it has one (a dev runner's is the cheapest), else the account's."),
+        pool: z.string().optional().describe("Pool id or title (see list_accounts). The runner picks the pool's login with room for each turn and moves the thread when one runs dry. Default: the folder's pool, else the one with the model's provider, else the last one picked."),
+        account: z.string().optional().describe('Account id or email, Claude or Codex (see list_accounts). Pins the thread to that login, which it then never leaves; leave it out to let a pool pick.'),
+        model: z.string().optional().describe("Model id, one of the account's (list_accounts shows them; Codex ones look like gpt-6-luna). With no account or pool, its provider picks the pool. Default: the runner's default model for the provider if it has one (a dev runner's is the cheapest), else the account's."),
         effort: effortEnum.optional().describe("Reasoning effort (ultra is Codex only). Default: the model's own level."),
         permissionMode: z.enum(['full', 'ask']).optional().describe('"full" (default) or "ask" before edits and commands.'),
       },
-      handle(async ({ text, title, folder: f, account: acc, model, effort, permissionMode }) => {
+      handle(async ({ text, title, folder: f, pool: p, account: acc, model, effort, permissionMode }) => {
         const r = await control.create({
           text: (await from()) + text,
           title: title?.trim() || text.split('\n').map((l) => l.trim()).find(Boolean)?.slice(0, 200),
           cwd: await folder(f ?? '.'),
           accountId: await account(acc),
+          ...(p !== undefined && !acc ? { poolId: pool(p) } : {}),
           model,
           effort,
           permissionMode,
         });
-        return `Started thread ${r.thread.id} "${r.thread.title}" in ${r.thread.cwd} on ${r.thread.accountId}.`;
+        const where = r.thread.poolId ? ` It's in the ${r.thread.poolId} pool, so it moves to another login if this one runs dry.` : '';
+        return `Started thread ${r.thread.id} "${r.thread.title}" in ${r.thread.cwd} on ${r.thread.accountId}${r.thread.model ? ` (${r.thread.model})` : ''}.${where}`;
       }),
     ),
     tool(
@@ -493,11 +512,12 @@ export function buildThreadbareTools(control: ThreadControl, selfId: string, now
         title: z.string().optional(),
         model: z.string().nullable().optional().describe('Model id, or null for the account default.'),
         effort: effortEnum.nullable().optional().describe("Reasoning effort, or null for the model's own level (ultra is Codex only)."),
+        pool: z.string().nullable().optional().describe('Pool id or title to put the thread in (it moves onto one of its logins from the next turn if its current one isn\'t in it), or null or "pin" to pin it to its current login.'),
         permissionMode: z.enum(['full', 'ask']).optional(),
         snooze: z.string().optional().describe('Snooze until: 30m, 2h, 1d, tomorrow, an ISO time, "restart" (until the runner next starts), or "off" to wake it.'),
         archived: z.boolean().optional().describe('true to archive, false to bring back to the inbox.'),
       },
-      handle(async ({ threadId, id: alias, title, model, effort, permissionMode, snooze, archived }) => {
+      handle(async ({ threadId, id: alias, title, model, effort, pool: p, permissionMode, snooze, archived }) => {
         const id = await resolve(threadId ?? alias);
         const stops = (snooze !== undefined && snooze.trim().toLowerCase() !== 'off') || archived === true;
         if (id === selfId && stops) throw new Error("Can't snooze or archive this thread from inside its own turn. Ask Mike to, or do it when the work is done.");
@@ -505,6 +525,7 @@ export function buildThreadbareTools(control: ThreadControl, selfId: string, now
         if (title !== undefined) upd.title = title;
         if (model !== undefined) upd.model = model;
         if (effort !== undefined) upd.effort = effort;
+        if (p !== undefined) upd.poolId = p === null || p.trim().toLowerCase() === 'pin' ? null : pool(p);
         if (permissionMode !== undefined) upd.permissionMode = permissionMode;
         if (snooze !== undefined) {
           const word = snooze.trim().toLowerCase();

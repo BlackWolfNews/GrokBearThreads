@@ -22,6 +22,7 @@ import type {
   ModelChoice,
   PermissionMode,
   PersistedEvent,
+  Pool,
   Provider,
   Question,
   RunnerDefaults,
@@ -53,8 +54,9 @@ import type { Clock, TimerHandle } from './clock.ts';
 import type { Logger } from './log.ts';
 import { threadEnv } from './restart.ts';
 import { stripModelSuffix, type AccountRegistry, type LearnedAccountInfo } from './accounts.ts';
-import { pickAccount as pickByRoom, type UsageReading } from './usage.ts';
-import { RUNNER_VERSION, expandHome, paths, readRunnerJson, writeRunnerJson, type Config } from './config.ts';
+import { pickAccount as pickByRoom, resetTime, type UsageReading } from './usage.ts';
+import { DEFAULT_POOL_FOLDERS, RUNNER_VERSION, expandHome, paths, readRunnerJson, writeRunnerJson, type Config } from './config.ts';
+import { WAIT_SLACK_MS, blockedUntil, limitWhy, loginOk, nextLogin, pickInPool, poolAccounts, poolForFolder, poolProviders, readPools, roomWait, validatePools } from './pools.ts';
 import { copyImageInto, imageRefFor } from './media.ts';
 import { isDirectory } from './fsutil.ts';
 import { copySessionTranscript, subagentTranscriptPath } from './transcripts.ts';
@@ -81,6 +83,7 @@ export type Notification =
   | { method: 'thread.event'; params: { threadId: string; event: AnyEvent } }
   | { method: 'thread.deleted'; params: { threadId: string } }
   | { method: 'accounts.updated'; params: { accounts: Account[] } }
+  | { method: 'pools.updated'; params: { pools: Pool[] } }
   | { method: 'runner.notice'; params: { level: 'info' | 'warning' | 'error'; message: string } }
   | { method: 'schedules.updated'; params: { schedules: Schedule[] } }
   | { method: 'clis.updated'; params: { clis: CliStatus[] } }
@@ -368,6 +371,14 @@ export class Runner {
   // The version E last asked sessions to move to, per provider.
   private wantedVersion: Partial<Record<Provider, string>> = {};
   private unsubs: (() => void)[] = [];
+  // Pools (docs/protocol.md, "Pools"): the timer for threads waiting for
+  // room, the list clients were last sent, and logins a turn found at
+  // their limit, blocked here until the time given even when the usage
+  // readings haven't caught up.
+  private roomTimer?: TimerHandle;
+  private armingRoom = false;
+  private poolsShown?: string;
+  private ranDry = new Map<string, number>();
 
   constructor(deps: RunnerDeps) {
     this.cfg = deps.config;
@@ -421,8 +432,11 @@ export class Runner {
     for (const st of this.threads.values()) if (st.rec.snoozedUntilRestart) this.wake(st);
     this.flush();
     this.armSnoozeTimer();
+    // Waits for room are in thread.json, so they outlive a restart.
+    this.armRoomTimer();
     this.log.info('runner loaded threads', { count: this.threads.size });
     this.accountsShown = accountsKey(this.safeAccounts());
+    this.poolsShown = JSON.stringify(this.pools());
     void this.probeModels();
     // Usage readings and a rescan that finds another list both reach
     // clients through the same throttle as what the probes learn.
@@ -504,6 +518,13 @@ export class Runner {
 
   private sendAccounts(): void {
     const accounts = this.safeAccounts();
+    // The built-in pools follow the login list.
+    const pools = this.pools(accounts);
+    const poolsKey = JSON.stringify(pools);
+    if (poolsKey !== this.poolsShown) {
+      this.poolsShown = poolsKey;
+      this.notify({ method: 'pools.updated', params: { pools } });
+    }
     const key = accountsKey(accounts);
     // A change that went back to what clients already have isn't news.
     if (key === this.accountsShown) return;
@@ -633,6 +654,7 @@ export class Runner {
   async shutdown(): Promise<void> {
     this.stopping = true;
     this.snoozeTimer?.cancel();
+    this.roomTimer?.cancel();
     this.rescanTimer?.cancel();
     this.accountsTimer?.cancel();
     for (const off of this.unsubs.splice(0)) off();
@@ -808,6 +830,7 @@ export class Runner {
     }
     this.markDirty(st);
     this.armSnoozeTimer();
+    this.armRoomTimer();
     this.log.info('adopted a thread', { threadId, crashed: Boolean(opts.crashed), queued: rec.queue.length });
     return this.summary(st);
   }
@@ -1011,15 +1034,18 @@ export class Runner {
 
   // --------------------------------------------------------------- queries
 
-  hello(): { runnerVersion: string; protocol: number; accounts: Account[]; defaults: RunnerDefaults; clis?: CliStatus[] } {
+  hello(): { runnerVersion: string; protocol: number; accounts: Account[]; pools: Pool[]; defaults: RunnerDefaults; clis?: CliStatus[] } {
     const accounts = this.accounts.list();
+    const pools = this.pools(accounts);
     const defaults: RunnerDefaults = { cwd: this.cfg.defaults.cwd, accountId: this.defaultAccountId(accounts) };
+    const poolId = this.defaultPoolId(pools, this.usable(accounts), defaults.accountId);
+    if (poolId) defaults.poolId = poolId;
     // `model` is Claude's, for apps that predate `models`.
     const claudeModel = this.defaultModelFor('claude');
     if (claudeModel) defaults.model = claudeModel;
     if (this.cfg.defaults.models) defaults.models = { ...this.cfg.defaults.models };
     if (this.cfg.defaults.efforts) defaults.efforts = { ...this.cfg.defaults.efforts };
-    const out: ReturnType<Runner['hello']> = { runnerVersion: RUNNER_VERSION, protocol: PROTOCOL_VERSION, accounts, defaults };
+    const out: ReturnType<Runner['hello']> = { runnerVersion: RUNNER_VERSION, protocol: PROTOCOL_VERSION, accounts, pools, defaults };
     const clis = this.cliList();
     if (clis) out.clis = clis;
     return out;
@@ -1056,6 +1082,115 @@ export class Runner {
 
   private defaultEffortFor(provider: Provider): EffortLevel | undefined {
     return this.cfg.defaults.efforts?.[provider];
+  }
+
+  // ------------------------------------------------------------------ pools
+  // docs/protocol.md, "Pools". The rules are in pools.ts; this is where
+  // they meet threads.
+
+  // The pools in force: runner.json's, else the built-in ones from the
+  // logins found.
+  private pools(all = this.safeAccounts()): Pool[] {
+    return readPools({ pools: this.cfg.pools, accountNotes: this.cfg.accountNotes }, all, DEFAULT_POOL_FOLDERS);
+  }
+
+  listPools(): { pools: Pool[] } {
+    return { pools: this.pools() };
+  }
+
+  // pools.save: replaces the whole list in runner.json (an empty one goes
+  // back to the built-in pools) and tells every client.
+  savePools(raw: unknown): { pools: Pool[] } {
+    const checked = validatePools(raw, this.safeAccounts());
+    if ('error' in checked) throw new RpcError(ErrorCode.badParams, checked.error);
+    const json = readRunnerJson(this.cfg.home);
+    if (checked.pools.length) json.pools = checked.pools;
+    else delete json.pools;
+    writeRunnerJson(this.cfg.home, json);
+    this.cfg.pools = checked.pools.length ? checked.pools : undefined;
+    const pools = this.pools();
+    this.poolsShown = JSON.stringify(pools);
+    this.notify({ method: 'pools.updated', params: { pools } });
+    return { pools };
+  }
+
+  // Logins this runner can start a CLI for, with any it found at its limit
+  // marked blocked until then (ranDry).
+  private usable(all: Account[]): Account[] {
+    const now = this.clock.now();
+    return all
+      .filter((a) => this.adapters[a.provider])
+      .map((a) => {
+        const until = this.ranDry.get(a.id);
+        if (until === undefined || until <= now || a.usage?.blocked) return a;
+        return { ...a, usage: { ...(a.usage ?? { windows: [], readAt: this.isoNow(), source: 'live' as const }), blocked: true } };
+      });
+  }
+
+  private usableAccounts(): Account[] {
+    return this.usable(this.safeAccounts());
+  }
+
+  private poolById(id: string | undefined): Pool | undefined {
+    return id === undefined ? undefined : this.pools().find((p) => p.id === id);
+  }
+
+  // The pool a new thread with nothing named starts on: the last one named
+  // (runner.json's defaults.poolId), else the first pool holding the
+  // default account, else the first pool. Only pools with a login this
+  // runner can use.
+  private defaultPoolId(pools: Pool[], usable: Account[], defaultAccount?: string): string | undefined {
+    const live = pools.filter((p) => poolAccounts(p, usable).length);
+    const saved = readRunnerJson(this.cfg.home).defaults?.poolId ?? this.cfg.defaults.poolId;
+    if (saved && live.some((p) => p.id === saved)) return saved;
+    const account = defaultAccount ?? this.defaultAccountId();
+    return (live.find((p) => p.accountIds.includes(account)) ?? live[0])?.id;
+  }
+
+  // The provider a model id belongs to, when that can be told.
+  private modelProvider(model: string): Provider | undefined {
+    if (isClaudeModel(model)) return 'claude';
+    const accounts = this.safeAccounts();
+    if (model.startsWith('gpt-') || accounts.some((a) => a.provider === 'codex' && modelRow(a, model))) return 'codex';
+    if (accounts.some((a) => a.provider === 'claude' && modelRow(a, model))) return 'claude';
+    return undefined;
+  }
+
+  // The pool and login for a new thread with no accountId: the pool named,
+  // else the folder's, else the default; and when a model is named whose
+  // provider has no login there, the first pool that has one. The login is
+  // the pool's one of the thread's provider (its model's, else the pool's
+  // first) with the most room, else one of another provider with room,
+  // else the first of its provider. undefined when no pool has a login
+  // this runner can use.
+  private pickForNew(p: { poolId?: string; cwd: string; model?: string }): { poolId: string; accountId: string } | undefined {
+    const accounts = this.usableAccounts();
+    const pools = this.pools().filter((x) => poolAccounts(x, accounts).length);
+    let pool: Pool | undefined;
+    if (p.poolId !== undefined) {
+      pool = pools.find((x) => x.id === p.poolId);
+      if (!pool) throw new RpcError(ErrorCode.badParams, `No pool called ${p.poolId}. Pools: ${pools.map((x) => x.id).join(', ') || 'none'}`);
+    }
+    const wanted = p.model ? this.modelProvider(p.model) : undefined;
+    if (!pool) {
+      pool = poolForFolder(pools, p.cwd) ?? pools.find((x) => x.id === this.defaultPoolId(pools, accounts)) ?? pools[0];
+      if (!pool) return undefined;
+      // Naming a model picks its provider: create_thread with an Opus
+      // model and no account must not land on Codex and drop the model.
+      if (wanted && !poolProviders(pool, accounts).includes(wanted)) pool = pools.find((x) => poolProviders(x, accounts).includes(wanted)) ?? pool;
+    }
+    const providers = poolProviders(pool, accounts);
+    const provider = wanted && providers.includes(wanted) ? wanted : providers[0];
+    // The last login used wins a tie, or when nothing says another has
+    // more room, as pickAccount has it.
+    const json = readRunnerJson(this.cfg.home).defaults;
+    let accountId = pickInPool(pool, accounts, { provider, prefer: json?.accountId ?? this.cfg.defaults.accountId });
+    if (!accountId) {
+      const next = nextLogin(pool, accounts, { accountId: '', provider }, this.clock.now());
+      if (!('waitUntil' in next)) accountId = next.accountId;
+    }
+    accountId ??= poolAccounts(pool, accounts).find((a) => a.provider === provider)?.id ?? poolAccounts(pool, accounts)[0].id;
+    return { poolId: pool.id, accountId };
   }
 
   list(include: ('inbox' | 'snoozed' | 'archived')[] = ['inbox']): ThreadSummary[] {
@@ -1155,6 +1290,7 @@ export class Runner {
     images?: ImageRef[];
     cwd?: string;
     accountId?: string;
+    poolId?: string;
     model?: string;
     effort?: EffortLevel;
     permissionMode?: PermissionMode;
@@ -1165,12 +1301,21 @@ export class Runner {
     this.checkAccepting();
     // New threads belong on the new release.
     if (this.draining) throw new RpcError(ErrorCode.busy, 'This runner is handing over to a new one; start the thread there.');
-    const accountId = params.accountId ?? this.defaultAccountId();
+    // A blank folder means the default, not the runner's own folder.
+    const cwd = path.resolve(expandHome(params.cwd?.trim() ? params.cwd.trim() : this.cfg.defaults.cwd));
+    // An accountId pins the thread to that login. Otherwise a pool picks
+    // the login (docs/protocol.md, "Pools"), except on a dev runner whose
+    // keepAccount pins new threads to its own account.
+    let poolId: string | undefined;
+    let accountId = params.accountId;
+    if (accountId === undefined && (params.poolId !== undefined || !readRunnerJson(this.cfg.home).defaults?.keepAccount)) {
+      const picked = this.pickForNew({ poolId: params.poolId, cwd, model: params.model });
+      if (picked) ({ poolId, accountId } = picked);
+    }
+    accountId ??= this.defaultAccountId();
     const account = this.accounts.get(accountId);
     if (!account) throw new RpcError(ErrorCode.accountNotFound, `No account called ${accountId}`);
     this.checkProvider(account);
-    // A blank folder means the default, not the runner's own folder.
-    const cwd = path.resolve(expandHome(params.cwd?.trim() ? params.cwd.trim() : this.cfg.defaults.cwd));
     if (!isDirectory(cwd)) throw new RpcError(ErrorCode.badParams, `Folder not found: ${cwd}`);
     if (!params.text && !params.images?.length) throw new RpcError(ErrorCode.badParams, 'text or images required');
     checkImages(params.images ?? []);
@@ -1182,6 +1327,7 @@ export class Runner {
       titleSet: Boolean(params.title?.trim()),
       cwd,
       accountId,
+      ...(poolId ? { poolId } : {}),
       provider: account.provider,
       permissionMode: params.permissionMode ?? 'full',
       status: 'idle',
@@ -1203,7 +1349,8 @@ export class Runner {
     this.store.create(rec);
     const st: ThreadState = { rec, rt: newRuntime(this.clock.now()) };
     this.threads.set(id, st);
-    this.rememberAccount(accountId);
+    if (!poolId) this.rememberAccount(accountId);
+    else if (params.poolId !== undefined) this.rememberPool(poolId);
     const turnId = this.sendTo(st, params.text ?? '', params.images ?? [], { origin: params.origin, scheduleId: params.scheduleId });
     // Under the first turn, so they read as part of starting it.
     for (const text of checked.notes) this.emit(st, { type: 'system.note', text }, st.rt.turn?.turnId ?? turnId);
@@ -1440,6 +1587,13 @@ export class Runner {
     rt.activeAt = this.clock.now();
     rec.turnId = msg.turnId;
     rec.lastActivityAt = this.isoNow();
+    // Any turn ends a wait for room: a message from Mike goes through the
+    // same check as the runner's own carry-on would.
+    if (rec.waitingForRoom) {
+      delete rec.waitingForRoom;
+      this.armRoomTimer();
+    }
+    this.beforeTurn(st);
     rec.status = rt.session && !rt.closing ? 'running' : 'starting';
     this.markDirty(st);
     this.deliver(st, msg).catch((e: unknown) => {
@@ -1462,8 +1616,16 @@ export class Runner {
       if (!account) throw new Error(`Account ${rec.accountId} isn't available on this Mac.`);
       if (!isDirectory(rec.cwd)) throw new Error(`Folder not found: ${rec.cwd}`);
       if (rec.handoff && this.carryTranscript(st, account)) {
-        // Same login, new folder: the whole conversation came along.
-        this.emit(st, { type: 'system.note', text: `Moved to ${rec.cwd}. The session carries on there.` }, msg.turnId);
+        // A new folder, or another Claude login: the whole conversation
+        // came along.
+        const from = rec.handoff;
+        const text =
+          from.fromAccountId === rec.accountId
+            ? `Moved to ${rec.cwd}. The session carries on there.`
+            : from.fromCwd === rec.cwd
+              ? `Resumed the session on ${account.title}, with the whole conversation.`
+              : `Moved to ${rec.cwd} on ${account.title}. The session carries on there, with the whole conversation.`;
+        this.emit(st, { type: 'system.note', text }, msg.turnId);
         rt.carried = rec.handoff;
         delete rec.handoff;
       } else if (rec.handoff) {
@@ -1496,20 +1658,26 @@ export class Runner {
   // the longest. CLIs with a turn, an approval, queued messages or
   // background work are never picked; if every other one is busy the cap
   // is passed rather than stopping work.
-  // A folder move on the same login copies the session's transcript to the
-  // new folder so it resumes with everything, rather than a short note.
-  // Anything else (a new login, a rebuilt record, a transcript that can't
-  // be found) gets the handoff note.
+  // A folder move, or a move from one Claude login to another (a pool
+  // move or a pick by hand), copies the session's transcript to the new
+  // folder and config dir so it resumes with everything, rather than a
+  // short note. Anything else (another provider, a rebuilt record, a
+  // transcript that can't be found) gets the handoff note, as does a
+  // resume that then fails (onExited).
   private carryTranscript(st: ThreadState, account: Account): boolean {
     const { rec } = st;
     const from = rec.handoff;
     // Claude only: it copies Claude's own transcript files. Codex moves
     // folders in the same session (movesFolders) and never gets here.
     if (rec.provider !== 'claude') return false;
-    if (!from || from.rebuilt || from.fromAccountId !== rec.accountId || from.fromCwd === rec.cwd) return false;
+    if (!from || from.rebuilt) return false;
+    const sameLogin = from.fromAccountId === rec.accountId;
+    if (sameLogin && from.fromCwd === rec.cwd) return false;
+    const fromAccount = sameLogin ? account : this.accounts.get(from.fromAccountId);
+    if (fromAccount?.provider !== 'claude') return false;
     if (!rec.sessionUsed || !rec.nativeSessionId) return false;
-    const ok = this.copyTranscript(account.configDir, from.fromCwd, rec.cwd, rec.nativeSessionId);
-    if (!ok) this.log.info('could not carry the transcript to the new folder; using a handoff note', { threadId: rec.id });
+    const ok = this.copyTranscript(fromAccount.configDir, account.configDir, from.fromCwd, rec.cwd, rec.nativeSessionId);
+    if (!ok) this.log.info('could not carry the transcript across; using a handoff note', { threadId: rec.id, from: from.fromAccountId, to: rec.accountId });
     return ok;
   }
 
@@ -1799,10 +1967,12 @@ export class Runner {
     // offer the fix without reading the message.
     if (outcome === 'failed' && r.errorKind) body.errorKind = r.errorKind;
     const ev = this.emit(st, body, turn.turnId);
-    this.endTurn(st, ev.seq, outcome === 'failed' ? 'error' : 'idle', outcome);
+    // A pool thread whose login ran dry moves and carries on (afterTurn).
+    const limitHit = outcome === 'failed' && r.errorKind === 'usageLimit' ? turn.turnId : undefined;
+    this.endTurn(st, ev.seq, outcome === 'failed' ? 'error' : 'idle', outcome, limitHit);
   }
 
-  private endTurn(st: ThreadState, completedSeq: number, status: ThreadStatus, outcome?: TurnOutcome): void {
+  private endTurn(st: ThreadState, completedSeq: number, status: ThreadStatus, outcome?: TurnOutcome, limitHit?: string): void {
     const { rec, rt } = st;
     const finished = rt.turn;
     rt.turn?.interruptTimer?.cancel();
@@ -1824,7 +1994,7 @@ export class Runner {
     rec.status = status;
     rec.lastActivityAt = this.isoNow();
     this.markDirty(st);
-    this.afterTurn(st);
+    this.afterTurn(st, limitHit);
   }
 
   // A turn that ended without a result from the CLI (spawn failure, crash).
@@ -1847,11 +2017,204 @@ export class Runner {
     this.endTurn(st, ev.seq, interrupted ? 'idle' : 'error');
   }
 
-  private afterTurn(st: ThreadState): void {
+  private afterTurn(st: ThreadState, limitHit?: string): void {
     if (this.stopping) return;
+    if (limitHit) {
+      try {
+        this.onUsageLimit(st, limitHit);
+      } catch (e) {
+        this.log.error('could not move a thread off a login at its limit', { threadId: st.rec.id, error: String(e) });
+      }
+    }
     // A snoozed or archived thread keeps its queue until it comes back.
     if (this.bucket(st.rec) === 'inbox' && this.kickQueue(st)) return;
     this.scheduleIdle(st);
+  }
+
+  // ------------------------------------------------------- pools: moving
+
+  // Before a pool thread's turn starts: if its login isn't OK (blocked or
+  // under the minimum room) or isn't in its pool any more, it moves first
+  // (docs/protocol.md, "Pools"). With nowhere better, the turn starts
+  // where it is. A pinned thread (no poolId) never moves.
+  private beforeTurn(st: ThreadState): void {
+    const { rec } = st;
+    const pool = this.poolById(rec.poolId);
+    if (!pool) return;
+    const accounts = this.usableAccounts();
+    const current = accounts.find((a) => a.id === rec.accountId);
+    const inPool = pool.accountIds.includes(rec.accountId);
+    if (current && inPool && loginOk(current)) return;
+    const now = this.clock.now();
+    const next = nextLogin(pool, accounts, rec, now);
+    if ('waitUntil' in next) return;
+    const why = !current ? `${rec.accountId} isn't on this Mac` : inPool ? `${current.title} ${limitWhy(current, now)}` : `${current.title} isn't in ${pool.title}`;
+    this.moveLogin(st, accounts.find((a) => a.id === next.accountId)!, why);
+  }
+
+  // A pool thread's turn ended failed with errorKind usageLimit: mark the
+  // login blocked, move to the next login with room and carry on by
+  // itself, once. A carry-on that runs dry too waits instead of moving
+  // again, as does a pool with nothing left.
+  private onUsageLimit(st: ThreadState, turnId: string): void {
+    const { rec } = st;
+    const pool = this.poolById(rec.poolId);
+    if (!pool) return;
+    const now = this.clock.now();
+    const was = this.usableAccounts().find((a) => a.id === rec.accountId);
+    if (was) this.markRanDry(was);
+    if (this.bucket(rec) !== 'inbox') return;
+    // A message sent meanwhile goes next; the before-a-turn check moves it.
+    if (rec.queue.length) return;
+    const accounts = this.usableAccounts();
+    const title = was?.title ?? rec.accountId;
+    if (rec.autoCarryOn === turnId) {
+      this.startWait(st, roomWait(pool, accounts, now), `${title} hit its usage limit too, so this thread waits rather than move again.`);
+      return;
+    }
+    const next = nextLogin(pool, accounts, rec, now);
+    if ('waitUntil' in next) {
+      this.startWait(st, next, `Every login in ${pool.title} is out of room.`);
+      return;
+    }
+    this.moveLogin(st, accounts.find((a) => a.id === next.accountId)!, `${title} ${was ? limitWhy(was, now, true) : 'hit its usage limit'}`);
+    this.carryOn(st, CARRY_ON_MOVED);
+  }
+
+  // A login a turn found at its limit counts as blocked until its window
+  // resets (30 minutes when none says), here and in the UsageStore, which
+  // tells clients. The reading may already say so.
+  private markRanDry(account: Account): void {
+    const now = this.clock.now();
+    const until = blockedUntil(account, now);
+    this.ranDry.set(account.id, until);
+    if (account.usage?.blocked) return;
+    try {
+      this.usage?.record(account.id, { windows: [], blocked: true, blockedUntil: until });
+    } catch (e) {
+      this.log.warn('could not record a usage limit', { accountId: account.id, error: String(e) });
+    }
+  }
+
+  // Moves a pool thread onto another login from its next turn: a new
+  // session on it, carrying the transcript across between Claude logins
+  // (carryTranscript), else with a handoff note. Another provider takes
+  // its own default model and effort, like any provider change. The move
+  // is a note in the transcript.
+  private moveLogin(st: ThreadState, to: Account, why: string): void {
+    const { rec, rt } = st;
+    if (rec.sessionUsed || rt.session) rec.handoff ??= { fromCwd: rec.moved?.fromCwd ?? rec.cwd, fromAccountId: rec.accountId };
+    delete rec.moved;
+    rec.accountId = to.id;
+    let note = `Moved to ${to.title}: ${why}.`;
+    if (to.provider !== rec.provider) {
+      rec.provider = to.provider;
+      delete rec.allowRules;
+      delete rec.cliVersion;
+      const checked = this.checkSettings(to, this.defaultModelFor(to.provider), this.defaultEffortFor(to.provider));
+      if (checked.model) rec.model = checked.model;
+      else delete rec.model;
+      if (checked.effort) rec.effort = checked.effort;
+      else delete rec.effort;
+      const model = rec.model ? modelTitle(to, rec.model) : to.defaultModel ? modelTitle(to, to.defaultModel) : "the account's default model";
+      note += ` It's on ${providerName(to.provider)} now, with ${model}${rec.sessionUsed ? ' and a summary of the thread so far' : ''}.`;
+    }
+    if (rt.session) {
+      rt.releaseWhenIdle = true;
+      if (!rt.turn) this.releaseSession(st);
+    }
+    rec.updatedAt = this.isoNow();
+    this.emit(st, { type: 'system.note', text: note }, rt.turn?.turnId);
+    this.markDirty(st);
+  }
+
+  // Nothing in the pool has room: the thread waits, with a note, and the
+  // room timer carries it on at `until`.
+  private startWait(st: ThreadState, w: { waitUntil: string; accountId?: string }, lead: string): void {
+    const { rec } = st;
+    const now = this.clock.now();
+    rec.waitingForRoom = { until: w.waitUntil, ...(w.accountId ? { accountId: w.accountId } : {}) };
+    const who = w.accountId ? (this.accounts.get(w.accountId)?.title ?? w.accountId) : undefined;
+    // The time it's back, not the minute after it the wait adds.
+    const at = resetTime(new Date(Date.parse(w.waitUntil) - (who ? WAIT_SLACK_MS : 0)).toISOString(), now);
+    this.emit(st, { type: 'system.note', text: `${lead} Carrying on at ${at}${who ? ` when ${who} is back` : ''}.` });
+    this.markDirty(st);
+    this.armRoomTimer();
+  }
+
+  // A wait's time has come: look again. A login with room (the thread's
+  // own, if it's back) carries on by itself; with none, wait again.
+  private endWait(st: ThreadState): void {
+    const { rec, rt } = st;
+    delete rec.waitingForRoom;
+    this.markDirty(st);
+    if (rt.deleted || rt.turn || rec.queue.length || this.bucket(rec) !== 'inbox') return;
+    const pool = this.poolById(rec.poolId);
+    if (!pool) return;
+    const now = this.clock.now();
+    const accounts = this.usableAccounts();
+    const current = accounts.find((a) => a.id === rec.accountId);
+    let moved = false;
+    if (!current || !pool.accountIds.includes(current.id) || !loginOk(current)) {
+      const next = nextLogin(pool, accounts, rec, now);
+      if ('waitUntil' in next) {
+        this.startWait(st, next, `Still no room in ${pool.title}.`);
+        return;
+      }
+      const why = current ? `${current.title} ${pool.accountIds.includes(current.id) ? limitWhy(current, now) : `isn't in ${pool.title}`}` : `${rec.accountId} isn't on this Mac`;
+      this.moveLogin(st, accounts.find((a) => a.id === next.accountId)!, why);
+      moved = true;
+    }
+    this.carryOn(st, moved ? CARRY_ON_MOVED : CARRY_ON_BACK);
+  }
+
+  // The runner's own message after a move or a wait. Its turn id is kept,
+  // so if it runs dry too the thread waits rather than move again. While
+  // a restart refuses new turns it waits a minute instead, which the next
+  // runner picks up from thread.json.
+  private carryOn(st: ThreadState, text: string): void {
+    const { rec } = st;
+    if (this.refusing || this.draining) {
+      rec.waitingForRoom = { until: new Date(this.clock.now() + WAIT_SLACK_MS).toISOString() };
+      this.markDirty(st);
+      this.armRoomTimer();
+      return;
+    }
+    try {
+      rec.autoCarryOn = this.sendTo(st, text, [], { origin: 'runner', queue: true });
+      this.markDirty(st);
+    } catch (e) {
+      this.log.error('could not carry on after a move', { threadId: rec.id, error: String(e) });
+    }
+  }
+
+  // One timer for every thread waiting for room, at the earliest `until`
+  // (looked at again at least hourly, like snoozes).
+  private armRoomTimer(): void {
+    if (this.armingRoom) return;
+    this.armingRoom = true;
+    try {
+      this.roomTimer?.cancel();
+      this.roomTimer = undefined;
+      // A draining runner's threads are the new runner's to carry on.
+      if (this.stopping || this.draining) return;
+      const now = this.clock.now();
+      for (const st of [...this.threads.values()]) {
+        const w = st.rec.waitingForRoom;
+        if (!w) continue;
+        const t = Date.parse(w.until);
+        if (!(t > now)) this.endWait(st);
+      }
+      let next = Infinity;
+      for (const st of this.threads.values()) {
+        const t = st.rec.waitingForRoom ? Date.parse(st.rec.waitingForRoom.until) : NaN;
+        if (t > now) next = Math.min(next, t);
+      }
+      if (next === Infinity) return;
+      this.roomTimer = this.clock.setTimeout(() => this.armRoomTimer(), Math.min(next - now, 3_600_000));
+    } finally {
+      this.armingRoom = false;
+    }
   }
 
   private onExited(st: ThreadState, gen: number, err?: Error): void {
@@ -1971,6 +2334,10 @@ export class Runner {
     title?: string;
     cwd?: string;
     accountId?: string;
+    // null pins the thread to its current login; a pool id puts it in that
+    // pool (and onto one of its logins if its current one isn't in it).
+    // accountId pins it to that login, poolId or not.
+    poolId?: string | null;
     model?: string | null;
     effort?: EffortLevel | null;
     permissionMode?: PermissionMode;
@@ -1981,6 +2348,22 @@ export class Runner {
     const { rec, rt } = st;
     let release = false;
     let stop = false;
+    const pool = typeof params.poolId === 'string' && params.accountId === undefined ? this.poolById(params.poolId) : undefined;
+    if (typeof params.poolId === 'string' && params.accountId === undefined && !pool) {
+      throw new RpcError(ErrorCode.badParams, `No pool called ${params.poolId}. Pools: ${this.pools().map((p) => p.id).join(', ') || 'none'}`);
+    }
+    // The login to move to: the one named (which pins), or one of the new
+    // pool's when the current one isn't in it.
+    let toAccountId = params.accountId;
+    if (pool && !pool.accountIds.includes(rec.accountId)) {
+      const accounts = this.usableAccounts();
+      let id = pickInPool(pool, accounts, { provider: rec.provider });
+      if (!id) {
+        const next = nextLogin(pool, accounts, rec, this.clock.now());
+        if (!('waitUntil' in next)) id = next.accountId;
+      }
+      toAccountId = id ?? poolAccounts(pool, accounts)[0]?.id;
+    }
     if (params.title !== undefined) {
       rec.title = params.title.trim().slice(0, 200) || rec.title;
       rec.titleSet = true;
@@ -1988,14 +2371,19 @@ export class Runner {
     if (params.cwd !== undefined && !params.cwd.trim()) throw new RpcError(ErrorCode.badParams, 'cwd must not be blank');
     const newCwd = params.cwd !== undefined ? path.resolve(expandHome(params.cwd.trim())) : undefined;
     if (newCwd !== undefined && !isDirectory(newCwd)) throw new RpcError(ErrorCode.badParams, `Folder not found: ${newCwd}`);
-    const newAccount = params.accountId !== undefined ? this.accounts.get(params.accountId) : undefined;
-    if (params.accountId !== undefined && !newAccount) {
-      throw new RpcError(ErrorCode.accountNotFound, `No account called ${params.accountId}`);
+    const newAccount = toAccountId !== undefined ? this.accounts.get(toAccountId) : undefined;
+    if (toAccountId !== undefined && !newAccount) {
+      throw new RpcError(ErrorCode.accountNotFound, `No account called ${toAccountId}`);
     }
-    if (newAccount && params.accountId !== rec.accountId) this.checkProvider(newAccount);
+    if (newAccount && toAccountId !== rec.accountId) this.checkProvider(newAccount);
+    // Pinned (an account named, or poolId null), or into a pool.
+    if (params.accountId !== undefined || params.poolId === null) {
+      delete rec.poolId;
+      delete rec.waitingForRoom;
+    } else if (pool) rec.poolId = pool.id;
     const cwdChanged = newCwd !== undefined && newCwd !== rec.cwd;
     const fromCwd = rec.cwd;
-    const accountChanged = params.accountId !== undefined && params.accountId !== rec.accountId;
+    const accountChanged = toAccountId !== undefined && toAccountId !== rec.accountId;
     const providerChanged = accountChanged && newAccount!.provider !== rec.provider;
     const adapter = this.adapters[rec.provider];
     // Changes a CLI that applies settings from its next turn only (Codex)
@@ -2026,9 +2414,9 @@ export class Runner {
       if (rec.sessionUsed || rt.session) rec.handoff ??= { fromCwd: rec.moved?.fromCwd ?? rec.cwd, fromAccountId: rec.accountId };
       delete rec.moved;
       if (newCwd !== undefined) rec.cwd = newCwd;
-      if (params.accountId !== undefined) {
-        rec.accountId = params.accountId;
-        this.rememberAccount(params.accountId);
+      if (toAccountId !== undefined) {
+        rec.accountId = toAccountId;
+        if (params.accountId !== undefined) this.rememberAccount(toAccountId);
       }
       release = true;
     }
@@ -2690,6 +3078,8 @@ export class Runner {
       lastSeq: rec.lastSeq,
       lastSeenSeq: rec.lastSeenSeq,
     };
+    if (rec.poolId) s.poolId = rec.poolId;
+    if (rec.waitingForRoom) s.waitingForRoom = { ...rec.waitingForRoom };
     if (rec.model) s.model = rec.model;
     if (rec.effort) s.effort = rec.effort;
     if (rec.modelInUse) s.modelInUse = rec.modelInUse;
@@ -2927,6 +3317,20 @@ export class Runner {
     return st;
   }
 
+  // The pool named last is where a new thread with nothing named starts
+  // (runner.json's defaults.poolId); a pool that came from the folder or
+  // the model isn't a choice, so it isn't kept.
+  private rememberPool(poolId: string): void {
+    try {
+      const json = readRunnerJson(this.cfg.home);
+      if (json.defaults?.poolId === poolId) return;
+      json.defaults = { ...json.defaults, poolId };
+      writeRunnerJson(this.cfg.home, json);
+    } catch (e) {
+      this.log.warn('could not save default pool', { error: String(e) });
+    }
+  }
+
   private rememberAccount(accountId: string): void {
     try {
       const json = readRunnerJson(this.cfg.home);
@@ -3036,6 +3440,11 @@ export class Runner {
 }
 
 export type SendOptions = { origin?: MessageOrigin; scheduleId?: string; queue?: boolean };
+
+// What a pool thread is told when it carries on by itself after its login
+// ran dry (docs/protocol.md, "Pools").
+export const CARRY_ON_MOVED = 'Your last login hit its usage limit partway through that turn, so this thread has moved to another one. Carry on from where you left off.';
+export const CARRY_ON_BACK = 'Your login hit its usage limit partway through that turn and has room again now. Carry on from where you left off.';
 
 // How many sub-agents a thread keeps in its summary.
 const SUBAGENTS_KEPT = 20;
