@@ -284,7 +284,7 @@ export class Librarian {
       return;
     }
     const prompt = this.prompt(rec);
-    const res = await this.models.generate({ feature: 'projects', cwd: rec.cwd, system: SYSTEM, prompt, maxTokens: 700 });
+    const res = await this.models.generate({ feature: 'projects', cwd: rec.cwd, system: SYSTEM, prompt, maxTokens: 2000 });
     if (!res.ok) {
       if (WAIT_FOR.includes(res.reason)) {
         // Nothing wrong with the job: try again once there's a key or budget.
@@ -517,7 +517,7 @@ function offReason(reason: ModelFailure, message: string): string {
 
 export const SYSTEM = `You are the librarian in Threadbear, an app where Mike runs AI coding agents in threads. You keep his projects: groupings above folders that carry goals, state and notes from thread to thread. A project is a body of work he'll come back to (an app, a library, a video, a house job, an ongoing chore), never a single task. One project can span several repos, and a thread can be in several projects.
 
-Given the project list and one thread, decide which projects the thread belongs in. Prefer existing projects. Make a new one only when the thread is clearly real work on something that fits none of them; a one-off question, a quick chore or a test belongs in none. Never put a thread back in one it says never to.
+Given the project list and one thread, decide which projects the thread belongs in. A thread belongs in a project when it's about that project: building, fixing, planning, ideas, research or questions for it. A thread whose folder is a project's repo almost always belongs in that project. Prefer existing projects. Make a new one when the thread is about a body of work that fits none of them (its own repo is a strong sign); a one-off question, a quick chore or a throwaway test belongs in none. Never put a thread back in one it says never to.
 
 Reply with JSON only, no prose and no code fence:
 {"projects": ["<ids of existing projects the thread belongs in, or []>"],
