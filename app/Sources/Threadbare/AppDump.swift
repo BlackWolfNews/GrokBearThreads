@@ -140,6 +140,9 @@ struct AppDump: Encodable {
     var usage: Usage? = nil
     /// The project page showing in place of the thread, if one is.
     var project: ProjectInfo? = nil
+    /// The Projects page's cards, while it's showing: "Title: 1 needs
+    /// you · 2 working" (or "Title: quiet").
+    var projectCards: [String]? = nil
     /// The librarian's state in words ("Looking at ..."), when the runner
     /// has projects.
     var librarian: String? = nil
@@ -289,6 +292,9 @@ struct AppDump: Encodable {
                 return ProjectInfo(id: project.id, title: project.title, folders: project.folders, threads: threads.map(\.id),
                                    patches: PatchGroups.patches(of: project.id, in: threads).map(\.patch.id), archived: project.archived)
             },
+            projectCards: app.openProject == nil && app.showsProjectsHome ? app.projectCards.map { card in
+                card.project.title + ": " + (card.status.isQuiet ? "quiet" : card.status.parts.map(\.text).joined(separator: " · "))
+            } : nil,
             librarian: app.librarian.map(LibrarianText.state)
         )
     }

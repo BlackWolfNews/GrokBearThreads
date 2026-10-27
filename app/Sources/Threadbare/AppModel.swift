@@ -60,7 +60,10 @@ final class AppModel {
         didSet { if subagentSelection != oldValue { noteNavigation() } }
     }
     var sidebarMode: SidebarMode = .inbox {
-        didSet { if sidebarMode != oldValue { noteNavigation() } }
+        didSet {
+            if sidebarMode != oldValue { noteNavigation() }
+            if sidebarMode != .projects { showsProjectsHome = false }
+        }
     }
     /// Back and forward (⌘[ and ⌘], or the mouse's side buttons).
     var history = NavigationHistory<NavigationPlace>()
@@ -127,6 +130,12 @@ final class AppModel {
     /// Selecting a thread (or a new one) closes it.
     var openProjectId: String? {
         didSet { if openProjectId != oldValue { noteNavigation() } }
+    }
+    /// The Projects page (a card per project) in the detail area: what
+    /// clicking Projects in the activity bar opens. Picking a thread or a
+    /// project, or leaving the Projects view, closes it.
+    var showsProjectsHome = false {
+        didSet { if showsProjectsHome != oldValue { noteNavigation() } }
     }
     /// The runner's settings for the Settings window: nil until
     /// `settings.get` answers, then replaced whole by `settings.updated`.
@@ -533,6 +542,7 @@ final class AppModel {
     func select(_ threadId: String?) {
         selection = threadId
         openProjectId = nil
+        showsProjectsHome = false
         stopShowingSubagent()
         guard let threadId else { return }
         let session = session(for: threadId)
@@ -662,6 +672,7 @@ final class AppModel {
     func newThread() {
         selection = nil
         openProjectId = nil
+        showsProjectsHome = false
         stopShowingSubagent()
         sidebarMode = .inbox
         focusComposer += 1

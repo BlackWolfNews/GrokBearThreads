@@ -20,6 +20,7 @@ extension AppModel {
                 projects = []
                 librarian = nil
                 openProjectId = nil
+                showsProjectsHome = false
                 if sidebarMode == .projects || sidebarMode == .librarian { sidebarMode = .inbox }
                 return
             } catch {
@@ -47,14 +48,21 @@ extension AppModel {
 
     var projectSections: ProjectSections { ProjectSections.build(projects: projects, threads: threads.values, now: now) }
 
+    var projectCards: [ProjectCard] { ProjectCard.build(projectSections) }
+
     /// Projects a thread could be put in: the live ones it isn't in.
     func projectsToAdd(_ thread: ThreadSummary) -> [Project] {
         projects.filter { project in !project.archived && !thread.projects.contains { $0.id == project.id } }
             .sorted { $0.title.localizedStandardCompare($1.title) == .orderedAscending }
     }
 
+    /// The Projects view in the sidebar, and its page of cards in the
+    /// detail area. The thread that was showing stays selected, so ⌘1
+    /// goes back to it.
     func showProjects() {
         sidebarMode = .projects
+        openProjectId = nil
+        showsProjectsHome = true
     }
 
     func showLibrarian() {
@@ -65,6 +73,7 @@ extension AppModel {
     func openProjectPage(_ id: String) {
         guard project(id) != nil else { return }
         openProjectId = id
+        showsProjectsHome = false
     }
 
     // MARK: Changing a project

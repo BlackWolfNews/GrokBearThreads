@@ -28,16 +28,25 @@ public enum UpdatesText {
         app.isPending || app.failed || runner?.isPending == true || runner?.failed == true
     }
 
-    /// Whether it wants Mike: a failed build, or a launch.mjs only he can
-    /// install. Everything else happens by itself.
+    /// Whether it wants Mike: a launch.mjs only he can install. Everything
+    /// else happens by itself, a failed build included: it tries again once
+    /// main is fixed, and fixing main is a thread's job, not his. The icon
+    /// gets a grey dot for those instead of the accent one (27 Oct, Mike:
+    /// "the blue dot usually indicates there's something for me to action").
     public static func needsYou(app: AppSide, runner: RunnerUpdates?) -> Bool {
-        app.failed || runner?.failed == true || runner?.launcherChanged == true
+        runner?.launcherChanged == true
     }
 
-    /// The icon's tooltip.
+    /// The icon's tooltip. A failure is said, as it shares the grey dot
+    /// with an update on its way.
     public static func tooltip(app: AppSide, runner: RunnerUpdates?) -> String {
         let appPart = app.isPending || app.failed
         let runnerPart = runner?.isPending == true || runner?.failed == true
+        let appFailed = app.failed && !app.isPending
+        let runnerFailed = runner?.failed == true && runner?.isPending != true
+        if appFailed && runnerFailed { return "The app's and the runner's updates failed" }
+        if appFailed && !runnerPart { return "The app's update failed" }
+        if runnerFailed && !appPart { return "The runner's update failed" }
         switch (appPart, runnerPart) {
         case (true, true): return "Updates for the app and the runner"
         case (true, false): return "An app update"

@@ -19,11 +19,12 @@ final class UpdatesTextTests: XCTestCase {
         XCTAssertTrue(UpdatesText.shown(app: Side(), runner: RunnerUpdates(state: "failed", reason: "tests failed")))
     }
 
-    func testOnlyFailuresAndALaunchMjsNeedMike() {
+    func testOnlyALaunchMjsNeedsMike() {
         XCTAssertFalse(UpdatesText.needsYou(app: Side(staged: "def5678"), runner: RunnerUpdates(state: "building")))
         XCTAssertFalse(UpdatesText.needsYou(app: Side(), runner: RunnerUpdates(oldRunners: [.init(version: "old", threads: ["t1"])])))
-        XCTAssertTrue(UpdatesText.needsYou(app: Side(failed: true), runner: nil))
-        XCTAssertTrue(UpdatesText.needsYou(app: Side(), runner: RunnerUpdates(state: "failed")))
+        // A failed build tries again once main is fixed, so it's not his to do.
+        XCTAssertFalse(UpdatesText.needsYou(app: Side(failed: true), runner: nil))
+        XCTAssertFalse(UpdatesText.needsYou(app: Side(staged: "def5678"), runner: RunnerUpdates(state: "failed")))
         XCTAssertTrue(UpdatesText.needsYou(app: Side(), runner: RunnerUpdates(launcherChanged: true)))
     }
 
@@ -31,6 +32,10 @@ final class UpdatesTextTests: XCTestCase {
         XCTAssertEqual(UpdatesText.tooltip(app: Side(staged: "a"), runner: RunnerUpdates(state: "building")), "Updates for the app and the runner")
         XCTAssertEqual(UpdatesText.tooltip(app: Side(staged: "a"), runner: RunnerUpdates()), "An app update")
         XCTAssertEqual(UpdatesText.tooltip(app: Side(), runner: RunnerUpdates(state: "waiting")), "A runner update")
+        XCTAssertEqual(UpdatesText.tooltip(app: Side(), runner: RunnerUpdates(state: "failed")), "The runner's update failed")
+        XCTAssertEqual(UpdatesText.tooltip(app: Side(failed: true), runner: nil), "The app's update failed")
+        XCTAssertEqual(UpdatesText.tooltip(app: Side(failed: true), runner: RunnerUpdates(state: "failed")), "The app's and the runner's updates failed")
+        XCTAssertEqual(UpdatesText.tooltip(app: Side(staged: "a"), runner: RunnerUpdates(state: "failed")), "Updates for the app and the runner")
     }
 
     func testLines() {

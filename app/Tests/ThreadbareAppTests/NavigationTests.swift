@@ -36,7 +36,7 @@ final class NavigationTests: XCTestCase {
         await settle()
 
         app.goBack()
-        XCTAssertEqual(app.place, NavigationPlace(mode: .projects, threadId: "b"))
+        XCTAssertEqual(app.place, NavigationPlace(mode: .projects, threadId: "b", projectsHome: true))
         app.goBack()
         XCTAssertEqual(app.place, NavigationPlace(mode: .inbox, threadId: "b"))
         app.goBack()
@@ -50,6 +50,29 @@ final class NavigationTests: XCTestCase {
         app.goForward()
         XCTAssertEqual(app.place, NavigationPlace(mode: .projects, threadId: "b", projectId: "p_a"))
         XCTAssertFalse(app.canGoForward)
+    }
+
+    /// Projects opens the page of cards; a card, a thread, or another view
+    /// closes it, and Back comes back to it.
+    func testProjectsOpensItsPageOfCards() async {
+        let app = app()
+        app.select("a")
+        await settle()
+        app.showProjects()
+        await settle()
+        XCTAssertTrue(app.showsProjectsHome)
+        XCTAssertEqual(app.selection, "a", "the thread stays selected for when Mike goes back to it")
+        app.openProjectPage("p_a")
+        XCTAssertFalse(app.showsProjectsHome)
+        await settle()
+        app.goBack()
+        XCTAssertTrue(app.showsProjectsHome)
+        XCTAssertNil(app.openProjectId)
+        app.select("b")
+        XCTAssertFalse(app.showsProjectsHome)
+        app.showProjects()
+        app.sidebarMode = .inbox
+        XCTAssertFalse(app.showsProjectsHome, "leaving the Projects view closes it")
     }
 
     /// Picking a thread changes the selection and closes the project page
