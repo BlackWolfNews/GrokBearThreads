@@ -46,6 +46,17 @@ struct DetailView: View {
         let session = subagentRef.map { app.subagentSession(for: $0) } ?? app.selection.map { app.session(for: $0) }
         let isNew = app.selection == nil
         let paneThread = thread.flatMap { app.showsPanels(for: $0) ? $0 : nil }
+        // A project's page takes the place of the thread (and its panels)
+        // until a thread is picked again.
+        let project = app.openProject
+        Group {
+        if let project {
+            VStack(spacing: 0) {
+                ConnectionBanner()
+                ErrorBanner()
+                ProjectPage(project: project)
+            }
+        } else {
         HStack(spacing: 0) {
             VStack(spacing: 0) {
             ConnectionBanner()
@@ -102,10 +113,12 @@ struct DetailView: View {
                     .frame(width: CGFloat(PanelChoice.clampedWidth(Double(app.panelWidth), paneColumnWidth: Double(widthStep))))
             }
         }
+        }
+        }
         .onGeometryChange(for: CGFloat.self) { ($0.size.width / 20).rounded(.down) * 20 } action: { widthStep = $0 }
         // The window's title (Window menu, Mission Control); the toolbar
         // shows the header below instead.
-        .navigationTitle(thread.map { $0.title.isEmpty ? "Untitled" : $0.title } ?? "New thread")
+        .navigationTitle(project?.title ?? thread.map { $0.title.isEmpty ? "Untitled" : $0.title } ?? "New thread")
         .toolbar(removing: .title)
         .toolbar {
             // Both items are always there, the header empty and the menu
@@ -113,8 +126,14 @@ struct DetailView: View {
             // the first selection cost about 40 ms of that first open
             // (NSToolbarView layout), on top of the transcript.
             ToolbarItem(placement: .navigation) {
-                HeaderTitle(thread: thread)
-                    .frame(maxWidth: max(120, widthStep - 120), alignment: .leading)
+                Group {
+                    if let project {
+                        ProjectHeaderTitle(project: project)
+                    } else {
+                        HeaderTitle(thread: thread)
+                    }
+                }
+                .frame(maxWidth: max(120, widthStep - 120), alignment: .leading)
             }
             .sharedBackgroundVisibility(.hidden)
             // With the system title gone nothing pushes the menu to the
@@ -123,7 +142,7 @@ struct DetailView: View {
             // Shows or hides the panels pane. Always built, like the menu
             // beside it, and out of sight for a thread with no panels.
             ToolbarItem(placement: .primaryAction) {
-                let hasPanels = thread.map { !$0.panels.isEmpty || !$0.patches.isEmpty } ?? false
+                let hasPanels = project == nil && (thread.map { !$0.panels.isEmpty || !$0.patches.isEmpty } ?? false)
                 Button {
                     app.togglePanels()
                 } label: {
@@ -136,8 +155,11 @@ struct DetailView: View {
             }
             .sharedBackgroundVisibility(.hidden)
             ToolbarItem(placement: .primaryAction) {
+                let hasMenu = thread != nil || project != nil
                 Menu {
-                    if let thread {
+                    if let project {
+                        ProjectMenu(project: project)
+                    } else if let thread {
                         ThreadMenu(thread: thread)
                         Divider()
                         Button("Copy transcript as Markdown") { session?.copyTranscript() }
@@ -149,12 +171,12 @@ struct DetailView: View {
                 }
                 .menuIndicator(.hidden)
                 .help("More")
-                .disabled(thread == nil)
+                .disabled(!hasMenu)
                 // Still built (see above), but out of sight with nothing to
                 // act on: a dimmed "..." alone in an empty new thread's
                 // header looked broken.
-                .opacity(thread == nil ? 0 : 1)
-                .allowsHitTesting(thread != nil)
+                .opacity(hasMenu ? 1 : 0)
+                .allowsHitTesting(hasMenu)
             }
             // A plain glyph like Codex's and Claude's. Its glass disc drew
             // dark grey on a light window.
@@ -164,8 +186,10 @@ struct DetailView: View {
 }
 
 /// One line, T3 style: the folder's name, then the title, and "Archived"
-/// for an archived thread. The full path is in the tooltip.
+/// for an archived thread, then its projects as chips. The full path is in
+/// the tooltip.
 private struct HeaderTitle: View {
+    @Environment(AppModel.self) private var app
     let thread: ThreadSummary?
 
     var body: some View {
@@ -187,6 +211,11 @@ private struct HeaderTitle: View {
                     // button.
                     Text("·  Archived").foregroundStyle(Color(nsColor: Theme.faintText)).layoutPriority(1)
                 }
+                if app.projectsSupported, !thread.projects.isEmpty {
+                    ProjectChips(thread: thread)
+                        .padding(.leading, zoomed(4))
+                        .layoutPriority(1)
+                }
             }
             .font(.system(size: TypeScale.header))
             .lineLimit(1)
@@ -194,6 +223,97 @@ private struct HeaderTitle: View {
             .help(thread.cwd.abbreviatingHome)
         } else {
             Color.clear.frame(width: 1, height: 1)
+        }
+    }
+}
+
+/// "Projects / Threadbear" while a project's page is open.
+private struct ProjectHeaderTitle: View {
+    @Environment(AppModel.self) private var app
+    let project: Project
+
+    var body: some View {
+        HStack(spacing: zoomed(5)) {
+            Button("Projects") { app.showProjects() }
+                .buttonStyle(.plain)
+                .foregroundStyle(.secondary)
+                .help("Show the Projects view")
+                .layoutPriority(1)
+            Text("/")
+                .foregroundStyle(Color(nsColor: Theme.faintText))
+                .layoutPriority(1)
+            Text(project.title)
+                .fontWeight(.semibold)
+                .foregroundStyle(.primary)
+            if project.archived {
+                Text("·  Archived").foregroundStyle(Color(nsColor: Theme.faintText)).layoutPriority(1)
+            }
+        }
+        .font(.system(size: TypeScale.header))
+        .lineLimit(1)
+        .padding(.leading, zoomed(6))
+    }
+}
+
+/// The thread's projects, small and grey after its title. A click opens the
+/// project's page; the context menu takes the thread out, keeps it there
+/// (for one the librarian put it in), or adds it to another. A dashed edge
+/// is the librarian's guess that no one has confirmed yet.
+private struct ProjectChips: View {
+    @Environment(AppModel.self) private var app
+    let thread: ThreadSummary
+
+    var body: some View {
+        HStack(spacing: zoomed(4)) {
+            ForEach(thread.projects) { membership in
+                ProjectChip(thread: thread, membership: membership)
+            }
+        }
+    }
+}
+
+private struct ProjectChip: View {
+    @Environment(AppModel.self) private var app
+    let thread: ThreadSummary
+    let membership: ThreadProject
+    @State private var hovering = false
+
+    private var guessed: Bool { membership.by == .librarian && !membership.pinned }
+    private var title: String { app.project(membership.id)?.title ?? membership.title }
+
+    var body: some View {
+        Button { app.openProjectPage(membership.id) } label: {
+            Text(title)
+                .font(.system(size: TypeScale.detail))
+                .foregroundStyle(hovering ? .primary : .secondary)
+                .padding(.horizontal, zoomed(7))
+                .padding(.vertical, zoomed(2))
+                .background(Color.primary.opacity(hovering ? 0.08 : 0.05), in: Capsule())
+                .overlay {
+                    if guessed {
+                        Capsule().strokeBorder(Color.secondary.opacity(0.5), style: StrokeStyle(lineWidth: 0.75, dash: [2.5, 2]))
+                    }
+                }
+                .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering = $0 }
+        .help(guessed ? "The librarian put this thread in \(title). Right-click to keep it there or take it out." : "Open \(title)")
+        .contextMenu {
+            Button("Open \(title)") { app.openProjectPage(membership.id) }
+            Divider()
+            if !membership.pinned {
+                Button("Keep it in \(title)") { app.setProjects(thread.id, add: [membership.id]) }
+            }
+            Button("Take it out of \(title)") { app.setProjects(thread.id, remove: [membership.id]) }
+            let others = app.projectsToAdd(thread)
+            if !others.isEmpty {
+                Menu("Add to another project") {
+                    ForEach(others) { project in
+                        Button(project.title) { app.setProjects(thread.id, add: [project.id]) }
+                    }
+                }
+            }
         }
     }
 }

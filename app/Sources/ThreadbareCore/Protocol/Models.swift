@@ -382,14 +382,18 @@ public struct Panel: Sendable, Hashable, Codable, Identifiable {
     public var patch: String
     /// One line about it: the deployment, the project.
     public var note: String?
+    /// The project whose folder gave it, when it came from one rather than
+    /// the thread's own folder.
+    public var projectId: String?
 
-    public init(id: String, title: String, kind: Kind = .url, url: String? = nil, patch: String = "", note: String? = nil) {
+    public init(id: String, title: String, kind: Kind = .url, url: String? = nil, patch: String = "", note: String? = nil, projectId: String? = nil) {
         self.id = id
         self.title = title
         self.kind = kind
         self.url = url
         self.patch = patch
         self.note = note
+        self.projectId = projectId
     }
 
     public init(from decoder: Decoder) throws {
@@ -400,6 +404,7 @@ public struct Panel: Sendable, Hashable, Codable, Identifiable {
         url = try c.decodeIfPresent(String.self, forKey: .url)
         patch = try c.decodeIfPresent(String.self, forKey: .patch) ?? ""
         note = try c.decodeIfPresent(String.self, forKey: .note)
+        projectId = (try? c.decodeIfPresent(String.self, forKey: .projectId)) ?? nil
     }
 
     /// The page as a URL, when it is one.
@@ -425,8 +430,13 @@ public struct Action: Sendable, Hashable, Codable, Identifiable {
     public var prompt: String?
     public var patch: String
     public var note: String?
+    /// Where the command runs: the project folder the patch came from. Nil
+    /// for the thread's own folder.
+    public var folder: String?
+    public var projectId: String?
 
-    public init(id: String, title: String, kind: Kind = .command, command: String? = nil, prompt: String? = nil, patch: String = "", note: String? = nil) {
+    public init(id: String, title: String, kind: Kind = .command, command: String? = nil, prompt: String? = nil, patch: String = "", note: String? = nil,
+                folder: String? = nil, projectId: String? = nil) {
         self.id = id
         self.title = title
         self.kind = kind
@@ -434,6 +444,8 @@ public struct Action: Sendable, Hashable, Codable, Identifiable {
         self.prompt = prompt
         self.patch = patch
         self.note = note
+        self.folder = folder
+        self.projectId = projectId
     }
 
     public init(from decoder: Decoder) throws {
@@ -445,6 +457,8 @@ public struct Action: Sendable, Hashable, Codable, Identifiable {
         prompt = try c.decodeIfPresent(String.self, forKey: .prompt)
         patch = try c.decodeIfPresent(String.self, forKey: .patch) ?? ""
         note = try c.decodeIfPresent(String.self, forKey: .note)
+        folder = (try? c.decodeIfPresent(String.self, forKey: .folder)) ?? nil
+        projectId = (try? c.decodeIfPresent(String.self, forKey: .projectId)) ?? nil
     }
 }
 
@@ -459,8 +473,13 @@ public struct Hook: Sendable, Hashable, Codable, Identifiable {
     public var tell: String
     public var patch: String
     public var note: String?
+    /// As Action's: a hook from a project folder runs there and only sees
+    /// edits inside it.
+    public var folder: String?
+    public var projectId: String?
 
-    public init(id: String, title: String, on: String = "turn.end", command: String = "", edited: String? = nil, tell: String = "failures", patch: String = "", note: String? = nil) {
+    public init(id: String, title: String, on: String = "turn.end", command: String = "", edited: String? = nil, tell: String = "failures", patch: String = "", note: String? = nil,
+                folder: String? = nil, projectId: String? = nil) {
         self.id = id
         self.title = title
         self.on = on
@@ -469,6 +488,8 @@ public struct Hook: Sendable, Hashable, Codable, Identifiable {
         self.tell = tell
         self.patch = patch
         self.note = note
+        self.folder = folder
+        self.projectId = projectId
     }
 
     public init(from decoder: Decoder) throws {
@@ -481,6 +502,8 @@ public struct Hook: Sendable, Hashable, Codable, Identifiable {
         tell = try c.decodeIfPresent(String.self, forKey: .tell) ?? "failures"
         patch = try c.decodeIfPresent(String.self, forKey: .patch) ?? ""
         note = try c.decodeIfPresent(String.self, forKey: .note)
+        folder = (try? c.decodeIfPresent(String.self, forKey: .folder)) ?? nil
+        projectId = (try? c.decodeIfPresent(String.self, forKey: .projectId)) ?? nil
     }
 }
 
@@ -491,12 +514,20 @@ public struct PatchInfo: Sendable, Hashable, Codable, Identifiable {
     public var source: String
     public var file: String?
     public var error: String?
+    /// The folder it applies from: the one holding `.threadbear/`, or a
+    /// built-in's project folder.
+    public var folder: String?
+    /// Set when it came from one of the thread's projects' folders rather
+    /// than its own.
+    public var projectId: String?
 
-    public init(id: String, source: String = "project", file: String? = nil, error: String? = nil) {
+    public init(id: String, source: String = "project", file: String? = nil, error: String? = nil, folder: String? = nil, projectId: String? = nil) {
         self.id = id
         self.source = source
         self.file = file
         self.error = error
+        self.folder = folder
+        self.projectId = projectId
     }
 
     public init(from decoder: Decoder) throws {
@@ -505,6 +536,8 @@ public struct PatchInfo: Sendable, Hashable, Codable, Identifiable {
         source = try c.decodeIfPresent(String.self, forKey: .source) ?? "project"
         file = try c.decodeIfPresent(String.self, forKey: .file)
         error = try c.decodeIfPresent(String.self, forKey: .error)
+        folder = (try? c.decodeIfPresent(String.self, forKey: .folder)) ?? nil
+        projectId = (try? c.decodeIfPresent(String.self, forKey: .projectId)) ?? nil
     }
 }
 
@@ -725,6 +758,9 @@ public struct ThreadSummary: Sendable, Hashable, Codable, Identifiable {
     public var background: [BackgroundTask]
     /// The sub-agents the agent has started: the newest 20, oldest first.
     public var subagents: [Subagent]
+    /// The projects it's in, oldest first. Empty when it's in none (or the
+    /// runner is from before projects).
+    public var projects: [ThreadProject]
 
     public init(
         id: String, title: String, cwd: String = "~/dev/me/misc", accountId: String = "claude-main",
@@ -736,7 +772,7 @@ public struct ThreadSummary: Sendable, Hashable, Codable, Identifiable {
         contextTokens: Int? = nil, costUsd: Double? = nil,
         effort: String? = nil, modelInUse: String? = nil, effortInUse: String? = nil, contextWindow: Int? = nil,
         panels: [Panel] = [], actions: [Action] = [], hooks: [Hook] = [], patches: [PatchInfo] = [], background: [BackgroundTask] = [],
-        subagents: [Subagent] = []
+        subagents: [Subagent] = [], projects: [ThreadProject] = []
     ) {
         self.id = id
         self.title = title
@@ -769,6 +805,7 @@ public struct ThreadSummary: Sendable, Hashable, Codable, Identifiable {
         self.patches = patches
         self.background = background
         self.subagents = subagents
+        self.projects = projects
     }
 
     public init(from decoder: Decoder) throws {
@@ -809,6 +846,7 @@ public struct ThreadSummary: Sendable, Hashable, Codable, Identifiable {
         patches = c.lossyArray(PatchInfo.self, forKey: .patches)
         background = c.lossyArray(BackgroundTask.self, forKey: .background)
         subagents = c.lossyArray(Subagent.self, forKey: .subagents)
+        projects = c.lossyArray(ThreadProject.self, forKey: .projects)
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -844,12 +882,14 @@ public struct ThreadSummary: Sendable, Hashable, Codable, Identifiable {
         if !patches.isEmpty { try c.encode(patches, forKey: .patches) }
         if !background.isEmpty { try c.encode(background, forKey: .background) }
         if !subagents.isEmpty { try c.encode(subagents, forKey: .subagents) }
+        if !projects.isEmpty { try c.encode(projects, forKey: .projects) }
     }
 
     enum CodingKeys: String, CodingKey {
         case id, title, cwd, accountId, provider, model, effort, modelInUse, effortInUse, permissionMode, status, live, needsYou
         case createdAt, updatedAt, lastActivityAt, snoozedUntil, archivedAt, preview
         case lastSeq, lastSeenSeq, nativeSessionId, contextTokens, contextWindow, costUsd, panels, actions, hooks, patches, background, subagents
+        case projects
     }
 
     /// Still being worked on between turns: background sub-agents or jobs

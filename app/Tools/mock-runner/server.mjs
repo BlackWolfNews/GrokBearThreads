@@ -174,6 +174,10 @@ addDemoSubagents();
 /** The schedules (docs/protocol.md, "Schedules"), soonest first. */
 let schedules = [];
 addDemoSchedules();
+/** The projects (docs/protocol.md, "Projects"), and the librarian's status. */
+let projects = [];
+let librarian;
+addDemoProjects();
 
 const token = crypto.randomBytes(24).toString('hex');
 fs.mkdirSync(path.join(dataDir, 'secrets'), { recursive: true });
@@ -496,6 +500,20 @@ async function dispatch(client, method, p) {
     // Settings (docs/protocol.md, "Settings and models"), kept in memory.
     // Like the real runner, the key itself is never kept or sent back:
     // only whether one is set and its last 4 characters.
+    // Projects and the librarian (docs/protocol.md, "Projects"). A runner
+    // played as old (mock.accounts {old: true}) has none of them.
+    case 'projects.list':
+    case 'projects.get':
+    case 'projects.create':
+    case 'projects.update':
+    case 'projects.merge':
+    case 'projects.delete':
+    case 'threads.setProjects':
+    case 'librarian.status':
+    case 'librarian.run':
+    case 'librarian.update':
+      if (oldRunner) throw rpcError(-32601, `Unknown method ${method}`);
+      return projectRequest(method, p);
     case 'settings.get':
       return { settings };
     case 'settings.update': {
@@ -1097,6 +1115,250 @@ function addDemoSchedules() {
     t.summary.lastSeq = seq;
     t.summary.lastSeenSeq = seq;
   }
+}
+
+// ---------------------------------------------------------------- projects
+
+function projectRequest(method, p) {
+  switch (method) {
+    case 'projects.list':
+      return { projects: listedProjects(p.archived === true) };
+    case 'projects.get': {
+      const project = needProject(p.projectId);
+      return { project: projectView(project), threadIds: newestFirst(membersOf(project.id)).map((s) => s.id) };
+    }
+    case 'projects.create': {
+      const title = String(p.title ?? '').trim();
+      if (!title) throw rpcError(-32602, 'title is required');
+      const project = {
+        id: 'p_' + crypto.randomBytes(4).toString('hex'), title, folders: p.folders ?? [], goals: p.goals ?? '', state: p.state ?? '',
+        notes: p.notes ?? '', createdBy: 'mike', createdAt: iso(), updatedAt: iso(),
+      };
+      projects.push(project);
+      for (const threadId of p.threadIds ?? []) join(need(threadId).summary, project, 'mike', true);
+      broadcastProjects();
+      return { project: projectView(project) };
+    }
+    case 'projects.update': {
+      const project = needProject(p.projectId);
+      for (const key of ['title', 'folders', 'goals', 'notes']) if (p[key] !== undefined) project[key] = p[key];
+      if (p.state !== undefined) { project.state = p.state; project.stateUpdatedAt = iso(); }
+      if (p.archived !== undefined) project.archived = Boolean(p.archived) || undefined;
+      project.updatedAt = iso();
+      if (p.title !== undefined) for (const s of membersOf(project.id)) { renameIn(s, project); broadcastSummary(s.id); }
+      broadcastProjects();
+      return { project: projectView(project) };
+    }
+    case 'projects.merge': {
+      const from = needProject(p.projectId);
+      const into = needProject(p.intoId);
+      if (from === into) throw rpcError(-32602, 'a project can\'t be merged into itself');
+      into.folders = [...new Set([...into.folders, ...from.folders])];
+      if (from.notes) into.notes = [into.notes, `## From ${from.title}\n\n${from.notes}`].filter(Boolean).join('\n\n');
+      into.updatedAt = iso();
+      for (const s of membersOf(from.id)) {
+        const was = s.projects.find((x) => x.id === from.id);
+        s.projects = s.projects.filter((x) => x.id !== from.id);
+        if (!s.projects.some((x) => x.id === into.id)) join(s, into, was.by, was.pinned);
+        if (!s.projects.length) delete s.projects;
+        broadcastSummary(s.id);
+      }
+      projects = projects.filter((x) => x !== from);
+      broadcastProjects();
+      return { project: projectView(into) };
+    }
+    case 'projects.delete': {
+      const project = needProject(p.projectId);
+      for (const s of membersOf(project.id)) {
+        s.projects = s.projects.filter((x) => x.id !== project.id);
+        if (!s.projects.length) delete s.projects;
+        broadcastSummary(s.id);
+      }
+      projects = projects.filter((x) => x !== project);
+      broadcastProjects();
+      return {};
+    }
+    case 'threads.setProjects': {
+      const s = need(p.threadId).summary;
+      for (const id of p.add ?? []) {
+        const project = needProject(id);
+        const already = s.projects?.find((x) => x.id === id);
+        // Added by hand: pinned, and Mike's from then on.
+        if (already) Object.assign(already, { pinned: true });
+        else join(s, project, 'mike', true);
+      }
+      for (const id of p.remove ?? []) {
+        needProject(id);
+        s.projects = (s.projects ?? []).filter((x) => x.id !== id);
+        if (!s.projects.length) delete s.projects;
+      }
+      s.updatedAt = iso();
+      broadcastSummary(s.id);
+      broadcastProjects();
+      return { thread: s };
+    }
+    case 'librarian.status':
+      return { librarian };
+    case 'librarian.run': {
+      const due = new Date(Date.now() + 10_000).toISOString();
+      const ids = p.threadId ? [need(p.threadId).summary.id]
+        : newestFirst([...threads.values()].map((t) => t.summary).filter((s) => !s.projects?.length && !s.archivedAt)).map((s) => s.id);
+      for (const id of ids) {
+        if (librarian.current?.threadId === id || librarian.queue.some((j) => j.threadId === id)) continue;
+        librarian.queue.push({ threadId: id, threadTitle: threads.get(id).summary.title, reason: 'asked', why: 'Asked for', dueAt: due });
+      }
+      librarian.queue.sort((a, b) => Date.parse(a.dueAt) - Date.parse(b.dueAt));
+      broadcastLibrarian();
+      return { librarian };
+    }
+    case 'librarian.update':
+      if (p.paused !== undefined) {
+        librarian.paused = Boolean(p.paused);
+        // A paused librarian finishes nothing new: what was under way goes
+        // back to the front of the queue.
+        if (librarian.paused && librarian.current) {
+          const { startedAt: _s, ...job } = librarian.current;
+          librarian.queue.unshift(job);
+          delete librarian.current;
+        }
+        librarian.state = librarian.paused ? 'paused' : librarian.queue.length ? 'working' : 'idle';
+        if (!librarian.paused && librarian.queue.length && !librarian.current) {
+          librarian.current = { ...librarian.queue.shift(), startedAt: iso() };
+        }
+      }
+      broadcastLibrarian();
+      return { librarian };
+  }
+}
+
+/** A project as the protocol sends it: with its thread count and newest activity. */
+function projectView(project) {
+  const members = membersOf(project.id);
+  const newest = Math.max(...members.map((s) => Date.parse(s.lastActivityAt)));
+  return { ...project, threadCount: members.length, ...(Number.isFinite(newest) ? { lastActivityAt: new Date(newest).toISOString() } : {}) };
+}
+
+function listedProjects(archived) {
+  const list = projects.filter((x) => archived || !x.archived).map(projectView);
+  return list.sort((a, b) => Date.parse(b.lastActivityAt ?? b.updatedAt) - Date.parse(a.lastActivityAt ?? a.updatedAt));
+}
+
+function membersOf(projectId) {
+  return [...threads.values()].map((t) => t.summary).filter((s) => s.projects?.some((x) => x.id === projectId));
+}
+
+function join(summary, project, by, pinned, at = iso()) {
+  summary.projects = [...(summary.projects ?? []), { id: project.id, title: project.title, by, ...(pinned ? { pinned: true } : {}), at }];
+}
+
+function renameIn(summary, project) {
+  for (const x of summary.projects ?? []) if (x.id === project.id) x.title = project.title;
+}
+
+function needProject(id) {
+  const project = projects.find((x) => x.id === id);
+  if (!project) throw rpcError(-32007, 'Project not found');
+  return project;
+}
+
+function broadcastProjects() {
+  broadcast('projects.updated', { projects: listedProjects(true) });
+}
+
+function broadcastLibrarian() {
+  broadcast('librarian.updated', { librarian });
+}
+
+// Three projects over the demo threads: one thread in two of them, some in
+// none, one the librarian has only just put somewhere (unpinned, with the
+// transcript's note saying so), and Walkies giving the dark mode thread
+// its Convex panel from another folder. The librarian is part way through
+// a look with three more queued, and has done eight things today.
+function addDemoProjects() {
+  const now = Date.now();
+  const ago = (minutes) => new Date(now - minutes * 60_000).toISOString();
+  const soon = (seconds) => new Date(now + seconds * 1000).toISOString();
+  const tb = {
+    id: 'p_3b1d9e20', title: 'Threadbear', folders: ['/Users/mike/dev/me/threadbare'],
+    goals: 'Mike\'s own agent app: a runner that drives the Claude and Codex CLIs, and a native Mac app over it. Done is when it replaces T3 Code for everyday work.',
+    state: 'Projects and the librarian are next: protocol written, runner and app being built in parallel. Settings tabs renamed; release notes for 0.4 drafted.',
+    notes: '**Checks**: `./check.sh` runs everything, `--quick` for the runner only.\n\nNever restart the live runner from a thread; merge to main and it follows.\n\nThe protocol is the contract: change `docs/protocol.md` first.',
+    createdBy: 'librarian', createdByThread: 'demo_release_notes', createdAt: ago(60 * 24 * 9), updatedAt: ago(3), stateUpdatedAt: ago(41),
+  };
+  const photo = {
+    id: 'p_7a2c41f0', title: 'Photo sync', folders: ['/Users/mike/dev/photo-sync'],
+    goals: 'Back up the family photo library to B2 without babysitting it: resumable uploads, a nightly report, and builds that don\'t take fifteen minutes.',
+    state: 'Uploads resume after a crash in testing; waiting on Mike to pick the chunk size. CI is slow because the lockfile change broke the cache key.',
+    notes: '', createdBy: 'librarian', createdByThread: 'demo_upload_resume', createdAt: ago(60 * 24 * 4), updatedAt: ago(41), stateUpdatedAt: ago(41),
+  };
+  const walkies = {
+    id: 'p_c9e8d102', title: 'Walkies', folders: ['/Users/mike/dev/walkies', '/Users/mike/dev/walkies-backend'],
+    goals: 'The dog walking app: iOS client and Convex backend. Next milestone is sharing a walk with a friend.',
+    state: 'Share button colour being picked; dark mode for the dashboard done and waiting for review.',
+    notes: '', createdBy: 'mike', createdAt: ago(60 * 24 * 20), updatedAt: ago(60 * 2),
+  };
+  projects = [tb, photo, walkies];
+  const put = (threadId, project, by, pinned, minutesAgo) => {
+    const t = threads.get(threadId);
+    if (t) join(t.summary, project, by, pinned, ago(minutesAgo));
+  };
+  put('demo_settings_tabs', tb, 'librarian', false, 3);
+  put('demo_sqlite_vs_files', tb, 'agent', true, 60 * 30);
+  put('demo_release_notes', tb, 'mike', true, 60 * 24 * 9);
+  put('demo_quick_ask_readme', tb, 'librarian', false, 60 * 24 * 6);
+  put('demo_ci_slow', photo, 'agent', true, 60 * 3);
+  put('demo_ci_slow', tb, 'librarian', false, 60 * 2);
+  put('demo_upload_resume', photo, 'librarian', true, 60 * 24 * 4);
+  put('demo_build_scripts', photo, 'librarian', false, 60 * 24 * 3);
+  put('demo_button_colour', walkies, 'librarian', false, 18);
+  put('demo_dark_mode', walkies, 'mike', true, 60 * 24 * 2);
+
+  // Walkies' backend folder gives the dark mode thread (which is in misc)
+  // its Convex panel, and a patch of its own.
+  const dark = threads.get('demo_dark_mode');
+  if (dark) {
+    for (const panel of dark.summary.panels ?? []) if (panel.patch === 'convex') panel.projectId = walkies.id;
+    dark.summary.actions = [
+      ...(dark.summary.actions ?? []),
+      { id: 'walkies.seed-walks', title: 'Seed walks', kind: 'command', command: 'npx convex run seed:walks', patch: 'walkies',
+        folder: '/Users/mike/dev/walkies-backend', projectId: walkies.id },
+    ];
+    dark.summary.patches = [
+      { id: 'tools', source: 'project', file: '/Users/mike/dev/me/misc/.threadbear/patches/tools.ts', folder: '/Users/mike/dev/me/misc' },
+      { id: 'convex', source: 'builtin', folder: '/Users/mike/dev/walkies-backend', projectId: walkies.id },
+      { id: 'walkies', source: 'project', file: '/Users/mike/dev/walkies-backend/.threadbear/patches/walkies.ts', folder: '/Users/mike/dev/walkies-backend', projectId: walkies.id },
+    ];
+  }
+
+  // The librarian's note in the thread it has just put somewhere.
+  const tabs = threads.get('demo_settings_tabs');
+  if (tabs) {
+    const seq = ++tabs.summary.lastSeq;
+    tabs.summary.lastSeenSeq = seq;
+    tabs.events.push({ seq, ts: ago(3), threadId: tabs.summary.id, type: 'system.note', text: 'Put in Threadbear' });
+  }
+
+  const title = (id) => threads.get(id)?.summary.title ?? id;
+  librarian = {
+    state: 'working', paused: false,
+    current: { threadId: 'demo_landing_pages', threadTitle: title('demo_landing_pages'), reason: 'first-turn', why: 'Its first turn ended', dueAt: ago(0.2), startedAt: ago(0.1) },
+    queue: [
+      { threadId: 'demo_codex_poster', threadTitle: title('demo_codex_poster'), reason: 'new-folder', why: 'Edited files in ~/dev/meetup-site', dueAt: soon(40) },
+      { threadId: 'demo_ci_slow', threadTitle: title('demo_ci_slow'), reason: 'catch-up', why: '4 turns since the last look', dueAt: soon(25 * 60) },
+      { threadId: 'demo_upload_resume', threadTitle: title('demo_upload_resume'), reason: 'catch-up', why: '2 turns since the last look', dueAt: soon(52 * 60) },
+    ],
+    recent: [
+      { id: 'l8', at: ago(3), threadId: 'demo_settings_tabs', threadTitle: title('demo_settings_tabs'), reason: 'first-turn', outcome: 'joined', text: 'Put it in Threadbear', projectIds: [tb.id], costUsd: 0.0021 },
+      { id: 'l7', at: ago(18), threadId: 'demo_button_colour', threadTitle: title('demo_button_colour'), reason: 'new-folder', outcome: 'joined', text: 'Put it in Walkies', projectIds: [walkies.id], costUsd: 0.0024 },
+      { id: 'l6', at: ago(41), threadId: 'demo_ci_slow', threadTitle: title('demo_ci_slow'), reason: 'catch-up', outcome: 'updated', text: 'Photo sync\'s state', projectIds: [photo.id], costUsd: 0.0031 },
+      { id: 'l5', at: ago(70), threadId: 'demo_invoice_export', threadTitle: title('demo_invoice_export'), reason: 'first-turn', outcome: 'nothing', text: 'Left it out: a one-off errand', costUsd: 0.0017 },
+      { id: 'l4', at: ago(60 * 2), threadId: 'demo_ci_slow', threadTitle: title('demo_ci_slow'), reason: 'new-folder', outcome: 'joined', text: 'Put it in Threadbear too', projectIds: [tb.id], costUsd: 0.0026 },
+      { id: 'l3', at: ago(60 * 3), threadId: 'demo_tunnel', threadTitle: title('demo_tunnel'), reason: 'asked', outcome: 'skipped', text: 'Archived before its first look' },
+      { id: 'l2', at: ago(60 * 4), threadId: 'demo_sqlite_vs_files', threadTitle: title('demo_sqlite_vs_files'), reason: 'catch-up', outcome: 'updated', text: 'Threadbear\'s state', projectIds: [tb.id], costUsd: 0.0029 },
+      { id: 'l1', at: ago(60 * 5), threadId: 'demo_landing_pages', threadTitle: title('demo_landing_pages'), reason: 'first-turn', outcome: 'failed', text: 'OpenRouter took too long to answer' },
+    ],
+    looksToday: 14, spentTodayUsd: 0.0312,
+  };
 }
 
 // ---------------------------------------------------------------- fixtures
