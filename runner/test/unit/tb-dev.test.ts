@@ -5,7 +5,7 @@ import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { makeHarness, tick, tmpDir } from '../helpers/fakes.ts';
 import { makePng } from '../helpers/png.ts';
-import { formatThread, formatStatus, lastTurns, exportThread, lastLines, findRepoRoot, duration, restartRefusal, tbCommand } from '../../src/tb-dev.ts';
+import { formatThread, formatStatus, lastTurns, exportThread, lastLines, findRepoRoot, duration, restartRefusal, tbCommand, shQuote } from '../../src/tb-dev.ts';
 import { Restarter, restartMethods, restartPath, resumesPath } from '../../src/restart.ts';
 import { RpcServer } from '../../src/rpc.ts';
 import { RunnerClient } from '../../src/client.ts';
@@ -15,6 +15,9 @@ import type { PersistedEvent, ThreadSummary } from '../../src/protocol.ts';
 import type { RunnerStatus } from '../../src/restart.ts';
 
 const TB = path.resolve(import.meta.dirname, '..', '..', 'bin', 'tb');
+// How tb prints itself: quoted when the checkout path has a space (the
+// runner's update checkout is under ~/Library/Application Support).
+const TB_SH = shQuote(TB);
 const MOCK = path.join(import.meta.dirname, '..', '..', '..', 'app', 'Tools', 'mock-runner');
 
 const T: ThreadSummary = {
@@ -374,9 +377,10 @@ test('tb status, self, show, export and rpc against a runner', async () => {
     assert.match(r.out, new RegExp(`--fixtures ${out.replaceAll('.', '\\.')}\n`), 'loads the export alone');
     // The debug app comes first, and there's no bare mock runner line to
     // run in the foreground by mistake.
-    assert.match(r.out, /\n  \S*app\/Tools\/dev-app\.sh start --mock --fixtures /);
+    // The path is quoted when the checkout sits under a dir with a space.
+    assert.match(r.out, /\n  ('[^']*|\S*)app\/Tools\/dev-app\.sh'? start --mock --fixtures /);
     assert.doesNotMatch(r.out, /server\.mjs/);
-    assert.match(r.out, new RegExp(`tb events ${thread.id.slice(0, 8)} --from N --to M\n`));
+    assert.match(r.out, new RegExp(`tb'? events ${thread.id.slice(0, 8)} --from N --to M\n`));
     assert.equal(fs.readFileSync(path.join(out, 'events.ndjson'), 'utf8').trim().split('\n').length, 4);
 
     r = await run(h.home, url, ['rpc', 'threads.list', '{"include":["inbox"]}']);
@@ -452,7 +456,7 @@ test('tb restart: waits for busy threads, resumes the calling thread, and guards
     r = await run(h.home, url, ['restart'], { THREADBARE_THREAD_ID: 'a-thread-of-another-runner' });
     assert.equal(r.code, 0, r.out);
     assert.doesNotMatch(r.out, /this thread/);
-    assert.ok(r.out.includes(`${TB} restart --cancel withdraws it`), r.out);
+    assert.ok(r.out.includes(`${TB_SH} restart --cancel withdraws it`), r.out);
     assert.deepEqual(JSON.parse(fs.readFileSync(restartPath(h.home), 'utf8')).resumes, []);
 
     assert.equal(state.restarts, 0);
@@ -569,7 +573,7 @@ test('tb restart and tb rpc against the live runner from one of its threads', as
     assert.match(r.out, /This is the runner your thread runs on/);
     r = await run(h.home, url, ['rpc', 'runner.restart', '{}'], env);
     assert.equal(r.code, 1, r.out);
-    assert.ok(r.out.includes(`Use ${TB} restart`), r.out);
+    assert.ok(r.out.includes(`Use ${TB_SH} restart`), r.out);
     assert.equal(fs.existsSync(restartPath(real)), false);
     r = await run(h.home, url, ['restart', '--force', '--no-resume'], env);
     assert.equal(r.code, 0, r.out);
@@ -674,7 +678,7 @@ test("tb status says when the runner went back to this release after a crash", (
 });
 
 test("tb prints commands that reach the runner it talked to", () => {
-  const tb = TB;
+  const tb = TB_SH;
   // A dev runner's <home>/tb names itself.
   assert.equal(tbCommand({ THREADBARE_TB: '/tmp/dev home/tb', THREADBARE_HOME: '/tmp/dev home' }), "'/tmp/dev home/tb'");
   // THREADBARE_HOME pointed away from the thread's own runner for one

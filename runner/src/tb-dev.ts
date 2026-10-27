@@ -267,7 +267,7 @@ export async function runDev(client: RunnerClient, cmd: string, args: string[], 
 }
 
 // For commands printed to paste into a shell; the default data dir has a space.
-function shQuote(s: string): string {
+export function shQuote(s: string): string {
   return /^[\w@%+=:,./-]+$/.test(s) ? s : `'${s.replace(/'/g, `'\\''`)}'`;
 }
 
