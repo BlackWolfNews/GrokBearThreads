@@ -60,6 +60,9 @@ export type ThreadRecord = {
   projects?: ThreadProjectRecord[];
   // Projects Mike took the thread out of: the librarian never puts it back.
   projectsLeft?: string[];
+  // The projects the native session has been told about (the brief, or a
+  // line when it joined one), so it hears about each once.
+  projectsTold?: string[];
 };
 
 export type ThreadProjectRecord = Omit<ThreadProject, 'title'>;

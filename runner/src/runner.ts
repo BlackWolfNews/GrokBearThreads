@@ -218,10 +218,6 @@ type Runtime = {
   // written, shows up within seconds. Until the first read finishes the
   // built-in panels stand in.
   patches?: { cwd: string; key: string; at: number; set: PatchSet; refreshing: boolean; loaded: boolean };
-  // Said to the agent at the start of its next message while its CLI is
-  // live: the projects it has just been put in (projects.ts). A new
-  // session gets the whole brief instead.
-  projectTell?: string;
   runningActions?: Set<string>;
   // Turns in a row that a hook's message started, per hook. A hook that
   // keeps failing stops being told to the agent after HOOK_TELL_LIMIT, so
@@ -740,13 +736,12 @@ export class Runner {
   }
 
   // Changes a thread's record for projects.ts, saves it and sends its
-  // summary; `note` goes in the transcript, `tell` to the agent with its
-  // next message if its CLI is live (a new session gets the brief anyway).
-  editThread(threadId: string, edit: (rec: ThreadRecord) => void, say: { note?: string; tell?: string } = {}): ThreadSummary {
+  // summary; `note` goes in the transcript. The agent hears about a new
+  // project with its next message (projectNews).
+  editThread(threadId: string, edit: (rec: ThreadRecord) => void, say: { note?: string } = {}): ThreadSummary {
     const st = this.mustGet(threadId);
     edit(st.rec);
     if (say.note) this.emit(st, { type: 'system.note', text: say.note }, st.rt.turn?.turnId);
-    if (say.tell && st.rt.session) st.rt.projectTell = st.rt.projectTell ? `${st.rt.projectTell}\n${say.tell}` : say.tell;
     this.markDirty(st);
     return this.summary(st);
   }
@@ -1266,12 +1261,11 @@ export class Runner {
       }
       this.makeRoomForCli(st);
       this.startSession(st, account);
-    } else if (rt.projectTell) {
-      // Projects it was put in while its CLI was live; a new session gets
-      // the whole brief instead.
-      text = `${rt.projectTell}\n\n${text}`;
     }
-    rt.projectTell = undefined;
+    // Projects the session hasn't been told about: one it was put in while
+    // live, or since it last ran. A fresh session got them as instructions.
+    const news = this.projectNews(rec);
+    if (news) text = `${news}\n\n${text}`;
     if (rec.moved) {
       // A CLI that moves folders itself: the live session got setCwd, or a
       // released one resumes in the new folder (startSession passes it).
@@ -1357,7 +1351,7 @@ export class Runner {
         tmpDir: path.join(paths.run(this.cfg.home), 'tmp'),
         allowRules: rec.allowRules ?? [],
         env: threadEnv(rec.id, this.cfg.home),
-        ...this.briefFor(rec),
+        ...this.briefFor(rec, resume),
       },
       sink,
     );
@@ -2705,10 +2699,27 @@ export class Runner {
     }
   }
 
-  // What a starting session is told about the thread's projects.
-  private briefFor(rec: ThreadRecord): { instructions?: string } {
-    const brief = this.projects?.brief(rec);
+  // What a starting session is told about the thread's projects. Only a
+  // fresh session: Claude Code keeps a resumed session's system prompt and
+  // ignores an appended one, so a resume hears through projectNews.
+  private briefFor(rec: ThreadRecord, resume: boolean): { instructions?: string } {
+    if (!this.projects || resume) return {};
+    rec.projectsTold = this.projects.briefIds(rec);
+    const brief = this.projects.brief(rec);
     return brief ? { instructions: brief } : {};
+  }
+
+  // The thread's projects its session hasn't been told about, as lines to
+  // put before its next message, or undefined. A thread whose session
+  // predates projects (never told anything) gets the whole brief.
+  private projectNews(rec: ThreadRecord): string | undefined {
+    if (!this.projects) return undefined;
+    const ids = this.projects.briefIds(rec);
+    const told = rec.projectsTold;
+    const fresh = ids.filter((id) => !told?.includes(id));
+    rec.projectsTold = ids;
+    if (!fresh.length) return undefined;
+    return told === undefined ? this.projects.brief(rec) : this.projects.joinedLines(fresh);
   }
 
   // A short note that gives a new native session the gist of the thread so

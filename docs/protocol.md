@@ -191,10 +191,11 @@ type PatchInfo = {
   id: string            // "convex", "xcode", or a patch file's name without its extension
   source: "builtin" | "home" | "project"
   file?: string         // the module, for home and project patches
-  folder?: string       // the folder it applies from: the one holding
-                        // `.threadbear/`, or a built-in's project folder
-  projectId?: string    // set when it came from one of the thread's
-                        // projects' folders rather than its own
+  folder?: string       // set (with projectId) when it came from one of
+                        // the thread's projects' folders rather than its
+                        // own: the folder holding `.threadbear/`, or a
+                        // built-in's project folder
+  projectId?: string
   error?: string        // the file couldn't be loaded, and gives nothing until it's fixed
 }
 
@@ -443,7 +444,7 @@ replaces whatever the deltas built up.
 | `projects.update` | `{ projectId, title?, folders?: string[], goals?, state?, notes?, archived?: boolean }` | `{ project: Project }`. Replaces what's given. A change of folders reloads its threads' patches |
 | `projects.merge` | `{ projectId, intoId }` | `{ project: Project }` (the one kept). Folders and threads move over, notes are joined, and `projectId` is deleted |
 | `projects.delete` | `{ projectId }` | `{}`. Its threads leave it; nothing else is touched |
-| `threads.setProjects` | `{ threadId, add?: string[], remove?: string[] }` | `{ thread: ThreadSummary }`. What Mike does by hand: an added project is pinned, a removed one is remembered so the librarian never puts the thread back in it |
+| `threads.setProjects` | `{ threadId, add?: string[], remove?: string[] }` | `{ thread: ThreadSummary }`. What Mike does by hand: an added project is pinned (adding one the thread is already in pins it, which is how "keep it here" works), a removed one is remembered so the librarian never puts the thread back in it |
 | `librarian.status` | `{}` | `{ librarian: LibrarianStatus }` |
 | `librarian.run` | `{ threadId?: string }` | `{ librarian: LibrarianStatus }`. Queues a look at the thread now (reason `asked`), or with no `threadId`, at every thread it has never looked at (a backfill, newest first) |
 | `librarian.update` | `{ paused?: boolean }` | `{ librarian: LibrarianStatus }` |
@@ -693,13 +694,16 @@ edited a file inside it, matched against its `edited` glob relative to
 it. Two items that would share an id get the folder's name in front, the
 later one only (`poddle:convex.dashboard`).
 
-**The brief.** A session that starts (or resumes) on a thread in projects
-is told about them: each project's title, folders, goals and state, at
-most about 2,000 characters in all, and that `read_project` has the
-notes. Claude gets it appended to the system prompt, Codex as developer
-instructions. A thread put in a project while its CLI is live hears about
-it at the start of its next message, in a line beginning `[Threadbear
-project]`.
+**The brief.** A session is told about its thread's projects once each.
+A fresh session (a new thread, a move or account change that starts a new
+native session) gets the brief as instructions: each project's title,
+folders, goals and state, at most about 2,000 characters in all, and that
+`read_project` has the notes. Claude gets it appended to the system
+prompt, Codex as developer instructions. A live or resumed session (Claude
+Code ignores new instructions on a resume) hears about a project it hasn't
+been told about at the start of its next message, in a line beginning
+`[Threadbear project]`; a session from before projects existed gets the
+whole brief that way. An agent that joined a project itself isn't told.
 
 **The librarian** is the runner's own background job that keeps projects
 up to date, on the small model (`models.*`, feature `projects`, inside the

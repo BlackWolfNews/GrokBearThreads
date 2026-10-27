@@ -147,7 +147,7 @@ test('the RPC methods: list, get, create, update, setProjects, archive', () => {
 
 // ------------------------------------------------------- brief and patches
 
-test('a session starting on a thread in projects gets the brief; a live one hears about a new project once', async () => {
+test('a session hears about a project once: a live one at its next message, a fresh one as instructions', async () => {
   const { h, repo, projects, create, finish } = setup();
   const app = repo('dev/app');
   const p = projects.create({ title: 'Poddle', folders: [app], goals: 'A podcast player for Mike', state: 'Build 12 is in review', by: 'mike' });
@@ -166,16 +166,27 @@ test('a session starting on a thread in projects gets the brief; a live one hear
   h.runner.send(thread.id, 'again');
   await tick();
   assert.equal(h.adapter.last.sent.at(-1)!.text, 'again');
-  // Once its CLI is let go, the next session starts with the whole brief.
+  // A resumed session isn't told again (and Claude Code would ignore new
+  // instructions on a resume anyway).
   await finish(thread.id);
   h.clock.advance(h.cfg.idleMs + 1000);
   await tick();
   h.runner.send(thread.id, 'back again');
   await tick();
+  assert.equal(h.adapter.last.opts.resume, true);
+  assert.equal(h.adapter.last.opts.instructions, undefined);
+  assert.equal(h.adapter.last.sent.at(-1)!.text, 'back again');
+  // A fresh session (here, a move whose transcript can't come along) gets
+  // the whole brief as instructions, and no line before the message.
+  await finish(thread.id);
+  h.runner.update({ threadId: thread.id, cwd: app });
+  h.runner.send(thread.id, 'moved');
+  await tick();
+  assert.equal(h.adapter.last.opts.resume, false);
   const brief = h.adapter.last.opts.instructions!;
   assert.match(brief, /^\[Threadbear projects\]/);
   assert.match(brief, /## Poddle \(p_[0-9a-f]+\)\nFolders: ~\/dev\/app\nGoals: A podcast player for Mike\nState: Build 12 is in review/);
-  assert.equal(h.adapter.last.sent.at(-1)!.text, 'back again');
+  assert.doesNotMatch(h.adapter.last.sent.at(-1)!.text, /Threadbear project/);
 });
 
 test('the brief stays short however many projects there are', () => {

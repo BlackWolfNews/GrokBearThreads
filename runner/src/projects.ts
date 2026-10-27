@@ -33,9 +33,8 @@ export type ProjectRecord = Omit<Project, 'threadCount' | 'lastActivityAt'>;
 export type ProjectHost = {
   threadRecords(): ThreadRecord[];
   // Changes a thread's record, then saves it and sends its summary. `note`
-  // goes in the transcript; `tell` goes to the agent at the start of its
-  // next message when its CLI is live (a new session gets the brief).
-  editThread(threadId: string, edit: (rec: ThreadRecord) => void, say?: { note?: string; tell?: string }): ThreadSummary;
+  // goes in the transcript.
+  editThread(threadId: string, edit: (rec: ThreadRecord) => void, say?: { note?: string }): ThreadSummary;
   // Sends these threads' summaries again (a title changed) and reads their
   // patches again (folders changed).
   touchThreads(threadIds: string[]): void;
@@ -194,6 +193,17 @@ export class Projects {
     const goals = clip(p.goals, Math.floor(room / 2));
     const state = clip(p.state, room - goals.length);
     return [head, goals && `Goals: ${goals}`, state && `State: ${state}`].filter(Boolean).join('\n');
+  }
+
+  // The projects a brief covers, for knowing what a session has been told.
+  briefIds(rec: ThreadRecord): string[] {
+    return (rec.projects ?? []).map((m) => m.id).filter((id) => this.items.get(id) && !this.items.get(id)!.archived);
+  }
+
+  // Lines for a session told about these projects since it started.
+  joinedLines(ids: string[]): string | undefined {
+    const lines = ids.map((id) => this.items.get(id)).filter((p): p is ProjectRecord => Boolean(p)).map((p) => this.joinedLine(p));
+    return lines.length ? lines.join('\n') : undefined;
   }
 
   // A line for the agent when its thread joins a project mid-session.
@@ -369,7 +379,7 @@ export class Projects {
     }
     if (!plan.length) return { joined, left, thread: host.editThread(id, () => {}) };
     const names = (ids: string[]) => ids.map((p) => this.items.get(p)!.title).join(' and ');
-    const say: { note?: string; tell?: string } = {};
+    const say: { note?: string } = {};
     // Mike sees his own change; the librarian's and agents' are said in
     // the transcript so a wrong guess gets noticed.
     if (change.by !== 'mike') {
@@ -377,8 +387,8 @@ export class Projects {
       const parts = [joined.length ? `Put in ${names(joined)}` : '', left.length ? `Taken out of ${names(left)}` : ''].filter(Boolean);
       say.note = `${parts.join('. ')} ${who}.`;
     }
-    // The agent hears about projects it didn't join itself.
-    if (change.by !== 'agent' && joined.length) say.tell = joined.map((p) => this.joinedLine(this.items.get(p)!)).join('\n');
+    // An agent that joined one itself knows: don't tell it again.
+    if (change.by === 'agent' && joined.length) plan.push((r) => (r.projectsTold = [...new Set([...(r.projectsTold ?? []), ...joined])]));
     const thread = host.editThread(id, (r) => plan.forEach((f) => f(r)), say);
     this.log.info('thread projects changed', { threadId: id, by: change.by, joined, left });
     this.publish();
