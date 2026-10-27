@@ -1195,6 +1195,24 @@ The first version had a `retireCodex()` hook for the shared process. With one pr
 - `update()` and `check()` returning at once, with state reported through `onChange`;
 - a running turn on the old process carrying on while the new version activates, and its session moving after the turn.
 
+### As built (E)
+
+**For C, wiring it in `main.ts`:**
+
+- The constructor takes `{cfg, log, clock, hooks, codex: {resolve, checkSurface, testedVersion}, notice?}`. `codex` is A's: `resolve` is `resolveCodexBinary` (only `{command, native}` is read), `checkSurface` and `testedVersion` come from `surface.ts`. They're injected because A hadn't landed when E was built, and so the tests use stubs. `notice(level, message)` is a `runner.notice`.
+- `codexBinary()` returns a start path for A's resolver, not the native binary: `codexPath`, else `<home>/tools/codex/current` (the install folder), else the fallback launcher next to the runner's Node.
+- Two methods beyond the interface: `settled()` resolves once nothing is checking or installing (for tests and shutdown), and `sessionStarted(provider, version, ok)` is how the runner reports whether a session reached `init` or `initialize`, for the "failed to start twice" warning.
+- Tests can also inject `exec`, `fetchText`, `env`, `execPath` (npm and the fallback codex sit next to it) and `random`.
+
+**Choices the plan didn't cover:**
+
+- The app's `clis.setPolicy` is kept in `<home>/updates.json`, not `runner.json`. `THREADBARE_CLI_UPDATES=off`, or `off` in `runner.json`, can't be turned on from the app, and a `codexPath` set by hand always shows `off`.
+- `off` stops the hourly checks. `clis.check` still looks the versions up.
+- A held version is installed and kept (`<v>/`, never `current`), so "Update anyway" activates it without downloading again. A hold reports `status: "held"` with `update.state: "unchanged"`, since nothing failed.
+- On a first start, a latest that fails to install or is held falls back to `testedVersion`, as it does for the gate.
+- An update left `running` or `waiting` by a runner that stopped reads as `failed` after the restart.
+- The commands and lookups are in `updates/exec.ts`, a fifth file next to the four planned.
+
 The real npm path gets one integration test, `codex-install.e2e.test.ts`, run under `--e2e` because it needs the network. It uses a temp `THREADBARE_HOME` and a temp `CODEX_HOME`, runs `app-server` only, and sends no prompts. It installs a version into a temp prefix with `npm install --prefix`, starts `app-server`, swaps in another version and checks the running process keeps working. Nothing touches the real installs: not the nvm global prefix, `~/.local/bin/codex`, `~/.local/bin/claude` or Claude's versions folder.
 
 ## F. App
