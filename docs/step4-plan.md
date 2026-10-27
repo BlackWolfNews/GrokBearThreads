@@ -632,6 +632,27 @@ What spike 1 means for the code:
 
 These unit tests merge before C. The e2e (Tests, below) is a second A change, merged after C.
 
+### As built (A, unit tests; 27 Oct)
+
+Where the build made a call the plan didn't, or differs from it:
+
+- **The normaliser is B's `CodexNormalizer`** by default. `CodexAdapterDeps.normalizer` is optional (tests pass a spy that wraps it), so C builds `new CodexAdapter({codexBinary, codexArgs, registry, log, toolsFor})` with nothing more. The session calls `setThread`, `startingTurn`, `turnAccepted` and `steered` (`CodexNormalizerLike` in `codex/types.ts`). The context's `cwd` follows `setCwd`.
+- **A owns turn ownership.** The adapter drops every `cliTurn` and `result` the normaliser emits. It emits its own `cliTurn` for a turn it didn't start, and builds each `result` from the normaliser's (outcome, duration, usage, error, `errorKind`), setting `own`, `answers`, `answered` and `queuedTurns` itself. B can always emit a `result` on `turn/completed` without knowing whose turn it was. If B emits none, A makes a plain one from `turn.status`.
+- **What A feeds the normaliser besides Codex's own notifications:**
+  - `account/read` becomes a `limits` reading through B's `limitsFromAccount` (email and plan);
+  - the start-up `account/rateLimits/read` and every update go in as `account/rateLimits/updated` with the merged snapshot `{ordinaryUsageAllowed, rateLimits, rateLimitsByLimitId}` (updates are merged per `limitId`, and nulls keep what was known);
+  - a line over the guard goes in as `threadbare/oversizedLine {bytes, method?, threadId?, turnId?, itemId?, itemType?}` (B's `OVERSIZED_LINE`), routed like a notification (with `from` for a child's), so B closes that item as "Too large to show";
+  - `closeOpen("Interrupted")` on every exit, so a background terminal left open from an earlier turn gets closed too.
+- **`configWarning`** also calls `CodexAdapterDeps.onNotice(text)`, at most once per adapter (runner run) per text. C wires it to a `runner.notice` warning.
+- **Approval card titles** use the whole unwrapped command, not `commandActions[0].command`, so a chained command shows all of it.
+- **"Always allow" rules** are `codex:command:<JSON argv>` and `codex:fileChange`. On top of the plan's checks, no rule is made or matched when the first word runs other commands (`sh`, `bash`, `env`, `sudo`, `xargs` and the like), and a backtick or `$(` inside double quotes also counts as not plain. A proposed amendment that isn't a prefix of the command falls back to the exact argv.
+- **No auto-accept in full access.** A request in a turn that started in ask mode still shows its card, because mode changes apply from the next turn.
+- **`archive()`** also archives the subagent threads this runner saw the session start (kept in memory per Codex thread), best effort, after the parent. That covers both answers to the open question, so the spike-9 check wasn't run.
+- **An interrupt whose command can't be terminated** emits the normaliser's outputs except the `result`, then ends the process. `exited()` closes the runner's turn as interrupted, and the next message resumes.
+- **Effort or model set back to unset** in a session sends the account's `defaultEffort`, else the model's own (or the account's `defaultModel`), because Codex keeps the last value sent.
+- **Resume** knows the thread id before `thread/resume`, so its own `notLoaded`/`idle` route while `resumePending` is set. Thread traffic before `thread/start` answers is held, then routed.
+- **For C and E:** `CodexAdapter.binariesInUse()` gives `codexBinariesInUse()`. `resolveCodexBinary(start)` returns `{command, args, native, packageRoot?}` (`native: true` when it found the binary behind the launcher), and `nativeBinaryFor(launcher)` and `fallbackCodexPath()` are exported too. `checkSurface(dir)` and `testedVersion` are in `surface.ts`, which takes its item and method lists from B's `MAPPED_*` and `IGNORED_*` exports, plus what the adapter reads itself and the 0.164.0 families nothing reads. `toolsFor` takes `buildThreadbareTools(...)`'s array as is (`ToolDefinition` in `tools.ts`).
+
 ## B. Codex events and images (`normalize.ts`, `media.ts`)
 
 **`CodexNormalizer`.**
@@ -852,6 +873,29 @@ The app already inserts an image row right after the tool row (`TranscriptReduce
 - a dynamic tool call named `mcp__threadbare__<tool>`;
 - an unknown item type shown as a plain row;
 - every notification method in `real-config` either mapped or listed as ignored.
+
+### As built (B)
+
+**What A calls on `CodexNormalizer`** (`new CodexNormalizer(ctx, {log})`, one per session):
+
+- `setThread(threadId, model?)` after `thread/start` or `thread/resume`, with the model it reported in `session`, so a later `thread/settings/updated` with another model is reported again.
+- `startingTurn(runnerTurnId)` when it sends `turn/start`, and `turnAccepted(codexTurnId)` with the reply. A `turn/started` in between counts as ours. `steered(runnerId)` for a message sent with `turn/steer`.
+- `handle(method, params, from?)` for every notification of its thread, its process's thread-less ones, and its children's (with `from.childThreadId`). Server requests don't go here.
+- `lineTooLarge(head)` when the line reader skips a line over its guard, with the line's first few KB, or `handle(OVERSIZED_LINE, {method?, itemId?})` (exported, `"threadbare/oversizedLine"`) when the reader has already picked those out; with `from` for a child. If it names an open item, that item closes as "Too large to show"; if not, the turn's other open items do.
+- `closeOpen(reason)` when the session ends with rows still open (process death, hard stop). It closes background terminals too and sends `tasks: []`. It emits no `result`.
+- `interruptedCommands()` after an interrupted or failed `turn/completed`: the command item ids it closed, for `backgroundTerminals/terminate`.
+- `limitsFromRateLimits(snapshot)` takes `account/rateLimits/read`'s result or a merged update (`handle('account/rateLimits/updated', merged)` does the same), and `limitsFromAccount(result)` takes `account/read`'s.
+- `innerCommand(command)` strips `/bin/zsh -lc '...'`, for approval titles and "Always allow" rules.
+- `MAPPED_ITEM_TYPES`, `IGNORED_ITEM_TYPES`, `MAPPED_METHODS` and `IGNORED_METHODS` are exported for `surface.ts`, so its ignore list and the normaliser's can't drift.
+
+**Differences from the plan above:**
+
+- A subagent row still open when a turn completes is kept open like a background terminal (`tasks` with `kind: "agent"`), not closed as interrupted: the child is still running in the process. Its `subAgentActivity completed` closes it later.
+- The credits detail ("1,234 credits") goes on the last of the `codex` bucket's windows (the weekly one when there are both).
+- Committed fixtures are `{proc, dir, t, msg}` lines. `proc` tells the processes of a resume apart. Every fixture keeps its capture's handshake and `thread/start` lines, so a replay knows its thread.
+- Extra fixtures: `models` (`probe.ndjson`'s `model/list`, for A), and the hand-written `mcp-image` (an MCP image block, an image resource, a dynamic tool's `data:` image), since no capture had MCP servers on. The optional `close-and-resume` isn't made.
+- The sanitiser also fails on the values of the keys it drops (account ids, `installationId`, `serverName`) wherever else they appear, and on this Mac's user and host name. The hostname also appeared with a `.localdomain` suffix.
+- `context.ts` gained `truncateResultText`, the 64 KB cut with a blob, for the Codex normaliser.
 
 ## C. Runner plumbing
 
@@ -1209,6 +1253,24 @@ The first version had a `retireCodex()` hook for the shared process. With one pr
   - `.partial` folders cleaned up after a failed install;
 - `update()` and `check()` returning at once, with state reported through `onChange`;
 - a running turn on the old process carrying on while the new version activates, and its session moving after the turn.
+
+### As built (E)
+
+**For C, wiring it in `main.ts`:**
+
+- The constructor takes `{cfg, log, clock, hooks, codex: {resolve, checkSurface, testedVersion}, notice?}`. `codex` is A's: `resolve` is `resolveCodexBinary` (only `{command, native}` is read), `checkSurface` and `testedVersion` come from `surface.ts`. They're injected because A hadn't landed when E was built, and so the tests use stubs. `notice(level, message)` is a `runner.notice`.
+- `codexBinary()` returns a start path for A's resolver, not the native binary: `codexPath`, else `<home>/tools/codex/current` (the install folder), else the fallback launcher next to the runner's Node.
+- Two methods beyond the interface: `settled()` resolves once nothing is checking or installing (for tests and shutdown), and `sessionStarted(provider, version, ok)` is how the runner reports whether a session reached `init` or `initialize`, for the "failed to start twice" warning.
+- Tests can also inject `exec`, `fetchText`, `env`, `execPath` (npm and the fallback codex sit next to it) and `random`.
+
+**Choices the plan didn't cover:**
+
+- The app's `clis.setPolicy` is kept in `<home>/updates.json`, not `runner.json`. `THREADBARE_CLI_UPDATES=off`, or `off` in `runner.json`, can't be turned on from the app, and a `codexPath` set by hand always shows `off`.
+- `off` stops the hourly checks. `clis.check` still looks the versions up.
+- A held version is installed and kept (`<v>/`, never `current`), so "Update anyway" activates it without downloading again. A hold reports `status: "held"` with `update.state: "unchanged"`, since nothing failed.
+- On a first start, a latest that fails to install or is held falls back to `testedVersion`, as it does for the gate.
+- An update left `running` or `waiting` by a runner that stopped reads as `failed` after the restart.
+- The commands and lookups are in `updates/exec.ts`, a fifth file next to the four planned.
 
 The real npm path gets one integration test, `codex-install.e2e.test.ts`, run under `--e2e` because it needs the network. It uses a temp `THREADBARE_HOME` and a temp `CODEX_HOME`, runs `app-server` only, and sends no prompts. It installs a version into a temp prefix with `npm install --prefix`, starts `app-server`, swaps in another version and checks the running process keeps working. Nothing touches the real installs: not the nvm global prefix, `~/.local/bin/codex`, `~/.local/bin/claude` or Claude's versions folder.
 
