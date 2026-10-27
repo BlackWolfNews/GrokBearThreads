@@ -632,6 +632,27 @@ What spike 1 means for the code:
 
 These unit tests merge before C. The e2e (Tests, below) is a second A change, merged after C.
 
+### As built (A, unit tests; 27 Oct)
+
+Where the build made a call the plan didn't, or differs from it:
+
+- **The normaliser is injected.** `CodexAdapterDeps.normalizer: (ctx, {threadId}) => CodexNormalizer` (the interface is in `codex/types.ts`), so A doesn't import B's file. C wires it in `main.ts` with B's class. The context's `cwd` follows `setCwd`.
+- **A owns turn ownership.** The adapter drops every `cliTurn` and `result` the normaliser emits. It emits its own `cliTurn` for a turn it didn't start, and builds each `result` from the normaliser's (outcome, duration, usage, error, `errorKind`), setting `own`, `answers`, `answered` and `queuedTurns` itself. B can always emit a `result` on `turn/completed` without knowing whose turn it was. If B emits none, A makes a plain one from `turn.status`.
+- **What A feeds the normaliser besides Codex's own notifications:**
+  - `account/read` goes in as `account/updated {authMode, planType, email?}`;
+  - the start-up `account/rateLimits/read` and every update go in as `account/rateLimits/updated` with the merged snapshot `{ordinaryUsageAllowed, rateLimits, rateLimitsByLimitId}` (updates are merged per `limitId`, and nulls keep what was known);
+  - a line over the guard goes in as `threadbare/oversizedLine {bytes, method?, threadId?, turnId?, itemId?, itemType?}` (`OVERSIZED_LINE` in `appserver.ts`), routed like a notification, so B can close that item as "Too large to show";
+  - `closeOpen("Interrupted")` on every exit, so a background terminal left open from an earlier turn gets closed too.
+- **`configWarning`** also calls `CodexAdapterDeps.onNotice(text)`, at most once per adapter (runner run) per text. C wires it to a `runner.notice` warning.
+- **Approval card titles** use the whole unwrapped command, not `commandActions[0].command`, so a chained command shows all of it.
+- **"Always allow" rules** are `codex:command:<JSON argv>` and `codex:fileChange`. On top of the plan's checks, no rule is made or matched when the first word runs other commands (`sh`, `bash`, `env`, `sudo`, `xargs` and the like), and a backtick or `$(` inside double quotes also counts as not plain. A proposed amendment that isn't a prefix of the command falls back to the exact argv.
+- **No auto-accept in full access.** A request in a turn that started in ask mode still shows its card, because mode changes apply from the next turn.
+- **`archive()`** also archives the subagent threads this runner saw the session start (kept in memory per Codex thread), best effort, after the parent. That covers both answers to the open question, so the spike-9 check wasn't run.
+- **An interrupt whose command can't be terminated** emits the normaliser's outputs except the `result`, then ends the process. `exited()` closes the runner's turn as interrupted, and the next message resumes.
+- **Effort or model set back to unset** in a session sends the account's `defaultEffort`, else the model's own (or the account's `defaultModel`), because Codex keeps the last value sent.
+- **Resume** knows the thread id before `thread/resume`, so its own `notLoaded`/`idle` route while `resumePending` is set. Thread traffic before `thread/start` answers is held, then routed.
+- **For C and E:** `CodexAdapter.binariesInUse()` gives `codexBinariesInUse()`. `resolveCodexBinary(start)` returns `{command, args, native, packageRoot?}` (`native: true` when it found the binary behind the launcher), and `nativeBinaryFor(launcher)` and `fallbackCodexPath()` are exported too. `checkSurface(dir)` and `testedVersion` are in `surface.ts`. `toolsFor` takes `buildThreadbareTools(...)`'s array as is (`ToolDefinition` in `tools.ts`).
+
 ## B. Codex events and images (`normalize.ts`, `media.ts`)
 
 **`CodexNormalizer`.**
