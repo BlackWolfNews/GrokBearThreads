@@ -120,11 +120,25 @@ final class SidebarRowTests: XCTestCase {
         XCTAssertEqual(ProjectMark.letter("🐻 Threadbear"), "T")
         XCTAssertEqual(ProjectMark.letter("🐻"), "?")
         XCTAssertEqual(ProjectMark.letter(""), "?")
-        var thread = ThreadSummary(id: "t", title: "t")
-        XCTAssertNil(ProjectMark.project(thread))
-        thread.projects = [ThreadProject(id: "a", title: "Threadbear"), ThreadProject(id: "b", title: "")]
-        XCTAssertEqual(ProjectMark.project(thread)?.id, "a")
+    }
+
+    func testProjectMarkForNoneOneAndTwoProjects() {
+        var thread = ThreadSummary(id: "t", title: "t", cwd: "/Users/mike/dev/me/misc")
+        XCTAssertEqual(ProjectMark.shown(thread), [])
+        XCTAssertEqual(ProjectMark.place(thread), "misc", "no project: the folder")
+        XCTAssertEqual(ProjectMark.help(thread), "/Users/mike/dev/me/misc")
+        thread.projects = [ThreadProject(id: "a", title: "Threadbear")]
+        XCTAssertEqual(ProjectMark.place(thread), "Threadbear")
+        thread.projects.append(ThreadProject(id: "b", title: ""))
+        XCTAssertEqual(ProjectMark.shown(thread).map(\.id), ["a", "b"])
+        XCTAssertEqual(ProjectMark.place(thread), "Threadbear, Untitled project")
         XCTAssertEqual(ProjectMark.help(thread), "Threadbear, Untitled project")
+        // Under a project's heading the row names only the others, and its
+        // folder when there are none.
+        XCTAssertEqual(ProjectMark.place(thread, under: "a"), "Untitled project")
+        XCTAssertEqual(ProjectMark.shown(thread, under: "b").map(\.id), ["a"])
+        thread.projects.removeLast()
+        XCTAssertEqual(ProjectMark.place(thread, under: "a"), "misc")
     }
 
     func testFolderName() {

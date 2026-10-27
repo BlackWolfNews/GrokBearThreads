@@ -127,7 +127,7 @@ images and sent notes read-only.
 Runner files: `runner/src/reviews.ts`, the review methods in `runner.ts`,
 and the shared MCP tool in `threadbare-mcp.ts`. App files: core review models
 and reduction, `ReviewSession.swift`, `ReviewRowCell.swift` and
-`Views/ReviewWindow.swift`. `app/Tools/screenshots.sh /tmp/review-shots --only 15`
+`Views/ReviewWindow.swift`. `app/Tools/screenshots.sh /tmp/review-shots --only 16`
 captures the card, grid, pair and readable-size views using the four original
 images. The mock fixture is `demo_design_review`. See the app README for the
 `review` automation command. HTML previews and overlays remain deferred.

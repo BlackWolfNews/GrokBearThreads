@@ -707,9 +707,11 @@ restart wait for busy threads. It hands over instead:
   `runner.notice` come through the primary. `threads.list`,
   `threads.search` and `hello` include kept threads.
 - A kept thread moves across once nothing would be cut short: no turn,
-  approval or question, background work or wake grace. Background work
-  holds it for 30 minutes after its last turn at most, and is then stopped
-  with the usual note. Messages queued for it at that moment move with it
+  approval or question, background work or wake grace. Background shells
+  and monitors hold it for 30 minutes after its last turn at most (a dev
+  server never ends), and are then stopped with the usual note. Subagents
+  hold it until they finish, up to 4 hours: they end by themselves, and
+  stopping one throws its work away. Messages queued for it at that moment move with it
   and the primary starts them, so a message sent during the turn runs on
   the new release. The draining runner saves the thread, then sends the
   primary `drain.handedOver { threadId }`; the primary loads it and carries
@@ -730,7 +732,8 @@ restart wait for busy threads. It hands over instead:
 - `when: "now"` restarts the primary straight away and tells each draining
   runner to stop too (`drain.stop`).
 - Another handover while one is draining makes the primary a draining
-  runner as well; draining runners don't hand over again.
+  runner as well; draining runners don't hand over again, and close their
+  own connections to older ones, which the new primary connects to.
 
 - The primary's summaries of kept threads carry `onOldRunner: true`, so a
   client can say a thread is finishing on the old release. The flag goes

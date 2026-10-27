@@ -228,3 +228,46 @@ test('Peers: a draining runner\'s threads are marked onOldRunner, its usage read
   assert.equal(changes, 2);
   assert.deepEqual(peers.status()[0].threads, []);
 });
+
+test('subagents hold a kept thread until they finish (up to agentMs); shells only for backgroundMs', async () => {
+  const h = makeHarness();
+  const t = create(h).thread;
+  const s = h.adapter.last;
+  s.init();
+  s.out({ kind: 'tasks', tasks: [{ id: 'a1', type: 'local_agent', kind: 'agent', description: 'Build the worktree feature' }] });
+  s.result('completed');
+  const handed: string[] = [];
+  await h.runner.beginDrain([t.id], { onHandedOver: (id) => handed.push(id), backgroundMs: 30 * MIN, agentMs: 240 * MIN, checkMs: MIN });
+  // Past the shells' limit, the subagent still holds it.
+  h.clock.advance(60 * MIN);
+  await tick();
+  assert.deepEqual(handed, []);
+  assert.equal(s.ended, false);
+  // It finishes; the thread goes across without anything being stopped.
+  s.out({ kind: 'tasks', tasks: [] });
+  h.clock.advance(20_000);
+  await tick();
+  h.clock.advance(MIN);
+  await tick();
+  assert.deepEqual(handed, [t.id]);
+  assert.equal(s.endedHard, false);
+});
+
+test('Peers: once closed (this runner is draining), a thread coming across is not taken in here', async () => {
+  const h = makeHarness();
+  const { writeDrainInfo, Peers } = await import('../../src/handover.ts');
+  writeDrainInfo(h.home, { pid: 434343, port: 1, version: 'old', since: new Date().toISOString(), threads: ['t-old'] });
+  let notify: (m: string, p: any) => void = () => {};
+  const client = {
+    call: async (method: string) => (method === 'drain.hello' ? { threads: ['t-old'] } : method === 'threads.list' ? { threads: [{ id: 't-old', title: 'Old', lastActivityAt: '' }] } : {}),
+    onNotification: (fn: (m: string, p: any) => void) => ((notify = fn), () => {}),
+    waitClosed: () => new Promise<never>(() => {}),
+    close: () => {},
+  };
+  const adopted: string[] = [];
+  const peers = new Peers({ home: h.home, token: 't', log: nullLogger, runner: { adopt: (id) => (adopted.push(id), undefined), publish: () => {} }, sweep: async () => {}, connect: async () => client as any, alive: () => true });
+  await peers.connectAll();
+  peers.close();
+  notify('drain.handedOver', { threadId: 't-old' });
+  assert.deepEqual(adopted, []);
+});
