@@ -146,15 +146,30 @@ type ThreadSummary = {
   subagents?: Subagent[] // the sub-agents the agent has started, foreground
                         // and background: the newest 20, oldest first.
                         // Absent when it has started none
+  projects?: ThreadProject[] // the projects the thread is in (see Projects),
+                        // oldest first. Absent when it's in none
+}
+
+// A project a thread is in, as its summary shows it.
+type ThreadProject = {
+  id: string
+  title: string
+  by: "mike" | "agent" | "librarian" // who put it there
+  pinned?: boolean      // Mike put it there (or an agent was told to): the
+                        // librarian won't take it out
+  at: string            // when it was put there
 }
 
 type Action = {
   id: string            // "<patch>.<slug of the title>": "reseed.reseed-dev-db"
   title: string
   kind: "command" | "prompt"
-  command?: string      // kind "command": run in the thread's folder by `actions.run`
+  command?: string      // kind "command": run by `actions.run`, in `folder`
   prompt?: string       // kind "prompt": sent to the thread as a message by `actions.run`
   patch: string
+  folder?: string       // where the command runs: the project folder the
+                        // patch came from. Absent: the thread's own folder
+  projectId?: string    // the project whose folder gave it (see Projects)
   note?: string
 }
 
@@ -162,10 +177,13 @@ type Hook = {
   id: string            // "<patch>.<slug of the title>"
   title: string
   on: "turn.end"        // when it runs: after a turn the agent completed (not one it was interrupted in, or failed)
-  command: string       // run in the thread's folder, as an action's command is
-  edited?: string       // only after a turn that edited a file matching this glob, relative to the folder ("**/*.ts")
+  command: string       // run in `folder`, as an action's command is
+  edited?: string       // only after a turn that edited a file matching this glob, relative to `folder` ("**/*.ts")
   tell: "failures" | "always" | "never"  // when its result is sent to the agent as a message (see Patches)
   patch: string
+  folder?: string       // as Action's; a hook from a project folder only
+                        // sees edits inside that folder
+  projectId?: string
   note?: string
 }
 
@@ -173,6 +191,10 @@ type PatchInfo = {
   id: string            // "convex", "xcode", or a patch file's name without its extension
   source: "builtin" | "home" | "project"
   file?: string         // the module, for home and project patches
+  folder?: string       // the folder it applies from: the one holding
+                        // `.threadbear/`, or a built-in's project folder
+  projectId?: string    // set when it came from one of the thread's
+                        // projects' folders rather than its own
   error?: string        // the file couldn't be loaded, and gives nothing until it's fixed
 }
 
@@ -182,7 +204,68 @@ type Panel = {
   kind: "url" | "image" // a page in a web view, or a picture the runner draws on request
   url?: string          // kind "url": the page; also what Open in browser opens
   patch: string         // the patch it came from: "convex", "xcode"
+  projectId?: string    // as Action's
   note?: string         // one line about it: the deployment, the project
+}
+
+// A grouping above folders that carries goals, state and notes forward
+// (see Projects).
+type Project = {
+  id: string            // "p_" and 8 hex characters
+  title: string
+  folders: string[]     // absolute paths, in the order patches load from them
+  goals: string         // a few lines: what it's for, what done looks like
+  state: string         // a few lines: where it's up to, what's next
+  notes: string         // markdown: decisions, gotchas, commands, links
+  createdBy: "mike" | "agent" | "librarian"
+  createdByThread?: string // the thread whose agent or look made it
+  createdAt: string
+  updatedAt: string
+  stateUpdatedAt?: string
+  archived?: boolean
+  threadCount: number   // threads in it, put away ones included
+  lastActivityAt?: string // its newest thread's lastActivityAt
+}
+
+// What the librarian (see Projects) is doing, has done and will do next.
+type LibrarianStatus = {
+  state: "idle" | "working" | "paused" | "off"
+  reason?: string       // state "off": why ("No OpenRouter key", "Today's
+                        // model budget is spent", "Model calls are off")
+  paused: boolean       // Mike paused it; looks wait in the queue
+  current?: LibrarianJob & { startedAt: string } // the look under way
+  queue: LibrarianJob[] // what it will look at next, soonest first
+  recent: LibrarianEntry[] // what it did, newest first, the last 50
+  looksToday: number
+  spentTodayUsd: number // its share of the day's model spend
+}
+
+type LibrarianReason =
+  | "first-turn"        // a thread's first turn ended
+  | "new-folder"        // a turn edited files outside the thread's projects' folders
+  | "moved"             // the thread changed folder
+  | "catch-up"          // more turns since its last look (at most hourly)
+  | "asked"             // librarian.run, or a backfill
+
+type LibrarianJob = {
+  threadId: string
+  threadTitle: string
+  reason: LibrarianReason
+  why: string           // the reason in words: "Edited files in ~/dev/me/poddle"
+  dueAt: string
+}
+
+type LibrarianEntry = {
+  id: string
+  at: string
+  threadId: string
+  threadTitle: string
+  reason: LibrarianReason
+  outcome: "joined" | "created" | "updated" | "left" | "nothing" | "skipped" | "failed"
+  text: string          // "Put it in Threadbear", "Made Poddle and put it there",
+                        // "Threadbear's state", "No key", the model's error
+  projectIds?: string[]
+  costUsd?: number
 }
 
 
@@ -354,6 +437,16 @@ replaces whatever the deltas built up.
 | `schedules.delete` | `{ scheduleId }` | `{}` |
 | `schedules.run` | `{ scheduleId }` | `{ schedule: Schedule, threadId: string, turnId: string }` runs it now, as if it were due, even when paused. A repeating schedule keeps its `nextRunAt`; a one-off is finished |
 | `schedules.preview` | `{ cron?: string, at?: string, timezone?: string, count?: number }` | `{ whenText: string, runs: string[] }`, the next `count` (default 5, at most 20) times it would run, for an editor to show as someone types. `-32602` with the reason for a cron or zone it can't read |
+| `projects.list` | `{ archived?: boolean }` | `{ projects: Project[] }`, newest `lastActivityAt` first. Archived ones only with `archived: true` (then all of them) |
+| `projects.get` | `{ projectId }` | `{ project: Project, threadIds: string[] }`, its threads newest activity first, put away ones included |
+| `projects.create` | `{ title: string, folders?: string[], goals?, state?, notes?, threadIds?: string[] }` | `{ project: Project }`, made by Mike (`createdBy: "mike"`). `threadIds` are put in it, pinned. Folders must exist (`-32602` otherwise) |
+| `projects.update` | `{ projectId, title?, folders?: string[], goals?, state?, notes?, archived?: boolean }` | `{ project: Project }`. Replaces what's given. A change of folders reloads its threads' patches |
+| `projects.merge` | `{ projectId, intoId }` | `{ project: Project }` (the one kept). Folders and threads move over, notes are joined, and `projectId` is deleted |
+| `projects.delete` | `{ projectId }` | `{}`. Its threads leave it; nothing else is touched |
+| `threads.setProjects` | `{ threadId, add?: string[], remove?: string[] }` | `{ thread: ThreadSummary }`. What Mike does by hand: an added project is pinned, a removed one is remembered so the librarian never puts the thread back in it |
+| `librarian.status` | `{}` | `{ librarian: LibrarianStatus }` |
+| `librarian.run` | `{ threadId?: string }` | `{ librarian: LibrarianStatus }`. Queues a look at the thread now (reason `asked`), or with no `threadId`, at every thread it has never looked at (a backfill, newest first) |
+| `librarian.update` | `{ paused?: boolean }` | `{ librarian: LibrarianStatus }` |
 | `settings.get` | `{}` | `{ settings: Settings }` |
 | `settings.update` | `{ defaultCwd?, idleMinutes?, maxLiveCLIs?, followMain?, models?: { dailyBudgetUsd?, privateFolders? } }` | `{ settings: Settings }`. Saves what's given to `runner.json` and applies it straight away, except `followMain` (next restart). `defaultCwd` must be an existing folder, `idleMinutes` at least 1, `maxLiveCLIs` 1 to 20, `dailyBudgetUsd` 0 to 100; otherwise `-32602` saying which. Every client gets `settings.updated` |
 | `settings.setKey` | `{ provider: "openrouter", key: string \| null }` | `{ settings: Settings }`. Writes the key to `secrets/openrouter-key` (0600), or removes it for `null`. The key is never sent back, only `set` and `hint`. A key with spaces inside or under 20 characters is `-32602`. Every client gets `settings.updated` |
@@ -366,7 +459,7 @@ replaces whatever the deltas built up.
 | `clis.setPolicy` | `{ provider: Provider, policy: "auto" \| "notify" \| "off" }` | `{ clis: CliStatus[] }` |
 
 Errors use JSON-RPC error objects: `-32602` bad params, `-32004` thread not
-found, `-32005` schedule not found, `-32006` sub-agent not found, `-32010` account not found, `-32020` busy (e.g. two sends racing),
+found, `-32005` schedule not found, `-32006` sub-agent not found, `-32007` project not found, `-32010` account not found, `-32020` busy (e.g. two sends racing),
 `-32601` a method this runner doesn't have (`clis.*` on a runner older than
 them), `-32000` anything else with a readable `message`.
 
@@ -398,6 +491,8 @@ still `-32602`.)
 | `accounts.updated` | `{ accounts: Account[] }` sent to every connected client when the account list or what the runner knows about an account changes: a login appears or goes (checked every 10 seconds), its `models` once the CLI has been asked, its `defaultModel` once a turn has shown it, or its `usage` (Token Stats' `limits.json` changed, or a live reading moved a window by a point or more). The first change goes out at once, then at most one every 5 seconds, always ending on the latest list. Replaces the list from `hello` |
 | `clis.updated` | `{ clis: CliStatus[] }` sent to every connected client when a CLI's status changes (a check finished, an update started, moved on or ended). The latest list wins |
 | `schedules.updated` | `{ schedules: Schedule[] }` sent to every connected client whenever any schedule changes (made, edited, run, deleted, or its thread deleted). The whole list, in `schedules.list` order |
+| `projects.updated` | `{ projects: Project[] }` sent to every connected client when any project changes, as `projects.list` with `archived: true` would answer. Thread membership changes come as `thread.updated` |
+| `librarian.updated` | `{ librarian: LibrarianStatus }` sent to every connected client when the librarian's status changes |
 | `settings.updated` | `{ settings: Settings }` sent to every connected client when a setting or the key changes, and at most once a minute while model calls are adding to the spend |
 | `runner.notice` | `{ level: "info" \| "warning" \| "error", message }`. Also sent straight after the `hello` result for things the client missed (startup problems, a missing `claude` binary) |
 
@@ -522,7 +617,8 @@ read is said in the transcript as a `system.note`.
 
 Patches are found by walking up from the thread's folder to the home
 folder (so a thread in a package of a monorepo gets the project's), plus
-`~/.threadbear/patches/` for every folder. Two kinds:
+`~/.threadbear/patches/` for every folder, plus every folder of every
+project the thread is in (see Projects). Two kinds:
 
 **Patch files**: `.threadbear/patches/<name>.ts` (or `.js`, `.mjs`). The
 runner imports the module (Node runs TypeScript as it is; a changed mtime
@@ -579,6 +675,60 @@ install` in it.
 A client shows what it can: a `url` panel in a web view, an `image` panel
 by asking `panels.render` now and then while it's on screen, and an
 unknown `kind` as a page if it has a `url`.
+
+## Projects
+
+A project groups threads above folders: it can have several folders, a
+thread can be in several projects, and it keeps `goals`, `state` and
+`notes` that carry forward from thread to thread. Nobody has to make one:
+the librarian and the agents do. Kept in `projects.json` in the data dir;
+which projects a thread is in is kept with the thread.
+
+**Patches.** A thread loads patches from, in this order: `~/.threadbear/`,
+each folder of each of its projects (the built-in ones and the patch
+files found walking up from it, each folder once), then its own folder
+as before. Anything from a project folder has `folder` and `projectId`
+set and runs in that folder; a hook from one only runs after a turn that
+edited a file inside it, matched against its `edited` glob relative to
+it. Two items that would share an id get the folder's name in front, the
+later one only (`poddle:convex.dashboard`).
+
+**The brief.** A session that starts (or resumes) on a thread in projects
+is told about them: each project's title, folders, goals and state, at
+most about 2,000 characters in all, and that `read_project` has the
+notes. Claude gets it appended to the system prompt, Codex as developer
+instructions. A thread put in a project while its CLI is live hears about
+it at the start of its next message, in a line beginning `[Threadbear
+project]`.
+
+**The librarian** is the runner's own background job that keeps projects
+up to date, on the small model (`models.*`, feature `projects`, inside the
+daily budget, never for private folders). It looks at a thread when:
+
+- its first turn ends (`first-turn`), 10 seconds later;
+- a turn edits files outside its folder and its projects' folders
+  (`new-folder`), 10 seconds later;
+- it moves folder (`moved`);
+- it has had turns since the last look, an hour after that look at the
+  soonest (`catch-up`);
+- someone asks (`librarian.run`, `asked`).
+
+One look at a time, the soonest due first. A look sends the model the
+project list (title, folders, goals, one line of state) and the thread's
+title, folder, first message, last few messages and the folders it edited
+in, and gets back the projects the thread belongs in, a new project when
+none fits, and a new `state` for a project the thread moved on. What it
+decides takes effect straight away: the thread gets `projects` (`by:
+"librarian"`) and a `system.note` saying so ("Put in Threadbear"), and
+Mike can take it out (`threads.setProjects`), after which it's never put
+back. It never takes out a pinned project or one an agent added. Looks
+are listed in `LibrarianStatus.recent`; without a key or budget the queue
+waits (`state: "off"`).
+
+**Agents** have tools for projects (see Tools for agents):
+`list_projects`, `read_project`, `create_project`, `update_project`,
+`join_project` and `leave_project` (each for their own thread by default).
+An agent's join is pinned.
 
 ## Schedules
 
@@ -644,8 +794,10 @@ Every session, Claude or Codex, gets an MCP server called `threadbare`
 (`runner/src/threadbare-mcp.ts`), bound to its own thread, so an agent can
 drive Threadbare itself: `list_threads`, `read_thread`, `list_accounts`,
 `create_thread`, `send_message`, `update_thread`, `move_thread`,
-`interrupt_thread`, `delete_thread`, and `schedule_message`,
-`list_schedules`, `update_schedule` and `delete_schedule` (see Schedules).
+`interrupt_thread`, `delete_thread`, `schedule_message`,
+`list_schedules`, `update_schedule` and `delete_schedule` (see Schedules),
+and `list_projects`, `read_project`, `create_project`, `update_project`,
+`join_project` and `leave_project` (see Projects).
 `list_accounts` shows each account's provider, note and room left;
 `create_thread` and `move_thread` take Codex accounts. They call the same runner methods as
 the requests above, so once a restart has begun `create_thread` and
