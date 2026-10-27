@@ -30,12 +30,19 @@ final class AppModel {
         isFake = ProcessInfo.processInfo.arguments.contains("-ThreadbearFake")
         if isFake {
             connect(FakeBackend(), pairing: nil)
-            // `-ThreadbearOpen <threadId>`: start on that thread, for screenshots.
-            let args = ProcessInfo.processInfo.arguments
-            if let i = args.firstIndex(of: "-ThreadbearOpen"), i + 1 < args.count { openThreadId = args[i + 1] }
         } else if let saved = PairingStore.load() {
             connect(ConvexBackend(deploymentURL: saved.deploymentURL, token: saved.token), pairing: saved)
         }
+        #if DEBUG
+        // `-ThreadbearPair <link>`: pair on launch, since the simulator asks
+        // "Open in Threadbear?" for links from outside and nothing can tap it.
+        let args = ProcessInfo.processInfo.arguments
+        if let i = args.firstIndex(of: "-ThreadbearPair"), i + 1 < args.count, let link = URL(string: args[i + 1]) {
+            Task { await pair(with: link) }
+        }
+        // `-ThreadbearOpen <threadId>`: start on that thread, for screenshots.
+        if let i = args.firstIndex(of: "-ThreadbearOpen"), i + 1 < args.count { openThreadId = args[i + 1] }
+        #endif
         Task { [weak self] in
             while !Task.isCancelled {
                 try? await Task.sleep(for: .seconds(15))

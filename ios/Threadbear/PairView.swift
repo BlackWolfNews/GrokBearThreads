@@ -2,19 +2,18 @@ import SwiftUI
 import ThreadbearKit
 
 /// First run, or after the token's been refused: pair with the Mac by
-/// scanning the QR code `tb phone-token` shows.
+/// scanning the QR code `ios/scripts/pair-qr.swift` shows.
 struct PairView: View {
     @Environment(AppModel.self) private var model
-    @State private var pasting = false
 
     var body: some View {
         VStack(spacing: 24) {
             Spacer()
-            BearView(pose: .wave, size: 96)
+            BearView(pose: .sit, size: 96)
                 .foregroundStyle(.secondary)
             VStack(spacing: 10) {
                 Text("Pair with your Mac").font(.title2.weight(.semibold))
-                Text("On the Mac, run **tb phone-token** and scan the QR code it shows with the Camera.")
+                Text("On the Mac, run **swift ios/scripts/pair-qr.swift** in the threadbare repo, then scan the code it shows with the Camera.")
                     .multilineTextAlignment(.center)
                     .foregroundStyle(.secondary)
             }
