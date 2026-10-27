@@ -133,6 +133,7 @@ struct ActivityButton: View {
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .shortcutHint(shortcut, .after)
         .onHover { hovering = $0 }
         .help(shortcut.map { "\(title) (\($0))" } ?? title)
         .accessibilityLabel(title)
