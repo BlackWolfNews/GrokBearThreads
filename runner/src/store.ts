@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import type { PermissionMode, PersistedEvent, Provider, ThreadStatus, ImageRef } from './protocol.ts';
+import type { EffortLevel, PermissionMode, PersistedEvent, Provider, ThreadStatus, ImageRef } from './protocol.ts';
 import { atomicWriteFileSync, readJsonSync } from './fsutil.ts';
 import { paths } from './config.ts';
 
@@ -14,6 +14,9 @@ export type ThreadRecord = {
   accountId: string;
   provider: Provider;
   model?: string;
+  effort?: EffortLevel;
+  modelInUse?: string; // full id the CLI ran the last turn on
+  effortInUse?: EffortLevel; // the level the CLI reported for the last turn
   permissionMode: PermissionMode;
   status: ThreadStatus;
   createdAt: string;

@@ -6,12 +6,32 @@ export const PROTOCOL_VERSION = 1;
 
 export type Provider = 'claude';
 export type PermissionMode = 'full' | 'ask';
+export type EffortLevel = 'low' | 'medium' | 'high' | 'xhigh' | 'max';
+export const EFFORT_LEVELS: readonly EffortLevel[] = ['low', 'medium', 'high', 'xhigh', 'max'];
+
+export function isEffortLevel(v: unknown): v is EffortLevel {
+  return typeof v === 'string' && (EFFORT_LEVELS as readonly string[]).includes(v);
+}
+
+// One row of a CLI's model picker: `id` is what to send as a thread's model,
+// `model` the full id it runs as.
+export type ModelChoice = {
+  id: string;
+  model: string;
+  title: string;
+  description?: string;
+  effortLevels?: EffortLevel[];
+};
 
 export type Account = {
   id: string;
   provider: Provider;
   title: string;
   configDir: string;
+  // The full id a thread with no model runs on, once known (the account's
+  // settings, corrected by the first turn seen); and the CLI's model list.
+  defaultModel?: string;
+  models?: ModelChoice[];
 };
 
 export type ThreadStatus = 'idle' | 'starting' | 'running' | 'waiting' | 'error' | 'stopped';
@@ -23,6 +43,9 @@ export type ThreadSummary = {
   accountId: string;
   provider: Provider;
   model?: string;
+  effort?: EffortLevel;
+  modelInUse?: string;
+  effortInUse?: EffortLevel;
   permissionMode: PermissionMode;
   status: ThreadStatus;
   live: boolean;

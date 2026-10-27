@@ -5,7 +5,7 @@ import path from 'node:path';
 import { diffLines } from '../../src/diff.ts';
 import { computeEditDiff, displayPath } from '../../src/tools.ts';
 import { sniffImage, copyImageInto, readImageInfo } from '../../src/media.ts';
-import { discoverAccounts } from '../../src/accounts.ts';
+import { AccountRegistry, discoverAccounts, resolveDefaultModel } from '../../src/accounts.ts';
 import { cliEnv } from '../../src/adapters/claude/adapter.ts';
 import { loadConfig, recordListening, readRunnerJson } from '../../src/config.ts';
 import { tmpDir } from '../helpers/fakes.ts';
@@ -87,6 +87,35 @@ test('account discovery reads only the login email', () => {
     { id: 'claude-10', provider: 'claude', title: 'claude-10', configDir: path.join(accts, 'claude-10') },
   ]);
   assert.ok(!JSON.stringify(found).includes('SHOULD-NOT-APPEAR'));
+});
+
+test("an account's default model: its settings.json, made exact by what the CLI says", () => {
+  const root = tmpDir();
+  const main = path.join(root, 'dot-claude');
+  fs.mkdirSync(main);
+  fs.writeFileSync(path.join(main, 'settings.json'), JSON.stringify({ model: 'claude-fable-5-1[1m]', apiKeyHelper: 'SHOULD-NOT-APPEAR' }));
+  const accts = path.join(root, 'Accounts');
+  fs.mkdirSync(path.join(accts, 'claude-2'), { recursive: true });
+  fs.writeFileSync(path.join(accts, 'claude-2', 'settings.json'), '{ not json');
+  const cfg = { claudeMainDir: main, claudeMainJson: path.join(root, 'claude.json'), tokenStatsAccountsDir: accts };
+  const found = discoverAccounts(cfg);
+  assert.equal(found[0].defaultModel, 'claude-fable-5-1', 'the [1m] suffix is not part of the id');
+  assert.equal(found[1].defaultModel, undefined, 'nothing set: unknown until a turn runs');
+  assert.ok(!JSON.stringify(found).includes('SHOULD-NOT-APPEAR'));
+
+  const registry = new AccountRegistry(cfg);
+  const models = [{ id: 'claude-fable-5-1[1m]', model: 'claude-fable-5-1', title: 'Fable 5.1' }, { id: 'sonnet', model: 'claude-sonnet-5-5', title: 'Sonnet 5.5' }];
+  assert.equal(registry.learn('claude-main', { models }), true);
+  assert.equal(registry.learn('claude-main', { models: [...models] }), false, 'the same list again is no change');
+  assert.deepEqual(registry.get('claude-main')?.models, models);
+  // A turn on a thread with no model is the truth, whatever settings say.
+  assert.equal(registry.learn('claude-2', { defaultModel: 'claude-opus-5-5' }), true);
+  assert.equal(registry.get('claude-2')?.defaultModel, 'claude-opus-5-5');
+  assert.equal(registry.learn('claude-2', { defaultModel: 'claude-opus-5-5' }), false);
+  // An alias in settings resolves through the list.
+  assert.equal(resolveDefaultModel('sonnet', { models }), 'claude-sonnet-5-5');
+  assert.equal(resolveDefaultModel('sonnet', undefined), 'sonnet');
+  assert.equal(resolveDefaultModel(undefined, { models }), undefined);
 });
 
 test('CLI env: CLAUDE_CONFIG_DIR per account, parent session vars dropped', () => {

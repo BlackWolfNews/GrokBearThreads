@@ -22,6 +22,23 @@ type Account = {
   provider: "claude"    // "codex" later
   title: string         // e.g. "you@example.com"
   configDir: string
+  defaultModel?: string // full id of the model a thread with no model runs on
+                        // ("claude-fable-5-1"): the account's own setting,
+                        // corrected by the first turn the runner sees. Absent
+                        // until the runner knows
+  models?: ModelChoice[] // what the account's CLI offers, in its own order,
+                        // once the runner has asked it (a few seconds after
+                        // it starts)
+}
+
+type EffortLevel = "low" | "medium" | "high" | "xhigh" | "max"
+
+type ModelChoice = {
+  id: string            // what to send as `model` ("opus", "claude-fable-5-1[1m]")
+  model: string         // the full id it runs as ("claude-opus-5-5")
+  title: string         // "Opus 5.5"
+  description?: string
+  effortLevels?: EffortLevel[] // absent when the model takes no effort level
 }
 
 type ThreadStatus =
@@ -39,6 +56,9 @@ type ThreadSummary = {
   accountId: string
   provider: "claude"
   model?: string        // undefined means the account's default
+  effort?: EffortLevel  // undefined means the model's own level
+  modelInUse?: string   // full id the CLI ran the last turn on, once one has run
+  effortInUse?: EffortLevel // the level the CLI reported for the last turn
   permissionMode: "full" | "ask"
   status: ThreadStatus
   live: boolean         // a CLI process is attached right now
@@ -114,13 +134,13 @@ replaces whatever the deltas built up.
 
 | method | params | result |
 |---|---|---|
-| `hello` | `{ client: string, version: string }` | `{ runnerVersion, protocol: 1, accounts: Account[], defaults: { cwd, accountId, model? } }`. `defaults.model` is the model a new thread gets when it names none (`runner.json`'s `defaults.model`; a dev runner sets the cheapest); absent means the account's own default. `runnerVersion` is `<package version>+<release id>` when the runner runs from a release, else `<package version>+source` |
+| `hello` | `{ client: string, version: string }` | `{ runnerVersion, protocol: 1, accounts: Account[], defaults: { cwd, accountId, model? } }`. `defaults.model` is the model a new thread gets when it names none (`runner.json`'s `defaults.model`; a dev runner sets the cheapest); absent means the account's own default (`accounts[].defaultModel` names it, when known). `runnerVersion` is `<package version>+<release id>` when the runner runs from a release, else `<package version>+source` |
 | `threads.list` | `{ include?: ("inbox" \| "snoozed" \| "archived")[] }` (default `["inbox"]`) | `{ threads: ThreadSummary[] }` newest activity first |
 | `threads.search` | `{ query: string, limit?: number }` | `{ threads: ThreadSummary[] }` matches title and preview across all threads, archived included |
-| `threads.create` | `{ text: string, images?: ImageRef[], cwd?: string, accountId?: string, model?: string, permissionMode?: "full" \| "ask", title?: string }` | `{ thread: ThreadSummary }` (the first turn starts straight away). With no `model`, the thread gets `defaults.model` from `hello` if there is one |
+| `threads.create` | `{ text: string, images?: ImageRef[], cwd?: string, accountId?: string, model?: string, effort?: EffortLevel, permissionMode?: "full" \| "ask", title?: string }` | `{ thread: ThreadSummary }` (the first turn starts straight away). With no `model`, the thread gets `defaults.model` from `hello` if there is one. With no `effort`, the model's own level |
 | `threads.send` | `{ threadId, text, images?: ImageRef[] }` | `{ turnId }`. If a turn is running, the message is queued and sent when it ends |
 | `threads.interrupt` | `{ threadId }` | `{}` |
-| `threads.update` | `{ threadId, title?, cwd?, accountId?, model?: string \| null, permissionMode?, snoozedUntil?: string \| null, archived?: boolean }` | `{ thread: ThreadSummary }`. Snoozing or archiving releases the CLI. Changing account or cwd takes effect on the next turn. A folder change on the same account copies the native session's transcript to the new folder and resumes it; otherwise (or if that fails) it starts a new native session with a short handoff note |
+| `threads.update` | `{ threadId, title?, cwd?, accountId?, model?: string \| null, effort?: EffortLevel \| null, permissionMode?, snoozedUntil?: string \| null, archived?: boolean }` | `{ thread: ThreadSummary }`. Snoozing or archiving releases the CLI. Changing account or cwd takes effect on the next turn. A model or effort change reaches a live CLI straight away (`null` goes back to the default). A folder change on the same account copies the native session's transcript to the new folder and resumes it; otherwise (or if that fails) it starts a new native session with a short handoff note |
 | `threads.delete` | `{ threadId }` | `{}`. Stops the thread's CLI and moves its folder to `trash/` in the data dir. Every client gets `thread.deleted` |
 | `threads.events` | `{ threadId, afterSeq?: number, beforeSeq?: number, limit?: number }` (default: the newest 500) | `{ events: Event[], firstSeq, lastSeq, inProgress: { itemId, type: "assistant.text" \| "reasoning", text }[] }` |
 | `threads.subscribe` | `{ threadId, afterSeq?: number }` | `{ events: Event[], inProgress: { itemId, type, text }[] }` (everything after `afterSeq`, and the text streamed so far for items still streaming), then pushes `thread.event` notifications. Deltas pushed after the reply carry on from `inProgress` |
@@ -142,6 +162,7 @@ found, `-32010` account not found, `-32020` busy (e.g. two sends racing),
 | `thread.updated` | `{ thread: ThreadSummary }` sent to every connected client whenever a summary changes |
 | `thread.event` | `{ threadId, event: Event }` only for subscribed threads, persisted and transient |
 | `thread.deleted` | `{ threadId }` sent to every connected client when a thread is deleted |
+| `accounts.updated` | `{ accounts: Account[] }` sent to every connected client when what the runner knows about an account changes: its `models` once the CLI has been asked, or its `defaultModel` once a turn has shown it. Replaces the list from `hello` |
 | `runner.notice` | `{ level: "info" \| "warning" \| "error", message }`. Also sent straight after the `hello` result for things the client missed (startup problems, a missing `claude` binary) |
 
 ## Restarts

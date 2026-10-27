@@ -9,12 +9,19 @@ public struct Account: Sendable, Hashable, Codable, Identifiable {
     public var provider: String
     public var title: String
     public var configDir: String
+    /// The full id a thread with no model runs on, once the runner knows
+    /// (the account's settings, corrected by the first turn seen).
+    public var defaultModel: String?
+    /// The CLI's model picker, in its order, once the runner has asked it.
+    public var models: [ModelChoice]
 
-    public init(id: String, provider: String = "claude", title: String, configDir: String = "") {
+    public init(id: String, provider: String = "claude", title: String, configDir: String = "", defaultModel: String? = nil, models: [ModelChoice] = []) {
         self.id = id
         self.provider = provider
         self.title = title
         self.configDir = configDir
+        self.defaultModel = defaultModel
+        self.models = models
     }
 
     public init(from decoder: Decoder) throws {
@@ -23,6 +30,36 @@ public struct Account: Sendable, Hashable, Codable, Identifiable {
         provider = try c.decodeIfPresent(String.self, forKey: .provider) ?? "claude"
         title = try c.decodeIfPresent(String.self, forKey: .title) ?? id
         configDir = try c.decodeIfPresent(String.self, forKey: .configDir) ?? ""
+        defaultModel = try c.decodeIfPresent(String.self, forKey: .defaultModel)
+        models = c.lossyArray(ModelChoice.self, forKey: .models)
+    }
+}
+
+/// One row of a CLI's model picker: `id` is what a thread's model is set
+/// to, `model` the full id it runs as.
+public struct ModelChoice: Sendable, Hashable, Codable, Identifiable {
+    public var id: String
+    public var model: String
+    public var title: String
+    public var description: String?
+    /// Empty when the model takes no effort level.
+    public var effortLevels: [String]
+
+    public init(id: String, model: String, title: String, description: String? = nil, effortLevels: [String] = []) {
+        self.id = id
+        self.model = model
+        self.title = title
+        self.description = description
+        self.effortLevels = effortLevels
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(String.self, forKey: .id)
+        model = try c.decodeIfPresent(String.self, forKey: .model) ?? id
+        title = try c.decodeIfPresent(String.self, forKey: .title) ?? id
+        description = try c.decodeIfPresent(String.self, forKey: .description)
+        effortLevels = try c.decodeIfPresent([String].self, forKey: .effortLevels) ?? []
     }
 }
 
@@ -76,6 +113,11 @@ public struct ThreadSummary: Sendable, Hashable, Codable, Identifiable {
     public var accountId: String
     public var provider: String
     public var model: String?
+    /// The level chosen for the thread; nil is the model's own.
+    public var effort: String?
+    /// What the CLI actually ran the last turn on and at, once one has run.
+    public var modelInUse: String?
+    public var effortInUse: String?
     public var permissionMode: PermissionMode
     public var status: ThreadStatus
     public var live: Bool
@@ -99,7 +141,8 @@ public struct ThreadSummary: Sendable, Hashable, Codable, Identifiable {
         createdAt: Date = Date(), updatedAt: Date = Date(), lastActivityAt: Date = Date(),
         snoozedUntil: Date? = nil, archivedAt: Date? = nil, preview: String = "",
         lastSeq: Int = 0, lastSeenSeq: Int = 0, nativeSessionId: String? = nil,
-        contextTokens: Int? = nil, costUsd: Double? = nil
+        contextTokens: Int? = nil, costUsd: Double? = nil,
+        effort: String? = nil, modelInUse: String? = nil, effortInUse: String? = nil
     ) {
         self.id = id
         self.title = title
@@ -107,6 +150,9 @@ public struct ThreadSummary: Sendable, Hashable, Codable, Identifiable {
         self.accountId = accountId
         self.provider = provider
         self.model = model
+        self.effort = effort
+        self.modelInUse = modelInUse
+        self.effortInUse = effortInUse
         self.permissionMode = permissionMode
         self.status = status
         self.live = live
@@ -136,6 +182,9 @@ public struct ThreadSummary: Sendable, Hashable, Codable, Identifiable {
         accountId = try c.decodeIfPresent(String.self, forKey: .accountId) ?? ""
         provider = try c.decodeIfPresent(String.self, forKey: .provider) ?? "claude"
         model = try c.decodeIfPresent(String.self, forKey: .model)
+        effort = try c.decodeIfPresent(String.self, forKey: .effort)
+        modelInUse = try c.decodeIfPresent(String.self, forKey: .modelInUse)
+        effortInUse = try c.decodeIfPresent(String.self, forKey: .effortInUse)
         permissionMode = try c.decodeIfPresent(PermissionMode.self, forKey: .permissionMode) ?? .full
         status = try c.decodeIfPresent(ThreadStatus.self, forKey: .status) ?? .idle
         live = try c.decodeIfPresent(Bool.self, forKey: .live) ?? false
@@ -162,6 +211,9 @@ public struct ThreadSummary: Sendable, Hashable, Codable, Identifiable {
         try c.encode(accountId, forKey: .accountId)
         try c.encode(provider, forKey: .provider)
         try c.encodeIfPresent(model, forKey: .model)
+        try c.encodeIfPresent(effort, forKey: .effort)
+        try c.encodeIfPresent(modelInUse, forKey: .modelInUse)
+        try c.encodeIfPresent(effortInUse, forKey: .effortInUse)
         try c.encode(permissionMode, forKey: .permissionMode)
         try c.encode(status, forKey: .status)
         try c.encode(live, forKey: .live)
@@ -180,7 +232,7 @@ public struct ThreadSummary: Sendable, Hashable, Codable, Identifiable {
     }
 
     enum CodingKeys: String, CodingKey {
-        case id, title, cwd, accountId, provider, model, permissionMode, status, live, needsYou
+        case id, title, cwd, accountId, provider, model, effort, modelInUse, effortInUse, permissionMode, status, live, needsYou
         case createdAt, updatedAt, lastActivityAt, snoozedUntil, archivedAt, preview
         case lastSeq, lastSeenSeq, nativeSessionId, contextTokens, costUsd
     }

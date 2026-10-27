@@ -45,6 +45,45 @@ public enum ComposerChips {
         return family.capitalized + " " + parts.dropFirst().joined(separator: ".")
     }
 
+    /// The first model id that's set: a thread's own choice, then the
+    /// default that applies (the runner's for a new thread, then what the
+    /// last turn ran on, then the account's). Nil when none is known.
+    public static func resolvedModel(_ ids: String?...) -> String? {
+        ids.first { !($0 ?? "").isEmpty } ?? nil
+    }
+
+    /// How a model id reads: the CLI's own title for it ("Fable 5.1")
+    /// when the account's list is known, else as `model` formats it.
+    public static func modelTitle(_ id: String?, choices: [ModelChoice]) -> String {
+        guard let id, !id.isEmpty else { return "Default" }
+        return choice(for: id, in: choices)?.title ?? model(id)
+    }
+
+    /// The picker row an id belongs to, by what's sent or what it runs as.
+    public static func choice(for id: String, in choices: [ModelChoice]) -> ModelChoice? {
+        choices.first { $0.id == id } ?? choices.first { $0.model == id }
+    }
+
+    /// The model chip: the model's title, and the effort level after a dot
+    /// when one is known ("Fable 5.1 · High").
+    public static func chipTitle(model: String?, effort: String?, choices: [ModelChoice]) -> String {
+        let title = modelTitle(model, choices: choices)
+        guard let effort, !effort.isEmpty else { return title }
+        return "\(title) · \(effortTitle(effort))"
+    }
+
+    /// The CLI's effort levels, lowest first.
+    public static let effortLevels = ["low", "medium", "high", "xhigh", "max"]
+
+    /// How an effort level reads in the menu and the chip.
+    public static func effortTitle(_ level: String) -> String {
+        switch level {
+        case "xhigh": return "Extra high"
+        case "max": return "Max"
+        default: return level.isEmpty ? level : level.prefix(1).uppercased() + level.dropFirst()
+        }
+    }
+
     /// Whether there's anything to send: some words or at least one image.
     public static func canSend(text: String, imageCount: Int) -> Bool {
         imageCount > 0 || !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty

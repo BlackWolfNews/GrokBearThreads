@@ -88,9 +88,15 @@ and the perf run stay away from the real one. Install the runner itself with
   once you send. It starts in `~/dev/me/misc` on the last account you used.
   The account, model and "Ask before edits" are small menus on the
   composer, and "+" > Folder changes the folder; the folder only gets a chip
-  of its own when it isn't the runner's default. Change them if you want,
-  you never have to. Folder, model and "Ask before edits" apply to that one
-  thread; the next starts from the defaults again. The account sticks.
+  of its own when it isn't the runner's default. The model chip names the
+  model a thread really runs on ("Fable 5.1", not "Default") and the effort
+  level once one is chosen or the CLI has reported it ("Fable 5.1 · High").
+  Its menu lists what the account's CLI offers, by the CLI's own names, with
+  a star on the default, older models in a submenu, and the effort level
+  (Default for the model's own, then Low to Max) under that. Change them if
+  you want, you never have to. Folder, model, effort and "Ask before edits"
+  apply to that one thread; the next starts from the defaults again. The
+  account sticks.
 - **Composer.** Return sends, Shift-Return adds a line. Paste or drop images,
   or "+" > "Attach images…";
   they go through `media.import` into the runner's `inbox/` and show as
@@ -406,7 +412,7 @@ result and exits 1 on an error or a timeout.
 `runner.json` has no default model it sets the composer's to
 claude-haiku-5-5 and says so, since a thread sent from it is a real turn.
 `dump` shows what a send from the composer would run on (folder, account,
-model and whose default it is, access).
+model and whose default it is, effort when set, access).
 
 `shot` asks the app for its window's id and runs `screencapture -l` from
 the script, in your shell: the temp bundle has no Screen Recording
@@ -431,7 +437,8 @@ is an error. Commands marked "the open thread" act on `id` when it's given
 |---|---|---|
 | `open` | `id`, `timeout` | selects a thread and waits until its rows are on screen |
 | `select` | `id` | selects it without waiting |
-| `new`, `options` | `cwd`, `account`, `model` (`null` for the default), `ask` | the new-thread composer and its menus; `options` refuses anything else (a typo used to pass) and says what's set now |
+| `new`, `options` | `cwd`, `account`, `model` (`null` for the default), `effort` (`null` for the model's own), `ask` | the new-thread composer and its menus; `options` refuses anything else (a typo used to pass) and says what's set now |
+| `composer-menu` | `menu` (`model`, `account`, `permission` or `folder`; default `model`), `click` (an item's title) | the composer chip's menu for the open thread or a new one, as text: `[x]` the ticked item, `*` the default, the subtitle after a dash, submenus indented; `click` picks an item as a click would |
 | `type`, `send`, `return` | `text`, `replace`, `timeout` | types into the composer (`replace` takes the place of what's there); `send` types and presses Return, and from the new-thread composer waits for the thread it starts and prints its id |
 | `paste-image` | `path` | through the instance's own pasteboard |
 | `click` | `title` | a button in the transcript: Allow, Always allow, Deny, an option, Send answer |
@@ -493,5 +500,6 @@ streams) and text typed into the composer reaching the draft.
   runs off the main thread with non-Sendable objects kept to one thread
   each); `ThreadbareCore` is Swift 6.
 - No syntax colouring in code blocks yet.
-- The model menu offers opus, sonnet and haiku by name; the runner passes the
-  name through to the CLI.
+- The model menu lists the CLI's own rows once the runner has asked each
+  account (a few seconds after it starts); until then it offers opus, sonnet
+  and haiku by name. The runner passes the row's id through to the CLI.

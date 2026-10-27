@@ -5,7 +5,8 @@ final class ModelsTests: XCTestCase {
     func testThreadSummaryDecodesFullAndToleratesUnknownFields() throws {
         let json = """
         {"id":"th1","title":"Fix the flaky test","cwd":"/Users/m/dev/me/misc","accountId":"claude-2","provider":"claude",
-         "model":"claude-haiku-5-5","permissionMode":"ask","status":"waiting","live":true,"needsYou":true,
+         "model":"claude-haiku-5-5","effort":"xhigh","modelInUse":"claude-haiku-5-5","effortInUse":"high",
+         "permissionMode":"ask","status":"waiting","live":true,"needsYou":true,
          "createdAt":"2026-10-26T10:00:00Z","updatedAt":"2026-10-26T10:05:00.250Z","lastActivityAt":"2026-10-26T10:06:00Z",
          "snoozedUntil":"2026-10-27T09:00:00+01:00","preview":"Done.","lastSeq":42,"lastSeenSeq":40,
          "costUsd":0.42,"contextTokens":12345,"futureField":{"a":1},"status2":"x"}
@@ -17,6 +18,12 @@ final class ModelsTests: XCTestCase {
         XCTAssertEqual(thread.lastSeq, 42)
         XCTAssertEqual(thread.costUsd, 0.42)
         XCTAssertEqual(thread.contextTokens, 12345)
+        XCTAssertEqual(thread.effort, "xhigh")
+        XCTAssertEqual(thread.modelInUse, "claude-haiku-5-5")
+        XCTAssertEqual(thread.effortInUse, "high")
+        let again = try JSONDecoder().decode(ThreadSummary.self, from: JSONEncoder().encode(thread))
+        XCTAssertEqual(again.effort, "xhigh")
+        XCTAssertEqual(again.effortInUse, "high")
         XCTAssertEqual(thread.updatedAt.timeIntervalSince1970, 1_793_008_800 + 300.25, accuracy: 0.001)
         XCTAssertEqual(thread.snoozedUntil?.timeIntervalSince1970, ISO8601.parse("2026-10-27T08:00:00Z")?.timeIntervalSince1970)
     }

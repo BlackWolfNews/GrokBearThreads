@@ -41,9 +41,20 @@ const fixtureDirs = (args.fixtures.length ? args.fixtures : defaultFixtureDirs()
 const fillerCount = Number(args.filler ?? 0);
 const quiet = Boolean(args.quiet);
 
+// The model list a real runner learns from each account's CLI, and the
+// default its settings name.
+const EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'];
+const models = [
+  { id: 'opus', model: 'claude-opus-5-5', title: 'Opus 5.5', description: 'For complex work and everyday tasks', effortLevels: EFFORTS },
+  { id: 'claude-fable-5-1[1m]', model: 'claude-fable-5-1', title: 'Fable 5.1', description: 'For your toughest challenges', effortLevels: EFFORTS },
+  { id: 'sonnet', model: 'claude-sonnet-5-5', title: 'Sonnet 5.5', description: 'Most efficient for simpler tasks', effortLevels: EFFORTS },
+  { id: 'haiku', model: 'claude-haiku-5-5', title: 'Haiku 5.5', description: 'Fastest for quick answers', effortLevels: EFFORTS },
+  { id: 'claude-haiku-4-5-20251001', model: 'claude-haiku-4-5-20251001', title: 'Haiku 4.5', description: 'Fastest for quick answers' },
+  { id: 'claude-opus-5', model: 'claude-opus-5', title: 'Opus 5', description: 'Best for everyday, complex tasks', effortLevels: EFFORTS },
+];
 const accounts = [
-  { id: 'claude-main', provider: 'claude', title: 'mike@example.com', configDir: '~/.claude' },
-  { id: 'claude-3', provider: 'claude', title: 'mike+3@example.com', configDir: '~/Library/Application Support/Token Stats/Accounts/claude-3' },
+  { id: 'claude-main', provider: 'claude', title: 'mike@example.com', configDir: '~/.claude', defaultModel: 'claude-fable-5-1', models },
+  { id: 'claude-3', provider: 'claude', title: 'mike+3@example.com', configDir: '~/Library/Application Support/Token Stats/Accounts/claude-3', defaultModel: 'claude-fable-5-1', models },
 ];
 // The synthetic fixtures live under a made-up /Users/mike, so the default
 // folder does too: the app only shows a folder chip away from the default.
@@ -164,7 +175,7 @@ async function dispatch(client, method, p) {
       const now = iso();
       const summary = {
         id: threadId, title: (p.title ?? p.text.split('\n')[0]).slice(0, 60), cwd: p.cwd ?? defaults.cwd,
-        accountId: p.accountId ?? defaults.accountId, provider: 'claude', model: p.model,
+        accountId: p.accountId ?? defaults.accountId, provider: 'claude', model: p.model, effort: p.effort,
         permissionMode: p.permissionMode ?? 'full', status: 'starting', live: true, needsYou: false,
         createdAt: now, updatedAt: now, lastActivityAt: now, preview: '', lastSeq: 0, lastSeenSeq: 0,
       };
@@ -189,6 +200,7 @@ async function dispatch(client, method, p) {
       const s = t.summary;
       for (const key of ['title', 'cwd', 'accountId', 'permissionMode']) if (p[key] !== undefined) s[key] = p[key];
       if (p.model !== undefined) s.model = p.model ?? undefined;
+      if (p.effort !== undefined) s.effort = p.effort ?? undefined;
       if (p.snoozedUntil !== undefined) {
         s.snoozedUntil = p.snoozedUntil ?? undefined;
         if (s.snoozedUntil) { s.live = false; scheduleWake(s.id); }

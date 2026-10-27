@@ -128,7 +128,8 @@ export function buildThreadbareTools(control: ThreadControl, selfId: string, now
       `status: ${t.status}${t.needsYou ? ' (needs Mike)' : ''}`,
       `folder: ${t.cwd}`,
       `account: ${t.accountId}`,
-      `model: ${t.model ?? 'default'}`,
+      `model: ${t.model ?? 'default'}${t.modelInUse ? ` (running as ${t.modelInUse})` : ''}`,
+      `effort: ${t.effort ?? 'default'}${t.effortInUse ? ` (${t.effortInUse} last turn)` : ''}`,
       `permissions: ${t.permissionMode === 'full' ? 'full access' : 'ask before edits'}`,
       t.snoozedUntil ? `snoozed until: ${t.snoozedUntil}` : '',
       t.archivedAt ? `archived: ${t.archivedAt}` : '',
@@ -207,15 +208,17 @@ export function buildThreadbareTools(control: ThreadControl, selfId: string, now
         folder: z.string().optional().describe("Working folder. Default: this thread's folder. Relative paths are from this thread's folder."),
         account: z.string().optional().describe('Account id or email (see list_accounts). Default: the last one used.'),
         model: z.string().optional().describe("Model id. Default: the runner's default model if it has one (a dev runner's is the cheapest), else the account's."),
+        effort: z.enum(['low', 'medium', 'high', 'xhigh', 'max']).optional().describe("Reasoning effort. Default: the model's own level."),
         permissionMode: z.enum(['full', 'ask']).optional().describe('"full" (default) or "ask" before edits and commands.'),
       },
-      handle(({ text, title, folder: f, account: acc, model, permissionMode }) => {
+      handle(({ text, title, folder: f, account: acc, model, effort, permissionMode }) => {
         const r = control.create({
           text: from() + text,
           title: title?.trim() || text.split('\n').map((l) => l.trim()).find(Boolean)?.slice(0, 200),
           cwd: folder(f ?? '.'),
           accountId: account(acc),
           model,
+          effort,
           permissionMode,
         });
         return `Started thread ${r.thread.id} "${r.thread.title}" in ${r.thread.cwd} on ${r.thread.accountId}.`;
@@ -242,17 +245,19 @@ export function buildThreadbareTools(control: ThreadControl, selfId: string, now
         ...thisOrOther,
         title: z.string().optional(),
         model: z.string().nullable().optional().describe('Model id, or null for the account default.'),
+        effort: z.enum(['low', 'medium', 'high', 'xhigh', 'max']).nullable().optional().describe("Reasoning effort, or null for the model's own level."),
         permissionMode: z.enum(['full', 'ask']).optional(),
         snooze: z.string().optional().describe('Snooze until: 30m, 2h, 1d, tomorrow, an ISO time, or "off" to wake it.'),
         archived: z.boolean().optional().describe('true to archive, false to bring back to the inbox.'),
       },
-      handle(({ threadId, id: alias, title, model, permissionMode, snooze, archived }) => {
+      handle(({ threadId, id: alias, title, model, effort, permissionMode, snooze, archived }) => {
         const id = resolve(threadId ?? alias);
         const stops = (snooze !== undefined && snooze.trim().toLowerCase() !== 'off') || archived === true;
         if (id === selfId && stops) throw new Error("Can't snooze or archive this thread from inside its own turn. Ask Mike to, or do it when the work is done.");
         const upd: Parameters<ThreadControl['update']>[0] = { threadId: id };
         if (title !== undefined) upd.title = title;
         if (model !== undefined) upd.model = model;
+        if (effort !== undefined) upd.effort = effort;
         if (permissionMode !== undefined) upd.permissionMode = permissionMode;
         if (snooze !== undefined) upd.snoozedUntil = snooze.trim().toLowerCase() === 'off' ? null : parseWhen(snooze, now());
         if (archived !== undefined) upd.archived = archived;

@@ -51,6 +51,7 @@ final class AppModel {
     var newThreadCwd: String?
     var newThreadAccount: String?
     var newThreadModel: String?
+    var newThreadEffort: String?
     var newThreadAsk = false
     /// A sidebar row drawn as if the pointer were over it, so the screenshot
     /// run can show the hover buttons without moving the mouse.
@@ -229,6 +230,10 @@ final class AppModel {
                 sessions[threadId]?.receive(event)
             case .threadDeleted(let threadId):
                 forget(threadId)
+            case .accountsUpdated(let list):
+                // The runner learned something (its model lists, a
+                // default it saw a turn run on): replaces hello's list.
+                accounts = list
             case .runnerNotice(let level, let message):
                 notice(level: level, message)
             case .other:
@@ -396,7 +401,7 @@ final class AppModel {
             let account = newThreadAccount ?? lastAccountId
             let request = NewThreadRequest(
                 text: trimmed, images: draft.images, cwd: newThreadCwd ?? defaults.cwd, accountId: account,
-                model: newThreadModel, permissionMode: newThreadAsk ? .ask : .full
+                model: newThreadModel, effort: newThreadEffort, permissionMode: newThreadAsk ? .ask : .full
             )
             Task {
                 do {
@@ -407,6 +412,7 @@ final class AppModel {
                     // The account sticks (the plan's "last-used account").
                     newThreadCwd = nil
                     newThreadModel = nil
+                    newThreadEffort = nil
                     newThreadAsk = false
                     threads[thread.id] = thread
                     select(thread.id)
@@ -480,6 +486,14 @@ final class AppModel {
 
     func setModel(_ threadId: String, _ model: String?) {
         update(threadId, ThreadUpdate(model: .some(model)))
+    }
+
+    func setEffort(_ threadId: String, _ effort: String?) {
+        update(threadId, ThreadUpdate(effort: .some(effort)))
+    }
+
+    func account(_ id: String) -> Account? {
+        accounts.first { $0.id == id }
     }
 
     func setAccount(_ threadId: String, _ accountId: String) {

@@ -427,7 +427,7 @@ export function formatSelf(t: ThreadSummary): string {
     t.id,
     t.title,
     `Status: ${t.status}${t.live ? ', CLI live' : ''}`,
-    `Account: ${t.accountId}, ${t.model ? `model ${t.model}` : 'default model'}, ${access(t)}`,
+    `Account: ${t.accountId}, ${t.model ? `model ${t.model}` : 'default model'}${t.modelInUse ? ` (${t.modelInUse})` : ''}, effort ${t.effort ?? 'default'}${t.effortInUse ? ` (${t.effortInUse})` : ''}, ${access(t)}`,
     `Folder: ${t.cwd}`,
     `Events: ${t.lastSeq}`,
   ];

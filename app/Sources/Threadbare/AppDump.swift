@@ -53,6 +53,8 @@ struct AppDump: Encodable {
         /// The model, or "default (...)" saying whose default.
         var model: String
         var ask: Bool
+        /// The effort level, or "default" for the model's own.
+        var effort: String = "default"
     }
 
     struct Settings {
@@ -60,19 +62,25 @@ struct AppDump: Encodable {
         var account: String
         var model: String
         var ask: Bool
+        var effort: String = "default"
     }
 
     /// What a new thread sent from the composer would get, as the
     /// composer's menus show it (`ThreadSettings` in ComposerControls).
     @MainActor
     static func newThreadSettings(_ app: AppModel) -> Settings {
-        Settings(cwd: app.newThreadCwd ?? app.defaults.cwd, account: app.newThreadAccount ?? app.lastAccountId,
-                 model: app.newThreadModel ?? defaultModel(app), ask: app.newThreadAsk)
+        let account = app.newThreadAccount ?? app.lastAccountId
+        return Settings(cwd: app.newThreadCwd ?? app.defaults.cwd, account: account,
+                        model: app.newThreadModel ?? defaultModel(app, account: account), ask: app.newThreadAsk,
+                        effort: app.newThreadEffort ?? "default")
     }
 
+    /// Whose default a new thread gets, and which model that is when known.
     @MainActor
-    static func defaultModel(_ app: AppModel) -> String {
-        app.defaults.model.map { "default (the runner's, \($0))" } ?? "default (the account's)"
+    static func defaultModel(_ app: AppModel, account: String) -> String {
+        if let model = app.defaults.model { return "default (the runner's, \(model))" }
+        if let model = app.account(account)?.defaultModel { return "default (the account's, \(model))" }
+        return "default (the account's)"
     }
 
     struct Row: Encodable {
@@ -179,12 +187,16 @@ struct AppDump: Encodable {
     private static func composer(_ app: AppModel, key: String) -> Composer {
         let settings: Settings
         if let thread = app.selectedThread {
-            settings = Settings(cwd: thread.cwd, account: thread.accountId, model: thread.model ?? defaultModel(app), ask: thread.permissionMode == .ask)
+            // A thread's model is its own, or what its last turn ran on,
+            // or the account's default.
+            let model = thread.model ?? thread.modelInUse.map { "default (the account's, \($0))" } ?? defaultModel(app, account: thread.accountId)
+            settings = Settings(cwd: thread.cwd, account: thread.accountId, model: model, ask: thread.permissionMode == .ask,
+                                effort: thread.effort ?? thread.effortInUse.map { "default (\($0))" } ?? "default")
         } else {
             settings = newThreadSettings(app)
         }
         return Composer(draft: key, text: app.drafts[key]?.text ?? "", images: app.drafts[key]?.images.count ?? 0,
-                        cwd: settings.cwd, account: settings.account, model: settings.model, ask: settings.ask)
+                        cwd: settings.cwd, account: settings.account, model: settings.model, ask: settings.ask, effort: settings.effort)
     }
 
     /// Rows a click opens: work lines, groups and settled approvals that
@@ -244,7 +256,7 @@ struct AppDump: Encodable {
         }
         lines.append("composer (\(composer.draft)): \"\(composer.text)\"" + (composer.images > 0 ? " and \(composer.images) image(s)" : ""))
         lines.append("  \(composer.draft == "new" ? "starts" : "runs") in \(composer.cwd) on \(composer.account), model \(composer.model), "
-            + (composer.ask ? "asks before edits" : "full access"))
+            + (composer.effort == "default" ? "" : "effort \(composer.effort), ") + (composer.ask ? "asks before edits" : "full access"))
         if let transcript {
             var about = "\(transcript.rows.count) rows, \(transcript.state)"
             if transcript.hasMoreAbove { about += ", more above" }

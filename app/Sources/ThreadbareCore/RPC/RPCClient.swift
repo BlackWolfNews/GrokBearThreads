@@ -28,6 +28,7 @@ public enum RPCNotification: Sendable {
     case threadUpdated(ThreadSummary)
     case threadEvent(threadId: String, event: Event)
     case threadDeleted(threadId: String)
+    case accountsUpdated([Account])
     case runnerNotice(level: String, message: String)
     case other(method: String)
 }
@@ -209,6 +210,10 @@ public final class RPCClient: Sendable {
             guard let params = try? decoder.decode(RPCNotificationEnvelope<ThreadDeletedParams>.self, from: data).params
             else { return nil }
             return .threadDeleted(threadId: params.threadId)
+        case "accounts.updated":
+            guard let params = try? decoder.decode(RPCNotificationEnvelope<AccountsUpdatedParams>.self, from: data).params
+            else { return nil }
+            return .accountsUpdated(params.accounts)
         case "runner.notice":
             guard let params = try? decoder.decode(RPCNotificationEnvelope<RunnerNoticeParams>.self, from: data).params
             else { return nil }
@@ -280,6 +285,17 @@ private struct ThreadEventParams: Decodable {
 
 private struct ThreadDeletedParams: Decodable {
     var threadId: String
+}
+
+private struct AccountsUpdatedParams: Decodable {
+    var accounts: [Account]
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        accounts = c.lossyArray(Account.self, forKey: .accounts)
+    }
+
+    enum CodingKeys: String, CodingKey { case accounts }
 }
 
 private struct RunnerNoticeParams: Decodable {

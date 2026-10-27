@@ -10,6 +10,7 @@ const OPTIONS = {
   cwd: { type: 'string' },
   account: { type: 'string' },
   model: { type: 'string' },
+  effort: { type: 'string' },
   ask: { type: 'boolean' },
   image: { type: 'string', multiple: true },
   wait: { type: 'boolean' },
@@ -39,7 +40,7 @@ const OPTIONS = {
 
 const HELP = `tb: talk to the Threadbare runner
 
-  tb new "text" [--cwd DIR] [--account ID] [--model M] [--ask] [--image FILE]... [--wait]
+  tb new "text" [--cwd DIR] [--account ID] [--model M] [--effort L] [--ask] [--image FILE]... [--wait]
   tb send <threadId> "text" [--image FILE]... [--wait]
   tb list [--snoozed] [--archived] [--all] [--json]
   tb search "words" [--json]
@@ -63,7 +64,7 @@ ${DEV_HELP}`;
 // The flags each command reads. Any other is refused rather than ignored:
 // `tb events <id> --from 3` used to print every event as if it had worked.
 const COMMAND_FLAGS: Record<string, string[]> = {
-  new: ['cwd', 'account', 'model', 'ask', 'image', 'wait', 'json'],
+  new: ['cwd', 'account', 'model', 'effort', 'ask', 'image', 'wait', 'json'],
   send: ['image', 'wait', 'json'],
   list: ['snoozed', 'archived', 'all', 'json'],
   search: ['json'],
@@ -170,6 +171,7 @@ async function run(client: RunnerClient, cmd: string, args: string[], f: Flags):
       if (f.cwd) params.cwd = path.resolve(String(f.cwd));
       if (f.account) params.accountId = f.account;
       if (f.model) params.model = f.model;
+      if (f.effort) params.effort = f.effort;
       if (f.ask) params.permissionMode = 'ask';
       const r = await client.call<{ thread: ThreadSummary; turnId: string }>('threads.create', params);
       console.log(r.thread.id);

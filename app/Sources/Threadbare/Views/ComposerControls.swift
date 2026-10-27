@@ -17,7 +17,6 @@ struct ComposerControls: View {
         let settings = ThreadSettings(app: app, thread: thread)
         let cwd = settings.cwd
         let account = settings.account
-        let model = settings.model
         let ask = settings.ask
         HStack(spacing: 4) {
             PlusButton { settings.plusMenu(attach: onAttach) }
@@ -33,7 +32,7 @@ struct ComposerControls: View {
                 settings.accountMenu()
             }
             ChipDivider()
-            ComposerChip(icon: "sparkle", title: ComposerChips.model(model), help: model ?? "The account's default model") {
+            ComposerChip(icon: "sparkle", title: settings.modelChipTitle, help: settings.modelChipHelp) {
                 settings.modelMenu()
             }
             ChipDivider()
@@ -57,14 +56,45 @@ struct ComposerControls: View {
 /// Menus are built when a chip is clicked, so the composer doesn't redraw
 /// whenever any thread in the list changes.
 @MainActor
-private struct ThreadSettings {
+struct ThreadSettings {
     let app: AppModel
     let thread: ThreadSummary?
 
     var cwd: String { thread?.cwd ?? app.newThreadCwd ?? app.defaults.cwd }
     var account: String { thread?.accountId ?? app.newThreadAccount ?? app.lastAccountId }
     var model: String? { thread == nil ? app.newThreadModel : thread?.model }
+    var effort: String? { thread == nil ? app.newThreadEffort : thread?.effort }
     var ask: Bool { thread.map { $0.permissionMode == .ask } ?? app.newThreadAsk }
+
+    /// What the account's CLI offers, once the runner has asked it.
+    var choices: [ModelChoice] { app.account(account)?.models ?? [] }
+
+    /// The model a thread with none of its own runs on: the runner's
+    /// default for a new thread, else the account's. For an open thread the
+    /// last turn is the truth, and it already includes the runner's default.
+    var defaultModel: String? {
+        if let thread { return ComposerChips.resolvedModel(thread.modelInUse, app.account(thread.accountId)?.defaultModel) }
+        return ComposerChips.resolvedModel(app.defaults.model, app.account(account)?.defaultModel)
+    }
+
+    /// The model the chip shows, resolved; nil only before the runner has
+    /// said anything.
+    var effectiveModel: String? { ComposerChips.resolvedModel(model, defaultModel) }
+
+    /// The level the chip shows: the one chosen, else what the CLI said it
+    /// ran the last turn at.
+    var effectiveEffort: String? { effort ?? thread?.effortInUse }
+
+    var modelChipTitle: String { ComposerChips.chipTitle(model: effectiveModel, effort: effectiveEffort, choices: choices) }
+
+    var modelChipHelp: String {
+        var parts: [String] = []
+        if let model { parts.append(model) } else if let defaultModel { parts.append("\(defaultModel), the default") } else { parts.append("The account's default model") }
+        if let effort { parts.append("\(ComposerChips.effortTitle(effort).lowercased()) effort") }
+        else if let level = thread?.effortInUse { parts.append("\(level) effort, the model's own level") }
+        else { parts.append("the model's own effort level") }
+        return parts.joined(separator: ", ")
+    }
 
     /// "+": images, and the folder, which has no chip of its own while it's
     /// the default.
@@ -107,22 +137,65 @@ private struct ThreadSettings {
         return menu
     }
 
+    /// The models by name, the default one starred, then the effort level.
+    /// Picking the default row leaves the thread on the default (so it
+    /// follows the account's setting), any other pins that model.
     func modelMenu() -> NSMenu {
         let menu = NSMenu()
-        let current = model
-        let fallback = ActionMenuItem("Default", checked: current == nil) { setModel(nil) }
-        // A dev runner sets a default model of its own (runner.json).
-        fallback.subtitle = app.defaults.model.map { "The runner's default, \($0)" } ?? "Whatever the account is set to use"
-        menu.addItem(fallback)
-        menu.addItem(.separator())
-        for name in ["opus", "sonnet", "haiku"] {
-            menu.addItem(ActionMenuItem(name.capitalized, checked: current == name) { setModel(name) })
+        let effective = effectiveModel
+        let defaultId = defaultModel
+        // The CLI's list once known; the three aliases until then.
+        let known = choices.isEmpty ? ["opus", "sonnet", "haiku"].map { ModelChoice(id: $0, model: $0, title: ComposerChips.model($0)) } : choices
+        // The picker's main rows: the aliases (a word), and whatever the
+        // default is. Dated and old full ids go under "Older models".
+        let isMain = { (c: ModelChoice) -> Bool in
+            c.id.allSatisfy(\.isLetter) || Self.matches(c, defaultId) || Self.matches(c, effective)
         }
-        // A model set some other way (a full id) still shows, ticked.
-        if let current, !["opus", "sonnet", "haiku"].contains(current) {
-            menu.addItem(ActionMenuItem(current, checked: true) { setModel(current) })
+        var main = known.filter(isMain)
+        let older = known.filter { !isMain($0) }
+        if let effective, !known.contains(where: { Self.matches($0, effective) }) {
+            // A model set some other way (a full id) still shows, ticked.
+            main.append(ModelChoice(id: effective, model: effective, title: ComposerChips.model(effective)))
+        }
+        var seenModels = Set<String>()
+        for c in main {
+            // The CLI lists "opus" and the default both as Opus 5.5: one row.
+            guard seenModels.insert(c.model).inserted else { continue }
+            let isDefault = Self.matches(c, defaultId)
+            let item = ActionMenuItem(c.title, checked: Self.matches(c, effective)) { setModel(isDefault ? nil : c.id) }
+            item.image = isDefault ? NSImage(systemSymbolName: "star.fill", accessibilityDescription: "Default") : NSImage(size: NSSize(width: 16, height: 16), flipped: false) { _ in true }
+            if isDefault {
+                item.subtitle = app.defaults.model != nil && thread == nil ? "The runner's default" : "The account's default"
+            } else if let description = c.description {
+                item.subtitle = description
+            }
+            menu.addItem(item)
+        }
+        if !older.isEmpty {
+            let more = NSMenuItem(title: "Older models", action: nil, keyEquivalent: "")
+            let sub = NSMenu()
+            for c in older {
+                sub.addItem(ActionMenuItem(c.title, checked: Self.matches(c, effective)) { setModel(c.id) })
+            }
+            more.submenu = sub
+            menu.addItem(more)
+        }
+        menu.addItem(.separator())
+        menu.addItem(.sectionHeader(title: "Effort"))
+        let chosen = effort
+        let own = ActionMenuItem("Default", checked: chosen == nil) { setEffort(nil) }
+        own.subtitle = thread?.effortInUse.map { "The model's own level, \(ComposerChips.effortTitle($0).lowercased()) last turn" } ?? "The model's own level"
+        menu.addItem(own)
+        let levels = effective.flatMap { ComposerChips.choice(for: $0, in: choices)?.effortLevels }.flatMap { $0.isEmpty ? nil : $0 } ?? ComposerChips.effortLevels
+        for level in levels {
+            menu.addItem(ActionMenuItem(ComposerChips.effortTitle(level), checked: chosen == level) { setEffort(level) })
         }
         return menu
+    }
+
+    private static func matches(_ c: ModelChoice, _ id: String?) -> Bool {
+        guard let id, !id.isEmpty else { return false }
+        return c.id == id || c.model == id
     }
 
     func permissionMenu() -> NSMenu {
@@ -168,6 +241,10 @@ private struct ThreadSettings {
 
     private func setModel(_ model: String?) {
         if let thread { app.setModel(thread.id, model) } else { app.newThreadModel = model }
+    }
+
+    private func setEffort(_ effort: String?) {
+        if let thread { app.setEffort(thread.id, effort) } else { app.newThreadEffort = effort }
     }
 
     private func setAsk(_ ask: Bool) {

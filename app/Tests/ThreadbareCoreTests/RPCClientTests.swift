@@ -112,6 +112,10 @@ final class RPCClientTests: XCTestCase {
             "seq": 4, "ts": "2026-10-26T10:00:01Z", "threadId": "th1", "type": "assistant.text.delta", "itemId": "m1", "text": "Hel",
         ]]]))
         transport.push(E.json(["jsonrpc": "2.0", "method": "thread.deleted", "params": ["threadId": "th2"]]))
+        transport.push(E.json(["jsonrpc": "2.0", "method": "accounts.updated", "params": ["accounts": [
+            ["id": "claude-3", "title": "mike@example.com", "defaultModel": "claude-fable-5-1",
+             "models": [["id": "opus", "model": "claude-opus-5-5", "title": "Opus 5.5", "effortLevels": ["low", "max"]], ["broken": true]]],
+        ]]]))
         transport.push(E.json(["jsonrpc": "2.0", "method": "some.future.thing", "params": [:]]))
         var iterator = client.notifications.makeAsyncIterator()
         guard case .threadUpdated(let thread)? = await iterator.next() else { return XCTFail("no update") }
@@ -123,6 +127,10 @@ final class RPCClientTests: XCTestCase {
         XCTAssertEqual(event.payload, .assistantTextDelta(itemId: "m1", text: "Hel"))
         guard case .threadDeleted(let deleted)? = await iterator.next() else { return XCTFail("no delete") }
         XCTAssertEqual(deleted, "th2")
+        guard case .accountsUpdated(let accounts)? = await iterator.next() else { return XCTFail("no accounts") }
+        XCTAssertEqual(accounts.first?.defaultModel, "claude-fable-5-1")
+        XCTAssertEqual(accounts.first?.models.map(\.title), ["Opus 5.5"], "a row that doesn't decode is skipped")
+        XCTAssertEqual(accounts.first?.models.first?.effortLevels, ["low", "max"])
         guard case .other(let method)? = await iterator.next() else { return XCTFail("no other") }
         XCTAssertEqual(method, "some.future.thing")
     }
@@ -195,8 +203,10 @@ final class RPCClientTests: XCTestCase {
     }
 
     func testThreadUpdateParamsEncodeNullToClear() {
-        let update = ThreadUpdate(model: .some(nil), snoozedUntil: .some(nil), archived: false)
+        let update = ThreadUpdate(model: .some(nil), effort: .some(nil), snoozedUntil: .some(nil), archived: false)
         XCTAssertEqual(update.params["model"], .null)
+        XCTAssertEqual(update.params["effort"], .null)
+        XCTAssertEqual(ThreadUpdate(effort: .some("xhigh")).params["effort"], .string("xhigh"))
         XCTAssertEqual(update.params["snoozedUntil"], .null)
         XCTAssertEqual(update.params["archived"], .bool(false))
         XCTAssertNil(update.params["title"])

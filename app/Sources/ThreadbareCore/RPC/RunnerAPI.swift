@@ -23,6 +23,7 @@ public extension RPCClient {
         if let cwd = request.cwd { params["cwd"] = .string(cwd) }
         if let accountId = request.accountId { params["accountId"] = .string(accountId) }
         if let model = request.model { params["model"] = .string(model) }
+        if let effort = request.effort { params["effort"] = .string(effort) }
         if let mode = request.permissionMode { params["permissionMode"] = .string(mode.rawValue) }
         if let title = request.title { params["title"] = .string(title) }
         return try await call("threads.create", .object(params), as: ThreadResult.self).thread
@@ -93,15 +94,17 @@ public struct NewThreadRequest: Sendable, Hashable {
     public var cwd: String?
     public var accountId: String?
     public var model: String?
+    public var effort: String?
     public var permissionMode: PermissionMode?
     public var title: String?
 
-    public init(text: String, images: [ImageRef] = [], cwd: String? = nil, accountId: String? = nil, model: String? = nil, permissionMode: PermissionMode? = nil, title: String? = nil) {
+    public init(text: String, images: [ImageRef] = [], cwd: String? = nil, accountId: String? = nil, model: String? = nil, effort: String? = nil, permissionMode: PermissionMode? = nil, title: String? = nil) {
         self.text = text
         self.images = images
         self.cwd = cwd
         self.accountId = accountId
         self.model = model
+        self.effort = effort
         self.permissionMode = permissionMode
         self.title = title
     }
@@ -114,15 +117,17 @@ public struct ThreadUpdate: Sendable, Hashable {
     public var cwd: String?
     public var accountId: String?
     public var model: String??
+    public var effort: String??
     public var permissionMode: PermissionMode?
     public var snoozedUntil: Date??
     public var archived: Bool?
 
-    public init(title: String? = nil, cwd: String? = nil, accountId: String? = nil, model: String?? = nil, permissionMode: PermissionMode? = nil, snoozedUntil: Date?? = nil, archived: Bool? = nil) {
+    public init(title: String? = nil, cwd: String? = nil, accountId: String? = nil, model: String?? = nil, effort: String?? = nil, permissionMode: PermissionMode? = nil, snoozedUntil: Date?? = nil, archived: Bool? = nil) {
         self.title = title
         self.cwd = cwd
         self.accountId = accountId
         self.model = model
+        self.effort = effort
         self.permissionMode = permissionMode
         self.snoozedUntil = snoozedUntil
         self.archived = archived
@@ -134,6 +139,7 @@ public struct ThreadUpdate: Sendable, Hashable {
         if let cwd { params["cwd"] = .string(cwd) }
         if let accountId { params["accountId"] = .string(accountId) }
         if let model { params["model"] = model.map { .string($0) } ?? .null }
+        if let effort { params["effort"] = effort.map { .string($0) } ?? .null }
         if let permissionMode { params["permissionMode"] = .string(permissionMode.rawValue) }
         if let snoozedUntil { params["snoozedUntil"] = snoozedUntil.map { .string(ISO8601.format($0)) } ?? .null }
         if let archived { params["archived"] = .bool(archived) }

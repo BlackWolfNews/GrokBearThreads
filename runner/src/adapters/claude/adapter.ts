@@ -1,7 +1,9 @@
 import crypto from 'node:crypto';
+import os from 'node:os';
 import { query as sdkQuery } from '@anthropic-ai/claude-agent-sdk';
-import type { McpServerConfig, Options, PermissionResult, Query, SDKUserMessage, PermissionUpdate } from '@anthropic-ai/claude-agent-sdk';
-import type { Account, PermissionMode, Question } from '../../protocol.ts';
+import type { HookInput, McpServerConfig, ModelInfo, Options, PermissionResult, Query, SDKUserMessage, PermissionUpdate } from '@anthropic-ai/claude-agent-sdk';
+import type { Account, EffortLevel, ModelChoice, PermissionMode, Question } from '../../protocol.ts';
+import { isEffortLevel } from '../../protocol.ts';
 import type { AgentAdapter, AgentSession, SessionSink, StartSessionOptions, UserInput } from '../types.ts';
 import type { Logger } from '../../log.ts';
 import { ClaudeNormalizer, fileContext } from './normalize.ts';
@@ -9,6 +11,7 @@ import { groupSpawner, type ProcessRegistry } from '../../proc.ts';
 import { prepareImageForModel } from '../../media.ts';
 import { toolTitle, truncateInput } from '../../tools.ts';
 import { RUNNER_VERSION } from '../../config.ts';
+import { stripModelSuffix } from '../../accounts.ts';
 
 // Variables a parent Claude Code session sets for its own children. If the
 // runner was started from inside one (tests, a terminal in T3), they would
@@ -98,6 +101,59 @@ export class ClaudeAdapter implements AgentAdapter {
     s.start();
     return s;
   }
+
+  // Asks the account's CLI what its model picker offers. Starting the CLI
+  // with no prompt is enough: it answers initialize without a turn (under
+  // a second, no tokens), and is closed straight after.
+  async models(account: Account): Promise<ModelChoice[]> {
+    const { deps } = this;
+    const never = { async *[Symbol.asyncIterator]() { await new Promise<never>(() => {}); } } as AsyncIterable<SDKUserMessage>;
+    const abort = new AbortController();
+    const options: Options = {
+      cwd: os.homedir(),
+      pathToClaudeCodeExecutable: deps.claudePath,
+      env: cliEnv(account),
+      settingSources: ['user', 'project', 'local'],
+      tools: [],
+      abortController: abort,
+      spawnClaudeCodeProcess: groupSpawner(deps.registry, deps.log, () => {}, `models:${account.id}`),
+    };
+    const queryFn = deps.queryFn ?? sdkQuery;
+    const q = queryFn({ prompt: never, options });
+    try {
+      const init = await q.initializationResult();
+      return modelChoices(init.models ?? []);
+    } finally {
+      try {
+        q.close();
+      } catch {
+        // already closed
+      }
+      abort.abort();
+    }
+  }
+}
+
+// The CLI's rows as the protocol's ModelChoice. The "default" row stands
+// for whatever the CLI would pick, which the account's settings can
+// override, so it's left out: the runner works the default out itself.
+export function modelChoices(rows: ModelInfo[]): ModelChoice[] {
+  const out: ModelChoice[] = [];
+  for (const row of rows) {
+    if (!row || typeof row.value !== 'string' || !row.value || row.value === 'default') continue;
+    const choice: ModelChoice = {
+      id: row.value,
+      model: typeof row.resolvedModel === 'string' && row.resolvedModel ? row.resolvedModel : stripModelSuffix(row.value),
+      title: typeof row.displayName === 'string' && row.displayName ? row.displayName : row.value,
+    };
+    if (typeof row.description === 'string' && row.description) choice.description = row.description;
+    if (row.supportsEffort && Array.isArray(row.supportedEffortLevels)) {
+      const levels = row.supportedEffortLevels.filter(isEffortLevel);
+      if (levels.length) choice.effortLevels = levels;
+    }
+    out.push(choice);
+  }
+  return out;
 }
 
 class ClaudeSession implements AgentSession {
@@ -139,18 +195,29 @@ class ClaudeSession implements AgentSession {
       // Always allowed so "Ask before edits" can be switched off mid-session.
       allowDangerouslySkipPermissions: true,
       canUseTool: (name, input, o) => this.canUseTool(name, input, o),
+      // The CLI says which effort level a turn ran at (after its own
+      // defaults and any downgrade) only through hooks; Stop fires once a
+      // turn, and is the cheapest place to read it.
+      hooks: { Stop: [{ hooks: [(input) => this.onStop(input)] }] },
       abortController: this.abort,
       spawnClaudeCodeProcess: groupSpawner(deps.registry, deps.log, (line) => this.stderr(line), opts.threadId),
     };
     const servers = deps.mcpServersFor?.(opts.threadId);
     if (servers && Object.keys(servers).length) options.mcpServers = servers;
     if (opts.model) options.model = opts.model;
+    if (opts.effort) options.effort = opts.effort;
     if (opts.allowRules?.length) options.allowedTools = [...opts.allowRules];
     if (opts.resume) options.resume = opts.sessionId;
     else options.sessionId = opts.sessionId;
     const queryFn = deps.queryFn ?? sdkQuery;
     this.q = queryFn({ prompt: this.input, options });
     void this.pump();
+  }
+
+  private async onStop(input: HookInput): Promise<Record<string, never>> {
+    const level = (input as { effort?: { level?: unknown } }).effort?.level;
+    if (isEffortLevel(level)) this.sink.output({ kind: 'effort', level });
+    return {};
   }
 
   private stderr(line: string): void {
@@ -289,6 +356,14 @@ class ClaudeSession implements AgentSession {
   async setModel(model: string | undefined): Promise<void> {
     if (this.exited) return;
     await this.q.setModel(model);
+  }
+
+  // Flag settings sit above the settings files for this session only, so
+  // null puts the level back to the model's own without touching Mike's
+  // settings.json.
+  async setEffort(effort: EffortLevel | undefined): Promise<void> {
+    if (this.exited) return;
+    await this.q.applyFlagSettings({ effortLevel: effort ?? null });
   }
 
   async setPermissionMode(mode: PermissionMode): Promise<void> {

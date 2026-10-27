@@ -2,13 +2,14 @@
 // turns, persistence and the protocol; an adapter only drives one CLI
 // process per live thread and reports normalised output. Codex will be a
 // second implementation of AgentAdapter.
-import type { Account, DeltaBody, EventBody, ImageRef, PermissionMode, Question, TurnOutcome } from '../protocol.ts';
+import type { Account, DeltaBody, EffortLevel, EventBody, ImageRef, ModelChoice, PermissionMode, Question, TurnOutcome } from '../protocol.ts';
 
 export type StartSessionOptions = {
   threadId: string;
   cwd: string;
   account: Account;
   model?: string;
+  effort?: EffortLevel; // undefined: the model's own level
   permissionMode: PermissionMode;
   // Native session id. With resume=false it's pre-assigned to a brand new
   // session; with resume=true the CLI loads that session's transcript.
@@ -44,6 +45,8 @@ export type AdapterOutput =
   | { kind: 'event'; event: EventBody }
   | { kind: 'delta'; delta: DeltaBody }
   | { kind: 'session'; nativeSessionId: string; model?: string }
+  // The effort level the CLI applied to the turn that just ended.
+  | { kind: 'effort'; level: EffortLevel }
   | { kind: 'context'; contextTokens: number }
   // The CLI started a turn of its own; `note` says why, when it's known.
   | { kind: 'cliTurn'; note?: string }
@@ -93,6 +96,7 @@ export interface AgentSession {
   send(input: UserInput): void;
   interrupt(): Promise<void>;
   setModel(model: string | undefined): Promise<void>;
+  setEffort(effort: EffortLevel | undefined): Promise<void>;
   setPermissionMode(mode: PermissionMode): Promise<void>;
   // Ends the input so the CLI finishes and exits. Resolves once it has.
   // With hard set it stops the CLI straight away instead (background work
@@ -105,4 +109,7 @@ export interface AgentSession {
 export interface AgentAdapter {
   readonly provider: string;
   start(opts: StartSessionOptions, sink: SessionSink): AgentSession;
+  // What the account's CLI offers as models, without starting a turn.
+  // Optional: a provider without a picker leaves it out.
+  models?(account: Account): Promise<ModelChoice[]>;
 }

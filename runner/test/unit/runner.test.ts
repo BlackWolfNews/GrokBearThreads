@@ -351,6 +351,70 @@ test('model and permission mode changes go to the live CLI', () => {
   assert.deepEqual(s.models, ['claude-haiku-5-5', undefined]);
 });
 
+test('effort goes to the CLI at start and on change; null is the model\'s own level', () => {
+  const h = makeHarness();
+  const { thread } = create(h, { effort: 'low' });
+  assert.deepEqual(checkSummary(thread), []);
+  assert.equal(thread.effort, 'low');
+  const s = h.adapter.last;
+  assert.equal(s.opts.effort, 'low');
+  s.init();
+  h.runner.update({ threadId: thread.id, effort: 'max' });
+  assert.deepEqual(s.efforts, ['max']);
+  const t = h.runner.update({ threadId: thread.id, effort: null }).thread;
+  assert.equal(t.effort, undefined);
+  assert.deepEqual(s.efforts, ['max', undefined]);
+  // What the CLI reports it ran at shows on the summary.
+  s.effort('high');
+  assert.equal(h.runner.get(thread.id).effortInUse, 'high');
+  assert.deepEqual(checkSummary(h.runner.get(thread.id)), []);
+});
+
+test("a turn on a thread with no model shows the account's real default", () => {
+  const h = makeHarness();
+  const { thread } = create(h);
+  const s = h.adapter.last;
+  s.init(undefined, 'claude-fable-5-1');
+  const t = h.runner.get(thread.id);
+  assert.equal(t.model, undefined);
+  assert.equal(t.modelInUse, 'claude-fable-5-1');
+  const note = h.notes.find((n) => n.method === 'accounts.updated');
+  assert.ok(note && note.method === 'accounts.updated');
+  assert.equal(note.params.accounts.find((a) => a.id === 'claude-3')?.defaultModel, 'claude-fable-5-1');
+  assert.equal(h.runner.hello().accounts.find((a) => a.id === 'claude-3')?.defaultModel, 'claude-fable-5-1');
+  // The same again isn't news.
+  const before = h.notes.length;
+  s.init(undefined, 'claude-fable-5-1');
+  assert.equal(h.notes.filter((n) => n.method === 'accounts.updated').length, 1);
+  assert.ok(h.notes.length >= before);
+  // A thread with a model of its own says nothing about the default.
+  const b = create(h, { model: 'haiku' }).thread;
+  h.adapter.last.init(undefined, 'claude-haiku-5-5');
+  assert.equal(h.runner.get(b.id).modelInUse, 'claude-haiku-5-5');
+  assert.equal(h.runner.hello().accounts.find((a) => a.id === 'claude-3')?.defaultModel, 'claude-fable-5-1');
+});
+
+test('the model list comes from the adapter at startup and reaches clients', async () => {
+  const h = makeHarness();
+  const choices = [{ id: 'opus', model: 'claude-opus-5-5', title: 'Opus 5.5', effortLevels: ['low', 'high'] as const }];
+  const asked: string[] = [];
+  h.adapter.models = async (account) => {
+    asked.push(account.id);
+    return choices.map((c) => ({ ...c, effortLevels: [...c.effortLevels] }));
+  };
+  await h.runner.probeModels();
+  assert.deepEqual(asked, ['claude-main', 'claude-3']);
+  const note = h.notes.find((n) => n.method === 'accounts.updated');
+  assert.ok(note && note.method === 'accounts.updated');
+  assert.deepEqual(h.runner.hello().accounts.map((a) => a.models?.[0]?.title), ['Opus 5.5', 'Opus 5.5']);
+  // A CLI that can't answer leaves the list unknown and the runner going.
+  h.adapter.models = async () => {
+    throw new Error('no cli');
+  };
+  await h.runner.probeModels();
+  assert.equal(h.runner.hello().accounts[0].models?.length, 1);
+});
+
 test('a CLI that dies mid-turn fails the turn with an error event', () => {
   const h = makeHarness();
   const { thread } = create(h);

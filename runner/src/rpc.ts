@@ -4,8 +4,8 @@ import crypto from 'node:crypto';
 import { WebSocketServer, WebSocket } from 'ws';
 import type { Runner, Notification } from './runner.ts';
 import type { Logger } from './log.ts';
-import { ErrorCode, RpcError } from './protocol.ts';
-import type { ApprovalDecision, ImageRef, PermissionMode } from './protocol.ts';
+import { EFFORT_LEVELS, ErrorCode, RpcError, isEffortLevel } from './protocol.ts';
+import type { ApprovalDecision, EffortLevel, ImageRef, PermissionMode } from './protocol.ts';
 
 type Conn = {
   id: number;
@@ -233,6 +233,7 @@ export class RpcServer {
           cwd: optString(p, 'cwd'),
           accountId: optString(p, 'accountId'),
           model: optString(p, 'model'),
+          effort: optEffort(p),
           permissionMode: optMode(p),
           title: optString(p, 'title'),
         });
@@ -248,6 +249,7 @@ export class RpcServer {
         if (p.cwd !== undefined) upd.cwd = reqString(p, 'cwd');
         if (p.accountId !== undefined) upd.accountId = reqString(p, 'accountId');
         if (p.model !== undefined) upd.model = p.model === null ? null : reqString(p, 'model');
+        if (p.effort !== undefined) upd.effort = p.effort === null ? null : optEffort(p);
         if (p.permissionMode !== undefined) upd.permissionMode = optMode(p);
         if (p.snoozedUntil !== undefined) upd.snoozedUntil = p.snoozedUntil === null ? null : reqString(p, 'snoozedUntil');
         if (p.archived !== undefined) {
@@ -353,6 +355,13 @@ function optMode(p: Record<string, unknown>): PermissionMode | undefined {
   const v = p.permissionMode;
   if (v === undefined || v === null) return undefined;
   if (v !== 'full' && v !== 'ask') throw bad('permissionMode must be "full" or "ask"');
+  return v;
+}
+
+function optEffort(p: Record<string, unknown>): EffortLevel | undefined {
+  const v = p.effort;
+  if (v === undefined || v === null) return undefined;
+  if (!isEffortLevel(v)) throw bad(`effort must be one of ${EFFORT_LEVELS.join(', ')}`);
   return v;
 }
 

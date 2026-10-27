@@ -2,12 +2,13 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import type { AgentAdapter, AgentSession, SessionSink, StartSessionOptions, UserInput, AdapterOutput } from '../../src/adapters/types.ts';
-import type { Account, PermissionMode } from '../../src/protocol.ts';
+import type { Account, EffortLevel, ModelChoice, PermissionMode } from '../../src/protocol.ts';
 import type { Config } from '../../src/config.ts';
 import { ensureHome } from '../../src/config.ts';
 import { ThreadStore } from '../../src/store.ts';
 import { Runner, type Notification, type RunnerDeps } from '../../src/runner.ts';
 import { FakeClock } from '../../src/clock.ts';
+import type { LearnedAccountInfo } from '../../src/accounts.ts';
 import { nullLogger } from '../../src/log.ts';
 
 export class FakeSession implements AgentSession {
@@ -19,6 +20,7 @@ export class FakeSession implements AgentSession {
   endedHard = false;
   killed = false;
   models: (string | undefined)[] = [];
+  efforts: (EffortLevel | undefined)[] = [];
   modes: PermissionMode[] = [];
   interruptError?: Error;
   // When set, end() waits for exit() like a real CLI that takes a moment
@@ -40,6 +42,9 @@ export class FakeSession implements AgentSession {
   async setModel(model: string | undefined): Promise<void> {
     this.models.push(model);
   }
+  async setEffort(effort: EffortLevel | undefined): Promise<void> {
+    this.efforts.push(effort);
+  }
   async setPermissionMode(mode: PermissionMode): Promise<void> {
     this.modes.push(mode);
   }
@@ -60,8 +65,11 @@ export class FakeSession implements AgentSession {
   out(o: AdapterOutput): void {
     this.sink.output(o);
   }
-  init(id = this.opts.sessionId): void {
-    this.out({ kind: 'session', nativeSessionId: id, model: 'claude-haiku-5-5' });
+  init(id = this.opts.sessionId, model = 'claude-haiku-5-5'): void {
+    this.out({ kind: 'session', nativeSessionId: id, model });
+  }
+  effort(level: EffortLevel): void {
+    this.out({ kind: 'effort', level });
   }
   text(itemId: string, text: string): void {
     this.out({ kind: 'event', event: { type: 'assistant.text', itemId, text } });
@@ -78,6 +86,8 @@ export class FakeAdapter implements AgentAdapter {
   readonly provider = 'claude';
   sessions: FakeSession[] = [];
   slowExit = false;
+  // Set by a test that wants the runner's model probe to find something.
+  models?: (account: Account) => Promise<ModelChoice[]>;
   start(opts: StartSessionOptions, sink: SessionSink): AgentSession {
     const s = new FakeSession(opts, sink);
     s.slowExit = this.slowExit;
@@ -125,6 +135,36 @@ export const ACCOUNTS: Account[] = [
   { id: 'claude-3', provider: 'claude', title: 'three@example.com', configDir: '/tmp/three' },
 ];
 
+// Stands in for AccountRegistry: a fixed list, plus what the runner learns
+// (a probe's model list, an observed default), applied the way it does.
+export class FakeAccounts {
+  private learned = new Map<string, LearnedAccountInfo>();
+  private base: Account[];
+  constructor(base: Account[] = ACCOUNTS) {
+    this.base = base;
+  }
+  list(): Account[] {
+    return this.base.map((a) => {
+      const info = this.learned.get(a.id);
+      if (!info) return a;
+      const out = { ...a };
+      if (info.defaultModel) out.defaultModel = info.defaultModel;
+      if (info.models) out.models = info.models;
+      return out;
+    });
+  }
+  get(id: string): Account | undefined {
+    return this.list().find((a) => a.id === id);
+  }
+  learn(id: string, info: LearnedAccountInfo): boolean {
+    const have = this.learned.get(id) ?? {};
+    const next = { ...have, ...info };
+    if (JSON.stringify(next) === JSON.stringify(have)) return false;
+    this.learned.set(id, next);
+    return true;
+  }
+}
+
 export type Harness = {
   home: string;
   cfg: Config;
@@ -147,7 +187,7 @@ export function makeHarness(home = tmpDir(), cfgExtra: Partial<Config> = {}, dep
     config: cfg,
     store,
     adapters: { claude: adapter },
-    accounts: { list: () => ACCOUNTS, get: (id: string) => ACCOUNTS.find((a) => a.id === id) },
+    accounts: new FakeAccounts(),
     clock,
     log: nullLogger,
     defer: (fn) => fn(),

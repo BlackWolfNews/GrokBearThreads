@@ -26,6 +26,7 @@ test('bearer header auth, hello, and JSON-RPC errors', async () => {
   await assert.rejects(c.call('threads.events', { threadId: 'missing' }), (e: { code: number }) => e.code === -32004);
   await assert.rejects(c.call('threads.create', { text: 1 }), (e: { code: number }) => e.code === -32602);
   await assert.rejects(c.call('threads.create', { text: 'x', accountId: 'claude-42' }), (e: { code: number }) => e.code === -32010);
+  await assert.rejects(c.call('threads.create', { text: 'x', effort: 'huge' }), (e: { code: number; message: string }) => e.code === -32602 && /effort must be one of/.test(e.message));
   await assert.rejects(c.call('nope.method'), (e: { code: number }) => e.code === -32601);
   c.close();
   await server.close();

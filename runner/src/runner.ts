@@ -10,6 +10,7 @@ import type {
   ApprovalDecision,
   DeltaBody,
   DeltaType,
+  EffortLevel,
   EventBody,
   ImageRef,
   InProgressItem,
@@ -36,7 +37,7 @@ import type { ThreadRecord, ThreadStore, QueuedSend } from './store.ts';
 import type { Clock, TimerHandle } from './clock.ts';
 import type { Logger } from './log.ts';
 import { threadEnv } from './restart.ts';
-import type { AccountRegistry } from './accounts.ts';
+import type { AccountRegistry, LearnedAccountInfo } from './accounts.ts';
 import { RUNNER_VERSION, expandHome, paths, readRunnerJson, writeRunnerJson, type Config } from './config.ts';
 import { copyImageInto, imageRefFor } from './media.ts';
 import { isDirectory } from './fsutil.ts';
@@ -47,6 +48,7 @@ export type Notification =
   | { method: 'thread.updated'; params: { thread: ThreadSummary } }
   | { method: 'thread.event'; params: { threadId: string; event: AnyEvent } }
   | { method: 'thread.deleted'; params: { threadId: string } }
+  | { method: 'accounts.updated'; params: { accounts: Account[] } }
   | { method: 'runner.notice'; params: { level: 'info' | 'warning' | 'error'; message: string } };
 
 type PendingApproval =
@@ -102,7 +104,7 @@ export type RunnerDeps = {
   config: Config;
   store: ThreadStore;
   adapters: Record<string, AgentAdapter>;
-  accounts: Pick<AccountRegistry, 'list' | 'get'>;
+  accounts: Pick<AccountRegistry, 'list' | 'get' | 'learn'>;
   clock: Clock;
   log: Logger;
   // Coalesces summary saves and thread.updated; tests pass a synchronous one.
@@ -126,7 +128,7 @@ export class Runner {
   private cfg: Config;
   private store: ThreadStore;
   private adapters: Record<string, AgentAdapter>;
-  private accounts: Pick<AccountRegistry, 'list' | 'get'>;
+  private accounts: Pick<AccountRegistry, 'list' | 'get' | 'learn'>;
   private clock: Clock;
   private log: Logger;
   private defer: (fn: () => void) => void;
@@ -176,6 +178,29 @@ export class Runner {
     this.flush();
     this.armSnoozeTimer();
     this.log.info('runner loaded threads', { count: this.threads.size });
+    void this.probeModels();
+  }
+
+  // Asks each account's CLI for its model list, one account at a time so
+  // startup doesn't spawn three CLIs at once. Clients hear through
+  // accounts.updated; a failure just leaves the list unknown.
+  async probeModels(): Promise<void> {
+    for (const account of this.accounts.list()) {
+      if (this.stopping) return;
+      const adapter = this.adapters[account.provider];
+      if (!adapter?.models) continue;
+      try {
+        const models = await adapter.models(account);
+        this.learnAccount(account.id, { models });
+      } catch (e) {
+        this.log.warn('could not read the model list', { accountId: account.id, error: String(e) });
+      }
+    }
+  }
+
+  private learnAccount(accountId: string, info: LearnedAccountInfo): void {
+    if (!this.accounts.learn(accountId, info)) return;
+    this.notify({ method: 'accounts.updated', params: { accounts: this.accounts.list() } });
   }
 
   // A thread folder whose thread.json can't be read: rebuild what can be
@@ -520,6 +545,7 @@ export class Runner {
     cwd?: string;
     accountId?: string;
     model?: string;
+    effort?: EffortLevel;
     permissionMode?: PermissionMode;
     title?: string;
   }): { thread: ThreadSummary; turnId: string } {
@@ -556,6 +582,7 @@ export class Runner {
     };
     const model = params.model || this.cfg.defaults.model;
     if (model) rec.model = model;
+    if (params.effort) rec.effort = params.effort;
     this.store.create(rec);
     const st: ThreadState = { rec, rt: newRuntime(this.clock.now()) };
     this.threads.set(id, st);
@@ -728,6 +755,7 @@ export class Runner {
         cwd: rec.cwd,
         account,
         model: rec.model,
+        effort: rec.effort,
         permissionMode: rec.permissionMode,
         sessionId: rec.nativeSessionId,
         resume,
@@ -764,7 +792,19 @@ export class Runner {
         rec.nativeSessionId = o.nativeSessionId;
         rec.sessionUsed = true;
         if (rec.status === 'starting') rec.status = rt.approvals.size ? 'waiting' : 'running';
+        if (o.model) {
+          rec.modelInUse = o.model;
+          // A thread with no model of its own shows what the account's
+          // default really is, which the settings alone can only guess.
+          if (!rec.model) this.learnAccount(rec.accountId, { defaultModel: o.model });
+        }
         this.markDirty(st);
+        break;
+      case 'effort':
+        if (rec.effortInUse !== o.level) {
+          rec.effortInUse = o.level;
+          this.markDirty(st);
+        }
         break;
       case 'context':
         rec.contextTokens = o.contextTokens;
@@ -1017,6 +1057,7 @@ export class Runner {
     cwd?: string;
     accountId?: string;
     model?: string | null;
+    effort?: EffortLevel | null;
     permissionMode?: PermissionMode;
     snoozedUntil?: string | null;
     archived?: boolean;
@@ -1054,6 +1095,18 @@ export class Runner {
         else delete rec.model;
         if (rt.session && !release) {
           rt.session.setModel(model).catch(() => {
+            rt.releaseWhenIdle = true;
+          });
+        }
+      }
+    }
+    if (params.effort !== undefined) {
+      const effort = params.effort || undefined;
+      if (effort !== rec.effort) {
+        if (effort) rec.effort = effort;
+        else delete rec.effort;
+        if (rt.session && !release) {
+          rt.session.setEffort(effort).catch(() => {
             rt.releaseWhenIdle = true;
           });
         }
@@ -1449,6 +1502,9 @@ export class Runner {
       lastSeenSeq: rec.lastSeenSeq,
     };
     if (rec.model) s.model = rec.model;
+    if (rec.effort) s.effort = rec.effort;
+    if (rec.modelInUse) s.modelInUse = rec.modelInUse;
+    if (rec.effortInUse) s.effortInUse = rec.effortInUse;
     if (rec.snoozedUntil) s.snoozedUntil = rec.snoozedUntil;
     if (rec.archivedAt) s.archivedAt = rec.archivedAt;
     if (rec.nativeSessionId && rec.sessionUsed) s.nativeSessionId = rec.nativeSessionId;

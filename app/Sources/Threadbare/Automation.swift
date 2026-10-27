@@ -319,7 +319,9 @@ enum Automation {
         case "account-ids":
             // For screenshots: accounts are titled by their email address,
             // so show their ids instead. Lasts until the next reconnect.
-            app.accounts = app.accounts.map { Account(id: $0.id, provider: $0.provider, title: $0.id, configDir: $0.configDir) }
+            app.accounts = app.accounts.map {
+                Account(id: $0.id, provider: $0.provider, title: $0.id, configDir: $0.configDir, defaultModel: $0.defaultModel, models: $0.models)
+            }
             return "ok"
         case "status":
             return "ok " + status(app)
@@ -389,6 +391,8 @@ enum Automation {
             return await waitFor(c, app: app)
         case "menu":
             return menu(c, app: app)
+        case "composer-menu":
+            return composerMenu(c, app: app)
         case "debug-info":
             // What the row menu's "Copy debug info" copies, copied the same
             // way (to this instance's pasteboard).
@@ -420,9 +424,9 @@ enum Automation {
     /// silent "ok" (a typo like "models" would leave the account's default
     /// model in place), and the answer says what's set now.
     private static func options(_ c: [String: Any], app: AppModel) -> String {
-        let known: Set<String> = ["cmd", "rid", "cwd", "account", "model", "ask"]
+        let known: Set<String> = ["cmd", "rid", "cwd", "account", "model", "effort", "ask"]
         let unknown = c.keys.filter { !known.contains($0) }.sorted()
-        guard unknown.isEmpty else { return "error options takes cwd, account, model and ask, not \(unknown.joined(separator: ", "))" }
+        guard unknown.isEmpty else { return "error options takes cwd, account, model, effort and ask, not \(unknown.joined(separator: ", "))" }
         if let value = c["cwd"] {
             guard let cwd = value as? String, !cwd.isEmpty else { return "error cwd is a folder path" }
             app.newThreadCwd = cwd
@@ -441,12 +445,20 @@ enum Automation {
                 app.newThreadModel = model
             }
         }
+        if let value = c["effort"] {
+            // null goes back to the model's own level.
+            if value is NSNull { app.newThreadEffort = nil } else {
+                guard let effort = value as? String, ComposerChips.effortLevels.contains(effort)
+                else { return "error effort is one of \(ComposerChips.effortLevels.joined(separator: ", ")), or null for the default" }
+                app.newThreadEffort = effort
+            }
+        }
         if let value = c["ask"] {
             guard let ask = value as? Bool else { return "error ask is true or false" }
             app.newThreadAsk = ask
         }
         let settings = AppDump.newThreadSettings(app)
-        return "ok cwd=\(settings.cwd) account=\(settings.account) model=\(settings.model) ask=\(settings.ask)"
+        return "ok cwd=\(settings.cwd) account=\(settings.account) model=\(settings.model) effort=\(settings.effort) ask=\(settings.ask)"
     }
 
     private static func pressReturn(_ window: NSWindow?) -> String {
@@ -598,6 +610,44 @@ enum Automation {
         guard let item = items.first(where: { $0.title == title }), let action = item.action else { return "error no item \(title)" }
         NSApp.sendAction(action, to: item.target, from: item)
         return "ok"
+    }
+
+    /// The composer's model, account, permission or folder menu as the
+    /// open thread (or a new one) would get it, a JSON list of lines:
+    /// `[x]` for the ticked one, `*` for the default, the subtitle after a
+    /// dash, submenus and section headers indented. `click` picks an item
+    /// by title, as a click on it would.
+    private static func composerMenu(_ c: [String: Any], app: AppModel) -> String {
+        let settings = ThreadSettings(app: app, thread: app.selectedThread)
+        let menu: NSMenu
+        switch c["menu"] as? String ?? "model" {
+        case "model": menu = settings.modelMenu()
+        case "account": menu = settings.accountMenu()
+        case "permission": menu = settings.permissionMenu()
+        case "folder": menu = settings.folderMenu()
+        default: return "error menu is model, account, permission or folder"
+        }
+        if let title = c["click"] as? String {
+            guard let item = allItems(menu).first(where: { $0.title == title }), let action = item.action else { return "error no item \(title)" }
+            NSApp.sendAction(action, to: item.target, from: item)
+            return "ok"
+        }
+        return "ok " + json(describe(menu, indent: ""))
+    }
+
+    private static func allItems(_ menu: NSMenu) -> [NSMenuItem] {
+        menu.items.flatMap { [$0] + ($0.submenu.map(allItems) ?? []) }
+    }
+
+    private static func describe(_ menu: NSMenu, indent: String) -> [String] {
+        menu.items.flatMap { item -> [String] in
+            if item.isSeparatorItem { return [indent + "---"] }
+            if item.isSectionHeader { return [indent + "# " + item.title] }
+            var line = indent + (item.state == .on ? "[x] " : "[ ] ") + item.title
+            if item.image?.accessibilityDescription == "Default" { line += " *" }
+            if let subtitle = item.subtitle, !subtitle.isEmpty { line += " - " + subtitle }
+            return [line] + (item.submenu.map { describe($0, indent: indent + "    ") } ?? [])
+        }
     }
 
     /// Mock runner helpers (`mock.restartPending`, `mock.restart`, ...),

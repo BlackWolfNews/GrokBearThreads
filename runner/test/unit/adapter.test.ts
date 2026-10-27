@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { ClaudeAdapter, alwaysAllow } from '../../src/adapters/claude/adapter.ts';
+import { ClaudeAdapter, alwaysAllow, modelChoices } from '../../src/adapters/claude/adapter.ts';
 import type { SessionSink, AdapterOutput, ToolApprovalRequest } from '../../src/adapters/types.ts';
 import { ProcessRegistry } from '../../src/proc.ts';
 import { nullLogger } from '../../src/log.ts';
@@ -26,7 +26,7 @@ test('"Always allow" keeps only allow rules, scoped to the session', () => {
 // A stand-in for the SDK's query(): records the options and the messages
 // sent, and lets the test call canUseTool.
 function fakeQuery() {
-  const state: { options?: any; sent: any[]; close?: () => void } = { sent: [] };
+  const state: { options?: any; sent: any[]; flags: unknown[]; models?: any[]; close?: () => void } = { sent: [], flags: [] };
   const fn = ((args: { prompt: AsyncIterable<any>; options: any }) => {
     state.options = args.options;
     let stop!: () => void;
@@ -42,13 +42,17 @@ function fakeQuery() {
       interrupt: async () => undefined,
       setModel: async () => undefined,
       setPermissionMode: async () => undefined,
+      applyFlagSettings: async (s: unknown) => {
+        state.flags.push(s);
+      },
+      initializationResult: async () => ({ models: state.models ?? [] }),
       close: () => stop(),
     };
   }) as any;
   return { fn, state };
 }
 
-function start(allowRules: string[] = []) {
+function start(allowRules: string[] = [], extra: Record<string, unknown> = {}) {
   const { fn, state } = fakeQuery();
   const outputs: AdapterOutput[] = [];
   const approvals: ToolApprovalRequest[] = [];
@@ -75,11 +79,47 @@ function start(allowRules: string[] = []) {
       blobsDir: dir,
       tmpDir: dir,
       allowRules,
+      ...extra,
     },
     sink,
   );
-  return { session, state, outputs, approvals };
+  return { session, state, outputs, approvals, adapter };
 }
+
+test('effort: sent at start, changed through flag settings, and read back from the Stop hook', async () => {
+  const { session, state, outputs } = start([], { effort: 'low' });
+  assert.equal(state.options.effort, 'low');
+  await session.setEffort('max');
+  await session.setEffort(undefined);
+  assert.deepEqual(state.flags, [{ effortLevel: 'max' }, { effortLevel: null }]);
+  const stop = state.options.hooks.Stop[0].hooks[0];
+  await stop({ hook_event_name: 'Stop', effort: { level: 'high' } });
+  await stop({ hook_event_name: 'Stop' });
+  await stop({ hook_event_name: 'Stop', effort: { level: 'silly' } });
+  assert.deepEqual(outputs.filter((o) => o.kind === 'effort'), [{ kind: 'effort', level: 'high' }]);
+  state.close!();
+});
+
+test("models() asks a promptless CLI for its picker; the 'default' row is left out", async () => {
+  const { fn, state } = fakeQuery();
+  state.models = [
+    { value: 'default', resolvedModel: 'claude-opus-5-5', displayName: 'Default (recommended)', description: 'Opus 5.5 · Best' },
+    { value: 'opus', resolvedModel: 'claude-opus-5-5', displayName: 'Opus 5.5', description: 'For complex work', supportsEffort: true, supportedEffortLevels: ['low', 'medium', 'high', 'xhigh', 'max'] },
+    { value: 'claude-fable-5-1[1m]', resolvedModel: 'claude-fable-5-1', displayName: 'Fable 5.1', supportsEffort: true, supportedEffortLevels: ['low', 'nope'] },
+    { value: 'claude-haiku-4-5-20251001', displayName: 'Haiku 4.5', description: 'Fastest' },
+  ];
+  const dir = tmpDir();
+  const adapter = new ClaudeAdapter({ claudePath: '/nonexistent', registry: new ProcessRegistry(dir, nullLogger), log: nullLogger, queryFn: fn });
+  const models = await adapter.models({ id: 'claude-3', provider: 'claude', title: 'x', configDir: dir });
+  assert.deepEqual(models, [
+    { id: 'opus', model: 'claude-opus-5-5', title: 'Opus 5.5', description: 'For complex work', effortLevels: ['low', 'medium', 'high', 'xhigh', 'max'] },
+    { id: 'claude-fable-5-1[1m]', model: 'claude-fable-5-1', title: 'Fable 5.1', effortLevels: ['low'] },
+    { id: 'claude-haiku-4-5-20251001', model: 'claude-haiku-4-5-20251001', title: 'Haiku 4.5', description: 'Fastest' },
+  ]);
+  assert.deepEqual(state.options.tools, []);
+  assert.equal(state.options.env.CLAUDE_CONFIG_DIR, dir);
+  assert.deepEqual(modelChoices([{ value: '', displayName: '' } as never]), []);
+});
 
 test('thread rules go to the CLI as allowedTools; messages carry the turn id', async () => {
   const { session, state } = start(['Bash(npm test)']);

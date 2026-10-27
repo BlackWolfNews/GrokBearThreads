@@ -40,6 +40,39 @@ final class ComposerChipsTests: XCTestCase {
         XCTAssertEqual(ComposerChips.model("gpt-6"), "gpt-6")
     }
 
+    /// The chip reads the CLI's own title for a model once the list is
+    /// known, falls back to formatting the id, and adds the effort level.
+    func testChipTitleUsesTheAccountsListAndEffort() {
+        let choices = [
+            ModelChoice(id: "opus", model: "claude-opus-5-5", title: "Opus 5.5"),
+            ModelChoice(id: "claude-fable-5-1[1m]", model: "claude-fable-5-1", title: "Fable 5.1", effortLevels: ["low", "max"]),
+        ]
+        XCTAssertEqual(ComposerChips.modelTitle("claude-fable-5-1", choices: choices), "Fable 5.1", "by the id it runs as")
+        XCTAssertEqual(ComposerChips.modelTitle("claude-fable-5-1[1m]", choices: choices), "Fable 5.1", "by what's sent")
+        XCTAssertEqual(ComposerChips.modelTitle("opus", choices: choices), "Opus 5.5")
+        XCTAssertEqual(ComposerChips.modelTitle("claude-sonnet-5-5", choices: choices), "Sonnet 5.5", "not in the list: formatted")
+        XCTAssertEqual(ComposerChips.modelTitle("opus", choices: []), "Opus", "no list yet: the alias as a word")
+        XCTAssertEqual(ComposerChips.modelTitle(nil, choices: choices), "Default")
+        XCTAssertEqual(ComposerChips.chipTitle(model: "claude-fable-5-1", effort: "xhigh", choices: choices), "Fable 5.1 · Extra high")
+        XCTAssertEqual(ComposerChips.chipTitle(model: "claude-fable-5-1", effort: nil, choices: choices), "Fable 5.1")
+        XCTAssertEqual(ComposerChips.chipTitle(model: nil, effort: "low", choices: choices), "Default · Low")
+        XCTAssertEqual(ComposerChips.choice(for: "claude-fable-5-1", in: choices)?.effortLevels, ["low", "max"])
+    }
+
+    /// A thread's own model first, then whichever default applies.
+    func testResolvedModelTakesTheFirstThatIsSet() {
+        XCTAssertEqual(ComposerChips.resolvedModel("haiku", "claude-fable-5-1"), "haiku")
+        XCTAssertEqual(ComposerChips.resolvedModel(nil, "", "claude-fable-5-1"), "claude-fable-5-1")
+        XCTAssertNil(ComposerChips.resolvedModel(nil, nil))
+        XCTAssertNil(ComposerChips.resolvedModel())
+    }
+
+    func testEffortTitles() {
+        XCTAssertEqual(ComposerChips.effortLevels.map(ComposerChips.effortTitle), ["Low", "Medium", "High", "Extra high", "Max"])
+        XCTAssertEqual(ComposerChips.effortTitle("turbo"), "Turbo")
+        XCTAssertEqual(ComposerChips.effortTitle(""), "")
+    }
+
     /// Blank text alone can't be sent; an image on its own can.
     func testCanSend() {
         XCTAssertFalse(ComposerChips.canSend(text: "", imageCount: 0))
