@@ -949,7 +949,7 @@ export class Runner {
     const st = this.mustGet(threadId);
     const chars = opts.chars ?? 600;
     const cut = (t: string) => (t.length > chars ? t.slice(0, chars) + '…' : t);
-    const first = this.firstMessageText(st.rec.id);
+    const first = this.opening(st.rec.id).text;
     const log = this.store.log(st.rec.id);
     const recent: { who: 'user' | 'assistant'; text: string }[] = [];
     const want = opts.recent ?? 6;
