@@ -18,7 +18,7 @@ enum Notifier {
     static func post(thread: ThreadSummary) {
         guard available else { return }
         let content = UNMutableNotificationContent()
-        content.title = thread.title.isEmpty ? "Threadbare" : thread.title
+        content.title = thread.title.isEmpty ? "Threadbear" : thread.title
         if thread.status == .waiting {
             content.body = "Waiting for you to answer."
         } else {

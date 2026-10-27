@@ -28,7 +28,7 @@ struct ThreadbareApp: App {
     }
 
     var body: some Scene {
-        Window("Threadbare", id: "main") {
+        Window("Threadbear", id: "main") {
             RootView()
                 .environment(app)
                 .frame(minWidth: 760, minHeight: 480)
@@ -69,7 +69,7 @@ struct ThreadbareApp: App {
                 Button(app.selectedThread?.isArchived == true ? "Unarchive" : "Archive") { app.toggleArchive() }
                     .keyboardShortcut("e")
                     .disabled(app.selection == nil)
-                Menu("Snooze") {
+                Menu("Hibernate") {
                     // Titles follow app.now (so the menu rebuilds as time
                     // passes); the date is worked out when the item is chosen.
                     ForEach(Snooze.presets(now: app.now)) { preset in
@@ -92,7 +92,7 @@ struct ThreadbareApp: App {
                 .disabled(app.selection == nil)
                 Divider()
                 Button("Show Inbox") { app.sidebarMode = .inbox }
-                Button("Show Snoozed") { app.sidebarMode = .snoozed }
+                Button("Show Hibernating") { app.sidebarMode = .snoozed }
                 Button("Show Archive") { app.showArchive() }
             }
         }

@@ -333,6 +333,8 @@ install_bundle() {
   mkdir -p "$I_BUNDLE/Contents/MacOS"
   cp "$bin" "$I_BUNDLE/Contents/MacOS/Threadbare"
   cp "$APP_ROOT/Resources/Info.plist" "$I_BUNDLE/Contents/Info.plist"
+  mkdir -p "$I_BUNDLE/Contents/Resources"
+  cp -R "$APP_ROOT/Resources/Sprites" "$I_BUNDLE/Contents/Resources/Sprites"
   # LSUIElement keeps it out of the Dock and the app switcher from launch:
   # Cmd-Tabbing into one by mistake and typing into its composer would start
   # a real turn on a dev runner.

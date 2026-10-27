@@ -184,11 +184,13 @@ struct ThreadSettings {
         menu.addItem(.sectionHeader(title: "Effort"))
         let chosen = effort
         let own = ActionMenuItem("Default", checked: chosen == nil) { setEffort(nil) }
-        own.subtitle = thread?.effortInUse.map { "The model's own level, \(ComposerChips.effortTitle($0).lowercased()) last turn" } ?? "The model's own level"
+        own.subtitle = thread?.effortInUse.map { "Just right: the model's own level, \(ComposerChips.effortTitle($0).lowercased()) last turn" } ?? "Just right: the model's own level"
         menu.addItem(own)
         let levels = effective.flatMap { ComposerChips.choice(for: $0, in: choices)?.effortLevels }.flatMap { $0.isEmpty ? nil : $0 } ?? ComposerChips.effortLevels
         for level in levels {
-            menu.addItem(ActionMenuItem(ComposerChips.effortTitle(level), checked: chosen == level) { setEffort(level) })
+            let item = ActionMenuItem(ComposerChips.effortTitle(level), checked: chosen == level) { setEffort(level) }
+            item.subtitle = ComposerChips.effortPorridge(level)
+            menu.addItem(item)
         }
         return menu
     }

@@ -157,7 +157,11 @@ it's where the patches stack from.
 
 1. **Goldilocks and the bear working line.** Small, and the app feels
    like Threadbear straight away. Includes the hibernate menu copy and
-   the sidebar footer. About a day.
+   the sidebar footer. About a day. Landed 2026-10-27: the app is
+   called Threadbear, the working line is "Bear with me · 12s" with the
+   waving sprite, Snooze is Hibernate (Wake to undo), Archive is Den,
+   the effort menu has the porridge under each level, and the icon is
+   `mascot-a` (`app/icons/make-icon.swift` cuts it out of the tile).
 2. **Panels from a manifest.** The panel bar, web view panels, built-in
    Convex (dashboard URL) and xcode (Simulator screenshot) patches. The
    Convex dashboard alone pays for it. A day or two.
@@ -173,7 +177,7 @@ it's where the patches stack from.
 
 ## Open questions for Mike
 
-- Icon: `mascot-a` (the bear) or `mascot-d` (the patch)?
+- Icon: went with `mascot-a` (the bear). Easy to swap for `mascot-d`.
 - Does the sidebar keep plain words ("Needs you", "Running", "Inbox")
   with the bear only in the transcript, dock and footer? That's what
   the mockups do, and I'd keep it that way: the bear is the app's

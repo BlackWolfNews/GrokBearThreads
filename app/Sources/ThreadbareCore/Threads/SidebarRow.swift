@@ -96,9 +96,9 @@ public enum BusyThreadAction {
 
     /// The confirmation's question and its explanation.
     public static func prompt(_ action: Action, status: ThreadStatus) -> (title: String, detail: String) {
-        let verb = action == .archive ? "Archive" : "Snooze"
+        let verb = action == .archive ? "Archive" : "Hibernate"
         let state = status == .waiting ? "is waiting for you" : "is still working"
-        let doing = action == .archive ? "Archiving" : "Snoozing"
+        let doing = action == .archive ? "Archiving" : "Hibernating"
         return ("\(verb) and stop the turn?", "This thread \(state). \(doing) it now stops its turn.")
     }
 }

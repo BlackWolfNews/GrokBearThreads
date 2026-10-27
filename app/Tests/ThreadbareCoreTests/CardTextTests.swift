@@ -114,7 +114,7 @@ final class CardTextTests: XCTestCase {
         XCTAssertFalse(BusyThreadAction.needsConfirm(.idle))
         XCTAssertFalse(BusyThreadAction.needsConfirm(.error))
         XCTAssertEqual(BusyThreadAction.prompt(.archive, status: .running).title, "Archive and stop the turn?")
-        XCTAssertEqual(BusyThreadAction.prompt(.snooze, status: .waiting).detail, "This thread is waiting for you. Snoozing it now stops its turn.")
+        XCTAssertEqual(BusyThreadAction.prompt(.snooze, status: .waiting).detail, "This thread is waiting for you. Hibernating it now stops its turn.")
     }
 
     // MARK: Images

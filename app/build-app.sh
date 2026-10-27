@@ -43,6 +43,8 @@ rm -rf "$STAGE_DIR" "$OLD_DIR"
 mkdir -p "$STAGE_DIR/Contents/MacOS" "$STAGE_DIR/Contents/Resources"
 cp "$BINARY" "$STAGE_DIR/Contents/MacOS/Threadbare"
 cp "$SCRIPT_DIR/Resources/Info.plist" "$STAGE_DIR/Contents/Info.plist"
+# The bear (Bear.swift reads Contents/Resources/Sprites).
+cp -R "$SCRIPT_DIR/Resources/Sprites" "$STAGE_DIR/Contents/Resources/Sprites"
 chmod +x "$STAGE_DIR/Contents/MacOS/Threadbare"
 
 # What this bundle was built from, for the app's self-update

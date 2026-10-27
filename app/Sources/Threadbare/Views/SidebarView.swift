@@ -369,7 +369,7 @@ private struct RowActions: View {
                     .buttonStyle(RowIconButtonStyle())
                     .menuIndicator(.hidden)
                     .fixedSize()
-                    .help("Snooze")
+                    .help("Hibernate")
                 case .archive:
                     Button {
                         guard BusyConfirm.allowed(.archive, threadId: thread.id, app: app) else { return }
@@ -380,7 +380,7 @@ private struct RowActions: View {
                 case .unsnooze:
                     Button { app.unsnooze(thread.id) } label: { Image(systemName: "arrow.uturn.backward") }
                         .buttonStyle(RowIconButtonStyle())
-                        .help("Unsnooze")
+                        .help("Wake")
                 case .unarchive:
                     Button { app.unarchive(thread.id) } label: { Image(systemName: "arrow.uturn.backward") }
                         .buttonStyle(RowIconButtonStyle())
@@ -420,6 +420,8 @@ struct RowIconButtonStyle: ButtonStyle {
 /// Snoozed and Archive at the bottom.
 private struct SidebarButtonRow: View {
     let icon: String
+    /// Drawn instead of the symbol when set (the bear in the footer).
+    var image: NSImage? = nil
     let title: String
     var hint: String? = nil
     var count: Int? = nil
@@ -432,10 +434,18 @@ private struct SidebarButtonRow: View {
     var body: some View {
         Button(action: action) {
             HStack(spacing: 8) {
-                Image(systemName: icon)
-                    .font(.system(size: size))
-                    .foregroundStyle(.secondary)
-                    .frame(width: 16)
+                if let image {
+                    Image(nsImage: image)
+                        .resizable()
+                        .aspectRatio(contentMode: .fit)
+                        .frame(width: 18, height: 18)
+                        .frame(width: 16)
+                } else {
+                    Image(systemName: icon)
+                        .font(.system(size: size))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 16)
+                }
                 // The footer's rows are navigation, quieter than the threads
                 // above them; New thread stays primary.
                 Text(title)
@@ -471,10 +481,10 @@ private struct SidebarFooter: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            SidebarButtonRow(icon: "moon.zzz", title: "Snoozed", count: app.snoozed.count, size: TypeScale.sidebarFooter) {
+            SidebarButtonRow(icon: "moon.zzz", image: Bear.image(.sleep), title: "Hibernating", count: app.snoozed.count, size: TypeScale.sidebarFooter) {
                 app.sidebarMode = .snoozed
             }
-            SidebarButtonRow(icon: "archivebox", title: "Archive", count: app.archiveLoaded ? app.archivedCount : nil, size: TypeScale.sidebarFooter) {
+            SidebarButtonRow(icon: "archivebox", title: "Den", count: app.archiveLoaded ? app.archivedCount : nil, size: TypeScale.sidebarFooter) {
                 app.showArchive()
             }
         }
@@ -495,7 +505,7 @@ struct ThreadMenu: View {
     var body: some View {
         SnoozeMenu(threadId: thread.id)
         if thread.snoozedUntil != nil {
-            Button("Unsnooze") { app.unsnooze(thread.id) }
+            Button("Wake") { app.unsnooze(thread.id) }
         }
         if thread.isArchived {
             Button("Unarchive") { app.unarchive(thread.id) }
@@ -509,7 +519,7 @@ struct SnoozeMenu: View {
     let threadId: String
 
     var body: some View {
-        Menu("Snooze") { SnoozeMenuItems(threadId: threadId) }
+        Menu("Hibernate") { SnoozeMenuItems(threadId: threadId) }
     }
 }
 
@@ -552,7 +562,7 @@ enum BusyConfirm {
         let alert = NSAlert()
         alert.messageText = prompt.title
         alert.informativeText = prompt.detail
-        alert.addButton(withTitle: action == .archive ? "Archive" : "Snooze")
+        alert.addButton(withTitle: action == .archive ? "Archive" : "Hibernate")
         alert.addButton(withTitle: "Cancel")
         return alert.runModal() == .alertFirstButtonReturn
     }
@@ -564,14 +574,14 @@ private struct SnoozedList: View {
     var body: some View {
         let snoozed = app.snoozed
         VStack(spacing: 0) {
-            ModeHeader(title: "Snoozed", count: snoozed.count)
+            ModeHeader(title: "Hibernating", count: snoozed.count)
             ThreadList(order: snoozed.map(\.id)) { select in
                 ForEach(snoozed) { thread in
                     ThreadRowView(thread: thread, mode: .snoozed) { select(thread.id) }
                         .id(thread.id)
                 }
                 if snoozed.isEmpty {
-                    EmptyNote(text: "Nothing snoozed.")
+                    EmptyNote(text: "Nothing hibernating.")
                 }
             }
         }
@@ -694,9 +704,9 @@ enum SnoozePicker {
         picker.minDate = Date()
         picker.sizeToFit()
         let alert = NSAlert()
-        alert.messageText = "Snooze until"
+        alert.messageText = "Hibernate until"
         alert.accessoryView = picker
-        alert.addButton(withTitle: "Snooze")
+        alert.addButton(withTitle: "Hibernate")
         alert.addButton(withTitle: "Cancel")
         if alert.runModal() == .alertFirstButtonReturn {
             app.snooze(threadId, until: picker.dateValue)
