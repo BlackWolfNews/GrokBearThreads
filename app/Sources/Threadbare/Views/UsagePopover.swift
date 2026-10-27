@@ -12,37 +12,54 @@ struct UsagePopover: View {
 
     var body: some View {
         let sections = UsageSections.build(app.accounts)
-        ScrollView {
-            VStack(alignment: .leading, spacing: 12) {
-                if sections.isEmpty || !sections.contains(where: { $0.accounts.contains { $0.usage != nil } }) {
-                    Text("The usage numbers need a newer runner.")
-                        .font(.system(size: 12))
-                        .foregroundStyle(.secondary)
-                }
-                ForEach(sections, id: \.provider) { section in
-                    VStack(alignment: .leading, spacing: 9) {
-                        Text(ModelPicker.providerTitle(section.provider))
-                            .font(.system(size: 11, weight: .medium))
-                            .foregroundStyle(.tertiary)
-                            .accessibilityAddTraits(.isHeader)
-                        ForEach(section.accounts) { account in
-                            AccountUsageView(account: account, now: app.now)
+        let notices = AccountUsageText.notices(app.accounts)
+        VStack(alignment: .leading, spacing: 0) {
+            // Only the accounts scroll: the CLIs stay in view at the bottom
+            // however many logins there are.
+            ScrollView {
+                VStack(alignment: .leading, spacing: 12) {
+                    if sections.isEmpty || !sections.contains(where: { $0.accounts.contains { $0.usage != nil } }) {
+                        Text("The usage numbers need a newer runner.")
+                            .font(.system(size: 12))
+                            .foregroundStyle(.secondary)
+                    }
+                    ForEach(sections, id: \.provider) { section in
+                        VStack(alignment: .leading, spacing: 9) {
+                            Text(ModelPicker.providerTitle(section.provider))
+                                .font(.system(size: 11, weight: .medium))
+                                .foregroundStyle(.tertiary)
+                                .accessibilityAddTraits(.isHeader)
+                            ForEach(section.accounts) { account in
+                                AccountUsageView(account: account, notice: notices.own[account.id], now: app.now)
+                            }
                         }
                     }
+                    // Where the numbers came from, and what Token Stats says
+                    // about all of them, once.
+                    let source = [AccountUsageText.sourceLine(app.accounts, now: app.now), notices.shared].compactMap { $0 }
+                    if !source.isEmpty {
+                        Text(source.joined(separator: ". "))
+                            .font(.system(size: 11))
+                            .foregroundStyle(.tertiary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
                 }
-                if let source = AccountUsageText.sourceLine(app.accounts, now: app.now) {
-                    Text(source)
-                        .font(.system(size: 11))
-                        .foregroundStyle(.tertiary)
-                }
-                Divider()
-                CliSection()
+                .padding(16)
             }
-            .padding(16)
+            .frame(maxHeight: Self.accountsMaxHeight)
+            .fixedSize(horizontal: false, vertical: true)
+            Divider().padding(.horizontal, 16)
+            CliSection()
+                .padding(16)
         }
         .frame(width: Self.width)
-        .frame(maxHeight: 640)
-        .fixedSize(horizontal: false, vertical: true)
+    }
+
+    /// Room for the accounts: the window's height less the CLI section and
+    /// a margin, so the popover never runs past the window.
+    static var accountsMaxHeight: CGFloat {
+        let window = AppWindow.contentHeight ?? 800
+        return max(160, min(560, window - 300))
     }
 }
 
@@ -62,6 +79,9 @@ enum UsageSections {
 
 private struct AccountUsageView: View {
     let account: Account
+    /// This account's own part of Token Stats' notice; the part every
+    /// account shares is said once at the bottom.
+    let notice: String?
     let now: Date
 
     var body: some View {
@@ -87,14 +107,14 @@ private struct AccountUsageView: View {
                 }
             }
             ForEach(AccountUsageText.mainWindows(usage), id: \.kind) { window in
-                UsageBar(window: window, now: now)
+                UsageBar(window: window, notice: usage?.notice, now: now)
             }
             ForEach(AccountUsageText.extraWindows(usage), id: \.title) { window in
-                Text("\(window.title) \(AccountUsageText.windowLine(window, now: now))")
+                Text("\(window.title) \(AccountUsageText.windowLine(window, now: now, notice: usage?.notice))")
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
             }
-            if let notice = usage?.notice, !notice.isEmpty {
+            if let notice, !notice.isEmpty {
                 Text(notice).font(.system(size: 11)).foregroundStyle(.tertiary)
             }
             if usage == nil {
@@ -108,6 +128,7 @@ private struct AccountUsageView: View {
 /// resets 3:40 pm".
 private struct UsageBar: View {
     let window: UsageWindow
+    let notice: String?
     let now: Date
 
     var body: some View {
@@ -123,12 +144,16 @@ private struct UsageBar: View {
                         .frame(width: max(0, geometry.size.width * window.remainingPercent / 100))
                 }
             }
-            .frame(height: 4)
-            Text(AccountUsageText.windowLine(window, now: now).replacingOccurrences(of: " left", with: ""))
+            .frame(width: 96, height: 4)
+            // The rest of the row, on one line: it wrapped at 150 pt
+            // ("66%, resets tomorrow / 12 am").
+            Text(AccountUsageText.windowLine(window, now: now, notice: notice).replacingOccurrences(of: " left", with: ""))
                 .font(.system(size: 11))
                 .foregroundStyle(.secondary)
                 .monospacedDigit()
-                .frame(width: 150, alignment: .trailing)
+                .lineLimit(1)
+                .minimumScaleFactor(0.85)
+                .frame(maxWidth: .infinity, alignment: .trailing)
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("\(window.title): \(AccountUsageText.windowLine(window, now: now))")

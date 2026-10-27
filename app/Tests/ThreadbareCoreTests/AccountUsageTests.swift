@@ -161,6 +161,29 @@ final class AccountUsageTests: XCTestCase {
         XCTAssertNil(AccountUsageText.switchTarget([accounts[0]], from: "claude-main"))
     }
 
+    func testANoticeSeveralAccountsShareIsSaidOnce() {
+        func with(_ id: String, _ notice: String?) -> Account {
+            Account(id: id, title: id, usage: AccountUsage(windows: [], notice: notice))
+        }
+        let couldnt = "Couldn't check usage just now, so these are from 1:19 pm."
+        let accounts = [
+            with("claude-main", couldnt), with("claude-1", "\(couldnt) · $48.85 extra usage spent"), with("claude-3", couldnt),
+            with("codex-main", "64,390 credits · 2 limit resets available"), with("claude-4", nil),
+        ]
+        let notices = AccountUsageText.notices(accounts)
+        XCTAssertEqual(notices.shared, couldnt)
+        XCTAssertEqual(notices.own, ["claude-1": "$48.85 extra usage spent", "codex-main": "64,390 credits · 2 limit resets available"])
+        // One account's notice stays its own.
+        XCTAssertEqual(AccountUsageText.notices([with("codex-main", "64,390 credits")]).own, ["codex-main": "64,390 credits"])
+        XCTAssertNil(AccountUsageText.notices([with("codex-main", "64,390 credits")]).shared)
+    }
+
+    func testCreditsShowOnce() {
+        let weekly = UsageWindow(kind: "weekly", title: "Weekly", remainingPercent: 93, detail: "64,390 credits")
+        XCTAssertEqual(AccountUsageText.windowLine(weekly, now: now, notice: "64,390 credits · 2 limit resets available"), "93% left")
+        XCTAssertEqual(AccountUsageText.windowLine(weekly, now: now), "93% left (64,390 credits)")
+    }
+
     // MARK: Names
 
     func testAccountNamesAreProviderAware() {

@@ -116,3 +116,13 @@ extension ThreadSession {
         return nil
     }
 }
+
+/// The main window, for popovers that size themselves to fit inside it.
+@MainActor
+enum AppWindow {
+    static var contentHeight: CGFloat? {
+        let window = NSApp.windows.first { $0.isVisible && $0.contentView != nil && $0.frame.width > 600
+            && !String(describing: type(of: $0)).contains("Popover") }
+        return window.map { $0.contentLayoutRect.height }
+    }
+}

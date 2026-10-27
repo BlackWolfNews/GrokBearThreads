@@ -536,6 +536,14 @@ struct ModelPickerView: View {
     static let width: CGFloat = 380
     static let railWidth: CGFloat = 44
 
+    /// The model list scrolls past this: 320 pt, less in a short window, so
+    /// the picker (search above, effort below) stays inside it. At 800 pt
+    /// it ran off the bottom over the composer's chips.
+    static var listMaxHeight: CGFloat {
+        let window = AppWindow.contentHeight ?? 800
+        return max(140, min(320, window - 330))
+    }
+
     private var settings: ThreadSettings { ThreadSettings(app: app, thread: threadId.flatMap { app.threads[$0] }) }
 
     var body: some View {
@@ -602,7 +610,7 @@ struct ModelPickerView: View {
                     }
                     .padding(6)
                 }
-                .frame(maxHeight: 320)
+                .frame(maxHeight: Self.listMaxHeight)
                 .fixedSize(horizontal: false, vertical: true)
                 Divider()
                 EffortRow(levels: settings.effortLevels, chosen: settings.effectiveEffort) { settings.setEffort($0) }
@@ -795,7 +803,7 @@ struct AccountPickerView: View {
     let threadId: String?
     let close: () -> Void
 
-    static let width: CGFloat = 340
+    static let width: CGFloat = 360
 
     private var settings: ThreadSettings { ThreadSettings(app: app, thread: threadId.flatMap { app.threads[$0] }) }
 
@@ -829,7 +837,7 @@ struct AccountPickerView: View {
                 }
                 .padding(6)
             }
-            .frame(maxHeight: 420)
+            .frame(maxHeight: max(160, min(420, (AppWindow.contentHeight ?? 800) - 300)))
             .fixedSize(horizontal: false, vertical: true)
             if let footer = settings.accountFooter {
                 Divider()
@@ -857,10 +865,12 @@ struct AccountPickerView: View {
                             .foregroundStyle(.primary)
                             .lineLimit(1)
                         if let subtitle = item.subtitle {
+                            // Two lines rather than "resets t…".
                             Text(subtitle)
                                 .font(.system(size: 11))
                                 .foregroundStyle(subtitleStyle)
-                                .lineLimit(1)
+                                .lineLimit(2)
+                                .fixedSize(horizontal: false, vertical: true)
                         }
                     }
                     Spacer(minLength: 8)

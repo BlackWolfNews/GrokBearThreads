@@ -230,6 +230,16 @@ final class CodexTranscriptTests: XCTestCase {
         XCTAssertEqual(CliText.policies.map(CliText.policyTitle), ["Automatic", "Ask me", "Off"])
     }
 
+    /// After going back from a version the runner holds it, with its own
+    /// reason; "Go back" to it would just be "Update anyway" again.
+    func testAVersionWentBackFromIsHeldWithItsReason() {
+        let cli = CliStatus(provider: "codex", installedVersion: "0.163.0", latestVersion: "0.165.0", status: "held", previousVersion: "0.164.0",
+                            hold: CliStatus.Hold(version: "0.164.0", reason: "you went back from it"))
+        XCTAssertEqual(CliText.statusLine(cli), "Codex 0.164.0 is held back because you went back from it")
+        XCTAssertEqual(CliText.updateTitle(cli), "Update anyway")
+        XCTAssertNil(CliText.goBackTitle(cli), "the kept version is the held one")
+    }
+
     func testTokenLineForDebugInfo() {
         let codex: JSONValue = .object(["inputTokens": .number(24177), "cachedInputTokens": .number(12032), "outputTokens": .number(310), "reasoningTokens": .number(120)])
         XCTAssertEqual(TokenText.line(codex), "24,177 in (12,032 cached), 310 out, 120 reasoning")
@@ -239,6 +249,22 @@ final class CodexTranscriptTests: XCTestCase {
         // The footer's own words in a dump and "Copy debug info".
         let footer = TranscriptRow(id: "f:t1", seq: 9, content: .footer(TurnCompletion(turnId: "t1", outcome: .completed, durationMs: 12_000, usage: codex)))
         XCTAssertEqual(RowDebug.text(footer), "12s, 24,177 in (12,032 cached), 310 out, 120 reasoning")
+    }
+
+    func testCopyDebugInfoHasTheTurnsTokens() {
+        let usage: JSONValue = .object(["inputTokens": .number(49058), "cachedInputTokens": .number(24320), "outputTokens": .number(125), "reasoningTokens": .number(0)])
+        let footer = TranscriptRow(id: "f:t1", seq: 9, turnId: "t1", content: .footer(TurnCompletion(turnId: "t1", outcome: .completed, durationMs: 6000, usage: usage)))
+        let info = RowDebug.info(threadId: "th1", row: footer, seqs: [9], runnerVersion: "0.2.0")
+        XCTAssertTrue(info.contains("\ntokens: 49,058 in (24,320 cached), 125 out\n"), info)
+    }
+
+    func testAViewedImageReadsAsViewNotRead() {
+        let call = ToolCall(itemId: "v1", name: "view_image", kind: .read, title: "View orange.png", input: .object(["path": .string("/w/orange.png")]))
+        let tool = ToolItem(itemId: "v1", call: call, root: "/w")
+        XCTAssertEqual(ToolPresentation.fileTitle(tool)?.verb, "View")
+        XCTAssertEqual(ToolPresentation.fileTitle(tool)?.name, "orange.png")
+        XCTAssertEqual(ToolPresentation.symbol(for: .read, name: "view_image"), "photo")
+        XCTAssertEqual(ToolPresentation.symbol(for: .read, name: "Read"), "doc.text")
     }
 
     func testClisCallsAndNotification() async throws {

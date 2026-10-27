@@ -121,11 +121,39 @@ public enum AccountUsageText {
     }
 
     /// The usage popover's line for one window: "89% left, resets 3:40 pm".
-    public static func windowLine(_ window: UsageWindow, now: Date, calendar: Calendar = .current) -> String {
+    /// The window's detail ("64,390 credits") is left out when `notice`
+    /// already says it, so it shows once.
+    public static func windowLine(_ window: UsageWindow, now: Date, calendar: Calendar = .current, notice: String? = nil) -> String {
         var line = percent(window.remainingPercent) + " left"
-        if let detail = window.detail, !detail.isEmpty { line += " (\(detail))" }
+        if let detail = window.detail, !detail.isEmpty, !(notice ?? "").contains(detail) { line += " (\(detail))" }
         if let reset = window.resetsAt { line += ", resets " + resetTime(reset, now: now, calendar: calendar) }
         return line
+    }
+
+    /// Token Stats' notices, with what several accounts say said once:
+    /// "Couldn't check usage just now, so these are from 1:19 pm." under
+    /// each of four accounts read as four problems. A notice is split on
+    /// " · "; a part two or more accounts have goes in `shared`, in the
+    /// order it first comes, and `own` keeps each account's other parts
+    /// ("$48.85 extra usage spent", Codex's credits).
+    public static func notices(_ accounts: [Account]) -> (shared: String?, own: [String: String]) {
+        var parts: [(id: String, parts: [String])] = []
+        for account in accounts {
+            guard let notice = account.usage?.notice?.trimmingCharacters(in: .whitespaces), !notice.isEmpty else { continue }
+            parts.append((account.id, notice.components(separatedBy: " · ").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }))
+        }
+        var common: [String] = []
+        for entry in parts {
+            for part in entry.parts where !common.contains(part) && parts.filter({ $0.parts.contains(part) }).count > 1 {
+                common.append(part)
+            }
+        }
+        var own: [String: String] = [:]
+        for entry in parts {
+            let rest = entry.parts.filter { !common.contains($0) }
+            if !rest.isEmpty { own[entry.id] = rest.joined(separator: " · ") }
+        }
+        return (common.isEmpty ? nil : common.joined(separator: " · "), own)
     }
 
     // MARK: Times
@@ -279,9 +307,12 @@ public enum CliText {
         }
     }
 
-    /// "Go back to 0.163.0", for Codex with a kept version.
+    /// "Go back to 0.163.0", for Codex with a kept version. Not when the
+    /// kept version is the one held (Mike went back from it): the hold's
+    /// "Update anyway" already reinstalls it.
     public static func goBackTitle(_ cli: CliStatus) -> String? {
-        guard let previous = cli.previousVersion, !previous.isEmpty, previous != cli.installedVersion, !isUpdating(cli) else { return nil }
+        guard let previous = cli.previousVersion, !previous.isEmpty, previous != cli.installedVersion, !isUpdating(cli),
+              previous != cli.hold?.version else { return nil }
         return "Go back to \(previous)"
     }
 
