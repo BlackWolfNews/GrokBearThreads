@@ -47,7 +47,12 @@ in the working tree are never built) into `~/Applications/.Threadbare.app.next`.
 Quitting swaps the staged bundle into place, so the next launch is the new
 app; a launch that finds one staged (the app was killed rather than quit)
 swaps it in and relaunches; "Restart to Update to <commit>" in the app
-menu does it right away. The build's output goes to
+menu does it right away. It also restarts by itself, checked every 30 s,
+once no thread is running or starting, no composer has unsent text or
+images, and either another app is in front (it relaunches behind, with
+`open -g`) or Threadbare is in front but hasn't had a key or a click for
+five minutes; the thread and list that were open come back after. The
+build's output goes to
 `~/Library/Logs/threadbare-update.log`; the app's own log says what it
 decided. Only the installed bundle path does this, not a dev app, perf or
 screenshot run, and `--no-update` turns it off for a launch. An app built

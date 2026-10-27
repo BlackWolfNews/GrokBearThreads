@@ -49,6 +49,20 @@ final class AppUpdateTests: XCTestCase {
         XCTAssertEqual(AppUpdate.decide(mainTree: "t1", running: running, staged: info("bbb", tree: "t2"), building: nil, failed: nil), .dropStaged)
     }
 
+    func testRestartsByItselfOnlyWhenNothingWouldBeInterrupted() {
+        let idle = AppUpdater.autoRestartIdleTime
+        // Another app in front: straight away.
+        XCTAssertTrue(AppUpdate.shouldAutoRestart(staged: true, loaded: true, working: false, hasDrafts: false, active: false, idleFor: 0))
+        // Threadbare in front: only after a while with no input.
+        XCTAssertFalse(AppUpdate.shouldAutoRestart(staged: true, loaded: true, working: false, hasDrafts: false, active: true, idleFor: idle - 1))
+        XCTAssertTrue(AppUpdate.shouldAutoRestart(staged: true, loaded: true, working: false, hasDrafts: false, active: true, idleFor: idle))
+        // A running thread, unsent text, no build or no thread list: never.
+        XCTAssertFalse(AppUpdate.shouldAutoRestart(staged: true, loaded: true, working: true, hasDrafts: false, active: false, idleFor: idle))
+        XCTAssertFalse(AppUpdate.shouldAutoRestart(staged: true, loaded: true, working: false, hasDrafts: true, active: false, idleFor: idle))
+        XCTAssertFalse(AppUpdate.shouldAutoRestart(staged: false, loaded: true, working: false, hasDrafts: false, active: false, idleFor: idle))
+        XCTAssertFalse(AppUpdate.shouldAutoRestart(staged: true, loaded: false, working: false, hasDrafts: false, active: false, idleFor: idle))
+    }
+
     func testSwapPutsTheStagedBundleInPlaceAndKeepsTheOld() throws {
         let install = try bundle("Threadbare.app", info("aaa", tree: "t1"))
         let next = try bundle(".Threadbare.app.next", info("bbb", tree: "t2"))

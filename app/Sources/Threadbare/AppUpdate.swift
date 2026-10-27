@@ -76,10 +76,21 @@ enum AppUpdate {
         }
     }
 
+    /// Whether to restart on its own to take a staged build: nothing is
+    /// running, nothing typed would be lost, and Mike isn't in the app
+    /// (another app is in front, or he hasn't touched this one for a while).
+    static func shouldAutoRestart(staged: Bool, loaded: Bool, working: Bool, hasDrafts: Bool, active: Bool, idleFor: TimeInterval) -> Bool {
+        guard staged, loaded, !working, !hasDrafts else { return false }
+        return !active || idleFor >= AppUpdater.autoRestartIdleTime
+    }
+
     /// Opens `bundle` again once this process has exited: a shell that
     /// waits for the pid, then `open`. Children of a GUI app outlive it.
-    static func relaunchAfterExit(_ bundle: URL) {
-        let script = "while /bin/kill -0 \(ProcessInfo.processInfo.processIdentifier) 2>/dev/null; do /bin/sleep 0.2; done; /usr/bin/open \"$0\""
+    /// `inBackground` opens it without bringing it in front (`open -g`),
+    /// for a restart Mike didn't ask for while he's in another app.
+    static func relaunchAfterExit(_ bundle: URL, inBackground: Bool = false) {
+        let open = inBackground ? "/usr/bin/open -g" : "/usr/bin/open"
+        let script = "while /bin/kill -0 \(ProcessInfo.processInfo.processIdentifier) 2>/dev/null; do /bin/sleep 0.2; done; \(open) \"$0\""
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/bin/sh")
         process.arguments = ["-c", script, bundle.path]
@@ -102,7 +113,9 @@ enum AppUpdate {
 /// Quitting swaps the staged bundle in, so the next launch is the new app;
 /// a launch that finds one staged (the app was killed rather than quit)
 /// swaps it in and relaunches. "Restart to Update" in the app menu does it
-/// now. Only the installed app does any of this: a debug app from
+/// now, and the app does it by itself once no thread is running, nothing
+/// typed would be lost and Mike isn't using it (see `shouldAutoRestart`),
+/// reopening the thread he had open. Only the installed app does any of this: a debug app from
 /// Tools/dev-app.sh, a perf run or a screenshot run has another bundle
 /// path or a scripted flag, and a bundle with no build.json (built before
 /// this existed) stays as it is until install.sh or restart.sh is run once.
@@ -112,7 +125,15 @@ final class AppUpdater {
     static let checkInterval: TimeInterval = 5 * 60
     /// After launch, once the app has connected and settled.
     static let firstCheckDelay: TimeInterval = 20
+    /// How often a staged build is weighed against what's going on.
+    nonisolated static let autoRestartInterval: TimeInterval = 30
+    /// With the app in front, this long without a key or a click counts as
+    /// not using it.
+    nonisolated static let autoRestartIdleTime: TimeInterval = 5 * 60
     static let logPath = NSHomeDirectory() + "/Library/Logs/threadbare-update.log"
+    /// Where the app was (the thread and sidebar list) when it restarted
+    /// itself, put back once the threads have loaded.
+    static let restoreKey = "updateRestore"
 
     nonisolated static var installDir: URL {
         URL(fileURLWithPath: ProcessInfo.processInfo.environment["THREADBARE_APP_DIR"] ?? NSHomeDirectory() + "/Applications/Threadbare.app")
@@ -147,7 +168,11 @@ final class AppUpdater {
     @ObservationIgnored private var building: String?
     @ObservationIgnored private var failed: String?
     @ObservationIgnored private var timer: Timer?
+    @ObservationIgnored private var restartTimer: Timer?
     @ObservationIgnored private var build: Process?
+    @ObservationIgnored private var lastInput = Date()
+    @ObservationIgnored private var inputMonitor: Any?
+    @ObservationIgnored private var restarting = false
 
     var enabled: Bool { running != nil && disabledReason == nil }
 
@@ -181,6 +206,54 @@ final class AppUpdater {
             try? await Task.sleep(for: .seconds(Self.firstCheckDelay))
             self?.check()
         }
+        restartTimer = Timer.scheduledTimer(withTimeInterval: Self.autoRestartInterval, repeats: true) { [weak self] _ in
+            Task { @MainActor in self?.considerAutoRestart(app: AppModel.shared) }
+        }
+        inputMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .leftMouseDown, .rightMouseDown, .scrollWheel]) { [weak self] event in
+            self?.lastInput = Date()
+            return event
+        }
+    }
+
+    /// Restarts into the staged build when that wouldn't interrupt anything.
+    func considerAutoRestart(app: AppModel) {
+        guard let staged, !restarting else { return }
+        let working = app.threads.values.contains { $0.status == .running || $0.status == .starting }
+        let hasDrafts = app.drafts.values.contains { !$0.text.isEmpty || !$0.images.isEmpty }
+        let active = NSApp.isActive
+        guard AppUpdate.shouldAutoRestart(staged: true, loaded: app.threadsLoaded && app.connection == .connected, working: working,
+                                          hasDrafts: hasDrafts, active: active, idleFor: Date().timeIntervalSince(lastInput)) else { return }
+        AppLog.write("update", "restarting into \(staged.short): nothing running, nothing typed, " + (active ? "no input for a while" : "the app isn't in front"))
+        restart(app: app, inBackground: !active)
+    }
+
+    private func restart(app: AppModel, inBackground: Bool) {
+        restarting = true
+        Self.saveRestore(selection: app.selection, mode: app.sidebarMode)
+        AppUpdate.relaunchAfterExit(Self.installDir, inBackground: inBackground)
+        NSApp.terminate(nil)
+    }
+
+    private static func saveRestore(selection: String?, mode: SidebarMode) {
+        let modeName = switch mode {
+        case .inbox: "inbox"
+        case .snoozed: "snoozed"
+        case .archive: "archive"
+        }
+        UserDefaults.standard.set(["selection": selection ?? "", "mode": modeName], forKey: restoreKey)
+    }
+
+    /// After a restart the app made itself: back to the thread and list
+    /// that were open. Called once the threads have loaded.
+    static func restoreAfterRestart(app: AppModel) {
+        guard let saved = UserDefaults.standard.dictionary(forKey: restoreKey) as? [String: String] else { return }
+        UserDefaults.standard.removeObject(forKey: restoreKey)
+        switch saved["mode"] {
+        case "snoozed": app.sidebarMode = .snoozed
+        case "archive": app.showArchive()
+        default: app.sidebarMode = .inbox
+        }
+        if let id = saved["selection"], !id.isEmpty, app.threads[id] != nil { app.select(id) }
     }
 
     /// Reads main's app/ tree in the checkout and starts a build if it's new.
@@ -261,8 +334,7 @@ final class AppUpdater {
     /// open the app again.
     func restartToUpdate() {
         guard staged != nil else { return }
-        AppUpdate.relaunchAfterExit(Self.installDir)
-        NSApp.terminate(nil)
+        restart(app: AppModel.shared, inBackground: false)
     }
 
     // MARK: Helpers

@@ -119,7 +119,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             #endif
             app.notificationsEnabled = !scripted
             if !scripted { Notifier.setUp(delegate: self) }
-            app.onThreadsLoaded = { LaunchClock.threadsLoaded() }
+            app.onThreadsLoaded = {
+                LaunchClock.threadsLoaded()
+                // After a restart the app made itself for an update: back
+                // to where it was (a no-op otherwise).
+                AppUpdater.restoreAfterRestart(app: app)
+            }
             app.start()
             if perf { PerfRunner.start(app: app) }
             if screenshots { ScreenshotRunner.start(app: app) }

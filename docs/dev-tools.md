@@ -271,7 +271,9 @@ the installed app follows main on its own (`app/AppUpdate.swift`,
 `app/stage-update.sh`, the README's "Build and run" section): it notices a
 change under `app/` on main within five minutes, builds it in the
 background from a clone (never the working tree), and swaps the bundle in
-on quit, at the next launch, or from "Restart to Update" in the app menu.
+on quit, at the next launch, from "Restart to Update" in the app menu, or
+by restarting itself once nothing is running, nothing is typed and Mike
+isn't in the app (reopening the thread he had open).
 Only `app/` counts: a runner or docs commit doesn't rebuild the app. The
 build is `nice`d and uses its own scratch folder, so it never waits on or
 disturbs an agent's `swift build` in the checkout.
