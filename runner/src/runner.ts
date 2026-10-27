@@ -31,7 +31,8 @@ import type {
   TurnOutcome,
 } from './protocol.ts';
 import { ErrorCode, LIMITS, PROTOCOL_VERSION, RpcError } from './protocol.ts';
-import type { Schedule } from './protocol.ts';
+import type { LibrarianStatus, Project, Schedule } from './protocol.ts';
+import type { Projects } from './projects.ts';
 import type { Settings } from './settings.ts';
 import type {
   AgentAdapter,
@@ -83,7 +84,15 @@ export type Notification =
   | { method: 'runner.notice'; params: { level: 'info' | 'warning' | 'error'; message: string } }
   | { method: 'schedules.updated'; params: { schedules: Schedule[] } }
   | { method: 'clis.updated'; params: { clis: CliStatus[] } }
-  | { method: 'settings.updated'; params: { settings: Settings } };
+  | { method: 'settings.updated'; params: { settings: Settings } }
+  | { method: 'projects.updated'; params: { projects: Project[] } }
+  | { method: 'librarian.updated'; params: { librarian: LibrarianStatus } };
+
+// What the librarian (librarian.ts) hears about threads: a turn that ended,
+// and a folder move.
+export type ThreadActivity =
+  | { kind: 'turn.end'; threadId: string; outcome: TurnOutcome; edited: string[] }
+  | { kind: 'moved'; threadId: string; from: string; to: string };
 
 // The seams to D's and E's modules (usage.ts, updates/), as far as the
 // runner uses them. They're structural so tests can pass small fakes.
@@ -208,7 +217,11 @@ type Runtime = {
   // has just written .env.local, or a patch file the agent has just
   // written, shows up within seconds. Until the first read finishes the
   // built-in panels stand in.
-  patches?: { cwd: string; at: number; set: PatchSet; refreshing: boolean; loaded: boolean };
+  patches?: { cwd: string; key: string; at: number; set: PatchSet; refreshing: boolean; loaded: boolean };
+  // Said to the agent at the start of its next message while its CLI is
+  // live: the projects it has just been put in (projects.ts). A new
+  // session gets the whole brief instead.
+  projectTell?: string;
   runningActions?: Set<string>;
   // Turns in a row that a hook's message started, per hook. A hook that
   // keeps failing stops being told to the agent after HOOK_TELL_LIMIT, so
@@ -248,6 +261,9 @@ export type RunnerDeps = {
   // The runner's own small-model calls (models/index.ts), for titles.
   // Absent in most tests, which then keep the first-line title.
   models?: Pick<Models, 'generate'>;
+  // Projects (projects.ts): their folders' patches, the brief a session
+  // starts with, and the summary's `projects`. Started by start().
+  projects?: Projects;
 };
 
 const DELTA_INTERVAL_MS = 33; // at most ~30 delta flushes a second per thread
@@ -290,6 +306,8 @@ export class Runner {
   private actionShell?: string[];
   private actionTimeoutMs?: number;
   private models?: Pick<Models, 'generate'>;
+  private projects?: Projects;
+  private activity = new Set<(a: ThreadActivity) => void>();
   private patchCache: PatchCache = new Map();
   private threads = new Map<string, ThreadState>();
   private listeners = new Set<(n: Notification) => void>();
@@ -325,6 +343,7 @@ export class Runner {
     this.actionShell = deps.actionShell;
     this.actionTimeoutMs = deps.actionTimeoutMs;
     this.models = deps.models;
+    this.projects = deps.projects;
     this.adapters = deps.adapters;
     this.accounts = deps.accounts;
     this.usage = deps.usage;
@@ -688,6 +707,81 @@ export class Runner {
   // For the runner's neighbours (schedules.ts) to tell every client.
   publish(n: Notification): void {
     this.notify(n);
+  }
+
+  // Turn ends and folder moves, for the librarian.
+  onThreadActivity(fn: (a: ThreadActivity) => void): () => void {
+    this.activity.add(fn);
+    return () => this.activity.delete(fn);
+  }
+
+  private tellActivity(a: ThreadActivity): void {
+    for (const fn of this.activity) {
+      try {
+        fn(a);
+      } catch (e) {
+        this.log.error('activity listener failed', { error: String(e) });
+      }
+    }
+  }
+
+  // ---------------------------------------------------- for projects.ts
+
+  // Every thread's record, put away ones included. Read only.
+  threadRecords(): ThreadRecord[] {
+    return [...this.threads.values()].filter((t) => !t.rt.deleted).map((t) => t.rec);
+  }
+
+  // A thread id from a full id or unique prefix; -32004 otherwise.
+  resolveThread(idOrPrefix: string): string {
+    const t = typeof idOrPrefix === 'string' && idOrPrefix ? this.findThread(idOrPrefix) : undefined;
+    if (!t) throw new RpcError(ErrorCode.threadNotFound, `Thread not found: ${idOrPrefix}`);
+    return t.id;
+  }
+
+  // Changes a thread's record for projects.ts, saves it and sends its
+  // summary; `note` goes in the transcript, `tell` to the agent with its
+  // next message if its CLI is live (a new session gets the brief anyway).
+  editThread(threadId: string, edit: (rec: ThreadRecord) => void, say: { note?: string; tell?: string } = {}): ThreadSummary {
+    const st = this.mustGet(threadId);
+    edit(st.rec);
+    if (say.note) this.emit(st, { type: 'system.note', text: say.note }, st.rt.turn?.turnId);
+    if (say.tell && st.rt.session) st.rt.projectTell = st.rt.projectTell ? `${st.rt.projectTell}\n${say.tell}` : say.tell;
+    this.markDirty(st);
+    return this.summary(st);
+  }
+
+  // Sends these threads' summaries again; their patches are read again on
+  // the way, since a project's folders may have changed.
+  touchThreads(threadIds: string[]): void {
+    for (const id of threadIds) {
+      const st = this.threads.get(id);
+      if (!st) continue;
+      if (st.rt.patches) st.rt.patches.at = -Infinity;
+      this.markDirty(st);
+    }
+  }
+
+  // The first user message and the last few messages of a thread, as plain
+  // text, for the librarian.
+  threadGist(threadId: string, opts: { recent?: number; chars?: number } = {}): { first?: string; recent: { who: 'user' | 'assistant'; text: string }[] } {
+    const st = this.mustGet(threadId);
+    const chars = opts.chars ?? 600;
+    const cut = (t: string) => (t.length > chars ? t.slice(0, chars) + '…' : t);
+    const first = this.firstMessageText(st.rec.id);
+    const log = this.store.log(st.rec.id);
+    const recent: { who: 'user' | 'assistant'; text: string }[] = [];
+    const want = opts.recent ?? 6;
+    // Back from the end a page at a time until there are enough.
+    for (let to = log.lastSeq; to >= 1 && recent.length < want; to -= 200) {
+      const page = log.read(Math.max(1, to - 199), to);
+      for (const e of page.reverse()) {
+        if (recent.length >= want) break;
+        if (e.type === 'user.message' && e.origin === undefined) recent.unshift({ who: 'user', text: cut(e.text) });
+        else if (e.type === 'assistant.text' && e.text.trim()) recent.unshift({ who: 'assistant', text: cut(e.text) });
+      }
+    }
+    return { first: first ? cut(first) : undefined, recent };
   }
 
   private notify(n: Notification): void {
@@ -1172,7 +1266,12 @@ export class Runner {
       }
       this.makeRoomForCli(st);
       this.startSession(st, account);
+    } else if (rt.projectTell) {
+      // Projects it was put in while its CLI was live; a new session gets
+      // the whole brief instead.
+      text = `${rt.projectTell}\n\n${text}`;
     }
+    rt.projectTell = undefined;
     if (rec.moved) {
       // A CLI that moves folders itself: the live session got setCwd, or a
       // released one resumes in the new folder (startSession passes it).
@@ -1258,6 +1357,7 @@ export class Runner {
         tmpDir: path.join(paths.run(this.cfg.home), 'tmp'),
         allowRules: rec.allowRules ?? [],
         env: threadEnv(rec.id, this.cfg.home),
+        ...this.briefFor(rec),
       },
       sink,
     );
@@ -1499,6 +1599,9 @@ export class Runner {
     // The folder's turn.end hooks, after a turn the agent finished itself
     // (not one the runner opened for a background task's approval).
     if (outcome === 'completed' && finished && !finished.auto && !this.stopping) void this.runHooks(st, finished);
+    if (outcome && finished && !finished.auto && !this.stopping) {
+      this.tellActivity({ kind: 'turn.end', threadId: rec.id, outcome, edited: [...finished.edited].map((p) => path.resolve(rec.cwd, p)) });
+    }
     if (rt.taskEndedInTurn) {
       rt.taskEndedInTurn = false;
       // Only while the CLI is there to start that turn.
@@ -1680,6 +1783,7 @@ export class Runner {
     }
     if (newAccount && params.accountId !== rec.accountId) this.checkProvider(newAccount);
     const cwdChanged = newCwd !== undefined && newCwd !== rec.cwd;
+    const fromCwd = rec.cwd;
     const accountChanged = params.accountId !== undefined && params.accountId !== rec.accountId;
     const providerChanged = accountChanged && newAccount!.provider !== rec.provider;
     const adapter = this.adapters[rec.provider];
@@ -1717,6 +1821,7 @@ export class Runner {
       }
       release = true;
     }
+    if (cwdChanged) this.tellActivity({ kind: 'moved', threadId: rec.id, from: fromCwd, to: rec.cwd });
     // The account the settings are checked against, after any change.
     const account = newAccount ?? this.accounts.get(rec.accountId);
     let model = rec.model;
@@ -2380,6 +2485,8 @@ export class Runner {
     const background = this.background(st);
     if (background.length) s.background = background;
     if (rec.subagents?.length) s.subagents = rec.subagents.map(publicSubagent);
+    const projects = this.projects?.threadProjects(rec);
+    if (projects) s.projects = projects;
     return s;
   }
 
@@ -2388,15 +2495,23 @@ export class Runner {
   private patchSet(st: ThreadState): PatchSet {
     const { rec, rt } = st;
     const now = this.clock.now();
+    const folders = this.projects?.foldersFor(rec) ?? [];
+    const key = JSON.stringify([rec.cwd, folders]);
+    if (rt.patches && rt.patches.cwd === rec.cwd && rt.patches.key !== key) {
+      // Same folder, different projects: keep showing what there is while
+      // the new set loads, rather than flashing the panels away.
+      rt.patches.key = key;
+      rt.patches.at = -Infinity;
+    }
     if (!rt.patches || rt.patches.cwd !== rec.cwd) {
       // The built-in panels straight away; the files follow.
       let panels: PatchSet['panels'] = [];
       try {
-        panels = projectPanels(rec.cwd, this.panelsRoot);
+        panels = projectPanels(rec.cwd, this.panelsRoot, folders);
       } catch (e) {
         this.log.warn('could not read the folder for panels', { threadId: rec.id, cwd: rec.cwd, error: String(e) });
       }
-      rt.patches = { cwd: rec.cwd, at: now, set: { ...EMPTY_PATCH_SET, panels }, refreshing: false, loaded: false };
+      rt.patches = { cwd: rec.cwd, key, at: now, set: { ...EMPTY_PATCH_SET, panels }, refreshing: false, loaded: false };
       void this.refreshPatches(st);
     } else if (!rt.patches.refreshing && now - rt.patches.at > PATCHES_TTL_MS) {
       void this.refreshPatches(st);
@@ -2413,9 +2528,10 @@ export class Runner {
     if (!entry || entry.refreshing) return;
     entry.refreshing = true;
     const cwd = rec.cwd;
+    const key = entry.key;
     let set: PatchSet;
     try {
-      set = await loadPatchSet(cwd, this.panelsRoot, this.patchCache);
+      set = await loadPatchSet(cwd, this.panelsRoot, this.patchCache, this.projects?.foldersFor(rec) ?? []);
     } catch (e) {
       this.log.warn('could not read the folder for patches', { threadId: rec.id, cwd, error: String(e) });
       set = entry.set;
@@ -2424,6 +2540,12 @@ export class Runner {
     entry.at = this.clock.now();
     // The folder moved on meanwhile: the next summary starts over.
     if (rt.patches !== entry || rec.cwd !== cwd || rt.deleted) return;
+    // The projects changed meanwhile: read again.
+    if (entry.key !== key) {
+      entry.at = -Infinity;
+      this.markDirty(st);
+      return;
+    }
     const before = entry.set;
     const changed = JSON.stringify(before) !== JSON.stringify(set);
     if (entry.loaded && changed) this.notePatchChanges(st, before, set);
@@ -2471,7 +2593,7 @@ export class Runner {
     for (const hook of hooks) {
       if (st.rt.deleted || this.stopping) return;
       const outcome = await runCommand(hook.command, {
-        cwd: st.rec.cwd,
+        cwd: hook.folder ?? st.rec.cwd,
         env: { ...process.env, ...threadEnv(st.rec.id, this.cfg.home) },
         shell: this.actionShell,
         timeoutMs: this.actionTimeoutMs,
@@ -2529,7 +2651,7 @@ export class Runner {
     running.add(actionId);
     try {
       const outcome = await runCommand(action.command ?? '', {
-        cwd: st.rec.cwd,
+        cwd: action.folder ?? st.rec.cwd,
         env: { ...process.env, ...threadEnv(threadId, this.cfg.home) },
         shell: this.actionShell,
         timeoutMs: this.actionTimeoutMs,
@@ -2581,6 +2703,12 @@ export class Runner {
     } catch (e) {
       this.log.warn('could not save default account', { error: String(e) });
     }
+  }
+
+  // What a starting session is told about the thread's projects.
+  private briefFor(rec: ThreadRecord): { instructions?: string } {
+    const brief = this.projects?.brief(rec);
+    return brief ? { instructions: brief } : {};
   }
 
   // A short note that gives a new native session the gist of the thread so

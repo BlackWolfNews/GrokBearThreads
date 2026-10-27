@@ -42,6 +42,10 @@ export type StartSessionOptions = {
   // Added to the CLI's environment (THREADBARE_THREAD_ID and friends), so
   // the commands it runs know which thread they belong to.
   env?: Record<string, string>;
+  // Said to the agent on top of the CLI's own system prompt: the thread's
+  // projects (projects.ts). Claude appends it to the system prompt, Codex
+  // takes it as developer instructions.
+  instructions?: string;
 };
 
 export type TurnResult = {

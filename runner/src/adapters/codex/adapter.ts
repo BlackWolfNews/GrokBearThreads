@@ -412,7 +412,9 @@ export class CodexSession implements AgentSession {
       cwd: opts.cwd,
       ...(this.model ? { model: this.model } : {}),
       ...threadPolicy(this.mode),
-      config: threadConfig(opts.threadId),
+      // The thread's projects, as developer instructions: config.toml's
+      // own key, set per thread like the rest of threadConfig.
+      config: { ...threadConfig(opts.threadId), ...(opts.instructions ? { developer_instructions: opts.instructions } : {}) },
     };
     let res: ThreadStartResponse;
     if (opts.resume) {

@@ -7,6 +7,8 @@ import { RELEASE, markGoodLater, readRelease, takeRollbackNotice, tellLaunchList
 import { RunnerUpdater } from './update.ts';
 import { Restarter, restartMethods } from './restart.ts';
 import { Scheduler, scheduleMethods } from './schedules.ts';
+import { Projects, projectMethods } from './projects.ts';
+import { Librarian, librarianMethods } from './librarian.ts';
 import { createLogger } from './log.ts';
 import { ThreadStore } from './store.ts';
 import { AccountRegistry } from './accounts.ts';
@@ -92,7 +94,7 @@ async function main(): Promise<void> {
     claudePath: cfg.claudePath,
     registry,
     log,
-    mcpServersFor: (threadId) => ({ [SERVER_NAME]: threadbareMcpServer(runner, threadId, scheduler) }),
+    mcpServersFor: (threadId) => ({ [SERVER_NAME]: threadbareMcpServer(runner, threadId, scheduler, projects) }),
     alwaysAsk: ALWAYS_ASK_TOOLS,
   });
   // One app-server per live Codex thread, each starting what E says is
@@ -102,7 +104,7 @@ async function main(): Promise<void> {
     codexArgs: cfg.codexArgs,
     registry,
     log,
-    toolsFor: (threadId) => buildThreadbareTools(runner, threadId, Date.now, scheduler),
+    toolsFor: (threadId) => buildThreadbareTools(runner, threadId, Date.now, scheduler, projects),
     onNotice: (text) => runner.notice('warning', text),
   });
   // The runner's own small-model calls. Reads the key from secrets/ on
@@ -116,7 +118,9 @@ async function main(): Promise<void> {
     notice: (level, message) => runner.notice(level, message),
     onSpend: () => settings.spendChanged(),
   });
+  const projects = new Projects({ home: cfg.home, clock: realClock, log });
   runner = new Runner({
+    projects,
     config: cfg,
     store,
     adapters: { claude, codex },
@@ -132,6 +136,11 @@ async function main(): Promise<void> {
   // runner was stopped finds its thread.
   scheduler = new Scheduler({ runner, home: cfg.home, clock: realClock, log });
   scheduler.start();
+  // Projects need the threads loaded (their counts, and the thread side of
+  // membership); the librarian needs both.
+  projects.start(runner);
+  const librarian = new Librarian({ host: runner, projects, models, clock: realClock, log, home: cfg.home });
+  librarian.start();
   if (swept) runner.startupNotice('info', `Stopped ${swept === 1 ? 'a process group' : `${swept} process groups`} left running by the previous runner.`);
 
   // launch.mjs went back to this release because a newer one kept crashing
@@ -167,7 +176,7 @@ async function main(): Promise<void> {
   });
 
   runner.attachClis(updates);
-  const methods = { ...restartMethods(restarter), ...scheduleMethods(scheduler), ...settingsMethods(settings), ...modelMethods(models) };
+  const methods = { ...restartMethods(restarter), ...scheduleMethods(scheduler), ...projectMethods(projects), ...librarianMethods(librarian), ...settingsMethods(settings), ...modelMethods(models) };
   // runner.status carries the CLI statuses too (protocol, "runner.status").
   const restartStatus = methods['runner.status'];
   methods['runner.status'] = (p) => ({ ...(restartStatus(p) as Record<string, unknown>), clis: updates.list() });
@@ -227,6 +236,8 @@ async function main(): Promise<void> {
     // Whatever stopped it, a pending restart has now happened.
     restarter.stopping();
     scheduler.stop();
+    librarian.stop();
+    projects.stop();
     usage.stop();
     updates.stop();
     settings.stop();

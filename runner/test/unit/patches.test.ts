@@ -231,3 +231,60 @@ test('a folder that is only called convex is not a Convex project', async () => 
   const cfg = project(home, 'dev/me/app', { convex: null, 'convex.json': '{}' });
   assert.equal(projectPanels(cfg, home)[0]?.id, 'convex.dashboard');
 });
+
+test("a project's folders add their patches: tagged with the project, run in their folder, clashes renamed", async () => {
+  const home = tmpDir();
+  // The thread runs in misc; its project spans two repos.
+  const misc = project(home, 'dev/misc');
+  const app = project(home, 'dev/app', { convex: null, 'package.json': '{}', '.env.local': 'CONVEX_DEPLOYMENT=dev:app-1\n' });
+  const web = project(home, 'dev/web', { convex: null, 'package.json': '{}', '.env.local': 'CONVEX_DEPLOYMENT=dev:web-2\n' });
+  const ownFile = writePatch(path.join(misc, '.threadbear/patches'), 'checks.ts', `export default { actions: [{ title: "Lint", run: "echo misc" }] };`);
+  const appFile = writePatch(path.join(app, '.threadbear/patches'), 'checks.ts', `export default {
+    actions: [{ title: "Lint", run: "echo app" }],
+    hooks: [{ title: "Typecheck", on: "turn.end", run: "tsc", edited: "**/*.ts" }, { title: "Any edit", on: "turn.end", run: "true" }],
+  };`);
+  // A patch dir above both is loaded once, as the thread's own.
+  const shared = writePatch(path.join(home, 'dev/.threadbear/patches'), 'shared.ts', `export default { actions: [{ title: "Shared", run: "true" }] };`);
+  const set = await loadPatchSet(misc, home, new Map(), [
+    { folder: app, projectId: 'p_1' },
+    { folder: web, projectId: 'p_1' },
+    { folder: misc, projectId: 'p_2' }, // the thread's own folder: already loaded as its own
+  ]);
+  assert.deepEqual(set.patches, [
+    { id: 'convex', source: 'builtin', folder: app, projectId: 'p_1' },
+    { id: 'web:convex', source: 'builtin', folder: web, projectId: 'p_1' },
+    { id: 'shared', source: 'project', file: shared },
+    { id: 'checks', source: 'project', file: ownFile },
+    { id: 'app:checks', source: 'project', file: appFile, folder: app, projectId: 'p_1' },
+  ]);
+  assert.deepEqual(set.panels.map((p) => [p.id, p.url, p.projectId]), [
+    ['convex.dashboard', 'https://dashboard.convex.dev/d/app-1', 'p_1'],
+    ['web:convex.dashboard', 'https://dashboard.convex.dev/d/web-2', 'p_1'],
+  ]);
+  assert.deepEqual(set.actions.map((a) => [a.id, a.patch, a.folder, a.projectId]), [
+    ['shared.shared', 'shared', undefined, undefined],
+    ['checks.lint', 'checks', undefined, undefined],
+    ['app:checks.lint', 'app:checks', app, 'p_1'],
+  ]);
+  for (const a of set.actions) assert.deepEqual(checkAction(a as never), [], a.id);
+  for (const p of set.panels) assert.deepEqual(checkPanel(p as never), [], p.id);
+  const [typecheck, anyEdit] = set.hooks;
+  assert.equal(typecheck.folder, app);
+  // Only edits inside the hook's own folder count, matched relative to it.
+  assert.equal(hookApplies(typecheck, [path.join(misc, 'x.ts')], misc), false);
+  assert.equal(hookApplies(typecheck, [path.join(app, 'src/x.ts')], misc), true);
+  assert.equal(hookApplies(anyEdit, [], misc), false, 'a project hook needs an edit in its folder');
+  assert.equal(hookApplies(anyEdit, [path.join(misc, 'notes.md')], misc), false);
+  assert.equal(hookApplies(anyEdit, [path.join(app, 'README.md')], misc), true);
+  // The quick built-in set agrees on the panels.
+  assert.deepEqual(projectPanels(misc, home, [{ folder: app, projectId: 'p_1' }, { folder: web, projectId: 'p_1' }]).map((p) => p.id), ['convex.dashboard', 'web:convex.dashboard']);
+});
+
+test("a thread inside a project's folder keeps its own patches as they were", async () => {
+  const home = tmpDir();
+  const app = project(home, 'dev/app', { convex: null, 'package.json': '{}' });
+  const sub = project(home, 'dev/app/packages/web');
+  const plain = await loadPatchSet(sub, home);
+  const withProject = await loadPatchSet(sub, home, new Map(), [{ folder: app, projectId: 'p_1' }]);
+  assert.deepEqual(withProject, plain);
+});
