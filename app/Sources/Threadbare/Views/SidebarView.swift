@@ -63,7 +63,9 @@ private struct InboxList: View {
             .help("New thread (⌘N)")
             .padding(.horizontal, SidebarMetrics.outerInset)
             .padding(.top, zoomed(4))
-            ThreadList(order: sections.all.map(\.id), scrollID: { rowIDs[$0] ?? $0 }) { select in
+            // A folded section's rows aren't drawn, so the arrow keys skip them.
+            let order = InboxSection.allCases.filter { !app.collapsedSections.contains($0) }.flatMap { sections[$0].map(\.id) }
+            ThreadList(order: order, scrollID: { rowIDs[$0] ?? $0 }) { select in
                 if app.threadsLoaded {
                     ForEach(InboxSection.allCases, id: \.self) { section in
                         ThreadSection(section: section, threads: sections[section], select: select)
@@ -78,17 +80,26 @@ private struct InboxList: View {
 }
 
 /// A heading and its rows. Empty sections other than Inbox are left out.
+/// Clicking the heading folds the rows away; folded, it shows how many.
 private struct ThreadSection: View {
+    @Environment(AppModel.self) private var app
     let section: InboxSection
     let threads: [ThreadSummary]
     let select: (String) -> Void
 
     var body: some View {
         if !threads.isEmpty || section == .inbox {
-            SectionHeading(title: section.title, icon: section.icon)
-            ForEach(threads.map { SectionRow(section: section.title, thread: $0) }) { row in
-                ThreadRowView(thread: row.thread, mode: .inbox, section: section) { select(row.thread.id) }
-                SubagentList(thread: row.thread, section: section.title)
+            let collapsed = app.collapsedSections.contains(section)
+            SectionHeading(title: section.title, icon: section.icon, fold: .init(collapsed: collapsed, count: threads.count) {
+                withAnimation(.snappy(duration: 0.2)) {
+                    if collapsed { app.collapsedSections.remove(section) } else { app.collapsedSections.insert(section) }
+                }
+            })
+            if !collapsed {
+                ForEach(threads.map { SectionRow(section: section.title, thread: $0) }) { row in
+                    ThreadRowView(thread: row.thread, mode: .inbox, section: section) { select(row.thread.id) }
+                    SubagentList(thread: row.thread, section: section.title)
+                }
             }
         }
     }
@@ -112,8 +123,30 @@ struct SectionHeading: View {
     /// A small SF Symbol before the title, so the groups can be told apart
     /// at a glance.
     var icon: String? = nil
+    /// Given for a heading that folds its rows away when clicked.
+    var fold: Fold? = nil
+    @State private var hovering = false
+
+    struct Fold {
+        var collapsed: Bool
+        /// The rows under it, shown while they're folded away.
+        var count: Int
+        var toggle: () -> Void
+    }
 
     var body: some View {
+        if let fold {
+            Button(action: fold.toggle) { label }
+                .buttonStyle(.plain)
+                .onHover { hovering = $0 }
+                .help(fold.collapsed ? "Show \(title)" : "Hide \(title)")
+                .accessibilityValue(fold.collapsed ? "Collapsed" : "Expanded")
+        } else {
+            label
+        }
+    }
+
+    private var label: some View {
         // A quiet divider rather than a bold tag: grey, at the previews'
         // size, with clear room above each group, like Codex and Claude.
         // Semibold so it isn't weaker than the rows it groups. A hairline
@@ -127,11 +160,28 @@ struct SectionHeading: View {
             }
             Text(title)
                 .font(.system(size: TypeScale.sidebarHeading, weight: .semibold))
+                .foregroundStyle(hovering ? .primary : .secondary)
                 .fixedSize()
             Rectangle()
                 .fill(Color.primary.opacity(0.08))
                 .frame(height: 1)
-                .padding(.leading, zoomed(4))
+                .padding(.horizontal, zoomed(4))
+            if let fold {
+                // Folded, the count says what's hidden; the chevron only
+                // shows while folded or on hover, so an open heading stays
+                // as quiet as the others.
+                if fold.collapsed && fold.count > 0 {
+                    Text("\(fold.count)")
+                        .font(.system(size: TypeScale.sidebarMeta))
+                        .foregroundStyle(SidebarMetrics.faint)
+                        .monospacedDigit()
+                }
+                Image(systemName: "chevron.down")
+                    .font(.system(size: zoomed(9), weight: .semibold))
+                    .foregroundStyle(SidebarMetrics.faint)
+                    .rotationEffect(.degrees(fold.collapsed ? -90 : 0))
+                    .opacity(fold.collapsed || hovering ? 1 : 0)
+            }
         }
         .foregroundStyle(.secondary)
         .padding(.leading, SidebarMetrics.leading)
@@ -139,6 +189,7 @@ struct SectionHeading: View {
         .padding(.top, zoomed(18))
         .padding(.bottom, zoomed(6))
         .frame(maxWidth: .infinity, alignment: .leading)
+        .contentShape(Rectangle())
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(.isHeader)
     }
