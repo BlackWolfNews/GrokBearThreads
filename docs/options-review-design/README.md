@@ -1,6 +1,8 @@
 # Comparing design options
 
-Design pass, 27 October 2026. Implementation waits for Mike's choice.
+Design pass, 27 October 2026. Mike approved A, the separate comparison window.
+The HTML files below remain the original design prototypes. V1 is built in
+the native app and runner; usage is at the end of this document.
 
 Open `index.html` to compare the directions, then open either mockup at full
 browser size. `./render.sh` renders all three views with the existing headless
@@ -82,3 +84,50 @@ Verify the approved UI against the four real account-picker images in a debug
 app behind Mike's window; use `app/Tools/screenshots.sh` for app screenshots.
 No app code changes are part of this design pass, so these HTML renders use
 Chromium directly.
+
+## Using V1
+
+An agent calls `threadbare.show_options` with image paths and stable option
+IDs. For example, from this repo:
+
+```json
+{
+  "title": "Account picker",
+  "options": [
+    { "id": "A", "title": "Auto account", "path": "docs/account-picker-design/1-auto-account.png" },
+    { "id": "B", "title": "One picker", "path": "docs/account-picker-design/2-one-picker.png" },
+    { "id": "C", "title": "Account pools", "path": "docs/account-picker-design/3-pools.png" },
+    { "id": "D", "title": "Moving mid-thread", "path": "docs/account-picker-design/4-moving-mid-thread.png", "reference": true }
+  ]
+}
+```
+
+The tool returns promptly. Mike's choice and notes arrive as a later message
+in the same thread. Existing Codex native sessions may retain the tools they
+started with; `tb rpc reviews.create '<JSON with threadId and the same fields>'`
+can create a review for such a session once the runner has updated.
+
+Click Compare images on the transcript card to open the window. Reviews with
+more than two images start in Grid; 2-up compares a pair and Single gives one
+image the whole canvas. Use either title menu or the thumbnail strip to
+change images. Fit shows the entire image; 100% shows one source pixel per
+screen pixel, with scrollbars. Left/right arrows browse outside the notes
+editor; Return toggles Single and 2-up. Reference images get notes but cannot
+be picked. The thread header also lists pending reviews, including those
+older than the transcript page currently loaded.
+
+Pick/unpick and notes save a draft. Review later or closing the window keeps
+it; Send reply commits all the notes and optional choice together. A local
+cache preserves text during a lost connection, including a rapid close and
+reopen. If another window has changed the server draft, local text is kept
+and an explicit Save my draft is needed before replacing it. Cancel review
+closes the request without messaging the agent. An answered card reopens the
+images and sent notes read-only.
+
+Runner files: `runner/src/reviews.ts`, the review methods in `runner.ts`,
+and the shared MCP tool in `threadbare-mcp.ts`. App files: core review models
+and reduction, `ReviewSession.swift`, `ReviewRowCell.swift` and
+`Views/ReviewWindow.swift`. `app/Tools/screenshots.sh /tmp/review-shots --only 16`
+captures the card, grid, pair and readable-size views using the four original
+images. The mock fixture is `demo_design_review`. See the app README for the
+`review` automation command. HTML previews and overlays remain deferred.

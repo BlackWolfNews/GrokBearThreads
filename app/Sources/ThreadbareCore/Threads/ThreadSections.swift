@@ -34,7 +34,7 @@ public struct ThreadSections: Sendable, Equatable {
     public static func build(_ threads: some Sequence<ThreadSummary>, now: Date) -> ThreadSections {
         var sections = ThreadSections()
         for thread in threads where !thread.isArchived && !thread.isSnoozed(at: now) {
-            if thread.status == .waiting || (thread.needsYou && !thread.isWorkingInBackground) {
+            if thread.hasPendingReviews || thread.status == .waiting || (thread.needsYou && !thread.isWorkingInBackground) {
                 sections.inbox.append(thread)
             } else if thread.status == .running || thread.status == .starting || thread.isWorkingInBackground {
                 sections.running.append(thread)
@@ -59,13 +59,13 @@ public struct ThreadSections: Sendable, Equatable {
     /// failed or was stopped, so it's still not done. 4: read and done.
     public static func urgency(_ thread: ThreadSummary) -> Int {
         let broken = thread.status == .error || thread.status == .stopped
-        if thread.status == .waiting { return 0 }
+        if thread.hasPendingReviews || thread.status == .waiting { return 0 }
         if thread.needsYou { return broken ? 1 : 2 }
         return broken ? 3 : 4
     }
 
     /// The inbox threads waiting on Mike or not read yet (the Dock badge).
-    public var needsYou: [ThreadSummary] { inbox.filter { $0.status == .waiting || $0.needsYou } }
+    public var needsYou: [ThreadSummary] { inbox.filter { $0.hasPendingReviews || $0.status == .waiting || $0.needsYou } }
 
     public var all: [ThreadSummary] { inbox + running }
 

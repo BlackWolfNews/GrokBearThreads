@@ -64,6 +64,18 @@ public enum MarkdownExport {
             return "**Approval**: \(item.request.title)\(decision)"
         case .question(let item):
             return item.request.questions.map { "**Question**: \($0.question)" }.joined(separator: "\n")
+        case .review(let review):
+            var lines = ["**Design review**: \(review.title) (\(review.status))"]
+            if let note = review.note { lines.append(note) }
+            let response = review.response ?? review.draft
+            for option in review.options {
+                var line = "- \(option.id). \(option.title)"
+                if response.pickedId == option.id { line += " (picked)" }
+                if option.reference { line += " (reference)" }
+                if let note = response.notes[option.id], !note.isEmpty { line += ": " + note }
+                lines.append(line)
+            }
+            return lines.joined(separator: "\n")
         case .plan(let entries):
             return entries.map { entry in
                 let box = entry.status == .completed ? "[x]" : "[ ]"

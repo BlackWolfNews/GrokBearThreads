@@ -735,6 +735,9 @@ public struct ThreadSummary: Sendable, Hashable, Codable, Identifiable {
     public var status: ThreadStatus
     public var live: Bool
     public var needsYou: Bool
+    /// Image reviews still waiting for a response, independent of whether
+    /// the last turn has been read. Absent on older runners.
+    public var pendingReviews: Int?
     public var createdAt: Date
     public var updatedAt: Date
     public var lastActivityAt: Date
@@ -778,7 +781,7 @@ public struct ThreadSummary: Sendable, Hashable, Codable, Identifiable {
         contextTokens: Int? = nil, costUsd: Double? = nil,
         effort: String? = nil, modelInUse: String? = nil, effortInUse: String? = nil, contextWindow: Int? = nil,
         panels: [Panel] = [], actions: [Action] = [], hooks: [Hook] = [], patches: [PatchInfo] = [], background: [BackgroundTask] = [],
-        subagents: [Subagent] = [], projects: [ThreadProject] = []
+        subagents: [Subagent] = [], projects: [ThreadProject] = [], pendingReviews: Int? = nil
     ) {
         self.id = id
         self.title = title
@@ -793,6 +796,7 @@ public struct ThreadSummary: Sendable, Hashable, Codable, Identifiable {
         self.status = status
         self.live = live
         self.needsYou = needsYou
+        self.pendingReviews = pendingReviews
         self.createdAt = createdAt
         self.updatedAt = updatedAt
         self.lastActivityAt = lastActivityAt
@@ -835,6 +839,7 @@ public struct ThreadSummary: Sendable, Hashable, Codable, Identifiable {
         status = try c.decodeIfPresent(ThreadStatus.self, forKey: .status) ?? .idle
         live = try c.decodeIfPresent(Bool.self, forKey: .live) ?? false
         needsYou = try c.decodeIfPresent(Bool.self, forKey: .needsYou) ?? false
+        pendingReviews = c.lenientInt(forKey: .pendingReviews)
         let created = try date(.createdAt) ?? Date(timeIntervalSince1970: 0)
         createdAt = created
         updatedAt = try date(.updatedAt) ?? created
@@ -874,6 +879,7 @@ public struct ThreadSummary: Sendable, Hashable, Codable, Identifiable {
         try c.encode(status, forKey: .status)
         try c.encode(live, forKey: .live)
         try c.encode(needsYou, forKey: .needsYou)
+        try c.encodeIfPresent(pendingReviews, forKey: .pendingReviews)
         try c.encode(ISO8601.format(createdAt), forKey: .createdAt)
         try c.encode(ISO8601.format(updatedAt), forKey: .updatedAt)
         try c.encode(ISO8601.format(lastActivityAt), forKey: .lastActivityAt)
@@ -898,7 +904,7 @@ public struct ThreadSummary: Sendable, Hashable, Codable, Identifiable {
     }
 
     enum CodingKeys: String, CodingKey {
-        case id, title, cwd, accountId, provider, model, effort, modelInUse, effortInUse, permissionMode, status, live, needsYou
+        case id, title, cwd, accountId, provider, model, effort, modelInUse, effortInUse, permissionMode, status, live, needsYou, pendingReviews
         case createdAt, updatedAt, lastActivityAt, snoozedUntil, snoozedUntilRestart, archivedAt, onOldRunner, preview
         case lastSeq, lastSeenSeq, nativeSessionId, contextTokens, contextWindow, costUsd, panels, actions, hooks, patches, background, subagents
         case projects
@@ -908,6 +914,8 @@ public struct ThreadSummary: Sendable, Hashable, Codable, Identifiable {
     /// are running (or just finished, with their result still to be read)
     /// and no turn is underway to show for it.
     public var isWorkingInBackground: Bool { !background.isEmpty && !status.isBusy }
+
+    public var hasPendingReviews: Bool { (pendingReviews ?? 0) > 0 }
 
     public var isArchived: Bool { archivedAt != nil }
 

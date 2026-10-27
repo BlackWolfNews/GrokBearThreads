@@ -556,6 +556,18 @@ public struct TranscriptModel: Sendable {
             pendingCards[id] = turnId ?? ""
             tailDirty = true
 
+        case .reviewUpdated(let review):
+            let id = "review:\(review.id)"
+            if let existing = item(id: id), case .review(let previous) = existing.content {
+                // A stale snapshot must not turn an answered review back
+                // into a pending request after reconnecting.
+                if review.revision > previous.revision {
+                    update(id) { $0 = .review(review) }
+                }
+            } else {
+                append(TranscriptRow(id: id, seq: seq, turnId: turnId, content: .review(review)))
+            }
+
         case .approvalResolved(let resolution):
             for id in ["ap:\(resolution.approvalId)", "q:\(resolution.approvalId)"] where itemIndex[id] != nil {
                 pendingCards[id] = nil

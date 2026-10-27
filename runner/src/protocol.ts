@@ -122,6 +122,7 @@ export type ThreadSummary = {
   status: ThreadStatus;
   live: boolean;
   needsYou: boolean;
+  pendingReviews?: number;
   createdAt: string;
   updatedAt: string;
   lastActivityAt: string;
@@ -376,11 +377,28 @@ export type CodexTurnUsage = {
   reasoningTokens: number;
 };
 
+export type ReviewDraft = { pickedId?: string; notes: Record<string, string> };
+
+export type DesignReview = {
+  id: string;
+  title: string;
+  note?: string;
+  options: { id: string; title: string; note?: string; reference?: boolean; image: ImageRef }[];
+  status: 'pending' | 'answered' | 'cancelled';
+  revision: number;
+  createdAt: string;
+  updatedAt: string;
+  draft: ReviewDraft;
+  response?: ReviewDraft;
+  replyTurnId?: string;
+};
+
 // Persisted event bodies, without the envelope.
 export type EventBody =
+  | { type: 'review.updated'; review: DesignReview }
   // origin is set only on messages the runner sent by itself (the resume
   // after a restart).
-  | { type: 'user.message'; text: string; images: ImageRef[]; origin?: MessageOrigin; scheduleId?: string }
+  | { type: 'user.message'; text: string; images: ImageRef[]; origin?: MessageOrigin; scheduleId?: string; reviewId?: string; reviewResponse?: ReviewDraft }
   | { type: 'assistant.text'; itemId: string; text: string }
   | { type: 'reasoning'; itemId: string; text: string }
   | { type: 'tool.call'; itemId: string; name: string; kind: ToolKind; title: string; input: Record<string, unknown> }
@@ -452,6 +470,7 @@ export type TransientEvent = Envelope & DeltaBody;
 export type AnyEvent = PersistedEvent | TransientEvent;
 
 export const PERSISTED_TYPES = new Set<string>([
+  'review.updated',
   'user.message',
   'assistant.text',
   'reasoning',

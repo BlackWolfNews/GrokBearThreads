@@ -23,7 +23,10 @@ import { RUNNER_VERSION, expandHome } from './config.ts';
 // the other runner, which is why every call may be a promise.
 type Aw<T> = T | Promise<T>;
 type Async<T, K extends keyof T> = { [P in K]: T[P] extends (...a: infer A) => infer R ? (...a: A) => Aw<R> : never };
-export type ThreadControl = { hello: Runner['hello'] } & Async<Runner, 'list' | 'search' | 'get' | 'events' | 'create' | 'send' | 'update' | 'interrupt' | 'delete'>;
+export type ThreadControl = {
+  hello: Runner['hello'];
+  createReview?: (...args: Parameters<Runner['createReview']>) => Aw<ReturnType<Runner['createReview']>>;
+} & Async<Runner, 'list' | 'search' | 'get' | 'events' | 'create' | 'send' | 'update' | 'interrupt' | 'delete'>;
 
 export type ScheduleControl = Async<Scheduler, 'create' | 'list' | 'find' | 'update' | 'delete'>;
 
@@ -164,6 +167,29 @@ export function buildThreadbareTools(control: ThreadControl, selfId: string, now
     if (!schedules) throw new Error("This runner doesn't have schedules.");
     return schedules;
   };
+
+  const reviewTools = [
+    tool(
+      'show_options',
+      'Shows Mike a set of images to compare side by side in a review window, with an optional pick and notes per image. Use this for design alternatives instead of reading every image into the transcript. Returns a review ID promptly; finish your turn and Mike’s answer arrives later as a message. Images are copied into the thread. Reference images can receive notes but cannot be picked.',
+      {
+        title: z.string().min(1).max(200).describe('What Mike is reviewing.'),
+        note: z.string().max(4000).optional().describe('A short explanation or question for the whole review.'),
+        options: z.array(z.object({
+          id: z.string().min(1).max(200).describe('Stable option ID, such as A or B.'),
+          title: z.string().min(1).max(200),
+          path: z.string().min(1).describe('Image path, absolute or relative to this thread’s folder.'),
+          note: z.string().max(4000).optional(),
+          reference: z.boolean().optional().describe('Context image that can receive notes but cannot be picked.'),
+        })).min(1).max(12),
+      },
+      handle(async (input) => {
+        if (!control.createReview) throw new Error('This runner does not support image reviews yet.');
+        const { review } = await control.createReview(selfId, input);
+        return `Review ${review.id}: ${review.title} (${review.options.length} images). Mike can compare them and send a choice or notes. You can finish this turn; his reply will arrive as a later message.`;
+      }),
+    ),
+  ];
 
   const scheduleTools = [
     tool(
@@ -394,6 +420,7 @@ export function buildThreadbareTools(control: ThreadControl, selfId: string, now
   ];
 
   return [
+    ...reviewTools,
     ...(schedules ? scheduleTools : []),
     ...(projects ? projectTools : []),
     tool(
