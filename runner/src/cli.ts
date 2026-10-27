@@ -89,7 +89,9 @@ const HELP = `tb: talk to the Threadbare runner
   tb models try <job> "text" [--labels a,b] [--field name=description]... [--system S] [--cwd DIR]
                                   one call by hand: classify (--labels), extract (--field),
                                   summarize or generate. It spends like any other
-  tb retitle [--dry-run] [--json] a model title for every thread still named by its first line
+  tb retitle [<threadId>...] [--dry-run] [--json]
+                                  a model title for every thread still named by its first line,
+                                  or for the ones given (never one named by hand)
 
 Thread ids can be shortened to any unique prefix.
 Uses THREADBARE_HOME and THREADBARE_PORT like the runner does.
@@ -468,7 +470,8 @@ async function run(client: RunnerClient, cmd: string, args: string[], f: Flags):
       return modelsCommand(client, args, f);
     case 'retitle': {
       const dryRun = Boolean(f['dry-run']);
-      const r = await client.call<{ threads: { threadId: string; from: string; to?: string; reason?: string }[] }>('threads.retitle', { dryRun });
+      const threadIds = args.length ? await Promise.all(args.map((a) => resolveId(client, a))) : undefined;
+      const r = await client.call<{ threads: { threadId: string; from: string; to?: string; reason?: string }[] }>('threads.retitle', { dryRun, threadIds });
       if (f.json) {
         console.log(JSON.stringify(r.threads, null, 2));
         return 0;

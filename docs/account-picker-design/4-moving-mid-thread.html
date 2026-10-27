@@ -1,0 +1,22 @@
+<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="picker.css"><!-- size: 1100x400 --></head><body style="height:400px">
+<div class="caption">
+  <h1>All three: what a move looks like</h1>
+  <p>When an Auto thread's login hits a limit mid-turn, the runner copies the transcript to the next login with room (move_thread already does this) and carries on the same turn.</p>
+  <p>You get one quiet line in the transcript, not an error. The cost is a cold prompt cache on the new login, so the first turn after a move uses a bit more.</p>
+  <p>If nothing has room, the thread waits and says when the first login comes back, rather than failing.</p>
+</div>
+<div style="position:absolute; left:380px; right:32px; top:60px; font-size:15px; line-height:1.55">
+  <div style="background:#2c2c2f; border-radius:14px; padding:10px 14px; margin-left:auto; width:fit-content; max-width:560px">Can you run the full e2e suite on tinker-desk and fix whatever breaks?</div>
+  <div style="margin-top:22px; color:var(--secondary); font-size:13px">⌄ Ran 6 commands, edited 2 files</div>
+  <div style="margin-top:14px; color:var(--tertiary); font-size:13px; display:flex; align-items:center; gap:8px">
+    <span class="auto-mark" style="width:18px;height:18px;font-size:10px">A</span>
+    Moved to mike@gangbusters.io: mike.cann@gmail.com hit its 5-hour limit, back at 6:10 pm
+  </div>
+  <div style="margin-top:14px; color:var(--secondary); font-size:13px">⌄ Ran 3 commands, edited 1 file</div>
+  <div style="margin-top:14px">All 18 pass now. The two failures were the same race in the upload retry: the test assumed the first chunk landed before the second started. I made it wait on the chunk's ack instead.</div>
+  <div style="margin-top:28px; color:var(--tertiary); font-size:13px; display:flex; align-items:center; gap:8px">
+    <span class="auto-mark" style="width:18px;height:18px;font-size:10px; background:rgba(255,159,10,.14); color:var(--orange)">A</span>
+    Every Claude login is out of room. Waiting for mike@cannstudios.com, back at 5:00 am, then carrying on
+  </div>
+</div>
+</body></html>
