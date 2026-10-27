@@ -26,15 +26,15 @@ document.write(`
       <circle cx="26.5" cy="22" r="1.8" fill="#2a1d10"/>
       <!-- the button eye, with its thread cross -->
       <circle cx="37.5" cy="22" r="2.6" fill="#3b2a18"/>
-      <path d="M36.5 21 l2 2 M38.5 21 l-2 2" stroke="var(--stitch,#f3e4c4)" stroke-width="0.7"/>
+      <path d="M36.5 21 l2 2 M38.5 21 l-2 2" stroke="var(--stitch,#cfc6b4)" stroke-width="0.7"/>
     </g>
     <g id="bear-cheek-patch">
-      <rect x="38" y="25" width="7" height="6" rx="1.5" fill="var(--patch,#7a9bb8)"/>
-      <rect x="38" y="25" width="7" height="6" rx="1.5" fill="none" stroke="var(--stitch,#f3e4c4)" stroke-width="0.8" stroke-dasharray="1.2 1.2"/>
+      <rect x="38" y="25" width="7" height="6" rx="1.5" fill="var(--patch,#6f6f76)"/>
+      <rect x="38" y="25" width="7" height="6" rx="1.5" fill="none" stroke="var(--stitch,#cfc6b4)" stroke-width="0.8" stroke-dasharray="1.2 1.2"/>
     </g>
     <g id="bear-body-patch">
-      <rect x="20" y="42" width="9" height="8" rx="2" fill="var(--patch2,#b85c5c)"/>
-      <rect x="20" y="42" width="9" height="8" rx="2" fill="none" stroke="var(--stitch,#f3e4c4)" stroke-width="0.8" stroke-dasharray="1.2 1.2"/>
+      <rect x="20" y="42" width="9" height="8" rx="2" fill="var(--patch2,#8a7a66)"/>
+      <rect x="20" y="42" width="9" height="8" rx="2" fill="none" stroke="var(--stitch,#cfc6b4)" stroke-width="0.8" stroke-dasharray="1.2 1.2"/>
     </g>
 
     <symbol id="bear-sit" viewBox="0 0 64 64">
@@ -63,8 +63,8 @@ document.write(`
     <symbol id="bear-sleep" viewBox="0 0 64 64">
       <ellipse cx="34" cy="44" rx="22" ry="15" fill="currentColor"/>
       <ellipse cx="40" cy="47" rx="9" ry="6" fill="var(--muzzle,#e9c99a)" opacity="0.5"/>
-      <rect x="40" y="36" width="9" height="8" rx="2" fill="var(--patch2,#b85c5c)"/>
-      <rect x="40" y="36" width="9" height="8" rx="2" fill="none" stroke="var(--stitch,#f3e4c4)" stroke-width="0.8" stroke-dasharray="1.2 1.2"/>
+      <rect x="40" y="36" width="9" height="8" rx="2" fill="var(--patch2,#8a7a66)"/>
+      <rect x="40" y="36" width="9" height="8" rx="2" fill="none" stroke="var(--stitch,#cfc6b4)" stroke-width="0.8" stroke-dasharray="1.2 1.2"/>
       <g transform="translate(-12 10) scale(0.95)">
         <use href="#bear-ears"/>
         <circle cx="32" cy="24" r="14" fill="currentColor"/>
@@ -84,8 +84,8 @@ document.write(`
       <use href="#bear-face"/>
       <use href="#bear-cheek-patch"/>
       <g transform="translate(2 -4)">
-        <rect x="6" y="34" width="20" height="16" rx="3" fill="var(--patch,#7a9bb8)" transform="rotate(-8 16 42)"/>
-        <rect x="6" y="34" width="20" height="16" rx="3" fill="none" stroke="var(--stitch,#f3e4c4)" stroke-width="1.2" stroke-dasharray="2 2" transform="rotate(-8 16 42)"/>
+        <rect x="6" y="34" width="20" height="16" rx="3" fill="var(--patch,#6f6f76)" transform="rotate(-8 16 42)"/>
+        <rect x="6" y="34" width="20" height="16" rx="3" fill="none" stroke="var(--stitch,#cfc6b4)" stroke-width="1.2" stroke-dasharray="2 2" transform="rotate(-8 16 42)"/>
       </g>
     </symbol>
 
@@ -121,8 +121,8 @@ document.write(`
     </symbol>
 
     <symbol id="patch" viewBox="0 0 24 24">
-      <rect x="3" y="4" width="18" height="16" rx="3" fill="var(--patch,#7a9bb8)" transform="rotate(-6 12 12)"/>
-      <rect x="3" y="4" width="18" height="16" rx="3" fill="none" stroke="var(--stitch,#f3e4c4)" stroke-width="1.3" stroke-dasharray="2 2" transform="rotate(-6 12 12)"/>
+      <rect x="3" y="4" width="18" height="16" rx="3" fill="var(--patch,#6f6f76)" transform="rotate(-6 12 12)"/>
+      <rect x="3" y="4" width="18" height="16" rx="3" fill="none" stroke="var(--stitch,#cfc6b4)" stroke-width="1.3" stroke-dasharray="2 2" transform="rotate(-6 12 12)"/>
     </symbol>
 
     <symbol id="honey" viewBox="0 0 64 64">

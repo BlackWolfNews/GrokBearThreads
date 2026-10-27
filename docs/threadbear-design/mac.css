@@ -64,7 +64,7 @@ body { margin: 0; background: #000; }
 .header .more { margin-left: auto; color: var(--secondary); font-size: 18px; letter-spacing: 1px; }
 .transcript { flex: 1; padding: 20px 0 0; display: flex; flex-direction: column; align-items: center; overflow: hidden; }
 .column { width: 780px; max-width: calc(100% - 48px); display: flex; flex-direction: column; gap: 14px; }
-.bubble { align-self: flex-end; max-width: 80%; background: rgba(120,160,255,0.11); border-radius: 18px; padding: 10px 14px; font-size: 15px; line-height: 23px; }
+.bubble { align-self: flex-end; max-width: 80%; background: rgba(255,255,255,0.07); border-radius: 18px; padding: 10px 14px; font-size: 15px; line-height: 23px; }
 .work { display: flex; align-items: center; gap: 8px; font-size: 14px; color: var(--secondary); }
 .work .chev { color: var(--tertiary); font-size: 12px; }
 .work .now { color: var(--text); }
@@ -109,13 +109,13 @@ body { margin: 0; background: #000; }
 .actions { display: flex; gap: 8px; margin: 0 0 10px; flex-wrap: wrap; }
 .chip { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--secondary); border: 0.5px solid rgba(255,255,255,0.14); border-radius: 14px; padding: 4px 10px 4px 8px; }
 .chip svg { width: 14px; height: 14px; }
-.chip.new { border-color: rgba(224,164,58,0.6); color: var(--text); background: rgba(224,164,58,0.08); }
+.chip.new { border-color: rgba(224,164,58,0.55); color: var(--text); }
 .hook { display: flex; align-items: center; gap: 8px; font-size: 14px; color: var(--secondary); }
 .hook svg { width: 16px; height: 16px; }
 .hook .ok { color: var(--green); }
 .hook .bad { color: var(--red); }
 .hook .src { color: var(--tertiary); font-size: 12px; margin-left: 4px; }
-.card.stitched { border: 1.5px dashed rgba(243,228,196,0.45); background: rgba(224,164,58,0.05); }
+.card.stitched { border: 1px dashed rgba(255,255,255,0.22); }
 .card .ctitle svg.patchi { width: 22px; height: 22px; }
 .bearline { display: flex; align-items: center; gap: 10px; font-size: 14px; color: var(--secondary); }
 .bearline svg { width: 30px; height: 30px; color: #c98a3e; }
@@ -129,17 +129,24 @@ body { margin: 0; background: #000; }
 .cvx table { border-collapse: collapse; width: 100%; font-family: "SF Mono", ui-monospace, Menlo, monospace; font-size: 11.5px; }
 .cvx th { text-align: left; color: var(--tertiary); font-weight: 500; padding: 4px 6px; border-bottom: 0.5px solid var(--separator); white-space: nowrap; }
 .cvx td { padding: 5px 6px; border-bottom: 0.5px solid rgba(255,255,255,0.05); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 120px; color: var(--secondary); }
-.cvx td.k { color: #c9a0ff; }
+.cvx td.k { color: var(--text); }
 .cvx .top { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; color: var(--secondary); }
 .cvx .top b { color: var(--text); font-weight: 600; }
 .cvx .top .pill { font-size: 11px; border: 0.5px solid rgba(255,255,255,0.14); border-radius: 10px; padding: 1px 8px; color: var(--tertiary); }
 /* fake iPhone simulator */
 .phone { width: 230px; height: 480px; border-radius: 34px; background: #000; border: 6px solid #2b2b2f; margin: 24px auto 0; overflow: hidden; position: relative; }
 .phone .scr { position: absolute; inset: 0; background: #f6f3ee; display: flex; flex-direction: column; color: #222; }
-.phone .map { flex: 1; background: radial-gradient(circle at 40% 40%, #cfe3c2, #b9d4ad 60%, #a9c89c); position: relative; }
-.phone .map .path { position: absolute; left: 30px; top: 80px; width: 160px; height: 160px; border: 4px solid #2f7bd6; border-radius: 50% 40% 60% 50%; border-color: #2f7bd6 transparent #2f7bd6 #2f7bd6; }
+.phone .map { flex: 1; background: radial-gradient(circle at 40% 40%, #dfe6d8, #cfd8c8 60%, #c3cdbb); position: relative; }
+.phone .map .path { position: absolute; left: 30px; top: 80px; width: 160px; height: 160px; border: 4px solid #4a6fa5; border-radius: 50% 40% 60% 50%; border-color: #2f7bd6 transparent #2f7bd6 #2f7bd6; }
 .phone .cardx { background: #fff; border-radius: 18px 18px 0 0; padding: 14px 16px; font-size: 13px; box-shadow: 0 -4px 14px rgba(0,0,0,0.08); }
 .phone .cardx b { display: block; font-size: 16px; margin-bottom: 4px; }
 .phone .cardx .stats { display: flex; gap: 14px; color: #666; margin: 6px 0 10px; }
-.phone .cardx .go { background: #1f8a4c; color: #fff; text-align: center; border-radius: 10px; padding: 9px; font-weight: 600; }
+.phone .cardx .go { background: #2d6a4f; color: #fff; text-align: center; border-radius: 10px; padding: 9px; font-weight: 600; }
 .phone .notch { position: absolute; left: 50%; top: 8px; transform: translateX(-50%); width: 80px; height: 22px; background: #000; border-radius: 12px; z-index: 2; }
+
+/* sprites: generated bear images in place of the SVG symbols */
+img.bear { height: 30px; width: auto; display: inline-block; vertical-align: middle; }
+img.bear.lg { height: 56px; }
+img.bear.xl { height: 84px; }
+img.bear.sm { height: 22px; }
+.hook img.bear, .work img.bear { height: 22px; }

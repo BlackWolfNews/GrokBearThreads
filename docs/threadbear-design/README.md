@@ -36,10 +36,22 @@ reads as a knitting app at dock size. The workbench illustration is the
 README hero: a bear patching itself with a laptop open is the whole
 idea in one picture.
 
-The flat bear in the mockups (`bears.js`) is a placeholder drawn in SVG
-so it can become SwiftUI paths: round ears, button eye with a thread
-cross, a cheek patch and a body patch. Six poses: sit, wave ("bear with
-me"), sleep (hibernating), holding a patch, dizzy (unbearable), cub.
+The in-app bear is a set of generated sprites, not drawn SVG (Mike
+didn't like the hand-drawn SVG version). Two sheets were generated from
+`mascot-b` as the reference: `sprites/` is the flat, muted,
+head-and-shoulders set used in the transcript, cards and footer, and
+`sprites-full/` is the full-body set for the empty state and dock. Six
+poses each: sit, wave ("bear with me"), sleep (hibernating), holding a
+patch, dizzy (unbearable), cub. `cut-sprites.py` keys the white
+background out and splits a sheet into transparent PNGs (pure Python
+plus `sips`, nothing to install). In the app they'd ship as PNG assets at
+2x and 3x; there's no need for them to be vector.
+
+Colour rule, from Mike: keep it quiet. Greys for structure, the accent
+blue only on the primary button and a running time, orange only for
+"waiting on you", red only for a failure, amber only for honey. Patch
+glyphs are grey; a brand-new patch gets a thin amber outline and nothing
+else. The bear's own honey-brown is the one warm thing on screen.
 
 ## Scenario 1: a Convex project, the dashboard beside the thread
 

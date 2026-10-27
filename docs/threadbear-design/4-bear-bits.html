@@ -24,8 +24,8 @@
   .gold .m.on { background: rgba(255,255,255,0.08); }
   .gold .m small { color: var(--tertiary); margin-left: auto; font-size: 12px; }
   .gold .slider { display: flex; align-items: center; gap: 10px; font-size: 12px; color: var(--secondary); margin-top: 6px; }
-  .gold .track { flex: 1; height: 4px; background: linear-gradient(90deg, #7a9bb8, #e0a43a, #d05a3c); border-radius: 2px; position: relative; }
-  .gold .knob { position: absolute; top: -6px; width: 16px; height: 16px; border-radius: 50%; background: #fff; box-shadow: 0 1px 4px rgba(0,0,0,0.5); left: 52%; }
+  .gold .track { flex: 1; height: 4px; background: rgba(255,255,255,0.14); border-radius: 2px; position: relative; }
+  .gold .knob { position: absolute; top: -6px; width: 16px; height: 16px; border-radius: 50%; background: #e6e6e6; box-shadow: 0 1px 4px rgba(0,0,0,0.5); left: 52%; }
   .gold .labels { display: flex; justify-content: space-between; font-size: 11px; color: var(--tertiary); }
   .big { display: flex; align-items: center; gap: 14px; }
   .big svg { width: 56px; height: 56px; color: #c98a3e; }
@@ -41,11 +41,11 @@
 
   <div class="cell">
     <div class="caption">The working line. The bear sits in the transcript while a turn runs and waves when you look. Replaces the spinner.</div>
-    <div class="card"><div class="big"><svg><use href="#bear-wave"/></svg><div><div style="font-weight:600">Bear with me</div><div style="color:var(--secondary);font-size:13px">Editing convex/snapshots.ts · 1m 12s</div></div></div></div>
+    <div class="card"><div class="big"><img class="bear lg" src="sprites/wave.png" alt=""><div><div style="font-weight:600">Bear with me</div><div style="color:var(--secondary);font-size:13px">Editing convex/snapshots.ts · 1m 12s</div></div></div></div>
     <div class="caption">And when it's on you.</div>
-    <div class="card"><div class="big"><svg><use href="#bear-sit"/></svg><div><div style="font-weight:600">Waiting on you</div><div style="color:var(--secondary);font-size:13px">Run the test suite on Tinker Desk? · 12s</div></div></div></div>
+    <div class="card"><div class="big"><img class="bear lg" src="sprites/sit.png" alt=""><div><div style="font-weight:600">Waiting on you</div><div style="color:var(--secondary);font-size:13px">Run the test suite on Tinker Desk? · 12s</div></div></div></div>
     <div class="caption">A failed turn is unbearable. Same card as an approval with a red bar.</div>
-    <div class="card bar red"><div class="ctitle"><svg style="width:30px;height:30px;color:#c98a3e"><use href="#bear-dizzy"/></svg> Unbearable</div><div class="csub">The runner restarted mid-turn. Nothing already written is lost.</div><div class="payload mono">Stopped after 1m 40s · runner restarted</div><div class="btns"><span class="btn primary">Carry on</span><span class="btn">Show the output</span></div></div>
+    <div class="card bar red"><div class="ctitle"><img class="bear" src="sprites/dizzy.png" alt=""> Unbearable</div><div class="csub">The runner restarted mid-turn. Nothing already written is lost.</div><div class="payload mono">Stopped after 1m 40s · runner restarted</div><div class="btns"><span class="btn primary">Carry on</span><span class="btn">Show the output</span></div></div>
   </div>
 
   <div class="cell">
@@ -73,7 +73,7 @@
       <div class="labels"><span>too cold</span><span>just right</span><span>too hot</span></div>
     </div>
     <div class="caption">New thread. The bear and the project's patches, so you know what this folder can do before you type.</div>
-    <div class="card empty"><svg><use href="#bear-sit"/></svg><h3>What should we work on?</h3><p>Starts in mikes-new-tab on cannstudios</p><div class="pp"><span class="chip"><svg style="color:#7a9bb8"><use href="#patch"/></svg> Dashboard</span><span class="chip"><svg style="color:#7a9bb8"><use href="#patch"/></svg> Typecheck</span><span class="chip"><svg style="color:#b85c5c"><use href="#patch"/></svg> Reseed</span></div></div>
+    <div class="card empty"><img class="bear xl" src="sprites-full/sit.png" alt=""><h3>What should we work on?</h3><p>Starts in mikes-new-tab on cannstudios</p><div class="pp"><span class="chip"><svg style="color:#7d7d83"><use href="#patch"/></svg> Dashboard</span><span class="chip"><svg style="color:#7d7d83"><use href="#patch"/></svg> Typecheck</span><span class="chip"><svg style="--patch:#9a7b4f"><use href="#patch"/></svg> Reseed</span></div></div>
   </div>
 </div>
 </body></html>
