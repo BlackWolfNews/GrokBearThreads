@@ -9,4 +9,9 @@ export default {
     { title: "Runner status", run: "runner/bin/tb status" },
     { title: "Releases", run: "runner/scripts/deploy-runner.sh --list" },
   ],
+  hooks: [
+    // After a turn that touched the runner's TypeScript: a few seconds, and
+    // the agent hears about a type error before it moves on.
+    { title: "Runner typecheck", on: "turn.end", run: "cd runner && npx tsc --noEmit -p .", edited: "runner/src/**/*.ts" },
+  ],
 };

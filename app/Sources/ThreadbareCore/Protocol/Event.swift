@@ -349,8 +349,10 @@ public struct ActionRun: Sendable, Hashable, Decodable {
     public var text: String
     public var truncated: Bool
     public var durationMs: Double
+    /// "turn.end" when a hook ran it; nil for a chip or tb.
+    public var trigger: String?
 
-    public init(actionId: String, patch: String = "", title: String, command: String = "", ok: Bool = true, exitCode: Int? = nil, text: String = "", truncated: Bool = false, durationMs: Double = 0) {
+    public init(actionId: String, patch: String = "", title: String, command: String = "", ok: Bool = true, exitCode: Int? = nil, text: String = "", truncated: Bool = false, durationMs: Double = 0, trigger: String? = nil) {
         self.actionId = actionId
         self.patch = patch
         self.title = title
@@ -360,6 +362,7 @@ public struct ActionRun: Sendable, Hashable, Decodable {
         self.text = text
         self.truncated = truncated
         self.durationMs = durationMs
+        self.trigger = trigger
     }
 
     public init(from decoder: Decoder) throws {
@@ -373,16 +376,19 @@ public struct ActionRun: Sendable, Hashable, Decodable {
         text = (try? c.decodeIfPresent(String.self, forKey: .text)) ?? ""
         truncated = (try? c.decodeIfPresent(Bool.self, forKey: .truncated)) ?? false
         durationMs = (try? c.decodeIfPresent(Double.self, forKey: .durationMs)) ?? 0
+        trigger = try? c.decodeIfPresent(String.self, forKey: .trigger)
     }
 
-    enum CodingKeys: String, CodingKey { case actionId, patch, title, command, ok, exitCode, text, truncated, durationMs }
+    enum CodingKeys: String, CodingKey { case actionId, patch, title, command, ok, exitCode, text, truncated, durationMs, trigger }
 
     /// The row's item id: one per run.
     public func itemId(seq: Int) -> String { "action:\(seq)" }
 
     /// The run as the tool call and result the transcript draws.
     public var asToolCall: (ToolCall, ToolResult) {
-        let title = ok ? self.title : "\(self.title) failed" + (exitCode.map { " (exit \($0))" } ?? "")
+        var title = ok ? self.title : "\(self.title) failed" + (exitCode.map { " (exit \($0))" } ?? "")
+        // A hook's run says when it ran, as the design's patch line does.
+        if trigger == "turn.end" { title += " · after the turn" }
         let call = ToolCall(itemId: "", name: "action", kind: .command, title: title,
                             input: .object(["command": .string(command), "patch": .string(patch), "actionId": .string(actionId)]))
         return (call, ToolResult(itemId: "", ok: ok, text: text, truncated: truncated))

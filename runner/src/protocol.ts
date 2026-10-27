@@ -63,6 +63,7 @@ export type ThreadSummary = {
   costUsd?: number;
   panels?: Panel[]; // absent when the folder has none
   actions?: Action[]; // likewise
+  hooks?: Hook[]; // likewise
   patches?: PatchInfo[]; // the patches that apply to the folder, built in and the project's; absent when none
 };
 
@@ -76,6 +77,23 @@ export type Action = {
   kind: ActionKind;
   command?: string; // kind "command"
   prompt?: string; // kind "prompt"
+  patch: string;
+  note?: string;
+};
+
+// A hook a patch gives a thread: a command the runner runs by itself when
+// something happens (for now, when a turn completes), posted into the
+// transcript like an action, and told to the agent as a new message when
+// `tell` says so.
+export type HookTrigger = 'turn.end';
+export type HookTell = 'failures' | 'always' | 'never';
+export type Hook = {
+  id: string; // "<patch>.<slug of the title>"
+  title: string;
+  on: HookTrigger;
+  command: string;
+  edited?: string; // only after a turn that edited a file matching this glob (relative to the folder)
+  tell: HookTell; // when the result goes to the agent as a message
   patch: string;
   note?: string;
 };
@@ -187,6 +205,7 @@ export type EventBody =
       text: string;
       truncated: boolean;
       durationMs: number;
+      trigger?: HookTrigger; // set when a hook ran it, absent for a chip or tb run
     };
 
 export type DeltaType = 'assistant.text.delta' | 'reasoning.delta' | 'tool.output.delta';

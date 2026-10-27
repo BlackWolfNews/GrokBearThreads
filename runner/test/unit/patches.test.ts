@@ -195,3 +195,27 @@ test('runCommand: output, exit codes, the time limit and the size cap', async ()
   assert.equal(missing.ok, false);
   assert.match(missing.text, /ENOENT/);
 });
+
+import { hookApplies } from '../../src/patches.ts';
+
+test('hooks in a patch file: shape, defaults and the edited glob', () => {
+  const read = (v: unknown) => readPatchModule('x', 'project', '/p/x.ts', v);
+  const ok = read({ hooks: [
+    { title: 'Typecheck', on: 'turn.end', run: 'npx tsc --noEmit', edited: '**/*.{ts,tsx}' },
+    { title: 'Always say', on: 'turn.end', run: 'echo hi', tell: 'always', note: 'noisy' },
+  ] });
+  assert.equal(ok.info.error, undefined);
+  assert.deepEqual(ok.hooks, [
+    { id: 'x.typecheck', title: 'Typecheck', on: 'turn.end', command: 'npx tsc --noEmit', tell: 'failures', patch: 'x', edited: '**/*.{ts,tsx}' },
+    { id: 'x.always-say', title: 'Always say', on: 'turn.end', command: 'echo hi', tell: 'always', patch: 'x', note: 'noisy' },
+  ]);
+  assert.equal(read({ hooks: [{ title: 'No trigger', run: 'x' }] }).info.error, 'hooks[0] ("No trigger") needs on: "turn.end" (the one trigger so far).');
+  assert.equal(read({ hooks: [{ title: 'Bad tell', on: 'turn.end', run: 'x', tell: 'sometimes' }] }).info.error, 'hooks[0] ("Bad tell") has tell "sometimes"; it\'s "failures" (the default), "always" or "never".');
+  assert.equal(read({ actions: [{ title: 'Same', run: 'a' }], hooks: [{ title: 'Same', on: 'turn.end', run: 'b' }] }).info.error, 'Two entries would both be called x.same; give them different titles.');
+  const hook = ok.hooks[0];
+  assert.equal(hookApplies(hook, ['/p/src/a.ts'], '/p'), true);
+  assert.equal(hookApplies(hook, ['src/b.tsx'], '/p'), true);
+  assert.equal(hookApplies(hook, ['/p/README.md', '/elsewhere/c.ts'], '/p'), false);
+  assert.equal(hookApplies(hook, [], '/p'), false);
+  assert.equal(hookApplies(ok.hooks[1], [], '/p'), true, 'no filter: every turn');
+});

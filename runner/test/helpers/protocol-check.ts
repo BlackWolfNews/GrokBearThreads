@@ -97,9 +97,10 @@ const PERSISTED: Record<string, (e: Obj) => string | null> = {
   error: (e) => (isStr(e.message) ? null : 'message'),
   'action.run': (e) =>
     isStr(e.actionId) && isStr(e.patch) && isStr(e.title) && isStr(e.command) && typeof e.ok === 'boolean' &&
-    (e.exitCode === undefined || isNum(e.exitCode)) && isStr(e.text) && typeof e.truncated === 'boolean' && isNum(e.durationMs)
+    (e.exitCode === undefined || isNum(e.exitCode)) && isStr(e.text) && typeof e.truncated === 'boolean' && isNum(e.durationMs) &&
+    (e.trigger === undefined || e.trigger === 'turn.end')
       ? null
-      : 'actionId, patch, title, command, ok, exitCode?, text, truncated, durationMs',
+      : 'actionId, patch, title, command, ok, exitCode?, text, truncated, durationMs, trigger?',
 };
 
 const TRANSIENT: Record<string, (e: Obj) => string | null> = {
@@ -167,6 +168,18 @@ export function checkSummary(t: Obj): string[] {
     if (!Array.isArray(t.actions) || t.actions.length === 0) problems.push('actions (absent when empty)');
     else for (const a of t.actions) problems.push(...checkAction(a).map((x) => `actions: ${x}`));
   }
+  if (t.hooks !== undefined) {
+    if (!Array.isArray(t.hooks) || t.hooks.length === 0) problems.push('hooks (absent when empty)');
+    else {
+      for (const h of t.hooks) {
+        if (!isStr(h.id) || !isStr(h.title) || !isStr(h.patch) || h.on !== 'turn.end' || !isStr(h.command) || !['failures', 'always', 'never'].includes(h.tell)) {
+          problems.push('hooks: id, title, on, command, tell, patch');
+        }
+        for (const k of ['edited', 'note']) if (h[k] !== undefined && !isStr(h[k])) problems.push(`hooks: ${k}`);
+        for (const k of Object.keys(h)) if (!['id', 'title', 'on', 'command', 'edited', 'tell', 'patch', 'note'].includes(k)) problems.push(`hooks: unexpected field ${k}`);
+      }
+    }
+  }
   if (t.patches !== undefined) {
     if (!Array.isArray(t.patches) || t.patches.length === 0) problems.push('patches (absent when empty)');
     else {
@@ -180,7 +193,7 @@ export function checkSummary(t: Obj): string[] {
   const allowed = new Set([
     'id', 'title', 'cwd', 'accountId', 'provider', 'model', 'permissionMode', 'status', 'live', 'needsYou', 'createdAt', 'updatedAt',
     'lastActivityAt', 'snoozedUntil', 'archivedAt', 'preview', 'lastSeq', 'lastSeenSeq', 'nativeSessionId', 'contextTokens', 'costUsd',
-    'effort', 'modelInUse', 'effortInUse', 'panels', 'actions', 'patches',
+    'effort', 'modelInUse', 'effortInUse', 'panels', 'actions', 'hooks', 'patches',
   ]);
   for (const k of Object.keys(t)) if (!allowed.has(k)) problems.push(`unexpected field ${k}`);
   return problems;

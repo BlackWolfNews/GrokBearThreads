@@ -14,6 +14,7 @@
 //         { title: "Explain the schema", prompt: "Read convex/schema.ts and explain it." },
 //       ],
 //       panels: [{ title: "Storybook", url: "http://localhost:6006" }],
+//       hooks: [{ title: "Typecheck", on: "turn.end", run: "npx tsc --noEmit", edited: "**/*.ts" }],
 //     }
 //
 //   The runner imports the file (Node runs TypeScript as it is) and reads
@@ -29,7 +30,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { execFile, spawn } from 'node:child_process';
-import type { Action, ImageRef, Panel, PatchInfo } from './protocol.ts';
+import type { Action, Hook, ImageRef, Panel, PatchInfo } from './protocol.ts';
 import { LIMITS } from './protocol.ts';
 import { imageRefFor } from './media.ts';
 
@@ -41,16 +42,16 @@ export const PATCH_DIR = path.join('.threadbear', 'patches');
 export const PATCH_EXTENSIONS = ['.ts', '.js', '.mjs'];
 
 // Everything the folder's patches give a thread.
-export type PatchSet = { panels: Panel[]; actions: Action[]; patches: PatchInfo[] };
-export const EMPTY_PATCH_SET: PatchSet = { panels: [], actions: [], patches: [] };
+export type PatchSet = { panels: Panel[]; actions: Action[]; hooks: Hook[]; patches: PatchInfo[] };
+export const EMPTY_PATCH_SET: PatchSet = { panels: [], actions: [], hooks: [], patches: [] };
 
 // Loaded patch files by path, so a summary refresh doesn't import a file
 // whose mtime hasn't moved. One per runner.
 export type PatchCache = Map<string, { mtimeMs: number; loaded: LoadedPatch }>;
-type LoadedPatch = { info: PatchInfo; panels: Panel[]; actions: Action[] };
+type LoadedPatch = { info: PatchInfo; panels: Panel[]; actions: Action[]; hooks: Hook[] };
 
 export async function loadPatchSet(cwd: string, home: string = os.homedir(), cache: PatchCache = new Map()): Promise<PatchSet> {
-  const set: PatchSet = { panels: [], actions: [], patches: [] };
+  const set: PatchSet = { panels: [], actions: [], hooks: [], patches: [] };
   // Built in first, so their panels come first.
   const convexDir = findUp(cwd, home, (dir) => isDir(path.join(dir, 'convex')));
   if (convexDir) {
@@ -68,6 +69,7 @@ export async function loadPatchSet(cwd: string, home: string = os.homedir(), cac
       set.patches.push(loaded.info);
       set.panels.push(...loaded.panels);
       set.actions.push(...loaded.actions);
+      set.hooks.push(...loaded.hooks);
     }
   }
   return set;
@@ -111,7 +113,7 @@ async function loadPatchFile(file: string, source: 'home' | 'project', cache: Pa
   try {
     mtimeMs = fs.statSync(file).mtimeMs;
   } catch (e) {
-    return { info: { id, source, file, error: String((e as Error).message ?? e) }, panels: [], actions: [] };
+    return { info: { id, source, file, error: String((e as Error).message ?? e) }, panels: [], actions: [], hooks: [] };
   }
   const hit = cache.get(file);
   if (hit && hit.mtimeMs === mtimeMs) return hit.loaded;
@@ -122,7 +124,7 @@ async function loadPatchFile(file: string, source: 'home' | 'project', cache: Pa
     const mod = (await import(`${pathToFileURL(file).href}?mtime=${mtimeMs}`)) as { default?: unknown };
     loaded = readPatchModule(id, source, file, mod.default);
   } catch (e) {
-    loaded = { info: { id, source, file, error: firstLine(e) }, panels: [], actions: [] };
+    loaded = { info: { id, source, file, error: firstLine(e) }, panels: [], actions: [], hooks: [] };
   }
   cache.set(file, { mtimeMs, loaded });
   return loaded;
@@ -133,13 +135,14 @@ async function loadPatchFile(file: string, source: 'home' | 'project', cache: Pa
 // for the whole file: a half-loaded patch would be confusing.
 export function readPatchModule(id: string, source: 'home' | 'project', file: string, value: unknown): LoadedPatch {
   const info: PatchInfo = { id, source, file };
-  const problem = (text: string): LoadedPatch => ({ info: { ...info, error: text }, panels: [], actions: [] });
+  const problem = (text: string): LoadedPatch => ({ info: { ...info, error: text }, panels: [], actions: [], hooks: [] });
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     return problem('The default export should be an object with actions and/or panels.');
   }
-  const v = value as { actions?: unknown; panels?: unknown };
+  const v = value as { actions?: unknown; panels?: unknown; hooks?: unknown };
   const actions: Action[] = [];
   const panels: Panel[] = [];
+  const hooks: Hook[] = [];
   if (v.actions !== undefined) {
     if (!Array.isArray(v.actions)) return problem('actions should be an array.');
     for (const [i, raw] of v.actions.entries()) {
@@ -168,12 +171,41 @@ export function readPatchModule(id: string, source: 'home' | 'project', file: st
       panels.push(panel);
     }
   }
+  if (v.hooks !== undefined) {
+    if (!Array.isArray(v.hooks)) return problem('hooks should be an array.');
+    for (const [i, raw] of v.hooks.entries()) {
+      const h = raw as { title?: unknown; on?: unknown; run?: unknown; edited?: unknown; tell?: unknown; note?: unknown };
+      if (!h || typeof h !== 'object' || typeof h.title !== 'string' || !h.title.trim()) return problem(`hooks[${i}] needs a title.`);
+      if (h.on !== 'turn.end') return problem(`hooks[${i}] ("${h.title}") needs on: "turn.end" (the one trigger so far).`);
+      if (typeof h.run !== 'string' || !h.run.trim()) return problem(`hooks[${i}] ("${h.title}") needs run (a command).`);
+      if (h.tell !== undefined && h.tell !== 'failures' && h.tell !== 'always' && h.tell !== 'never') {
+        return problem(`hooks[${i}] ("${h.title}") has tell "${String(h.tell)}"; it's "failures" (the default), "always" or "never".`);
+      }
+      if (h.edited !== undefined && (typeof h.edited !== 'string' || !h.edited.trim())) return problem(`hooks[${i}] ("${h.title}") has an edited that isn't a glob.`);
+      const hook: Hook = { id: `${id}.${slug(h.title)}`, title: h.title.trim(), on: 'turn.end', command: h.run, tell: (h.tell as Hook['tell']) ?? 'failures', patch: id };
+      if (typeof h.edited === 'string') hook.edited = h.edited.trim();
+      if (typeof h.note === 'string' && h.note.trim()) hook.note = h.note.trim();
+      hooks.push(hook);
+    }
+  }
   const ids = new Set<string>();
-  for (const x of [...actions, ...panels]) {
+  for (const x of [...actions, ...panels, ...hooks]) {
     if (ids.has(x.id)) return problem(`Two entries would both be called ${x.id}; give them different titles.`);
     ids.add(x.id);
   }
-  return { info, panels, actions };
+  return { info, panels, actions, hooks };
+}
+
+// Whether a turn's edits make a hook run: no filter, or one of the edited
+// paths (relative to the thread's folder) matches its glob.
+export function hookApplies(hook: Hook, editedPaths: Iterable<string>, cwd: string): boolean {
+  if (!hook.edited) return true;
+  for (const p of editedPaths) {
+    const rel = path.isAbsolute(p) ? path.relative(cwd, p) : p;
+    if (rel.startsWith('..')) continue;
+    if (path.matchesGlob(rel, hook.edited)) return true;
+  }
+  return false;
 }
 
 export function slug(title: string): string {

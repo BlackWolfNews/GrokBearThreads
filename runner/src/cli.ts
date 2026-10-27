@@ -267,13 +267,14 @@ async function run(client: RunnerClient, cmd: string, args: string[], f: Flags):
       const thread = (await client.call<{ threads: ThreadSummary[] }>('threads.list', { include: ['inbox', 'snoozed', 'archived'] })).threads.find((x) => x.id === id);
       if (!thread) throw new Error(`No thread ${id}`);
       if (f.json) {
-        console.log(JSON.stringify({ actions: thread.actions ?? [], panels: thread.panels ?? [], patches: thread.patches ?? [] }, null, 2));
+        console.log(JSON.stringify({ actions: thread.actions ?? [], panels: thread.panels ?? [], hooks: thread.hooks ?? [], patches: thread.patches ?? [] }, null, 2));
         return 0;
       }
       const actions = thread.actions ?? [];
       const panels = thread.panels ?? [];
+      const hooks = thread.hooks ?? [];
       const patches = thread.patches ?? [];
-      if (!actions.length && !panels.length && !patches.length) {
+      if (!actions.length && !panels.length && !hooks.length && !patches.length) {
         console.log(`No patches apply to ${thread.cwd}. Add .threadbear/patches/<name>.ts there (see docs/protocol.md, Patches).`);
         return 0;
       }
@@ -284,6 +285,10 @@ async function run(client: RunnerClient, cmd: string, args: string[], f: Flags):
       if (panels.length) {
         console.log('Panels:');
         for (const p of panels) console.log(`  ${p.id.padEnd(32)} ${p.title}${p.url ? `  ${p.url}` : '  (image)'}${p.note ? `  ${p.note}` : ''}`);
+      }
+      if (hooks.length) {
+        console.log('Hooks:');
+        for (const h of hooks) console.log(`  ${h.id.padEnd(32)} ${h.title}  after a turn${h.edited ? ` that edited ${h.edited}` : ''}  $ ${h.command}  (tell ${h.tell})`);
       }
       console.log('Patches:');
       for (const p of patches) console.log(`  ${p.id.padEnd(32)} ${p.source}${p.file ? `  ${p.file}` : ''}${p.error ? `  ERROR ${p.error}` : ''}`);
@@ -443,7 +448,7 @@ function printEvent(e: any, json: boolean, prefix = ''): void {
     case 'system.note':
       return out(`(${e.text})`);
     case 'action.run':
-      return out(`- ${e.title} (action, ${e.ok ? 'ok' : 'failed'}, ${(e.durationMs / 1000).toFixed(1)}s)${e.text ? `\n  ${String(e.text).split('\n')[0].slice(0, 120)}` : ''}`);
+      return out(`- ${e.title} (${e.trigger === 'turn.end' ? 'hook, after the turn' : 'action'}, ${e.ok ? 'ok' : 'failed'}, ${(e.durationMs / 1000).toFixed(1)}s)${e.text ? `\n  ${String(e.text).split('\n')[0].slice(0, 120)}` : ''}`);
     case 'error':
       return out(`error: ${e.message}`);
     default:

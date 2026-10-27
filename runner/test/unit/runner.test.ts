@@ -9,6 +9,15 @@ import { RpcError } from '../../src/protocol.ts';
 
 const MIN = 60_000;
 
+// Hooks and actions run real shells, so a test waits for their events.
+async function until(check: () => boolean, what = 'the condition', ms = 5000): Promise<void> {
+  const end = Date.now() + ms;
+  while (!check()) {
+    if (Date.now() > end) throw new Error(`Timed out waiting for ${what}`);
+    await new Promise((r) => setTimeout(r, 10));
+  }
+}
+
 function create(h: ReturnType<typeof makeHarness>, extra: Record<string, unknown> = {}) {
   return h.runner.create({ text: 'Fix the tests\nmore detail here', accountId: 'claude-3', ...extra });
 }
@@ -1146,7 +1155,7 @@ test('a patch file written later is noticed within the TTL and said in the trans
   h.runner.get(thread.id);
   await tick();
   const notes = h.events(thread.id).filter((e) => e.type === 'system.note').map((e) => e.text);
-  assert.deepEqual(notes, ['Patch slow added: action Wait and panel Docs.']);
+  assert.deepEqual(notes, ['Patch slow added: action Wait, panel Docs.']);
   assert.equal(h.runner.get(thread.id).panels?.[0].id, 'slow.docs');
 
   const first = h.runner.runAction(thread.id, 'slow.wait');
@@ -1166,4 +1175,94 @@ test('a patch file written later is noticed within the TTL and said in the trans
   const after = h.events(thread.id).filter((e) => e.type === 'system.note').map((e) => e.text);
   assert.deepEqual(after.slice(1), ['Patch slow couldn\'t load: The default export should be an object with actions and/or panels.']);
   assert.equal(h.runner.get(thread.id).actions, undefined);
+});
+
+test('a turn.end hook runs after a turn that edited a matching file, and a failure is told to the agent twice at most', async () => {
+  const root = tmpDir();
+  const project = path.join(root, 'app');
+  fs.mkdirSync(path.join(project, '.threadbear/patches'), { recursive: true });
+  fs.writeFileSync(path.join(project, '.threadbear/patches/checks.ts'), `export default { hooks: [
+    { title: "Typecheck", on: "turn.end", run: "echo 'a.ts(1,1): error TS1' >&2; exit 1", edited: "**/*.ts" },
+    { title: "Count", on: "turn.end", run: "echo counted", tell: "never" },
+  ] };`);
+  const h = makeHarness(undefined, {}, { panelsRoot: root, actionShell: ['/bin/sh', '-c'], actionTimeoutMs: 5000 });
+  const { thread } = create(h, { cwd: project });
+  await tick();
+  assert.equal(h.runner.get(thread.id).hooks?.length, 2);
+
+  // A turn that edits nothing: only the unfiltered hook runs, and says nothing.
+  let s = h.adapter.last;
+  s.init();
+  s.text('m1', 'Looked around.');
+  s.result('completed');
+  const runsSoFar = () => h.events(thread.id).filter((e) => e.type === 'action.run');
+  await until(() => runsSoFar().length >= 1, 'the first hook run');
+  let runs = runsSoFar();
+  assert.deepEqual(runs.map((e) => [e.actionId, e.ok, e.trigger]), [['checks.count', true, 'turn.end']]);
+  assert.equal(h.events(thread.id).filter((e) => e.type === 'user.message').length, 1);
+  assert.deepEqual(checkSequence(h.events(thread.id).filter((e) => !e.type.endsWith('.delta'))), []);
+
+  // A turn that edits a .ts file: Typecheck runs, fails, and the agent hears.
+  h.runner.send(thread.id, 'Edit a.ts');
+  s.out({ kind: 'event', event: { type: 'tool.call', itemId: 'c1', name: 'Edit', kind: 'edit', title: 'Edit a.ts', input: { file_path: path.join(project, 'a.ts') } } });
+  s.out({ kind: 'event', event: { type: 'tool.result', itemId: 'c1', ok: true, text: '', truncated: false, images: [] } });
+  s.result('completed');
+  await until(() => runsSoFar().length >= 3, 'both hooks after the edit');
+  runs = runsSoFar();
+  assert.equal(runs.length, 3);
+  const typecheck = runs.find((e) => e.actionId === 'checks.typecheck');
+  assert.equal(typecheck.ok, false);
+  assert.equal(typecheck.exitCode, 1);
+  assert.match(typecheck.text, /error TS1/);
+  let told = h.events(thread.id).filter((e) => e.type === 'user.message' && e.origin === 'runner');
+  assert.equal(told.length, 1);
+  assert.match(told[0].text, /^\[Threadbear hook\] Typecheck \(patch checks\) ran after your turn and failed \(exit 1\):\n\n```\na\.ts\(1,1\): error TS1\n```/);
+  assert.equal(h.runner.get(thread.id).status, 'running', 'the hook message started a turn');
+
+  // The agent "fixes" it, editing the file again; the hook fails again and
+  // is told again, then after the limit it's only posted.
+  // Two more turns: the second told run, then one past the limit, after
+  // which no turn starts (so there's no third to try in).
+  for (let i = 0; i < 2; i++) {
+    const before = runsSoFar().length;
+    s.out({ kind: 'event', event: { type: 'edit.diff', itemId: `e${i}`, path: 'a.ts', hunks: [] } });
+    s.result('completed');
+    await until(() => runsSoFar().length >= before + 2, `hook run ${i}`);
+    await tick(5);
+  }
+  told = h.events(thread.id).filter((e) => e.type === 'user.message' && e.origin === 'runner');
+  assert.equal(told.length, 2, 'told twice, then left in the transcript');
+  assert.equal(h.events(thread.id).filter((e) => e.actionId === 'checks.typecheck').length, 3, 'but it still ran every time');
+  assert.equal(h.runner.get(thread.id).status, 'idle');
+
+  // A message from a person resets the count.
+  h.runner.send(thread.id, 'Try once more');
+  s.out({ kind: 'event', event: { type: 'edit.diff', itemId: 'e9', path: 'a.ts', hunks: [] } });
+  const before = runsSoFar().length;
+  s.result('completed');
+  await until(() => runsSoFar().length >= before + 2, 'the last hook run');
+  await tick(5);
+  assert.equal(h.events(thread.id).filter((e) => e.type === 'user.message' && e.origin === 'runner').length, 3);
+});
+
+test('hooks don\'t run after an interrupted or failed turn, or a turn the runner opened for background work', async () => {
+  const root = tmpDir();
+  const project = path.join(root, 'app');
+  fs.mkdirSync(path.join(project, '.threadbear/patches'), { recursive: true });
+  fs.writeFileSync(path.join(project, '.threadbear/patches/h.ts'), `export default { hooks: [{ title: "Every", on: "turn.end", run: "echo ran", tell: "never" }] };`);
+  const h = makeHarness(undefined, {}, { panelsRoot: root, actionShell: ['/bin/sh', '-c'], actionTimeoutMs: 5000 });
+  const { thread } = create(h, { cwd: project });
+  await tick();
+  const s = h.adapter.last;
+  s.init();
+  s.result('failed', undefined, 'boom');
+  await tick(10);
+  h.runner.send(thread.id, 'again');
+  s.result('interrupted');
+  await new Promise((r) => setTimeout(r, 150));
+  assert.equal(h.events(thread.id).filter((e) => e.type === 'action.run').length, 0);
+  h.runner.send(thread.id, 'and again');
+  s.result('completed');
+  await until(() => h.events(thread.id).some((e) => e.type === 'action.run'), 'the hook after a completed turn');
+  assert.equal(h.events(thread.id).filter((e) => e.type === 'action.run').length, 1);
 });

@@ -184,7 +184,14 @@ it's where the patches stack from.
    glyph. `tb actions` and `tb run` do the same from a shell. The patch
    file shape question is settled: one file per patch, declarative.
 4. **Hooks.** Turn-end and file-change hooks posting into the
-   transcript; the Convex logs hook. A day.
+   transcript; the Convex logs hook. A day. Landed 2026-10-27 as
+   `hooks` in a patch file: `on: "turn.end"` with an optional `edited`
+   glob, posted into the transcript like an action and, when it fails
+   (or always, or never), sent to the agent as a message from the runner
+   so it fixes what it broke, told twice in a row at most. The Convex
+   logs hook (tailing `convex logs` into a running turn) needs a
+   long-running process per thread and a trigger while the turn runs;
+   it's the next hook trigger to add, not done yet.
 5. **Tools and honey pots** fold into step 4 of the main plan (Codex,
    accounts, usage) since both need the same plumbing.
 6. **App icon and dock states** from `mascot-a`, the dock teddy picking

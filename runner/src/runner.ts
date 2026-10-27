@@ -20,6 +20,7 @@ import type {
   Question,
   ThreadStatus,
   ThreadSummary,
+  TurnOutcome,
 } from './protocol.ts';
 import { ErrorCode, LIMITS, PROTOCOL_VERSION, RpcError } from './protocol.ts';
 import type {
@@ -46,6 +47,7 @@ import { copySessionTranscript } from './transcripts.ts';
 import { approvalTitle } from './threadbare-mcp.ts';
 import {
   EMPTY_PATCH_SET,
+  hookApplies,
   loadPatchSet,
   projectPanels,
   renderPanel,
@@ -83,6 +85,9 @@ type Turn = {
   // sent while it ran, which go straight into the CLI. The turn ends when
   // the CLI has answered them all.
   messages: string[];
+  // Files the turn edited or wrote (edit.diff paths, Write and Edit calls),
+  // for hooks that run only after a change to certain files.
+  edited: Set<string>;
 };
 
 type Runtime = {
@@ -122,6 +127,10 @@ type Runtime = {
   // built-in panels stand in.
   patches?: { cwd: string; at: number; set: PatchSet; refreshing: boolean; loaded: boolean };
   runningActions?: Set<string>;
+  // Turns in a row that a hook's message started, per hook. A hook that
+  // keeps failing stops being told to the agent after HOOK_TELL_LIMIT, so
+  // two can't go round for ever; a message from anyone else resets it.
+  hookTurns?: Map<string, number>;
 };
 
 type ThreadState = { rec: ThreadRecord; rt: Runtime };
@@ -159,6 +168,10 @@ const STARTUP_NOTICE_MS = 10 * 60_000;
 const WAKE_GRACE_MS = 15_000;
 // How long a thread's patches are kept before the folder is read again.
 const PATCHES_TTL_MS = 15_000;
+// How many turns in a row one hook may start with its result.
+const HOOK_TELL_LIMIT = 2;
+// How much of a hook's output goes to the agent (the transcript has it all).
+const HOOK_TELL_CHARS = 8000;
 
 export class Runner {
   private cfg: Config;
@@ -647,6 +660,7 @@ export class Runner {
 
   private sendTo(st: ThreadState, text: string, images: ImageRef[], origin?: 'runner'): string {
     const { rec, rt } = st;
+    if (origin !== 'runner') rt.hookTurns = undefined;
     // Copy images into the thread's own media folder now, so a queued
     // message still works if inbox/ is cleaned before it's sent.
     const media = this.store.mediaDir(rec.id);
@@ -730,7 +744,7 @@ export class Runner {
     }
     rt.idleTimer?.cancel();
     rt.idleTimer = undefined;
-    rt.turn = { turnId: msg.turnId, startedAt: this.clock.now(), interruptRequested: false, messages: [msg.turnId] };
+    rt.turn = { turnId: msg.turnId, startedAt: this.clock.now(), interruptRequested: false, messages: [msg.turnId], edited: new Set() };
     rt.activeAt = this.clock.now();
     rec.turnId = msg.turnId;
     rec.lastActivityAt = this.isoNow();
@@ -862,6 +876,13 @@ export class Runner {
           rt.pendingDeltas.delete(ev.itemId);
         }
         if (ev.type === 'assistant.text') rec.preview = oneLine(ev.text, LIMITS.previewChars);
+        if (rt.turn) {
+          if (ev.type === 'edit.diff') rt.turn.edited.add(ev.path);
+          else if (ev.type === 'tool.call' && (ev.kind === 'edit' || ev.kind === 'write')) {
+            const file = ev.input.file_path ?? ev.input.path ?? ev.input.notebook_path;
+            if (typeof file === 'string') rt.turn.edited.add(file);
+          }
+        }
         this.emit(st, ev, rt.turn?.turnId);
         break;
       }
@@ -978,7 +999,7 @@ export class Runner {
     this.emit(st, { type: 'turn.started', turnId }, turnId);
     rt.idleTimer?.cancel();
     rt.idleTimer = undefined;
-    rt.turn = { turnId, startedAt: this.clock.now(), interruptRequested: false, auto: true, messages: [] };
+    rt.turn = { turnId, startedAt: this.clock.now(), interruptRequested: false, auto: true, messages: [], edited: new Set() };
     rt.activeAt = this.clock.now();
     rec.turnId = turnId;
     rec.status = rt.approvals.size ? 'waiting' : 'running';
@@ -1015,13 +1036,17 @@ export class Runner {
     if (r.usage) body.usage = r.usage;
     if (outcome === 'failed' && r.error) body.error = r.error;
     const ev = this.emit(st, body, turn.turnId);
-    this.endTurn(st, ev.seq, outcome === 'failed' ? 'error' : 'idle');
+    this.endTurn(st, ev.seq, outcome === 'failed' ? 'error' : 'idle', outcome);
   }
 
-  private endTurn(st: ThreadState, completedSeq: number, status: ThreadStatus): void {
+  private endTurn(st: ThreadState, completedSeq: number, status: ThreadStatus, outcome?: TurnOutcome): void {
     const { rec, rt } = st;
+    const finished = rt.turn;
     rt.turn?.interruptTimer?.cancel();
     rt.turn = undefined;
+    // The folder's turn.end hooks, after a turn the agent finished itself
+    // (not one the runner opened for a background task's approval).
+    if (outcome === 'completed' && finished && !finished.auto && !this.stopping) void this.runHooks(st, finished);
     if (rt.taskEndedInTurn) {
       rt.taskEndedInTurn = false;
       // Only while the CLI is there to start that turn.
@@ -1611,6 +1636,7 @@ export class Runner {
     const set = this.patchSet(st);
     if (set.panels.length) s.panels = set.panels;
     if (set.actions.length) s.actions = set.actions;
+    if (set.hooks.length) s.hooks = set.hooks;
     if (set.patches.length) s.patches = set.patches;
     return s;
   }
@@ -1677,9 +1703,11 @@ export class Runner {
       const gives: string[] = [];
       const actions = after.actions.filter((a) => a.patch === p.id).map((a) => a.title);
       const panels = after.panels.filter((x) => x.patch === p.id).map((x) => x.title);
+      const hooks = after.hooks.filter((x) => x.patch === p.id).map((x) => x.title);
       if (actions.length) gives.push(`${actions.length === 1 ? 'action' : 'actions'} ${actions.join(', ')}`);
       if (panels.length) gives.push(`${panels.length === 1 ? 'panel' : 'panels'} ${panels.join(', ')}`);
-      this.emit(st, { type: 'system.note', text: `Patch ${p.id} ${old ? 'loads again' : 'added'}: ${gives.join(' and ') || 'nothing yet'}.` });
+      if (hooks.length) gives.push(`${hooks.length === 1 ? 'hook' : 'hooks'} ${hooks.join(', ')}`);
+      this.emit(st, { type: 'system.note', text: `Patch ${p.id} ${old ? 'loads again' : 'added'}: ${gives.join(', ') || 'nothing yet'}.` });
     }
   }
 
@@ -1689,6 +1717,60 @@ export class Runner {
     const panel = this.patchSet(st).panels.find((p) => p.id === panelId);
     if (!panel) throw new RpcError(ErrorCode.badParams, `This thread has no panel called ${panelId}`);
     return renderPanel(panel, paths.panels(this.cfg.home, threadId), this.screenshot);
+  }
+
+  // Runs the folder's turn.end hooks for a turn that just completed: each
+  // command's output goes into the transcript as an action.run, and when
+  // the hook's `tell` says so (failures by default), to the agent as a
+  // message from the runner, which starts a turn. A hook whose turn fails
+  // the same way again is told HOOK_TELL_LIMIT times, then only posted.
+  private async runHooks(st: ThreadState, turn: Turn): Promise<void> {
+    const hooks = this.patchSet(st).hooks.filter((h) => h.on === 'turn.end' && hookApplies(h, turn.edited, st.rec.cwd));
+    for (const hook of hooks) {
+      if (st.rt.deleted || this.stopping) return;
+      const outcome = await runCommand(hook.command, {
+        cwd: st.rec.cwd,
+        env: { ...process.env, ...threadEnv(st.rec.id, this.cfg.home) },
+        shell: this.actionShell,
+        timeoutMs: this.actionTimeoutMs,
+      });
+      if (st.rt.deleted || this.stopping) return;
+      const body: EventBody = {
+        type: 'action.run',
+        actionId: hook.id,
+        patch: hook.patch,
+        title: hook.title,
+        command: hook.command,
+        ok: outcome.ok,
+        text: outcome.text,
+        truncated: outcome.truncated,
+        durationMs: outcome.durationMs,
+        trigger: 'turn.end',
+      };
+      if (outcome.exitCode !== undefined) body.exitCode = outcome.exitCode;
+      this.emit(st, body, st.rt.turn?.turnId);
+      this.markDirty(st);
+      const tell = hook.tell === 'always' || (hook.tell === 'failures' && !outcome.ok);
+      if (!tell) continue;
+      const counts = (st.rt.hookTurns ??= new Map());
+      const sofar = counts.get(hook.id) ?? 0;
+      if (sofar >= HOOK_TELL_LIMIT) {
+        this.log.info('hook result not told again', { threadId: st.rec.id, hook: hook.id, times: sofar });
+        continue;
+      }
+      counts.set(hook.id, sofar + 1);
+      const shown = outcome.text.length > HOOK_TELL_CHARS ? outcome.text.slice(-HOOK_TELL_CHARS) : outcome.text;
+      const verdict = outcome.ok ? 'passed' : `failed${outcome.exitCode !== undefined ? ` (exit ${outcome.exitCode})` : ''}`;
+      const text =
+        `[Threadbear hook] ${hook.title} (patch ${hook.patch}) ran after your turn and ${verdict}:\n\n` +
+        '```\n' + (shown.trim() || '(no output)') + '\n```\n\n' +
+        (outcome.ok ? 'Nothing to do unless something above surprises you.' : 'If this is from your change, fix it; if not, say so and carry on.');
+      try {
+        this.sendTo(st, text, [], 'runner');
+      } catch (e) {
+        this.log.warn('could not tell the agent a hook result', { threadId: st.rec.id, hook: hook.id, error: String(e) });
+      }
+    }
   }
 
   // Runs an action for `actions.run`: a prompt action is a message to the

@@ -76,6 +76,7 @@ type ThreadSummary = {
   costUsd?: number      // total for the thread so far, if known
   panels?: Panel[]      // from the folder's patches (see Patches); absent when there are none
   actions?: Action[]    // likewise
+  hooks?: Hook[]        // likewise
   patches?: PatchInfo[] // the patches that apply to the folder; absent when there are none
 }
 
@@ -85,6 +86,17 @@ type Action = {
   kind: "command" | "prompt"
   command?: string      // kind "command": run in the thread's folder by `actions.run`
   prompt?: string       // kind "prompt": sent to the thread as a message by `actions.run`
+  patch: string
+  note?: string
+}
+
+type Hook = {
+  id: string            // "<patch>.<slug of the title>"
+  title: string
+  on: "turn.end"        // when it runs: after a turn the agent completed (not one it was interrupted in, or failed)
+  command: string       // run in the thread's folder, as an action's command is
+  edited?: string       // only after a turn that edited a file matching this glob, relative to the folder ("**/*.ts")
+  tell: "failures" | "always" | "never"  // when its result is sent to the agent as a message (see Patches)
   patch: string
   note?: string
 }
@@ -146,7 +158,7 @@ Persisted event types (stored in `events.ndjson`, returned by `threads.events`):
 | `turn.completed` | `turnId`, `outcome` (`completed` \| `interrupted` \| `failed`), `durationMs`, `costUsd?`, `usage?`, `error?` |
 | `system.note` | `text` (e.g. "Resumed session", "Compacted the conversation", "Patch reseed added: action Reseed dev DB.") |
 | `error` | `message` |
-| `action.run` | `actionId`, `patch`, `title`, `command`, `ok`, `exitCode?`, `text` (what it printed, truncated to 64 KB), `truncated`, `durationMs`. A command action that `actions.run` ran; outside any turn unless one was running, in which case it carries that `turnId` |
+| `action.run` | `actionId`, `patch`, `title`, `command`, `ok`, `exitCode?`, `text` (what it printed, truncated to 64 KB), `truncated`, `durationMs`, `trigger?` (`"turn.end"` when a hook ran it; absent for a chip or `tb run`). A command that `actions.run` or a hook ran; outside any turn unless one was running, in which case it carries that `turnId` |
 
 Transient events are only sent to subscribers, never persisted, and carry
 `seq` of the last persisted event (they don't consume a number):
@@ -301,7 +313,29 @@ export default {
 
 `run` is a command for `actions.run` to run in the thread's folder,
 `prompt` a message it sends instead; one or the other. A panel needs a
-`url` with a scheme. Ids are the file's name plus a slug of the title
+`url` with a scheme. A hook is a command the runner runs by itself:
+
+```ts
+  hooks: [
+    { title: "Typecheck", on: "turn.end", run: "npx tsc --noEmit", edited: "**/*.{ts,tsx}" },
+  ],
+```
+
+`on: "turn.end"` (the one trigger so far) runs it after each turn the
+agent completed, in the thread's folder like an action, and its output
+goes into the transcript as an `action.run` with `trigger`. With
+`edited`, only after a turn that edited or wrote a file matching that
+glob (from `edit.diff` paths and Edit and Write calls). `tell` says when
+the result also goes to the agent, as a `user.message` from the runner
+(`origin: "runner"`) that starts a turn: `"failures"` (the default) when
+the command failed, `"always"`, or `"never"`. The message names the hook
+and the patch, carries the last 8 KB of output in a code block, and asks
+the agent to fix it if it's theirs. One hook is told at most twice in a
+row (a hook that keeps failing is then only posted) and a message from
+anyone else starts the count again, so a hook and an agent can't go round
+for ever.
+
+Ids are the file's name plus a slug of the title
 (`reseed.reseed-dev-db`), and two entries in one file can't share one. A
 file whose export doesn't fit is listed in `patches` with an `error` and
 gives nothing. Loading a project's module is the same trust as `npm
