@@ -339,6 +339,13 @@ enum ScreenshotRunner {
                 }
                 app.choosePanel(PaneSection.highlightsId, in: thread)
             }
+            // 17e. A thread whose last turn asked Mike for things: they
+            // lead its Highlights, with the tick boxes the card has.
+            await open(app, "demo_openrouter_key")
+            app.choosePanel(PaneSection.highlightsId, in: "demo_openrouter_key")
+            await waitUntil(5) { app.highlights["demo_openrouter_key"] != nil }
+            try? await Task.sleep(for: .milliseconds(400))
+            await capture(window, dir.appendingPathComponent("17e-needs-you.png"))
         }
         // 11. A runner restart: the quiet banner while it waits for threads
         // to finish, the reconnecting line while the runner is down, and

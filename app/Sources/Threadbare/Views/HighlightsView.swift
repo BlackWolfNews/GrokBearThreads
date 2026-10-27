@@ -20,7 +20,7 @@ struct HighlightsView: View {
             PaneNote(text: "This runner doesn't keep highlights yet.")
         } else if let fetched = app.highlights[thread.id] {
             let sections = HighlightSections.build(fetched)
-            if sections.isEmpty {
+            if sections.isEmpty && openAsks == nil {
                 PaneNote(text: "Nothing here yet. Files, links and commits from this thread show up here as it works.")
             } else {
                 ScrollView {
@@ -49,8 +49,16 @@ struct HighlightsView: View {
                 .padding(.top, zoomed(14))
                 .padding(.bottom, zoomed(2))
         }
-        // "Needs you" (the thread's open asks) goes here once ThreadSummary
-        // has `asks`, from the needs-you branch.
+        // The last turn's asks while its card is open, ticked here or in
+        // the transcript alike (the same `threads.tickAsk`).
+        if let asksSeq = openAsks {
+            SectionHeading(title: "Needs you", icon: "hand.raised")
+            ForEach(Array(thread.asks.enumerated()), id: \.offset) { index, ask in
+                AskRow(ask: ask) {
+                    app.session(for: thread.id).tickAsk(asksSeq: asksSeq, index: index, ticked: !ask.ticked)
+                }
+            }
+        }
         if !sections.pinned.isEmpty {
             SectionHeading(title: "Pinned", icon: "pin")
             ForEach(sections.pinned) { row($0) }
@@ -74,6 +82,11 @@ struct HighlightsView: View {
         }
     }
 
+    /// The open card's seq, when the thread has asks on it.
+    private var openAsks: Int? {
+        thread.asks.isEmpty ? nil : thread.asksSeq
+    }
+
     /// Under a long group: the rest of it, newest first like the rest.
     private func showAll(_ count: Int, action: @escaping () -> Void) -> some View {
         PaneRow(icon: "ellipsis", title: "Show all \(count)", quiet: true) {
@@ -95,6 +108,7 @@ struct HighlightsView: View {
         let how = item.isPinned || isCommit ? nil : item.how.word
         return PaneRow(icon: FileIcon.symbol(for: item), title: item.title, lead: isCommit ? item.sha : nil,
                        trailing: how.flatMap { $0.isEmpty ? nil : $0 }, note: item.note, detail: detail,
+                       titleTruncation: item.path == nil ? .tail : .middle,
                        action: isCommit ? nil : { app.open(item, in: thread, external: false) })
             .contextMenu {
                 if let path = item.path {
@@ -122,7 +136,7 @@ struct HighlightsView: View {
                         detail: HighlightText.folder(of: path, cwd: thread.cwd), indent: true) {
                     app.openExternally(URL(fileURLWithPath: path))
                 }
-                .help("Open in its app")
+                .tip("Open in its app")
                 .contextMenu { FileMenu(path: path, thread: thread, title: (path as NSString).lastPathComponent) }
             }
         }
@@ -149,6 +163,8 @@ struct PaneRow: View {
     /// Keeps the icon's room with no icon, so a list where some rows have
     /// one still lines its titles up.
     var reservesIcon = false
+    /// A file name keeps its extension (middle); a sentence its start.
+    var titleTruncation: Text.TruncationMode = .middle
     var action: (() -> Void)?
     @State private var hovering = false
 
@@ -188,7 +204,7 @@ struct PaneRow: View {
                             .font(.system(size: TypeScale.label))
                             .foregroundStyle(quiet ? AnyShapeStyle(.secondary) : AnyShapeStyle(.primary))
                             .lineLimit(1)
-                            .truncationMode(.middle)
+                            .truncationMode(titleTruncation)
                         Spacer(minLength: zoomed(4))
                         if let trailing {
                             Text(trailing)
@@ -224,6 +240,44 @@ struct PaneRow: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(hovering && action != nil ? SidebarMetrics.hover : .clear, in: RoundedRectangle(cornerRadius: SidebarMetrics.corner))
             .contentShape(Rectangle())
+    }
+}
+
+/// One ask on the open card: a tick box, what Mike has to do, and where.
+/// A ticked one is struck through and grey, as on the transcript's card.
+private struct AskRow: View {
+    let ask: Ask
+    let tick: () -> Void
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: zoomed(8)) {
+            Button(action: tick) {
+                Image(systemName: ask.ticked ? "checkmark.square.fill" : "square")
+                    .font(.system(size: zoomed(13)))
+                    .foregroundStyle(ask.ticked ? AnyShapeStyle(Color.accentColor) : AnyShapeStyle(Color(nsColor: Theme.faintIcon)))
+                    .frame(width: zoomed(16))
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .tip(ask.ticked ? "Not done" : "Done")
+            VStack(alignment: .leading, spacing: zoomed(2)) {
+                Text(ask.action)
+                    .font(.system(size: TypeScale.label))
+                    .foregroundStyle(ask.ticked ? AnyShapeStyle(.secondary) : AnyShapeStyle(.primary))
+                    .strikethrough(ask.ticked)
+                    .fixedSize(horizontal: false, vertical: true)
+                if let place = ask.where_, !place.isEmpty {
+                    Text(place)
+                        .font(.system(size: TypeScale.small))
+                        .foregroundStyle(SidebarMetrics.faint)
+                        .lineLimit(2)
+                }
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.leading, SidebarMetrics.leading)
+        .padding(.trailing, SidebarMetrics.trailing + SidebarMetrics.outerInset)
+        .padding(.vertical, zoomed(6))
     }
 }
 
