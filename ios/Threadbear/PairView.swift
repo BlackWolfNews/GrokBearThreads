@@ -5,6 +5,8 @@ import ThreadbearKit
 /// scanning the QR code `ios/scripts/pair-qr.swift` shows.
 struct PairView: View {
     @Environment(AppModel.self) private var model
+    @State private var scanning = false
+    @State private var pairing = false
 
     var body: some View {
         VStack(spacing: 24) {
@@ -13,10 +15,23 @@ struct PairView: View {
                 .foregroundStyle(.secondary)
             VStack(spacing: 10) {
                 Text("Pair with your Mac").font(.title2.weight(.semibold))
-                Text("On the Mac, run **swift ios/scripts/pair-qr.swift** in the threadbear repo, then scan the code it shows with the Camera.")
+                Text("On the Mac, run **swift ios/scripts/pair-qr.swift** in the threadbear repo, then scan the code it shows.")
                     .multilineTextAlignment(.center)
                     .foregroundStyle(.secondary)
             }
+            Button {
+                model.clearError()
+                scanning = true
+            } label: {
+                if pairing {
+                    ProgressView().frame(maxWidth: .infinity)
+                } else {
+                    Label("Scan the code", systemImage: "qrcode.viewfinder").frame(maxWidth: .infinity)
+                }
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.large)
+            .disabled(pairing)
             if let problem = model.authProblem {
                 Text("The server stopped accepting this phone's token (\(problem)). Pair again to carry on.")
                     .font(.footnote)
@@ -38,6 +53,18 @@ struct PairView: View {
             .font(.subheadline)
         }
         .padding(32)
+        .fullScreenCover(isPresented: $scanning) {
+            // Only a Threadbear pairing link ends the scan; any other code
+            // in view is ignored.
+            ScanSheet(accept: { $0.hasPrefix("threadbear://pair") }) { code in
+                guard let url = URL(string: code) else { return }
+                pairing = true
+                Task {
+                    await model.pair(with: url)
+                    pairing = false
+                }
+            }
+        }
     }
 }
 

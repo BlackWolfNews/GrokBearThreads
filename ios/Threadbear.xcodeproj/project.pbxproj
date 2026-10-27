@@ -221,6 +221,7 @@
 				INFOPLIST_FILE = Threadbear/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = Threadbear;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.developer-tools";
+				INFOPLIST_KEY_NSCameraUsageDescription = "Threadbear uses the camera to scan the pairing code on your Mac.";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Threadbear listens after you tap the mic, to type your reply.";
 				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "Threadbear turns what you say into text for your reply, on the phone where it can.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
@@ -258,6 +259,7 @@
 				INFOPLIST_FILE = Threadbear/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = Threadbear;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.developer-tools";
+				INFOPLIST_KEY_NSCameraUsageDescription = "Threadbear uses the camera to scan the pairing code on your Mac.";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Threadbear listens after you tap the mic, to type your reply.";
 				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "Threadbear turns what you say into text for your reply, on the phone where it can.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
