@@ -1,9 +1,9 @@
 # Threadbear's Convex backend
 
-Research, 27 Oct 2026, thread 89b52654. Nothing here is built. It answers
-three questions: does any Convex work exist, what should "backed by
-Convex" mean now that the runner and the Mac app exist, and what shape to
-build first so the iPhone app (thread f5247e5b) can start.
+Research and build notes, 27 Oct 2026, thread 89b52654. Sections 1 to 4
+are the research Mike said yes to ("A", and make the project now).
+Section 5 is what's built and how to work on it; section 6 the phone's
+API as agreed with the iPhone thread (f5247e5b).
 
 ## 1. What exists today
 
@@ -306,11 +306,122 @@ In order, matching the build order above:
 Quick Ask stays as it is on Bruce. Folding it into the Threadbear phone
 app is a later decision and doesn't depend on any of this.
 
-## 4. Decisions for Mike
+## 4. Decisions
 
-1. Shape A as above, or push for B (Convex as the Mac app's source of
-   truth too). My recommendation is A.
-2. Make the Convex project now, on `mikec` in Sydney, or wait until the
-   phone app is ready to read it. (Nothing above has been created.)
-3. Whether full conversation text (option B from 27 Oct) should go in from
-   the start as an off-by-default flag, or wait.
+Mike, 27 Oct: shape A, and make the project now. Full conversation text
+(the 27 Oct option B) stays a later flag.
+
+## 5. What's built (step 1) and how to work on it
+
+**The Convex project** is `threadbear` on team `mikec`
+(https://dashboard.convex.dev/t/mikec/threadbear). Its code is `convex/`
+at the repo root, with the root `package.json` holding the `convex`
+dependency; `convex/_generated` is committed so `./check.sh` can typecheck
+the functions without a deployment (`npm run convex:typecheck`). Having a
+`convex/` folder here also gives threads in this repo the built-in Convex
+dashboard panel.
+
+- `convex/schema.ts`: `runners`, `threads`, `messages`, `commands`,
+  `tokens`, `devices`. Step 1 fills `runners` and `threads`; the rest are
+  defined so the phone can code against them.
+- `convex/sync.ts`: the runner's mutations (`upsertThreads`,
+  `removeThreads`, `prune`, `heartbeat`, `bye`) and two queries for
+  checks (`threadsOf`, `runnersList`). Each takes `key`, which must equal
+  the deployment's `RUNNER_KEY` env var.
+- `convex/phone.ts`: the phone's API (section 6).
+- `convex/tokens.ts`: `issue`, `revoke`, `list`, run from a terminal with
+  `npx convex run tokens:issue '{"name":"iphone","days":90}'` (add
+  `--prod` for the Sydney prod deployment). Only the SHA-256 of a token
+  is stored.
+- `runner/src/sync.ts`: the mirror, documented in docs/protocol.md
+  ("Sync"): on with `sync.url` in `runner.json` and `secrets/convex-key`;
+  coalesced writes, batches of 50, backoff, prune on start, bye on a stop
+  for good; `runner.status.sync` and a `tb status` line.
+- Tests: `runner/test/unit/sync.test.ts` (fake deployment) and
+  `runner/test/e2e/sync.e2e.test.ts`, which starts `npx convex dev` on
+  the repo's local deployment, points a runner at it with its own key and
+  reads back through the HTTP API and the phone queries. It skips
+  without a local deployment in `.env.local`.
+
+**Deployments.** The CLI can't make them yet: team `mikec` is at its
+quota of 300 deployments (159 projects, most of them `temp-*` and `tmp-*`
+with a dev and a prod deployment each). Until two are freed, the project
+has only a local dev deployment on this Mac (`.env.local`,
+`CONVEX_URL=http://127.0.0.1:3210`, made with `npx convex deployment
+create mikec:threadbear:local --select`). When Mike has freed some:
+
+```
+npx convex deployment create mikec:threadbear:dev/main --type dev --select --default --region aws-ap-southeast-2
+npx convex deployment create mikec:threadbear:production --type prod --default --region aws-ap-southeast-2
+npx convex env set RUNNER_KEY "$(cat ~/Library/Application\ Support/Threadbare/secrets/convex-key)" --prod
+npx convex deploy
+```
+
+then put `sync: { "url": "https://<prod name>.convex.cloud" }` in the
+live `runner.json` and a random key in `secrets/convex-key` (0600); the
+runner reads both at its next start. `tb status` shows "Convex mirror:
+on".
+
+**Working on it.** `npx convex dev` at the repo root runs the local
+backend and pushes `convex/` as it changes; `npx convex env set RUNNER_KEY
+<key>` on it once, and a dev runner with `THREADBARE_SYNC_URL` set to the
+local URL and the same key in its secrets mirrors there. `./check.sh`
+sets `THREADBARE_SYNC=off` so no test runner ever writes to the real
+project.
+
+## 6. The phone's API
+
+Agreed with thread f5247e5b on 27 Oct. All in `convex/phone.ts`. Every
+function takes `token` (a phone token from `tokens:issue`) and throws
+`ConvexError({ kind: "auth" })` for a bad, expired or revoked one;
+`{ kind: "notFound" }` for a thread or command that isn't there.
+
+Queries:
+
+- `phone:me({ token })` → `{ name, expiresAt }`.
+- `phone:runners({ token })` → `[{ runnerId, name, version, lastSeenAt,
+  draining }]`. Offline is `lastSeenAt` older than 3 minutes (a runner
+  that stopped for good has `lastSeenAt` of 1970).
+- `phone:threads({ token, view: "inbox" | "hibernating" | "den" })` →
+  rows, newest `lastActivityAt` first; the den is capped at 100. A row is
+  `threadId, runnerId, title, cwd, accountId, provider, model?, status,
+  needsYou, unread, preview, createdAt, lastActivityAt, lastActivityMs,
+  snoozedUntil?, snoozedUntilRestart?, archivedAt?, costUsd?, projects?:
+  [{ id, title }], working?, pendingApproval?, view`. `pendingApproval`
+  (from step 2) is `{ approvalId, kind: "approval", name, title, options:
+  ("allow" | "allowAlways" | "deny")[], inputSummary? }` or `{ approvalId,
+  kind: "question", questions: Question[] }` with the protocol's
+  `Question` shape.
+- `phone:thread({ token, threadId })` → `{ thread, messages: [{ seq, role,
+  text, origin?, at }] }`, oldest first. Empty until step 2.
+- `phone:command({ token, commandId })` → `{ state: "pending" | "taken" |
+  "done" | "failed", note?, threadId? }`.
+
+Mutations, each returning a `commandId` (the runner applies them from
+step 3; until then they sit `pending`):
+
+- `phone:send({ token, threadId, text })`
+- `phone:respond({ token, threadId, approvalId, decision: "allow" |
+  "allowAlways" | "deny", message? })`
+- `phone:answer({ token, threadId, approvalId, answers: Record<string,
+  string>, message? })`: one answer per question keyed by its text, as
+  the runner's `approvals.respond` with decision `answered` takes it;
+  `message` is the answers in one line for the transcript (default: joined
+  with "; ").
+- `phone:update({ token, threadId, change })` where `change` is one of
+  `{ snooze: { until?, untilRestart? } }`, `{ wake: true }`, `{ archive:
+  true }`, `{ unarchive: true }`, `{ markSeen: true }`, `{ title }`.
+- `phone:create({ token, text, runnerId?, cwd?, accountId?, model? })`.
+  With no `runnerId`, the newest runner seen in the last 3 minutes, or
+  `"any"` (the first runner back takes it).
+- `phone:registerDevice({ token, apnsToken, environment: "sandbox" |
+  "production" })` (push is step 4; the payload will be `{ aps: { alert:
+  { title, body }, sound: "default", "thread-id": threadId }, threadId }`
+  for bundle id `com.mikecann.threadbear`).
+
+Changes from the proposal: `answers` values are strings, not arrays (a
+multi-select question's choices go in one string, comma-joined, which is
+what the Mac app sends); `view` and `lastActivityMs` are on every row; a
+`title` change was added to `update`; the dev deployment URL waits on the
+quota above, so until then the local one on this Mac is the only
+deployment.

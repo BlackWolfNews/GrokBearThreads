@@ -1,0 +1,18 @@
+{
+  "name": "threadbear",
+  "private": true,
+  "description": "Threadbear's Convex project: the live mirror the phone reads (docs/convex-backend.md). The runner is in runner/, the Mac app in app/.",
+  "type": "module",
+  "scripts": {
+    "convex:typecheck": "tsc --noEmit -p convex",
+    "convex:dev": "convex dev",
+    "convex:deploy": "convex deploy"
+  },
+  "dependencies": {
+    "convex": "1.48.0"
+  },
+  "devDependencies": {
+    "typescript": "7.0.2",
+    "@types/node": "26.6.5"
+  }
+}

@@ -59,6 +59,9 @@ unset THREADBARE_HOME THREADBARE_DATA_DIR THREADBARE_PORT THREADBARE_URL THREADB
   THREADBARE_THREAD_ID THREADBARE_RUNNER_VERSION THREADBARE_RUNNER_HOME
 # No runner a check starts may install or update a CLI.
 export THREADBARE_CLI_UPDATES=off
+# Nor write to the real Convex project (the sync e2e points its own runner
+# at a local deployment with THREADBARE_SYNC_URL).
+export THREADBARE_SYNC=off
 
 TMP_ROOT="${TMPDIR:-/tmp}"
 LOGS="$(mktemp -d "${TMP_ROOT%/}/threadbare-check.XXXXXX")"
@@ -84,6 +87,11 @@ if [ "$APP_ONLY" = 0 ]; then
     step "runner packages" "$ROOT/runner" npm ci --no-audit --no-fund
   fi
   step "runner typecheck" "$ROOT/runner" npm run typecheck
+  # The Convex functions (convex/), against the generated types in git.
+  if [ ! -d "$ROOT/node_modules" ]; then
+    step "convex packages" "$ROOT" npm ci --no-audit --no-fund
+  fi
+  step "convex typecheck" "$ROOT" npm run convex:typecheck
   step "runner unit tests" "$ROOT/runner" npm test
   [ "$QUICK" = 1 ] || step "runner deploy tests" "$ROOT/runner" bash test/deploy/run.sh
 fi

@@ -955,6 +955,59 @@ kept in `schedules.json` in the data dir.
   schedule sends to its own thread ("check the deploy again in 20
   minutes").
 
+## Sync
+
+The runner mirrors the phone's view of its threads to Threadbear's Convex
+project (docs/convex-backend.md, shape A: the runner owns the state,
+Convex mirrors it, the phone asks through it). It's best effort and
+one-way in this step: nothing the runner or the Mac app does waits on it,
+and the runner never reads the mirror back. The Mac app doesn't use it.
+
+- **On when** `runner.json` has `sync.url` (the deployment's
+  `https://<name>.convex.cloud`) and `secrets/convex-key` (0600) holds the
+  key the deployment's `RUNNER_KEY` was set to. `sync.enabled: false`
+  turns it off; so does `THREADBARE_SYNC=off` in the environment, which
+  check.sh sets so no test runner writes to the real project.
+  `THREADBARE_SYNC_URL` points a dev or test runner at its own deployment.
+  `sync.name` is what the phone calls this runner (default: the Mac's
+  hostname without `.local`); `sync.runnerId` is made once and written
+  back to `runner.json`, so a data dir stays one runner across releases.
+- **What's written.** One `threads` row per thread: `threadId, runnerId,
+  title, cwd, accountId, provider, model?, status, needsYou, unread,
+  preview, createdAt, lastActivityAt, snoozedUntil?, snoozedUntilRestart?,
+  archivedAt?, costUsd?` (to the cent), `projects?: { id, title }[]`,
+  `working?` (the first unfinished background task's description) and
+  `view` (`inbox`, `hibernating` or `den`, worked out the way the app's
+  lists are). Nothing else from `ThreadSummary`: no `lastSeq`, context,
+  panels, actions, hooks or sub-agents, and never an event, tool output
+  or image. Plus a `runners` row for this runner (`runnerId, name,
+  version, release?, startedAt, draining, threadCount, lastSeenAt`),
+  written once a minute.
+- **When.** A `thread.updated` whose phone view differs from the last one
+  written marks the thread dirty; dirty threads are written together, at
+  most once every 2 seconds, 50 to a mutation. A `thread.deleted` removes
+  the row. On start every thread is written once and rows of this runner
+  for threads it no longer has are pruned. A stop for good (not a restart
+  or a handover) sets the runner's `lastSeenAt` to 0 so the phone shows it
+  offline at once; a draining runner just stops, and the new release
+  writes everything again under the same `runnerId`.
+- **Failures.** A write that fails is kept and tried again after 5
+  seconds, doubling to 5 minutes, with one log line per distinct error;
+  a newer state for the same thread replaces the one waiting. Rows are
+  current state, so a long outage costs one write per changed thread
+  when it's back.
+- **Status.** `runner.status` has `sync: { state: "off" | "ok" | "error",
+  reason?, url?, runnerId?, name?, threads?, lastSyncAt?, lastError?,
+  pending?, retryAt? }` (`reason` says why it's off; `threads` is rows
+  written since start; `pending` changes waiting), and `tb status` prints
+  it as one line.
+- **Convex side.** `convex/` at the repo root (schema, `sync.ts` for the
+  runner's mutations, `phone.ts` for the phone's queries and the commands
+  it queues, `tokens.ts` for phone tokens). The phone's API is in
+  docs/convex-backend.md. Later steps add messages, approvals, projects,
+  schedules and accounts to the mirror, and the runner applying the
+  phone's commands.
+
 ## Ordering and reconnects
 
 - Persisted events for a thread are delivered in `seq` order with no gaps.
