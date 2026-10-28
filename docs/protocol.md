@@ -1024,12 +1024,16 @@ A turn the agent finished can say whether Mike has to do anything, so
   asks?: { action, where?, reply?, why?, options?, suggested?, links? }[] }`.
   `action` is one concrete thing to do or a question, `where` the app,
   site, file or person, `reply` the words the agent wants back ("done"),
-  `why` a line of context for when Mike has forgotten the details,
+  `why` what the ask is about and what the agent wants back, for when
+  Mike has forgotten everything and sees only the card (the tool's schema
+  requires it; the runner still takes an ask without one),
   `options` up to six likely answers and `suggested` the index of the
   agent's own pick (dropped unless it points at an option). `links` (up
   to three) are where to go to do it or judge it, `{ title, url }`: a web
   page (`http(s)://`) or a file or folder on Mike's Mac (`file://`, an
-  absolute or `~` path); anything else is dropped. The agent calls it last, after its final
+  absolute or `~` path); anything else is dropped. The app shows a
+  picture, PDF, text file or page in the pane and opens anything else (a
+  folder, a `.tandem` project) in its own app. The agent calls it last, after its final
   message. The tool's description says when, so a resumed session that
   kept its old system prompt still hears it.
 - **Archiving itself.** `end_turn` also takes `archive?: true`. With

@@ -1,4 +1,5 @@
 import AppKit
+import UniformTypeIdentifiers
 import Quartz
 import SwiftUI
 import ThreadbearCore
@@ -701,7 +702,13 @@ final class TranscriptController: NSObject, NSTableViewDataSource, NSTableViewDe
             app.pickAnswer(thread: thread, ask: index, option: n)
         case "link":
             guard ask.links.indices.contains(n), let url = ask.links[n].target else { return }
-            app.openLink(url, title: ask.links[n].title, in: thread)
+            // A picture, PDF, text or page shows in the pane; anything else
+            // (a .tandem project, a folder) opens in its own app, as that's
+            // where the ask wants him.
+            let type = url.isFileURL ? UTType(filenameExtension: url.pathExtension) : nil
+            let showable = type.map { t in [UTType.image, .pdf, .text, .html].contains { t.conforms(to: $0) } } ?? false
+            let isFolder = (try? url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true
+            app.openLink(url, title: ask.links[n].title, in: thread, external: url.isFileURL && (isFolder || !showable))
         default: break
         }
     }

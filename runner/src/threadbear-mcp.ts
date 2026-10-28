@@ -499,7 +499,7 @@ export function buildThreadbearTools(control: ThreadControl, selfId: string, now
               action: z.string().min(1).describe('One concrete thing for Mike to do, in a short sentence: "Paste your OpenRouter key into Settings".'),
               where: z.string().optional().describe('Where he does it: an app, site, file or person, e.g. "Threadbear › Settings › Models". Leave it out when it is just this thread or this card.'),
               reply: z.string().optional().describe('The exact words to send back when it is done, e.g. "done" or "key set". Leave it out when the reply is his own answer (a decision, a choice).'),
-              why: z.string().optional().describe('One line of context, for when he has forgotten the details: "Preview is green and the events arrive."'),
+              why: z.string().min(1).describe('What this is about and what you want back, for when he has forgotten everything and only sees the card: "Your Slack draft to Emily names the automation guy Hayden; he\'s Pete." One or two sentences, never just a place.'),
               options: z.array(z.string()).max(6).optional().describe('Likely answers to pick from, short: ["Merge", "Test locally first"]. Give them for every decision or yes/no question. He can always write his own instead.'),
               suggested: z.number().int().optional().describe('Index into options of the answer you would pick.'),
               links: z
@@ -511,7 +511,7 @@ export function buildThreadbearTools(control: ThreadControl, selfId: string, now
                 )
                 .max(3)
                 .optional()
-                .describe('Where to go to do it or judge it: the page, PR, preview, file or screenshot. Give one whenever there is somewhere to go.'),
+                .describe('Where to go to do it or judge it: the page, the Slack message\'s permalink, the PR, the preview, the file or screenshot, or the project to open (a path opens in its own app, e.g. a .tandem file in Tandem). Give one whenever there is somewhere to go.'),
             }),
           )
           .max(10)
