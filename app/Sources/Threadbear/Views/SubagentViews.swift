@@ -10,10 +10,12 @@ struct SubagentList: View {
     /// The section the thread is under, so the rows' ids are unique when a
     /// thread changes section (see SectionRow).
     let section: String
+    /// False under Inbox: only a running or selected sub-agent shows there.
+    var finishedShown = true
 
     var body: some View {
         let selected = app.subagentSelection?.threadId == thread.id ? app.subagentSelection?.subagentId : nil
-        let rows = SubagentRows.visible(thread, threadSelected: app.selection == thread.id, selectedSubagent: selected, now: app.now)
+        let rows = SubagentRows.visible(thread, threadSelected: app.selection == thread.id, selectedSubagent: selected, now: app.now, finishedShown: finishedShown)
         ForEach(rows.map { SubagentRowID(section: section, threadId: thread.id, row: $0) }) { item in
             SubagentRowView(threadId: thread.id, row: item.row, isFirst: item.row.id == rows.first?.id, isLast: item.row.id == rows.last?.id)
                 .transition(Juice.row)

@@ -106,7 +106,7 @@ private struct ThreadSection: View {
                 ForEach(threads.map { SectionRow(section: section.title, thread: $0) }) { row in
                     ThreadRowView(thread: row.thread, mode: .inbox, section: section) { select(row.thread.id) }
                         .transition(Juice.row)
-                    SubagentList(thread: row.thread, section: section.title)
+                    SubagentList(thread: row.thread, section: section.title, finishedShown: section != .inbox)
                 }
             }
         }

@@ -229,7 +229,7 @@ struct AppDump: Encodable {
         func thread(_ summary: ThreadSummary, section: InboxSection? = nil) -> Thread {
             let look = ThreadRowLook(summary, section: section)
             let selectedSub = app.subagentSelection?.threadId == summary.id ? app.subagentSelection?.subagentId : nil
-            let subagents = section == nil ? [] : SubagentRows.visible(summary, threadSelected: app.selection == summary.id, selectedSubagent: selectedSub, now: app.now).map {
+            let subagents = section == nil ? [] : SubagentRows.visible(summary, threadSelected: app.selection == summary.id, selectedSubagent: selectedSub, now: app.now, finishedShown: section != .inbox).map {
                 SubagentInfo(id: $0.id, depth: $0.depth, status: $0.subagent.status.rawValue, title: SubagentRows.title($0.subagent),
                              detail: SubagentRows.detail($0.subagent), selected: $0.id == selectedSub)
             }

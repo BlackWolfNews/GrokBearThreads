@@ -65,6 +65,9 @@ final class SubagentTests: XCTestCase {
         // A selected one stays, however old.
         let selected = SubagentRows.visible(thread, threadSelected: false, selectedSubagent: "old", now: now)
         XCTAssertEqual(selected.map(\.id), ["old", "recent", "live", "failed"])
+        // Under Inbox, finished ones go even when recent or the thread is selected.
+        XCTAssertEqual(SubagentRows.visible(thread, threadSelected: true, selectedSubagent: nil, now: now, finishedShown: false).map(\.id), ["live"])
+        XCTAssertEqual(SubagentRows.visible(thread, threadSelected: true, selectedSubagent: "old", now: now, finishedShown: false).map(\.id), ["old", "live"])
     }
 
     func testSelectedThreadShowsItsFinishedOnesUpToTheCap() {

@@ -27,14 +27,17 @@ public enum SubagentRows {
     /// selected thread its finished ones too. A selected sub-agent is always
     /// shown. A nested one sits under its parent when the parent is shown,
     /// otherwise at the top level; the order is the runner's (oldest first).
-    public static func visible(_ thread: ThreadSummary, threadSelected: Bool, selectedSubagent: String?, now: Date) -> [SubagentRow] {
+    /// `finishedShown` false (Inbox) leaves finished ones out unless
+    /// selected: an Inbox thread's work is done, and its finished sub-agents
+    /// under it were clutter (Mike asked 28 Oct).
+    public static func visible(_ thread: ThreadSummary, threadSelected: Bool, selectedSubagent: String?, now: Date, finishedShown: Bool = true) -> [SubagentRow] {
         let all = thread.subagents
         guard !all.isEmpty else { return [] }
         var shown = Set<String>()
-        for subagent in all where subagent.isRunning || subagent.id == selectedSubagent || endedRecently(subagent, now: now) {
+        for subagent in all where subagent.isRunning || subagent.id == selectedSubagent || (finishedShown && endedRecently(subagent, now: now)) {
             shown.insert(subagent.id)
         }
-        if threadSelected {
+        if threadSelected && finishedShown {
             let finished = all.filter { !$0.isRunning && !shown.contains($0.id) }
             for subagent in finished.suffix(max(0, maxFinishedWhenSelected - finishedCount(all, shown))) {
                 shown.insert(subagent.id)
