@@ -23,6 +23,16 @@ struct Draft: Equatable {
     var images: [ImageRef] = []
 }
 
+/// One of Mike's messages being edited in the composer.
+struct MessageEdit: Equatable {
+    var seq: Int
+    /// The draft the box held before, put back once the edit is sent or
+    /// cancelled.
+    var before: Draft
+    /// The edit has gone to the runner and it hasn't answered yet.
+    var sending = false
+}
+
 /// The answers picked on a thread's open card (ask index to option index),
 /// and which card they're for.
 struct AskPicks: Equatable {
@@ -96,6 +106,10 @@ final class AppModel {
     var focusRequests: [String: Int] = [:]
     var now = Date()
     var drafts: [String: Draft] = [:]
+    /// Messages being edited, by thread id: the seq of the message the
+    /// composer's draft will replace (docs/protocol.md, "Editing a
+    /// message"), and whatever was in the box before, to put back after.
+    var editing: [String: MessageEdit] = [:]
     /// The answers Mike has picked on each thread's open card of asks, by
     /// thread id, waiting in the composer to go with his next message.
     /// Ones for an older card count as none.
@@ -842,12 +856,55 @@ final class AppModel {
         sessions[threadId]?.setAskPicks(seq: seq, picks: picks)
     }
 
+    /// Puts one of Mike's messages in the thread's composer to edit: sending
+    /// it then replaces that message and carries on from there.
+    func startEditing(threadId: String, seq: Int, text: String, images: [ImageRef]) {
+        let before = editing[threadId]?.before ?? drafts[threadId] ?? Draft()
+        editing[threadId] = MessageEdit(seq: seq, before: before)
+        drafts[threadId] = Draft(text: text, images: images)
+        focusComposer(threadId)
+    }
+
+    /// Leaves the edit: the box gets back what was in it before.
+    func cancelEditing(threadId: String) {
+        guard let edit = editing.removeValue(forKey: threadId) else { return }
+        drafts[threadId] = edit.before.text.isEmpty && edit.before.images.isEmpty ? nil : edit.before
+    }
+
+    /// Sends the edited message. The box keeps it, marked as sending,
+    /// until the runner has started the new turn; an error leaves it there
+    /// to try again.
+    private func sendEdit(threadId: String, edit: MessageEdit) {
+        let draft = drafts[threadId] ?? Draft()
+        let text = draft.text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty || !draft.images.isEmpty, !edit.sending else { return }
+        guard let client, connection == .connected else {
+            showConnectionError("Not connected to the runner, so the edit wasn't sent. It's still in the box.")
+            return
+        }
+        editing[threadId]?.sending = true
+        Task {
+            do {
+                try await client.editMessage(threadId: threadId, seq: edit.seq, text: text, images: draft.images)
+                editing[threadId] = nil
+                drafts[threadId] = edit.before.text.isEmpty && edit.before.images.isEmpty ? nil : edit.before
+            } catch {
+                editing[threadId]?.sending = false
+                show(error)
+            }
+        }
+    }
+
     /// Sends the draft for `threadId` (or starts a new thread with the "new"
     /// draft), with any answers picked on the open card. The box empties
     /// straight away, but the text, images and picks go back if the runner
     /// doesn't take them; while disconnected nothing is touched at all.
     func send(threadId: String?) {
         let key = threadId ?? "new"
+        if let threadId, let edit = editing[threadId] {
+            sendEdit(threadId: threadId, edit: edit)
+            return
+        }
         let draft = drafts[key] ?? Draft()
         // Answers picked on the open card go first, each question then its
         // answer, and his own words after them (Decisions.message).

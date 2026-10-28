@@ -64,6 +64,8 @@ struct AppDump: Encodable {
         var draft: String
         var text: String
         var images: Int
+        /// The seq of the message being edited, when the draft is an edit.
+        var editing: Int? = nil
         /// Where that thread runs, or where a new one will start: what the
         /// composer's chips and menus show.
         var cwd: String
@@ -447,6 +449,7 @@ struct AppDump: Encodable {
             settings = newThreadSettings(app)
         }
         return Composer(draft: key, text: app.drafts[key]?.text ?? "", images: app.drafts[key]?.images.count ?? 0,
+                        editing: app.editing[key]?.seq,
                         cwd: settings.cwd, account: settings.account, model: settings.model, ask: settings.ask, effort: settings.effort,
                         pool: settings.pool, chip: ThreadSettings(app: app, thread: app.selectedThread).modelChipTitle)
     }
@@ -533,7 +536,8 @@ struct AppDump: Encodable {
             lines += usage.lines.map { "  " + $0 }
         }
         if let decisions { lines.append("decisions: " + decisions[0]); lines += decisions.dropFirst().map { "  " + $0 } }
-        lines.append("composer (\(composer.draft)): \"\(composer.text)\"" + (composer.images > 0 ? " and \(composer.images) image(s)" : ""))
+        lines.append("composer (\(composer.draft)): \"\(composer.text)\"" + (composer.images > 0 ? " and \(composer.images) image(s)" : "")
+            + (composer.editing.map { ", editing the message at seq \($0)" } ?? ""))
         let on = composer.pool.map { "pool \($0) (now \(composer.account))" } ?? (pools.isEmpty ? composer.account : "\(composer.account), pinned")
         lines.append("  \(composer.draft == "new" ? "starts" : "runs") in \(composer.cwd) on \(on), model \(composer.model), "
             + (composer.effort == "default" ? "" : "effort \(composer.effort), ") + (composer.ask ? "asks before edits" : "full access"))

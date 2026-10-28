@@ -597,6 +597,25 @@ enum Automation {
             return "ok \(zoom.percent)"
         case "hover":
             return hover(c, app: app)
+        case "edit-message":
+            // Clicks the pencil by one of Mike's messages (`row`: its row id
+            // or a prefix), as he would, which loads it into the composer
+            // to edit. `{"cmd":"edit-message","cancel":true}` leaves the edit.
+            if c["cancel"] as? Bool == true {
+                guard let id = app.selection else { return "error no thread open" }
+                app.cancelEditing(threadId: id)
+                return "ok"
+            }
+            guard let prefix = c["row"] as? String, let row = displayedRow(prefix, app),
+                  let index = app.transcript.session?.displayIndex(of: row.id) else { return "error no such row" }
+            app.transcript.scroll(toRow: index, offset: 120)
+            guard let cell = app.transcript.tableView.view(atColumn: 0, row: index, makeIfNecessary: true) as? TextRowCell else { return "error row isn't drawn" }
+            guard !cell.edit.isHidden || cell.debugHover(true) else { return "error \(row.id) can't be edited" }
+            cell.edit.performClick(nil)
+            _ = cell.debugHover(false)
+            try? await Task.sleep(for: .milliseconds(100))
+            guard let id = app.selection, let edit = app.editing[id] else { return "error the edit didn't start" }
+            return "ok editing seq \(edit.seq)"
         case "swipe":
             return await swipe(c, app: app)
         case "decide":

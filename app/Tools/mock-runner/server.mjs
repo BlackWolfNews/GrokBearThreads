@@ -413,6 +413,23 @@ async function dispatch(client, method, p) {
       setTimeout(() => fakeTurn(t.summary.id, p.text ?? '', p.images ?? [], turnId, undefined, extra), 10);
       return { turnId };
     }
+    case 'threads.edit': {
+      // Editing a message (docs/protocol.md, "Editing a message"): stop
+      // the turn, cut back to the message with a thread.rewound, then the
+      // edited text as a new turn. The files are made up.
+      const t = need(p.threadId);
+      const target = t.events.find((e) => e.seq === p.seq);
+      if (!target || target.type !== 'user.message') throw rpcError(-32602, 'That message can\'t be edited.');
+      if (!p.text && !(p.images ?? []).length) throw rpcError(-32602, 'text or images required');
+      if (t.interrupt) t.interrupt();
+      await new Promise((r) => setTimeout(r, 300));
+      const files = { undone: ['src/settings/SettingsView.swift', 'src/settings/Tabs.swift'], failed: [], how: 'checkpoint' };
+      const rewound = persist(t.summary.id, { type: 'thread.rewound', fromSeq: p.seq, toSeq: t.summary.lastSeq, files });
+      setStatus(t.summary.id, 'idle');
+      const turnId = 'turn_' + crypto.randomBytes(4).toString('hex');
+      setTimeout(() => fakeTurn(t.summary.id, p.text ?? '', p.images ?? [], turnId, undefined, { editOf: p.seq }), 10);
+      return { turnId, rewound: { seq: rewound.seq, fromSeq: rewound.fromSeq, toSeq: rewound.toSeq, files } };
+    }
     case 'threads.interrupt': {
       const t = need(p.threadId);
       if (t.interrupt) t.interrupt();

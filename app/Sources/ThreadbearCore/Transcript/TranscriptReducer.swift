@@ -94,6 +94,12 @@ public struct TranscriptModel: Sendable {
     /// Each turn's last error row, to learn the turn's `errorKind`.
     private var errorRowForTurn: [String: String] = [:]
     private var turnStarts: [String: Date] = [:]
+    /// Turns whose `turn.started` has been seen: a message after it went
+    /// into that turn, so it can't be edited on its own.
+    private var startedTurns: Set<String> = []
+    /// The seqs edits cut (`thread.rewound`), from every rewind event held.
+    /// Their events stay in `events` but make no rows.
+    public private(set) var hidden: [ClosedRange<Int>] = []
     private var completedTurns: Set<String> = []
     /// Edit and Write tool items per turn, in order, for the changes card.
     private var editsByTurn: [String: [String]] = [:]
@@ -213,6 +219,7 @@ public struct TranscriptModel: Sendable {
     /// Applies live events (persisted or transient) and reports what changed.
     public mutating func apply(_ incoming: [Event]) -> TranscriptChange {
         var gap = false
+        var rewound = false
         for event in incoming {
             if !event.isTransient {
                 if event.seq <= lastSeq && lastSeq != 0 { continue }
@@ -220,12 +227,38 @@ public struct TranscriptModel: Sendable {
                 events.append(event)
                 if firstSeq == 0 { firstSeq = event.seq }
                 lastSeq = event.seq
+                if case .threadRewound = event.payload { rewound = true }
             }
             reduce(event)
+        }
+        // An edit cut rows that are already showing: build them all again
+        // and have the table reload, rather than work out what moved.
+        if rewound {
+            let before = rows.count
+            rebuild()
+            var change = TranscriptChange(removed: IndexSet(integersIn: 0..<before), inserted: IndexSet(integersIn: 0..<rows.count))
+            change.gapDetected = gap
+            return change
         }
         var change = refreshRows()
         change.gapDetected = gap
         return change
+    }
+
+    /// Whether an edit has cut the event at `seq`.
+    public func isHidden(_ seq: Int) -> Bool {
+        hidden.contains { $0.contains(seq) }
+    }
+
+    /// The seqs cut by the `thread.rewound` events among `events`, merged.
+    /// A later edit can cut back over an earlier one's marker; its range
+    /// still counts.
+    static func hiddenRanges(_ events: [Event]) -> [ClosedRange<Int>] {
+        var ranges: [ClosedRange<Int>] = []
+        for event in events {
+            if case .threadRewound(let rewind) = event.payload, let range = rewind.range { ranges.append(range) }
+        }
+        return ranges.sorted { $0.lowerBound < $1.lowerBound }
     }
 
     /// Opens or closes a group (`g:` id) or a file in a changes card
@@ -305,6 +338,8 @@ public struct TranscriptModel: Sendable {
         openAsksRow = nil
         errorRowForTurn = [:]
         turnStarts = [:]
+        startedTurns = []
+        hidden = Self.hiddenRanges(events)
         completedTurns = []
         editsByTurn = [:]
         pendingCards = [:]
@@ -316,7 +351,7 @@ public struct TranscriptModel: Sendable {
         // end it, and the live text would vanish.
         let pending = streaming
         streaming = [:]
-        for event in events {
+        for event in events where !isHidden(event.seq) {
             reduce(event)
         }
         streaming = [:]
@@ -431,10 +466,19 @@ public struct TranscriptModel: Sendable {
         let seq = event.seq
         let turnId = event.turnId
         switch event.payload {
-        case .userMessage(let text, let images, let origin, let answers):
+        case .userMessage(let text, let images, let origin, let answers, let editOf):
             // Mike's reply answers the open card, so it goes, picked or not.
             if origin != "runner" { closeOpenAsks() }
-            append(TranscriptRow(id: "u:\(seq)", seq: seq, turnId: turnId, content: .user(UserMessage(text: text, images: images, origin: origin, answers: answers))))
+            var message = UserMessage(text: text, images: images, origin: origin, answers: answers, editOf: editOf)
+            // Only one that started its own turn can be cut back to; one
+            // sent into a running turn went into that turn.
+            message.editable = message.isMike && turnId.map { !startedTurns.contains($0) } == true
+            append(TranscriptRow(id: "u:\(seq)", seq: seq, turnId: turnId, content: .user(message)))
+
+        case .threadRewound(let rewind):
+            // Mike's edit closes the card the cut turns left, as his reply would.
+            closeOpenAsks()
+            append(TranscriptRow(id: "rw:\(seq)", seq: seq, turnId: turnId, content: .note(rewind.summary)))
 
         case .assistantText(let itemId, let text):
             streaming[itemId] = nil
@@ -636,6 +680,7 @@ public struct TranscriptModel: Sendable {
         case .turnStarted:
             let key = turnId ?? ""
             openTurn = key
+            startedTurns.insert(key)
             if let date = Self.date(event.ts) { turnStarts[key] = date }
             // Nothing new to show but the working line (and a live group).
             markInserted(items.count)

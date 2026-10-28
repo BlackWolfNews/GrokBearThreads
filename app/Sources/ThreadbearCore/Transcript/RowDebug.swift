@@ -167,6 +167,7 @@ extension TranscriptModel {
         case .turnCompleted(let completion):
             return ["f:" + (completion.turnId.isEmpty ? (event.turnId ?? "seq\(seq)") : completion.turnId)]
         case .systemNote: return ["n:\(seq)"]
+        case .threadRewound: return ["rw:\(seq)"]
         case .error: return ["e:\(seq)"]
         case .actionRun(let run): return ["t:" + run.itemId(seq: seq)]
         default: return []

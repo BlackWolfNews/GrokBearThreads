@@ -731,6 +731,16 @@ final class TranscriptController: NSObject, NSTableViewDataSource, NSTableViewDe
         guard let session else { return }
         session.app?.openReview(threadId: session.threadId, review: review)
     }
+
+    /// The pencil by one of Mike's messages: its text and pictures go into
+    /// the composer, and sending replaces it (docs/protocol.md, "Editing a
+    /// message").
+    func editMessage(rowId: String) {
+        guard let session, let app = session.app,
+              case .user(let message)? = session.model.item(id: rowId)?.content, message.editable,
+              let row = session.model.item(id: rowId) else { return }
+        app.startEditing(threadId: session.threadId, seq: row.seq, text: message.text, images: message.images)
+    }
 }
 
 /// SwiftUI wrapper. The controller lives as long as the window's detail view,

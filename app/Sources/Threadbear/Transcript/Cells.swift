@@ -14,10 +14,14 @@ protocol RowCellDelegate: AnyObject {
     /// A click on an asks card: `tick:<index>` or `reply:<index>`.
     func askAction(_ card: AsksCard, action: String)
     func openReview(_ review: DesignReview)
+    /// The pencil by one of Mike's messages: edit it and carry on from
+    /// there (docs/protocol.md, "Editing a message").
+    func editMessage(rowId: String)
 }
 
 extension RowCellDelegate {
     func openReview(_ review: DesignReview) {}
+    func editMessage(rowId: String) {}
 }
 
 /// Base for transcript cells: flipped, so layout reads top-down.
@@ -199,6 +203,13 @@ final class TextRowCell: RowCellView {
     let textView = TranscriptTextView()
     let box = FillView()
     let images = ImageGridView()
+    /// The pencil left of an editable message of Mike's, shown while the
+    /// pointer is over the row.
+    let edit = NSButton()
+    private var editable = false
+    private var pointerInside = false
+    /// Screenshots show the pencil without a real hover.
+    static var debugShowEdit = false
     private var shownBlocks: [String] = []
     private var shownStarts: [Int] = []
     private var shownRowId = ""
@@ -211,9 +222,55 @@ final class TextRowCell: RowCellView {
         addSubview(box)
         addSubview(textView)
         addSubview(images)
+        edit.isBordered = false
+        edit.bezelStyle = .regularSquare
+        edit.imagePosition = .imageOnly
+        edit.target = self
+        edit.action = #selector(editClicked)
+        edit.isHidden = true
+        edit.setTip("Edit this message and carry on from here")
+        edit.setAccessibilityLabel("Edit message")
+        addSubview(edit)
     }
 
     required init?(coder: NSCoder) { fatalError() }
+
+    @objc private func editClicked() {
+        delegate?.editMessage(rowId: rowId)
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        super.mouseEntered(with: event)
+        pointerInside = true
+        updateEdit()
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        super.mouseExited(with: event)
+        pointerInside = false
+        updateEdit()
+    }
+
+    override func prepareForReuse() {
+        super.prepareForReuse()
+        pointerInside = false
+        updateEdit()
+    }
+
+    private func updateEdit() {
+        let show = editable && (pointerInside || Self.debugShowEdit)
+        if edit.isHidden == show { edit.isHidden = !show }
+    }
+
+    #if DEBUG
+    /// A message of Mike's has no hover fill, but shows its pencil.
+    override func debugHover(_ on: Bool) -> Bool {
+        guard editable else { return super.debugHover(on) }
+        pointerInside = on
+        updateEdit()
+        return true
+    }
+    #endif
 
     override func configure(row: TranscriptRow, render: RowRender, tableWidth: CGFloat, expanded: Bool) {
         let previousRowId = shownRowId
@@ -223,6 +280,7 @@ final class TextRowCell: RowCellView {
         box.isHidden = true
         images.isHidden = true
         textView.isHidden = render.text == nil
+        editable = false
 
         switch row.content {
         case .user(let message) where message.showsAsNote:
@@ -252,6 +310,18 @@ final class TextRowCell: RowCellView {
                 box.frame = bubble
                 box.set(fill: Theme.bubbleBackground, stroke: nil, radius: RowMetrics.bubbleRadius)
                 textView.place(bubble.insetBy(dx: RowMetrics.bubblePadH, dy: RowMetrics.bubblePadV))
+            }
+            if message.editable {
+                // Left of the bubble (or of the pictures, with no text),
+                // level with its last line, as Codex and ChatGPT put theirs.
+                editable = true
+                let side = zoomed(22)
+                let left = render.text != nil ? box.frame.minX : images.frame.minX
+                let bottom = render.text != nil ? box.frame.maxY : images.frame.maxY
+                edit.frame = NSRect(x: left - side - zoomed(6), y: bottom - side - zoomed(4), width: side, height: side)
+                let image = Symbols.image("pencil", size: 12)
+                if edit.image !== image { edit.image = image }
+                edit.contentTintColor = .secondaryLabelColor
             }
 
         case .assistant:
@@ -283,6 +353,8 @@ final class TextRowCell: RowCellView {
         default:
             textView.place(NSRect(x: x, y: top, width: width, height: render.textSize.height))
         }
+
+        updateEdit()
 
         // Messages get the selection bar (Explain, Quote, Copy).
         switch row.content {

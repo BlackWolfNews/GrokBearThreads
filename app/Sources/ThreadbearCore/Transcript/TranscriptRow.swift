@@ -59,13 +59,25 @@ public struct UserMessage: Sendable, Hashable {
     /// The asks it answered from the card (docs/protocol.md, "Needs you"):
     /// the bubble shows each question small and the answer as his words.
     public var answers: [AskAnswer]
+    /// The seq of the message this one replaced, when Mike edited one.
+    public var editOf: Int?
+    /// Mike can edit it and carry on from there (docs/protocol.md, "Editing
+    /// a message"). Set by the reducer, which knows whether it started its
+    /// own turn.
+    public var editable: Bool
 
-    public init(text: String, images: [ImageRef] = [], origin: String? = nil, answers: [AskAnswer] = []) {
+    public init(text: String, images: [ImageRef] = [], origin: String? = nil, answers: [AskAnswer] = [], editOf: Int? = nil, editable: Bool = false) {
         self.text = text
         self.images = images
         self.origin = origin
         self.answers = answers
+        self.editOf = editOf
+        self.editable = editable
     }
+
+    /// Mike wrote it, in the app or on the phone: not the runner, a
+    /// schedule or an agent.
+    public var isMike: Bool { (origin == nil || origin == "phone") && agentHeader == nil }
 
     /// Sent by the runner, not by Mike: shown as a quiet centred line, not
     /// a bubble of his own.

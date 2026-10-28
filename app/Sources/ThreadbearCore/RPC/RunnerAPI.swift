@@ -48,6 +48,19 @@ public extension RPCClient {
         return try await call("threads.send", .object(params), as: TurnResult.self).turnId
     }
 
+    /// Replaces the message at `seq` and carries on from there: the runner
+    /// stops the thread, cuts it back to before that message, undoes the
+    /// agent's file changes since and sends `text` as a new turn
+    /// (docs/protocol.md, "Editing a message"). It answers once the new
+    /// turn has started, which can take a while: a turn to stop, a CLI to
+    /// start for the files.
+    @discardableResult
+    func editMessage(threadId: String, seq: Int, text: String, images: [ImageRef] = []) async throws -> String? {
+        var params: [String: JSONValue] = ["threadId": .string(threadId), "seq": .number(Double(seq)), "text": .string(text)]
+        if !images.isEmpty { params["images"] = .array(images.map(\.jsonValue)) }
+        return try await call("threads.edit", .object(params), as: TurnResult.self, timeout: .seconds(120)).turnId
+    }
+
     /// Draws an image panel (the Simulator's screenshot) or fills a list
     /// panel. Slow: it waits for simctl or the patch's function (20 s at
     /// most).

@@ -33,7 +33,9 @@ struct ComposerView: View {
             ScheduledLine(line: line)
         }
         VStack(alignment: .leading, spacing: zoomed(10)) {
-            if let thread, !picks.isEmpty {
+            if let thread, let edit = app.editing[thread.id] {
+                EditingBanner(sending: edit.sending) { app.cancelEditing(threadId: thread.id) }
+            } else if let thread, !picks.isEmpty {
                 AnswerChips(thread: thread, picks: picks)
             }
             // The folder's actions (patches), above the text as in the design.
@@ -50,7 +52,8 @@ struct ComposerView: View {
                 placeholder: placeholder(picks),
                 onSend: { send() },
                 onReturnWhenEmpty: { returnWhenEmpty(draft.wrappedValue) },
-                onImages: { urls in attach(urls, to: draft) }
+                onImages: { urls in attach(urls, to: draft) },
+                onEscape: { cancelEdit() }
             )
             .frame(height: height)
             ComposerControls(
@@ -90,8 +93,16 @@ struct ComposerView: View {
             .onTapGesture { app.focusComposer(draftKey) }
     }
 
+    /// Esc while editing a message leaves the edit.
+    private func cancelEdit() -> Bool {
+        guard let thread, app.editing[thread.id] != nil else { return false }
+        app.cancelEditing(threadId: thread.id)
+        return true
+    }
+
     /// With "Something else" picked, the box is that ask's answer.
     private func placeholder(_ picks: [Int: Int]) -> String {
+        if let thread, app.editing[thread.id] != nil { return "Your message…" }
         if let thread, let own = picks.first(where: { $0.value == Decisions.ownAnswer })?.key, thread.asks.indices.contains(own) {
             return thread.asks.count == 1 ? "Your answer…" : "Your answer to \(own + 1)…"
         }
@@ -107,6 +118,11 @@ struct ComposerView: View {
     /// Return with nothing typed sends picked answers on their own, or
     /// else allows the sole approval (below).
     private func returnWhenEmpty(_ draft: Draft) -> Bool {
+        // An edit with only pictures left still sends; an empty one does nothing.
+        if let thread, app.editing[thread.id] != nil {
+            if !draft.images.isEmpty { send() }
+            return true
+        }
         if let thread, !app.picks(for: thread).isEmpty {
             send()
             return true
@@ -153,6 +169,36 @@ struct ComposerView: View {
             panel.beginSheetModal(for: window, completionHandler: finish)
         } else {
             finish(panel.runModal())
+        }
+    }
+}
+
+/// Over the text while one of Mike's messages is being edited: what
+/// sending will do, and the way out.
+private struct EditingBanner: View {
+    let sending: Bool
+    let onCancel: () -> Void
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: zoomed(6)) {
+            Image(systemName: "pencil")
+                .font(.system(size: TypeScale.sidebarMeta))
+                .foregroundStyle(.secondary)
+            Text(sending
+                 ? "Cutting the thread back to this message…"
+                 : "Editing a message. Sending cuts the thread back to it and undoes the agent's file changes since.")
+                .font(.system(size: TypeScale.sidebarMeta + 1))
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: zoomed(8))
+            if sending {
+                ProgressView().controlSize(.small)
+            } else {
+                Button("Cancel", action: onCancel)
+                    .buttonStyle(.link)
+                    .font(.system(size: TypeScale.sidebarMeta + 1))
+                    .tip("Stop editing and put back what was in the box (Esc)")
+            }
         }
     }
 }
@@ -278,6 +324,8 @@ struct ComposerTextField: NSViewRepresentable {
     /// Return with nothing typed: true if it did something.
     var onReturnWhenEmpty: () -> Bool = { false }
     var onImages: ([URL]) -> Void
+    /// Esc: true if it did something (left an edit).
+    var onEscape: () -> Bool = { false }
 
     // Computed, so they follow the zoom (`applyTypeScale` re-applies
     // them to a text view that's already up).
@@ -349,6 +397,7 @@ struct ComposerTextField: NSViewRepresentable {
         textView.onSend = onSend
         textView.onReturnWhenEmpty = onReturnWhenEmpty
         textView.onImages = onImages
+        textView.onEscape = onEscape
         textView.placeholder = placeholder
         if textView.string != text {
             textView.replaceText(text)
@@ -414,6 +463,7 @@ struct ComposerTextField: NSViewRepresentable {
 final class ComposerTextView: NSTextView {
     var onSend: (() -> Void)?
     var onReturnWhenEmpty: (() -> Bool)?
+    var onEscape: (() -> Bool)?
     var onImages: (([URL]) -> Void)?
     var placeholder = "" {
         didSet { if placeholder != oldValue { needsDisplay = true } }
@@ -474,6 +524,11 @@ final class ComposerTextView: NSTextView {
             return
         }
         super.keyDown(with: event)
+    }
+
+    override func cancelOperation(_ sender: Any?) {
+        if onEscape?() == true { return }
+        super.cancelOperation(sender)
     }
 
     override func paste(_ sender: Any?) {

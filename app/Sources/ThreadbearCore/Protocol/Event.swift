@@ -425,7 +425,9 @@ public struct ActionRun: Sendable, Hashable, Decodable {
 public enum EventPayload: Sendable, Hashable {
     /// `origin` is "runner" for a message the runner sent by itself (the
     /// resume after a restart); nil for anything a person or client sent.
-    case userMessage(text: String, images: [ImageRef], origin: String? = nil, answers: [AskAnswer] = [])
+    /// `editOf` is the seq of the message this one replaced (Editing a
+    /// message).
+    case userMessage(text: String, images: [ImageRef], origin: String? = nil, answers: [AskAnswer] = [], editOf: Int? = nil)
     case assistantText(itemId: String, text: String)
     case reasoning(itemId: String, text: String)
     case toolCall(ToolCall)
@@ -444,6 +446,10 @@ public enum EventPayload: Sendable, Hashable {
     /// The ticks on the card of asks that came with the turn.completed at
     /// `asksSeq`: the whole set each time.
     case asksTicked(asksSeq: Int, ticked: [Int])
+    /// Mike edited the message at `fromSeq`: every event from there to
+    /// `toSeq` is gone from the conversation (docs/protocol.md, "Editing a
+    /// message").
+    case threadRewound(ThreadRewind)
     case assistantTextDelta(itemId: String, text: String)
     case reasoningDelta(itemId: String, text: String)
     case toolOutputDelta(itemId: String, text: String)
@@ -490,6 +496,7 @@ public struct Event: Sendable, Hashable, Decodable {
         var message: String?
         var origin: String?
         var answers: [AskAnswer]
+        var editOf: Int?
 
         init(from decoder: Decoder) throws {
             let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -499,9 +506,10 @@ public struct Event: Sendable, Hashable, Decodable {
             message = try? c.decodeIfPresent(String.self, forKey: .message)
             origin = try? c.decodeIfPresent(String.self, forKey: .origin)
             answers = c.lossyArray(AskAnswer.self, forKey: .answers)
+            editOf = c.lenientInt(forKey: .editOf)
         }
 
-        enum CodingKeys: String, CodingKey { case itemId, text, images, message, origin, answers }
+        enum CodingKeys: String, CodingKey { case itemId, text, images, message, origin, answers, editOf }
     }
 
     private struct PlanFields: Decodable {
@@ -541,7 +549,7 @@ public struct Event: Sendable, Hashable, Decodable {
         switch type {
         case "user.message":
             let fields = try text()
-            return .userMessage(text: fields.text ?? "", images: fields.images, origin: fields.origin, answers: fields.answers)
+            return .userMessage(text: fields.text ?? "", images: fields.images, origin: fields.origin, answers: fields.answers, editOf: fields.editOf)
         case "assistant.text":
             let fields = try text()
             return .assistantText(itemId: fields.itemId ?? "", text: fields.text ?? "")
@@ -576,6 +584,8 @@ public struct Event: Sendable, Hashable, Decodable {
             return .error(fields.message ?? fields.text ?? "Something went wrong")
         case "action.run":
             return .actionRun(try ActionRun(from: decoder))
+        case "thread.rewound":
+            return .threadRewound(try ThreadRewind(from: decoder))
         case "asks.ticked":
             let fields = try AsksTickedFields(from: decoder)
             return .asksTicked(asksSeq: fields.asksSeq, ticked: fields.ticked ?? [])
@@ -669,7 +679,81 @@ extension KeyedDecodingContainer {
     }
 }
 
+/// A `thread.rewound` event: the range of seqs an edit cut, and what
+/// happened to the files the agent had changed since.
+public struct ThreadRewind: Sendable, Hashable, Decodable {
+    public struct FailedFile: Sendable, Hashable, Decodable {
+        public var path: String
+        public var reason: String
+
+        public init(path: String, reason: String) {
+            self.path = path
+            self.reason = reason
+        }
+
+        public init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            path = (try? c.decodeIfPresent(String.self, forKey: .path)) ?? ""
+            reason = (try? c.decodeIfPresent(String.self, forKey: .reason)) ?? ""
+        }
+
+        enum CodingKeys: String, CodingKey { case path, reason }
+    }
+
+    public var fromSeq: Int
+    public var toSeq: Int
+    /// Files put back as they were.
+    public var undone: [String]
+    public var failed: [FailedFile]
+    /// "checkpoint", "diffs" or "none".
+    public var how: String
+
+    public init(fromSeq: Int, toSeq: Int, undone: [String] = [], failed: [FailedFile] = [], how: String = "none") {
+        self.fromSeq = fromSeq
+        self.toSeq = toSeq
+        self.undone = undone
+        self.failed = failed
+        self.how = how
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        fromSeq = c.lenientInt(forKey: .fromSeq) ?? 0
+        toSeq = c.lenientInt(forKey: .toSeq) ?? 0
+        let files = try? c.nestedContainer(keyedBy: FileKeys.self, forKey: .files)
+        undone = files?.lossyArray(String.self, forKey: .undone) ?? []
+        failed = files?.lossyArray(FailedFile.self, forKey: .failed) ?? []
+        how = (try? files?.decodeIfPresent(String.self, forKey: .how)) ?? "none"
+    }
+
+    /// The seqs it hides; empty for a range that makes no sense.
+    public var range: ClosedRange<Int>? { fromSeq > 0 && toSeq >= fromSeq ? fromSeq...toSeq : nil }
+
+    enum CodingKeys: String, CodingKey { case fromSeq, toSeq, files }
+    enum FileKeys: String, CodingKey { case undone, failed, how }
+}
+
 private struct AsksTickedFields: Decodable {
     var asksSeq: Int
     var ticked: [Int]?
+}
+
+extension ThreadRewind {
+    /// The quiet line where the cut was: that a message was edited, and
+    /// what happened to the files.
+    public var summary: String {
+        var parts = ["Edited a message, so the thread carries on from there."]
+        if !undone.isEmpty {
+            parts.append("Undid changes to \(undone.count == 1 ? "1 file" : "\(undone.count) files").")
+        }
+        if !failed.isEmpty {
+            let named = failed.prefix(3).map { file in
+                let name = (file.path as NSString).lastPathComponent
+                return file.reason.isEmpty ? name : "\(name) (\(file.reason))"
+            }
+            let more = failed.count > 3 ? " and \(failed.count - 3) more" : ""
+            parts.append("Couldn't undo \(named.joined(separator: ", "))\(more).")
+        }
+        return parts.joined(separator: " ")
+    }
 }
