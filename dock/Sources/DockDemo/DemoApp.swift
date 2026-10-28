@@ -68,7 +68,7 @@ enum Demo {
                 .group(DockGroup(id: "right-top", panels: ["highlights", "worktrees"])),
                 .group(DockGroup(id: "right-bottom", panels: ["convex"])),
             ], fractions: [0.55, 0.45])),
-        ], fractions: [0.24, 0.5, 0.26])))
+        ], fractions: [0.24, 0.5, 0.26])), hiddenTitles: ["threads"])
     }
 
     static let key = "layout"

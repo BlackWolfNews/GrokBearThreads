@@ -76,9 +76,31 @@ public enum DockDrop: Equatable, Sendable, Hashable {
 
 public struct DockLayout: Codable, Equatable, Sendable {
     public var root: DockNode
+    /// Panels that go without a title bar while they're on their own (the
+    /// thread list doesn't need "Threads" over it). Kept per panel, not per
+    /// place, so it follows the panel when it's moved.
+    public var hiddenTitles: Set<PanelID>
 
-    public init(root: DockNode) {
+    public init(root: DockNode, hiddenTitles: Set<PanelID> = []) {
         self.root = root
+        self.hiddenTitles = hiddenTitles
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        root = try c.decode(DockNode.self, forKey: .root)
+        // Not in layouts saved before titles could be hidden.
+        hiddenTitles = try c.decodeIfPresent(Set<PanelID>.self, forKey: .hiddenTitles) ?? []
+    }
+
+    /// Whether a group gets its title bar. Always with tabs: they're how you
+    /// switch between its panels.
+    public func showsHeader(_ group: DockGroup) -> Bool {
+        group.panels.count > 1 || !hiddenTitles.contains(group.selected)
+    }
+
+    public mutating func setTitleHidden(_ panel: PanelID, _ hidden: Bool) {
+        if hidden { hiddenTitles.insert(panel) } else { hiddenTitles.remove(panel) }
     }
 
     // MARK: Reading

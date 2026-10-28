@@ -30,6 +30,12 @@ real window.
 - **Along the window's own edge** (the outer 22 points) the panel docks
   across the whole side.
 - On drop the ghost flies into its new spot; dropped anywhere else it flies home.
+- **Titles can be hidden** per panel: right-click a title or tab, Hide
+  Title. The panel then has no bar while it's on its own (the demo's Threads
+  starts that way); a thin strip along its top shows a grab handle on hover,
+  to drag it by or right-click for Show Title. With tabs the bar always
+  shows, as it's how you switch between them. It follows the panel when it
+  moves and is saved with the layout.
 - Dividers between panels drag to resize; × on a tab closes it, and the
   toolbar's menu opens it again.
 

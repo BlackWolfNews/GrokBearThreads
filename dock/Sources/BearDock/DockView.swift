@@ -188,8 +188,13 @@ struct GroupView: View {
         // then fades up under it.
         let landing = controller.landing?.panel == group.selected
 
+        let header = controller.layout.showsHeader(group)
+
         VStack(spacing: 0) {
-            GroupHeader(group: group)
+            if header {
+                GroupHeader(group: group)
+                    .transition(.move(edge: .top).combined(with: .opacity))
+            }
             content.view(group.selected)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .clipped()
@@ -204,6 +209,12 @@ struct GroupView: View {
                 .scaleEffect(lifted ? 0.985 : 1)
         }
         .background(DockTheme.panel)
+        .overlay(alignment: .top) {
+            if !header {
+                HiddenTitleStrip(panel: group.selected)
+                    .transition(.opacity)
+            }
+        }
         .overlay {
             if lifted {
                 // The hole it left behind.
@@ -259,6 +270,7 @@ private struct GroupHeader: View {
         // Anywhere on the bar picks up the panel showing, like a window's title bar.
         .contentShape(Rectangle())
         .gesture(dragGesture(controller: controller, panel: group.selected))
+        .contextMenu { PanelMenu(panel: group.selected, tabbed: group.panels.count > 1) }
         .overlay(alignment: .bottom) {
             Rectangle().fill(Color.white.opacity(0.06)).frame(height: 1)
         }
@@ -307,10 +319,56 @@ private struct TabItem: View {
         .contentShape(Rectangle())
         .onHover { hovering = $0 }
         .onTapGesture { controller.select(panel) }
+        .contextMenu { PanelMenu(panel: panel, tabbed: !single) }
         // Over the bar's own drag, so a tab that isn't showing can be pulled
         // out directly. It needs 5 points of movement, so a click still
         // selects the tab.
         .highPriorityGesture(dragGesture(controller: controller, panel: panel))
+    }
+}
+
+/// Right-click on a title or tab.
+private struct PanelMenu: View {
+    let panel: PanelID
+    let tabbed: Bool
+    @Environment(DockController.self) private var controller
+
+    var body: some View {
+        if controller.layout.hiddenTitles.contains(panel) {
+            Button("Show Title") { controller.setTitleHidden(panel, false) }
+        } else {
+            // With tabs the bar has to stay, so say when it'll take effect.
+            Button(tabbed ? "Hide Title When on Its Own" : "Hide Title") { controller.setTitleHidden(panel, true) }
+        }
+        Divider()
+        Button("Close") { controller.close(panel) }
+    }
+}
+
+/// In place of the title bar for a panel that hides its title: a strip
+/// along the top that shows a grab handle on hover, to drag the panel by and
+/// right-click for the title back.
+private struct HiddenTitleStrip: View {
+    let panel: PanelID
+    @Environment(DockController.self) private var controller
+    @State private var hovering = false
+
+    var body: some View {
+        ZStack {
+            Capsule()
+                .fill(Color.white.opacity(hovering ? 0.28 : 0))
+                .frame(width: 34, height: 4)
+        }
+        .frame(maxWidth: .infinity)
+        .frame(height: 10)
+        .contentShape(Rectangle())
+        .onHover { inside in
+            withAnimation(.easeOut(duration: 0.15)) { hovering = inside }
+            if inside { NSCursor.openHand.push() } else { NSCursor.pop() }
+        }
+        .gesture(dragGesture(controller: controller, panel: panel))
+        .contextMenu { PanelMenu(panel: panel, tabbed: false) }
+        .help("Drag to move this panel. Right-click to show its title.")
     }
 }
 

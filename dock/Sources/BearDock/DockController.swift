@@ -193,6 +193,10 @@ public final class DockController {
         withAnimation(Self.settle) { layout.close(panel) }
     }
 
+    public func setTitleHidden(_ panel: PanelID, _ hidden: Bool) {
+        withAnimation(.snappy(duration: 0.22)) { layout.setTitleHidden(panel, hidden) }
+    }
+
     public func select(_ panel: PanelID) {
         layout.select(panel)
     }

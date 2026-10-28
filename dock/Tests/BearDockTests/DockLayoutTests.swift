@@ -157,3 +157,24 @@ private func threeColumns() -> DockLayout {
     let data = try JSONEncoder().encode(layout)
     #expect(try JSONDecoder().decode(DockLayout.self, from: data) == layout)
 }
+
+@Test func aHiddenTitleOnlyHidesWhileThePanelIsOnItsOwn() {
+    var layout = threeColumns()
+    layout.setTitleHidden("threads", true)
+    #expect(!layout.showsHeader(layout.group(id: "left")!))
+    // Joined by a tab: the tabs are needed to switch, so the bar comes back.
+    layout.move("transcript", .tab(group: "left"))
+    #expect(layout.showsHeader(layout.group(containing: "threads")!))
+    // On its own again, wherever it ends up, the title stays hidden.
+    layout.move("threads", .window(.right))
+    #expect(!layout.showsHeader(layout.group(containing: "threads")!))
+    layout.setTitleHidden("threads", false)
+    #expect(layout.showsHeader(layout.group(containing: "threads")!))
+}
+
+@Test func layoutsSavedBeforeHiddenTitlesStillLoad() throws {
+    let old = #"{"root":{"group":{"_0":{"id":"a","panels":["A"],"selected":"A"}}}}"#
+    let layout = try JSONDecoder().decode(DockLayout.self, from: Data(old.utf8))
+    #expect(layout.hiddenTitles.isEmpty)
+    #expect(layout.panels == ["A"])
+}
