@@ -19,6 +19,11 @@ final class AppModel {
     private(set) var lastError: String?
     /// Set when the Mac's backend is older than this app needs.
     private(set) var backendProblem: String?
+    /// The backend's API version once phone:me has answered (nil before).
+    private(set) var apiVersion: Int?
+    /// Whether threads read phone:messages (API 2) rather than phone:thread's
+    /// newest 20 plus the runner's paging.
+    var hasMessagePages: Bool { (apiVersion ?? 0) >= BackendCompatibility.messagePagesAPIVersion }
     /// Ticks every 15 s so "5m" and "Mac offline" stay right.
     private(set) var now = Date.now
     /// A thread a notification tap asked for, for the inbox to open.
@@ -127,6 +132,7 @@ final class AppModel {
         pairing = nil
         authProblem = nil
         backendProblem = nil
+        apiVersion = nil
         runners = []
         inbox = []
         hibernating = []
@@ -149,6 +155,7 @@ final class AppModel {
         tasks.append(Task { [weak self] in
             guard let identity = try? await backend.me() else { return }
             self?.backendProblem = BackendCompatibility.problem(identity)
+            self?.apiVersion = identity.apiVersion ?? 0
         })
         if let apnsToken { register(apnsToken) }
     }

@@ -51,7 +51,7 @@ public final class FakeBackend: Backend, @unchecked Sendable {
     public func me() async throws -> PhoneIdentity {
         // Always a current backend, so the demo never says the Mac needs updating.
         PhoneIdentity(name: "iphone", expiresAt: Date.now.addingTimeInterval(90 * 86_400),
-                      apiVersion: BackendCompatibility.minimumAPIVersion)
+                      apiVersion: BackendCompatibility.currentAPIVersion)
     }
 
     public func runners() -> AsyncThrowingStream<[PhoneRunner], Error> {
@@ -77,6 +77,13 @@ public final class FakeBackend: Backend, @unchecked Sendable {
             lock.withLock {
                 threadsById[threadId].map { ThreadDetail(thread: $0, messages: messagesById[threadId] ?? []) }
             }
+        }
+    }
+
+    public func messages(_ threadId: String, limit: Int) -> AsyncThrowingStream<MessagePage, Error> {
+        watch { [unowned self] in
+            let all = lock.withLock { messagesById[threadId] ?? [] }
+            return MessagePage(messages: Array(all.suffix(limit)), hasMore: all.count > limit)
         }
     }
 
@@ -247,7 +254,11 @@ public final class FakeBackend: Backend, @unchecked Sendable {
         let messages: [String: [PhoneMessage]] = [
             "a1": [
                 PhoneMessage(seq: 1, role: .user, text: "Get 1.2 ready to release", at: ago(30)),
-                PhoneMessage(seq: 2, role: .assistant, text: "Bumped the version to **1.2.0** and wrote up the changelog. All 214 tests pass.\n\nReady to tag 1.2.0 and push it.", at: ago(4)),
+                PhoneMessage(seq: 2, role: .tool, text: "Read CHANGELOG.md", toolKind: "read", at: ago(29)),
+                PhoneMessage(seq: 3, role: .tool, text: "Bump the version to 1.2.0", toolKind: "command", at: ago(28)),
+                PhoneMessage(seq: 4, role: .tool, text: "Edited CHANGELOG.md", toolKind: "edit", at: ago(27)),
+                PhoneMessage(seq: 5, role: .tool, text: "Run the unit tests", toolKind: "command", at: ago(12)),
+                PhoneMessage(seq: 6, role: .assistant, text: "Bumped the version to **1.2.0** and wrote up the changelog. All 214 tests pass.\n\nReady to tag 1.2.0 and push it.", at: ago(4)),
             ],
             "a2": [
                 PhoneMessage(seq: 1, role: .user, text: "Let people pick metric or imperial in settings", at: ago(15)),

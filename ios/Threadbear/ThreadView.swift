@@ -13,7 +13,13 @@ struct ThreadView: View {
     @State private var markedSeen = false
     /// The oldest seq when "Load earlier" was tapped, until older messages
     /// arrive (the oldest seq changes) or the runner says it couldn't.
+    /// (A backend before API 2.)
     @State private var loadingBefore: Int?
+    /// From API 2: the newest `limit` messages and tool lines, from Convex.
+    @State private var page: MessagePage?
+    @State private var limit = ThreadView.firstPage
+    static let firstPage = 80
+    static let morePerPage = 200
 
     var body: some View {
         Group {
@@ -31,26 +37,40 @@ struct ThreadView: View {
         .toolbar { if let thread = detail?.thread { menu(thread) } }
         .hibernateDialog(for: $hibernateTarget)
         .task(id: threadId) { await follow() }
+        .task(id: "\(threadId):\(limit):\(model.hasMessagePages)") { await followMessages() }
         .task(id: sent?.id) { await followCommand() }
     }
 
     private func content(_ detail: ThreadDetail) -> some View {
         let thread = detail.thread
+        // From API 2 the page from phone:messages (tool lines included);
+        // until it arrives, and on an older backend, phone:thread's messages.
+        let messages = page?.messages ?? detail.messages
+        let items = ThreadItem.group(messages)
+        let paged = model.hasMessagePages && page != nil
+        let canLoadMore = paged ? page?.hasMore == true : thread.hasEarlier(than: detail.messages.first?.seq)
+        // Paged: a bigger page has been asked for and hasn't arrived yet.
+        let loadingMore = paged ? (page?.hasMore == true && messages.count < limit) : loadingBefore == detail.messages.first?.seq
         return ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 14) {
-                    if thread.hasEarlier(than: detail.messages.first?.seq) {
-                        EarlierButton(loading: loadingBefore == detail.messages.first?.seq) {
-                            loadEarlier(thread, before: detail.messages.first?.seq)
+                    if canLoadMore {
+                        EarlierButton(loading: loadingMore, fromMac: !paged) {
+                            loadMore(thread, detail: detail, paged: paged)
                         }
                         // Scrolling up to it loads by itself, like any chat.
                         // Not on a short thread, where it's on screen at
                         // once and nobody asked.
                         .onAppear {
-                            if detail.messages.count >= 20 { loadEarlier(thread, before: detail.messages.first?.seq) }
+                            if messages.count >= 20 { loadMore(thread, detail: detail, paged: paged) }
                         }
                     }
-                    ForEach(detail.messages) { MessageView(message: $0) }
+                    ForEach(items) { item in
+                        switch item {
+                        case let .message(message): MessageView(message: message)
+                        case let .tools(run): ToolRunView(items: run)
+                        }
+                    }
                     if let pending = thread.pendingApproval {
                         PendingCard(threadId: thread.threadId, pending: pending) { sent = ($0, nil) }
                     } else if thread.isBusy || thread.working != nil {
@@ -71,7 +91,7 @@ struct ThreadView: View {
             }
             .defaultScrollAnchor(.bottom)
             .scrollDismissesKeyboard(.interactively)
-            .onChange(of: detail.messages.last?.seq) { proxy.scrollTo("bottom", anchor: .bottom) }
+            .onChange(of: messages.last?.seq) { proxy.scrollTo("bottom", anchor: .bottom) }
             .safeAreaInset(edge: .bottom) {
                 Composer(text: $draft, placeholder: thread.isBusy ? "Steer the agent" : "Reply") { text in
                     await send(text, to: thread)
@@ -137,6 +157,27 @@ struct ThreadView: View {
         }
     }
 
+    /// API 2: the thread's newest `limit` messages, live from Convex.
+    private func followMessages() async {
+        guard model.hasMessagePages, let backend = model.backend else { return }
+        do {
+            for try await value in backend.messages(threadId, limit: limit) { page = value }
+        } catch {
+            model.report(error)
+        }
+    }
+
+    /// Older messages: from API 2 a bigger page from Convex (works with the
+    /// Mac asleep); before that, the runner pages them in.
+    private func loadMore(_ thread: PhoneThread, detail: ThreadDetail, paged: Bool) {
+        if paged {
+            guard let page, page.hasMore, page.messages.count >= limit else { return }
+            limit += ThreadView.morePerPage
+        } else {
+            loadEarlier(thread, before: detail.messages.first?.seq)
+        }
+    }
+
     private func followCommand() async {
         guard let id = sent?.id, let backend = model.backend else { return }
         do {
@@ -193,17 +234,19 @@ struct ThreadView: View {
     }
 }
 
-/// At the top of a thread: older messages come from the Mac on request.
+/// At the top of a thread: older messages, from Convex (API 2) or from the
+/// Mac on request (before).
 struct EarlierButton: View {
     @Environment(AppModel.self) private var model
     var loading: Bool
+    var fromMac = true
     var action: () -> Void
 
     var body: some View {
         Button(action: action) {
             HStack(spacing: 8) {
                 if loading { ProgressView().controlSize(.small) }
-                Text(loading ? (model.offlineText != nil ? "Waiting for the Mac to wake up" : "Loading…") : "Load earlier messages")
+                Text(loading ? (fromMac && model.offlineText != nil ? "Waiting for the Mac to wake up" : "Loading…") : "Load earlier messages")
             }
             .font(.footnote)
             .frame(maxWidth: .infinity)
@@ -236,6 +279,8 @@ struct MessageView: View {
             MarkdownText(message.text)
                 .textSelection(.enabled)
                 .frame(maxWidth: .infinity, alignment: .leading)
+        case .tool:
+            ToolRunView(items: [message])
         }
     }
 
@@ -245,6 +290,54 @@ struct MessageView: View {
         case "schedule": "Scheduled"
         case "runner": "From the runner"
         default: nil
+        }
+    }
+}
+
+/// Tool calls between two messages: up to three as small lines, more folded
+/// into "12 tool calls" that opens to them. What they printed stays on the Mac.
+struct ToolRunView: View {
+    var items: [PhoneMessage]
+
+    var body: some View {
+        if items.count <= 3 {
+            lines
+        } else {
+            DisclosureGroup {
+                lines.padding(.top, 4)
+            } label: {
+                Text("\(items.count) tool calls")
+            }
+            .font(.footnote)
+            .foregroundStyle(.secondary)
+            .tint(.secondary)
+        }
+    }
+
+    private var lines: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            ForEach(items) { item in
+                Label {
+                    Text(item.text).lineLimit(1).truncationMode(.middle)
+                } icon: {
+                    Image(systemName: Self.symbol(item.toolKind)).imageScale(.small)
+                }
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    static func symbol(_ kind: String?) -> String {
+        switch kind {
+        case "command": "terminal"
+        case "read": "doc.text"
+        case "edit", "write": "pencil"
+        case "search": "magnifyingglass"
+        case "web": "globe"
+        case "task": "person.2"
+        default: "wrench.and.screwdriver"
         }
     }
 }

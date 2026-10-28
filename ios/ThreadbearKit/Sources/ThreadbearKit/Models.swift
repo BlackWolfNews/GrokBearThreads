@@ -184,7 +184,8 @@ public struct PhoneThread: Codable, Sendable, Hashable, Identifiable {
 }
 
 public struct PhoneMessage: Codable, Sendable, Hashable, Identifiable {
-    public enum Role: String, Codable, Sendable { case user, assistant }
+    /// `tool` is one line for a tool call (backend API 2, phone:messages).
+    public enum Role: String, Codable, Sendable { case user, assistant, tool }
 
     public var id: Int { seq }
     public var seq: Int
@@ -193,17 +194,20 @@ public struct PhoneMessage: Codable, Sendable, Hashable, Identifiable {
     /// Where a user message came from: "phone", "schedule", "runner", or
     /// absent for the Mac.
     public var origin: String?
+    /// For a tool line: the protocol's ToolKind ("command", "read", "edit"...).
+    public var toolKind: String?
     @FlexibleDate public var at: Date
 
-    public init(seq: Int, role: Role, text: String, origin: String? = nil, at: Date) {
+    public init(seq: Int, role: Role, text: String, origin: String? = nil, toolKind: String? = nil, at: Date) {
         self.seq = seq
         self.role = role
         self.text = text
         self.origin = origin
+        self.toolKind = toolKind
         self._at = FlexibleDate(wrappedValue: at)
     }
 
-    private enum Keys: String, CodingKey { case seq, role, text, origin, at }
+    private enum Keys: String, CodingKey { case seq, role, text, origin, toolKind, at }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: Keys.self)
@@ -212,6 +216,7 @@ public struct PhoneMessage: Codable, Sendable, Hashable, Identifiable {
         role = try c.decode(Role.self, forKey: .role)
         text = try c.decode(String.self, forKey: .text)
         origin = try c.decodeIfPresent(String.self, forKey: .origin)
+        toolKind = try c.decodeIfPresent(String.self, forKey: .toolKind)
         _at = try c.decode(FlexibleDate.self, forKey: .at)
     }
 
@@ -221,7 +226,50 @@ public struct PhoneMessage: Codable, Sendable, Hashable, Identifiable {
         try c.encode(role, forKey: .role)
         try c.encode(text, forKey: .text)
         try c.encodeIfPresent(origin, forKey: .origin)
+        try c.encodeIfPresent(toolKind, forKey: .toolKind)
         try c.encode(_at, forKey: .at)
+    }
+}
+
+/// phone:messages: a thread's newest messages, oldest first, and whether
+/// there are older ones.
+public struct MessagePage: Codable, Sendable, Hashable {
+    public var messages: [PhoneMessage]
+    public var hasMore: Bool
+    public init(messages: [PhoneMessage], hasMore: Bool) {
+        self.messages = messages
+        self.hasMore = hasMore
+    }
+}
+
+/// A thread as shown: messages, with the tool calls between two of them
+/// gathered into one run.
+public enum ThreadItem: Identifiable, Hashable, Sendable {
+    case message(PhoneMessage)
+    case tools([PhoneMessage])
+
+    public var id: Int {
+        switch self {
+        case let .message(m): m.seq
+        case let .tools(items): items.first?.seq ?? 0
+        }
+    }
+
+    public static func group(_ messages: [PhoneMessage]) -> [ThreadItem] {
+        var out: [ThreadItem] = []
+        for m in messages {
+            if m.role == .tool {
+                if case var .tools(items)? = out.last {
+                    items.append(m)
+                    out[out.count - 1] = .tools(items)
+                } else {
+                    out.append(.tools([m]))
+                }
+            } else {
+                out.append(.message(m))
+            }
+        }
+        return out
     }
 }
 
@@ -277,6 +325,11 @@ public enum BackendCompatibility {
     /// The lowest backend API version this app works with. Raise it only when
     /// the app starts relying on something a newer backend added.
     public static let minimumAPIVersion = 1
+    /// The newest backend API this app knows. From 2 a thread's messages come
+    /// from phone:messages (every message and tool line, paged in Convex);
+    /// an older backend still gets phone:thread and the runner's paging.
+    public static let currentAPIVersion = 2
+    public static let messagePagesAPIVersion = 2
 
     /// The line to show, or nil when the backend is fine.
     public static func problem(_ identity: PhoneIdentity) -> String? {

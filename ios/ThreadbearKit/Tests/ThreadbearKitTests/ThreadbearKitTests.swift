@@ -13,6 +13,27 @@ import Testing
         #expect(BackendCompatibility.problem(old) != nil)
     }
 
+    @Test func messagePageDecodesToolLinesAndGroupsThem() throws {
+        let json = #"""
+        {"hasMore":true,"messages":[
+          {"seq":10.0,"role":"user","text":"Ship it","at":"2026-10-28T00:00:00.000Z"},
+          {"seq":11.0,"role":"tool","text":"Run the unit tests","toolKind":"command","at":"2026-10-28T00:00:01.000Z"},
+          {"seq":12.0,"role":"tool","text":"Edited ~/dev/x.ts","toolKind":"edit","at":"2026-10-28T00:00:02.000Z"},
+          {"seq":13.0,"role":"assistant","text":"Done.","at":"2026-10-28T00:00:03.000Z"},
+          {"seq":14.0,"role":"tool","text":"Read README.md","toolKind":"read","at":"2026-10-28T00:00:04.000Z"}
+        ]}
+        """#
+        let page = try JSONDecoder().decode(MessagePage.self, from: Data(json.utf8))
+        #expect(page.hasMore)
+        #expect(page.messages[1].role == .tool && page.messages[1].toolKind == "command")
+        let items = ThreadItem.group(page.messages)
+        #expect(items.count == 4)
+        guard case let .tools(run) = items[1] else { Issue.record("expected a tool run"); return }
+        #expect(run.map(\.seq) == [11, 12])
+        guard case .tools = items[3] else { Issue.record("expected a trailing run"); return }
+        #expect(items.map(\.id) == [10, 11, 13, 14])
+    }
+
     @Test func threadRowDecodesWithISOAndMillisecondDates() throws {
         let json = """
         [{"threadId":"t1","runnerId":"m5","title":"A","cwd":"/Users/m/dev/me/misc","accountId":"claude-3",

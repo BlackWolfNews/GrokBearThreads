@@ -19,7 +19,11 @@ public protocol Backend: Sendable {
     func answer(threadId: String, approvalId: String, answers: [String: String], summary: String) async throws -> String
     func update(threadId: String, change: ThreadChange) async throws -> String
     func create(text: String, runnerId: String?, cwd: String?) async throws -> String
-    /// Asks the runner for up to 50 text messages older than `beforeSeq`;
+    /// The newest `limit` messages of a thread, tool lines included, live
+    /// (backend API 2). Reads Convex alone, so it works while the Mac sleeps;
+    /// more history is a bigger limit.
+    func messages(_ threadId: String, limit: Int) -> AsyncThrowingStream<MessagePage, Error>
+    /// For a backend before API 2: asks the runner for up to 50 text messages older than `beforeSeq`;
     /// they turn up in `thread(_:)` once it has written them.
     func loadEarlier(threadId: String, beforeSeq: Int) async throws -> String
     func registerDevice(apnsToken: String, environment: String) async throws
@@ -91,6 +95,10 @@ public final class ConvexBackend: Backend, @unchecked Sendable {
 
     public func thread(_ threadId: String) -> AsyncThrowingStream<ThreadDetail?, Error> {
         live("phone:thread", ["threadId": .string(threadId)], as: ThreadDetail?.self, missing: .some(nil))
+    }
+
+    public func messages(_ threadId: String, limit: Int) -> AsyncThrowingStream<MessagePage, Error> {
+        live("phone:messages", ["threadId": .string(threadId), "limit": .number(Double(limit)), "tools": .bool(true)], as: MessagePage.self)
     }
 
     public func command(_ commandId: String) -> AsyncThrowingStream<CommandStatus?, Error> {

@@ -184,8 +184,9 @@ Nothing is open now. Next is building, in the order below.
    "Deploying" and "Keeping old and new working together").
 2. Done 28 Oct: every message and a one-line row per tool call go up (backend API 2,
    `phone:messages`), each thread's whole history sent once; the website shows whole
-   threads with tool calls folded into runs. The iPhone app still uses API 1 until it's
-   updated to `phone:messages`.
+   threads with tool calls folded into runs. The iPhone app reads `phone:messages` too
+   from the version after 1.0.0 (falling back to API 1's `phone:thread` on an older
+   backend).
 3. Push relay with encrypted messages, and the phone's notification extension.
 4. `./threadbear setup`: makes the Convex project in your account, the keys, the deploy,
    the runner and the app; the pairing QR code in the Mac app; Mike's defaults moved
