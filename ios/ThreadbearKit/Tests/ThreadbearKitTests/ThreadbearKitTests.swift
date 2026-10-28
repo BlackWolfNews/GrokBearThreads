@@ -187,3 +187,25 @@ struct FailingTransport: ConvexTransport {
     }
     func connectionStates() -> AsyncStream<Bool> { AsyncStream { $0.yield(true) } }
 }
+
+@Suite struct EarlierMessagesTests {
+    @Test func hasEarlierFollowsEarliestSeq() {
+        var thread = PhoneThread(threadId: "t", title: "t", lastActivityAt: .now)
+        #expect(!thread.hasEarlier(than: 50))
+        thread.earliestSeq = 3
+        #expect(thread.hasEarlier(than: 50))
+        #expect(!thread.hasEarlier(than: 3))
+        #expect(!thread.hasEarlier(than: nil))
+    }
+
+    @Test func fakeLoadEarlierPrependsOlderMessages() async throws {
+        let backend = FakeBackend(turnDelay: .milliseconds(20))
+        _ = try await backend.loadEarlier(threadId: "a3", beforeSeq: 120)
+        try await Task.sleep(for: .milliseconds(100))
+        var iterator = backend.thread("a3").makeAsyncIterator()
+        let detail = try #require(try await iterator.next() ?? nil)
+        #expect(detail.messages.first?.seq == 70)
+        #expect(detail.messages.map(\.seq) == detail.messages.map(\.seq).sorted())
+        #expect(detail.thread.hasEarlier(than: detail.messages.first?.seq))
+    }
+}

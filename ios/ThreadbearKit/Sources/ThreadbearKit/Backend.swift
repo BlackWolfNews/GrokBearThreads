@@ -19,6 +19,9 @@ public protocol Backend: Sendable {
     func answer(threadId: String, approvalId: String, answers: [String: String], summary: String) async throws -> String
     func update(threadId: String, change: ThreadChange) async throws -> String
     func create(text: String, runnerId: String?, cwd: String?) async throws -> String
+    /// Asks the runner for up to 50 text messages older than `beforeSeq`;
+    /// they turn up in `thread(_:)` once it has written them.
+    func loadEarlier(threadId: String, beforeSeq: Int) async throws -> String
     func registerDevice(apnsToken: String, environment: String) async throws
 }
 
@@ -122,6 +125,10 @@ public final class ConvexBackend: Backend, @unchecked Sendable {
         if let runnerId { extra["runnerId"] = .string(runnerId) }
         if let cwd { extra["cwd"] = .string(cwd) }
         return try await command("phone:create", extra)
+    }
+
+    public func loadEarlier(threadId: String, beforeSeq: Int) async throws -> String {
+        try await command("phone:loadEarlier", ["threadId": .string(threadId), "beforeSeq": .number(Double(beforeSeq))])
     }
 
     public func registerDevice(apnsToken: String, environment: String) async throws {
