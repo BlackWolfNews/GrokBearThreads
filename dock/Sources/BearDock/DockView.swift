@@ -484,11 +484,66 @@ private struct TabItem: View {
         .contentShape(Rectangle())
         .onHover { hovering = $0 }
         .onTapGesture { controller.select(panel) }
+        // Middle-click closes a tab, as in a browser.
+        .overlay {
+            if content.closable(panel) { MiddleClick { controller.close(panel) } }
+        }
         .contextMenu { PanelMenu(panel: panel, tabbed: !single) }
         // Over the bar's own drag, so a tab that isn't showing can be pulled
         // out directly. It needs 5 points of movement, so a click still
         // selects the tab.
         .highPriorityGesture(dragGesture(controller: controller, panel: panel))
+    }
+}
+
+/// Catches a middle-click over a view. SwiftUI has no gesture for the
+/// middle button, so this watches the app's middle-button events and acts
+/// on those that land on it with its window the topmost one there. It never
+/// takes part in hit-testing, so clicks, drags and hovers reach the SwiftUI
+/// view underneath as before.
+private struct MiddleClick: NSViewRepresentable {
+    let action: () -> Void
+
+    func makeNSView(context: Context) -> ClickView { ClickView() }
+    func updateNSView(_ view: ClickView, context: Context) { view.action = action }
+
+    final class ClickView: NSView {
+        var action: (() -> Void)?
+        private var monitor: Any?
+        private var pressed = false
+
+        override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            // Off when the tab leaves its window, which it does before it goes.
+            if let monitor { NSEvent.removeMonitor(monitor) }
+            monitor = nil
+            guard window != nil else { return }
+            monitor = NSEvent.addLocalMonitorForEvents(matching: [.otherMouseDown, .otherMouseUp]) { [weak self] event in
+                guard let self, event.buttonNumber == 2 else { return event }
+                let over = self.contains(event)
+                if event.type == .otherMouseDown {
+                    self.pressed = over
+                    return over ? nil : event
+                }
+                // On release, and only over the tab, like a browser: pressing
+                // then sliding off lets you change your mind.
+                guard self.pressed else { return event }
+                self.pressed = false
+                if over { self.action?() }
+                return nil
+            }
+        }
+
+        private func contains(_ event: NSEvent) -> Bool {
+            guard let window, !isHiddenOrHasHiddenAncestor else { return false }
+            // Events from the window server carry their window; one with none
+            // (posted by a test) is already in screen points.
+            let screen = event.window.map { $0.convertPoint(toScreen: event.locationInWindow) } ?? event.locationInWindow
+            guard NSWindow.windowNumber(at: screen, belowWindowWithWindowNumber: 0) == window.windowNumber else { return false }
+            return bounds.contains(convert(window.convertPoint(fromScreen: screen), from: nil))
+        }
     }
 }
 

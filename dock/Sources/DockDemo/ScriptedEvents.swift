@@ -5,7 +5,7 @@ import SwiftUI
 /// `BEARDOCK_EVENTS="down 1062 490;drag 640 420;esc;up;shot /tmp/x.png"`
 /// sends real mouse and key events through the app, as if from the user.
 /// Points are in the window's frame, top-left origin, as in a screenshot.
-/// Steps: down x y | drag x y (in ten moves) | up | right x y | esc | wait ms
+/// Steps: down x y | drag x y (in ten moves) | up | right x y | middle x y | esc | wait ms
 /// | shot path (the window) | screen path (its area of the screen, menus included)
 /// | others prefix (each of the app's other windows: a panel's own, the outline)
 @MainActor
@@ -58,6 +58,16 @@ enum ScriptedEvents {
                 if let e = NSEvent.mouseEvent(with: .rightMouseDown, location: p, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
                                               windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 1) {
                     DispatchQueue.main.async { NSApp.sendEvent(e) }
+                }
+            case "middle":
+                // A middle click, down and up. NSEvent can't make one with the
+                // middle button's number, so it comes from a CGEvent (with no
+                // window: its location is in screen points).
+                let p = window.convertPoint(toScreen: point(a[1], a[2]))
+                let global = CGPoint(x: p.x, y: (NSScreen.screens.first?.frame.height ?? 0) - p.y)
+                for type in [CGEventType.otherMouseDown, .otherMouseUp] {
+                    guard let cg = CGEvent(mouseEventSource: nil, mouseType: type, mouseCursorPosition: global, mouseButton: .center) else { continue }
+                    if let e = NSEvent(cgEvent: cg) { NSApp.sendEvent(e) }
                 }
             case "screen":
                 // The whole display the window's on, for menus (separate windows).
