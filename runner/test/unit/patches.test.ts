@@ -407,6 +407,31 @@ test('icons on chips: the patch file\'s, unless an action has its own', () => {
   assert.equal(ok.info.error, undefined);
   assert.deepEqual(ok.actions.map((a) => a.icon), ['pawprint', 'paperplane']);
   assert.equal(read({ actions: [{ title: 'Plain', run: 'a' }] }).actions[0].icon, undefined);
-  assert.equal(read({ icon: 3 }).info.error, 'icon should be an SF Symbol name, like "pawprint".');
-  assert.equal(read({ actions: [{ title: 'A', run: 'x', icon: '' }] }).info.error, 'actions[0] ("A") has an icon that isn\'t an SF Symbol name.');
+  assert.equal(read({ icon: 3 }).info.error, 'icon should be an SF Symbol name like "film", or a path to a picture or an app.');
+  assert.equal(read({ actions: [{ title: 'A', run: 'x', icon: '' }] }).info.error, 'actions[0] ("A"): icon should be an SF Symbol name like "film", or a path to a picture or an app.');
+});
+
+test("a patch's icon can be a picture or an app, relative to the patch file; actions and panels without their own get it", async () => {
+  const home = tmpDir();
+  const tool = project(home, 'dev/tool', { icons: null });
+  fs.writeFileSync(path.join(tool, 'icons/tool.png'), 'png');
+  const file = writePatch(path.join(tool, '.threadbear/patches'), 'tool.ts', `
+    export default {
+      icon: "../../icons/tool.png",
+      actions: [{ title: "Go", run: "true" }, { title: "Own", run: "true", icon: "star" }],
+      panels: [{ title: "List", items: () => [] }, { title: "Docs", url: "https://x.dev", icon: "book" }],
+    };
+  `);
+  const set = await loadPatchSet(tool, home);
+  const png = path.join(tool, 'icons/tool.png');
+  assert.deepEqual(set.patches, [{ id: 'tool', source: 'project', file, iconFile: png }]);
+  assert.deepEqual(set.actions.map((a) => [a.title, a.icon, a.iconFile]), [['Go', undefined, png], ['Own', 'star', undefined]]);
+  assert.deepEqual(set.panels.map((p) => [p.title, p.icon, p.iconFile]), [['List', undefined, png], ['Docs', 'book', undefined]]);
+  for (const a of set.actions) assert.deepEqual(checkAction(a as never), []);
+  for (const p of set.panels) assert.deepEqual(checkPanel(p as never), []);
+  const err = (icon: unknown) => readPatchModule('x', 'project', path.join(tool, '.threadbear/patches/x.ts'), { icon }).info.error;
+  assert.equal(err('./missing.png'), `icon "./missing.png" isn't there (looked for ${path.join(tool, '.threadbear/patches/missing.png')}).`);
+  assert.equal(err('./notes.txt'), 'icon "./notes.txt" should be a .png, .svg, .icns, .pdf, .jpg, .jpeg, .app file.');
+  assert.equal(err(''), 'icon should be an SF Symbol name like "film", or a path to a picture or an app.');
+  assert.equal(err('film'), undefined);
 });

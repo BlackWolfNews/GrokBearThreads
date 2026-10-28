@@ -307,8 +307,11 @@ export function readPatchModule(id: string, source: 'home' | 'project', file: st
   const v = value as { actions?: unknown; panels?: unknown; hooks?: unknown; worktree?: unknown; appliesTo?: unknown; icon?: unknown };
   // The patch's own icon goes on each of its chips, so a row of chips from
   // several patches says which one each came from (an action can have its own).
-  if (v.icon !== undefined && (typeof v.icon !== 'string' || !v.icon.trim())) return problem('icon should be an SF Symbol name, like "pawprint".');
-  const patchIcon = typeof v.icon === 'string' ? v.icon.trim() : undefined;
+  // It can also be a picture: the tool's own icon, so its chips and rail
+  // button are recognisable at a glance (see readIcon).
+  const patchIcon = readIcon(v.icon, file);
+  if (typeof patchIcon === 'string') return problem(`icon ${patchIcon}`);
+  if (patchIcon) Object.assign(info, patchIcon);
   let appliesTo: string[] | undefined;
   if (v.appliesTo !== undefined) {
     const list = typeof v.appliesTo === 'string' ? [v.appliesTo] : v.appliesTo;
@@ -357,9 +360,9 @@ export function readPatchModule(id: string, source: 'home' | 'project', file: st
       if (run) action.command = run;
       if (prompt) action.prompt = prompt;
       if (typeof a.note === 'string' && a.note.trim()) action.note = a.note.trim();
-      if (a.icon !== undefined && (typeof a.icon !== 'string' || !a.icon.trim())) return problem(`actions[${i}] ("${a.title}") has an icon that isn't an SF Symbol name.`);
-      const icon = typeof a.icon === 'string' ? a.icon.trim() : patchIcon;
-      if (icon) action.icon = icon;
+      const own = readIcon(a.icon, file);
+      if (typeof own === 'string') return problem(`actions[${i}] ("${a.title}"): icon ${own}`);
+      Object.assign(action, own ?? patchIcon);
       const liveProblem = liveOf('actions', i, action.title, a, action.id);
       if (liveProblem) return problem(liveProblem);
       actions.push(action);
@@ -370,7 +373,8 @@ export function readPatchModule(id: string, source: 'home' | 'project', file: st
     for (const [i, raw] of v.panels.entries()) {
       const p = raw as { title?: unknown; url?: unknown; note?: unknown; icon?: unknown; items?: unknown; when?: unknown; badge?: unknown };
       if (!p || typeof p !== 'object' || typeof p.title !== 'string' || !p.title.trim()) return problem(`panels[${i}] needs a title.`);
-      if (p.icon !== undefined && (typeof p.icon !== 'string' || !p.icon.trim())) return problem(`panels[${i}] ("${p.title}") has an icon that isn't an SF Symbol name.`);
+      const ownIcon = readIcon(p.icon, file);
+      if (typeof ownIcon === 'string') return problem(`panels[${i}] ("${p.title}"): icon ${ownIcon}`);
       const panelId = `${id}.${slug(p.title)}`;
       let panel: Panel;
       if (typeof p.items === 'function') {
@@ -384,7 +388,8 @@ export function readPatchModule(id: string, source: 'home' | 'project', file: st
         if (typeof p.url !== 'string' || !/^([a-z][a-z0-9+.-]*:\/\/\S|data:)/i.test(p.url.trim())) return problem(`panels[${i}] ("${p.title}") needs a url, or an items function.`);
         panel = { id: panelId, title: p.title.trim(), kind: 'url', url: p.url.trim(), patch: id };
       }
-      if (typeof p.icon === 'string') panel.icon = p.icon.trim();
+      // Its own icon, else the patch's: a tool's picture on its rail button.
+      Object.assign(panel, ownIcon ?? patchIcon);
       if (typeof p.note === 'string' && p.note.trim()) panel.note = p.note.trim();
       const liveProblem = liveOf('panels', i, panel.title, p, panel.id);
       if (liveProblem) return problem(liveProblem);
@@ -458,6 +463,24 @@ export function hookApplies(hook: Hook, editedPaths: Iterable<string>, cwd: stri
     if (!hook.edited || path.matchesGlob(rel, hook.edited)) return true;
   }
   return false;
+}
+
+// An `icon` in a patch file: an SF Symbol name ("film"), or a picture,
+// which is a path (relative to the patch file, or from ~) to an image the
+// app can open (png, svg, icns, pdf, jpg) or to a .app, whose icon it
+// shows. Gives { icon } or { iconFile } (the absolute path), undefined for
+// none, or a string saying what's wrong (after "icon ").
+const ICON_EXTENSIONS = ['.png', '.svg', '.icns', '.pdf', '.jpg', '.jpeg', '.app'];
+export function readIcon(raw: unknown, patchFile: string): { icon: string } | { iconFile: string } | undefined | string {
+  if (raw === undefined) return undefined;
+  if (typeof raw !== 'string' || !raw.trim()) return 'should be an SF Symbol name like "film", or a path to a picture or an app.';
+  const value = raw.trim();
+  const isPath = /^(\.{1,2}\/|\/|~\/)/.test(value) || ICON_EXTENSIONS.includes(path.extname(value).toLowerCase());
+  if (!isPath) return { icon: value };
+  if (!ICON_EXTENSIONS.includes(path.extname(value).toLowerCase())) return `"${value}" should be a ${ICON_EXTENSIONS.join(', ')} file.`;
+  const full = value.startsWith('~/') ? path.join(os.homedir(), value.slice(2)) : path.resolve(path.dirname(patchFile), value);
+  if (!fs.existsSync(full)) return `"${value}" isn't there (looked for ${full}).`;
+  return { iconFile: full };
 }
 
 export function slug(title: string): string {

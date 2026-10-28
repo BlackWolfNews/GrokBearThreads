@@ -1103,7 +1103,14 @@ export default {
 
 A patch file can have an `icon` at the top, an SF Symbol name that goes
 on each of its chips (`icon: "pawprint"`), so a row of chips from several
-patches shows which came from where; an action's own `icon` wins. Chips
+patches shows which came from where; an action's own `icon` wins.
+Panels without an icon of their own get it too. Instead of a symbol it
+can be a picture: a path, relative to the patch file or from `~/`, to a
+`.png`, `.svg`, `.icns`, `.pdf` or `.jpg`, or to a `.app` (its icon), sent
+as `iconFile` (absolute) on the patch, its actions and its panels, and
+drawn in full colour. A tool patch uses its tool's own icon this way
+(`icon: "../../icons/tandem.png"`), so its rail button and chips are
+recognisable at a glance. Chips
 are grouped by patch, and a chip's tooltip names its patch.
 
 `run` is a command for `actions.run` to run in the thread's folder,

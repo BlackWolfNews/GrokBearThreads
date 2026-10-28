@@ -385,6 +385,9 @@ public struct Panel: Sendable, Hashable, Codable, Identifiable {
     /// An SF Symbol for its button on the right-hand rail; nil leaves it to
     /// the app (PanelIcon).
     public var icon: String?
+    /// A picture in place of the symbol, drawn in full colour: an image or
+    /// a .app (its icon), as an absolute path. A tool's own icon.
+    public var iconFile: String?
     /// The patch it came from: "convex", "xcode".
     public var patch: String
     /// One line about it: the deployment, the project.
@@ -415,6 +418,7 @@ public struct Panel: Sendable, Hashable, Codable, Identifiable {
         kind = try c.decodeIfPresent(Kind.self, forKey: .kind) ?? .url
         url = try c.decodeIfPresent(String.self, forKey: .url)
         icon = (try? c.decodeIfPresent(String.self, forKey: .icon)) ?? nil
+        iconFile = (try? c.decodeIfPresent(String.self, forKey: .iconFile)) ?? nil
         patch = try c.decodeIfPresent(String.self, forKey: .patch) ?? ""
         note = try c.decodeIfPresent(String.self, forKey: .note)
         projectId = (try? c.decodeIfPresent(String.self, forKey: .projectId)) ?? nil
@@ -454,6 +458,8 @@ public struct Action: Sendable, Hashable, Codable, Identifiable {
     /// An SF Symbol for the chip, from the action or its patch file; nil
     /// for the default glyph.
     public var icon: String?
+    /// Or a picture for it, as Panel's.
+    public var iconFile: String?
 
     public init(id: String, title: String, kind: Kind = .command, command: String? = nil, prompt: String? = nil, patch: String = "", note: String? = nil,
                 folder: String? = nil, projectId: String? = nil, badge: Int? = nil, icon: String? = nil) {
@@ -483,6 +489,7 @@ public struct Action: Sendable, Hashable, Codable, Identifiable {
         projectId = (try? c.decodeIfPresent(String.self, forKey: .projectId)) ?? nil
         badge = (try? c.decodeIfPresent(Int.self, forKey: .badge)) ?? nil
         icon = (try? c.decodeIfPresent(String.self, forKey: .icon)) ?? nil
+        iconFile = (try? c.decodeIfPresent(String.self, forKey: .iconFile)) ?? nil
     }
 }
 
@@ -549,6 +556,9 @@ public struct PatchInfo: Sendable, Hashable, Codable, Identifiable {
     public var matched: [String]?
     /// A `when` or `badge` function that threw or took too long.
     public var liveError: String?
+    /// The patch file's icon: a symbol, or a picture (as Panel's).
+    public var icon: String?
+    public var iconFile: String?
 
     public init(id: String, source: String = "project", file: String? = nil, error: String? = nil, folder: String? = nil, projectId: String? = nil,
                 matched: [String]? = nil, liveError: String? = nil) {
@@ -572,6 +582,8 @@ public struct PatchInfo: Sendable, Hashable, Codable, Identifiable {
         projectId = (try? c.decodeIfPresent(String.self, forKey: .projectId)) ?? nil
         matched = (try? c.decodeIfPresent([String].self, forKey: .matched)) ?? nil
         liveError = (try? c.decodeIfPresent(String.self, forKey: .liveError)) ?? nil
+        icon = (try? c.decodeIfPresent(String.self, forKey: .icon)) ?? nil
+        iconFile = (try? c.decodeIfPresent(String.self, forKey: .iconFile)) ?? nil
     }
 }
 

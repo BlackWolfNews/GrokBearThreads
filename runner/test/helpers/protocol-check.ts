@@ -206,9 +206,9 @@ export function checkSummary(t: Obj): string[] {
     else {
       for (const p of t.patches) {
         if (!isStr(p.id) || !['builtin', 'home', 'project'].includes(p.source)) problems.push('patches: id, source');
-        for (const k of ['file', 'error', 'folder', 'projectId', 'liveError']) if (p[k] !== undefined && !isStr(p[k])) problems.push(`patches: ${k}`);
+        for (const k of ['file', 'error', 'folder', 'projectId', 'liveError', 'icon', 'iconFile']) if (p[k] !== undefined && !isStr(p[k])) problems.push(`patches: ${k}`);
         if (p.matched !== undefined && (!Array.isArray(p.matched) || !p.matched.every(isStr))) problems.push('patches: matched');
-        for (const k of Object.keys(p)) if (!['id', 'source', 'file', 'folder', 'projectId', 'error', 'matched', 'liveError'].includes(k)) problems.push(`patches: unexpected field ${k}`);
+        for (const k of Object.keys(p)) if (!['id', 'source', 'file', 'folder', 'projectId', 'error', 'matched', 'liveError', 'icon', 'iconFile'].includes(k)) problems.push(`patches: unexpected field ${k}`);
       }
     }
   }
@@ -355,9 +355,9 @@ export function checkPanel(p: Obj): string[] {
   for (const k of ['id', 'title', 'patch']) if (!isStr(p[k])) problems.push(k);
   if (p.kind !== 'url' && p.kind !== 'image' && p.kind !== 'list') problems.push('kind');
   if (p.kind === 'url' && !isStr(p.url)) problems.push('url (required for kind url)');
-  for (const k of ['url', 'note', 'projectId', 'icon']) if (p[k] !== undefined && !isStr(p[k])) problems.push(k);
+  for (const k of ['url', 'note', 'projectId', 'icon', 'iconFile']) if (p[k] !== undefined && !isStr(p[k])) problems.push(k);
   if (p.badge !== undefined && !(Number.isInteger(p.badge) && p.badge > 0)) problems.push('badge');
-  const allowed = new Set(['id', 'title', 'kind', 'url', 'icon', 'patch', 'projectId', 'note', 'badge']);
+  const allowed = new Set(['id', 'title', 'kind', 'url', 'icon', 'iconFile', 'patch', 'projectId', 'note', 'badge']);
   for (const k of Object.keys(p)) if (!allowed.has(k)) problems.push(`unexpected field ${k}`);
   return problems;
 }
@@ -368,9 +368,9 @@ export function checkAction(a: Obj): string[] {
   if (a.kind !== 'command' && a.kind !== 'prompt') problems.push('kind');
   if (a.kind === 'command' && !isStr(a.command)) problems.push('command (required for kind command)');
   if (a.kind === 'prompt' && !isStr(a.prompt)) problems.push('prompt (required for kind prompt)');
-  for (const k of ['command', 'prompt', 'note', 'folder', 'projectId']) if (a[k] !== undefined && !isStr(a[k])) problems.push(k);
+  for (const k of ['command', 'prompt', 'note', 'folder', 'projectId', 'icon', 'iconFile']) if (a[k] !== undefined && !isStr(a[k])) problems.push(k);
   if (a.badge !== undefined && !(Number.isInteger(a.badge) && a.badge > 0)) problems.push('badge');
-  const allowed = new Set(['id', 'title', 'kind', 'command', 'prompt', 'patch', 'folder', 'projectId', 'note', 'badge']);
+  const allowed = new Set(['id', 'title', 'kind', 'command', 'prompt', 'patch', 'folder', 'projectId', 'note', 'badge', 'icon', 'iconFile']);
   for (const k of Object.keys(a)) if (!allowed.has(k)) problems.push(`unexpected field ${k}`);
   return problems;
 }

@@ -5,6 +5,8 @@ import SwiftUI
 public struct DockContent {
     public var title: (PanelID) -> String
     public var symbol: (PanelID) -> String?
+    /// A picture drawn in colour in place of the symbol (a tool's own icon).
+    public var image: (PanelID) -> NSImage?
     public var view: (PanelID) -> AnyView
     /// Drawn in place of the title when the panel is on its own (the
     /// thread's name and folder over the transcript, say). Nil: the title.
@@ -22,6 +24,7 @@ public struct DockContent {
     public init(
         title: @escaping (PanelID) -> String,
         symbol: @escaping (PanelID) -> String? = { _ in nil },
+        image: @escaping (PanelID) -> NSImage? = { _ in nil },
         header: @escaping (PanelID) -> AnyView? = { _ in nil },
         accessory: @escaping (PanelID) -> AnyView? = { _ in nil },
         closable: @escaping (PanelID) -> Bool = { _ in true },
@@ -31,6 +34,7 @@ public struct DockContent {
         self.available = available
         self.title = title
         self.symbol = symbol
+        self.image = image
         self.header = header
         self.accessory = accessory
         self.closable = closable
@@ -448,7 +452,13 @@ private struct TabItem: View {
 
     var body: some View {
         HStack(spacing: 6) {
-            if let symbol = content.symbol(panel) {
+            if let image = content.image(panel) {
+                Image(nsImage: image)
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+                    .frame(width: options.titleSize + 2, height: options.titleSize + 2)
+                    .opacity(selected ? 1 : 0.7)
+            } else if let symbol = content.symbol(panel) {
                 Image(systemName: symbol)
                     .font(.system(size: options.titleSize - 1, weight: .medium))
                     .foregroundStyle(selected ? DockTheme.secondary : DockTheme.faint)

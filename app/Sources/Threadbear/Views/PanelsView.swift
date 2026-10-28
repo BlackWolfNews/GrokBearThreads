@@ -177,7 +177,7 @@ struct PanelRail: View {
                 app.clickRail(.highlights, in: thread)
             }
             ForEach(thread.panels) { panel in
-                ActivityButton(symbol: PanelIcon.symbol(for: panel), title: panel.title, badge: panel.badge, active: app.dock.isShowing(panel.id)) {
+                ActivityButton(symbol: PanelIcon.symbol(for: panel), image: PatchImage.image(panel.iconFile), tinted: false, title: panel.title, badge: panel.badge, active: app.dock.isShowing(panel.id)) {
                     app.clickRail(.panel(panel.id), in: thread)
                 }
             }
@@ -256,9 +256,13 @@ struct PatchesList: View {
     private func row(_ patch: PatchInfo) -> some View {
         VStack(alignment: .leading, spacing: zoomed(4)) {
             HStack(spacing: zoomed(6)) {
-                Image(systemName: "square.dashed")
-                    .font(.system(size: zoomed(11), weight: .medium))
-                    .foregroundStyle(.secondary)
+                if let image = PatchImage.image(patch.iconFile) {
+                    Image(nsImage: image).resizable().aspectRatio(contentMode: .fit).frame(width: zoomed(14), height: zoomed(14))
+                } else {
+                    Image(systemName: patch.icon ?? "square.dashed")
+                        .font(.system(size: zoomed(11), weight: .medium))
+                        .foregroundStyle(.secondary)
+                }
                 Text(patch.id)
                     .font(.system(size: TypeScale.label, weight: .medium))
                 Text(PatchesList.sourceName(patch.source))

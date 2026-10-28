@@ -95,6 +95,9 @@ struct ActivityButton: View {
     var symbol: String? = nil
     /// Drawn instead of a symbol (the sleeping bear).
     var image: NSImage? = nil
+    /// False draws `image` as it is, in colour: a tool's own icon, which is
+    /// how it's recognised. True tints it like the symbols (the bear).
+    var tinted = true
     let title: String
     var shortcut: String? = nil
     var badge: Int? = nil
@@ -191,7 +194,7 @@ struct ActivityButton: View {
         if let image {
             // The bear, tinted like the symbols.
             Image(nsImage: image)
-                .renderingMode(.template)
+                .renderingMode(tinted ? .template : .original)
                 .resizable()
                 .aspectRatio(contentMode: .fit)
                 .frame(width: zoomed(21), height: zoomed(21))

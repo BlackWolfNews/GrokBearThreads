@@ -58,9 +58,14 @@ private struct ActionChip: View {
                     // The patch's own icon when it has one (which project or
                     // tool it's for); else the patch glyph for a command, a
                     // bubble for a message.
-                    Image(systemName: action.icon ?? (action.kind == .prompt ? "text.bubble" : "square.dashed"))
-                        .font(.system(size: zoomed(11), weight: .medium))
-                        .foregroundStyle(.secondary)
+                    if let image = PatchImage.image(action.iconFile) {
+                        // The tool's own icon, in colour.
+                        Image(nsImage: image).resizable().aspectRatio(contentMode: .fit).frame(width: zoomed(13), height: zoomed(13))
+                    } else {
+                        Image(systemName: action.icon ?? (action.kind == .prompt ? "text.bubble" : "square.dashed"))
+                            .font(.system(size: zoomed(11), weight: .medium))
+                            .foregroundStyle(.secondary)
+                    }
                 }
                 Text(action.title)
                     .foregroundStyle(.primary)

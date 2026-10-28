@@ -120,6 +120,13 @@ enum WindowDock {
         }
     }
 
+    /// A patch panel's picture (its tool's icon), when it has one.
+    @MainActor
+    static func image(of panel: PanelID, app: AppModel) -> NSImage? {
+        let hit = app.selectedThread?.panels.first { $0.id == panel } ?? app.threads.values.lazy.flatMap(\.panels).first { $0.id == panel }
+        return PatchImage.image(hit?.iconFile)
+    }
+
     @MainActor
     static func symbol(of panel: PanelID, app: AppModel) -> String? {
         switch panel {
@@ -209,6 +216,7 @@ struct RootView: View {
         DockContent(
             title: { WindowDock.title(of: $0, app: app) },
             symbol: { WindowDock.symbol(of: $0, app: app) },
+            image: { WindowDock.image(of: $0, app: app) },
             header: { panel in
                 // The thread's own title line (folder, title, projects)
                 // in place of its name.

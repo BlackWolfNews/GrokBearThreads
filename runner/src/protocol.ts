@@ -311,6 +311,7 @@ export type Action = {
   projectId?: string; // the project whose folder gave it
   note?: string;
   icon?: string; // an SF Symbol for the chip: the action's own, else its patch's
+  iconFile?: string; // or a picture for it instead (absolute path: an image or a .app)
   badge?: number; // a count on the chip, from the patch's badge function
 };
 
@@ -344,6 +345,8 @@ export type PatchInfo = {
   error?: string; // set when the file couldn't be loaded; it then gives nothing
   matched?: string[]; // a tool patch (appliesTo): the paths that made it apply
   liveError?: string; // a when or badge function that threw or took too long
+  icon?: string; // the patch file's icon, an SF Symbol
+  iconFile?: string; // or its picture (absolute path: an image or a .app)
 };
 
 // A panel a patch gives a thread (docs/protocol.md, "Panels"). The runner
@@ -354,7 +357,8 @@ export type Panel = {
   title: string; // the tab's label
   kind: PanelKind;
   url?: string; // kind "url": what the panel shows and what Open in browser opens
-  icon?: string; // an SF Symbol name for its button on the app's right-hand rail
+  icon?: string; // an SF Symbol name for its button on the app's right-hand rail: its own, else its patch's
+  iconFile?: string; // or a picture instead (absolute path: an image or a .app), the tool's own icon
   patch: string; // the patch it came from: "convex", "xcode"
   projectId?: string;
   note?: string; // one line about it: the deployment name, the booted device
