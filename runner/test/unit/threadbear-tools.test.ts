@@ -397,3 +397,21 @@ test('end_turn only acknowledges; its description says when to call it', async (
   // The runner reads the call from the thread's events, not the handler.
   assert.equal(h.runner.get(thread.id).needs, undefined);
 });
+
+// ------------------------------------------------------------ instructions
+
+// The CLI defers MCP tools (an agent sees only their names), so the server's
+// instructions are the one place sure to tell an agent when to reach for
+// show_options and pin. Without them an agent pinned three mockups and asked
+// Mike to choose in chat.
+test('both instruction texts say when to use show_options and pin', async () => {
+  const { threadbearMcpServer } = await import('../../src/threadbear-mcp.ts');
+  const { dynamicToolSpecs } = await import('../../src/adapters/codex/tools.ts');
+  const claude = threadbearMcpServer({} as never, 'self');
+  const instructions = (claude.instance as unknown as { server: { _instructions?: string } }).server._instructions ?? '';
+  const [ns] = dynamicToolSpecs(buildThreadbearTools({} as never, 'self'));
+  for (const [who, text] of [['claude', instructions], ['codex', ns.description]] as const) {
+    assert.match(text, /show_options/, who);
+    assert.match(text, /\bpin\b/, who);
+  }
+});

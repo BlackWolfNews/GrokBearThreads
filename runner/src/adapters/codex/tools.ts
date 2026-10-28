@@ -14,7 +14,7 @@
 import { z } from 'zod';
 import type { ToolApprovalAnswer, ToolApprovalRequest } from '../types.ts';
 import type { PermissionMode } from '../../protocol.ts';
-import { ALWAYS_ASK_TOOLS, SERVER_NAME } from '../../threadbear-mcp.ts';
+import { ALWAYS_ASK_TOOLS, SERVER_NAME, SHOWING_MIKE } from '../../threadbear-mcp.ts';
 import { toolTitle, truncateInput } from '../../tools.ts';
 import type { DynamicToolCallParams, DynamicToolCallResponse, DynamicToolSpec } from './types.ts';
 
@@ -34,6 +34,7 @@ export const NAMESPACE = SERVER_NAME;
 const NAMESPACE_DESCRIPTION =
   "Tools that manage Threadbear, Mike's own app for running agent threads, which this thread runs in: list and read threads, start new ones, message them, rename, snooze, archive, move and delete them, and schedule messages for later. " +
   'Use move_thread when the work belongs in another folder (for example a repo), so this thread runs there from the next turn. ' +
+  `${SHOWING_MIKE} ` +
   'End every turn by calling end_turn, after your final message, to say whether Mike has to do anything.';
 
 // The tools as one dynamic-tool namespace, with JSON Schema from zod.

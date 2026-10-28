@@ -185,7 +185,7 @@ export function buildThreadbearTools(control: ThreadControl, selfId: string, now
   const reviewTools = [
     tool(
       'show_options',
-      'Shows Mike a set of images to compare side by side in a review window, with an optional pick and notes per image. Use this for design alternatives instead of reading every image into the transcript. Returns a review ID promptly; finish your turn and Mike’s answer arrives later as a message. Images are copied into the thread. Reference images can receive notes but cannot be picked.',
+      'Shows Mike a set of images to compare side by side in a review window, with an optional pick and notes per image. Use this whenever you have two or more design alternatives (mockups, wireframes, screenshots of variants) for Mike to choose between, instead of pinning them, listing them in your reply or reading every image into the transcript. Returns a review ID promptly; finish your turn and Mike’s answer arrives later as a message. Images are copied into the thread. Reference images can receive notes but cannot be picked.',
       {
         title: z.string().min(1).max(200).describe('What Mike is reviewing.'),
         note: z.string().max(4000).optional().describe('A short explanation or question for the whole review.'),
@@ -686,6 +686,15 @@ function clip(text: string, max = 2000): string {
   return text.length > max ? `${text.slice(0, max)}… (${text.length - max} more characters)` : text;
 }
 
+// In the server's instructions, which every thread sees from its first
+// turn. Tool descriptions aren't enough: the CLI defers MCP tools, so an
+// agent sees only their names until it loads one, and an agent that made
+// three mockups pinned them and asked in chat instead of calling
+// show_options, never knowing the review window was there.
+export const SHOWING_MIKE =
+  'When you have design options, mockups or wireframes for Mike to choose between, put them in front of him with show_options (a side-by-side review window where he picks one and leaves notes), not as pins or a list in your reply; his answer comes back as a message. ' +
+  "For a single file or link he should look at (a doc, a screenshot, a preview URL, a PR), use pin, with show: true to open it in Threadbear's side pane rather than running `open`.";
+
 export function threadbearMcpServer(control: ThreadControl, selfId: string, schedules?: ScheduleControl, projects?: ProjectControl): McpSdkServerConfigWithInstance {
   const server = createSdkMcpServer({
     name: SERVER_NAME,
@@ -694,6 +703,7 @@ export function threadbearMcpServer(control: ThreadControl, selfId: string, sche
       `This session is a thread in Threadbear, Mike's own app for running agent threads (thread id ${selfId}). ` +
       'These tools manage Threadbear itself: list and read threads, start new ones, message them, rename, snooze, archive, move and delete them, schedule messages for later (once or on a cron), and keep Mike\'s projects (groupings above folders with goals, state and notes) up to date. ' +
       'Use move_thread when the work belongs in another folder (for example a repo), so this thread runs there from the next turn. ' +
+      `${SHOWING_MIKE} ` +
       'End every turn by calling end_turn, after your final message, to say whether Mike has to do anything.',
     tools: buildThreadbearTools(control, selfId, Date.now, schedules, projects),
   });
