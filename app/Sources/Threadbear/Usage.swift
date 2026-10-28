@@ -137,4 +137,11 @@ enum AppWindow {
             && !($0 is DockPanelWindow) && !String(describing: type(of: $0)).contains("Popover") }
         return window.map { $0.contentLayoutRect.height }
     }
+
+    /// Screen space above the chip whose popover is opening, set just
+    /// before the popover is made. Picker popovers open upwards from the
+    /// composer, so this, not the window's height, is what they have to
+    /// fit in: a window reaching up near the top of the screen left the
+    /// model picker's Effort row below the bottom of the screen.
+    static var roomAboveAnchor: CGFloat?
 }

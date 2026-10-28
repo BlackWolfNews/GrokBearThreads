@@ -666,6 +666,10 @@ private final class MenuAnchor {
             popover.close()
             return
         }
+        if let window = view.window, let screen = window.screen ?? NSScreen.main {
+            let chip = window.convertToScreen(view.convert(view.bounds, to: nil))
+            AppWindow.roomAboveAnchor = screen.visibleFrame.maxY - chip.maxY
+        }
         let popover = NSPopover()
         popover.behavior = .transient
         popover.contentViewController = make { [weak popover] in popover?.close() }
@@ -736,19 +740,17 @@ struct ModelPickerView: View {
     static var poolWidth: CGFloat { zoomed(440) }
     static var poolRailWidth: CGFloat { zoomed(96) }
 
-    /// The model list scrolls past this: 320 pt at 100%, less in a short window, so
-    /// the picker (search above, effort below) stays inside it. At 800 pt
-    /// it ran off the bottom over the composer's chips.
-    static var listMaxHeight: CGFloat {
-        let window = AppWindow.contentHeight ?? 800
-        return max(zoomed(140), min(zoomed(320), window - zoomed(330)))
-    }
-
-    /// Less while "Pin to a login" is open under it, so the logins fit too
-    /// and the popover stays inside the window.
-    static var listMaxHeightWithLogins: CGFloat {
-        let window = AppWindow.contentHeight ?? 800
-        return max(zoomed(120), min(zoomed(320), window - zoomed(330) - zoomed(250)))
+    /// The model list scrolls past 320 pt at 100%, or sooner when there
+    /// isn't room above the chip for the search box, the list, Effort and
+    /// the pool footer (more while "Pin to a login" is open under it).
+    /// Sized from the window it ran off the bottom of the screen in a
+    /// thread whose window went up near the top of it.
+    static func listMaxHeight(pools: Bool, showsLogins: Bool) -> CGFloat {
+        var chrome = zoomed(160)
+        if pools { chrome += zoomed(80) }
+        if pools && showsLogins { chrome += zoomed(230) }
+        let room = AppWindow.roomAboveAnchor ?? (AppWindow.contentHeight ?? 800) - zoomed(170)
+        return max(zoomed(120), min(zoomed(320), room - chrome))
     }
 
     private var settings: ThreadSettings { ThreadSettings(app: app, thread: threadId.flatMap { app.threads[$0] }) }
@@ -820,7 +822,7 @@ struct ModelPickerView: View {
                     }
                     .padding(zoomed(6))
                 }
-                .frame(maxHeight: pools && showsLogins ? Self.listMaxHeightWithLogins : Self.listMaxHeight)
+                .frame(maxHeight: Self.listMaxHeight(pools: pools, showsLogins: showsLogins))
                 .fixedSize(horizontal: false, vertical: true)
                 Divider()
                 EffortRow(levels: settings.effortLevels, chosen: settings.effectiveEffort) { settings.setEffort($0) }
@@ -1197,7 +1199,7 @@ struct AccountPickerView: View {
                 }
                 .padding(zoomed(6))
             }
-            .frame(maxHeight: max(zoomed(160), min(zoomed(420), (AppWindow.contentHeight ?? 800) - zoomed(300))))
+            .frame(maxHeight: max(zoomed(160), min(zoomed(420), (AppWindow.roomAboveAnchor ?? (AppWindow.contentHeight ?? 800) - zoomed(170)) - zoomed(130))))
             .fixedSize(horizontal: false, vertical: true)
             if let footer = settings.accountFooter {
                 Divider()
