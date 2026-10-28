@@ -36,4 +36,5 @@ changes, deploying your Convex backend first (docs/setup-and-updates.md).
 - `runner/`: the runner (TypeScript), `app/`: the Mac app (SwiftUI and AppKit),
   `ios/`: the iPhone app, `convex/`: the backend, `web/`: the website,
   `relay/`: the push relay (Mike's, shared), `site/`: the landing page.
-- `AGENTS.md` for agents working on it, `docs/` for how it all works.
+- `docs/guide.md` for using it, `AGENTS.md` for agents working on it, `docs/`
+  for how it all works.

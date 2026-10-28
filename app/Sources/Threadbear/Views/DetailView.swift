@@ -134,6 +134,13 @@ struct ThreadMenuButton: View {
                 Button("Copy transcript as Markdown", systemImage: "doc.plaintext") { session?.copyTranscript() }
                 // So Mike can point an agent at this thread (`tb show <id>`).
                 Button("Copy thread id", systemImage: "number") { app.copyToPasteboard(thread.id) }
+                // The thread on the website (docs/website.md), to paste
+                // anywhere. Lost when this menu moved into the dock's bar.
+                if let site = app.websiteURL {
+                    Button("Copy web link", systemImage: "link") {
+                        app.copyToPasteboard(site.appendingPathComponent("t").appendingPathComponent(thread.id).absoluteString)
+                    }
+                }
             }
         } label: {
             Image(systemName: "ellipsis")

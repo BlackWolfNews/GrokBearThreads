@@ -3,6 +3,7 @@
 // them. The runner hands each Claude session its own in-process MCP server
 // ("threadbear"), built with that session's thread id, so "this thread" is
 // always the caller and nothing has to go over the WebSocket.
+import fs from 'node:fs';
 import path from 'node:path';
 import { createSdkMcpServer, tool } from '@anthropic-ai/claude-agent-sdk';
 import type { McpSdkServerConfigWithInstance } from '@anthropic-ai/claude-agent-sdk';
@@ -22,6 +23,7 @@ import { END_TURN_DESCRIPTION, END_TURN_TOOL, ENDED, NO_REPLY, turnReply } from 
 import { asksForAppRestart, type AppRestarts } from './app-restarts.ts';
 import { PANEL_PLACES } from './panel-requests.ts';
 import type { PanelPlace } from './protocol.ts';
+import { readRelease, type ReleaseJson } from './release.ts';
 
 // What the tools drive: the Runner itself, or during a handover
 // (docs/protocol.md) a ThreadRouter (handover.ts) that reaches threads on
@@ -845,12 +847,39 @@ export const FILING_PROJECTS =
   "If this thread's work belongs to one of Mike's projects (list_projects) and it isn't in it yet, put it there early with join_project, or make one with create_project for a new body of work he'll come back to (not for a one-off question or chore). " +
   "When the thread ships or finishes something, makes a decision or hits a blocker that changes where the project stands, update the project's state with update_project.";
 
+// This runner's release.json, or none when it runs from a checkout.
+const RELEASE_JSON = readRelease();
+
+// The user guide (docs/guide.md) in the repo this runner came from. A
+// release under <home>/runner/releases/<id> holds only runner/'s code, so
+// the guide is read from the checkout the release was built from
+// (release.json's checkout, which it follows main in); a runner started
+// from a checkout (a dev runner) has the repo two folders up from src/.
+export function guidePath(release: Pick<ReleaseJson, 'checkout'> | undefined = RELEASE_JSON, sourceRepo = path.resolve(import.meta.dirname, '..', '..')): string {
+  return path.join(release?.checkout ?? sourceRepo, 'docs', 'guide.md');
+}
+
+// Also in the instructions. A new user's first thread asked "tell me about
+// how this app works", and with nothing to read the agent searched the
+// disk for threadbear*, which set off macOS's Dropbox and Desktop prompts.
+// Left out when the guide isn't there (a release from before it, a moved
+// checkout), rather than sending the agent to a file that's missing.
+export function guideLine(file = guidePath(), exists: (p: string) => boolean = fs.existsSync): string {
+  if (!exists(file)) return '';
+  return (
+    `For questions about how Threadbear works or how to use it, read its guide, ${file}; the rest of its docs and its code are in ${path.dirname(path.dirname(file))}. ` +
+    "Don't search the filesystem for Threadbear's files: that sets off macOS's folder permission prompts."
+  );
+}
+
 export function threadbearMcpServer(control: ThreadControl, selfId: string, schedules?: ScheduleControl, projects?: ProjectControl, appRestarts?: AppRestartControl): McpSdkServerConfigWithInstance {
+  const guide = guideLine();
   const server = createSdkMcpServer({
     name: SERVER_NAME,
     version: RUNNER_VERSION,
     instructions:
       `This session is a thread in Threadbear, Mike's own app for running agent threads (thread id ${selfId}). ` +
+      (guide ? `${guide} ` : '') +
       'These tools manage Threadbear itself: list and read threads, start new ones, message them, rename, snooze, archive, move and delete them, schedule messages for later (once or on a cron), and keep Mike\'s projects (groupings above folders with goals, state and notes) up to date. ' +
       'Use move_thread when the work belongs in another folder (for example a repo), so this thread runs there from the next turn. ' +
       `${SHOWING_MIKE} ` +

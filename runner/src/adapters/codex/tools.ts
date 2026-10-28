@@ -14,7 +14,7 @@
 import { z } from 'zod';
 import type { ToolApprovalAnswer, ToolApprovalRequest } from '../types.ts';
 import type { PermissionMode } from '../../protocol.ts';
-import { ALWAYS_ASK_TOOLS, FILING_PROJECTS, SERVER_NAME, SHOWING_MIKE } from '../../threadbear-mcp.ts';
+import { ALWAYS_ASK_TOOLS, FILING_PROJECTS, guideLine, SERVER_NAME, SHOWING_MIKE } from '../../threadbear-mcp.ts';
 import { toolTitle, truncateInput } from '../../tools.ts';
 import type { DynamicToolCallParams, DynamicToolCallResponse, DynamicToolSpec } from './types.ts';
 
@@ -41,7 +41,9 @@ export const NAMESPACE_DESCRIPTION_MAX = 1024;
 // Said as developer instructions at thread/start, next to the thread's
 // projects brief: the same guidance Claude threads get in the MCP server's
 // instructions.
+const GUIDE = guideLine();
 export const TOOL_GUIDANCE =
+  (GUIDE ? `${GUIDE} ` : '') +
   "This thread's threadbear tools manage Threadbear itself: list and read threads, start new ones, message them, rename, snooze, archive, move and delete them, and schedule messages for later. " +
   'Use move_thread when the work belongs in another folder (for example a repo), so this thread runs there from the next turn. ' +
   `${SHOWING_MIKE} ` +

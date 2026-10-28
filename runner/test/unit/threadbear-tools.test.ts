@@ -520,3 +520,34 @@ test('both instruction texts say when to use show_options and pin', async () => 
     assert.match(text, /\bpin\b/, who);
   }
 });
+
+// A new user's first thread asked how the app works, and with nothing to
+// read the agent searched the disk for threadbear*, setting off macOS's
+// folder prompts. Every thread, Claude or Codex, is now pointed at the guide.
+test('the guide is in the checkout a release was built from, or two folders up from a source runner', async () => {
+  const { guidePath } = await import('../../src/threadbear-mcp.ts');
+  assert.equal(guidePath({ checkout: '/Users/someone/threadbear' }, '/ignored'), '/Users/someone/threadbear/docs/guide.md');
+  assert.equal(guidePath(undefined, '/src/repo'), '/src/repo/docs/guide.md');
+  // A release from before releases recorded their checkout.
+  assert.equal(guidePath({}, '/src/repo'), '/src/repo/docs/guide.md');
+  // This test runs from a checkout, whose repo has the guide.
+  assert.ok(fs.existsSync(guidePath(undefined)), guidePath(undefined));
+});
+
+test('the guide line names the guide and the repo, and is left out when the guide is missing', async () => {
+  const { guideLine } = await import('../../src/threadbear-mcp.ts');
+  const line = guideLine('/Users/someone/threadbear/docs/guide.md', () => true);
+  assert.match(line, /\/Users\/someone\/threadbear\/docs\/guide\.md/);
+  assert.match(line, /code are in \/Users\/someone\/threadbear\./);
+  assert.match(line, /Don't search the filesystem/);
+  assert.equal(guideLine('/nowhere/docs/guide.md', () => false), '');
+});
+
+test("a Claude or Codex thread's instructions point at the guide", async () => {
+  const { guidePath, threadbearMcpServer } = await import('../../src/threadbear-mcp.ts');
+  const { TOOL_GUIDANCE } = await import('../../src/adapters/codex/tools.ts');
+  const server = threadbearMcpServer({} as never, 'self');
+  const instructions = (server.instance as unknown as { server: { _instructions?: string } }).server._instructions ?? '';
+  assert.ok(instructions.includes(guidePath()), instructions);
+  assert.ok(TOOL_GUIDANCE.includes(guidePath()), TOOL_GUIDANCE);
+});

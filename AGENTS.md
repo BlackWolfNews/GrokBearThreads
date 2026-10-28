@@ -29,6 +29,9 @@ static site with its own `package.json`; its comments say how to build it.
 - Screenshots: capture the app window only (by window id), never the full
   screen, and delete them when done unless they're for a PR.
 - UI copy: plain words, no eyebrow or kicker labels, no em dashes.
+- `docs/guide.md` is the user guide, and every thread's agent is pointed at
+  it (`guideLine` in `runner/src/threadbear-mcp.ts`). Keep it true when a
+  change alters what someone using the app sees or does.
 - Every control gets a tooltip, with `.tip("…")` (SwiftUI) or `setTip` (AppKit).
   `.help` and `toolTip` never show in this app; TipsTests fails on them.
 - Transcript files and fixtures made from real sessions are private: keep them
