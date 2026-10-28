@@ -32,51 +32,50 @@
   {{structuredData}}
 </head>
 <body class="page-{{page}}{{bodyClass}}">
-  <!-- Fabric patches drifting behind everything, like the ones sewn onto the bear (and the
-       "patches" you sew onto Threadbear). Each fabric is a pattern drawn here once; the shapes
-       use them with a white running stitch round the edge. Faint on purpose: they're the page's
-       texture, not something to read. Styles in styles.css, "patchwork". -->
-  <div class="patchwork" aria-hidden="true">
-    <svg width="0" height="0" class="fabrics">
+  <!-- Fabric patches sewn onto the page here and there, as if it had been mended, like the
+       patches on the bear (and the "patches" you sew onto Threadbear). The fabrics and shapes
+       are drawn here once; pages place them with <svg class="sewn ..."><use href="#p-..."/></svg>.
+       Small, pale and still on purpose: Mike wanted them quiet. Styles in styles.css, "sewn". -->
+  <svg width="0" height="0" class="fabrics" aria-hidden="true">
       <defs>
         <!-- gingham in the bear's honey -->
         <pattern id="f-gingham" width="16" height="16" patternUnits="userSpaceOnUse">
-          <rect width="16" height="16" fill="#f3e5cd"/>
-          <rect width="8" height="16" fill="#e9d3ae" opacity=".7"/>
-          <rect width="16" height="8" fill="#e9d3ae" opacity=".7"/>
+          <rect width="16" height="16" fill="#f6ecdc"/>
+          <rect width="8" height="16" fill="#efdfc4" opacity=".7"/>
+          <rect width="16" height="8" fill="#efdfc4" opacity=".7"/>
         </pattern>
         <!-- sage polka dots -->
         <pattern id="f-dots" width="14" height="14" patternUnits="userSpaceOnUse">
-          <rect width="14" height="14" fill="#e2e8d9"/>
-          <circle cx="4" cy="4" r="2" fill="#c7d4b8"/>
-          <circle cx="11" cy="11" r="2" fill="#c7d4b8"/>
+          <rect width="14" height="14" fill="#e9eee2"/>
+          <circle cx="4" cy="4" r="2" fill="#d6e0ca"/>
+          <circle cx="11" cy="11" r="2" fill="#d6e0ca"/>
         </pattern>
         <!-- dusty blue ticking stripes -->
         <pattern id="f-stripes" width="12" height="12" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
-          <rect width="12" height="12" fill="#e1e7ee"/>
-          <rect width="4" height="12" fill="#cdd7e2"/>
+          <rect width="12" height="12" fill="#e9edf2"/>
+          <rect width="4" height="12" fill="#dbe2ea"/>
         </pattern>
         <!-- rose linen, a fine weave -->
         <pattern id="f-linen" width="6" height="6" patternUnits="userSpaceOnUse">
-          <rect width="6" height="6" fill="#f1dfd9"/>
-          <path d="M0 3h6M3 0v6" stroke="#e7cdc5" stroke-width="1"/>
+          <rect width="6" height="6" fill="#f5e8e4"/>
+          <path d="M0 3h6M3 0v6" stroke="#eedbd5" stroke-width="1"/>
         </pattern>
         <!-- oatmeal plaid -->
         <pattern id="f-plaid" width="24" height="24" patternUnits="userSpaceOnUse">
-          <rect width="24" height="24" fill="#eee7da"/>
-          <rect y="9" width="24" height="6" fill="#e0d5c2" opacity=".8"/>
-          <rect x="9" width="6" height="24" fill="#e0d5c2" opacity=".8"/>
-          <path d="M0 12h24M12 0v24" stroke="#d3c3a8" stroke-width="1"/>
+          <rect width="24" height="24" fill="#f2ece2"/>
+          <rect y="9" width="24" height="6" fill="#e8dfd0" opacity=".8"/>
+          <rect x="9" width="6" height="24" fill="#e8dfd0" opacity=".8"/>
+          <path d="M0 12h24M12 0v24" stroke="#ddd0ba" stroke-width="1"/>
         </pattern>
+
+        <!-- The shapes, each a fabric with a white running stitch round the edge. -->
+        <symbol id="p-square-gingham" viewBox="0 0 120 120"><rect x="4" y="4" width="112" height="112" rx="16" fill="url(#f-gingham)"/><rect x="12" y="12" width="96" height="96" rx="8" class="stitch"/></symbol>
+        <symbol id="p-square-plaid" viewBox="0 0 120 120"><rect x="4" y="4" width="112" height="112" rx="16" fill="url(#f-plaid)"/><rect x="12" y="12" width="96" height="96" rx="8" class="stitch"/></symbol>
+        <symbol id="p-square-stripes" viewBox="0 0 120 120"><rect x="4" y="4" width="112" height="112" rx="16" fill="url(#f-stripes)"/><rect x="12" y="12" width="96" height="96" rx="8" class="stitch"/><path d="M84 28l12 12M96 28 84 40" class="cross"/></symbol>
+        <symbol id="p-heart" viewBox="0 0 120 120"><path d="M60 108 14 62a26 26 0 0 1 46-36 26 26 0 0 1 46 36z" fill="url(#f-linen)"/><path d="M60 97 21 58a18 18 0 0 1 39-25 18 18 0 0 1 39 25z" class="stitch"/></symbol>
+        <symbol id="p-round-dots" viewBox="0 0 120 120"><circle cx="60" cy="60" r="54" fill="url(#f-dots)"/><circle cx="60" cy="60" r="45" class="stitch"/></symbol>
       </defs>
-    </svg>
-    <svg class="patch p1" viewBox="0 0 120 120"><rect x="4" y="4" width="112" height="112" rx="16" fill="url(#f-gingham)"/><rect x="12" y="12" width="96" height="96" rx="8" class="stitch"/></svg>
-    <svg class="patch p2" viewBox="0 0 120 120"><path d="M60 108 14 62a26 26 0 0 1 46-36 26 26 0 0 1 46 36z" fill="url(#f-linen)"/><path d="M60 97 21 58a18 18 0 0 1 39-25 18 18 0 0 1 39 25z" class="stitch"/></svg>
-    <svg class="patch p3" viewBox="0 0 120 120"><circle cx="60" cy="60" r="54" fill="url(#f-dots)"/><circle cx="60" cy="60" r="45" class="stitch"/></svg>
-    <svg class="patch p4" viewBox="0 0 120 120"><rect x="4" y="4" width="112" height="112" rx="16" fill="url(#f-stripes)"/><rect x="12" y="12" width="96" height="96" rx="8" class="stitch"/><path d="M84 28l12 12M96 28 84 40" class="cross"/></svg>
-    <svg class="patch p5" viewBox="0 0 120 120"><rect x="4" y="4" width="112" height="112" rx="16" fill="url(#f-plaid)"/><rect x="12" y="12" width="96" height="96" rx="8" class="stitch"/></svg>
-    <svg class="patch p6" viewBox="0 0 120 120"><circle cx="60" cy="60" r="54" fill="url(#f-gingham)"/><circle cx="60" cy="60" r="45" class="stitch"/></svg>
-  </div>
+  </svg>
   <!-- The code on GitHub, top right, like Walkies', Poddle's and Quick Ask's corner. Off while
        the repo's private (GITHUB_PUBLIC in site.mjs). -->
   {{githubCorner}}

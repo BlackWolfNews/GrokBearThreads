@@ -64,37 +64,41 @@ img { max-width: 100%; height: auto; }
 .icon { width: 1em; height: 1em; flex: none; display: block; }
 code { font-family: var(--mono); font-size: .875em; }
 
-/* ---------- patchwork ---------- */
-/* Fabric patches drifting behind the page (layout.html), Threadbear's version of Walkies'
-   clouds. A fixed layer under the content. Each patch crosses the screen in three to four
-   minutes, turning a little as it goes. They move at a constant speed, so these use linear
-   rather than the skill's easing curve, which would make them lurch; negative delays spread
-   them out on load, and with reduced motion they stay where they are. */
-.patchwork { position: fixed; inset: 0; z-index: -1; overflow: hidden; pointer-events: none; }
-.fabrics { position: absolute; }
-.patch {
-  position: absolute; left: 0; display: block; width: 120px; height: 120px; opacity: .55;
-  filter: drop-shadow(0 6px 10px rgba(60, 45, 20, .06)); will-change: transform;
-  animation: drift 220s linear infinite;
+/* ---------- sewn-on patches ---------- */
+/* Small fabric patches sewn onto the page as if it had been mended (layout.html has the
+   fabrics). Each sits over the edge or corner of something, a little turned, and stays still.
+   Pale fabrics and a soft shadow keep them quiet. */
+.fabrics { position: absolute; width: 0; height: 0; overflow: hidden; }
+.stitch { fill: none; stroke: #fff; stroke-width: 3; stroke-dasharray: 6 5; stroke-linecap: round; }
+.cross { fill: none; stroke: #fff; stroke-width: 3.5; stroke-linecap: round; }
+.sewn {
+  position: absolute; z-index: 2; width: 56px; height: 56px; pointer-events: none;
+  filter: drop-shadow(0 2px 3px rgba(60, 45, 20, .1));
 }
-.patch .stitch { fill: none; stroke: #fff; stroke-width: 2.5; stroke-dasharray: 6 5; stroke-linecap: round; }
-.patch .cross { fill: none; stroke: #fff; stroke-width: 3; stroke-linecap: round; }
-.patch.p1 { top: 9%; width: 132px; height: 132px; animation-duration: 230s; animation-delay: -30s; --turn: -8deg; }
-.patch.p2 { top: 34%; width: 104px; height: 104px; animation-duration: 260s; animation-delay: -150s; --turn: 10deg; }
-.patch.p3 { top: 58%; width: 112px; height: 112px; animation-duration: 210s; animation-delay: -90s; --turn: -14deg; }
-.patch.p4 { top: 80%; width: 140px; height: 140px; animation-duration: 280s; animation-delay: -210s; --turn: 6deg; }
-.patch.p5 { top: 20%; width: 96px; height: 96px; animation-duration: 300s; animation-delay: -250s; opacity: .45; --turn: 12deg; }
-.patch.p6 { top: 70%; width: 88px; height: 88px; animation-duration: 250s; animation-delay: -10s; opacity: .45; --turn: -10deg; }
-@keyframes drift {
-  from { transform: translateX(-180px) rotate(var(--turn, 0deg)); }
-  to { transform: translateX(calc(100vw + 40px)) rotate(calc(var(--turn, 0deg) * -1)); }
-}
-/* Smaller and fainter on a phone, where they pass behind the text rather than beside it. */
-@media (max-width: 767px) { .patch { scale: .6; opacity: .3; } }
-@media (prefers-reduced-motion: reduce) {
-  .patch { animation: none; }
-  .patch.p1 { left: 4%; } .patch.p2 { left: 78%; } .patch.p3 { left: 10%; }
-  .patch.p4 { left: 70%; } .patch.p5 { left: 46%; } .patch.p6 { left: 88%; }
+/* Over the bottom left corner of the Mac window. */
+.sewn-hero { left: calc(var(--s-300) * -1); bottom: var(--s-400); width: 64px; height: 64px; transform: rotate(-8deg); }
+/* Hanging off the top right of Threadbear's own card. */
+.problem-card.after { position: relative; }
+.sewn-heart { top: calc(var(--s-300) * -1); right: var(--s-400); transform: rotate(10deg); }
+/* Folded over the backend card's top left corner, so the card's round corner trims it. */
+.feature { position: relative; }
+.sewn-fold { top: calc(var(--s-300) * -1); left: calc(var(--s-300) * -1); width: 72px; height: 72px; transform: rotate(14deg); }
+/* On the last step's bottom right edge. */
+.sewn-step { right: calc(var(--s-200) * -1); bottom: calc(var(--s-200) * -1); width: 48px; height: 48px; }
+/* Over the quote's top left corner. */
+.quote { position: relative; }
+.sewn-quote { top: calc(var(--s-300) * -1); left: calc(var(--s-300) * -1); transform: rotate(-6deg); }
+/* Under the corner of the FAQ grid. */
+.faq { position: relative; }
+.sewn-faq { right: var(--s-50); bottom: calc(var(--s-300) * -1); width: 48px; height: 48px; transform: rotate(7deg); }
+/* The privacy card's top right. */
+.legal { position: relative; }
+.sewn-legal { top: calc(var(--s-300) * -1); right: var(--s-500); width: 48px; height: 48px; transform: rotate(-9deg); }
+@media (max-width: 860px) {
+  .sewn { width: 40px; height: 40px; }
+  .sewn-hero { left: calc(var(--s-75) * -1); bottom: var(--s-300); }
+  .sewn-quote, .sewn-fold { top: calc(var(--s-200) * -1); left: calc(var(--s-75) * -1); }
+  .sewn-step { right: calc(var(--s-75) * -1); }
 }
 
 /* ---------- skip link ---------- */

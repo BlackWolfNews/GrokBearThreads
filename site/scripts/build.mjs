@@ -248,8 +248,11 @@ for (const file of pages) {
   if (/[—–]/.test(out)) throw new Error(`${file} has an em or en dash in it: ${out.match(/.{0,40}[—–].{0,40}/)[0]}`);
   // The Worker's CSP has no 'unsafe-inline' for styles, so a style="" would be ignored.
   if (/\sstyle="/.test(out)) throw new Error(`${file} has a style="" attribute, which the CSP blocks`);
-  writeFileSync(join(dist, file), out);
-  built.set(name, { page, html: out });
+  // The comments are notes for whoever edits the page (including which claims aren't built
+  // yet), so they stay in src and never ship.
+  const shipped = out.replace(/\n?[ \t]*<!--[\s\S]*?-->/g, "");
+  writeFileSync(join(dist, file), shipped);
+  built.set(name, { page, html: shipped });
 }
 
 // Every link and image that stays on the site has to land somewhere: a page, a file, and the
