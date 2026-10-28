@@ -21,8 +21,9 @@ struct DecisionPager: View {
     @Environment(AppModel.self) private var app
     let thread: ThreadSummary
     @Binding var progress: DecisionProgress
-    @Binding var extra: String
-    @FocusState private var typing: Bool
+    /// The composer's draft, under the card: its text and images go with
+    /// the answers.
+    @Binding var draft: Draft
 
     private var asks: [Ask] { thread.asks }
     private var onSummary: Bool { progress.step >= asks.count }
@@ -48,7 +49,8 @@ struct DecisionPager: View {
         // brings it back with the answers kept.
         .onExitCommand { progress.dismissed = true }
         .onKeyPress(phases: .down) { press in
-            guard !typing, !onSummary else { return .ignored }
+            // Keys typed in a box go to its text view, not here.
+            guard !onSummary else { return .ignored }
             if press.key == .return { next(); return .handled }
             if let digit = Int(press.characters), digit >= 1, digit <= Decisions.choices(for: asks[progress.step]).count {
                 pick(digit - 1)
@@ -58,7 +60,6 @@ struct DecisionPager: View {
         }
         .focusable()
         .focusEffectDisabled()
-        .onAppear { if onSummary { typing = true } }
     }
 
     // MARK: - One ask
@@ -101,9 +102,11 @@ struct DecisionPager: View {
                 ),
                 placeholder: progress.answers[i]?.choice != nil ? "Add a note…" : "Type anything…",
                 number: Decisions.choices(for: ask).count + 1,
-                onSubmit: next
+                onSubmit: next,
+                onImages: { app.attachImages($0, toDraft: thread.id) }
             )
-            .focused($typing)
+            // A new box per ask, so each starts at its own text and height.
+            .id(i)
         }
     }
 
@@ -114,7 +117,7 @@ struct DecisionPager: View {
                     .buttonStyle(.plain).foregroundStyle(.secondary)
                     .tip("Go back to the last decision")
             } else {
-                Text("Esc for a normal message").foregroundStyle(.tertiary)
+                Text("Esc to put this away").foregroundStyle(.tertiary)
             }
             Spacer()
             if single {
@@ -122,13 +125,13 @@ struct DecisionPager: View {
                     .tip("Put this away and leave it open")
                 Button("Send") { app.sendDecisions(thread: thread) }
                     .buttonStyle(.borderedProminent)
-                    .disabled(Decisions.message(asks: asks, answers: progress.answers, extra: extra).isEmpty)
+                    .disabled(Decisions.message(asks: asks, answers: progress.answers, extra: draft.text).isEmpty && draft.images.isEmpty)
                     .keyboardShortcut(.return, modifiers: .command)
                     .tip("Send your answer (↩)")
             } else if onSummary {
                 Button("Send") { app.sendDecisions(thread: thread) }
                     .buttonStyle(.borderedProminent)
-                    .disabled(Decisions.message(asks: asks, answers: progress.answers, extra: extra).isEmpty)
+                    .disabled(Decisions.message(asks: asks, answers: progress.answers, extra: draft.text).isEmpty && draft.images.isEmpty)
                     .keyboardShortcut(.return, modifiers: .command)
                     .tip("Send your answers as one message (⌘↩)")
             } else {
@@ -168,8 +171,6 @@ struct DecisionPager: View {
                 .buttonStyle(.plain)
                 .tip("Change this answer")
             }
-            OtherField(text: $extra, placeholder: "Anything else?", number: nil, onSubmit: { app.sendDecisions(thread: thread) })
-                .focused($typing)
         }
     }
 
@@ -188,7 +189,6 @@ struct DecisionPager: View {
     private func next() {
         if single { app.sendDecisions(thread: thread); return }
         progress.step = min(progress.step + 1, asks.count)
-        typing = progress.step >= asks.count
     }
 }
 
@@ -222,33 +222,36 @@ private struct ChoiceRow: View {
     }
 }
 
-/// The box for his own words: an Other answer, a note on a pick, or the
-/// summary's anything else. Grows as he types; Return moves on and
-/// Shift-Return adds a line.
+/// The box for his own words: an Other answer or a note on a pick. The
+/// composer's own text view, so it grows as he types and takes pasted or
+/// dropped images (they go into the draft under the card, Mike 28 Oct).
+/// Return moves on; Shift-Return adds a line.
 private struct OtherField: View {
     @Binding var text: String
     let placeholder: String
     let number: Int?
     let onSubmit: () -> Void
+    let onImages: ([URL]) -> Void
+    @State private var height = ComposerTextField.minHeight
 
     var body: some View {
         let shape = RoundedRectangle(cornerRadius: zoomed(8), style: .continuous)
-        HStack(alignment: .firstTextBaseline, spacing: zoomed(10)) {
-            if let number { KeyCap(number: number) }
-            TextField(placeholder, text: $text, axis: .vertical)
-                .textFieldStyle(.plain)
-                .lineLimit(2...8)
-                // Two lines tall even when empty: a one-line box read as
-                // a label, not somewhere to write (Mike, 28 Oct).
-                .frame(minHeight: TypeScale.label * 2.6, alignment: .topLeading)
-                .onKeyPress(.return, phases: .down) { press in
-                    if press.modifiers.contains(.shift) { return .ignored }
-                    onSubmit()
-                    return .handled
-                }
-                .tip("Write your own answer")
+        HStack(alignment: .top, spacing: zoomed(10)) {
+            if let number { KeyCap(number: number).padding(.top, zoomed(3)) }
+            ComposerTextField(
+                text: $text,
+                height: $height,
+                focusTrigger: 0,
+                placeholder: placeholder,
+                onSend: onSubmit,
+                onImages: onImages,
+                decisionBox: true
+            )
+            // Two lines at least: a one-line box read as a label, not
+            // somewhere to write (Mike, 28 Oct).
+            .frame(height: max(height, ComposerTextField.minHeight))
+            .tip("Write your own answer. Paste or drop images here too")
         }
-        .font(.system(size: TypeScale.label))
         .padding(.horizontal, zoomed(10))
         .padding(.vertical, zoomed(7))
         .background(shape.fill(Color.primary.opacity(0.04)))

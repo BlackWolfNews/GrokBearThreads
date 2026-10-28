@@ -808,11 +808,13 @@ final class AppModel {
     /// Sends the open card's answers as one message, with the draft (the
     /// summary's "Anything else?") after them and its images, through the
     /// usual send so a failure puts it all back in the box.
-    func sendDecisions(thread: ThreadSummary) {
+    /// `withSuggestions: false` (the composer's own send) leaves out asks
+    /// he hasn't answered rather than taking the agent's picks for them.
+    func sendDecisions(thread: ThreadSummary, withSuggestions: Bool = true) {
         let progress = decisionProgress(for: thread)
         let draft = drafts[thread.id] ?? Draft()
-        let text = Decisions.message(asks: thread.asks, answers: progress.answers, extra: draft.text)
-        guard !text.isEmpty else { return }
+        let text = Decisions.message(asks: thread.asks, answers: progress.answers, extra: draft.text, withSuggestions: withSuggestions)
+        guard !text.isEmpty || !draft.images.isEmpty else { return }
         drafts[thread.id] = Draft(text: text, images: draft.images)
         decisions[thread.id] = nil
         send(threadId: thread.id)
@@ -1065,6 +1067,17 @@ final class AppModel {
                 for thread in list { threads[thread.id] = thread }
                 archiveLoaded = true
             }
+        }
+    }
+
+    /// Images pasted or dropped somewhere other than the composer (a
+    /// decision's box) go into the thread's draft, so they show in the
+    /// composer's strip and go with the next send.
+    func attachImages(_ urls: [URL], toDraft key: String) {
+        guard !urls.isEmpty else { return }
+        Task {
+            let refs = await importImages(urls)
+            drafts[key, default: Draft()].images += refs
         }
     }
 

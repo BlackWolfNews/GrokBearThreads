@@ -292,7 +292,7 @@ enum Automation {
         case "review":
             return await designReview(c, app: app)
         case "type":
-            guard let composer = find(ComposerTextView.self, in: window?.contentView) else { return "error no composer" }
+            guard let composer = findComposer(in: window?.contentView) else { return "error no composer" }
             window?.makeFirstResponder(composer)
             // `replace` takes the text view's whole text: clearing only the
             // draft reaches the view on SwiftUI's next update, after this
@@ -317,7 +317,7 @@ enum Automation {
             // Types `text` (if given, replacing the draft with `replace` as
             // `type` does) and presses Return, as Mike would.
             if let text = c["text"] as? String {
-                guard let composer = find(ComposerTextView.self, in: window?.contentView) else { return "error no composer" }
+                guard let composer = findComposer(in: window?.contentView) else { return "error no composer" }
                 window?.makeFirstResponder(composer)
                 let range = c["replace"] as? Bool == true ? NSRange(location: 0, length: (composer.string as NSString).length) : composer.selectedRange()
                 composer.insertText(text, replacementRange: range)
@@ -339,8 +339,11 @@ enum Automation {
             }
             return "error sent, but no new thread showed up within \(Int(wait)) s"
         case "paste-image":
-            guard let path = c["path"] as? String,
-                  let composer = find(ComposerTextView.self, in: window?.contentView) else { return "error no composer" }
+            // "into": "decision" pastes into the decision card's box.
+            let box = c["into"] as? String == "decision"
+                ? all(ComposerTextView.self, in: window?.contentView).first { $0.isDecisionBox }
+                : findComposer(in: window?.contentView)
+            guard let path = c["path"] as? String, let composer = box else { return "error no composer" }
             let board = pasteboard
             board.clearContents()
             board.writeObjects([URL(fileURLWithPath: path) as NSURL])
@@ -784,7 +787,7 @@ enum Automation {
 
     private static func pressReturn(_ window: NSWindow?) -> String {
         // The same key event the Return key sends.
-        guard let composer = find(ComposerTextView.self, in: window?.contentView),
+        guard let composer = findComposer(in: window?.contentView),
               let event = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
                                            windowNumber: window?.windowNumber ?? 0, context: nil, characters: "\r",
                                            charactersIgnoringModifiers: "\r", isARepeat: false, keyCode: 36)
@@ -1247,6 +1250,17 @@ enum Automation {
     static func json(_ value: Any) -> String {
         let data = (try? JSONSerialization.data(withJSONObject: value, options: [.sortedKeys, .fragmentsAllowed, .withoutEscapingSlashes])) ?? Data()
         return String(decoding: data, as: UTF8.self)
+    }
+
+    /// The composer's text view, not a decision card's box that shares
+    /// its class.
+    private static func findComposer(in view: NSView?) -> ComposerTextView? {
+        guard let view else { return nil }
+        if let match = view as? ComposerTextView, !match.isDecisionBox { return match }
+        for sub in view.subviews {
+            if let found = findComposer(in: sub) { return found }
+        }
+        return nil
     }
 
     private static func find<T: NSView>(_ type: T.Type, in view: NSView?) -> T? {

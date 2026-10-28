@@ -75,10 +75,11 @@ public enum Decisions {
     /// agent's pick for any he left alone, then
     /// anything else Mike wrote. Asks he skipped are left out, keeping the
     /// others' numbers, so the agent can tell which ones were answered.
-    public static func message(asks: [Ask], answers: [Int: DecisionAnswer], extra: String = "") -> String {
+    public static func message(asks: [Ask], answers: [Int: DecisionAnswer], extra: String = "", withSuggestions: Bool = true) -> String {
         var parts: [String] = []
         for (i, ask) in asks.enumerated() {
-            guard let text = answerText(answer(i, asks: asks, answers: answers), ask: ask) else { continue }
+            let given = withSuggestions ? answer(i, asks: asks, answers: answers) : answers[i]
+            guard let text = answerText(given, ask: ask) else { continue }
             // One ask needs no number: just the question, then the answer.
             parts.append(asks.count == 1
                 ? "\(ask.action)\n\(text)"

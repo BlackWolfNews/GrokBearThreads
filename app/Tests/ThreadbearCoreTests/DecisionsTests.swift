@@ -70,5 +70,8 @@ final class DecisionsTests: XCTestCase {
         XCTAssertEqual(Decisions.message(asks: [merge], answers: [0: DecisionAnswer(later: true)]), "Merge #52 to prod, or test locally first?\nLater, leave this one open")
         XCTAssertEqual(Decisions.answer(0, asks: [merge], answers: [:]), DecisionAnswer(choice: 0))
         XCTAssertNil(Decisions.answer(1, asks: [merge, events], answers: [:]))
+        // The composer's own send takes only what he answered.
+        XCTAssertEqual(Decisions.message(asks: [merge, events], answers: [1: DecisionAnswer(text: "signups")], extra: "and this", withSuggestions: false),
+                       "2. Which events matter most?\n   signups\n\nand this")
     }
 }

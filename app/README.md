@@ -457,7 +457,8 @@ is an error. Commands marked "the open thread" act on `id` when it's given
 | `usage` | `show` (true opens the usage popover and says its window number, false closes it), `click` (`Update`, `Update anyway`, `Go back to <version>`, `Automatic`, `Ask me`, `Off` with `provider`, or `Check now`) | the usage popover as text: each account's room by provider, then the CLIs with their buttons in brackets. `dump` has the same lines while it's open |
 | `type`, `send`, `return` | `text`, `replace`, `timeout` | types into the composer (`replace` takes the place of what's there); `send` types and presses Return, and from the new-thread composer waits for the thread it starts and prints its id |
 | `rename` | `title` | without `title`, makes the open thread's title in the header a field, as a click does; with it, saves that title as Mike's |
-| `paste-image` | `path` | through the instance's own pasteboard |
+| `paste-image` | `path`, `into` (`decision` for the decision card's box) | through the instance's own pasteboard |
+| `decide` | `pick` (1-based), `text`, `later`, `next`, `back`, `step` (1-based, 0 the summary), `extra` (the draft), `dismiss`, `send` | the open thread's decision card, changed as its controls change it; says where it is after |
 | `click` | `title` | a button in the transcript: Allow, Always allow, Deny, an option, Send answer |
 | `expand`, `collapse` | `row`, `file`, `all`, `section` | a group, tool, thinking block or settled approval (one folded in a closed group opens it); `file` (path or index) in a changes card; `all` for a whole diff; `section` (`inbox`, `running`) folds or opens an inbox heading, as clicking it does |
 | `scroll` | `to` (`top`, `bottom`) or `row`, `offset` | |
