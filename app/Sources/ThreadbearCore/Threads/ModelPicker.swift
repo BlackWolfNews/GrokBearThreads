@@ -30,12 +30,15 @@ public enum ModelPicker {
         public var subtitle: String?
         /// An SF Symbol for a provider's icon.
         public var symbol: String?
+        /// A pool's logins, drawn as that many little bear heads.
+        public var logins: Int?
 
-        public init(id: String, title: String, subtitle: String? = nil, symbol: String? = nil) {
+        public init(id: String, title: String, subtitle: String? = nil, symbol: String? = nil, logins: Int? = nil) {
             self.id = id
             self.title = title
             self.subtitle = subtitle
             self.symbol = symbol
+            self.logins = logins
         }
     }
 
@@ -52,6 +55,24 @@ public enum ModelPicker {
             self.title = title
             self.rows = rows
         }
+    }
+
+    /// How full a model's honey pot is drawn in the picker: the bigger
+    /// the model, the fuller. Guessed from the id and name, so a new
+    /// model lands somewhere sensible without a table to keep up.
+    public enum Honey: Sendable, Equatable {
+        case little, half, full
+        /// Full with a star: Fable, the one for the toughest jobs.
+        case special
+    }
+
+    public static func honey(id: String, title: String) -> Honey {
+        let name = (id + " " + title).lowercased()
+        if name.contains("fable") { return .special }
+        for small in ["haiku", "mini", "nano", "flash", "lite", "spark"] where name.contains(small) { return .little }
+        if name.contains("sonnet") { return .half }
+        if name.contains("opus") || name.contains("gpt") || name.contains("astra") { return .full }
+        return .half
     }
 
     /// One model in the list.

@@ -247,7 +247,7 @@ struct ThreadSettings {
         guard usesPools else {
             return providers.map { ModelPicker.Column(id: $0.id, title: $0.title, symbol: ModelPicker.providerSymbol($0.id)) }
         }
-        return app.pools.map { ModelPicker.Column(id: $0.id, title: $0.title, subtitle: Pools.railSubtitle($0, accounts: app.accounts)) }
+        return app.pools.map { ModelPicker.Column(id: $0.id, title: $0.title, subtitle: Pools.railSubtitle($0, accounts: app.accounts), logins: Pools.logins($0, accounts: app.accounts).count) }
     }
 
     /// The column the picker opens on.
@@ -920,6 +920,12 @@ private struct PickerRail: View {
         var body: some View {
             Button(action: action) {
                 VStack(spacing: zoomed(1)) {
+                    if let logins = column.logins, logins > 0 {
+                        Image(nsImage: Bear.heads(min(logins, 3), height: zoomed(12)))
+                            .foregroundStyle(active ? .primary : .secondary)
+                            .padding(.bottom, zoomed(2))
+                            .accessibilityHidden(true)
+                    }
                     // One weight either way: a bolder chosen title
                     // ("Side projects") no longer fitted the rail.
                     Text(column.title)
@@ -938,7 +944,7 @@ private struct PickerRail: View {
                 }
                 .padding(.horizontal, zoomed(4))
                 .frame(maxWidth: .infinity)
-                .frame(height: zoomed(40))
+                .frame(height: zoomed(column.logins ?? 0 > 0 ? 54 : 40))
                 .background(
                     RoundedRectangle(cornerRadius: zoomed(7), style: .continuous)
                         .fill(Color.primary.opacity(active ? 0.1 : hovering ? 0.06 : 0))
@@ -998,6 +1004,9 @@ private struct ModelRow: View {
     var body: some View {
         Button(action: action) {
             HStack(spacing: zoomed(8)) {
+                Image(nsImage: HoneyPot.image(ModelPicker.honey(id: row.id, title: row.title), side: zoomed(22)))
+                    .foregroundStyle(row.isOlder ? .tertiary : .secondary)
+                    .accessibilityHidden(true)
                 VStack(alignment: .leading, spacing: zoomed(1)) {
                     Text(row.title)
                         .font(.system(size: zoomed(13), weight: .medium))
