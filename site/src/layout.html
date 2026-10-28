@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="en-AU">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>{{title}}</title>
+  <meta name="description" content="{{description}}">
+  {{canonical}}
+  <meta name="theme-color" content="#faf8f3">
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="Threadbear">
+  <meta property="og:locale" content="en_AU">
+  <meta property="og:title" content="{{title}}">
+  <meta property="og:description" content="{{description}}">
+  <meta property="og:image" content="{{site}}/img/og.jpg">
+  <meta property="og:image:type" content="image/jpeg">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta property="og:image:alt" content="The Threadbear teddy icon and name with the line: The agent app you can patch yourself. Beside it, the Threadbear Mac app showing an inbox of threads and one asking to run a command.">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="{{title}}">
+  <meta name="twitter:description" content="{{description}}">
+  <meta name="twitter:image" content="{{site}}/img/og.jpg">
+  <meta name="twitter:image:alt" content="The Threadbear teddy icon and name next to the Threadbear Mac app.">
+  <link rel="icon" href="/img/favicon-32.png" sizes="32x32" type="image/png">
+  <link rel="icon" href="/img/icon-192.png" sizes="192x192" type="image/png">
+  <link rel="apple-touch-icon" href="/img/apple-touch-icon.png">
+  <link rel="manifest" href="/site.webmanifest">
+  <link rel="preload" href="/fonts/Geist-Variable.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="{{styles}}">
+  {{script}}
+  {{structuredData}}
+</head>
+<body class="page-{{page}}{{bodyClass}}">
+  <!-- The code on GitHub, top right, like Walkies', Poddle's and Quick Ask's corner. Off while
+       the repo's private (GITHUB_PUBLIC in site.mjs). -->
+  {{githubCorner}}
+  <!-- Skip link for keyboard users (landing page skill, B10). -->
+  <a class="skip" href="#content">Skip to content</a>
+  <!-- A compact bar floating off the top edge, sized to its content, translucent over a blur
+       (skill B7). On phones the links move into a full height panel behind the menu button. -->
+  <header class="nav-wrap">
+    <nav class="nav" aria-label="Main">
+      <a class="brand" href="/"{{homeCurrent}} aria-label="Threadbear home"><img src="/img/icon-192.png" alt="" width="32" height="32"><b>Threadbear</b></a>
+      <div class="nav-links">
+        <a href="/#features">What it does</a>
+        <a href="/#how">How it works</a>
+        <a href="/#faq">FAQ</a>
+      </div>
+      <a class="btn btn-sm nav-cta" href="/#get">Get Threadbear</a>
+      <button class="menu-toggle" type="button" aria-expanded="false" aria-controls="menu" aria-label="Open the menu"><span></span><span></span></button>
+    </nav>
+    <div class="menu" id="menu">
+      <ul>
+        <li><a href="/"{{homeCurrent}}>Home</a></li>
+        <li><a href="/#features">What it does</a></li>
+        <li><a href="/#how">How it works</a></li>
+        <li><a href="/#faq">FAQ</a></li>
+        <li><a class="btn" href="/#get">Get Threadbear</a></li>
+      </ul>
+    </div>
+  </header>
+  <main id="content">
+{{content}}
+  </main>
+  <footer class="footer">
+    <p>Threadbear is made by <a href="https://mikecann.app">Mike Cann</a>. It runs the official Claude Code and Codex command line tools, and isn't made by or connected to Anthropic or OpenAI.</p>
+    <nav aria-label="About Threadbear">
+      <a href="/">Home</a>
+      <a href="/#how">How it works</a>
+      <a href="/#faq">FAQ</a>
+      <a href="https://mikecann.app">mikecann.app</a>
+    </nav>
+  </footer>
+</body>
+</html>

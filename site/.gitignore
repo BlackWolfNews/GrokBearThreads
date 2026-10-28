@@ -1,0 +1,3 @@
+# The built site (npm run build) and the review screenshots (npm run shots).
+dist/
+review/

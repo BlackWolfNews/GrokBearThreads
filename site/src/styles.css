@@ -1,0 +1,428 @@
+/* Threadbear's landing page, copied from Quick Ask's site (~/dev/me/quick-ask/web/src/styles.css)
+   and moved into Threadbear's look: a warm paper white like the workbench picture's, greys for
+   structure, and the bear's honey brown (the iPhone app's AccentColor, #9A6B2F) only where it
+   means something: the main button and the bear. Mike's rule for the app, kept here: colour only
+   when it's important, never over the top.
+
+   The look follows Elaya's landing-page-design skill (github.com/elayadesign/ai-design-skills at
+   5e57840). Its rules, as plain CSS since the site has no Tailwind:
+   - one typeface, Geist (self hosted in public/fonts), Geist Mono only for code, no italics,
+     nothing heavier than 600;
+   - every font size and line height is a step of Tailwind's default type scale;
+   - every margin, padding and gap is one of the skill's spacing tokens (--s-*);
+   - every radius is a Tailwind radius, and nested radii are outer minus gap;
+   - flat backgrounds only, the one gradient being the hero heading's text (#000 to #666);
+   - every transition on one curve (--ease), 500 ms for movement, 300 ms for colour. */
+
+@font-face {
+  font-family: "Geist"; src: url("/fonts/Geist-Variable.woff2") format("woff2");
+  font-weight: 100 900; font-style: normal; font-display: swap;
+}
+@font-face {
+  font-family: "Geist Mono"; src: url("/fonts/GeistMono-Variable.woff2") format("woff2");
+  font-weight: 100 900; font-style: normal; font-display: swap;
+}
+
+:root {
+  --page: #faf8f3; --card: #fff; --well: #f1eee7; --line: #e7e2d7;
+  --ink: #1f1c18; --body: #46413a; --ink-soft: #6b645a; --ink-faint: #968e82;
+  /* The bear's honey brown, and a darker one for hover and for text on the page. */
+  --honey: #9a6b2f; --honey-d: #7f5725; --honey-tint: #f4ecdf;
+  --sans: "Geist", -apple-system, BlinkMacSystemFont, sans-serif;
+  --display: var(--sans);
+  --mono: "Geist Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  --lift: 0 1px 2px rgba(31, 28, 24, .05), 0 8px 28px rgba(60, 45, 20, .07);
+
+  /* The skill's spacing tokens (B2). Nothing between them. */
+  --s-25: 2px; --s-50: 4px; --s-75: 8px; --s-100: 12px; --s-200: 16px; --s-300: 24px; --s-400: 32px;
+  --s-500: 40px; --s-600: 48px; --s-700: 64px; --s-800: 80px; --s-900: 96px;
+  /* Tailwind's radii (B3). */
+  --r-sm: 2px; --r: 4px; --r-md: 6px; --r-lg: 8px; --r-xl: 12px; --r-2xl: 16px; --r-3xl: 24px; --r-full: 9999px;
+  /* The one motion curve (B7). */
+  --ease: cubic-bezier(0.22, 1, 0.36, 1);
+  color-scheme: light;
+}
+
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html { -webkit-text-size-adjust: 100%; scroll-behavior: smooth; scroll-padding-top: var(--s-900); }
+body {
+  font-family: var(--sans); color: var(--ink); background: var(--page);
+  -webkit-font-smoothing: antialiased; min-height: 100vh; min-height: 100dvh;
+  position: relative; display: flex; flex-direction: column;
+}
+/* Clears the floating nav. */
+main { flex: 1; width: 100%; padding-top: var(--s-800); }
+a { color: var(--ink); text-decoration-color: var(--ink-faint); text-underline-offset: 3px; transition: color 300ms var(--ease); }
+a:hover { color: var(--honey-d); }
+img { max-width: 100%; height: auto; }
+:focus-visible { outline: 2px solid var(--honey); outline-offset: 2px; border-radius: var(--r-md); }
+.icon { width: 1em; height: 1em; flex: none; display: block; }
+code { font-family: var(--mono); font-size: .875em; }
+
+/* ---------- skip link ---------- */
+.skip {
+  position: fixed; left: var(--s-200); top: var(--s-200); z-index: 60; padding: var(--s-75) var(--s-100);
+  border-radius: var(--r-lg); background: var(--ink); color: #fff; font: 600 14px/20px var(--sans); text-decoration: none;
+  transform: translateY(-200%); transition: transform 500ms var(--ease);
+}
+.skip:focus { transform: none; color: #fff; }
+
+/* ---------- the floating nav (B7) ---------- */
+.nav-wrap { position: fixed; inset: 0 0 auto 0; z-index: 50; display: flex; justify-content: center; padding: var(--s-200) var(--s-200) 0; pointer-events: none; }
+.nav {
+  position: relative; z-index: 1; pointer-events: auto; display: flex; align-items: center; gap: var(--s-75);
+  padding: var(--s-75); border-radius: var(--r-2xl); border: 1px solid rgba(31, 28, 24, .08);
+  background: rgba(255, 255, 255, .72); -webkit-backdrop-filter: blur(16px) saturate(180%); backdrop-filter: blur(16px) saturate(180%);
+  box-shadow: 0 8px 24px rgba(60, 45, 20, .08);
+}
+/* Inside the bar's 16 px radius with 8 px of padding, everything is 16 - 8 = 8 px (B3). */
+.brand { display: flex; align-items: center; gap: var(--s-75); padding: 0 var(--s-75) 0 0; border-radius: var(--r-lg); color: var(--ink); text-decoration: none; }
+.brand:hover { color: var(--ink); }
+.brand img { width: 32px; height: 32px; border-radius: var(--r-lg); }
+.brand b { font-size: 16px; line-height: 24px; font-weight: 600; letter-spacing: -.01em; }
+.nav-links { display: flex; gap: var(--s-25); }
+.nav-links a {
+  font-size: 14px; line-height: 20px; font-weight: 500; color: var(--ink-soft); text-decoration: none;
+  padding: var(--s-75) var(--s-100); border-radius: var(--r-lg);
+  transition: background-color 300ms var(--ease), color 300ms var(--ease), transform 500ms var(--ease);
+}
+.nav-links a:hover { background: rgba(31, 28, 24, .05); color: var(--ink); }
+.nav-links a:active { transform: scale(.98); }
+.nav-links a[aria-current="page"] { background: var(--well); color: var(--ink); }
+
+/* Buttons (B1, B2): 8 px by 12 px, 16 px semibold, or 14 px in the header. */
+.btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: var(--s-75);
+  padding: var(--s-75) var(--s-100); border-radius: var(--r-lg); border: 0;
+  background: var(--honey); color: #fff; font: 600 16px/24px var(--sans); text-decoration: none; cursor: pointer;
+  transition: background-color 300ms var(--ease), transform 500ms var(--ease);
+}
+.btn:hover { background: var(--honey-d); color: #fff; transform: translateY(-1px); }
+.btn:active { transform: scale(.98); }
+.btn-sm { font-size: 14px; line-height: 20px; }
+
+/* The menu button: two lines that turn into a cross (B7), drawn rather than swapped. */
+.menu-toggle {
+  display: none; width: 40px; height: 40px; border: 0; border-radius: var(--r-lg); background: transparent; cursor: pointer;
+  position: relative; transition: background-color 300ms var(--ease);
+}
+.menu-toggle:hover { background: rgba(31, 28, 24, .05); }
+.menu-toggle span {
+  position: absolute; left: var(--s-100); right: var(--s-100); height: 2px; border-radius: var(--r-full); background: var(--ink);
+  transition: transform 500ms var(--ease);
+}
+.menu-toggle span:first-child { transform: translateY(-4px); }
+.menu-toggle span:last-child { transform: translateY(4px); }
+.menu-open .menu-toggle span:first-child { transform: rotate(45deg); }
+.menu-open .menu-toggle span:last-child { transform: rotate(-45deg); }
+
+/* The phone menu: a full height panel of the page colour over a strong blur. */
+.menu {
+  position: fixed; inset: 0; z-index: 0; display: none; padding: calc(var(--s-900) + var(--s-200)) var(--s-300) var(--s-400);
+  background: rgba(250, 248, 243, .92); -webkit-backdrop-filter: blur(24px); backdrop-filter: blur(24px);
+  /* Its own scrolling, so every link is reachable on a short screen (a phone on its side). */
+  overflow-y: auto; overscroll-behavior: contain;
+  opacity: 0; visibility: hidden; pointer-events: none;
+  transition: opacity 500ms var(--ease), visibility 0s var(--ease) 500ms;
+}
+.menu ul { list-style: none; display: flex; flex-direction: column; gap: var(--s-75); }
+.menu li { opacity: 0; transform: translateY(var(--s-300)); transition: opacity 500ms var(--ease), transform 500ms var(--ease); }
+.menu a:not(.btn) {
+  display: block; padding: var(--s-75) var(--s-100); border-radius: var(--r-lg);
+  font-size: 30px; line-height: 36px; font-weight: 600; letter-spacing: -.02em; color: var(--ink); text-decoration: none;
+}
+.menu a:not(.btn):hover { background: rgba(31, 28, 24, .05); }
+.menu a[aria-current="page"] { color: var(--honey-d); }
+.menu .btn { margin-top: var(--s-300); width: 100%; }
+.menu-open .menu { opacity: 1; visibility: visible; pointer-events: auto; transition: opacity 500ms var(--ease); }
+/* One after another, 60 ms apart, all in within 400 ms (seven links: 0 to 360 ms). */
+.menu-open .menu li { opacity: 1; transform: none; }
+.menu-open .menu li:nth-child(2) { transition-delay: 60ms; }
+.menu-open .menu li:nth-child(3) { transition-delay: 120ms; }
+.menu-open .menu li:nth-child(4) { transition-delay: 180ms; }
+.menu-open .menu li:nth-child(5) { transition-delay: 240ms; }
+.menu-open .menu li:nth-child(6) { transition-delay: 300ms; }
+.menu-open .menu li:nth-child(n + 7) { transition-delay: 360ms; }
+@media (max-width: 860px) {
+  /* The page stays put behind the open menu. Only here, so it can never lock a desktop page. */
+  .menu-open, .menu-open body { overflow: hidden; }
+  .nav-links, .nav-cta { display: none; }
+  .nav { width: 100%; justify-content: space-between; }
+  .menu-toggle { display: block; }
+  .menu { display: block; }
+}
+
+/* The GitHub corner triangle (layout.html), off while the repo's private. */
+.corner { position: absolute; top: 0; z-index: 60; width: 72px; height: 72px; display: block; }
+.corner svg { width: 100%; height: 100%; display: block; fill: var(--ink); }
+.corner.github { right: 0; clip-path: polygon(0 0, 100% 0, 100% 100%); }
+.corner.github .octo { fill: var(--page); }
+.corner.github:hover .arm { animation: octo-wave 560ms var(--ease); transform-origin: 130px 106px; }
+@keyframes octo-wave { 0%, 100% { transform: rotate(0) } 20%, 60% { transform: rotate(-25deg) } 40%, 80% { transform: rotate(10deg) } }
+
+.footer {
+  max-width: 1080px; width: 100%; margin: 0 auto; text-align: center;
+  padding: var(--s-400) var(--s-300) max(var(--s-400), env(safe-area-inset-bottom)); font-size: 14px; line-height: 20px; font-weight: 500; color: var(--ink-soft);
+}
+.footer p { max-width: 540px; margin: 0 auto; }
+.footer a { color: var(--ink-soft); }
+.footer nav { display: flex; justify-content: center; flex-wrap: wrap; gap: var(--s-75) var(--s-300); margin-top: var(--s-75); }
+.footer nav a { text-decoration: none; }
+.footer a:hover { color: var(--honey-d); }
+
+/* ---------- type ---------- */
+h1, h2, h3 { font-family: var(--display); color: var(--ink); text-wrap: balance; }
+h1 { font-weight: 600; font-size: 36px; line-height: 40px; letter-spacing: -.025em; }
+.lede { font-size: 18px; line-height: 28px; color: var(--body); max-width: 600px; margin-top: var(--s-100); }
+.muted { color: var(--ink-soft); font-size: 14px; line-height: 20px; font-weight: 500; }
+p, li { text-wrap: pretty; }
+
+.card { background: var(--card); border-radius: var(--r-3xl); box-shadow: var(--lift); }
+
+/* ---------- the App Store badge, after Apple's black one ---------- */
+.appstore {
+  display: inline-flex; align-items: center; gap: var(--s-75); height: 56px; padding: 0 var(--s-200) 0 var(--s-100); border-radius: var(--r-xl);
+  background: #000; color: #fff; border: 1px solid #a6a6a6; text-decoration: none; white-space: nowrap;
+  font-family: var(--sans); box-shadow: 0 6px 16px rgba(31, 28, 24, .18);
+  transition: background-color 300ms var(--ease), transform 500ms var(--ease);
+}
+.appstore-logo { width: 32px; height: 32px; margin-top: calc(var(--s-50) * -1); flex: none; fill: currentColor; }
+.appstore span { display: flex; flex-direction: column; align-items: flex-start; }
+.appstore small { font-size: 12px; line-height: 16px; font-weight: 500; }
+.appstore b { font-size: 24px; line-height: 24px; font-weight: 600; letter-spacing: -.025em; }
+a.appstore:hover { background: #1f1f1f; color: #fff; transform: translateY(-1px); }
+a.appstore:active { transform: scale(.98); }
+/* Not out yet, so it's visibly not a button (B9: no dead links, or visibly disabled). */
+.appstore.soon { cursor: not-allowed; opacity: .72; }
+
+/* ---------- the home page ---------- */
+
+/* A phone, drawn round a screenshot. --w sets its width. Tailwind radii: 24 px outside, 8 px
+   bezel, so the screen is 24 - 8 = 16 px. The bezel is flat (no gradients). */
+.phone {
+  --w: 240px; width: var(--w); flex: none; padding: var(--s-75); border-radius: var(--r-3xl);
+  background: #1f1f1f;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .12), 0 30px 46px -26px rgba(40, 30, 15, .5), 0 10px 22px rgba(40, 30, 15, .12);
+}
+/* The screen's flat well colour shows while the screenshot loads, shaped like the screen. */
+.phone img { display: block; width: 100%; height: auto; border-radius: var(--r-2xl); background: #fff; }
+
+.section-title { font-size: 36px; line-height: 40px; font-weight: 600; letter-spacing: -.025em; text-align: center; margin: var(--s-900) auto var(--s-400); max-width: 680px; }
+.badge-icon {
+  display: inline-flex; align-items: center; justify-content: center; width: 40px; height: 40px; border-radius: var(--r-xl);
+  background: var(--well); color: var(--ink-soft); font-size: 24px; margin-bottom: var(--s-200);
+}
+
+/* hero */
+.hero { max-width: 1200px; margin: 0 auto; padding: var(--s-700) var(--s-300) var(--s-300); }
+.hero-copy { display: flex; flex-direction: column; align-items: center; text-align: center; }
+/* The one gradient: on the heading's text, left to right, light theme (B5). */
+.hero-title, .closing-title {
+  font-size: 48px; line-height: 48px; font-weight: 600; letter-spacing: -.035em; max-width: 680px; width: fit-content;
+  background: linear-gradient(90deg, #000000, #666666); -webkit-background-clip: text; background-clip: text; color: transparent;
+}
+.hero-sub { font-size: 18px; line-height: 28px; color: var(--body); max-width: 680px; margin-top: var(--s-300); }
+.hero-cta { display: flex; flex-direction: column; align-items: center; gap: var(--s-100); margin-top: var(--s-400); }
+.risk { font-size: 14px; line-height: 20px; font-weight: 500; color: var(--ink-soft); }
+.proof { margin-top: var(--s-400); max-width: 680px; text-align: center; font-size: 14px; line-height: 20px; color: var(--ink-soft); }
+.proof .icon { font-size: 20px; color: var(--ink-soft); }
+.proof b { white-space: nowrap; color: var(--ink); font-weight: 600; }
+/* The Mac window, with the iPhone over its bottom right corner. The window keeps its own round
+   corners (the screenshot's transparent), so it only needs a shadow. */
+.hero-media { position: relative; margin: var(--s-700) auto 0; max-width: 1100px; padding: 0 var(--s-700) var(--s-600) 0; }
+.mac { display: block; width: 100%; height: auto; filter: drop-shadow(0 24px 40px rgba(40, 30, 15, .16)) drop-shadow(0 2px 6px rgba(40, 30, 15, .08)); }
+.hero-media .phone { position: absolute; right: 0; bottom: 0; --w: 220px; }
+
+/* problem to solution */
+.problem, .benefits, .how, .proof-section, .faq, .closing { max-width: 1120px; margin: 0 auto; padding: 0 var(--s-300); }
+.problem-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--s-300); }
+.problem-card { background: var(--card); border-radius: var(--r-3xl); padding: var(--s-500); box-shadow: var(--lift); border: 1px solid transparent; }
+.problem-card h3 { font-size: 20px; line-height: 28px; font-weight: 600; }
+.problem-card p { font-size: 18px; line-height: 28px; color: var(--body); margin-top: var(--s-75); }
+.problem-card.before { background: var(--well); box-shadow: none; }
+.problem-card.before .badge-icon { background: #e6e1d6; color: var(--ink-soft); }
+.problem-card.before p { color: var(--ink-soft); }
+.problem-card.after { border-color: var(--line); }
+/* The one place the honey shows in this section: Threadbear's own card. */
+.problem-card.after .badge-icon { background: var(--honey-tint); color: var(--honey); }
+
+/* benefits */
+.feature {
+  display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); align-items: stretch; overflow: hidden;
+  background: var(--card); border-radius: var(--r-3xl); box-shadow: var(--lift);
+}
+.feature + .feature { margin-top: var(--s-300); }
+.feature-copy { padding: var(--s-700); align-self: center; }
+.feature-copy h3 { font-size: 30px; line-height: 36px; font-weight: 600; letter-spacing: -.02em; }
+.feature-copy p { font-size: 18px; line-height: 28px; color: var(--body); margin-top: var(--s-200); max-width: 460px; }
+/* Every picture sits on the same quiet well, so the screenshots do the talking. */
+.feature-media { position: relative; display: flex; justify-content: center; align-items: center; gap: var(--s-200); padding: var(--s-500) var(--s-300); background: var(--well); }
+.feature.flip .feature-copy { order: 2; }
+.feature-media .phone { --w: 236px; }
+.feature { grid-template-columns: minmax(0, 5fr) minmax(0, 6fr); }
+.feature.flip { grid-template-columns: minmax(0, 6fr) minmax(0, 5fr); }
+.feature-media.pair .phone { --w: 206px; }
+.feature-media.pair .phone:last-child { transform: translateY(var(--s-300)); }
+
+/* The tagline reveal (B11). Words start at 30% and go to full, one at a time, as you scroll. */
+.tagline-section { max-width: 1080px; margin: 0 auto; padding: var(--s-900) var(--s-300); }
+.tagline { max-width: 680px; margin: 0 auto; text-align: center; font-size: 60px; line-height: 60px; font-weight: 600; letter-spacing: -.03em; color: var(--ink); text-wrap: balance; }
+.tagline .word { opacity: .3; transition: opacity 500ms var(--ease); }
+.tagline .word.on { opacity: 1; }
+
+/* how it works */
+.steps { list-style: none; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--s-300); counter-reset: none; }
+.step { position: relative; background: var(--card); border-radius: var(--r-3xl); box-shadow: var(--lift); padding: var(--s-400); }
+.step-number {
+  position: absolute; top: var(--s-400); right: var(--s-400); width: 32px; height: 32px; border-radius: var(--r-full);
+  display: grid; place-items: center; background: var(--ink); color: #fff; font-size: 14px; line-height: 20px; font-weight: 600;
+}
+.step h3 { font-size: 20px; line-height: 28px; font-weight: 600; }
+.step p { font-size: 16px; line-height: 24px; color: var(--body); margin-top: var(--s-75); }
+
+/* proof */
+.quote { background: var(--card); border-radius: var(--r-3xl); box-shadow: var(--lift); padding: var(--s-600); }
+.quote blockquote p { font-size: 24px; line-height: 32px; font-weight: 500; letter-spacing: -.01em; color: var(--ink); }
+.quote figcaption { display: flex; align-items: center; gap: var(--s-100); margin-top: var(--s-300); font-size: 14px; line-height: 20px; color: var(--ink-soft); }
+.quote figcaption img { width: 40px; height: 40px; border-radius: var(--r-lg); }
+.quote figcaption b { color: var(--ink); font-weight: 600; }
+
+/* FAQ, as plain questions and answers */
+.faq-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--s-300); }
+.faq-item { background: var(--card); border-radius: var(--r-2xl); padding: var(--s-400); box-shadow: var(--lift); }
+.faq-item:last-child:nth-child(odd) { grid-column: 1 / -1; }
+.faq-item h3 { font-size: 18px; line-height: 28px; font-weight: 600; }
+.faq-item p { font-size: 16px; line-height: 24px; color: var(--body); margin-top: var(--s-75); }
+
+/* closing: the same promise and button as the top, with the risk reversal */
+.closing { margin-top: var(--s-900); padding-bottom: var(--s-700); text-align: center; display: flex; flex-direction: column; align-items: center; }
+.closing .hero-sub { text-align: center; max-width: 580px; }
+.risk-list { list-style: none; display: flex; flex-wrap: wrap; justify-content: center; gap: var(--s-100) var(--s-300); margin: var(--s-400) 0; max-width: 680px; }
+.risk-list li { display: flex; align-items: center; gap: var(--s-75); font-size: 16px; line-height: 24px; font-weight: 500; color: var(--ink); }
+.risk-list .icon { font-size: 20px; color: var(--ink-soft); }
+
+/* Scroll reveals (B7): up 32 px and in, once, on the base curve. Only once site.js has run, so
+   nothing is hidden without JavaScript. */
+.js .reveal { opacity: 0; transform: translateY(var(--s-400)); transition: opacity 700ms var(--ease), transform 700ms var(--ease); }
+.js .reveal.in { opacity: 1; transform: none; }
+
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  /* Movement becomes a plain fade. */
+  .js .reveal { transform: none; }
+  .menu li, .menu-toggle span, .btn, .appstore, .skip { transition-property: opacity, background-color, color; }
+  .menu li { transform: none; }
+}
+
+/* The closing repeats the hero, bigger, since it has the whole width to itself. */
+.closing-title { font-size: 60px; line-height: 60px; }
+
+@media (max-width: 960px) {
+  .closing-title { font-size: 48px; line-height: 48px; }
+  .steps { grid-template-columns: 1fr; }
+}
+@media (max-width: 860px) {
+  main { padding-top: var(--s-800); }
+  .hero { padding-top: var(--s-400); }
+  .proof { align-items: flex-start; }
+  /* The window is small on a phone, so the iPhone sits a little lower and takes less of it. */
+  .hero-media { margin-top: var(--s-500); padding: 0 var(--s-500) var(--s-700) 0; }
+  .hero-media .phone { --w: min(34vw, 180px); padding: var(--s-50); border-radius: var(--r-2xl); }
+  .hero-media .phone img { border-radius: var(--r-xl); }
+  .section-title { font-size: 30px; line-height: 36px; margin: var(--s-700) auto var(--s-300); }
+  .problem-grid, .faq-list { grid-template-columns: 1fr; }
+  .problem-card { padding: var(--s-400) var(--s-300); }
+  .feature, .feature.flip { grid-template-columns: 1fr; }
+  .feature.flip .feature-copy { order: 0; }
+  .feature-copy { padding: var(--s-400) var(--s-300); }
+  .feature-copy h3 { font-size: 24px; line-height: 32px; }
+  .feature-copy p { font-size: 16px; line-height: 24px; }
+  .feature-media { padding: var(--s-400) var(--s-200); }
+  .feature-media .phone { --w: min(56vw, 240px); }
+  .feature-media.pair { gap: var(--s-100); }
+  .feature-media.pair .phone { --w: min(38vw, 200px); }
+  .tagline-section { padding: var(--s-700) var(--s-300); }
+  .tagline { font-size: 36px; line-height: 40px; }
+  .quote { padding: var(--s-400) var(--s-300); }
+  .quote blockquote p { font-size: 20px; line-height: 28px; }
+  .faq-item { padding: var(--s-300); }
+  .closing { margin-top: var(--s-700); }
+}
+@media (max-width: 480px) {
+  /* "you can patch yourself" won't fit on one line at 36 px, so the hand break goes and
+     text-wrap: balance splits it into even lines instead of leaving a word alone. */
+  .hero-title, .closing-title { font-size: 36px; line-height: 40px; text-wrap: balance; }
+  .hero-title br, .closing-title br { display: none; }
+}
+
+
+/* ---------- Threadbear's own pieces ---------- */
+
+/* The main button, bigger than the header's, with the GitHub mark. While the repo's private it's
+   visibly not a button (skill B9): greyed, no hover, and "Coming soon" beside the label. */
+.btn-lg { padding: var(--s-100) var(--s-300); border-radius: var(--r-xl); gap: var(--s-100); }
+.btn-lg .icon { font-size: 20px; }
+.btn.soon { background: var(--well); color: var(--ink-soft); box-shadow: inset 0 0 0 1px var(--line); cursor: not-allowed; }
+.btn.soon:hover { background: var(--well); color: var(--ink-soft); transform: none; }
+.btn.soon small {
+  font-size: 12px; line-height: 16px; font-weight: 600; padding: var(--s-25) var(--s-75); border-radius: var(--r-full);
+  background: var(--card); color: var(--ink-soft); box-shadow: inset 0 0 0 1px var(--line);
+}
+
+/* A part of the Mac window, cropped at full size so it can be read in a card: a plain white
+   panel with a hairline and the usual lift, rather than a window. */
+.mac.crop { filter: none; border-radius: var(--r-xl); box-shadow: 0 0 0 1px var(--line), var(--lift); background: #fff; max-width: 470px; }
+
+/* The patch file, laid over the top corner of the screenshot it made the buttons in (the top of
+   that crop is only the end of the reply). 16 px card, 12 px inset, so the code block inside gets
+   16 - 12 = 4 px. */
+.feature-media.patches { flex-direction: column; align-items: stretch; gap: 0; }
+.feature-media.patches .mac { margin: calc(var(--s-700) * -1) auto 0 0; }
+.code {
+  position: relative; z-index: 1; width: min(100%, 320px); margin: 0 0 0 auto; padding: var(--s-100);
+  background: var(--card); border-radius: var(--r-2xl); box-shadow: 0 18px 40px -12px rgba(40, 30, 15, .3), 0 2px 6px rgba(40, 30, 15, .08);
+}
+.code figcaption { font-size: 12px; line-height: 16px; color: var(--ink-soft); padding: var(--s-50) var(--s-50) var(--s-75); }
+.code pre { margin: 0; padding: var(--s-100); border-radius: var(--r); background: #1f1c18; color: #efe9de; overflow-x: auto; }
+.code pre code { font-size: 12px; line-height: 16px; }
+
+/* The sleeping bear, curled up on the corner of the screenshot beside "hibernate". */
+.bear { display: block; height: auto; pointer-events: none; }
+.bear-sleep { position: absolute; width: 140px; right: var(--s-400); bottom: var(--s-300); filter: drop-shadow(0 8px 12px rgba(40, 30, 15, .18)); }
+
+/* Where your threads live: three plain cards, top to bottom, joined by a short line. */
+.flow { list-style: none; display: flex; flex-direction: column; gap: var(--s-300); width: min(100%, 380px); }
+.flow li {
+  position: relative; display: grid; grid-template-columns: auto 1fr; column-gap: var(--s-200); align-items: center;
+  padding: var(--s-200); background: var(--card); border-radius: var(--r-2xl); box-shadow: var(--lift);
+}
+.flow li + li::before { content: ""; position: absolute; left: 36px; top: calc(var(--s-300) * -1); width: 2px; height: var(--s-300); background: var(--line); }
+.flow .badge-icon { grid-row: span 2; margin: 0; }
+.flow b { font-size: 16px; line-height: 24px; font-weight: 600; }
+.flow span:not(.badge-icon) { font-size: 14px; line-height: 20px; color: var(--ink-soft); }
+
+/* Why I made it: the quote beside the bear at his workbench. The picture's paper white is close
+   to the page's, so it sits straight on the page with no card. */
+.why { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: var(--s-500); align-items: center; }
+.workbench { display: block; width: 100%; height: auto; border-radius: var(--r-3xl); }
+
+/* The closing: the waving bear over the heading, then both ways to get it side by side. */
+.bear-wave { width: 120px; margin-bottom: var(--s-300); }
+.closing-cta { display: flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: var(--s-200); margin-top: var(--s-400); }
+.closing-cta .btn-lg { height: 56px; }
+
+@media (max-width: 860px) {
+  .why { grid-template-columns: 1fr; gap: var(--s-300); }
+  /* No room to overlap on a phone: the code card would cover the buttons it made. */
+  .code { width: 100%; }
+  .feature-media.patches .mac { margin-top: var(--s-200); }
+  .bear-sleep { width: 80px; right: var(--s-75); bottom: 0; }
+}
+
+
+/* The 404 */
+.lost { max-width: 560px; margin: var(--s-700) auto var(--s-900); padding: 0 var(--s-300); text-align: center; display: flex; flex-direction: column; align-items: center; }
+.lost img { width: 120px; height: auto; margin-bottom: var(--s-300); }
+.lost .lede { margin-left: auto; margin-right: auto; }
+.lost .btn { margin-top: var(--s-400); }

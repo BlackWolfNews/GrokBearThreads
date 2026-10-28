@@ -1,0 +1,14 @@
+{
+  "name": "threadbear-site",
+  "private": true,
+  "type": "module",
+  "description": "threadbear.mikecann.app, the landing page. Plain pages, no bundler and no dependencies.",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "serve": "node scripts/build.mjs && node scripts/serve.mjs",
+    "shots": "node scripts/shots.mjs",
+    "images": "node scripts/images.mjs && node scripts/og.mjs",
+    "check": "node scripts/build.mjs && npx wrangler@4 deploy --dry-run",
+    "deploy": "node scripts/build.mjs && npx wrangler@4 deploy"
+  }
+}

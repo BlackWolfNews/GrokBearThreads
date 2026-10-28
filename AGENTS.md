@@ -11,7 +11,9 @@ that drives the official Claude Code (and later Codex) CLIs, and a native
 SwiftUI + AppKit Mac app (`app/`) that talks to it over the protocol in
 `docs/protocol.md`. Read `docs/plan.md` and `docs/protocol.md` before changing
 anything. The Convex mirror, the iPhone app (`ios/`) and the website (`web/`)
-are in `docs/convex-backend.md` and `docs/website.md`.
+are in `docs/convex-backend.md` and `docs/website.md`. The public landing
+page (threadbear.mikecann.app, not deployed yet) is `site/`, a separate
+static site with its own `package.json`; its comments say how to build it.
 
 ## Rules
 

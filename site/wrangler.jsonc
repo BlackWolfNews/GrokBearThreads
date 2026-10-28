@@ -1,0 +1,30 @@
+{
+  // threadbear.mikecann.app, the landing page. Not deployed yet: `npm run check` is a dry run,
+  // `npm run deploy` puts it live (and makes the custom domain's DNS record on mikecann.app).
+  "name": "threadbear-site",
+  "main": "worker.mjs",
+  "compatibility_date": "2026-10-28",
+  // The site is ./dist, built by scripts/build.mjs. The Worker runs first for every request so
+  // its headers (headers.mjs) apply to every file; it hands everything to the ASSETS binding.
+  "assets": {
+    "directory": "./dist",
+    "binding": "ASSETS",
+    "run_worker_first": true,
+    "html_handling": "auto-trailing-slash",
+    // Anything that isn't a file gets 404.html, with a 404.
+    "not_found_handling": "404-page"
+  },
+  "routes": [
+    {
+      "pattern": "threadbear.mikecann.app",
+      "custom_domain": true
+    }
+  ],
+  // No workers.dev address or preview URLs: the site's only at threadbear.mikecann.app.
+  "workers_dev": false,
+  "preview_urls": false,
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 1
+  }
+}
