@@ -466,6 +466,40 @@ describe('Codex threads end to end (real codex app-server)', { concurrency: fals
     assertProtocol(t.id);
   });
 
+  test('editing an earlier message: Codex forgets what came after it, and its file edit is undone', async () => {
+    const t = await createThread({ text: 'Reply with just: ok' });
+    assert.equal((await turnDone(t.id, t.turnId)).outcome, 'completed');
+    const file = path.join(work, 'edit-e2e.txt');
+    fs.writeFileSync(file, 'one\n');
+    const second = (
+      await client.call('threads.send', {
+        threadId: t.id,
+        text: 'My secret word is PELICAN. Use apply_patch to change edit-e2e.txt so it says two instead of one. Then reply with just: done',
+      })
+    ).turnId;
+    assert.equal((await turnDone(t.id, second)).outcome, 'completed');
+    assert.equal(fs.readFileSync(file, 'utf8').trim(), 'two', 'the agent edited the file');
+    const seq = persisted(t.id).find((e) => e.type === 'user.message' && e.turnId === second).seq;
+    const r = await client.call('threads.edit', {
+      threadId: t.id,
+      seq,
+      text: 'What secret word did I tell you, if any? Answer with one word, or NONE. Do not use any tools.',
+    });
+    assert.equal(r.rewound.fromSeq, seq);
+    assert.equal(r.rewound.files.how, 'diffs');
+    assert.deepEqual(r.rewound.files.failed, []);
+    assert.equal(fs.readFileSync(file, 'utf8'), 'one\n', 'the edit was undone');
+    const done = await turnDone(t.id, r.turnId);
+    assert.equal(done.outcome, 'completed', done.error);
+    const reply = replyText(t.id, r.turnId);
+    assert.match(reply, /NONE/i);
+    assert.doesNotMatch(reply, /PELICAN/i);
+    const edited = persisted(t.id).find((e) => e.type === 'user.message' && e.turnId === r.turnId);
+    assert.equal(edited.editOf, seq);
+    assertProtocol(t.id);
+    fs.rmSync(file, { force: true });
+  });
+
   test('archiving a thread archives it in Codex too', async () => {
     const native = summaries.get(words.id)!.nativeSessionId;
     await client.call('threads.update', { threadId: words.id, archived: true });

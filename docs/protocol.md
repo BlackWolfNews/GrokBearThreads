@@ -567,7 +567,7 @@ Persisted event types (stored in `events.ndjson`, returned by `threads.events`):
 
 | type | fields |
 |---|---|
-| `user.message` | `text`, `images: ImageRef[]`, `answers?: AskAnswer[]` (the open card's asks it answers, as `threads.send` gave them: for showing, the agent only gets `text`), `origin?: "runner" \| "schedule" \| "phone"` (`runner` when the runner sent the message by itself, such as the resume after a restart; `schedule` when a schedule sent it, with `scheduleId`; `phone` when it came from the phone through the Convex mirror (Sync); absent for anything a person or client sent), `scheduleId?` |
+| `user.message` | `text`, `images: ImageRef[]`, `answers?: AskAnswer[]` (the open card's asks it answers, as `threads.send` gave them: for showing, the agent only gets `text`), `origin?: "runner" \| "schedule" \| "phone"` (`runner` when the runner sent the message by itself, such as the resume after a restart; `schedule` when a schedule sent it, with `scheduleId`; `phone` when it came from the phone through the Convex mirror (Sync); absent for anything a person or client sent), `scheduleId?`, `editOf?: number` (the seq of the message this one replaced, see Editing a message) |
 | `assistant.text` | `itemId`, `text` (complete markdown for that block) |
 | `reasoning` | `itemId`, `text` (summary) |
 | `tool.call` | `itemId`, `name` (raw tool name), `kind` (`command` \| `read` \| `edit` \| `write` \| `search` \| `web` \| `mcp` \| `task` \| `todo` \| `image` \| `other`; `image` is image generation), `title` (one line, e.g. "npm test" or "Edit src/a.ts"), `input` (object, large strings truncated to 16 KB) |
@@ -583,6 +583,7 @@ Persisted event types (stored in `events.ndjson`, returned by `threads.events`):
 | `system.note` | `text` (e.g. "Resumed session", "Compacted the conversation", "Patch reseed added: action Reseed dev DB.") |
 | `error` | `message` |
 | `action.run` | `actionId`, `patch`, `title`, `command`, `ok`, `exitCode?`, `text` (what it printed, truncated to 64 KB), `truncated`, `durationMs`, `trigger?` (`"turn.end"` when a hook ran it, `"worktree.setup"` for a new worktree's `setup` (see Worktrees); absent for a chip or `tb run`). A command that `actions.run` or a hook ran; outside any turn unless one was running, in which case it carries that `turnId` |
+| `thread.rewound` | `fromSeq`, `toSeq`, `files: { undone: string[], failed: { path, reason }[], how: "checkpoint" \| "diffs" \| "none" }`. Mike edited the message at `fromSeq` (see Editing a message): every event from `fromSeq` to `toSeq` (inclusive, always this event's `seq` - 1) is gone from the conversation, and clients hide them. Outside any turn. The edited message comes next, as a `user.message` with `editOf: fromSeq` |
 
 Transient events are only sent to subscribers, never persisted, and carry
 `seq` of the last persisted event (they don't consume a number):
@@ -606,6 +607,7 @@ replaces whatever the deltas built up.
 | `threads.create` | `{ text: string, images?: ImageRef[], cwd?: string, accountId?: string, poolId?: string, model?: string, effort?: EffortLevel, permissionMode?: "full" \| "ask", title?: string, worktree?: boolean }` | `{ thread: ThreadSummary }` (the first turn starts straight away). In a repo that asks for worktrees (see Worktrees) the thread gets one of its own before its first turn; `worktree: false` starts it in the folder as it is. The thread's `provider` is its account's. With no `model`, the thread gets `defaults.models[provider]` from `hello`, or `defaults.model` for Claude, or else the account's own default. With no `effort`, `defaults.efforts[provider]`, or else the model's own level. See "Models and effort across providers" |
 | `threads.send` | `{ threadId, text, images?: ImageRef[], answers?: AskAnswer[] }` | `{ turnId }`. If a turn is running and its CLI is live, the message goes into that turn straight away (a `user.message` under the running `turnId`, which is returned): the agent takes it at its next step, or right after its reply if that was already finishing, and the turn doesn't complete until it has been answered. If the thread was moved to another login (usually another provider) during the running turn, a message from Mike (or the phone) doesn't steer into the old CLI: the turn is stopped (`system.note` "Stopped here so <model> can take over.") and the message starts the next turn on the new login, with the handoff, as T3 Code does. Otherwise (the CLI is still starting or leaving, messages are already waiting, a move or fresh CLI is due on the next turn, Stop has been pressed, or the turn is only an approval for a background subagent) the message is queued and starts its own turn when the running one ends |
 | `threads.interrupt` | `{ threadId }` | `{}` |
+| `threads.edit` | `{ threadId, seq, text, images?: ImageRef[] }` | `{ turnId, rewound: { seq, fromSeq, toSeq, files } }`. Replaces the message at `seq` and carries on from there (see Editing a message): stops any turn, cuts the conversation back to just before it, undoes the agent's file changes since, and sends `text` as a new turn. Answers once the new turn has started, which can take a few seconds. `-32602` with the reason when the message can't be edited; `-32020` while another edit of the thread is under way or the runner is handing over |
 | `threads.update` | `{ threadId, title?, titleBy?: "mike" \| "agent", cwd?, accountId?, poolId?: string \| null, model?: string \| null, effort?: EffortLevel \| null, permissionMode?, snoozedUntil?: string \| null, archived?: boolean }` | `{ thread: ThreadSummary }`. A `title` is Mike's unless `titleBy` is `"agent"` (the `update_thread` tool, unless the agent says Mike asked for it). Once Mike has named a thread, an agent's different title is `-32602` and nothing in the call changes, and no model title replaces it. `snoozedUntil` is an ISO time, or `"restart"` for until the runner next starts (any start: a planned restart, a crash, a reboot), when the thread wakes before the restart's resume is sent, so a thread put away while its own restart waited is still carried on. Snoozing or archiving releases the CLI (and archives a Codex thread in Codex too). Changing account or cwd takes effect on the next turn; an account change during a turn says so in a `system.note` ("<model> takes over from your next message, which stops this turn."), see `threads.send`. A model or effort change reaches a live Claude CLI straight away (`null` goes back to the default); on Codex it applies from the next turn, with a `system.note` if a turn is running. A folder change on the same Claude account copies the native session's transcript to the new folder and resumes it; on the same Codex account the session carries on in the new folder from the next turn. Otherwise (or if that fails) it starts a new native session with a handoff note: the thread so far under a 16,000-character budget (runner/src/handoff-history.ts, after T3 Code's): messages, tool calls with a little of their output, edited files and errors; the last user message, the last reply and the first message first, then newest to oldest, with gaps marked and a pointer to `read_thread` for the rest. An account of the other provider switches `provider`, resets `model` and `effort` to that provider's defaults unless the same call sets them, and clears the thread's "Always allow" rules. `model` and `effort` are checked as in "Models and effort across providers". `accountId` pins the thread to that login (clearing `poolId`). `poolId: null` pins it to its current login; a pool id puts it in that pool, and moves it onto one of the pool's logins at once (from the next turn) if its current one isn't in it; an unknown one is `-32602`. A move from one Claude login to another copies the session's transcript into the new login's config folder and resumes it there, as a folder move does |
 | `threads.retitle` | `{ dryRun?: boolean, threadIds?: string[] }` | `{ threads: { threadId, from: string, to?: string, reason?: string }[] }`. Gives a model title to every thread, archived and snoozed included, whose title is still its first message's first line and that nobody has named (`titleSet`); see "Titles" under "Settings and models". One entry per such thread: `to` when it was renamed, `reason` when it wasn't (no key, private folder, over budget, renamed meanwhile). With `threadIds`, those threads whatever their title (a poor model title can be asked for again), still never one named by hand. The model also gets the start of the thread's first reply. `dryRun` lists them without asking the model (`tb retitle`) |
 | `threads.delete` | `{ threadId }` | `{}`. Stops the thread's CLI and moves its folder to `trash/` in the data dir (a Codex thread is archived in Codex too). Every client gets `thread.deleted` |
@@ -1033,6 +1035,59 @@ thread to another login when the one it's on runs out of room.
   never moves. Threads from before pools stay pinned. A pool's logins
   include noted ones only when it lists them, so a "Convex work only"
   login only runs threads in a pool that names it.
+
+## Editing a message
+
+Mike can go back to one of his own messages, change it and carry on from
+there, as in Codex: the agent forgets everything from that message on,
+the files it changed since are put back, and the edited text is sent as
+if the rest had never happened (Mike, 28 Oct 2026, picked undoing files
+too).
+
+`threads.edit { threadId, seq, text, images? }`, in order:
+
+1. **Checks.** `seq` must be a `user.message` that Mike sent (no `origin`,
+   or `"phone"`; not a message from the runner, a schedule or an agent),
+   that started its own turn (it comes before the `turn.started` with its
+   `turnId`; one sent into a running turn went into that turn, and can't
+   be cut out of it alone), and that isn't already hidden by a
+   `thread.rewound`. Otherwise `-32602` saying why.
+2. **Stops the thread.** A running turn is interrupted and the edit waits
+   for it to end. Messages queued behind it are dropped (they came after
+   the edited one); one sent while the edit is under way waits and goes
+   after the edited message. The CLI is released, background work and all.
+3. **Cuts the conversation.** The message's `turnId` is the id the agent
+   got it under. Claude: the runner finds that id in the session's
+   transcript and the next start resumes at the entry before it (the Agent
+   SDK's `resumeSessionAt`), so the CLI writes the rest of the
+   conversation as a new branch. Codex: `thread/revert` with
+   `beforeTurnId`, the Codex turn that message started (the runner sends
+   its id as `clientUserMessageId`, which Codex keeps on the turn's user
+   message). A message the current native session doesn't have (the
+   thread moved to another login or provider since) is `-32602`. Editing the
+   session's first message starts a fresh session, with a handoff note
+   when the thread has messages before it.
+4. **Undoes files.** Claude sessions keep file checkpoints
+   (`enableFileCheckpointing`), and the runner rewinds them to that
+   message (`rewindFiles`): every file the session's Edit and Write tools
+   (sub-agents' too) changed since goes back, and files they made are
+   deleted (`how: "checkpoint"`). When there are no checkpoints for it (a
+   session from before this, and every Codex thread), the runner reverses
+   the `edit.diff` events after the message itself, newest first
+   (`how: "diffs"`); a file that has changed since in a way the diff
+   doesn't fit is left alone and listed in `failed` with the reason.
+   Changes made by shell commands are never undone.
+5. **Records it.** A `thread.rewound` event (`fromSeq` = `seq`, `toSeq`
+   its own seq - 1, `files`), then the edited text starts a new turn as a
+   `user.message` with `editOf: seq`. The thread's open asks, pending
+   reviews and panel request from the cut range go.
+
+Everything that reads the thread afterwards leaves the cut events out:
+the app's transcript, `read_thread`, handoff notes, Highlights (its pins
+stay), the librarian, and what the phone mirror sends from then on
+(messages it had already sent stay on the phone for now). `threads.events` still returns them, so
+a client can show what was cut if it wants to. A later edit can cut back
+further, across an earlier `thread.rewound`.
 
 ## Needs you
 

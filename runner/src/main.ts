@@ -218,6 +218,7 @@ async function main(): Promise<void> {
       list: (include) => runner.list(include),
       get: (id) => runner.get(id),
       events: (id, o) => runner.events(id, o),
+      cuts: (id) => runner.cuts(id),
       listProjects: () => projects.list({ archived: true }),
       listSchedules: () => scheduler.list(),
       listAccounts: () => runner.hello().accounts,

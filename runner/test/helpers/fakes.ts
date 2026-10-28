@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import type { AgentAdapter, AgentSession, SessionSink, StartSessionOptions, UserInput, AdapterOutput, TurnResult } from '../../src/adapters/types.ts';
+import type { AgentAdapter, AgentSession, SessionSink, StartSessionOptions, UserInput, AdapterOutput, TurnResult, RewindRequest, RewindResult } from '../../src/adapters/types.ts';
 import type { Account, EffortLevel, ModelChoice, PermissionMode, Provider } from '../../src/protocol.ts';
 import type { Config } from '../../src/config.ts';
 import { ensureHome } from '../../src/config.ts';
@@ -102,6 +102,9 @@ export class FakeAdapter implements AgentAdapter {
   models?: (account: Account) => Promise<ModelChoice[]>;
   archived: { accountId: string; nativeSessionId: string }[] = [];
   archive?: (account: Account, nativeSessionId: string) => Promise<void>;
+  // Set by a test of editing a message; `rewound` keeps what it was asked.
+  rewind?: (req: RewindRequest) => Promise<RewindResult>;
+  rewound: RewindRequest[] = [];
   binaries: string[] = [];
   constructor(provider: Provider = 'claude', flags: { movesFolders?: boolean; settingsApplyNextTurn?: boolean; wakesAfterTasks?: boolean; archives?: boolean } = {}) {
     this.provider = provider;

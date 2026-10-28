@@ -39,6 +39,7 @@ const THREAD_METHODS = new Set([
   'reviews.respond',
   'reviews.cancel',
   'threads.send',
+  'threads.edit',
   'threads.interrupt',
   'threads.update',
   'threads.delete',
@@ -384,6 +385,8 @@ export class RpcServer {
         return r.cancelReview(reqString(p, 'threadId'), reqString(p, 'reviewId'), p.revision as number);
       case 'threads.send':
         return r.send(reqString(p, 'threadId'), optString(p, 'text') ?? '', optImages(p) ?? [], optAnswers(p));
+      case 'threads.edit':
+        return r.editMessage(reqString(p, 'threadId'), reqNumber(p, 'seq'), optString(p, 'text') ?? '', optImages(p) ?? []);
       case 'threads.interrupt':
         return r.interrupt(reqString(p, 'threadId'));
       case 'threads.update': {

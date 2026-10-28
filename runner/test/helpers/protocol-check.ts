@@ -30,7 +30,7 @@ function isImageRef(v: Obj): boolean {
 }
 
 const PERSISTED: Record<string, (e: Obj) => string | null> = {
-  'user.message': (e) => (isStr(e.text) && Array.isArray(e.images) && e.images.every(isImageRef) ? null : 'text, images'),
+  'user.message': (e) => (isStr(e.text) && Array.isArray(e.images) && e.images.every(isImageRef) && (e.editOf === undefined || isNum(e.editOf)) ? null : 'text, images, editOf?'),
   'assistant.text': (e) => (isStr(e.itemId) && isStr(e.text) ? null : 'itemId, text'),
   reasoning: (e) => (isStr(e.itemId) && isStr(e.text) ? null : 'itemId, text'),
   'tool.call': (e) =>
@@ -115,6 +115,12 @@ const PERSISTED: Record<string, (e: Obj) => string | null> = {
     (e.trigger === undefined || e.trigger === 'turn.end' || e.trigger === 'worktree.setup')
       ? null
       : 'actionId, patch, title, command, ok, exitCode?, text, truncated, durationMs, trigger?',
+  'thread.rewound': (e) =>
+    isNum(e.fromSeq) && isNum(e.toSeq) && e.toSeq === e.seq - 1 && e.fromSeq <= e.toSeq && e.turnId === undefined &&
+    e.files && Array.isArray(e.files.undone) && e.files.undone.every(isStr) && Array.isArray(e.files.failed) &&
+    e.files.failed.every((f: Obj) => isStr(f.path) && isStr(f.reason)) && ['checkpoint', 'diffs', 'none'].includes(e.files.how)
+      ? null
+      : 'fromSeq, toSeq (seq - 1), no turnId, files { undone, failed, how }',
 };
 
 const TRANSIENT: Record<string, (e: Obj) => string | null> = {

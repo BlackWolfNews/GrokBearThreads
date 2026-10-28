@@ -6,7 +6,7 @@ import { atomicWriteFileSync, readJsonSync } from './fsutil.ts';
 import { paths } from './config.ts';
 import type { WorktreeRecord } from './worktrees.ts';
 
-export type QueuedSend = { turnId: string; text: string; images: ImageRef[]; origin?: MessageOrigin; scheduleId?: string; reviewId?: string; reviewResponse?: ReviewDraft; answers?: AskAnswer[] };
+export type QueuedSend = { turnId: string; text: string; images: ImageRef[]; origin?: MessageOrigin; scheduleId?: string; reviewId?: string; reviewResponse?: ReviewDraft; answers?: AskAnswer[]; editOf?: number };
 
 // What thread.json holds: the public summary fields plus a few internal ones.
 export type ThreadRecord = {
@@ -97,7 +97,19 @@ export type ThreadRecord = {
   schedule?: ThreadSchedule;
   // show_panel's request, until the app shows it or Mike sends a message.
   panelRequest?: PanelRequest;
+  // The seq ranges edits of earlier messages cut out of the conversation
+  // (docs/protocol.md, "Editing a message"), oldest first. Everything that
+  // reads the thread for the agent or the librarian leaves them out.
+  rewinds?: { from: number; to: number }[];
+  // Claude: the transcript entry the next start resumes at, after an edit
+  // cut the conversation back. Used once.
+  resumeAt?: string;
 };
+
+// Whether an edit cut the event at `seq` out of the conversation.
+export function cutOut(rec: Pick<ThreadRecord, 'rewinds'>, seq: number): boolean {
+  return rec.rewinds?.some((r) => seq >= r.from && seq <= r.to) ?? false;
+}
 
 export type ThreadProjectRecord = Omit<ThreadProject, 'title'>;
 

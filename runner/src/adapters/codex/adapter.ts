@@ -11,8 +11,8 @@ import type { Account, EffortLevel, ModelChoice, PermissionMode } from '../../pr
 import { isEffortLevel } from '../../protocol.ts';
 import type { Logger } from '../../log.ts';
 import type { ProcessRegistry } from '../../proc.ts';
-import type { AdapterOutput, AgentAdapter, AgentSession, SessionSink, StartSessionOptions, TurnResult, UserInput } from '../types.ts';
-import { SessionNotFoundError } from '../types.ts';
+import type { AdapterOutput, AgentAdapter, AgentSession, RewindRequest, RewindResult, SessionSink, StartSessionOptions, TurnResult, UserInput } from '../types.ts';
+import { RewindRefusedError, SessionNotFoundError } from '../types.ts';
 import { fileContext, type NormalizerContext } from '../context.ts';
 import {
   AppServerProcess,
@@ -180,6 +180,59 @@ export class CodexAdapter implements AgentAdapter {
     );
     this.children.delete(nativeSessionId);
   }
+
+  // An edit of an earlier message (docs/protocol.md, "Editing a message"):
+  // Codex drops the turn that message started, and every later one, from
+  // the thread's history with thread/revert. It never touches files; the
+  // runner reverses the thread's diffs. Every turn the runner starts
+  // carries its message id as clientUserMessageId, which is how the turn is
+  // found.
+  async rewind(req: RewindRequest): Promise<RewindResult> {
+    return withShortLivedProcess(
+      { ...this.shortLived(req.account, `rewind:${req.threadId}`), cwd: req.cwd },
+      async (p) => {
+        try {
+          await p.request('thread/resume', { threadId: req.sessionId, excludeTurns: true });
+        } catch (e) {
+          if (!/archived/i.test(errText(e))) throw e;
+          await p.request('thread/unarchive', { threadId: req.sessionId });
+          await p.request('thread/resume', { threadId: req.sessionId, excludeTurns: true });
+        }
+        const found = await findCodexTurn(p, req.sessionId, req.messageId);
+        if (!found) throw new RewindRefusedError("This message isn't in the thread's current Codex session (it has moved to another login or provider since), so it can't be edited.");
+        if (found.first) return { fresh: true };
+        await p.request('thread/revert', { threadId: req.sessionId, beforeTurnId: found.turnId });
+        return {};
+      },
+      (p, live) => this.track(p, live),
+    );
+  }
+}
+
+// The Codex turn a runner message started, newest first, and whether it's
+// the thread's first. Null when no turn carries the id, or the message
+// went into a turn another message started (it can't be cut out alone).
+async function findCodexTurn(p: AppServerProcess, threadId: string, messageId: string): Promise<{ turnId: string; first: boolean } | null> {
+  let cursor: string | null = null;
+  for (let page = 0; page < 200; page++) {
+    const r: { data?: { id?: string; items?: { type?: string; clientId?: string | null }[] }[]; nextCursor?: string | null } = await p.request('thread/turns/list', {
+      threadId,
+      sortDirection: 'desc',
+      limit: 50,
+      ...(cursor ? { cursor } : {}),
+    });
+    const turns = r?.data ?? [];
+    for (let i = 0; i < turns.length; i++) {
+      const asked = (turns[i].items ?? []).filter((it) => it?.type === 'userMessage');
+      const at = asked.findIndex((it) => it.clientId === messageId);
+      if (at < 0) continue;
+      if (at > 0 || typeof turns[i].id !== 'string') return null;
+      return { turnId: turns[i].id!, first: i === turns.length - 1 && !r.nextCursor };
+    }
+    cursor = r?.nextCursor ?? null;
+    if (!cursor) return null;
+  }
+  return null;
 }
 
 // model/list rows as the protocol's ModelChoice.

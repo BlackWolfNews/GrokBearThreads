@@ -484,7 +484,7 @@ export type EventBody =
   | { type: 'review.updated'; review: DesignReview }
   // origin is set only on messages the runner sent by itself (the resume
   // after a restart).
-  | { type: 'user.message'; text: string; images: ImageRef[]; origin?: MessageOrigin; scheduleId?: string; reviewId?: string; reviewResponse?: ReviewDraft; answers?: AskAnswer[] }
+  | { type: 'user.message'; text: string; images: ImageRef[]; origin?: MessageOrigin; scheduleId?: string; reviewId?: string; reviewResponse?: ReviewDraft; answers?: AskAnswer[]; editOf?: number }
   | { type: 'assistant.text'; itemId: string; text: string }
   | { type: 'reasoning'; itemId: string; text: string }
   | { type: 'tool.call'; itemId: string; name: string; kind: ToolKind; title: string; input: Record<string, unknown> }
@@ -544,7 +544,16 @@ export type EventBody =
       truncated: boolean;
       durationMs: number;
       trigger?: HookTrigger | 'worktree.setup'; // set when a hook or a new worktree's setup ran it, absent for a chip or tb run
-    };
+    }
+  // Mike edited the message at fromSeq (docs/protocol.md, "Editing a
+  // message"): fromSeq..toSeq are gone from the conversation. Outside any turn.
+  | { type: 'thread.rewound'; fromSeq: number; toSeq: number; files: RewoundFiles };
+
+// What an edit did to the files the agent had changed since the message.
+// how: "checkpoint" when Claude's own file checkpoints put them back,
+// "diffs" when the runner reversed the thread's edit.diff events, "none"
+// when there was nothing to undo.
+export type RewoundFiles = { undone: string[]; failed: { path: string; reason: string }[]; how: 'checkpoint' | 'diffs' | 'none' };
 
 export type DeltaType = 'assistant.text.delta' | 'reasoning.delta' | 'tool.output.delta';
 export type DeltaBody = { type: DeltaType; itemId: string; text: string };
@@ -593,6 +602,7 @@ export const PERSISTED_TYPES = new Set<string>([
   'system.note',
   'error',
   'action.run',
+  'thread.rewound',
 ]);
 
 export const TRANSIENT_TYPES = new Set<string>(['assistant.text.delta', 'reasoning.delta', 'tool.output.delta']);

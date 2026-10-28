@@ -32,6 +32,11 @@ export type StartSessionOptions = {
   // reports the real one through the `session` output.
   sessionId: string;
   resume: boolean;
+  // With resume, Claude picks the session up at this transcript entry
+  // rather than at its end: an edit cut the conversation back to it
+  // (docs/protocol.md, "Editing a message"). Codex cuts its own history
+  // in rewind(), so it never gets one.
+  resumeAt?: string;
   mediaDir: string; // images from tool results are saved here
   blobsDir: string; // tool output over 64 KB is saved here
   tmpDir: string;
@@ -176,6 +181,37 @@ export interface AgentSession {
   kill(): void;
 }
 
+// Cutting a native session back to just before one of the runner's
+// messages (docs/protocol.md, "Editing a message"). The thread's CLI is
+// never live while this runs.
+export type RewindRequest = {
+  threadId: string;
+  account: Account;
+  cwd: string;
+  sessionId: string;
+  messageId: string; // the id the message was sent under (its turnId)
+};
+
+export type RewindResult = {
+  // Where the next start picks the session up (Claude): an entry to resume
+  // at. Absent when the session itself is already cut (Codex).
+  resumeAt?: string;
+  // The message opened the session: start a fresh one instead.
+  fresh?: boolean;
+  // The files the CLI's own checkpoints put back. Absent when it has none
+  // for this message, so the runner reverses the thread's diffs instead.
+  files?: { undone: string[]; failed: { path: string; reason: string }[] };
+};
+
+// The session doesn't have the message (the thread moved to another login
+// or provider since it was sent): there's nothing to cut back to.
+export class RewindRefusedError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'RewindRefusedError';
+  }
+}
+
 export interface AgentAdapter {
   readonly provider: Provider;
   start(opts: StartSessionOptions, sink: SessionSink): AgentSession;
@@ -195,4 +231,8 @@ export interface AgentAdapter {
   // Archives the native session in the CLI's own app when the thread is
   // archived or deleted here. Best effort.
   archive?(account: Account, nativeSessionId: string): Promise<void>;
+  // Cuts the native session back to just before a message, and puts back
+  // the files the CLI checkpointed since, where it can. Throws
+  // RewindRefusedError when the session doesn't have the message.
+  rewind?(req: RewindRequest): Promise<RewindResult>;
 }

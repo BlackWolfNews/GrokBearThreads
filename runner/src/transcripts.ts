@@ -64,3 +64,50 @@ export function subagentTranscriptPath(configDir: string, cwd: string, sessionId
   }
   return null;
 }
+
+// The session's transcript file, or null when it isn't there.
+export function sessionTranscriptPath(configDir: string, cwd: string, sessionId: string): string | null {
+  if (!/^[0-9a-zA-Z-]+$/.test(sessionId)) return null;
+  for (const n of names(cwd)) {
+    const file = path.join(configDir, 'projects', n, `${sessionId}.jsonl`);
+    if (fs.existsSync(file)) return file;
+  }
+  return null;
+}
+
+// Where to cut a session back to so it forgets the user message with this
+// uuid and everything after it (docs/protocol.md, "Editing a message").
+// The runner sends each message with its own id as the uuid, so the CLI's
+// transcript has the message under that id; the entry before it in the
+// chain is where a resume with resumeSessionAt picks up. `first` when no
+// reply comes before it: the message opened the session, and there's
+// nothing worth resuming. Null when the transcript doesn't have it.
+export type CutPoint = { resumeAt: string; first: false } | { first: true };
+
+export function cutPointBefore(transcript: string, messageId: string): CutPoint | null {
+  const byUuid = new Map<string, { type?: string; parentUuid?: string | null }>();
+  let target: { parentUuid?: string | null } | undefined;
+  for (const line of transcript.split('\n')) {
+    if (!line.trim()) continue;
+    let e: { uuid?: unknown; type?: unknown; parentUuid?: unknown };
+    try {
+      e = JSON.parse(line);
+    } catch {
+      continue;
+    }
+    if (typeof e.uuid !== 'string') continue;
+    const entry = { type: typeof e.type === 'string' ? e.type : undefined, parentUuid: typeof e.parentUuid === 'string' ? e.parentUuid : null };
+    byUuid.set(e.uuid, entry);
+    if (e.uuid === messageId && e.type === 'user') target = entry;
+  }
+  if (!target) return null;
+  if (!target.parentUuid) return { first: true };
+  // Walk back from the entry before it: any reply means there's a
+  // conversation to keep.
+  const seen = new Set<string>();
+  for (let p: string | null | undefined = target.parentUuid; p && !seen.has(p); p = byUuid.get(p)?.parentUuid) {
+    seen.add(p);
+    if (byUuid.get(p)?.type === 'assistant') return { resumeAt: target.parentUuid, first: false };
+  }
+  return { first: true };
+}

@@ -34,6 +34,7 @@ import type {
   Pool,
   Provider,
   Question,
+  RewoundFiles,
   RunnerDefaults,
   Subagent,
   ThreadStatus,
@@ -58,7 +59,10 @@ import type {
   TurnResult,
 } from './adapters/types.ts';
 import { SessionNotFoundError } from './adapters/types.ts';
+import type { RewindResult } from './adapters/types.ts';
 import type { ThreadRecord, ThreadStore, QueuedSend, SubagentRecord } from './store.ts';
+import { cutOut } from './store.ts';
+import { appliedChanges, undoChanges } from './undo-edits.ts';
 import type { Clock, TimerHandle } from './clock.ts';
 import type { Logger } from './log.ts';
 import { BIN_DIR, threadEnv } from './restart.ts';
@@ -287,6 +291,11 @@ type Runtime = {
   // A show_panel call waiting to hear the app has shown its request
   // (threads.panelShown), for at most PANEL_ACK_WAIT_MS.
   panelWaiter?: { id: string; resolve: (shown: boolean) => void; timer: TimerHandle };
+  // An edit of an earlier message is under way (editMessage): nothing
+  // starts a turn until it has, and messages sent meanwhile wait.
+  editing?: boolean;
+  // Called when the running turn ends (endTurn), for an edit waiting on it.
+  turnEndWaiters?: (() => void)[];
 };
 
 type ThreadState = { rec: ThreadRecord; rt: Runtime };
@@ -611,6 +620,7 @@ export class Runner {
     const lastStarted = [...events].reverse().find((e) => e.type === 'turn.started');
     const open = lastStarted && !events.some((e) => e.type === 'turn.completed' && e.turnId === lastStarted.turnId);
     const lastCompleted = [...events].reverse().find((e) => e.type === 'turn.completed');
+    const rewinds = events.flatMap((e) => (e.type === 'thread.rewound' ? [{ from: e.fromSeq, to: e.toSeq }] : []));
     const accountId = this.defaultAccountId();
     const rec: ThreadRecord = {
       id,
@@ -639,6 +649,7 @@ export class Runner {
     const reviews = new Map<string, DesignReview>();
     for (const event of events) if (event.type === 'review.updated') reviews.set(event.review.id, event.review);
     if (reviews.size) rec.reviews = [...reviews.values()];
+    if (rewinds.length) rec.rewinds = rewinds;
     if (open && lastStarted) rec.turnId = lastStarted.turnId;
     this.log.warn('thread.json was unreadable; rebuilt it from the event log', { threadId: id });
     this.store.setAside(id);
@@ -1062,7 +1073,7 @@ export class Runner {
     const st = this.mustGet(threadId);
     const chars = opts.chars ?? 600;
     const cut = (t: string) => (t.length > chars ? t.slice(0, chars) + '…' : t);
-    const first = this.opening(st.rec.id).text;
+    const first = this.opening(st.rec.id, st.rec).text;
     const log = this.store.log(st.rec.id);
     const recent: { who: 'user' | 'assistant'; text: string }[] = [];
     const want = opts.recent ?? 6;
@@ -1071,11 +1082,18 @@ export class Runner {
       const page = log.read(Math.max(1, to - 199), to);
       for (const e of page.reverse()) {
         if (recent.length >= want) break;
+        if (cutOut(st.rec, e.seq)) continue;
         if (e.type === 'user.message' && e.origin === undefined) recent.unshift({ who: 'user', text: cut(e.text) });
         else if (e.type === 'assistant.text' && e.text.trim()) recent.unshift({ who: 'assistant', text: cut(e.text) });
       }
     }
     return { first: first ? cut(first) : undefined, recent };
+  }
+
+  // The seq ranges edits cut out of the thread (docs/protocol.md, "Editing
+  // a message").
+  cuts(threadId: string): { from: number; to: number }[] {
+    return [...(this.mustGet(threadId).rec.rewinds ?? [])];
   }
 
   // What a thread has said since `seq`: how much of Mike's and the
@@ -1088,6 +1106,7 @@ export class Runner {
     let links = false;
     for (let from = seq + 1; from <= log.lastSeq; from += 500) {
       for (const e of log.read(from, Math.min(log.lastSeq, from + 499))) {
+        if (cutOut(st.rec, e.seq)) continue;
         const text = e.type === 'user.message' && e.origin === undefined ? e.text : e.type === 'assistant.text' ? e.text : '';
         chars += text.trim().length;
         if (!links && /https?:\/\//.test(text)) links = true;
@@ -1607,11 +1626,12 @@ export class Runner {
   // The first user.message's text and the first assistant.text after it,
   // read a page at a time from the start: both are nearly always within
   // the first few events, and a long thread's log is large.
-  private opening(id: string): { text?: string; reply?: string } {
+  private opening(id: string, rec?: Pick<ThreadRecord, 'rewinds'>): { text?: string; reply?: string } {
     const log = this.store.log(id);
     let text: string | undefined;
     for (let from = 1; from <= Math.min(log.lastSeq, 500); from += 50) {
       for (const e of log.read(from, from + 49)) {
+        if (rec && cutOut(rec, e.seq)) continue;
         if (text === undefined && e.type === 'user.message') text = e.text;
         else if (text !== undefined && e.type === 'assistant.text' && e.text.trim()) return { text, reply: e.text };
       }
@@ -1667,6 +1687,7 @@ export class Runner {
     if (opts.origin) msg.origin = opts.origin;
     if (opts.scheduleId) msg.scheduleId = opts.scheduleId;
     if (opts.answers?.length) msg.answers = opts.answers;
+    if (opts.editOf) msg.editOf = opts.editOf;
     rec.lastActivityAt = this.isoNow();
     if (rt.turn && !opts.queue && fromMike(text, opts) && this.switchWaiting(st)) {
       // He picked another login (another provider, usually) during this
@@ -1688,7 +1709,7 @@ export class Runner {
       this.steer(st, msg);
       return rt.turn.turnId;
     }
-    if (rt.turn || rec.queue.length || this.draining) {
+    if (rt.turn || rec.queue.length || this.draining || rt.editing) {
       // Behind a running turn, or behind messages that couldn't start
       // earlier: they go first. On a draining runner a thread with no turn
       // is about to move across, and the message goes with it.
@@ -1711,7 +1732,7 @@ export class Runner {
   private canSteer(st: ThreadState): boolean {
     const { rec, rt } = st;
     const turn = rt.turn;
-    if (!turn || !rt.session || rt.closing || this.stopping) return false;
+    if (!turn || !rt.session || rt.closing || this.stopping || rt.editing) return false;
     if (rec.queue.length || rec.handoff || rec.moved || rt.releaseWhenIdle || turn.interruptRequested) return false;
     return !turn.auto || Boolean(turn.cliStarted);
   }
@@ -1721,7 +1742,7 @@ export class Runner {
   private switchWaiting(st: ThreadState): boolean {
     const { rec, rt } = st;
     const turn = rt.turn;
-    if (!turn || !rt.session || turn.interruptRequested || (turn.auto && !turn.cliStarted)) return false;
+    if (!turn || !rt.session || turn.interruptRequested || (turn.auto && !turn.cliStarted) || rt.editing) return false;
     return Boolean(rec.handoff && rec.handoff.fromAccountId !== rec.accountId);
   }
 
@@ -1932,6 +1953,7 @@ export class Runner {
         permissionMode: rec.permissionMode,
         sessionId: rec.nativeSessionId,
         resume,
+        ...(resume && rec.resumeAt ? { resumeAt: rec.resumeAt } : {}),
         mediaDir: this.store.mediaDir(rec.id),
         blobsDir: this.store.blobsDir(rec.id),
         tmpDir: path.join(paths.run(this.cfg.home), 'tmp'),
@@ -1941,7 +1963,7 @@ export class Runner {
       },
       sink,
     );
-    this.log.info('session started', { threadId: rec.id, resume, accountId: account.id });
+    this.log.info('session started', { threadId: rec.id, resume, accountId: account.id, ...(rec.resumeAt ? { resumeAt: rec.resumeAt } : {}) });
     this.markDirty(st);
   }
 
@@ -2179,6 +2201,10 @@ export class Runner {
       turnCost = round6(turnCost);
     }
     const outcome = turn.interruptRequested && r.outcome !== 'completed' ? 'interrupted' : r.outcome;
+    // The CLI resumed at the cut an edit asked for and has written a turn
+    // after it, which is the conversation's end from now on. Kept until
+    // then, so a CLI that died first cuts again on the next start.
+    if (rec.resumeAt && rt.resumed) delete rec.resumeAt;
     if (outcome === 'failed' && r.error) this.emit(st, { type: 'error', message: r.error }, turn.turnId);
     const body: EventBody = {
       type: 'turn.completed',
@@ -2246,6 +2272,9 @@ export class Runner {
     rec.status = status;
     rec.lastActivityAt = this.isoNow();
     this.markDirty(st);
+    const waiters = rt.turnEndWaiters ?? [];
+    rt.turnEndWaiters = undefined;
+    for (const w of waiters) w();
     this.afterTurn(st, limitHit);
   }
 
@@ -3216,7 +3245,7 @@ export class Runner {
   // Starts the next queued message if nothing is running. Returns true if
   // one started. One that can't be written (disk full) stays at the front.
   private kickQueue(st: ThreadState): boolean {
-    if (st.rt.turn || st.rec.queue.length === 0 || this.stopping) return false;
+    if (st.rt.turn || st.rec.queue.length === 0 || this.stopping || st.rt.editing) return false;
     // A draining runner hands a thread over with its queue rather than
     // start another turn on the old release; the primary starts it.
     if (this.draining) {
@@ -3234,6 +3263,131 @@ export class Runner {
       this.notice('error', `Couldn't start a message in "${st.rec.title}": ${(e as Error).message}`);
       return false;
     }
+  }
+
+  // ------------------------------------------------------ editing a message
+
+  // Mike changes one of his earlier messages and carries on from there
+  // (docs/protocol.md, "Editing a message"): the turn stops, the native
+  // session is cut back to just before the message, the agent's file
+  // changes since are put back, and the new text starts a turn.
+  async editMessage(threadId: string, seq: number, text: string, images: ImageRef[] = []): Promise<{ turnId: string; rewound: { seq: number; fromSeq: number; toSeq: number; files: RewoundFiles } }> {
+    const st = this.mustGet(threadId);
+    const { rec, rt } = st;
+    this.checkAccepting();
+    if (this.draining) throw new RpcError(ErrorCode.busy, 'The runner is handing over to a new one; edit again in a moment.');
+    if (rt.editing) throw new RpcError(ErrorCode.busy, 'This thread is already going back to an earlier message.');
+    if (!text && images.length === 0) throw new RpcError(ErrorCode.badParams, 'text or images required');
+    checkImages(images);
+    const target = this.editableMessage(st, seq);
+    const adapter = this.adapters[rec.provider];
+    if (!adapter?.rewind) throw new RpcError(ErrorCode.badParams, `${providerName(rec.provider)} threads can't go back to an earlier message.`);
+    const account = this.accounts.get(rec.accountId);
+    if (!account) throw new RpcError(ErrorCode.badParams, `Account ${rec.accountId} isn't available on this Mac.`);
+    rt.editing = true;
+    try {
+      // Messages waiting behind the turn were sent after the edited one,
+      // so they go with the rest.
+      if (rec.queue.length) {
+        rec.queue = [];
+        this.markDirty(st);
+      }
+      // A turn the CLI starts by itself as the last one ends (a
+      // background task's result) is stopped too.
+      for (let i = 0; rt.turn && i < 5; i++) {
+        const ended = new Promise<void>((r) => (rt.turnEndWaiters ??= []).push(r));
+        this.interrupt(rec.id);
+        await ended;
+      }
+      if (rt.session) this.releaseSession(st);
+      while (rt.closing) await rt.closing;
+      if (rt.deleted || this.threads.get(rec.id) !== st) throw new RpcError(ErrorCode.threadNotFound, `Thread not found: ${threadId}`);
+      // Cut the native session. One never started (its first turn failed
+      // before the CLI got going) has nothing to cut.
+      let cut: RewindResult = { fresh: true };
+      if (rec.sessionUsed && rec.nativeSessionId && !rec.handoff) {
+        try {
+          cut = await adapter.rewind({ threadId: rec.id, account, cwd: rec.cwd, sessionId: rec.nativeSessionId, messageId: target.turnId });
+        } catch (e) {
+          const err = e as Error;
+          if (err.name === 'RewindRefusedError') throw new RpcError(ErrorCode.badParams, err.message);
+          this.log.error('could not cut the session back', { threadId: rec.id, error: String(e) });
+          throw new RpcError(ErrorCode.other, `Couldn't go back to that message: ${err.message}`);
+        }
+      }
+      const toSeq = this.store.log(rec.id).lastSeq;
+      let files: RewoundFiles;
+      if (cut.files) files = { ...cut.files, how: 'checkpoint' };
+      else {
+        const changes = appliedChanges(this.store.log(rec.id).read(seq, toSeq).filter((e) => !cutOut(rec, e.seq)));
+        files = changes.length ? { ...undoChanges(changes, rec.cwd), how: 'diffs' } : { undone: [], failed: [], how: 'none' };
+      }
+      if (cut.fresh) {
+        // The message opened the session: a new one, told what came before
+        // it when anything did (a handoff from another login, say).
+        rec.nativeSessionId = crypto.randomUUID();
+        rec.sessionUsed = false;
+        rec.sessionCostTotal = 0;
+        delete rec.resumeAt;
+        if (!rec.handoff && this.saidBefore(rec, seq)) rec.handoff = { fromCwd: rec.cwd, fromAccountId: rec.accountId };
+      } else if (cut.resumeAt) rec.resumeAt = cut.resumeAt;
+      (rec.rewinds ??= []).push({ from: seq, to: toSeq });
+      const ev = this.emit(st, { type: 'thread.rewound', fromSeq: seq, toSeq, files });
+      // What the cut turns left open or found goes with them (pins stay).
+      if (rec.needs && rec.needs.seq >= seq) delete rec.needs;
+      if (rec.highlights?.items.some((h) => h.seq >= seq && h.how !== 'pinned')) {
+        rec.highlights.items = rec.highlights.items.filter((h) => h.seq < seq || h.how === 'pinned');
+        this.highlightsChanged(st);
+      }
+      if (rec.panelRequest) {
+        delete rec.panelRequest;
+        this.endPanelWait(st, false);
+      }
+      this.markDirty(st);
+      this.log.info('went back to an earlier message', { threadId: rec.id, seq, toSeq, how: files.how, undone: files.undone.length, failed: files.failed.length, fresh: Boolean(cut.fresh) });
+      rt.editing = false;
+      // The edited message goes first; anything sent during the edit after it.
+      const later = rec.queue.splice(0);
+      const turnId = this.sendTo(st, text, images, { editOf: seq });
+      if (later.length) {
+        rec.queue.push(...later);
+        this.markDirty(st);
+      }
+      return { turnId, rewound: { seq: ev.seq, fromSeq: seq, toSeq, files } };
+    } finally {
+      if (rt.editing) {
+        rt.editing = false;
+        // Messages sent while it failed still go.
+        if (!rt.turn) this.kickQueue(st);
+      }
+      this.markDirty(st);
+    }
+  }
+
+  // The message at `seq`, if Mike can edit it; otherwise why not.
+  private editableMessage(st: ThreadState, seq: number): { turnId: string } {
+    const { rec } = st;
+    const log = this.store.log(rec.id);
+    const ev = Number.isInteger(seq) && seq >= 1 && seq <= log.lastSeq ? log.read(seq, seq)[0] : undefined;
+    const no = (why: string) => new RpcError(ErrorCode.badParams, why);
+    if (!ev || ev.type !== 'user.message') throw no(`There's no message at ${seq} to edit.`);
+    if (cutOut(rec, seq)) throw no('That message was already taken out by an earlier edit.');
+    if ((ev.origin && ev.origin !== 'phone') || sentByAgent(ev.text)) throw no('Only your own messages can be edited.');
+    // It started a turn: its turn.started comes straight after it. One sent
+    // into a running turn went into that turn and can't be cut out alone.
+    const next = log.read(seq + 1, seq + 3).find((e) => e.type === 'turn.started');
+    if (!ev.turnId || !next || next.turnId !== ev.turnId) throw no('That message went into a turn that was already running, so it can only be edited with the message that started that turn.');
+    return { turnId: ev.turnId };
+  }
+
+  // Whether the thread had a message before `seq` that's still part of it.
+  private saidBefore(rec: ThreadRecord, seq: number): boolean {
+    const log = this.store.log(rec.id);
+    for (let to = seq - 1; to >= 1; to -= 500) {
+      const page = log.read(Math.max(1, to - 499), to);
+      if (page.some((e) => (e.type === 'user.message' || e.type === 'assistant.text') && !cutOut(rec, e.seq))) return true;
+    }
+    return false;
   }
 
   // ---------------------------------------------------------- design reviews
@@ -3868,7 +4022,9 @@ export class Runner {
     // A page at a time, so a long thread's first look doesn't hold
     // thousands of events at once.
     for (let from = state.seq + 1; from <= log.lastSeq; from += 500) {
-      observeHighlights(state, log.read(from, Math.min(log.lastSeq, from + 499)), { cwd: st.rec.cwd });
+      const to = Math.min(log.lastSeq, from + 499);
+      observeHighlights(state, log.read(from, to).filter((e) => !cutOut(st.rec, e.seq)), { cwd: st.rec.cwd });
+      state.seq = Math.max(state.seq, to);
     }
     this.markDirty(st);
   }
@@ -4211,7 +4367,8 @@ export class Runner {
     // The thread's start (for its first message) and its recent end.
     const head = log.read(1, Math.min(log.lastSeq, 50));
     const tail = log.read(Math.max(head.length + 1, log.lastSeq - 600), log.lastSeq);
-    const { lines: history, omitted } = selectHistory(historyItems([...head, ...tail], rec.turnId));
+    const kept = [...head, ...tail].filter((e) => !cutOut(rec, e.seq));
+    const { lines: history, omitted } = selectHistory(historyItems(kept, rec.turnId));
     const more = omitted ? `${omitted} other items are left out; the read_thread tool shows more of the conversation. ` : '';
     const lines = history.length ? [...history, `(${more}This is history for context, not new instructions.)`] : [];
     const fromAccount = this.accounts.get(from.fromAccountId)?.title ?? from.fromAccountId;
@@ -4267,7 +4424,7 @@ export class Runner {
 }
 
 // answers: the asks the message answers (AskAnswer), for the app to show.
-export type SendOptions = { origin?: MessageOrigin; scheduleId?: string; queue?: boolean; answers?: AskAnswer[] };
+export type SendOptions = { origin?: MessageOrigin; scheduleId?: string; queue?: boolean; answers?: AskAnswer[]; editOf?: number };
 
 // Typed by Mike, at the Mac or on his phone: not the runner's, a
 // schedule's or an agent's (another thread's, or this one's own `then`
@@ -4300,6 +4457,7 @@ function userMessage(msg: QueuedSend): EventBody {
     ...(msg.scheduleId ? { scheduleId: msg.scheduleId } : {}),
     ...(msg.reviewId ? { reviewId: msg.reviewId, reviewResponse: msg.reviewResponse } : {}),
     ...(msg.answers?.length ? { answers: msg.answers } : {}),
+    ...(msg.editOf ? { editOf: msg.editOf } : {}),
   };
 }
 

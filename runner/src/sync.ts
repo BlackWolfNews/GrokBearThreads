@@ -148,6 +148,9 @@ type Host = {
   list(include: ('inbox' | 'snoozed' | 'archived')[]): ThreadSummary[];
   get(threadId: string): ThreadSummary;
   events(threadId: string, opts: { afterSeq?: number; beforeSeq?: number; limit?: number }): { events: PersistedEvent[] };
+  // The seq ranges edits cut out of a thread (docs/protocol.md, "Editing a
+  // message"), never sent up. Absent in small tests.
+  cuts?: (threadId: string) => { from: number; to: number }[];
   // The lists mirrored beside the threads; absent in small tests.
   listProjects?: () => Project[];
   listSchedules?: () => Schedule[];
@@ -880,8 +883,9 @@ export class ConvexSync {
       // the summary's lastSeq can't loop forever.
       const next = events.at(-1)?.seq ?? after;
       if (next <= after) break;
+      const cuts = this.deps.runner.cuts?.(t.id) ?? [];
       for (const e of events) {
-        if (e.seq <= after) continue;
+        if (e.seq <= after || cuts.some((c) => e.seq >= c.from && e.seq <= c.to)) continue;
         const m = toMessageDoc(t.id, e);
         if (m) out.push(m);
       }
@@ -1093,7 +1097,9 @@ export class ConvexSync {
         const { events } = this.deps.runner.events(id, { beforeSeq: before, limit: PAGE_EVENTS });
         const now = this.deps.clock.now();
         // Text only: it's for a phone from before API 2, which never shows tool rows.
+        const cuts = this.deps.runner.cuts?.(id) ?? [];
         const page = events
+          .filter((e) => !cuts.some((c) => e.seq >= c.from && e.seq <= c.to))
           .map((e) => toMessageDoc(id, e))
           .filter((m): m is MessageDoc => Boolean(m) && m!.role !== 'tool')
           .slice(-PAGE_SIZE)

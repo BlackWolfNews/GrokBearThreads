@@ -4,7 +4,10 @@ import { query as sdkQuery } from '@anthropic-ai/claude-agent-sdk';
 import type { HookInput, McpServerConfig, ModelInfo, Options, PermissionResult, Query, SDKUserMessage, PermissionUpdate } from '@anthropic-ai/claude-agent-sdk';
 import type { Account, EffortLevel, ModelChoice, PermissionMode, Question } from '../../protocol.ts';
 import { isEffortLevel } from '../../protocol.ts';
-import type { AgentAdapter, AgentSession, SessionSink, StartSessionOptions, UserInput } from '../types.ts';
+import fs from 'node:fs';
+import type { AgentAdapter, AgentSession, RewindRequest, RewindResult, SessionSink, StartSessionOptions, UserInput } from '../types.ts';
+import { RewindRefusedError } from '../types.ts';
+import { cutPointBefore, sessionTranscriptPath } from '../../transcripts.ts';
 import type { Logger } from '../../log.ts';
 import { ClaudeNormalizer, fileContext } from './normalize.ts';
 import { groupSpawner, type ProcessRegistry } from '../../proc.ts';
@@ -149,6 +152,63 @@ export class ClaudeAdapter implements AgentAdapter {
       abort.abort();
     }
   }
+
+  // An edit of an earlier message (docs/protocol.md, "Editing a message").
+  // The conversation is cut by the next start (resumeAt); here the
+  // transcript says where, and a CLI started on the session with no turn
+  // rewinds the files its checkpoints cover to how they were when the
+  // message arrived. The SDK keys checkpoints by the message's uuid, which
+  // is the runner's id for it.
+  async rewind(req: RewindRequest): Promise<RewindResult> {
+    const file = sessionTranscriptPath(req.account.configDir, req.cwd, req.sessionId);
+    const cut = file ? cutPointBefore(fs.readFileSync(file, 'utf8'), req.messageId) : null;
+    if (!cut) throw new RewindRefusedError("This message isn't in the thread's current session (it has moved to another login or folder since), so it can't be edited.");
+    const files = await this.rewindFiles(req);
+    return { ...(cut.first ? { fresh: true } : { resumeAt: cut.resumeAt }), ...(files ? { files } : {}) };
+  }
+
+  private async rewindFiles(req: RewindRequest): Promise<RewindResult['files']> {
+    const { deps } = this;
+    const never = { async *[Symbol.asyncIterator]() { await new Promise<never>(() => {}); } } as AsyncIterable<SDKUserMessage>;
+    const abort = new AbortController();
+    const options: Options = {
+      cwd: req.cwd,
+      pathToClaudeCodeExecutable: deps.claudePath,
+      env: cliEnv(req.account),
+      // No settings: nothing runs but the rewind, hooks included.
+      settingSources: [],
+      tools: [],
+      resume: req.sessionId,
+      enableFileCheckpointing: true,
+      abortController: abort,
+      spawnClaudeCodeProcess: groupSpawner(deps.registry, deps.log, () => {}, `rewind:${req.threadId}`),
+    };
+    const q = (deps.queryFn ?? sdkQuery)({ prompt: never, options });
+    try {
+      await q.initializationResult();
+      // The dry run lists what will change; the real one doesn't.
+      const plan = await q.rewindFiles(req.messageId, { dryRun: true });
+      if (!plan.canRewind) {
+        // No checkpoint for it: a session from before checkpoints were on.
+        deps.log.info('no file checkpoint to rewind to', { threadId: req.threadId, error: plan.error });
+        return undefined;
+      }
+      const done = await q.rewindFiles(req.messageId);
+      if (!done.canRewind) return { undone: [], failed: (plan.filesChanged ?? []).map((p) => ({ path: p, reason: done.error || "Couldn't put it back." })) };
+      const failed = done.skippedLinks ? [{ path: `${done.skippedLinks} linked file${done.skippedLinks === 1 ? '' : 's'}`, reason: 'Left alone, as it is a link.' }] : [];
+      return { undone: plan.filesChanged ?? [], failed };
+    } catch (e) {
+      deps.log.warn('could not rewind files', { threadId: req.threadId, error: String(e) });
+      return undefined;
+    } finally {
+      try {
+        q.close();
+      } catch {
+        // already closed
+      }
+      abort.abort();
+    }
+  }
 }
 
 // The CLI's rows as the protocol's ModelChoice. The "default" row stands
@@ -209,6 +269,9 @@ class ClaudeSession implements AgentSession {
       systemPrompt: { type: 'preset', preset: 'claude_code', ...(opts.instructions ? { append: opts.instructions } : {}) },
       includePartialMessages: true,
       thinking: { type: 'adaptive', display: 'summarized' },
+      // Backups of the files the session's tools change, so an edit of an
+      // earlier message can put them back (rewind below).
+      enableFileCheckpointing: true,
       permissionMode: sdkPermissionMode(opts.permissionMode),
       // Always allowed so "Ask before edits" can be switched off mid-session.
       allowDangerouslySkipPermissions: true,
@@ -226,8 +289,10 @@ class ClaudeSession implements AgentSession {
     const effort = claudeEffort(opts.effort);
     if (effort) options.effort = effort;
     if (opts.allowRules?.length) options.allowedTools = [...opts.allowRules];
-    if (opts.resume) options.resume = opts.sessionId;
-    else options.sessionId = opts.sessionId;
+    if (opts.resume) {
+      options.resume = opts.sessionId;
+      if (opts.resumeAt) options.resumeSessionAt = opts.resumeAt;
+    } else options.sessionId = opts.sessionId;
     const queryFn = deps.queryFn ?? sdkQuery;
     this.q = queryFn({ prompt: this.input, options });
     void this.pump();

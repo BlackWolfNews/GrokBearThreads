@@ -54,6 +54,22 @@ it appear in `~/Threadbear`.
 Return sends and Shift-Return adds a new line. You can paste or drop images
 into the composer. Stop (⌘.) ends a turn that's running.
 
+### Going back to an earlier message
+
+Hover over one of your own messages and click the pencil to change it. Its
+text goes into the composer; send it and the thread goes back to that
+point. The agent forgets that message and everything after it, the
+changes it made to files since then are put back, and your new version is
+sent as if the rest had never happened. A turn that's running is stopped
+first. What was cut is gone from the thread, and a line where it was says
+which files were put back.
+
+Files changed by commands the agent ran (a script, `git`, `npm install`)
+aren't put back, only ones it edited or wrote itself. If you've changed one
+of its files yourself since, that file may be left as it is, and the line
+says so. A message you sent while the agent was working went into that
+turn, so edit the message that started it instead.
+
 ## What the list tells you
 
 The threads view has two sections. Running holds threads whose agent is

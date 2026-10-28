@@ -665,6 +665,10 @@ export function buildThreadbearTools(
         const t = await control.get(id);
         const want = messages ?? 10;
         const picked: string[] = [];
+        // What edits cut out (docs/protocol.md, "Editing a message"). Each
+        // thread.rewound comes after the range it cuts, so walking back
+        // meets it first.
+        const cuts: { from: number; to: number }[] = [];
         let before: number | undefined;
         // Walk back a page at a time until there are enough messages.
         for (let pages = 0; pages < 20 && picked.length < want; pages++) {
@@ -672,6 +676,8 @@ export function buildThreadbearTools(
           const evs = page.events as PersistedEvent[];
           for (const e of [...evs].reverse()) {
             if (picked.length >= want) break;
+            if (e.type === 'thread.rewound') cuts.push({ from: e.fromSeq, to: e.toSeq });
+            if (cuts.some((c) => e.seq >= c.from && e.seq <= c.to)) continue;
             // The runner's own messages (the resume after a restart) and
             // agents' aren't Mike's, and an agent shouldn't take them for
             // his instructions.
