@@ -49,7 +49,7 @@ extension AppModel {
     private func showReviewPanel(threadId: String) {
         let panel = WindowDock.review
         if dock.layout.contains(panel) {
-            dock.select(panel)
+            dock.show(panel)
         } else if let group = dock.layout.group(containing: WindowDock.threadPanel(threadId)) {
             dock.open(panel, .tab(group: group.id))
         } else {

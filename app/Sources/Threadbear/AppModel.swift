@@ -642,7 +642,7 @@ final class AppModel {
         // A thread open in a panel of its own is shown there: its panel
         // comes to the front and the main panel stays as it is.
         if let threadId, dock.layout.contains(WindowDock.threadPanel(threadId)) {
-            dock.select(WindowDock.threadPanel(threadId))
+            dock.show(WindowDock.threadPanel(threadId))
             return
         }
         selection = threadId

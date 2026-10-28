@@ -53,7 +53,7 @@ extension AppModel {
     func openThreadInPanel(_ threadId: String) {
         let panel = WindowDock.threadPanel(threadId)
         if dock.layout.contains(panel) {
-            dock.select(panel)
+            dock.show(panel)
             return
         }
         if selection == threadId { newThread() }
@@ -136,7 +136,7 @@ struct OpenElsewhereNote: View {
                 .font(.system(size: TypeScale.label))
                 .foregroundStyle(.secondary)
             HStack(spacing: zoomed(8)) {
-                Button("Go to it") { app.dock.select(WindowDock.threadPanel(threadId)) }
+                Button("Go to it") { app.dock.show(WindowDock.threadPanel(threadId)) }
                     .tip("Bring its panel to the front")
                 Button("Show it here") {
                     app.dock.close(WindowDock.threadPanel(threadId))
