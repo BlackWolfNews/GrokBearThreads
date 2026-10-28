@@ -134,6 +134,11 @@ if `tb` isn't found (an older runner, or outside a thread), use
   background jobs (tests, builds, subagents; background ones for 30
   minutes at most). `tb status` shows what it's waiting for, or the old
   runner and what it's finishing; don't try to hurry either.
+- The LaunchAgent's program is `~/Applications/Threadbear Runner.app`
+  (`runner/launcher/`), a small app that runs `node launch.mjs` so macOS's
+  privacy prompts say "Threadbear Runner", not "node". Releases never
+  rebuild it: a change under `runner/launcher/` only ships when Mike runs
+  `install-runner.sh` from a terminal, so say so in your end_turn.
 - Never pass `--now`, run `install-runner.sh`, `tb restart` the live runner,
   `launchctl kickstart` it or stop its node process: each ends your own turn
   and stops other threads' work. If one is needed, finish and tell Mike the

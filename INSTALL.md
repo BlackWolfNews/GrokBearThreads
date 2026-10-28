@@ -67,6 +67,12 @@ It takes a few minutes (it builds the Mac app). Along the way:
 It finishes with "Threadbear is set up." Then open the app:
 `open ~/Applications/Threadbear.app`.
 
+Setup also puts `Threadbear Runner.app` in `~/Applications`. It's the small
+program that runs the runner in the background; it isn't for opening. When
+an agent in a thread first reads a protected folder (Desktop, Documents,
+Downloads, iCloud or Dropbox), macOS asks whether to let "Threadbear Runner"
+do that. Tell them that prompt is Threadbear's, so they can answer it.
+
 ## 4. The phone and the browser
 
 Tell them the two commands setup printed at the end, and offer to run them:

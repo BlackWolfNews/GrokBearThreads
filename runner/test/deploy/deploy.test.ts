@@ -206,6 +206,8 @@ before(() => {
     fs.copyFileSync(path.join(RUNNER, 'scripts', f), path.join(rdir, 'scripts', f));
   }
   fs.copyFileSync(path.join(RUNNER, 'launch.mjs'), path.join(rdir, 'launch.mjs'));
+  // The launcher app's sources, built by install-runner.sh into the sandbox.
+  fs.cpSync(path.join(RUNNER, 'launcher'), path.join(rdir, 'launcher'), { recursive: true });
   fs.copyFileSync(path.join(import.meta.dirname, 'fake-runner.mjs'), path.join(rdir, 'src', 'main.ts'));
   fs.writeFileSync(path.join(rdir, 'bin', 'tb'), '#!/usr/bin/env node\n');
   const pkg = { name: 'fake-runner', version: '9.9.9', private: true, type: 'module', scripts: { typecheck: 'true', test: 'true' } };
@@ -242,7 +244,25 @@ test('install-runner.sh builds the first release and starts it through launch.mj
 
   const plistFile = path.join(agents, `${LABEL}.plist`);
   const plist = JSON.parse(spawnSync('plutil', ['-convert', 'json', '-o', '-', plistFile], { encoding: 'utf8' }).stdout);
-  assert.deepEqual(plist.ProgramArguments, [NODE, path.join(home, 'runner', 'launch.mjs')]);
+  // The program is the launcher app (a sandbox's lives in its data dir),
+  // with node and launch.mjs as its arguments.
+  const app = path.join(home, 'runner', 'Threadbear Runner.app');
+  assert.deepEqual(plist.ProgramArguments, [path.join(app, 'Contents', 'MacOS', 'Threadbear Runner'), NODE, path.join(home, 'runner', 'launch.mjs')]);
+  assert.match(r.stdout, /Threadbear Runner\.app isn't built yet/);
+  assert.match(r.stdout, /Built .*Threadbear Runner\.app/);
+  assert.match(r.stdout, new RegExp(`app:\\s+${app.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`));
+  const appInfo = JSON.parse(spawnSync('plutil', ['-convert', 'json', '-o', '-', path.join(app, 'Contents', 'Info.plist')], { encoding: 'utf8' }).stdout);
+  assert.equal(appInfo.CFBundleIdentifier, 'com.mikerosoft.threadbear.runner');
+  assert.equal(appInfo.CFBundleName, 'Threadbear Runner');
+  assert.equal(spawnSync('codesign', ['--verify', '--strict', app]).status, 0, 'the app is signed');
+  assert.equal(readJson(path.join(app, 'Contents', 'Resources', 'build.json')).sources, sh('../launcher/build-launcher.sh', ['--hash']).stdout.trim());
+  assert.ok(!fs.existsSync(path.join(home, 'runner', '.Threadbear Runner.app.old')), 'no old app left behind on a first install');
+  // launchd's job is the launcher, and the runner runs under it: node is
+  // its child, so privacy prompts are attributed to the app.
+  const launcherPid = Number(fs.readFileSync(path.join(launchd, 'child.pid'), 'utf8'));
+  assert.equal(spawnSync('ps', ['-o', 'comm=', '-p', String(launcherPid)], { encoding: 'utf8' }).stdout.trim(), path.join(app, 'Contents', 'MacOS', 'Threadbear Runner'));
+  const supervisorPid = Number(spawnSync('pgrep', ['-P', String(launcherPid)], { encoding: 'utf8' }).stdout.trim());
+  assert.equal(spawnSync('ps', ['-o', 'command=', '-p', String(supervisorPid)], { encoding: 'utf8' }).stdout.trim(), `${NODE} ${path.join(home, 'runner', 'launch.mjs')}`);
   assert.equal(plist.WorkingDirectory, path.join(home, 'runner'));
   assert.equal(plist.EnvironmentVariables.THREADBEAR_HOME, home);
   assert.equal(plist.EnvironmentVariables.THREADBEAR_PORT, '0');
@@ -1002,24 +1022,58 @@ test('reinstalling checks everything first, builds from HEAD, and puts the old s
   assert.equal(readJson(path.join(runnerDir(), 'releases', rebuilt, 'release.json')).commit, git('rev-parse', 'HEAD'));
   assert.equal(fs.readFileSync(installed, 'utf8'), fs.readFileSync(launchSrc, 'utf8'));
   for (const f of ['previous-launchagent.plist', 'previous-launch.mjs']) assert.ok(!fs.existsSync(path.join(runnerDir(), f)), f);
+  // The launcher app is left as it is unless launcher/ changed.
+  assert.match(r.stdout, /Keeping .*Threadbear Runner\.app, built from launcher\/ as it is/);
+  assert.doesNotMatch(r.stdout, /Built .*Threadbear Runner\.app/);
   await runsOn(rebuilt);
 
-  // Again, so current is kept; launchd won't load the new plist: the old
-  // one goes back and starts.
+  // A launcher change: the app is rebuilt and the job restarts on it.
+  const app = path.join(runnerDir(), 'Threadbear Runner.app');
+  const appBuild = () => readJson(path.join(app, 'Contents', 'Resources', 'build.json')).sources as string;
+  const launcherSrc = path.join(rdir, 'launcher', 'main.swift');
+  const launcherPristine = fs.readFileSync(launcherSrc, 'utf8');
+  const launcherHash = () => sh('../launcher/build-launcher.sh', ['--hash']).stdout.trim();
+  const hashBefore = launcherHash();
+  assert.equal(appBuild(), hashBefore);
+  fs.writeFileSync(launcherSrc, launcherPristine + '\n// a launcher change\n');
+  commit({ v: 'launcher change' }, 'launcher change');
+  assert.notEqual(launcherHash(), hashBefore);
+  r = install();
+  assert.equal(r.status, 0, out(r));
+  assert.match(r.stdout, /Threadbear Runner\.app was built from older sources/);
+  assert.match(r.stdout, /Built .*Threadbear Runner\.app/);
+  assert.equal(appBuild(), launcherHash());
+  assert.ok(!fs.existsSync(path.join(runnerDir(), '.Threadbear Runner.app.old')), 'the old app is gone once the install succeeded');
+  await runsOn(current());
+  const rebuiltApp = appBuild();
+
+  // Another launcher change (a commit, so a release is built from it too),
+  // but launchd won't load the new plist: the old plist, release and app
+  // all go back.
+  const keptRelease = current();
+  fs.writeFileSync(launcherSrc, launcherPristine + '\n// another launcher change\n');
+  commit({ v: 'launcher change 2' }, 'another launcher change');
   fs.writeFileSync(path.join(launchd, 'fail-bootstrap'), '/fail/here');
   try {
     r = install(['--path', '/fail/here:/usr/bin:/bin']);
   } finally {
     fs.rmSync(path.join(launchd, 'fail-bootstrap'));
+    fs.writeFileSync(launcherSrc, launcherPristine + '\n// a launcher change\n');
+    commit({ v: 'launcher change' }, 'launcher back');
   }
   assert.equal(r.status, 1, out(r));
-  assert.match(r.stdout, new RegExp(`Keeping release ${rebuilt}, which was built from HEAD`));
+  assert.match(r.stdout, /Built .*Threadbear Runner\.app/);
+  assert.match(r.stderr, new RegExp(`current points at ${keptRelease} again`));
+  assert.equal(current(), keptRelease);
   assert.match(r.stderr, /Bootstrap failed: 5: Input\/output error/);
-  assert.match(r.stderr, /launchd wouldn't load the new plist\.\nPutting back the LaunchAgent as it was\./);
+  assert.match(r.stderr, /launchd wouldn't load the new plist\.\nThreadbear Runner\.app is the one from before again\.\nPutting back the LaunchAgent as it was\./);
   assert.match(r.stderr, /Back as it was/);
   assert.ok(!plistPath().includes('/fail/here'), 'the old plist is back');
+  assert.equal(appBuild(), rebuiltApp, 'the app from before is back');
+  assert.ok(!fs.existsSync(path.join(runnerDir(), '.Threadbear Runner.app.old')));
   assert.deepEqual(fs.readdirSync(agents).filter((f) => f.startsWith(`${LABEL}.plist.`)), [], 'no temp plist left in LaunchAgents');
-  await runsOn(rebuilt);
+  await runsOn(current());
+  assert.equal(appBuild(), launcherHash(), 'launcher/ is back to what the app was built from');
 
   // A launch.mjs that loads but can't start a runner, with a new release:
   // the old launch.mjs, plist and current all go back.
@@ -1116,6 +1170,9 @@ test('uninstall boots the job out and removes the plist', { timeout: 30_000 }, a
   assert.throws(() => process.kill(sup, 0), 'the keep-alive loop is gone');
   assert.equal(await version(), null);
   assert.ok(fs.existsSync(path.join(runnerDir(), 'current')), 'releases stay');
+  // So do the app and the privacy grants macOS tied to it.
+  assert.ok(fs.existsSync(path.join(runnerDir(), 'Threadbear Runner.app')));
+  assert.match(r.stdout, /Threadbear Runner\.app stays/);
 });
 
 test('a first install whose runner never comes up is removed again, not left crash-looping', { timeout: 120_000 }, async () => {

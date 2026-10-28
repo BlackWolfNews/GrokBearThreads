@@ -66,8 +66,14 @@ Quick Ask, Tinker Desk as a second runner, cloud sandboxes.
   secrets file (header on upgrade, or first-message `auth`).
 - launchd LaunchAgent `com.mikerosoft.threadbear.runner`, KeepAlive, with the
   Node path pinned in the plist (`~/.nvm/versions/node/v24.22.1/bin/node`
-  today; make it configurable). Don't use `node:sqlite` (it truncates text
-  at NUL on Node 24); plain files are enough.
+  today; make it configurable). Its program is `~/Applications/Threadbear
+  Runner.app`, a small signed app (`runner/launcher/`) that runs `node
+  launch.mjs` as its child: macOS attributes privacy prompts (Desktop,
+  Documents, Dropbox, ...) to the LaunchAgent's program and everything under
+  it, so they say "Threadbear Runner" rather than "node", and the grants
+  stay with the app when Node updates (28 Oct 2026). Don't use
+  `node:sqlite` (it truncates text at NUL on Node 24); plain files are
+  enough.
 - **Accounts.** Discover Claude logins: `~/.claude` (id `claude-main`) and each
   `~/Library/Application Support/Token Stats/Accounts/claude-N` (id
   `claude-N`). Title from the login's email in its `.claude.json`

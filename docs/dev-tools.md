@@ -28,8 +28,16 @@ The live runner runs from a snapshot, never from a checkout. Layout under
 the data dir (`<home>`, normally `~/Library/Application Support/Threadbear`):
 
 ```
+~/Applications/Threadbear Runner.app
+                       the LaunchAgent's program: a small signed app that
+                       runs `node launch.mjs` as its child, so macOS's
+                       privacy prompts for the runner and its agents say
+                       "Threadbear Runner", not "node", and the grants stay
+                       with the app across Node updates and runner releases
+                       (runner/launcher/; a sandbox's lives in its
+                       <home>/runner/)
 <home>/runner/
-  launch.mjs           the LaunchAgent's program and the runners' supervisor:
+  launch.mjs           the runners' supervisor, started by the app:
                        small, no dependencies
   releases/<id>/       src/, bin/, package.json, package-lock.json,
                        node_modules/ (production only), release.json
@@ -102,10 +110,16 @@ the data dir (`<home>`, normally `~/Library/Application Support/Threadbear`):
   7. Keep the newest 5 releases plus `lastGood`.
 - **`install-runner.sh`** installs `launch.mjs`, builds the first release
   through `deploy-runner.sh`, and points the plist at
-  `node <home>/runner/launch.mjs`. `--from-source` keeps today's
-  run-from-the-checkout mode for debugging. `--home`, `--label` and
-  `--port` allow a sandbox install next to the real one (the plist then
-  sets `THREADBEAR_HOME` and `THREADBEAR_PORT`).
+  `Threadbear Runner.app/Contents/MacOS/Threadbear Runner node
+  <home>/runner/launch.mjs`. It builds the app (`launcher/build-launcher.sh`,
+  one `swiftc`, signed like the Mac app) only when it's missing or
+  `runner/launcher/` changed since, so a launcher change ships by running
+  `install-runner.sh` again, which only Mike can do for the real runner;
+  releases and Node updates never touch it. `--uninstall` leaves the app
+  where it is. `--from-source` keeps today's run-from-the-checkout mode for
+  debugging. `--home`, `--label` and `--port` allow a sandbox install next
+  to the real one (the plist then sets `THREADBEAR_HOME` and
+  `THREADBEAR_PORT`).
 
 ### 2. Restarting without killing the turn
 

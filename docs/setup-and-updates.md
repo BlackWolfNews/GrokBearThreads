@@ -211,7 +211,10 @@ How things work today, from a read of the repo on 28 Oct:
 - Install: `app/install.sh` (checks swift and python3, runs `setup_mac.sh`, which runs
   `build-app.sh`); `runner/scripts/install-runner.sh` (main's tip only, not from inside a
   thread, Node 24 at the nvm path, writes the LaunchAgent, first release through
-  `deploy.mjs`).
+  `deploy.mjs`). Since 28 Oct the LaunchAgent's program is `~/Applications/Threadbear
+  Runner.app` (`runner/launcher/`), which runs `node launch.mjs` as its child, so macOS's
+  privacy prompts name Threadbear Runner rather than node (seen on Tinker Desk's first
+  thread: "'node' wants to access files managed by Dropbox").
 - Runner updates: `runner/src/update.ts` (every 5 minutes and on ref changes, clones from
   the local checkout's `refs/heads/main`, builds when the runner's tree changed, idle
   restart); `runner/launch.mjs` (rollback to `lastGood` after 3 bad boots in 10 minutes).

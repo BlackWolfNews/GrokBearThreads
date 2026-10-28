@@ -12,6 +12,14 @@
 # <home>/runner/current points at. The first release is built here; after
 # that, ship changes with scripts/deploy-runner.sh.
 #
+# The plist's program is a small app, ~/Applications/Threadbear Runner.app
+# (launcher/main.swift says why: macOS names the LaunchAgent's program in
+# its privacy prompts, so this way they say "Threadbear Runner", not
+# "node"), which runs `node launch.mjs` as its child. It is built here when
+# it's missing or launcher/ changed, and otherwise left alone, so its
+# signature, and the privacy grants tied to it, survive runner releases and
+# Node updates. A sandbox install builds its own in <home>/runner/.
+#
 # It replaces a running copy only when no thread is busy (a turn, or
 # background shells and subagents), since that stops them; --force does it
 # anyway. It keeps the release current names only if it was built from
@@ -34,6 +42,10 @@
 #                  --home and --label; its port defaults to 0, a free one.
 #   --node PATH    Node 24 binary to pin in the plist
 #                  (default: $THREADBEAR_NODE, else ~/.nvm/versions/node/v24.22.1/bin/node)
+#   --runner-app DIR  where Threadbear Runner.app goes (default:
+#                  $THREADBEAR_RUNNER_APP_DIR, else ~/Applications/Threadbear
+#                  Runner.app, or <home>/runner/Threadbear Runner.app for a
+#                  sandbox)
 #   --path PATH    PATH for the runner and the agents it starts
 #                  (default: your login shell's PATH, captured now)
 #
@@ -53,6 +65,7 @@ LABEL="$DEFAULT_LABEL"
 DATA_HOME="$DEFAULT_HOME"
 PORT=""
 AGENT_PATH=""
+RUNNER_APP="${THREADBEAR_RUNNER_APP_DIR:-}"
 FROM_SOURCE=0
 FORCE=0
 ALLOW_BRANCH=0
@@ -71,6 +84,7 @@ while [ $# -gt 0 ]; do
     --label) LABEL="${2:?--label needs a launchd label}"; shift ;;
     --port) PORT="${2:?--port needs a number}"; shift ;;
     --node) NODE="${2:?--node needs the path to a Node binary}"; shift ;;
+    --runner-app) RUNNER_APP="${2:?--runner-app needs a folder}"; shift ;;
     --path) AGENT_PATH="${2:?--path needs a PATH}"; shift ;;
     -h|--help) awk 'NR > 1 && /^#/ { sub(/^# ?/, ""); print; next } NR > 1 { exit }' "$0"; exit 0 ;;
     *) echo "Unknown option: $1" >&2; exit 1 ;;
@@ -103,9 +117,18 @@ fi
 if [ "$SANDBOX" = 1 ]; then
   [ -n "$PORT" ] || PORT=0
   LOG="$DATA_HOME/runner.log"
+  [ -n "$RUNNER_APP" ] || RUNNER_APP="$DATA_HOME/runner/Threadbear Runner.app"
 else
   LOG="$HOME/Library/Logs/threadbear-runner.log"
+  [ -n "$RUNNER_APP" ] || RUNNER_APP="$HOME/Applications/Threadbear Runner.app"
 fi
+case "$RUNNER_APP" in /*) ;; *) RUNNER_APP="$PWD/$RUNNER_APP" ;; esac
+RUNNER_APP="${RUNNER_APP%/}"
+# The plist's program: the app's executable, given node and the program
+# to run as its arguments (it spawns them, so launchd's job, the process
+# macOS asks about, is the app).
+LAUNCHER="$RUNNER_APP/Contents/MacOS/Threadbear Runner"
+BUILD_LAUNCHER="$RUNNER_DIR/launcher/build-launcher.sh"
 PLIST="$AGENTS_DIR/$LABEL.plist"
 DOMAIN="gui/$(id -u)"
 
@@ -187,6 +210,9 @@ if [ "$MODE" = "uninstall" ]; then
   "$LAUNCHCTL" bootout "$DOMAIN/$LABEL" 2>/dev/null || true
   rm -f "$PLIST"
   echo "Removed $LABEL. The data in $DATA_HOME (releases included) is untouched."
+  # The app stays too: the privacy grants macOS gave it belong to it, and a
+  # reinstall picks it up as it is.
+  [ ! -d "$RUNNER_APP" ] || echo "$RUNNER_APP stays; delete it yourself if you're done with Threadbear."
   exit 0
 fi
 
@@ -239,6 +265,7 @@ plist() {
 	<string>$(xml "$LABEL")</string>
 	<key>ProgramArguments</key>
 	<array>
+		<string>$(xml "$LAUNCHER")</string>
 		<string>$(xml "$NODE")</string>
 		<string>$(xml "$PROGRAM")</string>
 	</array>
@@ -367,6 +394,25 @@ TMP=""
 mkdir -p "$AGENTS_DIR" "$(dirname "$LOG")" "$RDIR"
 rm -f "$PREV" "$PREV_LAUNCH"
 
+# The app the plist runs, built only when it's missing or launcher/
+# changed since (its signature is what privacy grants are tied to, so the
+# fewer rebuilds the better; a rebuild signs it the same way regardless).
+# build-launcher.sh leaves the old app next to the new one as
+# .Threadbear Runner.app.old, so a failed install can put it back.
+OLD_APP="$(dirname "$RUNNER_APP")/.$(basename "$RUNNER_APP").old"
+APP_BUILT=0
+rm -rf "$OLD_APP"
+if why="$(bash "$BUILD_LAUNCHER" --check "$RUNNER_APP")"; then
+  echo "Keeping $RUNNER_APP, built from launcher/ as it is."
+else
+  echo "$why"
+  if ! bash "$BUILD_LAUNCHER" "$RUNNER_APP"; then
+    echo "Threadbear Runner.app didn't build, so nothing was changed." >&2
+    exit 1
+  fi
+  APP_BUILT=1
+fi
+
 if [ "$FROM_SOURCE" = 1 ]; then
   if [ ! -d "$RUNNER_DIR/node_modules/@anthropic-ai/claude-agent-sdk" ] || [ ! -d "$RUNNER_DIR/node_modules/ws" ]; then
     echo "Installing the runner's packages..."
@@ -409,6 +455,11 @@ fail_back() {
   set +e
   echo "$1" >&2
   [ -z "$TMP" ] || rm -f "$TMP"
+  if [ "$APP_BUILT" = 1 ] && [ -d "$OLD_APP" ]; then
+    rm -rf "$RUNNER_APP"
+    mv "$OLD_APP" "$RUNNER_APP"
+    echo "$RUNNER_APP is the one from before again." >&2
+  fi
   if [ -f "$PREV" ]; then
     echo "Putting back the LaunchAgent as it was." >&2
     mv -f "$PREV" "$PLIST"
@@ -467,6 +518,7 @@ TMP=""
 reload || fail_back "launchd wouldn't load the new plist."
 
 echo "Installed $LABEL"
+echo "  app:    $RUNNER_APP"
 echo "  node:   $NODE"
 echo "  runner: $PROGRAM"
 echo "  data:   $DATA_HOME"
@@ -486,4 +538,5 @@ else
 fi
 trap - EXIT
 rm -f "$PREV" "$PREV_LAUNCH"
+rm -rf "$OLD_APP"
 echo "Restart it with: launchctl kickstart -k $DOMAIN/$LABEL"

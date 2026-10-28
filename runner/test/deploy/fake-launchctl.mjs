@@ -9,7 +9,10 @@
 // whose PATH contains it fails the way launchd sometimes does.
 //
 // The keep-alive loop is this script run as `supervise`, detached, with its
-// pid in supervisor.pid and the program's in child.pid.
+// pid in supervisor.pid and the program's in child.pid. The program gets a
+// process group of its own, and stopping it stops the whole group, as
+// launchd does for a job (AbandonProcessGroup is off): the program is the
+// launcher app, and node runs under it.
 import { spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -65,13 +68,26 @@ function startSupervisor() {
   child.unref();
 }
 
+// A signal to the program's whole process group (it leads one); nothing
+// if the group is gone.
+function signalJob(pid, signal) {
+  try {
+    process.kill(-pid, signal);
+  } catch {
+    // gone
+  }
+}
+
 async function stopAll() {
   fs.writeFileSync(path.join(dir, 'stop'), '');
   const sup = readPid(supPidFile);
   const kid = readPid(childPidFile);
-  for (const pid of [sup, kid]) if (alive(pid)) process.kill(pid, 'SIGTERM');
+  if (alive(sup)) process.kill(sup, 'SIGTERM');
+  // SIGTERM to the program alone, as launchd does; it forwards it.
+  if (alive(kid)) process.kill(kid, 'SIGTERM');
   for (let i = 0; i < 100 && (alive(sup) || alive(kid)); i++) await sleep(50);
-  for (const pid of [sup, kid]) if (alive(pid)) process.kill(pid, 'SIGKILL');
+  if (alive(sup)) process.kill(sup, 'SIGKILL');
+  if (kid) signalJob(kid, 'SIGKILL');
   fs.rmSync(supPidFile, { force: true });
   fs.rmSync(childPidFile, { force: true });
 }
@@ -90,10 +106,13 @@ async function supervise() {
       cwd: j.cwd,
       env: { HOME: process.env.HOME, USER: process.env.USER, ...j.env },
       stdio: ['ignore', out, out],
+      detached: true, // its own process group, like a launchd job
     });
     fs.closeSync(out);
     fs.writeFileSync(childPidFile, String(child.pid));
     await new Promise((r) => child.once('exit', r));
+    // Whatever the program left behind goes with it, as under launchd.
+    signalJob(child.pid, 'SIGKILL');
     child = null;
     await sleep(THROTTLE_MS);
   }

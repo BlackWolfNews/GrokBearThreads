@@ -18,7 +18,9 @@
 //   5. runner.json: where the runner mirrors to, and the default folder for
 //      new threads (~/Threadbear, made here, unless --cwd; Settings changes it)
 //   6. the backend and the website, deployed
-//   7. the runner and the Mac app, built and installed
+//   7. the runner (its LaunchAgent, with Threadbear Runner.app as the
+//      program, so macOS's privacy prompts name it) and the Mac app, built
+//      and installed
 //   8. how to pair your iPhone and sign a browser in
 //
 // Node built-ins only, so it runs before the repo's packages are installed.
