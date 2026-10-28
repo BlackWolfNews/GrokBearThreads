@@ -141,9 +141,10 @@ With the backend in the cloud, the phone and the browser don't need Tailscale fo
 everyday things. Tailscale is the default for everything that's machine to machine:
 
 - **The heavy bits:** tool output, diffs and images stay on the Mac. The runner shares
-  them on its tailnet name (`tailscale serve`, HTTPS, tailnet only), and the phone and
-  the website fetch them when you open one. When the Mac's asleep they say "on your Mac"
-  instead of loading.
+  them on its tailnet name (`tailscale serve`, HTTPS, tailnet only). On the phone and the
+  website each one shows as a grey box of the right size, and loads only as you scroll
+  to it, several at once (Mike, 28 Oct). When the Mac's asleep the box says "on your
+  Mac" instead.
 - **A second runner:** Tinker Desk (plan step 6) writes to the same backend and shows up
   on the phone and the website straight away. The Mac app talks to it over the tailnet,
   so its threads can be steered from the laptop.
@@ -153,18 +154,25 @@ everyday things. Tailscale is the default for everything that's machine to machi
 
 ## 3. What Mike needs to decide
 
-Decided 28 Oct: the backend is Convex cloud by default, self-hosted optional (2.1).
+Decided 28 Oct:
+
+- The backend is Convex cloud by default, self-hosted optional (2.1).
+- What goes up: all message text plus one line per tool call; tool output and images
+  stay on the Mac (2.1).
+- The phone and the website fetch tool output and images over Tailscale, lazily, as grey
+  boxes that fill in as you scroll (2.5).
 
 Still open:
 
-1. **What goes up:** all message text plus one line per tool call, with tool output and
-   images staying on the Mac (recommended)? Or tool output and images in Convex too,
-   which makes them readable with the laptop shut but costs more?
-2. **Push relay:** OK to run one for everyone, with encrypted messages (recommended)?
-3. **Bringing in Mike's changes:** an agent thread you approve each time (recommended),
-   or something more automatic?
-4. **The phone and the heavy bits over Tailscale:** worth it, or is "open it on the Mac"
-   fine for tool output and images?
+1. **Push relay (2.4):** Mike runs a small Cloudflare Worker holding his Apple push key,
+   so other people's backends can send notifications to the App Store app without ever
+   having the key (it also signs for Poddle and Walkies). Messages are encrypted with a
+   secret the backend and phone share from pairing, so the relay only passes on
+   gibberish. The alternatives are no notifications for other people, or each of them
+   building their own phone app. Explained to Mike 28 Oct; waiting on his answer.
+2. **Bringing in Mike's changes (2.3):** an agent thread you approve each time. Mike
+   agreed, but read it as part of the relay question, so it was explained again on
+   28 Oct and needs his confirmation.
 
 ## 4. A rough order to build it in
 
