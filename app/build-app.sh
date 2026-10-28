@@ -46,6 +46,9 @@ mkdir -p "$STAGE_DIR/Contents/MacOS" "$STAGE_DIR/Contents/Resources"
 cp "$BINARY" "$STAGE_DIR/Contents/MacOS/Threadbear"
 cp "$SCRIPT_DIR/Resources/Info.plist" "$STAGE_DIR/Contents/Info.plist"
 chmod +x "$STAGE_DIR/Contents/MacOS/Threadbear"
+# Packages' resource bundles (Highlightr's highlight.js and themes), where
+# SwiftPM's Bundle.module looks in an app: Contents/Resources.
+for b in "$BIN_DIR"/*.bundle; do if [[ -d "$b" ]]; then cp -R "$b" "$STAGE_DIR/Contents/Resources/"; fi; done
 
 # What this bundle was built from, for the app's self-update
 # (AppUpdate.swift): the commit, the tree hash of app/ at it (only a change

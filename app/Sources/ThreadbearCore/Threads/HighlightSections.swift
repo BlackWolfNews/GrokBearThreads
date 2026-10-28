@@ -91,6 +91,32 @@ public enum PreviewRules {
         return ext == "html" || ext == "htm" ? .web : .quickLook
     }
 
+    /// The highlight.js language for a code file, by its extension or
+    /// name, or nil. Markdown, CSV and plain text aren't here: Quick Look
+    /// shows those.
+    public static func codeLanguage(forPath path: String) -> String? {
+        let name = (path as NSString).lastPathComponent
+        switch name {
+        case "Makefile", "GNUmakefile": return "makefile"
+        case "Dockerfile": return "dockerfile"
+        case "Podfile", "Gemfile", "Fastfile": return "ruby"
+        default: break
+        }
+        return codeLanguages[(name as NSString).pathExtension.lowercased()]
+    }
+
+    static let codeLanguages: [String: String] = [
+        "ts": "typescript", "tsx": "typescript", "mts": "typescript", "cts": "typescript",
+        "js": "javascript", "jsx": "javascript", "mjs": "javascript", "cjs": "javascript",
+        "swift": "swift", "py": "python", "rb": "ruby", "go": "go", "rs": "rust",
+        "java": "java", "kt": "kotlin", "kts": "kotlin", "c": "c", "h": "c", "m": "objectivec",
+        "cc": "cpp", "cpp": "cpp", "hpp": "cpp", "cs": "csharp", "php": "php",
+        "sh": "bash", "bash": "bash", "zsh": "bash", "json": "json", "jsonc": "json",
+        "yml": "yaml", "yaml": "yaml", "toml": "ini", "ini": "ini", "xml": "xml", "plist": "xml",
+        "svg": "xml", "css": "css", "scss": "scss", "sql": "sql", "graphql": "graphql",
+        "lua": "lua", "diff": "diff", "patch": "diff",
+    ]
+
     /// Whether the start of a file reads as text: no NUL bytes, and UTF-8
     /// (a character cut off at the end of the sample is fine). Quick Look
     /// goes by the file's type, and macOS types `.ts` as MPEG video, so a

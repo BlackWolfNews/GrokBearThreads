@@ -70,6 +70,14 @@ final class HighlightsTests: XCTestCase {
         XCTAssertEqual(PreviewRules.viewer(forPath: "/a/b/shot.png"), .quickLook)
     }
 
+    func testCodeFilesGetTheirLanguage() {
+        XCTAssertEqual(PreviewRules.codeLanguage(forPath: "/r/runner/test/unit/release.test.ts"), "typescript")
+        XCTAssertEqual(PreviewRules.codeLanguage(forPath: "/r/App.SWIFT"), "swift")
+        XCTAssertEqual(PreviewRules.codeLanguage(forPath: "/r/Makefile"), "makefile")
+        XCTAssertNil(PreviewRules.codeLanguage(forPath: "/r/README.md"))
+        XCTAssertNil(PreviewRules.codeLanguage(forPath: "/r/clip.mp4"))
+    }
+
     func testTextIsToldFromBinaryByItsBytes() {
         XCTAssertTrue(PreviewRules.looksLikeText(Data("import test from 'node:test';\n".utf8)))
         XCTAssertTrue(PreviewRules.looksLikeText(Data()))

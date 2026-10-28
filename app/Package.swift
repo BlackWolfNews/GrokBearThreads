@@ -12,6 +12,8 @@ let package = Package(
     ],
     dependencies: [
         .package(url: "https://github.com/swiftlang/swift-markdown.git", from: "0.9.0"),
+        // highlight.js in JavaScriptCore, for code in the panel (CodeFileView).
+        .package(url: "https://github.com/raspu/Highlightr.git", from: "2.3.0"),
         // The window's dockable panels, in this repo (dock/README.md).
         .package(path: "../dock"),
     ],
@@ -27,6 +29,7 @@ let package = Package(
             dependencies: [
                 "ThreadbearCore",
                 .product(name: "Markdown", package: "swift-markdown"),
+                .product(name: "Highlightr", package: "Highlightr"),
                 .product(name: "BearDock", package: "dock"),
             ],
             path: "Sources/Threadbear",

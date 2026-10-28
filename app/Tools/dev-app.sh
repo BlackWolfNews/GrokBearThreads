@@ -336,6 +336,8 @@ install_bundle() {
   cp "$bin" "$I_BUNDLE/Contents/MacOS/Threadbear"
   cp "$APP_ROOT/Resources/Info.plist" "$I_BUNDLE/Contents/Info.plist"
   mkdir -p "$I_BUNDLE/Contents/Resources"
+  # Packages' resource bundles (Highlightr's), as build-app.sh does.
+  local b; for b in "$(dirname "$bin")"/*.bundle; do if [[ -d "$b" ]]; then rm -rf "$I_BUNDLE/Contents/Resources/$(basename "$b")"; cp -R "$b" "$I_BUNDLE/Contents/Resources/"; fi; done
   # LSUIElement keeps it out of the Dock and the app switcher from launch:
   # Cmd-Tabbing into one by mistake and typing into its composer would start
   # a real turn on a dev runner.

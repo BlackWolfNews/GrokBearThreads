@@ -1,6 +1,7 @@
 import AppKit
 import Quartz
 import SwiftUI
+import Highlightr
 import ThreadbearCore
 
 /// The pane's Highlights section: what the thread has made, shared and
@@ -369,8 +370,8 @@ struct PreviewBody: View {
                 PaneNote(text: "This file isn't there any more.")
             } else if PreviewRules.viewer(forPath: path) == .web {
                 WebPanel(url: URL(fileURLWithPath: path))
-            } else if TextFileView.shows(path) {
-                TextFileView(url: URL(fileURLWithPath: path), opened: preview.opened)
+            } else if CodeFileView.shows(path) {
+                CodeFileView(url: URL(fileURLWithPath: path), opened: preview.opened)
             } else {
                 QuickLookView(url: URL(fileURLWithPath: path), opened: preview.opened)
             }
@@ -412,19 +413,25 @@ extension PreviewBody {
     }
 }
 
-/// A text file Quick Look would get wrong, as plain monospaced text:
-/// `.ts` (which macOS takes for MPEG video), `.tsx`, a Makefile.
-struct TextFileView: NSViewRepresentable {
+/// Code in the panel, syntax highlighted (highlight.js through
+/// Highlightr) in Xcode's colours: any file with a known language
+/// (PreviewRules.codeLanguage), and text Quick Look would get wrong, like a
+/// `.ts` it takes for MPEG video, which is shown plain.
+struct CodeFileView: NSViewRepresentable {
     let url: URL
     /// Bumped by each open, so the same file opened again is read again.
     let opened: Int
+    @Environment(\.colorScheme) private var colorScheme
 
     /// Read no more than this; the panel is for a look, not an editor.
     static let limit = 2_000_000
+    /// highlight.js gets slow on big files; past this it's plain text.
+    static let highlightLimit = 400_000
+    static let font = NSFont.monospacedSystemFont(ofSize: 12, weight: .regular)
 
-    /// Text that macOS doesn't type as text. What it does (Swift,
-    /// Markdown, JSON) Quick Look already shows well.
     static func shows(_ path: String) -> Bool {
+        if PreviewRules.codeLanguage(forPath: path) != nil { return true }
+        // Text macOS types as text (Markdown, CSV) Quick Look shows well.
         let url = URL(fileURLWithPath: path)
         if let type = try? url.resourceValues(forKeys: [.contentTypeKey]).contentType, type.conforms(to: .text) { return false }
         guard let handle = try? FileHandle(forReadingFrom: url) else { return false }
@@ -434,7 +441,7 @@ struct TextFileView: NSViewRepresentable {
     }
 
     final class Coordinator {
-        var shown: (URL, Int)?
+        var shown: (URL, Int, ColorScheme)?
     }
 
     func makeCoordinator() -> Coordinator { Coordinator() }
@@ -447,21 +454,65 @@ struct TextFileView: NSViewRepresentable {
             text.isSelectable = true
             text.drawsBackground = false
             text.textContainerInset = NSSize(width: 10, height: 10)
-            text.font = .monospacedSystemFont(ofSize: 12, weight: .regular)
+            text.font = Self.font
             text.textColor = .labelColor
         }
         return scroll
     }
 
     func updateNSView(_ scroll: NSScrollView, context: Context) {
-        if let shown = context.coordinator.shown, shown.0 == url, shown.1 == opened { return }
-        context.coordinator.shown = (url, opened)
+        if let shown = context.coordinator.shown, shown.0 == url, shown.1 == opened, shown.2 == colorScheme { return }
+        let sameFile = context.coordinator.shown?.0 == url
+        context.coordinator.shown = (url, opened, colorScheme)
         guard let text = scroll.documentView as? NSTextView else { return }
         let data = (try? FileHandle(forReadingFrom: url)).flatMap { try? $0.read(upToCount: Self.limit) } ?? Data()
         var string = String(decoding: data, as: UTF8.self)
         if data.count == Self.limit { string += "\n\n… the rest is cut off here. Open it in its app to see it all." }
-        text.string = string
-        text.scrollToBeginningOfDocument(nil)
+        // Plain straight away; the colours follow when highlight.js is done.
+        text.textStorage?.setAttributedString(NSAttributedString(string: string, attributes: [.font: Self.font, .foregroundColor: NSColor.labelColor]))
+        if !sameFile { text.scrollToBeginningOfDocument(nil) }
+        guard let language = PreviewRules.codeLanguage(forPath: url.path), string.utf8.count <= Self.highlightLimit else { return }
+        let dark = colorScheme == .dark
+        let key = (url, opened, colorScheme)
+        CodeHighlighter.highlight(string, as: language, dark: dark) { coloured in
+            // Only if the panel still shows what was sent off.
+            guard let coloured, let shown = context.coordinator.shown, shown.0 == key.0, shown.1 == key.1, shown.2 == key.2 else { return }
+            text.textStorage?.setAttributedString(coloured)
+        }
+    }
+}
+
+/// One Highlightr, used only on its own queue: highlight.js runs in a
+/// JavaScriptCore context, which isn't for sharing across threads.
+enum CodeHighlighter {
+    private static let queue = DispatchQueue(label: "threadbear.code-highlighter", qos: .userInitiated)
+    nonisolated(unsafe) private static var highlighter: Highlightr?
+    nonisolated(unsafe) private static var theme: String?
+
+    /// SwiftPM's Bundle.module stops the app if Highlightr's resource
+    /// bundle isn't there, so look first (build-app.sh copies it into
+    /// Contents/Resources; `swift test` and `swift run` have it beside
+    /// the binary). Without it, code shows plain.
+    private static let available: Bool = {
+        let name = "Highlightr_Highlightr.bundle"
+        return [Bundle.main.resourceURL, Bundle.main.bundleURL, Bundle.main.executableURL?.deletingLastPathComponent()]
+            .compactMap { $0?.appendingPathComponent(name).path }
+            .contains { FileManager.default.fileExists(atPath: $0) }
+    }()
+
+    static func highlight(_ code: String, as language: String, dark: Bool, done: @escaping @MainActor (NSAttributedString?) -> Void) {
+        guard available else { return }
+        queue.async {
+            if highlighter == nil { highlighter = Highlightr() }
+            let wanted = dark ? "xcode-dark" : "xcode"
+            if theme != wanted, let highlighter {
+                highlighter.setTheme(to: wanted)
+                highlighter.theme.setCodeFont(CodeFileView.font)
+                theme = wanted
+            }
+            let coloured = highlighter?.highlight(code, as: language, fastRender: true)
+            DispatchQueue.main.async { MainActor.assumeIsolated { done(coloured) } }
+        }
     }
 }
 
