@@ -249,6 +249,7 @@ struct RootView: View {
         // activity bar under them has the first of those.
         o.trafficLights = max(0, 78 - ActivityBar.width)
         o.cornerMovesWindow = true
+        o.barsMoveWindow = true
         o.tip = { view, text in AnyView(view.tip(text)) }
         // A panel dragged out into a window of its own: the same model as
         // the main window's views.
