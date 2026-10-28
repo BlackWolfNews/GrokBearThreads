@@ -421,6 +421,13 @@ private struct PoolSettings: View {
                             .onSubmit(commitTitle)
                             .tip("Rename this pool. It saves when you press Return or click away.")
                     }
+                    LabeledContent("Icon") {
+                        PoolIconPicker(symbol: Pools.symbol(pool, accounts: app.accounts)) { icon in
+                            var changed = pool
+                            changed.icon = icon
+                            change(changed)
+                        }
+                    }
 
                     let list = Pools.loginList(pool, accounts: app.accounts)
                     ForEach(list, id: \.account.id) { entry in
@@ -577,6 +584,8 @@ private struct PoolListRow: View {
     var body: some View {
         Button(action: action) {
             HStack(spacing: 8) {
+                PoolSymbol(symbol: Pools.symbol(pool, accounts: accounts))
+                    .foregroundStyle(selected ? Color.accentColor : .secondary)
                 Text(pool.title)
                     .fontWeight(selected ? .semibold : .regular)
                     .foregroundStyle(.primary)
@@ -610,6 +619,60 @@ private struct PoolListRow: View {
         var text = logins.isEmpty ? "No logins yet" : logins.joined(separator: ", ")
         if !pool.folders.isEmpty { text += " · " + pool.folders.joined(separator: ", ") }
         return text
+    }
+}
+
+/// A pool's icon at a fixed width, so titles line up whichever symbol it
+/// is. One that this Mac doesn't have shows as a stack.
+private struct PoolSymbol: View {
+    let symbol: String
+
+    var body: some View {
+        Image(systemName: ProjectIconImages.symbolExists(symbol) ? symbol : "square.stack")
+            .frame(width: 20)
+            .accessibilityHidden(true)
+    }
+}
+
+/// The Icon row: the pool's icon as a button that opens a grid of the
+/// choices (`Pools.iconChoices`).
+private struct PoolIconPicker: View {
+    let symbol: String
+    let pick: (String) -> Void
+    @State private var open = false
+
+    var body: some View {
+        Button { open = true } label: {
+            HStack(spacing: 4) {
+                PoolSymbol(symbol: symbol)
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 8, weight: .bold))
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .tip("Pick this pool's icon. It shows in front of the model chip under the composer.")
+        .popover(isPresented: $open, arrowEdge: .bottom) {
+            LazyVGrid(columns: Array(repeating: GridItem(.fixed(30), spacing: 4), count: 7), spacing: 4) {
+                ForEach(Pools.iconChoices.filter(ProjectIconImages.symbolExists), id: \.self) { choice in
+                    Button {
+                        pick(choice)
+                        open = false
+                    } label: {
+                        Image(systemName: choice)
+                            .font(.system(size: 14))
+                            .frame(width: 30, height: 30)
+                            .background(
+                                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                                    .fill(choice == symbol ? Color.accentColor.opacity(0.25) : .clear)
+                            )
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .tip(choice)
+                }
+            }
+            .padding(10)
+        }
     }
 }
 

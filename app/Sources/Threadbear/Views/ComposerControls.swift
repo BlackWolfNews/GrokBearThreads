@@ -39,7 +39,7 @@ struct ComposerControls: View {
                 }, openRequest: app.accountPickerRequest)
                 ChipDivider()
             }
-            ComposerChip(icon: "sparkle", title: settings.modelChipTitle, help: settings.modelChipHelp, badge: settings.modelChipBadge, popover: {
+            ComposerChip(icon: settings.modelChipIcon, title: settings.modelChipTitle, help: settings.modelChipHelp, badge: settings.modelChipBadge, popover: {
                 // The picker reads the thread live, so a pick made while
                 // it's open shows straight away.
                 NSHostingController(rootView: ModelPickerView(threadId: thread?.id, close: $0).environment(app))
@@ -118,6 +118,16 @@ struct ThreadSettings {
     var accountSections: [AccountMenu.Section] { AccountMenu.sections(app.accounts, selected: account, now: app.now) }
     var accountFooter: String? { AccountUsageText.sourceLine(app.accounts, now: app.now) }
     func accountLines() -> [String] { AccountMenu.lines(accountSections, footer: accountFooter) }
+
+    /// The pool's own icon in front of the chip, so which pool a thread is
+    /// on shows at a glance; a pinned login's person, or (no pools) the
+    /// sparkle the chip always had.
+    var modelChipIcon: String {
+        guard usesPools else { return "sparkle" }
+        guard let pool else { return "person.crop.circle" }
+        let symbol = Pools.symbol(pool, accounts: app.accounts)
+        return ProjectIconImages.symbolExists(symbol) ? symbol : "square.stack"
+    }
 
     var modelChipTitle: String { Pools.chipTitle(owner: owner, model: effectiveModel, effort: effectiveEffort, choices: choices) }
 

@@ -150,8 +150,8 @@ let pools = [
   { id: 'claude', title: 'Claude', accountIds: ['claude-main', 'claude-3', 'claude-4'], builtIn: true },
   { id: 'convex', title: 'Convex', accountIds: ['claude-2'], folders: ['~/dev/convex'], builtIn: true },
   { id: 'codex', title: 'Codex', accountIds: ['codex-main'], builtIn: true },
-  { id: 'side-projects', title: 'Side projects', accountIds: ['codex-main', 'claude-3'] },
-  { id: 'evenings', title: 'Evenings', accountIds: ['claude-4'] },
+  { id: 'side-projects', title: 'Side projects', accountIds: ['codex-main', 'claude-3'], icon: 'hammer' },
+  { id: 'evenings', title: 'Evenings', accountIds: ['claude-4'], icon: 'moon' },
 ];
 const poolOf = (id) => pools.find((pool) => pool.id === id);
 // The room a login has: the tighter of its 5-hour and weekly windows; none
@@ -316,7 +316,7 @@ async function dispatch(client, method, p) {
       if (oldRunner) throw rpcError(-32601, 'Method not found');
       validatePools(p.pools);
       // Saved ones are runner.json's, not the code default's.
-      pools = p.pools.map(({ id, title, accountIds, folders }) => ({ id, title: title || id, accountIds, ...(folders?.length ? { folders } : {}) }));
+      pools = p.pools.map(({ id, title, accountIds, folders, icon }) => ({ id, title: title || id, accountIds, ...(folders?.length ? { folders } : {}), ...(icon ? { icon } : {}) }));
       broadcast('pools.updated', { pools });
       return { pools };
     }

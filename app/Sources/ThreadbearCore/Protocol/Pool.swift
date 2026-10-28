@@ -15,13 +15,16 @@ public struct Pool: Sendable, Hashable, Codable, Identifiable {
     public var folders: [String]
     /// From the runner's code default rather than runner.json.
     public var builtIn: Bool
+    /// An SF Symbol name Mike picked, or nil for `Pools.symbol`'s fallback.
+    public var icon: String?
 
-    public init(id: String, title: String, accountIds: [String], folders: [String] = [], builtIn: Bool = false) {
+    public init(id: String, title: String, accountIds: [String], folders: [String] = [], builtIn: Bool = false, icon: String? = nil) {
         self.id = id
         self.title = title
         self.accountIds = accountIds
         self.folders = folders
         self.builtIn = builtIn
+        self.icon = icon
     }
 
     public init(from decoder: Decoder) throws {
@@ -31,9 +34,10 @@ public struct Pool: Sendable, Hashable, Codable, Identifiable {
         accountIds = c.lossyArray(String.self, forKey: .accountIds)
         folders = c.lossyArray(String.self, forKey: .folders)
         builtIn = ((try? c.decodeIfPresent(Bool.self, forKey: .builtIn)) ?? nil) ?? false
+        icon = ((try? c.decodeIfPresent(String.self, forKey: .icon)) ?? nil).flatMap { $0.isEmpty ? nil : $0 }
     }
 
-    /// What `pools.save` sends: `folders` and `builtIn` only when they say
+    /// What `pools.save` sends: `folders`, `builtIn` and `icon` only when they say
     /// something, as the runner writes them.
     public func encode(to encoder: Encoder) throws {
         var c = encoder.container(keyedBy: CodingKeys.self)
@@ -42,9 +46,10 @@ public struct Pool: Sendable, Hashable, Codable, Identifiable {
         try c.encode(accountIds, forKey: .accountIds)
         if !folders.isEmpty { try c.encode(folders, forKey: .folders) }
         if builtIn { try c.encode(true, forKey: .builtIn) }
+        if let icon { try c.encode(icon, forKey: .icon) }
     }
 
-    enum CodingKeys: String, CodingKey { case id, title, accountIds, folders, builtIn }
+    enum CodingKeys: String, CodingKey { case id, title, accountIds, folders, builtIn, icon }
 
     public var jsonValue: JSONValue {
         var object: [String: JSONValue] = [
@@ -52,6 +57,7 @@ public struct Pool: Sendable, Hashable, Codable, Identifiable {
         ]
         if !folders.isEmpty { object["folders"] = .array(folders.map { .string($0) }) }
         if builtIn { object["builtIn"] = .bool(true) }
+        if let icon { object["icon"] = .string(icon) }
         return .object(object)
     }
 }

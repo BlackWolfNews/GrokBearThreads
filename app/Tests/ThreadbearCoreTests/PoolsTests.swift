@@ -227,6 +227,21 @@ final class PoolsTests: XCTestCase {
         XCTAssertEqual(Pools.moving(mixed, login: "claude-3", onto: "claude-1").accountIds, mixed.accountIds, "an unticked login doesn't move in")
     }
 
+    func testSymbolFallsBackToTheFirstProvider() {
+        XCTAssertEqual(Pools.symbol(Pool(id: "a", title: "A", accountIds: ["claude-1"], icon: "leaf"), accounts: accounts), "leaf")
+        XCTAssertEqual(Pools.symbol(mixed, accounts: accounts), "chevron.left.forwardslash.chevron.right", "Codex comes first in it")
+        XCTAssertEqual(Pools.symbol(claude, accounts: accounts), "sparkle")
+        XCTAssertEqual(Pools.symbol(Pool(id: "c", title: "C", accountIds: []), accounts: accounts), "square.stack")
+    }
+
+    func testIconRoundTrips() throws {
+        let pool = Pool(id: "a", title: "A", accountIds: ["claude-1"], icon: "leaf")
+        let decoded = try JSONDecoder().decode(Pool.self, from: JSONEncoder().encode(pool))
+        XCTAssertEqual(decoded.icon, "leaf")
+        let none = try JSONDecoder().decode(Pool.self, from: Data(#"{"id":"b","title":"B","accountIds":[],"icon":""}"#.utf8))
+        XCTAssertNil(none.icon, "a blank icon is no icon")
+    }
+
     func testRenamingKeepsTheId() {
         let pool = Pool(id: "convex", title: "Convex", accountIds: ["claude-1"])
         XCTAssertEqual(Pools.renaming(pool, to: "  Work  ")?.title, "Work")

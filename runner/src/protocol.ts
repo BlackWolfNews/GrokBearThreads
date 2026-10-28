@@ -105,6 +105,7 @@ export type Pool = {
   title: string; // "Claude"
   accountIds: string[]; // in order; may mix providers
   folders?: string[]; // ~ allowed; a new thread under one starts here
+  icon?: string; // an SF Symbol name Mike picked ("leaf"); the app has a fallback
   builtIn?: boolean; // from the code default, not runner.json
 };
 

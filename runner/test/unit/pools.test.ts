@@ -67,6 +67,9 @@ test('defaultPools: notes from the map count too; a note with no word, or a clas
 test("readPools: runner.json's list replaces the built-in one; bad entries are skipped", () => {
   const saved = [{ id: 'mine', title: 'Mine', accountIds: ['claude-3', 'codex-main'], folders: [' ~/x ', ''] }, { id: 'broken' }, 'nope'];
   assert.deepEqual(readPools({ pools: saved }, MIKE), [{ id: 'mine', title: 'Mine', accountIds: ['claude-3', 'codex-main'], folders: ['~/x'] }]);
+  // An icon is kept, trimmed; a blank or non-string one is dropped.
+  const icons = [{ id: 'a', title: 'A', accountIds: ['claude-3'], icon: ' leaf ' }, { id: 'b', title: 'B', accountIds: ['claude-3'], icon: 7 }, { id: 'c', title: 'C', accountIds: ['claude-3'], icon: ' ' }];
+  assert.deepEqual(readPools({ pools: icons }, MIKE).map((p) => p.icon), ['leaf', undefined, undefined]);
   // Nothing usable, or nothing saved: the built-in ones.
   assert.equal(readPools({ pools: ['nope'] }, MIKE, DEFAULT_POOL_FOLDERS)[0].builtIn, true);
   assert.equal(readPools({}, MIKE).length, 3);

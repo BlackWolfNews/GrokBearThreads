@@ -64,6 +64,9 @@ function shapeOf(raw: unknown): Pool | undefined {
     const f = (r.folders as string[]).map((x) => x.trim()).filter(Boolean);
     if (f.length) pool.folders = f;
   }
+  // Only the app draws it, so anything that isn't a name is dropped rather
+  // than refusing the pool.
+  if (typeof r.icon === 'string' && r.icon.trim()) pool.icon = r.icon.trim();
   return pool;
 }
 

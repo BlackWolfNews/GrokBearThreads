@@ -212,6 +212,28 @@ public enum Pools {
         return (AccountUsageText.dayName(date, now: now, calendar: calendar), clock)
     }
 
+    // MARK: Icons
+
+    /// The symbols Settings › Pools offers. Plain, one-colour SF Symbols
+    /// that read at the composer chip's size.
+    public static let iconChoices = [
+        "sparkle", "chevron.left.forwardslash.chevron.right", "briefcase", "house",
+        "hammer", "wrench.and.screwdriver", "paintbrush", "film",
+        "book", "graduationcap", "leaf", "flame",
+        "bolt", "moon", "sun.max", "star",
+        "heart", "flag", "bookmark", "tag",
+        "globe", "building.2", "cart", "gamecontroller",
+        "music.note", "camera", "airplane", "cup.and.saucer",
+    ]
+
+    /// The pool's icon: the one Mike picked, else its first provider's
+    /// (Claude's sparkle, Codex's brackets), else a stack.
+    public static func symbol(_ pool: Pool, accounts: [Account]) -> String {
+        if let icon = pool.icon, !icon.isEmpty { return icon }
+        if let first = providers(pool, accounts: accounts).first { return ModelPicker.providerSymbol(first) }
+        return "square.stack"
+    }
+
     // MARK: Settings
 
     /// Why the runner would refuse this list in `pools.save`, in words, or
