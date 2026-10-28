@@ -16,7 +16,7 @@
 //   4. its keys: a deploy key the runner uses to deploy the backend when it
 //      updates, and the runner's own key, set as RUNNER_KEY
 //   5. runner.json: where the runner mirrors to, and the default folder for
-//      new threads (your home folder unless --cwd; Settings changes it later)
+//      new threads (~/Threadbear, made here, unless --cwd; Settings changes it)
 //   6. the backend and the website, deployed
 //   7. the runner and the Mac app, built and installed
 //   8. how to pair your iPhone and sign a browser in
@@ -269,8 +269,13 @@ async function runnerJson(url) {
   const json = readJson(runnerJsonPath);
   const name = v.name ?? json.sync?.name ?? os.hostname().split('.')[0];
   // Not asked: it's in the Mac app's Settings, and each new thread can pick
-  // its own folder anyway. --cwd sets it here.
-  const cwd = v.cwd ?? json.defaults?.cwd ?? '~';
+  // its own folder anyway. --cwd sets it here. The default is a folder of its
+  // own rather than the home folder: an agent searching home reaches Dropbox,
+  // Desktop and Documents, and macOS stops everything to ask about each
+  // (Mike's first thread on Tinker Desk, 28 Oct).
+  const cwd = v.cwd ?? json.defaults?.cwd ?? '~/Threadbear';
+  const cwdPath = cwd.replace(/^~(?=$|\/)/, os.homedir());
+  if (!dry && !fs.existsSync(cwdPath)) fs.mkdirSync(cwdPath, { recursive: true });
   const next = { ...json, sync: { ...json.sync, ...(url ? { url } : {}), name }, defaults: { ...json.defaults, cwd } };
   if (JSON.stringify(next) === JSON.stringify(json)) return ok(`${runnerJsonPath} as it was`);
   if (dry) return todo(`write ${runnerJsonPath}: sync.url ${url ?? '(the new deployment)'}, sync.name ${name}, defaults.cwd ${cwd}`);
