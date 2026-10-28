@@ -162,12 +162,38 @@ private struct ModelSettings: View {
     var body: some View {
         SettingsGate { settings in
             Form {
+                if settings.models.poolSupported {
+                    Section {
+                        Picker("Run on", selection: poolBinding(settings)) {
+                            ForEach(claudePools) { pool in
+                                Text(pool.title).tag(Optional(pool.id))
+                            }
+                            // A pool deleted since it was picked, so the
+                            // picker still says what's set.
+                            if let id = settings.models.pool, !claudePools.contains(where: { $0.id == id }) {
+                                Text("\(id), which has no Claude login").tag(Optional(id))
+                            }
+                            Divider()
+                            Text("OpenRouter only").tag(String?.none)
+                        }
+                        .tip("Which pool's Claude logins write titles and do the librarian's work")
+                    } header: {
+                        Text("Small jobs")
+                    } footer: {
+                        Footnote("Titles and the librarian use Haiku on one of this pool's Claude logins, the one with the most room. That counts towards the login's usage, not the budget below. When every login is out of room, they go to OpenRouter if there's a key.")
+                    }
+                }
+
                 Section {
                     keyRow(settings.models.openRouterKey)
                 } header: {
                     Text("OpenRouter")
                 } footer: {
-                    Footnote("With a key set, Threadbear sends the start of each new thread to OpenRouter to write its title, and later more for summaries and triage. It only uses providers that keep nothing. Threads in private folders are never sent.")
+                    if settings.models.poolSupported {
+                        Footnote("For small jobs the pool can't take, and models only OpenRouter has. It only uses providers that keep nothing. Threads in private folders are never sent.")
+                    } else {
+                        Footnote("With a key set, Threadbear sends the start of each new thread to OpenRouter to write its title, and later more for summaries and triage. It only uses providers that keep nothing. Threads in private folders are never sent.")
+                    }
                 }
 
                 Section {
@@ -191,7 +217,9 @@ private struct ModelSettings: View {
                 } header: {
                     Text("Spending")
                 } footer: {
-                    Footnote("Calls stop for the day once the budget is spent. Set it to $0 to stop them altogether.")
+                    Footnote(settings.models.poolSupported
+                        ? "OpenRouter calls stop for the day once the budget is spent. Set it to $0 to stop them altogether."
+                        : "Calls stop for the day once the budget is spent. Set it to $0 to stop them altogether.")
                 }
                 .onAppear { budgetDraft = settings.models.dailyBudgetUsd }
                 .onChange(of: settings.models.dailyBudgetUsd) { _, new in budgetDraft = new }
@@ -219,7 +247,7 @@ private struct ModelSettings: View {
                         }
                     }
                     Button("Add Folder…") { addPrivateFolder(settings.models.privateFolders) }
-                        .tip("Keep a folder's threads from ever being sent to OpenRouter")
+                        .tip("Keep a folder's threads from ever being sent for titles and other small jobs")
                 } header: {
                     Text("Private folders")
                 } footer: {
@@ -235,6 +263,17 @@ private struct ModelSettings: View {
             .scrollIndicators(.never)
             .scrollDisabled(true)
         }
+    }
+
+    /// Pools with a Claude login: only those can take small jobs.
+    private var claudePools: [Pool] {
+        app.pools.filter { pool in
+            pool.accountIds.contains { id in app.accounts.contains { $0.id == id && $0.provider == "claude" } }
+        }
+    }
+
+    private func poolBinding(_ settings: RunnerSettings) -> Binding<String?> {
+        Binding(get: { settings.models.pool }, set: { app.updateSettings(SettingsUpdate(pool: .some($0))) })
     }
 
     @ViewBuilder

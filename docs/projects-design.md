@@ -45,7 +45,7 @@ is why membership is per thread and not worked out from the folder alone.
 ## Who makes and keeps them
 
 **The librarian**, a background job in the runner on the existing small
-model layer (`models/`, Haiku through OpenRouter, the daily budget and
+model layer (`models/`, Haiku on the Claude pool or through OpenRouter, the daily budget and
 private folders already there). It runs:
 
 - after a thread's first turn ends,

@@ -298,8 +298,9 @@ type ProjectIcon = {
 // What the librarian (see Projects) is doing, has done and will do next.
 type LibrarianStatus = {
   state: "idle" | "working" | "paused" | "off"
-  reason?: string       // state "off": why ("No OpenRouter key", "Today's
-                        // model budget is spent", "Model calls are off")
+  reason?: string       // state "off": why ("No Claude pool or OpenRouter
+                        // key", "Every login in Claude is out of room",
+                        // "Today's model budget is spent", "Model calls are off")
   paused: boolean       // Mike paused it; looks wait in the queue
   current?: LibrarianJob & { startedAt: string } // the look under way
   queue: LibrarianJob[] // what it will look at next, soonest first
@@ -420,8 +421,10 @@ type Settings = {
   followMain: boolean   // build and restart onto main by itself; a change
                         // takes effect when the runner next restarts
   models: {
+    pool: string | null      // the pool whose Claude logins answer small
+                             // jobs first; "claude" by default, null: none
     openRouterKey: { set: boolean, hint?: string } // hint: the key's last 4 characters
-    dailyBudgetUsd: number   // 1 by default; 0 turns model calls off
+    dailyBudgetUsd: number   // OpenRouter's, 1 by default; 0 turns OpenRouter off
     spentTodayUsd: number    // since local midnight
     spentMonthUsd: number    // since the 1st, local time
     privateFolders: string[] // folders (and everything under them) whose
@@ -607,9 +610,9 @@ replaces whatever the deltas built up.
 | `pools.list` | `{}` | `{ pools: Pool[] }` (see Pools) |
 | `pools.save` | `{ pools: Pool[] }` | `{ pools: Pool[] }`. Replaces the whole list in `runner.json` (`builtIn` is dropped; an empty list goes back to the built-in ones). `-32602` for a duplicate id, a blank id or title, an empty `accountIds`, or an account id the runner doesn't know. Every client gets `pools.updated` |
 | `settings.get` | `{}` | `{ settings: Settings }` |
-| `settings.update` | `{ defaultCwd?, idleMinutes?, maxLiveCLIs?, followMain?, models?: { dailyBudgetUsd?, privateFolders? } }` | `{ settings: Settings }`. Saves what's given to `runner.json` and applies it straight away, except `followMain` (next restart). `defaultCwd` must be an existing folder, `idleMinutes` at least 1, `maxLiveCLIs` 1 to 20, `dailyBudgetUsd` 0 to 100; otherwise `-32602` saying which. Every client gets `settings.updated` |
+| `settings.update` | `{ defaultCwd?, idleMinutes?, maxLiveCLIs?, followMain?, models?: { pool?: string \| null, dailyBudgetUsd?, privateFolders? } }` | `{ settings: Settings }`. Saves what's given to `runner.json` and applies it straight away, except `followMain` (next restart). `defaultCwd` must be an existing folder, `idleMinutes` at least 1, `maxLiveCLIs` 1 to 20, `dailyBudgetUsd` 0 to 100, `pool` a pool id or `null`; otherwise `-32602` saying which. Every client gets `settings.updated` |
 | `settings.setKey` | `{ provider: "openrouter", key: string \| null }` | `{ settings: Settings }`. Writes the key to `secrets/openrouter-key` (0600), or removes it for `null`. The key is never sent back, only `set` and `hint`. A key with spaces inside or under 20 characters is `-32602`. Every client gets `settings.updated` |
-| `models.run` | `{ job: "classify" \| "extract" \| "summarize" \| "generate", text: string, labels?: string[], fields?: Record<string, string>, maxWords?: number, system?: string, cwd?: string, maxTokens?: number }` | `{ ok: true, value, model, costUsd? }` or `{ ok: false, reason: "no-key" \| "off" \| "private" \| "over-budget" \| "timeout" \| "provider", message }`. One model call by hand (`tb models try`), spent and counted like any other, with `feature: "tb"`. `maxTokens` (generate only, 1 to 8000, default 500) caps the answer, reasoning included; `classify` needs 2 or more `labels` and answers one of them; `extract` needs `fields` (name to a plain description) and answers an object of them, `null` where the text doesn't say |
+| `models.run` | `{ job: "classify" \| "extract" \| "summarize" \| "generate", text: string, labels?: string[], fields?: Record<string, string>, maxWords?: number, system?: string, cwd?: string, maxTokens?: number }` | `{ ok: true, value, model, costUsd? }` or `{ ok: false, reason: "no-key" \| "off" \| "private" \| "over-budget" \| "no-room" \| "timeout" \| "provider", message }`. One model call by hand (`tb models try`), spent and counted like any other, with `feature: "tb"`. `maxTokens` (generate only, 1 to 8000, default 500) caps the answer, reasoning included; `classify` needs 2 or more `labels` and answers one of them; `extract` needs `fields` (name to a plain description) and answers an object of them, `null` where the text doesn't say |
 | `runner.status` | `{}` | `{ version, release?, branch?, pid, startedAt, home, logFile, liveClis, running: string[], background: { threadId, tasks: string[] }[], pendingRestart?: { when, reason?, release?, resumeThreadId?, requestedAt, backgroundUntil?, waitingFor: string[] }, rolledBack?: { from, at }, draining?: { pid, version, release?, since, threads: string[] }[], update?: { state, checkout?, reason?, checkedAt?, commit?, release?, logFile? }, clis?: CliStatus[] }`. `running` lists the threads that are starting, running or waiting on an approval or a question; `background` the threads whose CLI is still running background shells or subagents (`tasks` describes each). A restart waits for both. `branch` is the branch the release was built from. `rolledBack` is set when this release is running because `launch.mjs` went back to it from `from`, which kept crashing at startup (and nobody has activated it on purpose since). `update` is the runner following main by itself (docs/dev-tools.md): `state` is `off` (`reason` says why), `idle`, `checking`, `building`, `waiting` (`release` is built and starts on the pending restart) or `failed` (`reason` is the error; `logFile` has the build's output); `commit` is main's tip at the last check (`checkedAt`) |
 | `runner.restart` | `{ when?: "idle" \| "now", resume?: { threadId, text }, reason?: string, release?: string, backgroundWaitMs?: number, cancel?: boolean }` | `{ scheduled: boolean, waitingFor: string[], background?: { threadId, tasks: string[] }[], note?: string, noResume?: string, handover?: { keeps: string[] } }`. See Restarts below; `handover` under Handovers. `scheduled` is true once the restart is saved; an empty `waitingFor` means it is happening now. `background` is the background work among `waitingFor`. `release` is the release the restart should come back on (the deploy script sets it). `backgroundWaitMs` limits how long background shells and subagents hold the restart. `cancel: true` withdraws a pending restart that hasn't begun and returns `scheduled: false` (`-32020` once it has begun), with a `note` when it also put `current` back. `noResume` says why the `resume` won't be sent as things stand (the thread has already been resumed 3 times in the last hour), so whoever asked can say so rather than wait for it. A runner older than this answers `-32601` |
 | `clis.list` | `{}` | `{ clis: CliStatus[] }` |
@@ -820,39 +823,68 @@ The methods between runners (`drain.hello`, `drain.stop`) and
 ## Settings and models
 
 The runner makes small model calls of its own (classify, extract,
-summarise, generate) for features like titles, digests and needs-you
-triage. They go to OpenRouter (`src/models/`), with one key Mike sets in
-the Settings window, `tb models key`, or by writing
-`secrets/openrouter-key` himself. The app never holds the key: it sends
-it once through `settings.setKey` and only ever hears `set` and `hint`.
+summarise, generate) for features like titles, the librarian and
+needs-you triage (`src/models/`). Features ask for a job, not a model:
+`ROUTES` lists, per job, the places to try in order, and the first that
+answers wins. There are two kinds of place:
 
-- **Consent.** Setting a key is the go-ahead to send thread text to
-  OpenRouter and the model's provider (ScaleDown, or Google or Amazon
-  for Haiku). Every call asks OpenRouter for zero data retention
+- **A Claude pool** (`pool:<model>`, Haiku today): the official `claude`
+  CLI on one of the Claude logins in the pool `models.pool` names. It's
+  the same CLI and logins as threads, so it needs no key and costs
+  nothing beyond the login's usage.
+- **OpenRouter** (any other entry, an OpenRouter model id): with one key Mike sets in the
+  Settings window, `tb models key`, or by writing
+  `secrets/openrouter-key` himself. It's there for models only
+  OpenRouter has (ScaleDown's, and later others), and for when the pool
+  is out of room. The app never holds the key: it sends it once through
+  `settings.setKey` and only ever hears `set` and `hint`.
+
+- **Consent.** A pool call sends thread text to Anthropic on Mike's own
+  login, as the thread itself does. Setting a key is the go-ahead to send
+  it to OpenRouter and the model's provider (ScaleDown, or Google or
+  Amazon for Haiku). Every OpenRouter call asks for zero data retention
   (`provider.zdr`), so it only goes to endpoints that keep nothing, with
-  no change to the account's own privacy settings. With no key, nothing
-  is sent and every feature falls back to what it did before.
+  no change to the account's own privacy settings.
+- **The pool.** `models.pool` in `runner.json` is a pool id, `"claude"`
+  when it isn't set, or `null` for none. Only its Claude logins are used.
+  A call runs on the one it ran on last while that's OK to run on (see
+  Pools), else the one with the most room. The CLI runs as `claude -p`
+  at low effort in an empty folder (`models/cli` in the data dir), with
+  no tools, MCP servers, settings, hooks, CLAUDE.md, skills or saved
+  session (`--tools "" --strict-mcp-config --setting-sources ""
+  --disable-slash-commands --no-session-persistence`), the job's own
+  system prompt, and `--json-schema` for classify and extract. A login
+  that answers that it's out of room counts as run dry, as it does for a
+  turn, and the next one is tried. With no login that has room, the call
+  goes to the next place. At most 2 pool calls run at once, and each
+  times out after 60 seconds.
 - **Private folders.** `models.privateFolders` in `runner.json` lists
-  folders whose threads are never sent, for client work and the like. A
-  call for a thread in one of them, or anywhere under one, doesn't go out.
-- **Budget.** `models.dailyBudgetUsd` (default 1) caps what's spent per
-  local day. Once a call takes it over, later calls that day don't go out,
-  and every client gets one `warning` notice saying so. 0 stops all calls.
+  folders whose threads are never sent anywhere, for client work and the
+  like. A call for a thread in one of them, or anywhere under one,
+  doesn't go out.
+- **Budget.** `models.dailyBudgetUsd` (default 1) caps what's spent on
+  OpenRouter per local day. Once a call takes it over, later OpenRouter
+  calls that day don't go out, and every client gets one `warning`
+  notice saying so. 0 stops OpenRouter calls. Pool calls aren't counted.
 - **Spend.** Each call that goes out adds a line to `models/usage.ndjson`
   in the data dir: `{ ts, feature, job, model, ok, ms, inputTokens?,
-  outputTokens?, costUsd?, error? }`, with the cost OpenRouter reports.
-  No text from the call is kept. `spentTodayUsd` and `spentMonthUsd` add
-  these up.
+  outputTokens?, costUsd?, accountId?, notionalUsd?, error? }`. `costUsd`
+  is what OpenRouter reports; a pool call has `accountId` and
+  `notionalUsd`, what the CLI says it would have cost on the API, which
+  isn't spent. No text from the call is kept. `spentTodayUsd` and
+  `spentMonthUsd` add up `costUsd`.
 - **Titles.** A new thread's title is the first line of its first
-  message, as before; with a key, a few seconds later a small model's
-  title replaces it, unless someone has set one meanwhile. Threads from
-  before there was a key keep their first line until `threads.retitle`
+  message, as before; a few seconds later a small model's title replaces
+  it, unless someone has set one meanwhile. Threads from before any
+  model could be reached keep their first line until `threads.retitle`
   names them too.
-- **Failures.** A call never throws: it says why it didn't answer (no key,
-  private folder, over budget, timed out, provider error), and the feature
-  falls back. Each call times out after 20 seconds, is tried again once
-  on a network error, a 5xx or an empty answer (not one cut off by its
-  token limit), and at most 4 are in flight at once.
+- **Failures.** A call never throws: it says why it didn't answer
+  (`no-key`: no pool and no key; `no-room`: the pool is out of room and
+  OpenRouter can't take it; private folder, over budget, timed out,
+  provider error), and the feature falls back. An OpenRouter call times
+  out after 20 seconds, is tried again once on a network error, a 5xx or
+  an empty answer (not one cut off by its token limit), and at most 4
+  calls are in flight at once.
 
 ## Pools
 

@@ -258,7 +258,7 @@ enum ScreenshotRunner {
         // Claude pool and its picker, the picker on a mixed pool (models
         // under each provider), a thread pinned to one login with the
         // picker's login list open, a thread waiting for room, and
-        // Settings › Pools.
+        // Settings › Pools and › Models.
         if wanted("15") {
             app.sidebarMode = .inbox
             app.select(nil)
@@ -286,6 +286,10 @@ enum ScreenshotRunner {
                 settings.orderBack(nil)
                 try? await Task.sleep(for: .milliseconds(600))
                 await capture(settings, dir.appendingPathComponent("15g-settings-pools.png"))
+                // Settings › Models: small jobs on the Claude pool.
+                app.settingsTab = .models
+                try? await Task.sleep(for: .milliseconds(600))
+                await capture(settings, dir.appendingPathComponent("15h-settings-models.png"))
                 settings.close()
             } else {
                 print("settings: the window didn't open")

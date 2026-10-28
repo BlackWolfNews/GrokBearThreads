@@ -26,16 +26,24 @@ public struct RunnerSettings: Sendable, Hashable, Decodable {
     }
 
     public struct Models: Sendable, Hashable, Decodable {
+        /// The pool whose Claude logins answer small jobs first; nil means
+        /// OpenRouter only.
+        public var pool: String?
+        /// Whether the runner sends `pool` at all. An older one doesn't,
+        /// and sends everything through OpenRouter.
+        public var poolSupported: Bool
         public var openRouterKey: Key
-        /// 0 turns model calls off.
+        /// OpenRouter's; 0 turns OpenRouter off.
         public var dailyBudgetUsd: Double
         public var spentTodayUsd: Double
         public var spentMonthUsd: Double
         /// Folders whose thread text is never sent, as written ("~/" kept).
         public var privateFolders: [String]
 
-        public init(openRouterKey: Key = Key(), dailyBudgetUsd: Double = 1, spentTodayUsd: Double = 0,
-                    spentMonthUsd: Double = 0, privateFolders: [String] = []) {
+        public init(pool: String? = nil, poolSupported: Bool = false, openRouterKey: Key = Key(), dailyBudgetUsd: Double = 1,
+                    spentTodayUsd: Double = 0, spentMonthUsd: Double = 0, privateFolders: [String] = []) {
+            self.pool = pool
+            self.poolSupported = poolSupported
             self.openRouterKey = openRouterKey
             self.dailyBudgetUsd = dailyBudgetUsd
             self.spentTodayUsd = spentTodayUsd
@@ -45,6 +53,8 @@ public struct RunnerSettings: Sendable, Hashable, Decodable {
 
         public init(from decoder: Decoder) throws {
             let c = try decoder.container(keyedBy: CodingKeys.self)
+            poolSupported = c.contains(.pool)
+            pool = ((try? c.decodeIfPresent(String.self, forKey: .pool)) ?? nil).flatMap { $0.isEmpty ? nil : $0 }
             openRouterKey = (try? c.decodeIfPresent(Key.self, forKey: .openRouterKey)) ?? Key()
             dailyBudgetUsd = c.number(.dailyBudgetUsd) ?? 1
             spentTodayUsd = c.number(.spentTodayUsd) ?? 0
@@ -52,7 +62,7 @@ public struct RunnerSettings: Sendable, Hashable, Decodable {
             privateFolders = c.lossyArray(String.self, forKey: .privateFolders)
         }
 
-        enum CodingKeys: String, CodingKey { case openRouterKey, dailyBudgetUsd, spentTodayUsd, spentMonthUsd, privateFolders }
+        enum CodingKeys: String, CodingKey { case pool, openRouterKey, dailyBudgetUsd, spentTodayUsd, spentMonthUsd, privateFolders }
     }
 
     public var defaultCwd: String
@@ -89,11 +99,14 @@ public struct SettingsUpdate: Sendable, Hashable {
     public var idleMinutes: Int?
     public var maxLiveCLIs: Int?
     public var followMain: Bool?
+    /// `.some(nil)` sends null: OpenRouter only.
+    public var pool: String??
     public var dailyBudgetUsd: Double?
     public var privateFolders: [String]?
 
     public init(defaultCwd: String? = nil, idleMinutes: Int? = nil, maxLiveCLIs: Int? = nil, followMain: Bool? = nil,
-                dailyBudgetUsd: Double? = nil, privateFolders: [String]? = nil) {
+                pool: String?? = nil, dailyBudgetUsd: Double? = nil, privateFolders: [String]? = nil) {
+        self.pool = pool
         self.defaultCwd = defaultCwd
         self.idleMinutes = idleMinutes
         self.maxLiveCLIs = maxLiveCLIs
@@ -109,6 +122,7 @@ public struct SettingsUpdate: Sendable, Hashable {
         if let maxLiveCLIs { params["maxLiveCLIs"] = .number(Double(maxLiveCLIs)) }
         if let followMain { params["followMain"] = .bool(followMain) }
         var models: [String: JSONValue] = [:]
+        if let pool { models["pool"] = pool.map { .string($0) } ?? .null }
         if let dailyBudgetUsd { models["dailyBudgetUsd"] = .number(dailyBudgetUsd) }
         if let privateFolders { models["privateFolders"] = .array(privateFolders.map { .string($0) }) }
         if !models.isEmpty { params["models"] = .object(models) }

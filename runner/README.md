@@ -264,10 +264,11 @@ installed runner leaves it out; `scripts/dev-runner.sh` sets it.
 `followMain` (default true) lets a runner that runs from a release build
 and restart onto main by itself (`docs/dev-tools.md`, "The runner updating
 itself"); `THREADBEAR_FOLLOW_MAIN=0` does the same for one run.
-`models` is for the runner's own small-model calls through OpenRouter
-(`src/models/`, docs/protocol.md "Settings and models"): a daily budget in
-dollars (default 1; 0 turns them off) and folders whose threads are never
-sent. The app's Settings window and `tb settings` show and change all of
+`models` is for the runner's own small-model calls
+(`src/models/`, docs/protocol.md "Settings and models"): `pool`, the pool
+whose Claude logins answer them first through the CLI (default `"claude"`,
+`null` for none), OpenRouter's daily budget in dollars (default 1; 0 turns
+OpenRouter off) and folders whose threads are never sent. The app's Settings window and `tb settings` show and change all of
 this; the OpenRouter key itself is `secrets/openrouter-key`.
 
 Environment variables, mainly for tests:

@@ -1134,6 +1134,22 @@ export class Runner {
     return { pools: this.pools() };
   }
 
+  // For the small-model layer (models/index.ts): a pool and the logins this
+  // runner can use, with the room it knows of, a login that just ran dry
+  // counting as blocked.
+  smallModelPool(id: string): { pool: Pool; accounts: Account[] } | undefined {
+    const accounts = this.usableAccounts();
+    const pool = this.pools().find((p) => p.id === id);
+    return pool ? { pool, accounts: poolAccounts(pool, accounts) } : undefined;
+  }
+
+  // A small-model call found this login out of room: the same as a turn
+  // that did.
+  noteRanDry(accountId: string): void {
+    const account = this.safeAccounts().find((a) => a.id === accountId);
+    if (account) this.markRanDry(account);
+  }
+
   // pools.save: replaces the whole list in runner.json (an empty one goes
   // back to the built-in pools) and tells every client.
   savePools(raw: unknown): { pools: Pool[] } {
