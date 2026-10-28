@@ -1,11 +1,16 @@
 import AppKit
+import BearDock
 import SwiftUI
 import ThreadbearCore
 
-/// The column of icons down the sidebar's left edge, like VS Code's activity
+/// The column of icons down the window's left edge, like VS Code's activity
 /// bar: the sidebar's views at the top (threads, hibernating, archive,
 /// scheduled, projects, the librarian) and Usage and Settings at the foot. These were rows in a
 /// footer under the threads, which took about five rows' height from the list.
+///
+/// It's outside the dock (RootView), not part of the sidebar panel, so a
+/// panel docked under the sidebar (Usage) or the sidebar moved elsewhere
+/// leaves it the full height of the window, as VS Code's is (Mike, 28 Oct).
 struct ActivityBar: View {
     @Environment(AppModel.self) private var app
     @Environment(\.openSettings) private var openSettings
@@ -15,6 +20,10 @@ struct ActivityBar: View {
 
     var body: some View {
         VStack(spacing: zoomed(4)) {
+            // The traffic lights sit here, and it moves the window, as the
+            // panels' bars beside it do.
+            WindowGrip()
+                .frame(height: RootView.options.headerHeight)
             ActivityButton(symbol: "bubble.left.and.bubble.right", title: "Threads", shortcut: "⌘1",
                            active: app.sidebarMode == .inbox, slides: true) {
                 app.sidebarMode = .inbox
@@ -60,12 +69,11 @@ struct ActivityBar: View {
         }
         .environment(\.sidebarRowSpace, activeSpace)
         .animation(Juice.selection, value: app.sidebarMode)
-        .padding(.top, zoomed(4))
         .padding(.bottom, zoomed(10))
         .frame(width: Self.width)
         .frame(maxHeight: .infinity)
         .overlay(alignment: .trailing) {
-            Rectangle().fill(.separator).frame(width: 0.5).padding(.vertical, zoomed(4))
+            Rectangle().fill(.separator).frame(width: 0.5)
         }
     }
 }

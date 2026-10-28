@@ -177,8 +177,8 @@ extension AppModel {
     }
 }
 
-/// The window's content: the dock, with the rail of the thread's pane
-/// sections down the right.
+/// The window's content: the dock, with the activity bar down the left and
+/// the rail of the thread's pane sections down the right.
 struct RootView: View {
     @Environment(AppModel.self) private var app
     @Environment(\.openSettings) private var openSettings
@@ -186,6 +186,10 @@ struct RootView: View {
     var body: some View {
         @Bindable var app = app
         HStack(spacing: 0) {
+            // Drawn over the dock: its keys hang out to the right while ⌘
+            // is held (ShortcutHints).
+            ActivityBar()
+                .zIndex(1)
             DockView(controller: app.dock, options: Self.options, content: content)
             if let thread = app.selectedThread, app.openProject == nil {
                 PanelRail(thread: thread)
@@ -218,7 +222,9 @@ struct RootView: View {
         var o = DockOptions()
         o.headerHeight = PaneHeader<EmptyView, EmptyView>.height
         o.titleSize = TypeScale.label
-        o.trafficLights = 78
+        // The traffic lights take 78 points from the left edge; the
+        // activity bar under them has the first of those.
+        o.trafficLights = max(0, 78 - ActivityBar.width)
         o.cornerMovesWindow = true
         o.tip = { view, text in AnyView(view.tip(text)) }
         // A panel dragged out into a window of its own: the same model as

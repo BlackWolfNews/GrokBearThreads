@@ -24,34 +24,28 @@ struct SidebarView: View {
     @Environment(AppModel.self) private var app
 
     var body: some View {
-        // VS Code style: a column of icons down the left for the views and
-        // the window-wide things, and the chosen view beside it.
-        HStack(spacing: 0) {
-            // Drawn over the list: its keys hang out to the right while ⌘
-            // is held (ShortcutHints).
-            ActivityBar()
-                .zIndex(1)
-            // In a ZStack so the old view and the new one share the space
-            // while one fades out and the other fades in and settles.
-            ZStack {
-                Group {
-                    switch app.sidebarMode {
-                    case .inbox: InboxList()
-                    case .snoozed: SnoozedList()
-                    case .archive: ArchiveList()
-                    case .scheduled: ScheduledList()
-                    case .projects: ProjectsList()
-                    case .librarian: LibrarianView()
-                    }
+        // The view picked in the activity bar, which runs down the window's
+        // left edge beside this (RootView). In a ZStack so the old view and
+        // the new one share the space while one fades out and the other
+        // fades in and settles.
+        ZStack {
+            Group {
+                switch app.sidebarMode {
+                case .inbox: InboxList()
+                case .snoozed: SnoozedList()
+                case .archive: ArchiveList()
+                case .scheduled: ScheduledList()
+                case .projects: ProjectsList()
+                case .librarian: LibrarianView()
                 }
-                .transition(Juice.reduceMotion ? .opacity : .asymmetric(
-                    insertion: .opacity.combined(with: .offset(y: zoomed(6))),
-                    removal: .opacity
-                ))
             }
-            .frame(maxWidth: .infinity)
-            .animation(Juice.reduceMotion ? .easeOut(duration: 0.12) : .snappy(duration: 0.22), value: app.sidebarMode)
+            .transition(Juice.reduceMotion ? .opacity : .asymmetric(
+                insertion: .opacity.combined(with: .offset(y: zoomed(6))),
+                removal: .opacity
+            ))
         }
+        .frame(maxWidth: .infinity)
+        .animation(Juice.reduceMotion ? .easeOut(duration: 0.12) : .snappy(duration: 0.22), value: app.sidebarMode)
     }
 }
 

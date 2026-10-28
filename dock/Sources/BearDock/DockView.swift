@@ -703,10 +703,12 @@ extension View {
 /// AppKit still treats the top 28 points as one and moved the window on a
 /// drag of a panel's bar before the panel's own drag could start, the
 /// SwiftUI gestures there notwithstanding (Mike, 28 Oct). So this lets it
-/// move just for its own drag.
-private struct WindowGrip: NSViewRepresentable {
-    func makeNSView(context: Context) -> NSView { GripView() }
-    func updateNSView(_ view: NSView, context: Context) {}
+/// move just for its own drag. Public for anything the app draws beside
+/// the dock under the traffic lights (Threadbear's activity bar).
+public struct WindowGrip: NSViewRepresentable {
+    public init() {}
+    public func makeNSView(context: Context) -> NSView { GripView() }
+    public func updateNSView(_ view: NSView, context: Context) {}
 
     private final class GripView: NSView {
         override var mouseDownCanMoveWindow: Bool { false }
