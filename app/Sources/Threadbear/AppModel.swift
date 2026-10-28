@@ -148,9 +148,6 @@ final class AppModel {
     var modelPickerRequest = 0
     /// The same for the account picker.
     var accountPickerRequest = 0
-    /// The model picker's "Pin to a login" list is open. On the model, so
-    /// the automation and the screenshots can open it as a click does.
-    var pickerShowsLogins = false
     /// Every schedule, in the runner's order (soonest first, then the
     /// paused and finished ones). Replaced whole by `schedules.updated`.
     var schedules: [Schedule] = []

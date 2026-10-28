@@ -272,8 +272,7 @@ enum ScreenshotRunner {
             await open(app, "demo_sqlite_vs_files")
             app.transcript.scrollToBottom()
             await capture(window, dir.appendingPathComponent("15d-pinned-thread.png"))
-            // Opened as a click on "Pin to a login" does, once it's showing.
-            await capturePopover(window, dir.appendingPathComponent("15e-picker-pinned.png"), after: { app.pickerShowsLogins = true }) {
+            await capturePopover(window, dir.appendingPathComponent("15e-picker-pinned.png")) {
                 app.modelPickerRequest += 1
             }
             await open(app, "demo_release_notes")

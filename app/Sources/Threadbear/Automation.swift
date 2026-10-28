@@ -1019,9 +1019,6 @@ enum Automation {
                 // With pools, `pool` says which pool's column to pick from.
                 return settings.pickerClick(title, column: c["pool"] as? String) ? "ok" : "error no item \(title)"
             }
-            // `logins: true` or false opens or shuts "Pin to a login", in
-            // an open picker or the next one.
-            if let logins = c["logins"] as? Bool { app.pickerShowsLogins = logins }
             if c["show"] as? Bool == true { return show { app.modelPickerRequest += 1 } }
             return "ok " + json(settings.pickerLines())
         case "account":
@@ -1034,8 +1031,9 @@ enum Automation {
             if c["show"] as? Bool == true { return show { app.accountPickerRequest += 1 } }
             return "ok " + json(settings.accountLines())
         case "pin":
-            // The picker's "Pin to a login" list: a login by its email or
-            // id pins the thread (or the draft) to it; "Unpin" unpins.
+            // Pinning, which the picker no longer offers (28 Oct): a login
+            // by its email or id pins the thread (or the draft) to it;
+            // "Unpin" unpins.
             guard settings.usesPools else { return "error the runner has no pools; use menu account" }
             if let title = c["click"] as? String {
                 if title == "Unpin" { return settings.pickerClick("Unpin") ? "ok" : "error it isn't pinned" }

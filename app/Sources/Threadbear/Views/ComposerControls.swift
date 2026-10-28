@@ -289,17 +289,11 @@ struct ThreadSettings {
         app.choosePool(column, provider: section, model: model, threadId: thread?.id)
     }
 
-    /// A line about a pool's logins, for the composer menu's text dump.
-    func poolStatus(for columnId: String) -> String? {
-        guard let shown = app.pool(columnId) else { return nil }
-        return Pools.statusLine(shown, accounts: app.accounts, now: app.now)
-    }
-
     /// "Pinned to gmail", for a pinned thread.
     var pinnedLine: String? { isPinned ? "Pinned to " + AccountName.login(account, accounts: app.accounts) : nil }
 
-    /// "Pin to a login ›" lists every login with its room; the pinned one
-    /// is ticked. It reads the thread live, so the tick can't go stale.
+    /// Every login with its room, the pinned one ticked, for the
+    /// automation's pin menu. It reads the thread live, so the tick can't go stale.
     var pinSections: [AccountMenu.Section] { AccountMenu.sections(app.accounts, selected: isPinned ? account : "", now: app.now) }
 
     func pin(_ accountId: String) {
@@ -359,8 +353,8 @@ struct ThreadSettings {
 
     /// The pools picker as text: `# [x] Claude · 3 · 61%` per pool (ticked
     /// on the thread's own), `## Codex` over each provider in a mixed pool,
-    /// the rows as above, then the effort levels, the pool's status line,
-    /// the pinned line, and the logins "Pin to a login" lists.
+    /// the rows as above, then the effort levels and the pinned line, as
+    /// the picker shows them.
     private func poolPickerLines() -> [String] {
         var lines: [String] = []
         func add(_ sections: [ModelPicker.Section]) {
@@ -389,10 +383,7 @@ struct ThreadSettings {
             if let porridge = ComposerChips.effortPorridge(level) { line += " - " + porridge }
             lines.append(line)
         }
-        if let pool, let status = poolStatus(for: pool.id) { lines.append("--- " + status) }
         if let pinnedLine { lines.append("--- " + pinnedLine + " · Unpin") }
-        lines.append("# Pin to a login")
-        lines += AccountMenu.lines(pinSections, footer: nil).filter { !$0.hasPrefix("# ") }
         return lines
     }
 
@@ -727,9 +718,9 @@ private final class ActionMenuItem: NSMenuItem {
 /// the level picked last is what a new thread starts on.
 ///
 /// With pools (docs/pools-plan.md) the rail lists pools with their logins
-/// and best room, a mixed pool lists its models under each provider, and
-/// under the effort levels "Pin to a login ›" is there for the rare
-/// thread that should stay on one.
+/// and best room, and a mixed pool lists its models under each provider.
+/// "Pin to a login ›" went (28 Oct): Mike didn't want it. A thread pinned
+/// before then (or by a script) still gets a "Pinned to … · Unpin" line.
 struct ModelPickerView: View {
     @Environment(AppModel.self) private var app
     /// Nil for the new-thread composer.
@@ -746,14 +737,13 @@ struct ModelPickerView: View {
     static var poolRailWidth: CGFloat { zoomed(96) }
 
     /// The model list scrolls past 320 pt at 100%, or sooner when there
-    /// isn't room above the chip for the search box, the list, Effort and
-    /// the pool footer (more while "Pin to a login" is open under it).
+    /// isn't room above the chip for the search box, the list, the effort
+    /// levels and a pinned thread's Unpin line.
     /// Sized from the window it ran off the bottom of the screen in a
     /// thread whose window went up near the top of it.
-    static func listMaxHeight(pools: Bool, showsLogins: Bool) -> CGFloat {
+    static func listMaxHeight(pools: Bool) -> CGFloat {
         var chrome = zoomed(140)
-        if pools { chrome += zoomed(60) }
-        if pools && showsLogins { chrome += zoomed(230) }
+        if pools { chrome += zoomed(40) }
         let room = AppWindow.roomAboveAnchor ?? (AppWindow.contentHeight ?? 800) - zoomed(170)
         return max(zoomed(120), min(zoomed(320), room - chrome))
     }
@@ -766,7 +756,6 @@ struct ModelPickerView: View {
         let column = columnId ?? settings.columnId
         let sections = settings.sections(for: column, query: query)
         let railWidth = pools ? Self.poolRailWidth : Self.railWidth
-        let showsLogins = app.pickerShowsLogins
         // The rail is laid over the column's leading edge rather than
         // beside it in a stack: its full-height frame made the stack's
         // height a guess, and a short list (Codex's two models) floated in
@@ -827,13 +816,13 @@ struct ModelPickerView: View {
                     }
                     .padding(zoomed(6))
                 }
-                .frame(maxHeight: Self.listMaxHeight(pools: pools, showsLogins: showsLogins))
+                .frame(maxHeight: Self.listMaxHeight(pools: pools))
                 .fixedSize(horizontal: false, vertical: true)
                 Divider()
                 EffortRow(levels: settings.effortLevels, chosen: settings.effectiveEffort) { settings.setEffort($0) }
-                if pools {
+                if pools, settings.pinnedLine != nil {
                     Divider()
-                    PoolFooter(settings: settings, column: column, showsLogins: Bindable(app).pickerShowsLogins, showPinned: { columnId = ThreadSettings.pinnedColumn },
+                    PoolFooter(settings: settings, column: column, showPinned: { columnId = ThreadSettings.pinnedColumn },
                                close: close)
                 }
         }
@@ -850,7 +839,6 @@ struct ModelPickerView: View {
         .frame(width: pools ? Self.poolWidth : Self.width)
         .onAppear { searching = true }
         // Shut again for next time.
-        .onDisappear { app.pickerShowsLogins = false }
     }
 }
 
@@ -966,14 +954,11 @@ private struct PickerRail: View {
     }
 }
 
-/// Under the effort levels, with pools: the login a pinned thread is on
-/// with Unpin, and "Pin to a login ›", which opens the logins with their
-/// room in place. The rail already shows each pool's best room, so the
-/// line here about how its logins were doing went (28 Oct).
+/// Under the effort levels, for a pinned thread: the login it's on, and
+/// Unpin to hand it back to the pool.
 private struct PoolFooter: View {
     let settings: ThreadSettings
     let column: String
-    @Binding var showsLogins: Bool
     let showPinned: () -> Void
     let close: () -> Void
 
@@ -995,41 +980,6 @@ private struct PoolFooter: View {
                     .tip("Let the pool pick the login again")
                 }
                 .font(.system(size: zoomed(11)))
-            }
-            Button {
-                showsLogins.toggle()
-            } label: {
-                HStack(spacing: zoomed(3)) {
-                    Text("Pin to a login")
-                    Image(systemName: "chevron.right")
-                        .font(.system(size: zoomed(8), weight: .semibold))
-                        .rotationEffect(.degrees(showsLogins ? 90 : 0))
-                }
-                .font(.system(size: zoomed(11)))
-                .foregroundStyle(.secondary)
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .tip("Keep this thread on one login, which the runner never moves")
-            if showsLogins {
-                let sections = settings.pinSections
-                ScrollView {
-                    VStack(alignment: .leading, spacing: zoomed(1)) {
-                        ForEach(sections) { section in
-                            ListHeading(title: section.title, first: section.id == sections.first?.id)
-                            ForEach(section.items) { item in
-                                LoginRow(item: item) {
-                                    settings.pin(item.id)
-                                    close()
-                                }
-                            }
-                        }
-                    }
-                }
-                .frame(maxHeight: zoomed(220))
-                .fixedSize(horizontal: false, vertical: true)
-                // The rows' own padding lines their text up with the lines above.
-                .padding(.horizontal, -zoomed(10))
             }
         }
         .padding(.horizontal, zoomed(12))

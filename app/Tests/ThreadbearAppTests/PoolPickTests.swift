@@ -166,7 +166,6 @@ final class PoolPickTests: XCTestCase {
         let settings = ThreadSettings(app: app, thread: thread)
         XCTAssertEqual(settings.modelChipTitle, "Claude · Opus 5.5 · High")
         XCTAssertEqual(settings.modelChipBadge, .low("20%"), "every login in the pool is low")
-        XCTAssertEqual(settings.poolStatus(for: "claude"), "gangbusters 20% · gmail 16%")
         XCTAssertNil(settings.pinnedLine)
         // An old thread, pinned.
         let pinned = ThreadSummary(id: "th2", title: "t", accountId: "claude-1")
