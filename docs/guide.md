@@ -62,7 +62,7 @@ point. The agent forgets that message and everything after it, the
 changes it made to files since then are put back, and your new version is
 sent as if the rest had never happened. A turn that's running is stopped
 first. What was cut is gone from the thread, and a line where it was says
-which files were put back.
+how many files were put back.
 
 Files changed by commands the agent ran (a script, `git`, `npm install`)
 aren't put back, only ones it edited or wrote itself. If you've changed one
