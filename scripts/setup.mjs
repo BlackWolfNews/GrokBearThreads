@@ -219,19 +219,27 @@ async function keys(urlFromProject) {
   let url = urlFromProject ?? readJson(runnerJsonPath).sync?.url;
   if (!url && key?.name) url = await findUrl(key.name);
   if (!dry && !url) throw new Fail("Couldn't work out the production deployment's URL. Put it in runner.json as sync.url and run setup again.");
-  if (fs.existsSync(runnerKeyFile) && dry) ok('runner key');
-  if (!fs.existsSync(runnerKeyFile)) {
-    if (dry) todo('a runner key, set on the deployment as RUNNER_KEY');
-    else writeSecret(runnerKeyFile, crypto.randomBytes(32).toString('hex'));
+  // The deployment's RUNNER_KEY is shared by every runner that writes to it
+  // (each Mac that joins with --existing). So one that's already set wins:
+  // it's copied here, never replaced, or the other Macs would be locked out.
+  // Only a deployment without one gets a new key.
+  if (dry) {
+    if (fs.existsSync(runnerKeyFile)) ok('runner key');
+    else todo("the runner key: the deployment's own if it has one, else a new one set as RUNNER_KEY");
   }
   if (!dry && key) {
-    const want = fs.readFileSync(runnerKeyFile, 'utf8').trim();
-    const got = run(npx, ['convex', 'env', 'get', 'RUNNER_KEY'], { env: withKey(key.key) }).stdout.trim();
-    if (got !== want) {
-      const r = spawnSync(npx, ['convex', 'env', 'set', 'RUNNER_KEY'], { cwd: repo, env: withKey(key.key), input: want, encoding: 'utf8' });
+    const existing = run(npx, ['convex', 'env', 'get', 'RUNNER_KEY'], { env: withKey(key.key) }).stdout.trim();
+    const local = fs.existsSync(runnerKeyFile) ? fs.readFileSync(runnerKeyFile, 'utf8').trim() : '';
+    if (existing) {
+      if (local !== existing) writeSecret(runnerKeyFile, existing);
+      ok(local && local !== existing ? "runner key: using the deployment's (it already had one)" : 'runner key');
+    } else {
+      const fresh = local || crypto.randomBytes(32).toString('hex');
+      if (!local) writeSecret(runnerKeyFile, fresh);
+      const r = spawnSync(npx, ['convex', 'env', 'set', 'RUNNER_KEY'], { cwd: repo, env: withKey(key.key), input: fresh, encoding: 'utf8' });
       if (r.status !== 0) throw new Fail('Setting RUNNER_KEY on the deployment failed.');
+      ok('runner key set as RUNNER_KEY');
     }
-    ok('runner key set as RUNNER_KEY');
   }
   return url;
 }
