@@ -46,8 +46,14 @@ final class Dictation {
             self.request = request
             let input = engine.inputNode
             input.removeTap(onBus: 0)
-            input.installTap(onBus: 0, bufferSize: 1024, format: input.outputFormat(forBus: 0)) { buffer, _ in
-                request.append(buffer)
+            // The tap runs on the audio queue. Written plainly inside this
+            // @MainActor class the block would be main-actor isolated (the
+            // project's default isolation), and iOS 18 trapped on the first
+            // buffer: dispatch_assert_queue in Dictation.start. So it's
+            // @Sendable and reaches the request through MicSink.
+            let sink = MicSink(request)
+            input.installTap(onBus: 0, bufferSize: 1024, format: input.outputFormat(forBus: 0)) { @Sendable buffer, _ in
+                sink.append(buffer)
             }
             engine.prepare()
             try engine.start()
@@ -109,4 +115,13 @@ final class Dictation {
             SFSpeechRecognizer.requestAuthorization { continuation.resume(returning: $0) }
         }
     }
+}
+
+/// Carries the mic's buffers from the audio thread to the recognition request.
+/// `append` on a request is thread-safe; the box exists so the tap block can
+/// be @Sendable without capturing the (non-Sendable) request itself.
+nonisolated private final class MicSink: @unchecked Sendable {
+    private let request: SFSpeechAudioBufferRecognitionRequest
+    init(_ request: SFSpeechAudioBufferRecognitionRequest) { self.request = request }
+    func append(_ buffer: AVAudioPCMBuffer) { request.append(buffer) }
 }
