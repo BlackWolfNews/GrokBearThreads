@@ -1,10 +1,13 @@
-<!--page {"title": "Privacy · Threadbear", "description": "What the Threadbear website and app do with your information: the site has no cookies or analytics, and the app keeps your threads on your Mac and in your own Convex deployment.", "path": "/privacy"} -->
+<!--page {"title": "Privacy · Threadbear", "description": "What the Threadbear website and app do with your information: the site has no cookies or analytics, and the apps keep your threads on your Mac and in your own Convex deployment.", "path": "/privacy"} -->
 <!-- Keep every line here true. The website part is checked against worker.mjs, headers.mjs and
      wrangler.jsonc (Cloudflare Workers, observability on, no analytics or cookies). The app part
-     follows docs/convex-backend.md and docs/website.md.
+     follows docs/convex-backend.md, docs/website.md, ios/README.md and the iPhone app itself
+     (ios/Threadbear: AppModel.swift for pairing and push, Dictation.swift, QRScanner.swift,
+     PrivacyInfo.xcprivacy). The App Store listing links here (ios/appstore/metadata.json).
      NOT BUILT: "your own Convex deployment" assumes the install sets one up in your account.
-     TO DO before the iPhone app is on the App Store: say how notifications reach a phone that's
-     paired to someone else's deployment (today the push key is Mike's, in his deployment). -->
+     Notifications: in 1.0 the phone's pushes go straight from the deployment it's paired with
+     (convex/push.ts, with Mike's push key). The relay in docs/setup-and-updates.md 2.4 comes
+     later; when it does, say here what it sees (an encrypted message and a device token). -->
     <article class="legal">
       <h1>Privacy</h1>
       <p class="lede">The short version: I don't collect anything about you. Your threads stay on your Mac and in a Convex deployment that's yours.</p>
@@ -18,8 +21,11 @@
 
       <h2>The iPhone app and thread links</h2>
       <p>The iPhone app and the browser links read the same Convex deployment, using a sign in code that only you can make from your Mac. You can cancel one at any time and that phone or browser stops working straight away.</p>
-      <p>I'll add more detail here about notifications before the iPhone app is on the App Store.</p>
+      <p>The iPhone app only ever talks to the deployment you pair it with. The sign in code is kept in the phone's Keychain and the deployment's address in the app's settings, and nothing else about you is kept or sent anywhere. There's no account with me, no analytics, no ads and no tracking, and I don't collect anything from the app.</p>
+      <p>If you turn on notifications, Apple gives the phone a notification token, and the app saves it in your deployment so it can tell you when a thread needs you. The notifications go from your deployment through Apple's push service, and turning them off in the iPhone's Settings stops them.</p>
+      <p>The camera is only used to scan the pairing code, and the picture never leaves the phone. The microphone is only used after you tap it to dictate a reply. Apple's speech recognition turns it into text, on the phone where it can, otherwise through Apple's servers under <a href="https://www.apple.com/legal/privacy/">Apple's privacy policy</a>.</p>
+      <p>The sample threads you can look around in before pairing are made up, and they stay on the phone.</p>
 
       <h2>Questions</h2>
-      <p>If something here doesn't make sense, or you think it's wrong, get in touch through <a href="https://mikecann.app">mikecann.app</a>.</p>
+      <p>If something here doesn't make sense, or you think it's wrong, email me at <a href="mailto:threadbear@mikecann.app">threadbear@mikecann.app</a>.</p>
     </article>

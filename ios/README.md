@@ -12,9 +12,21 @@ directly, so it works with the Mac asleep: whatever you send waits in
   test` runs on the Mac.
 - `Threadbear/`: the SwiftUI app. iOS 18, so the XS Max runs it too.
 - `scripts/sim-shots.sh [dir] [--dark]`: screenshots on sample data in the
-  simulator (`-ThreadbearFake`, `-ThreadbearOpen <threadId>`).
+  simulator (`-ThreadbearFake`, `-ThreadbearOpen <threadId>`,
+  `-ThreadbearCompose <text>`), on a 6.9" iPhone, so they're App Store sized.
+- `appstore/` and `scripts/appstore-*`: the App Store listing and release,
+  in `appstore/RELEASE.md`.
 - `scripts/install-phone.sh`: build, install over wifi, launch.
 - `scripts/make-icon.swift`: the icon, from the same mascot as the Mac's.
+
+## The demo
+
+"Look around with sample threads", at the bottom of the pair screen, runs
+the app on `FakeBackend`'s made-up threads, on the phone only. It's how App
+Review sees the app working without a token into anyone's deployment, so
+the sample data must never name Mike's own projects or machines
+(`sampleDataHasNothingPersonal`). The menu and Settings have "Leave the
+demo", back to pairing. It isn't remembered across launches.
 
 ## Pairing
 
@@ -34,5 +46,8 @@ simulator.
 ## Push
 
 `phone:registerDevice` with the APNs token. Builds from `install-phone.sh`
-are development-signed, so they're `sandbox`. Tapping a notification opens
+are development-signed, so they're `sandbox`; App Store builds (Release,
+`THREADBEAR_APS_ENVIRONMENT = production`) are `production`. In 1.0 the
+pushes come straight from the paired deployment with Mike's key
+(`convex/push.ts`); the relay in docs/setup-and-updates.md 2.4 is later. Tapping a notification opens
 its `threadId`.

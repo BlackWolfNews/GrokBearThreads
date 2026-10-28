@@ -51,6 +51,11 @@ struct PairView: View {
                 Task { await model.pair(with: url) }
             }
             .font(.subheadline)
+            // Made-up threads on the phone only, for a look before there's
+            // a Mac to pair with (and for App Review).
+            Button("Look around with sample threads") { model.startDemo() }
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
         }
         .padding(32)
         .fullScreenCover(isPresented: $scanning) {
@@ -88,10 +93,18 @@ struct SettingsView: View {
                                     "Last seen \(RelativeTime.clock(runner.lastSeenAt, now: model.now))")
                 }
             }
-            Section {
-                Button("Unpair this phone", role: .destructive) { confirmUnpair = true }
-            } footer: {
-                Text("Forgets the token on this phone. Revoke it on the Mac too if the phone's lost.")
+            if model.isFake {
+                Section {
+                    Button("Leave the demo") { model.leaveDemo() }
+                } footer: {
+                    Text("These are made-up threads, kept on this phone. Leaving goes back to pairing with your Mac.")
+                }
+            } else {
+                Section {
+                    Button("Unpair this phone", role: .destructive) { confirmUnpair = true }
+                } footer: {
+                    Text("Forgets the token on this phone. Revoke it on the Mac too if the phone's lost.")
+                }
             }
         }
         .navigationTitle("Settings")

@@ -136,6 +136,9 @@ everything about it has to work with anyone's backend.
   token and an **encrypted** message; the phone decrypts it with a key it got at pairing
   (a Notification Service Extension), so the relay only ever sees gibberish. Mike's own
   backend uses the relay too, so his setup is the same as everyone's.
+- **For now (28 Oct 2026):** Mike's call is to ship 1.0 of the App Store app without the relay.
+  Pushes keep going straight from his own deployment (`convex/push.ts`, the `APNS_*` env), so
+  only a backend holding his key can notify a phone, and the relay comes in a later version.
 
 ### 2.5 Tailscale: how your own machines reach each other
 

@@ -18,7 +18,7 @@ public final class FakeBackend: Backend, @unchecked Sendable {
         let sample = Self.sample(now: now)
         threadsById = Dictionary(uniqueKeysWithValues: sample.threads.map { ($0.threadId, $0) })
         messagesById = sample.messages
-        runnerList = [PhoneRunner(runnerId: "m5", name: "M5", version: "0.1.0",
+        runnerList = [PhoneRunner(runnerId: "m5", name: "MacBook Pro", version: "0.1.0",
                                   lastSeenAt: runnerOnline ? now : now.addingTimeInterval(-3 * 3600))]
         self.turnDelay = turnDelay
     }
@@ -173,7 +173,7 @@ public final class FakeBackend: Backend, @unchecked Sendable {
         let id = UUID().uuidString.lowercased()
         let title = String(text.prefix(48))
         mutate { s in
-            s.threadsById[id] = PhoneThread(threadId: id, title: title, cwd: cwd ?? "~/dev/me/misc", status: .running,
+            s.threadsById[id] = PhoneThread(threadId: id, title: title, cwd: cwd ?? "~/code/misc", status: .running,
                                             lastActivityAt: .now, working: "Bear with me")
             s.append(id, role: .user, text: text, origin: "phone")
         }
@@ -203,48 +203,56 @@ public final class FakeBackend: Backend, @unchecked Sendable {
 
     // MARK: Sample data
 
+    /// Made-up threads for the demo (App Review taps "Look around with
+    /// sample threads"), the simulator and the screenshots. Nothing in here
+    /// is from a real thread, and no real project or app is named:
+    /// FakeBackendTests checks for the names that used to be here.
     static func sample(now: Date) -> (threads: [PhoneThread], messages: [String: [PhoneMessage]]) {
         func ago(_ minutes: Double) -> Date { now.addingTimeInterval(-minutes * 60) }
-        let threadbear = [ProjectRef(id: "p_2adc13b8", title: "Threadbear")]
-        let poddle = [ProjectRef(id: "p_poddle", title: "Poddle")]
+        let garden = [ProjectRef(id: "p_garden", title: "Garden planner")]
+        let site = [ProjectRef(id: "p_site", title: "Website")]
         let threads = [
-            PhoneThread(threadId: "a1", title: "Ship Poddle 1.0.1", cwd: "~/dev/me/poddle", status: .waiting,
-                        needsYou: true, preview: "Ready to submit build 2610270253 for review.",
-                        lastActivityAt: ago(4), projects: poddle,
+            PhoneThread(threadId: "a1", title: "Release 1.2 of the garden app", cwd: "~/code/garden-planner", status: .waiting,
+                        needsYou: true, preview: "Everything passes. Ready to tag 1.2.0 and push it.",
+                        lastActivityAt: ago(4), projects: garden,
                         pendingApproval: .approval(id: "ap1", name: "Bash", title: "Run a command",
                                                    options: [.allow, .allowAlways, .deny],
-                                                   inputSummary: "node scripts/appstore-submit.mjs --version 1.0.1")),
-            PhoneThread(threadId: "a2", title: "Pick a database for the shed viewer", cwd: "~/dev/me/dads-shed",
+                                                   inputSummary: "git tag v1.2.0 && git push origin v1.2.0")),
+            PhoneThread(threadId: "a2", title: "Where should the settings live?", cwd: "~/code/garden-planner",
                         status: .waiting, needsYou: true, preview: "Two ways to do this.", lastActivityAt: ago(12),
+                        projects: garden,
                         pendingApproval: .question(id: "q1", questions: [
-                            Question(question: "Where should the measurements live?", header: "Storage", options: [
-                                .init(label: "Convex", description: "Live, editable from the phone"),
-                                .init(label: "A JSON file", description: "Simplest, rebuild to change"),
+                            Question(question: "Where should each person's settings live?", header: "Settings", options: [
+                                .init(label: "In the database", description: "Follows them to a new phone"),
+                                .init(label: "On the phone", description: "Simplest, nothing to sync"),
                             ]),
                         ])),
-            PhoneThread(threadId: "a3", title: "Sidebar rows: two lines again", cwd: "~/dev/me/threadbear",
+            PhoneThread(threadId: "a3", title: "Date picker on small screens", cwd: "~/code/website",
                         needsYou: true, unread: true,
-                        preview: "Merged as 4700e57. Each row has a project tile and the status on the right.",
-                        lastActivityAt: ago(25), costUsd: 3.12, projects: threadbear, earliestSeq: 1),
-            PhoneThread(threadId: "a4", title: "Backblaze exclusions on Bruce", cwd: "~/dev/me/misc",
-                        preview: "All applied. Restart needs your sudo on the Mac.", lastActivityAt: ago(190)),
-            PhoneThread(threadId: "a5", title: "Convex mirror for the phone", cwd: "~/dev/me/threadbear", status: .running,
-                        preview: "Writing the schema.", lastActivityAt: ago(1), projects: threadbear,
+                        preview: "Fixed in 4700e57. The picker fits on the smallest iPhone now.",
+                        lastActivityAt: ago(25), costUsd: 1.84, projects: site, earliestSeq: 1),
+            PhoneThread(threadId: "a4", title: "Tidy up old feature flags", cwd: "~/code/api",
+                        preview: "Removed six flags nothing reads any more.", lastActivityAt: ago(190)),
+            PhoneThread(threadId: "a5", title: "Search box for the docs", cwd: "~/code/website", status: .running,
+                        preview: "Adding the index.", lastActivityAt: ago(1), projects: site,
                         working: "Running npm test"),
-            PhoneThread(threadId: "a6", title: "Juice audit follow-ups", cwd: "~/dev/me/misc",
-                        preview: "Picked the next three.", lastActivityAt: ago(60 * 20),
+            PhoneThread(threadId: "a6", title: "Upgrade the router", cwd: "~/code/website",
+                        preview: "Picked the next three pages to move.", lastActivityAt: ago(60 * 20),
                         snoozedUntil: now.addingTimeInterval(3600 * 14)),
-            PhoneThread(threadId: "a7", title: "Window-only screenshots", cwd: "~/dev/me/misc",
+            PhoneThread(threadId: "a7", title: "Rename the settings screen", cwd: "~/code/garden-planner",
                         preview: "Done.", lastActivityAt: ago(60 * 30), archivedAt: ago(60 * 26)),
         ]
         let messages: [String: [PhoneMessage]] = [
             "a1": [
-                PhoneMessage(seq: 1, role: .user, text: "Get 1.0.1 into review", at: ago(30)),
-                PhoneMessage(seq: 2, role: .assistant, text: "Built and uploaded **2610270253**. The e2e run on tinker-desk passed 42/42.\n\nReady to submit build 2610270253 for review.", at: ago(4)),
+                PhoneMessage(seq: 1, role: .user, text: "Get 1.2 ready to release", at: ago(30)),
+                PhoneMessage(seq: 2, role: .assistant, text: "Bumped the version to **1.2.0** and wrote up the changelog. All 214 tests pass.\n\nReady to tag 1.2.0 and push it.", at: ago(4)),
+            ],
+            "a2": [
+                PhoneMessage(seq: 1, role: .user, text: "Let people pick metric or imperial in settings", at: ago(15)),
             ],
             "a3": [
-                PhoneMessage(seq: 120, role: .user, text: "Go back to two lines, one line is too cramped", at: ago(50)),
-                PhoneMessage(seq: 121, role: .assistant, text: "Merged as `4700e57`. Each row has a project tile and the status on the right.", at: ago(25)),
+                PhoneMessage(seq: 120, role: .user, text: "The date picker gets cut off on small phones, can you fix it?", at: ago(50)),
+                PhoneMessage(seq: 121, role: .assistant, text: "Fixed in `4700e57`. The picker fits on the smallest iPhone now, and I checked it in the simulator at three sizes.", at: ago(25)),
             ],
             "a5": [
                 PhoneMessage(seq: 1, role: .user, text: "Okay, let's go with it.", at: ago(8)),

@@ -7,7 +7,12 @@ struct NewThreadView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
     var onCreated: (String) -> Void
-    @State private var text = ""
+    @State private var text: String
+
+    init(text: String = "", onCreated: @escaping (String) -> Void) {
+        _text = State(initialValue: text)
+        self.onCreated = onCreated
+    }
     @State private var folder: String?
     @State private var commandId: String?
     @State private var dictation = Dictation()

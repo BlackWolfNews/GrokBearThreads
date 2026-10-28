@@ -62,9 +62,9 @@ const MAC = {
   },
 };
 const PHONE = {
-  inbox: "Threadbear on iPhone: the inbox, with Ship Poddle 1.0.1 marked Needs OK, a question about which database to use marked Asking, two finished threads and one running.",
-  approval: "A thread on iPhone asking to run node scripts/appstore-submit.mjs, with Allow, Always and Deny buttons and a reply box at the bottom.",
-  question: "A thread on iPhone asking where the measurements should live, Convex or a JSON file, with a box for something else and a Send answer button.",
+  inbox: "Threadbear on iPhone: the inbox, with Release 1.2 of the garden app marked Needs OK, a question about where settings should live marked Asking, two finished threads and one running.",
+  approval: "A thread on iPhone asking to run git tag v1.2.0 and push it, with Allow, Always and Deny buttons and a reply box at the bottom.",
+  question: "A thread on iPhone asking where each person's settings should live, in the database or on the phone, with a box for something else and a Send answer button.",
 };
 
 /** A Mac screenshot, its own window shape (transparent corners), so no frame drawn round it. */
@@ -82,7 +82,7 @@ function phone(name, ...flags) {
   if (!alt) throw new Error(`No iPhone screenshot called ${name}`);
   const extra = flags.filter((f) => f !== "hero");
   const loading = flags.includes("hero") ? 'loading="eager"' : 'loading="lazy"';
-  return `<div class="phone${extra.map((c) => ` ${c}`).join("")}"><img src="/screens/phone-${name}.webp" alt="${escape(alt)}" width="600" height="1300" ${loading} decoding="async"></div>`;
+  return `<div class="phone${extra.map((c) => ` ${c}`).join("")}"><img src="/screens/phone-${name}.webp" alt="${escape(alt)}" width="600" height="1304" ${loading} decoding="async"></div>`;
 }
 
 const APPLE_LOGO = `<svg class="appstore-logo" viewBox="0 0 24 24" aria-hidden="true"><path d="M16.37 12.6c-.02-2.2 1.8-3.26 1.88-3.31-1.03-1.5-2.62-1.7-3.18-1.73-1.35-.14-2.65.8-3.33.8-.7 0-1.75-.78-2.88-.76-1.48.02-2.85.86-3.61 2.19-1.55 2.68-.4 6.63 1.1 8.8.74 1.06 1.61 2.25 2.75 2.2 1.11-.04 1.52-.71 2.86-.71 1.33 0 1.71.71 2.87.69 1.19-.02 1.94-1.07 2.66-2.14.85-1.23 1.19-2.43 1.21-2.49-.03-.01-2.31-.89-2.33-3.54ZM14.2 6.17c.6-.74 1.01-1.75.9-2.77-.87.04-1.94.59-2.56 1.32-.56.64-1.05 1.69-.92 2.68.97.08 1.97-.49 2.58-1.23Z"/></svg>`;
@@ -239,6 +239,7 @@ for (const file of pages) {
     canonical: url ? `<link rel="canonical" href="${url}">\n  <meta property="og:url" content="${url}">` : '<meta name="robots" content="noindex">',
     homeCurrent: name === "index" ? ' aria-current="page"' : "",
     privacyCurrent: name === "privacy" ? ' aria-current="page"' : "",
+    supportCurrent: name === "support" ? ' aria-current="page"' : "",
     structuredData: name === "index" ? structuredData() : "",
     script: `<script src="${siteScript}" defer></script>`,
     content: fill(html.slice(match[0].length), shared).trimEnd(),

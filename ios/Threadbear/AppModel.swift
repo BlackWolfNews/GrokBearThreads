@@ -23,14 +23,18 @@ final class AppModel {
     private(set) var now = Date.now
     /// A thread a notification tap asked for, for the inbox to open.
     var openThreadId: String?
+    /// `-ThreadbearCompose <text>` (Debug only): open New thread with this
+    /// typed in, for the screenshots.
+    var composeText: String?
 
     private var tasks: [Task<Void, Never>] = []
     private var apnsToken: String?
-    let isFake: Bool
+    /// On the sample threads (FakeBackend) rather than a real deployment:
+    /// the demo from the pair screen, or `-ThreadbearFake` for screenshots.
+    private(set) var isFake = false
 
     init() {
-        isFake = ProcessInfo.processInfo.arguments.contains("-ThreadbearFake")
-        if isFake {
+        if ProcessInfo.processInfo.arguments.contains("-ThreadbearFake") {
             connect(FakeBackend(), pairing: nil)
         } else if let saved = PairingStore.load() {
             connect(ConvexBackend(deploymentURL: saved.deploymentURL, token: saved.token), pairing: saved)
@@ -44,6 +48,7 @@ final class AppModel {
         }
         // `-ThreadbearOpen <threadId>`: start on that thread, for screenshots.
         if let i = args.firstIndex(of: "-ThreadbearOpen"), i + 1 < args.count { openThreadId = args[i + 1] }
+        if let i = args.firstIndex(of: "-ThreadbearCompose"), i + 1 < args.count { composeText = args[i + 1] }
         #endif
         Task { [weak self] in
             while !Task.isCancelled {
@@ -94,6 +99,27 @@ final class AppModel {
         }
     }
 
+    /// "Look around with sample threads" on the pair screen. The app is no
+    /// use until it's paired with a Mac, so this is how App Review (and
+    /// anyone curious) sees it working, on made-up threads that never leave
+    /// the phone. Not remembered: a relaunch goes back to pairing.
+    func startDemo() {
+        lastError = nil
+        connect(FakeBackend(), pairing: nil)
+    }
+
+    /// Back to the pair screen. A pairing saved before the demo (one whose
+    /// token was refused) is left as it was.
+    func leaveDemo() {
+        stop()
+        backend = nil
+        isFake = false
+        runners = []
+        inbox = []
+        hibernating = []
+        den = []
+    }
+
     func unpair() {
         PairingStore.clear()
         stop()
@@ -111,6 +137,7 @@ final class AppModel {
         stop()
         self.backend = backend
         self.pairing = pairing
+        isFake = backend is FakeBackend
         authProblem = nil
         tasks.append(follow(backend.runners()) { $0.runners = $1 })
         tasks.append(follow(backend.threads(.inbox)) { $0.inbox = $1 })

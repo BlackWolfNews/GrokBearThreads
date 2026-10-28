@@ -26,8 +26,11 @@ else
   echo "No API key at $ASC_KEY: signing with whatever Xcode has (sign in to Xcode if this fails)"
   extra+=(-allowProvisioningUpdates)
 fi
+# Release says production for APNs (the App Store build), but this build is
+# development-signed, so its pushes come through the sandbox.
 xcodebuild -project Threadbear.xcodeproj -scheme Threadbear -configuration "$CONFIG" \
-  -destination 'generic/platform=iOS' -derivedDataPath "$DD" "${extra[@]}" build | grep -E " error:|BUILD (SUCCEEDED|FAILED)"
+  -destination 'generic/platform=iOS' -derivedDataPath "$DD" "${extra[@]}" \
+  THREADBEAR_APS_ENVIRONMENT=development build | grep -E " error:|BUILD (SUCCEEDED|FAILED)"
 APP="$DD/Build/Products/$CONFIG-iphoneos/Threadbear.app"
 [[ "${BUILD_ONLY:-0}" == 1 ]] && { echo "Built $APP"; exit 0; }
 xcrun devicectl device install app --device "$DEVICE" "$APP"

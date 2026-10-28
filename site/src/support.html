@@ -1,0 +1,26 @@
+<!--page {"title": "Help · Threadbear", "description": "How to get help with Threadbear on the Mac or iPhone, and answers to the questions that come up most.", "path": "/support"} -->
+<!-- The support page the App Store listing links to (ios/appstore/metadata.json). Answers are
+     checked against the iPhone app: pairing is ios/README.md and PairView.swift, the demo is
+     AppModel.startDemo, the offline note is AppModel.offlineText. threadbear@mikecann.app is a
+     Cloudflare Email Routing forward to Mike, like walkies@ and quickask@. -->
+    <article class="legal">
+      <h1>Help with Threadbear</h1>
+      <p class="lede">It's just me making Threadbear, so the best way to reach me is email: <a href="mailto:threadbear@mikecann.app">threadbear@mikecann.app</a>. Let me know what happened and whether it's the Mac or iPhone app (a screenshot helps loads), and I'll get back to you as soon as I can.</p>
+
+      <h2>How do I pair my iPhone?</h2>
+      <p>The iPhone app goes with Threadbear on your Mac. On the Mac, run <code>swift ios/scripts/pair-qr.swift</code> in your Threadbear folder and it shows a code. In the iPhone app, tap Scan the code and point it at the screen. If the link came another way, like a message to yourself, copy it and tap Paste a pairing link instead.</p>
+
+      <h2>Can I try it without a Mac?</h2>
+      <p>Ye, tap Look around with sample threads at the bottom of the first screen. They're made up and stay on the phone, and you can reply, approve and answer questions to see how it works. Leave the demo from the menu at the top left when you're done.</p>
+
+      <h2>Why does it say my Mac is offline?</h2>
+      <p>Threadbear on the Mac checks in every so often, and the phone says it's offline when it hasn't heard from it for a few minutes, usually because the Mac's asleep. Anything you send waits and goes through when it's back.</p>
+
+      <h2>The app says the server stopped accepting this phone</h2>
+      <p>The phone's sign in code has run out or been cancelled on the Mac. Make a new one and pair again, the same way as the first time.</p>
+
+      <h2>How do I stop using it on a phone?</h2>
+      <p>In the iPhone app, open the menu, then Settings and Unpair this phone. If the phone's lost, cancel its sign in code on your Mac too and it stops working straight away.</p>
+
+      <p>What the apps do with your information is on the <a href="/privacy">privacy page</a>.</p>
+    </article>

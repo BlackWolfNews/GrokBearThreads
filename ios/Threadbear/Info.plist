@@ -14,6 +14,9 @@
 			</array>
 		</dict>
 	</array>
+	<!-- Only HTTPS to the paired Convex deployment, so no export compliance question. -->
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
 	<!-- Which APNs gateway this build's tokens belong to (AppModel.register). -->
 	<key>ThreadbearAPSEnvironment</key>
 	<string>$(THREADBEAR_APS_ENVIRONMENT)</string>

@@ -155,6 +155,20 @@ import Testing
         #expect(detail.thread.unread)
     }
 
+    /// The sample threads are what App Review and the App Store screenshots
+    /// see (the pair screen's "Look around with sample threads"), so none of
+    /// Mike's own projects, machines or folders can be in them.
+    @Test func sampleDataHasNothingPersonal() throws {
+        let sample = FakeBackend.sample(now: .now)
+        let encoder = JSONEncoder()
+        let text = (String(decoding: try encoder.encode(sample.threads), as: UTF8.self)
+            + String(decoding: try encoder.encode(sample.messages), as: UTF8.self)).lowercased()
+        for word in ["poddle", "walkies", "quick ask", "stash it", "cannvas", "bruce", "tinker", "backblaze",
+                     "shed", "juice", "mike", "dev/me", "/users/", "convex.cloud"] {
+            #expect(!text.contains(word), "the sample data mentions \(word)")
+        }
+    }
+
     @Test func archiveMovesToTheDen() async throws {
         let backend = FakeBackend()
         _ = try await backend.update(threadId: "a4", change: .archive)

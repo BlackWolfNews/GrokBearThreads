@@ -5,6 +5,7 @@ struct InboxView: View {
     @Environment(AppModel.self) private var model
     @State private var path: [String] = []
     @State private var composing = false
+    @State private var composeText = ""
     @State private var hibernateTarget: PhoneThread?
 
     var body: some View {
@@ -55,6 +56,11 @@ struct InboxView: View {
                             Label("Den", systemImage: "archivebox")
                         }
                         NavigationLink { SettingsView() } label: { Label("Settings", systemImage: "gear") }
+                        if model.isFake {
+                            Button { model.leaveDemo() } label: {
+                                Label("Leave the demo", systemImage: "rectangle.portrait.and.arrow.right")
+                            }
+                        }
                     } label: {
                         Image(systemName: "line.3.horizontal")
                     }
@@ -64,8 +70,14 @@ struct InboxView: View {
                         .accessibilityLabel("New thread")
                 }
             }
-            .sheet(isPresented: $composing) {
-                NewThreadView { threadId in path.append(threadId) }
+            .sheet(isPresented: $composing, onDismiss: { composeText = "" }) {
+                NewThreadView(text: composeText) { threadId in path.append(threadId) }
+            }
+            .onChange(of: model.composeText, initial: true) { _, text in
+                guard let text else { return }
+                composeText = text
+                composing = true
+                model.composeText = nil
             }
             .hibernateDialog(for: $hibernateTarget)
             .refreshable { try? await Task.sleep(for: .milliseconds(400)) }
