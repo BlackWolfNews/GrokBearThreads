@@ -122,6 +122,7 @@ export type RunnerUpdates = {
 // What the librarian (librarian.ts) hears about threads: a turn that ended,
 // and a folder move.
 export type ThreadActivity =
+  | { kind: 'turn.start'; threadId: string }
   | { kind: 'turn.end'; threadId: string; outcome: TurnOutcome; edited: string[] }
   | { kind: 'moved'; threadId: string; from: string; to: string };
 
@@ -1681,6 +1682,9 @@ export class Runner {
     this.beforeTurn(st);
     rec.status = rt.session && !rt.closing ? 'running' : 'starting';
     this.markDirty(st);
+    // A message to the thread (not a turn the CLI opened by itself), so the
+    // librarian can file a new thread before its first turn is over.
+    if (!this.stopping) this.tellActivity({ kind: 'turn.start', threadId: rec.id });
     this.deliver(st, msg).catch((e: unknown) => {
       this.log.error('could not start turn', { threadId: rec.id, error: String(e) });
       this.failTurn(st, e instanceof Error ? e.message : String(e));

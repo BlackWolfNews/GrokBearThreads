@@ -237,7 +237,7 @@ export type ProjectIcon = {
   updatedAt: string;
 };
 
-export type LibrarianReason = 'first-turn' | 'new-folder' | 'moved' | 'catch-up' | 'asked';
+export type LibrarianReason = 'first-message' | 'first-turn' | 'new-folder' | 'moved' | 'catch-up' | 'asked';
 
 export type LibrarianJob = {
   threadId: string;

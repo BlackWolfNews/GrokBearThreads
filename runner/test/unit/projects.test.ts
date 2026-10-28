@@ -5,7 +5,7 @@ import path from 'node:path';
 import { makeHarness, tick, tmpDir } from '../helpers/fakes.ts';
 import { checkSummary } from '../helpers/protocol-check.ts';
 import { Projects, projectMethods, BRIEF_MAX } from '../../src/projects.ts';
-import { Librarian, librarianMethods, mainCheckout, SETTLE_MS, CATCH_UP_MS } from '../../src/librarian.ts';
+import { Librarian, librarianMethods, mainCheckout, SETTLE_MS, CATCH_UP_MS, FIRST_MESSAGE_MS, SWEEP_MS } from '../../src/librarian.ts';
 import { buildThreadbearTools } from '../../src/threadbear-mcp.ts';
 import { FakeClock } from '../../src/clock.ts';
 import { nullLogger } from '../../src/log.ts';
@@ -241,8 +241,10 @@ test('the librarian looks after the first turn: makes a project and files the th
   await finish(thread.id, [path.join(poddle, 'src/app.ts')]);
   const st = librarian.status();
   assert.equal(st.state, 'idle');
+  // Its first message queued a look; the turn ending before it ran makes
+  // it a first-turn look, still as soon.
   assert.deepEqual(st.queue.map((j) => [j.reason, j.why]), [['first-turn', 'Its first turn ended']]);
-  assert.equal(Date.parse(st.queue[0].dueAt) - h.clock.now(), SETTLE_MS);
+  assert.equal(Date.parse(st.queue[0].dueAt) - h.clock.now(), FIRST_MESSAGE_MS);
   h.clock.advance(SETTLE_MS);
   await tick(6);
   const after = librarian.status();
@@ -420,4 +422,96 @@ test('the librarian keeps its line on where the thread is up to as the thread\'s
   assert.equal(librarian.status().recent[0]?.text, 'Nothing to change: a one-off', 'the brief is not a project change');
   assert.equal(h.runner.highlights(thread.id).brief?.text, 'Waiting on Mike to pick a layout.');
   assert.ok(h.runner.get(thread.id).highlightsAt);
+});
+
+test('the librarian files a new thread from its first message, then looks again when the first turn ends', async () => {
+  let answer: unknown = {};
+  const s = setup({ models: (p) => reply(typeof answer === 'function' ? (answer as (p: GenerateParams) => unknown)(p) : answer) });
+  const { h, repo, create, finish, librarian, projects } = s;
+  const app = repo('dev/app');
+  const p = projects.create({ title: 'App', folders: [app], state: 'old', by: 'mike' });
+  const { thread } = create('Fix the login screen in the app');
+  const job = librarian.status().queue[0];
+  assert.deepEqual([job.reason, job.why], ['first-message', 'Its first message came in']);
+  assert.equal(Date.parse(job.dueAt) - h.clock.now(), FIRST_MESSAGE_MS);
+  answer = (q: GenerateParams) => {
+    assert.match(q.prompt, /It has only just started/);
+    return { projects: [p.id], state: { [p.id]: 'Login fixed' } };
+  };
+  h.clock.advance(FIRST_MESSAGE_MS);
+  await tick(8);
+  assert.deepEqual(h.runner.get(thread.id).projects?.map((m) => m.title), ['App']);
+  assert.equal(projects.record(p.id)?.state, 'old', 'an early look never changes the state');
+  assert.equal(librarian.status().recent[0].reason, 'first-message');
+  // The first turn's end still gets its own look, 10 seconds later.
+  answer = { projects: [p.id], state: { [p.id]: 'Login fixed' } };
+  await finish(thread.id, [path.join(app, 'login.ts')]);
+  const next = librarian.status().queue[0];
+  assert.equal(next.reason, 'first-turn');
+  assert.equal(Date.parse(next.dueAt) - h.clock.now(), SETTLE_MS);
+  h.clock.advance(SETTLE_MS);
+  await tick(8);
+  assert.equal(projects.record(p.id)?.state, 'Login fixed');
+  // After that, more turns are catch-ups.
+  h.runner.send(thread.id, 'more');
+  await tick();
+  assert.equal(librarian.status().queue.length, 0, 'a later message queues nothing');
+  await finish(thread.id);
+  assert.equal(librarian.status().queue[0].reason, 'catch-up');
+});
+
+test('the librarian sweeps up turns it never heard end, as in a handover', async () => {
+  const s = setup({ models: () => reply({ projects: [], new: null, why: 'A one-off' }) });
+  const { h, create, finish, librarian } = s;
+  // A turn ends while no librarian is listening (the old runner's had
+  // stopped for the handover, and the new one never hears it).
+  librarian.stop();
+  const { thread } = create('Quick question');
+  await finish(thread.id);
+  const { thread: idle } = create('Never finished');
+  const again = new Librarian({ host: h.runner, projects: s.projects, models: { generate: async () => reply({ projects: [], why: 'A one-off' }) }, clock: h.clock, log: nullLogger, home: h.home, userHome: s.root });
+  again.start();
+  // The sweep on start finds the finished turn, and leaves the thread
+  // still in its first.
+  const queued = again.status().queue;
+  assert.deepEqual(queued.map((j) => [j.threadId, j.reason]), [[thread.id, 'first-turn']]);
+  assert.ok(!queued.some((j) => j.threadId === idle.id));
+  await tick(8);
+  assert.equal(again.status().recent[0].threadId, thread.id);
+  // Looked at: the next sweep leaves it.
+  h.clock.advance(SWEEP_MS);
+  await tick(4);
+  assert.ok(!again.status().queue.some((j) => j.threadId === thread.id));
+  // A turn whose end it also missed is found by the sweep after it.
+  again.stop();
+  const third = new Librarian({ host: h.runner, projects: s.projects, models: { generate: async () => reply({}) }, clock: h.clock, log: nullLogger, home: h.home, userHome: s.root });
+  h.runner.send(thread.id, 'more');
+  await tick();
+  await finish(thread.id);
+  third.start();
+  const job = third.status().queue.find((j) => j.threadId === thread.id)!;
+  assert.equal(job.reason, 'catch-up');
+  assert.ok(Date.parse(job.dueAt) > h.clock.now(), 'no sooner than an hour after the last look');
+  third.stop();
+});
+
+test("a thread its agent filed is the agent's to file: the librarian keeps its line and state only", async () => {
+  const s = setup({
+    models: (q) => {
+      assert.match(q.prompt, /Filed by its own agent or Mike/);
+      return reply({ projects: [other.id], new: { title: 'Another', folders: [], goals: 'x', state: 'y' }, state: { [p.id]: 'Shipped' }, thread: 'Done.' });
+    },
+  });
+  const { h, repo, create, finish, librarian, projects } = s;
+  const p = projects.create({ title: 'App', folders: [repo('dev/app')], state: 'old', by: 'mike' });
+  const other = projects.create({ title: 'Other', by: 'mike' });
+  const { thread } = create();
+  projects.changeMembership(thread.id, { add: [p.id], by: 'agent' });
+  await finish(thread.id);
+  h.clock.advance(SETTLE_MS);
+  await tick(8);
+  assert.deepEqual(h.runner.get(thread.id).projects?.map((m) => m.title), ['App']);
+  assert.equal(projects.list().length, 2, 'no new project');
+  assert.equal(projects.record(p.id)?.state, 'Shipped');
+  assert.equal(librarian.status().recent[0].text, "Updated App's state");
 });

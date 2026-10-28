@@ -311,6 +311,7 @@ type LibrarianStatus = {
 }
 
 type LibrarianReason =
+  | "first-message"     // a new thread's first message came in
   | "first-turn"        // a thread's first turn ended
   | "new-folder"        // a turn edited files outside the thread's projects' folders
   | "moved"             // the thread changed folder
@@ -1254,6 +1255,9 @@ whole brief that way. An agent that joined a project itself isn't told.
 up to date, on the small model (`models.*`, feature `projects`, inside the
 daily budget, never for private folders). It looks at a thread when:
 
+- its first message comes in (`first-message`), 5 seconds later, so a
+  thread is filed while a long first turn is still going; that look
+  never changes a project's state;
 - its first turn ends (`first-turn`), 10 seconds later;
 - a turn edits files outside its folder and its projects' folders
   (`new-folder`), 10 seconds later;
@@ -1261,6 +1265,18 @@ daily budget, never for private folders). It looks at a thread when:
 - it has had turns since the last look, an hour after that look at the
   soonest (`catch-up`);
 - someone asks (`librarian.run`, `asked`).
+
+Those come from the runner's events, and a turn that ends in an older
+runner draining after a handover is only heard there. So on start and
+every 5 minutes the librarian also queues any thread active in the last
+two days with a finished turn it hasn't looked at since (`first-turn` or
+`catch-up`).
+
+A thread its own agent or Mike has put in a project (`by` other than
+`"librarian"`) is theirs to file: its looks still keep its line and the
+state of its projects, but never add or take out a project. Every
+thread's agent is told, in the Threadbear tools' instructions, to
+`join_project` early and keep the state current with `update_project`.
 
 One look at a time, the soonest due first. A look sends the model the
 project list (title, folders, goals, one line of state) and the thread's

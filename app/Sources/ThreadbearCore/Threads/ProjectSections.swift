@@ -146,6 +146,7 @@ public enum LibrarianText {
     /// The reason a look is queued, when the runner gave no words for it.
     public static func reason(_ reason: LibrarianReason) -> String {
         switch reason {
+        case .firstMessage: return "Its first message came in"
         case .firstTurn: return "Its first turn ended"
         case .newFolder: return "Edited files in a new folder"
         case .moved: return "Moved to another folder"

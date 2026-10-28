@@ -42,8 +42,18 @@ export type LibrarianHost = {
 // How long after a turn ends before a look, so a quick follow-up turn
 // doesn't mean two looks.
 export const SETTLE_MS = 10_000;
+// How long after a new thread's first message before a look from that
+// alone, so it's filed while its first turn is still going (a long one
+// used to leave it unfiled for as long as it ran).
+export const FIRST_MESSAGE_MS = 5_000;
 // A thread with more turns is looked at again no sooner than this.
 export const CATCH_UP_MS = 60 * 60_000;
+// How often to look for turns the librarian never heard end. A turn that
+// ends in an older runner while it drains after a handover is only heard
+// by that runner, whose librarian has stopped; main moving every few
+// minutes made that common. Threads active within SWEEP_DAYS.
+export const SWEEP_MS = 5 * 60_000;
+const SWEEP_DAYS = 2;
 // Without a key or budget, how long before trying again.
 const OFF_RETRY_MS = 10 * 60_000;
 const RECENT_KEPT = 50;
@@ -56,9 +66,11 @@ export const ICON_SWEEP_MS = 60 * 60_000;
 export const ICON_SOON_MS = 3_000;
 
 // Which reason wins when a thread is queued twice.
-const RANK: Record<LibrarianReason, number> = { asked: 0, moved: 1, 'new-folder': 2, 'first-turn': 3, 'catch-up': 4 };
+const RANK: Record<LibrarianReason, number> = { asked: 0, moved: 1, 'new-folder': 2, 'first-turn': 3, 'first-message': 4, 'catch-up': 5 };
 
-type Look = { at: string; seq: number };
+// `early`: the look was from the first message alone, so the first turn's
+// end still gets a look of its own.
+type Look = { at: string; seq: number; early?: boolean };
 type Saved = {
   paused?: boolean;
   queue?: LibrarianJob[];
@@ -99,6 +111,7 @@ export class Librarian {
   private offForSetup = false;
   private timer?: TimerHandle;
   private timerAt = Infinity;
+  private sweepTimer?: TimerHandle;
   private stopped = false;
   private unsubs: (() => void)[] = [];
   // What each project's icon was last worked out from (folders, title, who
@@ -140,6 +153,7 @@ export class Librarian {
         if (this.queue.delete(id)) this.changed();
       }),
     );
+    this.sweep();
     this.schedule();
     this.iconsSoon();
   }
@@ -147,6 +161,7 @@ export class Librarian {
   stop(): void {
     this.stopped = true;
     this.timer?.cancel();
+    this.sweepTimer?.cancel();
     this.iconTimer?.cancel();
     for (const u of this.unsubs) u();
   }
@@ -229,12 +244,18 @@ export class Librarian {
       this.changed();
       return;
     }
+    if (a.kind === 'turn.start') {
+      if (this.looks[rec.id] || this.queue.has(rec.id) || this.current?.threadId === rec.id) return;
+      this.enqueue(rec.id, 'first-message', 'Its first message came in', now + FIRST_MESSAGE_MS);
+      this.changed();
+      return;
+    }
     if (a.outcome !== 'completed') return;
     const repos = this.edited.get(rec.id) ?? new Set<string>();
     for (const file of a.edited) repos.add(this.repoOf(file));
     if (repos.size) this.edited.set(rec.id, repos);
     const look = this.looks[rec.id];
-    if (!look) {
+    if (!look || look.early) {
       this.enqueue(rec.id, 'first-turn', 'Its first turn ended', now + SETTLE_MS);
     } else {
       const known = [rec.cwd, ...this.projects.foldersFor(rec).map((f) => f.folder)];
@@ -258,6 +279,31 @@ export class Librarian {
     } else {
       this.queue.set(threadId, job);
     }
+  }
+
+  // Queues every recent thread with a finished turn the librarian hasn't
+  // looked at since, then checks again in SWEEP_MS. Events are the quick
+  // path; this is what makes a missed one not matter.
+  private sweep(): void {
+    if (this.stopped) return;
+    this.sweepTimer = this.clock.setTimeout(() => this.sweep(), SWEEP_MS);
+    // With no models, a look does nothing and leaves no mark.
+    if (!this.models) return;
+    const now = this.clock.now();
+    const since = now - SWEEP_DAYS * 86_400_000;
+    let found = 0;
+    for (const t of this.host.threadRecords()) {
+      if (!t.lastTurnCompletedSeq || Date.parse(t.lastActivityAt) < since) continue;
+      if (this.queue.has(t.id) || this.current?.threadId === t.id) continue;
+      const look = this.looks[t.id];
+      if (look && look.seq >= t.lastTurnCompletedSeq) continue;
+      if (!look || look.early) this.enqueue(t.id, 'first-turn', 'Its first turn ended while the runner was restarting', now);
+      else this.enqueue(t.id, 'catch-up', 'More turns since its last look', Math.max(now, Date.parse(look.at) + CATCH_UP_MS));
+      found++;
+    }
+    if (!found) return;
+    this.log.info('librarian sweep', { threads: found });
+    this.changed();
   }
 
   // ------------------------------------------------------------- the pump
@@ -320,7 +366,7 @@ export class Librarian {
       this.off = 'Model calls are off in this runner.';
       return;
     }
-    const prompt = this.prompt(rec);
+    const prompt = this.prompt(rec, job);
     const res = await this.models.generate({ feature: 'projects', cwd: rec.cwd, system: SYSTEM, prompt, maxTokens: 2000 });
     if (!res.ok) {
       if (WAIT_FOR.includes(res.reason)) {
@@ -331,7 +377,7 @@ export class Librarian {
         this.enqueue(job.threadId, job.reason, job.why, this.clock.now() + OFF_RETRY_MS);
         return;
       }
-      this.markLooked(rec);
+      this.markLooked(rec, job);
       this.note(job, res.reason === 'private' ? 'skipped' : 'failed', res.reason === 'private' ? 'Private folder, not sent' : res.message);
       return;
     }
@@ -342,15 +388,15 @@ export class Librarian {
     this.day.spentUsd += res.costUsd ?? 0;
     const answer = parseAnswer(res.value);
     if (!answer) {
-      this.markLooked(rec);
+      this.markLooked(rec, job);
       this.note(job, 'failed', "The model's answer wasn't JSON", undefined, res.costUsd);
       return;
     }
     this.apply(job, rec, answer, res.costUsd);
-    this.markLooked(rec);
+    this.markLooked(rec, job);
   }
 
-  private prompt(rec: ThreadRecord): string {
+  private prompt(rec: ThreadRecord, job: LibrarianJob): string {
     const list = this.projects.list();
     const lines: string[] = [];
     lines.push('Projects:');
@@ -364,9 +410,11 @@ export class Librarian {
     const inNow = (rec.projects ?? []).map((m) => `${m.id}${m.pinned ? ' (pinned)' : ''}`);
     lines.push(`Currently in: ${inNow.join(', ') || 'none'}`);
     if (rec.projectsLeft?.length) lines.push(`Never put it in: ${rec.projectsLeft.join(', ')}`);
+    if (selfFiled(rec)) lines.push('Filed by its own agent or Mike: leave its projects as they are (projects [], new null).');
     const repos = [...(this.edited.get(rec.id) ?? [])].map((r) => this.tilde(r));
     if (repos.length) lines.push(`Edited files in: ${repos.join(', ')}`);
     const gist = this.host.threadGist(rec.id);
+    if (job.reason === 'first-message') lines.push("It has only just started: file it from what it's about, and don't change any project's state yet.");
     if (gist.first) lines.push('', `First message: ${gist.first}`);
     if (gist.recent.length) {
       lines.push('', 'Latest messages:');
@@ -377,6 +425,12 @@ export class Librarian {
 
   private apply(job: LibrarianJob, rec: ThreadRecord, a: Answer, costUsd?: number): void {
     const live = new Map(this.projects.list().map((p) => [p.id, p]));
+    // A thread its agent or Mike filed is theirs to file: the look only
+    // keeps its line and the state of the projects it's in.
+    const self = selfFiled(rec);
+    if (self) {
+      a = { ...a, projects: [], new: null };
+    }
     const wanted = Array.isArray(a.projects) ? a.projects.filter((x): x is string => typeof x === 'string' && live.has(x)) : [];
     const said: string[] = [];
     const ids = new Set<string>();
@@ -409,7 +463,7 @@ export class Librarian {
     }
     // Only a move or a direct ask takes the thread out of one of the
     // librarian's own guesses; turns alone shouldn't make it flap.
-    if (job.reason === 'moved' || job.reason === 'asked') {
+    if (!self && (job.reason === 'moved' || job.reason === 'asked')) {
       // Not one it has just made (ids) for this very thread.
       const stale = (rec.projects ?? []).filter((m) => m.by === 'librarian' && !m.pinned && !wanted.includes(m.id) && !ids.has(m.id)).map((m) => m.id);
       if (stale.length && Array.isArray(a.projects)) {
@@ -438,7 +492,7 @@ export class Librarian {
         bump('updated');
       }
     }
-    if (a.state && typeof a.state === 'object') {
+    if (a.state && typeof a.state === 'object' && job.reason !== 'first-message') {
       const updated: string[] = [];
       for (const [pid, text] of Object.entries(a.state as Record<string, unknown>)) {
         const p = this.projects.record(pid);
@@ -459,9 +513,12 @@ export class Librarian {
     this.note(job, outcome, text, [...ids], costUsd);
   }
 
-  private markLooked(rec: ThreadRecord): void {
-    this.looks[rec.id] = { at: new Date(this.clock.now()).toISOString(), seq: rec.lastSeq };
-    this.edited.delete(rec.id);
+  private markLooked(rec: ThreadRecord, job: LibrarianJob): void {
+    // Its seq as it is now, after any notes the look added.
+    const seq = this.host.threadRecords().find((t) => t.id === rec.id)?.lastSeq ?? rec.lastSeq;
+    this.looks[rec.id] = { at: new Date(this.clock.now()).toISOString(), seq, ...(job.reason === 'first-message' ? { early: true } : {}) };
+    // An early look hasn't seen the turn's edits yet; the first-turn look will.
+    if (job.reason !== 'first-message') this.edited.delete(rec.id);
   }
 
   private note(job: LibrarianJob, outcome: LibrarianOutcome, text: string, projectIds?: string[], costUsd?: number): void {
@@ -667,6 +724,12 @@ export class Librarian {
   private tilde(p: string): string {
     return p === this.home || p.startsWith(this.home + path.sep) ? '~' + p.slice(this.home.length) : p;
   }
+}
+
+// Whether the thread's agent or Mike put it in a project (join_project,
+// create_project or the app), rather than the librarian.
+function selfFiled(rec: ThreadRecord): boolean {
+  return (rec.projects ?? []).some((m) => m.by !== 'librarian');
 }
 
 // The main checkout of a git worktree (its .git is a file naming

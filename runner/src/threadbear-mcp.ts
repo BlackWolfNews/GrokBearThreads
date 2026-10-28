@@ -703,6 +703,14 @@ export const SHOWING_MIKE =
   'When you have design options, mockups or wireframes for Mike to choose between, put them in front of him with show_options (a side-by-side review window where he picks one and leaves notes), not as pins or a list in your reply; his answer comes back as a message. ' +
   "For a single file or link he should look at (a doc, a screenshot, a preview URL, a PR), use pin, with show: true to open it in Threadbear's side pane rather than running `open`.";
 
+// Also in the instructions, for the same reason. The librarian files
+// threads by itself, but it only sees a summary and can miss one; the
+// thread's own agent knows what it's working on. Once an agent (or Mike)
+// has filed a thread, the librarian leaves its projects alone.
+export const FILING_PROJECTS =
+  "If this thread's work belongs to one of Mike's projects (list_projects) and it isn't in it yet, put it there early with join_project, or make one with create_project for a new body of work he'll come back to (not for a one-off question or chore). " +
+  "When the thread ships or finishes something, makes a decision or hits a blocker that changes where the project stands, update the project's state with update_project.";
+
 export function threadbearMcpServer(control: ThreadControl, selfId: string, schedules?: ScheduleControl, projects?: ProjectControl): McpSdkServerConfigWithInstance {
   const server = createSdkMcpServer({
     name: SERVER_NAME,
@@ -712,6 +720,7 @@ export function threadbearMcpServer(control: ThreadControl, selfId: string, sche
       'These tools manage Threadbear itself: list and read threads, start new ones, message them, rename, snooze, archive, move and delete them, schedule messages for later (once or on a cron), and keep Mike\'s projects (groupings above folders with goals, state and notes) up to date. ' +
       'Use move_thread when the work belongs in another folder (for example a repo), so this thread runs there from the next turn. ' +
       `${SHOWING_MIKE} ` +
+      (projects ? `${FILING_PROJECTS} ` : '') +
       'End every turn by calling end_turn, after your final message, to say whether Mike has to do anything.',
     tools: buildThreadbearTools(control, selfId, Date.now, schedules, projects),
   });
