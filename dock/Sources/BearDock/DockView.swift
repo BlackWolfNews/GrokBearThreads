@@ -151,6 +151,12 @@ extension EnvironmentValues {
     @Entry var dockContent = DockContent(title: { $0 }, view: { _ in AnyView(EmptyView()) })
     @Entry var dockOptions = DockOptions()
     @Entry var dockNamespace: Namespace.ID?
+    /// True for a panel's content drawn in the ghost that follows a drag:
+    /// a second copy of what's in the panel. Content that hands out one
+    /// shared AppKit view (a transcript, a web view) should draw a picture
+    /// of it here instead, or the ghost takes the view and the panel is
+    /// left blank once the ghost goes.
+    @Entry public var isDockGhost = false
 }
 
 extension View {

@@ -1,6 +1,7 @@
 import AppKit
 import UniformTypeIdentifiers
 import Quartz
+import BearDock
 import SwiftUI
 import ThreadbearCore
 
@@ -734,15 +735,73 @@ final class TranscriptController: NSObject, NSTableViewDataSource, NSTableViewDe
 
 /// SwiftUI wrapper. The controller lives as long as the window's detail view,
 /// and switching threads hands it a different session.
+///
+/// The controller has one scroll view, so this hosts it in a container
+/// rather than handing it to SwiftUI as is. A second copy of the view (the
+/// dock's ghost while a panel is dragged) used to take the scroll view into
+/// itself and away with it when the ghost went, leaving the panel blank with
+/// the thread loaded and drawn into a view in no window (Mike, 28 Oct, on
+/// half dragging a panel). The ghost now gets a picture of the transcript,
+/// and a container in a window takes the scroll view back if it's left
+/// anywhere that isn't.
 struct TranscriptView: NSViewRepresentable {
     let session: ThreadSession?
     let controller: TranscriptController
+    @Environment(\.isDockGhost) private var isGhost
 
-    func makeNSView(context: Context) -> NSScrollView {
-        controller.scrollView
+    func makeNSView(context: Context) -> TranscriptHost {
+        TranscriptHost(controller: controller, ghost: isGhost)
     }
 
-    func updateNSView(_ view: NSScrollView, context: Context) {
+    func updateNSView(_ host: TranscriptHost, context: Context) {
+        if isGhost { return }
+        host.claim()
         controller.show(session)
+    }
+}
+
+final class TranscriptHost: NSView {
+    private let controller: TranscriptController
+    private let ghost: Bool
+
+    init(controller: TranscriptController, ghost: Bool) {
+        self.controller = controller
+        self.ghost = ghost
+        super.init(frame: .zero)
+        if ghost {
+            // What the transcript looks like now, scaled with the ghost.
+            wantsLayer = true
+            let source = controller.scrollView
+            if source.bounds.width > 0, source.bounds.height > 0,
+               let rep = source.bitmapImageRepForCachingDisplay(in: source.bounds) {
+                source.cacheDisplay(in: source.bounds, to: rep)
+                let image = NSImage(size: source.bounds.size)
+                image.addRepresentation(rep)
+                layer?.contents = image
+                layer?.contentsGravity = .resize
+            }
+        } else {
+            claim()
+        }
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been used") }
+
+    /// Puts the scroll view in this container, unless this one isn't in a
+    /// window yet and the scroll view is: then it stays put until this one is.
+    func claim() {
+        guard !ghost else { return }
+        let view = controller.scrollView
+        if view.superview === self { return }
+        if view.window != nil, window == nil { return }
+        view.removeFromSuperview()
+        view.frame = bounds
+        view.autoresizingMask = [.width, .height]
+        addSubview(view)
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        if window != nil { claim() }
     }
 }

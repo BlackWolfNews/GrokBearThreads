@@ -180,6 +180,7 @@ private struct Ghost: View {
             content.view(panel)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .clipped()
+                .environment(\.isDockGhost, true)
         }
         .frame(width: sourceSize.width, height: sourceSize.height)
         .background(DockTheme.panel)

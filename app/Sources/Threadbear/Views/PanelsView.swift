@@ -1,4 +1,5 @@
 import AppKit
+import BearDock
 import SwiftUI
 import ThreadbearCore
 import WebKit
@@ -360,10 +361,13 @@ struct PaneNote: View {
 /// view's container, so leaving and coming back finds the page as it was.
 struct WebPanel: NSViewRepresentable {
     let url: URL
+    @Environment(\.isDockGhost) private var isGhost
 
     func makeNSView(context: Context) -> WebPanelContainer { WebPanelContainer() }
 
     func updateNSView(_ container: WebPanelContainer, context: Context) {
+        // The dock's drag ghost would take the page out of its panel.
+        if isGhost { return }
         container.show(WebPanelPool.shared.webView(for: url))
     }
 }
