@@ -5,7 +5,7 @@ import path from 'node:path';
 import { makeHarness, tick, tmpDir } from '../helpers/fakes.ts';
 import { checkSummary } from '../helpers/protocol-check.ts';
 import { Projects, projectMethods, BRIEF_MAX } from '../../src/projects.ts';
-import { Librarian, librarianMethods, mainCheckout, SETTLE_MS, CATCH_UP_MS, FIRST_MESSAGE_MS, SWEEP_MS } from '../../src/librarian.ts';
+import { Librarian, librarianMethods, mainCheckout, SETTLE_MS, CATCH_UP_MS, CATCH_UP_MIN_CHARS, FIRST_MESSAGE_MS, SWEEP_MS } from '../../src/librarian.ts';
 import { buildThreadbearTools } from '../../src/threadbear-mcp.ts';
 import { FakeClock } from '../../src/clock.ts';
 import { nullLogger } from '../../src/log.ts';
@@ -273,7 +273,7 @@ test('the librarian: catch-up an hour after a look, new folders sooner, state up
   h.clock.advance(SETTLE_MS);
   await tick(6);
   assert.equal(librarian.status().recent[0].text, 'Nothing to change: a one-off question');
-  // Another turn with nothing new: an hour after that look.
+  // Another turn with nothing new: CATCH_UP_MS after that look.
   h.runner.send(thread.id, 'more');
   await tick();
   await finish(thread.id, [path.join(s.misc, 'notes.md')]);
@@ -424,6 +424,59 @@ test('the librarian keeps its line on where the thread is up to as the thread\'s
   assert.ok(h.runner.get(thread.id).highlightsAt);
 });
 
+test('a quiet catch-up is skipped with no model call, and what it said counts towards the next', async () => {
+  const s = setup({ models: () => reply({ projects: [], why: 'A one-off' }, 0) });
+  const { h, create, finish, librarian, asked } = s;
+  const { thread } = create('Work on the app');
+  h.clock.advance(FIRST_MESSAGE_MS);
+  await tick(8);
+  await finish(thread.id);
+  h.clock.advance(SETTLE_MS);
+  await tick(8);
+  const calls = asked.length;
+  // A short turn: no edits, no link, little said.
+  const turn = async (text: string) => {
+    h.runner.send(thread.id, 'go');
+    await tick();
+    const sess = h.adapter.sessions.filter((x) => x.opts.threadId === thread.id).at(-1)!;
+    sess.init();
+    sess.text(`t${Math.random()}`, text);
+    sess.result('completed');
+    await tick();
+  };
+  await turn('Done.');
+  assert.equal(librarian.status().queue[0].reason, 'catch-up');
+  h.clock.advance(CATCH_UP_MS);
+  await tick(8);
+  assert.equal(asked.length, calls, 'no model call');
+  assert.equal(librarian.status().skippedToday, 1);
+  assert.equal(librarian.status().queue.length, 0);
+  // Another short one, but the two together say enough: a look.
+  await turn('x'.repeat(CATCH_UP_MIN_CHARS));
+  h.clock.advance(CATCH_UP_MS);
+  await tick(8);
+  assert.equal(asked.length, calls + 1);
+  // A link, however short, is worth a look.
+  await turn('Live at https://app.example.com');
+  h.clock.advance(CATCH_UP_MS);
+  await tick(8);
+  assert.equal(asked.length, calls + 2);
+  assert.equal(librarian.status().skippedToday, 1);
+});
+
+test('the day counts tokens and what pool looks would have cost', async () => {
+  const s = setup({ models: () => ({ ok: true, value: JSON.stringify({ projects: [] }), model: 'haiku on claude-3', tokens: 3500, notionalUsd: 0.0009 }) });
+  const { h, create, finish, librarian } = s;
+  const { thread } = create('Work on the app');
+  await finish(thread.id);
+  h.clock.advance(SETTLE_MS);
+  await tick(8);
+  const st = librarian.status();
+  assert.equal(st.tokensToday, 3500);
+  assert.equal(st.notionalTodayUsd, 0.0009);
+  assert.equal(st.spentTodayUsd, 0);
+});
+
 test('the librarian renames a thread that has moved on, never one Mike or an agent named', async () => {
   let answer: unknown = {};
   const s = setup({ models: (p) => reply(typeof answer === 'function' ? (answer as (p: GenerateParams) => unknown)(p) : answer) });
@@ -530,7 +583,7 @@ test('the librarian sweeps up turns it never heard end, as in a handover', async
   third.start();
   const job = third.status().queue.find((j) => j.threadId === thread.id)!;
   assert.equal(job.reason, 'catch-up');
-  assert.ok(Date.parse(job.dueAt) > h.clock.now(), 'no sooner than an hour after the last look');
+  assert.ok(Date.parse(job.dueAt) > h.clock.now(), 'no sooner than CATCH_UP_MS after the last look');
   third.stop();
 });
 

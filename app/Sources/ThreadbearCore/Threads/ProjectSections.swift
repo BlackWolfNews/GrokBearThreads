@@ -159,11 +159,22 @@ public enum LibrarianText {
         job.why.isEmpty ? reason(job.reason) : job.why
     }
 
-    /// "14 looks today · $0.03".
+    /// "14 looks today · 3 skipped · 52k tokens · $0.03". The cost is
+    /// OpenRouter's spend plus what the pool's looks would have cost on the
+    /// API, so it moves however the looks are paid for.
     public static func today(_ status: LibrarianStatus) -> String {
-        let looks = status.looksToday == 1 ? "1 look today" : "\(status.looksToday) looks today"
-        let spend = CostText.format(status.spentTodayUsd) ?? "$0"
-        return "\(looks) · \(spend)"
+        var parts = [status.looksToday == 1 ? "1 look today" : "\(status.looksToday) looks today"]
+        if status.skippedToday > 0 { parts.append("\(status.skippedToday) skipped") }
+        if status.tokensToday > 0 { parts.append("\(tokens(status.tokensToday)) tokens") }
+        parts.append(CostText.format(status.spentTodayUsd + status.notionalTodayUsd) ?? "$0")
+        return parts.joined(separator: " · ")
+    }
+
+    /// 820, 52k, 1.2M.
+    static func tokens(_ n: Int) -> String {
+        if n < 1000 { return "\(n)" }
+        if n < 1_000_000 { return "\(Int((Double(n) / 1000).rounded()))k" }
+        return String(format: "%.1fM", Double(n) / 1_000_000)
     }
 
     /// "in 4m", "now", or "waiting" for one more than a minute overdue:

@@ -43,7 +43,9 @@ export const ROUTES: Record<ModelJob, string[]> = {
 export type ModelFailure = 'no-key' | 'off' | 'private' | 'over-budget' | 'no-room' | 'timeout' | 'provider';
 
 export type ModelResult<T> =
-  | { ok: true; value: T; model: string; costUsd?: number }
+  // tokens: in and out together, when the provider said. notionalUsd: what
+  // a pool call would have cost on the API, which isn't spent.
+  | { ok: true; value: T; model: string; costUsd?: number; tokens?: number; notionalUsd?: number }
   | { ok: false; reason: ModelFailure; message: string };
 
 // Every call names the feature asking (for the usage file) and, when it
@@ -335,7 +337,7 @@ export class Models {
         ...(res.costUsd !== undefined ? { costUsd: res.costUsd } : {}),
         ...(!res.ok ? { error: res.message } : unreadable ? { error: unreadable } : {}),
       });
-      if (res.ok && value !== undefined) return { ok: true, value, model, costUsd: res.costUsd };
+      if (res.ok && value !== undefined) return { ok: true, value, model, costUsd: res.costUsd, ...tokensOf(res) };
       last = res;
       if (res.ok || !res.retry) break;
     }
@@ -390,7 +392,7 @@ export class Models {
         });
         if (res.ok && value !== undefined) {
           this.lastLogin = account.id;
-          return { ok: true, value, model: `${model} on ${account.id}` };
+          return { ok: true, value, model: `${model} on ${account.id}`, ...tokensOf(res), ...(res.notionalUsd !== undefined ? { notionalUsd: res.notionalUsd } : {}) };
         }
         if (!res.ok && res.limit) {
           this.opts.poolHost?.ranDry(account.id);
@@ -476,4 +478,8 @@ function parseObject(text: string): Record<string, unknown> | undefined {
 export function usd(n: number): string {
   // A day of titles is a fraction of a cent, so small amounts keep 4 places.
   return n === 0 || n >= 0.01 ? `$${n.toFixed(2)}` : `$${n.toFixed(4)}`;
+}
+
+function tokensOf(res: { inputTokens?: number; outputTokens?: number }): { tokens?: number } {
+  return res.inputTokens === undefined && res.outputTokens === undefined ? {} : { tokens: (res.inputTokens ?? 0) + (res.outputTokens ?? 0) };
 }

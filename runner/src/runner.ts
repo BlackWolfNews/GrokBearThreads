@@ -1056,6 +1056,24 @@ export class Runner {
     return { first: first ? cut(first) : undefined, recent };
   }
 
+  // What a thread has said since `seq`: how much of Mike's and the
+  // agent's text, and whether any of it has a link. The librarian skips a
+  // catch-up look when there's little.
+  threadSince(threadId: string, seq: number): { chars: number; links: boolean } {
+    const st = this.mustGet(threadId);
+    const log = this.store.log(st.rec.id);
+    let chars = 0;
+    let links = false;
+    for (let from = seq + 1; from <= log.lastSeq; from += 500) {
+      for (const e of log.read(from, Math.min(log.lastSeq, from + 499))) {
+        const text = e.type === 'user.message' && e.origin === undefined ? e.text : e.type === 'assistant.text' ? e.text : '';
+        chars += text.trim().length;
+        if (!links && /https?:\/\//.test(text)) links = true;
+      }
+    }
+    return { chars, links };
+  }
+
   private notify(n: Notification): void {
     // A kept thread's summary changing can be it becoming free to go.
     if (this.draining && n.method === 'thread.updated') this.queueHandoverCheck();

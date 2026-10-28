@@ -1664,7 +1664,7 @@ function addDemoProjects() {
       { id: 'l2', at: ago(60 * 4), threadId: 'demo_sqlite_vs_files', threadTitle: title('demo_sqlite_vs_files'), reason: 'catch-up', outcome: 'updated', text: 'Threadbear\'s state', projectIds: [tb.id], costUsd: 0.0029 },
       { id: 'l1', at: ago(60 * 5), threadId: 'demo_landing_pages', threadTitle: title('demo_landing_pages'), reason: 'first-turn', outcome: 'failed', text: 'OpenRouter took too long to answer' },
     ],
-    looksToday: 14, spentTodayUsd: 0.0312,
+    looksToday: 14, spentTodayUsd: 0.0312, skippedToday: 3, tokensToday: 52_400, notionalTodayUsd: 0.011,
   };
 }
 

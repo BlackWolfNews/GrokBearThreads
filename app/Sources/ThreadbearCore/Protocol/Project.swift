@@ -314,9 +314,16 @@ public struct LibrarianStatus: Sendable, Hashable, Decodable {
     public var recent: [LibrarianEntry]
     public var looksToday: Int
     public var spentTodayUsd: Double
+    /// Catch-ups skipped today as too quiet for a model call.
+    public var skippedToday: Int
+    /// Tokens in and out today, and what the pool's looks would have cost
+    /// on the API (they use the logins' room, not money).
+    public var tokensToday: Int
+    public var notionalTodayUsd: Double
 
     public init(state: State = .idle, reason: String? = nil, paused: Bool = false, current: LibrarianJob? = nil,
-                queue: [LibrarianJob] = [], recent: [LibrarianEntry] = [], looksToday: Int = 0, spentTodayUsd: Double = 0) {
+                queue: [LibrarianJob] = [], recent: [LibrarianEntry] = [], looksToday: Int = 0, spentTodayUsd: Double = 0,
+                skippedToday: Int = 0, tokensToday: Int = 0, notionalTodayUsd: Double = 0) {
         self.state = state
         self.reason = reason
         self.paused = paused
@@ -325,6 +332,9 @@ public struct LibrarianStatus: Sendable, Hashable, Decodable {
         self.recent = recent
         self.looksToday = looksToday
         self.spentTodayUsd = spentTodayUsd
+        self.skippedToday = skippedToday
+        self.tokensToday = tokensToday
+        self.notionalTodayUsd = notionalTodayUsd
     }
 
     public init(from decoder: Decoder) throws {
@@ -337,9 +347,14 @@ public struct LibrarianStatus: Sendable, Hashable, Decodable {
         recent = c.lossyArray(LibrarianEntry.self, forKey: .recent)
         looksToday = c.lenientInt(forKey: .looksToday) ?? 0
         spentTodayUsd = (try? c.decodeIfPresent(Double.self, forKey: .spentTodayUsd)).flatMap { $0 } ?? 0
+        skippedToday = c.lenientInt(forKey: .skippedToday) ?? 0
+        tokensToday = c.lenientInt(forKey: .tokensToday) ?? 0
+        notionalTodayUsd = (try? c.decodeIfPresent(Double.self, forKey: .notionalTodayUsd)).flatMap { $0 } ?? 0
     }
 
-    enum CodingKeys: String, CodingKey { case state, reason, paused, current, queue, recent, looksToday, spentTodayUsd }
+    enum CodingKeys: String, CodingKey {
+        case state, reason, paused, current, queue, recent, looksToday, spentTodayUsd, skippedToday, tokensToday, notionalTodayUsd
+    }
 
     /// What the activity bar's badge counts: the look under way and the
     /// ones waiting.

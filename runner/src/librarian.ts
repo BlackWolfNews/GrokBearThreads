@@ -31,6 +31,7 @@ import { SYMBOLS, fileHash, findIcon, storeIcon } from './project-icons.ts';
 export type LibrarianHost = {
   threadRecords(): ThreadRecord[];
   threadGist(threadId: string, opts?: { recent?: number; chars?: number }): { first?: string; recent: { who: 'user' | 'assistant'; text: string }[] };
+  threadSince?(threadId: string, seq: number): { chars: number; links: boolean };
   resolveThread(idOrPrefix: string): string;
   onThreadActivity(fn: (a: ThreadActivity) => void): () => void;
   onNotification(fn: (n: Notification) => void): () => void;
@@ -51,7 +52,12 @@ export const SETTLE_MS = 10_000;
 // used to leave it unfiled for as long as it ran).
 export const FIRST_MESSAGE_MS = 5_000;
 // A thread with more turns is looked at again no sooner than this.
-export const CATCH_UP_MS = 60 * 60_000;
+export const CATCH_UP_MS = 20 * 60_000;
+// A catch-up look is skipped, with no model call, when the turns since the
+// last look edited nothing, gave no link and said less than this much: a
+// quick "thanks" or "go" rarely changes a project, its state or a title.
+// What they said still counts towards the next one.
+export const CATCH_UP_MIN_CHARS = 400;
 // How often to look for turns the librarian never heard end. A turn that
 // ends in an older runner while it drains after a handover is only heard
 // by that runner, whose librarian has stopped; main moving every few
@@ -80,8 +86,12 @@ type Saved = {
   queue?: LibrarianJob[];
   recent?: LibrarianEntry[];
   looks?: Record<string, Look>;
-  day?: { date: string; looks: number; spentUsd: number };
+  day?: Day;
 };
+
+// The day's looks, skips and what they used. spentUsd is OpenRouter's,
+// notionalUsd what the pool's would have cost on the API (not spent).
+type Day = { date: string; looks: number; spentUsd: number; skipped?: number; tokens?: number; notionalUsd?: number };
 
 // What the model is asked to answer.
 type Answer = {
@@ -107,7 +117,7 @@ export class Librarian {
   private queue = new Map<string, LibrarianJob>();
   private recent: LibrarianEntry[] = [];
   private looks: Record<string, Look> = {};
-  private day = { date: '', looks: 0, spentUsd: 0 };
+  private day: Day = { date: '', looks: 0, spentUsd: 0 };
   // Folders each thread has edited in since its last look, by repo.
   private edited = new Map<string, Set<string>>();
   private current?: LibrarianJob & { startedAt: string };
@@ -193,6 +203,9 @@ export class Librarian {
       recent: this.recent,
       looksToday: this.day.looks,
       spentTodayUsd: round(this.day.spentUsd),
+      skippedToday: this.day.skipped ?? 0,
+      tokensToday: this.day.tokens ?? 0,
+      notionalTodayUsd: round(this.day.notionalUsd ?? 0),
     };
     if (this.off && !this.current) s.reason = this.off;
     if (this.current) s.current = this.current;
@@ -372,6 +385,14 @@ export class Librarian {
       this.off = 'Model calls are off in this runner.';
       return;
     }
+    if (this.quiet(rec, job)) {
+      // Its seq stays, so what these turns said counts towards the next.
+      this.looks[rec.id] = { ...this.looks[rec.id], at: new Date(this.clock.now()).toISOString() };
+      this.rollDay();
+      this.day.skipped = (this.day.skipped ?? 0) + 1;
+      this.log.info('librarian skipped a quiet catch-up', { threadId: rec.id });
+      return;
+    }
     const prompt = this.prompt(rec, job);
     // rec is the live record: the title as the model saw it, so a rename
     // during the call isn't undone.
@@ -394,7 +415,7 @@ export class Librarian {
     this.offForSetup = false;
     this.rollDay();
     this.day.looks++;
-    this.day.spentUsd += res.costUsd ?? 0;
+    this.used(res);
     const answer = parseAnswer(res.value);
     if (!answer) {
       this.markLooked(rec, job);
@@ -403,6 +424,16 @@ export class Librarian {
     }
     this.apply(job, rec, answer, res.costUsd, prompt, title);
     this.markLooked(rec, job);
+  }
+
+  // A catch-up whose turns edited nothing, gave no link and said little
+  // since the last look: not worth a model call (CATCH_UP_MIN_CHARS).
+  private quiet(rec: ThreadRecord, job: LibrarianJob): boolean {
+    const look = this.looks[rec.id];
+    if (job.reason !== 'catch-up' || !look || look.early || !this.host.threadSince) return false;
+    if (this.edited.get(rec.id)?.size) return false;
+    const since = this.host.threadSince(rec.id, look.seq);
+    return !since.links && since.chars < CATCH_UP_MIN_CHARS;
   }
 
   private prompt(rec: ThreadRecord, job: LibrarianJob): string {
@@ -694,7 +725,7 @@ export class Librarian {
       return undefined;
     }
     this.rollDay();
-    this.day.spentUsd += res.costUsd ?? 0;
+    this.used(res);
     const words = res.value.toLowerCase().match(/[a-z0-9.]+/g) ?? [];
     return words.map((w) => w.replace(/\.+$/, '')).find((w) => SYMBOLS.includes(w));
   }
@@ -730,6 +761,13 @@ export class Librarian {
     const d = new Date(this.clock.now());
     const date = `${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()}`;
     if (this.day.date !== date) this.day = { date, looks: 0, spentUsd: 0 };
+  }
+
+  // What a call used, into the day's figures.
+  private used(res: { costUsd?: number; tokens?: number; notionalUsd?: number }): void {
+    this.day.spentUsd += res.costUsd ?? 0;
+    this.day.tokens = (this.day.tokens ?? 0) + (res.tokens ?? 0);
+    this.day.notionalUsd = (this.day.notionalUsd ?? 0) + (res.notionalUsd ?? 0);
   }
 
   // The repo a file belongs to (the nearest folder with .git), else its

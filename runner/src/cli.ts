@@ -948,7 +948,7 @@ function printProject(p: Project, threadIds: string[]): void {
 
 function printLibrarian(l: LibrarianStatus): void {
   const state = l.current ? `working on "${l.current.threadTitle}" (${l.current.why})` : l.state + (l.reason ? `: ${l.reason}` : '');
-  console.log(`Librarian: ${state}. ${l.looksToday} look${l.looksToday === 1 ? '' : 's'} today, $${l.spentTodayUsd.toFixed(4)}.`);
+  console.log(`Librarian: ${state}. ${l.looksToday} look${l.looksToday === 1 ? '' : 's'} today, ${l.skippedToday ?? 0} skipped, ${l.tokensToday ?? 0} tokens, $${l.spentTodayUsd.toFixed(4)} spent, $${(l.notionalTodayUsd ?? 0).toFixed(4)} at API prices on the pool.`);
   if (l.queue.length) {
     console.log('\nNext:');
     for (const j of l.queue.slice(0, 20)) console.log(`  ${j.dueAt}  ${j.threadId.slice(0, 8)} "${j.threadTitle}"  ${j.why}`);

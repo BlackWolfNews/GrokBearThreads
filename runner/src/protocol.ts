@@ -289,6 +289,9 @@ export type LibrarianStatus = {
   recent: LibrarianEntry[];
   looksToday: number;
   spentTodayUsd: number;
+  skippedToday?: number;
+  tokensToday?: number;
+  notionalTodayUsd?: number;
 };
 
 export type SubagentStatus = 'running' | 'completed' | 'failed' | 'stopped';

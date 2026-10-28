@@ -322,7 +322,11 @@ type LibrarianStatus = {
   queue: LibrarianJob[] // what it will look at next, soonest first
   recent: LibrarianEntry[] // what it did, newest first, the last 50
   looksToday: number
-  spentTodayUsd: number // its share of the day's model spend
+  spentTodayUsd: number // its share of the day's model spend (OpenRouter)
+  skippedToday?: number // quiet catch-ups skipped without a model call
+  tokensToday?: number  // tokens in and out, every look and icon pick
+  notionalTodayUsd?: number // what the pool's calls would have cost on
+                        // the API; they use logins' room, not money
 }
 
 type LibrarianReason =
@@ -1480,8 +1484,11 @@ daily budget, never for private folders). It looks at a thread when:
 - a turn edits files outside its folder and its projects' folders
   (`new-folder`), 10 seconds later;
 - it moves folder (`moved`);
-- it has had turns since the last look, an hour after that look at the
-  soonest (`catch-up`);
+- it has had turns since the last look, 20 minutes after that look at
+  the soonest (`catch-up`). A catch-up is skipped, with no model call, when
+  those turns edited no files, gave no link and said fewer than 400
+  characters between Mike and the agent; it counts in `skippedToday`, and
+  what they said still counts towards the next one;
 - someone asks (`librarian.run`, `asked`).
 
 Those come from the runner's events, and a turn that ends in an older
