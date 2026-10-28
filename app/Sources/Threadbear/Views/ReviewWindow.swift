@@ -441,7 +441,15 @@ struct ReviewWindow: View {
                     .tip("More")
                 Button("Later") { close() }.disabled(session.submitting)
                     .tip("Close it. Your draft is kept.")
-                Button(session.submitting ? "Sending…" : "Send") { Task { await session.submit() } }
+                Button(session.submitting ? "Sending…" : "Send") {
+                    Task {
+                        await session.submit()
+                        // Once it's sent there's nothing left to do here, so
+                        // it gets out of the way (Mike, 28 Oct). A failed send
+                        // stays open with its error and the notes kept.
+                        if session.review.status == "answered" { close() }
+                    }
+                }
                     .buttonStyle(.borderedProminent).disabled(!session.canSubmit)
                     .tip("Send your pick and notes to the agent")
             } else {
