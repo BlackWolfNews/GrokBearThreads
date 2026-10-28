@@ -400,3 +400,13 @@ test('live state: when hides, badge counts, a shared command runs once, a failur
   assert.equal(await applyLive(without, ctx), without);
   assert.equal(readPatchModule('x', 'project', '/x.ts', { actions: [{ title: 'A', run: 'x', when: true }] }).info.error, 'actions[0] ("A") has a when that isn\'t a function.');
 });
+
+test('icons on chips: the patch file\'s, unless an action has its own', () => {
+  const read = (v: unknown) => readPatchModule('x', 'project', '/p/x.ts', v);
+  const ok = read({ icon: ' pawprint ', actions: [{ title: 'Check', run: 'a' }, { title: 'Ship', run: 'b', icon: 'paperplane' }] });
+  assert.equal(ok.info.error, undefined);
+  assert.deepEqual(ok.actions.map((a) => a.icon), ['pawprint', 'paperplane']);
+  assert.equal(read({ actions: [{ title: 'Plain', run: 'a' }] }).actions[0].icon, undefined);
+  assert.equal(read({ icon: 3 }).info.error, 'icon should be an SF Symbol name, like "pawprint".');
+  assert.equal(read({ actions: [{ title: 'A', run: 'x', icon: '' }] }).info.error, 'actions[0] ("A") has an icon that isn\'t an SF Symbol name.');
+});

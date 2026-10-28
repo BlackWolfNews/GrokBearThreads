@@ -48,7 +48,7 @@ final class ActionsTests: XCTestCase {
     func testSummaryDecodesActionsAndPatches() throws {
         let json = """
         {"id":"th1","actions":[
-          {"id":"reseed.reseed-dev-db","title":"Reseed dev DB","kind":"command","command":"npx convex run seed:reset","patch":"reseed","note":"Dev only"},
+          {"id":"reseed.reseed-dev-db","title":"Reseed dev DB","kind":"command","command":"npx convex run seed:reset","patch":"reseed","note":"Dev only","icon":"pawprint"},
           {"id":"reseed.explain","title":"Explain","kind":"prompt","prompt":"Explain it","patch":"reseed"},
           {"title":"no id"}
         ],"patches":[{"id":"convex","source":"builtin"},{"id":"reseed","source":"project","file":"/p/.threadbear/patches/reseed.ts"},{"id":"bad","source":"project","file":"/p/x.ts","error":"nope"}]}
@@ -58,6 +58,7 @@ final class ActionsTests: XCTestCase {
         XCTAssertEqual(thread.actions[0].kind, .command)
         XCTAssertEqual(thread.actions[0].command, "npx convex run seed:reset")
         XCTAssertEqual(thread.actions[1].kind, .prompt)
+        XCTAssertEqual(thread.actions.map(\.icon), ["pawprint", nil])
         XCTAssertEqual(thread.patches.map(\.source), ["builtin", "project", "project"])
         XCTAssertEqual(thread.patches[2].error, "nope")
         let hooked = try JSONDecoder().decode(ThreadSummary.self, from: Data(#"{"id":"h","hooks":[{"id":"c.typecheck","title":"Typecheck","on":"turn.end","command":"npx tsc","edited":"**/*.ts","tell":"failures","patch":"c"}]}"#.utf8))

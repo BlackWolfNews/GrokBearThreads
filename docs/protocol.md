@@ -211,6 +211,9 @@ type Action = {
                         // patch came from. Absent: the thread's own folder
   projectId?: string    // the project whose folder gave it (see Projects)
   note?: string
+  icon?: string         // an SF Symbol for the chip: the action's own `icon`,
+                        // else its patch file's; absent: the client's default
+  badge?: number        // see Patches, "Live state"
 }
 
 type Hook = {
@@ -1097,6 +1100,11 @@ export default {
   panels: [{ title: "Storybook", url: "http://localhost:6006", note: "while npm run storybook is up" }],
 }
 ```
+
+A patch file can have an `icon` at the top, an SF Symbol name that goes
+on each of its chips (`icon: "pawprint"`), so a row of chips from several
+patches shows which came from where; an action's own `icon` wins. Chips
+are grouped by patch, and a chip's tooltip names its patch.
 
 `run` is a command for `actions.run` to run in the thread's folder,
 `prompt` a message it sends instead; one or the other. A panel needs a

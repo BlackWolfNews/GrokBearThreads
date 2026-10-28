@@ -310,6 +310,7 @@ export type Action = {
   folder?: string; // where the command runs; absent: the thread's folder
   projectId?: string; // the project whose folder gave it
   note?: string;
+  icon?: string; // an SF Symbol for the chip: the action's own, else its patch's
   badge?: number; // a count on the chip, from the patch's badge function
 };
 

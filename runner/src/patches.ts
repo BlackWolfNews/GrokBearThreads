@@ -304,7 +304,11 @@ export function readPatchModule(id: string, source: 'home' | 'project', file: st
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     return problem('The default export should be an object with actions and/or panels.');
   }
-  const v = value as { actions?: unknown; panels?: unknown; hooks?: unknown; worktree?: unknown; appliesTo?: unknown };
+  const v = value as { actions?: unknown; panels?: unknown; hooks?: unknown; worktree?: unknown; appliesTo?: unknown; icon?: unknown };
+  // The patch's own icon goes on each of its chips, so a row of chips from
+  // several patches says which one each came from (an action can have its own).
+  if (v.icon !== undefined && (typeof v.icon !== 'string' || !v.icon.trim())) return problem('icon should be an SF Symbol name, like "pawprint".');
+  const patchIcon = typeof v.icon === 'string' ? v.icon.trim() : undefined;
   let appliesTo: string[] | undefined;
   if (v.appliesTo !== undefined) {
     const list = typeof v.appliesTo === 'string' ? [v.appliesTo] : v.appliesTo;
@@ -343,7 +347,7 @@ export function readPatchModule(id: string, source: 'home' | 'project', file: st
   if (v.actions !== undefined) {
     if (!Array.isArray(v.actions)) return problem('actions should be an array.');
     for (const [i, raw] of v.actions.entries()) {
-      const a = raw as { title?: unknown; run?: unknown; prompt?: unknown; note?: unknown; when?: unknown; badge?: unknown };
+      const a = raw as { title?: unknown; run?: unknown; prompt?: unknown; note?: unknown; icon?: unknown; when?: unknown; badge?: unknown };
       if (!a || typeof a !== 'object' || typeof a.title !== 'string' || !a.title.trim()) return problem(`actions[${i}] needs a title.`);
       const run = typeof a.run === 'string' && a.run.trim() ? a.run : undefined;
       const prompt = typeof a.prompt === 'string' && a.prompt.trim() ? a.prompt : undefined;
@@ -353,6 +357,9 @@ export function readPatchModule(id: string, source: 'home' | 'project', file: st
       if (run) action.command = run;
       if (prompt) action.prompt = prompt;
       if (typeof a.note === 'string' && a.note.trim()) action.note = a.note.trim();
+      if (a.icon !== undefined && (typeof a.icon !== 'string' || !a.icon.trim())) return problem(`actions[${i}] ("${a.title}") has an icon that isn't an SF Symbol name.`);
+      const icon = typeof a.icon === 'string' ? a.icon.trim() : patchIcon;
+      if (icon) action.icon = icon;
       const liveProblem = liveOf('actions', i, action.title, a, action.id);
       if (liveProblem) return problem(liveProblem);
       actions.push(action);

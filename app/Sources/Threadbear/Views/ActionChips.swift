@@ -4,7 +4,9 @@ import ThreadbearCore
 
 /// The thread's actions (from its folder's patches) as chips above the
 /// composer's text. A command action runs in the folder and its output
-/// lands in the transcript; a prompt action sends its message.
+/// lands in the transcript; a prompt action sends its message. Chips from
+/// one patch sit together, with a hairline between patches, so a row that
+/// mixes a repo's checks with a tool's chips (Tandem's, say) reads as two.
 struct ActionChips: View {
     @Environment(AppModel.self) private var app
     let thread: ThreadSummary
@@ -12,14 +14,33 @@ struct ActionChips: View {
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: zoomed(6)) {
-                ForEach(thread.actions) { action in
-                    ActionChip(action: action, running: app.isRunning(action: action, in: thread.id)) {
-                        app.runAction(action, in: thread.id)
+                ForEach(Array(Self.groups(thread.actions).enumerated()), id: \.offset) { index, group in
+                    if index > 0 {
+                        Rectangle()
+                            .fill(Color(nsColor: Theme.cardBorder))
+                            .frame(width: 1, height: zoomed(14))
+                            .padding(.horizontal, zoomed(2))
+                    }
+                    ForEach(group) { action in
+                        ActionChip(action: action, running: app.isRunning(action: action, in: thread.id)) {
+                            app.runAction(action, in: thread.id)
+                        }
                     }
                 }
             }
             .padding(.vertical, 1)
         }
+    }
+
+    /// The actions by patch, each patch where its first chip was.
+    static func groups(_ actions: [Action]) -> [[Action]] {
+        var order: [String] = []
+        var byPatch: [String: [Action]] = [:]
+        for action in actions {
+            if byPatch[action.patch] == nil { order.append(action.patch) }
+            byPatch[action.patch, default: []].append(action)
+        }
+        return order.map { byPatch[$0]! }
     }
 }
 
@@ -34,8 +55,10 @@ private struct ActionChip: View {
                 if running {
                     SpinnerMark(color: .secondaryLabelColor).frame(width: zoomed(11), height: zoomed(11))
                 } else {
-                    // The patch glyph for a command, a bubble for a message.
-                    Image(systemName: action.kind == .prompt ? "text.bubble" : "square.dashed")
+                    // The patch's own icon when it has one (which project or
+                    // tool it's for); else the patch glyph for a command, a
+                    // bubble for a message.
+                    Image(systemName: action.icon ?? (action.kind == .prompt ? "text.bubble" : "square.dashed"))
                         .font(.system(size: zoomed(11), weight: .medium))
                         .foregroundStyle(.secondary)
                 }
@@ -59,6 +82,15 @@ private struct ActionChip: View {
         }
         .buttonStyle(.plain)
         .disabled(running)
-        .tip(action.note ?? action.command ?? action.prompt ?? action.title)
+        .tip(Self.tip(for: action))
+    }
+
+    /// What it does, then where it's from: "From the checks patch, in
+    /// threadbear", so a chip's origin is a hover away.
+    static func tip(for action: Action) -> String {
+        let what = action.note ?? action.command ?? action.prompt ?? action.title
+        guard !action.patch.isEmpty else { return what }
+        let folder = action.folder.map { ", in \(URL(fileURLWithPath: $0).lastPathComponent)" } ?? ""
+        return "\(what)\nFrom the \(action.patch) patch\(folder)"
     }
 }

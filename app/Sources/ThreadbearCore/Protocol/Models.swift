@@ -451,10 +451,14 @@ public struct Action: Sendable, Hashable, Codable, Identifiable {
     /// A count on the chip from the patch's live state ("3 comments");
     /// nil for none.
     public var badge: Int?
+    /// An SF Symbol for the chip, from the action or its patch file; nil
+    /// for the default glyph.
+    public var icon: String?
 
     public init(id: String, title: String, kind: Kind = .command, command: String? = nil, prompt: String? = nil, patch: String = "", note: String? = nil,
-                folder: String? = nil, projectId: String? = nil, badge: Int? = nil) {
+                folder: String? = nil, projectId: String? = nil, badge: Int? = nil, icon: String? = nil) {
         self.badge = badge
+        self.icon = icon
         self.id = id
         self.title = title
         self.kind = kind
@@ -478,6 +482,7 @@ public struct Action: Sendable, Hashable, Codable, Identifiable {
         folder = (try? c.decodeIfPresent(String.self, forKey: .folder)) ?? nil
         projectId = (try? c.decodeIfPresent(String.self, forKey: .projectId)) ?? nil
         badge = (try? c.decodeIfPresent(Int.self, forKey: .badge)) ?? nil
+        icon = (try? c.decodeIfPresent(String.self, forKey: .icon)) ?? nil
     }
 }
 

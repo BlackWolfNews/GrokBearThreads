@@ -2,6 +2,9 @@
 // checks an agent or Mike runs most in this repo. Output lands in the
 // thread's transcript.
 export default {
+  // The bear's paw on each chip, so they read as Threadbear's own next to
+  // another patch's (Tandem's, say).
+  icon: "pawprint",
   // A worktree per thread (docs/thread-worktrees.md): each new thread in
   // this repo works on a thread/<id8> branch in its own worktree, and
   // `tb land` puts it on main once the quick check passes. Setup links
