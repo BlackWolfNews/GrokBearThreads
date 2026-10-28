@@ -748,6 +748,16 @@ struct ThreadMenu: View {
     let thread: ThreadSummary
 
     var body: some View {
+        // So several threads can be open at once (Mike, 28 Oct).
+        if app.dock.layout.contains(WindowDock.threadPanel(thread.id)) {
+            Button("Move to Main Panel", systemImage: "rectangle.portrait.and.arrow.forward") {
+                app.dock.close(WindowDock.threadPanel(thread.id))
+                app.select(thread.id)
+            }
+        } else {
+            Button("Open in New Panel", systemImage: "rectangle.split.2x1") { app.openThreadInPanel(thread.id) }
+        }
+        Divider()
         Button("Rename", systemImage: "pencil") { app.startRenaming(thread.id) }
         SnoozeMenu(threadId: thread.id)
         if thread.snoozedUntil != nil {

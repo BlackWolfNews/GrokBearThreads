@@ -4,8 +4,8 @@ import SwiftUI
 import ThreadbearCore
 
 extension AppModel {
-    /// Opens a review in the dock's Review panel, beside its thread, or
-    /// brings up the window it was popped out into.
+    /// Opens a review in the dock's Review panel, a tab beside its thread,
+    /// or brings up the window it was popped out into.
     func openReview(threadId: String, review: DesignReview) {
         let key = threadId + "/" + review.id
         if let existing = reviewWindows[key] {
@@ -13,15 +13,18 @@ extension AppModel {
             existing.present()
             return
         }
+        // The review is a tab beside the main panel, so the main panel
+        // moves to its thread first: that closes another thread's review
+        // still there (mainContextChanged), and must come before this one
+        // is set up. One dragged out elsewhere is replaced in place.
+        if selection != threadId { select(threadId) }
         if let session = reviewPanel, session.threadId == threadId, session.review.id == review.id {
             session.receive(review)
         } else {
             if let old = reviewPanel { Task { await old.saveNow() } }
             reviewPanel = makeReviewSession(threadId: threadId, review: review)
         }
-        // The panel only shows with its own thread.
-        if selection != threadId { select(threadId) }
-        showReviewPanel()
+        showReviewPanel(threadId: threadId)
     }
 
     private func makeReviewSession(threadId: String, review: DesignReview) -> ReviewSession {
@@ -40,37 +43,18 @@ extension AppModel {
         return ReviewSession(threadId: threadId, review: review, service: service)
     }
 
-    private func showReviewPanel() {
+    /// A tab in the main panel's group (Mike, 28 Oct), or in the group of
+    /// its thread's own panel if it has one, unless it's open already,
+    /// wherever that is.
+    private func showReviewPanel(threadId: String) {
         let panel = WindowDock.review
         if dock.layout.contains(panel) {
             dock.select(panel)
-            return
+        } else if let group = dock.layout.group(containing: WindowDock.threadPanel(threadId)) {
+            dock.open(panel, .tab(group: group.id))
+        } else {
+            openMainTab(panel)
         }
-        guard let threadGroup = dock.layout.group(containing: WindowDock.thread) else {
-            dock.open(panel, .window(.right))
-            return
-        }
-        dock.open(panel, .edge(group: threadGroup.id, .right))
-        // Images need room: the review takes half of the row it joined,
-        // leaving the sidebar alone, and the thread and any panes beside it
-        // shrink in proportion. Mike can drag it after.
-        guard let group = dock.layout.group(containing: panel),
-              let split = Self.split(holding: group.id, in: dock.layout.root),
-              let i = split.children.firstIndex(where: { $0.id == group.id }), split.children.count > 1 else { return }
-        let sidebar = dock.layout.group(containing: WindowDock.threads).flatMap { g in split.children.firstIndex { $0.id == g.id } }
-        let fixed = sidebar.map { split.fractions[$0] } ?? 0
-        let room = 1 - fixed
-        let others = room - split.fractions[i]
-        guard others > 0 else { return }
-        var fractions = split.fractions.enumerated().map { j, f in j == sidebar ? f : f / others * room * 0.5 }
-        fractions[i] = room * 0.5
-        dock.layout.setFractions(split: split.id, fractions)
-    }
-
-    private static func split(holding child: String, in node: DockNode) -> DockSplit? {
-        guard case .split(let s) = node else { return nil }
-        if s.children.contains(where: { $0.id == child }) { return s }
-        return s.children.lazy.compactMap { split(holding: child, in: $0) }.first
     }
 
     func closeReviewPanel() {

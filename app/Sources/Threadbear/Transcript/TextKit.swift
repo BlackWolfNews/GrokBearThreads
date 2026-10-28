@@ -573,15 +573,23 @@ final class TranscriptTextView: NSTextView {
         let app = AppModel.shared
         switch action {
         case .explain:
-            guard let threadId = app.selection else { return }
+            guard let threadId = transcriptThreadId else { return }
             app.explain(text, message: selectionMessage, in: threadId)
         case .quote:
-            guard let threadId = app.selection else { return }
+            guard let threadId = transcriptThreadId else { return }
             app.quoteInComposer(text, in: threadId)
         case .copy:
             NSPasteboard.general.clearContents()
             NSPasteboard.general.setString(text, forType: .string)
         }
+    }
+
+    /// The thread whose transcript this text is in: the main panel's, or
+    /// one open in a panel of its own.
+    private var transcriptThreadId: String? {
+        var view = superview
+        while let v = view, !(v is TranscriptTableView) { view = v.superview }
+        return (view as? TranscriptTableView)?.controller?.session?.threadId ?? AppModel.shared.selection
     }
 
     func closeSelectionBar() {

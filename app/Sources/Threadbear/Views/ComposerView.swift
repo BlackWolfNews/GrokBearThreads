@@ -57,7 +57,7 @@ struct ComposerView: View {
             ComposerTextField(
                 text: draft.text,
                 height: $height,
-                focusTrigger: app.focusComposer,
+                focusTrigger: app.focusRequests[draftKey] ?? 0,
                 placeholder: "Message",
                 onSend: { send() },
                 onReturnWhenEmpty: { draft.wrappedValue.images.isEmpty && allowSoleApproval() },
@@ -99,7 +99,7 @@ struct ComposerView: View {
             .shadow(color: .black.opacity(dark ? 0 : 0.08), radius: zoomed(14), y: zoomed(4))
             .overlay(shape.strokeBorder(Color(nsColor: .separatorColor), lineWidth: 0.5))
             .contentShape(shape)
-            .onTapGesture { app.focusComposer += 1 }
+            .onTapGesture { app.focusComposer(draftKey) }
     }
 
     private func send() {

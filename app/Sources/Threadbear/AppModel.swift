@@ -55,7 +55,12 @@ final class AppModel {
     // These four are where the window is; a change to any of them is a
     // step in the back/forward history (Navigation.swift).
     var selection: String? {
-        didSet { if selection != oldValue { noteNavigation() } }
+        didSet {
+            if selection != oldValue {
+                noteNavigation()
+                mainContextChanged()
+            }
+        }
     }
     /// A sub-agent's transcript is showing instead of its thread's. The
     /// thread stays `selection`, so the sidebar keeps its sub-agents listed
@@ -77,7 +82,9 @@ final class AppModel {
     /// the Archive view's count).
     var archiveLoaded = false
     var errorMessage: String?
-    var focusComposer = 0
+    /// Bumped to put the cursor in a composer, by its draft key (a thread's
+    /// id, or "new"): with threads open in several panels, only that one's.
+    var focusRequests: [String: Int] = [:]
     var now = Date()
     var drafts: [String: Draft] = [:]
     /// Where Mike is on each thread's open card of asks (DecisionPager),
@@ -158,13 +165,23 @@ final class AppModel {
     /// The project page showing in the detail area instead of the thread.
     /// Selecting a thread (or a new one) closes it.
     var openProjectId: String? {
-        didSet { if openProjectId != oldValue { noteNavigation() } }
+        didSet {
+            if openProjectId != oldValue {
+                noteNavigation()
+                mainContextChanged()
+            }
+        }
     }
     /// The Projects page (a card per project) in the detail area: what
     /// clicking Projects in the activity bar opens. Picking a thread or a
     /// project, or leaving the Projects view, closes it.
     var showsProjectsHome = false {
-        didSet { if showsProjectsHome != oldValue { noteNavigation() } }
+        didSet {
+            if showsProjectsHome != oldValue {
+                noteNavigation()
+                mainContextChanged()
+            }
+        }
     }
     /// The runner's settings for the Settings window: nil until
     /// `settings.get` answers, then replaced whole by `settings.updated`.
@@ -185,6 +202,14 @@ final class AppModel {
     /// The window's panels and where they are (WindowDock), saved as Mike
     /// moves them.
     @ObservationIgnored let dock = WindowDock.makeController()
+    /// Panels opened as tabs beside the main panel for what it's showing
+    /// (a review, so far). They close when the main panel moves on to
+    /// something else, unless Mike has dragged them out of its group by
+    /// then, which keeps them (`dockChanged`).
+    @ObservationIgnored var mainTabs: Set<PanelID> = []
+    /// The transcripts of threads open in panels of their own, by thread id.
+    /// The main panel's is `transcript`.
+    @ObservationIgnored var panelTranscripts: [String: TranscriptController] = [:]
     /// The pane sections open when Hide Panels closed them, for Show Panels.
     @ObservationIgnored var hiddenPanes: [PanelID] = []
     /// Whether any pane section (Highlights, a panel, Patches) is open in
@@ -255,7 +280,9 @@ final class AppModel {
     @ObservationIgnored private var subagentSessions: [String: ThreadSession] = [:]
     @ObservationIgnored private var subagentPoll: Task<Void, Never>?
     @ObservationIgnored private var connectTask: Task<Void, Never>?
-    @ObservationIgnored private var markSeenTask: Task<Void, Never>?
+    /// By thread: the main panel's and those in panels of their own can
+    /// be marked at once.
+    @ObservationIgnored private var markSeenTasks: [String: Task<Void, Never>] = [:]
     @ObservationIgnored private var backoff = Backoff()
     @ObservationIgnored let transcript = TranscriptController()
     @ObservationIgnored var dataDir = RunnerConfig.dataDir()
@@ -288,6 +315,13 @@ final class AppModel {
     @ObservationIgnored private var connectionErrorMessage: String?
 
     init() {
+        // The dock saves its layout on every change (WindowDock); this
+        // follows panels in and out of the main panel's group as well.
+        let save = dock.onChange
+        dock.onChange = { [weak self] layout in
+            save?(layout)
+            self?.dockChanged(layout)
+        }
         clockTimer = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated {
                 guard let self else { return }
@@ -580,7 +614,7 @@ final class AppModel {
         // A thread a pending restart waits for may just have finished.
         if restart.isPending, previous?.status != thread.status { refreshRunnerStatus() }
         let becameNeedy = thread.needsYou && previous?.needsYou != true
-        let showing = isLooking && selection == thread.id && subagentSelection == nil
+        let showing = isLooking && isShowing(thread.id)
         if becameNeedy && !showing && notificationsEnabled {
             Notifier.post(thread: thread)
         }
@@ -592,6 +626,8 @@ final class AppModel {
     /// A thread deleted on the runner (by an agent's delete_thread, or `tb
     /// delete`) disappears from every list straight away.
     private func forget(_ threadId: String) {
+        let panel = WindowDock.threadPanel(threadId)
+        if dock.layout.contains(panel) { dock.close(panel) }
         threads[threadId] = nil
         drafts[threadId] = nil
         if let session = sessions.removeValue(forKey: threadId) { session.unsubscribe() }
@@ -603,6 +639,12 @@ final class AppModel {
     // MARK: Selection and sessions
 
     func select(_ threadId: String?) {
+        // A thread open in a panel of its own is shown there: its panel
+        // comes to the front and the main panel stays as it is.
+        if let threadId, dock.layout.contains(WindowDock.threadPanel(threadId)) {
+            dock.select(WindowDock.threadPanel(threadId))
+            return
+        }
         selection = threadId
         openProjectId = nil
         showsProjectsHome = false
@@ -706,7 +748,7 @@ final class AppModel {
     private func evictSessions() {
         guard sessions.count > Self.maxSessions else { return }
         let victims = sessions.values
-            .filter { $0.threadId != selection }
+            .filter { $0.threadId != selection && panelTranscripts[$0.threadId] == nil }
             .sorted { $0.lastUsed < $1.lastUsed }
             .prefix(sessions.count - Self.maxSessions)
         for victim in victims {
@@ -715,11 +757,21 @@ final class AppModel {
         }
     }
 
-    private func scheduleMarkSeen(_ threadId: String) {
-        markSeenTask?.cancel()
-        markSeenTask = Task {
+    func focusComposer(_ draftKey: String) {
+        focusRequests[draftKey, default: 0] += 1
+    }
+
+    /// The thread's transcript is in front of Mike: in the main panel, or
+    /// its own panel's tab is the one showing.
+    func isShowing(_ threadId: String) -> Bool {
+        (selection == threadId && subagentSelection == nil) || dock.isShowing(WindowDock.threadPanel(threadId))
+    }
+
+    func scheduleMarkSeen(_ threadId: String) {
+        markSeenTasks[threadId]?.cancel()
+        markSeenTasks[threadId] = Task {
             try? await Task.sleep(for: .milliseconds(400))
-            guard !Task.isCancelled, let client, let thread = threads[threadId], isLooking, selection == threadId, subagentSelection == nil else { return }
+            guard !Task.isCancelled, let client, let thread = threads[threadId], isLooking, isShowing(threadId) else { return }
             if let updated = try? await client.markSeen(threadId: threadId, seq: thread.lastSeq) {
                 threads[threadId] = updated
             }
@@ -738,7 +790,7 @@ final class AppModel {
         showsProjectsHome = false
         stopShowingSubagent()
         sidebarMode = .inbox
-        focusComposer += 1
+        focusComposer("new")
     }
 
     /// Sends the draft for `threadId` (or starts a new thread with the "new"

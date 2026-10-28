@@ -61,6 +61,6 @@ extension AppModel {
         let before = draft.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "" : draft.text.trimmingCharacters(in: .newlines) + "\n\n"
         draft.text = before + quote + "\n\n"
         drafts[threadId] = draft
-        focusComposer += 1
+        focusComposer(threadId)
     }
 }

@@ -32,6 +32,9 @@ struct DetailView: View {
                 ErrorBanner()
                 ProjectsHome()
             }
+        } else if let id = app.selection, app.dock.layout.contains(WindowDock.threadPanel(id)) {
+            // One transcript can only be drawn in one place.
+            OpenElsewhereNote(threadId: id)
         } else {
             VStack(spacing: 0) {
             ConnectionBanner()
@@ -112,12 +115,14 @@ struct ThreadHeader: View {
 /// broken.
 struct ThreadMenuButton: View {
     @Environment(AppModel.self) private var app
+    /// For a thread open in a panel of its own; nil for the main panel's.
+    var pinned: String? = nil
 
     var body: some View {
-        let project = app.openProject
-        let thread = app.selectedThread
-        let projectsHome = project == nil && app.showsProjectsHome
-        let session = app.selection.map { app.session(for: $0) }
+        let project = pinned == nil ? app.openProject : nil
+        let thread = pinned.map { app.threads[$0] } ?? app.selectedThread
+        let projectsHome = project == nil && pinned == nil && app.showsProjectsHome
+        let session = (pinned ?? app.selection).map { app.session(for: $0) }
         let hasMenu = (thread != nil && !projectsHome) || project != nil
         Menu {
             if let project {
@@ -376,7 +381,7 @@ private struct ProjectIconButton: View {
     }
 }
 
-private enum PaneRole: LayoutValueKey {
+enum PaneRole: LayoutValueKey {
     static let defaultValue = Role.transcript
 
     enum Role {
@@ -393,7 +398,7 @@ private enum PaneRole: LayoutValueKey {
 /// view (and keeps its text view and its focus) when the first message
 /// creates the thread and it drops to the bottom. The transcript's frame is
 /// the same either way, so showing that first thread doesn't resize it.
-private struct ComposerPlacement: Layout {
+struct ComposerPlacement: Layout {
     var centred: Bool
 
     func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
@@ -610,7 +615,7 @@ struct ConnectionBanner: View {
 /// most room. Here rather than in the transcript's error row, whose drawing
 /// is cached and knows nothing of accounts, so the name and the room it
 /// offers stay current as usage changes.
-private struct LimitBanner: View {
+struct LimitBanner: View {
     @Environment(AppModel.self) private var app
     let thread: ThreadSummary
 

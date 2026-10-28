@@ -1,5 +1,6 @@
 #if DEBUG
 import AppKit
+import BearDock
 import ThreadbearCore
 
 /// Debug builds only, and only when launched with `--automation <log file>`:
@@ -252,6 +253,22 @@ enum Automation {
         case "new":
             app.newThread()
             return "ok"
+        case "open-panel":
+            // A thread in a panel of its own, as the row's Open in New Panel.
+            let match = thread(c["id"], app)
+            guard let id = match.id else { return match.error }
+            app.openThreadInPanel(id)
+            try? await Task.sleep(for: .milliseconds(300))
+            return "ok \(id)"
+        case "dock-move":
+            // A panel dragged to a side of the window, as a drag there does:
+            // {"panel": "review" (or a full id), "edge": "right"}.
+            guard let name = c["panel"] as? String else { return "error panel is a panel id" }
+            let panel = app.dock.layout.panels.first { $0 == name || $0 == "threadbear." + name } ?? name
+            guard app.dock.layout.contains(panel) else { return "error \(name) isn't in the layout" }
+            guard let edge = DockEdge(rawValue: c["edge"] as? String ?? "right") else { return "error edge is left, right, top or bottom" }
+            app.dock.layout.move(panel, .window(edge))
+            return "ok " + app.dock.layout.summary
         case "mouse-button":
             // A mouse's back or forward button over the window, as the
             // event AppKit gives MouseNavigation's monitor. A made-up event

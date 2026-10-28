@@ -438,7 +438,7 @@ final class ThreadSession {
             draft.text = typed + (typed.hasSuffix(".") ? " " : ". ") + reply
         }
         app.drafts[threadId] = draft
-        app.focusComposer += 1
+        app.focusComposer(threadId)
     }
 
     func respond(approvalId: String, decision: ApprovalDecision, answers: [String: String]?, message: String?) {
