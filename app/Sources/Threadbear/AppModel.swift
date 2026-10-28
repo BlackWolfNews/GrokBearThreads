@@ -832,7 +832,8 @@ final class AppModel {
         // Answers picked on the open card go first, each question then its
         // answer, and his own words after them (Decisions.message).
         let thread = threadId.flatMap { threads[$0] }
-        let picks = thread.map { picks(for: $0) } ?? [:]
+        // self. so Swift 6.3 (Xcode 26) doesn't read picks as the variable being declared.
+        let picks = thread.map { self.picks(for: $0) } ?? [:]
         let asks = thread?.asks ?? []
         let answers = Decisions.answers(asks: asks, picks: picks, written: draft.text).map(\.answer)
         let trimmed = answers.isEmpty

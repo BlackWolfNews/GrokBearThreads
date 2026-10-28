@@ -138,8 +138,17 @@ function checkMac() {
   const codex = has('codex');
   if (!claude && !codex) throw new Fail('Neither Claude Code nor Codex is installed. Install one and log in first: https://claude.com/claude-code or https://developers.openai.com/codex');
   ok([claude && 'Claude Code', codex && 'Codex'].filter(Boolean).join(' and '));
+  // The runner is a login agent, which macOS only loads for someone logged in
+  // to the desktop: over SSH to a Mac nobody's logged in to, step 7 can't
+  // finish (seen on Tinker Desk, 28 Oct).
+  if (desktopSession()) ok('logged in to the desktop');
+  else note("Nobody is logged in to this Mac's desktop. Everything up to installing the runner works, then setup stops: log in (in person or with Screen Sharing) and run it again.");
   if (fs.existsSync('/Applications/Tailscale.app') || has('tailscale')) ok('Tailscale');
   else note("Tailscale isn't installed. Threadbear works without it; with it, a second Mac can run threads too (https://tailscale.com/download).");
+}
+
+function desktopSession() {
+  return run('launchctl', ['print', `gui/${process.getuid()}`]).status === 0;
 }
 
 function packages() {
@@ -260,6 +269,7 @@ function install() {
   say('7. Runner and Mac app');
   if (v['skip-install']) return note('skipped (--skip-install)');
   if (dry) return todo('runner/scripts/install-runner.sh, then app/install.sh');
+  if (!desktopSession()) throw new Fail("Nobody is logged in to this Mac's desktop, and macOS only starts the runner (a login agent) for someone who is. Log in, in person or with Screen Sharing, then run setup again.");
   const env = { ...process.env, THREADBEAR_NODE: process.execPath };
   const homeArgs = path.resolve(home) === DEFAULT_HOME ? [] : ['--home', home];
   runOrFail('Installing the runner', 'bash', [path.join(repo, 'runner', 'scripts', 'install-runner.sh'), ...homeArgs], { env });

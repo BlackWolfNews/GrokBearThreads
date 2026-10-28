@@ -7,8 +7,7 @@ along. More at [threadbear.mikecann.app](https://threadbear.mikecann.app).
 
 ## Setting it up
 
-You need a Mac with Apple silicon, Xcode's command line tools, Node 24 or
-newer, Claude Code or Codex (logged in), and a free
+You need a Mac with Apple silicon, Xcode 26 or newer, Node 24 or newer, Claude Code or Codex (logged in), and a free
 [Convex](https://convex.dev) account. Tailscale is optional.
 
 ```sh
