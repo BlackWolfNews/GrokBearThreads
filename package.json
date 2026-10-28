@@ -1,18 +1,32 @@
 {
   "name": "threadbear",
   "private": true,
-  "description": "Threadbear's Convex project: the live mirror the phone reads (docs/convex-backend.md). The runner is in runner/, the Mac app in app/.",
+  "description": "Threadbear's Convex project: the live mirror the phone and the website read (docs/convex-backend.md, docs/website.md). The runner is in runner/, the Mac app in app/, the website in web/.",
   "type": "module",
   "scripts": {
     "convex:typecheck": "tsc --noEmit -p convex",
     "convex:dev": "convex dev",
-    "convex:deploy": "convex deploy"
+    "convex:deploy": "convex deploy",
+    "web:dev": "vite --config web/vite.config.ts",
+    "web:build": "vite build --config web/vite.config.ts",
+    "web:typecheck": "tsc --noEmit -p web",
+    "web:deploy": "static-hosting deploy --dist web/dist --build-command 'npm run web:build'",
+    "web:sign-in": "swift web/scripts/sign-in.swift"
   },
   "dependencies": {
-    "convex": "1.48.0"
+    "@convex-dev/static-hosting": "0.2.1",
+    "convex": "1.48.0",
+    "react": "19.3.1",
+    "react-dom": "19.3.1",
+    "react-markdown": "10.1.0",
+    "remark-gfm": "4.0.1"
   },
   "devDependencies": {
+    "@types/node": "26.6.5",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "@vitejs/plugin-react": "6.1.2",
     "typescript": "7.0.2",
-    "@types/node": "26.6.5"
+    "vite": "8.3.5"
   }
 }
