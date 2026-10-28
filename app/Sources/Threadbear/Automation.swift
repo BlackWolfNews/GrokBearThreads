@@ -513,6 +513,8 @@ enum Automation {
             return "ok \(zoom.percent)"
         case "hover":
             return hover(c, app: app)
+        case "decide":
+            return decide(c, app: app)
         case "hints":
             ShortcutHints.shared.setShowing(c["on"] as? Bool ?? true)
             try? await Task.sleep(for: .milliseconds(100))
@@ -1276,3 +1278,49 @@ enum Automation {
     }
 }
 #endif
+
+extension Automation {
+    /// The open thread's card of asks (DecisionPager), changed as its
+    /// controls change it: `pick` (1-based, as the number keys), `text`
+    /// (his own words, or a note on a pick), `later`, `next`, `back`, `step`
+    /// (1-based, or 0 for the summary), `extra` (the summary's "Anything
+    /// else?"), `dismiss` (true is Esc, false the chip), `send`. Says where
+    /// it is after, as `dump` does.
+    @MainActor
+    static func decide(_ c: [String: Any], app: AppModel) -> String {
+        guard let thread = app.selectedThread else { return "error no thread open" }
+        guard Decisions.isOpen(thread) else { return "error the open thread has no card of asks to answer" }
+        var progress = app.decisionProgress(for: thread)
+        let count = thread.asks.count
+        if let dismiss = c["dismiss"] as? Bool { progress.dismissed = dismiss }
+        if let step = c["step"] as? Int { progress.step = step == 0 ? count : max(0, min(step - 1, count)) }
+        if progress.step < count {
+            let i = progress.step
+            if let pick = c["pick"] as? Int {
+                guard Decisions.choices(for: thread.asks[i]).indices.contains(pick - 1) else { return "error no choice \(pick)" }
+                var answer = progress.answers[i] ?? DecisionAnswer()
+                answer.choice = pick - 1
+                answer.later = false
+                progress.answers[i] = answer
+                progress.step += 1
+            } else if let text = c["text"] as? String {
+                var answer = progress.answers[i] ?? DecisionAnswer()
+                answer.text = text
+                answer.later = false
+                progress.answers[i] = answer
+            } else if c["later"] as? Bool == true {
+                progress.answers[i] = DecisionAnswer(later: true)
+                progress.step += 1
+            }
+        }
+        if c["next"] as? Bool == true { progress.step = min(progress.step + 1, count) }
+        if c["back"] as? Bool == true { progress.step = max(progress.step - 1, 0) }
+        app.decisions[thread.id] = progress
+        if let extra = c["extra"] as? String { app.drafts[thread.id, default: Draft()].text = extra }
+        if c["send"] as? Bool == true {
+            app.sendDecisions(thread: thread)
+            return "ok sent"
+        }
+        return "ok " + (AppDump.decisions(thread, app: app) ?? []).joined(separator: "\n")
+    }
+}

@@ -1250,18 +1250,26 @@ public enum ISO8601 {
 }
 
 /// One thing a finished turn needs Mike to do (docs/protocol.md, "Needs
-/// you"): the action, where he does it, and the words to send back.
+/// you"): the action, where he does it, and the words to send back. With
+/// options it's a decision: a line of why, the likely answers, and the
+/// agent's own pick (an index into options).
 public struct Ask: Sendable, Hashable, Codable {
     public var action: String
     public var where_: String?
     public var reply: String?
+    public var why: String?
+    public var options: [String]
+    public var suggested: Int?
     /// Ticked on the open card (only in a summary's `asks`).
     public var ticked: Bool
 
-    public init(action: String, where_: String? = nil, reply: String? = nil, ticked: Bool = false) {
+    public init(action: String, where_: String? = nil, reply: String? = nil, why: String? = nil, options: [String] = [], suggested: Int? = nil, ticked: Bool = false) {
         self.action = action
         self.where_ = where_
         self.reply = reply
+        self.why = why
+        self.options = options
+        self.suggested = suggested
         self.ticked = ticked
     }
 
@@ -1270,6 +1278,11 @@ public struct Ask: Sendable, Hashable, Codable {
         action = try c.decode(String.self, forKey: .action)
         where_ = (try? c.decodeIfPresent(String.self, forKey: .where_)) ?? nil
         reply = (try? c.decodeIfPresent(String.self, forKey: .reply)) ?? nil
+        why = (try? c.decodeIfPresent(String.self, forKey: .why)) ?? nil
+        let options = ((try? c.decodeIfPresent([String].self, forKey: .options)) ?? nil) ?? []
+        self.options = options
+        let pick = (try? c.decodeIfPresent(Int.self, forKey: .suggested)) ?? nil
+        suggested = pick.flatMap { options.indices.contains($0) ? $0 : nil }
         ticked = ((try? c.decodeIfPresent(Bool.self, forKey: .ticked)) ?? nil) ?? false
     }
 
@@ -1278,11 +1291,14 @@ public struct Ask: Sendable, Hashable, Codable {
         try c.encode(action, forKey: .action)
         try c.encodeIfPresent(where_, forKey: .where_)
         try c.encodeIfPresent(reply, forKey: .reply)
+        try c.encodeIfPresent(why, forKey: .why)
+        if !options.isEmpty { try c.encode(options, forKey: .options) }
+        try c.encodeIfPresent(suggested, forKey: .suggested)
         if ticked { try c.encode(true, forKey: .ticked) }
     }
 
     enum CodingKeys: String, CodingKey {
-        case action, reply, ticked
+        case action, reply, ticked, why, options, suggested
         case where_ = "where"
     }
 }

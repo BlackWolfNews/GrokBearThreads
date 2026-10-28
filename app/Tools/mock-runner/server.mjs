@@ -887,12 +887,21 @@ async function fakeTurn(threadId, text, images, turnId = 'turn_' + crypto.random
   const finalText = t.inProgress.get(itemId).text;
   t.inProgress.delete(itemId);
   persist(threadId, { type: 'assistant.text', itemId, text: finalText }, turnId);
-  finishTurn(threadId, turnId, started, interrupted ? 'interrupted' : 'completed');
+  // Say "decisions" for a turn that ends with a card of asks to step
+  // through (docs/protocol.md, "Needs you", Answering).
+  const said = /decisions/i.test(text) && !interrupted ? { needs: 'you', asks: DEMO_ASKS } : undefined;
+  finishTurn(threadId, turnId, started, interrupted ? 'interrupted' : 'completed', said);
 }
 
-function finishTurn(threadId, turnId, started, outcome) {
+const DEMO_ASKS = [
+  { action: 'Set the other 37 repos to collaborator-only pull requests?', why: "Anyone can open a PR on them today. Your own pushes and merges aren't affected.", options: ['Yes, all 37', 'Just the ones with Actions secrets', 'No, leave them'], suggested: 0 },
+  { action: 'Close issues to collaborators too, with private vulnerability reporting on?', why: 'Turns off public issues on all 41 repos. People could still report security problems privately.', options: ['Yes, close them', 'Leave issues open'], suggested: 0 },
+  { action: 'Sign in to GitHub in Chrome so I can check the settings took', where: 'github.com › Settings', options: ['Done', 'Can you do it?'] },
+];
+
+function finishTurn(threadId, turnId, started, outcome, said) {
   const t = threads.get(threadId);
-  persist(threadId, { type: 'turn.completed', turnId, outcome, durationMs: Date.now() - started, costUsd: 0.0123 }, turnId);
+  persist(threadId, { type: 'turn.completed', turnId, outcome, durationMs: Date.now() - started, costUsd: 0.0123, ...(said ?? {}) }, turnId);
   t.interrupt = undefined;
   t.summary.needsYou = true;
   setStatus(threadId, 'idle');
@@ -1136,6 +1145,13 @@ function persist(threadId, fields, turnId) {
   if (['user.message', 'turn.started', 'turn.completed'].includes(fields.type)) s.lastActivityAt = event.ts;
   s.updatedAt = event.ts;
   if (fields.type === 'assistant.text') s.preview = fields.text.replace(/\s+/g, ' ').slice(0, 140);
+  // Like the real runner's Needs you: a new turn closes the open card, and
+  // a completed one that says it needs Mike opens the next.
+  if (fields.type === 'turn.started') { delete s.needs; delete s.asks; delete s.asksSeq; }
+  if (fields.type === 'turn.completed' && fields.needs) {
+    s.needs = fields.needs;
+    if (fields.asks) { s.asks = fields.asks; s.asksSeq = event.seq; }
+  }
   sendEvent(threadId, event);
   broadcastSummary(threadId);
   return event;

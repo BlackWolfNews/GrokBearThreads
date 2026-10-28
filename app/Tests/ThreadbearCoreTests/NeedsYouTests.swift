@@ -16,30 +16,18 @@ final class NeedsYouTests: XCTestCase {
         return card
     }
 
-    func testACardOpensUnderTheFooterTicksAndClosesOnTheNextTurn() {
-        var model = TranscriptModel(events: [
+    /// The open card is answered in the composer's place (DecisionPager),
+    /// so the transcript keeps only the footer's needs, with no card row.
+    func testATurnThatNeedsYouHasNoCardRowAndItsFooterSaysSo() {
+        let model = TranscriptModel(events: [
             E.event(1, "turn.started", ["turnId": "t1"], turn: "t1"),
             E.text(2, "m1", "Built it."),
             done(3, turn: "t1", needs: "you", asks: [["action": "Paste the key", "where": "Settings", "reply": "done"], ["action": "Pick a budget"]]),
+            E.event(4, "asks.ticked", ["asksSeq": 3, "ticked": [0]], turn: nil),
         ])
-        XCTAssertEqual(model.rows.map(\.id).suffix(2), ["f:t1", "ak:3"])
-        XCTAssertEqual(card(model, "ak:3"), AsksCard(seq: 3, asks: [Ask(action: "Paste the key", where_: "Settings", reply: "done"), Ask(action: "Pick a budget")]))
-
-        _ = model.apply([E.event(4, "asks.ticked", ["asksSeq": 3, "ticked": [0]], turn: nil)])
-        XCTAssertEqual(card(model, "ak:3")?.ticked, [0])
-        XCTAssertEqual(card(model, "ak:3")?.isOpen, true)
-
-        _ = model.apply([
-            E.event(5, "turn.started", ["turnId": "t2"], turn: "t2"),
-            E.text(6, "m2", "Done."),
-            done(7, turn: "t2", needs: "nothing"),
-        ])
-        let closed = card(model, "ak:3")
-        XCTAssertEqual(closed?.isOpen, false, "any later turn closes it")
-        XCTAssertEqual(closed?.ticked, [0], "and it keeps its ticks")
-        XCTAssertNil(model.row(id: "ak:7"), "a turn that needs nothing has no card")
-        guard case .footer(let footer)? = model.row(id: "f:t2")?.content else { return XCTFail() }
-        XCTAssertEqual(footer.needs, "nothing")
+        XCTAssertFalse(model.rows.contains { $0.kind == .asks })
+        guard case .footer(let footer)? = model.row(id: "f:t1")?.content else { return XCTFail() }
+        XCTAssertEqual(footer.needs, "you")
     }
 
     func testOnlyACompletedTurnThatNeedsYouWithAsksGetsACard() {

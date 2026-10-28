@@ -80,6 +80,9 @@ final class AppModel {
     var focusComposer = 0
     var now = Date()
     var drafts: [String: Draft] = [:]
+    /// Where Mike is on each thread's open card of asks (DecisionPager),
+    /// by thread id. One for an older card counts as none.
+    var decisions: [String: DecisionProgress] = [:]
     @ObservationIgnored var reviewWindows: [String: ReviewWindowController] = [:]
     /// The review open in the dock's Review panel (WindowDock.review), if
     /// any. A review popped out into its own window leaves it.
@@ -742,6 +745,27 @@ final class AppModel {
     /// draft). The box empties straight away, but the text and images go
     /// back in if the runner doesn't take them; while disconnected nothing
     /// is touched at all.
+    /// Where Mike is on the thread's open card, fresh for a card he
+    /// hasn't started.
+    func decisionProgress(for thread: ThreadSummary) -> DecisionProgress {
+        guard let seq = thread.asksSeq else { return DecisionProgress(asksSeq: -1) }
+        if let progress = decisions[thread.id], progress.asksSeq == seq { return progress }
+        return DecisionProgress(asksSeq: seq)
+    }
+
+    /// Sends the open card's answers as one message, with the draft (the
+    /// summary's "Anything else?") after them and its images, through the
+    /// usual send so a failure puts it all back in the box.
+    func sendDecisions(thread: ThreadSummary) {
+        let progress = decisionProgress(for: thread)
+        let draft = drafts[thread.id] ?? Draft()
+        let text = Decisions.message(asks: thread.asks, answers: progress.answers, extra: draft.text)
+        guard !text.isEmpty else { return }
+        drafts[thread.id] = Draft(text: text, images: draft.images)
+        decisions[thread.id] = nil
+        send(threadId: thread.id)
+    }
+
     func send(threadId: String?) {
         let key = threadId ?? "new"
         let draft = drafts[key] ?? Draft()

@@ -525,7 +525,10 @@ export type Envelope = {
 
 // What a finished turn needs from Mike (docs/protocol.md, "Needs you").
 export type NeedsWho = 'you' | 'nothing';
-export type Ask = { action: string; where?: string; reply?: string };
+// One thing a turn needs from Mike (docs/protocol.md, "Needs you"). With
+// options it's a decision the app steps him through, the agent's pick
+// (suggested, an index into options) marked; he can always write his own.
+export type Ask = { action: string; where?: string; reply?: string; why?: string; options?: string[]; suggested?: number };
 export type OpenAsk = Ask & { ticked?: true };
 
 export type PersistedEvent = Envelope & EventBody;

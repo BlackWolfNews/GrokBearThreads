@@ -20,6 +20,17 @@ test('end_turn input: nothing, you with asks, and junk falls back', () => {
   assert.equal(needsFromTool({ needs: 'you', asks: Array.from({ length: 20 }, (_, i) => ({ action: `a${i}` })) })!.asks!.length, 10);
 });
 
+test('end_turn input: a decision keeps its why, options and a valid pick', () => {
+  assert.deepEqual(
+    needsFromTool({ needs: 'you', asks: [{ action: 'Merge #52?', why: ' Preview is green. ', options: ['Merge', ' ', 'Test locally', 3], suggested: 1 }] }),
+    { needs: 'you', asks: [{ action: 'Merge #52?', why: 'Preview is green.', options: ['Merge', 'Test locally'], suggested: 1 }] },
+  );
+  // A pick that isn't one of the options is dropped, and so is one with no options.
+  assert.deepEqual(needsFromTool({ needs: 'you', asks: [{ action: 'a', options: ['x'], suggested: 4 }] })!.asks, [{ action: 'a', options: ['x'] }]);
+  assert.deepEqual(needsFromTool({ needs: 'you', asks: [{ action: 'a', options: [], suggested: 0 }] })!.asks, [{ action: 'a' }]);
+  assert.equal(needsFromTool({ needs: 'you', asks: [{ action: 'a', options: Array.from({ length: 9 }, (_, i) => `o${i}`) }] })!.asks![0].options!.length, 6);
+});
+
 test('the section: a bold heading then a numbered list, with a reply phrase', () => {
   const text = [
     'The Settings window is in.',

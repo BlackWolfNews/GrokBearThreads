@@ -640,12 +640,10 @@ public struct TranscriptModel: Sendable {
                     }
                     openAsksRow = nil
                 }
-                if completion.outcome == .completed, completion.needs == "you", !completion.asks.isEmpty {
-                    let cardId = "ak:\(seq)"
-                    append(TranscriptRow(id: cardId, seq: seq, turnId: turnId ?? completion.turnId, content: .asks(AsksCard(seq: seq, asks: completion.asks))))
-                    asksRowForSeq[seq] = cardId
-                    openAsksRow = cardId
-                }
+                // No new card row since 28 Oct 2026: the open card is
+                // answered in the composer's place (DecisionPager), and the
+                // answer goes out as a message with each question in it, so
+                // a checklist here only repeated it.
             }
 
         case .asksTicked(let asksSeq, let ticked):

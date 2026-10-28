@@ -155,6 +155,9 @@ struct AppDump: Encodable {
     /// Its action chips (ActionChips).
     var actions: [ActionInfo] = []
     var composer: Composer
+    /// The open card of asks being stepped through in the composer's
+    /// place (DecisionPager), as lines; nil when there's none.
+    var decisions: [String]? = nil
     var transcript: Transcript?
     /// The usage popover's content as lines, and whether it's open.
     var usage: Usage? = nil
@@ -310,6 +313,7 @@ struct AppDump: Encodable {
                 thread.actions.map { ActionInfo(id: $0.id, title: $0.title, kind: $0.kind.rawValue, running: app.isRunning(action: $0, in: thread.id)) }
             } ?? [],
             composer: composer(app, key: key),
+            decisions: app.selectedThread.flatMap { decisions($0, app: app) },
             transcript: transcript,
             usage: Usage(shown: app.usagePopoverShown, lines: usageLines(app)),
             project: app.openProject.map { project in
@@ -402,6 +406,23 @@ struct AppDump: Encodable {
                 if CliText.isUpdating(cli), let text = CliText.bannerText(cli) { line += ": " + text }
                 lines.append(line)
             }
+        }
+        return lines
+    }
+
+    /// "decision 2 of 3 (shown)", then each ask with its answer, ">" on the
+    /// one showing and "*" on the agent's pick.
+    @MainActor
+    static func decisions(_ thread: ThreadSummary, app: AppModel) -> [String]? {
+        guard Decisions.isOpen(thread) else { return nil }
+        let progress = app.decisionProgress(for: thread)
+        let asks = thread.asks
+        let at = progress.step >= asks.count ? "the summary" : "decision \(progress.step + 1) of \(asks.count)"
+        var lines = ["\(at) (\(progress.dismissed ? "put away" : "shown"))"]
+        for (i, ask) in asks.enumerated() {
+            let choices = Decisions.choices(for: ask).enumerated().map { $0.offset == ask.suggested ? "*\($0.element)" : $0.element }
+            let answer = Decisions.answerText(Decisions.answer(i, asks: asks, answers: progress.answers), ask: ask) ?? "no answer"
+            lines.append("\(i == progress.step ? ">" : " ") \(i + 1). \(ask.action) [\(choices.joined(separator: " | "))] -> \(answer)")
         }
         return lines
     }
@@ -505,6 +526,7 @@ struct AppDump: Encodable {
             lines.append("usage popover:")
             lines += usage.lines.map { "  " + $0 }
         }
+        if let decisions { lines.append("decisions: " + decisions[0]); lines += decisions.dropFirst().map { "  " + $0 } }
         lines.append("composer (\(composer.draft)): \"\(composer.text)\"" + (composer.images > 0 ? " and \(composer.images) image(s)" : ""))
         let on = composer.pool.map { "pool \($0) (now \(composer.account))" } ?? (pools.isEmpty ? composer.account : "\(composer.account), pinned")
         lines.append("  \(composer.draft == "new" ? "starts" : "runs") in \(composer.cwd) on \(on), model \(composer.model), "

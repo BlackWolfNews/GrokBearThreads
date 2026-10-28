@@ -1009,9 +1009,12 @@ A turn the agent finished can say whether Mike has to do anything, so
 
 - **The tool.** Every thread's own agent (not its sub-agents) has
   `end_turn` in the `threadbear` tools: `{ needs: "you" | "nothing",
-  asks?: { action, where?, reply? }[] }`. `action` is one concrete thing
-  to do, `where` the app, site, file or person, and `reply` the words the
-  agent wants back ("done"). The agent calls it last, after its final
+  asks?: { action, where?, reply?, why?, options?, suggested? }[] }`.
+  `action` is one concrete thing to do or a question, `where` the app,
+  site, file or person, `reply` the words the agent wants back ("done"),
+  `why` a line of context for when Mike has forgotten the details,
+  `options` up to six likely answers and `suggested` the index of the
+  agent's own pick (dropped unless it points at an option). The agent calls it last, after its final
   message. The tool's description says when, so a resumed session that
   kept its old system prompt still hears it.
 - **Archiving itself.** `end_turn` also takes `archive?: true`. With
@@ -1039,9 +1042,16 @@ A turn the agent finished can say whether Mike has to do anything, so
   and older cards keep the ticks their last `asks.ticked` gave them.
   Ticking never sends anything: a reply is Mike's to write, and one reply
   often answers several asks.
+- **Answering.** The app steps Mike through the open card's asks one at a
+  time in place of the composer: each ask's options (or its `reply`), plus
+  a box to write his own, and Later to leave it. At the end it sends one
+  ordinary message, each ask's question then its answer, numbered in the
+  card's order, with anything else he adds after them. The runner sees a
+  normal `threads.send`; nothing about the card changes on its side, and
+  the next turn closes it as usual.
 
 ```ts
-type Ask = { action: string; where?: string; reply?: string }
+type Ask = { action: string; where?: string; reply?: string; why?: string; options?: string[]; suggested?: number }
 type OpenAsk = Ask & { ticked?: true }
 ```
 

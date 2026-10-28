@@ -25,11 +25,28 @@ struct ComposerView: View {
             set: { app.drafts[draftKey] = $0 }
         )
         let canSend = ComposerChips.canSend(text: draft.wrappedValue.text, imageCount: draft.wrappedValue.images.count)
+        // The open card of asks, stepped through in the composer's place
+        // until Mike puts it away (DecisionPager).
+        let deciding = thread.flatMap { Decisions.isOpen($0) ? $0 : nil }
+        let progress = deciding.map { thread in
+            Binding<DecisionProgress>(
+                get: { app.decisionProgress(for: thread) },
+                set: { app.decisions[thread.id] = $0 }
+            )
+        }
         VStack(alignment: .leading, spacing: zoomed(6)) {
         if let thread, let line = ScheduleLine.line(for: thread.id, in: app.schedules, now: app.now) {
             ScheduledLine(line: line)
         }
+        if let deciding, let progress, !progress.wrappedValue.dismissed {
+            DecisionPager(thread: deciding, progress: progress, extra: draft.text)
+                .padding(Self.padding)
+                .background { card }
+        } else {
         VStack(alignment: .leading, spacing: zoomed(10)) {
+            if let deciding, let progress {
+                DecisionsChip(count: deciding.asks.count) { progress.wrappedValue.dismissed = false }
+            }
             // The folder's actions (patches), above the text as in the design.
             if let thread, !thread.actions.isEmpty {
                 ActionChips(thread: thread)
@@ -58,6 +75,7 @@ struct ComposerView: View {
         }
         .padding(Self.padding)
         .background { card }
+        }
         }
         // The transcript's reading column: 780 wide at most at 100%,
         // centred, with the same side insets once the window is narrower.
