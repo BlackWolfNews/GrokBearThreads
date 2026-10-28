@@ -48,10 +48,6 @@
 html { -webkit-text-size-adjust: 100%; scroll-behavior: smooth; scroll-padding-top: var(--s-900); }
 body {
   font-family: var(--sans); color: var(--ink); background-color: var(--page);
-  /* A faint quilt: every square sewn to its neighbours with a running stitch. Flat, no
-     gradient (B4), and light enough that it reads as paper texture behind the cards. */
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='96' height='96' viewBox='0 0 96 96'%3E%3Crect x='4' y='4' width='88' height='88' rx='8' fill='none' stroke='%23e5dccb' stroke-width='1.5' stroke-dasharray='5 4'/%3E%3C/svg%3E");
-  background-size: 96px 96px;
   -webkit-font-smoothing: antialiased; min-height: 100vh; min-height: 100dvh;
   position: relative; display: flex; flex-direction: column;
 }
@@ -64,42 +60,29 @@ img { max-width: 100%; height: auto; }
 .icon { width: 1em; height: 1em; flex: none; display: block; }
 code { font-family: var(--mono); font-size: .875em; }
 
-/* ---------- sewn-on patches ---------- */
-/* Small fabric patches sewn onto the page as if it had been mended (layout.html has the
-   fabrics). Each sits over the edge or corner of something, a little turned, and stays still.
-   Pale fabrics and a soft shadow keep them quiet. */
-.fabrics { position: absolute; width: 0; height: 0; overflow: hidden; }
-.stitch { fill: none; stroke: #fff; stroke-width: 3; stroke-dasharray: 6 5; stroke-linecap: round; }
-.cross { fill: none; stroke: #fff; stroke-width: 3.5; stroke-linecap: round; }
-.sewn {
-  position: absolute; z-index: 2; width: 56px; height: 56px; pointer-events: none;
-  filter: drop-shadow(0 2px 3px rgba(60, 45, 20, .1));
-}
-/* Over the bottom left corner of the Mac window. */
-.sewn-hero { left: calc(var(--s-300) * -1); bottom: var(--s-400); width: 64px; height: 64px; transform: rotate(-8deg); }
-/* Hanging off the top right of Threadbear's own card. */
-.problem-card.after { position: relative; }
-.sewn-heart { top: calc(var(--s-300) * -1); right: var(--s-400); transform: rotate(10deg); }
-/* Folded over the backend card's top left corner, so the card's round corner trims it. */
-.feature { position: relative; }
-.sewn-fold { top: calc(var(--s-300) * -1); left: calc(var(--s-300) * -1); width: 72px; height: 72px; transform: rotate(14deg); }
-/* On the last step's bottom right edge. */
-.sewn-step { right: calc(var(--s-200) * -1); bottom: calc(var(--s-200) * -1); width: 48px; height: 48px; }
-/* Over the quote's top left corner. */
-.quote { position: relative; }
-.sewn-quote { top: calc(var(--s-300) * -1); left: calc(var(--s-300) * -1); transform: rotate(-6deg); }
-/* Under the corner of the FAQ grid. */
-.faq { position: relative; }
-.sewn-faq { right: var(--s-50); bottom: calc(var(--s-300) * -1); width: 48px; height: 48px; transform: rotate(7deg); }
-/* The privacy card's top right. */
-.legal { position: relative; }
-.sewn-legal { top: calc(var(--s-300) * -1); right: var(--s-500); width: 48px; height: 48px; transform: rotate(-9deg); }
-@media (max-width: 860px) {
-  .sewn { width: 40px; height: 40px; }
-  .sewn-hero { left: calc(var(--s-75) * -1); bottom: var(--s-300); }
-  .sewn-quote, .sewn-fold { top: calc(var(--s-200) * -1); left: calc(var(--s-75) * -1); }
-  .sewn-step { right: calc(var(--s-75) * -1); }
-}
+/* ---------- background patches ---------- */
+/* Faint, colourless patch silhouettes behind everything (layout.html), scattered down the
+   page's edges so they show in the margins and between sections. The cloth is the ink colour
+   at a few percent (layout.html); the stitch is drawn in the page colour, so it reads as a gap in the cloth. */
+.patch-shapes { position: absolute; width: 0; height: 0; overflow: hidden; }
+.bg-patches { position: absolute; inset: 0; z-index: -1; overflow: hidden; pointer-events: none; }
+.bg-patch { position: absolute; display: block; opacity: .05; }
+.bp1 { top: 3%; left: calc(4% - 60px); width: 120px; height: 120px; transform: rotate(-8deg); }
+.bp2 { top: 7%; left: calc(88% - 48px); width: 96px; height: 96px; transform: rotate(10deg); }
+.bp3 { top: 16%; left: calc(93% - 40px); width: 80px; height: 80px; transform: rotate(0deg); }
+.bp4 { top: 21%; left: calc(2% - 52px); width: 104px; height: 104px; transform: rotate(6deg); }
+.bp5 { top: 30%; left: calc(90% - 64px); width: 128px; height: 128px; transform: rotate(-12deg); }
+.bp6 { top: 38%; left: calc(5% - 44px); width: 88px; height: 88px; transform: rotate(12deg); }
+.bp7 { top: 46%; left: calc(94% - 36px); width: 72px; height: 72px; transform: rotate(-6deg); }
+.bp8 { top: 53%; left: calc(1% - 56px); width: 112px; height: 112px; transform: rotate(0deg); }
+.bp9 { top: 60%; left: calc(91% - 55px); width: 110px; height: 110px; transform: rotate(-4deg); }
+.bp10 { top: 68%; left: calc(3% - 60px); width: 120px; height: 120px; transform: rotate(9deg); }
+.bp11 { top: 75%; left: calc(92% - 46px); width: 92px; height: 92px; transform: rotate(-10deg); }
+.bp12 { top: 83%; left: calc(6% - 42px); width: 84px; height: 84px; transform: rotate(7deg); }
+.bp13 { top: 90%; left: calc(89% - 50px); width: 100px; height: 100px; transform: rotate(0deg); }
+.bp14 { top: 96%; left: calc(46% - 36px); width: 72px; height: 72px; transform: rotate(-14deg); }
+/* Smaller on a phone, where there's hardly any margin for them to sit in. */
+@media (max-width: 860px) { .bg-patch { scale: .6; } }
 
 /* ---------- skip link ---------- */
 .skip {
