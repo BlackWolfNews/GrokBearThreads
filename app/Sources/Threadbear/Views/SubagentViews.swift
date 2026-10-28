@@ -15,7 +15,7 @@ struct SubagentList: View {
         let selected = app.subagentSelection?.threadId == thread.id ? app.subagentSelection?.subagentId : nil
         let rows = SubagentRows.visible(thread, threadSelected: app.selection == thread.id, selectedSubagent: selected, now: app.now)
         ForEach(rows.map { SubagentRowID(section: section, threadId: thread.id, row: $0) }) { item in
-            SubagentRowView(threadId: thread.id, row: item.row)
+            SubagentRowView(threadId: thread.id, row: item.row, isFirst: item.row.id == rows.first?.id, isLast: item.row.id == rows.last?.id)
                 .transition(Juice.row)
         }
     }
@@ -33,6 +33,10 @@ struct SubagentRowView: View {
     @Environment(\.controlActiveState) private var activeState
     let threadId: String
     let row: SubagentRow
+    /// The first row's tree line reaches up to the thread's tile; the last
+    /// one's stops at its elbow rather than running on.
+    var isFirst = true
+    var isLast = true
     @State private var hovering = false
     @State private var pressed = false
     @Environment(\.sidebarRowSpace) private var rowSpace
@@ -40,6 +44,9 @@ struct SubagentRowView: View {
     /// Each level in by about the width of the glyph and its gap, so a
     /// child's glyph sits under its parent's title.
     static let indent: CGFloat = 18
+    /// Where the tree line runs down: the middle of the thread's 30pt
+    /// project tile, so the rows hang off it.
+    static var trunk: CGFloat { SidebarMetrics.leading + zoomed(15) }
 
     private var subagent: Subagent { row.subagent }
     private var isSelected: Bool { app.subagentSelection == SubagentRef(threadId: threadId, subagentId: subagent.id) }
@@ -69,9 +76,19 @@ struct SubagentRowView: View {
                     .lineLimit(1)
             }
         }
-        // In from the thread's title, so the rows read as its own.
-        .padding(EdgeInsets(top: 5, leading: SidebarMetrics.leading + 8 + Self.indent * CGFloat(row.depth),
+        // Right of the tree line, so the glyph sits under the thread's
+        // title and the rows read as its own.
+        .padding(EdgeInsets(top: 5, leading: Self.trunk + zoomed(9) + Self.indent * CGFloat(row.depth),
                             bottom: 6, trailing: SidebarMetrics.trailing))
+        // Mike couldn't tell these were the thread's sub-threads from the
+        // indent alone, so a faint line comes down from the thread's tile
+        // with an elbow into each glyph, like a file tree.
+        .background(alignment: .topLeading) {
+            SubagentGuide(trunk: Self.trunk, elbowEnd: Self.trunk + zoomed(6) + Self.indent * CGFloat(row.depth),
+                          elbowY: 5 + zoomed(8), overhang: isFirst ? zoomed(6) : 0, isLast: isLast)
+                .stroke(Color.primary.opacity(0.16), style: StrokeStyle(lineWidth: 1, lineCap: .round, lineJoin: .round))
+                .allowsHitTesting(false)
+        }
         // The selection highlight slides here from the thread's row.
         .rowHighlight(selected: isSelected, hovering: hovering, selectedColor: Color.primary.opacity(activeState == .key ? 0.08 : 0.06), space: rowSpace)
         .contentShape(RoundedRectangle(cornerRadius: SidebarMetrics.corner))
@@ -122,6 +139,33 @@ struct SubagentRowView: View {
         if let type = subagent.agentType, !type.isEmpty { parts.insert(type, at: 0) }
         if let uses = subagent.toolUses, uses > 0 { parts.append(uses == 1 ? "1 tool call" : "\(uses) tool calls") }
         return parts.joined(separator: " · ")
+    }
+}
+
+/// A sub-agent row's piece of the tree line: down the trunk (from a little
+/// above the row, to meet the tile in the thread's row) and across to the
+/// glyph. The last row's trunk stops at its elbow, rounded into it.
+private struct SubagentGuide: Shape {
+    let trunk: CGFloat
+    let elbowEnd: CGFloat
+    let elbowY: CGFloat
+    let overhang: CGFloat
+    let isLast: Bool
+
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+        let x = trunk + 0.5
+        path.move(to: CGPoint(x: x, y: -overhang))
+        if isLast {
+            let radius: CGFloat = 4
+            path.addLine(to: CGPoint(x: x, y: elbowY - radius))
+            path.addQuadCurve(to: CGPoint(x: x + radius, y: elbowY + 0.5), control: CGPoint(x: x, y: elbowY + 0.5))
+        } else {
+            path.addLine(to: CGPoint(x: x, y: rect.maxY))
+            path.move(to: CGPoint(x: x, y: elbowY + 0.5))
+        }
+        path.addLine(to: CGPoint(x: elbowEnd, y: elbowY + 0.5))
+        return path
     }
 }
 
