@@ -102,6 +102,87 @@ public struct ProjectRef: Codable, Sendable, Hashable {
     }
 }
 
+/// A project's icon as the Mac shows it (docs/protocol.md, "Icons"): its
+/// picture, here a URL into the backend's file storage (backend API 5),
+/// else an SF Symbol. Neither: the title's first letter.
+public struct PhoneProjectIcon: Codable, Sendable, Hashable {
+    public var symbol: String?
+    public var url: URL?
+    /// "mike", "agent" or "librarian": who chose it.
+    public var by: String?
+
+    public init(symbol: String? = nil, url: URL? = nil, by: String? = nil) {
+        self.symbol = symbol
+        self.url = url
+        self.by = by
+    }
+
+    private enum Keys: String, CodingKey { case symbol, url, by }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: Keys.self)
+        symbol = (try? c.decodeIfPresent(String.self, forKey: .symbol)).flatMap { $0 }.flatMap { $0.isEmpty ? nil : $0 }
+        // A URL that doesn't parse is no picture, not a broken row.
+        url = (try? c.decodeIfPresent(String.self, forKey: .url)).flatMap { $0 }.flatMap(URL.init(string:)).flatMap { $0.scheme == nil ? nil : $0 }
+        by = (try? c.decodeIfPresent(String.self, forKey: .by)).flatMap { $0 }
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: Keys.self)
+        try c.encodeIfPresent(symbol, forKey: .symbol)
+        try c.encodeIfPresent(url?.absoluteString, forKey: .url)
+        try c.encodeIfPresent(by, forKey: .by)
+    }
+}
+
+/// A row of phone:projects: what a thread's ProjectRef points at, as far as
+/// the rows need (the icon, the title). The rest of the runner's Project is
+/// in the row too but not read yet.
+public struct PhoneProject: Codable, Sendable, Hashable, Identifiable {
+    public var id: String
+    public var runnerId: String?
+    public var title: String
+    public var archived: Bool?
+    public var icon: PhoneProjectIcon?
+
+    public init(id: String, runnerId: String? = nil, title: String, archived: Bool? = nil, icon: PhoneProjectIcon? = nil) {
+        self.id = id
+        self.runnerId = runnerId
+        self.title = title
+        self.archived = archived
+        self.icon = icon
+    }
+
+    private enum Keys: String, CodingKey { case id, runnerId, title, archived, icon }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: Keys.self)
+        id = try c.decode(String.self, forKey: .id)
+        runnerId = (try? c.decodeIfPresent(String.self, forKey: .runnerId)).flatMap { $0 }
+        title = (try? c.decodeIfPresent(String.self, forKey: .title)).flatMap { $0 } ?? ""
+        archived = (try? c.decodeIfPresent(Bool.self, forKey: .archived)).flatMap { $0 }
+        icon = (try? c.decodeIfPresent(PhoneProjectIcon.self, forKey: .icon)).flatMap { $0 }
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: Keys.self)
+        try c.encode(id, forKey: .id)
+        try c.encodeIfPresent(runnerId, forKey: .runnerId)
+        try c.encode(title, forKey: .title)
+        try c.encodeIfPresent(archived, forKey: .archived)
+        try c.encodeIfPresent(icon, forKey: .icon)
+    }
+}
+
+/// "C" for "Convex docs", "7" for "7 day plan", "?" for a title with
+/// neither (all emoji, or empty). The Mac's ProjectMark.letter.
+public enum ProjectMark {
+    public static func letter(_ title: String) -> String {
+        guard let first = title.first(where: { $0.isLetter || $0.isNumber }) else { return "?" }
+        return String(first).uppercased()
+    }
+}
+
 public struct PhoneThread: Codable, Sendable, Hashable, Identifiable {
     public var id: String { threadId }
     public var threadId: String
@@ -343,12 +424,15 @@ public enum BackendCompatibility {
     /// The newest backend API this app knows. From 2 a thread's messages come
     /// from phone:messages (every message and tool line, paged in Convex);
     /// an older backend still gets phone:thread and the runner's paging.
-    public static let currentAPIVersion = 4
+    public static let currentAPIVersion = 5
     public static let messagePagesAPIVersion = 2
     /// From 3 each phone chooses when it's notified (phone:setNotifications).
     public static let notificationSettingAPIVersion = 3
     /// From 4 registerDevice takes the phone's relay key.
     public static let pushKeyAPIVersion = 4
+    /// From 5 phone:projects rows carry each project's icon (a symbol, and
+    /// a picture as a URL). Older backends answer the same query without it.
+    public static let projectIconsAPIVersion = 5
 
     /// The line to show, or nil when the backend is fine.
     public static func problem(_ identity: PhoneIdentity) -> String? {

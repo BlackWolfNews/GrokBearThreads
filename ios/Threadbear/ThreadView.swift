@@ -34,7 +34,21 @@ struct ThreadView: View {
         }
         .navigationTitle(detail?.thread.title ?? "")
         .navigationBarTitleDisplayMode(.inline)
-        .toolbar { if let thread = detail?.thread { menu(thread) } }
+        .toolbar {
+            if let thread = detail?.thread {
+                // The Mac's header: the project's icon (or a folder) before the title.
+                ToolbarItem(placement: .principal) {
+                    HStack(spacing: 6) {
+                        ProjectIconView(project: thread.projects?.first.flatMap { model.project($0.id) }, title: thread.projects?.first?.title, size: 20)
+                        Text(thread.title.isEmpty ? "Untitled" : thread.title)
+                            .font(.headline)
+                            .lineLimit(1)
+                    }
+                    .accessibilityElement(children: .combine)
+                }
+                menu(thread)
+            }
+        }
         .hibernateDialog(for: $hibernateTarget)
         .task(id: threadId) { await follow() }
         .task(id: "\(threadId):\(limit):\(model.hasMessagePages)") { await followMessages() }
@@ -268,7 +282,7 @@ struct MessageView: View {
                     .textSelection(.enabled)
                     .padding(.horizontal, 14)
                     .padding(.vertical, 10)
-                    .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                    .background(BubbleBackground().clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous)))
                 if let origin = originText {
                     Text(origin).font(.caption2).foregroundStyle(.tertiary)
                 }

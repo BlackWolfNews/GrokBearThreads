@@ -16,6 +16,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { ConvexClient } from 'convex/browser';
+import { phonePicture } from './project-icons.ts';
 import { makeFunctionReference } from 'convex/server';
 import type { Clock, TimerHandle } from './clock.ts';
 import type { Logger } from './log.ts';
@@ -59,7 +60,11 @@ export type SyncConfig = {
 // lower one means its backend hasn't been deployed since this runner was:
 // said in runner.status, tb status and the log rather than stopping, since
 // the runner only adds to what it sends while the number stays the same.
-export const BACKEND_API_VERSION = 4;
+export const BACKEND_API_VERSION = 5;
+// From this backend version a project's picture goes up to file storage
+// (sync:iconUploadUrl, sync:setProjectIcon); an older backend gets the
+// project without it and the phone shows its symbol or first letter.
+export const ICONS_API_VERSION = 5;
 
 export type SyncStatus = {
   state: 'off' | 'ok' | 'error';
@@ -125,6 +130,9 @@ export type Post = (kind: 'mutation' | 'query', fn: string, args: Record<string,
 // subscription fails. Returns the unsubscribe. Tests pass a fake.
 export type Subscribe = (fn: string, args: Record<string, unknown>, onUpdate: (value: unknown) => void, onError: (error: Error) => void) => () => void;
 export type Subscriber = { subscribe: Subscribe; close(): Promise<void> | void };
+// Puts a picture's bytes at the upload URL the backend gave (file storage)
+// and returns its storage id. Tests pass a fake.
+export type Upload = (url: string, bytes: Uint8Array, mediaType: string) => Promise<string>;
 
 // A command the phone queued (convex/schema.ts `commands`).
 export type Command = { commandId: string; kind: string; threadId?: string; args: Record<string, unknown>; createdAt: number };
@@ -170,6 +178,7 @@ export type SyncDeps = {
   log: Logger;
   post?: Post;
   subscriber?: Subscriber;
+  upload?: Upload;
 };
 
 // POST /api/mutation or /api/query on a Convex deployment, the plain HTTP
@@ -186,6 +195,17 @@ export function convexPoster(url: string, fetchFn: typeof fetch = fetch): Post {
     const body = (await res.json().catch(() => undefined)) as { status?: string; value?: unknown; errorMessage?: string } | undefined;
     if (!res.ok || !body || body.status !== 'success') throw new Error(body?.errorMessage ?? `HTTP ${res.status}`);
     return body.value;
+  };
+}
+
+// File storage's upload URL takes a plain POST of the bytes and answers
+// `{ storageId }`.
+export function convexUploader(fetchFn: typeof fetch = fetch): Upload {
+  return async (url, bytes, mediaType) => {
+    const res = await fetchFn(url, { method: 'POST', headers: { 'Content-Type': mediaType }, body: bytes, signal: AbortSignal.timeout(POST_TIMEOUT_MS) });
+    const body = (await res.json().catch(() => undefined)) as { storageId?: unknown } | undefined;
+    if (!res.ok || typeof body?.storageId !== 'string') throw new Error(`icon upload failed: HTTP ${res.status}`);
+    return body.storageId;
   };
 }
 
@@ -332,7 +352,17 @@ export function toProjectDoc(p: Project) {
     updatedAt: p.updatedAt,
     threadCount: p.threadCount,
     ...(p.lastActivityAt ? { lastActivityAt: p.lastActivityAt } : {}),
+    ...(p.icon ? { icon: { ...(p.icon.symbol ? { symbol: p.icon.symbol } : {}), ...(p.icon.image ? { picture: pictureName(p.icon.image.path) } : {}), by: p.icon.by } } : {}),
   };
+}
+
+// What a project's picture is called in the mirror: the runner's copy's
+// file name without its extension (`<projectId>-<hash>`), so a changed
+// picture is a new name and the same one is never sent twice.
+export function pictureName(iconPath: string): string {
+  const base = path.basename(iconPath);
+  const dot = base.lastIndexOf('.');
+  return dot > 0 ? base.slice(0, dot) : base;
 }
 
 export function toScheduleDoc(s: Schedule) {
@@ -375,6 +405,7 @@ type ListName = 'projects' | 'schedules' | 'accounts';
 export class ConvexSync {
   private deps: SyncDeps;
   private post: Post;
+  private upload: Upload;
   private subscriber?: Subscriber;
   private runnerId: string;
   private name: string;
@@ -389,6 +420,11 @@ export class ConvexSync {
   private earliest = new Map<string, number | null>(); // threadId -> seq of its first text message (null: none yet)
   private lists: { projects?: Project[]; schedules?: Schedule[]; accounts?: Account[] } = {};
   private dirtyLists = new Set<ListName>();
+  // Project pictures (ICONS_API_VERSION): what the mirror has, projectId ->
+  // picture name, read from it once; and whether the list has changed since
+  // the pictures were last looked at.
+  private pictures?: Map<string, string>;
+  private picturesDue = true;
   private flushTimer?: TimerHandle;
   private heartbeatTimer?: TimerHandle;
   private presenceTimer?: TimerHandle;
@@ -421,6 +457,7 @@ export class ConvexSync {
     else if (!url) this.off = 'no sync.url in runner.json';
     else if (!deps.key) this.off = 'no secrets/convex-key';
     this.post = deps.post ?? (url ? convexPoster(url) : async () => undefined);
+    this.upload = deps.upload ?? convexUploader();
     if (!this.off) this.subscriber = deps.subscriber ?? (url ? convexSubscriber(url) : undefined);
   }
 
@@ -467,6 +504,8 @@ export class ConvexSync {
     if (v < BACKEND_API_VERSION) {
       this.deps.log.warn('the convex backend is older than this runner', { backend: v, expected: BACKEND_API_VERSION, url: this.deps.config.url });
     }
+    // The pictures wait for the first heartbeat to say the backend takes them.
+    if (v >= ICONS_API_VERSION && this.picturesDue) this.scheduleFlush();
   }
 
   status(): SyncStatus {
@@ -522,6 +561,7 @@ export class ConvexSync {
       case 'projects.updated':
         this.lists.projects = n.params.projects;
         this.dirtyLists.add('projects');
+        this.picturesDue = true;
         this.scheduleFlush();
         break;
       case 'schedules.updated':
@@ -632,6 +672,7 @@ export class ConvexSync {
         const rows = name === 'projects' ? (list as Project[]).map(toProjectDoc) : name === 'schedules' ? (list as Schedule[]).map(toScheduleDoc) : (list as Account[]).map(toAccountDoc);
         await this.post('mutation', `sync:set${name[0]!.toUpperCase()}${name.slice(1)}`, { key, runnerId: this.runnerId, [name]: rows });
       }
+      if (this.picturesDue && (this.backendApiVersion ?? 0) >= ICONS_API_VERSION) await this.sendPictures();
       if (this.full) {
         const keep = this.deps.runner.list(ALL).map((t) => t.id);
         await this.post('mutation', 'sync:prune', { key, runnerId: this.runnerId, keep });
@@ -675,6 +716,45 @@ export class ConvexSync {
       this.flushing = false;
     }
     this.scheduleFlush();
+  }
+
+  // Each project's picture to file storage, once per picture: the mirror
+  // says what it has (sync:projectIcons, read once), and only a project
+  // whose picture is new or changed is uploaded. A picture that can't be
+  // read or drawn is skipped with a warning (the phone shows the symbol or
+  // a letter) and tried again when the projects next change; a failed
+  // upload throws, so the flush retries with the others.
+  private async sendPictures(): Promise<void> {
+    const key = this.deps.key;
+    if (!this.pictures) {
+      const rows = (await this.post('query', 'sync:projectIcons', { key, runnerId: this.runnerId })) as { projectId: string; picture: string }[] | null;
+      this.pictures = new Map((rows ?? []).map((r) => [r.projectId, r.picture]));
+    }
+    const projects = this.lists.projects ?? [];
+    for (const p of projects) {
+      const image = p.icon?.image;
+      if (!image) {
+        this.pictures.delete(p.id); // setProjects has dropped it from the mirror
+        continue;
+      }
+      const picture = pictureName(image.path);
+      if (this.pictures.get(p.id) === picture) continue;
+      let file: { bytes: Uint8Array; mediaType: string } | undefined;
+      try {
+        file = await phonePicture(image.path, image.mediaType);
+      } catch (e) {
+        this.deps.log.warn('project picture not sent', { projectId: p.id, path: image.path, error: String((e as Error)?.message ?? e) });
+        continue;
+      }
+      const url = (await this.post('mutation', 'sync:iconUploadUrl', { key })) as string;
+      const storageId = await this.upload(url, file.bytes, file.mediaType);
+      await this.post('mutation', 'sync:setProjectIcon', { key, runnerId: this.runnerId, projectId: p.id, picture, storageId, mediaType: file.mediaType });
+      this.pictures.set(p.id, picture);
+      this.deps.log.info('project picture sent', { projectId: p.id, picture, bytes: file.bytes.byteLength });
+    }
+    const keep = new Set(projects.map((p) => p.id));
+    for (const id of [...this.pictures.keys()]) if (!keep.has(id)) this.pictures.delete(id);
+    this.picturesDue = false;
   }
 
   private async appendMessages(all: MessageDoc[]): Promise<void> {

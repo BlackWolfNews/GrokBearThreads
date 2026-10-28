@@ -245,6 +245,7 @@ const projectDoc = v.object({
   updatedAt: v.string(),
   threadCount: v.number(),
   lastActivityAt: v.optional(v.string()),
+  icon: v.optional(v.object({ symbol: v.optional(v.string()), picture: v.optional(v.string()), by: v.string() })),
 });
 
 const scheduleDoc = v.object({
@@ -299,6 +300,63 @@ export const setProjects = mutation({
   handler: async (ctx, { key, runnerId, projects }) => {
     checkRunnerKey(key);
     await replaceRows(ctx, 'projects', runnerId, projects);
+    // A picture for a project that's gone, or that has no picture any more,
+    // goes with it. One the runner hasn't replaced yet stays, so the phone
+    // keeps showing the old picture rather than a letter meanwhile.
+    const wanted = new Set(projects.filter((p) => p.icon?.picture).map((p) => p.id));
+    for await (const row of ctx.db.query('projectIcons').withIndex('by_runner_project', (q) => q.eq('runnerId', runnerId))) {
+      if (wanted.has(row.projectId)) continue;
+      await ctx.storage.delete(row.storageId);
+      await ctx.db.delete(row._id);
+    }
+    return null;
+  },
+});
+
+// ------------------------------------------------------------ project icons
+// The runner puts each project's picture in file storage (API 5): it asks
+// for an upload URL, POSTs the bytes there, then records the storage id
+// against the project. projectIcons says what it has already sent, so a
+// restart doesn't send every picture again.
+
+export const projectIcons = query({
+  args: { key: v.string(), runnerId: v.string() },
+  returns: v.array(v.object({ projectId: v.string(), picture: v.string() })),
+  handler: async (ctx, { key, runnerId }) => {
+    checkRunnerKey(key);
+    const out = [];
+    for await (const row of ctx.db.query('projectIcons').withIndex('by_runner_project', (q) => q.eq('runnerId', runnerId))) {
+      out.push({ projectId: row.projectId, picture: row.picture });
+    }
+    return out;
+  },
+});
+
+export const iconUploadUrl = mutation({
+  args: { key: v.string() },
+  returns: v.string(),
+  handler: async (ctx, { key }) => {
+    checkRunnerKey(key);
+    return ctx.storage.generateUploadUrl();
+  },
+});
+
+export const setProjectIcon = mutation({
+  args: { key: v.string(), runnerId: v.string(), projectId: v.string(), picture: v.string(), storageId: v.id('_storage'), mediaType: v.string() },
+  returns: v.null(),
+  handler: async (ctx, { key, runnerId, projectId, picture, storageId, mediaType }) => {
+    checkRunnerKey(key);
+    const now = Date.now();
+    const existing = await ctx.db
+      .query('projectIcons')
+      .withIndex('by_runner_project', (q) => q.eq('runnerId', runnerId).eq('projectId', projectId))
+      .unique();
+    if (existing) {
+      if (existing.storageId !== storageId) await ctx.storage.delete(existing.storageId);
+      await ctx.db.patch(existing._id, { picture, storageId, mediaType, updatedAt: now });
+    } else {
+      await ctx.db.insert('projectIcons', { runnerId, projectId, picture, storageId, mediaType, updatedAt: now });
+    }
     return null;
   },
 });

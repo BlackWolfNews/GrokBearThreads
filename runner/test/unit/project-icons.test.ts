@@ -6,7 +6,7 @@ import zlib from 'node:zlib';
 import { makeHarness, tick, tmpDir } from '../helpers/fakes.ts';
 import { Projects, projectMethods } from '../../src/projects.ts';
 import { Librarian, ICON_SOON_MS, ICON_SWEEP_MS } from '../../src/librarian.ts';
-import { findIcon, imageSize, SYMBOLS } from '../../src/project-icons.ts';
+import { findIcon, imageSize, phonePicture, SYMBOLS } from '../../src/project-icons.ts';
 import { buildThreadbearTools } from '../../src/threadbear-mcp.ts';
 import { FakeClock } from '../../src/clock.ts';
 import { nullLogger } from '../../src/log.ts';
@@ -198,4 +198,22 @@ test("Mike's and agents' choices stay until set back to automatic", async () => 
   await s.settle();
   assert.deepEqual([s.projects.list()[0].icon?.by, s.projects.list()[0].icon?.from], ['librarian', path.join(app, 'icons/tandem.png')]);
   s.librarian.stop();
+});
+
+test('the phone gets a PNG as it is and an SVG drawn to a 256 px PNG', async () => {
+  const dir = tmpDir();
+  const pngPath = path.join(dir, 'p1-aaa.png');
+  fs.writeFileSync(pngPath, png(8, 8));
+  const asIs = await phonePicture(pngPath, 'image/png');
+  assert.equal(asIs.mediaType, 'image/png');
+  assert.deepEqual(Buffer.from(asIs.bytes), png(8, 8));
+  const svgPath = path.join(dir, 'p1-bbb.svg');
+  fs.writeFileSync(svgPath, '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><rect width="64" height="64" rx="12" fill="#38f"/></svg>');
+  const drawn = await phonePicture(svgPath, 'image/svg+xml');
+  assert.equal(drawn.mediaType, 'image/png');
+  const drawnPath = path.join(dir, 'drawn.png');
+  fs.writeFileSync(drawnPath, drawn.bytes);
+  assert.deepEqual(await imageSize(drawnPath, '.png'), { width: 256, height: 256 });
+  await assert.rejects(phonePicture(path.join(dir, 'missing.png'), 'image/png'));
+  await assert.rejects(phonePicture(pngPath, 'image/x-icon'), /can't show/);
 });

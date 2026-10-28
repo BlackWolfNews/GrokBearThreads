@@ -5,7 +5,8 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { makeHarness, tick, tmpDir } from '../helpers/fakes.ts';
-import { ConvexSync, BACKEND_API_VERSION, PRESENCE_MS, SYNC_COALESCE_MS, HEARTBEAT_MS, SYNC_BATCH, ensureRunnerId, toThreadDoc, convexPoster, type ThreadDoc } from '../../src/sync.ts';
+import { ConvexSync, BACKEND_API_VERSION, ICONS_API_VERSION, PRESENCE_MS, SYNC_COALESCE_MS, HEARTBEAT_MS, SYNC_BATCH, ensureRunnerId, toThreadDoc, convexPoster, convexUploader, pictureName, type ThreadDoc } from '../../src/sync.ts';
+import type { Project } from '../../src/protocol.ts';
 import { nullLogger } from '../../src/log.ts';
 import { AT_MAC_IDLE_MS, isAtMac } from '../../src/presence.ts';
 import { readRunnerJson } from '../../src/config.ts';
@@ -634,6 +635,143 @@ test('the backend API version from the heartbeat shows in status, and an old bac
   await tick();
   assert.deepEqual(old.sync.status().backend, { apiVersion: 0, expected: BACKEND_API_VERSION });
   await old.sync.stop();
+});
+
+// Project pictures: a runner with a picture for a project sends it to file
+// storage once, when the backend takes pictures (API 5), and never again
+// for the same copy.
+function setupPictures(opts: { backend?: number; has?: { projectId: string; picture: string }[]; project?: Partial<Project> } = {}) {
+  const h = makeHarness();
+  const dir = tmpDir();
+  // A tiny PNG by name only: the bytes don't matter to the sync, which
+  // sends what's in the file.
+  const iconPath = path.join(dir, 'p1-abc123.png');
+  fs.writeFileSync(iconPath, Buffer.from('PNGBYTES'));
+  const calls: Call[] = [];
+  const uploads: { url: string; bytes: string; mediaType: string }[] = [];
+  let project: Project = {
+    id: 'p1', title: 'Threadbear', folders: ['/w'], goals: 'g', state: 's', notes: 'n', links: [], createdBy: 'mike',
+    createdAt: '2026-10-27T00:00:00.000Z', updatedAt: '2026-10-27T00:00:00.000Z', threadCount: 1,
+    icon: { image: { path: iconPath, mediaType: 'image/png', width: 64, height: 64 }, symbol: 'leaf', by: 'librarian', updatedAt: '2026-10-27T00:00:00.000Z' },
+    ...opts.project,
+  };
+  const post = async (kind: 'mutation' | 'query', fn: string, args: Record<string, unknown>) => {
+    calls.push({ kind, fn, args });
+    if (fn === 'sync:heartbeat') return { apiVersion: opts.backend ?? ICONS_API_VERSION };
+    if (fn === 'sync:projectIcons') return opts.has ?? [];
+    if (fn === 'sync:iconUploadUrl') return 'https://upload.example/u1';
+    return null;
+  };
+  const sync = new ConvexSync({
+    config: { enabled: true, url: 'https://x.convex.cloud', runnerId: 'r1' },
+    key: 'k',
+    runner: { onNotification: (fn) => h.runner.onNotification(fn), list: (i) => h.runner.list(i), get: (id) => h.runner.get(id), events: (id, o) => h.runner.events(id, o), listProjects: () => [project] },
+    version: '0.1.0+test',
+    startedAt: '2026-10-27T00:00:00.000Z',
+    clock: h.clock,
+    log: nullLogger,
+    post,
+    upload: async (url, bytes, mediaType) => {
+      uploads.push({ url, bytes: Buffer.from(bytes).toString(), mediaType });
+      return `st_${uploads.length}`;
+    },
+  });
+  const setIcons = () => calls.filter((c) => c.fn === 'sync:setProjectIcon');
+  const change = (next: Partial<Project>) => {
+    project = { ...project, ...next };
+    h.runner.publish({ method: 'projects.updated', params: { projects: [project] } });
+  };
+  return { h, sync, calls, uploads, setIcons, change, iconPath, dir };
+}
+
+test('project pictures: sent to file storage once the backend takes them, once per copy, with the symbol on the project', async () => {
+  const { h, sync, calls, uploads, setIcons, change, iconPath, dir } = setupPictures();
+  sync.start();
+  await sync.flushNow();
+  await tick();
+  // The project went up with its icon named, and the picture itself followed.
+  const set = calls.filter((c) => c.fn === 'sync:setProjects');
+  assert.deepEqual((set[0]!.args.projects as { icon?: unknown }[])[0]!.icon, { symbol: 'leaf', picture: 'p1-abc123', by: 'librarian' });
+  assert.deepEqual(uploads, [{ url: 'https://upload.example/u1', bytes: 'PNGBYTES', mediaType: 'image/png' }]);
+  assert.deepEqual(setIcons()[0]!.args, { key: 'k', runnerId: 'r1', projectId: 'p1', picture: 'p1-abc123', storageId: 'st_1', mediaType: 'image/png' });
+  // The list changing again doesn't send the same picture again.
+  change({ title: 'Threadbear app' });
+  h.clock.advance(SYNC_COALESCE_MS);
+  await tick(20);
+  assert.equal(uploads.length, 1);
+  // A new copy (a new file name) does.
+  const next = path.join(dir, 'p1-def456.png');
+  fs.writeFileSync(next, Buffer.from('NEWBYTES'));
+  change({ icon: { image: { path: next, mediaType: 'image/png' }, by: 'mike', updatedAt: '2026-10-28T00:00:00.000Z' } });
+  h.clock.advance(SYNC_COALESCE_MS);
+  await tick(20);
+  assert.equal(uploads.length, 2);
+  assert.equal(uploads[1]!.bytes, 'NEWBYTES');
+  assert.equal(setIcons()[1]!.args.picture, 'p1-def456');
+  // Back to a symbol only: nothing to upload, and the mirror drops the
+  // picture with setProjects.
+  change({ icon: { symbol: 'leaf', by: 'librarian', updatedAt: '2026-10-28T00:00:00.000Z' } });
+  h.clock.advance(SYNC_COALESCE_MS);
+  await tick(20);
+  assert.equal(uploads.length, 2);
+  assert.deepEqual((calls.filter((c) => c.fn === 'sync:setProjects').at(-1)!.args.projects as { icon?: unknown }[])[0]!.icon, { symbol: 'leaf', by: 'librarian' });
+  fs.rmSync(iconPath, { force: true });
+  await sync.stop();
+});
+
+test('project pictures: one the mirror already has is not sent again, and an older backend gets none', async () => {
+  const has = setupPictures({ has: [{ projectId: 'p1', picture: 'p1-abc123' }] });
+  has.sync.start();
+  await has.sync.flushNow();
+  await tick();
+  assert.equal(has.uploads.length, 0);
+  assert.equal(has.setIcons().length, 0);
+  await has.sync.stop();
+
+  const old = setupPictures({ backend: ICONS_API_VERSION - 1 });
+  old.sync.start();
+  await old.sync.flushNow();
+  await tick();
+  assert.equal(old.uploads.length, 0);
+  assert.ok(!old.calls.some((c) => c.fn === 'sync:projectIcons' || c.fn === 'sync:iconUploadUrl'));
+  // The project still names its icon, for a phone that can show the symbol.
+  const set = old.calls.filter((c) => c.fn === 'sync:setProjects');
+  assert.deepEqual((set[0]!.args.projects as { icon?: unknown }[])[0]!.icon, { symbol: 'leaf', picture: 'p1-abc123', by: 'librarian' });
+  await old.sync.stop();
+});
+
+test('project pictures: a picture that cannot be read is skipped, not retried until the projects change', async () => {
+  const { sync, uploads, iconPath, h, change, dir } = setupPictures();
+  fs.rmSync(iconPath, { force: true });
+  sync.start();
+  await sync.flushNow();
+  await tick();
+  assert.equal(uploads.length, 0);
+  assert.equal(sync.status().state, 'ok');
+  // Fixed and changed: sent then.
+  const fixed = path.join(dir, 'p1-fixed.png');
+  fs.writeFileSync(fixed, Buffer.from('OK'));
+  change({ icon: { image: { path: fixed, mediaType: 'image/png' }, by: 'librarian', updatedAt: '2026-10-28T00:00:00.000Z' } });
+  h.clock.advance(SYNC_COALESCE_MS);
+  await tick(20);
+  assert.equal(uploads.length, 1);
+  await sync.stop();
+});
+
+test('the uploader posts the bytes to the upload URL and reads the storage id back', async () => {
+  const seen: { url: string; init: RequestInit }[] = [];
+  const fetchFn = (async (url: string | URL | Request, init?: RequestInit) => {
+    seen.push({ url: String(url), init: init! });
+    return new Response(JSON.stringify({ storageId: 'st_9' }), { status: 200 });
+  }) as unknown as typeof fetch;
+  const upload = convexUploader(fetchFn);
+  assert.equal(await upload('https://upload.example/u', new Uint8Array([1, 2, 3]), 'image/png'), 'st_9');
+  assert.equal(seen[0]!.url, 'https://upload.example/u');
+  assert.equal((seen[0]!.init.headers as Record<string, string>)['Content-Type'], 'image/png');
+  const bad = convexUploader((async () => new Response('nope', { status: 500 })) as unknown as typeof fetch);
+  await assert.rejects(bad('https://upload.example/u', new Uint8Array(), 'image/png'), /HTTP 500/);
+  assert.equal(pictureName('/x/project-icons/p1-abc.png'), 'p1-abc');
+  assert.equal(pictureName('/x/project-icons/p1-abc'), 'p1-abc');
 });
 
 test("the runner's expected backend API version is the one convex/version.ts declares", () => {

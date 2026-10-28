@@ -10,6 +10,7 @@
 // or SVG as it is), so the app never reads from a repo and an icon
 // doesn't vanish when a branch changes under it.
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { execFile } from 'node:child_process';
@@ -259,6 +260,27 @@ export async function storeIcon(src: string, dir: string, projectId: string, has
   }
   removeIcons(dir, projectId, path.basename(ref.path));
   return ref;
+}
+
+// The picture as the phone can show it (sync.ts): a PNG, JPEG or WebP as
+// it is; an SVG drawn to a 256 px PNG by Quick Look, since the phone can't
+// draw SVG. Throws when the file can't be read or drawn.
+export async function phonePicture(iconPath: string, mediaType: string): Promise<{ bytes: Uint8Array; mediaType: string }> {
+  if (mediaType !== 'image/svg+xml') {
+    if (!['image/png', 'image/jpeg', 'image/webp'].includes(mediaType)) throw new Error(`the phone can't show a ${mediaType} picture`);
+    return { bytes: new Uint8Array(await fs.promises.readFile(iconPath)), mediaType };
+  }
+  const dir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'threadbear-icon-'));
+  try {
+    const made = await new Promise<boolean>((resolve) =>
+      execFile('/usr/bin/qlmanage', ['-t', '-s', String(ICON_PX), '-o', dir, iconPath], { timeout: 20_000 }, (err) => resolve(!err)),
+    );
+    const out = path.join(dir, path.basename(iconPath) + '.png');
+    if (!made || !fs.existsSync(out)) throw new Error('Quick Look could not draw the SVG');
+    return { bytes: new Uint8Array(await fs.promises.readFile(out)), mediaType: 'image/png' };
+  } finally {
+    await fs.promises.rm(dir, { recursive: true, force: true });
+  }
 }
 
 // Takes away a project's copies, all of them or all but `keep`.

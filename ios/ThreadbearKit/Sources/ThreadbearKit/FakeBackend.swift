@@ -58,6 +58,10 @@ public final class FakeBackend: Backend, @unchecked Sendable {
         watch { [unowned self] in lock.withLock { runnerList } }
     }
 
+    public func projects() -> AsyncThrowingStream<[PhoneProject], Error> {
+        watch { Self.sampleProjects }
+    }
+
     public func threads(_ view: ThreadsView) -> AsyncThrowingStream<[PhoneThread], Error> {
         watch { [unowned self] in
             let all = lock.withLock { Array(threadsById.values) }
@@ -218,6 +222,13 @@ public final class FakeBackend: Backend, @unchecked Sendable {
     /// sample threads"), the simulator and the screenshots. Nothing in here
     /// is from a real thread, and no real project or app is named:
     /// FakeBackendTests checks for the names that used to be here.
+    /// The projects the sample threads are in, with symbols for icons (a
+    /// picture would need a URL to fetch; the demo has no backend).
+    public static let sampleProjects = [
+        PhoneProject(id: "p_garden", title: "Garden planner", icon: PhoneProjectIcon(symbol: "leaf", by: "librarian")),
+        PhoneProject(id: "p_site", title: "Website", icon: PhoneProjectIcon(symbol: "globe", by: "librarian")),
+    ]
+
     static func sample(now: Date) -> (threads: [PhoneThread], messages: [String: [PhoneMessage]]) {
         func ago(_ minutes: Double) -> Date { now.addingTimeInterval(-minutes * 60) }
         let garden = [ProjectRef(id: "p_garden", title: "Garden planner")]

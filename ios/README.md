@@ -10,6 +10,14 @@ directly, so it works with the Mac asleep: whatever you send waits in
 - `ThreadbearKit/`: the rows, the inbox order (same rules as the Mac
   sidebar), the Convex transport, a `FakeBackend` with sample data. `swift
   test` runs on the Mac.
+- The rows look like the Mac sidebar's (`Threadbear/Look.swift`): the
+  project's tile with its picture (from `phone:projects`, backend API 5,
+  fetched once and kept in `ProjectPictures`), its symbol or first
+  letter, a second tile's edge behind it for a thread in two projects, the
+  unread dot or done tick in the gutter, the status in the Mac's colours
+  (accent while working, orange for Needs you, red for Failed) and the
+  same section headings. The accent is the system blue the Mac's accent
+  is.
 - `Threadbear/`: the SwiftUI app. iOS 18, so the XS Max runs it too.
 - `scripts/sim-shots.sh [dir] [--dark]`: screenshots on sample data in the
   simulator (`-ThreadbearFake`, `-ThreadbearOpen <threadId>`,

@@ -126,9 +126,38 @@ import Testing
     }
 
     @Test func rowStatusText() {
-        #expect(RowStatus.text(thread("a", 1, status: .waiting, approval: true), now: now) == "Needs OK")
+        #expect(RowStatus.text(thread("a", 1, status: .waiting, approval: true), now: now) == "Needs you")
+        #expect(RowStatus.kind(thread("a", 1, status: .waiting, approval: true)) == .needsYou)
         #expect(RowStatus.text(thread("b", 1, status: .running), now: now) == "Working")
         #expect(RowStatus.text(thread("c", 5), now: now) == "5m")
+        #expect(RowStatus.kind(thread("c", 5)) == .time)
+        #expect(RowStatus.workingLabel(since: now.addingTimeInterval(-53), now: now) == "53s")
+        #expect(RowStatus.workingLabel(since: now.addingTimeInterval(-62 * 60), now: now) == "1h 2m")
+    }
+
+    @Test func projectRowsDecodeWithAndWithoutIcons() throws {
+        let json = #"""
+        [{"id":"p1","runnerId":"r1","title":"Garden","archived":false,"icon":{"symbol":"leaf","url":"https://x.convex.cloud/api/storage/abc","by":"librarian"}},
+         {"id":"p2","runnerId":"r1","title":"Site","archived":false,"icon":{"url":"not a url","by":"mike"}},
+         {"id":"p3","runnerId":"r1","title":"Old","archived":false}]
+        """#
+        let rows = try JSONDecoder().decode([PhoneProject].self, from: Data(json.utf8))
+        #expect(rows[0].icon?.symbol == "leaf")
+        #expect(rows[0].icon?.url?.host() == "x.convex.cloud")
+        #expect(rows[1].icon?.url == nil)
+        #expect(rows[2].icon == nil)
+        #expect(ProjectMark.letter("7 day plan") == "7")
+        #expect(ProjectMark.letter("🐻") == "?")
+    }
+
+    /// Every project a sample thread is in has a sample project, so the
+    /// demo's rows show icons.
+    @Test func sampleProjectsCoverTheSampleThreads() {
+        let sample = FakeBackend.sample(now: .now)
+        let ids = Set(FakeBackend.sampleProjects.map(\.id))
+        for thread in sample.threads {
+            for ref in thread.projects ?? [] { #expect(ids.contains(ref.id), "no sample project \(ref.id)") }
+        }
     }
 
     @Test func previewIsPlain() {
@@ -193,7 +222,8 @@ import Testing
         let sample = FakeBackend.sample(now: .now)
         let encoder = JSONEncoder()
         let text = (String(decoding: try encoder.encode(sample.threads), as: UTF8.self)
-            + String(decoding: try encoder.encode(sample.messages), as: UTF8.self)).lowercased()
+            + String(decoding: try encoder.encode(sample.messages), as: UTF8.self)
+            + String(decoding: try encoder.encode(FakeBackend.sampleProjects), as: UTF8.self)).lowercased()
         for word in ["poddle", "walkies", "quick ask", "stash it", "cannvas", "bruce", "tinker", "backblaze",
                      "shed", "juice", "mike", "dev/me", "/users/", "convex.cloud"] {
             #expect(!text.contains(word), "the sample data mentions \(word)")

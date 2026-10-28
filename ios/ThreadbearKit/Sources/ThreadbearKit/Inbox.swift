@@ -67,14 +67,42 @@ public struct InboxSections: Sendable, Equatable {
 /// What a row says at its right: the status while it means something, else
 /// the time since its last activity.
 public enum RowStatus {
-    public static func text(_ thread: PhoneThread, now: Date) -> String {
-        if case .question = thread.pendingApproval { return "Asking" }
-        if thread.pendingApproval != nil || thread.status == .waiting { return "Needs OK" }
+    /// What the status is, so the row can colour it as the Mac sidebar does.
+    public enum Kind: Sendable, Equatable { case needsYou, working, failed, stopped, time }
+
+    public static func kind(_ thread: PhoneThread) -> Kind {
+        if thread.pendingApproval != nil || thread.status == .waiting { return .needsYou }
         switch thread.status {
-        case .running, .starting: return "Working"
-        case .error: return "Failed"
-        default: return RelativeTime.short(thread.lastActivityAt, now: now)
+        case .running, .starting: return .working
+        case .error: return .failed
+        case .stopped: return .stopped
+        default: return .time
         }
+    }
+
+    /// The words, as the Mac says them: "Needs you" whether it's a question
+    /// or a permission (the thread says which), "Working", "Failed".
+    public static func text(_ thread: PhoneThread, now: Date) -> String {
+        switch kind(thread) {
+        case .needsYou: "Needs you"
+        case .working: "Working"
+        case .failed: "Failed"
+        case .stopped: "Stopped"
+        case .time: RelativeTime.short(thread.lastActivityAt, now: now)
+        }
+    }
+
+    /// How long a running turn has been going, where the time would be:
+    /// "53s", "4m", "1h 2m". The runner sets lastActivityAt when a turn
+    /// starts, so for a running thread it's the turn's start (the Mac's
+    /// ThreadRowLook.workingLabel).
+    public static func workingLabel(since start: Date, now: Date) -> String {
+        let seconds = max(0, Int(now.timeIntervalSince(start)))
+        if seconds < 60 { return "\(seconds)s" }
+        let minutes = seconds / 60
+        if minutes < 60 { return "\(minutes)m" }
+        let hours = minutes / 60
+        return minutes % 60 == 0 ? "\(hours)h" : "\(hours)h \(minutes % 60)m"
     }
 }
 

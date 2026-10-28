@@ -469,7 +469,12 @@ Queries:
 
 Also `phone:projects({ token, archived? })`, `phone:schedules({ token })`
 and `phone:accounts({ token })`, the runner's lists as it last sent them
-(docs/protocol.md "Sync" says which fields).
+(docs/protocol.md "Sync" says which fields). Since API 5 a project row
+has `icon?: { symbol?, url?, by }`: the Mac's `ProjectIcon` with the
+picture as a URL into file storage (the runner uploads it, docs/protocol.md
+"Sync", "Project pictures") in place of a path on the Mac. The phone draws
+the picture, else the symbol, else the title's first letter, as the Mac
+sidebar does; a runner before API 5 sends projects without `icon`.
 
 Mutations, each returning a `commandId`. The owning runner takes it
 within a second or two while it's online (state `taken`, then `done` or

@@ -10,6 +10,8 @@ final class AppModel {
     private(set) var pairing: Pairing?
     private(set) var backend: (any Backend)?
     private(set) var runners: [PhoneRunner] = []
+    /// The projects by id, for the rows' icons (backend API 5 carries them).
+    private(set) var projects: [String: PhoneProject] = [:]
     private(set) var inbox: [PhoneThread] = []
     private(set) var hibernating: [PhoneThread] = []
     private(set) var den: [PhoneThread] = []
@@ -94,6 +96,8 @@ final class AppModel {
         return "\(name) offline since \(RelativeTime.clock(newest.lastSeenAt, now: now))"
     }
 
+    func project(_ id: String) -> PhoneProject? { projects[id] }
+
     func runnerName(_ runnerId: String) -> String? {
         runners.count > 1 ? runners.first { $0.runnerId == runnerId }?.name : nil
     }
@@ -138,6 +142,7 @@ final class AppModel {
         backend = nil
         isFake = false
         runners = []
+        projects = [:]
         inbox = []
         hibernating = []
         den = []
@@ -152,6 +157,7 @@ final class AppModel {
         backendProblem = nil
         apiVersion = nil
         runners = []
+        projects = [:]
         inbox = []
         hibernating = []
         den = []
@@ -164,6 +170,10 @@ final class AppModel {
         isFake = backend is FakeBackend
         authProblem = nil
         tasks.append(follow(backend.runners()) { $0.runners = $1 })
+        tasks.append(follow(backend.projects()) { model, list in
+            // Two runners could use the same id; the first one wins.
+            model.projects = Dictionary(list.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        })
         tasks.append(follow(backend.threads(.inbox)) { $0.inbox = $1 })
         tasks.append(follow(backend.threads(.hibernating)) { $0.hibernating = $1 })
         tasks.append(follow(backend.threads(.den)) { $0.den = $1 })

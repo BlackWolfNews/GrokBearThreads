@@ -37,13 +37,15 @@ struct InboxView: View {
                     .listRowBackground(Color.clear)
                 }
                 if !sections.inbox.isEmpty {
-                    Section("Inbox") { rows(sections.inbox) }
+                    Section { rows(sections.inbox) } header: { SectionHeading(title: "Inbox", icon: "tray") }
                 }
                 if !sections.running.isEmpty {
-                    Section("Running") { rows(sections.running) }
+                    Section { rows(sections.running, running: true) } header: { SectionHeading(title: "Running", icon: "bolt") }
                 }
             }
-            .listStyle(.insetGrouped)
+            // A flat list with the Mac sidebar's headings, not grouped cards.
+            .listStyle(.plain)
+            .listSectionSeparator(.hidden)
             .navigationTitle("Threadbear")
             .navigationDestination(for: String.self) { ThreadView(threadId: $0) }
             .toolbar {
@@ -90,11 +92,16 @@ struct InboxView: View {
         }
     }
 
-    @ViewBuilder private func rows(_ threads: [PhoneThread]) -> some View {
+    @ViewBuilder private func rows(_ threads: [PhoneThread], running: Bool = false) -> some View {
         ForEach(threads) { thread in
-            NavigationLink(value: thread.threadId) {
-                ThreadRow(thread: thread)
+            // A plain row, not a NavigationLink: the Mac's rows have no
+            // chevron, and the status sits where it would go.
+            Button { path.append(thread.threadId) } label: {
+                ThreadRow(thread: thread, underRunning: running)
             }
+            .buttonStyle(.plain)
+            .listRowInsets(ThreadRow.insets)
+            .listRowSeparator(.hidden)
             .swipeActions(edge: .trailing) {
                 Button { Task { await perform(thread, .archive) } } label: { Label("Den", systemImage: "archivebox") }
                     .tint(.brown)
@@ -138,6 +145,8 @@ struct ThreadListView: View {
             }
             ForEach(threads) { thread in
                 NavigationLink(value: thread.threadId) { ThreadRow(thread: thread) }
+                    .listRowInsets(ThreadRow.insets)
+                    .listRowSeparator(.hidden)
                     .swipeActions(edge: .trailing) {
                         Button {
                             Task {
@@ -152,42 +161,75 @@ struct ThreadListView: View {
                     }
             }
         }
+        .listStyle(.plain)
         .navigationTitle(title)
     }
 }
 
+/// A row as the Mac sidebar draws one: the project's tile two lines tall,
+/// the title across the width, and under it where the thread belongs and
+/// what it's doing, with the unread dot (or the done tick) in the gutter
+/// left of the tile.
 struct ThreadRow: View {
     @Environment(AppModel.self) private var model
     var thread: PhoneThread
+    /// Under the Running heading a working row shows just its spinner and
+    /// time, as on the Mac: the heading says what it's doing.
+    var underRunning = false
+
+    /// Room on the left for the gutter mark; the trailing edge like the Mac's.
+    static let insets = EdgeInsets(top: 6, leading: 28, bottom: 6, trailing: 16)
 
     var body: some View {
-        HStack(alignment: .center, spacing: 12) {
-            ProjectTile(thread: thread)
-            VStack(alignment: .leading, spacing: 3) {
-                HStack(alignment: .firstTextBaseline) {
-                    Text(thread.title)
-                        .font(.body.weight(emphasised ? .semibold : .regular))
-                        .lineLimit(1)
-                    Spacer(minLength: 8)
-                    Text(RowStatus.text(thread, now: model.now))
-                        .font(.footnote.weight(InboxSections.needsAnswer(thread) ? .semibold : .regular))
-                        .foregroundStyle(InboxSections.needsAnswer(thread) ? Color.accentColor : .secondary)
-                }
-                HStack(spacing: 6) {
-                    if emphasised {
-                        Circle().fill(Color.accentColor).frame(width: 7, height: 7)
+        let kind = RowStatus.kind(thread)
+        HStack(alignment: .center, spacing: 10) {
+            ProjectTiles(projects: thread.projects ?? [])
+                .overlay(alignment: .leading) {
+                    if done {
+                        // Finished with nothing needed: a tick where the
+                        // unread dot would be.
+                        Image(systemName: "checkmark")
+                            .font(.system(size: 9, weight: .bold))
+                            .foregroundStyle(Color.accentColor)
+                            .frame(width: 10, height: 10)
+                            .offset(x: -19)
+                            .accessibilityLabel("Done, unread")
+                    } else if unread {
+                        Circle()
+                            .fill(Color.accentColor)
+                            .frame(width: 7, height: 7)
+                            .offset(x: -17)
+                            .accessibilityLabel("Unread")
                     }
+                }
+            VStack(alignment: .leading, spacing: 3) {
+                Text(thread.title.isEmpty ? "Untitled" : thread.title)
+                    .font(.body.weight(emphasised ? .semibold : .regular))
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
                     Text(line2)
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
+                    Spacer(minLength: 6)
+                    trailing(kind)
                 }
             }
         }
-        .padding(.vertical, 2)
+        .contentShape(Rectangle())
+        .accessibilityElement(children: .combine)
     }
 
-    private var emphasised: Bool { thread.unread || thread.needsYou || InboxSections.needsAnswer(thread) }
+    /// The Mac's ThreadRowLook, as far as the phone's row knows: unread
+    /// with nothing waiting on Mike is "done" (a tick); unread and needing
+    /// him, a dot, unless the status already says so in words.
+    private var done: Bool { RowStatus.kind(thread) == .time && thread.unread && !thread.needsYou }
+    private var unread: Bool {
+        let kind = RowStatus.kind(thread)
+        return (thread.needsYou && kind != .needsYou && kind != .working) || done
+    }
+    private var emphasised: Bool { thread.needsYou || RowStatus.kind(thread) == .needsYou || done }
 
     private var line2: String {
         var parts = [thread.placeText]
@@ -195,25 +237,35 @@ struct ThreadRow: View {
         if let working = thread.working, thread.isBusy || thread.pendingApproval == nil { parts.append(working) }
         return parts.joined(separator: " · ")
     }
-}
 
-/// The first letter of the thread's project, or a folder for a thread in
-/// none, as on the Mac sidebar.
-struct ProjectTile: View {
-    var thread: PhoneThread
-
-    var body: some View {
-        RoundedRectangle(cornerRadius: 8, style: .continuous)
-            .fill(Color(.tertiarySystemFill))
-            .frame(width: 34, height: 34)
-            .overlay {
-                if let first = thread.projects?.first?.title.first {
-                    Text(String(first).uppercased()).font(.headline).foregroundStyle(.secondary)
-                } else {
-                    Image(systemName: "folder").font(.subheadline).foregroundStyle(.secondary)
+    @ViewBuilder private func trailing(_ kind: RowStatus.Kind) -> some View {
+        switch kind {
+        case .working:
+            HStack(alignment: .firstTextBaseline, spacing: 5) {
+                ProgressView()
+                    .controlSize(.mini)
+                    .tint(.accentColor)
+                    .alignmentGuide(.firstTextBaseline) { $0[VerticalAlignment.center] + 4 }
+                // How long the turn has run, ticking once a second.
+                TimelineView(.periodic(from: .now, by: 1)) { context in
+                    let elapsed = RowStatus.workingLabel(since: thread.lastActivityAt, now: context.date)
+                    Text(underRunning ? elapsed : "Working " + elapsed)
+                        .monospacedDigit()
+                        .contentTransition(.numericText(countsDown: false))
+                        .animation(.default, value: elapsed)
                 }
             }
-            .accessibilityHidden(true)
+            .font(.footnote.weight(.medium))
+            .foregroundStyle(Color.accentColor)
+        case .needsYou:
+            Text("Needs you").font(.footnote.weight(.medium)).foregroundStyle(Look.needsYou)
+        case .failed:
+            Text("Failed").font(.footnote.weight(.medium)).foregroundStyle(Look.failed)
+        case .stopped:
+            Text("Stopped").font(.footnote).foregroundStyle(.secondary)
+        case .time:
+            Text(RowStatus.text(thread, now: model.now)).font(.footnote).monospacedDigit().foregroundStyle(Look.faint)
+        }
     }
 }
 

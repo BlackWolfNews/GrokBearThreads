@@ -6,6 +6,9 @@ import Foundation
 public protocol Backend: Sendable {
     func me() async throws -> PhoneIdentity
     func runners() -> AsyncThrowingStream<[PhoneRunner], Error>
+    /// Every runner's projects (not archived ones), with their icons from
+    /// backend API 5, so a row can show its project the way the Mac does.
+    func projects() -> AsyncThrowingStream<[PhoneProject], Error>
     func threads(_ view: ThreadsView) -> AsyncThrowingStream<[PhoneThread], Error>
     /// Nil once the thread's gone from the mirror.
     func thread(_ threadId: String) -> AsyncThrowingStream<ThreadDetail?, Error>
@@ -90,6 +93,10 @@ public final class ConvexBackend: Backend, @unchecked Sendable {
 
     public func runners() -> AsyncThrowingStream<[PhoneRunner], Error> {
         live("phone:runners", [:], as: [PhoneRunner].self)
+    }
+
+    public func projects() -> AsyncThrowingStream<[PhoneProject], Error> {
+        live("phone:projects", [:], as: [PhoneProject].self)
     }
 
     public func threads(_ view: ThreadsView) -> AsyncThrowingStream<[PhoneThread], Error> {

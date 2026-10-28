@@ -153,7 +153,25 @@ export default defineSchema({
     updatedAt: v.string(),
     threadCount: v.number(),
     lastActivityAt: v.optional(v.string()),
+    // The project's icon (docs/protocol.md, "Icons"), since API 5: its SF
+    // Symbol, and `picture` naming the copy of its picture the runner has
+    // put in projectIcons (the file's hash is in the name, so a changed
+    // picture is a new name).
+    icon: v.optional(v.object({ symbol: v.optional(v.string()), picture: v.optional(v.string()), by: v.string() })),
   }).index('by_runnerId', ['runnerId']),
+
+  // A project's picture, in file storage, as the phone shows it: PNG at
+  // most 256 px (an SVG is drawn to PNG by the runner, since the phone
+  // can't draw SVG). One row per project; the runner replaces it when the
+  // picture changes and setProjects drops it with the project.
+  projectIcons: defineTable({
+    runnerId: v.string(),
+    projectId: v.string(),
+    picture: v.string(), // the projects row's icon.picture this is
+    storageId: v.id('_storage'),
+    mediaType: v.string(),
+    updatedAt: v.number(),
+  }).index('by_runner_project', ['runnerId', 'projectId']),
 
   schedules: defineTable({
     runnerId: v.string(),

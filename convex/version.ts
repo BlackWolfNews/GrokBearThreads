@@ -18,4 +18,7 @@
 //    a push while Mike isn't at the Mac.
 // 4: phone:registerDevice takes the phone's pushKey; a backend without its
 //    own Apple key sends pushes through the push relay, encrypted with it.
-export const API_VERSION = 4;
+// 5: project icons. phone:projects rows carry `icon` ({ symbol?, url?, by }),
+//    the url a picture in file storage the runner uploads (sync:iconUploadUrl,
+//    sync:setProjectIcon); a runner before 5 sends projects without icons.
+export const API_VERSION = 5;

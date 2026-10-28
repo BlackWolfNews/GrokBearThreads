@@ -150,15 +150,48 @@ export const command = query({
   },
 });
 
+// A project as the phone shows it. `icon` (API 5) is the Mac's ProjectIcon
+// with the picture as a URL into file storage (sync.ts, project icons)
+// instead of a path on the Mac; absent from a runner before API 5.
+const projectRow = v.object({
+  runnerId: v.string(),
+  id: v.string(),
+  title: v.string(),
+  folders: v.array(v.string()),
+  goals: v.string(),
+  state: v.string(),
+  notes: v.string(),
+  createdBy: v.string(),
+  archived: v.boolean(),
+  createdAt: v.string(),
+  updatedAt: v.string(),
+  threadCount: v.number(),
+  lastActivityAt: v.optional(v.string()),
+  icon: v.optional(v.object({ symbol: v.optional(v.string()), url: v.optional(v.string()), by: v.string() })),
+});
+
 export const projects = query({
   args: { token: v.string(), archived: v.optional(v.boolean()) },
-  returns: v.array(v.object({ runnerId: v.string(), id: v.string(), title: v.string(), folders: v.array(v.string()), goals: v.string(), state: v.string(), notes: v.string(), createdBy: v.string(), archived: v.boolean(), createdAt: v.string(), updatedAt: v.string(), threadCount: v.number(), lastActivityAt: v.optional(v.string()) })),
+  returns: v.array(projectRow),
   handler: async (ctx, { token, archived }) => {
     await checkPhoneToken(ctx, token);
     const out = [];
     for await (const p of ctx.db.query('projects')) {
       if (p.archived && !archived) continue;
-      out.push(strip(p));
+      const { icon, ...rest } = strip(p);
+      if (!icon) {
+        out.push(rest);
+        continue;
+      }
+      let url: string | undefined;
+      if (icon.picture) {
+        const stored = await ctx.db
+          .query('projectIcons')
+          .withIndex('by_runner_project', (q) => q.eq('runnerId', p.runnerId).eq('projectId', p.id))
+          .unique();
+        url = (stored && (await ctx.storage.getUrl(stored.storageId))) ?? undefined;
+      }
+      out.push({ ...rest, icon: { ...(icon.symbol ? { symbol: icon.symbol } : {}), ...(url ? { url } : {}), by: icon.by } });
     }
     return out.sort((a, b) => (b.lastActivityAt ?? b.updatedAt).localeCompare(a.lastActivityAt ?? a.updatedAt));
   },

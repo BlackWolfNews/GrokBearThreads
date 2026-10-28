@@ -1664,10 +1664,25 @@ the mirror back as state. The Mac app doesn't use it.
   `approval.resolved`, or the thread no longer waiting, takes it off.
 - **Projects, schedules, accounts.** Each `projects.updated`,
   `schedules.updated` and `accounts.updated` replaces that runner's rows
-  of the table with the whole list (`Project` without its icon; `Schedule`
-  without effort and permission mode; `Account` as `id, provider, title,
-  note?, email?, plan?, defaultModel?, usage?`, never `configDir` or the
-  model list). The same at start.
+  of the table with the whole list (`Project` with its icon as `icon: {
+  symbol?, picture?, by }`, `picture` naming the runner's copy of the
+  picture, the file name without its extension; `Schedule` without effort
+  and permission mode; `Account` as `id, provider, title, note?, email?,
+  plan?, defaultModel?, usage?`, never `configDir` or the model list). The
+  same at start.
+- **Project pictures** (backend API 5). A project's picture goes to the
+  deployment's file storage so the phone can show it: the runner asks
+  `sync:projectIcons` once for what the mirror has, and for each project
+  whose `picture` is new or changed gets an upload URL
+  (`sync:iconUploadUrl`), POSTs the bytes and records the storage id
+  against the project (`sync:setProjectIcon`), which replaces and deletes
+  the old file. PNG, JPEG and WebP go as they are (at most 256 px, as
+  the runner stores them); an SVG is drawn to a 256 px PNG with Quick
+  Look first, since the phone can't draw SVG. A picture that can't be
+  read is skipped with a warning and tried again when the projects next
+  change. `sync:setProjects` drops the picture of a project that's gone
+  or has a symbol now. Only once a heartbeat has said the backend is at
+  API 5 or later; an older backend gets the project rows alone.
 - **Runner.** A `runners` row for this runner (`runnerId, name, version,
   release?, startedAt, draining, threadCount, lastSeenAt`), written once a
   minute. On start every thread is written once and rows of this runner
