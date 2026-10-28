@@ -21,6 +21,14 @@ function strip<T extends { _id: unknown; _creationTime: unknown }>(doc: T): Omit
   return rest;
 }
 
+// A thread row as the phone sees it. pushedAt is the mirror's own (push.ts)
+// and isn't in `row`: returning it fails the query's validator, which broke
+// the lists for every thread that had sent a push.
+function stripThread<T extends { _id: unknown; _creationTime: unknown; pushedAt?: number }>(doc: T): Omit<T, '_id' | '_creationTime' | 'pushedAt'> {
+  const { _id, _creationTime, pushedAt, ...rest } = doc;
+  return rest;
+}
+
 export const me = query({
   args: { token: v.string() },
   returns: v.object({ name: v.string(), expiresAt: v.string() }),
@@ -54,7 +62,7 @@ export const threads = query({
       .withIndex('by_view_activity', (x) => x.eq('view', view))
       .order('desc');
     const rows = view === 'den' ? await q.take(DEN_LIMIT) : await q.collect();
-    return rows.map(strip);
+    return rows.map(stripThread);
   },
 });
 
@@ -68,7 +76,7 @@ export const thread = query({
     for await (const m of ctx.db.query('messages').withIndex('by_thread_seq', (q) => q.eq('threadId', threadId))) {
       messages.push({ seq: m.seq, role: m.role, text: m.text, ...(m.origin ? { origin: m.origin } : {}), at: m.at });
     }
-    return { thread: strip(t), messages };
+    return { thread: stripThread(t), messages };
   },
 });
 
