@@ -3,7 +3,7 @@
 // Queries read the mirror; mutations only ever add a row to `commands`,
 // which the owning runner applies (step 3 of docs/convex-backend.md) and
 // marks done or failed. Nothing here touches a runner directly.
-import { ConvexError, v } from 'convex/values';
+import { ConvexError, v, type Infer } from 'convex/values';
 import { mutation, query, type QueryCtx } from './_generated/server';
 import type { Doc } from './_generated/dataModel';
 import { threadFields, views } from './schema';
@@ -33,12 +33,19 @@ function strip<T extends { _id: unknown; _creationTime: unknown }>(doc: T): Omit
   return rest;
 }
 
-// A thread row as the phone sees it. pushedAt is the mirror's own (push.ts)
-// and isn't in `row`: returning it fails the query's validator, which broke
-// the lists for every thread that had sent a push.
-function stripThread<T extends { _id: unknown; _creationTime: unknown; pushedAt?: number }>(doc: T): Omit<T, '_id' | '_creationTime' | 'pushedAt'> {
-  const { _id, _creationTime, pushedAt, ...rest } = doc;
-  return rest;
+// A thread row as the phone sees it: only the fields `row` lists. The
+// mirror keeps fields of its own on the row (pushedAt and pushHeldAt from
+// push.ts, and whatever comes next), and returning one fails the query's
+// validator, which broke every phone's inbox twice: once for pushedAt on
+// 27 Oct, once for pushHeldAt on 29 Oct (a push held back while Mike was
+// at the Mac). So the row is picked by the validator's own keys, not
+// stripped of the ones known today.
+const PHONE_THREAD_KEYS = new Set([...Object.keys(threadFields), 'view']);
+type PhoneThread = Infer<typeof row>;
+function stripThread(doc: Doc<'threads'>): PhoneThread {
+  const out: Record<string, unknown> = {};
+  for (const [k, value] of Object.entries(doc)) if (PHONE_THREAD_KEYS.has(k) && value !== undefined) out[k] = value;
+  return out as PhoneThread;
 }
 
 // apiVersion is the backend's (version.ts), so the app can say "update
