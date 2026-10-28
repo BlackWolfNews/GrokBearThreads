@@ -94,6 +94,7 @@ if [ "$APP_ONLY" = 0 ]; then
     step "convex packages" "$ROOT" npm ci --no-audit --no-fund
   fi
   step "convex typecheck" "$ROOT" npm run convex:typecheck
+  step "web typecheck" "$ROOT" npm run web:typecheck
   step "runner unit tests" "$ROOT/runner" npm test
   [ "$QUICK" = 1 ] || step "runner deploy tests" "$ROOT/runner" bash test/deploy/run.sh
 fi

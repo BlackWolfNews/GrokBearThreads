@@ -216,6 +216,8 @@ final class AppModel {
     /// A runner restart that's waiting for threads to finish or under way,
     /// for the quiet banner (see `banner`).
     private(set) var restart = RunnerRestart()
+    /// The website's root, from runner.status (nil while sync is off).
+    private(set) var websiteURL: URL?
     /// The runner's own update (protocol "Runner updates"), for the rail's
     /// updates icon. Nil from a runner older than that.
     var runnerUpdates: RunnerUpdates?
@@ -1023,6 +1025,7 @@ final class AppModel {
                 let status = try await client.runnerStatus()
                 guard !Task.isCancelled, self.client === client else { return }
                 self.updateRestart { $0.status(status.pendingRestart, now: Date()) }
+                if self.websiteURL != status.websiteURL { self.websiteURL = status.websiteURL }
             } catch RPCError.server(let code, _) where code == -32601 {
                 // A runner older than runner.status: its notices are all there is.
             } catch {

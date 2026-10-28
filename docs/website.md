@@ -1,0 +1,65 @@
+# The website
+
+Threadbear in a browser, so a thread has a link you can paste anywhere:
+`https://opulent-moose-249.ap-southeast-2.convex.site/t/<threadId>`.
+Built 28 Oct 2026 (thread 66935d23).
+
+## What it is
+
+- `web/`: a small Vite + React app. The inbox, hibernating and den lists on
+  the left, a thread on the right (one column on a phone). A thread shows
+  the mirrored messages, its pending approval or question with buttons, a
+  composer, Load earlier messages, and Hibernate / Wake / To the den / Copy
+  link. Opening a thread marks it seen.
+- It's a client of the phone's API (`convex/phone.ts`, docs/convex-backend.md
+  section 6) and nothing else, so it sees exactly what the phone sees: the
+  newest 20 text messages per thread, no tool output or images. Everything
+  it does is a `commands` row the runner applies.
+- Hosted by `@convex-dev/static-hosting` on the same Convex deployment
+  (`convex/convex.config.ts` mounts it at `/`; our own HTTP routes would go
+  under `/api`). Unknown paths fall back to `index.html`, so `/t/<id>` works
+  cold.
+- The Mac app's thread `...` menu has **Copy web link**. It takes the site
+  from `runner.status`'s `sync.url` (`.convex.cloud` → `.convex.site`), so
+  it only shows while sync is on.
+
+## Signing in
+
+The browser holds a phone token (`convex/tokens.ts`), named `web-…`, in
+localStorage. Only someone logged in to the Convex team can issue one:
+
+    npm run web:sign-in                  # Chrome on this Mac, prod, 90 days
+    npm run web:sign-in -- --qr          # a QR code for another device
+    npm run web:sign-in -- --dev         # the dev deployment's site
+    npm run web:sign-in -- --local       # Vite on localhost:5181, dev data
+
+`web/scripts/sign-in.swift` puts the token in the link's `#fragment`, which
+browsers never send to a server; the page keeps it and wipes it from the
+address bar. The token is never printed. Revoke a browser with
+`npx convex run tokens:revoke '{"name":"web-mac"}' --prod`; it then shows
+the sign-in page. The page is `noindex` and sends no referrer.
+
+## Working on it
+
+    VITE_CONVEX_URL=https://earnest-puffin-640.ap-southeast-2.convex.cloud npm run web:dev
+    npm run web:sign-in -- --local
+
+The dev deployment has no threads unless a dev runner mirrors to it, so for
+a real look use prod data with a throwaway token (`--name web-test --days 1`,
+revoke after).
+
+**Deploying:** `npm run web:deploy` runs `convex deploy` (prod) and then
+uploads `web/dist`. It asks before pushing to prod; from an agent, answer
+through a pseudo-terminal (`(sleep 40; printf 'y\r') | script -q /dev/null
+npm run web:deploy`). For a site-only change,
+`npx static-hosting upload --build --build-command 'npm run web:build' --dist web/dist --prod`.
+A plain `npm run web:build` refuses to run without `VITE_CONVEX_URL`, which
+the static-hosting CLI sets: a build without it can't reach Convex.
+
+## Not done
+
+- A custom domain (e.g. threadbear.mikecann.app) instead of the
+  `.convex.site` host.
+- Signing in from a browser without the Mac to hand (e.g. approve a new
+  browser from the iPhone app).
+- Starting a new thread from the web (`phone:create` is there to use).

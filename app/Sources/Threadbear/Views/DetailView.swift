@@ -184,6 +184,10 @@ struct DetailView: View {
                         Button("Copy transcript as Markdown") { session?.copyTranscript() }
                         // So Mike can point an agent at this thread (`tb show <id>`).
                         Button("Copy thread id") { app.copyToPasteboard(thread.id) }
+                        // The thread on the website (docs/website.md), to paste anywhere.
+                        if let site = app.websiteURL {
+                            Button("Copy web link") { app.copyToPasteboard(site.appendingPathComponent("t").appendingPathComponent(thread.id).absoluteString) }
+                        }
                     }
                 } label: {
                     Label("More", systemImage: "ellipsis")

@@ -166,7 +166,7 @@ function ThreadList({ token, view, selected }: { token: string; view: View; sele
               <span className="title">{r.title || 'Untitled'}</span>
               <span className="when muted">{ago(r.lastActivityMs)}</span>
             </span>
-            <span className="preview muted">{r.working || r.preview}</span>
+            <span className="preview muted">{r.working || plain(r.preview)}</span>
           </a>
         </li>
       ))}
@@ -414,6 +414,16 @@ function CopyLink() {
 
 function originLabel(origin: string): string {
   return origin === 'phone' ? 'From the phone or web' : origin === 'schedule' ? 'Scheduled' : origin === 'runner' ? 'From Threadbear' : origin;
+}
+
+// The preview is the reply's first lines as Markdown; the list shows them as
+// plain text.
+function plain(md: string): string {
+  return md
+    .replace(/!?\[([^\]]*)\]\([^)]*\)/g, '$1')
+    .replace(/[*`#>]+/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
 }
 
 function shortPath(p: string): string {

@@ -8,12 +8,22 @@ public struct RunnerStatus: Sendable, Equatable, Decodable {
     /// Threads starting, running or waiting on Mike.
     public var running: [String]
     public var pendingRestart: PendingRestart?
+    /// The Convex deployment the runner mirrors to (`sync.url`), if sync is on.
+    public var syncURL: String?
 
-    public init(version: String = "", release: String? = nil, running: [String] = [], pendingRestart: PendingRestart? = nil) {
+    public init(version: String = "", release: String? = nil, running: [String] = [], pendingRestart: PendingRestart? = nil, syncURL: String? = nil) {
         self.version = version
         self.release = release
         self.running = running
         self.pendingRestart = pendingRestart
+        self.syncURL = syncURL
+    }
+
+    /// The website (docs/website.md) is served from the same deployment's
+    /// .convex.site host, so a thread's link is `<site>/t/<threadId>`.
+    public var websiteURL: URL? {
+        guard let syncURL, syncURL.contains(".convex.cloud") else { return nil }
+        return URL(string: syncURL.replacingOccurrences(of: ".convex.cloud", with: ".convex.site"))
     }
 
     public init(from decoder: Decoder) throws {
@@ -22,9 +32,12 @@ public struct RunnerStatus: Sendable, Equatable, Decodable {
         release = try? c.decodeIfPresent(String.self, forKey: .release)
         running = ((try? c.decodeIfPresent([String].self, forKey: .running)) ?? nil) ?? []
         pendingRestart = try? c.decodeIfPresent(PendingRestart.self, forKey: .pendingRestart)
+        syncURL = (try? c.decodeIfPresent(Sync.self, forKey: .sync))?.url
     }
 
-    enum CodingKeys: String, CodingKey { case version, release, running, pendingRestart }
+    private struct Sync: Decodable { var url: String? }
+
+    enum CodingKeys: String, CodingKey { case version, release, running, pendingRestart, sync }
 }
 
 public struct PendingRestart: Sendable, Equatable, Decodable {
