@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { ClaudeAdapter, alwaysAllow, modelChoices } from '../../src/adapters/claude/adapter.ts';
+import { ClaudeAdapter, alwaysAllow, modelChoices, terminalMcpTools } from '../../src/adapters/claude/adapter.ts';
 import type { SessionSink, AdapterOutput, ToolApprovalRequest } from '../../src/adapters/types.ts';
 import { ProcessRegistry } from '../../src/proc.ts';
 import { nullLogger } from '../../src/log.ts';
@@ -127,6 +127,18 @@ test('thread rules go to the CLI as allowedTools; messages carry the turn id', a
   session.send({ id: 'turn-1', text: 'hi', images: [] });
   await new Promise((r) => setImmediate(r));
   assert.equal(state.sent[0].uuid, 'turn-1');
+  state.close!();
+});
+
+// Without this the CLI nudged the model after every end_turn ("[Your
+// previous response had no visible output...]") and a throwaway line
+// landed under the real answer (28 Oct 2026).
+test('end_turn is a terminal MCP tool for the CLI, so its result ends the turn without a nudge', () => {
+  const { state } = start();
+  assert.equal(state.options.env.CLAUDE_CODE_TERMINAL_MCP_TOOLS, 'mcp__threadbear__end_turn');
+  assert.equal(terminalMcpTools(undefined), 'mcp__threadbear__end_turn');
+  assert.equal(terminalMcpTools(' mcp__other__finish , '), 'mcp__other__finish,mcp__threadbear__end_turn');
+  assert.equal(terminalMcpTools('mcp__threadbear__end_turn'), 'mcp__threadbear__end_turn');
   state.close!();
 });
 

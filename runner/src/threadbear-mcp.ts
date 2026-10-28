@@ -18,7 +18,7 @@ import { parseWhen, relativeFuture, relativeTime } from './when.ts';
 
 export { parseWhen, relativeFuture, relativeTime };
 import { RUNNER_VERSION, expandHome } from './config.ts';
-import { END_TURN_DESCRIPTION, END_TURN_TOOL } from './needs.ts';
+import { END_TURN_DESCRIPTION, END_TURN_TOOL, NO_REPLY, turnReply } from './needs.ts';
 import { asksForAppRestart, type AppRestarts } from './app-restarts.ts';
 import { PANEL_PLACES } from './panel-requests.ts';
 import type { PanelPlace } from './protocol.ts';
@@ -90,8 +90,51 @@ export function approvalTitle(name: string, input: Record<string, unknown>, find
   return t ? `Delete the thread "${t.title}"` : undefined;
 }
 
-export function buildThreadbearTools(control: ThreadControl, selfId: string, now: () => number = Date.now, schedules?: ScheduleControl, projects?: ProjectControl, appRestarts?: AppRestartControl) {
+// How long end_turn waits for its own call to reach the thread's events
+// before judging the turn (below).
+export const LAND_WAIT_MS = 1000;
+const LAND_POLL_MS = 50;
+
+export function buildThreadbearTools(
+  control: ThreadControl,
+  selfId: string,
+  now: () => number = Date.now,
+  schedules?: ScheduleControl,
+  projects?: ProjectControl,
+  appRestarts?: AppRestartControl,
+  opts: { sleep?: (ms: number) => Promise<void> } = {},
+) {
   const all = async (): Promise<ThreadSummary[]> => control.list(['inbox', 'snoozed', 'archived']);
+  const sleep = opts.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
+
+  // The current turn's events, oldest first: back a page at a time until
+  // its turn.started.
+  const turnEvents = async (): Promise<PersistedEvent[]> => {
+    const out: PersistedEvent[] = [];
+    let before: number | undefined;
+    for (let pages = 0; pages < 20; pages++) {
+      const page = await control.events(selfId, { beforeSeq: before, limit: 500 });
+      const evs = page.events as PersistedEvent[];
+      out.unshift(...evs);
+      if (!evs.length || page.firstSeq <= 1 || evs.some((e) => e.type === 'turn.started')) break;
+      before = page.firstSeq;
+    }
+    return out;
+  };
+
+  // Whether the turn has replied to Mike (needs.ts, turnReply). The SDK
+  // runs a tool call as soon as it reads it, at times a few frames ahead
+  // of the runner's event log, so wait (briefly) for this call to land:
+  // everything the agent said before it lands first. A call that never
+  // lands (a sub-agent's, which the events never see) is taken at its word.
+  const replied = async (): Promise<boolean> => {
+    let r = turnReply(await turnEvents(), SERVER_NAME);
+    for (let waited = 0; !r.landed && waited < LAND_WAIT_MS; waited += LAND_POLL_MS) {
+      await sleep(LAND_POLL_MS);
+      r = turnReply(await turnEvents(), SERVER_NAME);
+    }
+    return r.landed ? r.replied : true;
+  };
 
   // Full ids, or any unique prefix of one (the list shows 8 characters).
   const resolve = async (id: string | undefined): Promise<string> => {
@@ -547,6 +590,9 @@ export function buildThreadbearTools(control: ThreadControl, selfId: string, now
           .describe('true to archive this thread once the turn is over. Only when Mike has asked for this thread to be archived, and only with needs "nothing".'),
       },
       handle(async ({ needs, asks, archive }) => {
+        // No reply yet: refused, so the agent writes one. An error result
+        // also keeps the CLI from taking this call as the turn's end.
+        if (!(await replied())) throw new Error(NO_REPLY);
         // Asking Mike to Restart to Update means wanting to know when he
         // has, to check the change in the running app: the same as
         // wait_for_app_restart, unless that was already asked for.
@@ -555,9 +601,13 @@ export function buildThreadbearTools(control: ThreadControl, selfId: string, now
           if (!appRestarts.isWatching(selfId)) appRestarts.watch(selfId);
           restart = " You'll get a message here when the app restarts onto the new build.";
         }
+        // With the why, as the bare "End the turn now, with no more text"
+        // didn't stop Haiku repeating its reply under end_turn; the reason
+        // helps a little at most, and the CLI accepts the empty reply it
+        // asks for without a nudge (adapter.ts) (28 Oct 2026).
         return needs === 'you'
-          ? `Noted: this thread will wait in Needs you${archive ? ', and stays in the inbox, as it needs something from Mike' : ''}.${restart} End the turn now, with no more text.`
-          : `Noted: this thread is done${archive ? ', and will be archived once the turn is over' : ''}. End the turn now, with no more text.`;
+          ? `Noted: this thread will wait in Needs you${archive ? ', and stays in the inbox, as it needs something from Mike' : ''}.${restart} Stop here, with no more text: Mike has your reply, the asks go in a card under it, and anything written now lands as a second message.`
+          : `Noted: this thread is done${archive ? ', and will be archived once the turn is over' : ''}. Stop here, with no more text: Mike has your reply, and anything written now lands as a second message under it.`;
       }),
     ),
     ...(appRestarts

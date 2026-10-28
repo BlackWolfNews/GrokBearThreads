@@ -12,6 +12,7 @@ import { prepareImageForModel } from '../../media.ts';
 import { toolTitle, truncateInput } from '../../tools.ts';
 import { RUNNER_VERSION } from '../../config.ts';
 import { stripModelSuffix } from '../../accounts.ts';
+import { END_TURN_FULL_NAME } from '../../needs.ts';
 
 // Variables a parent Claude Code session sets for its own children. If the
 // runner was started from inside one (tests, a terminal in T3), they would
@@ -39,6 +40,22 @@ export function cliEnv(account: Account, base: NodeJS.ProcessEnv = process.env):
   else env.CLAUDE_CONFIG_DIR = account.configDir;
   env.CLAUDE_AGENT_SDK_CLIENT_APP = `threadbear-runner/${RUNNER_VERSION}`;
   return env;
+}
+
+// The MCP tools whose successful result ends a turn, for the CLI's
+// CLAUDE_CODE_TERMINAL_MCP_TOOLS (2.1.312; older CLIs ignore it). Without
+// it, a model that stops after a tool result with no text (end_turn is the
+// last thing in every turn, and the model obeys "no more text") is nudged
+// with "[Your previous response had no visible output. Please continue and
+// produce a user-visible response.]" and writes a throwaway "I've marked
+// this thread as done" under the real answer: 47 of the 52 such nudges in
+// Mike's local CLI transcripts followed an end_turn (28 Oct 2026). Named
+// there, end_turn's result lets the empty reply end the turn quietly. Any
+// names already in the variable stay.
+export function terminalMcpTools(base: string | undefined): string {
+  const names = (base ?? '').split(',').map((s) => s.trim()).filter(Boolean);
+  if (!names.includes(END_TURN_FULL_NAME)) names.push(END_TURN_FULL_NAME);
+  return names.join(',');
 }
 
 export function sdkPermissionMode(mode: PermissionMode): 'bypassPermissions' | 'default' {
@@ -183,10 +200,11 @@ class ClaudeSession implements AgentSession {
 
   start(): void {
     const { opts, deps } = this;
+    const env = cliEnv(opts.account);
     const options: Options = {
       cwd: opts.cwd,
       pathToClaudeCodeExecutable: deps.claudePath,
-      env: { ...cliEnv(opts.account), ...opts.env },
+      env: { ...env, CLAUDE_CODE_TERMINAL_MCP_TOOLS: terminalMcpTools(env.CLAUDE_CODE_TERMINAL_MCP_TOOLS), ...opts.env },
       settingSources: ['user', 'project', 'local'],
       systemPrompt: { type: 'preset', preset: 'claude_code', ...(opts.instructions ? { append: opts.instructions } : {}) },
       includePartialMessages: true,

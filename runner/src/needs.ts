@@ -3,11 +3,14 @@
 // section his own instructions ask every agent to end with. No model call:
 // the agent that did the work is the one that knows.
 
-import type { Ask, AskLink, NeedsWho } from './protocol.ts';
+import type { Ask, AskLink, NeedsWho, PersistedEvent } from './protocol.ts';
 
 export type Needs = { needs: NeedsWho; asks?: Ask[] };
 
 export const END_TURN_TOOL = 'end_turn';
+// As the CLIs name it: under threadbear-mcp.ts's SERVER_NAME, which lives
+// here too so the adapters needn't import the server.
+export const END_TURN_FULL_NAME = `mcp__threadbear__${END_TURN_TOOL}`;
 
 // Big enough for any real list; an agent that sends more is rambling.
 const MAX_ASKS = 10;
@@ -179,6 +182,7 @@ function askFrom(item: string): Ask {
 export const END_TURN_DESCRIPTION =
   'Says whether Mike has to do anything now that this turn is over, so Threadbear can put the thread in Needs you or leave it as done. ' +
   'Call it once, as the very last thing in every turn, after your final message, and write nothing after it. ' +
+  "It is refused until the turn has a reply: ordinary text from you after your last tool result (Threadbear's own tools aside), as Mike reads neither tool calls nor thinking as your answer. " +
   'needs "nothing" when the work is finished (or still going by itself) and nothing waits on Mike. ' +
   'needs "you" when it does: an approval, a decision, a key, something to look at, a question. Give one ask per thing he has to do, most blocking first. ' +
   'The asks are your "What I need from you" list: Mike reads and answers them in a card under your message, each drawn as one paragraph of message text, its action then its why, with its buttons under it. So don\'t also list them in your message. ' +
@@ -188,3 +192,77 @@ export const END_TURN_DESCRIPTION =
   'For a step he has to do himself, offer options like ["Done", "Can you do it?"] when you could plausibly do it yourself. ' +
   'archive: true archives this thread once the turn is over, with needs "nothing" only. Use it only when Mike asks for this thread to be archived; otherwise leave it out, as a thread that vanishes from his inbox when he hadn\'t finished with it is confusing. ' +
   'Sub-agents never call this; only the thread\'s own agent does.';
+
+// What end_turn says when the turn has no reply yet. An error result, so
+// the CLI doesn't take the call as the end of the turn (adapter.ts,
+// CLAUDE_CODE_TERMINAL_MCP_TOOLS) and the agent reads it.
+export const NO_REPLY =
+  "Not ended: Mike hasn't had a reply this turn. Since his message (or your last tool result) you have only called tools and thought, and he reads neither as your answer: thinking is folded away with the tool calls. " +
+  'Write your reply as ordinary text, then call end_turn again.';
+
+// Whether the turn so far has given Mike a reply, for end_turn to check
+// before it ends the turn. An agent that drafted its answer in thinking
+// and went straight to end_turn left him a folded work group and a card
+// of asks, twice in one thread (28 Oct 2026). `events` are the thread's
+// recent ones, oldest first; only those after the last turn.started count.
+export type TurnReply = {
+  // This end_turn call has reached the events (a tool.call for it with no
+  // result yet). The CLI writes a call before it runs the tool, so once it
+  // is there, so is everything the agent said before it.
+  landed: boolean;
+  // The agent's own assistant.text after its last tool result from a tool
+  // outside the threadbear server, and after the last message from Mike in
+  // the turn. The thread's own tools (pin, update_project, an earlier
+  // refused end_turn) say nothing he has to read, so a message, then pin,
+  // then end_turn is a turn that replied.
+  replied: boolean;
+};
+
+// Tools that do nothing Mike would want told about. ToolSearch loads a
+// deferred tool's schema (end_turn's, as often as not: "Hello.", then
+// ToolSearch for end_turn, then end_turn was refused for having worked
+// since the reply).
+const PLUMBING_TOOLS = new Set(['ToolSearch']);
+
+export function turnReply(events: PersistedEvent[], serverName = 'threadbear'): TurnReply {
+  const ownPrefix = `mcp__${serverName}__`;
+  const endTurn = `${ownPrefix}${END_TURN_TOOL}`;
+  let start = 0;
+  for (let i = events.length - 1; i >= 0; i--) {
+    if (events[i].type === 'turn.started') {
+      start = i + 1;
+      break;
+    }
+  }
+  const names = new Map<string, string>();
+  const open = new Set<string>(); // end_turn calls with no result yet
+  let lastText = 0;
+  let lastWork = 0;
+  let lastUser = 0;
+  for (const e of events.slice(start)) {
+    // A Codex child's items carry its prefix (<child>/<id>); Claude's
+    // sub-agents never reach the thread's events.
+    if ('itemId' in e && typeof e.itemId === 'string' && e.itemId.includes('/')) continue;
+    switch (e.type) {
+      case 'user.message':
+        lastUser = e.seq;
+        break;
+      case 'assistant.text':
+        lastText = e.seq;
+        break;
+      case 'tool.call':
+        names.set(e.itemId, e.name);
+        if (e.name === endTurn) open.add(e.itemId);
+        break;
+      case 'tool.result': {
+        const name = names.get(e.itemId);
+        open.delete(e.itemId);
+        if (name !== undefined && !name.startsWith(ownPrefix) && !PLUMBING_TOOLS.has(name)) lastWork = e.seq;
+        break;
+      }
+      default:
+        break;
+    }
+  }
+  return { landed: open.size > 0, replied: lastText > 0 && lastText > lastWork && lastText > lastUser };
+}

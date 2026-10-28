@@ -1045,6 +1045,30 @@ A turn the agent finished can say whether Mike has to do anything, so
   folder, a `.tandem` project) in its own app. The agent calls it last, after its final
   message. The tool's description says when, so a resumed session that
   kept its old system prompt still hears it.
+- **A reply first.** `end_turn` is refused (an error result) until the
+  turn has replied to Mike: an own `assistant.text` after the turn's last
+  `tool.result` from a tool outside the `threadbear` server, and after
+  its last `user.message`. The thread's own tools (`pin`,
+  `update_project`, a refused `end_turn`) and `ToolSearch` (which loads
+  a deferred tool's schema, often `end_turn`'s own) say nothing he has
+  to read, so a message, then `pin`, then `end_turn` is fine; a progress
+  line, then more work, then `end_turn` is not. An agent that drafted its answer in
+  thinking and went straight to `end_turn` left Mike a folded work group
+  and a card, twice in one thread (28 Oct 2026). The SDK runs a tool as
+  soon as it reads the call, at times a few frames ahead of the runner's
+  log, so the handler waits up to a second for its own call to land
+  before judging; one that never lands (a sub-agent's, which the events
+  never see) is acknowledged.
+- **Ending on the tool.** Claude Code nudges a model whose reply after a
+  tool result has no text ("[Your previous response had no visible
+  output. Please continue and produce a user-visible response.]"), and
+  `end_turn` is that tool result in every turn, so every Claude turn
+  ended with the nudge and a throwaway "I've marked this thread as done"
+  under the real answer. The runner names `end_turn` in the CLI's
+  `CLAUDE_CODE_TERMINAL_MCP_TOOLS`: a successful result from a tool named
+  there lets the model's empty reply end the turn quietly (CLI 2.1.312;
+  older CLIs ignore it and nudge as before). A refused `end_turn` is an
+  error result, which doesn't count.
 - **Archiving itself.** `end_turn` also takes `archive?: true`. With
   `needs: "nothing"`, a turn that completes archives its own thread once
   it's over, with a `system.note` saying why; the thread can't archive

@@ -15,14 +15,30 @@ function start(h: ReturnType<typeof makeHarness>, text = 'Fix the tests', extra:
 }
 
 function tools(h: ReturnType<typeof makeHarness>, selfId: string) {
-  const list = buildThreadbearTools(h.runner, selfId, () => Date.parse('2026-10-26T12:00:00Z'));
+  // end_turn's wait for its own call to land is counted, not slept.
+  const slept: number[] = [];
+  const list = buildThreadbearTools(h.runner, selfId, () => Date.parse('2026-10-26T12:00:00Z'), undefined, undefined, undefined, {
+    sleep: async (ms) => {
+      slept.push(ms);
+    },
+  });
   const call = async (name: string, args: Record<string, unknown> = {}) => {
     const t = list.find((x) => x.name === name);
     assert.ok(t, `tool ${name}`);
     const r = (await t.handler(args as never, {})) as { content: { text: string }[]; isError?: boolean };
     return { text: r.content.map((c) => c.text).join('\n'), error: Boolean(r.isError) };
   };
-  return { list, call };
+  return { list, call, slept };
+}
+
+// What the CLI has told the runner by the time the end_turn handler runs:
+// the agent's text (if any), then the end_turn call itself.
+const END_TURN = 'mcp__threadbear__end_turn';
+function toolCall(s: ReturnType<typeof makeHarness>['adapter']['last'], itemId: string, name: string, input: Record<string, unknown> = {}) {
+  s.out({ kind: 'event', event: { type: 'tool.call', itemId, name, kind: name === 'Bash' ? 'command' : 'mcp', title: name, input } });
+}
+function toolResult(s: ReturnType<typeof makeHarness>['adapter']['last'], itemId: string) {
+  s.out({ kind: 'event', event: { type: 'tool.result', itemId, ok: true, text: 'ok', truncated: false, images: [] } });
 }
 
 // ------------------------------------------------------------ transcripts
@@ -408,17 +424,84 @@ test('pools in the tools: list_accounts prints them, create_thread and update_th
 
 test('end_turn only acknowledges; its description says when to call it', async () => {
   const h = makeHarness();
-  const { thread } = start(h);
-  const { list, call } = tools(h, thread.id);
+  const { thread, s } = start(h);
+  const { list, call, slept } = tools(h, thread.id);
   const t = list.find((x) => x.name === 'end_turn')!;
   assert.match(t.description, /last thing in every turn/);
+  assert.match(t.description, /refused until the turn has a reply/);
   assert.match(t.description, /Sub-agents never call this/);
+  s.text('m1', 'Yes or no?');
+  toolCall(s, 'e1', END_TURN, { needs: 'you' });
   const r = await call('end_turn', { needs: 'you', asks: [{ action: 'Say yes' }] });
   assert.equal(r.error, false);
   assert.match(r.text, /Needs you/);
+  toolResult(s, 'e1');
+  toolCall(s, 'e2', END_TURN, { needs: 'nothing' });
   assert.match((await call('end_turn', { needs: 'nothing' })).text, /done/);
+  assert.deepEqual(slept, [], 'the call had landed; nothing to wait for');
   // The runner reads the call from the thread's events, not the handler.
   assert.equal(h.runner.get(thread.id).needs, undefined);
+});
+
+// An agent drafted its answer in thinking, ran two commands and called
+// end_turn; Mike saw a folded work group and a card, twice (28 Oct 2026).
+test('end_turn is refused until the turn has replied to Mike in text', async () => {
+  const h = makeHarness();
+  const { thread, s } = start(h);
+  const { call, slept } = tools(h, thread.id);
+  toolCall(s, 'b1', 'Bash', { command: 'grep sammy' });
+  toolResult(s, 'b1');
+  toolCall(s, 'e1', END_TURN, { needs: 'nothing' });
+  let r = await call('end_turn', { needs: 'nothing' });
+  assert.equal(r.error, true);
+  assert.match(r.text, /hasn't had a reply this turn/);
+  assert.match(r.text, /Write your reply as ordinary text, then call end_turn again/);
+  toolResult(s, 'e1');
+  // A progress line before more work isn't the reply either.
+  s.text('m1', 'Found it, one more check.');
+  toolCall(s, 'b2', 'Bash', { command: 'git log' });
+  toolResult(s, 'b2');
+  toolCall(s, 'e2', END_TURN, { needs: 'nothing' });
+  r = await call('end_turn', { needs: 'nothing' });
+  assert.equal(r.error, true);
+  toolResult(s, 'e2');
+  // The reply, then one of Threadbear's own tools, then end_turn: fine.
+  s.text('m2', 'No, the camera is not where the delay is.');
+  toolCall(s, 'p1', 'mcp__threadbear__pin', { url: '/tmp/x.png' });
+  toolResult(s, 'p1');
+  toolCall(s, 'e3', END_TURN, { needs: 'nothing' });
+  r = await call('end_turn', { needs: 'nothing' });
+  assert.equal(r.error, false);
+  assert.match(r.text, /done/);
+  assert.deepEqual(slept, []);
+});
+
+// The SDK runs the tool as soon as it reads the call, so the handler can run
+// before the runner has logged the frames before it.
+test("end_turn waits for its own call to land, and takes a call that never lands (a sub-agent's) at its word", async () => {
+  const h = makeHarness();
+  const { thread, s } = start(h);
+  const { call, slept } = tools(h, thread.id);
+  // The text and the call arrive while the handler is waiting.
+  let polls = 0;
+  const late = buildThreadbearTools(h.runner, thread.id, Date.now, undefined, undefined, undefined, {
+    sleep: async () => {
+      if (++polls === 3) {
+        s.text('m1', 'All done.');
+        toolCall(s, 'e1', END_TURN, { needs: 'nothing' });
+      }
+    },
+  }).find((x) => x.name === 'end_turn')!;
+  const r = (await late.handler({ needs: 'nothing' } as never, {})) as { isError?: boolean };
+  assert.equal(r.isError, undefined);
+  assert.equal(polls, 3);
+  // Never lands: acknowledged after the wait, as the events can't judge it.
+  toolResult(s, 'e1');
+  toolCall(s, 'b1', 'Bash', { command: 'ls' });
+  toolResult(s, 'b1');
+  const r2 = await call('end_turn', { needs: 'nothing' });
+  assert.equal(r2.error, false);
+  assert.ok(slept.length >= 20 && slept.every((ms) => ms === 50), `waited about a second in short sleeps: ${slept.length}`);
 });
 
 // ------------------------------------------------------------ instructions
