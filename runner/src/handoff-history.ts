@@ -6,7 +6,7 @@
 // mid-task knows what was already tried. The last user message, the last
 // reply and the thread's first message go in first; the rest fill the
 // budget from newest to oldest. Shown in the order they happened.
-import type { PersistedEvent } from './protocol.ts';
+import { sentByAgent, type PersistedEvent } from './protocol.ts';
 
 export const HANDOFF_BUDGET = 16000;
 const MESSAGE_CHARS = 2000;
@@ -26,7 +26,10 @@ export function historyItems(events: PersistedEvent[], skipTurnId?: string): Ite
   for (const e of events) {
     if (e.type === 'user.message') {
       if (skipTurnId && e.turnId === skipTurnId) continue;
-      items.push({ seq: e.seq, role: 'user', text: `User: ${clip(e.text, MESSAGE_CHARS)}` });
+      // An agent's message (another thread's, or a move's `then`) isn't
+      // Mike's, though it came in as one.
+      const who = !e.origin && sentByAgent(e.text) ? 'Agent message' : 'User';
+      items.push({ seq: e.seq, role: 'user', text: `${who}: ${clip(e.text, MESSAGE_CHARS)}` });
     } else if (e.type === 'assistant.text') {
       if (e.text.trim()) items.push({ seq: e.seq, role: 'assistant', text: `Assistant: ${clip(e.text, MESSAGE_CHARS)}` });
     } else if (e.type === 'tool.call') {

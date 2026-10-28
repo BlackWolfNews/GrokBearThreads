@@ -83,31 +83,44 @@ public struct UserMessage: Sendable, Hashable {
     public var scheduledHeader: ScheduledHeader? { isFromSchedule ? ScheduledHeader(text) : nil }
 
     /// Sent by another thread's agent (its `send_message` or
-    /// `create_thread`): drawn as a card from that thread, not Mike's bubble.
-    /// The runner gives these no origin, so the header line is what says so.
+    /// `create_thread`), or by this thread's own agent as the `then` of a
+    /// `move_thread`: drawn as a card, not Mike's bubble. The runner gives
+    /// these no origin, so the header line is what says so.
     public var agentHeader: AgentHeader? { origin == nil ? AgentHeader(text) : nil }
 }
 
 /// The line the runner starts a message from another thread's agent with,
-/// `[Sent by the agent in the thread "<title>" (<id8>)]`
+/// `[Sent by the agent in the thread "<title>" (<id8>)]`, or the `then` of
+/// a thread's own move, `[Sent by the agent before moving to <folder>]`
 /// (docs/protocol.md, "Threadbear tools").
 public struct AgentHeader: Sendable, Hashable {
+    /// The sending thread's title and id (its first 8 characters); empty
+    /// for a move's `then`, which this thread's agent sent.
     public var title: String
-    /// The sending thread's id, its first 8 characters.
     public var threadId: String
+    /// For a move's `then`: the folder the thread moved to.
+    public var movedTo: String?
     /// The message without the header line.
     public var body: String
 
     public init?(_ text: String) {
         let lines = text.split(separator: "\n", maxSplits: 1, omittingEmptySubsequences: false)
-        let prefix = "[Sent by the agent in the thread \""
-        guard let first = lines.first?.trimmingCharacters(in: .whitespaces),
-              first.hasPrefix(prefix), first.hasSuffix(")]") else { return nil }
-        let inner = first.dropFirst(prefix.count).dropLast(2)
-        // The title may hold quotes and brackets; the id never holds `" (`.
-        guard let split = inner.range(of: "\" (", options: .backwards) else { return nil }
-        title = String(inner[..<split.lowerBound])
-        threadId = String(inner[split.upperBound...])
+        guard let first = lines.first?.trimmingCharacters(in: .whitespaces) else { return nil }
+        let thread = "[Sent by the agent in the thread \""
+        let move = "[Sent by the agent before moving to "
+        if first.hasPrefix(thread), first.hasSuffix(")]") {
+            let inner = first.dropFirst(thread.count).dropLast(2)
+            // The title may hold quotes and brackets; the id never holds `" (`.
+            guard let split = inner.range(of: "\" (", options: .backwards) else { return nil }
+            title = String(inner[..<split.lowerBound])
+            threadId = String(inner[split.upperBound...])
+        } else if first.hasPrefix(move), first.hasSuffix("]"), first.count > move.count + 1 {
+            title = ""
+            threadId = ""
+            movedTo = String(first.dropFirst(move.count).dropLast())
+        } else {
+            return nil
+        }
         body = lines.count > 1 ? String(lines[1]).trimmingCharacters(in: .newlines) : ""
     }
 }

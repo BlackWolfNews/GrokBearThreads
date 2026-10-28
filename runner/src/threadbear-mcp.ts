@@ -12,7 +12,7 @@ import type { Runner } from './runner.ts';
 import type { Account, EffortLevel, PersistedEvent, Schedule, ThreadSummary } from './protocol.ts';
 import { usageLine } from './usage.ts';
 import { findPool, poolLine } from './pools.ts';
-import { AGENT_MESSAGE_PREFIX, EFFORT_LEVELS } from './protocol.ts';
+import { AGENT_MESSAGE_PREFIX, EFFORT_LEVELS, MOVE_MESSAGE_PREFIX, sentByAgent } from './protocol.ts';
 import type { Scheduler } from './schedules.ts';
 import type { Projects } from './projects.ts';
 import { parseWhen, relativeFuture, relativeTime } from './when.ts';
@@ -672,9 +672,10 @@ export function buildThreadbearTools(
           const evs = page.events as PersistedEvent[];
           for (const e of [...evs].reverse()) {
             if (picked.length >= want) break;
-            // The runner's own messages (the resume after a restart) aren't
-            // Mike's, and an agent shouldn't take them for his instructions.
-            if (e.type === 'user.message') picked.push(`${e.origin === 'runner' ? 'Runner' : e.origin === 'schedule' ? 'Schedule' : 'Mike'} (${e.ts}):\n${clip(e.text)}`);
+            // The runner's own messages (the resume after a restart) and
+            // agents' aren't Mike's, and an agent shouldn't take them for
+            // his instructions.
+            if (e.type === 'user.message') picked.push(`${e.origin === 'runner' ? 'Runner' : e.origin === 'schedule' ? 'Schedule' : !e.origin && sentByAgent(e.text) ? 'Agent' : 'Mike'} (${e.ts}):\n${clip(e.text)}`);
             else if (e.type === 'assistant.text') picked.push(`Agent (${e.ts}):\n${clip(e.text)}`);
           }
           if (!evs.length || page.firstSeq <= 1) break;
@@ -797,7 +798,7 @@ export function buildThreadbearTools(
         const t = (await control.update({ threadId: id, cwd, accountId: await account(acc) })).thread;
         const self = id === selfId;
         if (then?.trim()) {
-          await control.send(id, `[Sent by the agent before moving to ${t.cwd}]\n\n${then.trim()}`);
+          await control.send(id, `${MOVE_MESSAGE_PREFIX}${t.cwd}]\n\n${then.trim()}`);
         }
         const when = self ? 'when this turn ends' : 'on its next message';
         const next = then?.trim() ? (self ? ' It carries on by itself straight after.' : ' Your message waits for it.') : self ? ' It waits for Mike after that.' : '';

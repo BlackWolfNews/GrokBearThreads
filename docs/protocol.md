@@ -1779,7 +1779,12 @@ the requests above, so once a restart has begun `create_thread` and
 to another thread (or as a new thread's first message) start with a line
 saying which thread sent them, `[Sent by the agent in the thread "<title>"
 (<id8>)]` (on one line); the app draws such a message as a card from that
-thread rather than as Mike's. `delete_thread` always asks for approval,
+thread rather than as Mike's. The `then` a thread's agent gives
+`move_thread` starts with `[Sent by the agent before moving to <folder>]`
+instead, and the app draws it as a card from the thread's own agent. The
+runner doesn't take either kind for Mike's: they leave reviews open and
+don't stop a turn for a waiting login switch, and `read_thread` and the
+handoff note label them as the agent's. `delete_thread` always asks for approval,
 even in a thread with full access, and no tool can delete, interrupt, snooze
 or archive the thread that's calling it; `tb` inside a thread refuses the
 same. There's no tool for restarting the runner: that's `runner.restart`.

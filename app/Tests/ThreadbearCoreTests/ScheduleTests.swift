@@ -202,6 +202,18 @@ final class ScheduleTests: XCTestCase {
         XCTAssertNotNil(UserMessage(text: "[Sent by the agent in the thread \"T\" (12345678)]\n\nGo.").agentHeader)
         XCTAssertNil(UserMessage(text: "[Sent by the agent in the thread \"T\" (12345678)]", origin: "phone").agentHeader)
         XCTAssertFalse(UserMessage(text: "[Sent by the agent in the thread \"T\" (12345678)]").showsAsNote)
+        XCTAssertNil(header.movedTo)
+    }
+
+    func testMoveThenHeader() throws {
+        let header = try XCTUnwrap(AgentHeader("[Sent by the agent before moving to /Users/m/dev/threadbear]\n\nCarry on with the tests."))
+        XCTAssertEqual(header.movedTo, "/Users/m/dev/threadbear")
+        XCTAssertEqual(header.threadId, "")
+        XCTAssertEqual(header.body, "Carry on with the tests.")
+        XCTAssertNotNil(UserMessage(text: "[Sent by the agent before moving to /tmp]\n\nGo.").agentHeader)
+        XCTAssertNil(UserMessage(text: "[Sent by the agent before moving to /tmp]\n\nGo.", origin: "phone").agentHeader)
+        XCTAssertNil(AgentHeader("[Sent by the agent before moving to ]"))
+        XCTAssertNil(AgentHeader("[Sent by the agent before moving to /tmp"))
     }
 
     func testStartedByScheduleTip() {

@@ -273,6 +273,24 @@ test('move_thread on itself switches folder after the turn and carries on with `
   assert.equal((await t.call('move_thread', { folder: '/definitely/not/here' })).error, true);
 });
 
+test("move_thread's `then` to another login isn't taken for Mike: the turn finishes, then it carries on there", async () => {
+  const h = makeHarness(undefined, {}, { accounts: new FakeAccounts(withCodex()) });
+  const { thread: me, s } = start(h, 'Move me');
+  const t = tools(h, me.id);
+  const r = await t.call('move_thread', { folder: '.', account: 'codex-main', then: 'Carry on with the tests' });
+  assert.equal(r.error, false, r.text);
+  await tick();
+  // As Mike's message it stopped the turn that sent it ("Stopped here so … can take over").
+  assert.equal(s.interrupts, 0, 'the running turn is left alone');
+  s.result();
+  await tick();
+  const first = h.codex.last.sent[0].text;
+  assert.match(first, /^\[Threadbear handoff\][\s\S]*\[Sent by the agent before moving to .*\]\n\nCarry on with the tests$/);
+  const read = (await t.call('read_thread', { messages: 5 })).text;
+  assert.match(read, /Agent \([^)]*\):\n\[Sent by the agent before moving to /);
+  assert.doesNotMatch(read, /Mike \([^)]*\):\n\[Sent by the agent/);
+});
+
 test('interrupt and delete refuse this thread and work on others', async () => {
   const h = makeHarness();
   const { thread: me } = start(h, 'Me');

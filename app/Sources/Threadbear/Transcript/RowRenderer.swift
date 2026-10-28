@@ -489,14 +489,22 @@ enum RowRenderer {
     /// A message another thread's agent sent: a card, left-aligned so it
     /// can't pass for Mike's bubble, headed by the thread it came from. The
     /// thread's name is a chip (when the thread still exists), so a click
-    /// opens it. The header line itself isn't repeated.
+    /// opens it. The header line itself isn't repeated. A move's `then` is
+    /// the same card, from this thread's own agent: as Mike's bubble, he
+    /// asked why a message he never wrote was there.
     static func agentMessageText(_ header: AgentHeader) -> NSAttributedString {
         let attributes = Theme.text(Theme.smallFont, color: Theme.faintText, line: TypeScale.scaled(17), spacing: zoomed(8))
-        let text = NSMutableAttributedString(attributedString: symbol("arrow.turn.down.right", label: "From another thread", font: Theme.smallFont, attributes: attributes))
-        text.append(NSAttributedString(string: " From the agent in ", attributes: attributes))
-        var name = attributes
-        name[.tbThreadRef] = header.threadId
-        text.append(NSAttributedString(string: header.title.isEmpty ? header.threadId : header.title, attributes: name))
+        let text: NSMutableAttributedString
+        if let folder = header.movedTo {
+            text = NSMutableAttributedString(attributedString: symbol("folder", label: "After a move", font: Theme.smallFont, attributes: attributes))
+            text.append(NSAttributedString(string: " Left by this thread's agent when it moved to \((folder as NSString).abbreviatingWithTildeInPath)", attributes: attributes))
+        } else {
+            text = NSMutableAttributedString(attributedString: symbol("arrow.turn.down.right", label: "From another thread", font: Theme.smallFont, attributes: attributes))
+            text.append(NSAttributedString(string: " From the agent in ", attributes: attributes))
+            var name = attributes
+            name[.tbThreadRef] = header.threadId
+            text.append(NSAttributedString(string: header.title.isEmpty ? header.threadId : header.title, attributes: name))
+        }
         let body = header.body.trimmingCharacters(in: .whitespacesAndNewlines)
         if !body.isEmpty {
             text.append(NSAttributedString(string: "\n", attributes: attributes))

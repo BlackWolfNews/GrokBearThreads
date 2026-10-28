@@ -40,7 +40,7 @@ import type {
   ThreadSummary,
   TurnOutcome,
 } from './protocol.ts';
-import { AGENT_MESSAGE_PREFIX, ErrorCode, LIMITS, PROTOCOL_VERSION, RpcError } from './protocol.ts';
+import { ErrorCode, LIMITS, PROTOCOL_VERSION, RpcError, sentByAgent } from './protocol.ts';
 import type { LibrarianStatus, Project, Schedule } from './protocol.ts';
 import type { Projects } from './projects.ts';
 import type { Settings } from './settings.ts';
@@ -4260,10 +4260,12 @@ export class Runner {
 export type SendOptions = { origin?: MessageOrigin; scheduleId?: string; queue?: boolean; answers?: AskAnswer[] };
 
 // Typed by Mike, at the Mac or on his phone: not the runner's, a
-// schedule's or another thread's agent's.
+// schedule's or an agent's (another thread's, or this one's own `then`
+// from move_thread, which once stopped the turn that sent it on a move to
+// another login).
 function fromMike(text: string, opts: SendOptions): boolean {
   if (opts.origin && opts.origin !== 'phone') return false;
-  return !text.startsWith(AGENT_MESSAGE_PREFIX);
+  return !sentByAgent(text);
 }
 
 // What a pool thread is told when it carries on by itself after its login
