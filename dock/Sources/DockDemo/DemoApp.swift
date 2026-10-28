@@ -80,6 +80,8 @@ enum Demo {
     }
 
     static func save(_ layout: DockLayout) {
+        // A fresh run (screenshots, tests) leaves the saved layout alone.
+        guard ProcessInfo.processInfo.environment["BEARDOCK_FRESH"] == nil else { return }
         UserDefaults.standard.set(try? JSONEncoder().encode(layout), forKey: key)
     }
 }
@@ -118,6 +120,7 @@ struct DemoView: View {
             }
         }
         .task { await FrozenDrag.run(dock) }
+        .task { await ScriptedEvents.run() }
     }
 }
 

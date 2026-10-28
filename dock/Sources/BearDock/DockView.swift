@@ -103,6 +103,7 @@ struct SplitView: View {
                             DragGesture(minimumDistance: 1)
                                 .onChanged { value in
                                     let start = startFractions ?? split.fractions
+                                    if startFractions == nil, ProcessInfo.processInfo.environment["BEARDOCK_LOG"] != nil { print("divider \(split.id) \(i) from \(value.startLocation)") }
                                     if startFractions == nil { startFractions = start }
                                     let t = split.axis == .horizontal ? value.translation.width : value.translation.height
                                     controller.layout.setFractions(split: split.id, Self.resized(start, at: i, by: t / max(available, 1), min: 80 / max(available, 1)))
@@ -193,6 +194,11 @@ struct GroupView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .clipped()
                 .contentShape(Rectangle())
+                // A plain .gesture, the lowest priority: any drag the panel's
+                // own content handles (reordering rows, a slider, a text
+                // selection, a web view) wins, so only a drag on its
+                // background moves the panel. `dockDragDisabled()` stops it
+                // for a region that has nothing of its own.
                 .gesture(dragGesture(controller: controller, panel: group.selected))
                 .opacity(lifted ? 0.18 : 1)
                 .scaleEffect(lifted ? 0.985 : 1)
@@ -250,6 +256,9 @@ private struct GroupHeader: View {
         }
         .padding(.horizontal, 6)
         .frame(height: DockTheme.headerHeight)
+        // Anywhere on the bar picks up the panel showing, like a window's title bar.
+        .contentShape(Rectangle())
+        .gesture(dragGesture(controller: controller, panel: group.selected))
         .overlay(alignment: .bottom) {
             Rectangle().fill(Color.white.opacity(0.06)).frame(height: 1)
         }
@@ -298,6 +307,19 @@ private struct TabItem: View {
         .contentShape(Rectangle())
         .onHover { hovering = $0 }
         .onTapGesture { controller.select(panel) }
-        .gesture(dragGesture(controller: controller, panel: panel))
+        // Over the bar's own drag, so a tab that isn't showing can be pulled
+        // out directly. It needs 5 points of movement, so a click still
+        // selects the tab.
+        .highPriorityGesture(dragGesture(controller: controller, panel: panel))
+    }
+}
+
+extension View {
+    /// Keeps a region of a panel from picking the panel up when dragged,
+    /// for content with no drag of its own (a canvas, a read-only list)
+    /// where moving the panel would surprise. The header still moves it.
+    public func dockDragDisabled() -> some View {
+        // A drag that does nothing, nearer the pointer than the dock's.
+        gesture(DragGesture(minimumDistance: 0).onChanged { _ in })
     }
 }

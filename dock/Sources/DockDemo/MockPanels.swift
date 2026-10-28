@@ -126,14 +126,49 @@ private struct ConvexMock: View {
     }
 }
 
+/// Rows you can reorder by dragging them: a drag the panel handles itself,
+/// so it must win over the dock's. Dragging the space under the rows still
+/// moves the panel.
 private struct WorktreesMock: View {
+    @State private var rows = ["thread/419a9c2a  dock", "thread/89b52654  convex backend", "thread/2f1e77c0  pool settings", "thread/7c3d9e11  website"]
+    @State private var dragging: String?
+    @State private var offset: CGFloat = 0
+    private let rowHeight: CGFloat = 30
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            ForEach(["thread/419a9c2a  dock", "thread/89b52654  convex backend", "thread/2f1e77c0  pool settings"], id: \.self) { w in
+        VStack(alignment: .leading, spacing: 0) {
+            Text("Drag a row to reorder it")
+                .font(.system(size: 11)).foregroundStyle(faint)
+                .padding(.bottom, 6)
+            ForEach(rows, id: \.self) { w in
                 HStack(spacing: 8) {
-                    Image(systemName: "arrow.triangle.branch").font(.system(size: 11)).foregroundStyle(faint)
+                    Image(systemName: "line.3.horizontal").font(.system(size: 10)).foregroundStyle(faint)
                     Text(w).font(.system(size: 12, design: .monospaced)).lineLimit(1)
+                    Spacer()
                 }
+                .padding(.horizontal, 8)
+                .frame(height: rowHeight)
+                .background(RoundedRectangle(cornerRadius: 6).fill(Color.white.opacity(dragging == w ? 0.1 : 0.03)))
+                .padding(.vertical, 1)
+                .offset(y: dragging == w ? offset : 0)
+                .zIndex(dragging == w ? 1 : 0)
+                .gesture(
+                    DragGesture(minimumDistance: 3)
+                        .onChanged { v in
+                            dragging = w
+                            offset = v.translation.height
+                        }
+                        .onEnded { v in
+                            if let from = rows.firstIndex(of: w) {
+                                let to = max(0, min(rows.count - 1, from + Int((v.translation.height / (rowHeight + 2)).rounded())))
+                                withAnimation(.snappy) {
+                                    rows.move(fromOffsets: IndexSet(integer: from), toOffset: to > from ? to + 1 : to)
+                                    dragging = nil
+                                    offset = 0
+                                }
+                            }
+                        }
+                )
             }
             Spacer()
         }

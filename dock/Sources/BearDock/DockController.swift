@@ -74,6 +74,9 @@ public final class DockController {
     /// Each group's frame in the dock's coordinates, from the views.
     @ObservationIgnored var frames: [String: CGRect] = [:]
     @ObservationIgnored var bounds: CGRect = .zero
+    /// Set by Escape until the gesture that was cancelled ends.
+    @ObservationIgnored private var cancelled = false
+    @ObservationIgnored private var escapeMonitor: Any?
 
     // Feel. Tuned by eye in the demo.
     /// How far in from a group's side, as a share of its size, counts as that side.
@@ -95,6 +98,8 @@ public final class DockController {
     /// From a drag gesture on a panel's body or its tab. Locations are in the
     /// dock's coordinate space.
     public func dragChanged(panel: PanelID, start: CGPoint, location: CGPoint) {
+        // Escape put it back; the gesture keeps reporting until the button's up.
+        if cancelled { return }
         if drag == nil {
             guard landing == nil, let group = layout.group(containing: panel), let frame = frames[group.id] else { return }
             // A tab that isn't showing comes to the front as it's picked up.
@@ -107,6 +112,8 @@ public final class DockController {
                 location: location
             )
             NSCursor.closedHand.push()
+            watchForEscape()
+            if ProcessInfo.processInfo.environment["BEARDOCK_LOG"] != nil { print("lift \(panel) from \(start)") }
             withAnimation(Self.lift) { drag?.lifted = true }
         }
         drag?.location = location
@@ -117,10 +124,26 @@ public final class DockController {
     }
 
     public func dragEnded() {
+        if cancelled {
+            cancelled = false
+            return
+        }
         guard let d = drag else { return }
+        finish(d, drop: d.target?.drop)
+    }
+
+    /// Escape, mid-drag: the panel flies home and the rest of the gesture is ignored.
+    public func cancelDrag() {
+        guard let d = drag else { return }
+        cancelled = true
+        finish(d, drop: nil)
+    }
+
+    private func finish(_ d: DragState, drop: DockDrop?) {
         NSCursor.pop()
+        stopWatchingForEscape()
         let size = d.sourceFrame.size
-        if let drop = d.target?.drop, let to = d.target?.preview {
+        if let drop, let to = d.target?.preview {
             landing = Landing(panel: d.panel, sourceSize: size, to: to)
             withAnimation(Self.settle) {
                 drag = nil
@@ -128,7 +151,7 @@ public final class DockController {
                 landing?.done = true
             }
         } else {
-            // Nowhere to go: fly home.
+            // Nowhere to go, or cancelled: fly home.
             landing = Landing(panel: d.panel, sourceSize: size, to: frames[d.sourceGroup] ?? d.sourceFrame)
             withAnimation(Self.settle) {
                 drag = nil
@@ -139,6 +162,23 @@ public final class DockController {
             try? await Task.sleep(for: .milliseconds(300))
             withAnimation(.easeOut(duration: 0.12)) { self.landing = nil }
         }
+    }
+
+    /// A key monitor only while a drag's in progress, so Escape reaches the
+    /// dock whatever has focus, and is swallowed rather than also closing a
+    /// sheet or clearing a field.
+    private func watchForEscape() {
+        guard escapeMonitor == nil else { return }
+        escapeMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            guard event.keyCode == 53, let self else { return event }
+            MainActor.assumeIsolated { self.cancelDrag() }
+            return nil
+        }
+    }
+
+    private func stopWatchingForEscape() {
+        if let m = escapeMonitor { NSEvent.removeMonitor(m) }
+        escapeMonitor = nil
     }
 
     /// A panel's group's frame in the dock, for tests and the demo's

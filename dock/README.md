@@ -13,9 +13,16 @@ real window.
   tidied: no empty groups, no one-child splits, and a split directly inside
   another along the same axis is flattened into it. It's `Codable`, so the
   demo saves it between launches.
-- **Dragging** a panel's body or its tab lifts it: the panel shrinks to
-  about 240 points wide under the pointer, with the spot you grabbed kept
-  under it, and leaves a dashed hole behind.
+- **Dragging** a panel's title bar, a tab, or the panel's background lifts
+  it: the panel shrinks to about 240 points wide under the pointer, with the
+  spot you grabbed kept under it, and leaves a dashed hole behind. A tab
+  that isn't showing can be pulled out directly. Escape puts it back.
+- **A panel's own drags win.** The dock's drag is the lowest priority
+  gesture on the panel, so content that handles a drag itself (reordering
+  rows, a slider, a web view) keeps it, and only the background moves the
+  panel. The demo's Worktrees rows reorder to show it. For a region with no
+  drag of its own that still shouldn't move the panel, use
+  `.dockDragDisabled()`.
 - **Over another panel**, the side you're nearest (within 28% of it) lights
   up: dropping there splits that panel's space in half.
 - **In the middle** of a panel a compass appears: dock above, below, left
@@ -32,3 +39,15 @@ The feel lives in a few constants at the top of `DockController`
 For screenshots without touching the mouse, `BEARDOCK_FREEZE` holds a drag
 of Highlights mid-air: `edge`, `compass`, `compass-left`, `window`, or any of
 those with `+drop` to let go.
+
+To test the real gestures, `BEARDOCK_EVENTS` sends real mouse and key events
+through the app, in a test window that takes the first click so the app
+needn't be active (see `ScriptedEvents.swift`). Add `BEARDOCK_FRESH=1` to
+start from the default layout without saving, `BEARDOCK_QUIT=1` to quit at
+the end, and `BEARDOCK_LOG=1` to print what each drag picked up:
+
+```sh
+BEARDOCK_FRESH=1 BEARDOCK_QUIT=1 BEARDOCK_LOG=1 \
+  BEARDOCK_EVENTS="down 1037 515;drag 641 471;esc;up;shot /tmp/after-escape.png" \
+  .build/debug/DockDemo
+```
