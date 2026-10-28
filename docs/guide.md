@@ -222,7 +222,14 @@ never sees what a notification says.
   safe, since your threads keep running without it. If the app says it
   can't reach the runner, click Start runner.
 
-## The tour
+## The tour and Finish setting up
 
 The first time the app opens it shows you round the window, one part at a
 time. Help > Take the Tour runs it again.
+
+The tour ends on Finish setting up, a short list of what's left after
+setup: start your first thread (which shows your login works), allow
+notifications, pair your iPhone and open your website. Each item ticks
+itself off once it's done, and its icon on the left goes when they all
+have. Hide this list puts it away, and Help > Finish Setting Up brings it
+back.

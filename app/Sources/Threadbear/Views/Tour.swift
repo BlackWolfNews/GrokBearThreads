@@ -15,8 +15,8 @@ enum TourTarget: Hashable {
     case highlights
     case highlightsRail
     case usage
-    /// The gear at the foot of the activity bar.
-    case settings
+    /// Finish setting up's icon, while it has something left.
+    case setup
 }
 
 /// Which side of what it points at the tour's card goes, in the order
@@ -64,10 +64,8 @@ final class Tour {
                  body: "Files, links and questions the agent pins for you, so you don't have to dig through the thread for them."),
         TourStep(targets: [.usage], title: "Usage",
                  body: "How much room each of your logins has left before it hits its limit."),
-        // Pairing and signing in live in Settings, where a new user
-        // wouldn't think to look for them.
-        TourStep(targets: [.settings], title: "Your phone and a browser",
-                 body: "Settings › Phone & browser pairs the iPhone app and signs a browser in to your threads' website."),
+        TourStep(targets: [.setup], title: "Finish setting up",
+                 body: "What's left to do, like pairing your phone. Each one ticks itself off once it's done."),
         TourStep(title: "That's the lot",
                  body: "Drag any panel by its bar to move it where you like. You can take this tour again from the Help menu.", bear: .sit),
     ]
@@ -236,6 +234,7 @@ private struct Spotlight: Shape {
 }
 
 private struct TourCard: View {
+    @Environment(AppModel.self) private var app
     let step: TourStep
     let index: Int
     let count: Int
@@ -281,6 +280,8 @@ private struct TourCard: View {
                 Button(tour.isLast ? "Done" : index == 0 ? "Show me" : "Next") {
                     if tour.isLast {
                         withAnimation(.easeOut(duration: 0.2)) { tour.finish() }
+                        // Straight on to what's left, while it's fresh.
+                        if app.setupShowsIcon { app.setupShown = true }
                     } else {
                         tour.next()
                     }

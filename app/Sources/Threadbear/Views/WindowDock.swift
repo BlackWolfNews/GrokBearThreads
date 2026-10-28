@@ -31,6 +31,9 @@ enum WindowDock {
     /// updates icon), open until Mike closes it.
     static let updates = "threadbear.updates"
     static let updatesSymbol = "arrow.down.circle"
+    /// Finish setting up (SetupChecklist), open until Mike closes it.
+    static let setup = "threadbear.setup"
+    static let setupSymbol = "checklist"
     static let layoutKey = "dockLayout"
     static let threadPanelPrefix = "threadbear.thread:"
 
@@ -90,7 +93,7 @@ enum WindowDock {
     /// A pane section's panel, or nil for the sidebar, the main panel, the
     /// review and a thread's own panel.
     static func section(_ panel: PanelID) -> PaneSection? {
-        panel == threads || panel == main || panel == review || panel == usage || panel == updates || pinnedThread(panel) != nil ? nil : PaneSection(id: panel)
+        panel == threads || panel == main || panel == review || panel == usage || panel == updates || panel == setup || pinnedThread(panel) != nil ? nil : PaneSection(id: panel)
     }
 
     @MainActor
@@ -106,6 +109,7 @@ enum WindowDock {
         case review: return app.reviewPanel?.review.title ?? "Review"
         case usage: return "Usage"
         case updates: return "Updates"
+        case setup: return "Finish setting up"
         default:
             break
         }
@@ -145,6 +149,7 @@ enum WindowDock {
         case review: return "rectangle.on.rectangle"
         case usage: return usageSymbol
         case updates: return updatesSymbol
+        case setup: return setupSymbol
         case PaneSection.highlightsId: return "pin"
         case PaneSection.patchesId: return "square.dashed"
         default:
@@ -183,6 +188,12 @@ extension AppModel {
         set { setShownUnderThreads(WindowDock.updates, newValue) }
     }
 
+    /// The same for Finish setting up.
+    var setupShown: Bool {
+        get { dock.isShowing(WindowDock.setup) }
+        set { setShownUnderThreads(WindowDock.setup, newValue) }
+    }
+
     /// Opens one of the activity bar's panels: as a tab beside the other
     /// if that's open (Usage and Updates share the space under the
     /// threads), else under the threads list, else down the left if the
@@ -190,7 +201,7 @@ extension AppModel {
     private func setShownUnderThreads(_ panel: PanelID, _ shown: Bool) {
         guard shown else { return dock.close(panel) }
         let under = dock.layout.group(containing: WindowDock.threads).map { DockDrop.edge(group: $0.id, .bottom) }
-        dock.show(panel, near: [WindowDock.usage, WindowDock.updates].filter { $0 != panel }, fallback: under ?? .window(.left))
+        dock.show(panel, near: [WindowDock.usage, WindowDock.updates, WindowDock.setup].filter { $0 != panel }, fallback: under ?? .window(.left))
     }
 }
 
@@ -306,6 +317,7 @@ struct RootView: View {
                 case WindowDock.threads: AnyView(SidebarView().tourTarget(.threads, withBar: true))
                 case WindowDock.usage: AnyView(UsagePanel())
                 case WindowDock.updates: AnyView(UpdatesPanel())
+                case WindowDock.setup: AnyView(SetupPanel())
                 case WindowDock.main: AnyView(DetailView())
                 case let id where WindowDock.pinnedThread(id) != nil:
                     AnyView(PinnedThreadView(threadId: WindowDock.pinnedThread(id)!).id(id))

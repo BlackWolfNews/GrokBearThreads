@@ -107,10 +107,17 @@ and the perf run stay away from the real one. Install the runner itself with
   and images stay in the box (or go back into it) and a banner says why.
 - **The tour.** The first time the app connects to a runner it dims the
   window and lights up its parts one at a time (the views down the left,
-  the threads, the composer, its access chip, Highlights, Usage, and the
-  Settings gear for Phone & browser) with a card beside each.
+  the threads, the composer, its access chip, Highlights, Usage and Finish
+  setting up) with a card beside each.
   Return goes on, Esc skips it, and Help > Take the Tour runs it again.
   It only points at things; it never starts a thread.
+- **Finish setting up.** While anything's left after setup, an icon on
+  the activity bar (with a count) opens a short checklist under the
+  threads: start your first thread (which shows the login works), allow
+  notifications, pair your iPhone and open your website. Each ticks itself
+  off from what the app already knows; the phone and website ones only show
+  once the threads are mirrored to Convex. The tour ends by opening it.
+  Hide this list puts it away; Help > Finish Setting Up brings it back.
 - **Snooze** from a row's hover button, the Thread menu, the ... menu or a
   row's right-click menu: 1 hour, this evening 6 pm, tomorrow 9 am, next
   Monday 9 am, or pick a time. The time is worked out when you choose, not
@@ -486,6 +493,7 @@ is an error. Commands marked "the open thread" act on `id` when it's given
 | `expand`, `collapse` | `row`, `file`, `all`, `section` | a group, tool, thinking block or settled approval (one folded in a closed group opens it); `file` (path or index) in a changes card; `all` for a whole diff; `section` (`inbox`, `running`) folds or opens an inbox heading, as clicking it does |
 | `scroll` | `to` (`top`, `bottom`) or `row`, `offset` | |
 | `hints` | `on` (default true) | shows the keys as if ⌘ were held, or hides them |
+| `setup` | `show`, `hidden`, `notifications` (`allowed`, `denied`, `notAsked`) | Finish setting up: opens or closes its panel, hides or unhides it, or stands in for macOS's notification answer (a dev app can't get one); says what's left, `[x]` on each item done, and whether the icon and panel are up |
 | `tour` | `do` (`start`, `next`, `back`, `end`) | the first-run tour (Help > Take the Tour): says the step, its title and the frame it lights up, or `off`. A scripted app never starts it by itself |
 | `hover` | `id` (sidebar) or `row` (transcript); neither clears | draws a row as if the pointer were on it |
 | `swipe` | `id`, `dx` (left negative), `steps`, `lift` (default true) | two fingers across a sidebar row, as synthetic trackpad events; `lift: false` leaves it part way for a shot. Says the offset, whether it's past the line, and whether it archived |

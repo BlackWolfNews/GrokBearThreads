@@ -410,6 +410,9 @@ async function dispatch(client, method, p) {
       const turnId = 'turn_' + crypto.randomBytes(4).toString('hex');
       // Answers from the card go on the user.message, as the runner keeps them.
       const extra = Array.isArray(p.answers) && p.answers.length ? { answers: p.answers } : {};
+      // As the runner has it once the CLI starts a session (the app's
+      // Finish setting up counts that as a login that works).
+      t.summary.nativeSessionId ??= 'mock-session-' + t.summary.id;
       setTimeout(() => fakeTurn(t.summary.id, p.text ?? '', p.images ?? [], turnId, undefined, extra), 10);
       return { turnId };
     }

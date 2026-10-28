@@ -91,6 +91,7 @@ struct ThreadbearApp: App {
             // Help has no help book to open: the tour is what there is.
             CommandGroup(replacing: .help) {
                 Button("Take the Tour") { Tour.shared.start() }
+                Button("Finish Setting Up") { app.showSetup() }
             }
             CommandMenu("Thread") {
                 Button(app.selectedThread?.isArchived == true ? "Unarchive" : "Archive") { app.toggleArchive() }
@@ -169,6 +170,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             app.notificationsEnabled = !scripted
             ShortcutHints.shared.install()
             if !scripted { Notifier.setUp(delegate: self) }
+            SetupState.shared.refreshNotifications()
             app.onThreadsLoaded = {
                 LaunchClock.threadsLoaded()
                 // After a restart the app made itself for an update: back
@@ -177,6 +179,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
                 // Someone's first launch: a look round the window, once
                 // it's drawn with their threads in it. Never in a scripted
                 // run (the automation's `tour` starts it there).
+                // The checklist's phone and website items need the list.
+                if !SetupState.shared.hidden { app.loadDevices() }
                 if !scripted {
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { Tour.shared.startIfNew() }
                 }
@@ -197,7 +201,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     }
 
     func applicationDidBecomeActive(_ notification: Notification) {
-        MainActor.assumeIsolated { AppModel.shared.appBecameActive() }
+        MainActor.assumeIsolated {
+            AppModel.shared.appBecameActive()
+            // Notifications may have been turned on in System Settings.
+            SetupState.shared.refreshNotifications()
+        }
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }

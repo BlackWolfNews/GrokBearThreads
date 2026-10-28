@@ -59,6 +59,8 @@ struct ActivityBar: View {
                 }
             }
             Spacer(minLength: zoomed(8))
+            // Only while something's left to set up and it isn't hidden.
+            SetupActivityButton()
             // Only while the app or the runner has an update on its way.
             UpdatesActivityButton()
             UsageActivityButton()
@@ -67,7 +69,6 @@ struct ActivityBar: View {
             ActivityButton(symbol: "gearshape", title: "Settings", shortcut: "⌘,", active: false) {
                 openSettings()
             }
-            .tourTarget(.settings)
         }
         .environment(\.sidebarRowSpace, activeSpace)
         .animation(Juice.selection, value: app.sidebarMode)

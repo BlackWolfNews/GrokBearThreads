@@ -624,6 +624,26 @@ enum Automation {
             ShortcutHints.shared.setShowing(c["on"] as? Bool ?? true)
             try? await Task.sleep(for: .milliseconds(100))
             return "ok \(ShortcutHints.shared.showing)"
+        case "setup":
+            // Finish setting up: {"show": true|false} opens or closes its
+            // panel, {"hidden": true|false} as Hide this list and Help's
+            // Finish Setting Up set it, {"notifications": "allowed",
+            // "denied" or "notAsked"} stands in for macOS's answer, which
+            // a dev app can't get. Says each item, [x] when done.
+            let state = SetupState.shared
+            if let hidden = c["hidden"] as? Bool { state.hidden = hidden }
+            switch c["notifications"] as? String {
+            case "allowed": state.standIn = .allowed; state.notifications = .allowed
+            case "denied": state.standIn = .denied; state.notifications = .denied
+            case "notAsked": state.standIn = .notAsked; state.notifications = .notAsked
+            case nil: break
+            default: return "error notifications is allowed, denied or notAsked"
+            }
+            if let show = c["show"] as? Bool { app.setupShown = show }
+            try? await Task.sleep(for: .milliseconds(300))
+            let checklist = app.setupChecklist
+            let items = checklist.items.map { "[\($0.done ? "x" : " ")] \($0.item.rawValue)" }.joined(separator: ", ")
+            return "ok \(checklist.left) left, icon \(app.setupShowsIcon ? "shown" : "hidden"), panel \(app.setupShown ? "open" : "closed"): \(items)"
         case "tour":
             // {"do": "start"|"next"|"back"|"end"}, or nothing to just read
             // where it's at. Says the step, its title and what it lights up.

@@ -316,10 +316,9 @@ function install() {
 }
 
 function finish(url) {
-  say('8. Your phone and browser');
-  note('In the Threadbear app, open Settings (⌘,) › Phone & browser.');
-  note('Show the code: a QR code the Threadbear iPhone app scans to pair.');
-  note('Open signed in: your Threadbear website in your browser.');
+  say('8. Finish setting up');
+  note('Open Threadbear. After a short tour, Finish setting up lists what is left (pair your iPhone, open your website, notifications) and ticks each off as you do it.');
+  note('Pairing and the website are in Settings (⌘,) › Phone & browser too.');
   // The terminal scripts still work, for a Mac with no app window to hand.
   const at = url ?? '<your deployment URL>';
   note(`From a terminal instead: swift ios/scripts/pair-qr.swift --prod --url ${at}  and  npm run web:sign-in`);
