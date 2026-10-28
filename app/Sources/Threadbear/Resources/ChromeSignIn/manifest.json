@@ -1,0 +1,10 @@
+{
+  "manifest_version": 3,
+  "name": "Threadbear Convex Sign-in",
+  "version": "1.0.0",
+  "description": "Finish a fresh Convex sign-in in a Threadbear panel.",
+  "permissions": ["activeTab", "declarativeNetRequestWithHostAccess", "alarms"],
+  "host_permissions": ["https://dashboard.convex.dev/api/auth/callback*"],
+  "background": { "service_worker": "worker.mjs", "type": "module" },
+  "action": { "default_title": "Continue this Threadbear sign-in" }
+}

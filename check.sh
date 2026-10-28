@@ -107,6 +107,7 @@ if [ "$QUICK" = 0 ]; then
   fi
   step "app build" "$ROOT/app" swift build
   step "app tests" "$ROOT/app" env THREADBEAR_REQUIRE_MOCK=1 swift test
+  step "Chrome sign-in tests" "$ROOT" node --test app/Tests/ChromeSignInTests/bridge.test.mjs
   # BearDock, the window's docking panels: its layout tests.
   step "dock tests" "$ROOT/dock" swift test
 fi

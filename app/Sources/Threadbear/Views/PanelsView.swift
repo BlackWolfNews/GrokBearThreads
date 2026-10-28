@@ -65,6 +65,7 @@ struct DockPane: View {
 struct DockPaneButtons: View {
     @Environment(AppModel.self) private var app
     let section: PaneSection
+    @State private var signInURL: URL?
 
     var body: some View {
         HStack(spacing: 0) {
@@ -73,9 +74,16 @@ struct DockPaneButtons: View {
                     PreviewButtons(thread: thread, preview: preview)
                 } else if case .panel(let id) = section, let panel = thread.panels.first(where: { $0.id == id }),
                           panel.kind == .url, let url = panel.pageURL {
+                    if ConvexPanelSignIn.supports(url) {
+                        PaneHeaderButton(symbol: "person.badge.key", help: "Sign in through Chrome") { signInURL = url }
+                    }
+                    PaneHeaderButton(symbol: "arrow.clockwise", help: "Reload panel") { WebPanelPool.shared.reloadIfLoaded(url) }
                     PaneHeaderButton(symbol: "arrow.up.right", help: "Open in browser") { NSWorkspace.shared.open(url) }
                 }
             }
+        }
+        .sheet(isPresented: Binding(get: { signInURL != nil }, set: { if !$0 { signInURL = nil } })) {
+            if let signInURL { ChromePanelSignInSheet(dashboard: signInURL) }
         }
     }
 }
@@ -422,6 +430,13 @@ final class WebPanelPool: NSObject, WKNavigationDelegate, WKUIDelegate {
     func reloadIfLoaded(_ url: URL) {
         guard let view = views[url] else { return }
         load(url, in: view)
+    }
+
+    /// Load the fresh callback in this store so Convex writes the panel's
+    /// own session cookie, shared with the other dashboard panels.
+    func finishSignIn(_ callback: URL, for dashboard: URL) {
+        let view = webView(for: dashboard)
+        view.load(URLRequest(url: callback))
     }
 
     /// A local file (a mockup in the pane's preview) may read the files

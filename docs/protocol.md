@@ -1234,6 +1234,26 @@ by asking `panels.render` now and then while it's on screen, a `list`
 panel the same way (when it's shown and every 15 seconds while it is),
 and an unknown `kind` as a page if it has a `url`.
 
+### Convex panel sign-in on the Mac
+
+The Convex panel offers **Sign in through Chrome**. This is local to the
+Mac app, with no runner RPC or credentials in thread events. The companion
+extension in `app/Sources/Threadbear/Resources/ChromeSignIn` must be loaded
+in Chrome once. The app opens a short-lived page on `127.0.0.1` in Chrome;
+Mike clicks the extension there to start a fresh Convex sign-in. A rule
+limited to that tab redirects the dashboard's sign-in callback to the
+app's loopback listener. The app checks its random nonce and the exact
+return path, then loads the original HTTPS callback in the waiting panel.
+Convex exchanges the one-use code itself and sets the panel's session cookie.
+
+The extension has no cookies, storage, scripting or general browsing
+permissions. It sees the active tab only when clicked and can redirect
+only `https://dashboard.convex.dev/api/auth/callback`. Rules are removed
+when the tab closes or after ten minutes. The app
+accepts one callback, stops after five minutes or Cancel, and never logs
+callback URLs. Existing Chrome cookies, OAuth tokens and Keychain entries
+are never imported. Signing in normally inside the panel remains possible.
+
 ## Highlights
 
 The Mac app's right-hand rail (like VS Code's secondary side bar) has a
