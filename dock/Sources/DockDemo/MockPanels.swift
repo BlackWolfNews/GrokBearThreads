@@ -33,20 +33,31 @@ private struct ThreadsMock: View {
         ("Poddle: download one episode", "poddle", "1d"),
     ]
 
+    /// Rows are buttons, as in the app, to try that a click on one still
+    /// lands with the dock's press timing behind the panel.
+    @State private var selected = 0
+
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
             ForEach(Array(rows.enumerated()), id: \.offset) { i, row in
-                HStack(spacing: 10) {
-                    RoundedRectangle(cornerRadius: 7).fill(Color.white.opacity(0.08)).frame(width: 28, height: 28)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(row.0).font(.system(size: 13, weight: .medium)).lineLimit(1)
-                        Text(row.1).font(.system(size: 11)).foregroundStyle(faint)
+                Button {
+                    selected = i
+                    if ProcessInfo.processInfo.environment["BEARDOCK_LOG"] != nil { print("select row \(i)") }
+                } label: {
+                    HStack(spacing: 10) {
+                        RoundedRectangle(cornerRadius: 7).fill(Color.white.opacity(0.08)).frame(width: 28, height: 28)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(row.0).font(.system(size: 13, weight: .medium)).lineLimit(1)
+                            Text(row.1).font(.system(size: 11)).foregroundStyle(faint)
+                        }
+                        Spacer(minLength: 4)
+                        Text(row.2).font(.system(size: 11)).foregroundStyle(faint)
                     }
-                    Spacer(minLength: 4)
-                    Text(row.2).font(.system(size: 11)).foregroundStyle(faint)
+                    .padding(8)
+                    .background(RoundedRectangle(cornerRadius: 8).fill(Color.white.opacity(i == selected ? 0.07 : 0)))
+                    .contentShape(Rectangle())
                 }
-                .padding(8)
-                .background(RoundedRectangle(cornerRadius: 8).fill(Color.white.opacity(i == 0 ? 0.07 : 0)))
+                .buttonStyle(.plain)
             }
             Spacer()
         }

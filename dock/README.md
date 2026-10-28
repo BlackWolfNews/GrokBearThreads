@@ -14,9 +14,13 @@ Hide Panels open and close them. The window has no title bar, so the
 panels' bars are the top of it: the traffic lights sit in the top-left
 panel's bar, and a plain drag on the empty part of any bar, or on a custom
 header like the thread's, moves the window, and a double-click zooms it, as
-a title bar would. Press for a moment before dragging and the panel lifts
-instead, to be moved. Tabs and titles (the chip with the panel's name and
-close button) and a panel's background pick the panel up straight away.
+a title bar would. Picking a panel up always takes a press held for a
+moment first (`HoldDrag.hold`, 350 ms), wherever you grab it: its bar, a
+tab or title, or its background. On a bar the panel lifts while you hold;
+elsewhere it lifts as you start to move. A drag that starts moving sooner
+moves the window from a bar or tab, and does nothing on a panel's
+background (Mike, 28 Oct: panels kept coming loose when he meant
+something else).
 
 ## How it works
 
@@ -25,14 +29,14 @@ close button) and a panel's background pick the panel up straight away.
   tidied: no empty groups, no one-child splits, and a split directly inside
   another along the same axis is flattened into it. It's `Codable`, so the
   demo saves it between launches.
-- **Dragging** a panel's title bar, a tab, or the panel's background lifts
-  it: the panel shrinks to about 240 points wide under the pointer, with the
+- **Dragging** a panel's title bar, a tab, or the panel's background, after
+  holding the press for a moment, lifts it: the panel shrinks to about 240 points wide under the pointer, with the
   spot you grabbed kept under it, and leaves a dashed hole behind. A tab
   that isn't showing can be pulled out directly. Escape puts it back.
 - **A panel's own drags win.** The dock's drag is the lowest priority
   gesture on the panel, so content that handles a drag itself (reordering
-  rows, a slider, a web view) keeps it, and only the background moves the
-  panel. The demo's Worktrees rows reorder to show it. For a region with no
+  rows, a slider, a web view) keeps it, and only a held press on the
+  background moves the panel. The demo's Worktrees rows reorder to show it. For a region with no
   drag of its own that still shouldn't move the panel, use
   `.dockDragDisabled()`.
 - **Over another panel**, the side you're nearest (within 28% of it) lights

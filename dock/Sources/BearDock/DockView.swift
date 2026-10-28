@@ -55,12 +55,11 @@ public struct DockOptions {
     /// every other bar moves its panel, empty part and all.
     public var cornerMovesWindow = false
     /// In a window without a title bar: a plain drag on a panel's bar
-    /// (title or empty part) moves the window, as a title bar's would, and
-    /// pressing for a moment first picks the panel up instead. Tabs, when a
-    /// group has several, and the panel's background still pick it up
-    /// straight away. Mike kept getting the panel when he went to move the
-    /// window by the thread's bar (28 Oct), and the panel when he wanted
-    /// the window before that, so the bar does both.
+    /// (title, tabs or empty part) moves the window, as a title bar's
+    /// would. Picking a panel up always takes a press held for a moment
+    /// first (HoldDrag), with or without this. Mike kept getting the panel
+    /// when he went to move the window by the thread's bar (28 Oct), and
+    /// the panel when he wanted the window before that, so the bar does both.
     public var barsMoveWindow = false
     /// The app's tooltips, for an app whose `.help` doesn't show.
     public var tip: @MainActor (AnyView, String) -> AnyView = { view, text in AnyView(view.help(text)) }
@@ -351,10 +350,10 @@ struct GroupView: View {
                 .contentShape(Rectangle())
                 // A plain .gesture, the lowest priority: any drag the panel's
                 // own content handles (reordering rows, a slider, a text
-                // selection, a web view) wins, so only a drag on its
+                // selection, a web view) wins, so only a held press on its
                 // background moves the panel. `dockDragDisabled()` stops it
                 // for a region that has nothing of its own.
-                .gesture(dragGesture(controller: controller, panel: group.selected))
+                .modifier(HoldDrag(panel: group.selected, movesWindow: false, fromPress: false))
                 // The same menu as the title's, on the background, so a hidden
                 // title can be brought back from anywhere empty. Outermost, so
                 // content with a menu of its own keeps it.
@@ -419,16 +418,10 @@ private struct MatchedGroup: ViewModifier {
     }
 }
 
-@MainActor
-func dragGesture(controller: DockController, panel: PanelID) -> some Gesture {
-    DragGesture(minimumDistance: 5, coordinateSpace: .named(DockSpace.name))
-        .onChanged { controller.dragChanged(panel: panel, start: $0.startLocation, location: $0.location) }
-        .onEnded { _ in controller.dragEnded() }
-}
-
 /// A group's title, or its tabs when it has several, and the showing
 /// panel's buttons. A title, a tab or the rest of the bar drags its panel
-/// (with `barsMoveWindow`, the window, unless held first: BarDrag); in the
+/// once held (HoldDrag), and with `barsMoveWindow` a plain drag moves the
+/// window; in the
 /// bar under the traffic lights, the room left for them drags the window.
 struct GroupHeader: View {
     let group: DockGroup
@@ -446,7 +439,7 @@ struct GroupHeader: View {
                     .padding(.leading, 8)
                     .contentShape(Rectangle())
                     // Lowest priority: the header's own buttons and chips win.
-                    .modifier(BarDrag(panel: group.selected))
+                    .modifier(HoldDrag(panel: group.selected))
                     .contextMenu { PanelMenu(panel: group.selected, tabbed: false) }
                     // Its full width before the empty bar beside it gets any.
                     .layoutPriority(1)
@@ -475,7 +468,7 @@ struct GroupHeader: View {
     }
 }
 
-/// The empty part of a bar: moves its panel (or the window, BarDrag).
+/// The empty part of a bar: moves its panel (or the window, HoldDrag).
 private struct BarSpace: View {
     let panel: PanelID
     let tabbed: Bool
@@ -485,24 +478,41 @@ private struct BarSpace: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .contentShape(Rectangle())
             .contextMenu { PanelMenu(panel: panel, tabbed: tabbed) }
-            .modifier(BarDrag(panel: panel))
+            .modifier(HoldDrag(panel: panel))
     }
 }
 
-/// The drag on a panel's bar. With `DockOptions.barsMoveWindow`, a plain
-/// drag moves the window and a press held for `hold` picks the panel up
-/// (it lifts under the pointer, so you can see it's got). Otherwise, and
-/// for a panel in a window of its own, whose bar already moves its window,
-/// it picks the panel up straight away.
-struct BarDrag: ViewModifier {
+/// Every drag that can pick a panel up: a press held for `hold` lifts the
+/// panel under the pointer (so you can see it's got), then it follows the
+/// pointer. A drag that starts moving before then moves the window instead,
+/// on a bar (with `DockOptions.barsMoveWindow`, or a panel in a window of
+/// its own), and does nothing elsewhere. Mike asked for the hold everywhere
+/// (28 Oct): a panel picked up straight away by a tab or its background
+/// came loose when he meant something else.
+///
+/// On a bar (`fromPress`) the drag starts from the press, not 5 points in,
+/// so the hold can be timed and the panel lifts while you hold. That takes
+/// the press, which a bar's empty part and a header's buttons survive, but a
+/// tab's click and a panel's own taps don't, so elsewhere the drag starts 5
+/// points in, as it did before, and a second gesture alongside only notes
+/// when the press began: the panel comes loose if that was `hold` ago.
+struct HoldDrag: ViewModifier {
     let panel: PanelID
+    /// On a bar: a plain drag moves the window, when the options allow.
+    var movesWindow = true
+    /// Times the hold from the press (a bar), rather than 5 points in.
+    var fromPress = true
+    /// Over the view's own gestures (a tab's), for a drag 5 points in.
+    var high = false
     @Environment(DockController.self) private var controller
     @Environment(\.dockOptions) private var options
     @State private var press: Press?
+    /// When the press began, for a drag that starts 5 points in.
+    @State private var pressedAt: Date?
 
     static let hold: Duration = .milliseconds(350)
 
-    private enum Mode { case waiting, window, panel }
+    private enum Mode { case waiting, window, nothing, panel }
 
     private struct Press {
         var mode: Mode
@@ -516,15 +526,46 @@ struct BarDrag: ViewModifier {
     }
 
     func body(content: Content) -> some View {
-        if options.barsMoveWindow && !controller.layout.isFloating(panel) {
-            // From the press, not 5 points in, so the hold can be timed.
-            let drag = DragGesture(minimumDistance: 0, coordinateSpace: .named(DockSpace.name))
-                .onChanged(changed)
-                .onEnded { _ in ended() }
-            content.gesture(drag)
+        if fromPress {
+            content.gesture(
+                DragGesture(minimumDistance: 0, coordinateSpace: .named(DockSpace.name))
+                    .onChanged(changed)
+                    .onEnded { _ in ended() }
+            )
         } else {
-            content.gesture(dragGesture(controller: controller, panel: panel))
+            let drag = DragGesture(minimumDistance: 5, coordinateSpace: .named(DockSpace.name))
+                .onChanged(movedOnce)
+                .onEnded { _ in ended() }
+            // A long press, not a drag from the press: that took a tab's
+            // click. Its change comes on the press, each time.
+            let timing = LongPressGesture(minimumDuration: 0.01, maximumDistance: .infinity)
+                .onChanged { _ in pressedAt = Date() }
+            Group {
+                if high { content.highPriorityGesture(drag) } else { content.gesture(drag) }
+            }
+            .simultaneousGesture(timing)
         }
+    }
+
+    /// A drag that starts 5 points in: the panel if the press was held
+    /// first, otherwise the window (on a bar) or nothing.
+    private func movedOnce(_ value: DragGesture.Value) {
+        if press == nil {
+            let held = pressedAt.map { Date().timeIntervalSince($0) >= Self.holdSeconds } ?? false
+            let window = Self.windowUnderMouse()
+            press = Press(mode: held ? .panel : dragsWindow ? .window : .nothing, start: value.startLocation, location: value.location,
+                          mouse: NSEvent.mouseLocation, origin: window?.frame.origin, window: window)
+        }
+        changed(value)
+    }
+
+    private static var holdSeconds: Double {
+        Double(hold.components.seconds) + Double(hold.components.attoseconds) / 1e18
+    }
+
+    /// Whether a plain drag here moves the window.
+    private var dragsWindow: Bool {
+        movesWindow && (options.barsMoveWindow || controller.layout.isFloating(panel))
     }
 
     /// The window the press landed in. Not the key window, which it isn't
@@ -551,11 +592,11 @@ struct BarDrag: ViewModifier {
         p.location = value.location
         if p.mode == .waiting, hypot(value.translation.width, value.translation.height) >= 5 {
             p.timer?.cancel()
-            p.mode = .window
+            p.mode = dragsWindow ? .window : .nothing
         }
         press = p
         switch p.mode {
-        case .waiting: break
+        case .waiting, .nothing: break
         case .panel: controller.dragChanged(panel: panel, start: p.start, location: value.location)
         case .window:
             // Moved by hand: the window is kept from moving itself (WindowGrip).
@@ -571,7 +612,7 @@ struct BarDrag: ViewModifier {
         // A double-click that didn't move zooms the window, as a title
         // bar's does (and WindowGrip's). The drag starts on the press, so
         // it has to be looked for here, on the second click's release.
-        if press?.mode == .waiting, let event = NSApp.currentEvent,
+        if dragsWindow, press?.mode == .waiting, let event = NSApp.currentEvent,
            event.type == .leftMouseUp, event.clickCount == 2 {
             press?.window?.performZoom(nil)
         }
@@ -633,6 +674,9 @@ private struct TabItem: View {
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
+                // Its own click, over the tab's: the tab's press timing
+                // (HoldDrag) otherwise takes the button's.
+                .highPriorityGesture(TapGesture().onEnded { controller.close(panel) })
                 .opacity(hovering || (selected && !single) ? 1 : 0)
                 .dockTip("Close \(content.title(panel))", options)
             }
@@ -654,13 +698,10 @@ private struct TabItem: View {
             if content.closable(panel) { MiddleClick { controller.close(panel) } }
         }
         .contextMenu { PanelMenu(panel: panel, tabbed: !single) }
-        // Over the bar's own drag, so a tab that isn't showing can be pulled
-        // out directly. It needs 5 points of movement, so a click still
-        // selects the tab and reaches its close button. A lone title is a
-        // tab too, not part of the bar (BarDrag): with BarDrag's drag from
-        // the press it swallowed the close button and moved the window
-        // instead of the panel (28 Oct).
-        .highPriorityGesture(dragGesture(controller: controller, panel: panel))
+        // Held, a tab (one that isn't showing too) is pulled out. Its drag
+        // starts 5 points in, so a click still selects the tab and reaches
+        // its close button: a drag from the press swallowed both (28 Oct).
+        .modifier(HoldDrag(panel: panel, fromPress: false, high: true))
     }
 }
 
@@ -764,9 +805,9 @@ private struct HiddenTitleStrip: View {
             withAnimation(.easeOut(duration: 0.15)) { hovering = inside }
             if inside { NSCursor.openHand.push() } else { NSCursor.pop() }
         }
-        .gesture(dragGesture(controller: controller, panel: panel))
+        .modifier(HoldDrag(panel: panel, movesWindow: false, fromPress: false))
         .contextMenu { PanelMenu(panel: panel, tabbed: false) }
-        .dockTip("Drag to move this panel. Right-click to show its title.", options)
+        .dockTip("Press and hold, then drag to move this panel. Right-click to show its title.", options)
     }
 }
 

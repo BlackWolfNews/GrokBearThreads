@@ -211,7 +211,7 @@ private struct WindowOutline: View {
 /// Fills the dock, so the controller can turn the dock's coordinates into
 /// the screen's: flipped, like SwiftUI's.
 /// With `locksWindow`, also keeps the window from moving except by the
-/// strip beside the traffic lights (WindowGrip) or a bar's drag (BarDrag).
+/// strip beside the traffic lights (WindowGrip) or a bar's drag (HoldDrag).
 struct DockAnchor: NSViewRepresentable {
     let controller: DockController
     var locksWindow = false
