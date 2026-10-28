@@ -1277,7 +1277,6 @@ enum Automation {
         try? handle.close()
     }
 }
-#endif
 
 extension Automation {
     /// The open thread's card of asks (DecisionPager), changed as its
@@ -1324,3 +1323,4 @@ extension Automation {
         return "ok " + (AppDump.decisions(thread, app: app) ?? []).joined(separator: "\n")
     }
 }
+#endif
