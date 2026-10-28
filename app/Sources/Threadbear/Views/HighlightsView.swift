@@ -116,10 +116,10 @@ struct HighlightsView: View {
                 } else if let url = item.link {
                     LinkMenu(url: url, thread: thread, title: item.title)
                 } else if let sha = item.sha {
-                    Button("Copy sha") { app.copyToPasteboard(sha) }
+                    Button("Copy sha", systemImage: "number") { app.copyToPasteboard(sha) }
                 }
                 Divider()
-                Button("Remove") { app.removeHighlight(item, in: thread.id) }
+                Button("Remove", systemImage: "pin.slash") { app.removeHighlight(item, in: thread.id) }
             }
     }
 
@@ -289,10 +289,10 @@ struct FileMenu: View {
     let title: String
 
     var body: some View {
-        Button("Preview here") { app.preview(path: path, title: title, in: thread) }
-        Button("Open") { app.openExternally(URL(fileURLWithPath: path)) }
-        Button("Reveal in Finder") { app.revealInFinder(path) }
-        Button("Copy path") { app.copyToPasteboard(path) }
+        Button("Preview here", systemImage: "sidebar.right") { app.preview(path: path, title: title, in: thread) }
+        Button("Open", systemImage: "arrow.up.forward.app") { app.openExternally(URL(fileURLWithPath: path)) }
+        Button("Reveal in Finder", systemImage: "folder") { app.revealInFinder(path) }
+        Button("Copy path", systemImage: "doc.on.doc") { app.copyToPasteboard(path) }
     }
 }
 
@@ -305,11 +305,11 @@ struct LinkMenu: View {
     let title: String
 
     var body: some View {
-        Button("Preview here") {
+        Button("Preview here", systemImage: "sidebar.right") {
             if url.isFileURL { app.preview(path: url.path, title: title, in: thread) } else { app.preview(page: url, title: title, in: thread) }
         }
-        Button("Open in browser") { app.openExternally(url) }
-        Button("Copy link") { app.copyToPasteboard(url.absoluteString) }
+        Button("Open in browser", systemImage: "safari") { app.openExternally(url) }
+        Button("Copy link", systemImage: "link") { app.copyToPasteboard(url.absoluteString) }
     }
 }
 

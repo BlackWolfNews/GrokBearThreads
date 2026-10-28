@@ -155,25 +155,25 @@ struct ProjectMenu: View {
 
     var body: some View {
         if app.openProjectId != project.id {
-            Button("Open") { app.openProjectPage(project.id) }
+            Button("Open", systemImage: "arrow.right.circle") { app.openProjectPage(project.id) }
             Divider()
         }
         if project.archived {
-            Button("Unarchive") { app.setProjectArchived(project.id, false) }
+            Button("Unarchive", systemImage: "tray.and.arrow.up") { app.setProjectArchived(project.id, false) }
         } else {
-            Button("Archive") { app.setProjectArchived(project.id, true) }
+            Button("Archive", systemImage: "archivebox") { app.setProjectArchived(project.id, true) }
         }
         let others = app.projects.filter { $0.id != project.id && !$0.archived }
         if !others.isEmpty {
-            Menu("Merge into") {
+            Menu("Merge into", systemImage: "arrow.triangle.merge") {
                 ForEach(others) { other in
                     Button(other.title) { app.mergeProject(project.id, into: other.id) }
                 }
             }
         }
         Divider()
-        Button("Copy project id") { app.copyToPasteboard(project.id) }
+        Button("Copy project id", systemImage: "number") { app.copyToPasteboard(project.id) }
         Divider()
-        Button("Delete…") { app.deleteProject(project.id) }
+        Button("Delete…", systemImage: "trash") { app.deleteProject(project.id) }
     }
 }

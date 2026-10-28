@@ -64,13 +64,13 @@ private struct IconButton: View {
 
     var body: some View {
         Menu {
-            Button("Choose a Picture…") { app.chooseProjectIcon(project.id) }
+            Button("Choose a Picture…", systemImage: "photo") { app.chooseProjectIcon(project.id) }
             if project.icon?.isChosen == true {
-                Button("Use the Librarian's Icon") { app.setProjectIconAutomatic(project.id) }
+                Button("Use the Librarian's Icon", systemImage: "books.vertical") { app.setProjectIconAutomatic(project.id) }
             }
             if let from = project.icon?.from {
                 Divider()
-                Button("Show Original in Finder") { NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: from)]) }
+                Button("Show Original in Finder", systemImage: "folder") { NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: from)]) }
             }
         } label: {
             ProjectIconView(project: project, size: 44)
@@ -379,11 +379,11 @@ private struct ProjectThreadRow: View {
         .onHover { hovering = $0 }
         .tip(by)
         .contextMenu {
-            Button("Open") { app.openThread(thread.id) }
+            Button("Open", systemImage: "arrow.right.circle") { app.openThread(thread.id) }
             if membership?.pinned == false {
-                Button("Keep it in \(project.title)") { app.setProjects(thread.id, add: [project.id]) }
+                Button("Keep it in \(project.title)", systemImage: "pin") { app.setProjects(thread.id, add: [project.id]) }
             }
-            Button("Take it out of \(project.title)") { app.setProjects(thread.id, remove: [project.id]) }
+            Button("Take it out of \(project.title)", systemImage: "minus.circle") { app.setProjects(thread.id, remove: [project.id]) }
         }
     }
 

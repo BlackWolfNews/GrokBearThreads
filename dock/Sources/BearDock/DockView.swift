@@ -467,14 +467,14 @@ private struct PanelMenu: View {
 
     var body: some View {
         if controller.layout.hiddenTitles.contains(panel) {
-            Button("Show Title") { controller.setTitleHidden(panel, false) }
+            Button("Show Title", systemImage: "eye") { controller.setTitleHidden(panel, false) }
         } else {
             // With tabs the bar has to stay, so say when it'll take effect.
-            Button(tabbed ? "Hide Title When on Its Own" : "Hide Title") { controller.setTitleHidden(panel, true) }
+            Button(tabbed ? "Hide Title When on Its Own" : "Hide Title", systemImage: "eye.slash") { controller.setTitleHidden(panel, true) }
         }
         if content.closable(panel) {
             Divider()
-            Button("Close \(content.title(panel))") { controller.close(panel) }
+            Button("Close \(content.title(panel))", systemImage: "xmark") { controller.close(panel) }
         }
     }
 }

@@ -298,7 +298,7 @@ private struct FolderMenu: View {
                 Button(folder.abbreviatingHome) { cwd = folder }
             }
             Divider()
-            Button("Choose…") { choose() }
+            Button("Choose…", systemImage: "folder.badge.plus") { choose() }
         } label: {
             Text(cwd.abbreviatingHome)
         }

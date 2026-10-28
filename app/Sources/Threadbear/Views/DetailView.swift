@@ -125,9 +125,9 @@ struct ThreadMenuButton: View {
             } else if let thread, !projectsHome {
                 ThreadMenu(thread: thread)
                 Divider()
-                Button("Copy transcript as Markdown") { session?.copyTranscript() }
+                Button("Copy transcript as Markdown", systemImage: "doc.plaintext") { session?.copyTranscript() }
                 // So Mike can point an agent at this thread (`tb show <id>`).
-                Button("Copy thread id") { app.copyToPasteboard(thread.id) }
+                Button("Copy thread id", systemImage: "number") { app.copyToPasteboard(thread.id) }
             }
         } label: {
             Image(systemName: "ellipsis")
@@ -358,15 +358,15 @@ private struct ProjectIconButton: View {
         .onHover { hovering = $0 }
         .tip(guessed ? "The librarian put this thread in \(title). Right-click to keep it there or take it out. In \(thread.cwd.abbreviatingHome)" : "\(title), in \(thread.cwd.abbreviatingHome). Click to open the project")
         .contextMenu {
-            Button("Open \(title)") { app.openProjectPage(membership.id) }
+            Button("Open \(title)", systemImage: "arrow.right.circle") { app.openProjectPage(membership.id) }
             Divider()
             if !membership.pinned {
-                Button("Keep it in \(title)") { app.setProjects(thread.id, add: [membership.id]) }
+                Button("Keep it in \(title)", systemImage: "pin") { app.setProjects(thread.id, add: [membership.id]) }
             }
-            Button("Take it out of \(title)") { app.setProjects(thread.id, remove: [membership.id]) }
+            Button("Take it out of \(title)", systemImage: "minus.circle") { app.setProjects(thread.id, remove: [membership.id]) }
             let others = app.projectsToAdd(thread)
             if !others.isEmpty {
-                Menu("Add to another project") {
+                Menu("Add to another project", systemImage: "plus.square.on.square") {
                     ForEach(others) { project in
                         Button(project.title) { app.setProjects(thread.id, add: [project.id]) }
                     }

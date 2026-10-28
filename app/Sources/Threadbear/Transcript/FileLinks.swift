@@ -24,6 +24,25 @@ enum FileLinkAction: String, CaseIterable {
         return FileManager.default.displayName(atPath: app.path).replacingOccurrences(of: ".app", with: "")
     }
 
+    var symbol: String {
+        switch self {
+        case .automatic: return "wand.and.stars"
+        case .panel: return "sidebar.right"
+        case .app: return "arrow.up.forward.app"
+        case .finder: return "folder"
+        }
+    }
+
+    /// The app's own icon for "Open in Xcode", else the symbol.
+    func image(path: String?) -> NSImage? {
+        if self == .app, let path, let app = NSWorkspace.shared.urlForApplication(toOpen: URL(fileURLWithPath: path)) {
+            let icon = NSWorkspace.shared.icon(forFile: app.path)
+            icon.size = NSSize(width: 16, height: 16)
+            return icon
+        }
+        return NSImage(systemSymbolName: symbol, accessibilityDescription: nil)
+    }
+
     func title(path: String?) -> String {
         switch self {
         case .automatic: return "Panel for Docs and Pictures, App for the Rest"
@@ -49,20 +68,19 @@ final class FileLinkMenu: NSObject {
     func menu() -> NSMenu {
         let menu = NSMenu()
         guard let path else {
-            let missing = NSMenuItem(title: "Couldn't Find This File", action: nil, keyEquivalent: "")
+            let missing = NSMenuItem(title: "Couldn't Find This File", symbol: "questionmark.folder", action: nil)
             missing.isEnabled = false
             menu.addItem(missing)
             return menu
         }
         let click = FileLinkAction.click
         for action in [FileLinkAction.panel, .app, .finder] {
-            let item = NSMenuItem(title: action.title(path: path), action: #selector(openItem(_:)), keyEquivalent: "")
-            item.target = self
+            let item = NSMenuItem(title: action.title(path: path), symbol: action.symbol, action: #selector(openItem(_:)), target: self)
+            item.image = action.image(path: path)
             item.representedObject = action.rawValue
             menu.addItem(item)
         }
-        let copy = NSMenuItem(title: "Copy Path", action: #selector(copyPath), keyEquivalent: "")
-        copy.target = self
+        let copy = NSMenuItem(title: "Copy Path", symbol: "doc.on.doc", action: #selector(copyPath), target: self)
         menu.addItem(.separator())
         menu.addItem(copy)
         menu.addItem(.separator())
@@ -71,13 +89,12 @@ final class FileLinkMenu: NSObject {
             // "Default App" rather than this file's app: the choice is for
             // every file link, and they open in different apps.
             let title = action == .app ? "Open in Default App" : action.title(path: path)
-            let item = NSMenuItem(title: title, action: #selector(setClick(_:)), keyEquivalent: "")
-            item.target = self
+            let item = NSMenuItem(title: title, symbol: action.symbol, action: #selector(setClick(_:)), target: self)
             item.representedObject = action.rawValue
             item.state = action == click ? .on : .off
             defaults.addItem(item)
         }
-        let submenu = NSMenuItem(title: "Click Opens", action: nil, keyEquivalent: "")
+        let submenu = NSMenuItem(title: "Click Opens", symbol: "cursorarrow.click", action: nil)
         submenu.submenu = defaults
         menu.addItem(submenu)
         // The menu holds its items' target weakly; keep this alive with it.

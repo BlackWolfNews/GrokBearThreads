@@ -57,7 +57,7 @@ struct ComposerControls: View {
                 .layoutPriority(1)
                 // Right-click send for later, as Mail and Slack do.
                 .contextMenu {
-                    if app.schedulesSupported { Button("Schedule…", action: onSchedule) }
+                    if app.schedulesSupported { Button("Schedule…", systemImage: "clock", action: onSchedule) }
                 }
         }
         .frame(height: SendButton.size)

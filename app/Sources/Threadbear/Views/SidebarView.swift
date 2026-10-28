@@ -748,15 +748,15 @@ struct ThreadMenu: View {
     let thread: ThreadSummary
 
     var body: some View {
-        Button("Rename") { app.startRenaming(thread.id) }
+        Button("Rename", systemImage: "pencil") { app.startRenaming(thread.id) }
         SnoozeMenu(threadId: thread.id)
         if thread.snoozedUntil != nil {
-            Button("Wake") { app.unsnooze(thread.id) }
+            Button("Wake", systemImage: "sun.max") { app.unsnooze(thread.id) }
         }
         if thread.isArchived {
-            Button("Unarchive") { app.unarchive(thread.id) }
+            Button("Unarchive", systemImage: "tray.and.arrow.up") { app.unarchive(thread.id) }
         } else {
-            Button("Archive") { app.archive(thread.id) }
+            Button("Archive", systemImage: "archivebox") { app.archive(thread.id) }
         }
         if app.projectsSupported {
             ThreadProjectsMenu(thread: thread)
@@ -772,7 +772,7 @@ struct ThreadProjectsMenu: View {
     let thread: ThreadSummary
 
     var body: some View {
-        Menu("Projects") {
+        Menu("Projects", systemImage: "square.stack") {
             let live = app.projects.filter { !$0.archived }.sorted { $0.title.localizedStandardCompare($1.title) == .orderedAscending }
             ForEach(live) { project in
                 let inIt = thread.projects.contains { $0.id == project.id }
@@ -782,8 +782,8 @@ struct ThreadProjectsMenu: View {
                 ))
             }
             if !live.isEmpty { Divider() }
-            Button("New project…") { app.newProject(with: thread.id) }
-            Button("Ask the librarian to look") { app.runLibrarian(threadId: thread.id) }
+            Button("New project…", systemImage: "plus") { app.newProject(with: thread.id) }
+            Button("Ask the librarian to look", systemImage: "books.vertical") { app.runLibrarian(threadId: thread.id) }
         }
     }
 }
@@ -792,7 +792,7 @@ struct SnoozeMenu: View {
     let threadId: String
 
     var body: some View {
-        Menu("Hibernate") { SnoozeMenuItems(threadId: threadId) }
+        Menu("Hibernate", systemImage: "moon.zzz") { SnoozeMenuItems(threadId: threadId) }
     }
 }
 
@@ -813,13 +813,13 @@ struct SnoozeMenuItems: View {
             }
         }
         if app.restartPending {
-            Button(Snooze.untilRestartTitle) {
+            Button(Snooze.untilRestartTitle, systemImage: "arrow.clockwise") {
                 guard allowed() else { return }
                 app.snoozeUntilRestart(threadId)
             }
         }
         Divider()
-        Button("Pick a time…") {
+        Button("Pick a time…", systemImage: "calendar") {
             guard allowed() else { return }
             SnoozePicker.show(threadId: threadId, app: app)
         }

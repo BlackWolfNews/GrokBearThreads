@@ -91,13 +91,13 @@ private struct ScheduleRowView: View {
         }
         .onHover { hovering = $0 }
         .contextMenu {
-            Button("Edit…") { app.editSchedule(schedule.id) }
-            Button("Run now") { app.runSchedule(schedule.id) }
+            Button("Edit…", systemImage: "pencil") { app.editSchedule(schedule.id) }
+            Button("Run now", systemImage: "play") { app.runSchedule(schedule.id) }
             if !schedule.isFinished {
-                Button(schedule.paused ? "Resume" : "Pause") { app.setSchedulePaused(schedule.id, !schedule.paused) }
+                Button(schedule.paused ? "Resume" : "Pause", systemImage: schedule.paused ? "playpause" : "pause") { app.setSchedulePaused(schedule.id, !schedule.paused) }
             }
             Divider()
-            Button("Delete…") { app.deleteSchedule(schedule.id) }
+            Button("Delete…", systemImage: "trash") { app.deleteSchedule(schedule.id) }
         }
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(.isButton)

@@ -623,27 +623,24 @@ final class TranscriptController: NSObject, NSTableViewDataSource, NSTableViewDe
         let menu = NSMenu()
         let row = row(at: index)
         if let row, MarkdownExport.message(for: row) != nil {
-            let copy = NSMenuItem(title: "Copy message", action: #selector(copyMessage(_:)), keyEquivalent: "")
-            copy.target = self
+            let copy = NSMenuItem(title: "Copy message", symbol: "doc.on.doc", action: #selector(copyMessage(_:)), target: self)
             copy.representedObject = row.id
             menu.addItem(copy)
             if [.tool, .reasoning, .diff, .group].contains(row.kind) {
                 let expanded = isExpanded(row)
-                let toggle = NSMenuItem(title: expanded ? "Collapse" : "Expand", action: #selector(toggleFromMenu(_:)), keyEquivalent: "")
-                toggle.target = self
+                let toggle = NSMenuItem(title: expanded ? "Collapse" : "Expand", symbol: expanded ? "chevron.up" : "chevron.down",
+                                        action: #selector(toggleFromMenu(_:)), target: self)
                 toggle.representedObject = row.id
                 menu.addItem(toggle)
             }
         }
-        let transcript = NSMenuItem(title: "Copy transcript as Markdown", action: #selector(copyTranscript), keyEquivalent: "")
-        transcript.target = self
+        let transcript = NSMenuItem(title: "Copy transcript as Markdown", symbol: "doc.plaintext", action: #selector(copyTranscript), target: self)
         menu.addItem(transcript)
         if let row {
             // What an agent needs to find this row again (the thread, the
             // row, the events behind it), so Mike can point at it.
             menu.addItem(.separator())
-            let debug = NSMenuItem(title: "Copy debug info", action: #selector(copyDebugInfo(_:)), keyEquivalent: "")
-            debug.target = self
+            let debug = NSMenuItem(title: "Copy debug info", symbol: "ladybug", action: #selector(copyDebugInfo(_:)), target: self)
             debug.representedObject = row.id
             menu.addItem(debug)
         }
