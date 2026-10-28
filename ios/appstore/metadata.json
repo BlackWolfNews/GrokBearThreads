@@ -43,7 +43,8 @@
     "ageAssurance": false,
     "userGeneratedContent": false,
     "advertising": false,
-    "healthOrWellnessTopics": false
+    "healthOrWellnessTopics": false,
+    "socialMedia": false
   },
   "review": {
     "contactFirstName": "Mike",
