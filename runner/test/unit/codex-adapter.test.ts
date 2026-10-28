@@ -10,6 +10,7 @@ import { z } from 'zod';
 import { tool } from '@anthropic-ai/claude-agent-sdk';
 import { CodexAdapter, CodexSession, codexModelChoices, type CodexAdapterDeps } from '../../src/adapters/codex/adapter.ts';
 import { OVERSIZED_LINE } from '../../src/adapters/codex/appserver.ts';
+import { TOOL_GUIDANCE } from '../../src/adapters/codex/tools.ts';
 import type { CodexNormalizerLike } from '../../src/adapters/codex/types.ts';
 import { CodexNormalizer } from '../../src/adapters/codex/normalize.ts';
 import type { NormalizerContext } from '../../src/adapters/context.ts';
@@ -205,11 +206,13 @@ test('a new thread: thread/start with the policy, config and tools; then session
   assert.equal(p.approvalPolicy, 'never');
   assert.equal(p.sandbox, 'danger-full-access');
   assert.equal(p.approvalsReviewer, 'user');
+  // With tools, the guidance on using them goes in as developer instructions.
   assert.deepEqual(p.config, {
     'shell_environment_policy.set.THREADBEAR_THREAD_ID': 'tb-1',
     'tools.update_plan.enabled': true,
     mcp_optional_startup_grace_ms: 10000,
     suppress_unstable_features_warning: true,
+    developer_instructions: TOOL_GUIDANCE,
   });
   assert.equal(p.dynamicTools[0].type, 'namespace');
   assert.equal(p.dynamicTools[0].name, 'threadbear');

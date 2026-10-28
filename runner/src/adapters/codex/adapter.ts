@@ -26,7 +26,7 @@ import {
   type OversizedLine,
 } from './appserver.ts';
 import { CodexApprovals } from './approvals.ts';
-import { CodexTools, dynamicToolSpecs, type ToolDefinition } from './tools.ts';
+import { CodexTools, dynamicToolSpecs, TOOL_GUIDANCE, type ToolDefinition } from './tools.ts';
 import { CodexNormalizer, limitsFromAccount } from './normalize.ts';
 import type {
   CodexNormalizerLike,
@@ -425,7 +425,11 @@ export class CodexSession implements AgentSession {
       res = await this.resume({ ...common, threadId: opts.sessionId, excludeTurns: true });
     } else {
       const tools = dynamicToolSpecs(this.deps.toolsFor?.(opts.threadId) ?? []);
-      const params: ThreadStartParams = { ...common, ...(tools.length ? { dynamicTools: tools } : {}) };
+      // With tools, the guidance on using them leads the developer
+      // instructions (the namespace description is too short to hold it).
+      const developer = [tools.length ? TOOL_GUIDANCE : '', opts.instructions ?? ''].filter(Boolean).join('\n\n');
+      const config = { ...common.config, ...(developer ? { developer_instructions: developer } : {}) };
+      const params: ThreadStartParams = { ...common, config, ...(tools.length ? { dynamicTools: tools } : {}) };
       res = await this.proc.request<ThreadStartResponse>('thread/start', params);
     }
     if (this.state !== 'starting') return;

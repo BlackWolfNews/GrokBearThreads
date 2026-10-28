@@ -429,11 +429,10 @@ test('end_turn only acknowledges; its description says when to call it', async (
 // Mike to choose in chat.
 test('both instruction texts say when to use show_options and pin', async () => {
   const { threadbearMcpServer } = await import('../../src/threadbear-mcp.ts');
-  const { dynamicToolSpecs } = await import('../../src/adapters/codex/tools.ts');
+  const { TOOL_GUIDANCE } = await import('../../src/adapters/codex/tools.ts');
   const claude = threadbearMcpServer({} as never, 'self');
   const instructions = (claude.instance as unknown as { server: { _instructions?: string } }).server._instructions ?? '';
-  const [ns] = dynamicToolSpecs(buildThreadbearTools({} as never, 'self'));
-  for (const [who, text] of [['claude', instructions], ['codex', ns.description]] as const) {
+  for (const [who, text] of [['claude', instructions], ['codex', TOOL_GUIDANCE]] as const) {
     assert.match(text, /show_options/, who);
     assert.match(text, /\bpin\b/, who);
   }

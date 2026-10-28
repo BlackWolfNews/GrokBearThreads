@@ -31,8 +31,18 @@ export type ToolDefinition = {
 
 export const NAMESPACE = SERVER_NAME;
 
-const NAMESPACE_DESCRIPTION =
-  "Tools that manage Threadbear, Mike's own app for running agent threads, which this thread runs in: list and read threads, start new ones, message them, rename, snooze, archive, move and delete them, and schedule messages for later. " +
+// Codex rejects a namespace description over 1,024 characters (and with it
+// the whole thread/start), so this stays a short summary. The longer
+// guidance on when to use each tool goes in as developer instructions.
+export const NAMESPACE_DESCRIPTION =
+  "Tools that manage Threadbear, Mike's own app for running agent threads, which this thread runs in: threads, schedules, projects, show_options and pin for showing Mike things, and end_turn to finish every turn.";
+export const NAMESPACE_DESCRIPTION_MAX = 1024;
+
+// Said as developer instructions at thread/start, next to the thread's
+// projects brief: the same guidance Claude threads get in the MCP server's
+// instructions.
+export const TOOL_GUIDANCE =
+  "This thread's threadbear tools manage Threadbear itself: list and read threads, start new ones, message them, rename, snooze, archive, move and delete them, and schedule messages for later. " +
   'Use move_thread when the work belongs in another folder (for example a repo), so this thread runs there from the next turn. ' +
   `${SHOWING_MIKE} ` +
   `${FILING_PROJECTS} ` +

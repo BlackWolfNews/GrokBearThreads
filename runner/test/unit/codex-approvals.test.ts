@@ -13,7 +13,7 @@ import {
   unwrapShell,
   type ApprovalsDeps,
 } from '../../src/adapters/codex/approvals.ts';
-import { dynamicToolSpecs, type ToolDefinition } from '../../src/adapters/codex/tools.ts';
+import { dynamicToolSpecs, NAMESPACE_DESCRIPTION_MAX, type ToolDefinition } from '../../src/adapters/codex/tools.ts';
 import { buildThreadbearTools } from '../../src/threadbear-mcp.ts';
 import { nullLogger } from '../../src/log.ts';
 import type { QuestionAnswer, QuestionRequest, ToolApprovalAnswer, ToolApprovalRequest } from '../../src/adapters/types.ts';
@@ -406,6 +406,8 @@ test('every threadbear tool converts to a dynamic tool with a JSON Schema', () =
   const tools: ToolDefinition[] = buildThreadbearTools({} as never, 'self');
   const [ns] = dynamicToolSpecs(tools);
   assert.equal(ns.name, 'threadbear');
+  // Codex refuses thread/start with a longer one, so no Codex thread starts.
+  assert.ok(ns.description.length <= NAMESPACE_DESCRIPTION_MAX, `namespace description is ${ns.description.length} characters`);
   assert.ok(ns.tools.length >= 9);
   for (const t of ns.tools) {
     const schema = t.inputSchema as { type?: string; properties?: unknown; $schema?: unknown };
