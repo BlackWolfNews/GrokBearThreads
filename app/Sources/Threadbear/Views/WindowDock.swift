@@ -163,13 +163,16 @@ extension AppModel {
         dock.show(section.id, near: openPanes, fallback: .window(.right))
     }
 
-    /// The Usage panel is up. Setting it opens it as a tab beside the
-    /// pane sections (Highlights and co.), or down the right without
-    /// them, and clearing it closes it.
+    /// The Usage panel is up. Setting it opens it under the threads list,
+    /// by the activity bar's Usage icon that opens it (Mike's pick, 28
+    /// Oct), or down the left if the threads aren't in the dock, and
+    /// clearing it closes it.
     var usageShown: Bool {
         get { dock.isShowing(WindowDock.usage) }
         set {
-            if newValue { dock.show(WindowDock.usage, near: openPanes, fallback: .window(.right)) } else { dock.close(WindowDock.usage) }
+            guard newValue else { return dock.close(WindowDock.usage) }
+            let under = dock.layout.group(containing: WindowDock.threads).map { DockDrop.edge(group: $0.id, .bottom) }
+            dock.show(WindowDock.usage, fallback: under ?? .window(.left))
         }
     }
 }

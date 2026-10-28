@@ -295,7 +295,7 @@ enum ScreenshotRunner {
                 print("settings: the window didn't open")
             }
         }
-        // 14. The Usage panel from the activity bar, beside Highlights:
+        // 14. The Usage panel from the activity bar, under the threads:
         // every account's room, then the CLIs (Claude behind, Codex held
         // back).
         if wanted("14") {
