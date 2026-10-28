@@ -1055,7 +1055,9 @@ enum RowRenderer {
         for (i, item) in message.answers.enumerated() {
             if i > 0 { output.append(NSAttributedString(string: "\n", attributes: answer)) }
             output.append(NSAttributedString(string: item.action + "\n", attributes: question))
-            output.append(NSAttributedString(string: item.answer, attributes: answer))
+            // Line separators keep a written answer's lines in one paragraph,
+            // so the gap between answers doesn't open up inside one.
+            output.append(NSAttributedString(string: item.answer.replacingOccurrences(of: "\n", with: "\u{2028}"), attributes: answer))
         }
         if !extra.isEmpty {
             output.append(NSAttributedString(string: "\n" + extra, attributes: plain))
@@ -1129,10 +1131,14 @@ enum RowRenderer {
             for (n, link) in ask.links.enumerated() where link.target != nil {
                 links.append(AskButton(title: link.title + " ↗", action: "link:\(i):\(n)", style: n == 0 ? .primary : .plain))
             }
-            let answers = Decisions.choices(for: ask).enumerated().map { n, choice in
+            var answers = Decisions.choices(for: ask).enumerated().map { n, choice in
                 let style: AskButtonStyle = card.picks[i] == n ? .picked : ask.suggested == n ? .suggested : .plain
                 return AskButton(title: style == .picked ? "✓ " + choice : choice, action: "pick:\(i):\(n)", style: style)
             }
+            // Always a way to answer in his own words (Mike, 28 Oct): what he
+            // types in the composer becomes this ask's answer.
+            let own = card.picks[i] == Decisions.ownAnswer
+            answers.append(AskButton(title: own ? "✓ Something else" : "Something else…", action: "pick:\(i):\(Decisions.ownAnswer)", style: own ? .picked : .plain))
             for row in [links, answers] where !row.isEmpty {
                 output.append(NSAttributedString(string: "\n", attributes: [.font: button, .paragraphStyle: buttonStyle]))
                 for (k, item) in row.enumerated() {

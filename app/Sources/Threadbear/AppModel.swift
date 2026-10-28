@@ -809,6 +809,8 @@ final class AppModel {
     func pickAnswer(thread: ThreadSummary, ask: Int, option: Int) {
         guard Decisions.isOpen(thread), let seq = thread.asksSeq else { return }
         var picks = picks(for: thread)
+        // What he writes can only answer one ask, so "Something else" moves.
+        if option == Decisions.ownAnswer { picks = picks.filter { $0.value != Decisions.ownAnswer || $0.key == ask } }
         picks[ask] = picks[ask] == option ? nil : option
         setPicks(picks, seq: seq, threadId: thread.id)
         focusComposer(thread.id)
@@ -831,7 +833,7 @@ final class AppModel {
         let thread = threadId.flatMap { threads[$0] }
         let picks = thread.map { picks(for: $0) } ?? [:]
         let asks = thread?.asks ?? []
-        let answers = Decisions.answers(asks: asks, picks: picks).map(\.answer)
+        let answers = Decisions.answers(asks: asks, picks: picks, written: draft.text).map(\.answer)
         let trimmed = answers.isEmpty
             ? draft.text.trimmingCharacters(in: .whitespacesAndNewlines)
             : Decisions.message(asks: asks, picks: picks, extra: draft.text)

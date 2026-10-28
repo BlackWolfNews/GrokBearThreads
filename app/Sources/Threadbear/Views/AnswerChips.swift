@@ -12,7 +12,10 @@ struct AnswerChips: View {
     let picks: [Int: Int]
 
     var body: some View {
-        let answers = Decisions.answers(asks: thread.asks, picks: picks)
+        // "Something else" shows as a chip too, before he's written it.
+        let answers = Decisions.answers(asks: thread.asks, picks: picks, written: "…").map { index, answer in
+            (index: index, answer: picks[index] == Decisions.ownAnswer ? AskAnswer(action: answer.action, answer: "Your answer below") : answer)
+        }
         // In a row that scrolls, like the action chips.
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: zoomed(6)) {
@@ -27,6 +30,9 @@ struct AnswerChips: View {
         HStack(spacing: zoomed(6)) {
             if thread.asks.count > 1 {
                 Text("\(index + 1)").foregroundStyle(.secondary).monospacedDigit()
+            }
+            if picks[index] == Decisions.ownAnswer {
+                Image(systemName: "pencil").font(.system(size: zoomed(10), weight: .medium)).foregroundStyle(.secondary)
             }
             Text(answer.answer).foregroundStyle(.primary).lineLimit(1)
             Button {

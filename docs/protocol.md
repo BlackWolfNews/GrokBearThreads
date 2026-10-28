@@ -1063,7 +1063,9 @@ A turn the agent finished can say whether Mike has to do anything, so
   often answers several asks.
 - **Answering.** The app shows the open card's asks under the agent's
   last message, each with its context, its links as buttons and its
-  options (or its `reply`). Picking one puts it in the composer as a chip;
+  options (or its `reply`), and Something else. Picking one puts it in
+  the composer as a chip; with Something else, what he writes in the
+  composer is that ask's answer (one ask at a time);
   the composer stays the only place to write, so his own words and images
   go with the picks, and a message with no picks is just a message. Send
   makes one ordinary message, each picked ask's question then its answer,

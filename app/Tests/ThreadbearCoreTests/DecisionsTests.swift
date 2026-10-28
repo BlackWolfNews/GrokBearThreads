@@ -76,4 +76,25 @@ final class DecisionsTests: XCTestCase {
         XCTAssertNil(Decisions.extra(in: "something else", answers: answers))
         XCTAssertNil(Decisions.extra(in: text, answers: []))
     }
+
+    /// "Something else": what he wrote answers that ask, with his line
+    /// breaks kept, and nothing is left over as extra.
+    func testSomethingElseTakesWhatHeWrote() {
+        let picks = [0: 0, 2: Decisions.ownAnswer]
+        let text = Decisions.message(asks: [merge, signIn, events], picks: picks, extra: " Signups\nand searches ")
+        XCTAssertEqual(text, """
+        1. Merge #52 to prod, or test locally first?
+           Merge
+
+        3. Which events matter most?
+           Signups
+           and searches
+        """)
+        let answers = Decisions.answers(asks: [merge, signIn, events], picks: picks, written: "Signups\nand searches").map(\.answer)
+        XCTAssertEqual(answers.last, AskAnswer(action: events.action, answer: "Signups\nand searches"))
+        XCTAssertEqual(Decisions.extra(in: text, answers: answers), "")
+        // Nothing written: that ask isn't answered.
+        XCTAssertEqual(Decisions.message(asks: [merge, events], picks: [1: Decisions.ownAnswer]), "")
+        XCTAssertEqual(Decisions.message(asks: [events], picks: [0: Decisions.ownAnswer], extra: "Signups"), "Which events matter most?\nSignups")
+    }
 }

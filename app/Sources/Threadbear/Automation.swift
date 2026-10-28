@@ -1346,9 +1346,10 @@ extension Automation {
         }
         if let pick = c["pick"] as? String {
             let parts = pick.split(separator: ":").compactMap { Int($0) }
+            // Choice 0 is "Something else".
             guard parts.count == 2, thread.asks.indices.contains(parts[0] - 1),
-                  Decisions.choices(for: thread.asks[parts[0] - 1]).indices.contains(parts[1] - 1) else { return "error no choice \(pick)" }
-            app.pickAnswer(thread: thread, ask: parts[0] - 1, option: parts[1] - 1)
+                  parts[1] == 0 || Decisions.choices(for: thread.asks[parts[0] - 1]).indices.contains(parts[1] - 1) else { return "error no choice \(pick)" }
+            app.pickAnswer(thread: thread, ask: parts[0] - 1, option: parts[1] == 0 ? Decisions.ownAnswer : parts[1] - 1)
         }
         if c["send"] as? Bool == true {
             app.send(threadId: thread.id)

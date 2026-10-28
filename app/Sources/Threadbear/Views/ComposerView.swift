@@ -47,7 +47,7 @@ struct ComposerView: View {
                 text: draft.text,
                 height: $height,
                 focusTrigger: app.focusRequests[draftKey] ?? 0,
-                placeholder: picks.isEmpty ? "Message" : "Add anything else…",
+                placeholder: placeholder(picks),
                 onSend: { send() },
                 onReturnWhenEmpty: { returnWhenEmpty(draft.wrappedValue) },
                 onImages: { urls in attach(urls, to: draft) }
@@ -88,6 +88,14 @@ struct ComposerView: View {
             .overlay(shape.strokeBorder(Color(nsColor: .separatorColor), lineWidth: 0.5))
             .contentShape(shape)
             .onTapGesture { app.focusComposer(draftKey) }
+    }
+
+    /// With "Something else" picked, the box is that ask's answer.
+    private func placeholder(_ picks: [Int: Int]) -> String {
+        if let thread, let own = picks.first(where: { $0.value == Decisions.ownAnswer })?.key, thread.asks.indices.contains(own) {
+            return thread.asks.count == 1 ? "Your answer…" : "Your answer to \(own + 1)…"
+        }
+        return picks.isEmpty ? "Message" : "Add anything else…"
     }
 
     /// AppModel empties the box, and puts the draft back if it isn't sent.

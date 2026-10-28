@@ -711,7 +711,7 @@ final class TranscriptController: NSObject, NSTableViewDataSource, NSTableViewDe
         let ask = card.asks[index]
         switch parts[0] {
         case "pick":
-            guard Decisions.choices(for: ask).indices.contains(n), thread.asksSeq == card.seq else { return }
+            guard Decisions.choices(for: ask).indices.contains(n) || n == Decisions.ownAnswer, thread.asksSeq == card.seq else { return }
             app.pickAnswer(thread: thread, ask: index, option: n)
         case "link":
             guard ask.links.indices.contains(n), let url = ask.links[n].target else { return }

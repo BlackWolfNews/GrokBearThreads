@@ -459,7 +459,7 @@ is an error. Commands marked "the open thread" act on `id` when it's given
 | `type`, `send`, `return` | `text`, `replace`, `timeout` | types into the composer (`replace` takes the place of what's there); `send` types and presses Return, and from the new-thread composer waits for the thread it starts and prints its id |
 | `rename` | `title` | without `title`, makes the open thread's title in the header a field, as a click does; with it, saves that title as Mike's |
 | `paste-image` | `path` | through the instance's own pasteboard |
-| `decide` | `pick` (`"ask:choice"`, both 1-based; picking the same again unpicks it), `clear`, `send` | the open thread's card of asks, picked as its buttons pick, waiting in the composer; `send` sends the composer with the picks. Says what's picked after |
+| `decide` | `pick` (`"ask:choice"`, both 1-based, choice 0 for "Something else"; picking the same again unpicks it), `clear`, `send` | the open thread's card of asks, picked as its buttons pick, waiting in the composer; `send` sends the composer with the picks. Says what's picked after |
 | `click` | `title` | a button in the transcript: Allow, Always allow, Deny, an option, Send answer |
 | `expand`, `collapse` | `row`, `file`, `all`, `section` | a group, tool, thinking block or settled approval (one folded in a closed group opens it); `file` (path or index) in a changes card; `all` for a whole diff; `section` (`inbox`, `running`) folds or opens an inbox heading, as clicking it does |
 | `scroll` | `to` (`top`, `bottom`) or `row`, `offset` | |

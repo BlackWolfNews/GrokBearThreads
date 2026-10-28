@@ -31,13 +31,20 @@ public enum Decisions {
     private static let quoted = try! NSRegularExpression(pattern: #"\b(?:say|reply|type|send|answer)(?: with)?\s+[\"“']([^\"”']{1,40})[\"”']"#, options: .caseInsensitive)
     private static let bare = try! NSRegularExpression(pattern: #"^(?:say|reply)\s+(go|yes|ok|okay|done|ship it|merge it|merge)\b"#, options: .caseInsensitive)
 
+    /// The pick that means "Something else": what Mike writes in the
+    /// composer is his answer to that ask (Mike, 28 Oct). One ask at a time.
+    public static let ownAnswer = -1
+
     /// The picked asks as answers, in the card's order, each with its
     /// index on the card. A pick that isn't one of its ask's choices is
-    /// left out.
-    public static func answers(asks: [Ask], picks: [Int: Int]) -> [(index: Int, answer: AskAnswer)] {
-        asks.enumerated().compactMap { i, ask in
+    /// left out, and so is "Something else" with nothing written.
+    public static func answers(asks: [Ask], picks: [Int: Int], written: String = "") -> [(index: Int, answer: AskAnswer)] {
+        let own = written.trimmingCharacters(in: .whitespacesAndNewlines)
+        return asks.enumerated().compactMap { i, ask in
+            guard let n = picks[i] else { return nil }
+            if n == ownAnswer { return own.isEmpty ? nil : (i, AskAnswer(action: ask.action, answer: own)) }
             let options = choices(for: ask)
-            guard let n = picks[i], options.indices.contains(n) else { return nil }
+            guard options.indices.contains(n) else { return nil }
             return (i, AskAnswer(action: ask.action, answer: options[n]))
         }
     }
@@ -45,18 +52,24 @@ public enum Decisions {
     /// One ordinary message: each picked ask's question then its answer,
     /// numbered as on the card (the agent wrote them in that order, and
     /// unpicked ones keep their numbers out of it, so it can tell which
-    /// were answered), then whatever Mike wrote in the composer.
+    /// were answered), then whatever Mike wrote in the composer. With
+    /// "Something else" picked, what he wrote is that ask's answer instead.
     public static func message(asks: [Ask], picks: [Int: Int], extra: String = "") -> String {
-        let parts = answers(asks: asks, picks: picks).map { i, answer in
-            // One ask needs no number: just the question, then the answer.
-            asks.count == 1
-                ? "\(answer.action)\n\(answer.answer)"
-                : "\(i + 1). \(answer.action)\n   \(answer.answer)"
+        let ownPicked = picks.values.contains(ownAnswer)
+        let parts = answers(asks: asks, picks: picks, written: ownPicked ? extra : "").map { i, answer in
+            block(answer, number: asks.count == 1 ? nil : i + 1)
         }
         var body = parts.joined(separator: "\n\n")
-        let more = extra.trimmingCharacters(in: .whitespacesAndNewlines)
+        let more = ownPicked ? "" : extra.trimmingCharacters(in: .whitespacesAndNewlines)
         if !more.isEmpty { body += (body.isEmpty ? "" : "\n\n") + more }
         return body
+    }
+
+    /// One ask's question then its answer. Numbered, the answer is
+    /// indented under it, every line of it.
+    static func block(_ answer: AskAnswer, number: Int?) -> String {
+        guard let number else { return "\(answer.action)\n\(answer.answer)" }
+        return "\(number). \(answer.action)\n   " + answer.answer.replacingOccurrences(of: "\n", with: "\n   ")
     }
 
     /// What Mike wrote himself in a message that answered asks: the text
@@ -64,14 +77,17 @@ public enum Decisions {
     /// start with them (so the bubble shows it all as it is).
     public static func extra(in text: String, answers: [AskAnswer]) -> String? {
         guard !answers.isEmpty else { return nil }
-        var paragraphs = text.components(separatedBy: "\n\n")[...]
+        var rest = Substring(text)
         for answer in answers {
-            guard let paragraph = paragraphs.first else { return nil }
-            let lines = paragraph.split(separator: "\n", maxSplits: 1).map { $0.trimmingCharacters(in: .whitespaces) }
-            guard lines.count == 2, lines[0].hasSuffix(answer.action), lines[1] == answer.answer else { return nil }
-            paragraphs = paragraphs.dropFirst()
+            // Numbered or not, as `message` wrote it.
+            var number: Int?
+            if let dot = rest.firstIndex(of: "."), let n = Int(rest[..<dot]), rest[rest.index(after: dot)...].hasPrefix(" ") { number = n }
+            let expected = block(answer, number: number)
+            guard rest.hasPrefix(expected) else { return nil }
+            rest = rest.dropFirst(expected.count)
+            if rest.hasPrefix("\n\n") { rest = rest.dropFirst(2) } else if !rest.isEmpty { return nil }
         }
-        return paragraphs.joined(separator: "\n\n").trimmingCharacters(in: .whitespacesAndNewlines)
+        return rest.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     /// Whether the open card can be answered: a completed turn that said

@@ -427,7 +427,7 @@ struct AppDump: Encodable {
             let options = Decisions.choices(for: ask)
             let choices = options.enumerated().map { $0.offset == ask.suggested ? "*\($0.element)" : $0.element }
             let links = ask.links.isEmpty ? "" : " links: " + ask.links.map(\.title).joined(separator: ", ")
-            let answer = picks[i].flatMap { options.indices.contains($0) ? options[$0] : nil } ?? "no answer"
+            let answer = picks[i] == Decisions.ownAnswer ? "something else (the composer)" : picks[i].flatMap { options.indices.contains($0) ? options[$0] : nil } ?? "no answer"
             lines.append("  \(i + 1). \(ask.action) [\(choices.joined(separator: " | "))]\(links) -> \(answer)")
         }
         return lines
