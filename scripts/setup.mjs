@@ -15,7 +15,8 @@
 //      --existing the project named by --project, for a second Mac)
 //   4. its keys: a deploy key the runner uses to deploy the backend when it
 //      updates, and the runner's own key, set as RUNNER_KEY
-//   5. runner.json: where the runner mirrors to, and your default folder
+//   5. runner.json: where the runner mirrors to, and the default folder for
+//      new threads (your home folder unless --cwd; Settings changes it later)
 //   6. the backend and the website, deployed
 //   7. the runner and the Mac app, built and installed
 //   8. how to pair your iPhone and sign a browser in
@@ -26,7 +27,6 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import readline from 'node:readline/promises';
 import { parseArgs } from 'node:util';
 
 const repo = path.resolve(import.meta.dirname, '..');
@@ -113,13 +113,6 @@ function withKey(key) {
   return env;
 }
 
-async function ask(question, fallback) {
-  if (v.yes || !process.stdin.isTTY) return fallback;
-  const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
-  const answer = (await rl.question(`  ${question} [${fallback}] `)).trim();
-  rl.close();
-  return answer || fallback;
-}
 
 // ------------------------------------------------------------ the steps
 
@@ -275,7 +268,9 @@ async function runnerJson(url) {
   say('5. runner.json');
   const json = readJson(runnerJsonPath);
   const name = v.name ?? json.sync?.name ?? os.hostname().split('.')[0];
-  const cwd = v.cwd ?? json.defaults?.cwd ?? (await ask('Folder new threads start in?', '~'));
+  // Not asked: it's in the Mac app's Settings, and each new thread can pick
+  // its own folder anyway. --cwd sets it here.
+  const cwd = v.cwd ?? json.defaults?.cwd ?? '~';
   const next = { ...json, sync: { ...json.sync, ...(url ? { url } : {}), name }, defaults: { ...json.defaults, cwd } };
   if (JSON.stringify(next) === JSON.stringify(json)) return ok(`${runnerJsonPath} as it was`);
   if (dry) return todo(`write ${runnerJsonPath}: sync.url ${url ?? '(the new deployment)'}, sync.name ${name}, defaults.cwd ${cwd}`);

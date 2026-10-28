@@ -39,18 +39,20 @@ Look first, without changing anything:
 
 **Ask** them, in one message:
 
-- what to call their Convex project (default `threadbear`),
-- which folder new threads should start in (default their home folder),
-- if this Mac is joining a Threadbear they already have on another Mac: the
-  name of that Convex project.
+- whether this Mac is joining a Threadbear they already have on another Mac
+  (then: the name of that Convex project),
+- otherwise, what to call their new Convex project (default `threadbear`).
 
 Then run it, with their answers:
 
 ```sh
-./threadbear setup --yes --project <name> --cwd <folder>
+./threadbear setup --yes --project <name>
 # joining an existing project instead:
-./threadbear setup --yes --existing --project <name> --cwd <folder>
+./threadbear setup --yes --existing --project <name>
 ```
+
+New threads start in their home folder; they can change that in the app's
+Settings, and pick a folder for each thread as they start it.
 
 It takes a few minutes (it builds the Mac app). Along the way:
 
