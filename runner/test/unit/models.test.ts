@@ -330,9 +330,9 @@ test('settings: update saves to runner.json, applies at once, and a bad field ch
   assert.equal(s.cfg.idleMs, 10 * 60_000, 'a refused update changed nothing');
 });
 
-test('settings: a fresh runner.json means a $1 budget and no private folders', () => {
+test('settings: a fresh runner.json means the Claude pool, a $1 budget and no private folders', () => {
   const cfg = loadConfig({ THREADBEAR_HOME: tmpDir() });
-  assert.deepEqual(cfg.models, { dailyBudgetUsd: 1, privateFolders: [] });
+  assert.deepEqual(cfg.models, { pool: 'claude', dailyBudgetUsd: 1, privateFolders: [] });
 });
 
 test('settings: spend changes reach clients at most once a minute', () => {

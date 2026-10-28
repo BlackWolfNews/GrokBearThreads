@@ -204,7 +204,7 @@ const clis = [
 const settings = {
   defaultCwd: defaults.cwd, idleMinutes: 30, maxLiveCLIs: 6, followMain: true,
   models: {
-    openRouterKey: { set: true, hint: 'f3a9' }, dailyBudgetUsd: 1, spentTodayUsd: 0.0123, spentMonthUsd: 0.4187,
+    pool: 'claude', openRouterKey: { set: true, hint: 'f3a9' }, dailyBudgetUsd: 1, spentTodayUsd: 0.0123, spentMonthUsd: 0.4187,
     privateFolders: ['~/dev/clients/acme'],
   },
 };
@@ -714,6 +714,10 @@ async function dispatch(client, method, p) {
       }
       if (p.followMain !== undefined) settings.followMain = Boolean(p.followMain);
       const m = p.models ?? {};
+      if (m.pool !== undefined) {
+        if (m.pool !== null && !poolOf(m.pool)) throw rpcError(-32602, `No pool called ${m.pool}`);
+        settings.models.pool = m.pool;
+      }
       if (m.dailyBudgetUsd !== undefined) {
         if (typeof m.dailyBudgetUsd !== 'number' || m.dailyBudgetUsd < 0 || m.dailyBudgetUsd > 100) throw rpcError(-32602, 'The daily budget must be between $0 and $100');
         settings.models.dailyBudgetUsd = m.dailyBudgetUsd;

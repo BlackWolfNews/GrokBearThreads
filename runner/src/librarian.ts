@@ -80,7 +80,7 @@ type Answer = {
 export class Librarian {
   private host: LibrarianHost;
   private projects: Projects;
-  private models?: Pick<Models, 'generate'> & Partial<Pick<Models, 'hasKey'>>;
+  private models?: Pick<Models, 'generate'> & Partial<Pick<Models, 'unavailable'>>;
   private clock: Clock;
   private log: Logger;
   private file: string;
@@ -94,6 +94,9 @@ export class Librarian {
   private edited = new Map<string, Set<string>>();
   private current?: LibrarianJob & { startedAt: string };
   private off?: string;
+  // `off` is there because no model could be reached at all (no pool, no
+  // key), so it clears by itself once one can.
+  private offForSetup = false;
   private timer?: TimerHandle;
   private timerAt = Infinity;
   private stopped = false;
@@ -107,7 +110,7 @@ export class Librarian {
   private iconAgain = false;
   private iconFullDue = 0;
 
-  constructor(deps: { host: LibrarianHost; projects: Projects; models?: Pick<Models, 'generate'> & Partial<Pick<Models, 'hasKey'>>; clock: Clock; log: Logger; home: string; userHome?: string }) {
+  constructor(deps: { host: LibrarianHost; projects: Projects; models?: Pick<Models, 'generate'> & Partial<Pick<Models, 'unavailable'>>; clock: Clock; log: Logger; home: string; userHome?: string }) {
     this.host = deps.host;
     this.projects = deps.projects;
     this.models = deps.models;
@@ -152,9 +155,16 @@ export class Librarian {
 
   status(): LibrarianStatus {
     this.rollDay();
-    // No key is known without asking the model; the budget isn't.
-    if (!this.current && !this.off && this.models?.hasKey && !this.models.hasKey()) this.off = 'No OpenRouter key';
-    else if (this.off === 'No OpenRouter key' && this.models?.hasKey?.()) this.off = undefined;
+    // Whether there's a pool or a key is known without asking the model;
+    // room and budget aren't.
+    const why = this.models?.unavailable?.();
+    if (!this.current && !this.off && why) {
+      this.off = why;
+      this.offForSetup = true;
+    } else if (this.offForSetup && this.models?.unavailable && !why) {
+      this.off = undefined;
+      this.offForSetup = false;
+    }
     const s: LibrarianStatus = {
       state: this.current ? 'working' : this.paused ? 'paused' : this.off ? 'off' : 'idle',
       paused: this.paused,
@@ -189,6 +199,7 @@ export class Librarian {
     }
     // Asking again is a good moment to try again after a missing key.
     this.off = this.models ? undefined : this.off;
+    if (this.models) this.offForSetup = false;
     this.changed();
     return this.status();
   }
@@ -313,8 +324,10 @@ export class Librarian {
     const res = await this.models.generate({ feature: 'projects', cwd: rec.cwd, system: SYSTEM, prompt, maxTokens: 2000 });
     if (!res.ok) {
       if (WAIT_FOR.includes(res.reason)) {
-        // Nothing wrong with the job: try again once there's a key or budget.
-        this.off = offReason(res.reason, res.message);
+        // Nothing wrong with the job: try again once there's a model, room
+        // or budget.
+        this.off = res.reason === 'no-key' ? (this.models.unavailable?.() ?? offReason(res.reason, res.message)) : offReason(res.reason, res.message);
+        this.offForSetup = res.reason === 'no-key';
         this.enqueue(job.threadId, job.reason, job.why, this.clock.now() + OFF_RETRY_MS);
         return;
       }
@@ -323,6 +336,7 @@ export class Librarian {
       return;
     }
     this.off = undefined;
+    this.offForSetup = false;
     this.rollDay();
     this.day.looks++;
     this.day.spentUsd += res.costUsd ?? 0;
@@ -672,10 +686,12 @@ export function mainCheckout(dir: string): string {
 
 const PROJECT_MARKERS = ['.git', 'package.json', 'Package.swift', 'pyproject.toml', 'Cargo.toml', 'go.mod', 'AGENTS.md', 'CLAUDE.md'];
 
-const WAIT_FOR: ModelFailure[] = ['no-key', 'off', 'over-budget'];
+const WAIT_FOR: ModelFailure[] = ['no-key', 'off', 'over-budget', 'no-room'];
 
 function offReason(reason: ModelFailure, message: string): string {
-  if (reason === 'no-key') return 'No OpenRouter key';
+  if (reason === 'no-key') return 'No Claude pool or OpenRouter key';
+  // "Every login in Claude is out of room"
+  if (reason === 'no-room') return message.replace(/\.$/, '');
   if (reason === 'over-budget') return "Today's model budget is spent";
   if (reason === 'off') return 'Model calls are off';
   return message;

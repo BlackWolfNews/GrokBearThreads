@@ -18,6 +18,7 @@ export type Settings = {
   maxLiveCLIs: number;
   followMain: boolean;
   models: {
+    pool: string | null;
     openRouterKey: { set: boolean; hint?: string };
     dailyBudgetUsd: number;
     spentTodayUsd: number;
@@ -31,7 +32,7 @@ export type SettingsUpdate = {
   idleMinutes?: number;
   maxLiveCLIs?: number;
   followMain?: boolean;
-  models?: { dailyBudgetUsd?: number; privateFolders?: string[] };
+  models?: { pool?: string | null; dailyBudgetUsd?: number; privateFolders?: string[] };
 };
 
 // While calls are adding to the spend, clients hear about it at most this often.
@@ -43,9 +44,12 @@ export class SettingsService {
   private publish: (n: Notification) => void;
   private clock: Clock;
   private spendTimer?: { cancel(): void };
+  // The pools there are, so models.pool can be checked; unchecked without.
+  private poolIds?: () => string[];
 
-  constructor(opts: { config: Config; models: Models; publish: (n: Notification) => void; clock: Clock }) {
+  constructor(opts: { config: Config; models: Models; publish: (n: Notification) => void; clock: Clock; poolIds?: () => string[] }) {
     this.cfg = opts.config;
+    this.poolIds = opts.poolIds;
     this.models = opts.models;
     this.publish = opts.publish;
     this.clock = opts.clock;
@@ -61,6 +65,7 @@ export class SettingsService {
       // What the next start will do, which is what the switch means.
       followMain: readRunnerJson(this.cfg.home).followMain !== false,
       models: {
+        pool: this.cfg.models.pool,
         openRouterKey: hint ? { set: true, hint } : { set: Boolean(key) },
         dailyBudgetUsd: this.cfg.models.dailyBudgetUsd,
         spentTodayUsd: round(this.models.spentTodayUsd()),
@@ -85,6 +90,10 @@ export class SettingsService {
     const budget = u.models?.dailyBudgetUsd;
     if (budget !== undefined && !(budget >= 0 && budget <= 100)) throw bad('dailyBudgetUsd must be from 0 to 100');
     const folders = u.models?.privateFolders?.map((f) => f.trim()).filter(Boolean);
+    const pool = u.models?.pool === undefined ? undefined : u.models.pool === null ? null : u.models.pool.trim();
+    if (pool === '') throw bad('pool must be a pool id or null');
+    const pools = pool ? this.poolIds?.() : undefined;
+    if (pool && pools && !pools.includes(pool)) throw bad(`No pool called ${pool}. Pools: ${pools.join(', ') || 'none'}`);
 
     const json = readRunnerJson(this.cfg.home);
     if (cwd !== undefined) {
@@ -101,8 +110,9 @@ export class SettingsService {
     }
     // Saved only: the updater reads it when the runner starts.
     if (u.followMain !== undefined) json.followMain = u.followMain;
-    if (budget !== undefined || folders !== undefined) {
+    if (budget !== undefined || folders !== undefined || pool !== undefined) {
       json.models = { ...json.models };
+      if (pool !== undefined) json.models.pool = this.cfg.models.pool = pool;
       if (budget !== undefined) json.models.dailyBudgetUsd = this.cfg.models.dailyBudgetUsd = budget;
       if (folders !== undefined) json.models.privateFolders = this.cfg.models.privateFolders = [...new Set(folders)];
     }
@@ -158,6 +168,10 @@ export function settingsMethods(s: SettingsService): Record<string, (p: Record<s
         if (!m || typeof m !== 'object' || Array.isArray(m)) throw bad('models must be an object');
         const mm = m as Record<string, unknown>;
         u.models = {};
+        if (mm.pool !== undefined) {
+          if (mm.pool !== null && typeof mm.pool !== 'string') throw bad('models.pool must be a pool id or null');
+          u.models.pool = mm.pool;
+        }
         if (mm.dailyBudgetUsd !== undefined) u.models.dailyBudgetUsd = num(mm.dailyBudgetUsd, 'models.dailyBudgetUsd');
         if (mm.privateFolders !== undefined) {
           if (!Array.isArray(mm.privateFolders) || mm.privateFolders.some((f) => typeof f !== 'string')) {

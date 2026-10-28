@@ -1,34 +1,46 @@
 // The runner's own small-model calls (docs/protocol.md, "Settings and
-// models"): classify, extract, summarize and generate, all through
-// OpenRouter with one key. Features ask for a job, not a model; ROUTES
-// says which models answer it, in order, so swapping one touches that
-// table alone. A call never throws: a failed one says why, and the feature
-// falls back to what it did before there was a key.
+// models"): classify, extract, summarize and generate, on a Claude pool's
+// logins through the official CLI, or through OpenRouter with one key.
+// Features ask for a job, not a model; ROUTES says which models answer it,
+// in order, so swapping one touches that table alone. A call never throws:
+// a failed one says why, and the feature falls back to what it did before
+// there was a model to ask.
 import fs from 'node:fs';
 import path from 'node:path';
 import type { Clock } from '../clock.ts';
 import type { Logger } from '../log.ts';
+import type { Account, Pool } from '../protocol.ts';
 import { expandHome, paths } from '../config.ts';
+import { pickInPool } from '../pools.ts';
 import { chat } from './openrouter.ts';
 import type { ChatResponse, Fetch } from './openrouter.ts';
+import { askCli, cliDir } from './claude-pool.ts';
+import type { AskCli, CliResponse } from './claude-pool.ts';
 import { Ledger } from './ledger.ts';
+import type { UsageLine } from './ledger.ts';
 
 export type ModelJob = 'classify' | 'extract' | 'summarize' | 'generate';
 
+// Haiku through OpenRouter, and Haiku on a login in the settings' pool.
+// A route starting "pool:" runs on the pool; any other is an OpenRouter id.
 export const HAIKU = 'anthropic/claude-haiku-5.5';
+export const POOL_HAIKU = 'pool:claude-haiku-5-5';
+const POOL_PREFIX = 'pool:';
 
-// ScaleDown's Extract and Summarize cost about $0.04 per million input
-// tokens with free output, so they go first; Haiku answers when they fail
-// or say something we can't read. ScaleDown's Classify is only on its own
-// API, so classify goes to Haiku until a feature needs typed decisions.
+// Haiku on the pool comes before Haiku on OpenRouter: it's the same model,
+// and the logins' room is there anyway. ScaleDown's Extract and Summarize
+// cost about $0.04 per million input tokens with free output, so they go
+// first when there's a key; Haiku answers when they fail or say something
+// we can't read. ScaleDown's Classify is only on its own API, so classify
+// goes to Haiku until a feature needs typed decisions.
 export const ROUTES: Record<ModelJob, string[]> = {
-  classify: [HAIKU],
-  extract: ['scaledown/extract', HAIKU],
-  summarize: ['scaledown/summarize', HAIKU],
-  generate: [HAIKU],
+  classify: [POOL_HAIKU, HAIKU],
+  extract: ['scaledown/extract', POOL_HAIKU, HAIKU],
+  summarize: ['scaledown/summarize', POOL_HAIKU, HAIKU],
+  generate: [POOL_HAIKU, HAIKU],
 };
 
-export type ModelFailure = 'no-key' | 'off' | 'private' | 'over-budget' | 'timeout' | 'provider';
+export type ModelFailure = 'no-key' | 'off' | 'private' | 'over-budget' | 'no-room' | 'timeout' | 'provider';
 
 export type ModelResult<T> =
   | { ok: true; value: T; model: string; costUsd?: number }
@@ -43,7 +55,17 @@ export type ExtractParams = Common & { text: string; fields: Record<string, stri
 export type SummarizeParams = Common & { text: string; maxWords?: number };
 export type GenerateParams = Common & { prompt: string; system?: string; maxTokens?: number };
 
-export type ModelSettings = { dailyBudgetUsd: number; privateFolders: string[] };
+// pool: the pool whose Claude logins answer "pool:" routes; null for none.
+export type ModelSettings = { dailyBudgetUsd: number; privateFolders: string[]; pool?: string | null };
+
+// What the Models layer needs of the runner for pool calls.
+export type PoolHost = {
+  // The pool and its logins this runner can use, with their room as the
+  // runner knows it; undefined when there's no pool by that id.
+  pool(id: string): { pool: Pool; accounts: Account[] } | undefined;
+  // A login that answered that it's out of room, as a turn would.
+  ranDry(accountId: string): void;
+};
 
 export type ModelsOptions = {
   home: string;
@@ -57,10 +79,23 @@ export type ModelsOptions = {
   onSpend?: () => void;
   timeoutMs?: number;
   maxInFlight?: number;
+  // Pool calls: the runner's pools and the claude binary. Without a host,
+  // pool routes are skipped.
+  poolHost?: PoolHost;
+  claudePath?: string;
+  registry?: { add(pid: number, command: string): void; remove(pid: number): void };
+  // Stands in for the CLI in tests.
+  askCli?: AskCli;
+  poolTimeoutMs?: number;
 };
 
 const TIMEOUT_MS = 20_000;
 const MAX_IN_FLIGHT = 4;
+// A CLI takes 3 to 5 seconds to start and answer, and each is a whole
+// process, so fewer at once and a longer wait than OpenRouter's.
+const POOL_TIMEOUT_MS = 60_000;
+const POOL_MAX_IN_FLIGHT = 2;
+export const DEFAULT_POOL = 'claude';
 
 export function keyPath(home: string): string {
   return path.join(paths.secrets(home), 'openrouter-key');
@@ -102,6 +137,12 @@ export function isPrivate(cwd: string, folders: string[]): boolean {
 
 // What one route asks a model, and how to read its answer (undefined: it
 // said something we can't use, so try the next model).
+type Failure = { ok: false; reason: ModelFailure; message: string };
+
+// Why a route didn't run, best first: the reason a feature is told when
+// none did. Out of room comes back by itself; no key needs Mike.
+const SKIP_ORDER: ModelFailure[] = ['no-room', 'over-budget', 'off', 'no-key'];
+
 type Attempt<T> = {
   system?: string;
   user: string;
@@ -116,6 +157,11 @@ export class Models {
   private ledger: Ledger;
   private inFlight = 0;
   private waiting: (() => void)[] = [];
+  private poolInFlight = 0;
+  private poolWaiting: (() => void)[] = [];
+  // The login the last pool call ran on, kept while it has room so its
+  // prompt cache stays warm.
+  private lastLogin?: string;
   // The local day the over-budget notice was last sent, so it's said once.
   private overBudgetNoticeDay?: string;
 
@@ -126,6 +172,30 @@ export class Models {
 
   hasKey(): boolean {
     return Boolean(readKey(this.opts.home));
+  }
+
+  // The pool small jobs run on, from the settings.
+  poolId(): string | null {
+    const p = this.opts.settings().pool;
+    return p === undefined ? DEFAULT_POOL : p;
+  }
+
+  // Why no call could go out at all, or undefined when one might: there's
+  // a pool with a Claude login, or a key. Room and budget aren't checked;
+  // a call finds those out.
+  unavailable(): string | undefined {
+    if (this.hasKey() || this.poolLogins()) return undefined;
+    const id = this.poolId();
+    return id === null ? 'No OpenRouter key' : 'No Claude pool or OpenRouter key';
+  }
+
+  private poolLogins(): { pool: Pool; accounts: Account[] } | undefined {
+    const id = this.poolId();
+    if (id === null || !this.opts.poolHost) return undefined;
+    const found = this.opts.poolHost.pool(id);
+    if (!found) return undefined;
+    const accounts = found.accounts.filter((a) => a.provider === 'claude' && found.pool.accountIds.includes(a.id));
+    return accounts.length ? { pool: found.pool, accounts } : undefined;
   }
 
   spentTodayUsd(): number {
@@ -206,75 +276,169 @@ export class Models {
   }
 
   private async run<T>(job: ModelJob, p: Common, attempt: (model: string) => Attempt<T>): Promise<ModelResult<T>> {
-    const key = readKey(this.opts.home);
-    if (!key) return { ok: false, reason: 'no-key', message: 'No OpenRouter key is set (Settings, Models).' };
     const s = this.opts.settings();
-    if (!(s.dailyBudgetUsd > 0)) return { ok: false, reason: 'off', message: 'Model calls are off (the daily budget is 0).' };
     if (p.cwd && isPrivate(p.cwd, s.privateFolders)) return { ok: false, reason: 'private', message: `${p.cwd} is a private folder.` };
-    const over = (): ModelResult<T> | undefined =>
-      this.spentTodayUsd() >= this.opts.settings().dailyBudgetUsd
-        ? { ok: false, reason: 'over-budget', message: `Today's model budget of ${usd(this.opts.settings().dailyBudgetUsd)} is spent.` }
-        : undefined;
-    const before = over();
-    if (before) return before;
-
+    const skipped: Failure[] = [];
+    let failed: Failure | undefined;
     await this.acquire();
     try {
-      // Checked again: calls that waited for a slot may have spent it.
-      const after = over();
-      if (after) return after;
-      let last: ChatResponse | undefined;
       for (const model of ROUTES[job]) {
         const a = attempt(model);
-        for (let tries = 0; tries < 2; tries++) {
-          const started = this.opts.clock.now();
-          const res = await chat({
-            key,
-            model,
-            system: a.system,
-            user: a.user,
-            maxTokens: a.maxTokens,
-            jsonSchema: a.jsonSchema,
-            extra: a.extra,
-            timeoutMs: this.opts.timeoutMs ?? TIMEOUT_MS,
-            fetch: this.opts.fetch ?? fetch,
-          });
-          const value = res.ok ? a.read(res.text) : undefined;
-          this.record(job, p.feature, model, started, res, res.ok && value === undefined ? 'unreadable answer' : undefined);
-          if (res.ok && value !== undefined) return { ok: true, value, model, costUsd: res.costUsd };
-          last = res;
-          if (res.ok || !res.retry) break;
-        }
+        const res = model.startsWith(POOL_PREFIX) ? await this.viaPool(job, p, model.slice(POOL_PREFIX.length), a) : await this.viaOpenRouter(job, p, model, a);
+        if (res.ok) return res;
+        if ('skipped' in res) skipped.push(res.skipped);
+        else failed = res;
       }
-      if (last && !last.ok && last.timedOut) return { ok: false, reason: 'timeout', message: last.message };
-      return { ok: false, reason: 'provider', message: last && !last.ok ? last.message : "The model's answer couldn't be read." };
     } finally {
       this.release();
     }
+    // A route that ran and failed says more than one that never ran.
+    if (failed) return failed;
+    for (const reason of SKIP_ORDER) {
+      const f = skipped.find((x) => x.reason === reason);
+      if (f) return f;
+    }
+    return { ok: false, reason: 'provider', message: "The model's answer couldn't be read." };
   }
 
-  private record(job: ModelJob, feature: string, model: string, started: number, res: ChatResponse, unreadable?: string): void {
+  // One OpenRouter route: skipped with no key, a budget of 0 or the day's
+  // budget spent; else tried, and once more on an error worth it.
+  private async viaOpenRouter<T>(job: ModelJob, p: Common, model: string, a: Attempt<T>): Promise<ModelResult<T> | { ok: false; skipped: Failure }> {
+    const key = readKey(this.opts.home);
+    if (!key) return skip('no-key', 'No OpenRouter key is set and no Claude pool could answer (Settings, Models).');
+    const budget = this.opts.settings().dailyBudgetUsd;
+    if (!(budget > 0)) return skip('off', 'OpenRouter calls are off (the daily budget is 0).');
+    if (this.spentTodayUsd() >= budget) return skip('over-budget', `Today's model budget of ${usd(budget)} is spent.`);
+    let last: ChatResponse | undefined;
+    for (let tries = 0; tries < 2; tries++) {
+      const started = this.opts.clock.now();
+      const res = await chat({
+        key,
+        model,
+        system: a.system,
+        user: a.user,
+        maxTokens: a.maxTokens,
+        jsonSchema: a.jsonSchema,
+        extra: a.extra,
+        timeoutMs: this.opts.timeoutMs ?? TIMEOUT_MS,
+        fetch: this.opts.fetch ?? fetch,
+      });
+      const value = res.ok ? a.read(res.text) : undefined;
+      const unreadable = res.ok && value === undefined ? 'unreadable answer' : undefined;
+      this.record({
+        job,
+        feature: p.feature,
+        model,
+        started,
+        ok: res.ok && !unreadable,
+        ...(res.ok ? { inputTokens: res.inputTokens, outputTokens: res.outputTokens } : {}),
+        ...(res.costUsd !== undefined ? { costUsd: res.costUsd } : {}),
+        ...(!res.ok ? { error: res.message } : unreadable ? { error: unreadable } : {}),
+      });
+      if (res.ok && value !== undefined) return { ok: true, value, model, costUsd: res.costUsd };
+      last = res;
+      if (res.ok || !res.retry) break;
+    }
+    if (last && !last.ok && last.timedOut) return { ok: false, reason: 'timeout', message: last.message };
+    return { ok: false, reason: 'provider', message: last && !last.ok ? last.message : "The model's answer couldn't be read." };
+  }
+
+  // One pool route: skipped with no pool or no login with room; else run
+  // on a login, and on the next one if that says it's out of room.
+  private async viaPool<T>(job: ModelJob, p: Common, model: string, a: Attempt<T>): Promise<ModelResult<T> | { ok: false; skipped: Failure }> {
+    if (!this.poolLogins()) {
+      const id = this.poolId();
+      return skip('no-key', id === null ? 'Small jobs are on no pool.' : `No pool called ${id} has a Claude login.`);
+    }
+    if (!this.opts.claudePath) return skip('off', 'Pool calls are off in this runner.');
+    await this.acquirePool();
+    try {
+      const tried: string[] = [];
+      let title = '';
+      for (;;) {
+        // Read again each time round: the last call may have used up a login.
+        const found = this.poolLogins();
+        if (!found) return skip('no-key', 'The pool has no Claude login.');
+        title = found.pool.title;
+        const id = pickInPool(found.pool, found.accounts, { provider: 'claude', current: this.lastLogin, exclude: tried });
+        const account = id ? found.accounts.find((x) => x.id === id) : undefined;
+        if (!account) break;
+        tried.push(account.id);
+        const started = this.opts.clock.now();
+        const res: CliResponse = await (this.opts.askCli ?? askCli)({
+          claudePath: this.opts.claudePath,
+          account,
+          model,
+          system: a.system,
+          user: a.user,
+          jsonSchema: a.jsonSchema?.schema,
+          cwd: cliDir(this.opts.home),
+          timeoutMs: this.opts.poolTimeoutMs ?? POOL_TIMEOUT_MS,
+          registry: this.opts.registry,
+        });
+        const value = res.ok ? a.read(res.text) : undefined;
+        const unreadable = res.ok && value === undefined ? 'unreadable answer' : undefined;
+        this.record({
+          job,
+          feature: p.feature,
+          model,
+          started,
+          ok: res.ok && !unreadable,
+          accountId: account.id,
+          ...(res.ok ? { inputTokens: res.inputTokens, outputTokens: res.outputTokens, notionalUsd: res.notionalUsd } : {}),
+          ...(!res.ok ? { error: res.message } : unreadable ? { error: unreadable } : {}),
+        });
+        if (res.ok && value !== undefined) {
+          this.lastLogin = account.id;
+          return { ok: true, value, model: `${model} on ${account.id}` };
+        }
+        if (!res.ok && res.limit) {
+          this.opts.poolHost?.ranDry(account.id);
+          if (this.lastLogin === account.id) this.lastLogin = undefined;
+          continue;
+        }
+        if (!res.ok && res.timedOut) return { ok: false, reason: 'timeout', message: res.message };
+        return { ok: false, reason: 'provider', message: res.ok ? "The model's answer couldn't be read." : res.message };
+      }
+      return skip('no-room', `Every login in ${title || 'the pool'} is out of room.`);
+    } finally {
+      this.releasePool();
+    }
+  }
+
+  private record(r: { job: ModelJob; feature: string; model: string; started: number; ok: boolean } & Partial<Omit<UsageLine, 'ts' | 'ms'>>): void {
     const now = this.opts.clock.now();
-    const line = {
+    const { started, error, ...rest } = r;
+    const line: UsageLine = {
       ts: new Date(now).toISOString(),
-      feature,
-      job,
-      model,
-      ok: res.ok && !unreadable,
+      ...rest,
       ms: now - started,
-      ...(res.ok ? { inputTokens: res.inputTokens, outputTokens: res.outputTokens } : {}),
-      ...(res.costUsd !== undefined ? { costUsd: res.costUsd } : {}),
-      ...(!res.ok ? { error: res.message.slice(0, 300) } : unreadable ? { error: unreadable } : {}),
+      ...(error ? { error: error.slice(0, 300) } : {}),
     };
+    for (const k of Object.keys(line) as (keyof UsageLine)[]) if (line[k] === undefined) delete line[k];
     this.ledger.add(line);
-    if (!line.ok) this.opts.log.warn('model call failed', { feature, job, model, error: line.error });
+    if (!line.ok) this.opts.log.warn('model call failed', { feature: r.feature, job: r.job, model: r.model, accountId: r.accountId, error: line.error });
     const budget = this.opts.settings().dailyBudgetUsd;
     const day = new Date(now).toDateString();
-    if (budget > 0 && this.spentTodayUsd() >= budget && this.overBudgetNoticeDay !== day) {
+    if (line.costUsd && budget > 0 && this.spentTodayUsd() >= budget && this.overBudgetNoticeDay !== day) {
       this.overBudgetNoticeDay = day;
-      this.opts.notice?.('warning', `Today's model budget of ${usd(budget)} is spent, so titles, summaries and the like wait for tomorrow. Change it in Settings.`);
+      this.opts.notice?.('warning', `Today's OpenRouter budget of ${usd(budget)} is spent, so anything only OpenRouter can do waits for tomorrow. Change it in Settings.`);
     }
     this.opts.onSpend?.();
+  }
+
+  private acquirePool(): Promise<void> {
+    if (this.poolInFlight < POOL_MAX_IN_FLIGHT) {
+      this.poolInFlight++;
+      return Promise.resolve();
+    }
+    return new Promise((resolve) => this.poolWaiting.push(resolve));
+  }
+
+  private releasePool(): void {
+    const next = this.poolWaiting.shift();
+    if (next) next();
+    else this.poolInFlight--;
   }
 
   private acquire(): Promise<void> {
@@ -291,6 +455,10 @@ export class Models {
     if (next) next();
     else this.inFlight--;
   }
+}
+
+function skip(reason: ModelFailure, message: string): { ok: false; skipped: Failure } {
+  return { ok: false, skipped: { ok: false, reason, message } };
 }
 
 function parseObject(text: string): Record<string, unknown> | undefined {

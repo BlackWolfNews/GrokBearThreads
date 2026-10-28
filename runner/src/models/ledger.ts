@@ -1,6 +1,6 @@
 // models/usage.ndjson: one line per model call that went out, so the
-// Settings window can say what's been spent and the daily budget can be
-// kept across restarts. Never any text from the call.
+// Settings window can say what's been spent on OpenRouter and the daily
+// budget can be kept across restarts. Never any text from the call.
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -14,6 +14,10 @@ export type UsageLine = {
   inputTokens?: number;
   outputTokens?: number;
   costUsd?: number;
+  // A pool call: the login it ran on, and what the CLI says it would have
+  // cost on the API. Not spent, so never added to the budget.
+  accountId?: string;
+  notionalUsd?: number;
   error?: string;
 };
 

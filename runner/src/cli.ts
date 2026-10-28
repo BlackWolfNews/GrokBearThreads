@@ -93,7 +93,8 @@ const HELP = `tb: talk to the Threadbear runner
   tb librarian run [<threadId>]   a look at a thread now; with none, at every recent thread it hasn't seen
   tb librarian pause|resume
   tb settings [--json]            what the Settings window shows
-  tb models [--json]              the OpenRouter key (set or not), budget and spend
+  tb models [--json]              the small-model pool, the OpenRouter key (set or not), budget and spend
+  tb models pool <pool|off>       which pool's Claude logins answer small jobs first (off: OpenRouter only)
   tb models key [--remove]        sets the OpenRouter key from a prompt or stdin, never an argument
   tb models try <job> "text" [--labels a,b] [--field name=description]... [--system S] [--cwd DIR]
                                   one call by hand: classify (--labels), extract (--field),
@@ -618,6 +619,8 @@ function printSettings(s: Settings): void {
 
 function printModels(s: Settings): void {
   const m = s.models;
+  // An older runner sends no pool: everything went through OpenRouter.
+  if (m.pool !== undefined) console.log(`Small jobs on    ${m.pool === null ? 'OpenRouter only' : `the ${m.pool} pool, then OpenRouter`}`);
   console.log(`OpenRouter key   ${m.openRouterKey.set ? `set${m.openRouterKey.hint ? `, ends in ${m.openRouterKey.hint}` : ''}` : 'not set'}`);
   console.log(`Daily budget     ${m.dailyBudgetUsd === 0 ? 'off' : usd(m.dailyBudgetUsd)}`);
   console.log(`Spent today      ${usd(m.spentTodayUsd)}`);
@@ -631,6 +634,13 @@ async function modelsCommand(client: RunnerClient, args: string[], f: Flags): Pr
     const r = await client.call<{ settings: Settings }>('settings.get', {});
     if (f.json) console.log(JSON.stringify(r.settings.models, null, 2));
     else printModels(r.settings);
+    return 0;
+  }
+  if (action === 'pool') {
+    const [id] = rest;
+    if (!id || rest.length > 1) throw new Error('tb models pool <pool|off>. tb pools lists them.');
+    const r = await client.call<{ settings: Settings }>('settings.update', { models: { pool: id === 'off' ? null : id } });
+    printModels(r.settings);
     return 0;
   }
   if (action === 'key') {
@@ -667,7 +677,7 @@ async function modelsCommand(client: RunnerClient, args: string[], f: Flags): Pr
     }
     return r.ok ? 0 : 1;
   }
-  throw new Error(`Unknown: tb models ${action}. It's key or try.`);
+  throw new Error(`Unknown: tb models ${action}. It's pool, key or try.`);
 }
 
 // A line from stdin; from a terminal, prompted for and not echoed.

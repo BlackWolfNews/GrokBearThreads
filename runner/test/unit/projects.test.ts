@@ -313,7 +313,7 @@ test('the librarian waits without a key, skips private folders, can be paused, a
   await tick(6);
   let st = librarian.status();
   assert.equal(st.state, 'off');
-  assert.equal(st.reason, 'No OpenRouter key');
+  assert.equal(st.reason, 'No Claude pool or OpenRouter key');
   assert.equal(st.queue.length, 1, 'kept for later');
   // Paused: nothing runs even when due.
   m['librarian.update']({ paused: true });

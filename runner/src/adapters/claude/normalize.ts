@@ -461,7 +461,7 @@ export class ClaudeNormalizer {
 
 // What a failed turn says when the login ran out, for CLIs whose
 // rate_limit_event didn't come first.
-const USAGE_LIMIT_TEXT = /hit your (usage )?limit|usage limit reached|rate_limit_error/i;
+export const USAGE_LIMIT_TEXT = /hit your (usage )?limit|usage limit reached|rate_limit_error/i;
 
 // Claude's single-window rateLimitType names, as protocol windows.
 const RATE_LIMIT_WINDOWS: Record<string, { kind: UsageWindow['kind']; title: string }> = {

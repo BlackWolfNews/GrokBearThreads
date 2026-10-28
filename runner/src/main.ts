@@ -125,14 +125,18 @@ async function main(): Promise<void> {
     toolsFor: (threadId) => buildThreadbearTools(router(), threadId, Date.now, scheduleControl(), projectControl()),
     onNotice: (text) => runner.notice('warning', text),
   });
-  // The runner's own small-model calls. Reads the key from secrets/ on
-  // each call, so a key written by hand works without a restart.
+  // The runner's own small-model calls, on the settings' Claude pool or
+  // through OpenRouter. Reads the key from secrets/ on each call, so a key
+  // written by hand works without a restart.
   let settings!: SettingsService;
   const models = new Models({
     home: cfg.home,
     clock: realClock,
     log,
     settings: () => cfg.models,
+    claudePath: cfg.claudePath,
+    registry,
+    poolHost: { pool: (id) => runner.smallModelPool(id), ranDry: (id) => runner.noteRanDry(id) },
     notice: (level, message) => runner.notice(level, message),
     onSpend: () => settings.spendChanged(),
   });
@@ -153,7 +157,7 @@ async function main(): Promise<void> {
     log,
     models,
   });
-  settings = new SettingsService({ config: cfg, models, publish: (n) => runner.publish(n), clock: realClock });
+  settings = new SettingsService({ config: cfg, models, publish: (n) => runner.publish(n), clock: realClock, poolIds: () => runner.listPools().pools.map((p) => p.id) });
   // Runners still finishing turns after a handover: connected before the
   // threads load, so the ones they have are left to them. Nothing after the
   // await below yields until runner.start(), so no thread can arrive first.

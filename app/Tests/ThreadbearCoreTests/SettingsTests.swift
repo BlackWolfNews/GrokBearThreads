@@ -18,6 +18,17 @@ final class SettingsTests: XCTestCase {
         XCTAssertEqual(settings.models.spentTodayUsd, 0.0123)
         XCTAssertEqual(settings.models.spentMonthUsd, 0.4)
         XCTAssertEqual(settings.models.privateFolders, ["~/dev/client", "/tmp/x"], "a folder that isn't a string is skipped")
+        XCTAssertFalse(settings.models.poolSupported, "an older runner sends no pool")
+        XCTAssertNil(settings.models.pool)
+    }
+
+    func testPoolDecodesAsAnIdOrNull() throws {
+        let on = try JSONDecoder().decode(RunnerSettings.self, from: Data(#"{"models":{"pool":"claude"}}"#.utf8))
+        XCTAssertTrue(on.models.poolSupported)
+        XCTAssertEqual(on.models.pool, "claude")
+        let off = try JSONDecoder().decode(RunnerSettings.self, from: Data(#"{"models":{"pool":null}}"#.utf8))
+        XCTAssertTrue(off.models.poolSupported, "null is OpenRouter only, from a runner that knows pools")
+        XCTAssertNil(off.models.pool)
     }
 
     func testEmptySettingsTakeTheDefaults() throws {
@@ -33,6 +44,9 @@ final class SettingsTests: XCTestCase {
                        ["followMain": .bool(false), "models": .object(["dailyBudgetUsd": .number(0)])])
         XCTAssertEqual(SettingsUpdate(privateFolders: []).params, ["models": .object(["privateFolders": .array([])])],
                        "an empty list clears the folders, so it's still sent")
+        XCTAssertEqual(SettingsUpdate(pool: "convex").params, ["models": .object(["pool": .string("convex")])])
+        XCTAssertEqual(SettingsUpdate(pool: .some(nil)).params, ["models": .object(["pool": .null])],
+                       "OpenRouter only is sent as null")
         XCTAssertEqual(SettingsUpdate().params, [:])
     }
 
