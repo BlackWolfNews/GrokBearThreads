@@ -212,6 +212,10 @@ enum Theme {
     /// mode and dim in dark. These are about 3.3:1 in both, and still
     /// clearly quieter than secondary text. Disabled controls and the light
     /// placeholder keep the system colour.
+    /// An asks card's buttons (AskButtonStyle): a raised grey, like a
+    /// bordered push button on either appearance.
+    static let buttonFill = dynamic(dark: NSColor(white: 1, alpha: 0.12), light: NSColor(white: 1, alpha: 1))
+    static let buttonEdge = dynamic(dark: NSColor(white: 1, alpha: 0.08), light: NSColor(white: 0, alpha: 0.18))
     static let faintText = dynamic(dark: NSColor(white: 1, alpha: 0.36), light: NSColor(white: 0, alpha: 0.45))
     /// Work line icons and chevrons.
     static let faintIcon = dynamic(dark: .tertiaryLabelColor, light: NSColor(white: 0, alpha: 0.36))
@@ -322,27 +326,29 @@ enum AskButtonStyle: String {
     case suggested
     case plain
 
+    // Filled like a macOS bordered button, so they read as buttons
+    // rather than outlined labels (Mike, 28 Oct): the link to go and do
+    // the thing and the picked answer in the accent, the rest a raised
+    // grey, the agent's pick with an accent edge.
     var textColor: NSColor {
         switch self {
-        case .primary: return .white
-        case .picked, .plain, .suggested: return .labelColor
+        case .primary, .picked: return .white
+        case .plain, .suggested: return .labelColor
         }
     }
 
     var fill: NSColor {
         switch self {
-        case .primary: return .controlAccentColor
-        case .picked: return NSColor.controlAccentColor.withAlphaComponent(0.4)
-        case .suggested, .plain: return .clear
+        case .primary, .picked: return .controlAccentColor
+        case .suggested, .plain: return Theme.buttonFill
         }
     }
 
     var stroke: NSColor {
         switch self {
-        case .primary: return .clear
-        case .picked: return .controlAccentColor
-        case .suggested: return NSColor.controlAccentColor.withAlphaComponent(0.55)
-        case .plain: return Theme.cardBorder.withAlphaComponent(0.25)
+        case .primary, .picked: return .clear
+        case .suggested: return NSColor.controlAccentColor.withAlphaComponent(0.8)
+        case .plain: return Theme.buttonEdge
         }
     }
 }

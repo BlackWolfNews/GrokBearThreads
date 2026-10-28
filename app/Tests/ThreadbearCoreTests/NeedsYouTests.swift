@@ -19,7 +19,7 @@ final class NeedsYouTests: XCTestCase {
     /// A turn that needs Mike gets its card under its footer, open until
     /// the next turn closes it, and keeps the picks the app gives it,
     /// through a rebuild too.
-    func testATurnThatNeedsYouGetsAnOpenCardThatKeepsItsPicks() {
+    func testATurnThatNeedsYouGetsACardThatKeepsItsPicksUntilHeReplies() {
         var model = TranscriptModel(events: [
             E.event(1, "turn.started", ["turnId": "t1"], turn: "t1"),
             E.text(2, "m1", "Built it."),
@@ -36,9 +36,13 @@ final class NeedsYouTests: XCTestCase {
         XCTAssertFalse(model.setAskPicks(3, [0: 0]).isEmpty)
         XCTAssertEqual(card(model, "ak:3")?.picks, [0: 0])
         XCTAssertTrue(model.setAskPicks(3, [0: 0]).isEmpty, "the same picks change nothing")
-        _ = model.apply([E.event(4, "user.message", ["text": "Log in\nDone", "images": []], turn: "t2"), E.event(5, "turn.started", ["turnId": "t2"], turn: "t2"), done(6, turn: "t2")])
-        XCTAssertEqual(card(model, "ak:3")?.isOpen, false)
-        XCTAssertEqual(card(model, "ak:3")?.picks, [0: 0])
+        // A message from the runner (a resume) leaves it; Mike's reply closes
+        // it, and a closed card isn't shown (the bubble has the answers).
+        _ = model.apply([E.event(4, "user.message", ["text": "Carry on", "images": [], "origin": "runner"], turn: "t2")])
+        XCTAssertEqual(card(model, "ak:3")?.isOpen, true)
+        _ = model.apply([E.event(5, "user.message", ["text": "Log in\nDone", "images": []], turn: "t2"), E.event(6, "turn.started", ["turnId": "t2"], turn: "t2"), done(7, turn: "t2")])
+        XCTAssertNil(model.row(id: "ak:3"))
+        XCTAssertEqual(TranscriptModel(events: model.events).row(id: "ak:3"), nil, "nor after a reload")
     }
 
     /// Picks the app had before the transcript loaded are on the card it builds.

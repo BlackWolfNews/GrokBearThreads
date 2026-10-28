@@ -78,12 +78,22 @@ final class BackgroundLayoutManager: NSLayoutManager {
             guard part.length > 0 else { return }
             var box = self.boundingRect(forGlyphRange: part, in: textContainer)
             let baseline = fragment.minY + self.location(forGlyphAt: part.location).y
-            box.origin.y = baseline - font.ascender - zoomed(5)
-            box.size.height = font.ascender - font.descender + zoomed(10)
+            box.origin.y = baseline - font.ascender - zoomed(7)
+            box.size.height = font.ascender - font.descender + zoomed(14)
             box = box.offsetBy(dx: origin.x, dy: origin.y).insetBy(dx: 0.5, dy: 0.5)
-            let path = NSBezierPath(roundedRect: box, xRadius: box.height / 2, yRadius: box.height / 2)
+            // Rounded rects like the app's other buttons, with a soft
+            // shadow under them so they sit up off the card.
+            let radius = zoomed(7)
+            let path = NSBezierPath(roundedRect: box, xRadius: radius, yRadius: radius)
+            NSGraphicsContext.saveGraphicsState()
+            let shadow = NSShadow()
+            shadow.shadowColor = NSColor.black.withAlphaComponent(0.25)
+            shadow.shadowOffset = NSSize(width: 0, height: -zoomed(1))
+            shadow.shadowBlurRadius = zoomed(1.5)
+            shadow.set()
             style.fill.setFill()
             path.fill()
+            NSGraphicsContext.restoreGraphicsState()
             style.stroke.setStroke()
             path.lineWidth = 1
             path.stroke()

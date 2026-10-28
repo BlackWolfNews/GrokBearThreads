@@ -1063,6 +1063,26 @@ enum RowRenderer {
         return output
     }
 
+    /// A line of an asks card's context as markdown, small and quiet, its
+    /// links and paths still links.
+    private static func noteText(_ text: String, font: NSFont, color: NSColor, style: NSParagraphStyle, offset: CGFloat) -> NSAttributedString {
+        let note = NSMutableAttributedString(attributedString: MarkdownRenderer.render(text).string)
+        // A one-line note has no trailing newline to keep.
+        while note.string.hasSuffix("\n") { note.deleteCharacters(in: NSRange(location: note.length - 1, length: 1)) }
+        let whole = NSRange(location: 0, length: note.length)
+        note.enumerateAttributes(in: whole) { attributes, range, _ in
+            let current = attributes[.font] as? NSFont
+            let traits = current?.fontDescriptor.symbolicTraits ?? []
+            let base = traits.contains(.monoSpace) ? NSFont.monospacedSystemFont(ofSize: font.pointSize * 0.95, weight: .regular) : font
+            let sized = NSFontManager.shared.convert(base, toHaveTrait: traits.contains(.bold) ? .boldFontMask : [])
+            note.addAttribute(.font, value: sized, range: range)
+            if attributes[.link] == nil { note.addAttribute(.foregroundColor, value: color, range: range) }
+        }
+        note.addAttribute(.paragraphStyle, value: style, range: whole)
+        note.addAttribute(.baselineOffset, value: offset, range: whole)
+        return note
+    }
+
     private struct AskButton {
         var title: String
         var action: String
@@ -1088,18 +1108,20 @@ enum RowRenderer {
         let (noteStyle, noteOffset) = Theme.lines(TypeScale.scaled(19), font: small, spacing: zoomed(2))
         let button = Theme.labelFont
         // Tall lines, so a row of buttons that wraps keeps them apart.
-        let (buttonStyle, buttonOffset) = Theme.lines(TypeScale.scaled(32), font: button, before: zoomed(4))
+        let (buttonStyle, buttonOffset) = Theme.lines(TypeScale.scaled(38), font: button, before: zoomed(6))
         for (i, ask) in card.asks.enumerated() {
             output.append(NSAttributedString(string: "\n" + (numbered ? "\(i + 1)  " : "") + ask.action, attributes: [
                 .font: card.isOpen ? action : Theme.bodyFont, .foregroundColor: card.isOpen ? NSColor.labelColor : NSColor.secondaryLabelColor,
                 .paragraphStyle: actionStyle, .baselineOffset: actionOffset,
             ]))
             guard card.isOpen else { continue }
-            let note = [ask.why, ask.where_].compactMap { $0?.isEmpty == false ? $0 : nil }.joined(separator: "  ·  ")
-            if !note.isEmpty {
-                output.append(NSAttributedString(string: "\n" + note, attributes: [
-                    .font: small, .foregroundColor: NSColor.secondaryLabelColor, .paragraphStyle: noteStyle, .baselineOffset: noteOffset,
-                ]))
+            // Why, then where on a line of its own (joined, "This thread, in
+            // Threadbear" read as part of the why). Both as markdown, so a
+            // link or path in them can be clicked.
+            for (text, color) in [(ask.why, NSColor.secondaryLabelColor), (ask.where_, Theme.faintText)] {
+                guard let text, !text.isEmpty else { continue }
+                output.append(NSAttributedString(string: "\n", attributes: [.font: small, .paragraphStyle: noteStyle]))
+                output.append(noteText(text, font: small, color: color, style: noteStyle, offset: noteOffset))
             }
             // Links on a row of their own, over the answers: going to look
             // comes before answering.
@@ -1117,7 +1139,7 @@ enum RowRenderer {
                     if k > 0 { output.append(NSAttributedString(string: "    ", attributes: [.font: button, .paragraphStyle: buttonStyle, .baselineOffset: buttonOffset])) }
                     // Spaces inside the run are the button's padding; the
                     // no-break ones keep a short title from wrapping apart.
-                    output.append(NSAttributedString(string: "\u{00A0}\u{00A0}" + item.title.replacingOccurrences(of: " ", with: "\u{00A0}") + "\u{00A0}\u{00A0}", attributes: [
+                    output.append(NSAttributedString(string: "\u{00A0}\u{00A0}\u{00A0}" + item.title.replacingOccurrences(of: " ", with: "\u{00A0}") + "\u{00A0}\u{00A0}\u{00A0}", attributes: [
                         .font: button, .foregroundColor: item.style.textColor, .paragraphStyle: buttonStyle, .baselineOffset: buttonOffset,
                         .tbAction: item.action, .tbButton: item.style.rawValue,
                     ]))

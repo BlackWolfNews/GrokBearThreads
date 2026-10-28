@@ -256,6 +256,17 @@ public struct TranscriptModel: Sendable {
         return refreshRows()
     }
 
+    private mutating func closeOpenAsks() {
+        guard let open = openAsksRow else { return }
+        update(open) { content in
+            if case .asks(var card) = content {
+                card.isOpen = false
+                content = .asks(card)
+            }
+        }
+        openAsksRow = nil
+    }
+
     /// Mike picked (or unpicked) answers on the card from `seq`.
     public mutating func setAskPicks(_ seq: Int, _ picks: [Int: Int]) -> TranscriptChange {
         guard askPicks[seq, default: [:]] != picks else { return TranscriptChange() }
@@ -421,6 +432,8 @@ public struct TranscriptModel: Sendable {
         let turnId = event.turnId
         switch event.payload {
         case .userMessage(let text, let images, let origin, let answers):
+            // Mike's reply answers the open card, so it goes, picked or not.
+            if origin != "runner" { closeOpenAsks() }
             append(TranscriptRow(id: "u:\(seq)", seq: seq, turnId: turnId, content: .user(UserMessage(text: text, images: images, origin: origin, answers: answers))))
 
         case .assistantText(let itemId, let text):
@@ -649,15 +662,7 @@ public struct TranscriptModel: Sendable {
                 append(TranscriptRow(id: id, seq: seq, turnId: turnId ?? completion.turnId, content: .footer(completion)))
                 // Any finished turn closes the last card; one that needs
                 // Mike opens the next, under its footer.
-                if let open = openAsksRow {
-                    update(open) { content in
-                        if case .asks(var card) = content {
-                            card.isOpen = false
-                            content = .asks(card)
-                        }
-                    }
-                    openAsksRow = nil
-                }
+                closeOpenAsks()
                 // The card sits under the turn's footer, its answers
                 // picked there and sent from the composer (Mike, 28 Oct).
                 if completion.outcome == .completed, completion.needs == "you", !completion.asks.isEmpty {
@@ -855,6 +860,10 @@ public struct TranscriptModel: Sendable {
                     }
                 }
                 i = runEnd
+            } else if case .asks(let card) = item.content, !card.isOpen {
+                // A card that's been answered or moved past isn't shown: the
+                // answers bubble says what was picked (Mike, 28 Oct).
+                i += 1
             } else {
                 if case .footer = item.content, let card = changedFiles(turn: item.turnId ?? "") {
                     out.append(derived("cf:" + card.turnId, seq: item.seq, turnId: item.turnId, .changes(card)))
