@@ -162,7 +162,7 @@ struct RootView: View {
         o.headerHeight = PaneHeader<EmptyView, EmptyView>.height
         o.titleSize = TypeScale.label
         o.trafficLights = 78
-        o.barsMoveWindow = true
+        o.cornerMovesWindow = true
         o.tip = { view, text in AnyView(view.tip(text)) }
         return o
     }

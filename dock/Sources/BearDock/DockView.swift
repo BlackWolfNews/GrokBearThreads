@@ -45,10 +45,11 @@ public struct DockOptions {
     /// In a window without a title bar: room left at the start of the
     /// top-left panel's bar for the traffic lights. 0 with a title bar.
     public var trafficLights: CGFloat = 0
-    /// In a window without a title bar: the empty part of a panel's bar
-    /// moves the window, as a title bar would. Titles and tabs still move
-    /// the panel.
-    public var barsMoveWindow = false
+    /// In a window without a title bar: the strip beside the traffic lights
+    /// moves the window, as a title bar would. Only that strip: Mike reached
+    /// for a panel's bar to move the panel and got the window (28 Oct), so
+    /// every other bar moves its panel, empty part and all.
+    public var cornerMovesWindow = false
     /// The app's tooltips, for an app whose `.help` doesn't show.
     public var tip: @MainActor (AnyView, String) -> AnyView = { view, text in AnyView(view.help(text)) }
 
@@ -261,7 +262,7 @@ struct GroupView: View {
 
         VStack(spacing: 0) {
             if header {
-                GroupHeader(group: group, leading: corner ? options.trafficLights : 0)
+                GroupHeader(group: group, leading: corner ? options.trafficLights : 0, movesWindow: corner)
                     .transition(.move(edge: .top).combined(with: .opacity))
             } else if corner {
                 CornerBar(panel: group.selected)
@@ -339,11 +340,13 @@ func dragGesture(controller: DockController, panel: PanelID) -> some Gesture {
 }
 
 /// A group's title, or its tabs when it has several, and the showing
-/// panel's buttons. A title or tab drags its panel; the rest of the bar
-/// drags the panel too, or the window in one without a title bar.
+/// panel's buttons. A title, a tab or the rest of the bar drags its panel;
+/// in the bar under the traffic lights, the room left for them drags the
+/// window.
 private struct GroupHeader: View {
     let group: DockGroup
     var leading: CGFloat = 0
+    var movesWindow = false
     @Environment(DockController.self) private var controller
     @Environment(\.dockContent) private var content
     @Environment(\.dockOptions) private var options
@@ -370,34 +373,51 @@ private struct GroupHeader: View {
                 accessory
             }
         }
-        .padding(.leading, 6 + leading)
+        .padding(.leading, 6)
         .padding(.trailing, 6)
         .frame(height: options.headerHeight)
+        .padding(.leading, leading)
+        .background(alignment: .leading) {
+            if movesWindow && leading > 0 {
+                WindowSpace().frame(width: leading)
+            }
+        }
         .overlay(alignment: .bottom) {
             Rectangle().fill(Color.primary.opacity(0.07)).frame(height: 1)
         }
     }
 }
 
-/// The empty part of a bar: moves the window where there's no title bar,
-/// else the panel.
+/// The empty part of a bar: moves its panel.
 private struct BarSpace: View {
     let panel: PanelID
     let tabbed: Bool
     @Environment(DockController.self) private var controller
+
+    var body: some View {
+        Color.clear
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .contentShape(Rectangle())
+            .contextMenu { PanelMenu(panel: panel, tabbed: tabbed) }
+            .gesture(dragGesture(controller: controller, panel: panel))
+    }
+}
+
+/// Where a title bar would be, in a window without one: moves the window,
+/// and a double-click zooms it, as a title bar's would.
+private struct WindowSpace: View {
     @Environment(\.dockOptions) private var options
 
     var body: some View {
         let space = Color.clear
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .contentShape(Rectangle())
-            .contextMenu { PanelMenu(panel: panel, tabbed: tabbed) }
-        if options.barsMoveWindow {
+        if options.cornerMovesWindow {
             space
                 .gesture(WindowDragGesture())
                 .onTapGesture(count: 2) { NSApp.keyWindow?.performZoom(nil) }
         } else {
-            space.gesture(dragGesture(controller: controller, panel: panel))
+            space
         }
     }
 }
@@ -509,15 +529,20 @@ private struct HiddenTitleStrip: View {
 
 /// The bar of a title-less panel under the traffic lights: empty, moving
 /// the window (or the panel, with a title bar), with the grab handle on
-/// hover to move the panel by.
+/// hover to move the panel by. In Threadbear that's the sidebar's bar, the
+/// one place left to grab the window by.
 private struct CornerBar: View {
     let panel: PanelID
     @Environment(\.dockOptions) private var options
 
     var body: some View {
         HStack(spacing: 0) {
-            Color.clear.frame(width: options.trafficLights)
-            BarSpace(panel: panel, tabbed: false)
+            if options.cornerMovesWindow {
+                WindowSpace()
+            } else {
+                Color.clear.frame(width: options.trafficLights)
+                BarSpace(panel: panel, tabbed: false)
+            }
             HiddenTitleStrip(panel: panel)
                 .frame(width: 60)
             Color.clear.frame(width: 12)

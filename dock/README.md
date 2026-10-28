@@ -12,8 +12,8 @@ says which panels there are (the sidebar, the thread, Highlights, each
 project panel, Patches), the default layout, and how the rail and Show or
 Hide Panels open and close them. The window has no title bar, so the
 panels' bars are the top of it: the traffic lights sit in the top-left
-panel's bar, the empty part of a bar moves the window, and a title or tab
-moves the panel.
+panel's bar, and the empty strip beside them moves the window. Every
+other part of a bar (title, tab or empty space) moves its panel.
 
 ## How it works
 
