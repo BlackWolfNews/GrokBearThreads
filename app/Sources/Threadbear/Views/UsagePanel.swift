@@ -1,55 +1,47 @@
 import SwiftUI
 import ThreadbearCore
 
-/// "Usage" in the sidebar's activity bar: every account's limits, grouped by
-/// provider, then the two CLIs' versions with what can be done about them.
+/// "Usage" in the sidebar's activity bar, a panel in the dock: every
+/// account's limits, grouped by provider, then the two CLIs' versions with
+/// what can be done about them. A panel rather than a popover (28 Oct) so
+/// it can stay open beside a thread, or be dragged out into a window.
 /// Everything comes from `accounts.updated` and `clis.updated`; the times
 /// follow `app.now`, which ticks without asking the runner anything.
-struct UsagePopover: View {
+struct UsagePanel: View {
     @Environment(AppModel.self) private var app
-
-    static let width: CGFloat = 400
 
     var body: some View {
         let sections = UsageSections.build(app.accounts)
         let notices = AccountUsageText.notices(app.accounts)
-        VStack(alignment: .leading, spacing: 0) {
-            // Only the accounts scroll: the CLIs stay in view at the bottom
-            // however many logins there are.
-            ScrollView {
-                VStack(alignment: .leading, spacing: zoomed(12)) {
-                    if sections.isEmpty || !sections.contains(where: { $0.accounts.contains { $0.usage != nil } }) {
-                        Text("The usage numbers need a newer runner.")
-                            .font(.system(size: zoomed(12)))
-                            .foregroundStyle(.secondary)
-                    }
-                    UsageTable(sections: sections, notices: notices.own, now: app.now)
-                    // Where the numbers came from, and what Token Stats says
-                    // about all of them, once.
-                    let source = [AccountUsageText.sourceLine(app.accounts, now: app.now), notices.shared].compactMap { $0 }
-                    if !source.isEmpty {
-                        Text(source.joined(separator: ". "))
-                            .font(.system(size: zoomed(11)))
-                            .foregroundStyle(.tertiary)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
+        ScrollView {
+            VStack(alignment: .leading, spacing: zoomed(12)) {
+                if sections.isEmpty || !sections.contains(where: { $0.accounts.contains { $0.usage != nil } }) {
+                    Text("The usage numbers need a newer runner.")
+                        .font(.system(size: zoomed(12)))
+                        .foregroundStyle(.secondary)
                 }
-                .padding(zoomed(16))
+                // Side by side when the addresses fit beside the bars;
+                // in a narrow panel each address gets a line of its own
+                // above its bars, rather than being cut to "mi...om".
+                ViewThatFits(in: .horizontal) {
+                    UsageTable(sections: sections, notices: notices.own, now: app.now)
+                    UsageTable(sections: sections, notices: notices.own, now: app.now, stacked: true)
+                }
+                // Where the numbers came from, and what Token Stats says
+                // about all of them, once.
+                let source = [AccountUsageText.sourceLine(app.accounts, now: app.now), notices.shared].compactMap { $0 }
+                if !source.isEmpty {
+                    Text(source.joined(separator: ". "))
+                        .font(.system(size: zoomed(11)))
+                        .foregroundStyle(.tertiary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Divider().padding(.vertical, zoomed(4))
+                CliSection()
             }
-            .frame(maxHeight: Self.accountsMaxHeight)
-            .fixedSize(horizontal: false, vertical: true)
-            Divider().padding(.horizontal, zoomed(16))
-            CliSection()
-                .padding(zoomed(16))
+            .padding(zoomed(16))
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .frame(width: Self.width)
-    }
-
-    /// Room for the accounts: the window's height less the CLI section and
-    /// a margin, so the popover never runs past the window.
-    static var accountsMaxHeight: CGFloat {
-        let window = AppWindow.contentHeight ?? 800
-        return max(160, min(560, window - 300))
     }
 }
 
@@ -78,14 +70,28 @@ private struct UsageTable: View {
     let sections: [UsageSections.Section]
     let notices: [String: String]
     let now: Date
+    /// Each address on its own line over its bars, for a narrow panel.
+    var stacked = false
 
     var body: some View {
         let hasFiveHour = sections.contains { $0.accounts.contains { AccountUsageText.mainWindows($0.usage).contains { $0.kind == "five_hour" } } }
         Grid(alignment: .leading, horizontalSpacing: zoomed(14), verticalSpacing: zoomed(6)) {
             ForEach(sections, id: \.provider) { section in
+            if stacked {
+                GridRow {
+                    Text(ModelPicker.providerTitle(section.provider))
+                        .accessibilityAddTraits(.isHeader)
+                        .gridCellColumns(hasFiveHour ? 2 : 1)
+                }
+                .font(.system(size: zoomed(11), weight: .medium))
+                .foregroundStyle(.tertiary)
+                .padding(.top, section.provider == sections.first?.provider ? 0 : zoomed(8))
+            }
             GridRow {
-                Text(ModelPicker.providerTitle(section.provider))
-                    .accessibilityAddTraits(.isHeader)
+                if !stacked {
+                    Text(ModelPicker.providerTitle(section.provider))
+                        .accessibilityAddTraits(.isHeader)
+                }
                 // Codex's Pro Lite has only a week: its column stays, empty.
                 if hasFiveHour {
                     Text(section.accounts.contains { AccountUsageText.mainWindows($0.usage).contains { $0.kind == "five_hour" } } ? "5-hour left" : "")
@@ -94,11 +100,16 @@ private struct UsageTable: View {
             }
             .font(.system(size: zoomed(11), weight: .medium))
             .foregroundStyle(.tertiary)
-            .padding(.top, section.provider == sections.first?.provider ? 0 : zoomed(8))
+            .padding(.top, stacked || section.provider == sections.first?.provider ? 0 : zoomed(8))
             ForEach(section.accounts) { account in
                 let windows = AccountUsageText.mainWindows(account.usage)
+                if stacked {
+                    GridRow {
+                        AccountNameCell(account: account, now: now).gridCellColumns(hasFiveHour ? 2 : 1)
+                    }
+                }
                 GridRow(alignment: .firstTextBaseline) {
-                    AccountNameCell(account: account, now: now)
+                    if !stacked { AccountNameCell(account: account, now: now) }
                     if hasFiveHour { RoomCell(window: windows.first { $0.kind == "five_hour" }, now: now) }
                     RoomCell(window: windows.first { $0.kind == "weekly" }, now: now)
                 }
@@ -114,7 +125,7 @@ private struct UsageTable: View {
                         }
                         .font(.system(size: zoomed(11)))
                         .padding(.top, zoomed(-3))
-                        .gridCellColumns(hasFiveHour ? 3 : 2)
+                        .gridCellColumns((hasFiveHour ? 2 : 1) + (stacked ? 0 : 1))
                     }
                 }
             }

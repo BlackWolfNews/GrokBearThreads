@@ -135,9 +135,6 @@ final class AppModel {
     /// Update failures Mike has dismissed, by "<provider>|<finishedAt>",
     /// so the line under the toolbar stays gone for that failure.
     var dismissedCliFailures: Set<String> = []
-    /// The usage popover is open (the sidebar's Usage button, or the
-    /// automation's `usage`).
-    var usagePopoverShown = false
     /// Bumped to open the composer's model picker from the automation
     /// (`composer-menu` with `show`), the way a click on the chip does.
     var modelPickerRequest = 0

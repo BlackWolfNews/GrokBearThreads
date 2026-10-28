@@ -315,7 +315,7 @@ struct AppDump: Encodable {
             composer: composer(app, key: key),
             decisions: app.selectedThread.flatMap { decisions($0, app: app) },
             transcript: transcript,
-            usage: Usage(shown: app.usagePopoverShown, lines: usageLines(app)),
+            usage: Usage(shown: app.usageShown, lines: usageLines(app)),
             project: app.openProject.map { project in
                 let threads = ProjectSections.threads(in: project.id, from: app.threads.values)
                 return ProjectInfo(id: project.id, title: project.title, folders: project.folders, threads: threads.map(\.id),
@@ -372,7 +372,7 @@ struct AppDump: Encodable {
     }
 
     /// What the usage popover says: each account's room by provider, then
-    /// the CLIs (`UsagePopover`).
+    /// the CLIs (`UsagePanel`).
     @MainActor
     static func usageLines(_ app: AppModel) -> [String] {
         var lines: [String] = []

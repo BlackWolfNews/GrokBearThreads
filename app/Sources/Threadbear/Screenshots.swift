@@ -295,26 +295,19 @@ enum ScreenshotRunner {
                 print("settings: the window didn't open")
             }
         }
-        // 14. The usage popover from the activity bar: every account's
-        // room, then the CLIs (Claude behind, Codex held back).
+        // 14. The Usage panel from the activity bar, beside Highlights:
+        // every account's room, then the CLIs (Claude behind, Codex held
+        // back).
         if wanted("14") {
-            app.usagePopoverShown = true
+            app.usageShown = true
             try? await Task.sleep(for: .milliseconds(600))
-            if let popover = popoverWindow() {
-                await capture(popover, dir.appendingPathComponent("14-usage-popover.png"))
-            } else {
-                print("usage popover: didn't open")
-            }
-            app.usagePopoverShown = false
-            try? await Task.sleep(for: .milliseconds(300))
+            await capture(window, dir.appendingPathComponent("14-usage-panel.png"))
             // 14b. After going back from a Codex version: it's held, with
             // that as the reason, and there's no "Go back" to it.
             _ = try? await app.client?.call("mock.clis", .object(["wentBack": .bool(true)]), as: JSONValue.self)
-            try? await Task.sleep(for: .milliseconds(300))
-            app.usagePopoverShown = true
             try? await Task.sleep(for: .milliseconds(600))
-            if let popover = popoverWindow() { await capture(popover, dir.appendingPathComponent("14b-usage-went-back.png")) }
-            app.usagePopoverShown = false
+            await capture(window, dir.appendingPathComponent("14b-usage-went-back.png"))
+            app.usageShown = false
             try? await Task.sleep(for: .milliseconds(300))
         }
         // 15. The sidebar's Projects view: rows under a project's heading

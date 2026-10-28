@@ -70,20 +70,14 @@ struct ActivityBar: View {
     }
 }
 
-/// "Usage": every account's room and the CLIs' versions, in a popover.
+/// "Usage": every account's room and the CLIs' versions, in a panel of
+/// its own (`UsagePanel`). Toggles it, as VS Code's bar does its views.
 private struct UsageActivityButton: View {
     @Environment(AppModel.self) private var app
 
     var body: some View {
-        @Bindable var app = app
-        ActivityButton(symbol: "gauge.with.dots.needle.33percent", title: "Usage", active: app.usagePopoverShown) {
-            app.usagePopoverShown.toggle()
-        }
-        // On the model, so a script can open it and `dump` can say so. To
-        // the right of the icon, over the sidebar, as VS Code's account and
-        // settings menus open beside its bar.
-        .popover(isPresented: $app.usagePopoverShown, arrowEdge: .trailing) {
-            UsagePopover().environment(app)
+        ActivityButton(symbol: WindowDock.usageSymbol, title: "Usage", active: app.usageShown) {
+            app.usageShown.toggle()
         }
     }
 }
@@ -108,7 +102,7 @@ struct ActivityButton: View {
     var quietDot: Bool = false
     let active: Bool
     /// One of the sidebar's views: the highlight slides between these.
-    /// Usage and Settings open over the view, so theirs just shows.
+    /// Usage and Settings open beside the view, so theirs just shows.
     var slides = false
     let action: () -> Void
     @State private var hovering = false

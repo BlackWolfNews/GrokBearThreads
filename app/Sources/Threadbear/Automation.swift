@@ -680,8 +680,8 @@ enum Automation {
         case "composer-menu":
             return composerMenu(c, app: app)
         case "usage":
-            // The usage popover: {"show": true} opens it (and says its
-            // window, for a screencapture -l), {"click": "Update"} presses
+            // The Usage panel: {"show": true} opens it ({"show": false}
+            // closes it), {"click": "Update"} presses
             // one of its buttons for a CLI ({"provider": "codex"}), and
             // with neither it lists what it says.
             return usage(c, app: app)
@@ -1055,11 +1055,10 @@ enum Automation {
 
     private static func usage(_ c: [String: Any], app: AppModel) -> String {
         if let show = c["show"] as? Bool {
-            app.usagePopoverShown = show
+            app.usageShown = show
             guard show else { return "ok closed" }
             RunLoop.main.run(until: Date().addingTimeInterval(0.5))
-            let popover = NSApp.windows.first { String(describing: type(of: $0)).contains("Popover") && $0.isVisible }
-            return popover.map { "ok window \($0.windowNumber)" } ?? "error the popover didn't open"
+            return app.usageShown ? "ok shown" : "error the panel didn't open"
         }
         if let title = c["click"] as? String {
             if title == "Check now" { app.checkClis(); return "ok" }

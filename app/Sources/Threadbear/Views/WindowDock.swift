@@ -23,6 +23,10 @@ enum WindowDock {
     /// The design review being answered (show_options), a tab beside the
     /// main panel.
     static let review = "threadbear.review"
+    /// Every account's limits and the CLIs' versions (the activity bar's
+    /// Usage), open until Mike closes it.
+    static let usage = "threadbear.usage"
+    static let usageSymbol = "gauge.with.dots.needle.33percent"
     static let layoutKey = "dockLayout"
     static let threadPanelPrefix = "threadbear.thread:"
 
@@ -82,7 +86,7 @@ enum WindowDock {
     /// A pane section's panel, or nil for the sidebar, the main panel, the
     /// review and a thread's own panel.
     static func section(_ panel: PanelID) -> PaneSection? {
-        panel == threads || panel == main || panel == review || pinnedThread(panel) != nil ? nil : PaneSection(id: panel)
+        panel == threads || panel == main || panel == review || panel == usage || pinnedThread(panel) != nil ? nil : PaneSection(id: panel)
     }
 
     @MainActor
@@ -96,6 +100,7 @@ enum WindowDock {
             guard let thread = app.selectedThread else { return "New thread" }
             return thread.title.isEmpty ? "Untitled" : thread.title
         case review: return app.reviewPanel?.review.title ?? "Review"
+        case usage: return "Usage"
         default:
             break
         }
@@ -133,6 +138,7 @@ enum WindowDock {
         case threads: return "bubble.left.and.bubble.right"
         case main: return "text.alignleft"
         case review: return "rectangle.on.rectangle"
+        case usage: return usageSymbol
         case PaneSection.highlightsId: return "pin"
         case PaneSection.patchesId: return "square.dashed"
         default:
@@ -155,6 +161,16 @@ extension AppModel {
     /// pane section if one's open, else down the right of the window.
     func showPane(_ section: PaneSection) {
         dock.show(section.id, near: openPanes, fallback: .window(.right))
+    }
+
+    /// The Usage panel is up. Setting it opens it as a tab beside the
+    /// pane sections (Highlights and co.), or down the right without
+    /// them, and clearing it closes it.
+    var usageShown: Bool {
+        get { dock.isShowing(WindowDock.usage) }
+        set {
+            if newValue { dock.show(WindowDock.usage, near: openPanes, fallback: .window(.right)) } else { dock.close(WindowDock.usage) }
+        }
     }
 }
 
@@ -251,6 +267,7 @@ struct RootView: View {
             view: { panel in
                 switch panel {
                 case WindowDock.threads: AnyView(SidebarView())
+                case WindowDock.usage: AnyView(UsagePanel())
                 case WindowDock.main: AnyView(DetailView())
                 case let id where WindowDock.pinnedThread(id) != nil:
                     AnyView(PinnedThreadView(threadId: WindowDock.pinnedThread(id)!).id(id))
