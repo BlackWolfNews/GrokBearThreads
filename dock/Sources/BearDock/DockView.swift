@@ -566,6 +566,13 @@ struct BarDrag: ViewModifier {
     private func ended() {
         press?.timer?.cancel()
         if press?.mode == .panel { controller.dragEnded() }
+        // A double-click that didn't move zooms the window, as a title
+        // bar's does (and WindowGrip's). The drag starts on the press, so
+        // it has to be looked for here, on the second click's release.
+        if press?.mode == .waiting, let event = NSApp.currentEvent,
+           event.type == .leftMouseUp, event.clickCount == 2 {
+            press?.window?.performZoom(nil)
+        }
         press = nil
     }
 }
