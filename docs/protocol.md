@@ -257,7 +257,7 @@ type Panel = {
 type PanelItem = {
   title: string
   detail?: string       // a second line, grey
-  url?: string          // a click opens it in the default browser
+  url?: string          // a click opens it in the browser, or the panel if Mike set "Click Opens"
   path?: string         // a click previews the file in the pane
   icon?: string         // an SF Symbol name
   tone?: "attention" | "failed" | "done" // orange, red or a tick; absent: plain

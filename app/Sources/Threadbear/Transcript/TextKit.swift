@@ -135,6 +135,22 @@ final class TranscriptTextView: NSTextView {
         return MainActor.assumeIsolated { AppModel.shared.openTranscriptFileLink(url, commandKey: commandKey) }
     }
 
+    /// A web link opens in the panel when that's what "Click Opens" says
+    /// (WebLinkAction.click). False leaves it to AppKit, which hands it to
+    /// the browser: the default, and always for a ⌘-click.
+    var openWebLink: (URL) -> Bool = { url in
+        let commandKey = NSApp.currentEvent?.modifierFlags.contains(.command) ?? false
+        guard !commandKey, WebLinkAction.click == .panel else { return false }
+        return MainActor.assumeIsolated { AppModel.shared.openTranscriptWebLink(url, .panel) }
+    }
+
+    /// An http(s) link, as a URL or the string NSTextView sometimes has.
+    private func webURL(_ link: Any) -> URL? {
+        let url = (link as? URL) ?? (link as? String).flatMap(URL.init(string:))
+        guard let url, let scheme = url.scheme?.lowercased(), scheme == "http" || scheme == "https" else { return nil }
+        return url
+    }
+
     /// A file path written in inline code (FilePathRefs).
     var openPathRef: (String) -> Bool = { text in
         let commandKey = NSApp.currentEvent?.modifierFlags.contains(.command) ?? false
@@ -147,6 +163,8 @@ final class TranscriptTextView: NSTextView {
             _ = openPathRef(text)
         } else if let url = link as? URL, url.isFileURL {
             _ = openFileLink(url)
+        } else if let url = webURL(link), openWebLink(url) {
+            return
         } else {
             super.clicked(onLink: link, at: charIndex)
         }
@@ -622,8 +640,12 @@ final class TranscriptTextView: NSTextView {
         MainActor.assumeIsolated { _ = AppModel.shared.openTranscriptFile(path, action) }
     }
 
-    /// The right-click menu for the file link under `point` (in this
-    /// view), if there's one there.
+    var openWeb: (URL, WebLinkAction) -> Void = { url, action in
+        MainActor.assumeIsolated { _ = AppModel.shared.openTranscriptWebLink(url, action) }
+    }
+
+    /// The right-click menu for the file or web link under `point` (in
+    /// this view), if there's one there.
     func fileLinkMenu(at point: NSPoint) -> NSMenu? {
         guard let storage = textStorage, let layoutManager, let container = textContainer, storage.length > 0 else { return nil }
         let inContainer = NSPoint(x: point.x - textContainerOrigin.x, y: point.y - textContainerOrigin.y)
@@ -632,8 +654,9 @@ final class TranscriptTextView: NSTextView {
         // glyphIndex gives the nearest glyph; only a click on it counts.
         guard layoutManager.boundingRect(forGlyphRange: NSRange(location: glyph, length: 1), in: container).contains(inContainer) else { return nil }
         let index = layoutManager.characterIndexForGlyph(at: glyph)
-        guard index < storage.length, let url = storage.attribute(.link, at: index, effectiveRange: nil) as? URL,
-              url.isFileURL || FilePathRefs.text(of: url) != nil else { return nil }
+        guard index < storage.length, let link = storage.attribute(.link, at: index, effectiveRange: nil) else { return nil }
+        if let web = webURL(link) { return WebLinkMenu(url: web, open: openWeb).menu() }
+        guard let url = link as? URL, url.isFileURL || FilePathRefs.text(of: url) != nil else { return nil }
         return FileLinkMenu(path: fileLinkPath(url), open: openFile).menu()
     }
 

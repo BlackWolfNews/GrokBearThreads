@@ -101,8 +101,21 @@ final class TranscriptLinkTests: XCTestCase {
         view.delegate = delegate
         view.openFileLink = { _ in XCTFail("HTTPS must keep AppKit's normal handling"); return false }
         let url = try XCTUnwrap(URL(string: "https://example.com/path#section"))
+        view.openWebLink = { _ in false }
         view.clicked(onLink: url, at: 0)
         XCTAssertEqual(delegate.clicked, url)
+    }
+
+    func testWebLinkSetToThePanelSkipsAppKit() throws {
+        let view = TranscriptTextView()
+        let delegate = LinkDelegate()
+        view.delegate = delegate
+        var opened: URL?
+        view.openWebLink = { opened = $0; return true }
+        let url = try XCTUnwrap(URL(string: "http://localhost:5176/"))
+        view.clicked(onLink: url, at: 0)
+        XCTAssertEqual(opened, url)
+        XCTAssertNil(delegate.clicked)
     }
 }
 

@@ -316,20 +316,36 @@ struct FileMenu: View {
     }
 }
 
-/// A link row's menu. Preview here works for any page, but a site that
-/// needs a sign-in won't have Mike's there; Open is the browser.
+/// A link row's menu: the browser or the panel, and "Click Opens", the
+/// same choice as a web link's menu in the transcript (WebLinkMenu). The
+/// panel works for any page, but a site that needs a sign-in won't have
+/// Mike's there.
 struct LinkMenu: View {
     @Environment(AppModel.self) private var app
+    @AppStorage(WebLinkAction.clickKey) private var click: WebLinkAction = .browser
     let url: URL
     let thread: ThreadSummary
     let title: String
 
     var body: some View {
-        Button("Preview here", systemImage: "sidebar.right") {
-            if url.isFileURL { app.preview(path: url.path, title: title, in: thread) } else { app.preview(page: url, title: title, in: thread) }
+        if url.isFileURL {
+            Button("Preview here", systemImage: "sidebar.right") { app.preview(path: url.path, title: title, in: thread) }
+            Button("Open", systemImage: "arrow.up.forward.app") { app.openExternally(url) }
+        } else {
+            Button(WebLinkAction.browser.title, systemImage: WebLinkAction.browser.symbol) { app.openExternally(url) }
+            if PreviewRules.isWebPage(url) {
+                Button(WebLinkAction.panel.title, systemImage: WebLinkAction.panel.symbol) { app.preview(page: url, title: title, in: thread) }
+            }
         }
-        Button("Open in browser", systemImage: "safari") { app.openExternally(url) }
         Button("Copy link", systemImage: "link") { app.copyToPasteboard(url.absoluteString) }
+        if PreviewRules.isWebPage(url) {
+            Divider()
+            Picker(selection: $click) {
+                ForEach(WebLinkAction.allCases, id: \.self) { Label($0.title, systemImage: $0.symbol).tag($0) }
+            } label: {
+                Label("Click Opens", systemImage: "cursorarrow.click")
+            }
+        }
     }
 }
 

@@ -59,15 +59,12 @@ final class HighlightsTests: XCTestCase {
         XCTAssertTrue(HighlightSections.build(ThreadHighlights(brief: .init(text: "  "))).isEmpty)
     }
 
-    func testFilesOpenInThePaneAndEveryPageInTheBrowser() throws {
-        func place(_ text: String) throws -> PreviewRules.Place { PreviewRules.place(for: try XCTUnwrap(URL(string: text))) }
-        XCTAssertEqual(try place("http://localhost:4321/poddle"), .browser)
-        XCTAssertEqual(try place("http://127.0.0.1:6790/"), .browser)
-        XCTAssertEqual(try place("http://app.localhost:3000"), .browser)
-        XCTAssertEqual(try place("file:///tmp/a.html"), .pane)
-        XCTAssertEqual(try place("https://github.com/m/site/pull/14"), .browser)
-        XCTAssertEqual(try place("https://localhost.example.com"), .browser)
-        XCTAssertEqual(try place("mailto:mike@example.com"), .browser)
+    func testWebPagesAreHttpLinksOnly() throws {
+        func web(_ text: String) throws -> Bool { PreviewRules.isWebPage(try XCTUnwrap(URL(string: text))) }
+        XCTAssertTrue(try web("http://localhost:4321/poddle"))
+        XCTAssertTrue(try web("HTTPS://github.com/m/site/pull/14"))
+        XCTAssertFalse(try web("file:///tmp/a.html"))
+        XCTAssertFalse(try web("mailto:mike@example.com"))
         XCTAssertEqual(PreviewRules.viewer(forPath: "/a/b/Index.HTML"), .web)
         XCTAssertEqual(PreviewRules.viewer(forPath: "/a/b/notes.md"), .quickLook)
         XCTAssertEqual(PreviewRules.viewer(forPath: "/a/b/shot.png"), .quickLook)

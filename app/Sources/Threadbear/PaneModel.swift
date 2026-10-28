@@ -91,8 +91,8 @@ extension AppModel {
 
     // MARK: Opening
 
-    /// A click on a highlight: a file previews in the pane, any page
-    /// (localhost too) goes to the browser, where the sign-ins are.
+    /// A click on a highlight: a file previews in the pane, a page goes
+    /// where "Click Opens" says (openLink).
     /// `external` is Open in the context menu: always the default app or
     /// browser.
     func open(_ highlight: Highlight, in thread: ThreadSummary, external: Bool) {
@@ -103,10 +103,16 @@ extension AppModel {
         }
     }
 
-    /// A link from a highlight or a list panel's row, by PreviewRules.
+    /// A link from a highlight or a list panel's row: a file in the pane,
+    /// a page where "Click Opens" says (the browser unless Mike picked the
+    /// panel).
     func openLink(_ url: URL, title: String? = nil, in thread: ThreadSummary, external: Bool = false) {
-        if !external, PreviewRules.place(for: url) == .pane {
-            if url.isFileURL { preview(path: url.path, title: title ?? url.lastPathComponent, in: thread) } else { preview(page: url, title: title ?? HighlightText.address(url.absoluteString), in: thread) }
+        if external {
+            openExternally(url)
+        } else if url.isFileURL {
+            preview(path: url.path, title: title ?? url.lastPathComponent, in: thread)
+        } else if PreviewRules.isWebPage(url), WebLinkAction.click == .panel {
+            preview(page: url, title: title ?? HighlightText.address(url.absoluteString), in: thread)
         } else {
             openExternally(url)
         }
@@ -171,6 +177,15 @@ extension AppModel {
         case .app, .automatic:
             return NSWorkspace.shared.open(url)
         }
+    }
+
+    /// A web link in the transcript, in the browser or the panel.
+    @discardableResult
+    func openTranscriptWebLink(_ url: URL, _ action: WebLinkAction) -> Bool {
+        // The pane belongs to a thread; on a project page there's none.
+        guard action == .panel, let thread = selectedThread, openProjectId == nil else { return NSWorkspace.shared.open(url) }
+        preview(page: url, title: HighlightText.address(url.absoluteString), in: thread)
+        return true
     }
 
     /// The file a transcript link names, if it exists: a file link's path,

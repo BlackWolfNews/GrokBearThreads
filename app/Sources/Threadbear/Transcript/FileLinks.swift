@@ -120,3 +120,109 @@ final class FileLinkMenu: NSObject {
         NSPasteboard.general.setString(path, forType: .string)
     }
 }
+
+/// What a click on a web link does, in the transcript and in the pane's
+/// Links: Mike's browser by default (where his sign-ins are), or the
+/// panel. Set from "Click Opens" in a link's right-click menu, as for
+/// files.
+enum WebLinkAction: String, CaseIterable {
+    case browser
+    case panel
+
+    static let clickKey = "webLinkClick"
+
+    static var click: WebLinkAction {
+        get { UserDefaults.standard.string(forKey: clickKey).flatMap(WebLinkAction.init(rawValue:)) ?? .browser }
+        set { UserDefaults.standard.set(newValue.rawValue, forKey: clickKey) }
+    }
+
+    /// The default browser, for "Open in Google Chrome".
+    private static var browserApp: URL? {
+        URL(string: "https://example.com").flatMap { NSWorkspace.shared.urlForApplication(toOpen: $0) }
+    }
+
+    static var browserName: String? {
+        browserApp.map { FileManager.default.displayName(atPath: $0.path).replacingOccurrences(of: ".app", with: "") }
+    }
+
+    var symbol: String {
+        switch self {
+        case .browser: return "safari"
+        case .panel: return "sidebar.right"
+        }
+    }
+
+    var title: String {
+        switch self {
+        case .browser: return Self.browserName.map { "Open in \($0)" } ?? "Open in Browser"
+        case .panel: return "Open in Panel"
+        }
+    }
+
+    /// The browser's own icon, else the symbol.
+    var image: NSImage? {
+        if self == .browser, let app = Self.browserApp {
+            let icon = NSWorkspace.shared.icon(forFile: app.path)
+            icon.size = NSSize(width: 16, height: 16)
+            return icon
+        }
+        return NSImage(systemSymbolName: symbol, accessibilityDescription: nil)
+    }
+}
+
+/// The right-click menu on a web link in the transcript: browser or
+/// panel, Copy Link, and "Click Opens", like FileLinkMenu.
+@MainActor
+final class WebLinkMenu: NSObject {
+    let url: URL
+    let open: (URL, WebLinkAction) -> Void
+
+    init(url: URL, open: @escaping (URL, WebLinkAction) -> Void) {
+        self.url = url
+        self.open = open
+    }
+
+    func menu() -> NSMenu {
+        let menu = NSMenu()
+        for action in [WebLinkAction.browser, .panel] {
+            let item = NSMenuItem(title: action.title, symbol: action.symbol, action: #selector(openItem(_:)), target: self)
+            item.image = action.image
+            item.representedObject = action.rawValue
+            menu.addItem(item)
+        }
+        menu.addItem(.separator())
+        menu.addItem(NSMenuItem(title: "Copy Link", symbol: "link", action: #selector(copyLink), target: self))
+        menu.addItem(.separator())
+        let defaults = NSMenu()
+        let click = WebLinkAction.click
+        for action in [WebLinkAction.browser, .panel] {
+            let item = NSMenuItem(title: action.title, symbol: action.symbol, action: #selector(setClick(_:)), target: self)
+            item.representedObject = action.rawValue
+            item.state = action == click ? .on : .off
+            defaults.addItem(item)
+        }
+        let submenu = NSMenuItem(title: "Click Opens", symbol: "cursorarrow.click", action: nil)
+        submenu.submenu = defaults
+        menu.addItem(submenu)
+        // The menu holds its items' target weakly; keep this alive with it.
+        objc_setAssociatedObject(menu, &WebLinkMenu.retainKey, self, .OBJC_ASSOCIATION_RETAIN)
+        return menu
+    }
+
+    nonisolated(unsafe) private static var retainKey: UInt8 = 0
+
+    @objc private func openItem(_ item: NSMenuItem) {
+        guard let action = (item.representedObject as? String).flatMap(WebLinkAction.init(rawValue:)) else { return }
+        open(url, action)
+    }
+
+    @objc private func setClick(_ item: NSMenuItem) {
+        guard let action = (item.representedObject as? String).flatMap(WebLinkAction.init(rawValue:)) else { return }
+        WebLinkAction.click = action
+    }
+
+    @objc private func copyLink() {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(url.absoluteString, forType: .string)
+    }
+}

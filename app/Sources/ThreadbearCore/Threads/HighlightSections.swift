@@ -72,15 +72,6 @@ public enum ProjectLinkGroups {
 /// Where a click on a highlight, a list panel's row or a transcript link
 /// opens it: in the pane beside the transcript, or out in the default app.
 public enum PreviewRules {
-    public enum Place: Equatable, Sendable {
-        /// The pane's preview: a file.
-        case pane
-        /// The default browser: any web page, localhost too. Mike wants
-        /// links in Chrome, never in the app (28 Oct); "Preview here" in a
-        /// link's menu still puts one in the pane when he asks.
-        case browser
-    }
-
     public enum Viewer: Equatable, Sendable {
         /// A web view: a page, or an `.html` file with what it links to.
         case web
@@ -88,8 +79,11 @@ public enum PreviewRules {
         case quickLook
     }
 
-    public static func place(for url: URL) -> Place {
-        url.isFileURL ? .pane : .browser
+    /// An http(s) page, which can open in the browser or the panel
+    /// (mailto: and the like only go to their app).
+    public static func isWebPage(_ url: URL) -> Bool {
+        guard let scheme = url.scheme?.lowercased() else { return false }
+        return scheme == "http" || scheme == "https"
     }
 
     public static func viewer(forPath path: String) -> Viewer {
