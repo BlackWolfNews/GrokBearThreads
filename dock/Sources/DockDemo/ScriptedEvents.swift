@@ -5,7 +5,8 @@ import SwiftUI
 /// `BEARDOCK_EVENTS="down 1062 490;drag 640 420;esc;up;shot /tmp/x.png"`
 /// sends real mouse and key events through the app, as if from the user.
 /// Points are in the window's frame, top-left origin, as in a screenshot.
-/// Steps: down x y | drag x y (in ten moves) | up | esc | wait ms | shot path
+/// Steps: down x y | drag x y (in ten moves) | up | right x y | esc | wait ms
+/// | shot path (the window) | screen path (its area of the screen, menus included)
 @MainActor
 enum ScriptedEvents {
     /// The test window's own DemoView would start it again.
@@ -49,6 +50,21 @@ enum ScriptedEvents {
                 last = to
             case "up":
                 mouse(.leftMouseUp, last)
+            case "right":
+                // Opens a menu, which runs its own loop: post it so this
+                // script carries on (and can capture the menu) meanwhile.
+                let p = point(a[1], a[2])
+                if let e = NSEvent.mouseEvent(with: .rightMouseDown, location: p, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+                                              windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 1) {
+                    DispatchQueue.main.async { NSApp.sendEvent(e) }
+                }
+            case "screen":
+                // The whole display the window's on, for menus (separate windows).
+                let p = Process()
+                p.executableURL = URL(fileURLWithPath: "/usr/sbin/screencapture")
+                p.arguments = ["-x", "-R\(Int(window.frame.minX)),\(Int((NSScreen.screens.first?.frame.height ?? 0) - window.frame.maxY)),\(Int(window.frame.width)),\(Int(window.frame.height))", a[1]]
+                try? p.run()
+                p.waitUntilExit()
             case "esc":
                 if let e = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
                                             windowNumber: window.windowNumber, context: nil, characters: "\u{1b}", charactersIgnoringModifiers: "\u{1b}",

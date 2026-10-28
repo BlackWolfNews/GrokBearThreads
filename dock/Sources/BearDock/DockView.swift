@@ -205,6 +205,10 @@ struct GroupView: View {
                 // background moves the panel. `dockDragDisabled()` stops it
                 // for a region that has nothing of its own.
                 .gesture(dragGesture(controller: controller, panel: group.selected))
+                // The same menu as the title's, on the background, so a hidden
+                // title can be brought back from anywhere empty. Outermost, so
+                // content with a menu of its own keeps it.
+                .contextMenu { PanelMenu(panel: group.selected, tabbed: group.panels.count > 1) }
                 .opacity(lifted ? 0.18 : 1)
                 .scaleEffect(lifted ? 0.985 : 1)
         }
@@ -327,7 +331,8 @@ private struct TabItem: View {
     }
 }
 
-/// Right-click on a title or tab.
+/// Right-click on a title, a tab, the strip of a panel without a title, or
+/// a panel's background.
 private struct PanelMenu: View {
     let panel: PanelID
     let tabbed: Bool
