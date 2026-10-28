@@ -375,13 +375,24 @@ test('messages: the first start against a deployment sends whole histories once,
   await tick();
   const h = h0.restart();
   const statePath = path.join(tmpDir('tb-sync-state-'), 'sync-state.json');
-  const start = async (heads: { threadId: string; lastSeq: number }[]) => {
+  // Reading b's log fails on the first start, as for a thread the old
+  // runner hasn't handed over yet.
+  let blockB = true;
+  const start = async (heads: { threadId: string; lastSeq: number }[], after?: (s: ConvexSync) => Promise<void>) => {
     const posts: Call[] = [];
     const s = new ConvexSync({
       config: { enabled: true, url: 'https://x.convex.cloud', runnerId: 'r1' },
       key: 'k',
       statePath,
-      runner: { onNotification: (fn) => h.runner.onNotification(fn), list: (i) => h.runner.list(i), get: (id) => h.runner.get(id), events: (id, o) => h.runner.events(id, o) },
+      runner: {
+        onNotification: (fn) => h.runner.onNotification(fn),
+        list: (i) => h.runner.list(i),
+        get: (id) => h.runner.get(id),
+        events: (id, o) => {
+          if (id === b.id && blockB) throw new Error('not here yet');
+          return h.runner.events(id, o);
+        },
+      },
       version: 'v',
       startedAt: 'now',
       clock: h.clock,
@@ -393,17 +404,25 @@ test('messages: the first start against a deployment sends whole histories once,
     });
     s.start();
     await s.flushNow();
+    await after?.(s);
     await s.stop();
     return { posts, sent: messagesSent(posts) };
   };
-  // First start: everything, whatever the mirror says it has.
-  const first = await start([{ threadId: b.id, lastSeq: 1 }]);
-  assert.equal(first.posts.some((p) => p.fn === 'sync:messageHeads'), false, 'a whole backfill does not ask');
+  // First start: a's whole history, whatever the mirror says it has; b's log
+  // can't be read yet, so b isn't counted as done...
+  const first = await start([{ threadId: b.id, lastSeq: 1 }], async (s) => {
+    // ...until a later write, once it can.
+    blockB = false;
+    h.runner.update({ threadId: b.id, title: 'renamed' });
+    await tick();
+    await s.flushNow();
+  });
+  assert.equal(first.posts.some((p) => p.fn === 'sync:messageHeads'), false, 'no thread is done yet, so nothing to ask');
   const forA = first.sent.filter((m) => m.threadId === a.id && m.role !== 'tool');
   assert.equal(forA.length, 26, 'the first message and every reply');
   assert.equal(forA[0]!.text, 'first');
-  assert.equal(first.sent.filter((m) => m.threadId === b.id).length, 1);
-  assert.equal(JSON.parse(fs.readFileSync(statePath, 'utf8')).fullHistory, 'https://x.convex.cloud');
+  assert.equal(first.sent.filter((m) => m.threadId === b.id).length, 1, "b's history went up on the later write");
+  assert.deepEqual(JSON.parse(fs.readFileSync(statePath, 'utf8')).histories['https://x.convex.cloud'].sort(), [a.id, b.id].sort());
   // Next start: only what's newer than the mirror's newest message.
   const lastA = forA.at(-1)!.seq;
   const second = await start([{ threadId: a.id, lastSeq: lastA }, { threadId: b.id, lastSeq: 1 }]);
