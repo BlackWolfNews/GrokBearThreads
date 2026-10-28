@@ -1,6 +1,7 @@
 # Setup, updates, the phone and Tailscale (proposal)
 
-28 Oct 2026, thread 66935d23. A proposal for Mike to react to, nothing built yet.
+28 Oct 2026, thread 66935d23. A proposal for Mike to react to, nothing built yet. Revised the same day after his
+first answer (section 3).
 
 What Mike asked for: setting up Threadbear has you create a Convex deployment
 "where everything goes"; a careful think about how updates work and how the iPhone app
@@ -30,55 +31,49 @@ How it works today (file references are in the research notes at the bottom):
 
 ## 2. The proposal in one go
 
-Threadbear runs its own Convex backend on your own machine (Convex's open source
-self-hosted backend), and Tailscale is how everything else reaches it: your phone, your
-browser and a second runner. The backend holds everything, not just the 20-message
-mirror, because there's no cloud bill or size limit to worry about. Setup is one
-command. Updates are your own `main` as today, plus a way to bring in Mike's changes
-that an agent does for you and you approve. There's one App Store iPhone app for
-everyone, which pairs with any Threadbear backend and gets notifications through a
-small relay Mike runs.
+Threadbear's backend is a Convex cloud deployment in your own Convex account, so your
+phone and your browser keep working when the laptop's shut. Running the backend on
+your own machine is an option for people who'd rather, not the default. More goes up
+than today's 20-message mirror: every message's text, with the heavy bits (tool output
+and images) staying on the Mac. Setup is one command. Updates are your own `main` as
+today, plus a way to bring in Mike's changes that an agent does for you and you approve.
+There's one App Store iPhone app for everyone, which pairs with any Threadbear backend
+and gets notifications through a small relay Mike runs. Tailscale is how your own
+machines reach each other: a second runner, a backend you host yourself, and the phone
+fetching the heavy bits straight from the Mac when it's awake.
 
-The parts, with the choices that need Mike:
+Mike, 28 Oct, on the first draft (which had a self-hosted backend as the default): "we
+should encourage cloud and use cloud, but optionally, I guess it could run locally ...
+so that you can send your laptop to sleep, but still be able to access stuff from your
+mobile phone".
 
-### 2.1 The backend: self-hosted Convex over Tailscale
+The parts, with the choices that still need Mike:
 
-**What:** the Convex backend binary (what `npx convex dev --local` already runs for the
-e2e tests) runs as a LaunchAgent next to the runner, keeping its data under
-`~/Library/Application Support/Threadbear/convex/`. `tailscale serve` puts it on the
-Mac's tailnet name with HTTPS, e.g. `https://m5-mike.tail9ef766.ts.net:8443` for the
-API and `:8444` for HTTP actions and the website. Only devices on your tailnet can reach
-it.
+### 2.1 The backend: Convex cloud, in your own account
 
-**Why this over Convex's cloud (what we have today):**
+**What:** a Convex project in your own Convex account, made by setup (2.2). The runner
+writes to it, the phone and the website read it, and it keeps working whatever the Mac
+is doing. That's today's arrangement, made automatic and given more to hold.
 
-| | Self-hosted on your tailnet | Convex cloud (today) |
+**What goes up:**
+
+| | Today | Proposed |
 |---|---|---|
-| What can go there | Everything: full transcripts, tool output, images | A thin mirror (newest 20 messages), because of cost |
-| Cost | Nothing | Usage on your Convex plan (Agent Archive moved off it for this reason) |
-| Privacy | Never leaves your machines | Text sits in Convex's cloud |
-| Needs | Tailscale on the phone | A Convex account |
-| When the Mac is asleep | Unreachable. But agents aren't running then either, so you only lose reading old threads | Still readable, and messages queue |
-| Who looks after it | Threadbear (backend upgrades and backups are part of updates) | Convex |
+| Thread list, status, what needs you | Yes | Yes |
+| Message text | Newest 20 per thread, older ones on request | All of it |
+| Tool calls | No | One line each ("Ran `npm test`", "Edited 3 files") |
+| Tool output, diffs, images | No | Stay on the Mac; the phone fetches them over Tailscale when the Mac's awake |
 
-The asleep row is the main cost, and it mostly disappears if the backend lives on an
-always-on machine. So the default is "the same Mac", with a setup option to put it on
-another tailnet machine. For Mike that's Bruce, which is always on, already on the
-tailnet, and already where Agent Archive lives.
+All the text is the part that makes the phone and the website feel complete, and it's
+small: the 27 Oct measurement put Mike's conversation text at about 110 MB a month,
+against roughly 10 GB for everything, most of it images and tool output. Writes stay
+batched and per message, never per token, which is what keeps the bill down (Agent
+Archive moved off Convex because of reads and writes, not storage).
 
-**What it changes:** the runner writes everything to the backend instead of a thin
-mirror, so the phone and the website can show whole transcripts, images included.
-Later, the Mac app could read from it too, which is the step that would make a second
-Mac or Tinker Desk feel like one app, but that isn't needed to start.
-
-**Fallback:** Convex cloud stays possible for anyone who doesn't want Tailscale. It's the
-same functions with a different URL, so it's a setting rather than a fork.
-
-**To check in a spike first:** that the self-hosted backend runs the static-hosting
-component, that `tailscale serve` with two ports is fine on macOS, how the backend
-binary is upgraded, and how big a month of full transcripts gets (the 27 Oct
-measurement was about 10 GB a month including images, so images may want to stay as
-files the backend links to).
+**Self-hosted as an option:** the same functions run on Convex's open source backend on
+your own machine, served over Tailscale. It's a setting in setup, not a fork. The phone
+then needs Tailscale on, and it can't reach a sleeping Mac unless the backend lives on an
+always-on machine.
 
 ### 2.2 Setup: one command
 
@@ -87,9 +82,11 @@ files the backend links to).
 1. Checks the basics: Xcode command line tools, Tailscale installed and logged in,
    Claude Code or Codex logged in. Downloads its own Node into the data folder rather
    than relying on nvm.
-2. Starts the backend (2.1), makes its admin key and the runner's key, deploys the
-   functions and the website, and writes `runner.json`. No Convex account, no
-   `.env.local`, no hand-set env vars.
+2. Signs you in to Convex (`npx convex login`, once, in the browser), makes a
+   `threadbear` project in your account with a production deployment, makes the
+   runner's key and sets `RUNNER_KEY`, deploys the functions and the website, and writes
+   `runner.json`. No `.env.local` and no env vars set by hand. With the self-hosted
+   option it starts the local backend instead.
 3. Builds and installs the runner and the Mac app (today's two scripts, folded together).
 4. Opens the Mac app, whose first screen shows a pairing QR code for the phone
    (Settings › Phone, replacing `pair-qr.swift`).
@@ -122,11 +119,11 @@ Everyone has their own fork. `origin` is theirs, and setup adds `upstream` point
 People won't build their own phone app, as Mike said, so there's one App Store app and
 everything about it has to work with anyone's backend.
 
-- **Pairing:** scan the QR code from the Mac app. It carries the backend's address and a
-  token. The app allows `*.ts.net` addresses (and the Convex cloud ones for the
-  fallback).
-- **Connecting:** with the default setup, the phone needs Tailscale on. If it can't
-  reach the backend, it says so and offers to open Tailscale.
+- **Pairing:** scan the QR code from the Mac app. It carries the backend's address, a
+  token, and the Mac's tailnet name for the heavy bits. The app accepts Convex cloud
+  addresses, and `*.ts.net` ones for a self-hosted backend.
+- **Connecting:** with the default setup the phone just needs the internet. Tailscale
+  only matters for opening tool output and images (2.5) or a self-hosted backend.
 - **A stable phone API:** `convex/phone.ts` is a contract between your backend and Mike's
   App Store app. It gets a version number; forks can add to it but shouldn't change
   what's there. The app shows "update Threadbear on your Mac" when a backend is too old,
@@ -138,51 +135,55 @@ everything about it has to work with anyone's backend.
   (a Notification Service Extension), so the relay only ever sees gibberish. Mike's own
   backend uses the relay too, so his setup is the same as everyone's.
 
-### 2.5 Tailscale by default, everywhere
+### 2.5 Tailscale: how your own machines reach each other
 
-- **The phone and the backend:** as above.
-- **Thread links:** the website lives on the backend, so a thread's link becomes
-  `https://<mac>.<tailnet>.ts.net:8444/t/<id>`. It opens on any of your devices and
-  nowhere else. Tailscale can also tell the backend who's asking (`tailscale serve`
-  passes the tailnet login in a header), so on your own tailnet the browser might not
-  need a sign-in token at all.
-- **A second runner:** Tinker Desk (plan step 6) runs its own runner and writes to the
-  same backend over the tailnet. Its threads show up on the phone and the website
-  straight away, and later in the Mac app.
-- **The Mac app and a remote runner:** later, the Mac app could talk to a runner on
-  another tailnet machine directly, so Tinker Desk's threads are steerable from the
-  laptop.
+With the backend in the cloud, the phone and the browser don't need Tailscale for the
+everyday things. Tailscale is the default for everything that's machine to machine:
+
+- **The heavy bits:** tool output, diffs and images stay on the Mac. The runner shares
+  them on its tailnet name (`tailscale serve`, HTTPS, tailnet only), and the phone and
+  the website fetch them when you open one. When the Mac's asleep they say "on your Mac"
+  instead of loading.
+- **A second runner:** Tinker Desk (plan step 6) writes to the same backend and shows up
+  on the phone and the website straight away. The Mac app talks to it over the tailnet,
+  so its threads can be steered from the laptop.
+- **A self-hosted backend**, for anyone who picks that option (2.1).
+- **Setup checks Tailscale** is installed and logged in, and says what you lose without
+  it (the heavy bits on the phone, a second runner) rather than refusing.
 
 ## 3. What Mike needs to decide
 
-1. **The backend:** self-hosted Convex on the tailnet as the default (recommended), or
-   keep Convex cloud as the default?
-2. **Where Mike's lives:** on Bruce, so the phone works when the laptop is shut
-   (recommended), or on the laptop like everyone else's default?
-3. **"Everything goes there":** whole transcripts including tool output, with images
-   kept as files the backend links to (recommended), or images in the backend too?
-4. **Push relay:** OK to run one for everyone, with encrypted messages (recommended)?
-5. **Bringing in Mike's changes:** an agent thread you approve each time (recommended),
+Decided 28 Oct: the backend is Convex cloud by default, self-hosted optional (2.1).
+
+Still open:
+
+1. **What goes up:** all message text plus one line per tool call, with tool output and
+   images staying on the Mac (recommended)? Or tool output and images in Convex too,
+   which makes them readable with the laptop shut but costs more?
+2. **Push relay:** OK to run one for everyone, with encrypted messages (recommended)?
+3. **Bringing in Mike's changes:** an agent thread you approve each time (recommended),
    or something more automatic?
+4. **The phone and the heavy bits over Tailscale:** worth it, or is "open it on the Mac"
+   fine for tool output and images?
 
 ## 4. A rough order to build it in
 
-1. Spike: the self-hosted backend under launchd, behind `tailscale serve`, with the
-   current functions, the website and a phone paired to it (pairing allows `*.ts.net`).
-   This answers the open questions in 2.1.
-2. Move Mike over: backend on Bruce (or the laptop), runner writing to it, phone
-   re-paired. Keep Convex cloud running until it's settled, then turn it off.
-3. The release pipeline deploys the backend; `apiVersion` in the backend and the phone.
-4. Write everything, not just the mirror. The phone and the website show full threads.
-5. Push relay with encrypted messages, and the phone's notification extension.
-6. `./threadbear setup`, the pairing QR code in the Mac app, Mike's defaults moved into
-   `runner.json`.
-7. Upstream updates: fetch, "new changes from Mike", the merge thread.
-8. Tinker Desk as a second runner on the same backend.
+1. The release pipeline deploys the backend before the runner restarts; `apiVersion` in
+   the backend and the phone. (Useful now: stops the runner getting ahead of prod.)
+2. Write all message text and the one-line tool calls, not just the newest 20. The
+   phone and the website show whole threads.
+3. Push relay with encrypted messages, and the phone's notification extension.
+4. `./threadbear setup`: makes the Convex project in your account, the keys, the deploy,
+   the runner and the app; the pairing QR code in the Mac app; Mike's defaults moved
+   into `runner.json`.
+5. Upstream updates: fetch, "new changes from Mike", the merge thread.
+6. The heavy bits over Tailscale for the phone and the website.
+7. Tinker Desk as a second runner on the same backend.
+8. Self-hosted backend as a setup option.
 
-Steps 1 to 4 are useful to Mike straight away. 5 to 7 are what make it installable by
-other people, and the landing page's promise ("Threadbear makes a Convex deployment in
-your own account") gets reworded to match whatever 1 decides.
+Steps 1 and 2 are useful to Mike straight away. 3 to 5 are what make it installable by
+other people. The landing page already says "Threadbear makes a Convex deployment in
+your own Convex account", which this now matches once step 4 is built.
 
 ## Research notes
 
