@@ -38,6 +38,15 @@ export function needsFromTool(input: unknown): Needs | undefined {
   return asks.length ? { needs: 'you', asks } : { needs: 'you' };
 }
 
+// Whether end_turn asked for its thread to be archived once the turn is
+// over. Only with needs "nothing": a thread that's waiting on Mike has to
+// stay where he'll see it.
+export function archiveFromTool(input: unknown): boolean {
+  if (!input || typeof input !== 'object') return false;
+  const o = input as Record<string, unknown>;
+  return o.needs === 'nothing' && o.archive === true;
+}
+
 function str(v: unknown, max: number): string | undefined {
   if (typeof v !== 'string') return undefined;
   const t = v.trim();
@@ -140,4 +149,5 @@ export const END_TURN_DESCRIPTION =
   'needs "nothing" when the work is finished (or still going by itself) and nothing waits on Mike. ' +
   'needs "you" when it does: an approval, a decision, a key, something to look at, a question. Give one ask per thing he has to do, each a concrete action, most blocking first. ' +
   'Asks are shown as a checklist beside your message, so keep the action short and put the details in the message itself. ' +
+  'archive: true archives this thread once the turn is over, with needs "nothing" only. Use it only when Mike asks for this thread to be archived; otherwise leave it out, as a thread that vanishes from his inbox when he hadn\'t finished with it is confusing. ' +
   'Sub-agents never call this; only the thread\'s own agent does.';

@@ -484,8 +484,16 @@ export function buildThreadbearTools(control: ThreadControl, selfId: string, now
           .max(10)
           .optional()
           .describe('With needs "you": each thing he has to do, most blocking first. Usually one or two.'),
+        archive: z
+          .boolean()
+          .optional()
+          .describe('true to archive this thread once the turn is over. Only when Mike has asked for this thread to be archived, and only with needs "nothing".'),
       },
-      handle(async ({ needs }) => (needs === 'you' ? 'Noted: this thread will wait in Needs you. End the turn now, with no more text.' : 'Noted: this thread is done. End the turn now, with no more text.')),
+      handle(async ({ needs, archive }) =>
+        needs === 'you'
+          ? `Noted: this thread will wait in Needs you${archive ? ', and stays in the inbox, as it needs something from Mike' : ''}. End the turn now, with no more text.`
+          : `Noted: this thread is done${archive ? ', and will be archived once the turn is over' : ''}. End the turn now, with no more text.`,
+      ),
     ),
     ...reviewTools,
     ...highlightTools,
@@ -600,7 +608,7 @@ export function buildThreadbearTools(control: ThreadControl, selfId: string, now
     ),
     tool(
       'update_thread',
-      "Changes a thread's title, model or permissions, snoozes it, or archives it. Leave threadId out for this thread. This thread can be renamed or have its model or permissions changed, but not snoozed or archived while it's working (that would stop this turn); say so to Mike instead.",
+      "Changes a thread's title, model or permissions, snoozes it, or archives it. Leave threadId out for this thread. This thread can be renamed or have its model or permissions changed, but not snoozed or archived while it's working (that would stop this turn). If Mike asks for this thread to be archived, pass archive: true to end_turn instead.",
       {
         ...thisOrOther,
         title: z.string().optional(),

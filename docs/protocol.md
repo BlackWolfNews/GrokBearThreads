@@ -988,6 +988,13 @@ A turn the agent finished can say whether Mike has to do anything, so
   agent wants back ("done"). The agent calls it last, after its final
   message. The tool's description says when, so a resumed session that
   kept its old system prompt still hears it.
+- **Archiving itself.** `end_turn` also takes `archive?: true`. With
+  `needs: "nothing"`, a turn that completes archives its own thread once
+  it's over, with a `system.note` saying why; the thread can't archive
+  itself mid-turn, as that stops the CLI. It's ignored with `needs: "you"`,
+  on an interrupted or failed turn, and when a message is already queued.
+  The description tells agents to use it only when Mike asks, so a thread
+  he hadn't finished with doesn't vanish from his inbox.
 - **The fallback.** A completed turn with no `end_turn` call is read for
   the "What I need from you" section Mike's own instructions ask for: the
   last line near the end that is just that heading in bold, then its

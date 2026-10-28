@@ -72,7 +72,7 @@ import { EXPLAIN_SYSTEM, RECENT_CHARS, RECENT_MESSAGES, explainPrompt } from './
 import type { ExplainTurn } from './explain.ts';
 import { emptyHighlights, observe as observeHighlights, pinItem, remove as removeHighlight, unpin as unpinHighlight, upsert as upsertHighlight, view as highlightsView, absolute, type ThreadHighlights } from './highlights.ts';
 import { SERVER_NAME, approvalTitle } from './threadbear-mcp.ts';
-import { END_TURN_TOOL, needsFromText, needsFromTool } from './needs.ts';
+import { archiveFromTool, END_TURN_TOOL, needsFromText, needsFromTool } from './needs.ts';
 import type { Needs } from './needs.ts';
 import {
   EMPTY_PATCH_SET,
@@ -2090,7 +2090,16 @@ export class Runner {
     }
     // A pool thread whose login ran dry moves and carries on (afterTurn).
     const limitHit = outcome === 'failed' && r.errorKind === 'usageLimit' ? turn.turnId : undefined;
+    // The agent asked for its own thread to be archived (end_turn's
+    // archive, which Mike asked it for). It can't archive itself mid-turn,
+    // as that stops the CLI, so it happens here, once the turn is over, and
+    // not if a message is already waiting for the next one.
+    const archive = outcome === 'completed' && !turn.auto && said?.needs === 'nothing' && archiveFromTool(turn.endTurn) && !rec.queue.length;
     this.endTurn(st, ev.seq, outcome === 'failed' ? 'error' : 'idle', outcome, limitHit);
+    if (archive && !rt.turn && !rec.archivedAt && !this.stopping) {
+      this.emit(st, { type: 'system.note', text: 'Archived, as the agent was asked to once it had finished.' });
+      this.update({ threadId: rec.id, archived: true });
+    }
   }
 
   private endTurn(st: ThreadState, completedSeq: number, status: ThreadStatus, outcome?: TurnOutcome, limitHit?: string): void {

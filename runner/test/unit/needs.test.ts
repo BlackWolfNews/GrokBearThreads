@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { needsFromText, needsFromTool } from '../../src/needs.ts';
+import { archiveFromTool, needsFromText, needsFromTool } from '../../src/needs.ts';
 
 test('end_turn input: nothing, you with asks, and junk falls back', () => {
   assert.deepEqual(needsFromTool({ needs: 'nothing', asks: [{ action: 'ignored' }] }), { needs: 'nothing' });
@@ -10,6 +10,12 @@ test('end_turn input: nothing, you with asks, and junk falls back', () => {
   );
   assert.deepEqual(needsFromTool({ needs: 'you' }), { needs: 'you' });
   assert.equal(needsFromTool({ needs: 'maybe' }), undefined);
+  // archive only counts with needs "nothing": a thread that asks for something stays in the inbox.
+  assert.equal(archiveFromTool({ needs: 'nothing', archive: true }), true);
+  assert.equal(archiveFromTool({ needs: 'you', archive: true }), false);
+  assert.equal(archiveFromTool({ needs: 'nothing', archive: 'yes' }), false);
+  assert.equal(archiveFromTool({ needs: 'nothing' }), false);
+  assert.equal(archiveFromTool(undefined), false);
   assert.equal(needsFromTool(null), undefined);
   assert.equal(needsFromTool({ needs: 'you', asks: Array.from({ length: 20 }, (_, i) => ({ action: `a${i}` })) })!.asks!.length, 10);
 });

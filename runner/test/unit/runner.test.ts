@@ -1503,6 +1503,47 @@ test('needs you: an interrupted turn says nothing, and a sub-agent\'s end_turn i
   assert.equal(t.needsYou, true);
 });
 
+test('needs you: end_turn with archive archives the thread once its turn is over, only when it needs nothing', () => {
+  const h = makeHarness();
+  const { thread } = create(h);
+  let s = h.adapter.last;
+  s.init();
+  // Asking for something and archiving would hide the ask: it stays in the inbox.
+  endTurnCall(s, 't1', { needs: 'you', asks: [{ action: 'Say yes' }], archive: true });
+  s.result('completed');
+  let t = h.runner.get(thread.id);
+  assert.equal(t.archivedAt, undefined);
+  assert.equal(t.needsYou, true);
+
+  h.runner.send(thread.id, 'yes, and archive this one');
+  s = h.adapter.last;
+  s.text('m1', 'Done. Archiving this thread, as you asked.');
+  endTurnCall(s, 't2', { needs: 'nothing', archive: true });
+  // Not while the turn is still running: archiving stops the CLI.
+  assert.equal(h.runner.get(thread.id).archivedAt, undefined);
+  s.result('completed');
+  t = h.runner.get(thread.id);
+  assert.ok(t.archivedAt, 'archived once the turn completed');
+  assert.ok(h.events(thread.id).some((e) => e.type === 'system.note' && /archived/i.test(String(e.text))), 'says why it went');
+  assert.deepEqual(checkSequence(h.events(thread.id)), []);
+});
+
+test('needs you: an interrupted turn, or one without archive, leaves the thread where it is', () => {
+  const h = makeHarness();
+  const { thread } = create(h);
+  let s = h.adapter.last;
+  s.init();
+  endTurnCall(s, 't1', { needs: 'nothing', archive: true });
+  s.result('interrupted');
+  assert.equal(h.runner.get(thread.id).archivedAt, undefined);
+
+  h.runner.send(thread.id, 'go on');
+  s = h.adapter.last;
+  endTurnCall(s, 't2', { needs: 'nothing' });
+  s.result('completed');
+  assert.equal(h.runner.get(thread.id).archivedAt, undefined);
+});
+
 test('needs you: the card survives a reload of the thread record', () => {
   const h = makeHarness();
   const { thread } = create(h);
