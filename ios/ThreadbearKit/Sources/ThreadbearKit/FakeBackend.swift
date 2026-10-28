@@ -49,7 +49,9 @@ public final class FakeBackend: Backend, @unchecked Sendable {
     }
 
     public func me() async throws -> PhoneIdentity {
-        PhoneIdentity(name: "iphone", expiresAt: Date.now.addingTimeInterval(90 * 86_400))
+        // Always a current backend, so the demo never says the Mac needs updating.
+        PhoneIdentity(name: "iphone", expiresAt: Date.now.addingTimeInterval(90 * 86_400),
+                      apiVersion: BackendCompatibility.minimumAPIVersion)
     }
 
     public func runners() -> AsyncThrowingStream<[PhoneRunner], Error> {

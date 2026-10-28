@@ -169,6 +169,11 @@ import Testing
         }
     }
 
+    /// The demo (and App Review) shouldn't be told to update a Mac it doesn't have.
+    @Test func fakeBackendIsNeverTooOld() async throws {
+        #expect(BackendCompatibility.problem(try await FakeBackend().me()) == nil)
+    }
+
     @Test func archiveMovesToTheDen() async throws {
         let backend = FakeBackend()
         _ = try await backend.update(threadId: "a4", change: .archive)
