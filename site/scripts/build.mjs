@@ -238,6 +238,7 @@ for (const file of pages) {
     // The 404 page has no address of its own, so it isn't canonical anywhere and isn't indexed.
     canonical: url ? `<link rel="canonical" href="${url}">\n  <meta property="og:url" content="${url}">` : '<meta name="robots" content="noindex">',
     homeCurrent: name === "index" ? ' aria-current="page"' : "",
+    privacyCurrent: name === "privacy" ? ' aria-current="page"' : "",
     structuredData: name === "index" ? structuredData() : "",
     script: `<script src="${siteScript}" defer></script>`,
     content: fill(html.slice(match[0].length), shared).trimEnd(),
