@@ -25,8 +25,13 @@ Built 28 Oct 2026 (thread 66935d23).
 
 ## Signing in
 
-The browser holds a phone token (`convex/tokens.ts`), named `web-…`, in
-localStorage. Only someone logged in to the Convex team can issue one:
+The browser holds a phone token (`convex/tokens.ts`) in localStorage. The
+Mac app issues one through the runner (docs/protocol.md "Devices"):
+Settings › Phone & browser › "Open signed in" opens the site in the default
+browser with the token in the link's `#fragment`, and the same tab lists
+the signed-in browsers with Revoke. Since 28 Oct that's the usual way.
+
+From a terminal, by someone logged in to the Convex team:
 
     npm run web:sign-in                  # Chrome on this Mac, prod, 90 days
     npm run web:sign-in -- --qr          # a QR code for another device
@@ -35,9 +40,9 @@ localStorage. Only someone logged in to the Convex team can issue one:
 
 `web/scripts/sign-in.swift` puts the token in the link's `#fragment`, which
 browsers never send to a server; the page keeps it and wipes it from the
-address bar. The token is never printed. Revoke a browser with
-`npx convex run tokens:revoke '{"name":"web-mac"}' --prod`; it then shows
-the sign-in page. The page is `noindex` and sends no referrer.
+address bar. The token is never printed. Revoke a browser from Settings ›
+Phone & browser, or with `npx convex run tokens:revoke '{"name":"web-mac"}'
+--prod`; it then shows the sign-in page. The page is `noindex` and sends no referrer.
 
 ## Working on it
 
@@ -61,5 +66,6 @@ the static-hosting CLI sets: a build without it can't reach Convex.
 - A custom domain (e.g. threadbear.mikecann.app) instead of the
   `.convex.site` host.
 - Signing in from a browser without the Mac to hand (e.g. approve a new
-  browser from the iPhone app).
+  browser from the iPhone app). A QR code for another device's browser is
+  still `npm run web:sign-in -- --qr`.
 - Starting a new thread from the web (`phone:create` is there to use).

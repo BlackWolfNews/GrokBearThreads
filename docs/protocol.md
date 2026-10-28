@@ -647,6 +647,9 @@ replaces whatever the deltas built up.
 | `settings.get` | `{}` | `{ settings: Settings }` |
 | `settings.update` | `{ defaultCwd?, idleMinutes?, maxLiveCLIs?, followMain?, models?: { pool?: string \| null, dailyBudgetUsd?, privateFolders? } }` | `{ settings: Settings }`. Saves what's given to `runner.json` and applies it straight away, except `followMain` (next restart). `defaultCwd` must be an existing folder, `idleMinutes` at least 1, `maxLiveCLIs` 1 to 20, `dailyBudgetUsd` 0 to 100, `pool` a pool id or `null`; otherwise `-32602` saying which. Every client gets `settings.updated` |
 | `settings.setKey` | `{ provider: "openrouter", key: string \| null }` | `{ settings: Settings }`. Writes the key to `secrets/openrouter-key` (0600), or removes it for `null`. The key is never sent back, only `set` and `hint`. A key with spaces inside or under 20 characters is `-32602`. Every client gets `settings.updated` |
+| `devices.list` | `{}` | `{ devices: Device[], site?: string, reason?: string }` (see Devices). `site` is the website's root while sync is on; `reason` says why nothing can pair when it's off |
+| `devices.pair` | `{ kind: "phone" \| "browser", name?: string, days?: number }` | `{ device: Device, pairingLink?: string, signInLink?: string }`. Issues a phone token for a new phone or browser (see Devices) and returns the link that carries it: a `threadbear://pair?url=…&token=…` link for a phone, for the app to draw as a QR code, or the website's sign-in link (`<site>/#token=…`) for a browser, for the app to open. `days` is 1 to 365 (default 90). `-32000` while sync is off, or while the backend is older than this |
+| `devices.revoke` | `{ deviceId }` | `{ devices: Device[] }`. The phone or browser is signed out at its next request. `-32602` for an id that isn't there |
 | `models.run` | `{ job: "classify" \| "extract" \| "summarize" \| "generate", text: string, labels?: string[], fields?: Record<string, string>, maxWords?: number, system?: string, cwd?: string, maxTokens?: number }` | `{ ok: true, value, model, costUsd? }` or `{ ok: false, reason: "no-key" \| "off" \| "private" \| "over-budget" \| "no-room" \| "timeout" \| "provider", message }`. One model call by hand (`tb models try`), spent and counted like any other, with `feature: "tb"`. `maxTokens` (generate only, 1 to 8000, default 500) caps the answer, reasoning included; `classify` needs 2 or more `labels` and answers one of them; `extract` needs `fields` (name to a plain description) and answers an object of them, `null` where the text doesn't say |
 | `runner.status` | `{}` | `{ version, release?, branch?, pid, startedAt, home, logFile, liveClis, running: string[], background: { threadId, tasks: string[] }[], pendingRestart?: { when, reason?, release?, resumeThreadId?, requestedAt, backgroundUntil?, waitingFor: string[] }, rolledBack?: { from, at }, draining?: { pid, version, release?, since, threads: string[] }[], update?: { state, checkout?, reason?, checkedAt?, commit?, release?, logFile? }, clis?: CliStatus[] }`. `running` lists the threads that are starting, running or waiting on an approval or a question; `background` the threads whose CLI is still running background shells or subagents (`tasks` describes each). A restart waits for both. `branch` is the branch the release was built from. `rolledBack` is set when this release is running because `launch.mjs` went back to it from `from`, which kept crashing at startup (and nobody has activated it on purpose since). `update` is the runner following main by itself (docs/dev-tools.md): `state` is `off` (`reason` says why), `idle`, `checking`, `building`, `waiting` (`release` is built and starts on the pending restart) or `failed` (`reason` is the error; `logFile` has the build's output); `commit` is main's tip at the last check (`checkedAt`) |
 | `runner.restart` | `{ when?: "idle" \| "now", resume?: { threadId, text }, reason?: string, release?: string, backgroundWaitMs?: number, cancel?: boolean }` | `{ scheduled: boolean, waitingFor: string[], background?: { threadId, tasks: string[] }[], note?: string, noResume?: string, handover?: { keeps: string[] } }`. See Restarts below; `handover` under Handovers. `scheduled` is true once the restart is saved; an empty `waitingFor` means it is happening now. `background` is the background work among `waitingFor`. `release` is the release the restart should come back on (the deploy script sets it). `backgroundWaitMs` limits how long background shells and subagents hold the restart. `cancel: true` withdraws a pending restart that hasn't begun and returns `scheduled: false` (`-32020` once it has begun), with a `note` when it also put `current` back. `noResume` says why the `resume` won't be sent as things stand (the thread has already been resumed 3 times in the last hour), so whoever asked can say so rather than wait for it. A runner older than this answers `-32601` |
@@ -1740,6 +1743,48 @@ the mirror back as state. The Mac app doesn't use it.
   queries and mutations, `tokens.ts` for phone tokens, `crons.ts` for
   pruning). The phone's API is in docs/convex-backend.md.
 
+## Devices
+
+The phones and browsers that read the mirror (Sync) each hold a phone
+token (`convex/tokens.ts`): only its SHA-256 is kept, under a name, a
+kind and an expiry, so each can be listed and revoked on its own. The
+Settings window's Phone & browser tab issues them through the runner,
+so nobody needs the Convex CLI (`ios/scripts/pair-qr.swift` and
+`web/scripts/sign-in.swift` still work from a terminal).
+
+```ts
+type Device = {
+  id: string               // the token's row id, for devices.revoke
+  kind: "phone" | "browser"
+  name: string             // "iPhone", "Chrome": what the app called it when pairing
+  createdAt: string
+  expiresAt: string
+  expired: boolean
+}
+```
+
+- `devices.pair` asks the backend (`sync:issueToken`, with the runner
+  key) for a token of that kind and name, good for `days`, and hands the
+  app the one link that carries it: the pairing link for a phone (the
+  app draws it as a QR code for the iPhone app to scan; `url` is
+  `sync.url`), or the website's sign-in link for a browser (the token in
+  the `#fragment`, which never reaches a server; the app opens it in the
+  default browser). The token is in that reply and nowhere else: the
+  runner never logs it, never writes it to disk, and no `tb` command
+  prints it, since a thread's transcript can command agents. The app
+  shows the QR code or opens the link, then forgets it.
+- `devices.list` is the backend's live list (`sync:listTokens`), never
+  revoked ones; expired ones stay until revoked, so the list says why a
+  phone stopped working. Nothing is cached in the runner.
+- `devices.revoke` marks the token revoked (`sync:revokeToken`); the
+  phone's or browser's next call fails as unauthorised and it shows its
+  pairing or sign-in screen.
+- With sync off, `devices.list` returns no devices and `reason` (the
+  same as `runner.status`'s `sync.reason`), and `pair` and `revoke` are
+  `-32000` with that reason. A backend older than API 6 has none of these
+  functions: `pair`, `list` and `revoke` are `-32000` saying the backend
+  deploys with the runner's next update.
+
 ## Ordering and reconnects
 
 - Persisted events for a thread are delivered in `seq` order with no gaps.
@@ -1820,3 +1865,6 @@ Either side may be upgraded first, so each tolerates the other:
   `waitingForRoom` and `pools.updated`. A newer app talking to a runner
   older than pools sees no `pools` in `hello` (and `-32601` from
   `pools.*`), and shows logins as before.
+- An app older than Devices never asks for them. A newer app talking to a
+  runner older than Devices gets `-32601` from `devices.*` and says the
+  Phone & browser tab needs a newer runner.

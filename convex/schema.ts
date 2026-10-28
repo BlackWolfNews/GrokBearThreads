@@ -127,11 +127,15 @@ export default defineSchema({
     .index('by_runner_state', ['runnerId', 'state'])
     .index('by_state', ['state']),
 
-  // Phone tokens: only the hash is kept. Issued with
-  // `npx convex run tokens:issue '{"name":"iphone","days":90}'`.
+  // Phone tokens: only the hash is kept. Issued from the Mac app through
+  // the runner (sync:issueToken) or by hand with
+  // `npx convex run tokens:issue '{"name":"iphone","days":90}'`. `kind`
+  // says whether a phone or a browser holds it (rows from before 28 Oct
+  // have none: tokens.ts works it out from the name).
   tokens: defineTable({
     hash: v.string(),
     name: v.string(),
+    kind: v.optional(v.union(v.literal('phone'), v.literal('browser'))),
     createdAt: v.number(),
     expiresAt: v.number(),
     revokedAt: v.optional(v.number()),

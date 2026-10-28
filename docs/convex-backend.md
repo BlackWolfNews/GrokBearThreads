@@ -345,10 +345,14 @@ dashboard panel.
   (`com.mikecann.threadbear`). `npx convex run push:test '{"body":"hi"}'
   --prod` sends a test; `npx convex run devices:list --prod` shows the
   phones.
-- `convex/tokens.ts`: `issue`, `revoke`, `list`, run from a terminal with
-  `npx convex run tokens:issue '{"name":"iphone","days":90}'` (add
-  `--prod` for the Sydney prod deployment). Only the SHA-256 of a token
-  is stored.
+- `convex/tokens.ts`: the token helpers, and `issue`, `revoke`, `list` to
+  run from a terminal with `npx convex run tokens:issue
+  '{"name":"iphone","days":90}'` (add `--prod` for the Sydney prod
+  deployment). Only the SHA-256 of a token is stored, with a name and a
+  kind (`phone` or `browser`). Since API 6 the Mac app issues them through
+  the runner instead: `sync:issueToken`, `sync:listTokens` and
+  `sync:revokeToken` take the runner key (docs/protocol.md "Devices"), so
+  pairing needs no Convex CLI.
 - `runner/src/sync.ts`: the mirror, documented in docs/protocol.md
   ("Sync"): on with `sync.url` in `runner.json` and `secrets/convex-key`;
   threads, messages (newest 20 per thread, backfilled once), the pending

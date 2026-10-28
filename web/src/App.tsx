@@ -32,11 +32,10 @@ function SignIn({ expired }: { expired?: boolean }) {
       <img src="/icon.png" alt="" width={72} height={72} />
       <h1>Threadbear</h1>
       <p>{expired ? 'This browser’s sign-in has expired or been revoked.' : 'This browser isn’t signed in yet.'}</p>
-      <p>
-        On the Mac, in <code>~/dev/me/threadbear</code>, run:
+      <p>On the Mac, open Threadbear, then Settings › Phone &amp; browser › Open signed in.</p>
+      <p className="muted">
+        It opens this site in your browser, signed in. From a terminal instead, in the repo: <code>npm run web:sign-in</code> (add <code>-- --qr</code> for a code to scan on another device).
       </p>
-      <pre>npm run web:sign-in</pre>
-      <p className="muted">It opens this site in Chrome, signed in. For another device, add <code>-- --qr</code> and scan the code.</p>
     </main>
   );
 }

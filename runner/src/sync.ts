@@ -60,7 +60,7 @@ export type SyncConfig = {
 // lower one means its backend hasn't been deployed since this runner was:
 // said in runner.status, tb status and the log rather than stopping, since
 // the runner only adds to what it sends while the number stays the same.
-export const BACKEND_API_VERSION = 5;
+export const BACKEND_API_VERSION = 6;
 // From this backend version a project's picture goes up to file storage
 // (sync:iconUploadUrl, sync:setProjectIcon); an older backend gets the
 // project without it and the phone shows its symbol or first letter.
@@ -133,6 +133,12 @@ export type Subscriber = { subscribe: Subscribe; close(): Promise<void> | void }
 // Puts a picture's bytes at the upload URL the backend gave (file storage)
 // and returns its storage id. Tests pass a fake.
 export type Upload = (url: string, bytes: Uint8Array, mediaType: string) => Promise<string>;
+
+// A phone or browser that holds a phone token (docs/protocol.md "Devices"),
+// as the backend lists them (convex/tokens.ts tokenInfo).
+export const DEVICE_KINDS = ['phone', 'browser'] as const;
+export type DeviceKind = (typeof DEVICE_KINDS)[number];
+export type Device = { id: string; kind: DeviceKind; name: string; createdAt: string; expiresAt: string; expired: boolean };
 
 // A command the phone queued (convex/schema.ts `commands`).
 export type Command = { commandId: string; kind: string; threadId?: string; args: Record<string, unknown>; createdAt: number };
@@ -525,6 +531,60 @@ export class ConvexSync {
     if (this.retryAt !== undefined) s.retryAt = new Date(this.retryAt).toISOString();
     if (this.backendApiVersion !== undefined) s.backend = { apiVersion: this.backendApiVersion, expected: BACKEND_API_VERSION };
     return s;
+  }
+
+  // ---- Devices (docs/protocol.md "Devices"): the phone tokens the Mac app
+  // issues, lists and revokes through this runner. Each is one call to the
+  // backend, outside the mirror's queue; nothing is kept here. The token
+  // in issueToken's reply goes back to the caller and nowhere else: never
+  // logged, never written.
+
+  /** Why nothing can pair, or undefined while sync is on. */
+  offReason(): string | undefined {
+    return this.off;
+  }
+
+  /** The deployment's URL (`sync.url`), while sync is on. */
+  url(): string | undefined {
+    return this.off ? undefined : this.deps.config.url;
+  }
+
+  async issueToken(args: { kind: DeviceKind; name: string; days?: number }): Promise<{ id: string; token: string; expiresAt: string }> {
+    this.mustBeOn();
+    const r = (await this.backend('mutation', 'sync:issueToken', { key: this.deps.key, ...args })) as { id?: unknown; token?: unknown; expiresAt?: unknown } | null;
+    if (!r || typeof r.id !== 'string' || typeof r.token !== 'string' || typeof r.expiresAt !== 'string') throw new Error('The backend gave no token back.');
+    return { id: r.id, token: r.token, expiresAt: r.expiresAt };
+  }
+
+  async listTokens(): Promise<Device[]> {
+    this.mustBeOn();
+    const r = await this.backend('query', 'sync:listTokens', { key: this.deps.key });
+    return Array.isArray(r) ? (r as Device[]) : [];
+  }
+
+  /** False when the backend has no token with that id. */
+  async revokeToken(id: string): Promise<boolean> {
+    this.mustBeOn();
+    return (await this.backend('mutation', 'sync:revokeToken', { key: this.deps.key, id })) === true;
+  }
+
+  private mustBeOn(): void {
+    if (this.off) throw new Error(`Your threads aren't mirrored to Convex (${this.off}), so there's nothing for a phone or browser to read. Run ./threadbear setup.`);
+  }
+
+  // A backend from before API 5 has none of the token functions: the
+  // Convex HTTP API says it can't find them. Said in words the Settings
+  // window can show, rather than the API's line about `npx convex dev`.
+  private async backend(kind: 'mutation' | 'query', fn: string, args: Record<string, unknown>): Promise<unknown> {
+    try {
+      return await this.post(kind, fn, args);
+    } catch (e) {
+      const message = (e as Error)?.message ?? String(e);
+      if (/could not find (public )?function/i.test(message)) {
+        throw new Error('The Convex backend is older than this runner. It deploys with the runner\'s next update; try again in a few minutes.');
+      }
+      throw e;
+    }
   }
 
   // Writes whatever is waiting now, however recent the last write; tests

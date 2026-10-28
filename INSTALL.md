@@ -75,13 +75,17 @@ do that. Tell them that prompt is Threadbear's, so they can answer it.
 
 ## 4. The phone and the browser
 
-Tell them the two commands setup printed at the end, and offer to run them:
+Both happen in the app, in Settings (⌘,) › Phone & browser. **Ask** them to
+open it there:
 
-- `npm run web:sign-in` opens their Threadbear website in Chrome, signed in.
-- `swift ios/scripts/pair-qr.swift --prod --url <the URL setup printed>` shows
-  a QR code to scan with the Threadbear iPhone app. **Ask** them to scan it.
-  Never show or print the pairing link or token yourself: it can run their
-  agents.
+- "Show the code" shows a QR code to scan with the Threadbear iPhone app.
+- "Open signed in" opens their Threadbear website in their browser, signed in.
+- The same tab lists what's paired, each with Revoke.
+
+The terminal scripts still work when there's no app window to hand
+(`npm run web:sign-in`, and `swift ios/scripts/pair-qr.swift --prod --url
+<the URL setup printed>`), but never show or print a pairing link or token
+yourself: it can run their agents.
 
 ## 5. Tell them it's done
 

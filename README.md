@@ -19,8 +19,9 @@ cd threadbear
 Setup checks the Mac, logs you in to Convex, makes a Convex project with a
 production deployment in your account, makes the keys the runner needs,
 deploys the backend and the website, and builds and installs the runner and
-the Mac app. It ends with the commands to pair the iPhone app and sign a
-browser in. Run it again whenever you like: it only does what's missing.
+the Mac app. Then, in the app, Settings › Phone & browser pairs the iPhone
+app (a code to scan) and opens the website in your browser, signed in. Run
+setup again whenever you like: it only does what's missing.
 `./threadbear setup --dry-run` shows what it would do.
 
 Or have your agent do it: ask Claude Code or Codex to "clone

@@ -198,6 +198,18 @@ final class AppModel {
     /// Bumped to open the Settings window from the automation (RootView
     /// opens it, as ⌘, does).
     var settingsRequest = 0
+    /// Settings › Phone & browser (DevicesModel.swift): the backend's list
+    /// of paired phones and browsers as the runner last gave it, the
+    /// website's root, or why nothing can pair. Never a token.
+    var devices: [Device] = []
+    var devicesSite: String?
+    var devicesReason: String?
+    var devicesError: String?
+    var devicesUnsupported = false
+    var devicesLoaded = false
+    var devicesLoading = false
+    /// Bumped by the automation to show the pairing code, for screenshots.
+    var pairRequest = 0
     /// The schedule editor sheet, when it's open (ScheduleEditor).
     var scheduleEditor: ScheduleEditorState?
     /// A sidebar row drawn as if the pointer were over it, so the screenshot

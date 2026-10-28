@@ -193,8 +193,9 @@ Nothing is open now. Next is building, in the order below.
    deploys the backend and website, and installs the runner and the app; tested end to
    end in a sandbox against a new project except the install step. Mike's defaults
    (default folder, account notes, pool folders) moved from the code into his
-   runner.json. Still to do: the pairing QR code inside the Mac app (setup prints the
-   pair-qr command meanwhile).
+   runner.json. The pairing QR code and the browser sign-in moved into the Mac app on
+   28 Oct (Settings › Phone & browser, docs/protocol.md "Devices"), so setup now points
+   there and the terminal scripts are the fallback.
 5. Upstream updates: fetch, "new changes from Mike", the merge thread.
 6. The heavy bits over Tailscale for the phone and the website.
 7. Tinker Desk as a second runner on the same backend.

@@ -126,14 +126,14 @@ fill in once it has run something.
 
 The Threadbear iPhone app shows your threads, lets you answer the ones that
 need you, and sends you notifications. It pairs with your Mac by scanning a
-QR code. For now that code comes from a command setup printed at the end:
+QR code: on the Mac, Settings (⌘,) > Phone & browser > Show the code, then
+scan it with the iPhone app. Keep the code to yourself: anyone who scans it
+can run your agents. The same tab lists each paired phone and browser with
+when it was paired and until when (90 days), and Revoke signs one out;
+Settings > Unpair this phone on the iPhone forgets it from that side. The
+terminal command setup used to print still works too:
 
     swift ios/scripts/pair-qr.swift --prod --url <your deployment URL>
-
-Run it from your Threadbear folder, or ask a thread there to run it for you,
-and scan the code with the iPhone app. Keep the code to yourself: anyone who
-scans it can run your agents. Settings > Unpair this phone on the iPhone
-forgets it.
 
 Notifications reach your phone only while you're away from the Mac by
 default. Threadbear counts you as at the Mac when the app is open and you've
@@ -141,8 +141,9 @@ used the keyboard or mouse in the last two minutes, and as away when the Mac
 is asleep. On the iPhone, Settings > Notify me changes it to Always or Never.
 
 Your threads also have a website, on your own Convex deployment. To sign a
-browser in, run `npm run web:sign-in` from your Threadbear folder (it opens
-Chrome, signed in). Each thread has its own link: Copy web link in a
+browser in, Settings > Phone & browser > Open signed in opens it in your
+browser (or run `npm run web:sign-in` from your Threadbear folder). Each
+thread has its own link: Copy web link in a
 thread's ... menu on the Mac, or the Copy link button on the website, gives
 you one to paste anywhere you're signed in.
 

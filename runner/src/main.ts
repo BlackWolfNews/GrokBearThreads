@@ -31,6 +31,7 @@ import { removeTempFiles } from './fsutil.ts';
 import { Models } from './models/index.ts';
 import { SettingsService, modelMethods, settingsMethods } from './settings.ts';
 import { ConvexSync, ensureRunnerId, readSyncKey } from './sync.ts';
+import { devicesMethods } from './devices.ts';
 import { ALWAYS_ASK_TOOLS, SERVER_NAME, buildThreadbearTools, threadbearMcpServer } from './threadbear-mcp.ts';
 
 // Tells launch.mjs this runner calls its listening() hook (release.ts), so
@@ -296,7 +297,7 @@ async function main(): Promise<void> {
   updaterReady = true;
 
   runner.attachClis(updates);
-  const methods = { ...restartMethods(restarter), ...scheduleMethods(scheduler), ...projectMethods(projects), ...librarianMethods(librarian), ...settingsMethods(settings), ...modelMethods(models) };
+  const methods = { ...restartMethods(restarter), ...scheduleMethods(scheduler), ...projectMethods(projects), ...librarianMethods(librarian), ...settingsMethods(settings), ...modelMethods(models), ...devicesMethods(sync) };
   // runner.status carries the CLI statuses too (protocol, "runner.status").
   const restartStatus = methods['runner.status'];
   methods['runner.status'] = (p) => {

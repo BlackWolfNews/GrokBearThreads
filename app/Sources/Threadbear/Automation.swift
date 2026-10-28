@@ -185,6 +185,17 @@ enum Automation {
         window.tuckBehind()
         // Let the tab switch and the window's new height settle.
         try? await Task.sleep(for: .milliseconds(400))
+        // {"pair": true}: the Phone & browser tab's pairing code, as a sheet
+        // over the window (capture it with `shot --settings --sheet`).
+        if c["pair"] as? Bool == true {
+            guard app.settingsTab == .devices else { return "error pair needs the devices tab" }
+            app.pairRequest += 1
+            for _ in 0..<200 where window.attachedSheet == nil {
+                try? await Task.sleep(for: .milliseconds(15))
+            }
+            guard window.attachedSheet != nil else { return "error the pairing code didn't open: \(app.devicesError ?? "no error")" }
+            try? await Task.sleep(for: .milliseconds(300))
+        }
         let shown: String
         if let settings = app.runnerSettings {
             shown = json([
@@ -201,6 +212,13 @@ enum Automation {
                 "error": app.settingsError ?? "",
                 "pools": app.pools.map { "\($0.id) \"\($0.title)\": " + $0.accountIds.joined(separator: ", ") + ($0.folders.isEmpty ? "" : " [" + $0.folders.joined(separator: ", ") + "]") },
                 "poolsError": app.poolsError ?? "",
+                // The Phone & browser tab: each paired device as one line,
+                // the website, and why nothing can pair when sync is off.
+                "devices": app.devices.map { "\($0.kind.rawValue) \"\($0.name)\": \(DeviceText.detail($0))" },
+                "devicesSite": app.devicesSite ?? "",
+                "devicesReason": app.devicesReason ?? "",
+                "devicesError": app.devicesError ?? "",
+                "pairingShown": SettingsWindow.current?.attachedSheet != nil,
             ] as [String: Any])
         } else {
             shown = json(["tab": app.settingsTab.rawValue, "unsupported": app.settingsUnsupported] as [String: Any])
@@ -663,13 +681,15 @@ enum Automation {
                     return "error that review isn't open"
                 }
             }
-            if c["sheet"] as? Bool == true {
-                guard let sheet = window.attachedSheet else { return "error no sheet" }
-                window = sheet
-            }
+            // The Settings window first, so {"settings": true, "sheet": true}
+            // is the sheet over it (the pairing code).
             if c["settings"] as? Bool == true {
                 guard let settings = SettingsWindow.current, settings.isVisible else { return "error the Settings window isn't open" }
                 window = settings
+            }
+            if c["sheet"] as? Bool == true {
+                guard let sheet = window.attachedSheet else { return "error no sheet" }
+                window = sheet
             }
             // A dev-app.sh instance never runs screencapture itself: its temp
             // bundle has no Screen Recording permission (the capture is
@@ -693,8 +713,14 @@ enum Automation {
                     return "error that review isn't open"
                 }
             }
-            // {"sheet": true}: the sheet over it (the schedule editor), a
-            // window of its own that a capture of the main one leaves out.
+            // {"settings": true}: the Settings window (open it with `settings`).
+            if c["settings"] as? Bool == true {
+                guard let settings = SettingsWindow.current, settings.isVisible else { return "error the Settings window isn't open" }
+                window = settings
+            }
+            // {"sheet": true}: the sheet over it (the schedule editor, or the
+            // pairing code over Settings), a window of its own that a
+            // capture of the one under it leaves out.
             if c["sheet"] as? Bool == true {
                 guard let sheet = window.attachedSheet else { return "error no sheet" }
                 window = sheet
@@ -703,11 +729,6 @@ enum Automation {
             if let id = c["panel"] as? String {
                 guard let panel = NSApp.windows.first(where: { ($0 as? DockPanelWindow)?.panel == id && $0.isVisible }) else { return "error \(id) has no window of its own" }
                 window = panel
-            }
-            // {"settings": true}: the Settings window (open it with `settings`).
-            if c["settings"] as? Bool == true {
-                guard let settings = SettingsWindow.current, settings.isVisible else { return "error the Settings window isn't open" }
-                window = settings
             }
             window.displayIfNeeded()
             try? await Task.sleep(for: .milliseconds(300))

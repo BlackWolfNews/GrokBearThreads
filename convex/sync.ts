@@ -2,12 +2,13 @@
 // runner key (lib.ts). Rows are current state, so writing the same thing
 // twice is harmless, and a runner that was offline writes each changed
 // row once when it's back.
-import { v } from 'convex/values';
+import { ConvexError, v } from 'convex/values';
 import { internalMutation, mutation, query } from './_generated/server';
 import { internal } from './_generated/api';
 import { threadFields, views } from './schema';
 import { API_VERSION } from './version';
 import { checkRunnerKey } from './lib';
+import { issueToken as makeToken, listTokens as allTokens, revokeToken as revokeOne, tokenInfo, tokenKind, MAX_DAYS } from './tokens';
 
 // Finished commands and paged messages older than this are pruned.
 const KEEP_FINISHED_MS = 24 * 60 * 60_000;
@@ -171,6 +172,42 @@ export const runnersList = query({
       out.push(rest);
     }
     return out;
+  },
+});
+
+// ------------------------------------------------------------ tokens
+// The Mac app's Settings › Phone & browser, through the runner (API 6;
+// docs/protocol.md "Devices"): issues the token a new phone or browser
+// holds, lists them, revokes one. The plain token goes back in the reply
+// that issued it and nowhere else.
+
+export const issueToken = mutation({
+  args: { key: v.string(), kind: tokenKind, name: v.string(), days: v.optional(v.number()) },
+  returns: v.object({ id: v.string(), token: v.string(), expiresAt: v.string() }),
+  handler: async (ctx, { key, kind, name, days }) => {
+    checkRunnerKey(key);
+    const trimmed = name.trim().slice(0, 80);
+    if (!trimmed) throw new ConvexError({ kind: 'badArgs', message: 'name must not be blank' });
+    if (days !== undefined && (!Number.isFinite(days) || days < 1 || days > MAX_DAYS)) throw new ConvexError({ kind: 'badArgs', message: `days must be 1 to ${MAX_DAYS}` });
+    return makeToken(ctx, { kind, name: trimmed, days });
+  },
+});
+
+export const listTokens = query({
+  args: { key: v.string() },
+  returns: v.array(tokenInfo),
+  handler: async (ctx, { key }) => {
+    checkRunnerKey(key);
+    return allTokens(ctx);
+  },
+});
+
+export const revokeToken = mutation({
+  args: { key: v.string(), id: v.string() },
+  returns: v.boolean(),
+  handler: async (ctx, { key, id }) => {
+    checkRunnerKey(key);
+    return revokeOne(ctx, id);
   },
 });
 

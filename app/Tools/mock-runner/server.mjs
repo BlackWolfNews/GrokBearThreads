@@ -201,6 +201,18 @@ const clis = [
 ];
 // The Settings window's settings, as a runner with a key set and a little
 // spent would have them, so a shot of it has something in every row.
+// Settings › Phone & browser: what the demo shows as paired. The
+// deployment and site are made up, so a demo pairing link opens nothing.
+const DEMO_DEPLOYMENT = 'https://demo-bear-123.convex.cloud';
+const DEMO_SITE = 'https://demo-bear-123.convex.site';
+const devices = [
+  { id: 'tok1', kind: 'phone', name: 'iPhone', createdAt: '2026-10-21T09:12:00.000Z', expiresAt: '2027-01-19T09:12:00.000Z', expired: false },
+  { id: 'tok2', kind: 'browser', name: 'Chrome', createdAt: '2026-10-22T14:30:00.000Z', expiresAt: '2027-01-20T14:30:00.000Z', expired: false },
+  { id: 'tok3', kind: 'browser', name: 'Safari', createdAt: '2026-07-01T08:00:00.000Z', expiresAt: '2026-09-29T08:00:00.000Z', expired: true },
+];
+let deviceSeq = devices.length;
+const deviceList = () => ({ devices: [...devices], site: DEMO_SITE });
+
 const settings = {
   defaultCwd: defaults.cwd, idleMinutes: 30, maxLiveCLIs: 6, followMain: true,
   models: {
@@ -797,6 +809,31 @@ async function dispatch(client, method, p) {
       }
       broadcastSettings();
       return { settings };
+    }
+    // Phone & browser (docs/protocol.md, "Devices"): the paired phones and
+    // browsers, kept in memory, and a made-up link for each pair (the
+    // demo deployment, a token that opens nothing).
+    case 'devices.list':
+      if (oldRunner) throw rpcError(-32601, `Unknown method ${method}`);
+      return deviceList();
+    case 'devices.pair': {
+      if (oldRunner) throw rpcError(-32601, `Unknown method ${method}`);
+      if (!['phone', 'browser'].includes(p.kind)) throw rpcError(-32602, 'kind must be one of phone, browser');
+      const name = typeof p.name === 'string' && p.name.trim() ? p.name.trim() : p.kind === 'phone' ? 'iPhone' : 'Browser';
+      const days = p.days ?? 90;
+      const device = { id: `tok${++deviceSeq}`, kind: p.kind, name, createdAt: iso(), expiresAt: new Date(Date.now() + days * 86_400_000).toISOString(), expired: false };
+      devices.unshift(device);
+      const token = 'tb_demo' + deviceSeq.toString().padStart(4, '0');
+      return p.kind === 'phone'
+        ? { device, pairingLink: `threadbear://pair?url=${encodeURIComponent(DEMO_DEPLOYMENT)}&token=${token}` }
+        : { device, signInLink: `${DEMO_SITE}/#token=${token}` };
+    }
+    case 'devices.revoke': {
+      if (oldRunner) throw rpcError(-32601, `Unknown method ${method}`);
+      const i = devices.findIndex((d) => d.id === p.deviceId);
+      if (i < 0) throw rpcError(-32602, `No phone or browser with id ${p.deviceId}`);
+      devices.splice(i, 1);
+      return deviceList();
     }
     // Mock-only helpers for perf runs, demos and screenshots.
     case 'mock.restartPending': {

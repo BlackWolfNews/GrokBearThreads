@@ -21,4 +21,7 @@
 // 5: project icons. phone:projects rows carry `icon` ({ symbol?, url?, by }),
 //    the url a picture in file storage the runner uploads (sync:iconUploadUrl,
 //    sync:setProjectIcon); a runner before 5 sends projects without icons.
-export const API_VERSION = 5;
+// 6: sync:issueToken, sync:listTokens and sync:revokeToken, so the Mac app
+//    pairs phones and signs browsers in through the runner (docs/protocol.md,
+//    "Devices") with no Convex CLI; tokens carry a kind.
+export const API_VERSION = 6;

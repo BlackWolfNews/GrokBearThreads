@@ -20,6 +20,9 @@ struct SettingsView: View {
             PoolSettings()
                 .tabItem { Label("Pools", systemImage: "square.stack") }
                 .tag(SettingsTab.pools)
+            DevicesSettings()
+                .tabItem { Label("Phone & browser", systemImage: "iphone") }
+                .tag(SettingsTab.devices)
         }
         .frame(width: 540)
         .background(SettingsWindowFinder())

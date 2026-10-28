@@ -21,7 +21,7 @@
 //   7. the runner (its LaunchAgent, with Threadbear Runner.app as the
 //      program, so macOS's privacy prompts name it) and the Mac app, built
 //      and installed
-//   8. how to pair your iPhone and sign a browser in
+//   8. where to pair your iPhone and sign a browser in (the app's Settings)
 //
 // Node built-ins only, so it runs before the repo's packages are installed.
 import { spawnSync } from 'node:child_process';
@@ -317,11 +317,12 @@ function install() {
 
 function finish(url) {
   say('8. Your phone and browser');
+  note('In the Threadbear app, open Settings (⌘,) › Phone & browser.');
+  note('Show the code: a QR code the Threadbear iPhone app scans to pair.');
+  note('Open signed in: your Threadbear website in your browser.');
+  // The terminal scripts still work, for a Mac with no app window to hand.
   const at = url ?? '<your deployment URL>';
-  note('Pair the Threadbear iPhone app (it shows a code to scan):');
-  say(`      swift ios/scripts/pair-qr.swift --prod --url ${at}`);
-  note('Sign a browser in to your Threadbear website:');
-  say('      npm run web:sign-in');
+  note(`From a terminal instead: swift ios/scripts/pair-qr.swift --prod --url ${at}  and  npm run web:sign-in`);
 }
 
 try {

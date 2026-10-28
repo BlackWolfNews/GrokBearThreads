@@ -9,7 +9,7 @@
 #   Tools/dev-app.sh start [--mock [--fixtures DIR]...] [--home DIR]
 #                          [--appearance light|dark] [--size WxH] [--id NAME]
 #   Tools/dev-app.sh do '<json>'... [--timeout S]
-#   Tools/dev-app.sh shot <file.png> [--sheet|--settings]   (the sheet over it, or the Settings window)
+#   Tools/dev-app.sh shot <file.png> [--sheet] [--settings]   (the sheet over it, the Settings window, or with both the sheet over Settings)
 #   Tools/dev-app.sh dump [--json]
 #   Tools/dev-app.sh rebuild
 #   Tools/dev-app.sh log [-f] [-n N] [--mock | --automation]

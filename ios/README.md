@@ -39,8 +39,11 @@ demo", back to pairing. It isn't remembered across launches.
 ## Pairing
 
 The phone carries a phone token (`convex/tokens.ts`), never the runner key.
-Make one with `npx convex run tokens:issue '{"name":"iphone","days":90}'`
-(`--prod` for prod), then get it onto the phone as a link:
+The Mac app makes one: Settings › Phone & browser › "Show the code" shows
+the pairing QR code (the runner issues the token, docs/protocol.md
+"Devices"), and the same tab lists paired phones with Revoke. By hand,
+`npx convex run tokens:issue '{"name":"iphone","days":90}'` (`--prod` for
+prod) makes one, to get onto the phone as a link:
 
     threadbear://pair?url=<https://….convex.cloud>&token=<tb_…>
 
