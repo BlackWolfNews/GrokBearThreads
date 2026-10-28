@@ -500,7 +500,7 @@ export function buildThreadbearTools(control: ThreadControl, selfId: string, now
               where: z.string().optional().describe('Where he does it: an app, site, file or person, e.g. "Threadbear › Settings › Models".'),
               reply: z.string().optional().describe('The exact words to send back when it is done, e.g. "done" or "key set". Leave it out when the reply is his own answer (a decision, a choice).'),
               why: z.string().optional().describe('One line of context, for when he has forgotten the details: "Preview is green and the events arrive."'),
-              options: z.array(z.string()).max(6).optional().describe('Likely answers to pick from, short: ["Merge", "Test locally first"]. He can always write his own instead.'),
+              options: z.array(z.string()).max(6).optional().describe('Likely answers to pick from, short: ["Merge", "Test locally first"]. Give them for every decision or yes/no question. He can always write his own instead.'),
               suggested: z.number().int().optional().describe('Index into options of the answer you would pick.'),
             }),
           )

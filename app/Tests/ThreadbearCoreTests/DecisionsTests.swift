@@ -27,6 +27,15 @@ final class DecisionsTests: XCTestCase {
         XCTAssertEqual(Decisions.choices(for: events), [])
     }
 
+    /// An ask with neither still gets the word it asks for as a button.
+    func testChoicesFromTheAsksOwnWords() {
+        XCTAssertEqual(Decisions.choices(for: Ask(action: "Say go for Short 2 (Thomas on AI being dumb), or name another")), ["Go"])
+        XCTAssertEqual(Decisions.choices(for: Ask(action: "Have a look, then reply \"export\" and I'll upload it")), ["export"])
+        XCTAssertEqual(Decisions.choices(for: Ask(action: "Reply “ship it” for the plan")), ["ship it"])
+        XCTAssertEqual(Decisions.choices(for: Ask(action: "Say whether $1 a day is right")), [])
+        XCTAssertEqual(Decisions.choices(for: Ask(action: "Paste your key, then say \"key set\"", options: ["Done"])), ["Done"])
+    }
+
     func testAnswerText() {
         XCTAssertNil(Decisions.answerText(nil, ask: merge))
         XCTAssertNil(Decisions.answerText(DecisionAnswer(text: "  "), ask: merge))
@@ -58,7 +67,7 @@ final class DecisionsTests: XCTestCase {
         XCTAssertEqual(Decisions.message(asks: [events], answers: [:], extra: "just this"), "just this")
         XCTAssertEqual(Decisions.message(asks: [events], answers: [:]), "")
         // Changing a pick, or saying Later, beats the suggestion.
-        XCTAssertEqual(Decisions.message(asks: [merge], answers: [0: DecisionAnswer(later: true)]), "1. Merge #52 to prod, or test locally first?\n   Later, leave this one open")
+        XCTAssertEqual(Decisions.message(asks: [merge], answers: [0: DecisionAnswer(later: true)]), "Merge #52 to prod, or test locally first?\nLater, leave this one open")
         XCTAssertEqual(Decisions.answer(0, asks: [merge], answers: [:]), DecisionAnswer(choice: 0))
         XCTAssertNil(Decisions.answer(1, asks: [merge, events], answers: [:]))
     }

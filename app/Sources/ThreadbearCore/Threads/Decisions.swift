@@ -24,8 +24,27 @@ public enum Decisions {
     public static func choices(for ask: Ask) -> [String] {
         if !ask.options.isEmpty { return ask.options }
         if let reply = ask.reply?.trimmingCharacters(in: .whitespacesAndNewlines), !reply.isEmpty { return [reply] }
-        return []
+        return impliedReply(ask.action).map { [$0] } ?? []
     }
+
+    /// The word an ask with no options still asks for: 'Reply "export"
+    /// when…' or "Say go for Short 2, or name another". Threads started
+    /// before end_turn had options, and agents that skip them, mostly
+    /// write asks like that (60% offered a reply word in the 27 Oct
+    /// survey), so the word becomes a button.
+    static func impliedReply(_ action: String) -> String? {
+        let ns = action as NSString
+        let full = NSRange(location: 0, length: ns.length)
+        if let m = quoted.firstMatch(in: action, range: full) { return ns.substring(with: m.range(at: 1)) }
+        if let m = bare.firstMatch(in: action, range: full) {
+            let word = ns.substring(with: m.range(at: 1))
+            return word.prefix(1).uppercased() + word.dropFirst()
+        }
+        return nil
+    }
+
+    private static let quoted = try! NSRegularExpression(pattern: #"\b(?:say|reply|type|send|answer)(?: with)?\s+[\"“']([^\"”']{1,40})[\"”']"#, options: .caseInsensitive)
+    private static let bare = try! NSRegularExpression(pattern: #"^(?:say|reply)\s+(go|yes|ok|okay|done|ship it|merge it|merge)\b"#, options: .caseInsensitive)
 
     /// His answer to ask `i`, or the agent's pick until he gives one: going
     /// straight through takes the suggestions.
@@ -60,7 +79,10 @@ public enum Decisions {
         var parts: [String] = []
         for (i, ask) in asks.enumerated() {
             guard let text = answerText(answer(i, asks: asks, answers: answers), ask: ask) else { continue }
-            parts.append("\(i + 1). \(ask.action)\n   \(text.replacingOccurrences(of: "\n", with: "\n   "))")
+            // One ask needs no number: just the question, then the answer.
+            parts.append(asks.count == 1
+                ? "\(ask.action)\n\(text)"
+                : "\(i + 1). \(ask.action)\n   \(text.replacingOccurrences(of: "\n", with: "\n   "))")
         }
         var body = parts.joined(separator: "\n\n")
         let more = extra.trimmingCharacters(in: .whitespacesAndNewlines)

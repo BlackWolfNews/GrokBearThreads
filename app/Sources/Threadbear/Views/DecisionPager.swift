@@ -26,15 +26,20 @@ struct DecisionPager: View {
 
     private var asks: [Ask] { thread.asks }
     private var onSummary: Bool { progress.step >= asks.count }
+    /// One ask is answered and sent from its own page: a summary of one
+    /// answer is just an extra click (Mike, 28 Oct).
+    private var single: Bool { asks.count == 1 }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: zoomed(10)) {
-            HStack {
-                Text(onSummary ? "Your answers" : "\(progress.step + 1) of \(asks.count)")
-                    .font(.system(size: TypeScale.detail))
-                    .foregroundStyle(.secondary)
-                Spacer()
-                StepDots(count: asks.count, step: progress.step, answered: { progress.answers[$0]?.isAnswered == true }) { progress.step = $0 }
+        VStack(alignment: .leading, spacing: zoomed(12)) {
+            if !single {
+                HStack {
+                    Text(onSummary ? "Your answers" : "\(progress.step + 1) of \(asks.count)")
+                        .font(.system(size: TypeScale.detail))
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    StepDots(count: asks.count, step: progress.step, answered: { progress.answers[$0]?.isAnswered == true }) { progress.step = $0 }
+                }
             }
             if onSummary { summary } else { step(progress.step) }
             footer
@@ -63,7 +68,7 @@ struct DecisionPager: View {
         let current = Decisions.answer(i, asks: asks, answers: progress.answers)
         VStack(alignment: .leading, spacing: zoomed(4)) {
             Text(ask.action)
-                .font(.system(size: TypeScale.body, weight: .semibold))
+                .font(.system(size: TypeScale.headings.1, weight: .semibold))
                 .fixedSize(horizontal: false, vertical: true)
                 .textSelection(.enabled)
             if let why = ask.why {
@@ -94,7 +99,7 @@ struct DecisionPager: View {
                         progress.answers[i] = answer
                     }
                 ),
-                placeholder: progress.answers[i]?.choice != nil ? "Add a note…" : "Other…",
+                placeholder: progress.answers[i]?.choice != nil ? "Add a note…" : "Type anything…",
                 number: Decisions.choices(for: ask).count + 1,
                 onSubmit: next
             )
@@ -112,7 +117,15 @@ struct DecisionPager: View {
                 Text("Esc for a normal message").foregroundStyle(.tertiary)
             }
             Spacer()
-            if onSummary {
+            if single {
+                Button("Later") { progress.dismissed = true }
+                    .tip("Put this away and leave it open")
+                Button("Send") { app.sendDecisions(thread: thread) }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(Decisions.message(asks: asks, answers: progress.answers, extra: extra).isEmpty)
+                    .keyboardShortcut(.return, modifiers: .command)
+                    .tip("Send your answer (↩)")
+            } else if onSummary {
                 Button("Send") { app.sendDecisions(thread: thread) }
                     .buttonStyle(.borderedProminent)
                     .disabled(Decisions.message(asks: asks, answers: progress.answers, extra: extra).isEmpty)
@@ -129,8 +142,8 @@ struct DecisionPager: View {
                     .tip("Go to the next decision (↩)")
             }
         }
-        .font(.system(size: TypeScale.detail))
-        .controlSize(.small)
+        .font(.system(size: TypeScale.label))
+        .controlSize(.regular)
     }
 
     // MARK: - The summary
@@ -163,16 +176,17 @@ struct DecisionPager: View {
     // MARK: - Moving on
 
     /// A pick moves straight on: most answers are a single pick, and Back
-    /// is there for adding a note.
+    /// is there for adding a note. With one ask it stays, for Send.
     private func pick(_ n: Int) {
         var answer = progress.answers[progress.step] ?? DecisionAnswer()
         answer.choice = n
         answer.later = false
         progress.answers[progress.step] = answer
-        progress.step += 1
+        if !single { progress.step += 1 }
     }
 
     private func next() {
+        if single { app.sendDecisions(thread: thread); return }
         progress.step = min(progress.step + 1, asks.count)
         typing = progress.step >= asks.count
     }
@@ -223,7 +237,10 @@ private struct OtherField: View {
             if let number { KeyCap(number: number) }
             TextField(placeholder, text: $text, axis: .vertical)
                 .textFieldStyle(.plain)
-                .lineLimit(1...8)
+                .lineLimit(2...8)
+                // Two lines tall even when empty: a one-line box read as
+                // a label, not somewhere to write (Mike, 28 Oct).
+                .frame(minHeight: TypeScale.label * 2.6, alignment: .topLeading)
                 .onKeyPress(.return, phases: .down) { press in
                     if press.modifiers.contains(.shift) { return .ignored }
                     onSubmit()
@@ -296,5 +313,46 @@ struct DecisionsChip: View {
         }
         .buttonStyle(.plain)
         .tip("Step through what the agent needs from you")
+    }
+}
+
+/// The decision card's border: a soft accent outline with a brighter arc
+/// that slowly goes round it, so the card reads as the thing to look at
+/// next (Mike, 28 Oct). Still for Reduce Motion. The arc is a rotating
+/// gradient masked to the outline, so Core Animation does the work.
+struct AttentionBorder: View {
+    let cornerRadius: CGFloat
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var turning = false
+
+    var body: some View {
+        let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+        let width: CGFloat = 1.5
+        ZStack {
+            shape.strokeBorder(Color.accentColor.opacity(0.35), lineWidth: width)
+            if !reduceMotion {
+                GeometryReader { geo in
+                    let side = hypot(geo.size.width, geo.size.height)
+                    AngularGradient(
+                        stops: [
+                            .init(color: .clear, location: 0),
+                            .init(color: .clear, location: 0.62),
+                            .init(color: .accentColor, location: 0.82),
+                            .init(color: .white.opacity(0.9), location: 0.86),
+                            .init(color: .clear, location: 0.98),
+                        ],
+                        center: .center
+                    )
+                    .frame(width: side, height: side)
+                    .rotationEffect(.degrees(turning ? 360 : 0))
+                    .position(x: geo.size.width / 2, y: geo.size.height / 2)
+                }
+                .mask(shape.strokeBorder(lineWidth: width + 0.5))
+                .onAppear {
+                    withAnimation(.linear(duration: 4).repeatForever(autoreverses: false)) { turning = true }
+                }
+            }
+        }
+        .allowsHitTesting(false)
     }
 }

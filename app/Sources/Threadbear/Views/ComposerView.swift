@@ -40,8 +40,9 @@ struct ComposerView: View {
         }
         if let deciding, let progress, !progress.wrappedValue.dismissed {
             DecisionPager(thread: deciding, progress: progress, extra: draft.text)
-                .padding(Self.padding)
+                .padding(zoomed(18))
                 .background { card }
+                .overlay { AttentionBorder(cornerRadius: Self.cornerRadius) }
         } else {
         VStack(alignment: .leading, spacing: zoomed(10)) {
             if let deciding, let progress {

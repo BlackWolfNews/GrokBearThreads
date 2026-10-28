@@ -889,7 +889,12 @@ async function fakeTurn(threadId, text, images, turnId = 'turn_' + crypto.random
   persist(threadId, { type: 'assistant.text', itemId, text: finalText }, turnId);
   // Say "decisions" for a turn that ends with a card of asks to step
   // through (docs/protocol.md, "Needs you", Answering).
-  const said = /decisions/i.test(text) && !interrupted ? { needs: 'you', asks: DEMO_ASKS } : undefined;
+  // "one decision" gives a single ask with no options, like a thread
+  // started before end_turn had them.
+  const said = interrupted ? undefined
+    : /decisions/i.test(text) ? { needs: 'you', asks: DEMO_ASKS }
+    : /one decision/i.test(text) ? { needs: 'you', asks: [{ action: 'Say go for Short 2 (Thomas on AI being dumb), or name another' }] }
+    : undefined;
   finishTurn(threadId, turnId, started, interrupted ? 'interrupted' : 'completed', said);
 }
 

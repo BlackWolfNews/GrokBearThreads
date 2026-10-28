@@ -161,7 +161,7 @@ export const END_TURN_DESCRIPTION =
   'needs "you" when it does: an approval, a decision, a key, something to look at, a question. Give one ask per thing he has to do, each a concrete action, most blocking first. ' +
   'Mike answers the asks one at a time in a card under your message, so write each as a short question or action that makes sense on its own, without reading the message. ' +
   'Give why: one line of context he would need if he had forgotten the details. ' +
-  'Give options whenever there are likely answers (2 to 4 short ones, e.g. ["Merge", "Test locally first"]), and suggested: the index of the one you would pick. He can always write his own answer instead. ' +
+  'Every decision or yes/no question needs options: 2 to 4 short likely answers, e.g. ["Go", "Not yet"] or ["Merge", "Test locally first"], with suggested: the index of the one you would pick. "Say go for X, or name another" is a decision too: give ["Go", ...the other candidates]. Mike can always write his own answer instead, so options never box him in. ' +
   'For a step he has to do himself, offer options like ["Done", "Can you do it?"] when you could plausibly do it yourself. ' +
   'archive: true archives this thread once the turn is over, with needs "nothing" only. Use it only when Mike asks for this thread to be archived; otherwise leave it out, as a thread that vanishes from his inbox when he hadn\'t finished with it is confusing. ' +
   'Sub-agents never call this; only the thread\'s own agent does.';

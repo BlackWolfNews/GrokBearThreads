@@ -1338,7 +1338,8 @@ extension Automation {
                 answer.choice = pick - 1
                 answer.later = false
                 progress.answers[i] = answer
-                progress.step += 1
+                // As the card: one ask stays on its page for Send.
+                if count > 1 { progress.step += 1 }
             } else if let text = c["text"] as? String {
                 var answer = progress.answers[i] ?? DecisionAnswer()
                 answer.text = text
