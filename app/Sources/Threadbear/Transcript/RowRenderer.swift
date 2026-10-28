@@ -1065,7 +1065,28 @@ enum RowRenderer {
         return output
     }
 
-    /// A line of an asks card's context as markdown, small and quiet, its
+    /// One ask on an open card as message text: `Decisions.paragraph` drawn
+    /// by the markdown renderer, so its size, colour, links and code are a
+    /// message's, and a numbered ask is a list item ("1." then a tab), with
+    /// the newline that starts it.
+    private static func askParagraph(_ ask: Ask, number: Int?) -> NSAttributedString {
+        var text = Decisions.paragraph(ask)
+        // Words that would start a heading, quote or list of their own
+        // ("- " or "2. ") are the ask's words, not markdown.
+        if text.range(of: #"^(#{1,6}\s|>|[-+*]\s|\d{1,9}[.)]\s|```|~~~|<)"#, options: .regularExpression) != nil { text = "\\" + text }
+        let paragraph = NSMutableAttributedString(string: "\n", attributes: Theme.bodyAttributes)
+        paragraph.append(MarkdownRenderer.renderBlock(number.map { "\($0). " + text } ?? text))
+        // A message's paragraph spacing, swapped for the card's: 12 under
+        // what's above, close over its buttons.
+        let base = paragraph.length > 1 ? paragraph.attribute(.paragraphStyle, at: 1, effectiveRange: nil) as? NSParagraphStyle : nil
+        let style = (base ?? NSParagraphStyle.default).mutableCopy() as! NSMutableParagraphStyle
+        style.paragraphSpacingBefore = zoomed(12)
+        style.paragraphSpacing = zoomed(2)
+        paragraph.addAttribute(.paragraphStyle, value: style, range: NSRange(location: 0, length: paragraph.length))
+        return paragraph
+    }
+
+    /// A quiet line on an asks card (its where) as markdown, small, its
     /// links and paths still links.
     private static func noteText(_ text: String, font: NSFont, color: NSColor, style: NSParagraphStyle, offset: CGFloat) -> NSAttributedString {
         let note = NSMutableAttributedString(attributedString: MarkdownRenderer.render(text).string)
@@ -1092,8 +1113,10 @@ enum RowRenderer {
     }
 
     /// The asks a turn ended on (docs/protocol.md, "Needs you"). Open, each
-    /// is its action, why and where, then a row of buttons: its links (the
-    /// first filled in, as the thing to do next) and its answers, the
+    /// is one paragraph of message text, its action then its why, as the
+    /// agent would have written it under "What I need from you" (numbered
+    /// like a list when there are several), then rows of buttons: its links
+    /// (the first filled in, as the thing to do next) and its answers, the
     /// picked one filled and the agent's pick outlined. Buttons are
     /// `.tbAction` runs (`link:<ask>:<n>`, `pick:<ask>:<n>`) drawn by
     /// BackgroundLayoutManager. Closed, it's just the asks, quietly.
@@ -1104,26 +1127,30 @@ enum RowRenderer {
             .paragraphStyle: titleStyle, .baselineOffset: titleOffset,
         ])
         let numbered = card.asks.count > 1
-        let action = NSFont.systemFont(ofSize: Theme.bodyFont.pointSize, weight: .semibold)
-        let (actionStyle, actionOffset) = Theme.lines(TypeScale.bodyLine, font: action, spacing: zoomed(2), before: zoomed(12))
+        // A numbered ask's text starts past its number, as in a list in a
+        // message; its buttons line up with the text, not the number.
+        let indent = numbered ? MarkdownRenderer.Builder.listIndent : 0
+        let (closedStyle, closedOffset) = Theme.lines(TypeScale.bodyLine, font: Theme.bodyFont, spacing: zoomed(2), before: zoomed(12))
         let small = Theme.smallFont
-        let (noteStyle, noteOffset) = Theme.lines(TypeScale.scaled(19), font: small, spacing: zoomed(2))
+        let (noteStyle, noteOffset) = Theme.lines(TypeScale.scaled(19), font: small, spacing: zoomed(2), head: indent)
         let button = Theme.labelFont
         // Tall lines, so a row of buttons that wraps keeps them apart.
-        let (buttonStyle, buttonOffset) = Theme.lines(TypeScale.scaled(38), font: button, before: zoomed(6))
+        let (buttonStyle, buttonOffset) = Theme.lines(TypeScale.scaled(38), font: button, before: zoomed(6), head: indent)
         for (i, ask) in card.asks.enumerated() {
-            output.append(NSAttributedString(string: "\n" + (numbered ? "\(i + 1)  " : "") + ask.action, attributes: [
-                .font: card.isOpen ? action : Theme.bodyFont, .foregroundColor: card.isOpen ? NSColor.labelColor : NSColor.secondaryLabelColor,
-                .paragraphStyle: actionStyle, .baselineOffset: actionOffset,
-            ]))
-            guard card.isOpen else { continue }
-            // Why, then where on a line of its own (joined, "This thread, in
-            // Threadbear" read as part of the why). Both as markdown, so a
-            // link or path in them can be clicked.
-            for (text, color) in [(ask.why, NSColor.secondaryLabelColor), (ask.where_, Theme.faintText)] {
-                guard let text, !text.isEmpty else { continue }
+            guard card.isOpen else {
+                output.append(NSAttributedString(string: "\n" + (numbered ? "\(i + 1)  " : "") + ask.action, attributes: [
+                    .font: Theme.bodyFont, .foregroundColor: NSColor.secondaryLabelColor,
+                    .paragraphStyle: closedStyle, .baselineOffset: closedOffset,
+                ]))
+                continue
+            }
+            output.append(askParagraph(ask, number: numbered ? i + 1 : nil))
+            // An agent can still give where apart from the paragraph (older
+            // sessions keep the old tool): a quiet line of its own, as a
+            // place to go rather than part of the reason.
+            if let place = ask.where_, !place.isEmpty {
                 output.append(NSAttributedString(string: "\n", attributes: [.font: small, .paragraphStyle: noteStyle]))
-                output.append(noteText(text, font: small, color: color, style: noteStyle, offset: noteOffset))
+                output.append(noteText(place, font: small, color: Theme.faintText, style: noteStyle, offset: noteOffset))
             }
             // Links on a row of their own, over the answers: going to look
             // comes before answering.

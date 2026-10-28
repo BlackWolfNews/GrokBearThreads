@@ -12,6 +12,31 @@ public enum Decisions {
         return impliedReply(ask.action).map { [$0] } ?? []
     }
 
+    /// An ask as the one paragraph the card shows: its action, then its
+    /// why, as the agent would have written it under "What I need from
+    /// you" in its message. Mike found a bold title over a small grey
+    /// reason backwards (28 Oct): you explain, then ask, in the same
+    /// voice. An action with no full stop gets one, so it doesn't run into
+    /// the why, and line breaks go, as it's one paragraph.
+    public static func paragraph(_ ask: Ask) -> String {
+        let action = oneLine(ask.action)
+        let why = oneLine(ask.why ?? "")
+        guard !why.isEmpty else { return action }
+        return (endsSentence(action) ? action : action + ".") + " " + why
+    }
+
+    private static func oneLine(_ text: String) -> String {
+        text.replacingOccurrences(of: #"\s*\n\s*"#, with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// Whether the text ends a sentence, looking past closing quotes,
+    /// brackets and markdown: 'Tell me "it locked."' does.
+    private static func endsSentence(_ text: String) -> Bool {
+        guard let last = text.last(where: { !"\"'”’)]*_`".contains($0) }) else { return false }
+        return ".?!…:".contains(last)
+    }
+
     /// The word an ask with no options still asks for: 'Reply "export"
     /// when…' or "Say go for Short 2, or name another". Threads started
     /// before end_turn had options, and agents that skip them, mostly

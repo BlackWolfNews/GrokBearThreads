@@ -496,10 +496,11 @@ export function buildThreadbearTools(control: ThreadControl, selfId: string, now
         asks: z
           .array(
             z.object({
-              action: z.string().min(1).describe('One concrete thing for Mike to do, in a short sentence: "Paste your OpenRouter key into Settings".'),
-              where: z.string().optional().describe('Where he does it: an app, site, file or person, e.g. "Threadbear › Settings › Models". Leave it out when it is just this thread or this card.'),
+              // No where: the paragraph says it (docs/protocol.md, "Needs
+              // you"). The runner still takes one from older sessions.
+              action: z.string().min(1).describe('The ask\'s first sentence: one concrete thing for Mike to do, or the question, e.g. "Paste your OpenRouter key into Settings › Models." The card shows it with why as one paragraph; Highlights and notifications show it alone, so keep it to a sentence.'),
               reply: z.string().optional().describe('The exact words to send back when it is done, e.g. "done" or "key set". Leave it out when the reply is his own answer (a decision, a choice).'),
-              why: z.string().min(1).describe('What this is about and what you want back, for when he has forgotten everything and only sees the card: "Your Slack draft to Emily names the automation guy Hayden; he\'s Pete." One or two sentences, never just a place.'),
+              why: z.string().min(1).describe('The rest of the ask\'s paragraph, read straight after action: what this is about and what you want back, in a sentence or two, so it makes sense without your message: "Your Slack draft to Emily names the automation guy Hayden; he\'s Pete. Say if I should fix it and send it." Never just a place.'),
               options: z.array(z.string()).max(6).optional().describe('Likely answers to pick from, short: ["Merge", "Test locally first"]. Give them for every decision or yes/no question. He can always write his own instead.'),
               suggested: z.number().int().optional().describe('Index into options of the answer you would pick.'),
               links: z

@@ -1021,12 +1021,16 @@ A turn the agent finished can say whether Mike has to do anything, so
 
 - **The tool.** Every thread's own agent (not its sub-agents) has
   `end_turn` in the `threadbear` tools: `{ needs: "you" | "nothing",
-  asks?: { action, where?, reply?, why?, options?, suggested?, links? }[] }`.
-  `action` is one concrete thing to do or a question, `where` the app,
-  site, file or person, `reply` the words the agent wants back ("done"),
-  `why` what the ask is about and what the agent wants back, for when
-  Mike has forgotten everything and sees only the card (the tool's schema
-  requires it; the runner still takes an ask without one),
+  asks?: { action, reply?, why?, options?, suggested?, links? }[] }`.
+  The asks are the agent's "What I need from you" list, written there
+  instead of in its message: each is one paragraph, `action` its first
+  sentence (one concrete thing to do, or a question) and `why` the rest
+  (what it's about and what the agent wants back, so it makes sense to
+  Mike when he has forgotten everything; the tool's schema requires it,
+  the runner still takes an ask without one). `reply` is the words the
+  agent wants back ("done"). `where?` (the app, site, file or person) is
+  no longer in the tool's schema, as the paragraph says it, but the
+  runner still takes it from sessions that kept the old tool,
   `options` up to six likely answers and `suggested` the index of the
   agent's own pick (dropped unless it points at an option). `links` (up
   to three) are where to go to do it or judge it, `{ title, url }`: a web
@@ -1062,8 +1066,12 @@ A turn the agent finished can say whether Mike has to do anything, so
   Ticking never sends anything: a reply is Mike's to write, and one reply
   often answers several asks.
 - **Answering.** The app shows the open card's asks under the agent's
-  last message, each with its context, its links as buttons and its
-  options (or its `reply`), and Something else. Picking one puts it in
+  last message, each as one paragraph of message text (`action`, a full
+  stop if it has none, then `why`; numbered like a list when there are
+  several), then its links as buttons and its options (or its `reply`),
+  and Something else. A `where` goes on a quiet line under the paragraph.
+  Mike found a bold title over a small grey reason backwards (28 Oct):
+  the reason is part of the ask, in the agent's own words, at full size. Picking one puts it in
   the composer as a chip; with Something else, what he writes in the
   composer is that ask's answer (one ask at a time);
   the composer stays the only place to write, so his own words and images

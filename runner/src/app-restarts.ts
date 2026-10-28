@@ -24,8 +24,8 @@ export function appRestartsPath(home: string): string {
 
 // end_turn asks that tell Mike to restart the app onto an update count as
 // asking to hear about it, so the agent needn't remember the tool.
-export function asksForAppRestart(asks: { action?: unknown; where?: unknown }[] | undefined): boolean {
-  return (asks ?? []).some((a) => /restart to update/i.test(`${a.action ?? ''} ${a.where ?? ''}`));
+export function asksForAppRestart(asks: { action?: unknown; why?: unknown; where?: unknown }[] | undefined): boolean {
+  return (asks ?? []).some((a) => /restart to update/i.test(`${a.action ?? ''} ${a.why ?? ''} ${a.where ?? ''}`));
 }
 
 type Deps = { runner: Pick<Runner, 'get' | 'note' | 'send'>; home: string; clock: Clock; log: Logger };

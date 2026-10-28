@@ -72,6 +72,8 @@ test('an archived thread or a stale request only gets the note', () => {
 test('asks that tell Mike to restart the app count as a request', () => {
   assert.equal(asksForAppRestart([{ action: 'Click Restart to Update in the Threadbear menu' }]), true);
   assert.equal(asksForAppRestart([{ action: 'Restart Threadbear', where: 'Threadbear menu > Restart to Update' }]), true);
+  // The ask is one paragraph now, so the words can be in its why.
+  assert.equal(asksForAppRestart([{ action: 'Try the new card', why: 'It needs Restart to Update in the Threadbear menu first.' }]), true);
   assert.equal(asksForAppRestart([{ action: 'Restart the runner' }]), false);
   assert.equal(asksForAppRestart(undefined), false);
 });

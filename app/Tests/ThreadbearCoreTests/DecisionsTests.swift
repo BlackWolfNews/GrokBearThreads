@@ -36,6 +36,26 @@ final class DecisionsTests: XCTestCase {
         XCTAssertEqual(Decisions.choices(for: Ask(action: "Paste your key, then say \"key set\"", options: ["Done"])), ["Done"])
     }
 
+    /// The card shows an ask as one paragraph, the way the agent would
+    /// have written it in its message: the action, then the why.
+    func testAParagraphIsTheActionThenTheWhy() {
+        XCTAssertEqual(Decisions.paragraph(Ask(action: "Pick a layout for the card", why: "Three mockups are in the review window.")),
+                       "Pick a layout for the card. Three mockups are in the review window.")
+        XCTAssertEqual(Decisions.paragraph(Ask(action: "Did it lock when you walked away?", why: "I picked the cutoff.")),
+                       "Did it lock when you walked away? I picked the cutoff.")
+        // A sentence that ends inside quotes, brackets or bold has its stop.
+        XCTAssertEqual(Decisions.paragraph(Ask(action: "Tell me \"it locked.\"", why: "Then I tune it.")), "Tell me \"it locked.\" Then I tune it.")
+        XCTAssertEqual(Decisions.paragraph(Ask(action: "Pair it (System Settings › Bluetooth.)", why: "Only paired phones count.")),
+                       "Pair it (System Settings › Bluetooth.) Only paired phones count.")
+        XCTAssertEqual(Decisions.paragraph(Ask(action: "Merge **#48**", why: "Checks pass.")), "Merge **#48**. Checks pass.")
+        // No why, or an empty one: just the action.
+        XCTAssertEqual(Decisions.paragraph(Ask(action: "Log in to Hugging Face")), "Log in to Hugging Face")
+        XCTAssertEqual(Decisions.paragraph(Ask(action: "Log in", why: "  ")), "Log in")
+        // One paragraph, even when the agent broke a line.
+        XCTAssertEqual(Decisions.paragraph(Ask(action: "Check the build", why: "It failed once.\n\nThe log has why.")),
+                       "Check the build. It failed once. The log has why.")
+    }
+
     func testDecodesLinksAndWhatTheyOpen() throws {
         let json = #"{"action":"a","links":[{"title":"Open login","url":"https://hf.co/login"},{"title":"Notes","url":"~/notes.md"},{"title":"bad"}]}"#
         let ask = try JSONDecoder().decode(Ask.self, from: Data(json.utf8))

@@ -112,6 +112,33 @@ final class TranscriptLayoutTests: XCTestCase {
         let style = text.attribute(.paragraphStyle, at: 0, effectiveRange: nil) as? NSParagraphStyle
         XCTAssertEqual(style?.tabStops.first?.location, style?.headIndent, "wrapped values hang under the value column")
     }
+
+    /// An open card draws each ask the way the agent would have written it
+    /// in its message: one paragraph, the why at the body size and colour,
+    /// numbered when there are several, its buttons in under the text.
+    func testAnAsksWhyIsMessageTextInOneParagraph() {
+        let card = AsksCard(seq: 1, asks: [
+            Ask(action: "Walk away with your phone", why: "I picked the cutoff, so tell me if it locked.", options: ["It locked", "It didn't"]),
+            Ask(action: "Pair the 15 Pro Max when it's back", why: "Only paired phones count, `~/notes.md` says which."),
+        ])
+        let text = RowRenderer.asksText(card)
+        let string = text.string as NSString
+        XCTAssertTrue(text.string.contains("1.\tWalk away with your phone. I picked the cutoff, so tell me if it locked."), text.string)
+        XCTAssertTrue(text.string.contains("2.\tPair the 15 Pro Max when it's back. Only paired phones count, ~/notes.md says which."), text.string)
+        let why = string.range(of: "I picked").location
+        XCTAssertEqual((text.attribute(.font, at: why, effectiveRange: nil) as? NSFont)?.pointSize, Theme.bodyFont.pointSize)
+        XCTAssertEqual(text.attribute(.foregroundColor, at: why, effectiveRange: nil) as? NSColor, NSColor.labelColor)
+        XCTAssertEqual((text.attribute(.font, at: why, effectiveRange: nil) as? NSFont)?.fontDescriptor.symbolicTraits.contains(.bold), false)
+        // Wrapped lines and the buttons sit in line with the text, past the number.
+        let paragraph = text.attribute(.paragraphStyle, at: why, effectiveRange: nil) as? NSParagraphStyle
+        // A button's spaces are no-break ones, so its title stays in one piece.
+        let button = text.attribute(.paragraphStyle, at: string.range(of: "It\u{00A0}locked").location, effectiveRange: nil) as? NSParagraphStyle
+        XCTAssertGreaterThan(paragraph?.headIndent ?? 0, 0)
+        XCTAssertEqual(button?.firstLineHeadIndent, paragraph?.headIndent)
+        // One ask: no number.
+        let one = RowRenderer.asksText(AsksCard(seq: 2, asks: [Ask(action: "Merge #48?", why: "Checks pass.")])).string
+        XCTAssertTrue(one.contains("\nMerge #48? Checks pass."), one)
+    }
 }
 
 private final class FlippedDocument: NSView {
