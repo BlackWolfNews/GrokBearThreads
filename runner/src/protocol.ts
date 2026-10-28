@@ -436,7 +436,7 @@ export type DesignReview = {
   title: string;
   note?: string;
   options: { id: string; title: string; note?: string; reference?: boolean; image: ImageRef }[];
-  status: 'pending' | 'answered' | 'cancelled';
+  status: 'pending' | 'answered' | 'cancelled' | 'superseded';
   revision: number;
   createdAt: string;
   updatedAt: string;
@@ -584,6 +584,10 @@ export type Schedule = {
 
 // Who sent a message when it wasn't a person or a client: the runner by
 // itself (the resume after a restart), or a schedule (schedules.ts).
+// How a message one thread's agent sends another starts (threadbear-mcp.ts).
+// The app parses it into a card; the runner knows it isn't from Mike.
+export const AGENT_MESSAGE_PREFIX = '[Sent by the agent in the thread ';
+
 export type MessageOrigin = 'runner' | 'schedule' | 'phone';
 
 export const ErrorCode = {

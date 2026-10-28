@@ -35,7 +35,7 @@ final class ReviewRowCell: RowCellView {
         detail.font = Theme.detailFont
         detail.textColor = Theme.quietText
         let picked = review.options.first { $0.id == review.response?.pickedId }
-        let state = review.isPending ? "Waiting for your review" : review.status == "answered" ? picked.map { "Picked \($0.id). \($0.title)" } ?? "Notes sent" : "Review closed"
+        let state = review.isPending ? "Waiting for your review" : review.status == "answered" ? picked.map { "Picked \($0.id). \($0.title)" } ?? "Notes sent" : review.status == "superseded" ? "Answered in the thread" : "Review closed"
         detail.stringValue = "\(review.options.count) images · \(state)"
         detail.frame = NSRect(x: x + pad, y: title.frame.maxY + zoomed(4), width: width - pad * 2, height: zoomed(20))
         open.title = review.isPending ? "Compare \(review.options.count) images" : "Open review"

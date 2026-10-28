@@ -455,7 +455,7 @@ type DesignReview = {
     reference?: boolean // can have notes, cannot be picked
     image: ImageRef     // a copy owned by the thread, never the source path
   }[]
-  status: "pending" | "answered" | "cancelled"
+  status: "pending" | "answered" | "cancelled" | "superseded"
   revision: number     // optimistic concurrency for saves and submission
   createdAt: string
   updatedAt: string
@@ -490,7 +490,11 @@ place even when the original event is outside the loaded transcript page.
 `ThreadSummary.pendingReviews?: number` counts pending reviews and makes
 `needsYou` true even after mark-read, turn-end and runner restart. It does
 not hold a CLI open or prevent an update. Cancelling closes the request
-without sending an agent message. Closing a window only keeps the draft.
+without sending an agent message. A message from Mike in the thread
+(from the app or the phone, not one sent by the runner, a schedule or
+another thread's agent) supersedes every pending review there: he often
+answers in the thread instead of the window. Each becomes `superseded`,
+read-only like a cancelled one, with no agent message. Closing a window only keeps the draft.
 The thread header can open pending reviews from `reviews.list`, including
 requests older than the transcript's loaded event page; Mike does not need
 to scroll back through earlier turns to find what still needs an answer.

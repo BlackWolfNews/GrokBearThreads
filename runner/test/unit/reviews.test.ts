@@ -247,3 +247,31 @@ test('a reply whose session.send fails is recovered after restart', async () => 
   assert.match(again.adapter.last.sent[0].text,/Picked A/);
   assert.deepEqual(again.store.load(thread.id)?.reviewDeliveries,[review.id]);
 });
+
+test('a message from Mike supersedes open reviews; runner, schedule and agent messages do not', () => {
+  const {h,thread,input}=fixture();
+  const {review}=h.runner.createReview(thread.id,input);
+  h.adapter.last.result();
+  h.runner.send(thread.id,'reminder',[],{origin:'schedule'});
+  h.runner.send(thread.id,'carry on',[],{origin:'runner'});
+  h.runner.send(thread.id,'[Sent by the agent in the thread "Other" (abcd1234)]\n\nhello');
+  assert.equal(h.runner.getReview(thread.id,review.id).review.status,'pending');
+  assert.equal(h.runner.get(thread.id).pendingReviews,1);
+  h.runner.send(thread.id,'Actually, build a mock app first');
+  const after=h.runner.getReview(thread.id,review.id).review;
+  assert.equal(after.status,'superseded');
+  assert.equal(after.revision,review.revision+1);
+  assert.equal(h.runner.get(thread.id).pendingReviews,undefined);
+  assert.deepEqual(h.runner.listReviews(thread.id).reviews,[]);
+  assert.throws(()=>h.runner.respondReview(thread.id,review.id,after.revision,{pickedId:'A',notes:{}}),/superseded/);
+  const last=h.runner.events(thread.id).events.filter(e=>e.type==='review.updated').at(-1);
+  assert.equal(last?.type==='review.updated'&&last.review.status,'superseded');
+});
+
+test('a message from the phone supersedes open reviews too', () => {
+  const {h,thread,input}=fixture();
+  const {review}=h.runner.createReview(thread.id,input);
+  h.adapter.last.result();
+  h.runner.send(thread.id,'from my phone',[],{origin:'phone'});
+  assert.equal(h.runner.getReview(thread.id,review.id).review.status,'superseded');
+});

@@ -11,7 +11,7 @@ import type { Runner } from './runner.ts';
 import type { Account, EffortLevel, PersistedEvent, Schedule, ThreadSummary } from './protocol.ts';
 import { usageLine } from './usage.ts';
 import { findPool, poolLine } from './pools.ts';
-import { EFFORT_LEVELS } from './protocol.ts';
+import { AGENT_MESSAGE_PREFIX, EFFORT_LEVELS } from './protocol.ts';
 import type { Scheduler } from './schedules.ts';
 import type { Projects } from './projects.ts';
 import { parseWhen, relativeFuture, relativeTime } from './when.ts';
@@ -159,7 +159,7 @@ export function buildThreadbearTools(control: ThreadControl, selfId: string, now
 
   // Messages an agent sends say where they came from, so whoever reads the
   // other thread (Mike or its agent) knows it wasn't Mike typing.
-  const from = async (): Promise<string> => `[Sent by the agent in the thread "${(await control.get(selfId)).title}" (${selfId.slice(0, 8)})]\n\n`;
+  const from = async (): Promise<string> => `${AGENT_MESSAGE_PREFIX}"${(await control.get(selfId)).title}" (${selfId.slice(0, 8)})]\n\n`;
 
 
   const titleOf = async (id: string): Promise<string> => {

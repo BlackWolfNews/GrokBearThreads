@@ -35,7 +35,7 @@ import type {
   ThreadSummary,
   TurnOutcome,
 } from './protocol.ts';
-import { ErrorCode, LIMITS, PROTOCOL_VERSION, RpcError } from './protocol.ts';
+import { AGENT_MESSAGE_PREFIX, ErrorCode, LIMITS, PROTOCOL_VERSION, RpcError } from './protocol.ts';
 import type { LibrarianStatus, Project, Schedule } from './protocol.ts';
 import type { Projects } from './projects.ts';
 import type { Settings } from './settings.ts';
@@ -1576,6 +1576,7 @@ export class Runner {
       delete rec.archivedAt;
       rt.releaseWhenIdle = false;
     }
+    this.supersedeReviews(st, text, opts);
     const turnId = crypto.randomUUID();
     const msg: QueuedSend = { turnId, text, images: refs };
     if (opts.origin) msg.origin = opts.origin;
@@ -3144,6 +3145,21 @@ export class Runner {
     const next: DesignReview = {...review, status: 'cancelled', revision: review.revision + 1, updatedAt: this.isoNow()};
     this.persistReview(st, next);
     return {review: structuredClone(next)};
+  }
+
+  // Mike often answers a review by typing in the thread instead of picking
+  // in the review window. Left pending, it kept the thread in Needs you
+  // (even mid-turn) with nothing left to do. So his own message, from the
+  // app or the phone, closes every open review as superseded; the card
+  // and window stay readable. Runner, schedule and agent-to-thread
+  // messages aren't him and leave reviews open.
+  private supersedeReviews(st: ThreadState, text: string, opts: SendOptions): void {
+    if (opts.origin && opts.origin !== 'phone') return;
+    if (text.startsWith(AGENT_MESSAGE_PREFIX)) return;
+    for (const review of st.rec.reviews ?? []) {
+      if (review.status !== 'pending') continue;
+      this.persistReview(st, {...review, status: 'superseded', revision: review.revision + 1, updatedAt: this.isoNow()});
+    }
   }
 
   private mustReview(st: ThreadState, id: string): DesignReview {
