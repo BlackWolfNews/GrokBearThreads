@@ -1278,9 +1278,6 @@ enum Automation {
     }
 }
 
-// Debug only, like Automation itself: outside the #if the release build
-// (the app's own updates) can't find the type.
-#if DEBUG
 extension Automation {
     /// The open thread's card of asks (DecisionPager), changed as its
     /// controls change it: `pick` (1-based, as the number keys), `text`
