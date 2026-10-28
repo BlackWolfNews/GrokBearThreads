@@ -16,6 +16,7 @@ import type * as push from "../push.js";
 import type * as pushText from "../pushText.js";
 import type * as sync from "../sync.js";
 import type * as tokens from "../tokens.js";
+import type * as version from "../version.js";
 
 import type {
   ApiFromModules,
@@ -32,6 +33,7 @@ declare const fullApi: ApiFromModules<{
   pushText: typeof pushText;
   sync: typeof sync;
   tokens: typeof tokens;
+  version: typeof version;
 }>;
 
 /**

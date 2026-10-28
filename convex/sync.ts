@@ -9,9 +9,6 @@ import { threadFields, views } from './schema';
 import { API_VERSION } from './version';
 import { checkRunnerKey } from './lib';
 
-// Text messages kept per thread (the phone's thread view); older ones go
-// as new ones arrive, unless the phone asked for them (pagedAt).
-export const MESSAGES_KEPT = 20;
 // Finished commands and paged messages older than this are pruned.
 const KEEP_FINISHED_MS = 24 * 60 * 60_000;
 
@@ -156,43 +153,30 @@ export const runnersList = query({
 const messageDoc = v.object({
   threadId: v.string(),
   seq: v.number(),
-  role: v.union(v.literal('user'), v.literal('assistant')),
+  role: v.union(v.literal('user'), v.literal('assistant'), v.literal('tool')),
   text: v.string(),
   origin: v.optional(v.string()),
+  toolKind: v.optional(v.string()),
   at: v.string(),
-  pagedAt: v.optional(v.number()), // the phone asked for it (loadEarlier); not counted in the newest 20, pruned after a day
+  pagedAt: v.optional(v.number()), // an old phone asked for it (loadEarlier): phone:thread shows it for a day
 });
 
-// Adds text messages (one per persisted user.message or assistant.text,
-// keyed by seq so writing one twice is harmless) and keeps the newest
-// MESSAGES_KEPT per thread.
+// Adds messages (text, and one line per tool call), keyed by seq so writing
+// one twice is harmless. Every message is kept (until API 2 only the newest
+// 20 were). A row sent again with pagedAt is an old phone's "Load earlier
+// messages", so the mark goes on the row that's already there.
 export const appendMessages = mutation({
   args: { key: v.string(), messages: v.array(messageDoc) },
   returns: v.null(),
   handler: async (ctx, { key, messages }) => {
     checkRunnerKey(key);
-    const touched = new Set<string>();
     for (const m of messages) {
       const existing = await ctx.db
         .query('messages')
         .withIndex('by_thread_seq', (q) => q.eq('threadId', m.threadId).eq('seq', m.seq))
         .unique();
-      if (existing) continue;
-      await ctx.db.insert('messages', m);
-      touched.add(m.threadId);
-    }
-    for (const threadId of touched) {
-      const rows = await ctx.db
-        .query('messages')
-        .withIndex('by_thread_seq', (q) => q.eq('threadId', threadId))
-        .order('desc')
-        .collect();
-      let kept = 0;
-      for (const row of rows) {
-        if (row.pagedAt) continue;
-        kept++;
-        if (kept > MESSAGES_KEPT) await ctx.db.delete(row._id);
-      }
+      if (!existing) await ctx.db.insert('messages', m);
+      else if (m.pagedAt && !existing.pagedAt) await ctx.db.patch(existing._id, { pagedAt: m.pagedAt });
     }
     return null;
   },
@@ -358,7 +342,8 @@ export const finishCommand = mutation({
   },
 });
 
-// Finished commands and paged messages older than a day go (crons.ts).
+// Finished commands older than a day go, and paged marks older than a day
+// come off (crons.ts).
 export const pruneOld = internalMutation({
   args: {},
   returns: v.null(),
@@ -369,8 +354,10 @@ export const pruneOld = internalMutation({
         if ((c.doneAt ?? c.createdAt) < cutoff) await ctx.db.delete(c._id);
       }
     }
-    for await (const m of ctx.db.query('messages')) {
-      if (m.pagedAt && m.pagedAt < cutoff) await ctx.db.delete(m._id);
+    // Rows an old phone paged in drop back out of its view after a day; the
+    // rows themselves stay, since every message is kept now.
+    for await (const m of ctx.db.query('messages').withIndex('by_pagedAt', (q) => q.gt('pagedAt', 0).lt('pagedAt', cutoff))) {
+      await ctx.db.patch(m._id, { pagedAt: undefined });
     }
     return null;
   },

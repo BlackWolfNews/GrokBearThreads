@@ -84,15 +84,23 @@ export default defineSchema({
 
   // The last 20 text messages of each thread (step 2), plus pages the
   // phone asked for, which a cron deletes a day later.
+  // Every text message of every thread, and one line per tool call (role
+  // "tool", since API 2; docs/setup-and-updates.md step 2). Tool output,
+  // diffs and images stay on the Mac. pagedAt marks rows an old phone asked
+  // for with loadEarlier, so phone:thread still shows them to it for a day.
   messages: defineTable({
     threadId: v.string(),
     seq: v.number(),
-    role: v.union(v.literal('user'), v.literal('assistant')),
+    role: v.union(v.literal('user'), v.literal('assistant'), v.literal('tool')),
     text: v.string(),
     origin: v.optional(v.string()),
+    toolKind: v.optional(v.string()), // the protocol's ToolKind, for a tool row
     at: v.string(),
     pagedAt: v.optional(v.number()),
-  }).index('by_thread_seq', ['threadId', 'seq']),
+  })
+    .index('by_thread_seq', ['threadId', 'seq'])
+    .index('by_thread_pagedAt', ['threadId', 'pagedAt'])
+    .index('by_pagedAt', ['pagedAt']),
 
   // What the phone asks a runner to do (step 3). The owning runner takes
   // pending ones for its runnerId (or "any"), applies them through the

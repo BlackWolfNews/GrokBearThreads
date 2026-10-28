@@ -207,6 +207,7 @@ async function main(): Promise<void> {
   const sync = new ConvexSync({
     config: { ...cfg.sync, runnerId: cfg.sync.runnerId ?? ensureRunnerId(cfg.home) },
     key: readSyncKey(cfg.home),
+    statePath: `${cfg.home}/sync-state.json`,
     runner: {
       onNotification: (fn) => runner.onNotification(fn),
       list: (include) => runner.list(include),

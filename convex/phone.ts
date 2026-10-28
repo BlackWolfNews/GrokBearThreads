@@ -5,6 +5,7 @@
 // marks done or failed. Nothing here touches a runner directly.
 import { ConvexError, v } from 'convex/values';
 import { mutation, query, type QueryCtx } from './_generated/server';
+import type { Doc } from './_generated/dataModel';
 import { threadFields, views } from './schema';
 import { checkPhoneToken } from './lib';
 import { API_VERSION } from './version';
@@ -16,6 +17,16 @@ const DEN_LIMIT = 100;
 
 const row = v.object({ ...threadFields, view: v.union(...views.map((x) => v.literal(x))) });
 const message = v.object({ seq: v.number(), role: v.union(v.literal('user'), v.literal('assistant')), text: v.string(), origin: v.optional(v.string()), at: v.string() });
+const pageMessage = v.object({ seq: v.number(), role: v.union(v.literal('user'), v.literal('assistant'), v.literal('tool')), text: v.string(), origin: v.optional(v.string()), toolKind: v.optional(v.string()), at: v.string() });
+// phone:thread's newest text messages for an old phone, and how far back it
+// looks past tool rows for them.
+const MESSAGES_SHOWN = 20;
+const THREAD_SCAN = 400;
+// phone:messages page sizes.
+const PAGE_DEFAULT = 50;
+// The website asks for more as you scroll back by raising limit, so one
+// live query covers everything it shows.
+const PAGE_MAX = 2000;
 
 function strip<T extends { _id: unknown; _creationTime: unknown }>(doc: T): Omit<T, '_id' | '_creationTime'> {
   const { _id, _creationTime, ...rest } = doc;
@@ -69,17 +80,62 @@ export const threads = query({
   },
 });
 
+// The thread's row and, as API 1 had it, its newest MESSAGES_SHOWN text
+// messages plus any an old phone paged in. Tool rows are never in it: an app
+// built before API 2 can't decode them. Newer clients use phone:messages.
 export const thread = query({
   args: { token: v.string(), threadId: v.string() },
   returns: v.object({ thread: row, messages: v.array(message) }),
   handler: async (ctx, { token, threadId }) => {
     await checkPhoneToken(ctx, token);
     const t = await findThread(ctx, threadId);
-    const messages = [];
-    for await (const m of ctx.db.query('messages').withIndex('by_thread_seq', (q) => q.eq('threadId', threadId))) {
-      messages.push({ seq: m.seq, role: m.role, text: m.text, ...(m.origin ? { origin: m.origin } : {}), at: m.at });
+    const bySeq = new Map<number, { seq: number; role: 'user' | 'assistant'; text: string; origin?: string; at: string }>();
+    const add = (m: Doc<'messages'>) => {
+      if (m.role === 'tool') return;
+      bySeq.set(m.seq, { seq: m.seq, role: m.role, text: m.text, ...(m.origin ? { origin: m.origin } : {}), at: m.at });
+    };
+    // Tool rows sit between the text ones, so this reads back far enough to
+    // find the newest text messages without reading the whole thread.
+    let text = 0;
+    let read = 0;
+    for await (const m of ctx.db.query('messages').withIndex('by_thread_seq', (q) => q.eq('threadId', threadId)).order('desc')) {
+      if (++read > THREAD_SCAN) break;
+      if (m.role === 'tool') continue;
+      add(m);
+      if (++text >= MESSAGES_SHOWN) break;
     }
+    for await (const m of ctx.db.query('messages').withIndex('by_thread_pagedAt', (q) => q.eq('threadId', threadId).gt('pagedAt', 0))) add(m);
+    const messages = [...bySeq.values()].sort((a, b) => a.seq - b.seq);
     return { thread: stripThread(t), messages };
+  },
+});
+
+// A page of a thread's messages, newest first in the reading but returned
+// oldest first: the newest `limit` with no beforeSeq (live, so new messages
+// arrive by themselves), or the `limit` before beforeSeq. Tool rows (one line
+// each) only with tools: true. hasMore says whether there are older ones.
+// Since API 2; reads Convex alone, so it works while the Mac is asleep.
+export const messages = query({
+  args: { token: v.string(), threadId: v.string(), beforeSeq: v.optional(v.number()), limit: v.optional(v.number()), tools: v.optional(v.boolean()) },
+  returns: v.object({ messages: v.array(pageMessage), hasMore: v.boolean() }),
+  handler: async (ctx, { token, threadId, beforeSeq, limit, tools }) => {
+    await checkPhoneToken(ctx, token);
+    const want = Math.max(1, Math.min(PAGE_MAX, Math.floor(limit ?? PAGE_DEFAULT)));
+    const out: { seq: number; role: 'user' | 'assistant' | 'tool'; text: string; origin?: string; toolKind?: string; at: string }[] = [];
+    let hasMore = false;
+    const q = ctx.db
+      .query('messages')
+      .withIndex('by_thread_seq', (x) => (beforeSeq === undefined ? x.eq('threadId', threadId) : x.eq('threadId', threadId).lt('seq', beforeSeq)))
+      .order('desc');
+    for await (const m of q) {
+      if (m.role === 'tool' && !tools) continue;
+      if (out.length >= want) {
+        hasMore = true;
+        break;
+      }
+      out.push({ seq: m.seq, role: m.role, text: m.text, ...(m.origin ? { origin: m.origin } : {}), ...(m.toolKind ? { toolKind: m.toolKind } : {}), at: m.at });
+    }
+    return { messages: out.reverse(), hasMore };
   },
 });
 

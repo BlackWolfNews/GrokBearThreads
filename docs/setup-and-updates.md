@@ -182,8 +182,10 @@ Nothing is open now. Next is building, in the order below.
 1. Done 28 Oct: the release pipeline deploys the backend before the runner restarts;
    `apiVersion` in the backend, the runner and the phone (docs/convex-backend.md,
    "Deploying" and "Keeping old and new working together").
-2. Write all message text and the one-line tool calls, not just the newest 20. The
-   phone and the website show whole threads.
+2. Done 28 Oct: every message and a one-line row per tool call go up (backend API 2,
+   `phone:messages`), each thread's whole history sent once; the website shows whole
+   threads with tool calls folded into runs. The iPhone app still uses API 1 until it's
+   updated to `phone:messages`.
 3. Push relay with encrypted messages, and the phone's notification extension.
 4. `./threadbear setup`: makes the Convex project in your account, the keys, the deploy,
    the runner and the app; the pairing QR code in the Mac app; Mike's defaults moved

@@ -257,7 +257,7 @@ test('the poster speaks the deployment HTTP API and reports its errors', async (
 
 // ------------------------------------------------------------ step 2 and 3
 
-import { MESSAGES_KEPT, MESSAGE_CHARS, toMessageDoc, inputSummary, type Command, type MessageDoc } from '../../src/sync.ts';
+import { MESSAGE_CHARS, toMessageDoc, toolLine, inputSummary, type Command, type MessageDoc } from '../../src/sync.ts';
 
 type Fake = { h: ReturnType<typeof makeHarness>; sync: ConvexSync; calls: Call[]; push: (value: unknown) => void; applied: string[] };
 
@@ -363,49 +363,65 @@ test('messages: the first message goes up with the thread, a reply when its text
   assert.ok(sent[1]!.text.length < MESSAGE_CHARS + 50 && sent[1]!.text.endsWith('[cut: the rest is on the Mac]'));
 });
 
-test('messages: a start backfills only what the mirror lacks, the newest few per thread', async () => {
+test('messages: the first start against a deployment sends whole histories once, later starts only what the mirror lacks', async () => {
   const h0 = makeHarness();
   const a = h0.runner.create({ text: 'first', cwd: h0.cfg.defaults.cwd, accountId: 'claude-3' }).thread;
   const sa = session(h0, a.id);
   sa.init();
-  for (let i = 0; i < MESSAGES_KEPT + 5; i++) sa.text(`i${i}`, `reply ${i}`);
+  for (let i = 0; i < 25; i++) sa.text(`i${i}`, `reply ${i}`);
   sa.result('completed');
   await tick();
   const b = h0.runner.create({ text: 'second', cwd: h0.cfg.defaults.cwd, accountId: 'claude-3' }).thread;
   await tick();
-  // A sync on the same home, told the mirror already has b's first message.
-  const { sync, calls } = (() => {
-    const f = setupFull({ heads: [{ threadId: b.id, lastSeq: 1 }] });
-    // Point it at h0's threads by restarting a harness on the same home.
-    return f;
-  })();
-  void sync;
-  void calls;
   const h = h0.restart();
-  const posts: Call[] = [];
-  const s2 = new ConvexSync({
-    config: { enabled: true, url: 'https://x.convex.cloud', runnerId: 'r1' },
-    key: 'k',
-    runner: { onNotification: (fn) => h.runner.onNotification(fn), list: (i) => h.runner.list(i), get: (id) => h.runner.get(id), events: (id, o) => h.runner.events(id, o) },
-    version: 'v',
-    startedAt: 'now',
-    clock: h.clock,
-    log: nullLogger,
-    post: async (kind, fn, args) => {
-      posts.push({ kind, fn, args });
-      return fn === 'sync:messageHeads' ? [{ threadId: b.id, lastSeq: 1 }] : null;
-    },
-  });
-  s2.start();
-  await s2.flushNow();
-  const sent = messagesSent(posts);
-  const forA = sent.filter((m) => m.threadId === a.id);
-  const forB = sent.filter((m) => m.threadId === b.id);
-  assert.equal(forA.length, MESSAGES_KEPT, 'only the newest few');
-  assert.equal(forA[0]!.text, 'reply 5');
-  assert.equal(forA.at(-1)!.text, `reply ${MESSAGES_KEPT + 4}`);
-  assert.equal(forB.length, 0, 'the mirror already had it');
-  assert.equal(s2.status().messages, MESSAGES_KEPT);
+  const statePath = path.join(tmpDir('tb-sync-state-'), 'sync-state.json');
+  const start = async (heads: { threadId: string; lastSeq: number }[]) => {
+    const posts: Call[] = [];
+    const s = new ConvexSync({
+      config: { enabled: true, url: 'https://x.convex.cloud', runnerId: 'r1' },
+      key: 'k',
+      statePath,
+      runner: { onNotification: (fn) => h.runner.onNotification(fn), list: (i) => h.runner.list(i), get: (id) => h.runner.get(id), events: (id, o) => h.runner.events(id, o) },
+      version: 'v',
+      startedAt: 'now',
+      clock: h.clock,
+      log: nullLogger,
+      post: async (kind, fn, args) => {
+        posts.push({ kind, fn, args });
+        return fn === 'sync:messageHeads' ? heads : null;
+      },
+    });
+    s.start();
+    await s.flushNow();
+    await s.stop();
+    return { posts, sent: messagesSent(posts) };
+  };
+  // First start: everything, whatever the mirror says it has.
+  const first = await start([{ threadId: b.id, lastSeq: 1 }]);
+  assert.equal(first.posts.some((p) => p.fn === 'sync:messageHeads'), false, 'a whole backfill does not ask');
+  const forA = first.sent.filter((m) => m.threadId === a.id && m.role !== 'tool');
+  assert.equal(forA.length, 26, 'the first message and every reply');
+  assert.equal(forA[0]!.text, 'first');
+  assert.equal(first.sent.filter((m) => m.threadId === b.id).length, 1);
+  assert.equal(JSON.parse(fs.readFileSync(statePath, 'utf8')).fullHistory, 'https://x.convex.cloud');
+  // Next start: only what's newer than the mirror's newest message.
+  const lastA = forA.at(-1)!.seq;
+  const second = await start([{ threadId: a.id, lastSeq: lastA }, { threadId: b.id, lastSeq: 1 }]);
+  assert.ok(second.posts.some((p) => p.fn === 'sync:messageHeads'));
+  assert.equal(second.sent.filter((m) => m.role !== 'tool').length, 0);
+});
+
+test('a tool call becomes one line: the description, the file, the search, else the title', () => {
+  const call = (kind: string, input: Record<string, unknown>, title = 'title') => toolLine({ name: 'Tool', kind, title, input });
+  assert.equal(call('command', { command: 'npm test', description: 'Run the unit tests' }), 'Run the unit tests');
+  assert.equal(call('command', { command: 'npm test\nmore' }, 'npm test'), 'Ran npm test');
+  assert.equal(call('read', { file_path: '/Users/someone/dev/x.ts' }), 'Read ~/dev/x.ts');
+  assert.equal(call('edit', { file_path: '/tmp/y.ts' }), 'Edited /tmp/y.ts');
+  assert.equal(call('search', { pattern: 'TODO' }), 'Searched for TODO');
+  assert.equal(call('web', { url: 'https://convex.dev' }), 'Fetched https://convex.dev');
+  assert.equal(call('mcp', {}, 'agent-archive: search_archive'), 'agent-archive: search_archive');
+  const doc = toMessageDoc('t1', { type: 'tool.call', seq: 7, ts: '2026-10-28T00:00:00.000Z', threadId: 't1', itemId: 'i', name: 'Bash', kind: 'command', title: 'ls', input: { command: 'ls' } } as never)!;
+  assert.deepEqual(doc, { threadId: 't1', seq: 7, role: 'tool', text: 'Ran ls', toolKind: 'command', at: '2026-10-28T00:00:00.000Z' });
 });
 
 test('approvals: the row carries what the thread waits on until it is answered', async () => {
@@ -525,10 +541,11 @@ test('commands: stop unsubscribes and nothing is applied after', async () => {
   assert.equal(sync.status().commands?.state, 'off');
 });
 
-test('toMessageDoc ignores everything but text, and keeps a schedule origin', () => {
+test('toMessageDoc keeps text and tool calls, nothing else, and a schedule origin', () => {
   const base = { seq: 4, ts: '2026-10-27T00:00:00.000Z', threadId: 't', turnId: 'u' };
   assert.deepEqual(toMessageDoc('t', { ...base, type: 'user.message', text: 'hi', images: [], origin: 'schedule', scheduleId: 's1' } as never), { threadId: 't', seq: 4, role: 'user', text: 'hi', at: base.ts, origin: 'schedule' });
-  assert.equal(toMessageDoc('t', { ...base, type: 'tool.call', itemId: 'i', name: 'Bash', kind: 'shell', input: {} } as never), undefined);
+  assert.equal(toMessageDoc('t', { ...base, type: 'tool.call', itemId: 'i', name: 'Bash', kind: 'command', title: 'ls', input: {} } as never)?.role, 'tool');
+  assert.equal(toMessageDoc('t', { ...base, type: 'tool.result', itemId: 'i', ok: true } as never), undefined);
   assert.equal(toMessageDoc('t', { ...base, type: 'reasoning', itemId: 'i', text: 'thinking' } as never), undefined);
 });
 

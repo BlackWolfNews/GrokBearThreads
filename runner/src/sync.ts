@@ -30,16 +30,14 @@ export const HEARTBEAT_MS = 60_000;
 // Threads per upsert mutation, and messages per append.
 export const SYNC_BATCH = 50;
 export const MESSAGE_BATCH = 100;
-// Text messages kept per thread on the phone (convex/sync.ts MESSAGES_KEPT).
-export const MESSAGES_KEPT = 20;
 // A message longer than this is cut on the phone; the Mac has it all.
 export const MESSAGE_CHARS = 8000;
 // Older messages per "Load earlier messages" on the phone.
 export const PAGE_SIZE = 50;
 // How many events are read back for a page or the first text message.
 const PAGE_EVENTS = 2000;
-// How many of a thread's newest events are read for the backfill at start.
-const BACKFILL_EVENTS = 300;
+// Events read at a time when backfilling a thread's history.
+const BACKFILL_EVENTS = 5000;
 const BACKOFF_MIN_MS = 5000;
 const BACKOFF_MAX_MS = 5 * 60_000;
 const POST_TIMEOUT_MS = 15_000;
@@ -58,7 +56,7 @@ export type SyncConfig = {
 // lower one means its backend hasn't been deployed since this runner was:
 // said in runner.status, tb status and the log rather than stopping, since
 // the runner only adds to what it sends while the number stays the same.
-export const BACKEND_API_VERSION = 1;
+export const BACKEND_API_VERSION = 2;
 
 export type SyncStatus = {
   state: 'off' | 'ok' | 'error';
@@ -112,7 +110,9 @@ export type ThreadDoc = {
   view: 'inbox' | 'hibernating' | 'den';
 };
 
-export type MessageDoc = { threadId: string; seq: number; role: 'user' | 'assistant'; text: string; origin?: string; at: string; pagedAt?: number };
+// A text message, or one line for a tool call (role "tool", since backend
+// API 2): what the phone and the website show of a thread.
+export type MessageDoc = { threadId: string; seq: number; role: 'user' | 'assistant' | 'tool'; text: string; origin?: string; toolKind?: string; at: string; pagedAt?: number };
 
 // One call to the deployment's HTTP API; tests pass a fake.
 export type Post = (kind: 'mutation' | 'query', fn: string, args: Record<string, unknown>) => Promise<unknown>;
@@ -151,6 +151,9 @@ export type CommandHost = {
 export type SyncDeps = {
   config: SyncConfig;
   key?: string;
+  // Where the sync keeps what it has sent once and for all (the full history
+  // backfill), per deployment. Tests leave it out and get a backfill each start.
+  statePath?: string;
   runner: Host;
   commands?: CommandHost;
   version: string;
@@ -256,11 +259,40 @@ export function toThreadDoc(t: ThreadSummary, runnerId: string, now: number, pen
 // A persisted user.message or assistant.text as a message row; anything
 // else is undefined.
 export function toMessageDoc(threadId: string, e: PersistedEvent): MessageDoc | undefined {
+  if (e.type === 'tool.call') return { threadId, seq: e.seq, role: 'tool', text: toolLine(e), toolKind: e.kind, at: e.ts };
   if (e.type !== 'user.message' && e.type !== 'assistant.text') return undefined;
   const text = e.text.length > MESSAGE_CHARS ? e.text.slice(0, MESSAGE_CHARS) + '\n\n[cut: the rest is on the Mac]' : e.text;
   const doc: MessageDoc = { threadId, seq: e.seq, role: e.type === 'user.message' ? 'user' : 'assistant', text, at: e.ts };
   if (e.type === 'user.message' && e.origin) doc.origin = e.origin;
   return doc;
+}
+
+// A tool call in one line, for the phone and the website (the output stays
+// on the Mac): the agent's own description of a command when it gave one
+// ("Run the full check suite"), what was read, edited or searched, else the
+// call's title. Never the whole input.
+export function toolLine(e: { name: string; kind: string; title: string; input: Record<string, unknown> }): string {
+  const str = (k: string) => (typeof e.input[k] === 'string' && (e.input[k] as string).trim() ? oneLine(e.input[k] as string) : undefined);
+  const file = str('file_path') ?? str('path') ?? str('notebook_path');
+  const short = (p: string) => p.replace(/^\/Users\/[^/]+/, '~');
+  switch (e.kind) {
+    case 'command':
+      return str('description') ?? `Ran ${oneLine(e.title || str('command') || e.name)}`;
+    case 'read':
+      return file ? `Read ${short(file)}` : oneLine(e.title || e.name);
+    case 'edit':
+      return file ? `Edited ${short(file)}` : oneLine(e.title || e.name);
+    case 'write':
+      return file ? `Wrote ${short(file)}` : oneLine(e.title || e.name);
+    case 'search':
+      return str('pattern') ? `Searched for ${str('pattern')}` : oneLine(e.title || e.name);
+    case 'web':
+      return str('url') ? `Fetched ${str('url')}` : str('query') ? `Searched the web for ${str('query')}` : oneLine(e.title || e.name);
+    case 'task':
+      return str('description') ?? oneLine(e.title || e.name);
+    default:
+      return oneLine(e.title || e.name);
+  }
 }
 
 // One line of a tool's input for the approval card: the command, the
@@ -591,10 +623,12 @@ export class ConvexSync {
       if (this.full) {
         const keep = this.deps.runner.list(ALL).map((t) => t.id);
         await this.post('mutation', 'sync:prune', { key, runnerId: this.runnerId, keep });
+        this.backfilledWhole = this.readState().fullHistory !== this.deps.config.url;
         messages.unshift(...(await this.backfill()));
         this.full = false;
       }
       await this.appendMessages(messages);
+      this.markBackfilled();
       this.lastSyncAt = this.deps.clock.now();
       this.backoffMs = 0;
       this.retryAt = undefined;
@@ -623,7 +657,10 @@ export class ConvexSync {
     this.scheduleFlush();
   }
 
-  private async appendMessages(messages: MessageDoc[]): Promise<void> {
+  private async appendMessages(all: MessageDoc[]): Promise<void> {
+    // A backend from before API 2 can't take tool rows; it's deployed before
+    // the runner, so this only matters when that deploy was skipped.
+    const messages = this.backendApiVersion !== undefined && this.backendApiVersion < 2 ? all.filter((m) => m.role !== 'tool') : all;
     for (let i = 0; i < messages.length; i += MESSAGE_BATCH) {
       const batch = messages.slice(i, i + MESSAGE_BATCH);
       await this.post('mutation', 'sync:appendMessages', { key: this.deps.key, messages: batch });
@@ -631,26 +668,62 @@ export class ConvexSync {
     }
   }
 
-  // At start, the last MESSAGES_KEPT text messages of every thread the
-  // mirror doesn't have yet (it says what it has, so a restart sends only
-  // what's new, and the first start sends them all once).
+  // At start, what the mirror lacks. The first start against a deployment
+  // sends every thread's whole history once (text and tool rows; until
+  // backend API 2 only the newest 20 text messages went up), then records it
+  // in statePath; later starts send only what's newer than the mirror's
+  // newest message per thread.
   private async backfill(): Promise<MessageDoc[]> {
-    const heads = (await this.post('query', 'sync:messageHeads', { key: this.deps.key, runnerId: this.runnerId })) as { threadId: string; lastSeq: number }[] | null;
+    const state = this.readState();
+    const whole = state.fullHistory !== this.deps.config.url;
+    const heads = whole ? null : ((await this.post('query', 'sync:messageHeads', { key: this.deps.key, runnerId: this.runnerId })) as { threadId: string; lastSeq: number }[] | null);
     const have = new Map((heads ?? []).map((h) => [h.threadId, h.lastSeq]));
     const out: MessageDoc[] = [];
     for (const t of this.deps.runner.list(ALL)) {
-      const after = have.get(t.id) ?? 0;
-      if (t.lastSeq <= after) continue;
-      let events: PersistedEvent[];
-      try {
-        events = this.deps.runner.events(t.id, { limit: BACKFILL_EVENTS }).events;
-      } catch {
-        continue;
+      let after = have.get(t.id) ?? 0;
+      while (t.lastSeq > after) {
+        let events: PersistedEvent[];
+        try {
+          events = this.deps.runner.events(t.id, { afterSeq: after, limit: BACKFILL_EVENTS }).events;
+        } catch {
+          break;
+        }
+        // Stops if a page doesn't move forward, so a log that disagrees with
+        // the summary's lastSeq can't loop forever.
+        const next = events.at(-1)?.seq ?? after;
+        if (next <= after) break;
+        for (const e of events) {
+          if (e.seq <= after) continue;
+          const m = toMessageDoc(t.id, e);
+          if (m) out.push(m);
+        }
+        after = next;
       }
-      const docs = events.filter((e) => e.seq > after).map((e) => toMessageDoc(t.id, e)).filter((m): m is MessageDoc => Boolean(m));
-      out.push(...docs.slice(-MESSAGES_KEPT));
     }
     return out;
+  }
+
+  // Written once the whole-history backfill has gone up (flush, after
+  // appendMessages), so a restart part way through sends it again.
+  private backfilledWhole = false;
+
+  private readState(): { fullHistory?: string } {
+    if (!this.deps.statePath) return {};
+    try {
+      return JSON.parse(fs.readFileSync(this.deps.statePath, 'utf8')) as { fullHistory?: string };
+    } catch {
+      return {};
+    }
+  }
+
+  private markBackfilled(): void {
+    if (!this.deps.statePath || !this.backfilledWhole) return;
+    this.backfilledWhole = false;
+    try {
+      fs.writeFileSync(this.deps.statePath, JSON.stringify({ ...this.readState(), fullHistory: this.deps.config.url }, null, 2) + '\n');
+    } catch (e) {
+      this.deps.log.warn('could not record the history backfill', { error: String(e) });
+    }
   }
 
   private heartbeat(): void {
@@ -785,16 +858,18 @@ export class ConvexSync {
         return thread.id;
       }
       case 'page': {
-        // Up to PAGE_SIZE text messages before beforeSeq, written now as
-        // paged rows (not counted in the newest 20, pruned after a day).
+        // An API 1 phone's "Load earlier messages": up to PAGE_SIZE text
+        // messages before beforeSeq, marked as paged so its phone:thread
+        // shows them for a day (the rows are all there already since API 2).
         const id = needThread();
         const before = Number(a.beforeSeq);
         if (!Number.isFinite(before) || before <= 1) throw new Error('nothing earlier');
         const { events } = this.deps.runner.events(id, { beforeSeq: before, limit: PAGE_EVENTS });
         const now = this.deps.clock.now();
+        // Text only: it's for a phone from before API 2, which never shows tool rows.
         const page = events
           .map((e) => toMessageDoc(id, e))
-          .filter((m): m is MessageDoc => Boolean(m))
+          .filter((m): m is MessageDoc => Boolean(m) && m!.role !== 'tool')
           .slice(-PAGE_SIZE)
           .map((m) => ({ ...m, pagedAt: now }));
         await this.appendMessages(page);

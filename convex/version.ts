@@ -10,4 +10,7 @@
 //
 // 1: the phone API of 27 Oct (docs/convex-backend.md section 6), plus this
 //    number on sync:heartbeat and phone:me.
-export const API_VERSION = 1;
+// 2: every message is kept, with one line per tool call (role "tool");
+//    phone:messages pages through them. phone:thread is unchanged for API 1
+//    phones and never returns tool rows.
+export const API_VERSION = 2;

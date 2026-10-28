@@ -443,6 +443,15 @@ Queries:
   the phone, `"schedule"` or `"runner"` as in the protocol). The row's
   `earliestSeq` is the seq of the thread's first text message: while the
   oldest message the phone has is newer than that, there's more to load.
+- `phone:messages({ token, threadId, beforeSeq?, limit?, tools? })` (since
+  API 2, 28 Oct) → `{ messages, hasMore }`, oldest first: the newest `limit`
+  (default 50, at most 2000) or the `limit` before `beforeSeq`. Every message
+  is kept since API 2, and with `tools: true` there's one row per tool call
+  too (`role: "tool"`, a one-line `text` such as "Run the unit tests" or
+  "Edited ~/dev/x.ts", and `toolKind`). It reads Convex alone, so it works
+  while the Mac is asleep; the website uses it, raising `limit` as you scroll
+  back. `phone:thread` stays as API 1 had it (newest 20 text messages plus
+  any paged ones, never tool rows), for phone apps built before.
 - `phone:command({ token, commandId })` → `{ state: "pending" | "taken" |
   "done" | "failed", note?, threadId? }`.
 
