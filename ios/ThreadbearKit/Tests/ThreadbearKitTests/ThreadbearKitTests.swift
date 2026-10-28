@@ -3,6 +3,16 @@ import Testing
 @testable import ThreadbearKit
 
 @Suite struct DecodingTests {
+    @Test func identityCarriesTheBackendVersionAndOldBackendsAreSaidToBeOld() throws {
+        let current = try JSONDecoder().decode(PhoneIdentity.self, from: Data(#"{"name":"iphone","expiresAt":"2027-01-26T00:00:00.000Z","apiVersion":1}"#.utf8))
+        #expect(current.apiVersion == 1)
+        #expect(BackendCompatibility.problem(current) == nil)
+        // A backend deployed before convex/version.ts has no apiVersion at all.
+        let old = try JSONDecoder().decode(PhoneIdentity.self, from: Data(#"{"name":"iphone","expiresAt":"2027-01-26T00:00:00.000Z"}"#.utf8))
+        #expect(old.apiVersion == nil)
+        #expect(BackendCompatibility.problem(old) != nil)
+    }
+
     @Test func threadRowDecodesWithISOAndMillisecondDates() throws {
         let json = """
         [{"threadId":"t1","runnerId":"m5","title":"A","cwd":"/Users/m/dev/me/misc","accountId":"claude-3",

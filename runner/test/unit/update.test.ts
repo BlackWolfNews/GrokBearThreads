@@ -119,6 +119,8 @@ type Harness = {
   follows: string[];
   main: { commit: string; short: string; subject: string; tree: string; buildTree?: string };
   deployResult: { ok: true; id: string } | { ok: false; error: string; transient?: boolean };
+  backendDeploys: string[];
+  backendResult: { ok: boolean; error?: string };
   pending: boolean;
 };
 
@@ -139,6 +141,8 @@ function harness(releaseExtra: Partial<ReleaseJson> = {}, depsExtra: Partial<Upd
     follows: [] as string[],
     main: { commit: 'c2', short: 'c2', subject: 'Steering', tree: 'x+b+c+d' },
     deployResult: { ok: true, id: 'r2' },
+    backendDeploys: [] as string[],
+    backendResult: { ok: true } as { ok: boolean; error?: string },
     pending: false,
   };
   const u = new RunnerUpdater({
@@ -155,6 +159,10 @@ function harness(releaseExtra: Partial<ReleaseJson> = {}, depsExtra: Partial<Upd
     },
     pendingRestart: () => h.pending,
     sync: async () => h.main,
+    deployBackend: async (_repo, _runnerDir, _home, commit) => {
+      h.backendDeploys.push(commit);
+      return h.backendResult;
+    },
     deploy: async (_dir, _home, _log, follow) => {
       h.deploys++;
       h.follows.push(follow);
@@ -367,4 +375,37 @@ test('launcherDiffers: only when both files are there and differ', () => {
   assert.equal(launcherDiffers(a, b), false);
   fs.writeFileSync(b, 'two');
   assert.equal(launcherDiffers(a, b), true);
+});
+
+test('the backend is deployed at main before the runner is built, once per commit', async () => {
+  const h = harness();
+  h.u.start();
+  await h.u.check();
+  assert.deepEqual(h.backendDeploys, ['c2']);
+  assert.equal(h.deploys, 1);
+  // The same commit again: the backend isn't asked a second time.
+  await h.u.check();
+  assert.deepEqual(h.backendDeploys, ['c2']);
+});
+
+test('a failed backend deploy holds the runner back until main changes', async () => {
+  const h = harness();
+  h.backendResult = { ok: false, error: 'convex deploy failed' };
+  h.u.start();
+  const d = await h.u.check();
+  assert.deepEqual(d, { action: 'nothing', why: 'the backend deploy at main failed' });
+  assert.equal(h.deploys, 0);
+  assert.equal(h.u.status().state, 'failed');
+  assert.match(h.u.status().reason ?? '', /backend deploy failed: convex deploy failed/);
+  assert.equal(h.notices.length, 1);
+  // Checked again at the same commit: still held, and no second notice.
+  await h.u.check();
+  assert.equal(h.deploys, 0);
+  assert.equal(h.notices.length, 1);
+  // Main moves on and the backend deploys: the runner is built.
+  h.backendResult = { ok: true };
+  h.main = { ...h.main, commit: 'c3', short: 'c3' };
+  await h.u.check();
+  assert.deepEqual(h.backendDeploys, ['c2', 'c3']);
+  assert.equal(h.deploys, 1);
 });

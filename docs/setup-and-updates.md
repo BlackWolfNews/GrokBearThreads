@@ -176,8 +176,9 @@ Nothing is open now. Next is building, in the order below.
 
 ## 4. A rough order to build it in
 
-1. The release pipeline deploys the backend before the runner restarts; `apiVersion` in
-   the backend and the phone. (Useful now: stops the runner getting ahead of prod.)
+1. Done 28 Oct: the release pipeline deploys the backend before the runner restarts;
+   `apiVersion` in the backend, the runner and the phone (docs/convex-backend.md,
+   "Deploying" and "Keeping old and new working together").
 2. Write all message text and the one-line tool calls, not just the newest 20. The
    phone and the website show whole threads.
 3. Push relay with encrypted messages, and the phone's notification extension.

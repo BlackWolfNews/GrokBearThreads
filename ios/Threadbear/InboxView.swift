@@ -10,6 +10,13 @@ struct InboxView: View {
     var body: some View {
         NavigationStack(path: $path) {
             List {
+                if let problem = model.backendProblem {
+                    Section {
+                        Label(problem, systemImage: "arrow.down.circle")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                    }
+                }
                 if let offline = model.offlineText {
                     Section {
                         Label(offline, systemImage: "moon.zzz")

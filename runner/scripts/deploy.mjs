@@ -19,13 +19,16 @@ for (const [k, v] of Object.entries(process.env)) {
 const HELP = `deploy-runner.sh: build a runner release from this checkout and switch the
 live runner to it.
 
-  1. typecheck and unit tests        5. restart the runner
-  2. snapshot runner/ at HEAD        6. check it came up on the new release,
-  3. smoke test the snapshot            or go back to the previous one
-  4. point current at it             7. keep the newest 5 plus the last good one
+  1. typecheck and unit tests        5. point current at it
+  2. snapshot runner/ at HEAD        6. restart the runner
+  3. smoke test the snapshot         7. check it came up on the new release,
+  4. deploy the Convex backend and      or go back to the previous one
+     website at HEAD, if they       8. keep the newest 5 plus the last good one
+     changed (deploy-backend.mjs)
 
 Options:
   --skip-checks     skip step 1
+  --skip-backend    skip step 4 (the runner may then be newer than its backend)
   --allow-dirty     build from uncommitted files (the id ends in -dirty)
   --allow-branch    build from a HEAD that isn't main's tip (unmerged work,
                     or a checkout behind main); the next deploy from main
@@ -619,6 +622,18 @@ function step(name, cmd, args, opts) {
   say(`failed (${secs})`);
   console.error(tail(logFile));
   throw new Fail(`${name} failed; the whole output is in ${logFile}`);
+}
+
+// Step 4: the backend before the runner, so a runner is never newer than the
+// backend it writes to. deploy-backend.mjs does nothing when convex/ and web/
+// haven't changed, or when this data dir has no deploy key (a sandbox).
+function deployBackend(c, g, v) {
+  if (v['skip-backend']) {
+    say('Skipping the backend (--skip-backend).');
+    return;
+  }
+  const r = spawnSync(process.execPath, [path.join(c.runnerDir, 'scripts', 'deploy-backend.mjs'), '--home', c.home, '--repo', g.root, '--commit', g.commit], { stdio: 'inherit', env: cleanEnv() });
+  if (r.status !== 0) throw new Fail('The backend deploy failed, so the runner stays on its current release. Fix it and deploy again, or pass --skip-backend.');
 }
 
 function checks(c) {
@@ -1301,6 +1316,7 @@ async function deploy(c, v, waitMs) {
     if (off) say(`Note: ${off}`);
     say(v['skip-checks'] ? 'Would skip the checks.' : 'Would run the typecheck and unit tests.');
     say(`Would build ${id} from ${dirty ? 'the working tree' : `${g.short} (HEAD)`} on ${g.branch === 'HEAD' ? 'no branch' : `branch ${g.branch}`} into ${c.releases}, then smoke test it.`);
+    say(v['skip-backend'] ? 'Would skip the backend.' : 'Would deploy the Convex backend and website at HEAD if they changed (deploy-backend.mjs --dry-run says which).');
     say(`Would point current at ${id}${currentId(c) ? ` (now ${currentId(c)})` : ''}.`);
     say(`Would restart: ${describeRestart(c, v, id)}.`);
     if (!v['no-restart']) {
@@ -1326,6 +1342,12 @@ async function deploy(c, v, waitMs) {
   build(c, id, g, dirty);
   try {
     await smoke(c, id);
+  } catch (e) {
+    fs.rmSync(path.join(c.releases, id), { recursive: true, force: true });
+    throw e;
+  }
+  try {
+    deployBackend(c, g, v);
   } catch (e) {
     fs.rmSync(path.join(c.releases, id), { recursive: true, force: true });
     throw e;
@@ -1360,6 +1382,7 @@ async function main(argv) {
       strict: true,
       options: {
         'skip-checks': { type: 'boolean' },
+      'skip-backend': { type: 'boolean' },
         'allow-dirty': { type: 'boolean' },
         'allow-branch': { type: 'boolean' },
         now: { type: 'boolean' },

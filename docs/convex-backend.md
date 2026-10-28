@@ -387,6 +387,33 @@ local URL and the same key in its secrets mirrors there. `./check.sh`
 sets `THREADBEAR_SYNC=off` so no test runner ever writes to the real
 project.
 
+**Deploying (since 28 Oct).** Nobody runs `npx convex deploy` for prod by
+hand any more. `runner/scripts/deploy-backend.mjs` deploys `convex/` and
+`web/` at a commit, from a clean `git archive` in a temp folder, whenever
+they've changed since what `<data>/backend.json` records. It uses the deploy
+key in `<data>/secrets/convex-deploy.env` (`CONVEX_DEPLOY_KEY=`, made with
+`npx convex deployment token create threadbear-runner --prod --save-env
+<file>`, never printed) and refuses a key for any deployment but the one
+`runner.json`'s `sync.url` names. The runner's updater runs it for each new
+commit of main before it builds a runner release, and holds the runner back
+(state `failed`, a notice) if it fails; `deploy-runner.sh` runs it as step 4
+(`--skip-backend` to leave it out). `--status`, `--dry-run` and `--force`
+do what they say. Log: `<data>/runner/update/backend.log`.
+
+**Keeping old and new working together.** For a while after any change,
+an older runner, a newer backend and an App Store phone app from weeks ago
+all meet. So:
+
+- Change the backend so it still takes what the old runner sends and still
+  returns what the old phone reads (new fields optional, nothing removed or
+  renamed), and only later stop accepting the old shape.
+- `convex/version.ts` has `API_VERSION`, returned by `sync:heartbeat` and
+  `phone:me`. Bump it when a client starts relying on something new, along
+  with `BACKEND_API_VERSION` in `runner/src/sync.ts` (a unit test keeps them
+  equal). The runner shows an older backend in `tb status`; the phone app
+  says "Update it on the Mac" when the backend is below
+  `BackendCompatibility.minimumAPIVersion` (ThreadbearKit).
+
 ## 6. The phone's API
 
 Agreed with thread f5247e5b on 27 Oct. All in `convex/phone.ts`. Every

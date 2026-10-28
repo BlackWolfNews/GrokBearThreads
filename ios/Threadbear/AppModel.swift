@@ -17,6 +17,8 @@ final class AppModel {
     /// The token was refused (expired or revoked): the app shows pairing again.
     private(set) var authProblem: String?
     private(set) var lastError: String?
+    /// Set when the Mac's backend is older than this app needs.
+    private(set) var backendProblem: String?
     /// Ticks every 15 s so "5m" and "Mac offline" stay right.
     private(set) var now = Date.now
     /// A thread a notification tap asked for, for the inbox to open.
@@ -98,6 +100,7 @@ final class AppModel {
         backend = nil
         pairing = nil
         authProblem = nil
+        backendProblem = nil
         runners = []
         inbox = []
         hibernating = []
@@ -115,6 +118,10 @@ final class AppModel {
         tasks.append(follow(backend.threads(.den)) { $0.den = $1 })
         tasks.append(Task { [weak self] in
             for await up in backend.connectionStates() { self?.connected = up }
+        })
+        tasks.append(Task { [weak self] in
+            guard let identity = try? await backend.me() else { return }
+            self?.backendProblem = BackendCompatibility.problem(identity)
         })
         if let apnsToken { register(apnsToken) }
     }

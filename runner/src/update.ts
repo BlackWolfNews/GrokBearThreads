@@ -84,6 +84,9 @@ export type UpdateDeps = {
   sync?: (checkout: string, prefix: string, dir: string) => Promise<MainInfo>;
   treeOf?: (dir: string, prefix: string, commit: string) => string | undefined;
   deploy?: (runnerDir: string, home: string, logFile: string, follow: string) => Promise<DeployResult>;
+  // Deploys the Convex backend and website at main before the runner is
+  // built (scripts/deploy-backend.mjs): a no-op when they haven't changed.
+  deployBackend?: (repoDir: string, runnerDir: string, home: string, commit: string, logFile: string) => Promise<{ ok: boolean; error?: string }>;
   watch?: (checkout: string, onChange: () => void) => () => void;
   // Whenever status() may have changed (runner.updates, main.ts).
   onChange?: () => void;
@@ -237,6 +240,51 @@ export async function syncClone(checkout: string, prefix: string, dir: string): 
 // it as the new release's checkout, so the release after this one still
 // follows Mike's checkout rather than this clone (which would only ever
 // fetch itself and report "up to date" for good).
+export function backendLogPath(home: string): string {
+  return path.join(updateDir(home), 'backend.log');
+}
+
+// The backend goes before the runner, so a runner is never newer than the
+// backend it writes to (docs/setup-and-updates.md section 2.3). The script
+// compares what changed itself, so running it for every new commit of main
+// is cheap when convex/ and web/ are as they were.
+export function runBackendDeploy(repoDir: string, runnerDir: string, home: string, commit: string, logFile: string): Promise<{ ok: boolean; error?: string }> {
+  return new Promise((resolve) => {
+    const script = path.join(runnerDir, 'scripts', 'deploy-backend.mjs');
+    // A main from before the script existed has nothing to deploy this way.
+    if (!fs.existsSync(script)) {
+      resolve({ ok: true });
+      return;
+    }
+    const env: Record<string, string | undefined> = {};
+    for (const [k, v] of Object.entries(process.env)) if (!/^THREADB(EAR|ARE)_/.test(k)) env[k] = v;
+    let fd: number;
+    try {
+      fd = fs.openSync(logFile, 'w');
+    } catch (e) {
+      resolve({ ok: false, error: `couldn't open ${logFile}: ${(e as Error).message}` });
+      return;
+    }
+    const child = spawn(process.execPath, [script, '--home', home, '--repo', repoDir, '--commit', commit], { cwd: repoDir, env, stdio: ['ignore', fd, fd] });
+    fs.closeSync(fd);
+    child.on('error', (e) => resolve({ ok: false, error: e.message }));
+    child.on('close', (code, signal) => {
+      if (code === 0) {
+        resolve({ ok: true });
+        return;
+      }
+      let text = '';
+      try {
+        text = fs.readFileSync(logFile, 'utf8');
+      } catch {
+        // nothing written
+      }
+      const last = text.trim().split('\n').filter(Boolean).at(-1) ?? (signal ? `stopped by ${signal}` : `exit ${code}`);
+      resolve({ ok: false, error: last.slice(0, 300) });
+    });
+  });
+}
+
 export function runDeploy(runnerDir: string, home: string, logFile: string, follow: string): Promise<DeployResult> {
   return new Promise((resolve) => {
     const env: Record<string, string | undefined> = {};
@@ -275,6 +323,10 @@ export function runDeploy(runnerDir: string, home: string, logFile: string, foll
 }
 
 export class RunnerUpdater {
+  // The last main commit the backend was deployed for (or failed at), so it's
+  // tried once per commit, and why it failed.
+  private backendTried?: string;
+  private backendFailed?: string;
   private deps: UpdateDeps;
   private timer?: TimerHandle;
   private state: UpdateState = 'off';
@@ -389,6 +441,23 @@ export class RunnerUpdater {
       this.commit = main.commit;
       this.subject = main.subject;
       this.launcherChanged = launcherDiffers(path.join(dir, release.prefix, 'launch.mjs'), path.join(home, 'runner', 'launch.mjs'));
+      if (main.commit !== this.backendTried) {
+        this.backendTried = main.commit;
+        const b = await (this.deps.deployBackend ?? runBackendDeploy)(dir, path.join(dir, release.prefix), home, main.commit, backendLogPath(home));
+        if (this.stopped) return undefined;
+        this.backendFailed = b.ok ? undefined : (b.error ?? 'unknown error');
+        if (!b.ok) {
+          log.error('could not deploy the backend at main', { commit: main.short, error: this.backendFailed });
+          this.deps.notice('warning', `The Convex backend couldn't be deployed at main ${main.short} (${main.subject}): ${this.backendFailed}. The runner stays where it is until main changes. The output is in ${backendLogPath(home)}.`);
+        }
+      }
+      // A runner newer than its backend could write what the backend can't
+      // take, so it waits for a main whose backend deploys.
+      if (this.backendFailed) {
+        this.state = 'failed';
+        this.reason = `the backend deploy failed: ${this.backendFailed}`;
+        return { action: 'nothing', why: 'the backend deploy at main failed' };
+      }
       const treeOf = this.deps.treeOf ?? releaseTreeAt;
       const running = { id: release.id, tree: release.tree ?? (release.dirty ? undefined : treeOf(dir, release.prefix, release.commit)) };
       const file = readJsonSync<UpdateFile>(updateFilePath(home));

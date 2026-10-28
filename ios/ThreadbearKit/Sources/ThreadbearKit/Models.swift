@@ -259,9 +259,30 @@ public struct PhoneRunner: Codable, Sendable, Hashable, Identifiable {
 public struct PhoneIdentity: Codable, Sendable, Hashable {
     public var name: String
     @OptionalFlexibleDate public var expiresAt: Date?
-    public init(name: String, expiresAt: Date?) {
+    /// The backend's API version (convex/version.ts). Missing from backends
+    /// deployed before there was one.
+    public var apiVersion: Int?
+    public init(name: String, expiresAt: Date?, apiVersion: Int? = nil) {
         self.name = name
         self._expiresAt = OptionalFlexibleDate(wrappedValue: expiresAt)
+        self.apiVersion = apiVersion
+    }
+}
+
+/// Whether the backend on the Mac is new enough for this build of the app.
+/// The App Store app meets backends of every age (everyone's Threadbear
+/// updates on its own schedule), so it says when one is too old rather than
+/// failing in odd ways. docs/setup-and-updates.md section 2.4.
+public enum BackendCompatibility {
+    /// The lowest backend API version this app works with. Raise it only when
+    /// the app starts relying on something a newer backend added.
+    public static let minimumAPIVersion = 1
+
+    /// The line to show, or nil when the backend is fine.
+    public static func problem(_ identity: PhoneIdentity) -> String? {
+        let version = identity.apiVersion ?? 0
+        guard version < minimumAPIVersion else { return nil }
+        return "Threadbear on your Mac is older than this app expects, so some things may not work. Update it on the Mac."
     }
 }
 

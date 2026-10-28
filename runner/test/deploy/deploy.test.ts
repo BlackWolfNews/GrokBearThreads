@@ -202,7 +202,7 @@ before(() => {
   agents = path.join(root, 'LaunchAgents');
   for (const d of ['scripts', 'src', 'bin']) fs.mkdirSync(path.join(rdir, d), { recursive: true });
   // The real scripts and launch.mjs, around a fake runner with no packages.
-  for (const f of ['deploy-runner.sh', 'deploy.mjs', 'rpc-client.mjs', 'install-runner.sh']) {
+  for (const f of ['deploy-runner.sh', 'deploy.mjs', 'rpc-client.mjs', 'install-runner.sh', 'deploy-backend.mjs']) {
     fs.copyFileSync(path.join(RUNNER, 'scripts', f), path.join(rdir, 'scripts', f));
   }
   fs.copyFileSync(path.join(RUNNER, 'launch.mjs'), path.join(rdir, 'launch.mjs'));
