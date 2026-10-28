@@ -274,9 +274,10 @@ test("a project's folders add their patches: tagged with the project, run in the
     { id: 'checks', source: 'project', file: ownFile },
     { id: 'app:checks', source: 'project', file: appFile, folder: app, projectId: 'p_1' },
   ]);
-  assert.deepEqual(set.panels.map((p) => [p.id, p.url, p.projectId]), [
-    ['convex.dashboard', 'https://dashboard.convex.dev/d/app-1', 'p_1'],
-    ['web:convex.dashboard', 'https://dashboard.convex.dev/d/web-2', 'p_1'],
+  // Same title, so each says its folder.
+  assert.deepEqual(set.panels.map((p) => [p.id, p.title, p.url, p.projectId]), [
+    ['convex.dashboard', 'Convex · app', 'https://dashboard.convex.dev/d/app-1', 'p_1'],
+    ['web:convex.dashboard', 'Convex · web', 'https://dashboard.convex.dev/d/web-2', 'p_1'],
   ]);
   assert.deepEqual(set.actions.map((a) => [a.id, a.patch, a.folder, a.projectId]), [
     ['shared.shared', 'shared', undefined, undefined],
@@ -294,7 +295,31 @@ test("a project's folders add their patches: tagged with the project, run in the
   assert.equal(hookApplies(anyEdit, [path.join(misc, 'notes.md')], misc), false);
   assert.equal(hookApplies(anyEdit, [path.join(app, 'README.md')], misc), true);
   // The quick built-in set agrees on the panels.
-  assert.deepEqual(projectPanels(misc, home, [{ folder: app, projectId: 'p_1' }, { folder: web, projectId: 'p_1' }]).map((p) => p.id), ['convex.dashboard', 'web:convex.dashboard']);
+  assert.deepEqual(projectPanels(misc, home, [{ folder: app, projectId: 'p_1' }, { folder: web, projectId: 'p_1' }]).map((p) => [p.id, p.title]), [
+    ['convex.dashboard', 'Convex · app'],
+    ['web:convex.dashboard', 'Convex · web'],
+  ]);
+});
+
+test('panels that share a title name their folders, the thread\'s own included, and leave the cached patch alone', async () => {
+  const home = tmpDir();
+  const own = project(home, 'dev/own', { convex: null, 'package.json': '{}' });
+  const other = project(home, 'dev/other', { convex: null, 'package.json': '{}' });
+  // Two folders called site: the parent's name tells them apart.
+  const siteA = project(home, 'dev/a/site');
+  const siteB = project(home, 'dev/b/site');
+  const panelPatch = `export default { panels: [{ title: "Preview", url: "http://localhost:3000" }, { title: "Docs", url: "http://localhost:4000" }] };`;
+  writePatch(path.join(siteA, '.threadbear/patches'), 'preview.ts', panelPatch);
+  writePatch(path.join(siteB, '.threadbear/patches'), 'preview.ts', panelPatch.replace(', { title: "Docs", url: "http://localhost:4000" }', ''));
+  const cache = new Map();
+  const folders = [other, siteA, siteB].map((folder) => ({ folder, projectId: 'p_1' }));
+  const set = await loadPatchSet(own, home, cache, folders);
+  assert.deepEqual(set.panels.map((p) => p.title), ['Convex · own', 'Convex · other', 'Preview · a/site', 'Docs', 'Preview · b/site']);
+  // Read again with the same cache: titles don't pile up.
+  const again = await loadPatchSet(own, home, cache, folders);
+  assert.deepEqual(again.panels.map((p) => p.title), set.panels.map((p) => p.title));
+  // On its own a panel keeps its plain title.
+  assert.deepEqual((await loadPatchSet(own, home)).panels.map((p) => p.title), ['Convex']);
 });
 
 test("a thread inside a project's folder keeps its own patches as they were", async () => {

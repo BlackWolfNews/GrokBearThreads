@@ -1268,7 +1268,11 @@ anyone else starts the count again, so a hook and an agent can't go round
 for ever.
 
 Ids are the file's name plus a slug of the title
-(`reseed.reseed-dev-db`), and two entries in one file can't share one. A
+(`reseed.reseed-dev-db`), and two entries in one file can't share one.
+Panels from different places that would share a title, like the Convex
+dashboards of two of a project's folders, each get their folder's name
+after it (`Convex · web`, or `Convex · apps/web` when the folder names are
+the same too), so their tabs and rail buttons say which is which. A
 file whose export doesn't fit is listed in `patches` with an `error` and
 gives nothing. Loading a project's module is the same trust as `npm
 install` in it.

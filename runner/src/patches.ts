@@ -125,6 +125,7 @@ export async function loadPatchSet(
       if (loaded.appliesTo) add(loaded);
     }
   }
+  nameClashingPanels(set, cwd);
   return set;
 }
 
@@ -221,6 +222,32 @@ function addPatch(set: PatchSet, loaded: LoadedPatch): void {
   set.panels.push(...patch.panels);
   set.actions.push(...patch.actions);
   set.hooks.push(...patch.hooks);
+}
+
+// Panels that would share a title, like the Convex dashboards of two of a
+// project's folders, get their folder's name after it ("Convex · web"), so
+// the tabs and rail buttons say which is which. A thread's own built-in
+// patches have no folder of their own and count as the thread's.
+function nameClashingPanels(set: PatchSet, cwd: string): void {
+  const folderOf = (panel: Panel): string => {
+    const info = set.patches.find((p) => p.id === panel.patch);
+    return info?.folder ?? (info?.file ? path.dirname(path.dirname(path.dirname(info.file))) : cwd);
+  };
+  const byTitle = new Map<string, Panel[]>();
+  for (const panel of set.panels) byTitle.set(panel.title, [...(byTitle.get(panel.title) ?? []), panel]);
+  for (const [title, panels] of byTitle) {
+    if (panels.length < 2) continue;
+    const folders = panels.map(folderOf);
+    // Two folders with the same name (a repo and its worktree, say) take
+    // their parent's name too.
+    const names = folders.map((f) => path.basename(f));
+    const label = (f: string, i: number) =>
+      names.filter((n) => n === names[i]).length > 1 ? `${path.basename(path.dirname(f))}/${names[i]}` : names[i];
+    // New objects: a patch file's panels are the cached module's own.
+    panels.forEach((panel, i) => {
+      set.panels[set.panels.indexOf(panel)] = { ...panel, title: `${title} · ${label(folders[i], i)}` };
+    });
+  }
 }
 
 function renamePatch(loaded: LoadedPatch, id: string): LoadedPatch {
@@ -501,6 +528,7 @@ function firstLine(e: unknown): string {
 export function projectPanels(cwd: string, home: string = os.homedir(), projectFolders: ProjectFolder[] = []): Panel[] {
   const set: PatchSet = { panels: [], actions: [], hooks: [], patches: [] };
   for (const b of builtins(cwd, home, projectRoots(cwd, projectFolders))) addPatch(set, b);
+  nameClashingPanels(set, cwd);
   return set.panels;
 }
 
