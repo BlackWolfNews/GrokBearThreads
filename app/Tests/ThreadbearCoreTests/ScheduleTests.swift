@@ -192,6 +192,18 @@ final class ScheduleTests: XCTestCase {
         XCTAssertNil(UserMessage(text: "[Scheduled: \"T\", Every hour]").scheduledHeader)
     }
 
+    func testAgentHeader() throws {
+        let header = try XCTUnwrap(AgentHeader("[Sent by the agent in the thread \"Mobile app for \"Threadbare\" (v2)\" (f5247e5b)]\n\nFrom f5247e5b: hi.\nBye."))
+        XCTAssertEqual(header.title, "Mobile app for \"Threadbare\" (v2)")
+        XCTAssertEqual(header.threadId, "f5247e5b")
+        XCTAssertEqual(header.body, "From f5247e5b: hi.\nBye.")
+        XCTAssertNil(AgentHeader("Just a message"))
+        XCTAssertNil(AgentHeader("[Sent by the agent in the thread X]"))
+        XCTAssertNotNil(UserMessage(text: "[Sent by the agent in the thread \"T\" (12345678)]\n\nGo.").agentHeader)
+        XCTAssertNil(UserMessage(text: "[Sent by the agent in the thread \"T\" (12345678)]", origin: "phone").agentHeader)
+        XCTAssertFalse(UserMessage(text: "[Sent by the agent in the thread \"T\" (12345678)]").showsAsNote)
+    }
+
     func testStartedByScheduleTip() {
         let origin = ThreadSchedule(id: "sc1", title: "Quarterly invoice export")
         let live = Schedule(id: "sc1", title: "Invoices", whenText: "Weekdays at 9:00")

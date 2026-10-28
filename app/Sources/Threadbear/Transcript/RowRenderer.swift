@@ -301,6 +301,11 @@ enum RowRenderer {
             let size = measurer.measure(text, width: width)
             return RowRender(height: RowMetrics.runnerTop + size.height + RowMetrics.runnerBottom, text: text, textSize: size)
 
+        case .user(let message) where message.agentHeader != nil:
+            let text = agentMessageText(message.agentHeader!)
+            let size = measurer.measure(text, width: width - RowMetrics.cardPad * 2)
+            return RowRender(height: RowMetrics.userTop + size.height + RowMetrics.cardPad * 2 + RowMetrics.userBottom, text: text, textSize: size)
+
         case .user(let message):
             let maxText = floor(width * RowMetrics.bubbleShare) - RowMetrics.bubblePadH * 2
             let text = NSAttributedString(string: message.text.isEmpty ? " " : message.text, attributes: Theme.text())
@@ -471,7 +476,7 @@ enum RowRenderer {
     static func scheduledMessageText(_ message: UserMessage) -> NSAttributedString {
         let header = message.scheduledHeader
         let attributes = Theme.text(Theme.smallFont, color: Theme.faintText, line: TypeScale.scaled(17), alignment: .center)
-        let text = NSMutableAttributedString(attributedString: clock(font: Theme.smallFont, attributes: attributes))
+        let text = NSMutableAttributedString(attributedString: symbol("clock", label: "Scheduled", font: Theme.smallFont, attributes: attributes))
         let label = header.map { "Scheduled: \($0.title) · \($0.whenText)" } ?? "Sent by a schedule"
         text.append(NSAttributedString(string: " " + label, attributes: attributes))
         let body = (header?.body ?? message.text).trimmingCharacters(in: .whitespacesAndNewlines)
@@ -481,12 +486,31 @@ enum RowRenderer {
         return text
     }
 
-    /// A clock symbol as a text attachment, in the label's faint colour.
+    /// A message another thread's agent sent: a card, left-aligned so it
+    /// can't pass for Mike's bubble, headed by the thread it came from. The
+    /// thread's name is a chip (when the thread still exists), so a click
+    /// opens it. The header line itself isn't repeated.
+    static func agentMessageText(_ header: AgentHeader) -> NSAttributedString {
+        let attributes = Theme.text(Theme.smallFont, color: Theme.faintText, line: TypeScale.scaled(17), spacing: zoomed(8))
+        let text = NSMutableAttributedString(attributedString: symbol("arrow.turn.down.right", label: "From another thread", font: Theme.smallFont, attributes: attributes))
+        text.append(NSAttributedString(string: " From the agent in ", attributes: attributes))
+        var name = attributes
+        name[.tbThreadRef] = header.threadId
+        text.append(NSAttributedString(string: header.title.isEmpty ? header.threadId : header.title, attributes: name))
+        let body = header.body.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !body.isEmpty {
+            text.append(NSAttributedString(string: "\n", attributes: attributes))
+            text.append(MarkdownRenderer.render(body).string)
+        }
+        return text
+    }
+
+    /// An SF Symbol as a text attachment, in the label's faint colour.
     /// Drawn through a handler so the colour follows light and dark at draw
     /// time, like the text beside it.
-    private static func clock(font: NSFont, attributes: [NSAttributedString.Key: Any]) -> NSAttributedString {
+    private static func symbol(_ name: String, label: String, font: NSFont, attributes: [NSAttributedString.Key: Any]) -> NSAttributedString {
         let config = NSImage.SymbolConfiguration(pointSize: font.pointSize, weight: .regular)
-        guard let symbol = NSImage(systemSymbolName: "clock", accessibilityDescription: "Scheduled")?.withSymbolConfiguration(config) else {
+        guard let symbol = NSImage(systemSymbolName: name, accessibilityDescription: label)?.withSymbolConfiguration(config) else {
             return NSAttributedString()
         }
         let size = symbol.size

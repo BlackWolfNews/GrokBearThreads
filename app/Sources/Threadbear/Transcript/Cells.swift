@@ -228,6 +228,12 @@ final class TextRowCell: RowCellView {
         case .user(let message) where message.showsAsNote:
             textView.place(NSRect(x: x, y: RowMetrics.runnerTop, width: width, height: render.textSize.height))
 
+        case .user(let message) where message.agentHeader != nil:
+            box.isHidden = false
+            box.set(fill: Theme.cardBackground, stroke: Theme.cardBorder, radius: RowMetrics.bubbleRadius)
+            box.frame = NSRect(x: x, y: RowMetrics.userTop, width: width, height: render.textSize.height + RowMetrics.cardPad * 2)
+            textView.place(box.frame.insetBy(dx: RowMetrics.cardPad, dy: RowMetrics.cardPad))
+
         case .user(let message):
             var y = RowMetrics.userTop
             if !message.images.isEmpty {

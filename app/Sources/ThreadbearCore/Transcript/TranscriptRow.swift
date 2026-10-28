@@ -77,6 +77,35 @@ public struct UserMessage: Sendable, Hashable {
     /// The schedule's title and time from the message's first line, for
     /// one a schedule sent.
     public var scheduledHeader: ScheduledHeader? { isFromSchedule ? ScheduledHeader(text) : nil }
+
+    /// Sent by another thread's agent (its `send_message` or
+    /// `create_thread`): drawn as a card from that thread, not Mike's bubble.
+    /// The runner gives these no origin, so the header line is what says so.
+    public var agentHeader: AgentHeader? { origin == nil ? AgentHeader(text) : nil }
+}
+
+/// The line the runner starts a message from another thread's agent with,
+/// `[Sent by the agent in the thread "<title>" (<id8>)]`
+/// (docs/protocol.md, "Threadbear tools").
+public struct AgentHeader: Sendable, Hashable {
+    public var title: String
+    /// The sending thread's id, its first 8 characters.
+    public var threadId: String
+    /// The message without the header line.
+    public var body: String
+
+    public init?(_ text: String) {
+        let lines = text.split(separator: "\n", maxSplits: 1, omittingEmptySubsequences: false)
+        let prefix = "[Sent by the agent in the thread \""
+        guard let first = lines.first?.trimmingCharacters(in: .whitespaces),
+              first.hasPrefix(prefix), first.hasSuffix(")]") else { return nil }
+        let inner = first.dropFirst(prefix.count).dropLast(2)
+        // The title may hold quotes and brackets; the id never holds `" (`.
+        guard let split = inner.range(of: "\" (", options: .backwards) else { return nil }
+        title = String(inner[..<split.lowerBound])
+        threadId = String(inner[split.upperBound...])
+        body = lines.count > 1 ? String(lines[1]).trimmingCharacters(in: .newlines) : ""
+    }
 }
 
 public struct ToolItem: Sendable, Hashable {

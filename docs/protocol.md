@@ -1438,7 +1438,9 @@ on; `create_thread` and `move_thread` take Codex accounts, and
 the requests above, so once a restart has begun `create_thread` and
 `send_message` get its "send again in a moment" too. Messages an agent sends
 to another thread (or as a new thread's first message) start with a line
-saying which thread sent them. `delete_thread` always asks for approval,
+saying which thread sent them, `[Sent by the agent in the thread "<title>"
+(<id8>)]` (on one line); the app draws such a message as a card from that
+thread rather than as Mike's. `delete_thread` always asks for approval,
 even in a thread with full access, and no tool can delete, interrupt, snooze
 or archive the thread that's calling it; `tb` inside a thread refuses the
 same. There's no tool for restarting the runner: that's `runner.restart`.
