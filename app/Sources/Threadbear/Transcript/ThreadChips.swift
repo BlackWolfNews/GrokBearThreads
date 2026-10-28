@@ -65,14 +65,14 @@ struct ThreadChipCard: View {
     }
 }
 
-/// The chip's hover card: a small borderless window under the chip, like
-/// a tooltip. NSPopover's glass corners (about 20 pt on macOS 26) and arrow
+/// The hover card of a chip or a link (LinkPeek): a small borderless
+/// window under it, like a tooltip. NSPopover's glass corners (about 20 pt on macOS 26) and arrow
 /// looked heavy for a few lines of text, and it can't be made squarer.
 final class ChipCardWindow: NSPanel {
     static let radius: CGFloat = 8
     static let gap: CGFloat = 4
 
-    static func show(_ card: ThreadChipCard, below chip: NSRect, parent: NSWindow) -> ChipCardWindow {
+    static func show(_ card: some View, below chip: NSRect, parent: NSWindow) -> ChipCardWindow {
         let host = NSHostingView(rootView: card)
         let size = host.fittingSize
         let window = ChipCardWindow(contentRect: NSRect(origin: .zero, size: size),

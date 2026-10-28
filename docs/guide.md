@@ -91,6 +91,10 @@ At the right of each row:
 - **Waiting for room**: every login it could use has hit its limit (see
   Accounts below). It carries on by itself when one has room again.
 
+Inside a thread, rest the pointer on a link for a moment, in a reply or on a
+Needs you card's buttons, to see where it goes: a picture of the file, or
+the page's address. Click it to open it.
+
 ## Hibernate and Archive
 
 To put a thread away for a while, hibernate it (the Thread menu, the ...

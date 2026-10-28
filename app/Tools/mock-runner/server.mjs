@@ -1004,7 +1004,7 @@ async function fakeTurn(threadId, text, images, turnId = 'turn_' + crypto.random
 const DEMO_ASKS = [
   { action: 'Set the other 37 repos to collaborator-only pull requests?', why: "Anyone can open a PR on them today. Your own pushes and merges aren't affected.", options: ['Yes, all 37', 'Just the ones with Actions secrets', 'No, leave them'], suggested: 0, links: [{ title: 'See the list of repos', url: 'https://github.com/mikecann?tab=repositories' }] },
   { action: 'Close issues to collaborators too, with private vulnerability reporting on?', why: 'Turns off public issues on all 41 repos. People could still report security problems privately.', options: ['Yes, close them', 'Leave issues open'], suggested: 0 },
-  { action: 'Sign in to GitHub in Chrome so I can check the settings took', where: 'github.com › Settings', options: ['Done', 'Can you do it?'], links: [{ title: 'Open GitHub sign-in', url: 'https://github.com/login' }, { title: 'See the audit', url: '~/dev/me/misc/security-audit/REPORT.md' }] },
+  { action: 'Sign in to GitHub in Chrome so I can check the settings took', where: 'github.com › Settings', why: "Then I'll tick off each repo in [the audit](~/dev/me/misc/security-audit/REPORT.md).", options: ['Done', 'Can you do it?'], links: [{ title: 'Open GitHub sign-in', url: 'https://github.com/login' }, { title: 'See the audit', url: '~/dev/me/misc/security-audit/REPORT.md' }] },
 ];
 
 function finishTurn(threadId, turnId, started, outcome, said) {

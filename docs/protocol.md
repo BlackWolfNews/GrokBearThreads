@@ -1188,7 +1188,12 @@ A turn the agent finished can say whether Mike has to do anything, so
   several), then its links as buttons and its options (or its `reply`),
   and Something else. A `where` goes on a quiet line under the paragraph.
   Mike found a bold title over a small grey reason backwards (28 Oct):
-  the reason is part of the ask, in the agent's own words, at full size. Picking one puts it in
+  the reason is part of the ask, in the agent's own words, at full size.
+  The paragraph is markdown, and the tool's description asks for the
+  words that name a link's target to link to the same place (29 Oct), so
+  Mike can open it from the sentence as well as the button. Resting the
+  pointer on any link in transcript text, or on a link button, shows a
+  card of where it goes (a file's thumbnail, a page's address). Picking one puts it in
   the composer as a chip; with Something else, what he writes in the
   composer is that ask's answer (one ask at a time);
   the composer stays the only place to write, so his own words and images

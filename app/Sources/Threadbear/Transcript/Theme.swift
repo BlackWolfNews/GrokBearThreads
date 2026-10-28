@@ -314,6 +314,9 @@ extension NSAttributedString.Key {
     /// A word shaped like a thread id (`ThreadRefs`). The value is the word;
     /// it's drawn as a chip only if it names a thread (`ThreadChips`).
     static let tbThreadRef = NSAttributedString.Key("tbThreadRef")
+    /// Where an asks card's link button goes, for its hover card: a
+    /// `LinkPeek`. Text links are peeked from their `.link`.
+    static let tbPeek = NSAttributedString.Key("tbPeek")
 }
 
 /// How a button on an asks card is drawn (`.tbButton`).

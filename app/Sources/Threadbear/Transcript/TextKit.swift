@@ -194,6 +194,7 @@ final class TranscriptTextView: NSTextView {
     }
 
     override func clicked(onLink link: Any, at charIndex: Int) {
+        closeChipCard()
         // NSTextView follows web links itself, but ignores file URLs.
         if let url = link as? URL, let text = FilePathRefs.text(of: url) {
             _ = openPathRef(text)
@@ -372,6 +373,7 @@ final class TranscriptTextView: NSTextView {
     override func mouseDown(with event: NSEvent) {
         let point = convert(event.locationInWindow, from: nil)
         if let onAction, let action = character(at: point).flatMap({ textStorage?.attribute(.tbAction, at: $0, effectiveRange: nil) as? String }) {
+            closeChipCard()
             onAction(action)
             return
         }
@@ -479,7 +481,7 @@ final class TranscriptTextView: NSTextView {
         let point = convert(event.locationInWindow, from: nil)
         let chip = chip(at: point)
         if chip != nil || isAction(at: point) { NSCursor.pointingHand.set() }
-        hoverChip(chip)
+        if let chip { hoverChip(chip) } else { hoverPeek(peek(at: point)) }
     }
 
     /// Over a clickable run (an asks card's buttons, "Show 30 more lines").
@@ -512,22 +514,61 @@ final class TranscriptTextView: NSTextView {
     /// The card shows after the pointer rests on a chip for a moment, like
     /// a tooltip, and goes when it leaves.
     private func hoverChip(_ chip: (range: NSRange, threadId: String)?) {
-        guard chip?.range != hoveredChip else { return }
+        hover(chip?.range, after: 0.35) { [weak self] in if let chip { self?.showChipCard(chip) } }
+    }
+
+    /// A link's card waits a little longer than a chip's: links are
+    /// everywhere in replies, and one shouldn't pop up under every pass of
+    /// the pointer while Mike reads.
+    private func hoverPeek(_ link: (range: NSRange, peek: LinkPeek)?) {
+        hover(link?.range, after: 0.5) { [weak self] in if let link { self?.showPeekCard(link) } }
+    }
+
+    private func hover(_ range: NSRange?, after delay: TimeInterval, show: @escaping @MainActor () -> Void) {
+        guard range != hoveredChip else { return }
         closeChipCard()
-        guard let chip else { return }
-        hoveredChip = chip.range
-        chipTimer = Timer.scheduledTimer(withTimeInterval: 0.35, repeats: false) { [weak self] _ in
-            MainActor.assumeIsolated { self?.showChipCard(chip) }
+        guard let range else { return }
+        hoveredChip = range
+        chipTimer = Timer.scheduledTimer(withTimeInterval: delay, repeats: false) { _ in
+            MainActor.assumeIsolated { show() }
         }
     }
 
     private func showChipCard(_ chip: (range: NSRange, threadId: String)) {
-        guard hoveredChip == chip.range, window != nil, let rect = chipRect(chip.range),
-              let card = ThreadChipCard.make(threadId: chip.threadId) else { return }
-        guard let window else { return }
+        guard let card = ThreadChipCard.make(threadId: chip.threadId) else { return }
+        showCard(card, under: chip.range)
+    }
+
+    private func showPeekCard(_ link: (range: NSRange, peek: LinkPeek)) {
+        showCard(LinkPeekCard(peek: link.peek), under: link.range)
+    }
+
+    private func showCard(_ card: some View, under range: NSRange) {
+        guard hoveredChip == range, let window, let rect = chipRect(range) else { return }
         let pill = rect.insetBy(dx: -MarkdownRenderer.pillPad, dy: -1.5)
         let onScreen = window.convertToScreen(convert(pill, to: nil))
         chipCard = ChipCardWindow.show(card, below: onScreen, parent: window)
+    }
+
+    /// The link under `point` and where it goes: an asks card's link
+    /// button (`.tbPeek`), a web link, or a file link or path in inline
+    /// code that names a file.
+    private func peek(at point: NSPoint) -> (range: NSRange, peek: LinkPeek)? {
+        character(at: point).flatMap(peek(atCharacter:))
+    }
+
+    private func peek(atCharacter index: Int) -> (range: NSRange, peek: LinkPeek)? {
+        guard let storage = textStorage, index < storage.length else { return nil }
+        var range = NSRange()
+        if let peek = storage.attribute(.tbPeek, at: index, effectiveRange: &range) as? LinkPeek { return (range, peek) }
+        // The longest range, as a link's words can change font part way
+        // (a bold word in it) and the card belongs to the whole link.
+        guard let link = storage.attribute(.link, at: index, longestEffectiveRange: &range,
+                                           in: NSRange(location: 0, length: storage.length)) else { return nil }
+        let words = storage.attributedSubstring(from: range).string.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let web = webURL(link) { return (range, LinkPeek(url: web, title: words)) }
+        guard let url = link as? URL, url.isFileURL || FilePathRefs.text(of: url) != nil, let path = fileLinkPath(url) else { return nil }
+        return (range, LinkPeek(url: URL(fileURLWithPath: path), title: words))
     }
 
     #if DEBUG
@@ -543,6 +584,36 @@ final class TranscriptTextView: NSTextView {
         hoveredChip = chip.range
         showChipCard(chip)
         return chipCard?.windowNumber
+    }
+
+    /// The links in this text that have a hover card: their words, then
+    /// where they go.
+    func debugPeeks() -> [(words: String, url: URL)] {
+        guard let storage = textStorage, storage.length > 0 else { return [] }
+        var found: [(String, URL)] = []
+        var seen = Set<Int>()
+        for index in 0..<storage.length where !seen.contains(index) {
+            guard let link = peek(atCharacter: index) else { continue }
+            seen.formUnion(link.range.location..<NSMaxRange(link.range))
+            found.append((storage.attributedSubstring(from: link.range).string.trimmingCharacters(in: .whitespacesAndNewlines.union(.init(charactersIn: "\u{00A0}↗"))), link.peek.url))
+        }
+        return found
+    }
+
+    /// Shows the card of the link whose words are `words`, as a hover
+    /// would; returns its window number.
+    func debugShowPeek(_ words: String) -> Int? {
+        guard let storage = textStorage else { return nil }
+        for index in 0..<storage.length {
+            guard let link = peek(atCharacter: index),
+                  // A button's title has no-break spaces.
+                  storage.attributedSubstring(from: link.range).string.replacingOccurrences(of: "\u{00A0}", with: " ").contains(words) else { continue }
+            closeChipCard()
+            hoveredChip = link.range
+            showPeekCard(link)
+            return chipCard?.windowNumber
+        }
+        return nil
     }
 
     func debugClickChip(_ word: String) {

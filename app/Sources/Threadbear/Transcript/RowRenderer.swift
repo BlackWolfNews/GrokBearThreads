@@ -1118,6 +1118,7 @@ enum RowRenderer {
         var title: String
         var action: String
         var style: AskButtonStyle
+        var peek: LinkPeek?
     }
 
     /// The asks a turn ended on (docs/protocol.md, "Needs you"). Open, each
@@ -1163,8 +1164,10 @@ enum RowRenderer {
             // Links on a row of their own, over the answers: going to look
             // comes before answering.
             var links: [AskButton] = []
-            for (n, link) in ask.links.enumerated() where link.target != nil {
-                links.append(AskButton(title: link.title + " ↗", action: "link:\(i):\(n)", style: n == 0 ? .primary : .plain))
+            for (n, link) in ask.links.enumerated() {
+                guard let target = link.target else { continue }
+                links.append(AskButton(title: link.title + " ↗", action: "link:\(i):\(n)", style: n == 0 ? .primary : .plain,
+                                       peek: LinkPeek(url: target, title: link.title)))
             }
             var answers = Decisions.choices(for: ask).enumerated().map { n, choice in
                 let style: AskButtonStyle = card.picks[i] == n ? .picked : ask.suggested == n ? .suggested : .plain
@@ -1180,10 +1183,12 @@ enum RowRenderer {
                     if k > 0 { output.append(NSAttributedString(string: "    ", attributes: [.font: button, .paragraphStyle: buttonStyle, .baselineOffset: buttonOffset])) }
                     // Spaces inside the run are the button's padding; the
                     // no-break ones keep a short title from wrapping apart.
-                    output.append(NSAttributedString(string: "\u{00A0}\u{00A0}\u{00A0}" + item.title.replacingOccurrences(of: " ", with: "\u{00A0}") + "\u{00A0}\u{00A0}\u{00A0}", attributes: [
+                    var attributes: [NSAttributedString.Key: Any] = [
                         .font: button, .foregroundColor: item.style.textColor, .paragraphStyle: buttonStyle, .baselineOffset: buttonOffset,
                         .tbAction: item.action, .tbButton: item.style.rawValue,
-                    ]))
+                    ]
+                    if let peek = item.peek { attributes[.tbPeek] = peek }
+                    output.append(NSAttributedString(string: "\u{00A0}\u{00A0}\u{00A0}" + item.title.replacingOccurrences(of: " ", with: "\u{00A0}") + "\u{00A0}\u{00A0}\u{00A0}", attributes: attributes))
                 }
             }
         }

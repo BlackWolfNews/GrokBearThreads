@@ -11,6 +11,12 @@ enum MarkdownRenderer {
     /// clickable but cannot be opened. Give the transcript's file opener a
     /// file URL, keeping URL escaping and HTML fragments intact.
     private static func linkURL(_ destination: String) -> URL? {
+        // end_turn's links take ~ paths, so an ask's words linked to the
+        // same place (needs.ts) may well use one too.
+        if destination.hasPrefix("~/") {
+            let path = destination.removingPercentEncoding ?? destination
+            return URL(fileURLWithPath: (path as NSString).expandingTildeInPath)
+        }
         guard var components = URLComponents(string: destination) else { return nil }
         if components.scheme == nil, destination.hasPrefix("/") {
             components.scheme = "file"

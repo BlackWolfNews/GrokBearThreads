@@ -643,6 +643,8 @@ enum Automation {
             return "ok \(step + 1)/\(tour.shown.count) \(current.title) lit: \(lit)"
         case "chip":
             return chip(c, app: app)
+        case "peek":
+            return peek(c, app: app)
         case "select-text":
             return select(c, app: app)
         case "account-ids":
@@ -1135,6 +1137,29 @@ enum Automation {
             return "ok"
         }
         guard let window = cell.textView.debugShowChip(word) else { return "error the card didn't show" }
+        return "ok window \(window)"
+    }
+
+    /// Links with a hover card in a transcript row's text (an asks card's
+    /// link buttons too): `{"row": id}` lists them (words, then where they
+    /// go); with `"words"` (part of a link's words), shows that link's
+    /// card and says its window number, and `"show": false` closes it.
+    private static func peek(_ c: [String: Any], app: AppModel) -> String {
+        guard let prefix = c["row"] as? String else { return "error row is required" }
+        guard let row = displayedRow(prefix, app), let index = app.transcript.session?.displayIndex(of: row.id) else { return "error no such row" }
+        app.transcript.scroll(toRow: index, offset: 120)
+        guard let cell = app.transcript.tableView.view(atColumn: 0, row: index, makeIfNecessary: true) as? TextRowCell else {
+            return "error \(row.id) isn't a text row"
+        }
+        if c["show"] as? Bool == false {
+            cell.textView.closeChipCard()
+            return "ok"
+        }
+        guard let words = c["words"] as? String else {
+            let peeks = cell.textView.debugPeeks()
+            return peeks.isEmpty ? "ok none" : "ok " + peeks.map { "\($0.words)=\($0.url.isFileURL ? $0.url.path : $0.url.absoluteString)" }.joined(separator: " | ")
+        }
+        guard let window = cell.textView.debugShowPeek(words) else { return "error no link with \(words) in \(row.id)" }
         return "ok window \(window)"
     }
 

@@ -20,6 +20,16 @@ final class TranscriptLinkTests: XCTestCase {
         XCTAssertEqual(text.path, "/tmp/notes.txt")
     }
 
+    /// end_turn's links take ~ paths, and the ask's words link to the same.
+    func testHomePathsAreFileURLs() throws {
+        let home = FileManager.default.homeDirectoryForCurrentUser.path
+        for destination in ["~/shots/pair one.png", "~/shots/pair%20one.png"] {
+            let url = try link("[the pairing screenshot](<\(destination)>)")
+            XCTAssertTrue(url.isFileURL)
+            XCTAssertEqual(url.path, home + "/shots/pair one.png")
+        }
+    }
+
     func testSpacesAndPercentEscapesAreDecodedOnce() throws {
         for destination in ["/tmp/Review Files/index.html", "/tmp/Review%20Files/index.html"] {
             let url = try link("[Review](<\(destination)>)")
