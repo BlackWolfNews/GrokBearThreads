@@ -1,0 +1,331 @@
+import Foundation
+
+/// A panel's id. The app decides what each one shows; the layout only says
+/// where it sits.
+public typealias PanelID = String
+
+/// Which way a split lays out its children: side by side, or one above the other.
+public enum SplitAxis: String, Codable, Sendable {
+    case horizontal, vertical
+}
+
+/// A side of a group, or of the whole window, to dock against.
+public enum DockEdge: String, Codable, Sendable, CaseIterable {
+    case left, right, top, bottom
+
+    public var axis: SplitAxis { self == .left || self == .right ? .horizontal : .vertical }
+    /// Left and top put the new panel first in the split.
+    public var isLeading: Bool { self == .left || self == .top }
+}
+
+/// One or more panels in the same space, as tabs when there are several.
+public struct DockGroup: Codable, Equatable, Sendable, Identifiable {
+    public var id: String
+    public var panels: [PanelID]
+    public var selected: PanelID
+
+    public init(id: String, panels: [PanelID], selected: PanelID? = nil) {
+        self.id = id
+        self.panels = panels
+        self.selected = selected ?? panels.first ?? ""
+    }
+}
+
+/// Children laid out along one axis, each taking a fraction of the space.
+/// Fractions always add up to 1.
+public struct DockSplit: Codable, Equatable, Sendable, Identifiable {
+    public var id: String
+    public var axis: SplitAxis
+    public var children: [DockNode]
+    public var fractions: [Double]
+
+    public init(id: String, axis: SplitAxis, children: [DockNode], fractions: [Double]? = nil) {
+        self.id = id
+        self.axis = axis
+        self.children = children
+        self.fractions = fractions ?? Array(repeating: 1 / Double(max(children.count, 1)), count: children.count)
+    }
+}
+
+/// The layout is a tree: splits all the way down to groups of panels. Any
+/// depth is allowed; `normalised()` keeps it tidy (no empty groups, no
+/// one-child splits, no split directly inside another along the same axis).
+public indirect enum DockNode: Codable, Equatable, Sendable, Identifiable {
+    case group(DockGroup)
+    case split(DockSplit)
+
+    public var id: String {
+        switch self {
+        case .group(let g): g.id
+        case .split(let s): s.id
+        }
+    }
+}
+
+/// Where a dragged panel lands.
+public enum DockDrop: Equatable, Sendable, Hashable {
+    /// Beside a group, splitting the space it had.
+    case edge(group: String, DockEdge)
+    /// Into a group, as another tab.
+    case tab(group: String)
+    /// Trading places with the panel showing in a group.
+    case swap(group: String)
+    /// Along a whole side of the window, the full height or width.
+    case window(DockEdge)
+}
+
+public struct DockLayout: Codable, Equatable, Sendable {
+    public var root: DockNode
+
+    public init(root: DockNode) {
+        self.root = root
+    }
+
+    // MARK: Reading
+
+    /// Every panel in the layout, in tree order.
+    public var panels: [PanelID] { Self.panels(in: root) }
+
+    public func contains(_ panel: PanelID) -> Bool { group(containing: panel) != nil }
+
+    public func group(id: String) -> DockGroup? { Self.groups(in: root).first { $0.id == id } }
+
+    public func group(containing panel: PanelID) -> DockGroup? {
+        Self.groups(in: root).first { $0.panels.contains(panel) }
+    }
+
+    public var groups: [DockGroup] { Self.groups(in: root) }
+
+    /// False for a drop that would leave everything where it is, so the UI
+    /// doesn't offer it.
+    public func canDrop(_ panel: PanelID, _ drop: DockDrop) -> Bool {
+        guard let source = group(containing: panel) else { return false }
+        switch drop {
+        case .edge(let target, _):
+            guard group(id: target) != nil else { return false }
+            // Splitting a group by a panel it alone holds goes nowhere.
+            return !(target == source.id && source.panels.count == 1)
+        case .tab(let target), .swap(let target):
+            return group(id: target) != nil && target != source.id
+        case .window:
+            // The only panel there is can't go anywhere else.
+            if case .group(let g) = root, g.panels == [panel] { return false }
+            return true
+        }
+    }
+
+    // MARK: Changing
+
+    /// Moves a panel already in the layout. Does nothing for a drop
+    /// `canDrop` refuses. `newID` names any group or split this makes.
+    public mutating func move(_ panel: PanelID, _ drop: DockDrop, newID: () -> String = { UUID().uuidString }) {
+        guard canDrop(panel, drop) else { return }
+        if case .swap(let target) = drop {
+            swap(panel, into: target)
+            return
+        }
+        guard let rest = Self.removing(panel, from: root) else { return }
+        root = rest
+        insert(panel, drop, newID: newID)
+    }
+
+    /// Puts a panel that isn't in the layout yet (a new one, or one that was
+    /// closed) somewhere. A panel already in it is moved instead.
+    public mutating func add(_ panel: PanelID, _ drop: DockDrop, newID: () -> String = { UUID().uuidString }) {
+        if contains(panel) {
+            move(panel, drop, newID: newID)
+        } else {
+            insert(panel, drop, newID: newID)
+        }
+    }
+
+    /// Takes a panel out. The last panel can't be closed: there'd be no layout left.
+    public mutating func close(_ panel: PanelID) {
+        guard let rest = Self.removing(panel, from: root) else { return }
+        root = rest
+    }
+
+    /// Shows a panel that's a tab in its group.
+    public mutating func select(_ panel: PanelID) {
+        root = Self.mapGroups(root) { g in
+            var g = g
+            if g.panels.contains(panel) { g.selected = panel }
+            return g
+        }
+    }
+
+    /// From a divider being dragged. Keeps the sum at 1.
+    public mutating func setFractions(split id: String, _ fractions: [Double]) {
+        root = Self.mapSplits(root) { s in
+            guard s.id == id, s.children.count == fractions.count else { return s }
+            var s = s
+            s.fractions = Self.normalisedFractions(fractions)
+            return s
+        }
+    }
+
+    // MARK: Internals
+
+    private mutating func insert(_ panel: PanelID, _ drop: DockDrop, newID: () -> String) {
+        let fresh = DockNode.group(DockGroup(id: newID(), panels: [panel]))
+        switch drop {
+        case .edge(let target, let edge):
+            root = Self.inserting(fresh, beside: target, edge, in: root, newID: newID)
+        case .tab(let target):
+            root = Self.mapGroups(root) { g in
+                guard g.id == target else { return g }
+                var g = g
+                g.panels.append(panel)
+                g.selected = panel
+                return g
+            }
+        case .swap:
+            break
+        case .window(let edge):
+            // A new outer child takes a quarter; the rest keeps its proportions.
+            if case .split(var s) = root, s.axis == edge.axis {
+                s.fractions = s.fractions.map { $0 * 0.75 }
+                if edge.isLeading {
+                    s.children.insert(fresh, at: 0)
+                    s.fractions.insert(0.25, at: 0)
+                } else {
+                    s.children.append(fresh)
+                    s.fractions.append(0.25)
+                }
+                root = .split(s)
+            } else {
+                let children = edge.isLeading ? [fresh, root] : [root, fresh]
+                let fractions = edge.isLeading ? [0.25, 0.75] : [0.75, 0.25]
+                root = .split(DockSplit(id: newID(), axis: edge.axis, children: children, fractions: fractions))
+            }
+        }
+        root = Self.normalised(root)
+    }
+
+    private mutating func swap(_ panel: PanelID, into target: String) {
+        guard let source = group(containing: panel), let other = group(id: target)?.selected else { return }
+        root = Self.mapGroups(root) { g in
+            var g = g
+            if g.id == source.id {
+                g.panels = g.panels.map { $0 == panel ? other : $0 }
+                if g.selected == panel { g.selected = other }
+            } else if g.id == target {
+                g.panels = g.panels.map { $0 == other ? panel : $0 }
+                g.selected = panel
+            }
+            return g
+        }
+    }
+
+    static func inserting(_ fresh: DockNode, beside target: String, _ edge: DockEdge, in node: DockNode, newID: () -> String) -> DockNode {
+        switch node {
+        case .group(let g):
+            // Reached the target without a parent split along this axis to join.
+            guard g.id == target else { return node }
+            let children = edge.isLeading ? [fresh, node] : [node, fresh]
+            return .split(DockSplit(id: newID(), axis: edge.axis, children: children))
+        case .split(var s):
+            // The target is a direct child and this split runs the same way:
+            // join it as a sibling, sharing the target's space, rather than
+            // nesting another split.
+            if s.axis == edge.axis, let i = s.children.firstIndex(where: { $0.id == target }) {
+                let half = s.fractions[i] / 2
+                s.fractions[i] = half
+                let at = edge.isLeading ? i : i + 1
+                s.children.insert(fresh, at: at)
+                s.fractions.insert(half, at: at)
+                return .split(s)
+            }
+            s.children = s.children.map { inserting(fresh, beside: target, edge, in: $0, newID: newID) }
+            return .split(s)
+        }
+    }
+
+    /// The node without the panel, tidied, or nil if nothing is left.
+    static func removing(_ panel: PanelID, from node: DockNode) -> DockNode? {
+        switch node {
+        case .group(var g):
+            guard let i = g.panels.firstIndex(of: panel) else { return node }
+            g.panels.remove(at: i)
+            if g.panels.isEmpty { return nil }
+            // The neighbour takes over, as closing a tab does in an editor.
+            if g.selected == panel { g.selected = g.panels[min(i, g.panels.count - 1)] }
+            return .group(g)
+        case .split(var s):
+            var children: [DockNode] = []
+            var fractions: [Double] = []
+            for (child, f) in zip(s.children, s.fractions) {
+                if let kept = removing(panel, from: child) {
+                    children.append(kept)
+                    fractions.append(f)
+                }
+            }
+            if children.isEmpty { return nil }
+            s.children = children
+            s.fractions = fractions
+            return normalised(.split(s))
+        }
+    }
+
+    /// No one-child splits, no split inside another along the same axis,
+    /// fractions adding up to 1. Applied all the way down.
+    static func normalised(_ node: DockNode) -> DockNode {
+        guard case .split(var s) = node else { return node }
+        var children: [DockNode] = []
+        var fractions: [Double] = []
+        for (child, f) in zip(s.children.map(normalised), s.fractions) {
+            if case .split(let inner) = child, inner.axis == s.axis {
+                // Same direction: its children become ours, scaled to its share.
+                children += inner.children
+                fractions += inner.fractions.map { $0 * f }
+            } else {
+                children.append(child)
+                fractions.append(f)
+            }
+        }
+        if children.count == 1 { return children[0] }
+        s.children = children
+        s.fractions = normalisedFractions(fractions)
+        return .split(s)
+    }
+
+    static func normalisedFractions(_ fractions: [Double]) -> [Double] {
+        let sum = fractions.reduce(0, +)
+        guard sum > 0 else { return fractions.map { _ in 1 / Double(max(fractions.count, 1)) } }
+        return fractions.map { $0 / sum }
+    }
+
+    static func mapGroups(_ node: DockNode, _ f: (DockGroup) -> DockGroup) -> DockNode {
+        switch node {
+        case .group(let g): .group(f(g))
+        case .split(var s):
+            {
+                s.children = s.children.map { mapGroups($0, f) }
+                return .split(s)
+            }()
+        }
+    }
+
+    static func mapSplits(_ node: DockNode, _ f: (DockSplit) -> DockSplit) -> DockNode {
+        switch node {
+        case .group: node
+        case .split(let s):
+            {
+                var s = f(s)
+                s.children = s.children.map { mapSplits($0, f) }
+                return .split(s)
+            }()
+        }
+    }
+
+    static func groups(in node: DockNode) -> [DockGroup] {
+        switch node {
+        case .group(let g): [g]
+        case .split(let s): s.children.flatMap(groups(in:))
+        }
+    }
+
+    static func panels(in node: DockNode) -> [PanelID] {
+        groups(in: node).flatMap(\.panels)
+    }
+}
