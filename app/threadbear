@@ -18,6 +18,16 @@ case "${1:-start}" in
   restart)
     exec bash "$SCRIPT_DIR/restart.sh"
     ;;
+  setup)
+    # Sets Threadbear up from a clone (scripts/setup.mjs): your own Convex
+    # project, keys, the runner and the app. Safe to run again.
+    shift
+    if ! command -v node >/dev/null 2>&1 || [[ "$(node -p 'process.versions.node.split(".")[0]')" -lt 24 ]]; then
+      echo "Threadbear needs Node 24 or newer: https://nodejs.org (or nvm install 24), then run this again." >&2
+      exit 1
+    fi
+    exec node "$SCRIPT_DIR/../scripts/setup.mjs" "$@"
+    ;;
   mock)
     # Opens the app against the mock runner with a temp data folder.
     shift

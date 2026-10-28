@@ -8,20 +8,23 @@ import { CLI_POLICIES, isEffortLevel, isProvider, type CliPolicy, type EffortLev
 
 // <package version>+<release id>, or +source when run from a checkout.
 export const RUNNER_VERSION = RELEASE.version;
-export const DEFAULT_CWD = '~/dev/me/misc';
+// Where a new thread starts when nothing says otherwise. Mike's own default
+// (~/dev/me/misc) is in his runner.json's defaults.cwd; setup asks.
+export const DEFAULT_CWD = '~';
 export const DEFAULT_PORT = 8797;
 export const DEFAULT_MAX_LIVE = 6;
 
-// Notes shown with an account in the app's account menu. In the code rather
-// than Mike's runner.json so nobody has to edit that; a runner.json
-// accountNotes replaces the whole map.
-export const DEFAULT_ACCOUNT_NOTES: Record<string, string> = { 'claude-2': 'Convex work only' };
+// Notes shown with an account in the app's account menu (runner.json
+// accountNotes, e.g. Mike's { "claude-2": "Convex work only" }). None by
+// default: they're one person's.
+export const DEFAULT_ACCOUNT_NOTES: Record<string, string> = {};
 
 // Folders whose new threads start on a built-in pool, by the login that
-// pool is made from (pools.ts, defaultPools): claude-2's pool, Convex,
-// takes anything under ~/dev/convex. In the code for the same reason as
-// the notes; a runner.json `pools` list carries its own folders.
-export const DEFAULT_POOL_FOLDERS: Record<string, string[]> = { 'claude-2': ['~/dev/convex'] };
+// pool is made from (pools.ts, defaultPools), from runner.json poolFolders
+// (Mike's: { "claude-2": ["~/dev/convex"] }). None by default; until
+// 28 Oct Mike's were in the code and would have applied to anyone's second
+// login. A runner.json `pools` list carries its own folders.
+export const DEFAULT_POOL_FOLDERS: Record<string, string[]> = {};
 
 export type CliUpdatesConfig = {
   claude: CliPolicy;
@@ -71,6 +74,7 @@ export type Config = {
   tokenStatsLimitsFile: string; // Token Stats' limits.json, read only
   cliUpdates: CliUpdatesConfig;
   accountNotes: Record<string, string>;
+  poolFolders?: Record<string, string[]>;
   // runner.json's pools as written (pools.ts readPools checks each);
   // absent means the built-in ones. pools.save replaces it.
   pools?: unknown[];
@@ -111,6 +115,7 @@ export type RunnerJson = {
   codexArgs?: string[];
   cliUpdates?: Partial<CliUpdatesConfig>;
   accountNotes?: Record<string, string>;
+  poolFolders?: Record<string, string[]>;
   pools?: unknown[];
   followMain?: boolean;
   models?: { pool?: string | null; dailyBudgetUsd?: number; privateFolders?: string[] };
@@ -207,6 +212,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     ),
     cliUpdates: cliUpdatesConfig(json.cliUpdates, env.THREADBEAR_CLI_UPDATES),
     accountNotes: stringMap(json.accountNotes) ?? { ...DEFAULT_ACCOUNT_NOTES },
+    poolFolders: folderMap(json.poolFolders) ?? { ...DEFAULT_POOL_FOLDERS },
     ...(Array.isArray(json.pools) && json.pools.length ? { pools: json.pools } : {}),
     sync: syncConfig(json.sync, env),
   };
@@ -239,6 +245,14 @@ function providerMap<V>(raw: unknown, read: (v: unknown) => V | undefined): Part
     if (isProvider(p) && value !== undefined) out[p] = value;
   }
   return Object.keys(out).length ? out : undefined;
+}
+
+// runner.json poolFolders: login id to folders. Anything else is ignored.
+function folderMap(v: unknown): Record<string, string[]> | undefined {
+  if (!v || typeof v !== 'object' || Array.isArray(v)) return undefined;
+  const out: Record<string, string[]> = {};
+  for (const [k, list] of Object.entries(v)) if (Array.isArray(list)) out[k] = list.filter((x): x is string => typeof x === 'string');
+  return out;
 }
 
 function stringMap(raw: unknown): Record<string, string> | undefined {

@@ -6,7 +6,8 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import type { Account, Pool, UsageWindow } from '../../src/protocol.ts';
-import { DEFAULT_POOL_FOLDERS } from '../../src/config.ts';
+// Mike's pool folders, as his runner.json has them (poolFolders).
+const DEFAULT_POOL_FOLDERS: Record<string, string[]> = { 'claude-2': ['~/dev/convex'] };
 import {
   UNKNOWN_WAIT_MS,
   WAIT_SLACK_MS,

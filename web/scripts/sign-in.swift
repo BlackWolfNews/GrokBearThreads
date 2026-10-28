@@ -15,9 +15,18 @@
 import AppKit
 import CoreImage
 
-// The Sydney deployments (docs/convex-backend.md).
-let prodURL = "https://opulent-moose-249.ap-southeast-2.convex.site"
-let devURL = "https://earnest-puffin-640.ap-southeast-2.convex.site"
+// The sites of this install's deployments: production from runner.json's
+// sync.url (what setup wrote), dev from the repo's .env.local. Both
+// .convex.cloud addresses turned into .convex.site, where the website is.
+func siteOf(_ cloud: String?) -> String? {
+    guard let cloud, cloud.contains(".convex.cloud") else { return nil }
+    return cloud.replacingOccurrences(of: ".convex.cloud", with: ".convex.site").trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+}
+let dataDir = ProcessInfo.processInfo.environment["THREADBEAR_HOME"] ?? (NSHomeDirectory() + "/Library/Application Support/Threadbear")
+let runnerJson = (try? JSONSerialization.jsonObject(with: Data(contentsOf: URL(fileURLWithPath: dataDir + "/runner.json")))) as? [String: Any]
+let prodURL = siteOf((runnerJson?["sync"] as? [String: Any])?["url"] as? String)
+let envLocal = (try? String(contentsOfFile: URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent().path + "/.env.local", encoding: .utf8)) ?? ""
+let devURL = siteOf(envLocal.split(separator: "\n").first { $0.hasPrefix("CONVEX_URL=") }.map { String($0.dropFirst("CONVEX_URL=".count)).components(separatedBy: " ").first ?? "" })
 
 let args = Array(CommandLine.arguments.dropFirst())
 let qr = args.contains("--qr")
@@ -30,7 +39,9 @@ func value(_ flag: String, _ fallback: String) -> String {
 let name = value("--name", qr ? "web-qr" : "web-mac") + (prod ? "" : "-dev")
 let days = Int(value("--days", "90")) ?? 90
 let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
-let site = local ? "http://localhost:5181" : prod ? prodURL : devURL
+guard let site = local ? "http://localhost:5181" : prod ? prodURL : devURL else {
+    fail(prod ? "No sync.url in \(dataDir)/runner.json. Run ./threadbear setup first." : "No CONVEX_URL in the repo's .env.local.")
+}
 
 func fail(_ message: String) -> Never {
     FileHandle.standardError.write((message + "\n").data(using: .utf8)!)

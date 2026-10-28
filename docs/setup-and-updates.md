@@ -188,9 +188,13 @@ Nothing is open now. Next is building, in the order below.
    from the version after 1.0.0 (falling back to API 1's `phone:thread` on an older
    backend).
 3. Push relay with encrypted messages, and the phone's notification extension.
-4. `./threadbear setup`: makes the Convex project in your account, the keys, the deploy,
-   the runner and the app; the pairing QR code in the Mac app; Mike's defaults moved
-   into `runner.json`.
+4. Done 28 Oct: `./threadbear setup` (scripts/setup.mjs) makes the Convex project in
+   your account with a production deployment, the deploy and runner keys, runner.json,
+   deploys the backend and website, and installs the runner and the app; tested end to
+   end in a sandbox against a new project except the install step. Mike's defaults
+   (default folder, account notes, pool folders) moved from the code into his
+   runner.json. Still to do: the pairing QR code inside the Mac app (setup prints the
+   pair-qr command meanwhile).
 5. Upstream updates: fetch, "new changes from Mike", the merge thread.
 6. The heavy bits over Tailscale for the phone and the website.
 7. Tinker Desk as a second runner on the same backend.

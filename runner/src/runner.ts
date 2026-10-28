@@ -1141,7 +1141,7 @@ export class Runner {
   // The pools in force: runner.json's, else the built-in ones from the
   // logins found.
   private pools(all = this.safeAccounts()): Pool[] {
-    return readPools({ pools: this.cfg.pools, accountNotes: this.cfg.accountNotes }, all, DEFAULT_POOL_FOLDERS);
+    return readPools({ pools: this.cfg.pools, accountNotes: this.cfg.accountNotes }, all, this.cfg.poolFolders ?? DEFAULT_POOL_FOLDERS);
   }
 
   listPools(): { pools: Pool[] } {
