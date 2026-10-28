@@ -579,6 +579,8 @@ enum Automation {
             return "ok \(zoom.percent)"
         case "hover":
             return hover(c, app: app)
+        case "swipe":
+            return await swipe(c, app: app)
         case "decide":
             return decide(c, app: app)
         case "hints":
@@ -1009,6 +1011,39 @@ enum Automation {
         guard let id = match.id else { return match.error }
         app.hoverOverride = id
         return "ok \(id)"
+    }
+
+    /// Two fingers across a sidebar row (`{"id": thread, "dx": -150}`, left
+    /// negative): synthetic trackpad events posted to the app, so they go
+    /// through the same monitor as a real swipe. `"lift": false` leaves the
+    /// fingers down, for a shot of the row part way along; a later swipe
+    /// with `"lift": true` (and any `dx`, 0 included) carries on and lets go.
+    /// Says where the row ended up and whether it's past the line.
+    private static func swipe(_ c: [String: Any], app: AppModel) async -> String {
+        let match = Self.thread(c["id"], app)
+        guard let id = match.id else { return match.error }
+        app.hoverOverride = id
+        try? await Task.sleep(for: .milliseconds(100))
+        guard let row = RowSwipeController.listening else { return "error \(id) has no swipe here (is its row drawn?)" }
+        let dx = number(c["dx"]) ?? 0
+        let steps = max(1, Int(number(c["steps"]) ?? 8))
+        let fresh = row.swipe.phase == .idle
+        if fresh { post(RowSwipeEvents.event(dx: 0, phase: .began)) }
+        for _ in 0..<steps {
+            post(RowSwipeEvents.event(dx: dx / Double(steps), phase: .changed))
+            try? await Task.sleep(for: .milliseconds(16))
+        }
+        let along = "offset \(Int(row.offset)) armed \(row.swipe.armed)"
+        guard c["lift"] as? Bool ?? true else { return "ok \(along)" }
+        post(RowSwipeEvents.event(dx: 0, phase: .ended))
+        try? await Task.sleep(for: .milliseconds(500))
+        app.hoverOverride = nil
+        return "ok \(along), let go: \(app.threads[id]?.isArchived == true ? "archived" : "not archived")"
+    }
+
+    private static func post(_ event: NSEvent?) {
+        guard let event else { return }
+        NSApp.postEvent(event, atStart: false)
     }
 
     /// Selects `words` in a message row's text and shows the selection bar

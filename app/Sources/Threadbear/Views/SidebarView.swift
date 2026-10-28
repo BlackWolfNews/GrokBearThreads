@@ -339,6 +339,8 @@ struct ThreadRowView: View {
     /// A brief accent wash over a row that's just finished, so a reply
     /// landing in the inbox catches the eye.
     @State private var landed = false
+    /// Two fingers sliding the row left to archive it (RowSwipe.swift).
+    @State private var swipe = RowSwipeController()
     @Environment(\.sidebarRowSpace) private var listSpace
     /// Not in Projects: a thread in two projects has a row under each, and
     /// two rows can't both be the one the highlight and the glide follow.
@@ -347,7 +349,9 @@ struct ThreadRowView: View {
     /// Not while one of its sub-agents is showing: that row is highlighted.
     private var isSelected: Bool { app.selection == thread.id && app.subagentSelection == nil && app.openProjectId == nil && !app.showsProjectsHome }
     /// The screenshot run shows one row as if the pointer were over it.
-    private var showsActions: Bool { hovering || app.hoverOverride == thread.id }
+    private var pointerOver: Bool { hovering || app.hoverOverride == thread.id }
+    /// Not while it's being swiped: the buttons would ride along with it.
+    private var showsActions: Bool { pointerOver && !swipe.isSwiping }
 
     var body: some View {
         // The Projects view's rows say what they're doing too: it has no
@@ -464,7 +468,13 @@ struct ThreadRowView: View {
                     .padding(.trailing, SidebarMetrics.trailing - zoomed(5))
             }
         }
+        .rowSwipe(swipe)
         .onHover { hovering = $0 }
+        .onChange(of: pointerOver, initial: true) {
+            swipe.action = RowSwipeAction.forRow(thread, mode: mode, app: app)
+            swipe.setHovered(pointerOver)
+        }
+        .onDisappear { swipe.stop() }
         .animation(Juice.hover, value: showsActions)
         // The whole title, which the row often cuts short, and where it runs.
         // The status and project marks have their own tips over this one.
