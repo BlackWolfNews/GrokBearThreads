@@ -1,38 +1,28 @@
-// A thread Mike shared (/s/<slug>; docs/website.md, "Sharing"). Read-only
-// and for anyone the share lets in: with "anyone with the link" it just
-// shows, with "specific people" the reader proves their address with a
-// code emailed to it first. Mike's own sign-in, if this browser has one,
-// lets him straight in.
-import { useEffect, useRef, useState } from 'react';
+// A thread shared by link (/s/<slug>; docs/website.md, "Sharing"):
+// read-only, for anyone, with its pictures. When this browser is signed in
+// as Mike the page also has ShareControl, so he can stop sharing it (it
+// then reads "Only you" for him and is gone for everyone else) or share
+// it again.
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery } from 'convex/react';
 import { api } from '../../convex/_generated/api';
-import { groupTools, MessageText, ToolRun } from './messages';
+import type { Id } from '../../convex/_generated/dataModel';
+import { groupTools, MessageText, Pictures, picturesByRow, ToolRun } from './messages';
+import { CommandState } from './command-state';
 
 const FIRST_PAGE = 80;
 const MORE = 200;
 
-const viewerKey = (slug: string) => `threadbear.viewer.${slug}`;
-
 export function SharePage({ slug, token }: { slug: string; token: string | null }) {
-  const [viewer, setViewer] = useState(() => localStorage.getItem(viewerKey(slug)) ?? undefined);
   const [limit, setLimit] = useState(FIRST_PAGE);
-  const data = useQuery(api.share.view, { slug, limit, ...(viewer ? { viewer } : {}), ...(token ? { token } : {}) });
+  const data = useQuery(api.share.view, { slug, limit, ...(token ? { token } : {}) });
   // Keeps the last page on screen while a bigger one loads.
   const [shown, setShown] = useState<typeof data>(undefined);
   useEffect(() => {
     if (data) setShown(data);
   }, [data]);
 
-  const signedIn = (v: string) => {
-    localStorage.setItem(viewerKey(slug), v);
-    setViewer(v);
-  };
-  const signOut = () => {
-    localStorage.removeItem(viewerKey(slug));
-    setViewer(undefined);
-  };
-
-  const title = shown && shown.state !== 'gone' ? shown.title || 'Untitled' : undefined;
+  const title = shown?.state === 'ok' ? shown.title || 'Untitled' : undefined;
   useEffect(() => {
     document.title = title ? `${title} · Threadbear` : 'Threadbear';
   }, [title]);
@@ -47,13 +37,12 @@ export function SharePage({ slug, token }: { slug: string; token: string | null 
       </main>
     );
   }
-  if (shown.state === 'signIn') return <CodeSignIn slug={slug} title={shown.title} onSignedIn={signedIn} />;
-  return <SharedThread data={shown} loading={data !== shown} onMore={() => setLimit((n) => n + MORE)} onSignOut={shown.email ? signOut : undefined} />;
+  return <SharedThread slug={slug} token={token} data={shown} loading={data !== shown} onMore={() => setLimit((n) => n + MORE)} />;
 }
 
 type Shared = Extract<NonNullable<ReturnType<typeof useQuery<typeof api.share.view>>>, { state: 'ok' }>;
 
-function SharedThread({ data, loading, onMore, onSignOut }: { data: Shared; loading: boolean; onMore: () => void; onSignOut?: () => void }) {
+function SharedThread({ slug, token, data, loading, onMore }: { slug: string; token: string | null; data: Shared; loading: boolean; onMore: () => void }) {
   const bottom = useRef<HTMLDivElement>(null);
   const list = useRef<HTMLDivElement>(null);
   const keepFromBottom = useRef<number | null>(null);
@@ -69,6 +58,10 @@ function SharedThread({ data, loading, onMore, onSignOut }: { data: Shared; load
     keepFromBottom.current = null;
   }, [data]);
 
+  const inText = useMemo(() => new Map(data.images.filter((p) => p.src).map((p) => [p.src!, p.url])), [data.images]);
+  const after = useMemo(() => picturesByRow(data.messages, data.images), [data.messages, data.images]);
+  const picturesFor = (seqs: number[]) => seqs.flatMap((s) => after.get(s) ?? []);
+
   return (
     <article className="thread shared">
       <header className="thread-head">
@@ -76,12 +69,9 @@ function SharedThread({ data, loading, onMore, onSignOut }: { data: Shared; load
         <div className="head-text">
           <h1>{data.title || 'Untitled'}</h1>
         </div>
-        {onSignOut ? (
+        {data.manage && token ? (
           <div className="head-actions">
-            <span className="muted small">{data.email}</span>
-            <button className="link" onClick={onSignOut}>
-              Sign out
-            </button>
+            <ShareControl token={token} threadId={data.manage.threadId} share={{ access: data.manage.shared ? 'link' : 'off', slug }} onSharePage />
           </div>
         ) : null}
       </header>
@@ -101,10 +91,14 @@ function SharedThread({ data, loading, onMore, onSignOut }: { data: Shared; load
         ) : null}
         {groupTools(data.messages).map((g) =>
           g.kind === 'tools' ? (
-            <ToolRun key={g.items[0]!.seq} items={g.items} />
+            <div key={g.items[0]!.seq}>
+              <ToolRun items={g.items} />
+              <Pictures items={picturesFor(g.items.map((m) => m.seq))} />
+            </div>
           ) : (
             <div key={g.m.seq} className={`msg ${g.m.role}`}>
-              <MessageText text={g.m.text} />
+              <MessageText text={g.m.text} pictures={inText} />
+              <Pictures items={picturesFor([g.m.seq])} />
               <div className="when muted small">{new Date(g.m.at).toLocaleString()}</div>
             </div>
           ),
@@ -120,85 +114,57 @@ function SharedThread({ data, loading, onMore, onSignOut }: { data: Shared; load
   );
 }
 
-// "Specific people": the reader's address, then the code sent to it.
-function CodeSignIn({ slug, title, onSignedIn }: { slug: string; title: string; onSignedIn: (viewer: string) => void }) {
-  const sendCode = useMutation(api.share.sendCode);
-  const verifyCode = useMutation(api.share.verifyCode);
-  const [email, setEmail] = useState('');
-  const [code, setCode] = useState('');
-  const [sentTo, setSentTo] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
-  const [problem, setProblem] = useState<string | null>(null);
-
-  const send = async () => {
-    setBusy(true);
-    setProblem(null);
-    try {
-      const r = await sendCode({ slug, email });
-      if (r.ok) setSentTo(email.trim());
-      else setProblem(r.message ?? 'That didn’t work.');
-    } finally {
-      setBusy(false);
-    }
-  };
-  const verify = async () => {
-    setBusy(true);
-    setProblem(null);
-    try {
-      const r = await verifyCode({ slug, email, code });
-      if (r.ok) onSignedIn(r.viewer);
-      else setProblem(r.message);
-    } finally {
-      setBusy(false);
-    }
-  };
-
+// Mike's sharing controls, on his own thread page and on the shared page
+// when he's signed in: share by link, copy it, stop sharing, or a new link.
+// Each is a command the runner applies (phone:share), so it shows "Waiting
+// for the Mac" while the Mac is asleep. No New link on the shared page
+// itself: its own address would stop working under him.
+export function ShareControl({ token, threadId, share, onSharePage }: { token: string; threadId: string; share?: { access: string; slug: string }; onSharePage?: boolean }) {
+  const send = useMutation(api.phone.share);
+  const [pending, setPending] = useState<Id<'commands'> | null>(null);
+  const [copied, setCopied] = useState(false);
+  const shared = share?.access === 'link';
+  const link = share ? `${location.origin}/s/${share.slug}` : undefined;
+  const run = async (access: 'off' | 'link', newLink?: boolean) => setPending(await send({ token, threadId, access, ...(newLink ? { newLink: true } : {}) }));
   return (
-    <main className="signin">
-      <img src="/icon.png" alt="" width={72} height={72} />
-      <h1>{title || 'Untitled'}</h1>
-      {sentTo === null ? (
-        <form
-          className="code-form"
-          onSubmit={(e) => {
-            e.preventDefault();
-            void send();
-          }}
-        >
-          <p className="muted">This thread is shared with specific people. Enter your email for a code.</p>
-          <input type="email" autoComplete="email" placeholder="you@example.com" value={email} onChange={(e) => setEmail(e.target.value)} autoFocus required />
-          <button className="primary" disabled={busy || !email.trim()}>
-            Send code
-          </button>
-        </form>
-      ) : (
-        <form
-          className="code-form"
-          onSubmit={(e) => {
-            e.preventDefault();
-            void verify();
-          }}
-        >
-          {/* The same words whether or not the address is on the list. */}
-          <p className="muted">If {sentTo} can read this thread, a code is on its way there.</p>
-          <input inputMode="numeric" autoComplete="one-time-code" placeholder="123456" value={code} onChange={(e) => setCode(e.target.value)} autoFocus required />
-          <button className="primary" disabled={busy || code.replace(/\D/g, '').length !== 6}>
-            Open
-          </button>
-          <button
-            type="button"
-            className="link"
-            onClick={() => {
-              setSentTo(null);
-              setCode('');
-              setProblem(null);
-            }}
-          >
-            Use another email
-          </button>
-        </form>
-      )}
-      {problem ? <p className="problem">{problem}</p> : null}
-    </main>
+    <details className="share-menu">
+      <summary className={shared ? 'on' : ''}>{shared ? 'Shared' : 'Share'}</summary>
+      <div className="share-panel">
+        <p className="muted small">{shared ? 'Anyone with the link can read this thread, as it carries on.' : 'Only you can see this thread.'}</p>
+        {shared && link ? (
+          <div className="share-link">
+            <input readOnly value={link} onFocus={(e) => e.target.select()} aria-label="Link" />
+            <button
+              onClick={async () => {
+                await navigator.clipboard.writeText(link);
+                setCopied(true);
+                setTimeout(() => setCopied(false), 1500);
+              }}
+            >
+              {copied ? 'Copied' : 'Copy'}
+            </button>
+          </div>
+        ) : null}
+        <div className="buttons">
+          {shared ? (
+            <>
+              <button disabled={pending !== null} onClick={() => run('off')}>
+                Stop sharing
+              </button>
+              {onSharePage ? null : (
+                <button disabled={pending !== null} onClick={() => run('link', true)} title="The old link stops working">
+                  New link
+                </button>
+              )}
+            </>
+          ) : (
+            <button className="primary" disabled={pending !== null} onClick={() => run('link')}>
+              Share with a link
+            </button>
+          )}
+        </div>
+        {pending ? <CommandState token={token} commandId={pending} onDone={() => setPending(null)} /> : null}
+      </div>
+    </details>
   );
 }

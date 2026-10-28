@@ -1000,12 +1000,12 @@ final class AppModel {
         }
     }
 
-    /// Who else can read a thread on the website (protocol "Sharing"). The
-    /// share popover shows a failure itself, so this throws rather than
-    /// putting up the banner.
-    func share(_ threadId: String, access: ThreadShare.Access, people: [String]? = nil, newLink: Bool = false) async throws {
+    /// Whether anyone with the link can read a thread on the website
+    /// (protocol "Sharing"). The share popover shows a failure itself, so
+    /// this throws rather than putting up the banner.
+    func share(_ threadId: String, access: ThreadShare.Access, newLink: Bool = false) async throws {
         guard let client else { throw RPCError.disconnected(nil) }
-        threads[threadId] = try await client.share(threadId: threadId, access: access, people: people, newLink: newLink)
+        threads[threadId] = try await client.share(threadId: threadId, access: access, newLink: newLink)
     }
 
     /// A shared thread's link on the website, while sync is on.

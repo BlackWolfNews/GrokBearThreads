@@ -619,7 +619,7 @@ replaces whatever the deltas built up.
 | `threads.subagent` | `{ threadId, subagentId }` | `{ subagent?: Subagent, events: Event[] }`: what the sub-agent has done so far, read from the CLI's own record of it, as events (`user.message` for its brief, then `assistant.text`, `reasoning`, `tool.call`, `tool.result`, `edit.diff`) numbered from 1, with no `turnId`. Read again for more while it runs: thread.updated says when it has done something. `subagent` is absent once the thread's list has dropped it. `-32006` when there's no record of it (an older thread, or the CLI cleaned it up) |
 | `threads.markSeen` | `{ threadId, seq }` | `{ thread: ThreadSummary }` |
 | `threads.tickAsk` | `{ threadId, asksSeq, index, ticked: boolean }` | `{ thread: ThreadSummary }`. Ticks or unticks one of the open card's asks (Needs you), with an `asks.ticked` event. Sends nothing to the agent. `-32602` when `asksSeq` isn't the open card's or `index` is out of range |
-| `threads.share` | `{ threadId, access: "off" \| "link" \| "people", people?: string[], newLink?: boolean }` | `{ thread: ThreadSummary }`. Who else can read the thread on the website (see Sharing). `people` replaces the list (trimmed, lowercased, once each, at most 50); left out, the list stays. `newLink` makes a fresh slug, which stops the old link. A bad access or address is `-32602` |
+| `threads.share` | `{ threadId, access: "off" \| "link", newLink?: boolean }` | `{ thread: ThreadSummary }`. Whether anyone with the link can read the thread on the website (see Sharing). `newLink` makes a fresh slug, which stops the old link. Another access is `-32602` |
 | `approvals.respond` | `{ threadId, approvalId, decision: "allow" \| "allowAlways" \| "deny" \| "answered", message?: string, answers?: Record<string, string> }` | `{}`. `allowAlways` allows matching requests for the rest of this thread only; it never changes the thread's permission mode or saves anything in the project. With `answered`, the app sends the chosen answers in one line as `message` too: the runner keeps it in `approval.resolved` (only `answers` goes to the CLI), so the transcript can show what was chosen |
 | `media.import` | `{ path: string }` | `{ image: ImageRef }` copies a file into `inbox/` and reads its size |
 | `actions.run` | `{ threadId, actionId }` | For a prompt action, `{ turnId }`: its prompt was sent as a message (as `threads.send`). For a command action, `{ ok, exitCode?, durationMs, seq }` once the command has finished, with its output in the transcript as the `action.run` event at `seq`. The command runs in the thread's folder through a login shell with the thread's variables (`THREADBEAR_THREAD_ID` and the rest) and is stopped after 10 minutes. `-32602` for an action the thread doesn't have, `-32020` while the same action is still running |
@@ -1810,7 +1810,7 @@ the mirror back as state. The Mac app doesn't use it.
   createdAt, lastActivityAt, snoozedUntil?, snoozedUntilRestart?,
   archivedAt?, costUsd?` (to the cent), `projects?: { id, title }[]`,
   `working?` (the first unfinished background task's description),
-  `pendingApproval?` (below), `earliestSeq?` (Messages, below), `share?` (see Sharing; API 7) and `view` (`inbox`, `hibernating` or `den`,
+  `pendingApproval?` (below), `earliestSeq?` (Messages, below), `share?` (see Sharing; API 8) and `view` (`inbox`, `hibernating` or `den`,
   worked out the way the app's lists are). Nothing else from
   `ThreadSummary`: no `lastSeq`, context, panels, actions, hooks or
   sub-agents, and never a tool result, diff or image. A `thread.updated`
@@ -1937,37 +1937,38 @@ type Device = {
 
 ## Sharing
 
-A thread can be shared on the website (docs/website.md, "Sharing"), from
-the share button beside its ... menu. The runner keeps it on the thread's
-record and the mirror carries it to Convex (Sync), which serves the link;
+A thread can be shared by link on the website (docs/website.md, "Sharing"),
+from the share button beside its ... menu, or from the website itself
+(a `share` command; see Sync). The runner keeps it on the thread's
+record and the mirror carries it to Convex, which serves the link;
 nothing about it is decided in Convex.
 
 ```ts
 type ThreadShare = {
-  access: "off" | "link" | "people"
+  access: "off" | "link"
   slug: string          // the link is <website>/s/<slug>: 16 random bytes, base64url
-  people: string[]      // lowercased email addresses, for "people"
   updatedAt: string
 }
 ```
 
-- `"link"`: anyone with the link reads the thread. `"people"`: only those
-  addresses, each signing in with a six-digit code emailed to it (good
-  for 10 minutes and five tries; the browser then holds a viewer token
-  for 30 days). Taking an address off the list, or a new link, shuts its
-  browsers out at once. Mike's own phone or browser token reads it
-  whatever the access.
-- `"off"` keeps the slug and the people, so sharing again brings the
-  same link back (as a doc's sharing does); `newLink` is the way to stop
-  an old link for good.
-- Readers see the title, the text of each message and one line per tool
-  call, as the phone does, live as the thread carries on. Never the
-  folder, account, model, cost, approvals or a composer, and never tool
-  output or images, which never leave the Mac.
-- The thread's row on the mirror has `share: { access, slug, people? }`
-  only while it's `"link"` or `"people"` (backend API 7). An older
-  backend gets the row without it, and gets it once a heartbeat says
-  it's new enough.
+- `"link"`: anyone with the link reads the thread, live as it carries on.
+  `"off"` keeps the slug, so sharing again brings the same link back (as
+  a doc's sharing does); `newLink` is the way to stop an old link for good.
+  (Sharing with specific people, by emailed code, was there on 28 Oct and
+  went on 29 Oct; a record that still says `"people"` reads as `"off"`.)
+- Readers see the title, the text of each message, one line per tool
+  call and the thread's pictures. Never the folder, account, model, cost,
+  approvals or a composer, and never tool output.
+- Pictures go up only while a thread is shared: a message's attachments,
+  what a tool handed back (a screenshot, an image it read or made) and
+  pictures the agent wrote into its text as Markdown with a path on the
+  Mac (`![alt](/path/to/file.png)`, a `file://` URL or a `~` path).
+  When the thread is shared the runner looks through its whole history,
+  then sends new ones as they come; each file goes once (`sync:shareImages`
+  says what's up), at most 10 MB. Stopping sharing drops them all.
+- The thread's row on the mirror has `share: { access, slug }` (backend
+  API 8). An older backend gets the row without it, and gets it once a
+  heartbeat says it's new enough.
 
 ## Ordering and reconnects
 

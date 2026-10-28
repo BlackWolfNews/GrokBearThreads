@@ -5,11 +5,13 @@
 import { defineSchema, defineTable } from 'convex/server';
 import { v } from 'convex/values';
 
-// A shared thread's settings, as the runner mirrors them (ThreadShare in
-// docs/protocol.md, without "off": a thread that isn't shared has none).
-// people are lowercased email addresses.
+// A thread's sharing, as the runner mirrors it (ThreadShare in
+// docs/protocol.md): "link" is readable by anyone with /s/<slug>; "off"
+// (since API 8) only by Mike, so his page can offer Share again. A thread
+// never shared has none. "people" and `people` came from API 7 runners
+// (sharing with specific people, dropped 29 Oct) and read as off.
 export const shareField = v.object({
-  access: v.union(v.literal('link'), v.literal('people')),
+  access: v.union(v.literal('off'), v.literal('link'), v.literal('people')),
   slug: v.string(),
   people: v.optional(v.array(v.string())),
 });
@@ -38,9 +40,8 @@ export const threadFields = {
   projects: v.optional(v.array(v.object({ id: v.string(), title: v.string() }))),
   working: v.optional(v.string()), // the working line: what the CLI is doing in the background
   earliestSeq: v.optional(v.number()), // seq of the thread's first text message, for "Load earlier messages"
-  // Who else can read the thread on the website (API 7; docs/website.md,
-  // "Sharing"): anyone with the /s/<slug> link, or only the people listed,
-  // who sign in with a code emailed to them. Absent: only Mike.
+  // Whether anyone with the /s/<slug> link can read it (docs/website.md,
+  // "Sharing"). Absent: never shared.
   share: v.optional(shareField),
   // The approval or question the thread is waiting on, if any (step 2).
   pendingApproval: v.optional(
@@ -129,7 +130,7 @@ export default defineSchema({
   commands: defineTable({
     runnerId: v.string(), // or "any"
     threadId: v.optional(v.string()),
-    kind: v.union(v.literal('send'), v.literal('respond'), v.literal('update'), v.literal('create'), v.literal('page')),
+    kind: v.union(v.literal('send'), v.literal('respond'), v.literal('update'), v.literal('create'), v.literal('page'), v.literal('share')),
     args: v.any(),
     state: v.union(v.literal('pending'), v.literal('taken'), v.literal('done'), v.literal('failed')),
     note: v.optional(v.string()),
@@ -248,32 +249,21 @@ export default defineSchema({
     pushKey: v.optional(v.string()),
   }).index('by_apnsToken', ['apnsToken']),
 
-  // Sign-in codes for a thread shared with specific people (share.ts): the
-  // SHA-256 of slug, email and the six digits, never the digits. One row
-  // per code sent; a code is good for 10 minutes and five tries.
-  shareCodes: defineTable({
-    slug: v.string(),
-    email: v.string(),
-    hash: v.string(),
-    createdAt: v.number(),
-    expiresAt: v.number(),
-    attempts: v.number(),
-  })
-    .index('by_slug_email', ['slug', 'email'])
-    .index('by_expiresAt', ['expiresAt']),
-
-  // A browser signed in to one shared thread as one of its people. Only
-  // the token's hash is kept. Taking the person off the list, or a new
-  // link, shuts it out at once (share:view checks both every time).
-  shareViewers: defineTable({
-    slug: v.string(),
-    email: v.string(),
-    hash: v.string(),
-    createdAt: v.number(),
-    expiresAt: v.number(),
-  })
-    .index('by_hash', ['hash'])
-    .index('by_expiresAt', ['expiresAt']),
+  // The pictures of a shared thread (API 8), in file storage, uploaded by
+  // the runner while the thread is shared and dropped when it stops
+  // (sync:addShareImage, sync:dropShareImages). `path` is the file on the
+  // Mac it came from, so the runner sends each once; `src` is set for one
+  // the agent wrote into its text as Markdown, the address the page swaps.
+  shareImages: defineTable({
+    threadId: v.string(),
+    seq: v.number(),
+    path: v.string(),
+    src: v.optional(v.string()),
+    storageId: v.id('_storage'),
+    mediaType: v.string(),
+    width: v.optional(v.number()),
+    height: v.optional(v.number()),
+  }).index('by_thread_seq', ['threadId', 'seq']),
 
   // This backend's registration with the push relay (docs/push-relay.md),
   // made the first time a push goes that way. One row.

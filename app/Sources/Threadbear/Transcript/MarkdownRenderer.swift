@@ -94,9 +94,31 @@ enum MarkdownRenderer {
         }
         builder.trimTrailingNewline()
         builder.linkBareURLs()
+        builder.freeLinesWithPictures()
         let result = NSAttributedString(attributedString: builder.output)
         cache.setObject(result, forKey: key, cost: block.utf16.count)
         return result
+    }
+
+    /// How big an inline picture is drawn at most, in points before zoom.
+    static var pictureMaxWidth: CGFloat { zoomed(420) }
+    static var pictureMaxHeight: CGFloat { zoomed(320) }
+
+    /// A picture the agent wrote as `![alt](/path/to/file.png)`, drawn at
+    /// most pictureMaxWidth by pictureMaxHeight. Nil for a file that isn't
+    /// there or isn't a picture. Decoded here, off the main thread, at the
+    /// size it's drawn (twice, for Retina); the block's cache keeps it.
+    static func picture(path: String, alt: String) -> NSTextAttachment? {
+        guard FileManager.default.fileExists(atPath: path) else { return nil }
+        let scale: CGFloat = 2
+        guard let image = ThumbnailLoader.decode(path: path, maxPixels: Int(max(pictureMaxWidth, pictureMaxHeight) * scale)) else { return nil }
+        var size = CGSize(width: CGFloat(image.width) / scale, height: CGFloat(image.height) / scale)
+        let fit = min(1, pictureMaxWidth / max(size.width, 1), pictureMaxHeight / max(size.height, 1))
+        size = CGSize(width: (size.width * fit).rounded(), height: (size.height * fit).rounded())
+        let attachment = NSTextAttachment()
+        attachment.image = NSImage(cgImage: image, size: size)
+        attachment.bounds = CGRect(origin: .zero, size: size)
+        return attachment
     }
 
     private static var separator: NSAttributedString { NSAttributedString(string: "\n", attributes: Theme.bodyAttributes) }
@@ -115,6 +137,23 @@ enum MarkdownRenderer {
 
     struct Builder {
         let output = NSMutableAttributedString()
+
+        /// Body lines have a fixed height, which would cut a picture down to
+        /// one line: a paragraph with one gets a style that lets it grow,
+        /// and the picture sits on the baseline.
+        mutating func freeLinesWithPictures() {
+            let text = output.string as NSString
+            output.enumerateAttribute(.attachment, in: NSRange(location: 0, length: output.length)) { value, range, _ in
+                guard value is NSTextAttachment else { return }
+                let paragraph = text.paragraphRange(for: range)
+                let old = output.attribute(.paragraphStyle, at: range.location, effectiveRange: nil) as? NSParagraphStyle ?? NSParagraphStyle.default
+                let style = (old.mutableCopy() as? NSMutableParagraphStyle) ?? NSMutableParagraphStyle()
+                style.minimumLineHeight = 0
+                style.maximumLineHeight = 0
+                output.addAttribute(.paragraphStyle, value: style, range: paragraph)
+                output.addAttribute(.baselineOffset, value: 0, range: range)
+            }
+        }
 
         mutating func trimTrailingNewline() {
             while output.length > 0, output.string.utf16.last == 10 {
@@ -516,7 +555,15 @@ enum MarkdownRenderer {
                 var inner = context
                 inner.link = image.source.flatMap(MarkdownRenderer.linkURL)
                 let alt = image.plainText.isEmpty ? (image.source ?? "image") : image.plainText
-                append("[\(alt)]", inner)
+                // A picture on this Mac is drawn in the text; a web address,
+                // or a file that's gone, stays a link with its alt text.
+                if let url = inner.link, url.isFileURL, let attachment = MarkdownRenderer.picture(path: url.path, alt: alt) {
+                    let run = NSMutableAttributedString(attachment: attachment)
+                    run.addAttributes([.link: url, .toolTip: alt], range: NSRange(location: 0, length: run.length))
+                    output.append(run)
+                } else {
+                    append("[\(alt)]", inner)
+                }
             case is SoftBreak:
                 append(" ", context)
             case is LineBreak:

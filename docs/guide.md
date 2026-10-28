@@ -186,13 +186,17 @@ thread has its own link: Copy web link in a
 thread's ... menu on the Mac, or the Copy link button on the website, gives
 you one to paste anywhere you're signed in.
 
-To let someone else read a thread, click the share button beside a thread's
-... menu. Anyone with the link gives a read-only page anybody can open;
-Specific people asks you for email addresses, and each person gets a code at
-theirs to open it. They see the messages and one line per step, as the
-thread carries on, but not tool output, images, the folder or the cost.
-Only you stops the link working (sharing again brings the same link back),
-and the arrows beside the link make a new one, which stops the old.
+To let someone else read a thread, click the share button beside a
+thread's ... menu and pick Anyone with the link, then Copy link. It's a
+read-only page anybody can open, which follows the thread as it carries on:
+the messages, one line per step and the pictures, but not tool output, the
+folder or the cost. Only you stops the link working (sharing again brings
+the same link back), and the arrows beside the link make a new one, which
+stops the old. The same Share button is on the website, on your thread's
+page and on the shared page while you're signed in.
+
+The Mac app also draws a picture an agent writes into its reply with a path
+on your Mac (`![a chart](/path/to/chart.png)`), rather than showing a link.
 
 ## Patches: your own buttons and panels
 
@@ -233,8 +237,8 @@ you. Right-click it for a quick Restart to Update.
 Your threads are mirrored to a Convex deployment in your own Convex account,
 which setup made: the thread list, the text of each message, and one line
 for each thing an agent did. Tool output and images stay on your Mac.
-A thread you share can be read by whoever you share it with, and only that
-thread.
+A thread you share can be read by anyone with its link, pictures included,
+and only that thread. The pictures are uploaded only while it's shared.
 Notifications to your phone go through a small relay Mike runs, because
 Apple only delivers notifications for his app through his key. The text is
 locked with a key only your phone and your deployment have, so the relay

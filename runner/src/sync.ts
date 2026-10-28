@@ -17,6 +17,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { ConvexClient } from 'convex/browser';
 import { phonePicture } from './project-icons.ts';
+import { imagesInEvent, readShareImage, type ShareImage } from './share-images.ts';
 import { makeFunctionReference } from 'convex/server';
 import type { Clock, TimerHandle } from './clock.ts';
 import type { Logger } from './log.ts';
@@ -60,15 +61,16 @@ export type SyncConfig = {
 // lower one means its backend hasn't been deployed since this runner was:
 // said in runner.status, tb status and the log rather than stopping, since
 // the runner only adds to what it sends while the number stays the same.
-export const BACKEND_API_VERSION = 7;
+export const BACKEND_API_VERSION = 8;
 // From this backend version a project's picture goes up to file storage
 // (sync:iconUploadUrl, sync:setProjectIcon); an older backend gets the
 // project without it and the phone shows its symbol or first letter.
 export const ICONS_API_VERSION = 5;
-// From this one a thread's row carries `share` (docs/website.md, "Sharing");
-// an older backend's validator would turn the whole write down, so it gets
+// From this one a thread's row carries `share` ("off" included) and a shared
+// thread's pictures go to file storage (docs/website.md, "Sharing"). An
+// older backend's validator would turn the whole write down, so it gets
 // the row without it, and the link doesn't work until it's deployed.
-export const SHARE_API_VERSION = 7;
+export const SHARE_API_VERSION = 8;
 
 export type SyncStatus = {
   state: 'off' | 'ok' | 'error';
@@ -119,7 +121,7 @@ export type ThreadDoc = {
   working?: string;
   pendingApproval?: PendingApproval;
   earliestSeq?: number;
-  share?: { access: 'link' | 'people'; slug: string; people?: string[] };
+  share?: { access: 'off' | 'link'; slug: string };
   view: 'inbox' | 'hibernating' | 'den';
 };
 
@@ -171,6 +173,7 @@ export type CommandHost = {
   update(p: { threadId: string; title?: string; snoozedUntil?: string | null; archived?: boolean }): unknown;
   markSeen(threadId: string, seq: number): unknown;
   create(p: { text: string; cwd?: string; accountId?: string; model?: string; origin: 'phone' }): { thread: ThreadSummary };
+  share(threadId: string, p: { access: 'off' | 'link'; newLink?: boolean }): unknown;
 };
 
 export type SyncDeps = {
@@ -294,10 +297,8 @@ export function toThreadDoc(t: ThreadSummary, runnerId: string, now: number, pen
   if (working) doc.working = working;
   if (pending) doc.pendingApproval = pending;
   if (earliestSeq !== undefined) doc.earliestSeq = earliestSeq;
-  // Only a shared thread has one on the mirror: "off" is the runner's, so
-  // sharing again brings the same link back.
-  const share = t.share;
-  if (share && share.access !== 'off') doc.share = { access: share.access, slug: share.slug, ...(share.access === 'people' ? { people: [...share.people] } : {}) };
+  // "off" goes up too, so Mike's own page for the link can offer Share again.
+  if (t.share) doc.share = { access: t.share.access, slug: t.share.slug };
   return doc;
 }
 
@@ -448,6 +449,15 @@ export class ConvexSync {
   // the pictures were last looked at.
   private pictures?: Map<string, string>;
   private picturesDue = true;
+  // Shared threads' pictures (SHARE_API_VERSION): which threads are shared
+  // as last marked; ones just shared, whose whole history is looked through;
+  // ones no longer shared, whose pictures the mirror drops; pictures waiting
+  // to go up; and what's up already, per thread, as "seq path".
+  private sharedNow = new Map<string, boolean>();
+  private imagesDue = new Set<string>();
+  private imagesDrop = new Set<string>();
+  private pendingImages: (ShareImage & { threadId: string })[] = [];
+  private imagesUp = new Map<string, Set<string>>();
   private flushTimer?: TimerHandle;
   private heartbeatTimer?: TimerHandle;
   private presenceTimer?: TimerHandle;
@@ -530,7 +540,7 @@ export class ConvexSync {
     // Shared threads held back their share from an older backend (or
     // before the first heartbeat said which): they go again now.
     if (v >= SHARE_API_VERSION && this.running) {
-      for (const t of this.deps.runner.list(ALL)) if (t.share && t.share.access !== 'off') this.mark(t);
+      for (const t of this.deps.runner.list(ALL)) if (t.share) this.mark(t);
       this.scheduleFlush();
     }
     // The pictures wait for the first heartbeat to say the backend takes them.
@@ -666,6 +676,15 @@ export class ConvexSync {
   // the thread is waiting on goes on its row until it's resolved.
   private onEvent(threadId: string, e: PersistedEvent): void {
     if (typeof (e as { seq?: unknown }).seq !== 'number') return; // a delta
+    // A shared thread's new pictures follow, unless its whole history is
+    // about to be looked through anyway.
+    if (this.sharedNow.get(threadId) && !this.imagesDue.has(threadId)) {
+      const found = imagesInEvent(e);
+      if (found.length) {
+        this.pendingImages.push(...found.map((i) => ({ ...i, threadId })));
+        this.scheduleFlush();
+      }
+    }
     const m = toMessageDoc(threadId, e);
     if (m) {
       this.messages.push(m);
@@ -692,12 +711,32 @@ export class ConvexSync {
     // A thread that isn't waiting any more lost its approval some other
     // way (the turn ended, the runner restarted); the row mustn't keep it.
     if (t.status === 'idle' || t.status === 'error' || t.status === 'stopped') this.pending.delete(t.id);
+    this.noteShared(t);
     const doc = toThreadDoc(t, this.runnerId, this.deps.clock.now(), this.pending.get(t.id), this.earliestSeq(t));
     if (this.sent.get(t.id) === JSON.stringify(doc)) {
       this.dirty.delete(t.id);
       return;
     }
     this.dirty.set(t.id, doc);
+  }
+
+  // A thread just shared has its pictures looked for; one no longer shared
+  // has them dropped. At start every shared thread is looked through (what's
+  // up already is skipped), and one shared then stopped while the runner
+  // was off has its pictures dropped.
+  private noteShared(t: ThreadSummary): void {
+    const shared = t.share?.access === 'link';
+    const was = this.sharedNow.get(t.id);
+    this.sharedNow.set(t.id, shared);
+    if (shared && !was) {
+      this.imagesDue.add(t.id);
+      this.imagesDrop.delete(t.id);
+    } else if (!shared && (was || (was === undefined && t.share))) {
+      this.imagesDue.delete(t.id);
+      this.imagesDrop.add(t.id);
+      this.imagesUp.delete(t.id);
+      this.pendingImages = this.pendingImages.filter((i) => i.threadId !== t.id);
+    }
   }
 
   // The seq of the thread's first text message, read once from the start
@@ -719,7 +758,7 @@ export class ConvexSync {
 
   private scheduleFlush(): void {
     if (!this.running || this.flushTimer) return;
-    if (!this.dirty.size && !this.removed.size && !this.messages.length && !this.dirtyLists.size && !this.full) return;
+    if (!this.dirty.size && !this.removed.size && !this.messages.length && !this.dirtyLists.size && !this.full && !this.imagesDue.size && !this.imagesDrop.size && !this.pendingImages.length) return;
     const now = this.deps.clock.now();
     let delay = Math.max(0, this.lastFlushAt + SYNC_COALESCE_MS - now);
     if (this.retryAt !== undefined) delay = Math.max(delay, this.retryAt - now);
@@ -777,6 +816,7 @@ export class ConvexSync {
       });
       await this.appendMessages(messages);
       this.markFilled(filling);
+      if (shares) await this.sendShareImages();
       this.lastSyncAt = this.deps.clock.now();
       this.backoffMs = 0;
       this.retryAt = undefined;
@@ -842,6 +882,70 @@ export class ConvexSync {
     const keep = new Set(projects.map((p) => p.id));
     for (const id of [...this.pictures.keys()]) if (!keep.has(id)) this.pictures.delete(id);
     this.picturesDue = false;
+  }
+
+  // Shared threads' pictures: drops for threads no longer shared, a look
+  // through the whole history of each one just shared, then the uploads.
+  // Each step is forgotten only once done, so a failure is picked up by
+  // the flush's retry. A file that's gone or too big is skipped with a line
+  // in the log; the page shows that picture's alt text, or nothing.
+  private async sendShareImages(): Promise<void> {
+    const key = this.deps.key;
+    for (const threadId of [...this.imagesDrop]) {
+      await this.post('mutation', 'sync:dropShareImages', { key, threadId });
+      this.imagesDrop.delete(threadId);
+    }
+    for (const threadId of [...this.imagesDue]) {
+      let t: ThreadSummary;
+      try {
+        t = this.deps.runner.get(threadId);
+      } catch {
+        this.imagesDue.delete(threadId);
+        continue;
+      }
+      const rows = (await this.post('query', 'sync:shareImages', { key, threadId })) as { seq: number; path: string }[] | null;
+      this.imagesUp.set(threadId, new Set((rows ?? []).map((r) => `${r.seq} ${r.path}`)));
+      this.pendingImages.push(...this.imagesOf(t).map((i) => ({ ...i, threadId })));
+      this.imagesDue.delete(threadId);
+    }
+    while (this.pendingImages.length) {
+      const img = this.pendingImages[0]!;
+      const up = this.imagesUp.get(img.threadId) ?? new Set<string>();
+      this.imagesUp.set(img.threadId, up);
+      const id = `${img.seq} ${img.path}`;
+      if (!up.has(id) && this.sharedNow.get(img.threadId)) {
+        const file = readShareImage(img.path);
+        if ('skip' in file) {
+          this.deps.log.warn('shared picture not sent', { threadId: img.threadId, path: img.path, why: file.skip });
+        } else {
+          const url = (await this.post('mutation', 'sync:iconUploadUrl', { key })) as string;
+          const storageId = await this.upload(url, file.bytes, img.mediaType);
+          const { threadId, seq, path: file_, src, mediaType, width, height } = img;
+          await this.post('mutation', 'sync:addShareImage', { key, threadId, seq, path: file_, ...(src ? { src } : {}), storageId, mediaType, ...(width ? { width } : {}), ...(height ? { height } : {}) });
+        }
+        up.add(id);
+      }
+      this.pendingImages.shift();
+    }
+  }
+
+  // Every picture in a thread's history, read from its log a page at a time.
+  private imagesOf(t: ThreadSummary): ShareImage[] {
+    const out: ShareImage[] = [];
+    let after = 0;
+    while (t.lastSeq > after) {
+      let events: PersistedEvent[];
+      try {
+        events = this.deps.runner.events(t.id, { afterSeq: after, limit: BACKFILL_EVENTS }).events;
+      } catch {
+        break;
+      }
+      const next = events.at(-1)?.seq ?? after;
+      if (next <= after) break;
+      for (const e of events) if (e.seq > after) out.push(...imagesInEvent(e));
+      after = next;
+    }
+    return out;
   }
 
   private async appendMessages(all: MessageDoc[]): Promise<void> {
@@ -1110,6 +1214,12 @@ export class ConvexSync {
           origin: 'phone',
         });
         return thread.id;
+      }
+      case 'share': {
+        // The website's Stop sharing, Share again and New link (API 8).
+        if (a.access !== 'off' && a.access !== 'link') throw new Error('access is "off" or "link"');
+        host.share(needThread(), { access: a.access, ...(a.newLink === true ? { newLink: true } : {}) });
+        return undefined;
       }
       case 'page': {
         // An API 1 phone's "Load earlier messages": up to PAGE_SIZE text

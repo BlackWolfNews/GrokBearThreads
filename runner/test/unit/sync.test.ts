@@ -324,6 +324,10 @@ function setupFull(opts: { heads?: { threadId: string; lastSeq: number }[]; take
         applied.push(`create ${p.text} ${p.origin}`);
         return h.runner.create(p);
       },
+      share: (id, p) => {
+        applied.push(`share ${id} ${p.access}${p.newLink ? ' new' : ''}`);
+        return h.runner.share(id, p);
+      },
     },
     version: '0.1.0+test',
     startedAt: '2026-10-27T00:00:00.000Z',
@@ -514,14 +518,15 @@ test('commands: each pending one is taken once, applied through the runner as fr
     { commandId: 'c1', kind: 'send', threadId: t.id, args: { text: 'from my phone' }, createdAt: 1 },
     { commandId: 'c2', kind: 'update', threadId: t.id, args: { archive: true }, createdAt: 2 },
     { commandId: 'c3', kind: 'create', args: { text: 'a new one', cwd: h.cfg.defaults.cwd, accountId: 'claude-3' }, createdAt: 3 },
+    { commandId: 'c4', kind: 'share', threadId: t.id, args: { access: 'link', newLink: true }, createdAt: 4 },
   ];
   push(cmds);
   await tick(10);
   push(cmds); // the same list again, as a live query re-run would send
   await tick(10);
-  assert.deepEqual(applied, [`send ${t.id} from my phone phone`, `update {"threadId":"${t.id}","archived":true}`, 'create a new one phone']);
+  assert.deepEqual(applied, [`send ${t.id} from my phone phone`, `update {"threadId":"${t.id}","archived":true}`, 'create a new one phone', `share ${t.id} link new`]);
   const finished = calls.filter((c) => c.fn === 'sync:finishCommand').map((c) => c.args);
-  assert.equal(finished.length, 3);
+  assert.equal(finished.length, 4);
   assert.ok(finished.every((f) => f.ok === true && f.key === 'k'));
   assert.ok(typeof finished[2]!.resultThreadId === 'string');
   assert.equal(h.runner.get(finished[2]!.resultThreadId as string).title, 'a new one');
@@ -529,7 +534,8 @@ test('commands: each pending one is taken once, applied through the runner as fr
   const ev = h.events(t.id).find((e: { type: string; text?: string }) => e.type === 'user.message' && e.text === 'from my phone') as { origin?: string };
   assert.equal(ev?.origin, 'phone');
   assert.equal(h.runner.get(t.id).archivedAt !== undefined, true);
-  assert.deepEqual(sync.status().commands, { state: 'on', applied: 3, failed: 0 });
+  assert.equal(h.runner.get(t.id).share?.access, 'link');
+  assert.deepEqual(sync.status().commands, { state: 'on', applied: 4, failed: 0 });
 });
 
 test('commands: one that fails is finished with a note; one another runner took is left alone', async () => {
@@ -819,15 +825,15 @@ test('at the Mac means the Mac app is connected and the keyboard or mouse was us
   assert.equal(isAtMac(true, undefined), false, "can't tell, so away");
 });
 
-test('sharing: the row carries share once the backend takes it, and never "off"', async () => {
-  let backend = 6;
+test('sharing: the row carries share, "off" included, once the backend takes it', async () => {
+  let backend = SHARE_API_VERSION - 1;
   const { h, sync, docs } = setup({ answer: (fn) => (fn === 'sync:heartbeat' ? { apiVersion: backend } : null) });
   const a = h.runner.create({ text: 'one', cwd: h.cfg.defaults.cwd, accountId: 'claude-3' }).thread;
-  h.runner.share(a.id, { access: 'people', people: ['ann@example.com'] });
+  h.runner.share(a.id, { access: 'link' });
   sync.start();
   await tick(20);
   await sync.flushNow();
-  // An API 6 backend would turn the row down with share on it.
+  // An older backend would turn the row down with share on it.
   const old = docs().filter((d) => d.threadId === a.id);
   assert.ok(old.length);
   assert.ok(old.every((d) => d.share === undefined));
@@ -839,17 +845,82 @@ test('sharing: the row carries share once the backend takes it, and never "off"'
   await tick(20);
   await sync.flushNow();
   const slug = h.runner.get(a.id).share!.slug;
-  assert.deepEqual(docs().filter((d) => d.threadId === a.id).at(-1)!.share, { access: 'people', slug, people: ['ann@example.com'] });
-
-  // A link share has no list on the row, and "off" takes share off it.
-  h.runner.share(a.id, { access: 'link' });
-  h.clock.advance(SYNC_COALESCE_MS);
-  await tick(20);
-  await sync.flushNow();
   assert.deepEqual(docs().filter((d) => d.threadId === a.id).at(-1)!.share, { access: 'link', slug });
+
+  // "off" goes up too, so Mike's page for the link keeps its controls.
   h.runner.share(a.id, { access: 'off' });
   h.clock.advance(SYNC_COALESCE_MS);
   await tick(20);
   await sync.flushNow();
-  assert.equal(docs().filter((d) => d.threadId === a.id).at(-1)!.share, undefined);
+  assert.deepEqual(docs().filter((d) => d.threadId === a.id).at(-1)!.share, { access: 'off', slug });
+});
+
+test('sharing: pictures of a shared thread go to file storage, once each, and go when it stops', async () => {
+  const dir = tmpDir();
+  const pic = path.join(dir, 'chart.png');
+  fs.writeFileSync(pic, Buffer.from('PNGBYTES'));
+  const calls: Call[] = [];
+  const uploads: string[] = [];
+  let stored: { seq: number; path: string }[] = [];
+  const h = makeHarness();
+  const sync = new ConvexSync({
+    config: { enabled: true, url: 'https://x.convex.cloud', runnerId: 'r1' },
+    key: 'k',
+    runner: h.runner,
+    version: '0.1.0+test',
+    startedAt: '2026-10-29T00:00:00.000Z',
+    clock: h.clock,
+    log: nullLogger,
+    post: async (kind, fn, args) => {
+      calls.push({ kind, fn, args });
+      if (fn === 'sync:heartbeat') return { apiVersion: SHARE_API_VERSION };
+      if (fn === 'sync:shareImages') return stored;
+      if (fn === 'sync:iconUploadUrl') return 'https://upload.example/u';
+      return null;
+    },
+    upload: async (_url, bytes) => {
+      uploads.push(Buffer.from(bytes).toString());
+      return `st_${uploads.length}`;
+    },
+  });
+  const t = h.runner.create({ text: 'draw it', cwd: h.cfg.defaults.cwd, accountId: 'claude-3' }).thread;
+  const s = session(h, t.id);
+  s.init();
+  s.text('m1', `Here it is:\n\n![The chart](${pic})\n\nand a [link](https://example.com).`);
+  s.result('completed');
+  await tick();
+
+  // Not shared: nothing goes up.
+  sync.start();
+  await tick(20);
+  await sync.flushNow();
+  assert.equal(uploads.length, 0);
+
+  // Shared: the picture the agent wrote in its text goes up, with its src.
+  h.runner.share(t.id, { access: 'link' });
+  h.clock.advance(SYNC_COALESCE_MS);
+  await tick(20);
+  await sync.flushNow();
+  const added = calls.filter((c) => c.fn === 'sync:addShareImage').map((c) => c.args);
+  assert.equal(added.length, 1);
+  assert.equal(added[0]!.path, pic);
+  assert.equal(added[0]!.src, pic);
+  assert.equal(added[0]!.mediaType, 'image/png');
+  assert.equal(added[0]!.storageId, 'st_1');
+  assert.deepEqual(uploads, ['PNGBYTES']);
+
+  // A restart doesn't send it again: the mirror says it has it.
+  stored = [{ seq: added[0]!.seq as number, path: pic }];
+  await sync.stop();
+  sync.start();
+  await tick(20);
+  await sync.flushNow();
+  assert.equal(uploads.length, 1);
+
+  // Stopping sharing drops them from the mirror.
+  h.runner.share(t.id, { access: 'off' });
+  h.clock.advance(SYNC_COALESCE_MS);
+  await tick(20);
+  await sync.flushNow();
+  assert.deepEqual(calls.filter((c) => c.fn === 'sync:dropShareImages').map((c) => c.args), [{ key: 'k', threadId: t.id }]);
 });

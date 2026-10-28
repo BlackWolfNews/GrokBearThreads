@@ -551,16 +551,10 @@ async function dispatch(client, method, p) {
       // docs/protocol.md, "Sharing". The mock keeps it on the summary; no
       // website reads it.
       const t = need(p.threadId);
-      if (!['off', 'link', 'people'].includes(p.access)) throw rpcError(-32602, 'access is "off", "link" or "people"');
+      if (p.access !== 'off' && p.access !== 'link') throw rpcError(-32602, 'access is "off" or "link"');
       const old = t.summary.share;
-      let people = old?.people ?? [];
-      if (p.people !== undefined) {
-        const bad = p.people.find((x) => !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(x).trim()));
-        if (bad !== undefined) throw rpcError(-32602, `${bad} isn't an email address.`);
-        people = [...new Set(p.people.map((x) => String(x).trim().toLowerCase()))];
-      }
       const slug = !old || p.newLink ? crypto.randomBytes(16).toString('base64url') : old.slug;
-      t.summary.share = { access: p.access, slug, people, updatedAt: new Date().toISOString() };
+      t.summary.share = { access: p.access, slug, updatedAt: new Date().toISOString() };
       broadcastSummary(t.summary.id);
       return { thread: t.summary };
     }

@@ -239,6 +239,7 @@ async function main(): Promise<void> {
       update: (p) => runner.update(p),
       markSeen: (id, seq) => runner.markSeen(id, seq),
       create: (p) => runner.create(p),
+      share: (id, p) => runner.share(id, p),
     },
     version: RUNNER_VERSION,
     release: RELEASE.release,

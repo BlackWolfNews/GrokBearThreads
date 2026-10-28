@@ -150,12 +150,11 @@ public extension RPCClient {
     }
 
     /// Ticks or unticks one ask on the open card. Sends nothing to the agent.
-    /// Who else can read the thread on the website (protocol "Sharing").
-    /// `people` nil keeps the list as it is; `newLink` makes a fresh link,
-    /// which stops the old one.
-    func share(threadId: String, access: ThreadShare.Access, people: [String]? = nil, newLink: Bool = false) async throws -> ThreadSummary {
+    /// Whether anyone with the link can read the thread on the website
+    /// (protocol "Sharing"). `newLink` makes a fresh link, which stops the
+    /// old one.
+    func share(threadId: String, access: ThreadShare.Access, newLink: Bool = false) async throws -> ThreadSummary {
         var params: [String: JSONValue] = ["threadId": .string(threadId), "access": .string(access.rawValue)]
-        if let people { params["people"] = .array(people.map { .string($0) }) }
         if newLink { params["newLink"] = .bool(true) }
         return try await call("threads.share", .object(params), as: ThreadResult.self).thread
     }

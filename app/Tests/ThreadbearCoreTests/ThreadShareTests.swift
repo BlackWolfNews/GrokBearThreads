@@ -13,17 +13,18 @@ final class ThreadShareTests: XCTestCase {
     }
 
     func testDecodesAndKeepsIt() throws {
-        let t = try thread(#","share":{"access":"people","slug":"abc","people":["ann@example.com"],"updatedAt":"2026-10-29T08:00:00Z"}"#)
-        XCTAssertEqual(t.share, ThreadShare(access: .people, slug: "abc", people: ["ann@example.com"]))
+        let t = try thread(#","share":{"access":"link","slug":"abc","updatedAt":"2026-10-29T08:00:00Z"}"#)
+        XCTAssertEqual(t.share, ThreadShare(access: .link, slug: "abc"))
         XCTAssertTrue(t.share!.isOn)
         let again = try JSONDecoder().decode(ThreadSummary.self, from: JSONEncoder().encode(t))
         XCTAssertEqual(again.share, t.share)
     }
 
     func testOffAndOddOnes() throws {
-        XCTAssertEqual(try thread(#","share":{"access":"off","slug":"abc","people":[]}"#).share?.isOn, false)
-        // An access this app doesn't know reads as off rather than shared.
-        XCTAssertEqual(try thread(#","share":{"access":"team","slug":"abc","people":[]}"#).share?.access, .off)
+        XCTAssertEqual(try thread(#","share":{"access":"off","slug":"abc"}"#).share?.isOn, false)
+        // An access this app doesn't know (the "people" of 28 Oct) reads as
+        // off rather than shared.
+        XCTAssertEqual(try thread(#","share":{"access":"people","slug":"abc","people":["a@x.io"]}"#).share?.access, .off)
         // A malformed one is as good as none, rather than losing the thread.
         XCTAssertNil(try thread(#","share":{"access":"link"}"#).share)
         XCTAssertNil(try thread("").share)

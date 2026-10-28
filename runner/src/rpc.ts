@@ -458,10 +458,9 @@ export class RpcServer {
         return r.panelShown(reqString(p, 'threadId'), reqString(p, 'requestId'));
       case 'threads.share': {
         const access = reqString(p, 'access');
-        if (!['off', 'link', 'people'].includes(access)) throw bad('access is "off", "link" or "people"');
-        if (p.people !== undefined && (!Array.isArray(p.people) || !p.people.every((x: unknown) => typeof x === 'string'))) throw bad('people must be an array of strings');
+        if (access !== 'off' && access !== 'link') throw bad('access is "off" or "link"');
         if (p.newLink !== undefined && typeof p.newLink !== 'boolean') throw bad('newLink must be a boolean');
-        return r.share(reqString(p, 'threadId'), { access: access as ShareAccess, ...(p.people ? { people: p.people } : {}), ...(p.newLink ? { newLink: true } : {}) });
+        return r.share(reqString(p, 'threadId'), { access: access as ShareAccess, ...(p.newLink ? { newLink: true } : {}) });
       }
       case 'threads.tickAsk':
         if (typeof p.ticked !== 'boolean') throw bad('ticked must be a boolean');

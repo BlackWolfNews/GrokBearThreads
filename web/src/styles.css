@@ -137,8 +137,20 @@ code, pre { font-family: var(--mono); font-size: 12.5px; }
 
 /* ---- a shared thread (share.tsx): one column, nothing to the side */
 .thread.shared { height: 100vh; height: 100dvh; }
-.code-form { display: flex; flex-direction: column; gap: 10px; margin-top: 16px; }
-.code-form input { font: inherit; color: inherit; background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 9px 12px; text-align: center; }
-.code-form input:focus { outline: none; border-color: var(--muted); }
-.code-form .link { align-self: center; }
-.problem { color: #c0392b; }
+
+/* ---- sharing controls (share.tsx), a small panel under the button */
+.share-menu { position: relative; }
+.share-menu > summary { list-style: none; cursor: pointer; border: 1px solid var(--line); border-radius: 8px; padding: 4px 10px; background: var(--card); }
+.share-menu > summary::-webkit-details-marker { display: none; }
+.share-menu > summary.on { border-color: var(--accent); }
+.share-panel { position: absolute; right: 0; top: calc(100% + 6px); z-index: 10; width: 320px; padding: 12px; background: var(--card); border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25); display: flex; flex-direction: column; gap: 10px; }
+.share-panel p { margin: 0; }
+.share-panel .command { margin: 0; }
+.share-link { display: flex; gap: 6px; }
+.share-link input { flex: 1; min-width: 0; font: inherit; font-size: 12.5px; color: var(--muted); background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 4px 8px; }
+
+/* ---- pictures in a shared thread */
+.picture { display: block; max-width: min(100%, 480px); max-height: 360px; width: auto; height: auto; border-radius: 8px; border: 1px solid var(--line); }
+.pictures { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+.pictures .picture { max-width: min(100%, 360px); max-height: 280px; }
+.msg.user .pictures { justify-content: flex-end; }

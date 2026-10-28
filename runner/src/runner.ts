@@ -367,8 +367,6 @@ const DELTA_INTERVAL_MS = 33; // at most ~30 delta flushes a second per thread
 const INTERRUPT_GRACE_MS = 10_000;
 // How long notices from startup are shown to clients that connect later.
 const STARTUP_NOTICE_MS = 10 * 60_000;
-// Most email addresses one thread can be shared with.
-const SHARE_PEOPLE_MAX = 50;
 // How long a finished background task keeps the thread counted as busy
 // while the CLI gets round to its own turn (usually well under a second).
 const WAKE_GRACE_MS = 15_000;
@@ -3730,7 +3728,9 @@ export class Runner {
     }
     if (rec.schedule) s.schedule = { ...rec.schedule };
     if (rec.panelRequest) s.panelRequest = { ...rec.panelRequest };
-    if (rec.share) s.share = { ...rec.share, people: [...rec.share.people] };
+    // A record from 28 Oct may say "people" (sharing with specific people,
+    // since dropped): that's not shared.
+    if (rec.share) s.share = { access: rec.share.access === 'link' ? 'link' : 'off', slug: rec.share.slug, updatedAt: rec.share.updatedAt };
     return s;
   }
 
@@ -3978,27 +3978,16 @@ export class Runner {
     return { request, shown };
   }
 
-  // Who else can read the thread on the website (docs/protocol.md,
-  // "Sharing"). The mirror carries it to Convex, which serves the link.
-  // The slug stays when sharing goes off, so sharing again brings the same
-  // link back, as a doc's sharing does; newLink makes a fresh one, which
-  // stops the old link and signs out everyone who read it.
-  share(threadId: string, args: { access: ShareAccess; people?: string[]; newLink?: boolean }): { thread: ThreadSummary } {
+  // Whether anyone with the link can read the thread on the website
+  // (docs/protocol.md, "Sharing"). The mirror carries it to Convex, which
+  // serves the link. The slug stays when sharing goes off, so sharing
+  // again brings the same link back, as a doc's sharing does; newLink
+  // makes a fresh one, which stops the old link for good.
+  share(threadId: string, args: { access: ShareAccess; newLink?: boolean }): { thread: ThreadSummary } {
     const st = this.mustGet(threadId);
-    if (!['off', 'link', 'people'].includes(args.access)) throw new RpcError(ErrorCode.badParams, 'access is "off", "link" or "people"');
-    let people = st.rec.share?.people ?? [];
-    if (args.people !== undefined) {
-      const seen = new Set<string>();
-      for (const raw of args.people) {
-        const email = raw.trim().toLowerCase();
-        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || email.length > 254) throw new RpcError(ErrorCode.badParams, `${raw.trim() || 'That'} isn't an email address.`);
-        seen.add(email);
-      }
-      if (seen.size > SHARE_PEOPLE_MAX) throw new RpcError(ErrorCode.badParams, `A thread can be shared with at most ${SHARE_PEOPLE_MAX} people.`);
-      people = [...seen];
-    }
+    if (args.access !== 'off' && args.access !== 'link') throw new RpcError(ErrorCode.badParams, 'access is "off" or "link"');
     const slug = !st.rec.share || args.newLink ? crypto.randomBytes(16).toString('base64url') : st.rec.share.slug;
-    st.rec.share = { access: args.access, slug, people, updatedAt: this.isoNow() };
+    st.rec.share = { access: args.access, slug, updatedAt: this.isoNow() };
     this.markDirty(st);
     return { thread: this.summary(st) };
   }

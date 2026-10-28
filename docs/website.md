@@ -25,27 +25,31 @@ Built 28 Oct 2026 (thread 66935d23).
 
 ## Sharing
 
-Since 29 Oct 2026 (thread ec75fe8b, backend API 7) a thread can be shared
-from the share button beside the Mac app's ... menu: Only you, Anyone with
-the link, or Specific people (docs/protocol.md, "Sharing"). The link is
-`<site>/s/<slug>`, a page with no sign-in of Mike's (`web/src/share.tsx`),
-read-only, live, served by `convex/share.ts`, the only functions that take
-no phone token:
+A thread can be shared by link (docs/protocol.md, "Sharing"): from the
+share button beside the Mac app's ... menu, or from the website, where
+Mike's own thread page and the shared page (when he's signed in) have a
+Share button: Share with a link, Copy, Stop sharing, and on his thread
+page New link. Those queue a `share` command (`phone:share`) the runner
+applies, as the Mac's button does. Built 28-29 Oct 2026 (thread ec75fe8b,
+backend APIs 7 and 8).
 
-- `share:view` gives the title, the messages and tool lines, and whether
-  it's running, and nothing else; or `signIn` for a "people" thread the
-  caller can't read yet; or `gone` for a link that doesn't work.
-- `share:sendCode` emails a six-digit code to an address on the list,
-  through Resend, and answers the same for one that isn't, so the page
-  can't tell anyone who a thread is shared with. Five codes per address
-  per link an hour. `share:verifyCode` swaps the code for a viewer token
-  the browser keeps in localStorage for that link.
-- Email needs `RESEND_API_KEY` on the deployment (`npx convex env set
-  RESEND_API_KEY … --prod`); without it the page says no code can be sent.
-  It sends from `Threadbear <threadbear@mail.mikecann.app>` (that domain is
-  verified in Mike's Resend account); `SHARE_EMAIL_FROM` changes it.
-- Only code hashes and viewer-token hashes are stored (`shareCodes`,
-  `shareViewers`); a cron deletes expired ones.
+The link is `<site>/s/<slug>`, a page with no sign-in (`web/src/share.tsx`),
+read-only and live, served by `share:view` (`convex/share.ts`), the only
+function that takes no phone token. It gives the title, the messages, the
+tool lines and the thread's pictures, and nothing else; or `gone` for a
+link that isn't shared. With Mike's token it also answers while the
+thread isn't shared, with `manage`, so his page keeps its controls.
+
+Pictures are in file storage (`shareImages`), uploaded by the runner only
+while the thread is shared and dropped when it stops. A picture written in
+a message's Markdown (`src`) takes the place of that Markdown image; the
+rest go after the row they came with. Mike's own thread page shows them
+too (`phone:messages` returns them). A Markdown picture that wasn't
+uploaded shows as its alt text, not a broken image.
+
+Sharing with specific people (an emailed code, through Resend) was built
+on 28 Oct and taken out on 29 Oct: Mike wanted a public link and nothing
+else for now, and it needed a Resend key Threadbear doesn't have.
 
 ## Signing in
 
@@ -93,5 +97,4 @@ the static-hosting CLI sets: a build without it can't reach Convex.
   browser from the iPhone app). A QR code for another device's browser is
   still `npm run web:sign-in -- --qr`.
 - Starting a new thread from the web (`phone:create` is there to use).
-- Sharing from the website or the iPhone app, and from an agent's tools:
-  only the Mac app's share button sets it so far.
+- Sharing from the iPhone app or an agent's tools.

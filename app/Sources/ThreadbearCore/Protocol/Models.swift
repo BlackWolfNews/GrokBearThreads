@@ -889,35 +889,33 @@ public struct PanelRequest: Sendable, Hashable, Codable {
     }
 }
 
-/// Who else can read a thread on the website (protocol "Sharing").
+/// Whether anyone with its link can read a thread on the website
+/// (protocol "Sharing").
 public struct ThreadShare: Sendable, Hashable, Codable {
     public enum Access: String, Sendable, Hashable, Codable, CaseIterable {
-        case off, link, people
+        case off, link
     }
     public var access: Access
     /// The link is `<website>/s/<slug>`. Kept while sharing is off, so
     /// sharing again brings the same link back.
     public var slug: String
-    /// Lowercased email addresses, for `people`.
-    public var people: [String]
 
-    public init(access: Access, slug: String, people: [String] = []) {
+    public init(access: Access, slug: String) {
         self.access = access
         self.slug = slug
-        self.people = people
     }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
+        // Anything else (the "people" of 28 Oct, or a later kind) isn't a
+        // public link: off.
         access = (try? c.decode(Access.self, forKey: .access)) ?? .off
         slug = try c.decode(String.self, forKey: .slug)
-        people = (try? c.decodeIfPresent([String].self, forKey: .people)) ?? []
     }
 
-    enum CodingKeys: String, CodingKey { case access, slug, people }
+    enum CodingKeys: String, CodingKey { case access, slug }
 
-    /// Shared with anyone at all.
-    public var isOn: Bool { access != .off }
+    public var isOn: Bool { access == .link }
 }
 
 public struct ThreadSummary: Sendable, Hashable, Codable, Identifiable {

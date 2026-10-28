@@ -1,11 +1,11 @@
+import AppKit
 import SwiftUI
 import ThreadbearCore
 
-/// The share icon beside the thread's ... menu: who else can read the
-/// thread on the website (protocol "Sharing"). Only you, anyone with the
-/// link, or specific people, who sign in with a code emailed to them. Out
-/// of sight while threads aren't mirrored to Convex, as there's no website
-/// to share on then.
+/// The share icon beside the thread's ... menu: whether anyone with the
+/// link can read the thread on the website (protocol "Sharing"). Out of
+/// sight while threads aren't mirrored to Convex, as there's no website to
+/// share on then.
 struct ShareButton: View {
     @Environment(AppModel.self) private var app
     /// For a thread open in a panel of its own; nil for the main panel's.
@@ -42,21 +42,13 @@ struct ShareButton: View {
 /// What the share button and popover say, kept apart so tests can read it.
 enum ShareText {
     static func buttonTip(_ thread: ThreadSummary) -> String {
-        guard let share = thread.share else { return "Share this thread on the web" }
-        switch share.access {
-        case .off: return "Share this thread on the web"
-        case .link: return "Shared: anyone with the link can read it"
-        case .people:
-            let n = share.people.count
-            return n == 1 ? "Shared with \(share.people[0])" : "Shared with \(n) people"
-        }
+        thread.share?.isOn == true ? "Shared: anyone with the link can read it" : "Share this thread on the web"
     }
 
     static func title(_ access: ThreadShare.Access) -> String {
         switch access {
         case .off: "Only you"
         case .link: "Anyone with the link"
-        case .people: "Specific people"
         }
     }
 
@@ -64,29 +56,15 @@ enum ShareText {
         switch access {
         case .off: "lock"
         case .link: "globe"
-        case .people: "person.2"
         }
     }
 
-    static let about = "Whoever you share with reads this thread on your Threadbear website: its messages and one line per step, as it carries on. Tool output, images, its folder and cost stay on your Mac. Only you stops the link working; sharing again brings the same link back."
-
-    /// The addresses typed into the field: split on commas, spaces and
-    /// semicolons, lowercased, the ones that aren't addresses left out.
-    static func emails(in text: String) -> (valid: [String], invalid: [String]) {
-        var valid: [String] = []
-        var invalid: [String] = []
-        for part in text.split(whereSeparator: { $0 == "," || $0 == ";" || $0.isWhitespace }) {
-            let email = part.trimmingCharacters(in: CharacterSet(charactersIn: "<>")).lowercased()
-            if email.range(of: #"^[^\s@]+@[^\s@]+\.[^\s@]+$"#, options: .regularExpression) != nil { valid.append(email) } else { invalid.append(String(part)) }
-        }
-        return (valid, invalid)
-    }
+    static let about = "Anyone with the link reads this thread on your Threadbear website: its messages, one line per step and its pictures, as it carries on. Tool output, its folder and cost stay on your Mac. Only you stops the link working; sharing again brings the same link back. You can change it from the website too."
 }
 
 struct SharePopover: View {
     @Environment(AppModel.self) private var app
     let threadId: String
-    @State private var newPeople = ""
     @State private var busy = false
     @State private var copied = false
     @State private var problem: String?
@@ -113,9 +91,7 @@ struct SharePopover: View {
             .pickerStyle(.menu)
             .fixedSize()
             .disabled(busy)
-            .tip("Who can read it. Specific people sign in with a code emailed to them.")
-
-            if access == .people { people }
+            .tip("Who can read it")
 
             if let share, share.isOn, let link = app.shareLink(share) {
                 HStack(spacing: 6) {
@@ -127,13 +103,20 @@ struct SharePopover: View {
                         .textSelection(.enabled)
                         .frame(maxWidth: .infinity, alignment: .leading)
                     Button {
-                        Task { await newLink() }
+                        Task { await run { try await app.share(threadId, access: .link, newLink: true) } }
                     } label: {
                         Image(systemName: "arrow.triangle.2.circlepath")
                     }
                     .buttonStyle(.borderless)
                     .disabled(busy)
-                    .tip("Make a new link. The old one stops working, and anyone who signed in has to again.")
+                    .tip("Make a new link. The old one stops working.")
+                    Button {
+                        NSWorkspace.shared.open(link)
+                    } label: {
+                        Image(systemName: "arrow.up.right.square")
+                    }
+                    .buttonStyle(.borderless)
+                    .tip("Open the shared page in your browser")
                     Button(copied ? "Copied" : "Copy link") { copy(link) }
                         .keyboardShortcut(.defaultAction)
                         .tip("Copy the link to paste anywhere")
@@ -148,40 +131,7 @@ struct SharePopover: View {
             }
         }
         .padding(16)
-        .frame(width: 360)
-    }
-
-    @ViewBuilder private var people: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 6) {
-                TextField("Add people by email", text: $newPeople)
-                    .textFieldStyle(.roundedBorder)
-                    .onSubmit { Task { await addPeople() } }
-                    .tip("One or more email addresses. They get a code at that address to open the link.")
-                Button("Add") { Task { await addPeople() } }
-                    .disabled(busy || newPeople.trimmingCharacters(in: .whitespaces).isEmpty)
-                    .tip("Let these addresses read the thread")
-            }
-            ForEach(share?.people ?? [], id: \.self) { email in
-                HStack(spacing: 8) {
-                    Image(systemName: "person.crop.circle")
-                        .foregroundStyle(.secondary)
-                    Text(email)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                    Spacer()
-                    Button {
-                        Task { await remove(email) }
-                    } label: {
-                        Image(systemName: "xmark")
-                            .font(.system(size: 10, weight: .semibold))
-                    }
-                    .buttonStyle(.borderless)
-                    .disabled(busy)
-                    .tip("Stop \(email) reading it. A browser they signed in with is shut out at once.")
-                }
-            }
-        }
+        .frame(width: 380)
     }
 
     private func change(to next: ThreadShare.Access) {
@@ -189,30 +139,10 @@ struct SharePopover: View {
         Task { await run { try await app.share(threadId, access: next) } }
     }
 
-    private func addPeople() async {
-        let (valid, invalid) = ShareText.emails(in: newPeople)
-        if !invalid.isEmpty {
-            problem = invalid.count == 1 ? "\(invalid[0]) isn't an email address." : "These aren't email addresses: \(invalid.joined(separator: ", "))."
-            return
-        }
-        guard !valid.isEmpty else { return }
-        let list = (share?.people ?? []) + valid.filter { !(share?.people ?? []).contains($0) }
-        await run { try await app.share(threadId, access: .people, people: list) }
-        if problem == nil { newPeople = "" }
-    }
-
-    private func remove(_ email: String) async {
-        await run { try await app.share(threadId, access: .people, people: (share?.people ?? []).filter { $0 != email }) }
-    }
-
-    private func newLink() async {
-        await run { try await app.share(threadId, access: access, newLink: true) }
-        copied = false
-    }
-
     private func run(_ body: () async throws -> Void) async {
         busy = true
         problem = nil
+        copied = false
         do { try await body() } catch { problem = error.localizedDescription }
         busy = false
     }

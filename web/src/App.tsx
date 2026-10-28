@@ -5,8 +5,9 @@ import { api } from '../../convex/_generated/api';
 import type { Id } from '../../convex/_generated/dataModel';
 import { go, threadPath, useRoute } from './route';
 import { signOut, useToken } from './token';
-import { SharePage } from './share';
-import { groupTools, MessageText, ToolRun } from './messages';
+import { groupTools, MessageText, Pictures, picturesByRow, ToolRun } from './messages';
+import { CommandState } from './command-state';
+import { ShareControl, SharePage } from './share';
 
 type View = 'inbox' | 'hibernating' | 'den';
 type Row = NonNullable<ReturnType<typeof useQuery<typeof api.phone.threads>>>[number];
@@ -227,6 +228,10 @@ function ThreadView({ token, threadId }: { token: string; threadId: string }) {
 
   if (!data || !shown) return <div className="pad muted">Loading…</div>;
   const t = data.thread;
+  // A shared thread's pictures (only shared ones have any uploaded).
+  const pictures = shown.images ?? [];
+  const inText = new Map(pictures.filter((p) => p.src).map((p) => [p.src!, p.url]));
+  const after = picturesByRow(shown.messages, pictures);
 
   const act = async (change: Parameters<typeof update>[0]['change']) => setPending(await update({ token, threadId, change }));
 
@@ -244,6 +249,7 @@ function ThreadView({ token, threadId }: { token: string; threadId: string }) {
           </p>
         </div>
         <div className="head-actions">
+          <ShareControl token={token} threadId={threadId} share={t.share} />
           <CopyLink />
           {t.view === 'hibernating' ? (
             <button onClick={() => act({ wake: true })}>Wake</button>
@@ -272,11 +278,15 @@ function ThreadView({ token, threadId }: { token: string; threadId: string }) {
         ) : null}
         {groupTools(shown.messages).map((g) =>
           g.kind === 'tools' ? (
-            <ToolRun key={g.items[0]!.seq} items={g.items} />
+            <div key={g.items[0]!.seq}>
+              <ToolRun items={g.items} />
+              <Pictures items={g.items.flatMap((m) => after.get(m.seq) ?? [])} />
+            </div>
           ) : (
             <div key={g.m.seq} className={`msg ${g.m.role}`}>
               {g.m.role === 'user' && g.m.origin && g.m.origin !== 'user' ? <div className="origin muted small">{originLabel(g.m.origin)}</div> : null}
-              <MessageText text={g.m.text} />
+              <MessageText text={g.m.text} pictures={inText} />
+              <Pictures items={after.get(g.m.seq) ?? []} />
               <div className="when muted small">{new Date(g.m.at).toLocaleString()}</div>
             </div>
           ),
@@ -397,29 +407,6 @@ function Composer({ token, threadId, onSent }: { token: string; threadId: string
         Send
       </button>
     </form>
-  );
-}
-
-// What happened to the last thing sent: the runner takes a command within a
-// second or two while it's online, so "waiting" for longer means the Mac is
-// asleep or offline.
-function CommandState({ token, commandId, onDone }: { token: string; commandId: Id<'commands'>; onDone: () => void }) {
-  const c = useQuery(api.phone.command, { token, commandId });
-  useEffect(() => {
-    if (c?.state !== 'done') return;
-    const t = setTimeout(onDone, 1200);
-    return () => clearTimeout(t);
-  }, [c?.state, onDone]);
-  if (!c || c.state === 'done') return null;
-  return (
-    <div className={`command ${c.state}`}>
-      {c.state === 'pending' ? 'Waiting for the Mac to pick this up…' : c.state === 'taken' ? 'Sent to the Mac…' : `Didn’t work: ${c.note ?? 'unknown error'}`}
-      {c.state === 'failed' ? (
-        <button className="link" onClick={onDone}>
-          Dismiss
-        </button>
-      ) : null}
-    </div>
   );
 }
 

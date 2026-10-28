@@ -275,8 +275,8 @@ export function checkSummary(t: Obj): string[] {
   }
   if (t.share !== undefined) {
     const s = t.share;
-    const ok = s && ['off', 'link', 'people'].includes(s.access) && isStr(s.slug) && Array.isArray(s.people) && s.people.every(isStr) && isIso(s.updatedAt) &&
-      Object.keys(s).every((k) => ['access', 'slug', 'people', 'updatedAt'].includes(k));
+    const ok = s && ['off', 'link'].includes(s.access) && isStr(s.slug) && isIso(s.updatedAt) &&
+      Object.keys(s).every((k) => ['access', 'slug', 'updatedAt'].includes(k));
     if (!ok) problems.push('share');
   }
   const allowed = new Set([

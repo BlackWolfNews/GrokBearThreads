@@ -1677,7 +1677,7 @@ test('needs you: the card survives a reload of the thread record', () => {
   assert.equal(t.asksSeq, seq);
 });
 
-test('sharing: a link that stays across off and on, people kept tidy, a new link on request', () => {
+test('sharing: a link that stays across off and on, and a new link on request', () => {
   const h = makeHarness();
   const { thread } = create(h);
   assert.equal(h.runner.get(thread.id).share, undefined);
@@ -1686,25 +1686,19 @@ test('sharing: a link that stays across off and on, people kept tidy, a new link
   assert.deepEqual(checkSummary(t), []);
   assert.equal(t.share!.access, 'link');
   assert.match(t.share!.slug, /^[A-Za-z0-9_-]{22}$/);
-  assert.deepEqual(t.share!.people, []);
   const slug = t.share!.slug;
 
-  // Addresses are trimmed, lowercased and listed once.
-  t = h.runner.share(thread.id, { access: 'people', people: [' Ann@Example.com', 'ann@example.com', 'bo@example.org'] }).thread;
-  assert.deepEqual(t.share!.people, ['ann@example.com', 'bo@example.org']);
-  assert.equal(t.share!.slug, slug);
-
-  // Off keeps the link and the people, so sharing again brings them back.
+  // Off keeps the link, so sharing again brings it back.
   t = h.runner.share(thread.id, { access: 'off' }).thread;
+  assert.deepEqual(checkSummary(t), []);
   assert.equal(t.share!.access, 'off');
-  t = h.runner.share(thread.id, { access: 'people' }).thread;
+  t = h.runner.share(thread.id, { access: 'link' }).thread;
   assert.equal(t.share!.slug, slug);
-  assert.deepEqual(t.share!.people, ['ann@example.com', 'bo@example.org']);
 
   t = h.runner.share(thread.id, { access: 'link', newLink: true }).thread;
   assert.notEqual(t.share!.slug, slug);
 
-  assert.throws(() => h.runner.share(thread.id, { access: 'people', people: ['not an address'] }), RpcError);
-  assert.throws(() => h.runner.share(thread.id, { access: 'everyone' as 'link' }), RpcError);
+  // Sharing with specific people went on 29 Oct.
+  assert.throws(() => h.runner.share(thread.id, { access: 'people' as 'link' }), RpcError);
   assert.equal(h.runner.get(thread.id).share!.access, 'link');
 });

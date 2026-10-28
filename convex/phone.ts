@@ -9,6 +9,7 @@ import type { Doc } from './_generated/dataModel';
 import { threadFields, views } from './schema';
 import { checkPhoneToken } from './lib';
 import { API_VERSION } from './version';
+import { imagesFrom, shareImage } from './share';
 
 // A runner not heard from for this long is offline, and a command with no
 // runnerId goes to the newest one still online.
@@ -124,7 +125,9 @@ export const thread = query({
 // Since API 2; reads Convex alone, so it works while the Mac is asleep.
 export const messages = query({
   args: { token: v.string(), threadId: v.string(), beforeSeq: v.optional(v.number()), limit: v.optional(v.number()), tools: v.optional(v.boolean()) },
-  returns: v.object({ messages: v.array(pageMessage), hasMore: v.boolean() }),
+  // images (API 8): a shared thread's uploaded pictures from the page's
+  // first row on (share.ts), so Mike's page shows what the shared one does.
+  returns: v.object({ messages: v.array(pageMessage), hasMore: v.boolean(), images: v.optional(v.array(shareImage)) }),
   handler: async (ctx, { token, threadId, beforeSeq, limit, tools }) => {
     await checkPhoneToken(ctx, token);
     const want = Math.max(1, Math.min(PAGE_MAX, Math.floor(limit ?? PAGE_DEFAULT)));
@@ -142,7 +145,9 @@ export const messages = query({
       }
       out.push({ seq: m.seq, role: m.role, text: m.text, ...(m.origin ? { origin: m.origin } : {}), ...(m.toolKind ? { toolKind: m.toolKind } : {}), at: m.at });
     }
-    return { messages: out.reverse(), hasMore };
+    out.reverse();
+    const images = tools && out.length ? await imagesFrom(ctx, threadId, hasMore || beforeSeq !== undefined ? out[0]!.seq : 0) : [];
+    return { messages: out, hasMore, ...(images.length ? { images } : {}) };
   },
 });
 
@@ -282,6 +287,19 @@ export const update = mutation({
   },
 });
 
+// Shares the thread by link, stops sharing it, or gives it a new link
+// (API 8; docs/website.md, "Sharing"), from the website. The runner
+// applies it as the Mac app's share button does.
+export const share = mutation({
+  args: { token: v.string(), threadId: v.string(), access: v.union(v.literal('off'), v.literal('link')), newLink: v.optional(v.boolean()) },
+  returns: v.id('commands'),
+  handler: async (ctx, { token, threadId, access, newLink }) => {
+    await checkPhoneToken(ctx, token);
+    const t = await findThread(ctx, threadId);
+    return queue(ctx, t.runnerId, 'share', threadId, { access, ...(newLink ? { newLink: true } : {}) });
+  },
+});
+
 // A new thread. With no runnerId, the newest runner still online takes it
 // (or the first one back, as "any").
 export const create = mutation({
@@ -361,6 +379,6 @@ async function findThread(ctx: QueryCtx, threadId: string) {
   return t;
 }
 
-async function queue(ctx: { db: QueryCtx['db'] & { insert: any } }, runnerId: string, kind: 'send' | 'respond' | 'update' | 'create' | 'page', threadId: string | undefined, args: Record<string, unknown>) {
+async function queue(ctx: { db: QueryCtx['db'] & { insert: any } }, runnerId: string, kind: 'send' | 'respond' | 'update' | 'create' | 'page' | 'share', threadId: string | undefined, args: Record<string, unknown>) {
   return ctx.db.insert('commands', { runnerId, ...(threadId ? { threadId } : {}), kind, args, state: 'pending', createdAt: Date.now() });
 }

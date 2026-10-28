@@ -1,7 +1,7 @@
 // How a thread's messages and tool lines are drawn, on Mike's own thread
 // page (App.tsx) and on a shared one (share.tsx).
 
-import Markdown from 'react-markdown';
+import Markdown, { defaultUrlTransform } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 
 // A message or tool line, from phone:messages or share:view.
@@ -62,13 +62,70 @@ function toolGlyph(kind?: string): string {
   }
 }
 
-// A message's text as Markdown, its links opening in a new tab.
-export function MessageText({ text }: { text: string }) {
+// A shared thread's picture (share:view): `src` for one written in a
+// message's Markdown, otherwise it goes after its row.
+export type Picture = { seq: number; src?: string; url: string; width?: number; height?: number };
+
+// A message's text as Markdown, its links opening in a new tab. A picture
+// written as a path on Mike's Mac shows from `pictures` (src to URL) when
+// it was uploaded for a shared thread, and as its alt text otherwise,
+// rather than a broken image.
+export function MessageText({ text, pictures }: { text: string; pictures?: Map<string, string> }) {
   return (
     <div className="md">
-      <Markdown remarkPlugins={[remarkGfm]} components={{ a: (p) => <a {...p} target="_blank" rel="noreferrer" /> }}>
+      <Markdown
+        remarkPlugins={[remarkGfm]}
+        // The default keeps links safe (no javascript: and the like). A
+        // file:// picture is let through only to be looked up in
+        // `pictures`; it's never used as an address itself.
+        urlTransform={(url, key) => (key === 'src' && url.startsWith('file://') ? url : defaultUrlTransform(url))}
+        components={{
+          a: (p) => <a {...p} target="_blank" rel="noreferrer" />,
+          img: ({ src, alt }) => {
+            const s = typeof src === 'string' ? src : '';
+            const url = pictures?.get(s) ?? (/^https?:\/\//.test(s) ? s : undefined);
+            if (!url) return <span className="muted">[{alt || 'image'}]</span>;
+            return (
+              <a href={url} target="_blank" rel="noreferrer">
+                <img className="picture" src={url} alt={alt ?? ''} loading="lazy" referrerPolicy="no-referrer" />
+              </a>
+            );
+          },
+        }}
+      >
         {text}
       </Markdown>
     </div>
   );
+}
+
+// Pictures that go after a row: an attachment, or what a tool handed back.
+export function Pictures({ items }: { items: Picture[] }) {
+  if (!items.length) return null;
+  return (
+    <div className="pictures">
+      {items.map((p) => (
+        <a key={p.url} href={p.url} target="_blank" rel="noreferrer">
+          <img className="picture" src={p.url} alt="" loading="lazy" width={p.width} height={p.height} />
+        </a>
+      ))}
+    </div>
+  );
+}
+
+// Which row each picture without a src goes after: the one with the
+// greatest seq at or before its own (rows are oldest first).
+export function picturesByRow(rows: { seq: number }[], pictures: Picture[]): Map<number, Picture[]> {
+  const out = new Map<number, Picture[]>();
+  for (const p of pictures) {
+    if (p.src) continue;
+    let at: number | undefined;
+    for (const r of rows) {
+      if (r.seq > p.seq) break;
+      at = r.seq;
+    }
+    if (at === undefined) continue;
+    out.set(at, [...(out.get(at) ?? []), p]);
+  }
+  return out;
 }

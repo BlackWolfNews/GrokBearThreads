@@ -28,4 +28,9 @@
 //    ({ access, slug, people? }), and share:view, share:sendCode and
 //    share:verifyCode serve /s/<slug> without a phone token. A runner sends
 //    `share` only to a backend of 7 or later.
-export const API_VERSION = 7;
+// 8: sharing is a public link or nothing (specific people and their email
+//    codes are gone). `share.access` can be "off", so Mike's page keeps
+//    its controls; phone:share queues a "share" command; and a shared
+//    thread's pictures go to file storage (sync:addShareImage), shown by
+//    share:view. A runner sends `share` only to a backend of 8 or later.
+export const API_VERSION = 8;

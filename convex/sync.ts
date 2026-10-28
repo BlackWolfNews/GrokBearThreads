@@ -3,7 +3,7 @@
 // twice is harmless, and a runner that was offline writes each changed
 // row once when it's back.
 import { ConvexError, v } from 'convex/values';
-import { internalMutation, mutation, query } from './_generated/server';
+import { internalMutation, mutation, query, type MutationCtx } from './_generated/server';
 import { internal } from './_generated/api';
 import { threadFields, views } from './schema';
 import { API_VERSION } from './version';
@@ -77,8 +77,72 @@ export const removeThreads = mutation({
         .unique();
       if (row) await ctx.db.delete(row._id);
       for await (const m of ctx.db.query('messages').withIndex('by_thread_seq', (q) => q.eq('threadId', threadId))) await ctx.db.delete(m._id);
+      await dropImages(ctx, threadId);
     }
     return null;
+  },
+});
+
+// ------------------------------------------------------------ shared pictures
+// A shared thread's pictures (API 8; docs/website.md, "Sharing"): the runner
+// asks what's up (shareImages), uploads each new file to an upload URL
+// (iconUploadUrl serves for these too) and records it (addShareImage).
+// When the thread stops being shared it drops them all.
+
+async function dropImages(ctx: MutationCtx, threadId: string): Promise<number> {
+  let n = 0;
+  for await (const img of ctx.db.query('shareImages').withIndex('by_thread_seq', (q) => q.eq('threadId', threadId))) {
+    await ctx.storage.delete(img.storageId);
+    await ctx.db.delete(img._id);
+    n++;
+  }
+  return n;
+}
+
+export const shareImages = query({
+  args: { key: v.string(), threadId: v.string() },
+  returns: v.array(v.object({ seq: v.number(), path: v.string() })),
+  handler: async (ctx, { key, threadId }) => {
+    checkRunnerKey(key);
+    const out = [];
+    for await (const img of ctx.db.query('shareImages').withIndex('by_thread_seq', (q) => q.eq('threadId', threadId))) out.push({ seq: img.seq, path: img.path });
+    return out;
+  },
+});
+
+export const addShareImage = mutation({
+  args: {
+    key: v.string(),
+    threadId: v.string(),
+    seq: v.number(),
+    path: v.string(),
+    src: v.optional(v.string()),
+    storageId: v.id('_storage'),
+    mediaType: v.string(),
+    width: v.optional(v.number()),
+    height: v.optional(v.number()),
+  },
+  returns: v.null(),
+  handler: async (ctx, { key, ...img }) => {
+    checkRunnerKey(key);
+    // Sent twice (a retry after a lost reply): keep the first, drop the copy.
+    const same = await ctx.db
+      .query('shareImages')
+      .withIndex('by_thread_seq', (q) => q.eq('threadId', img.threadId).eq('seq', img.seq))
+      .filter((q) => q.eq(q.field('path'), img.path))
+      .first();
+    if (same) await ctx.storage.delete(img.storageId);
+    else await ctx.db.insert('shareImages', img);
+    return null;
+  },
+});
+
+export const dropShareImages = mutation({
+  args: { key: v.string(), threadId: v.string() },
+  returns: v.number(),
+  handler: async (ctx, { key, threadId }) => {
+    checkRunnerKey(key);
+    return dropImages(ctx, threadId);
   },
 });
 
