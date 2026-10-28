@@ -257,6 +257,12 @@ type Panel = {
   patch: string         // the patch it came from: "convex", "xcode"
   projectId?: string    // as Action's
   note?: string         // one line about it: the deployment, the project
+  convex?: {            // the built-in Convex panel for a cloud deployment:
+    deployment: string  // its name, "happy-otter-123"
+    deploymentUrl: string // "https://happy-otter-123.convex.cloud"
+  }                     // a client that knows it shows Convex's embedded
+                        // dashboard with panels.convexKey (see "The Convex
+                        // panel"); one that doesn't shows `url`
 }
 
 // One row of a `list` panel (panels.render).
@@ -613,6 +619,7 @@ replaces whatever the deltas built up.
 | `media.import` | `{ path: string }` | `{ image: ImageRef }` copies a file into `inbox/` and reads its size |
 | `actions.run` | `{ threadId, actionId }` | For a prompt action, `{ turnId }`: its prompt was sent as a message (as `threads.send`). For a command action, `{ ok, exitCode?, durationMs, seq }` once the command has finished, with its output in the transcript as the `action.run` event at `seq`. The command runs in the thread's folder through a login shell with the thread's variables (`THREADBEAR_THREAD_ID` and the rest) and is stopped after 10 minutes. `-32602` for an action the thread doesn't have, `-32020` while the same action is still running |
 | `panels.render` | `{ threadId, panelId }` | `{ image?: ImageRef, items?: PanelItem[], note?: string }` draws an `image` panel or fills a `list` panel now. For `xcode.simulator`, a screenshot of the booted simulator (`xcrun simctl io booted screenshot`), written to the same file each time under the thread's `panels/`; with no device booted (or another failure) there's only `note`. For a `list` panel, the rows its patch's `items` function returned (at most 200), or `note` with the error when it threw or took over 20 seconds. Slow: it waits for the screenshot or the function. `-32602` for a panel the thread doesn't have |
+| `panels.convexKey` | `{ threadId, panelId, renew?: boolean }` | `{ deployment, deploymentUrl, adminKey }`, a deploy key for a panel with `convex`, for Convex's embedded dashboard. The runner makes it the first time (`npx convex deployment token create` in the project's folder, on Mike's Convex CLI login) and keeps it in `secrets/convex-panels/<deployment>.json`; `renew` deletes that one from Convex and makes a fresh one. Slow the first time. `-32602` for a panel the thread doesn't have or one without `convex`; an error with the CLI's message when it couldn't make one (not logged in, no `convex` package installed) |
 | `threads.highlights` | `{ threadId }` | `ThreadHighlights` (see Highlights): what the thread has made, shared and pinned, read from its events since the last call and kept with the thread |
 | `threads.explain` | `{ threadId, selection: string, message?: string, question?: string, earlier?: { question?: string, answer: string }[] }` | `{ answer: string, model: string }`. Explains words Mike selected in the transcript, on the small model (see Explain). `message` is the whole message they came from, as the app shows it; `earlier` and `question` are a follow-up. Writes nothing to the thread. `-32000` with the reason when no model answers |
 | `threads.removeHighlight` | `{ threadId, highlightId }` | `{ thread: ThreadSummary }` takes one off the list for good (a pin or a found one); a later mention doesn't bring it back. `-32602` for an id the thread doesn't have |
@@ -1257,7 +1264,7 @@ install` in it.
 
 | patch | when | panel |
 |---|---|---|
-| `convex` | a folder with `convex/` | `convex.dashboard`, a `url` panel: `https://dashboard.convex.dev/d/<name>` for the `CONVEX_DEPLOYMENT` in `.env.local` (then `.env`), `http://127.0.0.1:6790` for an anonymous local deployment, the dashboard's front page with no deployment yet. Only that one line of the file is read |
+| `convex` | a folder with `convex/` | `convex.dashboard`, a `url` panel: `https://dashboard.convex.dev/d/<name>` for the `CONVEX_DEPLOYMENT` in `.env.local` (then `.env`), `http://127.0.0.1:6790` for an anonymous local deployment, the dashboard's front page with no deployment yet. A cloud deployment's panel also has `convex`, with the deployment's URL from the `.env.local` (then `.env`) line ending `CONVEX_URL` (`CONVEX_URL`, `VITE_CONVEX_URL`, ...). Only those lines of the file are read |
 | `xcode` | a folder with an `.xcodeproj` or `.xcworkspace` | `xcode.simulator`, an `image` panel drawn by `panels.render` |
 | `worktree` | a thread with a worktree of its own (see Worktrees) | no panel: the action `worktree.land`, "Land", which runs `tb land` |
 
@@ -1266,29 +1273,27 @@ by asking `panels.render` now and then while it's on screen, a `list`
 panel the same way (when it's shown and every 15 seconds while it is),
 and an unknown `kind` as a page if it has a `url`.
 
-### Convex panel sign-in on the Mac
+### The Convex panel
 
-When the hosted dashboard redirects to Convex's sign-in page, the Mac
-panel shows a centred **Sign in through Chrome** button. **Sign in here
-instead** reveals the embedded form; the small bar button remains available
-after sign-in to change accounts. The dashboard reappears when the page
-returns to its authenticated destination. This is local to the
-Mac app, with no runner RPC or credentials in thread events. The companion
-extension in `app/Sources/Threadbear/Resources/ChromeSignIn` must be loaded
-in Chrome once. The app opens a short-lived page on `127.0.0.1` in Chrome;
-Mike clicks the extension there to start a fresh Convex sign-in. A rule
-limited to that tab redirects the dashboard's sign-in callback to the
-app's loopback listener. The app checks its random nonce and the exact
-return path, then loads the original HTTPS callback in the waiting panel.
-Convex exchanges the one-use code itself and sets the panel's session cookie.
+Convex's own dashboard wants Mike's Convex login, a browser session the
+panel's web view doesn't have. So a client that can shows Convex's
+[embedded dashboard](https://docs.convex.dev/platform-apis/embedded-dashboard)
+instead, `https://dashboard-embedded.convex.dev`, which takes a deployment
+and a deploy key rather than a login: the deployment's pages (data,
+functions, files, schedules, logs, history, settings), without the team's.
+The client gets the key with `panels.convexKey` and answers the page's
+`dashboard-credentials-request` message with `{ type:
+"dashboard-credentials", adminKey, deploymentUrl, deploymentName }`. The
+Mac app does it from a script in that web view alone, which only answers
+on that origin, with a website data store that isn't saved to disk. Open
+in browser still opens `url`, the full dashboard.
 
-The extension has no cookies, storage, scripting or general browsing
-permissions. It sees the active tab only when clicked and can redirect
-only `https://dashboard.convex.dev/api/auth/callback`. Rules are removed
-when the tab closes or after ten minutes. The app
-accepts one callback, stops after five minutes or Cancel, and never logs
-callback URLs. Existing Chrome cookies, OAuth tokens and Keychain entries
-are never imported. Signing in normally inside the panel remains possible.
+A deploy key is admin of its one deployment, so it never goes into a
+thread's events, the summary, the log or the Convex mirror: only
+`panels.convexKey`'s answer, on the local connection. The runner makes
+one per deployment, named `threadbear-panel-<host>-<6 hex>` (names are unique on a deployment), and Mike can revoke
+it in the deployment's settings on the Convex dashboard (then the panel's
+"New deploy key" button makes another).
 
 ## Highlights
 

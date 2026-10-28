@@ -364,7 +364,8 @@ export function checkPanel(p: Obj): string[] {
   if (p.kind === 'url' && !isStr(p.url)) problems.push('url (required for kind url)');
   for (const k of ['url', 'note', 'projectId', 'icon', 'iconFile', 'summary']) if (p[k] !== undefined && !isStr(p[k])) problems.push(k);
   if (p.badge !== undefined && !(Number.isInteger(p.badge) && p.badge > 0)) problems.push('badge');
-  const allowed = new Set(['id', 'title', 'kind', 'url', 'icon', 'iconFile', 'patch', 'projectId', 'note', 'badge', 'summary']);
+  if (p.convex !== undefined && !(isStr(p.convex?.deployment) && isStr(p.convex?.deploymentUrl) && Object.keys(p.convex).length === 2)) problems.push('convex');
+  const allowed = new Set(['id', 'title', 'kind', 'url', 'icon', 'iconFile', 'patch', 'projectId', 'note', 'badge', 'summary', 'convex']);
   for (const k of Object.keys(p)) if (!allowed.has(k)) problems.push(`unexpected field ${k}`);
   return problems;
 }

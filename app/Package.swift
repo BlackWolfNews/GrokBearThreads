@@ -33,7 +33,6 @@ let package = Package(
                 .product(name: "BearDock", package: "dock"),
             ],
             path: "Sources/Threadbear",
-            resources: [.copy("Resources/ChromeSignIn")],
             // The AppKit side renders and measures text off the main thread
             // with non-Sendable TextKit objects confined to one thread each;
             // Swift 5 mode keeps that from drowning in Sendable errors.

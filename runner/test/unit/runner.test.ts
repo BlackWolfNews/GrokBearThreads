@@ -1241,6 +1241,32 @@ test('a thread in a Convex project has the dashboard panel; a folder change refr
   assert.equal(back.panels?.[0].id, 'convex.dashboard');
 });
 
+test('panels.convexKey makes a deploy key in the project folder, for the panel only', async () => {
+  const root = tmpDir();
+  const project = path.join(root, 'app');
+  fs.mkdirSync(path.join(project, 'convex'), { recursive: true });
+  fs.writeFileSync(path.join(project, '.env.local'), 'CONVEX_DEPLOYMENT=dev:quick-fox-77\nCONVEX_URL=https://quick-fox-77.convex.cloud\n');
+  fs.writeFileSync(path.join(project, 'package.json'), '{}');
+  const calls: string[] = [];
+  const h = makeHarness(undefined, {}, {
+    panelsRoot: root,
+    convexKeyRun: async (command, cwd) => {
+      calls.push(cwd);
+      fs.writeFileSync(/--save-env '([^']+)'/.exec(command)![1], 'CONVEX_DEPLOY_KEY=dev:quick-fox-77|k\n');
+      return { ok: true, text: '', truncated: false, durationMs: 1 };
+    },
+  });
+  const { thread } = create(h, { cwd: path.join(project, 'convex') });
+  assert.deepEqual(thread.panels?.[0].convex, { deployment: 'quick-fox-77', deploymentUrl: 'https://quick-fox-77.convex.cloud' });
+  assert.deepEqual(await h.runner.convexPanelKey(thread.id, 'convex.dashboard'), { deployment: 'quick-fox-77', deploymentUrl: 'https://quick-fox-77.convex.cloud', adminKey: 'dev:quick-fox-77|k' });
+  assert.deepEqual(calls, [project]);
+  assert.ok(fs.existsSync(path.join(h.home, 'secrets', 'convex-panels', 'quick-fox-77.json')));
+  await assert.rejects(h.runner.convexPanelKey(thread.id, 'nope'), /no panel called nope/);
+  // The key is only in the answer: never in the thread's events or summary.
+  assert.ok(!JSON.stringify(h.runner.get(thread.id)).includes('quick-fox-77|k'));
+  assert.ok(!JSON.stringify(h.notes).includes('quick-fox-77|k'));
+});
+
 test('patch files give a thread actions; a command action runs in the folder and lands in the transcript', async () => {
   const root = tmpDir();
   const project = path.join(root, 'app');

@@ -511,7 +511,33 @@ function convexPanel(dir: string): Panel {
   const { url, note } = convexDashboardUrl(deployment);
   const panel: Panel = { id: 'convex.dashboard', title: 'Convex', kind: 'url', url, icon: 'cylinder.split.1x2', patch: 'convex' };
   if (note) panel.note = note;
+  const embed = convexEmbed(deployment, readEnvWhere(dir, (name) => /(^|_)CONVEX_URL$/.test(name)));
+  if (embed) panel.convex = embed;
   return panel;
+}
+
+// What the Mac app needs to show Convex's embedded dashboard, which takes a
+// deploy key instead of a login (docs/protocol.md, "The Convex panel"). Only
+// a cloud deployment: the embedded dashboard is https, and a local one's
+// http://127.0.0.1 address would be blocked there as mixed content.
+export function convexEmbed(deployment: string | undefined, deploymentUrl: string | undefined): Panel['convex'] {
+  const name = convexDeploymentName(deployment);
+  if (!name || deployment!.startsWith('anonymous:') || !deploymentUrl) return undefined;
+  let parsed: URL;
+  try {
+    parsed = new URL(deploymentUrl);
+  } catch {
+    return undefined;
+  }
+  if (parsed.protocol !== 'https:') return undefined;
+  return { deployment: name, deploymentUrl: parsed.origin };
+}
+
+// The name in a CONVEX_DEPLOYMENT ("dev:happy-otter-123"), if it looks like
+// one. It ends up in a command line and a file name, so nothing else passes.
+export function convexDeploymentName(deployment: string | undefined): string | undefined {
+  const name = deployment?.slice(deployment.indexOf(':') + 1);
+  return name && /^[a-z0-9]+(-[a-z0-9]+)*$/.test(name) ? name : undefined;
 }
 
 // Mirrors the CLI's own `convex dashboard`: every deployment type is a
@@ -574,6 +600,12 @@ function isDir(p: string): boolean {
 // A dotenv value by name, unquoted; `.env.local` then `.env`. Only the one
 // line is read and returned, never the file: the rest may hold secrets.
 export function readEnvValue(dir: string, name: string): string | undefined {
+  return readEnvWhere(dir, (n) => n === name);
+}
+
+// The first value whose name passes `test`: CONVEX_URL is VITE_CONVEX_URL,
+// NEXT_PUBLIC_CONVEX_URL and so on, depending on the framework.
+export function readEnvWhere(dir: string, test: (name: string) => boolean): string | undefined {
   for (const file of ['.env.local', '.env']) {
     let text: string;
     try {
@@ -581,18 +613,22 @@ export function readEnvValue(dir: string, name: string): string | undefined {
     } catch {
       continue;
     }
-    const value = parseEnvValue(text, name);
+    const value = parseEnvWhere(text, test);
     if (value !== undefined) return value;
   }
   return undefined;
 }
 
 export function parseEnvValue(text: string, name: string): string | undefined {
+  return parseEnvWhere(text, (n) => n === name);
+}
+
+function parseEnvWhere(text: string, test: (name: string) => boolean): string | undefined {
   for (const raw of text.split(/\r?\n/)) {
     const line = raw.trim();
     if (!line || line.startsWith('#')) continue;
     const m = /^(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$/.exec(line);
-    if (!m || m[1] !== name) continue;
+    if (!m || !test(m[1])) continue;
     let value = m[2].trim();
     if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
       value = value.slice(1, -1);

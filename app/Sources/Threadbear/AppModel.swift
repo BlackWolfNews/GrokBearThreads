@@ -1352,6 +1352,18 @@ final class AppModel {
             return PanelRender(note: failure)
         }
     }
+
+    /// A deploy key for a Convex panel, or the reason there isn't one (the
+    /// Convex CLI's, when it couldn't make one).
+    func convexPanelKey(threadId: String, panelId: String, renew: Bool = false) async -> Result<ConvexPanelKey, Error> {
+        guard let client else { return .failure(RPCError.disconnected(nil)) }
+        do {
+            return .success(try await client.convexPanelKey(threadId: threadId, panelId: panelId, renew: renew))
+        } catch {
+            AppLog.write("panels", "convex key for \(panelId) failed: \(error.localizedDescription)")
+            return .failure(error)
+        }
+    }
 }
 
 /// What `ConnectionBanner` shows.

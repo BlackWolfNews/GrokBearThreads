@@ -27,7 +27,24 @@ test('a folder with convex/ gets the dashboard panel for its deployment', () => 
   assert.deepEqual(panels[0], {
     id: 'convex.dashboard', title: 'Convex', kind: 'url', icon: 'cylinder.split.1x2', patch: 'convex',
     url: 'https://dashboard.convex.dev/d/happy-otter-123', note: 'happy-otter-123 (dev)',
+    convex: { deployment: 'happy-otter-123', deploymentUrl: 'https://happy-otter-123.convex.cloud' },
   });
+});
+
+test('the Convex panel offers the embedded dashboard only for a cloud deployment with its URL', () => {
+  const home = tmpDir();
+  const vite = project(home, 'dev/vite', { convex: null, 'package.json': '{}', '.env.local': 'CONVEX_DEPLOYMENT=dev:calm-cat-1\nVITE_CONVEX_URL=https://calm-cat-1.eu-west-1.convex.cloud\nCONVEX_SITE_URL=https://calm-cat-1.convex.site\n' });
+  assert.deepEqual(projectPanels(vite, home)[0].convex, { deployment: 'calm-cat-1', deploymentUrl: 'https://calm-cat-1.eu-west-1.convex.cloud' });
+  const noUrl = project(home, 'dev/nourl', { convex: null, 'package.json': '{}', '.env.local': 'CONVEX_DEPLOYMENT=dev:calm-cat-2\n' });
+  assert.equal(projectPanels(noUrl, home)[0].convex, undefined);
+  const local = project(home, 'dev/local', { convex: null, 'package.json': '{}', '.env.local': 'CONVEX_DEPLOYMENT=local:my-local-1\nCONVEX_URL=http://127.0.0.1:3210\n' });
+  assert.equal(projectPanels(local, home)[0].convex, undefined);
+  const anon = project(home, 'dev/anon', { convex: null, 'package.json': '{}', '.env.local': 'CONVEX_DEPLOYMENT=anonymous:anonymous-app\nCONVEX_URL=https://x.convex.cloud\n' });
+  assert.equal(projectPanels(anon, home)[0].convex, undefined);
+  // The name goes on a command line, so anything odd isn't offered.
+  const odd = project(home, 'dev/odd', { convex: null, 'package.json': '{}', '.env.local': 'CONVEX_DEPLOYMENT=dev:x;rm -rf ~\nCONVEX_URL=https://x.convex.cloud\n' });
+  assert.equal(projectPanels(odd, home)[0].convex, undefined);
+  for (const p of [vite, noUrl, local, anon, odd]) assert.deepEqual(checkPanel(projectPanels(p, home)[0] as never), []);
 });
 
 test('a thread in a package of the project still gets the project panels; nothing above home', () => {

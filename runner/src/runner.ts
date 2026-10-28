@@ -2,8 +2,10 @@
 // release and snoozes. Providers plug in through AgentAdapter; the WebSocket
 // server in rpc.ts is a thin layer over the public methods here.
 import fs from 'node:fs';
+import os from 'node:os';
 import { reviewInput, reviewDraft, reviewReply, sameDraft, type ReviewInput } from './reviews.ts';
 import path from 'node:path';
+import { ConvexKeys, convexFolderFor, type ConvexKey } from './convex-keys.ts';
 import crypto from 'node:crypto';
 import type {
   Panel,
@@ -92,6 +94,7 @@ import {
   renderPanel,
   runCommand,
   simctlScreenshot,
+  type CommandOutcome,
   type PanelRender,
   type PatchCache,
   type PatchSet,
@@ -330,6 +333,9 @@ export type RunnerDeps = {
   // tests pass /bin/sh -c and a short limit.
   actionShell?: string[];
   actionTimeoutMs?: number;
+  // Runs the Convex CLI for the Convex panel's deploy keys (convex-keys.ts);
+  // tests pass a fake that writes the key file the CLI would.
+  convexKeyRun?: (command: string, cwd: string) => Promise<CommandOutcome>;
   // The runner's own small-model calls (models/index.ts), for titles.
   // Absent in most tests, which then keep the first-line title.
   models?: Pick<Models, 'generate'>;
@@ -386,6 +392,7 @@ export class Runner {
   private panelsRoot?: string;
   private actionShell?: string[];
   private actionTimeoutMs?: number;
+  private convexKeys: ConvexKeys;
   private models?: Pick<Models, 'generate'>;
   private projects?: Projects;
   private activity = new Set<(a: ThreadActivity) => void>();
@@ -435,6 +442,10 @@ export class Runner {
     this.panelsRoot = deps.panelsRoot;
     this.actionShell = deps.actionShell;
     this.actionTimeoutMs = deps.actionTimeoutMs;
+    this.convexKeys = new ConvexKeys(
+      path.join(paths.secrets(deps.config.home), 'convex-panels'),
+      deps.convexKeyRun ?? ((command, cwd) => runCommand(command, { cwd, env: { ...process.env }, shell: this.actionShell, timeoutMs: 120_000 })),
+    );
     this.models = deps.models;
     this.projects = deps.projects;
     this.adapters = deps.adapters;
@@ -3682,6 +3693,20 @@ export class Runner {
       });
     }
     return renderPanel(panel, paths.panels(this.cfg.home, threadId), this.screenshot);
+  }
+
+  // panels.convexKey: a deploy key for the Convex panel, which shows
+  // Convex's embedded dashboard with it rather than asking for a login.
+  async convexPanelKey(threadId: string, panelId: string, renew = false): Promise<ConvexKey> {
+    const st = this.mustGet(threadId);
+    const panel = this.patchSet(st).panels.find((p) => p.id === panelId);
+    if (!panel) throw new RpcError(ErrorCode.badParams, `This thread has no panel called ${panelId}`);
+    if (!panel.convex) throw new RpcError(ErrorCode.badParams, `${panelId} isn't a Convex cloud deployment's panel`);
+    const { deployment, deploymentUrl } = panel.convex;
+    const starts = [st.rec.cwd, ...(this.projects?.foldersFor(st.rec) ?? []).map((f) => f.folder)];
+    const folder = convexFolderFor(deployment, starts, this.panelsRoot ?? os.homedir());
+    if (!folder) throw new RpcError(ErrorCode.badParams, `Couldn't find the Convex project for ${deployment}`);
+    return { deployment, deploymentUrl, adminKey: await this.convexKeys.key(deployment, folder, renew) };
   }
 
   // ------------------------------------------------------------ highlights

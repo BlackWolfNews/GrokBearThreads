@@ -55,6 +55,14 @@ public extension RPCClient {
         try await call("panels.render", .object(["threadId": .string(threadId), "panelId": .string(panelId)]), as: PanelRender.self, timeout: .seconds(30))
     }
 
+    /// A deploy key for a Convex panel's embedded dashboard. Slow the first
+    /// time for a deployment, while the runner has the Convex CLI make one.
+    func convexPanelKey(threadId: String, panelId: String, renew: Bool = false) async throws -> ConvexPanelKey {
+        var params: [String: JSONValue] = ["threadId": .string(threadId), "panelId": .string(panelId)]
+        if renew { params["renew"] = .bool(true) }
+        return try await call("panels.convexKey", .object(params), as: ConvexPanelKey.self, timeout: .seconds(150))
+    }
+
     /// What the thread has made, shared and pinned (docs/protocol.md,
     /// "Highlights"). A runner from before highlights answers `-32601`.
     func threadHighlights(threadId: String) async throws -> ThreadHighlights {

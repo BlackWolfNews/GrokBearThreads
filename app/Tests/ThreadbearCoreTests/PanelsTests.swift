@@ -26,6 +26,26 @@ final class PanelsTests: XCTestCase {
         XCTAssertFalse(String(decoding: try JSONEncoder().encode(none), as: UTF8.self).contains("panels"))
     }
 
+    func testConvexPanelDecodesItsDeploymentAndIgnoresABrokenOne() throws {
+        let json = """
+        {"id":"th1","panels":[
+          {"id":"convex.dashboard","title":"Convex","kind":"url","url":"https://dashboard.convex.dev/d/quick-fox-77","patch":"convex","convex":{"deployment":"quick-fox-77","deploymentUrl":"https://quick-fox-77.convex.cloud"}},
+          {"id":"web:convex.dashboard","title":"Convex","kind":"url","url":"https://dashboard.convex.dev/d/x","patch":"convex","convex":{"deployment":7}}
+        ]}
+        """
+        let thread = try JSONDecoder().decode(ThreadSummary.self, from: Data(json.utf8))
+        XCTAssertEqual(thread.panels[0].convex, ConvexDeployment(deployment: "quick-fox-77", deploymentUrl: "https://quick-fox-77.convex.cloud"))
+        XCTAssertNil(thread.panels[1].convex, "shown as the plain dashboard page instead")
+        XCTAssertEqual(try JSONDecoder().decode(ThreadSummary.self, from: JSONEncoder().encode(thread)).panels, thread.panels)
+    }
+
+    func testAConvexPanelKeyNeverDescribesItsKey() throws {
+        let key = try JSONDecoder().decode(ConvexPanelKey.self, from: Data(#"{"deployment":"quick-fox-77","deploymentUrl":"https://quick-fox-77.convex.cloud","adminKey":"dev:quick-fox-77|secret"}"#.utf8))
+        XCTAssertEqual(key.adminKey, "dev:quick-fox-77|secret")
+        XCTAssertFalse("\(key)".contains("secret"))
+        XCTAssertFalse(String(describing: [key]).contains("secret"))
+    }
+
     func testActivePanelIsTheRememberedOneIfStillThereElseTheFirst() {
         let convex = Panel(id: "convex.dashboard", title: "Convex", url: "https://dashboard.convex.dev", patch: "convex")
         let sim = Panel(id: "xcode.simulator", title: "Simulator", kind: .image, patch: "xcode")

@@ -1,0 +1,50 @@
+import WebKit
+import XCTest
+@testable import Threadbear
+@testable import ThreadbearCore
+
+/// The Convex panel's script hands the deploy key to Convex's embedded
+/// dashboard only when that page asks, and only on its origin. A page
+/// standing in for it is loaded with the dashboard's origin as its base, so
+/// no network is needed.
+@MainActor
+final class ConvexPanelTests: XCTestCase {
+    private let key = ConvexPanelKey(deployment: "quick-fox-77", deploymentUrl: "https://quick-fox-77.convex.cloud", adminKey: "dev:quick-fox-77|it's \"quoted\"</script>")
+
+    private func reply(origin: String) async throws -> String {
+        let config = WKWebViewConfiguration()
+        config.websiteDataStore = .nonPersistent()
+        config.userContentController.addUserScript(WKUserScript(
+            source: WebPanelPool.convexCredentialsScript(key), injectionTime: .atDocumentStart, forMainFrameOnly: true))
+        let view = WKWebView(frame: .zero, configuration: config)
+        // What the embedded dashboard does: ask its parent (itself, at the
+        // top level) and wait for the credentials.
+        let page = """
+        <script>
+        window.got = 'none';
+        window.addEventListener('message', (e) => { if (e.data && e.data.type === 'dashboard-credentials') window.got = JSON.stringify(e.data); });
+        window.parent.postMessage({ type: 'dashboard-credentials-request' }, '*');
+        </script>
+        """
+        view.loadHTMLString(page, baseURL: URL(string: origin)!)
+        for _ in 0..<50 {
+            try await Task.sleep(for: .milliseconds(100))
+            if !view.isLoading, let got = try? await view.evaluateJavaScript("window.got") as? String, got != "none" { return got }
+        }
+        return (try? await view.evaluateJavaScript("window.got") as? String) ?? "none"
+    }
+
+    func testAnswersTheEmbeddedDashboardWithTheKey() async throws {
+        let got = try await reply(origin: "https://dashboard-embedded.convex.dev/")
+        let credentials = try JSONSerialization.jsonObject(with: Data(got.utf8)) as? [String: String]
+        XCTAssertEqual(credentials, [
+            "type": "dashboard-credentials", "adminKey": key.adminKey,
+            "deploymentUrl": "https://quick-fox-77.convex.cloud", "deploymentName": "quick-fox-77",
+        ])
+    }
+
+    func testSaysNothingOnAnyOtherOrigin() async throws {
+        let got = try await reply(origin: "https://evil.example/")
+        XCTAssertEqual(got, "none")
+    }
+}

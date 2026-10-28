@@ -52,6 +52,7 @@ const THREAD_METHODS = new Set([
   'threads.tickAsk',
   'approvals.respond',
   'panels.render',
+  'panels.convexKey',
   'actions.run',
 ]);
 
@@ -480,6 +481,8 @@ export class RpcServer {
         return r.importMedia(reqString(p, 'path'));
       case 'panels.render':
         return r.renderPanel(reqString(p, 'threadId'), reqString(p, 'panelId'));
+      case 'panels.convexKey':
+        return r.convexPanelKey(reqString(p, 'threadId'), reqString(p, 'panelId'), p.renew === true);
       case 'actions.run':
         return r.runAction(reqString(p, 'threadId'), reqString(p, 'actionId'));
       // Each starts its work and answers at once; progress comes through

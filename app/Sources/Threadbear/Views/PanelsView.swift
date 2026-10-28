@@ -47,7 +47,9 @@ struct DockPane: View {
     private func panelView(_ panel: Panel, in thread: ThreadSummary) -> some View {
         switch panel.kind {
         case .url:
-            if let url = panel.pageURL {
+            if let convex = panel.convex {
+                ConvexPanel(threadId: thread.id, panelId: panel.id, convex: convex)
+            } else if let url = panel.pageURL {
                 WebPanel(url: url)
             } else {
                 PaneNote(text: "This panel has no page to show.")
@@ -65,7 +67,6 @@ struct DockPane: View {
 struct DockPaneButtons: View {
     @Environment(AppModel.self) private var app
     let section: PaneSection
-    @State private var signInURL: URL?
 
     var body: some View {
         HStack(spacing: 0) {
@@ -74,16 +75,17 @@ struct DockPaneButtons: View {
                     PreviewButtons(thread: thread, preview: preview)
                 } else if case .panel(let id) = section, let panel = thread.panels.first(where: { $0.id == id }),
                           panel.kind == .url, let url = panel.pageURL {
-                    if ConvexPanelSignIn.supports(url) {
-                        PaneHeaderButton(symbol: "person.badge.key", help: "Sign in through Chrome") { signInURL = url }
+                    if let convex = panel.convex {
+                        PaneHeaderButton(symbol: "key", help: "Make a new deploy key for \(convex.deployment), if the old one was revoked") {
+                            WebPanelPool.shared.renewConvex(convex.deployment)
+                        }
+                        PaneHeaderButton(symbol: "arrow.clockwise", help: "Reload panel") { WebPanelPool.shared.reloadConvex(convex.deployment) }
+                    } else {
+                        PaneHeaderButton(symbol: "arrow.clockwise", help: "Reload panel") { WebPanelPool.shared.reloadIfLoaded(url) }
                     }
-                    PaneHeaderButton(symbol: "arrow.clockwise", help: "Reload panel") { WebPanelPool.shared.reloadIfLoaded(url) }
                     PaneHeaderButton(symbol: "arrow.up.right", help: "Open in browser") { NSWorkspace.shared.open(url) }
                 }
             }
-        }
-        .sheet(isPresented: Binding(get: { signInURL != nil }, set: { if !$0 { signInURL = nil } })) {
-            if let signInURL { ChromePanelSignInSheet(dashboard: signInURL) }
         }
     }
 }
@@ -365,60 +367,9 @@ struct PaneNote: View {
 
 // MARK: - Web panels
 
-/// Give the Chrome sign-in its own page when Convex needs a login. The
-/// pooled web view stays alive behind it to receive the browser callback.
-struct WebPanel: View {
-    let url: URL
-    @ObservedObject private var pool = WebPanelPool.shared
-    @State private var signInHere = false
-    @State private var showSignIn = false
-
-    var body: some View {
-        Group {
-            if ConvexPanelSignIn.supports(url), pool.signInPages.contains(url), !signInHere {
-                VStack(spacing: 18) {
-                    Image(systemName: "cylinder.split.1x2")
-                        .font(.system(size: 44))
-                        .foregroundStyle(.secondary)
-                    Text("Sign in to Convex")
-                        .font(.system(size: 24, weight: .semibold))
-                    Text("Use your Chrome login for this panel.")
-                        .foregroundStyle(.secondary)
-                        .multilineTextAlignment(.center)
-                    Button { showSignIn = true } label: {
-                        Text("Sign in through Chrome")
-                            .font(.system(size: 16, weight: .medium))
-                            .multilineTextAlignment(.center)
-                            .fixedSize(horizontal: false, vertical: true)
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 4)
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .controlSize(.large)
-                    .tip("Use Chrome to sign in to the Convex panel")
-                    Button("Sign in here instead") { signInHere = true }
-                        .buttonStyle(.link)
-                        .tip("Show Convex’s sign-in form inside this panel")
-                }
-                .frame(maxWidth: 340)
-                .padding(28)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .background(Color(nsColor: .windowBackgroundColor))
-            } else {
-                PooledWebPage(url: url)
-            }
-        }
-        .sheet(isPresented: $showSignIn) { ChromePanelSignInSheet(dashboard: url) }
-        .onChange(of: url) { signInHere = false; showSignIn = false }
-        .onChange(of: pool.signInPages.contains(url)) { _, needsSignIn in
-            if !needsSignIn { signInHere = false }
-        }
-    }
-}
-
-/// Moving the pooled web view between containers preserves its page when
-/// leaving a panel and returning, or revealing the embedded login form.
-private struct PooledWebPage: NSViewRepresentable {
+/// A `url` panel. The web view comes from the pool and is moved into this
+/// view's container, so leaving and coming back finds the page as it was.
+struct WebPanel: NSViewRepresentable {
     let url: URL
     @Environment(\.isDockGhost) private var isGhost
 
@@ -428,6 +379,65 @@ private struct PooledWebPage: NSViewRepresentable {
         // The dock's drag ghost would take the page out of its panel.
         if isGhost { return }
         container.show(WebPanelPool.shared.webView(for: url))
+    }
+}
+
+/// The Convex panel: Convex's embedded dashboard, which takes a deploy key
+/// instead of a Convex login (docs/protocol.md, "The Convex panel"). The
+/// runner makes the key the first time, which takes a few seconds.
+private struct ConvexPanel: View {
+    @Environment(AppModel.self) private var app
+    let threadId: String
+    let panelId: String
+    let convex: ConvexDeployment
+    @ObservedObject private var pool = WebPanelPool.shared
+    @State private var key: ConvexPanelKey?
+    @State private var failure: String?
+
+    var body: some View {
+        Group {
+            if let key {
+                ConvexWebPage(key: key)
+            } else if let failure {
+                VStack(spacing: zoomed(12)) {
+                    Text(failure)
+                        .font(.system(size: TypeScale.label))
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                        .textSelection(.enabled)
+                    Button("Try again") { Task { await fetch() } }
+                        .tip("Ask the runner for a deploy key again")
+                }
+                .padding(zoomed(24))
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                PaneNote(text: "Getting a deploy key for \(convex.deployment)…")
+            }
+        }
+        // Again when the deployment changes, or after New deploy key.
+        .task(id: "\(convex.deployment) \(pool.convexRenewals[convex.deployment, default: 0])") { await fetch() }
+    }
+
+    private func fetch() async {
+        let renew = pool.takeRenewal(convex.deployment)
+        if renew || key?.deployment != convex.deployment { key = nil }
+        failure = nil
+        switch await app.convexPanelKey(threadId: threadId, panelId: panelId, renew: renew) {
+        case .success(let made): key = made
+        case .failure(let error): failure = error.localizedDescription
+        }
+    }
+}
+
+private struct ConvexWebPage: NSViewRepresentable {
+    let key: ConvexPanelKey
+    @Environment(\.isDockGhost) private var isGhost
+
+    func makeNSView(context: Context) -> WebPanelContainer { WebPanelContainer() }
+
+    func updateNSView(_ container: WebPanelContainer, context: Context) {
+        if isGhost { return }
+        container.show(WebPanelPool.shared.convexView(for: key))
     }
 }
 
@@ -450,8 +460,11 @@ final class WebPanelPool: NSObject, ObservableObject, WKNavigationDelegate, WKUI
     static let shared = WebPanelPool()
     private var views: [URL: WKWebView] = [:]
     private var order: [URL] = []
-    @Published private(set) var signInPages: Set<URL> = []
     static let capacity = 4
+    /// Bumped by New deploy key, so the deployment's panel asks again.
+    @Published private(set) var convexRenewals: [String: Int] = [:]
+    private var pendingRenewals: Set<String> = []
+    static let convexEmbedded = URL(string: "https://dashboard-embedded.convex.dev/")!
 
     func webView(for url: URL) -> WKWebView {
         if let existing = views[url] {
@@ -461,21 +474,111 @@ final class WebPanelPool: NSObject, ObservableObject, WKNavigationDelegate, WKUI
         }
         let config = WKWebViewConfiguration()
         config.websiteDataStore = .default()
+        let view = makeView(config)
+        load(url, in: view)
+        keep(view, as: url)
+        return view
+    }
+
+    /// Convex's embedded dashboard for one deployment, given its deploy key
+    /// by a script that answers the page's own request for it. The store
+    /// isn't saved to disk, so the key isn't either.
+    func convexView(for key: ConvexPanelKey) -> WKWebView {
+        let slot = Self.convexSlot(key.deployment)
+        if let existing = views[slot] {
+            order.removeAll { $0 == slot }
+            order.append(slot)
+            return existing
+        }
+        let config = WKWebViewConfiguration()
+        config.websiteDataStore = .nonPersistent()
+        config.userContentController.addUserScript(WKUserScript(
+            source: Self.convexCredentialsScript(key), injectionTime: .atDocumentStart, forMainFrameOnly: true))
+        let view = makeView(config)
+        view.load(URLRequest(url: Self.convexEmbedded))
+        keep(view, as: slot)
+        return view
+    }
+
+    /// Answers the embedded dashboard's `dashboard-credentials-request`
+    /// (docs.convex.dev/platform-apis/embedded-dashboard), only on its own
+    /// origin, and only to a message from the page itself.
+    static func convexCredentialsScript(_ key: ConvexPanelKey) -> String {
+        let credentials: [String: String] = [
+            "type": "dashboard-credentials", "adminKey": key.adminKey,
+            "deploymentUrl": key.deploymentUrl, "deploymentName": key.deployment,
+        ]
+        let json = (try? JSONSerialization.data(withJSONObject: credentials)).flatMap { String(data: $0, encoding: .utf8) } ?? "{}"
+        let origin = convexEmbedded.absoluteString.dropLast()
+        return """
+        (() => {
+          if (location.origin !== '\(origin)') return;
+          const credentials = \(json);
+          window.addEventListener('message', (e) => {
+            if (e.source === window && e.data && e.data.type === 'dashboard-credentials-request') window.postMessage(credentials, location.origin);
+          });
+        })();
+        """
+    }
+
+    /// The pool's key for a deployment's view: not a page anyone loads.
+    private static func convexSlot(_ deployment: String) -> URL {
+        URL(string: "threadbear-convex:\(deployment)")!
+    }
+
+    func reloadConvex(_ deployment: String) {
+        views[Self.convexSlot(deployment)]?.load(URLRequest(url: Self.convexEmbedded))
+    }
+
+    /// New deploy key: drops the view with the old key and has the panel
+    /// ask the runner for a fresh one.
+    func renewConvex(_ deployment: String) {
+        let slot = Self.convexSlot(deployment)
+        views.removeValue(forKey: slot)?.removeFromSuperview()
+        order.removeAll { $0 == slot }
+        pendingRenewals.insert(deployment)
+        convexRenewals[deployment, default: 0] += 1
+    }
+
+    func takeRenewal(_ deployment: String) -> Bool {
+        pendingRenewals.remove(deployment) != nil
+    }
+
+    private func makeView(_ config: WKWebViewConfiguration) -> WKWebView {
         let view = WKWebView(frame: .zero, configuration: config)
         view.navigationDelegate = self
         view.uiDelegate = self
         view.allowsBackForwardNavigationGestures = true
         view.underPageBackgroundColor = .windowBackgroundColor
-        load(url, in: view)
+        return view
+    }
+
+    private func keep(_ view: WKWebView, as url: URL) {
         views[url] = view
         order.append(url)
         while order.count > Self.capacity, let oldest = order.first {
             // Never drop the one just asked for; the oldest unused goes.
             order.removeFirst()
-            signInPages.remove(oldest)
             if let gone = views.removeValue(forKey: oldest) { gone.removeFromSuperview() }
         }
-        return view
+    }
+
+    private func isConvexView(_ webView: WKWebView) -> Bool {
+        views.contains { $0.key.scheme == "threadbear-convex" && $0.value === webView }
+    }
+
+    /// The embedded dashboard's links out (docs, the full dashboard) open in
+    /// the browser, so the page holding the key stays the only one in its view.
+    func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction,
+                 decisionHandler: @escaping @MainActor (WKNavigationActionPolicy) -> Void) {
+        if isConvexView(webView), navigationAction.targetFrame?.isMainFrame ?? true,
+           let url = navigationAction.request.url, url.host != Self.convexEmbedded.host,
+           ["http", "https"].contains(url.scheme) {
+            NSWorkspace.shared.open(url)
+            decisionHandler(.cancel)
+            return
+        }
+        decisionHandler(.allow)
     }
 
     /// A page kept from an earlier look, read again: a mockup the agent
@@ -483,13 +586,6 @@ final class WebPanelPool: NSObject, ObservableObject, WKNavigationDelegate, WKUI
     func reloadIfLoaded(_ url: URL) {
         guard let view = views[url] else { return }
         load(url, in: view)
-    }
-
-    /// Load the fresh callback in this store so Convex writes the panel's
-    /// own session cookie, shared with the other dashboard panels.
-    func finishSignIn(_ callback: URL, for dashboard: URL) {
-        let view = webView(for: dashboard)
-        view.load(URLRequest(url: callback))
     }
 
     /// A local file (a mockup in the pane's preview) may read the files
@@ -502,30 +598,12 @@ final class WebPanelPool: NSObject, ObservableObject, WKNavigationDelegate, WKUI
         }
     }
 
-    func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction,
-                 decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
-        if navigationAction.targetFrame?.isMainFrame == true, let page = navigationAction.request.url,
-           ConvexPanelSignIn.isLoginPage(page), let original = views.first(where: { $0.value === webView })?.key,
-           ConvexPanelSignIn.supports(original) {
-            signInPages.insert(original)
-        }
-        decisionHandler(.allow)
-    }
-
-    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
-        guard let page = webView.url, let original = views.first(where: { $0.value === webView })?.key,
-              ConvexPanelSignIn.supports(original) else { return }
-        // Server redirects may skip the action policy callback, so also
-        // check the page that actually loaded, without inspecting its form.
-        if ConvexPanelSignIn.isLoginPage(page) { signInPages.insert(original) }
-        else if ConvexPanelSignIn.supports(page) { signInPages.remove(original) }
-    }
-
     /// Links that want a new window (OAuth sign-in pages, "open in new tab")
     /// load in the same view: there is no other window to give them.
     func webView(_ webView: WKWebView, createWebViewWith configuration: WKWebViewConfiguration,
                  for navigationAction: WKNavigationAction, windowFeatures: WKWindowFeatures) -> WKWebView? {
-        if let url = navigationAction.request.url { webView.load(URLRequest(url: url)) }
+        guard let url = navigationAction.request.url else { return nil }
+        if isConvexView(webView) { NSWorkspace.shared.open(url) } else { webView.load(URLRequest(url: url)) }
         return nil
     }
 }

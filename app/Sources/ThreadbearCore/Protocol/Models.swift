@@ -401,8 +401,12 @@ public struct Panel: Sendable, Hashable, Codable, Identifiable {
     /// A line or few from the patch's summary function, for the panel's
     /// card at the top of Highlights ("16 edits waiting for your review").
     public var summary: String?
+    /// The Convex panel's cloud deployment: the app shows Convex's embedded
+    /// dashboard for it, with a deploy key from `panels.convexKey`, rather
+    /// than `url`, which wants a Convex login.
+    public var convex: ConvexDeployment?
 
-    public init(id: String, title: String, kind: Kind = .url, url: String? = nil, icon: String? = nil, patch: String = "", note: String? = nil, projectId: String? = nil, badge: Int? = nil) {
+    public init(id: String, title: String, kind: Kind = .url, url: String? = nil, icon: String? = nil, patch: String = "", note: String? = nil, projectId: String? = nil, badge: Int? = nil, convex: ConvexDeployment? = nil) {
         self.id = id
         self.title = title
         self.kind = kind
@@ -412,6 +416,7 @@ public struct Panel: Sendable, Hashable, Codable, Identifiable {
         self.note = note
         self.projectId = projectId
         self.badge = badge
+        self.convex = convex
     }
 
     public init(from decoder: Decoder) throws {
@@ -427,10 +432,39 @@ public struct Panel: Sendable, Hashable, Codable, Identifiable {
         projectId = (try? c.decodeIfPresent(String.self, forKey: .projectId)) ?? nil
         badge = (try? c.decodeIfPresent(Int.self, forKey: .badge)) ?? nil
         summary = (try? c.decodeIfPresent(String.self, forKey: .summary)) ?? nil
+        convex = (try? c.decodeIfPresent(ConvexDeployment.self, forKey: .convex)) ?? nil
     }
 
     /// The page as a URL, when it is one.
     public var pageURL: URL? { url.flatMap(URL.init(string:)) }
+}
+
+/// A Convex cloud deployment a panel shows (docs/protocol.md, "The Convex
+/// panel").
+public struct ConvexDeployment: Sendable, Hashable, Codable {
+    public var deployment: String
+    public var deploymentUrl: String
+
+    public init(deployment: String, deploymentUrl: String) {
+        self.deployment = deployment
+        self.deploymentUrl = deploymentUrl
+    }
+}
+
+/// `panels.convexKey`'s answer. The key is admin of its deployment, so its
+/// description leaves it out, in case one ever lands in a log line.
+public struct ConvexPanelKey: Sendable, Hashable, Decodable, CustomStringConvertible {
+    public var deployment: String
+    public var deploymentUrl: String
+    public var adminKey: String
+
+    public init(deployment: String, deploymentUrl: String, adminKey: String) {
+        self.deployment = deployment
+        self.deploymentUrl = deploymentUrl
+        self.adminKey = adminKey
+    }
+
+    public var description: String { "ConvexPanelKey(\(deployment))" }
 }
 
 /// An action a patch gives a thread: a chip above the composer that runs
