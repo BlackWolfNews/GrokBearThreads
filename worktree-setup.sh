@@ -1,6 +1,7 @@
 #!/bin/bash
 # Sets up a thread's own worktree of Threadbear (docs/thread-worktrees.md):
-# node_modules for the runner and the mock runner. The runner runs it in
+# node_modules for the repo root (the Convex functions), the runner and
+# the mock runner. The runner runs it in
 # the new worktree before the thread's first turn
 # (.threadbear/patches/checks.ts); it's safe to run again.
 #
@@ -29,7 +30,7 @@ MAIN="$(git -C "$ROOT" worktree list --porcelain | awk '
   /^branch refs\/heads\/main$/ { print path; exit }
 ')"
 
-for dir in runner app/Tools/mock-runner; do
+for dir in . runner app/Tools/mock-runner; do
   here="$ROOT/$dir"
   there="${MAIN:+$MAIN/$dir}"
   if [ -e "$here/node_modules" ] || [ -L "$here/node_modules" ]; then

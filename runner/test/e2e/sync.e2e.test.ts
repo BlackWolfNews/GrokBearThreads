@@ -181,8 +181,51 @@ describe('convex mirror e2e', { skip: LOCAL ? false : 'no local Convex deploymen
     assert.ok(den.some((r) => r.threadId === made.id));
     const one = (await api('query', 'phone:thread', { token: issued.token, threadId: made.id })) as any;
     assert.equal(one.thread.title, 'Renamed from the e2e');
-    assert.deepEqual(one.messages, []);
     await assert.rejects(api('query', 'phone:threads', { token: 'tb_wrong', view: 'inbox' }), /auth|token/);
+
+    // Messages: the first message was mirrored (the turn itself failed,
+    // there's no claude, so there's no reply).
+    const withMessages = await until('the first message', async () => {
+      const r = (await api('query', 'phone:thread', { token: issued.token, threadId: made.id })) as any;
+      return r.messages.length ? r : undefined;
+    });
+    assert.deepEqual(withMessages.messages.map((m: any) => [m.seq, m.role, m.text]), [[1, 'user', 'hello from the e2e']]);
+
+    // Lists: the fake login is in accounts.
+    const accounts = await until('the accounts list', async () => {
+      const a = (await api('query', 'phone:accounts', { token: issued.token })) as any[];
+      return a.length ? a : undefined;
+    });
+    assert.ok(accounts.some((a) => a.id === 'claude-main' && a.email === 'e2e@example.com'), JSON.stringify(accounts));
+
+    // A command from the phone: the runner takes it, applies it (the
+    // message lands in the transcript as from the phone), and finishes it.
+    await client.call('threads.update', { threadId: made.id, archived: false });
+    const commandId = (await api('mutation', 'phone:send', { token: issued.token, threadId: made.id, text: 'sent from the phone' })) as string;
+    const outcome = await until('the command to finish', async () => {
+      const c = (await api('query', 'phone:command', { token: issued.token, commandId })) as any;
+      return c.state === 'done' || c.state === 'failed' ? c : undefined;
+    });
+    assert.equal(outcome.state, 'done', JSON.stringify(outcome));
+    const { events } = (await client.call('threads.events', { threadId: made.id })) as any;
+    const fromPhone = events.find((e: any) => e.type === 'user.message' && e.text === 'sent from the phone');
+    assert.equal(fromPhone?.origin, 'phone');
+    // And it's mirrored back as a message.
+    await until('the phone message in the mirror', async () => {
+      const r = (await api('query', 'phone:thread', { token: issued.token, threadId: made.id })) as any;
+      return r.messages.some((m: any) => m.text === 'sent from the phone' && m.origin === 'phone') ? true : undefined;
+    });
+    const created = (await api('mutation', 'phone:create', { token: issued.token, text: 'a thread from the phone', cwd: home, accountId: 'claude-main' })) as string;
+    const createdOutcome = await until('the create to finish', async () => {
+      const c = (await api('query', 'phone:command', { token: issued.token, commandId: created })) as any;
+      return c.state === 'done' || c.state === 'failed' ? c : undefined;
+    });
+    assert.equal(createdOutcome.state, 'done', JSON.stringify(createdOutcome));
+    assert.ok(createdOutcome.threadId);
+    const newThread = (await client.call('threads.list', { include: ['inbox'] }) as any).threads.find((t: any) => t.id === createdOutcome.threadId);
+    assert.equal(newThread?.title, 'a thread from the phone');
+    await client.call('threads.delete', { threadId: createdOutcome.threadId });
+    await client.call('threads.update', { threadId: made.id, archived: true });
     await run('npx', ['convex', 'run', ...ENV_ARGS, 'tokens:revoke', JSON.stringify({ name: 'e2e' })], { cwd: REPO });
 
     await client.call('threads.delete', { threadId: made.id });

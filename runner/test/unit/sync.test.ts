@@ -254,3 +254,280 @@ test('the poster speaks the deployment HTTP API and reports its errors', async (
   reply = { ok: false, status: 502, json: undefined };
   await assert.rejects(post('query', 'sync:threadsOf', {}), /HTTP 502/);
 });
+
+// ------------------------------------------------------------ step 2 and 3
+
+import { MESSAGES_KEPT, MESSAGE_CHARS, toMessageDoc, inputSummary, type Command, type MessageDoc } from '../../src/sync.ts';
+
+type Fake = { h: ReturnType<typeof makeHarness>; sync: ConvexSync; calls: Call[]; push: (value: unknown) => void; applied: string[] };
+
+// A harness whose sync has lists, commands and a fake subscription; the
+// fake post answers messageHeads and takeCommand the way the deployment
+// would.
+function setupFull(opts: { heads?: { threadId: string; lastSeq: number }[]; taken?: Set<string>; failApply?: boolean } = {}): Fake {
+  const h = makeHarness();
+  const calls: Call[] = [];
+  const taken = opts.taken ?? new Set<string>();
+  const post = async (kind: 'mutation' | 'query', fn: string, args: Record<string, unknown>) => {
+    calls.push({ kind, fn, args });
+    if (fn === 'sync:messageHeads') return opts.heads ?? [];
+    if (fn === 'sync:takeCommand') {
+      const id = String(args.commandId);
+      if (taken.has(id)) return false;
+      taken.add(id);
+      return true;
+    }
+    return null;
+  };
+  let onUpdate: ((v: unknown) => void) | undefined;
+  const subscriber = {
+    subscribe: (_fn: string, _args: Record<string, unknown>, update: (v: unknown) => void) => {
+      onUpdate = update;
+      return () => (onUpdate = undefined);
+    },
+    close: () => {},
+  };
+  const applied: string[] = [];
+  const sync = new ConvexSync({
+    config: { enabled: true, url: 'https://x.convex.cloud', name: 'TestMac', runnerId: 'r1' },
+    key: 'k',
+    runner: {
+      onNotification: (fn) => h.runner.onNotification(fn),
+      list: (i) => h.runner.list(i),
+      get: (id) => h.runner.get(id),
+      events: (id, o) => h.runner.events(id, o),
+      listProjects: () => [{ id: 'p1', title: 'Threadbear', folders: ['/w'], goals: 'g', state: 's', notes: 'n', createdBy: 'mike', createdAt: '2026-10-27T00:00:00.000Z', updatedAt: '2026-10-27T00:00:00.000Z', threadCount: 1 }],
+      listSchedules: () => [{ id: 's1', title: 'Nightly', text: 'go', cron: '0 3 * * *', whenText: 'every day at 3 am', paused: false, createdAt: '2026-10-27T00:00:00.000Z', updatedAt: '2026-10-27T00:00:00.000Z', runs: 2, lastRun: { at: '2026-10-27T03:00:00.000Z', outcome: 'sent', threadId: 't9' } }],
+      listAccounts: () => [{ id: 'claude-3', provider: 'claude', title: 'three@example.com', configDir: '/tmp/three', models: [{ id: 'x', title: 'X' }] as never, usage: { windows: [{ kind: 'five_hour', title: '5-hour', remainingPercent: 80.5 }], readAt: '2026-10-27T00:00:00.000Z', source: 'live' } }],
+    },
+    commands: {
+      send: (id, text, images, o) => {
+        applied.push(`send ${id} ${text} ${o.origin}`);
+        if (opts.failApply) throw new Error('thread is busy');
+        return h.runner.send(id, text, images, o);
+      },
+      respondApproval: (p) => {
+        applied.push(`respond ${p.threadId} ${p.approvalId} ${p.decision}`);
+        return h.runner.respondApproval(p);
+      },
+      update: (p) => {
+        applied.push(`update ${JSON.stringify(p)}`);
+        return h.runner.update(p);
+      },
+      markSeen: (id, seq) => {
+        applied.push(`markSeen ${id} ${seq}`);
+        return h.runner.markSeen(id, seq);
+      },
+      create: (p) => {
+        applied.push(`create ${p.text} ${p.origin}`);
+        return h.runner.create(p);
+      },
+    },
+    version: '0.1.0+test',
+    startedAt: '2026-10-27T00:00:00.000Z',
+    clock: h.clock,
+    log: nullLogger,
+    post,
+    subscriber,
+  });
+  return { h, sync, calls, push: (v) => onUpdate?.(v), applied };
+}
+
+const messagesSent = (calls: Call[]): MessageDoc[] => calls.filter((c) => c.fn === 'sync:appendMessages').flatMap((c) => c.args.messages as MessageDoc[]);
+const session = (h: ReturnType<typeof makeHarness>, threadId: string) => h.adapter.sessions.filter((s) => s.opts.threadId === threadId).at(-1)!;
+
+test('messages: the first message goes up with the thread, a reply when its text completes, cut if huge', async () => {
+  const { h, sync, calls } = setupFull();
+  sync.start();
+  await sync.flushNow();
+  h.clock.advance(SYNC_COALESCE_MS);
+  const t = h.runner.create({ text: 'hello there', cwd: h.cfg.defaults.cwd, accountId: 'claude-3' }).thread;
+  h.clock.advance(SYNC_COALESCE_MS);
+  await tick();
+  let sent = messagesSent(calls);
+  assert.equal(sent.length, 1);
+  assert.deepEqual({ ...sent[0], at: undefined }, { threadId: t.id, seq: 1, role: 'user', text: 'hello there', at: undefined });
+  const s = session(h, t.id);
+  s.init();
+  s.delta('i1', 'partial');
+  h.clock.advance(SYNC_COALESCE_MS);
+  await tick();
+  assert.equal(messagesSent(calls).length, 1, 'deltas are never written');
+  s.text('i1', 'x'.repeat(MESSAGE_CHARS + 50));
+  s.result('completed');
+  h.clock.advance(SYNC_COALESCE_MS);
+  await tick();
+  sent = messagesSent(calls);
+  assert.equal(sent.length, 2);
+  assert.equal(sent[1]!.role, 'assistant');
+  assert.ok(sent[1]!.text.length < MESSAGE_CHARS + 50 && sent[1]!.text.endsWith('[cut: the rest is on the Mac]'));
+});
+
+test('messages: a start backfills only what the mirror lacks, the newest few per thread', async () => {
+  const h0 = makeHarness();
+  const a = h0.runner.create({ text: 'first', cwd: h0.cfg.defaults.cwd, accountId: 'claude-3' }).thread;
+  const sa = session(h0, a.id);
+  sa.init();
+  for (let i = 0; i < MESSAGES_KEPT + 5; i++) sa.text(`i${i}`, `reply ${i}`);
+  sa.result('completed');
+  await tick();
+  const b = h0.runner.create({ text: 'second', cwd: h0.cfg.defaults.cwd, accountId: 'claude-3' }).thread;
+  await tick();
+  // A sync on the same home, told the mirror already has b's first message.
+  const { sync, calls } = (() => {
+    const f = setupFull({ heads: [{ threadId: b.id, lastSeq: 1 }] });
+    // Point it at h0's threads by restarting a harness on the same home.
+    return f;
+  })();
+  void sync;
+  void calls;
+  const h = h0.restart();
+  const posts: Call[] = [];
+  const s2 = new ConvexSync({
+    config: { enabled: true, url: 'https://x.convex.cloud', runnerId: 'r1' },
+    key: 'k',
+    runner: { onNotification: (fn) => h.runner.onNotification(fn), list: (i) => h.runner.list(i), get: (id) => h.runner.get(id), events: (id, o) => h.runner.events(id, o) },
+    version: 'v',
+    startedAt: 'now',
+    clock: h.clock,
+    log: nullLogger,
+    post: async (kind, fn, args) => {
+      posts.push({ kind, fn, args });
+      return fn === 'sync:messageHeads' ? [{ threadId: b.id, lastSeq: 1 }] : null;
+    },
+  });
+  s2.start();
+  await s2.flushNow();
+  const sent = messagesSent(posts);
+  const forA = sent.filter((m) => m.threadId === a.id);
+  const forB = sent.filter((m) => m.threadId === b.id);
+  assert.equal(forA.length, MESSAGES_KEPT, 'only the newest few');
+  assert.equal(forA[0]!.text, 'reply 5');
+  assert.equal(forA.at(-1)!.text, `reply ${MESSAGES_KEPT + 4}`);
+  assert.equal(forB.length, 0, 'the mirror already had it');
+  assert.equal(s2.status().messages, MESSAGES_KEPT);
+});
+
+test('approvals: the row carries what the thread waits on until it is answered', async () => {
+  const { h, sync, docs } = (() => {
+    const f = setupFull();
+    return { ...f, docs: () => f.calls.filter((c) => c.fn === 'sync:upsertThreads').flatMap((c) => c.args.threads as ThreadDoc[]) };
+  })();
+  sync.start();
+  await sync.flushNow();
+  const t = h.runner.create({ text: 'go', cwd: h.cfg.defaults.cwd, accountId: 'claude-3' }).thread;
+  const s = session(h, t.id);
+  s.init();
+  s.out({ kind: 'event', event: { type: 'approval.requested', approvalId: 'ap1', itemId: 'c1', name: 'Bash', title: 'Run a command', input: { command: 'rm -rf build\necho done', description: 'clean' }, options: ['allow', 'allowAlways', 'deny'] } as never });
+  h.clock.advance(SYNC_COALESCE_MS);
+  await tick();
+  let last = docs().filter((d) => d.threadId === t.id).at(-1)!;
+  assert.deepEqual(last.pendingApproval, { approvalId: 'ap1', kind: 'approval', name: 'Bash', title: 'Run a command', options: ['allow', 'allowAlways', 'deny'], inputSummary: 'rm -rf build' });
+  // Answered (the fake session plays the CLI's part: the resolved event).
+  s.out({ kind: 'event', event: { type: 'approval.resolved', approvalId: 'ap1', decision: 'allow' } as never });
+  h.clock.advance(SYNC_COALESCE_MS);
+  await tick();
+  last = docs().filter((d) => d.threadId === t.id).at(-1)!;
+  assert.equal(last.pendingApproval, undefined);
+  // A question, with no input to summarise.
+  s.out({ kind: 'event', event: { type: 'question.requested', approvalId: 'q1', questions: [{ question: 'Which?', multiSelect: false, options: [{ label: 'A' }, { label: 'B', description: 'the other' }] }] } as never });
+  h.clock.advance(SYNC_COALESCE_MS);
+  await tick();
+  last = docs().filter((d) => d.threadId === t.id).at(-1)!;
+  assert.deepEqual(last.pendingApproval, { approvalId: 'q1', kind: 'question', questions: [{ question: 'Which?', multiSelect: false, options: [{ label: 'A' }, { label: 'B', description: 'the other' }] }] });
+});
+
+test('inputSummary picks the command or path, one line, never the whole input', () => {
+  assert.equal(inputSummary({ description: 'x', command: '  npm test\nnpm run build ' }), 'npm test');
+  assert.equal(inputSummary({ file_path: '/a/b.ts', content: 'lots' }), '/a/b.ts');
+  assert.equal(inputSummary({ notes: 'y'.repeat(300) })!.length, 200);
+  assert.equal(inputSummary({ n: 3 }), undefined);
+});
+
+test('lists: projects, schedules and accounts go up at start and when they change', async () => {
+  const { h, sync, calls } = setupFull();
+  sync.start();
+  await sync.flushNow();
+  const set = (name: string) => calls.filter((c) => c.fn === `sync:set${name}`);
+  assert.equal(set('Projects').length, 1);
+  assert.deepEqual(set('Projects')[0]!.args.projects, [{ id: 'p1', title: 'Threadbear', folders: ['/w'], goals: 'g', state: 's', notes: 'n', createdBy: 'mike', archived: false, createdAt: '2026-10-27T00:00:00.000Z', updatedAt: '2026-10-27T00:00:00.000Z', threadCount: 1 }]);
+  assert.equal(set('Projects')[0]!.args.runnerId, 'r1');
+  assert.deepEqual(set('Schedules')[0]!.args.schedules, [{ id: 's1', title: 'Nightly', text: 'go', whenText: 'every day at 3 am', paused: false, createdAt: '2026-10-27T00:00:00.000Z', updatedAt: '2026-10-27T00:00:00.000Z', runs: 2, cron: '0 3 * * *', lastRun: { at: '2026-10-27T03:00:00.000Z', outcome: 'sent', threadId: 't9' } }]);
+  const accounts = set('Accounts')[0]!.args.accounts as Record<string, unknown>[];
+  assert.deepEqual(accounts, [{ id: 'claude-3', provider: 'claude', title: 'three@example.com', usage: { windows: [{ kind: 'five_hour', title: '5-hour', remainingPercent: 80.5 }], readAt: '2026-10-27T00:00:00.000Z', source: 'live' } }]);
+  assert.ok(!('configDir' in accounts[0]!) && !('models' in accounts[0]!));
+  // A change: the whole list again.
+  h.runner.publish({ method: 'projects.updated', params: { projects: [] } });
+  h.clock.advance(SYNC_COALESCE_MS);
+  await tick();
+  assert.equal(set('Projects').length, 2);
+  assert.deepEqual(set('Projects')[1]!.args.projects, []);
+});
+
+test('commands: each pending one is taken once, applied through the runner as from the phone, and finished', async () => {
+  const { h, sync, calls, push, applied } = setupFull();
+  sync.start();
+  await sync.flushNow();
+  const t = h.runner.create({ text: 'hello', cwd: h.cfg.defaults.cwd, accountId: 'claude-3' }).thread;
+  const s = session(h, t.id);
+  s.init();
+  s.result('completed');
+  await tick();
+  const cmds: Command[] = [
+    { commandId: 'c1', kind: 'send', threadId: t.id, args: { text: 'from my phone' }, createdAt: 1 },
+    { commandId: 'c2', kind: 'update', threadId: t.id, args: { archive: true }, createdAt: 2 },
+    { commandId: 'c3', kind: 'create', args: { text: 'a new one', cwd: h.cfg.defaults.cwd, accountId: 'claude-3' }, createdAt: 3 },
+  ];
+  push(cmds);
+  await tick(10);
+  push(cmds); // the same list again, as a live query re-run would send
+  await tick(10);
+  assert.deepEqual(applied, [`send ${t.id} from my phone phone`, `update {"threadId":"${t.id}","archived":true}`, 'create a new one phone']);
+  const finished = calls.filter((c) => c.fn === 'sync:finishCommand').map((c) => c.args);
+  assert.equal(finished.length, 3);
+  assert.ok(finished.every((f) => f.ok === true && f.key === 'k'));
+  assert.ok(typeof finished[2]!.resultThreadId === 'string');
+  assert.equal(h.runner.get(finished[2]!.resultThreadId as string).title, 'a new one');
+  // The message the phone sent is in the transcript, marked as from the phone.
+  const ev = h.events(t.id).find((e: { type: string; text?: string }) => e.type === 'user.message' && e.text === 'from my phone') as { origin?: string };
+  assert.equal(ev?.origin, 'phone');
+  assert.equal(h.runner.get(t.id).archivedAt !== undefined, true);
+  assert.deepEqual(sync.status().commands, { state: 'on', applied: 3, failed: 0 });
+});
+
+test('commands: one that fails is finished with a note; one another runner took is left alone', async () => {
+  const taken = new Set(['c9']);
+  const { h, sync, calls, push, applied } = setupFull({ taken, failApply: true });
+  sync.start();
+  await sync.flushNow();
+  const t = h.runner.create({ text: 'hello', cwd: h.cfg.defaults.cwd, accountId: 'claude-3' }).thread;
+  push([
+    { commandId: 'c9', kind: 'send', threadId: t.id, args: { text: 'taken elsewhere' }, createdAt: 1 },
+    { commandId: 'c10', kind: 'send', threadId: t.id, args: { text: 'fails' }, createdAt: 2 },
+    { commandId: 'c11', kind: 'update', threadId: t.id, args: {}, createdAt: 3 },
+  ]);
+  await tick(10);
+  assert.deepEqual(applied, [`send ${t.id} fails phone`]);
+  const finished = calls.filter((c) => c.fn === 'sync:finishCommand').map((c) => c.args);
+  assert.deepEqual(finished.map((f) => [f.commandId, f.ok, f.note]), [['c10', false, 'thread is busy'], ['c11', false, 'nothing to change']]);
+  assert.equal(sync.status().commands?.failed, 2);
+  assert.equal(sync.status().commands?.lastError, 'nothing to change');
+});
+
+test('commands: stop unsubscribes and nothing is applied after', async () => {
+  const { h, sync, push, applied } = setupFull();
+  sync.start();
+  const t = h.runner.create({ text: 'hello', cwd: h.cfg.defaults.cwd, accountId: 'claude-3' }).thread;
+  await sync.stop();
+  push([{ commandId: 'c1', kind: 'send', threadId: t.id, args: { text: 'late' }, createdAt: 1 }]);
+  await tick(10);
+  assert.deepEqual(applied, []);
+  assert.equal(sync.status().commands?.state, 'off');
+});
+
+test('toMessageDoc ignores everything but text, and keeps a schedule origin', () => {
+  const base = { seq: 4, ts: '2026-10-27T00:00:00.000Z', threadId: 't', turnId: 'u' };
+  assert.deepEqual(toMessageDoc('t', { ...base, type: 'user.message', text: 'hi', images: [], origin: 'schedule', scheduleId: 's1' } as never), { threadId: 't', seq: 4, role: 'user', text: 'hi', at: base.ts, origin: 'schedule' });
+  assert.equal(toMessageDoc('t', { ...base, type: 'tool.call', itemId: 'i', name: 'Bash', kind: 'shell', input: {} } as never), undefined);
+  assert.equal(toMessageDoc('t', { ...base, type: 'reasoning', itemId: 'i', text: 'thinking' } as never), undefined);
+});

@@ -202,7 +202,23 @@ async function main(): Promise<void> {
   const sync = new ConvexSync({
     config: { ...cfg.sync, runnerId: cfg.sync.runnerId ?? ensureRunnerId(cfg.home) },
     key: readSyncKey(cfg.home),
-    runner,
+    runner: {
+      onNotification: (fn) => runner.onNotification(fn),
+      list: (include) => runner.list(include),
+      get: (id) => runner.get(id),
+      events: (id, o) => runner.events(id, o),
+      listProjects: () => projects.list({ archived: true }),
+      listSchedules: () => scheduler.list(),
+      listAccounts: () => runner.hello().accounts,
+    },
+    // The phone's commands, through the same methods the app's RPCs use.
+    commands: {
+      send: (id, text, images, o) => runner.send(id, text, images, o),
+      respondApproval: (p) => runner.respondApproval(p),
+      update: (p) => runner.update(p),
+      markSeen: (id, seq) => runner.markSeen(id, seq),
+      create: (p) => runner.create(p),
+    },
     version: RUNNER_VERSION,
     release: RELEASE.release,
     startedAt: new Date().toISOString(),

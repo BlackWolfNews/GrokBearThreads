@@ -584,7 +584,7 @@ export type Schedule = {
 
 // Who sent a message when it wasn't a person or a client: the runner by
 // itself (the resume after a restart), or a schedule (schedules.ts).
-export type MessageOrigin = 'runner' | 'schedule';
+export type MessageOrigin = 'runner' | 'schedule' | 'phone';
 
 export const ErrorCode = {
   parseError: -32700,

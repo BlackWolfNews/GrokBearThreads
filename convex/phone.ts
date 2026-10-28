@@ -83,6 +83,42 @@ export const command = query({
   },
 });
 
+export const projects = query({
+  args: { token: v.string(), archived: v.optional(v.boolean()) },
+  returns: v.array(v.object({ runnerId: v.string(), id: v.string(), title: v.string(), folders: v.array(v.string()), goals: v.string(), state: v.string(), notes: v.string(), createdBy: v.string(), archived: v.boolean(), createdAt: v.string(), updatedAt: v.string(), threadCount: v.number(), lastActivityAt: v.optional(v.string()) })),
+  handler: async (ctx, { token, archived }) => {
+    await checkPhoneToken(ctx, token);
+    const out = [];
+    for await (const p of ctx.db.query('projects')) {
+      if (p.archived && !archived) continue;
+      out.push(strip(p));
+    }
+    return out.sort((a, b) => (b.lastActivityAt ?? b.updatedAt).localeCompare(a.lastActivityAt ?? a.updatedAt));
+  },
+});
+
+export const schedules = query({
+  args: { token: v.string() },
+  returns: v.array(v.any()),
+  handler: async (ctx, { token }) => {
+    await checkPhoneToken(ctx, token);
+    const out = [];
+    for await (const s of ctx.db.query('schedules')) out.push(strip(s));
+    return out;
+  },
+});
+
+export const accounts = query({
+  args: { token: v.string() },
+  returns: v.array(v.any()),
+  handler: async (ctx, { token }) => {
+    await checkPhoneToken(ctx, token);
+    const out = [];
+    for await (const a of ctx.db.query('accounts')) out.push(strip(a));
+    return out;
+  },
+});
+
 // ------------------------------------------------------------ mutations
 
 export const send = mutation({

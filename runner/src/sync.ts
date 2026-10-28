@@ -1,9 +1,11 @@
 // The Convex mirror (docs/convex-backend.md, shape A): the runner stays the
-// source of truth and copies the phone's view of each thread, plus its own
-// heartbeat, to the Convex project the phone reads. Written on change and
-// coalesced, never per token; best effort, so nothing the Mac app does
-// waits on it, and a runner with no internet carries on and writes each
-// changed row once when it's back.
+// source of truth and copies the phone's view of each thread, the last few
+// text messages, its projects, schedules and accounts, plus its own
+// heartbeat, to the Convex project the phone reads; and it applies what
+// the phone asks for (the `commands` table) through the same methods the
+// Mac app uses. Written on change and coalesced, never per token; best
+// effort, so nothing the Mac app does waits on it, and a runner with no
+// internet carries on and writes each changed row once when it's back.
 //
 // Off unless runner.json has a `sync.url` and secrets/convex-key holds the
 // key the deployment's RUNNER_KEY was set to (`npx convex env set`).
@@ -13,9 +15,11 @@ import os from 'node:os';
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
+import { ConvexClient } from 'convex/browser';
+import { makeFunctionReference } from 'convex/server';
 import type { Clock, TimerHandle } from './clock.ts';
 import type { Logger } from './log.ts';
-import type { ThreadSummary } from './protocol.ts';
+import type { Account, ApprovalDecision, ApprovalOption, PersistedEvent, Project, Question, Schedule, ThreadSummary } from './protocol.ts';
 import type { Notification } from './runner.ts';
 import { paths, readRunnerJson, writeRunnerJson } from './config.ts';
 
@@ -23,8 +27,15 @@ import { paths, readRunnerJson, writeRunnerJson } from './config.ts';
 // thread's preview and working line change many times a second.
 export const SYNC_COALESCE_MS = 2000;
 export const HEARTBEAT_MS = 60_000;
-// Threads per upsert mutation.
+// Threads per upsert mutation, and messages per append.
 export const SYNC_BATCH = 50;
+export const MESSAGE_BATCH = 100;
+// Text messages kept per thread on the phone (convex/sync.ts MESSAGES_KEPT).
+export const MESSAGES_KEPT = 20;
+// A message longer than this is cut on the phone; the Mac has it all.
+export const MESSAGE_CHARS = 8000;
+// How many of a thread's newest events are read for the backfill at start.
+const BACKFILL_EVENTS = 300;
 const BACKOFF_MIN_MS = 5000;
 const BACKOFF_MAX_MS = 5 * 60_000;
 const POST_TIMEOUT_MS = 15_000;
@@ -45,11 +56,20 @@ export type SyncStatus = {
   runnerId?: string;
   name?: string;
   threads?: number; // rows written since start
+  messages?: number; // likewise
   lastSyncAt?: string;
   lastError?: string;
   pending?: number; // changes waiting to be written
   retryAt?: string;
+  // The phone's commands: whether the runner is listening for them, how
+  // many it has applied since start, and the last one that failed.
+  commands?: { state: 'off' | 'on' | 'error'; applied: number; failed: number; lastError?: string };
 };
+
+// The approval or question a thread is waiting on, as the phone sees it.
+export type PendingApproval =
+  | { approvalId: string; kind: 'approval'; name: string; title: string; options: ApprovalOption[]; inputSummary?: string }
+  | { approvalId: string; kind: 'question'; questions: Question[] };
 
 // The phone's view of a thread: convex/schema.ts's threadFields plus view.
 export type ThreadDoc = {
@@ -73,31 +93,62 @@ export type ThreadDoc = {
   costUsd?: number;
   projects?: { id: string; title: string }[];
   working?: string;
+  pendingApproval?: PendingApproval;
   view: 'inbox' | 'hibernating' | 'den';
 };
+
+export type MessageDoc = { threadId: string; seq: number; role: 'user' | 'assistant'; text: string; origin?: string; at: string };
 
 // One call to the deployment's HTTP API; tests pass a fake.
 export type Post = (kind: 'mutation' | 'query', fn: string, args: Record<string, unknown>) => Promise<unknown>;
 
+// A live query on the deployment (the commands the phone has queued):
+// `onUpdate` is called with each new result, `onError` when the
+// subscription fails. Returns the unsubscribe. Tests pass a fake.
+export type Subscribe = (fn: string, args: Record<string, unknown>, onUpdate: (value: unknown) => void, onError: (error: Error) => void) => () => void;
+export type Subscriber = { subscribe: Subscribe; close(): Promise<void> | void };
+
+// A command the phone queued (convex/schema.ts `commands`).
+export type Command = { commandId: string; kind: string; threadId?: string; args: Record<string, unknown>; createdAt: number };
+
 type Host = {
   onNotification(fn: (n: Notification) => void): () => void;
   list(include: ('inbox' | 'snoozed' | 'archived')[]): ThreadSummary[];
+  get(threadId: string): ThreadSummary;
+  events(threadId: string, opts: { limit?: number }): { events: PersistedEvent[] };
+  // The lists mirrored beside the threads; absent in small tests.
+  listProjects?: () => Project[];
+  listSchedules?: () => Schedule[];
+  listAccounts?: () => Account[];
+};
+
+// What the phone's commands are applied through: the runner's own
+// methods, so a phone message or approval is the same as one from the
+// Mac app (docs/protocol.md, "Sync").
+export type CommandHost = {
+  send(threadId: string, text: string, images: never[], opts: { origin: 'phone' }): { turnId: string };
+  respondApproval(p: { threadId: string; approvalId: string; decision: ApprovalDecision; message?: string; answers?: Record<string, string> }): unknown;
+  update(p: { threadId: string; title?: string; snoozedUntil?: string | null; archived?: boolean }): unknown;
+  markSeen(threadId: string, seq: number): unknown;
+  create(p: { text: string; cwd?: string; accountId?: string; model?: string; origin: 'phone' }): { thread: ThreadSummary };
 };
 
 export type SyncDeps = {
   config: SyncConfig;
   key?: string;
   runner: Host;
+  commands?: CommandHost;
   version: string;
   release?: string;
   startedAt: string;
   clock: Clock;
   log: Logger;
   post?: Post;
+  subscriber?: Subscriber;
 };
 
 // POST /api/mutation or /api/query on a Convex deployment, the plain HTTP
-// API, so the runner needs no Convex client and a fake is one function.
+// API, so a write needs no client and a fake is one function.
 export function convexPoster(url: string, fetchFn: typeof fetch = fetch): Post {
   const base = url.replace(/\/+$/, '');
   return async (kind, fn, args) => {
@@ -110,6 +161,23 @@ export function convexPoster(url: string, fetchFn: typeof fetch = fetch): Post {
     const body = (await res.json().catch(() => undefined)) as { status?: string; value?: unknown; errorMessage?: string } | undefined;
     if (!res.ok || !body || body.status !== 'success') throw new Error(body?.errorMessage ?? `HTTP ${res.status}`);
     return body.value;
+  };
+}
+
+// The Convex client's WebSocket subscription, for the phone's commands:
+// it reconnects by itself and re-runs the query whenever a row changes.
+export function convexSubscriber(url: string): Subscriber {
+  let client: ConvexClient | undefined;
+  return {
+    subscribe: (fn, args, onUpdate, onError) => {
+      client ??= new ConvexClient(url, { unsavedChangesWarning: false });
+      return client.onUpdate(makeFunctionReference<'query'>(fn), args, onUpdate, onError);
+    },
+    close: async () => {
+      const c = client;
+      client = undefined;
+      await c?.close();
+    },
   };
 }
 
@@ -132,12 +200,13 @@ export function readSyncKey(home: string): string | undefined {
   }
 }
 
-// "M5" from "M5.local", unless runner.json names the runner.
+// "M5" from "M5.local" or "m5.localdomain", unless runner.json names the
+// runner.
 export function defaultRunnerName(hostname = os.hostname()): string {
-  return hostname.replace(/\.local$/i, '') || 'runner';
+  return hostname.replace(/\.(local|localdomain|lan|home)$/i, '') || 'runner';
 }
 
-export function toThreadDoc(t: ThreadSummary, runnerId: string, now: number): ThreadDoc {
+export function toThreadDoc(t: ThreadSummary, runnerId: string, now: number, pending?: PendingApproval): ThreadDoc {
   const doc: ThreadDoc = {
     threadId: t.id,
     runnerId,
@@ -164,12 +233,94 @@ export function toThreadDoc(t: ThreadSummary, runnerId: string, now: number): Th
   if (t.projects?.length) doc.projects = t.projects.map((p) => ({ id: p.id, title: p.title }));
   const working = t.background?.find((b) => !b.finished)?.description;
   if (working) doc.working = working;
+  if (pending) doc.pendingApproval = pending;
   return doc;
 }
+
+// A persisted user.message or assistant.text as a message row; anything
+// else is undefined.
+export function toMessageDoc(threadId: string, e: PersistedEvent): MessageDoc | undefined {
+  if (e.type !== 'user.message' && e.type !== 'assistant.text') return undefined;
+  const text = e.text.length > MESSAGE_CHARS ? e.text.slice(0, MESSAGE_CHARS) + '\n\n[cut: the rest is on the Mac]' : e.text;
+  const doc: MessageDoc = { threadId, seq: e.seq, role: e.type === 'user.message' ? 'user' : 'assistant', text, at: e.ts };
+  if (e.type === 'user.message' && e.origin) doc.origin = e.origin;
+  return doc;
+}
+
+// One line of a tool's input for the approval card: the command, the
+// path, or the first short string in it. Never the whole input.
+export function inputSummary(input: Record<string, unknown>): string | undefined {
+  for (const k of ['command', 'file_path', 'path', 'url', 'pattern', 'query']) {
+    const v = input[k];
+    if (typeof v === 'string' && v.trim()) return oneLine(v);
+  }
+  for (const v of Object.values(input)) if (typeof v === 'string' && v.trim()) return oneLine(v);
+  return undefined;
+}
+
+function oneLine(s: string): string {
+  const line = s.trim().split('\n')[0]!.trim();
+  return line.length > 200 ? line.slice(0, 199) + '…' : line;
+}
+
+export function toProjectDoc(p: Project) {
+  return {
+    id: p.id,
+    title: p.title,
+    folders: p.folders,
+    goals: p.goals,
+    state: p.state,
+    notes: p.notes,
+    createdBy: p.createdBy,
+    archived: Boolean(p.archived),
+    createdAt: p.createdAt,
+    updatedAt: p.updatedAt,
+    threadCount: p.threadCount,
+    ...(p.lastActivityAt ? { lastActivityAt: p.lastActivityAt } : {}),
+  };
+}
+
+export function toScheduleDoc(s: Schedule) {
+  const out: Record<string, unknown> = {
+    id: s.id,
+    title: s.title,
+    text: s.text,
+    whenText: s.whenText,
+    paused: s.paused,
+    createdAt: s.createdAt,
+    updatedAt: s.updatedAt,
+    runs: s.runs,
+  };
+  for (const k of ['at', 'cron', 'timezone', 'threadId', 'cwd', 'accountId', 'model', 'nextRunAt', 'finishedAt'] as const) if (s[k] !== undefined) out[k] = s[k];
+  if (s.lastRun) {
+    out.lastRun = { at: s.lastRun.at, outcome: s.lastRun.outcome, ...(s.lastRun.threadId ? { threadId: s.lastRun.threadId } : {}), ...(s.lastRun.note ? { note: s.lastRun.note } : {}) };
+  }
+  return out;
+}
+
+export function toAccountDoc(a: Account) {
+  const out: Record<string, unknown> = { id: a.id, provider: a.provider, title: a.title };
+  for (const k of ['note', 'email', 'plan', 'defaultModel'] as const) if (a[k] !== undefined) out[k] = a[k];
+  if (a.usage) {
+    const u = a.usage;
+    out.usage = {
+      windows: u.windows.map((w) => ({ kind: w.kind, title: w.title, remainingPercent: w.remainingPercent, ...(w.resetsAt ? { resetsAt: w.resetsAt } : {}), ...(w.detail ? { detail: w.detail } : {}) })),
+      readAt: u.readAt,
+      source: u.source,
+      ...(u.stale ? { stale: true } : {}),
+      ...(u.blocked ? { blocked: true } : {}),
+      ...(u.notice ? { notice: u.notice } : {}),
+    };
+  }
+  return out;
+}
+
+type ListName = 'projects' | 'schedules' | 'accounts';
 
 export class ConvexSync {
   private deps: SyncDeps;
   private post: Post;
+  private subscriber?: Subscriber;
   private runnerId: string;
   private name: string;
   private off?: string; // why it isn't running
@@ -178,17 +329,29 @@ export class ConvexSync {
   private dirty = new Map<string, ThreadDoc>();
   private removed = new Set<string>();
   private sent = new Map<string, string>(); // threadId -> the doc last written, as JSON
+  private messages: MessageDoc[] = [];
+  private pending = new Map<string, PendingApproval>(); // threadId -> what it waits on
+  private lists: { projects?: Project[]; schedules?: Schedule[]; accounts?: Account[] } = {};
+  private dirtyLists = new Set<ListName>();
   private flushTimer?: TimerHandle;
   private heartbeatTimer?: TimerHandle;
   private lastFlushAt = -Infinity;
   private flushing = false;
-  private full = true; // the first write after start covers everything, then prunes
+  private full = true; // the first write after start covers everything, then prunes and backfills
   private backoffMs = 0;
   private retryAt?: number;
   private lastError?: string;
   private lastLogged?: string;
   private lastSyncAt?: number;
   private written = 0;
+  private messagesWritten = 0;
+  // Commands.
+  private unsubCommands?: () => void;
+  private inFlight = new Set<string>();
+  private applied = 0;
+  private failed = 0;
+  private commandError?: string;
+  private commandsState: 'off' | 'on' | 'error' = 'off';
 
   constructor(deps: SyncDeps) {
     this.deps = deps;
@@ -199,6 +362,7 @@ export class ConvexSync {
     else if (!url) this.off = 'no sync.url in runner.json';
     else if (!deps.key) this.off = 'no secrets/convex-key';
     this.post = deps.post ?? (url ? convexPoster(url) : async () => undefined);
+    if (!this.off) this.subscriber = deps.subscriber ?? (url ? convexSubscriber(url) : undefined);
   }
 
   start(): void {
@@ -206,10 +370,13 @@ export class ConvexSync {
     this.running = true;
     this.unsub = this.deps.runner.onNotification((n) => this.onNotification(n));
     for (const t of this.deps.runner.list(ALL)) this.mark(t);
+    this.lists = { projects: this.deps.runner.listProjects?.(), schedules: this.deps.runner.listSchedules?.(), accounts: this.deps.runner.listAccounts?.() };
+    for (const name of ['projects', 'schedules', 'accounts'] as const) if (this.lists[name]) this.dirtyLists.add(name);
     this.full = true;
     this.scheduleFlush();
     this.heartbeat();
-    this.deps.log.info('convex sync on', { url: this.deps.config.url, runnerId: this.runnerId, name: this.name });
+    this.listenForCommands();
+    this.deps.log.info('convex sync on', { url: this.deps.config.url, runnerId: this.runnerId, name: this.name, commands: Boolean(this.deps.commands) });
   }
 
   // A draining runner stops without a word: the new release writes
@@ -219,10 +386,14 @@ export class ConvexSync {
     if (!this.running) return;
     this.running = false;
     this.unsub?.();
+    this.unsubCommands?.();
+    this.unsubCommands = undefined;
+    this.commandsState = 'off';
     this.flushTimer?.cancel();
     this.heartbeatTimer?.cancel();
     this.flushTimer = undefined;
     this.heartbeatTimer = undefined;
+    await this.subscriber?.close();
     if (opts.bye) await this.post('mutation', 'sync:bye', { key: this.deps.key, runnerId: this.runnerId }).catch(() => {});
   }
 
@@ -234,7 +405,9 @@ export class ConvexSync {
       runnerId: this.runnerId,
       name: this.name,
       threads: this.written,
-      pending: this.dirty.size + this.removed.size,
+      messages: this.messagesWritten,
+      pending: this.dirty.size + this.removed.size + this.messages.length + this.dirtyLists.size,
+      commands: { state: this.commandsState, applied: this.applied, failed: this.failed, ...(this.commandError ? { lastError: this.commandError } : {}) },
     };
     if (this.lastSyncAt !== undefined) s.lastSyncAt = new Date(this.lastSyncAt).toISOString();
     if (this.lastError) s.lastError = this.lastError;
@@ -252,22 +425,77 @@ export class ConvexSync {
     await this.flush();
   }
 
+  // ------------------------------------------------------------ changes
+
   private onNotification(n: Notification): void {
-    if (n.method === 'thread.updated') {
-      this.mark(n.params.thread);
+    switch (n.method) {
+      case 'thread.updated':
+        this.mark(n.params.thread);
+        this.scheduleFlush();
+        break;
+      case 'thread.deleted': {
+        const id = n.params.threadId;
+        this.dirty.delete(id);
+        this.sent.delete(id);
+        this.pending.delete(id);
+        this.removed.add(id);
+        this.scheduleFlush();
+        break;
+      }
+      case 'thread.event':
+        this.onEvent(n.params.threadId, n.params.event as PersistedEvent);
+        break;
+      case 'projects.updated':
+        this.lists.projects = n.params.projects;
+        this.dirtyLists.add('projects');
+        this.scheduleFlush();
+        break;
+      case 'schedules.updated':
+        this.lists.schedules = n.params.schedules;
+        this.dirtyLists.add('schedules');
+        this.scheduleFlush();
+        break;
+      case 'accounts.updated':
+        this.lists.accounts = n.params.accounts;
+        this.dirtyLists.add('accounts');
+        this.scheduleFlush();
+        break;
+      default:
+        break;
+    }
+  }
+
+  // Text messages go up as they're persisted; an approval or question
+  // the thread is waiting on goes on its row until it's resolved.
+  private onEvent(threadId: string, e: PersistedEvent): void {
+    if (typeof (e as { seq?: unknown }).seq !== 'number') return; // a delta
+    const m = toMessageDoc(threadId, e);
+    if (m) {
+      this.messages.push(m);
       this.scheduleFlush();
-    } else if (n.method === 'thread.deleted') {
-      const id = n.params.threadId;
-      this.dirty.delete(id);
-      this.sent.delete(id);
-      this.removed.add(id);
+      return;
+    }
+    if (e.type === 'approval.requested') {
+      this.pending.set(threadId, { approvalId: e.approvalId, kind: 'approval', name: e.name, title: e.title, options: e.options, ...(inputSummary(e.input) ? { inputSummary: inputSummary(e.input) } : {}) });
+    } else if (e.type === 'question.requested') {
+      this.pending.set(threadId, { approvalId: e.approvalId, kind: 'question', questions: e.questions });
+    } else if (e.type === 'approval.resolved') {
+      if (this.pending.get(threadId)?.approvalId === e.approvalId) this.pending.delete(threadId);
+    } else return;
+    try {
+      this.mark(this.deps.runner.get(threadId));
       this.scheduleFlush();
+    } catch {
+      // The thread went between the event and now; its row goes with it.
     }
   }
 
   // Only a change the phone would see makes a write.
   private mark(t: ThreadSummary): void {
-    const doc = toThreadDoc(t, this.runnerId, this.deps.clock.now());
+    // A thread that isn't waiting any more lost its approval some other
+    // way (the turn ended, the runner restarted); the row mustn't keep it.
+    if (t.status === 'idle' || t.status === 'error' || t.status === 'stopped') this.pending.delete(t.id);
+    const doc = toThreadDoc(t, this.runnerId, this.deps.clock.now(), this.pending.get(t.id));
     if (this.sent.get(t.id) === JSON.stringify(doc)) {
       this.dirty.delete(t.id);
       return;
@@ -277,7 +505,7 @@ export class ConvexSync {
 
   private scheduleFlush(): void {
     if (!this.running || this.flushTimer) return;
-    if (!this.dirty.size && !this.removed.size && !this.full) return;
+    if (!this.dirty.size && !this.removed.size && !this.messages.length && !this.dirtyLists.size && !this.full) return;
     const now = this.deps.clock.now();
     let delay = Math.max(0, this.lastFlushAt + SYNC_COALESCE_MS - now);
     if (this.retryAt !== undefined) delay = Math.max(delay, this.retryAt - now);
@@ -293,8 +521,11 @@ export class ConvexSync {
     this.lastFlushAt = this.deps.clock.now();
     const docs = [...this.dirty.values()];
     const removed = [...this.removed];
+    const messages = this.messages.splice(0);
+    const lists = [...this.dirtyLists];
     this.dirty.clear();
     this.removed.clear();
+    this.dirtyLists.clear();
     const key = this.deps.key;
     try {
       for (let i = 0; i < docs.length; i += SYNC_BATCH) {
@@ -304,11 +535,19 @@ export class ConvexSync {
         this.written += batch.length;
       }
       if (removed.length) await this.post('mutation', 'sync:removeThreads', { key, threadIds: removed });
+      for (const name of lists) {
+        const list = this.lists[name];
+        if (!list) continue;
+        const rows = name === 'projects' ? (list as Project[]).map(toProjectDoc) : name === 'schedules' ? (list as Schedule[]).map(toScheduleDoc) : (list as Account[]).map(toAccountDoc);
+        await this.post('mutation', `sync:set${name[0]!.toUpperCase()}${name.slice(1)}`, { key, runnerId: this.runnerId, [name]: rows });
+      }
       if (this.full) {
         const keep = this.deps.runner.list(ALL).map((t) => t.id);
         await this.post('mutation', 'sync:prune', { key, runnerId: this.runnerId, keep });
+        messages.unshift(...(await this.backfill()));
         this.full = false;
       }
+      await this.appendMessages(messages);
       this.lastSyncAt = this.deps.clock.now();
       this.backoffMs = 0;
       this.retryAt = undefined;
@@ -322,17 +561,49 @@ export class ConvexSync {
       // meanwhile, and try again later; one log line per distinct error.
       for (const d of docs) if (!this.dirty.has(d.threadId) && this.sent.get(d.threadId) !== JSON.stringify(d)) this.dirty.set(d.threadId, d);
       for (const id of removed) this.removed.add(id);
+      for (const name of lists) this.dirtyLists.add(name);
+      this.messages.unshift(...messages.filter((m) => !this.messages.some((x) => x.threadId === m.threadId && x.seq === m.seq)));
       this.backoffMs = this.backoffMs ? Math.min(this.backoffMs * 2, BACKOFF_MAX_MS) : BACKOFF_MIN_MS;
       this.retryAt = this.deps.clock.now() + this.backoffMs;
       this.lastError = String((e as Error)?.message ?? e);
       if (this.lastError !== this.lastLogged) {
         this.lastLogged = this.lastError;
-        this.deps.log.warn('convex sync failed; will retry', { error: this.lastError, pending: this.dirty.size + this.removed.size, retryInMs: this.backoffMs });
+        this.deps.log.warn('convex sync failed; will retry', { error: this.lastError, pending: this.dirty.size + this.removed.size + this.messages.length, retryInMs: this.backoffMs });
       }
     } finally {
       this.flushing = false;
     }
     this.scheduleFlush();
+  }
+
+  private async appendMessages(messages: MessageDoc[]): Promise<void> {
+    for (let i = 0; i < messages.length; i += MESSAGE_BATCH) {
+      const batch = messages.slice(i, i + MESSAGE_BATCH);
+      await this.post('mutation', 'sync:appendMessages', { key: this.deps.key, messages: batch });
+      this.messagesWritten += batch.length;
+    }
+  }
+
+  // At start, the last MESSAGES_KEPT text messages of every thread the
+  // mirror doesn't have yet (it says what it has, so a restart sends only
+  // what's new, and the first start sends them all once).
+  private async backfill(): Promise<MessageDoc[]> {
+    const heads = (await this.post('query', 'sync:messageHeads', { key: this.deps.key, runnerId: this.runnerId })) as { threadId: string; lastSeq: number }[] | null;
+    const have = new Map((heads ?? []).map((h) => [h.threadId, h.lastSeq]));
+    const out: MessageDoc[] = [];
+    for (const t of this.deps.runner.list(ALL)) {
+      const after = have.get(t.id) ?? 0;
+      if (t.lastSeq <= after) continue;
+      let events: PersistedEvent[];
+      try {
+        events = this.deps.runner.events(t.id, { limit: BACKFILL_EVENTS }).events;
+      } catch {
+        continue;
+      }
+      const docs = events.filter((e) => e.seq > after).map((e) => toMessageDoc(t.id, e)).filter((m): m is MessageDoc => Boolean(m));
+      out.push(...docs.slice(-MESSAGES_KEPT));
+    }
+    return out;
   }
 
   private heartbeat(): void {
@@ -350,5 +621,121 @@ export class ConvexSync {
       this.deps.log.debug('convex heartbeat failed', { error: String(e) });
     });
     this.heartbeatTimer = this.deps.clock.setTimeout(() => this.heartbeat(), HEARTBEAT_MS);
+  }
+
+  // ------------------------------------------------------------ commands
+
+  private listenForCommands(): void {
+    if (!this.deps.commands || !this.subscriber) return;
+    try {
+      this.unsubCommands = this.subscriber.subscribe(
+        'sync:pendingCommands',
+        { key: this.deps.key, runnerId: this.runnerId },
+        (value) => {
+          this.commandsState = 'on';
+          void this.takeCommands(Array.isArray(value) ? (value as Command[]) : []);
+        },
+        (error) => {
+          this.commandsState = 'error';
+          this.commandError = String(error?.message ?? error);
+          this.deps.log.warn('convex command subscription failed', { error: this.commandError });
+        },
+      );
+      this.commandsState = 'on';
+    } catch (e) {
+      this.commandsState = 'error';
+      this.commandError = String((e as Error)?.message ?? e);
+      this.deps.log.warn('could not subscribe to convex commands', { error: this.commandError });
+    }
+  }
+
+  // Each pending command once: takeCommand says no if another runner (or
+  // an earlier update of the same list) already has it.
+  private async takeCommands(commands: Command[]): Promise<void> {
+    for (const c of commands) {
+      if (!this.running || this.inFlight.has(c.commandId)) continue;
+      this.inFlight.add(c.commandId);
+      try {
+        const taken = await this.post('mutation', 'sync:takeCommand', { key: this.deps.key, commandId: c.commandId });
+        if (taken !== true) continue;
+        let resultThreadId: string | undefined;
+        let note: string | undefined;
+        let ok = true;
+        try {
+          resultThreadId = this.apply(c);
+          this.applied++;
+        } catch (e) {
+          ok = false;
+          note = String((e as Error)?.message ?? e);
+          this.failed++;
+          this.commandError = note;
+          this.deps.log.warn('phone command failed', { kind: c.kind, threadId: c.threadId, error: note });
+        }
+        await this.post('mutation', 'sync:finishCommand', { key: this.deps.key, commandId: c.commandId, ok, ...(note ? { note } : {}), ...(resultThreadId ? { resultThreadId } : {}) });
+      } catch (e) {
+        // Couldn't take or finish it: the next update of the list brings
+        // it round again if it's still pending.
+        this.deps.log.debug('phone command not taken', { commandId: c.commandId, error: String(e) });
+      } finally {
+        this.inFlight.delete(c.commandId);
+      }
+    }
+  }
+
+  // Applies one command through the runner; returns the new thread's id
+  // for a create. Throws with a readable message for the phone.
+  private apply(c: Command): string | undefined {
+    const host = this.deps.commands!;
+    const a = c.args ?? {};
+    const threadId = c.threadId;
+    const needThread = (): string => {
+      if (!threadId) throw new Error('no thread');
+      return threadId;
+    };
+    switch (c.kind) {
+      case 'send': {
+        if (typeof a.text !== 'string' || !a.text.trim()) throw new Error('nothing to send');
+        host.send(needThread(), a.text, [], { origin: 'phone' });
+        return undefined;
+      }
+      case 'respond': {
+        const decision = a.decision as ApprovalDecision;
+        if (!['allow', 'allowAlways', 'deny', 'answered'].includes(decision)) throw new Error(`bad decision ${String(a.decision)}`);
+        host.respondApproval({
+          threadId: needThread(),
+          approvalId: String(a.approvalId),
+          decision,
+          ...(typeof a.message === 'string' ? { message: a.message } : {}),
+          ...(a.answers && typeof a.answers === 'object' ? { answers: a.answers as Record<string, string> } : {}),
+        });
+        return undefined;
+      }
+      case 'update': {
+        const id = needThread();
+        if (a.snooze && typeof a.snooze === 'object') {
+          const s = a.snooze as { until?: string; untilRestart?: boolean };
+          host.update({ threadId: id, snoozedUntil: s.untilRestart ? 'restart' : s.until ?? null });
+        } else if (a.wake) host.update({ threadId: id, snoozedUntil: null });
+        else if (a.archive) host.update({ threadId: id, archived: true });
+        else if (a.unarchive) host.update({ threadId: id, archived: false });
+        else if (a.markSeen) host.markSeen(id, this.deps.runner.get(id).lastSeq);
+        else if (typeof a.title === 'string') host.update({ threadId: id, title: a.title });
+        else throw new Error('nothing to change');
+        return undefined;
+      }
+      case 'create': {
+        if (typeof a.text !== 'string' || !a.text.trim()) throw new Error('nothing to send');
+        const { thread } = host.create({
+          text: a.text,
+          ...(typeof a.cwd === 'string' ? { cwd: a.cwd } : {}),
+          ...(typeof a.accountId === 'string' ? { accountId: a.accountId } : {}),
+          ...(typeof a.model === 'string' ? { model: a.model } : {}),
+          origin: 'phone',
+        });
+        return thread.id;
+      }
+      default:
+        throw new Error(`unknown command ${c.kind}`);
+    }
   }
 }

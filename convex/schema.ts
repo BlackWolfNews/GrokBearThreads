@@ -119,6 +119,67 @@ export default defineSchema({
     revokedAt: v.optional(v.number()),
   }).index('by_hash', ['hash']),
 
+  // The runner's projects, schedules and accounts (docs/protocol.md), one
+  // row each, replaced as a whole when the runner's list changes.
+  projects: defineTable({
+    runnerId: v.string(),
+    id: v.string(),
+    title: v.string(),
+    folders: v.array(v.string()),
+    goals: v.string(),
+    state: v.string(),
+    notes: v.string(),
+    createdBy: v.string(),
+    archived: v.boolean(),
+    createdAt: v.string(),
+    updatedAt: v.string(),
+    threadCount: v.number(),
+    lastActivityAt: v.optional(v.string()),
+  }).index('by_runnerId', ['runnerId']),
+
+  schedules: defineTable({
+    runnerId: v.string(),
+    id: v.string(),
+    title: v.string(),
+    text: v.string(),
+    at: v.optional(v.string()),
+    cron: v.optional(v.string()),
+    timezone: v.optional(v.string()),
+    whenText: v.string(),
+    threadId: v.optional(v.string()),
+    cwd: v.optional(v.string()),
+    accountId: v.optional(v.string()),
+    model: v.optional(v.string()),
+    paused: v.boolean(),
+    createdAt: v.string(),
+    updatedAt: v.string(),
+    nextRunAt: v.optional(v.string()),
+    finishedAt: v.optional(v.string()),
+    runs: v.number(),
+    lastRun: v.optional(v.object({ at: v.string(), outcome: v.string(), threadId: v.optional(v.string()), note: v.optional(v.string()) })),
+  }).index('by_runnerId', ['runnerId']),
+
+  accounts: defineTable({
+    runnerId: v.string(),
+    id: v.string(),
+    provider: v.string(),
+    title: v.string(),
+    note: v.optional(v.string()),
+    email: v.optional(v.string()),
+    plan: v.optional(v.string()),
+    defaultModel: v.optional(v.string()),
+    usage: v.optional(
+      v.object({
+        windows: v.array(v.object({ kind: v.string(), title: v.string(), remainingPercent: v.number(), resetsAt: v.optional(v.string()), detail: v.optional(v.string()) })),
+        readAt: v.string(),
+        source: v.string(),
+        stale: v.optional(v.boolean()),
+        blocked: v.optional(v.boolean()),
+        notice: v.optional(v.string()),
+      }),
+    ),
+  }).index('by_runnerId', ['runnerId']),
+
   // APNs tokens for push (step 4), one row per phone install.
   devices: defineTable({
     apnsToken: v.string(),

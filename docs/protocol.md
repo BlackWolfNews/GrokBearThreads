@@ -536,7 +536,7 @@ Persisted event types (stored in `events.ndjson`, returned by `threads.events`):
 
 | type | fields |
 |---|---|
-| `user.message` | `text`, `images: ImageRef[]`, `origin?: "runner" \| "schedule"` (`runner` when the runner sent the message by itself, such as the resume after a restart; `schedule` when a schedule sent it, with `scheduleId`; absent for anything a person or client sent), `scheduleId?` |
+| `user.message` | `text`, `images: ImageRef[]`, `origin?: "runner" \| "schedule" \| "phone"` (`runner` when the runner sent the message by itself, such as the resume after a restart; `schedule` when a schedule sent it, with `scheduleId`; `phone` when it came from the phone through the Convex mirror (Sync); absent for anything a person or client sent), `scheduleId?` |
 | `assistant.text` | `itemId`, `text` (complete markdown for that block) |
 | `reasoning` | `itemId`, `text` (summary) |
 | `tool.call` | `itemId`, `name` (raw tool name), `kind` (`command` \| `read` \| `edit` \| `write` \| `search` \| `web` \| `mcp` \| `task` \| `todo` \| `image` \| `other`; `image` is image generation), `title` (one line, e.g. "npm test" or "Edit src/a.ts"), `input` (object, large strings truncated to 16 KB) |
@@ -1314,9 +1314,9 @@ kept in `schedules.json` in the data dir.
 
 The runner mirrors the phone's view of its threads to Threadbear's Convex
 project (docs/convex-backend.md, shape A: the runner owns the state,
-Convex mirrors it, the phone asks through it). It's best effort and
-one-way in this step: nothing the runner or the Mac app does waits on it,
-and the runner never reads the mirror back. The Mac app doesn't use it.
+Convex mirrors it, the phone asks through it). It's best effort: nothing
+the runner or the Mac app does waits on it, and the runner never reads
+the mirror back as state. The Mac app doesn't use it.
 
 - **On when** `runner.json` has `sync.url` (the deployment's
   `https://<name>.convex.cloud`) and `secrets/convex-key` (0600) holds the
@@ -1325,43 +1325,76 @@ and the runner never reads the mirror back. The Mac app doesn't use it.
   check.sh sets so no test runner writes to the real project.
   `THREADBEAR_SYNC_URL` points a dev or test runner at its own deployment.
   `sync.name` is what the phone calls this runner (default: the Mac's
-  hostname without `.local`); `sync.runnerId` is made once and written
-  back to `runner.json`, so a data dir stays one runner across releases.
-- **What's written.** One `threads` row per thread: `threadId, runnerId,
-  title, cwd, accountId, provider, model?, status, needsYou, unread,
-  preview, createdAt, lastActivityAt, snoozedUntil?, snoozedUntilRestart?,
+  hostname without `.local` or `.localdomain`); `sync.runnerId` is made
+  once and written back to `runner.json`, so a data dir stays one runner
+  across releases.
+- **Threads.** One `threads` row per thread: `threadId, runnerId, title,
+  cwd, accountId, provider, model?, status, needsYou, unread, preview,
+  createdAt, lastActivityAt, snoozedUntil?, snoozedUntilRestart?,
   archivedAt?, costUsd?` (to the cent), `projects?: { id, title }[]`,
-  `working?` (the first unfinished background task's description) and
-  `view` (`inbox`, `hibernating` or `den`, worked out the way the app's
-  lists are). Nothing else from `ThreadSummary`: no `lastSeq`, context,
-  panels, actions, hooks or sub-agents, and never an event, tool output
-  or image. Plus a `runners` row for this runner (`runnerId, name,
-  version, release?, startedAt, draining, threadCount, lastSeenAt`),
-  written once a minute.
-- **When.** A `thread.updated` whose phone view differs from the last one
-  written marks the thread dirty; dirty threads are written together, at
-  most once every 2 seconds, 50 to a mutation. A `thread.deleted` removes
-  the row. On start every thread is written once and rows of this runner
+  `working?` (the first unfinished background task's description),
+  `pendingApproval?` (below) and `view` (`inbox`, `hibernating` or `den`,
+  worked out the way the app's lists are). Nothing else from
+  `ThreadSummary`: no `lastSeq`, context, panels, actions, hooks or
+  sub-agents, and never a tool result, diff or image. A `thread.updated`
+  whose phone view differs from the last one written marks the thread
+  dirty; dirty threads are written together, at most once every 2
+  seconds, 50 to a mutation. A `thread.deleted` removes the row and its
+  messages.
+- **Messages.** Each persisted `user.message` and `assistant.text` goes
+  up as a `messages` row (`threadId, seq, role, text, origin?, at`), text
+  cut at 8,000 characters with a note; never a delta. The mirror keeps
+  the newest 20 per thread. At start the runner asks what the mirror has
+  (`sync:messageHeads`) and sends only newer ones, the newest 20 per
+  thread at most, so a first start sends them all once and a restart
+  sends what it missed.
+- **Approvals.** An `approval.requested` puts `{ approvalId, kind:
+  "approval", name, title, options, inputSummary? }` on the thread's row
+  (`inputSummary` is one line: the command, the path, or the first string
+  in the input, at most 200 characters, never the whole input); a
+  `question.requested` puts `{ approvalId, kind: "question", questions }`.
+  `approval.resolved`, or the thread no longer waiting, takes it off.
+- **Projects, schedules, accounts.** Each `projects.updated`,
+  `schedules.updated` and `accounts.updated` replaces that runner's rows
+  of the table with the whole list (`Project` without its icon; `Schedule`
+  without effort and permission mode; `Account` as `id, provider, title,
+  note?, email?, plan?, defaultModel?, usage?`, never `configDir` or the
+  model list). The same at start.
+- **Runner.** A `runners` row for this runner (`runnerId, name, version,
+  release?, startedAt, draining, threadCount, lastSeenAt`), written once a
+  minute. On start every thread is written once and rows of this runner
   for threads it no longer has are pruned. A stop for good (not a restart
-  or a handover) sets the runner's `lastSeenAt` to 0 so the phone shows it
-  offline at once; a draining runner just stops, and the new release
-  writes everything again under the same `runnerId`.
+  or a handover) sets `lastSeenAt` to 0 so the phone shows it offline at
+  once; a draining runner just stops, and the new release writes
+  everything again under the same `runnerId`.
+- **Commands.** The phone's mutations (`convex/phone.ts`) add a row to
+  `commands` for a runner (`runnerId`, or `"any"`). The runner holds a
+  live query on its pending commands over the Convex client's WebSocket
+  (it reconnects by itself), and for each one: takes it
+  (`sync:takeCommand`, which says no if it was already taken), applies
+  it through the same methods the app's RPCs use, then finishes it with
+  the outcome and, for a `create`, the new thread's id. `send` and
+  `create` give the `user.message` `origin: "phone"`. `update` takes one
+  of `{ snooze: { until?, untilRestart? } }`, `{ wake }`, `{ archive }`,
+  `{ unarchive }`, `{ markSeen }` or `{ title }`; `respond` is
+  `approvals.respond`'s decision, message and answers. A failed command
+  gets `state: "failed"` and a readable `note`. A draining runner takes
+  no commands. Finished commands go after a day.
 - **Failures.** A write that fails is kept and tried again after 5
   seconds, doubling to 5 minutes, with one log line per distinct error;
   a newer state for the same thread replaces the one waiting. Rows are
   current state, so a long outage costs one write per changed thread
   when it's back.
 - **Status.** `runner.status` has `sync: { state: "off" | "ok" | "error",
-  reason?, url?, runnerId?, name?, threads?, lastSyncAt?, lastError?,
-  pending?, retryAt? }` (`reason` says why it's off; `threads` is rows
-  written since start; `pending` changes waiting), and `tb status` prints
-  it as one line.
+  reason?, url?, runnerId?, name?, threads?, messages?, lastSyncAt?,
+  lastError?, pending?, retryAt?, commands?: { state: "off" | "on" |
+  "error", applied, failed, lastError? } }` (`reason` says why it's off;
+  `threads` and `messages` are rows written since start; `pending`
+  changes waiting), and `tb status` prints it as one line.
 - **Convex side.** `convex/` at the repo root (schema, `sync.ts` for the
-  runner's mutations, `phone.ts` for the phone's queries and the commands
-  it queues, `tokens.ts` for phone tokens). The phone's API is in
-  docs/convex-backend.md. Later steps add messages, approvals, projects,
-  schedules and accounts to the mirror, and the runner applying the
-  phone's commands.
+  runner's mutations and the command queue, `phone.ts` for the phone's
+  queries and mutations, `tokens.ts` for phone tokens, `crons.ts` for
+  pruning). The phone's API is in docs/convex-backend.md.
 
 ## Ordering and reconnects
 

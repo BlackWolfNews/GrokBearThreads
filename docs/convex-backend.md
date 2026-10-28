@@ -311,7 +311,7 @@ app is a later decision and doesn't depend on any of this.
 Mike, 27 Oct: shape A, and make the project now. Full conversation text
 (the 27 Oct option B) stays a later flag.
 
-## 5. What's built (step 1) and how to work on it
+## 5. What's built (steps 1 to 3) and how to work on it
 
 **The Convex project** is `threadbear` on team `mikec`
 (https://dashboard.convex.dev/t/mikec/threadbear). Its code is `convex/`
@@ -322,12 +322,14 @@ the functions without a deployment (`npm run convex:typecheck`). Having a
 dashboard panel.
 
 - `convex/schema.ts`: `runners`, `threads`, `messages`, `commands`,
-  `tokens`, `devices`. Step 1 fills `runners` and `threads`; the rest are
-  defined so the phone can code against them.
+  `projects`, `schedules`, `accounts`, `tokens`, `devices`.
 - `convex/sync.ts`: the runner's mutations (`upsertThreads`,
-  `removeThreads`, `prune`, `heartbeat`, `bye`) and two queries for
-  checks (`threadsOf`, `runnersList`). Each takes `key`, which must equal
-  the deployment's `RUNNER_KEY` env var.
+  `removeThreads`, `prune`, `heartbeat`, `bye`, `appendMessages`,
+  `setProjects`, `setSchedules`, `setAccounts`, `takeCommand`,
+  `finishCommand`), its queries (`threadsOf`, `runnersList`,
+  `messageHeads`, `pendingCommands`, which it holds as a live query) and
+  `pruneOld` for `crons.ts`. Each takes `key`, which must equal the
+  deployment's `RUNNER_KEY` env var.
 - `convex/phone.ts`: the phone's API (section 6).
 - `convex/tokens.ts`: `issue`, `revoke`, `list`, run from a terminal with
   `npx convex run tokens:issue '{"name":"iphone","days":90}'` (add
@@ -335,8 +337,11 @@ dashboard panel.
   is stored.
 - `runner/src/sync.ts`: the mirror, documented in docs/protocol.md
   ("Sync"): on with `sync.url` in `runner.json` and `secrets/convex-key`;
-  coalesced writes, batches of 50, backoff, prune on start, bye on a stop
-  for good; `runner.status.sync` and a `tb status` line.
+  threads, messages (newest 20 per thread, backfilled once), the pending
+  approval on a row, projects, schedules and accounts; coalesced writes,
+  batches, backoff, prune on start, bye on a stop for good; the phone's
+  commands applied through the runner's own methods (`origin: "phone"` on
+  the message); `runner.status.sync` and a `tb status` line.
 - Tests: `runner/test/unit/sync.test.ts` (fake deployment) and
   `runner/test/e2e/sync.e2e.test.ts`, which starts `npx convex dev` on
   the repo's local deployment, points a runner at it with its own key and
@@ -392,12 +397,20 @@ Queries:
   kind: "question", questions: Question[] }` with the protocol's
   `Question` shape.
 - `phone:thread({ token, threadId })` → `{ thread, messages: [{ seq, role,
-  text, origin?, at }] }`, oldest first. Empty until step 2.
+  text, origin?, at }] }`, oldest first: the newest 20 text messages
+  (`origin` is `"phone"` for one sent from the phone, `"schedule"` or
+  `"runner"` as in the protocol).
 - `phone:command({ token, commandId })` → `{ state: "pending" | "taken" |
   "done" | "failed", note?, threadId? }`.
 
-Mutations, each returning a `commandId` (the runner applies them from
-step 3; until then they sit `pending`):
+Also `phone:projects({ token, archived? })`, `phone:schedules({ token })`
+and `phone:accounts({ token })`, the runner's lists as it last sent them
+(docs/protocol.md "Sync" says which fields).
+
+Mutations, each returning a `commandId`. The owning runner takes it
+within a second or two while it's online (state `taken`, then `done` or
+`failed` with a `note`); while it's offline the command waits as
+`pending`:
 
 - `phone:send({ token, threadId, text })`
 - `phone:respond({ token, threadId, approvalId, decision: "allow" |
