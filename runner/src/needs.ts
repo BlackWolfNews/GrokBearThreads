@@ -197,7 +197,7 @@ const END_TURN_ASKS =
 export const END_TURN_DESCRIPTION =
   END_TURN_WHAT +
   'Call it once, as the very last thing in every turn, after your final message, and write nothing after it. ' +
-  "It is refused until the turn has a reply: ordinary text from you after your last tool result (Threadbear's own tools aside), as Mike reads neither tool calls nor thinking as your answer. " +
+  "It is refused until the turn has a reply: ordinary text from you after your last tool result (Threadbear's own tools aside), so Mike gets a complete answer in the conversation. " +
   END_TURN_ASKS;
 
 // Codex's: its final answer ends the turn, so nothing can be called after
@@ -212,12 +212,13 @@ export const CODEX_END_TURN_DESCRIPTION =
 
 // What end_turn says when the turn has no reply yet. An error result, so
 // the CLI doesn't take the call as the end of the turn (adapter.ts,
-// CLAUDE_CODE_TERMINAL_MCP_TOOLS) and the agent reads it. "The whole
-// answer", as an agent told only to write its reply sent the closing line
-// of an answer it had only thought, and that was all Mike got (28 Oct 2026).
+// CLAUDE_CODE_TERMINAL_MCP_TOOLS) and the agent reads it. Ask for the whole
+// answer, as a shorter reminder once got Mike only a closing line.
+// Describe the result he needs: wording that asks for internal reasoning
+// can trigger a provider safeguard even during ordinary work.
 export const NO_REPLY =
-  "Not ended: Mike hasn't had a reply this turn. Since his message (or your last tool result) you have only called tools and thought, and he reads neither as your answer: thinking is folded away with the tool calls. " +
-  'He has seen nothing from you since he wrote, so write the whole answer as ordinary text, including anything you only worked out in thinking, not just its last line. Then call end_turn again.';
+  "Not ended: Mike hasn't had a reply this turn after his latest message and your latest tool result. " +
+  'Please write the whole answer as ordinary text, with the result and any supporting evidence Mike needs. Then call end_turn again.';
 
 // How every accepted end_turn result starts, so the runner can tell one
 // from a refusal by what it says (a refusal's ok flag is only as good as

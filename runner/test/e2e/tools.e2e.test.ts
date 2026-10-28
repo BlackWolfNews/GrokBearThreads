@@ -135,6 +135,40 @@ describe('threadbear tools end to end (real Claude CLI)', { concurrency: false }
     assert.equal(t.cwd, b);
   });
 
+  test('end_turn reminder gets a complete answer before the turn finishes', async () => {
+    const r = await client.call('threads.create', {
+      accountId: ACCOUNT,
+      model: MODEL,
+      cwd: a,
+      text:
+        'Test the end_turn reminder. First call mcp__threadbear__end_turn with needs "nothing", before writing any reply. ' +
+        'After its result, follow the reminder and answer this question in one sentence: ' +
+        'A box has 3 red balls and 2 blue balls. How many balls are there, and what counts support the total? ' +
+        'Then call end_turn again with needs "nothing".',
+    });
+    const id = r.thread.id;
+    await client.call('threads.subscribe', { threadId: id, afterSeq: 0 }).then((s: Ev) => {
+      const live = events.get(id) ?? [];
+      const seen = new Set(s.events.map((e: Ev) => e.seq));
+      events.set(id, [...s.events, ...live.filter((e) => isTransient(e) || !seen.has(e.seq))]);
+    });
+    const done = await waitFor('the reply after the end_turn reminder', () => persisted(id).find((e) => e.type === 'turn.completed'));
+    const evs = persisted(id);
+    assert.equal(done.outcome, 'completed', dump());
+    const calls = evs.filter((e) => e.type === 'tool.call' && e.name === 'mcp__threadbear__end_turn');
+    assert.equal(calls.length, 2, dump());
+    const refused = evs.find((e) => e.type === 'tool.result' && e.itemId === calls[0].itemId);
+    assert.equal(refused?.ok, false, dump());
+    assert.match(refused.text, /result and any supporting evidence/);
+    const reply = evs.filter((e) => e.type === 'assistant.text' && e.seq > refused.seq && e.seq < calls[1].seq).map((e) => e.text).join('\n');
+    assert.match(reply, /5|five/i);
+    assert.match(reply, /3|three/i);
+    assert.match(reply, /2|two/i);
+    assert.match(reply, /red/i);
+    assert.match(reply, /blue/i);
+    assert.ok(evs.find((e) => e.type === 'tool.result' && e.itemId === calls[1].itemId)?.ok, dump());
+  });
+
   test('create_thread, list_threads and delete_thread (which asks first)', async () => {
     const r = await client.call('threads.create', {
       accountId: ACCOUNT,

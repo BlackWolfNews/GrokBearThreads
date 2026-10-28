@@ -429,6 +429,7 @@ test('end_turn only acknowledges; its description says when to call it', async (
   const t = list.find((x) => x.name === 'end_turn')!;
   assert.match(t.description, /last thing in every turn/);
   assert.match(t.description, /refused until the turn has a reply/);
+  assert.doesNotMatch(t.description, /thinking|scratchpad|internal reasoning/i);
   assert.match(t.description, /Sub-agents never call this/);
   s.text('m1', 'Yes or no?');
   toolCall(s, 'e1', END_TURN, { needs: 'you' });
@@ -456,6 +457,8 @@ test('end_turn is refused until the turn has replied to Mike in text', async () 
   assert.equal(r.error, true);
   assert.match(r.text, /hasn't had a reply this turn/);
   assert.match(r.text, /write the whole answer as ordinary text/);
+  assert.match(r.text, /result and any supporting evidence/);
+  assert.doesNotMatch(r.text, /thinking|thought|scratchpad|internal reasoning/i);
   toolResult(s, 'e1');
   // A progress line before more work isn't the reply either.
   s.text('m1', 'Found it, one more check.');

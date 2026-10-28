@@ -1070,7 +1070,10 @@ A turn the agent finished can say whether Mike has to do anything, so
   soon as it reads the call, at times a few frames ahead of the runner's
   log, so the handler waits up to a second for its own call to land
   before judging; one that never lands (a sub-agent's, which the events
-  never see) is acknowledged.
+  never see) is acknowledged. The refusal asks for the complete answer
+  and any supporting evidence in ordinary text. Keep that reminder about
+  the result Mike needs, without asking the model to reproduce internal
+  reasoning.
 - **Codex calls it before its answer.** Codex's final answer ends its
   turn, so nothing can be called after it. Told to call `end_turn` after
   its final message, Codex never once did, and GPT-6.1-Sol wrote the call
