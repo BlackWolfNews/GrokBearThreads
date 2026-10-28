@@ -455,7 +455,7 @@ test('end_turn is refused until the turn has replied to Mike in text', async () 
   let r = await call('end_turn', { needs: 'nothing' });
   assert.equal(r.error, true);
   assert.match(r.text, /hasn't had a reply this turn/);
-  assert.match(r.text, /Write your reply as ordinary text, then call end_turn again/);
+  assert.match(r.text, /write the whole answer as ordinary text/);
   toolResult(s, 'e1');
   // A progress line before more work isn't the reply either.
   s.text('m1', 'Found it, one more check.');

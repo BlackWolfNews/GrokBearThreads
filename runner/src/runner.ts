@@ -77,7 +77,7 @@ import type { ExplainTurn } from './explain.ts';
 import { emptyHighlights, observe as observeHighlights, pinItem, remove as removeHighlight, unpin as unpinHighlight, upsert as upsertHighlight, view as highlightsView, absolute, type ThreadHighlights } from './highlights.ts';
 import { SERVER_NAME, approvalTitle } from './threadbear-mcp.ts';
 import { PANEL_ACK_WAIT_MS, PANEL_PLACES, resolvePanel } from './panel-requests.ts';
-import { archiveFromTool, END_TURN_TOOL, needsFromText, needsFromTool } from './needs.ts';
+import { archiveFromTool, END_TURN_TOOL, endTurnAccepted, needsFromText, needsFromTool } from './needs.ts';
 import type { Needs } from './needs.ts';
 import {
   EMPTY_PATCH_SET,
@@ -203,6 +203,12 @@ type Turn = {
   // from Mike (needs.ts). Never a sub-agent's.
   endTurn?: Record<string, unknown>;
   lastText?: string;
+  // The agent's latest end_turn call, and whether one was accepted since
+  // Mike last wrote. Text after that is dropped: end_turn has already told
+  // it to stop, yet an agent repeated its last line under it as a second
+  // message (28 Oct 2026).
+  endTurnCall?: string;
+  ended?: boolean;
 };
 
 type Runtime = {
@@ -1720,6 +1726,8 @@ export class Runner {
     const turn = rt.turn!;
     this.emit(st, userMessage(msg), turn.turnId);
     turn.messages.push(msg.turnId);
+    // He wrote again, so the turn owes him another reply.
+    turn.ended = false;
     this.markDirty(st);
     rt.session!.send({ id: msg.turnId, text: msg.text, images: msg.images });
   }
@@ -1927,6 +1935,13 @@ export class Runner {
     switch (o.kind) {
       case 'event': {
         const ev = o.event;
+        // Text after an accepted end_turn (see Turn.ended), dropped before
+        // it can become the preview or a second message.
+        if (ev.type === 'assistant.text' && rt.turn?.ended && !ev.itemId.includes('/')) {
+          rt.inProgress.delete(ev.itemId);
+          this.log.info('dropped text after end_turn', { threadId: rec.id, chars: ev.text.length });
+          break;
+        }
         if (ev.type === 'assistant.text' || ev.type === 'reasoning') {
           this.flushDeltas(st);
           rt.inProgress.delete(ev.itemId);
@@ -1938,7 +1953,11 @@ export class Runner {
           // sub-agents never reach the thread's events.
           const own = !('itemId' in ev && ev.itemId?.includes('/'));
           if (ev.type === 'assistant.text' && own) rt.turn.lastText = ev.text;
-          if (ev.type === 'tool.call' && own && ev.name === `mcp__${SERVER_NAME}__${END_TURN_TOOL}`) rt.turn.endTurn = ev.input;
+          if (ev.type === 'tool.call' && own && ev.name === `mcp__${SERVER_NAME}__${END_TURN_TOOL}`) {
+            rt.turn.endTurn = ev.input;
+            rt.turn.endTurnCall = ev.itemId;
+          }
+          if (ev.type === 'tool.result' && ev.itemId === rt.turn.endTurnCall && endTurnAccepted(ev)) rt.turn.ended = true;
           if (ev.type === 'edit.diff') rt.turn.edited.add(ev.path);
           else if (ev.type === 'tool.call' && (ev.kind === 'edit' || ev.kind === 'write')) {
             const file = ev.input.file_path ?? ev.input.path ?? ev.input.notebook_path;
@@ -1949,6 +1968,9 @@ export class Runner {
         break;
       }
       case 'delta':
+        // Streamed text after an accepted end_turn, dropped like its frame
+        // above, so it doesn't flash up and vanish.
+        if (rt.turn?.ended && o.delta.type === 'assistant.text.delta' && !o.delta.itemId.includes('/')) break;
         this.addDelta(st, o.delta);
         break;
       case 'session':

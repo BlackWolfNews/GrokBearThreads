@@ -18,7 +18,7 @@ import { parseWhen, relativeFuture, relativeTime } from './when.ts';
 
 export { parseWhen, relativeFuture, relativeTime };
 import { RUNNER_VERSION, expandHome } from './config.ts';
-import { END_TURN_DESCRIPTION, END_TURN_TOOL, NO_REPLY, turnReply } from './needs.ts';
+import { END_TURN_DESCRIPTION, END_TURN_TOOL, ENDED, NO_REPLY, turnReply } from './needs.ts';
 import { asksForAppRestart, type AppRestarts } from './app-restarts.ts';
 import { PANEL_PLACES } from './panel-requests.ts';
 import type { PanelPlace } from './protocol.ts';
@@ -606,8 +606,8 @@ export function buildThreadbearTools(
         // helps a little at most, and the CLI accepts the empty reply it
         // asks for without a nudge (adapter.ts) (28 Oct 2026).
         return needs === 'you'
-          ? `Noted: this thread will wait in Needs you${archive ? ', and stays in the inbox, as it needs something from Mike' : ''}.${restart} Stop here, with no more text: Mike has your reply, the asks go in a card under it, and anything written now lands as a second message.`
-          : `Noted: this thread is done${archive ? ', and will be archived once the turn is over' : ''}. Stop here, with no more text: Mike has your reply, and anything written now lands as a second message under it.`;
+          ? `${ENDED} will wait in Needs you${archive ? ', and stays in the inbox, as it needs something from Mike' : ''}.${restart} Stop here, with no more text: Mike has your reply, the asks go in a card under it, and anything written now lands as a second message.`
+          : `${ENDED} is done${archive ? ', and will be archived once the turn is over' : ''}. Stop here, with no more text: Mike has your reply, and anything written now lands as a second message under it.`;
       }),
     ),
     ...(appRestarts

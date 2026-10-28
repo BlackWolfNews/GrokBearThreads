@@ -1505,6 +1505,34 @@ test('needs you: end_turn "nothing" keeps a finished thread out of Needs you; "y
   assert.deepEqual(t.asks![0], { action: 'Paste the key', where: 'Settings', reply: 'done' });
 });
 
+test('needs you: text after an accepted end_turn is dropped, until Mike writes again mid-turn', () => {
+  const h = makeHarness();
+  const { thread } = create(h);
+  const s = h.adapter.last;
+  s.init();
+  const result = (itemId: string, text: string) =>
+    s.out({ kind: 'event', event: { type: 'tool.result', itemId, ok: true, text, truncated: false, images: [] } });
+  // A refused end_turn doesn't end anything, even one a provider reports as
+  // ok: the reply after it shows.
+  endTurnCall(s, 't0', { needs: 'nothing' });
+  result('t0', 'Not ended: Mike hasn\'t had a reply this turn.');
+  s.text('m1', 'The answer.');
+  endTurnCall(s, 't1', { needs: 'nothing' });
+  result('t1', 'Noted: this thread is done.');
+  // The repeat under it, streamed and then whole, goes nowhere.
+  s.out({ kind: 'delta', delta: { type: 'assistant.text.delta', itemId: 'm2', text: 'The ans' } });
+  s.text('m2', 'The answer.');
+  const texts = () => h.events(thread.id).filter((e) => e.type === 'assistant.text').map((e) => e.text);
+  assert.deepEqual(texts(), ['The answer.']);
+  assert.equal(h.runner.get(thread.id).preview, 'The answer.');
+  // A message sent into the running turn is owed a reply of its own.
+  h.runner.send(thread.id, 'One more thing');
+  s.text('m3', 'Sure.');
+  s.result('completed');
+  assert.deepEqual(texts(), ['The answer.', 'Sure.']);
+  assert.deepEqual(checkSequence(h.events(thread.id)), []);
+});
+
 test('needs you: without end_turn the closing section is read; with neither, a finished turn counts as before', () => {
   const h = makeHarness();
   const { thread } = create(h);

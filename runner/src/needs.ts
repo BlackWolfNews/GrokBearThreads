@@ -195,10 +195,21 @@ export const END_TURN_DESCRIPTION =
 
 // What end_turn says when the turn has no reply yet. An error result, so
 // the CLI doesn't take the call as the end of the turn (adapter.ts,
-// CLAUDE_CODE_TERMINAL_MCP_TOOLS) and the agent reads it.
+// CLAUDE_CODE_TERMINAL_MCP_TOOLS) and the agent reads it. "The whole
+// answer", as an agent told only to write its reply sent the closing line
+// of an answer it had only thought, and that was all Mike got (28 Oct 2026).
 export const NO_REPLY =
   "Not ended: Mike hasn't had a reply this turn. Since his message (or your last tool result) you have only called tools and thought, and he reads neither as your answer: thinking is folded away with the tool calls. " +
-  'Write your reply as ordinary text, then call end_turn again.';
+  'He has seen nothing from you since he wrote, so write the whole answer as ordinary text, including anything you only worked out in thinking, not just its last line. Then call end_turn again.';
+
+// How every accepted end_turn result starts, so the runner can tell one
+// from a refusal by what it says (a refusal's ok flag is only as good as
+// the provider's) and drop text written after it.
+export const ENDED = 'Noted: this thread';
+
+export function endTurnAccepted(result: { ok: boolean; text: string }): boolean {
+  return result.ok && result.text.startsWith(ENDED);
+}
 
 // Whether the turn so far has given Mike a reply, for end_turn to check
 // before it ends the turn. An agent that drafted its answer in thinking
