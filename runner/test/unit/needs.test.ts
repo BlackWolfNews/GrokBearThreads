@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { PersistedEvent } from '../../src/protocol.ts';
-import { archiveFromTool, END_TURN_FULL_NAME, needsFromText, needsFromTool, turnReply } from '../../src/needs.ts';
+import { archiveFromTool, CODEX_END_TURN_DESCRIPTION, END_TURN_DESCRIPTION, END_TURN_FULL_NAME, needsFromText, needsFromTool, turnReply } from '../../src/needs.ts';
 import { END_TURN_TOOL } from '../../src/needs.ts';
 import { SERVER_NAME } from '../../src/threadbear-mcp.ts';
 
@@ -194,4 +194,9 @@ test("turnReply: not landed until the call is in the events; a Codex child's ite
   assert.deepEqual(turnReply(log(user(), started, call('b1', 'Bash'), result('b1'))), { landed: false, replied: false });
   // The child's text and its own end_turn are not the thread's.
   assert.deepEqual(turnReply(log(user(), started, text('Done.'), call('child/b1', 'Bash'), result('child/b1'), call('child/e1', END), call('e1', END))), { landed: true, replied: true });
+});
+
+test("end_turn's description asks for the words naming a link's target to be that link", () => {
+  // Mike, 29 Oct: plain "the screenshots in Highlights" over a button for the same screenshot.
+  for (const d of [END_TURN_DESCRIPTION, CODEX_END_TURN_DESCRIPTION]) assert.match(d, /make those words a link to the same url/);
 });
