@@ -921,7 +921,8 @@ answers wins. There are two kinds of place:
   message, as before; a few seconds later a small model's title replaces
   it, unless someone has set one meanwhile. Threads from before any
   model could be reached keep their first line until `threads.retitle`
-  names them too.
+  names them too. Later, the librarian renames a thread whose title no
+  longer says what it's about (see Projects).
 - **Failures.** A call never throws: it says why it didn't answer
   (`no-key`: no pool and no key; `no-room`: the pool is out of room and
   OpenRouter can't take it; private folder, over budget, timed out,
@@ -1408,6 +1409,16 @@ Mike can take it out (`threads.setProjects`), after which it's never put
 back. It never takes out a pinned project or one an agent added. Looks
 are listed in `LibrarianStatus.recent`; without a key or budget the queue
 waits (`state: "off"`).
+
+**Titles.** A look also says whether the thread's title still fits, and
+gives a new one when the work has moved on or the title is only its first
+message's opening words. It takes effect straight away, tidied like any
+model title, and the look's entry says so ("Renamed it ..."). Never on a
+`first-message` look (the title model has only just named it), never over
+a title Mike or an agent set (`titleSet`), and not if the title changed
+while the model was answering. A librarian title doesn't set `titleSet`,
+so a later look can rename it again. No extra model call: it's the same
+look.
 
 **Icons.** The librarian gives each project an icon and keeps it up to
 date. It looks through the project's folders for the picture the project

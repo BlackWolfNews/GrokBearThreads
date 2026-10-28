@@ -424,6 +424,45 @@ test('the librarian keeps its line on where the thread is up to as the thread\'s
   assert.ok(h.runner.get(thread.id).highlightsAt);
 });
 
+test('the librarian renames a thread that has moved on, never one Mike or an agent named', async () => {
+  let answer: unknown = {};
+  const s = setup({ models: (p) => reply(typeof answer === 'function' ? (answer as (p: GenerateParams) => unknown)(p) : answer) });
+  const { h, create, finish, librarian } = s;
+  const { thread } = create('Hey, does the librarian update titles?');
+  // The early look never renames: the title model has only just named it.
+  answer = (q: GenerateParams) => {
+    assert.match(q.prompt, /Thread "Hey, does the librarian update titles\?"/);
+    return { projects: [], title: 'Too soon' };
+  };
+  h.clock.advance(FIRST_MESSAGE_MS);
+  await tick(8);
+  assert.equal(h.runner.get(thread.id).title, 'Hey, does the librarian update titles?');
+  // After a turn it does, tidied like any model title, and says so.
+  answer = { projects: [], title: '"Librarian renames drifting threads."', why: 'A feature' };
+  await finish(thread.id);
+  h.clock.advance(SETTLE_MS);
+  await tick(8);
+  assert.equal(h.runner.get(thread.id).title, 'Librarian renames drifting threads');
+  assert.ok(!rec(h, thread.id).titleSet, 'still a model title, so a later look can rename it');
+  assert.equal(librarian.status().recent[0].text, 'Renamed it Librarian renames drifting threads');
+  // null, the same title, or a rambling one: nothing changes.
+  for (const title of [null, 'Librarian renames drifting threads', 'a title that goes on and on and on for far more than ten words in all']) {
+    answer = { projects: [], title };
+    librarian.run(thread.id);
+    await tick(8);
+    assert.equal(h.runner.get(thread.id).title, 'Librarian renames drifting threads');
+  }
+  // Named by an agent: the look is told so, and a title it sends anyway is ignored.
+  h.runner.update({ threadId: thread.id, title: 'Picked by the agent', titleBy: 'agent' });
+  answer = (q: GenerateParams) => {
+    assert.match(q.prompt, /Its title was set by Mike or an agent/);
+    return { projects: [], title: 'Something else' };
+  };
+  librarian.run(thread.id);
+  await tick(8);
+  assert.equal(h.runner.get(thread.id).title, 'Picked by the agent');
+});
+
 test('the librarian files a new thread from its first message, then looks again when the first turn ends', async () => {
   let answer: unknown = {};
   const s = setup({ models: (p) => reply(typeof answer === 'function' ? (answer as (p: GenerateParams) => unknown)(p) : answer) });

@@ -2,9 +2,9 @@
 // to date (docs/protocol.md, "Projects"). It watches threads' turns and
 // moves, and now and then asks the small model (models/index.ts, feature
 // "projects") which projects a thread belongs in, whether it needs a new
-// one, and where the thread has got a project to. What it decides takes
-// effect straight away; Mike can take a thread out, and then it's never
-// put back (projects.ts).
+// one, where the thread has got a project to, and whether the thread's
+// title still fits. What it decides takes effect straight away; Mike can
+// take a thread out, and then it's never put back (projects.ts).
 //
 // One look at a time, the soonest due first. Its queue, what it did and
 // whether it's paused are kept in librarian.json, so a runner restart
@@ -38,6 +38,9 @@ export type LibrarianHost = {
   // Keeps the look's line on where the thread is up to, shown at the top
   // of its Highlights (docs/protocol.md).
   setBrief?(threadId: string, text: string): void;
+  // Renames a thread whose title no longer says what it's about; returns
+  // the title it took, or nothing when it kept the old one.
+  retitleFromLibrarian?(threadId: string, title: string, from: string): string | undefined;
 };
 
 // How long after a turn ends before a look, so a quick follow-up turn
@@ -88,6 +91,7 @@ type Answer = {
   addFolders?: unknown;
   links?: unknown;
   thread?: unknown;
+  title?: unknown;
   why?: unknown;
 };
 
@@ -369,6 +373,9 @@ export class Librarian {
       return;
     }
     const prompt = this.prompt(rec, job);
+    // rec is the live record: the title as the model saw it, so a rename
+    // during the call isn't undone.
+    const title = rec.title;
     const res = await this.models.generate({ feature: 'projects', cwd: rec.cwd, system: SYSTEM, prompt, maxTokens: 2000 });
     if (!res.ok) {
       if (WAIT_FOR.includes(res.reason)) {
@@ -394,7 +401,7 @@ export class Librarian {
       this.note(job, 'failed', "The model's answer wasn't JSON", undefined, res.costUsd);
       return;
     }
-    this.apply(job, rec, answer, res.costUsd, prompt);
+    this.apply(job, rec, answer, res.costUsd, prompt, title);
     this.markLooked(rec, job);
   }
 
@@ -413,6 +420,7 @@ export class Librarian {
     lines.push(`Currently in: ${inNow.join(', ') || 'none'}`);
     if (rec.projectsLeft?.length) lines.push(`Never put it in: ${rec.projectsLeft.join(', ')}`);
     if (selfFiled(rec)) lines.push('Filed by its own agent or Mike: leave its projects as they are (projects [], new null).');
+    if (rec.titleSet) lines.push('Its title was set by Mike or an agent: keep it (title null).');
     const repos = [...(this.edited.get(rec.id) ?? [])].map((r) => this.tilde(r));
     if (repos.length) lines.push(`Edited files in: ${repos.join(', ')}`);
     const gist = this.host.threadGist(rec.id);
@@ -426,8 +434,8 @@ export class Librarian {
   }
 
   // `seen` is the prompt the look was given: a link must be in it, so the
-  // model can't make one up.
-  private apply(job: LibrarianJob, rec: ThreadRecord, a: Answer, costUsd?: number, seen = ''): void {
+  // model can't make one up. `title` is the thread's title it was given.
+  private apply(job: LibrarianJob, rec: ThreadRecord, a: Answer, costUsd?: number, seen = '', title = rec.title): void {
     const live = new Map(this.projects.list().map((p) => [p.id, p]));
     // A thread its agent or Mike filed is theirs to file: the look only
     // keeps its line and the state of the projects it's in.
@@ -534,6 +542,15 @@ export class Librarian {
     }
     // Not a change to any project, so not in what the look says it did.
     if (typeof a.thread === 'string' && a.thread.trim()) this.host.setBrief?.(rec.id, a.thread);
+    // A thread that has moved on from its title gets a new one. Not from
+    // the first message alone: the title model has only just named it.
+    if (typeof a.title === 'string' && a.title.trim() && job.reason !== 'first-message') {
+      const renamed = this.host.retitleFromLibrarian?.(rec.id, a.title, title);
+      if (renamed) {
+        said.push(`Renamed it ${renamed}`);
+        bump('updated');
+      }
+    }
     const why = typeof a.why === 'string' ? a.why.trim().slice(0, 200) : '';
     const text = said.length ? said.join('. ') : why ? `Nothing to change: ${lowerFirst(why)}` : 'Nothing to change';
     this.note(job, outcome, text, [...ids], costUsd);
@@ -797,11 +814,14 @@ Reply with JSON only, no prose and no code fence:
  "addFolders": {"<project id>": ["~/path"]} for repos this thread shows belong to a project it's in, else {},
  "links": {"<project id>": [{"title": "Live site", "url": "https://..."}]} for lasting places of a project it's in that the messages give and the project doesn't list yet, else {},
  "thread": "where this thread itself is up to, as two or three short bullets, one per line, each starting \"- \": what it did or found, and what it's waiting on or doing next",
+ "title": null, or a new title when the thread's title no longer says what it's about (see below),
  "why": "one short line"}
 
 Folders are repos the work lives in (the thread's folder when it's a repo, and the repos it edited), never a catch-all folder. State is two to four plain sentences about the whole project, not this thread: what's done, what's next, what's blocked. Start from the current state, keep what's still true and fold the change in; don't replace it with this thread's details. Ideas and plans that aren't built yet don't change the state.
 
 Links are the few places Mike keeps going back to for a project: its live site, admin page, dashboard, store listing. Copy the url exactly from the messages and give it a short title ("Live site", "Admin", "App Store"). Never a pull request, commit, issue, docs page, localhost, file or one-off page.
+
+Keep the thread's title (title null) unless it no longer says what the thread is about: the work moved on to something else, or the title is only the first words of the first message ("Hey, does the library, sorry, the librarian, does it update"). A better wording of the same subject is no reason. A new title is 2 to 6 words about the whole thread as it is now, in sentence case (a capital for the first word and for names only), with no quotes, full stop, dash or emoji: "Fix the flaky upload test on CI", "Librarian renames threads that move on".
 
 The thread bullets are for Mike glancing at the thread later: concrete, in his plain words, each under ten words, no full stops. The last one says who's waiting on whom ("Waiting on Mike to pick a design", "Fixing the last failing test").`;
 
