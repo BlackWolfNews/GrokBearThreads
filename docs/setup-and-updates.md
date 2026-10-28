@@ -104,8 +104,10 @@ Everyone has their own fork. `origin` is theirs, and setup adds `upstream` point
   need no fork at all.
 - **Mike's changes come in when you say so.** The runner fetches `upstream` every few
   hours. When there's something new, the app shows "12 new changes from Mike" with what
-  they are. "Bring them in" starts a thread that merges upstream into your `main`, sorts
-  out clashes with your own changes, runs the checks, and asks before it lands. It never
+  they are, under the updates icon at the bottom of the left-hand rail (the one that
+  already shows app and runner updates). "Bring them in" starts a new thread that merges
+  upstream into your `main`, sorts out clashes with your own changes, runs the checks,
+  and asks before it lands. It never
   happens silently, because a merge can quietly undo something you changed on purpose.
 - **Each release deploys its backend first.** The release pipeline gains a step: deploy
   the Convex functions (and the website) to your backend, then restart the runner. Today
@@ -162,17 +164,15 @@ Decided 28 Oct:
 - The phone and the website fetch tool output and images over Tailscale, lazily, as grey
   boxes that fill in as you scroll (2.5).
 
-Still open:
+- Push relay: Mike runs it, with encrypted messages (2.4). Firebase Cloud Messaging,
+  Pusher Beams or OneSignal were considered: they'd still need Mike's Apple key uploaded
+  to them, and every user's backend would then hold that service's server key, which can
+  send to everyone's phone, so it's the same problem with an extra company in the middle.
+  A Worker of Mike's own is smaller and only ever sees encrypted messages.
+- Bringing in Mike's changes: from the updates icon on the left-hand rail, "Bring them
+  in" starts a new thread you approve (2.3).
 
-1. **Push relay (2.4):** Mike runs a small Cloudflare Worker holding his Apple push key,
-   so other people's backends can send notifications to the App Store app without ever
-   having the key (it also signs for Poddle and Walkies). Messages are encrypted with a
-   secret the backend and phone share from pairing, so the relay only passes on
-   gibberish. The alternatives are no notifications for other people, or each of them
-   building their own phone app. Explained to Mike 28 Oct; waiting on his answer.
-2. **Bringing in Mike's changes (2.3):** an agent thread you approve each time. Mike
-   agreed, but read it as part of the relay question, so it was explained again on
-   28 Oct and needs his confirmation.
+Nothing is open now. Next is building, in the order below.
 
 ## 4. A rough order to build it in
 
