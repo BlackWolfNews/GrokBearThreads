@@ -12,6 +12,11 @@ struct ThreadbearApp: App {
             RootView()
                 .environment(model)
                 .onAppear { delegate.model = model }
+                // Ask for notifications once paired, including straight
+                // after pairing, not only on a launch that was already paired.
+                .onChange(of: model.isPaired, initial: true) { _, paired in
+                    if paired, !model.isFake { delegate.askForNotifications() }
+                }
                 // The Camera opens threadbear://pair links from the QR code.
                 .onOpenURL { url in Task { await model.pair(with: url) } }
         }
@@ -33,9 +38,7 @@ struct RootView: View {
 /// Push: asks once it's paired, hands the APNs token to the model, and
 /// opens the thread a notification is about.
 final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDelegate {
-    weak var model: AppModel? {
-        didSet { if let model, model.isPaired, !model.isFake { askForNotifications() } }
-    }
+    weak var model: AppModel?
 
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
         UNUserNotificationCenter.current().delegate = self
