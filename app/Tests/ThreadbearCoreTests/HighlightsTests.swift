@@ -73,8 +73,20 @@ final class HighlightsTests: XCTestCase {
         XCTAssertFalse(try web("file:///tmp/a.html"))
         XCTAssertFalse(try web("mailto:mike@example.com"))
         XCTAssertEqual(PreviewRules.viewer(forPath: "/a/b/Index.HTML"), .web)
-        XCTAssertEqual(PreviewRules.viewer(forPath: "/a/b/notes.md"), .quickLook)
         XCTAssertEqual(PreviewRules.viewer(forPath: "/a/b/shot.png"), .quickLook)
+        XCTAssertEqual(PreviewRules.viewer(forPath: "/a/b/clip.mp4"), .quickLook)
+        XCTAssertEqual(PreviewRules.viewer(forPath: "/a/b/paper.pdf"), .quickLook)
+    }
+
+    /// Markdown, plain text and code are the pane's own text view, which
+    /// can be selected and edited; Quick Look's text couldn't be.
+    func testTextFilesGetTheTextView() {
+        for path in ["/a/INSTALL.md", "/a/notes.MD", "/a/b.markdown", "/a/readme.txt", "/a/data.csv", "/a/.env", "/a/x.log",
+                     "/a/app.ts", "/a/Package.swift", "/a/config.json", "/a/Makefile"] {
+            XCTAssertEqual(PreviewRules.viewer(forPath: path), .text, path)
+        }
+        XCTAssertTrue(PreviewRules.isMarkdown("/a/INSTALL.md"))
+        XCTAssertFalse(PreviewRules.isMarkdown("/a/notes.txt"))
     }
 
     func testCodeFilesGetTheirLanguage() {

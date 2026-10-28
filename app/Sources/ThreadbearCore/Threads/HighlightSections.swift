@@ -88,7 +88,11 @@ public enum PreviewRules {
     public enum Viewer: Equatable, Sendable {
         /// A web view: a page, or an `.html` file with what it links to.
         case web
-        /// Quick Look: images, PDFs, video, Markdown, text, CSV and the rest.
+        /// The pane's own text view (TextFileView): Markdown rendered,
+        /// code coloured, plain text plain, all of it selectable and
+        /// editable. Quick Look showed these as text nobody could select.
+        case text
+        /// Quick Look: images, PDFs, video and the rest.
         case quickLook
     }
 
@@ -101,12 +105,23 @@ public enum PreviewRules {
 
     public static func viewer(forPath path: String) -> Viewer {
         let ext = (path as NSString).pathExtension.lowercased()
-        return ext == "html" || ext == "htm" ? .web : .quickLook
+        if ext == "html" || ext == "htm" { return .web }
+        if isMarkdown(path) || textExtensions.contains(ext) || codeLanguage(forPath: path) != nil { return .text }
+        // A dotfile's name is all it has (`.env`, `.gitignore`).
+        if textExtensions.contains(String((path as NSString).lastPathComponent.lowercased().drop(while: { $0 == "." }))) { return .text }
+        return .quickLook
     }
 
+    public static func isMarkdown(_ path: String) -> Bool {
+        ["md", "markdown", "mdx"].contains((path as NSString).pathExtension.lowercased())
+    }
+
+    /// Text with no highlight.js language worth having: shown plain.
+    static let textExtensions: Set<String> = ["txt", "text", "csv", "tsv", "log", "env", "gitignore", "editorconfig", "ndjson", "jsonl"]
+
     /// The highlight.js language for a code file, by its extension or
-    /// name, or nil. Markdown, CSV and plain text aren't here: Quick Look
-    /// shows those.
+    /// name, or nil. Markdown, CSV and plain text aren't here: they're
+    /// shown as they are (Markdown rendered).
     public static func codeLanguage(forPath path: String) -> String? {
         let name = (path as NSString).lastPathComponent
         switch name {

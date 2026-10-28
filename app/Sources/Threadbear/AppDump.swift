@@ -346,7 +346,7 @@ struct AppDump: Encodable {
         }
         let preview: String? = app.panePreview[thread.id].map { preview in
             switch preview.target {
-            case .file(let path): "file \(path)"
+            case .file(let path): "file \(path)" + (preview.editing ? " (editing)" : "")
             case .page(let url): "page \(url.absoluteString)"
             case .explain:
                 // What was asked and where each answer is up to, for a script.

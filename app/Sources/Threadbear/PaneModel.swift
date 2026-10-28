@@ -18,6 +18,8 @@ struct PanePreview: Equatable {
     /// Bumped each time it's opened, so opening the same file again reads
     /// it again (an agent rewrites its mockup between turns).
     var opened = 0
+    /// A text file with its raw text up for editing (TextFileView).
+    var editing = false
 
     var fileURL: URL? {
         if case .file(let path) = target { return URL(fileURLWithPath: path) }
@@ -137,6 +139,11 @@ extension AppModel {
         if let url = preview.externalURL, preview.fileURL.map({ PreviewRules.viewer(forPath: $0.path) == .web }) ?? true {
             WebPanelPool.shared.reloadIfLoaded(url)
         }
+    }
+
+    /// The bar's pencil (and Done) over a text file.
+    func setPreviewEditing(_ editing: Bool, in threadId: String) {
+        panePreview[threadId]?.editing = editing
     }
 
     /// Back, to the section the preview came from. An explanation is kept

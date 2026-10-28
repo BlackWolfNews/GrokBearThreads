@@ -416,10 +416,29 @@ enum Automation {
             // {"cmd":"preview","path":"/abs/file.md"} or {"cmd":"preview",
             // "url":"http://localhost:3000"} opens it in the selected
             // thread's pane, as "Preview here" does; {"cmd":"preview",
-            // "close":true} goes back to the section.
+            // "close":true} goes back to the section. Over a text file,
+            // "edit" true or false is the bar's pencil or Done, "insert"
+            // types text at the end of the editor (and waits for the
+            // save, unless "wait" is false), and "resolve" ("file" or
+            // "mine") is the conflict bar's button.
             guard let thread = app.selectedThread else { return "error no thread selected" }
             if c["close"] as? Bool == true {
                 app.closePreview(in: thread.id)
+            } else if let editing = c["edit"] as? Bool {
+                guard app.panePreview[thread.id]?.fileURL != nil else { return "error no file is open in the pane" }
+                app.setPreviewEditing(editing, in: thread.id)
+            } else if let text = c["insert"] as? String {
+                guard let controller = TextFileController.current, app.panePreview[thread.id]?.editing == true else {
+                    return "error nothing is being edited"
+                }
+                controller.insertAtEnd(text)
+                if c["wait"] as? Bool != false { try? await Task.sleep(for: .seconds(1.2)) }
+                return "ok editor ends \(String(controller.textView.string.suffix(40)).debugDescription), file ends \(((try? String(contentsOf: controller.url, encoding: .utf8)) ?? "").suffix(40).debugDescription)"
+            } else if let side = c["resolve"] as? String {
+                guard let controller = TextFileController.current, let fileText = controller.conflict else { return "error no conflict to resolve" }
+                if side == "file" { controller.useFile(fileText) } else { controller.keepMine() }
+                try? await Task.sleep(for: .milliseconds(300))
+                return "ok editor ends \(String(controller.textView.string.suffix(40)).debugDescription), file ends \(((try? String(contentsOf: controller.url, encoding: .utf8)) ?? "").suffix(40).debugDescription)"
             } else if let path = c["path"] as? String {
                 app.preview(path: path, in: thread)
             } else if let text = c["url"] as? String, let url = URL(string: text) {
