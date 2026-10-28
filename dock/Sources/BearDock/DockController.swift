@@ -34,6 +34,10 @@ struct DropTarget: Equatable {
     /// Set when letting go would open the panel in a window of its own:
     /// that window's frame on screen. `drop` is nil then.
     var float: CGRect?
+    /// Over a group's bar: `preview` is the new tab's place in the bar,
+    /// drawn as a tab, and the panel lands in `land` (the whole group).
+    var inBar = false
+    var land: CGRect?
 }
 
 struct CompassState: Equatable {
@@ -83,6 +87,10 @@ public final class DockController {
     var landing: Landing?
     /// Each group's frame in the dock's coordinates, from the views.
     @ObservationIgnored var frames: [String: CGRect] = [:]
+    /// Each group's bar, while it shows one, and where the empty part of it
+    /// starts (after the title or tabs), for dropping a panel in as a tab.
+    @ObservationIgnored var bars: [String: CGRect] = [:]
+    @ObservationIgnored var barSpaceStarts: [String: CGFloat] = [:]
     @ObservationIgnored var bounds: CGRect = .zero
     /// Set by Escape until the gesture that was cancelled ends.
     @ObservationIgnored private var cancelled = false
@@ -244,7 +252,7 @@ public final class DockController {
         stopWatchingForEscape()
         windows.showOutline(panel: d.panel, frame: nil)
         let size = d.sourceFrame.size
-        if let drop, let to = d.target?.preview {
+        if let drop, let to = d.target?.land ?? d.target?.preview {
             landing = Landing(panel: d.panel, sourceSize: size, to: to)
             withAnimation(Self.settle) {
                 drag = nil
@@ -411,6 +419,13 @@ public final class DockController {
 
     func target(for panel: PanelID, at p: CGPoint) -> DropTarget? {
         if isOutsideWindow(p) { return nil }
+        // A group's bar: join it as a tab, shown as a tab in the bar (Mike,
+        // 28 Oct). Over the window's top band too, which runs along the top
+        // row's bars, except its outermost few points, so docking along the
+        // whole top of the window is still there.
+        if p.y - bounds.minY >= Self.windowTopOverBars, let target = barTarget(for: panel, at: p) {
+            return target
+        }
         // The window's own sides first: a thin strip all along each.
         if bounds.width > 0, let edge = windowEdge(at: p), layout.canDrop(panel, .window(edge)) {
             return DropTarget(drop: .window(edge), preview: Self.slice(bounds, edge, 0.25))
@@ -451,6 +466,23 @@ public final class DockController {
             preview: preview,
             compass: CompassState(group: group.id, center: center, hovered: hovered, disabled: disabled)
         )
+    }
+
+    /// Over a bar, the window's top band is only this deep.
+    static let windowTopOverBars: CGFloat = 6
+    /// The width of the tab drawn in a bar for a drop there.
+    static let barTabWidth: CGFloat = 120
+
+    private func barTarget(for panel: PanelID, at p: CGPoint) -> DropTarget? {
+        guard let group = layout.groups.first(where: { layout.showsHeader($0) && bars[$0.id]?.contains(p) == true }),
+              let bar = bars[group.id], let frame = frames[group.id] else { return nil }
+        let drop = DockDrop.tab(group: group.id)
+        // After the titles, or as far along as there's room for.
+        let start = barSpaceStarts[group.id] ?? bar.minX
+        let width = min(Self.barTabWidth, max(bar.width - 16, 40))
+        let x = max(bar.minX + 4, min(start + 4, bar.maxX - width - 4))
+        let tab = CGRect(x: x, y: bar.minY + 4, width: width, height: max(bar.height - 8, 12))
+        return DropTarget(drop: layout.canDrop(panel, drop) ? drop : nil, preview: tab, inBar: true, land: frame)
     }
 
     private func windowEdge(at p: CGPoint) -> DockEdge? {

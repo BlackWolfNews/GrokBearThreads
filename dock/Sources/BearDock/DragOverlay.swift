@@ -9,7 +9,7 @@ struct DragOverlay: View {
         ZStack(alignment: .topLeading) {
             Color.clear
             if let target = controller.drag?.target, target.drop != nil {
-                DropPreview(rect: target.preview, isTab: Self.isTab(target.drop))
+                DropPreview(rect: target.preview, isTab: Self.isTab(target.drop), inBar: target.inBar, panel: controller.drag?.panel)
                     .transition(.opacity)
             }
             if let ghost = ghost {
@@ -52,10 +52,36 @@ struct DragOverlay: View {
 private struct DropPreview: View {
     let rect: CGRect
     let isTab: Bool
+    /// The new tab itself, in a bar, with the dragged panel's name in it.
+    var inBar = false
+    var panel: PanelID?
+    @Environment(\.dockContent) private var content
+    @Environment(\.dockOptions) private var options
 
     var body: some View {
+        if inBar {
+            HStack(spacing: 6) {
+                if let panel, let symbol = content.symbol(panel) {
+                    Image(systemName: symbol).font(.system(size: options.titleSize - 1, weight: .medium))
+                }
+                if let panel {
+                    Text(content.title(panel)).font(.system(size: options.titleSize, weight: .semibold)).lineLimit(1)
+                }
+            }
+            .foregroundStyle(DockTheme.headerText)
+            .padding(.horizontal, 8)
+            .frame(width: max(rect.width, 0), height: max(rect.height, 0))
+            .background(RoundedRectangle(cornerRadius: 6).fill(DockTheme.accent.opacity(0.22)))
+            .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(DockTheme.accent.opacity(0.85), lineWidth: 1.5))
+                .offset(x: rect.minX, y: rect.minY)
+        } else {
+            area
+        }
+    }
+
+    private var area: some View {
         let r = rect.insetBy(dx: 4, dy: 4)
-        ZStack(alignment: .topLeading) {
+        return ZStack(alignment: .topLeading) {
             RoundedRectangle(cornerRadius: 8)
                 .fill(DockTheme.accent.opacity(0.14))
             RoundedRectangle(cornerRadius: 8)

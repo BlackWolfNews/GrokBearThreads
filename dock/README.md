@@ -40,6 +40,9 @@ something else).
   background moves the panel. The demo's Worktrees rows reorder to show it. For a region with no
   drag of its own that still shouldn't move the panel, use
   `.dockDragDisabled()`.
+- **Over another panel's bar**, a tab with the dragged panel's name shows
+  in it, after its titles: dropping there adds the panel as a tab. Along
+  the top row the window's own top edge keeps only its outer 6 points.
 - **Over another panel**, the side you're nearest (within 28% of it) lights
   up: dropping there splits that panel's space in half.
 - **In the middle** of a panel a compass appears: dock above, below, left

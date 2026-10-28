@@ -449,6 +449,7 @@ struct GroupHeader: View {
                 }
             }
             BarSpace(panel: group.selected, tabbed: !single)
+                .onGeometryChange(for: CGFloat.self) { $0.frame(in: .named(DockSpace.name)).minX } action: { controller.barSpaceStarts[group.id] = $0 }
             if let accessory = content.accessory(group.selected) {
                 accessory
             }
@@ -464,6 +465,12 @@ struct GroupHeader: View {
         }
         .overlay(alignment: .bottom) {
             Rectangle().fill(Color.primary.opacity(0.07)).frame(height: 1)
+        }
+        // Where a dragged panel joins this group as a tab (DockController.barTarget).
+        .onGeometryChange(for: CGRect.self) { $0.frame(in: .named(DockSpace.name)) } action: { controller.bars[group.id] = $0 }
+        .onDisappear {
+            controller.bars[group.id] = nil
+            controller.barSpaceStarts[group.id] = nil
         }
     }
 }
