@@ -23,6 +23,11 @@ the Mac app. It ends with the commands to pair the iPhone app and sign a
 browser in. Run it again whenever you like: it only does what's missing.
 `./threadbear setup --dry-run` shows what it would do.
 
+Or have your agent do it: ask Claude Code or Codex to "clone
+https://github.com/<you>/threadbear to ~/threadbear, then read INSTALL.md
+there and follow it". INSTALL.md walks an agent through it and says when to
+stop and ask you.
+
 After that, the runner and the app update themselves whenever your `main`
 changes, deploying your Convex backend first (docs/setup-and-updates.md).
 

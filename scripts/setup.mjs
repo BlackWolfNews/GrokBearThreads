@@ -165,7 +165,9 @@ function convexLogin() {
   if (config.accessToken) ok('logged in to Convex');
   else if (dry) todo('npx convex login (opens the browser)');
   else {
-    runOrFail('Logging in to Convex', npx, ['convex', 'login']);
+    // Opens the browser and waits for the approval there, with no questions
+    // in the terminal, so an agent can run setup too (INSTALL.md).
+    runOrFail('Logging in to Convex', npx, ['convex', 'login', '--device-name', os.hostname().split('.')[0], '--login-flow', 'poll']);
     ok('logged in to Convex');
   }
 }
@@ -184,7 +186,8 @@ async function project() {
     const verb = v.existing ? 'use the existing' : 'create a';
     if (dry) return todo(`${verb} Convex project "${v.project}"${v.team ? ` on team ${v.team}` : ''} with a dev deployment`), undefined;
     const args = ['convex', 'dev', '--once', '--configure', v.existing ? 'existing' : 'new', '--project', v.project, '--dev-deployment', 'cloud'];
-    if (v.team) args.push('--team', v.team);
+    const team = v.team ?? onlyTeam();
+    if (team) args.push('--team', team);
     runOrFail(v.existing ? 'Selecting the Convex project' : 'Creating the Convex project', npx, args);
     ok(`project ${v.project}`);
   } else ok('this clone already has a Convex project (.env.local)');
@@ -231,6 +234,17 @@ async function keys(urlFromProject) {
     ok('runner key set as RUNNER_KEY');
   }
   return url;
+}
+
+// The team to use when none was given: the only one there is. With several,
+// Convex asks in the terminal; with nobody there to answer (an agent), setup
+// stops and lists them instead.
+function onlyTeam() {
+  const out = run(npx, ['convex', 'login', 'status']).stdout ?? '';
+  const teams = [...out.matchAll(/^\s+- (.+) \(([^)]+)\)$/gm)].map((m) => ({ name: m[1], slug: m[2] }));
+  if (teams.length === 1) return teams[0].slug;
+  if (process.stdin.isTTY && !v.yes) return undefined;
+  throw new Fail(`Your Convex login has ${teams.length} teams. Run setup again with --team and one of: ${teams.map((t) => `${t.slug} (${t.name})`).join(', ')}.`);
 }
 
 // Probes the regions Convex runs in for a deployment's URL.
