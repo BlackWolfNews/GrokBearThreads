@@ -60,6 +60,8 @@ public struct Project: Sendable, Hashable, Decodable, Identifiable {
     public var goals: String
     public var state: String
     public var notes: String
+    /// The places Mike goes for it: its live site, admin page, dashboard.
+    public var links: [ProjectLink]
     public var createdBy: ProjectAuthor
     /// The thread whose agent or look made it.
     public var createdByThread: String?
@@ -75,7 +77,7 @@ public struct Project: Sendable, Hashable, Decodable, Identifiable {
 
     public init(
         id: String, title: String, folders: [String] = [], goals: String = "", state: String = "", notes: String = "",
-        createdBy: ProjectAuthor = .librarian, createdByThread: String? = nil, createdAt: Date = Date(), updatedAt: Date = Date(),
+        links: [ProjectLink] = [], createdBy: ProjectAuthor = .librarian, createdByThread: String? = nil, createdAt: Date = Date(), updatedAt: Date = Date(),
         stateUpdatedAt: Date? = nil, archived: Bool = false, icon: ProjectIcon? = nil, threadCount: Int = 0, lastActivityAt: Date? = nil
     ) {
         self.id = id
@@ -84,6 +86,7 @@ public struct Project: Sendable, Hashable, Decodable, Identifiable {
         self.goals = goals
         self.state = state
         self.notes = notes
+        self.links = links
         self.createdBy = createdBy
         self.createdByThread = createdByThread
         self.createdAt = createdAt
@@ -105,6 +108,7 @@ public struct Project: Sendable, Hashable, Decodable, Identifiable {
         goals = string(.goals) ?? ""
         state = string(.state) ?? ""
         notes = string(.notes) ?? ""
+        links = c.lossyArray(ProjectLink.self, forKey: .links)
         createdBy = (try? c.decodeIfPresent(ProjectAuthor.self, forKey: .createdBy)).flatMap { $0 } ?? .librarian
         createdByThread = string(.createdByThread)
         createdAt = date(.createdAt) ?? Date(timeIntervalSince1970: 0)
@@ -117,9 +121,32 @@ public struct Project: Sendable, Hashable, Decodable, Identifiable {
     }
 
     enum CodingKeys: String, CodingKey {
-        case id, title, folders, goals, state, notes, createdBy, createdByThread, createdAt, updatedAt, stateUpdatedAt
+        case id, title, folders, goals, state, notes, links, createdBy, createdByThread, createdAt, updatedAt, stateUpdatedAt
         case archived, icon, threadCount, lastActivityAt
     }
+}
+
+/// A place Mike keeps going back to for a project (docs/protocol.md,
+/// "Links"): shown at the top of its threads' Highlights.
+public struct ProjectLink: Sendable, Hashable, Decodable {
+    public var title: String
+    public var url: String
+
+    public init(title: String, url: String) {
+        self.title = title
+        self.url = url
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        url = try c.decode(String.self, forKey: .url)
+        let title = (try? c.decodeIfPresent(String.self, forKey: .title)).flatMap { $0 } ?? ""
+        self.title = title.isEmpty ? HighlightText.address(url) : title
+    }
+
+    enum CodingKeys: String, CodingKey { case title, url }
+
+    public var link: URL? { URL(string: url) }
 }
 
 /// A project's icon (docs/protocol.md, "Icons"): a picture copied into the

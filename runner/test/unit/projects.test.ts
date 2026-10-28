@@ -368,7 +368,7 @@ test('agent tools: make, read, update, join and leave projects', async () => {
   assert.equal(p.createdBy, 'agent');
   await call('update_project', { project: 'app', state: 'Half done', appendNote: 'Use npm ci.' });
   const read = await call('read_project', { project: p.id });
-  assert.match(read.text, /^App \(p_[0-9a-f]+\)\nFolders: .*\nGoals: Ship it\nState: Half done\n\nNotes:\nUse npm ci\.\n\nThreads \(1\):\n- [0-9a-f]{8} ".*" \(this thread\)$/);
+  assert.match(read.text, /^App \(p_[0-9a-f]+\)\nFolders: .*\nGoals: Ship it\nState: Half done\nLinks: none\n\nNotes:\nUse npm ci\.\n\nThreads \(1\):\n- [0-9a-f]{8} ".*" \(this thread\)$/);
   assert.match((await call('list_projects', {})).text, /\(this thread is in it\) · 1 thread · folders .* · state: Half done/);
   assert.match((await call('leave_project', { project: p.id })).text, /no longer in "App"/);
   assert.equal(rec(h, thread.id)?.projectsLeft?.[0], p.id);
@@ -514,4 +514,67 @@ test("a thread its agent filed is the agent's to file: the librarian keeps its l
   assert.equal(projects.list().length, 2, 'no new project');
   assert.equal(projects.record(p.id)?.state, 'Shipped');
   assert.equal(librarian.status().recent[0].text, "Updated App's state");
+});
+
+test('links: checked, titled from the host, added and retitled by url, merged, at most 8', () => {
+  const { projects } = setup();
+  const p = projects.create({ title: 'Cruise', links: [{ url: 'https://www.lights.example/' }], by: 'mike' });
+  assert.deepEqual(p.links, [{ title: 'lights.example', url: 'https://www.lights.example/' }]);
+  assert.throws(() => projects.update(p.id, { links: [{ url: 'file:///etc/hosts' }] }), RpcError);
+  assert.throws(() => projects.update(p.id, { links: [{ url: 'not a url' }] }), RpcError);
+  const added = projects.addLinks(p.id, [
+    { title: 'Live site', url: 'https://www.lights.example' },
+    { title: 'Admin', url: 'https://www.lights.example/admin' },
+  ]);
+  assert.deepEqual(added.links.map((l) => l.title), ['Live site', 'Admin'], 'the same page, with or without its slash, is retitled');
+  assert.deepEqual(projects.removeLinks(p.id, ['https://www.lights.example/admin/']).links.map((l) => l.title), ['Live site']);
+  const many = Array.from({ length: 9 }, (_, i) => ({ url: `https://x.example/${i}` }));
+  assert.throws(() => projects.update(p.id, { links: many }), /at most 8/);
+  const other = projects.create({ title: 'Other', links: [{ title: 'Dash', url: 'https://dash.example' }, { url: 'https://www.lights.example/' }], by: 'mike' });
+  assert.deepEqual(projects.merge(other.id, p.id).links.map((l) => l.title), ['Live site', 'Dash']);
+  // Saved and read back.
+  const again = new Projects({ home: (projects as any).file.replace(/\/projects\.json$/, ''), clock: new FakeClock(), log: nullLogger });
+  again.start((projects as any).host);
+  assert.deepEqual(again.record(p.id)?.links.map((l) => l.title), ['Live site', 'Dash']);
+});
+
+test('agent tools set links: create, add, remove, and read_project shows them', async () => {
+  const { h, projects, create } = setup();
+  const { thread } = create();
+  const tools = buildThreadbearTools(h.runner, thread.id, Date.now, undefined, projects);
+  const call = async (name: string, args: Record<string, unknown>) => {
+    const r = await tools.find((x) => x.name === name)!.handler(args as never, {} as never);
+    return { text: r.content.map((c: any) => c.text).join(''), error: Boolean(r.isError) };
+  };
+  await call('create_project', { title: 'Cruise', links: [{ title: 'Live site', url: 'https://cruise.example' }] });
+  await call('update_project', { project: 'cruise', addLinks: [{ title: 'Admin', url: 'https://cruise.example/admin' }] });
+  assert.match((await call('read_project', { project: 'cruise' })).text, /\nLinks: Live site https:\/\/cruise\.example\/ · Admin https:\/\/cruise\.example\/admin\n/);
+  await call('update_project', { project: 'cruise', removeLinks: ['https://cruise.example/'] });
+  assert.deepEqual(projects.list()[0].links.map((l) => l.title), ['Admin']);
+  assert.equal((await call('update_project', { project: 'cruise', addLinks: [{ url: 'ftp://x' }] })).error, true);
+});
+
+test('the librarian adds a link only when the thread gave it, to a project the thread is in', async () => {
+  let answer: unknown = {};
+  const s = setup({ models: () => reply(answer) });
+  const { h, create, finish, librarian, projects } = s;
+  const p = projects.create({ title: 'Cruise', by: 'mike' });
+  const other = projects.create({ title: 'Other', by: 'mike' });
+  const { thread } = create('The site is live at https://cruise.example now');
+  projects.changeMembership(thread.id, { add: [p.id], by: 'agent' });
+  answer = {
+    links: {
+      [p.id]: [
+        { title: 'Live site', url: 'https://cruise.example' },
+        { title: 'Made up', url: 'https://invented.example' },
+      ],
+      [other.id]: [{ title: 'Live site', url: 'https://cruise.example' }],
+    },
+  };
+  await finish(thread.id);
+  h.clock.advance(SETTLE_MS);
+  await tick(8);
+  assert.deepEqual(projects.record(p.id)?.links, [{ title: 'Live site', url: 'https://cruise.example/' }]);
+  assert.deepEqual(projects.record(other.id)?.links, [], 'not a project the thread is in');
+  assert.equal(librarian.status().recent[0].text, 'Added a link to Cruise');
 });

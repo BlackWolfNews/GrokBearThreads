@@ -1388,7 +1388,7 @@ function projectRequest(method, p) {
       if (!title) throw rpcError(-32602, 'title is required');
       const project = {
         id: 'p_' + crypto.randomBytes(4).toString('hex'), title, folders: p.folders ?? [], goals: p.goals ?? '', state: p.state ?? '',
-        notes: p.notes ?? '', createdBy: 'mike', createdAt: iso(), updatedAt: iso(),
+        notes: p.notes ?? '', links: p.links ?? [], createdBy: 'mike', createdAt: iso(), updatedAt: iso(),
       };
       projects.push(project);
       for (const threadId of p.threadIds ?? []) join(need(threadId).summary, project, 'mike', true);
@@ -1397,7 +1397,7 @@ function projectRequest(method, p) {
     }
     case 'projects.update': {
       const project = needProject(p.projectId);
-      for (const key of ['title', 'folders', 'goals', 'notes']) if (p[key] !== undefined) project[key] = p[key];
+      for (const key of ['title', 'folders', 'goals', 'notes', 'links']) if (p[key] !== undefined) project[key] = p[key];
       if (p.state !== undefined) { project.state = p.state; project.stateUpdatedAt = iso(); }
       if (p.archived !== undefined) project.archived = Boolean(p.archived) || undefined;
       project.updatedAt = iso();
@@ -1547,6 +1547,7 @@ function addDemoProjects() {
     goals: 'Mike\'s own agent app: a runner that drives the Claude and Codex CLIs, and a native Mac app over it. Done is when it replaces T3 Code for everyday work.',
     state: 'Projects and the librarian are next: protocol written, runner and app being built in parallel. Settings tabs renamed; release notes for 0.4 drafted.',
     notes: '**Checks**: `./check.sh` runs everything, `--quick` for the runner only.\n\nNever restart the live runner from a thread; merge to main and it follows.\n\nThe protocol is the contract: change `docs/protocol.md` first.',
+    links: [{ title: 'Website', url: 'https://threadbear.example.app/' }],
     createdBy: 'librarian', createdByThread: 'demo_release_notes', createdAt: ago(60 * 24 * 9), updatedAt: ago(3), stateUpdatedAt: ago(41),
     // The three kinds of icon: a picture (the app's own), a symbol, and
     // Walkies with none yet, which shows its letter.
@@ -1556,7 +1557,7 @@ function addDemoProjects() {
     id: 'p_7a2c41f0', title: 'Photo sync', folders: ['/Users/mike/dev/photo-sync'],
     goals: 'Back up the family photo library to B2 without babysitting it: resumable uploads, a nightly report, and builds that don\'t take fifteen minutes.',
     state: 'Uploads resume after a crash in testing; waiting on Mike to pick the chunk size. CI is slow because the lockfile change broke the cache key.',
-    notes: '', createdBy: 'librarian', createdByThread: 'demo_upload_resume', createdAt: ago(60 * 24 * 4), updatedAt: ago(41), stateUpdatedAt: ago(41),
+    notes: '', links: [], createdBy: 'librarian', createdByThread: 'demo_upload_resume', createdAt: ago(60 * 24 * 4), updatedAt: ago(41), stateUpdatedAt: ago(41),
     icon: { symbol: 'photo', by: 'librarian', updatedAt: ago(60) },
   };
   const walkies = {
@@ -1564,6 +1565,12 @@ function addDemoProjects() {
     goals: 'The dog walking app: iOS client and Convex backend. Next milestone is sharing a walk with a friend.',
     state: 'Share button colour being picked; dark mode for the dashboard done and waiting for review.',
     notes: '', createdBy: 'mike', createdAt: ago(60 * 24 * 20), updatedAt: ago(60 * 2),
+    // Shown at the top of its threads' Highlights.
+    links: [
+      { title: 'Live site', url: 'https://walkies.example.app/' },
+      { title: 'Admin', url: 'https://walkies.example.app/admin' },
+      { title: 'App Store', url: 'https://apps.apple.com/app/walkies/id6700000000' },
+    ],
   };
   projects = [tb, photo, walkies];
   const put = (threadId, project, by, pinned, minutesAgo) => {

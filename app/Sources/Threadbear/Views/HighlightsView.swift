@@ -5,7 +5,8 @@ import ThreadbearCore
 
 /// The pane's Highlights section: what the thread has made, shared and
 /// pinned, so it doesn't scroll away with the transcript. The librarian's
-/// line on where it's up to, then pins, files, links and commits, each
+/// line on where it's up to, the links of the projects it's in (its live
+/// site, admin page), then pins, files, links and commits, each
 /// under a grey heading like the sidebar's, and left out when empty.
 struct HighlightsView: View {
     @Environment(AppModel.self) private var app
@@ -20,12 +21,13 @@ struct HighlightsView: View {
             PaneNote(text: "This runner doesn't keep highlights yet.")
         } else if let fetched = app.highlights[thread.id] {
             let sections = HighlightSections.build(fetched)
-            if sections.isEmpty && openAsks == nil {
+            let projects = ProjectLinkGroups.build(thread: thread, project: app.project)
+            if sections.isEmpty && openAsks == nil && projects.isEmpty {
                 PaneNote(text: "Nothing here yet. Files, links and commits from this thread show up here as it works.")
             } else {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 0) {
-                        content(sections)
+                        content(sections, projects: projects)
                     }
                     .padding(.bottom, zoomed(16))
                 }
@@ -37,7 +39,7 @@ struct HighlightsView: View {
     }
 
     @ViewBuilder
-    private func content(_ sections: HighlightSections) -> some View {
+    private func content(_ sections: HighlightSections, projects: [Project]) -> some View {
         if let brief = sections.brief {
             Text(brief)
                 .font(.system(size: TypeScale.label))
@@ -58,6 +60,13 @@ struct HighlightsView: View {
                     app.session(for: thread.id).tickAsk(asksSeq: asksSeq, index: index, ticked: !ask.ticked)
                 }
             }
+        }
+        // The places Mike keeps going back to for the thread's projects,
+        // under each project's own icon, so the live site is one click
+        // from any of its threads (Mike asked 28 Oct).
+        ForEach(projects) { project in
+            SectionHeading(title: project.title, project: project)
+            ForEach(project.links, id: \.url) { projectLink($0) }
         }
         if !sections.pinned.isEmpty {
             SectionHeading(title: "Pinned", icon: "pin")
@@ -121,6 +130,17 @@ struct HighlightsView: View {
                 Divider()
                 Button("Remove", systemImage: "pin.slash") { app.removeHighlight(item, in: thread.id) }
             }
+    }
+
+    private func projectLink(_ link: ProjectLink) -> some View {
+        let address = HighlightText.address(link.url)
+        return PaneRow(icon: "globe", title: link.title, detail: address == link.title ? nil : address, titleTruncation: .tail) {
+            if let url = link.link { app.openLink(url, title: link.title, in: thread) }
+        }
+        .tip("Open \(address)")
+        .contextMenu {
+            if let url = link.link { LinkMenu(url: url, thread: thread, title: link.title) }
+        }
     }
 
     /// "4 files edited", which opens to the files; a click opens one in

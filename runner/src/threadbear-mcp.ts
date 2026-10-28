@@ -38,7 +38,8 @@ export type AppRestartControl = Pick<AppRestarts, 'watch' | 'isWatching'>;
 
 export type ScheduleControl = Async<Scheduler, 'create' | 'list' | 'find' | 'update' | 'delete'>;
 
-export type ProjectControl = Pick<Projects, 'list' | 'get' | 'find' | 'create' | 'update' | 'appendNote' | 'changeMembership'> & Partial<Pick<Projects, 'chooseIcon'>>;
+export type ProjectControl = Pick<Projects, 'list' | 'get' | 'find' | 'create' | 'update' | 'appendNote' | 'changeMembership'> &
+  Partial<Pick<Projects, 'chooseIcon' | 'addLinks' | 'removeLinks'>>;
 
 export const SERVER_NAME = 'threadbear';
 // Asked about every time, even in a thread with full access: deleting is
@@ -336,6 +337,10 @@ export function buildThreadbearTools(control: ThreadControl, selfId: string, now
   const tilde = (p: string) => (home && p.startsWith(home + '/') ? '~' + p.slice(home.length) : p);
   const projectFolder = (f: string): Promise<string> => folder(f);
 
+  const linksArg = z.array(z.object({ title: z.string().optional(), url: z.string() }));
+  const LINKS_HELP =
+    'The few places Mike goes for this project, at most 8: its live site, admin page, dashboard, store listing, repo. Short titles ("Live site", "Admin"). Not one-off pages, PRs or docs.';
+
   const projectTools = [
     tool(
       'list_projects',
@@ -372,6 +377,7 @@ export function buildThreadbearTools(control: ThreadControl, selfId: string, now
           `Folders: ${p.folders.map(tilde).join(', ') || 'none'}`,
           `Goals: ${p.goals || '(none yet)'}`,
           `State: ${p.state || '(none yet)'}`,
+          `Links: ${(p.links ?? []).map((l) => `${l.title} ${l.url}`).join(' · ') || 'none'}`,
           '',
           'Notes:',
           p.notes || '(none yet)',
@@ -391,15 +397,17 @@ export function buildThreadbearTools(control: ThreadControl, selfId: string, now
         goals: z.string().optional().describe("What it's for and what done looks like, a few lines."),
         state: z.string().optional().describe("Where it's up to and what's next, a few lines."),
         notes: z.string().optional().describe('Markdown: decisions, gotchas, commands, links.'),
+        links: linksArg.optional().describe(LINKS_HELP),
         join: z.boolean().optional().describe('Put this thread in it. Default true.'),
       },
-      handle(async ({ title, folders, goals, state, notes, join }) => {
+      handle(async ({ title, folders, goals, state, notes, links, join }) => {
         const p = mustProjects().create({
           title,
           folders: await Promise.all((folders ?? []).map(projectFolder)),
           goals,
           state,
           notes,
+          links,
           by: 'agent',
           byThread: selfId,
           threadIds: join === false ? [] : [selfId],
@@ -409,7 +417,7 @@ export function buildThreadbearTools(control: ThreadControl, selfId: string, now
     ),
     tool(
       'update_project',
-      "Changes a project: title, goals, state, notes, folders or icon. Keep state current as work moves on (what's done, what's next, what's blocked), and add to the notes anything a later thread should know. appendNote adds a paragraph without rewriting the notes. The librarian finds icons by itself from the project's folders, so only set one when Mike asks or the project gets a new app icon somewhere it wouldn't look.",
+      "Changes a project: title, goals, state, notes, links, folders or icon. Keep state current as work moves on (what's done, what's next, what's blocked), and add to the notes anything a later thread should know. appendNote adds a paragraph without rewriting the notes. When the project gets a place Mike will keep going back to (it goes live, gets an admin page, a dashboard, a store listing), add it with addLinks: links show at the top of every one of its threads' Highlights. The librarian finds icons by itself from the project's folders, so only set one when Mike asks or the project gets a new app icon somewhere it wouldn't look.",
       {
         project: z.string().describe('Project id, id prefix or title.'),
         title: z.string().optional(),
@@ -417,6 +425,9 @@ export function buildThreadbearTools(control: ThreadControl, selfId: string, now
         state: z.string().optional(),
         notes: z.string().optional().describe('Replaces all the notes.'),
         appendNote: z.string().optional().describe('Adds a paragraph to the end of the notes.'),
+        links: linksArg.optional().describe('Replaces all the links. ' + LINKS_HELP),
+        addLinks: linksArg.optional().describe('Adds links, or retitles ones it has (same url).'),
+        removeLinks: z.array(z.string()).optional().describe('Urls of links to take off.'),
         addFolders: z.array(z.string()).optional(),
         removeFolders: z.array(z.string()).optional(),
         icon: z
@@ -424,7 +435,7 @@ export function buildThreadbearTools(control: ThreadControl, selfId: string, now
           .optional()
           .describe('A path to a picture (PNG, SVG, ICNS...), an SF Symbol name such as "film", or "auto" to let the librarian find one again.'),
       },
-      handle(async ({ project: q, title, goals, state, notes, appendNote, addFolders, removeFolders, icon }) => {
+      handle(async ({ project: q, title, goals, state, notes, appendNote, links, addLinks, removeLinks, addFolders, removeFolders, icon }) => {
         const pc = mustProjects();
         const p = project(q);
         let folders: string[] | undefined;
@@ -433,8 +444,13 @@ export function buildThreadbearTools(control: ThreadControl, selfId: string, now
           const add = await Promise.all((addFolders ?? []).map(projectFolder));
           folders = [...p.folders.filter((f) => !drop.has(f)), ...add.filter((f) => !p.folders.includes(f))];
         }
-        let out = pc.update(p.id, { title, goals, state, notes, folders });
+        let out = pc.update(p.id, { title, goals, state, notes, links, folders });
         if (appendNote?.trim()) out = pc.appendNote(p.id, appendNote);
+        if (addLinks?.length || removeLinks?.length) {
+          if (!pc.addLinks || !pc.removeLinks) throw new Error("This runner can't change project links yet.");
+          if (removeLinks?.length) out = pc.removeLinks(p.id, removeLinks);
+          if (addLinks?.length) out = pc.addLinks(p.id, addLinks);
+        }
         if (icon?.trim()) {
           if (!pc.chooseIcon) throw new Error("This runner can't set project icons yet.");
           const v = icon.trim();

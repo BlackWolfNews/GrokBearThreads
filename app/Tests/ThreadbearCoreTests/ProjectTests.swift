@@ -51,6 +51,34 @@ final class ProjectTests: XCTestCase {
         XCTAssertNil(project.lastActivityAt)
     }
 
+    func testProjectLinks() throws {
+        let project = try decode(Project.self, """
+        {"id":"p_1","links":[{"title":"Live site","url":"https://cruise.example/"},{"url":"https://www.cruise.example/admin/"},
+         {"title":"no url"},"https://loose.example"]}
+        """)
+        XCTAssertEqual(project.links, [
+            ProjectLink(title: "Live site", url: "https://cruise.example/"),
+            ProjectLink(title: "cruise.example/admin", url: "https://www.cruise.example/admin/"),
+        ], "a link without a title is named by its address; a broken one is skipped")
+        XCTAssertEqual(try decode(Project.self, #"{"id":"p_2"}"#).links, [], "none from a runner before links")
+    }
+
+    func testProjectLinkGroupsFollowTheThreadAndSkipEmptyOrArchived() throws {
+        let thread = try decode(ThreadSummary.self, """
+        {"id":"th1","projects":[{"id":"p_b","title":"B"},{"id":"p_a","title":"A"},{"id":"p_none","title":"N"},
+         {"id":"p_old","title":"Old"},{"id":"p_gone","title":"Gone"}]}
+        """)
+        let link = [ProjectLink(title: "Site", url: "https://x.example")]
+        let all = [
+            Project(id: "p_a", title: "A", links: link),
+            Project(id: "p_b", title: "B", links: link),
+            Project(id: "p_none", title: "N"),
+            Project(id: "p_old", title: "Old", links: link, archived: true),
+        ]
+        let groups = ProjectLinkGroups.build(thread: thread) { id in all.first { $0.id == id } }
+        XCTAssertEqual(groups.map(\.id), ["p_b", "p_a"])
+    }
+
     func testThreadSummaryProjects() throws {
         let thread = try decode(ThreadSummary.self, """
         {"id":"th1","projects":[{"id":"p_a","title":"Threadbear","by":"mike","pinned":true,"at":"2026-10-27T10:00:00Z"},

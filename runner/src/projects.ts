@@ -16,7 +16,7 @@ import crypto from 'node:crypto';
 import type { Clock } from './clock.ts';
 import type { Logger } from './log.ts';
 import type { Notification } from './runner.ts';
-import type { Project, ProjectIcon, ProjectMaker, ThreadProject, ThreadSummary } from './protocol.ts';
+import type { Project, ProjectIcon, ProjectLink, ProjectMaker, ThreadProject, ThreadSummary } from './protocol.ts';
 import { ErrorCode, RpcError } from './protocol.ts';
 import type { ThreadRecord } from './store.ts';
 import type { ProjectFolder } from './patches.ts';
@@ -50,12 +50,16 @@ export type ProjectHost = {
   onNotification(fn: (n: Notification) => void): () => void;
 };
 
+// A link as agents and Mike give it: the title can be left to the host.
+export type LinkInput = { title?: string; url: string };
+
 export type CreateProjectParams = {
   title: string;
   folders?: string[];
   goals?: string;
   state?: string;
   notes?: string;
+  links?: LinkInput[];
   threadIds?: string[];
   by: ProjectMaker;
   byThread?: string;
@@ -67,6 +71,7 @@ export type UpdateProjectParams = {
   goals?: string;
   state?: string;
   notes?: string;
+  links?: LinkInput[];
   archived?: boolean;
 };
 
@@ -79,6 +84,9 @@ export type MembershipChange = {
 const TITLE_MAX = 80;
 const SHORT_MAX = 2000; // goals and state
 const NOTES_MAX = 50_000;
+// A project's links are the few places Mike goes for it, not a bookmark
+// list: more than this and the top of Highlights is all links.
+export const LINKS_MAX = 8;
 // How much of the projects goes into a session's brief, all of them together.
 export const BRIEF_MAX = 2000;
 
@@ -110,7 +118,7 @@ export class Projects {
     const saved = readJsonSync<{ projects?: ProjectRecord[] }>(this.file);
     if (!saved && fs.existsSync(this.file)) this.log.error('projects.json could not be read; starting with none', { file: this.file });
     for (const p of saved?.projects ?? []) {
-      if (p && typeof p.id === 'string' && typeof p.title === 'string') this.items.set(p.id, { ...p, folders: p.folders ?? [], goals: p.goals ?? '', state: p.state ?? '', notes: p.notes ?? '' });
+      if (p && typeof p.id === 'string' && typeof p.title === 'string') this.items.set(p.id, { ...p, folders: p.folders ?? [], goals: p.goals ?? '', state: p.state ?? '', notes: p.notes ?? '', links: p.links ?? [] });
     }
     // A deleted thread changes its projects' counts.
     this.unlisten = host.onNotification((n) => {
@@ -245,6 +253,7 @@ export class Projects {
       goals: checkText('goals', params.goals ?? '', SHORT_MAX),
       state: checkText('state', params.state ?? '', SHORT_MAX),
       notes: checkText('notes', params.notes ?? '', NOTES_MAX),
+      links: checkLinks(params.links ?? []),
       createdBy: params.by,
       createdAt: now,
       updatedAt: now,
@@ -269,6 +278,7 @@ export class Projects {
     if (params.goals !== undefined) next.goals = checkText('goals', params.goals, SHORT_MAX);
     if (params.state !== undefined) next.state = checkText('state', params.state, SHORT_MAX);
     if (params.notes !== undefined) next.notes = checkText('notes', params.notes, NOTES_MAX);
+    if (params.links !== undefined) next.links = checkLinks(params.links);
     if (params.archived !== undefined) {
       if (params.archived) next.archived = true;
       else delete next.archived;
@@ -295,6 +305,21 @@ export class Projects {
     return this.update(projectId, { notes: rec.notes.trim() ? `${rec.notes.trimEnd()}\n\n${add}` : add });
   }
 
+  // Adds links, or retitles ones it already has (same url), keeping the
+  // rest. For agents and the librarian, which add one at a time.
+  addLinks(projectId: string, links: LinkInput[]): Project {
+    const rec = this.must(projectId);
+    const add = checkLinks(links);
+    const next = rec.links.map((l) => add.find((a) => sameUrl(a.url, l.url)) ?? l);
+    for (const l of add) if (!next.some((n) => sameUrl(n.url, l.url))) next.push(l);
+    return this.update(projectId, { links: next });
+  }
+
+  removeLinks(projectId: string, urls: string[]): Project {
+    const rec = this.must(projectId);
+    return this.update(projectId, { links: rec.links.filter((l) => !urls.some((u) => sameUrl(u, l.url))) });
+  }
+
   merge(projectId: string, intoId: string): Project {
     const from = this.must(projectId);
     const into = this.must(intoId);
@@ -306,6 +331,7 @@ export class Projects {
       goals: into.goals || from.goals,
       state: into.state || from.state,
       notes: [into.notes.trim(), from.notes.trim() && `## From ${from.title}\n\n${from.notes.trim()}`].filter(Boolean).join('\n\n'),
+      links: [...into.links, ...from.links.filter((l) => !into.links.some((i) => sameUrl(i.url, l.url)))].slice(0, LINKS_MAX),
       updatedAt: now,
     };
     this.items.set(into.id, kept);
@@ -544,6 +570,37 @@ function checkText(name: string, text: unknown, max: number): string {
   return text.trim();
 }
 
+// Each a web address with a title (the host when there's none), no two the
+// same, at most LINKS_MAX.
+export function checkLinks(links: unknown): ProjectLink[] {
+  if (!Array.isArray(links)) throw bad('links must be a list of { title, url }');
+  const out: ProjectLink[] = [];
+  for (const l of links) {
+    if (!l || typeof l !== 'object') throw bad('links must be a list of { title, url }');
+    const { title, url } = l as Record<string, unknown>;
+    if (typeof url !== 'string') throw bad('A link needs a url.');
+    let parsed: URL;
+    try {
+      parsed = new URL(url.trim());
+    } catch {
+      throw bad(`${url} isn't a web address.`);
+    }
+    if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') throw bad(`${url} isn't a web address.`);
+    if (title !== undefined && title !== null && typeof title !== 'string') throw bad('A link\'s title must be text.');
+    const name = (typeof title === 'string' ? title.trim() : '') || parsed.host.replace(/^www\./, '');
+    if (out.some((o) => sameUrl(o.url, parsed.href))) continue;
+    out.push({ title: name.slice(0, TITLE_MAX), url: parsed.href });
+  }
+  if (out.length > LINKS_MAX) throw bad(`A project has at most ${LINKS_MAX} links: the few places Mike goes for it.`);
+  return out;
+}
+
+// The same page, give or take a trailing slash.
+function sameUrl(a: string, b: string): boolean {
+  const norm = (u: string) => u.trim().replace(/\/+$/, '').toLowerCase();
+  return norm(a) === norm(b);
+}
+
 function clip(text: string, max: number): string {
   const t = text.trim();
   return t.length > max ? t.slice(0, Math.max(0, max - 1)).trimEnd() + '…' : t;
@@ -566,6 +623,7 @@ export function projectMethods(projects: Projects): Record<string, (p: Record<st
         goals: str(p, 'goals'),
         state: str(p, 'state'),
         notes: str(p, 'notes'),
+        links: links(p),
         threadIds: strList(p, 'threadIds'),
         by: 'mike',
       }),
@@ -577,6 +635,7 @@ export function projectMethods(projects: Projects): Record<string, (p: Record<st
         goals: str(p, 'goals'),
         state: str(p, 'state'),
         notes: str(p, 'notes'),
+        links: links(p),
         archived: bool(p, 'archived'),
       }),
     }),
@@ -598,6 +657,11 @@ function str(p: Record<string, unknown>, k: string): string | undefined {
   if (v === undefined || v === null) return undefined;
   if (typeof v !== 'string') throw bad(`${k} must be a string`);
   return v;
+}
+
+function links(p: Record<string, unknown>): ProjectLink[] | undefined {
+  const v = p.links;
+  return v === undefined || v === null ? undefined : checkLinks(v);
 }
 
 function reqStr(p: Record<string, unknown>, k: string): string {
@@ -622,11 +686,11 @@ function bool(p: Record<string, unknown>, k: string): boolean | undefined {
 
 // The project tools' view of Projects, refusing while `blocked` says why
 // (a draining runner during a handover).
-export function guardProjects<K extends 'list' | 'get' | 'find' | 'create' | 'update' | 'appendNote' | 'changeMembership' | 'chooseIcon'>(
+export function guardProjects<K extends 'list' | 'get' | 'find' | 'create' | 'update' | 'appendNote' | 'addLinks' | 'removeLinks' | 'changeMembership' | 'chooseIcon'>(
   projects: Projects,
   blocked: () => string | undefined,
 ): Pick<Projects, K> {
-  const writes = new Set(['create', 'update', 'appendNote', 'changeMembership', 'chooseIcon']);
+  const writes = new Set(['create', 'update', 'appendNote', 'addLinks', 'removeLinks', 'changeMembership', 'chooseIcon']);
   return new Proxy(projects, {
     get(target, prop, receiver) {
       const v = Reflect.get(target, prop, receiver);

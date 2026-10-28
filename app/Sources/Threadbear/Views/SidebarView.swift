@@ -137,6 +137,9 @@ struct SectionHeading: View {
     /// A small SF Symbol before the title, so the groups can be told apart
     /// at a glance.
     var icon: String? = nil
+    /// A project's own icon in place of the symbol: a project's links in
+    /// Highlights.
+    var project: Project? = nil
     /// Given for a heading that folds its rows away when clicked.
     var fold: Fold? = nil
     @State private var hovering = false
@@ -167,7 +170,9 @@ struct SectionHeading: View {
         // runs from the title to the edge so the groups read as separate
         // (Mike asked 27 Oct).
         HStack(spacing: zoomed(6)) {
-            if let icon {
+            if let project {
+                ProjectIconView(project: project, size: 14)
+            } else if let icon {
                 Image(systemName: icon)
                     .font(.system(size: zoomed(11), weight: .medium))
                     .frame(width: zoomed(14))

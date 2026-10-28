@@ -296,7 +296,7 @@ function setupFull(opts: { heads?: { threadId: string; lastSeq: number }[]; take
       list: (i) => h.runner.list(i),
       get: (id) => h.runner.get(id),
       events: (id, o) => h.runner.events(id, o),
-      listProjects: () => [{ id: 'p1', title: 'Threadbear', folders: ['/w'], goals: 'g', state: 's', notes: 'n', createdBy: 'mike', createdAt: '2026-10-27T00:00:00.000Z', updatedAt: '2026-10-27T00:00:00.000Z', threadCount: 1 }],
+      listProjects: () => [{ id: 'p1', title: 'Threadbear', folders: ['/w'], goals: 'g', state: 's', notes: 'n', links: [], createdBy: 'mike', createdAt: '2026-10-27T00:00:00.000Z', updatedAt: '2026-10-27T00:00:00.000Z', threadCount: 1 }],
       listSchedules: () => [{ id: 's1', title: 'Nightly', text: 'go', cron: '0 3 * * *', whenText: 'every day at 3 am', paused: false, createdAt: '2026-10-27T00:00:00.000Z', updatedAt: '2026-10-27T00:00:00.000Z', runs: 2, lastRun: { at: '2026-10-27T03:00:00.000Z', outcome: 'sent', threadId: 't9' } }],
       listAccounts: () => [{ id: 'claude-3', provider: 'claude', title: 'three@example.com', configDir: '/tmp/three', models: [{ id: 'x', title: 'X' }] as never, usage: { windows: [{ kind: 'five_hour', title: '5-hour', remainingPercent: 80.5 }], readAt: '2026-10-27T00:00:00.000Z', source: 'live' } }],
     },

@@ -56,6 +56,19 @@ public struct HighlightSections: Sendable, Hashable {
     }
 }
 
+/// The links of the projects a thread is in, for the top of its
+/// Highlights: in the thread's order, leaving out archived projects and
+/// ones with no links.
+public enum ProjectLinkGroups {
+    public static func build(thread: ThreadSummary, project: (String) -> Project?) -> [Project] {
+        var seen = Set<String>()
+        return thread.projects.compactMap { member in
+            guard seen.insert(member.id).inserted, let p = project(member.id), !p.archived, !p.links.isEmpty else { return nil }
+            return p
+        }
+    }
+}
+
 /// Where a click on a highlight, a list panel's row or a transcript link
 /// opens it: in the pane beside the transcript, or out in the default app.
 public enum PreviewRules {

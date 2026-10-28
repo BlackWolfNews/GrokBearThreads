@@ -22,6 +22,7 @@ import type { LibrarianEntry, LibrarianJob, LibrarianOutcome, LibrarianReason, L
 import { ErrorCode, RpcError } from './protocol.ts';
 import type { ThreadRecord } from './store.ts';
 import type { ProjectRecord, Projects } from './projects.ts';
+import { LINKS_MAX } from './projects.ts';
 import { atomicWriteFileSync, readJsonSync } from './fsutil.ts';
 import { findUp, isInside } from './patches.ts';
 import { SYMBOLS, fileHash, findIcon, storeIcon } from './project-icons.ts';
@@ -85,6 +86,7 @@ type Answer = {
   new?: unknown;
   state?: unknown;
   addFolders?: unknown;
+  links?: unknown;
   thread?: unknown;
   why?: unknown;
 };
@@ -392,7 +394,7 @@ export class Librarian {
       this.note(job, 'failed', "The model's answer wasn't JSON", undefined, res.costUsd);
       return;
     }
-    this.apply(job, rec, answer, res.costUsd);
+    this.apply(job, rec, answer, res.costUsd, prompt);
     this.markLooked(rec, job);
   }
 
@@ -403,7 +405,7 @@ export class Librarian {
     if (!list.length) lines.push('(none yet)');
     for (const p of list) {
       const state = p.state.split('\n')[0]?.slice(0, 160);
-      lines.push(`- ${p.id} "${p.title}"; folders: ${p.folders.map((f) => this.tilde(f)).join(', ') || 'none'}` + (p.goals ? `; goals: ${p.goals.slice(0, 200).replace(/\s+/g, ' ')}` : '') + (state ? `; state: ${state}` : ''));
+      lines.push(`- ${p.id} "${p.title}"; folders: ${p.folders.map((f) => this.tilde(f)).join(', ') || 'none'}` + (p.goals ? `; goals: ${p.goals.slice(0, 200).replace(/\s+/g, ' ')}` : '') + (state ? `; state: ${state}` : '') + (p.links.length ? `; links: ${p.links.map((l) => l.url).join(' ')}` : ''));
     }
     lines.push('');
     lines.push(`Thread "${rec.title}", in ${this.tilde(rec.cwd)}${this.isRepo(rec.cwd) ? '' : ' (not a repo: a catch-all folder)'}`);
@@ -423,7 +425,9 @@ export class Librarian {
     return lines.join('\n');
   }
 
-  private apply(job: LibrarianJob, rec: ThreadRecord, a: Answer, costUsd?: number): void {
+  // `seen` is the prompt the look was given: a link must be in it, so the
+  // model can't make one up.
+  private apply(job: LibrarianJob, rec: ThreadRecord, a: Answer, costUsd?: number, seen = ''): void {
     const live = new Map(this.projects.list().map((p) => [p.id, p]));
     // A thread its agent or Mike filed is theirs to file: the look only
     // keeps its line and the state of the projects it's in.
@@ -488,6 +492,28 @@ export class Librarian {
         if (!add.length) continue;
         this.projects.update(pid, { folders: [...p.folders, ...add] });
         said.push(`Added ${add.map((f) => this.tilde(f)).join(', ')} to ${p.title}`);
+        ids.add(pid);
+        bump('updated');
+      }
+    }
+    // Places Mike will keep going back to (a live site, an admin page),
+    // added and never taken away: links are Mike's and agents' to prune.
+    if (a.links && typeof a.links === 'object') {
+      for (const [pid, list] of Object.entries(a.links as Record<string, unknown>)) {
+        const p = this.projects.record(pid);
+        if (!p || !member.has(pid) || !Array.isArray(list)) continue;
+        const add = list.filter(
+          (l): l is { title?: string; url: string } =>
+            !!l && typeof l === 'object' && typeof (l as { url?: unknown }).url === 'string' && seen.includes((l as { url: string }).url) && !p.links.some((h) => h.url.replace(/\/+$/, '') === (l as { url: string }).url.replace(/\/+$/, '')),
+        );
+        if (!add.length || p.links.length + add.length > LINKS_MAX) continue;
+        try {
+          this.projects.addLinks(pid, add.map((l) => ({ title: typeof l.title === 'string' ? l.title : undefined, url: l.url })));
+        } catch (e) {
+          this.log.warn('librarian could not add links', { projectId: pid, error: String(e) });
+          continue;
+        }
+        said.push(`Added ${add.length === 1 ? 'a link' : `${add.length} links`} to ${p.title}`);
         ids.add(pid);
         bump('updated');
       }
@@ -769,10 +795,13 @@ Reply with JSON only, no prose and no code fence:
  "new": null or {"title": "short name, as Mike would say it", "folders": ["~/path of its repo(s)"], "goals": "one or two sentences: what it's for", "state": "one or two sentences: where it's up to"},
  "state": {"<project id>": "the project's new state"} only when this thread changed where the whole project stands (shipped or finished something, made a decision, hit a blocker), else {},
  "addFolders": {"<project id>": ["~/path"]} for repos this thread shows belong to a project it's in, else {},
+ "links": {"<project id>": [{"title": "Live site", "url": "https://..."}]} for lasting places of a project it's in that the messages give and the project doesn't list yet, else {},
  "thread": "one or two plain sentences on where this thread itself is up to: what it did or found, and what it's waiting on or doing next",
  "why": "one short line"}
 
 Folders are repos the work lives in (the thread's folder when it's a repo, and the repos it edited), never a catch-all folder. State is two to four plain sentences about the whole project, not this thread: what's done, what's next, what's blocked. Start from the current state, keep what's still true and fold the change in; don't replace it with this thread's details. Ideas and plans that aren't built yet don't change the state.
+
+Links are the few places Mike keeps going back to for a project: its live site, admin page, dashboard, store listing. Copy the url exactly from the messages and give it a short title ("Live site", "Admin", "App Store"). Never a pull request, commit, issue, docs page, localhost, file or one-off page.
 
 The thread line is for Mike glancing at the thread later: concrete, in his plain words, no more than 40 words. Say who's waiting on whom ("Waiting on Mike to pick a design", "Fixing the last failing test").`;
 

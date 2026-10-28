@@ -272,6 +272,8 @@ type Project = {
   goals: string         // a few lines: what it's for, what done looks like
   state: string         // a few lines: where it's up to, what's next
   notes: string         // markdown: decisions, gotchas, commands, links
+  links: ProjectLink[]  // the places Mike goes for it, at most 8 (see
+                        // Projects, "Links"); [] from a runner before them
   createdBy: "mike" | "agent" | "librarian"
   createdByThread?: string // the thread whose agent or look made it
   createdAt: string
@@ -281,6 +283,13 @@ type Project = {
   icon?: ProjectIcon    // absent until the librarian has found or picked one
   threadCount: number   // threads in it, put away ones included
   lastActivityAt?: string // its newest thread's lastActivityAt
+}
+
+// A place Mike keeps going back to for a project: its live site, admin
+// page, dashboard, store listing or repo.
+type ProjectLink = {
+  title: string         // short: "Live site", "Admin"; the host when not given
+  url: string           // http or https
 }
 
 // A project's icon: a picture, else an SF Symbol (see Projects, "Icons").
@@ -605,8 +614,8 @@ replaces whatever the deltas built up.
 | `schedules.preview` | `{ cron?: string, at?: string, timezone?: string, count?: number }` | `{ whenText: string, runs: string[] }`, the next `count` (default 5, at most 20) times it would run, for an editor to show as someone types. `-32602` with the reason for a cron or zone it can't read |
 | `projects.list` | `{ archived?: boolean }` | `{ projects: Project[] }`, newest `lastActivityAt` first. Archived ones only with `archived: true` (then all of them) |
 | `projects.get` | `{ projectId }` | `{ project: Project, threadIds: string[] }`, its threads newest activity first, put away ones included |
-| `projects.create` | `{ title: string, folders?: string[], goals?, state?, notes?, threadIds?: string[] }` | `{ project: Project }`, made by Mike (`createdBy: "mike"`). `threadIds` are put in it, pinned. Folders must exist (`-32602` otherwise) |
-| `projects.update` | `{ projectId, title?, folders?: string[], goals?, state?, notes?, archived?: boolean }` | `{ project: Project }`. Replaces what's given. A change of folders reloads its threads' patches |
+| `projects.create` | `{ title: string, folders?: string[], goals?, state?, notes?, links?: { title?, url }[], threadIds?: string[] }` | `{ project: Project }`, made by Mike (`createdBy: "mike"`). `threadIds` are put in it, pinned. Folders must exist (`-32602` otherwise) |
+| `projects.update` | `{ projectId, title?, folders?: string[], goals?, state?, notes?, links?: { title?, url }[], archived?: boolean }` | `{ project: Project }`. Replaces what's given. A link that isn't http(s), or more than 8, is `-32602`. A change of folders reloads its threads' patches |
 | `projects.setIcon` | `{ projectId, path?: string, symbol?: string }` | `{ project: Project }`. Mike's choice: `path` a picture on this Mac (PNG, JPEG, WebP, SVG, ICNS or ICO, copied in), or `symbol` an SF Symbol name; neither puts it back to automatic, and the librarian finds one again within seconds. `-32602` for a missing file or a name that isn't a symbol's |
 | `projects.merge` | `{ projectId, intoId }` | `{ project: Project }` (the one kept). Folders and threads move over, notes are joined, and `projectId` is deleted |
 | `projects.delete` | `{ projectId }` | `{}`. Its threads leave it; nothing else is touched |
@@ -1342,6 +1351,17 @@ one small-model call (feature `projects`, in the budget, not while paused,
 never for a private folder) choosing from a fixed list. One Mike or an
 agent chose (`projects.setIcon`, `update_project`'s `icon`) is never
 changed by the librarian.
+
+**Links.** A project keeps up to 8 links: the places Mike keeps going
+back to for it (its live site, admin page, dashboard, store listing), not
+one-off pages or pull requests. The app shows them at the top of each of
+its threads' Highlights, under the project's icon and title. Agents set
+them with `create_project` and `update_project` (`links` replaces them,
+`addLinks` adds or retitles by url, `removeLinks` takes some off), and
+Mike with `projects.update`. The librarian's look can add ones the
+thread's messages give for a project the thread is in (`links` in its
+answer): only a url that's in what it was sent, never more than 8, and it
+never takes one away. Merging two projects keeps both lots.
 
 **Agents** have tools for projects (see Tools for agents):
 `list_projects`, `read_project`, `create_project`, `update_project`,

@@ -214,6 +214,7 @@ export type Project = {
   goals: string;
   state: string;
   notes: string;
+  links: ProjectLink[];
   createdBy: ProjectMaker;
   createdByThread?: string;
   createdAt: string;
@@ -224,6 +225,10 @@ export type Project = {
   threadCount: number;
   lastActivityAt?: string;
 };
+
+// A place Mike goes for a project: its live site, admin page, dashboard,
+// store listing or repo. Shown at the top of its threads' Highlights.
+export type ProjectLink = { title: string; url: string };
 
 // What a project shows as its icon: a picture found in its folders (or
 // chosen), else an SF Symbol. Absent until the librarian has found one.
