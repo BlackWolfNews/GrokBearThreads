@@ -311,7 +311,7 @@ app is a later decision and doesn't depend on any of this.
 Mike, 27 Oct: shape A, and make the project now. Full conversation text
 (the 27 Oct option B) stays a later flag.
 
-## 5. What's built (steps 1 to 4) and how to work on it
+## 5. What's built (steps 1 to 5) and how to work on it
 
 **The Convex project** is `threadbear` on team `mikec`
 (https://dashboard.convex.dev/t/mikec/threadbear). Its code is `convex/`
@@ -411,9 +411,11 @@ Queries:
   kind: "question", questions: Question[] }` with the protocol's
   `Question` shape.
 - `phone:thread({ token, threadId })` → `{ thread, messages: [{ seq, role,
-  text, origin?, at }] }`, oldest first: the newest 20 text messages
-  (`origin` is `"phone"` for one sent from the phone, `"schedule"` or
-  `"runner"` as in the protocol).
+  text, origin?, at, pagedAt? }] }`, oldest first: the newest 20 text
+  messages plus any paged ones (`origin` is `"phone"` for one sent from
+  the phone, `"schedule"` or `"runner"` as in the protocol). The row's
+  `earliestSeq` is the seq of the thread's first text message: while the
+  oldest message the phone has is newer than that, there's more to load.
 - `phone:command({ token, commandId })` → `{ state: "pending" | "taken" |
   "done" | "failed", note?, threadId? }`.
 
@@ -440,6 +442,11 @@ within a second or two while it's online (state `taken`, then `done` or
 - `phone:create({ token, text, runnerId?, cwd?, accountId?, model? })`.
   With no `runnerId`, the newest runner seen in the last 3 minutes, or
   `"any"` (the first runner back takes it).
+- `phone:loadEarlier({ token, threadId, beforeSeq })`: the runner writes
+  up to 50 text messages before `beforeSeq` as paged rows, then the
+  command is `done`; `phone:thread` then returns them too. Paged rows go
+  after a day, so the phone should ask again rather than expect them to
+  stay.
 - `phone:registerDevice({ token, apnsToken, environment: "sandbox" |
   "production" })`. A push arrives when a thread starts needing Mike,
   as `{ aps: { alert: { title, body }, sound: "default", "thread-id":

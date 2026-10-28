@@ -28,6 +28,7 @@ export const threadFields = {
   costUsd: v.optional(v.number()),
   projects: v.optional(v.array(v.object({ id: v.string(), title: v.string() }))),
   working: v.optional(v.string()), // the working line: what the CLI is doing in the background
+  earliestSeq: v.optional(v.number()), // seq of the thread's first text message, for "Load earlier messages"
   // The approval or question the thread is waiting on, if any (step 2).
   pendingApproval: v.optional(
     v.union(
@@ -99,7 +100,7 @@ export default defineSchema({
   commands: defineTable({
     runnerId: v.string(), // or "any"
     threadId: v.optional(v.string()),
-    kind: v.union(v.literal('send'), v.literal('respond'), v.literal('update'), v.literal('create')),
+    kind: v.union(v.literal('send'), v.literal('respond'), v.literal('update'), v.literal('create'), v.literal('page')),
     args: v.any(),
     state: v.union(v.literal('pending'), v.literal('taken'), v.literal('done'), v.literal('failed')),
     note: v.optional(v.string()),

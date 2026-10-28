@@ -34,6 +34,10 @@ export const MESSAGE_BATCH = 100;
 export const MESSAGES_KEPT = 20;
 // A message longer than this is cut on the phone; the Mac has it all.
 export const MESSAGE_CHARS = 8000;
+// Older messages per "Load earlier messages" on the phone.
+export const PAGE_SIZE = 50;
+// How many events are read back for a page or the first text message.
+const PAGE_EVENTS = 2000;
 // How many of a thread's newest events are read for the backfill at start.
 const BACKFILL_EVENTS = 300;
 const BACKOFF_MIN_MS = 5000;
@@ -94,10 +98,11 @@ export type ThreadDoc = {
   projects?: { id: string; title: string }[];
   working?: string;
   pendingApproval?: PendingApproval;
+  earliestSeq?: number;
   view: 'inbox' | 'hibernating' | 'den';
 };
 
-export type MessageDoc = { threadId: string; seq: number; role: 'user' | 'assistant'; text: string; origin?: string; at: string };
+export type MessageDoc = { threadId: string; seq: number; role: 'user' | 'assistant'; text: string; origin?: string; at: string; pagedAt?: number };
 
 // One call to the deployment's HTTP API; tests pass a fake.
 export type Post = (kind: 'mutation' | 'query', fn: string, args: Record<string, unknown>) => Promise<unknown>;
@@ -115,7 +120,7 @@ type Host = {
   onNotification(fn: (n: Notification) => void): () => void;
   list(include: ('inbox' | 'snoozed' | 'archived')[]): ThreadSummary[];
   get(threadId: string): ThreadSummary;
-  events(threadId: string, opts: { limit?: number }): { events: PersistedEvent[] };
+  events(threadId: string, opts: { afterSeq?: number; beforeSeq?: number; limit?: number }): { events: PersistedEvent[] };
   // The lists mirrored beside the threads; absent in small tests.
   listProjects?: () => Project[];
   listSchedules?: () => Schedule[];
@@ -206,7 +211,7 @@ export function defaultRunnerName(hostname = os.hostname()): string {
   return hostname.replace(/\.(local|localdomain|lan|home)$/i, '') || 'runner';
 }
 
-export function toThreadDoc(t: ThreadSummary, runnerId: string, now: number, pending?: PendingApproval): ThreadDoc {
+export function toThreadDoc(t: ThreadSummary, runnerId: string, now: number, pending?: PendingApproval, earliestSeq?: number): ThreadDoc {
   const doc: ThreadDoc = {
     threadId: t.id,
     runnerId,
@@ -234,6 +239,7 @@ export function toThreadDoc(t: ThreadSummary, runnerId: string, now: number, pen
   const working = t.background?.find((b) => !b.finished)?.description;
   if (working) doc.working = working;
   if (pending) doc.pendingApproval = pending;
+  if (earliestSeq !== undefined) doc.earliestSeq = earliestSeq;
   return doc;
 }
 
@@ -331,6 +337,7 @@ export class ConvexSync {
   private sent = new Map<string, string>(); // threadId -> the doc last written, as JSON
   private messages: MessageDoc[] = [];
   private pending = new Map<string, PendingApproval>(); // threadId -> what it waits on
+  private earliest = new Map<string, number | null>(); // threadId -> seq of its first text message (null: none yet)
   private lists: { projects?: Project[]; schedules?: Schedule[]; accounts?: Account[] } = {};
   private dirtyLists = new Set<ListName>();
   private flushTimer?: TimerHandle;
@@ -438,6 +445,7 @@ export class ConvexSync {
         this.dirty.delete(id);
         this.sent.delete(id);
         this.pending.delete(id);
+        this.earliest.delete(id);
         this.removed.add(id);
         this.scheduleFlush();
         break;
@@ -495,12 +503,29 @@ export class ConvexSync {
     // A thread that isn't waiting any more lost its approval some other
     // way (the turn ended, the runner restarted); the row mustn't keep it.
     if (t.status === 'idle' || t.status === 'error' || t.status === 'stopped') this.pending.delete(t.id);
-    const doc = toThreadDoc(t, this.runnerId, this.deps.clock.now(), this.pending.get(t.id));
+    const doc = toThreadDoc(t, this.runnerId, this.deps.clock.now(), this.pending.get(t.id), this.earliestSeq(t));
     if (this.sent.get(t.id) === JSON.stringify(doc)) {
       this.dirty.delete(t.id);
       return;
     }
     this.dirty.set(t.id, doc);
+  }
+
+  // The seq of the thread's first text message, read once from the start
+  // of its log (a thread with no text yet is asked again next time).
+  private earliestSeq(t: ThreadSummary): number | undefined {
+    const known = this.earliest.get(t.id);
+    if (typeof known === 'number') return known;
+    if (known === null && t.lastSeq === 0) return undefined;
+    let seq: number | undefined;
+    try {
+      const { events } = this.deps.runner.events(t.id, { afterSeq: 0, limit: 50 });
+      seq = events.find((e) => e.type === 'user.message' || e.type === 'assistant.text')?.seq;
+    } catch {
+      return undefined;
+    }
+    this.earliest.set(t.id, seq ?? null);
+    return seq;
   }
 
   private scheduleFlush(): void {
@@ -662,7 +687,7 @@ export class ConvexSync {
         let note: string | undefined;
         let ok = true;
         try {
-          resultThreadId = this.apply(c);
+          resultThreadId = await this.apply(c);
           this.applied++;
         } catch (e) {
           ok = false;
@@ -684,7 +709,7 @@ export class ConvexSync {
 
   // Applies one command through the runner; returns the new thread's id
   // for a create. Throws with a readable message for the phone.
-  private apply(c: Command): string | undefined {
+  private async apply(c: Command): Promise<string | undefined> {
     const host = this.deps.commands!;
     const a = c.args ?? {};
     const threadId = c.threadId;
@@ -733,6 +758,22 @@ export class ConvexSync {
           origin: 'phone',
         });
         return thread.id;
+      }
+      case 'page': {
+        // Up to PAGE_SIZE text messages before beforeSeq, written now as
+        // paged rows (not counted in the newest 20, pruned after a day).
+        const id = needThread();
+        const before = Number(a.beforeSeq);
+        if (!Number.isFinite(before) || before <= 1) throw new Error('nothing earlier');
+        const { events } = this.deps.runner.events(id, { beforeSeq: before, limit: PAGE_EVENTS });
+        const now = this.deps.clock.now();
+        const page = events
+          .map((e) => toMessageDoc(id, e))
+          .filter((m): m is MessageDoc => Boolean(m))
+          .slice(-PAGE_SIZE)
+          .map((m) => ({ ...m, pagedAt: now }));
+        await this.appendMessages(page);
+        return undefined;
       }
       default:
         throw new Error(`unknown command ${c.kind}`);

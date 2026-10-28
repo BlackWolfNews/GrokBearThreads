@@ -547,3 +547,37 @@ test('pushText says why the thread needs Mike: the question, the approval, or th
   assert.equal(long.body.length, PUSH_BODY_CHARS);
   assert.ok(long.body.endsWith('…'));
 });
+
+// ------------------------------------------------------------ paging
+
+import { PAGE_SIZE } from '../../src/sync.ts';
+
+test('paging: the row says where the thread starts, and a page command writes earlier messages as paged rows', async () => {
+  const { h, sync, calls, push } = setupFull();
+  const t = h.runner.create({ text: 'first', cwd: h.cfg.defaults.cwd, accountId: 'claude-3' }).thread;
+  const s = session(h, t.id);
+  s.init();
+  for (let i = 0; i < PAGE_SIZE + 10; i++) s.text(`i${i}`, `reply ${i}`);
+  s.result('completed');
+  await tick();
+  sync.start();
+  await sync.flushNow();
+  const rows = calls.filter((c) => c.fn === 'sync:upsertThreads').flatMap((c) => c.args.threads as ThreadDoc[]);
+  assert.equal(rows.find((d) => d.threadId === t.id)!.earliestSeq, 1, 'the first user message');
+  const before = calls.length;
+  // The phone's oldest message is reply 40 (seq 42); it asks for the ones before it.
+  const oldest = (await h.runner.events(t.id, { limit: 500 })).events.find((e) => e.type === 'assistant.text' && e.text === `reply ${PAGE_SIZE - 10}`)!;
+  push([{ commandId: 'p1', kind: 'page', threadId: t.id, args: { beforeSeq: oldest.seq }, createdAt: 1 }]);
+  await tick(10);
+  const paged = calls.slice(before).filter((c) => c.fn === 'sync:appendMessages').flatMap((c) => c.args.messages as MessageDoc[]);
+  assert.equal(paged.length, PAGE_SIZE - 10 + 1, 'everything before it: the first message and the earlier replies');
+  assert.ok(paged.every((m) => m.seq < oldest.seq && typeof m.pagedAt === 'number'));
+  assert.equal(paged[0]!.text, 'first');
+  assert.equal(paged.at(-1)!.text, `reply ${PAGE_SIZE - 11}`);
+  const finished = calls.filter((c) => c.fn === 'sync:finishCommand').map((c) => c.args);
+  assert.deepEqual(finished.map((f) => [f.commandId, f.ok]), [['p1', true]]);
+  // Nothing before the first message.
+  push([{ commandId: 'p2', kind: 'page', threadId: t.id, args: { beforeSeq: 1 }, createdAt: 2 }]);
+  await tick(10);
+  assert.deepEqual(calls.filter((c) => c.fn === 'sync:finishCommand').at(-1)!.args.note, 'nothing earlier');
+});

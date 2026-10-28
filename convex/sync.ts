@@ -157,6 +157,7 @@ const messageDoc = v.object({
   text: v.string(),
   origin: v.optional(v.string()),
   at: v.string(),
+  pagedAt: v.optional(v.number()), // the phone asked for it (loadEarlier); not counted in the newest 20, pruned after a day
 });
 
 // Adds text messages (one per persisted user.message or assistant.text,

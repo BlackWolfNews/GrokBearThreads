@@ -1333,7 +1333,7 @@ the mirror back as state. The Mac app doesn't use it.
   createdAt, lastActivityAt, snoozedUntil?, snoozedUntilRestart?,
   archivedAt?, costUsd?` (to the cent), `projects?: { id, title }[]`,
   `working?` (the first unfinished background task's description),
-  `pendingApproval?` (below) and `view` (`inbox`, `hibernating` or `den`,
+  `pendingApproval?` (below), `earliestSeq?` (Messages, below) and `view` (`inbox`, `hibernating` or `den`,
   worked out the way the app's lists are). Nothing else from
   `ThreadSummary`: no `lastSeq`, context, panels, actions, hooks or
   sub-agents, and never a tool result, diff or image. A `thread.updated`
@@ -1347,7 +1347,11 @@ the mirror back as state. The Mac app doesn't use it.
   the newest 20 per thread. At start the runner asks what the mirror has
   (`sync:messageHeads`) and sends only newer ones, the newest 20 per
   thread at most, so a first start sends them all once and a restart
-  sends what it missed.
+  sends what it missed. The row's `earliestSeq` is the seq of the
+  thread's first text message. A `page` command (the phone's
+  `loadEarlier`, with `beforeSeq`) writes up to 50 text messages before
+  that seq as paged rows (`pagedAt`), which don't count towards the 20
+  and go after a day.
 - **Approvals.** An `approval.requested` puts `{ approvalId, kind:
   "approval", name, title, options, inputSummary? }` on the thread's row
   (`inputSummary` is one line: the command, the path, or the first string
@@ -1377,7 +1381,8 @@ the mirror back as state. The Mac app doesn't use it.
   `create` give the `user.message` `origin: "phone"`. `update` takes one
   of `{ snooze: { until?, untilRestart? } }`, `{ wake }`, `{ archive }`,
   `{ unarchive }`, `{ markSeen }` or `{ title }`; `respond` is
-  `approvals.respond`'s decision, message and answers. A failed command
+  `approvals.respond`'s decision, message and answers; `page` is
+  `{ beforeSeq }` (above). A failed command
   gets `state: "failed"` and a readable `note`. A draining runner takes
   no commands. Finished commands go after a day.
 - **Failures.** A write that fails is kept and tried again after 5

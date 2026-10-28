@@ -195,6 +195,19 @@ export const create = mutation({
   },
 });
 
+// Older messages: the owning runner writes up to 50 text messages before
+// `beforeSeq` as paged rows (phone:thread then returns them too; they go
+// after a day). The row's `earliestSeq` says whether there are any.
+export const loadEarlier = mutation({
+  args: { token: v.string(), threadId: v.string(), beforeSeq: v.number() },
+  returns: v.id('commands'),
+  handler: async (ctx, { token, threadId, beforeSeq }) => {
+    await checkPhoneToken(ctx, token);
+    const t = await findThread(ctx, threadId);
+    return queue(ctx, t.runnerId, 'page', threadId, { beforeSeq });
+  },
+});
+
 export const registerDevice = mutation({
   args: { token: v.string(), apnsToken: v.string(), environment: v.union(v.literal('sandbox'), v.literal('production')) },
   returns: v.null(),
@@ -220,6 +233,6 @@ async function findThread(ctx: QueryCtx, threadId: string) {
   return t;
 }
 
-async function queue(ctx: { db: QueryCtx['db'] & { insert: any } }, runnerId: string, kind: 'send' | 'respond' | 'update' | 'create', threadId: string | undefined, args: Record<string, unknown>) {
+async function queue(ctx: { db: QueryCtx['db'] & { insert: any } }, runnerId: string, kind: 'send' | 'respond' | 'update' | 'create' | 'page', threadId: string | undefined, args: Record<string, unknown>) {
   return ctx.db.insert('commands', { runnerId, ...(threadId ? { threadId } : {}), kind, args, state: 'pending', createdAt: Date.now() });
 }
