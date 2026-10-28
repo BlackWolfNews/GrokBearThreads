@@ -284,6 +284,17 @@ enum Automation {
             return "ok"
         case "return":
             return pressReturn(window)
+        case "rename":
+            // No title: the open thread's title becomes a field, as a click
+            // does. With one: saves it, as Return in that field does.
+            guard let id = app.selection else { return "error no thread open" }
+            if let title = c["title"] as? String {
+                app.renamingThread = nil
+                app.rename(id, to: title)
+            } else {
+                app.startRenaming(id)
+            }
+            return "ok"
         case "send":
             // Types `text` (if given, replacing the draft with `replace` as
             // `type` does) and presses Return, as Mike would.

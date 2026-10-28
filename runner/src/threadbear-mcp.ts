@@ -637,6 +637,7 @@ export function buildThreadbearTools(control: ThreadControl, selfId: string, now
       {
         ...thisOrOther,
         title: z.string().optional(),
+        mikeAsked: z.boolean().optional().describe('true when Mike asked for this title. A thread Mike named himself keeps his title unless he asks for a new one.'),
         model: z.string().nullable().optional().describe('Model id, or null for the account default.'),
         effort: effortEnum.nullable().optional().describe("Reasoning effort, or null for the model's own level (ultra is Codex only)."),
         pool: z.string().nullable().optional().describe('Pool id or title to put the thread in (it moves onto one of its logins from the next turn if its current one isn\'t in it), or null or "pin" to pin it to its current login.'),
@@ -644,12 +645,15 @@ export function buildThreadbearTools(control: ThreadControl, selfId: string, now
         snooze: z.string().optional().describe('Snooze until: 30m, 2h, 1d, tomorrow, an ISO time, "restart" (until the runner next starts), or "off" to wake it.'),
         archived: z.boolean().optional().describe('true to archive, false to bring back to the inbox.'),
       },
-      handle(async ({ threadId, id: alias, title, model, effort, pool: p, permissionMode, snooze, archived }) => {
+      handle(async ({ threadId, id: alias, title, mikeAsked, model, effort, pool: p, permissionMode, snooze, archived }) => {
         const id = await resolve(threadId ?? alias);
         const stops = (snooze !== undefined && snooze.trim().toLowerCase() !== 'off') || archived === true;
         if (id === selfId && stops) throw new Error("Can't snooze or archive this thread from inside its own turn. Ask Mike to, or do it when the work is done.");
         const upd: Parameters<ThreadControl['update']>[0] = { threadId: id };
-        if (title !== undefined) upd.title = title;
+        if (title !== undefined) {
+          upd.title = title;
+          upd.titleBy = mikeAsked ? 'mike' : 'agent';
+        }
         if (model !== undefined) upd.model = model;
         if (effort !== undefined) upd.effort = effort;
         if (p !== undefined) upd.poolId = p === null || p.trim().toLowerCase() === 'pin' ? null : pool(p);

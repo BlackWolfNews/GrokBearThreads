@@ -748,6 +748,7 @@ struct ThreadMenu: View {
     let thread: ThreadSummary
 
     var body: some View {
+        Button("Rename") { app.startRenaming(thread.id) }
         SnoozeMenu(threadId: thread.id)
         if thread.snoozedUntil != nil {
             Button("Wake") { app.unsnooze(thread.id) }

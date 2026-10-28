@@ -380,6 +380,10 @@ export class RpcServer {
       case 'threads.update': {
         const upd: Parameters<Runner['update']>[0] = { threadId: reqString(p, 'threadId') };
         if (p.title !== undefined) upd.title = reqString(p, 'title');
+        if (p.titleBy !== undefined) {
+          if (p.titleBy !== 'mike' && p.titleBy !== 'agent') throw bad('titleBy must be "mike" or "agent"');
+          upd.titleBy = p.titleBy;
+        }
         if (p.cwd !== undefined) upd.cwd = reqString(p, 'cwd');
         if (p.accountId !== undefined) upd.accountId = reqString(p, 'accountId');
         if (p.poolId !== undefined) upd.poolId = p.poolId === null ? null : reqString(p, 'poolId');

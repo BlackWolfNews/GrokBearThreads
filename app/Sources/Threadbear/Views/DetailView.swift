@@ -146,25 +146,32 @@ struct ThreadMenuButton: View {
     }
 }
 
-/// One line, T3 style: the folder's name, then the title, and "Archived"
-/// for an archived thread, then its projects as chips. The full path is in
-/// the tooltip.
+/// One line: the thread's projects as icons (a folder glyph when it's in
+/// none), its title, which a click renames, and "Archived" and the like
+/// after. The folder is in the icon's tooltip; the slash and folder name
+/// that used to lead read as clutter.
 struct HeaderTitle: View {
     @Environment(AppModel.self) private var app
     let thread: ThreadSummary?
 
     var body: some View {
         if let thread {
-            HStack(spacing: zoomed(5)) {
-                Text(FolderName.short(thread.cwd))
-                    .foregroundStyle(.secondary)
+            HStack(spacing: zoomed(6)) {
+                if app.projectsSupported, !thread.projects.isEmpty {
+                    HStack(spacing: zoomed(3)) {
+                        ForEach(thread.projects) { membership in
+                            ProjectIconButton(thread: thread, membership: membership)
+                        }
+                    }
                     .layoutPriority(1)
-                Text("/")
-                    .foregroundStyle(Color(nsColor: Theme.faintText))
-                    .layoutPriority(1)
-                Text(thread.title.isEmpty ? "Untitled" : thread.title)
-                    .fontWeight(.semibold)
-                    .foregroundStyle(.primary)
+                } else {
+                    Image(systemName: "folder")
+                        .font(.system(size: TypeScale.detail))
+                        .foregroundStyle(.secondary)
+                        .tip("In \(thread.cwd.abbreviatingHome)")
+                        .layoutPriority(1)
+                }
+                ThreadTitleField(thread: thread)
                 if thread.isArchived {
                     // A quiet word here rather than a full-width band under
                     // the header, which nothing else in the window had.
@@ -183,7 +190,7 @@ struct HeaderTitle: View {
                 }
                 if let worktree = thread.worktree {
                     // Its own worktree (protocol "Worktrees"): the branch,
-                    // quietly, as the folder above is the worktree's.
+                    // quietly.
                     Text("·  \(worktree.branch)")
                         .foregroundStyle(Color(nsColor: Theme.faintText))
                         .layoutPriority(1)
@@ -194,19 +201,67 @@ struct HeaderTitle: View {
                         .padding(.leading, zoomed(4))
                         .layoutPriority(1)
                 }
-                if app.projectsSupported, !thread.projects.isEmpty {
-                    ProjectChips(thread: thread)
-                        .padding(.leading, zoomed(4))
-                        .layoutPriority(1)
-                }
             }
             .font(.system(size: TypeScale.header))
             .lineLimit(1)
             .padding(.leading, zoomed(6))
-            .tip(thread.cwd.abbreviatingHome)
         } else {
             Color.clear.frame(width: 1, height: 1)
         }
+    }
+}
+
+/// The title in the header, which turns into a field on a click. Return or
+/// clicking away saves, Escape puts it back. A name given here is Mike's,
+/// so the runner won't let a model or an agent rename it after.
+private struct ThreadTitleField: View {
+    @Environment(AppModel.self) private var app
+    let thread: ThreadSummary
+    @State private var draft = ""
+    @State private var hovering = false
+    @FocusState private var focused: Bool
+
+    private var editing: Bool { app.renamingThread == thread.id }
+
+    var body: some View {
+        if editing {
+            TextField("Title", text: $draft, prompt: Text("Thread title"))
+                .labelsHidden()
+                .textFieldStyle(.plain)
+                .fontWeight(.semibold)
+                .focused($focused)
+                .frame(minWidth: zoomed(160))
+                .onSubmit { finish(save: true) }
+                .onExitCommand { finish(save: false) }
+                .onChange(of: focused) { _, now in
+                    if !now { finish(save: true) }
+                }
+                .onAppear {
+                    draft = thread.title
+                    focused = true
+                }
+                .tip("Return saves, Escape cancels")
+        } else {
+            Text(thread.title.isEmpty ? "Untitled" : thread.title)
+                .fontWeight(.semibold)
+                .foregroundStyle(.primary)
+                .padding(.horizontal, zoomed(4))
+                .padding(.vertical, zoomed(1))
+                .background(Color.primary.opacity(hovering ? 0.06 : 0), in: RoundedRectangle(cornerRadius: zoomed(5), style: .continuous))
+                .padding(.horizontal, zoomed(-4))
+                .contentShape(Rectangle())
+                .onHover { hovering = $0 }
+                .onTapGesture { app.startRenaming(thread.id) }
+                .tip("Click to rename")
+                .accessibilityAddTraits(.isButton)
+                .accessibilityAction(named: "Rename") { app.startRenaming(thread.id) }
+        }
+    }
+
+    private func finish(save: Bool) {
+        guard editing else { return }
+        app.renamingThread = nil
+        if save { app.rename(thread.id, to: draft) }
     }
 }
 
@@ -272,24 +327,11 @@ private struct ScheduleChip: View {
     }
 }
 
-/// The thread's projects, small and grey after its title. A click opens the
-/// project's page; the context menu takes the thread out, keeps it there
-/// (for one the librarian put it in), or adds it to another. A dashed edge
+/// One of the thread's projects, as its icon before the title. A click opens
+/// the project's page; the context menu takes the thread out, keeps it there
+/// (for one the librarian put it in), or adds it to another. A dashed ring
 /// is the librarian's guess that no one has confirmed yet.
-private struct ProjectChips: View {
-    @Environment(AppModel.self) private var app
-    let thread: ThreadSummary
-
-    var body: some View {
-        HStack(spacing: zoomed(4)) {
-            ForEach(thread.projects) { membership in
-                ProjectChip(thread: thread, membership: membership)
-            }
-        }
-    }
-}
-
-private struct ProjectChip: View {
+private struct ProjectIconButton: View {
     @Environment(AppModel.self) private var app
     let thread: ThreadSummary
     let membership: ThreadProject
@@ -300,27 +342,21 @@ private struct ProjectChip: View {
 
     var body: some View {
         Button { app.openProjectPage(membership.id) } label: {
-            HStack(spacing: zoomed(4)) {
-                ProjectIconView(project: app.project(membership.id), title: title, size: 12)
-                .accessibilityHidden(true)
-                Text(title)
-            }
-                .font(.system(size: TypeScale.detail))
-                .foregroundStyle(hovering ? .primary : .secondary)
-                .padding(.leading, zoomed(4))
-                .padding(.trailing, zoomed(7))
-                .padding(.vertical, zoomed(2))
-                .background(Color.primary.opacity(hovering ? 0.08 : 0.05), in: Capsule())
+            ProjectIconView(project: app.project(membership.id), title: title, size: 16)
+                .accessibilityLabel(title)
+                .padding(zoomed(2))
+                .background(Color.primary.opacity(hovering ? 0.08 : 0), in: RoundedRectangle(cornerRadius: zoomed(5), style: .continuous))
                 .overlay {
                     if guessed {
-                        Capsule().strokeBorder(Color.secondary.opacity(0.5), style: StrokeStyle(lineWidth: 0.75, dash: [2.5, 2]))
+                        RoundedRectangle(cornerRadius: zoomed(5), style: .continuous)
+                            .strokeBorder(Color.secondary.opacity(0.5), style: StrokeStyle(lineWidth: 0.75, dash: [2.5, 2]))
                     }
                 }
-                .contentShape(Capsule())
+                .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .onHover { hovering = $0 }
-        .tip(guessed ? "The librarian put this thread in \(title). Right-click to keep it there or take it out." : "Open \(title)")
+        .tip(guessed ? "The librarian put this thread in \(title). Right-click to keep it there or take it out. In \(thread.cwd.abbreviatingHome)" : "\(title), in \(thread.cwd.abbreviatingHome). Click to open the project")
         .contextMenu {
             Button("Open \(title)") { app.openProjectPage(membership.id) }
             Divider()

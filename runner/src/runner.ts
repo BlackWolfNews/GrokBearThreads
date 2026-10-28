@@ -2466,6 +2466,10 @@ export class Runner {
   update(params: {
     threadId: string;
     title?: string;
+    // Who the title is from. Mike's (the default: the app, tb) sticks: an
+    // agent can't rename it after, unless it says Mike asked it to and
+    // passes 'mike' itself.
+    titleBy?: 'mike' | 'agent';
     cwd?: string;
     accountId?: string;
     // null pins the thread to its current login; a pool id puts it in that
@@ -2480,6 +2484,10 @@ export class Runner {
   }): { thread: ThreadSummary } {
     const st = this.mustGet(params.threadId);
     const { rec, rt } = st;
+    // Checked before anything changes, so a refused rename changes nothing else either.
+    if (params.title !== undefined && params.titleBy === 'agent' && rec.titleByMike && params.title.trim() !== rec.title) {
+      throw new RpcError(ErrorCode.badParams, `Mike named this thread "${rec.title}" himself, so it keeps that title. Only rename it if he asks you to.`);
+    }
     let release = false;
     let stop = false;
     const pool = typeof params.poolId === 'string' && params.accountId === undefined ? this.poolById(params.poolId) : undefined;
@@ -2501,6 +2509,7 @@ export class Runner {
     if (params.title !== undefined) {
       rec.title = params.title.trim().slice(0, 200) || rec.title;
       rec.titleSet = true;
+      if (params.titleBy !== 'agent') rec.titleByMike = true;
     }
     if (params.cwd !== undefined && !params.cwd.trim()) throw new RpcError(ErrorCode.badParams, 'cwd must not be blank');
     const newCwd = params.cwd !== undefined ? path.resolve(expandHome(params.cwd.trim())) : undefined;

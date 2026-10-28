@@ -283,6 +283,29 @@ test('`id` works as a thread id, and a missing one is an error rather than "this
   assert.equal(h.runner.list().length, 2);
 });
 
+test("update_thread leaves a title Mike gave alone unless he asked for the new one", async () => {
+  const h = makeHarness();
+  const { thread: me } = start(h, 'Me');
+  const { thread: other } = start(h, 'Other');
+  const t = tools(h, me.id);
+  // An agent's title doesn't stop a later agent rename.
+  await t.call('update_thread', { id: other.id, title: 'Agent name' });
+  await t.call('update_thread', { id: other.id, title: 'Better agent name' });
+  assert.equal(h.runner.get(other.id).title, 'Better agent name');
+  // Mike renames it in the app (threads.update, no titleBy).
+  h.runner.update({ threadId: other.id, title: 'Mike name' });
+  const refused = await t.call('update_thread', { id: other.id, title: 'Agent again', snooze: '2h' });
+  assert.equal(refused.error, true);
+  assert.match(refused.text, /Mike named this thread "Mike name" himself/);
+  assert.equal(h.runner.get(other.id).title, 'Mike name');
+  assert.equal(h.runner.get(other.id).snoozedUntil, undefined, 'nothing else in the refused call changed');
+  // The same title, or one Mike asked for, goes through.
+  assert.equal((await t.call('update_thread', { id: other.id, title: 'Mike name', snooze: 'off' })).error, false);
+  assert.equal((await t.call('update_thread', { id: other.id, title: 'Asked for', mikeAsked: true })).error, false);
+  assert.equal(h.runner.get(other.id).title, 'Asked for');
+  assert.equal((await t.call('update_thread', { id: other.id, title: 'Sneaky' })).error, true, 'still his');
+});
+
 test('the delete approval names the thread', async () => {
   const h = makeHarness();
   const { thread: other } = start(h, 'Old experiment');

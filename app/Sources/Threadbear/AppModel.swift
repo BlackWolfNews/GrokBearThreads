@@ -34,6 +34,9 @@ final class AppModel {
     var runnerVersion = ""
     var accounts: [Account] = []
     var defaults = RunnerDefaults(cwd: NSString("~/dev/me/misc").expandingTildeInPath, accountId: "claude-main")
+    /// The thread whose title is a field in the header just now (Rename,
+    /// or a click on the title).
+    var renamingThread: String?
     var threads: [String: ThreadSummary] = [:] {
         didSet {
             refreshDockBadge()
@@ -808,6 +811,30 @@ final class AppModel {
             do {
                 threads[threadId] = try await client.updateThread(threadId, update)
             } catch {
+                show(error)
+            }
+        }
+    }
+
+    /// Opens the thread if it isn't, and makes its title in the header a field.
+    func startRenaming(_ threadId: String? = nil) {
+        guard let threadId = threadId ?? selection, threads[threadId] != nil else { return }
+        if selection != threadId { select(threadId) }
+        renamingThread = threadId
+    }
+
+    /// Mike's own name for a thread, from the header. The runner keeps it:
+    /// no model title or agent replaces it unless he asks (protocol
+    /// `threads.update`, `titleBy`). Shown at once, put back if it fails.
+    func rename(_ threadId: String, to title: String) {
+        let title = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let client, let before = threads[threadId], !title.isEmpty, title != before.title else { return }
+        threads[threadId]?.title = title
+        Task {
+            do {
+                threads[threadId] = try await client.updateThread(threadId, ThreadUpdate(title: title))
+            } catch {
+                if threads[threadId]?.title == title { threads[threadId]?.title = before.title }
                 show(error)
             }
         }
