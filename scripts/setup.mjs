@@ -184,9 +184,10 @@ async function project() {
     runOrFail(v.existing ? 'Selecting the Convex project' : 'Creating the Convex project', npx, args);
     ok(`project ${v.project}`);
   } else ok('this clone already has a Convex project (.env.local)');
-  if (dry) return todo('create its production deployment'), undefined;
+  if (dry) return todo(`create its production deployment${(v.region ?? nearestRegion()) ? ` in ${v.region ?? nearestRegion()}` : ''}`), undefined;
   const args = ['convex', 'deployment', 'create', 'production', '--type', 'prod', '--default'];
-  if (v.region) args.push('--region', v.region);
+  const region = v.region ?? nearestRegion();
+  if (region) args.push('--region', region);
   const made = run(npx, args);
   const text = `${made.stdout}\n${made.stderr}`;
   let url = text.match(/https:\/\/[a-z0-9-]+(?:\.[a-z0-9-]+)?\.convex\.cloud/)?.[0];
@@ -235,6 +236,17 @@ async function keys(urlFromProject) {
     }
   }
   return url;
+}
+
+// The Convex region nearest this Mac, from its time zone, so the phone and
+// the website aren't a round trip across the world away (an agent-run install
+// on Tinker Desk landed in the US default, 28 Oct). Undefined leaves Convex's
+// default (the US). --region overrides it.
+function nearestRegion() {
+  const zone = Intl.DateTimeFormat().resolvedOptions().timeZone ?? '';
+  if (/^(Australia|Pacific\/(Auckland|Fiji|Guam|Port_Moresby)|Asia\/(Singapore|Jakarta|Makassar|Jayapura|Manila|Tokyo|Seoul|Hong_Kong|Shanghai|Taipei|Kuala_Lumpur|Bangkok|Ho_Chi_Minh))/.test(zone)) return 'aws-ap-southeast-2';
+  if (/^(Europe|Africa|Atlantic\/(Reykjavik|Canary|Madeira|Azores))/.test(zone)) return 'aws-eu-west-1';
+  return undefined;
 }
 
 // The team to use when none was given: the only one there is. With several,
