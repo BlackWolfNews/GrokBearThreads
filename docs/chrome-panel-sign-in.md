@@ -1,22 +1,27 @@
 # Sign in to the Convex panel through Chrome
 
-In the Convex panel's bar, click the person-and-key button, **Sign in
-through Chrome**. The panel also has a Reload button.
+When Convex needs you to sign in, the panel shows a large, centred
+**Sign in through Chrome** button. **Sign in here instead** opens the
+embedded form. The panel's bar keeps a smaller sign-in button for changing
+accounts and a Reload button.
 
-The first time:
+The sign-in window lists the steps, each with its own button. The first
+time:
 
-1. Click **Set up Chrome extension**. Threadbear puts the extension in
-   `~/Library/Application Support/Threadbear/ChromeSignIn` and shows the
-   folder in Finder.
-2. In Chrome, open `chrome://extensions`, enable **Developer mode**, click
-   **Load unpacked**, and select that folder. Its name in Chrome is
-   **Threadbear Convex Sign-in**.
-3. Return to Threadbear and click **Continue in Chrome**.
-4. On the page that opens, click Chrome's puzzle piece, then **Threadbear
-   Convex Sign-in**. Complete the normal Convex login. When Chrome says
-   “Returning to Threadbear”, return to the app and close the sign-in sheet.
+1. **Add the extension to Chrome (one time only).** Open
+   `chrome://extensions` in Chrome (**Copy chrome://extensions** puts the
+   address on the clipboard), turn on **Developer mode**, click **Load
+   unpacked** and pick the folder **Show folder in Finder** reveals,
+   `~/Library/Application Support/Threadbear/ChromeSignIn`. Its name in
+   Chrome is **Threadbear Convex Sign-in**.
+2. **Open the Convex login in Chrome** with **Open in Chrome**.
+3. On the page that opens, click Chrome's puzzle piece, then **Threadbear
+   Convex Sign-in**, and log in to Convex as normal. The panel signs in
+   by itself; close Chrome's tab and click **Done**.
 
-Later sign-ins start at step 3. The panel keeps its own session between
+Once a sign-in has come back, the window remembers the extension is there
+and shows only the last two steps (**Set up the extension again** brings
+step 1 back). The panel keeps its own session between
 app launches; other Convex panels use the same website data store. Reload
 an already-open panel if it is still showing the login page.
 

@@ -1264,7 +1264,11 @@ and an unknown `kind` as a page if it has a `url`.
 
 ### Convex panel sign-in on the Mac
 
-The Convex panel offers **Sign in through Chrome**. This is local to the
+When the hosted dashboard redirects to Convex's sign-in page, the Mac
+panel shows a centred **Sign in through Chrome** button. **Sign in here
+instead** reveals the embedded form; the small bar button remains available
+after sign-in to change accounts. The dashboard reappears when the page
+returns to its authenticated destination. This is local to the
 Mac app, with no runner RPC or credentials in thread events. The companion
 extension in `app/Sources/Threadbear/Resources/ChromeSignIn` must be loaded
 in Chrome once. The app opens a short-lived page on `127.0.0.1` in Chrome;

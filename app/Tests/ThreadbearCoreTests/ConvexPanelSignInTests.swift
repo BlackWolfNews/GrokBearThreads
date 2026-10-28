@@ -5,6 +5,15 @@ final class ConvexPanelSignInTests: XCTestCase {
     private let dashboard = URL(string: "https://dashboard.convex.dev/d/quick-fox-77?tab=data")!
     private let nonce = String(repeating: "a", count: 64)
 
+    func testRecognizesTheConvexLoginWithoutCoveringTheDashboard() {
+        for address in ["https://auth.convex.dev/sign-in", "https://auth.convex.dev/email-verification?state=fake", "https://dashboard.convex.dev/api/auth/login?returnTo=%2Fd%2Fquick-fox-77", "https://dashboard.convex.dev/login-error"] {
+            XCTAssertTrue(ConvexPanelSignIn.isLoginPage(URL(string: address)!), address)
+        }
+        for address in ["https://dashboard.convex.dev/d/quick-fox-77", "https://dashboard.convex.dev/t/my-team", "https://dashboard.convex.dev/api/auth/callback?code=fake", "http://auth.convex.dev/sign-in", "https://auth.convex.dev.evil.test/sign-in", "https://other.test/sign-in", "http://127.0.0.1:6790"] {
+            XCTAssertFalse(ConvexPanelSignIn.isLoginPage(URL(string: address)!), address)
+        }
+    }
+
     func testOnlyHostedConvexDashboardOffersTheBridge() {
         XCTAssertNotNil(ConvexPanelSignIn(dashboardURL: dashboard, nonce: nonce))
         for address in ["http://dashboard.convex.dev", "https://dashboard.convex.dev.evil.test", "https://evil.test", "http://127.0.0.1:6790", "https://dashboard.convex.dev:444", "https://user@dashboard.convex.dev", "https://dashboard.convex.dev/api/auth/callback"] {

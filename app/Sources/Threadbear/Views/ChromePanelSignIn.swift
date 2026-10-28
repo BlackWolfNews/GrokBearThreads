@@ -138,7 +138,7 @@ final class ChromePanelSignIn: ObservableObject {
         let status: String
         if valid && first[1] == flow.startPath {
             status = "200 OK"
-            text = "<h1>Sign in to Convex for Threadbear</h1><p>Click the puzzle piece in Chrome’s toolbar, then <b>Threadbear Convex Sign-in</b>. Finish signing in and Threadbear will load the dashboard in your panel.</p><p>Need the extension? Return to Threadbear and choose <b>Set up Chrome extension</b>.</p>"
+            text = "<h1>Sign in to Convex for Threadbear</h1><p>Click the puzzle piece in Chrome’s toolbar, then <b>Threadbear Convex Sign-in</b>. Finish signing in and Threadbear will load the dashboard in your panel.</p><p>Nothing happens when you click it? The extension isn’t added yet: go back to Threadbear and follow step 1 in the sign-in window.</p>"
         } else if valid, let result = flow.callback(requestTarget: first[1]) {
             callback = result
             // Consume before replying so a second connection cannot replay it.
@@ -187,51 +187,112 @@ final class ChromePanelSignIn: ObservableObject {
     }
 }
 
+/// Laid out as numbered steps with each button beside the step it belongs
+/// to, because a row of unrelated buttons left it unclear what to do first.
 struct ChromePanelSignInSheet: View {
     let dashboard: URL
     @Environment(\.dismiss) private var dismiss
     @StateObject private var session = ChromePanelSignIn()
-    @State private var setup = false
+    /// Set after the first sign-in that comes back, which proves the
+    /// extension is loaded. Until then the one-time setup step shows first.
+    @AppStorage("chromeSignInExtensionWorked") private var extensionWorked = false
+    @State private var showSetup = false
     @State private var setupError: String?
+    @State private var copied = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Text("Sign in through Chrome").font(.title2)
-            Text("Use your Chrome login to sign in to the Convex panel. Convex will save a separate session in Threadbear.")
-            if setup {
-                Text("1. Open chrome://extensions in Chrome and turn on Developer mode.\n2. Choose Load unpacked and select the ChromeSignIn folder shown in Finder.\n3. Return here and choose Continue in Chrome.")
-                    .textSelection(.enabled)
-                Text("The extension only handles fresh Convex sign-ins you start here.")
+        VStack(alignment: .leading, spacing: 18) {
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Sign in to Convex with Chrome").font(.title2.weight(.semibold))
+                Text("You log in to Convex in Chrome as usual, and a small Chrome extension hands the login back to this panel.")
                     .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            if session.finished {
+                Label("Signed in. The dashboard is loading in the panel.", systemImage: "checkmark.circle.fill")
+                    .foregroundStyle(.green)
+            } else {
+                steps
             }
             if let setupError { Text(setupError).foregroundStyle(.red) }
-            if !session.message.isEmpty { Text(session.message).textSelection(.enabled) }
             HStack {
-                Button("Set up Chrome extension") {
-                    do {
-                        let folder = try ChromePanelSignIn.extensionFolder()
-                        NSWorkspace.shared.selectFile(nil, inFileViewerRootedAtPath: folder.path)
-                        setup = true
-                    } catch { setupError = "Couldn’t prepare the extension folder. Try again." }
+                if extensionWorked && !showSetup && !session.finished {
+                    Button("Set up the extension again") { showSetup = true }
+                        .buttonStyle(.link)
+                        .tip("Show the one-time steps for adding the extension to Chrome")
                 }
-                .tip("Show the extension folder and installation steps")
                 Spacer()
                 Button(session.finished ? "Done" : "Cancel") { dismiss() }
                     .tip(session.finished ? "Close sign-in" : "Cancel this sign-in")
-                    .keyboardShortcut(.cancelAction)
-                if !session.finished {
-                    Button(session.waiting ? "Start again" : "Continue in Chrome") {
-                        session.start(dashboard: dashboard) { callback in
-                            WebPanelPool.shared.finishSignIn(callback, for: dashboard)
-                        }
-                    }
-                    .tip("Open a fresh Convex sign-in in Google Chrome")
-                    .keyboardShortcut(.defaultAction)
-                }
+                    .keyboardShortcut(session.finished ? .defaultAction : .cancelAction)
             }
         }
         .padding(24)
-        .frame(width: 570)
+        .frame(width: 520)
+        .onChange(of: session.finished) { _, done in if done { extensionWorked = true } }
         .onDisappear { session.cancel() }
+    }
+
+    @ViewBuilder private var steps: some View {
+        let setup = !extensionWorked || showSetup
+        VStack(alignment: .leading, spacing: 14) {
+            if setup {
+                SignInStep(number: 1, title: "Add the extension to Chrome (one time only)") {
+                    Text("In Chrome, go to chrome://extensions, turn on Developer mode (top right), click Load unpacked and pick the ChromeSignIn folder.")
+                        .textSelection(.enabled)
+                    HStack {
+                        Button(copied ? "Copied" : "Copy chrome://extensions") {
+                            NSPasteboard.general.clearContents()
+                            NSPasteboard.general.setString("chrome://extensions", forType: .string)
+                            copied = true
+                        }
+                        .tip("Copy the address of Chrome's extensions page, to paste into Chrome")
+                        Button("Show folder in Finder") {
+                            do {
+                                let folder = try ChromePanelSignIn.extensionFolder()
+                                NSWorkspace.shared.selectFile(nil, inFileViewerRootedAtPath: folder.path)
+                                setupError = nil
+                            } catch { setupError = "Couldn’t prepare the extension folder. Try again." }
+                        }
+                        .tip("Show the ChromeSignIn folder to pick in Chrome's Load unpacked")
+                    }
+                }
+            }
+            SignInStep(number: setup ? 2 : 1, title: "Open the Convex login in Chrome") {
+                Button(session.waiting ? "Open it again" : "Open in Chrome") {
+                    session.start(dashboard: dashboard) { callback in
+                        WebPanelPool.shared.finishSignIn(callback, for: dashboard)
+                    }
+                }
+                .buttonStyle(.borderedProminent)
+                .keyboardShortcut(.defaultAction)
+                .tip("Open a fresh Convex sign-in page in Google Chrome")
+            }
+            SignInStep(number: setup ? 3 : 2, title: "In Chrome, click the extension, then log in") {
+                Text("Click the puzzle piece in Chrome's toolbar, then Threadbear Convex Sign-in. Log in to Convex as normal and this panel signs in by itself.")
+                if session.waiting || !session.message.isEmpty {
+                    Text(session.message).foregroundStyle(.secondary).textSelection(.enabled)
+                }
+            }
+        }
+    }
+}
+
+private struct SignInStep<Content: View>: View {
+    let number: Int
+    let title: String
+    @ViewBuilder let content: Content
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 12) {
+            Text("\(number)")
+                .font(.callout.weight(.semibold).monospacedDigit())
+                .frame(width: 22, height: 22)
+                .background(Circle().fill(Color.secondary.opacity(0.2)))
+            VStack(alignment: .leading, spacing: 8) {
+                Text(title).font(.headline)
+                content.fixedSize(horizontal: false, vertical: true)
+            }
+        }
     }
 }

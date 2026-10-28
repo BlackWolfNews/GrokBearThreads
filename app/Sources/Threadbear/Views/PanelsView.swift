@@ -365,9 +365,60 @@ struct PaneNote: View {
 
 // MARK: - Web panels
 
-/// A `url` panel. The web view comes from the pool and is moved into this
-/// view's container, so leaving and coming back finds the page as it was.
-struct WebPanel: NSViewRepresentable {
+/// Give the Chrome sign-in its own page when Convex needs a login. The
+/// pooled web view stays alive behind it to receive the browser callback.
+struct WebPanel: View {
+    let url: URL
+    @ObservedObject private var pool = WebPanelPool.shared
+    @State private var signInHere = false
+    @State private var showSignIn = false
+
+    var body: some View {
+        Group {
+            if ConvexPanelSignIn.supports(url), pool.signInPages.contains(url), !signInHere {
+                VStack(spacing: 18) {
+                    Image(systemName: "cylinder.split.1x2")
+                        .font(.system(size: 44))
+                        .foregroundStyle(.secondary)
+                    Text("Sign in to Convex")
+                        .font(.system(size: 24, weight: .semibold))
+                    Text("Use your Chrome login for this panel.")
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                    Button { showSignIn = true } label: {
+                        Text("Sign in through Chrome")
+                            .font(.system(size: 16, weight: .medium))
+                            .multilineTextAlignment(.center)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 4)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.large)
+                    .tip("Use Chrome to sign in to the Convex panel")
+                    Button("Sign in here instead") { signInHere = true }
+                        .buttonStyle(.link)
+                        .tip("Show Convex’s sign-in form inside this panel")
+                }
+                .frame(maxWidth: 340)
+                .padding(28)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(Color(nsColor: .windowBackgroundColor))
+            } else {
+                PooledWebPage(url: url)
+            }
+        }
+        .sheet(isPresented: $showSignIn) { ChromePanelSignInSheet(dashboard: url) }
+        .onChange(of: url) { signInHere = false; showSignIn = false }
+        .onChange(of: pool.signInPages.contains(url)) { _, needsSignIn in
+            if !needsSignIn { signInHere = false }
+        }
+    }
+}
+
+/// Moving the pooled web view between containers preserves its page when
+/// leaving a panel and returning, or revealing the embedded login form.
+private struct PooledWebPage: NSViewRepresentable {
     let url: URL
     @Environment(\.isDockGhost) private var isGhost
 
@@ -395,10 +446,11 @@ final class WebPanelContainer: NSView {
 /// store, so a dashboard login made in one sticks for the next thread with
 /// the same project, and across launches.
 @MainActor
-final class WebPanelPool: NSObject, WKNavigationDelegate, WKUIDelegate {
+final class WebPanelPool: NSObject, ObservableObject, WKNavigationDelegate, WKUIDelegate {
     static let shared = WebPanelPool()
     private var views: [URL: WKWebView] = [:]
     private var order: [URL] = []
+    @Published private(set) var signInPages: Set<URL> = []
     static let capacity = 4
 
     func webView(for url: URL) -> WKWebView {
@@ -420,6 +472,7 @@ final class WebPanelPool: NSObject, WKNavigationDelegate, WKUIDelegate {
         while order.count > Self.capacity, let oldest = order.first {
             // Never drop the one just asked for; the oldest unused goes.
             order.removeFirst()
+            signInPages.remove(oldest)
             if let gone = views.removeValue(forKey: oldest) { gone.removeFromSuperview() }
         }
         return view
@@ -447,6 +500,25 @@ final class WebPanelPool: NSObject, WKNavigationDelegate, WKUIDelegate {
         } else {
             view.load(URLRequest(url: url))
         }
+    }
+
+    func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction,
+                 decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
+        if navigationAction.targetFrame?.isMainFrame == true, let page = navigationAction.request.url,
+           ConvexPanelSignIn.isLoginPage(page), let original = views.first(where: { $0.value === webView })?.key,
+           ConvexPanelSignIn.supports(original) {
+            signInPages.insert(original)
+        }
+        decisionHandler(.allow)
+    }
+
+    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        guard let page = webView.url, let original = views.first(where: { $0.value === webView })?.key,
+              ConvexPanelSignIn.supports(original) else { return }
+        // Server redirects may skip the action policy callback, so also
+        // check the page that actually loaded, without inspecting its form.
+        if ConvexPanelSignIn.isLoginPage(page) { signInPages.insert(original) }
+        else if ConvexPanelSignIn.supports(page) { signInPages.remove(original) }
     }
 
     /// Links that want a new window (OAuth sign-in pages, "open in new tab")

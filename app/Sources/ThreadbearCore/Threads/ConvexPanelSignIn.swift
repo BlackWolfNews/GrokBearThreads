@@ -15,6 +15,16 @@ public struct ConvexPanelSignIn: Sendable {
             && !url.path.hasPrefix("/api/")
     }
 
+    /// Convex's hosted login lives on AuthKit, outside the dashboard.
+    /// Match its origin so the native prompt follows email and SSO steps too.
+    public static func isLoginPage(_ url: URL) -> Bool {
+        guard url.scheme == "https", url.port == nil || url.port == 443,
+              url.user == nil, url.password == nil else { return false }
+        if url.host == "auth.convex.dev" { return true }
+        return url.host == "dashboard.convex.dev"
+            && ["/api/auth/login", "/login-error"].contains(url.path)
+    }
+
     public init?(dashboardURL: URL, nonce: String) {
         guard Self.supports(dashboardURL), nonce.count == 64,
               nonce.allSatisfy({ "0123456789abcdef".contains($0) }),
