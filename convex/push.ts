@@ -6,12 +6,74 @@
 // every send is a logged no-op. Each device row says whether it's a
 // sandbox (Xcode) or production (TestFlight, App Store) install, and
 // goes to the matching APNs host.
-import { createPrivateKey, sign } from 'node:crypto';
+import { createCipheriv, createPrivateKey, randomBytes, sign } from 'node:crypto';
 import http2 from 'node:http2';
 import { v } from 'convex/values';
 import { internal } from './_generated/api';
 import { internalAction, type ActionCtx } from './_generated/server';
 import { pushText } from './pushText';
+import { API_VERSION } from './version';
+
+// The push relay (relay/, docs/push-relay.md): Mike's Convex project that
+// holds his Apple key, for backends that don't have one. A deployment with
+// its own APNS_* env (Mike's) sends directly; PUSH_RELAY=off turns the relay
+// off (and so notifications, for a backend with no key of its own).
+const RELAY_URL = 'https://impartial-hound-393.ap-southeast-2.convex.site';
+
+type Target = { apnsToken: string; environment: 'sandbox' | 'production'; notify: 'away' | 'always' | 'off'; pushKey?: string };
+
+// AES-256-GCM with the phone's own key, as the app's notification extension
+// opens it (CryptoKit's AES.GCM.SealedBox combined: nonce, ciphertext, tag).
+export function seal(pushKey: string, text: string): string {
+  const nonce = randomBytes(12);
+  const cipher = createCipheriv('aes-256-gcm', Buffer.from(pushKey, 'base64'), nonce);
+  const ct = Buffer.concat([cipher.update(text, 'utf8'), cipher.final()]);
+  return Buffer.concat([nonce, ct, cipher.getAuthTag()]).toString('base64');
+}
+
+async function relayInstall(ctx: ActionCtx, url: string): Promise<{ installId: string; installKey: string } | null> {
+  const known = await ctx.runQuery(internal.devices.relayInstall, { url });
+  if (known) return known;
+  const res = await fetch(`${url}/register`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ version: `api-${API_VERSION}` }) });
+  if (!res.ok) {
+    console.warn(`[relay] couldn't register: HTTP ${res.status}`);
+    return null;
+  }
+  const install = (await res.json()) as { installId: string; installKey: string };
+  await ctx.runMutation(internal.devices.saveRelayInstall, { ...install, url });
+  return install;
+}
+
+// Through the relay. A phone that sent its pushKey gets the title and text
+// sealed with it, so the relay forwards only ciphertext; an older app
+// without one gets the relay's plain "A thread needs you", never the text.
+async function sendViaRelay(ctx: ActionCtx, alert: { title: string; body: string; threadId: string }, targets: Target[]): Promise<SendSummary> {
+  if (process.env.PUSH_RELAY === 'off') return { sent: 0, failed: 0, skipped: 'relayOff' };
+  const url = process.env.PUSH_RELAY_URL || RELAY_URL;
+  const install = await relayInstall(ctx, url);
+  if (!install) return { sent: 0, failed: targets.length };
+  let sent = 0;
+  let failed = 0;
+  for (const t of targets) {
+    const res = await fetch(`${url}/send`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${install.installId}.${install.installKey}`, 'X-Threadbear-Version': `api-${API_VERSION}` },
+      body: JSON.stringify({ deviceToken: t.apnsToken, environment: t.environment, threadId: alert.threadId, ...(t.pushKey ? { encrypted: seal(t.pushKey, JSON.stringify({ title: alert.title, body: alert.body })) } : {}) }),
+    }).catch((e: Error) => ({ ok: false, status: 0, json: async () => ({ reason: e.message }) }) as unknown as Response);
+    const r = (await res.json().catch(() => ({}))) as { ok?: boolean; gone?: boolean; reason?: string };
+    if (res.status === 401) {
+      // The relay forgot this install: register again next time.
+      await ctx.runMutation(internal.devices.clearRelayInstall, {});
+    }
+    if (r.ok) sent++;
+    else {
+      failed++;
+      console.warn(`[relay] ${res.status} ${r.reason ?? ''} for …${t.apnsToken.slice(-6)}`);
+      if (r.gone) await ctx.runMutation(internal.devices.drop, { apnsToken: t.apnsToken });
+    }
+  }
+  return { sent, failed };
+}
 
 type ApnsConfig = { key: string; keyId: string; teamId: string; topic: string };
 
@@ -85,14 +147,11 @@ const vSendResult = v.object({ sent: v.number(), failed: v.number(), skipped: v.
 
 // The payload the phone app expects (docs/convex-backend.md, section 6).
 async function sendAlert(ctx: ActionCtx, alert: { title: string; body: string; threadId: string }, which: (notify: 'away' | 'always' | 'off') => boolean = (n) => n !== 'off'): Promise<SendSummary> {
-  const cfg = apnsConfig();
-  if (!cfg) {
-    console.log(`[apns] not configured, skipping: ${alert.title}`);
-    return { sent: 0, failed: 0, skipped: 'unconfigured' };
-  }
-  const all: { apnsToken: string; environment: 'sandbox' | 'production'; notify: 'away' | 'always' | 'off' }[] = await ctx.runQuery(internal.devices.targets, {});
+  const all: Target[] = await ctx.runQuery(internal.devices.targets, {});
   const targets = all.filter((t) => which(t.notify));
   if (!targets.length) return { sent: 0, failed: 0, skipped: 'noDevices' };
+  const cfg = apnsConfig();
+  if (!cfg || process.env.PUSH_VIA === 'relay') return await sendViaRelay(ctx, alert, targets);
   const payload = JSON.stringify({ aps: { alert: { title: alert.title, body: alert.body }, sound: 'default', 'thread-id': alert.threadId }, threadId: alert.threadId });
   const jwt = providerToken(cfg);
   let sent = 0;
@@ -146,6 +205,7 @@ export const notify = internalAction({
 
 // A test to every registered phone:
 //   npx convex run push:test '{"body":"hello from Convex"}' --prod
+// (PUSH_VIA=relay in the env sends through the relay even with a key.)
 export const test = internalAction({
   args: { title: v.optional(v.string()), body: v.optional(v.string()) },
   returns: vSendResult,

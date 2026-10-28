@@ -59,7 +59,7 @@ export type SyncConfig = {
 // lower one means its backend hasn't been deployed since this runner was:
 // said in runner.status, tb status and the log rather than stopping, since
 // the runner only adds to what it sends while the number stays the same.
-export const BACKEND_API_VERSION = 3;
+export const BACKEND_API_VERSION = 4;
 
 export type SyncStatus = {
   state: 'off' | 'ok' | 'error';

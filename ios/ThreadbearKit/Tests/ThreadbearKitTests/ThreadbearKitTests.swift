@@ -34,6 +34,16 @@ import Testing
         #expect(items.map(\.id) == [10, 11, 13, 14])
     }
 
+    /// Sealed in Node the way convex/push.ts seal() does, with a key of 32
+    /// sevens: the phone must open what the backend seals.
+    @Test func pushSealOpensWhatTheBackendSealed() {
+        let key = Data(repeating: 7, count: 32)
+        let opened = PushSeal.open("AiSVcm4cKdtZwL3c/Uwy7/xLI/glgedZynZE0KGAPg1kAmJEyB2VjF4/jTFQARFe9Fvu853UYEiuEU6uMrlKm9HezW8YilUyjUeS13rAMw==", key: key)
+        #expect(opened?.title == "Fix the dock")
+        #expect(opened?.body == "Should I push it?")
+        #expect(PushSeal.open("AiSVcm4cKdtZwL3c/Uwy7/xLI/glgedZynZE0KGAPg1kAmJEyB2VjF4/jTFQARFe9Fvu853UYEiuEU6uMrlKm9HezW8YilUyjUeS13rAMw==", key: Data(repeating: 8, count: 32)) == nil, "the wrong key opens nothing")
+    }
+
     @Test func threadRowDecodesWithISOAndMillisecondDates() throws {
         let json = """
         [{"threadId":"t1","runnerId":"m5","title":"A","cwd":"/Users/m/dev/me/misc","accountId":"claude-3",

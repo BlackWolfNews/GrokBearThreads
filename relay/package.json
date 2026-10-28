@@ -1,0 +1,17 @@
+{
+  "name": "threadbear-relay",
+  "private": true,
+  "description": "The push relay: the one shared piece of Threadbear (docs/push-relay.md). A Convex project of Mike's that holds his Apple push key and forwards encrypted notifications from anyone's Threadbear backend to the App Store app.",
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit -p convex",
+    "deploy": "convex deploy"
+  },
+  "dependencies": {
+    "convex": "1.48.0"
+  },
+  "devDependencies": {
+    "@types/node": "26.6.5",
+    "typescript": "7.0.2"
+  }
+}

@@ -224,7 +224,11 @@ final class AppModel {
         let environment = Bundle.main.object(forInfoDictionaryKey: "ThreadbearAPSEnvironment") as? String == "production"
             ? "production" : "sandbox"
         Task {
-            do { try await backend.registerDevice(apnsToken: hex, environment: environment) } catch {
+            // The relay key goes to a backend that takes it (API 4); an older
+            // one would refuse the extra argument.
+            if apiVersion == nil, let identity = try? await backend.me() { apiVersion = identity.apiVersion ?? 0 }
+            let pushKey = (apiVersion ?? 0) >= BackendCompatibility.pushKeyAPIVersion ? PushKeyStore.loadOrCreate()?.base64EncodedString() : nil
+            do { try await backend.registerDevice(apnsToken: hex, environment: environment, pushKey: pushKey) } catch {
                 self.lastError = "Couldn't turn on notifications: \(error.localizedDescription)"
                 return
             }

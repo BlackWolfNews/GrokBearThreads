@@ -43,7 +43,7 @@ struct LiveBackendTests {
         _ = try await backend.answer(threadId: thread.threadId, approvalId: "x", answers: ["Which?": "A, B"], summary: "A, B")
         _ = try await backend.respond(threadId: thread.threadId, approvalId: "x", decision: .allowAlways)
         _ = try await backend.create(text: "A new thread from the test", runnerId: nil, cwd: nil)
-        try await backend.registerDevice(apnsToken: "00ff", environment: "sandbox")
+        try await backend.registerDevice(apnsToken: "00ff", environment: "sandbox", pushKey: nil)
     }
 
     @Test func aMissingThreadIsNil() async throws {
