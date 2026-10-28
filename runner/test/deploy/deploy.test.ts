@@ -1082,6 +1082,7 @@ test('reinstalling checks everything first, builds from HEAD, and puts the old s
   fs.writeFileSync(launchSrc, broken);
   commit({ v: 'broken launch' }, 'broken launch.mjs');
   const kept = fs.readFileSync(installed, 'utf8');
+  const keptCurrent = current();
   try {
     r = install();
   } finally {
@@ -1090,12 +1091,12 @@ test('reinstalling checks everything first, builds from HEAD, and puts the old s
   }
   assert.equal(r.status, 1, out(r));
   assert.match(r.stderr, /The runner didn't come up and stay up on its release\./);
-  assert.match(r.stderr, new RegExp(`current points at ${rebuilt} again`));
+  assert.match(r.stderr, new RegExp(`current points at ${keptCurrent} again`));
   assert.match(r.stderr, /Back as it was/);
   assert.equal(fs.readFileSync(installed, 'utf8'), kept, 'the old launch.mjs is back');
-  assert.equal(current(), rebuilt);
+  assert.equal(current(), keptCurrent);
   for (const f of ['previous-launchagent.plist', 'previous-launch.mjs']) assert.ok(!fs.existsSync(path.join(runnerDir(), f)), f);
-  await runsOn(rebuilt);
+  await runsOn(keptCurrent);
 });
 
 test('--check gives up once a runner that stopped before it was marked good stays down', { timeout: 120_000 }, async () => {
