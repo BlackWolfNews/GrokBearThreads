@@ -289,7 +289,7 @@ struct ThreadSettings {
         app.choosePool(column, provider: section, model: model, threadId: thread?.id)
     }
 
-    /// The quiet line under Effort about a pool's logins.
+    /// A line about a pool's logins, for the composer menu's text dump.
     func poolStatus(for columnId: String) -> String? {
         guard let shown = app.pool(columnId) else { return nil }
         return Pools.statusLine(shown, accounts: app.accounts, now: app.now)
@@ -728,8 +728,8 @@ private final class ActionMenuItem: NSMenuItem {
 ///
 /// With pools (docs/pools-plan.md) the rail lists pools with their logins
 /// and best room, a mixed pool lists its models under each provider, and
-/// under Effort a quiet line says how the pool's logins are doing, with
-/// "Pin to a login ›" for the rare thread that should stay on one.
+/// under the effort levels "Pin to a login ›" is there for the rare
+/// thread that should stay on one.
 struct ModelPickerView: View {
     @Environment(AppModel.self) private var app
     /// Nil for the new-thread composer.
@@ -751,8 +751,8 @@ struct ModelPickerView: View {
     /// Sized from the window it ran off the bottom of the screen in a
     /// thread whose window went up near the top of it.
     static func listMaxHeight(pools: Bool, showsLogins: Bool) -> CGFloat {
-        var chrome = zoomed(160)
-        if pools { chrome += zoomed(80) }
+        var chrome = zoomed(140)
+        if pools { chrome += zoomed(60) }
         if pools && showsLogins { chrome += zoomed(230) }
         let room = AppWindow.roomAboveAnchor ?? (AppWindow.contentHeight ?? 800) - zoomed(170)
         return max(zoomed(120), min(zoomed(320), room - chrome))
@@ -966,9 +966,10 @@ private struct PickerRail: View {
     }
 }
 
-/// Under Effort, with pools: how the shown pool's logins are doing, the
-/// login a pinned thread is on with Unpin, and "Pin to a login ›", which
-/// opens the logins with their room in place.
+/// Under the effort levels, with pools: the login a pinned thread is on
+/// with Unpin, and "Pin to a login ›", which opens the logins with their
+/// room in place. The rail already shows each pool's best room, so the
+/// line here about how its logins were doing went (28 Oct).
 private struct PoolFooter: View {
     let settings: ThreadSettings
     let column: String
@@ -978,12 +979,6 @@ private struct PoolFooter: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: zoomed(6)) {
-            if let status = settings.poolStatus(for: column) {
-                Text(status)
-                    .font(.system(size: zoomed(11)))
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
             if let pinned = settings.pinnedLine {
                 HStack(spacing: zoomed(4)) {
                     Button(pinned, action: showPinned)
@@ -1102,30 +1097,20 @@ private struct EffortRow: View {
     let choose: (String) -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: zoomed(6)) {
-            HStack {
-                Text("Effort")
-                    .font(.system(size: zoomed(11), weight: .medium))
-                    .foregroundStyle(.secondary)
-                Spacer()
-                if let chosen, let porridge = ComposerChips.effortPorridge(chosen) {
-                    Text(porridge)
-                        .font(.system(size: zoomed(11)))
-                        .foregroundStyle(.tertiary)
-                }
+        // Just the levels: the "Effort" heading and the porridge line over
+        // them were dropped as clutter (28 Oct); the porridge is in each
+        // level's tip.
+        HStack(spacing: zoomed(2)) {
+            ForEach(levels, id: \.self) { level in
+                Segment(title: ComposerChips.effortTitle(level), active: level == chosen) { choose(level) }
+                    .tip(ComposerChips.effortPorridge(level) ?? ComposerChips.effortTitle(level))
             }
-            HStack(spacing: zoomed(2)) {
-                ForEach(levels, id: \.self) { level in
-                    Segment(title: ComposerChips.effortTitle(level), active: level == chosen) { choose(level) }
-                        .tip(ComposerChips.effortPorridge(level) ?? ComposerChips.effortTitle(level))
-                }
-            }
-            .padding(zoomed(2))
-            .background(
-                RoundedRectangle(cornerRadius: zoomed(7), style: .continuous)
-                    .fill(Color.primary.opacity(0.05))
-            )
         }
+        .padding(zoomed(2))
+        .background(
+            RoundedRectangle(cornerRadius: zoomed(7), style: .continuous)
+                .fill(Color.primary.opacity(0.05))
+        )
         .padding(.horizontal, zoomed(12))
         .padding(.vertical, zoomed(10))
     }
