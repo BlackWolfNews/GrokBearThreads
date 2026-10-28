@@ -135,7 +135,7 @@ final class TranscriptTextView: NSTextView {
         return MainActor.assumeIsolated { AppModel.shared.openTranscriptFileLink(url, commandKey: commandKey) }
     }
 
-    /// A web link opens in the panel when that's what "Click Opens" says
+    /// A web link opens in the panel when that's what "Default" says
     /// (WebLinkAction.click). False leaves it to AppKit, which hands it to
     /// the browser: the default, and always for a ⌘-click.
     var openWebLink: (URL) -> Bool = { url in

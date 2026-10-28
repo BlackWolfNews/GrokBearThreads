@@ -189,12 +189,12 @@ final class FileLinkMenuTests: XCTestCase {
         XCTAssertEqual(opened.first?.0, "/repo/app/A.swift")
         XCTAssertEqual(opened.first?.1, .finder)
 
-        // "Click Opens" sets what a plain click does, and ticks it.
-        let clickOpens = try XCTUnwrap(menu.items.first { $0.title == "Click Opens" }?.submenu)
+        // "Default" sets what a plain click does, and ticks it.
+        let clickOpens = try XCTUnwrap(menu.items.first { $0.title == "Default" }?.submenu)
         let panel = try XCTUnwrap(clickOpens.items.first { $0.title == "Open in Panel" })
         clickOpens.performActionForItem(at: clickOpens.index(of: panel))
         XCTAssertEqual(FileLinkAction.click, .panel)
-        let again = try XCTUnwrap(view.fileLinkMenu(at: point(view, at: at))?.items.first { $0.title == "Click Opens" }?.submenu)
+        let again = try XCTUnwrap(view.fileLinkMenu(at: point(view, at: at))?.items.first { $0.title == "Default" }?.submenu)
         XCTAssertEqual(again.items.filter { $0.state == .on }.map(\.title), ["Open in Panel"])
     }
 

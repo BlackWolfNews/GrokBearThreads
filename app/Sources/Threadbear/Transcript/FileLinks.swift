@@ -54,7 +54,7 @@ enum FileLinkAction: String, CaseIterable {
 }
 
 /// The right-click menu on a file link: the ways to open it, Copy Path,
-/// and "Click Opens", which sets what a plain click does.
+/// and "Default", which sets what a plain click does.
 @MainActor
 final class FileLinkMenu: NSObject {
     let path: String?
@@ -94,7 +94,7 @@ final class FileLinkMenu: NSObject {
             item.state = action == click ? .on : .off
             defaults.addItem(item)
         }
-        let submenu = NSMenuItem(title: "Click Opens", symbol: "cursorarrow.click", action: nil)
+        let submenu = NSMenuItem(title: "Default", symbol: "cursorarrow.click", action: nil)
         submenu.submenu = defaults
         menu.addItem(submenu)
         // The menu holds its items' target weakly; keep this alive with it.
@@ -123,7 +123,7 @@ final class FileLinkMenu: NSObject {
 
 /// What a click on a web link does, in the transcript and in the pane's
 /// Links: Mike's browser by default (where his sign-ins are), or the
-/// panel. Set from "Click Opens" in a link's right-click menu, as for
+/// panel. Set from "Default" in a link's right-click menu, as for
 /// files.
 enum WebLinkAction: String, CaseIterable {
     case browser
@@ -171,7 +171,7 @@ enum WebLinkAction: String, CaseIterable {
 }
 
 /// The right-click menu on a web link in the transcript: browser or
-/// panel, Copy Link, and "Click Opens", like FileLinkMenu.
+/// panel, Copy Link, and "Default", like FileLinkMenu.
 @MainActor
 final class WebLinkMenu: NSObject {
     let url: URL
@@ -201,7 +201,7 @@ final class WebLinkMenu: NSObject {
             item.state = action == click ? .on : .off
             defaults.addItem(item)
         }
-        let submenu = NSMenuItem(title: "Click Opens", symbol: "cursorarrow.click", action: nil)
+        let submenu = NSMenuItem(title: "Default", symbol: "cursorarrow.click", action: nil)
         submenu.submenu = defaults
         menu.addItem(submenu)
         // The menu holds its items' target weakly; keep this alive with it.

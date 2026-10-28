@@ -316,7 +316,7 @@ struct FileMenu: View {
     }
 }
 
-/// A link row's menu: the browser or the panel, and "Click Opens", the
+/// A link row's menu: the browser or the panel, and "Default", the
 /// same choice as a web link's menu in the transcript (WebLinkMenu). The
 /// panel works for any page, but a site that needs a sign-in won't have
 /// Mike's there.
@@ -343,7 +343,7 @@ struct LinkMenu: View {
             Picker(selection: $click) {
                 ForEach(WebLinkAction.allCases, id: \.self) { Label($0.title, systemImage: $0.symbol).tag($0) }
             } label: {
-                Label("Click Opens", systemImage: "cursorarrow.click")
+                Label("Default", systemImage: "cursorarrow.click")
             }
         }
     }

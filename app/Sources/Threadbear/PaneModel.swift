@@ -92,7 +92,7 @@ extension AppModel {
     // MARK: Opening
 
     /// A click on a highlight: a file previews in the pane, a page goes
-    /// where "Click Opens" says (openLink).
+    /// where "Default" says (openLink).
     /// `external` is Open in the context menu: always the default app or
     /// browser.
     func open(_ highlight: Highlight, in thread: ThreadSummary, external: Bool) {
@@ -104,7 +104,7 @@ extension AppModel {
     }
 
     /// A link from a highlight or a list panel's row: a file in the pane,
-    /// a page where "Click Opens" says (the browser unless Mike picked the
+    /// a page where "Default" says (the browser unless Mike picked the
     /// panel).
     func openLink(_ url: URL, title: String? = nil, in thread: ThreadSummary, external: Bool = false) {
         if external {
