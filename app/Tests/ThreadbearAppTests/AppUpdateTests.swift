@@ -43,6 +43,35 @@ final class AppUpdateTests: XCTestCase {
         XCTAssertNotEqual(AppUpdate.tree(fromRevParse: "aaa111\nbbb222\n"), "aaa111")
     }
 
+    /// The real git, on a real repo: the command must work, not just its
+    /// parsing. `--verify` with two names failed every check for a morning.
+    func testTheRevParseCommandReadsBothTreesFromARealRepo() throws {
+        let repo = FileManager.default.temporaryDirectory.appendingPathComponent("tb-revparse-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: repo) }
+        for dir in ["app", "dock"] {
+            try FileManager.default.createDirectory(at: repo.appendingPathComponent(dir), withIntermediateDirectories: true)
+            try Data(dir.utf8).write(to: repo.appendingPathComponent("\(dir)/file"))
+        }
+        func git(_ args: [String]) throws -> (Int32, String) {
+            let p = Process()
+            let out = Pipe()
+            p.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+            p.arguments = args
+            p.standardOutput = out
+            p.standardError = out
+            try p.run()
+            p.waitUntilExit()
+            return (p.terminationStatus, String(decoding: out.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self))
+        }
+        let path = repo.path
+        _ = try git(["-C", path, "init", "-q", "-b", "main"])
+        _ = try git(["-C", path, "add", "."])
+        _ = try git(["-C", path, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "t"])
+        let (status, output) = try git(AppUpdate.revParseArguments(checkout: path))
+        XCTAssertEqual(status, 0, output)
+        XCTAssertEqual(AppUpdate.tree(fromRevParse: output).split(separator: "+").count, 2, output)
+    }
+
     func testDecidesWhetherToBuild() {
         let running = info("aaa", tree: "t1")
         XCTAssertEqual(AppUpdate.decide(mainTree: "t1", running: running, staged: nil, building: nil, failed: nil), .nothing)

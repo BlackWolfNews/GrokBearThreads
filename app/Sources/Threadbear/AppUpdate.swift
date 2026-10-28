@@ -28,6 +28,13 @@ struct BuildInfo: Codable, Equatable {
 enum AppUpdate {
     /// `git rev-parse` output, one hash a line, as BuildInfo.appTree:
     /// joined by "+", as build-app.sh writes it.
+    /// Main's app/ and dock/ trees in a checkout. Not `--verify`: that
+    /// takes one name only, and with two it failed every check from
+    /// 1a4317c (28 Oct), so the app stopped following main without a word.
+    static func revParseArguments(checkout: String) -> [String] {
+        ["-C", checkout, "rev-parse", "refs/heads/main:app", "refs/heads/main:dock"]
+    }
+
     static func tree(fromRevParse output: String) -> String {
         output.split(whereSeparator: \.isNewline).map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }.joined(separator: "+")
     }
@@ -300,7 +307,7 @@ final class AppUpdater {
     func check() {
         guard let running, build == nil else { return }
         Task { @MainActor in
-            let result = await Self.run("/usr/bin/git", ["-C", running.checkout, "rev-parse", "--verify", "-q", "refs/heads/main:app", "refs/heads/main:dock"])
+            let result = await Self.run("/usr/bin/git", AppUpdate.revParseArguments(checkout: running.checkout))
             guard result.status == 0 else {
                 AppLog.write("update", "git rev-parse main:app main:dock failed in \(running.checkout): \(result.output)")
                 return
