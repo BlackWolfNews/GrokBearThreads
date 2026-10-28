@@ -1,11 +1,14 @@
-// Two pages, so no router: "/" is the list and "/t/<threadId>" a thread.
-// Static hosting sends every unknown path to index.html, so a thread link
-// works when opened cold.
+// Three pages, so no router: "/" is the list, "/t/<threadId>" a thread, and
+// "/s/<slug>" a thread someone shared (no sign-in; share.tsx). Static
+// hosting sends every unknown path to index.html, so a link works when
+// opened cold.
 import { useSyncExternalStore } from 'react';
 
-export type Route = { page: 'list' } | { page: 'thread'; threadId: string };
+export type Route = { page: 'list' } | { page: 'thread'; threadId: string } | { page: 'share'; slug: string };
 
 function parse(): Route {
+  const s = location.pathname.match(/^\/s\/([^/]+)\/?$/);
+  if (s) return { page: 'share', slug: decodeURIComponent(s[1]) };
   const m = location.pathname.match(/^\/t\/([^/]+)\/?$/);
   return m ? { page: 'thread', threadId: decodeURIComponent(m[1]) } : { page: 'list' };
 }

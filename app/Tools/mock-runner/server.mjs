@@ -355,6 +355,9 @@ async function dispatch(client, method, p) {
       };
       if (pendingRestart) status.pendingRestart = pendingRestart;
       if (!oldRunner) status.clis = clis;
+      // Sync on, to the made-up deployment, so the website's links and
+      // sharing show (their links open nothing).
+      if (!oldRunner) status.sync = { state: 'ok', url: DEMO_DEPLOYMENT };
       return status;
     }
     // The CLI requests only report and pretend: nothing is checked or
@@ -543,6 +546,23 @@ async function dispatch(client, method, p) {
       if (caughtUp) s.lastSeenSeq = s.lastSeq;
       broadcastSummary(s.id);
       return { thread: s };
+    }
+    case 'threads.share': {
+      // docs/protocol.md, "Sharing". The mock keeps it on the summary; no
+      // website reads it.
+      const t = need(p.threadId);
+      if (!['off', 'link', 'people'].includes(p.access)) throw rpcError(-32602, 'access is "off", "link" or "people"');
+      const old = t.summary.share;
+      let people = old?.people ?? [];
+      if (p.people !== undefined) {
+        const bad = p.people.find((x) => !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(x).trim()));
+        if (bad !== undefined) throw rpcError(-32602, `${bad} isn't an email address.`);
+        people = [...new Set(p.people.map((x) => String(x).trim().toLowerCase()))];
+      }
+      const slug = !old || p.newLink ? crypto.randomBytes(16).toString('base64url') : old.slug;
+      t.summary.share = { access: p.access, slug, people, updatedAt: new Date().toISOString() };
+      broadcastSummary(t.summary.id);
+      return { thread: t.summary };
     }
     case 'threads.markSeen': {
       const t = need(p.threadId);

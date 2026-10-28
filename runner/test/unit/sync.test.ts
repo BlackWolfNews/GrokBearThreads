@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { makeHarness, tick, tmpDir } from '../helpers/fakes.ts';
-import { ConvexSync, BACKEND_API_VERSION, ICONS_API_VERSION, PRESENCE_MS, SYNC_COALESCE_MS, HEARTBEAT_MS, SYNC_BATCH, ensureRunnerId, toThreadDoc, convexPoster, convexUploader, pictureName, type ThreadDoc } from '../../src/sync.ts';
+import { ConvexSync, BACKEND_API_VERSION, ICONS_API_VERSION, SHARE_API_VERSION, PRESENCE_MS, SYNC_COALESCE_MS, HEARTBEAT_MS, SYNC_BATCH, ensureRunnerId, toThreadDoc, convexPoster, convexUploader, pictureName, type ThreadDoc } from '../../src/sync.ts';
 import type { Project } from '../../src/protocol.ts';
 import { nullLogger } from '../../src/log.ts';
 import { AT_MAC_IDLE_MS, isAtMac } from '../../src/presence.ts';
@@ -817,4 +817,39 @@ test('at the Mac means the Mac app is connected and the keyboard or mouse was us
   assert.equal(isAtMac(true, AT_MAC_IDLE_MS + 1), false, 'stepped away');
   assert.equal(isAtMac(false, 5_000), false, 'the app is closed');
   assert.equal(isAtMac(true, undefined), false, "can't tell, so away");
+});
+
+test('sharing: the row carries share once the backend takes it, and never "off"', async () => {
+  let backend = 6;
+  const { h, sync, docs } = setup({ answer: (fn) => (fn === 'sync:heartbeat' ? { apiVersion: backend } : null) });
+  const a = h.runner.create({ text: 'one', cwd: h.cfg.defaults.cwd, accountId: 'claude-3' }).thread;
+  h.runner.share(a.id, { access: 'people', people: ['ann@example.com'] });
+  sync.start();
+  await tick(20);
+  await sync.flushNow();
+  // An API 6 backend would turn the row down with share on it.
+  const old = docs().filter((d) => d.threadId === a.id);
+  assert.ok(old.length);
+  assert.ok(old.every((d) => d.share === undefined));
+
+  // Once the backend is new enough the shared thread goes again, with it.
+  backend = SHARE_API_VERSION;
+  await sync.stop();
+  sync.start();
+  await tick(20);
+  await sync.flushNow();
+  const slug = h.runner.get(a.id).share!.slug;
+  assert.deepEqual(docs().filter((d) => d.threadId === a.id).at(-1)!.share, { access: 'people', slug, people: ['ann@example.com'] });
+
+  // A link share has no list on the row, and "off" takes share off it.
+  h.runner.share(a.id, { access: 'link' });
+  h.clock.advance(SYNC_COALESCE_MS);
+  await tick(20);
+  await sync.flushNow();
+  assert.deepEqual(docs().filter((d) => d.threadId === a.id).at(-1)!.share, { access: 'link', slug });
+  h.runner.share(a.id, { access: 'off' });
+  h.clock.advance(SYNC_COALESCE_MS);
+  await tick(20);
+  await sync.flushNow();
+  assert.equal(docs().filter((d) => d.threadId === a.id).at(-1)!.share, undefined);
 });

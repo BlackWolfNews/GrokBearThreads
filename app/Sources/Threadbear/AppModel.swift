@@ -312,6 +312,9 @@ final class AppModel {
     /// updating the app without the panel. On the model so a script can
     /// open it.
     var updatePopoverShown = false
+    /// The thread whose share popover is open, if any. On the model so a
+    /// script can open it.
+    var sharePopoverThread: String?
 
     @ObservationIgnored private(set) var client: RPCClient?
     @ObservationIgnored private var sessions: [String: ThreadSession] = [:]
@@ -995,6 +998,19 @@ final class AppModel {
                 show(error)
             }
         }
+    }
+
+    /// Who else can read a thread on the website (protocol "Sharing"). The
+    /// share popover shows a failure itself, so this throws rather than
+    /// putting up the banner.
+    func share(_ threadId: String, access: ThreadShare.Access, people: [String]? = nil, newLink: Bool = false) async throws {
+        guard let client else { throw RPCError.disconnected(nil) }
+        threads[threadId] = try await client.share(threadId: threadId, access: access, people: people, newLink: newLink)
+    }
+
+    /// A shared thread's link on the website, while sync is on.
+    func shareLink(_ share: ThreadShare) -> URL? {
+        websiteURL?.appendingPathComponent("s").appendingPathComponent(share.slug)
     }
 
     /// Opens the thread if it isn't, and makes its title in the header a field.

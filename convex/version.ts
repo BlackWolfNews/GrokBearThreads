@@ -24,4 +24,8 @@
 // 6: sync:issueToken, sync:listTokens and sync:revokeToken, so the Mac app
 //    pairs phones and signs browsers in through the runner (docs/protocol.md,
 //    "Devices") with no Convex CLI; tokens carry a kind.
-export const API_VERSION = 6;
+// 7: sharing (docs/website.md, "Sharing"). Thread rows carry `share`
+//    ({ access, slug, people? }), and share:view, share:sendCode and
+//    share:verifyCode serve /s/<slug> without a phone token. A runner sends
+//    `share` only to a backend of 7 or later.
+export const API_VERSION = 7;

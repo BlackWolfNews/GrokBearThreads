@@ -134,3 +134,11 @@ code, pre { font-family: var(--mono); font-size: 12.5px; }
   .card, .command { margin-left: 12px; margin-right: 12px; }
   .composer { padding-bottom: max(12px, env(safe-area-inset-bottom)); }
 }
+
+/* ---- a shared thread (share.tsx): one column, nothing to the side */
+.thread.shared { height: 100vh; height: 100dvh; }
+.code-form { display: flex; flex-direction: column; gap: 10px; margin-top: 16px; }
+.code-form input { font: inherit; color: inherit; background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 9px 12px; text-align: center; }
+.code-form input:focus { outline: none; border-color: var(--muted); }
+.code-form .link { align-self: center; }
+.problem { color: #c0392b; }

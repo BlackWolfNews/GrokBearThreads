@@ -186,6 +186,14 @@ thread has its own link: Copy web link in a
 thread's ... menu on the Mac, or the Copy link button on the website, gives
 you one to paste anywhere you're signed in.
 
+To let someone else read a thread, click the share button beside a thread's
+... menu. Anyone with the link gives a read-only page anybody can open;
+Specific people asks you for email addresses, and each person gets a code at
+theirs to open it. They see the messages and one line per step, as the
+thread carries on, but not tool output, images, the folder or the cost.
+Only you stops the link working (sharing again brings the same link back),
+and the arrows beside the link make a new one, which stops the old.
+
 ## Patches: your own buttons and panels
 
 A patch adds buttons (chips above the composer) and panels (beside the
@@ -225,6 +233,8 @@ you. Right-click it for a quick Restart to Update.
 Your threads are mirrored to a Convex deployment in your own Convex account,
 which setup made: the thread list, the text of each message, and one line
 for each thing an agent did. Tool output and images stay on your Mac.
+A thread you share can be read by whoever you share it with, and only that
+thread.
 Notifications to your phone go through a small relay Mike runs, because
 Apple only delivers notifications for his app through his key. The text is
 locked with a key only your phone and your deployment have, so the relay

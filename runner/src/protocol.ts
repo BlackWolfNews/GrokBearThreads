@@ -190,6 +190,19 @@ export type ThreadSummary = {
   // A panel the agent asked to show Mike (show_panel), waiting for him to
   // look at the thread (docs/protocol.md, "Showing panels").
   panelRequest?: PanelRequest;
+  // Who else can read it on the website (docs/protocol.md, "Sharing").
+  // Absent until it's first shared; access "off" keeps the link and the
+  // people for when it's shared again.
+  share?: ThreadShare;
+};
+
+export type ShareAccess = 'off' | 'link' | 'people';
+
+export type ThreadShare = {
+  access: ShareAccess;
+  slug: string; // the link is <website>/s/<slug>
+  people: string[]; // lowercased email addresses, for access "people"
+  updatedAt: string;
 };
 
 // Where show_panel opens a panel that's closed; absent is its usual place.

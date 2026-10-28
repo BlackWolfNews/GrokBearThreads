@@ -889,6 +889,37 @@ public struct PanelRequest: Sendable, Hashable, Codable {
     }
 }
 
+/// Who else can read a thread on the website (protocol "Sharing").
+public struct ThreadShare: Sendable, Hashable, Codable {
+    public enum Access: String, Sendable, Hashable, Codable, CaseIterable {
+        case off, link, people
+    }
+    public var access: Access
+    /// The link is `<website>/s/<slug>`. Kept while sharing is off, so
+    /// sharing again brings the same link back.
+    public var slug: String
+    /// Lowercased email addresses, for `people`.
+    public var people: [String]
+
+    public init(access: Access, slug: String, people: [String] = []) {
+        self.access = access
+        self.slug = slug
+        self.people = people
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        access = (try? c.decode(Access.self, forKey: .access)) ?? .off
+        slug = try c.decode(String.self, forKey: .slug)
+        people = (try? c.decodeIfPresent([String].self, forKey: .people)) ?? []
+    }
+
+    enum CodingKeys: String, CodingKey { case access, slug, people }
+
+    /// Shared with anyone at all.
+    public var isOn: Bool { access != .off }
+}
+
 public struct ThreadSummary: Sendable, Hashable, Codable, Identifiable {
     public var id: String
     public var title: String
@@ -968,6 +999,9 @@ public struct ThreadSummary: Sendable, Hashable, Codable, Identifiable {
     /// A panel the agent asked to show Mike, waiting for him to look at the
     /// thread. Nil when there's none, and from a runner older than this.
     public var panelRequest: PanelRequest?
+    /// Who else can read it on the website. Nil until it's first shared,
+    /// and from a runner older than sharing.
+    public var share: ThreadShare?
 
     public init(
         id: String, title: String, cwd: String = "~/dev/me/misc", accountId: String = "claude-main",
@@ -982,7 +1016,7 @@ public struct ThreadSummary: Sendable, Hashable, Codable, Identifiable {
         subagents: [Subagent] = [], projects: [ThreadProject] = [], pendingReviews: Int? = nil, worktree: ThreadWorktree? = nil, needs: String? = nil, asks: [Ask] = [], asksSeq: Int? = nil,
         highlightsAt: Date? = nil,
         schedule: ThreadSchedule? = nil, poolId: String? = nil, waitingForRoom: WaitingForRoom? = nil,
-        panelRequest: PanelRequest? = nil
+        panelRequest: PanelRequest? = nil, share: ThreadShare? = nil
     ) {
         self.id = id
         self.title = title
@@ -1028,6 +1062,7 @@ public struct ThreadSummary: Sendable, Hashable, Codable, Identifiable {
         self.highlightsAt = highlightsAt
         self.schedule = schedule
         self.panelRequest = panelRequest
+        self.share = share
     }
 
     public init(from decoder: Decoder) throws {
@@ -1082,6 +1117,7 @@ public struct ThreadSummary: Sendable, Hashable, Codable, Identifiable {
         highlightsAt = ((try? c.decodeIfPresent(String.self, forKey: .highlightsAt)) ?? nil).flatMap(ISO8601.parse)
         schedule = (try? c.decodeIfPresent(ThreadSchedule.self, forKey: .schedule)) ?? nil
         panelRequest = (try? c.decodeIfPresent(PanelRequest.self, forKey: .panelRequest)) ?? nil
+        share = (try? c.decodeIfPresent(ThreadShare.self, forKey: .share)) ?? nil
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -1130,13 +1166,14 @@ public struct ThreadSummary: Sendable, Hashable, Codable, Identifiable {
         try c.encodeIfPresent(highlightsAt.map(ISO8601.format), forKey: .highlightsAt)
         try c.encodeIfPresent(schedule, forKey: .schedule)
         try c.encodeIfPresent(panelRequest, forKey: .panelRequest)
+        try c.encodeIfPresent(share, forKey: .share)
     }
 
     enum CodingKeys: String, CodingKey {
         case id, title, cwd, accountId, provider, model, effort, modelInUse, effortInUse, permissionMode, status, live, needsYou, pendingReviews
         case createdAt, updatedAt, lastActivityAt, snoozedUntil, snoozedUntilRestart, archivedAt, onOldRunner, preview
         case lastSeq, lastSeenSeq, nativeSessionId, contextTokens, contextWindow, costUsd, panels, actions, hooks, patches, background, subagents
-        case projects, worktree, needs, asks, asksSeq, highlightsAt, schedule, poolId, waitingForRoom, panelRequest
+        case projects, worktree, needs, asks, asksSeq, highlightsAt, schedule, poolId, waitingForRoom, panelRequest, share
     }
 
     /// The first ask Mike hasn't ticked on the open card, if any: what the

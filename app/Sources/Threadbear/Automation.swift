@@ -797,6 +797,27 @@ enum Automation {
             // panel's buttons for a CLI ({"provider": "codex"}), and
             // with neither it lists what it says.
             return usage(c, app: app)
+        case "share":
+            // The selected thread's sharing (protocol "Sharing"):
+            // {"access": "off" | "link" | "people", "people": [...]} sets it
+            // through the same call as the popover, {"open": true} opens the
+            // popover (false closes it). Says the access, people and link.
+            guard let thread = app.selectedThread else { return "error no thread is open" }
+            if let raw = c["access"] as? String {
+                guard let access = ThreadShare.Access(rawValue: raw) else { return "error access is off, link or people" }
+                do {
+                    try await app.share(thread.id, access: access, people: c["people"] as? [String])
+                } catch {
+                    return "error \(error.localizedDescription)"
+                }
+            }
+            if let open = c["open"] as? Bool {
+                app.sharePopoverThread = open ? thread.id : nil
+                try? await Task.sleep(for: .milliseconds(400))
+            }
+            let share = app.threads[thread.id]?.share
+            let link = share.flatMap { $0.isOn ? app.shareLink($0)?.absoluteString : nil } ?? "none"
+            return "ok access \(share?.access.rawValue ?? "off") people \(share?.people.joined(separator: ",") ?? "") link \(link) popover \(app.sharePopoverThread == thread.id ? "shown" : "closed")"
         case "updates":
             // The Updates panel: {"show": true} opens it ({"show": false}
             // closes it). {"rightClick": true} right-clicks the icon, which

@@ -5,7 +5,7 @@ import { WebSocketServer, WebSocket } from 'ws';
 import type { Runner, Notification, CliControl } from './runner.ts';
 import type { Logger } from './log.ts';
 import { CLI_POLICIES, EFFORT_LEVELS, ErrorCode, PROVIDERS, RpcError, isEffortLevel, isProvider } from './protocol.ts';
-import type { ApprovalDecision, AskAnswer, CliPolicy, EffortLevel, ImageRef, PermissionMode, Provider, ThreadSummary } from './protocol.ts';
+import type { ApprovalDecision, AskAnswer, CliPolicy, EffortLevel, ImageRef, PermissionMode, Provider, ShareAccess, ThreadSummary } from './protocol.ts';
 import { isMoved, mergeSummaries, type Bucket } from './handover.ts';
 
 type Conn = {
@@ -51,6 +51,7 @@ const THREAD_METHODS = new Set([
   'threads.removeHighlight',
   'threads.panelShown',
   'threads.tickAsk',
+  'threads.share',
   'approvals.respond',
   'panels.render',
   'panels.convexKey',
@@ -455,6 +456,13 @@ export class RpcServer {
         return r.removeHighlight(reqString(p, 'threadId'), reqString(p, 'highlightId'));
       case 'threads.panelShown':
         return r.panelShown(reqString(p, 'threadId'), reqString(p, 'requestId'));
+      case 'threads.share': {
+        const access = reqString(p, 'access');
+        if (!['off', 'link', 'people'].includes(access)) throw bad('access is "off", "link" or "people"');
+        if (p.people !== undefined && (!Array.isArray(p.people) || !p.people.every((x: unknown) => typeof x === 'string'))) throw bad('people must be an array of strings');
+        if (p.newLink !== undefined && typeof p.newLink !== 'boolean') throw bad('newLink must be a boolean');
+        return r.share(reqString(p, 'threadId'), { access: access as ShareAccess, ...(p.people ? { people: p.people } : {}), ...(p.newLink ? { newLink: true } : {}) });
+      }
       case 'threads.tickAsk':
         if (typeof p.ticked !== 'boolean') throw bad('ticked must be a boolean');
         return r.tickAsk(reqString(p, 'threadId'), reqNumber(p, 'asksSeq'), reqNumber(p, 'index'), p.ticked);

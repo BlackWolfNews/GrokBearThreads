@@ -60,11 +60,15 @@ export type SyncConfig = {
 // lower one means its backend hasn't been deployed since this runner was:
 // said in runner.status, tb status and the log rather than stopping, since
 // the runner only adds to what it sends while the number stays the same.
-export const BACKEND_API_VERSION = 6;
+export const BACKEND_API_VERSION = 7;
 // From this backend version a project's picture goes up to file storage
 // (sync:iconUploadUrl, sync:setProjectIcon); an older backend gets the
 // project without it and the phone shows its symbol or first letter.
 export const ICONS_API_VERSION = 5;
+// From this one a thread's row carries `share` (docs/website.md, "Sharing");
+// an older backend's validator would turn the whole write down, so it gets
+// the row without it, and the link doesn't work until it's deployed.
+export const SHARE_API_VERSION = 7;
 
 export type SyncStatus = {
   state: 'off' | 'ok' | 'error';
@@ -115,6 +119,7 @@ export type ThreadDoc = {
   working?: string;
   pendingApproval?: PendingApproval;
   earliestSeq?: number;
+  share?: { access: 'link' | 'people'; slug: string; people?: string[] };
   view: 'inbox' | 'hibernating' | 'den';
 };
 
@@ -289,7 +294,16 @@ export function toThreadDoc(t: ThreadSummary, runnerId: string, now: number, pen
   if (working) doc.working = working;
   if (pending) doc.pendingApproval = pending;
   if (earliestSeq !== undefined) doc.earliestSeq = earliestSeq;
+  // Only a shared thread has one on the mirror: "off" is the runner's, so
+  // sharing again brings the same link back.
+  const share = t.share;
+  if (share && share.access !== 'off') doc.share = { access: share.access, slug: share.slug, ...(share.access === 'people' ? { people: [...share.people] } : {}) };
   return doc;
+}
+
+function withoutShare(d: ThreadDoc): ThreadDoc {
+  const { share, ...rest } = d;
+  return rest;
 }
 
 // A persisted user.message or assistant.text as a message row; anything
@@ -513,6 +527,12 @@ export class ConvexSync {
     if (v < BACKEND_API_VERSION) {
       this.deps.log.warn('the convex backend is older than this runner', { backend: v, expected: BACKEND_API_VERSION, url: this.deps.config.url });
     }
+    // Shared threads held back their share from an older backend (or
+    // before the first heartbeat said which): they go again now.
+    if (v >= SHARE_API_VERSION && this.running) {
+      for (const t of this.deps.runner.list(ALL)) if (t.share && t.share.access !== 'off') this.mark(t);
+      this.scheduleFlush();
+    }
     // The pictures wait for the first heartbeat to say the backend takes them.
     if (v >= ICONS_API_VERSION && this.picturesDue) this.scheduleFlush();
   }
@@ -722,8 +742,12 @@ export class ConvexSync {
     this.dirtyLists.clear();
     const key = this.deps.key;
     try {
+      // What was written is what's remembered as sent, so a row whose
+      // share was held back from an older backend goes again once it's new
+      // enough (sawBackend).
+      const shares = (this.backendApiVersion ?? 0) >= SHARE_API_VERSION;
       for (let i = 0; i < docs.length; i += SYNC_BATCH) {
-        const batch = docs.slice(i, i + SYNC_BATCH);
+        const batch = docs.slice(i, i + SYNC_BATCH).map((d) => (shares || !d.share ? d : withoutShare(d)));
         await this.post('mutation', 'sync:upsertThreads', { key, threads: batch });
         for (const d of batch) this.sent.set(d.threadId, JSON.stringify(d));
         this.written += batch.length;

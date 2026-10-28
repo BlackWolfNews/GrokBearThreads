@@ -23,6 +23,30 @@ Built 28 Oct 2026 (thread 66935d23).
   from `runner.status`'s `sync.url` (`.convex.cloud` → `.convex.site`), so
   it only shows while sync is on.
 
+## Sharing
+
+Since 29 Oct 2026 (thread ec75fe8b, backend API 7) a thread can be shared
+from the share button beside the Mac app's ... menu: Only you, Anyone with
+the link, or Specific people (docs/protocol.md, "Sharing"). The link is
+`<site>/s/<slug>`, a page with no sign-in of Mike's (`web/src/share.tsx`),
+read-only, live, served by `convex/share.ts`, the only functions that take
+no phone token:
+
+- `share:view` gives the title, the messages and tool lines, and whether
+  it's running, and nothing else; or `signIn` for a "people" thread the
+  caller can't read yet; or `gone` for a link that doesn't work.
+- `share:sendCode` emails a six-digit code to an address on the list,
+  through Resend, and answers the same for one that isn't, so the page
+  can't tell anyone who a thread is shared with. Five codes per address
+  per link an hour. `share:verifyCode` swaps the code for a viewer token
+  the browser keeps in localStorage for that link.
+- Email needs `RESEND_API_KEY` on the deployment (`npx convex env set
+  RESEND_API_KEY … --prod`); without it the page says no code can be sent.
+  It sends from `Threadbear <threadbear@mail.mikecann.app>` (that domain is
+  verified in Mike's Resend account); `SHARE_EMAIL_FROM` changes it.
+- Only code hashes and viewer-token hashes are stored (`shareCodes`,
+  `shareViewers`); a cron deletes expired ones.
+
 ## Signing in
 
 The browser holds a phone token (`convex/tokens.ts`) in localStorage. The
@@ -69,3 +93,5 @@ the static-hosting CLI sets: a build without it can't reach Convex.
   browser from the iPhone app). A QR code for another device's browser is
   still `npm run web:sign-in -- --qr`.
 - Starting a new thread from the web (`phone:create` is there to use).
+- Sharing from the website or the iPhone app, and from an agent's tools:
+  only the Mac app's share button sets it so far.

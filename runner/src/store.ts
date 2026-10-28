@@ -1,7 +1,7 @@
 import type { HighlightState } from './highlights.ts';
 import fs from 'node:fs';
 import path from 'node:path';
-import type { WaitingForRoom, Ask, AskAnswer, NeedsWho, DesignReview, ReviewDraft, EffortLevel, MessageOrigin, PanelRequest, PermissionMode, PersistedEvent, Provider, Subagent, ThreadProject, ThreadSchedule, ThreadStatus, ImageRef } from './protocol.ts';
+import type { WaitingForRoom, Ask, AskAnswer, NeedsWho, DesignReview, ReviewDraft, EffortLevel, MessageOrigin, PanelRequest, PermissionMode, ThreadShare, PersistedEvent, Provider, Subagent, ThreadProject, ThreadSchedule, ThreadStatus, ImageRef } from './protocol.ts';
 import { atomicWriteFileSync, readJsonSync } from './fsutil.ts';
 import { paths } from './config.ts';
 import type { WorktreeRecord } from './worktrees.ts';
@@ -104,6 +104,8 @@ export type ThreadRecord = {
   // Claude: the transcript entry the next start resumes at, after an edit
   // cut the conversation back. Used once.
   resumeAt?: string;
+  // Sharing on the website (Runner.share): who else can read it.
+  share?: ThreadShare;
 };
 
 // Whether an edit cut the event at `seq` out of the conversation.

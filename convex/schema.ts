@@ -5,6 +5,15 @@
 import { defineSchema, defineTable } from 'convex/server';
 import { v } from 'convex/values';
 
+// A shared thread's settings, as the runner mirrors them (ThreadShare in
+// docs/protocol.md, without "off": a thread that isn't shared has none).
+// people are lowercased email addresses.
+export const shareField = v.object({
+  access: v.union(v.literal('link'), v.literal('people')),
+  slug: v.string(),
+  people: v.optional(v.array(v.string())),
+});
+
 // The phone's view of a thread, named as in docs/protocol.md's
 // ThreadSummary. Written on change, coalesced, never per token.
 export const threadFields = {
@@ -29,6 +38,10 @@ export const threadFields = {
   projects: v.optional(v.array(v.object({ id: v.string(), title: v.string() }))),
   working: v.optional(v.string()), // the working line: what the CLI is doing in the background
   earliestSeq: v.optional(v.number()), // seq of the thread's first text message, for "Load earlier messages"
+  // Who else can read the thread on the website (API 7; docs/website.md,
+  // "Sharing"): anyone with the /s/<slug> link, or only the people listed,
+  // who sign in with a code emailed to them. Absent: only Mike.
+  share: v.optional(shareField),
   // The approval or question the thread is waiting on, if any (step 2).
   pendingApproval: v.optional(
     v.union(
@@ -86,6 +99,7 @@ export default defineSchema({
   // at the Mac; it goes out if he leaves while the thread still needs him.
   threads: defineTable({ ...threadFields, view: v.union(...views.map((x) => v.literal(x))), pushedAt: v.optional(v.number()), pushHeldAt: v.optional(v.number()) })
     .index('by_threadId', ['threadId'])
+    .index('by_share_slug', ['share.slug'])
     .index('by_runnerId', ['runnerId'])
     .index('by_view_activity', ['view', 'lastActivityMs']),
 
@@ -233,6 +247,33 @@ export default defineSchema({
     // (API 4): base64 of 32 bytes, made on the phone and sent only here.
     pushKey: v.optional(v.string()),
   }).index('by_apnsToken', ['apnsToken']),
+
+  // Sign-in codes for a thread shared with specific people (share.ts): the
+  // SHA-256 of slug, email and the six digits, never the digits. One row
+  // per code sent; a code is good for 10 minutes and five tries.
+  shareCodes: defineTable({
+    slug: v.string(),
+    email: v.string(),
+    hash: v.string(),
+    createdAt: v.number(),
+    expiresAt: v.number(),
+    attempts: v.number(),
+  })
+    .index('by_slug_email', ['slug', 'email'])
+    .index('by_expiresAt', ['expiresAt']),
+
+  // A browser signed in to one shared thread as one of its people. Only
+  // the token's hash is kept. Taking the person off the list, or a new
+  // link, shuts it out at once (share:view checks both every time).
+  shareViewers: defineTable({
+    slug: v.string(),
+    email: v.string(),
+    hash: v.string(),
+    createdAt: v.number(),
+    expiresAt: v.number(),
+  })
+    .index('by_hash', ['hash'])
+    .index('by_expiresAt', ['expiresAt']),
 
   // This backend's registration with the push relay (docs/push-relay.md),
   // made the first time a push goes that way. One row.
