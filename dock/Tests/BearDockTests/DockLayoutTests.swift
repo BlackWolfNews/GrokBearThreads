@@ -215,3 +215,75 @@ private func threeColumns() -> DockLayout {
     // Nothing available: drawn as it is, for the app's own note.
     #expect(GroupView.visible(group) { _ in false } == group)
 }
+
+// MARK: Windows of their own
+
+@Test func floatingTakesAPanelOutOfTheTreeButKeepsItOpen() {
+    var layout = threeColumns()
+    let frame = CGRect(x: 100, y: 200, width: 400, height: 300)
+    layout.float("highlights", frame: frame)
+    #expect(layout.root == h("root", [
+        g("left", ["threads"]),
+        g("mid", ["transcript"]),
+        g("cx", ["convex"]),
+    ], [0.25, 0.5, 0.25]))
+    #expect(layout.floating == [DockFloat(panel: "highlights", frame: frame)])
+    #expect(layout.contains("highlights"))
+    #expect(layout.group(containing: "highlights") == nil)
+    #expect(layout.panels.last == "highlights")
+    #expect(layout.summary.hasSuffix(" + window[highlights]"))
+}
+
+@Test func floatingAgainOnlyMovesTheWindow() {
+    var layout = threeColumns()
+    layout.float("convex", frame: CGRect(x: 0, y: 0, width: 300, height: 300))
+    layout.float("convex", frame: CGRect(x: 50, y: 60, width: 320, height: 340))
+    #expect(layout.floating == [DockFloat(panel: "convex", frame: CGRect(x: 50, y: 60, width: 320, height: 340))])
+}
+
+@Test func theLastPanelInTheDockCantFloat() {
+    var layout = DockLayout(root: g("only", ["transcript"]))
+    #expect(!layout.canFloat("transcript"))
+    layout.float("transcript", frame: .zero)
+    #expect(layout.floating.isEmpty)
+    #expect(layout.root == g("only", ["transcript"]))
+}
+
+@Test func aFloatingPanelDocksBackAnywhereButASwap() {
+    var layout = threeColumns()
+    layout.float("threads", frame: .zero)
+    #expect(layout.canDrop("threads", .tab(group: "mid")))
+    #expect(layout.canDrop("threads", .edge(group: "mid", .left)))
+    #expect(layout.canDrop("threads", .window(.left)))
+    #expect(!layout.canDrop("threads", .swap(group: "mid")))
+    layout.move("threads", .edge(group: "hl", .top), newID: ids())
+    #expect(layout.floating.isEmpty)
+    #expect(layout.group(containing: "threads")?.id == "n1")
+}
+
+@Test func closingAFloatingPanelClosesItsWindow() {
+    var layout = threeColumns()
+    layout.float("convex", frame: .zero)
+    layout.close("convex")
+    #expect(layout.floating.isEmpty)
+    #expect(!layout.contains("convex"))
+}
+
+@Test func layoutsSavedBeforeWindowsStillLoad() throws {
+    var old = try JSONSerialization.jsonObject(with: JSONEncoder().encode(threeColumns())) as! [String: Any]
+    old.removeValue(forKey: "floating")
+    let decoded = try JSONDecoder().decode(DockLayout.self, from: JSONSerialization.data(withJSONObject: old))
+    #expect(decoded.floating.isEmpty)
+    var floated = threeColumns()
+    floated.float("convex", frame: CGRect(x: 1, y: 2, width: 3, height: 4))
+    #expect(try JSONDecoder().decode(DockLayout.self, from: JSONEncoder().encode(floated)) == floated)
+}
+
+@Test func putBackAlongASideComesBackTheSizeItWas() {
+    var layout = DockLayout(root: h("root", [g("left", ["threads"]), g("mid", ["transcript"])], [0.3, 0.7]))
+    layout.float("transcript", frame: .zero, home: .window(.right), share: 0.7)
+    layout.move("transcript", .window(.right), newID: ids())
+    guard case .split(let s) = layout.root else { Issue.record("expected a split"); return }
+    #expect(s.children == [g("left", ["threads"]), g("n1", ["transcript"])])
+    #expect(abs(s.fractions[1] - 0.7) < 0.0001)
+}

@@ -39,6 +39,17 @@ other part of a bar (title, tab or empty space) moves its panel.
 - **Along the window's own edge** (the outer 22 points) the panel docks
   across the whole side.
 - On drop the ghost flies into its new spot; dropped anywhere else it flies home.
+- **Windows of their own.** Drag a panel out past the edge of the window, or
+  onto the compass's Window button, and an outline shows the window it would
+  open as; let go and it's there. Right-click a panel for Open in New Window
+  too. The window has the panel's own bar: drag it back over the main
+  window and the drop targets show as for any other panel (the window goes
+  see-through so you can see them). Its menu's Put Back in Main Window
+  docks it where it came from, at the size it was. Its red button closes the
+  panel, or puts back one the app always keeps. The layout keeps them in
+  `floating`, with each window's frame, so they open again next launch.
+  `DockOptions.windowContent` gives a window what the app's main window gives
+  its views (Threadbear's model in the environment).
 - **Titles can be hidden** per panel: right-click a title or tab, Hide
   Title. The panel then has no bar while it's on its own (the demo's Threads
   starts that way); a thin strip along its top shows a grab handle on hover,
@@ -61,6 +72,9 @@ through the app, in a test window that takes the first click so the app
 needn't be active (see `ScriptedEvents.swift`). Add `BEARDOCK_FRESH=1` to
 start from the default layout without saving, `BEARDOCK_QUIT=1` to quit at
 the end, and `BEARDOCK_LOG=1` to print what each drag picked up:
+
+`others <prefix>` captures each of the app's other windows (a panel's own,
+or the outline while a drag would make one).
 
 ```sh
 BEARDOCK_FRESH=1 BEARDOCK_QUIT=1 BEARDOCK_LOG=1 \

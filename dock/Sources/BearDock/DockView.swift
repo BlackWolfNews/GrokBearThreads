@@ -52,6 +52,12 @@ public struct DockOptions {
     public var cornerMovesWindow = false
     /// The app's tooltips, for an app whose `.help` doesn't show.
     public var tip: @MainActor (AnyView, String) -> AnyView = { view, text in AnyView(view.help(text)) }
+    /// Wraps a panel in a window of its own, to give it what the app's
+    /// main window gives its views (its model in the environment, say),
+    /// as a new window doesn't inherit any of that.
+    public var windowContent: @MainActor (AnyView) -> AnyView = { $0 }
+    /// Called on a panel's window of its own as it's made, before it shows.
+    public var prepareWindow: @MainActor (NSWindow) -> Void = { _ in }
 
     public init() {}
 }
@@ -107,10 +113,21 @@ public struct DockView: View {
             }
             .coordinateSpace(.named(DockSpace.name))
             .onGeometryChange(for: CGRect.self) { CGRect(origin: .zero, size: $0.size) } action: { controller.bounds = $0 }
+            .background(DockAnchor(controller: controller))
+            // Panels in windows of their own: opened (again, at launch),
+            // moved and closed as the layout says.
+            .onAppear { syncWindows() }
+            .onChange(of: controller.layout.floating) { syncWindows() }
             .environment(controller)
             .environment(\.dockContent, content)
             .environment(\.dockOptions, options)
             .environment(\.dockNamespace, space)
+    }
+
+    private func syncWindows() {
+        controller.windows.content = content
+        controller.windows.options = options
+        controller.windows.sync()
     }
 }
 
@@ -343,7 +360,7 @@ func dragGesture(controller: DockController, panel: PanelID) -> some Gesture {
 /// panel's buttons. A title, a tab or the rest of the bar drags its panel;
 /// in the bar under the traffic lights, the room left for them drags the
 /// window.
-private struct GroupHeader: View {
+struct GroupHeader: View {
     let group: DockGroup
     var leading: CGFloat = 0
     var movesWindow = false
@@ -479,7 +496,7 @@ private struct TabItem: View {
 
 /// Right-click on a title, a tab, the strip of a panel without a title, or
 /// a panel's background.
-private struct PanelMenu: View {
+struct PanelMenu: View {
     let panel: PanelID
     let tabbed: Bool
     @Environment(DockController.self) private var controller
@@ -491,6 +508,11 @@ private struct PanelMenu: View {
         } else {
             // With tabs the bar has to stay, so say when it'll take effect.
             Button(tabbed ? "Hide Title When on Its Own" : "Hide Title", systemImage: "eye.slash") { controller.setTitleHidden(panel, true) }
+        }
+        if controller.layout.isFloating(panel) {
+            Button("Put Back in Main Window", systemImage: "rectangle.portrait.and.arrow.forward") { controller.putBack(panel) }
+        } else if controller.layout.canFloat(panel) {
+            Button("Open in New Window", systemImage: "macwindow.badge.plus") { controller.openInWindow(panel) }
         }
         if content.closable(panel) {
             Divider()

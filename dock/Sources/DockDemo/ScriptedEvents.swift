@@ -7,6 +7,7 @@ import SwiftUI
 /// Points are in the window's frame, top-left origin, as in a screenshot.
 /// Steps: down x y | drag x y (in ten moves) | up | right x y | esc | wait ms
 /// | shot path (the window) | screen path (its area of the screen, menus included)
+/// | others prefix (each of the app's other windows: a panel's own, the outline)
 @MainActor
 enum ScriptedEvents {
     /// The test window's own DemoView would start it again.
@@ -73,6 +74,17 @@ enum ScriptedEvents {
                 }
             case "wait":
                 try? await Task.sleep(for: .milliseconds(Int(a[1]) ?? 0))
+            case "others":
+                // Every other window of the app on screen (a panel's window
+                // of its own, the outline of one), as <prefix>-1.png and on.
+                let others = NSApp.windows.filter { $0 !== window && $0.isVisible && $0.title != "BearDock" }
+                for (i, w) in others.enumerated() {
+                    let p = Process()
+                    p.executableURL = URL(fileURLWithPath: "/usr/sbin/screencapture")
+                    p.arguments = ["-x", "-o", "-l", "\(w.windowNumber)", "\(a[1])-\(i + 1).png"]
+                    try? p.run()
+                    p.waitUntilExit()
+                }
             case "shot":
                 let p = Process()
                 p.executableURL = URL(fileURLWithPath: "/usr/sbin/screencapture")

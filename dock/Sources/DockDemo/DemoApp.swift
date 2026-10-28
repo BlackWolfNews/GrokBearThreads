@@ -89,13 +89,23 @@ enum Demo {
 struct DemoView: View {
     @State private var dock: DockController = {
         let c = DockController(layout: Demo.saved() ?? Demo.starting)
-        c.onChange = Demo.save
+        c.onChange = { layout in
+            if ProcessInfo.processInfo.environment["BEARDOCK_LOG"] != nil { print("layout \(layout.summary)") }
+            Demo.save(layout)
+        }
         return c
     }()
 
+    private static var options: DockOptions {
+        var o = DockOptions()
+        // A panel's window of its own gets the demo's look too.
+        o.windowContent = { AnyView($0.preferredColorScheme(.dark)) }
+        return o
+    }
+
     var body: some View {
         let closed = Demo.all.filter { !dock.layout.contains($0) }
-        DockView(controller: dock, title: Demo.title, symbol: Demo.symbol) { panel in
+        DockView(controller: dock, options: Self.options, title: Demo.title, symbol: Demo.symbol) { panel in
             MockPanel(panel: panel)
         }
         .toolbar {

@@ -76,7 +76,7 @@ extension AppModel {
             #if DEBUG
             if Automation.instanceId != nil { return }
             #endif
-            NSApp.windows.first { $0.isVisible && !($0 is ReviewNativeWindow) && $0.frame.width > 600 }?.makeKeyAndOrderFront(nil)
+            NSApp.windows.first { $0.isVisible && !($0 is ReviewNativeWindow) && !($0 is DockPanelWindow) && $0.frame.width > 600 }?.makeKeyAndOrderFront(nil)
         })
         controller.onClose = { [weak self] in self?.reviewWindows.removeValue(forKey: key) }
         reviewWindows[key] = controller

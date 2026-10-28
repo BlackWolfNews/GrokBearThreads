@@ -1,3 +1,4 @@
+import BearDock
 import AppKit
 import ThreadbearCore
 import os
@@ -36,7 +37,7 @@ final class PerfRunner: NSObject {
         fflush(stdout)
     }
 
-    private var window: NSWindow? { NSApp.windows.first { $0.isVisible && $0.contentView != nil && $0.title != "" } ?? NSApp.windows.first }
+    private var window: NSWindow? { NSApp.windows.first { $0.isVisible && $0.contentView != nil && $0.title != "" && !($0 is DockPanelWindow) } ?? NSApp.windows.first }
 
     private func run() async {
         // Wait for the runner and the thread list.

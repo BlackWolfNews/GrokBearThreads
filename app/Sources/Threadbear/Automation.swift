@@ -1,3 +1,4 @@
+import BearDock
 #if DEBUG
 import AppKit
 import BearDock
@@ -137,7 +138,7 @@ enum Automation {
     }
 
     static var mainWindow: NSWindow? {
-        NSApp.windows.first { $0.isVisible && $0.contentView != nil && $0.frame.width > 600 }
+        NSApp.windows.first { $0.isVisible && $0.contentView != nil && $0.frame.width > 600 && !($0 is DockPanelWindow) }
     }
 
     private static func handle(_ text: String, app: AppModel) {
@@ -397,6 +398,20 @@ enum Automation {
             // A beat for the pane (and a web view) to appear.
             try? await Task.sleep(for: .milliseconds(200))
             return "ok \(app.showsPanels(for: thread) ? "showing \(app.paneSection(for: thread).id)" : "hidden")"
+        case "float":
+            // {"cmd":"float","id":"threadbear.highlights"} opens a panel in a
+            // window of its own, as its menu's Open in New Window does;
+            // {"cmd":"float","id":…,"back":true} puts it back in the dock.
+            guard let id = c["id"] as? String else { return "error float needs an id" }
+            if c["back"] as? Bool == true {
+                guard app.dock.layout.isFloating(id) else { return "error \(id) isn't in a window of its own" }
+                app.dock.putBack(id)
+            } else {
+                guard app.dock.layout.canFloat(id) else { return "error \(id) can't go into a window of its own (not in the dock, or the last panel there)" }
+                app.dock.openInWindow(id)
+            }
+            try? await Task.sleep(for: .milliseconds(300))
+            return "ok \(app.dock.layout.summary)"
         case "preview":
             // {"cmd":"preview","path":"/abs/file.md"} or {"cmd":"preview",
             // "url":"http://localhost:3000"} opens it in the selected
@@ -630,6 +645,11 @@ enum Automation {
             if c["sheet"] as? Bool == true {
                 guard let sheet = window.attachedSheet else { return "error no sheet" }
                 window = sheet
+            }
+            // {"panel": id}: a panel's window of its own (see `float`).
+            if let id = c["panel"] as? String {
+                guard let panel = NSApp.windows.first(where: { ($0 as? DockPanelWindow)?.panel == id && $0.isVisible }) else { return "error \(id) has no window of its own" }
+                window = panel
             }
             // {"settings": true}: the Settings window (open it with `settings`).
             if c["settings"] as? Bool == true {

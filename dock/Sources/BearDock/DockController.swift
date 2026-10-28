@@ -7,11 +7,14 @@ public enum CompassItem: Hashable, Sendable {
     case tab
     case split(DockEdge)
     case swap
+    /// Out of the dock into a window of its own.
+    case window
 
     var label: String {
         switch self {
         case .tab: "Add as a tab"
         case .swap: "Swap places"
+        case .window: "Open in a new window"
         case .split(.left): "Dock on the left"
         case .split(.right): "Dock on the right"
         case .split(.top): "Dock above"
@@ -28,6 +31,9 @@ struct DropTarget: Equatable {
     var preview: CGRect
     /// The compass, while the pointer is over the middle of a group.
     var compass: CompassState?
+    /// Set when letting go would open the panel in a window of its own:
+    /// that window's frame on screen. `drop` is nil then.
+    var float: CGRect?
 }
 
 struct CompassState: Equatable {
@@ -49,6 +55,10 @@ struct DragState: Equatable {
     var location: CGPoint
     var lifted = false
     var target: DropTarget?
+    /// A panel in a window of its own, dragged by its title: the window
+    /// itself moves with the pointer, so there's no ghost, and it can be
+    /// dropped back into the dock. The window's frame when it started.
+    var window: CGRect?
 }
 
 /// The ghost flying to where the panel landed (or back home), after the drop.
@@ -77,6 +87,10 @@ public final class DockController {
     /// Set by Escape until the gesture that was cancelled ends.
     @ObservationIgnored private var cancelled = false
     @ObservationIgnored private var escapeMonitor: Any?
+    /// A view filling the dock, for turning its coordinates into the screen's.
+    @ObservationIgnored weak var anchor: NSView?
+    /// The panels in windows of their own, and the outline of one about to be.
+    @ObservationIgnored lazy var windows = DockWindows(controller: self)
 
     // Feel. Tuned by eye in the demo.
     /// How far in from a group's side, as a share of its size, counts as that side.
@@ -85,6 +99,9 @@ public final class DockController {
     static let windowBand: CGFloat = 22
     /// The ghost's width once lifted, within limits.
     static let ghostWidth: CGFloat = 240
+    /// A new window takes the panel's size within these.
+    static let windowMin = CGSize(width: 320, height: 260)
+    static let windowMax = CGSize(width: 760, height: 680)
     static let lift = Animation.spring(response: 0.32, dampingFraction: 0.72)
     static let settle = Animation.spring(response: 0.34, dampingFraction: 0.86)
     static let track = Animation.snappy(duration: 0.16)
@@ -100,6 +117,10 @@ public final class DockController {
     public func dragChanged(panel: PanelID, start: CGPoint, location: CGPoint) {
         // Escape put it back; the gesture keeps reporting until the button's up.
         if cancelled { return }
+        if layout.isFloating(panel) {
+            windowDragChanged(panel: panel)
+            return
+        }
         if drag == nil {
             guard landing == nil, let group = layout.group(containing: panel), let frame = frames[group.id] else { return }
             // A tab that isn't showing comes to the front as it's picked up.
@@ -117,10 +138,51 @@ public final class DockController {
             withAnimation(Self.lift) { drag?.lifted = true }
         }
         drag?.location = location
-        let target = target(for: panel, at: location)
+        var target = target(for: panel, at: location)
+        // Outside the window altogether, or on the compass's New Window: a
+        // window of its own, there.
+        let wantsWindow = target?.compass?.hovered == .window || (target == nil && isOutsideWindow(location))
+        if wantsWindow, let d = drag, layout.canFloat(panel) {
+            target = DropTarget(drop: nil, preview: .zero, compass: target?.compass, float: floatFrame(for: d, at: location))
+        }
         if target != drag?.target {
             withAnimation(Self.track) { drag?.target = target }
         }
+        windows.showOutline(panel: panel, frame: target?.float)
+    }
+
+    /// A panel in a window of its own, dragged by its title: the window
+    /// follows the pointer, and over the dock the drop targets show as for
+    /// any other panel.
+    private func windowDragChanged(panel: PanelID) {
+        guard let window = windows.window(for: panel) else { return }
+        let mouse = NSEvent.mouseLocation
+        if drag == nil {
+            guard landing == nil else { return }
+            let f = window.frame
+            drag = DragState(
+                panel: panel,
+                sourceGroup: "",
+                sourceFrame: .zero,
+                // Kept as an offset from the window's corner, in points.
+                grab: CGPoint(x: mouse.x - f.minX, y: mouse.y - f.minY),
+                location: .zero,
+                lifted: true,
+                window: f
+            )
+            NSCursor.closedHand.push()
+            watchForEscape()
+        }
+        guard let d = drag else { return }
+        window.setFrameOrigin(CGPoint(x: mouse.x - d.grab.x, y: mouse.y - d.grab.y))
+        let location = dockPoint(screen: mouse)
+        if let location { drag?.location = location }
+        let target = location.flatMap { self.target(for: panel, at: $0) }
+        if target != drag?.target {
+            withAnimation(Self.track) { drag?.target = target }
+        }
+        // See-through over a place to dock, so the targets under it show.
+        window.alphaValue = target?.drop != nil || target?.compass != nil ? 0.5 : 1
     }
 
     public func dragEnded() {
@@ -129,19 +191,58 @@ public final class DockController {
             return
         }
         guard let d = drag else { return }
-        finish(d, drop: d.target?.drop)
+        if d.window != nil {
+            finishWindowDrag(d, cancelled: false)
+        } else if let frame = d.target?.float {
+            NSCursor.pop()
+            stopWatchingForEscape()
+            windows.showOutline(panel: d.panel, frame: nil)
+            windows.focusNext = d.panel
+            withAnimation(Self.settle) {
+                drag = nil
+                let home = home(of: d.panel)
+                layout.float(d.panel, frame: frame, home: home.drop, share: home.share)
+            }
+        } else {
+            finish(d, drop: d.target?.drop)
+        }
     }
 
     /// Escape, mid-drag: the panel flies home and the rest of the gesture is ignored.
     public func cancelDrag() {
         guard let d = drag else { return }
         cancelled = true
-        finish(d, drop: nil)
+        if d.window != nil {
+            finishWindowDrag(d, cancelled: true)
+        } else {
+            finish(d, drop: nil)
+        }
+    }
+
+    /// Lets go of a window's panel: into the dock where it's pointing, else
+    /// the window stays where it was dragged (or goes back, after Escape).
+    private func finishWindowDrag(_ d: DragState, cancelled: Bool) {
+        NSCursor.pop()
+        stopWatchingForEscape()
+        let window = windows.window(for: d.panel)
+        window?.alphaValue = 1
+        if cancelled, let from = d.window {
+            window?.setFrame(from, display: true, animate: true)
+        }
+        withAnimation(Self.settle) {
+            drag = nil
+            if !cancelled, let drop = d.target?.drop {
+                layout.move(d.panel, drop)
+            } else if let frame = window?.frame {
+                layout.float(d.panel, frame: frame)
+            }
+        }
     }
 
     private func finish(_ d: DragState, drop: DockDrop?) {
         NSCursor.pop()
         stopWatchingForEscape()
+        windows.showOutline(panel: d.panel, frame: nil)
         let size = d.sourceFrame.size
         if let drop, let to = d.target?.preview {
             landing = Landing(panel: d.panel, sourceSize: size, to: to)
@@ -187,6 +288,76 @@ public final class DockController {
         layout.group(containing: panel).flatMap { frames[$0.id] }
     }
 
+    // MARK: Windows of their own
+
+    /// Right-click, Open in New Window: the panel in a window of its own,
+    /// just down and to the right of where it was.
+    public func openInWindow(_ panel: PanelID) {
+        guard layout.canFloat(panel), let frame = frame(of: panel) else { return }
+        let size = Self.windowSize(for: frame.size)
+        let at = CGRect(x: frame.minX + 30, y: frame.minY + 30, width: size.width, height: size.height)
+        guard let screen = screenRect(at) else { return }
+        windows.focusNext = panel
+        let home = home(of: panel)
+        withAnimation(Self.settle) { layout.float(panel, frame: screen, home: home.drop, share: home.share) }
+    }
+
+    /// From a window of its own back into the dock, where it came from if
+    /// that's still there.
+    public func putBack(_ panel: PanelID) {
+        guard let float = layout.floating.first(where: { $0.panel == panel }) else { return }
+        let drop = float.home.flatMap { layout.canDrop(panel, $0) ? $0 : nil } ?? .window(.right)
+        withAnimation(Self.settle) { layout.move(panel, drop) }
+    }
+
+    /// Where Put Back docks a panel: as a tab of the group it's leaving if
+    /// that has others, else along the side of the window it's nearest, at
+    /// the share of the window it has now.
+    func home(of panel: PanelID) -> (drop: DockDrop?, share: Double?) {
+        guard let group = layout.group(containing: panel) else { return (nil, nil) }
+        if group.panels.count > 1 { return (.tab(group: group.id), nil) }
+        guard let f = frames[group.id], bounds.width > 0, bounds.height > 0 else { return (nil, nil) }
+        let sides: [(DockEdge, CGFloat)] = [
+            (.left, f.midX - bounds.minX), (.right, bounds.maxX - f.midX),
+            (.top, f.midY - bounds.minY), (.bottom, bounds.maxY - f.midY),
+        ]
+        let edge = sides.min { $0.1 < $1.1 }!.0
+        let share = edge.axis == .horizontal ? f.width / bounds.width : f.height / bounds.height
+        return (.window(edge), Double(share))
+    }
+
+    static func windowSize(for size: CGSize) -> CGSize {
+        CGSize(width: min(max(size.width, windowMin.width), windowMax.width),
+               height: min(max(size.height, windowMin.height), windowMax.height))
+    }
+
+    /// The window a dragged panel would open as, on screen: its own size
+    /// (within limits), with the spot it was picked up by under the pointer.
+    func floatFrame(for d: DragState, at p: CGPoint) -> CGRect? {
+        let size = Self.windowSize(for: d.sourceFrame.size)
+        let rect = CGRect(x: p.x - d.grab.x * size.width, y: p.y - d.grab.y * size.height, width: size.width, height: size.height)
+        return screenRect(rect)
+    }
+
+    /// A rect in the dock's coordinates, on screen (origin bottom-left).
+    func screenRect(_ rect: CGRect) -> CGRect? {
+        guard let anchor, let window = anchor.window else { return nil }
+        return window.convertToScreen(anchor.convert(rect, to: nil))
+    }
+
+    /// A point on screen in the dock's coordinates.
+    func dockPoint(screen p: CGPoint) -> CGPoint? {
+        guard let anchor, let window = anchor.window else { return nil }
+        return anchor.convert(window.convertPoint(fromScreen: p), from: nil)
+    }
+
+    /// Past the edge of the window the dock's in, not just the dock (the
+    /// app may have more beside it, like Threadbear's rail).
+    func isOutsideWindow(_ p: CGPoint) -> Bool {
+        guard let anchor, let content = anchor.window?.contentView else { return !bounds.contains(p) }
+        return !anchor.convert(content.bounds, from: content).contains(p)
+    }
+
     // MARK: Other changes
 
     public func close(_ panel: PanelID) {
@@ -201,14 +372,18 @@ public final class DockController {
         layout.select(panel)
     }
 
-    /// In the layout and the tab showing in its group.
+    /// In the layout and the tab showing in its group, or in a window of its own.
     public func isShowing(_ panel: PanelID) -> Bool {
-        layout.group(containing: panel)?.selected == panel
+        layout.isFloating(panel) || layout.group(containing: panel)?.selected == panel
     }
 
     /// Brings a panel up: its tab if it's in the layout, else opened as a
     /// tab beside the first of `near` that's open, else at `fallback`.
     public func show(_ panel: PanelID, near: [PanelID] = [], fallback: DockDrop = .window(.right)) {
+        if layout.isFloating(panel) {
+            windows.window(for: panel)?.makeKeyAndOrderFront(nil)
+            return
+        }
         if let group = layout.group(containing: panel) {
             if group.selected != panel { layout.select(panel) }
             return
@@ -235,6 +410,7 @@ public final class DockController {
     // MARK: Hit testing
 
     func target(for panel: PanelID, at p: CGPoint) -> DropTarget? {
+        if isOutsideWindow(p) { return nil }
         // The window's own sides first: a thin strip all along each.
         if bounds.width > 0, let edge = windowEdge(at: p), layout.canDrop(panel, .window(edge)) {
             return DropTarget(drop: .window(edge), preview: Self.slice(bounds, edge, 0.25))
@@ -258,13 +434,17 @@ public final class DockController {
         }
 
         // The middle: the compass, and whatever it's on (a tab by default).
-        let disabled = Set(items.map(\.0).filter { !layout.canDrop(panel, Self.drop(for: $0, group: group.id)) })
+        let disabled = Set(items.map(\.0).filter { item in
+            if item == .window { return !layout.canFloat(panel) }
+            return !layout.canDrop(panel, Self.drop(for: item, group: group.id))
+        })
         let hovered = items.first { $0.1.contains(p) }?.0
         let item = hovered ?? .tab
-        let drop = disabled.contains(item) ? nil : Self.drop(for: item, group: group.id)
+        // New window isn't a place in the dock: dragChanged works out its frame.
+        let drop = disabled.contains(item) || item == .window ? nil : Self.drop(for: item, group: group.id)
         let preview: CGRect = switch item {
         case .split(let edge): Self.slice(frame, edge, 0.5)
-        case .tab, .swap: frame
+        case .tab, .swap, .window: frame
         }
         return DropTarget(
             drop: drop,
@@ -284,20 +464,22 @@ public final class DockController {
 
     static func drop(for item: CompassItem, group: String) -> DockDrop {
         switch item {
-        case .tab: .tab(group: group)
+        case .tab, .window: .tab(group: group)
         case .swap: .swap(group: group)
         case .split(let edge): .edge(group: group, edge)
         }
     }
 
     /// The compass's buttons around a group's centre: a cross of five, and
-    /// Swap under it.
+    /// Swap and New Window side by side under it.
     static func compassItems(center c: CGPoint) -> [(CompassItem, CGRect)] {
         let s = Compass.button, step = Compass.button + Compass.gap
         func at(_ dx: CGFloat, _ dy: CGFloat) -> CGRect {
             CGRect(x: c.x + dx * step - s / 2, y: c.y + dy * step - s / 2, width: s, height: s)
         }
-        let swap = CGRect(x: c.x - Compass.swapWidth / 2, y: c.y + 2 * step - s / 2 + 6, width: Compass.swapWidth, height: Compass.swapHeight)
+        let y = c.y + 2 * step - s / 2 + 6
+        let swap = CGRect(x: c.x - Compass.swapWidth - Compass.gap / 2, y: y, width: Compass.swapWidth, height: Compass.swapHeight)
+        let window = CGRect(x: c.x + Compass.gap / 2, y: y, width: Compass.swapWidth, height: Compass.swapHeight)
         return [
             (.tab, at(0, 0)),
             (.split(.top), at(0, -1)),
@@ -305,6 +487,7 @@ public final class DockController {
             (.split(.left), at(-1, 0)),
             (.split(.right), at(1, 0)),
             (.swap, swap),
+            (.window, window),
         ]
     }
 

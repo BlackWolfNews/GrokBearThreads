@@ -15,8 +15,10 @@ struct DragOverlay: View {
             if let ghost = ghost {
                 Ghost(panel: ghost.panel, sourceSize: ghost.sourceSize, rect: ghost.rect, lifted: ghost.lifted)
                     .id(ghost.panel)
-                    // See-through over the compass, so its choices stay readable.
-                    .opacity(controller.drag?.target?.compass == nil ? 1 : 0.45)
+                    // See-through over the compass, so its choices stay
+                    // readable, and gone while it would open as a window:
+                    // the window's outline shows where instead.
+                    .opacity(controller.drag?.target?.compass != nil ? 0.45 : controller.drag?.target?.float != nil ? 0 : 1)
                     .transition(.opacity)
             }
             // Over the ghost: the pointer is on it, so the ghost would hide it.
@@ -30,6 +32,8 @@ struct DragOverlay: View {
 
     private var ghost: (panel: PanelID, sourceSize: CGSize, rect: CGRect, lifted: Bool)? {
         if let d = controller.drag {
+            // A window's panel: the window itself is what's moving.
+            if d.window != nil { return nil }
             return (d.panel, d.sourceFrame.size, controller.ghostRect(for: d), d.lifted)
         }
         if let l = controller.landing {
@@ -123,6 +127,10 @@ private struct CompassButton: View {
         switch item {
         case .swap:
             Label("Swap", systemImage: "arrow.left.arrow.right")
+                .font(.system(size: 11, weight: .semibold))
+                .labelStyle(.titleAndIcon)
+        case .window:
+            Label("Window", systemImage: "macwindow.badge.plus")
                 .font(.system(size: 11, weight: .semibold))
                 .labelStyle(.titleAndIcon)
         case .tab:

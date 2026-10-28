@@ -195,6 +195,13 @@ struct RootView: View {
         o.trafficLights = 78
         o.cornerMovesWindow = true
         o.tip = { view, text in AnyView(view.tip(text)) }
+        // A panel dragged out into a window of its own: the same model as
+        // the main window's views.
+        o.windowContent = { AnyView($0.environment(AppModel.shared)) }
+        #if DEBUG
+        // A scripted run's panel windows stay behind Mike's, as its main one does.
+        o.prepareWindow = { if Automation.instanceId != nil { $0.tuckBehind() } }
+        #endif
         return o
     }
 

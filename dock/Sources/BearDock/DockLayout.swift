@@ -63,7 +63,7 @@ public indirect enum DockNode: Codable, Equatable, Sendable, Identifiable {
 }
 
 /// Where a dragged panel lands.
-public enum DockDrop: Equatable, Sendable, Hashable {
+public enum DockDrop: Codable, Equatable, Sendable, Hashable {
     /// Beside a group, splitting the space it had.
     case edge(group: String, DockEdge)
     /// Into a group, as another tab.
@@ -74,16 +74,41 @@ public enum DockDrop: Equatable, Sendable, Hashable {
     case window(DockEdge)
 }
 
+/// A panel taken out of the dock into a window of its own.
+public struct DockFloat: Codable, Equatable, Sendable {
+    public var panel: PanelID
+    /// The window's frame on screen, AppKit's way up (origin bottom-left),
+    /// so it opens there again next launch.
+    public var frame: CGRect
+    /// Where "Put Back" docks it: as a tab in the group it left, or along
+    /// the side of the window it was nearest.
+    public var home: DockDrop?
+    /// For a home along a side of the window: the share of the window it
+    /// had across that way, so it comes back the size it was.
+    public var share: Double?
+
+    public init(panel: PanelID, frame: CGRect, home: DockDrop? = nil, share: Double? = nil) {
+        self.panel = panel
+        self.frame = frame
+        self.home = home
+        self.share = share
+    }
+}
+
 public struct DockLayout: Codable, Equatable, Sendable {
     public var root: DockNode
+    /// Panels in windows of their own, oldest first. Each is still open
+    /// (`contains` says so) but in no group.
+    public var floating: [DockFloat]
     /// Panels that go without a title bar while they're on their own (the
     /// thread list doesn't need "Threads" over it). Kept per panel, not per
     /// place, so it follows the panel when it's moved.
     public var hiddenTitles: Set<PanelID>
 
-    public init(root: DockNode, hiddenTitles: Set<PanelID> = []) {
+    public init(root: DockNode, hiddenTitles: Set<PanelID> = [], floating: [DockFloat] = []) {
         self.root = root
         self.hiddenTitles = hiddenTitles
+        self.floating = floating
     }
 
     public init(from decoder: Decoder) throws {
@@ -91,6 +116,8 @@ public struct DockLayout: Codable, Equatable, Sendable {
         root = try c.decode(DockNode.self, forKey: .root)
         // Not in layouts saved before titles could be hidden.
         hiddenTitles = try c.decodeIfPresent(Set<PanelID>.self, forKey: .hiddenTitles) ?? []
+        // Nor in those saved before panels could have windows of their own.
+        floating = try c.decodeIfPresent([DockFloat].self, forKey: .floating) ?? []
     }
 
     /// Whether a group gets its title bar. Always with tabs: they're how you
@@ -105,10 +132,15 @@ public struct DockLayout: Codable, Equatable, Sendable {
 
     // MARK: Reading
 
-    /// Every panel in the layout, in tree order.
-    public var panels: [PanelID] { Self.panels(in: root) }
+    /// Every panel in the layout, in tree order, then those in windows of
+    /// their own.
+    public var panels: [PanelID] { Self.panels(in: root) + floating.map(\.panel) }
 
-    public func contains(_ panel: PanelID) -> Bool { group(containing: panel) != nil }
+    /// Open, in the dock or a window of its own.
+    public func contains(_ panel: PanelID) -> Bool { group(containing: panel) != nil || isFloating(panel) }
+
+    /// In a window of its own rather than the dock.
+    public func isFloating(_ panel: PanelID) -> Bool { floating.contains { $0.panel == panel } }
 
     public func group(id: String) -> DockGroup? { Self.groups(in: root).first { $0.id == id } }
 
@@ -122,7 +154,11 @@ public struct DockLayout: Codable, Equatable, Sendable {
     /// columns with each child's share, tabs joined by "+" with the one
     /// showing starred, "(no title)" where it's hidden.
     /// `row[threads (no title) 29% | thread 47% | column[highlights+patches* 60% / convex 40%] 24%]`
-    public var summary: String { Self.summary(root, hidden: hiddenTitles) }
+    /// Panels in windows of their own follow, as `+ window[highlights]`.
+    public var summary: String {
+        let tree = Self.summary(root, hidden: hiddenTitles)
+        return floating.isEmpty ? tree : tree + floating.map { " + window[\($0.panel)]" }.joined()
+    }
 
     static func summary(_ node: DockNode, hidden: Set<PanelID>) -> String {
         switch node {
@@ -146,6 +182,15 @@ public struct DockLayout: Codable, Equatable, Sendable {
     /// False for a drop that would leave everything where it is, so the UI
     /// doesn't offer it.
     public func canDrop(_ panel: PanelID, _ drop: DockDrop) -> Bool {
+        if isFloating(panel) {
+            // From a window of its own, back into the dock: anywhere but a
+            // swap, as there's no place in the dock to swap with.
+            switch drop {
+            case .edge(let target, _), .tab(let target): return group(id: target) != nil
+            case .swap: return false
+            case .window: return true
+            }
+        }
         guard let source = group(containing: panel) else { return false }
         switch drop {
         case .edge(let target, _):
@@ -161,12 +206,38 @@ public struct DockLayout: Codable, Equatable, Sendable {
         }
     }
 
+    /// Whether a panel in the dock can go into a window of its own: not the
+    /// last one there, as the main window would have nothing in it.
+    public func canFloat(_ panel: PanelID) -> Bool {
+        guard group(containing: panel) != nil else { return false }
+        if case .group(let g) = root, g.panels == [panel] { return false }
+        return true
+    }
+
     // MARK: Changing
+
+    /// Takes a panel out of the dock into a window of its own at `frame`
+    /// (on screen). For one that's already in a window, just moves it.
+    public mutating func float(_ panel: PanelID, frame: CGRect, home: DockDrop? = nil, share: Double? = nil) {
+        if let i = floating.firstIndex(where: { $0.panel == panel }) {
+            floating[i].frame = frame
+            return
+        }
+        guard canFloat(panel), let rest = Self.removing(panel, from: root) else { return }
+        root = rest
+        floating.append(DockFloat(panel: panel, frame: frame, home: home, share: share))
+    }
 
     /// Moves a panel already in the layout. Does nothing for a drop
     /// `canDrop` refuses. `newID` names any group or split this makes.
     public mutating func move(_ panel: PanelID, _ drop: DockDrop, newID: () -> String = { UUID().uuidString }) {
         guard canDrop(panel, drop) else { return }
+        if let i = floating.firstIndex(where: { $0.panel == panel }) {
+            let float = floating.remove(at: i)
+            // Back home along a side: the size it left at.
+            insert(panel, drop, share: float.home == drop ? float.share : nil, newID: newID)
+            return
+        }
         if case .swap(let target) = drop {
             swap(panel, into: target)
             return
@@ -186,8 +257,13 @@ public struct DockLayout: Codable, Equatable, Sendable {
         }
     }
 
-    /// Takes a panel out. The last panel can't be closed: there'd be no layout left.
+    /// Takes a panel out, closing its window if it has one of its own. The
+    /// last panel in the dock can't be closed: there'd be no layout left.
     public mutating func close(_ panel: PanelID) {
+        if isFloating(panel) {
+            floating.removeAll { $0.panel == panel }
+            return
+        }
         guard let rest = Self.removing(panel, from: root) else { return }
         root = rest
     }
@@ -213,7 +289,9 @@ public struct DockLayout: Codable, Equatable, Sendable {
 
     // MARK: Internals
 
-    private mutating func insert(_ panel: PanelID, _ drop: DockDrop, newID: () -> String) {
+    /// `share`: for a drop along a side of the window, how much of it the
+    /// panel takes; a quarter if nil.
+    private mutating func insert(_ panel: PanelID, _ drop: DockDrop, share: Double? = nil, newID: () -> String) {
         let fresh = DockNode.group(DockGroup(id: newID(), panels: [panel]))
         switch drop {
         case .edge(let target, let edge):
@@ -229,20 +307,22 @@ public struct DockLayout: Codable, Equatable, Sendable {
         case .swap:
             break
         case .window(let edge):
-            // A new outer child takes a quarter; the rest keeps its proportions.
+            // A new outer child takes a quarter (or its old share); the
+            // rest keeps its proportions.
+            let take = min(max(share ?? 0.25, 0.1), 0.9)
             if case .split(var s) = root, s.axis == edge.axis {
-                s.fractions = s.fractions.map { $0 * 0.75 }
+                s.fractions = s.fractions.map { $0 * (1 - take) }
                 if edge.isLeading {
                     s.children.insert(fresh, at: 0)
-                    s.fractions.insert(0.25, at: 0)
+                    s.fractions.insert(take, at: 0)
                 } else {
                     s.children.append(fresh)
-                    s.fractions.append(0.25)
+                    s.fractions.append(take)
                 }
                 root = .split(s)
             } else {
                 let children = edge.isLeading ? [fresh, root] : [root, fresh]
-                let fractions = edge.isLeading ? [0.25, 0.75] : [0.75, 0.25]
+                let fractions = edge.isLeading ? [take, 1 - take] : [1 - take, take]
                 root = .split(DockSplit(id: newID(), axis: edge.axis, children: children, fractions: fractions))
             }
         }
