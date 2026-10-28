@@ -86,6 +86,7 @@ import { SERVER_NAME, approvalTitle } from './threadbear-mcp.ts';
 import { PANEL_ACK_WAIT_MS, PANEL_PLACES, resolvePanel } from './panel-requests.ts';
 import { archiveFromTool, END_TURN_TOOL, endTurnAccepted, needsFromText, needsFromTool } from './needs.ts';
 import type { Needs } from './needs.ts';
+import type { ConnectorsStatus } from './connectors.ts';
 import {
   EMPTY_PATCH_SET,
   findWorktreePatch,
@@ -120,6 +121,7 @@ export type Notification =
   | { method: 'runner.updates'; params: { updates: RunnerUpdates } }
   | { method: 'projects.updated'; params: { projects: Project[] } }
   | { method: 'librarian.updated'; params: { librarian: LibrarianStatus } }
+  | { method: 'connectors.updated'; params: { connectors: ConnectorsStatus } }
   // Only from a draining runner, to the primary (handover.ts).
   | { method: 'drain.handedOver'; params: { threadId: string } }
   | { method: 'drain.usage'; params: { accountId: string; reading: UsageReading } };

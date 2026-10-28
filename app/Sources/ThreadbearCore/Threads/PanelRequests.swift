@@ -7,6 +7,7 @@ public enum RequestedPanel: Equatable, Sendable {
     case section(PaneSection)
     case usage
     case updates
+    case connectors
 }
 
 /// Where a closed panel opens. An open one stays where Mike put it.
@@ -33,6 +34,7 @@ public enum PanelRequests {
         case "patches": return thread.patches.isEmpty ? nil : .section(.patches)
         case "usage": return .usage
         case "updates": return .updates
+        case "connectors": return .connectors
         default: return thread.panels.contains { $0.id == request.panel } ? .section(.panel(request.panel)) : nil
         }
     }

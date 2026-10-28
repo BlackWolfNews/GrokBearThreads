@@ -180,6 +180,11 @@ final class AppModel {
     /// What the librarian is doing, once `librarian.status` has answered;
     /// replaced by `librarian.updated`.
     var librarian: LibrarianStatus?
+    /// The Connectors gateway's services (docs/protocol.md, "Connectors"),
+    /// once `connectors.status` has answered; replaced by
+    /// `connectors.updated`. Nil from a runner that doesn't know about it,
+    /// and then the activity bar has no Connectors icon.
+    var connectors: ConnectorsStatus?
     /// The project page showing in the detail area instead of the thread.
     /// Selecting a thread (or a new one) closes it.
     var openProjectId: String? {
@@ -501,6 +506,7 @@ final class AppModel {
                 servePanelRequest()
                 loadSchedules()
                 loadProjects()
+                loadConnectors()
                 loadSettings()
                 for session in sessions.values where session.state == .loaded {
                     await session.subscribe()
@@ -577,6 +583,8 @@ final class AppModel {
             case .librarianUpdated(let status):
                 librarian = status
                 projectsSupported = true
+            case .connectorsUpdated(let status):
+                connectors = status
             case .settingsUpdated(let settings):
                 receive(settings)
             case .runnerNotice(let level, let message):

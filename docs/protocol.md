@@ -642,6 +642,7 @@ replaces whatever the deltas built up.
 | `projects.delete` | `{ projectId }` | `{}`. Its threads leave it; nothing else is touched |
 | `threads.setProjects` | `{ threadId, add?: string[], remove?: string[] }` | `{ thread: ThreadSummary }`. What Mike does by hand: an added project is pinned (adding one the thread is already in pins it, which is how "keep it here" works), a removed one is remembered so the librarian never puts the thread back in it |
 | `librarian.status` | `{}` | `{ librarian: LibrarianStatus }` |
+| `connectors.status` | `{ refresh?: boolean }` | `{ connectors: ConnectorsStatus }` (see Connectors). `refresh` asks the gateway's `/health` first, unless it did in the last 10 seconds; the app passes it when the Connectors panel opens. A runner from before Connectors answers `-32601` and the app leaves the panel out |
 | `librarian.run` | `{ threadId?: string }` | `{ librarian: LibrarianStatus }`. Queues a look at the thread now (reason `asked`), or with no `threadId`, at every thread it has never looked at (a backfill, newest first) |
 | `librarian.update` | `{ paused?: boolean }` | `{ librarian: LibrarianStatus }` |
 | `pools.list` | `{}` | `{ pools: Pool[] }` (see Pools) |
@@ -696,6 +697,7 @@ still `-32602`.)
 | `schedules.updated` | `{ schedules: Schedule[] }` sent to every connected client whenever any schedule changes (made, edited, run, deleted, or its thread deleted). The whole list, in `schedules.list` order |
 | `projects.updated` | `{ projects: Project[] }` sent to every connected client when any project changes, as `projects.list` with `archived: true` would answer. Thread membership changes come as `thread.updated` |
 | `librarian.updated` | `{ librarian: LibrarianStatus }` sent to every connected client when the librarian's status changes |
+| `connectors.updated` | `{ connectors: ConnectorsStatus }` sent to every connected client when what the Connectors panel would show changes (a service signs out or back in, the gateway stops or starts answering); not when only `checkedAt` moves |
 | `settings.updated` | `{ settings: Settings }` sent to every connected client when a setting or the key changes, and at most once a minute while model calls are adding to the spend |
 | `runner.notice` | `{ level: "info" \| "warning" \| "error", message }`. Also sent straight after the `hello` result for things the client missed (startup problems, a missing `claude` binary) |
 | `runner.updates` | `{ updates: RunnerUpdates }` sent to every connected client when the runner's own update state changes (below). Replaces the one from `hello` |
@@ -1508,19 +1510,20 @@ or resizes a panel that's open: Mike's layout is his.
 
 `panel` is `highlights` or `patches` (the thread's own; Patches only when
 it has patches), one of the thread's `panels` by id or title (any case),
-or `usage` or `updates` (the app's Usage and Updates panels). `where`
+or `usage`, `updates` or `connectors` (the app's Usage, Updates and
+Connectors panels). `where`
 says where a closed one opens: `tab` (a tab beside the thread, which
 closes again when the main panel moves on, as a review's does), `left`,
 `right`, `top` or `bottom` (along that side of the window), or `window`
 (a window of its own). Without it, a closed panel opens where the app
 would put it: a thread's panels beside its other open ones, else down
-the right; Usage and Updates under the threads list. An open panel
+the right; Usage, Updates and Connectors under the threads list. An open panel
 ignores `where`.
 
 ```ts
 type PanelRequest = {
   id: string            // the request's own id
-  panel: string         // "highlights", "patches", "usage", "updates", or one of the thread's panels' ids
+  panel: string         // "highlights", "patches", "usage", "updates", "connectors", or one of the thread's panels' ids
   title: string         // the panel's name: "Highlights", "Convex"
   where?: "tab" | "left" | "right" | "top" | "bottom" | "window"
   at: string            // when the agent asked
@@ -1543,6 +1546,83 @@ panel in front of him now or will when he next looks.
 During a handover the request stays with the thread on the runner that
 has it, and the primary passes `threads.panelShown` on as it does any
 thread's request.
+
+## Connectors
+
+Mike's agents get MCP services from his Connectors gateway on Bruce
+(~/dev/me/connectors) and from claude.ai's connectors on each login.
+Either can need signing in again. The runner watches the gateway so the
+app can show what's signed in, and turns a sign-in error in a thread into
+an ask (below).
+
+**Where the gateway is.** runner.json's `connectors.url` (any URL on it;
+the base is used), else the `connectors` MCP server's `url` in the main
+login's `~/.claude.json` (only that field is read). `connectors.url: ""`
+or `connectors.enabled: false` turns it off, as does
+`THREADBEAR_CONNECTORS_URL=off` (tests); `THREADBEAR_CONNECTORS_URL`
+set to a URL wins over both.
+
+**Status.** The runner asks the gateway's open `GET <base>/health` every
+3 minutes, and when the app passes `refresh` to `connectors.status`
+(the panel opening, or its refresh button). One ask at a time, 5
+seconds at most. The app never calls the gateway itself.
+
+```ts
+type ConnectorsStatus = {
+  // off: no gateway set up. checking: no answer yet. unreachable: the
+  // last ask failed, and error says how in a few words.
+  state: "ok" | "unreachable" | "off" | "checking"
+  url?: string          // the gateway's base, https://host:port
+  checkedAt?: string    // when the last ask finished
+  error?: string
+  version?: string      // the gateway's, from /health
+  release?: string
+  services: ConnectorService[]   // empty unless ok
+}
+
+type ConnectorService = {
+  id: string            // "notion"
+  title: string         // "Notion"; from the id when the gateway sends none
+  // unknown: a state word the runner doesn't know (message says more).
+  state: "connected" | "signed_out" | "connecting" | "error" | "disabled" | "unknown"
+  message?: string
+  connectUrl?: string   // where Mike signs it in; set on anything not connected or disabled
+}
+```
+
+`/health` is read leniently: `upstreams` may be a map of id to state
+word (the first gateway: `ready`, `needs_sign_in`, `idle`, `connecting`,
+`error`, `disabled`) or a list of `{ id, title?, state, message?,
+connectUrl? }`, and unknown fields are ignored. A service with no
+`connectUrl` of its own gets `<base>/admin/connect/<id>`. A relative one
+is made absolute against the base; anything but http(s) is dropped.
+
+The app's Connectors panel lists the services with their state and a
+Connect button (Reconnect for one in `error`) that opens `connectUrl` in
+the browser. Its icon in the activity bar gets the accent dot while a
+service is `signed_out` (only Mike can fix that), and a grey dot while the
+gateway is unreachable or a service is connecting or in error (those
+usually sort themselves out).
+
+**Sign-in errors in a thread.** A tool result from an MCP tool (not
+Threadbear's own, not a shell or a file read) that says a service needs
+signing in is a sign-in problem:
+
+- claude.ai's: `MCP server "claude.ai Gmail" needs you to sign in again`.
+  The service is the name without `claude.ai`; the page is
+  `https://claude.ai/settings/connectors`, signed in as the thread's login.
+- the gateway's: a result from a signed-out service's stub tool
+  `<prefix>__sign_in`, or text like `Notion needs signing in again`. The
+  page is the first URL in the text with `/admin/connect/` in it, else the
+  first URL.
+
+When the thread's agent calls `end_turn` and the turn so far has a
+sign-in problem that no ask covers (an ask covers it when one of its
+links is the page, or its action or why names the service), `end_turn`
+is refused once that turn, with an error result that starts `Not ended
+yet: this turn ran into`, names each service and its page, and asks for
+an ask with that page as a link if the work needs it. Called again, it's
+taken as it is. Nothing new reaches the app: the ask is an ordinary one.
 
 ## Projects
 
@@ -1920,6 +2000,10 @@ Either side may be upgraded first, so each tolerates the other:
 - A newer app talking to an older runner gets `-32601` from `clis.*` and
   leaves the CLI part out, sees no `usage` on accounts and says the numbers
   need a newer runner, and sees no Codex accounts.
+- An app older than Connectors ignores `connectors.updated`, and a
+  `show_panel` for `connectors` waits for Mike's next message as an
+  unknown panel does. A newer app talking to an older runner gets
+  `-32601` from `connectors.status` and leaves the Connectors icon out.
 - An app older than Showing panels ignores `panelRequest`, so a request
   waits until Mike's next message clears it, and `show_panel` says it's
   waiting. A newer app never sees one from an older runner.

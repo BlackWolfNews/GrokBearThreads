@@ -4,6 +4,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { atomicWriteFileSync } from './fsutil.ts';
 import { RELEASE } from './release.ts';
+import { findGateway, gatewayBase } from './connectors.ts';
 import { CLI_POLICIES, isEffortLevel, isProvider, type CliPolicy, type EffortLevel, type Provider } from './protocol.ts';
 
 // <package version>+<release id>, or +source when run from a checkout.
@@ -92,6 +93,9 @@ export type Config = {
   // the name the phone shows for this runner and its id (made once).
   // THREADBEAR_SYNC=off turns it off for tests and dev runners.
   sync: { enabled: boolean; url?: string; name?: string; runnerId?: string };
+  // Mike's Connectors gateway's base URL (connectors.ts), for the app's
+  // Connectors panel. Unset means there's none to watch.
+  connectorsUrl?: string;
 };
 
 export type RunnerJson = {
@@ -122,6 +126,9 @@ export type RunnerJson = {
   followMain?: boolean;
   models?: { pool?: string | null; dailyBudgetUsd?: number; privateFolders?: string[] };
   sync?: { enabled?: boolean; url?: string; name?: string; runnerId?: string };
+  // The gateway, when it isn't the `connectors` MCP server in
+  // ~/.claude.json; url "" or enabled: false turns the panel's polling off.
+  connectors?: { url?: string; enabled?: boolean };
 };
 
 export function defaultHome(): string {
@@ -217,7 +224,16 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     poolFolders: folderMap(json.poolFolders) ?? { ...DEFAULT_POOL_FOLDERS },
     ...(Array.isArray(json.pools) && json.pools.length ? { pools: json.pools } : {}),
     sync: syncConfig(json.sync, env),
+    ...connectorsConfig(json.connectors, env, expandHome(env.THREADBEAR_CLAUDE_MAIN_JSON || '~/.claude.json')),
   };
+}
+
+// THREADBEAR_CONNECTORS_URL wins (empty or "off" turns it off, for tests),
+// then runner.json, then the main login's `connectors` MCP server.
+function connectorsConfig(raw: RunnerJson['connectors'], env: NodeJS.ProcessEnv, claudeJson: string): Pick<Config, 'connectorsUrl'> {
+  const fromEnv = env.THREADBEAR_CONNECTORS_URL;
+  const url = fromEnv !== undefined ? (fromEnv.trim() && fromEnv.trim() !== 'off' ? gatewayBase(fromEnv.trim()) : undefined) : findGateway(raw, claudeJson);
+  return url ? { connectorsUrl: url } : {};
 }
 
 // THREADBEAR_SYNC=off wins over runner.json; THREADBEAR_SYNC_URL points a

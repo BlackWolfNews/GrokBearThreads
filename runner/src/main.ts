@@ -12,6 +12,7 @@ import { AppRestarts } from './app-restarts.ts';
 import { Scheduler, scheduleMethods } from './schedules.ts';
 import { Projects, guardProjects, projectMethods } from './projects.ts';
 import { Librarian, librarianMethods } from './librarian.ts';
+import { ConnectorsMonitor, connectorsMethods } from './connectors.ts';
 import { createLogger } from './log.ts';
 import { hidIdleMs, isAtMac } from './presence.ts';
 import { ThreadStore } from './store.ts';
@@ -204,6 +205,14 @@ async function main(): Promise<void> {
   projects.start(runner);
   const librarian = new Librarian({ host: runner, projects, models, clock: realClock, log, home: cfg.home });
   librarian.start();
+  // The Connectors gateway's /health, for the app's Connectors panel
+  // (docs/protocol.md, "Connectors"). Off when there's no gateway.
+  const connectors = new ConnectorsMonitor({
+    url: cfg.connectorsUrl,
+    log,
+    onChange: (s) => runner.publish({ method: 'connectors.updated', params: { connectors: s } }),
+  });
+  connectors.start();
   // The Convex mirror the phone reads (docs/convex-backend.md). Best
   // effort: off without a URL and key, and never in the way of a turn.
   // The RPC server is made further down; presence asks it once it's there.
@@ -298,7 +307,7 @@ async function main(): Promise<void> {
   updaterReady = true;
 
   runner.attachClis(updates);
-  const methods = { ...restartMethods(restarter), ...scheduleMethods(scheduler), ...projectMethods(projects), ...librarianMethods(librarian), ...settingsMethods(settings), ...modelMethods(models), ...devicesMethods(sync) };
+  const methods = { ...restartMethods(restarter), ...scheduleMethods(scheduler), ...projectMethods(projects), ...librarianMethods(librarian), ...connectorsMethods(connectors), ...settingsMethods(settings), ...modelMethods(models), ...devicesMethods(sync) };
   // runner.status carries the CLI statuses too (protocol, "runner.status").
   const restartStatus = methods['runner.status'];
   methods['runner.status'] = (p) => {
@@ -370,6 +379,7 @@ async function main(): Promise<void> {
     primaryLink?.close();
     scheduler.stop();
     librarian.stop();
+    connectors.stop();
     projects.stop();
     usage.stop();
     updates.stop();
@@ -408,6 +418,7 @@ async function main(): Promise<void> {
       updater.stop();
       scheduler.stop();
       librarian.stop();
+      connectors.stop();
       projects.freeze();
       updates.stop();
       settings.stop();

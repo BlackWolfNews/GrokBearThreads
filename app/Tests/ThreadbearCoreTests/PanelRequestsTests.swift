@@ -30,6 +30,7 @@ final class PanelRequestsTests: XCTestCase {
         XCTAssertEqual(panel("convex.dashboard"), .section(.panel("convex.dashboard")))
         XCTAssertEqual(panel("usage"), .usage)
         XCTAssertEqual(panel("updates"), .updates)
+        XCTAssertEqual(panel("connectors"), .connectors)
         XCTAssertNil(panel("xcode.simulator"), "gone since the agent asked")
         let bare = try thread("")
         XCTAssertNil(PanelRequests.panel(PanelRequest(id: "r", panel: "patches", title: "Patches"), in: bare), "no patches, no Patches")

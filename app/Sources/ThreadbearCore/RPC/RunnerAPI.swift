@@ -553,6 +553,20 @@ public extension RPCClient {
     }
 }
 
+// MARK: Connectors (docs/protocol.md, "Connectors")
+
+/// A runner from before Connectors answers `-32601`, which the app reads as
+/// "no Connectors panel".
+public extension RPCClient {
+    /// What the runner last heard from the gateway, or with `refresh` a
+    /// fresh answer (unless it asked in the last few seconds).
+    func connectorsStatus(refresh: Bool = false) async throws -> ConnectorsStatus {
+        var params: [String: JSONValue] = [:]
+        if refresh { params["refresh"] = .bool(true) }
+        return try await call("connectors.status", .object(params), as: ConnectorsResult.self).connectors
+    }
+}
+
 public struct NewProjectRequest: Sendable, Hashable {
     public var title: String
     public var folders: [String]

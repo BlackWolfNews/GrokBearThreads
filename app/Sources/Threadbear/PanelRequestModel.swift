@@ -43,6 +43,7 @@ extension AppModel {
             id = section.id
         case .usage: id = WindowDock.usage
         case .updates: id = WindowDock.updates
+        case .connectors: id = WindowDock.connectors
         }
         if dock.layout.contains(id) { return dock.show(id) }
         switch place {
@@ -51,6 +52,7 @@ extension AppModel {
             case .section(let section): showPane(section)
             case .usage: usageShown = true
             case .updates: updatesShown = true
+            case .connectors: connectorsShown = true
             }
         case .tab: openMainTab(id)
         case .side(let side): dock.open(id, .window(DockEdge(rawValue: side.rawValue) ?? .right))

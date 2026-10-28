@@ -237,6 +237,19 @@ addDemoSchedules();
 /** The projects (docs/protocol.md, "Projects"), and the librarian's status. */
 let projects = [];
 let librarian;
+const MOCK_GATEWAY = 'https://bruce.example.ts.net:8443';
+let connectors = {
+  state: 'ok',
+  url: MOCK_GATEWAY,
+  version: '0.2.0',
+  checkedAt: new Date().toISOString(),
+  services: [
+    { id: 'notion', title: 'Notion', state: 'connected' },
+    { id: 'sentry', title: 'Sentry', state: 'signed_out', message: 'The sign-in expired.', connectUrl: `${MOCK_GATEWAY}/admin/connect/sentry` },
+    { id: 'cloudflare', title: 'Cloudflare', state: 'connected' },
+    { id: 'deepwiki', title: 'DeepWiki', state: 'connected' },
+  ],
+};
 addDemoProjects();
 
 const token = crypto.randomBytes(24).toString('hex');
@@ -785,6 +798,13 @@ async function dispatch(client, method, p) {
     case 'librarian.update':
       if (oldRunner) throw rpcError(-32601, `Unknown method ${method}`);
       return projectRequest(method, p);
+    // The Connectors gateway (docs/protocol.md, "Connectors"): a made-up
+    // one, with a service signed out so the panel and its dot show.
+    // mock.connectors changes it.
+    case 'connectors.status':
+      if (oldRunner) throw rpcError(-32601, `Unknown method ${method}`);
+      if (p.refresh) connectors = { ...connectors, checkedAt: iso() };
+      return { connectors };
     case 'settings.get':
       return { settings };
     case 'settings.update': {
@@ -874,6 +894,16 @@ async function dispatch(client, method, p) {
       const onYou = waitingFor.filter((id) => threads.get(id)?.summary.status === 'waiting').length;
       broadcastNotice('info', pendingMessage(waitingFor.length, onYou));
       return { scheduled: true, waitingFor };
+    }
+    case 'mock.connectors': {
+      // { state?, error?, services? }: replaces what connectors.status
+      // answers and sends connectors.updated.
+      connectors = { ...connectors, state: p.state ?? 'ok', services: Array.isArray(p.services) ? p.services : connectors.services, checkedAt: iso() };
+      if (typeof p.error === 'string') connectors.error = p.error;
+      else delete connectors.error;
+      if (connectors.state !== 'ok') connectors.services = [];
+      broadcast('connectors.updated', { connectors });
+      return { connectors };
     }
     case 'mock.updates': {
       // The runner's own update, as hello and runner.updates carry it:

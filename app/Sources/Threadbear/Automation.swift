@@ -840,6 +840,29 @@ enum Automation {
             let tip = UpdatesText.iconTooltip(app: side, runner: app.runnerUpdates, clis: app.clis)
             let popover = "popover: " + (app.updatePopoverShown ? "shown, " : "closed, ") + UpdatesText.popoverLine(side)
             return "ok " + json(["shown: \(shown)", "tip: " + tip.replacingOccurrences(of: "\n", with: " / "), popover, UpdatesText.appLine(side)] + UpdatesText.runnerLines(app.runnerUpdates))
+        case "connectors":
+            // The Connectors panel: {"show": true} opens it ({"show":
+            // false} closes it), {"click": "<service id>"} presses its
+            // Connect button (which opens the page in the browser). With
+            // neither, the icon's dots and tooltip and each service's line.
+            if let show = c["show"] as? Bool {
+                app.connectorsShown = show
+                guard show else { return "ok closed" }
+                try? await Task.sleep(for: .milliseconds(500))
+                return app.connectorsShown ? "ok shown" : "error the panel didn't open"
+            }
+            let status = app.connectors
+            if let id = c["click"] as? String {
+                guard let service = status?.services.first(where: { $0.id == id }) else { return "error no service \(id)" }
+                guard ConnectorsText.buttonTitle(service) != nil else { return "error \(id) has no button" }
+                app.openConnect(service)
+                return "ok opened \(service.connectUrl ?? "")"
+            }
+            guard let status else { return "error the runner has no connectors" }
+            let lines = status.services.map { s in "\(s.id): \(ConnectorsText.stateLine(s))" + (ConnectorsText.buttonTitle(s).map { " [\($0)]" } ?? "") }
+            return "ok " + json(["state: \(status.state)", "dot: \(ConnectorsText.needsYou(status))", "quietDot: \(ConnectorsText.quiet(status))",
+                                 "tip: " + ConnectorsText.tooltip(status).replacingOccurrences(of: "\n", with: " / ")]
+                                + (ConnectorsText.emptyLine(status).map { [$0] } ?? []) + lines)
         case "restart-countdown":
             // The update's countdown card: {"show": 5} shows it at that
             // count (with no build behind it), {"show": 0} hides it.

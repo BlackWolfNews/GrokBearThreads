@@ -197,7 +197,7 @@ export type PanelPlace = 'tab' | 'left' | 'right' | 'top' | 'bottom' | 'window';
 
 export type PanelRequest = {
   id: string;
-  panel: string; // "highlights", "patches", "usage", "updates", or one of the thread's panels' ids
+  panel: string; // "highlights", "patches", "usage", "updates", "connectors", or one of the thread's panels' ids
   title: string; // "Highlights", "Convex"
   where?: PanelPlace;
   at: string;

@@ -130,6 +130,25 @@ has left before it hits its limits (for Claude, the 5-hour and weekly ones).
 Threadbear learns these numbers from the threads it runs, so a login's bars
 fill in once it has run something.
 
+## Connectors
+
+Agents get services like Notion, Sentry and Cloudflare from your Connectors
+gateway, and Gmail, Drive and the like from claude.ai's connectors on each
+login. Now and then one needs signing in again.
+
+The Connectors icon (the plug) near the bottom of the left-hand rail opens a
+panel listing the gateway's services and whether each is signed in. A blue
+dot on the icon means one is signed out: click Connect beside it, and its
+sign-in page opens in your browser. A grey dot means something's off that
+usually sorts itself out, such as the gateway not answering for a moment.
+The arrow in the panel checks again, and the ⓘ says more. If the gateway
+can't be reached at all, the panel says so.
+
+When an agent runs into a service that needs signing in, it asks you in its
+reply, with a button that opens the page to do it on. claude.ai's own
+connectors are signed in on claude.ai (Settings > Connectors), on the login
+the thread runs on.
+
 ## The prompts macOS shows you
 
 - **Notifications.** The first time the app opens, macOS asks whether

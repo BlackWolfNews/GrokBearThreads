@@ -45,6 +45,9 @@ public enum RPCNotification: Sendable {
     case projectsUpdated([Project])
     /// The librarian's status, whole, whenever it changes.
     case librarianUpdated(LibrarianStatus)
+    /// The Connectors gateway's services, whole, whenever what the panel
+    /// shows changes.
+    case connectorsUpdated(ConnectorsStatus)
     /// The runner's settings after any change (a setting, the key, or the
     /// spend going up).
     case settingsUpdated(RunnerSettings)
@@ -255,6 +258,10 @@ public final class RPCClient: Sendable {
             guard let params = try? decoder.decode(RPCNotificationEnvelope<LibrarianResult>.self, from: data).params
             else { return nil }
             return .librarianUpdated(params.librarian)
+        case "connectors.updated":
+            guard let params = try? decoder.decode(RPCNotificationEnvelope<ConnectorsResult>.self, from: data).params
+            else { return nil }
+            return .connectorsUpdated(params.connectors)
         case "settings.updated":
             guard let params = try? decoder.decode(RPCNotificationEnvelope<SettingsResult>.self, from: data).params
             else { return nil }

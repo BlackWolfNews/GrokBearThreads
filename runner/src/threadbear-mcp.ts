@@ -22,6 +22,7 @@ import { RUNNER_VERSION, expandHome } from './config.ts';
 import { CODEX_END_TURN_DESCRIPTION, END_TURN_DESCRIPTION, END_TURN_TOOL, ENDED, NO_REPLY, turnReply } from './needs.ts';
 import { asksForAppRestart, type AppRestarts } from './app-restarts.ts';
 import { PANEL_PLACES } from './panel-requests.ts';
+import { nudgedThisTurn, signInNudge, turnSignIns, uncovered } from './connectors.ts';
 import type { PanelPlace } from './protocol.ts';
 import { readRelease, type ReleaseJson } from './release.ts';
 
@@ -294,9 +295,9 @@ export function buildThreadbearTools(
     // moves one Mike has open: his layout is his.
     tool(
       'show_panel',
-      "Opens one of Threadbear's panels for Mike, or brings it to the front where he has it: this thread's Highlights or Patches, one of its patch panels (by id or title, like the Convex dashboard or the Simulator), or the app's Usage or Updates. Use it when what he should look at is a panel; for a file or a link, use pin with show: true. It happens while Mike is looking at this thread in the Mac app: straight away if he is, otherwise when he next opens it (unless he sends a message first). The answer says which. A panel he has open stays where he put it; `where` only says where a closed one opens.",
+      "Opens one of Threadbear's panels for Mike, or brings it to the front where he has it: this thread's Highlights or Patches, one of its patch panels (by id or title, like the Convex dashboard or the Simulator), or the app's Usage, Updates or Connectors (which of Mike's gateway services are signed in, with Connect buttons). Use it when what he should look at is a panel; for a file or a link, use pin with show: true. It happens while Mike is looking at this thread in the Mac app: straight away if he is, otherwise when he next opens it (unless he sends a message first). The answer says which. A panel he has open stays where he put it; `where` only says where a closed one opens.",
       {
-        panel: z.string().min(1).max(200).describe("highlights, patches, usage, updates, or one of this thread's panels by id or title."),
+        panel: z.string().min(1).max(200).describe("highlights, patches, usage, updates, connectors, or one of this thread's panels by id or title."),
         where: z
           .enum(PANEL_PLACES as [PanelPlace, ...PanelPlace[]])
           .optional()
@@ -599,6 +600,14 @@ export function buildThreadbearTools(
         // also keeps the CLI from taking this call as the turn's end.
         // Codex's reply is the final answer it writes next.
         if (!codex && !(await replied())) throw new Error(NO_REPLY);
+        // A connector that needs Mike to sign in again (a gateway service's
+        // sign_in stub, or claude.ai's "needs you to sign in again") came
+        // up this turn and no ask covers it: refused once, saying which
+        // and where, so Mike gets an ask with the page to do it on rather
+        // than an error buried in a work group (connectors.ts).
+        const events = await turnEvents();
+        const missing = uncovered(turnSignIns(events), needs === 'you' ? asks : []);
+        if (missing.length && !nudgedThisTurn(events)) throw new Error(signInNudge(missing));
         // Asking Mike to Restart to Update means wanting to know when he
         // has, to check the change in the running app: the same as
         // wait_for_app_restart, unless that was already asked for.

@@ -18,13 +18,14 @@ const THREAD_PANELS = [
 const APP_PANELS = [
   { id: 'usage', title: 'Usage' },
   { id: 'updates', title: 'Updates' },
+  { id: 'connectors', title: 'Connectors' },
 ];
 
 // A panel name as the agent gave it, as the panel it means. Throws with
 // what the thread has when it's none of them, so the agent can pick again.
 export function resolvePanel(name: string, has: { panels: Panel[]; hasPatches: boolean }): { id: string; title: string } {
   const wanted = name.trim().toLowerCase();
-  if (!wanted) throw new Error('Name a panel: highlights, patches, usage, updates, or one of the thread\'s own.');
+  if (!wanted) throw new Error('Name a panel: highlights, patches, usage, updates, connectors, or one of the thread\'s own.');
   const own = THREAD_PANELS.filter((p) => p.id !== 'patches' || has.hasPatches);
   const builtIn = [...own, ...APP_PANELS].find((p) => p.id === wanted);
   if (builtIn) return builtIn;
