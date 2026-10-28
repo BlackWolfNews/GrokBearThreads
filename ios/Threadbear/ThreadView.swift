@@ -11,6 +11,9 @@ struct ThreadView: View {
     @State private var sent: (id: String, status: CommandStatus?)?
     @State private var hibernateTarget: PhoneThread?
     @State private var markedSeen = false
+    /// The oldest seq when "Load earlier" was tapped, until older messages
+    /// arrive (the oldest seq changes) or the runner says it couldn't.
+    @State private var loadingBefore: Int?
 
     var body: some View {
         Group {
@@ -36,11 +39,16 @@ struct ThreadView: View {
         return ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 14) {
-                    if detail.messages.count >= 20 {
-                        Text("Showing the last \(detail.messages.count) messages. The rest are on the Mac.")
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
-                            .frame(maxWidth: .infinity)
+                    if thread.hasEarlier(than: detail.messages.first?.seq) {
+                        EarlierButton(loading: loadingBefore == detail.messages.first?.seq) {
+                            loadEarlier(thread, before: detail.messages.first?.seq)
+                        }
+                        // Scrolling up to it loads by itself, like any chat.
+                        // Not on a short thread, where it's on screen at
+                        // once and nobody asked.
+                        .onAppear {
+                            if detail.messages.count >= 20 { loadEarlier(thread, before: detail.messages.first?.seq) }
+                        }
                     }
                     ForEach(detail.messages) { MessageView(message: $0) }
                     if let pending = thread.pendingApproval {
@@ -152,11 +160,57 @@ struct ThreadView: View {
         }
     }
 
+    private func loadEarlier(_ thread: PhoneThread, before seq: Int?) {
+        guard let seq, let backend = model.backend, loadingBefore != seq else { return }
+        loadingBefore = seq
+        Task {
+            do {
+                let id = try await backend.loadEarlier(threadId: thread.threadId, beforeSeq: seq)
+                // The messages turn up in the thread's own query; this only
+                // watches for a failure, or the Mac being asleep.
+                for try await status in backend.command(id) {
+                    if status?.state == .failed {
+                        model.report(TransportError.server(status?.note ?? "The Mac couldn't send older messages."))
+                        loadingBefore = nil
+                        return
+                    }
+                    if status?.state == .done { break }
+                }
+            } catch {
+                model.report(error)
+            }
+            // Done (or gone): if nothing older arrived, let it be tapped again.
+            try? await Task.sleep(for: .seconds(2))
+            if loadingBefore == seq { loadingBefore = nil }
+        }
+    }
+
     private func change(_ change: ThreadChange) {
         Task {
             guard let backend = model.backend else { return }
             do { _ = try await backend.update(threadId: threadId, change: change) } catch { model.report(error) }
         }
+    }
+}
+
+/// At the top of a thread: older messages come from the Mac on request.
+struct EarlierButton: View {
+    @Environment(AppModel.self) private var model
+    var loading: Bool
+    var action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 8) {
+                if loading { ProgressView().controlSize(.small) }
+                Text(loading ? (model.offlineText != nil ? "Waiting for the Mac to wake up" : "Loading…") : "Load earlier messages")
+            }
+            .font(.footnote)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 6)
+        }
+        .buttonStyle(.borderless)
+        .disabled(loading)
     }
 }
 

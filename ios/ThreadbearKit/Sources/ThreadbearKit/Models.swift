@@ -125,6 +125,10 @@ public struct PhoneThread: Codable, Sendable, Hashable, Identifiable {
     /// work is going.
     public var working: String?
     public var pendingApproval: PendingApproval?
+    /// The seq of the thread's first text message, so the phone knows
+    /// whether there's anything older than what it has to load. A Convex
+    /// number, so a Double on the wire.
+    public var earliestSeq: Double?
 
     public init(
         threadId: String, runnerId: String = "m5", title: String, cwd: String = "~/dev/me/misc",
@@ -132,7 +136,7 @@ public struct PhoneThread: Codable, Sendable, Hashable, Identifiable {
         status: ThreadStatus = .idle, needsYou: Bool = false, unread: Bool = false, preview: String = "",
         lastActivityAt: Date, snoozedUntil: Date? = nil, snoozedUntilRestart: Bool? = nil, archivedAt: Date? = nil,
         costUsd: Double? = nil, projects: [ProjectRef]? = nil, working: String? = nil,
-        pendingApproval: PendingApproval? = nil
+        pendingApproval: PendingApproval? = nil, earliestSeq: Double? = nil
     ) {
         self.threadId = threadId
         self.runnerId = runnerId
@@ -153,9 +157,17 @@ public struct PhoneThread: Codable, Sendable, Hashable, Identifiable {
         self.projects = projects
         self.working = working
         self.pendingApproval = pendingApproval
+        self.earliestSeq = earliestSeq
     }
 
     public var isBusy: Bool { status == .running || status == .starting }
+
+    /// Whether there are older text messages on the Mac than `oldestSeq`,
+    /// the oldest the phone has. False when the runner doesn't say.
+    public func hasEarlier(than oldestSeq: Int?) -> Bool {
+        guard let earliestSeq, let oldestSeq else { return false }
+        return oldestSeq > Int(earliestSeq)
+    }
 
     /// The last folder name, for a thread in no project: "misc".
     public var folderName: String {

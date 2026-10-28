@@ -97,7 +97,7 @@ public final class FakeBackend: Backend, @unchecked Sendable {
     private func append(_ threadId: String, role: PhoneMessage.Role, text: String, origin: String? = nil) {
         var list = messagesById[threadId] ?? []
         list.append(PhoneMessage(seq: (list.last?.seq ?? 0) + 1, role: role, text: text, origin: origin, at: .now))
-        messagesById[threadId] = Array(list.suffix(20))
+        messagesById[threadId] = list
     }
 
     private func runTurn(_ threadId: String, reply: String) {
@@ -181,6 +181,24 @@ public final class FakeBackend: Backend, @unchecked Sendable {
         return newCommand(threadId: id)
     }
 
+    public func loadEarlier(threadId: String, beforeSeq: Int) async throws -> String {
+        let delay = turnDelay
+        Task { [weak self] in
+            try? await Task.sleep(for: delay / 4)
+            self?.mutate { s in
+                let earliest = Int(s.threadsById[threadId]?.earliestSeq ?? 1)
+                let seqs = Array(max(earliest, beforeSeq - 50)..<beforeSeq)
+                let older = seqs.map { seq in
+                    PhoneMessage(seq: seq, role: seq % 2 == 0 ? .assistant : .user,
+                                 text: seq % 2 == 0 ? "An earlier reply, number \(seq)." : "An earlier ask, number \(seq).",
+                                 at: Date.now.addingTimeInterval(Double(seq - beforeSeq) * 300))
+                }
+                s.messagesById[threadId] = older + (s.messagesById[threadId] ?? [])
+            }
+        }
+        return newCommand()
+    }
+
     public func registerDevice(apnsToken: String, environment: String) async throws {}
 
     // MARK: Sample data
@@ -207,7 +225,7 @@ public final class FakeBackend: Backend, @unchecked Sendable {
             PhoneThread(threadId: "a3", title: "Sidebar rows: two lines again", cwd: "~/dev/me/threadbear",
                         needsYou: true, unread: true,
                         preview: "Merged as 4700e57. Each row has a project tile and the status on the right.",
-                        lastActivityAt: ago(25), costUsd: 3.12, projects: threadbear),
+                        lastActivityAt: ago(25), costUsd: 3.12, projects: threadbear, earliestSeq: 1),
             PhoneThread(threadId: "a4", title: "Backblaze exclusions on Bruce", cwd: "~/dev/me/misc",
                         preview: "All applied. Restart needs your sudo on the Mac.", lastActivityAt: ago(190)),
             PhoneThread(threadId: "a5", title: "Convex mirror for the phone", cwd: "~/dev/me/threadbear", status: .running,
@@ -225,8 +243,8 @@ public final class FakeBackend: Backend, @unchecked Sendable {
                 PhoneMessage(seq: 2, role: .assistant, text: "Built and uploaded **2610270253**. The e2e run on tinker-desk passed 42/42.\n\nReady to submit build 2610270253 for review.", at: ago(4)),
             ],
             "a3": [
-                PhoneMessage(seq: 1, role: .user, text: "Go back to two lines, one line is too cramped", at: ago(50)),
-                PhoneMessage(seq: 2, role: .assistant, text: "Merged as `4700e57`. Each row has a project tile and the status on the right.", at: ago(25)),
+                PhoneMessage(seq: 120, role: .user, text: "Go back to two lines, one line is too cramped", at: ago(50)),
+                PhoneMessage(seq: 121, role: .assistant, text: "Merged as `4700e57`. Each row has a project tile and the status on the right.", at: ago(25)),
             ],
             "a5": [
                 PhoneMessage(seq: 1, role: .user, text: "Okay, let's go with it.", at: ago(8)),
