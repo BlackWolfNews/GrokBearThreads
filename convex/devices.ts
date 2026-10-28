@@ -5,11 +5,40 @@ import { internalMutation, internalQuery } from './_generated/server';
 
 export const targets = internalQuery({
   args: {},
-  returns: v.array(v.object({ apnsToken: v.string(), environment: v.union(v.literal('sandbox'), v.literal('production')), notify: v.union(v.literal('away'), v.literal('always'), v.literal('off')) })),
+  returns: v.array(v.object({ apnsToken: v.string(), environment: v.union(v.literal('sandbox'), v.literal('production')), notify: v.union(v.literal('away'), v.literal('always'), v.literal('off')), pushKey: v.optional(v.string()) })),
   handler: async (ctx) => {
     const out = [];
-    for await (const d of ctx.db.query('devices')) out.push({ apnsToken: d.apnsToken, environment: d.environment, notify: d.notify ?? ('away' as const) });
+    for await (const d of ctx.db.query('devices')) out.push({ apnsToken: d.apnsToken, environment: d.environment, notify: d.notify ?? ('away' as const), ...(d.pushKey ? { pushKey: d.pushKey } : {}) });
     return out;
+  },
+});
+
+export const relayInstall = internalQuery({
+  args: { url: v.string() },
+  returns: v.union(v.null(), v.object({ installId: v.string(), installKey: v.string() })),
+  handler: async (ctx, { url }) => {
+    const row = await ctx.db.query('relayInstall').first();
+    return row && row.url === url ? { installId: row.installId, installKey: row.installKey } : null;
+  },
+});
+
+// Replaces any earlier registration (a new relay URL, or one it forgot).
+export const saveRelayInstall = internalMutation({
+  args: { installId: v.string(), installKey: v.string(), url: v.string() },
+  returns: v.null(),
+  handler: async (ctx, a) => {
+    for await (const row of ctx.db.query('relayInstall')) await ctx.db.delete(row._id);
+    await ctx.db.insert('relayInstall', { ...a, createdAt: Date.now() });
+    return null;
+  },
+});
+
+export const clearRelayInstall = internalMutation({
+  args: {},
+  returns: v.null(),
+  handler: async (ctx) => {
+    for await (const row of ctx.db.query('relayInstall')) await ctx.db.delete(row._id);
+    return null;
   },
 });
 

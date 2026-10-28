@@ -207,5 +207,17 @@ export default defineSchema({
     // When this phone wants a push (phone:setNotifications, API 3):
     // "away" (the default) only while Mike isn't at the Mac, "always", or "off".
     notify: v.optional(v.union(v.literal('away'), v.literal('always'), v.literal('off'))),
+    // The phone's own key for encrypting what goes through the push relay
+    // (API 4): base64 of 32 bytes, made on the phone and sent only here.
+    pushKey: v.optional(v.string()),
   }).index('by_apnsToken', ['apnsToken']),
+
+  // This backend's registration with the push relay (docs/push-relay.md),
+  // made the first time a push goes that way. One row.
+  relayInstall: defineTable({
+    installId: v.string(),
+    installKey: v.string(),
+    url: v.string(),
+    createdAt: v.number(),
+  }),
 });

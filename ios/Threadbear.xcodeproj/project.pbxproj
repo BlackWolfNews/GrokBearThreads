@@ -8,12 +8,39 @@
 
 /* Begin PBXBuildFile section */
 		BB0000000000000000000301 /* ThreadbearKit in Frameworks */ = {isa = PBXBuildFile; productRef = BB0000000000000000000401 /* ThreadbearKit */; };
+		BB0000000000000000000302 /* NotificationService.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = BB0000000000000000000103 /* NotificationService.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 /* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		BB0000000000000000000D01 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = BB0000000000000000000001 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = BB0000000000000000000702;
+			remoteInfo = NotificationService;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		BB0000000000000000000804 /* Embed Foundation Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				BB0000000000000000000302 /* NotificationService.appex in Embed Foundation Extensions */,
+			);
+			name = "Embed Foundation Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
 		BB0000000000000000000101 /* Threadbear.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Threadbear.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		BB0000000000000000000102 /* ThreadbearKit */ = {isa = PBXFileReference; lastKnownFileType = wrapper; name = ThreadbearKit; path = ThreadbearKit; sourceTree = "<group>"; };
 		BB0000000000000000000114 /* Threadbear.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Threadbear.entitlements; sourceTree = "<group>"; };
+		BB0000000000000000000103 /* NotificationService.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = NotificationService.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		BB0000000000000000000115 /* NotificationService.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = NotificationService.entitlements; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -24,6 +51,13 @@
 			);
 			target = BB0000000000000000000701 /* Threadbear */;
 		};
+		BB0000000000000000000604 /* Exceptions for "NotificationService" folder in "NotificationService" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = BB0000000000000000000702 /* NotificationService */;
+		};
 /* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -33,6 +67,14 @@
 				BB0000000000000000000602 /* Exceptions for "Threadbear" folder in "Threadbear" target */,
 			);
 			path = Threadbear;
+			sourceTree = "<group>";
+		};
+		BB0000000000000000000603 /* NotificationService */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				BB0000000000000000000604 /* Exceptions for "NotificationService" folder in "NotificationService" target */,
+			);
+			path = NotificationService;
 			sourceTree = "<group>";
 		};
 /* End PBXFileSystemSynchronizedRootGroup section */
@@ -46,6 +88,13 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		BB0000000000000000000806 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -53,6 +102,7 @@
 			isa = PBXGroup;
 			children = (
 				BB0000000000000000000601 /* Threadbear */,
+				BB0000000000000000000603 /* NotificationService */,
 				BB0000000000000000000504 /* Config */,
 				BB0000000000000000000102 /* ThreadbearKit */,
 				BB0000000000000000000502 /* Products */,
@@ -63,6 +113,7 @@
 			isa = PBXGroup;
 			children = (
 				BB0000000000000000000101 /* Threadbear.app */,
+				BB0000000000000000000103 /* NotificationService.appex */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -71,6 +122,7 @@
 			isa = PBXGroup;
 			children = (
 				BB0000000000000000000114 /* Threadbear.entitlements */,
+				BB0000000000000000000115 /* NotificationService.entitlements */,
 			);
 			path = Config;
 			sourceTree = "<group>";
@@ -85,10 +137,12 @@
 				BB0000000000000000000801 /* Sources */,
 				BB0000000000000000000802 /* Frameworks */,
 				BB0000000000000000000803 /* Resources */,
+				BB0000000000000000000804 /* Embed Foundation Extensions */,
 			);
 			buildRules = (
 			);
 			dependencies = (
+				BB0000000000000000000E01 /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
 				BB0000000000000000000601 /* Threadbear */,
@@ -101,6 +155,26 @@
 			productReference = BB0000000000000000000101 /* Threadbear.app */;
 			productType = "com.apple.product-type.application";
 		};
+		BB0000000000000000000702 /* NotificationService */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = BB0000000000000000000A03 /* Build configuration list for PBXNativeTarget "NotificationService" */;
+			buildPhases = (
+				BB0000000000000000000805 /* Sources */,
+				BB0000000000000000000806 /* Frameworks */,
+				BB0000000000000000000807 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				BB0000000000000000000603 /* NotificationService */,
+			);
+			name = NotificationService;
+			productName = NotificationService;
+			productReference = BB0000000000000000000103 /* NotificationService.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -112,6 +186,9 @@
 				LastUpgradeCheck = 2710;
 				TargetAttributes = {
 					BB0000000000000000000701 = {
+						CreatedOnToolsVersion = 27.1;
+					};
+					BB0000000000000000000702 = {
 						CreatedOnToolsVersion = 27.1;
 					};
 				};
@@ -134,12 +211,20 @@
 			projectRoot = "";
 			targets = (
 				BB0000000000000000000701 /* Threadbear */,
+				BB0000000000000000000702 /* NotificationService */,
 			);
 		};
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
 		BB0000000000000000000803 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		BB0000000000000000000807 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -156,7 +241,22 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		BB0000000000000000000805 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		BB0000000000000000000E01 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = BB0000000000000000000702 /* NotificationService */;
+			targetProxy = BB0000000000000000000D01 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
 		BB0000000000000000000B01 /* Debug */ = {
@@ -179,6 +279,7 @@
 				);
 				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
 				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
+				MARKETING_VERSION = 1.0.0;
 				ONLY_ACTIVE_ARCH = YES;
 				SDKROOT = iphoneos;
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
@@ -201,6 +302,7 @@
 				ENABLE_USER_SCRIPT_SANDBOXING = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
 				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
+				MARKETING_VERSION = 1.0.0;
 				SDKROOT = iphoneos;
 				SWIFT_COMPILATION_MODE = wholemodule;
 				VALIDATE_PRODUCT = YES;
@@ -229,7 +331,6 @@
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = UIInterfaceOrientationPortrait;
 				LD_RUNPATH_SEARCH_PATHS = "@executable_path/Frameworks";
-				MARKETING_VERSION = 1.0.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.mikecann.threadbear;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
@@ -267,7 +368,6 @@
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = UIInterfaceOrientationPortrait;
 				LD_RUNPATH_SEARCH_PATHS = "@executable_path/Frameworks";
-				MARKETING_VERSION = 1.0.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.mikecann.threadbear;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
@@ -280,6 +380,48 @@
 				SWIFT_VERSION = 6.0;
 				TARGETED_DEVICE_FAMILY = 1;
 				THREADBEAR_APS_ENVIRONMENT = production;
+			};
+			name = Release;
+		};
+		BB0000000000000000000C03 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = Config/NotificationService.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 4DTAZSZL6B;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = NotificationService/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = NotificationService;
+				LD_RUNPATH_SEARCH_PATHS = "@executable_path/Frameworks @executable_path/../../Frameworks";
+				PRODUCT_BUNDLE_IDENTIFIER = com.mikecann.threadbear.NotificationService;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Debug;
+		};
+		BB0000000000000000000C04 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = Config/NotificationService.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 4DTAZSZL6B;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = NotificationService/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = NotificationService;
+				LD_RUNPATH_SEARCH_PATHS = "@executable_path/Frameworks @executable_path/../../Frameworks";
+				PRODUCT_BUNDLE_IDENTIFIER = com.mikecann.threadbear.NotificationService;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = 1;
 			};
 			name = Release;
 		};
@@ -300,6 +442,15 @@
 			buildConfigurations = (
 				BB0000000000000000000C01 /* Debug */,
 				BB0000000000000000000C02 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		BB0000000000000000000A03 /* Build configuration list for PBXNativeTarget "NotificationService" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				BB0000000000000000000C03 /* Debug */,
+				BB0000000000000000000C04 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;

@@ -4,5 +4,9 @@
 <dict>
 	<key>aps-environment</key>
 	<string>$(THREADBEAR_APS_ENVIRONMENT)</string>
+	<key>keychain-access-groups</key>
+	<array>
+		<string>$(AppIdentifierPrefix)com.mikecann.threadbear.shared</string>
+	</array>
 </dict>
 </plist>

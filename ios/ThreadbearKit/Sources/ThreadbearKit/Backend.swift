@@ -26,7 +26,8 @@ public protocol Backend: Sendable {
     /// For a backend before API 2: asks the runner for up to 50 text messages older than `beforeSeq`;
     /// they turn up in `thread(_:)` once it has written them.
     func loadEarlier(threadId: String, beforeSeq: Int) async throws -> String
-    func registerDevice(apnsToken: String, environment: String) async throws
+    /// pushKey (backend API 4): base64 of this phone's relay key (PushKeyStore).
+    func registerDevice(apnsToken: String, environment: String, pushKey: String?) async throws
     /// Backend API 3: when this phone (by its APNs token) is notified.
     func setNotifications(apnsToken: String, notify: NotifyMode) async throws
 }
@@ -141,10 +142,10 @@ public final class ConvexBackend: Backend, @unchecked Sendable {
         try await command("phone:loadEarlier", ["threadId": .string(threadId), "beforeSeq": .number(Double(beforeSeq))])
     }
 
-    public func registerDevice(apnsToken: String, environment: String) async throws {
-        _ = try await transport.mutation("phone:registerDevice", args([
-            "apnsToken": .string(apnsToken), "environment": .string(environment),
-        ]))
+    public func registerDevice(apnsToken: String, environment: String, pushKey: String?) async throws {
+        var extra: [String: JSONValue] = ["apnsToken": .string(apnsToken), "environment": .string(environment)]
+        if let pushKey { extra["pushKey"] = .string(pushKey) }
+        _ = try await transport.mutation("phone:registerDevice", args(extra))
     }
 
     public func setNotifications(apnsToken: String, notify: NotifyMode) async throws {

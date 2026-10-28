@@ -343,10 +343,12 @@ public enum BackendCompatibility {
     /// The newest backend API this app knows. From 2 a thread's messages come
     /// from phone:messages (every message and tool line, paged in Convex);
     /// an older backend still gets phone:thread and the runner's paging.
-    public static let currentAPIVersion = 3
+    public static let currentAPIVersion = 4
     public static let messagePagesAPIVersion = 2
     /// From 3 each phone chooses when it's notified (phone:setNotifications).
     public static let notificationSettingAPIVersion = 3
+    /// From 4 registerDevice takes the phone's relay key.
+    public static let pushKeyAPIVersion = 4
 
     /// The line to show, or nil when the backend is fine.
     public static func problem(_ identity: PhoneIdentity) -> String? {

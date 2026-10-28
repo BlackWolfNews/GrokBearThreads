@@ -210,7 +210,7 @@ public final class FakeBackend: Backend, @unchecked Sendable {
         return newCommand()
     }
 
-    public func registerDevice(apnsToken: String, environment: String) async throws {}
+    public func registerDevice(apnsToken: String, environment: String, pushKey: String?) async throws {}
 
     // MARK: Sample data
 

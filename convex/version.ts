@@ -16,4 +16,6 @@
 // 3: presence (sync:setPresence from the runner) and each phone's
 //    notification setting (phone:setNotifications): "away" phones only get
 //    a push while Mike isn't at the Mac.
-export const API_VERSION = 3;
+// 4: phone:registerDevice takes the phone's pushKey; a backend without its
+//    own Apple key sends pushes through the push relay, encrypted with it.
+export const API_VERSION = 4;

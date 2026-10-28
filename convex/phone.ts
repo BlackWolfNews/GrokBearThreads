@@ -276,15 +276,19 @@ export const loadEarlier = mutation({
 });
 
 export const registerDevice = mutation({
-  args: { token: v.string(), apnsToken: v.string(), environment: v.union(v.literal('sandbox'), v.literal('production')) },
+  // pushKey (API 4): the phone's own key for what goes through the push
+  // relay, base64 of 32 bytes. Kept from an earlier registration if left out.
+  args: { token: v.string(), apnsToken: v.string(), environment: v.union(v.literal('sandbox'), v.literal('production')), pushKey: v.optional(v.string()) },
   returns: v.null(),
-  handler: async (ctx, { token, apnsToken, environment }) => {
+  handler: async (ctx, { token, apnsToken, environment, pushKey }) => {
+    if (pushKey !== undefined && !/^[A-Za-z0-9+/]{43}=$/.test(pushKey)) throw new ConvexError({ kind: 'invalid', message: 'pushKey must be base64 of 32 bytes' });
     const t = await checkPhoneToken(ctx, token);
     const existing = await ctx.db
       .query('devices')
       .withIndex('by_apnsToken', (q) => q.eq('apnsToken', apnsToken))
       .unique();
-    const row = { apnsToken, environment, tokenName: t.name, updatedAt: Date.now(), ...(existing?.notify ? { notify: existing.notify } : {}) };
+    const key = pushKey ?? existing?.pushKey;
+    const row = { apnsToken, environment, tokenName: t.name, updatedAt: Date.now(), ...(existing?.notify ? { notify: existing.notify } : {}), ...(key ? { pushKey: key } : {}) };
     if (existing) await ctx.db.replace(existing._id, row);
     else await ctx.db.insert('devices', row);
     return null;
