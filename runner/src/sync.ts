@@ -600,7 +600,7 @@ export class ConvexSync {
     this.lastFlushAt = this.deps.clock.now();
     const docs = [...this.dirty.values()];
     const removed = [...this.removed];
-    const messages = this.messages.splice(0);
+    let messages = this.messages.splice(0);
     const lists = [...this.dirtyLists];
     this.dirty.clear();
     this.removed.clear();
@@ -623,12 +623,20 @@ export class ConvexSync {
       if (this.full) {
         const keep = this.deps.runner.list(ALL).map((t) => t.id);
         await this.post('mutation', 'sync:prune', { key, runnerId: this.runnerId, keep });
-        this.backfilledWhole = this.readState().fullHistory !== this.deps.config.url;
-        messages.unshift(...(await this.backfill()));
+        messages.unshift(...(await this.catchUp()));
         this.full = false;
       }
+      const { docs: history, threadIds: filling } = this.histories();
+      // A new thread's first messages are both live and its history: once each.
+      const seen = new Set<string>();
+      messages = [...history, ...messages].filter((m) => {
+        const k = `${m.threadId}:${m.seq}`;
+        if (seen.has(k)) return false;
+        seen.add(k);
+        return true;
+      });
       await this.appendMessages(messages);
-      this.markBackfilled();
+      this.markFilled(filling);
       this.lastSyncAt = this.deps.clock.now();
       this.backoffMs = 0;
       this.retryAt = undefined;
@@ -668,61 +676,106 @@ export class ConvexSync {
     }
   }
 
-  // At start, what the mirror lacks. The first start against a deployment
-  // sends every thread's whole history once (text and tool rows; until
-  // backend API 2 only the newest 20 text messages went up), then records it
-  // in statePath; later starts send only what's newer than the mirror's
-  // newest message per thread.
-  private async backfill(): Promise<MessageDoc[]> {
-    const state = this.readState();
-    const whole = state.fullHistory !== this.deps.config.url;
-    const heads = whole ? null : ((await this.post('query', 'sync:messageHeads', { key: this.deps.key, runnerId: this.runnerId })) as { threadId: string; lastSeq: number }[] | null);
+  // At start, what's newer than the mirror's newest message, for threads
+  // whose whole history is already up (the others are histories()' job).
+  private async catchUp(): Promise<MessageDoc[]> {
+    const filled = this.filledThreads();
+    if (!filled.size) return [];
+    const heads = (await this.post('query', 'sync:messageHeads', { key: this.deps.key, runnerId: this.runnerId })) as { threadId: string; lastSeq: number }[] | null;
     const have = new Map((heads ?? []).map((h) => [h.threadId, h.lastSeq]));
     const out: MessageDoc[] = [];
     for (const t of this.deps.runner.list(ALL)) {
-      let after = have.get(t.id) ?? 0;
-      while (t.lastSeq > after) {
-        let events: PersistedEvent[];
-        try {
-          events = this.deps.runner.events(t.id, { afterSeq: after, limit: BACKFILL_EVENTS }).events;
-        } catch {
-          break;
-        }
-        // Stops if a page doesn't move forward, so a log that disagrees with
-        // the summary's lastSeq can't loop forever.
-        const next = events.at(-1)?.seq ?? after;
-        if (next <= after) break;
-        for (const e of events) {
-          if (e.seq <= after) continue;
-          const m = toMessageDoc(t.id, e);
-          if (m) out.push(m);
-        }
-        after = next;
-      }
+      if (filled.has(t.id)) out.push(...this.messagesAfter(t, have.get(t.id) ?? 0));
     }
     return out;
   }
 
-  // Written once the whole-history backfill has gone up (flush, after
-  // appendMessages), so a restart part way through sends it again.
-  private backfilledWhole = false;
-
-  private readState(): { fullHistory?: string } {
-    if (!this.deps.statePath) return {};
-    try {
-      return JSON.parse(fs.readFileSync(this.deps.statePath, 'utf8')) as { fullHistory?: string };
-    } catch {
-      return {};
+  // Each thread's whole history goes up once per deployment (text and tool
+  // rows; until backend API 2 only the newest 20 text messages did), and
+  // statePath records which threads are done. Checked on every flush rather
+  // than only at start: a restart hands threads over from the old runner one
+  // at a time, and one that wasn't here yet at start (or whose log couldn't
+  // be read) is caught on a later flush. Writing a message twice is harmless.
+  private histories(): { docs: MessageDoc[]; threadIds: string[] } {
+    const filled = this.filledThreads();
+    const docs: MessageDoc[] = [];
+    const threadIds: string[] = [];
+    for (const t of this.deps.runner.list(ALL)) {
+      if (filled.has(t.id)) continue;
+      const got = this.messagesAfter(t, 0, true);
+      if (!got) continue;
+      docs.push(...got);
+      threadIds.push(t.id);
     }
+    return { docs, threadIds };
   }
 
-  private markBackfilled(): void {
-    if (!this.deps.statePath || !this.backfilledWhole) return;
-    this.backfilledWhole = false;
+  // A thread's messages after a seq, read from its log a page at a time.
+  // With strict, undefined when the log can't be read (so it isn't counted
+  // as done); otherwise what could be read.
+  private messagesAfter(t: ThreadSummary, after: number, strict: true): MessageDoc[] | undefined;
+  private messagesAfter(t: ThreadSummary, after: number): MessageDoc[];
+  private messagesAfter(t: ThreadSummary, after: number, strict = false): MessageDoc[] | undefined {
+    const out: MessageDoc[] = [];
+    while (t.lastSeq > after) {
+      let events: PersistedEvent[];
+      try {
+        events = this.deps.runner.events(t.id, { afterSeq: after, limit: BACKFILL_EVENTS }).events;
+      } catch {
+        return strict ? undefined : out;
+      }
+      // Stops if a page doesn't move forward, so a log that disagrees with
+      // the summary's lastSeq can't loop forever.
+      const next = events.at(-1)?.seq ?? after;
+      if (next <= after) break;
+      for (const e of events) {
+        if (e.seq <= after) continue;
+        const m = toMessageDoc(t.id, e);
+        if (m) out.push(m);
+      }
+      after = next;
+    }
+    return out;
+  }
+
+  // Which threads' whole history is up on this deployment, from statePath
+  // ({ histories: { [url]: threadId[] } }); kept in memory once read.
+  private filled?: Set<string>;
+
+  private filledThreads(): Set<string> {
+    if (this.filled) return this.filled;
+    let ids: string[] = [];
+    if (this.deps.statePath) {
+      try {
+        const state = JSON.parse(fs.readFileSync(this.deps.statePath, 'utf8')) as { histories?: Record<string, string[]> };
+        ids = state.histories?.[this.deps.config.url ?? ''] ?? [];
+      } catch {
+        // none yet
+      }
+    }
+    this.filled = new Set(ids);
+    return this.filled;
+  }
+
+  // After the append that carried them went through.
+  private markFilled(threadIds: string[]): void {
+    if (!threadIds.length) return;
+    const filled = this.filledThreads();
+    for (const id of threadIds) filled.add(id);
+    if (!this.deps.statePath) return;
     try {
-      fs.writeFileSync(this.deps.statePath, JSON.stringify({ ...this.readState(), fullHistory: this.deps.config.url }, null, 2) + '\n');
+      let state: { histories?: Record<string, string[]> } = {};
+      try {
+        state = JSON.parse(fs.readFileSync(this.deps.statePath, 'utf8'));
+      } catch {
+        // first write
+      }
+      // Only threads that still exist, so the file doesn't grow for ever.
+      const live = new Set(this.deps.runner.list(ALL).map((t) => t.id));
+      const histories = { ...(state.histories ?? {}), [this.deps.config.url ?? '']: [...filled].filter((id) => live.has(id)) };
+      fs.writeFileSync(this.deps.statePath, JSON.stringify({ histories }, null, 2) + '\n');
     } catch (e) {
-      this.deps.log.warn('could not record the history backfill', { error: String(e) });
+      this.deps.log.warn('could not record which histories are up', { error: String(e) });
     }
   }
 
