@@ -376,7 +376,7 @@ test('live state: when hides, badge counts, a shared command runs once, a failur
         { title: "Zero", run: "true", badge: () => 0 },
       ],
       panels: [
-        { title: "Waiting", items: () => [], badge: () => ["a", "b"] },
+        { title: "Waiting", items: () => [], badge: () => ["a", "b"], summary: () => ["2 to review", "", "1 comment"] },
         { title: "Broken", url: "https://x.dev", badge: () => { throw new Error("tandem isn't running") } },
       ],
     };
@@ -387,7 +387,8 @@ test('live state: when hides, badge counts, a shared command runs once, a failur
   const ctx = { cwd: app, threadId: 't1', run: async (command: string, cwd: string) => { commands.push(command); return runCommand(command, { cwd, env: process.env }); } };
   const set = await applyLive(base, ctx);
   assert.deepEqual(set.actions.map((a) => [a.title, a.badge]), [['Your turn', 3], ['Plain', undefined], ['Zero', undefined]]);
-  assert.deepEqual(set.panels.map((p) => [p.title, p.badge]), [['Waiting', 2], ['Broken', undefined]]);
+  assert.deepEqual(set.panels.map((p) => [p.title, p.badge, p.summary]), [['Waiting', 2, '2 to review\n1 comment'], ['Broken', undefined, undefined]]);
+  assert.equal(readPatchModule('x', 'project', '/x.ts', { actions: [{ title: 'A', run: 'x', summary: () => 'no' }] }).actions.length, 1);
   for (const a of set.actions) assert.deepEqual(checkAction(a as never), []);
   for (const p of set.panels) assert.deepEqual(checkPanel(p as never), []);
   assert.equal(commands.length, 1);

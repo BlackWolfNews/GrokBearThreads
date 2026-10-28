@@ -23,7 +23,7 @@ struct HighlightsView: View {
         } else if let fetched = app.highlights[thread.id] {
             let sections = HighlightSections.build(fetched)
             let projects = ProjectLinkGroups.build(thread: thread, project: app.project)
-            if sections.isEmpty && openAsks == nil && projects.isEmpty {
+            if sections.isEmpty && openAsks == nil && projects.isEmpty && toolPanels.isEmpty {
                 PaneNote(text: "Nothing here yet. Files, links and commits from this thread show up here as it works.")
             } else {
                 ScrollView {
@@ -39,8 +39,22 @@ struct HighlightsView: View {
         }
     }
 
+    /// The panels of the thread's tool patches (appliesTo: Tandem's in a
+    /// video folder), each a card at the top, so a tool's state is where
+    /// Mike already looks rather than only on the rail (Mike picked this,
+    /// 28 Oct).
+    private var toolPanels: [Panel] {
+        let tools = Set(thread.patches.filter { !($0.matched ?? []).isEmpty }.map(\.id))
+        return thread.panels.filter { tools.contains($0.patch) }
+    }
+
     @ViewBuilder
     private func content(_ sections: HighlightSections, projects: [Project]) -> some View {
+        ForEach(toolPanels) { panel in
+            ToolCard(panel: panel) { app.choosePanel(panel.id, in: thread.id) }
+                .padding(.horizontal, SidebarMetrics.outerInset)
+                .padding(.top, zoomed(10))
+        }
         if let brief = sections.brief {
             Text(brief)
                 .font(.system(size: TypeScale.label))
@@ -549,5 +563,52 @@ struct QuickLookView: NSViewRepresentable {
 
     static func dismantleNSView(_ view: QLPreviewView, coordinator: Coordinator) {
         view.close()
+    }
+}
+
+/// A tool patch's panel as a card at the top of Highlights: the tool's
+/// icon and the panel's title, its summary (or note) under them, and its
+/// count. Opens the panel.
+private struct ToolCard: View {
+    let panel: Panel
+    let open: () -> Void
+    @State private var hovering = false
+
+    var body: some View {
+        Button(action: open) {
+            VStack(alignment: .leading, spacing: zoomed(6)) {
+                HStack(spacing: zoomed(8)) {
+                    if let image = PatchImage.image(panel.iconFile) {
+                        Image(nsImage: image).resizable().aspectRatio(contentMode: .fit).frame(width: zoomed(18), height: zoomed(18))
+                    } else {
+                        Image(systemName: PanelIcon.symbol(for: panel))
+                            .font(.system(size: zoomed(13)))
+                            .foregroundStyle(.secondary)
+                    }
+                    Text(panel.title)
+                        .font(.system(size: TypeScale.label, weight: .semibold))
+                    Spacer(minLength: zoomed(4))
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: zoomed(10), weight: .semibold))
+                        .foregroundStyle(.tertiary)
+                }
+                if let text = panel.summary ?? panel.note {
+                    Text(text)
+                        .font(.system(size: TypeScale.detail))
+                        .foregroundStyle(.secondary)
+                        .lineSpacing(zoomed(2))
+                        .fixedSize(horizontal: false, vertical: true)
+                        .multilineTextAlignment(.leading)
+                }
+            }
+            .padding(zoomed(12))
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(RoundedRectangle(cornerRadius: zoomed(10)).fill(Color.primary.opacity(hovering ? 0.08 : 0.05)))
+            .overlay(RoundedRectangle(cornerRadius: zoomed(10)).strokeBorder(Color(nsColor: Theme.cardBorder), lineWidth: 0.5))
+            .contentShape(RoundedRectangle(cornerRadius: zoomed(10)))
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering = $0 }
+        .tip("Open \(panel.title)")
     }
 }

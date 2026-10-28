@@ -122,6 +122,10 @@ public struct DockView: View {
             // moved and closed as the layout says.
             .onAppear { syncWindows() }
             .onChange(of: controller.layout.floating) { syncWindows() }
+            // A floating panel coming and going with what's on show (a
+            // thread's patch panel): reading `available` here is what makes
+            // the view notice.
+            .onChange(of: controller.layout.floating.map { content.available($0.panel) }) { syncWindows() }
             .environment(controller)
             .environment(\.dockContent, content)
             .environment(\.dockOptions, options)
@@ -164,21 +168,29 @@ struct NodeView: View {
 struct SplitView: View {
     let split: DockSplit
     @Environment(DockController.self) private var controller
+    @Environment(\.dockContent) private var content
     /// The fractions when a divider drag started.
     @State private var startFractions: [Double]?
 
     var body: some View {
-        SplitLayout(axis: split.axis, fractions: split.fractions, gap: DockTheme.gap) {
-            ForEach(split.children) { child in
-                NodeView(node: child)
+        // Children with nothing to show right now (a thread's patch panel,
+        // moved to a side of its own, while a thread without it is on show)
+        // are left out and their room shared among the rest, as unavailable
+        // tabs are within a group. The layout keeps them, so they're back
+        // when there's something to show again.
+        let shown = Self.shownIndices(split, content.available)
+        let fractions = Self.normalized(shown.map { split.fractions[$0] })
+        SplitLayout(axis: split.axis, fractions: fractions, gap: DockTheme.gap) {
+            ForEach(shown, id: \.self) { i in
+                NodeView(node: split.children[i])
             }
         }
         .overlay {
             GeometryReader { geo in
                 let length = split.axis == .horizontal ? geo.size.width : geo.size.height
-                let available = length - DockTheme.gap * CGFloat(split.children.count - 1)
-                ForEach(0..<max(split.children.count - 1, 0), id: \.self) { i in
-                    let before = split.fractions.prefix(i + 1).reduce(0, +)
+                let available = length - DockTheme.gap * CGFloat(shown.count - 1)
+                ForEach(0..<max(shown.count - 1, 0), id: \.self) { i in
+                    let before = fractions.prefix(i + 1).reduce(0, +)
                     let at = CGFloat(before) * available + CGFloat(i) * DockTheme.gap + DockTheme.gap / 2
                     DividerHandle(axis: split.axis)
                         .position(split.axis == .horizontal
@@ -191,13 +203,44 @@ struct SplitView: View {
                                     if startFractions == nil, ProcessInfo.processInfo.environment["BEARDOCK_LOG"] != nil { print("divider \(split.id) \(i) from \(value.startLocation)") }
                                     if startFractions == nil { startFractions = start }
                                     let t = split.axis == .horizontal ? value.translation.width : value.translation.height
-                                    controller.layout.setFractions(split: split.id, Self.resized(start, at: i, by: t / max(available, 1), min: 80 / max(available, 1)))
+                                    let visible = Self.normalized(shown.map { start[$0] })
+                                    let moved = Self.resized(visible, at: i, by: t / max(available, 1), min: 80 / max(available, 1))
+                                    controller.layout.setFractions(split: split.id, Self.merged(moved, into: start, at: shown))
                                 }
                                 .onEnded { _ in startFractions = nil }
                         )
                 }
             }
         }
+    }
+
+    /// The children that have a panel with something to show, by index.
+    /// All of them if none has, as a group shows all its tabs then.
+    static func shownIndices(_ split: DockSplit, _ available: (PanelID) -> Bool) -> [Int] {
+        let shown = split.children.indices.filter { hasAvailable(split.children[$0], available) }
+        return shown.isEmpty ? Array(split.children.indices) : shown
+    }
+
+    static func hasAvailable(_ node: DockNode, _ available: (PanelID) -> Bool) -> Bool {
+        switch node {
+        case .group(let g): g.panels.contains(where: available)
+        case .split(let s): s.children.contains { hasAvailable($0, available) }
+        }
+    }
+
+    static func normalized(_ f: [Double]) -> [Double] {
+        let total = f.reduce(0, +)
+        return total > 0 ? f.map { $0 / total } : f.map { _ in 1 / Double(max(f.count, 1)) }
+    }
+
+    /// Fractions of the shown children (summing to 1), put back into the
+    /// whole split's: the hidden ones keep theirs, the shown ones share
+    /// what's left in the new proportions.
+    static func merged(_ visible: [Double], into all: [Double], at shown: [Int]) -> [Double] {
+        var out = all
+        let room = shown.reduce(0) { $0 + all[$1] }
+        for (k, i) in shown.enumerated() { out[i] = visible[k] * room }
+        return out
     }
 
     /// Moves the boundary after child i, keeping both sides at least `min`.
@@ -279,7 +322,7 @@ struct GroupView: View {
         let header = controller.layout.showsHeader(group)
         // Under the traffic lights, in a window without a title bar: the
         // bar stays (empty, if the title's hidden) so they've somewhere to sit.
-        let corner = options.trafficLights > 0 && controller.layout.topLeadingGroupID == group.id
+        let corner = options.trafficLights > 0 && Self.topLeadingGroupID(controller.layout.root, content.available) == group.id
 
         VStack(spacing: 0) {
             if header {
@@ -329,6 +372,15 @@ struct GroupView: View {
 }
 
 extension GroupView {
+    /// The group in the window's top-leading corner as drawn, where the
+    /// traffic lights sit: a side left out for having nothing to show
+    /// (SplitView) passes the corner on to the next.
+    static func topLeadingGroupID(_ root: DockNode, _ available: (PanelID) -> Bool) -> String {
+        var node = root
+        while case .split(let s) = node, let first = SplitView.shownIndices(s, available).first { node = s.children[first] }
+        return node.id
+    }
+
     /// The group as drawn: without its unavailable panels, showing the
     /// selected one if it's available, else the first that is. All of
     /// them, if none is.

@@ -1150,7 +1150,12 @@ runner calls them each time it reads the patches, after every turn, and
 every 20 seconds for an inbox thread that has any. Commands that two of
 them run in the same folder run once per read. One that throws or takes
 over 10 seconds hides its item (a `when`) or gives no badge, and its
-patch's `liveError` says why.
+patch's `liveError` says why. A panel can also have `summary`, which
+returns a line or a list of lines (at most four, 120 characters each),
+sent as the panel's `summary`: a tool patch's panels get a card at the
+top of Highlights with the tool's icon, the panel's title and that
+summary (or its `note`), which opens the panel, so a tool's state is in
+the pane that's open by default rather than only on the rail.
 
 ```ts
   actions: [{

@@ -363,6 +363,7 @@ export type Panel = {
   projectId?: string;
   note?: string; // one line about it: the deployment name, the booted device
   badge?: number; // a count on its rail button, from the patch's badge function
+  summary?: string; // a line or few for its card in Highlights, from the patch's summary function
 };
 
 // One row of a `list` panel, as its patch's `items` function returns it.

@@ -355,9 +355,9 @@ export function checkPanel(p: Obj): string[] {
   for (const k of ['id', 'title', 'patch']) if (!isStr(p[k])) problems.push(k);
   if (p.kind !== 'url' && p.kind !== 'image' && p.kind !== 'list') problems.push('kind');
   if (p.kind === 'url' && !isStr(p.url)) problems.push('url (required for kind url)');
-  for (const k of ['url', 'note', 'projectId', 'icon', 'iconFile']) if (p[k] !== undefined && !isStr(p[k])) problems.push(k);
+  for (const k of ['url', 'note', 'projectId', 'icon', 'iconFile', 'summary']) if (p[k] !== undefined && !isStr(p[k])) problems.push(k);
   if (p.badge !== undefined && !(Number.isInteger(p.badge) && p.badge > 0)) problems.push('badge');
-  const allowed = new Set(['id', 'title', 'kind', 'url', 'icon', 'iconFile', 'patch', 'projectId', 'note', 'badge']);
+  const allowed = new Set(['id', 'title', 'kind', 'url', 'icon', 'iconFile', 'patch', 'projectId', 'note', 'badge', 'summary']);
   for (const k of Object.keys(p)) if (!allowed.has(k)) problems.push(`unexpected field ${k}`);
   return problems;
 }

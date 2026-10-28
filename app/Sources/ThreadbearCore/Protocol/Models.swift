@@ -398,6 +398,9 @@ public struct Panel: Sendable, Hashable, Codable, Identifiable {
     /// A count on its rail button from the patch's live state ("14 edits
     /// waiting for review"); nil for none.
     public var badge: Int?
+    /// A line or few from the patch's summary function, for the panel's
+    /// card at the top of Highlights ("16 edits waiting for your review").
+    public var summary: String?
 
     public init(id: String, title: String, kind: Kind = .url, url: String? = nil, icon: String? = nil, patch: String = "", note: String? = nil, projectId: String? = nil, badge: Int? = nil) {
         self.id = id
@@ -423,6 +426,7 @@ public struct Panel: Sendable, Hashable, Codable, Identifiable {
         note = try c.decodeIfPresent(String.self, forKey: .note)
         projectId = (try? c.decodeIfPresent(String.self, forKey: .projectId)) ?? nil
         badge = (try? c.decodeIfPresent(Int.self, forKey: .badge)) ?? nil
+        summary = (try? c.decodeIfPresent(String.self, forKey: .summary)) ?? nil
     }
 
     /// The page as a URL, when it is one.

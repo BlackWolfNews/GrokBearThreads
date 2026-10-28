@@ -216,6 +216,24 @@ private func threeColumns() -> DockLayout {
     #expect(GroupView.visible(group) { _ in false } == group)
 }
 
+@MainActor @Test func aSideWithNothingToShowGivesItsRoomToTheRest() {
+    // A thread's patch panel moved to a side of its own, while a thread
+    // without it is on show: that side goes and the others share its room.
+    let split = DockSplit(id: "root", axis: .horizontal, children: [
+        g("tool", ["tandem"]), g("mid", ["transcript"]), g("right", ["highlights", "convex"]),
+    ], fractions: [0.25, 0.5, 0.25])
+    let shown = SplitView.shownIndices(split) { $0 != "tandem" && $0 != "convex" }
+    #expect(shown == [1, 2])
+    #expect(SplitView.normalized(shown.map { split.fractions[$0] }) == [2.0 / 3, 1.0 / 3])
+    // A divider dragged meanwhile keeps the hidden side's share.
+    #expect(SplitView.merged([0.5, 0.5], into: split.fractions, at: shown) == [0.25, 0.375, 0.375])
+    // Nothing available anywhere: all of it, as a group does.
+    #expect(SplitView.shownIndices(split) { _ in false } == [0, 1, 2])
+    // The traffic lights move on to the next side.
+    #expect(GroupView.topLeadingGroupID(.split(split)) { $0 != "tandem" } == "mid")
+    #expect(GroupView.topLeadingGroupID(.split(split)) { _ in true } == "tool")
+}
+
 // MARK: Windows of their own
 
 @Test func floatingTakesAPanelOutOfTheTreeButKeepsItOpen() {

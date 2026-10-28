@@ -320,17 +320,18 @@ export function readPatchModule(id: string, source: 'home' | 'project', file: st
     }
     appliesTo = list.map((g: string) => g.trim());
   }
-  // The when and badge functions of the file's actions and panels, kept
-  // aside (see liveFunctions) once the whole file has passed.
+  // The when, badge and summary functions of the file's actions and panels,
+  // kept aside (see liveFunctions) once the whole file has passed. Only
+  // panels have a summary.
   const live: [string, LiveFunctions][] = [];
-  const liveOf = (kind: string, i: number, title: string, raw: { when?: unknown; badge?: unknown }, itemId: string): string | undefined => {
+  const liveOf = (kind: string, i: number, title: string, raw: { when?: unknown; badge?: unknown; summary?: unknown }, itemId: string): string | undefined => {
     const fns: LiveFunctions = {};
-    for (const key of ['when', 'badge'] as const) {
+    for (const key of kind === 'panels' ? (['when', 'badge', 'summary'] as const) : (['when', 'badge'] as const)) {
       if (raw[key] === undefined) continue;
       if (typeof raw[key] !== 'function') return `${kind}[${i}] ("${title}") has a ${key} that isn't a function.`;
       fns[key] = raw[key] as LiveFunction;
     }
-    if (fns.when || fns.badge) live.push([itemId.slice(id.length), fns]);
+    if (fns.when || fns.badge || fns.summary) live.push([itemId.slice(id.length), fns]);
     return undefined;
   };
   let worktree: WorktreeConfig | undefined;
@@ -371,7 +372,7 @@ export function readPatchModule(id: string, source: 'home' | 'project', file: st
   if (v.panels !== undefined) {
     if (!Array.isArray(v.panels)) return problem('panels should be an array.');
     for (const [i, raw] of v.panels.entries()) {
-      const p = raw as { title?: unknown; url?: unknown; note?: unknown; icon?: unknown; items?: unknown; when?: unknown; badge?: unknown };
+      const p = raw as { title?: unknown; url?: unknown; note?: unknown; icon?: unknown; items?: unknown; when?: unknown; badge?: unknown; summary?: unknown };
       if (!p || typeof p !== 'object' || typeof p.title !== 'string' || !p.title.trim()) return problem(`panels[${i}] needs a title.`);
       const ownIcon = readIcon(p.icon, file);
       if (typeof ownIcon === 'string') return problem(`panels[${i}] ("${p.title}"): icon ${ownIcon}`);
@@ -665,7 +666,7 @@ export async function renderListPanel(
 // ------------------------------------------------------------ live state
 
 type LiveFunction = (ctx: ItemsContext) => unknown;
-type LiveFunctions = { when?: LiveFunction; badge?: LiveFunction };
+type LiveFunctions = { when?: LiveFunction; badge?: LiveFunction; summary?: LiveFunction };
 
 // The when and badge functions of loaded patch files' actions and panels,
 // keyed like listFunctions. Kept off the items, which go over the wire.
@@ -728,17 +729,20 @@ export async function applyLive(
       clearTimeout(timer);
     }
   };
-  const settle = async <T extends { id: string; patch: string; badge?: number }>(item: T): Promise<T | undefined> => {
+  const settle = async <T extends { id: string; patch: string; badge?: number; summary?: string }>(item: T): Promise<T | undefined> => {
     const fns = liveFor(set, item);
     if (!fns) return item;
-    const [shown, badge] = await Promise.all([
+    const [shown, badge, summary] = await Promise.all([
       fns.when ? call(item.patch, fns.when).then((v) => Boolean(v), () => false) : true,
       fns.badge ? call(item.patch, fns.badge).then(badgeCount, () => undefined) : undefined,
+      fns.summary ? call(item.patch, fns.summary).then(summaryText, () => undefined) : undefined,
     ]);
     if (!shown) return undefined;
     const out = { ...item };
     delete out.badge;
+    delete out.summary;
     if (badge !== undefined) out.badge = badge;
+    if (summary !== undefined) out.summary = summary;
     return out;
   };
   const [actions, panels] = await Promise.all([Promise.all(set.actions.map(settle)), Promise.all(set.panels.map(settle))]);
@@ -748,6 +752,18 @@ export async function applyLive(
     panels: panels.filter((p): p is Panel => p !== undefined),
     patches: set.patches.map((p) => (errors.has(p.id) ? { ...p, liveError: errors.get(p.id) } : p)),
   };
+}
+
+// A summary function's answer as the card's text: a string, or a list of
+// lines (empty ones dropped), at most SUMMARY_LINES lines of 120 characters.
+export const SUMMARY_LINES = 4;
+function summaryText(v: unknown): string | undefined {
+  const lines = (Array.isArray(v) ? v : typeof v === 'string' ? v.split('\n') : [])
+    .filter((l): l is string => typeof l === 'string')
+    .map((l) => l.trim().slice(0, 120))
+    .filter(Boolean)
+    .slice(0, SUMMARY_LINES);
+  return lines.length ? lines.join('\n') : undefined;
 }
 
 // A badge function's answer as a count: a number, a numeric string or a

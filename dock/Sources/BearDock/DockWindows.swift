@@ -28,7 +28,9 @@ final class DockWindows: NSObject, NSWindowDelegate {
 
     /// Opens a window for each floating panel without one, closes those
     /// whose panel went back into the dock or was closed, and moves any the
-    /// layout says are somewhere else.
+    /// layout says are somewhere else. A panel with nothing to show right
+    /// now (a thread's patch panel while another thread is on show) keeps
+    /// its window, hidden, until it has something again.
     func sync() {
         guard let content else { return }
         let floating = controller.layout.floating
@@ -39,14 +41,23 @@ final class DockWindows: NSObject, NSWindowDelegate {
             windows[panel] = nil
         }
         for f in floating {
+            let shows = content.available(f.panel)
             if let window = windows[f.panel] {
                 if window.frame != f.frame, controller.drag?.panel != f.panel { window.setFrame(f.frame, display: true) }
                 window.title = content.title(f.panel)
+                if !shows, window.isVisible {
+                    window.orderOut(nil)
+                } else if shows, !window.isVisible, !window.isMiniaturized {
+                    window.orderFront(nil)
+                }
                 continue
             }
             let window = makeWindow(f, content: content)
             windows[f.panel] = window
-            if focusNext == f.panel {
+            if !shows {
+                // Made now, so it's there in its place when the panel is back.
+                focusNext = focusNext == f.panel ? nil : focusNext
+            } else if focusNext == f.panel {
                 window.makeKeyAndOrderFront(nil)
                 focusNext = nil
             } else {
