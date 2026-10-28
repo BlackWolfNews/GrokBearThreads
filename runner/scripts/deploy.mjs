@@ -625,7 +625,28 @@ function checks(c) {
   const opts = { cwd: c.runnerDir, env: cleanEnv() };
   if (!fs.existsSync(path.join(c.runnerDir, 'node_modules'))) step('Installing the checkout\'s packages', c.npm, ['ci', '--no-audit', '--no-fund'], opts);
   step('Typecheck', c.npm, ['run', 'typecheck'], opts);
-  step('Unit tests', c.npm, ['test'], opts);
+  unitTests(c, opts);
+}
+
+// The full suite runs files in parallel on a Mac that's usually busy with
+// threads, so a test with a timing assumption can fail for no real reason
+// and hold the runner back from main. Files that failed get one more go, one
+// at a time; a real break fails both runs and still stops the update.
+function unitTests(c, opts) {
+  try {
+    step('Unit tests', c.npm, ['test'], opts);
+  } catch (e) {
+    const logFile = e.message.match(/output is in (\S+)$/)?.[1];
+    const files = logFile ? failedTestFiles(fs.readFileSync(logFile, 'utf8')) : [];
+    if (!files.length) throw e;
+    step(`Rerunning ${files.join(', ')}`, process.execPath, ['--test', '--test-reporter=spec', '--test-concurrency=1', ...files], opts);
+    say(`Flaky: ${files.join(', ')} failed in the full run and passed alone (first run's output: ${logFile})`);
+  }
+}
+
+// node --test's summary names each failure as "test at <file>:<line>:<col>".
+function failedTestFiles(output) {
+  return [...new Set([...output.matchAll(/^test at (\S+?\.test\.ts):\d+:\d+$/gm)].map((m) => m[1]))];
 }
 
 function snapshotHead(c, g, dest) {

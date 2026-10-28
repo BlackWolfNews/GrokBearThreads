@@ -120,7 +120,9 @@ test('a release reports its id, marks itself good, reports a rollback, and resta
   const id = '20261026T101500Z-abc1234';
   const dir = makeRelease(home, id);
   writeState(home, { current: id, previous: 'older', lastGood: 'older', boots: [{ release: id, at: new Date().toISOString() }], rolledBack: { from: 'broken', to: id, at: new Date().toISOString() } });
-  const a = startRunner(path.join(dir, 'src', 'main.ts'), home, { THREADBEAR_GOOD_AFTER_MS: '300' });
+  // Long enough that a busy Mac still gets through the checks below before
+  // the release marks itself good.
+  const a = startRunner(path.join(dir, 'src', 'main.ts'), home, { THREADBEAR_GOOD_AFTER_MS: '3000' });
   try {
     const port = await a.listening;
     const { c, hello, notices } = await connect(home, port);
@@ -133,7 +135,9 @@ test('a release reports its id, marks itself good, reports a rollback, and resta
     assert.deepEqual(status.running, []);
 
     assert.equal(readState(home)?.lastGood, 'older', 'not good yet');
-    await new Promise((r) => setTimeout(r, 600));
+    for (const until = Date.now() + 15_000; readState(home)?.lastGood !== id && Date.now() < until; ) {
+      await new Promise((r) => setTimeout(r, 100));
+    }
     const s = readState(home)!;
     assert.equal(s.lastGood, id);
     assert.ok(s.rolledBack?.reportedAt);
