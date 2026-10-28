@@ -34,33 +34,29 @@
 <body class="page-{{page}}{{bodyClass}}">
   <!-- Patches in the page's background, like the ones sewn onto the bear: still, with no colour,
        just faint silhouettes with their running stitch. Mike wanted them quiet and part of the
-       background rather than on top of anything (28 Oct). The shapes are drawn once below, coloured with attributes (CSS doesn't reach a <use> copy's insides);
+       background rather than on top of anything (28 Oct). The shapes are drawn once below, coloured with attributes and currentColor (CSS rules don't reach a <use> copy's insides, but `color` does);
        each patch's place, size and turn is set in styles.css ("background patches"), since the
        Worker's CSP blocks inline styles. -->
   <svg width="0" height="0" class="patch-shapes" aria-hidden="true">
     <defs>
-      <symbol id="bp-sq" viewBox="0 0 120 120"><rect x="4" y="4" width="112" height="112" rx="16" fill="#1f1c18"/><rect x="13" y="13" width="94" height="94" rx="8" fill="none" stroke="#faf8f3" stroke-width="3" stroke-dasharray="7 6" stroke-linecap="round"/></symbol>
-      <symbol id="bp-heart" viewBox="0 0 120 120"><path d="M60 108 14 62a26 26 0 0 1 46-36 26 26 0 0 1 46 36z" fill="#1f1c18"/><path d="M60 96 22 58a17 17 0 0 1 38-24 17 17 0 0 1 38 24z" fill="none" stroke="#faf8f3" stroke-width="3" stroke-dasharray="7 6" stroke-linecap="round"/></symbol>
-      <symbol id="bp-round" viewBox="0 0 120 120"><circle cx="60" cy="60" r="54" fill="#1f1c18"/><circle cx="60" cy="60" r="44" fill="none" stroke="#faf8f3" stroke-width="3" stroke-dasharray="7 6" stroke-linecap="round"/></symbol>
-      <symbol id="bp-long" viewBox="0 0 120 120"><rect x="4" y="30" width="112" height="60" rx="14" fill="#1f1c18"/><rect x="13" y="39" width="94" height="42" rx="6" fill="none" stroke="#faf8f3" stroke-width="3" stroke-dasharray="7 6" stroke-linecap="round"/></symbol>
-      <symbol id="bp-cross" viewBox="0 0 120 120"><rect x="4" y="4" width="112" height="112" rx="16" fill="#1f1c18"/><rect x="13" y="13" width="94" height="94" rx="8" fill="none" stroke="#faf8f3" stroke-width="3" stroke-dasharray="7 6" stroke-linecap="round"/><path d="M80 26l14 14M94 26 80 40" fill="none" stroke="#faf8f3" stroke-width="4" stroke-linecap="round"/></symbol>
+      <symbol id="bp-sq" viewBox="0 0 120 120"><rect x="4" y="4" width="112" height="112" rx="16" fill="currentColor"/><rect x="13" y="13" width="94" height="94" rx="8" fill="none" stroke="#faf8f3" stroke-width="2.2" stroke-dasharray="5 4" stroke-linecap="round"/></symbol>
+      <symbol id="bp-heart" viewBox="0 0 120 120"><path d="M60 108 14 62a26 26 0 0 1 46-36 26 26 0 0 1 46 36z" fill="currentColor"/><path d="M60 96 22 58a17 17 0 0 1 38-24 17 17 0 0 1 38 24z" fill="none" stroke="#faf8f3" stroke-width="2.2" stroke-dasharray="5 4" stroke-linecap="round"/></symbol>
+      <symbol id="bp-round" viewBox="0 0 120 120"><circle cx="60" cy="60" r="54" fill="currentColor"/><circle cx="60" cy="60" r="44" fill="none" stroke="#faf8f3" stroke-width="2.2" stroke-dasharray="5 4" stroke-linecap="round"/></symbol>
+      <symbol id="bp-long" viewBox="0 0 120 120"><rect x="4" y="30" width="112" height="60" rx="14" fill="currentColor"/><rect x="13" y="39" width="94" height="42" rx="6" fill="none" stroke="#faf8f3" stroke-width="2.2" stroke-dasharray="5 4" stroke-linecap="round"/></symbol>
+      <symbol id="bp-cross" viewBox="0 0 120 120"><rect x="4" y="4" width="112" height="112" rx="16" fill="currentColor"/><rect x="13" y="13" width="94" height="94" rx="8" fill="none" stroke="#faf8f3" stroke-width="2.2" stroke-dasharray="5 4" stroke-linecap="round"/><path d="M80 26l14 14M94 26 80 40" fill="none" stroke="#faf8f3" stroke-width="4" stroke-linecap="round"/></symbol>
     </defs>
   </svg>
   <div class="bg-patches" aria-hidden="true">
-    <svg class="bg-patch bp1" viewBox="0 0 120 120"><use href="#bp-sq"/></svg>
-    <svg class="bg-patch bp2" viewBox="0 0 120 120"><use href="#bp-heart"/></svg>
-    <svg class="bg-patch bp3" viewBox="0 0 120 120"><use href="#bp-round"/></svg>
-    <svg class="bg-patch bp4" viewBox="0 0 120 120"><use href="#bp-cross"/></svg>
-    <svg class="bg-patch bp5" viewBox="0 0 120 120"><use href="#bp-long"/></svg>
-    <svg class="bg-patch bp6" viewBox="0 0 120 120"><use href="#bp-sq"/></svg>
-    <svg class="bg-patch bp7" viewBox="0 0 120 120"><use href="#bp-heart"/></svg>
-    <svg class="bg-patch bp8" viewBox="0 0 120 120"><use href="#bp-round"/></svg>
-    <svg class="bg-patch bp9" viewBox="0 0 120 120"><use href="#bp-sq"/></svg>
-    <svg class="bg-patch bp10" viewBox="0 0 120 120"><use href="#bp-long"/></svg>
-    <svg class="bg-patch bp11" viewBox="0 0 120 120"><use href="#bp-cross"/></svg>
-    <svg class="bg-patch bp12" viewBox="0 0 120 120"><use href="#bp-heart"/></svg>
-    <svg class="bg-patch bp13" viewBox="0 0 120 120"><use href="#bp-round"/></svg>
-    <svg class="bg-patch bp14" viewBox="0 0 120 120"><use href="#bp-sq"/></svg>
+    <svg class="bg-patch bp1 tone-b" viewBox="0 0 120 120"><use href="#bp-sq"/></svg>
+    <svg class="bg-patch bp2 tone-g" viewBox="0 0 120 120"><use href="#bp-heart"/></svg>
+    <svg class="bg-patch bp3 tone-h" viewBox="0 0 120 120"><use href="#bp-long"/></svg>
+    <svg class="bg-patch bp4 tone-b" viewBox="0 0 120 120"><use href="#bp-round"/></svg>
+    <svg class="bg-patch bp5 tone-g" viewBox="0 0 120 120"><use href="#bp-cross"/></svg>
+    <svg class="bg-patch bp6 tone-h" viewBox="0 0 120 120"><use href="#bp-sq"/></svg>
+    <svg class="bg-patch bp7 tone-b" viewBox="0 0 120 120"><use href="#bp-heart"/></svg>
+    <svg class="bg-patch bp8 tone-g" viewBox="0 0 120 120"><use href="#bp-long"/></svg>
+    <svg class="bg-patch bp9 tone-h" viewBox="0 0 120 120"><use href="#bp-round"/></svg>
+    <svg class="bg-patch bp10 tone-b" viewBox="0 0 120 120"><use href="#bp-sq"/></svg>
   </div>
   <!-- The code on GitHub, top right, like Walkies', Poddle's and Quick Ask's corner. Off while
        the repo's private (GITHUB_PUBLIC in site.mjs). -->

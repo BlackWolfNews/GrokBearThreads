@@ -61,28 +61,28 @@ img { max-width: 100%; height: auto; }
 code { font-family: var(--mono); font-size: .875em; }
 
 /* ---------- background patches ---------- */
-/* Faint, colourless patch silhouettes behind everything (layout.html), scattered down the
-   page's edges so they show in the margins and between sections. The cloth is the ink colour
-   at a few percent (layout.html); the stitch is drawn in the page colour, so it reads as a gap in the cloth. */
+/* Big, faint patches behind everything (layout.html), half off the page's edges, still and
+   barely there: light browns and a warm grey, each the cloth colour at a few percent, with the
+   running stitch drawn in the page colour so it reads as a gap in the cloth. Mike, 28 Oct:
+   "They're big patches", lighter, light brown, not all grey. */
 .patch-shapes { position: absolute; width: 0; height: 0; overflow: hidden; }
 .bg-patches { position: absolute; inset: 0; z-index: -1; overflow: hidden; pointer-events: none; }
-.bg-patch { position: absolute; display: block; opacity: .05; }
-.bp1 { top: 3%; left: calc(4% - 60px); width: 120px; height: 120px; transform: rotate(-8deg); }
-.bp2 { top: 7%; left: calc(88% - 48px); width: 96px; height: 96px; transform: rotate(10deg); }
-.bp3 { top: 16%; left: calc(93% - 40px); width: 80px; height: 80px; transform: rotate(0deg); }
-.bp4 { top: 21%; left: calc(2% - 52px); width: 104px; height: 104px; transform: rotate(6deg); }
-.bp5 { top: 30%; left: calc(90% - 64px); width: 128px; height: 128px; transform: rotate(-12deg); }
-.bp6 { top: 38%; left: calc(5% - 44px); width: 88px; height: 88px; transform: rotate(12deg); }
-.bp7 { top: 46%; left: calc(94% - 36px); width: 72px; height: 72px; transform: rotate(-6deg); }
-.bp8 { top: 53%; left: calc(1% - 56px); width: 112px; height: 112px; transform: rotate(0deg); }
-.bp9 { top: 60%; left: calc(91% - 55px); width: 110px; height: 110px; transform: rotate(-4deg); }
-.bp10 { top: 68%; left: calc(3% - 60px); width: 120px; height: 120px; transform: rotate(9deg); }
-.bp11 { top: 75%; left: calc(92% - 46px); width: 92px; height: 92px; transform: rotate(-10deg); }
-.bp12 { top: 83%; left: calc(6% - 42px); width: 84px; height: 84px; transform: rotate(7deg); }
-.bp13 { top: 90%; left: calc(89% - 50px); width: 100px; height: 100px; transform: rotate(0deg); }
-.bp14 { top: 96%; left: calc(46% - 36px); width: 72px; height: 72px; transform: rotate(-14deg); }
-/* Smaller on a phone, where there's hardly any margin for them to sit in. */
-@media (max-width: 860px) { .bg-patch { scale: .6; } }
+.bg-patch { position: absolute; display: block; }
+.tone-b { color: #9a6b2f; opacity: .06; }
+.tone-h { color: #b98a4e; opacity: .055; }
+.tone-g { color: #6b645a; opacity: .04; }
+.bp1 { top: 2%; left: calc(-4% - 210px); width: 420px; height: 420px; transform: rotate(-8deg); }
+.bp2 { top: 9%; left: calc(96% - 180px); width: 360px; height: 360px; transform: rotate(10deg); }
+.bp3 { top: 22%; left: calc(-6% - 230px); width: 460px; height: 460px; transform: rotate(6deg); }
+.bp4 { top: 31%; left: calc(99% - 200px); width: 400px; height: 400px; transform: rotate(0deg); }
+.bp5 { top: 43%; left: calc(-3% - 190px); width: 380px; height: 380px; transform: rotate(-10deg); }
+.bp6 { top: 53%; left: calc(97% - 220px); width: 440px; height: 440px; transform: rotate(7deg); }
+.bp7 { top: 64%; left: calc(-2% - 170px); width: 340px; height: 340px; transform: rotate(-6deg); }
+.bp8 { top: 74%; left: calc(100% - 240px); width: 480px; height: 480px; transform: rotate(-12deg); }
+.bp9 { top: 84%; left: calc(0% - 180px); width: 360px; height: 360px; transform: rotate(0deg); }
+.bp10 { top: 93%; left: calc(94% - 200px); width: 400px; height: 400px; transform: rotate(12deg); }
+/* Smaller on a phone so they don't fill the screen. */
+@media (max-width: 860px) { .bg-patch { scale: .55; } }
 
 /* ---------- skip link ---------- */
 .skip {
