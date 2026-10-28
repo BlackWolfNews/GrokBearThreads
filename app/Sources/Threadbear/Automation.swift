@@ -696,6 +696,12 @@ enum Automation {
             let shown = UpdatesText.shown(app: side, runner: app.runnerUpdates)
             let tip = UpdatesText.iconTooltip(app: side, runner: app.runnerUpdates, clis: app.clis)
             return "ok " + json(["shown: \(shown)", "tip: " + tip.replacingOccurrences(of: "\n", with: " / "), UpdatesText.appLine(side)] + UpdatesText.runnerLines(app.runnerUpdates))
+        case "restart-countdown":
+            // The update's countdown card: {"show": 5} shows it at that
+            // count (with no build behind it), {"show": 0} hides it.
+            let seconds = (c["show"] as? Int) ?? 0
+            AppUpdater.shared.previewCountdown(seconds > 0 ? seconds : nil)
+            return "ok"
         case "debug-info":
             // What the row menu's "Copy debug info" copies, copied the same
             // way (to this instance's pasteboard).
