@@ -56,15 +56,24 @@ struct HighlightsView: View {
                 .padding(.top, zoomed(10))
         }
         if let brief = sections.brief {
-            Text(brief)
-                .font(.system(size: TypeScale.label))
-                .foregroundStyle(.secondary)
-                .lineSpacing(zoomed(2))
-                .fixedSize(horizontal: false, vertical: true)
-                .textSelection(.enabled)
-                .padding(.horizontal, SidebarMetrics.leading)
-                .padding(.top, zoomed(14))
-                .padding(.bottom, zoomed(2))
+            let points = HighlightSections.points(brief)
+            VStack(alignment: .leading, spacing: zoomed(4)) {
+                ForEach(Array(points.enumerated()), id: \.offset) { _, point in
+                    HStack(alignment: .firstTextBaseline, spacing: zoomed(6)) {
+                        // An old paragraph brief is one point: no bullet.
+                        if points.count > 1 { Text("•") }
+                        Text(point)
+                            .lineSpacing(zoomed(2))
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+            }
+            .font(.system(size: TypeScale.label))
+            .foregroundStyle(.secondary)
+            .textSelection(.enabled)
+            .padding(.horizontal, SidebarMetrics.leading)
+            .padding(.top, zoomed(14))
+            .padding(.bottom, zoomed(2))
         }
         // The last turn's asks while its card is open, ticked here or in
         // the transcript alike (the same `threads.tickAsk`).

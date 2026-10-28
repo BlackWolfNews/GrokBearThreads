@@ -796,14 +796,14 @@ Reply with JSON only, no prose and no code fence:
  "state": {"<project id>": "the project's new state"} only when this thread changed where the whole project stands (shipped or finished something, made a decision, hit a blocker), else {},
  "addFolders": {"<project id>": ["~/path"]} for repos this thread shows belong to a project it's in, else {},
  "links": {"<project id>": [{"title": "Live site", "url": "https://..."}]} for lasting places of a project it's in that the messages give and the project doesn't list yet, else {},
- "thread": "one or two plain sentences on where this thread itself is up to: what it did or found, and what it's waiting on or doing next",
+ "thread": "where this thread itself is up to, as two or three short bullets, one per line, each starting \"- \": what it did or found, and what it's waiting on or doing next",
  "why": "one short line"}
 
 Folders are repos the work lives in (the thread's folder when it's a repo, and the repos it edited), never a catch-all folder. State is two to four plain sentences about the whole project, not this thread: what's done, what's next, what's blocked. Start from the current state, keep what's still true and fold the change in; don't replace it with this thread's details. Ideas and plans that aren't built yet don't change the state.
 
 Links are the few places Mike keeps going back to for a project: its live site, admin page, dashboard, store listing. Copy the url exactly from the messages and give it a short title ("Live site", "Admin", "App Store"). Never a pull request, commit, issue, docs page, localhost, file or one-off page.
 
-The thread line is for Mike glancing at the thread later: concrete, in his plain words, no more than 40 words. Say who's waiting on whom ("Waiting on Mike to pick a design", "Fixing the last failing test").`;
+The thread bullets are for Mike glancing at the thread later: concrete, in his plain words, each under ten words, no full stops. The last one says who's waiting on whom ("Waiting on Mike to pick a design", "Fixing the last failing test").`;
 
 const SYMBOL_SYSTEM = `You pick an icon for a project in Threadbear, Mike's app for running AI coding agents. Given the project and a list of SF Symbol names, reply with the one name from the list that best shows what the project is about, and nothing else.`;
 

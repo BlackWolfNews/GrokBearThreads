@@ -25,6 +25,19 @@ public struct HighlightSections: Sendable, Hashable {
         return (Array(items.prefix(limit)), items.count - limit)
     }
 
+    /// The brief's bullets: the librarian writes "- " lines (Mike found a
+    /// paragraph too long to glance at, 28 Oct). An older paragraph brief
+    /// comes back as one point.
+    public static func points(_ brief: String) -> [String] {
+        brief.split(whereSeparator: \.isNewline)
+            .map { line in
+                var text = line.trimmingCharacters(in: .whitespaces)
+                if let first = text.first, "-•*".contains(first) { text = String(text.dropFirst()).trimmingCharacters(in: .whitespaces) }
+                return text
+            }
+            .filter { !$0.isEmpty }
+    }
+
     /// Nothing to show but the empty line.
     public var isEmpty: Bool {
         brief == nil && pinned.isEmpty && files.isEmpty && links.isEmpty && commits.isEmpty && edited.isEmpty

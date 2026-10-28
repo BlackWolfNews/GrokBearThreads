@@ -59,6 +59,13 @@ final class HighlightsTests: XCTestCase {
         XCTAssertTrue(HighlightSections.build(ThreadHighlights(brief: .init(text: "  "))).isEmpty)
     }
 
+    func testBriefPointsSplitTheBullets() {
+        XCTAssertEqual(HighlightSections.points("- Added the Tandem card\n\n  - Panel follows the thread \n• Waiting on Mike to test"),
+                       ["Added the Tandem card", "Panel follows the thread", "Waiting on Mike to test"])
+        // An older paragraph brief stays one point.
+        XCTAssertEqual(HighlightSections.points("Rebuilt the pages; copy needs a pass."), ["Rebuilt the pages; copy needs a pass."])
+    }
+
     func testWebPagesAreHttpLinksOnly() throws {
         func web(_ text: String) throws -> Bool { PreviewRules.isWebPage(try XCTUnwrap(URL(string: text))) }
         XCTAssertTrue(try web("http://localhost:4321/poddle"))
