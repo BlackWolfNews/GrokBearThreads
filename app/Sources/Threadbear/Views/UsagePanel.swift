@@ -1,21 +1,22 @@
 import SwiftUI
 import ThreadbearCore
 
-/// "Usage" in the sidebar's activity bar, a panel in the dock: every
-/// account's limits, grouped by provider, then the two CLIs' versions with
-/// what can be done about them. A panel rather than a popover (28 Oct) so
-/// it can stay open beside a thread, or be dragged out into a window.
-/// Everything comes from `accounts.updated` and `clis.updated`; the times
-/// follow `app.now`, which ticks without asking the runner anything.
+/// "Usage" in the activity bar, a panel in the dock: every login's limits,
+/// grouped by pool and, within a pool, by provider (Mike, 28 Oct: pools are
+/// what threads run on). A panel rather than a popover so it can stay open
+/// beside a thread, or be dragged out into a window. The CLIs' versions are
+/// in Updates. Everything comes from `accounts.updated` and
+/// `pools.updated`; the times follow `app.now`, which ticks without asking
+/// the runner anything.
 struct UsagePanel: View {
     @Environment(AppModel.self) private var app
 
     var body: some View {
-        let sections = UsageSections.build(app.accounts)
+        let groups = UsageGroups.build(pools: app.poolsSupported ? app.pools : [], accounts: app.accounts)
         let notices = AccountUsageText.notices(app.accounts)
         ScrollView {
             VStack(alignment: .leading, spacing: zoomed(12)) {
-                if sections.isEmpty || !sections.contains(where: { $0.accounts.contains { $0.usage != nil } }) {
+                if !app.accounts.contains(where: { $0.usage != nil }) {
                     Text("The usage numbers need a newer runner.")
                         .font(.system(size: zoomed(12)))
                         .foregroundStyle(.secondary)
@@ -24,8 +25,8 @@ struct UsagePanel: View {
                 // in a narrow panel each address gets a line of its own
                 // above its bars, rather than being cut to "mi...om".
                 ViewThatFits(in: .horizontal) {
-                    UsageTable(sections: sections, notices: notices.own, now: app.now)
-                    UsageTable(sections: sections, notices: notices.own, now: app.now, stacked: true)
+                    UsageTable(groups: groups, allAccounts: app.accounts, notices: notices.own, now: app.now)
+                    UsageTable(groups: groups, allAccounts: app.accounts, notices: notices.own, now: app.now, stacked: true)
                 }
                 // Where the numbers came from, and what Token Stats says
                 // about all of them, once.
@@ -36,8 +37,6 @@ struct UsagePanel: View {
                         .foregroundStyle(.tertiary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
-                Divider().padding(.vertical, zoomed(4))
-                CliSection()
             }
             .padding(zoomed(16))
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -45,51 +44,65 @@ struct UsagePanel: View {
     }
 }
 
-/// Accounts by provider, Claude first, in the runner's order within each.
-enum UsageSections {
-    struct Section {
-        var provider: String
-        var accounts: [Account]
-    }
-
-    static func build(_ accounts: [Account]) -> [Section] {
-        AccountMenu.sections(accounts, selected: "", now: Date()).map { section in
-            Section(provider: section.id, accounts: section.items.compactMap { item in accounts.first { $0.id == item.id } })
-        }
-    }
-}
-
-/// One provider's accounts as a small table: the name, then what's left
-/// of the 5-hour and weekly windows, with "left" said once in the header
-/// (a bare "54%" read as used as easily as left). Under an account, only
-/// what's worth knowing: its note, that it's at its limit or its numbers
-/// are old, when a short window comes back, and the extras that decide
-/// something (`AccountUsageText.extraLines`).
-/// Claude and Codex share one grid so their columns line up.
+/// The logins as one small table: each pool's name and icon, then its
+/// logins by provider, each provider with a header saying what its columns
+/// are. A login's name, then what's left of the 5-hour and weekly windows,
+/// with "left" said once in the header (a bare "54%" read as used as
+/// easily as left). Under a login, only what's worth knowing: its note,
+/// that it's at its limit or its numbers are old, when a short window
+/// comes back, and the extras that decide something
+/// (`AccountUsageText.extraLines`). One grid so every column lines up.
+/// A login in two pools shows in both.
 private struct UsageTable: View {
-    let sections: [UsageSections.Section]
+    let groups: [UsageGroups.Group]
+    /// Every login, for a pool's fallback icon (its providers').
+    let allAccounts: [Account]
     let notices: [String: String]
     let now: Date
     /// Each address on its own line over its bars, for a narrow panel.
     var stacked = false
 
     var body: some View {
-        let hasFiveHour = sections.contains { $0.accounts.contains { AccountUsageText.mainWindows($0.usage).contains { $0.kind == "five_hour" } } }
+        let hasFiveHour = groups.contains { $0.accounts.contains { AccountUsageText.mainWindows($0.usage).contains { $0.kind == "five_hour" } } }
+        let columns = (stacked ? 0 : 1) + (hasFiveHour ? 2 : 1)
+        // Pools get headings; groups that are just providers (an older
+        // runner) don't, as the provider's own header names them.
+        let pooled = groups.contains { $0.pool != nil }
         Grid(alignment: .leading, horizontalSpacing: zoomed(14), verticalSpacing: zoomed(6)) {
-            ForEach(sections, id: \.provider) { section in
-            if stacked {
+            ForEach(groups) { group in
+            let firstGroup = group.id == groups.first?.id
+            if pooled {
+                GridRow {
+                    Label {
+                        Text(group.title)
+                    } icon: {
+                        Image(systemName: group.pool.map { Pools.symbol($0, accounts: allAccounts) } ?? "tray")
+                            .foregroundStyle(.secondary)
+                    }
+                    .font(.system(size: zoomed(12.5), weight: .semibold))
+                    .accessibilityAddTraits(.isHeader)
+                    .gridCellColumns(columns)
+                }
+                .padding(.top, firstGroup ? 0 : zoomed(14))
+            }
+            ForEach(group.providers) { section in
+            let first = !pooled && firstGroup && section.id == group.providers.first?.id
+            // A pool of one provider doesn't name it: the pool's heading
+            // says enough, and "Claude" under "Claude" read as noise.
+            let named = !pooled || group.providers.count > 1
+            if stacked && named {
                 GridRow {
                     Text(ModelPicker.providerTitle(section.provider))
                         .accessibilityAddTraits(.isHeader)
-                        .gridCellColumns(hasFiveHour ? 2 : 1)
+                        .gridCellColumns(columns)
                 }
                 .font(.system(size: zoomed(11), weight: .medium))
                 .foregroundStyle(.tertiary)
-                .padding(.top, section.provider == sections.first?.provider ? 0 : zoomed(8))
+                .padding(.top, first ? 0 : zoomed(pooled ? 4 : 8))
             }
             GridRow {
                 if !stacked {
-                    Text(ModelPicker.providerTitle(section.provider))
+                    Text(named ? ModelPicker.providerTitle(section.provider) : "")
                         .accessibilityAddTraits(.isHeader)
                 }
                 // Codex's Pro Lite has only a week: its column stays, empty.
@@ -100,12 +113,12 @@ private struct UsageTable: View {
             }
             .font(.system(size: zoomed(11), weight: .medium))
             .foregroundStyle(.tertiary)
-            .padding(.top, stacked || section.provider == sections.first?.provider ? 0 : zoomed(8))
+            .padding(.top, (stacked && named) || first ? 0 : zoomed(pooled ? 4 : 8))
             ForEach(section.accounts) { account in
                 let windows = AccountUsageText.mainWindows(account.usage)
                 if stacked {
                     GridRow {
-                        AccountNameCell(account: account, now: now).gridCellColumns(hasFiveHour ? 2 : 1)
+                        AccountNameCell(account: account, now: now).gridCellColumns(columns)
                     }
                 }
                 GridRow(alignment: .firstTextBaseline) {
@@ -125,9 +138,10 @@ private struct UsageTable: View {
                         }
                         .font(.system(size: zoomed(11)))
                         .padding(.top, zoomed(-3))
-                        .gridCellColumns((hasFiveHour ? 2 : 1) + (stacked ? 0 : 1))
+                        .gridCellColumns(columns)
                     }
                 }
+            }
             }
             }
         }
@@ -204,96 +218,5 @@ private struct RoomCell: View {
         if window.remainingPercent < 1 { return .red }
         if window.remainingPercent < AccountUsageText.chipWarning { return .orange }
         return Color.primary.opacity(0.45)
-    }
-}
-
-/// The two CLIs: their versions, Update (or Update anyway, or Go back),
-/// whether updates install by themselves, and when the runner last looked.
-private struct CliSection: View {
-    @Environment(AppModel.self) private var app
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: zoomed(12)) {
-            if app.clisSupported == false || (app.clisSupported == nil && app.clis.isEmpty) {
-                Text("The CLI versions need a newer runner.")
-                    .font(.system(size: zoomed(12)))
-                    .foregroundStyle(.secondary)
-            } else {
-                ForEach(app.clis) { cli in
-                    CliRow(cli: cli)
-                }
-                HStack {
-                    if let checked = CliText.checkedLine(app.clis, now: app.now) {
-                        Text(checked).font(.system(size: zoomed(11))).foregroundStyle(.tertiary)
-                    }
-                    Spacer()
-                    Button("Check now") { app.checkClis() }
-                        .buttonStyle(.borderless)
-                        .tip("Look for new versions of the CLIs now")
-                        .font(.system(size: zoomed(11)))
-                }
-            }
-        }
-    }
-}
-
-private struct CliRow: View {
-    @Environment(AppModel.self) private var app
-    let cli: CliStatus
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: zoomed(6)) {
-            HStack(alignment: .firstTextBaseline) {
-                Text(CliText.statusLine(cli))
-                    .font(.system(size: zoomed(12)))
-                    .foregroundStyle(cli.status == "held" ? AnyShapeStyle(Color.orange) : AnyShapeStyle(.primary))
-                    .fixedSize(horizontal: false, vertical: true)
-                Spacer(minLength: zoomed(6))
-                if let title = CliText.updateTitle(cli) {
-                    Button(title) { app.updateCli(cli.provider, force: cli.status == "held") }
-                        .controlSize(.small)
-                        .tip(cli.status == "held" ? "Install it even though the check held it back" : "Install the new version now")
-                }
-            }
-            if let text = CliText.isUpdating(cli) ? CliText.bannerText(cli) : nil {
-                Text(text).font(.system(size: zoomed(11))).foregroundStyle(.secondary)
-            }
-            if let missing = cli.hold?.missing, !missing.isEmpty {
-                Text("Missing: " + missing.joined(separator: ", "))
-                    .font(.system(size: zoomed(11)))
-                    .foregroundStyle(.tertiary)
-                    .lineLimit(2)
-            }
-            if let managed = CliText.managedLine(cli) {
-                Text(managed).font(.system(size: zoomed(11))).foregroundStyle(.tertiary)
-            }
-            HStack(spacing: zoomed(8)) {
-                // A menu, not a segmented control: two rows of three
-                // buttons were most of the popover's noise, and the choice
-                // is set once and left.
-                Menu {
-                    ForEach(CliText.policies, id: \.self) { policy in
-                        Button { app.setCliPolicy(cli.provider, policy) } label: {
-                            if policy == cli.policy { Label(CliText.policyTitle(policy), systemImage: "checkmark") } else { Text(CliText.policyTitle(policy)) }
-                        }
-                    }
-                } label: {
-                    Text("Updates: " + CliText.policyTitle(cli.policy))
-                }
-                .menuStyle(.borderlessButton)
-                .menuIndicator(.visible)
-                .controlSize(.small)
-                .fixedSize()
-                .foregroundStyle(.secondary)
-                .tip("Whether new versions install by themselves")
-                Spacer()
-                if let back = CliText.goBackTitle(cli), let previous = cli.previousVersion {
-                    Button(back) { app.updateCli(cli.provider, version: previous) }
-                        .buttonStyle(.borderless)
-                        .tip("Go back to the version you had before the last update")
-                        .font(.system(size: zoomed(11)))
-                }
-            }
-        }
     }
 }

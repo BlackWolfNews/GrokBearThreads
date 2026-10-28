@@ -681,24 +681,24 @@ enum Automation {
             return composerMenu(c, app: app)
         case "usage":
             // The Usage panel: {"show": true} opens it ({"show": false}
-            // closes it), {"click": "Update"} presses
-            // one of its buttons for a CLI ({"provider": "codex"}), and
+            // closes it), {"click": "Update"} presses one of the Updates
+            // panel's buttons for a CLI ({"provider": "codex"}), and
             // with neither it lists what it says.
             return usage(c, app: app)
         case "updates":
-            // The rail's updates popover: {"show": true} opens it (and says
-            // its window, for a screencapture -l); with nothing, whether the
-            // icon is showing and what the popover would say.
+            // The Updates panel: {"show": true} opens it ({"show": false}
+            // closes it); with nothing, whether the icon has its dot, its
+            // tooltip, and what the panel says about the app and runner.
             if let show = c["show"] as? Bool {
-                app.updatesPopoverShown = show
+                app.updatesShown = show
                 guard show else { return "ok closed" }
                 RunLoop.main.run(until: Date().addingTimeInterval(0.5))
-                let popover = NSApp.windows.first { String(describing: type(of: $0)).contains("Popover") && $0.isVisible }
-                return popover.map { "ok window \($0.windowNumber)" } ?? "error the popover didn't open (is the icon showing?)"
+                return app.updatesShown ? "ok shown" : "error the panel didn't open"
             }
-            let side = UpdatesPopover.appSide(AppUpdater.shared)
+            let side = UpdatesPanel.appSide(AppUpdater.shared)
             let shown = UpdatesText.shown(app: side, runner: app.runnerUpdates)
-            return "ok " + json(["shown: \(shown)", UpdatesText.appLine(side)] + UpdatesText.runnerLines(app.runnerUpdates))
+            let tip = UpdatesText.iconTooltip(app: side, runner: app.runnerUpdates, clis: app.clis)
+            return "ok " + json(["shown: \(shown)", "tip: " + tip.replacingOccurrences(of: "\n", with: " / "), UpdatesText.appLine(side)] + UpdatesText.runnerLines(app.runnerUpdates))
         case "debug-info":
             // What the row menu's "Copy debug info" copies, copied the same
             // way (to this instance's pasteboard).

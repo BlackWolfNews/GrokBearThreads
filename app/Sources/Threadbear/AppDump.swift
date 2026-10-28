@@ -371,13 +371,18 @@ struct AppDump: Encodable {
         return ((sections.brief != nil ? ["a brief"] : []) + counts).joined(separator: ", ")
     }
 
-    /// What the usage popover says: each account's room by provider, then
-    /// the CLIs (`UsagePanel`).
+    /// What the Usage panel says: each login's room by pool and provider
+    /// (`UsagePanel`), then the CLIs from the Updates panel, as the
+    /// automation's `usage` presses their buttons.
     @MainActor
     static func usageLines(_ app: AppModel) -> [String] {
         var lines: [String] = []
-        for section in UsageSections.build(app.accounts) {
-            lines.append("# " + ModelPicker.providerTitle(section.provider))
+        let groups = UsageGroups.build(pools: app.poolsSupported ? app.pools : [], accounts: app.accounts)
+        let pooled = groups.contains { $0.pool != nil }
+        for group in groups {
+            if pooled { lines.append("# " + group.title) }
+            for section in group.providers {
+            lines.append((pooled ? "## " : "# ") + ModelPicker.providerTitle(section.provider))
             for account in section.accounts {
                 var line = AccountName.title(account)
                 if let plan = account.plan { line += " (\(plan))" }
@@ -392,6 +397,7 @@ struct AppDump: Encodable {
                     line += ": nothing known"
                 }
                 lines.append(line)
+            }
             }
         }
         if let source = AccountUsageText.sourceLine(app.accounts, now: app.now) { lines.append(source) }

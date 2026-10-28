@@ -78,13 +78,16 @@ struct ActivityBar: View {
     }
 }
 
-/// "Usage": every account's room and the CLIs' versions, in a panel of
-/// its own (`UsagePanel`). Toggles it, as VS Code's bar does its views.
+/// "Usage": every pool's logins and their room, in a panel of its own
+/// (`UsagePanel`). Toggles it, as VS Code's bar does its views. Its tooltip
+/// is the short version: each pool's best room (Mike, 28 Oct).
 private struct UsageActivityButton: View {
     @Environment(AppModel.self) private var app
 
     var body: some View {
-        ActivityButton(symbol: WindowDock.usageSymbol, title: "Usage", active: app.usageShown) {
+        let groups = UsageGroups.build(pools: app.poolsSupported ? app.pools : [], accounts: app.accounts)
+        ActivityButton(symbol: WindowDock.usageSymbol, title: "Usage", tip: UsageGroups.tooltip(groups, now: app.now),
+                       active: app.usageShown) {
             app.usageShown.toggle()
         }
     }
@@ -101,6 +104,9 @@ struct ActivityButton: View {
     /// how it's recognised. True tints it like the symbols (the bear).
     var tinted = true
     let title: String
+    /// The tooltip, when it says more than the title (Usage's and Updates'
+    /// short summaries).
+    var tip: String? = nil
     var shortcut: String? = nil
     var badge: Int? = nil
     /// Accent, unlike the counts: it means something needs Mike.
@@ -185,7 +191,7 @@ struct ActivityButton: View {
         .buttonStyle(.plain)
         .shortcutHint(shortcut, .after)
         .onHover { hovering = $0 }
-        .tip(shortcut.map { "\(title) (\($0))" } ?? title)
+        .tip(tip ?? shortcut.map { "\(title) (\($0))" } ?? title)
         .accessibilityLabel(title)
         .accessibilityValue(dot ? "Needs you" : badge.map { $0 > 0 ? "\($0)" : "" } ?? "")
         .accessibilityAddTraits(active ? [.isSelected] : [])

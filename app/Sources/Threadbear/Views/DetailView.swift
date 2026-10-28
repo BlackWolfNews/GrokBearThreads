@@ -464,7 +464,7 @@ private struct NewThreadNote: View {
                 .tip("\(cwd.abbreviatingHome) on " + (pool.map { "the \($0.title) pool, which picks the login" } ?? app.accountTitle(account)))
             // Only once there's something to compare: an older runner sends
             // no usage, and one account has nothing to choose between.
-            let accounts = UsageSections.build(app.accounts).flatMap(\.accounts)
+            let accounts = UsageGroups.byProvider(app.accounts).flatMap(\.accounts)
                 .filter { item in pool.map { $0.accountIds.contains(item.id) } ?? true }
             if accounts.count > 1, accounts.contains(where: { $0.usage != nil }) {
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: zoomed(140), maximum: zoomed(200)), spacing: zoomed(8), alignment: .top)], spacing: zoomed(8)) {

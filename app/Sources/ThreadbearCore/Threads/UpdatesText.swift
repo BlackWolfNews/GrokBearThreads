@@ -22,10 +22,30 @@ public enum UpdatesText {
         public var isPending: Bool { staged != nil || building }
     }
 
-    /// Whether the icon shows at all: something on its way, or something
-    /// that went wrong.
+    /// Something on its way, or something that went wrong, for the app or
+    /// the runner: the icon's grey dot. The icon itself is always there
+    /// since the CLIs' versions moved into its panel (28 Oct).
     public static func shown(app: AppSide, runner: RunnerUpdates?) -> Bool {
         app.isPending || app.failed || runner?.isPending == true || runner?.failed == true
+    }
+
+    /// A CLI with a new version, held back, updating, or whose update
+    /// failed: also a grey dot, and a line in the tooltip.
+    public static func cliPending(_ cli: CliStatus) -> Bool {
+        cli.status == "behind" || cli.status == "held" || cli.status == "missing" || ["waiting", "running", "failed"].contains(cli.update?.state ?? "")
+    }
+
+    /// The icon's tooltip: "Updates", then a line for each thing going on
+    /// (what `tooltip(app:runner:)` says, then each CLI that isn't up to
+    /// date), or that everything is. The panel has the rest.
+    public static func iconTooltip(app: AppSide, runner: RunnerUpdates?, clis: [CliStatus]) -> String {
+        var lines: [String] = []
+        if shown(app: app, runner: runner) { lines.append(tooltip(app: app, runner: runner)) }
+        for cli in clis where cliPending(cli) {
+            lines.append(CliText.bannerText(cli) ?? CliText.statusLine(cli))
+        }
+        if lines.isEmpty { lines.append("Everything is up to date") }
+        return (["Updates"] + lines).joined(separator: "\n")
     }
 
     /// Whether it wants Mike: a launch.mjs only he can install. Everything

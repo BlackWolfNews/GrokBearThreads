@@ -27,6 +27,10 @@ enum WindowDock {
     /// Usage), open until Mike closes it.
     static let usage = "threadbear.usage"
     static let usageSymbol = "gauge.with.dots.needle.33percent"
+    /// The app's, the runner's and the CLIs' updates (the activity bar's
+    /// updates icon), open until Mike closes it.
+    static let updates = "threadbear.updates"
+    static let updatesSymbol = "arrow.down.circle"
     static let layoutKey = "dockLayout"
     static let threadPanelPrefix = "threadbear.thread:"
 
@@ -86,7 +90,7 @@ enum WindowDock {
     /// A pane section's panel, or nil for the sidebar, the main panel, the
     /// review and a thread's own panel.
     static func section(_ panel: PanelID) -> PaneSection? {
-        panel == threads || panel == main || panel == review || panel == usage || pinnedThread(panel) != nil ? nil : PaneSection(id: panel)
+        panel == threads || panel == main || panel == review || panel == usage || panel == updates || pinnedThread(panel) != nil ? nil : PaneSection(id: panel)
     }
 
     @MainActor
@@ -101,6 +105,7 @@ enum WindowDock {
             return thread.title.isEmpty ? "Untitled" : thread.title
         case review: return app.reviewPanel?.review.title ?? "Review"
         case usage: return "Usage"
+        case updates: return "Updates"
         default:
             break
         }
@@ -139,6 +144,7 @@ enum WindowDock {
         case main: return "text.alignleft"
         case review: return "rectangle.on.rectangle"
         case usage: return usageSymbol
+        case updates: return updatesSymbol
         case PaneSection.highlightsId: return "pin"
         case PaneSection.patchesId: return "square.dashed"
         default:
@@ -164,16 +170,27 @@ extension AppModel {
     }
 
     /// The Usage panel is up. Setting it opens it under the threads list,
-    /// by the activity bar's Usage icon that opens it (Mike's pick, 28
-    /// Oct), or down the left if the threads aren't in the dock, and
+    /// by the activity bar's icon that opens it (Mike's pick, 28 Oct), and
     /// clearing it closes it.
     var usageShown: Bool {
         get { dock.isShowing(WindowDock.usage) }
-        set {
-            guard newValue else { return dock.close(WindowDock.usage) }
-            let under = dock.layout.group(containing: WindowDock.threads).map { DockDrop.edge(group: $0.id, .bottom) }
-            dock.show(WindowDock.usage, fallback: under ?? .window(.left))
-        }
+        set { setShownUnderThreads(WindowDock.usage, newValue) }
+    }
+
+    /// The same for the Updates panel.
+    var updatesShown: Bool {
+        get { dock.isShowing(WindowDock.updates) }
+        set { setShownUnderThreads(WindowDock.updates, newValue) }
+    }
+
+    /// Opens one of the activity bar's panels: as a tab beside the other
+    /// if that's open (Usage and Updates share the space under the
+    /// threads), else under the threads list, else down the left if the
+    /// threads aren't in the dock.
+    private func setShownUnderThreads(_ panel: PanelID, _ shown: Bool) {
+        guard shown else { return dock.close(panel) }
+        let under = dock.layout.group(containing: WindowDock.threads).map { DockDrop.edge(group: $0.id, .bottom) }
+        dock.show(panel, near: [WindowDock.usage, WindowDock.updates].filter { $0 != panel }, fallback: under ?? .window(.left))
     }
 }
 
@@ -277,6 +294,7 @@ struct RootView: View {
                 switch panel {
                 case WindowDock.threads: AnyView(SidebarView())
                 case WindowDock.usage: AnyView(UsagePanel())
+                case WindowDock.updates: AnyView(UpdatesPanel())
                 case WindowDock.main: AnyView(DetailView())
                 case let id where WindowDock.pinnedThread(id) != nil:
                     AnyView(PinnedThreadView(threadId: WindowDock.pinnedThread(id)!).id(id))
