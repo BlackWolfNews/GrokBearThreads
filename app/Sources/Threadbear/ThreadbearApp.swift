@@ -35,6 +35,9 @@ struct ThreadbearApp: App {
                 .onAppear { LaunchClock.windowShown() }
         }
         .defaultSize(width: 1180, height: 800)
+        // The panels' bars are the top of the window (WindowDock): no title
+        // bar, the traffic lights over the top-left panel's bar.
+        .windowStyle(.hiddenTitleBar)
         // Always open the window at launch. With restoration on, a saved
         // state with no window (closing the window quits the app, and so
         // does a kill) made the next launch show nothing at all. The frame
@@ -65,11 +68,14 @@ struct ThreadbearApp: App {
                     .keyboardShortcut("0")
                     .disabled(zoom.isDefault)
                 Divider()
-                // The panels pane beside the transcript, for threads whose
-                // folder has any (PanelsView).
+                // The sidebar's panel, with the key other Mac apps use.
+                Button(app.dock.layout.contains(WindowDock.threads) ? "Hide Threads" : "Show Threads") { app.toggleThreadsPanel() }
+                    .keyboardShortcut("s", modifiers: [.command, .control])
+                // The pane sections (Highlights, a project's panels, Patches)
+                // open in the dock (WindowDock).
                 Button(app.panelsShown ? "Hide Panels" : "Show Panels") { app.togglePanels() }
                     .keyboardShortcut("p", modifiers: [.command, .option])
-                    .disabled(app.selectedThread == nil || app.openProjectId != nil)
+                Button("Reset Panel Layout") { app.dock.setLayout(WindowDock.defaultLayout) }
             }
             // Back and forward through the threads and views, as Safari
             // and Finder have them. The mouse's side buttons do the same

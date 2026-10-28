@@ -1,4 +1,5 @@
 import AppKit
+import BearDock
 import Observation
 import ThreadbearCore
 
@@ -172,11 +173,27 @@ final class AppModel {
     /// A sidebar row drawn as if the pointer were over it, so the screenshot
     /// run can show the hover buttons without moving the mouse.
     var hoverOverride: String?
-    /// The pane beside the transcript (PanelsView). Shown for any thread
-    /// unless Mike has hidden it; which section is showing (Highlights, a
-    /// panel, Patches) is remembered per thread for the session.
-    var panelsShown = UserDefaults.standard.object(forKey: AppModel.panelsShownKey) as? Bool ?? true {
-        didSet { UserDefaults.standard.set(panelsShown, forKey: Self.panelsShownKey) }
+    /// The window's panels and where they are (WindowDock), saved as Mike
+    /// moves them.
+    @ObservationIgnored let dock = WindowDock.makeController()
+    /// The pane sections open when Hide Panels closed them, for Show Panels.
+    @ObservationIgnored var hiddenPanes: [PanelID] = []
+    /// Whether any pane section (Highlights, a panel, Patches) is open in
+    /// the dock. Setting it closes them all, or opens again the ones Hide
+    /// Panels closed (Highlights if none).
+    var panelsShown: Bool {
+        get { !openPanes.isEmpty }
+        set {
+            if newValue {
+                guard openPanes.isEmpty else { return }
+                for id in hiddenPanes.isEmpty ? [PaneSection.highlightsId] : hiddenPanes {
+                    showPane(PaneSection(id: id))
+                }
+            } else {
+                hiddenPanes = openPanes
+                for id in hiddenPanes { dock.close(id) }
+            }
+        }
     }
     /// Inbox sections folded away under their heading, remembered across
     /// launches (Mike asked 27 Oct).
@@ -185,10 +202,6 @@ final class AppModel {
     ) {
         didSet { UserDefaults.standard.set(collapsedSections.map(\.rawValue).sorted(), forKey: Self.collapsedSectionsKey) }
     }
-    var panelWidth: CGFloat = {
-        let saved = UserDefaults.standard.double(forKey: AppModel.panelWidthKey)
-        return saved > 0 ? CGFloat(saved) : CGFloat(PanelChoice.defaultWidth)
-    }()
     /// A thread's chosen pane section, as `PaneSection.id`.
     var panelChoice: [String: String] = [:]
     /// Each thread's highlights once `threads.highlights` has answered
@@ -260,8 +273,6 @@ final class AppModel {
     static let lastModelKey = "lastModel"
     static let lastEffortKey = "lastEffort"
     static let memoryProviders = ["claude", "codex"]
-    static let panelsShownKey = "panelsShown"
-    static let panelWidthKey = "panelWidth"
     static let collapsedSectionsKey = "collapsedSections"
     /// The error banner text shown for a connection problem, so it can be
     /// cleared when the connection comes back.
@@ -1124,46 +1135,41 @@ final class AppModel {
 
     // MARK: Panels
 
-    /// Whether the pane is beside this thread's transcript. Every thread
-    /// has Highlights, so it's just whether Mike has hidden it.
-    func showsPanels(for thread: ThreadSummary) -> Bool { panelsShown }
+    /// Whether the section remembered for this thread is open in the dock.
+    func showsPanels(for thread: ThreadSummary) -> Bool { dock.layout.contains(paneSection(for: thread).id) }
 
     func activePanel(for thread: ThreadSummary) -> Panel? {
         PanelChoice.active(in: thread.panels, remembered: panelChoice[thread.id])
     }
 
-    /// The pane's section for this thread: the one chosen while it's still
-    /// there, else Highlights.
+    /// The thread's pane section: the one last chosen while it's still
+    /// there, else Highlights. Previews open over it.
     func paneSection(for thread: ThreadSummary) -> PaneSection {
         PanelChoice.section(panels: thread.panels, hasPatches: !thread.patches.isEmpty, remembered: panelChoice[thread.id])
     }
 
-    /// Shows a section of the pane (the automation's `panel`), closing any
+    /// Shows a section's panel (the automation's `panel`), closing any
     /// preview over another one.
     func choosePanel(_ panelId: String, in threadId: String) {
         if panePreview[threadId]?.from.id != panelId { panePreview[threadId] = nil }
         panelChoice[threadId] = panelId
-        panelsShown = true
+        showPane(PaneSection(id: panelId))
     }
 
-    /// A rail button: the section that's showing collapses the pane, any
-    /// other opens it there (PanelChoice.click).
+    /// A rail button, VS Code's way: closes the section's panel if it's
+    /// showing, else brings it up (WindowDock).
     func clickRail(_ section: PaneSection, in thread: ThreadSummary) {
-        let showing = paneSection(for: thread)
-        let next = PanelChoice.click(section, showing: showing, shown: panelsShown)
-        if next.section != showing { panePreview[thread.id] = nil }
-        panelChoice[thread.id] = next.section.id
-        panelsShown = next.shown
+        if panePreview[thread.id].map({ $0.from != section }) ?? false { panePreview[thread.id] = nil }
+        panelChoice[thread.id] = section.id
+        if dock.isShowing(section.id) { dock.close(section.id) } else { showPane(section) }
     }
 
     func togglePanels() { panelsShown.toggle() }
 
-    func setPanelWidth(_ width: CGFloat, columnWidth: CGFloat) {
-        panelWidth = CGFloat(PanelChoice.clampedWidth(Double(width), paneColumnWidth: Double(columnWidth)))
-    }
-
-    func savePanelWidth() {
-        UserDefaults.standard.set(Double(panelWidth), forKey: Self.panelWidthKey)
+    /// The sidebar's panel, from the View menu: closed, or opened down the
+    /// left of the window.
+    func toggleThreadsPanel() {
+        if dock.layout.contains(WindowDock.threads) { dock.close(WindowDock.threads) } else { dock.open(WindowDock.threads, .window(.left)) }
     }
 
     static func actionKey(threadId: String, actionId: String) -> String { "\(threadId)/\(actionId)" }

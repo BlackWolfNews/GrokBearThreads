@@ -33,7 +33,7 @@ enum ScreenshotRunner {
         window.setFrameAutosaveName("")
         window.setContentSize(NSSize(width: 1240, height: 820))
         window.center()
-        freshSidebar(in: window)
+        freshSidebar(in: window, app: app)
         // Behind every other window and never activated: these runs happen
         // while Mike is working, and `screencapture -l` captures a window by
         // id even when it's covered.
@@ -457,15 +457,12 @@ enum ScreenshotRunner {
     /// the build its own bundle id (so its own, empty defaults: it used to
     /// share Mike's and leave its window size in them); this keeps the
     /// shots right for a build run some other way.
-    private static func freshSidebar(in window: NSWindow) {
-        func find(_ view: NSView?) -> NSSplitView? {
-            guard let view else { return nil }
-            if let split = view as? NSSplitView { return split }
-            return view.subviews.lazy.compactMap { find($0) }.first
-        }
-        guard let split = find(window.contentView), split.subviews.count > 1 else { return }
-        split.autosaveName = nil
-        split.setPosition(RootView.sidebarIdealWidth, ofDividerAt: 0)
+    private static func freshSidebar(in window: NSWindow, app: AppModel) {
+        // The dock's default layout, not saved back over the build's own.
+        let onChange = app.dock.onChange
+        app.dock.onChange = nil
+        app.dock.layout = WindowDock.defaultLayout
+        app.dock.onChange = onChange
     }
 
     /// The first image a demo thread's messages carry, if it's loaded.

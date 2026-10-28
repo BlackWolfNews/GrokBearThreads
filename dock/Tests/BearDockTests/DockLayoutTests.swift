@@ -178,3 +178,40 @@ private func threeColumns() -> DockLayout {
     #expect(layout.hiddenTitles.isEmpty)
     #expect(layout.panels == ["A"])
 }
+
+@Test func theTopLeadingGroupIsTheFirstChildAllTheWayDown() {
+    #expect(threeColumns().topLeadingGroupID == "left")
+    var layout = threeColumns()
+    layout.move("highlights", .window(.top), newID: ids())
+    #expect(layout.topLeadingGroupID == "n1")
+}
+
+@MainActor @Test func showAndToggleFromARail() {
+    let dock = DockController(layout: threeColumns())
+    // Open behind another tab: brought to the front.
+    dock.layout.move("convex", .tab(group: "hl"))
+    #expect(!dock.isShowing("highlights"))
+    dock.toggle("highlights")
+    #expect(dock.isShowing("highlights"))
+    // Showing: closed.
+    dock.toggle("highlights")
+    #expect(!dock.layout.contains("highlights"))
+    // Closed: opened as a tab beside the first of `near` that's open.
+    dock.toggle("highlights", near: ["nope", "convex"])
+    #expect(dock.layout.group(containing: "highlights")?.panels == ["convex", "highlights"])
+}
+
+@Test func summaryReadsLikeTheWindow() {
+    var layout = threeColumns()
+    layout.setTitleHidden("threads", true)
+    layout.move("convex", .tab(group: "hl"))
+    #expect(layout.summary == "row[threads (no title) 25% | transcript 50% | highlights+convex* 25%]")
+}
+
+@MainActor @Test func unavailablePanelsAreLeftOutOfTheirGroup() {
+    let group = DockGroup(id: "g", panels: ["highlights", "convex", "simulator"], selected: "simulator")
+    let drawn = GroupView.visible(group) { $0 != "simulator" }
+    #expect(drawn == DockGroup(id: "g", panels: ["highlights", "convex"], selected: "highlights"))
+    // Nothing available: drawn as it is, for the app's own note.
+    #expect(GroupView.visible(group) { _ in false } == group)
+}

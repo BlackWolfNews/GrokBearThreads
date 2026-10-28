@@ -124,7 +124,8 @@ extension AppModel {
         var preview = preview
         preview.opened = (panePreview[threadId]?.opened ?? 0) + 1
         panePreview[threadId] = preview
-        panelsShown = true
+        // Over the section it's from, opening that if it's closed.
+        showPane(preview.from)
         // A page kept loaded from an earlier look is read again: the file
         // or the dev server has likely changed since.
         if let url = preview.externalURL, preview.fileURL.map({ PreviewRules.viewer(forPath: $0.path) == .web }) ?? true {

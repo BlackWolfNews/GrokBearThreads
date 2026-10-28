@@ -12,6 +12,8 @@ let package = Package(
     ],
     dependencies: [
         .package(url: "https://github.com/swiftlang/swift-markdown.git", from: "0.9.0"),
+        // The window's dockable panels, in this repo (dock/README.md).
+        .package(path: "../dock"),
     ],
     targets: [
         // Protocol models, the JSON-RPC client, the event reducer and other
@@ -25,6 +27,7 @@ let package = Package(
             dependencies: [
                 "ThreadbearCore",
                 .product(name: "Markdown", package: "swift-markdown"),
+                .product(name: "BearDock", package: "dock"),
             ],
             path: "Sources/Threadbear",
             // The AppKit side renders and measures text off the main thread

@@ -1,26 +1,73 @@
 import AppKit
 import SwiftUI
 
-/// What the app gives the dock for each panel: its title, an SF Symbol, and its view.
+/// What the app gives the dock for each panel.
 public struct DockContent {
     public var title: (PanelID) -> String
     public var symbol: (PanelID) -> String?
     public var view: (PanelID) -> AnyView
+    /// Drawn in place of the title when the panel is on its own (the
+    /// thread's name and folder over the transcript, say). Nil: the title.
+    public var header: (PanelID) -> AnyView?
+    /// Buttons at the end of the panel's bar while it's showing.
+    public var accessory: (PanelID) -> AnyView?
+    /// False for a panel the app always keeps (the transcript): no ×, no Close.
+    public var closable: (PanelID) -> Bool
+    /// False for a panel with nothing to show right now (the selected
+    /// thread has no such panel): its tab is left out and another of its
+    /// group's shows, without changing the layout, so it's back when it
+    /// has something again.
+    public var available: (PanelID) -> Bool
+
+    public init(
+        title: @escaping (PanelID) -> String,
+        symbol: @escaping (PanelID) -> String? = { _ in nil },
+        header: @escaping (PanelID) -> AnyView? = { _ in nil },
+        accessory: @escaping (PanelID) -> AnyView? = { _ in nil },
+        closable: @escaping (PanelID) -> Bool = { _ in true },
+        available: @escaping (PanelID) -> Bool = { _ in true },
+        view: @escaping (PanelID) -> AnyView
+    ) {
+        self.available = available
+        self.title = title
+        self.symbol = symbol
+        self.header = header
+        self.accessory = accessory
+        self.closable = closable
+        self.view = view
+    }
+}
+
+/// How the dock fits the app around it.
+public struct DockOptions {
+    public var headerHeight: CGFloat = 32
+    public var titleSize: CGFloat = 12
+    /// In a window without a title bar: room left at the start of the
+    /// top-left panel's bar for the traffic lights. 0 with a title bar.
+    public var trafficLights: CGFloat = 0
+    /// In a window without a title bar: the empty part of a panel's bar
+    /// moves the window, as a title bar would. Titles and tabs still move
+    /// the panel.
+    public var barsMoveWindow = false
+    /// The app's tooltips, for an app whose `.help` doesn't show.
+    public var tip: @MainActor (AnyView, String) -> AnyView = { view, text in AnyView(view.help(text)) }
+
+    public init() {}
 }
 
 enum DockSpace {
     static let name = "BearDock"
 }
 
+/// System colours, so the dock follows light and dark like the app around it.
 enum DockTheme {
-    static let panel = Color(white: 0.125)
+    static let panel = Color(nsColor: .windowBackgroundColor)
     /// Shows through the 1 pt gaps between panels, as the hairlines.
-    static let hairline = Color(white: 0.2)
-    static let headerText = Color(white: 0.93)
-    static let secondary = Color(white: 0.62)
-    static let faint = Color(white: 0.45)
-    static let accent = Color(red: 0.36, green: 0.62, blue: 1)
-    static let headerHeight: CGFloat = 32
+    static let hairline = Color(nsColor: .separatorColor)
+    static let headerText = Color.primary
+    static let secondary = Color.secondary
+    static let faint = Color(nsColor: .tertiaryLabelColor)
+    static let accent = Color.accentColor
     static let gap: CGFloat = 1
 }
 
@@ -29,22 +76,30 @@ enum DockTheme {
 public struct DockView: View {
     let controller: DockController
     let content: DockContent
+    let options: DockOptions
     @Namespace private var space
+
+    public init(controller: DockController, options: DockOptions = DockOptions(), content: DockContent) {
+        self.controller = controller
+        self.options = options
+        self.content = content
+    }
 
     public init<C: View>(
         controller: DockController,
+        options: DockOptions = DockOptions(),
         title: @escaping (PanelID) -> String,
         symbol: @escaping (PanelID) -> String? = { _ in nil },
         @ViewBuilder content: @escaping (PanelID) -> C
     ) {
-        self.controller = controller
-        self.content = DockContent(title: title, symbol: symbol, view: { AnyView(content($0)) })
+        self.init(controller: controller, options: options, content: DockContent(title: title, symbol: symbol, view: { AnyView(content($0)) }))
     }
 
     public var body: some View {
         NodeView(node: controller.layout.root)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(DockTheme.hairline)
+            .background(DockTheme.panel)
             .overlay(alignment: .topLeading) {
                 DragOverlay()
                     .allowsHitTesting(false)
@@ -53,13 +108,21 @@ public struct DockView: View {
             .onGeometryChange(for: CGRect.self) { CGRect(origin: .zero, size: $0.size) } action: { controller.bounds = $0 }
             .environment(controller)
             .environment(\.dockContent, content)
+            .environment(\.dockOptions, options)
             .environment(\.dockNamespace, space)
     }
 }
 
 extension EnvironmentValues {
-    @Entry var dockContent = DockContent(title: { $0 }, symbol: { _ in nil }, view: { _ in AnyView(EmptyView()) })
+    @Entry var dockContent = DockContent(title: { $0 }, view: { _ in AnyView(EmptyView()) })
+    @Entry var dockOptions = DockOptions()
     @Entry var dockNamespace: Namespace.ID?
+}
+
+extension View {
+    @MainActor func dockTip(_ text: String, _ options: DockOptions) -> AnyView {
+        options.tip(AnyView(self), text)
+    }
 }
 
 /// A split or a group. AnyView is where the tree recurses.
@@ -180,20 +243,28 @@ struct GroupView: View {
     let group: DockGroup
     @Environment(DockController.self) private var controller
     @Environment(\.dockContent) private var content
+    @Environment(\.dockOptions) private var options
     @Environment(\.dockNamespace) private var space
 
     var body: some View {
+        // The tabs with something to show; the layout keeps the rest.
+        let group = Self.visible(group, content.available)
         let lifted = controller.drag.map { $0.lifted && $0.panel == group.selected } ?? false
         // Where a panel just landed stays empty while the ghost flies in,
         // then fades up under it.
         let landing = controller.landing?.panel == group.selected
 
         let header = controller.layout.showsHeader(group)
+        // Under the traffic lights, in a window without a title bar: the
+        // bar stays (empty, if the title's hidden) so they've somewhere to sit.
+        let corner = options.trafficLights > 0 && controller.layout.topLeadingGroupID == group.id
 
         VStack(spacing: 0) {
             if header {
-                GroupHeader(group: group)
+                GroupHeader(group: group, leading: corner ? options.trafficLights : 0)
                     .transition(.move(edge: .top).combined(with: .opacity))
+            } else if corner {
+                CornerBar(panel: group.selected)
             }
             content.view(group.selected)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -214,7 +285,7 @@ struct GroupView: View {
         }
         .background(DockTheme.panel)
         .overlay(alignment: .top) {
-            if !header {
+            if !header && !corner {
                 HiddenTitleStrip(panel: group.selected)
                     .transition(.opacity)
             }
@@ -232,6 +303,17 @@ struct GroupView: View {
         .opacity(landing ? 0 : 1)
         .onGeometryChange(for: CGRect.self) { $0.frame(in: .named(DockSpace.name)) } action: { controller.frames[group.id] = $0 }
         .modifier(MatchedGroup(id: group.id, space: space))
+    }
+}
+
+extension GroupView {
+    /// The group as drawn: without its unavailable panels, showing the
+    /// selected one if it's available, else the first that is. All of
+    /// them, if none is.
+    static func visible(_ group: DockGroup, _ available: (PanelID) -> Bool) -> DockGroup {
+        let panels = group.panels.filter(available)
+        guard !panels.isEmpty else { return group }
+        return DockGroup(id: group.id, panels: panels, selected: panels.contains(group.selected) ? group.selected : panels[0])
     }
 }
 
@@ -256,27 +338,66 @@ func dragGesture(controller: DockController, panel: PanelID) -> some Gesture {
         .onEnded { _ in controller.dragEnded() }
 }
 
-/// A group's title, or its tabs when it has several. Each tab can be dragged
-/// out on its own; the body drags the one showing.
+/// A group's title, or its tabs when it has several, and the showing
+/// panel's buttons. A title or tab drags its panel; the rest of the bar
+/// drags the panel too, or the window in one without a title bar.
 private struct GroupHeader: View {
     let group: DockGroup
+    var leading: CGFloat = 0
     @Environment(DockController.self) private var controller
+    @Environment(\.dockContent) private var content
+    @Environment(\.dockOptions) private var options
 
     var body: some View {
+        let single = group.panels.count == 1
         HStack(spacing: 2) {
-            ForEach(group.panels, id: \.self) { panel in
-                TabItem(panel: panel, selected: panel == group.selected, single: group.panels.count == 1)
+            if single, let custom = content.header(group.selected) {
+                custom
+                    .padding(.leading, 8)
+                    .contentShape(Rectangle())
+                    // Lowest priority: the header's own buttons and chips win.
+                    .gesture(dragGesture(controller: controller, panel: group.selected))
+                    .contextMenu { PanelMenu(panel: group.selected, tabbed: false) }
+                    // Its full width before the empty bar beside it gets any.
+                    .layoutPriority(1)
+            } else {
+                ForEach(group.panels, id: \.self) { panel in
+                    TabItem(panel: panel, selected: panel == group.selected, single: single)
+                }
             }
-            Spacer(minLength: 0)
+            BarSpace(panel: group.selected, tabbed: !single)
+            if let accessory = content.accessory(group.selected) {
+                accessory
+            }
         }
-        .padding(.horizontal, 6)
-        .frame(height: DockTheme.headerHeight)
-        // Anywhere on the bar picks up the panel showing, like a window's title bar.
-        .contentShape(Rectangle())
-        .gesture(dragGesture(controller: controller, panel: group.selected))
-        .contextMenu { PanelMenu(panel: group.selected, tabbed: group.panels.count > 1) }
+        .padding(.leading, 6 + leading)
+        .padding(.trailing, 6)
+        .frame(height: options.headerHeight)
         .overlay(alignment: .bottom) {
-            Rectangle().fill(Color.white.opacity(0.06)).frame(height: 1)
+            Rectangle().fill(Color.primary.opacity(0.07)).frame(height: 1)
+        }
+    }
+}
+
+/// The empty part of a bar: moves the window where there's no title bar,
+/// else the panel.
+private struct BarSpace: View {
+    let panel: PanelID
+    let tabbed: Bool
+    @Environment(DockController.self) private var controller
+    @Environment(\.dockOptions) private var options
+
+    var body: some View {
+        let space = Color.clear
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .contentShape(Rectangle())
+            .contextMenu { PanelMenu(panel: panel, tabbed: tabbed) }
+        if options.barsMoveWindow {
+            space
+                .gesture(WindowDragGesture())
+                .onTapGesture(count: 2) { NSApp.keyWindow?.performZoom(nil) }
+        } else {
+            space.gesture(dragGesture(controller: controller, panel: panel))
         }
     }
 }
@@ -287,39 +408,44 @@ private struct TabItem: View {
     let single: Bool
     @Environment(DockController.self) private var controller
     @Environment(\.dockContent) private var content
+    @Environment(\.dockOptions) private var options
     @State private var hovering = false
 
     var body: some View {
         HStack(spacing: 6) {
             if let symbol = content.symbol(panel) {
                 Image(systemName: symbol)
-                    .font(.system(size: 11, weight: .medium))
+                    .font(.system(size: options.titleSize - 1, weight: .medium))
                     .foregroundStyle(selected ? DockTheme.secondary : DockTheme.faint)
             }
             Text(content.title(panel))
-                .font(.system(size: 12, weight: selected ? .semibold : .regular))
+                .font(.system(size: options.titleSize, weight: selected ? .semibold : .regular))
                 .foregroundStyle(selected ? DockTheme.headerText : DockTheme.secondary)
                 .lineLimit(1)
-            Button {
-                controller.close(panel)
-            } label: {
-                Image(systemName: "xmark")
-                    .font(.system(size: 9, weight: .bold))
-                    .foregroundStyle(DockTheme.secondary)
-                    .frame(width: 16, height: 16)
-                    .contentShape(Rectangle())
+            if content.closable(panel) {
+                Button {
+                    controller.close(panel)
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(.system(size: options.titleSize - 3, weight: .bold))
+                        .foregroundStyle(DockTheme.secondary)
+                        .frame(width: 16, height: 16)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .opacity(hovering || (selected && !single) ? 1 : 0)
+                .dockTip("Close \(content.title(panel))", options)
             }
-            .buttonStyle(.plain)
-            .opacity(hovering || (selected && !single) ? 1 : 0)
-            .help("Close")
         }
         .padding(.leading, 8)
-        .padding(.trailing, 4)
-        .frame(height: 24)
+        .padding(.trailing, content.closable(panel) ? 4 : 8)
+        .frame(height: max(options.headerHeight - 8, 20))
         .background(
             RoundedRectangle(cornerRadius: 6)
-                .fill(Color.white.opacity(selected && !single ? 0.07 : (hovering ? 0.04 : 0)))
+                .fill(Color.primary.opacity(selected && !single ? 0.07 : (hovering ? 0.04 : 0)))
         )
+        // Full titles: the empty bar beside them gives way first.
+        .fixedSize(horizontal: true, vertical: false)
         .contentShape(Rectangle())
         .onHover { hovering = $0 }
         .onTapGesture { controller.select(panel) }
@@ -337,6 +463,7 @@ private struct PanelMenu: View {
     let panel: PanelID
     let tabbed: Bool
     @Environment(DockController.self) private var controller
+    @Environment(\.dockContent) private var content
 
     var body: some View {
         if controller.layout.hiddenTitles.contains(panel) {
@@ -345,8 +472,10 @@ private struct PanelMenu: View {
             // With tabs the bar has to stay, so say when it'll take effect.
             Button(tabbed ? "Hide Title When on Its Own" : "Hide Title") { controller.setTitleHidden(panel, true) }
         }
-        Divider()
-        Button("Close") { controller.close(panel) }
+        if content.closable(panel) {
+            Divider()
+            Button("Close \(content.title(panel))") { controller.close(panel) }
+        }
     }
 }
 
@@ -356,12 +485,13 @@ private struct PanelMenu: View {
 private struct HiddenTitleStrip: View {
     let panel: PanelID
     @Environment(DockController.self) private var controller
+    @Environment(\.dockOptions) private var options
     @State private var hovering = false
 
     var body: some View {
         ZStack {
             Capsule()
-                .fill(Color.white.opacity(hovering ? 0.28 : 0))
+                .fill(Color.primary.opacity(hovering ? 0.28 : 0))
                 .frame(width: 34, height: 4)
         }
         .frame(maxWidth: .infinity)
@@ -373,7 +503,26 @@ private struct HiddenTitleStrip: View {
         }
         .gesture(dragGesture(controller: controller, panel: panel))
         .contextMenu { PanelMenu(panel: panel, tabbed: false) }
-        .help("Drag to move this panel. Right-click to show its title.")
+        .dockTip("Drag to move this panel. Right-click to show its title.", options)
+    }
+}
+
+/// The bar of a title-less panel under the traffic lights: empty, moving
+/// the window (or the panel, with a title bar), with the grab handle on
+/// hover to move the panel by.
+private struct CornerBar: View {
+    let panel: PanelID
+    @Environment(\.dockOptions) private var options
+
+    var body: some View {
+        HStack(spacing: 0) {
+            Color.clear.frame(width: options.trafficLights)
+            BarSpace(panel: panel, tabbed: false)
+            HiddenTitleStrip(panel: panel)
+                .frame(width: 60)
+            Color.clear.frame(width: 12)
+        }
+        .frame(height: options.headerHeight)
     }
 }
 

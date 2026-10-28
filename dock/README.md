@@ -4,7 +4,16 @@ Dockable, rearrangeable panels for Threadbear, in a package of their own with
 a demo app, so dragging and docking can feel right before it goes into the
 real window.
 
-`./run.sh` opens the demo. `swift test` runs the layout tests.
+`./run.sh` opens the demo. `swift test` runs the layout tests (and
+`check.sh --app` runs them too).
+
+The app's window is a dock since 28 Oct 2026: `WindowDock.swift` in the app
+says which panels there are (the sidebar, the thread, Highlights, each
+project panel, Patches), the default layout, and how the rail and Show or
+Hide Panels open and close them. The window has no title bar, so the
+panels' bars are the top of it: the traffic lights sit in the top-left
+panel's bar, the empty part of a bar moves the window, and a title or tab
+moves the panel.
 
 ## How it works
 

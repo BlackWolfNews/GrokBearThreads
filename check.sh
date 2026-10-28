@@ -107,6 +107,8 @@ if [ "$QUICK" = 0 ]; then
   fi
   step "app build" "$ROOT/app" swift build
   step "app tests" "$ROOT/app" env THREADBEAR_REQUIRE_MOCK=1 swift test
+  # BearDock, the window's docking panels: its layout tests.
+  step "dock tests" "$ROOT/dock" swift test
 fi
 if [ "$E2E" = 1 ]; then
   # Claude's first, then Codex's (codex*.e2e.test.ts: the conversation

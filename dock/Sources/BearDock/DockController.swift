@@ -201,6 +201,28 @@ public final class DockController {
         layout.select(panel)
     }
 
+    /// In the layout and the tab showing in its group.
+    public func isShowing(_ panel: PanelID) -> Bool {
+        layout.group(containing: panel)?.selected == panel
+    }
+
+    /// Brings a panel up: its tab if it's in the layout, else opened as a
+    /// tab beside the first of `near` that's open, else at `fallback`.
+    public func show(_ panel: PanelID, near: [PanelID] = [], fallback: DockDrop = .window(.right)) {
+        if let group = layout.group(containing: panel) {
+            if group.selected != panel { layout.select(panel) }
+            return
+        }
+        let drop = near.lazy.compactMap { self.layout.group(containing: $0) }.first.map { DockDrop.tab(group: $0.id) } ?? fallback
+        open(panel, drop)
+    }
+
+    /// A rail button, VS Code's way: closes a panel that's showing, brings
+    /// up one that's open behind another tab, opens one that isn't.
+    public func toggle(_ panel: PanelID, near: [PanelID] = [], fallback: DockDrop = .window(.right)) {
+        if isShowing(panel) { close(panel) } else { show(panel, near: near, fallback: fallback) }
+    }
+
     /// Opens a panel that isn't in the layout, along the right of the window.
     public func open(_ panel: PanelID, _ drop: DockDrop = .window(.right)) {
         withAnimation(Self.settle) { layout.add(panel, drop) }

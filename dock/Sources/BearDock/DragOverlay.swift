@@ -82,8 +82,8 @@ private struct CompassView: View {
 
         ZStack(alignment: .topLeading) {
             RoundedRectangle(cornerRadius: 14)
-                .fill(Color(white: 0.17).opacity(0.94))
-                .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(Color.white.opacity(0.1)))
+                .fill(.regularMaterial)
+                .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(Color.primary.opacity(0.1)))
                 .shadow(color: .black.opacity(0.45), radius: 18, y: 8)
                 .frame(width: plate.width, height: plate.height)
                 .offset(x: plate.minX, y: plate.minY)
@@ -110,7 +110,7 @@ private struct CompassButton: View {
     var body: some View {
         ZStack {
             RoundedRectangle(cornerRadius: 8)
-                .fill(hovered && !disabled ? DockTheme.accent.opacity(0.9) : Color.white.opacity(0.07))
+                .fill(hovered && !disabled ? DockTheme.accent.opacity(0.9) : Color.primary.opacity(0.07))
             glyph
                 .foregroundStyle(hovered && !disabled ? Color.white : DockTheme.secondary)
         }
@@ -154,6 +154,7 @@ private struct Ghost: View {
     let rect: CGRect
     let lifted: Bool
     @Environment(\.dockContent) private var content
+    @Environment(\.dockOptions) private var options
 
     var body: some View {
         let sx = rect.width / max(sourceSize.width, 1), sy = rect.height / max(sourceSize.height, 1)
@@ -166,8 +167,8 @@ private struct Ghost: View {
                 Spacer()
             }
             .padding(.horizontal, 14)
-            .frame(height: DockTheme.headerHeight)
-            .overlay(alignment: .bottom) { Rectangle().fill(Color.white.opacity(0.06)).frame(height: 1) }
+            .frame(height: options.headerHeight)
+            .overlay(alignment: .bottom) { Rectangle().fill(Color.primary.opacity(0.07)).frame(height: 1) }
             content.view(panel)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .clipped()
@@ -175,7 +176,7 @@ private struct Ghost: View {
         .frame(width: sourceSize.width, height: sourceSize.height)
         .background(DockTheme.panel)
         .clipShape(RoundedRectangle(cornerRadius: 10 / max(min(sx, sy), 0.2)))
-        .overlay(RoundedRectangle(cornerRadius: 10 / max(min(sx, sy), 0.2)).strokeBorder(Color.white.opacity(0.14), lineWidth: 1 / max(min(sx, sy), 0.2)))
+        .overlay(RoundedRectangle(cornerRadius: 10 / max(min(sx, sy), 0.2)).strokeBorder(Color.primary.opacity(0.14), lineWidth: 1 / max(min(sx, sy), 0.2)))
         .scaleEffect(x: sx, y: sy, anchor: .topLeading)
         .frame(width: rect.width, height: rect.height, alignment: .topLeading)
         .shadow(color: .black.opacity(lifted ? 0.5 : 0), radius: lifted ? 24 : 0, y: lifted ? 12 : 0)

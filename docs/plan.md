@@ -115,7 +115,9 @@ Quick Ask, Tinker Desk as a second runner, cloud sandboxes.
   (`~/dev/me/mikerosoft-tools/token-stats`); bundle id
   `com.mikerosoft.threadbear`; sign with the first "Apple Development"
   identity, falling back to ad hoc, with a stable designated requirement.
-- **Window:** `NavigationSplitView`. Sidebar sections: Inbox (everything not
+- **Window:** a dock of panels (BearDock, `dock/`; was a `NavigationSplitView`
+  until 28 Oct 2026): the sidebar, the thread and the pane sections, each
+  movable, tabbable and closable, no title bar. Sidebar sections: Inbox (everything not
   running, what needs Mike first: questions and approvals, then unread
   replies, then the rest; Needs you merged into it 27 Oct), Running at the
   bottom, then a footer button for Snoozed and Archive views. Each row: title,

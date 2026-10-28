@@ -2,42 +2,11 @@ import AppKit
 import SwiftUI
 import ThreadbearCore
 
-struct RootView: View {
-    @Environment(AppModel.self) private var app
-    @Environment(\.openSettings) private var openSettings
-    static var sidebarIdealWidth: CGFloat { zoomed(360) }
-
-    var body: some View {
-        @Bindable var app = app
-        NavigationSplitView {
-            // About a quarter of the window, as T3, Codex and Claude give
-            // theirs: at 290 most titles were cut at about 25 characters.
-            // At the default 1180 pt window the detail pane still fits the
-            // 780 pt reading column and its insets. 30 wider since the
-            // activity bar (44) took the left of it.
-            SidebarView()
-                .navigationSplitViewColumnWidth(min: zoomed(290), ideal: Self.sidebarIdealWidth, max: zoomed(480))
-        } detail: {
-            DetailView()
-        }
-        .sheet(item: $app.scheduleEditor) { state in
-            ScheduleEditor(state: state)
-        }
-        // The automation's `settings` opens the Settings window; only a
-        // SwiftUI view can (AppKit's showSettingsWindow: does nothing now).
-        .onChange(of: app.settingsRequest) { openSettings() }
-        // Saves where the window is, so the next launch opens it there.
-        .background(MainWindowFrameTracker())
-    }
-}
-
+/// The thread panel: the transcript and composer, or a project's page or
+/// the Projects page in their place. Its title line and menu are in the
+/// panel's bar (ThreadHeader, ThreadMenuButton).
 struct DetailView: View {
     @Environment(AppModel.self) private var app
-    /// The pane's width in 20 pt steps, to cap the header's width so a long
-    /// title truncates instead of going into the toolbar's overflow menu.
-    /// Stepped so a live resize re-renders this view a few times, not on
-    /// every frame.
-    @State private var widthStep: CGFloat = 900
 
     var body: some View {
         let thread = app.selectedThread
@@ -45,9 +14,8 @@ struct DetailView: View {
         let subagentRef = app.subagentSelection
         let session = subagentRef.map { app.subagentSession(for: $0) } ?? app.selection.map { app.session(for: $0) }
         let isNew = app.selection == nil
-        let paneThread = thread.flatMap { app.showsPanels(for: $0) ? $0 : nil }
-        // A project's page takes the place of the thread (and its panels)
-        // until a thread is picked again.
+        // A project's page takes the place of the thread until a thread is
+        // picked again.
         let project = app.openProject
         // The Projects page of cards, from the activity bar's Projects.
         let projectsHome = project == nil && app.showsProjectsHome
@@ -65,7 +33,6 @@ struct DetailView: View {
                 ProjectsHome()
             }
         } else {
-        HStack(spacing: 0) {
             VStack(spacing: 0) {
             ConnectionBanner()
             ErrorBanner()
@@ -118,100 +85,71 @@ struct DetailView: View {
             }
             }
             .frame(maxWidth: .infinity)
-            // The pane (PanelsView) unless Mike has hidden it, and the rail
-            // of its sections at the far right whenever a thread is open,
-            // like the activity bar on the left.
-            if let paneThread {
-                PanelResizeHandle(columnWidth: widthStep - ActivityBar.width)
-                PanelPane(thread: paneThread)
-                    .frame(width: CGFloat(PanelChoice.clampedWidth(Double(app.panelWidth), paneColumnWidth: Double(widthStep - ActivityBar.width))))
-            }
-            if let thread {
-                PanelRail(thread: thread)
-            }
         }
         }
+    }
+}
+
+/// The thread panel's title line, in its bar: the thread's, the project's,
+/// or nothing over the Projects page (the selected thread isn't what's
+/// showing there).
+struct ThreadHeader: View {
+    @Environment(AppModel.self) private var app
+
+    var body: some View {
+        Group {
+            if let project = app.openProject {
+                ProjectHeaderTitle(project: project)
+            } else {
+                HeaderTitle(thread: app.showsProjectsHome ? nil : app.selectedThread)
+            }
         }
-        .onGeometryChange(for: CGFloat.self) { ($0.size.width / 20).rounded(.down) * 20 } action: { widthStep = $0 }
-        // The window's title (Window menu, Mission Control); the toolbar
-        // shows the header below instead.
-        .navigationTitle(project?.title ?? (projectsHome ? "Projects" : nil) ?? thread.map { $0.title.isEmpty ? "Untitled" : $0.title } ?? "New thread")
-        .toolbar(removing: .title)
-        .toolbar {
-            // Both items are always there, the header empty and the menu
-            // disabled with no thread selected: building toolbar items on
-            // the first selection cost about 40 ms of that first open
-            // (NSToolbarView layout), on top of the transcript.
-            ToolbarItem(placement: .navigation) {
-                Group {
-                    if let project {
-                        ProjectHeaderTitle(project: project)
-                    } else {
-                        // Nothing over the Projects page: the selected
-                        // thread isn't what's showing.
-                        HeaderTitle(thread: projectsHome ? nil : thread)
-                    }
-                }
-                .frame(maxWidth: max(120, widthStep - 120), alignment: .leading)
+    }
+}
+
+/// The thread panel's ... menu, at the end of its bar. Out of sight with
+/// nothing to act on: a dimmed "..." alone over an empty new thread looked
+/// broken.
+struct ThreadMenuButton: View {
+    @Environment(AppModel.self) private var app
+
+    var body: some View {
+        let project = app.openProject
+        let thread = app.selectedThread
+        let projectsHome = project == nil && app.showsProjectsHome
+        let session = app.selection.map { app.session(for: $0) }
+        let hasMenu = (thread != nil && !projectsHome) || project != nil
+        Menu {
+            if let project {
+                ProjectMenu(project: project)
+            } else if let thread, !projectsHome {
+                ThreadMenu(thread: thread)
+                Divider()
+                Button("Copy transcript as Markdown") { session?.copyTranscript() }
+                // So Mike can point an agent at this thread (`tb show <id>`).
+                Button("Copy thread id") { app.copyToPasteboard(thread.id) }
             }
-            .sharedBackgroundVisibility(.hidden)
-            // With the system title gone nothing pushes the menu to the
-            // trailing edge; it sat right after the header.
-            ToolbarSpacer(.flexible)
-            // Shows or hides the pane. Always built, like the menu beside
-            // it, and out of sight with no thread open.
-            ToolbarItem(placement: .primaryAction) {
-                let hasPanels = project == nil && !projectsHome && thread != nil
-                Button {
-                    app.togglePanels()
-                } label: {
-                    Label(app.panelsShown ? "Hide Panels" : "Show Panels", systemImage: "sidebar.trailing")
-                }
-                .tip(app.panelsShown ? "Hide the panels" : "Show the panels")
-                .disabled(!hasPanels)
-                .opacity(hasPanels ? 1 : 0)
-                .allowsHitTesting(hasPanels)
-            }
-            .sharedBackgroundVisibility(.hidden)
-            ToolbarItem(placement: .primaryAction) {
-                let hasMenu = (thread != nil && !projectsHome) || project != nil
-                Menu {
-                    if let project {
-                        ProjectMenu(project: project)
-                    } else if let thread, !projectsHome {
-                        ThreadMenu(thread: thread)
-                        Divider()
-                        Button("Copy transcript as Markdown") { session?.copyTranscript() }
-                        // So Mike can point an agent at this thread (`tb show <id>`).
-                        Button("Copy thread id") { app.copyToPasteboard(thread.id) }
-                        // The thread on the website (docs/website.md), to paste anywhere.
-                        if let site = app.websiteURL {
-                            Button("Copy web link") { app.copyToPasteboard(site.appendingPathComponent("t").appendingPathComponent(thread.id).absoluteString) }
-                        }
-                    }
-                } label: {
-                    Label("More", systemImage: "ellipsis")
-                }
-                .menuIndicator(.hidden)
-                .tip("More")
-                .disabled(!hasMenu)
-                // Still built (see above), but out of sight with nothing to
-                // act on: a dimmed "..." alone in an empty new thread's
-                // header looked broken.
-                .opacity(hasMenu ? 1 : 0)
-                .allowsHitTesting(hasMenu)
-            }
-            // A plain glyph like Codex's and Claude's. Its glass disc drew
-            // dark grey on a light window.
-            .sharedBackgroundVisibility(.hidden)
+        } label: {
+            Image(systemName: "ellipsis")
+                .font(.system(size: TypeScale.label, weight: .medium))
+                .foregroundStyle(.secondary)
+                .frame(width: zoomed(26), height: zoomed(26))
+                .contentShape(Rectangle())
         }
+        .menuStyle(.button)
+        .buttonStyle(.plain)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .tip("More")
+        .disabled(!hasMenu)
+        .opacity(hasMenu ? 1 : 0)
     }
 }
 
 /// One line, T3 style: the folder's name, then the title, and "Archived"
 /// for an archived thread, then its projects as chips. The full path is in
 /// the tooltip.
-private struct HeaderTitle: View {
+struct HeaderTitle: View {
     @Environment(AppModel.self) private var app
     let thread: ThreadSummary?
 
@@ -273,7 +211,7 @@ private struct HeaderTitle: View {
 }
 
 /// "Projects / Threadbear" while a project's page is open.
-private struct ProjectHeaderTitle: View {
+struct ProjectHeaderTitle: View {
     @Environment(AppModel.self) private var app
     let project: Project
 

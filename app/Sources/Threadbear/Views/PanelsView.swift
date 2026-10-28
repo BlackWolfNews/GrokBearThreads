@@ -3,49 +3,47 @@ import SwiftUI
 import ThreadbearCore
 import WebKit
 
-/// The pane beside the transcript, VS Code's secondary side bar: the
-/// section chosen on the rail (PanelRail) under a small header. Highlights
-/// by default, a panel, or Patches; a preview of a file or page from one of
-/// them takes its place until Back. A `url` panel is a web view kept loaded
-/// between visits (WebPanelPool), so the Convex dashboard doesn't reload
-/// every time Mike switches threads. An `image` or `list` panel asks the
-/// runner for a fresh picture or rows now and then while it's showing.
-struct PanelPane: View {
+/// A pane section as a panel in the window's dock (WindowDock): Highlights,
+/// one of the thread's panels, or Patches, for the thread that's selected.
+/// A preview of a file or page opened from it takes its place until Back.
+/// A `url` panel is a web view kept loaded between visits (WebPanelPool),
+/// so the Convex dashboard doesn't reload every time Mike switches threads.
+/// An `image` or `list` panel asks the runner for a fresh picture or rows
+/// now and then while it's showing.
+struct DockPane: View {
     @Environment(AppModel.self) private var app
-    let thread: ThreadSummary
+    let section: PaneSection
 
     var body: some View {
-        VStack(spacing: 0) {
-            if let preview = app.panePreview[thread.id] {
-                PreviewPane(thread: thread, preview: preview)
-            } else {
-                switch app.paneSection(for: thread) {
-                case .highlights:
-                    PaneHeader(title: "Highlights")
-                    // Its own state (Show all, the edited files open) per thread.
-                    HighlightsView(thread: thread)
-                        .id(thread.id)
-                case .patches:
-                    PaneHeader(title: "Patches")
-                    PatchesList(thread: thread)
-                case .panel(let id):
-                    if let panel = thread.panels.first(where: { $0.id == id }) {
-                        panelView(panel)
+        Group {
+            if let thread = app.selectedThread {
+                if let preview = app.panePreview[thread.id], preview.from == section {
+                    PreviewBody(thread: thread, preview: preview)
+                } else {
+                    switch section {
+                    case .highlights:
+                        // Its own state (Show all, the edited files open) per thread.
+                        HighlightsView(thread: thread)
+                            .id(thread.id)
+                    case .patches:
+                        PatchesList(thread: thread)
+                    case .panel(let id):
+                        if let panel = thread.panels.first(where: { $0.id == id }) {
+                            panelView(panel, in: thread)
+                        } else {
+                            PaneNote(text: "This thread has no \(WindowDock.title(of: section.id, app: app)) panel.")
+                        }
                     }
                 }
+            } else {
+                PaneNote(text: "Pick a thread to see its \(WindowDock.title(of: section.id, app: app)).")
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-        .background(Color(nsColor: .windowBackgroundColor))
     }
 
     @ViewBuilder
-    private func panelView(_ panel: Panel) -> some View {
-        PaneHeader(title: panel.title, detail: panel.note) {
-            if panel.kind == .url, let url = panel.pageURL {
-                PaneHeaderButton(symbol: "arrow.up.right", help: "Open in browser") { NSWorkspace.shared.open(url) }
-            }
-        }
+    private func panelView(_ panel: Panel, in thread: ThreadSummary) -> some View {
         switch panel.kind {
         case .url:
             if let url = panel.pageURL {
@@ -57,6 +55,26 @@ struct PanelPane: View {
             ImagePanel(threadId: thread.id, panel: panel)
         case .list:
             ListPanel(thread: thread, panel: panel)
+        }
+    }
+}
+
+/// A pane panel's buttons, at the end of its bar in the dock: Back and the
+/// file's or page's buttons over a preview, Open in browser for a page.
+struct DockPaneButtons: View {
+    @Environment(AppModel.self) private var app
+    let section: PaneSection
+
+    var body: some View {
+        HStack(spacing: 0) {
+            if let thread = app.selectedThread {
+                if let preview = app.panePreview[thread.id], preview.from == section {
+                    PreviewButtons(thread: thread, preview: preview)
+                } else if case .panel(let id) = section, let panel = thread.panels.first(where: { $0.id == id }),
+                          panel.kind == .url, let url = panel.pageURL {
+                    PaneHeaderButton(symbol: "arrow.up.right", help: "Open in browser") { NSWorkspace.shared.open(url) }
+                }
+            }
         }
     }
 }
@@ -152,22 +170,20 @@ struct PanelRail: View {
     }
 
     var body: some View {
-        let section = app.paneSection(for: thread)
-        let shown = app.panelsShown
         VStack(spacing: zoomed(4)) {
             // The accent dot while the last turn's asks aren't all ticked:
             // Highlights lists them under Needs you.
-            ActivityButton(symbol: "pin", title: "Highlights", dot: thread.firstOpenAsk != nil, active: shown && section == .highlights) {
+            ActivityButton(symbol: "pin", title: "Highlights", dot: thread.firstOpenAsk != nil, active: app.dock.isShowing(PaneSection.highlightsId)) {
                 app.clickRail(.highlights, in: thread)
             }
             ForEach(thread.panels) { panel in
-                ActivityButton(symbol: PanelIcon.symbol(for: panel), title: panel.title, active: shown && section == .panel(panel.id)) {
+                ActivityButton(symbol: PanelIcon.symbol(for: panel), title: panel.title, active: app.dock.isShowing(panel.id)) {
                     app.clickRail(.panel(panel.id), in: thread)
                 }
             }
             Spacer(minLength: zoomed(8))
             if !thread.patches.isEmpty {
-                ActivityButton(symbol: "square.dashed", title: "Patches", badge: thread.patches.count, active: shown && section == .patches) {
+                ActivityButton(symbol: "square.dashed", title: "Patches", badge: thread.patches.count, active: app.dock.isShowing(PaneSection.patchesId)) {
                     app.clickRail(.patches, in: thread)
                 }
             }
@@ -537,39 +553,5 @@ private struct ListPanel: View {
         case .failed: Color(nsColor: Theme.failed)
         case .done, nil: nil
         }
-    }
-}
-
-// MARK: - Resizing
-
-/// The hairline between transcript and pane, draggable to resize the pane.
-struct PanelResizeHandle: View {
-    @Environment(AppModel.self) private var app
-    /// The width of the whole detail column, for the clamp.
-    let columnWidth: CGFloat
-    @State private var startWidth: CGFloat?
-
-    var body: some View {
-        Rectangle()
-            .fill(Color(nsColor: Theme.hairline))
-            .frame(width: 0.5)
-            .frame(width: zoomed(8))
-            .contentShape(Rectangle())
-            .onHover { inside in
-                if inside { NSCursor.resizeLeftRight.push() } else { NSCursor.pop() }
-            }
-            .gesture(
-                DragGesture(minimumDistance: 1, coordinateSpace: .global)
-                    .onChanged { value in
-                        let start = startWidth ?? app.panelWidth
-                        startWidth = start
-                        // The handle is on the pane's left: dragging left widens it.
-                        app.setPanelWidth(start - value.translation.width, columnWidth: columnWidth)
-                    }
-                    .onEnded { _ in
-                        startWidth = nil
-                        app.savePanelWidth()
-                    }
-            )
     }
 }

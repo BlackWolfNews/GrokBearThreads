@@ -319,27 +319,12 @@ struct LinkMenu: View {
 /// section. An `.html` file or a local page is a web view (from the pool,
 /// so it's kept while Mike looks at something else); anything else is
 /// Quick Look.
-struct PreviewPane: View {
+struct PreviewBody: View {
     @Environment(AppModel.self) private var app
     let thread: ThreadSummary
     let preview: PanePreview
 
     var body: some View {
-        PaneHeader(title: preview.title) {
-            PaneHeaderButton(symbol: "chevron.left", help: "Back to \(PreviewPane.name(of: preview.from, in: thread))") {
-                app.closePreview(in: thread.id)
-            }
-            .padding(.leading, -zoomed(8))
-        } trailing: {
-            if let file = preview.fileURL {
-                PaneHeaderButton(symbol: "folder", help: "Reveal in Finder") { app.revealInFinder(file.path) }
-            }
-            if let url = preview.externalURL {
-                PaneHeaderButton(symbol: "arrow.up.right", help: preview.fileURL == nil ? "Open in browser" : "Open in its app") {
-                    app.openExternally(url)
-                }
-            }
-        }
         switch preview.target {
         case .page(let url):
             WebPanel(url: url)
@@ -355,7 +340,31 @@ struct PreviewPane: View {
             ExplainPane(thread: thread)
         }
     }
+}
 
+/// A preview's buttons in its panel's bar: Back to the section it came
+/// from, Reveal in Finder for a file, and Open.
+struct PreviewButtons: View {
+    @Environment(AppModel.self) private var app
+    let thread: ThreadSummary
+    let preview: PanePreview
+
+    var body: some View {
+        PaneHeaderButton(symbol: "chevron.left", help: "Back to \(PreviewBody.name(of: preview.from, in: thread))") {
+            app.closePreview(in: thread.id)
+        }
+        if let file = preview.fileURL {
+            PaneHeaderButton(symbol: "folder", help: "Reveal in Finder") { app.revealInFinder(file.path) }
+        }
+        if let url = preview.externalURL {
+            PaneHeaderButton(symbol: "arrow.up.right", help: preview.fileURL == nil ? "Open in browser" : "Open in its app") {
+                app.openExternally(url)
+            }
+        }
+    }
+}
+
+extension PreviewBody {
     static func name(of section: PaneSection, in thread: ThreadSummary) -> String {
         switch section {
         case .highlights: "Highlights"

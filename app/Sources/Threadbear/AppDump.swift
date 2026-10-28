@@ -168,6 +168,8 @@ struct AppDump: Encodable {
     var librarian: String? = nil
     /// Empty from a runner older than pools.
     var pools: [PoolInfo] = []
+    /// The window's panels and where they are (WindowDock), in one line.
+    var dock: String = ""
 
     struct ProjectInfo: Encodable {
         var id: String
@@ -322,7 +324,8 @@ struct AppDump: Encodable {
             pools: app.usesPools ? app.pools.map { pool in
                 PoolInfo(id: pool.id, title: pool.title, logins: pool.accountIds, folders: pool.folders,
                          rail: Pools.railSubtitle(pool, accounts: app.accounts), status: Pools.statusLine(pool, accounts: app.accounts, now: app.now))
-            } : []
+            } : [],
+            dock: app.dock.layout.summary.replacingOccurrences(of: "threadbear.", with: "")
         )
     }
 
@@ -348,7 +351,7 @@ struct AppDump: Encodable {
                 } ?? "(none)")
             }
         }
-        return Panels(shown: app.showsPanels(for: thread), width: Int(app.panelWidth), items: items, preview: preview,
+        return Panels(shown: app.showsPanels(for: thread), width: Int(app.dock.frame(of: section.id)?.width ?? 0), items: items, preview: preview,
                       highlights: highlightsLine(app, thread.id))
     }
 
@@ -507,6 +510,7 @@ struct AppDump: Encodable {
         lines.append("  \(composer.draft == "new" ? "starts" : "runs") in \(composer.cwd) on \(on), model \(composer.model), "
             + (composer.effort == "default" ? "" : "effort \(composer.effort), ") + (composer.ask ? "asks before edits" : "full access"))
         lines.append("  model chip: \(composer.chip)")
+        lines.append("dock: \(dock)")
         if !pools.isEmpty {
             lines.append("pools:")
             for pool in pools {

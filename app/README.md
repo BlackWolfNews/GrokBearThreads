@@ -471,7 +471,7 @@ is an error. Commands marked "the open thread" act on `id` when it's given
 | `archive`, `unarchive`, `snooze` | `id`, `seconds` (default 3600) | the open thread; says which thread it acted on |
 | `mode` | `mode` (`archive`, `snoozed`, `inbox`) | which list the sidebar shows |
 | `action` | `id`, `timeout` | runs that action chip of the selected thread and waits for a command to finish (default 60 s); `dump` lists the actions |
-| `panel` | `id`, `show` | the pane of the selected thread: `id` shows that section (`threadbear.highlights`, a panel's id, or `threadbear.patches`; an error names the ones it has), `show` true/false shows or hides the pane, neither toggles it; `dump` lists the sections, the active one starred, and what Highlights has |
+| `panel` | `id`, `show` | the selected thread's pane sections, each a panel in the window's dock: `id` opens or brings up that section (`threadbear.highlights`, a panel's id, or `threadbear.patches`; an error names the ones it has), `show` false closes every section and true opens them again (Highlights if none), neither toggles; `dump` lists the sections, the active one starred, and what Highlights has, and its `dock:` line is the whole layout |
 | `preview` | `path`, `url`, `close` | opens a file or page in the selected thread's pane, as a click on a highlight does (a web URL goes to the browser); `close` goes back to the section |
 | `waitFor` | `row`, `kind`, `status` (and `thread`), `text`, `banner` (`""` for none), `connection`, `loaded`, `ready`, `not`, `timeout` | until every condition given holds (default 10 s) |
 | `dump` | `format` (`json`, `text`), `out` | |

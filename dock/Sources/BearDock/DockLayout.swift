@@ -118,6 +118,31 @@ public struct DockLayout: Codable, Equatable, Sendable {
 
     public var groups: [DockGroup] { Self.groups(in: root) }
 
+    /// The tree in one line, for logs and the app's dump: rows and
+    /// columns with each child's share, tabs joined by "+" with the one
+    /// showing starred, "(no title)" where it's hidden.
+    /// `row[threads (no title) 29% | thread 47% | column[highlights+patches* 60% / convex 40%] 24%]`
+    public var summary: String { Self.summary(root, hidden: hiddenTitles) }
+
+    static func summary(_ node: DockNode, hidden: Set<PanelID>) -> String {
+        switch node {
+        case .group(let g):
+            let tabs = g.panels.map { $0 + (g.panels.count > 1 && $0 == g.selected ? "*" : "") }.joined(separator: "+")
+            return tabs + (g.panels.count == 1 && hidden.contains(g.selected) ? " (no title)" : "")
+        case .split(let s):
+            let parts = zip(s.children, s.fractions).map { "\(summary($0, hidden: hidden)) \(Int(($1 * 100).rounded()))%" }
+            return (s.axis == .horizontal ? "row[" : "column[") + parts.joined(separator: s.axis == .horizontal ? " | " : " / ") + "]"
+        }
+    }
+
+    /// The group in the window's top-left corner: the first child all the
+    /// way down, whichever way each split runs.
+    public var topLeadingGroupID: String {
+        var node = root
+        while case .split(let s) = node, let first = s.children.first { node = first }
+        return node.id
+    }
+
     /// False for a drop that would leave everything where it is, so the UI
     /// doesn't offer it.
     public func canDrop(_ panel: PanelID, _ drop: DockDrop) -> Bool {
