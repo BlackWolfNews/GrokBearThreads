@@ -451,6 +451,23 @@ public struct ConvexDeployment: Sendable, Hashable, Codable {
     }
 }
 
+public struct ConvexDeploymentChoice: Sendable, Hashable, Codable {
+    public var deployment: String
+    public var deploymentUrl: String
+    public var label: String
+
+    public init(deployment: String, deploymentUrl: String, label: String) {
+        self.deployment = deployment
+        self.deploymentUrl = deploymentUrl
+        self.label = label
+    }
+}
+
+public struct ConvexDeployments: Sendable, Decodable {
+    public var deployments: [ConvexDeploymentChoice]
+    public var note: String?
+}
+
 /// `panels.convexKey`'s answer. The key is admin of its deployment, so its
 /// description leaves it out, in case one ever lands in a log line.
 public struct ConvexPanelKey: Sendable, Hashable, Decodable, CustomStringConvertible {

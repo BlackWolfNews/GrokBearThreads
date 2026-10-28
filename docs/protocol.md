@@ -619,7 +619,8 @@ replaces whatever the deltas built up.
 | `media.import` | `{ path: string }` | `{ image: ImageRef }` copies a file into `inbox/` and reads its size |
 | `actions.run` | `{ threadId, actionId }` | For a prompt action, `{ turnId }`: its prompt was sent as a message (as `threads.send`). For a command action, `{ ok, exitCode?, durationMs, seq }` once the command has finished, with its output in the transcript as the `action.run` event at `seq`. The command runs in the thread's folder through a login shell with the thread's variables (`THREADBEAR_THREAD_ID` and the rest) and is stopped after 10 minutes. `-32602` for an action the thread doesn't have, `-32020` while the same action is still running |
 | `panels.render` | `{ threadId, panelId }` | `{ image?: ImageRef, items?: PanelItem[], note?: string }` draws an `image` panel or fills a `list` panel now. For `xcode.simulator`, a screenshot of the booted simulator (`xcrun simctl io booted screenshot`), written to the same file each time under the thread's `panels/`; with no device booted (or another failure) there's only `note`. For a `list` panel, the rows its patch's `items` function returned (at most 200), or `note` with the error when it threw or took over 20 seconds. Slow: it waits for the screenshot or the function. `-32602` for a panel the thread doesn't have |
-| `panels.convexKey` | `{ threadId, panelId, renew?: boolean }` | `{ deployment, deploymentUrl, adminKey }`, a deploy key for a panel with `convex`, for Convex's embedded dashboard. The runner makes it the first time (`npx convex deployment token create` in the project's folder, on Mike's Convex CLI login) and keeps it in `secrets/convex-panels/<deployment>.json`; `renew` deletes that one from Convex and makes a fresh one. Slow the first time. `-32602` for a panel the thread doesn't have or one without `convex`; an error with the CLI's message when it couldn't make one (not logged in, no `convex` package installed) |
+| `panels.convexDeployments` | `{ threadId, panelId, refresh?: boolean }` | `{ deployments: { deployment, deploymentUrl, label }[], note?: string }`. The configured cloud deployment and the project's Development and Production deployments, resolved through the project's Convex CLI with read-only queries of `process.env.CONVEX_CLOUD_URL`. Duplicate names are combined; `note` explains unavailable choices. Cached for one minute; `refresh` bypasses the cache. Makes no deploy keys and changes no project settings. `-32602` for a missing or non-cloud panel |
+| `panels.convexKey` | `{ threadId, panelId, deployment?: string, renew?: boolean }` | `{ deployment, deploymentUrl, adminKey }`, a deploy key for a panel with `convex`, for Convex's embedded dashboard. `deployment` defaults to the panel's configured deployment; any other name must be one returned by `panels.convexDeployments` for this panel's project. The runner makes it the first time (`npx convex deployment token create` in the project's folder, on Mike's Convex CLI login) and keeps it in `secrets/convex-panels/<deployment>.json`; `renew` deletes that one from Convex and makes a fresh one. Slow the first time. `-32602` for a panel the thread doesn't have or one without `convex`; an error with the CLI's message when it couldn't make one (not logged in, no `convex` package installed) |
 | `threads.highlights` | `{ threadId }` | `ThreadHighlights` (see Highlights): what the thread has made, shared and pinned, read from its events since the last call and kept with the thread |
 | `threads.explain` | `{ threadId, selection: string, message?: string, question?: string, earlier?: { question?: string, answer: string }[] }` | `{ answer: string, model: string }`. Explains words Mike selected in the transcript, on the small model (see Explain). `message` is the whole message they came from, as the app shows it; `earlier` and `question` are a follow-up. Writes nothing to the thread. `-32000` with the reason when no model answers |
 | `threads.removeHighlight` | `{ threadId, highlightId }` | `{ thread: ThreadSummary }` takes one off the list for good (a pin or a found one); a later mention doesn't bring it back. `-32602` for an id the thread doesn't have |
@@ -1286,7 +1287,15 @@ The client gets the key with `panels.convexKey` and answers the page's
 "dashboard-credentials", adminKey, deploymentUrl, deploymentName }`. The
 Mac app does it from a script in that web view alone, which only answers
 on that origin, with a website data store that isn't saved to disk. Open
-in browser still opens `url`, the full dashboard.
+in browser opens the selected deployment's full dashboard.
+
+The Mac panel's deployment menu lists the configured deployment plus
+Development and Production from `panels.convexDeployments`, showing both
+the label and deployment name. It remembers the choice on this Mac by
+the configured deployment, so threads in the same project share it.
+Switching changes only the panel; `.env.local` and the runner's mirror
+settings stay as they are. Older runners without the listing method
+keep showing the configured deployment.
 
 A deploy key is admin of its one deployment, so it never goes into a
 thread's events, the summary, the log or the Convex mirror: only

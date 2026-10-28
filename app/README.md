@@ -429,6 +429,14 @@ Tools/dev-app.sh log             # the app's own log
 Tools/dev-app.sh stop            # quits it, stops its mock, deletes its files and settings
 ```
 
+For the Convex deployment picker, open `demo_dark_mode`, then send
+`{"cmd":"mock","method":"convexPanel","params":{"threadId":"demo_dark_mode"}}`
+and `{"cmd":"panel","id":"convex.dashboard"}`. The mock lists Development
+and Production but has no deploy keys. `{"cmd":"convex","deployment":"busy-bear-456"}`
+uses the picker's selection model; `{"cmd":"convex"}` reports the selection
+and browser URL. Calling `mock.convexPanel` again reports key requests so
+switching can be checked without a real Convex account.
+
 `start` also takes `--appearance light|dark`, `--size WxH` and `--id NAME`;
 every other command takes `--id` (default: your newest), and `status` lists
 them, saying when an app's runner has stopped (`do`, `shot`, `dump` and

@@ -398,6 +398,21 @@ enum Automation {
             // A beat for the pane (and a web view) to appear.
             try? await Task.sleep(for: .milliseconds(200))
             return "ok \(app.showsPanels(for: thread) ? "showing \(app.paneSection(for: thread).id)" : "hidden")"
+        case "convex":
+            // Select through the same model as the panel's deployment menu.
+            guard let thread = app.selectedThread,
+                  let panel = thread.panels.first(where: { $0.convex != nil }),
+                  let configured = panel.convex else { return "error no Convex cloud panel" }
+            if let deployment = c["deployment"] as? String {
+                switch await app.convexPanelDeployments(threadId: thread.id, panelId: panel.id) {
+                case .success(let listed):
+                    guard listed.deployments.contains(where: { $0.deployment == deployment }) else { return "error unknown deployment" }
+                    WebPanelPool.shared.selectConvex(deployment, for: configured)
+                case .failure(let error): return "error \(error.localizedDescription)"
+                }
+                try? await Task.sleep(for: .milliseconds(200))
+            }
+            return "ok \(WebPanelPool.shared.selectedConvex(configured)) browser=\(WebPanelPool.shared.convexBrowserURL(configured)?.absoluteString ?? "none")"
         case "float":
             // {"cmd":"float","id":"threadbear.highlights"} opens a panel in a
             // window of its own, as its menu's Open in New Window does;

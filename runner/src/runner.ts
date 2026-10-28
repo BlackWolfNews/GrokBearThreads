@@ -5,7 +5,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import { reviewInput, reviewDraft, reviewReply, sameDraft, type ReviewInput } from './reviews.ts';
 import path from 'node:path';
-import { ConvexKeys, convexFolderFor, type ConvexKey } from './convex-keys.ts';
+import { ConvexKeys, convexFolderFor, type ConvexKey, type ConvexDeployments } from './convex-keys.ts';
 import crypto from 'node:crypto';
 import type {
   Panel,
@@ -3695,18 +3695,37 @@ export class Runner {
     return renderPanel(panel, paths.panels(this.cfg.home, threadId), this.screenshot);
   }
 
-  // panels.convexKey: a deploy key for the Convex panel, which shows
-  // Convex's embedded dashboard with it rather than asking for a login.
-  async convexPanelKey(threadId: string, panelId: string, renew = false): Promise<ConvexKey> {
+  // Cloud deployments in the Convex panel's project, through its CLI.
+  async convexPanelDeployments(threadId: string, panelId: string, refresh = false): Promise<ConvexDeployments> {
+    const { convex, folder } = this.convexPanelContext(threadId, panelId);
+    return this.convexKeys.deployments(folder, convex, refresh);
+  }
+
+  // A deploy key for the embedded dashboard. Other choices must resolve in
+  // this panel's project before they can get a key.
+  async convexPanelKey(threadId: string, panelId: string, renew = false, selected?: string): Promise<ConvexKey> {
+    const { convex, folder } = this.convexPanelContext(threadId, panelId);
+    let target = convex;
+    if (selected && selected !== convex.deployment) {
+      const choices = await this.convexKeys.deployments(folder, convex);
+      const choice = choices.deployments.find(d => d.deployment === selected);
+      if (!choice) throw new RpcError(ErrorCode.badParams, `This project's panel has no deployment called ${selected}`);
+      target = choice;
+    }
+    const { deployment, deploymentUrl } = target;
+    return { deployment, deploymentUrl, adminKey: await this.convexKeys.key(deployment, folder, renew) };
+  }
+
+  private convexPanelContext(threadId: string, panelId: string) {
     const st = this.mustGet(threadId);
     const panel = this.patchSet(st).panels.find((p) => p.id === panelId);
     if (!panel) throw new RpcError(ErrorCode.badParams, `This thread has no panel called ${panelId}`);
     if (!panel.convex) throw new RpcError(ErrorCode.badParams, `${panelId} isn't a Convex cloud deployment's panel`);
-    const { deployment, deploymentUrl } = panel.convex;
+    const { deployment } = panel.convex;
     const starts = [st.rec.cwd, ...(this.projects?.foldersFor(st.rec) ?? []).map((f) => f.folder)];
     const folder = convexFolderFor(deployment, starts, this.panelsRoot ?? os.homedir());
     if (!folder) throw new RpcError(ErrorCode.badParams, `Couldn't find the Convex project for ${deployment}`);
-    return { deployment, deploymentUrl, adminKey: await this.convexKeys.key(deployment, folder, renew) };
+    return { convex: panel.convex, folder };
   }
 
   // ------------------------------------------------------------ highlights

@@ -47,4 +47,18 @@ final class ConvexPanelTests: XCTestCase {
         let got = try await reply(origin: "https://evil.example/")
         XCTAssertEqual(got, "none")
     }
+
+    func testDeploymentChoiceIsRememberedPerConfiguredDeploymentAndUsedByBrowserLink() {
+        let suite = "ConvexPanelTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let pool = WebPanelPool(defaults: defaults)
+        let configured = ConvexDeployment(deployment: "quick-fox-77", deploymentUrl: "https://quick-fox-77.convex.cloud")
+        XCTAssertEqual(pool.selectedConvex(configured), "quick-fox-77")
+        pool.selectConvex("busy-bear-2", for: configured)
+        XCTAssertEqual(WebPanelPool(defaults: defaults).selectedConvex(configured), "busy-bear-2")
+        XCTAssertEqual(pool.convexBrowserURL(configured)?.absoluteString, "https://dashboard.convex.dev/d/busy-bear-2")
+        let other = ConvexDeployment(deployment: "other-project-3", deploymentUrl: "https://other-project-3.convex.cloud")
+        XCTAssertEqual(pool.selectedConvex(other), "other-project-3")
+    }
 }

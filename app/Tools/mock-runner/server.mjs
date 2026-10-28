@@ -579,6 +579,28 @@ async function dispatch(client, method, p) {
       });
       return { ok, exitCode: ok ? 0 : 2, durationMs: 2100, seq: event.seq };
     }
+    case 'mock.convexPanel': {
+      const t = need(p.threadId);
+      const deployment = 'happy-otter-123';
+      t.summary.panels = [{ id: 'convex.dashboard', title: 'Convex', kind: 'url', patch: 'convex',
+        url: `https://dashboard.convex.dev/d/${deployment}`,
+        convex: { deployment, deploymentUrl: `https://${deployment}.convex.cloud` } }];
+      t.convexKeyRequests ??= [];
+      broadcastSummary(t.summary.id);
+      return { keyRequests: t.convexKeyRequests };
+    }
+    case 'panels.convexDeployments': {
+      need(p.threadId);
+      return { deployments: [
+        { deployment: 'happy-otter-123', deploymentUrl: 'https://happy-otter-123.convex.cloud', label: 'Development' },
+        { deployment: 'busy-bear-456', deploymentUrl: 'https://busy-bear-456.ap-southeast-2.convex.cloud', label: 'Production' },
+      ] };
+    }
+    case 'panels.convexKey': {
+      const t = need(p.threadId);
+      (t.convexKeyRequests ??= []).push({ deployment: p.deployment, renew: p.renew === true });
+      throw rpcError(-32000, 'The demo runner has no Convex deploy keys.');
+    }
     case 'panels.render': {
       // The Simulator panel's picture: a fixture image, as if simctl took it.
       const t = need(p.threadId);

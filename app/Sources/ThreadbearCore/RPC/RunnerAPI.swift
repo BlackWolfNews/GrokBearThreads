@@ -55,10 +55,16 @@ public extension RPCClient {
         try await call("panels.render", .object(["threadId": .string(threadId), "panelId": .string(panelId)]), as: PanelRender.self, timeout: .seconds(30))
     }
 
+    /// Cloud deployments for the panel's project, resolved by its CLI.
+    func convexPanelDeployments(threadId: String, panelId: String, refresh: Bool = false) async throws -> ConvexDeployments {
+        try await call("panels.convexDeployments", .object(["threadId": .string(threadId), "panelId": .string(panelId), "refresh": .bool(refresh)]), as: ConvexDeployments.self, timeout: .seconds(150))
+    }
+
     /// A deploy key for a Convex panel's embedded dashboard. Slow the first
     /// time for a deployment, while the runner has the Convex CLI make one.
-    func convexPanelKey(threadId: String, panelId: String, renew: Bool = false) async throws -> ConvexPanelKey {
+    func convexPanelKey(threadId: String, panelId: String, deployment: String? = nil, renew: Bool = false) async throws -> ConvexPanelKey {
         var params: [String: JSONValue] = ["threadId": .string(threadId), "panelId": .string(panelId)]
+        if let deployment { params["deployment"] = .string(deployment) }
         if renew { params["renew"] = .bool(true) }
         return try await call("panels.convexKey", .object(params), as: ConvexPanelKey.self, timeout: .seconds(150))
     }

@@ -12,12 +12,15 @@ import type { CommandOutcome } from './patches.ts';
 import { convexDeploymentName, findUp, isConvexProject, parseEnvValue, readEnvValue } from './patches.ts';
 
 export type ConvexKey = { deployment: string; deploymentUrl: string; adminKey: string };
+export type ConvexDeploymentChoice = { deployment: string; deploymentUrl: string; label: string };
+export type ConvexDeployments = { deployments: ConvexDeploymentChoice[]; note?: string };
 type Run = (command: string, cwd: string) => Promise<CommandOutcome>;
 
 export class ConvexKeys {
   // One CLI call per deployment at a time: two panels opening together
   // would otherwise make two keys.
   private pending = new Map<string, Promise<string>>();
+  private choices = new Map<string, { until: number; result: Promise<ConvexDeployments> }>();
 
   private dir: string;
   private run: Run;
@@ -28,6 +31,48 @@ export class ConvexKeys {
     this.dir = dir;
     this.run = run;
     this.host = host;
+  }
+
+  async deployments(folder: string, configured: { deployment: string; deploymentUrl: string }, refresh = false): Promise<ConvexDeployments> {
+    const type = readEnvValue(folder, 'CONVEX_DEPLOYMENT')?.split(':')[0];
+    const cacheKey = JSON.stringify([folder, configured, type]);
+    const cached = this.choices.get(cacheKey);
+    if (!refresh && cached && cached.until > Date.now()) return cached.result;
+    const result = this.listDeployments(folder, configured, type);
+    this.choices.set(cacheKey, { until: Date.now() + 60_000, result });
+    return result;
+  }
+
+  private async listDeployments(folder: string, configured: { deployment: string; deploymentUrl: string }, type?: string): Promise<ConvexDeployments> {
+    const deployments: ConvexDeploymentChoice[] = [{ ...configured,
+      label: type === 'dev' ? 'Development' : type === 'prod' ? 'Production' : 'Configured' }];
+    const notes: string[] = [];
+    // The CLI resolves the project's default dev/prod with its own login.
+    // Reading only this built-in URL also preserves regional cloud hosts.
+    // No --push, codegen or writes to the project's env files.
+    const resolved = await Promise.all(['dev', 'prod'].map(async selector => {
+      const label = selector === 'prod' ? 'Production' : 'Development';
+      try {
+        const out = await this.run(`npx --no-install convex run --inline-query 'process.env.CONVEX_CLOUD_URL' --deployment ${selector} --codegen disable --typecheck disable`, folder);
+        if (!out.ok) throw new Error(cliError(out.text));
+        const url = new URL(JSON.parse(out.text.trim()));
+        const deployment = convexDeploymentName(url.hostname.split('.')[0]);
+        if (url.protocol !== 'https:' || !url.hostname.endsWith('.convex.cloud') || !deployment || url.username || url.password) {
+          throw new Error('This deployment has no Convex cloud URL.');
+        }
+        return { deployment, deploymentUrl: url.origin, label };
+      } catch (error) {
+        notes.push(`${label}: ${error instanceof Error ? error.message : 'Could not resolve deployment'}`);
+        return undefined;
+      }
+    }));
+    for (const choice of resolved) {
+      if (!choice) continue;
+      const at = deployments.findIndex(d => d.deployment === choice.deployment);
+      if (at < 0) deployments.push(choice);
+      else deployments[at] = choice;
+    }
+    return { deployments, ...(notes.length ? { note: notes.join('\n') } : {}) };
   }
 
   async key(deployment: string, folder: string, renew = false): Promise<string> {

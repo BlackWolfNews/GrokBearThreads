@@ -1252,6 +1252,9 @@ test('panels.convexKey makes a deploy key in the project folder, for the panel o
     panelsRoot: root,
     convexKeyRun: async (command, cwd) => {
       calls.push(cwd);
+      if (command.includes('--inline-query')) return { ok: true,
+        text: JSON.stringify(command.includes('--deployment prod') ? 'https://busy-bear-2.ap-southeast-2.convex.cloud' : 'https://quick-fox-77.convex.cloud'),
+        truncated: false, durationMs: 1 };
       fs.writeFileSync(/--save-env '([^']+)'/.exec(command)![1], 'CONVEX_DEPLOY_KEY=dev:quick-fox-77|k\n');
       return { ok: true, text: '', truncated: false, durationMs: 1 };
     },
@@ -1262,6 +1265,12 @@ test('panels.convexKey makes a deploy key in the project folder, for the panel o
   assert.deepEqual(calls, [project]);
   assert.ok(fs.existsSync(path.join(h.home, 'secrets', 'convex-panels', 'quick-fox-77.json')));
   await assert.rejects(h.runner.convexPanelKey(thread.id, 'nope'), /no panel called nope/);
+  const listed = await h.runner.convexPanelDeployments(thread.id, 'convex.dashboard');
+  assert.equal(listed.deployments[1].label, 'Production');
+  assert.equal(listed.deployments[1].deployment, 'busy-bear-2');
+  assert.equal((await h.runner.convexPanelKey(thread.id, 'convex.dashboard', false, 'busy-bear-2')).deploymentUrl, 'https://busy-bear-2.ap-southeast-2.convex.cloud');
+  await assert.rejects(h.runner.convexPanelKey(thread.id, 'convex.dashboard', false, 'unrelated-project-3'), /no deployment called unrelated-project-3/);
+  assert.equal(calls.length, 4, 'configured key, two read-only lookups, selected key; no call for an unrelated deployment');
   // The key is only in the answer: never in the thread's events or summary.
   assert.ok(!JSON.stringify(h.runner.get(thread.id)).includes('quick-fox-77|k'));
   assert.ok(!JSON.stringify(h.notes).includes('quick-fox-77|k'));

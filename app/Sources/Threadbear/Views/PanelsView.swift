@@ -49,6 +49,7 @@ struct DockPane: View {
         case .url:
             if let convex = panel.convex {
                 ConvexPanel(threadId: thread.id, panelId: panel.id, convex: convex)
+                    .id("\(thread.id) \(panel.id) \(convex.deployment)")
             } else if let url = panel.pageURL {
                 WebPanel(url: url)
             } else {
@@ -66,6 +67,7 @@ struct DockPane: View {
 /// file's or page's buttons over a preview, Open in browser for a page.
 struct DockPaneButtons: View {
     @Environment(AppModel.self) private var app
+    @ObservedObject private var pool = WebPanelPool.shared
     let section: PaneSection
 
     var body: some View {
@@ -76,14 +78,18 @@ struct DockPaneButtons: View {
                 } else if case .panel(let id) = section, let panel = thread.panels.first(where: { $0.id == id }),
                           panel.kind == .url, let url = panel.pageURL {
                     if let convex = panel.convex {
-                        PaneHeaderButton(symbol: "key", help: "Make a new deploy key for \(convex.deployment), if the old one was revoked") {
-                            WebPanelPool.shared.renewConvex(convex.deployment)
+                        let selected = pool.selectedConvex(convex)
+                        PaneHeaderButton(symbol: "key", help: "Make a new deploy key for \(selected), if the old one was revoked") {
+                            pool.renewConvex(selected)
                         }
-                        PaneHeaderButton(symbol: "arrow.clockwise", help: "Reload panel") { WebPanelPool.shared.reloadConvex(convex.deployment) }
+                        PaneHeaderButton(symbol: "arrow.clockwise", help: "Reload panel") { pool.reloadConvex(selected) }
+                        PaneHeaderButton(symbol: "arrow.up.right", help: "Open \(selected) in browser") {
+                            if let target = pool.convexBrowserURL(convex) { NSWorkspace.shared.open(target) }
+                        }
                     } else {
                         PaneHeaderButton(symbol: "arrow.clockwise", help: "Reload panel") { WebPanelPool.shared.reloadIfLoaded(url) }
+                        PaneHeaderButton(symbol: "arrow.up.right", help: "Open in browser") { NSWorkspace.shared.open(url) }
                     }
-                    PaneHeaderButton(symbol: "arrow.up.right", help: "Open in browser") { NSWorkspace.shared.open(url) }
                 }
             }
         }
@@ -394,36 +400,119 @@ private struct ConvexPanel: View {
     @ObservedObject private var pool = WebPanelPool.shared
     @State private var key: ConvexPanelKey?
     @State private var failure: String?
+    @State private var choices: [ConvexDeploymentChoice] = []
+    @State private var choicesNote: String?
+    @State private var loadingChoices = true
+    @State private var refresh = 0
+
+    private var selected: String { pool.selectedConvex(convex) }
+    private var label: String { choices.first(where: { $0.deployment == selected })?.label ?? "Configured" }
 
     var body: some View {
-        Group {
-            if let key {
-                ConvexWebPage(key: key)
-            } else if let failure {
-                VStack(spacing: zoomed(12)) {
-                    Text(failure)
-                        .font(.system(size: TypeScale.label))
+        VStack(spacing: 0) {
+            VStack(alignment: .leading, spacing: zoomed(6)) {
+                HStack(spacing: zoomed(8)) {
+                    Menu {
+                        ForEach(choices, id: \.deployment) { choice in
+                            Button {
+                                pool.selectConvex(choice.deployment, for: convex)
+                            } label: {
+                                if selected == choice.deployment {
+                                    Label("\(choice.label) · \(choice.deployment)", systemImage: "checkmark")
+                                } else {
+                                    Text("\(choice.label) · \(choice.deployment)")
+                                }
+                            }
+                            .tip("Show \(choice.deployment) in this panel")
+                        }
+                        Divider()
+                        Button("Refresh deployments") { refresh += 1 }
+                            .tip("Look up this project's development and production deployments again")
+                    } label: {
+                        Text(label)
+                            .font(.system(size: TypeScale.label, weight: .medium))
+                    }
+                    .menuStyle(.borderlessButton)
+                    .fixedSize()
+                    .disabled(loadingChoices)
+                    .tip("Choose the deployment shown in this panel")
+                    Text(selected)
+                        .font(.system(size: TypeScale.small, design: .monospaced))
                         .foregroundStyle(.secondary)
-                        .multilineTextAlignment(.center)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
                         .textSelection(.enabled)
-                    Button("Try again") { Task { await fetch() } }
-                        .tip("Ask the runner for a deploy key again")
+                        .tip(selected)
+                    Spacer(minLength: 0)
+                    if loadingChoices { ProgressView().controlSize(.mini) }
                 }
-                .padding(zoomed(24))
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else {
-                PaneNote(text: "Getting a deploy key for \(convex.deployment)…")
+                if let choicesNote {
+                    Text(choicesNote)
+                        .font(.system(size: TypeScale.small))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                        .tip(choicesNote)
+                }
             }
+            .padding(.horizontal, zoomed(12))
+            .padding(.vertical, zoomed(8))
+            Divider()
+            content
         }
-        // Again when the deployment changes, or after New deploy key.
-        .task(id: "\(convex.deployment) \(pool.convexRenewals[convex.deployment, default: 0])") { await fetch() }
+        .task(id: refresh) { await loadChoices() }
+        // A cancelled request must never put the previous deployment back.
+        .task(id: "\(selected) \(pool.convexRenewals[selected, default: 0])") { await fetch() }
+    }
+
+    @ViewBuilder
+    private var content: some View {
+        if let key, key.deployment == selected {
+            ConvexWebPage(key: key)
+        } else if let failure {
+            VStack(spacing: zoomed(12)) {
+                Text(failure)
+                    .font(.system(size: TypeScale.label))
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .textSelection(.enabled)
+                Button("Try again") { Task { await fetch() } }
+                    .tip("Ask the runner for a deploy key again")
+            }
+            .padding(zoomed(24))
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else {
+            PaneNote(text: loadingChoices ? "Finding deployments…" : "Getting a deploy key for \(selected)…")
+        }
+    }
+
+    private func loadChoices() async {
+        loadingChoices = true
+        let result = await app.convexPanelDeployments(threadId: threadId, panelId: panelId, refresh: refresh > 0)
+        guard !Task.isCancelled else { return }
+        switch result {
+        case .success(let listed):
+            choices = listed.deployments
+            choicesNote = listed.note
+        case .failure(let error):
+            choicesNote = "Couldn't load other deployments: \(error.localizedDescription)"
+        }
+        if !choices.contains(where: { $0.deployment == convex.deployment }) {
+            choices.insert(ConvexDeploymentChoice(deployment: convex.deployment, deploymentUrl: convex.deploymentUrl, label: "Configured"), at: 0)
+        }
+        if !choices.contains(where: { $0.deployment == selected }) {
+            pool.selectConvex(convex.deployment, for: convex)
+        }
+        loadingChoices = false
     }
 
     private func fetch() async {
-        let renew = pool.takeRenewal(convex.deployment)
-        if renew || key?.deployment != convex.deployment { key = nil }
+        let target = selected
+        let renew = pool.takeRenewal(target)
+        if renew || key?.deployment != target { key = nil }
         failure = nil
-        switch await app.convexPanelKey(threadId: threadId, panelId: panelId, renew: renew) {
+        let result = await app.convexPanelKey(threadId: threadId, panelId: panelId, deployment: target, renew: renew)
+        guard !Task.isCancelled, selected == target else { return }
+        switch result {
         case .success(let made): key = made
         case .failure(let error): failure = error.localizedDescription
         }
@@ -462,10 +551,31 @@ final class WebPanelPool: NSObject, ObservableObject, WKNavigationDelegate, WKUI
     private var views: [URL: WKWebView] = [:]
     private var order: [URL] = []
     static let capacity = 4
+    private let defaults: UserDefaults
+    @Published private var convexSelections: [String: String]
     /// Bumped by New deploy key, so the deployment's panel asks again.
     @Published private(set) var convexRenewals: [String: Int] = [:]
     private var pendingRenewals: Set<String> = []
     static let convexEmbedded = URL(string: "https://dashboard-embedded.convex.dev/")!
+
+    init(defaults: UserDefaults = .standard) {
+        self.defaults = defaults
+        convexSelections = defaults.dictionary(forKey: "convexPanelDeployments") as? [String: String] ?? [:]
+        super.init()
+    }
+
+    func selectedConvex(_ configured: ConvexDeployment) -> String {
+        convexSelections[configured.deployment] ?? configured.deployment
+    }
+
+    func selectConvex(_ deployment: String, for configured: ConvexDeployment) {
+        convexSelections[configured.deployment] = deployment
+        defaults.set(convexSelections, forKey: "convexPanelDeployments")
+    }
+
+    func convexBrowserURL(_ configured: ConvexDeployment) -> URL? {
+        URL(string: "https://dashboard.convex.dev/d/\(selectedConvex(configured))")
+    }
 
     func webView(for url: URL) -> WKWebView {
         if let existing = views[url] {

@@ -1353,12 +1353,22 @@ final class AppModel {
         }
     }
 
-    /// A deploy key for a Convex panel, or the reason there isn't one (the
-    /// Convex CLI's, when it couldn't make one).
-    func convexPanelKey(threadId: String, panelId: String, renew: Bool = false) async -> Result<ConvexPanelKey, Error> {
+    /// Available cloud deployments for the panel's project.
+    func convexPanelDeployments(threadId: String, panelId: String, refresh: Bool = false) async -> Result<ConvexDeployments, Error> {
         guard let client else { return .failure(RPCError.disconnected(nil)) }
         do {
-            return .success(try await client.convexPanelKey(threadId: threadId, panelId: panelId, renew: renew))
+            return .success(try await client.convexPanelDeployments(threadId: threadId, panelId: panelId, refresh: refresh))
+        } catch {
+            return .failure(error)
+        }
+    }
+
+    /// A deploy key for the selected deployment, or the CLI's reason when
+    /// it couldn't make one.
+    func convexPanelKey(threadId: String, panelId: String, deployment: String? = nil, renew: Bool = false) async -> Result<ConvexPanelKey, Error> {
+        guard let client else { return .failure(RPCError.disconnected(nil)) }
+        do {
+            return .success(try await client.convexPanelKey(threadId: threadId, panelId: panelId, deployment: deployment, renew: renew))
         } catch {
             AppLog.write("panels", "convex key for \(panelId) failed: \(error.localizedDescription)")
             return .failure(error)

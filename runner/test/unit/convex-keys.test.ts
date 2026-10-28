@@ -70,3 +70,37 @@ test('the project folder for a deployment is the thread\'s or one of its project
   assert.equal(convexFolderFor('web-2', [path.join(app, 'src'), web], home), web);
   assert.equal(convexFolderFor('other-3', [app, web], home), undefined);
 });
+
+test('deployment choices resolve dev and prod through the CLI without changing project settings or making keys', async () => {
+  const folder = tmpDir();
+  fs.writeFileSync(path.join(folder, '.env.local'), 'CONVEX_DEPLOYMENT=dev:calm-cat-1\n');
+  const calls: string[] = [];
+  const keys = new ConvexKeys(path.join(folder, 'keys'), async (command, cwd) => {
+    assert.equal(cwd, folder);
+    calls.push(command);
+    return { ok: true, text: JSON.stringify(command.includes('--deployment prod')
+      ? 'https://busy-bear-2.ap-southeast-2.convex.cloud' : 'https://calm-cat-1.convex.cloud'), truncated: false, durationMs: 1 };
+  });
+  const configured = { deployment: 'calm-cat-1', deploymentUrl: 'https://calm-cat-1.convex.cloud' };
+  const listed = await keys.deployments(folder, configured);
+  assert.deepEqual(listed, { deployments: [
+    { ...configured, label: 'Development' },
+    { deployment: 'busy-bear-2', deploymentUrl: 'https://busy-bear-2.ap-southeast-2.convex.cloud', label: 'Production' },
+  ] });
+  assert.ok(calls.every(c => c.includes('run --inline-query') && !c.includes('--push') && !c.includes('token')));
+  assert.deepEqual(await keys.deployments(folder, configured), listed);
+  assert.equal(calls.length, 2, 'discovery is cached');
+  await keys.deployments(folder, configured, true);
+  assert.equal(calls.length, 4, 'refresh bypasses the cache');
+  assert.equal(fs.readFileSync(path.join(folder, '.env.local'), 'utf8'), 'CONVEX_DEPLOYMENT=dev:calm-cat-1\n');
+  assert.ok(!fs.existsSync(path.join(folder, 'keys')));
+});
+
+test('unavailable choices leave the configured deployment usable and explain why', async () => {
+  const folder = tmpDir();
+  const configured = { deployment: 'calm-cat-1', deploymentUrl: 'https://calm-cat-1.convex.cloud' };
+  const keys = new ConvexKeys(path.join(folder, 'keys'), async () => ({ ok: false, text: 'No production deployment', truncated: false, durationMs: 1 }));
+  const listed = await keys.deployments(folder, configured);
+  assert.deepEqual(listed.deployments, [{ ...configured, label: 'Configured' }]);
+  assert.match(listed.note!, /Production: No production deployment/);
+});
