@@ -672,7 +672,12 @@ private final class MenuAnchor {
         }
         let popover = NSPopover()
         popover.behavior = .transient
-        popover.contentViewController = make { [weak popover] in popover?.close() }
+        let controller = make { [weak popover] in popover?.close() }
+        popover.contentViewController = controller
+        // Measure the SwiftUI content first: shown before it knew its
+        // height, the popover was placed for the wrong size and, once it
+        // grew, slid down over the composer with Effort off the screen.
+        popover.contentSize = controller.view.fittingSize
         popover.show(relativeTo: view.bounds, of: view, preferredEdge: .maxY)
         self.popover = popover
     }
