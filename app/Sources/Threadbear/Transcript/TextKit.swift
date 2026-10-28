@@ -605,7 +605,32 @@ final class TranscriptTextView: NSTextView {
     var debugSelectionBarWindow: Int? { selectionBar?.windowNumber }
     #endif
 
+    /// The file a link names, for its right-click menu (nil for a path
+    /// that names nothing). Only asked of file links and inline code paths.
+    var fileLinkPath: (URL) -> String? = { url in
+        MainActor.assumeIsolated { AppModel.shared.transcriptLinkPath(url) }
+    }
+    var openFile: (String, FileLinkAction) -> Void = { path, action in
+        MainActor.assumeIsolated { _ = AppModel.shared.openTranscriptFile(path, action) }
+    }
+
+    /// The right-click menu for the file link under `point` (in this
+    /// view), if there's one there.
+    func fileLinkMenu(at point: NSPoint) -> NSMenu? {
+        guard let storage = textStorage, let layoutManager, let container = textContainer, storage.length > 0 else { return nil }
+        let inContainer = NSPoint(x: point.x - textContainerOrigin.x, y: point.y - textContainerOrigin.y)
+        var fraction: CGFloat = 0
+        let glyph = layoutManager.glyphIndex(for: inContainer, in: container, fractionOfDistanceThroughGlyph: &fraction)
+        // glyphIndex gives the nearest glyph; only a click on it counts.
+        guard layoutManager.boundingRect(forGlyphRange: NSRange(location: glyph, length: 1), in: container).contains(inContainer) else { return nil }
+        let index = layoutManager.characterIndexForGlyph(at: glyph)
+        guard index < storage.length, let url = storage.attribute(.link, at: index, effectiveRange: nil) as? URL,
+              url.isFileURL || FilePathRefs.text(of: url) != nil else { return nil }
+        return FileLinkMenu(path: fileLinkPath(url), open: openFile).menu()
+    }
+
     override func menu(for event: NSEvent) -> NSMenu? {
+        if let menu = fileLinkMenu(at: convert(event.locationInWindow, from: nil)) { return menu }
         // Defer to the table's row menu (Copy message, Copy transcript) with
         // text-specific items first when there's a selection.
         let base = super.menu(for: event) ?? NSMenu()

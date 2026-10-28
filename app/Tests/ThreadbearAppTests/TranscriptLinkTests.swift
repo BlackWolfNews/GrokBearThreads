@@ -131,3 +131,72 @@ final class TranscriptPathRefTests: XCTestCase {
         XCTAssertEqual(opened, "app/Sources/A.swift")
     }
 }
+
+@MainActor
+final class FileLinkMenuTests: XCTestCase {
+    private var saved: String?
+
+    override func setUp() async throws {
+        saved = UserDefaults.standard.string(forKey: "transcriptFileLinkClick")
+    }
+
+    override func tearDown() async throws {
+        UserDefaults.standard.set(saved, forKey: "transcriptFileLinkClick")
+    }
+
+    private func view(_ markdown: String) -> TranscriptTextView {
+        let view = TranscriptTextView()
+        view.show(MarkdownRenderer.render(markdown).string, width: 500)
+        return view
+    }
+
+    /// A point on the character at `index`, in the view's coordinates.
+    private func point(_ view: TranscriptTextView, at index: Int) throws -> NSPoint {
+        let layout = try XCTUnwrap(view.layoutManager), container = try XCTUnwrap(view.textContainer)
+        let glyphs = layout.glyphRange(forCharacterRange: NSRange(location: index, length: 1), actualCharacterRange: nil)
+        let rect = layout.boundingRect(forGlyphRange: glyphs, in: container)
+        return NSPoint(x: rect.midX + view.textContainerOrigin.x, y: rect.midY + view.textContainerOrigin.y)
+    }
+
+    func testRightClickOnAPathOffersWaysToOpenIt() throws {
+        let view = view("Changed `app/A.swift` today")
+        view.fileLinkPath = { url in FilePathRefs.text(of: url) == "app/A.swift" ? "/repo/app/A.swift" : nil }
+        var opened: [(String, FileLinkAction)] = []
+        view.openFile = { opened.append(($0, $1)) }
+        let at = (view.string as NSString).range(of: "app/").location
+        let menu = try XCTUnwrap(view.fileLinkMenu(at: point(view, at: at)))
+        let titles = menu.items.map(\.title)
+        XCTAssertEqual(titles.first, "Open in Panel")
+        XCTAssertTrue(titles.contains("Show in Finder"))
+        XCTAssertTrue(titles.contains("Copy Path"))
+        XCTAssertTrue(titles.contains { $0.hasPrefix("Open in ") && $0 != "Open in Panel" })
+
+        let finder = try XCTUnwrap(menu.items.first { $0.title == "Show in Finder" })
+        menu.performActionForItem(at: menu.index(of: finder))
+        XCTAssertEqual(opened.first?.0, "/repo/app/A.swift")
+        XCTAssertEqual(opened.first?.1, .finder)
+
+        // "Click Opens" sets what a plain click does, and ticks it.
+        let clickOpens = try XCTUnwrap(menu.items.first { $0.title == "Click Opens" }?.submenu)
+        let panel = try XCTUnwrap(clickOpens.items.first { $0.title == "Open in Panel" })
+        clickOpens.performActionForItem(at: clickOpens.index(of: panel))
+        XCTAssertEqual(FileLinkAction.click, .panel)
+        let again = try XCTUnwrap(view.fileLinkMenu(at: point(view, at: at))?.items.first { $0.title == "Click Opens" }?.submenu)
+        XCTAssertEqual(again.items.filter { $0.state == .on }.map(\.title), ["Open in Panel"])
+    }
+
+    func testMissingFileAndPlainTextMenus() throws {
+        let view = view("Changed `app/Gone.swift` today")
+        view.fileLinkPath = { _ in nil }
+        let at = (view.string as NSString).range(of: "app/").location
+        XCTAssertEqual(try XCTUnwrap(view.fileLinkMenu(at: point(view, at: at))).items.map(\.title), ["Couldn't Find This File"])
+        XCTAssertNil(view.fileLinkMenu(at: try point(view, at: 2)))
+    }
+
+    func testFileLinksGetAPlainTip() {
+        let text = MarkdownRenderer.render("See `app/A.swift` and [x](https://example.com)").string
+        let path = (text.string as NSString).range(of: "app/").location
+        XCTAssertEqual(text.attribute(.toolTip, at: path, effectiveRange: nil) as? String, "Click to open, right-click for more")
+        XCTAssertNil(text.attribute(.toolTip, at: text.length - 1, effectiveRange: nil))
+    }
+}

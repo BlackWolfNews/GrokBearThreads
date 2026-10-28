@@ -147,24 +147,46 @@ extension AppModel {
         NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)])
     }
 
-    /// A click on a file link in the transcript: a file Mike would review
-    /// (a mockup, a doc, a picture) opens in the pane beside it; ⌘-click,
-    /// and anything else, opens in its own app as before.
+    /// A click on a file link in the transcript does what Mike picked in
+    /// its right-click menu (FileLinkAction.click); ⌘-click always opens
+    /// it in its own app.
     func openTranscriptFileLink(_ url: URL, commandKey: Bool) -> Bool {
-        if !commandKey, PreviewRules.previewsInPane(transcriptLink: url), let thread = selectedThread, openProjectId == nil {
-            preview(path: url.path, in: thread)
-            return true
-        }
-        return NSWorkspace.shared.open(url)
+        openTranscriptFile(url.path, commandKey ? .app : FileLinkAction.click)
     }
 
-    /// A click on a file path in inline code (FilePathRefs): found from
-    /// the selected thread's folder and what its tools touched, then
-    /// opened like a file link. A path that names nothing just beeps.
-    func openTranscriptPathRef(_ text: String, commandKey: Bool) -> Bool {
+    @discardableResult
+    func openTranscriptFile(_ path: String, _ action: FileLinkAction) -> Bool {
+        let url = URL(fileURLWithPath: path)
+        var action = action
+        if action == .automatic { action = PreviewRules.previewsInPane(transcriptLink: url) ? .panel : .app }
+        switch action {
+        case .panel:
+            // The pane belongs to a thread; on a project page there's none.
+            guard let thread = selectedThread, openProjectId == nil else { return NSWorkspace.shared.open(url) }
+            preview(path: path, in: thread)
+            return true
+        case .finder:
+            revealInFinder(path)
+            return true
+        case .app, .automatic:
+            return NSWorkspace.shared.open(url)
+        }
+    }
+
+    /// The file a transcript link names, if it exists: a file link's path,
+    /// or a path in inline code found from the selected thread's folder
+    /// and what its tools touched (FilePathRefs).
+    func transcriptLinkPath(_ url: URL) -> String? {
+        if url.isFileURL { return url.path }
+        guard let text = FilePathRefs.text(of: url) else { return nil }
         let thread = selectedThread
         let known = thread.flatMap { loadedSession($0.id) }.map { FilePathRefs.toolPaths($0.model.items) } ?? []
-        guard let path = FilePathRefs.resolve(text, root: thread?.cwd, known: known) else {
+        return FilePathRefs.resolve(text, root: thread?.cwd, known: known)
+    }
+
+    /// A click on a path in inline code. One that names nothing beeps.
+    func openTranscriptPathRef(_ text: String, commandKey: Bool) -> Bool {
+        guard let url = FilePathRefs.url(for: text), let path = transcriptLinkPath(url) else {
             NSSound.beep()
             return false
         }

@@ -139,6 +139,10 @@ enum MarkdownRenderer {
             if let link = context.link {
                 attributes[.link] = link
                 attributes[.foregroundColor] = NSColor.linkColor
+                // Otherwise the tip is the raw link, `tbpath:?p=…` for a path.
+                if link.isFileURL || FilePathRefs.text(of: link) != nil {
+                    attributes[.toolTip] = "Click to open, right-click for more"
+                }
             }
             return attributes
         }
