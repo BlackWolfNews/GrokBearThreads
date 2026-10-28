@@ -49,6 +49,7 @@ let runnerOutput = '';
 const events = new Map<string, Ev[]>();
 const summaries = new Map<string, Ev>();
 const made: string[] = []; // runner thread ids, for clean-up
+const codexIdsMovedAway: string[] = []; // Codex threads a thread left for Claude, for clean-up
 
 async function startRunner(): Promise<void> {
   runnerOutput = '';
@@ -164,7 +165,7 @@ function running(pattern: string): boolean {
 
 // Every Codex thread the runner made for these threads, from its records.
 function nativeIds(): string[] {
-  const ids = new Set<string>();
+  const ids = new Set<string>(codexIdsMovedAway);
   for (const id of made) {
     const s = summaries.get(id);
     if (s?.nativeSessionId) ids.add(s.nativeSessionId);
@@ -445,6 +446,24 @@ describe('Codex threads end to end (real codex app-server)', { concurrency: fals
     assert.ok(notes.some((n) => n.startsWith(`Moved to ${other}`)), JSON.stringify(notes));
     const after = await idle(main.id);
     assert.equal(after.nativeSessionId, before.nativeSessionId, 'the same Codex thread carries on');
+  });
+
+  test('switching to Claude mid-turn: the next message stops Codex and Claude takes over with the work so far', async () => {
+    const t = await createThread({ text: 'Run the shell command `sleep 25` and wait for it to finish. Then reply with only: woke' });
+    await waitFor('the sleep starts', () => turnEvents(t.id, t.turnId).find((e) => e.type === 'tool.call' && /sleep 25/.test(e.title)));
+    const codexId = summaries.get(t.id)?.nativeSessionId;
+    if (codexId) codexIdsMovedAway.push(codexId);
+    await client.call('threads.update', { threadId: t.id, accountId: 'claude-3', model: 'claude-haiku-5-5' });
+    await waitFor('the switch note', () => turnEvents(t.id, t.turnId).find((e) => e.type === 'system.note' && /takes over from your next message/.test(e.text)), 10_000);
+    const next = await send(t.id, 'Which shell command were you running just now? Reply with only the command.');
+    assert.notEqual(next, t.turnId, 'not steered into the Codex turn');
+    const stopped = await turnDone(t.id, t.turnId, 30_000);
+    assert.equal(stopped.outcome, 'interrupted');
+    const done = await turnDone(t.id, next);
+    assert.equal(done.outcome, 'completed', done.error);
+    assert.equal(summaries.get(t.id)?.provider, 'claude');
+    assert.match(replyText(t.id, next), /sleep 25/);
+    assertProtocol(t.id);
   });
 
   test('archiving a thread archives it in Codex too', async () => {

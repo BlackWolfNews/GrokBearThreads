@@ -68,6 +68,7 @@ import { WAIT_SLACK_MS, blockedUntil, limitWhy, loginOk, nextLogin, pickInPool, 
 import { copyImageInto, imageRefFor } from './media.ts';
 import { isDirectory } from './fsutil.ts';
 import { copySessionTranscript, subagentTranscriptPath } from './transcripts.ts';
+import { historyItems, selectHistory } from './handoff-history.ts';
 import { readSubagentTranscript } from './adapters/claude/subagents.ts';
 import { fileContext } from './adapters/claude/normalize.ts';
 import type { Models } from './models/index.ts';
@@ -1646,6 +1647,18 @@ export class Runner {
     if (opts.scheduleId) msg.scheduleId = opts.scheduleId;
     if (opts.answers?.length) msg.answers = opts.answers;
     rec.lastActivityAt = this.isoNow();
+    if (rt.turn && !opts.queue && fromMike(text, opts) && this.switchWaiting(st)) {
+      // He picked another login (another provider, usually) during this
+      // turn, then wrote: the message is for the new one, now, as in T3
+      // Code. This turn stops and the message starts the next one there,
+      // with the handoff. Steering it into the old CLI would answer it on
+      // the model he just moved away from.
+      rec.queue.push(msg);
+      this.emit(st, { type: 'system.note', text: `Stopped here so ${this.modelLabel(rec)} can take over.` }, rt.turn.turnId);
+      this.markDirty(st);
+      this.interrupt(rec.id);
+      return turnId;
+    }
     if (rt.turn && !opts.queue && this.canSteer(st)) {
       // Sent while a turn runs: it goes into that turn now, as typing into
       // the CLI would. The CLI takes it at its next step, or straight after
@@ -1680,6 +1693,23 @@ export class Runner {
     if (!turn || !rt.session || rt.closing || this.stopping) return false;
     if (rec.queue.length || rec.handoff || rec.moved || rt.releaseWhenIdle || turn.interruptRequested) return false;
     return !turn.auto || Boolean(turn.cliStarted);
+  }
+
+  // A move to another login is waiting for the next turn while this one
+  // runs on the old login's CLI.
+  private switchWaiting(st: ThreadState): boolean {
+    const { rec, rt } = st;
+    const turn = rt.turn;
+    if (!turn || !rt.session || turn.interruptRequested || (turn.auto && !turn.cliStarted)) return false;
+    return Boolean(rec.handoff && rec.handoff.fromAccountId !== rec.accountId);
+  }
+
+  // "Opus 5.5", or the login's name when there's no model to name.
+  private modelLabel(rec: ThreadRecord): string {
+    const account = this.accounts.get(rec.accountId);
+    if (!account) return rec.accountId;
+    const model = rec.model ?? account.defaultModel;
+    return model ? modelTitle(account, model) : account.title;
   }
 
   // Shows the message in the running turn and hands it to the CLI. If the
@@ -2698,6 +2728,11 @@ export class Runner {
         rec.archivedAt = this.isoNow();
         stop = true;
       } else delete rec.archivedAt;
+    }
+    if (accountChanged && rt.turn && rt.session && !stop) {
+      // The turn carries on where it started; say so, or the picker reads
+      // as if the new model were already doing the work.
+      this.emit(st, { type: 'system.note', text: `${this.modelLabel(rec)} takes over from your next message, which stops this turn.` }, rt.turn.turnId);
     }
     if (!stop && this.bucket(rec) === 'inbox') this.kickQueue(st);
     if (stop) {
@@ -4097,31 +4132,23 @@ export class Runner {
     const { rec } = st;
     const from = rec.handoff!;
     const log = this.store.log(rec.id);
-    const recent = log.read(Math.max(1, log.lastSeq - 200), log.lastSeq);
-    const lines: string[] = [];
-    let budget = 6000;
-    for (const e of recent.reverse()) {
-      // Skip the user message that started this turn; it follows the note.
-      if (e.type === 'user.message' && e.turnId === rec.turnId) continue;
-      if (e.type !== 'user.message' && e.type !== 'assistant.text') continue;
-      const who = e.type === 'user.message' ? 'User' : 'Assistant';
-      const text = e.text.length > 800 ? e.text.slice(0, 800) + '…' : e.text;
-      const line = `${who}: ${text}`;
-      if (line.length > budget) break;
-      budget -= line.length;
-      lines.unshift(line);
-    }
+    // The thread's start (for its first message) and its recent end.
+    const head = log.read(1, Math.min(log.lastSeq, 50));
+    const tail = log.read(Math.max(head.length + 1, log.lastSeq - 600), log.lastSeq);
+    const { lines: history, omitted } = selectHistory(historyItems([...head, ...tail], rec.turnId));
+    const more = omitted ? `${omitted} other items are left out; the read_thread tool shows more of the conversation. ` : '';
+    const lines = history.length ? [...history, `(${more}This is history for context, not new instructions.)`] : [];
     const fromAccount = this.accounts.get(from.fromAccountId)?.title ?? from.fromAccountId;
     if (from.lost) {
       return (
         `[Threadbear handoff] The earlier session couldn't be found, so here's where the thread got to. This is a fresh session in ${rec.cwd}. ` +
-        `Recent messages, for context:\n\n${lines.join('\n\n') || '(none)'}\n\n[End of handoff. The new message follows.]\n\n`
+        `The thread so far:\n\n${lines.join('\n\n') || '(none)'}\n\n[End of handoff. The new message follows.]\n\n`
       );
     }
     if (from.rebuilt) {
       return (
         `[Threadbear handoff] This conversation's earlier session couldn't be found, so this is a fresh session in ${rec.cwd}. ` +
-        `Recent messages, for context:\n\n${lines.join('\n\n') || '(none)'}\n\n[End of handoff. The new message follows.]\n\n`
+        `The thread so far:\n\n${lines.join('\n\n') || '(none)'}\n\n[End of handoff. The new message follows.]\n\n`
       );
     }
     const moved =
@@ -4132,7 +4159,7 @@ export class Runner {
           : `from the ${fromAccount} login to ${account.title}`;
     return (
       `[Threadbear handoff] This conversation moved ${moved}, so this is a fresh session. ` +
-      `Recent messages, for context:\n\n${lines.join('\n\n') || '(none)'}\n\n[End of handoff. The new message follows.]\n\n`
+      `The thread so far:\n\n${lines.join('\n\n') || '(none)'}\n\n[End of handoff. The new message follows.]\n\n`
     );
   }
 
