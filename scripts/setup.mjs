@@ -5,13 +5,14 @@
 //
 //   ./threadbear setup [--dry-run] [--yes] [--team SLUG] [--project NAME]
 //                      [--region REGION] [--cwd DIR] [--name NAME]
-//                      [--home DIR] [--skip-install]
+//                      [--home DIR] [--skip-install] [--existing]
 //
 //   1. this Mac: macOS, Xcode's command line tools, git, Node 24, Claude Code
 //      or Codex, and Tailscale (optional)
 //   2. the repo's packages
 //   3. a Convex login, then a Convex project of your own with a production
-//      deployment (a new one, or the one this clone already uses)
+//      deployment (a new one, the one this clone already uses, or with
+//      --existing the project named by --project, for a second Mac)
 //   4. its keys: a deploy key the runner uses to deploy the backend when it
 //      updates, and the runner's own key, set as RUNNER_KEY
 //   5. runner.json: where the runner mirrors to, and your default folder
@@ -42,6 +43,7 @@ const { values: v } = parseArgs({
     name: { type: 'string' },
     home: { type: 'string' },
     'skip-install': { type: 'boolean' },
+    existing: { type: 'boolean' },
     help: { type: 'boolean', short: 'h' },
   },
 });
@@ -170,10 +172,11 @@ async function project() {
   }
   const selected = fs.existsSync(path.join(repo, '.env.local')) && /CONVEX_DEPLOYMENT=/.test(fs.readFileSync(path.join(repo, '.env.local'), 'utf8'));
   if (!selected) {
-    if (dry) return todo(`create a Convex project "${v.project}"${v.team ? ` on team ${v.team}` : ''} with a dev deployment`), undefined;
-    const args = ['convex', 'dev', '--once', '--configure', 'new', '--project', v.project, '--dev-deployment', 'cloud'];
+    const verb = v.existing ? 'use the existing' : 'create a';
+    if (dry) return todo(`${verb} Convex project "${v.project}"${v.team ? ` on team ${v.team}` : ''} with a dev deployment`), undefined;
+    const args = ['convex', 'dev', '--once', '--configure', v.existing ? 'existing' : 'new', '--project', v.project, '--dev-deployment', 'cloud'];
     if (v.team) args.push('--team', v.team);
-    runOrFail('Creating the Convex project', npx, args);
+    runOrFail(v.existing ? 'Selecting the Convex project' : 'Creating the Convex project', npx, args);
     ok(`project ${v.project}`);
   } else ok('this clone already has a Convex project (.env.local)');
   if (dry) return todo('create its production deployment'), undefined;
