@@ -39,6 +39,31 @@ export function toolKind(name: string): ToolKind {
 
 export const EDIT_TOOLS = new Set(['Edit', 'MultiEdit', 'Write']);
 
+// The folders a shell command works in: where its `cd`, `pushd` and
+// `git -C` point, in order, so a later relative `cd` follows an earlier one.
+// An agent in a catch-all folder like ~/dev/me/misc often does all its work
+// this way (`cd ~/dev/me/app && ...`), which no Edit or Write call shows.
+// A folder spelt with any other variable or a command substitution is
+// skipped rather than guessed at.
+export function commandFolders(command: string, cwd: string, home: string): string[] {
+  const found: string[] = [];
+  let at = cwd;
+  const re = /(?:^|[\s;&|(])(?:(?:cd|pushd)\s+|git\s+-C\s+)("[^"]*"|'[^']*'|[^\s;&|)]+)/g;
+  for (const m of command.matchAll(re)) {
+    let arg = m[1];
+    const quote = arg[0] === "'" ? "'" : arg[0] === '"' ? '"' : '';
+    if (quote) arg = arg.slice(1, -1);
+    if (quote !== "'") arg = arg.replace(/^(?:\$HOME|\$\{HOME\})(?=\/|$)/, '~');
+    if (!arg || arg === '-' || arg.startsWith('-') || (quote !== "'" && /[$`]/.test(arg))) continue;
+    if (!quote && /[*?\\]/.test(arg)) continue;
+    const dir = arg === '~' ? home : arg.startsWith('~/') ? path.join(home, arg.slice(2)) : path.resolve(at, arg);
+    found.push(dir);
+    // `git -C` runs one command there; a `cd` stays.
+    if (!/^[\s;&|(]?git/.test(m[0])) at = dir;
+  }
+  return [...new Set(found)];
+}
+
 function str(v: unknown): string {
   return typeof v === 'string' ? v : '';
 }

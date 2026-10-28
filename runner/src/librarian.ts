@@ -120,6 +120,9 @@ export class Librarian {
   private day: Day = { date: '', looks: 0, spentUsd: 0 };
   // Folders each thread has edited in since its last look, by repo.
   private edited = new Map<string, Set<string>>();
+  // Repos its shell commands ran in since its last look (`cd ~/dev/me/app`),
+  // for a thread in a catch-all folder that never uses Edit or Write.
+  private workedIn = new Map<string, Set<string>>();
   private current?: LibrarianJob & { startedAt: string };
   private off?: string;
   // `off` is there because no model could be reached at all (no pool, no
@@ -166,6 +169,7 @@ export class Librarian {
         const id = n.params.threadId;
         delete this.looks[id];
         this.edited.delete(id);
+        this.workedIn.delete(id);
         if (this.queue.delete(id)) this.changed();
       }),
     );
@@ -273,6 +277,12 @@ export class Librarian {
     const repos = this.edited.get(rec.id) ?? new Set<string>();
     for (const file of a.edited) repos.add(this.repoOf(file));
     if (repos.size) this.edited.set(rec.id, repos);
+    const worked = this.workedIn.get(rec.id) ?? new Set<string>();
+    for (const dir of a.workedIn ?? []) {
+      const repo = this.repoOfDir(dir);
+      if (repo !== this.repoOfDir(rec.cwd) && this.isProjectFolder(repo)) worked.add(repo);
+    }
+    if (worked.size) this.workedIn.set(rec.id, worked);
     const look = this.looks[rec.id];
     if (!look || look.early) {
       this.enqueue(rec.id, 'first-turn', 'Its first turn ended', now + SETTLE_MS);
@@ -432,6 +442,7 @@ export class Librarian {
     const look = this.looks[rec.id];
     if (job.reason !== 'catch-up' || !look || look.early || !this.host.threadSince) return false;
     if (this.edited.get(rec.id)?.size) return false;
+    if (this.newWorkedIn(rec).length) return false;
     const since = this.host.threadSince(rec.id, look.seq);
     return !since.links && since.chars < CATCH_UP_MIN_CHARS;
   }
@@ -454,6 +465,8 @@ export class Librarian {
     if (rec.titleSet) lines.push('Its title was set by Mike or an agent: keep it (title null).');
     const repos = [...(this.edited.get(rec.id) ?? [])].map((r) => this.tilde(r));
     if (repos.length) lines.push(`Edited files in: ${repos.join(', ')}`);
+    const worked = [...(this.workedIn.get(rec.id) ?? [])].filter((r) => !this.edited.get(rec.id)?.has(r)).map((r) => this.tilde(r));
+    if (worked.length) lines.push(`Ran commands in: ${worked.join(', ')}`);
     const gist = this.host.threadGist(rec.id);
     if (job.reason === 'first-message') lines.push("It has only just started: file it from what it's about, and don't change any project's state yet.");
     if (gist.first) lines.push('', `First message: ${gist.first}`);
@@ -592,7 +605,10 @@ export class Librarian {
     const seq = this.host.threadRecords().find((t) => t.id === rec.id)?.lastSeq ?? rec.lastSeq;
     this.looks[rec.id] = { at: new Date(this.clock.now()).toISOString(), seq, ...(job.reason === 'first-message' ? { early: true } : {}) };
     // An early look hasn't seen the turn's edits yet; the first-turn look will.
-    if (job.reason !== 'first-message') this.edited.delete(rec.id);
+    if (job.reason !== 'first-message') {
+      this.edited.delete(rec.id);
+      this.workedIn.delete(rec.id);
+    }
   }
 
   private note(job: LibrarianJob, outcome: LibrarianOutcome, text: string, projectIds?: string[], costUsd?: number): void {
@@ -774,9 +790,19 @@ export class Librarian {
   // folder. A git worktree counts as its main checkout: worktrees come and
   // go, and the main one is where the project's patches live.
   private repoOf(file: string): string {
-    const dir = path.dirname(file);
+    return this.repoOfDir(path.dirname(file));
+  }
+
+  private repoOfDir(dir: string): string {
     const repo = findUp(dir, this.home, (d) => fs.existsSync(path.join(d, '.git')));
     return repo ? mainCheckout(repo) : dir;
+  }
+
+  // Repos the thread ran commands in that neither its folder nor any of
+  // its projects has.
+  private newWorkedIn(rec: ThreadRecord): string[] {
+    const known = [rec.cwd, ...this.projects.foldersFor(rec).map((f) => f.folder)];
+    return [...(this.workedIn.get(rec.id) ?? [])].filter((r) => !known.some((k) => isInside(r, k) || isInside(k, r)));
   }
 
   private isRepo(dir: string): boolean {
@@ -855,7 +881,7 @@ Reply with JSON only, no prose and no code fence:
  "title": null, or a new title when the thread's title no longer says what it's about (see below),
  "why": "one short line"}
 
-Folders are repos the work lives in (the thread's folder when it's a repo, and the repos it edited), never a catch-all folder. State is two to four plain sentences about the whole project, not this thread: what's done, what's next, what's blocked. Start from the current state, keep what's still true and fold the change in; don't replace it with this thread's details. Ideas and plans that aren't built yet don't change the state.
+Folders are repos the work lives in (the thread's folder when it's a repo, the repos it edited, and the ones it ran commands in when the work was about them, not a look at something else), never a catch-all folder. A project with no folders that this thread worked on in a repo should get that repo through addFolders. State is two to four plain sentences about the whole project, not this thread: what's done, what's next, what's blocked. Start from the current state, keep what's still true and fold the change in; don't replace it with this thread's details. Ideas and plans that aren't built yet don't change the state.
 
 Links are the few places Mike keeps going back to for a project: its live site, admin page, dashboard, store listing. Copy the url exactly from the messages and give it a short title ("Live site", "Admin", "App Store"). Never a pull request, commit, issue, docs page, localhost, file or one-off page.
 

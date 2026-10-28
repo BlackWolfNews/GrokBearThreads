@@ -55,7 +55,9 @@ private folders already there). It runs:
 
 It's given the project list (titles, folders, goals, one line of state),
 and for the thread: its title, folder, the first message, the last few
-messages and the folders of the files it edited. It answers with which
+messages, the folders of the files it edited, and the repos its shell
+commands ran in (`cd`, `pushd`, `git -C`), since a thread in a catch-all
+folder often works on a repo with nothing but Bash. It answers with which
 projects the thread belongs to, a new project if none fits, and a short
 `state` update when the thread moved things on. Most of the signal is
 cheap and doesn't need the model at all: a thread that edits files in

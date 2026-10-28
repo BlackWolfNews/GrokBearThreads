@@ -69,6 +69,7 @@ import { DEFAULT_POOL_FOLDERS, RUNNER_VERSION, expandHome, paths, readRunnerJson
 import { WAIT_SLACK_MS, blockedUntil, limitWhy, loginOk, nextLogin, pickInPool, poolAccounts, poolForFolder, poolProviders, readPools, roomWait, validatePools } from './pools.ts';
 import { copyImageInto, imageRefFor } from './media.ts';
 import { isDirectory } from './fsutil.ts';
+import { commandFolders } from './tools.ts';
 import { copySessionTranscript, subagentTranscriptPath } from './transcripts.ts';
 import { historyItems, selectHistory } from './handoff-history.ts';
 import { readSubagentTranscript } from './adapters/claude/subagents.ts';
@@ -133,7 +134,7 @@ export type RunnerUpdates = {
 // and a folder move.
 export type ThreadActivity =
   | { kind: 'turn.start'; threadId: string }
-  | { kind: 'turn.end'; threadId: string; outcome: TurnOutcome; edited: string[] }
+  | { kind: 'turn.end'; threadId: string; outcome: TurnOutcome; edited: string[]; workedIn?: string[] }
   | { kind: 'moved'; threadId: string; from: string; to: string };
 
 // The seams to D's and E's modules (usage.ts, updates/), as far as the
@@ -202,6 +203,9 @@ type Turn = {
   // Files the turn edited or wrote (edit.diff paths, Write and Edit calls),
   // for hooks that run only after a change to certain files.
   edited: Set<string>;
+  // Folders its shell commands worked in (commandFolders), so the
+  // librarian knows the repo a thread in a catch-all folder works on.
+  workedIn?: Set<string>;
   // The agent's own end_turn input and last text, for what the turn needs
   // from Mike (needs.ts). Never a sub-agent's.
   endTurn?: Record<string, unknown>;
@@ -1973,6 +1977,12 @@ export class Runner {
           else if (ev.type === 'tool.call' && (ev.kind === 'edit' || ev.kind === 'write')) {
             const file = ev.input.file_path ?? ev.input.path ?? ev.input.notebook_path;
             if (typeof file === 'string') rt.turn.edited.add(file);
+          } else if (ev.type === 'tool.call' && own && ev.kind === 'command') {
+            const cmd = Array.isArray(ev.input.command) ? ev.input.command.join(' ') : ev.input.command;
+            if (typeof cmd === 'string') {
+              rt.turn.workedIn ??= new Set();
+              for (const dir of commandFolders(cmd, rec.cwd, this.panelsRoot ?? os.homedir())) rt.turn.workedIn.add(dir);
+            }
           }
         }
         this.emit(st, ev, rt.turn?.turnId);
@@ -2223,7 +2233,7 @@ export class Runner {
     // a handback): read it now rather than at the next poll.
     if (rt.patches?.live && !this.stopping) void this.refreshPatches(st);
     if (outcome && finished && !finished.auto && !this.stopping) {
-      this.tellActivity({ kind: 'turn.end', threadId: rec.id, outcome, edited: [...finished.edited].map((p) => path.resolve(rec.cwd, p)) });
+      this.tellActivity({ kind: 'turn.end', threadId: rec.id, outcome, edited: [...finished.edited].map((p) => path.resolve(rec.cwd, p)), workedIn: [...(finished.workedIn ?? [])] });
     }
     if (rt.taskEndedInTurn) {
       rt.taskEndedInTurn = false;

@@ -1519,7 +1519,8 @@ daily budget, never for private folders). It looks at a thread when:
 - it moves folder (`moved`);
 - it has had turns since the last look, 20 minutes after that look at
   the soonest (`catch-up`). A catch-up is skipped, with no model call, when
-  those turns edited no files, gave no link and said fewer than 400
+  those turns edited no files, ran no commands in a repo outside its
+  folder and its projects' folders, gave no link and said fewer than 400
   characters between Mike and the agent; it counts in `skippedToday`, and
   what they said still counts towards the next one;
 - someone asks (`librarian.run`, `asked`).

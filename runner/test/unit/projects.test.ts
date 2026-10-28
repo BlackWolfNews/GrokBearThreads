@@ -10,6 +10,7 @@ import { buildThreadbearTools } from '../../src/threadbear-mcp.ts';
 import { FakeClock } from '../../src/clock.ts';
 import { nullLogger } from '../../src/log.ts';
 import { RpcError } from '../../src/protocol.ts';
+import { commandFolders } from '../../src/tools.ts';
 import type { GenerateParams, ModelResult } from '../../src/models/index.ts';
 
 // A harness whose runner has projects, with a fake home holding repos.
@@ -43,10 +44,12 @@ function setup(opts: { models?: (p: GenerateParams) => Promise<ModelResult<strin
   librarian.start();
   const create = (text = 'Work on the app', cwd = misc) => h.runner.create({ text, cwd, accountId: 'claude-3' });
   // Ends the thread's running turn as the CLI would.
-  const finish = async (threadId: string, edited: string[] = []) => {
+  // `commands` are Bash calls it made.
+  const finish = async (threadId: string, edited: string[] = [], commands: string[] = []) => {
     const s = h.adapter.sessions.filter((x) => x.opts.threadId === threadId).at(-1)!;
     s.init();
     for (const file of edited) s.out({ kind: 'event', event: { type: 'tool.call', itemId: `w${Math.random()}`, name: 'Write', kind: 'write', input: { file_path: file, content: 'x' } } as never });
+    for (const command of commands) s.out({ kind: 'event', event: { type: 'tool.call', itemId: `b${Math.random()}`, name: 'Bash', kind: 'command', input: { command } } as never });
     s.result('completed');
     await tick();
   };
@@ -259,6 +262,51 @@ test('the librarian looks after the first turn: makes a project and files the th
   assert.equal(p.createdByThread, thread.id);
   assert.deepEqual(h.runner.get(thread.id).projects?.map((m) => [m.title, m.by]), [['Poddle', 'librarian']]);
   assert.ok(h.notes.some((n) => n.method === 'librarian.updated'));
+});
+
+test('commandFolders: where cd, pushd and git -C point, a later relative cd following an earlier one', () => {
+  const home = '/Users/me';
+  const cwd = '/Users/me/dev/misc';
+  assert.deepEqual(commandFolders('cd ~/dev/me/sammy-cam && npm test', cwd, home), ['/Users/me/dev/me/sammy-cam']);
+  assert.deepEqual(commandFolders('cd "$HOME/dev/my app"; cd web && ls', cwd, home), ['/Users/me/dev/my app', '/Users/me/dev/my app/web']);
+  assert.deepEqual(commandFolders('git -C ../blog log -3; pushd /tmp/x', cwd, home), ['/Users/me/dev/blog', '/tmp/x']);
+  // A git -C doesn't move later relative cds.
+  assert.deepEqual(commandFolders('git -C /a status && cd b', cwd, home), ['/a', '/Users/me/dev/misc/b']);
+  // Guesses are skipped: other variables, substitutions, globs, cd -.
+  assert.deepEqual(commandFolders('cd $DIR; cd "$(git rev-parse --show-toplevel)"; cd src/*; cd -; echo abcd x', cwd, home), []);
+  // Words that only end in cd aren't cd.
+  assert.deepEqual(commandFolders('abcd /x; npm run build:cd /y', cwd, home), []);
+});
+
+test('the librarian sees the repo a catch-all thread works in through shell commands alone', async () => {
+  let answer: unknown = {};
+  const s = setup({ models: (p) => {
+    assert.match(p.prompt, /Ran commands in: ~\/dev\/sammy-cam\n/);
+    return reply(answer);
+  } });
+  const { h, repo, create, finish, librarian, projects } = s;
+  const cam = repo('dev/sammy-cam');
+  // Its first turn: no Edit or Write, just commands in the repo (and a
+  // look in the catch-all folder it's in, which isn't news).
+  answer = { projects: [], new: { title: 'Sammy Cam', folders: ['~/dev/sammy-cam'], goals: 'Watches Sammy', state: 'Fixed a false visit' } };
+  const { thread } = create('Sammy Cam saw him on the sofa when he was not');
+  await finish(thread.id, [], [`cd ${cam} && npm test`, `cd ${s.misc} && ls`]);
+  h.clock.advance(SETTLE_MS);
+  await tick(6);
+  const [p] = projects.list();
+  assert.equal(p.title, 'Sammy Cam');
+  assert.deepEqual(p.folders, [cam]);
+  // A project made without its folder gets it at the next look, and a
+  // turn of commands in a repo the project lacks isn't skipped as quiet.
+  projects.update(p.id, { folders: [] });
+  answer = { projects: [p.id], addFolders: { [p.id]: ['~/dev/sammy-cam'] } };
+  h.runner.send(thread.id, 'ok');
+  await tick();
+  await finish(thread.id, [], [`git -C ${cam} log -1`]);
+  h.clock.advance(CATCH_UP_MS + SETTLE_MS);
+  await tick(8);
+  assert.equal(librarian.status().recent[0].text, 'Added ~/dev/sammy-cam to Sammy Cam');
+  assert.deepEqual(projects.record(p.id)?.folders, [cam]);
 });
 
 test('the librarian: catch-up an hour after a look, new folders sooner, state updates, moves', async () => {
