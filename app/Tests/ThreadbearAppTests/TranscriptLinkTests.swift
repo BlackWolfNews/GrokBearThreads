@@ -1,6 +1,7 @@
 import AppKit
 import XCTest
 @testable import Threadbear
+import ThreadbearCore
 
 @MainActor
 final class TranscriptLinkTests: XCTestCase {
@@ -111,5 +112,22 @@ private final class LinkDelegate: NSObject, NSTextViewDelegate {
     func textView(_ textView: NSTextView, clickedOnLink link: Any, at charIndex: Int) -> Bool {
         clicked = link as? URL
         return true // Observe AppKit's click without launching another app in a unit test.
+    }
+}
+
+@MainActor
+final class TranscriptPathRefTests: XCTestCase {
+    func testPathInInlineCodeOpensThroughPathRef() throws {
+        let text = MarkdownRenderer.render("The change is in `app/Sources/A.swift`, see `npm test`.").string
+        let at = (text.string as NSString).range(of: "app/").location
+        let url = try XCTUnwrap(text.attribute(.link, at: at, effectiveRange: nil) as? URL)
+        XCTAssertEqual(FilePathRefs.text(of: url), "app/Sources/A.swift")
+        XCTAssertNil(text.attribute(.link, at: (text.string as NSString).range(of: "npm").location, effectiveRange: nil))
+        let view = TranscriptTextView()
+        var opened: String?
+        view.openPathRef = { opened = $0; return true }
+        view.openFileLink = { _ in XCTFail("a path ref resolves first"); return false }
+        view.clicked(onLink: url, at: at)
+        XCTAssertEqual(opened, "app/Sources/A.swift")
     }
 }

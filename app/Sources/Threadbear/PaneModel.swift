@@ -157,4 +157,17 @@ extension AppModel {
         }
         return NSWorkspace.shared.open(url)
     }
+
+    /// A click on a file path in inline code (FilePathRefs): found from
+    /// the selected thread's folder and what its tools touched, then
+    /// opened like a file link. A path that names nothing just beeps.
+    func openTranscriptPathRef(_ text: String, commandKey: Bool) -> Bool {
+        let thread = selectedThread
+        let known = thread.flatMap { loadedSession($0.id) }.map { FilePathRefs.toolPaths($0.model.items) } ?? []
+        guard let path = FilePathRefs.resolve(text, root: thread?.cwd, known: known) else {
+            NSSound.beep()
+            return false
+        }
+        return openTranscriptFileLink(URL(fileURLWithPath: path), commandKey: commandKey)
+    }
 }

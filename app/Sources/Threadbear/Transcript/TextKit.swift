@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import ThreadbearCore
 
 /// TextKit 1 layout manager that also draws the transcript's custom
 /// backgrounds: rounded boxes behind code blocks and full-width line fills
@@ -134,9 +135,17 @@ final class TranscriptTextView: NSTextView {
         return MainActor.assumeIsolated { AppModel.shared.openTranscriptFileLink(url, commandKey: commandKey) }
     }
 
+    /// A file path written in inline code (FilePathRefs).
+    var openPathRef: (String) -> Bool = { text in
+        let commandKey = NSApp.currentEvent?.modifierFlags.contains(.command) ?? false
+        return MainActor.assumeIsolated { AppModel.shared.openTranscriptPathRef(text, commandKey: commandKey) }
+    }
+
     override func clicked(onLink link: Any, at charIndex: Int) {
         // NSTextView follows web links itself, but ignores file URLs.
-        if let url = link as? URL, url.isFileURL {
+        if let url = link as? URL, let text = FilePathRefs.text(of: url) {
+            _ = openPathRef(text)
+        } else if let url = link as? URL, url.isFileURL {
             _ = openFileLink(url)
         } else {
             super.clicked(onLink: link, at: charIndex)

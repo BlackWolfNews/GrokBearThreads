@@ -484,6 +484,7 @@ enum MarkdownRenderer {
             case let code as InlineCode:
                 var inner = context
                 inner.code = true
+                if inner.link == nil, FilePathRefs.looksLikePath(code.code) { inner.link = FilePathRefs.url(for: code.code) }
                 // BackgroundLayoutManager draws the pill `pillPad` past the
                 // glyphs on each side, which ate most of the word space
                 // around it. Kerning the characters either side reserves
