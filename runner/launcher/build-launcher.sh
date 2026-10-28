@@ -99,6 +99,9 @@ if [ -z "$SIGN_IDENTITY" ]; then
   SIGN_IDENTITY="-"
   SIGNING_REQUIREMENTS=(--requirements "=designated => identifier \"$BUNDLE_ID\"")
 fi
+# swiftc signs the binary ad hoc as it builds; taking that off first keeps
+# codesign from saying "replacing existing signature" on every build.
+codesign --remove-signature "$STAGE_DIR/Contents/MacOS/$APP_NAME" 2>/dev/null || true
 codesign --force --timestamp=none --sign "$SIGN_IDENTITY" \
   ${SIGNING_REQUIREMENTS[@]+"${SIGNING_REQUIREMENTS[@]}"} "$STAGE_DIR" >/dev/null
 

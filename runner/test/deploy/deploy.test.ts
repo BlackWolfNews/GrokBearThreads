@@ -1066,7 +1066,7 @@ test('reinstalling checks everything first, builds from HEAD, and puts the old s
   assert.match(r.stderr, new RegExp(`current points at ${keptRelease} again`));
   assert.equal(current(), keptRelease);
   assert.match(r.stderr, /Bootstrap failed: 5: Input\/output error/);
-  assert.match(r.stderr, /launchd wouldn't load the new plist\.\nThreadbear Runner\.app is the one from before again\.\nPutting back the LaunchAgent as it was\./);
+  assert.match(r.stderr, /launchd wouldn't load the new plist\.\n.*Threadbear Runner\.app is the one from before again\.\nPutting back the LaunchAgent as it was\./);
   assert.match(r.stderr, /Back as it was/);
   assert.ok(!plistPath().includes('/fail/here'), 'the old plist is back');
   assert.equal(appBuild(), rebuiltApp, 'the app from before is back');
