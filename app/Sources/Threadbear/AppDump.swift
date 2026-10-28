@@ -341,6 +341,11 @@ struct AppDump: Encodable {
             switch preview.target {
             case .file(let path): "file \(path)"
             case .page(let url): "page \(url.absoluteString)"
+            case .explain:
+                // What was asked and where each answer is up to, for a script.
+                "explain " + (app.explainers[thread.id].map { session in
+                    session.title + " | " + session.turns.map { $0.answer ?? $0.error.map { "error: \($0)" } ?? "pending" }.joined(separator: " | ")
+                } ?? "(none)")
             }
         }
         return Panels(shown: app.showsPanels(for: thread), width: Int(app.panelWidth), items: items, preview: preview,

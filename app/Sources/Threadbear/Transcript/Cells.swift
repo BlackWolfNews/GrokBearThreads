@@ -284,6 +284,13 @@ final class TextRowCell: RowCellView {
             textView.place(NSRect(x: x, y: top, width: width, height: render.textSize.height))
         }
 
+        // Messages get the selection bar (Explain, Quote, Copy).
+        switch row.content {
+        case .user(let message): textView.selectionMessage = message.text
+        case .assistant(let item): textView.selectionMessage = item.text
+        default: textView.selectionMessage = nil
+        }
+
         // Pooled cells are reused for any text row, so only an asks card
         // keeps a click handler.
         if case .asks(let card) = row.content, card.isOpen {

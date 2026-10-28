@@ -508,6 +508,8 @@ enum Automation {
             return "ok \(ShortcutHints.shared.showing)"
         case "chip":
             return chip(c, app: app)
+        case "select-text":
+            return select(c, app: app)
         case "account-ids":
             // For screenshots: accounts are titled by their email address,
             // so show their ids instead. Lasts until the next reconnect.
@@ -861,6 +863,30 @@ enum Automation {
         guard let id = match.id else { return match.error }
         app.hoverOverride = id
         return "ok \(id)"
+    }
+
+    /// Selects `words` in a message row's text and shows the selection bar
+    /// (`{"row": id, "words": "…"}`, which says the bar's window number);
+    /// with `"action": "explain" | "quote" | "copy"`, clicks that instead.
+    private static func select(_ c: [String: Any], app: AppModel) -> String {
+        guard let prefix = c["row"] as? String, let words = c["words"] as? String else { return "error row and words are required" }
+        guard let row = displayedRow(prefix, app), let index = app.transcript.session?.displayIndex(of: row.id) else { return "error no such row" }
+        app.transcript.scroll(toRow: index, offset: 120)
+        guard let cell = app.transcript.tableView.view(atColumn: 0, row: index, makeIfNecessary: true) as? TextRowCell else {
+            return "error \(row.id) isn't a text row"
+        }
+        let action: SelectionBarWindow.Action?
+        switch c["action"] as? String {
+        case nil: action = nil
+        case "explain": action = .explain
+        case "quote": action = .quote
+        case "copy": action = .copy
+        case let other?: return "error unknown action \(other)"
+        }
+        guard cell.textView.selectionMessage != nil else { return "error \(row.id) isn't a message" }
+        guard cell.textView.debugSelect(words, then: action) else { return "error \(words) isn't in \(row.id)" }
+        if action != nil { return "ok" }
+        return cell.textView.debugSelectionBarWindow.map { "ok window \($0)" } ?? "error the bar didn't show"
     }
 
     /// Thread chips in a transcript row's text: `{"row": id}` lists them

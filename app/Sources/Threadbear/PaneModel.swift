@@ -7,6 +7,8 @@ struct PanePreview: Equatable {
     enum Target: Equatable {
         case file(String)
         case page(URL)
+        /// Words selected in the transcript, explained (`explainers`).
+        case explain
     }
 
     var target: Target
@@ -23,10 +25,11 @@ struct PanePreview: Equatable {
     }
 
     /// What Open hands to the default app or browser.
-    var externalURL: URL {
+    var externalURL: URL? {
         switch target {
         case .file(let path): URL(fileURLWithPath: path)
         case .page(let url): url
+        case .explain: nil
         }
     }
 }
@@ -117,19 +120,20 @@ extension AppModel {
         show(PanePreview(target: .page(url), title: title, from: paneSection(for: thread)), in: thread.id)
     }
 
-    private func show(_ preview: PanePreview, in threadId: String) {
+    func show(_ preview: PanePreview, in threadId: String) {
         var preview = preview
         preview.opened = (panePreview[threadId]?.opened ?? 0) + 1
         panePreview[threadId] = preview
         panelsShown = true
         // A page kept loaded from an earlier look is read again: the file
         // or the dev server has likely changed since.
-        if preview.fileURL.map({ PreviewRules.viewer(forPath: $0.path) == .web }) ?? true {
-            WebPanelPool.shared.reloadIfLoaded(preview.externalURL)
+        if let url = preview.externalURL, preview.fileURL.map({ PreviewRules.viewer(forPath: $0.path) == .web }) ?? true {
+            WebPanelPool.shared.reloadIfLoaded(url)
         }
     }
 
-    /// Back, to the section the preview came from.
+    /// Back, to the section the preview came from. An explanation is kept
+    /// until the next one, though nothing shows it again yet.
     func closePreview(in threadId: String) {
         panePreview[threadId] = nil
     }

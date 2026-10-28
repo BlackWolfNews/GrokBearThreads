@@ -199,6 +199,9 @@ final class AppModel {
     var highlightsUnsupported = false
     /// A file or page open in the pane in place of its section, per thread.
     var panePreview: [String: PanePreview] = [:]
+    /// Each thread's Explain side conversation (ExplainModel.swift).
+    var explainers: [String: ExplainSession] = [:]
+    @ObservationIgnored var explainCount = 0
     @ObservationIgnored var highlightFetches: [String: Task<Void, Never>] = [:]
     /// Bumped by each request for a thread's highlights, so a change that
     /// lands while a fetch is out gets fetched again after it.

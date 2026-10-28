@@ -68,6 +68,8 @@ import { copySessionTranscript, subagentTranscriptPath } from './transcripts.ts'
 import { readSubagentTranscript } from './adapters/claude/subagents.ts';
 import { fileContext } from './adapters/claude/normalize.ts';
 import type { Models } from './models/index.ts';
+import { EXPLAIN_SYSTEM, RECENT_CHARS, RECENT_MESSAGES, explainPrompt } from './explain.ts';
+import type { ExplainTurn } from './explain.ts';
 import { emptyHighlights, observe as observeHighlights, pinItem, remove as removeHighlight, unpin as unpinHighlight, upsert as upsertHighlight, view as highlightsView, absolute, type ThreadHighlights } from './highlights.ts';
 import { SERVER_NAME, approvalTitle } from './threadbear-mcp.ts';
 import { END_TURN_TOOL, needsFromText, needsFromTool } from './needs.ts';
@@ -1523,6 +1525,25 @@ export class Runner {
     );
     this.log.info('retitle', { dryRun: Boolean(params.dryRun), found: threads.length, named: threads.filter((t) => t.to).length });
     return { threads };
+  }
+
+  // Explains words Mike selected in a thread (explain.ts), on the small
+  // model. A side conversation: nothing is written to the thread.
+  // `message` is the whole message the selection came from, as the app
+  // shows it (a row's seq can be a streamed delta's, not the final text's).
+  async explain(params: { threadId: string; selection: string; message?: string; question?: string; earlier?: ExplainTurn[] }): Promise<{ answer: string; model: string }> {
+    const st = this.mustGet(params.threadId);
+    if (!this.models) throw new RpcError(ErrorCode.other, 'Model calls are off in this runner.');
+    const gist = this.threadGist(st.rec.id, { recent: RECENT_MESSAGES, chars: RECENT_CHARS });
+    const res = await this.models.generate({
+      feature: 'explain',
+      cwd: st.rec.cwd,
+      system: EXPLAIN_SYSTEM,
+      prompt: explainPrompt({ selection: params.selection, message: params.message, first: gist.first, recent: gist.recent, earlier: params.earlier ?? [], question: params.question }),
+      maxTokens: 800,
+    });
+    if (!res.ok) throw new RpcError(ErrorCode.other, res.message || `No explanation (${res.reason}).`);
+    return { answer: res.value.trim(), model: res.model };
   }
 
   // The first user.message's text and the first assistant.text after it,

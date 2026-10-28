@@ -46,6 +46,7 @@ const THREAD_METHODS = new Set([
   'threads.subscribe',
   'threads.markSeen',
   'threads.highlights',
+  'threads.explain',
   'threads.removeHighlight',
   'threads.tickAsk',
   'approvals.respond',
@@ -412,6 +413,20 @@ export class RpcServer {
         return r.markSeen(reqString(p, 'threadId'), reqNumber(p, 'seq'));
       case 'threads.highlights':
         return r.highlights(reqString(p, 'threadId'));
+      case 'threads.explain': {
+        const selection = reqString(p, 'selection');
+        if (!selection.trim()) throw bad('selection is empty');
+        const question = p.question === undefined ? undefined : reqString(p, 'question');
+        let earlier: { question?: string; answer: string }[] | undefined;
+        if (p.earlier !== undefined) {
+          if (!Array.isArray(p.earlier)) throw bad('earlier must be an array');
+          earlier = p.earlier.map((t: any) => {
+            if (!t || typeof t.answer !== 'string' || (t.question !== undefined && typeof t.question !== 'string')) throw bad('earlier: each is { question?, answer }');
+            return { question: t.question, answer: t.answer };
+          });
+        }
+        return r.explain({ threadId: reqString(p, 'threadId'), selection, message: p.message === undefined ? undefined : reqString(p, 'message'), question, earlier });
+      }
       case 'threads.removeHighlight':
         return r.removeHighlight(reqString(p, 'threadId'), reqString(p, 'highlightId'));
       case 'threads.tickAsk':

@@ -334,8 +334,10 @@ struct PreviewPane: View {
             if let file = preview.fileURL {
                 PaneHeaderButton(symbol: "folder", help: "Reveal in Finder") { app.revealInFinder(file.path) }
             }
-            PaneHeaderButton(symbol: "arrow.up.right", help: preview.fileURL == nil ? "Open in browser" : "Open in its app") {
-                app.openExternally(preview.externalURL)
+            if let url = preview.externalURL {
+                PaneHeaderButton(symbol: "arrow.up.right", help: preview.fileURL == nil ? "Open in browser" : "Open in its app") {
+                    app.openExternally(url)
+                }
             }
         }
         switch preview.target {
@@ -349,6 +351,8 @@ struct PreviewPane: View {
             } else {
                 QuickLookView(url: URL(fileURLWithPath: path), opened: preview.opened)
             }
+        case .explain:
+            ExplainPane(thread: thread)
         }
     }
 

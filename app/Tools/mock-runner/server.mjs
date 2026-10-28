@@ -591,6 +591,14 @@ async function dispatch(client, method, p) {
       await new Promise((r) => setTimeout(r, 300));
       return { image: { path: file, mediaType: 'image/png', ...imageSize(file) } };
     }
+    case 'threads.explain': {
+      // A canned answer after a moment, like the small model's few seconds.
+      need(p.threadId);
+      await new Promise((r) => setTimeout(r, 600));
+      const sel = String(p.selection ?? '').slice(0, 60);
+      if (p.question) return { answer: `About "${sel}": ${p.question} That's the mock runner's answer to a follow-up.`, model: 'mock' };
+      return { answer: `**${sel}** is what the agent called this step. It means the smallest piece to move first, so the rest can follow.\n\n- It's in \`runner/src/explain.ts\`\n- Nothing here goes into the thread`, model: 'mock' };
+    }
     case 'threads.highlights': {
       const t = need(p.threadId);
       return highlights.get(t.summary.id) ?? { highlights: [], edited: [] };

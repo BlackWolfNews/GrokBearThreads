@@ -594,6 +594,7 @@ replaces whatever the deltas built up.
 | `actions.run` | `{ threadId, actionId }` | For a prompt action, `{ turnId }`: its prompt was sent as a message (as `threads.send`). For a command action, `{ ok, exitCode?, durationMs, seq }` once the command has finished, with its output in the transcript as the `action.run` event at `seq`. The command runs in the thread's folder through a login shell with the thread's variables (`THREADBEAR_THREAD_ID` and the rest) and is stopped after 10 minutes. `-32602` for an action the thread doesn't have, `-32020` while the same action is still running |
 | `panels.render` | `{ threadId, panelId }` | `{ image?: ImageRef, items?: PanelItem[], note?: string }` draws an `image` panel or fills a `list` panel now. For `xcode.simulator`, a screenshot of the booted simulator (`xcrun simctl io booted screenshot`), written to the same file each time under the thread's `panels/`; with no device booted (or another failure) there's only `note`. For a `list` panel, the rows its patch's `items` function returned (at most 200), or `note` with the error when it threw or took over 20 seconds. Slow: it waits for the screenshot or the function. `-32602` for a panel the thread doesn't have |
 | `threads.highlights` | `{ threadId }` | `ThreadHighlights` (see Highlights): what the thread has made, shared and pinned, read from its events since the last call and kept with the thread |
+| `threads.explain` | `{ threadId, selection: string, message?: string, question?: string, earlier?: { question?: string, answer: string }[] }` | `{ answer: string, model: string }`. Explains words Mike selected in the transcript, on the small model (see Explain). `message` is the whole message they came from, as the app shows it; `earlier` and `question` are a follow-up. Writes nothing to the thread. `-32000` with the reason when no model answers |
 | `threads.removeHighlight` | `{ threadId, highlightId }` | `{ thread: ThreadSummary }` takes one off the list for good (a pin or a found one); a later mention doesn't bring it back. `-32602` for an id the thread doesn't have |
 | `schedules.list` | `{ threadId?: string }` | `{ schedules: Schedule[] }`, soonest `nextRunAt` first, then the paused and finished ones. With `threadId`, only the ones that send to that thread or were made by it |
 | `schedules.create` | `{ text: string, title?: string, at?: string, cron?: string, timezone?: string, threadId?: string, cwd?, accountId?, model?, effort?, permissionMode?, paused?: boolean, createdBy?: string }` | `{ schedule: Schedule }`. Exactly one of `at` and `cron`. An `at` in the past runs straight away. With `threadId` it sends there, otherwise it starts a new thread each time (`cwd` defaults like `threads.create`'s, checked now). A bad cron or zone is `-32602` with a message saying what's wrong |
@@ -890,6 +891,21 @@ answers wins. There are two kinds of place:
   out after 20 seconds, is tried again once on a network error, a 5xx or
   an empty answer (not one cut off by its token limit), and at most 4
   calls are in flight at once.
+
+## Explain
+
+Mike can select words in a thread's transcript and pick Explain from the
+little bar that shows above them. The explanation opens in the pane beside
+the transcript, with a box under it for a follow-up question. It's a mini
+fork of the thread for that one thing: `threads.explain` sends the
+selection, the message it came from, the thread's first message and
+its last 8 messages to the small model (job `generate`, feature `explain`,
+so Haiku on the pool first), and the answer goes back to the app alone.
+Nothing goes into the thread's events, so the agent never sees it and its
+context doesn't grow. The side conversation lives in the app (one per
+thread, gone on quit); each follow-up sends the earlier answers again as
+`earlier`. Private folders, the pool and the budget apply as for any
+model call.
 
 ## Pools
 

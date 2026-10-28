@@ -433,7 +433,10 @@ final class TranscriptTextView: NSTextView {
 
     override func viewWillMove(toWindow newWindow: NSWindow?) {
         super.viewWillMove(toWindow: newWindow)
-        if newWindow == nil { closeChipCard() }
+        if newWindow == nil {
+            closeChipCard()
+            closeSelectionBar()
+        }
     }
 
     /// The card shows after the pointer rests on a chip for a moment, like
@@ -497,8 +500,101 @@ final class TranscriptTextView: NSTextView {
     override var acceptsFirstResponder: Bool { true }
     override func scrollWheel(with event: NSEvent) {
         closeChipCard()
+        closeSelectionBar()
         nextResponder?.scrollWheel(with: event)
     }
+
+    // MARK: The selection bar (SelectionBar.swift)
+
+    /// The whole message this text is, for Explain; nil for rows that
+    /// aren't a message (tools, notes, footers), which get no bar.
+    var selectionMessage: String?
+    private var selectionBar: SelectionBarWindow?
+    /// Bumped by each selection change and bar click, so a show queued
+    /// before one doesn't bring the bar back after it.
+    private var selectionBarToken = 0
+
+    override func setSelectedRanges(_ ranges: [NSValue], affinity: NSSelectionAffinity, stillSelecting: Bool) {
+        super.setSelectedRanges(ranges, affinity: affinity, stillSelecting: stillSelecting)
+        closeSelectionBar()
+        // Once the drag or double-click has finished, after the text view
+        // has drawn the selection.
+        guard !stillSelecting, selectionMessage != nil, selectedRange().length > 0 else { return }
+        selectionBarToken += 1
+        let token = selectionBarToken
+        DispatchQueue.main.async { [weak self] in
+            guard let self, self.selectionBarToken == token else { return }
+            self.showSelectionBar()
+        }
+    }
+
+    override func resignFirstResponder() -> Bool {
+        closeSelectionBar()
+        return super.resignFirstResponder()
+    }
+
+    private func showSelectionBar() {
+        closeSelectionBar()
+        let range = selectedRange()
+        guard let window, selectionMessage != nil, range.length > 0, window.firstResponder === self, !selectedText.isEmpty else { return }
+        let first = firstRect(forCharacterRange: NSRange(location: range.location, length: 0), actualRange: nil)
+        var last = firstRect(forCharacterRange: NSRange(location: NSMaxRange(range) - 1, length: 1), actualRange: nil)
+        if last.isEmpty { last = first }
+        // firstRect is in screen coordinates already; the bar sits over the
+        // first line's top and drops below the last line's bottom.
+        let span = NSRect(x: first.minX, y: last.minY, width: max(first.width, 1), height: first.maxY - last.minY)
+        let scroller = enclosingScrollView ?? superview
+        let column = scroller.map { window.convertToScreen($0.convert($0.bounds, to: nil)) } ?? .zero
+        selectionBar = SelectionBarWindow.show(above: span, within: column, parent: window) { [weak self] action in
+            MainActor.assumeIsolated { self?.selectionAction(action) }
+        }
+    }
+
+    private var selectedText: String {
+        let range = selectedRange()
+        guard let storage = textStorage, range.length > 0, NSMaxRange(range) <= storage.length else { return "" }
+        return storage.attributedSubstring(from: range).string.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private func selectionAction(_ action: SelectionBarWindow.Action) {
+        let text = selectedText
+        selectionBarToken += 1
+        closeSelectionBar()
+        guard !text.isEmpty else { return }
+        let app = AppModel.shared
+        switch action {
+        case .explain:
+            guard let threadId = app.selection else { return }
+            app.explain(text, message: selectionMessage, in: threadId)
+        case .quote:
+            guard let threadId = app.selection else { return }
+            app.quoteInComposer(text, in: threadId)
+        case .copy:
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(text, forType: .string)
+        }
+    }
+
+    func closeSelectionBar() {
+        selectionBar?.dismiss()
+        selectionBar = nil
+    }
+
+    #if DEBUG
+    /// Selects the first match of `words` and runs a bar action as a click
+    /// would; false when they're not in this text.
+    func debugSelect(_ words: String, then action: SelectionBarWindow.Action?) -> Bool {
+        guard let storage = textStorage else { return false }
+        let found = (storage.string as NSString).range(of: words)
+        guard found.location != NSNotFound else { return false }
+        window?.makeFirstResponder(self)
+        setSelectedRange(found)
+        if let action { selectionAction(action) } else { showSelectionBar() }
+        return true
+    }
+
+    var debugSelectionBarWindow: Int? { selectionBar?.windowNumber }
+    #endif
 
     override func menu(for event: NSEvent) -> NSMenu? {
         // Defer to the table's row menu (Copy message, Copy transcript) with

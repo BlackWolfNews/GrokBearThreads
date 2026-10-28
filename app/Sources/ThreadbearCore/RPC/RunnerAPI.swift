@@ -50,6 +50,12 @@ public extension RPCClient {
         try await call("threads.highlights", .object(["threadId": .string(threadId)]), as: ThreadHighlights.self)
     }
 
+    /// Asks the small model about words selected in the thread (see
+    /// "Explain"). The pool's CLI can take a few seconds to start.
+    func explain(_ session: ExplainSession, threadId: String, turn index: Int) async throws -> ExplainResult {
+        try await call("threads.explain", session.params(threadId: threadId, for: index), as: ExplainResult.self, timeout: .seconds(75))
+    }
+
     /// Takes one off the list for good: a later mention doesn't bring it back.
     func removeHighlight(threadId: String, highlightId: String) async throws -> ThreadSummary {
         try await call("threads.removeHighlight", .object(["threadId": .string(threadId), "highlightId": .string(highlightId)]), as: ThreadResult.self).thread
