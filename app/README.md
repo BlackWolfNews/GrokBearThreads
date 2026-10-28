@@ -107,7 +107,8 @@ and the perf run stay away from the real one. Install the runner itself with
   and images stay in the box (or go back into it) and a banner says why.
 - **The tour.** The first time the app connects to a runner it dims the
   window and lights up its parts one at a time (the views down the left,
-  the threads, the composer, Highlights, Usage) with a card beside each.
+  the threads, the composer, its access chip, Highlights, Usage, and the
+  Settings gear for Phone & browser) with a card beside each.
   Return goes on, Esc skips it, and Help > Take the Tour runs it again.
   It only points at things; it never starts a thread.
 - **Snooze** from a row's hover button, the Thread menu, the ... menu or a

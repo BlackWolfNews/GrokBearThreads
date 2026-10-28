@@ -67,6 +67,7 @@ struct ActivityBar: View {
             ActivityButton(symbol: "gearshape", title: "Settings", shortcut: "⌘,", active: false) {
                 openSettings()
             }
+            .tourTarget(.settings)
         }
         .environment(\.sidebarRowSpace, activeSpace)
         .animation(Juice.selection, value: app.sidebarMode)
