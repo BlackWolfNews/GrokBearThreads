@@ -28,8 +28,8 @@ each person's own Mac and their own Convex deployment.
 
 ## How a notification travels
 
-1. The phone makes 32 random bytes the first time (`PushKeyStore`, in a
-   keychain group its notification extension shares) and sends them to its
+1. The phone makes 32 random bytes the first time (`PushKeyStore`, in the
+   keychain under an App Group its notification extension shares) and sends them to its
    own backend with `phone:registerDevice` (API 4), never anywhere else.
 2. When a thread needs Mike, `convex/push.ts` seals `{title, body}` with that
    phone's key (AES-256-GCM: nonce, ciphertext, tag, base64) and posts it to

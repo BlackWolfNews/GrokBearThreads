@@ -35,15 +35,15 @@ enum PushSeal {
     }
 }
 
-/// Reads the key the app keeps in the shared keychain group (ThreadbearKit's
-/// PushKeyStore writes it).
+/// Reads the key the app keeps in the keychain under the shared App Group
+/// (ThreadbearKit's PushKeyStore writes it).
 enum PushKeyReader {
     static func key() -> Data? {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: "com.mikecann.threadbear.pushKey",
             kSecAttrAccount as String: "pushKey",
-            kSecAttrAccessGroup as String: "4DTAZSZL6B.com.mikecann.threadbear.shared",
+            kSecAttrAccessGroup as String: "group.com.mikecann.threadbear",
             kSecReturnData as String: true,
         ]
         var out: AnyObject?
