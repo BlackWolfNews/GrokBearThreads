@@ -51,7 +51,7 @@ struct DevicesSettings: View {
                             .tip("Opens your Threadbear website in \(DefaultBrowser.current()?.name ?? "your browser"), signed in for 90 days")
                     } label: {
                         HStack(spacing: 6) {
-                            Text("Browser")
+                            Text("Website")
                             InfoTip("Your threads on the web, at \(app.devicesSite ?? "your deployment's .convex.site address"): a link you can paste anywhere. The browser keeps a key of its own; sign another browser in from here too.")
                         }
                     }
