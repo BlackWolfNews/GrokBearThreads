@@ -35,7 +35,7 @@ export const NAMESPACE = SERVER_NAME;
 // the whole thread/start), so this stays a short summary. The longer
 // guidance on when to use each tool goes in as developer instructions.
 export const NAMESPACE_DESCRIPTION =
-  "Tools that manage Threadbear, Mike's own app for running agent threads, which this thread runs in: threads, schedules, projects, show_options and pin for showing Mike things, and end_turn to finish every turn.";
+  "Tools that manage Threadbear, Mike's own app for running agent threads, which this thread runs in: threads, schedules, projects, show_options, pin and show_panel for showing Mike things, and end_turn to finish every turn.";
 export const NAMESPACE_DESCRIPTION_MAX = 1024;
 
 // Said as developer instructions at thread/start, next to the thread's

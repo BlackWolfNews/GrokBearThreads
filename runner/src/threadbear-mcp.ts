@@ -20,6 +20,8 @@ export { parseWhen, relativeFuture, relativeTime };
 import { RUNNER_VERSION, expandHome } from './config.ts';
 import { END_TURN_DESCRIPTION, END_TURN_TOOL } from './needs.ts';
 import { asksForAppRestart, type AppRestarts } from './app-restarts.ts';
+import { PANEL_PLACES } from './panel-requests.ts';
+import type { PanelPlace } from './protocol.ts';
 
 // What the tools drive: the Runner itself, or during a handover
 // (docs/protocol.md) a ThreadRouter (handover.ts) that reaches threads on
@@ -31,6 +33,7 @@ export type ThreadControl = {
   createReview?: (...args: Parameters<Runner['createReview']>) => Aw<ReturnType<Runner['createReview']>>;
   pin?: (...args: Parameters<Runner['pin']>) => Aw<ReturnType<Runner['pin']>>;
   unpin?: (...args: Parameters<Runner['unpin']>) => Aw<ReturnType<Runner['unpin']>>;
+  showPanel?: (threadId: string, ask: Parameters<Runner['showPanel']>[1]) => ReturnType<Runner['showPanel']>;
 } & Async<Runner, 'list' | 'search' | 'get' | 'events' | 'create' | 'send' | 'update' | 'interrupt' | 'delete'>;
 
 // Messages a thread when the Mac app restarts onto a new build (app-restarts.ts).
@@ -237,6 +240,26 @@ export function buildThreadbearTools(control: ThreadControl, selfId: string, now
         if (!control.unpin) throw new Error("This runner doesn't keep highlights yet.");
         const { removed } = await control.unpin(selfId, id);
         return removed ? 'Unpinned.' : `Nothing pinned as ${id}.`;
+      }),
+    ),
+    // docs/protocol.md, "Showing panels". Opens or brings forward, never
+    // moves one Mike has open: his layout is his.
+    tool(
+      'show_panel',
+      "Opens one of Threadbear's panels for Mike, or brings it to the front where he has it: this thread's Highlights or Patches, one of its patch panels (by id or title, like the Convex dashboard or the Simulator), or the app's Usage or Updates. Use it when what he should look at is a panel; for a file or a link, use pin with show: true. It happens while Mike is looking at this thread in the Mac app: straight away if he is, otherwise when he next opens it (unless he sends a message first). The answer says which. A panel he has open stays where he put it; `where` only says where a closed one opens.",
+      {
+        panel: z.string().min(1).max(200).describe("highlights, patches, usage, updates, or one of this thread's panels by id or title."),
+        where: z
+          .enum(PANEL_PLACES as [PanelPlace, ...PanelPlace[]])
+          .optional()
+          .describe('Where a closed panel opens: tab (beside the thread, closing when Mike moves on), left, right, top or bottom (along that side of the window), or window (its own). Default: its usual place.'),
+      },
+      handle(async (input) => {
+        if (!control.showPanel) throw new Error("This runner can't show panels yet.");
+        const { request, shown } = await control.showPanel(selfId, input);
+        return shown
+          ? `${request.title} is open in front of Mike now.`
+          : `${request.title} will open when Mike next looks at this thread in the Mac app; he isn't right now. It waits until then, or until his next message.`;
       }),
     ),
   ];
@@ -761,6 +784,7 @@ function clip(text: string, max = 2000): string {
 export const SHOWING_MIKE =
   'When you have design options, mockups or wireframes for Mike to choose between, put them in front of him with show_options (a side-by-side review window where he picks one and leaves notes), not as pins or a list in your reply; his answer comes back as a message. ' +
   "For a single file or link he should look at (a doc, a screenshot, a preview URL, a PR), use pin, with show: true to open it in Threadbear's side pane rather than running `open`. " +
+  "To put one of Threadbear's own panels in front of him (this thread's Highlights, a patch panel such as the Convex dashboard, Usage), use show_panel. " +
   'After landing a change to the Threadbear Mac app, ask Mike to Restart to Update (Threadbear menu) in end_turn: you get a message here when the app is back on the new build (wait_for_app_restart says what to send).';
 
 // Also in the instructions, for the same reason. The librarian files

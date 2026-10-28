@@ -25,6 +25,8 @@ import type {
   AskAnswer,
   MessageOrigin,
   ModelChoice,
+  PanelPlace,
+  PanelRequest,
   PermissionMode,
   PersistedEvent,
   Pool,
@@ -73,6 +75,7 @@ import { EXPLAIN_SYSTEM, RECENT_CHARS, RECENT_MESSAGES, explainPrompt } from './
 import type { ExplainTurn } from './explain.ts';
 import { emptyHighlights, observe as observeHighlights, pinItem, remove as removeHighlight, unpin as unpinHighlight, upsert as upsertHighlight, view as highlightsView, absolute, type ThreadHighlights } from './highlights.ts';
 import { SERVER_NAME, approvalTitle } from './threadbear-mcp.ts';
+import { PANEL_ACK_WAIT_MS, PANEL_PLACES, resolvePanel } from './panel-requests.ts';
 import { archiveFromTool, END_TURN_TOOL, needsFromText, needsFromTool } from './needs.ts';
 import type { Needs } from './needs.ts';
 import {
@@ -267,6 +270,9 @@ type Runtime = {
   // Turn-end hooks still running; a draining runner waits for them, since
   // one may tell the agent something and start a turn.
   hooksRunning?: number;
+  // A show_panel call waiting to hear the app has shown its request
+  // (threads.panelShown), for at most PANEL_ACK_WAIT_MS.
+  panelWaiter?: { id: string; resolve: (shown: boolean) => void; timer: TimerHandle };
 };
 
 type ThreadState = { rec: ThreadRecord; rt: Runtime };
@@ -1610,6 +1616,12 @@ export class Runner {
       rt.releaseWhenIdle = false;
     }
     this.supersedeReviews(st, text, opts);
+    // He has seen the reply a waiting panel went with.
+    if (rec.panelRequest && fromMike(text, opts)) {
+      delete rec.panelRequest;
+      this.endPanelWait(st, false);
+      this.markDirty(st);
+    }
     const turnId = crypto.randomUUID();
     const msg: QueuedSend = { turnId, text, images: refs };
     if (opts.origin) msg.origin = opts.origin;
@@ -3212,8 +3224,7 @@ export class Runner {
   // and window stay readable. Runner, schedule and agent-to-thread
   // messages aren't him and leave reviews open.
   private supersedeReviews(st: ThreadState, text: string, opts: SendOptions): void {
-    if (opts.origin && opts.origin !== 'phone') return;
-    if (text.startsWith(AGENT_MESSAGE_PREFIX)) return;
+    if (!fromMike(text, opts)) return;
     for (const review of st.rec.reviews ?? []) {
       if (review.status !== 'pending') continue;
       this.persistReview(st, {...review, status: 'superseded', revision: review.revision + 1, updatedAt: this.isoNow()});
@@ -3462,6 +3473,7 @@ export class Runner {
       s.worktree = { branch: rec.worktree.branch, mainCheckout: rec.worktree.mainCheckout, path: rec.worktree.path };
     }
     if (rec.schedule) s.schedule = { ...rec.schedule };
+    if (rec.panelRequest) s.panelRequest = { ...rec.panelRequest };
     return s;
   }
 
@@ -3643,6 +3655,56 @@ export class Runner {
     const removed = unpinHighlight(st.rec.highlights!, highlightId);
     if (removed) this.highlightsChanged(st);
     return { removed };
+  }
+
+  // ------------------------------------------------------- showing panels
+
+  // The show_panel tool (docs/protocol.md, "Showing panels"): the request
+  // waits on the thread, replacing an older one, for the app to show once
+  // Mike is looking at it. Resolves when the app says it has, or after
+  // waitMs with shown false. Everything up to the wait runs before the
+  // promise is returned, so the request is there as soon as this is called.
+  async showPanel(threadId: string, ask: { panel: string; where?: PanelPlace }, waitMs = PANEL_ACK_WAIT_MS): Promise<{ request: PanelRequest; shown: boolean }> {
+    const st = this.mustGet(threadId);
+    if (ask.where !== undefined && !PANEL_PLACES.includes(ask.where)) {
+      throw new RpcError(ErrorCode.badParams, `where is ${PANEL_PLACES.slice(0, -1).join(', ')} or ${PANEL_PLACES.at(-1)}.`);
+    }
+    const set = this.patchSet(st);
+    let panel: { id: string; title: string };
+    try {
+      panel = resolvePanel(ask.panel, { panels: set.panels, hasPatches: set.patches.length > 0 || Boolean(this.worktreeAction(st.rec)) });
+    } catch (e) {
+      throw new RpcError(ErrorCode.badParams, (e as Error).message);
+    }
+    const request: PanelRequest = { id: crypto.randomUUID(), panel: panel.id, title: panel.title, at: this.isoNow() };
+    if (ask.where) request.where = ask.where;
+    this.endPanelWait(st, false);
+    st.rec.panelRequest = request;
+    this.markDirty(st);
+    const shown = await new Promise<boolean>((resolve) => {
+      const timer = this.clock.setTimeout(() => this.endPanelWait(st, false), waitMs);
+      st.rt.panelWaiter = { id: request.id, resolve, timer };
+    });
+    return { request, shown };
+  }
+
+  // The app has shown the thread's panel request: it's done.
+  panelShown(threadId: string, requestId: string): { thread: ThreadSummary } {
+    const st = this.mustGet(threadId);
+    if (st.rec.panelRequest?.id === requestId) {
+      delete st.rec.panelRequest;
+      if (st.rt.panelWaiter?.id === requestId) this.endPanelWait(st, true);
+      this.markDirty(st);
+    }
+    return { thread: this.summary(st) };
+  }
+
+  private endPanelWait(st: ThreadState, shown: boolean): void {
+    const waiter = st.rt.panelWaiter;
+    if (!waiter) return;
+    st.rt.panelWaiter = undefined;
+    waiter.timer.cancel();
+    waiter.resolve(shown);
   }
 
   // The librarian's line on where the thread is up to.
@@ -4085,6 +4147,13 @@ export class Runner {
 
 // answers: the asks the message answers (AskAnswer), for the app to show.
 export type SendOptions = { origin?: MessageOrigin; scheduleId?: string; queue?: boolean; answers?: AskAnswer[] };
+
+// Typed by Mike, at the Mac or on his phone: not the runner's, a
+// schedule's or another thread's agent's.
+function fromMike(text: string, opts: SendOptions): boolean {
+  if (opts.origin && opts.origin !== 'phone') return false;
+  return !text.startsWith(AGENT_MESSAGE_PREFIX);
+}
 
 // What a pool thread is told when it carries on by itself after its login
 // ran dry (docs/protocol.md, "Pools").

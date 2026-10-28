@@ -181,6 +181,9 @@ type ThreadSummary = {
   schedule?: { id: string, title: string } // the schedule that started the
                         // thread (see Schedules), with its title as it was
                         // then. Absent for one a person or agent started
+  panelRequest?: PanelRequest // a panel the agent asked to show Mike,
+                        // waiting for him to look at the thread (see
+                        // Showing panels). Absent when there's none
 }
 
 // A thread's own worktree, as its summary shows it (see Worktrees).
@@ -609,6 +612,7 @@ replaces whatever the deltas built up.
 | `threads.highlights` | `{ threadId }` | `ThreadHighlights` (see Highlights): what the thread has made, shared and pinned, read from its events since the last call and kept with the thread |
 | `threads.explain` | `{ threadId, selection: string, message?: string, question?: string, earlier?: { question?: string, answer: string }[] }` | `{ answer: string, model: string }`. Explains words Mike selected in the transcript, on the small model (see Explain). `message` is the whole message they came from, as the app shows it; `earlier` and `question` are a follow-up. Writes nothing to the thread. `-32000` with the reason when no model answers |
 | `threads.removeHighlight` | `{ threadId, highlightId }` | `{ thread: ThreadSummary }` takes one off the list for good (a pin or a found one); a later mention doesn't bring it back. `-32602` for an id the thread doesn't have |
+| `threads.panelShown` | `{ threadId, requestId }` | `{ thread: ThreadSummary }`. The app has shown the thread's `panelRequest` (see Showing panels), which clears it. Another id (a newer request replaced it, or it's gone already) changes nothing |
 | `schedules.list` | `{ threadId?: string }` | `{ schedules: Schedule[] }`, soonest `nextRunAt` first, then the paused and finished ones. With `threadId`, only the ones that send to that thread or were made by it |
 | `schedules.create` | `{ text: string, title?: string, at?: string, cron?: string, timezone?: string, threadId?: string, cwd?, accountId?, model?, effort?, permissionMode?, paused?: boolean, createdBy?: string }` | `{ schedule: Schedule }`. Exactly one of `at` and `cron`. An `at` in the past runs straight away. With `threadId` it sends there, otherwise it starts a new thread each time (`cwd` defaults like `threads.create`'s, checked now). A bad cron or zone is `-32602` with a message saying what's wrong |
 | `schedules.update` | `{ scheduleId, title?, text?, at?: string, cron?: string, timezone?: string \| null, paused?: boolean, cwd?, accountId?, model?: string \| null, effort?: EffortLevel \| null, permissionMode? }` | `{ schedule: Schedule }`. Setting `at` drops `cron` and the other way round. A new time works out `nextRunAt` again; so does unpausing. Setting `at` on a finished one-off makes it run again then. The target thread can't be changed (make a new schedule) |
@@ -1363,6 +1367,52 @@ When the thread is archived or deleted, a worktree whose branch is on main
 with a `system.note` saying how to land or drop them. A thread whose
 worktree was removed carries on in the main checkout, with a note.
 
+## Showing panels
+
+An agent puts one of the app's panels in front of Mike with the
+`show_panel` tool, `{ panel, where? }`, when what he should look at is a
+panel rather than a file or a link (those are `pin` with `show`). It opens
+the panel, or brings it to the front wherever Mike put it. It never moves
+or resizes a panel that's open: Mike's layout is his.
+
+`panel` is `highlights` or `patches` (the thread's own; Patches only when
+it has patches), one of the thread's `panels` by id or title (any case),
+or `usage` or `updates` (the app's Usage and Updates panels). `where`
+says where a closed one opens: `tab` (a tab beside the thread, which
+closes again when the main panel moves on, as a review's does), `left`,
+`right`, `top` or `bottom` (along that side of the window), or `window`
+(a window of its own). Without it, a closed panel opens where the app
+would put it: a thread's panels beside its other open ones, else down
+the right; Usage and Updates under the threads list. An open panel
+ignores `where`.
+
+```ts
+type PanelRequest = {
+  id: string            // the request's own id
+  panel: string         // "highlights", "patches", "usage", "updates", or one of the thread's panels' ids
+  title: string         // the panel's name: "Highlights", "Convex"
+  where?: "tab" | "left" | "right" | "top" | "bottom" | "window"
+  at: string            // when the agent asked
+}
+```
+
+The runner checks the name (an unknown one is the tool's error, listing
+what the thread has), keeps the request on the thread as `panelRequest`,
+replacing an older one, and sends the summary. The app shows it once Mike
+is looking at the thread: the app is in front and the thread is the one
+in the main panel (a thread open in a panel of its own doesn't count, as
+the side panels follow the main one). That's straight away if he already
+is, or else when he next opens the thread or comes back to the app. Then
+the app calls `threads.panelShown`, which clears it. A message from Mike
+(typed, or from his phone; not a runner, schedule or agent message)
+clears it too: he has seen the reply it went with. The tool waits up to 2
+seconds for `threads.panelShown`, so its answer says whether Mike has the
+panel in front of him now or will when he next looks.
+
+During a handover the request stays with the thread on the runner that
+has it, and the primary passes `threads.panelShown` on as it does any
+thread's request.
+
 ## Projects
 
 A project groups threads above folders: it can have several folders, a
@@ -1634,7 +1684,8 @@ drive Threadbear itself: `list_threads`, `read_thread`, `list_accounts`,
 `list_schedules`, `update_schedule` and `delete_schedule` (see Schedules),
 and `list_projects`, `read_project`, `create_project`, `update_project`,
 `join_project` and `leave_project` (see Projects), and `pin` and
-`unpin` (see Highlights), and `wait_for_app_restart` (see App restarts).
+`unpin` (see Highlights), `show_panel` (see Showing panels), and
+`wait_for_app_restart` (see App restarts).
 `list_accounts` shows each account's provider, note and room left, then
 the pools with their logins and room, and which pool a new thread starts
 on; `create_thread` and `move_thread` take Codex accounts, and
@@ -1672,6 +1723,9 @@ Either side may be upgraded first, so each tolerates the other:
 - A newer app talking to an older runner gets `-32601` from `clis.*` and
   leaves the CLI part out, sees no `usage` on accounts and says the numbers
   need a newer runner, and sees no Codex accounts.
+- An app older than Showing panels ignores `panelRequest`, so a request
+  waits until Mike's next message clears it, and `show_panel` says it's
+  waiting. A newer app never sees one from an older runner.
 - An app older than pools sends `accountId` with every `threads.create`,
   so its threads are pinned as before, and it ignores `pools`, `poolId`,
   `waitingForRoom` and `pools.updated`. A newer app talking to a runner

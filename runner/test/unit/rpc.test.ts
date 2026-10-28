@@ -286,6 +286,37 @@ test('clis.* call CliUpdates and return at once; without it they are -32601; cli
 // Handovers (docs/protocol.md): the primary passes a request about a
 // draining runner's thread to it, lists its threads with its own, and
 // handles the request itself if that thread has just come across.
+test('threads.panelShown clears the thread\'s panel request, and goes to a draining runner that has the thread', async () => {
+  const away = { id: 'away-2', title: 'Busy elsewhere', status: 'running', lastActivityAt: '2099-01-01T00:00:00.000Z' } as any;
+  const calls: { threadId: string; method: string }[] = [];
+  const remote = {
+    owns: (id: string) => id === away.id,
+    call: async (threadId: string, method: string) => {
+      calls.push({ threadId, method });
+      return { thread: away };
+    },
+    summaries: () => [away],
+    search: async () => [away],
+  };
+  const { h, server, url } = await serve({ remote: remote as any });
+  const { thread } = h.runner.create({ text: 'here', accountId: 'claude-3' });
+  const c = await RunnerClient.connect(url, TOKEN);
+  try {
+    const shown = h.runner.showPanel(thread.id, { panel: 'usage' });
+    const request = h.runner.get(thread.id).panelRequest!;
+    const res = await c.call('threads.panelShown', { threadId: thread.id, requestId: request.id });
+    assert.deepEqual(checkSummary(res.thread), []);
+    assert.equal(res.thread.panelRequest, undefined);
+    assert.equal((await shown).shown, true);
+    await assert.rejects(c.call('threads.panelShown', { threadId: thread.id }), (e: { code: number }) => e.code === -32602);
+    await c.call('threads.panelShown', { threadId: away.id, requestId: 'r1' });
+    assert.deepEqual(calls, [{ threadId: away.id, method: 'threads.panelShown' }]);
+  } finally {
+    c.close();
+    await server.close();
+  }
+});
+
 test('requests about a draining runner\'s thread go to it; a moved answer is handled here', async () => {
   const away = { id: 'away-1', title: 'Busy elsewhere', status: 'running', lastActivityAt: '2099-01-01T00:00:00.000Z' } as any;
   const calls: { threadId: string; method: string }[] = [];

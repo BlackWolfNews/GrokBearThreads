@@ -50,6 +50,10 @@ static site with its own `package.json`; its comments say how to build it.
 - Files and links an agent makes for Mike to look at belong in the
   thread's Highlights (the pin on the right-hand rail): use the `pin`
   tool, with `show: true` to open it in the side pane, rather than `open`.
+  To put one of the app's own panels in front of him (this thread's
+  Highlights or Patches, a patch panel, Usage, Updates), use
+  `show_panel`: it opens the panel, or brings it forward where he has it,
+  once he's looking at the thread (docs/protocol.md, "Showing panels").
 
 ## Working on Threadbear from inside Threadbear
 

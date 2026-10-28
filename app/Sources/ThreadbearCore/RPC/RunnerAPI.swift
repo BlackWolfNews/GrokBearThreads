@@ -72,6 +72,12 @@ public extension RPCClient {
         try await call("threads.removeHighlight", .object(["threadId": .string(threadId), "highlightId": .string(highlightId)]), as: ThreadResult.self).thread
     }
 
+    /// The thread's panel request (show_panel) is showing now, which clears
+    /// it. Another id changes nothing.
+    func panelShown(threadId: String, requestId: String) async throws -> ThreadSummary {
+        try await call("threads.panelShown", .object(["threadId": .string(threadId), "requestId": .string(requestId)]), as: ThreadResult.self).thread
+    }
+
     /// Runs an action from the thread's patches. A command action answers
     /// when the command has finished (the runner stops it after 10 minutes).
     func runAction(threadId: String, actionId: String) async throws -> ActionRunResult {

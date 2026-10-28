@@ -631,6 +631,31 @@ async function dispatch(client, method, p) {
       broadcastSummary(t.summary.id);
       return { highlight: list.highlights[0] };
     }
+    case 'mock.showPanel': {
+      // As the agent's show_panel tool would: {threadId, panel, where?}
+      // (docs/protocol.md, "Showing panels"). The panel isn't checked.
+      const t = need(p.threadId);
+      const named = { highlights: 'Highlights', patches: 'Patches', usage: 'Usage', updates: 'Updates' };
+      const title = named[p.panel] ?? t.summary.panels?.find((x) => x.id === p.panel)?.title ?? String(p.panel);
+      t.summary.panelRequest = { id: 'pr_' + crypto.randomBytes(4).toString('hex'), panel: String(p.panel), title, ...(p.where ? { where: p.where } : {}), at: iso() };
+      broadcastSummary(t.summary.id);
+      return { request: t.summary.panelRequest };
+    }
+    case 'mock.panelState': {
+      // What's waiting on the thread and what the app has said it showed.
+      const t = need(p.threadId);
+      return { request: t.summary.panelRequest ?? null, shown: t.panelsShown ?? [] };
+    }
+    case 'threads.panelShown': {
+      const t = need(p.threadId);
+      if (typeof p.requestId !== 'string') throw rpcError(-32602, 'requestId must be a string');
+      if (t.summary.panelRequest?.id === p.requestId) {
+        delete t.summary.panelRequest;
+        (t.panelsShown ??= []).push(p.requestId);
+        broadcastSummary(t.summary.id);
+      }
+      return { thread: t.summary };
+    }
     case 'media.import': {
       const source = String(p.path ?? '');
       if (!fs.existsSync(source)) throw rpcError(-32602, `No file at ${source}`);

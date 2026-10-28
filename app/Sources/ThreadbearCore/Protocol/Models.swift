@@ -815,6 +815,29 @@ public struct ThreadSchedule: Sendable, Hashable, Codable {
     }
 }
 
+/// A panel the thread's agent asked to show Mike (show_panel), waiting on
+/// the thread until he's looking at it (docs/protocol.md, "Showing
+/// panels").
+public struct PanelRequest: Sendable, Hashable, Codable {
+    public var id: String
+    /// "highlights", "patches", "usage", "updates", or one of the thread's
+    /// panels' ids.
+    public var panel: String
+    public var title: String
+    /// Where a closed one opens: "tab", "left", "right", "top", "bottom" or
+    /// "window". Nil for its usual place.
+    public var `where`: String?
+    public var at: String
+
+    public init(id: String, panel: String, title: String, where: String? = nil, at: String = "") {
+        self.id = id
+        self.panel = panel
+        self.title = title
+        self.where = `where`
+        self.at = at
+    }
+}
+
 public struct ThreadSummary: Sendable, Hashable, Codable, Identifiable {
     public var id: String
     public var title: String
@@ -891,6 +914,9 @@ public struct ThreadSummary: Sendable, Hashable, Codable, Identifiable {
     /// The schedule that started it; nil for one a person or an agent
     /// started, and from a runner that predates this.
     public var schedule: ThreadSchedule?
+    /// A panel the agent asked to show Mike, waiting for him to look at the
+    /// thread. Nil when there's none, and from a runner older than this.
+    public var panelRequest: PanelRequest?
 
     public init(
         id: String, title: String, cwd: String = "~/dev/me/misc", accountId: String = "claude-main",
@@ -904,7 +930,8 @@ public struct ThreadSummary: Sendable, Hashable, Codable, Identifiable {
         panels: [Panel] = [], actions: [Action] = [], hooks: [Hook] = [], patches: [PatchInfo] = [], background: [BackgroundTask] = [],
         subagents: [Subagent] = [], projects: [ThreadProject] = [], pendingReviews: Int? = nil, worktree: ThreadWorktree? = nil, needs: String? = nil, asks: [Ask] = [], asksSeq: Int? = nil,
         highlightsAt: Date? = nil,
-        schedule: ThreadSchedule? = nil, poolId: String? = nil, waitingForRoom: WaitingForRoom? = nil
+        schedule: ThreadSchedule? = nil, poolId: String? = nil, waitingForRoom: WaitingForRoom? = nil,
+        panelRequest: PanelRequest? = nil
     ) {
         self.id = id
         self.title = title
@@ -949,6 +976,7 @@ public struct ThreadSummary: Sendable, Hashable, Codable, Identifiable {
         self.asksSeq = asksSeq
         self.highlightsAt = highlightsAt
         self.schedule = schedule
+        self.panelRequest = panelRequest
     }
 
     public init(from decoder: Decoder) throws {
@@ -1002,6 +1030,7 @@ public struct ThreadSummary: Sendable, Hashable, Codable, Identifiable {
         asksSeq = (try? c.decodeIfPresent(Int.self, forKey: .asksSeq)) ?? nil
         highlightsAt = ((try? c.decodeIfPresent(String.self, forKey: .highlightsAt)) ?? nil).flatMap(ISO8601.parse)
         schedule = (try? c.decodeIfPresent(ThreadSchedule.self, forKey: .schedule)) ?? nil
+        panelRequest = (try? c.decodeIfPresent(PanelRequest.self, forKey: .panelRequest)) ?? nil
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -1049,13 +1078,14 @@ public struct ThreadSummary: Sendable, Hashable, Codable, Identifiable {
         try c.encodeIfPresent(asksSeq, forKey: .asksSeq)
         try c.encodeIfPresent(highlightsAt.map(ISO8601.format), forKey: .highlightsAt)
         try c.encodeIfPresent(schedule, forKey: .schedule)
+        try c.encodeIfPresent(panelRequest, forKey: .panelRequest)
     }
 
     enum CodingKeys: String, CodingKey {
         case id, title, cwd, accountId, provider, model, effort, modelInUse, effortInUse, permissionMode, status, live, needsYou, pendingReviews
         case createdAt, updatedAt, lastActivityAt, snoozedUntil, snoozedUntilRestart, archivedAt, onOldRunner, preview
         case lastSeq, lastSeenSeq, nativeSessionId, contextTokens, contextWindow, costUsd, panels, actions, hooks, patches, background, subagents
-        case projects, worktree, needs, asks, asksSeq, highlightsAt, schedule, poolId, waitingForRoom
+        case projects, worktree, needs, asks, asksSeq, highlightsAt, schedule, poolId, waitingForRoom, panelRequest
     }
 
     /// The first ask Mike hasn't ticked on the open card, if any: what the

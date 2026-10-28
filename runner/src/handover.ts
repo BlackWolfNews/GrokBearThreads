@@ -502,6 +502,12 @@ export class ThreadRouter implements ThreadControl {
     return this.runner.unpin(threadId, highlightId);
   }
 
+  // Likewise: the request waits on this runner, which the app's
+  // threads.panelShown reaches through the primary.
+  showPanel(threadId: string, ask: Parameters<Runner['showPanel']>[1]): ReturnType<Runner['showPanel']> {
+    return this.runner.showPanel(threadId, ask);
+  }
+
   async update(upd: Parameters<Runner['update']>[0]): Promise<ReturnType<Runner['update']>> {
     const e = this.away(upd.threadId);
     return e ? e.call('threads.update', { ...upd }) : this.runner.update(upd);

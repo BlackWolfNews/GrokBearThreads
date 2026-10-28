@@ -310,6 +310,24 @@ public final class DockController {
         withAnimation(Self.settle) { layout.float(panel, frame: screen, home: home.drop, share: home.share) }
     }
 
+    /// A panel that isn't in the layout, straight into a window of its own
+    /// in the middle of the dock's window, at `size` within the usual
+    /// limits. Put Back docks it down the right. One that's in the layout
+    /// already comes to the front instead. (Threadbear's show_panel, when an
+    /// agent asks for a window.)
+    public func openInNewWindow(_ panel: PanelID, size: CGSize = CGSize(width: 560, height: 520)) {
+        guard !layout.contains(panel) else { return show(panel) }
+        let s = Self.windowSize(for: size)
+        let rect = CGRect(x: bounds.midX - s.width / 2, y: bounds.midY - s.height / 2, width: s.width, height: s.height)
+        // Not on screen yet (no window to measure from): docked will do.
+        guard bounds.width > 0, let screen = screenRect(rect) else { return open(panel, .window(.right)) }
+        var next = layout
+        next.add(panel, .window(.right))
+        next.float(panel, frame: screen, home: .window(.right))
+        windows.focusNext = panel
+        withAnimation(Self.settle) { layout = next }
+    }
+
     /// From a window of its own back into the dock, where it came from if
     /// that's still there.
     public func putBack(_ panel: PanelID) {

@@ -187,6 +187,20 @@ export type ThreadSummary = {
   // The schedule that started it (docs/protocol.md, "Schedules"). Absent
   // for a thread a person or an agent started.
   schedule?: ThreadSchedule;
+  // A panel the agent asked to show Mike (show_panel), waiting for him to
+  // look at the thread (docs/protocol.md, "Showing panels").
+  panelRequest?: PanelRequest;
+};
+
+// Where show_panel opens a panel that's closed; absent is its usual place.
+export type PanelPlace = 'tab' | 'left' | 'right' | 'top' | 'bottom' | 'window';
+
+export type PanelRequest = {
+  id: string;
+  panel: string; // "highlights", "patches", "usage", "updates", or one of the thread's panels' ids
+  title: string; // "Highlights", "Convex"
+  where?: PanelPlace;
+  at: string;
 };
 
 export type ThreadWorktree = { branch: string; mainCheckout: string; path: string };

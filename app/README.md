@@ -256,6 +256,14 @@ does, so the sidebar's "3 sub-agents" row and the transcript's background
 line can be seen without waiting on a real sub-agent. The demo thread
 "Rebuild the three landing pages" starts that way.
 
+`mock.showPanel` (`threadId`, `panel`, `where?`) puts a panel request on a
+thread as the agent's `show_panel` does (docs/protocol.md, "Showing
+panels"), with the panel's id as the real runner sends it
+(`convex.dashboard`, not "Convex"): the app shows it once it's on that
+thread and in front (`{"cmd":"focus"}` for a scripted one). `mock.panelState`
+(`threadId`) says what's still waiting there and which requests the app has
+said it showed.
+
 ```bash
 (cd Tools/mock-runner && npm install)
 threadbear mock              # the app against the mock, in a temp data folder

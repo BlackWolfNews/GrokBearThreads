@@ -260,12 +260,19 @@ export function checkSummary(t: Obj): string[] {
     if (!ok) problems.push('worktree');
   }
   if (t.highlightsAt !== undefined && !isIso(t.highlightsAt)) problems.push('highlightsAt');
+  if (t.panelRequest !== undefined) {
+    const r = t.panelRequest;
+    const ok = r && isStr(r.id) && isStr(r.panel) && isStr(r.title) && isIso(r.at) &&
+      (r.where === undefined || ['tab', 'left', 'right', 'top', 'bottom', 'window'].includes(r.where)) &&
+      Object.keys(r).every((k) => ['id', 'panel', 'title', 'where', 'at'].includes(k));
+    if (!ok) problems.push('panelRequest');
+  }
   const allowed = new Set([
     'id', 'title', 'cwd', 'accountId', 'provider', 'model', 'permissionMode', 'status', 'live', 'needsYou', 'createdAt', 'updatedAt',
     'lastActivityAt', 'snoozedUntil', 'snoozedUntilRestart', 'archivedAt', 'preview', 'lastSeq', 'lastSeenSeq', 'nativeSessionId', 'contextTokens', 'costUsd',
     'poolId', 'waitingForRoom',
     'effort', 'modelInUse', 'effortInUse', 'contextWindow', 'panels', 'actions', 'hooks', 'patches', 'background', 'subagents', 'projects', 'worktree',
-    'needs', 'asks', 'asksSeq', 'highlightsAt',
+    'needs', 'asks', 'asksSeq', 'highlightsAt', 'panelRequest',
   ]);
   for (const k of Object.keys(t)) if (!allowed.has(k)) problems.push(`unexpected field ${k}`);
   return problems;

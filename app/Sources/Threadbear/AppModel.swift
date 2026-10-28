@@ -66,6 +66,8 @@ final class AppModel {
             if selection != oldValue {
                 noteNavigation()
                 mainContextChanged()
+                // Back and forward set this without select().
+                servePanelRequest()
             }
         }
     }
@@ -256,6 +258,8 @@ final class AppModel {
     /// lands while a fetch is out gets fetched again after it.
     @ObservationIgnored var highlightWanted: [String: Int] = [:]
     @ObservationIgnored var highlightAutoShow = HighlightAutoShow()
+    /// The agents' show_panel requests shown this run (PanelRequestModel).
+    @ObservationIgnored var panelRequestGate = PanelRequestGate()
     /// Actions whose command is running, as "<threadId>/<actionId>", so
     /// the chip shows it and a second click doesn't start another.
     var runningActions: Set<String> = []
@@ -468,6 +472,7 @@ final class AppModel {
                 threadsLoaded = true
                 archiveLoaded = true
                 onThreadsLoaded?()
+                servePanelRequest()
                 loadSchedules()
                 loadProjects()
                 loadSettings()
@@ -625,6 +630,7 @@ final class AppModel {
         if showing && thread.lastSeq > thread.lastSeenSeq && thread.status != .waiting {
             scheduleMarkSeen(thread.id)
         }
+        if thread.panelRequest != nil, thread.id == selection { servePanelRequest() }
     }
 
     /// A thread deleted on the runner (by an agent's delete_thread, or `tb
@@ -661,6 +667,7 @@ final class AppModel {
         if let thread = threads[threadId], thread.needsYou || thread.lastSeq > thread.lastSeenSeq {
             scheduleMarkSeen(threadId)
         }
+        servePanelRequest()
     }
 
     /// Opens a thread from a chip in a reply, showing the sidebar list it's
@@ -784,6 +791,7 @@ final class AppModel {
 
     func appBecameActive() {
         if subagentSelection == nil, let selection, let thread = threads[selection], thread.needsYou { scheduleMarkSeen(selection) }
+        servePanelRequest()
     }
 
     // MARK: Thread actions

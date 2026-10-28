@@ -1,7 +1,7 @@
 import type { HighlightState } from './highlights.ts';
 import fs from 'node:fs';
 import path from 'node:path';
-import type { WaitingForRoom, Ask, AskAnswer, NeedsWho, DesignReview, ReviewDraft, EffortLevel, MessageOrigin, PermissionMode, PersistedEvent, Provider, Subagent, ThreadProject, ThreadSchedule, ThreadStatus, ImageRef } from './protocol.ts';
+import type { WaitingForRoom, Ask, AskAnswer, NeedsWho, DesignReview, ReviewDraft, EffortLevel, MessageOrigin, PanelRequest, PermissionMode, PersistedEvent, Provider, Subagent, ThreadProject, ThreadSchedule, ThreadStatus, ImageRef } from './protocol.ts';
 import { atomicWriteFileSync, readJsonSync } from './fsutil.ts';
 import { paths } from './config.ts';
 import type { WorktreeRecord } from './worktrees.ts';
@@ -95,6 +95,8 @@ export type ThreadRecord = {
   // The schedule that started the thread, with its title then (the
   // schedule may be renamed or deleted later).
   schedule?: ThreadSchedule;
+  // show_panel's request, until the app shows it or Mike sends a message.
+  panelRequest?: PanelRequest;
 };
 
 export type ThreadProjectRecord = Omit<ThreadProject, 'title'>;
