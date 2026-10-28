@@ -24,32 +24,17 @@ struct ComposerView: View {
             get: { app.drafts[draftKey] ?? Draft() },
             set: { app.drafts[draftKey] = $0 }
         )
-        let canSend = ComposerChips.canSend(text: draft.wrappedValue.text, imageCount: draft.wrappedValue.images.count)
-        // The open card of asks, stepped through in the composer's place
-        // until Mike puts it away (DecisionPager).
-        let deciding = thread.flatMap { Decisions.isOpen($0) ? $0 : nil }
-        let progress = deciding.map { thread in
-            Binding<DecisionProgress>(
-                get: { app.decisionProgress(for: thread) },
-                set: { app.decisions[thread.id] = $0 }
-            )
-        }
+        // Answers picked on the open card of asks, in the transcript, wait
+        // here as chips and go with the message (AnswerChips).
+        let picks = thread.map { app.picks(for: $0) } ?? [:]
+        let canSend = !picks.isEmpty || ComposerChips.canSend(text: draft.wrappedValue.text, imageCount: draft.wrappedValue.images.count)
         VStack(alignment: .leading, spacing: zoomed(6)) {
         if let thread, let line = ScheduleLine.line(for: thread.id, in: app.schedules, now: app.now) {
             ScheduledLine(line: line)
         }
-        // The card sits over the composer rather than in its place: Mike
-        // often adds something of his own, or an image, to his answers
-        // (28 Oct), and whatever's in the box goes with them.
-        if let deciding, let progress, !progress.wrappedValue.dismissed {
-            DecisionPager(thread: deciding, progress: progress, draft: draft)
-                .padding(zoomed(18))
-                .background { card }
-                .overlay { AttentionBorder(cornerRadius: Self.cornerRadius) }
-        }
         VStack(alignment: .leading, spacing: zoomed(10)) {
-            if let deciding, let progress, progress.wrappedValue.dismissed {
-                DecisionsChip(count: deciding.asks.count) { progress.wrappedValue.dismissed = false }
+            if let thread, !picks.isEmpty {
+                AnswerChips(thread: thread, picks: picks)
             }
             // The folder's actions (patches), above the text as in the design.
             if let thread, !thread.actions.isEmpty {
@@ -62,9 +47,9 @@ struct ComposerView: View {
                 text: draft.text,
                 height: $height,
                 focusTrigger: app.focusRequests[draftKey] ?? 0,
-                placeholder: "Message",
+                placeholder: picks.isEmpty ? "Message" : "Add anything else…",
                 onSend: { send() },
-                onReturnWhenEmpty: { draft.wrappedValue.images.isEmpty && allowSoleApproval() },
+                onReturnWhenEmpty: { returnWhenEmpty(draft.wrappedValue) },
                 onImages: { urls in attach(urls, to: draft) }
             )
             .frame(height: height)
@@ -105,17 +90,20 @@ struct ComposerView: View {
             .onTapGesture { app.focusComposer(draftKey) }
     }
 
+    /// AppModel empties the box, and puts the draft back if it isn't sent.
+    /// Picked answers go with it.
     private func send() {
-        // With the decision card up, answers he's given go too; the
-        // agent's picks he hasn't looked at don't (DecisionPager's Send
-        // takes those). AppModel empties the box, and puts the draft back
-        // if it isn't sent.
-        if let thread, Decisions.isOpen(thread), !app.decisionProgress(for: thread).dismissed,
-           !app.decisionProgress(for: thread).answers.isEmpty {
-            app.sendDecisions(thread: thread, withSuggestions: false)
-            return
-        }
         app.send(threadId: thread?.id)
+    }
+
+    /// Return with nothing typed sends picked answers on their own, or
+    /// else allows the sole approval (below).
+    private func returnWhenEmpty(_ draft: Draft) -> Bool {
+        if let thread, !app.picks(for: thread).isEmpty {
+            send()
+            return true
+        }
+        return draft.images.isEmpty && allowSoleApproval()
     }
 
     /// Return in an empty box allows the open thread's approval card, the
@@ -282,9 +270,6 @@ struct ComposerTextField: NSViewRepresentable {
     /// Return with nothing typed: true if it did something.
     var onReturnWhenEmpty: () -> Bool = { false }
     var onImages: ([URL]) -> Void
-    /// A decision card's "Type anything" box rather than the composer, so
-    /// automation's composer lookups pass it by.
-    var decisionBox = false
 
     // Computed, so they follow the zoom (`applyTypeScale` re-applies
     // them to a text view that's already up).
@@ -307,7 +292,6 @@ struct ComposerTextField: NSViewRepresentable {
         let textView = Self.makeTextView()
         textView.delegate = context.coordinator
         textView.placeholder = placeholder
-        textView.isDecisionBox = decisionBox
         let scroll = OverlayScrollView()
         scroll.documentView = textView
         scroll.drawsBackground = false
@@ -420,7 +404,6 @@ struct ComposerTextField: NSViewRepresentable {
 }
 
 final class ComposerTextView: NSTextView {
-    var isDecisionBox = false
     var onSend: (() -> Void)?
     var onReturnWhenEmpty: (() -> Bool)?
     var onImages: (([URL]) -> Void)?

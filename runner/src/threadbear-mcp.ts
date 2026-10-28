@@ -502,6 +502,16 @@ export function buildThreadbearTools(control: ThreadControl, selfId: string, now
               why: z.string().optional().describe('One line of context, for when he has forgotten the details: "Preview is green and the events arrive."'),
               options: z.array(z.string()).max(6).optional().describe('Likely answers to pick from, short: ["Merge", "Test locally first"]. Give them for every decision or yes/no question. He can always write his own instead.'),
               suggested: z.number().int().optional().describe('Index into options of the answer you would pick.'),
+              links: z
+                .array(
+                  z.object({
+                    title: z.string().min(1).describe('What the button does, short: "Open login page", "See the preview".'),
+                    url: z.string().min(1).describe('A web page (https://…) or a file or folder on this Mac (an absolute or ~ path).'),
+                  }),
+                )
+                .max(3)
+                .optional()
+                .describe('Where to go to do it or judge it: the page, PR, preview, file or screenshot. Give one whenever there is somewhere to go.'),
             }),
           )
           .max(10)

@@ -5,7 +5,7 @@ import { WebSocketServer, WebSocket } from 'ws';
 import type { Runner, Notification, CliControl } from './runner.ts';
 import type { Logger } from './log.ts';
 import { CLI_POLICIES, EFFORT_LEVELS, ErrorCode, PROVIDERS, RpcError, isEffortLevel, isProvider } from './protocol.ts';
-import type { ApprovalDecision, CliPolicy, EffortLevel, ImageRef, PermissionMode, Provider, ThreadSummary } from './protocol.ts';
+import type { ApprovalDecision, AskAnswer, CliPolicy, EffortLevel, ImageRef, PermissionMode, Provider, ThreadSummary } from './protocol.ts';
 import { isMoved, mergeSummaries, type Bucket } from './handover.ts';
 
 type Conn = {
@@ -374,7 +374,7 @@ export class RpcServer {
       case 'reviews.cancel':
         return r.cancelReview(reqString(p, 'threadId'), reqString(p, 'reviewId'), p.revision as number);
       case 'threads.send':
-        return r.send(reqString(p, 'threadId'), optString(p, 'text') ?? '', optImages(p) ?? []);
+        return r.send(reqString(p, 'threadId'), optString(p, 'text') ?? '', optImages(p) ?? [], optAnswers(p));
       case 'threads.interrupt':
         return r.interrupt(reqString(p, 'threadId'));
       case 'threads.update': {
@@ -571,6 +571,20 @@ function optEffort(p: Record<string, unknown>): EffortLevel | undefined {
   if (v === undefined || v === null) return undefined;
   if (!isEffortLevel(v)) throw bad(`effort must be one of ${EFFORT_LEVELS.join(', ')}`);
   return v;
+}
+
+// threads.send's answers (Needs you, Answering): short, and only for the
+// app to show, so anything malformed is refused rather than half kept.
+function optAnswers(p: Record<string, unknown>): { answers?: AskAnswer[] } {
+  const v = p.answers;
+  if (v === undefined || v === null) return {};
+  if (!Array.isArray(v) || v.length > 10) throw bad('answers must be an array of at most 10');
+  const answers = v.map((x) => {
+    const r = (x ?? {}) as Record<string, unknown>;
+    if (typeof r.action !== 'string' || typeof r.answer !== 'string') throw bad('each answer needs an action and an answer');
+    return { action: r.action.slice(0, 500), answer: r.answer.slice(0, 4000) };
+  });
+  return answers.length ? { answers } : {};
 }
 
 function optImages(p: Record<string, unknown>): ImageRef[] | undefined {

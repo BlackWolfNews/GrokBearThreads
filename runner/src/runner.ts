@@ -22,6 +22,7 @@ import type {
   EventBody,
   ImageRef,
   InProgressItem,
+  AskAnswer,
   MessageOrigin,
   ModelChoice,
   PermissionMode,
@@ -1613,6 +1614,7 @@ export class Runner {
     const msg: QueuedSend = { turnId, text, images: refs };
     if (opts.origin) msg.origin = opts.origin;
     if (opts.scheduleId) msg.scheduleId = opts.scheduleId;
+    if (opts.answers?.length) msg.answers = opts.answers;
     rec.lastActivityAt = this.isoNow();
     if (rt.turn && !opts.queue && this.canSteer(st)) {
       // Sent while a turn runs: it goes into that turn now, as typing into
@@ -4066,7 +4068,8 @@ export class Runner {
   }
 }
 
-export type SendOptions = { origin?: MessageOrigin; scheduleId?: string; queue?: boolean };
+// answers: the asks the message answers (AskAnswer), for the app to show.
+export type SendOptions = { origin?: MessageOrigin; scheduleId?: string; queue?: boolean; answers?: AskAnswer[] };
 
 // What a pool thread is told when it carries on by itself after its login
 // ran dry (docs/protocol.md, "Pools").
@@ -4089,6 +4092,7 @@ function userMessage(msg: QueuedSend): EventBody {
     ...(msg.origin ? { origin: msg.origin } : {}),
     ...(msg.scheduleId ? { scheduleId: msg.scheduleId } : {}),
     ...(msg.reviewId ? { reviewId: msg.reviewId, reviewResponse: msg.reviewResponse } : {}),
+    ...(msg.answers?.length ? { answers: msg.answers } : {}),
   };
 }
 

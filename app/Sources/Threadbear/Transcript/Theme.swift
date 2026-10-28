@@ -304,7 +304,45 @@ extension NSAttributedString.Key {
     /// Clicking the run does something in its row ("Show 30 more lines"):
     /// the value is passed to the text view's `onAction`.
     static let tbAction = NSAttributedString.Key("tbAction")
+    /// A button drawn behind the run (an ask's links and answers): the
+    /// value is an `AskButtonStyle` raw value.
+    static let tbButton = NSAttributedString.Key("tbButton")
     /// A word shaped like a thread id (`ThreadRefs`). The value is the word;
     /// it's drawn as a chip only if it names a thread (`ThreadChips`).
     static let tbThreadRef = NSAttributedString.Key("tbThreadRef")
+}
+
+/// How a button on an asks card is drawn (`.tbButton`).
+enum AskButtonStyle: String {
+    /// The first link: the thing to go and do.
+    case primary
+    /// The answer he picked.
+    case picked
+    /// The agent's own pick, before he's picked anything.
+    case suggested
+    case plain
+
+    var textColor: NSColor {
+        switch self {
+        case .primary: return .white
+        case .picked, .plain, .suggested: return .labelColor
+        }
+    }
+
+    var fill: NSColor {
+        switch self {
+        case .primary: return .controlAccentColor
+        case .picked: return NSColor.controlAccentColor.withAlphaComponent(0.4)
+        case .suggested, .plain: return .clear
+        }
+    }
+
+    var stroke: NSColor {
+        switch self {
+        case .primary: return .clear
+        case .picked: return .controlAccentColor
+        case .suggested: return NSColor.controlAccentColor.withAlphaComponent(0.55)
+        case .plain: return Theme.cardBorder.withAlphaComponent(0.25)
+        }
+    }
 }

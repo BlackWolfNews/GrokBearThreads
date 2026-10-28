@@ -54,6 +54,11 @@ final class BackgroundLayoutManager: NSLayoutManager {
             drawPill(range, color: Theme.chipBackground, storage: storage, origin: origin)
         }
 
+        storage.enumerateAttribute(.tbButton, in: characters) { value, range, _ in
+            guard let raw = value as? String, let style = AskButtonStyle(rawValue: raw) else { return }
+            drawButton(range, style: style, storage: storage, origin: origin)
+        }
+
         storage.enumerateAttribute(.tbLineBackground, in: characters) { value, range, _ in
             guard let color = value as? NSColor else { return }
             let glyphs = glyphRange(forCharacterRange: range, actualCharacterRange: nil)
@@ -61,6 +66,27 @@ final class BackgroundLayoutManager: NSLayoutManager {
             enumerateLineFragments(forGlyphRange: glyphs) { rect, _, _, _, _ in
                 NSRect(x: origin.x, y: rect.minY + origin.y, width: width, height: rect.height).fill()
             }
+        }
+    }
+
+    /// A capsule behind an asks card button, one per line if it wraps.
+    private func drawButton(_ range: NSRange, style: AskButtonStyle, storage: NSTextStorage, origin: NSPoint) {
+        let font = storage.attribute(.font, at: range.location, effectiveRange: nil) as? NSFont ?? Theme.labelFont
+        let glyphs = glyphRange(forCharacterRange: range, actualCharacterRange: nil)
+        enumerateLineFragments(forGlyphRange: glyphs) { fragment, _, textContainer, lineGlyphs, _ in
+            let part = NSIntersectionRange(lineGlyphs, glyphs)
+            guard part.length > 0 else { return }
+            var box = self.boundingRect(forGlyphRange: part, in: textContainer)
+            let baseline = fragment.minY + self.location(forGlyphAt: part.location).y
+            box.origin.y = baseline - font.ascender - zoomed(5)
+            box.size.height = font.ascender - font.descender + zoomed(10)
+            box = box.offsetBy(dx: origin.x, dy: origin.y).insetBy(dx: 0.5, dy: 0.5)
+            let path = NSBezierPath(roundedRect: box, xRadius: box.height / 2, yRadius: box.height / 2)
+            style.fill.setFill()
+            path.fill()
+            style.stroke.setStroke()
+            path.lineWidth = 1
+            path.stroke()
         }
     }
 
@@ -440,13 +466,20 @@ final class TranscriptTextView: NSTextView {
     // added in resetCursorRects lost to it), so the hand is set after it.
     override func mouseMoved(with event: NSEvent) {
         super.mouseMoved(with: event)
-        let chip = chip(at: convert(event.locationInWindow, from: nil))
-        if chip != nil { NSCursor.pointingHand.set() }
+        let point = convert(event.locationInWindow, from: nil)
+        let chip = chip(at: point)
+        if chip != nil || isAction(at: point) { NSCursor.pointingHand.set() }
         hoverChip(chip)
     }
 
+    /// Over a clickable run (an asks card's buttons, "Show 30 more lines").
+    private func isAction(at point: NSPoint) -> Bool {
+        onAction != nil && character(at: point).flatMap { textStorage?.attribute(.tbAction, at: $0, effectiveRange: nil) } != nil
+    }
+
     override func cursorUpdate(with event: NSEvent) {
-        if chip(at: convert(event.locationInWindow, from: nil)) != nil {
+        let point = convert(event.locationInWindow, from: nil)
+        if chip(at: point) != nil || isAction(at: point) {
             NSCursor.pointingHand.set()
         } else {
             super.cursorUpdate(with: event)

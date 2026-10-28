@@ -308,7 +308,7 @@ enum RowRenderer {
 
         case .user(let message):
             let maxText = floor(width * RowMetrics.bubbleShare) - RowMetrics.bubblePadH * 2
-            let text = NSAttributedString(string: message.text.isEmpty ? " " : message.text, attributes: Theme.text())
+            let text = userText(message)
             let size = measurer.measure(text, width: maxText)
             let (frames, area) = imageFrames(message.images, maxWidth: floor(width * RowMetrics.bubbleShare),
                                              maxHeight: RowMetrics.userThumbHeight, alignRight: true)
@@ -1040,53 +1040,88 @@ enum RowRenderer {
         return output
     }
 
-    /// "Needs you · 1 of 2 done", then each ask as a tick box, its action,
-    /// where on a quieter line, and a "Reply “done”" chip. Ticks and chips
-    /// are `.tbAction` runs (`tick:<i>`, `reply:<i>`), live only while the
-    /// card is open.
+    /// Mike's bubble. One that answered asks from the card shows each
+    /// question small and quiet, its answer as his own words, then
+    /// whatever else he wrote, so it doesn't read as if he wrote the
+    /// questions (Mike, 28 Oct).
+    static func userText(_ message: UserMessage) -> NSAttributedString {
+        let plain = Theme.text()
+        guard let extra = Decisions.extra(in: message.text, answers: message.answers) else {
+            return NSAttributedString(string: message.text.isEmpty ? " " : message.text, attributes: plain)
+        }
+        let output = NSMutableAttributedString()
+        let question = Theme.text(Theme.smallFont, color: .secondaryLabelColor, line: TypeScale.scaled(18))
+        let answer = Theme.text(spacing: zoomed(8))
+        for (i, item) in message.answers.enumerated() {
+            if i > 0 { output.append(NSAttributedString(string: "\n", attributes: answer)) }
+            output.append(NSAttributedString(string: item.action + "\n", attributes: question))
+            output.append(NSAttributedString(string: item.answer, attributes: answer))
+        }
+        if !extra.isEmpty {
+            output.append(NSAttributedString(string: "\n" + extra, attributes: plain))
+        }
+        return output
+    }
+
+    private struct AskButton {
+        var title: String
+        var action: String
+        var style: AskButtonStyle
+    }
+
+    /// The asks a turn ended on (docs/protocol.md, "Needs you"). Open, each
+    /// is its action, why and where, then a row of buttons: its links (the
+    /// first filled in, as the thing to do next) and its answers, the
+    /// picked one filled and the agent's pick outlined. Buttons are
+    /// `.tbAction` runs (`link:<ask>:<n>`, `pick:<ask>:<n>`) drawn by
+    /// BackgroundLayoutManager. Closed, it's just the asks, quietly.
     static func asksText(_ card: AsksCard) -> NSAttributedString {
-        let (titleStyle, titleOffset) = Theme.lines(TypeScale.workLine, font: Theme.changesTitleFont, spacing: zoomed(8))
+        let (titleStyle, titleOffset) = Theme.lines(TypeScale.workLine, font: Theme.changesTitleFont, spacing: zoomed(6))
         let output = NSMutableAttributedString(string: card.isOpen ? "Needs you" : "Needed you", attributes: [
             .font: Theme.changesTitleFont, .foregroundColor: card.isOpen ? NSColor.labelColor : NSColor.secondaryLabelColor,
             .paragraphStyle: titleStyle, .baselineOffset: titleOffset,
         ])
-        if card.tickedCount > 0 {
-            output.append(NSAttributedString(string: "   \(card.tickedCount) of \(card.asks.count) done", attributes: [
-                .font: Theme.smallFont, .foregroundColor: Theme.faintText, .paragraphStyle: titleStyle, .baselineOffset: titleOffset,
+        let numbered = card.asks.count > 1
+        let action = NSFont.systemFont(ofSize: Theme.bodyFont.pointSize, weight: .semibold)
+        let (actionStyle, actionOffset) = Theme.lines(TypeScale.bodyLine, font: action, spacing: zoomed(2), before: zoomed(12))
+        let small = Theme.smallFont
+        let (noteStyle, noteOffset) = Theme.lines(TypeScale.scaled(19), font: small, spacing: zoomed(2))
+        let button = Theme.labelFont
+        // Tall lines, so a row of buttons that wraps keeps them apart.
+        let (buttonStyle, buttonOffset) = Theme.lines(TypeScale.scaled(32), font: button, before: zoomed(4))
+        for (i, ask) in card.asks.enumerated() {
+            output.append(NSAttributedString(string: "\n" + (numbered ? "\(i + 1)  " : "") + ask.action, attributes: [
+                .font: card.isOpen ? action : Theme.bodyFont, .foregroundColor: card.isOpen ? NSColor.labelColor : NSColor.secondaryLabelColor,
+                .paragraphStyle: actionStyle, .baselineOffset: actionOffset,
             ]))
-        }
-        let font = Theme.bodyFont
-        let (style, offset) = Theme.lines(TypeScale.scaled(22), font: font, spacing: zoomed(6), head: zoomed(26), first: 0)
-        style.tabStops = [NSTextTab(textAlignment: .left, location: zoomed(26))]
-        output.append(NSAttributedString(string: "\n", attributes: [.font: Theme.changesTitleFont, .paragraphStyle: titleStyle]))
-        for (index, ask) in card.asks.enumerated() {
-            let ticked = card.ticked.contains(index)
-            if index > 0 { output.append(NSAttributedString(string: "\n", attributes: [.font: font, .paragraphStyle: style, .baselineOffset: offset])) }
-            // A size up from the text: at body size the box read as a dot.
-            var mark: [NSAttributedString.Key: Any] = [
-                .font: NSFont.systemFont(ofSize: font.pointSize * 1.3), .foregroundColor: ticked ? NSColor.controlAccentColor : Theme.faintText, .paragraphStyle: style, .baselineOffset: offset,
-            ]
-            if card.isOpen { mark[.tbAction] = "tick:\(index)" }
-            output.append(NSAttributedString(string: ticked ? "☑" : "☐", attributes: mark))
-            output.append(NSAttributedString(string: "\t", attributes: [.font: font, .paragraphStyle: style]))
-            var attributes: [NSAttributedString.Key: Any] = [
-                .font: font, .foregroundColor: ticked || !card.isOpen ? NSColor.secondaryLabelColor : NSColor.labelColor,
-                .paragraphStyle: style, .baselineOffset: offset,
-            ]
-            if ticked { attributes[.strikethroughStyle] = NSUnderlineStyle.single.rawValue }
-            output.append(NSAttributedString(string: ask.action, attributes: attributes))
-            if let reply = ask.reply, card.isOpen, !ticked {
-                output.append(NSAttributedString(string: "  ", attributes: [.font: font, .paragraphStyle: style]))
-                output.append(NSAttributedString(string: "Reply “\(reply)”", attributes: [
-                    .font: Theme.smallFont, .foregroundColor: NSColor.controlAccentColor, .paragraphStyle: style, .baselineOffset: offset,
-                    .tbAction: "reply:\(index)",
+            guard card.isOpen else { continue }
+            let note = [ask.why, ask.where_].compactMap { $0?.isEmpty == false ? $0 : nil }.joined(separator: "  ·  ")
+            if !note.isEmpty {
+                output.append(NSAttributedString(string: "\n" + note, attributes: [
+                    .font: small, .foregroundColor: NSColor.secondaryLabelColor, .paragraphStyle: noteStyle, .baselineOffset: noteOffset,
                 ]))
             }
-            // Where, on a quieter line of the same paragraph, under the action.
-            if let place = ask.where_, !place.isEmpty {
-                output.append(NSAttributedString(string: "\u{2028}" + place, attributes: [
-                    .font: Theme.smallFont, .foregroundColor: Theme.faintText, .paragraphStyle: style, .baselineOffset: offset,
-                ]))
+            // Links on a row of their own, over the answers: going to look
+            // comes before answering.
+            var links: [AskButton] = []
+            for (n, link) in ask.links.enumerated() where link.target != nil {
+                links.append(AskButton(title: link.title + " ↗", action: "link:\(i):\(n)", style: n == 0 ? .primary : .plain))
+            }
+            let answers = Decisions.choices(for: ask).enumerated().map { n, choice in
+                let style: AskButtonStyle = card.picks[i] == n ? .picked : ask.suggested == n ? .suggested : .plain
+                return AskButton(title: style == .picked ? "✓ " + choice : choice, action: "pick:\(i):\(n)", style: style)
+            }
+            for row in [links, answers] where !row.isEmpty {
+                output.append(NSAttributedString(string: "\n", attributes: [.font: button, .paragraphStyle: buttonStyle]))
+                for (k, item) in row.enumerated() {
+                    if k > 0 { output.append(NSAttributedString(string: "    ", attributes: [.font: button, .paragraphStyle: buttonStyle, .baselineOffset: buttonOffset])) }
+                    // Spaces inside the run are the button's padding; the
+                    // no-break ones keep a short title from wrapping apart.
+                    output.append(NSAttributedString(string: "\u{00A0}\u{00A0}" + item.title.replacingOccurrences(of: " ", with: "\u{00A0}") + "\u{00A0}\u{00A0}", attributes: [
+                        .font: button, .foregroundColor: item.style.textColor, .paragraphStyle: buttonStyle, .baselineOffset: buttonOffset,
+                        .tbAction: item.action, .tbButton: item.style.rawValue,
+                    ]))
+                }
             }
         }
         return output

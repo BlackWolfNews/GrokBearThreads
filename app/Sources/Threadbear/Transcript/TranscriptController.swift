@@ -687,13 +687,21 @@ final class TranscriptController: NSObject, NSTableViewDataSource, NSTableViewDe
 
     func setQuestionDraft(_ approvalId: String, _ draft: [Int: Set<String>]) { questionDrafts[approvalId] = draft }
 
+    /// A button on the open asks card: `pick:<ask>:<n>` picks (or unpicks)
+    /// an answer, which waits in the composer; `link:<ask>:<n>` opens one of
+    /// the ask's links where links open (the pane or the browser).
     func askAction(_ card: AsksCard, action: String) {
-        guard let session else { return }
-        let parts = action.split(separator: ":", maxSplits: 1)
-        guard parts.count == 2, let index = Int(parts[1]), card.asks.indices.contains(index) else { return }
+        guard let session, let app = session.app, let thread = app.threads[session.threadId] else { return }
+        let parts = action.split(separator: ":")
+        guard parts.count == 3, let index = Int(parts[1]), let n = Int(parts[2]), card.asks.indices.contains(index) else { return }
+        let ask = card.asks[index]
         switch parts[0] {
-        case "tick": session.tickAsk(asksSeq: card.seq, index: index, ticked: !card.ticked.contains(index))
-        case "reply": if let reply = card.asks[index].reply { session.useReply(reply) }
+        case "pick":
+            guard Decisions.choices(for: ask).indices.contains(n), thread.asksSeq == card.seq else { return }
+            app.pickAnswer(thread: thread, ask: index, option: n)
+        case "link":
+            guard ask.links.indices.contains(n), let url = ask.links[n].target else { return }
+            app.openLink(url, title: ask.links[n].title, in: thread)
         default: break
         }
     }

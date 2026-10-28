@@ -155,8 +155,8 @@ struct AppDump: Encodable {
     /// Its action chips (ActionChips).
     var actions: [ActionInfo] = []
     var composer: Composer
-    /// The open card of asks being stepped through in the composer's
-    /// place (DecisionPager), as lines; nil when there's none.
+    /// The open card of asks and what's picked on it, as lines; nil when
+    /// there's none.
     var decisions: [String]? = nil
     var transcript: Transcript?
     /// The usage popover's content as lines, and whether it's open.
@@ -416,19 +416,19 @@ struct AppDump: Encodable {
         return lines
     }
 
-    /// "decision 2 of 3 (shown)", then each ask with its answer, ">" on the
-    /// one showing and "*" on the agent's pick.
+    /// "2 picked", then each ask with its choices, "*" on the agent's
+    /// pick, its links and the answer picked.
     @MainActor
     static func decisions(_ thread: ThreadSummary, app: AppModel) -> [String]? {
         guard Decisions.isOpen(thread) else { return nil }
-        let progress = app.decisionProgress(for: thread)
-        let asks = thread.asks
-        let at = progress.step >= asks.count ? "the summary" : "decision \(progress.step + 1) of \(asks.count)"
-        var lines = ["\(at) (\(progress.dismissed ? "put away" : "shown"))"]
-        for (i, ask) in asks.enumerated() {
-            let choices = Decisions.choices(for: ask).enumerated().map { $0.offset == ask.suggested ? "*\($0.element)" : $0.element }
-            let answer = Decisions.answerText(Decisions.answer(i, asks: asks, answers: progress.answers), ask: ask) ?? "no answer"
-            lines.append("\(i == progress.step ? ">" : " ") \(i + 1). \(ask.action) [\(choices.joined(separator: " | "))] -> \(answer)")
+        let picks = app.picks(for: thread)
+        var lines = ["\(picks.count) picked"]
+        for (i, ask) in thread.asks.enumerated() {
+            let options = Decisions.choices(for: ask)
+            let choices = options.enumerated().map { $0.offset == ask.suggested ? "*\($0.element)" : $0.element }
+            let links = ask.links.isEmpty ? "" : " links: " + ask.links.map(\.title).joined(separator: ", ")
+            let answer = picks[i].flatMap { options.indices.contains($0) ? options[$0] : nil } ?? "no answer"
+            lines.append("  \(i + 1). \(ask.action) [\(choices.joined(separator: " | "))]\(links) -> \(answer)")
         }
         return lines
     }

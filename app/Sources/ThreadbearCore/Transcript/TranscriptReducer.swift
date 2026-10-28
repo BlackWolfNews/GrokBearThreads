@@ -87,6 +87,10 @@ public struct TranscriptModel: Sendable {
     /// (the last finished turn's), if it has asks.
     private var asksRowForSeq: [Int: String] = [:]
     private var openAsksRow: String?
+    /// The option Mike picked on each card's asks (ask index to option
+    /// index), by the card's seq. Kept here rather than in the rows, so a
+    /// rebuild keeps them; only the app sets them.
+    public private(set) var askPicks: [Int: [Int: Int]] = [:]
     /// Each turn's last error row, to learn the turn's `errorKind`.
     private var errorRowForTurn: [String: String] = [:]
     private var turnStarts: [String: Date] = [:]
@@ -252,6 +256,20 @@ public struct TranscriptModel: Sendable {
         return refreshRows()
     }
 
+    /// Mike picked (or unpicked) answers on the card from `seq`.
+    public mutating func setAskPicks(_ seq: Int, _ picks: [Int: Int]) -> TranscriptChange {
+        guard askPicks[seq, default: [:]] != picks else { return TranscriptChange() }
+        askPicks[seq] = picks.isEmpty ? nil : picks
+        guard let cardId = asksRowForSeq[seq] else { return TranscriptChange() }
+        update(cardId) { content in
+            if case .asks(var card) = content {
+                card.picks = picks
+                content = .asks(card)
+            }
+        }
+        return refreshRows()
+    }
+
     public mutating func setExpanded(_ key: String, _ open: Bool) -> TranscriptChange {
         guard expanded.contains(key) != open else { return TranscriptChange() }
         DiffPreview.set(key, open: open, in: &expanded)
@@ -402,8 +420,8 @@ public struct TranscriptModel: Sendable {
         let seq = event.seq
         let turnId = event.turnId
         switch event.payload {
-        case .userMessage(let text, let images, let origin):
-            append(TranscriptRow(id: "u:\(seq)", seq: seq, turnId: turnId, content: .user(UserMessage(text: text, images: images, origin: origin))))
+        case .userMessage(let text, let images, let origin, let answers):
+            append(TranscriptRow(id: "u:\(seq)", seq: seq, turnId: turnId, content: .user(UserMessage(text: text, images: images, origin: origin, answers: answers))))
 
         case .assistantText(let itemId, let text):
             streaming[itemId] = nil
@@ -640,10 +658,14 @@ public struct TranscriptModel: Sendable {
                     }
                     openAsksRow = nil
                 }
-                // No new card row since 28 Oct 2026: the open card is
-                // answered in the composer's place (DecisionPager), and the
-                // answer goes out as a message with each question in it, so
-                // a checklist here only repeated it.
+                // The card sits under the turn's footer, its answers
+                // picked there and sent from the composer (Mike, 28 Oct).
+                if completion.outcome == .completed, completion.needs == "you", !completion.asks.isEmpty {
+                    let cardId = "ak:\(seq)"
+                    append(TranscriptRow(id: cardId, seq: seq, turnId: turnId ?? completion.turnId, content: .asks(AsksCard(seq: seq, asks: completion.asks, picks: askPicks[seq] ?? [:]))))
+                    asksRowForSeq[seq] = cardId
+                    openAsksRow = cardId
+                }
             }
 
         case .asksTicked(let asksSeq, let ticked):

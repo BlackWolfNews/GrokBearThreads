@@ -150,6 +150,11 @@ public struct ThreadFeed: Sendable {
         model.setExpanded(key, open)
     }
 
+    /// Mike picked answers on a card (see `TranscriptModel.setAskPicks`).
+    public mutating func setAskPicks(_ seq: Int, _ picks: [Int: Int]) -> TranscriptChange {
+        model.setAskPicks(seq, picks)
+    }
+
     /// The thread's background work changed (see
     /// `TranscriptModel.setBackground`). Queued events stay queued.
     public mutating func setBackground(_ tasks: [BackgroundTask]) -> TranscriptChange {

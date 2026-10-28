@@ -56,11 +56,15 @@ public struct UserMessage: Sendable, Hashable {
     /// restart), "schedule" when a schedule did, nil when a person or a
     /// client did.
     public var origin: String?
+    /// The asks it answered from the card (docs/protocol.md, "Needs you"):
+    /// the bubble shows each question small and the answer as his words.
+    public var answers: [AskAnswer]
 
-    public init(text: String, images: [ImageRef] = [], origin: String? = nil) {
+    public init(text: String, images: [ImageRef] = [], origin: String? = nil, answers: [AskAnswer] = []) {
         self.text = text
         self.images = images
         self.origin = origin
+        self.answers = answers
     }
 
     /// Sent by the runner, not by Mike: shown as a quiet centred line, not
@@ -263,12 +267,16 @@ public struct AsksCard: Sendable, Hashable {
     public var asks: [Ask]
     public var ticked: Set<Int>
     public var isOpen: Bool
+    /// The option picked on each ask (ask index to option index), waiting
+    /// in the composer to be sent.
+    public var picks: [Int: Int]
 
-    public init(seq: Int, asks: [Ask], ticked: Set<Int> = [], isOpen: Bool = true) {
+    public init(seq: Int, asks: [Ask], ticked: Set<Int> = [], isOpen: Bool = true, picks: [Int: Int] = [:]) {
         self.seq = seq
         self.asks = asks
         self.ticked = ticked
         self.isOpen = isOpen
+        self.picks = picks
     }
 
     public var tickedCount: Int { asks.indices.filter { ticked.contains($0) }.count }

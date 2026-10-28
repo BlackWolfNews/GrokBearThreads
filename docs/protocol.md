@@ -554,7 +554,7 @@ Persisted event types (stored in `events.ndjson`, returned by `threads.events`):
 
 | type | fields |
 |---|---|
-| `user.message` | `text`, `images: ImageRef[]`, `origin?: "runner" \| "schedule" \| "phone"` (`runner` when the runner sent the message by itself, such as the resume after a restart; `schedule` when a schedule sent it, with `scheduleId`; `phone` when it came from the phone through the Convex mirror (Sync); absent for anything a person or client sent), `scheduleId?` |
+| `user.message` | `text`, `images: ImageRef[]`, `answers?: AskAnswer[]` (the open card's asks it answers, as `threads.send` gave them: for showing, the agent only gets `text`), `origin?: "runner" \| "schedule" \| "phone"` (`runner` when the runner sent the message by itself, such as the resume after a restart; `schedule` when a schedule sent it, with `scheduleId`; `phone` when it came from the phone through the Convex mirror (Sync); absent for anything a person or client sent), `scheduleId?` |
 | `assistant.text` | `itemId`, `text` (complete markdown for that block) |
 | `reasoning` | `itemId`, `text` (summary) |
 | `tool.call` | `itemId`, `name` (raw tool name), `kind` (`command` \| `read` \| `edit` \| `write` \| `search` \| `web` \| `mcp` \| `task` \| `todo` \| `image` \| `other`; `image` is image generation), `title` (one line, e.g. "npm test" or "Edit src/a.ts"), `input` (object, large strings truncated to 16 KB) |
@@ -591,7 +591,7 @@ replaces whatever the deltas built up.
 | `threads.list` | `{ include?: ("inbox" \| "snoozed" \| "archived")[] }` (default `["inbox"]`) | `{ threads: ThreadSummary[] }` newest activity first |
 | `threads.search` | `{ query: string, limit?: number }` | `{ threads: ThreadSummary[] }` matches title and preview across all threads, archived included |
 | `threads.create` | `{ text: string, images?: ImageRef[], cwd?: string, accountId?: string, poolId?: string, model?: string, effort?: EffortLevel, permissionMode?: "full" \| "ask", title?: string, worktree?: boolean }` | `{ thread: ThreadSummary }` (the first turn starts straight away). In a repo that asks for worktrees (see Worktrees) the thread gets one of its own before its first turn; `worktree: false` starts it in the folder as it is. The thread's `provider` is its account's. With no `model`, the thread gets `defaults.models[provider]` from `hello`, or `defaults.model` for Claude, or else the account's own default. With no `effort`, `defaults.efforts[provider]`, or else the model's own level. See "Models and effort across providers" |
-| `threads.send` | `{ threadId, text, images?: ImageRef[] }` | `{ turnId }`. If a turn is running and its CLI is live, the message goes into that turn straight away (a `user.message` under the running `turnId`, which is returned): the agent takes it at its next step, or right after its reply if that was already finishing, and the turn doesn't complete until it has been answered. Otherwise (the CLI is still starting or leaving, messages are already waiting, a move or fresh CLI is due on the next turn, Stop has been pressed, or the turn is only an approval for a background subagent) the message is queued and starts its own turn when the running one ends |
+| `threads.send` | `{ threadId, text, images?: ImageRef[], answers?: AskAnswer[] }` | `{ turnId }`. If a turn is running and its CLI is live, the message goes into that turn straight away (a `user.message` under the running `turnId`, which is returned): the agent takes it at its next step, or right after its reply if that was already finishing, and the turn doesn't complete until it has been answered. Otherwise (the CLI is still starting or leaving, messages are already waiting, a move or fresh CLI is due on the next turn, Stop has been pressed, or the turn is only an approval for a background subagent) the message is queued and starts its own turn when the running one ends |
 | `threads.interrupt` | `{ threadId }` | `{}` |
 | `threads.update` | `{ threadId, title?, titleBy?: "mike" \| "agent", cwd?, accountId?, poolId?: string \| null, model?: string \| null, effort?: EffortLevel \| null, permissionMode?, snoozedUntil?: string \| null, archived?: boolean }` | `{ thread: ThreadSummary }`. A `title` is Mike's unless `titleBy` is `"agent"` (the `update_thread` tool, unless the agent says Mike asked for it). Once Mike has named a thread, an agent's different title is `-32602` and nothing in the call changes, and no model title replaces it. `snoozedUntil` is an ISO time, or `"restart"` for until the runner next starts (any start: a planned restart, a crash, a reboot), when the thread wakes before the restart's resume is sent, so a thread put away while its own restart waited is still carried on. Snoozing or archiving releases the CLI (and archives a Codex thread in Codex too). Changing account or cwd takes effect on the next turn. A model or effort change reaches a live Claude CLI straight away (`null` goes back to the default); on Codex it applies from the next turn, with a `system.note` if a turn is running. A folder change on the same Claude account copies the native session's transcript to the new folder and resumes it; on the same Codex account the session carries on in the new folder from the next turn. Otherwise (or if that fails) it starts a new native session with a short handoff note. An account of the other provider switches `provider`, resets `model` and `effort` to that provider's defaults unless the same call sets them, and clears the thread's "Always allow" rules. `model` and `effort` are checked as in "Models and effort across providers". `accountId` pins the thread to that login (clearing `poolId`). `poolId: null` pins it to its current login; a pool id puts it in that pool, and moves it onto one of the pool's logins at once (from the next turn) if its current one isn't in it; an unknown one is `-32602`. A move from one Claude login to another copies the session's transcript into the new login's config folder and resumes it there, as a folder move does |
 | `threads.retitle` | `{ dryRun?: boolean, threadIds?: string[] }` | `{ threads: { threadId, from: string, to?: string, reason?: string }[] }`. Gives a model title to every thread, archived and snoozed included, whose title is still its first message's first line and that nobody has named (`titleSet`); see "Titles" under "Settings and models". One entry per such thread: `to` when it was renamed, `reason` when it wasn't (no key, private folder, over budget, renamed meanwhile). With `threadIds`, those threads whatever their title (a poor model title can be asked for again), still never one named by hand. The model also gets the start of the thread's first reply. `dryRun` lists them without asking the model (`tb retitle`) |
@@ -1021,12 +1021,15 @@ A turn the agent finished can say whether Mike has to do anything, so
 
 - **The tool.** Every thread's own agent (not its sub-agents) has
   `end_turn` in the `threadbear` tools: `{ needs: "you" | "nothing",
-  asks?: { action, where?, reply?, why?, options?, suggested? }[] }`.
+  asks?: { action, where?, reply?, why?, options?, suggested?, links? }[] }`.
   `action` is one concrete thing to do or a question, `where` the app,
   site, file or person, `reply` the words the agent wants back ("done"),
   `why` a line of context for when Mike has forgotten the details,
   `options` up to six likely answers and `suggested` the index of the
-  agent's own pick (dropped unless it points at an option). The agent calls it last, after its final
+  agent's own pick (dropped unless it points at an option). `links` (up
+  to three) are where to go to do it or judge it, `{ title, url }`: a web
+  page (`http(s)://`) or a file or folder on Mike's Mac (`file://`, an
+  absolute or `~` path); anything else is dropped. The agent calls it last, after its final
   message. The tool's description says when, so a resumed session that
   kept its old system prompt still hears it.
 - **Archiving itself.** `end_turn` also takes `archive?: true`. With
@@ -1054,16 +1057,21 @@ A turn the agent finished can say whether Mike has to do anything, so
   and older cards keep the ticks their last `asks.ticked` gave them.
   Ticking never sends anything: a reply is Mike's to write, and one reply
   often answers several asks.
-- **Answering.** The app steps Mike through the open card's asks one at a
-  time in place of the composer: each ask's options (or its `reply`), plus
-  a box to write his own, and Later to leave it. At the end it sends one
-  ordinary message, each ask's question then its answer, numbered in the
-  card's order, with anything else he adds after them. The runner sees a
-  normal `threads.send`; nothing about the card changes on its side, and
-  the next turn closes it as usual.
+- **Answering.** The app shows the open card's asks under the agent's
+  last message, each with its context, its links as buttons and its
+  options (or its `reply`). Picking one puts it in the composer as a chip;
+  the composer stays the only place to write, so his own words and images
+  go with the picks, and a message with no picks is just a message. Send
+  makes one ordinary message, each picked ask's question then its answer,
+  numbered in the card's order, then whatever he wrote, and passes the
+  picks as `answers` so the app can show them as answers. The runner
+  keeps `answers` on the `user.message` and otherwise treats it as a
+  normal `threads.send`; the next turn closes the card as usual.
 
 ```ts
-type Ask = { action: string; where?: string; reply?: string; why?: string; options?: string[]; suggested?: number }
+type Ask = { action: string; where?: string; reply?: string; why?: string; options?: string[]; suggested?: number; links?: AskLink[] }
+type AskLink = { title: string; url: string }
+type AskAnswer = { action: string; answer: string } // an ask's action and the answer he picked
 type OpenAsk = Ask & { ticked?: true }
 ```
 

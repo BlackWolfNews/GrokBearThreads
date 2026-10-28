@@ -95,8 +95,11 @@ final class ThreadSession {
                 // What the thread's summary says is running in the
                 // background, for the line at the end.
                 let background = app?.threads[threadId]?.background ?? []
+                // Answers picked on the open card before it was last shown.
+                let picks = app?.askPicks[threadId]
                 let prepared = await Task.detached(priority: .userInitiated) { () -> (TranscriptModel, Int) in
                     var model = TranscriptModel(root: root)
+                    if let picks { _ = model.setAskPicks(picks.asksSeq, picks.picks) }
                     model.load(events: page.events, inProgress: page.inProgress)
                     _ = model.setBackground(background)
                     if debug { print(String(format: "    after model %.0f MB", memoryMB())) }
@@ -285,6 +288,17 @@ final class ThreadSession {
         show(change, oldStart: oldStart)
     }
 
+    /// Shows the answers picked on the card from `seq` as picked. Before
+    /// the transcript has loaded, the model is built with them instead
+    /// (AppModel.askPicks is read when it is).
+    func setAskPicks(seq: Int, picks: [Int: Int]) {
+        guard state == .loaded, !rebuilding else { return }
+        let oldStart = displayStart
+        let change = feed.setAskPicks(seq, picks)
+        guard !change.isEmpty else { return }
+        show(change, oldStart: oldStart)
+    }
+
     /// Opens or closes a work group or a changed file. Its rows are
     /// inserted or removed in place, like a live update.
     func setModelExpanded(_ key: String, _ open: Bool) {
@@ -422,23 +436,6 @@ final class ThreadSession {
                 app?.show(error)
             }
         }
-    }
-
-    /// An ask's reply chip: puts its words in the composer, after anything
-    /// already typed, and focuses it, so Return sends them. Never sends by
-    /// itself: one reply often answers several asks, and sending starts a
-    /// turn.
-    func useReply(_ reply: String) {
-        guard let app else { return }
-        var draft = app.drafts[threadId] ?? Draft()
-        let typed = draft.text.trimmingCharacters(in: .whitespacesAndNewlines)
-        if typed.isEmpty {
-            draft.text = reply
-        } else if !typed.localizedCaseInsensitiveContains(reply) {
-            draft.text = typed + (typed.hasSuffix(".") ? " " : ". ") + reply
-        }
-        app.drafts[threadId] = draft
-        app.focusComposer(threadId)
     }
 
     func respond(approvalId: String, decision: ApprovalDecision, answers: [String: String]?, message: String?) {

@@ -23,6 +23,13 @@ struct Draft: Equatable {
     var images: [ImageRef] = []
 }
 
+/// The answers picked on a thread's open card (ask index to option index),
+/// and which card they're for.
+struct AskPicks: Equatable {
+    var asksSeq: Int
+    var picks: [Int: Int]
+}
+
 /// App state: the runner connection, the thread list, the selection and the
 /// open thread sessions. Holds no agent state of its own.
 @MainActor
@@ -87,9 +94,10 @@ final class AppModel {
     var focusRequests: [String: Int] = [:]
     var now = Date()
     var drafts: [String: Draft] = [:]
-    /// Where Mike is on each thread's open card of asks (DecisionPager),
-    /// by thread id. One for an older card counts as none.
-    var decisions: [String: DecisionProgress] = [:]
+    /// The answers Mike has picked on each thread's open card of asks, by
+    /// thread id, waiting in the composer to go with his next message.
+    /// Ones for an older card count as none.
+    var askPicks: [String: AskPicks] = [:]
     @ObservationIgnored var reviewWindows: [String: ReviewWindowController] = [:]
     /// The review open in the dock's Review panel (WindowDock.review), if
     /// any. A review popped out into its own window leaves it.
@@ -788,37 +796,45 @@ final class AppModel {
         focusComposer("new")
     }
 
+    /// The answers picked on the thread's open card (ask index to option
+    /// index), none for a card he hasn't touched.
+    func picks(for thread: ThreadSummary) -> [Int: Int] {
+        guard Decisions.isOpen(thread), let seq = thread.asksSeq, let mine = askPicks[thread.id], mine.asksSeq == seq else { return [:] }
+        return mine.picks
+    }
+
+    /// Picks option `option` on ask `ask` of the open card, or unpicks it
+    /// when it's already the pick. It waits in the composer as a chip and
+    /// goes with whatever he sends next.
+    func pickAnswer(thread: ThreadSummary, ask: Int, option: Int) {
+        guard Decisions.isOpen(thread), let seq = thread.asksSeq else { return }
+        var picks = picks(for: thread)
+        picks[ask] = picks[ask] == option ? nil : option
+        setPicks(picks, seq: seq, threadId: thread.id)
+        focusComposer(thread.id)
+    }
+
+    private func setPicks(_ picks: [Int: Int], seq: Int, threadId: String) {
+        askPicks[threadId] = picks.isEmpty ? nil : AskPicks(asksSeq: seq, picks: picks)
+        sessions[threadId]?.setAskPicks(seq: seq, picks: picks)
+    }
+
     /// Sends the draft for `threadId` (or starts a new thread with the "new"
-    /// draft). The box empties straight away, but the text and images go
-    /// back in if the runner doesn't take them; while disconnected nothing
-    /// is touched at all.
-    /// Where Mike is on the thread's open card, fresh for a card he
-    /// hasn't started.
-    func decisionProgress(for thread: ThreadSummary) -> DecisionProgress {
-        guard let seq = thread.asksSeq else { return DecisionProgress(asksSeq: -1) }
-        if let progress = decisions[thread.id], progress.asksSeq == seq { return progress }
-        return DecisionProgress(asksSeq: seq)
-    }
-
-    /// Sends the open card's answers as one message, with the draft (the
-    /// summary's "Anything else?") after them and its images, through the
-    /// usual send so a failure puts it all back in the box.
-    /// `withSuggestions: false` (the composer's own send) leaves out asks
-    /// he hasn't answered rather than taking the agent's picks for them.
-    func sendDecisions(thread: ThreadSummary, withSuggestions: Bool = true) {
-        let progress = decisionProgress(for: thread)
-        let draft = drafts[thread.id] ?? Draft()
-        let text = Decisions.message(asks: thread.asks, answers: progress.answers, extra: draft.text, withSuggestions: withSuggestions)
-        guard !text.isEmpty || !draft.images.isEmpty else { return }
-        drafts[thread.id] = Draft(text: text, images: draft.images)
-        decisions[thread.id] = nil
-        send(threadId: thread.id)
-    }
-
+    /// draft), with any answers picked on the open card. The box empties
+    /// straight away, but the text, images and picks go back if the runner
+    /// doesn't take them; while disconnected nothing is touched at all.
     func send(threadId: String?) {
         let key = threadId ?? "new"
         let draft = drafts[key] ?? Draft()
-        let trimmed = draft.text.trimmingCharacters(in: .whitespacesAndNewlines)
+        // Answers picked on the open card go first, each question then its
+        // answer, and his own words after them (Decisions.message).
+        let thread = threadId.flatMap { threads[$0] }
+        let picks = thread.map { picks(for: $0) } ?? [:]
+        let asks = thread?.asks ?? []
+        let answers = Decisions.answers(asks: asks, picks: picks).map(\.answer)
+        let trimmed = answers.isEmpty
+            ? draft.text.trimmingCharacters(in: .whitespacesAndNewlines)
+            : Decisions.message(asks: asks, picks: picks, extra: draft.text)
         guard !trimmed.isEmpty || !draft.images.isEmpty else { return }
         guard let client, connection == .connected else {
             showConnectionError("Not connected to the runner, so that wasn't sent. It's still in the box.")
@@ -826,11 +842,14 @@ final class AppModel {
         }
         drafts[key] = nil
         if let threadId {
+            let seq = thread?.asksSeq
+            if let seq, !answers.isEmpty { setPicks([:], seq: seq, threadId: threadId) }
             Task {
                 do {
-                    try await client.send(threadId: threadId, text: trimmed, images: draft.images)
+                    try await client.send(threadId: threadId, text: trimmed, images: draft.images, answers: answers)
                 } catch {
                     restoreDraft(draft, key: key)
+                    if let seq, !answers.isEmpty { setPicks(picks, seq: seq, threadId: threadId) }
                     show(error)
                 }
             }

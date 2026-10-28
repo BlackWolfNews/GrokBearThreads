@@ -36,42 +36,44 @@ final class DecisionsTests: XCTestCase {
         XCTAssertEqual(Decisions.choices(for: Ask(action: "Paste your key, then say \"key set\"", options: ["Done"])), ["Done"])
     }
 
-    func testAnswerText() {
-        XCTAssertNil(Decisions.answerText(nil, ask: merge))
-        XCTAssertNil(Decisions.answerText(DecisionAnswer(text: "  "), ask: merge))
-        XCTAssertEqual(Decisions.answerText(DecisionAnswer(choice: 1), ask: merge), "Test locally first")
-        XCTAssertEqual(Decisions.answerText(DecisionAnswer(choice: 0, text: "check the preview"), ask: merge), "Merge. check the preview")
-        XCTAssertEqual(Decisions.answerText(DecisionAnswer(text: "Neither, revert it"), ask: merge), "Neither, revert it")
-        XCTAssertEqual(Decisions.answerText(DecisionAnswer(choice: 0, later: true), ask: merge), "Later, leave this one open")
+    func testDecodesLinksAndWhatTheyOpen() throws {
+        let json = #"{"action":"a","links":[{"title":"Open login","url":"https://hf.co/login"},{"title":"Notes","url":"~/notes.md"},{"title":"bad"}]}"#
+        let ask = try JSONDecoder().decode(Ask.self, from: Data(json.utf8))
+        XCTAssertEqual(ask.links, [AskLink(title: "Open login", url: "https://hf.co/login"), AskLink(title: "Notes", url: "~/notes.md")])
+        XCTAssertEqual(ask.links[0].target?.absoluteString, "https://hf.co/login")
+        XCTAssertEqual(ask.links[1].target?.path, NSHomeDirectory() + "/notes.md")
+        XCTAssertNil(AskLink(title: "x", url: "javascript:alert(1)").target)
     }
 
-    /// Numbered as on the card, question then answer, the agent's pick for
-    /// one he left alone, skipped ones with no pick left out
-    /// with the others keeping their numbers, then anything else he wrote.
+    /// Numbered as on the card, question then answer, unpicked ones left
+    /// out with the others keeping their numbers, then his own words.
     func testMessage() {
-        let text = Decisions.message(
-            asks: [merge, signIn, events],
-            answers: [2: DecisionAnswer(text: "Signups\nand searches")],
-            extra: "  Also bump the version.  "
-        )
+        let text = Decisions.message(asks: [merge, signIn, events], picks: [0: 1, 1: 0], extra: "  Also bump the version.  ")
         XCTAssertEqual(text, """
         1. Merge #52 to prod, or test locally first?
-           Merge
+           Test locally first
 
-        3. Which events matter most?
-           Signups
-           and searches
+        2. Sign in to PostHog in Chrome
+           done
 
         Also bump the version.
         """)
-        XCTAssertEqual(Decisions.message(asks: [events], answers: [:], extra: "just this"), "just this")
-        XCTAssertEqual(Decisions.message(asks: [events], answers: [:]), "")
-        // Changing a pick, or saying Later, beats the suggestion.
-        XCTAssertEqual(Decisions.message(asks: [merge], answers: [0: DecisionAnswer(later: true)]), "Merge #52 to prod, or test locally first?\nLater, leave this one open")
-        XCTAssertEqual(Decisions.answer(0, asks: [merge], answers: [:]), DecisionAnswer(choice: 0))
-        XCTAssertNil(Decisions.answer(1, asks: [merge, events], answers: [:]))
-        // The composer's own send takes only what he answered.
-        XCTAssertEqual(Decisions.message(asks: [merge, events], answers: [1: DecisionAnswer(text: "signups")], extra: "and this", withSuggestions: false),
-                       "2. Which events matter most?\n   signups\n\nand this")
+        XCTAssertEqual(Decisions.message(asks: [merge], picks: [0: 0]), "Merge #52 to prod, or test locally first?\nMerge")
+        XCTAssertEqual(Decisions.message(asks: [events], picks: [:], extra: "just this"), "just this")
+        // A pick that isn't one of its choices doesn't count.
+        XCTAssertEqual(Decisions.message(asks: [events], picks: [0: 0]), "")
+        XCTAssertEqual(Decisions.answers(asks: [merge, events], picks: [0: 0, 1: 2]).map(\.answer), [AskAnswer(action: merge.action, answer: "Merge")])
+    }
+
+    /// The bubble finds his own words after the answers, or shows the text
+    /// as it is when it doesn't start with them.
+    func testExtraAfterTheAnswers() {
+        let asks = [merge, signIn, events]
+        let answers = Decisions.answers(asks: asks, picks: [0: 0, 1: 0]).map(\.answer)
+        let text = Decisions.message(asks: asks, picks: [0: 0, 1: 0], extra: "Also this.\n\nAnd that.")
+        XCTAssertEqual(Decisions.extra(in: text, answers: answers), "Also this.\n\nAnd that.")
+        XCTAssertEqual(Decisions.extra(in: Decisions.message(asks: [merge], picks: [0: 1]), answers: [AskAnswer(action: merge.action, answer: "Test locally first")]), "")
+        XCTAssertNil(Decisions.extra(in: "something else", answers: answers))
+        XCTAssertNil(Decisions.extra(in: text, answers: []))
     }
 }

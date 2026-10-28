@@ -38,9 +38,13 @@ public extension RPCClient {
     }
 
     @discardableResult
-    func send(threadId: String, text: String, images: [ImageRef] = []) async throws -> String? {
+    func send(threadId: String, text: String, images: [ImageRef] = [], answers: [AskAnswer] = []) async throws -> String? {
         var params: [String: JSONValue] = ["threadId": .string(threadId), "text": .string(text)]
         if !images.isEmpty { params["images"] = .array(images.map(\.jsonValue)) }
+        // The card's answers it carries, for the bubble (docs/protocol.md, "Needs you").
+        if !answers.isEmpty {
+            params["answers"] = .array(answers.map { .object(["action": .string($0.action), "answer": .string($0.answer)]) })
+        }
         return try await call("threads.send", .object(params), as: TurnResult.self).turnId
     }
 

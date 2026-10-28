@@ -466,7 +466,7 @@ export type EventBody =
   | { type: 'review.updated'; review: DesignReview }
   // origin is set only on messages the runner sent by itself (the resume
   // after a restart).
-  | { type: 'user.message'; text: string; images: ImageRef[]; origin?: MessageOrigin; scheduleId?: string; reviewId?: string; reviewResponse?: ReviewDraft }
+  | { type: 'user.message'; text: string; images: ImageRef[]; origin?: MessageOrigin; scheduleId?: string; reviewId?: string; reviewResponse?: ReviewDraft; answers?: AskAnswer[] }
   | { type: 'assistant.text'; itemId: string; text: string }
   | { type: 'reasoning'; itemId: string; text: string }
   | { type: 'tool.call'; itemId: string; name: string; kind: ToolKind; title: string; input: Record<string, unknown> }
@@ -543,7 +543,14 @@ export type NeedsWho = 'you' | 'nothing';
 // One thing a turn needs from Mike (docs/protocol.md, "Needs you"). With
 // options it's a decision the app steps him through, the agent's pick
 // (suggested, an index into options) marked; he can always write his own.
-export type Ask = { action: string; where?: string; reply?: string; why?: string; options?: string[]; suggested?: number };
+export type Ask = { action: string; where?: string; reply?: string; why?: string; options?: string[]; suggested?: number; links?: AskLink[] };
+// Somewhere to go to do or judge an ask: a web page, or a file or folder
+// on this Mac (an absolute or ~ path). The app shows each as a button.
+export type AskLink = { title: string; url: string };
+// Which of the open card's asks a message answers, and how, so the app
+// can show the answers as answers rather than as text Mike wrote. The
+// agent only ever sees the message's text.
+export type AskAnswer = { action: string; answer: string };
 export type OpenAsk = Ask & { ticked?: true };
 
 export type PersistedEvent = Envelope & EventBody;

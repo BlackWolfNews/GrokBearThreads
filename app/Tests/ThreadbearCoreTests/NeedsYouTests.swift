@@ -16,18 +16,44 @@ final class NeedsYouTests: XCTestCase {
         return card
     }
 
-    /// The open card is answered in the composer's place (DecisionPager),
-    /// so the transcript keeps only the footer's needs, with no card row.
-    func testATurnThatNeedsYouHasNoCardRowAndItsFooterSaysSo() {
-        let model = TranscriptModel(events: [
+    /// A turn that needs Mike gets its card under its footer, open until
+    /// the next turn closes it, and keeps the picks the app gives it,
+    /// through a rebuild too.
+    func testATurnThatNeedsYouGetsAnOpenCardThatKeepsItsPicks() {
+        var model = TranscriptModel(events: [
             E.event(1, "turn.started", ["turnId": "t1"], turn: "t1"),
             E.text(2, "m1", "Built it."),
-            done(3, turn: "t1", needs: "you", asks: [["action": "Paste the key", "where": "Settings", "reply": "done"], ["action": "Pick a budget"]]),
-            E.event(4, "asks.ticked", ["asksSeq": 3, "ticked": [0]], turn: nil),
+            done(3, turn: "t1", needs: "you", asks: [
+                ["action": "Log in", "links": [["title": "Open login", "url": "https://hf.co/login"]], "options": ["Done", "Can't"]],
+                ["action": "Pick a budget"],
+            ]),
         ])
-        XCTAssertFalse(model.rows.contains { $0.kind == .asks })
         guard case .footer(let footer)? = model.row(id: "f:t1")?.content else { return XCTFail() }
         XCTAssertEqual(footer.needs, "you")
+        XCTAssertEqual(model.rows.last?.id, "ak:3")
+        XCTAssertEqual(card(model, "ak:3")?.isOpen, true)
+        XCTAssertEqual(card(model, "ak:3")?.asks.first?.links, [AskLink(title: "Open login", url: "https://hf.co/login")])
+        XCTAssertFalse(model.setAskPicks(3, [0: 0]).isEmpty)
+        XCTAssertEqual(card(model, "ak:3")?.picks, [0: 0])
+        XCTAssertTrue(model.setAskPicks(3, [0: 0]).isEmpty, "the same picks change nothing")
+        _ = model.apply([E.event(4, "user.message", ["text": "Log in\nDone", "images": []], turn: "t2"), E.event(5, "turn.started", ["turnId": "t2"], turn: "t2"), done(6, turn: "t2")])
+        XCTAssertEqual(card(model, "ak:3")?.isOpen, false)
+        XCTAssertEqual(card(model, "ak:3")?.picks, [0: 0])
+    }
+
+    /// Picks the app had before the transcript loaded are on the card it builds.
+    func testPicksSetBeforeTheEventsLoad() {
+        var model = TranscriptModel()
+        _ = model.setAskPicks(1, [0: 1])
+        model.load(events: [done(1, turn: "t1", needs: "you", asks: [["action": "a", "options": ["x", "y"]]])])
+        XCTAssertEqual(card(model, "ak:1")?.picks, [0: 1])
+    }
+
+    /// A message that answered asks keeps them for its bubble.
+    func testAUserMessageKeepsItsAnswers() {
+        let model = TranscriptModel(events: [E.event(1, "user.message", ["text": "Log in\nDone", "images": [], "answers": [["action": "Log in", "answer": "Done"], ["bad": 1]]], turn: "t1")])
+        guard case .user(let message)? = model.row(id: "u:1")?.content else { return XCTFail() }
+        XCTAssertEqual(message.answers, [AskAnswer(action: "Log in", answer: "Done")])
     }
 
     func testOnlyACompletedTurnThatNeedsYouWithAsksGetsACard() {

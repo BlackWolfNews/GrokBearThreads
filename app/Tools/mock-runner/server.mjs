@@ -396,7 +396,9 @@ async function dispatch(client, method, p) {
     case 'threads.send': {
       const t = need(p.threadId);
       const turnId = 'turn_' + crypto.randomBytes(4).toString('hex');
-      setTimeout(() => fakeTurn(t.summary.id, p.text ?? '', p.images ?? [], turnId), 10);
+      // Answers from the card go on the user.message, as the runner keeps them.
+      const extra = Array.isArray(p.answers) && p.answers.length ? { answers: p.answers } : {};
+      setTimeout(() => fakeTurn(t.summary.id, p.text ?? '', p.images ?? [], turnId, undefined, extra), 10);
       return { turnId };
     }
     case 'threads.interrupt': {
@@ -899,9 +901,9 @@ async function fakeTurn(threadId, text, images, turnId = 'turn_' + crypto.random
 }
 
 const DEMO_ASKS = [
-  { action: 'Set the other 37 repos to collaborator-only pull requests?', why: "Anyone can open a PR on them today. Your own pushes and merges aren't affected.", options: ['Yes, all 37', 'Just the ones with Actions secrets', 'No, leave them'], suggested: 0 },
+  { action: 'Set the other 37 repos to collaborator-only pull requests?', why: "Anyone can open a PR on them today. Your own pushes and merges aren't affected.", options: ['Yes, all 37', 'Just the ones with Actions secrets', 'No, leave them'], suggested: 0, links: [{ title: 'See the list of repos', url: 'https://github.com/mikecann?tab=repositories' }] },
   { action: 'Close issues to collaborators too, with private vulnerability reporting on?', why: 'Turns off public issues on all 41 repos. People could still report security problems privately.', options: ['Yes, close them', 'Leave issues open'], suggested: 0 },
-  { action: 'Sign in to GitHub in Chrome so I can check the settings took', where: 'github.com › Settings', options: ['Done', 'Can you do it?'] },
+  { action: 'Sign in to GitHub in Chrome so I can check the settings took', where: 'github.com › Settings', options: ['Done', 'Can you do it?'], links: [{ title: 'Open GitHub sign-in', url: 'https://github.com/login' }, { title: 'See the audit', url: '~/dev/me/misc/security-audit/REPORT.md' }] },
 ];
 
 function finishTurn(threadId, turnId, started, outcome, said) {

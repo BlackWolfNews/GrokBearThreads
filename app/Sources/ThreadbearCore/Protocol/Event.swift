@@ -425,7 +425,7 @@ public struct ActionRun: Sendable, Hashable, Decodable {
 public enum EventPayload: Sendable, Hashable {
     /// `origin` is "runner" for a message the runner sent by itself (the
     /// resume after a restart); nil for anything a person or client sent.
-    case userMessage(text: String, images: [ImageRef], origin: String? = nil)
+    case userMessage(text: String, images: [ImageRef], origin: String? = nil, answers: [AskAnswer] = [])
     case assistantText(itemId: String, text: String)
     case reasoning(itemId: String, text: String)
     case toolCall(ToolCall)
@@ -489,6 +489,7 @@ public struct Event: Sendable, Hashable, Decodable {
         var images: [ImageRef]
         var message: String?
         var origin: String?
+        var answers: [AskAnswer]
 
         init(from decoder: Decoder) throws {
             let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -497,9 +498,10 @@ public struct Event: Sendable, Hashable, Decodable {
             images = c.lossyArray(ImageRef.self, forKey: .images)
             message = try? c.decodeIfPresent(String.self, forKey: .message)
             origin = try? c.decodeIfPresent(String.self, forKey: .origin)
+            answers = c.lossyArray(AskAnswer.self, forKey: .answers)
         }
 
-        enum CodingKeys: String, CodingKey { case itemId, text, images, message, origin }
+        enum CodingKeys: String, CodingKey { case itemId, text, images, message, origin, answers }
     }
 
     private struct PlanFields: Decodable {
@@ -539,7 +541,7 @@ public struct Event: Sendable, Hashable, Decodable {
         switch type {
         case "user.message":
             let fields = try text()
-            return .userMessage(text: fields.text ?? "", images: fields.images, origin: fields.origin)
+            return .userMessage(text: fields.text ?? "", images: fields.images, origin: fields.origin, answers: fields.answers)
         case "assistant.text":
             let fields = try text()
             return .assistantText(itemId: fields.itemId ?? "", text: fields.text ?? "")

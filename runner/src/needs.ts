@@ -3,7 +3,7 @@
 // section his own instructions ask every agent to end with. No model call:
 // the agent that did the work is the one that knows.
 
-import type { Ask, NeedsWho } from './protocol.ts';
+import type { Ask, AskLink, NeedsWho } from './protocol.ts';
 
 export type Needs = { needs: NeedsWho; asks?: Ask[] };
 
@@ -15,6 +15,12 @@ const MAX_ACTION = 500;
 const MAX_SHORT = 200;
 // A decision with more than this many choices is better as a question.
 const MAX_OPTIONS = 6;
+// A button or two to go and do the thing; past three it's a reading list.
+const MAX_LINKS = 3;
+const MAX_URL = 2000;
+// Web pages, and paths on this Mac. Anything else (javascript:, custom
+// schemes) isn't something a button should open.
+const LINK_URL = /^(?:https?:\/\/|file:\/\/|\/|~\/)/i;
 
 // end_turn's input, checked. Undefined when it isn't usable, so the turn
 // falls back to the text.
@@ -43,6 +49,8 @@ export function needsFromTool(input: unknown): Needs | undefined {
       const s = r.suggested;
       if (typeof s === 'number' && Number.isInteger(s) && s >= 0 && s < options.length) ask.suggested = s;
     }
+    const links = linksFrom(r.links);
+    if (links.length) ask.links = links;
     asks.push(ask);
     if (asks.length === MAX_ASKS) break;
   }
@@ -56,6 +64,20 @@ export function archiveFromTool(input: unknown): boolean {
   if (!input || typeof input !== 'object') return false;
   const o = input as Record<string, unknown>;
   return o.needs === 'nothing' && o.archive === true;
+}
+
+function linksFrom(v: unknown): AskLink[] {
+  const out: AskLink[] = [];
+  for (const l of Array.isArray(v) ? v : []) {
+    if (!l || typeof l !== 'object') continue;
+    const r = l as Record<string, unknown>;
+    const title = str(r.title, MAX_SHORT);
+    const url = str(r.url, MAX_URL);
+    if (!title || !url || !LINK_URL.test(url)) continue;
+    out.push({ title, url });
+    if (out.length === MAX_LINKS) break;
+  }
+  return out;
 }
 
 function str(v: unknown, max: number): string | undefined {
@@ -159,8 +181,9 @@ export const END_TURN_DESCRIPTION =
   'Call it once, as the very last thing in every turn, after your final message, and write nothing after it. ' +
   'needs "nothing" when the work is finished (or still going by itself) and nothing waits on Mike. ' +
   'needs "you" when it does: an approval, a decision, a key, something to look at, a question. Give one ask per thing he has to do, each a concrete action, most blocking first. ' +
-  'Mike answers the asks one at a time in a card under your message, so write each as a short question or action that makes sense on its own, without reading the message. ' +
+  'Mike answers the asks in a card under your message, so write each as a short question or action that makes sense on its own, without reading the message. ' +
   'Give why: one line of context he would need if he had forgotten the details. ' +
+  'Give links whenever there is somewhere to go to do it or judge it: the page to log in on, the preview, the PR, the file or screenshot to look at. Each is a button on the ask, so title it as the action ("Open login page", "See the preview"). ' +
   'Every decision or yes/no question needs options: 2 to 4 short likely answers, e.g. ["Go", "Not yet"] or ["Merge", "Test locally first"], with suggested: the index of the one you would pick. "Say go for X, or name another" is a decision too: give ["Go", ...the other candidates]. Mike can always write his own answer instead, so options never box him in. ' +
   'For a step he has to do himself, offer options like ["Done", "Can you do it?"] when you could plausibly do it yourself. ' +
   'archive: true archives this thread once the turn is over, with needs "nothing" only. Use it only when Mike asks for this thread to be archived; otherwise leave it out, as a thread that vanishes from his inbox when he hadn\'t finished with it is confusing. ' +

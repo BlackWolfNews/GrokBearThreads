@@ -1301,16 +1301,19 @@ public struct Ask: Sendable, Hashable, Codable {
     public var why: String?
     public var options: [String]
     public var suggested: Int?
+    /// Where to go to do it or judge it, shown as buttons on the card.
+    public var links: [AskLink]
     /// Ticked on the open card (only in a summary's `asks`).
     public var ticked: Bool
 
-    public init(action: String, where_: String? = nil, reply: String? = nil, why: String? = nil, options: [String] = [], suggested: Int? = nil, ticked: Bool = false) {
+    public init(action: String, where_: String? = nil, reply: String? = nil, why: String? = nil, options: [String] = [], suggested: Int? = nil, links: [AskLink] = [], ticked: Bool = false) {
         self.action = action
         self.where_ = where_
         self.reply = reply
         self.why = why
         self.options = options
         self.suggested = suggested
+        self.links = links
         self.ticked = ticked
     }
 
@@ -1324,6 +1327,7 @@ public struct Ask: Sendable, Hashable, Codable {
         self.options = options
         let pick = (try? c.decodeIfPresent(Int.self, forKey: .suggested)) ?? nil
         suggested = pick.flatMap { options.indices.contains($0) ? $0 : nil }
+        links = c.lossyArray(AskLink.self, forKey: .links)
         ticked = ((try? c.decodeIfPresent(Bool.self, forKey: .ticked)) ?? nil) ?? false
     }
 
@@ -1335,11 +1339,44 @@ public struct Ask: Sendable, Hashable, Codable {
         try c.encodeIfPresent(why, forKey: .why)
         if !options.isEmpty { try c.encode(options, forKey: .options) }
         try c.encodeIfPresent(suggested, forKey: .suggested)
+        if !links.isEmpty { try c.encode(links, forKey: .links) }
         if ticked { try c.encode(true, forKey: .ticked) }
     }
 
     enum CodingKeys: String, CodingKey {
-        case action, reply, ticked, why, options, suggested
+        case action, reply, ticked, why, options, suggested, links
         case where_ = "where"
+    }
+}
+
+/// A button on an ask: a web page, or a file or folder on this Mac (an
+/// absolute, `~` or `file://` path).
+public struct AskLink: Sendable, Hashable, Codable {
+    public var title: String
+    public var url: String
+
+    public init(title: String, url: String) {
+        self.title = title
+        self.url = url
+    }
+
+    /// What clicking it opens: the web page, or the file with `~` expanded.
+    public var target: URL? {
+        if url.hasPrefix("~/") || url.hasPrefix("/") { return URL(fileURLWithPath: (url as NSString).expandingTildeInPath) }
+        guard let parsed = URL(string: url), let scheme = parsed.scheme?.lowercased(), ["http", "https", "file"].contains(scheme) else { return nil }
+        return parsed
+    }
+}
+
+/// One of the open card's asks a message answered, and the answer he
+/// picked (docs/protocol.md, "Needs you"): sent with `threads.send` and
+/// kept on the `user.message`, so the bubble can show it as an answer.
+public struct AskAnswer: Sendable, Hashable, Codable {
+    public var action: String
+    public var answer: String
+
+    public init(action: String, answer: String) {
+        self.action = action
+        self.answer = answer
     }
 }

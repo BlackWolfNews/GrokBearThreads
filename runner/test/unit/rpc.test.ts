@@ -105,6 +105,7 @@ test('subscribe replays the gap then streams; thread.updated goes to everyone', 
   const list = await b.call('threads.list', { include: ['inbox', 'snoozed', 'archived'] });
   assert.deepEqual(list.threads.map((t: { id: string }) => t.id), [id]);
   await assert.rejects(b.call('threads.list', { include: ['bogus'] }), (e: { code: number }) => e.code === -32602);
+  await assert.rejects(b.call('threads.send', { threadId: id, text: 'x', answers: [{ action: 'a' }] }), (e: { code: number }) => e.code === -32602);
   a.close();
   b.close();
   await server.close();

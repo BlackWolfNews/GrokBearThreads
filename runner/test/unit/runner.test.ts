@@ -1097,6 +1097,27 @@ test('live CLIs are capped: starting one more releases the longest-idle one', as
   assert.equal(h.runner.isLive(b.id), true);
 });
 
+test('a send can say which asks it answers: kept on its user.message, in a turn or starting one', () => {
+  const h = makeHarness();
+  const { thread } = create(h);
+  const s = h.adapter.last;
+  s.init();
+  const answers = [{ action: 'Merge #52?', answer: 'Merge' }];
+  // While the turn runs with nothing queued it goes straight in.
+  h.runner.send(thread.id, 'Merge #52?\nMerge', [], { answers });
+  const steered = h.events(thread.id).filter((e) => e.type === 'user.message').at(-1) as any;
+  assert.deepEqual(steered.answers, answers);
+  assert.equal(steered.text, 'Merge #52?\nMerge');
+  s.result('completed', 0, undefined, { answered: s.sent.map((m) => m.id!) });
+  // A send that starts a turn of its own keeps them too.
+  h.runner.send(thread.id, 'Pick one\nB', [], { answers: [{ action: 'Pick one', answer: 'B' }] });
+  const last = h.events(thread.id).filter((e) => e.type === 'user.message').at(-1) as any;
+  assert.equal(last.text, 'Pick one\nB');
+  assert.deepEqual(last.answers, [{ action: 'Pick one', answer: 'B' }]);
+  // A plain send has none.
+  assert.equal((h.events(thread.id).find((e) => e.type === 'user.message') as any).answers, undefined);
+});
+
 test('a send the disk refuses leaves no stuck turn behind', async () => {
   const h = makeHarness();
   const { thread } = create(h);

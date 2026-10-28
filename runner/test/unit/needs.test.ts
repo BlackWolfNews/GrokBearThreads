@@ -31,6 +31,31 @@ test('end_turn input: a decision keeps its why, options and a valid pick', () =>
   assert.equal(needsFromTool({ needs: 'you', asks: [{ action: 'a', options: Array.from({ length: 9 }, (_, i) => `o${i}`) }] })!.asks![0].options!.length, 6);
 });
 
+test('end_turn input: links to go and do the thing, web or local, a few at most', () => {
+  const asks = needsFromTool({
+    needs: 'you',
+    asks: [{
+      action: 'Log in to Hugging Face',
+      links: [
+        { title: ' Open login page ', url: 'https://huggingface.co/login' },
+        { title: 'Notes', url: '~/dev/notes.md' },
+        { title: 'Spec', url: '/Users/m/spec.md' },
+        { title: 'Bad scheme', url: 'javascript:alert(1)' },
+        { title: '', url: 'https://example.com' },
+        { title: 'No url' },
+        'junk',
+        { title: 'Fourth good one', url: 'http://localhost:3000' },
+      ],
+    }],
+  })!.asks!;
+  assert.deepEqual(asks[0].links, [
+    { title: 'Open login page', url: 'https://huggingface.co/login' },
+    { title: 'Notes', url: '~/dev/notes.md' },
+    { title: 'Spec', url: '/Users/m/spec.md' },
+  ]);
+  assert.equal(needsFromTool({ needs: 'you', asks: [{ action: 'a', links: [] }] })!.asks![0].links, undefined);
+});
+
 test('the section: a bold heading then a numbered list, with a reply phrase', () => {
   const text = [
     'The Settings window is in.',

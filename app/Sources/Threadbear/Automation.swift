@@ -339,11 +339,7 @@ enum Automation {
             }
             return "error sent, but no new thread showed up within \(Int(wait)) s"
         case "paste-image":
-            // "into": "decision" pastes into the decision card's box.
-            let box = c["into"] as? String == "decision"
-                ? all(ComposerTextView.self, in: window?.contentView).first { $0.isDecisionBox }
-                : findComposer(in: window?.contentView)
-            guard let path = c["path"] as? String, let composer = box else { return "error no composer" }
+            guard let path = c["path"] as? String, let composer = findComposer(in: window?.contentView) else { return "error no composer" }
             let board = pasteboard
             board.clearContents()
             board.writeObjects([URL(fileURLWithPath: path) as NSURL])
@@ -357,8 +353,9 @@ enum Automation {
             button.performClick(nil)
             return "ok"
         case "ask":
-            // {"cmd":"ask","row":"ak:6","action":"tick:0"} clicks an open
-            // asks card's tick box (or "reply:0", its reply chip).
+            // {"cmd":"ask","row":"ak:6","action":"pick:0:1"} clicks an open
+            // asks card's button: "pick:<ask>:<choice>" or "link:<ask>:<link>",
+            // 0-based.
             guard let id = c["row"] as? String, let action = c["action"] as? String,
                   case .asks(let card)? = app.transcript.session?.model.row(id: id)?.content else { return "error no asks card" }
             guard card.isOpen else { return "error that card is closed" }
@@ -1255,7 +1252,7 @@ enum Automation {
     /// its class.
     private static func findComposer(in view: NSView?) -> ComposerTextView? {
         guard let view else { return nil }
-        if let match = view as? ComposerTextView, !match.isDecisionBox { return match }
+        if let match = view as? ComposerTextView { return match }
         for sub in view.subviews {
             if let found = findComposer(in: sub) { return found }
         }
@@ -1329,46 +1326,26 @@ enum Automation {
 }
 
 extension Automation {
-    /// The open thread's card of asks (DecisionPager), changed as its
-    /// controls change it: `pick` (1-based, as the number keys), `text`
-    /// (his own words, or a note on a pick), `later`, `next`, `back`, `step`
-    /// (1-based, or 0 for the summary), `extra` (the summary's "Anything
-    /// else?"), `dismiss` (true is Esc, false the chip), `send`. Says where
-    /// it is after, as `dump` does.
+    /// The open thread's card of asks, picked as its buttons pick:
+    /// `pick` is "ask:option", both 1-based ("2:1" picks the second ask's
+    /// first choice, or unpicks it if it was), `clear` drops every pick,
+    /// `send` sends the composer with them. Says where it is after, as
+    /// `dump` does.
     @MainActor
     static func decide(_ c: [String: Any], app: AppModel) -> String {
         guard let thread = app.selectedThread else { return "error no thread open" }
         guard Decisions.isOpen(thread) else { return "error the open thread has no card of asks to answer" }
-        var progress = app.decisionProgress(for: thread)
-        let count = thread.asks.count
-        if let dismiss = c["dismiss"] as? Bool { progress.dismissed = dismiss }
-        if let step = c["step"] as? Int { progress.step = step == 0 ? count : max(0, min(step - 1, count)) }
-        if progress.step < count {
-            let i = progress.step
-            if let pick = c["pick"] as? Int {
-                guard Decisions.choices(for: thread.asks[i]).indices.contains(pick - 1) else { return "error no choice \(pick)" }
-                var answer = progress.answers[i] ?? DecisionAnswer()
-                answer.choice = pick - 1
-                answer.later = false
-                progress.answers[i] = answer
-                // As the card: one ask stays on its page for Send.
-                if count > 1 { progress.step += 1 }
-            } else if let text = c["text"] as? String {
-                var answer = progress.answers[i] ?? DecisionAnswer()
-                answer.text = text
-                answer.later = false
-                progress.answers[i] = answer
-            } else if c["later"] as? Bool == true {
-                progress.answers[i] = DecisionAnswer(later: true)
-                progress.step += 1
-            }
+        if c["clear"] as? Bool == true {
+            for (ask, option) in app.picks(for: thread) { app.pickAnswer(thread: thread, ask: ask, option: option) }
         }
-        if c["next"] as? Bool == true { progress.step = min(progress.step + 1, count) }
-        if c["back"] as? Bool == true { progress.step = max(progress.step - 1, 0) }
-        app.decisions[thread.id] = progress
-        if let extra = c["extra"] as? String { app.drafts[thread.id, default: Draft()].text = extra }
+        if let pick = c["pick"] as? String {
+            let parts = pick.split(separator: ":").compactMap { Int($0) }
+            guard parts.count == 2, thread.asks.indices.contains(parts[0] - 1),
+                  Decisions.choices(for: thread.asks[parts[0] - 1]).indices.contains(parts[1] - 1) else { return "error no choice \(pick)" }
+            app.pickAnswer(thread: thread, ask: parts[0] - 1, option: parts[1] - 1)
+        }
         if c["send"] as? Bool == true {
-            app.sendDecisions(thread: thread)
+            app.send(threadId: thread.id)
             return "ok sent"
         }
         return "ok " + (AppDump.decisions(thread, app: app) ?? []).joined(separator: "\n")
