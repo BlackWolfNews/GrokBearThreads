@@ -4,6 +4,7 @@
 // row once when it's back.
 import { v } from 'convex/values';
 import { internalMutation, mutation, query } from './_generated/server';
+import { internal } from './_generated/api';
 import { threadFields, views } from './schema';
 import { checkRunnerKey } from './lib';
 
@@ -15,18 +16,26 @@ const KEEP_FINISHED_MS = 24 * 60 * 60_000;
 
 const threadDoc = v.object({ ...threadFields, view: v.union(...views.map((x) => v.literal(x))) });
 
+// A push goes out when a thread starts needing Mike (needsYou goes from
+// false to true), at most one per thread this often, so a status that
+// flaps doesn't ring his phone over and over.
+const PUSH_COOLDOWN_MS = 30_000;
+
 export const upsertThreads = mutation({
   args: { key: v.string(), threads: v.array(threadDoc) },
   returns: v.null(),
   handler: async (ctx, { key, threads }) => {
     checkRunnerKey(key);
+    const now = Date.now();
     for (const t of threads) {
       const existing = await ctx.db
         .query('threads')
         .withIndex('by_threadId', (q) => q.eq('threadId', t.threadId))
         .unique();
-      if (existing) await ctx.db.replace(existing._id, t);
+      const wantsPush = t.needsYou && existing !== null && !existing.needsYou && (existing.pushedAt ?? 0) < now - PUSH_COOLDOWN_MS;
+      if (existing) await ctx.db.replace(existing._id, { ...t, ...(wantsPush ? { pushedAt: now } : existing.pushedAt ? { pushedAt: existing.pushedAt } : {}) });
       else await ctx.db.insert('threads', t);
+      if (wantsPush) await ctx.scheduler.runAfter(0, internal.push.notify, { threadId: t.threadId });
     }
     return null;
   },

@@ -531,3 +531,19 @@ test('toMessageDoc ignores everything but text, and keeps a schedule origin', ()
   assert.equal(toMessageDoc('t', { ...base, type: 'tool.call', itemId: 'i', name: 'Bash', kind: 'shell', input: {} } as never), undefined);
   assert.equal(toMessageDoc('t', { ...base, type: 'reasoning', itemId: 'i', text: 'thinking' } as never), undefined);
 });
+
+// ------------------------------------------------------------ push text
+
+import { pushText, PUSH_BODY_CHARS } from '../../../convex/pushText.ts';
+
+test('pushText says why the thread needs Mike: the question, the approval, or the reply', () => {
+  const base = { title: 'Fix the dock badge', status: 'idle', preview: 'Done, the badge clears when you open the thread.' };
+  assert.deepEqual(pushText(base), { title: 'Fix the dock badge', body: 'Done, the badge clears when you open the thread.' });
+  assert.deepEqual(pushText({ ...base, status: 'waiting', pendingApproval: { kind: 'approval', name: 'Bash', title: 'Run a command', inputSummary: 'npm test' } }), { title: 'Fix the dock badge', body: 'Run a command: npm test' });
+  assert.deepEqual(pushText({ ...base, status: 'waiting', pendingApproval: { kind: 'question', questions: [{ question: 'Which colour?' }] } }), { title: 'Fix the dock badge', body: 'Which colour?' });
+  assert.deepEqual(pushText({ ...base, status: 'error', preview: 'usage limit' }), { title: 'Fix the dock badge', body: 'Failed: usage limit' });
+  assert.deepEqual(pushText({ title: '', status: 'idle', preview: '' }), { title: 'Threadbear', body: 'Finished' });
+  const long = pushText({ ...base, preview: 'x'.repeat(500) + '\n\nmore' });
+  assert.equal(long.body.length, PUSH_BODY_CHARS);
+  assert.ok(long.body.endsWith('…'));
+});

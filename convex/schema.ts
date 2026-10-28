@@ -74,7 +74,9 @@ export default defineSchema({
     threadCount: v.number(),
   }).index('by_runnerId', ['runnerId']),
 
-  threads: defineTable({ ...threadFields, view: v.union(...views.map((x) => v.literal(x))) })
+  // pushedAt is the mirror's own: when a push last went out for the thread
+  // (push.ts), kept across the runner's writes.
+  threads: defineTable({ ...threadFields, view: v.union(...views.map((x) => v.literal(x))), pushedAt: v.optional(v.number()) })
     .index('by_threadId', ['threadId'])
     .index('by_runnerId', ['runnerId'])
     .index('by_view_activity', ['view', 'lastActivityMs']),

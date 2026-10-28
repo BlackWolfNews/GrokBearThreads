@@ -311,7 +311,7 @@ app is a later decision and doesn't depend on any of this.
 Mike, 27 Oct: shape A, and make the project now. Full conversation text
 (the 27 Oct option B) stays a later flag.
 
-## 5. What's built (steps 1 to 3) and how to work on it
+## 5. What's built (steps 1 to 4) and how to work on it
 
 **The Convex project** is `threadbear` on team `mikec`
 (https://dashboard.convex.dev/t/mikec/threadbear). Its code is `convex/`
@@ -331,6 +331,20 @@ dashboard panel.
   `pruneOld` for `crons.ts`. Each takes `key`, which must equal the
   deployment's `RUNNER_KEY` env var.
 - `convex/phone.ts`: the phone's API (section 6).
+- `convex/push.ts` (Node action) and `convex/devices.ts`: APNs over
+  HTTP/2 with the team's token-based key, copied from Poddle's `apns.ts`.
+  `sync:upsertThreads` schedules `push:notify` when a thread's `needsYou`
+  goes from false to true (at most once per thread every 30 seconds,
+  `pushedAt` on the row); the action re-reads the row, skips it if the
+  Mac has seen it meanwhile, and sends `pushText`'s title and body
+  (`convex/pushText.ts`: the question, the approval and its input line,
+  "Failed: …", or the reply) to every registered phone, sandbox and
+  production installs each to their APNs host. A token Apple reports gone
+  is dropped. Env on both deployments: `APNS_KEY_P8`, `APNS_KEY_ID`,
+  `APNS_TEAM_ID` (Poddle's, copied 28 Oct) and `APNS_TOPIC`
+  (`com.mikecann.threadbear`). `npx convex run push:test '{"body":"hi"}'
+  --prod` sends a test; `npx convex run devices:list --prod` shows the
+  phones.
 - `convex/tokens.ts`: `issue`, `revoke`, `list`, run from a terminal with
   `npx convex run tokens:issue '{"name":"iphone","days":90}'` (add
   `--prod` for the Sydney prod deployment). Only the SHA-256 of a token
@@ -427,9 +441,11 @@ within a second or two while it's online (state `taken`, then `done` or
   With no `runnerId`, the newest runner seen in the last 3 minutes, or
   `"any"` (the first runner back takes it).
 - `phone:registerDevice({ token, apnsToken, environment: "sandbox" |
-  "production" })` (push is step 4; the payload will be `{ aps: { alert:
-  { title, body }, sound: "default", "thread-id": threadId }, threadId }`
-  for bundle id `com.mikecann.threadbear`).
+  "production" })`. A push arrives when a thread starts needing Mike,
+  as `{ aps: { alert: { title, body }, sound: "default", "thread-id":
+  threadId }, threadId }` for bundle id `com.mikecann.threadbear`; the
+  title is the thread's title and the body the question, the approval
+  with its input line, or the reply.
 
 Changes from the proposal: `answers` values are strings, not arrays (a
 multi-select question's choices go in one string, comma-joined, which is

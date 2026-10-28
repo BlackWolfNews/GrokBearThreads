@@ -9,8 +9,11 @@
  */
 
 import type * as crons from "../crons.js";
+import type * as devices from "../devices.js";
 import type * as lib from "../lib.js";
 import type * as phone from "../phone.js";
+import type * as push from "../push.js";
+import type * as pushText from "../pushText.js";
 import type * as sync from "../sync.js";
 import type * as tokens from "../tokens.js";
 
@@ -22,8 +25,11 @@ import type {
 
 declare const fullApi: ApiFromModules<{
   crons: typeof crons;
+  devices: typeof devices;
   lib: typeof lib;
   phone: typeof phone;
+  push: typeof push;
+  pushText: typeof pushText;
   sync: typeof sync;
   tokens: typeof tokens;
 }>;
