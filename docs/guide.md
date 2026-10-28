@@ -84,7 +84,7 @@ own. It leaves the list, its agent stops, and it comes back marked unread
 when the time comes. Hibernating threads have their own view (⌘2).
 
 When a thread is done, archive it with ⌘E, or swipe its row left with two
-fingers on the trackpad and let go once the space behind it turns blue (a
+fingers on the trackpad (or drag it left with the mouse) and let go once the space behind it turns blue (a
 quick flick works too). The Archive view (⌘3) lists them with a search box,
 and Unarchive, or the same swipe there, puts one back. The iPhone app and the
 website call the archive the Den.

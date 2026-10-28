@@ -455,12 +455,17 @@ struct ThreadRowView: View {
             withAnimation(.easeOut(duration: Juice.reduceMotion ? 0.4 : 1.1).delay(0.3)) { landed = false }
         }
         // Selects on mouse down, as the system list did and Mail does; a
-        // tap gesture waits for the mouse to come back up.
-        .gesture(DragGesture(minimumDistance: 0).onChanged { _ in
+        // tap gesture waits for the mouse to come back up. Dragging left
+        // swipes the row, for a mouse (global, as the row moves with it).
+        .gesture(DragGesture(minimumDistance: 0, coordinateSpace: .global).onChanged { value in
+            swipe.drag(value.translation)
             guard !pressed else { return }
             pressed = true
             select()
-        }.onEnded { _ in pressed = false })
+        }.onEnded { _ in
+            pressed = false
+            swipe.dragEnded()
+        })
         // After the gesture, so clicking these never selects the row.
         .overlay(alignment: .trailing) {
             if showsActions {

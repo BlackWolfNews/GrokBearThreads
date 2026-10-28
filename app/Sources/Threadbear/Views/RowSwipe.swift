@@ -62,6 +62,7 @@ final class RowSwipeController {
     /// The row's gone: stop listening whatever it was doing.
     func stop() {
         hovered = false
+        dragLast = nil
         eatingMomentum = false
         swipe.cancel()
         updateMonitor()
@@ -103,13 +104,7 @@ final class RowSwipeController {
             // Follow the fingers whichever way the system scrolls: with
             // natural scrolling the delta already goes the fingers' way.
             let sign: CGFloat = event.isDirectionInvertedFromDevice ? 1 : -1
-            let wasArmed = swipe.armed
-            let mine = withAnimation(nil) { swipe.move(dx: Double(event.scrollingDeltaX * sign), dy: Double(event.scrollingDeltaY)) }
-            if swipe.armed != wasArmed {
-                // A tick under the fingers on crossing the line, either way.
-                NSHapticFeedbackManager.defaultPerformer.perform(.alignment, performanceTime: .now)
-            }
-            return mine
+            return move(dx: event.scrollingDeltaX * sign, dy: event.scrollingDeltaY)
         }
         if event.phase.contains(.ended) {
             let wasSwiping = swipe.isSwiping
@@ -127,6 +122,42 @@ final class RowSwipeController {
             return wasSwiping
         }
         return swipe.isSwiping
+    }
+
+    private func move(dx: CGFloat, dy: CGFloat) -> Bool {
+        let wasArmed = swipe.armed
+        let mine = withAnimation(nil) { swipe.move(dx: Double(dx), dy: Double(dy)) }
+        if swipe.armed != wasArmed {
+            // A tick under the fingers on crossing the line, either way.
+            NSHapticFeedbackManager.defaultPerformer.perform(.alignment, performanceTime: .now)
+        }
+        return mine
+    }
+
+    /// Where the mouse was last time it moved with the button down: a mouse
+    /// has no two-finger swipe, so dragging the row left does the same.
+    @ObservationIgnored private var dragLast: CGSize?
+
+    /// The mouse moved with the button down on the row, `translation` from
+    /// where it went down (in a space that doesn't move with the row).
+    func drag(_ translation: CGSize) {
+        guard action != nil, !leaving, swipe.phase == .idle || dragLast != nil else { return }
+        if dragLast == nil {
+            swipe.begin()
+            dragLast = .zero
+        }
+        let last = dragLast ?? .zero
+        dragLast = translation
+        _ = move(dx: translation.width - last.width, dy: translation.height - last.height)
+    }
+
+    /// The mouse button came up.
+    func dragEnded() {
+        guard dragLast != nil else { return }
+        dragLast = nil
+        // A plain click never left `deciding`: nothing to spring back.
+        guard swipe.isSwiping else { return swipe.reset() }
+        if swipe.end() { finish() } else { springBack() }
     }
 
     private func springBack() {
