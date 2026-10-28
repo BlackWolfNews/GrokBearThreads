@@ -2,7 +2,7 @@
 // printed or going near the clipboard. Issues a phone token with
 // `npx convex run tokens:issue`, makes the threadbear://pair link, draws it
 // as a QR code into a temp PNG, opens it in Preview, and deletes the file
-// ten minutes later. Point the iPhone's Camera at it.
+// once Preview has it. Scan it with Threadbear's Scan the code (or the Camera).
 //
 //   swift ios/scripts/pair-qr.swift [--prod --url https://….convex.cloud] [--name iphone] [--days 90]
 //
@@ -72,11 +72,10 @@ try! rep.representation(using: .png, properties: [:])!.write(to: file)
 // Readable by Mike only.
 try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: file.path)
 NSWorkspace.shared.open(file)
-print("Showing the pairing QR for \"\(name)\" (\(prod ? "prod" : "dev"), expires in \(days) days). Scan it with the iPhone Camera.")
-print("The image deletes itself in 10 minutes. Revoke with: npx convex run tokens:revoke '{\"name\":\"\(name)\"}'\(prod ? " --prod" : "")")
-// Delete later from a detached shell, so this script can return now.
-let cleanup = Process()
-cleanup.executableURL = URL(fileURLWithPath: "/bin/sh")
-cleanup.arguments = ["-c", "(sleep 600; rm -f '\(file.path)') >/dev/null 2>&1 &"]
-try? cleanup.run()
-cleanup.waitUntilExit()
+// Preview holds the picture once it has opened it, so the file can go
+// straight away and no copy of the token stays on disk. (A delayed delete
+// from a detached shell didn't survive the script's process group ending.)
+Thread.sleep(forTimeInterval: 3)
+try? FileManager.default.removeItem(at: file)
+print("Showing the pairing QR for \"\(name)\" (\(prod ? "prod" : "dev"), expires in \(days) days). In Threadbear, tap Scan the code.")
+print("Close the Preview window once the phone has paired. Revoke with: npx convex run tokens:revoke '{\"name\":\"\(name)\"}'\(prod ? " --prod" : "")")
