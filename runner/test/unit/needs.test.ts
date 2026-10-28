@@ -119,9 +119,22 @@ test('the section: choices under an ask stay with it, and a choice is not a repl
     needs: 'you',
     asks: [
       { action: 'Pick a fix and reply with it: "fix it": I make the tests work. "leave it": nothing changes.' },
-      { action: 'Decide on the filter. Reply "filter" or "wait".' },
+      { action: 'Decide on the filter. Reply "filter" or "wait".', options: ['filter', 'wait'] },
     ],
   });
+});
+
+// Fable skipped end_turn and wrote this; the card had one button (28 Oct 2026).
+test('the section: every quoted answer in a list is a choice', () => {
+  const ask = (line: string) => needsFromText(`**What I need from you**\n\n1. ${line}`)!.asks![0];
+  assert.deepEqual(
+    ask('Say whether to keep "Browser" or rename the row to "Website". Reply with "Land it", "Website, then land it", or what else to change.').options,
+    ['Land it', 'Website, then land it'],
+  );
+  assert.deepEqual(ask('Reply "merge", "wait" or "close".').options, ['merge', 'wait', 'close']);
+  assert.deepEqual(ask('Reply “yes” / “no”.').options, ['yes', 'no']);
+  // A quote that isn't straight after the reply word isn't one of them.
+  assert.deepEqual(ask('Reply "go" when the "Export" step is done.'), { action: 'Reply "go" when the "Export" step is done.', reply: 'go' });
 });
 
 test('the section: a code block in an ask stays in it', () => {

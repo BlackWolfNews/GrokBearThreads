@@ -9,7 +9,7 @@ public enum Decisions {
     public static func choices(for ask: Ask) -> [String] {
         if !ask.options.isEmpty { return ask.options }
         if let reply = ask.reply?.trimmingCharacters(in: .whitespacesAndNewlines), !reply.isEmpty { return [reply] }
-        return impliedReply(ask.action).map { [$0] } ?? []
+        return impliedChoices(ask.action)
     }
 
     /// An ask as the one paragraph the card shows: its action, then its
@@ -37,23 +37,38 @@ public enum Decisions {
         return ".?!…:".contains(last)
     }
 
-    /// The word an ask with no options still asks for: 'Reply "export"
+    /// The words an ask with no options still asks for: 'Reply "export"
     /// when…' or "Say go for Short 2, or name another". Threads started
     /// before end_turn had options, and agents that skip them, mostly
     /// write asks like that (60% offered a reply word in the 27 Oct
-    /// survey), so the word becomes a button.
-    static func impliedReply(_ action: String) -> String? {
+    /// survey), so the word becomes a button. A list of them ('Reply with
+    /// "Land it", "Website, then land it", or…') is a button each: taking
+    /// just the first left Mike one where he'd been offered two (28 Oct).
+    static func impliedChoices(_ action: String) -> [String] {
         let ns = action as NSString
         let full = NSRange(location: 0, length: ns.length)
-        if let m = quoted.firstMatch(in: action, range: full) { return ns.substring(with: m.range(at: 1)) }
+        if let m = quoted.firstMatch(in: action, range: full) {
+            var choices = [ns.substring(with: m.range(at: 1))]
+            var at = m.range.upperBound
+            while choices.count < maxImplied,
+                  let more = Self.more.firstMatch(in: action, options: .anchored, range: NSRange(location: at, length: ns.length - at)) {
+                choices.append(ns.substring(with: more.range(at: 1)))
+                at = more.range.upperBound
+            }
+            return choices
+        }
         if let m = bare.firstMatch(in: action, range: full) {
             let word = ns.substring(with: m.range(at: 1))
-            return word.prefix(1).uppercased() + word.dropFirst()
+            return [word.prefix(1).uppercased() + word.dropFirst()]
         }
-        return nil
+        return []
     }
 
+    /// As many as end_turn's options take (runner/src/needs.ts).
+    private static let maxImplied = 6
     private static let quoted = try! NSRegularExpression(pattern: #"\b(?:say|reply|type|send|answer)(?: with)?\s+[\"“']([^\"”']{1,40})[\"”']"#, options: .caseInsensitive)
+    /// Each further quoted choice straight after the first.
+    private static let more = try! NSRegularExpression(pattern: #"\s*(?:,\s*(?:or\s+)?|or\s+|/\s*)[\"“']([^\"”']{1,40})[\"”']"#, options: .caseInsensitive)
     private static let bare = try! NSRegularExpression(pattern: #"^(?:say|reply)\s+(go|yes|ok|okay|done|ship it|merge it|merge)\b"#, options: .caseInsensitive)
 
     /// The pick that means "Something else": what Mike writes in the

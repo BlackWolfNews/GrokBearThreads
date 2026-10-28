@@ -162,6 +162,9 @@ export function needsFromText(text: string): Needs | undefined {
 
 // "Open X, add Y, then reply 'done'" names the words to send back.
 const REPLY = /\b(?:reply|send(?: back)?|say|answer|respond)(?: with)?\s+["'“‘`]([^"'”’`\n]{1,40})["'”’`]/i;
+// Each further quoted choice after it: 'Reply "filter" or "wait"', or
+// 'Reply with "Land it", "Website, then land it", or what else to change'.
+const MORE = /^\s*(?:,\s*(?:or\s+)?|or\s+|\/\s*)["'“‘`]([^"'”’`\n]{1,40})["'”’`]/i;
 
 function askFrom(item: string): Ask {
   const action = item
@@ -171,8 +174,18 @@ function askFrom(item: string): Ask {
     .slice(0, MAX_ACTION);
   const ask: Ask = { action };
   const reply = REPLY.exec(action);
-  // 'Reply "filter" or "wait"' is a choice, not the words to send back.
-  if (reply && !/^\s*(?:or|,|\/)\s*["'“‘`]/.test(action.slice(reply.index + reply[0].length))) ask.reply = reply[1].trim();
+  if (!reply) return ask;
+  const choices = [reply[1].trim()];
+  let rest = action.slice(reply.index + reply[0].length);
+  for (let m = MORE.exec(rest); m && choices.length < MAX_OPTIONS; m = MORE.exec(rest)) {
+    choices.push(m[1].trim());
+    rest = rest.slice(m[0].length);
+  }
+  // One is the words to send back; several are a choice, each its own
+  // button. Taking just the first of a list left Mike one button where
+  // the agent had offered two (28 Oct 2026).
+  if (choices.length > 1) ask.options = choices;
+  else ask.reply = choices[0];
   return ask;
 }
 
@@ -215,9 +228,15 @@ export const CODEX_END_TURN_DESCRIPTION =
 // CLAUDE_CODE_TERMINAL_MCP_TOOLS) and the agent reads it. Ask for the whole
 // answer, as a shorter reminder once got Mike only a closing line.
 // Describe the result he needs: wording that asks for internal reasoning
-// can trigger a provider safeguard even during ordinary work.
+// can trigger a provider safeguard even during ordinary work. An agent
+// that believed it had written its answer read the old wording as the
+// check being broken (a refused end_turn counted as its tool result),
+// wrote one line about that, and Mike never got the answer (28 Oct 2026):
+// so say a refusal isn't a tool result, and that an answer it thinks it
+// gave never arrived.
 export const NO_REPLY =
-  "Not ended: Mike hasn't had a reply this turn after his latest message and your latest tool result. " +
+  "Not ended: Mike hasn't had a reply this turn. No message text from you has reached him since his latest message and your latest tool result (a refused end_turn isn't a tool result). " +
+  "If you think you already answered, he hasn't seen any of it. " +
   'Please write the whole answer as ordinary text, with the result and any supporting evidence Mike needs. Then call end_turn again.';
 
 // How every accepted end_turn result starts, so the runner can tell one

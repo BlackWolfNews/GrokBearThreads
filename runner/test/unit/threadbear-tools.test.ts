@@ -476,6 +476,9 @@ test('end_turn is refused until the turn has replied to Mike in text', async () 
   assert.match(r.text, /hasn't had a reply this turn/);
   assert.match(r.text, /write the whole answer as ordinary text/);
   assert.match(r.text, /result and any supporting evidence/);
+  // So an agent sure it had answered doesn't take the check for broken.
+  assert.match(r.text, /a refused end_turn isn't a tool result/);
+  assert.match(r.text, /If you think you already answered, he hasn't seen any of it/);
   assert.doesNotMatch(r.text, /thinking|thought|scratchpad|internal reasoning/i);
   toolResult(s, 'e1');
   // A progress line before more work isn't the reply either.

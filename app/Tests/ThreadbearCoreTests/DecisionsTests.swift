@@ -36,6 +36,17 @@ final class DecisionsTests: XCTestCase {
         XCTAssertEqual(Decisions.choices(for: Ask(action: "Paste your key, then say \"key set\"", options: ["Done"])), ["Done"])
     }
 
+    /// A list of quoted answers is a button each, not just the first
+    /// (an ask from a turn that skipped end_turn, 28 Oct).
+    func testChoicesFromAListOfQuotedAnswers() {
+        let ask = Ask(action: "Say whether to keep \"Browser\" or rename the row to \"Website\", and whether to land it. Reply with \"Land it\", \"Website, then land it\", or what else to change.")
+        XCTAssertEqual(Decisions.choices(for: ask), ["Land it", "Website, then land it"])
+        XCTAssertEqual(Decisions.choices(for: Ask(action: "Reply \"merge\", \"wait\" or \"close\"")), ["merge", "wait", "close"])
+        XCTAssertEqual(Decisions.choices(for: Ask(action: "Reply “yes” / “no”")), ["yes", "no"])
+        // A quote further on isn't one of them.
+        XCTAssertEqual(Decisions.choices(for: Ask(action: "Reply \"go\" when the \"Export\" step is done")), ["go"])
+    }
+
     /// The card shows an ask as one paragraph, the way the agent would
     /// have written it in its message: the action, then the why.
     func testAParagraphIsTheActionThenTheWhy() {

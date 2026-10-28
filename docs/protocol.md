@@ -1109,8 +1109,11 @@ A turn the agent finished can say whether Mike has to do anything, so
 - **The fallback.** A completed turn with no `end_turn` call is read for
   the "What I need from you" section Mike's own instructions ask for: the
   last line near the end that is just that heading in bold, then its
-  numbered or bulleted items, one ask each. A heading with no list whose
-  text says nothing is needed counts as `nothing`. `needsFrom` says which
+  numbered or bulleted items, one ask each. An item's quoted reply words
+  (`reply "done"`) are its `reply`; a list of them (`Reply with "Land
+  it", "Website, then land it", or…`) is its `options`, one each. A
+  heading with no list whose text says nothing is needed counts as
+  `nothing`. `needsFrom` says which
   it was. Neither found: no `needs`, and the turn counts as today.
 - **What decides `needsYou`**, in order: an approval or question waiting;
   a thread marked unread; then a finished turn after `lastSeenSeq`,
