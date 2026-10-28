@@ -361,6 +361,7 @@ private struct PoolSettings: View {
     @State private var draft: [Pool] = []
     @State private var selected: String?
     @State private var titleDraft = ""
+    @FocusState private var naming: Bool
 
     var body: some View {
         if !app.poolsSupported {
@@ -385,34 +386,42 @@ private struct PoolSettings: View {
         Form {
             Section {
                 ForEach(draft) { pool in
-                    PoolListRow(pool: pool, accounts: app.accounts, selected: pool.id == selected) { choose(pool.id) }
+                    PoolListRow(pool: pool, accounts: app.accounts, selected: pool.id == current?.id) { choose(pool.id) }
                 }
-                HStack(spacing: 8) {
-                    Button("Add Pool", action: add)
-                    Spacer()
-                    if let pool = current {
-                        Button("Delete \(pool.title)…") { delete(pool) }
-                            .disabled(draft.count < 2)
+                HStack(spacing: 2) {
+                    Button(action: add) { Image(systemName: "plus") }
+                        .tip("Add a pool")
+                    Button {
+                        if let pool = current { delete(pool) }
+                    } label: {
+                        Image(systemName: "minus")
                     }
+                    .disabled(draft.count < 2 || current == nil)
+                    .tip(draft.count < 2 ? "There has to be at least one pool" : "Delete \(current?.title ?? "this pool")")
                 }
+                .buttonStyle(.borderless)
             } header: {
                 Text("Pools")
             } footer: {
-                Footnote("A new thread starts on its folder's pool, or else the one you picked last. The pool picks a login with room for each turn and moves the thread when one runs out.")
+                Footnote("New threads start on their folder's pool, or on the one you picked last. Each turn runs on a login with room, and the thread moves on when that login runs out.")
             }
 
             if let pool = current {
                 Section {
+                    // A boxed field with the text from its left edge: the
+                    // grouped form's own right-aligned one reads as a label,
+                    // so renaming was easy to miss.
                     LabeledContent("Name") {
-                        TextField("Name", text: $titleDraft)
+                        TextField("Name", text: $titleDraft, prompt: Text("Pool name"))
                             .labelsHidden()
                             .textFieldStyle(.roundedBorder)
-                            .frame(maxWidth: 220)
+                            .multilineTextAlignment(.leading)
+                            .frame(width: 220)
+                            .focused($naming)
                             .onSubmit(commitTitle)
+                            .tip("Rename this pool. It saves when you press Return or click away.")
                     }
-                }
 
-                Section {
                     let list = Pools.loginList(pool, accounts: app.accounts)
                     ForEach(list, id: \.account.id) { entry in
                         LoginToggleRow(account: entry.account, accounts: app.accounts, included: entry.included,
@@ -423,16 +432,12 @@ private struct PoolSettings: View {
                                        drop: { change(Pools.moving(pool, login: $0, onto: entry.account.id)) })
                     }
                 } header: {
-                    Text("Logins")
+                    Text(pool.title)
                 } footer: {
-                    Footnote("The order decides which provider a mixed pool tries first. Within one provider, the login with the most room runs the turn.")
+                    Footnote("Tick the logins this pool can use. A mixed pool tries providers in this order; within one provider, the login with the most room goes first.")
                 }
 
                 Section {
-                    if pool.folders.isEmpty {
-                        Text("None")
-                            .foregroundStyle(.secondary)
-                    }
                     ForEach(pool.folders, id: \.self) { folder in
                         HStack {
                             Image(systemName: "folder")
@@ -449,14 +454,17 @@ private struct PoolSettings: View {
                                 Image(systemName: "minus.circle")
                             }
                             .buttonStyle(.borderless)
-                            .tip("Remove")
+                            .tip("Stop starting threads in this folder on \(pool.title)")
                         }
                     }
                     Button("Add Folder…") { addFolders(to: pool) }
+                        .tip("Pick folders whose new threads start on \(pool.title)")
                 } header: {
                     Text("Folders")
                 } footer: {
-                    Footnote("A new thread in one of these, or in a folder inside one, starts on \(pool.title).")
+                    Footnote(pool.folders.isEmpty
+                        ? "No folders yet. New threads in a folder added here, or a folder inside one, start on \(pool.title)."
+                        : "New threads in these folders, or a folder inside one, start on \(pool.title).")
                 }
             }
 
@@ -476,6 +484,10 @@ private struct PoolSettings: View {
         .fixedSize(horizontal: false, vertical: true)
         .scrollIndicators(.never)
         .scrollDisabled(true)
+        // A name typed and then left (another field, a click elsewhere, or
+        // the window closing) is saved, not just one ended with Return.
+        .onChange(of: naming) { _, focused in if !focused { commitTitle() } }
+        .onDisappear(perform: commitTitle)
     }
 
     private var current: Pool? { draft.first { $0.id == selected } ?? draft.first }
@@ -507,11 +519,14 @@ private struct PoolSettings: View {
     }
 
     private func commitTitle() {
-        guard var pool = current else { return }
-        let title = titleDraft.trimmingCharacters(in: .whitespaces)
-        guard !title.isEmpty, title != pool.title else { return }
-        pool.title = title
-        change(pool)
+        guard let pool = current else { return }
+        guard let renamed = Pools.renaming(pool, to: titleDraft) else {
+            // Blank: back to the name it has.
+            titleDraft = pool.title
+            return
+        }
+        titleDraft = renamed.title
+        change(renamed)
     }
 
     private func add() {
@@ -563,6 +578,7 @@ private struct PoolListRow: View {
         Button(action: action) {
             HStack(spacing: 8) {
                 Text(pool.title)
+                    .fontWeight(selected ? .semibold : .regular)
                     .foregroundStyle(.primary)
                     .layoutPriority(1)
                 Spacer(minLength: 12)
@@ -570,14 +586,21 @@ private struct PoolListRow: View {
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
                     .truncationMode(.tail)
-                Image(systemName: "checkmark")
-                    .foregroundStyle(.secondary)
-                    .opacity(selected ? 1 : 0)
-                    .accessibilityHidden(!selected)
             }
             .contentShape(Rectangle())
+            // The pool being edited below is the one tinted, like a
+            // sidebar's selection, rather than a faint tick at the end of
+            // its row. Drawn here as the grouped form on macOS ignores
+            // listRowBackground.
+            .background {
+                RoundedRectangle(cornerRadius: 6)
+                    .fill(Color.accentColor.opacity(selected ? 0.2 : 0))
+                    .padding(.horizontal, -8)
+                    .padding(.vertical, -5)
+            }
         }
         .buttonStyle(.plain)
+        .tip(selected ? "Editing \(pool.title) below" : "Edit \(pool.title)")
         .accessibilityLabel(pool.title + (selected ? ", showing" : ""))
     }
 

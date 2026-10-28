@@ -227,6 +227,14 @@ final class PoolsTests: XCTestCase {
         XCTAssertEqual(Pools.moving(mixed, login: "claude-3", onto: "claude-1").accountIds, mixed.accountIds, "an unticked login doesn't move in")
     }
 
+    func testRenamingKeepsTheId() {
+        let pool = Pool(id: "convex", title: "Convex", accountIds: ["claude-1"])
+        XCTAssertEqual(Pools.renaming(pool, to: "  Work  ")?.title, "Work")
+        XCTAssertEqual(Pools.renaming(pool, to: "Work")?.id, "convex")
+        XCTAssertNil(Pools.renaming(pool, to: "   "), "a blank name isn't saved")
+        XCTAssertNil(Pools.renaming(pool, to: "Convex "), "nothing changed")
+    }
+
     func testNewId() {
         XCTAssertEqual(Pools.newId(title: "Side projects", taken: ["claude"]), "side-projects")
         XCTAssertEqual(Pools.newId(title: "Claude", taken: ["claude", "claude-2"]), "claude-3")

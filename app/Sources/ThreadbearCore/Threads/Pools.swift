@@ -268,6 +268,17 @@ public enum Pools {
         return pool
     }
 
+    /// The pool with a new name, trimmed, or nil when there's nothing to
+    /// save: a blank name (the runner refuses those) or the same one. The id
+    /// stays, so threads and folders on the pool keep it.
+    public static func renaming(_ pool: Pool, to title: String) -> Pool? {
+        let title = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !title.isEmpty, title != pool.title else { return nil }
+        var pool = pool
+        pool.title = title
+        return pool
+    }
+
     /// An id for a new pool from its title: lowercase words joined by
     /// dashes, with "-2", "-3" when it's taken.
     public static func newId(title: String, taken: [String]) -> String {
