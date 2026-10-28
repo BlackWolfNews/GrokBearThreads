@@ -56,6 +56,17 @@ final class UpdatesTextTests: XCTestCase {
         }
     }
 
+    func testPopoverLineIsAboutTheAppAlone() {
+        XCTAssertEqual(UpdatesText.popoverLine(Side(running: "abc1234", staged: "def5678")), "A new version of the app is ready.")
+        // A build of a newer main can start with one staged; the staged one
+        // is still what Restart to Update takes.
+        XCTAssertEqual(UpdatesText.popoverLine(Side(running: "abc1234", staged: "def5678", building: true)), "A new version of the app is ready.")
+        XCTAssertEqual(UpdatesText.popoverLine(Side(running: "abc1234", building: true)), "Building the app's next version.")
+        XCTAssertEqual(UpdatesText.popoverLine(Side(running: "abc1234", failed: true)), "The app's last build failed.")
+        XCTAssertEqual(UpdatesText.popoverLine(Side(running: "abc1234")), "The app is up to date (abc1234).")
+        XCTAssertEqual(UpdatesText.popoverLine(Side()), "The app is up to date.", "a debug app follows nothing")
+    }
+
     func testHelloUpdatesAndOnOldRunnerDecode() throws {
         let hello = try JSONDecoder().decode(HelloResult.self, from: Data("""
         {"runnerVersion":"0.1.0+r","protocol":1,"accounts":[],"defaults":{"cwd":"/tmp","accountId":"claude-3"},

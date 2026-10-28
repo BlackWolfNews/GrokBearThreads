@@ -8,12 +8,14 @@ import ThreadbearCore
 /// a small accent dot only when it needs Mike: a launch.mjs only he can
 /// install. Anything else sorts itself out (a failed build retries once
 /// main is fixed), so it asks nothing of him. The tooltip says what's
-/// going on in a line or two; a click opens the panel.
+/// going on in a line or two; a click opens the panel, and a right-click
+/// a little popover for updating the app (`AppUpdatePopover`).
 struct UpdatesActivityButton: View {
     @Environment(AppModel.self) private var app
     private var updater: AppUpdater { AppUpdater.shared }
 
     var body: some View {
+        @Bindable var app = app
         let side = UpdatesPanel.appSide(updater)
         let busy = UpdatesText.shown(app: side, runner: app.runnerUpdates) || app.clis.contains(where: UpdatesText.cliPending)
         ActivityButton(symbol: WindowDock.updatesSymbol, title: "Updates",
@@ -22,6 +24,52 @@ struct UpdatesActivityButton: View {
                        active: app.updatesShown) {
             app.updatesShown.toggle()
         }
+        // The quick way to take an app update: a popover by the icon, not
+        // the panel (Mike, 28 Oct).
+        .onRightClick(id: "updates") { app.updatePopoverShown.toggle() }
+        .popover(isPresented: $app.updatePopoverShown, arrowEdge: .trailing) {
+            AppUpdatePopover().environment(app)
+        }
+    }
+}
+
+/// The right-click popover: the app's own update in a line, with Restart
+/// to Update when a new version is ready. It changes as it goes, so one
+/// opened mid-build gets its button when the build is staged.
+struct AppUpdatePopover: View {
+    @Environment(AppModel.self) private var app
+    private var updater: AppUpdater { AppUpdater.shared }
+
+    var body: some View {
+        let side = UpdatesPanel.appSide(updater)
+        VStack(alignment: .leading, spacing: zoomed(10)) {
+            HStack(spacing: zoomed(7)) {
+                if side.building && side.staged == nil {
+                    SpinnerMark(color: .secondaryLabelColor)
+                        .frame(width: zoomed(11), height: zoomed(11))
+                }
+                Text(UpdatesText.popoverLine(side))
+                    .font(.system(size: zoomed(12)))
+                    .fixedSize()
+            }
+            if let staged = updater.staged {
+                Button("Restart to Update") {
+                    app.updatePopoverShown = false
+                    updater.restartToUpdate()
+                }
+                // Return takes it, as the popover is there for this.
+                .keyboardShortcut(.defaultAction)
+                .tip("Quit and reopen on \(staged.short). Running threads carry on in the runner.")
+            } else if side.failed && !side.building {
+                // Not while a newer main builds: the line is about that.
+                Button("Show the Log") {
+                    app.updatePopoverShown = false
+                    NSWorkspace.shared.open(URL(fileURLWithPath: AppUpdater.logPath))
+                }
+                .tip("Open the update build's log, to see why it failed")
+            }
+        }
+        .padding(zoomed(14))
     }
 }
 

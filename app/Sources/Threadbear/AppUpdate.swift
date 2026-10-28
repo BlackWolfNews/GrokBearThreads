@@ -318,6 +318,20 @@ final class AppUpdater {
     /// Shows the countdown card with no build behind it, for a scripted
     /// app's screenshot (Automation's `restart-countdown`).
     func previewCountdown(_ seconds: Int?) { countdown = seconds }
+
+    /// Makes up an app update that's "staged", "building" or "failed" (or
+    /// none, on abc1234), for a scripted app's screenshots of the updates
+    /// popover and panel (Automation's `updates` with `preview`). Restart
+    /// to Update does nothing with it: a debug app isn't the installed one.
+    func previewUpdate(_ state: String) {
+        func build(_ short: String) -> BuildInfo {
+            BuildInfo(commit: short, short: short, appTree: short, builtAt: "", checkout: "", configuration: "debug")
+        }
+        running = build("abc1234")
+        staged = state == "staged" ? build("def5678") : nil
+        building = state == "building" ? "def5678" : nil
+        failed = state == "failed" ? "def5678" : nil
+    }
     #endif
 
     private func restart(app: AppModel, inBackground: Bool) {
@@ -445,9 +459,10 @@ final class AppUpdater {
     }
 
     /// "Restart to Update": quit (which swaps the staged bundle in) and
-    /// open the app again.
+    /// open the app again. Only in the installed app: a debug app showing
+    /// a made-up update would otherwise quit and open Mike's.
     func restartToUpdate() {
-        guard staged != nil else { return }
+        guard staged != nil, enabled else { return }
         countdown = nil
         restart(app: AppModel.shared, inBackground: false)
     }

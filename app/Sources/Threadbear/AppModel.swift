@@ -273,6 +273,10 @@ final class AppModel {
     /// The runner's own update (protocol "Runner updates"), for the rail's
     /// updates icon. Nil from a runner older than that.
     var runnerUpdates: RunnerUpdates?
+    /// The little popover a right-click on the updates icon opens, for
+    /// updating the app without the panel. On the model so a script can
+    /// open it.
+    var updatePopoverShown = false
 
     @ObservationIgnored private(set) var client: RPCClient?
     @ObservationIgnored private var sessions: [String: ThreadSession] = [:]

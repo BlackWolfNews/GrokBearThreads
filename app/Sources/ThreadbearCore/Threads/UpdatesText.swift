@@ -82,6 +82,16 @@ public enum UpdatesText {
         return a.running.map { "The app is up to date (\($0))." } ?? "The app is up to date."
     }
 
+    /// The right-click popover's one line, about the app alone: the panel
+    /// has the rest. The view puts Restart to Update or Show the Log under
+    /// it, and the staged commit in the button's tooltip.
+    public static func popoverLine(_ a: AppSide) -> String {
+        if a.staged != nil { return "A new version of the app is ready." }
+        if a.building { return "Building the app's next version." }
+        if a.failed { return "The app's last build failed." }
+        return appLine(a)
+    }
+
     /// The runner's own build: building, built and starting, or failed.
     public static func buildLine(_ u: RunnerUpdates) -> String? {
         let at = u.commit.map { " at \($0)" } ?? ""

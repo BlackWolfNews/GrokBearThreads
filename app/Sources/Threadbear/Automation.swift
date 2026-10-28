@@ -684,8 +684,36 @@ enum Automation {
             return usage(c, app: app)
         case "updates":
             // The Updates panel: {"show": true} opens it ({"show": false}
-            // closes it); with nothing, whether the icon has its dot, its
-            // tooltip, and what the panel says about the app and runner.
+            // closes it). {"rightClick": true} right-clicks the icon, which
+            // opens or closes the app's update popover ({"popover": false}
+            // closes it). {"preview": "staged" | "building" | "failed" |
+            // "none"} makes up the app's update first, for screenshots.
+            // With nothing, whether the icon has its dot, its tooltip,
+            // whether the popover is up and what it says, and what the
+            // panel says about the app and runner.
+            if let state = c["preview"] as? String {
+                guard ["staged", "building", "failed", "none"].contains(state) else { return "error preview is staged, building, failed or none" }
+                AppUpdater.shared.previewUpdate(state)
+            }
+            if c["rightClick"] as? Bool == true {
+                // A made-up right-click through the app's own event
+                // dispatch, so it's the icon's monitor that takes it.
+                guard let window,
+                      let icon = all(RightClickView.self, in: window.contentView).first(where: { $0.identifier?.rawValue == "updates" })
+                else { return "error no updates icon" }
+                let center = icon.convert(NSPoint(x: icon.bounds.midX, y: icon.bounds.midY), to: nil)
+                guard let event = NSEvent.mouseEvent(with: .rightMouseDown, location: center, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+                                                     windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 1)
+                else { return "error no event" }
+                NSApp.sendEvent(event)
+                try? await Task.sleep(for: .milliseconds(500))
+                return "ok popover \(app.updatePopoverShown ? "shown" : "closed")"
+            }
+            if let popover = c["popover"] as? Bool {
+                app.updatePopoverShown = popover
+                try? await Task.sleep(for: .milliseconds(300))
+                return "ok popover \(app.updatePopoverShown ? "shown" : "closed")"
+            }
             if let show = c["show"] as? Bool {
                 app.updatesShown = show
                 guard show else { return "ok closed" }
@@ -695,7 +723,8 @@ enum Automation {
             let side = UpdatesPanel.appSide(AppUpdater.shared)
             let shown = UpdatesText.shown(app: side, runner: app.runnerUpdates)
             let tip = UpdatesText.iconTooltip(app: side, runner: app.runnerUpdates, clis: app.clis)
-            return "ok " + json(["shown: \(shown)", "tip: " + tip.replacingOccurrences(of: "\n", with: " / "), UpdatesText.appLine(side)] + UpdatesText.runnerLines(app.runnerUpdates))
+            let popover = "popover: " + (app.updatePopoverShown ? "shown, " : "closed, ") + UpdatesText.popoverLine(side)
+            return "ok " + json(["shown: \(shown)", "tip: " + tip.replacingOccurrences(of: "\n", with: " / "), popover, UpdatesText.appLine(side)] + UpdatesText.runnerLines(app.runnerUpdates))
         case "restart-countdown":
             // The update's countdown card: {"show": 5} shows it at that
             // count (with no build behind it), {"show": 0} hides it.
