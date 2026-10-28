@@ -240,7 +240,9 @@ async function keys(urlFromProject) {
 // Convex asks in the terminal; with nobody there to answer (an agent), setup
 // stops and lists them instead.
 function onlyTeam() {
-  const out = run(npx, ['convex', 'login', 'status']).stdout ?? '';
+  // `convex login status` prints the list on stderr.
+  const r = run(npx, ['convex', 'login', 'status']);
+  const out = `${r.stdout ?? ''}\n${r.stderr ?? ''}`;
   const teams = [...out.matchAll(/^\s+- (.+) \(([^)]+)\)$/gm)].map((m) => ({ name: m[1], slug: m[2] }));
   if (teams.length === 1) return teams[0].slug;
   if (process.stdin.isTTY && !v.yes) return undefined;
