@@ -192,6 +192,13 @@ final class TranscriptController: NSObject, NSTableViewDataSource, NSTableViewDe
         } else {
             scrollToBottom()
         }
+        // Evidence for the blank transcript Mike has seen twice and no debug
+        // copy reproduces: what the view had when a thread was drawn afresh.
+        if let session {
+            let clip = scrollView.contentView.bounds
+            let visible = scrollView.window?.occlusionState.contains(.visible) ?? false
+            AppLog.write("transcript", "showing \(session.threadId): \(rowCount) rows, \(session.state), width \(Int(width)), clip \(Int(clip.minY))+\(Int(clip.height)) of \(Int(tableView.frame.height)), window \(scrollView.window == nil ? "none" : visible ? "visible" : "hidden")")
+        }
     }
 
     var rowCount: Int { session?.displayCount ?? 0 }
@@ -523,7 +530,13 @@ final class TranscriptController: NSObject, NSTableViewDataSource, NSTableViewDe
         // was, which hid the newest rows of a thread that was pinned to the
         // bottom. Whether it was pinned is judged by the height it had.
         let clip = scrollView.contentView.bounds
-        let wasPinned = lastClipHeight > 0 && abs(clip.height - lastClipHeight) >= 1
+        // A thread shown before its panel was laid out (height 0, as after
+        // the app relaunches itself in the background) scrolled to "the
+        // bottom" of a zero-height view, which is past the last row; with no
+        // earlier height it never counted as pinned, so the transcript
+        // stayed blank (Mike, 28 Oct). A view wholly past the end is pinned.
+        let pastEnd = rowCount > 0 && clip.minY >= tableView.frame.height
+        let wasPinned = pastEnd || lastClipHeight > 0 && abs(clip.height - lastClipHeight) >= 1
             && clip.minY + lastClipHeight >= tableView.frame.height + scrollView.contentInsets.bottom - 24
         lastClipHeight = clip.height
         let newWidth = currentTableWidth
