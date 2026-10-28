@@ -436,7 +436,8 @@ function formatSync(y: NonNullable<RunnerStatus['sync']>, now: number): string {
   const last = y.lastSyncAt ? `, last write ${duration(now - Date.parse(y.lastSyncAt))} ago` : ', nothing written yet';
   const pending = y.pending ? `, ${plural(y.pending, 'change', 'changes')} waiting` : '';
   if (y.state === 'error') return `Convex mirror: failing${where}: ${y.lastError ?? 'unknown error'}${y.retryAt ? `, retrying in ${duration(Math.max(0, Date.parse(y.retryAt) - now))}` : ''}${pending}`;
-  return `Convex mirror: on${where} as ${y.name ?? y.runnerId ?? 'this runner'}${last}${pending}`;
+  const behind = y.backend && y.backend.apiVersion < y.backend.expected ? `; its backend is older than this runner (API ${y.backend.apiVersion}, wants ${y.backend.expected}): deploy it with runner/scripts/deploy-backend.mjs` : '';
+  return `Convex mirror: on${where} as ${y.name ?? y.runnerId ?? 'this runner'}${last}${pending}${behind}`;
 }
 
 // The runner following main by itself (src/update.ts), one line.

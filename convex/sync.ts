@@ -6,6 +6,7 @@ import { v } from 'convex/values';
 import { internalMutation, mutation, query } from './_generated/server';
 import { internal } from './_generated/api';
 import { threadFields, views } from './schema';
+import { API_VERSION } from './version';
 import { checkRunnerKey } from './lib';
 
 // Text messages kept per thread (the phone's thread view); older ones go
@@ -89,7 +90,9 @@ export const heartbeat = mutation({
       threadCount: v.number(),
     }),
   },
-  returns: v.null(),
+  // The backend's API version (version.ts), so the runner can tell when it's
+  // talking to an older backend than it was built for.
+  returns: v.object({ apiVersion: v.number() }),
   handler: async (ctx, { key, runner }) => {
     checkRunnerKey(key);
     const row = { ...runner, lastSeenAt: Date.now() };
@@ -99,7 +102,7 @@ export const heartbeat = mutation({
       .unique();
     if (existing) await ctx.db.replace(existing._id, row);
     else await ctx.db.insert('runners', row);
-    return null;
+    return { apiVersion: API_VERSION };
   },
 });
 

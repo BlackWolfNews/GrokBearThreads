@@ -53,6 +53,13 @@ export type SyncConfig = {
 };
 
 // runner.status's `sync` (docs/protocol.md, "Sync").
+// The backend API version this runner was built for (convex/version.ts; a unit
+// test keeps them equal). sync:heartbeat answers with the backend's, and a
+// lower one means its backend hasn't been deployed since this runner was:
+// said in runner.status, tb status and the log rather than stopping, since
+// the runner only adds to what it sends while the number stays the same.
+export const BACKEND_API_VERSION = 1;
+
 export type SyncStatus = {
   state: 'off' | 'ok' | 'error';
   reason?: string; // why it's off
@@ -68,6 +75,9 @@ export type SyncStatus = {
   // The phone's commands: whether the runner is listening for them, how
   // many it has applied since start, and the last one that failed.
   commands?: { state: 'off' | 'on' | 'error'; applied: number; failed: number; lastError?: string };
+  // The backend's API version from the last heartbeat (0 for a backend from
+  // before there was one), and the one this runner expects.
+  backend?: { apiVersion: number; expected: number };
 };
 
 // The approval or question a thread is waiting on, as the phone sees it.
@@ -342,6 +352,7 @@ export class ConvexSync {
   private dirtyLists = new Set<ListName>();
   private flushTimer?: TimerHandle;
   private heartbeatTimer?: TimerHandle;
+  private backendApiVersion?: number;
   private lastFlushAt = -Infinity;
   private flushing = false;
   private full = true; // the first write after start covers everything, then prunes and backfills
@@ -404,6 +415,16 @@ export class ConvexSync {
     if (opts.bye) await this.post('mutation', 'sync:bye', { key: this.deps.key, runnerId: this.runnerId }).catch(() => {});
   }
 
+  // Backends from before version.ts answer the heartbeat with null: version 0.
+  private sawBackend(r: unknown): void {
+    const v = typeof (r as { apiVersion?: unknown } | null)?.apiVersion === 'number' ? (r as { apiVersion: number }).apiVersion : 0;
+    if (v === this.backendApiVersion) return;
+    this.backendApiVersion = v;
+    if (v < BACKEND_API_VERSION) {
+      this.deps.log.warn('the convex backend is older than this runner', { backend: v, expected: BACKEND_API_VERSION, url: this.deps.config.url });
+    }
+  }
+
   status(): SyncStatus {
     if (this.off) return { state: 'off', reason: this.off };
     const s: SyncStatus = {
@@ -419,6 +440,7 @@ export class ConvexSync {
     if (this.lastSyncAt !== undefined) s.lastSyncAt = new Date(this.lastSyncAt).toISOString();
     if (this.lastError) s.lastError = this.lastError;
     if (this.retryAt !== undefined) s.retryAt = new Date(this.retryAt).toISOString();
+    if (this.backendApiVersion !== undefined) s.backend = { apiVersion: this.backendApiVersion, expected: BACKEND_API_VERSION };
     return s;
   }
 
@@ -642,9 +664,12 @@ export class ConvexSync {
       draining: false,
       threadCount: this.deps.runner.list(ALL).length,
     };
-    void this.post('mutation', 'sync:heartbeat', { key: this.deps.key, runner }).catch((e) => {
-      this.deps.log.debug('convex heartbeat failed', { error: String(e) });
-    });
+    void this.post('mutation', 'sync:heartbeat', { key: this.deps.key, runner }).then(
+      (r) => this.sawBackend(r),
+      (e) => {
+        this.deps.log.debug('convex heartbeat failed', { error: String(e) });
+      },
+    );
     this.heartbeatTimer = this.deps.clock.setTimeout(() => this.heartbeat(), HEARTBEAT_MS);
   }
 

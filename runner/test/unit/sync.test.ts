@@ -5,20 +5,20 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { makeHarness, tick, tmpDir } from '../helpers/fakes.ts';
-import { ConvexSync, SYNC_COALESCE_MS, HEARTBEAT_MS, SYNC_BATCH, ensureRunnerId, toThreadDoc, convexPoster, type ThreadDoc } from '../../src/sync.ts';
+import { ConvexSync, BACKEND_API_VERSION, SYNC_COALESCE_MS, HEARTBEAT_MS, SYNC_BATCH, ensureRunnerId, toThreadDoc, convexPoster, type ThreadDoc } from '../../src/sync.ts';
 import { nullLogger } from '../../src/log.ts';
 import { readRunnerJson } from '../../src/config.ts';
 
 type Call = { kind: string; fn: string; args: Record<string, unknown> };
 
-function setup(opts: { fail?: () => Error | undefined; config?: Partial<ConstructorParameters<typeof ConvexSync>[0]['config']>; key?: string } = {}) {
+function setup(opts: { fail?: () => Error | undefined; config?: Partial<ConstructorParameters<typeof ConvexSync>[0]['config']>; key?: string; answer?: (fn: string) => unknown } = {}) {
   const h = makeHarness();
   const calls: Call[] = [];
   const post = async (kind: 'mutation' | 'query', fn: string, args: Record<string, unknown>) => {
     const err = opts.fail?.();
     if (err) throw err;
     calls.push({ kind, fn, args });
-    return null;
+    return opts.answer ? opts.answer(fn) : null;
   };
   const sync = new ConvexSync({
     config: { enabled: true, url: 'https://x.convex.cloud', name: 'TestMac', runnerId: 'r1', ...opts.config },
@@ -580,4 +580,27 @@ test('paging: the row says where the thread starts, and a page command writes ea
   push([{ commandId: 'p2', kind: 'page', threadId: t.id, args: { beforeSeq: 1 }, createdAt: 2 }]);
   await tick(10);
   assert.deepEqual(calls.filter((c) => c.fn === 'sync:finishCommand').at(-1)!.args.note, 'nothing earlier');
+});
+
+test('the backend API version from the heartbeat shows in status, and an old backend counts as 0', async () => {
+  const fresh = setup({ answer: (fn) => (fn === 'sync:heartbeat' ? { apiVersion: BACKEND_API_VERSION } : null) });
+  fresh.sync.start();
+  await fresh.sync.flushNow();
+  await tick();
+  assert.deepEqual(fresh.sync.status().backend, { apiVersion: BACKEND_API_VERSION, expected: BACKEND_API_VERSION });
+  await fresh.sync.stop();
+
+  // A backend deployed before convex/version.ts answers the heartbeat with null.
+  const old = setup();
+  old.sync.start();
+  await old.sync.flushNow();
+  await tick();
+  assert.deepEqual(old.sync.status().backend, { apiVersion: 0, expected: BACKEND_API_VERSION });
+  await old.sync.stop();
+});
+
+test("the runner's expected backend API version is the one convex/version.ts declares", () => {
+  const src = fs.readFileSync(path.join(import.meta.dirname, '..', '..', '..', 'convex', 'version.ts'), 'utf8');
+  const declared = Number(src.match(/export const API_VERSION = (\d+);/)?.[1]);
+  assert.equal(BACKEND_API_VERSION, declared, 'bump BACKEND_API_VERSION in runner/src/sync.ts along with convex/version.ts');
 });

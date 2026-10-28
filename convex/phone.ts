@@ -7,6 +7,7 @@ import { ConvexError, v } from 'convex/values';
 import { mutation, query, type QueryCtx } from './_generated/server';
 import { threadFields, views } from './schema';
 import { checkPhoneToken } from './lib';
+import { API_VERSION } from './version';
 
 // A runner not heard from for this long is offline, and a command with no
 // runnerId goes to the newest one still online.
@@ -29,12 +30,14 @@ function stripThread<T extends { _id: unknown; _creationTime: unknown; pushedAt?
   return rest;
 }
 
+// apiVersion is the backend's (version.ts), so the app can say "update
+// Threadbear on your Mac" when it's talking to a backend older than it needs.
 export const me = query({
   args: { token: v.string() },
-  returns: v.object({ name: v.string(), expiresAt: v.string() }),
+  returns: v.object({ name: v.string(), expiresAt: v.string(), apiVersion: v.number() }),
   handler: async (ctx, { token }) => {
     const t = await checkPhoneToken(ctx, token);
-    return { name: t.name, expiresAt: new Date(t.expiresAt).toISOString() };
+    return { name: t.name, expiresAt: new Date(t.expiresAt).toISOString(), apiVersion: API_VERSION };
   },
 });
 
