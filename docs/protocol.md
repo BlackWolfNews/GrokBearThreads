@@ -1125,6 +1125,39 @@ the rail. A hook is a command the runner runs by itself:
   ],
 ```
 
+**Live state.** An action or panel can also have `when` and `badge`,
+functions that get the same `{ cwd, threadId, matched, sh }` as `items`.
+`when` hides it unless it returns something true (a chip that only turns
+up when there's something to do); `badge` returns a count (a number, a
+numeric string or a list, whose length counts), sent as the item's
+`badge` when it's 1 or more and drawn on the chip or rail button. The
+runner calls them each time it reads the patches, after every turn, and
+every 20 seconds for an inbox thread that has any. Commands that two of
+them run in the same folder run once per read. One that throws or takes
+over 10 seconds hides its item (a `when`) or gives no badge, and its
+patch's `liveError` says why.
+
+```ts
+  actions: [{
+    title: "Your turn",
+    prompt: "Do my comments in Tandem, then hand back.",
+    when: async ({ sh }) => JSON.parse(await sh("tandem comments --json")).comments.length > 0,
+    badge: async ({ sh }) => JSON.parse(await sh("tandem comments --json")).comments,
+  }],
+```
+
+**Tool patches.** A patch with `appliesTo` (a name glob, or a list of
+them, like `"*.tandem"`) belongs to a tool, not a place. It applies to a
+thread only where a folder from the thread's own up to home (else from
+one of its projects' folders) holds a matching name, and runs in that
+folder, whichever folder the patch file came from. Besides the usual
+places, the runner looks for tool patches in the `.threadbear/patches/`
+of every project's folders, so a tool's repo can carry its patch: Tandem's
+lives in Tandem's repo, and any video folder with a `.tandem` file gets
+it. The patch's `matched` lists the paths that made it apply, and
+functions get them as `matched` (a folder with two `.tandem` projects
+has two).
+
 `on: "turn.end"` (the one trigger so far) runs it after each turn the
 agent completed, in the thread's folder like an action, and its output
 goes into the transcript as an `action.run` with `trigger`. With

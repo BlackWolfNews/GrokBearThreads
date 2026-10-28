@@ -310,6 +310,7 @@ export type Action = {
   folder?: string; // where the command runs; absent: the thread's folder
   projectId?: string; // the project whose folder gave it
   note?: string;
+  badge?: number; // a count on the chip, from the patch's badge function
 };
 
 // A hook a patch gives a thread: a command the runner runs by itself when
@@ -340,6 +341,8 @@ export type PatchInfo = {
   folder?: string; // the folder it applies from
   projectId?: string; // set when it came from a project's folder
   error?: string; // set when the file couldn't be loaded; it then gives nothing
+  matched?: string[]; // a tool patch (appliesTo): the paths that made it apply
+  liveError?: string; // a when or badge function that threw or took too long
 };
 
 // A panel a patch gives a thread (docs/protocol.md, "Panels"). The runner
@@ -354,6 +357,7 @@ export type Panel = {
   patch: string; // the patch it came from: "convex", "xcode"
   projectId?: string;
   note?: string; // one line about it: the deployment name, the booted device
+  badge?: number; // a count on its rail button, from the patch's badge function
 };
 
 // One row of a `list` panel, as its patch's `items` function returns it.

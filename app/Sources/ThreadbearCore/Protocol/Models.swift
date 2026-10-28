@@ -392,8 +392,11 @@ public struct Panel: Sendable, Hashable, Codable, Identifiable {
     /// The project whose folder gave it, when it came from one rather than
     /// the thread's own folder.
     public var projectId: String?
+    /// A count on its rail button from the patch's live state ("14 edits
+    /// waiting for review"); nil for none.
+    public var badge: Int?
 
-    public init(id: String, title: String, kind: Kind = .url, url: String? = nil, icon: String? = nil, patch: String = "", note: String? = nil, projectId: String? = nil) {
+    public init(id: String, title: String, kind: Kind = .url, url: String? = nil, icon: String? = nil, patch: String = "", note: String? = nil, projectId: String? = nil, badge: Int? = nil) {
         self.id = id
         self.title = title
         self.kind = kind
@@ -402,6 +405,7 @@ public struct Panel: Sendable, Hashable, Codable, Identifiable {
         self.patch = patch
         self.note = note
         self.projectId = projectId
+        self.badge = badge
     }
 
     public init(from decoder: Decoder) throws {
@@ -414,6 +418,7 @@ public struct Panel: Sendable, Hashable, Codable, Identifiable {
         patch = try c.decodeIfPresent(String.self, forKey: .patch) ?? ""
         note = try c.decodeIfPresent(String.self, forKey: .note)
         projectId = (try? c.decodeIfPresent(String.self, forKey: .projectId)) ?? nil
+        badge = (try? c.decodeIfPresent(Int.self, forKey: .badge)) ?? nil
     }
 
     /// The page as a URL, when it is one.
@@ -443,9 +448,13 @@ public struct Action: Sendable, Hashable, Codable, Identifiable {
     /// for the thread's own folder.
     public var folder: String?
     public var projectId: String?
+    /// A count on the chip from the patch's live state ("3 comments");
+    /// nil for none.
+    public var badge: Int?
 
     public init(id: String, title: String, kind: Kind = .command, command: String? = nil, prompt: String? = nil, patch: String = "", note: String? = nil,
-                folder: String? = nil, projectId: String? = nil) {
+                folder: String? = nil, projectId: String? = nil, badge: Int? = nil) {
+        self.badge = badge
         self.id = id
         self.title = title
         self.kind = kind
@@ -468,6 +477,7 @@ public struct Action: Sendable, Hashable, Codable, Identifiable {
         note = try c.decodeIfPresent(String.self, forKey: .note)
         folder = (try? c.decodeIfPresent(String.self, forKey: .folder)) ?? nil
         projectId = (try? c.decodeIfPresent(String.self, forKey: .projectId)) ?? nil
+        badge = (try? c.decodeIfPresent(Int.self, forKey: .badge)) ?? nil
     }
 }
 
@@ -529,8 +539,16 @@ public struct PatchInfo: Sendable, Hashable, Codable, Identifiable {
     /// Set when it came from one of the thread's projects' folders rather
     /// than its own.
     public var projectId: String?
+    /// A tool patch (`appliesTo`): the paths that made it apply, like the
+    /// video's .tandem file.
+    public var matched: [String]?
+    /// A `when` or `badge` function that threw or took too long.
+    public var liveError: String?
 
-    public init(id: String, source: String = "project", file: String? = nil, error: String? = nil, folder: String? = nil, projectId: String? = nil) {
+    public init(id: String, source: String = "project", file: String? = nil, error: String? = nil, folder: String? = nil, projectId: String? = nil,
+                matched: [String]? = nil, liveError: String? = nil) {
+        self.matched = matched
+        self.liveError = liveError
         self.id = id
         self.source = source
         self.file = file
@@ -547,6 +565,8 @@ public struct PatchInfo: Sendable, Hashable, Codable, Identifiable {
         error = try c.decodeIfPresent(String.self, forKey: .error)
         folder = (try? c.decodeIfPresent(String.self, forKey: .folder)) ?? nil
         projectId = (try? c.decodeIfPresent(String.self, forKey: .projectId)) ?? nil
+        matched = (try? c.decodeIfPresent([String].self, forKey: .matched)) ?? nil
+        liveError = (try? c.decodeIfPresent(String.self, forKey: .liveError)) ?? nil
     }
 }
 

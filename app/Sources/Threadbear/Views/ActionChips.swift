@@ -41,6 +41,14 @@ private struct ActionChip: View {
                 }
                 Text(action.title)
                     .foregroundStyle(.primary)
+                // The patch's live count: comments waiting, say.
+                if let badge = action.badge {
+                    Text(badge > 99 ? "99+" : String(badge))
+                        .font(.system(size: TypeScale.small, weight: .semibold).monospacedDigit())
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, zoomed(5))
+                        .background(Capsule().fill(Color.primary.opacity(0.08)))
+                }
             }
             .font(.system(size: TypeScale.chip))
             .padding(.horizontal, zoomed(9))

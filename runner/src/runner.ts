@@ -80,6 +80,8 @@ import {
   hookApplies,
   isInside,
   loadPatchSet,
+  applyLive,
+  hasLive,
   projectPanels,
   renderListPanel,
   renderPanel,
@@ -253,7 +255,9 @@ type Runtime = {
   // has just written .env.local, or a patch file the agent has just
   // written, shows up within seconds. Until the first read finishes the
   // built-in panels stand in.
-  patches?: { cwd: string; key: string; at: number; set: PatchSet; refreshing: boolean; loaded: boolean };
+  // `base` is the set as the files give it; `set` is that with live state
+  // applied (applyLive), which is what the app sees. `live`: base has any.
+  patches?: { cwd: string; key: string; at: number; base: PatchSet; set: PatchSet; refreshing: boolean; loaded: boolean; live?: boolean };
   runningActions?: Set<string>;
   // Turns in a row that a hook's message started, per hook. A hook that
   // keeps failing stops being told to the agent after HOOK_TELL_LIMIT, so
@@ -331,6 +335,10 @@ const STARTUP_NOTICE_MS = 10 * 60_000;
 const WAKE_GRACE_MS = 15_000;
 // How long a thread's patches are kept before the folder is read again.
 const PATCHES_TTL_MS = 15_000;
+// How often a thread whose patches have live state (when, badge) has it
+// read again by itself, while it's in the inbox: comments Mike leaves in
+// Tandem turn into a "Your turn" chip within this long.
+const LIVE_POLL_MS = 20_000;
 // How often the account list is read again, so a new login is noticed
 // (and its models asked for) without a client asking.
 const ACCOUNT_RESCAN_MS = 10_000;
@@ -383,6 +391,7 @@ export class Runner {
   // Accounts whose CLI has been asked for its models (or is being asked).
   private probed = new Set<string>();
   private rescanTimer?: TimerHandle;
+  private liveTimer?: TimerHandle;
   private accountsTimer?: TimerHandle;
   private accountsSentAt = -Infinity;
   private accountsShown?: string; // the last list clients were sent (or got in hello's time)
@@ -688,6 +697,7 @@ export class Runner {
     this.roomTimer?.cancel();
     this.rescanTimer?.cancel();
     this.accountsTimer?.cancel();
+    this.liveTimer?.cancel();
     for (const off of this.unsubs.splice(0)) off();
     for (const st of this.threads.values()) {
       const { rt } = st;
@@ -2114,6 +2124,9 @@ export class Runner {
     // The folder's turn.end hooks, after a turn the agent finished itself
     // (not one the runner opened for a background task's approval).
     if (outcome === 'completed' && finished && !finished.auto && !this.stopping) void this.runHooks(st, finished);
+    // The turn may have changed what live state reads (comments resolved,
+    // a handback): read it now rather than at the next poll.
+    if (rt.patches?.live && !this.stopping) void this.refreshPatches(st);
     if (outcome && finished && !finished.auto && !this.stopping) {
       this.tellActivity({ kind: 'turn.end', threadId: rec.id, outcome, edited: [...finished.edited].map((p) => path.resolve(rec.cwd, p)) });
     }
@@ -3471,7 +3484,8 @@ export class Runner {
       } catch (e) {
         this.log.warn('could not read the folder for panels', { threadId: rec.id, cwd: rec.cwd, error: String(e) });
       }
-      rt.patches = { cwd: rec.cwd, key, at: now, set: { ...EMPTY_PATCH_SET, panels }, refreshing: false, loaded: false };
+      const set = { ...EMPTY_PATCH_SET, panels };
+      rt.patches = { cwd: rec.cwd, key, at: now, base: set, set, refreshing: false, loaded: false };
       void this.refreshPatches(st);
     } else if (!rt.patches.refreshing && now - rt.patches.at > PATCHES_TTL_MS) {
       void this.refreshPatches(st);
@@ -3489,11 +3503,14 @@ export class Runner {
     entry.refreshing = true;
     const cwd = rec.cwd;
     const key = entry.key;
+    let base: PatchSet;
     let set: PatchSet;
     try {
-      set = await loadPatchSet(cwd, this.panelsRoot, this.patchCache, this.projects?.foldersFor(rec) ?? []);
+      base = await loadPatchSet(cwd, this.panelsRoot, this.patchCache, this.projects?.foldersFor(rec) ?? [], this.projects?.allFolders() ?? []);
+      set = await applyLive(base, { cwd, threadId: rec.id, run: (command, dir) => this.runPatchCommand(rec.id, command, dir) });
     } catch (e) {
       this.log.warn('could not read the folder for patches', { threadId: rec.id, cwd, error: String(e) });
+      base = entry.base;
       set = entry.set;
     }
     entry.refreshing = false;
@@ -3506,12 +3523,40 @@ export class Runner {
       this.markDirty(st);
       return;
     }
-    const before = entry.set;
-    const changed = JSON.stringify(before) !== JSON.stringify(set);
-    if (entry.loaded && changed) this.notePatchChanges(st, before, set);
+    // What the files give is said in the transcript; live state (a chip
+    // coming and going) only moves the summary.
+    if (entry.loaded && JSON.stringify(entry.base) !== JSON.stringify(base)) this.notePatchChanges(st, entry.base, base);
+    const changed = JSON.stringify(entry.set) !== JSON.stringify(set);
+    entry.base = base;
     entry.set = set;
+    entry.live = hasLive(base);
     entry.loaded = true;
     if (changed) this.markDirty(st);
+    if (entry.live) this.armLivePoll();
+  }
+
+  // A command a patch's function runs (list panels, live state): in its
+  // folder, with the thread's variables, like an action.
+  private runPatchCommand(threadId: string, command: string, cwd: string) {
+    return runCommand(command, { cwd, env: { ...process.env, ...threadEnv(threadId, this.cfg.home) }, shell: this.actionShell, timeoutMs: this.actionTimeoutMs });
+  }
+
+  // Reads live state again for the inbox's threads that have any, every
+  // LIVE_POLL_MS while there are some. Hibernating and Den threads wait
+  // until they're back (patchSet reads again on the next summary).
+  private armLivePoll(): void {
+    if (this.liveTimer || this.stopping) return;
+    this.liveTimer = this.clock.setTimeout(() => {
+      this.liveTimer = undefined;
+      if (this.stopping) return;
+      let any = false;
+      for (const st of this.threads.values()) {
+        if (!st.rt.patches?.live || st.rt.deleted || this.bucket(st.rec) !== 'inbox') continue;
+        any = true;
+        void this.refreshPatches(st);
+      }
+      if (any) this.armLivePoll();
+    }, LIVE_POLL_MS);
   }
 
   private notePatchChanges(st: ThreadState, before: PatchSet, after: PatchSet): void {
@@ -3544,7 +3589,7 @@ export class Runner {
       return renderListPanel(panel, this.patchSet(st), {
         cwd: st.rec.cwd,
         threadId,
-        run: (command, cwd) => runCommand(command, { cwd, env: { ...process.env, ...threadEnv(threadId, this.cfg.home) }, shell: this.actionShell, timeoutMs: this.actionTimeoutMs }),
+        run: (command, cwd) => this.runPatchCommand(threadId, command, cwd),
       });
     }
     return renderPanel(panel, paths.panels(this.cfg.home, threadId), this.screenshot);

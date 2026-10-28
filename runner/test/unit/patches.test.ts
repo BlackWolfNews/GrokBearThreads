@@ -331,3 +331,72 @@ test('a panel with an items function is a list panel, filled by renderListPanel 
   assert.deepEqual(await renderListPanel(notList!, set, ctx), { note: "The panel's items function didn't return a list." });
   assert.equal(readPatchModule('x', 'project', '/x.ts', { panels: [{ title: 'Both', url: 'https://a.dev', items: () => [] }] }).info.error, 'panels[0] ("Both") should have url or items, not both.');
 });
+
+test('a tool patch (appliesTo) applies only where its name is found, from any project folder, and runs there', async () => {
+  const home = tmpDir();
+  const tool = project(home, 'dev/tandem', { 'package.json': '{}' });
+  const file = writePatch(path.join(tool, '.threadbear/patches'), 'tandem.ts', `
+    export default {
+      appliesTo: "*.tandem",
+      actions: [{ title: "Open in Tandem", run: "open *.tandem" }],
+    };
+  `);
+  // Another project's patch with no appliesTo stays with that project.
+  writePatch(path.join(tool, '.threadbear/patches'), 'build.ts', `export default { actions: [{ title: "Build", run: "swift build" }] };`);
+  const video = project(home, 'videos/batching', { 'Batching.tandem': 'x', 'Short.tandem': null });
+  const sub = project(home, 'videos/batching/broll');
+  const plain = project(home, 'videos/other');
+
+  const set = await loadPatchSet(sub, home, new Map(), [], [tool]);
+  assert.deepEqual(set.patches, [{ id: 'tandem', source: 'project', file, folder: video, matched: [path.join(video, 'Batching.tandem'), path.join(video, 'Short.tandem')] }]);
+  assert.deepEqual(set.actions, [{ id: 'tandem.open-in-tandem', title: 'Open in Tandem', kind: 'command', command: 'open *.tandem', patch: 'tandem', folder: video }]);
+  for (const a of set.actions) assert.deepEqual(checkAction(a as never), []);
+  assert.deepEqual((await loadPatchSet(plain, home, new Map(), [], [tool])).patches, []);
+  // In the tool's own repo, with no .tandem file, only its own patch applies.
+  assert.deepEqual((await loadPatchSet(tool, home, new Map(), [], [tool])).patches.map((p) => p.id), ['build']);
+  // Found through one of the thread's projects' folders too, tagged with it.
+  const misc = project(home, 'dev/misc');
+  const viaProject = await loadPatchSet(misc, home, new Map(), [{ folder: video, projectId: 'p_v' }], [tool]);
+  assert.equal(viaProject.patches[0]?.folder, video);
+  assert.equal(viaProject.actions[0]?.projectId, 'p_v');
+  assert.equal(readPatchModule('x', 'project', '/x.ts', { appliesTo: 'a/*.tandem' }).info.error, 'appliesTo should be a name glob like "*.tandem", or a list of them (names in a folder, no slashes).');
+});
+
+test('live state: when hides, badge counts, a shared command runs once, a failure is liveError', async () => {
+  const { applyLive, hasLive } = await import('../../src/patches.ts');
+  const home = tmpDir();
+  const app = project(home, 'dev/app', { 'package.json': '{}' });
+  writePatch(path.join(app, '.threadbear/patches'), 'review.ts', `
+    const count = async ({ sh }) => JSON.parse(await sh("echo '{\\"n\\":3}'")).n;
+    export default {
+      actions: [
+        { title: "Your turn", prompt: "Do my comments.", when: async (ctx) => (await count(ctx)) > 0, badge: count },
+        { title: "Hidden", run: "true", when: () => false },
+        { title: "Plain", run: "true" },
+        { title: "Zero", run: "true", badge: () => 0 },
+      ],
+      panels: [
+        { title: "Waiting", items: () => [], badge: () => ["a", "b"] },
+        { title: "Broken", url: "https://x.dev", badge: () => { throw new Error("tandem isn't running") } },
+      ],
+    };
+  `);
+  const base = await loadPatchSet(app, home);
+  assert.equal(hasLive(base), true);
+  const commands: string[] = [];
+  const ctx = { cwd: app, threadId: 't1', run: async (command: string, cwd: string) => { commands.push(command); return runCommand(command, { cwd, env: process.env }); } };
+  const set = await applyLive(base, ctx);
+  assert.deepEqual(set.actions.map((a) => [a.title, a.badge]), [['Your turn', 3], ['Plain', undefined], ['Zero', undefined]]);
+  assert.deepEqual(set.panels.map((p) => [p.title, p.badge]), [['Waiting', 2], ['Broken', undefined]]);
+  for (const a of set.actions) assert.deepEqual(checkAction(a as never), []);
+  for (const p of set.panels) assert.deepEqual(checkPanel(p as never), []);
+  assert.equal(commands.length, 1);
+  assert.equal(set.patches[0]?.liveError, "tandem isn't running");
+  // The base set is left as it was, so a when that turns true brings it back.
+  assert.equal(base.actions.length, 4);
+  assert.equal(base.patches[0]?.liveError, undefined);
+  const without = await loadPatchSet(project(home, 'dev/none'), home);
+  assert.equal(hasLive(without), false);
+  assert.equal(await applyLive(without, ctx), without);
+  assert.equal(readPatchModule('x', 'project', '/x.ts', { actions: [{ title: 'A', run: 'x', when: true }] }).info.error, 'actions[0] ("A") has a when that isn\'t a function.');
+});

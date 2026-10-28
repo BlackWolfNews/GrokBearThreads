@@ -177,7 +177,7 @@ struct PanelRail: View {
                 app.clickRail(.highlights, in: thread)
             }
             ForEach(thread.panels) { panel in
-                ActivityButton(symbol: PanelIcon.symbol(for: panel), title: panel.title, active: app.dock.isShowing(panel.id)) {
+                ActivityButton(symbol: PanelIcon.symbol(for: panel), title: panel.title, badge: panel.badge, active: app.dock.isShowing(panel.id)) {
                     app.clickRail(.panel(panel.id), in: thread)
                 }
             }
@@ -277,6 +277,20 @@ struct PatchesList: View {
                         .font(.system(size: TypeScale.detail))
                         .foregroundStyle(.secondary)
                 }
+                if let liveError = patch.liveError {
+                    Text(liveError)
+                        .font(.system(size: TypeScale.detail))
+                        .foregroundStyle(Color(nsColor: Theme.failed))
+                        .textSelection(.enabled)
+                }
+            }
+            // A tool patch: why it's here, when it came from another repo.
+            if let matched = patch.matched, !matched.isEmpty {
+                Text("Here for " + matched.map { ($0 as NSString).lastPathComponent }.joined(separator: ", "))
+                    .font(.system(size: TypeScale.small))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
             }
             if let file = patch.file {
                 Button {

@@ -1306,6 +1306,40 @@ test('a patch file written later is noticed within the TTL and said in the trans
   assert.equal(h.runner.get(thread.id).actions, undefined);
 });
 
+test('live state: a when chip comes and goes by itself on the poll, with its badge', async () => {
+  const root = tmpDir();
+  const project = path.join(root, 'app');
+  fs.mkdirSync(path.join(project, '.threadbear/patches'), { recursive: true });
+  // A comment count in a file stands in for tandem comments --json.
+  fs.writeFileSync(path.join(project, 'count'), '0');
+  fs.writeFileSync(path.join(project, '.threadbear/patches/review.ts'), `
+    const count = async ({ sh }) => Number((await sh("cat count")).trim());
+    export default { actions: [{ title: "Your turn", prompt: "Do my comments.", when: async (c) => (await count(c)) > 0, badge: count }] };`);
+  const h = makeHarness(undefined, {}, { panelsRoot: root, actionShell: ['/bin/sh', '-c'], actionTimeoutMs: 5000 });
+  const { thread } = create(h, { cwd: project });
+  const settle = async () => {
+    for (let i = 0; i < 50; i++) {
+      await new Promise((r) => setTimeout(r, 10));
+      await tick();
+    }
+  };
+  await settle();
+  assert.equal(h.runner.get(thread.id).actions, undefined);
+  fs.writeFileSync(path.join(project, 'count'), '3');
+  // No summary asked for: the poll reads it again by itself.
+  h.clock.advance(21_000);
+  await settle();
+  const shown = h.runner.get(thread.id);
+  assert.deepEqual(shown.actions?.map((a) => [a.title, a.badge]), [['Your turn', 3]]);
+  assert.deepEqual(checkSummary(shown), []);
+  // A chip coming and going isn't a patch change worth a note.
+  assert.ok(!h.events(thread.id).some((e) => e.type === 'system.note'));
+  fs.writeFileSync(path.join(project, 'count'), '0');
+  h.clock.advance(21_000);
+  await settle();
+  assert.equal(h.runner.get(thread.id).actions, undefined);
+});
+
 test('a turn.end hook runs after a turn that edited a matching file, and a failure is told to the agent twice at most', async () => {
   const root = tmpDir();
   const project = path.join(root, 'app');

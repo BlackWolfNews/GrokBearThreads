@@ -31,6 +31,21 @@
 // the folder and project, and their commands run in that folder rather
 // than the thread's: a thread in ~/dev/me/misc that's about Poddle gets
 // Poddle's dashboard and chips, and Poddle's Reseed runs in Poddle.
+//
+// Tool patches: a patch with `appliesTo` (globs of names, like
+// "*.tandem") belongs to a tool rather than a place. It applies to a
+// thread wherever a folder from the thread's own up holds a matching
+// name, and only there, and runs in that folder. They're found in every
+// project's folders, not just the thread's projects', so Tandem's patch
+// lives in Tandem's repo and a video folder with a .tandem file gets it
+// without being in the Tandem project.
+//
+// Live state: an action or panel can have `when` (hide it unless this
+// says true) and `badge` (a count drawn on its chip or rail button),
+// functions given the same context as a list panel's `items`. The runner
+// calls them when it reads the patches (applyLive) and every little while
+// for a thread that has any, so "Your turn" turns up once Mike has left
+// comments, without a turn.
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -54,7 +69,7 @@ export const EMPTY_PATCH_SET: PatchSet = { panels: [], actions: [], hooks: [], p
 // Loaded patch files by path, so a summary refresh doesn't import a file
 // whose mtime hasn't moved. One per runner.
 export type PatchCache = Map<string, { mtimeMs: number; loaded: LoadedPatch }>;
-type LoadedPatch = { info: PatchInfo; panels: Panel[]; actions: Action[]; hooks: Hook[]; worktree?: WorktreeConfig };
+type LoadedPatch = { info: PatchInfo; panels: Panel[]; actions: Action[]; hooks: Hook[]; worktree?: WorktreeConfig; appliesTo?: string[] };
 
 // A patch's `worktree`: the repo gives each new thread a git worktree of
 // its own (docs/thread-worktrees.md, worktrees.ts). Not part of PatchSet:
@@ -64,27 +79,83 @@ export type WorktreeConfig = { setup?: string; check?: string };
 // A folder of one of the thread's projects.
 export type ProjectFolder = { folder: string; projectId: string };
 
-export async function loadPatchSet(cwd: string, home: string = os.homedir(), cache: PatchCache = new Map(), projectFolders: ProjectFolder[] = []): Promise<PatchSet> {
+// `toolFolders` are the folders of every project, where tool patches are
+// looked for (see the top of the file).
+export async function loadPatchSet(
+  cwd: string,
+  home: string = os.homedir(),
+  cache: PatchCache = new Map(),
+  projectFolders: ProjectFolder[] = [],
+  toolFolders: string[] = [],
+): Promise<PatchSet> {
   const set: PatchSet = { panels: [], actions: [], hooks: [], patches: [] };
   const roots = projectRoots(cwd, projectFolders);
   // Built in first, so their panels come first: the thread's own, then
   // its projects'.
   for (const b of builtins(cwd, home, roots)) addPatch(set, b);
   // Then the files: the thread's own chain (home's folder first), then
-  // each project folder's chain, each patch folder once.
+  // each project folder's chain, then the other projects' tool patches,
+  // each patch folder once. A tool patch goes wherever its name is found,
+  // whichever folder it came from.
   const seen = new Set<string>();
+  const add = (loaded: LoadedPatch, root?: ProjectFolder) => {
+    if (!loaded.appliesTo) return addPatch(set, inFolder(loaded, root));
+    const placed = placeTool(loaded, cwd, home, roots);
+    if (placed) addPatch(set, placed);
+  };
   for (const { dir, source } of patchDirs(cwd, home)) {
     seen.add(dir);
-    for (const file of patchFiles(dir)) addPatch(set, await loadPatchFile(file, source, cache));
+    for (const file of patchFiles(dir)) add(await loadPatchFile(file, source, cache));
   }
   for (const root of roots) {
     for (const { dir, source } of patchDirs(root.folder, home)) {
       if (seen.has(dir) || source === 'home') continue;
       seen.add(dir);
-      for (const file of patchFiles(dir)) addPatch(set, inFolder(await loadPatchFile(file, source, cache), root));
+      for (const file of patchFiles(dir)) add(await loadPatchFile(file, source, cache), root);
+    }
+  }
+  for (const folder of toolFolders) {
+    const dir = path.join(path.resolve(folder), PATCH_DIR);
+    if (seen.has(dir) || !isDir(dir)) continue;
+    seen.add(dir);
+    for (const file of patchFiles(dir)) {
+      const loaded = await loadPatchFile(file, 'project', cache);
+      // Only the tools: the rest of another project's patches are for
+      // threads in that project.
+      if (loaded.appliesTo) add(loaded);
     }
   }
   return set;
+}
+
+// Where a tool patch applies for a thread: the first folder from the
+// thread's own up to home holding a name its globs match, else the same
+// from each of its projects' folders. Undefined when there's none, and the
+// patch isn't the thread's at all.
+function placeTool(loaded: LoadedPatch, cwd: string, home: string, roots: ProjectFolder[]): LoadedPatch | undefined {
+  const globs = loaded.appliesTo!;
+  const matching = (dir: string): string[] => {
+    let names: string[];
+    try {
+      names = fs.readdirSync(dir);
+    } catch {
+      return [];
+    }
+    return names.filter((n) => !n.startsWith('.') && globs.some((g) => path.matchesGlob(n, g))).sort();
+  };
+  for (const start of [{ folder: cwd } as { folder: string; projectId?: string }, ...roots]) {
+    let names: string[] = [];
+    const dir = findUp(start.folder, home, (d) => (names = matching(d)).length > 0);
+    if (!dir) continue;
+    const tag = start.projectId ? { projectId: start.projectId } : {};
+    return {
+      info: { ...loaded.info, folder: dir, matched: names.map((n) => path.join(dir, n)), ...tag },
+      panels: loaded.panels.map((p) => ({ ...p, ...tag })),
+      actions: loaded.actions.map((a) => ({ ...a, folder: dir, ...tag })),
+      hooks: loaded.hooks.map((h) => ({ ...h, folder: dir, ...tag })),
+    };
+  }
+  return undefined;
 }
 
 // The project folders that add anything: not the thread's own folder or
@@ -233,7 +304,28 @@ export function readPatchModule(id: string, source: 'home' | 'project', file: st
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     return problem('The default export should be an object with actions and/or panels.');
   }
-  const v = value as { actions?: unknown; panels?: unknown; hooks?: unknown; worktree?: unknown };
+  const v = value as { actions?: unknown; panels?: unknown; hooks?: unknown; worktree?: unknown; appliesTo?: unknown };
+  let appliesTo: string[] | undefined;
+  if (v.appliesTo !== undefined) {
+    const list = typeof v.appliesTo === 'string' ? [v.appliesTo] : v.appliesTo;
+    if (!Array.isArray(list) || !list.length || list.some((g) => typeof g !== 'string' || !g.trim() || g.includes('/'))) {
+      return problem('appliesTo should be a name glob like "*.tandem", or a list of them (names in a folder, no slashes).');
+    }
+    appliesTo = list.map((g: string) => g.trim());
+  }
+  // The when and badge functions of the file's actions and panels, kept
+  // aside (see liveFunctions) once the whole file has passed.
+  const live: [string, LiveFunctions][] = [];
+  const liveOf = (kind: string, i: number, title: string, raw: { when?: unknown; badge?: unknown }, itemId: string): string | undefined => {
+    const fns: LiveFunctions = {};
+    for (const key of ['when', 'badge'] as const) {
+      if (raw[key] === undefined) continue;
+      if (typeof raw[key] !== 'function') return `${kind}[${i}] ("${title}") has a ${key} that isn't a function.`;
+      fns[key] = raw[key] as LiveFunction;
+    }
+    if (fns.when || fns.badge) live.push([itemId.slice(id.length), fns]);
+    return undefined;
+  };
   let worktree: WorktreeConfig | undefined;
   if (v.worktree !== undefined) {
     const w = v.worktree as { setup?: unknown; check?: unknown };
@@ -251,7 +343,7 @@ export function readPatchModule(id: string, source: 'home' | 'project', file: st
   if (v.actions !== undefined) {
     if (!Array.isArray(v.actions)) return problem('actions should be an array.');
     for (const [i, raw] of v.actions.entries()) {
-      const a = raw as { title?: unknown; run?: unknown; prompt?: unknown; note?: unknown };
+      const a = raw as { title?: unknown; run?: unknown; prompt?: unknown; note?: unknown; when?: unknown; badge?: unknown };
       if (!a || typeof a !== 'object' || typeof a.title !== 'string' || !a.title.trim()) return problem(`actions[${i}] needs a title.`);
       const run = typeof a.run === 'string' && a.run.trim() ? a.run : undefined;
       const prompt = typeof a.prompt === 'string' && a.prompt.trim() ? a.prompt : undefined;
@@ -261,13 +353,15 @@ export function readPatchModule(id: string, source: 'home' | 'project', file: st
       if (run) action.command = run;
       if (prompt) action.prompt = prompt;
       if (typeof a.note === 'string' && a.note.trim()) action.note = a.note.trim();
+      const liveProblem = liveOf('actions', i, action.title, a, action.id);
+      if (liveProblem) return problem(liveProblem);
       actions.push(action);
     }
   }
   if (v.panels !== undefined) {
     if (!Array.isArray(v.panels)) return problem('panels should be an array.');
     for (const [i, raw] of v.panels.entries()) {
-      const p = raw as { title?: unknown; url?: unknown; note?: unknown; icon?: unknown; items?: unknown };
+      const p = raw as { title?: unknown; url?: unknown; note?: unknown; icon?: unknown; items?: unknown; when?: unknown; badge?: unknown };
       if (!p || typeof p !== 'object' || typeof p.title !== 'string' || !p.title.trim()) return problem(`panels[${i}] needs a title.`);
       if (p.icon !== undefined && (typeof p.icon !== 'string' || !p.icon.trim())) return problem(`panels[${i}] ("${p.title}") has an icon that isn't an SF Symbol name.`);
       const panelId = `${id}.${slug(p.title)}`;
@@ -285,6 +379,8 @@ export function readPatchModule(id: string, source: 'home' | 'project', file: st
       }
       if (typeof p.icon === 'string') panel.icon = p.icon.trim();
       if (typeof p.note === 'string' && p.note.trim()) panel.note = p.note.trim();
+      const liveProblem = liveOf('panels', i, panel.title, p, panel.id);
+      if (liveProblem) return problem(liveProblem);
       panels.push(panel);
     }
   }
@@ -310,7 +406,12 @@ export function readPatchModule(id: string, source: 'home' | 'project', file: st
     if (ids.has(x.id)) return problem(`Two entries would both be called ${x.id}; give them different titles.`);
     ids.add(x.id);
   }
-  return worktree ? { info, panels, actions, hooks, worktree } : { info, panels, actions, hooks };
+  for (const key of [...liveFunctions.keys()]) if (key.startsWith(file + '\u0000')) liveFunctions.delete(key);
+  for (const [suffix, fns] of live) liveFunctions.set(listKey(file, suffix), fns);
+  const loaded: LoadedPatch = { info, panels, actions, hooks };
+  if (worktree) loaded.worktree = worktree;
+  if (appliesTo) loaded.appliesTo = appliesTo;
+  return loaded;
 }
 
 // The patch that gives a thread in `cwd` its own worktree: the first patch
@@ -481,7 +582,9 @@ export type PanelRender = { image?: ImageRef; items?: PanelItem[]; note?: string
 
 // What a list panel's `items` gets: where it applies, and `sh` to run a
 // command there (resolves with what it printed, rejects on failure).
-export type ItemsContext = { cwd: string; threadId: string; sh: (command: string) => Promise<string> };
+// `matched` is what made a tool patch apply: the paths its appliesTo
+// found (two .tandem files in a folder are two), and empty otherwise.
+export type ItemsContext = { cwd: string; threadId: string; matched: string[]; sh: (command: string) => Promise<string> };
 type ItemsFunction = (ctx: ItemsContext) => unknown;
 
 // The `items` functions of loaded patch files, by file and the panel's id
@@ -515,7 +618,7 @@ export async function renderListPanel(
   let timer: NodeJS.Timeout | undefined;
   try {
     const value = await Promise.race([
-      Promise.resolve().then(() => fn({ cwd, threadId: ctx.threadId, sh })),
+      Promise.resolve().then(() => fn({ cwd, threadId: ctx.threadId, matched: info?.matched ?? [], sh })),
       new Promise((_, reject) => {
         timer = setTimeout(() => reject(new Error(`took over ${Math.round((ctx.timeoutMs ?? LIST_TIMEOUT_MS) / 1000)} seconds`)), ctx.timeoutMs ?? LIST_TIMEOUT_MS);
       }),
@@ -527,6 +630,102 @@ export async function renderListPanel(
   } finally {
     clearTimeout(timer);
   }
+}
+
+// ------------------------------------------------------------ live state
+
+type LiveFunction = (ctx: ItemsContext) => unknown;
+type LiveFunctions = { when?: LiveFunction; badge?: LiveFunction };
+
+// The when and badge functions of loaded patch files' actions and panels,
+// keyed like listFunctions. Kept off the items, which go over the wire.
+const liveFunctions = new Map<string, LiveFunctions>();
+
+export const LIVE_TIMEOUT_MS = 10_000;
+
+function liveFor(set: PatchSet, item: { id: string; patch: string }): LiveFunctions | undefined {
+  const file = set.patches.find((p) => p.id === item.patch)?.file;
+  return file ? liveFunctions.get(listKey(file, item.id.slice(item.patch.length))) : undefined;
+}
+
+// Whether anything in the set has a when or badge, so is worth reading
+// again every little while.
+export function hasLive(set: PatchSet): boolean {
+  return [...set.actions, ...set.panels].some((x) => liveFor(set, x) !== undefined);
+}
+
+// The set as it stands now: each action and panel whose `when` isn't
+// true left out, and `badge` set from its function (a whole number above
+// zero, else none). All at once, each in its patch's folder; a command
+// two of them run (both asking `tandem status`) runs once. A function
+// that throws or takes too long hides its item (a when) or gives no badge,
+// and the patch shows the first such problem as `liveError`.
+export async function applyLive(
+  set: PatchSet,
+  ctx: { cwd: string; threadId: string; run: (command: string, cwd: string) => Promise<CommandOutcome>; timeoutMs?: number },
+): Promise<PatchSet> {
+  if (!hasLive(set)) return set;
+  const timeoutMs = ctx.timeoutMs ?? LIVE_TIMEOUT_MS;
+  const ran = new Map<string, Promise<string>>();
+  const errors = new Map<string, string>();
+  const call = async (patch: string, fn: LiveFunction): Promise<unknown> => {
+    const info = set.patches.find((p) => p.id === patch);
+    const cwd = info?.folder ?? ctx.cwd;
+    const sh = (command: string) => {
+      const key = `${cwd}\u0000${command}`;
+      let out = ran.get(key);
+      if (!out) {
+        out = ctx.run(command, cwd).then((o) => {
+          if (!o.ok) throw new Error(`${command} failed${o.exitCode !== undefined ? ` (exit ${o.exitCode})` : ''}: ${o.text.trim().split('\n').pop() ?? ''}`);
+          return o.text;
+        });
+        ran.set(key, out);
+      }
+      return out;
+    };
+    let timer: NodeJS.Timeout | undefined;
+    try {
+      return await Promise.race([
+        Promise.resolve().then(() => fn({ cwd, threadId: ctx.threadId, matched: info?.matched ?? [], sh })),
+        new Promise((_, reject) => {
+          timer = setTimeout(() => reject(new Error(`took over ${Math.round(timeoutMs / 1000)} seconds`)), timeoutMs);
+        }),
+      ]);
+    } catch (e) {
+      if (!errors.has(patch)) errors.set(patch, firstLine(e));
+      throw e;
+    } finally {
+      clearTimeout(timer);
+    }
+  };
+  const settle = async <T extends { id: string; patch: string; badge?: number }>(item: T): Promise<T | undefined> => {
+    const fns = liveFor(set, item);
+    if (!fns) return item;
+    const [shown, badge] = await Promise.all([
+      fns.when ? call(item.patch, fns.when).then((v) => Boolean(v), () => false) : true,
+      fns.badge ? call(item.patch, fns.badge).then(badgeCount, () => undefined) : undefined,
+    ]);
+    if (!shown) return undefined;
+    const out = { ...item };
+    delete out.badge;
+    if (badge !== undefined) out.badge = badge;
+    return out;
+  };
+  const [actions, panels] = await Promise.all([Promise.all(set.actions.map(settle)), Promise.all(set.panels.map(settle))]);
+  return {
+    ...set,
+    actions: actions.filter((a): a is Action => a !== undefined),
+    panels: panels.filter((p): p is Panel => p !== undefined),
+    patches: set.patches.map((p) => (errors.has(p.id) ? { ...p, liveError: errors.get(p.id) } : p)),
+  };
+}
+
+// A badge function's answer as a count: a number, a numeric string or a
+// list (its length), rounded down; nothing for zero or less.
+function badgeCount(v: unknown): number | undefined {
+  const n = Array.isArray(v) ? v.length : typeof v === 'string' && v.trim() ? Number(v) : typeof v === 'number' ? v : NaN;
+  if (!Number.isFinite(n) || n < 1) return undefined;
+  return Math.min(Math.floor(n), 9999);
 }
 
 function panelItem(raw: unknown): PanelItem | undefined {

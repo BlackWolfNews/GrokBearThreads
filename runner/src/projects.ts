@@ -197,6 +197,14 @@ export class Projects {
     return out;
   }
 
+  // Every folder of every project that isn't archived, each once: where
+  // tool patches (appliesTo) are looked for, for any thread.
+  allFolders(): string[] {
+    const out = new Set<string>();
+    for (const p of this.items.values()) if (!p.archived) for (const folder of p.folders) out.add(folder);
+    return [...out];
+  }
+
   // What a session starting on the thread is told about its projects
   // (docs/protocol.md, "The brief"), or undefined when it's in none.
   brief(rec: ThreadRecord): string | undefined {
