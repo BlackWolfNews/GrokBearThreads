@@ -59,11 +59,11 @@ final class HighlightsTests: XCTestCase {
         XCTAssertTrue(HighlightSections.build(ThreadHighlights(brief: .init(text: "  "))).isEmpty)
     }
 
-    func testLocalPagesAndFilesOpenInThePaneAndTheWebInTheBrowser() throws {
+    func testFilesOpenInThePaneAndEveryPageInTheBrowser() throws {
         func place(_ text: String) throws -> PreviewRules.Place { PreviewRules.place(for: try XCTUnwrap(URL(string: text))) }
-        XCTAssertEqual(try place("http://localhost:4321/poddle"), .pane)
-        XCTAssertEqual(try place("http://127.0.0.1:6790/"), .pane)
-        XCTAssertEqual(try place("http://app.localhost:3000"), .pane)
+        XCTAssertEqual(try place("http://localhost:4321/poddle"), .browser)
+        XCTAssertEqual(try place("http://127.0.0.1:6790/"), .browser)
+        XCTAssertEqual(try place("http://app.localhost:3000"), .browser)
         XCTAssertEqual(try place("file:///tmp/a.html"), .pane)
         XCTAssertEqual(try place("https://github.com/m/site/pull/14"), .browser)
         XCTAssertEqual(try place("https://localhost.example.com"), .browser)

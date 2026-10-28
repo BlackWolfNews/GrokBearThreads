@@ -91,10 +91,10 @@ extension AppModel {
 
     // MARK: Opening
 
-    /// A click on a highlight: a file previews in the pane, a local page
-    /// too, anything on the web goes to the browser (where the sign-ins
-    /// are). `external` is Open in the context menu: always the default
-    /// app or browser.
+    /// A click on a highlight: a file previews in the pane, any page
+    /// (localhost too) goes to the browser, where the sign-ins are.
+    /// `external` is Open in the context menu: always the default app or
+    /// browser.
     func open(_ highlight: Highlight, in thread: ThreadSummary, external: Bool) {
         if let path = highlight.path {
             if external { openExternally(URL(fileURLWithPath: path)) } else { preview(path: path, title: highlight.title, in: thread) }

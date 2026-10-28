@@ -383,7 +383,7 @@ enum Automation {
         case "preview":
             // {"cmd":"preview","path":"/abs/file.md"} or {"cmd":"preview",
             // "url":"http://localhost:3000"} opens it in the selected
-            // thread's pane, as a highlight's click does; {"cmd":"preview",
+            // thread's pane, as "Preview here" does; {"cmd":"preview",
             // "close":true} goes back to the section.
             guard let thread = app.selectedThread else { return "error no thread selected" }
             if c["close"] as? Bool == true {
@@ -391,7 +391,7 @@ enum Automation {
             } else if let path = c["path"] as? String {
                 app.preview(path: path, in: thread)
             } else if let text = c["url"] as? String, let url = URL(string: text) {
-                app.openLink(url, in: thread)
+                app.preview(page: url, title: HighlightText.address(url.absoluteString), in: thread)
             } else {
                 return "error preview needs path, url or close"
             }

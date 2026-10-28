@@ -60,10 +60,11 @@ public struct HighlightSections: Sendable, Hashable {
 /// opens it: in the pane beside the transcript, or out in the default app.
 public enum PreviewRules {
     public enum Place: Equatable, Sendable {
-        /// The pane's preview: a local page or file.
+        /// The pane's preview: a file.
         case pane
-        /// The default browser: anything on the web, where Mike's sign-ins
-        /// are (GitHub and the like).
+        /// The default browser: any web page, localhost too. Mike wants
+        /// links in Chrome, never in the app (28 Oct); "Preview here" in a
+        /// link's menu still puts one in the pane when he asks.
         case browser
     }
 
@@ -74,13 +75,8 @@ public enum PreviewRules {
         case quickLook
     }
 
-    /// Hosts that are this Mac: a dev server the thread started.
-    static let localHosts: Set<String> = ["localhost", "127.0.0.1", "::1", "[::1]", "0.0.0.0"]
-
     public static func place(for url: URL) -> Place {
-        if url.isFileURL { return .pane }
-        guard let host = url.host?.lowercased() else { return .browser }
-        return localHosts.contains(host) || host.hasSuffix(".localhost") ? .pane : .browser
+        url.isFileURL ? .pane : .browser
     }
 
     public static func viewer(forPath path: String) -> Viewer {
