@@ -14,6 +14,7 @@ import {
   limitsFromAccount,
   limitsFromRateLimits,
   parseHunks,
+  stripLeakedToolCall,
 } from '../../src/adapters/codex/normalize.ts';
 import { fileContext, type NormalizerContext } from '../../src/adapters/context.ts';
 import type { AdapterOutput } from '../../src/adapters/types.ts';
@@ -674,4 +675,15 @@ test('the committed Codex fixtures hold nothing private', () => {
     const text = fs.readFileSync(path.join(FIX, f), 'utf8');
     assert.deepEqual(leaks(text), [], f);
   }
+});
+
+// GPT-6.1-Sol wrote its end_turn call into a final answer rather than make
+// it, and Mike read the lot (28 Oct 2026).
+test('a tool call written into a message is cut off it', () => {
+  const leaked =
+    'Nothing needed from you right now; the review is finished.\n fortheassistant to=functions.exec کامنتری code segmente\ntext(await tools.threadbear__end_turn({needs:"nothing"}));\n 只有精品functions.exec (commentary) ым\nScript completed\nWall time 0.1 seconds\nOutput:\n{"needs":"nothing"}';
+  assert.equal(stripLeakedToolCall(leaked), 'Nothing needed from you right now; the review is finished.');
+  assert.equal(stripLeakedToolCall('Done.\nto=functions.exec code'), 'Done.');
+  // Plain text, and a message about the token, keep every word.
+  for (const keep of ['All done.', 'It wrote `to=functions.exec` into the reply.', 'Set to=5 and rerun.']) assert.equal(stripLeakedToolCall(keep), keep);
 });

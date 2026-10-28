@@ -179,10 +179,11 @@ function askFrom(item: string): Ask {
 // end_turn's description doubles as the instructions: a resumed Claude
 // session keeps the system prompt it started with, but sees every tool's
 // description afresh.
-export const END_TURN_DESCRIPTION =
-  'Says whether Mike has to do anything now that this turn is over, so Threadbear can put the thread in Needs you or leave it as done. ' +
-  'Call it once, as the very last thing in every turn, after your final message, and write nothing after it. ' +
-  "It is refused until the turn has a reply: ordinary text from you after your last tool result (Threadbear's own tools aside), as Mike reads neither tool calls nor thinking as your answer. " +
+const END_TURN_WHAT =
+  'Says whether Mike has to do anything now that this turn is over, so Threadbear can put the thread in Needs you or leave it as done. ';
+
+// What to put in it, the same for both providers.
+const END_TURN_ASKS =
   'needs "nothing" when the work is finished (or still going by itself) and nothing waits on Mike. ' +
   'needs "you" when it does: an approval, a decision, a key, something to look at, a question. Give one ask per thing he has to do, most blocking first. ' +
   'The asks are your "What I need from you" list: Mike reads and answers them in a card under your message, each drawn as one paragraph of message text, its action then its why, with its buttons under it. So don\'t also list them in your message. ' +
@@ -192,6 +193,22 @@ export const END_TURN_DESCRIPTION =
   'For a step he has to do himself, offer options like ["Done", "Can you do it?"] when you could plausibly do it yourself. ' +
   'archive: true archives this thread once the turn is over, with needs "nothing" only. Use it only when Mike asks for this thread to be archived; otherwise leave it out, as a thread that vanishes from his inbox when he hadn\'t finished with it is confusing. ' +
   'Sub-agents never call this; only the thread\'s own agent does.';
+
+export const END_TURN_DESCRIPTION =
+  END_TURN_WHAT +
+  'Call it once, as the very last thing in every turn, after your final message, and write nothing after it. ' +
+  "It is refused until the turn has a reply: ordinary text from you after your last tool result (Threadbear's own tools aside), as Mike reads neither tool calls nor thinking as your answer. " +
+  END_TURN_ASKS;
+
+// Codex's: its final answer ends the turn, so nothing can be called after
+// it. Told to call end_turn after its final message, Codex never once
+// did; GPT-6.1-Sol wrote the call into its final answer instead, raw
+// tool-call tokens and all, and Mike read them (28 Oct 2026).
+export const CODEX_END_TURN_DESCRIPTION =
+  END_TURN_WHAT +
+  'Call it once, as your last tool call, just before your final answer: the final answer ends the turn, so nothing can be called after it. ' +
+  'Call it through your tools like any other; never write the call, or its result, in your message. ' +
+  END_TURN_ASKS;
 
 // What end_turn says when the turn has no reply yet. An error result, so
 // the CLI doesn't take the call as the end of the turn (adapter.ts,

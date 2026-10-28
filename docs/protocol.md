@@ -1071,6 +1071,18 @@ A turn the agent finished can say whether Mike has to do anything, so
   log, so the handler waits up to a second for its own call to land
   before judging; one that never lands (a sub-agent's, which the events
   never see) is acknowledged.
+- **Codex calls it before its answer.** Codex's final answer ends its
+  turn, so nothing can be called after it. Told to call `end_turn` after
+  its final message, Codex never once did, and GPT-6.1-Sol wrote the call
+  into its answer instead, raw tool-call tokens and all (28 Oct 2026). So
+  a Codex thread's `end_turn` (`buildThreadbearTools`' `provider:
+  "codex"`) asks for it as the last tool call, just before the final
+  answer. It is never refused for want of a reply, as the reply comes
+  next, and its result doesn't start like an accepted one, so the runner
+  keeps the answer written after it. Codex threads started before then
+  keep the old description, which was fixed at `thread/start`; for them,
+  the Codex normalizer cuts a tool call written into a message (from its
+  first ` to=functions.` token to the end) off the text.
 - **Ending on the tool.** Claude Code nudges a model whose reply after a
   tool result has no text ("[Your previous response had no visible
   output. Please continue and produce a user-visible response.]"), and

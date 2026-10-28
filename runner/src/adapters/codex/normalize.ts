@@ -586,7 +586,7 @@ export class CodexNormalizer {
     switch (type) {
       case 'agentMessage': {
         this.texts.delete(id);
-        const text = typeof item.text === 'string' ? item.text : '';
+        const text = typeof item.text === 'string' ? stripLeakedToolCall(item.text) : '';
         if (text) out.push(ev({ type: 'assistant.text', itemId: id, text }));
         return;
       }
@@ -900,6 +900,19 @@ function diffEvents(itemId: string, changes: AnyMsg[]): AdapterOutput[] {
     out.push(ev({ type: 'edit.diff', itemId, path: p, hunks }));
   }
   return out;
+}
+
+// A tool call the model wrote into its message instead of making it, from
+// its first routing token (` to=functions.exec`, with whatever word it
+// glued on in front) to the end: GPT-6.1-Sol put its end_turn call, a made-up
+// result and stray tokens in other scripts in a final answer, and Mike read
+// them all (28 Oct 2026). Never in backticks, so a message about such a
+// token keeps it.
+const LEAKED_TOOL_CALL = /(?:[^\S\n]*[^\s`]*[^\S\n]+|^)to=(?:functions|multi_tool_use|tools)\.\w[\s\S]*/m;
+
+export function stripLeakedToolCall(text: string): string {
+  const m = LEAKED_TOOL_CALL.exec(text);
+  return m ? text.slice(0, m.index).trimEnd() : text;
 }
 
 function splitText(s: string): string[] {

@@ -19,7 +19,7 @@ import { parseWhen, relativeFuture, relativeTime } from './when.ts';
 
 export { parseWhen, relativeFuture, relativeTime };
 import { RUNNER_VERSION, expandHome } from './config.ts';
-import { END_TURN_DESCRIPTION, END_TURN_TOOL, ENDED, NO_REPLY, turnReply } from './needs.ts';
+import { CODEX_END_TURN_DESCRIPTION, END_TURN_DESCRIPTION, END_TURN_TOOL, ENDED, NO_REPLY, turnReply } from './needs.ts';
 import { asksForAppRestart, type AppRestarts } from './app-restarts.ts';
 import { PANEL_PLACES } from './panel-requests.ts';
 import type { PanelPlace } from './protocol.ts';
@@ -104,8 +104,11 @@ export function buildThreadbearTools(
   schedules?: ScheduleControl,
   projects?: ProjectControl,
   appRestarts?: AppRestartControl,
-  opts: { sleep?: (ms: number) => Promise<void> } = {},
+  // codex: the tools are for a Codex thread, whose end_turn comes just
+  // before its final answer rather than after it (needs.ts).
+  opts: { sleep?: (ms: number) => Promise<void>; provider?: 'claude' | 'codex' } = {},
 ) {
+  const codex = opts.provider === 'codex';
   const all = async (): Promise<ThreadSummary[]> => control.list(['inbox', 'snoozed', 'archived']);
   const sleep = opts.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
 
@@ -558,7 +561,7 @@ export function buildThreadbearTools(
     // handler only checks it; a sub-agent's call never reaches the thread.
     tool(
       END_TURN_TOOL,
-      END_TURN_DESCRIPTION,
+      codex ? CODEX_END_TURN_DESCRIPTION : END_TURN_DESCRIPTION,
       {
         needs: z.enum(['you', 'nothing']).describe('"you" when Mike has to do something before this can go on; "nothing" when it is done.'),
         asks: z
@@ -594,7 +597,8 @@ export function buildThreadbearTools(
       handle(async ({ needs, asks, archive }) => {
         // No reply yet: refused, so the agent writes one. An error result
         // also keeps the CLI from taking this call as the turn's end.
-        if (!(await replied())) throw new Error(NO_REPLY);
+        // Codex's reply is the final answer it writes next.
+        if (!codex && !(await replied())) throw new Error(NO_REPLY);
         // Asking Mike to Restart to Update means wanting to know when he
         // has, to check the change in the running app: the same as
         // wait_for_app_restart, unless that was already asked for.
@@ -602,6 +606,13 @@ export function buildThreadbearTools(
         if (needs === 'you' && appRestarts && asksForAppRestart(asks)) {
           if (!appRestarts.isWatching(selfId)) appRestarts.watch(selfId);
           restart = " You'll get a message here when the app restarts onto the new build.";
+        }
+        // Not ENDED: that would have the runner drop the final answer that
+        // follows as text after end_turn.
+        if (codex) {
+          return needs === 'you'
+            ? `Noted.${restart} Now write your final answer: it ends the turn. Keep the asks out of it, as they go in a card under it.`
+            : 'Noted. Now write your final answer: it ends the turn.';
         }
         // With the why, as the bare "End the turn now, with no more text"
         // didn't stop Haiku repeating its reply under end_turn; the reason

@@ -48,7 +48,8 @@ export const TOOL_GUIDANCE =
   'Use move_thread when the work belongs in another folder (for example a repo), so this thread runs there from the next turn. ' +
   `${SHOWING_MIKE} ` +
   `${FILING_PROJECTS} ` +
-  'End every turn by calling end_turn, after your final message, to say whether Mike has to do anything.';
+  // Before, not after: Codex's final answer ends its turn (needs.ts).
+  'End every turn by calling end_turn as your last tool call, just before your final answer, to say whether Mike has to do anything.';
 
 // The tools as one dynamic-tool namespace, with JSON Schema from zod.
 export function dynamicToolSpecs(tools: ToolDefinition[]): DynamicToolSpec[] {

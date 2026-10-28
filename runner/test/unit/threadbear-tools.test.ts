@@ -476,6 +476,26 @@ test('end_turn is refused until the turn has replied to Mike in text', async () 
   assert.deepEqual(slept, []);
 });
 
+// Codex's final answer ends its turn, so its end_turn comes just before it.
+// Told to call it after, Codex never did (28 Oct 2026).
+test("Codex's end_turn comes before the final answer: never refused, and the answer after it is kept", async () => {
+  const h = makeHarness();
+  const { thread, s } = start(h);
+  const t = buildThreadbearTools(h.runner, thread.id, Date.now, undefined, undefined, undefined, { provider: 'codex' }).find((x) => x.name === 'end_turn')!;
+  assert.match(t.description, /just before your final answer/);
+  assert.doesNotMatch(t.description, /after your final message/);
+  toolCall(s, 'b1', 'Bash', { command: 'gh pr view 384' });
+  toolResult(s, 'b1');
+  toolCall(s, 'e1', END_TURN, { needs: 'nothing' });
+  const r = (await t.handler({ needs: 'nothing' } as never, {})) as { content: { text: string }[]; isError?: boolean };
+  assert.equal(r.isError, undefined);
+  assert.match(r.content[0].text, /Now write your final answer/);
+  // Not the "ended" result, so the runner keeps the answer that follows.
+  s.out({ kind: 'event', event: { type: 'tool.result', itemId: 'e1', ok: true, text: r.content[0].text, truncated: false, images: [] } });
+  s.text('m1', 'Looks fine. Nothing needed from you.');
+  assert.ok(h.events(thread.id).some((e) => e.type === 'assistant.text' && e.text === 'Looks fine. Nothing needed from you.'));
+});
+
 // The SDK runs the tool as soon as it reads the call, so the handler can run
 // before the runner has logged the frames before it.
 test("end_turn waits for its own call to land, and takes a call that never lands (a sub-agent's) at its word", async () => {
