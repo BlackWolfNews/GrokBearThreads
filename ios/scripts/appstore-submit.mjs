@@ -139,7 +139,9 @@ async function check() {
   tick(!!infoLoc?.attributes.name, `name (${infoLoc?.attributes.name ?? "unset"})`);
   tick(!!infoLoc?.attributes.privacyPolicyUrl, "privacy policy URL");
   const rating = (await get(`/v1/appInfos/${info.id}/ageRatingDeclaration`)).data;
-  const unanswered = Object.entries(rating.attributes).filter(([, v]) => v === null).map(([k]) => k);
+  // These are optional and stay null for an app that isn't made for kids or rated in Korea.
+  const OPTIONAL = new Set(["kidsAgeBand", "gracRatingClassificationNumber", "developerAgeRatingInfoUrl"]);
+  const unanswered = Object.entries(rating.attributes).filter(([k, v]) => v === null && !OPTIONAL.has(k)).map(([k]) => k);
   tick(unanswered.length === 0, `age rating answered${unanswered.length ? ` (unanswered: ${unanswered.join(", ")})` : ""}`);
 
   const version = await preparedVersion();

@@ -44,7 +44,8 @@
     "userGeneratedContent": false,
     "advertising": false,
     "healthOrWellnessTopics": false,
-    "socialMedia": false
+    "socialMedia": false,
+    "socialMediaAgeRestricted": false
   },
   "review": {
     "contactFirstName": "Mike",
