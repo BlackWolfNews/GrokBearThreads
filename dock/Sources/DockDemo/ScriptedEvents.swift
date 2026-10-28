@@ -51,6 +51,10 @@ enum ScriptedEvents {
                 last = to
             case "up":
                 mouse(.leftMouseUp, last)
+            case "move":
+                // Hovers, for what only shows on hover (a lone title's close button).
+                last = point(a[1], a[2])
+                mouse(.mouseMoved, last)
             case "right":
                 // Opens a menu, which runs its own loop: post it so this
                 // script carries on (and can capture the menu) meanwhile.

@@ -490,8 +490,6 @@ private struct BarSpace: View {
 /// it picks the panel up straight away.
 struct BarDrag: ViewModifier {
     let panel: PanelID
-    /// Over the view's own gestures (a tab's click to select).
-    var high = false
     @Environment(DockController.self) private var controller
     @Environment(\.dockOptions) private var options
     @State private var press: Press?
@@ -517,9 +515,7 @@ struct BarDrag: ViewModifier {
             let drag = DragGesture(minimumDistance: 0, coordinateSpace: .named(DockSpace.name))
                 .onChanged(changed)
                 .onEnded { _ in ended() }
-            if high { content.highPriorityGesture(drag) } else { content.gesture(drag) }
-        } else if high {
-            content.highPriorityGesture(dragGesture(controller: controller, panel: panel))
+            content.gesture(drag)
         } else {
             content.gesture(dragGesture(controller: controller, panel: panel))
         }
@@ -654,24 +650,11 @@ private struct TabItem: View {
         .contextMenu { PanelMenu(panel: panel, tabbed: !single) }
         // Over the bar's own drag, so a tab that isn't showing can be pulled
         // out directly. It needs 5 points of movement, so a click still
-        // selects the tab.
-        .modifier(TabDrag(panel: panel, single: single))
-    }
-}
-
-/// A tab among several is pulled out straight away, as in a browser; a
-/// lone title is part of the bar (BarDrag).
-private struct TabDrag: ViewModifier {
-    let panel: PanelID
-    let single: Bool
-    @Environment(DockController.self) private var controller
-
-    func body(content: Content) -> some View {
-        if single {
-            content.modifier(BarDrag(panel: panel, high: true))
-        } else {
-            content.highPriorityGesture(dragGesture(controller: controller, panel: panel))
-        }
+        // selects the tab and reaches its close button. A lone title is a
+        // tab too, not part of the bar (BarDrag): with BarDrag's drag from
+        // the press it swallowed the close button and moved the window
+        // instead of the panel (28 Oct).
+        .highPriorityGesture(dragGesture(controller: controller, panel: panel))
     }
 }
 

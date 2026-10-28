@@ -100,6 +100,8 @@ struct DemoView: View {
         var o = DockOptions()
         // A panel's window of its own gets the demo's look too.
         o.windowContent = { AnyView($0.preferredColorScheme(.dark)) }
+        // The app's bars move its window; this tries them the same way.
+        o.barsMoveWindow = ProcessInfo.processInfo.environment["BEARDOCK_BARS_MOVE_WINDOW"] != nil
         return o
     }
 

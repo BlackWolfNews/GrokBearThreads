@@ -12,10 +12,11 @@ says which panels there are (the sidebar, the thread, Highlights, each
 project panel, Patches), the default layout, and how the rail and Show or
 Hide Panels open and close them. The window has no title bar, so the
 panels' bars are the top of it: the traffic lights sit in the top-left
-panel's bar, and a plain drag on any bar (title or empty part) moves the
-window, and a double-click zooms it, as a title bar would. Press for a moment before dragging and the
-panel lifts instead, to be moved. Tabs, when a group has several, and a
-panel's background pick the panel up straight away.
+panel's bar, and a plain drag on the empty part of any bar, or on a custom
+header like the thread's, moves the window, and a double-click zooms it, as
+a title bar would. Press for a moment before dragging and the panel lifts
+instead, to be moved. Tabs and titles (the chip with the panel's name and
+close button) and a panel's background pick the panel up straight away.
 
 ## How it works
 
