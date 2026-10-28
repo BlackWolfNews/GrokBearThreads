@@ -6,7 +6,7 @@ import path from 'node:path';
 import { tmpDir } from '../helpers/fakes.ts';
 import { FakeClock } from '../../src/clock.ts';
 import { nullLogger } from '../../src/log.ts';
-import { CHECK_INTERVAL_MS, FIRST_CHECK_MS, SOON_MS, RunnerUpdater, launcherDiffers, launchAgentBehind, launcherSourcesHash, updateDir, watchMainRef, decideUpdate, failedAlready, releaseTreeAt, syncClone, updateFilePath, type UpdateDeps } from '../../src/update.ts';
+import { CHECK_INTERVAL_MS, FIRST_CHECK_MS, SOON_MS, RunnerUpdater, launcherDiffers, launchAgentBehind, launcherSourcesHash, appOfExecutable, updateDir, watchMainRef, decideUpdate, failedAlready, releaseTreeAt, syncClone, updateFilePath, type UpdateDeps } from '../../src/update.ts';
 import type { ReleaseJson } from '../../src/release.ts';
 
 const running = { id: 'r1', tree: 'a+b+c+d' };
@@ -403,11 +403,14 @@ test('launchAgentBehind: launch.mjs, a plist that runs node, and an app built fr
   built(launcherSourcesHash(path.join(main, 'launcher'))!);
   const sup = { THREADBEAR_SUPERVISED: '1', THREADBEAR_RUNNER_APP: app };
 
-  assert.equal(launchAgentBehind(main, home, sup), undefined, 'up to date');
+  const noApp = () => undefined;
+  assert.equal(launchAgentBehind(main, home, sup, noApp), undefined, 'up to date');
   // Not under launch.mjs (a dev runner, a checkout): nothing to say about the app.
-  assert.equal(launchAgentBehind(main, home, {}), undefined);
+  assert.equal(launchAgentBehind(main, home, {}, noApp), undefined);
   // Installed before the app: the plist runs node.
-  assert.match(launchAgentBehind(main, home, { THREADBEAR_SUPERVISED: '1' })!, /^The LaunchAgent still runs node, not Threadbear Runner\.app/);
+  assert.match(launchAgentBehind(main, home, { THREADBEAR_SUPERVISED: '1' }, noApp)!, /^The LaunchAgent still runs node, not Threadbear Runner\.app/);
+  // A plist from before THREADBEAR_RUNNER_APP: the app is found above launch.mjs.
+  assert.equal(launchAgentBehind(main, home, { THREADBEAR_SUPERVISED: '1' }, () => app), undefined);
   // The app is from older launcher sources, or its build.json is gone.
   built('old');
   assert.equal(launchAgentBehind(main, home, sup), "Threadbear Runner.app was built from older launcher sources than main's.");
@@ -418,11 +421,18 @@ test('launchAgentBehind: launch.mjs, a plist that runs node, and an app built fr
   assert.equal(launchAgentBehind(main, home, sup), "launch.mjs has changed on main. Threadbear Runner.app was built from older launcher sources than main's.");
   // A main from before the launcher says nothing about it.
   fs.rmSync(path.join(main, 'launcher'), { recursive: true });
-  assert.equal(launchAgentBehind(main, home, { THREADBEAR_SUPERVISED: '1' }), 'launch.mjs has changed on main.');
+  assert.equal(launchAgentBehind(main, home, { THREADBEAR_SUPERVISED: '1' }, () => app), 'launch.mjs has changed on main.');
+});
+
+test('appOfExecutable: only the launcher app\'s executable', () => {
+  assert.equal(appOfExecutable('/Users/m/Applications/Threadbear Runner.app/Contents/MacOS/Threadbear Runner'), '/Users/m/Applications/Threadbear Runner.app');
+  assert.equal(appOfExecutable('/Users/m/.nvm/versions/node/v24.22.1/bin/node'), undefined);
+  assert.equal(appOfExecutable('/Applications/Threadbear.app/Contents/MacOS/Threadbear'), undefined);
+  assert.equal(appOfExecutable(''), undefined);
 });
 
 test('a check says when the LaunchAgent is behind main, for tb status and the Updates panel', async () => {
-  const h = harness({}, { env: { THREADBEAR_SUPERVISED: '1' } });
+  const h = harness({}, { env: { THREADBEAR_SUPERVISED: '1' }, findLauncherApp: () => undefined });
   // main's runner/ as the updater's clone holds it.
   const launcher = path.join(updateDir(h.home), 'src', 'runner', 'launcher');
   fs.mkdirSync(launcher, { recursive: true });

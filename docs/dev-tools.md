@@ -118,8 +118,9 @@ the data dir (`<home>`, normally `~/Library/Application Support/Threadbear`):
   releases and Node updates never touch it. The runner can't reinstall
   the launchd job it runs in, so when it follows main it says instead:
   each check compares main's `launch.mjs` with the installed one, and
-  main's `runner/launcher/` hash with the app's `build.json`, and a plist
-  without `THREADBEAR_RUNNER_APP` (from before the app) still runs node.
+  main's `runner/launcher/` hash with the app's `build.json` (the app named
+  by `THREADBEAR_RUNNER_APP` in the plist, else the process above
+  launch.mjs), and a runner with neither still runs node as the program.
   Any of those sets `launcherChanged` and `launcherReason`, which
   `tb status` and the app's Updates panel show with the command
   (`launchAgentBehind` in `src/update.ts`). `--uninstall` leaves the app

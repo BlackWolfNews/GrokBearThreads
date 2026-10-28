@@ -91,6 +91,8 @@ export type UpdateDeps = {
   watch?: (checkout: string, onChange: () => void) => () => void;
   // The environment launchAgentBehind reads (process.env; tests replace it).
   env?: NodeJS.ProcessEnv;
+  // The launcher app above launch.mjs (launcherAppAbove; tests replace it).
+  findLauncherApp?: () => string | undefined;
   // Whenever status() may have changed (runner.updates, main.ts).
   onChange?: () => void;
 };
@@ -445,7 +447,7 @@ export class RunnerUpdater {
       this.checkedAt = new Date(this.deps.clock.now()).toISOString();
       this.commit = main.commit;
       this.subject = main.subject;
-      this.launcherReason = launchAgentBehind(path.join(dir, release.prefix), home, this.deps.env ?? process.env);
+      this.launcherReason = launchAgentBehind(path.join(dir, release.prefix), home, this.deps.env ?? process.env, this.deps.findLauncherApp);
       this.launcherChanged = this.launcherReason !== undefined;
       if (main.commit !== this.backendTried) {
         this.backendTried = main.commit;
@@ -559,15 +561,17 @@ export function launcherSourcesHash(dir: string): string | undefined {
 // the updater's clone), in a sentence, or undefined when it isn't.
 // Releases never change any of it, and the runner can't reinstall the
 // launchd job it runs in, so this is said (tb status, the app's Updates
-// panel) for Mike to run install-runner.sh. THREADBEAR_RUNNER_APP is the
-// app install-runner.sh put in the plist; a supervised runner without it
-// was installed before the app, and still runs node as the program.
-export function launchAgentBehind(mainRunner: string, home: string, env: NodeJS.ProcessEnv): string | undefined {
+// panel) for Mike to run install-runner.sh. The app is the one
+// install-runner.sh put in the plist (THREADBEAR_RUNNER_APP), else the
+// process that started launch.mjs, for a plist written before that
+// variable; a supervised runner with neither still runs node as the
+// program.
+export function launchAgentBehind(mainRunner: string, home: string, env: NodeJS.ProcessEnv, findApp: () => string | undefined = launcherAppAbove): string | undefined {
   const why: string[] = [];
   if (launcherDiffers(path.join(mainRunner, 'launch.mjs'), path.join(home, 'runner', 'launch.mjs'))) why.push('launch.mjs has changed on main.');
   const onMain = launcherSourcesHash(path.join(mainRunner, 'launcher'));
   if (onMain && env.THREADBEAR_SUPERVISED === '1') {
-    const app = env.THREADBEAR_RUNNER_APP;
+    const app = env.THREADBEAR_RUNNER_APP || findApp();
     if (!app) {
       why.push('The LaunchAgent still runs node, not Threadbear Runner.app, so privacy prompts say "node".');
     } else {
@@ -581,6 +585,22 @@ export function launchAgentBehind(mainRunner: string, home: string, env: NodeJS.
     }
   }
   return why.length ? why.join(' ') : undefined;
+}
+
+// The launcher app this runner runs under, from the process tree: the
+// runner's parent is launch.mjs and launch.mjs's parent is the app's
+// executable. Undefined when it's anything else (node, a test, a shell).
+export function launcherAppAbove(): string | undefined {
+  const ps = (field: string, pid: number) => spawnSync('ps', ['-o', `${field}=`, '-p', String(pid)], { encoding: 'utf8' }).stdout?.trim() ?? '';
+  const grandparent = Number(ps('ppid', process.ppid));
+  if (!grandparent || grandparent <= 1) return undefined;
+  return appOfExecutable(ps('comm', grandparent));
+}
+
+// "<x>.app/Contents/MacOS/Threadbear Runner" to "<x>.app", else undefined.
+export function appOfExecutable(exe: string): string | undefined {
+  const m = /^(\/.+\.app)\/Contents\/MacOS\/Threadbear Runner$/.exec(exe);
+  return m ? m[1] : undefined;
 }
 
 export function launcherDiffers(onMain: string, installed: string): boolean {
