@@ -114,10 +114,13 @@ public enum UpdatesText {
             : "\(threads) threads are finishing their turns on the previous version. Each moves to the new one when its turn ends."
     }
 
-    /// A launch.mjs only install-runner.sh puts in place; the view shows
-    /// the command under it.
+    /// A LaunchAgent only install-runner.sh brings up to date (launch.mjs,
+    /// the plist, Threadbear Runner.app); the view shows the command under
+    /// it. An older runner sends no reason, and then it was launch.mjs.
     public static func launcherLine(_ u: RunnerUpdates) -> String? {
-        u.launcherChanged ? "launch.mjs has changed on main. It only updates when you run this, once nothing is busy:" : nil
+        guard u.launcherChanged else { return nil }
+        let why = u.launcherReason ?? "launch.mjs has changed on main."
+        return "\(why) It only updates when you run this, once nothing is busy:"
     }
 
     /// Every runner line in order, or the one that says there's nothing.

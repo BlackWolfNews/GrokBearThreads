@@ -424,8 +424,9 @@ export function formatStatus(s: RunnerStatus, threads: ThreadSummary[], now: num
   const u = s.update;
   if (u) lines.push(formatUpdate(u, now));
   if (s.sync) lines.push(formatSync(s.sync, now));
-  // Releases never replace launch.mjs; only Mike's install-runner.sh does.
-  if (u?.launcherChanged) lines.push(`launch.mjs on main differs from the installed one: Mike runs ${u.checkout ? `${u.checkout}/runner/` : 'runner/'}scripts/install-runner.sh once nothing is busy.`);
+  // Releases never touch the LaunchAgent (launch.mjs, the plist, Threadbear
+  // Runner.app); only Mike's install-runner.sh does.
+  if (u?.launcherChanged) lines.push(`${u.launcherReason ?? 'launch.mjs on main differs from the installed one.'} Mike runs ${u.checkout ? `${u.checkout}/runner/` : 'runner/'}scripts/install-runner.sh once nothing is busy.`);
   return lines.join('\n') + '\n';
 }
 

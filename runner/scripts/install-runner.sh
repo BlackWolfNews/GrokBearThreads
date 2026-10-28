@@ -275,6 +275,7 @@ plist() {
 	<dict>
 $(env_entry PATH "$AGENT_PATH")
 $(env_entry LANG en_US.UTF-8)
+$(env_entry THREADBEAR_RUNNER_APP "$RUNNER_APP")
 EOF
   if [ "$SANDBOX" = 1 ]; then
     env_entry THREADBEAR_HOME "$DATA_HOME"

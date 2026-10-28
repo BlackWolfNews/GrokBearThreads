@@ -48,6 +48,9 @@ final class UpdatesTextTests: XCTestCase {
             "2 threads are finishing their turns on the previous version. Each moves to the new one when its turn ends.",
             "launch.mjs has changed on main. It only updates when you run this, once nothing is busy:",
         ])
+        XCTAssertEqual(UpdatesText.runnerLines(RunnerUpdates(state: "idle", launcherChanged: true, launcherReason: "Threadbear Runner.app was built from older launcher sources than main's.")), [
+            "Threadbear Runner.app was built from older launcher sources than main's. It only updates when you run this, once nothing is busy:",
+        ])
         XCTAssertEqual(UpdatesText.runnerLines(RunnerUpdates(state: "idle")), ["The runner is up to date."])
         XCTAssertEqual(UpdatesText.installCommand(checkout: NSHomeDirectory() + "/dev/me/threadbear"), "~/dev/me/threadbear/runner/scripts/install-runner.sh")
         // Plain words: no em dashes.
@@ -75,6 +78,7 @@ final class UpdatesTextTests: XCTestCase {
         XCTAssertEqual(hello.updates?.state, "waiting")
         XCTAssertEqual(hello.updates?.oldRunners.map(\.threads), [["t1"], []])
         XCTAssertEqual(hello.updates?.launcherChanged, true)
+        XCTAssertNil(hello.updates?.launcherReason)
         XCTAssertEqual(hello.updates?.isPending, true)
         let older = try JSONDecoder().decode(HelloResult.self, from: Data(#"{"runnerVersion":"x","accounts":[],"defaults":{"cwd":"/","accountId":"a"}}"#.utf8))
         XCTAssertNil(older.updates)

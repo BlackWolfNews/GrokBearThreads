@@ -6,7 +6,7 @@ import path from 'node:path';
 import { tmpDir } from '../helpers/fakes.ts';
 import { FakeClock } from '../../src/clock.ts';
 import { nullLogger } from '../../src/log.ts';
-import { CHECK_INTERVAL_MS, FIRST_CHECK_MS, SOON_MS, RunnerUpdater, launcherDiffers, watchMainRef, decideUpdate, failedAlready, releaseTreeAt, syncClone, updateFilePath, type UpdateDeps } from '../../src/update.ts';
+import { CHECK_INTERVAL_MS, FIRST_CHECK_MS, SOON_MS, RunnerUpdater, launcherDiffers, launchAgentBehind, launcherSourcesHash, updateDir, watchMainRef, decideUpdate, failedAlready, releaseTreeAt, syncClone, updateFilePath, type UpdateDeps } from '../../src/update.ts';
 import type { ReleaseJson } from '../../src/release.ts';
 
 const running = { id: 'r1', tree: 'a+b+c+d' };
@@ -158,6 +158,9 @@ function harness(releaseExtra: Partial<ReleaseJson> = {}, depsExtra: Partial<Upd
       return { scheduled: true, waitingFor: ['t1'] };
     },
     pendingRestart: () => h.pending,
+    // Not the environment these tests happen to run in (inside a thread it
+    // is a supervised runner's).
+    env: {},
     sync: async () => h.main,
     deployBackend: async (_repo, _runnerDir, _home, commit) => {
       h.backendDeploys.push(commit);
@@ -375,6 +378,60 @@ test('launcherDiffers: only when both files are there and differ', () => {
   assert.equal(launcherDiffers(a, b), false);
   fs.writeFileSync(b, 'two');
   assert.equal(launcherDiffers(a, b), true);
+});
+
+test('launcherSourcesHash matches what build-launcher.sh records', () => {
+  const launcher = path.join(import.meta.dirname, '..', '..', 'launcher');
+  const r = spawnSync('bash', [path.join(launcher, 'build-launcher.sh'), '--hash'], { encoding: 'utf8' });
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(launcherSourcesHash(launcher), r.stdout.trim());
+  assert.equal(launcherSourcesHash(tmpDir('tb-no-launcher-')), undefined);
+});
+
+test('launchAgentBehind: launch.mjs, a plist that runs node, and an app built from older sources', () => {
+  // main's runner/ in the updater's clone, and an installed data dir.
+  const main = tmpDir('tb-behind-main-');
+  const home = tmpDir('tb-behind-home-');
+  fs.mkdirSync(path.join(main, 'launcher'));
+  for (const f of ['main.swift', 'Info.plist', 'build-launcher.sh']) fs.writeFileSync(path.join(main, 'launcher', f), f);
+  fs.writeFileSync(path.join(main, 'launch.mjs'), 'launch');
+  fs.mkdirSync(path.join(home, 'runner'));
+  fs.writeFileSync(path.join(home, 'runner', 'launch.mjs'), 'launch');
+  const app = path.join(home, 'Threadbear Runner.app');
+  fs.mkdirSync(path.join(app, 'Contents', 'Resources'), { recursive: true });
+  const built = (sources: string) => fs.writeFileSync(path.join(app, 'Contents', 'Resources', 'build.json'), JSON.stringify({ sources }));
+  built(launcherSourcesHash(path.join(main, 'launcher'))!);
+  const sup = { THREADBEAR_SUPERVISED: '1', THREADBEAR_RUNNER_APP: app };
+
+  assert.equal(launchAgentBehind(main, home, sup), undefined, 'up to date');
+  // Not under launch.mjs (a dev runner, a checkout): nothing to say about the app.
+  assert.equal(launchAgentBehind(main, home, {}), undefined);
+  // Installed before the app: the plist runs node.
+  assert.match(launchAgentBehind(main, home, { THREADBEAR_SUPERVISED: '1' })!, /^The LaunchAgent still runs node, not Threadbear Runner\.app/);
+  // The app is from older launcher sources, or its build.json is gone.
+  built('old');
+  assert.equal(launchAgentBehind(main, home, sup), "Threadbear Runner.app was built from older launcher sources than main's.");
+  fs.rmSync(path.join(app, 'Contents', 'Resources', 'build.json'));
+  assert.match(launchAgentBehind(main, home, sup)!, /older launcher sources/);
+  // Both at once, a sentence each.
+  fs.writeFileSync(path.join(main, 'launch.mjs'), 'launch 2');
+  assert.equal(launchAgentBehind(main, home, sup), "launch.mjs has changed on main. Threadbear Runner.app was built from older launcher sources than main's.");
+  // A main from before the launcher says nothing about it.
+  fs.rmSync(path.join(main, 'launcher'), { recursive: true });
+  assert.equal(launchAgentBehind(main, home, { THREADBEAR_SUPERVISED: '1' }), 'launch.mjs has changed on main.');
+});
+
+test('a check says when the LaunchAgent is behind main, for tb status and the Updates panel', async () => {
+  const h = harness({}, { env: { THREADBEAR_SUPERVISED: '1' } });
+  // main's runner/ as the updater's clone holds it.
+  const launcher = path.join(updateDir(h.home), 'src', 'runner', 'launcher');
+  fs.mkdirSync(launcher, { recursive: true });
+  for (const f of ['main.swift', 'Info.plist', 'build-launcher.sh']) fs.writeFileSync(path.join(launcher, f), f);
+  h.u.start();
+  await h.u.check();
+  const s = h.u.status();
+  assert.equal(s.launcherChanged, true);
+  assert.match(s.launcherReason!, /still runs node/);
 });
 
 test('the backend is deployed at main before the runner is built, once per commit', async () => {

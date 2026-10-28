@@ -293,6 +293,7 @@ async function main(): Promise<void> {
     if (u.subject) out.subject = u.subject;
     if (u.reason) out.reason = u.reason;
     if (u.launcherChanged) out.launcherChanged = true;
+    if (u.launcherReason) out.launcherReason = u.launcherReason;
     return out;
   };
   function publishUpdates(): void {

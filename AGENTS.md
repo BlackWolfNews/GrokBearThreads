@@ -138,7 +138,8 @@ if `tb` isn't found (an older runner, or outside a thread), use
   (`runner/launcher/`), a small app that runs `node launch.mjs` so macOS's
   privacy prompts say "Threadbear Runner", not "node". Releases never
   rebuild it: a change under `runner/launcher/` only ships when Mike runs
-  `install-runner.sh` from a terminal, so say so in your end_turn.
+  `install-runner.sh` from a terminal. `tb status` and the app's Updates
+  panel tell him once it's on main, but say so in your end_turn too.
 - Never pass `--now`, run `install-runner.sh`, `tb restart` the live runner,
   `launchctl kickstart` it or stop its node process: each ends your own turn
   and stops other threads' work. If one is needed, finish and tell Mike the

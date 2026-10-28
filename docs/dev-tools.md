@@ -115,7 +115,14 @@ the data dir (`<home>`, normally `~/Library/Application Support/Threadbear`):
   one `swiftc`, signed like the Mac app) only when it's missing or
   `runner/launcher/` changed since, so a launcher change ships by running
   `install-runner.sh` again, which only Mike can do for the real runner;
-  releases and Node updates never touch it. `--uninstall` leaves the app
+  releases and Node updates never touch it. The runner can't reinstall
+  the launchd job it runs in, so when it follows main it says instead:
+  each check compares main's `launch.mjs` with the installed one, and
+  main's `runner/launcher/` hash with the app's `build.json`, and a plist
+  without `THREADBEAR_RUNNER_APP` (from before the app) still runs node.
+  Any of those sets `launcherChanged` and `launcherReason`, which
+  `tb status` and the app's Updates panel show with the command
+  (`launchAgentBehind` in `src/update.ts`). `--uninstall` leaves the app
   where it is. `--from-source` keeps today's run-from-the-checkout mode for
   debugging. `--home`, `--label` and `--port` allow a sandbox install next
   to the real one (the plist then sets `THREADBEAR_HOME` and

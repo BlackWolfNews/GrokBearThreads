@@ -135,6 +135,7 @@ export type RunnerUpdates = {
   reason?: string;
   oldRunners: { version: string; threads: string[] }[];
   launcherChanged?: true;
+  launcherReason?: string;
 };
 
 // What the librarian (librarian.ts) hears about threads: a turn that ended,

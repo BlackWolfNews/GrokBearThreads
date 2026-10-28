@@ -52,9 +52,10 @@ export type UpdateStatus = {
   subject?: string; // the commit's subject line
   release?: string;
   logFile?: string;
-  // launch.mjs on main differs from the installed one (only
-  // install-runner.sh replaces it).
+  // The LaunchAgent is behind main in a way only install-runner.sh fixes
+  // (launchAgentBehind below), and which way.
   launcherChanged?: boolean;
+  launcherReason?: string;
 };
 
 // tree is what a release of main would hold (RELEASE_PATHS); buildTree is
@@ -88,6 +89,8 @@ export type UpdateDeps = {
   // built (scripts/deploy-backend.mjs): a no-op when they haven't changed.
   deployBackend?: (repoDir: string, runnerDir: string, home: string, commit: string, logFile: string) => Promise<{ ok: boolean; error?: string }>;
   watch?: (checkout: string, onChange: () => void) => () => void;
+  // The environment launchAgentBehind reads (process.env; tests replace it).
+  env?: NodeJS.ProcessEnv;
   // Whenever status() may have changed (runner.updates, main.ts).
   onChange?: () => void;
 };
@@ -335,6 +338,7 @@ export class RunnerUpdater {
   private commit?: string;
   private subject?: string;
   private launcherChanged = false;
+  private launcherReason?: string;
   private releaseBuilt?: string;
   private busy = false;
   private stopped = false;
@@ -410,6 +414,7 @@ export class RunnerUpdater {
     if (this.subject) out.subject = this.subject;
     if (this.releaseBuilt) out.release = this.releaseBuilt;
     if (this.launcherChanged) out.launcherChanged = true;
+    if (this.launcherReason) out.launcherReason = this.launcherReason;
     if (this.state !== 'off') out.logFile = updateLogPath(this.deps.home);
     return out;
   }
@@ -440,7 +445,8 @@ export class RunnerUpdater {
       this.checkedAt = new Date(this.deps.clock.now()).toISOString();
       this.commit = main.commit;
       this.subject = main.subject;
-      this.launcherChanged = launcherDiffers(path.join(dir, release.prefix, 'launch.mjs'), path.join(home, 'runner', 'launch.mjs'));
+      this.launcherReason = launchAgentBehind(path.join(dir, release.prefix), home, this.deps.env ?? process.env);
+      this.launcherChanged = this.launcherReason !== undefined;
       if (main.commit !== this.backendTried) {
         this.backendTried = main.commit;
         const b = await (this.deps.deployBackend ?? runBackendDeploy)(dir, path.join(dir, release.prefix), home, main.commit, backendLogPath(home));
@@ -533,6 +539,50 @@ export class RunnerUpdater {
 // Whether main's launch.mjs (in the clone) isn't the installed one. Only
 // for a runner installed with one: without either file there's nothing to
 // say.
+// The files build-launcher.sh hashes (its sources_hash), in its order.
+const LAUNCHER_SOURCES = ['main.swift', 'Info.plist', 'build-launcher.sh'];
+
+// The hash build-launcher.sh records in the app's build.json for the
+// launcher sources in `dir`, or undefined when they aren't all there (a
+// main from before the launcher).
+export function launcherSourcesHash(dir: string): string | undefined {
+  try {
+    const h = crypto.createHash('sha256');
+    for (const f of LAUNCHER_SOURCES) h.update(fs.readFileSync(path.join(dir, f)));
+    return h.digest('hex');
+  } catch {
+    return undefined;
+  }
+}
+
+// Why the installed LaunchAgent is behind main's runner/ (`mainRunner`, in
+// the updater's clone), in a sentence, or undefined when it isn't.
+// Releases never change any of it, and the runner can't reinstall the
+// launchd job it runs in, so this is said (tb status, the app's Updates
+// panel) for Mike to run install-runner.sh. THREADBEAR_RUNNER_APP is the
+// app install-runner.sh put in the plist; a supervised runner without it
+// was installed before the app, and still runs node as the program.
+export function launchAgentBehind(mainRunner: string, home: string, env: NodeJS.ProcessEnv): string | undefined {
+  const why: string[] = [];
+  if (launcherDiffers(path.join(mainRunner, 'launch.mjs'), path.join(home, 'runner', 'launch.mjs'))) why.push('launch.mjs has changed on main.');
+  const onMain = launcherSourcesHash(path.join(mainRunner, 'launcher'));
+  if (onMain && env.THREADBEAR_SUPERVISED === '1') {
+    const app = env.THREADBEAR_RUNNER_APP;
+    if (!app) {
+      why.push('The LaunchAgent still runs node, not Threadbear Runner.app, so privacy prompts say "node".');
+    } else {
+      let built: unknown;
+      try {
+        built = JSON.parse(fs.readFileSync(path.join(app, 'Contents', 'Resources', 'build.json'), 'utf8')).sources;
+      } catch {
+        // missing or unreadable: rebuilt by the same command
+      }
+      if (built !== onMain) why.push('Threadbear Runner.app was built from older launcher sources than main\'s.');
+    }
+  }
+  return why.length ? why.join(' ') : undefined;
+}
+
 export function launcherDiffers(onMain: string, installed: string): boolean {
   try {
     return !fs.readFileSync(onMain).equals(fs.readFileSync(installed));

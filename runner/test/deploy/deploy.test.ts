@@ -265,6 +265,8 @@ test('install-runner.sh builds the first release and starts it through launch.mj
   assert.equal(spawnSync('ps', ['-o', 'command=', '-p', String(supervisorPid)], { encoding: 'utf8' }).stdout.trim(), `${NODE} ${path.join(home, 'runner', 'launch.mjs')}`);
   assert.equal(plist.WorkingDirectory, path.join(home, 'runner'));
   assert.equal(plist.EnvironmentVariables.THREADBEAR_HOME, home);
+  // So the runner can tell the LaunchAgent is behind main (update.ts, launchAgentBehind).
+  assert.equal(plist.EnvironmentVariables.THREADBEAR_RUNNER_APP, app);
   assert.equal(plist.EnvironmentVariables.THREADBEAR_PORT, '0');
   assert.equal(plist.EnvironmentVariables.THREADBEAR_LOG, path.join(home, 'runner.log'));
   assert.equal(plist.StandardOutPath, path.join(home, 'runner.log'));

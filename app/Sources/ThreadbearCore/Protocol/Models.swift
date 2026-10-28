@@ -1307,14 +1307,18 @@ public struct RunnerUpdates: Sendable, Hashable, Decodable {
     public var reason: String?
     public var oldRunners: [OldRunner]
     public var launcherChanged: Bool
+    /// Which way the LaunchAgent is behind main, in a sentence (runners
+    /// from before 29 Oct 2026 don't send it).
+    public var launcherReason: String?
 
-    public init(state: String = "idle", commit: String? = nil, subject: String? = nil, reason: String? = nil, oldRunners: [OldRunner] = [], launcherChanged: Bool = false) {
+    public init(state: String = "idle", commit: String? = nil, subject: String? = nil, reason: String? = nil, oldRunners: [OldRunner] = [], launcherChanged: Bool = false, launcherReason: String? = nil) {
         self.state = state
         self.commit = commit
         self.subject = subject
         self.reason = reason
         self.oldRunners = oldRunners
         self.launcherChanged = launcherChanged
+        self.launcherReason = launcherReason
     }
 
     public init(from decoder: Decoder) throws {
@@ -1325,12 +1329,13 @@ public struct RunnerUpdates: Sendable, Hashable, Decodable {
         reason = (try? c.decodeIfPresent(String.self, forKey: .reason)) ?? nil
         oldRunners = c.lossyArray(OldRunner.self, forKey: .oldRunners)
         launcherChanged = ((try? c.decodeIfPresent(Bool.self, forKey: .launcherChanged)) ?? nil) ?? false
+        launcherReason = (try? c.decodeIfPresent(String.self, forKey: .launcherReason)) ?? nil
     }
 
-    enum CodingKeys: String, CodingKey { case state, commit, subject, reason, oldRunners, launcherChanged }
+    enum CodingKeys: String, CodingKey { case state, commit, subject, reason, oldRunners, launcherChanged, launcherReason }
 
     /// Something's on its way: a release being built or about to start, an
-    /// old runner still finishing turns, or a launch.mjs to install.
+    /// old runner still finishing turns, or a LaunchAgent to reinstall.
     public var isPending: Bool {
         state == "building" || state == "waiting" || !oldRunners.isEmpty || launcherChanged
     }
