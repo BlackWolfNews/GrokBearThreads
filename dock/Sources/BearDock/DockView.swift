@@ -113,7 +113,7 @@ public struct DockView: View {
             }
             .coordinateSpace(.named(DockSpace.name))
             .onGeometryChange(for: CGRect.self) { CGRect(origin: .zero, size: $0.size) } action: { controller.bounds = $0 }
-            .background(DockAnchor(controller: controller))
+            .background(DockAnchor(controller: controller, locksWindow: options.cornerMovesWindow))
             // Panels in windows of their own: opened (again, at launch),
             // moved and closed as the layout says.
             .onAppear { syncWindows() }
@@ -430,9 +430,7 @@ private struct WindowSpace: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .contentShape(Rectangle())
         if options.cornerMovesWindow {
-            space
-                .gesture(WindowDragGesture())
-                .onTapGesture(count: 2) { NSApp.keyWindow?.performZoom(nil) }
+            WindowGrip()
         } else {
             space
         }
@@ -580,5 +578,32 @@ extension View {
     public func dockDragDisabled() -> some View {
         // A drag that does nothing, nearer the pointer than the dock's.
         gesture(DragGesture(minimumDistance: 0).onChanged { _ in })
+    }
+}
+
+/// The one place that moves a window whose panels' bars are its top. The
+/// window itself is kept from moving (DockAnchor): with a hidden title bar
+/// AppKit still treats the top 28 points as one and moved the window on a
+/// drag of a panel's bar before the panel's own drag could start, the
+/// SwiftUI gestures there notwithstanding (Mike, 28 Oct). So this lets it
+/// move just for its own drag.
+private struct WindowGrip: NSViewRepresentable {
+    func makeNSView(context: Context) -> NSView { GripView() }
+    func updateNSView(_ view: NSView, context: Context) {}
+
+    private final class GripView: NSView {
+        override var mouseDownCanMoveWindow: Bool { false }
+
+        override func mouseDown(with event: NSEvent) {
+            guard let window else { return }
+            if event.clickCount == 2 {
+                window.performZoom(nil)
+                return
+            }
+            window.isMovable = true
+            // Runs the drag to mouse-up, then locks the window again.
+            window.performDrag(with: event)
+            window.isMovable = false
+        }
     }
 }

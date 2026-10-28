@@ -70,6 +70,8 @@ final class DockWindows: NSObject, NSWindowDelegate {
         window.title = content.title(f.panel)
         window.minSize = CGSize(width: 240, height: 160)
         window.animationBehavior = .documentWindow
+        // Only the strip beside the traffic lights moves it (WindowGrip).
+        window.isMovable = false
         var options = options
         // Room for the traffic lights, and the strip beside them moves the
         // window natively; the rest of the bar drags it with the dock's
@@ -197,21 +199,33 @@ private struct WindowOutline: View {
 
 /// Fills the dock, so the controller can turn the dock's coordinates into
 /// the screen's: flipped, like SwiftUI's.
+/// With `locksWindow`, also keeps the window from moving except by the
+/// strip beside the traffic lights (WindowGrip).
 struct DockAnchor: NSViewRepresentable {
     let controller: DockController
+    var locksWindow = false
 
     func makeNSView(context: Context) -> NSView {
         let view = FlippedView()
+        view.locksWindow = locksWindow
         controller.anchor = view
         return view
     }
 
     func updateNSView(_ view: NSView, context: Context) {
+        (view as? FlippedView)?.locksWindow = locksWindow
         controller.anchor = view
     }
 
     private final class FlippedView: NSView {
+        var locksWindow = false {
+            didSet { if locksWindow { window?.isMovable = false } }
+        }
         override var isFlipped: Bool { true }
         override func hitTest(_ point: NSPoint) -> NSView? { nil }
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            if locksWindow { window?.isMovable = false }
+        }
     }
 }
