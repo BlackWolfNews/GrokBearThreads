@@ -142,11 +142,13 @@ final class AppUpdater {
     static let checkInterval: TimeInterval = 5 * 60
     /// After launch, once the app has connected and settled.
     static let firstCheckDelay: TimeInterval = 20
-    /// How often a staged build is weighed against what's going on.
-    nonisolated static let autoRestartInterval: TimeInterval = 30
+    /// How often a staged build is weighed against what's going on. Cheap
+    /// (a few comparisons), so often, to restart soon after the idle time.
+    nonisolated static let autoRestartInterval: TimeInterval = 1
     /// With the app in front, this long without a key or a click counts as
-    /// not using it.
-    nonisolated static let autoRestartIdleTime: TimeInterval = 5 * 60
+    /// not using it. Short: a restart takes a second or two and puts the
+    /// open thread back, so there's little to wait for (Mike, 28 Oct).
+    nonisolated static let autoRestartIdleTime: TimeInterval = 5
     static let logPath = NSHomeDirectory() + "/Library/Logs/threadbear-update.log"
     /// Where the app was (the thread and sidebar list) when it restarted
     /// itself, put back once the threads have loaded.
@@ -361,6 +363,7 @@ final class AppUpdater {
             staged = info
             failed = nil
             AppLog.write("update", "\(info.short) is staged; it's swapped in when the app quits or is relaunched")
+            considerAutoRestart(app: AppModel.shared)
         } else {
             // Not tried again until main moves on or the app is relaunched.
             failed = appTree
