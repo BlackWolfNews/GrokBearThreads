@@ -1,6 +1,10 @@
 # Comparing design options
 
 Design pass, 27 October 2026. Mike approved A, the separate comparison window.
+On 28 October he asked for it as a panel instead: a review now opens in the
+dock's Review panel beside its thread, with a button in its bar to pop it out
+into the window, and less text (icon view and zoom controls, no filmstrip in
+the grid, a click on an image to open it with its notes).
 The HTML files below remain the original design prototypes. V1 is built in
 the native app and runner; usage is at the end of this document.
 

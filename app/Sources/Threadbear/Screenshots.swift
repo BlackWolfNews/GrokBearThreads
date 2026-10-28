@@ -336,19 +336,23 @@ enum ScreenshotRunner {
                 if case .review(let review) = row.content { return review }
                 return nil
             }).first {
+                // In the Review panel beside the thread, then popped out.
                 app.openReview(threadId: "demo_design_review", review: review)
-                if let controller = app.reviewWindows["demo_design_review/" + review.id], let compare = controller.window {
-                    compare.tuckBehind()
-                    controller.session.mode = .grid
-                    await capture(compare, dir.appendingPathComponent("16b-design-review-grid.png"))
-                    controller.session.mode = .pair
-                    controller.session.pick("B")
-                    controller.session.setNote("Keep the account override easy to find.", for: "B")
-                    await controller.session.saveNow()
-                    await capture(compare, dir.appendingPathComponent("16c-design-review-pair.png"))
-                    controller.session.actualSize = true
-                    await capture(compare, dir.appendingPathComponent("16d-design-review-100-percent.png"))
-                    controller.close()
+                if let session = app.reviewPanel {
+                    session.mode = .grid
+                    await capture(window, dir.appendingPathComponent("16b-design-review-grid.png"))
+                    session.mode = .pair
+                    session.pick("B")
+                    session.setNote("Keep the account override easy to find.", for: "B")
+                    await session.saveNow()
+                    await capture(window, dir.appendingPathComponent("16c-design-review-pair.png"))
+                    app.popOutReview()
+                    if let controller = app.reviewWindows["demo_design_review/" + review.id], let compare = controller.window {
+                        compare.tuckBehind()
+                        controller.session.actualSize = true
+                        await capture(compare, dir.appendingPathComponent("16d-design-review-100-percent.png"))
+                        controller.close()
+                    }
                 }
             }
         }

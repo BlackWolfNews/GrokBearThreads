@@ -556,9 +556,14 @@ enum Automation {
             guard let path = c["path"] as? String, path.hasPrefix("/") else { return "error path must be absolute" }
             if let refused = refusesToWrite(path) { return refused }
             guard var window else { return "error no window" }
+            // {"review": id}: its own window when popped out; in the
+            // Review panel it's in the main window already.
             if let id = c["review"] as? String {
-                guard let review = app.reviewWindows.values.first(where: { $0.session.review.id == id })?.window else { return "error the review window isn't open" }
-                window = review
+                if let review = app.reviewWindows.values.first(where: { $0.session.review.id == id })?.window {
+                    window = review
+                } else if app.reviewPanel?.review.id != id {
+                    return "error that review isn't open"
+                }
             }
             if c["sheet"] as? Bool == true {
                 guard let sheet = window.attachedSheet else { return "error no sheet" }
@@ -581,9 +586,14 @@ enum Automation {
             // The window's id for `screencapture -l`, once anything pending
             // has been drawn (as `screenshot` waits).
             guard var window else { return "error no window" }
+            // {"review": id}: its own window when popped out; in the
+            // Review panel it's in the main window already.
             if let id = c["review"] as? String {
-                guard let review = app.reviewWindows.values.first(where: { $0.session.review.id == id })?.window else { return "error the review window isn't open" }
-                window = review
+                if let review = app.reviewWindows.values.first(where: { $0.session.review.id == id })?.window {
+                    window = review
+                } else if app.reviewPanel?.review.id != id {
+                    return "error that review isn't open"
+                }
             }
             // {"sheet": true}: the sheet over it (the schedule editor), a
             // window of its own that a capture of the main one leaves out.
@@ -1210,11 +1220,14 @@ enum Automation {
         let key = threadId + "/" + snapshot.id
         if c["close"] as? Bool == true {
             app.reviewWindows[key]?.close()
+            if app.reviewPanel?.review.id == snapshot.id { app.closeReviewPanel() }
             return "ok closed"
         }
         app.openReview(threadId: threadId, review: snapshot)
-        guard let controller = app.reviewWindows[key] else { return "error couldn't open review" }
-        let session = controller.session
+        // {"popOut": true}: into its own window, as the panel's button does.
+        if c["popOut"] as? Bool == true { app.popOutReview() }
+        let controller = app.reviewWindows[key]
+        guard let session = controller?.session ?? app.reviewPanel else { return "error couldn't open review" }
         await session.refresh()
         if let mode = c["mode"] as? String, let view = ReviewMode(rawValue: mode) { session.mode = view }
         if let actual = c["actual"] as? Bool { session.actualSize = actual }
@@ -1225,10 +1238,10 @@ enum Automation {
         if c["save"] as? Bool == true { await session.saveNow() }
         if c["submit"] as? Bool == true { await session.submit() }
         if c["cancel"] as? Bool == true { await session.cancelReview() }
-        controller.window?.tuckBehind()
+        controller?.window?.tuckBehind()
         try? await Task.sleep(for: .milliseconds(250))
         return "ok " + json([
-            "id": session.review.id, "window": controller.window?.windowNumber ?? 0,
+            "id": session.review.id, "window": controller?.window?.windowNumber ?? 0, "panel": controller == nil,
             "status": session.review.status, "revision": session.review.revision,
             "mode": session.mode.rawValue, "actual": session.actualSize,
             "pickedId": session.draft.pickedId ?? "", "notes": session.draft.notes,

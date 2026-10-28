@@ -10,6 +10,8 @@ import ThreadbearCore
 enum WindowDock {
     static let threads = "threadbear.threads"
     static let thread = "threadbear.thread"
+    /// The design review being answered (show_options), beside the thread.
+    static let review = "threadbear.review"
     static let layoutKey = "dockLayout"
 
     /// Option 2 of the layout pass (28 Oct): the sidebar without a title,
@@ -28,14 +30,38 @@ enum WindowDock {
         // Without the thread there's nothing to type in: a layout saved
         // that way (or by an older build) gets it back.
         if !layout.contains(thread) { layout.add(thread, .window(.right)) }
+        // A review panel only lasts while its review is open in this run.
+        if layout.contains(review) { layout.close(review) }
         let dock = DockController(layout: layout)
-        dock.onChange = { defaults.set(try? JSONEncoder().encode($0), forKey: layoutKey) }
+        // The layout without the review panel, as it was before the review
+        // opened. The review is a visitor: closing it puts that layout back
+        // (closing a panel otherwise grows every neighbour, the sidebar
+        // too), and a layout with it in is never saved.
+        var withoutReview = layout
+        var reviewWasOpen = false
+        dock.onChange = { [weak dock] next in
+            if next.contains(review) {
+                reviewWasOpen = true
+                return
+            }
+            if reviewWasOpen {
+                reviewWasOpen = false
+                if next.groups.map(\.panels) == withoutReview.groups.map(\.panels) {
+                    // Nothing else moved while it was open: back to the old sizes.
+                    let restored = withoutReview
+                    DispatchQueue.main.async { dock?.setLayout(restored) }
+                    return
+                }
+            }
+            withoutReview = next
+            defaults.set(try? JSONEncoder().encode(next), forKey: layoutKey)
+        }
         return dock
     }
 
     /// A pane section's panel, or nil for the sidebar and the thread.
     static func section(_ panel: PanelID) -> PaneSection? {
-        panel == threads || panel == thread ? nil : PaneSection(id: panel)
+        panel == threads || panel == thread || panel == review ? nil : PaneSection(id: panel)
     }
 
     @MainActor
@@ -43,6 +69,7 @@ enum WindowDock {
         switch panel {
         case threads: return "Threads"
         case thread: return "Thread"
+        case review: return app.reviewPanel?.review.title ?? "Review"
         default:
             break
         }
@@ -68,6 +95,7 @@ enum WindowDock {
         switch panel {
         case threads: return "bubble.left.and.bubble.right"
         case thread: return "text.alignleft"
+        case review: return "rectangle.on.rectangle"
         case PaneSection.highlightsId: return "pin"
         case PaneSection.patchesId: return "square.dashed"
         default:
@@ -150,6 +178,7 @@ struct RootView: View {
             },
             accessory: { panel in
                 if panel == WindowDock.thread { return AnyView(ThreadMenuButton()) }
+                if panel == WindowDock.review { return AnyView(ReviewPanelButtons()) }
                 if let section = WindowDock.section(panel) { return AnyView(DockPaneButtons(section: section)) }
                 return nil
             },
@@ -158,6 +187,8 @@ struct RootView: View {
             // A project's panel or Patches only for a thread that has them;
             // the dock keeps their place for the next one that does.
             available: { panel in
+                // A review shows with the thread it came from.
+                if panel == WindowDock.review { return app.reviewPanel != nil && app.reviewPanel?.threadId == app.selection }
                 guard let thread = app.selectedThread else { return true }
                 switch WindowDock.section(panel) {
                 case .panel(let id): return thread.panels.contains { $0.id == id }
@@ -169,6 +200,12 @@ struct RootView: View {
                 switch panel {
                 case WindowDock.threads: AnyView(SidebarView())
                 case WindowDock.thread: AnyView(DetailView())
+                case WindowDock.review:
+                    if let session = app.reviewPanel {
+                        AnyView(ReviewWindow(session: session, inPanel: true, back: {}, close: { app.closeReviewPanel() }).id(session.threadId + "/" + session.review.id))
+                    } else {
+                        AnyView(EmptyView())
+                    }
                 default: AnyView(DockPane(section: PaneSection(id: panel)))
                 }
             }
