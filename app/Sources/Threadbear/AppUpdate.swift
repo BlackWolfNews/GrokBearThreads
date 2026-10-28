@@ -6,9 +6,11 @@ import Observation
 struct BuildInfo: Codable, Equatable {
     var commit: String
     var short: String
-    /// The tree hash of app/ at that commit (`git rev-parse <commit>:app`).
-    /// Only a change under app/ changes what runs, so this, not the commit,
-    /// says whether a build would be any different.
+    /// The tree hashes of app/ and dock/ at that commit, joined by "+"
+    /// (`git rev-parse <commit>:app <commit>:dock`). Only a change under
+    /// those changes what runs, so this, not the commit, says whether a
+    /// build would be any different. Builds from before BearDock have only
+    /// app/'s, so they're rebuilt once.
     var appTree: String
     var builtAt: String
     /// The checkout it was built from, whose main the updater follows.
@@ -24,6 +26,12 @@ struct BuildInfo: Codable, Equatable {
 /// The file moves and decisions of the self-update, with no app state, so
 /// the tests can run them on temp folders.
 enum AppUpdate {
+    /// `git rev-parse` output, one hash a line, as BuildInfo.appTree:
+    /// joined by "+", as build-app.sh writes it.
+    static func tree(fromRevParse output: String) -> String {
+        output.split(whereSeparator: \.isNewline).map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }.joined(separator: "+")
+    }
+
     enum Action: Equatable {
         case nothing
         /// Main's app/ differs from what's running and nothing staged or
@@ -287,16 +295,17 @@ final class AppUpdater {
         }
     }
 
-    /// Reads main's app/ tree in the checkout and starts a build if it's new.
+    /// Reads main's app/ and dock/ trees in the checkout and starts a build
+    /// if they're new.
     func check() {
         guard let running, build == nil else { return }
         Task { @MainActor in
-            let result = await Self.run("/usr/bin/git", ["-C", running.checkout, "rev-parse", "--verify", "-q", "refs/heads/main:app"])
+            let result = await Self.run("/usr/bin/git", ["-C", running.checkout, "rev-parse", "--verify", "-q", "refs/heads/main:app", "refs/heads/main:dock"])
             guard result.status == 0 else {
-                AppLog.write("update", "git rev-parse main:app failed in \(running.checkout): \(result.output)")
+                AppLog.write("update", "git rev-parse main:app main:dock failed in \(running.checkout): \(result.output)")
                 return
             }
-            let mainTree = result.output.trimmingCharacters(in: .whitespacesAndNewlines)
+            let mainTree = AppUpdate.tree(fromRevParse: result.output)
             // What's staged may have been swapped in or dropped by hand.
             staged = BuildInfo.read(bundle: Self.nextDir)
             switch AppUpdate.decide(mainTree: mainTree, running: running, staged: staged, building: building, failed: failed) {

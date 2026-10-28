@@ -54,7 +54,9 @@ chmod +x "$STAGE_DIR/Contents/MacOS/Threadbear"
 SOURCE_CHECKOUT="${THREADBEAR_SOURCE_CHECKOUT:-$(cd "$SCRIPT_DIR/.." && pwd -P)}"
 COMMIT="$(git -C "$SCRIPT_DIR" rev-parse HEAD 2>/dev/null || true)"
 SHORT="$(git -C "$SCRIPT_DIR" rev-parse --short HEAD 2>/dev/null || true)"
-APP_TREE="$(git -C "$SCRIPT_DIR" rev-parse HEAD:app 2>/dev/null || true)"
+# app/ and dock/ (BearDock, which the app builds in): a change to either
+# changes what runs. The updater reads main's the same way (AppUpdate.swift).
+APP_TREE="$(git -C "$SCRIPT_DIR" rev-parse HEAD:app HEAD:dock 2>/dev/null | paste -sd+ - || true)"
 python3 - "$STAGE_DIR/Contents/Resources/build.json" "$COMMIT" "$SHORT" "$APP_TREE" "$SOURCE_CHECKOUT" "$BUILD_CONFIGURATION" <<'PY'
 import json, sys, datetime
 path, commit, short, tree, checkout, configuration = sys.argv[1:]

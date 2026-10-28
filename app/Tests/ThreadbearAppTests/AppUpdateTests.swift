@@ -35,6 +35,14 @@ final class AppUpdateTests: XCTestCase {
         (try? Data(contentsOf: url.appendingPathComponent("Contents/marker"))).map { String(decoding: $0, as: UTF8.self) }
     }
 
+    func testTheTreeCoversAppAndDockAsBuildAppWritesIt() {
+        // `git rev-parse main:app main:dock`, as the updater runs it.
+        XCTAssertEqual(AppUpdate.tree(fromRevParse: "aaa111\nbbb222\n"), "aaa111+bbb222")
+        // A build from before BearDock had app/'s alone: not the same, so
+        // it's rebuilt once.
+        XCTAssertNotEqual(AppUpdate.tree(fromRevParse: "aaa111\nbbb222\n"), "aaa111")
+    }
+
     func testDecidesWhetherToBuild() {
         let running = info("aaa", tree: "t1")
         XCTAssertEqual(AppUpdate.decide(mainTree: "t1", running: running, staged: nil, building: nil, failed: nil), .nothing)
