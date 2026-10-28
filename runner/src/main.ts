@@ -13,6 +13,7 @@ import { Scheduler, scheduleMethods } from './schedules.ts';
 import { Projects, guardProjects, projectMethods } from './projects.ts';
 import { Librarian, librarianMethods } from './librarian.ts';
 import { createLogger } from './log.ts';
+import { hidIdleMs, isAtMac } from './presence.ts';
 import { ThreadStore } from './store.ts';
 import { AccountRegistry } from './accounts.ts';
 import { ClaudeAdapter } from './adapters/claude/adapter.ts';
@@ -204,10 +205,13 @@ async function main(): Promise<void> {
   librarian.start();
   // The Convex mirror the phone reads (docs/convex-backend.md). Best
   // effort: off without a URL and key, and never in the way of a turn.
+  // The RPC server is made further down; presence asks it once it's there.
+  let rpcServer: RpcServer | undefined;
   const sync = new ConvexSync({
     config: { ...cfg.sync, runnerId: cfg.sync.runnerId ?? ensureRunnerId(cfg.home) },
     key: readSyncKey(cfg.home),
     statePath: `${cfg.home}/sync-state.json`,
+    presence: () => isAtMac(rpcServer?.appConnected() ?? false, hidIdleMs()),
     runner: {
       onNotification: (fn) => runner.onNotification(fn),
       list: (include) => runner.list(include),
@@ -301,7 +305,7 @@ async function main(): Promise<void> {
   };
   const codexWarning = missingCodex(updates.codexBinary(), cfg);
   if (codexWarning) log.warn('codex CLI not found', { path: updates.codexBinary() });
-  const server = new RpcServer({
+  const server = (rpcServer = new RpcServer({
     host: cfg.host,
     port: cfg.port,
     token,
@@ -321,7 +325,7 @@ async function main(): Promise<void> {
         ...restarter.helloNotices(),
       ];
     },
-  });
+  }));
   let port: number;
   try {
     ({ port } = await server.listen());

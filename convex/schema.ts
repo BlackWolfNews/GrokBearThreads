@@ -73,11 +73,18 @@ export default defineSchema({
     startedAt: v.string(),
     draining: v.boolean(),
     threadCount: v.number(),
+    // Whether Mike is at this Mac (the Mac app connected and the keyboard or
+    // mouse used in the last two minutes), from sync:setPresence (API 3).
+    // Only believed while lastSeenAt is recent: a sleeping Mac counts as away.
+    atMac: v.optional(v.boolean()),
+    atMacAt: v.optional(v.number()),
   }).index('by_runnerId', ['runnerId']),
 
   // pushedAt is the mirror's own: when a push last went out for the thread
   // (push.ts), kept across the runner's writes.
-  threads: defineTable({ ...threadFields, view: v.union(...views.map((x) => v.literal(x))), pushedAt: v.optional(v.number()) })
+  // pushHeldAt: a push to "when I'm away" phones held back because Mike was
+  // at the Mac; it goes out if he leaves while the thread still needs him.
+  threads: defineTable({ ...threadFields, view: v.union(...views.map((x) => v.literal(x))), pushedAt: v.optional(v.number()), pushHeldAt: v.optional(v.number()) })
     .index('by_threadId', ['threadId'])
     .index('by_runnerId', ['runnerId'])
     .index('by_view_activity', ['view', 'lastActivityMs']),
@@ -197,5 +204,8 @@ export default defineSchema({
     environment: v.union(v.literal('sandbox'), v.literal('production')),
     tokenName: v.string(),
     updatedAt: v.number(),
+    // When this phone wants a push (phone:setNotifications, API 3):
+    // "away" (the default) only while Mike isn't at the Mac, "always", or "off".
+    notify: v.optional(v.union(v.literal('away'), v.literal('always'), v.literal('off'))),
   }).index('by_apnsToken', ['apnsToken']),
 });

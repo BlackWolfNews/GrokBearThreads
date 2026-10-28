@@ -190,6 +190,8 @@ public final class FakeBackend: Backend, @unchecked Sendable {
         return newCommand(threadId: id)
     }
 
+    public func setNotifications(apnsToken: String, notify: NotifyMode) async throws {}
+
     public func loadEarlier(threadId: String, beforeSeq: Int) async throws -> String {
         let delay = turnDelay
         Task { [weak self] in

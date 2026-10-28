@@ -24,6 +24,24 @@ final class AppModel {
     /// Whether threads read phone:messages (API 2) rather than phone:thread's
     /// newest 20 plus the runner's paging.
     var hasMessagePages: Bool { (apiVersion ?? 0) >= BackendCompatibility.messagePagesAPIVersion }
+    /// When this phone is notified, kept on the phone and sent to the backend
+    /// with each registration and change (API 3).
+    private(set) var notifyMode: NotifyMode = NotifyMode(rawValue: UserDefaults.standard.string(forKey: "notifyMode") ?? "") ?? .away
+    /// The setting shows once the backend takes it and notifications are on.
+    var canChooseNotifications: Bool {
+        !isFake && apnsToken != nil && (apiVersion ?? 0) >= BackendCompatibility.notificationSettingAPIVersion
+    }
+
+    func setNotifyMode(_ mode: NotifyMode) {
+        notifyMode = mode
+        UserDefaults.standard.set(mode.rawValue, forKey: "notifyMode")
+        guard let backend, let apnsToken, !isFake else { return }
+        Task {
+            do { try await backend.setNotifications(apnsToken: apnsToken, notify: mode) } catch {
+                self.lastError = "Couldn't change notifications: \(error.localizedDescription)"
+            }
+        }
+    }
     /// Ticks every 15 s so "5m" and "Mac offline" stay right.
     private(set) var now = Date.now
     /// A thread a notification tap asked for, for the inbox to open.
@@ -33,7 +51,7 @@ final class AppModel {
     var composeText: String?
 
     private var tasks: [Task<Void, Never>] = []
-    private var apnsToken: String?
+    private(set) var apnsToken: String?
     /// On the sample threads (FakeBackend) rather than a real deployment:
     /// the demo from the pair screen, or `-ThreadbearFake` for screenshots.
     private(set) var isFake = false
@@ -208,7 +226,10 @@ final class AppModel {
         Task {
             do { try await backend.registerDevice(apnsToken: hex, environment: environment) } catch {
                 self.lastError = "Couldn't turn on notifications: \(error.localizedDescription)"
+                return
             }
+            // A backend before API 3 has no setting; it notifies every time.
+            try? await backend.setNotifications(apnsToken: hex, notify: self.notifyMode)
         }
     }
 

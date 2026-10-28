@@ -400,6 +400,18 @@ commit of main before it builds a runner release, and holds the runner back
 (`--skip-backend` to leave it out). `--status`, `--dry-run` and `--force`
 do what they say. Log: `<data>/runner/update/backend.log`.
 
+**Notifications and presence (API 3, 28 Oct).** Mike was getting pushes
+while sitting at the Mac. Now each runner works out whether he's at its Mac
+(`runner/src/presence.ts`: the Mac app connected and the keyboard or mouse
+used in the last two minutes, from IOKit's `HIDIdleTime`), checks every 15
+seconds and sends `sync:setPresence` when it changes. Each phone has a
+setting (`devices.notify`, set with `phone:setNotifications` from the app's
+Settings › Notify me): `away` (the default) only gets a push while he isn't
+at the Mac, `always` gets every one, `off` none. A push that's held back
+while he's there marks the thread `pushHeldAt`; leaving the Mac sends it to
+the `away` phones if the thread still needs him. A runner that hasn't
+checked in for 3 minutes (a sleeping Mac) counts as away.
+
 **Keeping old and new working together.** For a while after any change,
 an older runner, a newer backend and an App Store phone app from weeks ago
 all meet. So:

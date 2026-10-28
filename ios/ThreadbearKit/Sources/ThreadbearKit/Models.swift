@@ -231,6 +231,21 @@ public struct PhoneMessage: Codable, Sendable, Hashable, Identifiable {
     }
 }
 
+/// When this phone is notified that a thread needs Mike (backend API 3).
+/// `away` (the default) only while he isn't at the Mac: the Mac app is
+/// closed, or the keyboard and mouse have been idle a couple of minutes.
+public enum NotifyMode: String, CaseIterable, Sendable, Codable {
+    case away, always, off
+
+    public var label: String {
+        switch self {
+        case .away: "When I'm away from the Mac"
+        case .always: "Always"
+        case .off: "Never"
+        }
+    }
+}
+
 /// phone:messages: a thread's newest messages, oldest first, and whether
 /// there are older ones.
 public struct MessagePage: Codable, Sendable, Hashable {
@@ -328,8 +343,10 @@ public enum BackendCompatibility {
     /// The newest backend API this app knows. From 2 a thread's messages come
     /// from phone:messages (every message and tool line, paged in Convex);
     /// an older backend still gets phone:thread and the runner's paging.
-    public static let currentAPIVersion = 2
+    public static let currentAPIVersion = 3
     public static let messagePagesAPIVersion = 2
+    /// From 3 each phone chooses when it's notified (phone:setNotifications).
+    public static let notificationSettingAPIVersion = 3
 
     /// The line to show, or nil when the backend is fine.
     public static func problem(_ identity: PhoneIdentity) -> String? {

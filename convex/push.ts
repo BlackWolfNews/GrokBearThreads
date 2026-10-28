@@ -84,13 +84,14 @@ type SendSummary = { sent: number; failed: number; skipped?: string };
 const vSendResult = v.object({ sent: v.number(), failed: v.number(), skipped: v.optional(v.string()) });
 
 // The payload the phone app expects (docs/convex-backend.md, section 6).
-async function sendAlert(ctx: ActionCtx, alert: { title: string; body: string; threadId: string }): Promise<SendSummary> {
+async function sendAlert(ctx: ActionCtx, alert: { title: string; body: string; threadId: string }, which: (notify: 'away' | 'always' | 'off') => boolean = (n) => n !== 'off'): Promise<SendSummary> {
   const cfg = apnsConfig();
   if (!cfg) {
     console.log(`[apns] not configured, skipping: ${alert.title}`);
     return { sent: 0, failed: 0, skipped: 'unconfigured' };
   }
-  const targets: { apnsToken: string; environment: 'sandbox' | 'production' }[] = await ctx.runQuery(internal.devices.targets, {});
+  const all: { apnsToken: string; environment: 'sandbox' | 'production'; notify: 'away' | 'always' | 'off' }[] = await ctx.runQuery(internal.devices.targets, {});
+  const targets = all.filter((t) => which(t.notify));
   if (!targets.length) return { sent: 0, failed: 0, skipped: 'noDevices' };
   const payload = JSON.stringify({ aps: { alert: { title: alert.title, body: alert.body }, sound: 'default', 'thread-id': alert.threadId }, threadId: alert.threadId });
   const jwt = providerToken(cfg);
@@ -121,15 +122,25 @@ async function sendAlert(ctx: ActionCtx, alert: { title: string; body: string; t
   return { sent, failed };
 }
 
-// Scheduled by sync:upsertThreads when a thread starts needing Mike.
+// Scheduled by sync:upsertThreads when a thread starts needing Mike, and by
+// sync:setPresence (held: true) when he leaves the Mac with one still
+// waiting. Each phone has its own setting: "always" gets every one, "away"
+// (the default) only while he isn't at the Mac (the rest are held for when
+// he leaves), "off" none.
 export const notify = internalAction({
-  args: { threadId: v.string() },
+  args: { threadId: v.string(), held: v.optional(v.boolean()) },
   returns: vSendResult,
-  handler: async (ctx, { threadId }): Promise<SendSummary> => {
-    const t: { title: string; status: string; preview: string; pendingApproval?: any; needsYou: boolean } | null = await ctx.runQuery(internal.devices.threadForPush, { threadId });
+  handler: async (ctx, { threadId, held }): Promise<SendSummary> => {
+    const t: { title: string; status: string; preview: string; pendingApproval?: any; needsYou: boolean; atMac: boolean } | null = await ctx.runQuery(internal.devices.threadForPush, { threadId });
     // It may have been seen on the Mac in the meantime.
     if (!t || !t.needsYou) return { sent: 0, failed: 0, skipped: 'noLongerNeedsYou' };
-    return await sendAlert(ctx, { ...pushText(t), threadId });
+    const alert = { ...pushText(t), threadId };
+    // A held push only goes to the phones that waited for it.
+    if (held) return await sendAlert(ctx, alert, (n) => n === 'away');
+    if (!t.atMac) return await sendAlert(ctx, alert);
+    await ctx.runMutation(internal.devices.holdPush, { threadId });
+    const r = await sendAlert(ctx, alert, (n) => n === 'always');
+    return r.skipped === 'noDevices' ? { ...r, skipped: 'atMac' } : r;
   },
 });
 

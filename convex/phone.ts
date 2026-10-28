@@ -284,9 +284,26 @@ export const registerDevice = mutation({
       .query('devices')
       .withIndex('by_apnsToken', (q) => q.eq('apnsToken', apnsToken))
       .unique();
-    const row = { apnsToken, environment, tokenName: t.name, updatedAt: Date.now() };
+    const row = { apnsToken, environment, tokenName: t.name, updatedAt: Date.now(), ...(existing?.notify ? { notify: existing.notify } : {}) };
     if (existing) await ctx.db.replace(existing._id, row);
     else await ctx.db.insert('devices', row);
+    return null;
+  },
+});
+
+// When this phone wants a push (API 3): "away" (the default) only while
+// Mike isn't at the Mac, "always", or "off".
+export const setNotifications = mutation({
+  args: { token: v.string(), apnsToken: v.string(), notify: v.union(v.literal('away'), v.literal('always'), v.literal('off')) },
+  returns: v.null(),
+  handler: async (ctx, { token, apnsToken, notify }) => {
+    await checkPhoneToken(ctx, token);
+    const row = await ctx.db
+      .query('devices')
+      .withIndex('by_apnsToken', (q) => q.eq('apnsToken', apnsToken))
+      .unique();
+    if (!row) throw new ConvexError({ kind: 'notFound', message: 'this phone has not registered for notifications' });
+    await ctx.db.patch(row._id, { notify });
     return null;
   },
 });

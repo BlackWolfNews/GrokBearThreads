@@ -93,6 +93,15 @@ struct SettingsView: View {
                                     "Last seen \(RelativeTime.clock(runner.lastSeenAt, now: model.now))")
                 }
             }
+            if model.canChooseNotifications {
+                Section("Notify me") {
+                    Picker("Notify me", selection: Binding(get: { model.notifyMode }, set: { model.setNotifyMode($0) })) {
+                        ForEach(NotifyMode.allCases, id: \.self) { Text($0.label).tag($0) }
+                    }
+                    .pickerStyle(.inline)
+                    .labelsHidden()
+                }
+            }
             if model.isFake {
                 Section {
                     Button("Leave the demo") { model.leaveDemo() }

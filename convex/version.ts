@@ -13,4 +13,7 @@
 // 2: every message is kept, with one line per tool call (role "tool");
 //    phone:messages pages through them. phone:thread is unchanged for API 1
 //    phones and never returns tool rows.
-export const API_VERSION = 2;
+// 3: presence (sync:setPresence from the runner) and each phone's
+//    notification setting (phone:setNotifications): "away" phones only get
+//    a push while Mike isn't at the Mac.
+export const API_VERSION = 3;

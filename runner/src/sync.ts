@@ -38,6 +38,9 @@ export const PAGE_SIZE = 50;
 const PAGE_EVENTS = 2000;
 // Events read at a time when backfilling a thread's history.
 const BACKFILL_EVENTS = 5000;
+// How often presence is checked. A push is decided with whatever the backend
+// last heard, so this is how late "away" can be.
+export const PRESENCE_MS = 15_000;
 const BACKOFF_MIN_MS = 5000;
 const BACKOFF_MAX_MS = 5 * 60_000;
 const POST_TIMEOUT_MS = 15_000;
@@ -56,7 +59,7 @@ export type SyncConfig = {
 // lower one means its backend hasn't been deployed since this runner was:
 // said in runner.status, tb status and the log rather than stopping, since
 // the runner only adds to what it sends while the number stays the same.
-export const BACKEND_API_VERSION = 2;
+export const BACKEND_API_VERSION = 3;
 
 export type SyncStatus = {
   state: 'off' | 'ok' | 'error';
@@ -151,6 +154,10 @@ export type CommandHost = {
 export type SyncDeps = {
   config: SyncConfig;
   key?: string;
+  // Whether Mike is at this Mac (presence.ts), checked every PRESENCE_MS and
+  // sent to the backend when it changes, so his phone only buzzes while he's
+  // away. Left out, presence isn't sent.
+  presence?: () => boolean;
   // Where the sync keeps what it has sent once and for all (the full history
   // backfill), per deployment. Tests leave it out and get a backfill each start.
   statePath?: string;
@@ -384,6 +391,8 @@ export class ConvexSync {
   private dirtyLists = new Set<ListName>();
   private flushTimer?: TimerHandle;
   private heartbeatTimer?: TimerHandle;
+  private presenceTimer?: TimerHandle;
+  private sentAtMac?: boolean;
   private backendApiVersion?: number;
   private lastFlushAt = -Infinity;
   private flushing = false;
@@ -425,6 +434,7 @@ export class ConvexSync {
     this.full = true;
     this.scheduleFlush();
     this.heartbeat();
+    this.checkPresence();
     this.listenForCommands();
     this.deps.log.info('convex sync on', { url: this.deps.config.url, runnerId: this.runnerId, name: this.name, commands: Boolean(this.deps.commands) });
   }
@@ -441,6 +451,8 @@ export class ConvexSync {
     this.commandsState = 'off';
     this.flushTimer?.cancel();
     this.heartbeatTimer?.cancel();
+    this.presenceTimer?.cancel();
+    this.presenceTimer = undefined;
     this.flushTimer = undefined;
     this.heartbeatTimer = undefined;
     await this.subscriber?.close();
@@ -777,6 +789,27 @@ export class ConvexSync {
     } catch (e) {
       this.deps.log.warn('could not record which histories are up', { error: String(e) });
     }
+  }
+
+  // Sends presence when it changes (and once at start); a failed send is
+  // tried again on the next check.
+  private checkPresence(): void {
+    if (!this.running || !this.deps.presence) return;
+    let atMac: boolean;
+    try {
+      atMac = this.deps.presence();
+    } catch {
+      atMac = false;
+    }
+    if (atMac !== this.sentAtMac) {
+      void this.post('mutation', 'sync:setPresence', { key: this.deps.key, runnerId: this.runnerId, atMac }).then(
+        () => {
+          this.sentAtMac = atMac;
+        },
+        (e) => this.deps.log.debug('convex presence failed', { error: String(e) }),
+      );
+    }
+    this.presenceTimer = this.deps.clock.setTimeout(() => this.checkPresence(), PRESENCE_MS);
   }
 
   private heartbeat(): void {

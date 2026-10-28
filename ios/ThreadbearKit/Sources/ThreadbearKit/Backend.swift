@@ -27,6 +27,8 @@ public protocol Backend: Sendable {
     /// they turn up in `thread(_:)` once it has written them.
     func loadEarlier(threadId: String, beforeSeq: Int) async throws -> String
     func registerDevice(apnsToken: String, environment: String) async throws
+    /// Backend API 3: when this phone (by its APNs token) is notified.
+    func setNotifications(apnsToken: String, notify: NotifyMode) async throws
 }
 
 /// The real backend: convex/phone.ts, called with the phone token.
@@ -142,6 +144,12 @@ public final class ConvexBackend: Backend, @unchecked Sendable {
     public func registerDevice(apnsToken: String, environment: String) async throws {
         _ = try await transport.mutation("phone:registerDevice", args([
             "apnsToken": .string(apnsToken), "environment": .string(environment),
+        ]))
+    }
+
+    public func setNotifications(apnsToken: String, notify: NotifyMode) async throws {
+        _ = try await transport.mutation("phone:setNotifications", args([
+            "apnsToken": .string(apnsToken), "notify": .string(notify.rawValue),
         ]))
     }
 }

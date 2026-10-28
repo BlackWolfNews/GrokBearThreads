@@ -5,8 +5,9 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { makeHarness, tick, tmpDir } from '../helpers/fakes.ts';
-import { ConvexSync, BACKEND_API_VERSION, SYNC_COALESCE_MS, HEARTBEAT_MS, SYNC_BATCH, ensureRunnerId, toThreadDoc, convexPoster, type ThreadDoc } from '../../src/sync.ts';
+import { ConvexSync, BACKEND_API_VERSION, PRESENCE_MS, SYNC_COALESCE_MS, HEARTBEAT_MS, SYNC_BATCH, ensureRunnerId, toThreadDoc, convexPoster, type ThreadDoc } from '../../src/sync.ts';
 import { nullLogger } from '../../src/log.ts';
+import { AT_MAC_IDLE_MS, isAtMac } from '../../src/presence.ts';
 import { readRunnerJson } from '../../src/config.ts';
 
 type Call = { kind: string; fn: string; args: Record<string, unknown> };
@@ -639,4 +640,43 @@ test("the runner's expected backend API version is the one convex/version.ts dec
   const src = fs.readFileSync(path.join(import.meta.dirname, '..', '..', '..', 'convex', 'version.ts'), 'utf8');
   const declared = Number(src.match(/export const API_VERSION = (\d+);/)?.[1]);
   assert.equal(BACKEND_API_VERSION, declared, 'bump BACKEND_API_VERSION in runner/src/sync.ts along with convex/version.ts');
+});
+
+test('presence: sent at start, then only when it changes', async () => {
+  let atMac = true;
+  const h = makeHarness();
+  const calls: Call[] = [];
+  const sync = new ConvexSync({
+    config: { enabled: true, url: 'https://x.convex.cloud', runnerId: 'r1' },
+    key: 'k',
+    runner: h.runner,
+    presence: () => atMac,
+    version: 'v',
+    startedAt: 'now',
+    clock: h.clock,
+    log: nullLogger,
+    post: async (kind, fn, args) => {
+      calls.push({ kind, fn, args });
+      return null;
+    },
+  });
+  const sent = () => calls.filter((c) => c.fn === 'sync:setPresence').map((c) => c.args.atMac);
+  sync.start();
+  await tick();
+  assert.deepEqual(sent(), [true]);
+  h.clock.advance(PRESENCE_MS);
+  await tick();
+  assert.deepEqual(sent(), [true], 'unchanged, not sent again');
+  atMac = false;
+  h.clock.advance(PRESENCE_MS);
+  await tick();
+  assert.deepEqual(sent(), [true, false]);
+  await sync.stop();
+});
+
+test('at the Mac means the Mac app is connected and the keyboard or mouse was used lately', () => {
+  assert.equal(isAtMac(true, 5_000), true);
+  assert.equal(isAtMac(true, AT_MAC_IDLE_MS + 1), false, 'stepped away');
+  assert.equal(isAtMac(false, 5_000), false, 'the app is closed');
+  assert.equal(isAtMac(true, undefined), false, "can't tell, so away");
 });

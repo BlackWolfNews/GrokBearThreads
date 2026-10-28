@@ -31,9 +31,34 @@ export const upsertThreads = mutation({
         .withIndex('by_threadId', (q) => q.eq('threadId', t.threadId))
         .unique();
       const wantsPush = t.needsYou && existing !== null && !existing.needsYou && (existing.pushedAt ?? 0) < now - PUSH_COOLDOWN_MS;
-      if (existing) await ctx.db.replace(existing._id, { ...t, ...(wantsPush ? { pushedAt: now } : existing.pushedAt ? { pushedAt: existing.pushedAt } : {}) });
+      // A held push stays held only while the thread still needs Mike.
+      const held = t.needsYou && existing?.pushHeldAt && !wantsPush ? { pushHeldAt: existing.pushHeldAt } : {};
+      if (existing) await ctx.db.replace(existing._id, { ...t, ...(wantsPush ? { pushedAt: now } : existing.pushedAt ? { pushedAt: existing.pushedAt } : {}), ...held });
       else await ctx.db.insert('threads', t);
       if (wantsPush) await ctx.scheduler.runAfter(0, internal.push.notify, { threadId: t.threadId });
+    }
+    return null;
+  },
+});
+
+// Whether Mike is at this runner's Mac, sent by the runner when it changes
+// (API 3). Leaving sends the pushes that were held back while he was there,
+// for threads that still need him.
+export const setPresence = mutation({
+  args: { key: v.string(), runnerId: v.string(), atMac: v.boolean() },
+  returns: v.null(),
+  handler: async (ctx, { key, runnerId, atMac }) => {
+    checkRunnerKey(key);
+    const runner = await ctx.db
+      .query('runners')
+      .withIndex('by_runnerId', (q) => q.eq('runnerId', runnerId))
+      .unique();
+    if (runner) await ctx.db.patch(runner._id, { atMac, atMacAt: Date.now() });
+    if (atMac) return null;
+    for await (const t of ctx.db.query('threads').withIndex('by_runnerId', (q) => q.eq('runnerId', runnerId))) {
+      if (!t.pushHeldAt) continue;
+      await ctx.db.patch(t._id, { pushHeldAt: undefined });
+      if (t.needsYou) await ctx.scheduler.runAfter(0, internal.push.notify, { threadId: t.threadId, held: true });
     }
     return null;
   },
@@ -97,7 +122,8 @@ export const heartbeat = mutation({
       .query('runners')
       .withIndex('by_runnerId', (q) => q.eq('runnerId', runner.runnerId))
       .unique();
-    if (existing) await ctx.db.replace(existing._id, row);
+    // Presence is setPresence's to change; a heartbeat keeps it.
+    if (existing) await ctx.db.replace(existing._id, { ...row, ...(existing.atMac !== undefined ? { atMac: existing.atMac, atMacAt: existing.atMacAt } : {}) });
     else await ctx.db.insert('runners', row);
     return { apiVersion: API_VERSION };
   },

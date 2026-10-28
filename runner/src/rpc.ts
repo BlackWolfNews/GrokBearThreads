@@ -158,6 +158,12 @@ export class RpcServer {
     return n;
   }
 
+  // Whether the Mac app itself is connected (hello's client), for presence.ts.
+  appConnected(): boolean {
+    for (const c of this.conns) if (c.authed && c.client === 'threadbear-mac' && c.ws.readyState === WebSocket.OPEN) return true;
+    return false;
+  }
+
   private tokenOk(candidate: unknown): boolean {
     if (typeof candidate !== 'string') return false;
     const a = Buffer.from(candidate);
