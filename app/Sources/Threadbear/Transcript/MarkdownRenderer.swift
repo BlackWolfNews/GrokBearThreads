@@ -19,6 +19,8 @@ enum MarkdownRenderer {
         return components.url
     }
 
+    nonisolated(unsafe) static let urlDetector = try! NSDataDetector(types: NSTextCheckingResult.CheckingType.link.rawValue)
+
     struct Rendered {
         let string: NSAttributedString
         let blocks: [String]
@@ -85,6 +87,7 @@ enum MarkdownRenderer {
             builder.block(child, Context())
         }
         builder.trimTrailingNewline()
+        builder.linkBareURLs()
         let result = NSAttributedString(attributedString: builder.output)
         cache.setObject(result, forKey: key, cost: block.utf16.count)
         return result
@@ -166,6 +169,32 @@ enum MarkdownRenderer {
             // One offset for the whole line, so smaller runs (inline code)
             // share the body text's baseline.
             output.addAttribute(.baselineOffset, value: style.offset, range: range)
+        }
+
+        /// swift-markdown leaves a bare URL like http://localhost:5176 as
+        /// plain text (it doesn't run GFM's autolink extension), and agents
+        /// write them that way all the time. Done over the whole block, not
+        /// per Text node, because cmark splits text at characters like `_`.
+        /// Only http(s) with the scheme written out: the detector also
+        /// guesses at words like CLAUDE.md, which aren't links. Code blocks
+        /// stay as they are; inline code that's a URL gets linked.
+        mutating func linkBareURLs() {
+            let text = output.string
+            guard text.contains("://") else { return }
+            for match in MarkdownRenderer.urlDetector.matches(in: text, range: NSRange(location: 0, length: output.length)) {
+                let range = match.range
+                let word = output.mutableString.substring(with: range).lowercased()
+                guard word.hasPrefix("http://") || word.hasPrefix("https://"), let url = match.url else { continue }
+                var taken = false
+                output.enumerateAttributes(in: range) { attributes, _, stop in
+                    if attributes[.link] != nil || attributes[.tbBlockBackground] != nil { taken = true; stop.pointee = true }
+                }
+                guard !taken else { continue }
+                output.addAttribute(.link, value: url, range: range)
+                output.addAttribute(.foregroundColor, value: NSColor.linkColor, range: range)
+                // A link keeps its own destination, not a thread chip.
+                output.removeAttribute(.tbThreadRef, range: range)
+            }
         }
 
         // MARK: Blocks

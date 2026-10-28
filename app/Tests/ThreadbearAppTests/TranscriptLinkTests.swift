@@ -54,6 +54,33 @@ final class TranscriptLinkTests: XCTestCase {
         XCTAssertEqual(url.path, "/tmp/source.swift:12")
     }
 
+    func testBareURLsAreLinked() throws {
+        let text = MarkdownRenderer.render("The preview is running again at http://localhost:5176, so refresh it.").string
+        let start = (text.string as NSString).range(of: "http://").location
+        var range = NSRange()
+        let url = try XCTUnwrap(text.attribute(.link, at: start, effectiveRange: &range) as? URL)
+        XCTAssertEqual(url, URL(string: "http://localhost:5176"))
+        XCTAssertEqual((text.string as NSString).substring(with: range), "http://localhost:5176")
+        let underscored = MarkdownRenderer.render("See https://example.com/a_b_c/page for more").string
+        let at = (underscored.string as NSString).range(of: "https").location
+        XCTAssertEqual(underscored.attribute(.link, at: at, effectiveRange: nil) as? URL, URL(string: "https://example.com/a_b_c/page"))
+        let code = MarkdownRenderer.render("Open `https://example.com` now").string
+        let codeAt = (code.string as NSString).range(of: "https").location
+        XCTAssertEqual(code.attribute(.link, at: codeAt, effectiveRange: nil) as? URL, URL(string: "https://example.com"))
+    }
+
+    func testWordsAndCodeBlocksAreNotLinked() {
+        let text = MarkdownRenderer.render("Read CLAUDE.md and example.com first").string
+        text.enumerateAttribute(.link, in: NSRange(location: 0, length: text.length)) { value, _, _ in XCTAssertNil(value) }
+        let block = MarkdownRenderer.render("```\ncurl https://example.com\n```").string
+        block.enumerateAttribute(.link, in: NSRange(location: 0, length: block.length)) { value, _, _ in XCTAssertNil(value) }
+    }
+
+    func testMarkdownLinkKeepsItsDestination() throws {
+        let url = try link("[https://shown.example](https://real.example)")
+        XCTAssertEqual(url, URL(string: "https://real.example"))
+    }
+
     func testTextViewOpensLocalFileThroughWorkspace() throws {
         let text = MarkdownRenderer.render("[Review](</tmp/Review Files/index.html>)").string
         let view = TranscriptTextView()
