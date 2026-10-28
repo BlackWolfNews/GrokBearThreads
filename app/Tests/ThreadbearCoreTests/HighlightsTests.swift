@@ -70,6 +70,16 @@ final class HighlightsTests: XCTestCase {
         XCTAssertEqual(PreviewRules.viewer(forPath: "/a/b/shot.png"), .quickLook)
     }
 
+    func testTextIsToldFromBinaryByItsBytes() {
+        XCTAssertTrue(PreviewRules.looksLikeText(Data("import test from 'node:test';\n".utf8)))
+        XCTAssertTrue(PreviewRules.looksLikeText(Data()))
+        // "é" cut in half at the end of the sample.
+        XCTAssertTrue(PreviewRules.looksLikeText(Data("caf".utf8) + Data([0xC3])))
+        // An MPEG transport stream packet: sync byte, then binary.
+        XCTAssertFalse(PreviewRules.looksLikeText(Data([0x47, 0x40, 0x00, 0x10, 0x00])))
+        XCTAssertFalse(PreviewRules.looksLikeText(Data([0xFF, 0xFE, 0xFD, 0x41])))
+    }
+
     func testTranscriptLinksToReviewFilesPreviewInThePane() {
         for path in ["/tmp/a.md", "/tmp/b.HTML", "/tmp/c.pdf", "/tmp/d.png", "/tmp/e.mov", "/tmp/f.csv", "/tmp/g.svg"] {
             XCTAssertTrue(PreviewRules.previewsInPane(transcriptLink: URL(fileURLWithPath: path)), path)

@@ -91,6 +91,21 @@ public enum PreviewRules {
         return ext == "html" || ext == "htm" ? .web : .quickLook
     }
 
+    /// Whether the start of a file reads as text: no NUL bytes, and UTF-8
+    /// (a character cut off at the end of the sample is fine). Quick Look
+    /// goes by the file's type, and macOS types `.ts` as MPEG video, so a
+    /// TypeScript file showed a VLC icon; text it doesn't know is shown
+    /// as text instead.
+    public static func looksLikeText(_ sample: Data) -> Bool {
+        if sample.contains(0) { return false }
+        if String(data: sample, encoding: .utf8) != nil { return true }
+        // Up to three bytes short of a whole character at the end.
+        for cut in 1...3 where sample.count > cut {
+            if String(data: sample.dropLast(cut), encoding: .utf8) != nil { return true }
+        }
+        return false
+    }
+
     /// The kinds of file Mike reviews rather than edits: a transcript link
     /// to one of these opens in the pane, not in its app (⌘-click still
     /// does that).

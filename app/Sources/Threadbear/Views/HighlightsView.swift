@@ -369,6 +369,8 @@ struct PreviewBody: View {
                 PaneNote(text: "This file isn't there any more.")
             } else if PreviewRules.viewer(forPath: path) == .web {
                 WebPanel(url: URL(fileURLWithPath: path))
+            } else if TextFileView.shows(path) {
+                TextFileView(url: URL(fileURLWithPath: path), opened: preview.opened)
             } else {
                 QuickLookView(url: URL(fileURLWithPath: path), opened: preview.opened)
             }
@@ -407,6 +409,59 @@ extension PreviewBody {
         case .patches: "Patches"
         case .panel(let id): thread.panels.first { $0.id == id }?.title ?? "the panel"
         }
+    }
+}
+
+/// A text file Quick Look would get wrong, as plain monospaced text:
+/// `.ts` (which macOS takes for MPEG video), `.tsx`, a Makefile.
+struct TextFileView: NSViewRepresentable {
+    let url: URL
+    /// Bumped by each open, so the same file opened again is read again.
+    let opened: Int
+
+    /// Read no more than this; the panel is for a look, not an editor.
+    static let limit = 2_000_000
+
+    /// Text that macOS doesn't type as text. What it does (Swift,
+    /// Markdown, JSON) Quick Look already shows well.
+    static func shows(_ path: String) -> Bool {
+        let url = URL(fileURLWithPath: path)
+        if let type = try? url.resourceValues(forKeys: [.contentTypeKey]).contentType, type.conforms(to: .text) { return false }
+        guard let handle = try? FileHandle(forReadingFrom: url) else { return false }
+        defer { try? handle.close() }
+        let sample = (try? handle.read(upToCount: 8192)) ?? Data()
+        return !sample.isEmpty && PreviewRules.looksLikeText(sample)
+    }
+
+    final class Coordinator {
+        var shown: (URL, Int)?
+    }
+
+    func makeCoordinator() -> Coordinator { Coordinator() }
+
+    func makeNSView(context: Context) -> NSScrollView {
+        let scroll = NSTextView.scrollableTextView()
+        scroll.drawsBackground = false
+        if let text = scroll.documentView as? NSTextView {
+            text.isEditable = false
+            text.isSelectable = true
+            text.drawsBackground = false
+            text.textContainerInset = NSSize(width: 10, height: 10)
+            text.font = .monospacedSystemFont(ofSize: 12, weight: .regular)
+            text.textColor = .labelColor
+        }
+        return scroll
+    }
+
+    func updateNSView(_ scroll: NSScrollView, context: Context) {
+        if let shown = context.coordinator.shown, shown.0 == url, shown.1 == opened { return }
+        context.coordinator.shown = (url, opened)
+        guard let text = scroll.documentView as? NSTextView else { return }
+        let data = (try? FileHandle(forReadingFrom: url)).flatMap { try? $0.read(upToCount: Self.limit) } ?? Data()
+        var string = String(decoding: data, as: UTF8.self)
+        if data.count == Self.limit { string += "\n\n… the rest is cut off here. Open it in its app to see it all." }
+        text.string = string
+        text.scrollToBeginningOfDocument(nil)
     }
 }
 
