@@ -88,6 +88,10 @@ struct ThreadbearApp: App {
                     .keyboardShortcut("]")
                     .disabled(!app.canGoForward)
             }
+            // Help has no help book to open: the tour is what there is.
+            CommandGroup(replacing: .help) {
+                Button("Take the Tour") { Tour.shared.start() }
+            }
             CommandMenu("Thread") {
                 Button(app.selectedThread?.isArchived == true ? "Unarchive" : "Archive") { app.toggleArchive() }
                     .keyboardShortcut("e")
@@ -170,6 +174,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
                 // After a restart the app made itself for an update: back
                 // to where it was (a no-op otherwise).
                 AppUpdater.restoreAfterRestart(app: app)
+                // Someone's first launch: a look round the window, once
+                // it's drawn with their threads in it. Never in a scripted
+                // run (the automation's `tour` starts it there).
+                if !scripted {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { Tour.shared.startIfNew() }
+                }
             }
             app.start()
             MouseNavigation.install(app: app)

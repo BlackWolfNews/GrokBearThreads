@@ -570,6 +570,23 @@ enum Automation {
             ShortcutHints.shared.setShowing(c["on"] as? Bool ?? true)
             try? await Task.sleep(for: .milliseconds(100))
             return "ok \(ShortcutHints.shared.showing)"
+        case "tour":
+            // {"do": "start"|"next"|"back"|"end"}, or nothing to just read
+            // where it's at. Says the step, its title and what it lights up.
+            let tour = Tour.shared
+            switch c["do"] as? String {
+            case "start": tour.start()
+            case "next": tour.next()
+            case "back": tour.back()
+            case "end": tour.finish()
+            case nil: break
+            default: return "error do is start, next, back or end"
+            }
+            // The card and spotlight's move to settle before a shot.
+            try? await Task.sleep(for: .milliseconds(400))
+            guard let step = tour.step, let current = tour.current else { return "ok off" }
+            let lit = tour.frame(for: current).map { "\(Int($0.minX)),\(Int($0.minY)) \(Int($0.width))x\(Int($0.height))" } ?? "nothing"
+            return "ok \(step + 1)/\(tour.shown.count) \(current.title) lit: \(lit)"
         case "chip":
             return chip(c, app: app)
         case "select-text":

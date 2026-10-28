@@ -105,6 +105,11 @@ and the perf run stay away from the real one. Install the runner itself with
   thumbnails you can remove before sending. Stop (⌘.) while a turn runs. If
   the runner is down, or it doesn't take the message (busy, say), the text
   and images stay in the box (or go back into it) and a banner says why.
+- **The tour.** The first time the app connects to a runner it dims the
+  window and lights up its parts one at a time (the views down the left,
+  the threads, the composer, Highlights, Usage) with a card beside each.
+  Return goes on, Esc skips it, and Help > Take the Tour runs it again.
+  It only points at things; it never starts a thread.
 - **Snooze** from a row's hover button, the Thread menu, the ... menu or a
   row's right-click menu: 1 hour, this evening 6 pm, tomorrow 9 am, next
   Monday 9 am, or pick a time. The time is worked out when you choose, not
@@ -472,6 +477,7 @@ is an error. Commands marked "the open thread" act on `id` when it's given
 | `expand`, `collapse` | `row`, `file`, `all`, `section` | a group, tool, thinking block or settled approval (one folded in a closed group opens it); `file` (path or index) in a changes card; `all` for a whole diff; `section` (`inbox`, `running`) folds or opens an inbox heading, as clicking it does |
 | `scroll` | `to` (`top`, `bottom`) or `row`, `offset` | |
 | `hints` | `on` (default true) | shows the keys as if ⌘ were held, or hides them |
+| `tour` | `do` (`start`, `next`, `back`, `end`) | the first-run tour (Help > Take the Tour): says the step, its title and the frame it lights up, or `off`. A scripted app never starts it by itself |
 | `hover` | `id` (sidebar) or `row` (transcript); neither clears | draws a row as if the pointer were on it |
 | `chip` | `row`, `word`, `show`, `click` | thread chips in a row's text: lists them (word=thread id); with `word`, `show` true shows its hover card and says its window number, false closes it, `click` true opens its thread |
 | `select-text` | `row`, `words`, `action` | selects the first match of `words` in a message row and shows the selection bar (says its window number); `action` (`explain`, `quote` or `copy`) clicks that instead. Explain opens the pane; `dump`'s panels line shows its answers |

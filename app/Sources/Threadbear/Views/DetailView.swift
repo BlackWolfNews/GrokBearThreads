@@ -77,6 +77,7 @@ struct DetailView: View {
                 // the agent that started it.
                 if subagentRef == nil {
                     ComposerView(thread: thread)
+                        .tourTarget(.composer)
                         .layoutValue(key: PaneRole.self, value: .composer)
                 }
                 if isNew {

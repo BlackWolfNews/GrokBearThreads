@@ -62,6 +62,7 @@ struct ActivityBar: View {
             // Only while the app or the runner has an update on its way.
             UpdatesActivityButton()
             UsageActivityButton()
+                .tourTarget(.usage)
             // The same window as ⌘, without a trip to the menu bar.
             ActivityButton(symbol: "gearshape", title: "Settings", shortcut: "⌘,", active: false) {
                 openSettings()

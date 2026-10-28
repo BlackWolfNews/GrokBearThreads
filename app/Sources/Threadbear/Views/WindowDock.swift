@@ -206,12 +206,16 @@ struct RootView: View {
             // Drawn over the dock: its keys hang out to the right while ⌘
             // is held (ShortcutHints).
             ActivityBar()
+                .tourTarget(.activityBar)
                 .zIndex(1)
             DockView(controller: app.dock, options: Self.options, content: content)
             if let thread = app.selectedThread, app.openProject == nil {
                 PanelRail(thread: thread)
             }
         }
+        // The tour's frames are in this space, and its overlay covers it.
+        .coordinateSpace(.named(Tour.space))
+        .overlay { TourOverlay().animation(.easeOut(duration: 0.2), value: Tour.shared.step == nil) }
         // Up under where the title bar was: the panels' bars take its place.
         .ignoresSafeArea(.container, edges: .top)
         // Over everything, just under the panels' bars, while an update
@@ -299,7 +303,7 @@ struct RootView: View {
             },
             view: { panel in
                 switch panel {
-                case WindowDock.threads: AnyView(SidebarView())
+                case WindowDock.threads: AnyView(SidebarView().tourTarget(.threads, withBar: true))
                 case WindowDock.usage: AnyView(UsagePanel())
                 case WindowDock.updates: AnyView(UpdatesPanel())
                 case WindowDock.main: AnyView(DetailView())
@@ -311,6 +315,7 @@ struct RootView: View {
                     } else {
                         AnyView(EmptyView())
                     }
+                case PaneSection.highlightsId: AnyView(DockPane(section: .highlights).tourTarget(.highlights, withBar: true))
                 default: AnyView(DockPane(section: PaneSection(id: panel)))
                 }
             }

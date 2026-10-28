@@ -187,6 +187,7 @@ struct PanelRail: View {
             ActivityButton(symbol: "pin", title: "Highlights", dot: thread.firstOpenAsk != nil, active: app.dock.isShowing(PaneSection.highlightsId)) {
                 app.clickRail(.highlights, in: thread)
             }
+            .tourTarget(.highlightsRail)
             ForEach(thread.panels) { panel in
                 ActivityButton(symbol: PanelIcon.symbol(for: panel), image: PatchImage.image(panel.iconFile), tinted: false, title: panel.title, badge: panel.badge, active: app.dock.isShowing(panel.id)) {
                     app.clickRail(.panel(panel.id), in: thread)
