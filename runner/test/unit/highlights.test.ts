@@ -28,7 +28,7 @@ test('links, PRs and existing files in a reply are found; code blocks and missin
       '```',
       'https://example.com/in-a-code-block',
       '```',
-      'Dev server: http://localhost:5173/',
+      'Dev server: http://localhost:5173/, also http://localhost:5173 and **https://moose.convex.site**.',
     ].join('\n'),
     { cwd: CWD, home: HOME, isFile: ctx.exists },
   );
@@ -38,7 +38,8 @@ test('links, PRs and existing files in a reply are found; code blocks and missin
     'file:/Users/mike/dev/app/docs/plan.md',
     'file:/Users/mike/notes/todo.md',
     'link:https://next-abc.vercel.app',
-    'link:http://localhost:5173/',
+    'link:http://localhost:5173',
+    'link:https://moose.convex.site',
   ]);
   assert.equal(found[0]!.title, 'mikecann/poddle#19');
   assert.equal(found[1]!.title, 'the mockup');

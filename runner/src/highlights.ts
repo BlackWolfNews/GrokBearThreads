@@ -230,7 +230,10 @@ const PR_URL = /^https:\/\/github\.com\/([^/\s]+)\/([^/\s]+)\/pull\/(\d+)/i;
 const PR_URL_G = /https:\/\/github\.com\/[^/\s]+\/[^/\s]+\/pull\/\d+/gi;
 
 export function linkItem(url: string): Pick<Highlight, 'id' | 'kind' | 'title' | 'url'> {
-  const clean = url.replace(/[).,;:!?'"]+$/, '');
+  // Trailing punctuation and Markdown emphasis ("**https://x.dev**") aren't
+  // part of the address, and a bare origin's "/" would make
+  // "localhost:5176" and "localhost:5176/" two rows.
+  const clean = url.replace(/[).,;:!?'"*_~]+$/, '').replace(/^(https?:\/\/[^/?#]+)\/$/i, '$1');
   const pr = PR_URL.exec(clean);
   if (pr) {
     const prUrl = pr[0];
