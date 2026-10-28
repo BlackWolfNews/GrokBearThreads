@@ -14,11 +14,12 @@ Hide Panels open and close them. The window has no title bar, so the
 panels' bars are the top of it: the traffic lights sit in the top-left
 panel's bar, and a plain drag on the empty part of any bar, or on a custom
 header like the thread's, moves the window, and a double-click zooms it, as
-a title bar would. Picking a panel up always takes a press held for a
-moment first (`HoldDrag.hold`, 350 ms), wherever you grab it: its bar, a
-tab or title, or its background. On a bar the panel lifts while you hold;
-elsewhere it lifts as you start to move. A drag that starts moving sooner
-moves the window from a bar or tab, and does nothing on a panel's
+a title bar would. A panel's title, or a tab, picks the panel up as soon
+as you drag it. Anywhere else (the empty part of its bar, a custom header,
+its background, the grab strip of a hidden title) takes a press held for a
+moment first (`HoldDrag.hold`, 350 ms). On a bar the panel lifts while
+you hold; elsewhere it lifts as you start to move. A drag that starts
+moving sooner moves the window from a bar, and does nothing on a panel's
 background (Mike, 28 Oct: panels kept coming loose when he meant
 something else).
 
@@ -29,7 +30,7 @@ something else).
   tidied: no empty groups, no one-child splits, and a split directly inside
   another along the same axis is flattened into it. It's `Codable`, so the
   demo saves it between launches.
-- **Dragging** a panel's title bar, a tab, or the panel's background, after
+- **Dragging** a panel's title or a tab, or its bar or background after
   holding the press for a moment, lifts it: the panel shrinks to about 240 points wide under the pointer, with the
   spot you grabbed kept under it, and leaves a dashed hole behind. A tab
   that isn't showing can be pulled out directly. Escape puts it back.

@@ -487,8 +487,9 @@ private struct BarSpace: View {
 /// pointer. A drag that starts moving before then moves the window instead,
 /// on a bar (with `DockOptions.barsMoveWindow`, or a panel in a window of
 /// its own), and does nothing elsewhere. Mike asked for the hold everywhere
-/// (28 Oct): a panel picked up straight away by a tab or its background
-/// came loose when he meant something else.
+/// (28 Oct): a panel picked up straight away by its background came loose
+/// when he meant something else. Then for titles and tabs he wanted it
+/// gone (`needsHold`), as dragging one is plainly meant to move the panel.
 ///
 /// On a bar (`fromPress`) the drag starts from the press, not 5 points in,
 /// so the hold can be timed and the panel lifts while you hold. That takes
@@ -504,6 +505,10 @@ struct HoldDrag: ViewModifier {
     var fromPress = true
     /// Over the view's own gestures (a tab's), for a drag 5 points in.
     var high = false
+    /// Picks the panel up as soon as it moves, with no hold: a title or
+    /// tab, which is plainly for moving the panel (Mike, 28 Oct, after
+    /// trying the hold everywhere).
+    var needsHold = true
     @Environment(DockController.self) private var controller
     @Environment(\.dockOptions) private var options
     @State private var press: Press?
@@ -540,10 +545,11 @@ struct HoldDrag: ViewModifier {
             // click. Its change comes on the press, each time.
             let timing = LongPressGesture(minimumDuration: 0.01, maximumDistance: .infinity)
                 .onChanged { _ in pressedAt = Date() }
-            Group {
+            let placed = Group {
                 if high { content.highPriorityGesture(drag) } else { content.gesture(drag) }
             }
-            .simultaneousGesture(timing)
+            // No timing without a hold: it would only take clicks.
+            if needsHold { placed.simultaneousGesture(timing) } else { placed }
         }
     }
 
@@ -551,7 +557,7 @@ struct HoldDrag: ViewModifier {
     /// first, otherwise the window (on a bar) or nothing.
     private func movedOnce(_ value: DragGesture.Value) {
         if press == nil {
-            let held = pressedAt.map { Date().timeIntervalSince($0) >= Self.holdSeconds } ?? false
+            let held = !needsHold || pressedAt.map { Date().timeIntervalSince($0) >= Self.holdSeconds } ?? false
             let window = Self.windowUnderMouse()
             press = Press(mode: held ? .panel : dragsWindow ? .window : .nothing, start: value.startLocation, location: value.location,
                           mouse: NSEvent.mouseLocation, origin: window?.frame.origin, window: window)
@@ -674,9 +680,6 @@ private struct TabItem: View {
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                // Its own click, over the tab's: the tab's press timing
-                // (HoldDrag) otherwise takes the button's.
-                .highPriorityGesture(TapGesture().onEnded { controller.close(panel) })
                 .opacity(hovering || (selected && !single) ? 1 : 0)
                 .dockTip("Close \(content.title(panel))", options)
             }
@@ -698,10 +701,11 @@ private struct TabItem: View {
             if content.closable(panel) { MiddleClick { controller.close(panel) } }
         }
         .contextMenu { PanelMenu(panel: panel, tabbed: !single) }
-        // Held, a tab (one that isn't showing too) is pulled out. Its drag
-        // starts 5 points in, so a click still selects the tab and reaches
-        // its close button: a drag from the press swallowed both (28 Oct).
-        .modifier(HoldDrag(panel: panel, fromPress: false, high: true))
+        // A tab (one that isn't showing too) is pulled out straight away,
+        // with no hold. Its drag starts 5 points in, so a click still
+        // selects the tab and reaches its close button: a drag from the
+        // press swallowed both (28 Oct).
+        .modifier(HoldDrag(panel: panel, fromPress: false, high: true, needsHold: false))
     }
 }
 
