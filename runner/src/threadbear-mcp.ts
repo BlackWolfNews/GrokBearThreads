@@ -19,6 +19,7 @@ import { parseWhen, relativeFuture, relativeTime } from './when.ts';
 export { parseWhen, relativeFuture, relativeTime };
 import { RUNNER_VERSION, expandHome } from './config.ts';
 import { END_TURN_DESCRIPTION, END_TURN_TOOL } from './needs.ts';
+import { asksForAppRestart, type AppRestarts } from './app-restarts.ts';
 
 // What the tools drive: the Runner itself, or during a handover
 // (docs/protocol.md) a ThreadRouter (handover.ts) that reaches threads on
@@ -31,6 +32,9 @@ export type ThreadControl = {
   pin?: (...args: Parameters<Runner['pin']>) => Aw<ReturnType<Runner['pin']>>;
   unpin?: (...args: Parameters<Runner['unpin']>) => Aw<ReturnType<Runner['unpin']>>;
 } & Async<Runner, 'list' | 'search' | 'get' | 'events' | 'create' | 'send' | 'update' | 'interrupt' | 'delete'>;
+
+// Messages a thread when the Mac app restarts onto a new build (app-restarts.ts).
+export type AppRestartControl = Pick<AppRestarts, 'watch' | 'isWatching'>;
 
 export type ScheduleControl = Async<Scheduler, 'create' | 'list' | 'find' | 'update' | 'delete'>;
 
@@ -82,7 +86,7 @@ export function approvalTitle(name: string, input: Record<string, unknown>, find
   return t ? `Delete the thread "${t.title}"` : undefined;
 }
 
-export function buildThreadbearTools(control: ThreadControl, selfId: string, now: () => number = Date.now, schedules?: ScheduleControl, projects?: ProjectControl) {
+export function buildThreadbearTools(control: ThreadControl, selfId: string, now: () => number = Date.now, schedules?: ScheduleControl, projects?: ProjectControl, appRestarts?: AppRestartControl) {
   const all = async (): Promise<ThreadSummary[]> => control.list(['inbox', 'snoozed', 'archived']);
 
   // Full ids, or any unique prefix of one (the list shows 8 characters).
@@ -489,12 +493,33 @@ export function buildThreadbearTools(control: ThreadControl, selfId: string, now
           .optional()
           .describe('true to archive this thread once the turn is over. Only when Mike has asked for this thread to be archived, and only with needs "nothing".'),
       },
-      handle(async ({ needs, archive }) =>
-        needs === 'you'
-          ? `Noted: this thread will wait in Needs you${archive ? ', and stays in the inbox, as it needs something from Mike' : ''}. End the turn now, with no more text.`
-          : `Noted: this thread is done${archive ? ', and will be archived once the turn is over' : ''}. End the turn now, with no more text.`,
-      ),
+      handle(async ({ needs, asks, archive }) => {
+        // Asking Mike to Restart to Update means wanting to know when he
+        // has, to check the change in the running app: the same as
+        // wait_for_app_restart, unless that was already asked for.
+        let restart = '';
+        if (needs === 'you' && appRestarts && asksForAppRestart(asks)) {
+          if (!appRestarts.isWatching(selfId)) appRestarts.watch(selfId);
+          restart = " You'll get a message here when the app restarts onto the new build.";
+        }
+        return needs === 'you'
+          ? `Noted: this thread will wait in Needs you${archive ? ', and stays in the inbox, as it needs something from Mike' : ''}.${restart} End the turn now, with no more text.`
+          : `Noted: this thread is done${archive ? ', and will be archived once the turn is over' : ''}. End the turn now, with no more text.`;
+      }),
     ),
+    ...(appRestarts
+      ? [
+          tool(
+            'wait_for_app_restart',
+            "Sends you a message in this thread when Mike's Threadbear Mac app next restarts onto a new build: after you've landed an app change and asked him to Restart to Update (in the Threadbear menu), so you can check it in the running app. An end_turn ask that mentions Restart to Update does this by itself. `text` is what to send then; by default a line saying it restarted. One per thread: asking again replaces it.",
+            { text: z.string().max(4000).optional().describe('What to send when it restarts, e.g. what to check.') },
+            handle(async ({ text }) => {
+              const { build } = appRestarts.watch(selfId, text);
+              return `You'll get a message here when the app restarts onto a build other than the one running now${build ? ` (${build.short})` : ''}. End your turn when you've nothing else to do.`;
+            }),
+          ),
+        ]
+      : []),
     ...reviewTools,
     ...highlightTools,
     ...(schedules ? scheduleTools : []),
@@ -701,7 +726,8 @@ function clip(text: string, max = 2000): string {
 // show_options, never knowing the review window was there.
 export const SHOWING_MIKE =
   'When you have design options, mockups or wireframes for Mike to choose between, put them in front of him with show_options (a side-by-side review window where he picks one and leaves notes), not as pins or a list in your reply; his answer comes back as a message. ' +
-  "For a single file or link he should look at (a doc, a screenshot, a preview URL, a PR), use pin, with show: true to open it in Threadbear's side pane rather than running `open`.";
+  "For a single file or link he should look at (a doc, a screenshot, a preview URL, a PR), use pin, with show: true to open it in Threadbear's side pane rather than running `open`. " +
+  'After landing a change to the Threadbear Mac app, ask Mike to Restart to Update (Threadbear menu) in end_turn: you get a message here when the app is back on the new build (wait_for_app_restart says what to send).';
 
 // Also in the instructions, for the same reason. The librarian files
 // threads by itself, but it only sees a summary and can miss one; the
@@ -711,7 +737,7 @@ export const FILING_PROJECTS =
   "If this thread's work belongs to one of Mike's projects (list_projects) and it isn't in it yet, put it there early with join_project, or make one with create_project for a new body of work he'll come back to (not for a one-off question or chore). " +
   "When the thread ships or finishes something, makes a decision or hits a blocker that changes where the project stands, update the project's state with update_project.";
 
-export function threadbearMcpServer(control: ThreadControl, selfId: string, schedules?: ScheduleControl, projects?: ProjectControl): McpSdkServerConfigWithInstance {
+export function threadbearMcpServer(control: ThreadControl, selfId: string, schedules?: ScheduleControl, projects?: ProjectControl, appRestarts?: AppRestartControl): McpSdkServerConfigWithInstance {
   const server = createSdkMcpServer({
     name: SERVER_NAME,
     version: RUNNER_VERSION,
@@ -722,7 +748,7 @@ export function threadbearMcpServer(control: ThreadControl, selfId: string, sche
       `${SHOWING_MIKE} ` +
       (projects ? `${FILING_PROJECTS} ` : '') +
       'End every turn by calling end_turn, after your final message, to say whether Mike has to do anything.',
-    tools: buildThreadbearTools(control, selfId, Date.now, schedules, projects),
+    tools: buildThreadbearTools(control, selfId, Date.now, schedules, projects, appRestarts),
   });
   server.tools = [...ALWAYS_ASK_TOOLS].map((name) => ({ name: name.split('__').at(-1)!, permission_policy: 'always_ask' as const }));
   return server;

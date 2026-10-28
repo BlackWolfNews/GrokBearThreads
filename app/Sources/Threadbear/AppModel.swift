@@ -388,7 +388,8 @@ final class AppModel {
                 let client = RPCClient(transport: WebSocketTransport(url: endpoint.url, token: endpoint.token))
                 attempt = client
                 try await client.start()
-                let hello = try await client.hello(version: Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "dev")
+                let build = BuildInfo.read(bundle: Bundle.main.bundleURL).flatMap { $0.appTree.isEmpty ? nil : (commit: $0.commit, short: $0.short, tree: $0.appTree) }
+                let hello = try await client.hello(version: Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "dev", build: build)
                 self.client = client
                 runnerVersion = hello.runnerVersion
                 accounts = hello.accounts

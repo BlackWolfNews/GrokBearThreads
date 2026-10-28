@@ -40,6 +40,11 @@ are in `docs/convex-backend.md` and `docs/website.md`.
   asks for a button or a panel for a project, write one of those there.
   A panel with an `items` function is a native list (rows, no page to
   serve); `.threadbear/patches/checks.ts` has one, Worktrees.
+- After landing a change to the Mac app, ask Mike to Restart to Update
+  (Threadbear menu) in your end_turn: the runner messages this thread when
+  the app is back on the new build (docs/protocol.md, "App restarts"), so
+  you can check the change in the running app. `wait_for_app_restart`
+  sets what that message says.
 - Files and links an agent makes for Mike to look at belong in the
   thread's Highlights (the pin on the right-hand rail): use the `pin`
   tool, with `show: true` to open it in the side pane, rather than `open`.

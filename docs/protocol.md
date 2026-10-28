@@ -575,7 +575,7 @@ replaces whatever the deltas built up.
 
 | method | params | result |
 |---|---|---|
-| `hello` | `{ client: string, version: string }` | `{ runnerVersion, protocol: 1, accounts: Account[], pools?: Pool[], defaults: { cwd, accountId, poolId?, model?, models?: { claude?, codex? }, efforts?: { claude?: EffortLevel, codex?: EffortLevel } }, clis?: CliStatus[], updates?: RunnerUpdates }`. `updates` is under Runner updates; `pools` and `defaults.poolId` under Pools. `defaults.accountId` is the account a `threads.create` with no `accountId` uses: the one with the most room among the last-used account's provider (skipping blocked ones, ones under 10% and ones with a note), worked out again as usage changes; a client keeps its own copy of the rule rather than asking again. `defaults.models[provider]` is the model a new thread on that provider gets when it names none (`runner.json`'s `defaults.models`; a dev runner sets the cheapest); `defaults.model` is the same for Claude, kept for older apps. Absent means the account's own default (`accounts[].defaultModel` names it, when known). `defaults.efforts[provider]` likewise for effort; absent means the model's own level. `runnerVersion` is `<package version>+<release id>` when the runner runs from a release, else `<package version>+source` |
+| `hello` | `{ client: string, version: string, build?: { commit, short, tree } }` (`build`: the Mac app's own build, see App restarts) | `{ runnerVersion, protocol: 1, accounts: Account[], pools?: Pool[], defaults: { cwd, accountId, poolId?, model?, models?: { claude?, codex? }, efforts?: { claude?: EffortLevel, codex?: EffortLevel } }, clis?: CliStatus[], updates?: RunnerUpdates }`. `updates` is under Runner updates; `pools` and `defaults.poolId` under Pools. `defaults.accountId` is the account a `threads.create` with no `accountId` uses: the one with the most room among the last-used account's provider (skipping blocked ones, ones under 10% and ones with a note), worked out again as usage changes; a client keeps its own copy of the rule rather than asking again. `defaults.models[provider]` is the model a new thread on that provider gets when it names none (`runner.json`'s `defaults.models`; a dev runner sets the cheapest); `defaults.model` is the same for Claude, kept for older apps. Absent means the account's own default (`accounts[].defaultModel` names it, when known). `defaults.efforts[provider]` likewise for effort; absent means the model's own level. `runnerVersion` is `<package version>+<release id>` when the runner runs from a release, else `<package version>+source` |
 | `threads.list` | `{ include?: ("inbox" \| "snoozed" \| "archived")[] }` (default `["inbox"]`) | `{ threads: ThreadSummary[] }` newest activity first |
 | `threads.search` | `{ query: string, limit?: number }` | `{ threads: ThreadSummary[] }` matches title and preview across all threads, archived included |
 | `threads.create` | `{ text: string, images?: ImageRef[], cwd?: string, accountId?: string, poolId?: string, model?: string, effort?: EffortLevel, permissionMode?: "full" \| "ask", title?: string, worktree?: boolean }` | `{ thread: ThreadSummary }` (the first turn starts straight away). In a repo that asks for worktrees (see Worktrees) the thread gets one of its own before its first turn; `worktree: false` starts it in the folder as it is. The thread's `provider` is its account's. With no `model`, the thread gets `defaults.models[provider]` from `hello`, or `defaults.model` for Claude, or else the account's own default. With no `effort`, `defaults.efforts[provider]`, or else the model's own level. See "Models and effort across providers" |
@@ -761,6 +761,31 @@ the restart is asked for.
   kept crashing at startup says so with a `warning` notice at startup and
   after every `hello` ("Release X kept crashing at startup, so the runner
   went back to Y.").
+
+### App restarts
+
+An agent that changed the Mac app lands it and asks Mike to Restart to
+Update; then it wants to know when he has, to check the change in the
+running app. The app's `hello` carries its `build` (`commit`, `short`, and
+`tree`, the app/ and dock/ trees as `BuildInfo.appTree`; a dev build sends
+none, and only `client: "threadbear-mac"` counts). The runner keeps the
+last build it saw and the threads waiting, in `app-restart.json` in the
+data dir, so both outlast its own restarts.
+
+- `wait_for_app_restart` (`{ text? }`) puts the calling thread on the list,
+  remembering the build running then. Asking again replaces its request.
+- An `end_turn` with `needs: "you"` whose asks mention "Restart to Update"
+  (in `action` or `where`) does the same, unless the thread is already on
+  the list, and its reply says so.
+- When the app says `hello` with a `tree` other than the one a thread
+  remembered, that thread gets a `system.note` "Threadbear app restarted:
+  <old short> to <new short>" and a message with `origin: "runner"`: "The
+  Threadbear app has restarted onto <short> (<commit>), as you asked to
+  hear." and its `text`, or "Check your change in the running app.". Then
+  it's off the list. The same build again (the app reconnecting to a
+  restarted runner) changes nothing.
+- An archived thread, or a request more than a day old, gets only the
+  note, saying why.
 
 ### Handovers
 
@@ -1473,7 +1498,7 @@ drive Threadbear itself: `list_threads`, `read_thread`, `list_accounts`,
 `list_schedules`, `update_schedule` and `delete_schedule` (see Schedules),
 and `list_projects`, `read_project`, `create_project`, `update_project`,
 `join_project` and `leave_project` (see Projects), and `pin` and
-`unpin` (see Highlights).
+`unpin` (see Highlights), and `wait_for_app_restart` (see App restarts).
 `list_accounts` shows each account's provider, note and room left, then
 the pools with their logins and room, and which pool a new thread starts
 on; `create_thread` and `move_thread` take Codex accounts, and

@@ -2,8 +2,15 @@ import Foundation
 
 /// Typed wrappers for the requests in docs/protocol.md.
 public extension RPCClient {
-    func hello(client: String = "threadbear-mac", version: String) async throws -> HelloResult {
-        try await call("hello", .object(["client": .string(client), "version": .string(version)]))
+    /// `build` is the bundle's build (commit, short, tree), so the runner
+    /// can tell threads waiting for it when the app is back on a new one
+    /// (docs/protocol.md, "App restarts"). A dev build has none.
+    func hello(client: String = "threadbear-mac", version: String, build: (commit: String, short: String, tree: String)? = nil) async throws -> HelloResult {
+        var params: [String: JSONValue] = ["client": .string(client), "version": .string(version)]
+        if let build {
+            params["build"] = .object(["commit": .string(build.commit), "short": .string(build.short), "tree": .string(build.tree)])
+        }
+        return try await call("hello", .object(params))
     }
 
     func listThreads(include: [ThreadListScope] = [.inbox]) async throws -> [ThreadSummary] {

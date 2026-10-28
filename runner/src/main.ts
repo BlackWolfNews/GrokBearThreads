@@ -8,6 +8,7 @@ import type { RunnerUpdates } from './runner.ts';
 import { Peers, PrimaryLink, ThreadRouter, drainChildrenName, peersElsewhere, primaryElsewhere, removeDrainInfo, scheduleRouter, writeDrainInfo, type Elsewhere } from './handover.ts';
 import { RunnerUpdater } from './update.ts';
 import { Restarter, restartMethods } from './restart.ts';
+import { AppRestarts } from './app-restarts.ts';
 import { Scheduler, scheduleMethods } from './schedules.ts';
 import { Projects, guardProjects, projectMethods } from './projects.ts';
 import { Librarian, librarianMethods } from './librarian.ts';
@@ -78,6 +79,9 @@ async function main(): Promise<void> {
   // own thread. Sessions only start after the runner exists.
   let runner!: Runner;
   let scheduler!: Scheduler;
+  // Threads waiting to hear the Mac app has restarted onto a new build
+  // (app-restarts.ts); made once the runner is.
+  let appRestarts!: AppRestarts;
   let restarter!: Restarter;
   // Where the agent tools reach threads this runner doesn't have: draining
   // runners' (Peers) while this is the primary, the primary's once this one
@@ -112,7 +116,7 @@ async function main(): Promise<void> {
     claudePath: cfg.claudePath,
     registry,
     log,
-    mcpServersFor: (threadId) => ({ [SERVER_NAME]: threadbearMcpServer(router(), threadId, scheduleControl(), projectControl()) }),
+    mcpServersFor: (threadId) => ({ [SERVER_NAME]: threadbearMcpServer(router(), threadId, scheduleControl(), projectControl(), appRestarts) }),
     alwaysAsk: ALWAYS_ASK_TOOLS,
   });
   // One app-server per live Codex thread, each starting what E says is
@@ -122,7 +126,7 @@ async function main(): Promise<void> {
     codexArgs: cfg.codexArgs,
     registry,
     log,
-    toolsFor: (threadId) => buildThreadbearTools(router(), threadId, Date.now, scheduleControl(), projectControl()),
+    toolsFor: (threadId) => buildThreadbearTools(router(), threadId, Date.now, scheduleControl(), projectControl(), appRestarts),
     onNotice: (text) => runner.notice('warning', text),
   });
   // The runner's own small-model calls, on the settings' Claude pool or
@@ -190,6 +194,7 @@ async function main(): Promise<void> {
   runner.start({ skip: kept });
   // After the threads are loaded, so a schedule that came due while the
   // runner was stopped finds its thread.
+  appRestarts = new AppRestarts({ runner, home: cfg.home, clock: realClock, log });
   scheduler = new Scheduler({ runner, home: cfg.home, clock: realClock, log, elsewhere: (id) => peers.owns(id) });
   scheduler.start();
   // Projects need the threads loaded (their counts, and the thread side of
@@ -305,6 +310,7 @@ async function main(): Promise<void> {
     methods,
     remote: peers,
     updates: () => (draining ? undefined : runnerUpdates()),
+    appHello: (build) => appRestarts.appHello(build),
     helloNotices: () => {
       // Like a missing claude: said to every client, until it's there.
       const noCodex = missingCodex(updates.codexBinary(), cfg);

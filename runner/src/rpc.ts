@@ -83,6 +83,8 @@ export type RpcServerOptions = {
   onlyOwn?: boolean;
   // hello's `updates` (docs/protocol.md, "Runner updates").
   updates?: () => unknown;
+  // The Mac app's hello with its build (docs/protocol.md, "App restarts").
+  appHello?: (build: { commit: string; short: string; tree: string }) => void;
   // Tests shorten these.
   authTimeoutMs?: number;
   skipDeltasBytes?: number;
@@ -317,6 +319,12 @@ export class RpcServer {
         return {};
       case 'hello': {
         conn.client = optString(p, 'client');
+        // Only the Mac app's own builds: a dev build has none.
+        const build = p.build as Record<string, unknown> | undefined;
+        if (conn.client === 'threadbear-mac' && build && typeof build === 'object'
+          && typeof build.commit === 'string' && typeof build.short === 'string' && typeof build.tree === 'string' && build.tree) {
+          this.opts.appHello?.({ commit: build.commit, short: build.short, tree: build.tree });
+        }
         const updates = this.opts.updates?.();
         return updates ? { ...r.hello(), updates } : r.hello();
       }
