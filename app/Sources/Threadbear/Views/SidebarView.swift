@@ -54,8 +54,7 @@ private struct InboxList: View {
     @State private var archiveLimit = ArchiveRows.first
 
     var body: some View {
-        // The search under New thread cuts every section down to its
-        // matches.
+        // The search at the top cuts every section down to its matches.
         let query = app.searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
         let searching = !query.isEmpty
         let sections = app.sections.matching(query)
@@ -73,13 +72,16 @@ private struct InboxList: View {
             drawn(section).map { ($0.id, SectionRow.id(section: section.title, thread: $0.id)) }
         })
         VStack(spacing: 0) {
-            SidebarButtonRow(icon: "square.and.pencil", title: "New thread", shortcut: "⌘N", tip: "Start a new thread (⌘N)", active: app.selection == nil) {
-                app.newThread()
+            // One line, the search and then New thread (Mike asked 30 Oct):
+            // a New thread row over a search field read as two bars that
+            // didn't match. The button takes the field's height.
+            HStack(spacing: zoomed(6)) {
+                ThreadSearch()
+                NewThreadButton()
             }
+            .fixedSize(horizontal: false, vertical: true)
             .padding(.horizontal, SidebarMetrics.outerInset)
             .padding(.top, zoomed(4))
-            ThreadSearch()
-                .padding(.horizontal, SidebarMetrics.outerInset)
             let order = open.flatMap { drawn($0).map(\.id) }
             // Section and thread, so a thread changing section animates
             // even when the order of ids alone stays the same.
@@ -166,16 +168,46 @@ private struct ThreadSection: View {
     }
 }
 
-/// The search under New thread. It searched only the archive, under the
-/// Archived heading, until Mike asked for it at the top, finding any
-/// thread (30 Oct).
+/// The search at the top of the inbox. It searched only the archive,
+/// under the Archived heading, until Mike asked for it at the top,
+/// finding any thread (30 Oct).
 private struct ThreadSearch: View {
     @Environment(AppModel.self) private var app
 
     var body: some View {
         @Bindable var app = app
         SearchField(text: $app.searchQuery, prompt: "Search threads")
-            .padding(.top, zoomed(4))
+    }
+}
+
+/// New thread beside the search: the compose icon alone, as Mail and
+/// Notes have it, so the search keeps the room. Lit while the new
+/// thread's composer is showing, as the row it replaced was.
+private struct NewThreadButton: View {
+    @Environment(AppModel.self) private var app
+    @Environment(\.controlActiveState) private var activeState
+    @State private var hovering = false
+
+    var body: some View {
+        let active = app.selection == nil
+        Button { app.newThread() } label: {
+            Image(systemName: "square.and.pencil")
+                .font(.system(size: TypeScale.sidebarButton))
+                .foregroundStyle(hovering || active ? .primary : .secondary)
+                .frame(width: zoomed(32))
+                .frame(maxHeight: .infinity)
+                .background(active ? Color.primary.opacity(activeState == .key ? 0.08 : 0.06) : hovering ? SidebarMetrics.hover : .clear,
+                            in: RoundedRectangle(cornerRadius: SidebarMetrics.corner))
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering = $0 }
+        .animation(Juice.hover, value: hovering)
+        // Over the end of the search, since the sidebar's edge is just
+        // right of the button.
+        .shortcutHint("⌘N", .before)
+        .tip("Start a new thread (⌘N)")
+        .accessibilityLabel("New thread")
     }
 }
 
@@ -894,14 +926,11 @@ struct RowIconButtonStyle: ButtonStyle {
     }
 }
 
-/// A full-width sidebar row that does one thing: New thread at the top of
-/// the inbox, New schedule at the top of Scheduled.
+/// A full-width sidebar row that does one thing: New schedule at the top
+/// of Scheduled, New project, Show more under the archive.
 struct SidebarButtonRow: View {
     let icon: String
     let title: String
-    /// Shown at the row's end while ⌘ is held (`ShortcutHints`). It used
-    /// to be printed there all the time, which Mike found noisy.
-    var shortcut: String? = nil
     /// The tooltip, if the title alone doesn't say enough.
     var tip: String? = nil
     var active = false
@@ -926,12 +955,11 @@ struct SidebarButtonRow: View {
             .padding(.trailing, SidebarMetrics.trailing)
             .padding(.vertical, zoomed(7))
             .background(background, in: RoundedRectangle(cornerRadius: SidebarMetrics.corner))
-            .shortcutHint(shortcut, .insideTrailing)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .onHover { hovering = $0 }
-        .tip(tip ?? shortcut.map { "\(title) (\($0))" } ?? title)
+        .tip(tip ?? title)
     }
 
     private var background: Color {
@@ -1102,8 +1130,8 @@ struct SearchField: View {
     let prompt: String
 
     var body: some View {
-        // The glass and the prompt on the same columns as New thread's icon
-        // and title, as SidebarButtonRow lays them out.
+        // The glass and the prompt on the same columns as a
+        // SidebarButtonRow's icon and title.
         HStack(spacing: zoomed(8)) {
             Image(systemName: "magnifyingglass")
                 .font(.system(size: zoomed(12.5)))

@@ -39,7 +39,8 @@ has to ask about, whatever the mode.
 
 ## Your first thread
 
-Press ⌘N, or click New thread, type a message and press Return.
+Press ⌘N, or click New thread (the pencil beside the search at the top of
+the list), type a message and press Return.
 
 New threads start in the `Threadbear` folder in your home folder
 (`~/Threadbear`), which setup makes for you. You can pick another folder for
@@ -96,8 +97,8 @@ Hibernating and Archived, at the foot, hold the threads you've put away
 (below). They start folded, showing only how many; click a heading to
 open or fold it.
 
-The search box under New thread looks through every thread, the put-away
-ones too. Type part of a title, or of a thread's last reply, and each
+The search box at the top, beside the New thread button, looks through
+every thread, the put-away ones too. Type part of a title, or of a thread's last reply, and each
 section shows only the threads that match, with folded ones opened. The x
 clears it.
 

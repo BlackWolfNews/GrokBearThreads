@@ -87,7 +87,8 @@ and the perf run stay away from the real one. Install the runner itself with
 
 ## Using it
 
-- **Sidebar.** New thread at the top, then Needs you (waiting on an
+- **Sidebar.** The search and a New thread button (⌘N) share the top
+  line, then Needs you (waiting on an
   approval or a question, or finished and unread), Running, then Inbox.
   Each row has the title, a one-line preview, and at the right the time or
   the status in words: "Working" with a spinner, "Needs you" in orange,
@@ -96,13 +97,13 @@ and the perf run stay away from the real one. Install the runner itself with
   at the end of the preview only if it isn't on `claude-main`. Hover a row
   for Snooze and Archive buttons. A click selects a row straight away, and
   the up and down arrows move through threads from there. Snoozed and
-  Archive, with their counts, are at the bottom. The search under New
-  thread cuts every section down to the threads whose title or preview
-  match, opening folded ones while it has text.
+  Archive, with their counts, are at the bottom. The search cuts every
+  section down to the threads whose title or preview match, opening
+  folded ones while it has text.
 - **Header.** One line: the folder's name, then the title. The full path is
   in its tooltip. The ... menu has Snooze, Archive, "Copy transcript as
   Markdown" and "Copy thread id" (for pointing an agent at the thread).
-- **New thread** with ⌘N or the New thread row. The composer sits in the
+- **New thread** with ⌘N or the pencil beside the search. The composer sits in the
   middle of the pane under "What should we work on?", with where the thread
   will start ("Starts in misc on mike") under it, and drops to the bottom
   once you send. It starts in `~/dev/me/misc` on the last account you used.
@@ -531,7 +532,7 @@ is an error. Commands marked "the open thread" act on `id` when it's given
 | `click` | `title` | a button in the transcript: Allow, Always allow, Deny, an option, Send answer |
 | `expand`, `collapse` | `row`, `file`, `all`, `section` | a group, tool, thinking block or settled approval (one folded in a closed group opens it); `file` (path or index) in a changes card; `all` for a whole diff; `section` (`inbox`, `running`) folds or opens an inbox heading, as clicking it does |
 | `sort` | `order` (`needsYou`, `newest`, `oldest`) | the Inbox section's order, as its heading's sort menu sets it |
-| `search` | `text` (`""` clears it) | the search under New thread, as typing in it does; `sidebar` then lists only its matches |
+| `search` | `text` (`""` clears it) | the search at the top of the inbox, as typing in it does; `sidebar` then lists only its matches |
 | `scroll` | `to` (`top`, `bottom`) or `row`, `offset` | |
 | `hints` | `on` (default true) | shows the keys as if ⌘ were held, or hides them |
 | `setup` | `show`, `hidden` | Finish setting up: opens or closes its panel, or hides or unhides it; says what's left, `[x]` on each item done, and whether the icon and panel are up |

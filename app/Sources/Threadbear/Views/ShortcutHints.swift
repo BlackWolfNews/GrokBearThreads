@@ -84,11 +84,9 @@ enum ShortcutHintPlacement {
     /// Just right of the button, over whatever is there (the activity bar's
     /// icons, whose neighbours above and below are too close).
     case after
-    /// Just left of the button (the composer's Stop, at the window's edge).
+    /// Just left of the button (the composer's Stop, at the window's edge,
+    /// and New thread, at the sidebar's).
     case before
-    /// Inside the button at its trailing end, where a row's key would be
-    /// printed (New thread).
-    case insideTrailing
 }
 
 extension View {
@@ -121,8 +119,6 @@ private struct ShortcutHintMark: ViewModifier {
                     ShortcutKeyBadge(key: key)
                         .frame(width: 0, alignment: .trailing)
                         .offset(x: -gap)
-                case .insideTrailing:
-                    ShortcutKeyBadge(key: key).padding(.trailing, SidebarMetrics.trailing)
                 }
             }
         }

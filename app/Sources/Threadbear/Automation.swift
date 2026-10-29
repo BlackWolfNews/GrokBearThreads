@@ -687,7 +687,8 @@ enum Automation {
             app.inboxOrder = order
             return "ok"
         case "search":
-            // The search under New thread, as typing in it does; "" clears it.
+            // The search at the top of the inbox, as typing in it does; ""
+            // clears it.
             app.searchQuery = c["text"] as? String ?? ""
             return "ok"
         case "expand", "collapse":
