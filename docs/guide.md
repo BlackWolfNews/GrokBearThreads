@@ -147,6 +147,19 @@ has left before it hits its limits (for Claude, the 5-hour and weekly ones).
 Threadbear learns these numbers from the threads it runs, so a login's bars
 fill in once it has run something.
 
+At the top it shows what you've spent: tokens today (and what a usual day
+had spent by this time), in the last hour and over the last 7 days, with a
+chart by the hour or by the day, each login in its own colour. Hover a bar
+to see who spent what. The tokens are read from the Claude and Codex
+transcripts on your Mac, so work done outside Threadbear counts too; the
+first read takes a minute or so after the runner updates.
+
+Below that, each pool is a card, with each login in it: what it's spent
+today, and its 5-hour and weekly windows. The weekly one has a small chart
+of the week so far, with your current pace dashed on to the reset. When a
+window would run out before it resets at that pace, it says when in
+orange. Hover a window for its rate.
+
 ## Connectors
 
 Agents get services like Notion, Sentry and Cloudflare from your Connectors

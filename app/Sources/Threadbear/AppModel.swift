@@ -164,6 +164,11 @@ final class AppModel {
     /// Nil until asked; false for a runner older than step 4, which has no
     /// `clis.*` (the usage popover leaves the CLI part out).
     var clisSupported: Bool?
+    /// Tokens by the hour and limit readings over time (`usage.stats`),
+    /// for the Usage panel. Asked for while the panel is open.
+    var usageStats: UsageStats?
+    /// Nil until asked; false for a runner without `usage.stats`.
+    var usageStatsSupported: Bool?
     /// Update failures Mike has dismissed, by "<provider>|<finishedAt>",
     /// so the line under the toolbar stays gone for that failure.
     var dismissedCliFailures: Set<String> = []

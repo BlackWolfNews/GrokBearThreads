@@ -379,6 +379,14 @@ struct AppDump: Encodable {
     @MainActor
     static func usageLines(_ app: AppModel) -> [String] {
         var lines: [String] = []
+        // The spend at the top, as the tiles say it.
+        if let stats = app.usageStats {
+            let ids = app.accounts.map(\.id)
+            var spend = "Today " + UsageStatsMath.tokens(UsageStatsMath.today(stats, accounts: ids, now: app.now).total)
+            spend += ", last hour " + UsageStatsMath.tokens(UsageStatsMath.lastHour(stats, accounts: ids, now: app.now))
+            if !stats.ready { spend += " (still reading)" }
+            lines.append(spend)
+        }
         let groups = UsageGroups.build(pools: app.poolsSupported ? app.pools : [], accounts: app.accounts)
         let pooled = groups.contains { $0.pool != nil }
         for group in groups {

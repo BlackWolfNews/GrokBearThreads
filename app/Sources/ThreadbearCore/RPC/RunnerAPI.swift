@@ -189,6 +189,16 @@ public extension RPCClient {
     }
 }
 
+// MARK: Usage history (docs/protocol.md, "Usage history")
+
+public extension RPCClient {
+    /// Each login's tokens by the hour and its limit readings over time.
+    /// `-32601` from a runner older than it: the panel shows no charts.
+    func usageStats(days: Int = 8) async throws -> UsageStats {
+        try await call("usage.stats", .object(["days": .number(Double(days))]), as: UsageStats.self)
+    }
+}
+
 // MARK: CLIs (docs/protocol.md, "CLI requests")
 
 /// Each CLI request returns at once with the state when it arrived; the

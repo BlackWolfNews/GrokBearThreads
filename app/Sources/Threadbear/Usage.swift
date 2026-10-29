@@ -23,6 +23,20 @@ extension AppModel {
         }
     }
 
+    /// The Usage panel's charts. The panel asks when it opens and once a
+    /// minute while it stays open; nothing else needs them.
+    func loadUsageStats() async {
+        guard let client else { return }
+        do {
+            usageStats = try await client.usageStats()
+            usageStatsSupported = true
+        } catch RPCError.server(let code, _) where code == RPCError.methodNotFound {
+            usageStatsSupported = false
+        } catch {
+            AppLog.write("rpc", "usage.stats failed: \(error.localizedDescription)")
+        }
+    }
+
     /// The usage popover's buttons. Each returns at once; progress comes
     /// through `clis.updated`.
     func checkClis() { cliCall("clis.check") { try await $0.checkClis() } }

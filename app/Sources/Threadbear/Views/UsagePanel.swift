@@ -1,32 +1,38 @@
+import Charts
 import SwiftUI
 import ThreadbearCore
 
-/// "Usage" in the activity bar, a panel in the dock: every login's limits,
-/// grouped by pool and, within a pool, by provider (Mike, 28 Oct: pools are
-/// what threads run on). A panel rather than a popover so it can stay open
-/// beside a thread, or be dragged out into a window. The CLIs' versions are
-/// in Updates. Everything comes from `accounts.updated` and
-/// `pools.updated`; the times follow `app.now`, which ticks without asking
-/// the runner anything.
+/// "Usage" in the activity bar, a panel in the dock. At the top, what's
+/// been spent: today's tokens, the last hour's, and a chart by the hour or
+/// the day, each login its own colour (Mike, 29 Oct: "how many tokens I've
+/// spent today, what my velocity is, some graphs"). Then one card per pool
+/// (pools are what threads run on), each login in it with its 5-hour and
+/// weekly room, how fast the week is going and whether it lasts. A panel
+/// rather than a popover so it can stay open beside a thread, or be dragged
+/// out into a window. The CLIs' versions are in Updates.
+///
+/// The limits come from `accounts.updated` and `pools.updated`; the tokens
+/// and the readings over time from `usage.stats`, asked for when the panel
+/// opens and once a minute while it's open.
 struct UsagePanel: View {
     @Environment(AppModel.self) private var app
 
     var body: some View {
         let groups = UsageGroups.build(pools: app.poolsSupported ? app.pools : [], accounts: app.accounts)
         let notices = AccountUsageText.notices(app.accounts)
+        let colours = LoginColours(accounts: app.accounts)
         ScrollView {
-            VStack(alignment: .leading, spacing: zoomed(12)) {
+            VStack(alignment: .leading, spacing: zoomed(14)) {
                 if !app.accounts.contains(where: { $0.usage != nil }) {
                     Text("The usage numbers need a newer runner.")
                         .font(.system(size: zoomed(12)))
                         .foregroundStyle(.secondary)
                 }
-                // Side by side when the addresses fit beside the bars;
-                // in a narrow panel each address gets a line of its own
-                // above its bars, rather than being cut to "mi...om".
-                ViewThatFits(in: .horizontal) {
-                    UsageTable(groups: groups, allAccounts: app.accounts, notices: notices.own, now: app.now)
-                    UsageTable(groups: groups, allAccounts: app.accounts, notices: notices.own, now: app.now, stacked: true)
+                if let stats = app.usageStats {
+                    SpendSection(stats: stats, accounts: app.accounts, colours: colours, now: app.now)
+                }
+                ForEach(groups) { group in
+                    PoolCard(group: group, allAccounts: app.accounts, notices: notices.own, stats: app.usageStats, colours: colours, now: app.now)
                 }
                 // Where the numbers came from, and what Token Stats says
                 // about all of them, once.
@@ -41,182 +47,573 @@ struct UsagePanel: View {
             .padding(zoomed(16))
             .frame(maxWidth: .infinity, alignment: .leading)
         }
+        .task {
+            // Only while the panel is on screen: the task ends with it.
+            while !Task.isCancelled {
+                await app.loadUsageStats()
+                if app.usageStatsSupported == false { return }
+                try? await Task.sleep(for: .seconds(60))
+            }
+        }
     }
 }
 
-/// The logins as one small table: each pool's name and icon, then its
-/// logins by provider, each provider with a header saying what its columns
-/// are. A login's name, then what's left of the 5-hour and weekly windows,
-/// with "left" said once in the header (a bare "54%" read as used as
-/// easily as left). Under a login, only what's worth knowing: its note,
-/// that it's at its limit or its numbers are old, when a short window
-/// comes back, and the extras that decide something
-/// (`AccountUsageText.extraLines`). One grid so every column lines up.
-/// A login in two pools shows in both.
-private struct UsageTable: View {
-    let groups: [UsageGroups.Group]
-    /// Every login, for a pool's fallback icon (its providers').
-    let allAccounts: [Account]
-    let notices: [String: String]
-    let now: Date
-    /// Each address on its own line over its bars, for a narrow panel.
-    var stacked = false
+// MARK: Colours
+
+/// Each login's colour in the charts: the reference categorical palette's
+/// slots in the logins' own order, so a login keeps its colour whichever
+/// pool or chart it's in. Text never wears them; a dot beside a name does.
+struct LoginColours {
+    private let index: [String: Int]
+
+    init(accounts: [Account]) {
+        index = Dictionary(accounts.enumerated().map { ($1.id, $0) }, uniquingKeysWith: { first, _ in first })
+    }
+
+    private static let light: [UInt32] = [0x2A78D6, 0xEB6834, 0x1BAF7A, 0xEDA100, 0xE87BA4, 0x008300, 0x6250D6, 0xE34948]
+    private static let dark: [UInt32] = [0x3987E5, 0xD95926, 0x199E70, 0xC98500, 0xD55181, 0x008300, 0x9085E9, 0xE66767]
+
+    func colour(_ accountId: String, dark: Bool) -> Color {
+        // A ninth login folds to grey rather than repeating a colour.
+        guard let slot = index[accountId], slot < Self.light.count else { return .gray }
+        let hex = (dark ? Self.dark : Self.light)[slot]
+        return Color(red: Double((hex >> 16) & 0xFF) / 255, green: Double((hex >> 8) & 0xFF) / 255, blue: Double(hex & 0xFF) / 255)
+    }
+}
+
+/// A login's colour as a small dot, beside its name.
+private struct LoginDot: View {
+    let colour: Color
 
     var body: some View {
-        let hasFiveHour = groups.contains { $0.accounts.contains { AccountUsageText.mainWindows($0.usage).contains { $0.kind == "five_hour" } } }
-        let columns = (stacked ? 0 : 1) + (hasFiveHour ? 2 : 1)
-        // Pools get headings; groups that are just providers (an older
-        // runner) don't, as the provider's own header names them.
-        let pooled = groups.contains { $0.pool != nil }
-        Grid(alignment: .leading, horizontalSpacing: zoomed(14), verticalSpacing: zoomed(6)) {
-            ForEach(groups) { group in
-            let firstGroup = group.id == groups.first?.id
-            if pooled {
-                GridRow {
-                    Label {
-                        Text(group.title)
-                    } icon: {
-                        Image(systemName: group.pool.map { Pools.symbol($0, accounts: allAccounts) } ?? "tray")
-                            .foregroundStyle(.secondary)
-                    }
-                    .font(.system(size: zoomed(12.5), weight: .semibold))
-                    .accessibilityAddTraits(.isHeader)
-                    .gridCellColumns(columns)
-                }
-                .padding(.top, firstGroup ? 0 : zoomed(14))
+        Circle().fill(colour).frame(width: zoomed(7), height: zoomed(7))
+    }
+}
+
+// MARK: Spend
+
+/// Today's tokens, the last hour's, the week's, then the chart.
+private struct SpendSection: View {
+    let stats: UsageStats
+    let accounts: [Account]
+    let colours: LoginColours
+    let now: Date
+
+    var body: some View {
+        let ids = accounts.map(\.id)
+        let today = UsageStatsMath.today(stats, accounts: ids, now: now)
+        let lastHour = UsageStatsMath.lastHour(stats, accounts: ids, now: now)
+        let usual = UsageStatsMath.usualByNow(stats, accounts: ids, now: now)
+        let week = UsageStatsMath.total(stats, accounts: ids, from: Calendar.current.date(byAdding: .day, value: -6, to: Calendar.current.startOfDay(for: now)) ?? now, to: now.addingTimeInterval(1))
+        let hoursToday = max(1, now.timeIntervalSince(Calendar.current.startOfDay(for: now)) / 3600)
+        VStack(alignment: .leading, spacing: zoomed(12)) {
+            HStack(alignment: .top, spacing: zoomed(10)) {
+                StatTile(title: "Today", value: UsageStatsMath.tokens(today.total),
+                         detail: usual.map { "Usually " + UsageStatsMath.tokens($0) + " by now" },
+                         tip: UsageStatsMath.breakdown(today))
+                StatTile(title: "Last hour", value: UsageStatsMath.tokens(lastHour),
+                         detail: UsageStatsMath.tokens(Int(Double(today.total) / hoursToday)) + " an hour today",
+                         tip: "Tokens in the last 60 minutes, across every login")
+                StatTile(title: "7 days", value: UsageStatsMath.tokens(week.total),
+                         detail: UsageStatsMath.tokens(week.total / 7) + " a day",
+                         tip: UsageStatsMath.breakdown(week))
             }
-            ForEach(group.providers) { section in
-            let first = !pooled && firstGroup && section.id == group.providers.first?.id
-            // A pool of one provider doesn't name it: the pool's heading
-            // says enough, and "Claude" under "Claude" read as noise.
-            let named = !pooled || group.providers.count > 1
-            if stacked && named {
-                GridRow {
-                    Text(ModelPicker.providerTitle(section.provider))
-                        .accessibilityAddTraits(.isHeader)
-                        .gridCellColumns(columns)
-                }
+            TokensChart(stats: stats, accounts: accounts, colours: colours, now: now)
+            if !stats.ready {
+                Text("Still reading the transcripts, so these are partial.")
+                    .font(.system(size: zoomed(11)))
+                    .foregroundStyle(.tertiary)
+            }
+        }
+    }
+}
+
+/// A number with its name over it and a quiet line under it.
+private struct StatTile: View {
+    let title: String
+    let value: String
+    let detail: String?
+    let tip: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: zoomed(2)) {
+            Text(title)
                 .font(.system(size: zoomed(11), weight: .medium))
+                .foregroundStyle(.secondary)
+            Text(value)
+                .font(.system(size: zoomed(22), weight: .semibold))
+                .monospacedDigit()
+            // Two lines rather than "Usually 76..." when the dock is narrow.
+            Text(detail ?? " ")
+                .font(.system(size: zoomed(11)))
                 .foregroundStyle(.tertiary)
-                .padding(.top, first ? 0 : zoomed(pooled ? 4 : 8))
+                .lineLimit(2, reservesSpace: true)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(zoomed(10))
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Card())
+        .tip(tip)
+        .accessibilityElement(children: .combine)
+    }
+}
+
+/// The cards' fill: a shade lighter than the panel, with a hairline.
+private struct Card: View {
+    var body: some View {
+        RoundedRectangle(cornerRadius: zoomed(8), style: .continuous)
+            .fill(Color.primary.opacity(0.035))
+            .overlay(RoundedRectangle(cornerRadius: zoomed(8), style: .continuous).strokeBorder(Color.primary.opacity(0.07)))
+    }
+}
+
+/// Tokens by the hour today, or by the day for the last week, stacked by
+/// login. Hovering a bar shows what's in it.
+private struct TokensChart: View {
+    let stats: UsageStats
+    let accounts: [Account]
+    let colours: LoginColours
+    let now: Date
+    @Environment(\.colorScheme) private var scheme
+    @AppStorage("usage.chartRange") private var range = "today"
+    @State private var hovered: Date?
+
+    var body: some View {
+        let ids = accounts.map(\.id)
+        let byDay = range == "week"
+        let calendar = Calendar.current
+        let bars = byDay
+            ? UsageStatsMath.byDay(stats, accounts: ids, days: 7, now: now)
+            : UsageStatsMath.todayByHour(stats, accounts: ids, now: now)
+        let unit: Calendar.Component = byDay ? .day : .hour
+        let start = byDay ? calendar.date(byAdding: .day, value: -6, to: calendar.startOfDay(for: now))! : calendar.startOfDay(for: now)
+        let end = byDay ? calendar.date(byAdding: .day, value: 1, to: calendar.startOfDay(for: now))! : calendar.date(byAdding: .day, value: 1, to: start)!
+        let spending = ids.filter { id in bars.contains { $0.accountId == id } }
+        let selected = hovered.flatMap { calendar.dateInterval(of: unit, for: $0)?.start }
+        VStack(alignment: .leading, spacing: zoomed(8)) {
+            HStack {
+                Text(byDay ? "Tokens by day" : "Tokens by hour")
+                    .font(.system(size: zoomed(12.5), weight: .semibold))
+                Spacer()
+                Picker("Range", selection: $range) {
+                    Text("Today").tag("today")
+                    Text("7 days").tag("week")
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .fixedSize()
+                .controlSize(.small)
+                .tip("Show today by the hour, or the last 7 days by the day")
             }
-            GridRow {
-                if !stacked {
-                    Text(named ? ModelPicker.providerTitle(section.provider) : "")
+            Chart {
+                ForEach(bars, id: \.self) { bar in
+                    BarMark(x: .value("Time", bar.start, unit: unit), y: .value("Tokens", bar.tokens))
+                        .foregroundStyle(by: .value("Login", bar.accountId))
+                        .opacity(selected == nil || selected == bar.start ? 1 : 0.45)
+                }
+                if !byDay {
+                    RuleMark(x: .value("Now", now))
+                        .foregroundStyle(Color.primary.opacity(0.25))
+                        .lineStyle(StrokeStyle(lineWidth: 1, dash: [3, 3]))
+                }
+            }
+            .chartForegroundStyleScale(domain: spending, range: spending.map { colours.colour($0, dark: scheme == .dark) })
+            .chartLegend(.hidden)
+            .chartXScale(domain: start...end)
+            .chartXAxis {
+                AxisMarks(values: .stride(by: byDay ? .day : .hour, count: byDay ? 1 : 6)) { value in
+                    AxisGridLine().foregroundStyle(Color.primary.opacity(0.06))
+                    AxisValueLabel {
+                        if let date = value.as(Date.self) {
+                            Text(byDay ? Self.dayLabel(date, now: now) : AccountUsageText.clock(date))
+                        }
+                    }
+                }
+            }
+            .chartYAxis {
+                AxisMarks(position: .trailing, values: .automatic(desiredCount: 3)) { value in
+                    AxisGridLine().foregroundStyle(Color.primary.opacity(0.06))
+                    AxisValueLabel {
+                        if let n = value.as(Int.self) { Text(UsageStatsMath.tokens(n)) }
+                    }
+                }
+            }
+            .chartXSelection(value: $hovered)
+            .frame(height: zoomed(130))
+            .overlay(alignment: .topLeading) {
+                if let selected {
+                    HoverNote(start: selected, byDay: byDay, bars: bars.filter { $0.start == selected }, accounts: accounts, colours: colours, now: now)
+                }
+            }
+            .overlay {
+                if bars.isEmpty {
+                    Text(stats.ready ? "Nothing spent yet" : "Reading the transcripts…")
+                        .font(.system(size: zoomed(11)))
+                        .foregroundStyle(.tertiary)
+                }
+            }
+            // The legend: only the logins that spent something here, in
+            // the logins' own order, so the colours read without a hover.
+            if spending.count > 1 {
+                // Wrapped a whole name at a time: in the narrow dock an
+                // HStack broke "mike+3" over two lines.
+                LegendFlow(spacing: zoomed(12), lineSpacing: zoomed(4)) {
+                    ForEach(spending, id: \.self) { id in
+                        HStack(spacing: zoomed(5)) {
+                            LoginDot(colour: colours.colour(id, dark: scheme == .dark))
+                            Text(AccountName.login(id, accounts: accounts))
+                        }
+                        .fixedSize()
+                    }
+                }
+                .font(.system(size: zoomed(11)))
+                .foregroundStyle(.secondary)
+            }
+        }
+        .padding(zoomed(12))
+        .background(Card())
+    }
+
+    /// "Mon", "Today".
+    static func dayLabel(_ date: Date, now: Date) -> String {
+        if Calendar.current.isDate(date, inSameDayAs: now) { return "Today" }
+        let names = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
+        return names[(Calendar.current.component(.weekday, from: date) - 1) % 7]
+    }
+}
+
+/// Lays its children out left to right, wrapping to a new line when the
+/// next one doesn't fit, for the chart's legend.
+private struct LegendFlow: Layout {
+    var spacing: CGFloat
+    var lineSpacing: CGFloat
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let rows = rows(width: proposal.width ?? .infinity, subviews: subviews)
+        let width = rows.map { $0.width }.max() ?? 0
+        let height = rows.map(\.height).reduce(0, +) + lineSpacing * CGFloat(max(0, rows.count - 1))
+        return CGSize(width: width, height: height)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        var y = bounds.minY
+        for row in rows(width: bounds.width, subviews: subviews) {
+            var x = bounds.minX
+            for index in row.indices {
+                let size = subviews[index].sizeThatFits(.unspecified)
+                subviews[index].place(at: CGPoint(x: x, y: y + (row.height - size.height) / 2), proposal: .unspecified)
+                x += size.width + spacing
+            }
+            y += row.height + lineSpacing
+        }
+    }
+
+    private func rows(width: CGFloat, subviews: Subviews) -> [(indices: [Int], width: CGFloat, height: CGFloat)] {
+        var rows: [(indices: [Int], width: CGFloat, height: CGFloat)] = []
+        for (index, subview) in subviews.enumerated() {
+            let size = subview.sizeThatFits(.unspecified)
+            if var last = rows.last, last.width + spacing + size.width <= width {
+                last.indices.append(index)
+                last.width += spacing + size.width
+                last.height = max(last.height, size.height)
+                rows[rows.count - 1] = last
+            } else {
+                rows.append(([index], size.width, size.height))
+            }
+        }
+        return rows
+    }
+}
+
+/// The hovered bar's hour or day, its total and each login's part.
+private struct HoverNote: View {
+    let start: Date
+    let byDay: Bool
+    let bars: [UsageStatsMath.Bar]
+    let accounts: [Account]
+    let colours: LoginColours
+    let now: Date
+    @Environment(\.colorScheme) private var scheme
+
+    var body: some View {
+        let total = bars.reduce(0) { $0 + $1.tokens }
+        VStack(alignment: .leading, spacing: zoomed(3)) {
+            Text((byDay ? TokensChart.dayLabel(start, now: now) : AccountUsageText.clock(start)) + "  " + UsageStatsMath.tokens(total))
+                .font(.system(size: zoomed(11), weight: .semibold))
+            ForEach(bars.sorted { $0.tokens > $1.tokens }, id: \.accountId) { bar in
+                HStack(spacing: zoomed(5)) {
+                    LoginDot(colour: colours.colour(bar.accountId, dark: scheme == .dark))
+                    Text(AccountName.login(bar.accountId, accounts: accounts))
+                    Spacer(minLength: zoomed(8))
+                    Text(UsageStatsMath.tokens(bar.tokens)).monospacedDigit()
+                }
+                .font(.system(size: zoomed(11)))
+                .foregroundStyle(.secondary)
+            }
+        }
+        .padding(.horizontal, zoomed(8))
+        .padding(.vertical, zoomed(6))
+        .fixedSize()
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: zoomed(6)))
+        .allowsHitTesting(false)
+    }
+}
+
+
+// MARK: Pools
+
+/// One pool: its name and what it's spent today, then each login in it.
+/// A pool of more than one provider names each provider over its logins,
+/// as a Claude and a Codex login have different windows.
+private struct PoolCard: View {
+    let group: UsageGroups.Group
+    let allAccounts: [Account]
+    let notices: [String: String]
+    let stats: UsageStats?
+    let colours: LoginColours
+    let now: Date
+
+    var body: some View {
+        let today = stats.map { UsageStatsMath.today($0, accounts: group.accounts.map(\.id), now: now) }
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: zoomed(7)) {
+                Image(systemName: group.pool.map { Pools.symbol($0, accounts: allAccounts) } ?? "tray")
+                    .foregroundStyle(.secondary)
+                Text(group.title)
+                    .font(.system(size: zoomed(13), weight: .semibold))
+                    .accessibilityAddTraits(.isHeader)
+                Spacer()
+                if let today, today.total > 0 {
+                    Text(UsageStatsMath.tokens(today.total) + " today")
+                        .font(.system(size: zoomed(11)))
+                        .monospacedDigit()
+                        .foregroundStyle(.secondary)
+                        .tip(UsageStatsMath.breakdown(today))
+                }
+            }
+            .padding(.horizontal, zoomed(12))
+            .padding(.vertical, zoomed(9))
+            ForEach(group.providers) { section in
+                if group.providers.count > 1 {
+                    Text(ModelPicker.providerTitle(section.provider))
+                        .font(.system(size: zoomed(11), weight: .medium))
+                        .foregroundStyle(.tertiary)
+                        .padding(.horizontal, zoomed(12))
+                        .padding(.top, zoomed(6))
                         .accessibilityAddTraits(.isHeader)
                 }
-                // Codex's Pro Lite has only a week: its column stays, empty.
-                if hasFiveHour {
-                    Text(section.accounts.contains { AccountUsageText.mainWindows($0.usage).contains { $0.kind == "five_hour" } } ? "5-hour left" : "")
+                ForEach(section.accounts) { account in
+                    Divider().opacity(0.6)
+                    LoginRow(account: account, allAccounts: allAccounts, notice: notices[account.id], stats: stats, colours: colours, now: now)
+                        .padding(.horizontal, zoomed(12))
+                        .padding(.vertical, zoomed(10))
                 }
-                Text("Weekly left")
             }
-            .font(.system(size: zoomed(11), weight: .medium))
-            .foregroundStyle(.tertiary)
-            .padding(.top, (stacked && named) || first ? 0 : zoomed(pooled ? 4 : 8))
-            ForEach(section.accounts) { account in
-                let windows = AccountUsageText.mainWindows(account.usage)
-                if stacked {
-                    GridRow {
-                        AccountNameCell(account: account, now: now).gridCellColumns(columns)
-                    }
+        }
+        .background(Card())
+    }
+}
+
+/// A login: its name and what it's spent today, its 5-hour and weekly
+/// windows side by side (one over the other in a narrow panel), then only
+/// the extras that decide something (`AccountUsageText.extraLines`).
+private struct LoginRow: View {
+    let account: Account
+    let allAccounts: [Account]
+    let notice: String?
+    let stats: UsageStats?
+    let colours: LoginColours
+    let now: Date
+    @Environment(\.colorScheme) private var scheme
+
+    var body: some View {
+        let usage = account.usage
+        let windows = AccountUsageText.mainWindows(usage)
+        let today = stats.map { UsageStatsMath.today($0, accounts: [account.id], now: now) }
+        let colour = colours.colour(account.id, dark: scheme == .dark)
+        VStack(alignment: .leading, spacing: zoomed(8)) {
+            HStack(alignment: .firstTextBaseline, spacing: zoomed(7)) {
+                if stats != nil { LoginDot(colour: colour).alignmentGuide(.firstTextBaseline) { $0[.bottom] - zoomed(1) } }
+                Text(AccountName.title(account))
+                    .font(.system(size: zoomed(12.5), weight: .medium))
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                if let note = account.note, !note.isEmpty {
+                    Text(note).font(.system(size: zoomed(11))).foregroundStyle(.tertiary).lineLimit(1)
                 }
-                GridRow(alignment: .firstTextBaseline) {
-                    if !stacked { AccountNameCell(account: account, now: now) }
-                    if hasFiveHour { RoomCell(window: windows.first { $0.kind == "five_hour" }, now: now) }
-                    RoomCell(window: windows.first { $0.kind == "weekly" }, now: now)
-                }
-                let more = moreLines(account)
-                if !more.isEmpty {
-                    GridRow {
-                        VStack(alignment: .leading, spacing: zoomed(2)) {
-                            ForEach(more, id: \.text) { line in
-                                Text(line.text)
-                                    .foregroundStyle(line.loud ? AnyShapeStyle(Color.orange) : AnyShapeStyle(.tertiary))
-                                    .fixedSize(horizontal: false, vertical: true)
-                            }
-                        }
+                Spacer(minLength: zoomed(8))
+                if let today, today.total > 0 {
+                    Text(UsageStatsMath.tokens(today.total) + " today")
                         .font(.system(size: zoomed(11)))
-                        .padding(.top, zoomed(-3))
-                        .gridCellColumns(columns)
-                    }
+                        .monospacedDigit()
+                        .foregroundStyle(.secondary)
+                        .tip(UsageStatsMath.breakdown(today))
                 }
             }
+            .tip([AccountName.title(account), account.plan].compactMap { $0 }.joined(separator: ", "))
+            if usage == nil {
+                Text("Nothing known yet").font(.system(size: zoomed(11))).foregroundStyle(.tertiary)
+            } else if usage?.blocked == true {
+                Text("Limit reached").font(.system(size: zoomed(11), weight: .medium)).foregroundStyle(.red)
             }
+            if !windows.isEmpty {
+                ViewThatFits(in: .horizontal) {
+                    HStack(alignment: .top, spacing: zoomed(18)) { meters(windows, colour: colour) }
+                    VStack(alignment: .leading, spacing: zoomed(10)) { meters(windows, colour: colour) }
+                }
+            }
+            let more = moreLines
+            if !more.isEmpty {
+                VStack(alignment: .leading, spacing: zoomed(2)) {
+                    ForEach(more, id: \.self) { line in
+                        Text(line).fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                .font(.system(size: zoomed(11)))
+                .foregroundStyle(.tertiary)
             }
         }
     }
 
-    private func moreLines(_ account: Account) -> [(text: String, loud: Bool)] {
-        if account.usage == nil { return [("Nothing known yet", false)] }
-        var lines: [(text: String, loud: Bool)] = []
-        if let reset = AccountUsageText.resetLine(account.usage, now: now) { lines.append((reset, true)) }
-        lines += AccountUsageText.extraLines(account.usage, notice: notices[account.id], now: now).map { ($0, false) }
+    @ViewBuilder
+    private func meters(_ windows: [UsageWindow], colour: Color) -> some View {
+        ForEach(windows, id: \.kind) { window in
+            WindowMeter(window: window, samples: stats?.samples(account.id, kind: window.kind) ?? [], colour: colour, stale: account.usage?.stale == true, now: now)
+                .frame(minWidth: zoomed(170), maxWidth: zoomed(320), alignment: .leading)
+        }
+    }
+
+    /// Token Stats' notes and the windows besides the main two. When the
+    /// numbers are old, say since when.
+    private var moreLines: [String] {
+        var lines: [String] = []
+        if account.usage?.stale == true, let readAt = account.usage?.readAt {
+            lines.append("Numbers from " + AccountUsageText.when(readAt, now: now))
+        }
+        lines += AccountUsageText.extraLines(account.usage, notice: notice, now: now)
         return lines
     }
 }
 
-/// The address, with the note ("Convex work only") or what's wrong under
-/// it. The plan is in the tooltip: it never changed what Mike did.
-private struct AccountNameCell: View {
-    let account: Account
+/// One window: its name and what's left, a bar, and how it's going: when
+/// it resets, or that it runs out first at this pace. The weekly window
+/// has a small chart of the week so far, with where this pace leads
+/// dashed on to the reset.
+private struct WindowMeter: View {
+    let window: UsageWindow
+    let samples: [LimitSample]
+    let colour: Color
+    let stale: Bool
     let now: Date
 
     var body: some View {
-        let usage = account.usage
-        VStack(alignment: .leading, spacing: zoomed(1)) {
-            Text(AccountName.title(account))
-                .font(.system(size: zoomed(12.5), weight: .medium))
-                .lineLimit(1)
-                .truncationMode(.middle)
-            if usage?.blocked == true {
-                Text("Limit reached").font(.system(size: zoomed(11), weight: .medium)).foregroundStyle(.red)
-            } else if usage?.stale == true, let readAt = usage?.readAt {
-                Text("Numbers from " + AccountUsageText.when(readAt, now: now))
-                    .font(.system(size: zoomed(11)))
-                    .foregroundStyle(.tertiary)
-                    .tip("Token Stats hasn't updated this account since then")
-            }
-            if let note = account.note, !note.isEmpty {
-                Text(note).font(.system(size: zoomed(11))).foregroundStyle(.tertiary).lineLimit(1)
-            }
-        }
-        .tip([AccountName.title(account), account.plan].compactMap { $0 }.joined(separator: ", "))
-    }
-}
-
-/// A thin bar of what's left and the percentage, the reset in its tooltip.
-/// Grey while there's room; orange under a quarter; red when it's used up.
-private struct RoomCell: View {
-    let window: UsageWindow?
-    let now: Date
-
-    var body: some View {
-        if let window {
-            HStack(spacing: zoomed(6)) {
-                ZStack(alignment: .leading) {
-                    Capsule().fill(Color.primary.opacity(0.08))
-                    Capsule().fill(fill(window))
-                        .frame(width: max(0, zoomed(44) * window.remainingPercent / 100))
-                }
-                .frame(width: zoomed(44), height: zoomed(4))
-                Text(AccountUsageText.percent(window.remainingPercent))
-                    .font(.system(size: zoomed(12)))
+        let pace = LimitPace.of(window, samples: samples, now: now)
+        let short = window.remainingPercent < AccountUsageText.chipWarning
+        VStack(alignment: .leading, spacing: zoomed(4)) {
+            HStack(alignment: .firstTextBaseline) {
+                Text(window.title)
+                    .font(.system(size: zoomed(11), weight: .medium))
+                    .foregroundStyle(.secondary)
+                Spacer(minLength: zoomed(6))
+                Text(AccountUsageText.percent(window.remainingPercent) + " left")
+                    .font(.system(size: zoomed(12), weight: .medium))
                     .monospacedDigit()
-                    .foregroundStyle(window.remainingPercent < AccountUsageText.chipWarning ? AnyShapeStyle(fill(window)) : AnyShapeStyle(.secondary))
-                    .frame(minWidth: zoomed(30), alignment: .trailing)
+                    .foregroundStyle(short ? AnyShapeStyle(fill) : AnyShapeStyle(.primary))
             }
-            .tip("\(window.title): " + AccountUsageText.windowLine(window, now: now))
-            .accessibilityElement(children: .ignore)
-            .accessibilityLabel("\(window.title): \(AccountUsageText.windowLine(window, now: now))")
+            if window.kind == "weekly" {
+                WeekChart(window: window, samples: samples, pace: pace, colour: colour, now: now)
+                    .frame(height: zoomed(34))
+            }
+            ZStack(alignment: .leading) {
+                Capsule().fill(Color.primary.opacity(0.08))
+                GeometryReader { geo in
+                    Capsule().fill(fill).frame(width: max(0, geo.size.width * window.remainingPercent / 100))
+                }
+            }
+            .frame(height: zoomed(4))
+            outlook(pace)
+                .font(.system(size: zoomed(11)))
+                .lineLimit(1)
+        }
+        .tip(tip(pace))
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(window.title): " + tip(pace))
+    }
+
+    /// Orange when it runs out before it resets; otherwise when it resets.
+    @ViewBuilder
+    private func outlook(_ pace: LimitPace?) -> some View {
+        if window.remainingPercent < 1, let reset = window.resetsAt {
+            Text("Back " + AccountUsageText.resetTime(reset, now: now)).foregroundStyle(.red)
+        } else if let pace, pace.runsOutAt != nil, !stale {
+            Text(pace.outlook(now: now) + " at this pace").foregroundStyle(.orange)
+        } else if let reset = window.resetsAt {
+            Text("Resets " + AccountUsageText.resetTime(reset, now: now)).foregroundStyle(.tertiary)
         } else {
-            Color.clear.frame(width: 1, height: 1)
+            Text(" ")
         }
     }
 
-    private func fill(_ window: UsageWindow) -> Color {
+    private func tip(_ pace: LimitPace?) -> String {
+        var parts = [AccountUsageText.windowLine(window, now: now)]
+        if let pace {
+            var line = "Going at about \(pace.rateText(kind: window.kind))"
+            if let at = pace.runsOutAt { line += ", so it runs out " + AccountUsageText.resetTime(at, now: now) }
+            else if let left = pace.leftAtReset { line += ", so about \(AccountUsageText.percent(left)) is left when it resets" }
+            parts.append(line)
+        }
+        return parts.joined(separator: ". ")
+    }
+
+    private var fill: Color {
         if window.remainingPercent < 1 { return .red }
         if window.remainingPercent < AccountUsageText.chipWarning { return .orange }
         return Color.primary.opacity(0.45)
+    }
+}
+
+/// The weekly window from its start to its reset: what was left over time
+/// (full at the start, by definition), then this pace dashed on from now.
+private struct WeekChart: View {
+    let window: UsageWindow
+    let samples: [LimitSample]
+    let pace: LimitPace?
+    let colour: Color
+    let now: Date
+
+    var body: some View {
+        if let reset = window.resetsAt {
+            let start = reset.addingTimeInterval(-7 * 86400)
+            let points = [LimitSample(at: start, remainingPercent: 100)]
+                + samples.filter { $0.at > start && $0.at < now }
+                + [LimitSample(at: now, remainingPercent: window.remainingPercent)]
+            let ahead: [LimitSample] = pace.map { pace in
+                [LimitSample(at: now, remainingPercent: window.remainingPercent),
+                 pace.runsOutAt.map { LimitSample(at: $0, remainingPercent: 0) } ?? LimitSample(at: reset, remainingPercent: pace.leftAtReset ?? window.remainingPercent)]
+            } ?? []
+            Chart {
+                ForEach(Array(points.enumerated()), id: \.offset) { _, point in
+                    AreaMark(x: .value("Time", point.at), yStart: .value("Floor", 0), yEnd: .value("Left", point.remainingPercent), series: .value("Part", "past"))
+                        .foregroundStyle(colour.opacity(0.07))
+                        .interpolationMethod(.monotone)
+                    LineMark(x: .value("Time", point.at), y: .value("Left", point.remainingPercent), series: .value("Part", "past"))
+                        .foregroundStyle(colour)
+                        .lineStyle(StrokeStyle(lineWidth: 1.5))
+                        .interpolationMethod(.monotone)
+                }
+                ForEach(Array(ahead.enumerated()), id: \.offset) { _, point in
+                    LineMark(x: .value("Time", point.at), y: .value("Left", point.remainingPercent), series: .value("Part", "ahead"))
+                        .foregroundStyle(colour.opacity(0.6))
+                        .lineStyle(StrokeStyle(lineWidth: 1, dash: [3, 3]))
+                }
+            }
+            .chartXScale(domain: start...reset)
+            .chartYScale(domain: 0...100)
+            .chartXAxis(.hidden)
+            .chartYAxis(.hidden)
+            .chartPlotStyle { $0.background(Color.primary.opacity(0.025)) }
+        } else {
+            Color.clear
+        }
     }
 }
