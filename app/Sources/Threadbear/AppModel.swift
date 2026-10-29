@@ -74,6 +74,16 @@ final class AppModel {
     @ObservationIgnored private var heldWhileSliding: [String: ThreadSummary] = [:]
     var threads: [String: ThreadSummary] = [:] {
         didSet {
+            // A summary from another runner never says which runner it's on
+            // (runnerId is this app's own marker), so one stored over a
+            // remote thread's (markSeen's reply, a rename's, an archive's)
+            // keeps the runner it had. Without this the thread quietly turns
+            // into one of this Mac's: its calls go to this Mac's runner
+            // ("Thread not found") and its own runner's events are dropped.
+            // Setting threads in its own didSet doesn't run didSet again.
+            for (id, thread) in threads where thread.runnerId == nil {
+                if let runnerId = oldValue[id]?.runnerId { threads[id]?.runnerId = runnerId }
+            }
             threadsVersion &+= 1
             refreshDockBadge()
             noteFailedAccounts(from: oldValue)
