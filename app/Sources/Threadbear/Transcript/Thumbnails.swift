@@ -191,6 +191,11 @@ final class ImageGridView: NSView {
     override func mouseDown(with event: NSEvent) {
         let point = convert(event.locationInWindow, from: nil)
         if let index = frames.firstIndex(where: { $0.contains(point) }) {
+            // Dragged, the picture goes out as the file itself (FileDrag).
+            if FileDrag.isDrag(from: event) {
+                FileDrag.begin(URL(fileURLWithPath: paths[index]), from: self, event: event)
+                return
+            }
             QuickLookCoordinator.shared.show(paths: paths, index: index, from: self)
         } else {
             super.mouseDown(with: event)

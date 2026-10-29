@@ -125,6 +125,12 @@ Inside a thread, rest the pointer on a link for a moment, in a reply or on a
 Needs you card's buttons, to see where it goes: a picture of the file, or
 the page's address. Click it to open it.
 
+To share a file somewhere else, drag it out of the app: a file link in a
+reply, a picture in the transcript, a file in Highlights, or the picture or
+video showing in the side pane. It drops as the file itself, so you can
+drag a clip straight into a post on X, or onto the Finder. A web link drags
+out as its address.
+
 ## Schedules
 
 A schedule sends a message at a set time, once or over and over: to a

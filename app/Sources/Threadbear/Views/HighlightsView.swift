@@ -2,6 +2,7 @@ import AppKit
 import Quartz
 import SwiftUI
 import ThreadbearCore
+import UniformTypeIdentifiers
 
 /// The pane's Highlights section: what the thread has made, shared and
 /// pinned, so it doesn't scroll away with the transcript. The librarian's
@@ -191,6 +192,7 @@ struct HighlightsView: View {
                        trailing: how.flatMap { $0.isEmpty ? nil : $0 }, note: item.note, detail: detail,
                        titleTruncation: item.path == nil ? .tail : .middle,
                        action: isCommit ? nil : { app.open(item, in: thread, external: false) })
+            .fileDrag(item.path.map(URL.init(fileURLWithPath:)) ?? item.link)
             .contextMenu {
                 if let path = item.path {
                     FileMenu(path: path, thread: thread, title: item.title)
@@ -229,8 +231,26 @@ struct HighlightsView: View {
                     app.openExternally(URL(fileURLWithPath: path))
                 }
                 .tip("Open in its app")
+                .fileDrag(URL(fileURLWithPath: path))
                 .contextMenu { FileMenu(path: path, thread: thread, title: (path as NSString).lastPathComponent) }
             }
+        }
+    }
+}
+
+extension View {
+    /// Drags a row's file or link out of the app (FileDrag): a file as the
+    /// file itself, for X or the Finder. Nothing for a file that's gone.
+    @ViewBuilder
+    func fileDrag(_ url: URL?) -> some View {
+        if let url {
+            onDrag {
+                guard FileDrag.writer(for: url) != nil else { return NSItemProvider() }
+                // A page's ?query isn't part of its file.
+                return NSItemProvider(object: (url.isFileURL ? URL(fileURLWithPath: url.path) : url) as NSURL)
+            }
+        } else {
+            self
         }
     }
 }
@@ -506,26 +526,82 @@ struct QuickLookView: NSViewRepresentable {
 
     func makeCoordinator() -> Coordinator { Coordinator() }
 
-    func makeNSView(context: Context) -> QLPreviewView {
+    func makeNSView(context: Context) -> DraggableQuickLook {
         // .normal draws no frame of its own around the item.
-        let view = QLPreviewView(frame: .zero, style: .normal) ?? QLPreviewView()
+        let preview = QLPreviewView(frame: .zero, style: .normal) ?? QLPreviewView()
         // It's reused across files; closing would end it for good.
-        view.shouldCloseWithWindow = false
-        return view
+        preview.shouldCloseWithWindow = false
+        return DraggableQuickLook(preview: preview)
     }
 
-    func updateNSView(_ view: QLPreviewView, context: Context) {
+    func updateNSView(_ view: DraggableQuickLook, context: Context) {
+        view.url = url
         if let shown = context.coordinator.shown, shown.0 == url, shown.1 == opened { return }
         if context.coordinator.shown?.0 == url {
-            view.refreshPreviewItem()
+            view.preview.refreshPreviewItem()
         } else {
-            view.previewItem = url as NSURL
+            view.preview.previewItem = url as NSURL
         }
         context.coordinator.shown = (url, opened)
     }
 
-    static func dismantleNSView(_ view: QLPreviewView, coordinator: Coordinator) {
-        view.close()
+    static func dismantleNSView(_ view: DraggableQuickLook, coordinator: Coordinator) {
+        view.preview.close()
+    }
+}
+
+/// Quick Look's view with a picture or video that drags out as the file
+/// (FileDrag), to drop on X or the Finder. A press that's let go without
+/// moving goes on to Quick Look as before. A video's controls along the
+/// bottom keep their own drags (scrubbing), and anything else (a PDF's
+/// text, say) isn't touched.
+final class DraggableQuickLook: NSView {
+    let preview: QLPreviewView
+    var url: URL?
+
+    /// The strip along the bottom where a video's play bar sits.
+    private static let controls: CGFloat = 64
+
+    init(preview: QLPreviewView) {
+        self.preview = preview
+        super.init(frame: .zero)
+        preview.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(preview)
+        NSLayoutConstraint.activate([
+            preview.leadingAnchor.constraint(equalTo: leadingAnchor),
+            preview.trailingAnchor.constraint(equalTo: trailingAnchor),
+            preview.topAnchor.constraint(equalTo: topAnchor),
+            preview.bottomAnchor.constraint(equalTo: bottomAnchor),
+        ])
+    }
+
+    required init?(coder: NSCoder) { fatalError() }
+
+    /// Pictures and video only: the rest have presses of their own.
+    private var draggable: Bool {
+        guard let url, let type = UTType(filenameExtension: url.pathExtension) else { return false }
+        return type.conforms(to: .image) || type.conforms(to: .audiovisualContent)
+    }
+
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        // Only a left press is taken here, so scrolling, pinching and
+        // hovering (which shows a video's controls) still reach Quick Look.
+        guard NSApp.currentEvent?.type == .leftMouseDown, draggable,
+              let inside = superview.map({ convert(point, from: $0) }), bounds.contains(inside),
+              inside.y > (isFlipped ? 0 : Self.controls), inside.y < bounds.height - (isFlipped ? Self.controls : 0)
+        else { return super.hitTest(point) }
+        return self
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        if let url, FileDrag.isDrag(from: event) {
+            FileDrag.begin(url, from: self, event: event)
+            return
+        }
+        // A click: Quick Look's own view under the mouse gets it, and the
+        // mouse-up still waiting in the queue.
+        let target = preview.hitTest(convert(event.locationInWindow, from: nil)) ?? preview
+        target.mouseDown(with: event)
     }
 }
 

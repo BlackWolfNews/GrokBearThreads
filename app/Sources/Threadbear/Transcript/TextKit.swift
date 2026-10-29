@@ -380,6 +380,14 @@ final class TranscriptTextView: NSTextView {
 
     override func mouseDown(with event: NSEvent) {
         let point = convert(event.locationInWindow, from: nil)
+        // A press on a link (a file, a web page, an asks card's link
+        // button) that moves drags it out (FileDrag); let go first and
+        // it's a click as before.
+        if let link = peek(at: point), FileDrag.writer(for: link.peek.url) != nil, FileDrag.isDrag(from: event) {
+            closeChipCard()
+            FileDrag.begin(link.peek.url, from: self, event: event)
+            return
+        }
         if let onAction, let action = character(at: point).flatMap({ textStorage?.attribute(.tbAction, at: $0, effectiveRange: nil) as? String }) {
             closeChipCard()
             onAction(action)
