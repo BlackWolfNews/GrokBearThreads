@@ -9,13 +9,13 @@ import { projectRouter, type PrimaryLink } from '../../src/handover.ts';
 import { Librarian, librarianMethods, mainCheckout, SETTLE_MS, CATCH_UP_MS, CATCH_UP_MIN_CHARS, FIRST_MESSAGE_MS, SWEEP_MS } from '../../src/librarian.ts';
 import { buildThreadbearTools } from '../../src/threadbear-mcp.ts';
 import { FakeClock } from '../../src/clock.ts';
-import { nullLogger } from '../../src/log.ts';
+import { nullLogger, type Logger } from '../../src/log.ts';
 import { ErrorCode, RpcError } from '../../src/protocol.ts';
 import { commandFolders } from '../../src/tools.ts';
 import type { GenerateParams, ModelResult } from '../../src/models/index.ts';
 
 // A harness whose runner has projects, with a fake home holding repos.
-function setup(opts: { models?: (p: GenerateParams) => Promise<ModelResult<string>> | ModelResult<string> } = {}) {
+function setup(opts: { models?: (p: GenerateParams) => Promise<ModelResult<string>> | ModelResult<string>; log?: Logger } = {}) {
   const root = tmpDir();
   const repo = (rel: string, files: Record<string, string> = {}) => {
     const dir = path.join(root, rel);
@@ -41,7 +41,7 @@ function setup(opts: { models?: (p: GenerateParams) => Promise<ModelResult<strin
     : undefined;
   const h = makeHarness(home, {}, { projects, panelsRoot: root, actionShell: ['/bin/sh', '-c'], actionTimeoutMs: 5000 });
   projects.start(h.runner);
-  const librarian = new Librarian({ host: h.runner, projects, models, clock: h.clock, log: nullLogger, home, userHome: root });
+  const librarian = new Librarian({ host: h.runner, projects, models, clock: h.clock, log: opts.log ?? nullLogger, home, userHome: root });
   librarian.start();
   const create = (text = 'Work on the app', cwd = misc) => h.runner.create({ text, cwd, accountId: 'claude-3' });
   // Ends the thread's running turn as the CLI would.
@@ -707,6 +707,79 @@ test('the librarian sweeps up turns it never heard end, as in a handover', async
   assert.equal(job.reason, 'catch-up');
   assert.ok(Date.parse(job.dueAt) > h.clock.now(), 'no sooner than CATCH_UP_MS after the last look');
   third.stop();
+});
+
+// A logger that keeps its warnings and errors, for "said nothing" checks.
+function keepingLogger() {
+  const lines: string[] = [];
+  const log: Logger = { info() {}, debug() {}, warn: (m) => void lines.push(`warn ${m}`), error: (m) => void lines.push(`error ${m}`) };
+  return { log, lines };
+}
+
+// A model call that waits until answer() is called.
+function heldModel(value: () => unknown) {
+  let answer!: () => void;
+  const held = new Promise<void>((r) => (answer = r));
+  let asked = false;
+  return {
+    models: async () => {
+      asked = true;
+      await held;
+      return reply(value());
+    },
+    answer: () => answer(),
+    asked: () => asked,
+  };
+}
+
+test('a thread deleted while the librarian waits on the model is dropped quietly', async () => {
+  // THREADBEAR-4: the look carried on and failed with "Thread not found".
+  const { log, lines } = keepingLogger();
+  let p!: { id: string };
+  const m = heldModel(() => ({ projects: [p.id], state: { [p.id]: 'Going' } }));
+  const s = setup({ models: () => m.models(), log });
+  const { h, repo, create, finish, librarian, projects } = s;
+  p = projects.create({ title: 'App', folders: [repo('dev/app')], by: 'mike' });
+  const { thread } = create();
+  await finish(thread.id);
+  h.clock.advance(SETTLE_MS);
+  await tick(4);
+  assert.ok(m.asked(), 'the look is waiting on the model');
+  h.runner.delete(thread.id);
+  m.answer();
+  await tick(6);
+  assert.deepEqual(lines, []);
+  const st = librarian.status();
+  assert.equal(st.state, 'idle');
+  assert.ok(!st.recent.some((e) => e.threadId === thread.id), 'no "failed" line for a thread that has gone');
+  assert.notEqual(projects.record(p.id)?.state, 'Going', "the answer about it isn't applied");
+});
+
+test('a thread a draining runner lets go mid-look is left to the new runner, quietly', async () => {
+  // THREADBEAR-4 as it really happened: the thread wasn't deleted, the old
+  // runner had handed it over while its look waited on the model.
+  const { log, lines } = keepingLogger();
+  const m = heldModel(() => ({ projects: [], new: null }));
+  const s = setup({ models: () => m.models(), log });
+  const { h, create, finish, librarian } = s;
+  const { thread } = create();
+  await finish(thread.id);
+  h.clock.advance(SETTLE_MS);
+  await tick(4);
+  assert.ok(m.asked());
+  // main.ts's handOver: the librarian stops, then every idle thread is let go.
+  librarian.stop();
+  await h.runner.beginDrain([], { onHandedOver: () => {}, backgroundMs: 60_000 });
+  // The new runner's librarian has read librarian.json by now: the job it
+  // was doing is in its queue, so nothing is lost.
+  const saved = JSON.parse(fs.readFileSync(path.join(h.home, 'librarian.json'), 'utf8'));
+  assert.deepEqual(saved.queue.map((j: { threadId: string }) => j.threadId), [thread.id]);
+  const before = fs.readFileSync(path.join(h.home, 'librarian.json'), 'utf8');
+  m.answer();
+  await tick(6);
+  assert.deepEqual(lines, []);
+  // A stopped librarian leaves the file to the new runner's.
+  assert.equal(fs.readFileSync(path.join(h.home, 'librarian.json'), 'utf8'), before);
 });
 
 test("a thread its agent filed is the agent's to file: the librarian keeps its line and state only", async () => {

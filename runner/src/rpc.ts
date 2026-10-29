@@ -388,7 +388,7 @@ export class RpcServer {
       case 'reviews.cancel':
         return r.cancelReview(reqString(p, 'threadId'), reqString(p, 'reviewId'), p.revision as number);
       case 'threads.send':
-        return r.send(reqString(p, 'threadId'), optString(p, 'text') ?? '', optImages(p) ?? [], optAnswers(p));
+        return r.send(reqString(p, 'threadId'), optString(p, 'text') ?? '', optImages(p) ?? [], { ...optAnswers(p), ...optPhoneOrigin(p) });
       case 'threads.edit':
         return r.editMessage(reqString(p, 'threadId'), reqNumber(p, 'seq'), optString(p, 'text') ?? '', optImages(p) ?? []);
       case 'threads.interrupt':
@@ -614,6 +614,14 @@ function optEffort(p: Record<string, unknown>): EffortLevel | undefined {
 
 // threads.send's answers (Needs you, Answering): short, and only for the
 // app to show, so anything malformed is refused rather than half kept.
+// Only a phone command the primary passed on to a draining runner says
+// where it came from (docs/protocol.md, threads.send).
+function optPhoneOrigin(p: Record<string, unknown>): { origin?: 'phone' } {
+  if (p.origin === undefined) return {};
+  if (p.origin !== 'phone') throw bad('origin can only be "phone"');
+  return { origin: 'phone' };
+}
+
 function optAnswers(p: Record<string, unknown>): { answers?: AskAnswer[] } {
   const v = p.answers;
   if (v === undefined || v === null) return {};

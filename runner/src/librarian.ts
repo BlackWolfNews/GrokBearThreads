@@ -387,6 +387,9 @@ export class Librarian {
       } finally {
         this.current = undefined;
       }
+      // A stopped librarian has said all it will: librarian.json is the
+      // new runner's now.
+      if (this.stopped) return;
       this.changed(false);
     }
     this.schedule();
@@ -414,6 +417,15 @@ export class Librarian {
     // during the call isn't undone.
     const title = rec.title;
     const res = await this.models.generate({ feature: 'projects', cwd: rec.cwd, system: SYSTEM, prompt, maxTokens: 2000 });
+    // While the model was thinking, the runner may have stopped this
+    // librarian for a handover, let the thread go to the new runner, or
+    // the thread may have been deleted. Nothing to say or apply then: the
+    // new runner's librarian has the job (changed() saves the one in
+    // flight), and a deleted thread needs nothing (THREADBEAR-4).
+    if (this.stopped || !this.host.threadRecords().some((t) => t.id === rec.id)) {
+      this.log.info('librarian dropped a look at a thread that has gone', { threadId: rec.id, stopped: this.stopped });
+      return;
+    }
     if (!res.ok) {
       if (WAIT_FOR.includes(res.reason)) {
         // Nothing wrong with the job: try again once there's a pool or room
@@ -782,10 +794,18 @@ export class Librarian {
 
   // Saves and tells every client. `reschedule` false while a look runs.
   private changed(reschedule = true): void {
+    if (this.stopped) return;
     try {
+      // The look in flight is saved as queued, so a runner that takes over
+      // mid-look (a handover, a crash) does it again rather than losing it.
+      const queue = [...this.queue.values()];
+      if (this.current && !this.queue.has(this.current.threadId)) {
+        const { startedAt: _, ...job } = this.current;
+        queue.unshift(job);
+      }
       atomicWriteFileSync(
         this.file,
-        JSON.stringify({ paused: this.paused, queue: [...this.queue.values()], recent: this.recent, looks: this.looks, day: this.day } satisfies Saved),
+        JSON.stringify({ paused: this.paused, queue, recent: this.recent, looks: this.looks, day: this.day } satisfies Saved),
       );
     } catch (e) {
       this.log.warn('could not save librarian.json', { error: String(e) });

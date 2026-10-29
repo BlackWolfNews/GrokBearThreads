@@ -109,6 +109,13 @@ test('subscribe replays the gap then streams; thread.updated goes to everyone', 
   assert.deepEqual(list.threads.map((t: { id: string }) => t.id), [id]);
   await assert.rejects(b.call('threads.list', { include: ['bogus'] }), (e: { code: number }) => e.code === -32602);
   await assert.rejects(b.call('threads.send', { threadId: id, text: 'x', answers: [{ action: 'a' }] }), (e: { code: number }) => e.code === -32602);
+  // A phone command the primary passed on keeps its origin; nothing else
+  // can be claimed.
+  await b.call('threads.send', { threadId: id, text: 'from the phone', origin: 'phone' });
+  await new Promise((r) => setTimeout(r, 30));
+  const phoned = (await b.call('threads.events', { threadId: id })).events.find((e: { type: string; text?: string }) => e.type === 'user.message' && e.text === 'from the phone');
+  assert.equal(phoned?.origin, 'phone');
+  await assert.rejects(b.call('threads.send', { threadId: id, text: 'x', origin: 'runner' }), (e: { code: number }) => e.code === -32602);
   a.close();
   b.close();
   await server.close();

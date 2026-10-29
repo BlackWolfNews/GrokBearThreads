@@ -8,7 +8,7 @@ import { startHousekeeping } from './housekeeping.ts';
 import { RELEASE, markGoodLater, onSupervisorGone, ownCheckout, readRelease, readState, requestHandover, supervised, takeRollbackNotice, tellLaunchListening } from './release.ts';
 import { PatchTrust } from './patch-trust.ts';
 import type { RunnerUpdates } from './runner.ts';
-import { Peers, PrimaryLink, ThreadRouter, drainChildrenName, peersElsewhere, primaryElsewhere, projectRouter, removeDrainInfo, scheduleRouter, writeDrainInfo, type Elsewhere } from './handover.ts';
+import { Peers, PrimaryLink, ThreadRouter, drainChildrenName, peersElsewhere, phoneCommands, primaryElsewhere, projectRouter, removeDrainInfo, scheduleRouter, writeDrainInfo, type Elsewhere } from './handover.ts';
 import { RunnerUpdater, releaseTreeAt } from './update.ts';
 import { SETTLE_MS, Upstream } from './upstream.ts';
 import { Restarter, restartMethods } from './restart.ts';
@@ -197,6 +197,8 @@ async function main(): Promise<void> {
         if (draining) return undefined;
         const t = runner.adopt(threadId, o);
         restarter?.resumeAdopted(threadId);
+        // Told now if the app restarted while it was over there.
+        if (t) appRestarts?.adopted(threadId);
         return t;
       },
       publish: (n) => runner.publish(n),
@@ -215,7 +217,7 @@ async function main(): Promise<void> {
   runner.start({ skip: kept });
   // After the threads are loaded, so a schedule that came due while the
   // runner was stopped finds its thread.
-  appRestarts = new AppRestarts({ runner, home: cfg.home, clock: realClock, log });
+  appRestarts = new AppRestarts({ runner, home: cfg.home, clock: realClock, log, away: (threadId) => peers.owns(threadId) });
   // Its runner id and name are the mirror's (sync.ts), since that's how other
   // runners and the backend know this one (step 6, docs/step6-plan.md).
   const syncRunnerId = cfg.sync.runnerId ?? ensureRunnerId(cfg.home);
@@ -266,16 +268,9 @@ async function main(): Promise<void> {
       listSchedules: () => scheduler.list(),
       listAccounts: () => runner.hello().accounts,
     },
-    // The phone's commands, through the same methods the app's RPCs use.
-    commands: {
-      send: (id, text, images, o) => runner.send(id, text, images, o),
-      respondApproval: (p) => runner.respondApproval(p),
-      update: (p) => runner.update(p),
-      markSeen: (id, seq) => runner.markSeen(id, seq),
-      create: (p) => runner.create(p),
-      share: (id, p) => runner.share(id, p),
-      quickAsk: (p) => runner.quickAsk(p),
-    },
+    // The phone's commands, through the same methods the app's RPCs use,
+    // on whichever runner has the thread.
+    commands: phoneCommands(runner, peers),
     schedules: scheduler,
     publish: (n) => runner.publish(n),
     home: cfg.home,

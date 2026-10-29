@@ -69,6 +69,49 @@ test('an archived thread or a stale request only gets the note', () => {
   assert.match(said(h, thread.id).note, /more than a day old/);
 });
 
+test('a thread on a draining runner hears once it comes across', () => {
+  // THREADBEAR-5: the app came back while the thread was finishing a turn
+  // on the old runner; the primary said "Thread not found" and dropped
+  // the request.
+  const { h, thread } = setUp();
+  const warned: string[] = [];
+  // The primary as the watcher sees it: the thread is on a draining
+  // runner, so this one hasn't got it.
+  const away = new Set<string>();
+  const primary = { has: (id: string) => !away.has(id) && h.runner.has(id), get: h.runner.get.bind(h.runner), note: h.runner.note.bind(h.runner), send: h.runner.send.bind(h.runner) };
+  const watcher = new AppRestarts({ runner: primary, home: h.home, clock: h.clock, log: { ...nullLogger, warn: (m) => void warned.push(m) }, away: (id) => away.has(id) });
+  watcher.appHello(A);
+  watcher.watch(thread.id);
+  h.adapter.last.result('completed');
+  away.add(thread.id);
+  watcher.appHello(B);
+  assert.deepEqual(warned, []);
+  assert.equal(said(h, thread.id).note, undefined);
+  assert.equal(watcher.isWatching(thread.id), true, 'still waiting to tell it');
+  // It comes across: now it hears, about the build the app came back on.
+  away.delete(thread.id);
+  watcher.adopted(thread.id);
+  assert.deepEqual(warned, []);
+  assert.match(said(h, thread.id).message, /restarted onto bbbb222/);
+  assert.equal(said(h, thread.id).note, 'Threadbear app restarted: aaaa111 to bbbb222');
+  assert.equal(watcher.isWatching(thread.id), false);
+  // Once only.
+  watcher.adopted(thread.id);
+  assert.equal(h.events(thread.id).filter((e) => e.type === 'user.message' && e.origin === 'runner').length, 1);
+});
+
+test('a deleted thread is dropped quietly', () => {
+  const { h, thread } = setUp();
+  const warned: string[] = [];
+  const watcher = new AppRestarts({ runner: h.runner, home: h.home, clock: h.clock, log: { ...nullLogger, warn: (m) => void warned.push(m) }, away: () => false });
+  watcher.appHello(A);
+  watcher.watch(thread.id);
+  h.runner.delete(thread.id);
+  watcher.appHello(B);
+  assert.deepEqual(warned, []);
+  assert.equal(watcher.isWatching(thread.id), false);
+});
+
 test('asks that tell Mike to restart the app count as a request', () => {
   assert.equal(asksForAppRestart([{ action: 'Click Restart to Update in the Threadbear menu' }]), true);
   assert.equal(asksForAppRestart([{ action: 'Restart Threadbear', where: 'Threadbear menu > Restart to Update' }]), true);

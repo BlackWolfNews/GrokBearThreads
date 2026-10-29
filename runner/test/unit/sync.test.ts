@@ -8,7 +8,7 @@ import { makeHarness, tick, tmpDir } from '../helpers/fakes.ts';
 import { ConvexSync, BACKEND_API_VERSION, ICONS_API_VERSION, RUNNER_ICON_API_VERSION, SCHEDULES_API_VERSION, SHARE_API_VERSION, PRESENCE_MS, SYNC_COALESCE_MS, HEARTBEAT_MS, SYNC_BATCH, ensureRunnerId, toThreadDoc, convexPoster, convexUploader, pictureName, type ThreadDoc } from '../../src/sync.ts';
 import type { Project } from '../../src/protocol.ts';
 import type { ScheduleBackend } from '../../src/schedules.ts';
-import { nullLogger } from '../../src/log.ts';
+import { nullLogger, type Logger } from '../../src/log.ts';
 import { AT_MAC_IDLE_MS, isAtMac } from '../../src/presence.ts';
 import { readRunnerJson } from '../../src/config.ts';
 
@@ -276,7 +276,7 @@ type Fake = { h: ReturnType<typeof makeHarness>; sync: ConvexSync; calls: Call[]
 // A harness whose sync has lists, commands and a fake subscription; the
 // fake post answers messageHeads and takeCommand the way the deployment
 // would.
-function setupFull(opts: { heads?: { threadId: string; lastSeq: number }[]; taken?: Set<string>; failApply?: boolean } = {}): Fake {
+function setupFull(opts: { heads?: { threadId: string; lastSeq: number }[]; taken?: Set<string>; failApply?: boolean | 'async'; log?: Logger } = {}): Fake {
   const h = makeHarness();
   const calls: Call[] = [];
   const taken = opts.taken ?? new Set<string>();
@@ -315,6 +315,8 @@ function setupFull(opts: { heads?: { threadId: string; lastSeq: number }[]; take
     commands: {
       send: (id, text, images, o) => {
         applied.push(`send ${id} ${text} ${o.origin}`);
+        // A forwarded command fails later, as a rejected promise.
+        if (opts.failApply === 'async') return Promise.reject(new Error('thread is busy'));
         if (opts.failApply) throw new Error('thread is busy');
         return h.runner.send(id, text, images, o);
       },
@@ -326,9 +328,9 @@ function setupFull(opts: { heads?: { threadId: string; lastSeq: number }[]; take
         applied.push(`update ${JSON.stringify(p)}`);
         return h.runner.update(p);
       },
-      markSeen: (id, seq) => {
-        applied.push(`markSeen ${id} ${seq}`);
-        return h.runner.markSeen(id, seq);
+      markSeen: (id) => {
+        applied.push(`markSeen ${id}`);
+        return h.runner.markSeen(id, h.runner.get(id).lastSeq);
       },
       create: (p) => {
         applied.push(`create ${p.text} ${p.origin}`);
@@ -346,7 +348,7 @@ function setupFull(opts: { heads?: { threadId: string; lastSeq: number }[]; take
     version: '0.1.0+test',
     startedAt: '2026-10-27T00:00:00.000Z',
     clock: h.clock,
-    log: nullLogger,
+    log: opts.log ?? nullLogger,
     post,
     subscriber,
   });
@@ -594,6 +596,31 @@ test('commands: one that fails is finished with a note; one another runner took 
   assert.deepEqual(finished.map((f) => [f.commandId, f.ok, f.note]), [['c10', false, 'thread is busy'], ['c11', false, 'nothing to change']]);
   assert.equal(sync.status().commands?.failed, 2);
   assert.equal(sync.status().commands?.lastError, 'nothing to change');
+});
+
+test('commands: one for a thread that has gone is finished quietly; a forwarded one that fails is awaited', async () => {
+  // The phone still showed a thread for a moment after it went: its
+  // command fails, but that's a race, not a runner problem to warn about.
+  const warned: string[] = [];
+  const { h, sync, calls, push } = setupFull({ failApply: 'async', log: { ...nullLogger, warn: (m) => void warned.push(m) } });
+  sync.start();
+  await sync.flushNow();
+  const gone = h.runner.create({ text: 'hello', cwd: h.cfg.defaults.cwd, accountId: 'claude-3' }).thread;
+  h.runner.delete(gone.id);
+  const t = h.runner.create({ text: 'still here', cwd: h.cfg.defaults.cwd, accountId: 'claude-3' }).thread;
+  push([
+    { commandId: 'g1', kind: 'update', threadId: gone.id, args: { markSeen: true }, createdAt: 1 },
+    { commandId: 'g2', kind: 'update', threadId: gone.id, args: { archive: true }, createdAt: 2 },
+    { commandId: 'g3', kind: 'send', threadId: t.id, args: { text: 'fails later' }, createdAt: 3 },
+  ]);
+  await tick(10);
+  const finished = calls.filter((c) => c.fn === 'sync:finishCommand').map((c) => c.args);
+  assert.deepEqual(finished.map((f) => [f.commandId, f.ok, f.note]), [
+    ['g1', false, `Thread not found: ${gone.id}`],
+    ['g2', false, `Thread not found: ${gone.id}`],
+    ['g3', false, 'thread is busy'],
+  ]);
+  assert.deepEqual(warned.filter((m) => m.startsWith('phone')), ['phone command failed'], 'only the real failure is a warning');
 });
 
 test('commands: stop unsubscribes and nothing is applied after', async () => {

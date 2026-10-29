@@ -21,6 +21,7 @@ import { imagesInEvent, readShareImage, type ShareImage } from './share-images.t
 import { makeFunctionReference } from 'convex/server';
 import type { Clock, TimerHandle } from './clock.ts';
 import type { Logger } from './log.ts';
+import { ErrorCode } from './protocol.ts';
 import type { Account, ApprovalDecision, ApprovalOption, PersistedEvent, Project, Question, Schedule, ThreadSummary } from './protocol.ts';
 import type { Notification } from './runner.ts';
 import type { ScheduleBackend, StoredSchedule } from './schedules.ts';
@@ -181,11 +182,14 @@ type Host = {
 // What the phone's commands are applied through: the runner's own
 // methods, so a phone message or approval is the same as one from the
 // Mac app (docs/protocol.md, "Sync").
+// A thread's commands may go on to a draining runner (handover.ts's
+// phoneCommands), so they can answer later; apply() waits for each.
 export type CommandHost = {
-  send(threadId: string, text: string, images: never[], opts: { origin: 'phone' }): { turnId: string };
+  send(threadId: string, text: string, images: never[], opts: { origin: 'phone' }): unknown;
   respondApproval(p: { threadId: string; approvalId: string; decision: ApprovalDecision; message?: string; answers?: Record<string, string> }): unknown;
   update(p: { threadId: string; title?: string; snoozedUntil?: string | null; archived?: boolean }): unknown;
-  markSeen(threadId: string, seq: number): unknown;
+  // Seen up to the last event it has.
+  markSeen(threadId: string): unknown;
   create(p: { text: string; cwd?: string; accountId?: string; model?: string; origin: 'phone' }): { thread: ThreadSummary };
   share(threadId: string, p: { access: 'off' | 'link'; newLink?: boolean }): unknown;
   quickAsk(p: { question: string; answer: string; sources?: { title: string; url: string }[]; askedAt?: number }): { thread: ThreadSummary };
@@ -1284,7 +1288,10 @@ export class ConvexSync {
           note = String((e as Error)?.message ?? e);
           this.failed++;
           this.commandError = note;
-          this.deps.log.warn('phone command failed', { kind: c.kind, threadId: c.threadId, error: note });
+          // The phone can still show a thread for a moment after it's
+          // deleted: its command failing then is a race, not a problem.
+          if ((e as { code?: unknown })?.code === ErrorCode.threadNotFound) this.deps.log.info('phone command for a thread that has gone', { kind: c.kind, threadId: c.threadId });
+          else this.deps.log.warn('phone command failed', { kind: c.kind, threadId: c.threadId, error: note });
         }
         await this.post('mutation', 'sync:finishCommand', { key: this.deps.key, commandId: c.commandId, ok, ...(note ? { note } : {}), ...(resultThreadId ? { resultThreadId } : {}) });
       } catch (e) {
@@ -1310,13 +1317,13 @@ export class ConvexSync {
     switch (c.kind) {
       case 'send': {
         if (typeof a.text !== 'string' || !a.text.trim()) throw new Error('nothing to send');
-        host.send(needThread(), a.text, [], { origin: 'phone' });
+        await host.send(needThread(), a.text, [], { origin: 'phone' });
         return undefined;
       }
       case 'respond': {
         const decision = a.decision as ApprovalDecision;
         if (!['allow', 'allowAlways', 'deny', 'answered'].includes(decision)) throw new Error(`bad decision ${String(a.decision)}`);
-        host.respondApproval({
+        await host.respondApproval({
           threadId: needThread(),
           approvalId: String(a.approvalId),
           decision,
@@ -1329,12 +1336,12 @@ export class ConvexSync {
         const id = needThread();
         if (a.snooze && typeof a.snooze === 'object') {
           const s = a.snooze as { until?: string; untilRestart?: boolean };
-          host.update({ threadId: id, snoozedUntil: s.untilRestart ? 'restart' : s.until ?? null });
-        } else if (a.wake) host.update({ threadId: id, snoozedUntil: null });
-        else if (a.archive) host.update({ threadId: id, archived: true });
-        else if (a.unarchive) host.update({ threadId: id, archived: false });
-        else if (a.markSeen) host.markSeen(id, this.deps.runner.get(id).lastSeq);
-        else if (typeof a.title === 'string') host.update({ threadId: id, title: a.title });
+          await host.update({ threadId: id, snoozedUntil: s.untilRestart ? 'restart' : s.until ?? null });
+        } else if (a.wake) await host.update({ threadId: id, snoozedUntil: null });
+        else if (a.archive) await host.update({ threadId: id, archived: true });
+        else if (a.unarchive) await host.update({ threadId: id, archived: false });
+        else if (a.markSeen) await host.markSeen(id);
+        else if (typeof a.title === 'string') await host.update({ threadId: id, title: a.title });
         else throw new Error('nothing to change');
         return undefined;
       }
@@ -1369,7 +1376,7 @@ export class ConvexSync {
       case 'share': {
         // The website's Stop sharing, Share again and New link (API 8).
         if (a.access !== 'off' && a.access !== 'link') throw new Error('access is "off" or "link"');
-        host.share(needThread(), { access: a.access, ...(a.newLink === true ? { newLink: true } : {}) });
+        await host.share(needThread(), { access: a.access, ...(a.newLink === true ? { newLink: true } : {}) });
         return undefined;
       }
       case 'page': {

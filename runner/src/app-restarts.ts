@@ -12,7 +12,9 @@ import type { Runner } from './runner.ts';
 
 export type AppBuild = { commit: string; short: string; tree: string };
 
-type Watch = { threadId: string; text?: string; requestedAt: string; fromTree?: string; fromShort?: string };
+// `due`: the app has come back on this build, but the thread was on a
+// draining runner then; it hears once it comes across (adopted).
+type Watch = { threadId: string; text?: string; requestedAt: string; fromTree?: string; fromShort?: string; due?: AppBuild };
 type SavedState = { build?: AppBuild; watching: Watch[] };
 
 // After a day the request has likely been forgotten: only the note.
@@ -28,7 +30,9 @@ export function asksForAppRestart(asks: { action?: unknown; why?: unknown; where
   return (asks ?? []).some((a) => /restart to update/i.test(`${a.action ?? ''} ${a.why ?? ''} ${a.where ?? ''}`));
 }
 
-type Deps = { runner: Pick<Runner, 'get' | 'note' | 'send'>; home: string; clock: Clock; log: Logger };
+// `away`: whether a draining runner still has the thread (handover.ts's
+// Peers), so it isn't here yet but will be.
+type Deps = { runner: Pick<Runner, 'get' | 'note' | 'send' | 'has'>; home: string; clock: Clock; log: Logger; away?: (threadId: string) => boolean };
 
 export class AppRestarts {
   private deps: Deps;
@@ -59,11 +63,32 @@ export class AppRestarts {
   // The Mac app's `hello`, with the build it's running.
   appHello(build: AppBuild): void {
     const state = this.read();
-    const due = state.watching.filter((w) => w.fromTree !== build.tree);
+    const { runner, log, away } = this.deps;
+    const now: Watch[] = [];
+    const kept: Watch[] = [];
+    for (const w of state.watching) {
+      if (w.fromTree === build.tree) kept.push(w);
+      else if (runner.has(w.threadId)) now.push(w);
+      // Finishing a turn on the old runner after a handover: told when it
+      // comes across (THREADBEAR-5).
+      else if (away?.(w.threadId)) kept.push({ ...w, due: build });
+      else log.info('dropped an app restart watch for a thread that has gone', { threadId: w.threadId });
+    }
     state.build = build;
-    state.watching = state.watching.filter((w) => w.fromTree === build.tree);
+    state.watching = kept;
     this.write(state);
-    for (const w of due) this.tell(w, build);
+    for (const w of now) this.tell(w, build);
+  }
+
+  // A thread a draining runner has handed over: if the app came back
+  // while it was over there, it hears now.
+  adopted(threadId: string): void {
+    const state = this.read();
+    const w = state.watching.find((x) => x.threadId === threadId && x.due);
+    if (!w?.due) return;
+    state.watching = state.watching.filter((x) => x !== w);
+    this.write(state);
+    this.tell(w, w.due);
   }
 
   private tell(w: Watch, build: AppBuild): void {

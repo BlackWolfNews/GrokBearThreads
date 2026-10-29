@@ -21,6 +21,7 @@ import type { Notification, Runner } from './runner.ts';
 import type { UsageReading } from './usage.ts';
 import type { ProjectControl, ScheduleControl, ThreadControl } from './threadbear-mcp.ts';
 import type { Scheduler } from './schedules.ts';
+import type { CommandHost } from './sync.ts';
 import type { DrainProjectOp, MembershipChange, Projects } from './projects.ts';
 import { processInfo } from './proc.ts';
 
@@ -523,6 +524,31 @@ export class ThreadRouter implements ThreadControl {
     const e = this.away(threadId);
     return e ? e.call('threads.delete', { threadId }) : this.runner.delete(threadId);
   }
+}
+
+// The phone's commands (sync.ts's CommandHost): this runner's threads
+// directly, and one a draining runner still has over there, as the app's
+// RPCs go (rpc.ts's forward). Without this a command for a thread
+// finishing its turn on the old runner failed with "Thread not found".
+export function phoneCommands(runner: Runner, remote?: Pick<Peers, 'owns' | 'call'>): CommandHost {
+  const at = <T>(threadId: string, method: string, params: Record<string, unknown>, here: () => T): T | Promise<unknown> => {
+    if (runner.has(threadId) || !remote?.owns(threadId)) return here();
+    // Just handed over (-32030): this runner has it by now.
+    return remote.call(threadId, method, { threadId, ...params }).catch((e) => {
+      if (isMoved(e) && runner.has(threadId)) return here();
+      throw e;
+    });
+  };
+  return {
+    send: (id, text, images, o) => at(id, 'threads.send', { text, origin: o.origin }, () => runner.send(id, text, images, o)) as { turnId: string },
+    respondApproval: (p) => at(p.threadId, 'approvals.respond', { ...p }, () => runner.respondApproval(p)),
+    update: (p) => at(p.threadId, 'threads.update', { ...p }, () => runner.update(p)),
+    // Up to whatever it has: markSeen keeps it within the thread's events.
+    markSeen: (id) => at(id, 'threads.markSeen', { seq: Number.MAX_SAFE_INTEGER }, () => runner.markSeen(id, runner.get(id).lastSeq)),
+    create: (p) => runner.create(p),
+    share: (id, p) => at(id, 'threads.share', { ...p }, () => runner.share(id, p)),
+    quickAsk: (p) => runner.quickAsk(p),
+  };
 }
 
 // What the schedule tools drive: this runner's Scheduler, or on a draining

@@ -271,3 +271,49 @@ test('Peers: once closed (this runner is draining), a thread coming across is no
   notify('drain.handedOver', { threadId: 't-old' });
   assert.deepEqual(adopted, []);
 });
+
+test("the phone's commands reach a thread a draining runner still has", async () => {
+  // 28 Oct: the phone's markSeen for a thread finishing its turn on the
+  // old runner went to the primary's own runner and failed, again and
+  // again, with "Thread not found".
+  const { phoneCommands } = await import('../../src/handover.ts');
+  const h = makeHarness();
+  const idle = create(h, 'idle one').thread;
+  h.adapter.last.init();
+  h.adapter.last.result('completed');
+  const busy = create(h, 'busy one').thread;
+  h.adapter.last.init();
+  await h.runner.beginDrain([busy.id], { onHandedOver: () => {}, backgroundMs: 30 * MIN });
+  const b = primary(h, [busy.id]);
+  const sent: [string, Record<string, unknown>][] = [];
+  let moved = false;
+  const remote = {
+    owns: (id: string) => id === busy.id,
+    call: async (_id: string, method: string, params: Record<string, unknown>) => {
+      if (moved) {
+        // The handover's notification lands first, then the answer.
+        b.runner.adopt(busy.id);
+        throw new RpcError(ErrorCode.moved, 'moved');
+      }
+      sent.push([method, params]);
+      return {};
+    },
+  };
+  const host = phoneCommands(b.runner, remote);
+  await host.send(busy.id, 'from my phone', [], { origin: 'phone' });
+  await host.markSeen(busy.id);
+  await host.update({ threadId: busy.id, archived: true });
+  await host.respondApproval({ threadId: busy.id, approvalId: 'a1', decision: 'allow' });
+  await host.share(busy.id, { access: 'link' });
+  assert.deepEqual(sent.map(([m]) => m), ['threads.send', 'threads.markSeen', 'threads.update', 'approvals.respond', 'threads.share']);
+  assert.deepEqual(sent[0][1], { threadId: busy.id, text: 'from my phone', origin: 'phone' });
+  assert.ok((sent[1][1].seq as number) >= Number.MAX_SAFE_INTEGER, 'seen up to whatever it has');
+  // The primary's own threads are done here.
+  await host.update({ threadId: idle.id, title: 'Renamed' });
+  assert.equal(b.runner.get(idle.id).title, 'Renamed');
+  assert.equal(sent.length, 5);
+  // Handed over just as the command went: done here instead.
+  moved = true;
+  await host.update({ threadId: busy.id, title: 'Came across' });
+  assert.equal(b.runner.get(busy.id).title, 'Came across');
+});
