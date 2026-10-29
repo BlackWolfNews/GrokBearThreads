@@ -174,6 +174,7 @@ final class QuickAskModel {
 
     private func enteredBackground() {
         inBackground = true
+        if prepared { QuickAskLogFile.save() }
         comingForwardAt = nil
         idleTask?.cancel()
         if phase == .listening {
@@ -275,6 +276,7 @@ final class QuickAskModel {
         isPresented = false
         phase = .idle(notice: nil)
         audio.stop(deactivate: true)
+        QuickAskLogFile.save()
     }
 
     private func interrupted() {

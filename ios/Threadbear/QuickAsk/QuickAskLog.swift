@@ -1,5 +1,5 @@
 import Foundation
-import os
+import OSLog
 
 /// `log stream --predicate 'subsystem == "com.mikecann.threadbear" AND category BEGINSWITH "quickask"'`
 /// (or Console.app) shows these. Never log the archive server's token.
@@ -34,6 +34,32 @@ nonisolated final class OnceFlag: @unchecked Sendable {
             if claimed { return false }
             claimed = true
             return true
+        }
+    }
+}
+
+/// Copies this run's quick ask log lines into Library/Caches/quickask.log, so a problem on a phone
+/// can be read off it with `devicectl device copy from` (Console needs the phone on a cable, and
+/// `log collect` needs root). Only this app's own lines, from this run; kept on the phone. Written
+/// when quick ask closes or the app goes to the background.
+nonisolated enum QuickAskLogFile {
+    static func save() {
+        Task.detached(priority: .utility) {
+            do {
+                let store = try OSLogStore(scope: .currentProcessIdentifier)
+                let since = store.position(date: Date().addingTimeInterval(-30 * 60))
+                let predicate = NSPredicate(format: "subsystem == %@ AND category BEGINSWITH %@", "com.mikecann.threadbear", "quickask")
+                let formatter = ISO8601DateFormatter()
+                formatter.formatOptions = [.withTime, .withFractionalSeconds, .withColonSeparatorInTime]
+                var lines: [String] = []
+                for case let entry as OSLogEntryLog in try store.getEntries(at: since, matching: predicate) {
+                    lines.append("\(formatter.string(from: entry.date)) \(entry.category) \(entry.composedMessage)")
+                }
+                guard let dir = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first else { return }
+                try lines.joined(separator: "\n").write(to: dir.appendingPathComponent("quickask.log"), atomically: true, encoding: .utf8)
+            } catch {
+                Log.app.error("Couldn't save the log: \(error.localizedDescription, privacy: .public)")
+            }
         }
     }
 }

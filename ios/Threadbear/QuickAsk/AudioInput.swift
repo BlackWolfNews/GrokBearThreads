@@ -28,12 +28,15 @@ nonisolated final class AudioInput: @unchecked Sendable {
 
     enum Failure: Error {
         case noMicrophone
+        /// The audio hardware is between formats (a route or configuration change).
+        case formatChanging
         case session(String)
         case engine(String)
 
         var message: String {
             switch self {
             case .noMicrophone: "There's no microphone available."
+            case .formatChanging: "The microphone was busy changing. Tap the mic to try again."
             case .session(let detail): "Couldn't start the audio session: \(detail)"
             case .engine(let detail): "Couldn't start the microphone: \(detail)"
             }
@@ -96,13 +99,14 @@ nonisolated final class AudioInput: @unchecked Sendable {
         }
     }
 
-    /// Forgets that the session's set up and active, so the next start sets it again. Threadbear's
-    /// reply dictation uses the same audio session with its own category and turns it off when it's
-    /// done, so a quick ask after it can't trust what this last did.
+    /// Forgets that the session's active, so the next start activates it again. Threadbear's reply
+    /// dictation shares the audio session and turns it off when it's done, so a quick ask after it
+    /// can't trust `sessionActive`. (The category's checked against the session itself, in
+    /// `configureIfNeeded`, rather than set again here: setting it while the engine's going is an
+    /// audio configuration change, which restarts the mic.)
     func resetSession() {
         queue.async { [self] in
             guard !engine.isRunning else { return }
-            configured = false
             sessionActive = false
         }
     }
@@ -199,7 +203,15 @@ nonisolated final class AudioInput: @unchecked Sendable {
         let wasActive = sessionActive
         try activateIfNeeded()
         let activated = Stopwatch.now
-        try installTapIfNeeded()
+        // Activating the session can leave the format settling for a moment (see installTapIfNeeded).
+        for attempt in 0... {
+            do {
+                try installTapIfNeeded()
+                break
+            } catch Failure.formatChanging where attempt < 10 {
+                Thread.sleep(forTimeInterval: 0.05)
+            }
+        }
         let tapped = Stopwatch.now
         guard !engine.isRunning else { return }
         engine.prepare()
@@ -213,8 +225,9 @@ nonisolated final class AudioInput: @unchecked Sendable {
     }
 
     private func configureIfNeeded() throws {
-        guard !configured else { return }
         let session = AVAudioSession.sharedInstance()
+        // Reply dictation sets its own category; only then does this one need setting again.
+        guard !configured || session.category != .playAndRecord else { return }
         do {
             // Loud speaker rather than the earpiece, and AirPods for both directions when they're in.
             try session.setCategory(.playAndRecord, mode: .default,
@@ -246,13 +259,21 @@ nonisolated final class AudioInput: @unchecked Sendable {
         let input = engine.inputNode
         let format = input.outputFormat(forBus: 0)
         guard format.sampleRate > 0, format.channelCount > 0 else { throw Failure.noMicrophone }
+        // Just after an audio configuration change the node's format can still be the old one,
+        // and a tap in a format the hardware isn't running at is an Objective-C exception, which
+        // Swift can't catch: it crashed the app (29 Oct, on the XS Max, the first time quick ask
+        // listened). So that's refused here, and the restart tries again shortly.
+        let hardware = input.inputFormat(forBus: 0)
+        guard hardware.sampleRate > 0, hardware.sampleRate == format.sampleRate else {
+            throw Failure.formatChanging
+        }
         input.installTap(onBus: 0, bufferSize: 1024, format: format) { [weak self] buffer, _ in
             self?.handle(buffer)
         }
         tapInstalled = true
     }
 
-    private func restartAfterConfigurationChange() {
+    private func restartAfterConfigurationChange(attempt: Int = 0) {
         let listening = lock.withLock { handlers.sink != nil || handlers.level != nil || capturingPreroll }
         // Activating the session can change the hardware format just after the engine's started,
         // which stops it and costs a second start: the log shows whether that's happening.
@@ -264,7 +285,15 @@ nonisolated final class AudioInput: @unchecked Sendable {
         }
         guard listening else { return }
         do {
-            try installTapIfNeeded()
+            do {
+                try installTapIfNeeded()
+            } catch Failure.formatChanging where attempt < 10 {
+                // Settles within a few tens of milliseconds; up to a second's tries.
+                queue.asyncAfter(deadline: .now() + 0.1) { [self] in
+                    if !tapInstalled { restartAfterConfigurationChange(attempt: attempt + 1) }
+                }
+                return
+            }
             engine.prepare()
             try engine.start()
             lastEngineStartAt = Stopwatch.now
