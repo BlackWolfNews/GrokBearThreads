@@ -3,10 +3,11 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { tmpDir } from '../helpers/fakes.ts';
-import { ConvexKeys, cliError, convexFolderFor } from '../../src/convex-keys.ts';
+import { execFileSync } from 'node:child_process';
+import { CONVEX_CLI, ConvexKeys, cliError, convexFolderFor } from '../../src/convex-keys.ts';
 import type { CommandOutcome } from '../../src/patches.ts';
 
-// Stands in for `npx convex deployment token create ... --save-env <file>`.
+// Stands in for `convex deployment token create ... --save-env <file>`.
 function fakeCli(key = 'dev:calm-cat-1|secretsecret') {
   const calls: { command: string; cwd: string }[] = [];
   const run = async (command: string, cwd: string): Promise<CommandOutcome> => {
@@ -28,7 +29,7 @@ test('a deploy key is made once per deployment, kept private, and made again on 
   assert.equal(cli.calls.length, 1, 'two panels opening together make one key');
   const name = /token create (threadbear-panel-mikes-macbook-[0-9a-f]{6}) --deployment calm-cat-1 --save-env '/.exec(cli.calls[0].command)?.[1];
   assert.ok(name, cli.calls[0].command);
-  assert.match(cli.calls[0].command, /^npx --no-install convex /);
+  assert.ok(cli.calls[0].command.startsWith(`${CONVEX_CLI} deployment token create `), cli.calls[0].command);
   assert.equal(cli.calls[0].cwd, '/proj');
   const file = path.join(dir, 'calm-cat-1.json');
   assert.equal(fs.statSync(file).mode & 0o777, 0o600);
@@ -39,7 +40,7 @@ test('a deploy key is made once per deployment, kept private, and made again on 
   // Renewing takes the old key off Convex, then makes one with a new name
   // (names are unique on a deployment).
   await keys.key('calm-cat-1', '/proj', true);
-  assert.equal(cli.calls[1].command, `npx --no-install convex deployment token delete ${name} --deployment calm-cat-1`);
+  assert.equal(cli.calls[1].command, `${CONVEX_CLI} deployment token delete ${name} --deployment calm-cat-1`);
   assert.match(cli.calls[2].command, /token create threadbear-panel-mikes-macbook-[0-9a-f]{6} /);
   assert.ok(!cli.calls[2].command.includes(name!));
   assert.equal(JSON.parse(fs.readFileSync(file, 'utf8')).name, /token create (\S+)/.exec(cli.calls[2].command)![1]);
@@ -87,7 +88,7 @@ test('deployment choices resolve dev and prod through the CLI without changing p
     { ...configured, label: 'Development' },
     { deployment: 'busy-bear-2', deploymentUrl: 'https://busy-bear-2.ap-southeast-2.convex.cloud', label: 'Production' },
   ] });
-  assert.ok(calls.every(c => c.includes('run --inline-query') && !c.includes('--push') && !c.includes('token')));
+  assert.ok(calls.every(c => c.startsWith(`${CONVEX_CLI} run --inline-query`) && !c.includes('--push') && !c.includes('token')));
   assert.deepEqual(await keys.deployments(folder, configured), listed);
   assert.equal(calls.length, 2, 'discovery is cached');
   await keys.deployments(folder, configured, true);
@@ -103,4 +104,20 @@ test('unavailable choices leave the configured deployment usable and explain why
   const listed = await keys.deployments(folder, configured);
   assert.deepEqual(listed.deployments, [{ ...configured, label: 'Configured' }]);
   assert.match(listed.note!, /Production: No production deployment/);
+});
+
+// THREADBEAR-6: a project on convex 1.32 has no `deployment token` command
+// or `--inline-query`, so its own CLI printed its help instead. The runner's
+// own CLI works in any project folder, whatever version the project is on.
+test('the runner\'s own Convex CLI is used, not the project\'s older one', () => {
+  const folder = tmpDir();
+  const old = path.join(folder, 'node_modules', 'convex');
+  fs.mkdirSync(path.join(old, 'bin'), { recursive: true });
+  fs.writeFileSync(path.join(old, 'package.json'), JSON.stringify({ name: 'convex', version: '1.32.0', bin: { convex: 'bin/main.js' } }));
+  fs.writeFileSync(path.join(old, 'bin', 'main.js'), 'console.log("Usage: convex [options] [command]")');
+  fs.writeFileSync(path.join(folder, 'package.json'), JSON.stringify({ dependencies: { convex: '1.32.0' } }));
+  const help = (args: string) => execFileSync('/bin/sh', ['-c', `${CONVEX_CLI} ${args} --help`], { cwd: folder, encoding: 'utf8' });
+  assert.match(help('deployment token create'), /Creates a deploy key/);
+  assert.match(help('deployment token delete'), /Usage: convex deployment token delete/);
+  assert.match(help('run'), /--inline-query/);
 });

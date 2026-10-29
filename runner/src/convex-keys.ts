@@ -6,6 +6,7 @@
 
 import crypto from 'node:crypto';
 import fs from 'node:fs';
+import { createRequire } from 'node:module';
 import os from 'node:os';
 import path from 'node:path';
 import type { CommandOutcome } from './patches.ts';
@@ -15,6 +16,15 @@ export type ConvexKey = { deployment: string; deploymentUrl: string; adminKey: s
 export type ConvexDeploymentChoice = { deployment: string; deploymentUrl: string; label: string };
 export type ConvexDeployments = { deployments: ConvexDeploymentChoice[]; note?: string };
 type Run = (command: string, cwd: string) => Promise<CommandOutcome>;
+
+// The runner's own Convex CLI (its `convex` dependency, run by its own
+// node), never the project's: a project on an older convex package lacks
+// `deployment token` and `run --inline-query` (1.32 printed its help
+// instead, THREADBEAR-6), and npx would need it installed. It still runs in
+// the project's folder, so it finds the project's convex.json and env files.
+const convexPackage = createRequire(import.meta.url).resolve('convex/package.json');
+const convexBin = path.join(path.dirname(convexPackage), JSON.parse(fs.readFileSync(convexPackage, 'utf8')).bin.convex);
+export const CONVEX_CLI = `${shellQuote(process.execPath)} ${shellQuote(convexBin)}`;
 
 export class ConvexKeys {
   // One CLI call per deployment at a time: two panels opening together
@@ -53,7 +63,7 @@ export class ConvexKeys {
     const resolved = await Promise.all(['dev', 'prod'].map(async selector => {
       const label = selector === 'prod' ? 'Production' : 'Development';
       try {
-        const out = await this.run(`npx --no-install convex run --inline-query 'process.env.CONVEX_CLOUD_URL' --deployment ${selector} --codegen disable --typecheck disable`, folder);
+        const out = await this.run(`${CONVEX_CLI} run --inline-query 'process.env.CONVEX_CLOUD_URL' --deployment ${selector} --codegen disable --typecheck disable`, folder);
         if (!out.ok) throw new Error(cliError(out.text));
         const url = new URL(JSON.parse(out.text.trim()));
         const deployment = convexDeploymentName(url.hostname.split('.')[0]);
@@ -92,8 +102,7 @@ export class ConvexKeys {
     fs.chmodSync(this.dir, 0o700);
     // A new key replaces one that stopped working (or was revoked): take
     // the old one off Convex too, if it's still there. Its failure is fine.
-    // --no-install: the project's own convex package, never a download.
-    if (oldName) await this.run(`npx --no-install convex deployment token delete ${oldName} --deployment ${deployment}`, folder);
+    if (oldName) await this.run(`${CONVEX_CLI} deployment token delete ${oldName} --deployment ${deployment}`, folder);
     // Names are unique on a deployment, so each key gets its own; the host
     // says which Mac's runner made it, in the deployment's settings.
     const host = this.host.split('.')[0].toLowerCase().replace(/[^a-z0-9-]+/g, '-').replace(/^-+|-+$/g, '') || 'mac';
@@ -101,7 +110,7 @@ export class ConvexKeys {
     // --save-env writes the key to a file rather than printing it, so it's
     // never in the command's output (which an error message quotes).
     const scratch = path.join(this.dir, `.new-${deployment}-${crypto.randomBytes(4).toString('hex')}.env`);
-    const command = `npx --no-install convex deployment token create ${name} --deployment ${deployment} --save-env ${shellQuote(scratch)}`;
+    const command = `${CONVEX_CLI} deployment token create ${name} --deployment ${deployment} --save-env ${shellQuote(scratch)}`;
     try {
       const out = await this.run(command, folder);
       const adminKey = fs.existsSync(scratch) ? parseEnvValue(fs.readFileSync(scratch, 'utf8'), 'CONVEX_DEPLOY_KEY') : undefined;
