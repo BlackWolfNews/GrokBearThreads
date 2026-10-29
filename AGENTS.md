@@ -45,11 +45,13 @@ static site with its own `package.json`; its comments say how to build it.
   asks for a button or a panel for a project, write one of those there.
   A panel with an `items` function is a native list (rows, no page to
   serve); `.threadbear/patches/checks.ts` has one, Worktrees.
-- After landing a change to the Mac app, ask Mike to Restart to Update
-  (Threadbear menu) in your end_turn: the runner messages this thread when
-  the app is back on the new build (docs/protocol.md, "App restarts"), so
-  you can check the change in the running app. `wait_for_app_restart`
-  sets what that message says.
+- After landing a change to the Mac app, don't ask Mike to Restart to
+  Update or to check it for you: the app restarts onto the new build by
+  itself once he leaves it idle. Call `wait_for_app_restart` with what to
+  check and end the turn with needs "nothing". The runner messages this
+  thread when the app is back on the new build (docs/protocol.md, "App
+  restarts"); check it then yourself, with `tb export` of the thread and
+  the scripted app (below), and ask him only for a judgement he has to make.
 - Files and links an agent makes for Mike to look at belong in the
   thread's Highlights (the pin on the right-hand rail): use the `pin`
   tool, with `show: true` to open it in the side pane, rather than `open`.

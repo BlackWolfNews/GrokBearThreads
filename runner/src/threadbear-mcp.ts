@@ -864,7 +864,11 @@ export const SHOWING_MIKE =
   'When you have design options, mockups or wireframes for Mike to choose between, put them in front of him with show_options (a side-by-side review window where he picks one and leaves notes), not as pins or a list in your reply; his answer comes back as a message. ' +
   "For a single file or link he should look at (a doc, a screenshot, a preview URL, a PR), use pin, with show: true to open it in Threadbear's side pane rather than running `open`. " +
   "To put one of Threadbear's own panels in front of him (this thread's Highlights, a patch panel such as the Convex dashboard, Usage), use show_panel. " +
-  'After landing a change to the Threadbear Mac app, ask Mike to Restart to Update (Threadbear menu) in end_turn: you get a message here when the app is back on the new build (wait_for_app_restart says what to send).';
+  // The app takes a new build by itself once Mike leaves it idle, and the
+  // runner tells the thread when it has, so neither the restart nor the
+  // looking needs him. Agents kept ending "Restart to Update, then check
+  // the bubble" anyway, because this line told them to (Mike, 29 Oct).
+  "After landing a change to the Threadbear Mac app, don't ask Mike to restart it or to check it: the app restarts onto the new build by itself once he leaves it idle. Call wait_for_app_restart saying what to check, end the turn with needs \"nothing\", and check it yourself when that message comes (the Threadbear repo's AGENTS.md, \"Seeing and driving the app\", shows any thread in a scripted copy of the app and screenshots it). Ask him only for a judgement he has to make.";
 
 // Also in the instructions, for the same reason. The librarian files
 // threads by itself, but it only sees a summary and can miss one; the

@@ -818,8 +818,9 @@ the restart is asked for.
 
 ### App restarts
 
-An agent that changed the Mac app lands it and asks Mike to Restart to
-Update; then it wants to know when he has, to check the change in the
+An agent that changed the Mac app lands it; the app restarts onto the new
+build by itself once Mike leaves it idle, or sooner if he picks Restart to
+Update. The agent wants to know when it has, to check the change in the
 running app. The app's `hello` carries its `build` (`commit`, `short`, and
 `tree`, the app/ and dock/ trees as `BuildInfo.appTree`; a dev build sends
 none, and only `client: "threadbear-mac"` counts). The runner keeps the
