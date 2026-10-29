@@ -1,6 +1,6 @@
 # Connectors for everyone (proposal)
 
-29 Oct 2026, thread 0ee93bb5. A proposal for Mike to react to, nothing built yet.
+29 Oct 2026, thread 0ee93bb5. Decided the same day (section 3); nothing built yet.
 
 What Mike asked: should the Connectors gateway be part of Threadbear's onboarding,
 explaining why someone would want it, and optional? And the gateway itself should be a
@@ -30,12 +30,13 @@ public repo so other people can run it easily.
 
 ## 2. The proposal in one go
 
-The gateway stays optional. Most people with one Claude login are better off with
-claude.ai's connectors, so setup doesn't ask about it. It's offered when it starts to
-matter: once you have two or more logins in a pool (or Codex as well), because a pool
-moves a thread between logins and claude.ai connectors are signed in per login, so a
-thread may or may not have your Gmail depending on where it lands. That's exactly what
-happened to Mike on 29 Oct.
+The gateway stays optional, and it's offered to everyone. One gateway serves every
+agent at once (Claude logins, Codex, and others such as Grok), so it pays off as soon as
+someone uses more than one: one sign-in instead of one per login and per provider. With
+several Claude logins in a pool it matters even more, because a pool moves a thread
+between logins and claude.ai connectors are signed in per login, so a thread may or may
+not have your Gmail depending on where it lands. That's exactly what happened to Mike on
+29 Oct.
 
 By default it runs on the same Mac as the runner, on localhost, installed and updated
 with Threadbear. A second always-on machine (Mike's Bruce) is an option, not a
@@ -47,10 +48,10 @@ too, and Threadbear installs a pinned version of it.
 
 ### 2.1 Where it's offered
 
-- **Finish setting up** gets an optional item, "Share your connectors across logins",
-  that appears only once a pool has two or more logins. One line, the reasons behind the
-  ⓘ: one sign-in for every login and Codex, asks you before anything is sent, a log of
-  every call. Dismissing it hides it for good.
+- **Finish setting up** gets an optional item for everyone, "Share your connectors
+  across agents". One line, the reasons behind the ⓘ: one sign-in for every Claude login,
+  Codex and other agents, asks you before anything is sent, a log of every call.
+  Dismissing it hides it for good.
 - **The Connectors panel**, with no gateway, shows a "Set up" button with the same ⓘ,
   instead of only saying there isn't one.
 - **The end_turn nudge** for a claude.ai sign-in error can mention it once ("this keeps
@@ -111,15 +112,19 @@ Before flipping `mikecann/connectors` to public:
   personal lingers in old commits, and run a secret scanner over it first.
 - A licence (MIT, like Mike's other public tools, unless he'd rather not).
 
-## 3. What Mike needs to decide
+## 3. Decisions
 
-- Offer it only once there are two or more logins, or to everyone as an optional item?
-- Runs on this Mac by default (proposed), or ask where during setup?
-- Google: leave out of the first version (proposed), or include the guided Cloud
-  console step from the start?
-- The public repo: name (`connectors` is generic; something like `mcp-gateway` or a
-  Threadbear-flavoured name), licence, and whether it goes public before Threadbear's
-  own install is ready for other people.
+Decided 29 Oct. Mike: "offer to everyone as an optional item ... connectors can span
+across multiple providers, so Claude and Codex and whatever". He left the rest to these
+picks:
+
+- Offered to everyone as an optional Finish setting up item, not only with two or more
+  logins (2.1).
+- Runs on this Mac by default; another machine over Tailscale is an option (2.2).
+- Google is left out of the first version and added later as a guided step (2.4).
+- The public repo gets a less generic name than `connectors` (to pick when it's
+  published) and the MIT licence. It goes public once the cleanup in 2.5 is done, which
+  can be before Threadbear's own install is ready, since it's useful on its own.
 
 ## 4. A rough order to build it in
 
