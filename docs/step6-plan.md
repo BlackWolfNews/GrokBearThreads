@@ -112,37 +112,41 @@ the website, not in the Mac app.
 
 ## Part 2: Bruce's threads in the Mac app
 
-The M5's runner connects to Bruce's runner over Tailscale, as a
-*remote peer*, the way a primary connects to a draining runner today. The
-Mac app keeps its one socket:
+Decided 29 Oct (Mike): the Mac app finds other runners' threads through
+Convex, the way the phone and the website do, and talks to a thread's own
+runner only while that thread is open. Runners never talk to each other.
 
-- `threads.list`, `threads.search` and `hello` include the remote runner's
-  threads, each with a `runner: { id, name }` so the sidebar can label it
-  (only when it isn't this Mac's).
-- Requests about a remote thread (`threads.send`, `threads.events`,
-  `threads.subscribe`, `approvals.respond`, ...) go to its runner, and its
-  events come back through, as for a kept thread in a handover.
-- `threads.create` takes an optional `runnerId`: the Runs on picker, as a
-  small machine chip on the composer beside folder, account and model.
-- Files: a new `files.read { path, maxBytes? }` (and an image variant with
-  a thumbnail size) that the local runner answers itself or forwards. The
-  app fetches remote images, blobs and linked files through it and caches
-  them, rather than opening the path.
-- Folders: `folders.list` on the remote runner for the picker; recent
-  folders are per runner.
+- **A sidebar table.** `threadIndex` in Convex has one small row per
+  thread: what a sidebar row shows (title, folder, provider, status, needs
+  you, unread, view, archived, snoozed, last activity, the preview line).
+  Each runner writes its own rows only when one of those changes, apart
+  from the preview and last activity, which ride along but never cause a
+  write. That's a few writes per turn rather than one every 2 seconds, so
+  a live query on it stays cheap all day. (The `threads` mirror keeps its
+  busy fields for the phone, which only watches while it's open.)
+- **This Mac's threads don't come from Convex.** The app keeps getting
+  them from its own runner, instant and offline-safe. The runner
+  subscribes to the other runners' `threadIndex` rows (it already holds
+  the Convex key and a live client) and hands them to the app as
+  `remoteThreads.updated`, with each runner's name, icon, whether it's
+  online and how to reach it. The app holds no Convex key.
+- **Opening one** connects the app straight to that thread's runner, over
+  Tailscale: `wss://<its MagicDNS name>:<port>/rpc` (`tailscale serve` on
+  that Mac, so it's only reachable on the tailnet), with that runner's
+  token, copied once into this Mac's data dir
+  (`secrets/runners/<runnerId>.token`). From there it's the normal
+  protocol against that runner: `threads.events`, `threads.subscribe`,
+  `threads.send`, `approvals.respond`, `threads.update`. The connection
+  closes again when the thread does.
+- **Not in this part:** images, long tool output and file links in a
+  remote thread are paths on that Mac, so they show as unavailable until a
+  `files.read` comes; new threads on another runner from the composer
+  (schedules can already make them); agents and `tb` seeing other runners'
+  threads.
 
-Proposed: the M5's runner fronts Bruce's (above). Not decided; Mike wanted
-to talk it through. Why this shape rather than the others:
-
-- **The app opening a socket per runner** works too, but every view that
-  holds `client` would learn about several, and every list would merge in
-  Swift. The runner already merges for handovers.
-- **The app reading remote threads from Convex** is ruled out by the
-  project notes: no always-on Convex subscriptions behind the sidebar (the
-  Agent Archive cost pattern).
-
-What it costs: Bruce's threads only show on the Mac while the M5's runner
-can reach it. The phone sees both through Convex either way.
+What it costs: the sidebar's remote rows need the internet (Convex); with
+none, only this Mac's threads show. Opening a remote thread needs
+Tailscale.
 
 ## Installing on Bruce
 

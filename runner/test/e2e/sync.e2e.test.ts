@@ -211,6 +211,42 @@ describe('convex mirror e2e', { skip: LOCAL ? false : 'no local Convex deploymen
     await api('mutation', 'sync:bye', { key, runnerId: 'e2e-bruce' });
   });
 
+  // Step 6 part 2 (docs/protocol.md, "Other runners' threads"): the runner
+  // writes its sidebar rows, and hands the app another runner's rows (here a
+  // pretend "e2e-other" that only heartbeats and writes its index).
+  test('the sidebar table: this runner\'s rows go up, another runner\'s come back as remoteThreads', async () => {
+    const runnerId = readRunnerJson(home).sync?.runnerId;
+    const { thread } = (await client.call('threads.create', { text: 'index me', cwd: home, accountId: 'claude-main' })) as any;
+    const mine = await until('this runner\'s index row', async () => {
+      const r = (await api('query', 'sync:otherRunnersThreads', { key, runnerId: 'someone-else' })) as any;
+      return r.threads.find((t: any) => t.threadId === thread.id);
+    });
+    assert.equal(mine.runnerId, runnerId);
+    assert.equal(mine.title, 'index me');
+
+    await api('mutation', 'sync:heartbeat', { key, runner: { runnerId: 'e2e-other', name: 'other', version: 'x', startedAt: new Date().toISOString(), draining: false, threadCount: 1, icon: 'macmini', rpcUrl: 'wss://other.example.ts.net/rpc' } });
+    const row = { threadId: 'other-t1', title: 'On the other Mac', cwd: '/Users/other', accountId: 'codex-main', provider: 'codex', status: 'idle', needsYou: true, unread: false, preview: 'done', createdAt: new Date().toISOString(), lastActivityAt: new Date().toISOString() };
+    await api('mutation', 'sync:setThreadIndex', { key, runnerId: 'e2e-other', rows: [row], removed: [] });
+    const remote = await until('remoteThreads.list', async () => {
+      const r = (await client.call('remoteThreads.list')) as any;
+      return r.threads.some((t: any) => t.threadId === 'other-t1') ? r : undefined;
+    });
+    const other = remote.runners.find((r: any) => r.id === 'e2e-other');
+    assert.deepEqual([other.name, other.icon, other.online, other.rpcUrl, other.tokenFile], ['other', 'macmini', true, 'wss://other.example.ts.net/rpc', undefined]);
+    assert.ok(!remote.runners.some((r: any) => r.id === runnerId), 'not this runner itself');
+    assert.equal(remote.threads.find((t: any) => t.threadId === 'other-t1').needsYou, true);
+
+    // Its thread goes, and the other runner signs off.
+    await api('mutation', 'sync:setThreadIndex', { key, runnerId: 'e2e-other', rows: [], removed: ['other-t1'] });
+    await until('the row to go', async () => (((await client.call('remoteThreads.list')) as any).threads.some((t: any) => t.threadId === 'other-t1') ? undefined : true));
+    await api('mutation', 'sync:bye', { key, runnerId: 'e2e-other' });
+    await client.call('threads.delete', { threadId: thread.id });
+    await until('this runner\'s row to go', async () => {
+      const r = (await api('query', 'sync:otherRunnersThreads', { key, runnerId: 'someone-else' })) as any;
+      return r.threads.some((t: any) => t.threadId === thread.id) ? undefined : true;
+    });
+  });
+
   test('a thread is mirrored, updated, and removed; the runner is listed and signs off', async () => {
     const runnerId = readRunnerJson(home).sync?.runnerId;
     assert.ok(runnerId, 'the runner made itself an id');

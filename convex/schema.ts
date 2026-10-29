@@ -95,7 +95,35 @@ export default defineSchema({
     // An SF Symbol for the runner's Mac ("laptopcomputer", "macmini"), so
     // lists can tell runners apart at a glance (API 10).
     icon: v.optional(v.string()),
+    // How a Mac app reaches this runner to open one of its threads (API 12):
+    // wss://<MagicDNS name>:<port>/rpc, only on the tailnet (sync.rpcUrl).
+    rpcUrl: v.optional(v.string()),
   }).index('by_runnerId', ['runnerId']),
+
+  // One small row per thread, just what a sidebar row shows (API 12), so a
+  // Mac app can list other runners' threads without the busy fields of
+  // `threads`: a runner writes a row only when one of these changes, apart
+  // from preview and lastActivityAt, which ride along but never cause a
+  // write (docs/step6-plan.md, part 2).
+  threadIndex: defineTable({
+    runnerId: v.string(),
+    threadId: v.string(),
+    title: v.string(),
+    cwd: v.string(),
+    accountId: v.string(),
+    provider: v.string(),
+    model: v.optional(v.string()),
+    status: v.string(),
+    needsYou: v.boolean(),
+    unread: v.boolean(),
+    preview: v.string(),
+    createdAt: v.string(),
+    lastActivityAt: v.string(),
+    snoozedUntil: v.optional(v.string()),
+    archivedAt: v.optional(v.string()),
+  })
+    .index('by_runnerId', ['runnerId'])
+    .index('by_runner_thread', ['runnerId', 'threadId']),
 
   // pushedAt is the mirror's own: when a push last went out for the thread
   // (push.ts), kept across the runner's writes.

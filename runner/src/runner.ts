@@ -125,6 +125,8 @@ export type Notification =
   | { method: 'pools.updated'; params: { pools: Pool[] } }
   | { method: 'runner.notice'; params: { level: 'info' | 'warning' | 'error'; message: string } }
   | { method: 'schedules.updated'; params: { schedules: Schedule[] } }
+  // Other runners' threads, from the backend (thread-index.ts, step 6 part 2).
+  | { method: 'remoteThreads.updated'; params: import('./thread-index.ts').RemoteThreads }
   | { method: 'clis.updated'; params: { clis: CliStatus[] } }
   | { method: 'settings.updated'; params: { settings: Settings } }
   | { method: 'runner.updates'; params: { updates: RunnerUpdates } }

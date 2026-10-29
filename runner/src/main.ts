@@ -277,6 +277,8 @@ async function main(): Promise<void> {
       quickAsk: (p) => runner.quickAsk(p),
     },
     schedules: scheduler,
+    publish: (n) => runner.publish(n),
+    home: cfg.home,
     version: RUNNER_VERSION,
     release: RELEASE.release,
     startedAt: new Date().toISOString(),
@@ -376,6 +378,8 @@ async function main(): Promise<void> {
   };
   // tb updates (docs/protocol.md, "Mike's releases").
   methods['upstream.status'] = () => ({ upstream: upstream.status() });
+  // Other runners' threads, for the Mac app's sidebar (step 6 part 2).
+  methods['remoteThreads.list'] = () => sync.remoteThreads();
   methods['upstream.check'] = async () => ({ upstream: await upstream.check() });
   const codexWarning = missingCodex(updates.codexBinary(), cfg);
   if (codexWarning) log.warn('codex CLI not found', { path: updates.codexBinary() });

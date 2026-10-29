@@ -176,6 +176,7 @@ export const heartbeat = mutation({
       draining: v.boolean(),
       threadCount: v.number(),
       icon: v.optional(v.string()),
+      rpcUrl: v.optional(v.string()),
     }),
   },
   // The backend's API version (version.ts), so the runner can tell when it's
@@ -758,5 +759,87 @@ export const pruneOld = internalMutation({
       await ctx.db.patch(m._id, { pagedAt: undefined });
     }
     return null;
+  },
+});
+
+// ------------------------------------------------------------ thread index (API 12)
+// The Mac app's view of other runners' threads (docs/step6-plan.md, part 2).
+// A runner writes its own rows when what a sidebar shows changes; a Mac
+// app's runner watches the other runners' rows and hands them to the app.
+
+const indexDoc = v.object({
+  threadId: v.string(),
+  title: v.string(),
+  cwd: v.string(),
+  accountId: v.string(),
+  provider: v.string(),
+  model: v.optional(v.string()),
+  status: v.string(),
+  needsYou: v.boolean(),
+  unread: v.boolean(),
+  preview: v.string(),
+  createdAt: v.string(),
+  lastActivityAt: v.string(),
+  snoozedUntil: v.optional(v.string()),
+  archivedAt: v.optional(v.string()),
+});
+
+// Rows made or changed, and threads gone. With `keep`, every row of the
+// runner whose thread isn't in it goes too (the first write after start).
+export const setThreadIndex = mutation({
+  args: { key: v.string(), runnerId: v.string(), rows: v.array(indexDoc), removed: v.array(v.string()), keep: v.optional(v.array(v.string())) },
+  returns: v.null(),
+  handler: async (ctx, { key, runnerId, rows, removed, keep }) => {
+    checkRunnerKey(key);
+    for (const row of rows) {
+      const existing = await ctx.db
+        .query('threadIndex')
+        .withIndex('by_runner_thread', (q) => q.eq('runnerId', runnerId).eq('threadId', row.threadId))
+        .unique();
+      if (existing) await ctx.db.replace(existing._id, { ...row, runnerId });
+      else await ctx.db.insert('threadIndex', { ...row, runnerId });
+    }
+    const gone = new Set(removed);
+    const kept = keep ? new Set([...keep, ...rows.map((r) => r.threadId)]) : undefined;
+    if (gone.size || kept) {
+      for await (const row of ctx.db.query('threadIndex').withIndex('by_runnerId', (q) => q.eq('runnerId', runnerId))) {
+        if (gone.has(row.threadId) || (kept && !kept.has(row.threadId))) await ctx.db.delete(row._id);
+      }
+    }
+    return null;
+  },
+});
+
+// Every runner but this one, with its threads. Each runner's rows are read
+// through its own index range, so this one's writes never re-run the query;
+// the runners table does, about once a minute per runner (heartbeats), which
+// is also what keeps `lastSeenAt` fresh here.
+export const otherRunnersThreads = query({
+  args: { key: v.string(), runnerId: v.string() },
+  returns: v.object({
+    runners: v.array(
+      v.object({ runnerId: v.string(), name: v.string(), icon: v.optional(v.string()), lastSeenAt: v.number(), rpcUrl: v.optional(v.string()) }),
+    ),
+    threads: v.array(v.object({ ...indexDoc.fields, runnerId: v.string() })),
+  }),
+  handler: async (ctx, { key, runnerId }) => {
+    checkRunnerKey(key);
+    const runners = [];
+    const threads = [];
+    for await (const r of ctx.db.query('runners')) {
+      if (r.runnerId === runnerId) continue;
+      runners.push({
+        runnerId: r.runnerId,
+        name: r.name,
+        lastSeenAt: r.lastSeenAt,
+        ...(r.icon !== undefined ? { icon: r.icon } : {}),
+        ...(r.rpcUrl !== undefined ? { rpcUrl: r.rpcUrl } : {}),
+      });
+      for await (const t of ctx.db.query('threadIndex').withIndex('by_runnerId', (q) => q.eq('runnerId', r.runnerId))) {
+        const { _id, _creationTime, ...rest } = t;
+        threads.push(rest);
+      }
+    }
+    return { runners, threads };
   },
 });

@@ -690,6 +690,7 @@ the summary and then the reply.
 | `schedules.delete` | `{ scheduleId }` | `{}` |
 | `schedules.run` | `{ scheduleId }` | `{ schedule: Schedule, threadId?: string, turnId?: string, queued?: boolean }` runs it now, as if it were due, even when paused. A repeating schedule keeps its `nextRunAt`; a one-off is finished. For a schedule on another runner it answers at once with `queued: true` and no thread: that runner runs it when it next hears (`runRequestedAt` is set until then) |
 | `runners.list` | `{}` | `{ runners: RunnerInfo[] }`, this runner first, then the rest by name. Without a backend, just this runner |
+| `remoteThreads.list` | `{}` | `RemoteThreads`: other runners' threads for the sidebar (see "Other runners' threads"). Empty with sync off, or before the backend (API 12) has answered. A runner older than this answers `-32601` |
 | `schedules.preview` | `{ cron?: string, at?: string, timezone?: string, count?: number }` | `{ whenText: string, runs: string[] }`, the next `count` (default 5, at most 20) times it would run, for an editor to show as someone types. `-32602` with the reason for a cron or zone it can't read |
 | `projects.list` | `{ archived?: boolean }` | `{ projects: Project[] }`, newest `lastActivityAt` first. Archived ones only with `archived: true` (then all of them) |
 | `projects.get` | `{ projectId }` | `{ project: Project, threadIds: string[] }`, its threads newest activity first, put away ones included |
@@ -753,6 +754,7 @@ still `-32602`.)
 | `pools.updated` | `{ pools: Pool[] }` sent to every connected client after `pools.save`, and when a change in the login list changes the built-in pools. Replaces the list from `hello` |
 | `clis.updated` | `{ clis: CliStatus[] }` sent to every connected client when a CLI's status changes (a check finished, an update started, moved on or ended). The latest list wins |
 | `schedules.updated` | `{ schedules: Schedule[] }` sent to every connected client whenever any schedule changes (made, edited, run, deleted, or its thread deleted). The whole list, in `schedules.list` order |
+| `remoteThreads.updated` | `RemoteThreads` sent to every connected client whenever another runner's threads, or what's known of that runner, change. The whole list, as `remoteThreads.list` |
 | `projects.updated` | `{ projects: Project[] }` sent to every connected client when any project changes, as `projects.list` with `archived: true` would answer. Thread membership changes come as `thread.updated` |
 | `librarian.updated` | `{ librarian: LibrarianStatus }` sent to every connected client when the librarian's status changes |
 | `connectors.updated` | `{ connectors: ConnectorsStatus }` sent to every connected client when what the Connectors panel would show changes (a service signs out or back in, the gateway stops or starts answering); not when only `checkedAt` moves |
@@ -2114,6 +2116,53 @@ kept in `schedules.json` in the data dir.
   schedule sends to its own thread ("check the deploy again in 20
   minutes"). `schedule_message` takes a `runner` (a name or id from
   `runners.list`); left out, the schedule runs on the agent's own runner.
+
+## Other runners' threads
+
+Step 6 part 2 (docs/step6-plan.md). The Mac app lists every runner's
+threads: this runner's from this runner as always, the others' from the
+backend. To open one of another runner's threads the app connects to that
+runner itself. Runners never talk to each other.
+
+- **The sidebar table.** With a backend of API 12, each runner keeps one
+  `threadIndex` row per thread there: `threadId, title, cwd, accountId,
+  provider, model?, status, needsYou, unread, preview, createdAt,
+  lastActivityAt, snoozedUntil?, archivedAt?`. It writes a row when any
+  of those but `preview` and `lastActivityAt` changes (those two go along
+  but never cause a write), and on its first write after starting it
+  drops rows for threads it no longer has. A deleted thread's row goes.
+- **Watching the others.** The runner subscribes to
+  `sync:otherRunnersThreads` (every runner but itself, with its threads)
+  and gives the result to clients as `remoteThreads.list` and
+  `remoteThreads.updated`:
+
+```ts
+type RemoteThreads = { runners: RemoteRunner[], threads: RemoteThread[] }
+type RemoteRunner = {
+  id: string, name: string, icon?: string  // as RunnerInfo
+  online: boolean      // heard from in the last 3 minutes
+  lastSeenAt: string
+  rpcUrl?: string      // how to reach it: that runner's sync.rpcUrl
+  tokenFile?: string   // absolute path on this Mac of its runner token,
+                       // when one has been copied in
+                       // (<home>/secrets/runners/<id>.token); absent means
+                       // its threads can be listed but not opened
+}
+type RemoteThread = { runnerId: string, threadId: string, title, cwd,
+  accountId, provider, model?, status: ThreadStatus, needsYou: boolean,
+  unread: boolean, preview, createdAt, lastActivityAt, snoozedUntil?,
+  archivedAt? }
+```
+
+- **Opening one.** The client connects to `rpcUrl` (a `wss://` URL served
+  by `tailscale serve` on that Mac, so only the tailnet reaches it) with
+  the token in `tokenFile`, exactly as to its own runner, and uses the
+  normal methods there for that thread: `threads.events`,
+  `threads.subscribe`, `threads.send`, `threads.update`,
+  `approvals.respond`, and so on. Paths in its events (images, blobs,
+  file links) are that Mac's.
+- **`sync.rpcUrl`** in a runner's `runner.json` is the URL it tells the
+  backend (in its heartbeat, API 12) for other Macs to reach it by.
 
 ## Sync
 

@@ -24,6 +24,7 @@ import type { Logger } from './log.ts';
 import type { Account, ApprovalDecision, ApprovalOption, PersistedEvent, Project, Question, Schedule, ThreadSummary } from './protocol.ts';
 import type { Notification } from './runner.ts';
 import type { ScheduleBackend, StoredSchedule } from './schedules.ts';
+import { ThreadIndex, type RemoteThreads } from './thread-index.ts';
 import { paths, readRunnerJson, writeRunnerJson } from './config.ts';
 
 // At most one write per thread this often while a turn runs: a running
@@ -55,6 +56,7 @@ export type SyncConfig = {
   name?: string;
   runnerId?: string;
   icon?: string;
+  rpcUrl?: string;
 };
 
 // runner.status's `sync` (docs/protocol.md, "Sync").
@@ -63,7 +65,7 @@ export type SyncConfig = {
 // lower one means its backend hasn't been deployed since this runner was:
 // said in runner.status, tb status and the log rather than stopping, since
 // the runner only adds to what it sends while the number stays the same.
-export const BACKEND_API_VERSION = 11;
+export const BACKEND_API_VERSION = 12;
 // From this backend version a project's picture goes up to file storage
 // (sync:iconUploadUrl, sync:setProjectIcon); an older backend gets the
 // project without it and the phone shows its symbol or first letter.
@@ -80,6 +82,9 @@ export const SCHEDULES_API_VERSION = 9;
 // From this one the heartbeat carries the runner's icon (machine.ts); an
 // older backend's validator would turn the heartbeat down.
 export const RUNNER_ICON_API_VERSION = 11;
+// From this one there's the sidebar table (thread-index.ts) and the
+// heartbeat carries rpcUrl (step 6 part 2).
+export const THREAD_INDEX_API_VERSION = 12;
 
 export type SyncStatus = {
   state: 'off' | 'ok' | 'error';
@@ -210,6 +215,10 @@ export type SyncDeps = {
   // a heartbeat says it has one; while inBackend(), schedules.updated isn't
   // mirrored. Absent in small tests.
   schedules?: { attach(backend: ScheduleBackend): void | Promise<void>; inBackend(): boolean };
+  // For the sidebar table (thread-index.ts): telling the app about other
+  // runners' threads, and the data dir their tokens are copied into.
+  publish?: (n: Notification) => void;
+  home?: string;
 };
 
 // POST /api/mutation or /api/query on a Convex deployment, the plain HTTP
@@ -517,6 +526,7 @@ export class ConvexSync {
   private failed = 0;
   private commandError?: string;
   private commandsState: 'off' | 'on' | 'error' = 'off';
+  private index?: ThreadIndex;
 
   constructor(deps: SyncDeps) {
     this.deps = deps;
@@ -529,6 +539,20 @@ export class ConvexSync {
     this.post = deps.post ?? (url ? convexPoster(url) : async () => undefined);
     this.upload = deps.upload ?? convexUploader();
     if (!this.off) this.subscriber = deps.subscriber ?? (url ? convexSubscriber(url) : undefined);
+    if (!this.off && deps.home) {
+      const subscriber = this.subscriber;
+      this.index = new ThreadIndex({
+        post: (kind, fn, args) => this.post(kind, fn, args),
+        subscribe: subscriber ? (fn, args, onUpdate, onError) => subscriber.subscribe(fn, args, onUpdate, onError) : undefined,
+        key: deps.key,
+        runnerId: this.runnerId,
+        home: deps.home,
+        host: deps.runner,
+        publish: deps.publish,
+        clock: deps.clock,
+        log: deps.log,
+      });
+    }
   }
 
   start(): void {
@@ -560,6 +584,7 @@ export class ConvexSync {
     this.unsubCommands?.();
     this.unsubCommands = undefined;
     this.commandsState = 'off';
+    this.index?.stop();
     this.flushTimer?.cancel();
     this.heartbeatTimer?.cancel();
     this.presenceTimer?.cancel();
@@ -1145,17 +1170,24 @@ export class ConvexSync {
       draining: false,
       threadCount: this.deps.runner.list(ALL).length,
       ...(this.deps.config.icon && (this.backendApiVersion ?? 0) >= RUNNER_ICON_API_VERSION ? { icon: this.deps.config.icon } : {}),
+      ...(this.deps.config.rpcUrl && (this.backendApiVersion ?? 0) >= THREAD_INDEX_API_VERSION ? { rpcUrl: this.deps.config.rpcUrl } : {}),
     };
     void this.post('mutation', 'sync:heartbeat', { key: this.deps.key, runner }).then(
       (r) => {
         this.sawBackend(r);
         if ((this.backendApiVersion ?? 0) >= SCHEDULES_API_VERSION && this.running) void this.deps.schedules?.attach(this.scheduleBackend());
+        if ((this.backendApiVersion ?? 0) >= THREAD_INDEX_API_VERSION && this.running) this.index?.start();
       },
       (e) => {
         this.deps.log.debug('convex heartbeat failed', { error: String(e) });
       },
     );
     this.heartbeatTimer = this.deps.clock.setTimeout(() => this.heartbeat(), HEARTBEAT_MS);
+  }
+
+  /** remoteThreads.list: other runners' threads, empty with sync off. */
+  remoteThreads(): RemoteThreads {
+    return this.index?.list() ?? { runners: [], threads: [] };
   }
 
   // ------------------------------------------------------------ schedules

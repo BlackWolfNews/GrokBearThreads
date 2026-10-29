@@ -43,4 +43,8 @@
 // 11: a runner's heartbeat can carry `icon`, an SF Symbol for its Mac
 //    (sync.icon, or worked out from the model), and sync:runnersList
 //    returns it. A runner sends it only to a backend of 11 or later.
-export const API_VERSION = 11;
+// 12: Bruce's threads in the Mac app (step 6, part 2): the threadIndex
+//    table (sync:setThreadIndex, sync:otherRunnersThreads), and a runner's
+//    heartbeat can carry rpcUrl, how a Mac app reaches it. A runner writes
+//    the index and sends rpcUrl only to a backend of 12 or later.
+export const API_VERSION = 12;
