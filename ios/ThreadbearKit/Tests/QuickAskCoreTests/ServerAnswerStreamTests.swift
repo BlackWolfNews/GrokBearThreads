@@ -164,3 +164,12 @@ struct ServerAnswerStreamTests {
         #expect(restored.headline == timing.headline)
     }
 }
+
+struct HeaderStallTests {
+    @Test func noHeadersBySevenSecondsIsAStall() {
+        let deadline = ServerStreamDeadline(startedAt: 100)
+        #expect(!deadline.stalledBeforeHeaders(at: 106.9, responded: false))
+        #expect(deadline.stalledBeforeHeaders(at: 107, responded: false))
+        #expect(!deadline.stalledBeforeHeaders(at: 120, responded: true))
+    }
+}

@@ -86,6 +86,16 @@ nonisolated struct ServerStreamDeadline {
         hasStage = hasStage || stage
     }
 
+    /// The server answers with its headers within about 6 s (it sends a 502 if no model has
+    /// started by then), so nothing at all by 7 s means the request never got there: on 29 Oct
+    /// the phone's connection to Bruce went dead between the ping and the question, and the
+    /// question sat on it for the whole 30 s. Then it's sent again, once, on a new connection.
+    static let headersWithin: Double = 7
+
+    func stalledBeforeHeaders(at time: Double, responded: Bool) -> Bool {
+        !responded && time - startedAt >= Self.headersWithin
+    }
+
     func expired(at time: Double) -> Bool {
         if hasStage { return time - startedAt >= 75 || time - lastActivityAt >= 15 }
         return time - lastActivityAt >= 30

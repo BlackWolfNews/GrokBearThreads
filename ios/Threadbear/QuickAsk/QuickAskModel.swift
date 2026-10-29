@@ -619,7 +619,9 @@ final class QuickAskModel {
         let body = AskAPI.body(question: text, history: [], timeZone: .current, now: Date())
         do {
             let request = try AskAPI.askRequest(baseURL: baseURL, token: token, body: body)
-            return .success(AnswerStream(request: request, question: text, history: [], decidedAt: decidedAt, session: client.session))
+            let stream = AnswerStream(request: request, question: text, history: [], decidedAt: decidedAt, session: client.session)
+            stream.freshSession = { [client] in client.freshSession() }
+            return .success(stream)
         } catch {
             return .failure(.badRequest(error.localizedDescription))
         }

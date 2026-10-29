@@ -42,6 +42,12 @@ final class AnswerStream {
     private var watchdog: Task<Void, Never>?
     private var deadline: ServerStreamDeadline?
     private var receivedServerText = false
+    /// The status and headers have come back.
+    private var responded = false
+    private var retried = false
+    /// A new connection, for sending it again if it stalls before any reply (see
+    /// `ServerStreamDeadline.headersWithin`). Without it there's no retry.
+    var freshSession: (() -> URLSession)?
 
     init(request: URLRequest, question: String, history: [Exchange], decidedAt: Double, session: URLSession) {
         self.request = request
@@ -54,20 +60,23 @@ final class AnswerStream {
     /// Sends it.
     func start() {
         deadline = ServerStreamDeadline(startedAt: Stopwatch.now)
-        // The request goes out from a detached task straight away, rather than after the main
-        // actor has finished redrawing; the answer's then read on the main actor.
-        let (session, request) = (session, request)
-        let opening = Task.detached(priority: .userInitiated) {
-            let sentAt = Stopwatch.now
-            let (bytes, response) = try await session.bytes(for: request)
-            return Opened(sentAt: sentAt, bytes: UncheckedSendable(bytes), response: response)
-        }
-        self.opening = opening
-        reading = Task { await read(opening) }
+        send(on: session)
         watchdog = Task { [weak self] in
             while !Task.isCancelled {
                 try? await Task.sleep(for: .milliseconds(100))
                 guard !Task.isCancelled, let self else { return }
+                let now = Stopwatch.now
+                if self.deadline?.stalledBeforeHeaders(at: now, responded: self.responded) == true,
+                   !self.retried, let fresh = self.freshSession {
+                    // Nothing back at all: the connection's dead. Send it again on a new one.
+                    self.retried = true
+                    Log.net.error("No reply in \(Int(ServerStreamDeadline.headersWithin)) s; sending again on a new connection")
+                    self.opening?.cancel()
+                    self.reading?.cancel()
+                    self.deadline = ServerStreamDeadline(startedAt: now)
+                    self.send(on: fresh())
+                    continue
+                }
                 if self.deadline?.expired(at: Stopwatch.now) == true {
                     self.opening?.cancel()
                     self.dataTask?.cancel()
@@ -77,6 +86,19 @@ final class AnswerStream {
                 }
             }
         }
+    }
+
+    /// The request goes out from a detached task straight away, rather than after the main
+    /// actor has finished redrawing; the answer's then read on the main actor.
+    private func send(on session: URLSession) {
+        let request = request
+        let opening = Task.detached(priority: .userInitiated) {
+            let sentAt = Stopwatch.now
+            let (bytes, response) = try await session.bytes(for: request)
+            return Opened(sentAt: sentAt, bytes: UncheckedSendable(bytes), response: response)
+        }
+        self.opening = opening
+        reading = Task { await read(opening) }
     }
 
     /// Hands over everything kept so far, then each event as it happens.
@@ -128,6 +150,7 @@ final class AnswerStream {
             }
             let bytes = opened.bytes.value
             dataTask = bytes.task
+            responded = true
             emit(.responded(sentAt: opened.sentAt, at: Stopwatch.now))
             guard let http = opened.response as? HTTPURLResponse else { throw URLError(.badServerResponse) }
             guard http.statusCode == 200 else {
