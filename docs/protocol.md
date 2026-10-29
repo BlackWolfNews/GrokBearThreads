@@ -327,15 +327,16 @@ type ProjectIcon = {
 // What the librarian (see Projects) is doing, has done and will do next.
 type LibrarianStatus = {
   state: "idle" | "working" | "paused" | "off"
-  reason?: string       // state "off": why ("No Claude pool or OpenRouter
-                        // key", "Every login in Claude is out of room",
-                        // "Today's model budget is spent", "Model calls are off")
+  reason?: string       // state "off": why ("Needs a Claude pool to run
+                        // on", "Every login in Claude is out of room",
+                        // "Model calls are off")
   paused: boolean       // Mike paused it; looks wait in the queue
   current?: LibrarianJob & { startedAt: string } // the look under way
   queue: LibrarianJob[] // what it will look at next, soonest first
   recent: LibrarianEntry[] // what it did, newest first, the last 50
   looksToday: number
-  spentTodayUsd: number // its share of the day's model spend (OpenRouter)
+  spentTodayUsd: number // its share of the day's OpenRouter spend: 0 since
+                        // it runs on the pool only, kept for older apps
   skippedToday?: number // quiet catch-ups skipped without a model call
   tokensToday?: number  // tokens in and out, every look and icon pick
   notionalTodayUsd?: number // what the pool's calls would have cost on
@@ -1029,6 +1030,9 @@ answers wins. There are two kinds of place:
   model could be reached keep their first line until `threads.retitle`
   names them too. Later, the librarian renames a thread whose title no
   longer says what it's about (see Projects).
+- **Pool only.** A feature can ask for the pool alone (`poolOnly`): its
+  calls skip OpenRouter, so with no pool or no room they say `no-key` or
+  `no-room` rather than going there. The librarian does.
 - **Failures.** A call never throws: it says why it didn't answer
   (`no-key`: no pool and no key; `no-room`: the pool is out of room and
   OpenRouter can't take it; private folder, over budget, timed out,
@@ -1899,8 +1903,14 @@ decides takes effect straight away: the thread gets `projects` (`by:
 "librarian"`) and a `system.note` saying so ("Put in Threadbear"), and
 Mike can take it out (`threads.setProjects`), after which it's never put
 back. It never takes out a pinned project or one an agent added. Looks
-are listed in `LibrarianStatus.recent`; without a key or budget the queue
-waits (`state: "off"`).
+are listed in `LibrarianStatus.recent`.
+
+Looks (and icon picks) run on the Claude pool only, never OpenRouter
+(`poolOnly` in `src/models/`): Mike's subscription takes them anyway,
+and a second place to pay for and budget them was more to explain than
+it was worth. Without a pool with a Claude login (`models.pool` null, or
+a pool with none), or while every login in it is out of room, the queue
+waits (`state: "off"`) and tries again later.
 
 **Titles.** A look also says whether the thread's title still fits, and
 gives a new one when the work has moved on or the title is only its first

@@ -354,7 +354,7 @@ test('the librarian: catch-up an hour after a look, new folders sooner, state up
   assert.equal(h.runner.get(thread.id).projects, undefined);
 });
 
-test('the librarian waits without a key, skips private folders, can be paused, and backfills', async () => {
+test('the librarian waits without a pool, skips private folders, can be paused, and backfills', async () => {
   let result: ModelResult<string> = { ok: false, reason: 'no-key', message: 'No key' };
   const s = setup({ models: () => result });
   const { h, create, finish, librarian } = s;
@@ -365,7 +365,8 @@ test('the librarian waits without a key, skips private folders, can be paused, a
   await tick(6);
   let st = librarian.status();
   assert.equal(st.state, 'off');
-  assert.equal(st.reason, 'No Claude pool or OpenRouter key');
+  assert.equal(st.reason, 'Needs a Claude pool to run on');
+  assert.ok(s.asked.every((p) => p.poolOnly), 'looks only ever ask the pool');
   assert.equal(st.queue.length, 1, 'kept for later');
   // Paused: nothing runs even when due.
   m['librarian.update']({ paused: true });

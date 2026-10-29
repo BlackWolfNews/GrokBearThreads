@@ -68,7 +68,7 @@ export const CATCH_UP_MIN_CHARS = 400;
 // minutes made that common. Threads active within SWEEP_DAYS.
 export const SWEEP_MS = 5 * 60_000;
 const SWEEP_DAYS = 2;
-// Without a key or budget, how long before trying again.
+// Without a pool or room on it, how long before trying again.
 const OFF_RETRY_MS = 10 * 60_000;
 const RECENT_KEPT = 50;
 // A backfill looks at threads active this recently.
@@ -113,7 +113,7 @@ type Answer = {
 export class Librarian {
   private host: LibrarianHost;
   private projects: Projects;
-  private models?: Pick<Models, 'generate'> & Partial<Pick<Models, 'unavailable'>>;
+  private models?: Pick<Models, 'generate'> & { unavailable?(opts?: { poolOnly?: boolean }): string | undefined };
   private clock: Clock;
   private log: Logger;
   private file: string;
@@ -130,8 +130,8 @@ export class Librarian {
   private workedIn = new Map<string, Set<string>>();
   private current?: LibrarianJob & { startedAt: string };
   private off?: string;
-  // `off` is there because no model could be reached at all (no pool, no
-  // key), so it clears by itself once one can.
+  // `off` is there because no model could be reached at all (no pool with
+  // a Claude login), so it clears by itself once one can.
   private offForSetup = false;
   private timer?: TimerHandle;
   private timerAt = Infinity;
@@ -147,7 +147,7 @@ export class Librarian {
   private iconAgain = false;
   private iconFullDue = 0;
 
-  constructor(deps: { host: LibrarianHost; projects: Projects; models?: Pick<Models, 'generate'> & Partial<Pick<Models, 'unavailable'>>; clock: Clock; log: Logger; home: string; userHome?: string }) {
+  constructor(deps: { host: LibrarianHost; projects: Projects; models?: Pick<Models, 'generate'> & { unavailable?(opts?: { poolOnly?: boolean }): string | undefined }; clock: Clock; log: Logger; home: string; userHome?: string }) {
     this.host = deps.host;
     this.projects = deps.projects;
     this.models = deps.models;
@@ -195,9 +195,9 @@ export class Librarian {
 
   status(): LibrarianStatus {
     this.rollDay();
-    // Whether there's a pool or a key is known without asking the model;
-    // room and budget aren't.
-    const why = this.models?.unavailable?.();
+    // Whether there's a pool with a Claude login is known without asking
+    // the model; room isn't.
+    const why = this.models?.unavailable?.({ poolOnly: true });
     if (!this.current && !this.off && why) {
       this.off = why;
       this.offForSetup = true;
@@ -240,7 +240,7 @@ export class Librarian {
       due.forEach((t, i) => this.enqueue(t.id, 'asked', 'Looking at everything', now + i * 1000));
       this.log.info('librarian backfill', { threads: due.length });
     }
-    // Asking again is a good moment to try again after a missing key.
+    // Asking again is a good moment to try again after a missing pool.
     this.off = this.models ? undefined : this.off;
     if (this.models) this.offForSetup = false;
     this.changed();
@@ -412,12 +412,12 @@ export class Librarian {
     // rec is the live record: the title as the model saw it, so a rename
     // during the call isn't undone.
     const title = rec.title;
-    const res = await this.models.generate({ feature: 'projects', cwd: rec.cwd, system: SYSTEM, prompt, maxTokens: 2000 });
+    const res = await this.models.generate({ feature: 'projects', poolOnly: true, cwd: rec.cwd, system: SYSTEM, prompt, maxTokens: 2000 });
     if (!res.ok) {
       if (WAIT_FOR.includes(res.reason)) {
-        // Nothing wrong with the job: try again once there's a model, room
-        // or budget.
-        this.off = res.reason === 'no-key' ? (this.models.unavailable?.() ?? offReason(res.reason, res.message)) : offReason(res.reason, res.message);
+        // Nothing wrong with the job: try again once there's a pool or room
+        // on it.
+        this.off = res.reason === 'no-key' ? (this.models.unavailable?.({ poolOnly: true }) ?? offReason(res.reason, res.message)) : offReason(res.reason, res.message);
         this.offForSetup = res.reason === 'no-key';
         this.enqueue(job.threadId, job.reason, job.why, this.clock.now() + OFF_RETRY_MS);
         return;
@@ -751,7 +751,7 @@ export class Librarian {
   }
 
   // A symbol for a project with no picture, from SYMBOLS. Not while paused,
-  // and like a look, inside the budget and never for a private folder.
+  // and like a look, on the pool only and never for a private folder.
   private async pickSymbol(rec: ProjectRecord): Promise<string | undefined> {
     if (!this.models || this.paused) return undefined;
     const prompt = [
@@ -763,7 +763,7 @@ export class Librarian {
     ]
       .filter((l) => l !== undefined)
       .join('\n');
-    const res = await this.models.generate({ feature: 'projects', cwd: rec.folders[0], system: SYMBOL_SYSTEM, prompt, maxTokens: 1000 });
+    const res = await this.models.generate({ feature: 'projects', poolOnly: true, cwd: rec.folders[0], system: SYMBOL_SYSTEM, prompt, maxTokens: 1000 });
     if (!res.ok) {
       if (!WAIT_FOR.includes(res.reason)) this.log.info('librarian could not pick a symbol', { projectId: rec.id, reason: res.reason });
       return undefined;
@@ -884,13 +884,13 @@ export function mainCheckout(dir: string): string {
 
 const PROJECT_MARKERS = ['.git', 'package.json', 'Package.swift', 'pyproject.toml', 'Cargo.toml', 'go.mod', 'AGENTS.md', 'CLAUDE.md'];
 
-const WAIT_FOR: ModelFailure[] = ['no-key', 'off', 'over-budget', 'no-room'];
+// Looks run on the pool only, so never over an OpenRouter budget.
+const WAIT_FOR: ModelFailure[] = ['no-key', 'off', 'no-room'];
 
 function offReason(reason: ModelFailure, message: string): string {
-  if (reason === 'no-key') return 'No Claude pool or OpenRouter key';
+  if (reason === 'no-key') return 'Needs a Claude pool to run on';
   // "Every login in Claude is out of room"
   if (reason === 'no-room') return message.replace(/\.$/, '');
-  if (reason === 'over-budget') return "Today's model budget is spent";
   if (reason === 'off') return 'Model calls are off';
   return message;
 }

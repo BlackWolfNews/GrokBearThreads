@@ -280,28 +280,14 @@ public enum LibrarianText {
         job.why.isEmpty ? reason(job.reason) : job.why
     }
 
-    /// "14 looks today · 3 skipped · 52k tokens · $0.03". The money is
-    /// only what OpenRouter charged: looks on a Claude login use its room,
-    /// and adding what they'd have cost on the API read as a bill Mike
-    /// wasn't paying. That's in `apiValue`, for a tooltip.
+    /// "14 looks today · 3 skipped · 52k tokens". No money: looks run on
+    /// a Claude login (never OpenRouter), which uses its room, and what
+    /// they'd have cost on the API read as a bill Mike wasn't paying.
     public static func today(_ status: LibrarianStatus) -> String {
         var parts = [status.looksToday == 1 ? "1 look today" : "\(status.looksToday) looks today"]
         if status.skippedToday > 0 { parts.append("\(status.skippedToday) skipped") }
         if status.tokensToday > 0 { parts.append("\(tokens(status.tokensToday)) tokens") }
-        parts.append(spent(status))
         return parts.joined(separator: " · ")
-    }
-
-    /// What OpenRouter charged today: "$0.03", or "$0".
-    public static func spent(_ status: LibrarianStatus) -> String {
-        CostText.format(status.spentTodayUsd) ?? "$0"
-    }
-
-    /// "Today's looks on your Claude login would have cost $0.16 at API
-    /// prices", or nil when none ran there.
-    public static func apiValue(_ status: LibrarianStatus) -> String? {
-        guard let value = CostText.format(status.notionalTodayUsd) else { return nil }
-        return "Today's looks on your Claude login would have cost \(value) at API prices; they use its room, not money"
     }
 
     /// 820, 52k, 1.2M.

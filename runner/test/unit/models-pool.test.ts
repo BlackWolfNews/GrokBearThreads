@@ -177,6 +177,22 @@ test('pool: null means OpenRouter only; no pool and no key says so', async () =>
   assert.equal(setup().models.unavailable(), undefined, 'a pool with a Claude login is enough');
 });
 
+test('pool: a poolOnly call never goes to OpenRouter, even with a key', async () => {
+  const dry = (login: string) => acct(login, { blocked: true });
+  const s = setup({ key: true, accounts: [dry('claude-main'), dry('claude-1')] });
+  const r = await s.models.generate({ feature: 'projects', poolOnly: true, prompt: 'a' });
+  assert.equal(r.ok ? 'sent' : r.reason, 'no-room');
+  assert.deepEqual(s.orCalls, [], 'OpenRouter is never asked');
+  assert.equal(s.models.unavailable({ poolOnly: true }), undefined, 'a pool with a Claude login is there, just out of room');
+
+  const none = setup({ key: true, pool: null });
+  assert.equal(none.models.unavailable(), undefined, 'titles can still use the key');
+  assert.equal(none.models.unavailable({ poolOnly: true }), 'Needs a Claude pool to run on');
+  const r2 = await none.models.generate({ feature: 'projects', poolOnly: true, prompt: 'a' });
+  assert.equal(r2.ok ? 'sent' : r2.reason, 'no-key');
+  assert.deepEqual(none.orCalls, []);
+});
+
 test('pool: only the pool\'s Claude logins are used, never a noted login outside it or a Codex one', async () => {
   const s = setup({ pool: 'everything' });
   await s.models.generate({ feature: 'titles', prompt: 'a' });

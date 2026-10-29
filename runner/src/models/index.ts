@@ -55,7 +55,10 @@ export type ModelResult<T> =
 
 // Every call names the feature asking (for the usage file) and, when it
 // sends a thread's text, the thread's folder (for private folders).
-type Common = { feature: string; cwd?: string };
+// poolOnly: only the Claude pool's routes, never OpenRouter (the librarian:
+// Mike's subscription takes its looks, and a second place to pay for them
+// was more to explain than it was worth).
+type Common = { feature: string; cwd?: string; poolOnly?: boolean };
 
 export type ClassifyParams = Common & { text: string; labels: string[]; instructions?: string };
 export type ExtractParams = Common & { text: string; fields: Record<string, string> };
@@ -189,10 +192,12 @@ export class Models {
   }
 
   // Why no call could go out at all, or undefined when one might: there's
-  // a pool with a Claude login, or a key. Room and budget aren't checked;
-  // a call finds those out.
-  unavailable(): string | undefined {
-    if (this.hasKey() || this.poolLogins()) return undefined;
+  // a pool with a Claude login, or a key (not for a poolOnly feature).
+  // Room and budget aren't checked; a call finds those out.
+  unavailable(opts: { poolOnly?: boolean } = {}): string | undefined {
+    if (this.poolLogins()) return undefined;
+    if (opts.poolOnly) return 'Needs a Claude pool to run on';
+    if (this.hasKey()) return undefined;
     const id = this.poolId();
     return id === null ? 'No OpenRouter key' : 'No Claude pool or OpenRouter key';
   }
@@ -290,7 +295,8 @@ export class Models {
     let failed: Failure | undefined;
     await this.acquire();
     try {
-      for (const model of ROUTES[job]) {
+      const routes = p.poolOnly ? ROUTES[job].filter((m) => m.startsWith(POOL_PREFIX)) : ROUTES[job];
+      for (const model of routes) {
         const a = attempt(model);
         const res = model.startsWith(POOL_PREFIX) ? await this.viaPool(job, p, model.slice(POOL_PREFIX.length), a) : await this.viaOpenRouter(job, p, model, a);
         if (res.ok) return res;

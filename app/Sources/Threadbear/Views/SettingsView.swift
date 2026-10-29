@@ -183,7 +183,7 @@ private struct ModelSettings: View {
                     } header: {
                         Text("Small jobs")
                     } footer: {
-                        Footnote("Titles and the librarian use Haiku on one of this pool's Claude logins, the one with the most room. That counts towards the login's usage, not the budget below. When every login is out of room, they go to OpenRouter if there's a key.")
+                        Footnote("Titles and the librarian use Haiku on one of this pool's Claude logins, the one with the most room. That counts towards the login's usage, not the budget below. When every login is out of room, titles go to OpenRouter if there's a key; the librarian only ever uses the pool, so it waits.")
                     }
                 }
 
