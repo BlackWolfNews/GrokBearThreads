@@ -246,8 +246,18 @@ test('turnReply: a reply the CLI sent as a narration block counts; a thought bef
       .flatMap((o) => (o.kind === 'event' ? [o.event as Record<string, unknown> & { type: string }] : []));
     return turnReply(log(user(), started, ...evs));
   };
-  assert.deepEqual(turn('narration'), { landed: true, replied: true });
+  // Its text is only the API's summary of what the agent wrote.
+  assert.deepEqual(turn('narration'), { landed: true, replied: true, narrationOnly: true });
   assert.deepEqual(turn('thinking'), { landed: true, replied: false });
+});
+
+test('turnReply: a reply in words after a narration block is not narration-only; one before work does not count', () => {
+  const narrated = (itemId: string) => ({ type: 'assistant.text', itemId, text: 'I sent the steps.', narration: true });
+  assert.deepEqual(turnReply(log(user(), started, narrated('a'), call('e1', END))), { landed: true, replied: true, narrationOnly: true });
+  assert.deepEqual(turnReply(log(user(), started, narrated('a'), text('Step 1: ...', 'b'), call('e1', END))), { landed: true, replied: true });
+  assert.deepEqual(turnReply(log(user(), started, text('Step 1: ...', 'b'), narrated('a'), call('e1', END))), { landed: true, replied: true });
+  // Words before work, then only narration since: narration-only.
+  assert.deepEqual(turnReply(log(user(), started, text('Checking.', 'b'), call('b1', 'Bash'), result('b1'), narrated('a'), call('e1', END))), { landed: true, replied: true, narrationOnly: true });
 });
 
 test("end_turn's description asks for the words naming a link's target to be that link", () => {

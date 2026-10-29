@@ -285,6 +285,20 @@ export const NO_REPLY =
   "If you think you already answered, he hasn't seen any of it. " +
   'Please write the whole answer as ordinary text, with the result and any supporting evidence Mike needs. Then call end_turn again.';
 
+// What an accepted end_turn adds when the turn's reply reached Mike only
+// as a narration block's summary (TurnReply.narrationOnly), and end_turn
+// brought no summary bullets of its own. On 29 Oct 2026 a step-by-step
+// walkthrough reached him as "I've resent the full step-by-step setup
+// instructions...", twice (thread 66935d23): the agent had written it in
+// a narration block, which the API sends only summarised. Each time the
+// agent wrote the whole thing again after end_turn anyway, and the runner
+// dropped it as a repeat. Now the runner keeps that text in the summary's
+// place (runner.ts, onOutput), and this asks for it. A text block with no
+// tool call after it is never narration, so "nothing after it" matters.
+export const NARRATION_ONLY =
+  'Mike got only a short summary of your last message, not its words. ' +
+  'Write the whole message again now, as ordinary text with nothing after it: it takes the summary\'s place.';
+
 // How every accepted end_turn result starts, so the runner can tell one
 // from a refusal by what it says (a refusal's ok flag is only as good as
 // the provider's) and drop text written after it.
@@ -340,6 +354,11 @@ export type TurnReply = {
   // refused end_turn) say nothing he has to read, so a message, then pin,
   // then end_turn is a turn that replied.
   replied: boolean;
+  // Every text that counted for `replied` was a summary (a Claude
+  // narration block, which reaches the runner only as the API's summary
+  // of what the agent wrote): Mike has a paragraph about the reply, not
+  // the reply. end_turn asks for it again (NARRATION_ONLY).
+  narrationOnly?: true;
 };
 
 // Tools that do nothing Mike would want told about. ToolSearch loads a
@@ -361,6 +380,7 @@ export function turnReply(events: PersistedEvent[], serverName = 'threadbear'): 
   const names = new Map<string, string>();
   const open = new Set<string>(); // end_turn calls with no result yet
   let lastText = 0;
+  let lastWords = 0; // the last text that wasn't a summary
   let lastWork = 0;
   let lastUser = 0;
   for (const e of events.slice(start)) {
@@ -373,6 +393,7 @@ export function turnReply(events: PersistedEvent[], serverName = 'threadbear'): 
         break;
       case 'assistant.text':
         lastText = e.seq;
+        if (!e.narration) lastWords = e.seq;
         break;
       case 'tool.call':
         names.set(e.itemId, e.name);
@@ -388,5 +409,7 @@ export function turnReply(events: PersistedEvent[], serverName = 'threadbear'): 
         break;
     }
   }
-  return { landed: open.size > 0, replied: lastText > 0 && lastText > lastWork && lastText > lastUser };
+  const since = Math.max(lastWork, lastUser);
+  const replied = lastText > 0 && lastText > since;
+  return { landed: open.size > 0, replied, ...(replied && lastWords <= since ? { narrationOnly: true as const } : {}) };
 }

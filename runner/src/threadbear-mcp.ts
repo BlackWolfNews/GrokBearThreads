@@ -19,7 +19,7 @@ import { parseWhen, relativeFuture, relativeTime } from './when.ts';
 
 export { parseWhen, relativeFuture, relativeTime };
 import { RUNNER_VERSION, expandHome } from './config.ts';
-import { ALREADY_ENDED, CODEX_END_TURN_DESCRIPTION, END_TURN_DESCRIPTION, END_TURN_TOOL, ENDED, endedThisTurn, NO_REPLY, needsFromTool, summaryFromTool, turnReply } from './needs.ts';
+import { ALREADY_ENDED, CODEX_END_TURN_DESCRIPTION, END_TURN_DESCRIPTION, END_TURN_TOOL, ENDED, endedThisTurn, NARRATION_ONLY, NO_REPLY, needsFromTool, summaryFromTool, turnReply, type TurnReply } from './needs.ts';
 import { asksForAppRestart, type AppRestarts } from './app-restarts.ts';
 import { PANEL_PLACES } from './panel-requests.ts';
 import { nudgedThisTurn, signInNudge, turnSignIns, uncovered } from './connectors.ts';
@@ -133,13 +133,13 @@ export function buildThreadbearTools(
   // of the runner's event log, so wait (briefly) for this call to land:
   // everything the agent said before it lands first. A call that never
   // lands (a sub-agent's, which the events never see) is taken at its word.
-  const replied = async (): Promise<boolean> => {
+  const replied = async (): Promise<TurnReply> => {
     let r = turnReply(await turnEvents(), SERVER_NAME);
     for (let waited = 0; !r.landed && waited < LAND_WAIT_MS; waited += LAND_POLL_MS) {
       await sleep(LAND_POLL_MS);
       r = turnReply(await turnEvents(), SERVER_NAME);
     }
-    return r.landed ? r.replied : true;
+    return r.landed ? r : { landed: false, replied: true };
   };
 
   // Full ids, or any unique prefix of one (the list shows 8 characters).
@@ -619,7 +619,8 @@ export function buildThreadbearTools(
         // also keeps the CLI from taking this call as the turn's end.
         // Codex's reply is the final answer it writes next.
         const summary = summaryFromTool(args);
-        if (!codex && !summary && !(await replied())) throw new Error(NO_REPLY);
+        const reply = codex || summary ? undefined : await replied();
+        if (reply && !reply.replied) throw new Error(NO_REPLY);
         if (endedThisTurn(await turnEvents(), SERVER_NAME)) throw new Error(ALREADY_ENDED);
         // A connector that needs Mike to sign in again (a gateway service's
         // sign_in stub, or claude.ai's "needs you to sign in again") came
@@ -647,6 +648,13 @@ export function buildThreadbearTools(
         // didn't stop Haiku repeating its reply under end_turn; the reason
         // helps a little at most, and the CLI accepts the empty reply it
         // asks for without a nudge (adapter.ts) (28 Oct 2026).
+        // A reply that reached Mike only as a summary is asked for again;
+        // the runner puts it in the summary's place (needs.ts, NARRATION_ONLY).
+        if (reply?.narrationOnly) {
+          return needs === 'you'
+            ? `${ENDED} will wait in Needs you${archive ? ', and stays in the inbox, as it needs something from Mike' : ''}.${restart} ${NARRATION_ONLY} Keep the asks out of it: they go in a card under it.`
+            : `${ENDED} is done${archive ? ', and will be archived once the turn is over' : ''}. ${NARRATION_ONLY}`;
+        }
         return needs === 'you'
           ? `${ENDED} will wait in Needs you${archive ? ', and stays in the inbox, as it needs something from Mike' : ''}.${restart} Stop here, with no more text: Mike has your reply, the asks go in a card under it, and anything written now lands as a second message.`
           : `${ENDED} is done${archive ? ', and will be archived once the turn is over' : ''}. Stop here, with no more text: Mike has your reply, and anything written now lands as a second message under it.`;
@@ -699,6 +707,9 @@ export function buildThreadbearTools(
         // meets it first.
         const cuts: { from: number; to: number }[] = [];
         let before: number | undefined;
+        // A summary's replacement comes later with its itemId (protocol.md,
+        // Transient events); walking back, the first one seen is the reply.
+        const texts = new Set<string>();
         // Walk back a page at a time until there are enough messages.
         for (let pages = 0; pages < 20 && picked.length < want; pages++) {
           const page = await control.events(id, { beforeSeq: before, limit: 500 });
@@ -711,7 +722,10 @@ export function buildThreadbearTools(
             // agents' aren't Mike's, and an agent shouldn't take them for
             // his instructions.
             if (e.type === 'user.message') picked.push(`${e.origin === 'runner' ? 'Runner' : e.origin === 'schedule' ? 'Schedule' : !e.origin && sentByAgent(e.text) ? 'Agent' : 'Mike'} (${e.ts}):\n${clip(e.text)}`);
-            else if (e.type === 'assistant.text') picked.push(`Agent (${e.ts}):\n${clip(e.text)}`);
+            else if (e.type === 'assistant.text' && !texts.has(e.itemId)) {
+              texts.add(e.itemId);
+              picked.push(`Agent (${e.ts}):\n${clip(e.text)}`);
+            }
           }
           if (!evs.length || page.firstSeq <= 1) break;
           before = page.firstSeq;

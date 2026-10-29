@@ -23,6 +23,10 @@ export function historyItems(events: PersistedEvent[], skipTurnId?: string): Ite
   const items: Item[] = [];
   const calls = new Map<string, Item>();
   const edited = new Set<string>();
+  // A summary's replacement comes later with its itemId (protocol.md,
+  // Transient events): only the last text of an itemId is kept.
+  const lastText = new Map<string, number>();
+  for (const e of events) if (e.type === 'assistant.text') lastText.set(e.itemId, e.seq);
   for (const e of events) {
     if (e.type === 'user.message') {
       if (skipTurnId && e.turnId === skipTurnId) continue;
@@ -31,7 +35,7 @@ export function historyItems(events: PersistedEvent[], skipTurnId?: string): Ite
       const who = !e.origin && sentByAgent(e.text) ? 'Agent message' : 'User';
       items.push({ seq: e.seq, role: 'user', text: `${who}: ${clip(e.text, MESSAGE_CHARS)}` });
     } else if (e.type === 'assistant.text') {
-      if (e.text.trim()) items.push({ seq: e.seq, role: 'assistant', text: `Assistant: ${clip(e.text, MESSAGE_CHARS)}` });
+      if (e.text.trim() && lastText.get(e.itemId) === e.seq) items.push({ seq: e.seq, role: 'assistant', text: `Assistant: ${clip(e.text, MESSAGE_CHARS)}` });
     } else if (e.type === 'tool.call') {
       // Threadbear's own end_turn says nothing about the work.
       if (e.name.endsWith('end_turn')) continue;

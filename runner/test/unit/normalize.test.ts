@@ -536,6 +536,8 @@ test('a thinking block signed as narration is the reply: assistant.text, not rea
       ['tool.call', 'tu1', 'mcp__threadbear__end_turn'],
     ],
   );
+  // What the API sends for a narration block is a summary of it.
+  assert.deepEqual(events(outs).map((e) => e.narration), [undefined, true, undefined]);
 });
 
 test('a narration block cut off after its signature streamed is kept as text', () => {
@@ -548,5 +550,5 @@ test('a narration block cut off after its signature streamed is kept as text', (
     se({ type: 'content_block_delta', index: 0, delta: { type: 'signature_delta', signature: NARRATION_SIG } }),
     { type: 'result', subtype: 'error_during_execution', is_error: true, terminal_reason: 'aborted_streaming', duration_ms: 5, errors: ['[ede_diagnostic] x'] },
   ].flatMap((m) => n.handle(m));
-  assert.deepEqual(events(outs), [{ type: 'assistant.text', itemId: 'm1:0', text: 'All done.' }]);
+  assert.deepEqual(events(outs), [{ type: 'assistant.text', itemId: 'm1:0', text: 'All done.', narration: true }]);
 });

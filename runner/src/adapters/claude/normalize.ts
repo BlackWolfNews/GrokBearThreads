@@ -21,13 +21,16 @@ type AnyMsg = Record<string, any>;
 // call; never a text block after it) and reads as the reply. Shown as
 // reasoning, those replies were folded away and end_turn refused the turn
 // for having none (29 Oct 2026). The CLI itself doesn't tell them apart.
+// Its text is the API's summary of what the agent wrote, not the words
+// (summarised thinking), so the event says so: `narration` (needs.ts,
+// turnReply, and the runner's onOutput).
 export function isNarration(signature: unknown): boolean {
   if (typeof signature !== 'string' || !signature) return false;
   // The kind is in the first few dozen bytes; 64 characters is 48 of them.
   return Buffer.from(signature.slice(0, 64), 'base64').includes('narration');
 }
 
-type OpenItem = { type: 'assistant.text' | 'reasoning'; text: string };
+type OpenItem = { type: 'assistant.text' | 'reasoning'; text: string; narration?: true };
 
 export class ClaudeNormalizer {
   private ctx: NormalizerContext;
@@ -233,7 +236,7 @@ export class ClaudeNormalizer {
           // Its deltas went out as reasoning; the complete frame says text.
           // This keeps one cut off before that frame as text too.
           const item = this.open.get(itemId);
-          if (item) item.type = 'assistant.text';
+          if (item) Object.assign(item, { type: 'assistant.text', narration: true });
         }
         break;
       }
@@ -281,7 +284,10 @@ export class ClaudeNormalizer {
           if (block.text) out.push({ kind: 'event', event: { type: 'assistant.text', itemId, text: block.text } });
           break;
         case 'thinking':
-          if (block.thinking) out.push({ kind: 'event', event: { type: isNarration(block.signature) ? 'assistant.text' : 'reasoning', itemId, text: block.thinking } });
+          if (block.thinking) {
+            const text = block.thinking;
+            out.push({ kind: 'event', event: isNarration(block.signature) ? { type: 'assistant.text', itemId, text, narration: true } : { type: 'reasoning', itemId, text } });
+          }
           break;
         case 'tool_use':
         case 'server_tool_use':
@@ -434,7 +440,7 @@ export class ClaudeNormalizer {
     for (const [itemId, item] of this.open) {
       if (item.text) {
         const event: EventBody =
-          item.type === 'assistant.text' ? { type: 'assistant.text', itemId, text: item.text } : { type: 'reasoning', itemId, text: item.text };
+          item.type === 'assistant.text' ? { type: 'assistant.text', itemId, text: item.text, ...(item.narration ? { narration: true as const } : {}) } : { type: 'reasoning', itemId, text: item.text };
         out.push({ kind: 'event', event });
       }
     }

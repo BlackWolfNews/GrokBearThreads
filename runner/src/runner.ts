@@ -230,6 +230,12 @@ type Turn = {
   // Its end_turn's summary is in the events as the turn's reply.
   summarized?: boolean;
   ended?: boolean;
+  // The itemId of the agent's latest text when that was only a summary
+  // (assistant.text with narration: a Claude narration block). The first
+  // text after an accepted end_turn is then the real message, which
+  // end_turn asked for (needs.ts, NARRATION_ONLY): it's kept, not dropped,
+  // and takes the summary's itemId so it replaces it.
+  narrationItem?: string;
 };
 
 type Runtime = {
@@ -2097,12 +2103,18 @@ export class Runner {
     const { rec, rt } = st;
     switch (o.kind) {
       case 'event': {
-        const ev = o.event;
+        let ev = o.event;
         // Text after an accepted end_turn (see Turn.ended), dropped before
-        // it can become the preview or a second message.
-        // Thinking after it too: Opus mused "I'd already wrapped up" under
-        // its summary (29 Oct 2026).
-        if ((ev.type === 'assistant.text' || ev.type === 'reasoning') && rt.turn?.ended && !ev.itemId.includes('/')) {
+        // it can become the preview or a second message. Unless the reply
+        // was a narration block's summary: then this is the reply, in the
+        // summary's place. Thinking after it is dropped too: Opus mused
+        // "I'd already wrapped up" under its summary (29 Oct 2026).
+        if (ev.type === 'assistant.text' && rt.turn?.ended && !ev.itemId.includes('/') && rt.turn.narrationItem && !rt.turn.summarized && ev.text.trim()) {
+          rt.inProgress.delete(ev.itemId);
+          this.log.info('replaced a summary with the text after end_turn', { threadId: rec.id, chars: ev.text.length });
+          ev = { type: 'assistant.text', itemId: rt.turn.narrationItem, text: ev.text };
+          rt.turn.narrationItem = undefined;
+        } else if ((ev.type === 'assistant.text' || ev.type === 'reasoning') && rt.turn?.ended && !ev.itemId.includes('/')) {
           rt.inProgress.delete(ev.itemId);
           this.log.info('dropped text after end_turn', { threadId: rec.id, chars: ev.text.length });
           break;
@@ -2119,7 +2131,10 @@ export class Runner {
           // A Codex child's items carry its prefix (<child>/<id>); Claude's
           // sub-agents never reach the thread's events.
           const own = !('itemId' in ev && ev.itemId?.includes('/'));
-          if (ev.type === 'assistant.text' && own && !rt.turn.summarized) rt.turn.lastText = ev.text;
+          if (ev.type === 'assistant.text' && own && !rt.turn.summarized) {
+            rt.turn.lastText = ev.text;
+            rt.turn.narrationItem = ev.narration ? ev.itemId : undefined;
+          }
           if (ev.type === 'tool.call' && own && ev.name === `mcp__${SERVER_NAME}__${END_TURN_TOOL}`) {
             rt.turn.endTurn = ev.input;
             rt.turn.endTurnCall = ev.itemId;

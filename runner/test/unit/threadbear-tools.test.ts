@@ -562,6 +562,44 @@ test("Codex's summary is the reply, and its final answer after it doesn't take o
   assert.equal(h.runner.get(thread.id).preview, '- Fixed it.');
 });
 
+// Thread 66935d23, 29 Oct 2026: a walkthrough written in a narration block
+// reached Mike as the API's one-paragraph summary of it, and the agent's
+// rewrite after end_turn was dropped as a repeat.
+test('a reply that came only as a summary: end_turn asks for it again, and the rewrite takes its place', async () => {
+  const h = makeHarness();
+  const { thread, s } = start(h);
+  const { call } = tools(h, thread.id);
+  const summary = "I've resent the full step-by-step setup instructions.";
+  s.out({ kind: 'event', event: { type: 'assistant.text', itemId: 'm1:1', text: summary, narration: true } });
+  toolCall(s, 'e1', END_TURN, { needs: 'you' });
+  const r = await call('end_turn', { needs: 'you', asks: [{ action: 'Do step 1' }] });
+  assert.equal(r.error, false, 'a summary is still a reply: no refusal loop');
+  assert.match(r.text, /^Noted: this thread will wait in Needs you/);
+  assert.match(r.text, /only a short summary of your last message/);
+  assert.match(r.text, /Write the whole message again now, as ordinary text with nothing after it/);
+  assert.doesNotMatch(r.text, /Stop here/);
+  s.out({ kind: 'event', event: { type: 'tool.result', itemId: 'e1', ok: true, text: r.text, truncated: false, images: [] } });
+  // The rewrite, streamed then whole: kept, under the summary's itemId.
+  s.out({ kind: 'delta', delta: { type: 'assistant.text.delta', itemId: 'm2:0', text: '**Step 1' } });
+  s.text('m2:0', '**Step 1:** open the Claude app.\n\n**Step 2:** paste the prompt.');
+  // Anything after that is a repeat again.
+  s.text('m3:0', 'Over to you.');
+  const texts = h.events(thread.id).filter((e) => e.type === 'assistant.text');
+  assert.deepEqual(
+    texts.map((e) => [e.itemId, e.text, e.type === 'assistant.text' && e.narration]),
+    [
+      ['m1:1', summary, true],
+      ['m1:1', '**Step 1:** open the Claude app.\n\n**Step 2:** paste the prompt.', undefined],
+    ],
+  );
+  assert.equal(h.runner.get(thread.id).preview, '**Step 1:** open the Claude app. **Step 2:** paste the prompt.');
+  s.result('completed');
+  // An agent reading the thread gets the reply, not the summary as well.
+  const read = await call('read_thread', { threadId: thread.id });
+  assert.match(read.text, /Step 2/);
+  assert.doesNotMatch(read.text, /resent the full/);
+});
+
 // Codex's final answer ends its turn, so its end_turn comes just before it.
 // Told to call it after, Codex never did (28 Oct 2026).
 test("Codex's end_turn comes before the final answer: never refused, and the answer after it is kept", async () => {

@@ -589,7 +589,7 @@ Persisted event types (stored in `events.ndjson`, returned by `threads.events`):
 | type | fields |
 |---|---|
 | `user.message` | `text`, `images: ImageRef[]`, `answers?: AskAnswer[]` (the open card's asks it answers, as `threads.send` gave them: for showing, the agent only gets `text`), `origin?: "runner" \| "schedule" \| "phone"` (`runner` when the runner sent the message by itself, such as the resume after a restart; `schedule` when a schedule sent it, with `scheduleId`; `phone` when it came from the phone through the Convex mirror (Sync); absent for anything a person or client sent), `scheduleId?`, `editOf?: number` (the seq of the message this one replaced, see Editing a message) |
-| `assistant.text` | `itemId`, `text` (complete markdown for that block), `summary?: true` (the turn's summary, written by the runner from `end_turn`; see "Needs you") |
+| `assistant.text` | `itemId`, `text` (complete markdown for that block), `summary?: true` (the turn's summary, written by the runner from `end_turn`; see "Needs you"), `narration?: true` (Claude sent this as a narration block, whose text reaches the runner only as a short summary of what the agent wrote, not its words: see Transient events). A later `assistant.text` with the same `itemId` replaces the earlier one where it stands |
 | `reasoning` | `itemId`, `text` (summary) |
 | `tool.call` | `itemId`, `name` (raw tool name), `kind` (`command` \| `read` \| `edit` \| `write` \| `search` \| `web` \| `mcp` \| `task` \| `todo` \| `image` \| `other`; `image` is image generation), `title` (one line, e.g. "npm test" or "Edit src/a.ts"), `input` (object, large strings truncated to 16 KB) |
 | `tool.result` | `itemId` (matches the call), `ok`, `text` (truncated to 64 KB), `truncated`, `blobPath?`, `images: ImageRef[]` |
@@ -621,6 +621,23 @@ at times sends its reply as a thinking block signed as narration, which
 streams as `reasoning.delta` and lands as `assistant.text` with the same
 `itemId` (it is the reply, so end_turn counts it). A client lets the text
 take the streaming reasoning row's place.
+
+A narration block's text is not the agent's words: with summarised
+thinking (the only kind the CLI offers besides none) the API sends a
+short summary of it, in the agent's voice ("I've laid out the full
+setup steps..."), and the words themselves never reach the runner. On
+29 Oct 2026 a numbered walkthrough reached Mike as one such paragraph,
+twice (thread 66935d23). So that event carries `narration: true`. An
+`end_turn` with no summary bullets, whose turn replied only in
+narration, is accepted, and its
+result asks for the whole message again as ordinary text with nothing
+after it (a text block followed by no tool call is never narration);
+the runner keeps that text, which it otherwise drops after an accepted
+`end_turn`, and persists it with the summary's `itemId` and no
+`narration`, so it takes the summary's place. Readers that list a
+thread's messages keep only the last `assistant.text` of an `itemId`.
+The Convex mirror keys messages by seq, so the phone and website show
+the summary and then the reply.
 
 ## Requests (app to runner)
 
@@ -1294,7 +1311,10 @@ A turn the agent finished can say whether Mike has to do anything, so
   and a card, twice in one thread (28 Oct 2026). A reply Claude sent as
   a thinking block signed as narration is an `assistant.text` (see
   Transient events), so it counts; a thinking block signed as thinking
-  doesn't. The SDK runs a tool as
+  doesn't. When the only reply was such a block (`narration: true`,
+  whose text is only a summary of it) and there are no summary bullets,
+  the accepted result asks for the message again in full, and the
+  text after it replaces the summary. The SDK runs a tool as
   soon as it reads the call, at times a few frames ahead of the runner's
   log, so the handler waits up to a second for its own call to land
   before judging; one that never lands (a sub-agent's, which the events

@@ -99,6 +99,27 @@ final class TranscriptModelTests: XCTestCase {
         XCTAssertEqual(model.items.map(\.id), ["u:1", "a:m1:1", "r:m2:0", "a:m2:0"])
     }
 
+    /// A narration block reaches the runner only as a summary; the reply the
+    /// agent writes again after end_turn comes with the summary's item id
+    /// (docs/protocol.md, Transient events) and takes its place, above the
+    /// end_turn call, whether it arrives live or with the history.
+    func testALaterTextWithTheSameItemIdReplacesASummaryInPlace() {
+        let events = [
+            E.user(1, "Walk me through it"),
+            E.event(2, "assistant.text", ["itemId": "m1:1", "text": "I've sent the full steps.", "narration": true]),
+            E.call(3, "e1", name: "mcp__threadbear__end_turn", kind: "mcp", title: "end_turn"),
+            E.result(4, "e1", text: "Noted: this thread will wait in Needs you."),
+        ]
+        let reply = E.text(5, "m1:1", "**Step 1:** open the app.")
+        var live = TranscriptModel(events: events)
+        _ = live.apply([reply])
+        let loaded = TranscriptModel(events: events + [reply])
+        for model in [live, loaded] {
+            XCTAssertEqual(model.items.map(\.id), ["u:1", "a:m1:1", "t:e1"])
+            XCTAssertEqual(model.items[1].content, .assistant(TextItem(itemId: "m1:1", text: "**Step 1:** open the app.")))
+        }
+    }
+
     func testDuplicateAndOldEventsAreIgnoredAndGapsFlagged() {
         var model = TranscriptModel(events: [E.user(1, "a"), E.text(2, "m1", "b")])
         XCTAssertTrue(model.apply([E.text(2, "m1", "b")]).isEmpty)
