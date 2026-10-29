@@ -92,9 +92,14 @@ for later (an agent saying "I'll check again in 20 minutes") and have nothing
 for you until then: each says when it wakes, soonest first. When the time
 comes it runs again, and lands in the inbox when it's done. A thread that
 asks you something keeps its place in the inbox, wake-up or not.
-Hibernating and Archive, at the foot, hold the threads you've put away
+Hibernating and Archived, at the foot, hold the threads you've put away
 (below). They start folded, showing only how many; click a heading to
 open or fold it.
+
+The search box under New thread looks through every thread, the put-away
+ones too. Type part of a title, or of a thread's last reply, and each
+section shows only the threads that match, with folded ones opened. The x
+clears it.
 
 At the right of each row:
 
@@ -175,9 +180,9 @@ When a thread is done, archive it with ⌘E, or swipe its row left with two
 fingers on the trackpad (or drag it left with the mouse) and let go once the space behind it turns blue (a
 quick flick works too). However it's archived (⌘E, a button, or an agent
 or your phone doing it), its row slides off the same way. The Archived section at the foot of the
-list has them, most recently archived first, with a search box under its
-heading and the older ones behind Show more. Unarchive, or the same swipe
-there, puts one back. The iPhone app and the
+list has them, most recently archived first, with the older ones behind
+Show more (the search at the top finds any of them). Unarchive, or the
+same swipe there, puts one back. The iPhone app and the
 website call the archive the Den.
 
 ## Accounts, pools and Usage

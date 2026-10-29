@@ -128,10 +128,9 @@ final class AppModel {
     /// Back and forward (⌘[ and ⌘], or the mouse's side buttons).
     var history = NavigationHistory<NavigationPlace>()
     @ObservationIgnored var navigationPending = false
-    var archiveQuery = ""
-    /// Archived threads are in `threads` (the first list includes them, for
-    /// the Archive view's count).
-    var archiveLoaded = false
+    /// What's typed in the search at the top of the inbox, which cuts every
+    /// section down to its matches (`ThreadSections.matching`).
+    var searchQuery = ""
     var errorMessage: String?
     /// Bumped to put the cursor in a composer, by its draft key (a thread's
     /// id, or "new"): with threads open in several panels, only that one's.
@@ -518,7 +517,6 @@ final class AppModel {
     /// The schedule due to message each thread soonest, for the Waiting section.
     var wakes: [String: Schedule] { ThreadSections.wakes(schedules) }
     var snoozed: [ThreadSummary] { ThreadSections.snoozed(threads.values, now: now) }
-    var archived: [ThreadSummary] { ThreadSections.archived(threads.values, matching: archiveQuery) }
     var archivedCount: Int { threads.values.reduce(0) { $0 + ($1.isArchived ? 1 : 0) } }
     var selectedThread: ThreadSummary? { selection.flatMap { threads[$0] } }
 
@@ -636,8 +634,9 @@ final class AppModel {
                 refreshRunnerStatus()
                 clearConnectionError()
                 backoff.reset()
-                // Archived threads come too: the Archive view shows how
-                // many there are, and they open as fast as live ones.
+                // Archived threads come too: the Archived section shows how
+                // many there are, the search finds them, and they open as
+                // fast as live ones.
                 let list = try await client.listThreads(include: [.inbox, .snoozed, .archived])
                 var fresh: [String: ThreadSummary] = [:]
                 for thread in list { fresh[thread.id] = thread }
@@ -645,7 +644,6 @@ final class AppModel {
                 for (id, thread) in threads where thread.isRemote && fresh[id] == nil { fresh[id] = thread }
                 threads = fresh
                 threadsLoaded = true
-                archiveLoaded = true
                 onThreadsLoaded?()
                 servePanelRequest()
                 loadSchedules()
@@ -1494,7 +1492,6 @@ final class AppModel {
         Task {
             if let list = try? await client.listThreads(include: [.archived]) {
                 for thread in list { threads[thread.id] = thread }
-                archiveLoaded = true
             }
         }
     }

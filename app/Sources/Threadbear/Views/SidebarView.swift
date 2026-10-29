@@ -50,17 +50,23 @@ struct SidebarView: View {
 private struct InboxList: View {
     @Environment(AppModel.self) private var app
 
-    /// How many archived threads the Archive section shows (`ArchiveRows`).
+    /// How many archived threads the Archived section shows (`ArchiveRows`).
     @State private var archiveLimit = ArchiveRows.first
 
     var body: some View {
-        let sections = app.sections
-        // The Archive section draws the search's matches, cut short.
-        let query = app.archiveQuery.trimmingCharacters(in: .whitespacesAndNewlines)
-        let archive = ArchiveRows.shown(query.isEmpty ? sections.archived : sections.archived.filter { ThreadSections.matches($0, query) },
-                                        limit: archiveLimit, searching: !query.isEmpty, selection: app.selection)
+        // The search under New thread cuts every section down to its
+        // matches.
+        let query = app.searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+        let searching = !query.isEmpty
+        let sections = app.sections.matching(query)
+        // The Archived section shows the most recent few, or every match
+        // while searching.
+        let archive = ArchiveRows.shown(sections.archived, limit: archiveLimit, searching: searching, selection: app.selection)
         // Each section's rows as drawn.
         let drawn: (InboxSection) -> [ThreadSummary] = { $0 == .archived ? archive.rows : sections[$0] }
+        // A folded section's rows aren't drawn, so the arrow keys skip
+        // them. A search draws every section's matches, folded or not.
+        let open = InboxSection.allCases.filter { searching || !app.collapsedSections.contains($0) }
         // Rows are identified by section and thread (see SectionRow), so
         // the arrow keys scroll to that.
         let rowIDs = Dictionary(uniqueKeysWithValues: InboxSection.allCases.flatMap { section in
@@ -72,26 +78,30 @@ private struct InboxList: View {
             }
             .padding(.horizontal, SidebarMetrics.outerInset)
             .padding(.top, zoomed(4))
-            // A folded section's rows aren't drawn, so the arrow keys skip them.
-            let order = InboxSection.allCases.filter { !app.collapsedSections.contains($0) }.flatMap { drawn($0).map(\.id) }
+            ThreadSearch()
+                .padding(.horizontal, SidebarMetrics.outerInset)
+            let order = open.flatMap { drawn($0).map(\.id) }
             // Section and thread, so a thread changing section animates
             // even when the order of ids alone stays the same.
-            let layout = InboxSection.allCases.filter { !app.collapsedSections.contains($0) }.flatMap { section in
+            let layout = open.flatMap { section in
                 drawn(section).map { SectionRow.id(section: section.title, thread: $0.id) }
             }
             ThreadList(order: order, layout: layout, scrollID: { rowIDs[$0] ?? $0 }) { select in
                 if app.threadsLoaded {
+                    if searching && sections.isEmpty {
+                        EmptyNote(text: "No threads match.")
+                    }
                     ForEach(InboxSection.allCases, id: \.self) { section in
                         if section == .archived {
                             ThreadSection(section: section, threads: archive.rows, total: sections.archived.count, more: archive.more,
-                                          showMore: { archiveLimit += ArchiveRows.step }, select: select)
+                                          searching: searching, showMore: { archiveLimit += ArchiveRows.step }, select: select)
                         } else {
-                            ThreadSection(section: section, threads: sections[section], select: select)
+                            ThreadSection(section: section, threads: sections[section], searching: searching, select: select)
                         }
                         // Under the empty Inbox heading. Threads waiting on
                         // a schedule don't stop it: there's still nothing
                         // for Mike to do.
-                        if section == .inbox && sections.inbox.isEmpty && sections.running.isEmpty {
+                        if section == .inbox && !searching && sections.inbox.isEmpty && sections.running.isEmpty {
                             InboxZero()
                         }
                     }
@@ -101,30 +111,33 @@ private struct InboxList: View {
     }
 }
 
-/// A heading and its rows. Empty sections other than Inbox are left out.
-/// Clicking the heading folds the rows away; folded, it shows how many.
-/// The Archive section has the archive's search under its heading, and
-/// shows the most recent few until asked for more.
+/// A heading and its rows. Empty sections other than Inbox are left out,
+/// and Inbox too while searching. Clicking the heading folds the rows
+/// away; folded, it shows how many. The Archived section shows the most
+/// recent few until asked for more.
 private struct ThreadSection: View {
     @Environment(AppModel.self) private var app
     let section: InboxSection
-    /// As drawn: the Archive's already searched and cut short
+    /// As drawn: the Archived section's are already cut short
     /// (`ArchiveRows`).
     let threads: [ThreadSummary]
-    /// The Archive's rows before the search and the cut, for the folded
-    /// count and to keep the section (and its search) while nothing
-    /// matches.
+    /// The Archived section's rows before the cut, for the folded count.
     var total: Int? = nil
     /// Archived threads left out by the cut, for "Show more".
     var more = 0
+    /// The search has text, so `threads` are its matches. They're drawn
+    /// with the heading open and no fold, whatever Mike had folded: a
+    /// match behind a folded heading would be easy to miss. The folds are
+    /// back as they were once the search is cleared.
+    var searching = false
     var showMore: () -> Void = {}
     let select: (String) -> Void
 
     var body: some View {
         let count = total ?? threads.count
-        if count > 0 || section == .inbox {
-            let collapsed = app.collapsedSections.contains(section)
-            SectionHeading(title: section.title, icon: section.icon, fold: .init(collapsed: collapsed, count: count) {
+        if count > 0 || (section == .inbox && !searching) {
+            let collapsed = !searching && app.collapsedSections.contains(section)
+            SectionHeading(title: section.title, icon: section.icon, fold: searching ? nil : .init(collapsed: collapsed, count: count) {
                 withAnimation(.snappy(duration: 0.2)) {
                     if collapsed { app.collapsedSections.remove(section) } else { app.collapsedSections.insert(section) }
                 }
@@ -132,7 +145,6 @@ private struct ThreadSection: View {
                 if section == .inbox { InboxOrderMenu() }
             }
             if !collapsed {
-                if section == .archived { ArchiveSearch() }
                 ForEach(threads.map { SectionRow(section: section.title, thread: $0) }) { row in
                     ThreadRowView(thread: row.thread, mode: RowMode(section), section: section) { select(row.thread.id) }
                         // The tour points at the samples' rows by title.
@@ -143,14 +155,10 @@ private struct ThreadSection: View {
                         SubagentList(thread: row.thread, section: section.title, finishedShown: section != .inbox)
                     }
                 }
-                if section == .archived {
-                    if threads.isEmpty {
-                        EmptyNote(text: app.archiveLoaded ? "Nothing archived matches." : "Loading…")
-                    } else if more > 0 {
-                        SidebarButtonRow(icon: "ellipsis", title: "Show \(min(more, ArchiveRows.step)) more",
-                                         tip: "\(more) older archived \(more == 1 ? "thread" : "threads") not shown") {
-                            withAnimation(.snappy(duration: 0.2)) { showMore() }
-                        }
+                if section == .archived && more > 0 {
+                    SidebarButtonRow(icon: "ellipsis", title: "Show \(min(more, ArchiveRows.step)) more",
+                                     tip: "\(more) older archived \(more == 1 ? "thread" : "threads") not shown") {
+                        withAnimation(.snappy(duration: 0.2)) { showMore() }
                     }
                 }
             }
@@ -158,16 +166,16 @@ private struct ThreadSection: View {
     }
 }
 
-/// The search under the Archive heading: how settled threads are found
-/// again, so it stays although the rest of the inbox has none.
-private struct ArchiveSearch: View {
+/// The search under New thread. It searched only the archive, under the
+/// Archived heading, until Mike asked for it at the top, finding any
+/// thread (30 Oct).
+private struct ThreadSearch: View {
     @Environment(AppModel.self) private var app
 
     var body: some View {
         @Bindable var app = app
-        SearchField(text: $app.archiveQuery, prompt: "Search the archive")
-            .padding(.top, zoomed(2))
-            .padding(.bottom, zoomed(4))
+        SearchField(text: $app.searchQuery, prompt: "Search threads")
+            .padding(.top, zoomed(4))
     }
 }
 

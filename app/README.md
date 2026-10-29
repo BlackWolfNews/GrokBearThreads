@@ -96,8 +96,9 @@ and the perf run stay away from the real one. Install the runner itself with
   at the end of the preview only if it isn't on `claude-main`. Hover a row
   for Snooze and Archive buttons. A click selects a row straight away, and
   the up and down arrows move through threads from there. Snoozed and
-  Archive, with their counts, are at the bottom. There's no search in the
-  inbox; the archive has its own.
+  Archive, with their counts, are at the bottom. The search under New
+  thread cuts every section down to the threads whose title or preview
+  match, opening folded ones while it has text.
 - **Header.** One line: the folder's name, then the title. The full path is
   in its tooltip. The ... menu has Snooze, Archive, "Copy transcript as
   Markdown" and "Copy thread id" (for pointing an agent at the thread).
@@ -150,8 +151,9 @@ and the perf run stay away from the real one. Install the runner itself with
   Monday 9 am, or pick a time. The time is worked out when you choose, not
   when the menu was built. The thread comes back marked unread.
 - **Archive** with ⌘E (⌘E on an archived thread brings it back), a row's
-  hover button or its menus. The Archive view lists archived threads, newest
-  first, with search; hover a row for Unarchive. Esc goes back to the inbox.
+  hover button or its menus. The Archived section at the foot of the inbox
+  lists archived threads, most recently archived first; hover a row for
+  Unarchive.
   Archived threads load with the rest, so they open as fast as live ones.
 - **Approvals and questions** show as a card in the transcript with Allow,
   Always allow and Deny, or the question's options plus "Something else".
@@ -529,6 +531,7 @@ is an error. Commands marked "the open thread" act on `id` when it's given
 | `click` | `title` | a button in the transcript: Allow, Always allow, Deny, an option, Send answer |
 | `expand`, `collapse` | `row`, `file`, `all`, `section` | a group, tool, thinking block or settled approval (one folded in a closed group opens it); `file` (path or index) in a changes card; `all` for a whole diff; `section` (`inbox`, `running`) folds or opens an inbox heading, as clicking it does |
 | `sort` | `order` (`needsYou`, `newest`, `oldest`) | the Inbox section's order, as its heading's sort menu sets it |
+| `search` | `text` (`""` clears it) | the search under New thread, as typing in it does; `sidebar` then lists only its matches |
 | `scroll` | `to` (`top`, `bottom`) or `row`, `offset` | |
 | `hints` | `on` (default true) | shows the keys as if ⌘ were held, or hides them |
 | `setup` | `show`, `hidden` | Finish setting up: opens or closes its panel, or hides or unhides it; says what's left, `[x]` on each item done, and whether the icon and panel are up |

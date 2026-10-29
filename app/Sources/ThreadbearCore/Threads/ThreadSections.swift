@@ -161,15 +161,17 @@ public struct ThreadSections: Sendable, Equatable {
         (a.archivedAt ?? .distantPast) > (b.archivedAt ?? .distantPast)
     }
 
-    /// Archived threads, most recently archived first, filtered by a search
-    /// that matches title or preview (case and accent insensitive).
-    public static func archived(_ threads: some Sequence<ThreadSummary>, matching query: String = "") -> [ThreadSummary] {
+    /// Each section cut down to the threads a search matches, in the same
+    /// order: the search at the top of the sidebar.
+    public func matching(_ query: String) -> ThreadSections {
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        return threads
-            .filter { $0.isArchived }
-            .filter { trimmed.isEmpty || matches($0, trimmed) }
-            .sorted(by: lastArchived)
+        guard !trimmed.isEmpty else { return self }
+        let keep: ([ThreadSummary]) -> [ThreadSummary] = { $0.filter { Self.matches($0, trimmed) } }
+        return ThreadSections(inbox: keep(inbox), running: keep(running), waiting: keep(waiting),
+                              hibernating: keep(hibernating), archived: keep(archived))
     }
+
+    public var isEmpty: Bool { InboxSection.allCases.allSatisfy { self[$0].isEmpty } }
 
     public static func snoozed(_ threads: some Sequence<ThreadSummary>, now: Date) -> [ThreadSummary] {
         threads
@@ -177,6 +179,7 @@ public struct ThreadSections: Sendable, Equatable {
             .sorted(by: soonestToWake)
     }
 
+    /// Title or preview, case and accent insensitive.
     public static func matches(_ thread: ThreadSummary, _ query: String) -> Bool {
         let options: String.CompareOptions = [.caseInsensitive, .diacriticInsensitive]
         return thread.title.range(of: query, options: options) != nil

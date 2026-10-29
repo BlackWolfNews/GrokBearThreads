@@ -686,6 +686,10 @@ enum Automation {
             }
             app.inboxOrder = order
             return "ok"
+        case "search":
+            // The search under New thread, as typing in it does; "" clears it.
+            app.searchQuery = c["text"] as? String ?? ""
+            return "ok"
         case "expand", "collapse":
             if let raw = c["section"] as? String {
                 // An inbox heading, as clicking it does.
@@ -837,12 +841,13 @@ enum Automation {
             }
             return "ok " + json(out)
         case "sidebar":
-            // The inbox's rows by section, as the sidebar lists them.
-            let sections = app.sections
+            // The inbox's rows by section, as the sidebar lists them: only
+            // the search's matches while it has text.
+            let sections = app.sections.matching(app.searchQuery)
             let object: [String: Any] = [
                 "needsYou": sections.needsYou.map(\.id), "running": sections.running.map(\.id), "waiting": sections.waiting.map(\.id),
                 "inbox": sections.inbox.map(\.id), "snoozed": sections.hibernating.count, "archived": sections.archived.count,
-                "hover": app.hoverOverride ?? "",
+                "hover": app.hoverOverride ?? "", "search": app.searchQuery,
             ]
             return "ok " + json(object)
         case "dump":

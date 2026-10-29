@@ -310,15 +310,33 @@ final class ThreadSectionsTests: XCTestCase {
         XCTAssertEqual(PreviewText.plain("C# and a#b stay"), "C# and a#b stay")
     }
 
-    func testArchivedSearch() {
-        var a = thread("a", minutesAgo: 1, archived: Date(timeIntervalSince1970: 10))
-        a.title = "Résumé builder"
-        var b = thread("b", minutesAgo: 1, archived: Date(timeIntervalSince1970: 20))
-        b.preview = "Fixed the upload test"
-        let c = thread("c", minutesAgo: 1)
-        XCTAssertEqual(ThreadSections.archived([a, b, c]).map(\.id), ["b", "a"])
-        XCTAssertEqual(ThreadSections.archived([a, b, c], matching: "resume").map(\.id), ["a"])
-        XCTAssertEqual(ThreadSections.archived([a, b, c], matching: "UPLOAD").map(\.id), ["b"])
+    func testSearchFindsThreadsInEverySection() {
+        let now = Date()
+        var archivedOld = thread("archived-old", minutesAgo: 1, archived: Date(timeIntervalSince1970: 10))
+        archivedOld.title = "Résumé builder"
+        var archivedNew = thread("archived-new", minutesAgo: 1, archived: Date(timeIntervalSince1970: 20))
+        archivedNew.preview = "Fixed the resume upload"
+        var inbox = thread("inbox", minutesAgo: 1)
+        inbox.title = "Resume the upload"
+        var running = thread("running", status: .running, minutesAgo: 1)
+        running.preview = "It'll resume where it stopped"
+        var hibernating = thread("hibernating", minutesAgo: 1, snoozed: now.addingTimeInterval(3600))
+        hibernating.title = "Resume after lunch"
+        var other = thread("other", minutesAgo: 1)
+        other.title = "Something else"
+        let sections = ThreadSections.build([archivedOld, archivedNew, inbox, running, hibernating, other], now: now)
+
+        let found = sections.matching("  RESUME ")
+        XCTAssertEqual(found.inbox.map(\.id), ["inbox"])
+        XCTAssertEqual(found.running.map(\.id), ["running"])
+        XCTAssertEqual(found.hibernating.map(\.id), ["hibernating"])
+        // Still most recently archived first.
+        XCTAssertEqual(found.archived.map(\.id), ["archived-new", "archived-old"])
+        XCTAssertFalse(found.isEmpty)
+
+        XCTAssertEqual(sections.matching(""), sections)
+        XCTAssertEqual(sections.matching("upload").inbox.map(\.id), ["inbox"])
+        XCTAssertTrue(sections.matching("nothing like it").isEmpty)
     }
 
     func testRelativeTime() {
