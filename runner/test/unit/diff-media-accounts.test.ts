@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
+import { execFileSync } from 'node:child_process';
 import { diffLines } from '../../src/diff.ts';
 import { computeEditDiff, displayPath } from '../../src/tools.ts';
 import { sniffImage, copyImageInto, readImageInfo } from '../../src/media.ts';
@@ -70,6 +71,34 @@ test('image sniffing reads type and size from headers', () => {
   assert.deepEqual(readImageInfo(ref.path), { mediaType: 'image/png', width: 64, height: 48 });
   fs.writeFileSync(path.join(dir, 'not.txt'), 'nope');
   assert.throws(() => copyImageInto(dir, path.join(dir, 'not.txt')), /Not a supported image/);
+});
+
+// Dropping an iPhone photo into the composer goes through copyImageInto.
+test('copyImageInto converts HEIC to JPEG and TIFF to PNG', { skip: process.platform !== 'darwin' }, () => {
+  const dir = tmpDir();
+  const png = path.join(dir, 'in.png');
+  fs.writeFileSync(png, makePng(64, 48));
+  const heic = path.join(dir, 'IMG_0356.HEIC');
+  const tiff = path.join(dir, 'scan.tiff');
+  execFileSync('/usr/bin/sips', ['-s', 'format', 'heic', png, '--out', heic], { stdio: 'ignore' });
+  execFileSync('/usr/bin/sips', ['-s', 'format', 'tiff', png, '--out', tiff], { stdio: 'ignore' });
+
+  const fromHeic = copyImageInto(path.join(dir, 'inbox'), heic);
+  assert.equal(fromHeic.mediaType, 'image/jpeg');
+  assert.match(fromHeic.path, /\.jpg$/);
+  assert.equal(fromHeic.width, 64);
+  assert.equal(fromHeic.height, 48);
+
+  const fromTiff = copyImageInto(path.join(dir, 'inbox'), tiff);
+  assert.deepEqual(readImageInfo(fromTiff.path), { mediaType: 'image/png', width: 64, height: 48 });
+  // Only the converted files are left behind, no temp files.
+  assert.equal(fs.readdirSync(path.join(dir, 'inbox')).length, 2);
+
+  // A file that only looks like a HEIC still fails with the usual message.
+  const fake = path.join(dir, 'fake.heic');
+  fs.writeFileSync(fake, Buffer.concat([Buffer.from([0, 0, 0, 0x18]), Buffer.from('ftypheic'), Buffer.alloc(32)]));
+  assert.throws(() => copyImageInto(path.join(dir, 'inbox'), fake), /Not a supported image: fake\.heic/);
+  assert.equal(fs.readdirSync(path.join(dir, 'inbox')).length, 2);
 });
 
 test('account discovery reads only the login email', () => {

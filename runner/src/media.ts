@@ -118,9 +118,11 @@ export function saveBase64Image(dir: string, data: string, mediaType: string, hi
 // Copies an image into a folder under a fresh name and returns its ref.
 // Used by media.import (into inbox/) and when a message is sent (into the
 // thread's media/ so the transcript keeps working if inbox/ is cleaned).
+// HEIC (iPhone photos), TIFF and BMP are converted with sips on the way in,
+// since the app and the models only take the common web formats.
 export function copyImageInto(dir: string, src: string): ImageRef {
   const info = readImageInfo(src);
-  if (!info) throw new Error(`Not a supported image: ${path.basename(src)}`);
+  if (!info) return convertImageInto(dir, src);
   fs.mkdirSync(dir, { recursive: true });
   const file = path.join(dir, `${crypto.randomUUID()}.${extForMediaType(info.mediaType)}`);
   fs.copyFileSync(src, file);
@@ -128,6 +130,51 @@ export function copyImageInto(dir: string, src: string): ImageRef {
   if (info.width) ref.width = info.width;
   if (info.height) ref.height = info.height;
   return ref;
+}
+
+function convertImageInto(dir: string, src: string): ImageRef {
+  const unsupported = new Error(`Not a supported image: ${path.basename(src)}`);
+  const kind = convertibleKind(readHead(src));
+  if (!kind) throw unsupported;
+  fs.mkdirSync(dir, { recursive: true });
+  // Photos go to JPEG: a 12 MP iPhone shot as PNG is tens of MB, and it's
+  // stored twice (inbox, then the thread's media). TIFF and BMP are more
+  // often screenshots or diagrams, so they stay lossless as PNG.
+  const [format, ext] = kind === 'heic' ? ['jpeg', 'jpg'] : ['png', 'png'];
+  const file = path.join(dir, `${crypto.randomUUID()}.${ext}`);
+  const tmp = `${file}.tmp.${ext}`;
+  try {
+    const args = ['-s', 'format', format, ...(format === 'jpeg' ? ['-s', 'formatOptions', '90'] : []), src, '--out', tmp];
+    execFileSync('/usr/bin/sips', args, { stdio: 'ignore', timeout: 30_000 });
+    fs.renameSync(tmp, file);
+  } catch {
+    throw unsupported;
+  } finally {
+    fs.rmSync(tmp, { force: true });
+  }
+  const info = readImageInfo(file);
+  if (!info) {
+    fs.rmSync(file, { force: true });
+    throw unsupported;
+  }
+  return refFrom(file, info);
+}
+
+// The first bytes of a regular file under the size cap, or an empty buffer.
+function readHead(file: string): Buffer {
+  let fd: number | null = null;
+  try {
+    const st = fs.statSync(file);
+    if (!st.isFile() || st.size > MAX_IMAGE_BYTES) return Buffer.alloc(0);
+    fd = fs.openSync(file, 'r');
+    const buf = Buffer.alloc(Math.min(st.size, 64));
+    fs.readSync(fd, buf, 0, buf.length, 0);
+    return buf;
+  } catch {
+    return Buffer.alloc(0);
+  } finally {
+    if (fd !== null) fs.closeSync(fd);
+  }
 }
 
 // The API rejects images over about 5 MB (base64) or 8000 px. Shrink big
@@ -172,7 +219,7 @@ export function copyImageFileInto(dir: string, src: string, hint: string): Image
       if (!fs.existsSync(out)) fs.copyFileSync(file, out);
       return refFrom(out, info);
     }
-    if (!needsConversion(buf)) return null;
+    if (!convertibleKind(buf)) return null;
     const out = path.join(dir, `${safeName(hint)}-${sha}.png`);
     if (!fs.existsSync(out)) {
       // Converted next to the target first, so a failed sips run never
@@ -219,12 +266,12 @@ function localPath(src: string): string | null {
 }
 
 // HEIC/HEIF (an ISO box with a heic-family brand), TIFF and BMP.
-function needsConversion(buf: Buffer): boolean {
-  if (buf.length < 12) return false;
-  const tiff = (buf[0] === 0x49 && buf[1] === 0x49 && buf[2] === 0x2a && buf[3] === 0) || (buf[0] === 0x4d && buf[1] === 0x4d && buf[2] === 0 && buf[3] === 0x2a);
-  const bmp = buf[0] === 0x42 && buf[1] === 0x4d;
-  const heic = buf.toString('ascii', 4, 8) === 'ftyp' && /^(heic|heix|hevc|hevx|heim|heis|mif1|msf1)$/.test(buf.toString('ascii', 8, 12));
-  return tiff || bmp || heic;
+function convertibleKind(buf: Buffer): 'heic' | 'tiff' | 'bmp' | null {
+  if (buf.length < 12) return null;
+  if (buf.toString('ascii', 4, 8) === 'ftyp' && /^(heic|heix|hevc|hevx|heim|heis|mif1|msf1)$/.test(buf.toString('ascii', 8, 12))) return 'heic';
+  if ((buf[0] === 0x49 && buf[1] === 0x49 && buf[2] === 0x2a && buf[3] === 0) || (buf[0] === 0x4d && buf[1] === 0x4d && buf[2] === 0 && buf[3] === 0x2a)) return 'tiff';
+  if (buf[0] === 0x42 && buf[1] === 0x4d) return 'bmp';
+  return null;
 }
 
 function refFrom(file: string, info: ImageInfo): ImageRef {
