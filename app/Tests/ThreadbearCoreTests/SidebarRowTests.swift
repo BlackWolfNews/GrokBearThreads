@@ -97,7 +97,7 @@ final class SidebarRowTests: XCTestCase {
     }
 
     func testSectionTitles() {
-        XCTAssertEqual(InboxSection.allCases.map(\.title), ["Inbox", "Running", "Waiting", "Hibernating", "Archive"])
+        XCTAssertEqual(InboxSection.allCases.map(\.title), ["Inbox", "Running", "Waiting", "Hibernating", "Archived"])
         let sections = ThreadSections(inbox: [ThreadSummary(id: "b", title: "b")], running: [ThreadSummary(id: "a", title: "a")])
         XCTAssertEqual(sections[.running].map(\.id), ["a"])
         XCTAssertEqual(sections[.inbox].map(\.id), ["b"])

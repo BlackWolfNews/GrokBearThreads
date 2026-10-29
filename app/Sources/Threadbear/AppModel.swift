@@ -1388,7 +1388,7 @@ final class AppModel {
         return index > 0 ? ordered[index - 1] : nil
     }
 
-    /// The inbox with its Archive section unfolded.
+    /// The inbox with its Archived section unfolded.
     func showArchive() {
         sidebarMode = .inbox
         collapsedSections.remove(.archived)

@@ -6,9 +6,10 @@ import Foundation
 /// last: threads that have booked themselves a message for later and have
 /// nothing for him until then (Mike asked 29 Oct). Not to be confused with
 /// a thread whose status is `.waiting`, which is waiting on him.
-/// Hibernating and Archive come last: threads put away. They were views of
+/// Hibernating and Archived come last: threads put away. They were views of
 /// their own in the activity bar until Mike asked for them as sections
-/// here (29 Oct).
+/// here (29 Oct). The heading says Archived, not Archive, so it names a
+/// state like Running, Waiting and Hibernating (Mike asked 29 Oct).
 public enum InboxSection: String, Sendable, CaseIterable {
     case inbox, running, waiting, hibernating, archived
 
@@ -18,11 +19,11 @@ public enum InboxSection: String, Sendable, CaseIterable {
         case .running: return "Running"
         case .waiting: return "Waiting"
         case .hibernating: return "Hibernating"
-        case .archived: return "Archive"
+        case .archived: return "Archived"
         }
     }
 
-    /// Hibernating and Archive: threads put away rather than live ones.
+    /// Hibernating and Archived: threads put away rather than live ones.
     public var isPutAway: Bool { self == .hibernating || self == .archived }
 }
 
@@ -70,7 +71,7 @@ public struct ThreadSections: Sendable, Equatable {
     /// needs Mike first (see `urgency`), newest first within that. A question or approval goes in
     /// the inbox even with background work going, since the thread is stuck
     /// until he answers. Running is newest activity first. Snoozed and
-    /// archived threads go in Hibernating and Archive, whatever their state.
+    /// archived threads go in Hibernating and Archived, whatever their state.
     public static func build(_ threads: some Sequence<ThreadSummary>, now: Date, wakes: [String: Schedule] = [:], order: InboxOrder = .needsYou) -> ThreadSections {
         var sections = ThreadSections()
         for thread in threads {

@@ -144,7 +144,7 @@ struct ThreadbearApp: App {
                     .disabled(!app.projectsSupported)
                 Divider()
                 Button("Show Hibernating") { app.showHibernating() }
-                Button("Show Archive") { app.showArchive() }
+                Button("Show Archived") { app.showArchive() }
             }
         }
         // ⌘, (the app menu's Settings…): the runner's settings.

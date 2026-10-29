@@ -166,7 +166,7 @@ where.
 When a thread is done, archive it with ⌘E, or swipe its row left with two
 fingers on the trackpad (or drag it left with the mouse) and let go once the space behind it turns blue (a
 quick flick works too). However it's archived (⌘E, a button, or an agent
-or your phone doing it), its row slides off the same way. The Archive section at the foot of the
+or your phone doing it), its row slides off the same way. The Archived section at the foot of the
 list has them, most recently archived first, with a search box under its
 heading and the older ones behind Show more. Unarchive, or the same swipe
 there, puts one back. The iPhone app and the
