@@ -24,8 +24,10 @@ struct ActivityBar: View {
             // panels' bars beside it do.
             WindowGrip()
                 .frame(height: RootView.options.headerHeight)
+            // How many threads are in the Inbox section, so Mike can see
+            // how far off inbox zero he is from any view (29 Oct).
             ActivityButton(symbol: "bubble.left.and.bubble.right", title: "Threads", shortcut: "⌘1",
-                           active: app.sidebarMode == .inbox, slides: true) {
+                           badge: app.sections.inbox.count, active: app.sidebarMode == .inbox, slides: true) {
                 app.sidebarMode = .inbox
             }
             ActivityButton(image: Bear.image(.sleep), title: "Hibernating", shortcut: "⌘2",
@@ -166,8 +168,8 @@ struct ActivityButton: View {
                 }
                 .overlay(alignment: .topTrailing) {
                     if let badge, badge > 0 {
-                        // Grey, not accent: a count of things put away for
-                        // later, not something that needs Mike.
+                        // Grey, not accent: a count of what's there, not an
+                        // alarm. The rows themselves say which need Mike.
                         Text(badge > 99 ? "99+" : "\(badge)")
                             .font(.system(size: zoomed(9), weight: .semibold))
                             .monospacedDigit()
