@@ -495,11 +495,27 @@ function saveState(c, state, activated) {
   writeState(c.dir, { ...state, crashed: [...crashed].slice(-20) });
 }
 
+// The releases that runners still finishing turns after a handover run on
+// (docs/protocol.md, "Handovers"), from their run/drain-<pid>.json files. On
+// a busy day one can outlast five newer releases; deleting its release from
+// under it took tb away from its threads (29 Oct), and anything it hadn't
+// loaded yet would have gone the same way.
+function drainingReleases(c) {
+  const dir = path.join(c.home, 'run');
+  const names = fs.existsSync(dir) ? fs.readdirSync(dir) : [];
+  return names
+    .filter((name) => /^drain-\d+\.json$/.test(name))
+    .map((name) => readJson(path.join(dir, name)))
+    .filter((info) => typeof info?.release === 'string' && alive(info.pid))
+    .map((info) => info.release);
+}
+
 function pruneList(c, extraKeep = []) {
   const state = readState(c.dir);
   const ids = listReleases(c);
   // The newest 5 plus lastGood, as specced, and never anything current,
-  // previous or still running points at, whatever its age. Releases that
+  // previous or still running points at, whatever its age (extraKeep has
+  // the running runners' releases). Releases that
   // crashed at startup go first and don't count towards the 5: a run of
   // broken deploys used to push out the good releases there were to go
   // back to. The newest of them stays, for --rollback --force.
@@ -536,16 +552,19 @@ function lock(c) {
       if (e.code !== 'EEXIST') throw e;
     }
     const pid = Number(readJson(path.join(dir, 'pid')) ?? 0);
-    let alive = false;
-    try {
-      alive = pid > 0 && (process.kill(pid, 0), true);
-    } catch (e) {
-      alive = e.code === 'EPERM';
-    }
-    if (alive) throw new Fail(`Another deploy (pid ${pid}) is working on ${c.dir}. Wait for it to finish.`);
+    if (alive(pid)) throw new Fail(`Another deploy (pid ${pid}) is working on ${c.dir}. Wait for it to finish.`);
     fs.rmSync(dir, { recursive: true, force: true });
   }
   throw new Fail(`Couldn't take the deploy lock in ${c.dir}.`);
+}
+
+// Whether a process is running; another user's counts.
+function alive(pid) {
+  try {
+    return pid > 0 && (process.kill(pid, 0), true);
+  } catch (e) {
+    return e.code === 'EPERM';
+  }
 }
 
 function git(cwd, args, opts = {}) {
@@ -1333,7 +1352,7 @@ async function deploy(c, v, waitMs) {
         say(`But the real run would stop before building: ${e.message}`);
       }
     }
-    const gone = pruneList(c, [id]);
+    const gone = pruneList(c, [id, ...drainingReleases(c)]);
     say(gone.length ? `Would remove: ${gone.join(', ')}` : 'Would remove no old releases.');
     return 0;
   }
@@ -1376,7 +1395,7 @@ async function deploy(c, v, waitMs) {
   if (v['no-restart']) say('Not restarting (--no-restart).');
   else code = await restartAndCheck(c, v, id, before, waitMs);
   const running = releaseOf((await probe(c.home)).version);
-  prune(c, [running]);
+  prune(c, [running, ...drainingReleases(c)]);
   return code;
 }
 

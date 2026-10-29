@@ -885,6 +885,36 @@ test('pruning keeps the newest 5 releases plus lastGood, and drops crashed ones 
   assert.ok(!releases().includes(bad), 'the older crashing release is gone');
 });
 
+test('pruning keeps the release of a runner still finishing turns after a handover, until it exits', { timeout: 120_000 }, async () => {
+  // The oldest release outside the newest 5: the next deploy would remove it.
+  const doomed = releases().filter((id) => id !== state().lastGood && id !== died)[0];
+  // A runner still finishing a turn on it, as a live process with the drain
+  // file a real one writes (docs/protocol.md, "Handovers").
+  const draining = spawn(NODE, ['-e', 'setTimeout(() => {}, 120_000)'], { stdio: 'ignore' });
+  const drain = path.join(home, 'run', `drain-${draining.pid}.json`);
+  fs.mkdirSync(path.dirname(drain), { recursive: true });
+  fs.writeFileSync(drain, JSON.stringify({ pid: draining.pid, port: 1, version: `9.9.9+${doomed}`, release: doomed, since: new Date().toISOString(), threads: ['t1'] }));
+  try {
+    commit({ v: 'drain1', goodAfterMs: -1 }, 'while one drains');
+    let r = deploy(['--skip-checks', '--dry-run']);
+    assert.doesNotMatch(r.stdout, new RegExp(`Would remove: .*${doomed}`), out(r));
+    r = deploy(['--skip-checks']);
+    assert.equal(r.status, 0, out(r));
+    assert.ok(releases().includes(doomed), `kept while its runner runs\n${out(r)}`);
+    // Once that runner has exited, the next deploy removes it as usual.
+    draining.kill();
+    await waitFor('the draining runner to exit', () => !alive(draining.pid!));
+    commit({ v: 'drain2', goodAfterMs: -1 }, 'after it exits');
+    r = deploy(['--skip-checks']);
+    assert.equal(r.status, 0, out(r));
+    assert.ok(!releases().includes(doomed), `removed once its runner is gone\n${out(r)}`);
+    await runsOn(current());
+  } finally {
+    draining.kill();
+    fs.rmSync(drain, { force: true });
+  }
+});
+
 test('--list and --dry-run change nothing', { timeout: 60_000 }, async () => {
   let r = deploy(['--list']);
   assert.equal(r.status, 0, out(r));
