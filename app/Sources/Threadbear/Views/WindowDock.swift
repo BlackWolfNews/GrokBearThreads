@@ -146,6 +146,16 @@ enum WindowDock {
         return PatchImage.image(hit?.iconFile)
     }
 
+    /// A patch panel's tab gets the rail button's badge for where it came
+    /// from (PanelOriginBadge), smaller to suit the tab's icon.
+    @MainActor
+    static func badge(of panel: PanelID, app: AppModel) -> AnyView? {
+        let owner = app.selectedThread.flatMap { $0.panels.contains { $0.id == panel } ? $0 : nil }
+            ?? app.threads.values.first { $0.panels.contains { $0.id == panel } }
+        guard let owner, let hit = owner.panels.first(where: { $0.id == panel }) else { return nil }
+        return AnyView(PanelOriginBadge(panel: hit, thread: owner, app: app, side: 10))
+    }
+
     @MainActor
     static func symbol(of panel: PanelID, app: AppModel) -> String? {
         switch panel {
@@ -293,6 +303,7 @@ struct RootView: View {
             title: { WindowDock.title(of: $0, app: app) },
             symbol: { WindowDock.symbol(of: $0, app: app) },
             image: { WindowDock.image(of: $0, app: app) },
+            badge: { WindowDock.badge(of: $0, app: app) },
             header: { panel in
                 // The thread's own title line (folder, title, projects)
                 // in place of its name.

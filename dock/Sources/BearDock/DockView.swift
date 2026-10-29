@@ -7,6 +7,9 @@ public struct DockContent {
     public var symbol: (PanelID) -> String?
     /// A picture drawn in colour in place of the symbol (a tool's own icon).
     public var image: (PanelID) -> NSImage?
+    /// A small mark over the bottom corner of the tab's icon (where the
+    /// panel came from, say). Nil: none.
+    public var badge: (PanelID) -> AnyView?
     public var view: (PanelID) -> AnyView
     /// Drawn in place of the title when the panel is on its own (the
     /// thread's name and folder over the transcript, say). Nil: the title.
@@ -25,6 +28,7 @@ public struct DockContent {
         title: @escaping (PanelID) -> String,
         symbol: @escaping (PanelID) -> String? = { _ in nil },
         image: @escaping (PanelID) -> NSImage? = { _ in nil },
+        badge: @escaping (PanelID) -> AnyView? = { _ in nil },
         header: @escaping (PanelID) -> AnyView? = { _ in nil },
         accessory: @escaping (PanelID) -> AnyView? = { _ in nil },
         closable: @escaping (PanelID) -> Bool = { _ in true },
@@ -35,6 +39,7 @@ public struct DockContent {
         self.title = title
         self.symbol = symbol
         self.image = image
+        self.badge = badge
         self.header = header
         self.accessory = accessory
         self.closable = closable
@@ -661,17 +666,20 @@ private struct TabItem: View {
 
     var body: some View {
         HStack(spacing: 6) {
-            if let image = content.image(panel) {
-                Image(nsImage: image)
-                    .resizable()
-                    .aspectRatio(contentMode: .fit)
-                    .frame(width: options.titleSize + 2, height: options.titleSize + 2)
-                    .opacity(selected ? 1 : 0.7)
-            } else if let symbol = content.symbol(panel) {
-                Image(systemName: symbol)
-                    .font(.system(size: options.titleSize - 1, weight: .medium))
-                    .foregroundStyle(selected ? DockTheme.secondary : DockTheme.faint)
+            Group {
+                if let image = content.image(panel) {
+                    Image(nsImage: image)
+                        .resizable()
+                        .aspectRatio(contentMode: .fit)
+                        .frame(width: options.titleSize + 2, height: options.titleSize + 2)
+                        .opacity(selected ? 1 : 0.7)
+                } else if let symbol = content.symbol(panel) {
+                    Image(systemName: symbol)
+                        .font(.system(size: options.titleSize - 1, weight: .medium))
+                        .foregroundStyle(selected ? DockTheme.secondary : DockTheme.faint)
+                }
             }
+            .overlay(alignment: .bottomTrailing) { content.badge(panel) }
             Text(content.title(panel))
                 .font(.system(size: options.titleSize, weight: selected ? .semibold : .regular))
                 .foregroundStyle(selected ? DockTheme.headerText : DockTheme.secondary)

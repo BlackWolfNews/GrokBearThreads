@@ -197,11 +197,11 @@ struct PanelRail: View {
             ForEach(thread.panels) { panel in
                 let origin = PanelOrigin.of(panel, in: thread)
                 ActivityButton(symbol: PanelIcon.symbol(for: panel), image: PatchImage.image(panel.iconFile), tinted: false, title: panel.title,
-                               tip: origin.tip(panel.title, projectTitle: projectTitle(origin)), badge: panel.badge, active: app.dock.isShowing(panel.id)) {
+                               tip: origin.tip(panel.title, projectTitle: PanelOriginBadge.projectTitle(origin, thread: thread, app: app)), badge: panel.badge, active: app.dock.isShowing(panel.id)) {
                     app.clickRail(.panel(panel.id), in: thread)
                 }
                 // Bottom corner: the top one is the patch's count.
-                .overlay(alignment: .bottomTrailing) { PanelOriginBadge(origin: origin, projectTitle: projectTitle(origin) ?? "") }
+                .overlay(alignment: .bottomTrailing) { PanelOriginBadge(panel: panel, thread: thread, app: app) }
             }
             Spacer(minLength: zoomed(8))
             if !thread.patches.isEmpty {
@@ -227,38 +227,49 @@ struct PanelRail: View {
             if old.threadId == new.threadId { app.refreshHighlights(thread.id) }
         }
     }
+}
 
-    private func projectTitle(_ origin: PanelOrigin) -> String? {
+/// The little badge in the bottom corner of a panel's icon, on the rail and
+/// on its tab in the pane, that says where it came from: the project's own
+/// icon for a project's folder, else a glyph (a house for ~/.threadbear, a
+/// folder for the thread's own, a wrench for a tool patch, a box for a
+/// built-in). Grey and small, like the counts: it's there to answer
+/// "where's this from?", not to be noticed. It takes what it needs rather
+/// than the environment, as the dock draws tabs in windows of their own.
+struct PanelOriginBadge: View {
+    let origin: PanelOrigin
+    let project: Project?
+    /// For the letter tile, when the project isn't in the list yet.
+    var projectTitle = ""
+    /// The circle's width before zoom: 13 on the rail, smaller on a tab.
+    var side: CGFloat = 13
+
+    init(panel: Panel, thread: ThreadSummary, app: AppModel, side: CGFloat = 13) {
+        origin = PanelOrigin.of(panel, in: thread)
+        if case .project(let id) = origin { project = app.project(id) } else { project = nil }
+        projectTitle = Self.projectTitle(origin, thread: thread, app: app) ?? ""
+        self.side = side
+    }
+
+    static func projectTitle(_ origin: PanelOrigin, thread: ThreadSummary, app: AppModel) -> String? {
         guard case .project(let id) = origin else { return nil }
         return thread.projects.first { $0.id == id }?.title ?? app.project(id)?.title
     }
-}
-
-/// The little badge in the bottom corner of a panel's rail button that says
-/// where it came from: the project's own icon for a project's folder, else
-/// a glyph (a house for ~/.threadbear, a folder for the thread's own, a
-/// wrench for a tool patch, a box for a built-in). Grey and small, like the
-/// counts: it's there to answer "where's this from?", not to be noticed.
-struct PanelOriginBadge: View {
-    @Environment(AppModel.self) private var app
-    let origin: PanelOrigin
-    /// For the letter tile, when the project isn't in the list yet.
-    var projectTitle = ""
 
     var body: some View {
         Group {
-            if case .project(let id) = origin {
-                ProjectIconView(project: app.project(id), title: projectTitle, size: 10)
+            if case .project = origin {
+                ProjectIconView(project: project, title: projectTitle, size: side * 10 / 13)
             } else if let symbol = origin.symbol {
                 Image(systemName: symbol)
-                    .font(.system(size: zoomed(6.5), weight: .semibold))
+                    .font(.system(size: zoomed(side / 2), weight: .semibold))
                     .foregroundStyle(.secondary)
             }
         }
-        .frame(width: zoomed(13), height: zoomed(13))
+        .frame(width: zoomed(side), height: zoomed(side))
         .background(Color(nsColor: .windowBackgroundColor), in: Circle())
         .overlay(Circle().strokeBorder(.separator, lineWidth: 0.5))
-        .offset(x: zoomed(2), y: zoomed(1))
+        .offset(x: zoomed(side * 2 / 13), y: zoomed(side / 13))
         .allowsHitTesting(false)
     }
 }

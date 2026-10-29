@@ -222,7 +222,7 @@ tests, or send the agent a message you use a lot. A panel can show a web
 page, such as your app running on localhost, or a list.
 
 Each panel has a button on the right-hand rail, with a small badge in its
-bottom corner saying where it came from: the project's own icon when it came
+bottom corner (and on the panel's tab) saying where it came from: the project's own icon when it came
 from one of the thread's projects' folders, a folder for the thread's own
 folder, a house for `~/.threadbear`, a wrench for a tool patch (one that's
 there because of a file, like a video's `.tandem`) and a box for one built
