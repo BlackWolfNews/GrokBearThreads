@@ -530,7 +530,7 @@ is an error. Commands marked "the open thread" act on `id` when it's given
 | `appearance`, `resize` | `mode` (light, dark, system); `w`, `h` | |
 | `zoom` | `to` (in, out, reset) or `percent` | the window's zoom, as ⌘=, ⌘- and ⌘0 set it; says the percent it's at |
 | `archive`, `unarchive`, `snooze` | `id`, `seconds` (default 3600) | the open thread; says which thread it acted on |
-| `mode` | `mode` (`archive`, `snoozed`, `inbox`) | which list the sidebar shows |
+| `mode` | `mode` (`inbox`, `scheduled`, `projects`, `librarian`; `archive` and `snoozed` show the inbox with that section unfolded) | which view the sidebar shows |
 | `action` | `id`, `timeout` | runs that action chip of the selected thread and waits for a command to finish (default 60 s); `dump` lists the actions |
 | `panel` | `id`, `show` | the selected thread's pane sections, each a panel in the window's dock: `id` opens or brings up that section (`threadbear.highlights`, a panel's id, or `threadbear.patches`; an error names the ones it has), `show` false closes every section and true opens them again (Highlights if none), neither toggles; `dump` lists the sections, the active one starred, and what Highlights has, and its `dock:` line is the whole layout |
 | `preview` | `path`, `url`, `close`, `edit`, `insert` | opens a file or page in the selected thread's pane, as a click on a highlight does (a web URL goes to the browser); `close` goes back to the section. Over a text file, `edit` true or false is the bar's pencil or Done, and `insert` types text at the end of the editor (`wait` false returns before the save), `resolve` (`file` or `mine`) presses the conflict bar's button; `dump`'s preview line says `(editing)` |

@@ -128,23 +128,23 @@ struct ThreadbearApp: App {
                 .keyboardShortcut("c", modifiers: [.command, .shift])
                 .disabled(app.selection == nil)
                 Divider()
-                // ⌘1 to ⌘6 in the activity bar's order, as VS Code numbers
-                // its views.
+                // ⌘1 to ⌘4 in the activity bar's order, as VS Code numbers
+                // its views. Hibernating and Archive are sections of the
+                // inbox now: these unfold them.
                 Button("Show Inbox") { app.sidebarMode = .inbox }
                     .keyboardShortcut("1")
-                Button("Show Hibernating") { app.sidebarMode = .snoozed }
-                    .keyboardShortcut("2")
-                Button("Show Archive") { app.showArchive() }
-                    .keyboardShortcut("3")
                 Button("Show Scheduled") { app.showSchedules() }
-                    .keyboardShortcut("4")
+                    .keyboardShortcut("2")
                     .disabled(!app.schedulesSupported)
                 Button("Show Projects") { app.showProjects() }
-                    .keyboardShortcut("5")
+                    .keyboardShortcut("3")
                     .disabled(!app.projectsSupported)
                 Button("Show Librarian") { app.showLibrarian() }
-                    .keyboardShortcut("6")
+                    .keyboardShortcut("4")
                     .disabled(!app.projectsSupported)
+                Divider()
+                Button("Show Hibernating") { app.showHibernating() }
+                Button("Show Archive") { app.showArchive() }
             }
         }
         // ⌘, (the app menu's Settings…): the runner's settings.

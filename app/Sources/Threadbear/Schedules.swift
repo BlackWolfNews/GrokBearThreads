@@ -55,6 +55,7 @@ extension AppModel {
                 // A runner from before schedules.
                 schedulesSupported = false
                 schedules = []
+                showsScheduledHome = false
             } catch {
                 AppLog.write("rpc", "schedules.list failed: \(error.localizedDescription)")
             }
@@ -123,8 +124,11 @@ extension AppModel {
         return "New thread in \(FolderName.short(schedule.cwd ?? defaults.cwd))"
     }
 
+    /// The Scheduled view in the sidebar, and its page in the detail area.
     func showSchedules() {
         sidebarMode = .scheduled
+        openProjectId = nil
+        showsScheduledHome = true
     }
 
     // MARK: The editor

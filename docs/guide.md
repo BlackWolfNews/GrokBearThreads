@@ -82,7 +82,7 @@ turn, so edit the message that started it instead.
 
 ## What the list tells you
 
-The threads view has three sections. Inbox holds the threads for you, with
+The threads view has five sections. Inbox holds the threads for you, with
 the ones that need you at the top. The number on the Threads icon in the
 left-hand rail is how many are in it. The arrows at the end of its heading
 sort it newest first or oldest first instead, which is handy for working
@@ -92,6 +92,9 @@ for later (an agent saying "I'll check again in 20 minutes") and have nothing
 for you until then: each says when it wakes, soonest first. When the time
 comes it runs again, and lands in the inbox when it's done. A thread that
 asks you something keeps its place in the inbox, wake-up or not.
+Hibernating and Archive, at the foot, hold the threads you've put away
+(below). They start folded, showing only how many; click a heading to
+open or fold it.
 
 At the right of each row:
 
@@ -126,8 +129,10 @@ the page's address. Click it to open it.
 
 A schedule sends a message at a set time, once or over and over: to a
 thread, or to a new thread each time (a morning summary, say). Make one in
-the Scheduled view, or ask an agent ("look at this again every weekday at
-9"). The Scheduled view lists them with when each runs next.
+the Scheduled view (⌘2), or ask an agent ("look at this again every weekday
+at 9"). The Scheduled view lists them with when each runs next, and its page
+says what's coming up next with a few numbers: how many are on, due in the
+next day, repeating, set by threads, paused, and how often they've run.
 
 If you run Threadbear on more than one Mac, a schedule that starts a new
 thread can run on any of them: pick the Mac under Runs on. It runs there
@@ -142,7 +147,8 @@ To put a thread away for a while, hibernate it (the Thread menu, the ...
 menu, or the button that shows when you hover a row). Pick when it should
 come back: in an hour, this evening, tomorrow, next Monday or a time of your
 own. It leaves the list, its agent stops, and it comes back marked unread
-when the time comes. Hibernating threads have their own view (⌘2).
+when the time comes. Hibernating threads wait in the Hibernating section at
+the foot of the list, soonest to wake first.
 
 Or pick Wake when… and say it in your own words: "at the weekend", "in a
 few weeks", "next time I talk about woodworking". Opus works out what you
@@ -154,8 +160,10 @@ where.
 When a thread is done, archive it with ⌘E, or swipe its row left with two
 fingers on the trackpad (or drag it left with the mouse) and let go once the space behind it turns blue (a
 quick flick works too). However it's archived (⌘E, a button, or an agent
-or your phone doing it), its row slides off the same way. The Archive view (⌘3) lists them with a search box,
-and Unarchive, or the same swipe there, puts one back. The iPhone app and the
+or your phone doing it), its row slides off the same way. The Archive section at the foot of the
+list has them, most recently archived first, with a search box under its
+heading and the older ones behind Show more. Unarchive, or the same swipe
+there, puts one back. The iPhone app and the
 website call the archive the Den.
 
 ## Accounts, pools and Usage

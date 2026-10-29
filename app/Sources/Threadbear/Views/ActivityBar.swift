@@ -4,9 +4,11 @@ import SwiftUI
 import ThreadbearCore
 
 /// The column of icons down the window's left edge, like VS Code's activity
-/// bar: the sidebar's views at the top (threads, hibernating, archive,
-/// scheduled, projects, the librarian) and Usage and Settings at the foot. These were rows in a
+/// bar: the sidebar's views at the top (threads, scheduled, projects, the
+/// librarian) and Usage and Settings at the foot. These were rows in a
 /// footer under the threads, which took about five rows' height from the list.
+/// Hibernating and Archive had icons here too, until they became sections
+/// at the foot of the threads (Mike, 29 Oct).
 ///
 /// It's outside the dock (RootView), not part of the sidebar panel, so a
 /// panel docked under the sidebar (Usage) or the sidebar moved elsewhere
@@ -30,32 +32,22 @@ struct ActivityBar: View {
                            badge: app.sections.inbox.count, active: app.sidebarMode == .inbox, slides: true) {
                 app.sidebarMode = .inbox
             }
-            ActivityButton(image: Bear.image(.sleep), title: "Hibernating", shortcut: "⌘2",
-                           badge: app.snoozed.count, active: app.sidebarMode == .snoozed, slides: true) {
-                app.sidebarMode = .snoozed
-            }
-            // No badge: the archive only grows, so its count says nothing
-            // needs looking at. The view's header has it.
-            ActivityButton(symbol: "archivebox", title: "Archive", shortcut: "⌘3",
-                           active: app.sidebarMode == .archive, slides: true) {
-                app.showArchive()
-            }
             // Only once the runner has said it knows about schedules.
             if app.schedulesSupported {
-                ActivityButton(symbol: "clock", title: "Scheduled", shortcut: "⌘4",
+                ActivityButton(symbol: "clock", title: "Scheduled", shortcut: "⌘2",
                                badge: app.activeScheduleCount, active: app.sidebarMode == .scheduled, slides: true) {
                     app.showSchedules()
                 }
             }
             // Only once the runner has said it knows about projects.
             if app.projectsSupported {
-                ActivityButton(symbol: "square.stack.3d.up", title: "Projects", shortcut: "⌘5",
+                ActivityButton(symbol: "square.stack.3d.up", title: "Projects", shortcut: "⌘3",
                                active: app.sidebarMode == .projects, slides: true) {
                     app.showProjects()
                 }
                 // A count while it's looking at a thread or has some
                 // waiting: what it's doing and about to do.
-                ActivityButton(symbol: "books.vertical", title: "Librarian", shortcut: "⌘6",
+                ActivityButton(symbol: "books.vertical", title: "Librarian", shortcut: "⌘4",
                                badge: app.librarian?.pendingCount, active: app.sidebarMode == .librarian, slides: true) {
                     app.showLibrarian()
                 }

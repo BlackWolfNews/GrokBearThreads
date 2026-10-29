@@ -208,6 +208,31 @@ final class ThreadSectionsTests: XCTestCase {
         XCTAssertEqual(sections.running.map(\.id), ["running"])
         XCTAssertEqual(sections.needsYou.map(\.id), ["waiting-new", "waiting-old", "unread-failed", "unread"])
         XCTAssertEqual(ThreadSections.snoozed(threads, now: now).map(\.id), ["snoozed"])
+        // Put-away threads have sections of their own at the foot, and
+        // aren't among the live ones.
+        XCTAssertEqual(sections.hibernating.map(\.id), ["snoozed"])
+        XCTAssertEqual(sections.archived.map(\.id), ["archived"])
+        XCTAssertEqual(sections[.archived].map(\.id), ["archived"])
+        XCTAssertFalse(sections.all.contains { $0.id == "snoozed" || $0.id == "archived" })
+    }
+
+    /// Hibernating soonest to wake first; Archive most recently archived
+    /// first, whatever state each thread was in when put away.
+    func testPutAwaySectionsOrder() {
+        let now = Date(timeIntervalSince1970: 1_000_000)
+        let threads = [
+            thread("wakes-late", minutesAgo: 1, snoozed: now.addingTimeInterval(7200)),
+            thread("wakes-soon", status: .waiting, needsYou: true, minutesAgo: 1, snoozed: now.addingTimeInterval(60)),
+            thread("archived-old", status: .running, minutesAgo: 1, archived: now.addingTimeInterval(-600)),
+            thread("archived-new", needsYou: true, minutesAgo: 1, archived: now),
+        ]
+        let sections = ThreadSections.build(threads, now: now)
+        XCTAssertEqual(sections.hibernating.map(\.id), ["wakes-soon", "wakes-late"])
+        XCTAssertEqual(sections.archived.map(\.id), ["archived-new", "archived-old"])
+        XCTAssertTrue(sections.inbox.isEmpty)
+        XCTAssertTrue(sections.running.isEmpty)
+        XCTAssertTrue(InboxSection.hibernating.isPutAway && InboxSection.archived.isPutAway)
+        XCTAssertFalse(InboxSection.waiting.isPutAway)
     }
 
     /// The inbox's sort menu: newest or oldest first go by last activity
@@ -275,7 +300,7 @@ final class ThreadSectionsTests: XCTestCase {
         XCTAssertEqual(sections.waiting.map(\.id), ["said-done-unread", "read"])
         XCTAssertEqual(Set(sections.inbox.map(\.id)), ["asked-read", "unread", "question", "failed", "no-wake", "woken"])
         XCTAssertEqual(sections.running.map(\.id), ["running"])
-        XCTAssertEqual(InboxSection.allCases.map(\.title), ["Inbox", "Running", "Waiting"])
+        XCTAssertEqual(InboxSection.allCases.map(\.title), ["Inbox", "Running", "Waiting", "Hibernating", "Archive"])
     }
 
     func testPreviewTextDropsMarkdown() {

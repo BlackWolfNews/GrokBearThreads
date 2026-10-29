@@ -21,6 +21,8 @@ struct DetailView: View {
         let projectsHome = project == nil && app.showsProjectsHome
         // The Librarian's page, from the activity bar's Librarian.
         let librarianHome = project == nil && app.showsLibrarianHome
+        // The Scheduled page, from the activity bar's Scheduled.
+        let scheduledHome = project == nil && app.showsScheduledHome
         Group {
         if let project {
             VStack(spacing: 0) {
@@ -39,6 +41,12 @@ struct DetailView: View {
                 ConnectionBanner()
                 ErrorBanner()
                 LibrarianHome()
+            }
+        } else if scheduledHome {
+            VStack(spacing: 0) {
+                ConnectionBanner()
+                ErrorBanner()
+                ScheduledHome()
             }
         } else if let id = app.selection, app.dock.layout.contains(WindowDock.threadPanel(id)) {
             // One transcript can only be drawn in one place.

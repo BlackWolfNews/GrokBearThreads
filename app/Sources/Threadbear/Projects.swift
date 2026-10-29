@@ -79,6 +79,7 @@ extension AppModel {
         openProjectId = id
         showsProjectsHome = false
         showsLibrarianHome = false
+        showsScheduledHome = false
     }
 
     // MARK: Changing a project

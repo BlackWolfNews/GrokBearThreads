@@ -11,13 +11,15 @@ struct NavigationPlace: Equatable, Sendable {
     var projectsHome = false
     /// The Librarian's page (`showsLibrarianHome`).
     var librarianHome = false
+    /// The Scheduled page (`showsScheduledHome`).
+    var scheduledHome = false
 }
 
 /// Back and forward, like a browser's: ⌘[ and ⌘] in the Go menu, and the
 /// side buttons on a mouse.
 extension AppModel {
     var place: NavigationPlace {
-        NavigationPlace(mode: sidebarMode, threadId: selection, subagent: subagentSelection, projectId: openProjectId, projectsHome: showsProjectsHome, librarianHome: showsLibrarianHome)
+        NavigationPlace(mode: sidebarMode, threadId: selection, subagent: subagentSelection, projectId: openProjectId, projectsHome: showsProjectsHome, librarianHome: showsLibrarianHome, scheduledHome: showsScheduledHome)
     }
 
     /// Called by the didSet of each property that makes up `place`. One
@@ -70,11 +72,7 @@ extension AppModel {
     /// Puts the window back at `place`. The history's index has already
     /// moved, so the step this records is where it is now and adds nothing.
     private func show(_ place: NavigationPlace) {
-        if place.mode == .archive, sidebarMode != .archive {
-            showArchive()
-        } else {
-            sidebarMode = place.mode
-        }
+        sidebarMode = place.mode
         if let subagent = place.subagent {
             selectSubagent(threadId: subagent.threadId, subagentId: subagent.subagentId)
         } else if selection != place.threadId || subagentSelection != nil {
@@ -83,6 +81,7 @@ extension AppModel {
         openProjectId = place.projectId
         showsProjectsHome = place.projectsHome
         showsLibrarianHome = place.librarianHome
+        showsScheduledHome = place.scheduledHome
     }
 }
 

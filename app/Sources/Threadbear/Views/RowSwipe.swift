@@ -3,7 +3,7 @@ import SwiftUI
 import ThreadbearCore
 
 /// What a two-finger swipe left on a row does: archive it, or in the
-/// Archive view put it back.
+/// Archive section put it back.
 struct RowSwipeAction {
     var icon: String
     /// Asked once the fingers lift past the line, before the row goes:
@@ -12,7 +12,7 @@ struct RowSwipeAction {
     var run: () -> Void
 
     @MainActor
-    static func forRow(_ thread: ThreadSummary, mode: SidebarMode, app: AppModel) -> RowSwipeAction? {
+    static func forRow(_ thread: ThreadSummary, mode: RowMode, app: AppModel) -> RowSwipeAction? {
         if mode.rowActions.contains(.archive) {
             return RowSwipeAction(icon: "archivebox",
                                   confirm: { BusyConfirm.allowed(.archive, threadId: thread.id, app: app) },

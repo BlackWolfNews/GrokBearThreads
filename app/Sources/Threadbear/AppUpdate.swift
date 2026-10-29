@@ -373,8 +373,6 @@ final class AppUpdater {
     static func restoreState(app: AppModel) -> (mode: String, selection: String) {
         let mode = switch app.sidebarMode {
         case .inbox: "inbox"
-        case .snoozed: "snoozed"
-        case .archive: "archive"
         case .scheduled: "scheduled"
         case .projects: "projects"
         case .librarian: "librarian"
@@ -408,7 +406,8 @@ final class AppUpdater {
     static func restore(mode: String, selection: String, scroll: ScrollMemory?, app: AppModel) {
         if restoreState(app: app).mode != mode {
             switch mode {
-            case "snoozed": app.sidebarMode = .snoozed
+            // Saved by a build from before these were inbox sections.
+            case "snoozed": app.showHibernating()
             case "archive": app.showArchive()
             case "scheduled": app.showSchedules()
             // Before projects.list has answered; an older runner's -32601 puts

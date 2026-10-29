@@ -6,16 +6,24 @@ import Foundation
 /// last: threads that have booked themselves a message for later and have
 /// nothing for him until then (Mike asked 29 Oct). Not to be confused with
 /// a thread whose status is `.waiting`, which is waiting on him.
+/// Hibernating and Archive come last: threads put away. They were views of
+/// their own in the activity bar until Mike asked for them as sections
+/// here (29 Oct).
 public enum InboxSection: String, Sendable, CaseIterable {
-    case inbox, running, waiting
+    case inbox, running, waiting, hibernating, archived
 
     public var title: String {
         switch self {
         case .inbox: return "Inbox"
         case .running: return "Running"
         case .waiting: return "Waiting"
+        case .hibernating: return "Hibernating"
+        case .archived: return "Archive"
         }
     }
+
+    /// Hibernating and Archive: threads put away rather than live ones.
+    public var isPutAway: Bool { self == .hibernating || self == .archived }
 }
 
 /// How the Inbox section is ordered, from the sort menu on its heading.
@@ -39,11 +47,18 @@ public struct ThreadSections: Sendable, Equatable {
     public var inbox: [ThreadSummary] = []
     public var running: [ThreadSummary] = []
     public var waiting: [ThreadSummary] = []
+    /// Soonest to wake first.
+    public var hibernating: [ThreadSummary] = []
+    /// Most recently archived first.
+    public var archived: [ThreadSummary] = []
 
-    public init(inbox: [ThreadSummary] = [], running: [ThreadSummary] = [], waiting: [ThreadSummary] = []) {
+    public init(inbox: [ThreadSummary] = [], running: [ThreadSummary] = [], waiting: [ThreadSummary] = [],
+                hibernating: [ThreadSummary] = [], archived: [ThreadSummary] = []) {
         self.inbox = inbox
         self.running = running
         self.waiting = waiting
+        self.hibernating = hibernating
+        self.archived = archived
     }
 
     /// Running: a turn is underway, or background sub-agents or jobs are
@@ -54,12 +69,16 @@ public struct ThreadSections: Sendable, Equatable {
     /// first. Inbox: everything else, by `order`: by default what most
     /// needs Mike first (see `urgency`), newest first within that. A question or approval goes in
     /// the inbox even with background work going, since the thread is stuck
-    /// until he answers. Snoozed and archived threads are left out. Running
-    /// is newest activity first.
+    /// until he answers. Running is newest activity first. Snoozed and
+    /// archived threads go in Hibernating and Archive, whatever their state.
     public static func build(_ threads: some Sequence<ThreadSummary>, now: Date, wakes: [String: Schedule] = [:], order: InboxOrder = .needsYou) -> ThreadSections {
         var sections = ThreadSections()
-        for thread in threads where !thread.isArchived && !thread.isSnoozed(at: now) {
-            if thread.hasPendingReviews || thread.status == .waiting || (thread.needsYou && !thread.isWorkingInBackground) {
+        for thread in threads {
+            if thread.isArchived {
+                sections.archived.append(thread)
+            } else if thread.isSnoozed(at: now) {
+                sections.hibernating.append(thread)
+            } else if thread.hasPendingReviews || thread.status == .waiting || (thread.needsYou && !thread.isWorkingInBackground) {
                 sections.inbox.append(thread)
             } else if thread.status == .running || thread.status == .starting || thread.isWorkingInBackground {
                 sections.running.append(thread)
@@ -88,6 +107,8 @@ public struct ThreadSections: Sendable, Equatable {
             let (a, b) = (wakes[$0.id]?.nextRunAt ?? .distantFuture, wakes[$1.id]?.nextRunAt ?? .distantFuture)
             return a != b ? a < b : newestFirst($0, $1)
         }
+        sections.hibernating.sort(by: soonestToWake)
+        sections.archived.sort(by: lastArchived)
         return sections
     }
 
@@ -118,6 +139,7 @@ public struct ThreadSections: Sendable, Equatable {
     /// The inbox threads waiting on Mike or not read yet (the Dock badge).
     public var needsYou: [ThreadSummary] { inbox.filter { $0.hasPendingReviews || $0.status == .waiting || $0.needsYou } }
 
+    /// The live threads, not the ones put away.
     public var all: [ThreadSummary] { inbox + running + waiting }
 
     public subscript(section: InboxSection) -> [ThreadSummary] {
@@ -125,7 +147,17 @@ public struct ThreadSections: Sendable, Equatable {
         case .inbox: return inbox
         case .running: return running
         case .waiting: return waiting
+        case .hibernating: return hibernating
+        case .archived: return archived
         }
+    }
+
+    private static func soonestToWake(_ a: ThreadSummary, _ b: ThreadSummary) -> Bool {
+        (a.snoozedUntil ?? .distantFuture) < (b.snoozedUntil ?? .distantFuture)
+    }
+
+    private static func lastArchived(_ a: ThreadSummary, _ b: ThreadSummary) -> Bool {
+        (a.archivedAt ?? .distantPast) > (b.archivedAt ?? .distantPast)
     }
 
     /// Archived threads, most recently archived first, filtered by a search
@@ -135,13 +167,13 @@ public struct ThreadSections: Sendable, Equatable {
         return threads
             .filter { $0.isArchived }
             .filter { trimmed.isEmpty || matches($0, trimmed) }
-            .sorted { ($0.archivedAt ?? .distantPast) > ($1.archivedAt ?? .distantPast) }
+            .sorted(by: lastArchived)
     }
 
     public static func snoozed(_ threads: some Sequence<ThreadSummary>, now: Date) -> [ThreadSummary] {
         threads
             .filter { !$0.isArchived && $0.isSnoozed(at: now) }
-            .sorted { ($0.snoozedUntil ?? .distantFuture) < ($1.snoozedUntil ?? .distantFuture) }
+            .sorted(by: soonestToWake)
     }
 
     public static func matches(_ thread: ThreadSummary, _ query: String) -> Bool {

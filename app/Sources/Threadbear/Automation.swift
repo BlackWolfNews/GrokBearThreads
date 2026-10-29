@@ -239,7 +239,7 @@ enum Automation {
             let match = thread(c["id"], app)
             guard let id = match.id else { return match.error }
             if let thread = app.threads[id] {
-                app.sidebarMode = thread.isArchived ? .archive : thread.isSnoozed(at: Date()) ? .snoozed : .inbox
+                if thread.isArchived { app.showArchive() } else if thread.isSnoozed(at: Date()) { app.showHibernating() } else { app.sidebarMode = .inbox }
             }
             app.select(id)
             let session = app.session(for: id)
@@ -505,7 +505,7 @@ enum Automation {
         case "mode":
             switch c["mode"] as? String {
             case "archive": app.showArchive()
-            case "snoozed": app.sidebarMode = .snoozed
+            case "snoozed": app.showHibernating()
             case "scheduled": app.showSchedules()
             case "projects":
                 guard app.projectsSupported else { return "error this runner has no projects" }
@@ -730,7 +730,7 @@ enum Automation {
             let sections = app.sections
             let object: [String: Any] = [
                 "needsYou": sections.needsYou.map(\.id), "running": sections.running.map(\.id), "waiting": sections.waiting.map(\.id),
-                "inbox": sections.inbox.map(\.id), "snoozed": app.snoozed.count, "archived": app.archivedCount,
+                "inbox": sections.inbox.map(\.id), "snoozed": sections.hibernating.count, "archived": sections.archived.count,
                 "hover": app.hoverOverride ?? "",
             ]
             return "ok " + json(object)

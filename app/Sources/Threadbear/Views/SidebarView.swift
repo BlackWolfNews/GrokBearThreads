@@ -32,8 +32,6 @@ struct SidebarView: View {
             Group {
                 switch app.sidebarMode {
                 case .inbox: InboxList()
-                case .snoozed: SnoozedList()
-                case .archive: ArchiveList()
                 case .scheduled: ScheduledList()
                 case .projects: ProjectsList()
                 case .librarian: LibrarianView()
@@ -52,12 +50,21 @@ struct SidebarView: View {
 private struct InboxList: View {
     @Environment(AppModel.self) private var app
 
+    /// How many archived threads the Archive section shows (`ArchiveRows`).
+    @State private var archiveLimit = ArchiveRows.first
+
     var body: some View {
         let sections = app.sections
+        // The Archive section draws the search's matches, cut short.
+        let query = app.archiveQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+        let archive = ArchiveRows.shown(query.isEmpty ? sections.archived : sections.archived.filter { ThreadSections.matches($0, query) },
+                                        limit: archiveLimit, searching: !query.isEmpty, selection: app.selection)
+        // Each section's rows as drawn.
+        let drawn: (InboxSection) -> [ThreadSummary] = { $0 == .archived ? archive.rows : sections[$0] }
         // Rows are identified by section and thread (see SectionRow), so
         // the arrow keys scroll to that.
         let rowIDs = Dictionary(uniqueKeysWithValues: InboxSection.allCases.flatMap { section in
-            sections[section].map { ($0.id, SectionRow.id(section: section.title, thread: $0.id)) }
+            drawn(section).map { ($0.id, SectionRow.id(section: section.title, thread: $0.id)) }
         })
         VStack(spacing: 0) {
             SidebarButtonRow(icon: "square.and.pencil", title: "New thread", shortcut: "⌘N", tip: "Start a new thread (⌘N)", active: app.selection == nil) {
@@ -66,16 +73,21 @@ private struct InboxList: View {
             .padding(.horizontal, SidebarMetrics.outerInset)
             .padding(.top, zoomed(4))
             // A folded section's rows aren't drawn, so the arrow keys skip them.
-            let order = InboxSection.allCases.filter { !app.collapsedSections.contains($0) }.flatMap { sections[$0].map(\.id) }
+            let order = InboxSection.allCases.filter { !app.collapsedSections.contains($0) }.flatMap { drawn($0).map(\.id) }
             // Section and thread, so a thread changing section animates
             // even when the order of ids alone stays the same.
             let layout = InboxSection.allCases.filter { !app.collapsedSections.contains($0) }.flatMap { section in
-                sections[section].map { SectionRow.id(section: section.title, thread: $0.id) }
+                drawn(section).map { SectionRow.id(section: section.title, thread: $0.id) }
             }
             ThreadList(order: order, layout: layout, scrollID: { rowIDs[$0] ?? $0 }) { select in
                 if app.threadsLoaded {
                     ForEach(InboxSection.allCases, id: \.self) { section in
-                        ThreadSection(section: section, threads: sections[section], select: select)
+                        if section == .archived {
+                            ThreadSection(section: section, threads: archive.rows, total: sections.archived.count, more: archive.more,
+                                          showMore: { archiveLimit += ArchiveRows.step }, select: select)
+                        } else {
+                            ThreadSection(section: section, threads: sections[section], select: select)
+                        }
                         // Under the empty Inbox heading. Threads waiting on
                         // a schedule don't stop it: there's still nothing
                         // for Mike to do.
@@ -91,16 +103,28 @@ private struct InboxList: View {
 
 /// A heading and its rows. Empty sections other than Inbox are left out.
 /// Clicking the heading folds the rows away; folded, it shows how many.
+/// The Archive section has the archive's search under its heading, and
+/// shows the most recent few until asked for more.
 private struct ThreadSection: View {
     @Environment(AppModel.self) private var app
     let section: InboxSection
+    /// As drawn: the Archive's already searched and cut short
+    /// (`ArchiveRows`).
     let threads: [ThreadSummary]
+    /// The Archive's rows before the search and the cut, for the folded
+    /// count and to keep the section (and its search) while nothing
+    /// matches.
+    var total: Int? = nil
+    /// Archived threads left out by the cut, for "Show more".
+    var more = 0
+    var showMore: () -> Void = {}
     let select: (String) -> Void
 
     var body: some View {
-        if !threads.isEmpty || section == .inbox {
+        let count = total ?? threads.count
+        if count > 0 || section == .inbox {
             let collapsed = app.collapsedSections.contains(section)
-            SectionHeading(title: section.title, icon: section.icon, fold: .init(collapsed: collapsed, count: threads.count) {
+            SectionHeading(title: section.title, icon: section.icon, fold: .init(collapsed: collapsed, count: count) {
                 withAnimation(.snappy(duration: 0.2)) {
                     if collapsed { app.collapsedSections.remove(section) } else { app.collapsedSections.insert(section) }
                 }
@@ -108,13 +132,57 @@ private struct ThreadSection: View {
                 if section == .inbox { InboxOrderMenu() }
             }
             if !collapsed {
+                if section == .archived { ArchiveSearch() }
                 ForEach(threads.map { SectionRow(section: section.title, thread: $0) }) { row in
-                    ThreadRowView(thread: row.thread, mode: .inbox, section: section) { select(row.thread.id) }
+                    ThreadRowView(thread: row.thread, mode: RowMode(section), section: section) { select(row.thread.id) }
                         .transition(Juice.row)
-                    SubagentList(thread: row.thread, section: section.title, finishedShown: section != .inbox)
+                    // Put-away threads have nothing running to list.
+                    if !section.isPutAway {
+                        SubagentList(thread: row.thread, section: section.title, finishedShown: section != .inbox)
+                    }
+                }
+                if section == .archived {
+                    if threads.isEmpty {
+                        EmptyNote(text: app.archiveLoaded ? "Nothing archived matches." : "Loading…")
+                    } else if more > 0 {
+                        SidebarButtonRow(icon: "ellipsis", title: "Show \(min(more, ArchiveRows.step)) more",
+                                         tip: "\(more) older archived \(more == 1 ? "thread" : "threads") not shown") {
+                            withAnimation(.snappy(duration: 0.2)) { showMore() }
+                        }
+                    }
                 }
             }
         }
+    }
+}
+
+/// The search under the Archive heading: how settled threads are found
+/// again, so it stays although the rest of the inbox has none.
+private struct ArchiveSearch: View {
+    @Environment(AppModel.self) private var app
+
+    var body: some View {
+        @Bindable var app = app
+        SearchField(text: $app.archiveQuery, prompt: "Search the archive")
+            .padding(.top, zoomed(2))
+            .padding(.bottom, zoomed(4))
+    }
+}
+
+/// Which archived threads the Archive section draws. Mike's archive runs
+/// to hundreds, more than a list under the inbox should scroll through,
+/// so it shows the most recent few and more on asking. A search shows
+/// every match, and the open thread is always in (a thread chip can open
+/// an old one).
+enum ArchiveRows {
+    static let first = 20
+    static let step = 50
+
+    static func shown(_ archived: [ThreadSummary], limit: Int, searching: Bool, selection: String?) -> (rows: [ThreadSummary], more: Int) {
+        if searching { return (archived, 0) }
+        let selected = selection.flatMap { id in archived.firstIndex { $0.id == id } }.map { $0 + 1 } ?? 0
+        let count = min(archived.count, max(limit, selected))
+        return (Array(archived.prefix(count)), archived.count - count)
     }
 }
 
@@ -277,6 +345,8 @@ extension InboxSection {
         case .inbox: return "tray"
         case .running: return "bolt"
         case .waiting: return "clock"
+        case .hibernating: return "moon.zzz"
+        case .archived: return "archivebox"
         }
     }
 }
@@ -364,14 +434,23 @@ private struct SelectionKey: Equatable {
     let project: String?
 }
 
-/// Which list a row is in, for its hover buttons.
-extension SidebarMode {
+/// What kind of list a row is in: how it reads and its hover buttons.
+enum RowMode: Equatable {
+    case inbox, hibernating, archive, projects
+
+    init(_ section: InboxSection) {
+        switch section {
+        case .hibernating: self = .hibernating
+        case .archived: self = .archive
+        case .inbox, .running, .waiting: self = .inbox
+        }
+    }
+
     var rowActions: [RowAction] {
         switch self {
         case .inbox, .projects: return [.snooze, .archive]
-        case .snoozed: return [.unsnooze, .archive]
+        case .hibernating: return [.unsnooze, .archive]
         case .archive: return [.unarchive]
-        case .scheduled, .librarian: return []
         }
     }
 }
@@ -384,7 +463,7 @@ struct ThreadRowView: View {
     @Environment(AppModel.self) private var app
     @Environment(\.controlActiveState) private var activeState
     let thread: ThreadSummary
-    let mode: SidebarMode
+    let mode: RowMode
     /// The inbox section the row is under, so it doesn't repeat its heading.
     var section: InboxSection? = nil
     /// The project whose heading the row is under (the Projects view), so
@@ -567,7 +646,7 @@ struct ThreadRowView: View {
     private func trailing(_ look: ThreadRowLook) -> some View {
         // Every login in its pool is out of room; it carries on by itself.
         // Says so over whatever the turn that ran dry left (often Failed).
-        if mode != .snoozed, let waiting = thread.waitingForRoom, !thread.isArchived {
+        if mode != .hibernating, let waiting = thread.waitingForRoom, !thread.isArchived {
             Text(Pools.waitingLine(waiting, now: app.now))
                 .font(.system(size: TypeScale.sidebarMeta))
                 .foregroundStyle(SidebarMetrics.faint)
@@ -581,7 +660,7 @@ struct ThreadRowView: View {
     private func trailingStatus(_ look: ThreadRowLook) -> some View {
         switch look.status {
         case .time:
-            if mode == .snoozed {
+            if mode == .hibernating {
                 if let words = WakeWords.row(thread, now: app.now) {
                     // A topic, or Thinking… while the runner works out when.
                     Text(words.text)
@@ -955,55 +1034,6 @@ enum BusyConfirm {
     }
 }
 
-private struct SnoozedList: View {
-    @Environment(AppModel.self) private var app
-
-    var body: some View {
-        let snoozed = app.snoozed
-        VStack(spacing: 0) {
-            ModeHeader(title: "Hibernating", count: snoozed.count)
-            ThreadList(order: snoozed.map(\.id)) { select in
-                ForEach(snoozed) { thread in
-                    ThreadRowView(thread: thread, mode: .snoozed) { select(thread.id) }
-                        .id(thread.id)
-                        .transition(Juice.row)
-                }
-                if snoozed.isEmpty {
-                    EmptyNote(text: "Nothing hibernating.")
-                }
-            }
-        }
-    }
-}
-
-private struct ArchiveList: View {
-    @Environment(AppModel.self) private var app
-
-    var body: some View {
-        @Bindable var app = app
-        let archived = app.archived
-        VStack(spacing: 0) {
-            ModeHeader(title: "Archive", count: app.archiveLoaded ? app.archivedCount : nil)
-            // The way settled threads are found again, so it stays here
-            // although the inbox has no search.
-            SearchField(text: $app.archiveQuery, prompt: "Search the archive")
-                .padding(.horizontal, SidebarMetrics.outerInset)
-                .padding(.top, zoomed(4))
-                .padding(.bottom, zoomed(6))
-            ThreadList(order: archived.map(\.id)) { select in
-                ForEach(archived) { thread in
-                    ThreadRowView(thread: thread, mode: .archive) { select(thread.id) }
-                        .id(thread.id)
-                        .transition(Juice.row)
-                }
-                if archived.isEmpty {
-                    EmptyNote(text: app.archiveLoaded ? "Nothing archived matches." : "Loading…")
-                }
-            }
-        }
-    }
-}
-
 struct EmptyNote: View {
     let text: String
 
@@ -1016,7 +1046,7 @@ struct EmptyNote: View {
     }
 }
 
-/// The top of the Hibernating, Archive and Scheduled views: the view's name
+/// The top of the Scheduled view: the view's name
 /// and its count. The activity bar's top icon (or Esc) goes back to the
 /// inbox, so there's no back button.
 struct ModeHeader: View {

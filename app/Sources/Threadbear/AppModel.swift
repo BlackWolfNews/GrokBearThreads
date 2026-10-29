@@ -3,8 +3,10 @@ import BearDock
 import Observation
 import ThreadbearCore
 
+/// The view picked in the activity bar. Hibernating and Archive were views
+/// too, until they became sections of the inbox (29 Oct).
 enum SidebarMode: Equatable {
-    case inbox, snoozed, archive, scheduled, projects, librarian
+    case inbox, scheduled, projects, librarian
 }
 
 enum ConnectionState: Equatable {
@@ -108,6 +110,7 @@ final class AppModel {
             if sidebarMode != oldValue { noteNavigation() }
             if sidebarMode != .projects { showsProjectsHome = false }
             if sidebarMode != .librarian { showsLibrarianHome = false }
+            if sidebarMode != .scheduled { showsScheduledHome = false }
         }
     }
     /// Back and forward (⌘[ and ⌘], or the mouse's side buttons).
@@ -243,8 +246,18 @@ final class AppModel {
             }
         }
     }
+    /// The Scheduled page (what schedules are, what's coming up and their
+    /// numbers), from the activity bar's Scheduled. Closes the same ways.
+    var showsScheduledHome = false {
+        didSet {
+            if showsScheduledHome != oldValue {
+                noteNavigation()
+                mainContextChanged()
+            }
+        }
+    }
     /// One of those pages is in the detail area, not the selected thread.
-    var showsHomePage: Bool { showsProjectsHome || showsLibrarianHome }
+    var showsHomePage: Bool { showsProjectsHome || showsLibrarianHome || showsScheduledHome }
     /// The runner's settings for the Settings window: nil until
     /// `settings.get` answers, then replaced whole by `settings.updated`.
     var runnerSettings: RunnerSettings?
@@ -304,10 +317,8 @@ final class AppModel {
         }
     }
     /// Inbox sections folded away under their heading, remembered across
-    /// launches (Mike asked 27 Oct).
-    var collapsedSections: Set<InboxSection> = Set(
-        (UserDefaults.standard.stringArray(forKey: AppModel.collapsedSectionsKey) ?? []).compactMap(InboxSection.init(rawValue:))
-    ) {
+    /// launches (Mike asked 27 Oct). Hibernating and Archive start folded.
+    var collapsedSections: Set<InboxSection> = AppModel.storedCollapsedSections() {
         didSet { UserDefaults.standard.set(collapsedSections.map(\.rawValue).sorted(), forKey: Self.collapsedSectionsKey) }
     }
     /// The Inbox section's order, from the sort menu on its heading,
@@ -396,6 +407,20 @@ final class AppModel {
     static let lastEffortKey = "lastEffort"
     static let memoryProviders = ["claude", "codex"]
     static let collapsedSectionsKey = "collapsedSections"
+    /// Set once Hibernating and Archive have been folded the first time.
+    /// They came after collapsedSections did, so a saved list without them
+    /// can't tell "never seen" from "opened".
+    static let putAwayFoldedKey = "putAwaySectionsFolded"
+
+    static func storedCollapsedSections(_ defaults: UserDefaults = .standard) -> Set<InboxSection> {
+        var sections = Set((defaults.stringArray(forKey: collapsedSectionsKey) ?? []).compactMap(InboxSection.init(rawValue:)))
+        if !defaults.bool(forKey: putAwayFoldedKey) {
+            sections.formUnion([.hibernating, .archived])
+            defaults.set(sections.map(\.rawValue).sorted(), forKey: collapsedSectionsKey)
+            defaults.set(true, forKey: putAwayFoldedKey)
+        }
+        return sections
+    }
     static let inboxOrderKey = "inboxOrder"
     /// The error banner text shown for a connection problem, so it can be
     /// cleared when the connection comes back.
@@ -766,6 +791,7 @@ final class AppModel {
         openProjectId = nil
         showsProjectsHome = false
         showsLibrarianHome = false
+        showsScheduledHome = false
         stopShowingSubagent()
         guard let threadId else { return }
         let session = session(for: threadId)
@@ -778,14 +804,14 @@ final class AppModel {
         servePanelRequest()
     }
 
-    /// Opens a thread from a chip in a reply, showing the sidebar list it's
-    /// in (Archive or Hibernating for one that's put away).
+    /// Opens a thread from a chip in a reply, showing it in the inbox
+    /// (with Archive or Hibernating unfolded for one that's put away).
     func openThread(_ threadId: String) {
         guard let thread = threads[threadId] else { return }
         if thread.isArchived {
-            if sidebarMode != .archive { showArchive() }
-        } else if let until = thread.snoozedUntil, until > Date() {
-            sidebarMode = .snoozed
+            showArchive()
+        } else if thread.isSnoozed(at: Date()) {
+            showHibernating()
         } else {
             sidebarMode = .inbox
         }
@@ -909,6 +935,7 @@ final class AppModel {
         openProjectId = nil
         showsProjectsHome = false
         showsLibrarianHome = false
+        showsScheduledHome = false
         stopShowingSubagent()
         sidebarMode = .inbox
         focusComposer("new")
@@ -1339,9 +1366,17 @@ final class AppModel {
         return index > 0 ? ordered[index - 1] : nil
     }
 
+    /// The inbox with its Archive section unfolded.
     func showArchive() {
-        sidebarMode = .archive
+        sidebarMode = .inbox
+        collapsedSections.remove(.archived)
         loadArchive()
+    }
+
+    /// The inbox with its Hibernating section unfolded.
+    func showHibernating() {
+        sidebarMode = .inbox
+        collapsedSections.remove(.hibernating)
     }
 
     /// Refreshes the archived threads (the first list already has them).

@@ -231,7 +231,8 @@ struct AppDump: Encodable {
         func thread(_ summary: ThreadSummary, section: InboxSection? = nil) -> Thread {
             let look = ThreadRowLook(summary, section: section)
             let selectedSub = app.subagentSelection?.threadId == summary.id ? app.subagentSelection?.subagentId : nil
-            let subagents = section == nil ? [] : SubagentRows.visible(summary, threadSelected: app.selection == summary.id, selectedSubagent: selectedSub, now: app.now, finishedShown: section != .inbox).map {
+            // Put-away rows list no sub-agents, as in the sidebar.
+            let subagents = section == nil || section?.isPutAway == true ? [] : SubagentRows.visible(summary, threadSelected: app.selection == summary.id, selectedSubagent: selectedSub, now: app.now, finishedShown: section != .inbox).map {
                 SubagentInfo(id: $0.id, depth: $0.depth, status: $0.subagent.status.rawValue, title: SubagentRows.title($0.subagent),
                              detail: SubagentRows.detail($0.subagent), selected: $0.id == selectedSub)
             }
@@ -249,10 +250,6 @@ struct AppDump: Encodable {
                 Section(name: section.title, threads: built[section].map { thread($0, section: section) },
                         collapsed: app.collapsedSections.contains(section))
             }
-        case .snoozed:
-            sections = [Section(name: "Snoozed", threads: app.snoozed.map { thread($0) })]
-        case .archive:
-            sections = [Section(name: "Archive", threads: app.archived.map { thread($0) })]
         case .projects:
             // A section per project, then the threads in none.
             let built = app.projectSections
