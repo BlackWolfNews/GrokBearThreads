@@ -163,6 +163,10 @@ async function main(): Promise<void> {
     clock: realClock,
     log,
     models,
+    // Keeps any text end_turn's own sign-up or wait_for_app_restart gave.
+    appRestartAsked: (threadId) => {
+      if (!appRestarts.isWatching(threadId)) appRestarts.watch(threadId);
+    },
   });
   settings = new SettingsService({ config: cfg, models, publish: (n) => runner.publish(n), clock: realClock, poolIds: () => runner.listPools().pools.map((p) => p.id) });
   // Runners still finishing turns after a handover: connected before the

@@ -87,6 +87,7 @@ import { SERVER_NAME, approvalTitle } from './threadbear-mcp.ts';
 import { PANEL_ACK_WAIT_MS, PANEL_PLACES, resolvePanel } from './panel-requests.ts';
 import { archiveFromTool, END_TURN_TOOL, endTurnAccepted, needsFromText, needsFromTool } from './needs.ts';
 import type { Needs } from './needs.ts';
+import { asksForAppRestart } from './app-restarts.ts';
 import type { ConnectorsStatus } from './connectors.ts';
 import {
   EMPTY_PATCH_SET,
@@ -359,6 +360,9 @@ export type RunnerDeps = {
   // Projects (projects.ts): their folders' patches, the brief a session
   // starts with, and the summary's `projects`. Started by start().
   projects?: Projects;
+  // A completed turn asked Mike to Restart to Update, by end_turn or in its
+  // closing "What I need from you" (app-restarts.ts signs the thread up).
+  appRestartAsked?: (threadId: string) => void;
 };
 
 const DELTA_INTERVAL_MS = 33; // at most ~30 delta flushes a second per thread
@@ -449,6 +453,7 @@ export class Runner {
   private armingRoom = false;
   private poolsShown?: string;
   private ranDry = new Map<string, number>();
+  private appRestartAsked?: (threadId: string) => void;
 
   constructor(deps: RunnerDeps) {
     this.cfg = deps.config;
@@ -465,6 +470,7 @@ export class Runner {
     );
     this.models = deps.models;
     this.projects = deps.projects;
+    this.appRestartAsked = deps.appRestartAsked;
     this.adapters = deps.adapters;
     this.accounts = deps.accounts;
     this.usage = deps.usage;
@@ -2230,6 +2236,10 @@ export class Runner {
       if (said.asks) body.asks = said.asks;
       body.needsFrom = said.from;
     }
+    // Here rather than only in end_turn's handler: a refused end_turn
+    // leaves the asks in the reply's text, and that thread never heard
+    // Mike had restarted (29 Oct 2026).
+    if (said?.needs === 'you' && asksForAppRestart(said.asks)) this.appRestartAsked?.(rec.id);
     const ev = this.emit(st, body, turn.turnId);
     // Any completed turn replaces the last one's card; one that said
     // neither leaves no card, and counts as before.

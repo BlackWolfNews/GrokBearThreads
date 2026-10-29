@@ -817,8 +817,10 @@ data dir, so both outlast its own restarts.
 - `wait_for_app_restart` (`{ text? }`) puts the calling thread on the list,
   remembering the build running then. Asking again replaces its request.
 - An `end_turn` with `needs: "you"` whose asks mention "Restart to Update"
-  (in `action` or `where`) does the same, unless the thread is already on
-  the list, and its reply says so.
+  (in `action`, `why` or `where`) does the same, unless the thread is already on
+  the list, and its reply says so. So does a completed turn whose
+  closing "What I need from you" says it, for when end_turn was refused
+  and the asks ended up in the reply's text.
 - When the app says `hello` with a `tree` other than the one a thread
   remembered, that thread gets a `system.note` "Threadbear app restarted:
   <old short> to <new short>" and a message with `origin: "runner"`: "The

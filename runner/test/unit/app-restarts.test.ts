@@ -106,3 +106,20 @@ test('end_turn asking for Restart to Update signs the thread up; wait_for_app_re
   watcher.appHello(B);
   assert.match(said(h, thread.id).message, /Drag Highlights about\.$/);
 });
+
+test('a turn whose end_turn was refused still signs up from its closing "What I need from you"', () => {
+  // The thread that asked Mike to reply "restarted" instead (29 Oct).
+  const asked: string[] = [];
+  const h = makeHarness(undefined, {}, { appRestartAsked: (id) => asked.push(id) });
+  const { thread } = h.runner.create({ text: 'Share a thread', accountId: 'claude-3' });
+  const s = h.adapter.last;
+  s.init();
+  s.text('m1', 'Landed.\n\n**What I need from you**\n\n1. Choose Restart to Update from the Threadbear menu, then reply "restarted".');
+  s.result('completed');
+  assert.deepEqual(asked, [thread.id]);
+  // A turn asking for something else doesn't.
+  h.runner.send(thread.id, 'ok');
+  h.adapter.last.text('m2', 'Done.\n\n**What I need from you**\n\n1. Paste the key.');
+  h.adapter.last.result('completed');
+  assert.deepEqual(asked, [thread.id]);
+});
