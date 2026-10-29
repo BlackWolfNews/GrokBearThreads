@@ -1790,7 +1790,6 @@ extension Automation {
         return "ok " + (AppDump.decisions(thread, app: app) ?? []).joined(separator: "\n")
     }
 }
-#endif
 
 /// Frame gaps from the window's display link, for `mode` with "frames".
 @MainActor
@@ -1822,3 +1821,4 @@ private final class FrameWatch: NSObject {
         return String(format: "%d frames at %.1f ms, %d dropped, worst %.0f ms, %d over 20 ms", gaps.count + 1, frame, dropped, worst, missed)
     }
 }
+#endif
