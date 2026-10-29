@@ -79,9 +79,12 @@ final class ActivityRecorder {
         record(launch)
     }
 
-    /// The last line, written before the app goes.
+    /// The last line, written before the app goes. With its build: in a
+    /// handover the new app has launched before the old one quits.
     func quit() {
-        record(ActivityEvent(kind: .quit))
+        var e = ActivityEvent(kind: .quit)
+        e.build = BuildInfo.read(bundle: Bundle.main.bundleURL)?.short
+        record(e)
         writer?.flush()
     }
 

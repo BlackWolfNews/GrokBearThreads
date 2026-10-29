@@ -120,10 +120,18 @@ private struct GeneralSettings: View {
                 }
 
                 Section {
-                    Toggle("Keep an activity log", isOn: $activityLog)
-                        .tip("Note what you click and open in this app, so agents working on Threadbear can see how you use it")
+                    Toggle(isOn: $activityLog) {
+                        HStack(spacing: 6) {
+                            Text("Keep an activity log")
+                            // What's in it, for anyone wary of turning it
+                            // on; the footnote is why they'd want to.
+                            InfoTip("It notes the buttons, rows and menu items you use (by their tooltips and titles), your shortcuts, the threads and pages you open, and when you send or answer something, never what you type. Agents read it with tb activity.")
+                        }
+                    }
+                    .tip("Note what you click and open in this app")
                 } footer: {
-                    Footnote("It stays on this Mac for 30 days and Threadbear never sends it anywhere. Agents read it with tb activity.")
+                    // Why it's worth turning on (Mike, 29 Oct).
+                    Footnote("When you ask a thread to change Threadbear, its agent can check this log first to see how you really use the app. It stays on this Mac for 30 days and Threadbear never sends it anywhere.")
                 }
 
                 Section {

@@ -50,6 +50,8 @@ test('each kind reads as a line, with the thread it was in', () => {
   assert.equal(line({ kind: 'view', mode: 'projects', page: 'projects' }), 'view    projects page (projects)');
   assert.equal(line({ kind: 'send', new: true, images: 2 }), 'send    new thread with 2 pictures');
   assert.equal(line({ kind: 'approval', decision: 'allow', thread: id }), 'answer  allow · abcdef12 Fix the tests');
+  assert.equal(line({ kind: 'quit', build: 'b6e6420' }), 'quit    b6e6420');
+  assert.equal(line({ kind: 'quit' }), 'quit');
 });
 
 test('--thread picks out one thread, its own panel included', () => {

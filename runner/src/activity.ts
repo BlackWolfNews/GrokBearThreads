@@ -138,6 +138,10 @@ export function describe(e: ActivityEvent, titles: Map<string, string> = new Map
       return `app     ${e.state ?? ''}`;
     case 'launch':
       return `launch  ${[e.version, e.build].filter(Boolean).join(' ')}${e.showing ? ` showing ${e.showing.join(', ')}` : ''}`;
+    case 'quit':
+      // The build says which app went: in a handover the new one has
+      // launched by then.
+      return `quit${e.build ? `    ${e.build}` : ''}`;
     default:
       return `${e.kind.padEnd(7)} ${e.target ?? ''}${on}`;
   }
