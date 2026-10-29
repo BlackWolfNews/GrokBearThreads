@@ -673,6 +673,7 @@ take the streaming reasoning row's place.
 | `clis.check` | `{ provider?: Provider }` | `{ clis: CliStatus[] }`. Starts a version check (both CLIs when `provider` is absent) and returns at once, with the state as it was when the call arrived; the result comes through `clis.updated` |
 | `clis.update` | `{ provider: Provider, version?: string, force?: boolean }` | `{ clis: CliStatus[] }`. Starts an update and returns at once, with `update.state` `running` or `waiting`; progress comes through `clis.updated`. `version` picks a kept Codex version (how "Go back" works). `force: true` installs a held version anyway |
 | `clis.setPolicy` | `{ provider: Provider, policy: "auto" \| "notify" \| "off" }` | `{ clis: CliStatus[] }` |
+| `usage.stats` | `{ days?: number }` | `UsageStats` (see Usage history): each login's tokens by the hour and its limit readings over time, for the Usage panel's charts. `days` is 1 to 14 (default 8). A runner older than this answers `-32601` |
 
 Errors use JSON-RPC error objects: `-32602` bad params, `-32004` thread not
 found, `-32005` schedule not found, `-32006` sub-agent not found, `-32007` project not found, `-32010` account not found, `-32020` busy (e.g. two sends racing), `-32030` a draining runner no longer holds that thread (Handovers),
@@ -1039,6 +1040,50 @@ puts the thread back and fails the call. A private folder's thread is
 asked about with his words alone. Any other snooze, a wake or a message
 clears `wakeWhen`, and a runner that restarts while one is pending wakes
 the thread, as the answer is lost.
+
+## Usage history
+
+The Usage panel shows more than what's left: how many tokens each login
+has spent today, how fast, and how its limits have gone down over the
+week. `usage.stats` answers with what the runner has kept:
+
+```ts
+type UsageStats = {
+  generatedAt: string
+  // Whether the first read of the CLIs' transcripts has finished. Until it
+  // has, `tokens` is partial and the app says so.
+  ready: boolean
+  // Per login, the hours it spent anything in, oldest first. Each hour is
+  // [startMs, input, output, cacheRead, cacheWrite]: startMs is the start
+  // of the hour (UTC, so the app buckets days in its own time zone).
+  // Claude's input excludes cache reads and writes; Codex's input excludes
+  // its cached input (counted as cacheRead).
+  tokens: { accountId: string, hours: [number, number, number, number, number][] }[]
+  // Per login, readings of its 5-hour and weekly windows over time, oldest
+  // first: [atMs, remainingPercent]. A sample is kept when a window moves
+  // by half a point or more, at a reset, and at least every 30 minutes
+  // while readings keep coming, so a flat line still has points.
+  limits: { accountId: string, kind: "five_hour" | "weekly", samples: [number, number][] }[]
+}
+```
+
+- **Tokens** come from the CLIs' own transcripts, not just Threadbear's
+  threads, so turns run in a terminal or another app count too: Claude's
+  `<configDir>/projects/**/*.jsonl` (assistant lines, each message id
+  counted once at its biggest, as Claude Code writes a message several
+  times while it streams), and Codex's `<configDir>/sessions` and
+  `archived_sessions` (`token_count` events, the difference between one
+  total and the last). The runner reads only what's new since its last
+  look, once a minute, and keeps the hourly totals and where it got to in
+  each file in `<data dir>/token-tally.json`, so a restart doesn't read
+  everything again. The first read goes back 14 days and takes a while
+  (`ready: false` until it's done). Hours older than 15 days are dropped.
+  `THREADBEAR_TOKEN_TALLY=off` turns the reading off (dev runners and the
+  e2e tests set it): `tokens` stays empty and `ready` false.
+- **Limit readings** are whatever `accounts.updated` would show, sampled
+  as above into `<data dir>/usage-history.json`, kept for 8 days.
+- A draining runner (Handovers) keeps neither file: both are the new
+  runner's to write.
 
 ## Pools
 

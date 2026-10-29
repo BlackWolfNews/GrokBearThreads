@@ -10,6 +10,7 @@ import type { Account, AccountUsage, Provider, UsageWindow, UsageWindowKind } fr
 import type { Clock, TimerHandle } from './clock.ts';
 import type { Logger } from './log.ts';
 import { atomicWriteFileSync, readJsonSync } from './fsutil.ts';
+import type { UsageHistory } from './usage-history.ts';
 
 // blockedUntil (ms) says when a block ends when no window does: the runner
 // marks a login blocked when a turn hits its limit (pools, runner.ts) and
@@ -159,9 +160,12 @@ export class UsageStore {
   private wakeTimer?: TimerHandle;
   private wakeAt = 0;
   private running = false;
+  // Samples what each login shows over time (usage-history.ts).
+  private history?: UsageHistory;
 
-  constructor(o: { limitsFile: string; dataDir: string; clock: Clock; log: Logger }) {
+  constructor(o: { limitsFile: string; dataDir: string; clock: Clock; log: Logger; history?: UsageHistory }) {
     this.limitsFile = o.limitsFile;
+    this.history = o.history;
     this.usageFile = path.join(o.dataDir, 'usage.json');
     this.clock = o.clock;
     this.log = o.log;
@@ -202,6 +206,7 @@ export class UsageStore {
     this.pollTimer = undefined;
     this.wakeTimer?.cancel();
     this.wakeTimer = undefined;
+    this.history?.flush();
   }
 
   onChange(fn: (accountIds: string[]) => void): () => void {
@@ -376,6 +381,7 @@ export class UsageStore {
     const ids: string[] = [];
     for (const a of this.known.values()) {
       const now = this.compute(a);
+      this.history?.observe(a.id, now);
       const was = this.sent.get(a.id);
       if (!sameUsage(was, now, exact)) {
         this.sent.set(a.id, now);
@@ -399,6 +405,7 @@ export class UsageStore {
   // memory only; usage.json is the new runner's to write.
   stopWriting(): void {
     this.writes = false;
+    this.history?.stopWriting();
   }
 
   private writes = true;

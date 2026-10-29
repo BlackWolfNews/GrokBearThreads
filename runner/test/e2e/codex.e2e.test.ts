@@ -63,7 +63,7 @@ async function startRunner(): Promise<void> {
       THREADBEAR_IDLE_MS: String(IDLE_MS),
       THREADBEAR_DEBUG: '1',
       // Never install a CLI: Codex runs from the npm copy next to Node.
-      THREADBEAR_CLI_UPDATES: 'off',
+      THREADBEAR_CLI_UPDATES: 'off', THREADBEAR_TOKEN_TALLY: 'off',
     },
     stdio: ['ignore', 'pipe', 'pipe'],
   });

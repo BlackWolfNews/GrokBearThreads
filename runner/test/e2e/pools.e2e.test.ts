@@ -43,7 +43,7 @@ async function startRunner(): Promise<void> {
       THREADBEAR_PORT: '0',
       THREADBEAR_LOG: path.join(root, 'runner.log'),
       THREADBEAR_DEBUG: '1',
-      THREADBEAR_CLI_UPDATES: 'off',
+      THREADBEAR_CLI_UPDATES: 'off', THREADBEAR_TOKEN_TALLY: 'off',
       THREADBEAR_FOLLOW_MAIN: '0',
     },
     stdio: ['ignore', 'pipe', 'pipe'],

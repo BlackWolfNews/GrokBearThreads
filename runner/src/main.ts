@@ -28,6 +28,9 @@ import { resolveCodexBinary } from './adapters/codex/appserver.ts';
 import { checkSurface, testedVersion } from './adapters/codex/surface.ts';
 import { CliUpdates } from './updates/manager.ts';
 import { UsageStore } from './usage.ts';
+import { UsageHistory } from './usage-history.ts';
+import { TokenTally } from './token-tally.ts';
+import { usageStatsMethods } from './usage-stats.ts';
 import { RpcServer } from './rpc.ts';
 import { realClock } from './clock.ts';
 import { acquireLock } from './lock.ts';
@@ -78,9 +81,14 @@ async function main(): Promise<void> {
   const token = readToken(cfg.home);
   // Token Stats' limits.json as a baseline, plus what the threads' own
   // turns report; the registry puts it on every account.
-  const usage = new UsageStore({ limitsFile: cfg.tokenStatsLimitsFile, dataDir: cfg.home, clock: realClock, log });
+  // What each login shows over time, and its tokens by the hour, for the
+  // Usage panel's charts (docs/protocol.md, "Usage history").
+  const usageHistory = new UsageHistory({ dataDir: cfg.home, clock: realClock, log });
+  const usage = new UsageStore({ limitsFile: cfg.tokenStatsLimitsFile, dataDir: cfg.home, clock: realClock, log, history: usageHistory });
   usage.start();
   const accounts = new AccountRegistry(cfg, usage);
+  const tally = new TokenTally({ dataDir: cfg.home, clock: realClock, log, accounts: () => accounts.list() });
+  if (cfg.tokenTally !== false) tally.start();
   // Every session gets tools for driving Threadbear itself, bound to its
   // own thread. Sessions only start after the runner exists.
   let runner!: Runner;
@@ -319,7 +327,7 @@ async function main(): Promise<void> {
   updaterReady = true;
 
   runner.attachClis(updates);
-  const methods = { ...restartMethods(restarter), ...scheduleMethods(scheduler), ...projectMethods(projects), ...librarianMethods(librarian), ...connectorsMethods(connectors), ...settingsMethods(settings), ...modelMethods(models), ...devicesMethods(sync) };
+  const methods = { ...restartMethods(restarter), ...scheduleMethods(scheduler), ...projectMethods(projects), ...librarianMethods(librarian), ...connectorsMethods(connectors), ...settingsMethods(settings), ...modelMethods(models), ...devicesMethods(sync), ...usageStatsMethods({ tally, history: usageHistory, clock: realClock }) };
   // runner.status carries the CLI statuses too (protocol, "runner.status").
   const restartStatus = methods['runner.status'];
   methods['runner.status'] = (p) => {
@@ -407,6 +415,7 @@ async function main(): Promise<void> {
     connectors.stop();
     projects.stop();
     usage.stop();
+    tally.stop();
     updates.stop();
     settings.stop();
     // A restart's new release writes everything again under the same
@@ -450,6 +459,7 @@ async function main(): Promise<void> {
       updates.stop();
       settings.stop();
       usage.stopWriting();
+      tally.stopWriting();
       // The new release mirrors from here on.
       void sync.stop();
       // The older runners it was connected to are the new primary's now:

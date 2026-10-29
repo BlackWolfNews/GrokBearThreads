@@ -101,7 +101,7 @@ describe('convex mirror e2e', { skip: LOCAL ? false : 'no local Convex deploymen
         THREADBEAR_CLAUDE_MAIN_JSON: path.join(home, 'fake-main.json'),
         THREADBEAR_CODEX_MAIN_DIR: path.join(home, 'no-codex-main'),
         THREADBEAR_TOKEN_STATS_LIMITS: path.join(home, 'no-limits.json'),
-        THREADBEAR_CLI_UPDATES: 'off',
+        THREADBEAR_CLI_UPDATES: 'off', THREADBEAR_TOKEN_TALLY: 'off',
         THREADBEAR_SYNC_URL: CONVEX_URL,
       },
       stdio: ['ignore', 'pipe', 'pipe'],

@@ -127,6 +127,71 @@ let accounts = [
     }),
   },
 ];
+// usage.stats (docs/protocol.md, "Usage history"), made up but steady: the
+// same seed every time, so screenshots only change when the code does.
+// Each login works the hours of a day (busier in the afternoon, quiet at
+// night), at its own pace; its weekly and 5-hour readings go down with its
+// tokens and come back at its resets, ending on what `accounts` says now.
+const tokenPace = { 'claude-main': 1.0, 'claude-2': 0.08, 'claude-3': 0.45, 'claude-4': 0.7, 'codex-main': 0.25 };
+function seeded(seed) {
+  let x = seed >>> 0;
+  return () => ((x = (x * 1664525 + 1013904223) >>> 0) / 2 ** 32);
+}
+function mockUsageStats(days) {
+  const HOUR = 3_600_000;
+  const now = Date.now();
+  const since = now - days * 24 * HOUR;
+  const firstHour = Math.floor(since / HOUR) * HOUR;
+  const tokens = [];
+  const limits = [];
+  for (const [i, a] of accounts.entries()) {
+    const pace = tokenPace[a.id] ?? 0.2;
+    const rand = seeded(17 + i * 101);
+    const hours = [];
+    for (let h = firstHour; h <= now; h += HOUR) {
+      const local = new Date(h).getHours();
+      // A working day: nothing from 1am to 7am, building to mid-afternoon.
+      const shape = local < 7 && local >= 1 ? 0 : Math.max(0, Math.sin(((local - 7 + 24) % 24) / 18 * Math.PI));
+      const busy = shape * pace * (0.4 + rand() * 1.2);
+      if (busy < 0.02) continue;
+      const total = Math.round(busy * 28_000_000);
+      // Mostly cache reads, as real Claude and Codex turns are.
+      const cacheRead = Math.round(total * 0.94);
+      const cacheWrite = a.provider === 'codex' ? 0 : Math.round(total * 0.04);
+      const output = Math.round(total * 0.006);
+      hours.push([h, total - cacheRead - cacheWrite - output, output, cacheRead, cacheWrite]);
+    }
+    tokens.push({ accountId: a.id, hours });
+    for (const kind of ['weekly', 'five_hour']) {
+      const w = a.usage?.windows?.find((x) => x.kind === kind);
+      if (!w?.resetsAt) continue;
+      const length = (kind === 'weekly' ? 168 : 5) * HOUR;
+      const reset = Date.parse(w.resetsAt);
+      // Walk back from now, one window at a time: each goes from 100 down
+      // to where it ended, the current one to what it says now.
+      const samples = [];
+      let end = now;
+      let endPct = w.remainingPercent;
+      for (let start = reset - length; end > since; start -= length) {
+        const from = Math.max(start, since);
+        const steps = Math.max(2, Math.round((end - from) / (kind === 'weekly' ? 3 * HOUR : 20 * 60_000)));
+        const run = [];
+        for (let k = 0; k <= steps; k++) {
+          const t = from + ((end - from) * k) / steps;
+          const done = (t - start) / (end - start);
+          run.push([Math.round(t), Math.round((100 - (100 - endPct) * Math.pow(done, 1.1)) * 10) / 10]);
+        }
+        samples.unshift(...run);
+        end = start - 1;
+        endPct = kind === 'weekly' ? 20 + rand() * 40 : 10 + rand() * 60;
+        // Only today's 5-hour windows: older ones say nothing more.
+        if (kind === 'five_hour' && end < now - 15 * HOUR) break;
+      }
+      limits.push({ accountId: a.id, kind, samples });
+    }
+  }
+  return { generatedAt: iso(), ready: true, tokens, limits };
+}
 // mock.accounts {old: true}: acts like a runner from before step 4, with
 // no Codex accounts, no usage, notes or plans on the rest, and no clis.*
 // requests.
@@ -362,6 +427,12 @@ async function dispatch(client, method, p) {
     }
     // The CLI requests only report and pretend: nothing is checked or
     // installed. An update "runs" for a couple of seconds.
+    case 'usage.stats': {
+      if (oldRunner) throw rpcError(-32601, `Unknown method ${method}`);
+      const days = p.days ?? 8;
+      if (!Number.isInteger(days) || days < 1 || days > 14) throw rpcError(-32602, 'days must be a whole number from 1 to 14');
+      return mockUsageStats(days);
+    }
     case 'clis.list':
     case 'clis.check':
     case 'clis.update':

@@ -81,7 +81,7 @@ test('a busy turn finishes on the old runner while the new one takes everything 
       THREADBEAR_HOME: home,
       THREADBEAR_PORT: String(port),
       THREADBEAR_LOG: path.join(root, 'runner.log'),
-      THREADBEAR_CLI_UPDATES: 'off',
+      THREADBEAR_CLI_UPDATES: 'off', THREADBEAR_TOKEN_TALLY: 'off',
       THREADBEAR_FOLLOW_MAIN: '0',
       THREADBEAR_DEBUG: '1',
     },

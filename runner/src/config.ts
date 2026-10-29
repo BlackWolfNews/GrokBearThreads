@@ -76,6 +76,10 @@ export type Config = {
   codexMainDir: string; // codex-main's CODEX_HOME
   tokenStatsLimitsFile: string; // Token Stats' limits.json, read only
   cliUpdates: CliUpdatesConfig;
+  // Reads the CLIs' transcripts for the Usage panel's token counts
+  // (token-tally.ts). THREADBEAR_TOKEN_TALLY=off turns it off: a dev runner
+  // would read every login's last 14 days (gigabytes) for nothing.
+  tokenTally?: boolean;
   accountNotes: Record<string, string>;
   poolFolders?: Record<string, string[]>;
   // runner.json's pools as written (pools.ts readPools checks each);
@@ -220,6 +224,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
       env.THREADBEAR_TOKEN_STATS_LIMITS || '~/Library/Application Support/Token Stats/limits.json',
     ),
     cliUpdates: cliUpdatesConfig(json.cliUpdates, env.THREADBEAR_CLI_UPDATES),
+    tokenTally: env.THREADBEAR_TOKEN_TALLY !== 'off',
     accountNotes: stringMap(json.accountNotes) ?? { ...DEFAULT_ACCOUNT_NOTES },
     poolFolders: folderMap(json.poolFolders) ?? { ...DEFAULT_POOL_FOLDERS },
     ...(Array.isArray(json.pools) && json.pools.length ? { pools: json.pools } : {}),

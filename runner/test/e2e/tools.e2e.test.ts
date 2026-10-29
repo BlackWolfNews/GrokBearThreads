@@ -59,7 +59,7 @@ describe('threadbear tools end to end (real Claude CLI)', { concurrency: false }
     fs.writeFileSync(path.join(b, 'marker.txt'), 'you are in the new folder\n');
     runner = spawn(process.execPath, ['src/main.ts'], {
       cwd: RUNNER_DIR,
-      env: { ...process.env, THREADBEAR_HOME: home, THREADBEAR_PORT: '0', THREADBEAR_LOG: path.join(root, 'runner.log'), THREADBEAR_DEBUG: '1', THREADBEAR_CLI_UPDATES: 'off' },
+      env: { ...process.env, THREADBEAR_HOME: home, THREADBEAR_PORT: '0', THREADBEAR_LOG: path.join(root, 'runner.log'), THREADBEAR_DEBUG: '1', THREADBEAR_CLI_UPDATES: 'off', THREADBEAR_TOKEN_TALLY: 'off' },
       stdio: ['ignore', 'pipe', 'pipe'],
     });
     const port = await new Promise<number>((resolve, reject) => {
