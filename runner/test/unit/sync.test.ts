@@ -924,3 +924,60 @@ test('sharing: pictures of a shared thread go to file storage, once each, and go
   await sync.flushNow();
   assert.deepEqual(calls.filter((c) => c.fn === 'sync:dropShareImages').map((c) => c.args), [{ key: 'k', threadId: t.id }]);
 });
+
+test('sharing: a shared thread seen before it comes across in a handover has its pictures sent once it arrives', async () => {
+  const dir = tmpDir();
+  const pic = path.join(dir, 'shot.png');
+  fs.writeFileSync(pic, Buffer.from('PNGBYTES'));
+  const calls: Call[] = [];
+  const h = makeHarness();
+  const t = h.runner.create({ text: 'look', cwd: h.cfg.defaults.cwd, accountId: 'claude-3' }).thread;
+  const s = session(h, t.id);
+  s.init();
+  s.text('m1', `![shot](${pic})`);
+  s.result('completed');
+  await tick();
+  h.runner.share(t.id, { access: 'link' });
+  // Still on the draining runner: its update comes through, but this
+  // runner can't read the thread yet.
+  let here = false;
+  const sync = new ConvexSync({
+    config: { enabled: true, url: 'https://x.convex.cloud', runnerId: 'r1' },
+    key: 'k',
+    runner: {
+      onNotification: (fn) => h.runner.onNotification(fn),
+      list: (i) => (here ? h.runner.list(i) : []),
+      get: (id) => {
+        if (!here) throw new Error('no such thread');
+        return h.runner.get(id);
+      },
+      events: (id, o) => h.runner.events(id, o),
+    },
+    version: '0.1.0+test',
+    startedAt: '2026-10-29T00:00:00.000Z',
+    clock: h.clock,
+    log: nullLogger,
+    post: async (kind, fn, args) => {
+      calls.push({ kind, fn, args });
+      if (fn === 'sync:heartbeat') return { apiVersion: SHARE_API_VERSION };
+      if (fn === 'sync:shareImages') return [];
+      if (fn === 'sync:iconUploadUrl') return 'https://upload.example/u';
+      return null;
+    },
+    upload: async () => 'st_1',
+  });
+  sync.start();
+  await tick(20);
+  h.runner.publish({ method: 'thread.updated', params: { thread: h.runner.get(t.id) } });
+  h.clock.advance(SYNC_COALESCE_MS);
+  await tick(20);
+  await sync.flushNow();
+  assert.equal(calls.filter((c) => c.fn === 'sync:addShareImage').length, 0);
+  // It comes across: its update now finds it here.
+  here = true;
+  h.runner.publish({ method: 'thread.updated', params: { thread: h.runner.get(t.id) } });
+  h.clock.advance(SYNC_COALESCE_MS);
+  await tick(20);
+  await sync.flushNow();
+  assert.equal(calls.filter((c) => c.fn === 'sync:addShareImage').length, 1);
+});

@@ -900,7 +900,11 @@ export class ConvexSync {
       try {
         t = this.deps.runner.get(threadId);
       } catch {
+        // Not here (yet): during a handover the draining runner's updates
+        // come through for threads it still has. Forget it was seen, so
+        // its update on coming across starts the look through again.
         this.imagesDue.delete(threadId);
+        this.sharedNow.delete(threadId);
         continue;
       }
       const rows = (await this.post('query', 'sync:shareImages', { key, threadId })) as { seq: number; path: string }[] | null;
