@@ -96,29 +96,16 @@ enum AppUpdate {
     /// he hasn't touched this one for a while). Running threads don't hold
     /// it up: the runner owns the turns and the app replays what it missed
     /// when it reconnects.
-    static func shouldAutoRestart(staged: Bool, loaded: Bool, hasDrafts: Bool, active: Bool, idleFor: TimeInterval) -> Bool {
+    ///
+    /// There's no warning first (Mike, 29 Oct: the countdown card went once
+    /// restarts were handovers), so with the app in front it only goes when
+    /// a handover would go unseen (`inPlace`: the main window is on screen
+    /// and the one he's in). A full-screen or minimised window restarts the
+    /// old way, and Settings or a panel's own window would close, so those
+    /// wait for Restart to Update or for him to be in another app.
+    static func shouldAutoRestart(staged: Bool, loaded: Bool, hasDrafts: Bool, active: Bool, idleFor: TimeInterval, inPlace: Bool) -> Bool {
         guard staged, loaded, !hasDrafts else { return false }
-        return !active || idleFor >= AppUpdater.autoRestartIdleTime
-    }
-
-    /// What one second of the countdown before a restart Mike didn't ask
-    /// for does. `left` is the seconds still showing (nil: no countdown);
-    /// `ready` is `shouldAutoRestart` with his Cancel taken into account;
-    /// `safe` is whether a restart would still lose nothing (no drafts,
-    /// connected). Being in the app doesn't stop the count, as he has the
-    /// card's buttons for that; starting to type does.
-    enum CountdownStep: Equatable {
-        case wait
-        case start(Int)
-        case tick(Int)
-        case restart
-        case cancel
-    }
-
-    static func countdownStep(left: Int?, ready: Bool, safe: Bool) -> CountdownStep {
-        guard let left else { return ready ? .start(AppUpdater.countdownSeconds) : .wait }
-        guard safe else { return .cancel }
-        return left <= 1 ? .restart : .tick(left - 1)
+        return !active || (inPlace && idleFor >= AppUpdater.autoRestartIdleTime)
     }
 
     /// Opens `bundle` again once this process has exited: a shell that
@@ -169,9 +156,6 @@ final class AppUpdater {
     /// not using it. Short: a restart takes a second or two and puts the
     /// open thread back, so there's little to wait for (Mike, 28 Oct).
     nonisolated static let autoRestartIdleTime: TimeInterval = 5
-    /// How long the "Restarting to update" card counts down before a
-    /// restart Mike didn't ask for, so he can stop it (Mike, 28 Oct).
-    nonisolated static let countdownSeconds = 5
     static let logPath = NSHomeDirectory() + "/Library/Logs/threadbear-update.log"
     /// Where the app was (the thread and sidebar list) when it restarted
     /// itself, put back once the threads have loaded.
@@ -223,11 +207,6 @@ final class AppUpdater {
     @ObservationIgnored private var restarting = false
     /// The staged build was swapped in before quitting, for a handover.
     @ObservationIgnored private var swappedEarly = false
-    /// The seconds left on the restart countdown, while the card shows.
-    private(set) var countdown: Int?
-    /// The staged build Mike cancelled the countdown for: not counted down
-    /// again, though "Restart to Update" still takes it. A newer one is.
-    @ObservationIgnored private var declined: String?
 
     var enabled: Bool { running != nil && disabledReason == nil }
 
@@ -275,54 +254,27 @@ final class AppUpdater {
         }
     }
 
-    /// Counts down to a restart into the staged build when that wouldn't
-    /// interrupt anything, and restarts when the count runs out. Called
-    /// every second (`autoRestartInterval`), which is what moves the count.
+    /// Restarts into the staged build as soon as that wouldn't interrupt
+    /// anything (`shouldAutoRestart`). Called every second
+    /// (`autoRestartInterval`), so it goes soon after the idle time.
     func considerAutoRestart(app: AppModel) {
-        guard !restarting else { return }
-        guard let staged else {
-            countdown = nil
-            return
-        }
+        guard !restarting, let staged else { return }
         // An open schedule editor counts as something typed: a restart
         // would throw away what's in it.
         let hasDrafts = app.drafts.values.contains { !$0.text.isEmpty || !$0.images.isEmpty } || app.scheduleEditor != nil
         let loaded = app.threadsLoaded && app.connection == .connected
         let active = NSApp.isActive
-        let ready = staged.appTree != declined
-            && AppUpdate.shouldAutoRestart(staged: true, loaded: loaded, hasDrafts: hasDrafts, active: active,
-                                           idleFor: Date().timeIntervalSince(lastInput))
-        switch AppUpdate.countdownStep(left: countdown, ready: ready, safe: loaded && !hasDrafts) {
-        case .wait:
-            break
-        case .start(let seconds):
-            AppLog.write("update", "counting down to \(staged.short): nothing typed, " + (active ? "no input for a while" : "the app isn't in front"))
-            countdown = seconds
-        case .tick(let seconds):
-            countdown = seconds
-        case .cancel:
-            AppLog.write("update", "stopped the countdown: something was typed, or the runner went away")
-            countdown = nil
-        case .restart:
-            AppLog.write("update", "restarting into \(staged.short)")
-            restart(app: app, inBackground: !NSApp.isActive)
-        }
-    }
-
-    /// The countdown card's Cancel: stay on this build until Mike restarts
-    /// or a newer one is staged.
-    func cancelCountdown() {
-        guard countdown != nil else { return }
-        declined = staged?.appTree
-        countdown = nil
-        AppLog.write("update", "countdown cancelled; \(staged?.short ?? "the staged build") waits for Restart to Update")
+        // A handover only keeps the main window: with Settings, a panel's
+        // own window or a dialog in front of it, he'd see that one close.
+        let main = Handover.windowToHandOver()
+        let inPlace = main != nil && (NSApp.keyWindow == nil || NSApp.keyWindow === main)
+        guard AppUpdate.shouldAutoRestart(staged: true, loaded: loaded, hasDrafts: hasDrafts, active: active,
+                                          idleFor: Date().timeIntervalSince(lastInput), inPlace: inPlace) else { return }
+        AppLog.write("update", "restarting into \(staged.short): nothing typed, " + (active ? "no input for a while" : "the app isn't in front"))
+        restart(app: app, inBackground: !active)
     }
 
     #if DEBUG
-    /// Shows the countdown card with no build behind it, for a scripted
-    /// app's screenshot (Automation's `restart-countdown`).
-    func previewCountdown(_ seconds: Int?) { countdown = seconds }
-
     /// Hands over to a new copy of this same bundle, as a restart into an
     /// update does, for a scripted app (Automation's `handover`).
     func previewHandover(app: AppModel) -> Bool {
@@ -517,7 +469,6 @@ final class AppUpdater {
     /// a made-up update would otherwise quit and open Mike's.
     func restartToUpdate() {
         guard staged != nil, enabled else { return }
-        countdown = nil
         restart(app: AppModel.shared, inBackground: false)
     }
 

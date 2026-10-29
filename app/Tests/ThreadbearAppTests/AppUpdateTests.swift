@@ -88,25 +88,24 @@ final class AppUpdateTests: XCTestCase {
 
     func testRestartsByItselfOnlyWhenNothingWouldBeInterrupted() {
         let idle = AppUpdater.autoRestartIdleTime
-        // Another app in front: straight away.
-        XCTAssertTrue(AppUpdate.shouldAutoRestart(staged: true, loaded: true, hasDrafts: false, active: false, idleFor: 0))
+        // Another app in front: straight away, handover or not.
+        XCTAssertTrue(AppUpdate.shouldAutoRestart(staged: true, loaded: true, hasDrafts: false, active: false, idleFor: 0, inPlace: true))
+        XCTAssertTrue(AppUpdate.shouldAutoRestart(staged: true, loaded: true, hasDrafts: false, active: false, idleFor: 0, inPlace: false))
         // Threadbear in front: only after a while with no input.
-        XCTAssertFalse(AppUpdate.shouldAutoRestart(staged: true, loaded: true, hasDrafts: false, active: true, idleFor: idle - 1))
-        XCTAssertTrue(AppUpdate.shouldAutoRestart(staged: true, loaded: true, hasDrafts: false, active: true, idleFor: idle))
+        XCTAssertFalse(AppUpdate.shouldAutoRestart(staged: true, loaded: true, hasDrafts: false, active: true, idleFor: idle - 1, inPlace: true))
+        XCTAssertTrue(AppUpdate.shouldAutoRestart(staged: true, loaded: true, hasDrafts: false, active: true, idleFor: idle, inPlace: true))
         // Unsent text, no build or no thread list: never.
-        XCTAssertFalse(AppUpdate.shouldAutoRestart(staged: true, loaded: true, hasDrafts: true, active: false, idleFor: idle))
-        XCTAssertFalse(AppUpdate.shouldAutoRestart(staged: false, loaded: true, hasDrafts: false, active: false, idleFor: idle))
-        XCTAssertFalse(AppUpdate.shouldAutoRestart(staged: true, loaded: false, hasDrafts: false, active: false, idleFor: idle))
+        XCTAssertFalse(AppUpdate.shouldAutoRestart(staged: true, loaded: true, hasDrafts: true, active: false, idleFor: idle, inPlace: true))
+        XCTAssertFalse(AppUpdate.shouldAutoRestart(staged: false, loaded: true, hasDrafts: false, active: false, idleFor: idle, inPlace: true))
+        XCTAssertFalse(AppUpdate.shouldAutoRestart(staged: true, loaded: false, hasDrafts: false, active: false, idleFor: idle, inPlace: true))
     }
 
-    func testCountsDownBeforeRestartingAndStopsWhenSomethingIsTyped() {
-        let seconds = AppUpdater.countdownSeconds
-        XCTAssertEqual(AppUpdate.countdownStep(left: nil, ready: false, safe: true), .wait)
-        XCTAssertEqual(AppUpdate.countdownStep(left: nil, ready: true, safe: true), .start(seconds))
-        XCTAssertEqual(AppUpdate.countdownStep(left: 5, ready: false, safe: true), .tick(4))
-        XCTAssertEqual(AppUpdate.countdownStep(left: 2, ready: true, safe: true), .tick(1))
-        XCTAssertEqual(AppUpdate.countdownStep(left: 1, ready: true, safe: true), .restart)
-        XCTAssertEqual(AppUpdate.countdownStep(left: 3, ready: true, safe: false), .cancel)
+    func testDoesNotRestartInFrontOfMikeWhenItCantHandOver() {
+        // No countdown warns him first, so with the app in front, a restart
+        // he'd see (a full-screen or minimised window, Settings in front)
+        // waits however idle he is.
+        XCTAssertFalse(AppUpdate.shouldAutoRestart(staged: true, loaded: true, hasDrafts: false, active: true,
+                                                   idleFor: AppUpdater.autoRestartIdleTime * 100, inPlace: false))
     }
 
     func testSwapPutsTheStagedBundleInPlaceAndKeepsTheOld() throws {

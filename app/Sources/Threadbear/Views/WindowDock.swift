@@ -261,12 +261,6 @@ struct RootView: View {
         .overlay { TourOverlay().animation(.easeOut(duration: 0.2), value: Tour.shared.step == nil) }
         // Up under where the title bar was: the panels' bars take its place.
         .ignoresSafeArea(.container, edges: .top)
-        // Over everything, just under the panels' bars, while an update
-        // counts down to restarting the app.
-        .overlay(alignment: .top) {
-            RestartCountdownCard()
-                .animation(.snappy, value: AppUpdater.shared.countdown == nil)
-        }
         // The window's title (Window menu, Mission Control); nothing shows
         // it, as the window has no title bar.
         .navigationTitle(windowTitle)

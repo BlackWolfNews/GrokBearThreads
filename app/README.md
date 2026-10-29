@@ -47,11 +47,17 @@ in the working tree are never built) into `~/Applications/.Threadbear.app.next`.
 Quitting swaps the staged bundle into place, so the next launch is the new
 app; a launch that finds one staged (the app was killed rather than quit)
 swaps it in and relaunches; "Restart to Update to <commit>" in the app
-menu does it right away. It also restarts by itself, checked every 30 s,
-once no thread is running or starting, no composer has unsent text or
-images, and either another app is in front (it relaunches behind, with
-`open -g`) or Threadbear is in front but hasn't had a key or a click for
-five minutes; the thread and list that were open come back after.
+menu does it right away. It also restarts by itself, checked every second,
+once it's connected with the threads loaded, no composer has unsent text or
+images and no schedule editor is open, and either another app is in front
+(it comes back behind, with `open -g` if it can't hand over) or Threadbear
+is in front, hasn't had a key, a click or a scroll for five seconds, and
+can hand over (below) with the main window the one in use. Running threads
+don't hold it up: the runner keeps the turn. There's no countdown first,
+as a handover keeps the window where it is; a full-screen or minimised
+window, or Settings or a panel's own window in front, waits for Restart to
+Update or another app instead. The thread and list that were open come
+back after.
 
 When the window is on screen (not minimised, full screen or hidden), a
 restart is a handover (`Handover.swift`) and the window never goes away:

@@ -912,12 +912,6 @@ enum Automation {
             return "ok " + json(["state: \(status.state)", "dot: \(ConnectorsText.needsYou(status))", "quietDot: \(ConnectorsText.quiet(status))",
                                  "tip: " + ConnectorsText.tooltip(status).replacingOccurrences(of: "\n", with: " / ")]
                                 + (ConnectorsText.emptyLine(status).map { [$0] } ?? []) + lines)
-        case "restart-countdown":
-            // The update's countdown card: {"show": 5} shows it at that
-            // count (with no build behind it), {"show": 0} hides it.
-            let seconds = (c["show"] as? Int) ?? 0
-            AppUpdater.shared.previewCountdown(seconds > 0 ? seconds : nil)
-            return "ok"
         case "handover":
             // Starts a second copy of this bundle that takes over from this
             // one, as a restart into an update does (Handover). This
