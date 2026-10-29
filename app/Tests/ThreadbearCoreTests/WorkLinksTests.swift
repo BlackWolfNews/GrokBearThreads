@@ -75,6 +75,27 @@ final class WorkLinksTests: XCTestCase {
         XCTAssertEqual(model.workStep("Check Google verification request", turn: "t1")?.rowId, "t:c2")
     }
 
+    func testTheAgentDraftingItsLinksDoesNotTakeThemFromTheStep() {
+        // Opus drafts its summary, links and all, in its thinking just before
+        // end_turn, and at times in a message too, so they're the latest
+        // mentions of the words. The link still means the step (29 Oct 2026).
+        let link = "[The beep means no matching step](work:Read recent work-link clicks from the app's unified log)"
+        let model = TranscriptModel(events: [
+            E.user(1, "Why the beep?"),
+            E.call(2, "c1", input: ["command": "/usr/bin/log show --last 2h", "description": "Read recent work-link clicks from the app's unified log"]),
+            E.result(3, "c1", text: "work link: no step"),
+            E.call(4, "c2", input: ["command": "tb events d8c829e8"]), E.result(5, "c2", text: "the slug regex drops accents"),
+            E.event(6, "reasoning", ["itemId": "r1", "text": "First bullet: \(link). The slug regex drops accents."]),
+            E.text(7, "m1", "- \(link)."),
+            Self.summary(8, "e1.summary", "- \(link)."), E.done(9),
+        ])
+        XCTAssertEqual(model.workStep("Read recent work-link clicks from the app's unified log", turn: "t1")?.rowId, "t:c1")
+        // A thought loses to a step's output as well...
+        XCTAssertEqual(model.workStep("the slug regex drops accents", turn: "t1")?.rowId, "t:c2")
+        // ...but still answers when nothing else mentions the words.
+        XCTAssertEqual(model.workStep("First bullet", turn: "t1")?.rowId, "r:r1")
+    }
+
     func testLinksWithSpacesAreEscapedSoTheyParseAsLinks() {
         XCTAssertEqual(WorkLinks.escapeDestinations("[Tests pass](work:npm test) and [x](https://a.b/c d)"),
                        "[Tests pass](work:npm%20test) and [x](https://a.b/c d)")

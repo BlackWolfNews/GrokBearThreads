@@ -52,10 +52,11 @@ public enum WorkLinks {
 
     /// The item a quote means among a turn's items: the last whose command
     /// (or one of its `&&` parts) starts with the words, else the last whose
-    /// command, description, path, pattern or text mentions them, else the
-    /// last whose output does. Models quoted all three in the tests that
-    /// settled this (docs/end-turn-design), and the latest is the one a
-    /// summary is about ("tests pass" means the run after the fix).
+    /// command, description, path, pattern, title or text mentions them, else
+    /// the last whose output does, else the last thought that does. Models
+    /// quoted all three in the tests that settled this (docs/end-turn-design),
+    /// and the latest is the one a summary is about ("tests pass" means the
+    /// run after the fix).
     public static func step(for quote: String, in items: some Sequence<TranscriptRow>) -> TranscriptRow? {
         let q = normal(quote)
         guard !q.isEmpty else { return nil }
@@ -79,7 +80,7 @@ public enum WorkLinks {
                 // isn't a test run.
                 let bare = command.replacingOccurrences(of: #"'[^']*'|"[^"]*""#, with: "", options: .regularExpression)
                 let parts = normal(bare).components(separatedBy: CharacterSet(charactersIn: "&;|"))
-                if parts.contains(where: { trimCd($0).hasPrefix(q) }) { return 3 }
+                if parts.contains(where: { trimCd($0).hasPrefix(q) }) { return 4 }
             }
             // The input's title is the step's own name where a tool takes
             // one: Codex's computer-use calls are all "cua_repl: js" as
@@ -87,18 +88,27 @@ public enum WorkLinks {
             let named = [command, input?["description"]?.stringValue, input?["file_path"]?.stringValue, input?["path"]?.stringValue,
                          input?["pattern"]?.stringValue, input?["url"]?.stringValue, input?["query"]?.stringValue,
                          input?["title"]?.stringValue, tool.call?.title]
-            if named.contains(where: { $0.map { normal($0).contains(q) } ?? false }) { return 2 }
-            if let output = tool.result?.text, normal(output).contains(q) { return 1 }
+            if named.contains(where: { $0.map { normal($0).contains(q) } ?? false }) { return 3 }
+            if let output = tool.result?.text, normal(output).contains(q) { return 2 }
             return 0
         case .assistant(let text) where !text.isSummary:
-            return normal(text.text).contains(q) ? 2 : 0
+            return mentions(text.text, q) ? 3 : 0
         case .reasoning(let text):
-            return normal(text.text).contains(q) ? 2 : 0
+            // Last of all: an agent drafts its summary in its thinking just
+            // before end_turn, quoting the words its links quote, and as the
+            // latest mention the thought took the links from their steps.
+            return mentions(text.text, q) ? 1 : 0
         case .note(let text):
-            return normal(text).contains(q) ? 2 : 0
+            return normal(text).contains(q) ? 3 : 0
         default:
             return 0
         }
+    }
+
+    /// Whether the agent's own text mentions the words outside its work:
+    /// links: a line that links to a step isn't the step.
+    private static func mentions(_ text: String, _ q: String) -> Bool {
+        normal(text.replacingOccurrences(of: #"\]\(work:[^)\n]*\)"#, with: "]", options: .regularExpression)).contains(q)
     }
 
     /// "cd app && npm test" starts with "npm test" too.

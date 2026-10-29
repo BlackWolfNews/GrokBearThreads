@@ -1352,11 +1352,16 @@ A turn the agent finished can say whether Mike has to do anything, so
   the step and lights it up: the last step whose command (or one of its
   `&&` parts) starts with the words, else the last whose command,
   description, file path, pattern, input title or text mentions them,
-  else the last whose output does. The input title is a Codex
-  computer-use step's name ("Reconnect to Chrome desktop"), as its row
-  only says "cua_repl: js"; without it, links to those steps beeped. The agent can't see its tool calls' ids, so it quotes
-  the step: models quoted the command, the command's description and
-  their own lines while working, and every quote landed in the tests.
+  else the last whose output does, else the last thought that does. The
+  input title is a Codex computer-use step's name ("Reconnect to Chrome
+  desktop"), as its row only says "cua_repl: js"; without it, links to
+  those steps beeped. Thoughts come last, and words inside a message's
+  own `work:` links don't count, as Opus drafts its summary, links and
+  all, in its thinking (at times a message too) just before `end_turn`:
+  as the latest mention, that took the links from their steps (29 Oct
+  2026). The agent can't see its tool calls' ids, so it quotes the step:
+  models quoted the command, the command's description and their own
+  lines while working, and every quote landed in the tests.
 - **Needs from the asks.** `needs` may be left out: asks mean `you`,
   none mean `nothing`. Agents filling in a summary forgot it 2 times in
   9.
