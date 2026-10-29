@@ -44,8 +44,10 @@ export type AppRestartControl = Pick<AppRestarts, 'watch' | 'isWatching'>;
 
 export type ScheduleControl = Async<Scheduler, 'create' | 'list' | 'find' | 'update' | 'delete'>;
 
-export type ProjectControl = Pick<Projects, 'list' | 'get' | 'find' | 'create' | 'update' | 'appendNote' | 'changeMembership'> &
-  Partial<Pick<Projects, 'chooseIcon' | 'addLinks' | 'removeLinks'>>;
+// On a draining runner these are the primary's projects (projectRouter in
+// handover.ts), so they may be promises too.
+export type ProjectControl = Async<Projects, 'list' | 'get' | 'find' | 'create' | 'update' | 'appendNote' | 'changeMembership'> &
+  Partial<Async<Projects, 'chooseIcon' | 'addLinks' | 'removeLinks'>>;
 
 export const SERVER_NAME = 'threadbear';
 // Asked about every time, even in a thread with full access: deleting is
@@ -410,8 +412,8 @@ export function buildThreadbearTools(
     if (!projects) throw new Error("This runner doesn't have projects yet.");
     return projects;
   };
-  const project = (q: string) => {
-    const p = mustProjects().find(q);
+  const project = async (q: string) => {
+    const p = await mustProjects().find(q);
     if (!p) throw new Error(`No project ${q}. list_projects shows them.`);
     return p;
   };
@@ -430,7 +432,7 @@ export function buildThreadbearTools(
       { archived: z.boolean().optional().describe('Include archived projects.') },
       handle(async ({ archived }) => {
         const mine = new Set(((await control.get(selfId)).projects ?? []).map((m) => m.id));
-        const list = mustProjects().list({ archived });
+        const list = await mustProjects().list({ archived });
         if (!list.length) return 'No projects yet. create_project makes one.';
         return list
           .map((p) => {
@@ -448,7 +450,7 @@ export function buildThreadbearTools(
       "Reads a project: its folders, goals, state, notes and threads. Read the notes before working on a project you're in, for decisions and gotchas earlier threads left.",
       { project: z.string().describe('Project id, id prefix or title.') },
       handle(async ({ project: q }) => {
-        const { project: p, threadIds } = mustProjects().get(project(q).id);
+        const { project: p, threadIds } = await mustProjects().get((await project(q)).id);
         const threads: string[] = [];
         for (const id of threadIds.slice(0, 20)) {
           const t = await Promise.resolve(control.get(id)).catch(() => undefined);
@@ -483,7 +485,7 @@ export function buildThreadbearTools(
         join: z.boolean().optional().describe('Put this thread in it. Default true.'),
       },
       handle(async ({ title, folders, goals, state, notes, links, join }) => {
-        const p = mustProjects().create({
+        const p = await mustProjects().create({
           title,
           folders: await Promise.all((folders ?? []).map(projectFolder)),
           goals,
@@ -519,19 +521,19 @@ export function buildThreadbearTools(
       },
       handle(async ({ project: q, title, goals, state, notes, appendNote, links, addLinks, removeLinks, addFolders, removeFolders, icon }) => {
         const pc = mustProjects();
-        const p = project(q);
+        const p = await project(q);
         let folders: string[] | undefined;
         if (addFolders?.length || removeFolders?.length) {
           const drop = new Set(await Promise.all((removeFolders ?? []).map(projectFolder)));
           const add = await Promise.all((addFolders ?? []).map(projectFolder));
           folders = [...p.folders.filter((f) => !drop.has(f)), ...add.filter((f) => !p.folders.includes(f))];
         }
-        let out = pc.update(p.id, { title, goals, state, notes, links, folders });
-        if (appendNote?.trim()) out = pc.appendNote(p.id, appendNote);
+        let out = await pc.update(p.id, { title, goals, state, notes, links, folders });
+        if (appendNote?.trim()) out = await pc.appendNote(p.id, appendNote);
         if (addLinks?.length || removeLinks?.length) {
           if (!pc.addLinks || !pc.removeLinks) throw new Error("This runner can't change project links yet.");
-          if (removeLinks?.length) out = pc.removeLinks(p.id, removeLinks);
-          if (addLinks?.length) out = pc.addLinks(p.id, addLinks);
+          if (removeLinks?.length) out = await pc.removeLinks(p.id, removeLinks);
+          if (addLinks?.length) out = await pc.addLinks(p.id, addLinks);
         }
         if (icon?.trim()) {
           if (!pc.chooseIcon) throw new Error("This runner can't set project icons yet.");
@@ -548,8 +550,8 @@ export function buildThreadbearTools(
       { project: z.string().describe('Project id, id prefix or title.'), ...thisOrOther },
       handle(async ({ project: q, threadId, id: alias }) => {
         const id = await resolve(threadId ?? alias);
-        const p = project(q);
-        mustProjects().changeMembership(id, { add: [p.id], by: 'agent' });
+        const p = await project(q);
+        await mustProjects().changeMembership(id, { add: [p.id], by: 'agent' });
         return `${id === selfId ? 'This thread is' : `"${(await control.get(id)).title}" is`} in "${p.title}" now.`;
       }),
     ),
@@ -559,8 +561,8 @@ export function buildThreadbearTools(
       { project: z.string().describe('Project id, id prefix or title.'), ...thisOrOther },
       handle(async ({ project: q, threadId, id: alias }) => {
         const id = await resolve(threadId ?? alias);
-        const p = project(q);
-        mustProjects().changeMembership(id, { remove: [p.id], by: 'agent' });
+        const p = await project(q);
+        await mustProjects().changeMembership(id, { remove: [p.id], by: 'agent' });
         return `${id === selfId ? 'This thread is' : `"${(await control.get(id)).title}" is`} no longer in "${p.title}".`;
       }),
     ),

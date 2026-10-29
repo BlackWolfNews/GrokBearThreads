@@ -137,6 +137,13 @@ export class Projects {
     this.frozen = true;
   }
 
+  // A draining runner's copy of the primary's project, so a thread it keeps
+  // can join one made or renamed since the handover (projectRouter in
+  // handover.ts). Never saved: projects.json is the primary's.
+  adopt(rec: ProjectRecord): void {
+    if (this.frozen) this.items.set(rec.id, rec);
+  }
+
   // ---------------------------------------------------------------- reads
 
   list(opts: { archived?: boolean } = {}): Project[] {
@@ -699,22 +706,24 @@ function bool(p: Record<string, unknown>, k: string): boolean | undefined {
   return v;
 }
 
-// The project tools' view of Projects, refusing while `blocked` says why
-// (a draining runner during a handover).
-export function guardProjects<K extends 'list' | 'get' | 'find' | 'create' | 'update' | 'appendNote' | 'addLinks' | 'removeLinks' | 'changeMembership' | 'chooseIcon'>(
-  projects: Projects,
-  blocked: () => string | undefined,
-): Pick<Projects, K> {
-  const writes = new Set(['create', 'update', 'appendNote', 'addLinks', 'removeLinks', 'changeMembership', 'chooseIcon']);
-  return new Proxy(projects, {
-    get(target, prop, receiver) {
-      const v = Reflect.get(target, prop, receiver);
-      if (typeof v !== 'function') return v;
-      return (...args: unknown[]) => {
-        const why = writes.has(String(prop)) ? blocked() : undefined;
-        if (why) throw new Error(why);
-        return (v as (...a: unknown[]) => unknown).apply(target, args);
-      };
+// The Projects calls the agent tools make, which a draining runner's tools
+// make on the primary instead (projectRouter in handover.ts).
+export const DRAIN_PROJECT_OPS = ['list', 'get', 'find', 'create', 'update', 'appendNote', 'addLinks', 'removeLinks', 'changeMembership', 'chooseIcon'] as const;
+export type DrainProjectOp = (typeof DRAIN_PROJECT_OPS)[number];
+
+// drain.projects (docs/protocol.md, "Handovers"): a kept thread's project
+// tool call, made here because projects.json is this runner's now. The
+// arguments are the ones the tool built on the draining runner, maker
+// included, so an agent's change still counts as the agent's.
+export function drainProjectMethods(projects: Projects): Record<string, (p: Record<string, unknown>) => unknown> {
+  return {
+    'drain.projects': async (p) => {
+      const op = reqStr(p, 'op');
+      if (!(DRAIN_PROJECT_OPS as readonly string[]).includes(op)) throw bad(`drain.projects has no ${op}`);
+      if (!Array.isArray(p.args)) throw bad('args must be a list');
+      const call = projects[op as DrainProjectOp] as (...args: unknown[]) => unknown;
+      // find answers undefined for no such project, which JSON can't carry.
+      return { result: (await call.apply(projects, p.args)) ?? null };
     },
-  }) as Pick<Projects, K>;
+  };
 }

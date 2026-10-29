@@ -975,7 +975,21 @@ restart wait for busy threads. It hands over instead:
 - A request for a thread the draining runner has already let go answers
   `-32030` ("moved"), and the primary handles it itself.
 - The threadbear tools in a kept thread's session reach the primary over
-  the runner's port for anything about other threads, and its schedules.
+  the runner's port for anything about other threads, its schedules and
+  its projects.
+- Projects belong to the primary, which owns `projects.json`. A kept
+  thread's project tools read and change them there with
+  `drain.projects { op, args }`: `op` is the `Projects` call the tool
+  would have made on its own runner (`list`, `get`, `find`, `create`,
+  `update`, `appendNote`, `addLinks`, `removeLinks`, `changeMembership`,
+  `chooseIcon`), with the same `args` and the agent as the maker, and the
+  answer is `{ result }`. A primary older than this answers `-32601`.
+  Joining or leaving changes the thread itself, so for a thread the
+  draining runner keeps (`create` with `threadIds` included) that part
+  happens on the draining runner, against the primary's copy of the
+  project, and moves across with the thread. Until the draining runner
+  knows the primary's port, a change is refused with a "try again in a
+  few seconds" error.
 - A `resume` for a kept thread is sent when the thread moves across,
   rather than when the new runner starts, and the 15-minute limit counts
   from then.
@@ -999,7 +1013,7 @@ restart wait for busy threads. It hands over instead:
   onto a new release", which clients already read as a restart under way.
 
 The methods between runners (`drain.hello`, `drain.stop`) and
-`drain.handedOver` and `drain.usage` are for runners only.
+`drain.handedOver`, `drain.usage` and `drain.projects` are for runners only.
 
 ### Stuck background jobs
 

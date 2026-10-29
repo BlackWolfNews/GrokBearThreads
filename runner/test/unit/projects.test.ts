@@ -4,12 +4,13 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { makeHarness, tick, tmpDir } from '../helpers/fakes.ts';
 import { checkSummary } from '../helpers/protocol-check.ts';
-import { Projects, projectMethods, BRIEF_MAX } from '../../src/projects.ts';
+import { Projects, drainProjectMethods, projectMethods, BRIEF_MAX, type ProjectHost } from '../../src/projects.ts';
+import { projectRouter, type PrimaryLink } from '../../src/handover.ts';
 import { Librarian, librarianMethods, mainCheckout, SETTLE_MS, CATCH_UP_MS, CATCH_UP_MIN_CHARS, FIRST_MESSAGE_MS, SWEEP_MS } from '../../src/librarian.ts';
 import { buildThreadbearTools } from '../../src/threadbear-mcp.ts';
 import { FakeClock } from '../../src/clock.ts';
 import { nullLogger } from '../../src/log.ts';
-import { RpcError } from '../../src/protocol.ts';
+import { ErrorCode, RpcError } from '../../src/protocol.ts';
 import { commandFolders } from '../../src/tools.ts';
 import type { GenerateParams, ModelResult } from '../../src/models/index.ts';
 
@@ -424,6 +425,77 @@ test('agent tools: make, read, update, join and leave projects', async () => {
   assert.match((await call('leave_project', { project: p.id })).text, /no longer in "App"/);
   assert.equal(rec(h, thread.id)?.projectsLeft?.[0], p.id);
   assert.equal((await call('read_project', { project: 'nope' })).error, true);
+});
+
+// The primary's side of a handover in these tests: projects with no
+// threads of their own, as the kept thread is still on the draining runner.
+const noThreads: ProjectHost = {
+  threadRecords: () => [],
+  editThread: () => {
+    throw new Error('the new runner has no threads in this test');
+  },
+  touchThreads: () => {},
+  resolveThread: (id) => {
+    throw new Error(`No thread ${id}`);
+  },
+  publish: () => {},
+  onNotification: () => () => {},
+};
+
+test('a thread finishing its turn on a draining runner changes projects on the new runner, and joins them where it is', async () => {
+  const { h, root, repo, projects, create } = setup();
+  const p = projects.create({ title: 'App', folders: [repo('dev/app')], by: 'mike' });
+  const { thread } = create();
+  // The handover: this runner keeps the busy thread and stops writing
+  // projects; the new release reads projects.json and owns it from here.
+  projects.freeze();
+  const primary = new Projects({ home: h.home, clock: new FakeClock(), log: nullLogger, userHome: root });
+  primary.start(noThreads);
+  const methods = drainProjectMethods(primary);
+  let link: Pick<PrimaryLink, 'call'> | undefined;
+  const control = projectRouter(projects, () => link, { draining: () => true, holds: (id) => h.runner.has(id) });
+  const tools = buildThreadbearTools(h.runner, thread.id, Date.now, undefined, control);
+  const call = async (name: string, args: Record<string, unknown>) => {
+    const t = tools.find((x) => x.name === name)!;
+    const r = await t.handler(args as never, {} as never);
+    return { text: r.content.map((c: any) => c.text).join(''), error: Boolean(r.isError) };
+  };
+
+  // Until it knows where the new runner is: a few seconds.
+  const early = await call('update_project', { project: p.id, appendNote: 'Too soon' });
+  assert.equal(early.error, true);
+  assert.match(early.text, /try the project tool again in a few seconds/);
+
+  // Over JSON, as the runner's port carries it.
+  link = { call: async (method, params = {}) => JSON.parse(JSON.stringify(await methods[method](JSON.parse(JSON.stringify(params))))) };
+  assert.deepEqual(await call('update_project', { project: 'app', state: 'Releases live', appendNote: 'Forks follow tags.' }), { text: `Updated "App" (${p.id}).`, error: false });
+  assert.equal(primary.record(p.id)?.state, 'Releases live');
+  const saved = JSON.parse(fs.readFileSync(path.join(h.home, 'projects.json'), 'utf8'));
+  assert.equal(saved.projects[0].notes, 'Forks follow tags.', "in the new runner's projects.json");
+  assert.match((await call('read_project', { project: p.id })).text, /\nState: Releases live\n[\s\S]*\nForks follow tags\.\n/);
+
+  // A project made now is the new runner's. The kept thread joins it here,
+  // so the join moves across with the thread.
+  const made = await call('create_project', { title: 'Docs' });
+  assert.match(made.text, /^Made the project "Docs" \(p_[0-9a-f]+\) and put this thread in it\.$/);
+  const docs = primary.find('Docs')!;
+  assert.equal(docs.createdBy, 'agent');
+  assert.match((await call('join_project', { project: 'App' })).text, /^This thread is in "App" now\.$/);
+  assert.deepEqual(rec(h, thread.id).projects?.map((m) => [m.id, m.by, m.pinned]), [
+    [docs.id, 'agent', true],
+    [p.id, 'agent', true],
+  ]);
+  const listed = (await call('list_projects', {})).text;
+  assert.match(listed, /"App" \(this thread is in it\)/);
+  assert.match(listed, /"Docs" \(this thread is in it\)/);
+
+  // A rollback can leave an older release as the new runner.
+  link = {
+    call: async () => {
+      throw new RpcError(ErrorCode.methodNotFound, 'Unknown method drain.projects');
+    },
+  };
+  assert.match((await call('update_project', { project: p.id, state: 'x' })).text, /older release/);
 });
 
 test('a project the librarian makes on an asked look stays: the same look never takes the thread out of it', async () => {

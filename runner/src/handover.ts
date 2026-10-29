@@ -6,7 +6,7 @@
 // - Peers: the primary's connections to draining runners, which pass
 //   requests about their threads to them and their notifications back;
 // - PrimaryLink: a draining runner's way back to the primary, for agent
-//   tools that act on other threads;
+//   tools that act on other threads, schedules or projects;
 // - ThreadRouter: what the agent tools drive, on either side, so they reach
 //   a thread wherever it is.
 import fs from 'node:fs';
@@ -19,8 +19,9 @@ import { ErrorCode, RpcError } from './protocol.ts';
 import type { ThreadSummary } from './protocol.ts';
 import type { Notification, Runner } from './runner.ts';
 import type { UsageReading } from './usage.ts';
-import type { ScheduleControl, ThreadControl } from './threadbear-mcp.ts';
+import type { ProjectControl, ScheduleControl, ThreadControl } from './threadbear-mcp.ts';
 import type { Scheduler } from './schedules.ts';
+import type { DrainProjectOp, MembershipChange, Projects } from './projects.ts';
 import { processInfo } from './proc.ts';
 
 export type DrainInfo = { pid: number; port: number; version: string; release?: string; since: string; threads: string[] };
@@ -551,6 +552,97 @@ export function scheduleRouter(local: Scheduler, link: () => PrimaryLink | undef
     delete: async (scheduleId) => {
       const l = link();
       return l ? l.call('schedules.delete', { scheduleId }) : local.delete(scheduleId);
+    },
+  };
+}
+
+type Link = Pick<PrimaryLink, 'call'>;
+
+// What the project tools drive. Projects belong to the primary, so once
+// this runner is draining its tools read and change them there
+// (drain.projects), as this runner's own copy stops at the handover. A turn
+// kept here can last an hour, so refusing until the handover is over would
+// lose most of what agents write at the end of a long turn (29 Oct: 131
+// refused calls in three days). Joining or leaving changes the thread,
+// though, and a thread kept here is still this runner's: that part happens
+// here, against the primary's copy of the project, and moves across with
+// the thread.
+export function projectRouter(
+  local: Projects,
+  link: () => Link | undefined,
+  opts: { draining: () => boolean; holds: (threadId: string) => boolean },
+): ProjectControl {
+  // Where a change goes: the primary, once this runner knows where it is.
+  const primary = (): Link | undefined => {
+    const l = link();
+    if (!l && opts.draining()) throw new Error('Threadbear is starting its new runner; try the project tool again in a few seconds.');
+    return l;
+  };
+  const there = async <K extends DrainProjectOp>(l: Link, op: K, args: Parameters<Projects[K]>): Promise<Awaited<ReturnType<Projects[K]>>> => {
+    try {
+      return (await l.call<{ result: Awaited<ReturnType<Projects[K]>> }>('drain.projects', { op, args })).result;
+    } catch (e) {
+      // A rollback can leave an older release as the primary.
+      if (e instanceof RpcError && e.code === ErrorCode.methodNotFound) {
+        throw new Error("The new runner is an older release that can't change projects for a thread finishing its turn on this one. Make the change in your next turn.");
+      }
+      throw e;
+    }
+  };
+  const changeHere = async (l: Link, threadId: string, change: MembershipChange) => {
+    for (const id of [...(change.add ?? []), ...(change.remove ?? [])]) {
+      const rec = await there(l, 'find', [id]);
+      if (rec) local.adopt(rec);
+    }
+    return local.changeMembership(threadId, change);
+  };
+  return {
+    list: async (o) => {
+      const l = link();
+      return l ? there(l, 'list', [o]) : local.list(o);
+    },
+    get: async (projectId) => {
+      const l = link();
+      return l ? there(l, 'get', [projectId]) : local.get(projectId);
+    },
+    // No such project comes back as null.
+    find: async (q) => {
+      const l = link();
+      return l ? ((await there(l, 'find', [q])) ?? undefined) : local.find(q);
+    },
+    create: async (p) => {
+      const l = primary();
+      if (!l) return local.create(p);
+      // The primary doesn't have the threads kept here: they join here.
+      const ids = p.threadIds ?? [];
+      const made = await there(l, 'create', [{ ...p, threadIds: ids.filter((t) => !opts.holds(t)) }]);
+      for (const t of ids.filter(opts.holds)) await changeHere(l, t, { add: [made.id], by: p.by });
+      return made;
+    },
+    update: async (projectId, params) => {
+      const l = primary();
+      return l ? there(l, 'update', [projectId, params]) : local.update(projectId, params);
+    },
+    appendNote: async (projectId, text) => {
+      const l = primary();
+      return l ? there(l, 'appendNote', [projectId, text]) : local.appendNote(projectId, text);
+    },
+    addLinks: async (projectId, links) => {
+      const l = primary();
+      return l ? there(l, 'addLinks', [projectId, links]) : local.addLinks(projectId, links);
+    },
+    removeLinks: async (projectId, urls) => {
+      const l = primary();
+      return l ? there(l, 'removeLinks', [projectId, urls]) : local.removeLinks(projectId, urls);
+    },
+    changeMembership: async (threadId, change) => {
+      const l = primary();
+      if (!l) return local.changeMembership(threadId, change);
+      return opts.holds(threadId) ? changeHere(l, threadId, change) : there(l, 'changeMembership', [threadId, change]);
+    },
+    chooseIcon: async (projectId, choice, by) => {
+      const l = primary();
+      return l ? there(l, 'chooseIcon', [projectId, choice, by]) : local.chooseIcon(projectId, choice, by);
     },
   };
 }
