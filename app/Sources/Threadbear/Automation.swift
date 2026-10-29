@@ -891,6 +891,11 @@ enum Automation {
             let seconds = (c["show"] as? Int) ?? 0
             AppUpdater.shared.previewCountdown(seconds > 0 ? seconds : nil)
             return "ok"
+        case "handover":
+            // Starts a second copy of this bundle that takes over from this
+            // one, as a restart into an update does (Handover). This
+            // instance quits once it's done; the new one answers after.
+            return AppUpdater.shared.previewHandover(app: app) ? "ok handing over" : "error the window can't be handed over"
         case "debug-info":
             // What the row menu's "Copy debug info" copies, copied the same
             // way (to this instance's pasteboard).

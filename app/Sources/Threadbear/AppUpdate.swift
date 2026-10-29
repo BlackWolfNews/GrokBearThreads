@@ -194,7 +194,9 @@ final class AppUpdater {
     /// A staged update found at launch: swapped in, with a relaunch on the
     /// way. The caller exits. Before anything else in the app starts.
     nonisolated static func applyStagedAtLaunch() -> Bool {
-        guard isInstalledApp else { return false }
+        // A handover's incoming app is the new build already, and `.old`
+        // is the outgoing app, still running.
+        guard isInstalledApp, Handover.incomingFrom == nil else { return false }
         let running = BuildInfo.read(bundle: Bundle.main.bundleURL)
         guard AppUpdate.applyStaged(install: installDir, next: nextDir, old: oldDir, running: running) != nil else { return false }
         AppUpdate.relaunchAfterExit(installDir)
@@ -219,6 +221,8 @@ final class AppUpdater {
     @ObservationIgnored private var lastInput = Date()
     @ObservationIgnored private var inputMonitor: Any?
     @ObservationIgnored private var restarting = false
+    /// The staged build was swapped in before quitting, for a handover.
+    @ObservationIgnored private var swappedEarly = false
     /// The seconds left on the restart countdown, while the card shows.
     private(set) var countdown: Int?
     /// The staged build Mike cancelled the countdown for: not counted down
@@ -319,6 +323,17 @@ final class AppUpdater {
     /// app's screenshot (Automation's `restart-countdown`).
     func previewCountdown(_ seconds: Int?) { countdown = seconds }
 
+    /// Hands over to a new copy of this same bundle, as a restart into an
+    /// update does, for a scripted app (Automation's `handover`).
+    func previewHandover(app: AppModel) -> Bool {
+        guard let window = Handover.windowToHandOver() else { return false }
+        Self.saveRestore(app: app)
+        Handover.shared.handOver(to: Bundle.main.bundleURL, window: window, app: app) {
+            AppLog.write("handover", "the scripted handover couldn't start the new app")
+        }
+        return true
+    }
+
     /// Makes up an app update that's "staged", "building" or "failed" (or
     /// none, on abc1234), for a scripted app's screenshots of the updates
     /// popover and panel (Automation's `updates` with `preview`). Restart
@@ -336,13 +351,27 @@ final class AppUpdater {
 
     private func restart(app: AppModel, inBackground: Bool) {
         restarting = true
-        Self.saveRestore(selection: app.selection, mode: app.sidebarMode)
-        AppUpdate.relaunchAfterExit(Self.installDir, inBackground: inBackground)
-        NSApp.terminate(nil)
+        Self.saveRestore(app: app)
+        let classic = {
+            AppUpdate.relaunchAfterExit(Self.installDir, inBackground: inBackground)
+            NSApp.terminate(nil)
+        }
+        // With the window on screen, the new build is swapped in now and
+        // started beside this one, which quits once it's showing
+        // (Handover), so the window never goes away.
+        if let window = Handover.windowToHandOver(),
+           AppUpdate.applyStaged(install: Self.installDir, next: Self.nextDir, old: Self.oldDir, running: running) != nil {
+            swappedEarly = true
+            staged = nil
+            Handover.shared.handOver(to: Self.installDir, window: window, app: app, fallback: classic)
+            return
+        }
+        classic()
     }
 
-    private static func saveRestore(selection: String?, mode: SidebarMode) {
-        let modeName = switch mode {
+    /// The list and the thread showing, as saved for a restart.
+    static func restoreState(app: AppModel) -> (mode: String, selection: String) {
+        let mode = switch app.sidebarMode {
         case .inbox: "inbox"
         case .snoozed: "snoozed"
         case .archive: "archive"
@@ -350,7 +379,19 @@ final class AppUpdater {
         case .projects: "projects"
         case .librarian: "librarian"
         }
-        UserDefaults.standard.set(["selection": selection ?? "", "mode": modeName], forKey: restoreKey)
+        return (mode, app.selection ?? "")
+    }
+
+    private static func saveRestore(app: AppModel) {
+        let state = restoreState(app: app)
+        var saved: [String: String] = ["selection": state.selection, "mode": state.mode]
+        // Where the open thread was scrolled to, so it doesn't jump to the
+        // bottom (a handover shows it in place of the old window).
+        if !state.selection.isEmpty, let memory = app.loadedSession(state.selection)?.view?.captureMemory(), !memory.pinned, let anchor = memory.anchorId {
+            saved["anchor"] = anchor
+            saved["offset"] = String(Double(memory.offset))
+        }
+        UserDefaults.standard.set(saved, forKey: restoreKey)
     }
 
     /// After a restart the app made itself: back to the thread and list
@@ -358,17 +399,29 @@ final class AppUpdater {
     static func restoreAfterRestart(app: AppModel) {
         guard let saved = UserDefaults.standard.dictionary(forKey: restoreKey) as? [String: String] else { return }
         UserDefaults.standard.removeObject(forKey: restoreKey)
-        switch saved["mode"] {
-        case "snoozed": app.sidebarMode = .snoozed
-        case "archive": app.showArchive()
-        case "scheduled": app.showSchedules()
-        // Before projects.list has answered; an older runner's -32601 puts
-        // it back on the inbox.
-        case "projects": app.showProjects()
-        case "librarian": app.showLibrarian()
-        default: app.sidebarMode = .inbox
+        let scroll = saved["anchor"].map { ScrollMemory(pinned: false, anchorId: $0, offset: CGFloat(Double(saved["offset"] ?? "") ?? 0)) }
+        restore(mode: saved["mode"] ?? "inbox", selection: saved["selection"] ?? "", scroll: scroll, app: app)
+    }
+
+    /// Puts the list and the thread back. Only what differs is changed, so
+    /// a handover's "go" that matches what's showing does nothing.
+    static func restore(mode: String, selection: String, scroll: ScrollMemory?, app: AppModel) {
+        if restoreState(app: app).mode != mode {
+            switch mode {
+            case "snoozed": app.sidebarMode = .snoozed
+            case "archive": app.showArchive()
+            case "scheduled": app.showSchedules()
+            // Before projects.list has answered; an older runner's -32601 puts
+            // it back on the inbox.
+            case "projects": app.showProjects()
+            case "librarian": app.showLibrarian()
+            default: app.sidebarMode = .inbox
+            }
         }
-        if let id = saved["selection"], !id.isEmpty, app.threads[id] != nil { app.select(id) }
+        if !selection.isEmpty, app.selection != selection, app.threads[selection] != nil {
+            if let scroll { app.session(for: selection).scrollMemory = scroll }
+            app.select(selection)
+        }
     }
 
     /// main moved: check in a few seconds. A burst of ref writes (a merge,
@@ -453,7 +506,9 @@ final class AppUpdater {
     /// next launch is the new app. The running binary stays in `.old`
     /// until then.
     func applyAtQuit() {
-        guard enabled else { return }
+        // A handover swapped it in already, and the bundle in `.old` is
+        // this app's own, still running.
+        guard enabled, !swappedEarly else { return }
         build?.terminate()
         AppUpdate.applyStaged(install: Self.installDir, next: Self.nextDir, old: Self.oldDir, running: running)
     }

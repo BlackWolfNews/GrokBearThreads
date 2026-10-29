@@ -51,7 +51,20 @@ menu does it right away. It also restarts by itself, checked every 30 s,
 once no thread is running or starting, no composer has unsent text or
 images, and either another app is in front (it relaunches behind, with
 `open -g`) or Threadbear is in front but hasn't had a key or a click for
-five minutes; the thread and list that were open come back after. The
+five minutes; the thread and list that were open come back after.
+
+When the window is on screen (not minimised, full screen or hidden), a
+restart is a handover (`Handover.swift`) and the window never goes away:
+the new build is swapped in while the old app runs and started beside it
+with `--handover-from <pid>`. It keeps its window invisible while it
+connects and opens the same thread at the same scroll position, in the
+same frame, then shows it just under the old window. The old app passes on
+being the app in front, sends anything Mike changed meanwhile (the thread,
+the list, drafts), and quits. On the mock runner it takes under a second.
+If the new app never says it's ready, the old one quits after 20 s and the
+new one takes over when it sees it go; if the new app doesn't start, the
+old one restarts the old way. The automation's `handover` does the same
+with a dev app's own bundle. The
 build's output goes to
 `~/Library/Logs/threadbear-update.log`; the app's own log says what it
 decided. Only the installed bundle path does this, not a dev app, perf or

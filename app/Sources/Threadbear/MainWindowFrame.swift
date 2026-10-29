@@ -31,7 +31,8 @@ enum MainWindowFrame {
         observers = []
         // The exact frame, set by hand: AppKit's setFrameUsingName moved a
         // frame saved on the laptop's screen onto an external one.
-        if let saved = defaults.string(forKey: key(name)) {
+        // A handover's incoming window has the outgoing one's frame already.
+        if Handover.incomingFrom == nil, let saved = defaults.string(forKey: key(name)) {
             let frame = NSRectFromString(saved)
             if onScreen(frame) { window.setFrame(frame, display: true) }
         }
@@ -63,8 +64,18 @@ enum MainWindowFrame {
 
 /// Hands the main window to MainWindowFrame once it's in one.
 struct MainWindowFrameTracker: NSViewRepresentable {
+    /// Tells Handover about the window the moment the view is in it,
+    /// before the window's first drawn, so a handover's incoming app can
+    /// keep it invisible.
+    final class TrackerView: NSView {
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            if let window { Handover.shared.conceal(window, main: true) }
+        }
+    }
+
     func makeNSView(context: Context) -> NSView {
-        let view = NSView()
+        let view = TrackerView()
         DispatchQueue.main.async {
             guard let window = view.window else { return }
             MainWindowFrame.window = window

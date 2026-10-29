@@ -167,7 +167,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             #else
             let scripted = perf || screenshots
             #endif
-            app.notificationsEnabled = !scripted
+            // A handover's incoming app stays quiet until it takes over:
+            // the outgoing one is still posting banners.
+            app.notificationsEnabled = !scripted && Handover.incomingFrom == nil
             ShortcutHints.shared.install()
             if !scripted { Notifier.setUp(delegate: self) }
             SetupState.shared.refreshNotifications()
@@ -189,10 +191,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             MouseNavigation.install(app: app)
             if perf { PerfRunner.start(app: app) }
             if screenshots { ScreenshotRunner.start(app: app) }
-            #if DEBUG
-            Automation.startIfAsked(app: app)
-            #endif
-            AppUpdater.shared.start()
+            // What only one of two Threadbears should run: a handover's
+            // incoming app starts these once the outgoing one has gone.
+            let takeOver = {
+                app.notificationsEnabled = !scripted
+                #if DEBUG
+                Automation.startIfAsked(app: app)
+                #endif
+                AppUpdater.shared.start()
+            }
+            if Handover.incomingFrom != nil {
+                Handover.shared.startIncoming(app: app, takeOver: takeOver)
+            } else {
+                takeOver()
+            }
         }
     }
 

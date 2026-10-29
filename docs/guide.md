@@ -232,7 +232,9 @@ on `main`, the runner builds it and switches over without cutting off any
 thread that's partway through a turn, and the app builds its new version in
 the background. The app swaps in the new version when you next quit it, when
 you choose Restart to Update in the Threadbear menu, or by itself when you've
-left it alone for a while with nothing typed.
+left it alone for a while with nothing typed. The window stays where it is
+while it does: the new version opens the same thread underneath and takes
+over, so you shouldn't see it go.
 
 The Updates icon on the left-hand rail shows what's on its way for the app,
 the runner and the Claude Code and Codex tools. A grey dot means something
