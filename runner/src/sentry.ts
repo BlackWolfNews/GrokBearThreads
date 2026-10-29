@@ -8,7 +8,8 @@
 //
 // Errors only: no tracing, no breadcrumbs (CLI output and URLs can carry
 // a thread's text or a token), no PII or local variables. What it sends is the
-// runner's own uncaught exceptions and its ERROR log lines, by message.
+// runner's own uncaught exceptions and its ERROR and WARN log lines, by
+// message (WARN as Sentry warnings).
 import fs from 'node:fs';
 import path from 'node:path';
 import { defaultHome } from './config.ts';
@@ -101,16 +102,47 @@ const SAFE_FIELDS = new Set(['error', 'method', 'kind', 'provider', 'commit', 'p
 // failure that repeats every second from using up the month's quota.
 const SAME_MESSAGE_MS = 60 * 60_000;
 const lastSent = new Map<string, number>();
+const UUID = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi;
 
-// The logger's hook for each ERROR line: one Sentry event per message,
-// grouped by the message (the fixed text, not the error inside it).
-export function reportLoggedError(msg: string, extra: Record<string, unknown> | undefined, now = Date.now()): void {
-  if (!sentry || REPORTED_AS_EXCEPTIONS.has(msg)) return;
-  const last = lastSent.get(msg);
-  if (last !== undefined && now - last < SAME_MESSAGE_MS) return;
-  lastSent.set(msg, now);
+export type LogLevel = 'error' | 'warning';
+
+// Log lines that aren't Threadbear bugs, so they never become issues: a
+// model call failing is a login's limit or a provider being down, and
+// Convex sync retries its network blips by itself.
+function notOurBug(msg: string, extra: Record<string, unknown> | undefined): boolean {
+  if (msg === 'model call failed') return true;
+  return msg === 'convex sync failed; will retry' && /fetch failed/i.test(String(extra?.error ?? ''));
+}
+
+// What to send for one ERROR or WARN line, or null to send nothing. Grouped
+// by the message (the fixed text, not the error inside it), with any thread
+// or session id taken out so one fault is one issue. Pure but for the
+// once-an-hour memory, for the tests.
+export function logLineEvent(level: LogLevel, msg: string, extra: Record<string, unknown> | undefined, now = Date.now()) {
+  if (REPORTED_AS_EXCEPTIONS.has(msg) || notOurBug(msg, extra)) return null;
+  const title = msg.replace(UUID, '<id>');
+  const key = `${level} ${title}`;
+  const last = lastSent.get(key);
+  if (last !== undefined && now - last < SAME_MESSAGE_MS) return null;
+  lastSent.set(key, now);
+  return { title, level, fingerprint: ['runner-log', level, title], extra: safeFields(extra) };
+}
+
+// The logger's hooks for each ERROR and WARN line.
+export function reportLoggedError(msg: string, extra?: Record<string, unknown>): void {
+  reportLogLine('error', msg, extra);
+}
+
+export function reportLoggedWarning(msg: string, extra?: Record<string, unknown>): void {
+  reportLogLine('warning', msg, extra);
+}
+
+function reportLogLine(level: LogLevel, msg: string, extra: Record<string, unknown> | undefined): void {
+  if (!sentry) return;
+  const event = logLineEvent(level, msg, extra);
+  if (!event) return;
   try {
-    sentry.captureMessage(msg, { level: 'error', fingerprint: ['runner-log', msg], extra: safeFields(extra) });
+    sentry.captureMessage(event.title, { level: event.level, fingerprint: event.fingerprint, extra: event.extra });
   } catch {
     // never mind
   }

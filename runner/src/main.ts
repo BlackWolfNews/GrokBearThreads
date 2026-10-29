@@ -39,7 +39,7 @@ import { Models } from './models/index.ts';
 import { SettingsService, modelMethods, settingsMethods } from './settings.ts';
 import { ConvexSync, defaultRunnerName, ensureRunnerId, readSyncKey } from './sync.ts';
 import { devicesMethods } from './devices.ts';
-import { flushSentry, reportException, reportLoggedError, startSentry } from './sentry.ts';
+import { flushSentry, reportException, reportLoggedError, reportLoggedWarning, startSentry } from './sentry.ts';
 import { ALWAYS_ASK_TOOLS, SERVER_NAME, buildThreadbearTools, threadbearMcpServer } from './threadbear-mcp.ts';
 
 // Tells launch.mjs this runner calls its listening() hook (release.ts), so
@@ -49,7 +49,7 @@ export const REPORTS_LISTENING = true;
 async function main(): Promise<void> {
   const cfg = loadConfig();
   ensureHome(cfg.home);
-  const log = createLogger(cfg.logFile, { echo: process.env.THREADBEAR_LOG_STDERR === '1', debug: process.env.THREADBEAR_DEBUG === '1', onError: reportLoggedError });
+  const log = createLogger(cfg.logFile, { echo: process.env.THREADBEAR_LOG_STDERR === '1', debug: process.env.THREADBEAR_DEBUG === '1', onError: reportLoggedError, onWarn: reportLoggedWarning });
   // Only the installed runner reports to Sentry (sentry.ts says why).
   const reporting = await startSentry(cfg.home);
   log.info('runner starting', { version: RUNNER_VERSION, home: cfg.home, port: cfg.port, pid: process.pid, sentry: reporting });
