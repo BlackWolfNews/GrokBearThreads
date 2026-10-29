@@ -315,7 +315,9 @@ test('a 2.5 MB line reads whole; a line over the guard fails only itself', async
   conn.notify('item/completed', { item: { type: 'imageGeneration', id: 'ig_ok', result }, threadId: 't1', turnId: 'u1' });
   conn.notify('item/completed', { item: { type: 'imageGeneration', id: 'ig_huge', result: 'C'.repeat(2_500_000) }, threadId: 't1', turnId: 'u1' });
   conn.notify('turn/completed', { threadId: 't1', turn: { id: 'u1', status: 'completed' } });
-  await waitFor(() => notes.length === 2);
+  // 3.4 MB through a pipe and JSON.parse: the default 3 s timed out in
+  // ./check.sh with the Mac's load average over 500 (29 Oct 2026).
+  await waitFor(() => notes.length === 2, 15_000);
   assert.equal((notes[0][1] as { item: { result: string } }).item.result.length, 900_000);
   assert.equal(notes[1][0], 'turn/completed');
   assert.equal(big.length, 1);
