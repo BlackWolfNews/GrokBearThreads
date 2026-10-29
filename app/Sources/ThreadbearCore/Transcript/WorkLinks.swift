@@ -81,8 +81,12 @@ public enum WorkLinks {
                 let parts = normal(bare).components(separatedBy: CharacterSet(charactersIn: "&;|"))
                 if parts.contains(where: { trimCd($0).hasPrefix(q) }) { return 3 }
             }
+            // The input's title is the step's own name where a tool takes
+            // one: Codex's computer-use calls are all "cua_repl: js" as
+            // rows, and "Reconnect to Chrome desktop" only there.
             let named = [command, input?["description"]?.stringValue, input?["file_path"]?.stringValue, input?["path"]?.stringValue,
-                         input?["pattern"]?.stringValue, input?["url"]?.stringValue, input?["query"]?.stringValue, tool.call?.title]
+                         input?["pattern"]?.stringValue, input?["url"]?.stringValue, input?["query"]?.stringValue,
+                         input?["title"]?.stringValue, tool.call?.title]
             if named.contains(where: { $0.map { normal($0).contains(q) } ?? false }) { return 2 }
             if let output = tool.result?.text, normal(output).contains(q) { return 1 }
             return 0

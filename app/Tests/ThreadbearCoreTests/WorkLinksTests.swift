@@ -57,6 +57,24 @@ final class WorkLinksTests: XCTestCase {
         XCTAssertEqual(model.workStep("npm test", turn: "t1")?.groupId, "g:t:c1")
     }
 
+    func testAWorkLinkFindsACodexComputerUseStepByItsTitle() {
+        // Codex names each computer-use step in the call's input; the row's
+        // own title is just "cua_repl: js". A Paws thread's summary quoted
+        // these two names and both links beeped (29 Oct 2026).
+        let model = TranscriptModel(events: [
+            E.user(1, "ready"),
+            E.call(2, "c1", name: "mcp__cua_repl__js", kind: "mcp", title: "cua_repl: js",
+                   input: ["code": "let app = await cua.getApp(\"com.google.Chrome\");", "timeout_ms": 60000, "title": "Reconnect to Chrome desktop"]),
+            E.result(3, "c1"),
+            E.call(4, "c2", name: "mcp__cua_repl__js", kind: "mcp", title: "cua_repl: js",
+                   input: ["code": "await app.click(699); await app.getAXState();", "title": "Check Google verification request"]),
+            E.result(5, "c2"),
+            Self.summary(6, "e1.summary", "- [Chrome desktop control now works](work:Reconnect to Chrome desktop)."), E.done(7),
+        ])
+        XCTAssertEqual(model.workStep("Reconnect to Chrome desktop", turn: "t1")?.rowId, "t:c1")
+        XCTAssertEqual(model.workStep("Check Google verification request", turn: "t1")?.rowId, "t:c2")
+    }
+
     func testLinksWithSpacesAreEscapedSoTheyParseAsLinks() {
         XCTAssertEqual(WorkLinks.escapeDestinations("[Tests pass](work:npm test) and [x](https://a.b/c d)"),
                        "[Tests pass](work:npm%20test) and [x](https://a.b/c d)")

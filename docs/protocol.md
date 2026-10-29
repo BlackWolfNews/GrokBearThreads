@@ -1359,8 +1359,10 @@ A turn the agent finished can say whether Mike has to do anything, so
   inside the parentheses. The app opens the turn's work group, scrolls to
   the step and lights it up: the last step whose command (or one of its
   `&&` parts) starts with the words, else the last whose command,
-  description, file path, pattern or text mentions them, else the last
-  whose output does. The agent can't see its tool calls' ids, so it quotes
+  description, file path, pattern, input title or text mentions them,
+  else the last whose output does. The input title is a Codex
+  computer-use step's name ("Reconnect to Chrome desktop"), as its row
+  only says "cua_repl: js"; without it, links to those steps beeped. The agent can't see its tool calls' ids, so it quotes
   the step: models quoted the command, the command's description and
   their own lines while working, and every quote landed in the tests.
 - **Needs from the asks.** `needs` may be left out: asks mean `you`,
