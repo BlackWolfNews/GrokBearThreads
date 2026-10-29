@@ -201,9 +201,12 @@ export type AccountSource = Pick<AccountRegistry, 'list' | 'get' | 'learn'> & { 
 // Codex has it.
 type BinaryReporter = { binariesInUse?(): string[] };
 
+// main: the card is for the agent's own tool call, so its CLI waits on it
+// and reads nothing else until it's answered. A background subagent's card
+// (no tool call of the agent's to point at) holds up only that subagent.
 type PendingApproval =
-  | { approvalId: string; kind: 'tool'; resolve: (a: ToolApprovalAnswer) => void }
-  | { approvalId: string; kind: 'question'; questions: Question[]; resolve: (a: QuestionAnswer) => void };
+  | { approvalId: string; kind: 'tool'; main: boolean; resolve: (a: ToolApprovalAnswer) => void }
+  | { approvalId: string; kind: 'question'; main: boolean; questions: Question[]; resolve: (a: QuestionAnswer) => void };
 
 type Turn = {
   turnId: string;
@@ -1948,6 +1951,18 @@ export class Runner {
       this.interrupt(rec.id);
       return turnId;
     }
+    if (rt.turn && rt.approvals.size && fromMike(text, opts)) {
+      // He wrote instead of using the card. The CLI is parked on the card's
+      // answer and won't read anything else until it has one, so a message
+      // steered or queued now would sit unread behind it for good. Declining
+      // the card lets the CLI move on and take the message next.
+      for (const [approvalId, pending] of [...rt.approvals]) {
+        if (!pending.main) continue;
+        this.resolveApproval(st, approvalId, 'deny', WROTE_INSTEAD);
+        if (pending.kind === 'question') pending.resolve({ answers: null, message: WROTE_INSTEAD });
+        else pending.resolve({ decision: 'deny', message: WROTE_INSTEAD });
+      }
+    }
     if (rt.turn && !opts.queue && this.canSteer(st)) {
       // Sent while a turn runs: it goes into that turn now, as typing into
       // the CLI would. The CLI takes it at its next step, or straight after
@@ -3258,7 +3273,7 @@ export class Runner {
     };
     if (req.toolUseId) body.itemId = req.toolUseId;
     return new Promise((resolve) => {
-      this.addApproval(st, { approvalId, kind: 'tool', resolve }, body, req.signal);
+      this.addApproval(st, { approvalId, kind: 'tool', main: Boolean(req.toolUseId), resolve }, body, req.signal);
     });
   }
 
@@ -3268,7 +3283,7 @@ export class Runner {
     const body: EventBody = { type: 'question.requested', approvalId, questions: req.questions };
     if (req.toolUseId) body.itemId = req.toolUseId;
     return new Promise((resolve) => {
-      this.addApproval(st, { approvalId, kind: 'question', questions: req.questions, resolve }, body, req.signal);
+      this.addApproval(st, { approvalId, kind: 'question', main: Boolean(req.toolUseId), questions: req.questions, resolve }, body, req.signal);
     });
   }
 
@@ -4896,6 +4911,10 @@ function fromMike(text: string, opts: SendOptions): boolean {
   if (opts.origin && opts.origin !== 'phone') return false;
   return !sentByAgent(text);
 }
+
+// What the agent is told when Mike writes a message while its question or
+// approval card is still open (sendTo).
+export const WROTE_INSTEAD = "Mike didn't answer this; he wrote you a message instead, which comes next. Read it before asking again.";
 
 // What a pool thread is told when it carries on by itself after its login
 // ran dry (docs/protocol.md, "Pools").

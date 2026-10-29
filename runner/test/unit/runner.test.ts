@@ -6,7 +6,7 @@ import { makeHarness, tick, tmpDir } from '../helpers/fakes.ts';
 import { checkSequence, checkSummary } from '../helpers/protocol-check.ts';
 import { makePng } from '../helpers/png.ts';
 import { RpcError } from '../../src/protocol.ts';
-import { UNTIL_RESTART } from '../../src/runner.ts';
+import { UNTIL_RESTART, WROTE_INSTEAD } from '../../src/runner.ts';
 
 const MIN = 60_000;
 
@@ -375,6 +375,23 @@ test('questions are answered by question text, header or index', async () => {
   h.runner.respondApproval({ threadId: thread.id, approvalId: req.approvalId, decision: 'answered', answers: { Drink: 'Tea', '1': 'No' } });
   assert.deepEqual((await answer).answers, { 'Tea or coffee?': 'Tea', 'Milk?': 'No' });
   assert.equal(h.events(thread.id).at(-1).decision, 'answered');
+});
+
+test('a message written while a card is open declines the card so the CLI reads it', async () => {
+  const h = makeHarness();
+  const { thread } = create(h, { permissionMode: 'ask' });
+  const s = h.adapter.last;
+  s.init();
+  const questions = [{ question: 'Which name?', multiSelect: false, options: [{ label: 'browse' }] }];
+  const question = s.sink.requestQuestion({ toolUseId: 'q1', questions, signal: new AbortController().signal });
+  const approval = s.sink.requestApproval({ toolUseId: 't1', name: 'Edit', title: 'Edit a.ts', input: {}, canAlwaysAllow: false, signal: new AbortController().signal });
+  assert.equal(h.runner.get(thread.id).status, 'waiting');
+  h.runner.send(thread.id, 'Can you come up with some more options?');
+  assert.deepEqual(await question, { answers: null, message: WROTE_INSTEAD });
+  assert.deepEqual(await approval, { decision: 'deny', message: WROTE_INSTEAD });
+  assert.deepEqual(h.events(thread.id).filter((e) => e.type === 'approval.resolved').map((e) => e.decision), ['deny', 'deny']);
+  assert.equal(s.sent.at(-1)?.text, 'Can you come up with some more options?');
+  assert.equal(h.runner.get(thread.id).status, 'running');
 });
 
 test('pending approvals expire when the CLI cancels or the turn is interrupted', async () => {
