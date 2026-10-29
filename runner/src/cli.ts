@@ -912,7 +912,10 @@ async function tail(
   });
 }
 
-main(process.argv.slice(2)).then((code) => process.exit(code));
+// Exit only once stdout has drained: into a pipe Node writes it
+// asynchronously, and exiting straight away cut `tb list --json | ...`
+// off partway (at 64 or 128 KB).
+main(process.argv.slice(2)).then((code) => process.stdout.write('', () => process.exit(code)));
 
 // ------------------------------------------------------------- projects
 
