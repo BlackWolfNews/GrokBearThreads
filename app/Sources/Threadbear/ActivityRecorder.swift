@@ -40,6 +40,10 @@ final class ActivityRecorder {
     private var lastShowing: [String]?
     private var lastWindow: NSWindow?
     private var lastHover: (text: String, at: Date)?
+    /// The running build, read at launch. By the time a handover's old app
+    /// quits, its bundle's path already holds the new build, so reading it
+    /// then named the wrong one (29 Oct).
+    private var build: String?
 
     func install(app: AppModel) {
         guard writer == nil else { return }
@@ -73,7 +77,8 @@ final class ActivityRecorder {
         })
         var launch = ActivityEvent(kind: .launch)
         launch.version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String
-        launch.build = BuildInfo.read(bundle: Bundle.main.bundleURL)?.short
+        build = BuildInfo.read(bundle: Bundle.main.bundleURL)?.short
+        launch.build = build
         launch.showing = showing(app.dock.layout)
         lastShowing = launch.showing
         record(launch)
@@ -83,7 +88,7 @@ final class ActivityRecorder {
     /// handover the new app has launched before the old one quits.
     func quit() {
         var e = ActivityEvent(kind: .quit)
-        e.build = BuildInfo.read(bundle: Bundle.main.bundleURL)?.short
+        e.build = build
         record(e)
         writer?.flush()
     }
