@@ -1339,17 +1339,28 @@ A turn the agent finished can say whether Mike has to do anything, so
   into its working, so the turn reads as one line of work, the bullets,
   then the Needs you card. Once any turn is over (`turn.completed`), the
   app shows it as Mike's messages, one "Worked for 2m 13s" line holding
-  everything else, its reply (the summary, else its last
-  `assistant.text`), errors, a review still waiting, pictures the agent
-  made, the changes card, the footer and the card (Mike, 29 Oct: like
-  Codex desktop). While it runs, its work shows as it always has.
+  everything else, its reply, errors, a review still waiting, pictures
+  the agent made, the changes card, the footer and the card (Mike, 29
+  Oct: like Codex desktop). The reply is the turn's messages after its
+  last step and before its taken `end_turn`, when they're longer than
+  the summary; else the summary; else its last `assistant.text`. A step
+  is a tool call outside the `threadbear` tools and `ToolSearch`,
+  counted from its `tool.result` too (a message written while it ran
+  isn't after it); a `user.message` sent into the turn counts as one.
+  Text after `end_turn` never counts. The line of work goes above the
+  reply, and holds the summary when the message won. On 29 Oct 2026 the
+  bullets alone hid two answers: a turn that only explained something
+  showed "Explained the choice above" over the folded explanation, and a
+  Sentry triage report folded away under bullets that never said what
+  was broken. A sign-off line is shorter than the bullets, so they still
+  win over it. While it runs, its work shows as it always has.
   A turn started by a `user.message` with `origin: "runner"` (the app
   restarted, a hook ran, a resume, a carry-on) joins the turns before it
   back to the last message that started a turn of its own (Mike's, a
   schedule's, another agent's): one line of work holding all of them and
   the notes between (their earlier summaries and the runner's messages
   too), one reply (the last summary, plus the last `assistant.text` of
-  any later turn), one changes card and one footer with their time and
+  any later turn, each picked as above), one changes card and one footer with their time and
   cost added up. A note from an edit (`thread.rewound`) stays out. The
   `end_turn` description tells the agent that in such a turn its summary
   takes the place of the last one, so it covers everything since Mike's

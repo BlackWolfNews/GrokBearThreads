@@ -105,6 +105,9 @@ public struct TranscriptModel: Sendable {
     private var summarizedTurns: Set<String> = []
     /// Edit and Write tool items per turn, in order, for the changes card.
     private var editsByTurn: [String: [String]] = [:]
+    /// The seq each tool row's result came at, by row id: a message written
+    /// while a step was still running isn't after it (reply(of:)).
+    private var resultSeqs: [String: Int] = [:]
     /// Approval and question rows still waiting, and their turn. A turn
     /// waiting on Mike isn't "working".
     private var pendingCards: [String: String] = [:]
@@ -369,6 +372,7 @@ public struct TranscriptModel: Sendable {
         completedTurns = []
         summarizedTurns = []
         editsByTurn = [:]
+        resultSeqs = [:]
         pendingCards = [:]
         approvalForTool = [:]
         openTurn = nil
@@ -617,6 +621,7 @@ public struct TranscriptModel: Sendable {
 
         case .toolResult(let result):
             let id = "t:\(result.itemId)"
+            resultSeqs[id] = seq
             if itemIndex[id] != nil {
                 update(id) { content in
                     if case .tool(var tool) = content {
@@ -920,23 +925,75 @@ public struct TranscriptModel: Sendable {
         completedTurns.contains(turn) && turn != openTurn
     }
 
-    /// A finished turn's reply: its last summary from end_turn, else its
-    /// last message. In a stretch with the runner's turns in it, each turn
-    /// after the one with that summary (each turn, without one) has its
-    /// last message as a reply too, so a turn that ended on a line rather
-    /// than a summary isn't folded away behind the one before.
+    /// A finished turn's reply (`reply(of:)`). In a stretch with the
+    /// runner's turns in it, each turn from the one with the last summary
+    /// on (each turn, without one) has a reply, so a turn that ended on a
+    /// line rather than a summary isn't folded away behind the one before.
     private func replies(in turn: Range<Int>) -> Set<Int> {
-        func text(_ k: Int) -> TextItem? {
-            if case .assistant(let text) = items[k].content { return text }
-            return nil
-        }
-        let summary = turn.last { text($0)?.isSummary == true }
-        var out: Set<Int> = summary.map { [$0] } ?? []
-        var seen: Set<String> = summary.flatMap { items[$0].turnId }.map { [$0] } ?? []
-        for k in turn.reversed() where k > (summary ?? -1) && text(k) != nil {
-            if seen.insert(items[k].turnId ?? "").inserted { out.insert(k) }
-        }
+        // Items with no turn id (live text not yet given one) are a turn
+        // of their own, "".
+        var turns: [String] = []
+        for k in turn where !turns.contains(items[k].turnId ?? "") { turns.append(items[k].turnId ?? "") }
+        let summary = turn.last { textItem($0)?.isSummary == true }
+        let from = summary.flatMap { turns.firstIndex(of: items[$0].turnId ?? "") } ?? 0
+        var out: Set<Int> = []
+        for id in turns[from...] { out.formUnion(reply(of: turn.filter { (items[$0].turnId ?? "") == id })) }
         return out
+    }
+
+    /// One turn's reply: the messages it wrote after its last real step
+    /// and before its end_turn, when they say more than its summary; else
+    /// its summary; else its last message.
+    ///
+    /// The summary alone hid the answer twice on 29 Oct 2026: a turn that
+    /// only explained something to Mike showed "Explained the choice
+    /// above" over a folded explanation, and a Sentry triage turn's full
+    /// report folded away under four bullets that didn't say what was
+    /// broken. Mike: everything before the last step is the work, what
+    /// comes after it is what he should see. A sign-off line ("Landed.")
+    /// is shorter than the bullets, so they still win over it. Text after
+    /// end_turn never counts: it's a repeat of the card (an agent wrote
+    /// "What I need from you" there and it took the answer's place), or
+    /// Codex's final answer, which follows its end_turn by design.
+    private func reply(of turn: [Int]) -> Set<Int> {
+        let text = textItem
+        let end = turn.firstIndex { k in
+            if case .tool(let tool) = items[k].content { return Self.isTakenEndTurn(tool) }
+            return false
+        } ?? turn.count
+        let beforeEnd = turn[..<end]
+        // After the last step's row and after its result, as a message can
+        // land between a call and its result. A message sent into the
+        // running turn starts a new answer too; it counts by place, as live
+        // text carries the seq of the event before it.
+        let steps = beforeEnd.filter { k in
+            if case .user = items[k].content { return true }
+            return Self.isRealStep(items[k])
+        }
+        let lastResult = steps.compactMap { resultSeqs[items[$0].id] }.max() ?? Int.min
+        let final = beforeEnd.filter { k in
+            text(k).map { !$0.isSummary } == true && k > (steps.last ?? Int.min) && items[k].seq > lastResult
+        }
+        if let summary = turn.last(where: { text($0)?.isSummary == true }) {
+            let said = final.reduce(0) { $0 + (text($1)?.text.count ?? 0) }
+            return said > (text(summary)?.text.count ?? 0) ? Set(final) : [summary]
+        }
+        if !final.isEmpty { return Set(final) }
+        return (turn.last { text($0) != nil }).map { [$0] } ?? []
+    }
+
+    private func textItem(_ k: Int) -> TextItem? {
+        if case .assistant(let text) = items[k].content { return text }
+        return nil
+    }
+
+    /// A step that did something: a tool call outside Threadbear's own
+    /// tools (pin, update_project, end_turn) and ToolSearch, which only
+    /// loads a tool. A message after a pin is still the agent's last word.
+    static func isRealStep(_ row: TranscriptRow) -> Bool {
+        guard case .tool(let tool) = row.content else { return false }
+        guard let name = tool.call?.name else { return true }
+        return !name.hasPrefix("mcp__threadbear") && name != "ToolSearch"
     }
 
     /// What stays out of a finished turn's line of work: Mike's messages,
@@ -1088,6 +1145,10 @@ public struct TranscriptModel: Sendable {
                 // a change anywhere in it rebuilds it whole (runStart).
                 let replies = replies(in: turn)
                 let folded = turn.filter { !staysOut($0, replies: replies) }
+                // The line of work goes above the reply, even when the reply
+                // came first: a turn that only answered has its summary
+                // folded under it (reply(of:)).
+                let groupAt = folded.first.map { first in min(first, replies.min() ?? first) }
                 // A stretch with the runner's turns in it has a footer for
                 // each: the last one stands for them all, with their time
                 // and cost added up, and the changes card has every turn's
@@ -1099,14 +1160,15 @@ public struct TranscriptModel: Sendable {
                 let worked = footers.reduce(0) { $0 + $1.done.durationMs }
                 for k in turn {
                     let row = items[k]
-                    if k == folded.first {
-                        let id = "g:" + row.id
+                    if k == groupAt, let first = folded.first {
+                        let lead = items[first]
+                        let id = "g:" + lead.id
                         let open = expanded.contains(id)
                         var group = WorkGroup(members: ArraySlice(folded.map { items[$0] }), isExpanded: open, isLive: false)
                         if worked > 0 {
                             group.summary = "Worked for " + RelativeTime.duration(milliseconds: worked)
                         }
-                        out.append(derived(id, seq: row.seq, turnId: row.turnId, .group(group)))
+                        out.append(derived(id, seq: lead.seq, turnId: lead.turnId, .group(group)))
                         starts.append(turn.lowerBound)
                         if open {
                             for m in folded {
@@ -1115,6 +1177,10 @@ public struct TranscriptModel: Sendable {
                                 out.append(member)
                                 starts.append(turn.lowerBound)
                             }
+                        }
+                        if replies.contains(k) {
+                            out.append(row)
+                            starts.append(turn.lowerBound)
                         }
                     } else if !staysOut(k, replies: replies) {
                         continue

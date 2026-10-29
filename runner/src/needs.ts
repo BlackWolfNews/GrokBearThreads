@@ -225,13 +225,15 @@ const END_TURN_WHAT =
 
 // Mike, 29 Oct 2026, after Codex desktop: the least context to load when
 // he comes back to a thread, then what's next, with links back into the
-// detail. In 36 test sessions, bullets asked for in the final message
+// detail. Later that day the bullets hid two answers (an explanation, a
+// Sentry report), so a final message that says more than them is the
+// Mac app's reply (TranscriptReducer.replyItems). In 36 test sessions, bullets asked for in the final message
 // came back as prose from Opus every time; in here, as bullets every time
 // (docs/end-turn-design). The links' quote-a-step rule is what models
 // managed: they can't see their tool calls' ids.
 const END_TURN_SUMMARY =
   'summary is what Mike reads first when he comes back to the thread, often hours later and among many others: 2 to 5 markdown bullets of what happened this turn (what you found, changed, shipped or decided, with the result), each one line of about 15 words at most, in plain words that make sense to someone who has forgotten the task. ' +
-  "It is drawn as your reply, with the asks under it, and everything else you wrote this turn folds into your working, so don't repeat it in a message, and leave what Mike has to do to the asks. If he asked a question, the first bullet answers it. " +
+  "The preview, notifications and the phone show it as your reply. In the Mac app, what you write after your last step (before end_turn) is the reply when it says more than the bullets, and the bullets fold into your working with everything else; otherwise the bullets are the reply. So when the answer is an explanation or a report, write it as your message and make the bullets a short version that stands on its own; when it isn't, don't repeat the bullets in a message. Never point at something \"above\": Mike may only see the bullets. Leave what Mike has to do to the asks. If he asked a question, the first bullet answers it. " +
   'Link each bullet to where he can check it: a web page or a file as an ordinary markdown link; another thread as [its own thread](thread:<its id from list_threads>); a step in your own working this turn as work: and a few words copied exactly from that step (the command you ran or its description, the file you edited, or a line you wrote while working), e.g. [tests pass](work:npm test), which opens your working at that step and lights it up. Links work in the asks too. ' +
   // Mike, 29 Oct: a turn that waited for the app to restart, then the
   // check after it, left two summaries. The app now shows a runner's turn

@@ -114,7 +114,9 @@ At the right of each row:
 
 When an agent finishes a piece of work, its reply is a few short bullets
 of what it did, with what it needs from you (or "Nothing needed from you")
-under them. Everything it did to get there, its notes, thinking, commands
+under them. When its last message says more than the bullets (an
+explanation you asked for, a report), that message is the reply instead,
+and the bullets fold away with the work. Everything it did to get there, its notes, thinking, commands
 and edits, is one line above the reply, "Worked for 2m 13s": click it to
 open it. Pictures it made stay out, as they're often the answer. When
 the agent carries on by itself after that (to check its change once the

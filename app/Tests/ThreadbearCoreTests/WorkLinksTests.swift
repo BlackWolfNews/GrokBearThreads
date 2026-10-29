@@ -25,6 +25,52 @@ final class WorkLinksTests: XCTestCase {
         XCTAssertEqual(TranscriptModel(events: model.events).rows.map(\.id), model.rows.map(\.id))
     }
 
+    /// Mike asked what option A and B meant; the turn did no work, only
+    /// answered, and its bullets said "Explained the choice above" over a
+    /// folded explanation (29 Oct 2026). The answer is the reply.
+    func testAnAnswerWithNoStepsIsTheReplyOverItsSummary() {
+        let model = TranscriptModel(events: [
+            E.user(1, "Can you explain this a bit more?"),
+            E.text(2, "m1", "Sure. It comes down to timing against proof. **Option A:** wait and post it with a short video. **Option B:** post text only, now."),
+            E.call(3, "e1", name: "mcp__threadbear__end_turn", kind: "mcp", title: "end_turn"), E.result(4, "e1", text: "Noted"),
+            Self.summary(5, "e1.summary", "- Explained the choice above"), E.done(6),
+        ])
+        XCTAssertEqual(model.rows.map(\.id), ["u:1", "g:a:e1.summary", "a:m1", "f:t1"])
+    }
+
+    /// A Sentry triage turn's report came after its last step (and a pin),
+    /// and folded away under bullets that never said what was broken
+    /// (29 Oct 2026). Everything before the last step is the work.
+    func testTheReportAfterTheLastStepIsTheReplyOverAShorterSummary() {
+        let model = TranscriptModel(events: [
+            E.user(1, "Triage this"),
+            E.text(2, "m1", "Committing and opening the PR."),
+            E.call(3, "c1", input: ["command": "git commit -qm fix"]), E.result(4, "c1"),
+            E.call(5, "c2", name: "ToolSearch", kind: "search", title: "Find tools"), E.result(6, "c2"),
+            E.call(7, "p1", name: "mcp__threadbear__pin", kind: "mcp", title: "Pin PR #2"), E.result(8, "p1"),
+            E.text(9, "m2", "**What's broken:** every sync since 22 Oct has failed. **My recommendation:** the planner is wrong and the guard is right."),
+            E.call(10, "e1", name: "mcp__threadbear__end_turn", kind: "mcp", title: "end_turn"), E.result(11, "e1", text: "Noted"),
+            Self.summary(12, "e1.summary", "- PR #2 opened"), E.done(13),
+        ])
+        XCTAssertEqual(model.rows.map(\.id), ["u:1", "g:a:m1", "a:m2", "f:t1"])
+        guard case .group(let group) = model.rows[1].content else { return XCTFail("a group") }
+        XCTAssertEqual(group.memberIds, ["a:m1", "t:c1", "t:c2", "t:p1", "a:e1.summary"])
+    }
+
+    /// Text after end_turn never takes the answer's place: an agent wrote
+    /// its "What I need from you" there, and it showed instead of the
+    /// explanation before it (29 Oct 2026).
+    func testTextAfterEndTurnFoldsAndTheAnswerBeforeItStays() {
+        let model = TranscriptModel(events: [
+            E.user(1, "What can we do?"),
+            E.call(2, "c1", input: ["command": "sed -n 1,80p needs.ts"]), E.result(3, "c1"),
+            E.text(4, "m1", "Two fixes."),
+            E.call(5, "e1", name: "mcp__threadbear__end_turn", kind: "mcp", title: "end_turn"), E.result(6, "e1", text: "Noted"),
+            E.text(7, "m2", "**What I need from you**\n1. Pick one."), E.done(8),
+        ])
+        XCTAssertEqual(model.rows.map(\.id), ["u:1", "g:t:c1", "a:m1", "f:t1"])
+    }
+
     func testATurnWithoutASummaryKeepsItsMessages() {
         let model = TranscriptModel(events: [
             E.user(1, "Hi"), E.text(2, "m1", "Hello."), E.done(3),
