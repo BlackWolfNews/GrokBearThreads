@@ -619,9 +619,16 @@ public struct PatchInfo: Sendable, Hashable, Codable, Identifiable {
     /// The patch file's icon: a symbol, or a picture (as Panel's).
     public var icon: String?
     public var iconFile: String?
+    /// A project's patch file that isn't trusted yet, so it wasn't loaded:
+    /// "new" (nothing from its folder is trusted) or "changed" (an earlier
+    /// version was). `hash` is the version `patches.trust` would trust.
+    public var untrusted: String?
+    public var hash: String?
 
     public init(id: String, source: String = "project", file: String? = nil, error: String? = nil, folder: String? = nil, projectId: String? = nil,
-                matched: [String]? = nil, liveError: String? = nil) {
+                matched: [String]? = nil, liveError: String? = nil, untrusted: String? = nil, hash: String? = nil) {
+        self.untrusted = untrusted
+        self.hash = hash
         self.matched = matched
         self.liveError = liveError
         self.id = id
@@ -644,6 +651,8 @@ public struct PatchInfo: Sendable, Hashable, Codable, Identifiable {
         liveError = (try? c.decodeIfPresent(String.self, forKey: .liveError)) ?? nil
         icon = (try? c.decodeIfPresent(String.self, forKey: .icon)) ?? nil
         iconFile = (try? c.decodeIfPresent(String.self, forKey: .iconFile)) ?? nil
+        untrusted = (try? c.decodeIfPresent(String.self, forKey: .untrusted)) ?? nil
+        hash = (try? c.decodeIfPresent(String.self, forKey: .hash)) ?? nil
     }
 }
 

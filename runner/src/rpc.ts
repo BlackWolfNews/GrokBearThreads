@@ -501,6 +501,15 @@ export class RpcServer {
         return r.convexPanelKey(reqString(p, 'threadId'), reqString(p, 'panelId'), p.renew === true, optString(p, 'deployment'));
       case 'panels.convexDeployments':
         return r.convexPanelDeployments(reqString(p, 'threadId'), reqString(p, 'panelId'), p.refresh === true);
+      case 'patches.trust': {
+        if (!Array.isArray(p.files) || !p.files.length) throw bad('files must be a non-empty array');
+        const files = p.files.map((f: unknown) => {
+          const o = f as { file?: unknown; hash?: unknown };
+          if (!o || typeof o.file !== 'string' || typeof o.hash !== 'string') throw bad('each file needs file and hash');
+          return { file: o.file, hash: o.hash };
+        });
+        return r.trustPatches(reqString(p, 'threadId'), files);
+      }
       case 'actions.run':
         return r.runAction(reqString(p, 'threadId'), reqString(p, 'actionId'));
       // Each starts its work and answers at once; progress comes through

@@ -250,6 +250,11 @@ type PatchInfo = {
                         // built-in's project folder
   projectId?: string
   error?: string        // the file couldn't be loaded, and gives nothing until it's fixed
+  untrusted?: "new" | "changed" // a project's patch file that isn't trusted yet, so
+                        // wasn't loaded and gives nothing: "new" when nothing
+                        // from its folder is trusted, "changed" when an earlier
+                        // version was (see "Trusting a folder's patches")
+  hash?: string         // with untrusted: the version patches.trust would trust
 }
 
 type Panel = {
@@ -673,6 +678,7 @@ the summary and then the reply.
 | `threads.share` | `{ threadId, access: "off" \| "link", newLink?: boolean }` | `{ thread: ThreadSummary }`. Whether anyone with the link can read the thread on the website (see Sharing). `newLink` makes a fresh slug, which stops the old link. Another access is `-32602` |
 | `approvals.respond` | `{ threadId, approvalId, decision: "allow" \| "allowAlways" \| "deny" \| "answered", message?: string, answers?: Record<string, string> }` | `{}`. `allowAlways` allows matching requests for the rest of this thread only; it never changes the thread's permission mode or saves anything in the project. With `answered`, the app sends the chosen answers in one line as `message` too: the runner keeps it in `approval.resolved` (only `answers` goes to the CLI), so the transcript can show what was chosen |
 | `media.import` | `{ path: string }` | `{ image: ImageRef }` copies a file into `inbox/` and reads its size; HEIC becomes JPEG and TIFF or BMP becomes PNG |
+| `patches.trust` | `{ threadId, files: { file, hash }[] }` | `{ trusted: string[] }`. Trusts those versions of the thread's waiting patch files (each a `file` its `patches` lists with `untrusted`, and the `hash` given there), then every thread's patches are read again, so the answer comes once they have been. `-32602` for a file the thread isn't waiting on, or one whose hash has moved on since (look again). See "Trusting a folder's patches" |
 | `actions.run` | `{ threadId, actionId }` | For a prompt action, `{ turnId }`: its prompt was sent as a message (as `threads.send`). For a command action, `{ ok, exitCode?, durationMs, seq }` once the command has finished, with its output in the transcript as the `action.run` event at `seq`. The command runs in the thread's folder through a login shell with the thread's variables (`THREADBEAR_THREAD_ID` and the rest) and is stopped after 10 minutes. `-32602` for an action the thread doesn't have, `-32020` while the same action is still running |
 | `panels.render` | `{ threadId, panelId }` | `{ image?: ImageRef, items?: PanelItem[], note?: string }` draws an `image` panel or fills a `list` panel now. For `xcode.simulator`, a screenshot of the booted simulator (`xcrun simctl io booted screenshot`), written to the same file each time under the thread's `panels/`; with no device booted (or another failure) there's only `note`. For a `list` panel, the rows its patch's `items` function returned (at most 200), or `note` with the error when it threw or took over 20 seconds. Slow: it waits for the screenshot or the function. `-32602` for a panel the thread doesn't have |
 | `panels.convexDeployments` | `{ threadId, panelId, refresh?: boolean }` | `{ deployments: { deployment, deploymentUrl, label }[], note?: string }`. The configured cloud deployment and the project's Development and Production deployments, resolved through the project's Convex CLI with read-only queries of `process.env.CONVEX_CLOUD_URL`. Duplicate names are combined; `note` explains unavailable choices. Cached for one minute; `refresh` bypasses the cache. Makes no deploy keys and changes no project settings. `-32602` for a missing or non-cloud panel |
@@ -1478,8 +1484,9 @@ folder again in the background when the folder changes and otherwise
 every 15 seconds at most (on the next summary it sends), and sends a new
 summary if anything differs, so a `.env.local` that `convex dev` has just
 written, or a patch file the agent has just saved, shows up within
-seconds. A patch file that appears, loads again or breaks after the first
-read is said in the transcript as a `system.note`.
+seconds. A patch file that appears, loads again, breaks or is waiting
+to be trusted after the first read is said in the transcript as a
+`system.note`.
 
 Patches are found by walking up from the thread's folder to the home
 folder (so a thread in a package of a monorepo gets the project's), plus
@@ -1602,8 +1609,43 @@ dashboards of two of a project's folders, each get their folder's name
 after it (`Convex · web`, or `Convex · apps/web` when the folder names are
 the same too), so their tabs and rail buttons say which is which. A
 file whose export doesn't fit is listed in `patches` with an `error` and
-gives nothing. Loading a project's module is the same trust as `npm
-install` in it.
+gives nothing. A project's file only loads once it's trusted (below).
+
+### Trusting a folder's patches
+
+A patch file is code. Importing it runs it, and its hooks, live state
+functions and worktree `setup` then run by themselves, so without a gate
+opening a thread in a repo someone else wrote would run that repo's code
+before you'd said a word. The runner only imports a project's patch file
+(`src/patch-trust.ts`) once that version of it is trusted, the way VS
+Code and Claude Code ask before running a folder's code. Until then it's
+in `patches` with `untrusted` and `hash`, and gives nothing: no actions,
+panels or hooks, no live functions, and no worktree for new threads.
+
+- Trust is kept per folder (the one holding `.threadbear/`) as the
+  SHA-256 hashes of the patch files trusted there, in `patch-trust.json`
+  in the data dir. `untrusted` is `"new"` when nothing from that folder
+  is trusted and `"changed"` when an earlier version was: a pull brought
+  a new one, and it's asked about again.
+- A git worktree counts as its main checkout, so a thread's worktree of
+  a trusted repo isn't asked about. Only one git made: its `.git` file and
+  the repo's record of it must name each other, so a folder can't claim
+  to be a worktree of a trusted repo.
+- A patch file a thread's agent writes with an Edit or Write call (or a
+  Codex patch, at the end of the turn) is trusted as it left it: the
+  agent can run anything in the folder already. One written another way,
+  like a shell heredoc or a `git pull`, waits.
+- Always trusted: `~/.threadbear/patches` and Threadbear's own checkout
+  (the release's `checkout`, else the one the runner runs from).
+- `patches.trust` trusts what the app showed, by hash. Clients show a
+  waiting patch with a way to read its file and trust it.
+- A runner's first start with this (no `patch-trust.json` yet) trusts
+  the patch files of every thread's folder and every project's as they
+  are, since it was already running them.
+
+Only the patch file's own text is hashed. A patch that imports a helper
+from elsewhere in its repo isn't asked about again when only the helper
+changes.
 
 **Built in**, from the folder alone:
 

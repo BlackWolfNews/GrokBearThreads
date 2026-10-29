@@ -1656,6 +1656,20 @@ final class AppModel {
         }
     }
 
+    /// Trusts patch files waiting in a thread's folder, as the Patches
+    /// panel showed them; the runner then loads them.
+    func trustPatches(_ patches: [PatchInfo], in threadId: String) {
+        let files = patches.compactMap { p in p.file.flatMap { f in p.hash.map { (file: f, hash: $0) } } }
+        guard !files.isEmpty, let client else { return }
+        Task {
+            do {
+                try await client.trustPatches(threadId: threadId, files: files)
+            } catch {
+                errorMessage = "Couldn't trust \(patches.count == 1 ? patches[0].id : "the patches"): \(error.localizedDescription)"
+            }
+        }
+    }
+
     /// An image panel's latest picture or a list panel's rows, or nil when
     /// the runner can't be asked (not connected). `failure` is the note
     /// when it couldn't answer.

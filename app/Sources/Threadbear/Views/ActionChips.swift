@@ -14,6 +14,10 @@ struct ActionChips: View {
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: zoomed(6)) {
+                let waiting = thread.patches.filter { $0.untrusted != nil }.count
+                if waiting > 0 {
+                    WaitingPatchesChip(count: waiting) { app.showPane(.patches) }
+                }
                 ForEach(Array(Self.groups(thread.actions).enumerated()), id: \.offset) { index, group in
                     if index > 0 {
                         Rectangle()
@@ -41,6 +45,33 @@ struct ActionChips: View {
             byPatch[action.patch, default: []].append(action)
         }
         return order.map { byPatch[$0]! }
+    }
+}
+
+/// Patch files in the thread's folder that haven't run because they
+/// aren't trusted yet. Opens Patches, where each can be read and trusted.
+private struct WaitingPatchesChip: View {
+    let count: Int
+    let open: () -> Void
+
+    var body: some View {
+        Button(action: open) {
+            HStack(spacing: zoomed(5)) {
+                Image(systemName: "lock.shield")
+                    .font(.system(size: zoomed(11), weight: .medium))
+                    .foregroundStyle(Color(nsColor: Theme.needsYou))
+                Text(count == 1 ? "1 patch to trust" : "\(count) patches to trust")
+                    .foregroundStyle(.primary)
+            }
+            .font(.system(size: TypeScale.chip))
+            .padding(.horizontal, zoomed(9))
+            .padding(.vertical, zoomed(4))
+            .background(Capsule().fill(Color.primary.opacity(0.06)))
+            .overlay(Capsule().strokeBorder(Color(nsColor: Theme.cardBorder), lineWidth: 0.5))
+            .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .tip("This folder has patch files that haven't run, because you haven't trusted them yet. A patch is code that runs on your Mac. Open Patches to read and trust them.")
     }
 }
 

@@ -378,6 +378,12 @@ export type PatchInfo = {
   error?: string; // set when the file couldn't be loaded; it then gives nothing
   matched?: string[]; // a tool patch (appliesTo): the paths that made it apply
   liveError?: string; // a when or badge function that threw or took too long
+  // A project's patch file that isn't trusted yet, so wasn't loaded and
+  // gives nothing (docs/protocol.md, "Trusting a folder's patches"): "new"
+  // when nothing from its folder is trusted, "changed" when an earlier
+  // version was. `hash` is the version patches.trust would trust.
+  untrusted?: 'new' | 'changed';
+  hash?: string;
   icon?: string; // the patch file's icon, an SF Symbol
   iconFile?: string; // or its picture (absolute path: an image or a .app)
 };

@@ -136,6 +136,14 @@ public extension RPCClient {
         try await call("actions.run", .object(["threadId": .string(threadId), "actionId": .string(actionId)]), as: ActionRunResult.self, timeout: .seconds(11 * 60))
     }
 
+    /// Trusts the versions of the thread's waiting patch files that were
+    /// shown (by hash), so they load (docs/protocol.md, "Trusting a
+    /// folder's patches").
+    func trustPatches(threadId: String, files: [(file: String, hash: String)]) async throws {
+        let list = files.map { JSONValue.object(["file": .string($0.file), "hash": .string($0.hash)]) }
+        _ = try await call("patches.trust", .object(["threadId": .string(threadId), "files": .array(list)]), as: EmptyResult.self)
+    }
+
     func interrupt(threadId: String) async throws {
         _ = try await call("threads.interrupt", .object(["threadId": .string(threadId)]), as: EmptyResult.self)
     }

@@ -356,7 +356,18 @@ struct PatchesList: View {
                     .font(.system(size: TypeScale.small))
                     .foregroundStyle(Color(nsColor: Theme.faintText))
             }
-            if let error = patch.error {
+            if let untrusted = patch.untrusted {
+                // Not loaded until trusted: it's code that would run on
+                // this Mac (docs/guide.md, "Patches").
+                HStack(spacing: zoomed(8)) {
+                    Text(untrusted == "changed" ? "Changed since you trusted it" : "Not run yet")
+                        .font(.system(size: TypeScale.detail))
+                        .foregroundStyle(Color(nsColor: Theme.needsYou))
+                    Button("Trust") { app.trustPatches([patch], in: thread.id) }
+                        .controlSize(.small)
+                        .tip("Load this patch and let its code run on your Mac from now on. Open the file below to read it first.")
+                }
+            } else if let error = patch.error {
                 Text(error)
                     .font(.system(size: TypeScale.detail))
                     .foregroundStyle(Color(nsColor: Theme.failed))

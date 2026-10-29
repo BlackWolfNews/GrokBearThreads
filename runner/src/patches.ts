@@ -19,8 +19,9 @@
 //
 //   The runner imports the file (Node runs TypeScript as it is) and reads
 //   that object; a file that can't be loaded is listed with its error and
-//   gives nothing. Loading a project's module is the same trust as `npm
-//   install` in it, and these are Mike's own repos.
+//   gives nothing. A project's file is only imported once it's trusted
+//   (patch-trust.ts): until then it's listed as `untrusted` and gives
+//   nothing, so opening a thread in someone else's repo runs none of it.
 //
 // Patches are found by walking up from the thread's folder to the home
 // folder, so a thread started in a package of a monorepo still gets the
@@ -55,6 +56,7 @@ import type { Action, Hook, ImageRef, Panel, PanelItem, PatchInfo } from './prot
 import { LIMITS } from './protocol.ts';
 import { imageRefFor } from './media.ts';
 import { FolderCache } from './folder-cache.ts';
+import { TRUST_ALL, type PatchGate } from './patch-trust.ts';
 
 export const CONVEX_DASHBOARD = 'https://dashboard.convex.dev';
 // `npx convex dev` on an anonymous (no account) deployment serves the
@@ -89,6 +91,7 @@ export async function loadPatchSet(
   projectFolders: ProjectFolder[] = [],
   toolFolders: string[] = [],
   dirs: FolderCache = new FolderCache(),
+  gate: PatchGate = TRUST_ALL,
 ): Promise<PatchSet> {
   const set: PatchSet = { panels: [], actions: [], hooks: [], patches: [] };
   const roots = projectRoots(cwd, projectFolders);
@@ -110,13 +113,13 @@ export async function loadPatchSet(
   };
   for (const { dir, source } of patchDirs(cwd, home, dirs)) {
     seen.add(dir);
-    for (const file of patchFiles(dir, dirs)) add(await loadPatchFile(file, source, cache, dirs));
+    for (const file of patchFiles(dir, dirs)) add(await loadPatchFile(file, source, cache, dirs, gate));
   }
   for (const root of roots) {
     for (const { dir, source } of patchDirs(root.folder, home, dirs)) {
       if (seen.has(dir) || source === 'home') continue;
       seen.add(dir);
-      for (const file of patchFiles(dir, dirs)) add(await loadPatchFile(file, source, cache, dirs), root);
+      for (const file of patchFiles(dir, dirs)) add(await loadPatchFile(file, source, cache, dirs, gate), root);
     }
   }
   for (const folder of toolFolders) {
@@ -124,9 +127,10 @@ export async function loadPatchSet(
     if (seen.has(dir) || !dirs.isDir(dir)) continue;
     seen.add(dir);
     for (const file of patchFiles(dir, dirs)) {
-      const loaded = await loadPatchFile(file, 'project', cache, dirs);
+      const loaded = await loadPatchFile(file, 'project', cache, dirs, gate);
       // Only the tools: the rest of another project's patches are for
-      // threads in that project.
+      // threads in that project. One not trusted yet can't say whether
+      // it's a tool, so it's asked about in that project's threads only.
       if (loaded.appliesTo) add(loaded);
     }
   }
@@ -309,6 +313,15 @@ export function patchDirs(cwd: string, home: string, dirs: FolderCache = new Fol
   return out;
 }
 
+// Every project patch file a thread in `cwd` would read from its own
+// folder chain (not home's): what a first start trusts as already running.
+export function projectPatchFiles(cwd: string, home: string = os.homedir()): string[] {
+  const dirs = new FolderCache();
+  return patchDirs(cwd, home, dirs)
+    .filter((d) => d.source === 'project')
+    .flatMap((d) => patchFiles(d.dir, dirs));
+}
+
 function patchFiles(dir: string, dirs: FolderCache): string[] {
   return dirs
     .names(dir)
@@ -317,10 +330,21 @@ function patchFiles(dir: string, dirs: FolderCache): string[] {
     .map((n) => path.join(dir, n));
 }
 
-async function loadPatchFile(file: string, source: 'home' | 'project', cache: PatchCache, dirs: FolderCache = new FolderCache()): Promise<LoadedPatch> {
+async function loadPatchFile(file: string, source: 'home' | 'project', cache: PatchCache, dirs: FolderCache = new FolderCache(), gate: PatchGate = TRUST_ALL): Promise<LoadedPatch> {
   const id = path.basename(file, path.extname(file));
   const mtimeMs = dirs.mtimeMs(file);
   if (mtimeMs === undefined) return { info: { id, source, file, error: `can't read ${file}` }, panels: [], actions: [], hooks: [] };
+  // Before the cache: a file imported once and then changed by a pull is
+  // asked about again, whatever's cached for it.
+  if (source === 'project') {
+    let verdict;
+    try {
+      verdict = await gate.check(file, mtimeMs);
+    } catch (e) {
+      return { info: { id, source, file, error: firstLine(e) }, panels: [], actions: [], hooks: [] };
+    }
+    if (!verdict.trusted) return { info: { id, source, file, untrusted: verdict.reason, hash: verdict.hash }, panels: [], actions: [], hooks: [] };
+  }
   const hit = cache.get(file);
   if (hit && hit.mtimeMs === mtimeMs) return hit.loaded;
   let loaded: LoadedPatch;
@@ -474,9 +498,15 @@ export function readPatchModule(id: string, source: 'home' | 'project', file: st
 // worktrees are a repo's own choice. `folder` holds the `.threadbear/`.
 export type WorktreePatch = WorktreeConfig & { patch: string; file: string; folder: string };
 
-export async function findWorktreePatch(cwd: string, home: string = os.homedir(), cache: PatchCache = new Map(), dirs: FolderCache = new FolderCache()): Promise<WorktreePatch | undefined> {
+export async function findWorktreePatch(
+  cwd: string,
+  home: string = os.homedir(),
+  cache: PatchCache = new Map(),
+  dirs: FolderCache = new FolderCache(),
+  gate: PatchGate = TRUST_ALL,
+): Promise<WorktreePatch | undefined> {
   for (const file of worktreePatchFiles(cwd, home, dirs)) {
-    const loaded = await loadPatchFile(file, 'project', cache, dirs);
+    const loaded = await loadPatchFile(file, 'project', cache, dirs, gate);
     if (loaded.worktree && !loaded.info.error) {
       return { ...loaded.worktree, patch: loaded.info.id, file, folder: path.dirname(path.dirname(path.dirname(file))) };
     }

@@ -46,7 +46,7 @@ import type {
 } from './protocol.ts';
 import { ErrorCode, LIMITS, PROTOCOL_VERSION, RpcError, sentByAgent } from './protocol.ts';
 import type { LibrarianStatus, Project, Schedule } from './protocol.ts';
-import type { Projects } from './projects.ts';
+import { Projects } from './projects.ts';
 import type { Settings } from './settings.ts';
 import type {
   AgentAdapter,
@@ -92,6 +92,7 @@ import { archiveFromTool, END_TURN_TOOL, endTurnAccepted, endTurnTaken, needsFro
 import type { Needs } from './needs.ts';
 import { asksForAppRestart } from './app-restarts.ts';
 import type { ConnectorsStatus } from './connectors.ts';
+import { isPatchFile, PatchTrust, type PatchTrustStore } from './patch-trust.ts';
 import {
   EMPTY_PATCH_SET,
   findWorktreePatch,
@@ -112,6 +113,7 @@ import {
   type ProjectFolder,
   type Screenshot,
   worktreePatchFiles,
+  projectPatchFiles,
 } from './patches.ts';
 import { FolderCache } from './folder-cache.ts';
 
@@ -219,6 +221,9 @@ type Turn = {
   // Files the turn edited or wrote (edit.diff paths, Write and Edit calls),
   // for hooks that run only after a change to certain files.
   edited: Set<string>;
+  // Edit and Write calls on patch files, by item, until their result: the
+  // file is trusted as the agent left it (patch-trust.ts).
+  patchEdits?: Map<string, string>;
   // Folders its shell commands worked in (commandFolders), so the
   // librarian knows the repo a thread in a catch-all folder works on.
   workedIn?: Set<string>;
@@ -362,6 +367,9 @@ export type RunnerDeps = {
   screenshot?: Screenshot;
   // Where patches stop being looked for up the folder tree (the home folder).
   panelsRoot?: string;
+  // Which project patch files may load (patch-trust.ts). Defaults to
+  // patch-trust.json in the data dir; tests not about trust pass TRUST_ALL.
+  patchTrust?: PatchTrustStore;
   // The shell command actions run through, and how long they may take;
   // tests pass /bin/sh -c and a short limit.
   actionShell?: string[];
@@ -443,6 +451,7 @@ export class Runner {
   private projects?: Projects;
   private activity = new Set<(a: ThreadActivity) => void>();
   private patchCache: PatchCache = new Map();
+  private patchTrust: PatchTrustStore;
   private folderCache: FolderCache;
   private sharedPatchSets = new Map<string, { at: number; set: Promise<PatchSet> }>();
   private patchReads = new Set<Promise<void>>();
@@ -491,6 +500,7 @@ export class Runner {
     this.subagentTranscript = deps.subagentTranscript ?? subagentTranscriptPath;
     this.screenshot = deps.screenshot ?? simctlScreenshot;
     this.panelsRoot = deps.panelsRoot;
+    this.patchTrust = deps.patchTrust ?? new PatchTrust({ file: path.join(deps.config.home, 'patch-trust.json') });
     this.actionShell = deps.actionShell;
     this.actionTimeoutMs = deps.actionTimeoutMs;
     this.convexKeys = new ConvexKeys(
@@ -543,6 +553,9 @@ export class Runner {
     // A wake-when still being worked out lost its answer with the old
     // runner, so it comes back too.
     for (const st of this.threads.values()) if (st.rec.snoozedUntilRestart || st.rec.wakeWhen?.pending) this.wake(st);
+    // Before anything reads a thread's patches. Every thread on disk,
+    // including ones a draining runner still has.
+    this.seedPatchTrust(records.map((r) => r.cwd));
     this.flush();
     for (const st of this.threads.values()) if (st.rec.queue.some(q => q.reviewId) && this.bucket(st.rec) === 'inbox') this.kickQueue(st);
     this.armSnoozeTimer();
@@ -2244,7 +2257,15 @@ export class Runner {
           if (ev.type === 'edit.diff') rt.turn.edited.add(ev.path);
           else if (ev.type === 'tool.call' && (ev.kind === 'edit' || ev.kind === 'write')) {
             const file = ev.input.file_path ?? ev.input.path ?? ev.input.notebook_path;
-            if (typeof file === 'string') rt.turn.edited.add(file);
+            if (typeof file === 'string') {
+              rt.turn.edited.add(file);
+              const full = path.resolve(rec.cwd, file);
+              if (isPatchFile(full)) (rt.turn.patchEdits ??= new Map()).set(ev.itemId, full);
+            }
+          } else if (ev.type === 'tool.result' && rt.turn.patchEdits?.has(ev.itemId)) {
+            const file = rt.turn.patchEdits.get(ev.itemId)!;
+            rt.turn.patchEdits.delete(ev.itemId);
+            if (ev.ok) this.trustAgentPatches([file]);
           } else if (ev.type === 'tool.call' && own && ev.kind === 'command') {
             const cmd = Array.isArray(ev.input.command) ? ev.input.command.join(' ') : ev.input.command;
             if (typeof cmd === 'string') {
@@ -2514,6 +2535,9 @@ export class Runner {
     const finished = rt.turn;
     rt.turn?.interruptTimer?.cancel();
     rt.turn = undefined;
+    // Patch files the turn wrote some other way than Edit and Write calls
+    // (a Codex patch's edit.diff) are trusted as it left them.
+    if (finished) this.trustAgentPatches([...finished.edited].map((p) => path.resolve(rec.cwd, p)), false);
     // The turn may have added a patch file or a convex/ folder.
     this.forgetFolders();
     // The folder's turn.end hooks, after a turn the agent finished itself
@@ -4099,7 +4123,7 @@ export class Runner {
     const now = this.clock.now();
     const hit = this.sharedPatchSets.get(key);
     if (hit && now - hit.at < FOLDER_CACHE_MS) return hit.set;
-    const set = loadPatchSet(cwd, this.panelsRoot, this.patchCache, folders, allFolders, this.folderCache);
+    const set = loadPatchSet(cwd, this.panelsRoot, this.patchCache, folders, allFolders, this.folderCache, this.patchTrust);
     const entry = { at: now, set };
     this.sharedPatchSets.set(key, entry);
     set.catch(() => {
@@ -4173,7 +4197,14 @@ export class Runner {
         if (old?.error !== p.error) this.emit(st, { type: 'system.note', text: `Patch ${p.id} couldn't load: ${p.error}` });
         continue;
       }
-      if (old && !old.error) continue;
+      if (p.untrusted) {
+        if (old?.untrusted !== p.untrusted || old?.hash !== p.hash) {
+          const why = p.untrusted === 'changed' ? 'it changed since you trusted it' : 'nothing from its folder is trusted yet';
+          this.emit(st, { type: 'system.note', text: `Patch ${p.id} isn't loaded: ${why}. Trust it in Patches to load it.` });
+        }
+        continue;
+      }
+      if (old && !old.error && !old.untrusted) continue;
       const gives: string[] = [];
       const actions = after.actions.filter((a) => a.patch === p.id).map((a) => a.title);
       const panels = after.panels.filter((x) => x.patch === p.id).map((x) => x.title);
@@ -4183,6 +4214,67 @@ export class Runner {
       if (hooks.length) gives.push(`${hooks.length === 1 ? 'hook' : 'hooks'} ${hooks.join(', ')}`);
       this.emit(st, { type: 'system.note', text: `Patch ${p.id} ${old ? 'loads again' : 'added'}: ${gives.join(', ') || 'nothing yet'}.` });
     }
+  }
+
+  // patches.trust: trusts the versions of a thread's untrusted patch files
+  // that the app showed (by hash), then reads every thread's patches again.
+  // Only files the thread lists as untrusted: this isn't a way to trust
+  // any path.
+  async trustPatches(threadId: string, files: { file: string; hash: string }[]): Promise<{ trusted: string[] }> {
+    const st = this.mustGet(threadId);
+    const waiting = this.patchSet(st).patches.filter((p) => p.untrusted && p.file);
+    for (const { file, hash } of files) {
+      const p = waiting.find((w) => w.file === file);
+      if (!p) throw new RpcError(ErrorCode.badParams, `${file} isn't one of this thread's patches waiting to be trusted`);
+      if (p.hash !== hash) throw new RpcError(ErrorCode.badParams, `${path.basename(file)} has changed since it was shown; look again`);
+    }
+    const trusted = files.filter(({ file, hash }) => this.patchTrust.trust(file, hash)).map((f) => f.file);
+    this.log.info('patches trusted', { threadId, files: trusted });
+    this.rereadAllPatches();
+    await this.patchesIdle();
+    return { trusted };
+  }
+
+  // Trusts patch files an agent wrote, as they are now (patch-trust.ts).
+  // `reread` false when the caller reads them again itself.
+  private trustAgentPatches(files: string[], reread = true): void {
+    const patchFiles = files.filter(isPatchFile);
+    if (!patchFiles.length) return;
+    const done = this.patchTrust.trustCurrent(patchFiles);
+    if (done.length && reread) this.rereadAllPatches();
+  }
+
+  // Every thread whose patches have been read reads them again now: a
+  // trusted file can matter to threads in other folders (a project's).
+  private rereadAllPatches(): void {
+    this.forgetFolders();
+    for (const st of this.threads.values()) {
+      if (!st.rt.patches || st.rt.deleted) continue;
+      st.rt.patches.at = -Infinity;
+      void this.refreshPatches(st);
+    }
+  }
+
+  // A first start with patch trust (no patch-trust.json yet): the patch
+  // files of every thread's folder and every project's are trusted as they
+  // are, since this runner was already running them. Anything new after
+  // this asks.
+  private seedPatchTrust(threadFolders: string[]): void {
+    if (this.patchTrust.existed) return;
+    const home = this.panelsRoot ?? os.homedir();
+    const folders = new Set<string>(threadFolders);
+    for (const f of Projects.savedFolders(this.cfg.home)) folders.add(f);
+    const files = new Set<string>();
+    for (const folder of folders) {
+      try {
+        for (const f of projectPatchFiles(folder, home)) files.add(f);
+      } catch {
+        // a folder that's gone
+      }
+    }
+    const done = this.patchTrust.trustCurrent([...files]);
+    this.patchTrust.save();
+    this.log.info('patch trust seeded', { files: done.length });
   }
 
   // Draws an image panel (the Simulator's screenshot) for `panels.render`.
@@ -4523,7 +4615,7 @@ export class Runner {
     if (rec.sessionUsed || rec.worktree) return;
     let patch;
     try {
-      patch = await findWorktreePatch(rec.cwd, this.panelsRoot, this.patchCache);
+      patch = await findWorktreePatch(rec.cwd, this.panelsRoot, this.patchCache, undefined, this.patchTrust);
     } catch (e) {
       this.log.warn('could not read patches for a worktree', { threadId: rec.id, error: String(e) });
       return;

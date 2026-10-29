@@ -11,6 +11,7 @@ import { backgroundFlag } from './protocol.ts';
 import { parseWhen as parseLater, relativeFuture } from './when.ts';
 import { DEV_HELP, formatModels, logsCommand, runDev } from './tb-dev.ts';
 import { findWorktreePatch, isInside } from './patches.ts';
+import { TRUST_ALL } from './patch-trust.ts';
 import { land, landTargetFromGit, type LandTarget } from './worktrees.ts';
 
 const OPTIONS = {
@@ -244,7 +245,8 @@ async function landCommand(cfg: ReturnType<typeof loadConfig>, dryRun: boolean):
   }
   let check: string | undefined;
   try {
-    check = (await findWorktreePatch(from))?.check;
+    // Trusted as it stands: running tb land is asking for this check.
+    check = (await findWorktreePatch(from, undefined, undefined, undefined, TRUST_ALL))?.check;
   } catch (e) {
     console.error(`Couldn't read the repo's patches for its check: ${(e as Error).message}`);
     return 1;

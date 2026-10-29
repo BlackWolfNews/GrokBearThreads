@@ -52,7 +52,10 @@ static site with its own `package.json`; its comments say how to build it.
   `.threadbear/patches/*.ts` (docs/protocol.md, "Patches"). When Mike
   asks for a button or a panel for a project, write one of those there.
   A panel with an `items` function is a native list (rows, no page to
-  serve); `.threadbear/patches/checks.ts` has one, Worktrees.
+  serve); `.threadbear/patches/checks.ts` has one, Worktrees. Write
+  patch files with Edit or Write, not the shell: the runner trusts what
+  an agent's Edit and Write calls leave, and makes Mike trust anything
+  else before it runs (docs/protocol.md, "Trusting a folder's patches").
 - After landing a change to the Mac app, don't ask Mike to Restart to
   Update or to check it for you: the app restarts onto the new build by
   itself once he leaves it idle. Call `wait_for_app_restart` with what to

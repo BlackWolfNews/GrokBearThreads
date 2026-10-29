@@ -10,6 +10,7 @@ import { Runner, type Notification, type RunnerDeps } from '../../src/runner.ts'
 import { FakeClock } from '../../src/clock.ts';
 import type { LearnedAccountInfo } from '../../src/accounts.ts';
 import { nullLogger } from '../../src/log.ts';
+import { TRUST_ALL } from '../../src/patch-trust.ts';
 
 export class FakeSession implements AgentSession {
   opts: StartSessionOptions;
@@ -260,6 +261,8 @@ export function makeHarness(home = tmpDir(), cfgExtra: Partial<Config> = {}, dep
     clock,
     log: nullLogger,
     defer: (fn) => fn(),
+    // Patch trust has its own tests; the rest load every patch file.
+    patchTrust: TRUST_ALL,
     // Never touch a real Claude config dir from a test.
     copyTranscript: () => false,
     subagentTranscript: () => null,

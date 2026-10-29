@@ -39,7 +39,7 @@ struct ComposerView: View {
                 AnswerChips(thread: thread, picks: picks)
             }
             // The folder's actions (patches), above the text as in the design.
-            if let thread, !thread.actions.isEmpty {
+            if let thread, !thread.actions.isEmpty || thread.patches.contains(where: { $0.untrusted != nil }) {
                 ActionChips(thread: thread)
                     .tourTarget(.actionChips)
             }

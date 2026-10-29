@@ -220,7 +220,9 @@ export function checkSummary(t: Obj): string[] {
         if (!isStr(p.id) || !['builtin', 'home', 'project'].includes(p.source)) problems.push('patches: id, source');
         for (const k of ['file', 'error', 'folder', 'projectId', 'liveError', 'icon', 'iconFile']) if (p[k] !== undefined && !isStr(p[k])) problems.push(`patches: ${k}`);
         if (p.matched !== undefined && (!Array.isArray(p.matched) || !p.matched.every(isStr))) problems.push('patches: matched');
-        for (const k of Object.keys(p)) if (!['id', 'source', 'file', 'folder', 'projectId', 'error', 'matched', 'liveError', 'icon', 'iconFile'].includes(k)) problems.push(`patches: unexpected field ${k}`);
+        if (p.untrusted !== undefined && (!['new', 'changed'].includes(p.untrusted) || !/^[0-9a-f]{64}$/.test(p.hash ?? '') || !isStr(p.file))) problems.push('patches: untrusted needs file and hash');
+        if (p.hash !== undefined && p.untrusted === undefined) problems.push('patches: hash only with untrusted');
+        for (const k of Object.keys(p)) if (!['id', 'source', 'file', 'folder', 'projectId', 'error', 'matched', 'liveError', 'icon', 'iconFile', 'untrusted', 'hash'].includes(k)) problems.push(`patches: unexpected field ${k}`);
       }
     }
   }

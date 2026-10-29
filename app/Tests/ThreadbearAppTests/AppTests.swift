@@ -590,6 +590,10 @@ final class AutomationTests: XCTestCase {
     func testNewThreadSettingsSayWhoseDefaultModel() {
         _ = NSApplication.shared
         let app = AppModel()
+        // The pick is kept in UserDefaults, which every test run shares:
+        // left behind, the next run starts on "sonnet" and fails.
+        app.newThreadModel = nil
+        defer { app.newThreadModel = nil }
         app.defaults = RunnerDefaults(cwd: "/w", accountId: "claude-3")
         XCTAssertEqual(AppDump.newThreadSettings(app).model, "default (the account's)")
         app.defaults.model = "claude-haiku-5-5"

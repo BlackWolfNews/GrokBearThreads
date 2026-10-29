@@ -197,6 +197,13 @@ export class Projects {
     return out;
   }
 
+  // The folders projects.json lists, read before start(): the runner's
+  // first start with patch trust trusts what they were already running.
+  static savedFolders(home: string): string[] {
+    const saved = readJsonSync<{ projects?: Partial<ProjectRecord>[] }>(path.join(home, 'projects.json'));
+    return (saved?.projects ?? []).flatMap((p) => (Array.isArray(p?.folders) ? p.folders.filter((f): f is string => typeof f === 'string') : []));
+  }
+
   // Every folder of every project that isn't archived, each once: where
   // tool patches (appliesTo) are looked for, for any thread.
   allFolders(): string[] {

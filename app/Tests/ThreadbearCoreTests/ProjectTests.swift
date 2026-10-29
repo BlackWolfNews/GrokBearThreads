@@ -8,6 +8,17 @@ final class ProjectTests: XCTestCase {
 
     // MARK: Decoding
 
+    func testPatchInfoDecodesAnUntrustedPatch() throws {
+        let patch = try decode(PatchInfo.self, """
+        {"id":"release","source":"project","file":"/w/.threadbear/patches/release.ts","untrusted":"changed","hash":"\(String(repeating: "a", count: 64))"}
+        """)
+        XCTAssertEqual(patch.untrusted, "changed")
+        XCTAssertEqual(patch.hash?.count, 64)
+        let loaded = try decode(PatchInfo.self, #"{"id":"tools","source":"project"}"#)
+        XCTAssertNil(loaded.untrusted)
+        XCTAssertNil(loaded.hash)
+    }
+
     func testProjectDecodesFullAndToleratesUnknownFields() throws {
         let project = try decode(Project.self, """
         {"id":"p_3b1d9e20","title":"Threadbear","folders":["/Users/mike/dev/me/threadbear",5,"/Users/mike/dev/me/notes"],

@@ -26,6 +26,9 @@ import { SAMPLE_THREADS } from '../../../runner/src/samples.ts';
 import { fileURLToPath } from 'node:url';
 import { reviewDraft, reviewReply, sameDraft } from '../../../runner/src/reviews.ts';
 
+// What a waiting (untrusted) demo patch gives once it's trusted, by file.
+const waitingPatchGives = new Map();
+
 const here = path.dirname(fileURLToPath(import.meta.url));
 const args = parseArgs(process.argv.slice(2));
 const dataDir = args['data-dir'];
@@ -768,6 +771,19 @@ async function dispatch(client, method, p) {
         ok, exitCode: ok ? 0 : 2, text, truncated: false, durationMs: 2100,
       });
       return { ok, exitCode: ok ? 0 : 2, durationMs: 2100, seq: event.seq };
+    }
+    case 'patches.trust': {
+      // As the real runner: the waiting files load, and give what they give.
+      const t = need(p.threadId);
+      for (const { file, hash } of p.files ?? []) {
+        const patch = (t.summary.patches ?? []).find((x) => x.file === file && x.untrusted);
+        if (!patch || patch.hash !== hash) throw rpcError(-32602, `${file} isn't one of this thread's patches waiting to be trusted`);
+        delete patch.untrusted;
+        delete patch.hash;
+        t.summary.actions = [...(t.summary.actions ?? []), ...(waitingPatchGives.get(file) ?? [])];
+      }
+      broadcastSummary(t.summary.id);
+      return { trusted: (p.files ?? []).map((f) => f.file) };
     }
     case 'mock.convexPanel': {
       const t = need(p.threadId);
@@ -2147,6 +2163,16 @@ p{color:#8a8a90;font-size:12px;line-height:1.5;margin-top:18px}
   }
   const ios = threads.get('demo_button_colour');
   if (ios) {
+    // A patch that came with a pull, not trusted yet: listed, not loaded.
+    ios.summary.patches = [
+      { id: 'xcode', source: 'builtin' },
+      { id: 'convex', source: 'builtin' },
+      { id: 'release', source: 'project', file: '/Users/mike/dev/walkies/.threadbear/patches/release.ts', folder: '/Users/mike/dev/walkies',
+        untrusted: 'new', hash: 'a'.repeat(64) },
+    ];
+    waitingPatchGives.set('/Users/mike/dev/walkies/.threadbear/patches/release.ts', [
+      { id: 'release.upload-build', title: 'Upload build', kind: 'command', command: './scripts/upload.sh', patch: 'release' },
+    ]);
     ios.summary.panels = [
       { id: 'xcode.simulator', title: 'Simulator', kind: 'image', patch: 'xcode', note: 'Walkies' },
       { id: 'convex.dashboard', title: 'Convex', kind: 'url', patch: 'convex', url: 'data:text/html;charset=utf-8,' + encodeURIComponent(page), note: 'walkies-dev (dev)' },

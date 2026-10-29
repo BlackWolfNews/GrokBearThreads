@@ -39,6 +39,13 @@ export function readRelease(root = CODE_ROOT): ReleaseJson | undefined {
   return r && typeof r.id === 'string' && r.id ? r : undefined;
 }
 
+// The Threadbear checkout this runner's code came from: the release's
+// record of it, else the checkout it's running from. Its own patches are
+// always trusted (patch-trust.ts).
+export function ownCheckout(root = CODE_ROOT): string {
+  return readRelease(root)?.checkout ?? path.dirname(root);
+}
+
 export function runnerVersion(root = CODE_ROOT): { version: string; release?: string; branch?: string } {
   const pkg = readJsonSync<{ version?: string }>(path.join(root, 'package.json'));
   const base = typeof pkg?.version === 'string' ? pkg.version : '0.0.0';
