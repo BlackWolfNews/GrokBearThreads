@@ -1051,21 +1051,29 @@ enum RowRenderer {
     /// Mike's bubble. One that answered asks from the card shows each
     /// question small and quiet, its answer as his own words, then
     /// whatever else he wrote, so it doesn't read as if he wrote the
-    /// questions (Mike, 28 Oct).
+    /// questions (Mike, 28 Oct). An answer to a review reads the same way:
+    /// the review's title small, then what he picked and his notes, not
+    /// the review's id and the wording the agent gets (Mike, 29 Oct).
     static func userText(_ message: UserMessage) -> NSAttributedString {
         let plain = Theme.text()
-        guard let extra = Decisions.extra(in: message.text, answers: message.answers) else {
+        let lines: [(label: String, text: String)]
+        let extra: String
+        if let review = message.review {
+            (lines, extra) = (review.lines.map { ($0.label, $0.text) }, "")
+        } else if let rest = Decisions.extra(in: message.text, answers: message.answers) {
+            (lines, extra) = (message.answers.map { ($0.action, $0.answer) }, rest)
+        } else {
             return NSAttributedString(string: message.text.isEmpty ? " " : message.text, attributes: plain)
         }
         let output = NSMutableAttributedString()
         let question = Theme.text(Theme.smallFont, color: .secondaryLabelColor, line: TypeScale.scaled(18))
         let answer = Theme.text(spacing: zoomed(8))
-        for (i, item) in message.answers.enumerated() {
+        for (i, item) in lines.enumerated() {
             if i > 0 { output.append(NSAttributedString(string: "\n", attributes: answer)) }
-            output.append(NSAttributedString(string: item.action + "\n", attributes: question))
+            output.append(NSAttributedString(string: item.label + "\n", attributes: question))
             // Line separators keep a written answer's lines in one paragraph,
             // so the gap between answers doesn't open up inside one.
-            output.append(NSAttributedString(string: item.answer.replacingOccurrences(of: "\n", with: "\u{2028}"), attributes: answer))
+            output.append(NSAttributedString(string: item.text.replacingOccurrences(of: "\n", with: "\u{2028}"), attributes: answer))
         }
         if !extra.isEmpty {
             output.append(NSAttributedString(string: "\n" + extra, attributes: plain))

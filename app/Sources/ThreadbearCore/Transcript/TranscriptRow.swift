@@ -59,6 +59,9 @@ public struct UserMessage: Sendable, Hashable {
     /// The asks it answered from the card (docs/protocol.md, "Needs you"):
     /// the bubble shows each question small and the answer as his words.
     public var answers: [AskAnswer]
+    /// His answer to a review (Mike, 29 Oct): the bubble shows the pick
+    /// and notes the same way, not the message the agent got.
+    public var review: ReviewAnswer?
     /// The seq of the message this one replaced, when Mike edited one.
     public var editOf: Int?
     /// Mike can edit it and carry on from there (docs/protocol.md, "Editing
@@ -66,11 +69,12 @@ public struct UserMessage: Sendable, Hashable {
     /// own turn.
     public var editable: Bool
 
-    public init(text: String, images: [ImageRef] = [], origin: String? = nil, answers: [AskAnswer] = [], editOf: Int? = nil, editable: Bool = false) {
+    public init(text: String, images: [ImageRef] = [], origin: String? = nil, answers: [AskAnswer] = [], editOf: Int? = nil, review: ReviewAnswer? = nil, editable: Bool = false) {
         self.text = text
         self.images = images
         self.origin = origin
         self.answers = answers
+        self.review = review
         self.editOf = editOf
         self.editable = editable
     }

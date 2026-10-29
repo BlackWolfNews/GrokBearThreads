@@ -134,4 +134,46 @@ final class DesignReviewTests: XCTestCase {
         XCTAssertEqual((params["draft"] as? [String: Any])?["notes"] as? [String: String], draft.notes)
         XCTAssertNil((params["draft"] as? [String: Any])?["pickedId"])
     }
+
+    // MARK: Mike's answer in his bubble
+
+    private static let id = "74d1e391-cbc6-4b23-bd6b-cfed7cb79488"
+
+    func testReviewReplyShowsThePickNotTheId() {
+        let text = "Review: End of turn: summary + what's next (\(Self.id))\n\nPicked A. A: summary is the agent's last message."
+        let reply = ReviewAnswer.parse(text, reviewId: Self.id, response: ReviewDraft(pickedId: "A"))
+        XCTAssertEqual(reply?.lines, [.init(label: "End of turn: summary + what's next", text: "Picked A: summary is the agent's last message")])
+    }
+
+    func testReviewReplyNotesKeepTheirWordsAndOrder() {
+        let text = "Review: Picker (r1)\n\nPicked B. One picker.\n\nNotes on A (Auto (smart)): Too clever.\n\nWith a gap): there\n\nNotes on B (One picker): Ship it"
+        let reply = ReviewAnswer.parse(text, reviewId: "r1", response: ReviewDraft(pickedId: "B", notes: ["B": "Ship it", "A": "Too clever.\n\nWith a gap): there"]))
+        XCTAssertEqual(reply?.lines, [
+            .init(label: "Picker", text: "Picked B: One picker"),
+            .init(label: "Notes on A: Auto (smart)", text: "Too clever.\n\nWith a gap): there"),
+            .init(label: "Notes on B: One picker", text: "Ship it"),
+        ])
+    }
+
+    func testReviewReplyWithOnlyNotesPutsTheTitleOverThem() {
+        let reply = ReviewAnswer.parse("Review: Picker (r1)\n\nNotes on D (Moving): Keep this", reviewId: "r1", response: ReviewDraft(notes: ["D": "Keep this"]))
+        XCTAssertEqual(reply?.lines, [.init(label: "Picker\nNotes on D: Moving", text: "Keep this")])
+    }
+
+    func testReviewReplyInOtherWordsIsLeftAlone() {
+        let draft = ReviewDraft(pickedId: "A")
+        XCTAssertNil(ReviewAnswer.parse("Picked A. Thing.", reviewId: "r1", response: draft))
+        XCTAssertNil(ReviewAnswer.parse("Review: Picker (r1)\n\nPicked B. Thing.", reviewId: "r1", response: draft))
+        XCTAssertNil(ReviewAnswer.parse("Review: Picker (r1)\n\nPicked A. Thing.", reviewId: nil, response: draft))
+        XCTAssertNil(ReviewAnswer.parse("Review: Picker (r1)\n\nPicked A. Thing.\n\nNotes on B (X): y", reviewId: "r1", response: draft))
+    }
+
+    func testReviewReplyEventReachesTheBubble() {
+        let text = "Review: Picker (r1)\n\nPicked A. Auto account."
+        let event = E.event(4, "user.message", ["text": text, "images": [], "reviewId": "r1", "reviewResponse": ["pickedId": "A", "notes": [:]]])
+        let model = TranscriptModel(events: [event])
+        guard case .user(let message)? = model.rows.first?.content else { return XCTFail("no bubble") }
+        XCTAssertEqual(message.text, text)
+        XCTAssertEqual(message.review?.lines, [.init(label: "Picker", text: "Picked A: Auto account")])
+    }
 }

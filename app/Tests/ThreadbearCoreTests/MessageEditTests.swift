@@ -31,7 +31,7 @@ final class MessageEditTests: XCTestCase {
         XCTAssertEqual(rewind.failed, [ThreadRewind.FailedFile(path: "/a/c.ts", reason: "it changed since")])
         XCTAssertEqual(rewind.how, "checkpoint")
         XCTAssertEqual(rewind.summary, "Edited a message, so the thread carries on from there. Undid changes to 1 file. Couldn't undo c.ts (it changed since).")
-        guard case .userMessage(_, _, _, _, let editOf) = edited(10, "t3", "x", editOf: 5).payload else { return XCTFail() }
+        guard case .userMessage(_, _, _, _, let editOf, _) = edited(10, "t3", "x", editOf: 5).payload else { return XCTFail() }
         XCTAssertEqual(editOf, 5)
     }
 

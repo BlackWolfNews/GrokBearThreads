@@ -426,8 +426,9 @@ public enum EventPayload: Sendable, Hashable {
     /// `origin` is "runner" for a message the runner sent by itself (the
     /// resume after a restart); nil for anything a person or client sent.
     /// `editOf` is the seq of the message this one replaced (Editing a
-    /// message).
-    case userMessage(text: String, images: [ImageRef], origin: String? = nil, answers: [AskAnswer] = [], editOf: Int? = nil)
+    /// message). `review` is Mike's answer to a review, when the runner
+    /// sent it for one.
+    case userMessage(text: String, images: [ImageRef], origin: String? = nil, answers: [AskAnswer] = [], editOf: Int? = nil, review: ReviewAnswer? = nil)
     case assistantText(itemId: String, text: String)
     case reasoning(itemId: String, text: String)
     case toolCall(ToolCall)
@@ -497,6 +498,8 @@ public struct Event: Sendable, Hashable, Decodable {
         var origin: String?
         var answers: [AskAnswer]
         var editOf: Int?
+        var reviewId: String?
+        var reviewResponse: ReviewDraft?
 
         init(from decoder: Decoder) throws {
             let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -507,9 +510,11 @@ public struct Event: Sendable, Hashable, Decodable {
             origin = try? c.decodeIfPresent(String.self, forKey: .origin)
             answers = c.lossyArray(AskAnswer.self, forKey: .answers)
             editOf = c.lenientInt(forKey: .editOf)
+            reviewId = try? c.decodeIfPresent(String.self, forKey: .reviewId)
+            reviewResponse = try? c.decodeIfPresent(ReviewDraft.self, forKey: .reviewResponse)
         }
 
-        enum CodingKeys: String, CodingKey { case itemId, text, images, message, origin, answers, editOf }
+        enum CodingKeys: String, CodingKey { case itemId, text, images, message, origin, answers, editOf, reviewId, reviewResponse }
     }
 
     private struct PlanFields: Decodable {
@@ -549,7 +554,9 @@ public struct Event: Sendable, Hashable, Decodable {
         switch type {
         case "user.message":
             let fields = try text()
-            return .userMessage(text: fields.text ?? "", images: fields.images, origin: fields.origin, answers: fields.answers, editOf: fields.editOf)
+            let text = fields.text ?? ""
+            return .userMessage(text: text, images: fields.images, origin: fields.origin, answers: fields.answers, editOf: fields.editOf,
+                                review: ReviewAnswer.parse(text, reviewId: fields.reviewId, response: fields.reviewResponse))
         case "assistant.text":
             let fields = try text()
             return .assistantText(itemId: fields.itemId ?? "", text: fields.text ?? "")

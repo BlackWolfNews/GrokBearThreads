@@ -154,3 +154,65 @@ public struct ReviewReply: Sendable, Hashable, Decodable {
         self.turnId = turnId
     }
 }
+
+/// Mike's answer to a review, read back out of the message the runner sent
+/// for it (`reviewReply` in runner/src/reviews.ts), so his bubble can say
+/// what he picked instead of showing the review's id and the agent-facing
+/// wording (Mike, 29 Oct). The runner only puts the review's id and his
+/// draft on the event, not the option titles, hence reading the text.
+public struct ReviewAnswer: Sendable, Hashable {
+    public struct Line: Sendable, Hashable {
+        /// Small and quiet, over the line: what it's about.
+        public var label: String
+        /// In his own words' style: what he picked or wrote.
+        public var text: String
+    }
+
+    public var lines: [Line]
+
+    /// Nil when the text isn't the runner's wording for this review and
+    /// draft, so the bubble shows it as it is.
+    public static func parse(_ text: String, reviewId: String?, response: ReviewDraft?) -> ReviewAnswer? {
+        guard let reviewId, let response else { return nil }
+        var rest = Substring(text)
+        // "Review: <title> (<id>)"
+        let head = " (\(reviewId))"
+        guard rest.hasPrefix("Review: "), let close = rest.range(of: head) else { return nil }
+        let title = String(rest[rest.index(rest.startIndex, offsetBy: 8)..<close.lowerBound])
+        rest = rest[close.upperBound...]
+        var lines: [Line] = []
+        // "Picked <id>. <option title>."
+        if let picked = response.pickedId {
+            guard rest.hasPrefix("\n\nPicked \(picked). ") else { return nil }
+            rest = rest.dropFirst("\n\nPicked \(picked). ".count)
+            let end = rest.range(of: "\n\n")?.lowerBound ?? rest.endIndex
+            var option = rest[..<end]
+            if option.hasSuffix(".") { option = option.dropLast() }
+            lines.append(Line(label: title, text: "Picked \(picked): \(Self.bare(option, id: picked))"))
+            rest = rest[end...]
+        }
+        // "Notes on <id> (<option title>): <note>", in the review's option
+        // order, which the draft doesn't keep, so whichever comes next.
+        var notes = response.notes.filter { !$0.value.isEmpty }
+        while !notes.isEmpty {
+            guard let (id, note) = notes.first(where: { rest.hasPrefix("\n\nNotes on \($0.key) (") }) else { return nil }
+            rest = rest.dropFirst("\n\nNotes on \(id) (".count)
+            guard let tail = rest.range(of: "): " + note) else { return nil }
+            let option = rest[..<tail.lowerBound]
+            // With nothing picked, the review's title goes over the first one.
+            lines.append(Line(label: (lines.isEmpty ? title + "\n" : "") + "Notes on \(id): \(Self.bare(option, id: id))", text: note))
+            rest = rest[tail.upperBound...]
+            notes[id] = nil
+        }
+        return rest.isEmpty && !lines.isEmpty ? ReviewAnswer(lines: lines) : nil
+    }
+
+    /// Agents often title options "A: Summary first", which would read
+    /// "Picked A: A: Summary first".
+    static func bare(_ option: Substring, id: String) -> Substring {
+        for sep in [": ", ". ", " - ", ") "] where option.hasPrefix(id + sep) && option.count > id.count + sep.count {
+            return option.dropFirst(id.count + sep.count)
+        }
+        return option
+    }
+}

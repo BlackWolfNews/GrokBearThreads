@@ -466,10 +466,10 @@ public struct TranscriptModel: Sendable {
         let seq = event.seq
         let turnId = event.turnId
         switch event.payload {
-        case .userMessage(let text, let images, let origin, let answers, let editOf):
+        case .userMessage(let text, let images, let origin, let answers, let editOf, let review):
             // Mike's reply answers the open card, so it goes, picked or not.
             if origin != "runner" { closeOpenAsks() }
-            var message = UserMessage(text: text, images: images, origin: origin, answers: answers, editOf: editOf)
+            var message = UserMessage(text: text, images: images, origin: origin, answers: answers, editOf: editOf, review: review)
             // Only one that started its own turn can be cut back to; one
             // sent into a running turn went into that turn.
             message.editable = message.isMike && turnId.map { !startedTurns.contains($0) } == true
