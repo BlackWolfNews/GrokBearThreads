@@ -274,7 +274,7 @@ final class QuickAskModel {
         awaitingReply = nil
         isPresented = true
         guard settings.isReady else {
-            phase = .idle(notice: "Add your archive server in Settings to use quick ask.")
+            phase = .idle(notice: "Add your archive server in Settings to use Ask.")
             return
         }
         prepare()
@@ -392,7 +392,7 @@ final class QuickAskModel {
             return
         }
         guard settings.isReady else {
-            phase = .idle(notice: "Add your archive server in Settings to use quick ask.")
+            phase = .idle(notice: "Add your archive server in Settings to use Ask.")
             return
         }
         if phase == .listening { stopListening() }

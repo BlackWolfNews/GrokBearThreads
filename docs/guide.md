@@ -273,18 +273,18 @@ from the Mac by default. Threadbear counts you as at the Mac when the app is ope
 used the keyboard or mouse in the last two minutes, and as away when the Mac
 is asleep. On the iPhone, Settings > Notify me changes it to Always or Never.
 
-Quick ask on the iPhone: press the Action button, say a question, and hear
-the answer from your Agent Archive server, the way the old Quick Ask app
-did. Set it up in the iPhone's Settings > Quick ask (the archive server's
-address and a phone token from it; the phone needs Tailscale to reach it),
-then set the Action button to the Shortcut called Quick ask. The waveform
-button in the inbox does the same. Each quick ask is kept as a thread in your default folder, with
-the question, the answer and a note that quick ask answered it. It shows
-as done and already read. Once it's kept, the phone opens that thread with
-a big mic at the bottom: tap it and say a follow-up, which goes to the
-agent as an ordinary reply, and its answer is read out when it's done. The
-keyboard button beside the mic brings back the text box. The agent is told
-the thread started as a quick ask and picks up from there.
+Ask on the iPhone: press the Action button, say a question, and hear the
+answer from your Agent Archive server. Set it up in the iPhone's
+Settings > Ask (the archive server's address and a phone token from it;
+the phone needs Tailscale to reach it), then set the Action button to
+Threadbear's Ask shortcut. The waveform button in the inbox does the same.
+Each answer is kept as a thread in your default folder, with the question,
+the answer and a note that Ask answered it. It shows as done and already
+read. Once it's kept, the phone opens that thread with a big mic at the
+bottom: tap it and say a follow-up, which goes to the agent as an ordinary
+reply, and its answer is read out when it's done. The keyboard button
+beside the mic brings back the text box. The agent is told the thread
+started with Ask and picks up from there.
 
 Your threads also have a website, on your own Convex deployment. To sign a
 browser in, Settings > Phone & browser > Open signed in opens it in your

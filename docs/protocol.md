@@ -2285,7 +2285,7 @@ the mirror back as state. The Mac app doesn't use it.
   a new thread gets) but runs no turn: it writes the question as a
   `user.message` with `origin: "phone"`, `turn.started`, the answer as an
   `assistant.text` (the sources after it as markdown links), a
-  `system.note` "Answered by quick ask from Agent Archive" and a
+  `system.note` "Answered by Ask from Agent Archive" and a
   `turn.completed` (`completed`, `needs: "nothing"`), all under one
   `turnId`, and marks it seen, since Mike has heard it. The title comes
   from the question, then a model title with the answer as the reply.

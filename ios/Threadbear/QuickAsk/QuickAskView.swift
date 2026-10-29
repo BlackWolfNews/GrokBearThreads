@@ -211,8 +211,8 @@ private struct PermissionNote: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             Text(state == .denied
-                 ? "Quick ask needs the microphone and speech recognition. Turn them on for Threadbear in Settings."
-                 : "Quick ask listens for your question, and turns it into text on the phone where it can.")
+                 ? "Ask needs the microphone and speech recognition. Turn them on for Threadbear in Settings."
+                 : "Ask listens for your question, and turns it into text on the phone where it can.")
                 .font(.title3)
             Button(state == .denied ? "Open Settings" : "Allow") {
                 state == .denied ? quick.openSystemSettings() : quick.requestPermissions()
@@ -303,7 +303,7 @@ private struct ThinkingDots: View {
     }
 }
 
-/// Settings › Quick ask: where questions go, and how answers sound.
+/// Settings › Ask: where questions go, and how answers sound.
 struct QuickAskSettingsSection: View {
     @Environment(QuickAskModel.self) private var quick
     @State private var tokenDraft = ""
@@ -341,16 +341,16 @@ struct QuickAskSettingsSection: View {
             }
         } header: {
             HStack {
-                Text("Quick ask")
+                Text("Ask")
                 Spacer()
                 Button { showingAbout = true } label: { Image(systemName: "info.circle") }
-                    .accessibilityLabel("About quick ask")
+                    .accessibilityLabel("About Ask")
             }
         }
-        .alert("Quick ask", isPresented: $showingAbout) {
+        .alert("Ask", isPresented: $showingAbout) {
             Button("OK", role: .cancel) {}
         } message: {
-            Text("Press the Action button (set it to the Quick ask shortcut), say a question, and hear the answer from your Agent Archive server. It needs Tailscale on this phone. Each answer is kept as a thread on your Mac, so you can carry on there.")
+            Text("Press the Action button (set it to Threadbear's Ask shortcut), say a question, and hear the answer from your Agent Archive server. It needs Tailscale on this phone. Each answer is kept as a thread on your Mac, so you can carry on there.")
         }
     }
 }

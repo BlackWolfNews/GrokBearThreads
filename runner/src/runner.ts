@@ -1533,7 +1533,7 @@ export class Runner {
     this.emit(st, userMessage({ turnId, text: question, images: [], origin: 'phone' }), turnId);
     this.emit(st, { type: 'turn.started', turnId }, turnId);
     this.emit(st, { type: 'assistant.text', itemId: crypto.randomUUID(), text }, turnId);
-    this.emit(st, { type: 'system.note', text: 'Answered by quick ask from Agent Archive' }, turnId);
+    this.emit(st, { type: 'system.note', text: 'Answered by Ask from Agent Archive' }, turnId);
     for (const note of notes) this.emit(st, { type: 'system.note', text: note }, turnId);
     const askedAt = params.askedAt !== undefined && Number.isFinite(params.askedAt) ? params.askedAt : this.clock.now();
     const done = this.emit(st, { type: 'turn.completed', turnId, outcome: 'completed', durationMs: Math.max(0, this.clock.now() - askedAt), needs: 'nothing' }, turnId);

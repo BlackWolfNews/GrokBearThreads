@@ -71,7 +71,7 @@ struct InboxView: View {
                 if quick.settings.isReady {
                     ToolbarItem(placement: .topBarTrailing) {
                         Button { quick.open() } label: { Image(systemName: "waveform") }
-                            .accessibilityLabel("Quick ask")
+                            .accessibilityLabel("Ask")
                     }
                 }
                 ToolbarItem(placement: .topBarTrailing) {

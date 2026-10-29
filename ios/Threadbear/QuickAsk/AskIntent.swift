@@ -1,10 +1,11 @@
 import AppIntents
 import Foundation
 
-/// Opens Threadbear's quick ask, already listening. It's what the Action button, Siri, Spotlight and
+/// Opens Threadbear's Ask, already listening. (Called quick ask in the code; shown as Ask, so it
+/// isn't taken for the retired Quick Ask app.) It's what the Action button, Siri, Spotlight and
 /// Back Tap (through Shortcuts) run.
 nonisolated struct QuickAskIntent: AppIntent {
-    static let title: LocalizedStringResource = "Quick ask"
+    static let title: LocalizedStringResource = "Ask"
     static let description = IntentDescription("Opens Threadbear listening for a question, and answers it out loud from your Agent Archive.")
 
     /// iOS 18. From iOS 26 `supportedModes` takes over.
@@ -32,18 +33,17 @@ enum QuickAskIntentBridge {
     }
 }
 
-/// Puts "Quick ask" in Settings › Action Button › Shortcut, in Siri and in Spotlight, with no
+/// Puts "Ask" in Settings › Action Button › Shortcut, in Siri and in Spotlight, with no
 /// setup in the Shortcuts app.
 nonisolated struct ThreadbearShortcuts: AppShortcutsProvider {
     static var appShortcuts: [AppShortcut] {
         AppShortcut(
             intent: QuickAskIntent(),
             phrases: [
-                "Quick ask \(.applicationName)",
                 "Ask \(.applicationName)",
                 "Ask \(.applicationName) a question",
             ],
-            shortTitle: "Quick ask",
+            shortTitle: "Ask",
             systemImageName: "waveform"
         )
     }

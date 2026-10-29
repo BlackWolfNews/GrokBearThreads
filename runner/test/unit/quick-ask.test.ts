@@ -29,7 +29,7 @@ test('a quick ask becomes a seen, finished thread with no CLI started', () => {
   assert.equal(evs[0].origin, 'phone');
   assert.match(evs[2].text, /^It's CannMedia, the 8 TB one\./);
   assert.match(evs[2].text, /\[Bruce migration\]\(https:\/\/bruce\.example\/\?thread=t1&item=4\)/);
-  assert.equal(evs[3].text, 'Answered by quick ask from Agent Archive');
+  assert.equal(evs[3].text, 'Answered by Ask from Agent Archive');
   assert.equal(evs[4].outcome, 'completed');
   assert.equal(evs[4].needs, 'nothing');
   const summary = h.runner.get(thread.id);

@@ -63,11 +63,12 @@ pushes come straight from the paired deployment with Mike's key
 (`convex/push.ts`); the relay in docs/setup-and-updates.md 2.4 is later. Tapping a notification opens
 its `threadId`.
 
-## Quick ask
+## Ask (quick ask in the code)
 
-The old Quick Ask app, folded in (29 Oct 2026). The Action button runs
-`QuickAskIntent` (Settings › Action Button › Shortcut › Threadbear › Quick
-ask), which opens the quick ask screen already listening. The question goes
+The old Quick Ask app, folded in (29 Oct 2026). Shown as "Ask" so it isn't
+taken for that retired app; the code still says quick ask. The Action
+button runs `QuickAskIntent` (Settings › Action Button › Shortcut ›
+Threadbear › Ask), which opens the screen already listening. The question goes
 straight to the Agent Archive server's `/api/quick/ask` over Tailscale
 (contract in `~/dev/me/agent-archive/docs/quick-ask.md`), and the answer is
 spoken a sentence at a time as it streams in. When it's finished, or stopped,
