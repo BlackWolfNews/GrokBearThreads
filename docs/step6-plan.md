@@ -52,15 +52,22 @@ remote thread breaks wherever the app treats a path as a file on this Mac:
 
 ## Runs on: picking a runner
 
-Mike, 29 Oct: new threads and schedules both get a **Runs on** picker, the
-same one in both places: this Mac, Bruce, later a cloud sandbox. It
-defaults to this Mac, and the default is a setting. A schedule also offers
-**Any**, for jobs that don't mind where they run.
+Mike, 29 Oct: every thread and every schedule has a runner set from the
+start, chosen by Mike or by the agent. Nothing guesses.
 
-A runner only shows in the picker (and only takes an Any run) if it can do
-the job: the folder exists on that machine and it has a login for the
-thread's provider. A schedule that sends into an existing thread runs on
-that thread's runner, so it has no picker.
+- **Mike picks** with a **Runs on** picker, the same one on the composer
+  for new threads and in the schedule editor: this Mac, Bruce, later a
+  cloud sandbox. From the Mac app it defaults to this Mac; the default is
+  a setting. The phone and website use that setting too.
+- **Agents pick** through the threadbear tools: `create_thread` and
+  `schedule_message` take an optional runner. Without one, the new thread
+  or schedule goes on **the runner the agent's own thread is on**.
+- **A schedule that sends into an existing thread** runs on that thread's
+  runner, so it has no picker.
+- **Work stays where it is.** A thread keeps its runner until Mike or its
+  agent moves it on purpose (see Later).
+- A runner is only offered if it can do the job: the folder exists on that
+  machine and it has a login for the thread's provider.
 
 ## Part 1: schedules in Convex
 
@@ -72,18 +79,19 @@ mirrors it) flips: for schedules Convex owns them and runners follow.
 
 - **Table** `schedules` in Convex is the source of truth (today it's only a
   mirror for the phone). Each row keeps today's `Schedule` fields plus
-  `runsOn: runnerId | "any"`. The current `schedules.json` is moved in once.
+  `runnerId`. The current `schedules.json` is moved in once, onto the M5's
+  runner.
 - **The clock is Convex.** Saving a schedule sets `nextRunAt` and uses
   `ctx.scheduler.runAt` to mark it due then. Runners can't poll "what's due
   now" with a query: a query that reads the time doesn't re-run as time
   passes.
-- **Runners claim.** Each runner subscribes to due runs it can take (its
-  own `runsOn`, or Any). `schedules:claim` is a mutation, so exactly one
-  runner gets each run. The claim is a lease: if that runner doesn't report
-  the run started within a couple of minutes, it goes back to due.
-- **When its runner is off**, a run for a named runner waits, then happens
-  once when that runner is back, as late runs do today. An Any run goes to
-  whichever runner can take it.
+- **Runners claim.** Each runner subscribes to its own due runs and takes
+  each with `schedules:claim`, a mutation, so a run starts exactly once.
+  That still matters with one runner per schedule: during a handover two
+  runner processes share a `runnerId`. The claim is a lease: if the run
+  isn't reported started within a couple of minutes, it goes back to due.
+- **When its runner is off**, the run waits, then happens once when the
+  runner is back, as late runs do today.
 - **The skip rule stays**: a repeating schedule whose last thread is still
   running or waiting on Mike skips a run. Convex can see that from the
   mirrored thread rows.
@@ -160,12 +168,19 @@ Checked 29 Oct over SSH:
 1. Part 2's shape: the M5's runner fronts Bruce's, one socket for the app?
 2. Which Claude login goes on Bruce? Today it's mike.cann@gmail.com.
 
-Decided 29 Oct: schedules first, held in Convex (part 1); a Runs on picker
-for threads and schedules, defaulting to this Mac.
+Decided 29 Oct: schedules first, held in Convex (part 1). Every thread and
+schedule has its runner set by Mike or the agent: this Mac by default in
+the app, the agent's own runner for what an agent makes.
 
 ## Later
 
-- Moving a thread between machines, with a handoff note as account moves
-  do (`docs/pools-plan.md`), when the folder exists on both.
+- **Any runner** for schedules that don't mind where they run: no runner
+  set, and the first runner that can do it claims it. The claim already
+  makes this safe; Mike thinks it could be interesting but not at first.
+- **Smarter runner choice**, so Mike doesn't always have to pick. Not at
+  first.
+- **Moving a thread to another runner**, by Mike or its agent
+  (`move_thread` with a runner), with a handoff note as account moves do
+  (`docs/pools-plan.md`), when the folder exists on both.
 - Cloud sandboxes: a runner in a throwaway VM is a remote peer like Bruce,
   plus making and destroying the VM.
