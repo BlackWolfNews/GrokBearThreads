@@ -57,11 +57,13 @@ enum FileLinkAction: String, CaseIterable {
 /// and "Default", which sets what a plain click does.
 @MainActor
 final class FileLinkMenu: NSObject {
-    let path: String?
-    let open: (String, FileLinkAction) -> Void
+    /// The file, with any ?query its page is opened with.
+    let file: URL?
+    let open: (URL, FileLinkAction) -> Void
+    var path: String? { file?.path }
 
-    init(path: String?, open: @escaping (String, FileLinkAction) -> Void) {
-        self.path = path
+    init(file: URL?, open: @escaping (URL, FileLinkAction) -> Void) {
+        self.file = file
         self.open = open
     }
 
@@ -105,8 +107,8 @@ final class FileLinkMenu: NSObject {
     nonisolated(unsafe) private static var retainKey: UInt8 = 0
 
     @objc private func openItem(_ item: NSMenuItem) {
-        guard let path, let action = (item.representedObject as? String).flatMap(FileLinkAction.init(rawValue:)) else { return }
-        open(path, action)
+        guard let file, let action = (item.representedObject as? String).flatMap(FileLinkAction.init(rawValue:)) else { return }
+        open(file, action)
     }
 
     @objc private func setClick(_ item: NSMenuItem) {

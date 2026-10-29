@@ -15,7 +15,13 @@ enum MarkdownRenderer {
         // same place (needs.ts) may well use one too.
         if destination.hasPrefix("~/") {
             let path = destination.removingPercentEncoding ?? destination
-            return URL(fileURLWithPath: (path as NSString).expandingTildeInPath)
+            let whole = URL(fileURLWithPath: (path as NSString).expandingTildeInPath)
+            // `~/a/grow.html?clean`: the file, and the query for its page,
+            // unless the whole thing is a file's name.
+            let parts = FilePathRefs.splitQuery(destination)
+            guard parts.query != nil || parts.fragment != nil, !FileManager.default.fileExists(atPath: whole.path) else { return whole }
+            let file = URL(fileURLWithPath: ((parts.path.removingPercentEncoding ?? parts.path) as NSString).expandingTildeInPath)
+            return FilePathRefs.withQuery(file, query: parts.query, fragment: parts.fragment)
         }
         guard var components = URLComponents(string: destination) else { return nil }
         if components.scheme == nil, destination.hasPrefix("/") {

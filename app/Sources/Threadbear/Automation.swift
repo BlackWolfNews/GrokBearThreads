@@ -1225,6 +1225,14 @@ enum Automation {
             cell.textView.closeChipCard()
             return "ok"
         }
+        if let words = c["words"] as? String, c["menu"] as? Bool == true || c["click"] != nil {
+            guard let menu = cell.textView.debugLinkMenu(words) else { return "error no link with \(words) in \(row.id)" }
+            let items = menu.items.filter { !$0.isSeparatorItem }
+            guard let title = c["click"] as? String else { return "ok " + json(items.map(\.title)) }
+            guard let item = items.first(where: { $0.title == title }), let action = item.action else { return "error no item \(title)" }
+            NSApp.sendAction(action, to: item.target, from: item)
+            return "ok"
+        }
         guard let words = c["words"] as? String else {
             let peeks = cell.textView.debugPeeks()
             return peeks.isEmpty ? "ok none" : "ok " + peeks.map { "\($0.words)=\($0.url.isFileURL ? $0.url.path : $0.url.absoluteString)" }.joined(separator: " | ")

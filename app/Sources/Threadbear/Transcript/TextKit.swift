@@ -567,8 +567,9 @@ final class TranscriptTextView: NSTextView {
                                            in: NSRange(location: 0, length: storage.length)) else { return nil }
         let words = storage.attributedSubstring(from: range).string.trimmingCharacters(in: .whitespacesAndNewlines)
         if let web = webURL(link) { return (range, LinkPeek(url: web, title: words)) }
-        guard let url = link as? URL, url.isFileURL || FilePathRefs.text(of: url) != nil, let path = fileLinkPath(url) else { return nil }
-        return (range, LinkPeek(url: URL(fileURLWithPath: path), title: words))
+        guard let url = link as? URL, url.isFileURL || FilePathRefs.text(of: url) != nil, let file = fileLinkTarget(url) else { return nil }
+        // The file alone, for its thumbnail: a page's ?query isn't the file's.
+        return (range, LinkPeek(url: URL(fileURLWithPath: file.path), title: words))
     }
 
     #if DEBUG
@@ -614,6 +615,14 @@ final class TranscriptTextView: NSTextView {
             return chipCard?.windowNumber
         }
         return nil
+    }
+
+    /// The right-click menu of the first link whose words have `words`.
+    func debugLinkMenu(_ words: String) -> NSMenu? {
+        guard let storage = textStorage else { return nil }
+        let range = (storage.string as NSString).range(of: words)
+        guard range.location != NSNotFound else { return nil }
+        return fileLinkMenu(atCharacter: range.location)
     }
 
     func debugClickChip(_ word: String) {
@@ -745,13 +754,14 @@ final class TranscriptTextView: NSTextView {
     var debugSelectionBarWindow: Int? { selectionBar?.windowNumber }
     #endif
 
-    /// The file a link names, for its right-click menu (nil for a path
-    /// that names nothing). Only asked of file links and inline code paths.
-    var fileLinkPath: (URL) -> String? = { url in
-        MainActor.assumeIsolated { AppModel.shared.transcriptLinkPath(url) }
+    /// The file a link names, as a file URL with any ?query kept, for its
+    /// right-click menu (nil for a path that names nothing). Only asked of
+    /// file links and inline code paths.
+    var fileLinkTarget: (URL) -> URL? = { url in
+        MainActor.assumeIsolated { AppModel.shared.transcriptLinkFile(url) }
     }
-    var openFile: (String, FileLinkAction) -> Void = { path, action in
-        MainActor.assumeIsolated { _ = AppModel.shared.openTranscriptFile(path, action) }
+    var openFile: (URL, FileLinkAction) -> Void = { url, action in
+        MainActor.assumeIsolated { _ = AppModel.shared.openTranscriptFile(url, action) }
     }
 
     var openWeb: (URL, WebLinkAction) -> Void = { url, action in
@@ -767,11 +777,14 @@ final class TranscriptTextView: NSTextView {
         let glyph = layoutManager.glyphIndex(for: inContainer, in: container, fractionOfDistanceThroughGlyph: &fraction)
         // glyphIndex gives the nearest glyph; only a click on it counts.
         guard layoutManager.boundingRect(forGlyphRange: NSRange(location: glyph, length: 1), in: container).contains(inContainer) else { return nil }
-        let index = layoutManager.characterIndexForGlyph(at: glyph)
-        guard index < storage.length, let link = storage.attribute(.link, at: index, effectiveRange: nil) else { return nil }
+        return fileLinkMenu(atCharacter: layoutManager.characterIndexForGlyph(at: glyph))
+    }
+
+    func fileLinkMenu(atCharacter index: Int) -> NSMenu? {
+        guard let storage = textStorage, index < storage.length, let link = storage.attribute(.link, at: index, effectiveRange: nil) else { return nil }
         if let web = webURL(link) { return WebLinkMenu(url: web, open: openWeb).menu() }
         guard let url = link as? URL, url.isFileURL || FilePathRefs.text(of: url) != nil else { return nil }
-        return FileLinkMenu(path: fileLinkPath(url), open: openFile).menu()
+        return FileLinkMenu(file: fileLinkTarget(url), open: openFile).menu()
     }
 
     override func menu(for event: NSEvent) -> NSMenu? {

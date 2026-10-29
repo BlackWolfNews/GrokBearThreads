@@ -30,6 +30,21 @@ final class TranscriptLinkTests: XCTestCase {
         }
     }
 
+    /// A page's ?query is for its own script, so the link keeps it but
+    /// the file it names is the path alone.
+    func testQueriesStayOnFileLinks() throws {
+        let home = FileManager.default.homeDirectoryForCurrentUser.path
+        let tilde = try link("[grow](~/misc/grow.html?clean&s=45)")
+        XCTAssertEqual(tilde.path, home + "/misc/grow.html")
+        XCTAssertEqual(tilde.query, "clean&s=45")
+        let absolute = try link("[grow](/tmp/grow.html?clean#end)")
+        XCTAssertEqual(absolute.path, "/tmp/grow.html")
+        XCTAssertEqual(absolute.query, "clean")
+        XCTAssertEqual(absolute.fragment, "end")
+        let code = try XCTUnwrap(MarkdownRenderer.render("`~/misc/grow.html?clean&s=45`").string.attribute(.link, at: 0, effectiveRange: nil) as? URL)
+        XCTAssertEqual(FilePathRefs.text(of: code), "~/misc/grow.html?clean&s=45")
+    }
+
     func testSpacesAndPercentEscapesAreDecodedOnce() throws {
         for destination in ["/tmp/Review Files/index.html", "/tmp/Review%20Files/index.html"] {
             let url = try link("[Review](<\(destination)>)")
@@ -161,6 +176,8 @@ final class FileLinkMenuTests: XCTestCase {
 
     override func setUp() async throws {
         saved = UserDefaults.standard.string(forKey: "transcriptFileLinkClick")
+        // A menu item's action goes nowhere until there's an NSApp.
+        _ = NSApplication.shared
     }
 
     override func tearDown() async throws {
@@ -183,8 +200,8 @@ final class FileLinkMenuTests: XCTestCase {
 
     func testRightClickOnAPathOffersWaysToOpenIt() throws {
         let view = view("Changed `app/A.swift` today")
-        view.fileLinkPath = { url in FilePathRefs.text(of: url) == "app/A.swift" ? "/repo/app/A.swift" : nil }
-        var opened: [(String, FileLinkAction)] = []
+        view.fileLinkTarget = { url in FilePathRefs.text(of: url) == "app/A.swift" ? URL(fileURLWithPath: "/repo/app/A.swift") : nil }
+        var opened: [(URL, FileLinkAction)] = []
         view.openFile = { opened.append(($0, $1)) }
         let at = (view.string as NSString).range(of: "app/").location
         let menu = try XCTUnwrap(view.fileLinkMenu(at: point(view, at: at)))
@@ -196,7 +213,7 @@ final class FileLinkMenuTests: XCTestCase {
 
         let finder = try XCTUnwrap(menu.items.first { $0.title == "Show in Finder" })
         menu.performActionForItem(at: menu.index(of: finder))
-        XCTAssertEqual(opened.first?.0, "/repo/app/A.swift")
+        XCTAssertEqual(opened.first?.0.path, "/repo/app/A.swift")
         XCTAssertEqual(opened.first?.1, .finder)
 
         // "Default" sets what a plain click does, and ticks it.
@@ -208,9 +225,25 @@ final class FileLinkMenuTests: XCTestCase {
         XCTAssertEqual(again.items.filter { $0.state == .on }.map(\.title), ["Open in Panel"])
     }
 
+    func testAPathWithAQueryPeeksAtTheFileAndOpensWithTheQuery() throws {
+        let view = view("Open `~/misc/grow.html?clean&s=45` to watch")
+        let target = try XCTUnwrap(URL(string: "file:///tmp/misc/grow.html?clean&s=45"))
+        view.fileLinkTarget = { url in FilePathRefs.text(of: url) == "~/misc/grow.html?clean&s=45" ? target : nil }
+        var opened: [URL] = []
+        view.openFile = { url, _ in opened.append(url) }
+        let menu = try XCTUnwrap(view.fileLinkMenu(at: point(view, at: (view.string as NSString).range(of: "grow").location)))
+        for title in ["Open in Panel", "Show in Finder"] {
+            let item = try XCTUnwrap(menu.items.first { $0.title == title })
+            menu.performActionForItem(at: menu.index(of: item))
+        }
+        XCTAssertEqual(opened, [target, target])
+        XCTAssertEqual(view.debugPeeks().map(\.url), [URL(fileURLWithPath: "/tmp/misc/grow.html")])
+
+    }
+
     func testMissingFileAndPlainTextMenus() throws {
         let view = view("Changed `app/Gone.swift` today")
-        view.fileLinkPath = { _ in nil }
+        view.fileLinkTarget = { _ in nil }
         let at = (view.string as NSString).range(of: "app/").location
         XCTAssertEqual(try XCTUnwrap(view.fileLinkMenu(at: point(view, at: at))).items.map(\.title), ["Couldn't Find This File"])
         XCTAssertNil(view.fileLinkMenu(at: try point(view, at: 2)))

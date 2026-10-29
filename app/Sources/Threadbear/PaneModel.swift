@@ -153,6 +153,21 @@ extension AppModel {
     }
 
     func openExternally(_ url: URL) {
+        // A page's `?clean&s=45` would be dropped on the way to the browser
+        // (macOS passes a file URL on without them), so the page goes by a
+        // little one that forwards to it, opened in the same app.
+        if url.isFileURL, url.query != nil || url.fragment != nil,
+           PreviewRules.viewer(forPath: url.path) == .web,
+           let app = NSWorkspace.shared.urlForApplication(toOpen: URL(fileURLWithPath: url.path)) {
+            let folder = FileManager.default.temporaryDirectory.appendingPathComponent("Threadbear-links", isDirectory: true)
+            let page = folder.appendingPathComponent(UUID().uuidString + ".html")
+            do {
+                try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+                try FilePathRefs.forwardingPage(to: url).write(to: page, atomically: true, encoding: .utf8)
+                NSWorkspace.shared.open([page], withApplicationAt: app, configuration: NSWorkspace.OpenConfiguration())
+                return
+            } catch {}
+        }
         NSWorkspace.shared.open(url)
     }
 
@@ -164,25 +179,36 @@ extension AppModel {
     /// its right-click menu (FileLinkAction.click); ⌘-click always opens
     /// it in its own app.
     func openTranscriptFileLink(_ url: URL, commandKey: Bool) -> Bool {
-        openTranscriptFile(url.path, commandKey ? .app : FileLinkAction.click)
+        openTranscriptFile(url, commandKey ? .app : FileLinkAction.click)
     }
 
+    /// `url` is a file URL, perhaps with a `?query` or `#fragment` for the
+    /// page (FilePathRefs.fileLink), which a page in the panel or the
+    /// browser keeps.
     @discardableResult
-    func openTranscriptFile(_ path: String, _ action: FileLinkAction) -> Bool {
-        let url = URL(fileURLWithPath: path)
+    func openTranscriptFile(_ url: URL, _ action: FileLinkAction) -> Bool {
+        let path = url.path
         var action = action
         if action == .automatic { action = PreviewRules.previewsInPane(transcriptLink: url) ? .panel : .app }
         switch action {
         case .panel:
             // The pane belongs to a thread; on a project page there's none.
-            guard let thread = selectedThread, openProjectId == nil else { return NSWorkspace.shared.open(url) }
-            preview(path: path, in: thread)
+            guard let thread = selectedThread, openProjectId == nil else {
+                openExternally(url)
+                return true
+            }
+            if url.query != nil || url.fragment != nil, PreviewRules.viewer(forPath: path) == .web {
+                preview(page: url, title: url.lastPathComponent, in: thread)
+            } else {
+                preview(path: path, in: thread)
+            }
             return true
         case .finder:
             revealInFinder(path)
             return true
         case .app, .automatic:
-            return NSWorkspace.shared.open(url)
+            openExternally(url)
+            return true
         }
     }
 
@@ -195,23 +221,24 @@ extension AppModel {
         return true
     }
 
-    /// The file a transcript link names, if it exists: a file link's path,
-    /// or a path in inline code found from the selected thread's folder
-    /// and what its tools touched (FilePathRefs).
-    func transcriptLinkPath(_ url: URL) -> String? {
-        if url.isFileURL { return url.path }
+    /// The file a transcript link names, as a file URL keeping any query
+    /// and fragment: a file link itself, or a path in inline code found
+    /// from the selected thread's folder and what its tools touched
+    /// (FilePathRefs). Nil for one that names nothing.
+    func transcriptLinkFile(_ url: URL) -> URL? {
+        if url.isFileURL { return url }
         guard let text = FilePathRefs.text(of: url) else { return nil }
         let thread = selectedThread
         let known = thread.flatMap { loadedSession($0.id) }.map { FilePathRefs.toolPaths($0.model.items) } ?? []
-        return FilePathRefs.resolve(text, root: thread?.cwd, known: known)
+        return FilePathRefs.fileLink(text, root: thread?.cwd, known: known)
     }
 
     /// A click on a path in inline code. One that names nothing beeps.
     func openTranscriptPathRef(_ text: String, commandKey: Bool) -> Bool {
-        guard let url = FilePathRefs.url(for: text), let path = transcriptLinkPath(url) else {
+        guard let url = FilePathRefs.url(for: text), let file = transcriptLinkFile(url) else {
             NSSound.beep()
             return false
         }
-        return openTranscriptFileLink(URL(fileURLWithPath: path), commandKey: commandKey)
+        return openTranscriptFileLink(file, commandKey: commandKey)
     }
 }

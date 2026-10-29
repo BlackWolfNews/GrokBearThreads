@@ -442,7 +442,7 @@ final class FileTextView: NSTextView {
         } else if let url, url.scheme == nil, let base, !url.path.isEmpty {
             let target = URL(fileURLWithPath: url.path, relativeTo: base).standardizedFileURL
             if FileManager.default.fileExists(atPath: target.path),
-               MainActor.assumeIsolated({ AppModel.shared.openTranscriptFileLink(target, commandKey: commandKey) }) { return }
+               MainActor.assumeIsolated({ AppModel.shared.openTranscriptFileLink(FilePathRefs.withQuery(target, query: url.query, fragment: url.fragment), commandKey: commandKey) }) { return }
         }
         super.clicked(onLink: link, at: charIndex)
     }

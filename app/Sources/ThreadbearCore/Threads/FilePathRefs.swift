@@ -33,7 +33,7 @@ public enum FilePathRefs {
         guard !text.isEmpty, text.count < 400, !text.contains("://"),
               text.rangeOfCharacter(from: .whitespacesAndNewlines) == nil,
               !text.contains("*"), !text.contains("<"), !text.contains("`") else { return false }
-        let path = stripLine(text)
+        let path = stripLine(splitQuery(text).path)
         if path.hasPrefix("/") { return path.count > 1 }
         if path.hasPrefix("~/") || path.hasPrefix("./") || path.hasPrefix("../") { return true }
         let name = (path as NSString).lastPathComponent
@@ -57,6 +57,55 @@ public enum FilePathRefs {
             path = path[..<colon]
         }
         return String(path)
+    }
+
+    /// `grow.html?clean&s=45` or `guide.md#links`: a file, with a query or
+    /// fragment that's for the page (its own script reads `?clean`), not
+    /// part of the file's name. Split at the first `?` or `#`.
+    public static func splitQuery(_ text: String) -> (path: String, query: String?, fragment: String?) {
+        guard let mark = text.firstIndex(where: { $0 == "?" || $0 == "#" }) else { return (text, nil, nil) }
+        let path = String(text[..<mark])
+        let rest = text[text.index(after: mark)...]
+        if text[mark] == "#" { return (path, nil, String(rest)) }
+        guard let hash = rest.firstIndex(of: "#") else { return (path, String(rest), nil) }
+        return (path, String(rest[..<hash]), String(rest[rest.index(after: hash)...]))
+    }
+
+    /// The file `text` names as a file URL, carrying any `?query` and
+    /// `#fragment` so a page opens with them. A file whose own name has a
+    /// `?` or `#` in it wins over reading that as a query.
+    public static func fileLink(_ text: String, root: String?, known: [String], home: String = NSHomeDirectory(),
+                                exists: (String) -> Bool = { FileManager.default.fileExists(atPath: $0) },
+                                search: (String, String) -> String? = FilePathRefs.search) -> URL? {
+        let parts = splitQuery(text)
+        guard parts.query != nil || parts.fragment != nil, !parts.path.isEmpty else {
+            return resolve(text, root: root, known: known, home: home, exists: exists, search: search).map(URL.init(fileURLWithPath:))
+        }
+        // The whole text as a name: no folder search for it, as the
+        // split one gets that.
+        if let path = resolve(text, root: root, known: known, home: home, exists: exists, search: { _, _ in nil }) {
+            return URL(fileURLWithPath: path)
+        }
+        guard let path = resolve(parts.path, root: root, known: known, home: home, exists: exists, search: search) else { return nil }
+        return withQuery(URL(fileURLWithPath: path), query: parts.query, fragment: parts.fragment)
+    }
+
+    /// `url` with a query and fragment as an agent wrote them. They're
+    /// decoded first so `a%20b` isn't escaped twice.
+    public static func withQuery(_ url: URL, query: String?, fragment: String?) -> URL {
+        guard var components = URLComponents(url: url, resolvingAgainstBaseURL: false) else { return url }
+        components.query = query.map { $0.removingPercentEncoding ?? $0 }
+        components.fragment = fragment.map { $0.removingPercentEncoding ?? $0 }
+        return components.url ?? url
+    }
+
+    /// A page that goes straight on to `url`. macOS drops a file URL's
+    /// query and fragment when it hands one to a browser, so a page's
+    /// `?clean` is lost; opening this instead gets them there.
+    public static func forwardingPage(to url: URL) -> String {
+        // JSONEncoder escapes `/`, so nothing in the link can close the script.
+        let target = (try? JSONEncoder().encode(url.absoluteString)).flatMap { String(data: $0, encoding: .utf8) } ?? "\"\""
+        return "<!doctype html><meta charset=\"utf-8\"><script>location.replace(\(target))</script>\n"
     }
 
     /// The file `text` names, if one exists: as written (with `~`), then

@@ -67,4 +67,63 @@ final class FilePathRefsTests: XCTestCase {
         let command = #"cd ~/dev/me/threadbear && git status; (cd "/tmp/My Dir" && ls) || cd relative"#
         XCTAssertEqual(FilePathRefs.cdTargets(command, home: "/home/me"), ["/home/me/dev/me/threadbear", "/tmp/My Dir"])
     }
+
+    func testQueryAndFragmentSplitOff() {
+        XCTAssertEqual(FilePathRefs.splitQuery("grow.html?clean&s=45").path, "grow.html")
+        XCTAssertEqual(FilePathRefs.splitQuery("grow.html?clean&s=45").query, "clean&s=45")
+        XCTAssertNil(FilePathRefs.splitQuery("grow.html?clean&s=45").fragment)
+        let both = FilePathRefs.splitQuery("~/a/b.html?x=1#top")
+        XCTAssertEqual(both.path, "~/a/b.html")
+        XCTAssertEqual(both.query, "x=1")
+        XCTAssertEqual(both.fragment, "top")
+        // A ? after the # is the fragment's.
+        let fragment = FilePathRefs.splitQuery("docs/guide.md#what?")
+        XCTAssertEqual(fragment.path, "docs/guide.md")
+        XCTAssertNil(fragment.query)
+        XCTAssertEqual(fragment.fragment, "what?")
+        let plain = FilePathRefs.splitQuery("Foo.swift:12")
+        XCTAssertEqual(plain.path, "Foo.swift:12")
+        XCTAssertNil(plain.query)
+        XCTAssertNil(plain.fragment)
+    }
+
+    func testPathsWithAQueryArePaths() {
+        for text in ["~/dev/me/misc/threadbear-tree/grow.html?clean&s=45", "site/grow.html?clean", "grow.html#end", "/tmp/a.html?x"] {
+            XCTAssertTrue(FilePathRefs.looksLikePath(text), text)
+        }
+        for text in ["example.com?x=1", "https://example.com/a.html?x=1", "?x=1", "#top"] {
+            XCTAssertFalse(FilePathRefs.looksLikePath(text), text)
+        }
+    }
+
+    func testFileLinkKeepsTheQuery() throws {
+        let files: Set<String> = ["/home/me/dev/grow.html", "/work/site/grow.html", "/work/odd?name.txt", "/work/a.swift"]
+        func link(_ text: String) -> URL? {
+            FilePathRefs.fileLink(text, root: "/work", known: [], home: "/home/me", exists: files.contains, search: { _, _ in nil })
+        }
+        let grow = try XCTUnwrap(link("~/dev/grow.html?clean&s=45"))
+        XCTAssertTrue(grow.isFileURL)
+        XCTAssertEqual(grow.path, "/home/me/dev/grow.html")
+        XCTAssertEqual(grow.query, "clean&s=45")
+        XCTAssertEqual(grow.absoluteString, "file:///home/me/dev/grow.html?clean&s=45")
+        XCTAssertEqual(try XCTUnwrap(link("site/grow.html#end")).absoluteString, "file:///work/site/grow.html#end")
+        // Escaping is kept as written, not done twice.
+        XCTAssertEqual(try XCTUnwrap(link("site/grow.html?t=a%20b")).absoluteString, "file:///work/site/grow.html?t=a%20b")
+        // A file whose name has a ? in it is that file, not a query.
+        let odd = try XCTUnwrap(link("odd?name.txt"))
+        XCTAssertEqual(odd.path, "/work/odd?name.txt")
+        XCTAssertNil(odd.query)
+        // Plain paths and line numbers as before.
+        XCTAssertEqual(link("a.swift:3"), URL(fileURLWithPath: "/work/a.swift"))
+        XCTAssertNil(link("missing.html?x"))
+    }
+
+    func testForwardingPageGoesToTheLink() throws {
+        let url = try XCTUnwrap(URL(string: "file:///tmp/a%20b/grow.html?clean&s=45#x"))
+        let page = FilePathRefs.forwardingPage(to: url)
+        XCTAssertTrue(page.contains(#"location.replace("file:\/\/\/tmp\/a%20b\/grow.html?clean&s=45#x")"#), page)
+        // Nothing in the link can end the script early.
+        let sneaky = try XCTUnwrap(URL(string: "file:///tmp/a.html?\"</script>"))
+        XCTAssertEqual(FilePathRefs.forwardingPage(to: sneaky).components(separatedBy: "</script>").count, 2)
+    }
 }
