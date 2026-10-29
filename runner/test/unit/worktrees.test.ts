@@ -9,7 +9,7 @@ import { execFileSync, spawn } from 'node:child_process';
 import { makeHarness, tmpDir, type Harness } from '../helpers/fakes.ts';
 import { checkSequence, checkSummary } from '../helpers/protocol-check.ts';
 import { findWorktreePatch, readPatchModule } from '../../src/patches.ts';
-import { cleanUpWorktree, land, makeWorktree, overwrittenFiles, type LandTarget } from '../../src/worktrees.ts';
+import { cleanUpWorktree, land, makeWorktree, MAX_SPARES, overwrittenFiles, type LandTarget } from '../../src/worktrees.ts';
 import { RpcServer } from '../../src/rpc.ts';
 import { RunnerClient } from '../../src/client.ts';
 import { readToken } from '../../src/config.ts';
@@ -48,7 +48,7 @@ function makeRepo(patch = PATCH(`{ setup: "echo setting up in $PWD; touch .setup
   fs.mkdirSync(main);
   sh(main, 'git init -q -b main');
   write(main, {
-    '.gitignore': 'node_modules\n.setup-ran\n',
+    '.gitignore': 'node_modules\n.setup-ran\n.build\n',
     'README.md': 'one\ntwo\nthree\n',
     'runner/a.ts': 'export const a = 1;\n',
     ...(patch ? { '.threadbear/patches/checks.ts': patch } : {}),
@@ -95,12 +95,17 @@ test('a patch can carry worktree with setup and check; anything malformed is the
   assert.deepEqual(ok.worktree, { setup: 'npm ci', check: './check.sh --quick' });
   assert.deepEqual(ok.actions, []);
   assert.deepEqual(readPatchModule('w', 'project', '/x/w.ts', { worktree: {} }).worktree, {});
+  assert.deepEqual(readPatchModule('k', 'project', '/x/k.ts', { worktree: { keep: ['app/.build', 'dock/.build'] } }).worktree, { keep: ['app/.build', 'dock/.build'] });
   assert.equal(readPatchModule('a', 'project', '/x/a.ts', { actions: [] }).worktree, undefined, 'none unless asked for');
   for (const [worktree, error] of [
     [[], 'worktree should be an object with setup and/or check.'],
     [true, 'worktree should be an object with setup and/or check.'],
     [{ setup: 3 }, 'worktree.setup should be a command.'],
     [{ check: '  ' }, 'worktree.check should be a command.'],
+    [{ keep: 'app/.build' }, 'worktree.keep should be a list of folders inside the repo, like "app/.build".'],
+    [{ keep: [] }, 'worktree.keep should be a list of folders inside the repo, like "app/.build".'],
+    [{ keep: ['/abs/.build'] }, 'worktree.keep should be a list of folders inside the repo, like "app/.build".'],
+    [{ keep: ['../up'] }, 'worktree.keep should be a list of folders inside the repo, like "app/.build".'],
   ] as const) {
     const bad = readPatchModule('b', 'project', '/x/b.ts', { worktree });
     assert.equal(bad.info.error, error);
@@ -531,4 +536,81 @@ test('deleting a thread removes a landed worktree; an unlanded one stays, with a
   const notice = h.notes.find((n) => n.method === 'runner.notice') as { params: { message: string } };
   assert.match(notice.params.message, new RegExp(`^"Go" was deleted, but its worktree at ${b.w.path} and branch ${b.w.branch} stay: ${b.w.branch.replace('/', '\\/')} has commits that aren't on main\\. To land it, run tb land in ${b.w.path}\\. To drop it`));
   assert.ok(fs.existsSync(b.w.path));
+});
+
+// ---------------------------------------------------------------- spares
+
+const KEEP = PATCH(`{ setup: "touch .setup-ran", keep: ["app/.build"] }`);
+
+const isLocked = (main: string, wt: string) => sh(main, 'git worktree list --porcelain').split('\n\n').some((b) => b.includes(`worktree ${wt}\n`) && b.includes('locked threadbear spare'));
+
+test('with keep, an archived landed worktree is kept as a spare, and the next thread takes it, build cache and all', async () => {
+  const { root, main } = makeRepo(KEEP);
+  const h = harness();
+  const a = await threadWithWorktree(h, main);
+  const slot = path.join(root, 'proj-threads', 'slot-1');
+  assert.equal(a.w.path, slot, 'named for the slot, not the thread, as it outlives it');
+  assert.deepEqual(h.store.load(a.id)?.worktree?.keep, ['app/.build']);
+  commit(slot, { 'runner/b.ts': '2\n' }, 'Landed work');
+  assert.equal(await land({ path: slot, branch: a.w.branch, mainCheckout: main }, capture().opts), 0);
+  write(slot, { 'app/.build/cache.o': 'warm\n', 'node_modules/old.js': 'stale\n', 'scratch.txt': 'untracked\n' });
+
+  h.runner.update({ threadId: a.id, archived: true });
+  await until(() => notes(h, a.id).some((n) => n.includes('for the next thread')), 'the cleanup');
+  assert.equal(notes(h, a.id).at(-1), `Deleted this thread's branch ${a.w.branch} (everything on it is on main) and kept its worktree, build caches and all, for the next thread.`);
+  assert.ok(isLocked(main, slot), 'locked as a spare');
+  assert.equal(sh(main, `git branch --list ${a.w.branch}`), '');
+  assert.equal(h.runner.get(a.id).worktree, undefined);
+
+  const b = await threadWithWorktree(h, main);
+  assert.equal(b.w.path, slot, 'took the spare');
+  assert.equal(h.adapter.last.opts.cwd, path.join(slot, 'runner'));
+  assert.ok(!isLocked(main, slot));
+  assert.equal(sh(slot, 'git rev-parse --abbrev-ref HEAD'), b.w.branch);
+  assert.equal(sh(slot, 'git rev-parse HEAD'), sh(main, 'git rev-parse main'));
+  assert.equal(fs.readFileSync(path.join(slot, 'app/.build/cache.o'), 'utf8'), 'warm\n', 'the kept folder stays');
+  assert.ok(!fs.existsSync(path.join(slot, 'node_modules')), "ignored files that aren't kept go");
+  assert.ok(!fs.existsSync(path.join(slot, 'scratch.txt')));
+  assert.ok(fs.existsSync(path.join(slot, '.setup-ran')), 'setup ran again');
+  assert.equal(sh(slot, 'git status --porcelain'), '');
+
+  // The first thread, brought back, never carries on in what's now b's folder.
+  h.runner.send(a.id, 'More please');
+  await until(() => h.adapter.last.opts.cwd === path.join(main, 'runner'), "a's new CLI in the main checkout");
+  assert.ok(notes(h, a.id).includes(`This thread's worktree was handed on to other threads when it was archived, so it carries on in the main checkout, ${path.join(main, 'runner')}.`));
+  assert.match(h.adapter.last.sent.at(-1)!.text, new RegExp(`Your worktree at ${slot} was handed on to other threads after its work landed on main`));
+});
+
+test('with keep, two threads at once never share a spare, and an unlanded worktree is never kept', async () => {
+  const { root, main } = makeRepo(KEEP);
+  const patch = (await findWorktreePatch(main, root))!;
+  const one = await makeWorktree({ cwd: main, threadId: 'aaaaaaaa-1', patch });
+  assert.ok(one.ok);
+  assert.deepEqual(await cleanUpWorktree(one.worktree), { removed: true, spare: true });
+  const [x, y] = await Promise.all([
+    makeWorktree({ cwd: main, threadId: 'bbbbbbbb-1', patch }),
+    makeWorktree({ cwd: main, threadId: 'cccccccc-1', patch }),
+  ]);
+  assert.ok(x.ok && y.ok);
+  assert.deepEqual([x.worktree.path, y.worktree.path].sort(), [path.join(root, 'proj-threads', 'slot-1'), path.join(root, 'proj-threads', 'slot-2')]);
+
+  commit(x.worktree.path, { 'runner/b.ts': '2\n' }, 'Not landed');
+  assert.deepEqual(await cleanUpWorktree(x.worktree), { removed: false, reason: `${x.worktree.branch} has commits that aren't on main` });
+  assert.ok(!isLocked(main, x.worktree.path));
+});
+
+test(`with keep, past ${MAX_SPARES} spares an archived worktree is removed as before`, async () => {
+  const { root, main } = makeRepo(KEEP);
+  const patch = (await findWorktreePatch(main, root))!;
+  const made = [];
+  for (let i = 0; i <= MAX_SPARES; i++) {
+    const m = await makeWorktree({ cwd: main, threadId: `${String(i).padStart(8, '0')}-x`, patch });
+    assert.ok(m.ok);
+    made.push(m.worktree);
+  }
+  for (const w of made.slice(0, MAX_SPARES)) assert.deepEqual(await cleanUpWorktree(w), { removed: true, spare: true });
+  const last = made[MAX_SPARES];
+  assert.deepEqual(await cleanUpWorktree(last), { removed: true });
+  assert.ok(!fs.existsSync(last.path));
+  assert.equal(sh(main, `git branch --list ${last.branch}`), '');
 });

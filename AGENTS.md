@@ -93,16 +93,21 @@ interrupt, snooze or archive it. The runner puts its own `tb` on your PATH;
 if `tb` isn't found (an older runner, or outside a thread), use
 `runner/bin/tb`. `tb --help` lists the rest.
 
-- `./check.sh` runs every check, about two and a half minutes (`--quick`:
-  the runner's typecheck and unit tests; `--app`: the app's build and tests,
-  for a change outside `runner/`). Nothing in it touches the live runner.
-  A failure prints what failed and keeps the logs; it says where, so
-  delete them when you're done.
+- `./check.sh` runs every check (`--quick`: the runner's typecheck and
+  unit tests, about a minute; `--app`: the app's build and tests, for a
+  change outside `runner/`). It skips the deploy tests and BearDock's
+  unless something they cover changed from main (`--all` runs them
+  anyway). The app's part is under a minute with a warm `app/.build` and
+  5 to 10 minutes in a folder that has never built, so run it in the
+  background. Nothing in it touches the live runner. A failure prints
+  what failed and keeps the logs; it says where, so delete them when
+  you're done.
 - A thread started in this repo (from the app, `create_thread` or a
   schedule) gets a worktree of its own before its first turn:
-  `<parent>/threadbear-threads/<id8>` on the branch `thread/<id8>`, made
-  from main, with `node_modules` linked to the main checkout's
-  (`worktree-setup.sh`). Your system prompt says where. Commit there. When
+  `<parent>/threadbear-threads/slot-<n>` on the branch `thread/<id8>`,
+  made from main, with `node_modules` linked to the main checkout's
+  (`worktree-setup.sh`). The folder is usually an earlier thread's,
+  reused with its Swift build caches so the app builds warm. Your system prompt says where. Commit there. When
   the work is done and checked, `tb land` rebases it on main, runs
   `./check.sh --quick` and fast-forwards main in the main checkout
   (`--dry-run` first if you like; it never pushes). Mike's Land chip does
@@ -111,14 +116,17 @@ if `tb` isn't found (an older runner, or outside a thread), use
   whoever has uncommitted changes in main's checkout. You can carry on
   after landing; the next `tb land` lands only what's new. Changing a
   `package.json`? Replace the link first: `rm runner/node_modules` (no
-  trailing slash, so only the link goes), then `npm ci` there. The
-  worktree is removed when the thread is archived with everything landed.
+  trailing slash, so only the link goes), then `npm ci` there. When the
+  thread is archived with everything landed, its branch is deleted and
+  the worktree kept as a spare for the next thread (or removed, past six).
   docs/thread-worktrees.md has the details.
-- A thread started somewhere else (like `~/dev/me/misc`) still makes its
-  own worktree by hand, as another thread may be editing the main
-  checkout: `git worktree add --detach <dir> main` (main is checked out in
-  the main checkout), then `npm ci` in its `runner/` and
-  `app/Tools/mock-runner/`, and merges to main itself.
+- A thread started somewhere else (like `~/dev/me/misc`) still needs a
+  worktree of its own, as another thread may be editing the main
+  checkout. Borrow a spare: `./borrow-worktree.sh` in the main checkout
+  prints one, detached at main and set up, with warm build caches. Don't
+  `git worktree add` a fresh one: its first app build takes 5 to 10
+  minutes. Commit there, merge to main yourself, then
+  `./borrow-worktree.sh --give-back <dir>` so the next thread gets it.
 - The live runner runs a release, a snapshot, so editing `runner/` doesn't
   change it. To try a runner change, start `runner/scripts/dev-runner.sh` in
   the background and use the `<dev home>/tb` it prints (a bare `tb` reaches

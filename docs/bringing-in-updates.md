@@ -53,8 +53,9 @@ use), and fix them if not.
 
 ## 4. Check it
 
-- `./check.sh` runs every check (about two and a half minutes). All of it
-  must pass before you land.
+- `./check.sh --all` runs every check (several minutes; up to ten for the
+  app in a folder that has never built it). All of it must pass before you
+  land.
 - If the release looks halfway through something (a feature half there, a
   commit that says it's temporary, tests skipped), say so and ask whether
   to land it now or wait for the next release.

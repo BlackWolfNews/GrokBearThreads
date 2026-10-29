@@ -4668,7 +4668,9 @@ export class Runner {
   private leaveRemovedWorktree(st: ThreadState, turnId: string): string | undefined {
     const { rec } = st;
     const w = rec.worktree;
-    if (!w?.removedAt || !isInside(rec.cwd, w.path) || isDirectory(rec.cwd)) return undefined;
+    // A spare's folder is still there, but it's another thread's (or will
+    // be), so the thread never carries on in it.
+    if (!w?.removedAt || !isInside(rec.cwd, w.path) || (!w.spare && isDirectory(rec.cwd))) return undefined;
     const from = rec.cwd;
     const to = sameSubfolder(from, w.path, w.mainCheckout);
     if (rec.sessionUsed) {
@@ -4679,8 +4681,9 @@ export class Runner {
     rec.updatedAt = this.isoNow();
     this.markDirty(st);
     this.tellActivity({ kind: 'moved', threadId: rec.id, from, to });
-    this.emit(st, { type: 'system.note', text: `This thread's worktree was removed when it was archived, so it carries on in the main checkout, ${to}.` }, turnId);
-    return `[Threadbear] Your worktree at ${w.path} was removed after its work landed on main. You're now in the main checkout, ${to}, which other threads share: stage your own files by name.`;
+    const went = w.spare ? 'was handed on to other threads' : 'was removed';
+    this.emit(st, { type: 'system.note', text: `This thread's worktree ${went} when it was archived, so it carries on in the main checkout, ${to}.` }, turnId);
+    return `[Threadbear] Your worktree at ${w.path} ${went} after its work landed on main. You're now in the main checkout, ${to}, which other threads share: stage your own files by name.`;
   }
 
   // The Land chip, for a thread with a worktree of its own.
@@ -4721,8 +4724,12 @@ export class Runner {
     this.log.info('worktree cleanup', { threadId: rec.id, path: w.path, ...result });
     if (result.removed) {
       w.removedAt = this.isoNow();
+      if ('spare' in result && result.spare) w.spare = true;
       if (deleted) return;
-      this.emit(st, { type: 'system.note', text: `Removed this thread's worktree and its branch ${w.branch}: everything on it is on main.` });
+      const text = w.spare
+        ? `Deleted this thread's branch ${w.branch} (everything on it is on main) and kept its worktree, build caches and all, for the next thread.`
+        : `Removed this thread's worktree and its branch ${w.branch}: everything on it is on main.`;
+      this.emit(st, { type: 'system.note', text });
       this.markDirty(st);
       return;
     }

@@ -3,14 +3,25 @@
 # what failed and the end of the log for each step that failed, and a
 # nonzero exit if any did.
 #
-#   ./check.sh [--quick | --app] [--e2e] [--shots DIR]
+#   ./check.sh [--quick | --app] [--all] [--e2e] [--shots DIR]
 #
 #   (no options)  runner typecheck, unit tests and deploy tests, then the
-#                 app's swift build and swift test (about two and a half
-#                 minutes, most of it the deploy tests)
-#   --quick       runner typecheck and unit tests only (about 10 seconds)
+#                 app's swift build and swift test, and BearDock's tests
+#   --quick       runner typecheck and unit tests only (about a minute)
 #   --app         the app's swift build and swift test only, for a change
-#                 that doesn't touch runner/ (about 30 seconds)
+#                 that doesn't touch runner/
+#   --all         don't skip the dock and deploy tests (below)
+#
+# The deploy tests (a few minutes) only run when something they cover
+# changed from main: runner/scripts/, launch.mjs, the launcher or the tests
+# themselves. BearDock's tests only run when dock/ changed (the app's own
+# build and tests cover how it uses it). On main itself, with nothing
+# changed, everything runs.
+#
+# How long the app takes depends on its build cache: under a minute when
+# app/.build is warm, 5 to 10 minutes in a folder that has never built
+# (a new worktree), as SwiftPM's cache only works where it was made. Run
+# it in the background rather than waiting on it.
 #   --e2e         also the runner's end-to-end tests: the real claude CLI on
 #                 claude-haiku-5-5 and account claude-3, then Codex on
 #                 gpt-6-luna at low effort and a Codex install into a temp
@@ -24,6 +35,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 NODE="${THREADBEAR_NODE:-$HOME/.nvm/versions/node/v24.22.1/bin/node}"
 QUICK=0
 APP_ONLY=0
+ALL=0
 E2E=0
 SHOTS=""
 
@@ -31,6 +43,7 @@ while [ $# -gt 0 ]; do
   case "$1" in
     --quick) QUICK=1 ;;
     --app) APP_ONLY=1 ;;
+    --all) ALL=1 ;;
     --e2e) E2E=1 ;;
     --shots)
       [ $# -ge 2 ] || { echo "--shots needs a folder" >&2; exit 2; }
@@ -65,6 +78,22 @@ export THREADBEAR_CLI_UPDATES=off
 # at a local deployment with THREADBEAR_SYNC_URL).
 export THREADBEAR_SYNC=off
 
+# What this checkout changes from main: committed since they parted, plus
+# anything uncommitted or untracked. Empty on main itself.
+CHANGED="$( {
+  base="$(git -C "$ROOT" merge-base HEAD main 2>/dev/null)" && git -C "$ROOT" diff --name-only "$base"
+  git -C "$ROOT" ls-files --others --exclude-standard
+} 2>/dev/null | sort -u)"
+
+# needed <regex>: whether a step whose inputs match it should run.
+needed() {
+  [ "$ALL" = 1 ] || [ -z "$CHANGED" ] || printf '%s\n' "$CHANGED" | grep -qE "$1|^check\.sh$"
+}
+
+skip() {
+  printf 'skip  %-20s (%s; --all runs it)\n' "$1" "$2"
+}
+
 TMP_ROOT="${TMPDIR:-/tmp}"
 LOGS="$(mktemp -d "${TMP_ROOT%/}/threadbear-check.XXXXXX")"
 FAILED=""
@@ -96,7 +125,13 @@ if [ "$APP_ONLY" = 0 ]; then
   step "convex typecheck" "$ROOT" npm run convex:typecheck
   step "web typecheck" "$ROOT" npm run web:typecheck
   step "runner unit tests" "$ROOT/runner" npm test
-  [ "$QUICK" = 1 ] || step "runner deploy tests" "$ROOT/runner" bash test/deploy/run.sh
+  if [ "$QUICK" = 0 ]; then
+    if needed '^runner/(scripts/|launch\.mjs$|launcher/|test/deploy/)'; then
+      step "runner deploy tests" "$ROOT/runner" bash test/deploy/run.sh
+    else
+      skip "runner deploy tests" "nothing they cover changed"
+    fi
+  fi
 fi
 if [ "$QUICK" = 0 ]; then
   # The app's MockRunnerTests run the real WebSocket client (and the
@@ -108,7 +143,11 @@ if [ "$QUICK" = 0 ]; then
   step "app build" "$ROOT/app" swift build
   step "app tests" "$ROOT/app" env THREADBEAR_REQUIRE_MOCK=1 swift test
   # BearDock, the window's docking panels: its layout tests.
-  step "dock tests" "$ROOT/dock" swift test
+  if needed '^dock/'; then
+    step "dock tests" "$ROOT/dock" swift test
+  else
+    skip "dock tests" "nothing in dock/ changed"
+  fi
 fi
 if [ "$E2E" = 1 ]; then
   # Claude's first, then Codex's (codex*.e2e.test.ts: the conversation

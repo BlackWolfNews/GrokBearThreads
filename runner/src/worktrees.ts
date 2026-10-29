@@ -19,6 +19,12 @@ export type WorktreeRecord = {
   branch: string; // "thread/<id8>"
   base: string; // main's commit when it was made
   removedAt?: string; // cleaned up when the thread was archived
+  // The patch's worktree.keep: the folder is set aside for another thread
+  // when this one's done with it, rather than removed (see "spares").
+  keep?: string[];
+  // Set aside as a spare (with removedAt): the folder is still there, but
+  // it's another thread's now, or will be.
+  spare?: boolean;
 };
 
 export const MAIN = 'main';
@@ -57,7 +63,7 @@ function firstLine(text: string): string {
 }
 
 // The checkouts of a repo, from `git worktree list --porcelain`.
-export type Checkout = { path: string; branch?: string; head?: string };
+export type Checkout = { path: string; branch?: string; head?: string; locked?: string };
 
 export async function listCheckouts(cwd: string): Promise<Checkout[] | undefined> {
   const out = await gitOut(cwd, ['worktree', 'list', '--porcelain']);
@@ -69,6 +75,7 @@ export async function listCheckouts(cwd: string): Promise<Checkout[] | undefined
       if (line.startsWith('worktree ')) c.path = line.slice('worktree '.length);
       else if (line.startsWith('branch ')) c.branch = line.slice('branch '.length).replace(/^refs\/heads\//, '');
       else if (line.startsWith('HEAD ')) c.head = line.slice('HEAD '.length);
+      else if (line === 'locked' || line.startsWith('locked ')) c.locked = line.slice('locked '.length);
     }
     if (c.path) list.push(c);
   }
@@ -108,32 +115,109 @@ export function sameSubfolder(cwd: string, from: string, to: string): string {
 
 export type MadeWorktree = { ok: true; worktree: WorktreeRecord; cwd: string } | { ok: false; reason: string };
 
-// Makes the thread's worktree: `git worktree add -b thread/<id8>
-// <parent>/<repo>-threads/<id8> main` from the main checkout. A leftover
-// folder or branch of that name is a reason, never overwritten.
-export async function makeWorktree(opts: { cwd: string; threadId: string; patch: WorktreePatch }): Promise<MadeWorktree> {
+// Makes the thread's worktree from main in the main checkout. A leftover
+// branch of the thread's name is a reason, never overwritten.
+//
+// Without the patch's `keep`: `git worktree add -b thread/<id8>
+// <parent>/<repo>-threads/<id8> main`, and a leftover folder of that name
+// is a reason too.
+//
+// With `keep`: a spare, if there is one (see "spares" below), switched to
+// the new branch with its kept folders left as they were; otherwise a new
+// `<repo>-threads/slot-<n>`. The folder isn't named after the thread, as
+// it outlives it.
+export function makeWorktree(opts: { cwd: string; threadId: string; patch: WorktreePatch }): Promise<MadeWorktree> {
+  // One at a time, so two new threads never take the same spare or slot.
+  const made = making.then(() => makeWorktreeNow(opts));
+  making = made.then(
+    () => undefined,
+    () => undefined,
+  );
+  return made;
+}
+
+let making: Promise<void> = Promise.resolve();
+
+async function makeWorktreeNow(opts: { cwd: string; threadId: string; patch: WorktreePatch }): Promise<MadeWorktree> {
   const top = await gitOut(opts.patch.folder, ['rev-parse', '--show-toplevel']);
   if (!top) return { ok: false, reason: `the ${opts.patch.patch} patch asks for one, but ${opts.patch.folder} isn't in a git repo` };
   const mainCheckout = await mainCheckoutOf(top);
   if (!mainCheckout) return { ok: false, reason: `no checkout of ${path.basename(top)} has ${MAIN} checked out` };
   const repo = path.basename(mainCheckout);
+  const threads = path.join(path.dirname(mainCheckout), `${repo}-threads`);
   const id8 = opts.threadId.slice(0, 8);
   const branch = threadBranch(opts.threadId);
-  const where = path.join(path.dirname(mainCheckout), `${repo}-threads`, id8);
-  if (fs.existsSync(where)) return { ok: false, reason: `there's already a folder at ${where}` };
+  const keep = opts.patch.keep;
+  if (!keep && fs.existsSync(path.join(threads, id8))) return { ok: false, reason: `there's already a folder at ${path.join(threads, id8)}` };
   if ((await git(mainCheckout, ['rev-parse', '--verify', '--quiet', `refs/heads/${branch}`])).ok) {
     return { ok: false, reason: `the branch ${branch} already exists` };
   }
   const base = await gitOut(mainCheckout, ['rev-parse', MAIN]);
   if (!base) return { ok: false, reason: `couldn't read ${MAIN} in ${mainCheckout}` };
-  fs.mkdirSync(path.dirname(where), { recursive: true });
+  const done = (where: string): MadeWorktree => ({
+    ok: true,
+    worktree: { repo, mainCheckout, path: where, branch, base, ...(keep ? { keep } : {}) },
+    cwd: sameSubfolder(opts.cwd, top, where),
+  });
+
+  if (keep) {
+    for (const spare of await spares(mainCheckout, threads)) {
+      // Unlocking is the claim: a second unlock of the same spare fails.
+      if (!(await git(mainCheckout, ['worktree', 'unlock', spare])).ok) continue;
+      if (await reuse(spare, branch, base, keep)) return done(spare);
+      // Couldn't be put right: it stays unlocked, out of the pool, for
+      // someone to look at, and the thread gets a new slot.
+    }
+  }
+
+  let where = path.join(threads, id8);
+  if (keep) {
+    let n = 1;
+    while (fs.existsSync(path.join(threads, `slot-${n}`))) n++;
+    where = path.join(threads, `slot-${n}`);
+  }
+  fs.mkdirSync(threads, { recursive: true });
   const add = await git(mainCheckout, ['worktree', 'add', '-b', branch, where, base]);
   if (!add.ok) return { ok: false, reason: `git worktree add failed: ${firstLine(add.stderr)}` };
-  return {
-    ok: true,
-    worktree: { repo, mainCheckout, path: where, branch, base },
-    cwd: sameSubfolder(opts.cwd, top, where),
-  };
+  return done(where);
+}
+
+// ---------------------------------------------------------------- spares
+//
+// A repo whose patch has worktree.keep (its build caches, like
+// "app/.build") gets its worktrees reused: SwiftPM's cache only works in
+// the folder it was built in, so every new worktree was a cold build of
+// several minutes. When a thread is archived with everything landed, its
+// worktree is detached, its branch deleted, and the folder locked with
+// the reason below: a spare. The next new thread unlocks one, wipes
+// everything git doesn't track except the kept folders, and checks out its
+// branch there, so its first build only recompiles what changed.
+
+const SPARE = 'threadbear spare';
+
+// How many spares a repo keeps. Each holds its build caches (a gigabyte or
+// so for Threadbear's), so past this an archived thread's worktree is
+// removed as before.
+export const MAX_SPARES = 6;
+
+// The repo's spares, in `threads` (its <repo>-threads folder).
+async function spares(mainCheckout: string, threads: string): Promise<string[]> {
+  const dir = realpath(threads);
+  return ((await listCheckouts(mainCheckout)) ?? [])
+    .filter((c) => c.locked === SPARE && path.dirname(realpath(c.path)) === dir && isDir(c.path))
+    .map((c) => c.path)
+    .sort();
+}
+
+// A claimed spare, made like new on `branch` at `base`. The kept folders
+// are left as they are; everything else git doesn't track goes, ignored
+// files too (an old thread's node_modules, say), and setup runs again.
+async function reuse(where: string, branch: string, base: string, keep: string[]): Promise<boolean> {
+  const exclude = keep.flatMap((k) => ['-e', `/${k.replace(/^\/+|\/+$/g, '')}`]);
+  for (const args of [['reset', '-q', '--hard'], ['clean', '-ffdxq', ...exclude], ['checkout', '-q', '-b', branch, base]]) {
+    if (!(await git(where, args)).ok) return false;
+  }
+  return true;
 }
 
 // What the agent is told in its appended system prompt.
@@ -335,13 +419,14 @@ export async function landTargetFromGit(cwd: string): Promise<{ target?: Omit<La
 
 // ------------------------------------------------------------- cleaning up
 
-export type Cleanup = { removed: true } | { removed: false; reason: string };
+export type Cleanup = { removed: true; spare?: boolean } | { removed: false; reason: string };
 
 // When its thread is archived or deleted: a worktree whose branch is all
 // on main is removed with its branch (`--force` only for untracked
-// files); otherwise both stay, and the reason says why.
+// files), or, with `keep` and room for another spare, set aside as one;
+// otherwise both stay, and the reason says why.
 export async function cleanUpWorktree(w: WorktreeRecord): Promise<Cleanup> {
-  const branchThere = (await git(w.mainCheckout, ['rev-parse', '--verify', '--quiet', `refs/heads/${w.branch}`])).ok;
+  let branchThere = (await git(w.mainCheckout, ['rev-parse', '--verify', '--quiet', `refs/heads/${w.branch}`])).ok;
   if (branchThere) {
     const merged = await git(w.mainCheckout, ['merge-base', '--is-ancestor', w.branch, MAIN]);
     if (!merged.ok) return { removed: false, reason: `${w.branch} has commits that aren't on ${MAIN}` };
@@ -351,6 +436,15 @@ export async function cleanUpWorktree(w: WorktreeRecord): Promise<Cleanup> {
     if (status === undefined) return { removed: false, reason: `git couldn't read ${w.path}` };
     const lines = status ? status.split('\n') : [];
     if (lines.some((l) => !l.startsWith('??'))) return { removed: false, reason: `the worktree has uncommitted changes` };
+    if (w.keep && (await spares(w.mainCheckout, path.dirname(w.path))).length < MAX_SPARES) {
+      // Detached where it is (no files change), so the branch can go; its
+      // untracked files go when the next thread takes it.
+      if ((await git(w.path, ['checkout', '-q', '--detach'])).ok) {
+        if (branchThere && (await git(w.mainCheckout, ['branch', '-D', w.branch])).ok) branchThere = false;
+        if (!branchThere && (await git(w.mainCheckout, ['worktree', 'lock', '--reason', SPARE, w.path])).ok) return { removed: true, spare: true };
+      }
+      // Couldn't be set aside: removed instead, below.
+    }
     const args = ['worktree', 'remove', ...(lines.length ? ['--force'] : []), w.path];
     const rm = await git(w.mainCheckout, args);
     if (!rm.ok) return { removed: false, reason: `git worktree remove failed: ${firstLine(rm.stderr)}` };

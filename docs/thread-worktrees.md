@@ -90,6 +90,40 @@ deleted. Otherwise both stay, with a `system.note` saying so and how to
 land or drop them. Unarchiving a thread whose worktree was removed starts
 its next turn in the main checkout, with a note.
 
+## Reusing worktrees
+
+Mike, 2026-10-29: removing a sound effect took a thread 18 minutes, 17 of
+them `./check.sh --app` in a worktree that had never built. SwiftPM's
+`.build` only works in the folder it was built in (copying main's, even
+as an APFS clone, still rebuilt everything: 297 s), so every new worktree
+paid 5 to 10 minutes for its first app build, more with other threads
+compiling at once.
+
+So a patch can list its build caches:
+
+```ts
+worktree: { setup: "...", check: "...", keep: ["app/.build", "dock/.build"] },
+```
+
+With `keep`:
+
+- New worktrees are `<repo>-threads/slot-<n>`, not `<id8>`, as the folder
+  outlives the thread.
+- Cleaning up a landed one detaches it, deletes its branch and locks it
+  (`git worktree lock --reason "threadbear spare"`): a spare. Past six
+  spares (`MAX_SPARES`), it's removed as before.
+- A new thread takes a spare if there is one: unlocking is the claim, so
+  two threads (or a thread and `borrow-worktree.sh`) never get the same
+  one. Then `git reset --hard`, `git clean -ffdx` with the kept folders
+  left out (an old thread's `node_modules` goes, its build cache stays),
+  and `git checkout -b thread/<id8> main`. Setup runs as for a new one.
+- The record keeps `keep`, and `spare: true` once it's set aside. A
+  spare's thread, unarchived, moves to the main checkout even though the
+  folder is still there: it's another thread's now.
+
+A thread started outside the repo borrows one by hand with
+`./borrow-worktree.sh` and gives it back with `--give-back <dir>`.
+
 ## Not in v1
 
 - Repos that aren't on `main`.

@@ -77,7 +77,12 @@ type LoadedPatch = { info: PatchInfo; panels: Panel[]; actions: Action[]; hooks:
 // A patch's `worktree`: the repo gives each new thread a git worktree of
 // its own (docs/thread-worktrees.md, worktrees.ts). Not part of PatchSet:
 // only the thread's own folder chain counts, which findWorktreePatch reads.
-export type WorktreeConfig = { setup?: string; check?: string };
+// `keep` lists build caches (folders inside the repo) that make a
+// worktree worth reusing: SwiftPM's .build only helps in the folder it was
+// built in, so a fresh worktree builds from cold. With `keep`, an archived
+// thread's worktree is set aside, those folders and all, for the next
+// thread rather than removed (worktrees.ts, "spares").
+export type WorktreeConfig = { setup?: string; check?: string; keep?: string[] };
 
 // A folder of one of the thread's projects.
 export type ProjectFolder = { folder: string; projectId: string };
@@ -401,13 +406,21 @@ export function readPatchModule(id: string, source: 'home' | 'project', file: st
   };
   let worktree: WorktreeConfig | undefined;
   if (v.worktree !== undefined) {
-    const w = v.worktree as { setup?: unknown; check?: unknown };
+    const w = v.worktree as { setup?: unknown; check?: unknown; keep?: unknown };
     if (!w || typeof w !== 'object' || Array.isArray(w)) return problem('worktree should be an object with setup and/or check.');
     worktree = {};
     for (const key of ['setup', 'check'] as const) {
       if (w[key] === undefined) continue;
       if (typeof w[key] !== 'string' || !w[key].trim()) return problem(`worktree.${key} should be a command.`);
       worktree[key] = w[key];
+    }
+    if (w.keep !== undefined) {
+      const keep = w.keep;
+      const relative = (p: unknown) => typeof p === 'string' && p.trim() !== '' && !path.isAbsolute(p) && !p.split('/').includes('..');
+      if (!Array.isArray(keep) || !keep.length || !keep.every(relative)) {
+        return problem('worktree.keep should be a list of folders inside the repo, like "app/.build".');
+      }
+      worktree.keep = keep as string[];
     }
   }
   const actions: Action[] = [];

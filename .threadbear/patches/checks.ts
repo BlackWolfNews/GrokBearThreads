@@ -8,26 +8,31 @@ export default {
   // A worktree per thread (docs/thread-worktrees.md): each new thread in
   // this repo works on a thread/<id8> branch in its own worktree, and
   // `tb land` puts it on main once the quick check passes. Setup links
-  // node_modules to the main checkout's (see worktree-setup.sh).
+  // node_modules to the main checkout's (see worktree-setup.sh). `keep`
+  // reuses an archived thread's worktree, Swift build caches and all, for
+  // the next thread: in a fresh one the app's first build took 5 to 10
+  // minutes, as SwiftPM's cache only works in the folder it was built in.
   worktree: {
     setup: "./worktree-setup.sh",
     check: "./check.sh --quick",
+    keep: ["app/.build", "dock/.build"],
   },
   actions: [
-    { title: "Quick check", run: "./check.sh --quick", note: "Runner typecheck and unit tests, about 15 s" },
+    { title: "Quick check", run: "./check.sh --quick", note: "Runner typecheck and unit tests, about a minute" },
     { title: "App check", run: "./check.sh --app", note: "App build and tests" },
-    { title: "Full check", run: "./check.sh", note: "Everything, about three minutes" },
+    { title: "Full check", run: "./check.sh", note: "Everything that could be affected by what changed from main" },
     { title: "Runner status", run: "runner/bin/tb status" },
     { title: "Releases", run: "runner/scripts/deploy-runner.sh --list" },
   ],
   panels: [
     // Several threads work on this repo at once, each in its own worktree:
     // which ones have work that isn't on main yet, and which are dirty.
+    // Spares (set aside for the next thread) are nobody's, so they're left out.
     {
       title: "Worktrees",
       icon: "arrow.triangle.branch",
       items: async ({ sh }) => {
-        const out = await sh(`git worktree list --porcelain | awk '/^worktree /{print $2}' | while read -r dir; do
+        const out = await sh(`git worktree list --porcelain | awk -v RS= '!/\\nlocked threadbear spare/ { sub(/^worktree /, ""); sub(/\\n.*/, ""); print }' | while read -r dir; do
           [ -d "$dir" ] || continue
           branch=$(git -C "$dir" branch --show-current); [ -n "$branch" ] || branch="detached"
           ahead=$(git -C "$dir" rev-list --count main..HEAD 2>/dev/null || echo 0)

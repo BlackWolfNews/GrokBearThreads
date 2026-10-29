@@ -30,13 +30,35 @@ MAIN="$(git -C "$ROOT" worktree list --porcelain | awk '
   /^branch refs\/heads\/main$/ { print path; exit }
 ')"
 
+# Brings the main checkout's install in `$1` up to its package-lock.json
+# when git has moved the lock on since (npm writes node_modules/
+# .package-lock.json on every install). Nothing else ever does: on 29 Oct
+# every thread was linking to a runner/node_modules a day behind its lock,
+# without @sentry/node. An install in place, not `npm ci`, as other
+# threads' worktrees link to it and ci empties the folder first; a lock
+# folder keeps two setups from installing at once.
+refresh_main() {
+  local there="$1" lock="$MAIN/.git/threadbear-npm.lock" tries=0
+  [ "$there/package-lock.json" -nt "$there/node_modules/.package-lock.json" ] || return 0
+  until mkdir "$lock" 2>/dev/null; do
+    tries=$((tries + 1))
+    [ "$tries" -lt 300 ] || { echo "$there: waited 5 minutes for another setup's npm install" >&2; return 1; }
+    sleep 1
+  done
+  if [ "$there/package-lock.json" -nt "$there/node_modules/.package-lock.json" ]; then
+    echo "${there#"$MAIN"/}: the main checkout's node_modules is older than its lock; npm install there"
+    (cd "$there" && "$NPM" install --no-audit --no-fund --loglevel=error) || { rmdir "$lock"; return 1; }
+  fi
+  rmdir "$lock"
+}
+
 for dir in . runner app/Tools/mock-runner; do
   here="$ROOT/$dir"
   there="${MAIN:+$MAIN/$dir}"
   if [ -e "$here/node_modules" ] || [ -L "$here/node_modules" ]; then
     echo "$dir: node_modules is already there"
   elif [ -n "$there" ] && [ "$MAIN" != "$ROOT" ] && [ -d "$there/node_modules" ] \
-    && cmp -s "$here/package-lock.json" "$there/package-lock.json"; then
+    && cmp -s "$here/package-lock.json" "$there/package-lock.json" && refresh_main "$there"; then
     ln -s "$there/node_modules" "$here/node_modules"
     echo "$dir: node_modules linked to $there/node_modules"
   else
