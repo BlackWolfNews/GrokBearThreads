@@ -257,6 +257,12 @@ the runner and the Claude Code and Codex tools. A grey dot means something
 is in progress and will sort itself out, and a coloured dot means it needs
 you. Right-click it for a quick Restart to Update.
 
+Threadbear also watches itself. When the runner logs an error that looks
+like a bug rather than a network blip, the librarian starts a thread in
+your Threadbear folder to find the cause and fix it, at most three a day.
+The Librarian view lists each one under what it did, and pausing the
+librarian pauses this too.
+
 ## Privacy
 
 Your threads are mirrored to a Convex deployment in your own Convex account,

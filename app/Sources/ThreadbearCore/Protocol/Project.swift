@@ -197,6 +197,8 @@ public enum LibrarianReason: String, Sendable, Hashable, Decodable {
     case moved
     case catchUp = "catch-up"
     case asked
+    /// The error watch opened the thread for an error in Threadbear.
+    case error
 
     public init(from decoder: Decoder) throws {
         let raw = try decoder.singleValueContainer().decode(String.self)
@@ -243,6 +245,8 @@ public struct LibrarianJob: Sendable, Hashable, Decodable {
 public struct LibrarianEntry: Sendable, Hashable, Decodable, Identifiable {
     public enum Outcome: String, Sendable, Hashable, Decodable {
         case joined, created, updated, left, nothing, skipped, failed
+        /// The error watch opened a thread for an error.
+        case opened
         /// From a newer runner.
         case other
 
