@@ -377,7 +377,9 @@ final class AppModel {
 
     // MARK: Derived
 
-    var sections: ThreadSections { ThreadSections.build(threads.values, now: now) }
+    var sections: ThreadSections { ThreadSections.build(threads.values, now: now, wakes: wakes) }
+    /// The schedule due to message each thread soonest, for the Waiting section.
+    var wakes: [String: Schedule] { ThreadSections.wakes(schedules) }
     var snoozed: [ThreadSummary] { ThreadSections.snoozed(threads.values, now: now) }
     var archived: [ThreadSummary] { ThreadSections.archived(threads.values, matching: archiveQuery) }
     var archivedCount: Int { threads.values.reduce(0) { $0 + ($1.isArchived ? 1 : 0) } }

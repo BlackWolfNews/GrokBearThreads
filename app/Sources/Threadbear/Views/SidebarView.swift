@@ -76,9 +76,12 @@ private struct InboxList: View {
                 if app.threadsLoaded {
                     ForEach(InboxSection.allCases, id: \.self) { section in
                         ThreadSection(section: section, threads: sections[section], select: select)
-                    }
-                    if sections.all.isEmpty {
-                        InboxZero()
+                        // Under the empty Inbox heading. Threads waiting on
+                        // a schedule don't stop it: there's still nothing
+                        // for Mike to do.
+                        if section == .inbox && sections.inbox.isEmpty && sections.running.isEmpty {
+                            InboxZero()
+                        }
                     }
                 }
             }
@@ -220,6 +223,7 @@ extension InboxSection {
         switch self {
         case .inbox: return "tray"
         case .running: return "bolt"
+        case .waiting: return "clock"
         }
     }
 }
@@ -521,6 +525,13 @@ struct ThreadRowView: View {
                 if let wakeText {
                     Text(wakeText).font(.system(size: TypeScale.sidebarMeta)).foregroundStyle(SidebarMetrics.faint)
                 }
+            } else if section == .waiting, let wake = app.wakes[thread.id], let next = wake.nextRunAt {
+                // When its schedule messages it next, where the time would be.
+                Text(RelativeTime.until(next, now: app.now))
+                    .font(.system(size: TypeScale.sidebarMeta))
+                    .monospacedDigit()
+                    .foregroundStyle(SidebarMetrics.faint)
+                    .tip("Scheduled: \(wake.whenText)")
             } else {
                 time.foregroundStyle(SidebarMetrics.faint)
             }

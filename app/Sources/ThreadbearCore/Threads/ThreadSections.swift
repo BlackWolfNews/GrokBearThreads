@@ -1,43 +1,54 @@
 import Foundation
 
 /// The inbox's sections, top to bottom. Inbox comes first because it's
-/// what Mike acts on; Running sits at the bottom, since there's nothing to
-/// do with those threads until they finish (Mike asked 27 Oct).
+/// what Mike acts on; Running sits below it, since there's nothing to do
+/// with those threads until they finish (Mike asked 27 Oct). Waiting is
+/// last: threads that have booked themselves a message for later and have
+/// nothing for him until then (Mike asked 29 Oct). Not to be confused with
+/// a thread whose status is `.waiting`, which is waiting on him.
 public enum InboxSection: String, Sendable, CaseIterable {
-    case inbox, running
+    case inbox, running, waiting
 
     public var title: String {
         switch self {
         case .inbox: return "Inbox"
         case .running: return "Running"
+        case .waiting: return "Waiting"
         }
     }
 }
 
-/// The sidebar's two sections.
+/// The sidebar's sections.
 public struct ThreadSections: Sendable, Equatable {
     public var inbox: [ThreadSummary] = []
     public var running: [ThreadSummary] = []
+    public var waiting: [ThreadSummary] = []
 
-    public init(inbox: [ThreadSummary] = [], running: [ThreadSummary] = []) {
+    public init(inbox: [ThreadSummary] = [], running: [ThreadSummary] = [], waiting: [ThreadSummary] = []) {
         self.inbox = inbox
         self.running = running
+        self.waiting = waiting
     }
 
     /// Running: a turn is underway, or background sub-agents or jobs are
     /// still going (an unread reply waits there with its dot until they're
-    /// done: the thread isn't finished yet). Inbox: everything else, what
-    /// most needs Mike first (see `urgency`), newest first within that. A
-    /// question or approval goes in the inbox even with background work
-    /// going, since the thread is stuck until he answers. Snoozed and
-    /// archived threads are left out. Running is newest activity first.
-    public static func build(_ threads: some Sequence<ThreadSummary>, now: Date) -> ThreadSections {
+    /// done: the thread isn't finished yet). Waiting: idle with a schedule
+    /// due to message it (`wakes`), and nothing for Mike: no question, no
+    /// unread reply that didn't say "nothing", no open asks. Soonest wake
+    /// first. Inbox: everything else, what most needs Mike first (see
+    /// `urgency`), newest first within that. A question or approval goes in
+    /// the inbox even with background work going, since the thread is stuck
+    /// until he answers. Snoozed and archived threads are left out. Running
+    /// is newest activity first.
+    public static func build(_ threads: some Sequence<ThreadSummary>, now: Date, wakes: [String: Schedule] = [:]) -> ThreadSections {
         var sections = ThreadSections()
         for thread in threads where !thread.isArchived && !thread.isSnoozed(at: now) {
             if thread.hasPendingReviews || thread.status == .waiting || (thread.needsYou && !thread.isWorkingInBackground) {
                 sections.inbox.append(thread)
             } else if thread.status == .running || thread.status == .starting || thread.isWorkingInBackground {
                 sections.running.append(thread)
+            } else if thread.status == .idle, thread.needs != "you", thread.waitingForRoom == nil, wakes[thread.id] != nil {
+                sections.waiting.append(thread)
             } else {
                 sections.inbox.append(thread)
             }
@@ -50,7 +61,24 @@ public struct ThreadSections: Sendable, Equatable {
             return a != b ? a < b : newestFirst($0, $1)
         }
         sections.running.sort(by: newestFirst)
+        sections.waiting.sort {
+            let (a, b) = (wakes[$0.id]?.nextRunAt ?? .distantFuture, wakes[$1.id]?.nextRunAt ?? .distantFuture)
+            return a != b ? a < b : newestFirst($0, $1)
+        }
         return sections
+    }
+
+    /// For each thread a schedule will message by itself, the one due
+    /// soonest. Paused and finished ones don't count, nor ones that start
+    /// a new thread.
+    public static func wakes(_ schedules: some Sequence<Schedule>) -> [String: Schedule] {
+        var soonest: [String: Schedule] = [:]
+        for schedule in schedules where schedule.isActive {
+            guard let threadId = schedule.threadId, let next = schedule.nextRunAt else { continue }
+            if let current = soonest[threadId]?.nextRunAt, current <= next { continue }
+            soonest[threadId] = schedule
+        }
+        return soonest
     }
 
     /// How much an inbox thread wants Mike, lowest first. 0: stuck on his
@@ -67,12 +95,13 @@ public struct ThreadSections: Sendable, Equatable {
     /// The inbox threads waiting on Mike or not read yet (the Dock badge).
     public var needsYou: [ThreadSummary] { inbox.filter { $0.hasPendingReviews || $0.status == .waiting || $0.needsYou } }
 
-    public var all: [ThreadSummary] { inbox + running }
+    public var all: [ThreadSummary] { inbox + running + waiting }
 
     public subscript(section: InboxSection) -> [ThreadSummary] {
         switch section {
         case .inbox: return inbox
         case .running: return running
+        case .waiting: return waiting
         }
     }
 

@@ -167,6 +167,53 @@ final class ThreadSectionsTests: XCTestCase {
         XCTAssertEqual(ThreadSections.snoozed(threads, now: now).map(\.id), ["snoozed"])
     }
 
+    /// A thread that has booked itself a message for later, and has nothing
+    /// for Mike, waits in its own section at the bottom, soonest first,
+    /// rather than sitting in the inbox (Mike asked 29 Oct). Anything it
+    /// still wants from him keeps it in the inbox.
+    func testBookedThreadsWait() {
+        let now = Date(timeIntervalSince1970: 1_000_000)
+        var said = thread("said-done-unread", needsYou: false, minutesAgo: 1)
+        said.needs = "nothing"
+        var asked = thread("asked-read", minutesAgo: 2)
+        asked.needs = "you"
+        let threads = [
+            thread("read", minutesAgo: 5),
+            said,
+            asked,
+            thread("unread", needsYou: true, minutesAgo: 3),
+            thread("question", status: .waiting, needsYou: true, minutesAgo: 4),
+            thread("failed", status: .error, minutesAgo: 6),
+            thread("running", status: .running, minutesAgo: 7),
+            thread("no-wake", minutesAgo: 8),
+            thread("woken", minutesAgo: 9),
+        ]
+        let schedules = [
+            Schedule(id: "1", title: "a", threadId: "read", nextRunAt: now.addingTimeInterval(600)),
+            Schedule(id: "2", title: "b", threadId: "said-done-unread", nextRunAt: now.addingTimeInterval(120)),
+            // A later one for the same thread: the soonest counts.
+            Schedule(id: "3", title: "c", cron: "0 9 * * *", threadId: "said-done-unread", nextRunAt: now.addingTimeInterval(9000)),
+            Schedule(id: "4", title: "d", threadId: "asked-read", nextRunAt: now.addingTimeInterval(60)),
+            Schedule(id: "5", title: "e", threadId: "unread", nextRunAt: now.addingTimeInterval(60)),
+            Schedule(id: "6", title: "f", threadId: "question", nextRunAt: now.addingTimeInterval(60)),
+            Schedule(id: "7", title: "g", threadId: "failed", nextRunAt: now.addingTimeInterval(60)),
+            Schedule(id: "8", title: "h", threadId: "running", nextRunAt: now.addingTimeInterval(60)),
+            Schedule(id: "9", title: "i", threadId: "no-wake", paused: true, nextRunAt: now.addingTimeInterval(60)),
+            Schedule(id: "10", title: "j", threadId: "woken", nextRunAt: now.addingTimeInterval(60), finishedAt: now),
+            // Starts new threads: nobody waits on it.
+            Schedule(id: "11", title: "k", nextRunAt: now.addingTimeInterval(30)),
+        ]
+        let wakes = ThreadSections.wakes(schedules)
+        XCTAssertEqual(wakes["said-done-unread"]?.id, "2")
+        XCTAssertNil(wakes["no-wake"])
+        XCTAssertNil(wakes["woken"])
+        let sections = ThreadSections.build(threads, now: now, wakes: wakes)
+        XCTAssertEqual(sections.waiting.map(\.id), ["said-done-unread", "read"])
+        XCTAssertEqual(Set(sections.inbox.map(\.id)), ["asked-read", "unread", "question", "failed", "no-wake", "woken"])
+        XCTAssertEqual(sections.running.map(\.id), ["running"])
+        XCTAssertEqual(InboxSection.allCases.map(\.title), ["Inbox", "Running", "Waiting"])
+    }
+
     func testPreviewTextDropsMarkdown() {
         XCTAssertEqual(PreviewText.plain("## 0.4 - **Uploads resume** after the app quits"), "0.4 - Uploads resume after the app quits")
         XCTAssertEqual(PreviewText.plain("Done. The tabs now read **General**, `Accounts` and [Usage](https://x.y)."), "Done. The tabs now read General, Accounts and Usage.")

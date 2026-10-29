@@ -74,9 +74,13 @@ turn, so edit the message that started it instead.
 
 ## What the list tells you
 
-The threads view has two sections. Running holds threads whose agent is
-working now. Inbox holds everything else, with the threads that need you at
-the top.
+The threads view has three sections. Inbox holds the threads for you, with
+the ones that need you at the top. Running holds threads whose agent is
+working now. Waiting holds threads that have booked a message to themselves
+for later (an agent saying "I'll check again in 20 minutes") and have nothing
+for you until then: each says when it wakes, soonest first. When the time
+comes it runs again, and lands in the inbox when it's done. A thread that
+asks you something keeps its place in the inbox, wake-up or not.
 
 At the right of each row:
 

@@ -694,7 +694,7 @@ enum Automation {
             // The inbox's rows by section, as the sidebar lists them.
             let sections = app.sections
             let object: [String: Any] = [
-                "needsYou": sections.needsYou.map(\.id), "running": sections.running.map(\.id),
+                "needsYou": sections.needsYou.map(\.id), "running": sections.running.map(\.id), "waiting": sections.waiting.map(\.id),
                 "inbox": sections.inbox.map(\.id), "snoozed": app.snoozed.count, "archived": app.archivedCount,
                 "hover": app.hoverOverride ?? "",
             ]
