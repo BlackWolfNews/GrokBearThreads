@@ -387,6 +387,9 @@ const FOLDER_CACHE_MS = 10_000;
 // read again by itself, while it's in the inbox: comments Mike leaves in
 // Tandem turn into a "Your turn" chip within this long.
 const LIVE_POLL_MS = 20_000;
+// How long a live state command's output serves every thread in the same
+// folder (runLiveCommand): well inside one poll, so each poll runs it again.
+const LIVE_SHARE_MS = 10_000;
 // How often the account list is read again, so a new login is noticed
 // (and its models asked for) without a client asking.
 const ACCOUNT_RESCAN_MS = 10_000;
@@ -431,6 +434,7 @@ export class Runner {
   private folderCache: FolderCache;
   private sharedPatchSets = new Map<string, { at: number; set: Promise<PatchSet> }>();
   private patchReads = new Set<Promise<void>>();
+  private liveRuns = new Map<string, { doneAt?: number; out: Promise<CommandOutcome> }>();
   private threads = new Map<string, ThreadState>();
   private listeners = new Set<(n: Notification) => void>();
   private dirty = new Set<string>();
@@ -3921,7 +3925,7 @@ export class Runner {
     let set: PatchSet;
     try {
       base = await this.loadSharedPatchSet(cwd, this.projects?.foldersFor(rec) ?? [], this.projects?.allFolders() ?? []);
-      set = await applyLive(base, { cwd, threadId: rec.id, run: (command, dir) => this.runPatchCommand(rec.id, command, dir) });
+      set = await applyLive(base, { cwd, threadId: rec.id, run: (command, dir) => this.runLiveCommand(rec.id, command, dir) });
     } catch (e) {
       this.log.warn('could not read the folder for patches', { threadId: rec.id, cwd, error: String(e) });
       base = entry.base;
@@ -3974,6 +3978,31 @@ export class Runner {
   private forgetFolders(): void {
     this.folderCache.clear();
     this.sharedPatchSets.clear();
+    // A turn may have changed what they read (comments resolved, a handback).
+    this.liveRuns.clear();
+  }
+
+  // A live state command (when, badge), shared by every thread that runs
+  // the same one in the same folder: Tandem's patch runs tandem status and
+  // tandem comments for each thread in a video folder every LIVE_POLL_MS.
+  // On a loaded Mac each took longer than that, so they piled up, nine at a
+  // time, and every spawn blocked the event loop for a second or so. Now
+  // one run serves them all for LIVE_SHARE_MS, and a poll that comes round
+  // while it's still going joins it. Live state is about the folder (what
+  // a tool says about the files there), not about one thread.
+  private runLiveCommand(threadId: string, command: string, cwd: string): Promise<CommandOutcome> {
+    const key = `${cwd}\u0000${command}`;
+    const hit = this.liveRuns.get(key);
+    if (hit && (hit.doneAt === undefined || this.clock.now() - hit.doneAt < LIVE_SHARE_MS)) return hit.out;
+    const entry: { doneAt?: number; out: Promise<CommandOutcome> } = { out: this.runPatchCommand(threadId, command, cwd) };
+    this.liveRuns.set(key, entry);
+    void entry.out.then(
+      () => (entry.doneAt = this.clock.now()),
+      () => {
+        if (this.liveRuns.get(key) === entry) this.liveRuns.delete(key);
+      },
+    );
+    return entry.out;
   }
 
   // A command a patch's function runs (list panels, live state): in its

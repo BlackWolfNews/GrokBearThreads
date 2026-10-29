@@ -1369,6 +1369,34 @@ test('a patch file written later is noticed within the TTL and said in the trans
   assert.equal(h.runner.get(thread.id).actions, undefined);
 });
 
+test('live state: threads in the same folder share one run of a command, and a slow one is joined, not started again', async () => {
+  const root = tmpDir();
+  const project = path.join(root, 'app');
+  fs.mkdirSync(path.join(project, '.threadbear/patches'), { recursive: true });
+  fs.writeFileSync(path.join(project, 'count'), '2');
+  // Each run adds a line to runs, so the test can count them.
+  fs.writeFileSync(path.join(project, '.threadbear/patches/review.ts'), `
+    const count = async ({ sh }) => Number((await sh("echo run >> runs; cat count")).trim());
+    export default { actions: [{ title: "Your turn", prompt: "Do my comments.", badge: count }] };`);
+  const h = makeHarness(undefined, {}, { panelsRoot: root, actionShell: ['/bin/sh', '-c'], actionTimeoutMs: 5000 });
+  const a = create(h, { cwd: project }).thread;
+  const b = create(h, { cwd: project }).thread;
+  const settle = async () => {
+    for (let i = 0; i < 50; i++) {
+      await new Promise((r) => setTimeout(r, 10));
+      await tick();
+    }
+    await h.runner.patchesIdle();
+  };
+  await settle();
+  const runs = () => fs.readFileSync(path.join(project, 'runs'), 'utf8').trim().split('\n').length;
+  assert.deepEqual([a, b].map((t) => h.runner.get(t.id).actions?.[0].badge), [2, 2]);
+  assert.equal(runs(), 1, 'one run for both threads');
+  h.clock.advance(21_000);
+  await settle();
+  assert.equal(runs(), 2, 'the next poll runs it again, once');
+});
+
 test('live state: a when chip comes and goes by itself on the poll, with its badge', async () => {
   const root = tmpDir();
   const project = path.join(root, 'app');

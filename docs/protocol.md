@@ -1416,7 +1416,10 @@ numeric string or a list, whose length counts), sent as the item's
 `badge` when it's 1 or more and drawn on the chip or rail button. The
 runner calls them each time it reads the patches, after every turn, and
 every 20 seconds for an inbox thread that has any. Commands that two of
-them run in the same folder run once per read. One that throws or takes
+them run in the same folder run once per read, and the output is shared
+with every other thread that runs the same command in the same folder
+for 10 seconds (a run still going is joined, not started again), so live
+state should be about the folder, not the thread. One that throws or takes
 over 10 seconds hides its item (a `when`) or gives no badge, and its
 patch's `liveError` says why. A panel can also have `summary`, which
 returns a line or a list of lines (at most four, 120 characters each),
