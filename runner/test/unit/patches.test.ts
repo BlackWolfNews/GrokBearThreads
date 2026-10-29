@@ -31,6 +31,14 @@ test('a folder with convex/ gets the dashboard panel for its deployment', () => 
   });
 });
 
+test('the Convex panel names the project convex dev noted after the deployment', () => {
+  const home = tmpDir();
+  const dir = project(home, 'dev/walkies', { convex: null, 'package.json': '{}', '.env.local': '# Deployment used by `npx convex dev`\nCONVEX_DEPLOYMENT=dev:happy-otter-123 # team: mike, project: walkies\nCONVEX_URL=https://happy-otter-123.convex.cloud\n' });
+  assert.deepEqual(projectPanels(dir, home)[0].convex, {
+    deployment: 'happy-otter-123', deploymentUrl: 'https://happy-otter-123.convex.cloud', team: 'mike', project: 'walkies',
+  });
+});
+
 test('the Convex panel offers the embedded dashboard only for a cloud deployment with its URL', () => {
   const home = tmpDir();
   const vite = project(home, 'dev/vite', { convex: null, 'package.json': '{}', '.env.local': 'CONVEX_DEPLOYMENT=dev:calm-cat-1\nVITE_CONVEX_URL=https://calm-cat-1.eu-west-1.convex.cloud\nCONVEX_SITE_URL=https://calm-cat-1.convex.site\n' });

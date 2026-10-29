@@ -265,6 +265,8 @@ type Panel = {
   convex?: {            // the built-in Convex panel for a cloud deployment:
     deployment: string  // its name, "happy-otter-123"
     deploymentUrl: string // "https://happy-otter-123.convex.cloud"
+    team?: string       // "mike" and "walkies": what `convex dev` notes
+    project?: string    // after CONVEX_DEPLOYMENT in .env.local, if it did
   }                     // a client that knows it shows Convex's embedded
                         // dashboard with panels.convexKey (see "The Convex
                         // panel"); one that doesn't shows `url`
@@ -1429,7 +1431,8 @@ in browser opens the selected deployment's full dashboard.
 
 The Mac panel's deployment menu lists the configured deployment plus
 Development and Production from `panels.convexDeployments`, showing both
-the label and deployment name. It remembers the choice on this Mac by
+the label and deployment name, after the Convex project's name when the
+panel has one. It remembers the choice on this Mac by
 the configured deployment, so threads in the same project share it.
 Switching changes only the panel; `.env.local` and the runner's mirror
 settings stay as they are. Older runners without the listing method

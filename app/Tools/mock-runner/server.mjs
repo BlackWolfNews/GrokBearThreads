@@ -644,7 +644,7 @@ async function dispatch(client, method, p) {
       const deployment = 'happy-otter-123';
       t.summary.panels = [{ id: 'convex.dashboard', title: 'Convex', kind: 'url', patch: 'convex',
         url: `https://dashboard.convex.dev/d/${deployment}`,
-        convex: { deployment, deploymentUrl: `https://${deployment}.convex.cloud` } }];
+        convex: { deployment, deploymentUrl: `https://${deployment}.convex.cloud`, team: 'mike', project: 'walkies' } }];
       t.convexKeyRequests ??= [];
       broadcastSummary(t.summary.id);
       return { keyRequests: t.convexKeyRequests };

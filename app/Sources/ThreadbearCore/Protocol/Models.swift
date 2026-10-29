@@ -444,10 +444,15 @@ public struct Panel: Sendable, Hashable, Codable, Identifiable {
 public struct ConvexDeployment: Sendable, Hashable, Codable {
     public var deployment: String
     public var deploymentUrl: String
+    /// The Convex team and project, when `convex dev` noted them in .env.local.
+    public var team: String?
+    public var project: String?
 
-    public init(deployment: String, deploymentUrl: String) {
+    public init(deployment: String, deploymentUrl: String, team: String? = nil, project: String? = nil) {
         self.deployment = deployment
         self.deploymentUrl = deploymentUrl
+        self.team = team
+        self.project = project
     }
 }
 

@@ -412,6 +412,13 @@ private struct ConvexPanel: View {
         VStack(spacing: 0) {
             VStack(alignment: .leading, spacing: zoomed(6)) {
                 HStack(spacing: zoomed(8)) {
+                    // A deployment's name doesn't say whose it is.
+                    if let project = convex.project {
+                        Text(project)
+                            .font(.system(size: TypeScale.label, weight: .semibold))
+                            .lineLimit(1)
+                            .tip(convex.team.map { "Convex project \(project), team \($0)" } ?? "Convex project \(project)")
+                    }
                     Menu {
                         ForEach(choices, id: \.deployment) { choice in
                             Button {

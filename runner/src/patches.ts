@@ -540,8 +540,27 @@ function convexPanel(dir: string): Panel {
   const panel: Panel = { id: 'convex.dashboard', title: 'Convex', kind: 'url', url, icon: 'cylinder.split.1x2', patch: 'convex' };
   if (note) panel.note = note;
   const embed = convexEmbed(deployment, readEnvWhere(dir, (name) => /(^|_)CONVEX_URL$/.test(name)));
-  if (embed) panel.convex = embed;
+  if (embed) panel.convex = { ...embed, ...convexProjectOf(dir) };
   return panel;
+}
+
+// The team and project `convex dev` notes after CONVEX_DEPLOYMENT
+// ("dev:happy-otter-123 # team: mike, project: walkies"), so the panel can
+// say which project a deployment belongs to: its name alone doesn't.
+export function convexProjectOf(dir: string): { team?: string; project?: string } {
+  for (const file of ['.env.local', '.env']) {
+    let text: string;
+    try {
+      text = fs.readFileSync(path.join(dir, file), 'utf8');
+    } catch {
+      continue;
+    }
+    const line = text.split(/\r?\n/).find((l) => /^\s*(?:export\s+)?CONVEX_DEPLOYMENT\s*=/.test(l));
+    if (!line) continue;
+    const m = /#\s*team:\s*([\w-]+)\s*,\s*project:\s*([\w-]+)/.exec(line);
+    return m ? { team: m[1], project: m[2] } : {};
+  }
+  return {};
 }
 
 // What the Mac app needs to show Convex's embedded dashboard, which takes a

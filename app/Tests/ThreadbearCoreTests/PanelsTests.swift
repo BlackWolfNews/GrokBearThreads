@@ -30,12 +30,15 @@ final class PanelsTests: XCTestCase {
         let json = """
         {"id":"th1","panels":[
           {"id":"convex.dashboard","title":"Convex","kind":"url","url":"https://dashboard.convex.dev/d/quick-fox-77","patch":"convex","convex":{"deployment":"quick-fox-77","deploymentUrl":"https://quick-fox-77.convex.cloud"}},
+          {"id":"named:convex.dashboard","title":"Convex","kind":"url","url":"https://dashboard.convex.dev/d/quick-fox-77","patch":"convex","convex":{"deployment":"quick-fox-77","deploymentUrl":"https://quick-fox-77.convex.cloud","team":"mike","project":"walkies"}},
           {"id":"web:convex.dashboard","title":"Convex","kind":"url","url":"https://dashboard.convex.dev/d/x","patch":"convex","convex":{"deployment":7}}
         ]}
         """
         let thread = try JSONDecoder().decode(ThreadSummary.self, from: Data(json.utf8))
         XCTAssertEqual(thread.panels[0].convex, ConvexDeployment(deployment: "quick-fox-77", deploymentUrl: "https://quick-fox-77.convex.cloud"))
-        XCTAssertNil(thread.panels[1].convex, "shown as the plain dashboard page instead")
+        XCTAssertEqual(thread.panels[1].convex?.project, "walkies")
+        XCTAssertEqual(thread.panels[1].convex?.team, "mike")
+        XCTAssertNil(thread.panels[2].convex, "shown as the plain dashboard page instead")
         XCTAssertEqual(try JSONDecoder().decode(ThreadSummary.self, from: JSONEncoder().encode(thread)).panels, thread.panels)
     }
 
