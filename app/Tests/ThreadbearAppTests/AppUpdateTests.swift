@@ -152,4 +152,19 @@ final class AppUpdateTests: XCTestCase {
         XCTAssertEqual(BuildInfo.read(bundle: url)?.short, "abc1234")
         XCTAssertNil(BuildInfo.read(bundle: root.appendingPathComponent("missing.app")))
     }
+
+    // Only a build of Mike's own repo reports to his Sentry (CrashReporting).
+    func testOnlyMikesRepoCountsAsMikes() {
+        func info(_ origin: String?) -> BuildInfo {
+            var b = BuildInfo(commit: "abc", short: "abc", appTree: "t", builtAt: "2026-10-30T00:00:00Z", checkout: "/tmp/x", configuration: "release")
+            b.origin = origin
+            return b
+        }
+        for url in ["https://github.com/mikecann/threadbear.git", "https://github.com/MikeCann/threadbear", "git@github.com:mikecann/threadbear.git", "ssh://git@github.com/mikecann/threadbear", "https://x-access-token@github.com/mikecann/threadbear/"] {
+            XCTAssertTrue(info(url).isMikesRepo, url)
+        }
+        XCTAssertFalse(info("https://github.com/someone/threadbear.git").isMikesRepo)
+        XCTAssertFalse(info("").isMikesRepo)
+        XCTAssertFalse(info(nil).isMikesRepo, "built before origin was recorded, or no origin")
+    }
 }

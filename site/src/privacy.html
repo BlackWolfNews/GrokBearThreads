@@ -18,8 +18,8 @@
       <p>threadbear.mikecann.app doesn't use cookies, analytics or ads. It's hosted on Cloudflare, which sees your internet address like any web host does and keeps its request logs for a few days so I can spot problems.</p>
 
       <h2>The Mac app</h2>
-      <p>Threadbear runs on your Mac. It starts the official Claude Code and Codex command line tools, logged in as you, so what you send an agent goes to Anthropic or OpenAI under your own account and their own privacy policies. Threadbear never reads or copies your login.</p>
-      <p>Full transcripts, tool output and images stay on your Mac. Each thread's title and status, its newest messages, and anything waiting on you go up to your own Convex deployment, so your phone and browser can show them. None of it comes to me.</p>
+      <p>Threadbear runs on your Mac. It starts the official Claude Code and Codex command line tools, logged in as you, so what you send an agent goes to Anthropic or OpenAI under your own account and their own privacy policies. Threadbear never reads or copies your login tokens. It does read which account each login is and the token counts in your transcripts, to show how much room each has left.</p>
+      <p>Full transcripts, tool output and images stay on your Mac. Each thread's title and status, the text of its messages, a line for each tool it used, and anything waiting on you go up to your own Convex deployment, so your phone and browser can show them. None of it comes to me. The full list of what Threadbear installs and talks to is in <a href="https://github.com/mikecann/threadbear/blob/main/docs/on-your-mac.md">on-your-mac.md</a>.</p>
 
       <h2>The iPhone app and thread links</h2>
       <p>The iPhone app and the browser links read the same Convex deployment, using a sign in code that only you can make from your Mac. You can cancel one at any time and that phone or browser stops working straight away.</p>
@@ -30,7 +30,7 @@
       <p>The sample threads you can look around in before pairing are made up, and they stay on the phone.</p>
 
       <h2>Crash reports</h2>
-      <p>When the Mac app or the iPhone app crashes or hits an error, it sends an anonymous report to <a href="https://sentry.io/privacy/">Sentry</a>, which I use to find and fix bugs. A report says where in Threadbear's own code it went wrong, the app's version, and the kind of device and system it ran on. It doesn't include your threads, messages, files, logins or anything that says who you are, and it isn't used for tracking or ads.</p>
+      <p>Your copy of Threadbear on your Mac never sends me crash reports; only my own copy does. When the iPhone app crashes or hits an error, it sends an anonymous report to <a href="https://sentry.io/privacy/">Sentry</a>, which I use to find and fix bugs. A report says where in Threadbear's own code it went wrong, the app's version, and the kind of device and system it ran on. It doesn't include your threads, messages, files, logins or anything that says who you are, and it isn't used for tracking or ads.</p>
 
       <h2>Questions</h2>
       <p>If something here doesn't make sense, or you think it's wrong, email me at <a href="mailto:threadbear@mikecann.app">threadbear@mikecann.app</a>.</p>

@@ -16,6 +16,21 @@ struct BuildInfo: Codable, Equatable {
     /// The checkout it was built from, whose main the updater follows.
     var checkout: String
     var configuration: String
+    /// The checkout's origin remote when it was built (builds before 30 Oct
+    /// 2026 have none). Only Mike's own repo reports to his Sentry.
+    var origin: String?
+
+    /// github.com/mikecann/threadbear, however the URL was written.
+    var isMikesRepo: Bool {
+        guard let origin else { return false }
+        var key = origin.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if key.hasPrefix("git@") { key = String(key.dropFirst(4)).replacingOccurrences(of: ":", with: "/") }
+        if let scheme = key.range(of: "://") { key = String(key[scheme.upperBound...]) }
+        if let at = key.firstIndex(of: "@"), !key[..<at].contains("/") { key = String(key[key.index(after: at)...]) }
+        if key.hasSuffix("/") { key.removeLast() }
+        if key.hasSuffix(".git") { key.removeLast(4) }
+        return key == "github.com/mikecann/threadbear"
+    }
 
     static func read(bundle: URL) -> BuildInfo? {
         guard let data = try? Data(contentsOf: bundle.appendingPathComponent("Contents/Resources/build.json")) else { return nil }

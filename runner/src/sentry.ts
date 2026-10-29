@@ -5,15 +5,22 @@
 // running on the real data dir reports. Anything run from a checkout
 // (scripts/dev-runner.sh, `npm start`, the tests) has no release.json, and
 // a sandbox install has another home. THREADBEAR_SENTRY=off turns it off.
+// And only Mike's own copies (origin is mikecann/threadbear): someone's
+// fork never reports to Mike's Sentry, nor opens threads in his watcher
+// (docs/on-your-mac.md).
 //
 // Errors only: no tracing, no breadcrumbs (CLI output and URLs can carry
 // a thread's text or a token), no PII or local variables. What it sends is the
 // runner's own uncaught exceptions and its ERROR and WARN log lines, by
 // message (WARN as Sentry warnings).
+import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { defaultHome } from './config.ts';
-import { RELEASE } from './release.ts';
+import { RELEASE, readRelease } from './release.ts';
+import { repoKey } from './upstream.ts';
+
+const MIKES_REPO = 'github.com/mikecann/threadbear';
 
 // A public client key (it ships in every Sentry client); fine to commit.
 const DSN = 'https://c69460318b1f938fd1703c6578a059f6@o4508736647266304.ingest.us.sentry.io/4512336956293120';
@@ -36,11 +43,20 @@ function realPath(p: string): string {
   }
 }
 
-// Whether this runner reports: a release, on the real data dir, not
-// switched off. Pure, for the tests.
-export function sentryWanted(home: string, env: NodeJS.ProcessEnv = process.env, release: string | undefined = RELEASE.release): boolean {
+// The origin remote of the checkout this release follows, if any.
+function releaseOrigin(): string | undefined {
+  const checkout = readRelease()?.checkout;
+  if (!checkout) return undefined;
+  const r = spawnSync('git', ['-C', checkout, 'remote', 'get-url', 'origin'], { encoding: 'utf8' });
+  return r.status === 0 ? r.stdout.trim() : undefined;
+}
+
+// Whether this runner reports: a release of Mike's own repo, on the real
+// data dir, not switched off. Pure but for the default origin, for the tests.
+export function sentryWanted(home: string, env: NodeJS.ProcessEnv = process.env, release: string | undefined = RELEASE.release, origin: string | undefined = release ? releaseOrigin() : undefined): boolean {
   if (!release) return false;
   if (env.THREADBEAR_SENTRY === 'off' || env.NODE_ENV === 'test') return false;
+  if (!origin || repoKey(origin) !== MIKES_REPO) return false;
   return realPath(home) === realPath(defaultHome());
 }
 

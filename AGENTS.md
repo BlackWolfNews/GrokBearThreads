@@ -32,6 +32,11 @@ static site with its own `package.json`; its comments say how to build it.
 - `docs/guide.md` is the user guide, and every thread's agent is pointed at
   it (`guideLine` in `runner/src/threadbear-mcp.ts`). Keep it true when a
   change alters what someone using the app sees or does.
+- `docs/on-your-mac.md` lists everything Threadbear installs, runs in the
+  background, reads and talks to. A stranger's agent checks the code
+  against it before installing (README's prompt), so anything missing
+  from it looks like something hidden. Keep it true when a change adds a
+  file outside the repo, a timer, something it reads, or a network call.
 - Every control gets a tooltip, with `.tip("…")` (SwiftUI) or `setTip` (AppKit).
   `.help` and `toolTip` never show in this app; TipsTests fails on them.
 - Transcript files and fixtures made from real sessions are private: keep them

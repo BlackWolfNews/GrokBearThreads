@@ -11,6 +11,8 @@ import Sentry
 /// launch reports (`AppUpdater.isInstalledApp`): never a Debug build
 /// (dev-app.sh, swift test), never a release one somewhere else
 /// (perf-run.sh) or a scripted one. THREADBEAR_SENTRY=off turns it off.
+/// And only a build of Mike's own repo (build.json's origin): someone's
+/// fork never reports to his Sentry (docs/on-your-mac.md).
 ///
 /// Crashes and errors only: no tracing, sessions, app-hang reports,
 /// breadcrumbs or PII.
@@ -20,9 +22,10 @@ enum CrashReporting {
 
     static func start() {
         #if !DEBUG
-        guard AppUpdater.isInstalledApp, ProcessInfo.processInfo.environment["THREADBEAR_SENTRY"] != "off" else { return }
+        let build = BuildInfo.read(bundle: Bundle.main.bundleURL)
+        guard AppUpdater.isInstalledApp, build?.isMikesRepo == true, ProcessInfo.processInfo.environment["THREADBEAR_SENTRY"] != "off" else { return }
         let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0"
-        let short = BuildInfo.read(bundle: Bundle.main.bundleURL)?.short ?? "unknown"
+        let short = build?.short ?? "unknown"
         SentrySDK.start { options in
             options.dsn = dsn
             options.environment = "production"

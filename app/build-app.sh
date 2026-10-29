@@ -60,12 +60,15 @@ SHORT="$(git -C "$SCRIPT_DIR" rev-parse --short HEAD 2>/dev/null || true)"
 # app/ and dock/ (BearDock, which the app builds in): a change to either
 # changes what runs. The updater reads main's the same way (AppUpdate.swift).
 APP_TREE="$(git -C "$SCRIPT_DIR" rev-parse HEAD:app HEAD:dock 2>/dev/null | paste -sd+ - || true)"
-python3 - "$STAGE_DIR/Contents/Resources/build.json" "$COMMIT" "$SHORT" "$APP_TREE" "$SOURCE_CHECKOUT" "$BUILD_CONFIGURATION" <<'PY'
+# The checkout's origin too: only a build of Mike's own repo reports to his
+# Sentry (CrashReporting.swift), never someone's fork.
+ORIGIN="$(git -C "$SOURCE_CHECKOUT" remote get-url origin 2>/dev/null || true)"
+python3 - "$STAGE_DIR/Contents/Resources/build.json" "$COMMIT" "$SHORT" "$APP_TREE" "$SOURCE_CHECKOUT" "$BUILD_CONFIGURATION" "$ORIGIN" <<'PY'
 import json, sys, datetime
-path, commit, short, tree, checkout, configuration = sys.argv[1:]
+path, commit, short, tree, checkout, configuration, origin = sys.argv[1:]
 json.dump({
     "commit": commit, "short": short, "appTree": tree, "checkout": checkout,
-    "configuration": configuration,
+    "configuration": configuration, "origin": origin,
     "builtAt": datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds"),
 }, open(path, "w"), indent=2)
 PY
