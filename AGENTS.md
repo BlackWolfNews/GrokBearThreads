@@ -101,6 +101,9 @@ if `tb` isn't found (an older runner, or outside a thread), use
   the live runner unless `THREADBEAR_HOME` is set in that same command).
   Its threads start in `<dev home>/work` on claude-3 and claude-haiku-5-5
   (its `runner.json` defaults), from `tb` or a debug app's composer alike.
+  Leave `--home` out, or keep it and any extra work folders under
+  `$TMPDIR`: Agent Archive skips transcripts from there, but not from
+  `/tmp`, so a try-out thread in `/tmp` ends up in Mike's archive.
   Stop it with the `kill <pid>` it prints, never
   `pkill`, and before you deploy or end your turn: the live runner's restart
   waits for it. Its temp data dir goes with it (`--keep` keeps it).

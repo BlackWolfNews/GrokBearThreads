@@ -15,7 +15,8 @@
 # It writes <home>/tb, a tb that always talks to this runner (an exported
 # THREADBEAR_HOME doesn't last past one command in an agent's shell), and
 # prints the app/Tools/dev-app.sh command for a debug app against it. On a
-# new data dir, threads default to the folder <home>/work, account claude-3
+# new data dir, threads default to the folder <home>/work (under $TMPDIR
+# when <home> isn't), account claude-3
 # and model claude-haiku-5-5, and Codex threads to gpt-6-luna at low effort
 # (runner.json's defaults; keepAccount keeps new threads on claude-3 rather
 # than the login with the most room), not your real folders or the
@@ -86,6 +87,14 @@ fi
 LOG="$DATA_HOME/runner.log"
 TB="$DATA_HOME/tb"
 WORK="$DATA_HOME/work"
+# Agent Archive skips transcripts from folders under $TMPDIR (Mike's
+# privacy rules since 29 Oct), so a try-out thread doesn't land in his
+# archive. A --home elsewhere, like /tmp, gets a work folder under $TMPDIR.
+TMP_REAL="$(real_dir "${TMPDIR:-/tmp}")"
+case "$(real_dir "$DATA_HOME")/" in
+  "$TMP_REAL"/*) ;;
+  *) [ -e "$DATA_HOME/runner.json" ] || WORK="$(mktemp -d "${TMP_REAL%/}/threadbear-dev-work.XXXXXX")" ;;
+esac
 # The runner's defaults are Mike's real folder, the last account used and
 # the account's own model (Fable with a 1M context on claude-3); a thread
 # made to try a change belongs in a scratch folder on the cheapest model,

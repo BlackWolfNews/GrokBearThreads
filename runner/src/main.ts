@@ -2,7 +2,9 @@
 // scripts/install-runner.sh); tests run it with THREADBEAR_HOME and
 // THREADBEAR_PORT pointing at temp places.
 import fs from 'node:fs';
-import { loadConfig, ensureHome, readToken, paths, recordListening, DEFAULT_CWD, RUNNER_VERSION } from './config.ts';
+import path from 'node:path';
+import { loadConfig, ensureHome, readToken, paths, recordListening, defaultHome, DEFAULT_CWD, RUNNER_VERSION } from './config.ts';
+import { startHousekeeping } from './housekeeping.ts';
 import { RELEASE, markGoodLater, onSupervisorGone, readRelease, requestHandover, supervised, takeRollbackNotice, tellLaunchListening } from './release.ts';
 import type { RunnerUpdates } from './runner.ts';
 import { Peers, PrimaryLink, ThreadRouter, drainChildrenName, peersElsewhere, primaryElsewhere, removeDrainInfo, scheduleRouter, writeDrainInfo, type Elsewhere } from './handover.ts';
@@ -361,6 +363,17 @@ async function main(): Promise<void> {
   tellLaunchListening();
   // Checks start a minute after this; installs never while a restart waits.
   updates.start();
+  // The runner's log is held open by launchd too, so it's emptied in place.
+  // The app's update log sits beside it, but only for the real data dir: a
+  // dev runner's log is in its temp home.
+  const stopHousekeeping = startHousekeeping({
+    home: cfg.home,
+    logs: [
+      { file: cfg.logFile, inPlace: true },
+      ...(cfg.home === defaultHome() ? [{ file: path.join(path.dirname(cfg.logFile), 'threadbear-update.log') }] : []),
+    ],
+    log,
+  });
   const cancelMarkGood = markGoodLater(cfg.home, RELEASE.release, log, process.env, () => {
     restarter.proven();
     updater.start();
@@ -375,6 +388,7 @@ async function main(): Promise<void> {
     stopping = true;
     cancelMarkGood();
     updater.stop();
+    stopHousekeeping();
     log.info('runner stopping', { signal });
     // Whatever stopped it, a pending restart has now happened. A draining
     // runner's restart was the handover, which the new runner has taken.
@@ -422,6 +436,7 @@ async function main(): Promise<void> {
     try {
       cancelMarkGood();
       updater.stop();
+      stopHousekeeping();
       scheduler.stop();
       librarian.stop();
       connectors.stop();
