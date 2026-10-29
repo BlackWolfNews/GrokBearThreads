@@ -407,8 +407,10 @@ struct ThreadRowView: View {
     private var isSelected: Bool { app.selection == thread.id && app.subagentSelection == nil && app.openProjectId == nil && !app.showsProjectsHome }
     /// The screenshot run shows one row as if the pointer were over it.
     private var pointerOver: Bool { hovering || app.hoverOverride == thread.id }
+    /// Archived from somewhere other than a swipe: slides off all the same.
+    private var slidingOff: Bool { app.slidingOff.contains(thread.id) }
     /// Not while it's being swiped: the buttons would ride along with it.
-    private var showsActions: Bool { pointerOver && !swipe.isSwiping }
+    private var showsActions: Bool { pointerOver && !swipe.isSwiping && !slidingOff }
 
     var body: some View {
         // The Projects view's rows say what they're doing too: it has no
@@ -530,7 +532,12 @@ struct ThreadRowView: View {
                     .padding(.trailing, SidebarMetrics.trailing - zoomed(5))
             }
         }
-        .rowSwipe(swipe)
+        .rowSwipe(swipe, leaving: slidingOff)
+        // Off as quickly as a swiped row goes, back (an archive that
+        // failed) with the spring a short swipe has.
+        .animation(slidingOff ? .easeIn(duration: Juice.reduceMotion ? 0.1 : 0.16)
+                   : Juice.reduceMotion ? .easeOut(duration: 0.15) : .spring(response: 0.3, dampingFraction: 0.75),
+                   value: slidingOff)
         .onHover { hovering = $0 }
         .onChange(of: pointerOver, initial: true) {
             swipe.action = RowSwipeAction.forRow(thread, mode: mode, app: app)

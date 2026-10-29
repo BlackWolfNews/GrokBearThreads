@@ -16,7 +16,7 @@ struct RowSwipeAction {
         if mode.rowActions.contains(.archive) {
             return RowSwipeAction(icon: "archivebox",
                                   confirm: { BusyConfirm.allowed(.archive, threadId: thread.id, app: app) },
-                                  run: { app.archive(thread.id) })
+                                  run: { app.archive(thread.id, slid: true) })
         }
         if mode.rowActions.contains(.unarchive) {
             return RowSwipeAction(icon: "arrow.uturn.backward", run: { app.unarchive(thread.id) })
@@ -44,7 +44,9 @@ final class RowSwipeController {
     /// the row's too, or the list would scroll once the fingers lift.
     @ObservationIgnored private var eatingMomentum = false
 
-    var offset: CGFloat { leaving ? -swipe.width - 40 : CGFloat(swipe.offset) }
+    var offset: CGFloat { leaving ? gone : CGFloat(swipe.offset) }
+    /// Off the row's left edge, and a little more for its shadow.
+    var gone: CGFloat { -swipe.width - 40 }
     var isSwiping: Bool { swipe.isSwiping || leaving }
 
     func setWidth(_ width: CGFloat) { swipe.width = Double(width) }
@@ -211,25 +213,29 @@ enum RowSwipeEvents {
 
 extension View {
     /// Slides the row with the fingers and shows what letting go will do
-    /// in the space it leaves on the right.
-    func rowSwipe(_ controller: RowSwipeController) -> some View {
-        modifier(RowSwipeModifier(controller: controller))
+    /// in the space it leaves on the right. `leaving` slides it all the way
+    /// off as a swipe would, for an archive from anywhere else.
+    func rowSwipe(_ controller: RowSwipeController, leaving: Bool = false) -> some View {
+        modifier(RowSwipeModifier(controller: controller, leaving: leaving))
     }
 }
 
 private struct RowSwipeModifier: ViewModifier {
     let controller: RowSwipeController
+    let leaving: Bool
+
+    private var offset: CGFloat { leaving ? controller.gone : controller.offset }
 
     func body(content: Content) -> some View {
         content
-            .offset(x: controller.offset)
+            .offset(x: offset)
             .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { controller.setWidth($0) }
             // Behind the row and only as wide as the gap it's left: the
             // rows have no fill of their own, so a full-width backing would
             // show through the text.
             .background(alignment: .trailing) {
-                if let action = controller.action, controller.offset < 0 {
-                    let armed = controller.swipe.armed || controller.leaving
+                if let action = controller.action, offset < 0 {
+                    let armed = controller.swipe.armed || controller.leaving || leaving
                     ZStack {
                         RoundedRectangle(cornerRadius: SidebarMetrics.corner)
                             .fill(armed ? Color.accentColor : Color.primary.opacity(0.07))
@@ -238,9 +244,9 @@ private struct RowSwipeModifier: ViewModifier {
                             .foregroundStyle(armed ? Color.white : Color.secondary)
                             .scaleEffect(armed && !Juice.reduceMotion ? 1.12 : 1)
                             // Hidden until there's room for it.
-                            .opacity(min(1, max(0, (-controller.offset - zoomed(16)) / zoomed(24))))
+                            .opacity(min(1, max(0, (-offset - zoomed(16)) / zoomed(24))))
                     }
-                    .frame(width: -controller.offset)
+                    .frame(width: -offset)
                     .animation(Juice.hover, value: armed)
                     .accessibilityHidden(true)
                 }

@@ -54,6 +54,14 @@ final class AppModel {
     /// The thread whose title is a field in the header just now (Rename,
     /// or a click on the title).
     var renamingThread: String?
+    /// Threads whose sidebar rows are sliding off on their way to the
+    /// archive, as a swiped row does (Mike asked 29 Oct): from the archive
+    /// button, ⌘E, the done card, or an agent or the phone archiving it.
+    /// `ThreadRowView` slides a row off while its thread is in here.
+    private(set) var slidingOff: Set<String> = []
+    /// What the runner said about a thread archived elsewhere, held back
+    /// while its row slides off, so the row's still there to slide.
+    @ObservationIgnored private var heldWhileSliding: [String: ThreadSummary] = [:]
     var threads: [String: ThreadSummary] = [:] {
         didSet {
             refreshDockBadge()
@@ -628,6 +636,7 @@ final class AppModel {
 
     /// Tests feed it what the runner would: a notice, a status, a drop.
     func noticeForTesting(level: String = "info", _ message: String) { notice(level: level, message) }
+    func receiveForTesting(_ thread: ThreadSummary) { receive(thread) }
     func restartStatusForTesting(_ pending: PendingRestart?) { updateRestart { $0.status(pending, now: Date()) } }
     func connectionLostForTesting() {
         connection = .lost
@@ -655,6 +664,26 @@ final class AppModel {
     }
 
     private func receive(_ thread: ThreadSummary) {
+        if heldWhileSliding[thread.id] != nil {
+            heldWhileSliding[thread.id] = thread
+            return
+        }
+        // Archived somewhere else: slide its row off first, then let it go.
+        // Not one archived here, which is already sliding (`archive`).
+        if thread.isArchived, threads[thread.id]?.isArchived == false, !slidingOff.contains(thread.id) {
+            heldWhileSliding[thread.id] = thread
+            slideOff(thread.id)
+            Task {
+                try? await Task.sleep(for: Self.slideTime)
+                if let held = heldWhileSliding.removeValue(forKey: thread.id) { apply(held) }
+                await endSlide(thread.id)
+            }
+            return
+        }
+        apply(thread)
+    }
+
+    private func apply(_ thread: ThreadSummary) {
         let previous = threads[thread.id]
         threads[thread.id] = thread
         // The open transcript's "3 sub-agents working in the background"
@@ -1046,11 +1075,43 @@ final class AppModel {
     }
 
     /// Archive (Mike calls it settling): leaves the inbox, stops its CLI.
-    func archive(_ threadId: String? = nil) {
+    /// Its row slides off with a whoosh first, as a swiped one does;
+    /// `slid` is a swipe that's already done that.
+    func archive(_ threadId: String? = nil, slid: Bool = false) {
         guard let threadId = threadId ?? selection else { return }
         let next = neighbour(of: threadId)
-        update(threadId, ThreadUpdate(archived: true))
         if selection == threadId { select(next) }
+        if slid { return update(threadId, ThreadUpdate(archived: true)) }
+        guard !slidingOff.contains(threadId) else { return }
+        Whoosh.play()
+        slideOff(threadId)
+        Task {
+            try? await Task.sleep(for: Self.slideTime)
+            do {
+                guard let client else { throw RPCError.disconnected(nil) }
+                threads[threadId] = try await client.updateThread(threadId, ThreadUpdate(archived: true))
+                await endSlide(threadId)
+            } catch {
+                // Still in the inbox: bring the row back.
+                slidingOff.remove(threadId)
+                show(error)
+            }
+        }
+    }
+
+    /// As long as a swiped row takes to leave (`RowSwipeController`).
+    static var slideTime: Duration { .milliseconds(Juice.reduceMotion ? 100 : 160) }
+
+    /// The row animates it (`ThreadRowView`).
+    private func slideOff(_ threadId: String) {
+        slidingOff.insert(threadId)
+    }
+
+    /// The row's normally gone by now. If it's still drawn (a list that
+    /// keeps archived threads), it springs back into place.
+    private func endSlide(_ threadId: String) async {
+        try? await Task.sleep(for: .milliseconds(600))
+        slidingOff.remove(threadId)
     }
 
     /// ⌘E: archives the open thread, or brings it back if it's archived.
