@@ -51,7 +51,9 @@ folder?" or "Explain what you can do for me here." When you're ready for it
 to make something, try "Make a file called hello.txt that says hi" and watch
 it appear in `~/Threadbear`.
 
-Return sends and Shift-Return adds a new line. You can paste or drop images
+Return sends and Shift-Return adds a new line. In a list, Shift-Return
+starts the next item ("2. " after "1. milk", "- " after "- milk"), and
+Shift-Return on an empty item ends the list. You can paste or drop images
 into the composer. Stop (⌘.) ends a turn that's running.
 
 ### Going back to an earlier message

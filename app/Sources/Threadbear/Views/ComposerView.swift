@@ -4,7 +4,7 @@ import ThreadbearCore
 import UniformTypeIdentifiers
 
 /// The message box: a rounded card the width of the transcript column.
-/// Return sends, Shift-Return adds a line, paste, drop or "+" adds images,
+/// Return sends, Shift-Return adds a line (carrying a markdown list on), paste, drop or "+" adds images,
 /// and the row under the text holds the account, model and permission
 /// chips (and the folder's, away from the default) and send (or Stop).
 struct ComposerView: View {
@@ -515,7 +515,7 @@ final class ComposerTextView: NSTextView {
         let isReturn = event.keyCode == 36 || event.keyCode == 76
         if isReturn, !hasMarkedText() {
             if event.modifierFlags.contains(.shift) || event.modifierFlags.contains(.option) {
-                insertNewlineIgnoringFieldEditor(nil)
+                insertLineContinuingList()
             } else if string.isEmpty, onReturnWhenEmpty?() == true {
                 // Allowed the waiting approval.
             } else {
@@ -524,6 +524,16 @@ final class ComposerTextView: NSTextView {
             return
         }
         super.keyDown(with: event)
+    }
+
+    /// A new line that carries on a markdown list ("2. " after "1. foo"),
+    /// or ends it from an empty item. Through `insertText`, so it's one undo.
+    private func insertLineContinuingList() {
+        guard let edit = ListContinuation.newline(in: string, selection: selectedRange()) else {
+            insertNewlineIgnoringFieldEditor(nil)
+            return
+        }
+        insertText(edit.text, replacementRange: edit.range)
     }
 
     override func cancelOperation(_ sender: Any?) {

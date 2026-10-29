@@ -319,7 +319,8 @@ enum Automation {
             composer.insertText(c["text"] as? String ?? "", replacementRange: range)
             return "ok"
         case "return":
-            return pressReturn(window)
+            // `"shift": true` for Shift-Return (a new line, carrying a list on).
+            return pressReturn(window, shift: c["shift"] as? Bool == true)
         case "rename":
             // No title: the open thread's title becomes a field, as a click
             // does. With one: saves it, as Return in that field does.
@@ -976,10 +977,10 @@ enum Automation {
             + " model=\(settings.model) effort=\(settings.effort) ask=\(settings.ask)"
     }
 
-    private static func pressReturn(_ window: NSWindow?) -> String {
+    private static func pressReturn(_ window: NSWindow?, shift: Bool = false) -> String {
         // The same key event the Return key sends.
         guard let composer = findComposer(in: window?.contentView),
-              let event = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+              let event = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: shift ? .shift : [], timestamp: ProcessInfo.processInfo.systemUptime,
                                            windowNumber: window?.windowNumber ?? 0, context: nil, characters: "\r",
                                            charactersIgnoringModifiers: "\r", isARepeat: false, keyCode: 36)
         else { return "error no composer" }
