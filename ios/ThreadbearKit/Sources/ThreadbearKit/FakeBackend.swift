@@ -283,6 +283,10 @@ public final class FakeBackend: Backend, @unchecked Sendable {
             "a5": [
                 PhoneMessage(seq: 1, role: .user, text: "Okay, let's go with it.", at: ago(8)),
             ],
+            "a6": [
+                PhoneMessage(seq: 1, role: .user, text: "Review: Router upgrade order (0f3c2a9e-5b1d-4e7a-9c64-2d8b1f0a7e35)\n\nPicked B. B: docs pages first.\n\nNotes on B (B: docs pages first): Leave the search page till last.", at: ago(60 * 21)),
+                PhoneMessage(seq: 2, role: .assistant, text: "Going with the docs pages first, search last. Picked the next three pages to move.", at: ago(60 * 20)),
+            ],
         ]
         return (threads, messages)
     }

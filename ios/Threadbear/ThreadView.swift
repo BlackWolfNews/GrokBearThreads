@@ -278,7 +278,7 @@ struct MessageView: View {
         switch message.role {
         case .user:
             VStack(alignment: .trailing, spacing: 4) {
-                Text(message.text)
+                userText
                     .textSelection(.enabled)
                     .padding(.horizontal, 14)
                     .padding(.vertical, 10)
@@ -295,6 +295,26 @@ struct MessageView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
         case .tool:
             ToolRunView(items: [message])
+        }
+    }
+
+    /// An answer to a review reads as the Mac shows it: the review's icon
+    /// and title small, then what he picked and his notes (Mike, 29 Oct).
+    @ViewBuilder private var userText: some View {
+        if let review = ReviewAnswer.parse(message.text) {
+            VStack(alignment: .leading, spacing: 8) {
+                ForEach(Array(review.lines.enumerated()), id: \.offset) { i, line in
+                    VStack(alignment: .leading, spacing: 2) {
+                        // The same symbol as the Mac's review card and button.
+                        (i == 0 ? Text("\(Image(systemName: "rectangle.on.rectangle")) \(line.label)") : Text(line.label))
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                        Text(line.text)
+                    }
+                }
+            }
+        } else {
+            Text(message.text)
         }
     }
 
