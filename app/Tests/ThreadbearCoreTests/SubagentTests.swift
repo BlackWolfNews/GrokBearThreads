@@ -70,6 +70,16 @@ final class SubagentTests: XCTestCase {
         XCTAssertEqual(SubagentRows.visible(thread, threadSelected: true, selectedSubagent: "old", now: now, finishedShown: false).map(\.id), ["old", "live"])
     }
 
+    func testHighlightsListsEveryOneRunningFirstThenNewest() {
+        let thread = ThreadSummary(id: "t", title: "t", subagents: [
+            agent("first", .completed, endedMinutesAgo: 30),
+            agent("live"),
+            agent("second", .failed, endedMinutesAgo: 9),
+            agent("third", .completed, endedMinutesAgo: 2),
+        ])
+        XCTAssertEqual(SubagentRows.highlights(thread).map(\.id), ["live", "third", "second", "first"])
+    }
+
     func testSelectedThreadShowsItsFinishedOnesUpToTheCap() {
         var list = (0..<15).map { agent("f\($0)", .completed, endedMinutesAgo: 60) }
         list.append(agent("live"))

@@ -155,17 +155,28 @@ final class ScheduleTests: XCTestCase {
         XCTAssertEqual(ScheduleTime.defaultOnce(now: at("2026-10-27T10:45:00Z"), calendar: calendar), at("2026-10-27T11:00:00Z"))
     }
 
-    func testComposerLine() {
+    func testHighlightRows() {
         let now = Date(timeIntervalSince1970: 1_800_000_000)
         let soon = Schedule(id: "a", title: "A", whenText: "Weekdays at 9:00", threadId: "th1", nextRunAt: now.addingTimeInterval(3 * 3600))
-        let later = Schedule(id: "b", title: "B", whenText: "Mondays at 10:00", createdBy: "th1", nextRunAt: now.addingTimeInterval(30 * 3600))
-        let paused = Schedule(id: "c", title: "C", whenText: "Every hour", threadId: "th1", paused: true)
+        let later = Schedule(id: "b", title: "B", whenText: "Mondays at 10:00", cwd: "~/dev/me/misc", createdBy: "th1", nextRunAt: now.addingTimeInterval(30 * 3600))
+        let paused = Schedule(id: "c", title: "", whenText: "Every hour", threadId: "th1", paused: true)
         let elsewhere = Schedule(id: "d", title: "D", whenText: "Every day at 2:00", threadId: "th2", nextRunAt: now.addingTimeInterval(60))
-        XCTAssertNil(ScheduleLine.line(for: "th1", in: [paused, elsewhere], now: now), "paused ones don't count")
-        XCTAssertEqual(ScheduleLine.line(for: "th1", in: [soon, paused], now: now),
-                       ScheduleLine.Line(text: "Scheduled: Weekdays at 9:00 · next in 3h", scheduleId: "a"))
-        XCTAssertEqual(ScheduleLine.line(for: "th1", in: [later, soon, elsewhere], now: now),
-                       ScheduleLine.Line(text: "2 schedules · next in 3h", scheduleId: nil))
+        let ran = Schedule(id: "e", title: "E", whenText: "Once, Tue 28 Oct at 15:30", threadId: "th1", finishedAt: now)
+        let thread = ThreadSummary(id: "th1", title: "T")
+        let rows = ScheduleRows.rows(for: thread, in: [paused, later, elsewhere, ran, soon], now: now) { _ in "New thread in misc" }
+        XCTAssertEqual(rows.map(\.id), ["a", "b", "c"], "soonest first, paused last, other threads' and spent one-offs left out")
+        XCTAssertEqual(rows[0], ScheduleRows.Row(id: "a", title: "A", when: "in 3h", detail: "Weekdays at 9:00", paused: false))
+        XCTAssertEqual(rows[1].detail, "Mondays at 10:00 · New thread in misc", "one it made for somewhere else says where")
+        XCTAssertEqual(rows[2].title, "Untitled")
+        XCTAssertEqual(rows[2].when, "paused")
+
+        // A thread a schedule started shows that schedule, though it sends
+        // to new threads rather than this one.
+        var started = ThreadSummary(id: "th3", title: "Q3 invoices")
+        started.schedule = ThreadSchedule(id: "d", title: "D")
+        let origin = ScheduleRows.rows(for: started, in: [elsewhere, soon], now: now) { _ in "unused" }
+        XCTAssertEqual(origin.map(\.detail), ["Started this thread · Every day at 2:00"])
+        XCTAssertEqual(origin.first?.when, "in 1m")
     }
 
     // MARK: The transcript

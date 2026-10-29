@@ -17,6 +17,8 @@ public struct HighlightSections: Sendable, Hashable {
     /// have fifteen commits, which pushed Files and Links off screen.
     public static let commitLimit = 5
     public static let linkLimit = 10
+    /// The runner keeps a thread's newest 20 sub-agents.
+    public static let subagentLimit = 5
 
     /// The first `limit` of a group (they come newest first), and how many
     /// more "Show all" would add. All of them once Mike has asked.

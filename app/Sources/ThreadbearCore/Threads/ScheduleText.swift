@@ -123,26 +123,52 @@ public enum ScheduleTime {
     }
 }
 
-/// The quiet line over a thread's composer when it has schedules of its own.
-public enum ScheduleLine {
-    public struct Line: Sendable, Hashable {
-        public var text: String
-        /// The schedule it's about, when there's only one (clicking opens
-        /// it); nil for several (clicking opens the Scheduled view).
-        public var scheduleId: String?
+/// A thread's schedules, for the Scheduled group in its Highlights: what
+/// sends to it, what its agent made, and the one that started it. They sat
+/// as one line over the composer ("3 schedules · next in 7 days") until
+/// Mike asked for them in Highlights with the rest of what the thread has
+/// made (29 Oct).
+public enum ScheduleRows {
+    public struct Row: Sendable, Hashable, Identifiable {
+        public var id: String
+        public var title: String
+        /// At the end of the title's line: "in 3h", "due now", "paused".
+        public var when: String?
+        /// The runner's words for the time ("Weekdays at 9:00"), and where
+        /// it goes when that isn't this thread.
+        public var detail: String
+        public var paused: Bool
     }
 
-    /// "Scheduled: Weekdays at 9:00 · next in 3h", or "2 schedules · next
-    /// in 3h". Nil when nothing active sends to the thread.
-    public static func line(for threadId: String, in schedules: [Schedule], now: Date) -> Line? {
-        let active = schedules.filter { $0.isActive && $0.belongs(to: threadId) }
-        guard !active.isEmpty else { return nil }
-        let soonest = active.compactMap(\.nextRunAt).min()
-        let next = soonest.map { " · " + ScheduleTime.next($0, now: now) } ?? ""
-        if active.count == 1, let only = active.first {
-            return Line(text: "Scheduled: \(only.whenText)\(next)", scheduleId: only.id)
+    /// Active ones soonest first, then paused ones; a one-off that has run
+    /// is left out, unless it's the schedule that started the thread.
+    /// `target` names where a schedule goes that isn't this thread
+    /// ("New thread in misc").
+    public static func rows(for thread: ThreadSummary, in schedules: [Schedule], now: Date, target: (Schedule) -> String) -> [Row] {
+        let origin = thread.schedule?.id
+        let mine = schedules.filter { $0.belongs(to: thread.id) || $0.id == origin }
+        let kept = mine.filter { !$0.isFinished || $0.id == origin }
+        let sorted = kept.sorted { a, b in
+            if a.isActive != b.isActive { return a.isActive }
+            switch (a.nextRunAt, b.nextRunAt) {
+            case let (x?, y?): return x < y
+            case (_?, nil): return true
+            case (nil, _?): return false
+            case (nil, nil): return a.createdAt < b.createdAt
+            }
         }
-        return Line(text: "\(active.count) schedules\(next)", scheduleId: nil)
+        return sorted.map { schedule in
+            // "Started this thread" leads, so a long cron can't push it
+            // off the end of the line.
+            var parts: [String] = schedule.id == origin ? ["Started this thread"] : []
+            if !schedule.whenText.isEmpty { parts.append(schedule.whenText) }
+            if schedule.id != origin, schedule.threadId != thread.id { parts.append(target(schedule)) }
+            let when: String? = schedule.paused ? "paused"
+                : schedule.isFinished ? nil
+                : schedule.nextRunAt.map { ScheduleTime.relative($0, now: now) }.map { $0 == "now" ? "due now" : $0 }
+            return Row(id: schedule.id, title: schedule.title.isEmpty ? "Untitled" : schedule.title,
+                       when: when, detail: parts.joined(separator: " · "), paused: schedule.paused)
+        }
     }
 }
 

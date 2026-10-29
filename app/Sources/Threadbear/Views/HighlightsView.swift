@@ -6,8 +6,9 @@ import ThreadbearCore
 /// The pane's Highlights section: what the thread has made, shared and
 /// pinned, so it doesn't scroll away with the transcript. The librarian's
 /// line on where it's up to, the links of the projects it's in (its live
-/// site, admin page), then pins, files, links and commits, each
-/// under a grey heading like the sidebar's, and left out when empty.
+/// site, admin page), its schedules and sub-agents, then pins, files, links
+/// and commits, each under a grey heading like the sidebar's, and left out
+/// when empty.
 struct HighlightsView: View {
     @Environment(AppModel.self) private var app
     let thread: ThreadSummary
@@ -15,6 +16,7 @@ struct HighlightsView: View {
     /// "Show all" on Links and Changes, for the thread on show.
     @State private var allLinks = false
     @State private var allCommits = false
+    @State private var allSubagents = false
 
     var body: some View {
         if app.highlightsUnsupported {
@@ -22,7 +24,7 @@ struct HighlightsView: View {
         } else if let fetched = app.highlights[thread.id] {
             let sections = HighlightSections.build(fetched)
             let projects = ProjectLinkGroups.build(thread: thread, project: app.project)
-            if sections.isEmpty && openAsks == nil && projects.isEmpty && toolPanels.isEmpty {
+            if sections.isEmpty && openAsks == nil && projects.isEmpty && toolPanels.isEmpty && schedules.isEmpty && thread.subagents.isEmpty {
                 PaneNote(text: "Nothing here yet. Files, links and commits from this thread show up here as it works.")
             } else {
                 ScrollView {
@@ -91,6 +93,21 @@ struct HighlightsView: View {
             SectionHeading(title: project.title, project: project)
             ForEach(project.links, id: \.url) { projectLink($0) }
         }
+        // What will message the thread later, and the helpers it started:
+        // they were a line over the composer and only the sidebar's rows
+        // under the thread, and Mike wanted them here (29 Oct).
+        let scheduled = schedules
+        if !scheduled.isEmpty {
+            SectionHeading(title: "Scheduled", icon: "clock")
+            ForEach(scheduled) { scheduleRow($0) }
+        }
+        if !thread.subagents.isEmpty {
+            let all = SubagentRows.highlights(thread)
+            SectionHeading(title: "Sub-agents", icon: "person.2")
+            let subagents = HighlightSections.capped(all, limit: HighlightSections.subagentLimit, showAll: allSubagents)
+            ForEach(subagents.shown) { subagentRow($0) }
+            if subagents.more > 0 { showAll(all.count) { allSubagents = true } }
+        }
         if !sections.pinned.isEmpty {
             SectionHeading(title: "Pinned", icon: "pin")
             ForEach(sections.pinned) { row($0) }
@@ -112,6 +129,38 @@ struct HighlightsView: View {
             if commits.more > 0 { showAll(sections.commits.count) { allCommits = true } }
             if !sections.edited.isEmpty { edited(sections.edited) }
         }
+    }
+
+    private var schedules: [ScheduleRows.Row] {
+        ScheduleRows.rows(for: thread, in: app.schedules, now: app.now, target: app.scheduleTarget)
+    }
+
+    private func scheduleRow(_ row: ScheduleRows.Row) -> some View {
+        PaneRow(icon: row.paused ? "pause.circle" : "clock", title: row.title, trailing: row.when, detail: row.detail, titleTruncation: .tail, detailTruncation: .tail) {
+            app.editSchedule(row.id)
+        }
+        .tip("Edit the schedule")
+        .contextMenu {
+            Button("Edit", systemImage: "pencil") { app.editSchedule(row.id) }
+            Button("Show all schedules", systemImage: "clock") { app.showSchedules() }
+        }
+    }
+
+    /// Like its row under the thread in the sidebar: how it's doing, what
+    /// it's up to or found, and how long it took. Opens its transcript.
+    private func subagentRow(_ subagent: Subagent) -> some View {
+        let (icon, color): (String, Color?) = switch subagent.status {
+        case .running: ("circle.dashed", nil)
+        case .completed: ("checkmark", nil)
+        case .failed: ("xmark", Color(nsColor: Theme.failed))
+        case .stopped: ("minus", nil)
+        }
+        return PaneRow(icon: icon, iconColor: color, title: SubagentRows.title(subagent),
+                       trailing: SubagentRows.duration(subagent, now: app.now), detail: SubagentRows.detail(subagent),
+                       titleTruncation: .tail, detailTruncation: .tail) {
+            app.selectSubagent(threadId: thread.id, subagentId: subagent.id)
+        }
+        .tip("\(SubagentRows.statusText(subagent)). Click to read its transcript.")
     }
 
     /// The open card's seq, when the thread has asks on it.
@@ -208,6 +257,8 @@ struct PaneRow: View {
     var reservesIcon = false
     /// A file name keeps its extension (middle); a sentence its start.
     var titleTruncation: Text.TruncationMode = .middle
+    /// A path keeps both ends; a sub-agent's report its start.
+    var detailTruncation: Text.TruncationMode = .middle
     var action: (() -> Void)?
     @State private var hovering = false
 
@@ -273,7 +324,7 @@ struct PaneRow: View {
                             .font(.system(size: TypeScale.small))
                             .foregroundStyle(SidebarMetrics.faint)
                             .lineLimit(1)
-                            .truncationMode(.middle)
+                            .truncationMode(detailTruncation)
                     }
                 }
             }

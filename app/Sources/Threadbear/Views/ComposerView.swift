@@ -29,9 +29,6 @@ struct ComposerView: View {
         let picks = thread.map { app.picks(for: $0) } ?? [:]
         let canSend = !picks.isEmpty || ComposerChips.canSend(text: draft.wrappedValue.text, imageCount: draft.wrappedValue.images.count)
         VStack(alignment: .leading, spacing: zoomed(6)) {
-        if let thread, let line = ScheduleLine.line(for: thread.id, in: app.schedules, now: app.now) {
-            ScheduledLine(line: line)
-        }
         VStack(alignment: .leading, spacing: zoomed(10)) {
             if let thread, let edit = app.editing[thread.id] {
                 EditingBanner(sending: edit.sending) { app.cancelEditing(threadId: thread.id) }
@@ -201,38 +198,6 @@ private struct EditingBanner: View {
             }
         }
     }
-}
-
-/// "Scheduled: Weekdays at 9:00 · next in 3h" over the composer of a thread
-/// with schedules: quiet, and a way into them (the one schedule's editor, or
-/// the Scheduled view for several).
-private struct ScheduledLine: View {
-    @Environment(AppModel.self) private var app
-    let line: ScheduleLine.Line
-    @State private var hovering = false
-
-    var body: some View {
-        Button {
-            if let id = line.scheduleId { app.editSchedule(id) } else { app.showSchedules() }
-        } label: {
-            HStack(spacing: zoomed(5)) {
-                Image(systemName: "clock")
-                    .font(.system(size: TypeScale.sidebarMeta))
-                Text(line.text)
-                    .lineLimit(1)
-            }
-            .font(.system(size: TypeScale.sidebarMeta + 1))
-            .foregroundStyle(hovering ? AnyShapeStyle(.secondary) : AnyShapeStyle(Color(nsColor: Theme.faintText)))
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .onHover { hovering = $0 }
-        .tip(line.scheduleId == nil ? "Show the schedules" : "Edit the schedule")
-        // In line with the message text inside the card below.
-        .padding(.leading, Self.inset)
-    }
-
-    static var inset: CGFloat { ComposerView.padding }
 }
 
 private struct AttachmentStrip: View {

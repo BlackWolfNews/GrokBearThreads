@@ -68,6 +68,13 @@ public enum SubagentRows {
         return rows
     }
 
+    /// All of a thread's sub-agents for its Highlights: running ones first,
+    /// then the rest newest first, like the other groups there.
+    public static func highlights(_ thread: ThreadSummary) -> [Subagent] {
+        let newest = Array(thread.subagents.reversed())
+        return newest.filter(\.isRunning) + newest.filter { !$0.isRunning }
+    }
+
     private static func finishedCount(_ all: [Subagent], _ shown: Set<String>) -> Int {
         all.reduce(0) { $0 + (!$1.isRunning && shown.contains($1.id) ? 1 : 0) }
     }
