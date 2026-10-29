@@ -647,6 +647,12 @@ function checks(c) {
 // threads, so a test with a timing assumption can fail for no real reason
 // and hold the runner back from main. Files that failed get one more go, one
 // at a time; a real break fails both runs and still stops the update.
+// Both runs give up on a test after 5 minutes, and end once the tests are
+// done even if one left a server open (package.json's test script has the
+// same flags). Without them a test that failed with its socket still open
+// held the run, and so the runner, off main for 48 minutes on 29 Oct, until
+// it was stopped by hand.
+const TEST_LIMITS = ['--test-timeout=300000', '--test-force-exit'];
 function unitTests(c, opts) {
   try {
     step('Unit tests', c.npm, ['test'], opts);
@@ -654,7 +660,7 @@ function unitTests(c, opts) {
     const logFile = e.message.match(/output is in (\S+)$/)?.[1];
     const files = logFile ? failedTestFiles(fs.readFileSync(logFile, 'utf8')) : [];
     if (!files.length) throw e;
-    step(`Rerunning ${files.join(', ')}`, process.execPath, ['--test', '--test-reporter=spec', '--test-concurrency=1', ...files], opts);
+    step(`Rerunning ${files.join(', ')}`, process.execPath, ['--test', '--test-reporter=spec', '--test-concurrency=1', ...TEST_LIMITS, ...files], opts);
     say(`Flaky: ${files.join(', ')} failed in the full run and passed alone (first run's output: ${logFile})`);
   }
 }

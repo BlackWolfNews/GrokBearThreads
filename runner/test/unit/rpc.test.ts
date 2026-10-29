@@ -82,7 +82,10 @@ test('subscribe replays the gap then streams; thread.updated goes to everyone', 
   h.clock.advance(40);
   s.text('m2:0', 'streamed');
   s.result('completed', 0.001);
-  await new Promise((r) => setTimeout(r, 50));
+  // Up to 5 s for them to arrive: a fixed 50 ms wasn't always enough on a
+  // busy Mac (29 Oct).
+  const arrived = () => aNotes.filter((n) => n.method === 'thread.event').length >= 3 && bNotes.some((n) => n.method === 'thread.updated');
+  for (let i = 0; i < 500 && !arrived(); i++) await new Promise((r) => setTimeout(r, 10));
 
   const live = aNotes.filter((n) => n.method === 'thread.event').map((n) => n.params.event);
   assert.deepEqual(checkSequence([...sub.events, ...live], 1), []);
