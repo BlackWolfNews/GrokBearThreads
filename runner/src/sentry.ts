@@ -90,6 +90,10 @@ export async function startSentry(home: string): Promise<boolean> {
       // The runtime module hooks are for tracing's instrumentation.
       enableRuntimeChannelInjection: false,
       beforeBreadcrumb: () => null,
+      // v11 attaches a stack to captureMessage by default, which turns each
+      // log line into a nameless exception titled after reportLogLine.
+      // Without it the issue is titled with the log message.
+      attachStacktrace: false,
       integrations: (all) => all.filter((i) => !LEFT_OUT.has(i.name)),
       initialScope: { tags: { component: 'runner' } },
     });
