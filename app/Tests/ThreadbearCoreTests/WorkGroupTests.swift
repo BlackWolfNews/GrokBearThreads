@@ -583,6 +583,17 @@ final class WorkGroupTests: XCTestCase {
         XCTAssertEqual(model.indexOf(id: "f:t19"), model.rows.count - 1, "rows after the group moved down in the index too")
     }
 
+    func testASummarizedTurnHasNoCard() {
+        let model = TranscriptModel(events: [
+            E.user(1, "Change things"), Self.started(2),
+            Self.edit(3, "c1", path: "/repo/Sources/A.swift", old: "a", new: "b"), E.result(4, "c1"),
+            E.event(5, "assistant.text", ["itemId": "m1", "text": "- Changed A", "summary": true], turn: "t1"),
+            E.done(6),
+        ])
+        XCTAssertNotNil(model.row(id: "a:m1"))
+        XCTAssertNil(model.rows.first { $0.kind == .changes })
+    }
+
     func testATurnWithNoEditsHasNoCard() {
         let model = TranscriptModel(events: [E.user(1, "Hi"), E.call(2, "c1"), E.text(3, "m1", "Hello"), E.done(4)])
         XCTAssertNil(model.rows.first { $0.kind == .changes })

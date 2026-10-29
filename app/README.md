@@ -212,7 +212,8 @@ turn footer (duration and cost), a note or an error.
 - While a turn runs, the last row is "Working for 12s" with a spinner, and
   the turn's live group adds the current action after a dot.
 - A turn that edited files ends with an "Edited 3 files" card (name, folder,
-  +N −M); click a file for its diff.
+  +N −M); click a file for its diff. A turn that ended with a summary
+  doesn't: the summary is the reply, and the edits are in its folded work.
 
 - `ThreadbearCore` turns protocol events into rows (`TranscriptModel`), keeps
   live events in seq order and spots gaps (`ThreadFeed`), splits markdown into

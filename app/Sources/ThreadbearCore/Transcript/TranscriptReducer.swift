@@ -1190,7 +1190,11 @@ public struct TranscriptModel: Sendable {
                         continue
                     } else if case .footer(var done) = row.content {
                         guard k == footers.last?.index else { continue }
-                        if let card = changedFiles(turns: footers.map { items[$0.index].turnId ?? "" }) {
+                        let stretch = footers.map { items[$0.index].turnId ?? "" }
+                        // A turn that ended with a summary has no changes
+                        // card: the summary says what changed, and the
+                        // edits are still in the folded work (Mike, 30 Oct).
+                        if !stretch.contains(where: summarizedTurns.contains), let card = changedFiles(turns: stretch) {
                             out.append(derived("cf:" + card.turnId, seq: row.seq, turnId: row.turnId, .changes(card)))
                             starts.append(turn.lowerBound)
                         }

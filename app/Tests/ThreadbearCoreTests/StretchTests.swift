@@ -42,7 +42,7 @@ final class StretchTests: XCTestCase {
 
     func testTheRunnersTurnJoinsTheTurnBeforeIt() {
         let model = TranscriptModel(events: Self.restartCheck)
-        XCTAssertEqual(model.rows.map(\.id), ["u:1", "g:n:2", "a:e2.summary", "cf:t2", "f:t2"])
+        XCTAssertEqual(model.rows.map(\.id), ["u:1", "g:n:2", "a:e2.summary", "f:t2"])
         guard case .group(let group)? = model.row(id: "g:n:2")?.content else { return XCTFail("a group") }
         XCTAssertEqual(group.memberIds, ["n:2", "t:c1", "t:c2", "a:e1.summary", "n:9", "u:10", "t:c3"],
                        "the earlier summary, the notes and the runner's message fold into the work")
@@ -50,8 +50,7 @@ final class StretchTests: XCTestCase {
         guard case .footer(let done)? = model.row(id: "f:t2")?.content else { return XCTFail("a footer") }
         XCTAssertEqual(done.durationMs, 8400)
         XCTAssertEqual(done.costUsd ?? 0, 0.24, accuracy: 0.0001)
-        guard case .changes(let card)? = model.row(id: "cf:t2")?.content else { return XCTFail("a changes card") }
-        XCTAssertEqual(card.files.map(\.path), ["/r/Sections.swift"], "the first turn's edits")
+        XCTAssertNil(model.row(id: "cf:t2"), "a summarized stretch has no changes card")
     }
 
     /// Each event as it comes: the first turn shows as it did when it
@@ -64,11 +63,11 @@ final class StretchTests: XCTestCase {
             WorkGroupTests.replay(model.apply([event]), onto: &table, model: model)
             XCTAssertEqual(model.rows.map(\.id), TranscriptModel(events: Array(model.events)).rows.map(\.id), "after seq \(event.seq)")
             if event.seq == 12 {
-                XCTAssertEqual(model.rows.map(\.id), ["u:1", "g:n:2", "a:e1.summary", "cf:t1", "f:t1", "u:10", "t:c3"],
+                XCTAssertEqual(model.rows.map(\.id), ["u:1", "g:n:2", "a:e1.summary", "f:t1", "u:10", "t:c3"],
                                "while the runner's turn runs, the first turn shows as it did once it finished")
             }
         }
-        XCTAssertEqual(model.rows.map(\.id), ["u:1", "g:n:2", "a:e2.summary", "cf:t2", "f:t2"])
+        XCTAssertEqual(model.rows.map(\.id), ["u:1", "g:n:2", "a:e2.summary", "f:t2"])
     }
 
     func testMikesNextMessageOrAScheduleStartsAStretchOfItsOwn() {
