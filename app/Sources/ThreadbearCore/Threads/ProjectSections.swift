@@ -248,8 +248,8 @@ public enum ProjectPane {
 
 /// The words the Librarian view uses.
 public enum LibrarianText {
-    /// "Idle", "Looking at Rename the Settings tabs", "Paused", "Off: No
-    /// OpenRouter key".
+    /// "Idle", "Looking at Rename the Settings tabs", "Paused", "Off: Needs
+    /// a Claude pool to run on".
     public static func state(_ status: LibrarianStatus) -> String {
         switch status.state {
         case .idle: return status.paused ? "Paused" : "Idle"
@@ -281,7 +281,7 @@ public enum LibrarianText {
     }
 
     /// "14 looks today · 3 skipped · 52k tokens". No money: looks run on
-    /// a Claude login (never OpenRouter), which uses its room, and what
+    /// a Claude login, which uses its room, and what
     /// they'd have cost on the API read as a bill Mike wasn't paying.
     public static func today(_ status: LibrarianStatus) -> String {
         var parts = [status.looksToday == 1 ? "1 look today" : "\(status.looksToday) looks today"]

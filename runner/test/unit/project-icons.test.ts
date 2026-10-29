@@ -151,7 +151,7 @@ test('a project with no picture gets a symbol from the list; a made-up one is ig
   const s = setup((p) => {
     assert.match(p.prompt, /^Project "Scheduled jobs"/);
     assert.match(p.prompt, /Symbols: app macwindow/);
-    return { ok: true, value: answer, model: 'haiku', costUsd: 0.0001 };
+    return { ok: true, value: answer, model: 'haiku' };
   });
   answer = 'not.a.symbol';
   s.projects.create({ title: 'Scheduled jobs', by: 'librarian' });

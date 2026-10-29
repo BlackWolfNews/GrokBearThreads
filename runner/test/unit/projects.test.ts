@@ -58,7 +58,7 @@ function setup(opts: { models?: (p: GenerateParams) => Promise<ModelResult<strin
 }
 
 const rec = (h: ReturnType<typeof makeHarness>, id: string) => h.runner.threadRecords().find((t) => t.id === id)!;
-const reply = (v: unknown, costUsd = 0.002): ModelResult<string> => ({ ok: true, value: JSON.stringify(v), model: 'haiku', costUsd });
+const reply = (v: unknown): ModelResult<string> => ({ ok: true, value: JSON.stringify(v), model: 'haiku' });
 
 // ------------------------------------------------------------- projects
 
@@ -256,7 +256,7 @@ test('the librarian looks after the first turn: makes a project and files the th
   const after = librarian.status();
   assert.equal(after.queue.length, 0);
   assert.equal(after.looksToday, 1);
-  assert.equal(after.spentTodayUsd, 0.002);
+  assert.equal(after.spentTodayUsd, 0, 'looks run on the pool, so nothing is spent');
   assert.deepEqual(after.recent.map((e) => [e.outcome, e.text, e.reason]), [['created', 'Made Poddle and put it there', 'first-turn']]);
   const [p] = projects.list();
   // The catch-all folder isn't a project folder.
@@ -356,7 +356,7 @@ test('the librarian: catch-up an hour after a look, new folders sooner, state up
 });
 
 test('the librarian waits without a pool, skips private folders, can be paused, and backfills', async () => {
-  let result: ModelResult<string> = { ok: false, reason: 'no-key', message: 'No key' };
+  let result: ModelResult<string> = { ok: false, reason: 'no-pool', message: 'Small jobs are on no pool.' };
   const s = setup({ models: () => result });
   const { h, create, finish, librarian } = s;
   const m = librarianMethods(librarian);
@@ -367,7 +367,6 @@ test('the librarian waits without a pool, skips private folders, can be paused, 
   let st = librarian.status();
   assert.equal(st.state, 'off');
   assert.equal(st.reason, 'Needs a Claude pool to run on');
-  assert.ok(s.asked.every((p) => p.poolOnly), 'looks only ever ask the pool');
   assert.equal(st.queue.length, 1, 'kept for later');
   // Paused: nothing runs even when due.
   m['librarian.update']({ paused: true });
@@ -548,7 +547,7 @@ test('the librarian keeps its line on where the thread is up to as the thread\'s
 });
 
 test('a quiet catch-up is skipped with no model call, and what it said counts towards the next', async () => {
-  const s = setup({ models: () => reply({ projects: [], why: 'A one-off' }, 0) });
+  const s = setup({ models: () => reply({ projects: [], why: 'A one-off' }) });
   const { h, create, finish, librarian, asked } = s;
   const { thread } = create('Work on the app');
   h.clock.advance(FIRST_MESSAGE_MS);

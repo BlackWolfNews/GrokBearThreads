@@ -150,10 +150,7 @@ async function main(): Promise<void> {
     toolsFor: (threadId) => buildThreadbearTools(router(), threadId, Date.now, scheduleControl(), projectControl(), appRestarts, { provider: 'codex' }),
     onNotice: (text) => runner.notice('warning', text),
   });
-  // The runner's own small-model calls, on the settings' Claude pool or
-  // through OpenRouter. Reads the key from secrets/ on each call, so a key
-  // written by hand works without a restart.
-  let settings!: SettingsService;
+  // The runner's own small-model calls, on the settings' Claude pool.
   const models = new Models({
     home: cfg.home,
     clock: realClock,
@@ -162,8 +159,6 @@ async function main(): Promise<void> {
     claudePath: cfg.claudePath,
     registry,
     poolHost: { pool: (id) => runner.smallModelPool(id), ranDry: (id) => runner.noteRanDry(id) },
-    notice: (level, message) => runner.notice(level, message),
-    onSpend: () => settings.spendChanged(),
   });
   const projects = new Projects({ home: cfg.home, clock: realClock, log });
   runner = new Runner({
@@ -187,7 +182,7 @@ async function main(): Promise<void> {
       if (!appRestarts.isWatching(threadId)) appRestarts.watch(threadId);
     },
   });
-  settings = new SettingsService({ config: cfg, models, publish: (n) => runner.publish(n), clock: realClock, poolIds: () => runner.listPools().pools.map((p) => p.id) });
+  const settings = new SettingsService({ config: cfg, publish: (n) => runner.publish(n), poolIds: () => runner.listPools().pools.map((p) => p.id) });
   // Runners still finishing turns after a handover: connected before the
   // threads load, so the ones they have are left to them. Nothing after the
   // await below yields until runner.start(), so no thread can arrive first.
@@ -467,7 +462,6 @@ async function main(): Promise<void> {
     usage.stop();
     tally.stop();
     updates.stop();
-    settings.stop();
     // A restart's new release writes everything again under the same
     // runnerId; only a stop for good tells the phone this runner is gone.
     await sync.stop({ bye: signal !== 'restart' && !draining });
@@ -508,7 +502,6 @@ async function main(): Promise<void> {
       connectors.stop();
       projects.freeze();
       updates.stop();
-      settings.stop();
       usage.stopWriting();
       tally.stopWriting();
       // The new release mirrors from here on.

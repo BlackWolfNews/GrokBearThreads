@@ -93,9 +93,9 @@ type Saved = {
   day?: Day;
 };
 
-// The day's looks, skips and what they used. spentUsd is OpenRouter's,
-// notionalUsd what the pool's would have cost on the API (not spent).
-type Day = { date: string; looks: number; spentUsd: number; skipped?: number; tokens?: number; notionalUsd?: number };
+// The day's looks, skips and what they used. notionalUsd is what they'd
+// have cost on the API; the login's room pays, so nothing is spent.
+type Day = { date: string; looks: number; skipped?: number; tokens?: number; notionalUsd?: number };
 
 // What the model is asked to answer.
 type Answer = {
@@ -122,7 +122,7 @@ export class Librarian {
   private queue = new Map<string, LibrarianJob>();
   private recent: LibrarianEntry[] = [];
   private looks: Record<string, Look> = {};
-  private day: Day = { date: '', looks: 0, spentUsd: 0 };
+  private day: Day = { date: '', looks: 0 };
   // Folders each thread has edited in since its last look, by repo.
   private edited = new Map<string, Set<string>>();
   // Repos its shell commands ran in since its last look (`cd ~/dev/me/app`),
@@ -211,7 +211,8 @@ export class Librarian {
       queue: this.sortedQueue(),
       recent: this.recent,
       looksToday: this.day.looks,
-      spentTodayUsd: round(this.day.spentUsd),
+      // Always 0 since looks only run on the pool; kept for older apps.
+      spentTodayUsd: 0,
       skippedToday: this.day.skipped ?? 0,
       tokensToday: this.day.tokens ?? 0,
       notionalTodayUsd: round(this.day.notionalUsd ?? 0),
@@ -412,13 +413,13 @@ export class Librarian {
     // rec is the live record: the title as the model saw it, so a rename
     // during the call isn't undone.
     const title = rec.title;
-    const res = await this.models.generate({ feature: 'projects', poolOnly: true, cwd: rec.cwd, system: SYSTEM, prompt, maxTokens: 2000 });
+    const res = await this.models.generate({ feature: 'projects', cwd: rec.cwd, system: SYSTEM, prompt, maxTokens: 2000 });
     if (!res.ok) {
       if (WAIT_FOR.includes(res.reason)) {
         // Nothing wrong with the job: try again once there's a pool or room
         // on it.
-        this.off = res.reason === 'no-key' ? (this.models.unavailable?.({ poolOnly: true }) ?? offReason(res.reason, res.message)) : offReason(res.reason, res.message);
-        this.offForSetup = res.reason === 'no-key';
+        this.off = res.reason === 'no-pool' ? (this.models.unavailable?.() ?? offReason(res.reason, res.message)) : offReason(res.reason, res.message);
+        this.offForSetup = res.reason === 'no-pool';
         this.enqueue(job.threadId, job.reason, job.why, this.clock.now() + OFF_RETRY_MS);
         return;
       }
@@ -434,10 +435,10 @@ export class Librarian {
     const answer = parseAnswer(res.value);
     if (!answer) {
       this.markLooked(rec, job);
-      this.note(job, 'failed', "The model's answer wasn't JSON", undefined, res.costUsd);
+      this.note(job, 'failed', "The model's answer wasn't JSON");
       return;
     }
-    this.apply(job, rec, answer, res.costUsd, prompt, title);
+    this.apply(job, rec, answer, prompt, title);
     this.markLooked(rec, job);
   }
 
@@ -489,7 +490,7 @@ export class Librarian {
 
   // `seen` is the prompt the look was given: a link must be in it, so the
   // model can't make one up. `title` is the thread's title it was given.
-  private apply(job: LibrarianJob, rec: ThreadRecord, a: Answer, costUsd?: number, seen = '', title = rec.title): void {
+  private apply(job: LibrarianJob, rec: ThreadRecord, a: Answer, seen = '', title = rec.title): void {
     const live = new Map(this.projects.list().map((p) => [p.id, p]));
     // A thread its agent or Mike filed is theirs to file: the look only
     // keeps its line and the state of the projects it's in.
@@ -620,7 +621,7 @@ export class Librarian {
     }
     const why = typeof a.why === 'string' ? a.why.trim().slice(0, 200) : '';
     const text = said.length ? said.join('. ') : why ? `Nothing to change: ${lowerFirst(why)}` : 'Nothing to change';
-    this.note(job, outcome, text, [...ids], costUsd);
+    this.note(job, outcome, text, [...ids]);
   }
 
   // The other threads waiting on a topic.
@@ -639,7 +640,7 @@ export class Librarian {
     }
   }
 
-  private note(job: LibrarianJob, outcome: LibrarianOutcome, text: string, projectIds?: string[], costUsd?: number): void {
+  private note(job: LibrarianJob, outcome: LibrarianOutcome, text: string, projectIds?: string[]): void {
     const e: LibrarianEntry = {
       id: crypto.randomBytes(6).toString('hex'),
       at: new Date(this.clock.now()).toISOString(),
@@ -650,7 +651,6 @@ export class Librarian {
       text,
     };
     if (projectIds?.length) e.projectIds = projectIds;
-    if (costUsd !== undefined) e.costUsd = round(costUsd);
     this.recent.unshift(e);
     if (this.recent.length > RECENT_KEPT) this.recent.length = RECENT_KEPT;
     this.log.info('librarian looked', { threadId: job.threadId, reason: job.reason, outcome, text });
@@ -763,7 +763,7 @@ export class Librarian {
     ]
       .filter((l) => l !== undefined)
       .join('\n');
-    const res = await this.models.generate({ feature: 'projects', poolOnly: true, cwd: rec.folders[0], system: SYMBOL_SYSTEM, prompt, maxTokens: 1000 });
+    const res = await this.models.generate({ feature: 'projects', cwd: rec.folders[0], system: SYMBOL_SYSTEM, prompt, maxTokens: 1000 });
     if (!res.ok) {
       if (!WAIT_FOR.includes(res.reason)) this.log.info('librarian could not pick a symbol', { projectId: rec.id, reason: res.reason });
       return undefined;
@@ -804,12 +804,11 @@ export class Librarian {
   private rollDay(): void {
     const d = new Date(this.clock.now());
     const date = `${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()}`;
-    if (this.day.date !== date) this.day = { date, looks: 0, spentUsd: 0 };
+    if (this.day.date !== date) this.day = { date, looks: 0 };
   }
 
   // What a call used, into the day's figures.
-  private used(res: { costUsd?: number; tokens?: number; notionalUsd?: number }): void {
-    this.day.spentUsd += res.costUsd ?? 0;
+  private used(res: { tokens?: number; notionalUsd?: number }): void {
     this.day.tokens = (this.day.tokens ?? 0) + (res.tokens ?? 0);
     this.day.notionalUsd = (this.day.notionalUsd ?? 0) + (res.notionalUsd ?? 0);
   }
@@ -884,11 +883,10 @@ export function mainCheckout(dir: string): string {
 
 const PROJECT_MARKERS = ['.git', 'package.json', 'Package.swift', 'pyproject.toml', 'Cargo.toml', 'go.mod', 'AGENTS.md', 'CLAUDE.md'];
 
-// Looks run on the pool only, so never over an OpenRouter budget.
-const WAIT_FOR: ModelFailure[] = ['no-key', 'off', 'no-room'];
+const WAIT_FOR: ModelFailure[] = ['no-pool', 'off', 'no-room'];
 
 function offReason(reason: ModelFailure, message: string): string {
-  if (reason === 'no-key') return 'Needs a Claude pool to run on';
+  if (reason === 'no-pool') return 'Needs a Claude pool to run on';
   // "Every login in Claude is out of room"
   if (reason === 'no-room') return message.replace(/\.$/, '');
   if (reason === 'off') return 'Model calls are off';

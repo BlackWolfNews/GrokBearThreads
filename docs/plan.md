@@ -129,7 +129,8 @@ the gap is the Mac app, which talks to one runner on this Mac.
     send starts a new `query()` with `resume`. Never run two live queries on
     one session. Kill the CLI's process group if the runner exits.
   - Title: first line of the first message, trimmed to 60 characters,
-    then a small model's title once there's an OpenRouter key (src/models/).
+    then a small model's title, on a Claude login in the small-jobs pool
+    (src/models/).
 - **Adapter interface** so Codex can be added without touching the rest.
 - **Startup:** threads that were live when the runner stopped become
   `stopped`; any approval that was pending is marked expired.

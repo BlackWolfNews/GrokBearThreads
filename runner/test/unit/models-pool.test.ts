@@ -1,7 +1,7 @@
 // Small-model calls on a Claude pool (models/claude-pool.ts and the pool
 // routes in models/index.ts): which login answers, moving on when one is
-// out of room, falling through to OpenRouter, and the CLI's own arguments
-// and answers. The CLI is a fake: a function here, and a script standing in
+// out of room, saying why when none can, and the CLI's own arguments and
+// answers. The CLI is a fake: a function here, and a script standing in
 // for the claude binary for askCli itself.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -11,15 +11,13 @@ import { tmpDir, testConfig } from '../helpers/fakes.ts';
 import { FakeClock } from '../../src/clock.ts';
 import { ensureHome, readRunnerJson } from '../../src/config.ts';
 import { nullLogger } from '../../src/log.ts';
-import { HAIKU, Models, writeKey } from '../../src/models/index.ts';
+import { Models } from '../../src/models/index.ts';
 import type { ModelSettings } from '../../src/models/index.ts';
 import { askCli, cliArgs, readReply } from '../../src/models/claude-pool.ts';
 import type { CliRequest, CliResponse } from '../../src/models/claude-pool.ts';
 import { ledgerPath } from '../../src/models/ledger.ts';
 import { SettingsService, settingsMethods } from '../../src/settings.ts';
 import type { Account, Pool } from '../../src/protocol.ts';
-
-const KEY = 'sk-or-v1-0123456789abcdef0123456789abcdefWXYZ';
 
 function acct(id: string, opts: { provider?: 'claude' | 'codex'; room?: number; blocked?: boolean } = {}): Account {
   const a: Account = { id, provider: opts.provider ?? 'claude', title: id, configDir: `/tmp/no-such/${id}` };
@@ -36,22 +34,19 @@ function acct(id: string, opts: { provider?: 'claude' | 'codex'; room?: number; 
 
 type Reply = CliResponse | ((req: CliRequest) => CliResponse | Promise<CliResponse>);
 
-function setup(o: { accounts?: Account[]; pools?: Pool[]; key?: boolean; pool?: string | null; replies?: Reply[]; orReplies?: string[] } = {}) {
+function setup(o: { accounts?: Account[]; pools?: Pool[]; pool?: string | null; replies?: Reply[] } = {}) {
   const home = tmpDir();
   ensureHome(home);
-  if (o.key) writeKey(home, KEY);
   let accounts = o.accounts ?? [acct('claude-main', { room: 50 }), acct('claude-1', { room: 80 }), acct('claude-2', { room: 90 }), acct('codex-main', { provider: 'codex', room: 90 })];
   const pools = o.pools ?? [
     { id: 'claude', title: 'Claude', accountIds: ['claude-main', 'claude-1'] },
     { id: 'convex', title: 'Convex', accountIds: ['claude-2'] },
     { id: 'everything', title: 'Everything', accountIds: ['codex-main', 'claude-main'] },
   ];
-  const settings: ModelSettings = { dailyBudgetUsd: 1, privateFolders: [], pool: o.pool === undefined ? 'claude' : o.pool };
+  const settings: ModelSettings = { privateFolders: [], pool: o.pool === undefined ? 'claude' : o.pool };
   const cli: CliRequest[] = [];
   const ranDry: string[] = [];
   const replies = [...(o.replies ?? [])];
-  const orCalls: string[] = [];
-  const orReplies = [...(o.orReplies ?? [])];
   const models = new Models({
     home,
     clock: new FakeClock(),
@@ -73,37 +68,31 @@ function setup(o: { accounts?: Account[]; pools?: Pool[]; key?: boolean; pool?: 
       const r = replies.shift() ?? { ok: true, text: 'ok' };
       return typeof r === 'function' ? r(req) : r;
     },
-    fetch: (async (_url: string, init: RequestInit) => {
-      orCalls.push(JSON.parse(String(init.body)).model);
-      const text = orReplies.shift() ?? 'from openrouter';
-      return new Response(JSON.stringify({ choices: [{ message: { content: text } }], usage: { prompt_tokens: 5, completion_tokens: 2, cost: 0.0001 } }), { status: 200 });
-    }) as unknown as typeof fetch,
   });
   const ledger = () => (fs.existsSync(ledgerPath(home)) ? fs.readFileSync(ledgerPath(home), 'utf8').trim().split('\n').map((l) => JSON.parse(l)) : []);
-  return { home, settings, models, cli, ranDry, orCalls, ledger, setAccounts: (a: Account[]) => (accounts = a) };
+  return { home, settings, models, cli, ranDry, ledger, setAccounts: (a: Account[]) => (accounts = a) };
 }
 
-test('pool: a call runs on the pool login with the most room, needs no key, and costs nothing against the budget', async () => {
+test('pool: a call runs on the pool login with the most room, and the usage file says which, without the text', async () => {
   const s = setup({ replies: [{ ok: true, text: ' Librarian picks a pool \n', inputTokens: 667, outputTokens: 15, notionalUsd: 0.00026 }] });
   const r = await s.models.generate({ feature: 'titles', prompt: 'secret words', system: 'Name it' });
   assert.ok(r.ok);
   assert.equal(r.value, 'Librarian picks a pool');
   assert.equal(r.model, 'claude-haiku-5-5 on claude-1');
-  assert.equal(r.costUsd, undefined);
+  assert.equal(r.tokens, 682);
+  assert.equal(r.notionalUsd, 0.00026);
   assert.equal(s.cli.length, 1);
   assert.equal(s.cli[0].account.id, 'claude-1');
   assert.equal(s.cli[0].model, 'claude-haiku-5-5');
   assert.equal(s.cli[0].system, 'Name it');
   assert.equal(s.cli[0].user, 'secret words');
   assert.equal(s.cli[0].cwd, path.join(s.home, 'models', 'cli'));
-  assert.equal(s.orCalls.length, 0);
   const lines = s.ledger();
   assert.equal(lines.length, 1);
   assert.equal(lines[0].accountId, 'claude-1');
   assert.equal(lines[0].notionalUsd, 0.00026);
   assert.equal(lines[0].costUsd, undefined, 'not spent');
   assert.ok(!JSON.stringify(lines).includes('secret'));
-  assert.equal(s.models.spentTodayUsd(), 0);
 });
 
 test('pool: it stays on the login it used last while that has room, then moves', async () => {
@@ -130,67 +119,37 @@ test('pool: a login that answers it is out of room counts as run dry, and the ne
   assert.deepEqual(lines.map((l) => [l.accountId, l.ok]), [['claude-1', false], ['claude-main', true]]);
 });
 
-test('pool: with every login out of room it goes to OpenRouter, or says no-room without a key', async () => {
-  const dry = [acct('claude-main', { room: 3 }), acct('claude-1', { blocked: true })];
-  const withKey = setup({ key: true, accounts: dry });
-  const r = await withKey.models.generate({ feature: 'titles', prompt: 'a' });
-  assert.ok(r.ok);
-  assert.equal(r.model, HAIKU);
-  assert.equal(withKey.cli.length, 0);
-  assert.deepEqual(withKey.orCalls, [HAIKU]);
-
-  const noKey = setup({ accounts: dry });
-  const r2 = await noKey.models.generate({ feature: 'titles', prompt: 'a' });
-  assert.equal(r2.ok ? 'sent' : r2.reason, 'no-room');
-  assert.match(r2.ok ? '' : r2.message, /Every login in Claude is out of room/);
-});
-
-test('pool: a login that fails some other way hands over to OpenRouter, and its failure is said when there is no key', async () => {
-  const fail: CliResponse = { ok: false, timedOut: false, limit: false, message: 'claude: something broke' };
-  const withKey = setup({ key: true, replies: [fail] });
-  const r = await withKey.models.generate({ feature: 'titles', prompt: 'a' });
-  assert.ok(r.ok);
-  assert.equal(r.model, HAIKU);
-  assert.equal(withKey.ranDry.length, 0);
-
-  const noKey = setup({ replies: [fail] });
-  const r2 = await noKey.models.generate({ feature: 'titles', prompt: 'a' });
-  assert.equal(r2.ok ? 'sent' : r2.reason, 'provider');
-  assert.match(r2.ok ? '' : r2.message, /something broke/);
-});
-
-test('pool: null means OpenRouter only; no pool and no key says so', async () => {
-  const s = setup({ key: true, pool: null });
-  const r = await s.models.generate({ feature: 'titles', prompt: 'a' });
-  assert.ok(r.ok);
-  assert.equal(r.model, HAIKU);
-  assert.equal(s.cli.length, 0);
-  assert.equal(s.models.unavailable(), undefined);
-
-  const none = setup({ pool: null });
-  assert.equal(none.models.unavailable(), 'No OpenRouter key');
-  const r2 = await none.models.generate({ feature: 'titles', prompt: 'a' });
-  assert.equal(r2.ok ? 'sent' : r2.reason, 'no-key');
-
-  const gone = setup({ pool: 'nope' });
-  assert.equal(gone.models.unavailable(), 'No Claude pool or OpenRouter key');
-  assert.equal(setup().models.unavailable(), undefined, 'a pool with a Claude login is enough');
-});
-
-test('pool: a poolOnly call never goes to OpenRouter, even with a key', async () => {
-  const dry = (login: string) => acct(login, { blocked: true });
-  const s = setup({ key: true, accounts: [dry('claude-main'), dry('claude-1')] });
-  const r = await s.models.generate({ feature: 'projects', poolOnly: true, prompt: 'a' });
+test('pool: with every login out of room it says no-room, though a pool is there', async () => {
+  const s = setup({ accounts: [acct('claude-main', { room: 3 }), acct('claude-1', { blocked: true })] });
+  const r = await s.models.generate({ feature: 'projects', prompt: 'a' });
   assert.equal(r.ok ? 'sent' : r.reason, 'no-room');
-  assert.deepEqual(s.orCalls, [], 'OpenRouter is never asked');
-  assert.equal(s.models.unavailable({ poolOnly: true }), undefined, 'a pool with a Claude login is there, just out of room');
+  assert.match(r.ok ? '' : r.message, /Every login in Claude is out of room/);
+  assert.equal(s.cli.length, 0);
+  assert.equal(s.models.unavailable(), undefined, 'a pool with a Claude login is there, just out of room');
+});
 
-  const none = setup({ key: true, pool: null });
-  assert.equal(none.models.unavailable(), undefined, 'titles can still use the key');
-  assert.equal(none.models.unavailable({ poolOnly: true }), 'Needs a Claude pool to run on');
-  const r2 = await none.models.generate({ feature: 'projects', poolOnly: true, prompt: 'a' });
-  assert.equal(r2.ok ? 'sent' : r2.reason, 'no-key');
-  assert.deepEqual(none.orCalls, []);
+test('pool: a login that fails some other way says so, and is not counted as run dry', async () => {
+  const s = setup({ replies: [{ ok: false, timedOut: false, limit: false, message: 'claude: something broke' }] });
+  const r = await s.models.generate({ feature: 'titles', prompt: 'a' });
+  assert.equal(r.ok ? 'sent' : r.reason, 'provider');
+  assert.match(r.ok ? '' : r.message, /something broke/);
+  assert.equal(s.cli.length, 1);
+  assert.equal(s.ranDry.length, 0);
+
+  const slow = setup({ replies: [{ ok: false, timedOut: true, limit: false, message: 'claude: timed out' }] });
+  const r2 = await slow.models.generate({ feature: 'titles', prompt: 'a' });
+  assert.equal(r2.ok ? 'sent' : r2.reason, 'timeout');
+});
+
+test('pool: null, a pool that is gone or one with no Claude login says no-pool, and unavailable() says so', async () => {
+  for (const pool of [null, 'nope', 'codex-only']) {
+    const s = setup({ pool, pools: [{ id: 'claude', title: 'Claude', accountIds: ['claude-main'] }, { id: 'codex-only', title: 'Codex', accountIds: ['codex-main'] }] });
+    assert.equal(s.models.unavailable(), 'Needs a Claude pool to run on', String(pool));
+    const r = await s.models.generate({ feature: 'titles', prompt: 'a' });
+    assert.equal(r.ok ? 'sent' : r.reason, 'no-pool', String(pool));
+    assert.equal(s.cli.length, 0);
+  }
+  assert.equal(setup().models.unavailable(), undefined, 'a pool with a Claude login is enough');
 });
 
 test('pool: only the pool\'s Claude logins are used, never a noted login outside it or a Codex one', async () => {
@@ -250,8 +209,7 @@ test('settings: models.pool is a pool id or null, saved to runner.json', () => {
   const home = tmpDir();
   ensureHome(home);
   const cfg = testConfig(home);
-  const models = new Models({ home, clock: new FakeClock(), log: nullLogger, settings: () => cfg.models });
-  const svc = new SettingsService({ config: cfg, models, publish: () => {}, clock: new FakeClock(), poolIds: () => ['claude', 'convex'] });
+  const svc = new SettingsService({ config: cfg, publish: () => {}, poolIds: () => ['claude', 'convex'] });
   const m = settingsMethods(svc);
   assert.equal(svc.get().models.pool, 'claude');
   assert.throws(() => m['settings.update']({ models: { pool: 'nope' } }), /No pool called nope. Pools: claude, convex/);

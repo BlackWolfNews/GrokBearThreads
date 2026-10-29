@@ -251,7 +251,7 @@ holds the live runner's restart, so stop it before a deploy.
   "idleMinutes": 30,
   "maxLiveCLIs": 6,
   "followMain": true,
-  "models": { "dailyBudgetUsd": 1, "privateFolders": ["~/dev/client-work"] }
+  "models": { "pool": "claude", "privateFolders": ["~/dev/client-work"] }
 }
 ```
 
@@ -266,10 +266,10 @@ and restart onto main by itself (`docs/dev-tools.md`, "The runner updating
 itself"); `THREADBEAR_FOLLOW_MAIN=0` does the same for one run.
 `models` is for the runner's own small-model calls
 (`src/models/`, docs/protocol.md "Settings and models"): `pool`, the pool
-whose Claude logins answer them first through the CLI (default `"claude"`,
-`null` for none), OpenRouter's daily budget in dollars (default 1; 0 turns
-OpenRouter off) and folders whose threads are never sent. The app's Settings window and `tb settings` show and change all of
-this; the OpenRouter key itself is `secrets/openrouter-key`.
+whose Claude logins answer them through the CLI (default `"claude"`,
+`null` for none, which turns titles and the librarian off), and folders
+whose threads are never sent. The app's Settings window and `tb settings`
+show and change both.
 
 Environment variables, mainly for tests:
 
@@ -301,8 +301,7 @@ What the runner gives the CLIs it starts is under Tools for agents below.
   restart.json                  a restart that's waiting for threads to finish
   restart.done.json             the last one handled, until this release is marked good
   secrets/runner-token          random bearer token, 0600 (folder 0700)
-  secrets/openrouter-key        the OpenRouter key, 0600, if one is set
-  models/usage.ndjson           one line per model call: feature, model, tokens, cost (no text)
+  models/usage.ndjson           one line per model call: feature, model, login, tokens (no text)
   inbox/                        images the app imports before sending
   run/children.json             CLI process groups this runner started, and the
                                 groups their tool commands ran in
@@ -349,7 +348,6 @@ bin/tb move <id> <folder>      # from the next message
 bin/tb delete <id>             # to trash/
 bin/tb accounts
 bin/tb settings                # what the Settings window shows
-bin/tb models key              # set the OpenRouter key: pasted at a prompt or piped in, never an argument
 bin/tb models try summarize "some text"   # one call by hand; also classify --labels a,b, extract --field name=desc, generate
 ```
 

@@ -42,9 +42,8 @@ private struct LibrarianAbout: View {
 
 /// What can be changed about the librarian, here rather than only in
 /// Settings: whether it's looking at all, and which pool's Claude logins
-/// it runs on. It never runs on OpenRouter (the runner's `poolOnly`), so
-/// there's no budget here. The pool is the runner's small-model setting,
-/// which titles share, so a change here shows in Settings › Models too.
+/// it runs on. The pool is the runner's small-jobs setting, which titles
+/// share, so a change here shows in Settings › Models too.
 private struct LibrarianSettings: View {
     @Environment(AppModel.self) private var app
     let status: LibrarianStatus
@@ -71,10 +70,10 @@ private struct LibrarianSettings: View {
                             ForEach(app.claudePools) { pool in
                                 Text(pool.title).tag(Optional(pool.id))
                             }
-                            // What's set but can't take a look: OpenRouter
-                            // only (from Settings), or a pool deleted since
-                            // or with no Claude login. Shown so the picker
-                            // still says what's set; not offered.
+                            // What's set but can't take a look: None (from
+                            // Settings), or a pool deleted since or with no
+                            // Claude login. Shown so the picker still says
+                            // what's set; not offered.
                             if let id = settings.models.pool, !app.claudePools.contains(where: { $0.id == id }) {
                                 Text("\(id), which has no Claude login").tag(Optional(id))
                             } else if settings.models.pool == nil {

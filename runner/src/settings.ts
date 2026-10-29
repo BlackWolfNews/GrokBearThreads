@@ -1,7 +1,5 @@
-// settings.get, settings.update and settings.setKey (docs/protocol.md):
-// the runner's side of the Settings window. Everything but the key lives
-// in runner.json; the key lives in secrets/openrouter-key and never goes
-// back out, only whether it's set and its last 4 characters.
+// settings.get and settings.update (docs/protocol.md): the runner's side
+// of the Settings window. Everything lives in runner.json.
 import fs from 'node:fs';
 import path from 'node:path';
 import type { Config } from './config.ts';
@@ -9,7 +7,6 @@ import { expandHome, readRunnerJson, writeRunnerJson } from './config.ts';
 import type { Clock } from './clock.ts';
 import { ErrorCode, RpcError } from './protocol.ts';
 import type { Notification } from './runner.ts';
-import { keyHint, readKey, writeKey } from './models/index.ts';
 import type { Models } from './models/index.ts';
 
 export type Settings = {
@@ -19,10 +16,6 @@ export type Settings = {
   followMain: boolean;
   models: {
     pool: string | null;
-    openRouterKey: { set: boolean; hint?: string };
-    dailyBudgetUsd: number;
-    spentTodayUsd: number;
-    spentMonthUsd: number;
     privateFolders: string[];
   };
 };
@@ -32,32 +25,22 @@ export type SettingsUpdate = {
   idleMinutes?: number;
   maxLiveCLIs?: number;
   followMain?: boolean;
-  models?: { pool?: string | null; dailyBudgetUsd?: number; privateFolders?: string[] };
+  models?: { pool?: string | null; privateFolders?: string[] };
 };
-
-// While calls are adding to the spend, clients hear about it at most this often.
-const SPEND_NOTIFY_MS = 60_000;
 
 export class SettingsService {
   private cfg: Config;
-  private models: Models;
   private publish: (n: Notification) => void;
-  private clock: Clock;
-  private spendTimer?: { cancel(): void };
   // The pools there are, so models.pool can be checked; unchecked without.
   private poolIds?: () => string[];
 
-  constructor(opts: { config: Config; models: Models; publish: (n: Notification) => void; clock: Clock; poolIds?: () => string[] }) {
+  constructor(opts: { config: Config; publish: (n: Notification) => void; poolIds?: () => string[] }) {
     this.cfg = opts.config;
     this.poolIds = opts.poolIds;
-    this.models = opts.models;
     this.publish = opts.publish;
-    this.clock = opts.clock;
   }
 
   get(): Settings {
-    const key = readKey(this.cfg.home);
-    const hint = keyHint(key);
     return {
       defaultCwd: this.cfg.defaults.cwd,
       idleMinutes: Math.round((this.cfg.idleMs / 60_000) * 100) / 100,
@@ -66,10 +49,6 @@ export class SettingsService {
       followMain: readRunnerJson(this.cfg.home).followMain !== false,
       models: {
         pool: this.cfg.models.pool,
-        openRouterKey: hint ? { set: true, hint } : { set: Boolean(key) },
-        dailyBudgetUsd: this.cfg.models.dailyBudgetUsd,
-        spentTodayUsd: round(this.models.spentTodayUsd()),
-        spentMonthUsd: round(this.models.spentMonthUsd()),
         privateFolders: [...this.cfg.models.privateFolders],
       },
     };
@@ -87,8 +66,6 @@ export class SettingsService {
     if (u.maxLiveCLIs !== undefined && !(Number.isInteger(u.maxLiveCLIs) && u.maxLiveCLIs >= 1 && u.maxLiveCLIs <= 20)) {
       throw bad('maxLiveCLIs must be a whole number from 1 to 20');
     }
-    const budget = u.models?.dailyBudgetUsd;
-    if (budget !== undefined && !(budget >= 0 && budget <= 100)) throw bad('dailyBudgetUsd must be from 0 to 100');
     const folders = u.models?.privateFolders?.map((f) => f.trim()).filter(Boolean);
     const pool = u.models?.pool === undefined ? undefined : u.models.pool === null ? null : u.models.pool.trim();
     if (pool === '') throw bad('pool must be a pool id or null');
@@ -110,38 +87,13 @@ export class SettingsService {
     }
     // Saved only: the updater reads it when the runner starts.
     if (u.followMain !== undefined) json.followMain = u.followMain;
-    if (budget !== undefined || folders !== undefined || pool !== undefined) {
+    if (folders !== undefined || pool !== undefined) {
       json.models = { ...json.models };
       if (pool !== undefined) json.models.pool = this.cfg.models.pool = pool;
-      if (budget !== undefined) json.models.dailyBudgetUsd = this.cfg.models.dailyBudgetUsd = budget;
       if (folders !== undefined) json.models.privateFolders = this.cfg.models.privateFolders = [...new Set(folders)];
     }
     writeRunnerJson(this.cfg.home, json);
     return this.changed();
-  }
-
-  setKey(provider: string, key: string | null): Settings {
-    if (provider !== 'openrouter') throw bad(`Unknown provider ${provider}; only "openrouter" for now`);
-    if (key !== null) {
-      key = key.trim();
-      if (key.length < 20 || /\s/.test(key)) throw bad("That doesn't look like an OpenRouter key.");
-    }
-    writeKey(this.cfg.home, key);
-    return this.changed();
-  }
-
-  // Models calls this after each call that went out.
-  spendChanged(): void {
-    if (this.spendTimer) return;
-    this.spendTimer = this.clock.setTimeout(() => {
-      this.spendTimer = undefined;
-      this.publish({ method: 'settings.updated', params: { settings: this.get() } });
-    }, SPEND_NOTIFY_MS);
-  }
-
-  stop(): void {
-    this.spendTimer?.cancel();
-    this.spendTimer = undefined;
   }
 
   private changed(): Settings {
@@ -172,7 +124,6 @@ export function settingsMethods(s: SettingsService): Record<string, (p: Record<s
           if (mm.pool !== null && typeof mm.pool !== 'string') throw bad('models.pool must be a pool id or null');
           u.models.pool = mm.pool;
         }
-        if (mm.dailyBudgetUsd !== undefined) u.models.dailyBudgetUsd = num(mm.dailyBudgetUsd, 'models.dailyBudgetUsd');
         if (mm.privateFolders !== undefined) {
           if (!Array.isArray(mm.privateFolders) || mm.privateFolders.some((f) => typeof f !== 'string')) {
             throw bad('models.privateFolders must be an array of strings');
@@ -182,14 +133,10 @@ export function settingsMethods(s: SettingsService): Record<string, (p: Record<s
       }
       return { settings: s.update(u) };
     },
-    'settings.setKey': (p) => {
-      if (p.key !== null && typeof p.key !== 'string') throw bad('key must be a string or null');
-      return { settings: s.setKey(str(p.provider, 'provider'), p.key as string | null) };
-    },
   };
 }
 
-// models.run: one call by hand, for `tb models try`. Spends like any other.
+// models.run: one call by hand, for `tb models try`, on the pool like any other.
 export function modelMethods(m: Models): Record<string, (p: Record<string, unknown>) => unknown> {
   return {
     'models.run': async (p) => {
@@ -232,10 +179,6 @@ function str(v: unknown, k: string): string {
 function num(v: unknown, k: string): number {
   if (typeof v !== 'number' || !Number.isFinite(v)) throw bad(`${k} must be a number`);
   return v;
-}
-
-function round(n: number): number {
-  return Math.round(n * 1e6) / 1e6;
 }
 
 function isDirectory(p: string): boolean {

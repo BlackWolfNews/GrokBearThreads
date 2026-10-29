@@ -286,7 +286,7 @@ const deviceList = () => ({ devices: [...devices], site: DEMO_SITE });
 const settings = {
   defaultCwd: defaults.cwd, idleMinutes: 30, maxLiveCLIs: 6, followMain: true,
   models: {
-    pool: 'claude', openRouterKey: { set: true, hint: 'f3a9' }, dailyBudgetUsd: 1, spentTodayUsd: 0.0123, spentMonthUsd: 0.4187,
+    pool: 'claude',
     privateFolders: ['~/dev/clients/acme'],
   },
 };
@@ -1023,25 +1023,9 @@ async function dispatch(client, method, p) {
         if (m.pool !== null && !poolOf(m.pool)) throw rpcError(-32602, `No pool called ${m.pool}`);
         settings.models.pool = m.pool;
       }
-      if (m.dailyBudgetUsd !== undefined) {
-        if (typeof m.dailyBudgetUsd !== 'number' || m.dailyBudgetUsd < 0 || m.dailyBudgetUsd > 100) throw rpcError(-32602, 'The daily budget must be between $0 and $100');
-        settings.models.dailyBudgetUsd = m.dailyBudgetUsd;
-      }
       if (m.privateFolders !== undefined) {
         if (!Array.isArray(m.privateFolders) || m.privateFolders.some((f) => typeof f !== 'string')) throw rpcError(-32602, 'privateFolders must be a list of folders');
         settings.models.privateFolders = m.privateFolders;
-      }
-      broadcastSettings();
-      return { settings };
-    }
-    case 'settings.setKey': {
-      if (p.provider !== 'openrouter') throw rpcError(-32602, 'provider must be "openrouter"');
-      if (p.key === null) {
-        settings.models.openRouterKey = { set: false };
-      } else {
-        const key = typeof p.key === 'string' ? p.key.trim() : '';
-        if (key.length < 20 || /\s/.test(key)) throw rpcError(-32602, "That doesn't look like an OpenRouter key");
-        settings.models.openRouterKey = { set: true, hint: key.slice(-4) };
       }
       broadcastSettings();
       return { settings };
@@ -2004,9 +1988,9 @@ function addDemoProjects() {
       { id: 'l4', at: ago(60 * 2), threadId: 'demo_ci_slow', threadTitle: title('demo_ci_slow'), reason: 'new-folder', outcome: 'joined', text: 'Put it in Threadbear too', projectIds: [tb.id], costUsd: 0.0026 },
       { id: 'l3', at: ago(60 * 3), threadId: 'demo_tunnel', threadTitle: title('demo_tunnel'), reason: 'asked', outcome: 'skipped', text: 'Archived before its first look' },
       { id: 'l2', at: ago(60 * 4), threadId: 'demo_sqlite_vs_files', threadTitle: title('demo_sqlite_vs_files'), reason: 'catch-up', outcome: 'updated', text: 'Threadbear\'s state', projectIds: [tb.id], costUsd: 0.0029 },
-      { id: 'l1', at: ago(60 * 5), threadId: 'demo_landing_pages', threadTitle: title('demo_landing_pages'), reason: 'first-turn', outcome: 'failed', text: 'OpenRouter took too long to answer' },
+      { id: 'l1', at: ago(60 * 5), threadId: 'demo_landing_pages', threadTitle: title('demo_landing_pages'), reason: 'first-turn', outcome: 'failed', text: 'Claude took too long to answer' },
     ],
-    looksToday: 14, spentTodayUsd: 0.0312, skippedToday: 3, tokensToday: 52_400, notionalTodayUsd: 0.011,
+    looksToday: 14, spentTodayUsd: 0, skippedToday: 3, tokensToday: 52_400, notionalTodayUsd: 0.011,
   };
 }
 

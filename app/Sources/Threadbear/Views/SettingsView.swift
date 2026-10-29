@@ -155,12 +155,6 @@ private struct GeneralSettings: View {
 
 private struct ModelSettings: View {
     @Environment(AppModel.self) private var app
-    /// What's typed into the key field. Held only until it's sent, then
-    /// cleared: the app never keeps the key.
-    @State private var keyDraft = ""
-    @State private var changingKey = false
-    @State private var savingKey = false
-    @State private var budgetDraft: Double = 1
 
     var body: some View {
         SettingsGate { settings in
@@ -177,55 +171,15 @@ private struct ModelSettings: View {
                                 Text("\(id), which has no Claude login").tag(Optional(id))
                             }
                             Divider()
-                            Text("OpenRouter only").tag(String?.none)
+                            Text("None").tag(String?.none)
                         }
                         .tip("Which pool's Claude logins write titles and do the librarian's work")
                     } header: {
                         Text("Small jobs")
                     } footer: {
-                        Footnote("Titles and the librarian use Haiku on one of this pool's Claude logins, the one with the most room. That counts towards the login's usage, not the budget below. When every login is out of room, titles go to OpenRouter if there's a key; the librarian only ever uses the pool, so it waits.")
+                        Footnote("Titles and the librarian use Haiku on one of this pool's Claude logins, the one with the most room, and count towards its usage. When every login is out of room they wait. None turns them off.")
                     }
                 }
-
-                Section {
-                    keyRow(settings.models.openRouterKey)
-                } header: {
-                    Text("OpenRouter")
-                } footer: {
-                    if settings.models.poolSupported {
-                        Footnote("For small jobs the pool can't take, and models only OpenRouter has. It only uses providers that keep nothing. Threads in private folders are never sent.")
-                    } else {
-                        Footnote("With a key set, Threadbear sends the start of each new thread to OpenRouter to write its title, and later more for summaries and triage. It only uses providers that keep nothing. Threads in private folders are never sent.")
-                    }
-                }
-
-                Section {
-                    LabeledContent("Daily budget") {
-                        // "$" and a number rather than a currency format,
-                        // which reads "USD 1.00" outside the US.
-                        HStack(spacing: 4) {
-                            Text("$")
-                                .foregroundStyle(.secondary)
-                            TextField("Daily budget", value: $budgetDraft, format: .number.precision(.fractionLength(0...2)))
-                                .labelsHidden()
-                                .textFieldStyle(.roundedBorder)
-                                .multilineTextAlignment(.trailing)
-                                .frame(width: 70)
-                                .onSubmit { saveBudget(settings) }
-                                .tip("Most to spend on OpenRouter in a day, in US dollars. Return saves it.")
-                        }
-                    }
-                    LabeledContent("Spent today", value: SettingsText.money(settings.models.spentTodayUsd))
-                    LabeledContent("Spent this month", value: SettingsText.money(settings.models.spentMonthUsd))
-                } header: {
-                    Text("Spending")
-                } footer: {
-                    Footnote(settings.models.poolSupported
-                        ? "OpenRouter calls stop for the day once the budget is spent. Set it to $0 to stop them altogether."
-                        : "Calls stop for the day once the budget is spent. Set it to $0 to stop them altogether.")
-                }
-                .onAppear { budgetDraft = settings.models.dailyBudgetUsd }
-                .onChange(of: settings.models.dailyBudgetUsd) { _, new in budgetDraft = new }
 
                 Section {
                     if settings.models.privateFolders.isEmpty {
@@ -272,61 +226,6 @@ private struct ModelSettings: View {
 
     private func poolBinding(_ settings: RunnerSettings) -> Binding<String?> {
         Binding(get: { settings.models.pool }, set: { app.updateSettings(SettingsUpdate(pool: .some($0))) })
-    }
-
-    @ViewBuilder
-    private func keyRow(_ key: RunnerSettings.Key) -> some View {
-        if key.set && !changingKey {
-            LabeledContent("Key") {
-                HStack(spacing: 8) {
-                    Text(key.hint.map { "Set, ends in \($0)" } ?? "Set")
-                        .foregroundStyle(.secondary)
-                    Button("Change") { changingKey = true }
-                        .tip("Put in a different key")
-                    Button("Remove") { Task { await app.setOpenRouterKey(nil) } }
-                        .tip("Forget the key: titles and summaries stop until there's a new one")
-                }
-            }
-        } else {
-            LabeledContent("Key") {
-                HStack(spacing: 8) {
-                    SecureField("Key", text: $keyDraft, prompt: Text("sk-or-…"))
-                        .labelsHidden()
-                        .frame(maxWidth: 220)
-                        .onSubmit(saveKey)
-                        .tip("Your OpenRouter API key. It goes to the runner, not this app.")
-                    if changingKey {
-                        Button("Cancel") {
-                            keyDraft = ""
-                            changingKey = false
-                        }
-                        .tip("Keep the key you have")
-                    }
-                    Button("Save", action: saveKey)
-                        .tip("Send the key to the runner")
-                        .disabled(keyDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || savingKey)
-                }
-            }
-        }
-    }
-
-    private func saveKey() {
-        let key = keyDraft.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !key.isEmpty, !savingKey else { return }
-        savingKey = true
-        Task {
-            let saved = await app.setOpenRouterKey(key)
-            savingKey = false
-            // Cleared either way once the runner has answered: a key that
-            // was refused is typed again, not kept around.
-            keyDraft = ""
-            if saved { changingKey = false }
-        }
-    }
-
-    private func saveBudget(_ settings: RunnerSettings) {
-        guard budgetDraft != settings.models.dailyBudgetUsd else { return }
-        app.updateSettings(SettingsUpdate(dailyBudgetUsd: budgetDraft))
     }
 
     private func addPrivateFolder(_ current: [String]) {

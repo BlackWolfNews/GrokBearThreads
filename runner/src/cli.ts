@@ -6,7 +6,6 @@ import { RunnerClient } from './client.ts';
 import { poolLine } from './pools.ts';
 import type { Account, ImageRef, Pool, LibrarianStatus, PersistedEvent, Project, RunnerDefaults, Schedule, ThreadSummary } from './protocol.ts';
 import type { Settings } from './settings.ts';
-import { usd } from './models/index.ts';
 import { backgroundFlag } from './protocol.ts';
 import { parseWhen as parseLater, relativeFuture } from './when.ts';
 import { DEV_HELP, formatModels, logsCommand, runDev } from './tb-dev.ts';
@@ -94,9 +93,8 @@ const HELP = `tb: talk to the Threadbear runner
   tb librarian run [<threadId>]   a look at a thread now; with none, at every recent thread it hasn't seen
   tb librarian pause|resume
   tb settings [--json]            what the Settings window shows
-  tb models [--json]              the small-model pool, the OpenRouter key (set or not), budget and spend
-  tb models pool <pool|off>       which pool's Claude logins answer small jobs first (off: OpenRouter only)
-  tb models key [--remove]        sets the OpenRouter key from a prompt or stdin, never an argument
+  tb models [--json]              the small-model pool and private folders
+  tb models pool <pool|off>       which pool's Claude logins answer small jobs (off: none, so no titles or librarian)
   tb models try <job> "text" [--labels a,b] [--field name=description]... [--system S] [--cwd DIR]
                                   one call by hand: classify (--labels), extract (--field),
                                   summarize or generate. It spends like any other
@@ -462,7 +460,7 @@ async function run(client: RunnerClient, cmd: string, args: string[], f: Flags):
     }
     case 'accounts': {
       const r = await client.call<{ accounts: Account[]; defaults: RunnerDefaults }>('hello', { client: 'tb', version: '1' });
-      // With an account, its models (tb models is the runner's own OpenRouter models).
+      // With an account, its models (tb models is the runner's own small jobs).
       if (args[0]) {
         const a = r.accounts.find((x) => x.id === args[0]) ?? r.accounts.find((x) => x.email === args[0] || x.title === args[0]);
         if (!a) throw new Error(`No account ${args[0]}. Accounts: ${r.accounts.map((x) => x.id).join(', ')}`);
@@ -622,12 +620,7 @@ function printSettings(s: Settings): void {
 
 function printModels(s: Settings): void {
   const m = s.models;
-  // An older runner sends no pool: everything went through OpenRouter.
-  if (m.pool !== undefined) console.log(`Small jobs on    ${m.pool === null ? 'OpenRouter only' : `the ${m.pool} pool, then OpenRouter`}`);
-  console.log(`OpenRouter key   ${m.openRouterKey.set ? `set${m.openRouterKey.hint ? `, ends in ${m.openRouterKey.hint}` : ''}` : 'not set'}`);
-  console.log(`Daily budget     ${m.dailyBudgetUsd === 0 ? 'off' : usd(m.dailyBudgetUsd)}`);
-  console.log(`Spent today      ${usd(m.spentTodayUsd)}`);
-  console.log(`Spent this month ${usd(m.spentMonthUsd)}`);
+  console.log(`Small jobs on    ${m.pool === null ? 'nothing: titles and the librarian are off' : `the ${m.pool} pool`}`);
   console.log(`Private folders  ${m.privateFolders.length ? m.privateFolders.join(', ') : 'none'}`);
 }
 
@@ -646,15 +639,6 @@ async function modelsCommand(client: RunnerClient, args: string[], f: Flags): Pr
     printModels(r.settings);
     return 0;
   }
-  if (action === 'key') {
-    if (rest.length) throw new Error("tb models key reads the key from a prompt or stdin, so it stays out of your shell history. Run it on its own.");
-    const key = f.remove ? null : await readSecret('OpenRouter key (hidden): ');
-    if (key === '') throw new Error('No key given; nothing changed.');
-    const r = await client.call<{ settings: Settings }>('settings.setKey', { provider: 'openrouter', key });
-    const k = r.settings.models.openRouterKey;
-    console.log(k.set ? `Key saved${k.hint ? `, ends in ${k.hint}` : ''}.` : 'Key removed.');
-    return 0;
-  }
   if (action === 'try') {
     const [job, text] = rest;
     if (!job || text === undefined) throw new Error('tb models try <classify|extract|summarize|generate> "text"');
@@ -671,50 +655,16 @@ async function modelsCommand(client: RunnerClient, args: string[], f: Flags): Pr
     }
     if (f.system) params.system = f.system;
     if (f.cwd) params.cwd = path.resolve(String(f.cwd));
-    const r = await client.call<{ ok: boolean; value?: unknown; model?: string; costUsd?: number; reason?: string; message?: string }>('models.run', params);
+    const r = await client.call<{ ok: boolean; value?: unknown; model?: string; reason?: string; message?: string }>('models.run', params);
     if (f.json) console.log(JSON.stringify(r, null, 2));
     else if (!r.ok) console.error(`Not sent or no answer (${r.reason}): ${r.message}`);
     else {
       console.log(typeof r.value === 'string' ? r.value : JSON.stringify(r.value, null, 2));
-      console.error(`(${r.model}${r.costUsd !== undefined ? `, ${usd(r.costUsd)}` : ''})`);
+      console.error(`(${r.model})`);
     }
     return r.ok ? 0 : 1;
   }
-  throw new Error(`Unknown: tb models ${action}. It's pool, key or try.`);
-}
-
-// A line from stdin; from a terminal, prompted for and not echoed.
-async function readSecret(prompt: string): Promise<string> {
-  const stdin = process.stdin;
-  if (!stdin.isTTY) {
-    let data = '';
-    for await (const chunk of stdin) data += chunk;
-    return data.trim();
-  }
-  process.stderr.write(prompt);
-  stdin.setRawMode(true);
-  stdin.resume();
-  stdin.setEncoding('utf8');
-  return new Promise((resolve, reject) => {
-    let got = '';
-    const done = (err?: Error) => {
-      stdin.setRawMode(false);
-      stdin.pause();
-      stdin.off('data', onData);
-      process.stderr.write('\n');
-      if (err) reject(err);
-      else resolve(got.trim());
-    };
-    const onData = (s: string) => {
-      for (const ch of s) {
-        if (ch === '\r' || ch === '\n') return done();
-        if (ch === '\u0003') return done(new Error('Cancelled.'));
-        if (ch === '\u007f') got = got.slice(0, -1);
-        else got += ch;
-      }
-    };
-    stdin.on('data', onData);
-  });
+  throw new Error(`Unknown: tb models ${action}. It's pool or try.`);
 }
 
 // Inside a thread, tb won't stop the thread it runs in, as the threadbear
@@ -954,7 +904,7 @@ function printProject(p: Project, threadIds: string[]): void {
 
 function printLibrarian(l: LibrarianStatus): void {
   const state = l.current ? `working on "${l.current.threadTitle}" (${l.current.why})` : l.state + (l.reason ? `: ${l.reason}` : '');
-  console.log(`Librarian: ${state}. ${l.looksToday} look${l.looksToday === 1 ? '' : 's'} today, ${l.skippedToday ?? 0} skipped, ${l.tokensToday ?? 0} tokens, $${l.spentTodayUsd.toFixed(4)} spent, $${(l.notionalTodayUsd ?? 0).toFixed(4)} at API prices on the pool.`);
+  console.log(`Librarian: ${state}. ${l.looksToday} look${l.looksToday === 1 ? '' : 's'} today, ${l.skippedToday ?? 0} skipped, ${l.tokensToday ?? 0} tokens ($${(l.notionalTodayUsd ?? 0).toFixed(4)} at API prices, on the pool's room).`);
   if (l.queue.length) {
     console.log('\nNext:');
     for (const j of l.queue.slice(0, 20)) console.log(`  ${j.dueAt}  ${j.threadId.slice(0, 8)} "${j.threadTitle}"  ${j.why}`);

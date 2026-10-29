@@ -204,10 +204,8 @@ enum Automation {
                 "idleMinutes": settings.idleMinutes,
                 "maxLiveCLIs": settings.maxLiveCLIs,
                 "followMain": settings.followMain,
-                // "" is OpenRouter only, or an older runner with no pools.
+                // "" is none (small jobs off), or an older runner with no pools.
                 "smallJobsPool": settings.models.pool ?? "",
-                "keySet": settings.models.openRouterKey.set,
-                "dailyBudgetUsd": settings.models.dailyBudgetUsd,
                 "privateFolders": settings.models.privateFolders,
                 "error": app.settingsError ?? "",
                 "pools": app.pools.map { "\($0.id) \"\($0.title)\": " + $0.accountIds.joined(separator: ", ") + ($0.folders.isEmpty ? "" : " [" + $0.folders.joined(separator: ", ") + "]") },

@@ -93,9 +93,9 @@ export type Config = {
   // else's copy (src/upstream.ts): runner.json `releases`.
   releases?: { publish: boolean; signingKey?: string };
   // The runner's own model calls (src/models/): the pool whose Claude
-  // logins answer them first (null: none), OpenRouter's daily cap in
-  // dollars (0 turns it off) and folders whose threads are never sent.
-  models: { pool: string | null; dailyBudgetUsd: number; privateFolders: string[] };
+  // logins answer them (null: none, so no small jobs) and folders whose
+  // threads are never sent.
+  models: { pool: string | null; privateFolders: string[] };
   // The Convex mirror (src/sync.ts): the project's URL, whether it's on,
   // the name the phone shows for this runner and its id (made once).
   // THREADBEAR_SYNC=off turns it off for tests and dev runners.
@@ -132,7 +132,7 @@ export type RunnerJson = {
   pools?: unknown[];
   followMain?: boolean;
   releases?: { publish?: boolean; signingKey?: string };
-  models?: { pool?: string | null; dailyBudgetUsd?: number; privateFolders?: string[] };
+  models?: { pool?: string | null; privateFolders?: string[] };
   // icon: an SF Symbol for this runner in lists (machine.ts works one out).
   sync?: { enabled?: boolean; url?: string; name?: string; runnerId?: string; icon?: string };
   // The gateway, when it isn't the `connectors` MCP server in
@@ -308,17 +308,14 @@ function cliUpdatesConfig(raw: Partial<CliUpdatesConfig> | undefined, envValue: 
   };
 }
 
-export const DEFAULT_DAILY_BUDGET_USD = 1;
 export const DEFAULT_SMALL_MODEL_POOL = 'claude';
 
 export function modelSettingsFrom(json: RunnerJson): Config['models'] {
-  const budget = json.models?.dailyBudgetUsd;
   const folders = json.models?.privateFolders;
   const pool = json.models?.pool;
   return {
     // Absent or not a string: the Claude pool. null is Mike saying none.
     pool: pool === null ? null : typeof pool === 'string' && pool.trim() ? pool.trim() : DEFAULT_SMALL_MODEL_POOL,
-    dailyBudgetUsd: typeof budget === 'number' && Number.isFinite(budget) && budget >= 0 ? budget : DEFAULT_DAILY_BUDGET_USD,
     privateFolders: Array.isArray(folders) ? folders.filter((f): f is string => typeof f === 'string' && f.trim() !== '') : [],
   };
 }

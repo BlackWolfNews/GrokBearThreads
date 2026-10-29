@@ -1,6 +1,6 @@
 // Real end-to-end check for small jobs on a Claude pool (docs/protocol.md,
-// "Settings and models"): a runner with no OpenRouter key, its small jobs
-// on a pool holding only claude-3, answers models.run through the real
+// "Settings and models"): a fresh runner with its small jobs on a pool
+// holding only claude-3, answers models.run through the real
 // claude CLI on Haiku, records the login it ran on, and leaves no session
 // behind in the login's config dir (so the Agent Archive never sees these
 // calls as threads). Tiny prompts and a temp runner data dir. Run with
@@ -78,11 +78,9 @@ describe('small jobs on a Claude pool, end to end', { concurrency: false }, () =
     else fs.rmSync(root, { recursive: true, force: true });
   });
 
-  test('a title comes back from Haiku on the pool login, with no key and no session left behind', async () => {
+  test('a title comes back from Haiku on the pool login, with no session left behind', async () => {
     const account = accounts.find((a) => a.id === ACCOUNT);
     assert.ok(account, `${ACCOUNT} is a login here`);
-    const settings = (await client.call('settings.get', {})).settings;
-    assert.equal(settings.models.openRouterKey.set, false, 'a fresh data dir has no key');
     await client.call('pools.save', { pools: [{ id: 'e2e', title: 'E2E', accountIds: [ACCOUNT] }] });
     await client.call('settings.update', { models: { pool: 'e2e' } });
 
@@ -92,7 +90,7 @@ describe('small jobs on a Claude pool, end to end', { concurrency: false }, () =
     const r = await client.call('models.run', {
       job: 'generate',
       system: 'Write a title of 3 to 6 words for a chat that starts with this message. Answer with the title only.',
-      text: 'Should the librarian run Haiku on one of my Claude logins rather than through OpenRouter?',
+      text: 'Should the librarian run Haiku on one of my Claude logins rather than through an API key?',
     });
     const ms = Date.now() - started;
     assert.equal(r.ok, true, r.message);
@@ -105,7 +103,6 @@ describe('small jobs on a Claude pool, end to end', { concurrency: false }, () =
     assert.equal(last.accountId, ACCOUNT);
     assert.equal(last.ok, true);
     assert.equal(last.costUsd, undefined, 'nothing spent');
-    assert.equal((await client.call('settings.get', {})).settings.models.spentTodayUsd, 0);
 
     // No session for the CLI's folder, and no new project folder at all.
     const cliDir = fs.realpathSync(path.join(home, 'models', 'cli'));

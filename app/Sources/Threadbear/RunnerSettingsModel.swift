@@ -6,9 +6,7 @@ enum SettingsTab: String, Hashable, CaseIterable {
 }
 
 /// The Settings window's side of AppModel. Everything in it is the
-/// runner's (runner.json and its secrets folder); the app keeps none of it,
-/// and never the OpenRouter key, which goes to the runner once and is
-/// forgotten.
+/// runner's (runner.json); the app keeps none of it.
 extension AppModel {
     /// After hello; `settings.updated` replaces them from then on.
     func loadSettings() {
@@ -58,7 +56,6 @@ extension AppModel {
             if let v = update.maxLiveCLIs { shown.maxLiveCLIs = v }
             if let v = update.followMain { shown.followMain = v }
             if let v = update.pool { shown.models.pool = v }
-            if let v = update.dailyBudgetUsd { shown.models.dailyBudgetUsd = v }
             if let v = update.privateFolders { shown.models.privateFolders = v }
             runnerSettings = shown
         }
@@ -74,21 +71,4 @@ extension AppModel {
         }
     }
 
-    /// Sends the key to the runner (nil removes it). True once it's saved.
-    func setOpenRouterKey(_ key: String?) async -> Bool {
-        guard let client else {
-            settingsError = "Not connected to the runner."
-            return false
-        }
-        do {
-            receive(try await client.settingsSetKey(key: key))
-            settingsError = nil
-            return true
-        } catch {
-            // Never log the key, only that it failed.
-            settingsError = error.localizedDescription
-            AppLog.write("rpc", "settings.setKey failed: \(error.localizedDescription)")
-            return false
-        }
-    }
 }

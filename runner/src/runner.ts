@@ -1711,7 +1711,7 @@ export class Runner {
   }
 
   // Asks a small model for a better title than the first line. Without a
-  // key, in a private folder or over budget it says why and nothing
+  // pool, out of room or in a private folder it says why and nothing
   // changes. A title set meanwhile (by Mike or an agent) wins.
   // `reply`, the start of the agent's first answer, is there when an older
   // thread is named (retitle): a terse first message like "Explain thread

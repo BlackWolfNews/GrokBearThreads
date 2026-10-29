@@ -1,53 +1,23 @@
 import Foundation
 
 /// The runner's settings, as the Settings window shows them
-/// (docs/protocol.md, "Settings and models"). Everything is kept in the
-/// runner's runner.json except the OpenRouter key, which the app never
-/// sees: only whether one is set and its last few characters. Decoded as
-/// forgivingly as the other models, so a missing field takes its default.
+/// (docs/protocol.md, "Settings and models"), all kept in the runner's
+/// runner.json. Decoded as forgivingly as the other models, so a missing
+/// field takes its default and an older runner's OpenRouter fields (key,
+/// budget, spend) are ignored.
 public struct RunnerSettings: Sendable, Hashable, Decodable {
-    public struct Key: Sendable, Hashable, Decodable {
-        public var set: Bool
-        /// The key's last 4 characters, to tell keys apart.
-        public var hint: String?
-
-        public init(set: Bool = false, hint: String? = nil) {
-            self.set = set
-            self.hint = hint
-        }
-
-        public init(from decoder: Decoder) throws {
-            let c = try decoder.container(keyedBy: CodingKeys.self)
-            set = (try? c.decodeIfPresent(Bool.self, forKey: .set)) ?? false
-            hint = (try? c.decodeIfPresent(String.self, forKey: .hint)).flatMap { $0.isEmpty ? nil : $0 }
-        }
-
-        enum CodingKeys: String, CodingKey { case set, hint }
-    }
-
     public struct Models: Sendable, Hashable, Decodable {
-        /// The pool whose Claude logins answer small jobs first; nil means
-        /// OpenRouter only.
+        /// The pool whose Claude logins answer small jobs (titles, the
+        /// librarian); nil means none, so those are off.
         public var pool: String?
-        /// Whether the runner sends `pool` at all. An older one doesn't,
-        /// and sends everything through OpenRouter.
+        /// Whether the runner sends `pool` at all. A much older one doesn't.
         public var poolSupported: Bool
-        public var openRouterKey: Key
-        /// OpenRouter's; 0 turns OpenRouter off.
-        public var dailyBudgetUsd: Double
-        public var spentTodayUsd: Double
-        public var spentMonthUsd: Double
         /// Folders whose thread text is never sent, as written ("~/" kept).
         public var privateFolders: [String]
 
-        public init(pool: String? = nil, poolSupported: Bool = false, openRouterKey: Key = Key(), dailyBudgetUsd: Double = 1,
-                    spentTodayUsd: Double = 0, spentMonthUsd: Double = 0, privateFolders: [String] = []) {
+        public init(pool: String? = nil, poolSupported: Bool = false, privateFolders: [String] = []) {
             self.pool = pool
             self.poolSupported = poolSupported
-            self.openRouterKey = openRouterKey
-            self.dailyBudgetUsd = dailyBudgetUsd
-            self.spentTodayUsd = spentTodayUsd
-            self.spentMonthUsd = spentMonthUsd
             self.privateFolders = privateFolders
         }
 
@@ -55,14 +25,10 @@ public struct RunnerSettings: Sendable, Hashable, Decodable {
             let c = try decoder.container(keyedBy: CodingKeys.self)
             poolSupported = c.contains(.pool)
             pool = ((try? c.decodeIfPresent(String.self, forKey: .pool)) ?? nil).flatMap { $0.isEmpty ? nil : $0 }
-            openRouterKey = (try? c.decodeIfPresent(Key.self, forKey: .openRouterKey)) ?? Key()
-            dailyBudgetUsd = c.number(.dailyBudgetUsd) ?? 1
-            spentTodayUsd = c.number(.spentTodayUsd) ?? 0
-            spentMonthUsd = c.number(.spentMonthUsd) ?? 0
             privateFolders = c.lossyArray(String.self, forKey: .privateFolders)
         }
 
-        enum CodingKeys: String, CodingKey { case pool, openRouterKey, dailyBudgetUsd, spentTodayUsd, spentMonthUsd, privateFolders }
+        enum CodingKeys: String, CodingKey { case pool, privateFolders }
     }
 
     public var defaultCwd: String
@@ -99,19 +65,17 @@ public struct SettingsUpdate: Sendable, Hashable {
     public var idleMinutes: Int?
     public var maxLiveCLIs: Int?
     public var followMain: Bool?
-    /// `.some(nil)` sends null: OpenRouter only.
+    /// `.some(nil)` sends null: no pool, so no small jobs.
     public var pool: String??
-    public var dailyBudgetUsd: Double?
     public var privateFolders: [String]?
 
     public init(defaultCwd: String? = nil, idleMinutes: Int? = nil, maxLiveCLIs: Int? = nil, followMain: Bool? = nil,
-                pool: String?? = nil, dailyBudgetUsd: Double? = nil, privateFolders: [String]? = nil) {
+                pool: String?? = nil, privateFolders: [String]? = nil) {
         self.pool = pool
         self.defaultCwd = defaultCwd
         self.idleMinutes = idleMinutes
         self.maxLiveCLIs = maxLiveCLIs
         self.followMain = followMain
-        self.dailyBudgetUsd = dailyBudgetUsd
         self.privateFolders = privateFolders
     }
 
@@ -123,7 +87,6 @@ public struct SettingsUpdate: Sendable, Hashable {
         if let followMain { params["followMain"] = .bool(followMain) }
         var models: [String: JSONValue] = [:]
         if let pool { models["pool"] = pool.map { .string($0) } ?? .null }
-        if let dailyBudgetUsd { models["dailyBudgetUsd"] = .number(dailyBudgetUsd) }
         if let privateFolders { models["privateFolders"] = .array(privateFolders.map { .string($0) }) }
         if !models.isEmpty { params["models"] = .object(models) }
         return params
@@ -142,13 +105,6 @@ public extension RPCClient {
     func settingsUpdate(_ update: SettingsUpdate) async throws -> RunnerSettings {
         try await call("settings.update", .object(update.params), as: SettingsResult.self).settings
     }
-
-    /// Sends the key once; the runner keeps it and only ever says whether
-    /// one is set. Nil removes it.
-    func settingsSetKey(provider: String = "openrouter", key: String?) async throws -> RunnerSettings {
-        let params: JSONValue = .object(["provider": .string(provider), "key": key.map { .string($0) } ?? .null])
-        return try await call("settings.setKey", params, as: SettingsResult.self).settings
-    }
 }
 
 private extension KeyedDecodingContainer {
@@ -161,14 +117,6 @@ private extension KeyedDecodingContainer {
 }
 
 public enum SettingsText {
-    /// Spend in dollars: "$0.42", "$0", and "under $0.01" for the fractions
-    /// of a cent a few small calls cost, which "$0.00" would hide.
-    public static func money(_ usd: Double) -> String {
-        guard usd.isFinite, usd > 0 else { return "$0" }
-        if usd < 0.01 { return "under $0.01" }
-        return String(format: "$%.2f", usd)
-    }
-
     /// A folder as Mike would write it: "~/dev/x" for one in his home.
     public static func folder(_ path: String, home: String = NSHomeDirectory()) -> String {
         guard !home.isEmpty, path == home || path.hasPrefix(home + "/") else { return path }
