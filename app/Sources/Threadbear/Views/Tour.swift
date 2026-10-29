@@ -31,6 +31,10 @@ enum TourEdge {
 /// Something the tour has them do rather than read about (Mike, 29 Oct:
 /// show what makes Threadbear interesting, hands-on).
 enum TourTask: Equatable {
+    /// Hibernate one of the sample threads.
+    case hibernate
+    /// Archive one of the sample threads.
+    case archive
     /// Drag a panel somewhere else; done when the dock's layout changes.
     case movePanel
     /// Press the Welcome thread's example chip; done once it has run.
@@ -52,16 +56,23 @@ struct TourStep: Equatable {
     var edges: [TourEdge] = [.right, .left, .below, .above]
     /// The bear on the card.
     var bear: Bear.Pose? = nil
+    /// Opens the sample that needs you first, for a composer, Highlights
+    /// and the example patch's chip to point at.
+    var opensSample = false
 }
 
 /// A short, hands-on look round the window for someone new: the window
 /// dims and each step lights up one part of it with a card beside it, and
-/// three of them have you do the thing (move a panel, press a patch's chip,
-/// send your first thread). It starts by itself the first time the app
-/// connects to its runner, with no Skip then, and Help > Take the Tour runs
-/// it again, skippable. The only thread it makes is the Welcome thread in
-/// ~/Threadbear/Welcome, with no turn, for its example chip; the first real
-/// thread is theirs to send.
+/// most have you do the thing (hibernate and archive a thread, move a
+/// panel, press a patch's chip, send your first thread). It starts by
+/// itself the first time the app connects to its runner, with no Skip
+/// then, and Help > Take the Tour runs it again, skippable.
+///
+/// So there's something to try things on before they've run anything, it
+/// asks the runner for a few sample threads (`threads.samples`, made up
+/// and finished, no turn) in ~/Threadbear/Welcome, where it writes an
+/// example patch, and removes them when it ends however it ends (Mike,
+/// 29 Oct). The first real thread is theirs to send.
 ///
 /// Copy: notifications are played down and never the reason to pair the
 /// phone; the phone is for asking and steering while you're out (Mike,
@@ -78,24 +89,35 @@ final class Tour {
     static let patience: Duration = .seconds(20)
 
     static let steps: [TourStep] = [
-        TourStep(title: "Welcome to Threadbear", body: "A quick, hands-on look round. It takes about a minute.", bear: .wave),
+        TourStep(title: "Welcome to Threadbear",
+                 body: "A quick, hands-on look round, with a few sample threads to try things on. They go when the tour ends.",
+                 bear: .wave),
         TourStep(targets: [.threads], title: "Threads",
-                 body: "Everything your agents are working on. One that needs you moves to the top. The icons on the left switch to hibernating threads, the archive, schedules and projects."),
+                 body: "Everything your agents are working on. One that needs you moves to the top, and a blue dot is a reply you haven't read. The icons on the left switch to hibernating threads, the archive, schedules and projects."),
+        TourStep(targets: [.threads], title: "Not now? Hibernate it",
+                 body: "Hover Plan the weekend and press the moon to put it away until later. It comes back by itself, marked unread.",
+                 task: .hibernate,
+                 doneBody: "It waits under the sleeping bear on the left until then."),
+        TourStep(targets: [.threads], title: "Done with it? Archive it",
+                 body: "Hover Draft the release notes and press the box, or select it and press ⌘E.",
+                 task: .archive,
+                 doneBody: "Archived threads are kept, with a search, under the box on the left."),
         // The one choice that matters for safety, so it gets a step of its own.
         TourStep(targets: [.permission], title: "Full access or ask first",
                  body: "With Full access the agent edits files and runs commands on its own. Ask before edits stops for your OK each time. You choose per thread.",
-                 edges: [.above, .below, .right, .left]),
+                 edges: [.above, .below, .right, .left], opensSample: true),
         TourStep(targets: [.highlights, .highlightsRail], title: "Highlights",
-                 body: "Files, links and questions the agent pins for you, so you don't have to dig through the thread for them."),
+                 body: "Files, links and questions the agent pins for you, so you don't have to dig through the thread for them.",
+                 opensSample: true),
         TourStep(targets: [.highlights, .mainPanel], title: "Move a panel",
                  body: "Every panel can go wherever you like. Drag this one by its bar to another side of the window, or onto another panel to make tabs.",
                  task: .movePanel,
                  doneBody: "That's it. View › Reset Panel Layout puts everything back."),
         TourStep(targets: [.actionChips], title: "Patches",
-                 body: "A patch adds buttons, panels and checks to the threads in a folder. This Welcome thread's folder has one. Press Roll a die.",
+                 body: "A patch adds buttons, panels and checks to the threads in a folder. The samples' folder has one. Press Roll a die.",
                  task: .runPatch,
                  doneBody: "That ran a command in the folder. You don't write patches yourself: ask a thread to \"add a button that runs the tests\" and it makes one.",
-                 edges: [.above, .right, .left, .below]),
+                 edges: [.above, .right, .left, .below], opensSample: true),
         TourStep(targets: [.composer], title: "Your first thread",
                  body: "We've written its first message for you: it asks for a patch with a hello button of your own. Press Return to send it, and while it works, Finish setting up has the rest.",
                  task: .sendFirst,
@@ -118,11 +140,11 @@ final class Tour {
     /// (RootView's `Tour.space`).
     var frames: [TourTarget: CGRect] = [:]
     @ObservationIgnored var framesFrom: [TourTarget: UUID] = [:]
-    /// The Welcome thread, once the patch step has opened it.
-    private(set) var welcomeThreadId: String?
+    /// The sample threads this run asked the runner for, in its order.
+    private(set) var sampleIds: [String] = []
     @ObservationIgnored var defaults: UserDefaults = .standard
-    /// Set by the overlay. Tests leave it nil, so stepping through touches
-    /// nothing.
+    /// Set at launch (AppDelegate). Tests leave it nil, so stepping
+    /// through touches nothing.
     @ObservationIgnored weak var app: AppModel?
     @ObservationIgnored private var layoutAtStart: DockLayout?
     @ObservationIgnored private var sawChipRun = false
@@ -147,6 +169,9 @@ final class Tour {
 
     func start(skippable: Bool = true) {
         self.skippable = skippable
+        if let app {
+            Task { sampleIds = await app.makeTourSamples() }
+        }
         shown = Self.steps.filter { $0.task != nil || $0.targets.isEmpty || frame(for: $0) != nil }
         go(to: 0)
         // The composer has the keyboard on a new thread: Return is the
@@ -164,24 +189,28 @@ final class Tour {
         go(to: step - 1)
     }
 
-    /// Done or skipped: either way it doesn't come up by itself again.
+    /// Done or skipped: either way it doesn't come up by itself again, and
+    /// the samples go.
     func finish() {
         step = nil
         defaults.set(true, forKey: Self.seenKey)
+        if let app, !sampleIds.isEmpty { app.removeTourSamples() }
+        sampleIds = []
     }
 
     private func go(to index: Int) {
         step = index
         taskDone = false
-        guard let app, let task = shown[index].task else { return }
+        guard let app else { return }
+        if shown[index].opensSample { app.openTourSample(sampleIds) }
+        guard let task = shown[index].task else { return }
         switch task {
+        case .hibernate, .archive:
+            break
         case .movePanel:
             layoutAtStart = app.dock.layout
         case .runPatch:
             sawChipRun = false
-            Task {
-                welcomeThreadId = await app.openTourWelcome()
-            }
         case .sendFirst:
             threadsAtStart = Set(app.threads.keys)
             app.newThread()
@@ -194,14 +223,18 @@ final class Tour {
     /// (TourOverlay calls it).
     func check() {
         guard let app, let task = current?.task, !taskDone else { return }
+        let samples = sampleIds.compactMap { app.threads[$0] }
         switch task {
+        case .hibernate:
+            if samples.contains(where: { $0.isSnoozed(at: Date()) }) { taskDone = true }
+        case .archive:
+            if samples.contains(where: \.isArchived) { taskDone = true }
         case .movePanel:
             if let layoutAtStart, app.dock.layout != layoutAtStart { taskDone = true }
         case .runPatch:
             // Running, then not: the command has finished and its output is
             // in the thread.
-            guard let id = welcomeThreadId else { return }
-            let running = app.runningActions.contains { $0.hasPrefix(id) }
+            let running = app.runningActions.contains { key in sampleIds.contains { key.hasPrefix($0) } }
             if running { sawChipRun = true } else if sawChipRun { taskDone = true }
         case .sendFirst:
             if app.threads.keys.contains(where: { !threadsAtStart.contains($0) }) {
@@ -239,10 +272,10 @@ final class Tour {
     }
 }
 
-// MARK: - The Welcome thread
+// MARK: - The samples' folder and its patch
 
 extension Tour {
-    /// The example patch the Welcome folder gets. Its comment is for
+    /// The example patch the samples' folder gets. Its comment is for
     /// whoever opens the file to see what a patch looks like.
     static let welcomePatch = """
     // A patch: tools for the threads in this folder. This one adds a chip
@@ -283,31 +316,43 @@ extension Tour {
 }
 
 extension AppModel {
-    /// The Welcome thread for the tour's patch step: the one there is, or a
-    /// new one with no turn (threads.create's `start: false`), opened in
-    /// the inbox. Nil when the runner can't make one.
-    func openTourWelcome() async -> String? {
+    /// The tour's sample threads, made (or found) in the Welcome folder
+    /// with its example patch. Empty when the runner can't make them (one
+    /// from before `threads.samples`): the tour goes on without.
+    func makeTourSamples() async -> [String] {
         let folder = Tour.welcomeFolder(app: self)
+        guard let client else { return [] }
         do {
             try Tour.writeWelcomePatch(in: folder)
+            let samples = try await client.samples(cwd: folder)
+            for thread in samples { threads[thread.id] = thread }
+            return samples.map(\.id)
         } catch {
-            errorMessage = "Couldn't make the Welcome folder: \(error.localizedDescription)"
-            return nil
+            AppLog.write("rpc", "threads.samples failed: \(error.localizedDescription)")
+            return []
         }
+    }
+
+    /// Opens the first sample still in the inbox (the one that needs you,
+    /// unless it's been put away), for a step about the open thread.
+    func openTourSample(_ ids: [String]) {
+        let now = Date()
+        guard let id = ids.first(where: { threads[$0].map { !$0.isArchived && !$0.isSnoozed(at: now) } ?? false }) else { return }
         sidebarMode = .inbox
-        if let thread = threads.values.first(where: { $0.cwd == folder && !$0.isArchived }) {
-            select(thread.id)
-            return thread.id
-        }
-        guard let client else { return nil }
-        do {
-            let thread = try await client.createThread(NewThreadRequest(text: "", cwd: folder, title: "Welcome to Threadbear", start: false))
-            threads[thread.id] = thread
-            select(thread.id)
-            return thread.id
-        } catch {
-            errorMessage = "Couldn't make the Welcome thread: \(error.localizedDescription)"
-            return nil
+        select(id)
+    }
+
+    /// Deletes the samples, archived and hibernating ones too. The runner
+    /// says each is gone, which takes it off the list.
+    func removeTourSamples() {
+        guard let client else { return }
+        let folder = Tour.welcomeFolder(app: self)
+        Task {
+            do {
+                try await client.samples(cwd: folder, remove: true)
+            } catch {
+                AppLog.write("rpc", "removing the tour's samples failed: \(error.localizedDescription)")
+            }
         }
     }
 }
@@ -351,6 +396,8 @@ private struct TourProgress: Equatable {
     var layout: DockLayout
     var running: Set<String>
     var threadCount: Int
+    /// The samples hibernated or archived.
+    var putAway: Set<String>
 }
 
 /// The dimmed window with the step's part cut out of it, and the card.
@@ -403,8 +450,8 @@ struct TourOverlay: View {
                 .animation(Juice.reduceMotion ? nil : .snappy(duration: 0.3), value: hole)
             }
             .transition(.opacity)
-            .onAppear { tour.app = app }
-            .onChange(of: TourProgress(layout: app.dock.layout, running: app.runningActions, threadCount: app.threads.count)) {
+            .onChange(of: TourProgress(layout: app.dock.layout, running: app.runningActions, threadCount: app.threads.count,
+                                       putAway: Set(tour.sampleIds.filter { id in app.threads[id].map { $0.isArchived || $0.snoozedUntil != nil } ?? false }))) {
                 tour.check()
             }
         }

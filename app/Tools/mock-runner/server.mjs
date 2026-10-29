@@ -21,6 +21,8 @@ import { WebSocketServer } from 'ws';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
+// The tour's sample threads, the runner's own (it runs TypeScript as it is).
+import { SAMPLE_THREADS } from '../../../runner/src/samples.ts';
 import { fileURLToPath } from 'node:url';
 import { reviewDraft, reviewReply, sameDraft } from '../../../runner/src/reviews.ts';
 
@@ -488,6 +490,44 @@ async function dispatch(client, method, p) {
         .filter((s) => s.title.toLowerCase().includes(q) || s.preview.toLowerCase().includes(q));
       return { threads: newestFirst(list).slice(0, p.limit ?? 50) };
     }
+    case 'threads.samples': {
+      // As the runner makes them (runner/src/samples.ts), each with the
+      // Welcome folder's Roll a die chip, as the runner would read it from
+      // the patch file the app wrote there.
+      const existing = [...threads.values()].filter((t) => t.summary.sample);
+      if (p.remove) {
+        for (const t of existing) {
+          threads.delete(t.summary.id);
+          broadcast('thread.deleted', { threadId: t.summary.id });
+        }
+        return { threads: [] };
+      }
+      if (existing.length) return { threads: existing.map((t) => t.summary) };
+      const made = [];
+      for (const sample of [...SAMPLE_THREADS].reverse()) {
+        const threadId = 'th_sample_' + crypto.randomBytes(4).toString('hex');
+        const now = iso();
+        const provider = providerOf(defaults.accountId);
+        const summary = {
+          id: threadId, title: sample.title, cwd: p.cwd, accountId: defaults.accountId, provider,
+          model: defaults.models[provider], permissionMode: 'full', status: 'idle', live: false, needsYou: false, sample: true,
+          createdAt: now, updatedAt: now, lastActivityAt: now, preview: '', lastSeq: 0, lastSeenSeq: 0,
+          actions: [{ id: 'welcome.roll-a-die', title: 'Roll a die', kind: 'command', command: 'echo "You rolled a $(( RANDOM % 6 + 1 ))."', patch: 'welcome', icon: 'dice' }],
+          patches: [{ id: 'welcome', source: 'project', file: path.join(p.cwd, '.threadbear/patches/welcome.ts'), icon: 'dice' }],
+        };
+        threads.set(threadId, { summary, events: [], inProgress: new Map(), timers: [] });
+        const turnId = 'turn_' + crypto.randomBytes(4).toString('hex');
+        persist(threadId, { type: 'user.message', text: sample.question, images: [] }, turnId);
+        persist(threadId, { type: 'turn.started' }, turnId);
+        persist(threadId, { type: 'assistant.text', itemId: 'a_' + threadId, text: sample.answer }, turnId);
+        persist(threadId, { type: 'turn.completed', outcome: 'completed', durationMs: 4000, needs: sample.needs, ...(sample.asks ? { asks: sample.asks } : {}) }, turnId);
+        if (sample.needs === 'you') summary.needsYou = true;
+        else if (!sample.unread) summary.lastSeenSeq = summary.lastSeq;
+        broadcastSummary(threadId);
+        made.push(summary);
+      }
+      return { threads: made.reverse() };
+    }
     case 'threads.create': {
       if (!p.text) throw rpcError(-32602, 'text is required');
       const threadId = 'th_' + crypto.randomBytes(6).toString('hex');
@@ -718,7 +758,9 @@ async function dispatch(client, method, p) {
       if (action.kind === 'prompt') return dispatch(client, 'threads.send', { threadId: t.summary.id, text: action.prompt });
       await new Promise((r) => setTimeout(r, 900));
       const ok = action.id !== 'tools.typecheck';
-      const text = ok
+      const text = action.patch === 'welcome'
+        ? `You rolled a ${1 + Math.floor(Math.random() * 6)}.\n`
+        : ok
         ? `$ ${action.command}\nDone in 2.1s.\n`
         : 'src/dashboard/UsageCard.tsx(42,7): error TS2322: Type \'string\' is not assignable to type \'number\'.\n\nFound 1 error in src/dashboard/UsageCard.tsx:42\n';
       const event = persist(t.summary.id, {

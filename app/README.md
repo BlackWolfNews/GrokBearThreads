@@ -119,17 +119,18 @@ and the perf run stay away from the real one. Install the runner itself with
   the runner is down, or it doesn't take the message (busy, say), the text
   and images stay in the box (or go back into it) and a banner says why.
 - **The tour.** The first time the app connects to a runner it dims the
-  window and lights up its parts one at a time (the threads, the access
-  chip, Highlights) with a card beside each, then has you do three things:
-  drag a panel somewhere (done when the dock's layout changes), press the
-  example chip in a Welcome thread (`~/Threadbear/Welcome`, made with no
-  turn, `threads.create`'s `start: false`, its patch written there if it
-  isn't already), and send your first thread, its message written for you
-  (a patch with a hello button). Sending it ends the tour and opens Finish
-  setting up. The first run has no Skip; Next turns up on a hands-on step
-  after 20 seconds in case it won't take. Help > Take the Tour runs it
-  again, skippable. `setup --existing` marks it seen, so a Mac joining a
-  Threadbear you already use doesn't get it.
+  window and lights up its parts one at a time with a card beside each. It
+  asks the runner for three sample threads (`threads.samples`: made up,
+  finished, no turn) in `~/Threadbear/Welcome`, where it writes an example
+  patch, and has you hibernate one, archive another, drag a panel (done
+  when the dock's layout changes) and press the patch's Roll a die chip,
+  between cards on the threads, the access chip and Highlights. It ends on
+  a new thread with its message written for you (a patch with a hello
+  button); sending it ends the tour and opens Finish setting up. However it
+  ends, the samples are deleted. The first run has no Skip; Next turns up
+  on a hands-on step after 20 seconds in case it won't take. Help > Take
+  the Tour runs it again, skippable. `setup --existing` marks it seen, so a
+  Mac joining a Threadbear you already use doesn't get it.
 - **Finish setting up.** While anything's left after setup, an icon on
   the activity bar (with a count) opens a short checklist under the
   threads: start your first thread (which shows the login works), pair

@@ -37,6 +37,15 @@ public extension RPCClient {
         return try await call("threads.create", .object(params), as: ThreadResult.self, timeout: RPCClient.sendTimeout).thread
     }
 
+    /// The tour's sample threads (protocol `threads.samples`), made in
+    /// `cwd` unless they're there already; `remove` deletes them all.
+    @discardableResult
+    func samples(cwd: String, remove: Bool = false) async throws -> [ThreadSummary] {
+        var params: [String: JSONValue] = ["cwd": .string(cwd)]
+        if remove { params["remove"] = .bool(true) }
+        return try await call("threads.samples", .object(params), as: ThreadsResult.self).threads
+    }
+
     @discardableResult
     func send(threadId: String, text: String, images: [ImageRef] = [], answers: [AskAnswer] = []) async throws -> String? {
         var params: [String: JSONValue] = ["threadId": .string(threadId), "text": .string(text)]

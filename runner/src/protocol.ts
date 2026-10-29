@@ -197,6 +197,7 @@ export type ThreadSummary = {
   // (docs/protocol.md, "Sharing"). Absent until it's first shared; "off"
   // keeps the link for when it's shared again.
   share?: ThreadShare;
+  sample?: true; // one of the tour's sample threads (threads.samples): made up, never sent to
 };
 
 export type ShareAccess = 'off' | 'link';

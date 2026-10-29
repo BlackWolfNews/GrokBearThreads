@@ -986,6 +986,9 @@ public struct ThreadSummary: Sendable, Hashable, Codable, Identifiable {
     /// Its own worktree, when the repo gives each thread one; nil for most
     /// threads, and from a runner that predates worktrees.
     public var worktree: ThreadWorktree?
+    /// One of the tour's sample threads (protocol `threads.samples`): made
+    /// up, and nothing can be sent to it.
+    public var sample = false
     /// What the last completed turn said it needs from Mike ("you" or
     /// "nothing"), nil when it said neither (docs/protocol.md, "Needs you").
     public var needs: String?
@@ -1118,6 +1121,7 @@ public struct ThreadSummary: Sendable, Hashable, Codable, Identifiable {
         waitingForRoom = (try? c.decodeIfPresent(WaitingForRoom.self, forKey: .waitingForRoom)) ?? nil
         // A malformed one is as good as none, rather than losing the thread.
         worktree = (try? c.decodeIfPresent(ThreadWorktree.self, forKey: .worktree)) ?? nil
+        sample = (try? c.decodeIfPresent(Bool.self, forKey: .sample)) ?? false
         needs = (try? c.decodeIfPresent(String.self, forKey: .needs)) ?? nil
         asks = c.lossyArray(Ask.self, forKey: .asks)
         asksSeq = (try? c.decodeIfPresent(Int.self, forKey: .asksSeq)) ?? nil
@@ -1168,6 +1172,7 @@ public struct ThreadSummary: Sendable, Hashable, Codable, Identifiable {
         try c.encodeIfPresent(poolId, forKey: .poolId)
         try c.encodeIfPresent(waitingForRoom, forKey: .waitingForRoom)
         try c.encodeIfPresent(worktree, forKey: .worktree)
+        if sample { try c.encode(true, forKey: .sample) }
         try c.encodeIfPresent(needs, forKey: .needs)
         if !asks.isEmpty { try c.encode(asks, forKey: .asks) }
         try c.encodeIfPresent(asksSeq, forKey: .asksSeq)
@@ -1181,7 +1186,7 @@ public struct ThreadSummary: Sendable, Hashable, Codable, Identifiable {
         case id, title, cwd, accountId, provider, model, effort, modelInUse, effortInUse, permissionMode, status, live, needsYou, pendingReviews
         case createdAt, updatedAt, lastActivityAt, snoozedUntil, snoozedUntilRestart, wakeWhen, archivedAt, onOldRunner, preview
         case lastSeq, lastSeenSeq, nativeSessionId, contextTokens, contextWindow, costUsd, panels, actions, hooks, patches, background, subagents
-        case projects, worktree, needs, asks, asksSeq, highlightsAt, schedule, poolId, waitingForRoom, panelRequest, share
+        case projects, worktree, needs, asks, asksSeq, highlightsAt, schedule, poolId, waitingForRoom, panelRequest, share, sample
     }
 
     /// The first ask Mike hasn't ticked on the open card, if any: what the

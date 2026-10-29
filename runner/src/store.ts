@@ -71,6 +71,7 @@ export type ThreadRecord = {
   // quickAsk: the thread began as a quick ask from the phone (Runner.quickAsk),
   // answered by a fast model rather than a session of its own.
   handoff?: { fromCwd: string; fromAccountId: string; rebuilt?: boolean; lost?: boolean; quickAsk?: boolean };
+  sample?: true; // one of the tour's sample threads (Runner.samples): made up, never sent to
   allowRules?: string[]; // "Always allow" rules, in the CLI's syntax
   queue: QueuedSend[];
   pendingApprovals: string[];

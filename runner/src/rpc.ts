@@ -373,6 +373,8 @@ export class RpcServer {
         });
         return { thread: res.thread, turnId: res.turnId };
       }
+      case 'threads.samples':
+        return r.samples({ cwd: reqString(p, 'cwd'), remove: p.remove === true });
       case 'reviews.list':
         return r.listReviews(reqString(p, 'threadId'));
       case 'reviews.create':

@@ -3,6 +3,7 @@
 // server in rpc.ts is a thin layer over the public methods here.
 import fs from 'node:fs';
 import os from 'node:os';
+import { SAMPLE_THREADS } from './samples.ts';
 import { reviewInput, reviewDraft, reviewReply, sameDraft, type ReviewInput } from './reviews.ts';
 import path from 'node:path';
 import { ConvexKeys, convexFolderFor, type ConvexKey, type ConvexDeployments } from './convex-keys.ts';
@@ -1529,6 +1530,46 @@ export class Runner {
     return { thread: this.summary(st) };
   }
 
+  // The tour's sample threads (docs/protocol.md, threads.samples; samples.ts):
+  // made up exchanges written as finished turns, like a quick ask, in the
+  // folder the app gives (~/Threadbear/Welcome, where its example patch
+  // is), so someone new has threads to hibernate, archive and look round.
+  // Asking again gives the ones there are; remove deletes them all,
+  // archived and hibernating ones too.
+  samples(params: { cwd: string; remove?: boolean }): { threads: ThreadSummary[] } {
+    const existing = [...this.threads.values()].filter((st) => st.rec.sample);
+    if (params.remove) {
+      for (const st of existing) this.delete(st.rec.id);
+      return { threads: [] };
+    }
+    // In SAMPLE_THREADS' order, as they were first given.
+    const order = (st: ThreadState) => SAMPLE_THREADS.findIndex((x) => x.title === st.rec.title);
+    if (existing.length) return { threads: existing.sort((a, b) => order(a) - order(b)).map((st) => this.summary(st)) };
+    const made: ThreadSummary[] = [];
+    // Oldest first, so the first in SAMPLE_THREADS is the newest in the list.
+    for (const sample of [...SAMPLE_THREADS].reverse()) {
+      const { st } = this.makeThread({ text: sample.question, cwd: params.cwd, title: sample.title, worktree: false });
+      const { rec } = st;
+      rec.sample = true;
+      const turnId = crypto.randomUUID();
+      this.emit(st, userMessage({ turnId, text: sample.question, images: [] }), turnId);
+      this.emit(st, { type: 'turn.started', turnId }, turnId);
+      this.emit(st, { type: 'assistant.text', itemId: crypto.randomUUID(), text: sample.answer }, turnId);
+      const done = this.emit(st, {
+        type: 'turn.completed', turnId, outcome: 'completed', durationMs: 4000, needs: sample.needs,
+        ...(sample.asks ? { asks: sample.asks } : {}),
+      }, turnId);
+      rec.needs = { seq: done.seq, needs: sample.needs, ...(sample.asks ? { asks: sample.asks } : {}) };
+      rec.preview = oneLine(sample.answer, LIMITS.previewChars);
+      rec.lastTurnCompletedSeq = done.seq;
+      // Unseen: Needs you, or the blue dot; the rest read.
+      if (sample.needs === 'nothing' && !sample.unread) rec.lastSeenSeq = done.seq;
+      this.markDirty(st);
+      made.push(this.summary(st));
+    }
+    return { threads: made.reverse() };
+  }
+
   // The record and state of a new thread, before anything is sent to it:
   // its folder, login, model and effort as create picks them.
   private makeThread(params: {
@@ -1834,6 +1875,8 @@ export class Runner {
     // runner's; a message queued here now would be lost on the way.
     if (this.draining && !this.draining.keep.has(threadId)) throw new RpcError(ErrorCode.busy, 'The runner is handing over to a new one; send again in a moment.');
     if (!text && images.length === 0) throw new RpcError(ErrorCode.badParams, 'text or images required');
+    // Its turn was made up; a real agent picking it up would only be lost.
+    if (st.rec.sample) throw new RpcError(ErrorCode.badParams, "This is one of the tour's sample threads, so nothing can be sent to it. Start a new thread to try it for real.");
     checkImages(images);
     return { turnId: this.sendTo(st, text, images, opts) };
   }
@@ -3927,6 +3970,7 @@ export class Runner {
     if (rec.archivedAt) s.archivedAt = rec.archivedAt;
     if (rec.nativeSessionId && rec.sessionUsed) s.nativeSessionId = rec.nativeSessionId;
     if (rec.contextTokens !== undefined) s.contextTokens = rec.contextTokens;
+    if (rec.sample) s.sample = true;
     if (rec.contextWindow !== undefined) s.contextWindow = rec.contextWindow;
     if (rec.costUsd !== undefined) s.costUsd = rec.costUsd;
     const set = this.patchSet(st);

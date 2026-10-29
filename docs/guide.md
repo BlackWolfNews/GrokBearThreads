@@ -361,12 +361,13 @@ never sees what a notification says.
 ## The tour and Finish setting up
 
 The first time the app opens it shows you round the window, one part at a
-time, and has you try a few things: move a panel, press a patch's button
-in a Welcome thread (in `~/Threadbear/Welcome`, where its example patch
-lives), and send your first thread, whose message it writes for you: it
-asks the agent for a patch with a hello button of your own. Help > Take
-the Tour runs it again. A Mac that joined a Threadbear you already use
-(setup's `--existing`) skips it.
+time, with a few made-up sample threads to try things on: you hibernate one,
+archive another, move a panel, and press an example patch's button (it
+lives in `~/Threadbear/Welcome`). Then it opens your first thread with the
+message written for you, asking the agent for a patch with a hello button of
+your own, and you send it. The samples are deleted when the tour ends.
+Help > Take the Tour runs it again. A Mac that joined a Threadbear you
+already use (setup's `--existing`) skips it.
 
 While that first thread works, Finish setting up has what's left after
 setup: pair your iPhone and open your website, so you can check on your

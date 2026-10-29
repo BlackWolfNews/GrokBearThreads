@@ -177,6 +177,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             // the outgoing one is still posting banners.
             app.notificationsEnabled = !scripted && Handover.incomingFrom == nil
             ShortcutHints.shared.install()
+            // Before anything can start the tour: its samples and hands-on
+            // steps need the model from its first step.
+            Tour.shared.app = app
             if !scripted { Notifier.setUp(delegate: self) }
             app.onThreadsLoaded = {
                 LaunchClock.threadsLoaded()

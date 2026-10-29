@@ -22,7 +22,8 @@ final class TourTests: XCTestCase {
                        .permission: .zero]
         tour.start()
         // The hands-on steps bring their part up themselves.
-        XCTAssertEqual(tour.shown.map(\.title), ["Welcome to Threadbear", "Threads", "Move a panel", "Patches", "Your first thread"])
+        XCTAssertEqual(tour.shown.map(\.title), ["Welcome to Threadbear", "Threads", "Not now? Hibernate it", "Done with it? Archive it",
+                                                 "Move a panel", "Patches", "Your first thread"])
         XCTAssertEqual(tour.step, 0)
     }
 
