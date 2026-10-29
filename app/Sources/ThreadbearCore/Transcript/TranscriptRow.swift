@@ -41,11 +41,15 @@ public struct TextItem: Sendable, Hashable {
     public var text: String
     /// Still receiving deltas.
     public var isStreaming: Bool
+    /// The turn's summary from end_turn: the turn's reply, while its other
+    /// messages fold into the work.
+    public var isSummary: Bool
 
-    public init(itemId: String, text: String, isStreaming: Bool = false) {
+    public init(itemId: String, text: String, isStreaming: Bool = false, isSummary: Bool = false) {
         self.itemId = itemId
         self.text = text
         self.isStreaming = isStreaming
+        self.isSummary = isSummary
     }
 }
 

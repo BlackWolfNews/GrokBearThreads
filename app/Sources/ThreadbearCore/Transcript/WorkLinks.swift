@@ -1,0 +1,114 @@
+import Foundation
+
+/// Links from a turn's summary (or any message) back into the thread
+/// (docs/protocol.md, "Links into the thread"): `work:<words>` is a step in
+/// the turn's own working, `thread:<id>` another thread. The agent can't
+/// see its tool calls' ids, so a work link quotes the step: the command it
+/// ran or its description, the file it edited, or a line it wrote.
+public enum WorkLinks {
+    public static let workScheme = "work"
+    public static let threadScheme = "thread"
+
+    /// The markdown with the spaces (and anything else a URL can't hold)
+    /// in work: and thread: destinations escaped, as agents write
+    /// `[tests pass](work:npm test)` and a destination with a space isn't a
+    /// link to the markdown parser.
+    public static func escapeDestinations(_ markdown: String) -> String {
+        guard markdown.contains("](work:") || markdown.contains("](thread:") else { return markdown }
+        let ns = markdown as NSString
+        var out = ""
+        var last = 0
+        for match in destination.matches(in: markdown, range: NSRange(location: 0, length: ns.length)) {
+            let body = match.range(at: 2)
+            out += ns.substring(with: NSRange(location: last, length: body.location - last))
+            let raw = ns.substring(with: body)
+            out += (raw.removingPercentEncoding ?? raw).addingPercentEncoding(withAllowedCharacters: allowed) ?? raw
+            last = body.location + body.length
+        }
+        return out + ns.substring(from: last)
+    }
+
+    nonisolated(unsafe) private static let destination = try! NSRegularExpression(pattern: #"\]\((work|thread):([^)\n]*)\)"#)
+    private static let allowed: CharacterSet = {
+        var set = CharacterSet.urlPathAllowed
+        set.remove(charactersIn: "%")
+        return set
+    }()
+
+    /// The words a work: link quotes.
+    public static func quote(of url: URL) -> String? {
+        guard url.scheme?.lowercased() == workScheme else { return nil }
+        let raw = url.absoluteString.dropFirst(workScheme.count + 1)
+        let words = (String(raw).removingPercentEncoding ?? String(raw)).trimmingCharacters(in: .whitespaces)
+        return words.isEmpty ? nil : words
+    }
+
+    /// The thread a thread: link names (an id or an id prefix).
+    public static func threadId(of url: URL) -> String? {
+        guard url.scheme?.lowercased() == threadScheme else { return nil }
+        let id = url.absoluteString.dropFirst(threadScheme.count + 1).trimmingCharacters(in: .whitespaces)
+        return id.isEmpty ? nil : id
+    }
+
+    /// The item a quote means among a turn's items: the last whose command
+    /// (or one of its `&&` parts) starts with the words, else the last whose
+    /// command, description, path, pattern or text mentions them, else the
+    /// last whose output does. Models quoted all three in the tests that
+    /// settled this (docs/end-turn-design), and the latest is the one a
+    /// summary is about ("tests pass" means the run after the fix).
+    public static func step(for quote: String, in items: some Sequence<TranscriptRow>) -> TranscriptRow? {
+        let q = normal(quote)
+        guard !q.isEmpty else { return nil }
+        var best: (score: Int, row: TranscriptRow)?
+        for row in items {
+            let s = score(row, q)
+            if s > 0, s >= (best?.score ?? 0) { best = (s, row) }
+        }
+        return best?.row
+    }
+
+    static func score(_ row: TranscriptRow, _ q: String) -> Int {
+        switch row.content {
+        case .tool(let tool):
+            let input = tool.call?.input
+            let command: String? = input?["command"].flatMap { value in
+                value.stringValue ?? value.arrayValue?.compactMap(\.stringValue).joined(separator: " ")
+            }
+            if let command {
+                // Not inside quotes: `git commit -m "...; npm test passes"`
+                // isn't a test run.
+                let bare = command.replacingOccurrences(of: #"'[^']*'|"[^"]*""#, with: "", options: .regularExpression)
+                let parts = normal(bare).components(separatedBy: CharacterSet(charactersIn: "&;|"))
+                if parts.contains(where: { trimCd($0).hasPrefix(q) }) { return 3 }
+            }
+            let named = [command, input?["description"]?.stringValue, input?["file_path"]?.stringValue, input?["path"]?.stringValue,
+                         input?["pattern"]?.stringValue, input?["url"]?.stringValue, input?["query"]?.stringValue, tool.call?.title]
+            if named.contains(where: { $0.map { normal($0).contains(q) } ?? false }) { return 2 }
+            if let output = tool.result?.text, normal(output).contains(q) { return 1 }
+            return 0
+        case .assistant(let text) where !text.isSummary:
+            return normal(text.text).contains(q) ? 2 : 0
+        case .reasoning(let text):
+            return normal(text.text).contains(q) ? 2 : 0
+        case .note(let text):
+            return normal(text).contains(q) ? 2 : 0
+        default:
+            return 0
+        }
+    }
+
+    /// "cd app && npm test" starts with "npm test" too.
+    private static func trimCd(_ part: String) -> String {
+        let t = part.trimmingCharacters(in: .whitespaces)
+        guard t.hasPrefix("cd "), let space = t.dropFirst(3).firstIndex(of: " ") else { return t }
+        return String(t[space...]).trimmingCharacters(in: .whitespaces)
+    }
+
+    /// Lowercased, quotes and backticks gone, runs of space as one.
+    static func normal(_ s: String) -> String {
+        s.lowercased()
+            .replacingOccurrences(of: "[`\"'*]", with: "", options: .regularExpression)
+            .replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespaces)
+    }
+}

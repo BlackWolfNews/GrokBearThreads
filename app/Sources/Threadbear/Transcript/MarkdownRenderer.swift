@@ -93,7 +93,9 @@ enum MarkdownRenderer {
         // The zoom is in the key: a block's layout is all sizes.
         let key = "\(TypeScale.percent)|\(block)" as NSString
         if let cached = cache.object(forKey: key) { return cached }
-        let document = Document(parsing: block, options: [.disableSmartOpts])
+        // `[tests pass](work:npm test)`: a space ends a link's destination
+        // for the parser, so work: and thread: links are escaped first.
+        let document = Document(parsing: WorkLinks.escapeDestinations(block), options: [.disableSmartOpts])
         var builder = Builder()
         for child in document.children {
             builder.block(child, Context())
@@ -557,6 +559,9 @@ enum MarkdownRenderer {
                 var inner = context
                 inner.link = link.destination.flatMap(MarkdownRenderer.linkURL)
                 inlines(link.children, inner)
+                // A link into the turn's own working says it goes up the
+                // thread, not out of it (docs/end-turn-design).
+                if let url = inner.link, WorkLinks.quote(of: url) != nil { append("\u{2009}↑", inner) }
             case let image as Markdown.Image:
                 var inner = context
                 inner.link = image.source.flatMap(MarkdownRenderer.linkURL)

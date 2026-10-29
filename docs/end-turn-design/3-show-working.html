@@ -1,0 +1,24 @@
+<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="m.css"><!-- size: 900x600 --></head><body><div class="win">
+<div class="work">Worked for 14m: read 6 files, ran 7 commands, edited 2 files<span class="ch" style="display:inline-block;transform:rotate(90deg)">›</span></div>
+<div class="fade">
+<div class="wrow"><span class="i">◫</span>Read <code>LocationService.kt</code></div>
+<div class="wrow"><span class="i">⌕</span>Searched for <code>requestLocationUpdates</code></div>
+<div class="wrow t"><span class="i"></span>The battery drain lines up with the car check. Looking at its timer.</div>
+<div class="wrow"><span class="i">◫</span>Read <code>CarDetector.kt</code></div>
+</div>
+<div class="wrow t hl"><span class="i"></span>Found it: <code>CarDetector</code> restarts GPS every 5 s, parked or not.</div>
+<div class="wrow hl"><span class="i">⌥</span>Ran <code>grep -n "5_000" app/src/main/java/**/CarDetector.kt</code></div>
+<div class="out">88:    private val pollMs = 5_000L  // restarts the fused provider each tick</div>
+<div class="fade">
+<div class="wrow"><span class="i">✎</span>Edited <code>CarDetector.kt</code> <span class="plus">+24</span> <span class="minus">−6</span></div>
+<div class="wrow"><span class="i">⌥</span>Ran <code>./gradlew testDebugUnitTest</code></div>
+<div class="wrow"><span class="i">⌥</span>Ran <code>./scripts/upload-internal.sh 1.0.3</code></div>
+</div>
+<div class="card" style="margin-top:14px"><ul class="sum" style="margin-top:0">
+<li>The car check <a class="w clicked" href="#">restarts GPS every 5 seconds<span class="g">↑</span></a>, even when parked.</li>
+<li>It now backs off to once a minute after 3 minutes still. <a class="w" href="#">Tests pass<span class="g">↑</span></a>.</li>
+<li>Android 1.0.3 is up on <a href="#">internal testing<span class="g">↗</span></a>.</li>
+<li>Poddle's sync has the same timer; left for <a href="#">its own thread<span class="g">◦</span></a>.</li>
+</ul></div>
+<div class="meta end" style="color:#6f6d69">Clicking a ↑ link opens the working above, scrolls to the step it means and lights it up. Click anywhere else and it folds again.</div>
+</div></body></html>

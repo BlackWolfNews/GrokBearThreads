@@ -195,6 +195,14 @@ final class TranscriptTextView: NSTextView {
 
     override func clicked(onLink link: Any, at charIndex: Int) {
         closeChipCard()
+        // work: and thread: links go somewhere in Threadbear: the row's
+        // cell knows which turn the link is in (WorkLinks).
+        if let url = link as? URL, WorkLinks.quote(of: url) != nil || WorkLinks.threadId(of: url) != nil {
+            var view: NSView? = superview
+            while let v = view, !(v is RowCellView) { view = v.superview }
+            if let cell = view as? RowCellView { cell.delegate?.openThreadLink(url, fromRow: cell.rowId) }
+            return
+        }
         // NSTextView follows web links itself, but ignores file URLs.
         if let url = link as? URL, let text = FilePathRefs.text(of: url) {
             _ = openPathRef(text)

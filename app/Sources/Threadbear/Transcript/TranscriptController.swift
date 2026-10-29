@@ -439,6 +439,59 @@ final class TranscriptController: NSObject, NSTableViewDataSource, NSTableViewDe
         refreshInPlace(index: index, row: row)
     }
 
+    /// A work: link opens the turn's working at the step it quotes and
+    /// lights it up; a thread: link opens that thread (WorkLinks).
+    func openThreadLink(_ url: URL, fromRow rowId: String) {
+        guard let session else { return }
+        if let id = WorkLinks.threadId(of: url)?.lowercased() {
+            let app = AppModel.shared
+            let matches = app.threads.keys.filter { $0 == id || $0.hasPrefix(id) }
+            if matches.count == 1 { app.openThread(matches[0]) } else { NSSound.beep() }
+            return
+        }
+        guard let quote = WorkLinks.quote(of: url), let index = session.displayIndex(of: rowId), let turn = row(at: index)?.turnId,
+              let step = session.feed.model.workStep(quote, turn: turn) else {
+            AppLog.write("transcript", "work link \(url.absoluteString) in \(rowId): no step")
+            NSSound.beep()
+            return
+        }
+        AppLog.write("transcript", "work link \(url.absoluteString) in \(rowId): \(step.rowId) in \(step.groupId ?? "no group")")
+        if let group = step.groupId, let groupIndex = session.displayIndex(of: group), case .group(let g)? = row(at: groupIndex)?.content, !g.isExpanded {
+            session.setModelExpanded(group, true)
+        }
+        // After the table has laid out the opened group's rows.
+        DispatchQueue.main.async { [weak self] in
+            guard let self, let index = self.session?.displayIndex(of: step.rowId) else { return }
+            self.scroll(toRow: index, offset: self.scrollView.contentView.bounds.height / 3)
+            self.light(row: index)
+        }
+    }
+
+    /// Lights a row up for a moment: an accent rail and a tint, fading out,
+    /// so the eye lands on the step a summary bullet is about.
+    private func light(row index: Int) {
+        guard let cell = tableView.view(atColumn: 0, row: index, makeIfNecessary: false) else { return }
+        cell.wantsLayer = true
+        let glow = CALayer()
+        glow.frame = cell.bounds.insetBy(dx: 4, dy: 0)
+        glow.cornerRadius = 6
+        glow.backgroundColor = NSColor.controlAccentColor.withAlphaComponent(0.24).cgColor
+        let rail = CALayer()
+        rail.frame = NSRect(x: 0, y: 0, width: 3, height: glow.frame.height)
+        rail.backgroundColor = NSColor.controlAccentColor.cgColor
+        glow.addSublayer(rail)
+        cell.layer?.insertSublayer(glow, at: 0)
+        let fade = CABasicAnimation(keyPath: "opacity")
+        fade.fromValue = 1
+        fade.toValue = 0
+        fade.beginTime = CACurrentMediaTime() + 2.5
+        fade.duration = 0.8
+        fade.fillMode = .forwards
+        fade.isRemovedOnCompletion = false
+        glow.add(fade, forKey: "fade")
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3.4) { glow.removeFromSuperlayer() }
+    }
+
     /// "Show 30 more lines" under an opened diff. A changes card's file is
     /// the model's to open; a tool row's lines are this view's.
     func showAllLines(_ key: String) {

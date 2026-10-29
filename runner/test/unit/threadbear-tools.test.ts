@@ -500,6 +500,68 @@ test('end_turn is refused until the turn has replied to Mike in text', async () 
   assert.deepEqual(slept, []);
 });
 
+// The summary is the turn's reply (docs/protocol.md, "The summary"): in 36
+// test sessions Opus left its final message as prose, and put bullets in
+// end_turn every time (29 Oct 2026).
+test('end_turn with a summary needs no message first, and the runner writes it as the reply', async () => {
+  const h = makeHarness();
+  const { thread, s } = start(h);
+  const { call } = tools(h, thread.id);
+  s.text('m1', 'Looking at the slug code.');
+  toolCall(s, 'b1', 'Bash', { command: 'npm test', description: 'Run the tests' });
+  toolResult(s, 'b1');
+  const input = { summary: ['- Fixed the slug bug.', '[Tests pass](work:npm test).'], asks: [{ action: 'Redirect the old URLs?', why: 'Two posts move.' }] };
+  toolCall(s, 'e1', END_TURN, input);
+  const r = await call('end_turn', input);
+  assert.equal(r.error, false);
+  assert.match(r.text, /Needs you/);
+  s.out({ kind: 'event', event: { type: 'tool.result', itemId: 'e1', ok: true, text: r.text, truncated: false, images: [] } });
+  const summary = h.events(thread.id).find((e) => e.type === 'assistant.text' && 'summary' in e && e.summary);
+  assert.ok(summary, 'a summary text after the call');
+  assert.equal(summary.type === 'assistant.text' && summary.text, '- Fixed the slug bug.\n- [Tests pass](work:npm test).');
+  assert.equal(summary.type === 'assistant.text' && summary.itemId, 'e1.summary');
+  assert.match(h.runner.get(thread.id).preview ?? '', /^- Fixed the slug bug/);
+  // Text written after it is dropped, as after any accepted end_turn.
+  s.text('m2', 'All in the card above.');
+  assert.ok(!h.events(thread.id).some((e) => e.type === 'assistant.text' && e.text === 'All in the card above.'));
+  s.out({ kind: 'event', event: { type: 'reasoning', itemId: 'r1', text: "I'd already wrapped up." } });
+  assert.ok(!h.events(thread.id).some((e) => e.type === 'reasoning'), 'thinking after it is dropped too');
+  s.result('completed');
+  await tick();
+  // needs came from the asks.
+  assert.equal(h.runner.get(thread.id).needs, 'you');
+});
+
+// Opus once sent its card four times in one turn (29 Oct 2026).
+test('end_turn is taken once a turn', async () => {
+  const h = makeHarness();
+  const { thread, s } = start(h);
+  const { call } = tools(h, thread.id);
+  toolCall(s, 'e1', END_TURN, { summary: ['Done.'] });
+  const r1 = await call('end_turn', { summary: ['Done.'] });
+  assert.equal(r1.error, false);
+  s.out({ kind: 'event', event: { type: 'tool.result', itemId: 'e1', ok: true, text: r1.text, truncated: false, images: [] } });
+  toolCall(s, 'e2', END_TURN, { summary: ['Done again.'] });
+  const r2 = await call('end_turn', { summary: ['Done again.'] });
+  assert.equal(r2.error, true);
+  assert.match(r2.text, /Already ended/);
+});
+
+test("Codex's summary is the reply, and its final answer after it doesn't take over the preview", async () => {
+  const h = makeHarness();
+  const { thread, s } = start(h);
+  const t = buildThreadbearTools(h.runner, thread.id, Date.now, undefined, undefined, undefined, { provider: 'codex' }).find((x) => x.name === 'end_turn')!;
+  toolCall(s, 'e1', END_TURN, { summary: ['Fixed it.'] });
+  const r = (await t.handler({ summary: ['Fixed it.'] } as never, {})) as { content: { text: string }[]; isError?: boolean };
+  assert.equal(r.isError, undefined);
+  assert.match(r.content[0].text, /one short line/);
+  s.out({ kind: 'event', event: { type: 'tool.result', itemId: 'e1', ok: true, text: r.content[0].text, truncated: false, images: [] } });
+  s.text('m1', 'Done.');
+  const texts = h.events(thread.id).filter((e) => e.type === 'assistant.text');
+  assert.deepEqual(texts.map((e) => e.type === 'assistant.text' && e.text), ['- Fixed it.', 'Done.']);
+  assert.equal(h.runner.get(thread.id).preview, '- Fixed it.');
+});
+
 // Codex's final answer ends its turn, so its end_turn comes just before it.
 // Told to call it after, Codex never did (28 Oct 2026).
 test("Codex's end_turn comes before the final answer: never refused, and the answer after it is kept", async () => {

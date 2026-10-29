@@ -49,7 +49,7 @@ export const TOOL_GUIDANCE =
   `${SHOWING_MIKE} ` +
   `${FILING_PROJECTS} ` +
   // Before, not after: Codex's final answer ends its turn (needs.ts).
-  'End every turn by calling end_turn as your last tool call, just before your final answer, to say whether Mike has to do anything.';
+  'End every turn by calling end_turn as your last tool call, just before your final answer, with a short summary of what you did (Mike reads it first) and anything he has to do.';
 
 // The tools as one dynamic-tool namespace, with JSON Schema from zod.
 export function dynamicToolSpecs(tools: ToolDefinition[]): DynamicToolSpec[] {

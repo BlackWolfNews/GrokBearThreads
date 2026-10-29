@@ -1,0 +1,63 @@
+/* Colours and sizes taken from the live app's transcript (screenshots
+   28 Oct): RowRenderer.asksText and Theme. */
+*{box-sizing:border-box;margin:0}
+body{background:#1e1e1e;font:15px/1.5 -apple-system,"SF Pro Text",system-ui;color:#e6e4e1;padding:24px;width:900px}
+.win{background:#262626;border:1px solid #333;border-radius:12px;padding:22px 26px 20px}
+.work{color:#9a9894;font-size:14px;margin-bottom:14px}
+.work .ch{color:#6f6d69;margin-left:6px}
+.msg p{margin-bottom:12px}
+code{font:13px ui-monospace,"SF Mono",monospace;background:#333;border-radius:5px;padding:1px 6px;color:#8fb4ff}
+.files{border:1px solid #3a3a3a;border-radius:10px;margin:14px 0 10px}
+.files .h{display:flex;justify-content:space-between;padding:10px 14px;font-weight:600;font-size:14px;border-bottom:1px solid #353535}
+.files .r{display:flex;justify-content:space-between;padding:9px 14px;font-size:14px}
+.files .dim{color:#7d7b77;font-weight:400;margin-left:8px;font-size:13px}
+.plus{color:#7cc78a}.minus{color:#e0726b}
+.meta{color:#7d7b77;font-size:12.5px;margin:8px 0 14px}
+.card{border:1px solid #3d5fae;border-radius:12px;padding:16px 18px 6px;background:#282828}
+.card .head{font-weight:600;font-size:14px;margin-bottom:6px}
+.ask{font-weight:600;font-size:15px;margin-top:10px}
+.ask .n{margin-right:8px}
+.why{color:#a3a09b;font-size:12.5px;margin-top:3px}
+.where{color:#7d7b77;font-size:12.5px;margin-top:2px}
+.ctx{font-size:15px;margin-top:10px;color:#e6e4e1}
+.btns{display:flex;flex-wrap:wrap;gap:10px;margin:10px 0 10px}
+.b{background:#383838;border:1px solid #474747;border-radius:8px;padding:5px 12px;font-size:13.5px;box-shadow:0 1px 2px rgba(0,0,0,.35)}
+.b.pri{background:#3478f6;border-color:#3478f6;color:#fff}
+.b.sug{border-color:#4f7fd9}
+/* Option B: the asks are the end of the message, marked by a rail */
+.asks{border-left:3px solid #3d6fd6;padding:2px 0 2px 16px;margin:6px 0 4px}
+.asks .ask:first-child{margin-top:0}
+.composer{margin-top:16px;background:#2d2d2d;border:1px solid #3a3a3a;border-radius:14px;padding:12px 14px;color:#77746f;font-size:14px;display:flex;justify-content:space-between}
+.btns+.ask,.btns+.ctx{margin-top:20px}
+.files.top{margin:0 0 16px}
+.meta.end{margin:10px 0 0}
+/* Option D: each ask is the agent's own paragraph, drawn like message text */
+.li{display:grid;grid-template-columns:24px 1fr;margin-top:10px}
+.li .num{color:#e6e4e1}
+.li p{margin:0}
+.li+.li{margin-top:14px}
+.card .head.body{font-size:15px}
+/* End-of-turn summary (29 Oct) */
+.user{background:#333;border-radius:14px;padding:10px 14px;margin:0 0 16px 160px;font-size:14.5px}
+.sum{margin:4px 0 12px;padding-left:20px}
+.sum li{margin:5px 0}
+a{color:#8fb4ff;text-decoration:none}
+a.w{color:#8fb4ff;border-bottom:1px dotted #5d7fc4}
+.g{font-size:11px;margin-left:3px;opacity:.85}
+.card.done{border-color:#3a3a3a}
+.sec{font-weight:600;font-size:14px;margin:4px 0 4px;color:#e6e4e1}
+.sec+.sum{margin-top:2px}
+.split{border-top:1px solid #353535;margin:12px -18px 10px}
+.chips{display:inline-flex;gap:6px;margin-left:6px;vertical-align:1px}
+.chip{font-size:12px;background:#333;border:1px solid #444;border-radius:6px;padding:0 7px;color:#b9c9ec}
+/* expanded work */
+.wrow{display:flex;gap:10px;align-items:baseline;color:#b5b2ad;font-size:14px;padding:4px 8px;border-radius:6px}
+.wrow .i{width:16px;color:#7d7b77;font-size:12px;text-align:center}
+.wrow.t{color:#d8d6d2}
+.wrow code{font-size:12.5px}
+.wrow.hl{background:rgba(61,111,214,.16);box-shadow:inset 3px 0 0 #3d6fd6}
+.out{font:12.5px/1.45 ui-monospace,"SF Mono",monospace;color:#9a9894;background:#222;border:1px solid #333;border-radius:8px;padding:8px 10px;margin:2px 0 4px 34px}
+.hl+.out{border-color:#3d5fae}
+.fade{opacity:.45}
+.clicked{background:rgba(61,111,214,.18);border-radius:4px}
+.toast{color:#7d7b77;font-size:12.5px;margin:2px 0 8px 34px}

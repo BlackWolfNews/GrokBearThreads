@@ -575,7 +575,7 @@ Persisted event types (stored in `events.ndjson`, returned by `threads.events`):
 | type | fields |
 |---|---|
 | `user.message` | `text`, `images: ImageRef[]`, `answers?: AskAnswer[]` (the open card's asks it answers, as `threads.send` gave them: for showing, the agent only gets `text`), `origin?: "runner" \| "schedule" \| "phone"` (`runner` when the runner sent the message by itself, such as the resume after a restart; `schedule` when a schedule sent it, with `scheduleId`; `phone` when it came from the phone through the Convex mirror (Sync); absent for anything a person or client sent), `scheduleId?`, `editOf?: number` (the seq of the message this one replaced, see Editing a message) |
-| `assistant.text` | `itemId`, `text` (complete markdown for that block) |
+| `assistant.text` | `itemId`, `text` (complete markdown for that block), `summary?: true` (the turn's summary, written by the runner from `end_turn`; see "Needs you") |
 | `reasoning` | `itemId`, `text` (summary) |
 | `tool.call` | `itemId`, `name` (raw tool name), `kind` (`command` \| `read` \| `edit` \| `write` \| `search` \| `web` \| `mcp` \| `task` \| `todo` \| `image` \| `other`; `image` is image generation), `title` (one line, e.g. "npm test" or "Edit src/a.ts"), `input` (object, large strings truncated to 16 KB) |
 | `tool.result` | `itemId` (matches the call), `ok`, `text` (truncated to 64 KB), `truncated`, `blobPath?`, `images: ImageRef[]` |
@@ -1213,8 +1213,9 @@ A turn the agent finished can say whether Mike has to do anything, so
 "Needs you" only holds threads that are really waiting on him.
 
 - **The tool.** Every thread's own agent (not its sub-agents) has
-  `end_turn` in the `threadbear` tools: `{ needs: "you" | "nothing",
-  asks?: { action, reply?, why?, options?, suggested?, links? }[] }`.
+  `end_turn` in the `threadbear` tools: `{ needs?: "you" | "nothing",
+  summary?: string[], asks?: { action, reply?, why?, options?,
+  suggested?, links? }[] }`.
   The asks are the agent's "What I need from you" list, written there
   instead of in its message: each is one paragraph, `action` its first
   sentence (one concrete thing to do, or a question) and `why` the rest
@@ -1233,8 +1234,41 @@ A turn the agent finished can say whether Mike has to do anything, so
   folder, a `.tandem` project) in its own app. The agent calls it last, after its final
   message. The tool's description says when, so a resumed session that
   kept its old system prompt still hears it.
+- **The summary.** `end_turn` also takes `summary?: string[]`: two to
+  five short markdown bullets of what the turn did and found, which Mike
+  reads first (29 Oct 2026, after Codex desktop: the least context to
+  load, then what's next). When an accepted `end_turn` has one, the runner
+  writes it into the thread straight after the call's `tool.result`, as
+  an `assistant.text` with `summary: true` (`itemId` the call's plus
+  `.summary`, `text` the bullets as a markdown list). So it is the turn's
+  reply everywhere: the preview, notifications, the phone, the website,
+  `read_thread`. The Mac app folds the turn's other `assistant.text`
+  into its working, so the turn reads as one line of work, the bullets,
+  then the Needs you card. Text after the call is dropped as before
+  (Claude), and Codex's final answer, which still follows its `end_turn`,
+  folds away like the rest and doesn't take over the preview. Up to 8
+  bullets of up to 400 characters are kept; a leading `-`, `*` or `•` is
+  taken off. Why not just ask for bullets in the final message: in 36
+  test sessions Opus 5.5 wrote a prose paragraph every time, as it
+  often sends its last reply as a narration block, and in `end_turn`
+  every one came back as bullets (docs/end-turn-design).
+- **Links into the thread.** A summary bullet (or any message, or an
+  ask's markdown) can link `work:<words>`, a step in this turn's working,
+  and `thread:<id>`, another thread by id or id prefix. Spaces are fine
+  inside the parentheses. The app opens the turn's work group, scrolls to
+  the step and lights it up: the last step whose command (or one of its
+  `&&` parts) starts with the words, else the last whose command,
+  description, file path, pattern or text mentions them, else the last
+  whose output does. The agent can't see its tool calls' ids, so it quotes
+  the step: models quoted the command, the command's description and
+  their own lines while working, and every quote landed in the tests.
+- **Needs from the asks.** `needs` may be left out: asks mean `you`,
+  none mean `nothing`. Agents filling in a summary forgot it 2 times in
+  9.
+- **Once a turn.** A second `end_turn` after an accepted one in the same
+  turn is refused ("Already ended"); Opus once sent its card four times.
 - **A reply first.** `end_turn` is refused (an error result) until the
-  turn has replied to Mike: an own `assistant.text` after the turn's last
+  turn has replied to Mike: a `summary` in the call itself, or an own `assistant.text` after the turn's last
   `tool.result` from a tool outside the `threadbear` server, and after
   its last `user.message`. The thread's own tools (`pin`,
   `update_project`, a refused `end_turn`) and `ToolSearch` (which loads

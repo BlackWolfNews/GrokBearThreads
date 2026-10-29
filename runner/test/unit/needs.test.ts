@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { PersistedEvent } from '../../src/protocol.ts';
-import { archiveFromTool, CODEX_END_TURN_DESCRIPTION, END_TURN_DESCRIPTION, END_TURN_FULL_NAME, needsFromText, needsFromTool, turnReply } from '../../src/needs.ts';
+import { archiveFromTool, CODEX_END_TURN_DESCRIPTION, END_TURN_DESCRIPTION, END_TURN_FULL_NAME, needsFromText, needsFromTool, summaryFromTool, summaryMarkdown, turnReply } from '../../src/needs.ts';
 import { END_TURN_TOOL } from '../../src/needs.ts';
 import { SERVER_NAME } from '../../src/threadbear-mcp.ts';
 import { ClaudeNormalizer, fileContext } from '../../src/adapters/claude/normalize.ts';
@@ -22,6 +22,34 @@ test('end_turn input: nothing, you with asks, and junk falls back', () => {
   assert.equal(archiveFromTool(undefined), false);
   assert.equal(needsFromTool(null), undefined);
   assert.equal(needsFromTool({ needs: 'you', asks: Array.from({ length: 20 }, (_, i) => ({ action: `a${i}` })) })!.asks!.length, 10);
+});
+
+test('end_turn input: needs left out comes from the asks', () => {
+  // Agents filling in a summary forgot needs 2 times in 9 (29 Oct 2026).
+  assert.deepEqual(needsFromTool({ asks: [{ action: 'Paste the key', why: 'For the deploy.' }] }), { needs: 'you', asks: [{ action: 'Paste the key', why: 'For the deploy.' }] });
+  assert.deepEqual(needsFromTool({ summary: ['Fixed it.'] }), { needs: 'nothing' });
+  assert.deepEqual(needsFromTool({ asks: [{ action: '' }] }), { needs: 'nothing' });
+  assert.deepEqual(needsFromTool({}), { needs: 'nothing' });
+  assert.equal(archiveFromTool({ archive: true }), true);
+  assert.equal(archiveFromTool({ archive: true, asks: [{ action: 'Look' }] }), false);
+});
+
+test('end_turn summary: bullets kept tidy, a few at most, none is undefined', () => {
+  assert.deepEqual(summaryFromTool({ summary: ['- Fixed the slug bug.', ' • [Tests pass](work:npm test) ', '', 3, '* Committed as `b08255b`.'] }), ['Fixed the slug bug.', '[Tests pass](work:npm test)', 'Committed as `b08255b`.']);
+  assert.equal(summaryFromTool({ summary: [] }), undefined);
+  assert.equal(summaryFromTool({ summary: 'Fixed it.' }), undefined);
+  assert.equal(summaryFromTool({ needs: 'nothing' }), undefined);
+  assert.equal(summaryFromTool({ summary: Array.from({ length: 12 }, (_, i) => `b${i}`) })!.length, 8);
+  assert.equal(summaryFromTool({ summary: ['x'.repeat(600)] })![0].length, 400);
+  assert.equal(summaryMarkdown(['One.', 'Two.']), '- One.\n- Two.');
+});
+
+test("end_turn's description asks for a short summary with links into the thread", () => {
+  for (const d of [END_TURN_DESCRIPTION, CODEX_END_TURN_DESCRIPTION]) {
+    assert.match(d, /summary/);
+    assert.match(d, /work:/);
+    assert.match(d, /thread:/);
+  }
 });
 
 test('end_turn input: a decision keeps its why, options and a valid pick', () => {

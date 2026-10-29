@@ -500,7 +500,8 @@ export type EventBody =
   // origin is set only on messages the runner sent by itself (the resume
   // after a restart).
   | { type: 'user.message'; text: string; images: ImageRef[]; origin?: MessageOrigin; scheduleId?: string; reviewId?: string; reviewResponse?: ReviewDraft; answers?: AskAnswer[]; editOf?: number }
-  | { type: 'assistant.text'; itemId: string; text: string }
+  // summary: the turn's summary, written by the runner from end_turn
+  | { type: 'assistant.text'; itemId: string; text: string; summary?: true }
   | { type: 'reasoning'; itemId: string; text: string }
   | { type: 'tool.call'; itemId: string; name: string; kind: ToolKind; title: string; input: Record<string, unknown> }
   | {

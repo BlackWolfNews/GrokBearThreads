@@ -108,6 +108,13 @@ At the right of each row:
 - **Waiting for room**: every login it could use has hit its limit (see
   Accounts below). It carries on by itself when one has room again.
 
+When an agent finishes a piece of work, its reply is a few short bullets
+of what it did, with what it needs from you (or "Nothing needed from you")
+under them. What it wrote while it worked is folded into the line of work
+above, with its commands and edits. A link with ↑ after it goes to the
+step it's about: click it and the work opens there, with that step lit
+up. A link to another thread opens that thread.
+
 Inside a thread, rest the pointer on a link for a moment, in a reply or on a
 Needs you card's buttons, to see where it goes: a picture of the file, or
 the page's address. Click it to open it.

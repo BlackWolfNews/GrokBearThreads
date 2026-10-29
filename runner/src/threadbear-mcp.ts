@@ -19,7 +19,7 @@ import { parseWhen, relativeFuture, relativeTime } from './when.ts';
 
 export { parseWhen, relativeFuture, relativeTime };
 import { RUNNER_VERSION, expandHome } from './config.ts';
-import { CODEX_END_TURN_DESCRIPTION, END_TURN_DESCRIPTION, END_TURN_TOOL, ENDED, NO_REPLY, turnReply } from './needs.ts';
+import { ALREADY_ENDED, CODEX_END_TURN_DESCRIPTION, END_TURN_DESCRIPTION, END_TURN_TOOL, ENDED, endedThisTurn, NO_REPLY, needsFromTool, summaryFromTool, turnReply } from './needs.ts';
 import { asksForAppRestart, type AppRestarts } from './app-restarts.ts';
 import { PANEL_PLACES } from './panel-requests.ts';
 import { nudgedThisTurn, signInNudge, turnSignIns, uncovered } from './connectors.ts';
@@ -564,7 +564,12 @@ export function buildThreadbearTools(
       END_TURN_TOOL,
       codex ? CODEX_END_TURN_DESCRIPTION : END_TURN_DESCRIPTION,
       {
-        needs: z.enum(['you', 'nothing']).describe('"you" when Mike has to do something before this can go on; "nothing" when it is done.'),
+        needs: z.enum(['you', 'nothing']).optional().describe('"you" when Mike has to do something before this can go on; "nothing" when it is done. Left out, it follows the asks.'),
+        summary: z
+          .array(z.string())
+          .max(8)
+          .optional()
+          .describe('What happened this turn, 2 to 5 markdown bullets (one string each, no leading dash), each one line of about 15 words at most, linked to where Mike can check it: [tests pass](work:npm test) for a step in your working, [its own thread](thread:a1b2c3d4), a web page or a file. Drawn as your reply; see the description.'),
         asks: z
           .array(
             z.object({
@@ -595,11 +600,17 @@ export function buildThreadbearTools(
           .optional()
           .describe('true to archive this thread once the turn is over. Only when Mike has asked for this thread to be archived, and only with needs "nothing".'),
       },
-      handle(async ({ needs, asks, archive }) => {
+      handle(async (args) => {
+        const { asks, archive } = args;
+        // Left out, needs follows the asks (needs.ts).
+        const needs = needsFromTool(args)?.needs ?? 'nothing';
+        // A summary is the reply (the runner writes it into the thread).
         // No reply yet: refused, so the agent writes one. An error result
         // also keeps the CLI from taking this call as the turn's end.
         // Codex's reply is the final answer it writes next.
-        if (!codex && !(await replied())) throw new Error(NO_REPLY);
+        const summary = summaryFromTool(args);
+        if (!codex && !summary && !(await replied())) throw new Error(NO_REPLY);
+        if (endedThisTurn(await turnEvents(), SERVER_NAME)) throw new Error(ALREADY_ENDED);
         // A connector that needs Mike to sign in again (a gateway service's
         // sign_in stub, or claude.ai's "needs you to sign in again") came
         // up this turn and no ask covers it: refused once, saying which
@@ -619,9 +630,8 @@ export function buildThreadbearTools(
         // Not ENDED: that would have the runner drop the final answer that
         // follows as text after end_turn.
         if (codex) {
-          return needs === 'you'
-            ? `Noted.${restart} Now write your final answer: it ends the turn. Keep the asks out of it, as they go in a card under it.`
-            : 'Noted. Now write your final answer: it ends the turn.';
+          const answer = summary ? 'Now write your final answer, one short line, as Mike reads your summary: it ends the turn.' : 'Now write your final answer: it ends the turn.';
+          return needs === 'you' ? `Noted.${restart} ${answer} Keep the asks out of it, as they go in a card under it.` : `Noted. ${answer}`;
         }
         // With the why, as the bare "End the turn now, with no more text"
         // didn't stop Haiku repeating its reply under end_turn; the reason
@@ -915,7 +925,7 @@ export function threadbearMcpServer(control: ThreadControl, selfId: string, sche
       'Use move_thread when the work belongs in another folder (for example a repo), so this thread runs there from the next turn. ' +
       `${SHOWING_MIKE} ` +
       (projects ? `${FILING_PROJECTS} ` : '') +
-      'End every turn by calling end_turn, after your final message, to say whether Mike has to do anything.',
+      'End every turn by calling end_turn, with a short summary of what you did (Mike reads it first, as your reply) and anything he has to do.',
     tools: buildThreadbearTools(control, selfId, Date.now, schedules, projects, appRestarts),
   });
   server.tools = [...ALWAYS_ASK_TOOLS].map((name) => ({ name: name.split('__').at(-1)!, permission_policy: 'always_ask' as const }));

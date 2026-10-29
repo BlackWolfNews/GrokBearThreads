@@ -30,7 +30,9 @@ const LINK_URL = /^(?:https?:\/\/|file:\/\/|\/|~\/)/i;
 export function needsFromTool(input: unknown): Needs | undefined {
   if (!input || typeof input !== 'object') return undefined;
   const o = input as Record<string, unknown>;
-  if (o.needs !== 'you' && o.needs !== 'nothing') return undefined;
+  // Left out, it comes from the asks: agents filling in a summary forgot
+  // it 2 times in 9 (29 Oct 2026). Anything else is a call to ignore.
+  if (o.needs !== undefined && o.needs !== 'you' && o.needs !== 'nothing') return undefined;
   if (o.needs === 'nothing') return { needs: 'nothing' };
   const asks: Ask[] = [];
   for (const a of Array.isArray(o.asks) ? o.asks : []) {
@@ -57,7 +59,33 @@ export function needsFromTool(input: unknown): Needs | undefined {
     asks.push(ask);
     if (asks.length === MAX_ASKS) break;
   }
+  if (o.needs === undefined) return asks.length ? { needs: 'you', asks } : { needs: 'nothing' };
   return asks.length ? { needs: 'you', asks } : { needs: 'you' };
+}
+
+// Big enough for any turn's story; past this it's the working again.
+const MAX_SUMMARY = 8;
+const MAX_BULLET = 400;
+
+// end_turn's summary bullets, tidied (docs/protocol.md, "The summary"),
+// or undefined when there are none, so the turn's own text is its reply.
+export function summaryFromTool(input: unknown): string[] | undefined {
+  if (!input || typeof input !== 'object') return undefined;
+  const v = (input as Record<string, unknown>).summary;
+  if (!Array.isArray(v)) return undefined;
+  const out: string[] = [];
+  for (const b of v) {
+    // The app draws them as a list, so a bullet of its own would be doubled.
+    const t = typeof b === 'string' ? b.trim().replace(/^[-*•]\s+/, '').trim() : '';
+    if (t) out.push(t.slice(0, MAX_BULLET));
+    if (out.length === MAX_SUMMARY) break;
+  }
+  return out.length ? out : undefined;
+}
+
+// The summary as the reply's text: a markdown list, one bullet a line.
+export function summaryMarkdown(bullets: string[]): string {
+  return bullets.map((b) => `- ${b}`).join('\n');
 }
 
 // Whether end_turn asked for its thread to be archived once the turn is
@@ -66,7 +94,7 @@ export function needsFromTool(input: unknown): Needs | undefined {
 export function archiveFromTool(input: unknown): boolean {
   if (!input || typeof input !== 'object') return false;
   const o = input as Record<string, unknown>;
-  return o.needs === 'nothing' && o.archive === true;
+  return o.archive === true && needsFromTool(input)?.needs === 'nothing';
 }
 
 function linksFrom(v: unknown): AskLink[] {
@@ -193,7 +221,19 @@ function askFrom(item: string): Ask {
 // session keeps the system prompt it started with, but sees every tool's
 // description afresh.
 const END_TURN_WHAT =
-  'Says whether Mike has to do anything now that this turn is over, so Threadbear can put the thread in Needs you or leave it as done. ';
+  'Ends the turn: says what it did (summary) and whether Mike has to do anything (asks), so Threadbear can put the thread in Needs you or leave it as done. ';
+
+// Mike, 29 Oct 2026, after Codex desktop: the least context to load when
+// he comes back to a thread, then what's next, with links back into the
+// detail. In 36 test sessions, bullets asked for in the final message
+// came back as prose from Opus every time; in here, as bullets every time
+// (docs/end-turn-design). The links' quote-a-step rule is what models
+// managed: they can't see their tool calls' ids.
+const END_TURN_SUMMARY =
+  'summary is what Mike reads first when he comes back to the thread, often hours later and among many others: 2 to 5 markdown bullets of what happened this turn (what you found, changed, shipped or decided, with the result), each one line of about 15 words at most, in plain words that make sense to someone who has forgotten the task. ' +
+  "It is drawn as your reply, with the asks under it, and everything else you wrote this turn folds into your working, so don't repeat it in a message, and leave what Mike has to do to the asks. If he asked a question, the first bullet answers it. " +
+  'Link each bullet to where he can check it: a web page or a file as an ordinary markdown link; another thread as [its own thread](thread:<its id from list_threads>); a step in your own working this turn as work: and a few words copied exactly from that step (the command you ran or its description, the file you edited, or a line you wrote while working), e.g. [tests pass](work:npm test), which opens your working at that step and lights it up. Links work in the asks too. ' +
+  'Leave summary out only when the turn was a line or two of conversation, and write that as an ordinary message. ';
 
 // What to put in it, the same for both providers.
 const END_TURN_ASKS =
@@ -212,8 +252,9 @@ const END_TURN_ASKS =
 
 export const END_TURN_DESCRIPTION =
   END_TURN_WHAT +
-  'Call it once, as the very last thing in every turn, after your final message, and write nothing after it. ' +
-  "It is refused until the turn has a reply: ordinary text from you after your last tool result (Threadbear's own tools aside), so Mike gets a complete answer in the conversation. " +
+  'Call it once, as the very last thing in every turn, and write nothing after it. ' +
+  END_TURN_SUMMARY +
+  "With a summary, you needn't write a message first. Without one, it is refused until the turn has a reply: ordinary text from you after your last tool result (Threadbear's own tools aside), so Mike gets a complete answer in the conversation. " +
   END_TURN_ASKS;
 
 // Codex's: its final answer ends the turn, so nothing can be called after
@@ -224,6 +265,8 @@ export const CODEX_END_TURN_DESCRIPTION =
   END_TURN_WHAT +
   'Call it once, as your last tool call, just before your final answer: the final answer ends the turn, so nothing can be called after it. ' +
   'Call it through your tools like any other; never write the call, or its result, in your message. ' +
+  END_TURN_SUMMARY +
+  'With a summary, your final answer can be one short line: it folds into your working, as Mike reads the summary instead. ' +
   END_TURN_ASKS;
 
 // What end_turn says when the turn has no reply yet. An error result, so
@@ -250,6 +293,33 @@ export const ENDED = 'Noted: this thread';
 export function endTurnAccepted(result: { ok: boolean; text: string }): boolean {
   return result.ok && result.text.startsWith(ENDED);
 }
+
+// An end_turn the handler took, Claude's (ENDED) or Codex's ("Noted. Now
+// write your final answer"), as opposed to one it refused.
+export function endTurnTaken(result: { ok: boolean; text: string }): boolean {
+  return result.ok && result.text.startsWith('Noted');
+}
+
+// Whether this turn already has an end_turn that was taken, so a second
+// is refused: Opus once sent its card four times (29 Oct 2026).
+export function endedThisTurn(events: PersistedEvent[], serverName = 'threadbear'): boolean {
+  const endTurn = `mcp__${serverName}__${END_TURN_TOOL}`;
+  let start = 0;
+  for (let i = events.length - 1; i >= 0; i--) {
+    if (events[i].type === 'turn.started') {
+      start = i + 1;
+      break;
+    }
+  }
+  const calls = new Set<string>();
+  for (const e of events.slice(start)) {
+    if (e.type === 'tool.call' && e.name === endTurn) calls.add(e.itemId);
+    if (e.type === 'tool.result' && calls.has(e.itemId) && endTurnTaken(e)) return true;
+  }
+  return false;
+}
+
+export const ALREADY_ENDED = 'Already ended: this turn has had its end_turn, and Mike has its summary and asks. Stop here, with no more text.';
 
 // Whether the turn so far has given Mike a reply, for end_turn to check
 // before it ends the turn. An agent that drafted its answer in thinking

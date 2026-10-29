@@ -101,6 +101,8 @@ public struct TranscriptModel: Sendable {
     /// Their events stay in `events` but make no rows.
     public private(set) var hidden: [ClosedRange<Int>] = []
     private var completedTurns: Set<String> = []
+    /// Turns with a summary from end_turn: their other messages are work.
+    private var summarizedTurns: Set<String> = []
     /// Edit and Write tool items per turn, in order, for the changes card.
     private var editsByTurn: [String: [String]] = [:]
     /// Approval and question rows still waiting, and their turn. A turn
@@ -365,6 +367,7 @@ public struct TranscriptModel: Sendable {
         startedTurns = []
         hidden = Self.hiddenRanges(events)
         completedTurns = []
+        summarizedTurns = []
         editsByTurn = [:]
         pendingCards = [:]
         approvalForTool = [:]
@@ -504,7 +507,19 @@ public struct TranscriptModel: Sendable {
             closeOpenAsks()
             append(TranscriptRow(id: "rw:\(seq)", seq: seq, turnId: turnId, content: .note(rewind.summary)))
 
-        case .assistantText(let itemId, let text):
+        case .assistantText(let itemId, let text, let summary) where summary:
+            // The turn's summary is its reply: what the agent wrote before it
+            // folds into the work, so the turn reads as one line of work,
+            // the bullets, then the card (docs/protocol.md, "The summary").
+            let id = "a:\(itemId)"
+            guard itemIndex[id] == nil, !text.isEmpty else { break }
+            if let turnId, !summarizedTurns.contains(turnId) {
+                summarizedTurns.insert(turnId)
+                if let first = items.firstIndex(where: { $0.turnId == turnId }) { markInserted(first) }
+            }
+            append(TranscriptRow(id: id, seq: seq, turnId: turnId, content: .assistant(TextItem(itemId: itemId, text: text, isSummary: true))))
+
+        case .assistantText(let itemId, let text, _):
             streaming[itemId] = nil
             let id = "a:\(itemId)"
             let thought = "r:\(itemId)"
@@ -836,22 +851,38 @@ public struct TranscriptModel: Sendable {
         return tool.result?.ok ?? true
     }
 
+    /// `isWork`, plus a summarized turn's own messages, which fold into
+    /// its work under the summary.
+    private func isWork(_ row: TranscriptRow) -> Bool {
+        if case .assistant(let text) = row.content, !text.isSummary, let turn = row.turnId, summarizedTurns.contains(turn) { return true }
+        return Self.isWork(row)
+    }
+
     /// The first item of the run of work that item `i` is in (or `i`).
     private func runStart(_ i: Int) -> Int {
-        guard i >= 0, i < items.count, Self.isWork(items[i]) else { return max(0, i) }
+        guard i >= 0, i < items.count, isWork(items[i]) else { return max(0, i) }
         let turn = items[i].turnId
         var j = i
-        while j > 0, Self.isWork(items[j - 1]), items[j - 1].turnId == turn { j -= 1 }
+        while j > 0, isWork(items[j - 1]), items[j - 1].turnId == turn { j -= 1 }
         return j
     }
 
     /// One past the last item of the run that item `i` is in (or `i + 1`).
     private func runEnd(_ i: Int) -> Int {
-        guard i >= 0, i < items.count, Self.isWork(items[i]) else { return min(items.count, i + 1) }
+        guard i >= 0, i < items.count, isWork(items[i]) else { return min(items.count, i + 1) }
         let turn = items[i].turnId
         var j = i + 1
-        while j < items.count, Self.isWork(items[j]), items[j].turnId == turn { j += 1 }
+        while j < items.count, isWork(items[j]), items[j].turnId == turn { j += 1 }
         return j
+    }
+
+    /// The step a work: link in turn `turnId` means (WorkLinks.step), and
+    /// the group row it's folded into, nil when it's shown as itself.
+    public func workStep(_ quote: String, turn turnId: String) -> (rowId: String, groupId: String?)? {
+        let turnItems = items.lazy.filter { $0.turnId == turnId }
+        guard let row = WorkLinks.step(for: quote, in: turnItems), let i = itemIndex[row.id] else { return nil }
+        let start = runStart(i)
+        return (row.id, runEnd(i) - start > 1 ? "g:" + items[start].id : nil)
     }
 
     /// The first row standing for item `item` or a later one.
@@ -934,9 +965,13 @@ public struct TranscriptModel: Sendable {
         var i = start
         while i < end {
             let item = items[i]
-            if Self.isWork(item) {
+            if isWork(item) {
                 let runEnd = runEnd(i)
-                if runEnd - i == 1 {
+                // A summarized turn's one message still folds away: the
+                // summary is the reply.
+                var foldedText = false
+                if case .assistant = item.content { foldedText = true }
+                if runEnd - i == 1, !foldedText {
                     // A run of one is shown as itself.
                     out.append(item)
                     starts.append(i)

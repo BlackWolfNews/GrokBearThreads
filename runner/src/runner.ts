@@ -86,7 +86,7 @@ import { SAID_MAX, WAKE_SYSTEM, hibernateNote, readWakeAnswer, wakePrompt } from
 import { emptyHighlights, observe as observeHighlights, pinItem, remove as removeHighlight, unpin as unpinHighlight, upsert as upsertHighlight, view as highlightsView, absolute, type ThreadHighlights } from './highlights.ts';
 import { SERVER_NAME, approvalTitle } from './threadbear-mcp.ts';
 import { PANEL_ACK_WAIT_MS, PANEL_PLACES, resolvePanel } from './panel-requests.ts';
-import { archiveFromTool, END_TURN_TOOL, endTurnAccepted, needsFromText, needsFromTool } from './needs.ts';
+import { archiveFromTool, END_TURN_TOOL, endTurnAccepted, endTurnTaken, needsFromText, needsFromTool, summaryFromTool, summaryMarkdown } from './needs.ts';
 import type { Needs } from './needs.ts';
 import { asksForAppRestart } from './app-restarts.ts';
 import type { ConnectorsStatus } from './connectors.ts';
@@ -227,6 +227,8 @@ type Turn = {
   // it to stop, yet an agent repeated its last line under it as a second
   // message (28 Oct 2026).
   endTurnCall?: string;
+  // Its end_turn's summary is in the events as the turn's reply.
+  summarized?: boolean;
   ended?: boolean;
 };
 
@@ -2098,7 +2100,9 @@ export class Runner {
         const ev = o.event;
         // Text after an accepted end_turn (see Turn.ended), dropped before
         // it can become the preview or a second message.
-        if (ev.type === 'assistant.text' && rt.turn?.ended && !ev.itemId.includes('/')) {
+        // Thinking after it too: Opus mused "I'd already wrapped up" under
+        // its summary (29 Oct 2026).
+        if ((ev.type === 'assistant.text' || ev.type === 'reasoning') && rt.turn?.ended && !ev.itemId.includes('/')) {
           rt.inProgress.delete(ev.itemId);
           this.log.info('dropped text after end_turn', { threadId: rec.id, chars: ev.text.length });
           break;
@@ -2108,12 +2112,14 @@ export class Runner {
           rt.inProgress.delete(ev.itemId);
           rt.pendingDeltas.delete(ev.itemId);
         }
-        if (ev.type === 'assistant.text') rec.preview = oneLine(ev.text, LIMITS.previewChars);
+        // Once the turn has its summary, that is the reply: Codex's final
+        // answer after it folds away in the app and isn't the preview.
+        if (ev.type === 'assistant.text' && !rt.turn?.summarized) rec.preview = oneLine(ev.text, LIMITS.previewChars);
         if (rt.turn) {
           // A Codex child's items carry its prefix (<child>/<id>); Claude's
           // sub-agents never reach the thread's events.
           const own = !('itemId' in ev && ev.itemId?.includes('/'));
-          if (ev.type === 'assistant.text' && own) rt.turn.lastText = ev.text;
+          if (ev.type === 'assistant.text' && own && !rt.turn.summarized) rt.turn.lastText = ev.text;
           if (ev.type === 'tool.call' && own && ev.name === `mcp__${SERVER_NAME}__${END_TURN_TOOL}`) {
             rt.turn.endTurn = ev.input;
             rt.turn.endTurnCall = ev.itemId;
@@ -2132,12 +2138,24 @@ export class Runner {
           }
         }
         this.emit(st, ev, rt.turn?.turnId);
+        // end_turn's summary, written as the turn's reply straight after
+        // the call it came in (docs/protocol.md, "The summary").
+        if (ev.type === 'tool.result' && rt.turn && ev.itemId === rt.turn.endTurnCall && endTurnTaken(ev)) {
+          const bullets = summaryFromTool(rt.turn.endTurn);
+          if (bullets) {
+            const text = summaryMarkdown(bullets);
+            rt.turn.summarized = true;
+            rt.turn.lastText = text;
+            rec.preview = oneLine(text, LIMITS.previewChars);
+            this.emit(st, { type: 'assistant.text', itemId: `${ev.itemId}.summary`, text, summary: true }, rt.turn.turnId);
+          }
+        }
         break;
       }
       case 'delta':
         // Streamed text after an accepted end_turn, dropped like its frame
         // above, so it doesn't flash up and vanish.
-        if (rt.turn?.ended && o.delta.type === 'assistant.text.delta' && !o.delta.itemId.includes('/')) break;
+        if (rt.turn?.ended && (o.delta.type === 'assistant.text.delta' || o.delta.type === 'reasoning.delta') && !o.delta.itemId.includes('/')) break;
         this.addDelta(st, o.delta);
         break;
       case 'session':
