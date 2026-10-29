@@ -113,7 +113,7 @@ struct PendingReviewsButton: View {
             Button {
                 showing = true
             } label: {
-                Label("Review design options (\(thread.pendingReviews ?? 0))", systemImage: "rectangle.on.rectangle")
+                Label("Review design options (\(thread.pendingReviews ?? 0))", systemImage: Symbols.review)
             }.buttonStyle(.plain).foregroundStyle(.secondary)
                 .tip("Compare the images the agent made side by side, and reply")
             Spacer()

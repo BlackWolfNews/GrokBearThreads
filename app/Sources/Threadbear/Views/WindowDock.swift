@@ -161,7 +161,7 @@ enum WindowDock {
         switch panel {
         case threads: return "bubble.left.and.bubble.right"
         case main: return "text.alignleft"
-        case review: return "rectangle.on.rectangle"
+        case review: return Symbols.review
         case usage: return usageSymbol
         case updates: return updatesSymbol
         case setup: return setupSymbol

@@ -5,6 +5,7 @@ import ThreadbearCore
 /// decision can be reopened without finding an old tool invocation.
 final class ReviewRowCell: RowCellView {
     private let card = FillView()
+    private let icon = Symbols.makeView()
     private let title = NSTextField(labelWithString: "")
     private let detail = NSTextField(labelWithString: "")
     private let open = PillButton(pill: "Compare images")
@@ -12,7 +13,7 @@ final class ReviewRowCell: RowCellView {
 
     override init(frame: NSRect) {
         super.init(frame: frame)
-        [card, title, detail, open].forEach(addSubview)
+        [card, icon, title, detail, open].forEach(addSubview)
         open.target = self
         open.action = #selector(clicked)
         title.lineBreakMode = .byTruncatingTail
@@ -31,7 +32,10 @@ final class ReviewRowCell: RowCellView {
         card.set(fill: Theme.cardBackground, stroke: Theme.cardBorder, radius: RowMetrics.cardRadius, accent: review.isPending ? .systemOrange : nil)
         title.font = .systemFont(ofSize: TypeScale.work, weight: .semibold)
         title.stringValue = review.title
-        title.frame = NSRect(x: x + pad, y: top + pad, width: width - pad * 2, height: zoomed(22))
+        // The feature's icon, also on the answer bubble and the panel's tab.
+        Symbols.set(icon, Symbols.review, size: 13, tint: .secondaryLabelColor)
+        icon.frame = NSRect(x: x + pad, y: top + pad, width: zoomed(18), height: zoomed(22))
+        title.frame = NSRect(x: icon.frame.maxX + zoomed(6), y: top + pad, width: width - pad * 2 - zoomed(24), height: zoomed(22))
         detail.font = Theme.detailFont
         detail.textColor = Theme.quietText
         let picked = review.options.first { $0.id == review.response?.pickedId }

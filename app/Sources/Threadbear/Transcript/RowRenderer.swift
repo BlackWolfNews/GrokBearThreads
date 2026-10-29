@@ -516,7 +516,7 @@ enum RowRenderer {
     /// An SF Symbol as a text attachment, in the label's faint colour.
     /// Drawn through a handler so the colour follows light and dark at draw
     /// time, like the text beside it.
-    private static func symbol(_ name: String, label: String, font: NSFont, attributes: [NSAttributedString.Key: Any]) -> NSAttributedString {
+    private static func symbol(_ name: String, label: String, font: NSFont, attributes: [NSAttributedString.Key: Any], color: NSColor = Theme.faintText) -> NSAttributedString {
         let config = NSImage.SymbolConfiguration(pointSize: font.pointSize, weight: .regular)
         guard let symbol = NSImage(systemSymbolName: name, accessibilityDescription: label)?.withSymbolConfiguration(config) else {
             return NSAttributedString()
@@ -525,7 +525,7 @@ enum RowRenderer {
         let image = NSImage(size: size, flipped: false) { rect in
             // The colour, cut to the symbol's shape: drawn over the black
             // symbol instead, a translucent grey stayed nearly black.
-            Theme.faintText.set()
+            color.set()
             rect.fill(using: .copy)
             symbol.draw(in: rect, from: .zero, operation: .destinationIn, fraction: 1)
             return true
@@ -1068,6 +1068,12 @@ enum RowRenderer {
         let output = NSMutableAttributedString()
         let question = Theme.text(Theme.smallFont, color: .secondaryLabelColor, line: TypeScale.scaled(18))
         let answer = Theme.text(spacing: zoomed(8))
+        // The review's icon, as on its card, so the answer reads as the
+        // same feature.
+        if message.review != nil {
+            output.append(symbol(Symbols.review, label: "Review", font: Theme.smallFont, attributes: question, color: .secondaryLabelColor))
+            output.append(NSAttributedString(string: " ", attributes: question))
+        }
         for (i, item) in lines.enumerated() {
             if i > 0 { output.append(NSAttributedString(string: "\n", attributes: answer)) }
             output.append(NSAttributedString(string: item.label + "\n", attributes: question))

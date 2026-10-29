@@ -162,6 +162,11 @@ final class FillView: NSView {
 enum Symbols {
     private static var cache: [String: NSImage] = [:]
 
+    /// Comparing the agent's images (show_options): the button to open
+    /// waiting ones, the card, the panel's tab and Mike's answer all wear
+    /// it, so they read as one feature (Mike, 29 Oct).
+    nonisolated static let review = "rectangle.on.rectangle"
+
     /// `size` is the design size; the image is made at the zoom's.
     static func image(_ name: String, size: CGFloat = 12, weight: NSFont.Weight = .regular) -> NSImage? {
         let size = zoomed(size)
