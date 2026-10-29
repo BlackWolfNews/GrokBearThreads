@@ -23,12 +23,21 @@ struct ScheduleEditorState: Identifiable, Equatable {
     var model: String?
     var effort: String?
     var ask = false
+    /// Another runner it runs on (`runners.list`); nil is this one. Only
+    /// for a new thread each time. There the folder is a path on that
+    /// runner's Mac, typed as is ("" for its default folder), and the
+    /// account and model are left to it: its accounts aren't this Mac's.
+    var runnerId: String?
+    /// That runner's name, for an existing schedule's read-only line.
+    var runnerName: String?
     /// The composer draft it came from, emptied once it's saved.
     var draftKey: String?
     /// Images in that draft, which a schedule can't send.
     var draftImages = 0
 
     var isNew: Bool { scheduleId == nil }
+    /// Runs on another runner's Mac.
+    var isAway: Bool { runnerId != nil }
     var when: ScheduleWhen { once ? .at(at) : .cron(repeatChoice.cron) }
 }
 
@@ -52,6 +61,28 @@ extension AppModel {
         }
     }
 
+    /// Where a schedule can run. Asked at hello and again as the editor
+    /// opens, so who's offline is fresh when it matters.
+    func loadRunners() {
+        guard let client else { return }
+        Task {
+            do {
+                runners = try await client.listRunners()
+            } catch {
+                AppLog.write("rpc", "runners.list failed: \(error.localizedDescription)")
+            }
+        }
+    }
+
+    /// The runner this app talks to, as the backend knows it.
+    var selfRunnerId: String? { runners.first(where: \.isSelf)?.id }
+
+    /// The other runner a schedule runs on, by name; nil when it's this one.
+    func awayRunnerName(_ schedule: Schedule) -> String? {
+        guard schedule.runsElsewhere(than: selfRunnerId), let runnerId = schedule.runnerId else { return nil }
+        return schedule.runnerName ?? runners.first { $0.id == runnerId }?.name ?? "another Mac"
+    }
+
     var activeScheduleCount: Int { schedules.reduce(0) { $0 + ($1.isActive ? 1 : 0) } }
 
     func schedule(_ id: String) -> Schedule? { schedules.first { $0.id == id } }
@@ -61,6 +92,10 @@ extension AppModel {
         if let threadId = schedule.threadId {
             guard let thread = threads[threadId] else { return "A thread that's gone" }
             return thread.title.isEmpty ? "Untitled" : thread.title
+        }
+        if awayRunnerName(schedule) != nil {
+            // That Mac's default folder isn't known here.
+            return schedule.cwd.map { "New thread in \(FolderName.short($0))" } ?? "New thread"
         }
         return "New thread in \(FolderName.short(schedule.cwd ?? defaults.cwd))"
     }
@@ -91,6 +126,7 @@ extension AppModel {
         state.effort = settings.effort
         state.ask = settings.ask
         scheduleEditor = state
+        loadRunners()
     }
 
     func editSchedule(_ id: String) {
@@ -102,8 +138,15 @@ extension AppModel {
         state.at = schedule.at ?? ScheduleTime.defaultOnce(now: Date())
         if let cron = schedule.cron { state.repeatChoice = RepeatChoice(cron: cron) }
         state.threadId = schedule.threadId
-        state.cwd = schedule.cwd ?? defaults.cwd
+        if let name = awayRunnerName(schedule) {
+            state.runnerId = schedule.runnerId
+            state.runnerName = name
+            state.cwd = schedule.cwd ?? ""
+        } else {
+            state.cwd = schedule.cwd ?? defaults.cwd
+        }
         scheduleEditor = state
+        loadRunners()
     }
 
     /// Makes or updates the schedule. Returns the runner's reason when it
@@ -117,7 +160,16 @@ extension AppModel {
             if let id = state.scheduleId {
                 saved = try await client.updateSchedule(id, ScheduleUpdate(
                     title: title.isEmpty ? nil : title, text: text, when: state.when,
-                    cwd: state.threadId == nil ? state.cwd : nil
+                    cwd: state.threadId == nil ? state.cwd.trimmingCharacters(in: .whitespacesAndNewlines) : nil
+                ))
+            } else if state.isAway && state.threadId == nil {
+                // Its folder is sent as typed and checked on that Mac when
+                // it runs; this Mac's account, model and effort mean
+                // nothing there, so they're left to that runner's defaults.
+                let cwd = state.cwd.trimmingCharacters(in: .whitespacesAndNewlines)
+                saved = try await client.createSchedule(NewScheduleRequest(
+                    text: text, title: title.isEmpty ? nil : title, when: state.when,
+                    cwd: cwd.isEmpty ? nil : cwd, permissionMode: state.ask ? .ask : .full, runnerId: state.runnerId
                 ))
             } else {
                 saved = try await client.createSchedule(NewScheduleRequest(
@@ -160,6 +212,8 @@ extension AppModel {
 
     // MARK: Row actions
 
+    /// Another runner's schedule comes back queued, with `runRequestedAt`
+    /// set, which its row shows until that runner has run it.
     func runSchedule(_ id: String) {
         guard let client else { return }
         Task {

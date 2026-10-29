@@ -528,6 +528,21 @@ enum Automation {
             } else {
                 app.newSchedule(from: app.selectedThread, draftKey: app.selection ?? "new")
             }
+            // {"runner": "bruce"}: a new schedule's Runs on, by name or id,
+            // as picking it would set it. Set before the sheet first draws,
+            // since the editor takes its state once.
+            if let runner = c["runner"] as? String, var state = app.scheduleEditor, state.isNew {
+                guard let match = app.runners.first(where: { $0.id == runner || $0.name == runner }) else {
+                    app.scheduleEditor = nil
+                    return "error no runner \(runner); there are \(app.runners.map(\.name).joined(separator: ", "))"
+                }
+                if !match.isSelf {
+                    state.threadId = nil
+                    state.runnerId = match.id
+                    state.cwd = ""
+                    app.scheduleEditor = state
+                }
+            }
             try? await Task.sleep(for: .milliseconds(400))
             return "ok"
         case "project":

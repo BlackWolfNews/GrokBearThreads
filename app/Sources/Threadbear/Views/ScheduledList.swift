@@ -62,13 +62,28 @@ private struct ScheduleRowView: View {
             HStack(alignment: .firstTextBaseline, spacing: zoomed(4)) {
                 Text(schedule.whenText)
                     .lineLimit(1)
-                    .layoutPriority(1)
+                    .layoutPriority(2)
+                if let away {
+                    // Quiet, like the rest of the line: most schedules are
+                    // this Mac's, and those say nothing about it.
+                    Text("·").foregroundStyle(SidebarMetrics.faint)
+                    Text(away)
+                        .lineLimit(1)
+                        .layoutPriority(1)
+                        .tip("Runs on \(away)")
+                }
                 Text("·").foregroundStyle(SidebarMetrics.faint)
                 TargetButton(schedule: schedule)
             }
             .font(.system(size: TypeScale.sidebarPreview))
             .foregroundStyle(.secondary)
-            if let problem {
+            if let away, let asked = schedule.runRequestedAt {
+                Text("Waiting for \(away) to run it")
+                    .font(.system(size: TypeScale.sidebarMeta))
+                    .foregroundStyle(SidebarMetrics.faint)
+                    .lineLimit(1)
+                    .tip("Asked at \(asked.formatted(date: .omitted, time: .shortened)). It runs as soon as \(away) picks it up.")
+            } else if let problem {
                 Text(problem.text)
                     .font(.system(size: TypeScale.sidebarMeta))
                     .foregroundStyle(problem.failed ? Color(nsColor: Theme.failed) : SidebarMetrics.faint)
@@ -121,6 +136,9 @@ private struct ScheduleRowView: View {
         .font(.system(size: TypeScale.sidebarMeta))
     }
 
+    /// The other runner it runs on, by name; nil for this one's.
+    private var away: String? { app.awayRunnerName(schedule) }
+
     /// The last run, only when it didn't send.
     private var problem: (text: String, failed: Bool)? {
         guard let last = schedule.lastRun else { return nil }
@@ -135,7 +153,7 @@ private struct ScheduleRowView: View {
         HStack(spacing: zoomed(2)) {
             Button { app.runSchedule(schedule.id) } label: { Image(systemName: "paperplane") }
                 .buttonStyle(RowIconButtonStyle())
-                .tip("Run now")
+                .tip(away.map { "Ask \($0) to run it now" } ?? "Run now")
             if !schedule.isFinished {
                 Button { app.setSchedulePaused(schedule.id, !schedule.paused) } label: {
                     Image(systemName: schedule.paused ? "play" : "pause")

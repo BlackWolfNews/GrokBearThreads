@@ -428,7 +428,19 @@ public extension RPCClient {
         _ = try await call("schedules.delete", .object(["scheduleId": .string(scheduleId)]), as: EmptyResult.self)
     }
 
-    /// Runs it now, as if it were due, even when paused.
+    /// The runners a schedule can be put on, this one first. A runner from
+    /// before step 6 answers -32601, which means just itself: no choice to
+    /// offer, so an empty list.
+    func listRunners() async throws -> [RunnerInfo] {
+        do {
+            return try await call("runners.list", .object([:]), as: RunnersResult.self).runners
+        } catch RPCError.server(let code, _) where code == RPCError.methodNotFound {
+            return []
+        }
+    }
+
+    /// Runs it now, as if it were due, even when paused. Another runner's
+    /// schedule comes back `queued`, with no thread: that runner runs it.
     func runSchedule(_ scheduleId: String) async throws -> ScheduleRunResult {
         try await call("schedules.run", .object(["scheduleId": .string(scheduleId)]), as: ScheduleRunResult.self)
     }
@@ -467,9 +479,13 @@ public struct NewScheduleRequest: Sendable, Hashable {
     public var model: String?
     public var effort: String?
     public var permissionMode: PermissionMode?
+    /// Another runner's id (or name) from `runners.list`; nil is this one.
+    /// Only for a new thread each time: a thread's schedule runs where it is.
+    public var runnerId: String?
 
     public init(text: String, title: String? = nil, when: ScheduleWhen, threadId: String? = nil, cwd: String? = nil,
-                accountId: String? = nil, model: String? = nil, effort: String? = nil, permissionMode: PermissionMode? = nil) {
+                accountId: String? = nil, model: String? = nil, effort: String? = nil, permissionMode: PermissionMode? = nil,
+                runnerId: String? = nil) {
         self.text = text
         self.title = title
         self.when = when
@@ -479,6 +495,7 @@ public struct NewScheduleRequest: Sendable, Hashable {
         self.model = model
         self.effort = effort
         self.permissionMode = permissionMode
+        self.runnerId = runnerId
     }
 
     public var params: [String: JSONValue] {
@@ -494,6 +511,7 @@ public struct NewScheduleRequest: Sendable, Hashable {
             if let model { params["model"] = .string(model) }
             if let effort { params["effort"] = .string(effort) }
             if let permissionMode { params["permissionMode"] = .string(permissionMode.rawValue) }
+            if let runnerId { params["runnerId"] = .string(runnerId) }
         }
         return params
     }
@@ -543,8 +561,33 @@ public struct ScheduleResult: Sendable, Decodable {
 
 public struct ScheduleRunResult: Sendable, Decodable {
     public var schedule: Schedule
+    /// The thread it sent to or started; nil when it was `queued`.
     public var threadId: String?
     public var turnId: String?
+    /// Another runner's schedule: asked of that runner, which runs it when
+    /// it next hears (the schedule's `runRequestedAt` until then).
+    public var queued: Bool
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        schedule = try c.decode(Schedule.self, forKey: .schedule)
+        threadId = try? c.decodeIfPresent(String.self, forKey: .threadId)
+        turnId = try? c.decodeIfPresent(String.self, forKey: .turnId)
+        queued = (try? c.decodeIfPresent(Bool.self, forKey: .queued)) ?? false
+    }
+
+    enum CodingKeys: String, CodingKey { case schedule, threadId, turnId, queued }
+}
+
+public struct RunnersResult: Sendable, Decodable {
+    public var runners: [RunnerInfo]
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        runners = c.lossyArray(RunnerInfo.self, forKey: .runners)
+    }
+
+    enum CodingKeys: String, CodingKey { case runners }
 }
 
 // MARK: Projects and the librarian (docs/protocol.md, "Projects")

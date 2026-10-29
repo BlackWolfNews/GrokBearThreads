@@ -192,6 +192,10 @@ final class AppModel {
     /// The runner knows about schedules: an older one answers
     /// `schedules.list` with -32601, and then the sidebar has no Scheduled row.
     var schedulesSupported = false
+    /// The runners a schedule can run on (`runners.list`), this one first.
+    /// Empty from a runner before step 6, or before it answers: then
+    /// there's no choice to offer and every schedule is this runner's.
+    var runners: [RunnerInfo] = []
     /// Every project, archived ones too, in the runner's order (newest
     /// activity first). Replaced whole by `projects.updated`.
     var projects: [Project] = []
@@ -551,6 +555,7 @@ final class AppModel {
                 onThreadsLoaded?()
                 servePanelRequest()
                 loadSchedules()
+                loadRunners()
                 loadProjects()
                 loadConnectors()
                 loadSettings()

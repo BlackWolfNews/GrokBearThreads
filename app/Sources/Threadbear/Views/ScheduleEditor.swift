@@ -12,9 +12,13 @@ struct ScheduleEditor: View {
     @State private var preview: Result<SchedulePreview, AppModel.PreviewError>?
     @State private var saving = false
     @State private var saveError: String?
+    /// This Mac's folder, kept while another runner is picked so picking
+    /// this one again puts it back.
+    @State private var localCwd: String
 
     init(state: ScheduleEditorState) {
         _state = State(initialValue: state)
+        _localCwd = State(initialValue: state.isAway ? "" : state.cwd)
     }
 
     private var canSave: Bool {
@@ -242,9 +246,60 @@ struct ScheduleEditor: View {
             }
         }
         if state.threadId == nil {
-            LabeledContent("Folder") { FolderMenu(cwd: $state.cwd) }
-                .tip("The folder each new thread starts in")
+            runsOn
+            if let away = awayName {
+                // A path on that Mac: nothing here can check or choose it.
+                LabeledContent("Folder") {
+                    HStack(spacing: zoomed(6)) {
+                        TextField("Folder", text: $state.cwd, prompt: Text("Default folder"))
+                            .labelsHidden()
+                            .tip("A folder on \(away). Left empty, \(away)'s default folder.")
+                        InfoTip("A path on \(away), checked there when it runs. Its threads use \(away)'s default account and model.")
+                    }
+                }
+            } else {
+                LabeledContent("Folder") { FolderMenu(cwd: $state.cwd) }
+                    .tip("The folder each new thread starts in")
+            }
         }
+    }
+
+    /// Which Mac runs it, when there's more than one runner. Set when it's
+    /// made: an existing schedule shows where it runs but can't move.
+    @ViewBuilder
+    private var runsOn: some View {
+        let others = app.runners.filter { !$0.isSelf }
+        if state.isNew, !others.isEmpty {
+            Picker("Runs on", selection: $state.runnerId) {
+                Text("This Mac").tag(String?.none)
+                Divider()
+                ForEach(others) { runner in
+                    // Still a choice: it runs once that Mac is back.
+                    Text(runner.online ? runner.name : "\(runner.name) (offline)").tag(Optional(runner.id))
+                }
+            }
+            .fixedSize()
+            .tip("Which Mac runs it and starts its threads")
+            .onChange(of: state.runnerId) { old, new in
+                if old == nil, new != nil {
+                    localCwd = state.cwd
+                    state.cwd = ""
+                } else if new == nil {
+                    state.cwd = localCwd.isEmpty ? app.defaults.cwd : localCwd
+                }
+            }
+        } else if !state.isNew, state.isAway || !others.isEmpty {
+            LabeledContent("Runs on") {
+                Text(awayName ?? "This Mac").foregroundStyle(.secondary).lineLimit(1)
+            }
+            .tip("Where it runs. To run it somewhere else, make a new schedule.")
+        }
+    }
+
+    /// The other runner's name, when one is picked.
+    private var awayName: String? {
+        guard let id = state.runnerId else { return nil }
+        return app.runners.first { $0.id == id }?.name ?? state.runnerName ?? "another Mac"
     }
 
     private var targetText: String {

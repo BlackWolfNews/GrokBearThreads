@@ -296,6 +296,14 @@ addDemoPools();
 const highlights = new Map();
 addDemoHighlights();
 addDemoSubagents();
+/**
+ * The runners a schedule can run on (runners.list, docs/protocol.md,
+ * "Schedules", "Runners"): this one first, and an online "bruce", as if
+ * sync were on with a backend that has both. A runner played as old
+ * (mock.accounts {old: true}) answers runners.list with -32601.
+ */
+const SELF_RUNNER = { id: 'runner_mock', name: 'm5', self: true };
+const runners = [SELF_RUNNER, { id: 'runner_bruce', name: 'bruce', self: false }];
 /** The schedules (docs/protocol.md, "Schedules"), soonest first. */
 let schedules = [];
 addDemoSchedules();
@@ -850,17 +858,31 @@ async function dispatch(client, method, p) {
       const list = sortedSchedules();
       return { schedules: p.threadId ? list.filter((x) => x.threadId === p.threadId || x.createdBy === p.threadId) : list };
     }
+    case 'runners.list':
+      if (oldRunner) throw rpcError(-32601, `Unknown method ${method}`);
+      return { runners: runners.map((r) => ({ id: r.id, name: r.name, online: true, lastSeenAt: iso(), self: r.self })) };
     case 'schedules.create': {
       if (!p.text) throw rpcError(-32602, 'text is required');
       if (Boolean(p.at) === Boolean(p.cron)) throw rpcError(-32602, 'Give exactly one of at and cron');
       if (p.threadId) need(p.threadId);
+      // An id or a name from runners.list, as the real runner takes it.
+      const runner = p.runnerId ? runners.find((r) => r.id === p.runnerId || r.name === p.runnerId) : SELF_RUNNER;
+      if (!runner) throw rpcError(-32602, `No runner "${p.runnerId}"; runners.list has ${runners.map((r) => r.name).join(', ')}`);
+      const away = !runner.self;
+      if (away && p.threadId) throw rpcError(-32602, "A schedule that sends to a thread runs on that thread's runner; leave runnerId out.");
       const when = readWhen(p);
       const now = iso();
+      // Another runner's folder and account are its own, checked there
+      // when it runs: kept as sent, and no folder means its default.
+      const settings = away
+        ? { ...(p.cwd?.trim() ? { cwd: p.cwd.trim() } : {}), accountId: p.accountId, model: p.model, effort: p.effort, permissionMode: p.permissionMode }
+        : { cwd: p.cwd ?? defaults.cwd, accountId: p.accountId ?? defaults.accountId, model: p.model, effort: p.effort, permissionMode: p.permissionMode ?? 'full' };
       const schedule = {
         id: 'sc_' + crypto.randomBytes(5).toString('hex'), title: p.title || p.text.split('\n')[0].slice(0, 60), text: p.text,
         ...(p.at ? { at: new Date(p.at).toISOString() } : { cron: p.cron }), whenText: when.whenText,
-        ...(p.threadId ? { threadId: p.threadId } : { cwd: p.cwd ?? defaults.cwd, accountId: p.accountId ?? defaults.accountId, model: p.model, effort: p.effort, permissionMode: p.permissionMode ?? 'full' }),
+        ...(p.threadId ? { threadId: p.threadId } : settings),
         paused: Boolean(p.paused), createdAt: now, updatedAt: now, ...(p.createdBy ? { createdBy: p.createdBy } : {}), runs: 0,
+        runnerId: runner.id, runnerName: runner.name,
       };
       if (!schedule.paused) schedule.nextRunAt = when.runs[0];
       schedules.push(schedule);
@@ -870,6 +892,8 @@ async function dispatch(client, method, p) {
     case 'schedules.update': {
       const schedule = needSchedule(p.scheduleId);
       for (const key of ['title', 'text', 'cwd', 'accountId', 'permissionMode']) if (p[key] !== undefined) schedule[key] = p[key];
+      // Another runner's folder, emptied, is its default again.
+      if (schedule.runnerId !== SELF_RUNNER.id && !schedule.cwd?.trim()) delete schedule.cwd;
       for (const key of ['model', 'effort', 'timezone']) if (p[key] !== undefined) schedule[key] = p[key] ?? undefined;
       if (p.at || p.cron) {
         const when = readWhen(p);
@@ -1554,8 +1578,28 @@ function broadcastSchedules() {
   for (const client of clients) if (client.authed) client.ws.send(text);
 }
 
-/** Sends the schedule's message now, to its thread or a new one. */
+/**
+ * Sends the schedule's message now, to its thread or a new one. Another
+ * runner's is only asked of it (queued, with runRequestedAt), and "bruce"
+ * picks it up a few seconds later, so the row's waiting line comes and goes.
+ */
 function runSchedule(schedule) {
+  if (schedule.runnerId && schedule.runnerId !== SELF_RUNNER.id) {
+    const asked = iso();
+    schedule.runRequestedAt = asked;
+    schedule.updatedAt = asked;
+    broadcastSchedules();
+    setTimeout(() => {
+      if (schedule.runRequestedAt !== asked || !schedules.includes(schedule)) return;
+      delete schedule.runRequestedAt;
+      schedule.runs += 1;
+      schedule.lastRun = { at: iso(), outcome: 'sent' };
+      if (!schedule.cron) { schedule.finishedAt = iso(); delete schedule.nextRunAt; }
+      schedule.updatedAt = iso();
+      broadcastSchedules();
+    }, 6000);
+    return { schedule, queued: true };
+  }
   const text = `[Scheduled: "${schedule.title}", ${schedule.whenText}]\n${schedule.text}`;
   const turnId = 'turn_' + crypto.randomBytes(4).toString('hex');
   let threadId = schedule.threadId;
@@ -1588,7 +1632,10 @@ function addDemoSchedules() {
   const ago = (minutes) => new Date(now - minutes * 60_000).toISOString();
   const make = (fields) => {
     const when = readWhen(fields);
-    const schedule = { createdAt: ago(60 * 24 * 3), updatedAt: ago(60 * 24), runs: 0, paused: false, whenText: when.whenText, ...fields };
+    const schedule = {
+      createdAt: ago(60 * 24 * 3), updatedAt: ago(60 * 24), runs: 0, paused: false, whenText: when.whenText,
+      runnerId: SELF_RUNNER.id, runnerName: SELF_RUNNER.name, ...fields,
+    };
     if (!schedule.paused && !schedule.finishedAt) schedule.nextRunAt = when.runs[0];
     schedules.push(schedule);
     return schedule;
@@ -1612,6 +1659,13 @@ function addDemoSchedules() {
       lastRun: { at: ago(60 * 26), outcome: 'sent', threadId: 'demo_invoice_export' } });
     threads.get('demo_invoice_export').summary.schedule = { id: 'sc_demo_invoices', title: 'Quarterly invoice export' };
   }
+  // Two on bruce, the other Mac: one in a folder there, and one whose Run
+  // now is waiting for bruce to hear about it.
+  make({ id: 'sc_demo_bruce_photos', title: 'Photo library check', text: 'Check the photo library on the external drive for files that failed to import.',
+    cron: '30 6 * * *', cwd: '/Volumes/CannMedia/Photos', permissionMode: 'full', runs: 12,
+    runnerId: 'runner_bruce', runnerName: 'bruce', lastRun: { at: ago(60 * 8), outcome: 'sent' } });
+  make({ id: 'sc_demo_bruce_disk', title: 'Disk space report', text: 'Say how much space is left on each drive and what grew most this week.',
+    cron: '0 8 * * 1', permissionMode: 'full', runs: 2, runnerId: 'runner_bruce', runnerName: 'bruce', runRequestedAt: ago(2) });
   make({ id: 'sc_demo_backup', title: 'Nightly backup report', text: 'Summarise last night\'s Backblaze log and say if anything failed.',
     cron: '0 2 * * *', cwd: '/Users/mike/dev/old-backups', accountId: defaults.accountId, paused: true, runs: 21,
     lastRun: { at: ago(60 * 30), outcome: 'failed', note: 'the folder /Users/mike/dev/old-backups is gone' } });

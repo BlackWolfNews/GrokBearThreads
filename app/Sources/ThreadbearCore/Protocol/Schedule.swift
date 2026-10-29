@@ -66,13 +66,21 @@ public struct Schedule: Sendable, Hashable, Decodable, Identifiable {
     public var finishedAt: Date?
     public var runs: Int
     public var lastRun: LastRun?
+    /// The runner it runs on (docs/protocol.md, "Schedules", "Runners").
+    /// Nil from a runner whose schedules are its own file: then it's that one.
+    public var runnerId: String?
+    /// That runner's name, as `runners.list` has it.
+    public var runnerName: String?
+    /// A "Run now" asked of another runner, waiting for it to hear.
+    public var runRequestedAt: Date?
 
     public init(
         id: String, title: String, text: String = "", at: Date? = nil, cron: String? = nil, timezone: String? = nil,
         whenText: String = "", threadId: String? = nil, cwd: String? = nil, accountId: String? = nil,
         model: String? = nil, effort: String? = nil, permissionMode: PermissionMode? = nil, paused: Bool = false,
         createdAt: Date = Date(), updatedAt: Date = Date(), createdBy: String? = nil, nextRunAt: Date? = nil,
-        finishedAt: Date? = nil, runs: Int = 0, lastRun: LastRun? = nil
+        finishedAt: Date? = nil, runs: Int = 0, lastRun: LastRun? = nil, runnerId: String? = nil,
+        runnerName: String? = nil, runRequestedAt: Date? = nil
     ) {
         self.id = id
         self.title = title
@@ -95,6 +103,9 @@ public struct Schedule: Sendable, Hashable, Decodable, Identifiable {
         self.finishedAt = finishedAt
         self.runs = runs
         self.lastRun = lastRun
+        self.runnerId = runnerId
+        self.runnerName = runnerName
+        self.runRequestedAt = runRequestedAt
     }
 
     public init(from decoder: Decoder) throws {
@@ -123,11 +134,15 @@ public struct Schedule: Sendable, Hashable, Decodable, Identifiable {
         finishedAt = date(.finishedAt)
         runs = c.lenientInt(forKey: .runs) ?? 0
         lastRun = try? c.decodeIfPresent(LastRun.self, forKey: .lastRun)
+        runnerId = string(.runnerId).flatMap { $0.isEmpty ? nil : $0 }
+        runnerName = string(.runnerName).flatMap { $0.isEmpty ? nil : $0 }
+        runRequestedAt = date(.runRequestedAt)
     }
 
     enum CodingKeys: String, CodingKey {
         case id, title, text, at, cron, timezone, whenText, threadId, cwd, accountId, model, effort, permissionMode
         case paused, createdAt, updatedAt, createdBy, nextRunAt, finishedAt, runs, lastRun
+        case runnerId, runnerName, runRequestedAt
     }
 
     public var isOneOff: Bool { cron == nil }
@@ -140,6 +155,51 @@ public struct Schedule: Sendable, Hashable, Decodable, Identifiable {
     /// `threadId` returns).
     public func belongs(to threadId: String) -> Bool {
         self.threadId == threadId || createdBy == threadId
+    }
+
+    /// Runs on a runner other than `selfRunnerId` (the one answering, from
+    /// `runners.list`). Without a runner on either side it's this one's: an
+    /// older runner sends no `runnerId`, and one that can't list runners
+    /// has only itself.
+    public func runsElsewhere(than selfRunnerId: String?) -> Bool {
+        guard let runnerId, let selfRunnerId else { return false }
+        return runnerId != selfRunnerId
+    }
+}
+
+/// A runner Threadbear knows of, from the backend (`runners.list`): where a
+/// schedule can run.
+public struct RunnerInfo: Sendable, Hashable, Decodable, Identifiable {
+    public var id: String
+    /// "m5", "bruce": the Mac's hostname by default.
+    public var name: String
+    /// Heard from in the last few minutes.
+    public var online: Bool
+    public var lastSeenAt: Date?
+    /// The runner answering, the one this app talks to.
+    public var isSelf: Bool
+
+    public init(id: String, name: String, online: Bool = true, lastSeenAt: Date? = nil, isSelf: Bool = false) {
+        self.id = id
+        self.name = name
+        self.online = online
+        self.lastSeenAt = lastSeenAt
+        self.isSelf = isSelf
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(String.self, forKey: .id)
+        name = (try? c.decodeIfPresent(String.self, forKey: .name)).flatMap { $0.isEmpty ? nil : $0 } ?? id
+        isSelf = (try? c.decodeIfPresent(Bool.self, forKey: .isSelf)) ?? false
+        // The answering runner is plainly up; anything else unsaid is offline.
+        online = (try? c.decodeIfPresent(Bool.self, forKey: .online)) ?? isSelf
+        lastSeenAt = (try? c.decodeIfPresent(String.self, forKey: .lastSeenAt)).flatMap(ISO8601.parse)
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case id, name, online, lastSeenAt
+        case isSelf = "self"
     }
 }
 

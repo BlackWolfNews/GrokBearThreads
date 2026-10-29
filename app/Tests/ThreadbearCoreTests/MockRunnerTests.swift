@@ -288,6 +288,52 @@ final class MockRunnerTests: XCTestCase {
         }
     }
 
+    /// Schedules on another runner, as the mock plays them: runners.list with
+    /// this runner and bruce, a schedule made for bruce by name keeping its
+    /// folder as typed, Run now on it queued with no thread, a thread's
+    /// schedule refused a runner, and an old runner's -32601.
+    func testSchedulesOnAnotherRunner() async throws {
+        let client = try await connect()
+        defer { client.close() }
+        _ = try await client.hello(version: "test")
+        let runners = try await client.listRunners()
+        XCTAssertEqual(runners.map(\.name), ["m5", "bruce"])
+        XCTAssertEqual(runners.map(\.isSelf), [true, false])
+        XCTAssertTrue(runners[1].online)
+        let me = runners[0], bruce = runners[1]
+
+        let list = try await client.listSchedules()
+        XCTAssertTrue(list.contains { $0.runsElsewhere(than: me.id) }, "the demo has a schedule on bruce")
+        XCTAssertTrue(list.contains { $0.runRequestedAt != nil }, "and one waiting for bruce")
+        XCTAssertTrue(list.contains { $0.runnerId == me.id }, "this runner's own carry its id too")
+
+        let made = try await client.createSchedule(NewScheduleRequest(text: "Check the drive.", when: .cron("0 7 * * *"), cwd: "/Volumes/Bruce/x", runnerId: "bruce"))
+        XCTAssertEqual(made.runnerId, bruce.id)
+        XCTAssertEqual(made.runnerName, "bruce")
+        XCTAssertEqual(made.cwd, "/Volumes/Bruce/x", "a path on bruce, kept as typed")
+        XCTAssertNil(made.accountId, "left to bruce's default")
+        let noFolder = try await client.createSchedule(NewScheduleRequest(text: "Default folder.", when: .cron("0 7 * * *"), runnerId: bruce.id))
+        XCTAssertNil(noFolder.cwd, "no folder means bruce's default")
+
+        let run = try await client.runSchedule(made.id)
+        XCTAssertTrue(run.queued)
+        XCTAssertNil(run.threadId)
+        XCTAssertNotNil(run.schedule.runRequestedAt)
+        XCTAssertEqual(run.schedule.runs, 0, "bruce hasn't run it yet")
+
+        do {
+            let params: [String: JSONValue] = ["text": .string("x"), "cron": .string("0 7 * * *"), "threadId": .string("demo_settings_tabs"), "runnerId": .string("bruce")]
+            _ = try await client.call("schedules.create", .object(params), as: JSONValue.self)
+            XCTFail("a thread's schedule has no runner choice")
+        } catch RPCError.server(let code, _) {
+            XCTAssertEqual(code, -32602)
+        }
+
+        _ = try await client.call("mock.accounts", .object(["old": .bool(true)]), as: JSONValue.self)
+        let old = try await client.listRunners()
+        XCTAssertEqual(old, [], "an old runner's -32601 is just this runner")
+    }
+
     /// The mock's projects and librarian: its demo, a thread taken out of a
     /// project and put back (pinned), a merge, and an old runner's -32601.
     func testProjectsAndTheLibrarian() async throws {

@@ -53,6 +53,85 @@ final class ScheduleTests: XCTestCase {
         XCTAssertEqual(result.schedules.map(\.id), ["a", "b"])
     }
 
+    // MARK: Runners (docs/protocol.md, "Schedules", "Runners")
+
+    func testScheduleOnAnotherRunner() throws {
+        let json = #"{"id":"x","text":"t","cron":"0 8 * * 1","runnerId":"r_bruce","runnerName":"bruce","runRequestedAt":"2026-10-29T01:02:03Z"}"#
+        let schedule = try JSONDecoder().decode(Schedule.self, from: Data(json.utf8))
+        XCTAssertEqual(schedule.runnerId, "r_bruce")
+        XCTAssertEqual(schedule.runnerName, "bruce")
+        XCTAssertEqual(schedule.runRequestedAt, ISO8601.parse("2026-10-29T01:02:03Z"))
+        XCTAssertTrue(schedule.runsElsewhere(than: "r_m5"))
+        XCTAssertFalse(schedule.runsElsewhere(than: "r_bruce"))
+        XCTAssertFalse(schedule.runsElsewhere(than: nil), "without runners.list every schedule is this runner's")
+    }
+
+    func testScheduleRunnerFieldsDecodeTolerantly() throws {
+        let json = #"{"id":"x","text":"t","runnerId":"","runnerName":5,"runRequestedAt":"soon"}"#
+        let schedule = try JSONDecoder().decode(Schedule.self, from: Data(json.utf8))
+        XCTAssertNil(schedule.runnerId)
+        XCTAssertNil(schedule.runnerName)
+        XCTAssertNil(schedule.runRequestedAt)
+        XCTAssertFalse(schedule.runsElsewhere(than: "r_m5"))
+    }
+
+    func testRunnersDecodeLeniently() throws {
+        let json = #"""
+        {"runners":[{"id":"r_m5","name":"m5","online":true,"self":true,"lastSeenAt":"2026-10-29T01:00:00Z"},
+                    {"id":"r_bruce","name":"bruce","online":false,"self":false,"somethingNew":1},
+                    {"name":"no id"},{"id":"r_bare"}]}
+        """#
+        let runners = try JSONDecoder().decode(RunnersResult.self, from: Data(json.utf8)).runners
+        XCTAssertEqual(runners.map(\.id), ["r_m5", "r_bruce", "r_bare"])
+        XCTAssertTrue(runners[0].isSelf)
+        XCTAssertTrue(runners[0].online)
+        XCTAssertEqual(runners[0].lastSeenAt, ISO8601.parse("2026-10-29T01:00:00Z"))
+        XCTAssertFalse(runners[1].isSelf)
+        XCTAssertFalse(runners[1].online)
+        XCTAssertEqual(runners[2].name, "r_bare", "a runner with no name goes by its id")
+        XCTAssertFalse(runners[2].online)
+    }
+
+    func testRunResultQueuedOrSent() throws {
+        let queued = try JSONDecoder().decode(ScheduleRunResult.self, from: Data(#"{"schedule":{"id":"x","text":"t"},"queued":true}"#.utf8))
+        XCTAssertTrue(queued.queued)
+        XCTAssertNil(queued.threadId)
+        XCTAssertNil(queued.turnId)
+        let sent = try JSONDecoder().decode(ScheduleRunResult.self, from: Data(#"{"schedule":{"id":"x","text":"t"},"threadId":"th1","turnId":"tu1"}"#.utf8))
+        XCTAssertFalse(sent.queued)
+        XCTAssertEqual(sent.threadId, "th1")
+        XCTAssertEqual(sent.turnId, "tu1")
+    }
+
+    func testRunnersListFromAnOlderRunnerIsJustThisOne() async throws {
+        let transport = FakeTransport()
+        transport.onSend = { request in
+            guard let id = request["id"] else { return [] }
+            return [E.json(["jsonrpc": "2.0", "id": id, "error": ["code": -32601, "message": "Unknown method runners.list"]])]
+        }
+        let client = RPCClient(transport: transport)
+        try await client.start()
+        let runners = try await client.listRunners()
+        XCTAssertEqual(runners, [], "-32601 means no other runner to offer, not an error")
+        XCTAssertEqual(transport.sent.first?["method"] as? String, "runners.list")
+    }
+
+    func testRunnersListOtherErrorsStillThrow() async throws {
+        let transport = FakeTransport()
+        transport.onSend = { request in
+            guard let id = request["id"] else { return [] }
+            return [E.json(["jsonrpc": "2.0", "id": id, "error": ["code": -32000, "message": "No backend"]])]
+        }
+        let client = RPCClient(transport: transport)
+        try await client.start()
+        do {
+            _ = try await client.listRunners()
+            XCTFail("only -32601 reads as just this runner")
+        } catch RPCError.server(let code, _) {
+            XCTAssertEqual(code, -32000)
+        }
+    }
+
     func testPreviewDecodesRuns() throws {
         let json = #"{"whenText":"Weekdays at 9:00","runs":["2026-10-28T01:00:00Z","not a date","2026-10-29T01:00:00Z"]}"#
         let preview = try JSONDecoder().decode(SchedulePreview.self, from: Data(json.utf8))
@@ -88,6 +167,18 @@ final class ScheduleTests: XCTestCase {
         XCTAssertEqual(fresh["permissionMode"], .string("ask"))
         XCTAssertEqual(fresh["title"], .string("T"))
         XCTAssertNil(fresh["threadId"])
+    }
+
+    func testCreateParamsCarryTheRunnerOnlyForANewThread() {
+        let at = ISO8601.parse("2026-10-28T01:00:00Z")!
+        let away = NewScheduleRequest(text: "hi", when: .at(at), cwd: "/Volumes/x", permissionMode: .full, runnerId: "bruce").params
+        XCTAssertEqual(away["runnerId"], .string("bruce"))
+        XCTAssertEqual(away["cwd"], .string("/Volumes/x"))
+        XCTAssertNil(away["accountId"])
+        XCTAssertNil(away["model"])
+        let forThread = NewScheduleRequest(text: "hi", when: .at(at), threadId: "th1", runnerId: "bruce").params
+        XCTAssertNil(forThread["runnerId"], "a thread's schedule runs where the thread is")
+        XCTAssertNil(NewScheduleRequest(text: "hi", when: .at(at)).params["runnerId"])
     }
 
     func testUpdateParamsOnlyWhatChanged() {
