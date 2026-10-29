@@ -214,6 +214,7 @@ Results so far:
   the biggest thread (later first opens 74 to 95 ms). Switches p95 45 ms,
   fling max frame gap 53 ms with no jumps, streaming scrolled up 9.4% of a
   core, memory 164 MB (174 MB peak) on its 1080p display.
+  Mike, 29 Oct: the 185 ms first open isn't worth chasing now.
 - The M5 hasn't been measured since 26 Oct: on 29 Oct its load average was
   over 200 from other threads' builds, which would skew every number.
 

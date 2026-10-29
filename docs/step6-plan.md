@@ -115,9 +115,9 @@ Checked 29 Oct over SSH:
 1. Is the shape right: the M5's runner fronts Bruce's, one socket for
    the app?
 2. Which Claude login goes on Bruce? Today it's mike.cann@gmail.com.
-3. What first: just schedules (smaller, since a schedule's thread can stay
-   on Bruce and be read on the phone), or remote threads in the Mac
-   app too?
+3. Decided 29 Oct: **schedules first.** A schedule can run on Bruce and
+   its thread stays there, read on the phone or website. Bruce's threads in
+   the Mac app come after.
 
 ## Later
 
