@@ -325,6 +325,7 @@ private struct VoiceBar: View {
     private var note: String? {
         if let problem = quick.followUpProblem { return "Didn't go through: \(problem)" }
         if case .idle(let notice?) = quick.phase { return notice }
+        if quick.followUpSending { return "Sending…" }
         if quick.awaitingReply?.threadId == threadId, !working { return "Sent. The answer will be read out." }
         return nil
     }

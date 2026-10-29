@@ -55,6 +55,8 @@ final class QuickAskModel {
     private(set) var awaitingReply: (threadId: String, afterSeq: Int)?
     /// Sending a follow-up failed.
     private(set) var followUpProblem: String?
+    /// A follow-up's on its way to Convex.
+    private(set) var followUpSending = false
 
     let settings = QuickAskSettings()
     let timings = QuickAskTimings()
@@ -191,7 +193,6 @@ final class QuickAskModel {
 
     private func enteredBackground() {
         inBackground = true
-        if prepared { QuickAskLogFile.save() }
         comingForwardAt = nil
         idleTask?.cancel()
         if phase == .listening {
@@ -295,7 +296,6 @@ final class QuickAskModel {
         isPresented = false
         phase = .idle(notice: nil)
         audio.stop(deactivate: true)
-        QuickAskLogFile.save()
     }
 
     private func interrupted() {
@@ -455,6 +455,7 @@ final class QuickAskModel {
 
     private func heard(_ text: String) {
         guard phase == .listening else { return }
+        if transcript.isEmpty, !text.isEmpty { Log.speech.info("First words heard") }
         transcript = text
         detector.transcriptChanged(text, at: Stopwatch.now)
         checkEndOfSpeech()
@@ -481,6 +482,7 @@ final class QuickAskModel {
         let listened = now - (timing?.micLiveAt ?? listenStartedAt)
         if transcript.trimmingCharacters(in: .whitespaces).isEmpty, listened > noSpeechTimeout {
             stopListening()
+            Log.app.info("Heard nothing for \(Int(listened)) s; stopped listening")
             phase = .idle(notice: "Didn't hear anything. Tap the mic to try again.")
         } else if now - listenStartedAt > maxListening {
             if EndOfSpeechDetector.isMeaningful(transcript) {
@@ -722,6 +724,7 @@ final class QuickAskModel {
     }
 
     private func fail(_ failure: AskFailure) {
+        Log.app.error("Quick ask failed: \(failure.message, privacy: .public)")
         cancelAnswer()
         phase = .failed(failure)
         saveTiming()
@@ -771,6 +774,7 @@ final class QuickAskModel {
         isSpeaking = false
         followUpProblem = nil
         prepare()
+        Log.app.info("Listening for a follow-up to \(threadId, privacy: .public) after seq \(afterSeq)")
         startListening(trigger: .followUp, pressAt: Stopwatch.now)
         // After startListening, which clears it via stopListening.
         if phase == .listening {
@@ -780,16 +784,25 @@ final class QuickAskModel {
     }
 
     private func sendToThread(_ text: String, threadId: String) {
-        guard EndOfSpeechDetector.isMeaningful(text), let sendFollowUp else { return }
+        guard EndOfSpeechDetector.isMeaningful(text), let sendFollowUp else {
+            Log.app.error("Follow-up not sent (\(text.count) characters, sender set: \(self.sendFollowUp != nil))")
+            phase = .idle(notice: "Didn't catch that. Tap the mic to try again.")
+            return
+        }
         awaitingReply = (threadId, pendingAfterSeq)
-        Log.app.info("Follow-up to \(threadId, privacy: .public)")
+        followUpSending = true
+        let started = Stopwatch.now
+        Log.app.info("Sending a follow-up to \(threadId, privacy: .public): \(text, privacy: .public)")
         Task { [weak self] in
             do {
                 try await sendFollowUp(threadId, text)
+                Log.app.info("Follow-up sent in \(Int((Stopwatch.now - started) * 1000)) ms")
             } catch {
+                Log.app.error("Follow-up failed: \(error.localizedDescription, privacy: .public)")
                 self?.awaitingReply = nil
                 self?.followUpProblem = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
             }
+            self?.followUpSending = false
         }
     }
 
@@ -798,6 +811,7 @@ final class QuickAskModel {
     func replyArrived(in threadId: String, seq: Int, text: String) {
         guard let awaiting = awaitingReply, awaiting.threadId == threadId, seq > awaiting.afterSeq else { return }
         awaitingReply = nil
+        Log.app.info("Reading out the reply (seq \(seq), \(text.count) characters)")
         speakReply(text)
     }
 
