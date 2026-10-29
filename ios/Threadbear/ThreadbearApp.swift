@@ -17,6 +17,11 @@ struct ThreadbearApp: App {
                 .onAppear {
                     delegate.model = model
                     quick.keep = { [model] record in try await model.keepQuickAsk(record) }
+                    quick.sendFollowUp = { [model] threadId, text in
+                        guard let backend = model.backend else { throw TransportError.server("Not paired with a Mac.") }
+                        _ = try await backend.send(threadId: threadId, text: text)
+                    }
+                    quick.onKept = { [model] threadId in model.openThreadId = threadId }
                 }
                 .onChange(of: scenePhase, initial: true) { _, phase in quick.scenePhaseChanged(to: phase) }
                 // Ask for notifications once paired, including straight

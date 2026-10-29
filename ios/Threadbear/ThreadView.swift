@@ -3,6 +3,9 @@ import ThreadbearKit
 
 struct ThreadView: View {
     @Environment(AppModel.self) private var model
+    @Environment(QuickAskModel.self) private var quick
+    /// In a quick ask's thread, the keyboard's been asked for in place of the big mic.
+    @State private var typing = false
     let threadId: String
     @State private var detail: ThreadDetail?
     @State private var loaded = false
@@ -106,9 +109,19 @@ struct ThreadView: View {
             .defaultScrollAnchor(.bottom)
             .scrollDismissesKeyboard(.interactively)
             .onChange(of: messages.last?.seq) { proxy.scrollTo("bottom", anchor: .bottom) }
+            // A voice follow-up's reply is read out once the turn's over, so it's the answer and
+            // not a line the agent wrote on the way.
+            .onChange(of: "\(messages.last?.seq ?? 0):\(thread.isBusy)", initial: true) {
+                guard !thread.isBusy, let reply = messages.last(where: { $0.role == .assistant }) else { return }
+                quick.replyArrived(in: threadId, seq: reply.seq, text: reply.text)
+            }
             .safeAreaInset(edge: .bottom) {
-                Composer(text: $draft, placeholder: thread.isBusy ? "Steer the agent" : "Reply") { text in
-                    await send(text, to: thread)
+                if quick.voiceThreadId == threadId, !typing {
+                    VoiceBar(threadId: threadId, afterSeq: messages.last?.seq ?? 0, working: thread.isBusy) { typing = true }
+                } else {
+                    Composer(text: $draft, placeholder: thread.isBusy ? "Steer the agent" : "Reply") { text in
+                        await send(text, to: thread)
+                    }
                 }
             }
         }
@@ -244,6 +257,85 @@ struct ThreadView: View {
         Task {
             guard let backend = model.backend else { return }
             do { _ = try await backend.update(threadId: threadId, change: change) } catch { model.report(error) }
+        }
+    }
+}
+
+/// The bottom of a quick ask's thread: a big mic for a follow-up out loud, in place of the text
+/// box (which the keyboard button brings back). What you say goes to the agent when you stop, and
+/// its answer is read out when its turn ends. Tap while it's talking to stop it.
+private struct VoiceBar: View {
+    @Environment(QuickAskModel.self) private var quick
+    let threadId: String
+    let afterSeq: Int
+    let working: Bool
+    var showKeyboard: () -> Void
+
+    private var listening: Bool { quick.phase == .listening && quick.listeningFor == threadId }
+
+    var body: some View {
+        VStack(spacing: 10) {
+            if listening {
+                Text(quick.transcript.isEmpty ? "Listening" : quick.transcript)
+                    .font(.title3.weight(.medium))
+                    .foregroundStyle(quick.transcript.isEmpty ? .tertiary : .primary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 24)
+                    .animation(.easeOut(duration: 0.12), value: quick.transcript)
+            } else if let note = note {
+                Text(note).font(.footnote).foregroundStyle(.secondary)
+            }
+            HStack {
+                Button(action: showKeyboard) {
+                    Image(systemName: "keyboard")
+                        .font(.system(size: 17))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 44, height: 44)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Type instead")
+                Spacer()
+                Button(action: tap) {
+                    ZStack {
+                        if listening {
+                            Circle().fill(Color.accentColor.opacity(0.14)).frame(width: 66, height: 66)
+                                .scaleEffect(1.15 + quick.level * 0.6)
+                        }
+                        Circle().fill(Color.accentColor).frame(width: 66, height: 66)
+                        Image(systemName: listening ? "waveform" : quick.isSpeaking ? "stop.fill" : "mic.fill")
+                            .font(.system(size: 26, weight: .semibold))
+                            .foregroundStyle(.white)
+                    }
+                    .frame(width: 110, height: 90)
+                    .animation(.easeOut(duration: 0.12), value: quick.level)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(listening ? "Send" : quick.isSpeaking ? "Stop talking" : "Ask a follow-up")
+                Spacer()
+                // Balances the keyboard button, so the mic sits in the middle.
+                Color.clear.frame(width: 44, height: 44)
+            }
+            .padding(.horizontal)
+        }
+        .padding(.top, 8)
+        .background(.bar)
+    }
+
+    /// Plain words for what's going on, when it isn't obvious from the thread.
+    private var note: String? {
+        if let problem = quick.followUpProblem { return "Didn't go through: \(problem)" }
+        if case .idle(let notice?) = quick.phase { return notice }
+        if quick.awaitingReply?.threadId == threadId, !working { return "Sent. The answer will be read out." }
+        return nil
+    }
+
+    private func tap() {
+        if listening {
+            quick.micButton()
+        } else if quick.isSpeaking {
+            quick.stopSpeakingReply()
+        } else {
+            quick.listenForFollowUp(in: threadId, afterSeq: afterSeq)
         }
     }
 }

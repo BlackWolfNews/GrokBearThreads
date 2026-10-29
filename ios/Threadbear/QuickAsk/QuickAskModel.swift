@@ -12,6 +12,10 @@ import os
 ///
 /// Unlike Quick Ask, Threadbear is mostly an inbox, so this only listens when it's asked to: the
 /// intent (Action button, Siri, Shortcuts) or the inbox's mic button.
+///
+/// Once the answer's kept, the screen gives way to that thread, in voice mode (Mike, 29 Oct): a
+/// big mic at the bottom asks a follow-up there, which goes to the agent as an ordinary reply,
+/// and the agent's answer is read out when its turn ends.
 @Observable
 final class QuickAskModel {
     enum Phase: Equatable {
@@ -43,11 +47,24 @@ final class QuickAskModel {
     private(set) var threadId: String?
     /// Keeping it failed (no runner reachable, an old backend). The answer's still on screen.
     private(set) var keepProblem: String?
+    /// The thread in voice mode: the one the last quick ask was kept in.
+    var voiceThreadId: String?
+    /// Listening for a follow-up to this thread, rather than a new quick ask.
+    private(set) var listeningFor: String?
+    /// A follow-up's been sent to this thread; its reply is read out once it's there.
+    private(set) var awaitingReply: (threadId: String, afterSeq: Int)?
+    /// Sending a follow-up failed.
+    private(set) var followUpProblem: String?
 
     let settings = QuickAskSettings()
     let timings = QuickAskTimings()
     /// Hands the finished ask to the backend and waits for its thread. Set by the app.
     @ObservationIgnored var keep: ((QuickAskRecord) async throws -> String?)?
+    /// Sends a follow-up to a thread (phone:send). Set by the app.
+    @ObservationIgnored var sendFollowUp: ((_ threadId: String, _ text: String) async throws -> Void)?
+    /// The answer's been kept: the app opens its thread. Set by the app.
+    @ObservationIgnored var onKept: ((String) -> Void)?
+    @ObservationIgnored private var pendingAfterSeq = 0
 
     @ObservationIgnored private let audio = AudioInput()
     @ObservationIgnored private let classic = ClassicTranscriber()
@@ -252,6 +269,8 @@ final class QuickAskModel {
     /// Puts the screen up and listens. Without a server there's nothing to ask, so the screen
     /// says so (Settings has the fields).
     func open(trigger: QuestionTiming.Trigger = .followUp, pressAt: Double = Stopwatch.now) {
+        listeningFor = nil
+        awaitingReply = nil
         isPresented = true
         guard settings.isReady else {
             phase = .idle(notice: "Add your archive server in Settings to use quick ask.")
@@ -491,6 +510,7 @@ final class QuickAskModel {
         }
         ticker?.cancel()
         ticker = nil
+        listeningFor = nil
         transcriber?.end()
         audio.pause()
         level = 0
@@ -504,6 +524,8 @@ final class QuickAskModel {
     /// At a short pause the question goes out, before the full pause says you've finished; if the
     /// words change after that, it's dropped (and goes again at the next short pause).
     private func sendEarlyIfPaused(at now: Double) {
+        // A follow-up goes to the thread's agent, once, when you've finished.
+        guard listeningFor == nil else { return }
         for step in early.update(transcript: transcript, paused: EarlySend.isPaused(detector, at: now)) {
             switch step {
             case .cancel:
@@ -559,6 +581,12 @@ final class QuickAskModel {
 
     private func send(endOfSpeechAt endedAt: Double, decidedAt: Double) {
         let text = transcript.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let threadId = listeningFor {
+            stopListening()
+            phase = .idle(notice: nil)
+            sendToThread(text, threadId: threadId)
+            return
+        }
         Log.timing.info("End of speech: waited \(Int((decidedAt - endedAt) * 1000)) ms (setting \(self.settings.silenceMs) ms)")
         let sentEarly = takeEarlyStream(for: text)
         stopListening()
@@ -720,12 +748,76 @@ final class QuickAskModel {
                 guard !Task.isCancelled, let self, self.question == record.question else { return }
                 self.threadId = id
                 Log.app.info("Kept as thread \(id ?? "none", privacy: .public)")
+                // Into the thread, in voice mode; the answer carries on being spoken.
+                if let id, self.isPresented, self.phase != .listening {
+                    self.voiceThreadId = id
+                    self.isPresented = false
+                    self.onKept?(id)
+                }
             } catch {
                 guard !Task.isCancelled, let self, self.question == record.question else { return }
                 self.keepProblem = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
                 Log.app.error("Couldn't keep the quick ask: \(error.localizedDescription, privacy: .public)")
             }
         }
+    }
+
+    // MARK: - Follow-ups in the thread
+
+    /// The thread's big mic: listen for a follow-up. `afterSeq` is the thread's newest message
+    /// now, so the reply read out is one that comes after it.
+    func listenForFollowUp(in threadId: String, afterSeq: Int) {
+        speaker.stop()
+        isSpeaking = false
+        followUpProblem = nil
+        prepare()
+        startListening(trigger: .followUp, pressAt: Stopwatch.now)
+        // After startListening, which clears it via stopListening.
+        if phase == .listening {
+            listeningFor = threadId
+            pendingAfterSeq = afterSeq
+        }
+    }
+
+    private func sendToThread(_ text: String, threadId: String) {
+        guard EndOfSpeechDetector.isMeaningful(text), let sendFollowUp else { return }
+        awaitingReply = (threadId, pendingAfterSeq)
+        Log.app.info("Follow-up to \(threadId, privacy: .public)")
+        Task { [weak self] in
+            do {
+                try await sendFollowUp(threadId, text)
+            } catch {
+                self?.awaitingReply = nil
+                self?.followUpProblem = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+            }
+        }
+    }
+
+    /// The thread's view saw the agent finish with this reply: read it out, if it's the one a
+    /// voice follow-up is waiting for.
+    func replyArrived(in threadId: String, seq: Int, text: String) {
+        guard let awaiting = awaitingReply, awaiting.threadId == threadId, seq > awaiting.afterSeq else { return }
+        awaitingReply = nil
+        speakReply(text)
+    }
+
+    func stopSpeakingReply() {
+        speaker.stop()
+        isSpeaking = false
+    }
+
+    private func speakReply(_ text: String) {
+        let spoken = SpokenReply.text(from: text)
+        guard !spoken.isEmpty, settings.speakAnswers, !inBackground else { return }
+        prepare()
+        audio.resetSession()
+        audio.prewarm(activate: true)
+        speaker.beginAnswer()
+        var splitter = SentenceSplitter()
+        for sentence in splitter.append(spoken) { speaker.speak(sentence) }
+        if let rest = splitter.finish() { speaker.speak(rest) }
+        isSpeaking = true
+        scheduleIdleShutdown()
     }
 
     // MARK: -
