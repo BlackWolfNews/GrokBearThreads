@@ -292,7 +292,7 @@ public enum LibrarianText {
     }
 
     /// 820, 52k, 1.2M.
-    static func tokens(_ n: Int) -> String {
+    public static func tokens(_ n: Int) -> String {
         if n < 1000 { return "\(n)" }
         if n < 1_000_000 { return "\(Int((Double(n) / 1000).rounded()))k" }
         return String(format: "%.1fM", Double(n) / 1_000_000)

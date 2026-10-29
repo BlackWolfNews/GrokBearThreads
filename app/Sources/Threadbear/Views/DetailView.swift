@@ -19,6 +19,8 @@ struct DetailView: View {
         let project = app.openProject
         // The Projects page of cards, from the activity bar's Projects.
         let projectsHome = project == nil && app.showsProjectsHome
+        // The Librarian's page, from the activity bar's Librarian.
+        let librarianHome = project == nil && app.showsLibrarianHome
         Group {
         if let project {
             VStack(spacing: 0) {
@@ -31,6 +33,12 @@ struct DetailView: View {
                 ConnectionBanner()
                 ErrorBanner()
                 ProjectsHome()
+            }
+        } else if librarianHome {
+            VStack(spacing: 0) {
+                ConnectionBanner()
+                ErrorBanner()
+                LibrarianHome()
             }
         } else if let id = app.selection, app.dock.layout.contains(WindowDock.threadPanel(id)) {
             // One transcript can only be drawn in one place.
@@ -105,7 +113,7 @@ struct ThreadHeader: View {
             if let project = app.openProject {
                 ProjectHeaderTitle(project: project)
             } else {
-                HeaderTitle(thread: app.showsProjectsHome ? nil : app.selectedThread)
+                HeaderTitle(thread: app.showsHomePage ? nil : app.selectedThread)
             }
         }
     }
@@ -122,13 +130,13 @@ struct ThreadMenuButton: View {
     var body: some View {
         let project = pinned == nil ? app.openProject : nil
         let thread = pinned.map { app.threads[$0] } ?? app.selectedThread
-        let projectsHome = project == nil && pinned == nil && app.showsProjectsHome
+        let homePage = project == nil && pinned == nil && app.showsHomePage
         let session = (pinned ?? app.selection).map { app.session(for: $0) }
-        let hasMenu = (thread != nil && !projectsHome) || project != nil
+        let hasMenu = (thread != nil && !homePage) || project != nil
         Menu {
             if let project {
                 ProjectMenu(project: project)
-            } else if let thread, !projectsHome {
+            } else if let thread, !homePage {
                 ThreadMenu(thread: thread)
                 Divider()
                 Button("Copy transcript as Markdown", systemImage: "doc.plaintext") { session?.copyTranscript() }

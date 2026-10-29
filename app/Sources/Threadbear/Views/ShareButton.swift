@@ -12,7 +12,7 @@ struct ShareButton: View {
     var pinned: String? = nil
 
     var body: some View {
-        let thread = pinned.map { app.threads[$0] } ?? (pinned == nil && app.openProject == nil && !app.showsProjectsHome ? app.selectedThread : nil)
+        let thread = pinned.map { app.threads[$0] } ?? (pinned == nil && app.openProject == nil && !app.showsHomePage ? app.selectedThread : nil)
         let shown = thread != nil && app.websiteURL != nil
         let on = thread?.share?.isOn == true
         Button {

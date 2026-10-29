@@ -108,6 +108,7 @@ enum WindowDock {
             // As a tab beside a review it's named for what it shows.
             if let project = app.openProject { return project.title }
             if app.showsProjectsHome { return "Projects" }
+            if app.showsLibrarianHome { return "Librarian" }
             guard let thread = app.selectedThread else { return "New thread" }
             return thread.title.isEmpty ? "Untitled" : thread.title
         case review: return app.reviewPanel?.review.title ?? "Review"
@@ -282,6 +283,7 @@ struct RootView: View {
     private var windowTitle: String {
         if let project = app.openProject { return project.title }
         if app.showsProjectsHome { return "Projects" }
+        if app.showsLibrarianHome { return "Librarian" }
         return app.selectedThread.map { $0.title.isEmpty ? "Untitled" : $0.title } ?? "New thread"
     }
 

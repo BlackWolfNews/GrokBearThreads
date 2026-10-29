@@ -21,6 +21,7 @@ extension AppModel {
                 librarian = nil
                 openProjectId = nil
                 showsProjectsHome = false
+                showsLibrarianHome = false
                 if sidebarMode == .projects || sidebarMode == .librarian { sidebarMode = .inbox }
                 return
             } catch {
@@ -65,8 +66,11 @@ extension AppModel {
         showsProjectsHome = true
     }
 
+    /// The Librarian view in the sidebar, and its page in the detail area.
     func showLibrarian() {
         sidebarMode = .librarian
+        openProjectId = nil
+        showsLibrarianHome = true
     }
 
     /// The project's page in the detail area. The sidebar stays where it is.
@@ -74,6 +78,7 @@ extension AppModel {
         guard project(id) != nil else { return }
         openProjectId = id
         showsProjectsHome = false
+        showsLibrarianHome = false
     }
 
     // MARK: Changing a project

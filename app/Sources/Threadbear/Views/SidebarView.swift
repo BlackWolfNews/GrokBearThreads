@@ -404,7 +404,7 @@ struct ThreadRowView: View {
     private var rowSpace: Namespace.ID? { mode == .projects ? nil : listSpace }
 
     /// Not while one of its sub-agents is showing: that row is highlighted.
-    private var isSelected: Bool { app.selection == thread.id && app.subagentSelection == nil && app.openProjectId == nil && !app.showsProjectsHome }
+    private var isSelected: Bool { app.selection == thread.id && app.subagentSelection == nil && app.openProjectId == nil && !app.showsHomePage }
     /// The screenshot run shows one row as if the pointer were over it.
     private var pointerOver: Bool { hovering || app.hoverOverride == thread.id }
     /// Archived from somewhere other than a swipe: slides off all the same.

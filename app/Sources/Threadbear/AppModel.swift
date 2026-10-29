@@ -107,6 +107,7 @@ final class AppModel {
         didSet {
             if sidebarMode != oldValue { noteNavigation() }
             if sidebarMode != .projects { showsProjectsHome = false }
+            if sidebarMode != .librarian { showsLibrarianHome = false }
         }
     }
     /// Back and forward (⌘[ and ⌘], or the mouse's side buttons).
@@ -227,6 +228,19 @@ final class AppModel {
             }
         }
     }
+    /// The Librarian's page (what it is, what it's up to and its numbers)
+    /// in the detail area, from the activity bar's Librarian. Closes the
+    /// same ways as the Projects page.
+    var showsLibrarianHome = false {
+        didSet {
+            if showsLibrarianHome != oldValue {
+                noteNavigation()
+                mainContextChanged()
+            }
+        }
+    }
+    /// One of those pages is in the detail area, not the selected thread.
+    var showsHomePage: Bool { showsProjectsHome || showsLibrarianHome }
     /// The runner's settings for the Settings window: nil until
     /// `settings.get` answers, then replaced whole by `settings.updated`.
     var runnerSettings: RunnerSettings?
@@ -746,6 +760,7 @@ final class AppModel {
         selection = threadId
         openProjectId = nil
         showsProjectsHome = false
+        showsLibrarianHome = false
         stopShowingSubagent()
         guard let threadId else { return }
         let session = session(for: threadId)
@@ -888,6 +903,7 @@ final class AppModel {
         selection = nil
         openProjectId = nil
         showsProjectsHome = false
+        showsLibrarianHome = false
         stopShowingSubagent()
         sidebarMode = .inbox
         focusComposer("new")

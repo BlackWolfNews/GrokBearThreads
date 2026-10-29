@@ -75,6 +75,30 @@ final class NavigationTests: XCTestCase {
         XCTAssertFalse(app.showsProjectsHome, "leaving the Projects view closes it")
     }
 
+    /// Librarian opens its page in the detail area; a thread, a project
+    /// or another view closes it, and Back comes back to it.
+    func testLibrarianOpensItsPage() async {
+        let app = app()
+        app.select("a")
+        await settle()
+        app.showLibrarian()
+        await settle()
+        XCTAssertTrue(app.showsLibrarianHome)
+        XCTAssertTrue(app.showsHomePage)
+        XCTAssertEqual(app.selection, "a", "the thread stays selected for when Mike goes back to it")
+        app.select("b")
+        XCTAssertFalse(app.showsLibrarianHome)
+        await settle()
+        app.goBack()
+        XCTAssertEqual(app.place, NavigationPlace(mode: .librarian, threadId: "a", librarianHome: true))
+        app.openProjectPage("p_a")
+        XCTAssertFalse(app.showsLibrarianHome)
+        app.showLibrarian()
+        app.showProjects()
+        XCTAssertFalse(app.showsLibrarianHome, "leaving the Librarian view closes it")
+        XCTAssertTrue(app.showsProjectsHome)
+    }
+
     /// Picking a thread changes the selection and closes the project page
     /// in turn; that's one step, not two.
     func testOneClickIsOneStep() async {

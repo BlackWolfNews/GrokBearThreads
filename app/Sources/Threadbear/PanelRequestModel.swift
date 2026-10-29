@@ -12,7 +12,7 @@ extension AppModel {
     /// thread's summary changes, when it's selected, when the app comes to
     /// the front and when the thread list loads.
     func servePanelRequest() {
-        guard openProjectId == nil, !showsProjectsHome,
+        guard openProjectId == nil, !showsHomePage,
               let thread = selectedThread, let request = panelRequestGate.take(thread, looking: isLooking) else { return }
         guard let panel = PanelRequests.panel(request, in: thread) else {
             // Left for the runner to clear with Mike's next message.
