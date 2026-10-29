@@ -95,3 +95,47 @@ final class FileDragTests: XCTestCase {
         while NSApp.nextEvent(matching: .any, until: Date(), inMode: .default, dequeue: true) != nil {}
     }
 }
+
+/// The pane's preview takes a press on a picture or a video's picture, so
+/// it can drag out, and leaves the rest to the view under it.
+@MainActor
+final class FilePreviewPressTests: XCTestCase {
+    private func shown(_ name: String, _ data: Data) throws -> FilePreviewView {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        addTeardownBlock { try? FileManager.default.removeItem(at: folder) }
+        let file = folder.appendingPathComponent(name)
+        try data.write(to: file)
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 400, height: 300), styleMask: [.borderless], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        let view = FilePreviewView(frame: window.contentView!.bounds)
+        view.autoresizingMask = [.width, .height]
+        window.contentView!.addSubview(view)
+        view.show(file)
+        window.layoutIfNeeded()
+        addTeardownBlock { view.close(); window.close() }
+        return view
+    }
+
+    private var middle: NSPoint { NSPoint(x: 200, y: 150) }
+
+    func testAPictureTakesThePress() throws {
+        let image = NSImage(size: NSSize(width: 20, height: 20), flipped: false) { rect in
+            NSColor.systemPink.setFill(); rect.fill(); return true
+        }
+        let png = try XCTUnwrap(NSBitmapImageRep(data: try XCTUnwrap(image.tiffRepresentation))?.representation(using: .png, properties: [:]))
+        let view = try shown("shot.png", png)
+        XCTAssertTrue(view.pressTarget(at: middle) === view)
+    }
+
+    func testAVideosPictureTakesThePress() throws {
+        // Any bytes do: the player makes its views whether it plays or not.
+        let view = try shown("clip.mp4", Data([0, 0, 0, 0]))
+        XCTAssertTrue(view.pressTarget(at: middle) === view)
+    }
+
+    func testOtherFilesKeepTheirPresses() throws {
+        let view = try shown("notes.pdf", Data("%PDF-1.4\n".utf8))
+        XCTAssertFalse(view.pressTarget(at: middle) === view)
+    }
+}

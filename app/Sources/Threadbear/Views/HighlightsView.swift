@@ -1,4 +1,5 @@
 import AppKit
+import AVKit
 import Quartz
 import SwiftUI
 import ThreadbearCore
@@ -513,8 +514,9 @@ extension PreviewBody {
     }
 }
 
-/// Quick Look's own view: pictures, PDFs and video, as the Finder's space
-/// bar shows them.
+/// A file in the pane that isn't text or a page: a picture or video in
+/// the app's own views, so it drags out (FilePreviewView), and anything
+/// else (a PDF, a Keynote) in Quick Look, as the Finder's space bar shows it.
 struct QuickLookView: NSViewRepresentable {
     let url: URL
     /// Bumped by each open, so the same file opened again is read again.
@@ -526,71 +528,152 @@ struct QuickLookView: NSViewRepresentable {
 
     func makeCoordinator() -> Coordinator { Coordinator() }
 
-    func makeNSView(context: Context) -> DraggableQuickLook {
-        // .normal draws no frame of its own around the item.
-        let preview = QLPreviewView(frame: .zero, style: .normal) ?? QLPreviewView()
-        // It's reused across files; closing would end it for good.
-        preview.shouldCloseWithWindow = false
-        return DraggableQuickLook(preview: preview)
-    }
+    func makeNSView(context: Context) -> FilePreviewView { FilePreviewView() }
 
-    func updateNSView(_ view: DraggableQuickLook, context: Context) {
-        view.url = url
+    func updateNSView(_ view: FilePreviewView, context: Context) {
         if let shown = context.coordinator.shown, shown.0 == url, shown.1 == opened { return }
-        if context.coordinator.shown?.0 == url {
-            view.preview.refreshPreviewItem()
-        } else {
-            view.preview.previewItem = url as NSURL
-        }
+        view.show(url)
         context.coordinator.shown = (url, opened)
     }
 
-    static func dismantleNSView(_ view: DraggableQuickLook, coordinator: Coordinator) {
-        view.preview.close()
+    static func dismantleNSView(_ view: FilePreviewView, coordinator: Coordinator) {
+        view.close()
     }
 }
 
-/// Quick Look's view with a picture or video that drags out as the file
-/// (FileDrag), to drop on X or the Finder. A press that's let go without
-/// moving goes on to Quick Look as before. A video's controls along the
-/// bottom keep their own drags (scrubbing), and anything else (a PDF's
-/// text, say) isn't touched.
-final class DraggableQuickLook: NSView {
-    let preview: QLPreviewView
-    var url: URL?
+/// Shows one file for QuickLookView, and lets a picture or video drag out
+/// as the file (FileDrag), to drop on X or the Finder. Quick Look draws
+/// those in another process (an NSRemoteView), which takes presses on
+/// the picture itself before the app sees them (Mike found the video
+/// wouldn't drag, 29 Oct), so they're an NSImageView and an AVPlayerView
+/// here instead. A press that's let go without moving is a click as
+/// before, and the video's controls keep their own presses.
+final class FilePreviewView: NSView {
+    private enum Content {
+        case picture(NSImageView)
+        case video(AVPlayerView)
+        case quickLook(QLPreviewView)
 
-    /// The strip along the bottom where a video's play bar sits.
-    private static let controls: CGFloat = 64
-
-    init(preview: QLPreviewView) {
-        self.preview = preview
-        super.init(frame: .zero)
-        preview.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(preview)
-        NSLayoutConstraint.activate([
-            preview.leadingAnchor.constraint(equalTo: leadingAnchor),
-            preview.trailingAnchor.constraint(equalTo: trailingAnchor),
-            preview.topAnchor.constraint(equalTo: topAnchor),
-            preview.bottomAnchor.constraint(equalTo: bottomAnchor),
-        ])
+        var view: NSView {
+            switch self {
+            case .picture(let view): view
+            case .video(let view): view
+            case .quickLook(let view): view
+            }
+        }
     }
 
-    required init?(coder: NSCoder) { fatalError() }
+    private var content: Content?
+    private var url: URL?
+    /// Kept for the next file Quick Look shows; closing it would end it for good.
+    private var quickLook: QLPreviewView?
 
-    /// Pictures and video only: the rest have presses of their own.
-    private var draggable: Bool {
-        guard let url, let type = UTType(filenameExtension: url.pathExtension) else { return false }
-        return type.conforms(to: .image) || type.conforms(to: .audiovisualContent)
+    /// Reads `url` afresh, even when it's the file already shown.
+    func show(_ url: URL) {
+        self.url = url
+        let type = UTType(filenameExtension: url.pathExtension)
+        if type?.conforms(to: .audiovisualContent) == true {
+            let player: AVPlayerView
+            if case .video(let shown) = content { player = shown } else {
+                player = AVPlayerView()
+                player.controlsStyle = .floating
+                // Live Text over a paused frame would take the press too.
+                player.allowsVideoFrameAnalysis = false
+            }
+            player.player?.pause()
+            player.player = AVPlayer(url: url)
+            install(.video(player))
+            fitPlayer(to: url)
+        } else if type?.conforms(to: .image) == true, let image = NSImage(contentsOf: url) {
+            let view: NSImageView
+            if case .picture(let shown) = content { view = shown } else {
+                view = NSImageView()
+                view.imageScaling = .scaleProportionallyDown
+                view.animates = true
+            }
+            view.image = image
+            install(.picture(view))
+        } else {
+            // .normal draws no frame of its own around the item.
+            let view = quickLook ?? QLPreviewView(frame: .zero, style: .normal) ?? QLPreviewView()
+            view.shouldCloseWithWindow = false
+            quickLook = view
+            if case .quickLook = content, (view.previewItem as? URL) == url {
+                view.refreshPreviewItem()
+            } else {
+                view.previewItem = url as NSURL
+            }
+            install(.quickLook(view))
+        }
+    }
+
+    /// Content is placed by hand (layout), not by constraints: an image
+    /// view's own size would push the pane to fit the picture, and crop it.
+    private func install(_ next: Content) {
+        if let old = content?.view, old !== next.view {
+            if case .video(let player)? = content { player.player?.pause() }
+            old.removeFromSuperview()
+        }
+        content = next
+        if next.view.superview !== self { addSubview(next.view) }
+        needsLayout = true
+    }
+
+    /// The video's shape once it's known: the player is that shape in the
+    /// middle, so there are no black bars where Quick Look showed the pane
+    /// behind it. It fills the pane until then.
+    private var videoSize: CGSize?
+
+    private func fitPlayer(to url: URL) {
+        videoSize = nil
+        Task { @MainActor [weak self] in
+            let asset = AVURLAsset(url: url)
+            guard let track = try? await asset.loadTracks(withMediaType: .video).first,
+                  let (size, transform) = try? await track.load(.naturalSize, .preferredTransform) else { return }
+            let shown = size.applying(transform)
+            guard let self, self.url == url, shown.width != 0, shown.height != 0 else { return }
+            self.videoSize = CGSize(width: abs(shown.width), height: abs(shown.height))
+            self.needsLayout = true
+        }
+    }
+
+    override func layout() {
+        super.layout()
+        guard let view = content?.view else { return }
+        if case .video = content, let videoSize {
+            view.frame = AVMakeRect(aspectRatio: videoSize, insideRect: bounds).integral
+        } else {
+            view.frame = bounds
+        }
+    }
+
+    func close() {
+        if case .video(let player)? = content { player.player?.pause() }
+        quickLook?.close()
     }
 
     override func hitTest(_ point: NSPoint) -> NSView? {
         // Only a left press is taken here, so scrolling, pinching and
-        // hovering (which shows a video's controls) still reach Quick Look.
-        guard NSApp.currentEvent?.type == .leftMouseDown, draggable,
-              let inside = superview.map({ convert(point, from: $0) }), bounds.contains(inside),
-              inside.y > (isFlipped ? 0 : Self.controls), inside.y < bounds.height - (isFlipped ? Self.controls : 0)
-        else { return super.hitTest(point) }
-        return self
+        // hovering (which shows the video's controls) still reach the view.
+        guard NSApp.currentEvent?.type == .leftMouseDown else { return super.hitTest(point) }
+        return pressTarget(at: point)
+    }
+
+    /// Where a left press at `point` (in the superview) goes: here, to be
+    /// a drag or a click, or the view under it.
+    func pressTarget(at point: NSPoint) -> NSView? {
+        guard let inner = super.hitTest(point) else { return nil }
+        switch content {
+        case .picture:
+            return self
+        case .video(let player):
+            // The picture fills the player; its controls are smaller
+            // panels over it (the play bar, volume), left to the player.
+            let frame = inner.convert(inner.bounds, to: player)
+            return frame.width >= player.bounds.width - 1 && frame.height >= player.bounds.height - 1 ? self : inner
+        case .quickLook, nil:
+            return inner
+        }
     }
 
     override func mouseDown(with event: NSEvent) {
@@ -598,9 +681,10 @@ final class DraggableQuickLook: NSView {
             FileDrag.begin(url, from: self, event: event)
             return
         }
-        // A click: Quick Look's own view under the mouse gets it, and the
-        // mouse-up still waiting in the queue.
-        let target = preview.hitTest(convert(event.locationInWindow, from: nil)) ?? preview
+        // A click: the view under the mouse gets it, and the mouse-up
+        // still waiting in the queue.
+        guard let view = content?.view else { return }
+        let target = view.hitTest(convert(event.locationInWindow, from: nil)) ?? view
         target.mouseDown(with: event)
     }
 }
