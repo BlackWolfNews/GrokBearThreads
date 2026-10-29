@@ -172,7 +172,6 @@ final class RowSwipeController {
         guard let action else { return springBack() }
         // Hold where it was let go while a busy thread asks first.
         guard action.confirm() else { return springBack() }
-        Whoosh.play()
         withAnimation(.easeIn(duration: Juice.reduceMotion ? 0.1 : 0.16)) { leaving = true }
         Task { @MainActor in
             try? await Task.sleep(for: .milliseconds(Juice.reduceMotion ? 100 : 160))

@@ -1205,7 +1205,7 @@ final class AppModel {
     }
 
     /// Archive (Mike calls it settling): leaves the inbox, stops its CLI.
-    /// Its row slides off with a whoosh first, as a swiped one does;
+    /// Its row slides off first, as a swiped one does;
     /// `slid` is a swipe that's already done that.
     func archive(_ threadId: String? = nil, slid: Bool = false) {
         guard let threadId = threadId ?? selection else { return }
@@ -1213,7 +1213,6 @@ final class AppModel {
         if selection == threadId { select(next) }
         if slid { return update(threadId, ThreadUpdate(archived: true)) }
         guard !slidingOff.contains(threadId) else { return }
-        Whoosh.play()
         slideOff(threadId)
         Task {
             try? await Task.sleep(for: Self.slideTime)
