@@ -43,15 +43,17 @@ The order Mike agreed on 26 Oct, and what became of each step:
   bigger than planned: Threadbear got its own iPhone app (1.0 in App
   Review) and a website with sharing, rather than a Threads tab in Quick
   Ask.
-- **Step 6: Tinker Desk as a second runner, then cloud sandboxes.** Not
-  started. Cloud sandboxes were only ever this line; nothing is designed.
+- **Step 6: a second runner, then cloud sandboxes.** Not started. The plan
+  said Tinker Desk; on 29 Oct Mike moved it to Bruce, keeping Tinker Desk
+  for testing clean Threadbear installs. Cloud sandboxes were only ever this
+  line; nothing is designed.
 
 Much was added outside this order: schedules, hibernate, projects and the
 librarian, the dockable window (BearDock), patches and panels, the asks card,
 handovers for runner and app restarts, message editing and sharing. Their
 docs are in `docs/` and the contracts in `docs/protocol.md`.
 
-## Step 6: Tinker Desk as a second runner
+## Step 6: a second runner (Bruce)
 
 Draft design in `docs/step6-plan.md` (29 Oct), with open questions for
 Mike. Convex already handles several runners (`docs/convex-backend.md`);

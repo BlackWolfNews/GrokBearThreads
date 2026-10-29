@@ -1,7 +1,11 @@
-# Step 6: Tinker Desk as a second runner
+# Step 6: a second runner (Bruce)
 
 Draft, 29 Oct 2026. Nothing here is built. It follows `docs/plan.md`
 ("Build order") and the multi-runner notes in `docs/convex-backend.md`.
+
+The plan said Tinker Desk. On 29 Oct Mike moved it to Bruce: Tinker Desk is
+kept for testing clean installs of Threadbear as a new user would, and a
+second runner there would muddy those tests.
 
 ## Why
 
@@ -9,11 +13,11 @@ Two things Mike wants that one runner on the laptop can't give:
 
 - **Work that doesn't need the laptop.** Scheduled jobs (the Slack, Gmail and
   Calendar ones in `~/dev/me/misc/schedules`) only fire while the M5 is awake
-  (protocol.md, Schedules, "Late runs"). Tinker Desk never sleeps
+  (protocol.md, Schedules, "Late runs"). Bruce never sleeps
   (`pmset sleep 0`).
-- **Heavy work off the M5.** Long e2e and simulator suites already go to
-  Tinker Desk by hand over SSH. A thread that runs there does the same thing
-  without the SSH dance, and the M5 stays quick.
+- **Work off the M5.** A thread that runs on another Mac leaves the laptop
+  quick. Bruce has 8 GB, so this means a few threads at a time, not heavy
+  builds: those stay on Tinker Desk by hand, as now.
 
 ## What already works for several runners
 
@@ -23,8 +27,8 @@ Two things Mike wants that one runner on the laptop can't give:
   one or goes to "any" (the newest one online). The phone needs nothing new
   beyond a machine label on rows.
 - **Runner identity.** `ensureRunnerId` gives each data dir a stable id, and
-  the name defaults to the hostname (`defaultRunnerName`), so Tinker Desk
-  would show as "tinker-desk".
+  the name defaults to the hostname (`defaultRunnerName`), so Bruce would
+  show as "bruce".
 - **Talking to another runner.** Handovers (protocol.md, "Handovers")
   already have the primary runner forward requests about some threads to
   another runner and pass its events back (`Peers`, `ThreadRouter` and
@@ -42,13 +46,13 @@ remote thread breaks wherever the app treats a path as a file on this Mac:
   diffs opened in the panel, text files in the side pane.
 - **Folders.** The composer's folder picker and `cwd` checks read this
   Mac's disk. Patches (`appliesTo`) look in this Mac's folders.
-- **Accounts and pools** are per runner. Tinker Desk has one Claude login
-  (mike.cann@gmail.com), a Codex login but no Codex CLI, and no Token Stats
+- **Accounts and pools** are per runner. Bruce has one Claude login
+  (mike.cann@gmail.com), Codex installed and signed in, and no Token Stats
   accounts folder.
 
 ## Proposed shape: the local runner fronts the remote one
 
-The M5's runner connects to Tinker Desk's runner over Tailscale, as a
+The M5's runner connects to Bruce's runner over Tailscale, as a
 *remote peer*, the way a primary connects to a draining runner today. The
 Mac app keeps its one socket:
 
@@ -62,7 +66,7 @@ Mac app keeps its one socket:
   composer gets a small machine chip beside folder, account and model, and
   the schedule editor a "Runs on" picker, both defaulting to this Mac.
 - `schedules.list` merges both runners' lists. A schedule lives on its own
-  runner, so one made for Tinker Desk fires with the laptop shut.
+  runner, so one made for Bruce fires with the laptop shut.
 - Files: a new `files.read { path, maxBytes? }` (and an image variant with
   a thumbnail size) that the local runner answers itself or forwards. The
   app fetches remote images, blobs and linked files through it and caches
@@ -79,33 +83,40 @@ Why this shape rather than the others:
   project notes: no always-on Convex subscriptions behind the sidebar (the
   Agent Archive cost pattern).
 
-What it costs: Tinker Desk's threads only show on the Mac while the M5's
-runner can reach it. The phone sees both through Convex either way.
+What it costs: Bruce's threads only show on the Mac while the M5's runner
+can reach it. The phone sees both through Convex either way.
 
-## Installing on Tinker Desk
+## Installing on Bruce
 
+Checked 29 Oct over SSH:
+
+- macOS 26.5, M1, **8 GB**. It already runs the Agent Archive server
+  (about 1 GB), the Connectors gateway, Sammy Cam's Convex backend and
+  Cannvas media, and had 2 GB of swap in use. The runner itself is small;
+  each live Claude or Codex CLI adds a few hundred MB, so keep its
+  idle-release short and expect a few threads at a time.
+- Desktop logged in as `bruce`, `pmset sleep 0`, 67 GB free.
+- Node 24.22.1 in nvm, Claude Code at `~/.local/bin/claude`, Codex in the
+  nvm bin, both signed in.
 - Same release, its own data dir, LaunchAgent and Runner.app, installed by
-  `install-runner.sh` over SSH. The desktop is logged in (`mikeysee`), so a
-  LaunchAgent runs. After a reboot it waits for that login, as the gha-wake
-  agent does today (auto-login is off, and was left off on purpose).
-- Node 24.22.1 is already there. Claude Code is at `~/.local/bin/claude`.
-  Codex needs `npm install -g @openai/codex`.
-- It listens on its Tailscale address as well as 127.0.0.1, with its own
-  peer token (copied to the M5 once). Nothing on the LAN.
+  `install-runner.sh` over SSH. Runner.app gets its own privacy grants, so
+  the Node path problem Bruce's other services had after the 26 Oct Node
+  upgrade (file access stored per binary path) shouldn't apply; check it
+  under launchd, not over SSH, anyway.
+- Bruce's pf lockdown blocks a fixed list of ports on the LAN, so a new
+  port isn't covered by it. The runner listens on its Tailscale address
+  (and 127.0.0.1) only, with its own peer token copied to the M5 once.
 - Sync uses the same Convex deployment and `RUNNER_KEY` as the M5.
 - Updates follow `main` like the M5's (`docs/setup-and-updates.md`), so it
   needs read access to the repo.
-- 53 GB free on a 460 GB disk, shared with Colima, simulators and the
-  Windows VM. Worktrees for its threads go under its own data dir.
 
 ## Questions for Mike
 
-1. Is the shape right: the M5's runner fronts Tinker Desk's, one socket for
+1. Is the shape right: the M5's runner fronts Bruce's, one socket for
    the app?
-2. Which Claude login goes on Tinker Desk? Today it's mike.cann@gmail.com
-   (the one `claude remote-control` uses there).
+2. Which Claude login goes on Bruce? Today it's mike.cann@gmail.com.
 3. What first: just schedules (smaller, since a schedule's thread can stay
-   on Tinker Desk and be read on the phone), or remote threads in the Mac
+   on Bruce and be read on the phone), or remote threads in the Mac
    app too?
 
 ## Later
@@ -116,5 +127,5 @@ runner can reach it. The phone sees both through Convex either way.
   twice.
 - Moving a thread between machines, with a handoff note as account moves
   do (`docs/pools-plan.md`), when the folder exists on both.
-- Cloud sandboxes: a runner in a throwaway VM is a remote peer like Tinker
-  Desk, plus making and destroying the VM.
+- Cloud sandboxes: a runner in a throwaway VM is a remote peer like Bruce,
+  plus making and destroying the VM.
