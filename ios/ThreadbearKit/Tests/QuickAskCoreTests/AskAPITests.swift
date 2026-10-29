@@ -1,0 +1,95 @@
+import Foundation
+import Testing
+@testable import QuickAskCore
+
+struct AskAPITests {
+    private let perth = TimeZone(identifier: "Australia/Perth")!
+    private let now = Date(timeIntervalSince1970: 1_792_735_560) // 2026-10-23T06:06:00Z
+
+    private func json(_ data: Data) throws -> [String: Any] {
+        try #require(try JSONSerialization.jsonObject(with: data) as? [String: Any])
+    }
+
+    @Test func bodyMatchesTheContract() throws {
+        let history = [Exchange(question: "What did I do yesterday?", answer: "You worked on Walkies.")]
+        let body = AskAPI.body(question: "  And the day before?  ", history: history, timeZone: perth, now: now)
+        let object = try json(try AskAPI.encode(body))
+
+        #expect(object["question"] as? String == "And the day before?")
+        #expect(object["timezone"] as? String == "Australia/Perth")
+        #expect(object["clientTime"] as? String == "2026-10-23T14:06:00+08:00")
+        let sent = try #require(object["history"] as? [[String: String]])
+        #expect(sent == [["question": "What did I do yesterday?", "answer": "You worked on Walkies."]])
+        #expect(Set(object.keys) == ["question", "history", "timezone", "clientTime"])
+    }
+
+    @Test func historyIsLeftOutWhenEmpty() throws {
+        let body = AskAPI.body(question: "Hello there", history: [], timeZone: perth, now: now)
+        let object = try json(try AskAPI.encode(body))
+        #expect(object["history"] == nil)
+    }
+
+    @Test func historyKeepsTheLastThreeOldestFirstAndSkipsEmptyAnswers() {
+        let history = (1...5).map { Exchange(question: "Q\($0)", answer: $0 == 4 ? " " : "A\($0)") }
+        let body = AskAPI.body(question: "Q6", history: history, timeZone: perth, now: now)
+        #expect(body.history?.map(\.question) == ["Q2", "Q3", "Q5"])
+    }
+
+    @Test func clientTimeUsesTheGivenZone() {
+        #expect(AskAPI.isoTime(now, in: TimeZone(identifier: "UTC")!) == "2026-10-23T06:06:00Z")
+        #expect(AskAPI.isoTime(now, in: TimeZone(identifier: "Europe/London")!) == "2026-10-23T07:06:00+01:00")
+    }
+
+    @Test func askRequestHeaders() throws {
+        let body = AskAPI.body(question: "Hi there", history: [], timeZone: perth, now: now)
+        let request = try AskAPI.askRequest(baseURL: URL(string: "https://greedy-octopus-740.convex.site")!,
+                                            token: "aa_0123456789abcdef_secret", body: body)
+        #expect(request.url?.absoluteString == "https://greedy-octopus-740.convex.site/api/quick/ask")
+        #expect(request.httpMethod == "POST")
+        #expect(request.value(forHTTPHeaderField: "Authorization") == "Bearer aa_0123456789abcdef_secret")
+        #expect(request.value(forHTTPHeaderField: "Content-Type") == "application/json")
+        #expect(request.value(forHTTPHeaderField: "Accept") == "application/x-ndjson")
+        #expect(request.timeoutInterval == 75)
+        #expect(try AskBody.decode(request.httpBody) == body)
+    }
+
+    @Test func pingRequest() {
+        let request = AskAPI.pingRequest(baseURL: URL(string: "http://127.0.0.1:8787")!)
+        #expect(request.url?.absoluteString == "http://127.0.0.1:8787/api/quick/ping")
+        #expect(request.httpMethod == "GET")
+        #expect(request.value(forHTTPHeaderField: "Authorization") == nil)
+    }
+
+    @Test func baseURLNormalising() {
+        #expect(AskAPI.normalizeBaseURL(" https://notable-orca-910.convex.site/ ")?.absoluteString == "https://notable-orca-910.convex.site")
+        #expect(AskAPI.normalizeBaseURL("notable-orca-910.convex.site")?.absoluteString == "https://notable-orca-910.convex.site")
+        #expect(AskAPI.normalizeBaseURL("http://127.0.0.1:8787")?.absoluteString == "http://127.0.0.1:8787")
+        #expect(AskAPI.normalizeBaseURL("") == nil)
+        #expect(AskAPI.normalizeBaseURL("ftp://example.com") == nil)
+    }
+
+    @Test func tokenShape() {
+        #expect(AskAPI.looksLikeToken("aa_0123456789abcdef_s3cr3t-Value"))
+        #expect(!AskAPI.looksLikeToken("aa_0123_secret"))
+        #expect(!AskAPI.looksLikeToken("Bearer aa_0123456789abcdef_x"))
+    }
+
+    @Test func failuresInPlainWords() {
+        let body = Data(#"{"error":"Slow down"}"#.utf8)
+        #expect(AskFailure.from(status: 401, body: Data()) == .unauthorized)
+        #expect(AskFailure.from(status: 429, body: body) == .rateLimited("Slow down"))
+        #expect(AskFailure.from(status: 400, body: Data(#"{"error":"question is required"}"#.utf8)) == .badRequest("question is required"))
+        #expect(AskFailure.from(status: 503, body: Data("<html>".utf8)) == .server(status: 503, message: nil))
+        #expect(AskFailure.unauthorized.message.contains("Settings"))
+        #expect(AskFailure.unauthorized.needsSettings)
+        #expect(AskFailure.from(URLError(.notConnectedToInternet)) == .offline)
+        #expect(AskFailure.from(URLError(.timedOut)) == .timedOut)
+        #expect(AskFailure.from(URLError(.cannotFindHost)) == .unreachable)
+    }
+}
+
+private extension AskBody {
+    static func decode(_ data: Data?) throws -> AskBody {
+        try JSONDecoder().decode(AskBody.self, from: try #require(data))
+    }
+}

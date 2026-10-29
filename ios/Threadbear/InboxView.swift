@@ -3,6 +3,7 @@ import ThreadbearKit
 
 struct InboxView: View {
     @Environment(AppModel.self) private var model
+    @Environment(QuickAskModel.self) private var quick
     @State private var path: [String] = []
     @State private var composing = false
     @State private var composeText = ""
@@ -65,6 +66,12 @@ struct InboxView: View {
                         }
                     } label: {
                         Image(systemName: "line.3.horizontal")
+                    }
+                }
+                if quick.settings.isReady {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button { quick.open() } label: { Image(systemName: "waveform") }
+                            .accessibilityLabel("Quick ask")
                     }
                 }
                 ToolbarItem(placement: .topBarTrailing) {

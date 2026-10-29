@@ -102,6 +102,7 @@ struct SettingsView: View {
                     .labelsHidden()
                 }
             }
+            QuickAskSettingsSection()
             if model.isFake {
                 Section {
                     Button("Leave the demo") { model.leaveDemo() }

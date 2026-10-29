@@ -22,6 +22,10 @@ public protocol Backend: Sendable {
     func answer(threadId: String, approvalId: String, answers: [String: String], summary: String) async throws -> String
     func update(threadId: String, change: ThreadChange) async throws -> String
     func create(text: String, runnerId: String?, cwd: String?) async throws -> String
+    /// A quick ask that's been answered (backend API 9): the runner makes it a thread with the
+    /// question and its answer in, without running a turn, so a follow-up is an ordinary reply.
+    /// The command's threadId is that thread.
+    func quickAsk(_ ask: QuickAskRecord) async throws -> String
     /// The newest `limit` messages of a thread, tool lines included, live
     /// (backend API 2). Reads Convex alone, so it works while the Mac sleeps;
     /// more history is a bigger limit.
@@ -145,6 +149,17 @@ public final class ConvexBackend: Backend, @unchecked Sendable {
         return try await command("phone:create", extra)
     }
 
+    public func quickAsk(_ ask: QuickAskRecord) async throws -> String {
+        var extra: [String: JSONValue] = [
+            "question": .string(ask.question), "answer": .string(ask.answer),
+            "askedAt": .number(ask.askedAt.timeIntervalSince1970 * 1000),
+        ]
+        if !ask.sources.isEmpty {
+            extra["sources"] = .array(ask.sources.map { .object(["title": .string($0.title), "url": .string($0.url)]) })
+        }
+        return try await command("phone:quickAsk", extra)
+    }
+
     public func loadEarlier(threadId: String, beforeSeq: Int) async throws -> String {
         try await command("phone:loadEarlier", ["threadId": .string(threadId), "beforeSeq": .number(Double(beforeSeq))])
     }
@@ -160,6 +175,31 @@ public final class ConvexBackend: Backend, @unchecked Sendable {
             "apnsToken": .string(apnsToken), "notify": .string(notify.rawValue),
         ]))
     }
+}
+
+/// A spoken question and the answer the archive server gave, for `Backend.quickAsk`. Clipped to
+/// what phone:quickAsk takes.
+public struct QuickAskRecord: Sendable, Equatable {
+    public struct Source: Sendable, Equatable {
+        public var title: String
+        public var url: String
+        public init(title: String, url: String) { self.title = title; self.url = url }
+    }
+
+    public var question: String
+    public var answer: String
+    public var sources: [Source]
+    public var askedAt: Date
+
+    public init(question: String, answer: String, sources: [Source], askedAt: Date) {
+        self.question = String(question.trimmingCharacters(in: .whitespacesAndNewlines).prefix(2000))
+        self.answer = String(answer.trimmingCharacters(in: .whitespacesAndNewlines).prefix(20000))
+        self.sources = Array(sources.filter { !$0.url.isEmpty }.prefix(10))
+        self.askedAt = askedAt
+    }
+
+    /// Worth keeping: there's a question and some answer.
+    public var isWorthKeeping: Bool { !question.isEmpty && !answer.isEmpty }
 }
 
 /// The answers map for a question card, as the Mac app builds it

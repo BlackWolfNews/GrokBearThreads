@@ -62,3 +62,34 @@ are development-signed, so they're `sandbox`; App Store builds (Release,
 pushes come straight from the paired deployment with Mike's key
 (`convex/push.ts`); the relay in docs/setup-and-updates.md 2.4 is later. Tapping a notification opens
 its `threadId`.
+
+## Quick ask
+
+The old Quick Ask app, folded in (29 Oct 2026). The Action button runs
+`QuickAskIntent` (Settings › Action Button › Shortcut › Threadbear › Quick
+ask), which opens the quick ask screen already listening. The question goes
+straight to the Agent Archive server's `/api/quick/ask` over Tailscale
+(contract in `~/dev/me/agent-archive/docs/quick-ask.md`), and the answer is
+spoken a sentence at a time as it streams in. When it's finished, or stopped,
+`phone:quickAsk` (backend API 9) has the runner keep it as a thread, so a
+follow-up is an ordinary reply there; ↗ opens it.
+
+- `Threadbear/QuickAskCore/`: the logic with no UIKit (end of speech, early
+  sending, the NDJSON stream, sentences, the filler cut, timings), from
+  Quick Ask's `QuickAskCore` without its OpenRouter path. The app compiles it;
+  `ThreadbearKit/Sources/QuickAskCore` is a link to it so `swift test` runs
+  its tests (`Tests/QuickAskCoreTests`).
+- `Threadbear/QuickAsk/`: the mic, speech recognition (SpeechAnalyzer on iOS
+  26, else SFSpeechRecognizer), the voice, the screen, Settings › Quick ask.
+- It only listens when asked (the intent or the inbox's waveform button), and
+  nothing shows until a server and token are set, so App Store users without
+  an archive never see it.
+- The server and token: a QR code of `threadbear://quickask?url=<server>&token=<aa_…>`,
+  or typed into Settings. The token is an archive phone token issued on
+  Bruce (agent-archive's `scripts/phone-token.mjs`, `--bruce`). Get it onto
+  the phone as a QR code, never through the Mac clipboard: Quick Ask's
+  OpenRouter key leaked that way.
+- Debug builds take `-QuickAskServer <url> -QuickAskToken <token>
+  -QuickAskDebugQuestion "…"` (and `-quickAsk.speakAnswers NO`) to ask from
+  the simulator with no mic. The simulator reaches the server through the
+  Mac's Tailscale.

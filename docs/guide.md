@@ -238,8 +238,12 @@ default. Threadbear counts you as at the Mac when the app is open and you've
 used the keyboard or mouse in the last two minutes, and as away when the Mac
 is asleep. On the iPhone, Settings > Notify me changes it to Always or Never.
 
-A quick ask on the iPhone (a question you say out loud and hear answered
-from your Agent Archive) is kept as a thread in your default folder, with
+Quick ask on the iPhone: press the Action button, say a question, and hear
+the answer from your Agent Archive server, the way the old Quick Ask app
+did. Set it up in the iPhone's Settings > Quick ask (the archive server's
+address and a phone token from it; the phone needs Tailscale to reach it),
+then set the Action button to the Shortcut called Quick ask. The waveform
+button in the inbox does the same. Each quick ask is kept as a thread in your default folder, with
 the question, the answer and a note that quick ask answered it. It shows
 as done and already read. Write in it to carry on: the agent is told the
 thread started as a quick ask and picks up from there.

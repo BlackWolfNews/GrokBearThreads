@@ -19,6 +19,19 @@ let package = Package(
             dependencies: [.product(name: "ConvexMobile", package: "convex-swift")]
         ),
         .testTarget(name: "ThreadbearKitTests", dependencies: ["ThreadbearKit"]),
+        // Quick ask's logic (listening, early sending, the server's answer stream, speaking a
+        // sentence at a time). The app compiles these files itself, from Threadbear/QuickAskCore,
+        // where this target's folder is a link to; the package builds them only so `swift test`
+        // runs their tests on the Mac. Main-actor by default, as in the app.
+        .target(
+            name: "QuickAskCore",
+            swiftSettings: [.defaultIsolation(MainActor.self)]
+        ),
+        .testTarget(
+            name: "QuickAskCoreTests",
+            dependencies: ["QuickAskCore"],
+            swiftSettings: [.defaultIsolation(MainActor.self)]
+        ),
     ],
     swiftLanguageModes: [.v6]
 )

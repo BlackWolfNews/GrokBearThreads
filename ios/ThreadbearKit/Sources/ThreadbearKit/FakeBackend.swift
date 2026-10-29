@@ -194,6 +194,17 @@ public final class FakeBackend: Backend, @unchecked Sendable {
         return newCommand(threadId: id)
     }
 
+    public func quickAsk(_ ask: QuickAskRecord) async throws -> String {
+        let id = UUID().uuidString.lowercased()
+        mutate { s in
+            s.threadsById[id] = PhoneThread(threadId: id, title: String(ask.question.prefix(48)), cwd: "~/code/misc", status: .idle,
+                                            lastActivityAt: .now)
+            s.append(id, role: .user, text: ask.question, origin: "phone")
+            s.append(id, role: .assistant, text: ask.answer)
+        }
+        return newCommand(threadId: id)
+    }
+
     public func setNotifications(apnsToken: String, notify: NotifyMode) async throws {}
 
     public func loadEarlier(threadId: String, beforeSeq: Int) async throws -> String {

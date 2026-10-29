@@ -247,6 +247,33 @@ final class AppModel {
         }
     }
 
+    /// A finished quick ask, kept as a thread by the runner (backend API 9). The thread's id once
+    /// it's made; nil if the runner hasn't taken it within a while (the Mac's asleep), in which
+    /// case it's made when the runner's back.
+    func keepQuickAsk(_ record: QuickAskRecord) async throws -> String? {
+        guard let backend else { throw TransportError.server("Pair with your Mac to keep answers as threads.") }
+        if let apiVersion, apiVersion < BackendCompatibility.quickAskAPIVersion {
+            throw TransportError.server("Update Threadbear on your Mac to keep answers as threads.")
+        }
+        let commandId = try await backend.quickAsk(record)
+        return try await withThrowingTaskGroup(of: String?.self) { group in
+            group.addTask {
+                for try await status in backend.command(commandId) {
+                    if let threadId = status?.threadId { return threadId }
+                    if status?.state == .failed { throw TransportError.server(status?.note ?? "The runner couldn't keep it.") }
+                }
+                return nil
+            }
+            group.addTask {
+                try await Task.sleep(for: .seconds(30))
+                return nil
+            }
+            let first = try await group.next() ?? nil
+            group.cancelAll()
+            return first
+        }
+    }
+
     func clearError() { lastError = nil }
 
     func report(_ error: Error) {

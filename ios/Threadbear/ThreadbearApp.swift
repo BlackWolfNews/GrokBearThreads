@@ -6,31 +6,54 @@ import UserNotifications
 struct ThreadbearApp: App {
     @UIApplicationDelegateAdaptor(AppDelegate.self) private var delegate
     @State private var model = AppModel()
+    @State private var quick = QuickAskModel()
+    @Environment(\.scenePhase) private var scenePhase
 
     var body: some Scene {
         WindowGroup {
             RootView()
                 .environment(model)
-                .onAppear { delegate.model = model }
+                .environment(quick)
+                .onAppear {
+                    delegate.model = model
+                    quick.keep = { [model] record in try await model.keepQuickAsk(record) }
+                }
+                .onChange(of: scenePhase, initial: true) { _, phase in quick.scenePhaseChanged(to: phase) }
                 // Ask for notifications once paired, including straight
                 // after pairing, not only on a launch that was already paired.
                 .onChange(of: model.isPaired, initial: true) { _, paired in
                     if paired, !model.isFake { delegate.askForNotifications() }
                 }
-                // The Camera opens threadbear://pair links from the QR code.
-                .onOpenURL { url in Task { await model.pair(with: url) } }
+                // The Camera opens threadbear://pair links from the QR code, and
+                // threadbear://quickask ones with the archive server for quick ask.
+                .onOpenURL { url in
+                    if quick.settings.apply(link: url) { quick.settingsChanged(); return }
+                    Task { await model.pair(with: url) }
+                }
         }
     }
 }
 
 struct RootView: View {
     @Environment(AppModel.self) private var model
+    @Environment(QuickAskModel.self) private var quick
 
     var body: some View {
-        if model.isPaired {
-            InboxView()
-        } else {
-            PairView()
+        @Bindable var quick = quick
+        Group {
+            if model.isPaired {
+                InboxView()
+            } else {
+                PairView()
+            }
+        }
+        // Quick ask goes over whatever's showing, from the Action button or the inbox's mic.
+        .fullScreenCover(isPresented: $quick.isPresented) {
+            QuickAskView { threadId in
+                quick.close()
+                model.openThreadId = threadId
+            }
+            .environment(quick)
         }
     }
 }
