@@ -247,7 +247,7 @@ final class AppModel {
         }
     }
 
-    /// A finished quick ask, kept as a thread by the runner (backend API 9). The thread's id once
+    /// A finished quick ask, kept as a thread by the runner (backend API 10). The thread's id once
     /// it's made; nil if the runner hasn't taken it within a while (the Mac's asleep), in which
     /// case it's made when the runner's back.
     func keepQuickAsk(_ record: QuickAskRecord) async throws -> String? {

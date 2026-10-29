@@ -71,7 +71,7 @@ ask), which opens the quick ask screen already listening. The question goes
 straight to the Agent Archive server's `/api/quick/ask` over Tailscale
 (contract in `~/dev/me/agent-archive/docs/quick-ask.md`), and the answer is
 spoken a sentence at a time as it streams in. When it's finished, or stopped,
-`phone:quickAsk` (backend API 9) has the runner keep it as a thread, so a
+`phone:quickAsk` (backend API 10) has the runner keep it as a thread, so a
 follow-up is an ordinary reply there; ↗ opens it.
 
 - `Threadbear/QuickAskCore/`: the logic with no UIKit (end of speech, early

@@ -22,7 +22,7 @@ public protocol Backend: Sendable {
     func answer(threadId: String, approvalId: String, answers: [String: String], summary: String) async throws -> String
     func update(threadId: String, change: ThreadChange) async throws -> String
     func create(text: String, runnerId: String?, cwd: String?) async throws -> String
-    /// A quick ask that's been answered (backend API 9): the runner makes it a thread with the
+    /// A quick ask that's been answered (backend API 10): the runner makes it a thread with the
     /// question and its answer in, without running a turn, so a follow-up is an ordinary reply.
     /// The command's threadId is that thread.
     func quickAsk(_ ask: QuickAskRecord) async throws -> String

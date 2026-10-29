@@ -316,7 +316,7 @@ export const create = mutation({
   },
 });
 
-// A quick ask the phone has already answered out loud (API 9), kept as a
+// A quick ask the phone has already answered out loud (API 10), kept as a
 // thread so Mike can carry on in it. The runner writes the exchange with
 // no turn run (docs/protocol.md, Sync, "quickAsk"); phone:command gives the
 // new thread's id once it's done. Targets a runner as create does.

@@ -2084,7 +2084,7 @@ the mirror back as state. The Mac app doesn't use it.
   of `{ snooze: { until?, untilRestart? } }`, `{ wake }`, `{ archive }`,
   `{ unarchive }`, `{ markSeen }` or `{ title }`; `respond` is
   `approvals.respond`'s decision, message and answers; `page` is
-  `{ beforeSeq }` (above). `quickAsk` (backend API 9) is
+  `{ beforeSeq }` (above). `quickAsk` (backend API 10) is
   `{ question, answer, sources: { title, url }[], askedAt }`: a quick
   ask the phone already answered out loud (from Agent Archive's
   `/api/quick/ask`, straight over Tailscale), kept as a thread so Mike
