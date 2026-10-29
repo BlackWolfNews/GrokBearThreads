@@ -22,7 +22,11 @@ struct ThreadbearApp: App {
                 // Ask for notifications once paired, including straight
                 // after pairing, not only on a launch that was already paired.
                 .onChange(of: model.isPaired, initial: true) { _, paired in
-                    if paired, !model.isFake { delegate.askForNotifications() }
+                    // Not for a scripted quick ask: the prompt would keep the app from going
+                    // active, which is when the debug question is asked.
+                    if paired, !model.isFake, !ProcessInfo.processInfo.arguments.contains("-QuickAskDebugQuestion") {
+                        delegate.askForNotifications()
+                    }
                 }
                 // The Camera opens threadbear://pair links from the QR code, and
                 // threadbear://quickask ones with the archive server for quick ask.
