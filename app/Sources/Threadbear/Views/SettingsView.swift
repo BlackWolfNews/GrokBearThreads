@@ -268,12 +268,7 @@ private struct ModelSettings: View {
         }
     }
 
-    /// Pools with a Claude login: only those can take small jobs.
-    private var claudePools: [Pool] {
-        app.pools.filter { pool in
-            pool.accountIds.contains { id in app.accounts.contains { $0.id == id && $0.provider == "claude" } }
-        }
-    }
+    private var claudePools: [Pool] { app.claudePools }
 
     private func poolBinding(_ settings: RunnerSettings) -> Binding<String?> {
         Binding(get: { settings.models.pool }, set: { app.updateSettings(SettingsUpdate(pool: .some($0))) })

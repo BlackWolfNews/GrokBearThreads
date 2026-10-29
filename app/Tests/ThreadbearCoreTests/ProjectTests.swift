@@ -362,7 +362,10 @@ final class ProjectTests: XCTestCase {
         XCTAssertEqual(LibrarianText.today(LibrarianStatus(looksToday: 1, spentTodayUsd: 0)), "1 look today · $0")
         XCTAssertEqual(LibrarianText.today(LibrarianStatus(looksToday: 14, spentTodayUsd: 0.031)), "14 looks today · $0.03")
         XCTAssertEqual(LibrarianText.today(LibrarianStatus(looksToday: 208, spentTodayUsd: 0.009, skippedToday: 40, tokensToday: 768_951, notionalTodayUsd: 0.153)),
-                       "208 looks today · 40 skipped · 769k tokens · $0.16")
+                       "208 looks today · 40 skipped · 769k tokens · $0.009", "pool looks aren't money spent")
+        XCTAssertEqual(LibrarianText.apiValue(LibrarianStatus(looksToday: 3, spentTodayUsd: 0, notionalTodayUsd: 0.153)),
+                       "Today's looks on your Claude login would have cost $0.15 at API prices; they use its room, not money")
+        XCTAssertNil(LibrarianText.apiValue(LibrarianStatus(looksToday: 3, spentTodayUsd: 0.02)))
         XCTAssertEqual(LibrarianText.tokens(820), "820")
         XCTAssertEqual(LibrarianText.tokens(1_234_567), "1.2M")
         XCTAssertEqual(LibrarianText.due(now.addingTimeInterval(240), now: now), "in 4m")

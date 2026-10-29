@@ -75,7 +75,7 @@ private struct LibrarianState: View {
                 .font(.system(size: TypeScale.sidebarMeta))
                 .foregroundStyle(SidebarMetrics.faint)
                 .monospacedDigit()
-                .tip("Today's looks, quiet catch-ups it skipped without asking the model, tokens used, and what that costs at API prices. Looks on a Claude login use its room, not money")
+                .tip(["Today's looks, quiet catch-ups it skipped without asking the model, tokens used, and what OpenRouter charged", LibrarianText.apiValue(status)].compactMap { $0 }.joined(separator: ". "))
             HStack(spacing: zoomed(8)) {
                 Button(status.paused ? "Resume" : "Pause") { app.setLibrarianPaused(!status.paused) }
                     .tip(status.paused ? "Let it look at threads again" : "Stop looking at threads; what's queued waits")
