@@ -30,3 +30,24 @@ final class RemoteRunnerMarkTests: XCTestCase {
         XCTAssertNil(app.threads["t1"])
     }
 }
+
+/// The composer's pickers on another runner's thread offer that runner's
+/// logins, from its connection's hello, not this Mac's.
+@MainActor
+final class RemoteLoginsTests: XCTestCase {
+    func testAThreadsPickersUseItsRunnersLogins() {
+        let app = AppModel()
+        app.accounts = [Account(id: "claude-main", provider: "claude", title: "mine@example.com"), Account(id: "claude-3", provider: "claude", title: "other@example.com")]
+        var remote = ThreadSummary(id: "t1", title: "On bruce", status: .idle)
+        remote.runnerId = "r-bruce"
+        let local = ThreadSummary(id: "t2", title: "Here", status: .idle)
+
+        XCTAssertNil(app.logins(for: remote), "nothing to offer before bruce has said hello")
+        XCTAssertEqual(app.logins(for: local)?.accounts.map(\.id), ["claude-main", "claude-3"])
+        XCTAssertEqual(app.logins(for: nil)?.accounts.count, 2, "a new thread is this Mac's")
+
+        app.remoteLogins["r-bruce"] = RunnerLogins(accounts: [Account(id: "codex-main", provider: "codex", title: "Codex")], pools: [], defaults: app.defaults)
+        XCTAssertEqual(app.logins(for: remote)?.accounts.map(\.id), ["codex-main"])
+        XCTAssertEqual(ThreadSettings(app: app, thread: remote).accountSections.flatMap(\.items).map(\.id), ["codex-main"])
+    }
+}

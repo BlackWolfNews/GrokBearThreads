@@ -19,16 +19,38 @@ struct ComposerControls: View {
 
     var body: some View {
         if let thread, let place = app.runnerPlace(of: thread) {
-            remoteControls(thread, place: place)
+            // Its pickers fill from that Mac's logins once its connection
+            // has said hello; until then just its name.
+            if app.logins(for: thread) != nil {
+                controls(remote: (thread, place))
+            } else {
+                remoteControls(thread, place: place)
+            }
         } else {
-            controls
+            controls(remote: nil)
         }
     }
 
-    /// Another runner's thread: its Mac's name where the chips would be,
-    /// and send. Its folder, logins and models are that Mac's, and a
-    /// picture from here would be a path that Mac hasn't got, so there's
-    /// nothing to pick.
+    /// Another runner's thread: its Mac's icon and name, at the front of
+    /// the row in place of "+" (a picture from here would be a path that
+    /// Mac hasn't got) and the folder (it's that Mac's).
+    private func runnerChip(_ thread: ThreadSummary, place: String) -> some View {
+        HStack(spacing: zoomed(4)) {
+            Image(systemName: app.runnerIcon(of: thread))
+                .font(.system(size: TypeScale.chip - 1))
+                .foregroundStyle(Color(nsColor: Theme.faintIcon))
+            Text(app.runnerName(of: thread) ?? "")
+                .font(.system(size: TypeScale.chip))
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+        }
+        .padding(.horizontal, zoomed(7))
+        .frame(height: zoomed(26))
+        .tip("\(place), in \(thread.cwd.abbreviatingHome)")
+    }
+
+    /// Another runner's thread before its connection has said hello: its
+    /// Mac's name where the chips would be, and send.
     private func remoteControls(_ thread: ThreadSummary, place: String) -> some View {
         HStack(spacing: zoomed(4)) {
             HStack(spacing: zoomed(4)) {
@@ -51,16 +73,22 @@ struct ComposerControls: View {
     }
 
     @ViewBuilder
-    private var controls: some View {
+    private func controls(remote: (thread: ThreadSummary, place: String)?) -> some View {
         let settings = ThreadSettings(app: app, thread: thread)
         let cwd = settings.cwd
         let account = settings.account
         let ask = settings.ask
         HStack(spacing: zoomed(4)) {
-            PlusButton { settings.plusMenu(attach: onAttach, schedule: app.schedulesSupported ? onSchedule : nil) }
-                // Pulls the glyph back so it lines up with the text above.
-                .padding(.leading, -zoomed(7))
-            if ComposerChips.showsFolder(cwd, defaultFolder: app.defaults.cwd) {
+            if let remote {
+                runnerChip(remote.thread, place: remote.place)
+                    .padding(.leading, -zoomed(7))
+                ChipDivider()
+            } else {
+                PlusButton { settings.plusMenu(attach: onAttach, schedule: app.schedulesSupported ? onSchedule : nil) }
+                    // Pulls the glyph back so it lines up with the text above.
+                    .padding(.leading, -zoomed(7))
+            }
+            if remote == nil, ComposerChips.showsFolder(cwd, defaultFolder: app.defaults.cwd) {
                 ComposerChip(icon: "folder", title: ComposerChips.folder(cwd), help: cwd.abbreviatingHome) {
                     settings.folderMenu()
                 }
@@ -69,7 +97,7 @@ struct ComposerControls: View {
             // With pools the runner picks the login, so there's no account
             // chip: the model chip names the pool (or the pinned login).
             if !settings.usesPools {
-                ComposerChip(icon: "person.crop.circle", title: app.accountShortTitle(account), help: settings.accountChipHelp,
+                ComposerChip(icon: "person.crop.circle", title: AccountName.short(account, accounts: settings.logins.accounts), help: settings.accountChipHelp,
                              badge: settings.accountBadge, popover: {
                     NSHostingController(rootView: AccountPickerView(threadId: thread?.id, close: $0).environment(app))
                 }, openRequest: app.accountPickerRequest)
@@ -92,9 +120,10 @@ struct ComposerControls: View {
             Spacer(minLength: zoomed(8))
             SendButton(running: running, canSend: canSend, sending: sending, onSend: onSend, onStop: { app.interrupt() })
                 .layoutPriority(1)
-                // Right-click send for later, as Mail and Slack do.
+                // Right-click send for later, as Mail and Slack do. Not on
+                // another Mac's thread: its schedules are made from there.
                 .contextMenu {
-                    if app.schedulesSupported { Button("Schedule…", systemImage: "clock", action: onSchedule) }
+                    if app.schedulesSupported, remote == nil { Button("Schedule…", systemImage: "clock", action: onSchedule) }
                 }
         }
         .frame(height: SendButton.size)
@@ -109,25 +138,34 @@ struct ComposerControls: View {
 struct ThreadSettings {
     let app: AppModel
     let thread: ThreadSummary?
+    /// The logins its pickers offer: the thread's runner's (another Mac's
+    /// for one of its threads), this Mac's otherwise.
+    let logins: RunnerLogins
 
-    var cwd: String { thread?.cwd ?? app.newThreadCwd ?? app.defaults.cwd }
+    init(app: AppModel, thread: ThreadSummary?) {
+        self.app = app
+        self.thread = thread
+        logins = app.logins(for: thread) ?? RunnerLogins(accounts: app.accounts, pools: app.pools, defaults: app.defaults)
+    }
+
+    var cwd: String { thread?.cwd ?? app.newThreadCwd ?? logins.defaults.cwd }
     /// A new thread's is the one with the most room until Mike picks one.
     var account: String { thread?.accountId ?? app.newThreadAccountId }
     /// "claude" or "codex": the account's, which a thread's own follows.
-    var provider: String { thread?.provider ?? app.provider(ofAccount: account) }
+    var provider: String { thread?.provider ?? (logins.account(account)?.provider ?? "claude") }
     var model: String? { thread == nil ? app.lastModels[provider] : thread?.model }
     var effort: String? { thread == nil ? app.lastEfforts[provider] : thread?.effort }
     var ask: Bool { thread.map { $0.permissionMode == .ask } ?? app.newThreadAsk }
 
     /// What the account's CLI offers, once the runner has asked it.
-    var choices: [ModelChoice] { app.account(account)?.models ?? [] }
+    var choices: [ModelChoice] { logins.account(account)?.models ?? [] }
 
     /// The model a thread with none of its own runs on: the runner's
     /// default for a new thread, else the account's. For an open thread the
     /// last turn is the truth, and it already includes the runner's default.
     var defaultModel: String? {
-        if let thread { return ComposerChips.resolvedModel(thread.modelInUse, app.account(thread.accountId)?.defaultModel) }
-        return ComposerChips.resolvedModel(app.defaults.model(for: provider), app.account(account)?.defaultModel)
+        if let thread { return ComposerChips.resolvedModel(thread.modelInUse, logins.account(thread.accountId)?.defaultModel) }
+        return ComposerChips.resolvedModel(logins.defaults.model(for: provider), logins.account(account)?.defaultModel)
     }
 
     /// The model the chip shows, resolved; nil only before the runner has
@@ -139,21 +177,21 @@ struct ThreadSettings {
     /// default for a new thread, the account's, the model's).
     var effectiveEffort: String? {
         effort ?? thread?.effortInUse ?? ModelPicker.impliedEffort(
-            model: effectiveModel, choices: choices, account: app.account(account),
-            runnerDefault: thread == nil ? app.defaults.efforts[provider] : nil)
+            model: effectiveModel, choices: choices, account: logins.account(account),
+            runnerDefault: thread == nil ? logins.defaults.efforts[provider] : nil)
     }
 
     /// The account chip's "· 12%" or "Limit reached".
-    var accountBadge: AccountUsageText.ChipBadge? { AccountUsageText.chipBadge(app.account(account)?.usage) }
+    var accountBadge: AccountUsageText.ChipBadge? { AccountUsageText.chipBadge(logins.account(account)?.usage) }
 
     /// The full sentence: the address, its note, and the room left.
     var accountChipHelp: String {
-        AccountUsageText.tooltip(app.account(account), fallback: app.accountTitle(account), now: app.now)
+        AccountUsageText.tooltip(logins.account(account), fallback: (logins.account(account).map(AccountName.title) ?? account), now: app.now)
     }
 
     /// The account picker's sections and its last line.
-    var accountSections: [AccountMenu.Section] { AccountMenu.sections(app.accounts, selected: account, now: app.now) }
-    var accountFooter: String? { AccountUsageText.sourceLine(app.accounts, now: app.now) }
+    var accountSections: [AccountMenu.Section] { AccountMenu.sections(logins.accounts, selected: account, now: app.now) }
+    var accountFooter: String? { AccountUsageText.sourceLine(logins.accounts, now: app.now) }
     func accountLines() -> [String] { AccountMenu.lines(accountSections, footer: accountFooter) }
 
     /// The pool's own icon in front of the chip, so which pool a thread is
@@ -162,7 +200,7 @@ struct ThreadSettings {
     var modelChipIcon: String {
         guard usesPools else { return "sparkle" }
         guard let pool else { return "person.crop.circle" }
-        let symbol = Pools.symbol(pool, accounts: app.accounts)
+        let symbol = Pools.symbol(pool, accounts: logins.accounts)
         return ProjectIconImages.symbolExists(symbol) ? symbol : "square.stack"
     }
 
@@ -172,14 +210,14 @@ struct ThreadSettings {
     /// or a pinned login's own.
     var modelChipBadge: AccountUsageText.ChipBadge? {
         guard usesPools else { return nil }
-        if let pool { return Pools.chipBadge(pool, accounts: app.accounts) }
+        if let pool { return Pools.chipBadge(pool, accounts: logins.accounts) }
         return accountBadge
     }
 
     var modelChipHelp: String {
         var parts: [String] = []
         if let pool { parts.append("\(pool.title) pool") }
-        else if usesPools { parts.append("Pinned to \(app.accountTitle(account))") }
+        else if usesPools { parts.append("Pinned to \((logins.account(account).map(AccountName.title) ?? account))") }
         if let model { parts.append(model) } else if let defaultModel { parts.append("\(defaultModel), the default") } else { parts.append("The account's default model") }
         if let effort { parts.append("\(ComposerChips.effortTitle(effort).lowercased()) effort") }
         else if let level = thread?.effortInUse { parts.append("\(level) effort, the model's own level") }
@@ -213,7 +251,7 @@ struct ThreadSettings {
         let current = cwd
         for folder in recentFolders(including: current) {
             let item = ActionMenuItem(folder.abbreviatingHome, checked: folder == current) { setCwd(folder) }
-            if !ComposerChips.showsFolder(folder, defaultFolder: app.defaults.cwd) { item.subtitle = "Default" }
+            if !ComposerChips.showsFolder(folder, defaultFolder: logins.defaults.cwd) { item.subtitle = "Default" }
             menu.addItem(item)
         }
         menu.addItem(.separator())
@@ -223,8 +261,8 @@ struct ThreadSettings {
 
     /// The providers in the picker's rail, and which column opens: the
     /// account's own provider.
-    var providers: [ModelPicker.Provider] { ModelPicker.providers(app.accounts) }
-    var providerId: String { app.account(account)?.provider ?? "claude" }
+    var providers: [ModelPicker.Provider] { ModelPicker.providers(logins.accounts) }
+    var providerId: String { logins.account(account)?.provider ?? "claude" }
 
     /// The account whose models a provider's column lists: the thread's
     /// own when it's on that provider, else the provider's first.
@@ -241,8 +279,8 @@ struct ThreadSettings {
             return ModelPicker.rows(choices: [], defaultId: nil, selected: nil, query: query)
         }
         let own = listed == account
-        let choices = app.account(listed)?.models ?? []
-        let defaultId = own ? defaultModel : (app.defaults.model(for: providerId) ?? app.account(listed)?.defaultModel)
+        let choices = logins.account(listed)?.models ?? []
+        let defaultId = own ? defaultModel : (logins.defaults.model(for: providerId) ?? logins.account(listed)?.defaultModel)
         return ModelPicker.rows(choices: choices, defaultId: defaultId, selected: own ? effectiveModel : nil, query: query, provider: providerId)
     }
 
@@ -253,7 +291,7 @@ struct ThreadSettings {
 
     /// The runner has pools: the rail lists them, and the login is the
     /// runner's to pick unless the thread is pinned.
-    var usesPools: Bool { app.usesPools }
+    var usesPools: Bool { (app.poolsSupported && !logins.pools.isEmpty) }
 
     /// The thread's pool, or the one a new thread starts on. Nil when it's
     /// pinned to a login (or there are no pools). A thread whose pool has
@@ -271,7 +309,7 @@ struct ThreadSettings {
     /// pinned login's name. Nil without pools (the account chip says it).
     var owner: String? {
         guard usesPools else { return nil }
-        return pool?.title ?? AccountName.login(account, accounts: app.accounts)
+        return pool?.title ?? AccountName.login(account, accounts: logins.accounts)
     }
 
     /// The rail's column for a pinned thread: its own login's models, with
@@ -284,7 +322,7 @@ struct ThreadSettings {
         guard usesPools else {
             return providers.map { ModelPicker.Column(id: $0.id, title: $0.title, symbol: ModelPicker.providerSymbol($0.id)) }
         }
-        return app.pools.map { ModelPicker.Column(id: $0.id, title: $0.title, subtitle: Pools.railSubtitle($0, accounts: app.accounts), logins: Pools.logins($0, accounts: app.accounts).count) }
+        return logins.pools.map { ModelPicker.Column(id: $0.id, title: $0.title, subtitle: Pools.railSubtitle($0, accounts: logins.accounts), logins: Pools.logins($0, accounts: logins.accounts).count) }
     }
 
     /// The column the picker opens on.
@@ -299,15 +337,15 @@ struct ThreadSettings {
     /// a plain list until a model there is picked.
     func sections(for columnId: String, query: String = "") -> [ModelPicker.Section] {
         guard usesPools else { return [ModelPicker.Section(id: columnId, rows: rows(for: columnId, query: query))] }
-        guard let shown = app.pool(columnId) else {
+        guard let shown = logins.pool(columnId) else {
             return [ModelPicker.Section(id: provider, rows: ModelPicker.rows(choices: choices, defaultId: defaultModel, selected: effectiveModel, query: query, provider: provider))]
         }
-        let providers = Pools.providers(shown, accounts: app.accounts)
+        let providers = Pools.providers(shown, accounts: logins.accounts)
         return providers.compactMap { providerId -> ModelPicker.Section? in
             let own = shown.id == pool?.id && providerId == provider
-            let listed = own ? account : Pools.pickLogin(shown, accounts: app.accounts, provider: providerId, current: app.lastAccountId(provider: providerId))
+            let listed = own ? account : Pools.pickLogin(shown, accounts: logins.accounts, provider: providerId, current: app.lastAccountId(provider: providerId))
             let listedAccount = listed.flatMap(app.account)
-            let defaultId = own ? defaultModel : (app.defaults.model(for: providerId) ?? listedAccount?.defaultModel)
+            let defaultId = own ? defaultModel : (logins.defaults.model(for: providerId) ?? listedAccount?.defaultModel)
             let rows = ModelPicker.rows(choices: listedAccount?.models ?? [], defaultId: defaultId, selected: own ? effectiveModel : nil,
                                         query: query, provider: providerId)
             if rows.isEmpty, !query.isEmpty { return nil }
@@ -327,11 +365,11 @@ struct ThreadSettings {
     }
 
     /// "Pinned to gmail", for a pinned thread.
-    var pinnedLine: String? { isPinned ? "Pinned to " + AccountName.login(account, accounts: app.accounts) : nil }
+    var pinnedLine: String? { isPinned ? "Pinned to " + AccountName.login(account, accounts: logins.accounts) : nil }
 
     /// Every login with its room, the pinned one ticked, for the
     /// automation's pin menu. It reads the thread live, so the tick can't go stale.
-    var pinSections: [AccountMenu.Section] { AccountMenu.sections(app.accounts, selected: isPinned ? account : "", now: app.now) }
+    var pinSections: [AccountMenu.Section] { AccountMenu.sections(logins.accounts, selected: isPinned ? account : "", now: app.now) }
 
     func pin(_ accountId: String) {
         if let thread {
@@ -478,7 +516,7 @@ struct ThreadSettings {
     private func recentFolders(including cwd: String) -> [String] {
         var seen = Set<String>()
         var folders: [String] = []
-        for folder in [cwd, app.defaults.cwd] + app.threads.values.filter({ !$0.isRemote }).sorted(by: { $0.lastActivityAt > $1.lastActivityAt }).map(\.cwd) {
+        for folder in [cwd, logins.defaults.cwd] + app.threads.values.filter({ !$0.isRemote }).sorted(by: { $0.lastActivityAt > $1.lastActivityAt }).map(\.cwd) {
             guard !folder.isEmpty, seen.insert(folder).inserted else { continue }
             folders.append(folder)
             if folders.count >= 8 { break }

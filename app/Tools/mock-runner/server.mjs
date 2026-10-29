@@ -439,6 +439,11 @@ async function handle(client, { id, method, params = {} }) {
 async function dispatch(client, method, p) {
   switch (method) {
     case 'hello':
+      // Bruce has two logins of its own and no pools, as the real one does,
+      // so the pickers on its threads plainly aren't this Mac's.
+      if (client.as) {
+        return { runnerVersion, protocol: 1, accounts: publicAccounts().filter((a) => a.id === 'claude-main' || a.id === 'codex-main'), defaults: { ...defaults, poolId: undefined }, clis, updates, pools: [] };
+      }
       return {
         runnerVersion, protocol: 1, accounts: publicAccounts(),
         defaults: oldRunner ? { ...defaults, poolId: undefined } : defaults, ...(oldRunner ? {} : { clis, updates, pools }),

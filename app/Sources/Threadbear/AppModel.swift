@@ -164,6 +164,11 @@ final class AppModel {
     /// The runner's pools (docs/pools-plan.md), in its order. Replaced whole
     /// by `pools.updated`.
     var pools: [Pool] = []
+    /// Other runners' logins (accounts, pools, defaults), by runner id, from
+    /// the hello their connection made and their accounts.updated and
+    /// pools.updated since: what the composer's pickers offer on one of
+    /// their threads (`logins(for:)`).
+    var remoteLogins: [String: RunnerLogins] = [:]
     /// The runner has pools. False for an older one, which sends none in
     /// hello: then the composer keeps its account chip and the picker's
     /// rail lists providers, as before.

@@ -51,6 +51,14 @@ extension AppModel {
 
     func route(_ threadId: String) -> ThreadRoute { ThreadRoute.of(threads[threadId], runners: remoteRunners) }
 
+    /// The logins a thread's pickers offer: its runner's. This Mac's for its
+    /// own threads and a new one; another runner's once its connection has
+    /// said hello, nil until then (the composer shows just that Mac's name).
+    func logins(for thread: ThreadSummary?) -> RunnerLogins? {
+        guard let runnerId = thread?.runnerId else { return RunnerLogins(accounts: accounts, pools: pools, defaults: defaults) }
+        return remoteLogins[runnerId]
+    }
+
     /// The runner one of another runner's threads lives on, if it's listed.
     func remoteRunner(of thread: ThreadSummary) -> RemoteRunner? {
         guard let id = thread.runnerId else { return nil }
@@ -168,6 +176,11 @@ extension AppModel {
             guard threads[threadId]?.runnerId == runnerId else { return }
             liveRemote.remove(threadId)
             forget(threadId)
+        // Its own logins, for the pickers on its threads.
+        case .accountsUpdated(let list):
+            remoteLogins[runnerId]?.accounts = list
+        case .poolsUpdated(let list):
+            remoteLogins[runnerId]?.pools = list
         default:
             break
         }
@@ -176,6 +189,12 @@ extension AppModel {
     private func remoteConnected(_ runnerId: String, _ client: RPCClient) {
         AppLog.write("connection", "connected to \(remoteName(runnerId))")
         Task {
+            // Its logins (accounts with their models, pools, defaults) fill
+            // the composer's pickers on its threads; its accounts.updated
+            // and pools.updated keep them current.
+            if let hello = try? await client.hello(version: Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "dev"), remoteClients.connected(runnerId) === client {
+                remoteLogins[runnerId] = RunnerLogins(hello: hello)
+            }
             // Its own summaries are fuller than the table's rows (seqs, the
             // open card, the permission), and its thread.updated keeps
             // them fresh while it's connected.

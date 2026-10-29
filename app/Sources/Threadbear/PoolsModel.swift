@@ -100,12 +100,13 @@ extension AppModel {
     /// the pool, which keeps it on that login. The protocol has no one call
     /// for "this pool, on that provider".
     func moveThread(_ threadId: String, toPool poolId: String, provider: String, model: String?) {
-        guard let client, let thread = threads[threadId], let pool = pool(poolId) else { return }
+        // Its runner's pools and logins: another Mac's for one of its threads.
+        guard let client = client(for: threadId), let thread = threads[threadId], let logins = logins(for: thread), let pool = logins.pool(poolId) else { return }
         remember(model: model, provider: provider)
         if thread.provider == provider {
             return update(threadId, ThreadUpdate(model: .some(model), poolId: .some(poolId)))
         }
-        guard let login = Pools.pickLogin(pool, accounts: accounts, provider: provider, current: lastAccountId(provider: provider)) else { return }
+        guard let login = Pools.pickLogin(pool, accounts: logins.accounts, provider: provider, current: lastAccountId(provider: provider)) else { return }
         var change = ThreadUpdate(accountId: login, model: .some(model))
         if let effort = lastEfforts[provider] { change.effort = .some(effort) }
         Task {
@@ -134,8 +135,8 @@ extension AppModel {
     /// Puts a pinned thread back in a pool: one that has its login, so it
     /// stays where it is until that login runs dry.
     func unpinThread(_ threadId: String) {
-        guard let thread = threads[threadId],
-              let target = Pools.unpinTarget(pools, accountId: thread.accountId, cwd: thread.cwd, home: NSHomeDirectory(), last: lastPoolId)
+        guard let thread = threads[threadId], let logins = logins(for: thread),
+              let target = Pools.unpinTarget(logins.pools, accountId: thread.accountId, cwd: thread.cwd, home: NSHomeDirectory(), last: lastPoolId)
         else { return }
         update(threadId, ThreadUpdate(poolId: .some(target)))
     }
