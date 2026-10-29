@@ -818,6 +818,37 @@ test('presence: sent at start, then only when it changes', async () => {
   await sync.stop();
 });
 
+test('presence: an async check (ioreg off the event loop) is awaited, and a failed one counts as away', async () => {
+  let answer: () => Promise<boolean> = async () => true;
+  const h = makeHarness();
+  const calls: Call[] = [];
+  const sync = new ConvexSync({
+    config: { enabled: true, url: 'https://x.convex.cloud', runnerId: 'r1' },
+    key: 'k',
+    runner: h.runner,
+    presence: () => answer(),
+    version: 'v',
+    startedAt: 'now',
+    clock: h.clock,
+    log: nullLogger,
+    post: async (kind, fn, args) => {
+      calls.push({ kind, fn, args });
+      return null;
+    },
+  });
+  const sent = () => calls.filter((c) => c.fn === 'sync:setPresence').map((c) => c.args.atMac);
+  sync.start();
+  await tick();
+  assert.deepEqual(sent(), [true]);
+  answer = async () => {
+    throw new Error('ioreg timed out');
+  };
+  h.clock.advance(PRESENCE_MS);
+  await tick();
+  assert.deepEqual(sent(), [true, false]);
+  await sync.stop();
+});
+
 test('at the Mac means the Mac app is connected and the keyboard or mouse was used lately', () => {
   assert.equal(isAtMac(true, 5_000), true);
   assert.equal(isAtMac(true, AT_MAC_IDLE_MS + 1), false, 'stepped away');

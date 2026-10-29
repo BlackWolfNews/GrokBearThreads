@@ -10,7 +10,7 @@
 // tried again until something it builds or checks changes on main (a fix
 // to a test counts, though it changes nothing that runs), and a tree whose
 // release crashed at startup isn't tried again until main changes.
-import { spawn, spawnSync } from 'node:child_process';
+import { execFile, spawn, spawnSync } from 'node:child_process';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -191,13 +191,38 @@ function git(cwd: string, args: string[]): string {
   return r.stdout.trim();
 }
 
+// git without blocking the event loop. syncClone runs every time main
+// moves, and its fetch, checkout and clean take many seconds while the
+// disk is busy (a render, a backup): run synchronously they froze every
+// thread and the app's requests for that long.
+function gitAsync(cwd: string, args: string[]): Promise<string> {
+  return new Promise((resolve, reject) => {
+    execFile('git', ['-C', cwd, ...args], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 }, (err, stdout, stderr) => {
+      if (err) reject(new Error(`git ${args.join(' ')} failed: ${String(stderr).trim() || err.message}`));
+      else resolve(stdout.trim());
+    });
+  });
+}
+
 // The object hashes of the release paths at `rev`, joined: the same formula
 // deploy.mjs writes as `tree` in release.json. Undefined when `rev` isn't
 // in the repo or holds none of them.
 export function releaseTreeAt(repo: string, prefix: string, rev: string): string | undefined {
   const r = spawnSync('git', ['-C', repo, 'ls-tree', rev, '--', ...RELEASE_PATHS.map((p) => prefix + p)], { encoding: 'utf8' });
   if (r.status !== 0) return undefined;
-  const hashes = r.stdout
+  return joinTreeHashes(r.stdout);
+}
+
+async function releaseTreeAtAsync(repo: string, prefix: string, rev: string): Promise<string | undefined> {
+  try {
+    return joinTreeHashes(await gitAsync(repo, ['ls-tree', rev, '--', ...RELEASE_PATHS.map((p) => prefix + p)]));
+  } catch {
+    return undefined;
+  }
+}
+
+function joinTreeHashes(lsTree: string): string | undefined {
+  const hashes = lsTree
     .split('\n')
     .filter(Boolean)
     .map((line) => line.split(/\s+/)[2]);
@@ -210,14 +235,14 @@ export function releaseTreeAt(repo: string, prefix: string, rev: string): string
 // and dropped when package-lock.json changed so they install afresh.
 export async function syncClone(checkout: string, prefix: string, dir: string): Promise<MainInfo> {
   if (!fs.existsSync(path.join(dir, '.git'))) {
-    fs.rmSync(dir, { recursive: true, force: true });
-    fs.mkdirSync(path.dirname(dir), { recursive: true });
-    git(path.dirname(dir), ['clone', '-q', '--no-checkout', checkout, dir]);
+    await fs.promises.rm(dir, { recursive: true, force: true });
+    await fs.promises.mkdir(path.dirname(dir), { recursive: true });
+    await gitAsync(path.dirname(dir), ['clone', '-q', '--no-checkout', checkout, dir]);
   }
-  git(dir, ['fetch', '-q', checkout, 'refs/heads/main']);
-  git(dir, ['checkout', '-q', '-B', 'main', 'FETCH_HEAD']);
+  await gitAsync(dir, ['fetch', '-q', checkout, 'refs/heads/main']);
+  await gitAsync(dir, ['checkout', '-q', '-B', 'main', 'FETCH_HEAD']);
   const modules = path.join(dir, prefix, 'node_modules');
-  git(dir, ['clean', '-qfdx', '-e', `${prefix}node_modules`]);
+  await gitAsync(dir, ['clean', '-qfdx', '-e', `${prefix}node_modules`]);
   const lockFile = path.join(dir, prefix, 'package-lock.json');
   // Beside the clone, not in it: git clean would take it out each time.
   const stamp = path.join(path.dirname(dir), 'installed-lock');
@@ -229,13 +254,18 @@ export async function syncClone(checkout: string, prefix: string, dir: string): 
     // first run
   }
   if (had !== lock) {
-    fs.rmSync(modules, { recursive: true, force: true });
+    await fs.promises.rm(modules, { recursive: true, force: true });
     fs.writeFileSync(stamp, lock + '\n');
   }
-  const tree = releaseTreeAt(dir, prefix, 'HEAD');
+  const tree = await releaseTreeAtAsync(dir, prefix, 'HEAD');
   if (!tree) throw new Error(`main in ${checkout} has no ${prefix}src to build`);
-  const buildTree = git(dir, ['rev-parse', `HEAD:${prefix.replace(/\/$/, '')}`]);
-  return { commit: git(dir, ['rev-parse', 'HEAD']), short: git(dir, ['rev-parse', '--short', 'HEAD']), subject: git(dir, ['log', '-1', '--format=%s']), tree, buildTree };
+  const buildTree = await gitAsync(dir, ['rev-parse', `HEAD:${prefix.replace(/\/$/, '')}`]);
+  const [commit, short, subject] = await Promise.all([
+    gitAsync(dir, ['rev-parse', 'HEAD']),
+    gitAsync(dir, ['rev-parse', '--short', 'HEAD']),
+    gitAsync(dir, ['log', '-1', '--format=%s']),
+  ]);
+  return { commit, short, subject, tree, buildTree };
 }
 
 // deploy.mjs from the clone, stopping after it has pointed current at the

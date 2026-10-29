@@ -54,6 +54,7 @@ import { execFile, spawn } from 'node:child_process';
 import type { Action, Hook, ImageRef, Panel, PanelItem, PatchInfo } from './protocol.ts';
 import { LIMITS } from './protocol.ts';
 import { imageRefFor } from './media.ts';
+import { FolderCache } from './folder-cache.ts';
 
 export const CONVEX_DASHBOARD = 'https://dashboard.convex.dev';
 // `npx convex dev` on an anonymous (no account) deployment serves the
@@ -87,12 +88,16 @@ export async function loadPatchSet(
   cache: PatchCache = new Map(),
   projectFolders: ProjectFolder[] = [],
   toolFolders: string[] = [],
+  dirs: FolderCache = new FolderCache(),
 ): Promise<PatchSet> {
   const set: PatchSet = { panels: [], actions: [], hooks: [], patches: [] };
   const roots = projectRoots(cwd, projectFolders);
+  // Everything below reads the disk through dirs, synchronously; this
+  // reads it first without blocking, so those reads are all hits.
+  await warmPatchReads(dirs, cwd, home, roots, toolFolders);
   // Built in first, so their panels come first: the thread's own, then
   // its projects'.
-  for (const b of builtins(cwd, home, roots)) addPatch(set, b);
+  for (const b of builtins(cwd, home, roots, dirs)) addPatch(set, b);
   // Then the files: the thread's own chain (home's folder first), then
   // each project folder's chain, then the other projects' tool patches,
   // each patch folder once. A tool patch goes wherever its name is found,
@@ -100,26 +105,26 @@ export async function loadPatchSet(
   const seen = new Set<string>();
   const add = (loaded: LoadedPatch, root?: ProjectFolder) => {
     if (!loaded.appliesTo) return addPatch(set, inFolder(loaded, root));
-    const placed = placeTool(loaded, cwd, home, roots);
+    const placed = placeTool(loaded, cwd, home, roots, dirs);
     if (placed) addPatch(set, placed);
   };
-  for (const { dir, source } of patchDirs(cwd, home)) {
+  for (const { dir, source } of patchDirs(cwd, home, dirs)) {
     seen.add(dir);
-    for (const file of patchFiles(dir)) add(await loadPatchFile(file, source, cache));
+    for (const file of patchFiles(dir, dirs)) add(await loadPatchFile(file, source, cache, dirs));
   }
   for (const root of roots) {
-    for (const { dir, source } of patchDirs(root.folder, home)) {
+    for (const { dir, source } of patchDirs(root.folder, home, dirs)) {
       if (seen.has(dir) || source === 'home') continue;
       seen.add(dir);
-      for (const file of patchFiles(dir)) add(await loadPatchFile(file, source, cache), root);
+      for (const file of patchFiles(dir, dirs)) add(await loadPatchFile(file, source, cache, dirs), root);
     }
   }
   for (const folder of toolFolders) {
     const dir = path.join(path.resolve(folder), PATCH_DIR);
-    if (seen.has(dir) || !isDir(dir)) continue;
+    if (seen.has(dir) || !dirs.isDir(dir)) continue;
     seen.add(dir);
-    for (const file of patchFiles(dir)) {
-      const loaded = await loadPatchFile(file, 'project', cache);
+    for (const file of patchFiles(dir, dirs)) {
+      const loaded = await loadPatchFile(file, 'project', cache, dirs);
       // Only the tools: the rest of another project's patches are for
       // threads in that project.
       if (loaded.appliesTo) add(loaded);
@@ -129,20 +134,38 @@ export async function loadPatchSet(
   return set;
 }
 
+// Reads, off the event loop, what loadPatchSet's walk will ask dirs for:
+// each folder from the thread's own (and its projects') up to home, the
+// tool patches' project folders, their .threadbear/patches, the patch
+// files' times and the Convex projects' .env files.
+async function warmPatchReads(dirs: FolderCache, cwd: string, home: string, roots: ProjectFolder[], toolFolders: string[]): Promise<void> {
+  const chain = new Set<string>([path.resolve(home)]);
+  for (const start of [cwd, ...roots.map((r) => r.folder)]) {
+    findUp(start, home, (d) => {
+      chain.add(d);
+      return false;
+    });
+  }
+  const folders = [...chain, ...toolFolders.map((f) => path.resolve(f))];
+  await dirs.warmFolders(folders);
+  const dotDirs = folders.map((d) => path.join(d, path.dirname(PATCH_DIR))).filter((d) => dirs.isDir(d));
+  await dirs.warmFolders(dotDirs);
+  const patchFolders = dotDirs.map((d) => path.join(d, path.basename(PATCH_DIR))).filter((d) => dirs.isDir(d));
+  await dirs.warmFolders(patchFolders);
+  await Promise.all([
+    dirs.warmMtimes(patchFolders.flatMap((d) => patchFiles(d, dirs))),
+    dirs.warmTexts([...chain].filter((d) => isConvexProject(d, dirs)).flatMap((d) => ENV_FILES.map((f) => path.join(d, f)))),
+  ]);
+}
+
 // Where a tool patch applies for a thread: the first folder from the
 // thread's own up to home holding a name its globs match, else the same
 // from each of its projects' folders. Undefined when there's none, and the
 // patch isn't the thread's at all.
-function placeTool(loaded: LoadedPatch, cwd: string, home: string, roots: ProjectFolder[]): LoadedPatch | undefined {
+function placeTool(loaded: LoadedPatch, cwd: string, home: string, roots: ProjectFolder[], dirs: FolderCache): LoadedPatch | undefined {
   const globs = loaded.appliesTo!;
   const matching = (dir: string): string[] => {
-    let names: string[];
-    try {
-      names = fs.readdirSync(dir);
-    } catch {
-      return [];
-    }
-    return names.filter((n) => !n.startsWith('.') && globs.some((g) => path.matchesGlob(n, g))).sort();
+    return dirs.names(dir).filter((n) => !n.startsWith('.') && globs.some((g) => path.matchesGlob(n, g))).sort();
   };
   for (const start of [{ folder: cwd } as { folder: string; projectId?: string }, ...roots]) {
     let names: string[] = [];
@@ -174,16 +197,16 @@ function projectRoots(cwd: string, projectFolders: ProjectFolder[]): ProjectFold
 
 // The built-in patches: the thread's folder's, then each project folder's
 // that isn't the same project as one already found.
-function builtins(cwd: string, home: string, roots: ProjectFolder[]): LoadedPatch[] {
+function builtins(cwd: string, home: string, roots: ProjectFolder[], dirs: FolderCache): LoadedPatch[] {
   const out: LoadedPatch[] = [];
   const found = new Set<string>();
   const add = (start: string, root?: ProjectFolder) => {
-    const convexDir = findUp(start, home, isConvexProject);
+    const convexDir = findUp(start, home, (d) => isConvexProject(d, dirs));
     if (convexDir && !found.has('convex@' + convexDir)) {
       found.add('convex@' + convexDir);
-      out.push(inFolder({ info: { id: 'convex', source: 'builtin' }, panels: [convexPanel(convexDir)], actions: [], hooks: [] }, root, convexDir));
+      out.push(inFolder({ info: { id: 'convex', source: 'builtin' }, panels: [convexPanel(convexDir, dirs)], actions: [], hooks: [] }, root, convexDir));
     }
-    const xcodeDir = findUp(start, home, hasXcodeProject);
+    const xcodeDir = findUp(start, home, (d) => hasXcodeProject(d, dirs));
     if (xcodeDir && !found.has('xcode@' + xcodeDir)) {
       found.add('xcode@' + xcodeDir);
       out.push(inFolder({ info: { id: 'xcode', source: 'builtin' }, panels: [simulatorPanel(xcodeDir)], actions: [], hooks: [] }, root, xcodeDir));
@@ -270,10 +293,10 @@ export function isInside(dir: string, parent: string): boolean {
 // The patch folders that apply to `cwd`: the home one, then each folder
 // from the top down to `cwd` itself (a deeper file wins a clash of ids, as
 // the later one in the list).
-export function patchDirs(cwd: string, home: string): { dir: string; source: 'home' | 'project' }[] {
+export function patchDirs(cwd: string, home: string, dirs: FolderCache = new FolderCache()): { dir: string; source: 'home' | 'project' }[] {
   const out: { dir: string; source: 'home' | 'project' }[] = [];
   const homeDir = path.join(path.resolve(home), PATCH_DIR);
-  if (isDir(homeDir)) out.push({ dir: homeDir, source: 'home' });
+  if (dirs.isDir(homeDir)) out.push({ dir: homeDir, source: 'home' });
   const chain: string[] = [];
   findUp(cwd, home, (dir) => {
     chain.unshift(dir);
@@ -281,32 +304,23 @@ export function patchDirs(cwd: string, home: string): { dir: string; source: 'ho
   });
   for (const dir of chain) {
     const patchDir = path.join(dir, PATCH_DIR);
-    if (patchDir !== homeDir && isDir(patchDir)) out.push({ dir: patchDir, source: 'project' });
+    if (patchDir !== homeDir && dirs.isDir(patchDir)) out.push({ dir: patchDir, source: 'project' });
   }
   return out;
 }
 
-function patchFiles(dir: string): string[] {
-  let names: string[];
-  try {
-    names = fs.readdirSync(dir);
-  } catch {
-    return [];
-  }
-  return names
+function patchFiles(dir: string, dirs: FolderCache): string[] {
+  return dirs
+    .names(dir)
     .filter((n) => PATCH_EXTENSIONS.includes(path.extname(n)) && !n.endsWith('.d.ts') && !n.startsWith('.'))
     .sort()
     .map((n) => path.join(dir, n));
 }
 
-async function loadPatchFile(file: string, source: 'home' | 'project', cache: PatchCache): Promise<LoadedPatch> {
+async function loadPatchFile(file: string, source: 'home' | 'project', cache: PatchCache, dirs: FolderCache = new FolderCache()): Promise<LoadedPatch> {
   const id = path.basename(file, path.extname(file));
-  let mtimeMs: number;
-  try {
-    mtimeMs = fs.statSync(file).mtimeMs;
-  } catch (e) {
-    return { info: { id, source, file, error: String((e as Error).message ?? e) }, panels: [], actions: [], hooks: [] };
-  }
+  const mtimeMs = dirs.mtimeMs(file);
+  if (mtimeMs === undefined) return { info: { id, source, file, error: `can't read ${file}` }, panels: [], actions: [], hooks: [] };
   const hit = cache.get(file);
   if (hit && hit.mtimeMs === mtimeMs) return hit.loaded;
   let loaded: LoadedPatch;
@@ -460,9 +474,9 @@ export function readPatchModule(id: string, source: 'home' | 'project', file: st
 // worktrees are a repo's own choice. `folder` holds the `.threadbear/`.
 export type WorktreePatch = WorktreeConfig & { patch: string; file: string; folder: string };
 
-export async function findWorktreePatch(cwd: string, home: string = os.homedir(), cache: PatchCache = new Map()): Promise<WorktreePatch | undefined> {
-  for (const file of worktreePatchFiles(cwd, home)) {
-    const loaded = await loadPatchFile(file, 'project', cache);
+export async function findWorktreePatch(cwd: string, home: string = os.homedir(), cache: PatchCache = new Map(), dirs: FolderCache = new FolderCache()): Promise<WorktreePatch | undefined> {
+  for (const file of worktreePatchFiles(cwd, home, dirs)) {
+    const loaded = await loadPatchFile(file, 'project', cache, dirs);
     if (loaded.worktree && !loaded.info.error) {
       return { ...loaded.worktree, patch: loaded.info.id, file, folder: path.dirname(path.dirname(path.dirname(file))) };
     }
@@ -472,11 +486,11 @@ export async function findWorktreePatch(cwd: string, home: string = os.homedir()
 
 // The patch files findWorktreePatch would read, nearest folder first.
 // Synchronous, so a thread with none can start without waiting.
-export function worktreePatchFiles(cwd: string, home: string = os.homedir()): string[] {
-  return patchDirs(cwd, home)
+export function worktreePatchFiles(cwd: string, home: string = os.homedir(), dirs: FolderCache = new FolderCache()): string[] {
+  return patchDirs(cwd, home, dirs)
     .filter((d) => d.source === 'project')
     .reverse()
-    .flatMap((d) => patchFiles(d.dir));
+    .flatMap((d) => patchFiles(d.dir, dirs));
 }
 
 // Whether a turn's edits make a hook run: no filter, or one of the edited
@@ -525,36 +539,32 @@ function firstLine(e: unknown): string {
 
 // The built-in set alone, synchronous: what the first summary of a thread
 // shows before its patch files have been read.
-export function projectPanels(cwd: string, home: string = os.homedir(), projectFolders: ProjectFolder[] = []): Panel[] {
+export function projectPanels(cwd: string, home: string = os.homedir(), projectFolders: ProjectFolder[] = [], dirs: FolderCache = new FolderCache()): Panel[] {
   const set: PatchSet = { panels: [], actions: [], hooks: [], patches: [] };
-  for (const b of builtins(cwd, home, projectRoots(cwd, projectFolders))) addPatch(set, b);
+  for (const b of builtins(cwd, home, projectRoots(cwd, projectFolders), dirs)) addPatch(set, b);
   nameClashingPanels(set, cwd);
   return set.panels;
 }
 
 // The Convex dashboard for the project's deployment. `.env.local` (what
 // `convex dev` writes) wins over `.env`.
-function convexPanel(dir: string): Panel {
-  const deployment = readEnvValue(dir, 'CONVEX_DEPLOYMENT');
+function convexPanel(dir: string, dirs: FolderCache): Panel {
+  const deployment = readEnvValue(dir, 'CONVEX_DEPLOYMENT', dirs);
   const { url, note } = convexDashboardUrl(deployment);
   const panel: Panel = { id: 'convex.dashboard', title: 'Convex', kind: 'url', url, icon: 'cylinder.split.1x2', patch: 'convex' };
   if (note) panel.note = note;
-  const embed = convexEmbed(deployment, readEnvWhere(dir, (name) => /(^|_)CONVEX_URL$/.test(name)));
-  if (embed) panel.convex = { ...embed, ...convexProjectOf(dir) };
+  const embed = convexEmbed(deployment, readEnvWhere(dir, (name) => /(^|_)CONVEX_URL$/.test(name), dirs));
+  if (embed) panel.convex = { ...embed, ...convexProjectOf(dir, dirs) };
   return panel;
 }
 
 // The team and project `convex dev` notes after CONVEX_DEPLOYMENT
 // ("dev:happy-otter-123 # team: mike, project: walkies"), so the panel can
 // say which project a deployment belongs to: its name alone doesn't.
-export function convexProjectOf(dir: string): { team?: string; project?: string } {
-  for (const file of ['.env.local', '.env']) {
-    let text: string;
-    try {
-      text = fs.readFileSync(path.join(dir, file), 'utf8');
-    } catch {
-      continue;
-    }
+export function convexProjectOf(dir: string, dirs: FolderCache = new FolderCache()): { team?: string; project?: string } {
+  for (const file of ENV_FILES) {
+    const text = dirs.text(path.join(dir, file));
+    if (text === undefined) continue;
     const line = text.split(/\r?\n/).find((l) => /^\s*(?:export\s+)?CONVEX_DEPLOYMENT\s*=/.test(l));
     if (!line) continue;
     const m = /#\s*team:\s*([\w-]+)\s*,\s*project:\s*([\w-]+)/.exec(line);
@@ -603,23 +613,17 @@ export function convexDashboardUrl(deployment: string | undefined): { url: strin
 // A folder with its functions in convex/ and a package.json or convex.json
 // beside them. A bare folder called convex isn't enough: ~/dev/convex is a
 // folder of repos, and every thread under ~/dev got a dashboard panel.
-export function isConvexProject(dir: string): boolean {
-  if (!isDir(path.join(dir, 'convex'))) return false;
-  return fs.existsSync(path.join(dir, 'package.json')) || fs.existsSync(path.join(dir, 'convex.json'));
+export function isConvexProject(dir: string, dirs: FolderCache = new FolderCache()): boolean {
+  if (!dirs.isDir(path.join(dir, 'convex'))) return false;
+  return dirs.exists(path.join(dir, 'package.json')) || dirs.exists(path.join(dir, 'convex.json'));
 }
 
 function simulatorPanel(dir: string): Panel {
   return { id: 'xcode.simulator', title: 'Simulator', kind: 'image', icon: 'iphone', patch: 'xcode', note: path.basename(dir) };
 }
 
-function hasXcodeProject(dir: string): boolean {
-  let names: string[];
-  try {
-    names = fs.readdirSync(dir);
-  } catch {
-    return false;
-  }
-  return names.some((n) => n.endsWith('.xcodeproj') || n.endsWith('.xcworkspace'));
+function hasXcodeProject(dir: string, dirs: FolderCache): boolean {
+  return dirs.names(dir).some((n) => n.endsWith('.xcodeproj') || n.endsWith('.xcworkspace'));
 }
 
 // The first folder from `start` up to and including `home` (or the root)
@@ -636,30 +640,21 @@ export function findUp(start: string, home: string, test: (dir: string) => boole
   }
 }
 
-function isDir(p: string): boolean {
-  try {
-    return fs.statSync(p).isDirectory();
-  } catch {
-    return false;
-  }
-}
-
 // A dotenv value by name, unquoted; `.env.local` then `.env`. Only the one
-// line is read and returned, never the file: the rest may hold secrets.
-export function readEnvValue(dir: string, name: string): string | undefined {
-  return readEnvWhere(dir, (n) => n === name);
+// line is returned, never the file: the rest may hold secrets (a runner's
+// FolderCache keeps the text in memory for a few seconds, nowhere else).
+const ENV_FILES = ['.env.local', '.env'];
+
+export function readEnvValue(dir: string, name: string, dirs: FolderCache = new FolderCache()): string | undefined {
+  return readEnvWhere(dir, (n) => n === name, dirs);
 }
 
 // The first value whose name passes `test`: CONVEX_URL is VITE_CONVEX_URL,
 // NEXT_PUBLIC_CONVEX_URL and so on, depending on the framework.
-export function readEnvWhere(dir: string, test: (name: string) => boolean): string | undefined {
-  for (const file of ['.env.local', '.env']) {
-    let text: string;
-    try {
-      text = fs.readFileSync(path.join(dir, file), 'utf8');
-    } catch {
-      continue;
-    }
+export function readEnvWhere(dir: string, test: (name: string) => boolean, dirs: FolderCache = new FolderCache()): string | undefined {
+  for (const file of ENV_FILES) {
+    const text = dirs.text(path.join(dir, file));
+    if (text === undefined) continue;
     const value = parseEnvWhere(text, test);
     if (value !== undefined) return value;
   }

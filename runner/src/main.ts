@@ -227,7 +227,7 @@ async function main(): Promise<void> {
     config: { ...cfg.sync, runnerId: cfg.sync.runnerId ?? ensureRunnerId(cfg.home) },
     key: readSyncKey(cfg.home),
     statePath: `${cfg.home}/sync-state.json`,
-    presence: () => isAtMac(rpcServer?.appConnected() ?? false, hidIdleMs()),
+    presence: async () => isAtMac(rpcServer?.appConnected() ?? false, await hidIdleMs()),
     runner: {
       onNotification: (fn) => runner.onNotification(fn),
       list: (include) => runner.list(include),

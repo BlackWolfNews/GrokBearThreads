@@ -1228,10 +1228,12 @@ test('a thread in a Convex project has the dashboard panel; a folder change refr
   // the folder changes.
   fs.rmSync(path.join(project, 'convex'), { recursive: true });
   await tick();
+  await h.runner.patchesIdle();
   assert.equal(h.runner.get(thread.id).panels?.length, 1, 'still cached');
   h.clock.advance(16_000);
   h.runner.get(thread.id);
   await tick();
+  await h.runner.patchesIdle();
   assert.equal(h.runner.get(thread.id).panels, undefined, 'gone after the TTL');
   assert.equal(h.notes.filter((n) => n.method === 'thread.updated').at(-1)?.params.thread.panels, undefined, 'a summary went out for the change');
   fs.mkdirSync(path.join(project, 'convex'));
@@ -1290,6 +1292,7 @@ test('patch files give a thread actions; a command action runs in the folder and
   // The first summary has the built-in bits only; the files follow.
   assert.equal(thread.actions, undefined);
   await tick();
+  await h.runner.patchesIdle();
   const loaded = h.runner.get(thread.id);
   assert.deepEqual(checkSummary(loaded), []);
   assert.deepEqual(loaded.actions?.map((a) => a.id), ['tools.say-hi', 'tools.fail', 'tools.explain']);
@@ -1333,18 +1336,21 @@ test('a patch file written later is noticed within the TTL and said in the trans
   const h = makeHarness(undefined, {}, { panelsRoot: root, actionShell: ['/bin/sh', '-c'], actionTimeoutMs: 5000 });
   const { thread } = create(h, { cwd: project });
   await tick();
+  await h.runner.patchesIdle();
   assert.equal(h.runner.get(thread.id).patches, undefined);
   fs.mkdirSync(path.join(project, '.threadbear/patches'), { recursive: true });
   fs.writeFileSync(path.join(project, '.threadbear/patches/slow.ts'), `export default { actions: [{ title: "Wait", run: "sleep 1" }], panels: [{ title: "Docs", url: "http://localhost:8000" }] };`);
   h.clock.advance(16_000);
   h.runner.get(thread.id);
   await tick();
+  await h.runner.patchesIdle();
   const notes = h.events(thread.id).filter((e) => e.type === 'system.note').map((e) => e.text);
   assert.deepEqual(notes, ['Patch slow added: action Wait, panel Docs.']);
   assert.equal(h.runner.get(thread.id).panels?.[0].id, 'slow.docs');
 
   const first = h.runner.runAction(thread.id, 'slow.wait');
   await tick();
+  await h.runner.patchesIdle();
   await assert.rejects(h.runner.runAction(thread.id, 'slow.wait'), (e: RpcError) => e.code === -32020 && /already running/.test(e.message));
   assert.equal((await first).ok, true);
 
@@ -1356,6 +1362,7 @@ test('a patch file written later is noticed within the TTL and said in the trans
     h.clock.advance(16_000);
     h.runner.get(thread.id);
     await tick();
+    await h.runner.patchesIdle();
   }
   const after = h.events(thread.id).filter((e) => e.type === 'system.note').map((e) => e.text);
   assert.deepEqual(after.slice(1), ['Patch slow couldn\'t load: The default export should be an object with actions and/or panels.']);
@@ -1407,6 +1414,7 @@ test('a turn.end hook runs after a turn that edited a matching file, and a failu
   const h = makeHarness(undefined, {}, { panelsRoot: root, actionShell: ['/bin/sh', '-c'], actionTimeoutMs: 5000 });
   const { thread } = create(h, { cwd: project });
   await tick();
+  await h.runner.patchesIdle();
   assert.equal(h.runner.get(thread.id).hooks?.length, 2);
 
   // A turn that edits nothing: only the unfiltered hook runs, and says nothing.

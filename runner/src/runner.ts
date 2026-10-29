@@ -107,9 +107,11 @@ import {
   type PanelRender,
   type PatchCache,
   type PatchSet,
+  type ProjectFolder,
   type Screenshot,
   worktreePatchFiles,
 } from './patches.ts';
+import { FolderCache } from './folder-cache.ts';
 
 export type Notification =
   | { method: 'thread.updated'; params: { thread: ThreadSummary } }
@@ -377,6 +379,10 @@ const STARTUP_NOTICE_MS = 10 * 60_000;
 const WAKE_GRACE_MS = 15_000;
 // How long a thread's patches are kept before the folder is read again.
 const PATCHES_TTL_MS = 15_000;
+// How long a folder listing (and a patch file's time, a .env) read for one
+// thread's patches serves every other thread in the same folders
+// (folder-cache.ts). A turn ending forgets them, as it may have added one.
+const FOLDER_CACHE_MS = 10_000;
 // How often a thread whose patches have live state (when, badge) has it
 // read again by itself, while it's in the inbox: comments Mike leaves in
 // Tandem turn into a "Your turn" chip within this long.
@@ -422,6 +428,9 @@ export class Runner {
   private projects?: Projects;
   private activity = new Set<(a: ThreadActivity) => void>();
   private patchCache: PatchCache = new Map();
+  private folderCache: FolderCache;
+  private sharedPatchSets = new Map<string, { at: number; set: Promise<PatchSet> }>();
+  private patchReads = new Set<Promise<void>>();
   private threads = new Map<string, ThreadState>();
   private listeners = new Set<(n: Notification) => void>();
   private dirty = new Set<string>();
@@ -480,6 +489,7 @@ export class Runner {
     this.usage = deps.usage;
     this.pickAccount = deps.pickAccount ?? pickByRoom;
     this.clock = deps.clock;
+    this.folderCache = new FolderCache(FOLDER_CACHE_MS, () => this.clock.now());
     this.log = deps.log;
     this.defer = deps.defer ?? ((fn) => setImmediate(fn));
   }
@@ -1075,6 +1085,7 @@ export class Runner {
   // Sends these threads' summaries again; their patches are read again on
   // the way, since a project's folders may have changed.
   touchThreads(threadIds: string[]): void {
+    this.forgetFolders();
     for (const id of threadIds) {
       const st = this.threads.get(id);
       if (!st) continue;
@@ -2352,6 +2363,8 @@ export class Runner {
     const finished = rt.turn;
     rt.turn?.interruptTimer?.cancel();
     rt.turn = undefined;
+    // The turn may have added a patch file or a convex/ folder.
+    this.forgetFolders();
     // The folder's turn.end hooks, after a turn the agent finished itself
     // (not one the runner opened for a background task's approval).
     if (outcome === 'completed' && finished && !finished.auto && !this.stopping) void this.runHooks(st, finished);
@@ -3849,10 +3862,13 @@ export class Runner {
       rt.patches.at = -Infinity;
     }
     if (!rt.patches || rt.patches.cwd !== rec.cwd) {
+      // A thread moved to another folder looks at it afresh, rather than
+      // through what was read a few seconds ago (rare, unlike startup).
+      if (rt.patches) this.forgetFolders();
       // The built-in panels straight away; the files follow.
       let panels: PatchSet['panels'] = [];
       try {
-        panels = projectPanels(rec.cwd, this.panelsRoot, folders);
+        panels = projectPanels(rec.cwd, this.panelsRoot, folders, this.folderCache);
       } catch (e) {
         this.log.warn('could not read the folder for panels', { threadId: rec.id, cwd: rec.cwd, error: String(e) });
       }
@@ -3868,7 +3884,20 @@ export class Runner {
   // Reads the folder's patches again; a change sends a new summary, and a
   // patch file that has appeared or broken since the last read is said in
   // the transcript (not on the first read, which would say it at startup).
-  async refreshPatches(st: ThreadState): Promise<void> {
+  refreshPatches(st: ThreadState): Promise<void> {
+    const read = this.readPatches(st);
+    this.patchReads.add(read);
+    void read.finally(() => this.patchReads.delete(read));
+    return read;
+  }
+
+  // Resolves once no thread's patches are being read. For tests: the
+  // reads go to the disk asynchronously, so a tick or two isn't enough.
+  async patchesIdle(): Promise<void> {
+    while (this.patchReads.size) await Promise.allSettled([...this.patchReads]);
+  }
+
+  private async readPatches(st: ThreadState): Promise<void> {
     const { rec, rt } = st;
     const entry = rt.patches;
     if (!entry || entry.refreshing) return;
@@ -3878,7 +3907,7 @@ export class Runner {
     let base: PatchSet;
     let set: PatchSet;
     try {
-      base = await loadPatchSet(cwd, this.panelsRoot, this.patchCache, this.projects?.foldersFor(rec) ?? [], this.projects?.allFolders() ?? []);
+      base = await this.loadSharedPatchSet(cwd, this.projects?.foldersFor(rec) ?? [], this.projects?.allFolders() ?? []);
       set = await applyLive(base, { cwd, threadId: rec.id, run: (command, dir) => this.runPatchCommand(rec.id, command, dir) });
     } catch (e) {
       this.log.warn('could not read the folder for patches', { threadId: rec.id, cwd, error: String(e) });
@@ -3905,6 +3934,33 @@ export class Runner {
     entry.loaded = true;
     if (changed) this.markDirty(st);
     if (entry.live) this.armLivePoll();
+  }
+
+  // Threads in the same folder with the same projects get the same set, so
+  // it's read once per FOLDER_CACHE_MS for all of them: a couple of hundred
+  // threads share a few dozen folders, and each reading its own set again
+  // every 15 seconds kept the runner busy for seconds on a loaded Mac.
+  // Sets aren't changed once made (applyLive makes new ones), so sharing
+  // one is safe, as sharing a patch file's module already was.
+  private loadSharedPatchSet(cwd: string, folders: ProjectFolder[], allFolders: string[]): Promise<PatchSet> {
+    const key = JSON.stringify([cwd, folders, allFolders]);
+    const now = this.clock.now();
+    const hit = this.sharedPatchSets.get(key);
+    if (hit && now - hit.at < FOLDER_CACHE_MS) return hit.set;
+    const set = loadPatchSet(cwd, this.panelsRoot, this.patchCache, folders, allFolders, this.folderCache);
+    const entry = { at: now, set };
+    this.sharedPatchSets.set(key, entry);
+    set.catch(() => {
+      if (this.sharedPatchSets.get(key) === entry) this.sharedPatchSets.delete(key);
+    });
+    return set;
+  }
+
+  // Forgets what was read from the folders, after something that may have
+  // changed them: the next patch reads go to the disk.
+  private forgetFolders(): void {
+    this.folderCache.clear();
+    this.sharedPatchSets.clear();
   }
 
   // A command a patch's function runs (list panels, live state): in its

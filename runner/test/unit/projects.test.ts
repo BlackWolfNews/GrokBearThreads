@@ -211,11 +211,13 @@ test("a thread in a project gets its folders' patches, and their actions run in 
   const app = repo('dev/app', { '.threadbear/patches/tools.ts': `export default { actions: [{ title: "Where", run: "pwd" }] };` });
   const { thread } = create();
   await tick();
+  await h.runner.patchesIdle();
   assert.equal(h.runner.get(thread.id).actions, undefined);
   projects.create({ title: 'App', folders: [app], threadIds: [thread.id], by: 'mike' });
   // The new set loads in the background.
   h.runner.get(thread.id);
   await tick(6);
+  await h.runner.patchesIdle();
   const s = h.runner.get(thread.id);
   assert.deepEqual(checkSummary(s), []);
   assert.deepEqual(s.actions?.map((a) => [a.id, a.folder]), [['tools.where', app]]);

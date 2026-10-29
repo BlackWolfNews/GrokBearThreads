@@ -182,7 +182,7 @@ export type SyncDeps = {
   // Whether Mike is at this Mac (presence.ts), checked every PRESENCE_MS and
   // sent to the backend when it changes, so his phone only buzzes while he's
   // away. Left out, presence isn't sent.
-  presence?: () => boolean;
+  presence?: () => boolean | Promise<boolean>;
   // Where the sync keeps what it has sent once and for all (the full history
   // backfill), per deployment. Tests leave it out and get a backfill each start.
   statePath?: string;
@@ -504,7 +504,7 @@ export class ConvexSync {
     this.full = true;
     this.scheduleFlush();
     this.heartbeat();
-    this.checkPresence();
+    void this.checkPresence();
     this.listenForCommands();
     this.deps.log.info('convex sync on', { url: this.deps.config.url, runnerId: this.runnerId, name: this.name, commands: Boolean(this.deps.commands) });
   }
@@ -1069,14 +1069,16 @@ export class ConvexSync {
 
   // Sends presence when it changes (and once at start); a failed send is
   // tried again on the next check.
-  private checkPresence(): void {
+  private async checkPresence(): Promise<void> {
     if (!this.running || !this.deps.presence) return;
     let atMac: boolean;
     try {
-      atMac = this.deps.presence();
+      atMac = await this.deps.presence();
     } catch {
       atMac = false;
     }
+    // Stopped while the check ran (ioreg can take seconds on a busy Mac).
+    if (!this.running) return;
     if (atMac !== this.sentAtMac) {
       void this.post('mutation', 'sync:setPresence', { key: this.deps.key, runnerId: this.runnerId, atMac }).then(
         () => {
@@ -1085,7 +1087,7 @@ export class ConvexSync {
         (e) => this.deps.log.debug('convex presence failed', { error: String(e) }),
       );
     }
-    this.presenceTimer = this.deps.clock.setTimeout(() => this.checkPresence(), PRESENCE_MS);
+    this.presenceTimer = this.deps.clock.setTimeout(() => void this.checkPresence(), PRESENCE_MS);
   }
 
   private heartbeat(): void {
