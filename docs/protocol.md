@@ -448,6 +448,7 @@ type Schedule = {
                         // Absent from a runner whose schedules are its own
                         // file: then it's that runner
   runnerName?: string   // that runner's name, as runners.list has it
+  runnerIcon?: string   // and its icon (RunnerInfo.icon)
   runRequestedAt?: string // a schedules.run for it waits for its runner
 }
 
@@ -455,6 +456,12 @@ type Schedule = {
 type RunnerInfo = {
   id: string
   name: string          // "m5", "bruce": the Mac's hostname by default
+  icon?: string         // an SF Symbol for its Mac: "laptopcomputer",
+                        // "macmini", "macstudio", "macpro.gen3" or
+                        // "desktopcomputer", from the model macOS names
+                        // (runner/src/machine.ts), or sync.icon in
+                        // runner.json. Absent from a runner before icons;
+                        // a client draws a symbol it lacks as the desktop
   online: boolean       // heard from in the last 3 minutes
   lastSeenAt?: string
   self: boolean         // the runner answering
@@ -2016,7 +2023,10 @@ the mirror back as state. The Mac app doesn't use it.
   `sync.name` is what the phone calls this runner (default: the Mac's
   hostname without `.local` or `.localdomain`); `sync.runnerId` is made
   once and written back to `runner.json`, so a data dir stays one runner
-  across releases.
+  across releases. `sync.icon` names an SF Symbol for the runner in lists
+  (default: worked out from the Mac's model, see `RunnerInfo`); the
+  heartbeat carries it to a backend of API 11 or later, and
+  `sync:runnersList` gives it back.
 - **Threads.** One `threads` row per thread: `threadId, runnerId, title,
   cwd, accountId, provider, model?, status, needsYou, unread, preview,
   createdAt, lastActivityAt, snoozedUntil?, snoozedUntilRestart?,

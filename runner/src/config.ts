@@ -96,7 +96,7 @@ export type Config = {
   // The Convex mirror (src/sync.ts): the project's URL, whether it's on,
   // the name the phone shows for this runner and its id (made once).
   // THREADBEAR_SYNC=off turns it off for tests and dev runners.
-  sync: { enabled: boolean; url?: string; name?: string; runnerId?: string };
+  sync: { enabled: boolean; url?: string; name?: string; runnerId?: string; icon?: string };
   // Mike's Connectors gateway's base URL (connectors.ts), for the app's
   // Connectors panel. Unset means there's none to watch.
   connectorsUrl?: string;
@@ -129,7 +129,8 @@ export type RunnerJson = {
   pools?: unknown[];
   followMain?: boolean;
   models?: { pool?: string | null; dailyBudgetUsd?: number; privateFolders?: string[] };
-  sync?: { enabled?: boolean; url?: string; name?: string; runnerId?: string };
+  // icon: an SF Symbol for this runner in lists (machine.ts works one out).
+  sync?: { enabled?: boolean; url?: string; name?: string; runnerId?: string; icon?: string };
   // The gateway, when it isn't the `connectors` MCP server in
   // ~/.claude.json; url "" or enabled: false turns the panel's polling off.
   connectors?: { url?: string; enabled?: boolean };
@@ -251,6 +252,8 @@ function syncConfig(raw: RunnerJson['sync'], env: NodeJS.ProcessEnv): Config['sy
   if (name) out.name = name;
   const runnerId = nonEmpty(raw?.runnerId);
   if (runnerId) out.runnerId = runnerId;
+  const icon = nonEmpty(raw?.icon);
+  if (icon) out.icon = icon;
   return out;
 }
 

@@ -175,6 +175,7 @@ export const heartbeat = mutation({
       startedAt: v.string(),
       draining: v.boolean(),
       threadCount: v.number(),
+      icon: v.optional(v.string()),
     }),
   },
   // The backend's API version (version.ts), so the runner can tell when it's
@@ -227,7 +228,19 @@ export const threadsOf = query({
 
 export const runnersList = query({
   args: { key: v.string() },
-  returns: v.array(v.object({ runnerId: v.string(), name: v.string(), version: v.string(), release: v.optional(v.string()), startedAt: v.string(), draining: v.boolean(), threadCount: v.number(), lastSeenAt: v.number() })),
+  returns: v.array(
+    v.object({
+      runnerId: v.string(),
+      name: v.string(),
+      version: v.string(),
+      release: v.optional(v.string()),
+      startedAt: v.string(),
+      draining: v.boolean(),
+      threadCount: v.number(),
+      lastSeenAt: v.number(),
+      icon: v.optional(v.string()),
+    }),
+  ),
   handler: async (ctx, { key }) => {
     checkRunnerKey(key);
     const out = [];
@@ -243,6 +256,7 @@ export const runnersList = query({
         draining: r.draining,
         threadCount: r.threadCount,
         lastSeenAt: r.lastSeenAt,
+        ...(r.icon !== undefined ? { icon: r.icon } : {}),
       });
     }
     return out;

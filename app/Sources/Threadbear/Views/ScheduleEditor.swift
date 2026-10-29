@@ -271,11 +271,12 @@ struct ScheduleEditor: View {
         let others = app.runners.filter { !$0.isSelf }
         if state.isNew, !others.isEmpty {
             Picker("Runs on", selection: $state.runnerId) {
-                Text("This Mac").tag(String?.none)
+                Label("This Mac", systemImage: app.selfRunnerIcon).tag(String?.none)
                 Divider()
                 ForEach(others) { runner in
                     // Still a choice: it runs once that Mac is back.
-                    Text(runner.online ? runner.name : "\(runner.name) (offline)").tag(Optional(runner.id))
+                    Label(runner.online ? runner.name : "\(runner.name) (offline)", systemImage: RunnerIcon.symbol(runner.icon))
+                        .tag(Optional(runner.id))
                 }
             }
             .fixedSize()
@@ -290,10 +291,18 @@ struct ScheduleEditor: View {
             }
         } else if !state.isNew, state.isAway || !others.isEmpty {
             LabeledContent("Runs on") {
-                Text(awayName ?? "This Mac").foregroundStyle(.secondary).lineLimit(1)
+                Label(awayName ?? "This Mac", systemImage: awayIcon ?? app.selfRunnerIcon)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
             }
             .tip("Where it runs. To run it somewhere else, make a new schedule.")
         }
+    }
+
+    /// The other runner's icon, when one is picked.
+    private var awayIcon: String? {
+        guard let id = state.runnerId else { return nil }
+        return RunnerIcon.symbol(app.runners.first { $0.id == id }?.icon ?? app.schedule(state.scheduleId ?? "")?.runnerIcon)
     }
 
     /// The other runner's name, when one is picked.

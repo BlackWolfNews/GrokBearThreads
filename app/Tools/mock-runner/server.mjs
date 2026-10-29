@@ -302,8 +302,8 @@ addDemoSubagents();
  * sync were on with a backend that has both. A runner played as old
  * (mock.accounts {old: true}) answers runners.list with -32601.
  */
-const SELF_RUNNER = { id: 'runner_mock', name: 'm5', self: true };
-const runners = [SELF_RUNNER, { id: 'runner_bruce', name: 'bruce', self: false }];
+const SELF_RUNNER = { id: 'runner_mock', name: 'm5', icon: 'laptopcomputer', self: true };
+const runners = [SELF_RUNNER, { id: 'runner_bruce', name: 'bruce', icon: 'macmini', self: false }];
 /** The schedules (docs/protocol.md, "Schedules"), soonest first. */
 let schedules = [];
 addDemoSchedules();
@@ -860,7 +860,7 @@ async function dispatch(client, method, p) {
     }
     case 'runners.list':
       if (oldRunner) throw rpcError(-32601, `Unknown method ${method}`);
-      return { runners: runners.map((r) => ({ id: r.id, name: r.name, online: true, lastSeenAt: iso(), self: r.self })) };
+      return { runners: runners.map((r) => ({ id: r.id, name: r.name, icon: r.icon, online: true, lastSeenAt: iso(), self: r.self })) };
     case 'schedules.create': {
       if (!p.text) throw rpcError(-32602, 'text is required');
       if (Boolean(p.at) === Boolean(p.cron)) throw rpcError(-32602, 'Give exactly one of at and cron');
@@ -882,7 +882,7 @@ async function dispatch(client, method, p) {
         ...(p.at ? { at: new Date(p.at).toISOString() } : { cron: p.cron }), whenText: when.whenText,
         ...(p.threadId ? { threadId: p.threadId } : settings),
         paused: Boolean(p.paused), createdAt: now, updatedAt: now, ...(p.createdBy ? { createdBy: p.createdBy } : {}), runs: 0,
-        runnerId: runner.id, runnerName: runner.name,
+        runnerId: runner.id, runnerName: runner.name, runnerIcon: runner.icon,
       };
       if (!schedule.paused) schedule.nextRunAt = when.runs[0];
       schedules.push(schedule);
@@ -1634,7 +1634,7 @@ function addDemoSchedules() {
     const when = readWhen(fields);
     const schedule = {
       createdAt: ago(60 * 24 * 3), updatedAt: ago(60 * 24), runs: 0, paused: false, whenText: when.whenText,
-      runnerId: SELF_RUNNER.id, runnerName: SELF_RUNNER.name, ...fields,
+      runnerId: SELF_RUNNER.id, runnerName: SELF_RUNNER.name, runnerIcon: SELF_RUNNER.icon, ...fields,
     };
     if (!schedule.paused && !schedule.finishedAt) schedule.nextRunAt = when.runs[0];
     schedules.push(schedule);
@@ -1663,9 +1663,9 @@ function addDemoSchedules() {
   // now is waiting for bruce to hear about it.
   make({ id: 'sc_demo_bruce_photos', title: 'Photo library check', text: 'Check the photo library on the external drive for files that failed to import.',
     cron: '30 6 * * *', cwd: '/Volumes/CannMedia/Photos', permissionMode: 'full', runs: 12,
-    runnerId: 'runner_bruce', runnerName: 'bruce', lastRun: { at: ago(60 * 8), outcome: 'sent' } });
+    runnerId: 'runner_bruce', runnerName: 'bruce', runnerIcon: 'macmini', lastRun: { at: ago(60 * 8), outcome: 'sent' } });
   make({ id: 'sc_demo_bruce_disk', title: 'Disk space report', text: 'Say how much space is left on each drive and what grew most this week.',
-    cron: '0 8 * * 1', permissionMode: 'full', runs: 2, runnerId: 'runner_bruce', runnerName: 'bruce', runRequestedAt: ago(2) });
+    cron: '0 8 * * 1', permissionMode: 'full', runs: 2, runnerId: 'runner_bruce', runnerName: 'bruce', runnerIcon: 'macmini', runRequestedAt: ago(2) });
   make({ id: 'sc_demo_backup', title: 'Nightly backup report', text: 'Summarise last night\'s Backblaze log and say if anything failed.',
     cron: '0 2 * * *', cwd: '/Users/mike/dev/old-backups', accountId: defaults.accountId, paused: true, runs: 21,
     lastRun: { at: ago(60 * 30), outcome: 'failed', note: 'the folder /Users/mike/dev/old-backups is gone' } });

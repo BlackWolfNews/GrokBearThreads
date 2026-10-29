@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { makeHarness, tick, tmpDir } from '../helpers/fakes.ts';
-import { ConvexSync, BACKEND_API_VERSION, ICONS_API_VERSION, SCHEDULES_API_VERSION, SHARE_API_VERSION, PRESENCE_MS, SYNC_COALESCE_MS, HEARTBEAT_MS, SYNC_BATCH, ensureRunnerId, toThreadDoc, convexPoster, convexUploader, pictureName, type ThreadDoc } from '../../src/sync.ts';
+import { ConvexSync, BACKEND_API_VERSION, ICONS_API_VERSION, RUNNER_ICON_API_VERSION, SCHEDULES_API_VERSION, SHARE_API_VERSION, PRESENCE_MS, SYNC_COALESCE_MS, HEARTBEAT_MS, SYNC_BATCH, ensureRunnerId, toThreadDoc, convexPoster, convexUploader, pictureName, type ThreadDoc } from '../../src/sync.ts';
 import type { Project } from '../../src/protocol.ts';
 import type { ScheduleBackend } from '../../src/schedules.ts';
 import { nullLogger } from '../../src/log.ts';
@@ -1084,5 +1084,21 @@ test('schedules: a backend of API 9 gets the scheduler attached, and schedules s
   f.h.clock.advance(SYNC_COALESCE_MS);
   await tick();
   assert.equal(f.calls.filter((c) => c.fn === 'sync:setSchedules').length, 0);
+  await f.sync.stop();
+});
+
+test('the heartbeat carries the runner icon once the backend takes it', async () => {
+  let api = RUNNER_ICON_API_VERSION - 1;
+  const f = setup({ config: { icon: 'macmini' }, answer: (fn) => (fn === 'sync:heartbeat' ? { apiVersion: api } : null) });
+  f.sync.start();
+  await tick();
+  const beats = () => f.calls.filter((c) => c.fn === 'sync:heartbeat').map((c) => (c.args.runner as { icon?: string }).icon);
+  assert.deepEqual(beats(), [undefined], 'not to an older backend, whose validator would refuse it');
+  api = RUNNER_ICON_API_VERSION;
+  f.h.clock.advance(HEARTBEAT_MS);
+  await tick();
+  f.h.clock.advance(HEARTBEAT_MS);
+  await tick();
+  assert.equal(beats().at(-1), 'macmini');
   await f.sync.stop();
 });

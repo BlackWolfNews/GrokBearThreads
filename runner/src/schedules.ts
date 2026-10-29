@@ -25,7 +25,7 @@ import { CronError, checkZone, describeAt, describeCron, localZone, nextRun, nex
 
 // What schedules.json holds for each: everything but whenText, which is
 // worked out when it's sent, and runnerName, from the backend's runners.
-type ScheduleRecord = Omit<Schedule, 'whenText' | 'runnerName'>;
+type ScheduleRecord = Omit<Schedule, 'whenText' | 'runnerName' | 'runnerIcon'>;
 
 // A schedule as the backend stores it: the record with its runner and its
 // words (the phone shows whenText; the backend has no cron code).
@@ -33,8 +33,8 @@ export type StoredSchedule = ScheduleRecord & { runnerId: string; whenText: stri
 
 // What a runner the backend knows of looks like, and what runners.list
 // answers with (docs/protocol.md, RunnerInfo).
-export type BackendRunner = { id: string; name: string; lastSeenAt?: number };
-export type RunnerInfo = { id: string; name: string; online: boolean; lastSeenAt?: string; self: boolean };
+export type BackendRunner = { id: string; name: string; lastSeenAt?: number; icon?: string };
+export type RunnerInfo = { id: string; name: string; icon?: string; online: boolean; lastSeenAt?: string; self: boolean };
 
 // The backend's schedules table (sync.ts makes one for Convex; tests pass a
 // fake). Every call can fail when the backend can't be reached.
@@ -122,7 +122,7 @@ export class Scheduler {
   private stopped = false;
   private unlisten?: () => void;
   // This runner, as the backend knows it (sync.runnerId and its name).
-  private self: { id: string; name: string };
+  private self: { id: string; name: string; icon?: string };
   // Whether this runner has a backend to attach to at all (sync is on).
   // Without one a backend copy on disk is taken back as the runner's own.
   private syncOn: boolean;
@@ -137,6 +137,7 @@ export class Scheduler {
   // straight after rather than on the next regular check.
   private tickAgain = false;
   private names = new Map<string, string>();
+  private icons = new Map<string, string>();
   private namesDue = false;
   // Threads a draining runner still has (docs/protocol.md, "Handovers"):
   // they're real threads, just not loaded here yet.
@@ -149,7 +150,7 @@ export class Scheduler {
     log: Logger;
     zone?: () => string;
     elsewhere?: (threadId: string) => boolean;
-    self?: { id: string; name: string };
+    self?: { id: string; name: string; icon?: string };
     syncOn?: boolean;
   }) {
     this.runner = deps.runner;
@@ -283,24 +284,30 @@ export class Scheduler {
   private async refreshNames(): Promise<void> {
     const list = await this.backend?.runners().catch(() => undefined);
     if (!list) return;
-    const before = JSON.stringify([...this.names]);
-    for (const r of list) this.names.set(r.id, r.name);
+    const before = JSON.stringify([...this.names, ...this.icons]);
+    for (const r of list) this.learn(r);
     this.namesDue = false;
-    if (JSON.stringify([...this.names]) !== before) this.publish();
+    if (JSON.stringify([...this.names, ...this.icons]) !== before) this.publish();
+  }
+
+  private learn(r: BackendRunner): void {
+    this.names.set(r.id, r.name);
+    if (r.icon) this.icons.set(r.id, r.icon);
   }
 
   /** runners.list: this runner first, then the backend's others by name. */
   async runners(): Promise<RunnerInfo[]> {
-    const me: RunnerInfo = { id: this.self.id, name: this.self.name, online: true, self: true };
+    const me: RunnerInfo = { id: this.self.id, name: this.self.name, ...(this.self.icon ? { icon: this.self.icon } : {}), online: true, self: true };
     if (!this.backend) return [me];
     const now = this.clock.now();
     const all = await this.backend.runners();
-    for (const r of all) this.names.set(r.id, r.name);
+    for (const r of all) this.learn(r);
     const others = all
       .filter((r) => r.id !== this.self.id && r.lastSeenAt !== undefined && now - r.lastSeenAt < FORGET_MS)
       .map((r) => ({
         id: r.id,
         name: r.name,
+        ...(r.icon ? { icon: r.icon } : {}),
         online: r.lastSeenAt !== undefined && now - r.lastSeenAt < ONLINE_MS,
         ...(r.lastSeenAt !== undefined ? { lastSeenAt: new Date(r.lastSeenAt).toISOString() } : {}),
         self: false,
@@ -770,8 +777,11 @@ export class Scheduler {
   private view(rec: ScheduleRecord): Schedule {
     const v: Schedule = { ...rec, whenText: this.whenText(rec) };
     if (rec.runnerId) {
-      const name = rec.runnerId === this.self.id ? this.self.name : this.names.get(rec.runnerId);
+      const own = rec.runnerId === this.self.id;
+      const name = own ? this.self.name : this.names.get(rec.runnerId);
       if (name) v.runnerName = name;
+      const icon = own ? this.self.icon : this.icons.get(rec.runnerId);
+      if (icon) v.runnerIcon = icon;
     }
     return v;
   }

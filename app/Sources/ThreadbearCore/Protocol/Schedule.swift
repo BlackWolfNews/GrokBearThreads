@@ -71,6 +71,8 @@ public struct Schedule: Sendable, Hashable, Decodable, Identifiable {
     public var runnerId: String?
     /// That runner's name, as `runners.list` has it.
     public var runnerName: String?
+    /// That runner's SF Symbol (`RunnerInfo.icon`), for telling runners apart.
+    public var runnerIcon: String?
     /// A "Run now" asked of another runner, waiting for it to hear.
     public var runRequestedAt: Date?
 
@@ -80,7 +82,7 @@ public struct Schedule: Sendable, Hashable, Decodable, Identifiable {
         model: String? = nil, effort: String? = nil, permissionMode: PermissionMode? = nil, paused: Bool = false,
         createdAt: Date = Date(), updatedAt: Date = Date(), createdBy: String? = nil, nextRunAt: Date? = nil,
         finishedAt: Date? = nil, runs: Int = 0, lastRun: LastRun? = nil, runnerId: String? = nil,
-        runnerName: String? = nil, runRequestedAt: Date? = nil
+        runnerName: String? = nil, runnerIcon: String? = nil, runRequestedAt: Date? = nil
     ) {
         self.id = id
         self.title = title
@@ -105,6 +107,7 @@ public struct Schedule: Sendable, Hashable, Decodable, Identifiable {
         self.lastRun = lastRun
         self.runnerId = runnerId
         self.runnerName = runnerName
+        self.runnerIcon = runnerIcon
         self.runRequestedAt = runRequestedAt
     }
 
@@ -136,13 +139,14 @@ public struct Schedule: Sendable, Hashable, Decodable, Identifiable {
         lastRun = try? c.decodeIfPresent(LastRun.self, forKey: .lastRun)
         runnerId = string(.runnerId).flatMap { $0.isEmpty ? nil : $0 }
         runnerName = string(.runnerName).flatMap { $0.isEmpty ? nil : $0 }
+        runnerIcon = string(.runnerIcon).flatMap { $0.isEmpty ? nil : $0 }
         runRequestedAt = date(.runRequestedAt)
     }
 
     enum CodingKeys: String, CodingKey {
         case id, title, text, at, cron, timezone, whenText, threadId, cwd, accountId, model, effort, permissionMode
         case paused, createdAt, updatedAt, createdBy, nextRunAt, finishedAt, runs, lastRun
-        case runnerId, runnerName, runRequestedAt
+        case runnerId, runnerName, runnerIcon, runRequestedAt
     }
 
     public var isOneOff: Bool { cron == nil }
@@ -173,15 +177,19 @@ public struct RunnerInfo: Sendable, Hashable, Decodable, Identifiable {
     public var id: String
     /// "m5", "bruce": the Mac's hostname by default.
     public var name: String
+    /// An SF Symbol for its Mac ("laptopcomputer", "macmini"), from the
+    /// runner's model or its `sync.icon`. Nil from a runner before icons.
+    public var icon: String?
     /// Heard from in the last few minutes.
     public var online: Bool
     public var lastSeenAt: Date?
     /// The runner answering, the one this app talks to.
     public var isSelf: Bool
 
-    public init(id: String, name: String, online: Bool = true, lastSeenAt: Date? = nil, isSelf: Bool = false) {
+    public init(id: String, name: String, icon: String? = nil, online: Bool = true, lastSeenAt: Date? = nil, isSelf: Bool = false) {
         self.id = id
         self.name = name
+        self.icon = icon
         self.online = online
         self.lastSeenAt = lastSeenAt
         self.isSelf = isSelf
@@ -191,6 +199,7 @@ public struct RunnerInfo: Sendable, Hashable, Decodable, Identifiable {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         id = try c.decode(String.self, forKey: .id)
         name = (try? c.decodeIfPresent(String.self, forKey: .name)).flatMap { $0.isEmpty ? nil : $0 } ?? id
+        icon = (try? c.decodeIfPresent(String.self, forKey: .icon)).flatMap { $0.isEmpty ? nil : $0 }
         isSelf = (try? c.decodeIfPresent(Bool.self, forKey: .isSelf)) ?? false
         // The answering runner is plainly up; anything else unsaid is offline.
         online = (try? c.decodeIfPresent(Bool.self, forKey: .online)) ?? isSelf
@@ -198,7 +207,7 @@ public struct RunnerInfo: Sendable, Hashable, Decodable, Identifiable {
     }
 
     enum CodingKeys: String, CodingKey {
-        case id, name, online, lastSeenAt
+        case id, name, icon, online, lastSeenAt
         case isSelf = "self"
     }
 }

@@ -54,6 +54,7 @@ export type SyncConfig = {
   url?: string;
   name?: string;
   runnerId?: string;
+  icon?: string;
 };
 
 // runner.status's `sync` (docs/protocol.md, "Sync").
@@ -62,7 +63,7 @@ export type SyncConfig = {
 // lower one means its backend hasn't been deployed since this runner was:
 // said in runner.status, tb status and the log rather than stopping, since
 // the runner only adds to what it sends while the number stays the same.
-export const BACKEND_API_VERSION = 10;
+export const BACKEND_API_VERSION = 11;
 // From this backend version a project's picture goes up to file storage
 // (sync:iconUploadUrl, sync:setProjectIcon); an older backend gets the
 // project without it and the phone shows its symbol or first letter.
@@ -76,6 +77,9 @@ export const SHARE_API_VERSION = 8;
 // Schedules, "Runners"): the scheduler is attached once a heartbeat says
 // so, and from then on writes them there itself, so they aren't mirrored.
 export const SCHEDULES_API_VERSION = 9;
+// From this one the heartbeat carries the runner's icon (machine.ts); an
+// older backend's validator would turn the heartbeat down.
+export const RUNNER_ICON_API_VERSION = 11;
 
 export type SyncStatus = {
   state: 'off' | 'ok' | 'error';
@@ -1140,6 +1144,7 @@ export class ConvexSync {
       startedAt: this.deps.startedAt,
       draining: false,
       threadCount: this.deps.runner.list(ALL).length,
+      ...(this.deps.config.icon && (this.backendApiVersion ?? 0) >= RUNNER_ICON_API_VERSION ? { icon: this.deps.config.icon } : {}),
     };
     void this.post('mutation', 'sync:heartbeat', { key: this.deps.key, runner }).then(
       (r) => {
@@ -1193,7 +1198,9 @@ export class ConvexSync {
       requestRun: async (scheduleId, at) => (await call('mutation', 'sync:requestScheduleRun', { scheduleId, at })) === true,
       runners: async () => {
         const rows = await call('query', 'sync:runnersList', {});
-        return Array.isArray(rows) ? (rows as { runnerId: string; name: string; lastSeenAt: number }[]).map((r) => ({ id: r.runnerId, name: r.name, lastSeenAt: r.lastSeenAt })) : [];
+        return Array.isArray(rows)
+          ? (rows as { runnerId: string; name: string; lastSeenAt: number; icon?: string }[]).map((r) => ({ id: r.runnerId, name: r.name, lastSeenAt: r.lastSeenAt, ...(r.icon ? { icon: r.icon } : {}) }))
+          : [];
       },
     };
     return this.schedulesTable;

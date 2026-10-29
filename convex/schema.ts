@@ -92,6 +92,9 @@ export default defineSchema({
     // Only believed while lastSeenAt is recent: a sleeping Mac counts as away.
     atMac: v.optional(v.boolean()),
     atMacAt: v.optional(v.number()),
+    // An SF Symbol for the runner's Mac ("laptopcomputer", "macmini"), so
+    // lists can tell runners apart at a glance (API 10).
+    icon: v.optional(v.string()),
   }).index('by_runnerId', ['runnerId']),
 
   // pushedAt is the mirror's own: when a push last went out for the thread

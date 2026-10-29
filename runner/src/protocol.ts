@@ -656,6 +656,7 @@ export type Schedule = {
   // Where it runs, once schedules live in the backend (Schedules, "Runners").
   runnerId?: string;
   runnerName?: string;
+  runnerIcon?: string; // its SF Symbol (RunnerInfo.icon)
   runRequestedAt?: string;
 };
 

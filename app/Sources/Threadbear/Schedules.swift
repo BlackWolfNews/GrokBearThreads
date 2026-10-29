@@ -83,6 +83,29 @@ extension AppModel {
         return schedule.runnerName ?? runners.first { $0.id == runnerId }?.name ?? "another Mac"
     }
 
+    /// The SF Symbol of the runner a schedule runs on.
+    func runnerIcon(_ schedule: Schedule) -> String {
+        RunnerIcon.symbol(schedule.runnerIcon ?? runners.first { $0.id == schedule.runnerId }?.icon)
+    }
+
+    /// This runner's own, for "This Mac" in the picker.
+    var selfRunnerIcon: String { RunnerIcon.symbol(runners.first(where: \.isSelf)?.icon) }
+}
+
+/// A runner's icon (`RunnerInfo.icon`) as a symbol this Mac can draw: one
+/// named by a runner on a newer macOS, or none at all from a runner before
+/// icons, is the plain desktop.
+enum RunnerIcon {
+    static let fallback = "desktopcomputer"
+
+    static func symbol(_ name: String?) -> String {
+        guard let name, NSImage(systemSymbolName: name, accessibilityDescription: nil) != nil else { return fallback }
+        return name
+    }
+}
+
+extension AppModel {
+
     var activeScheduleCount: Int { schedules.reduce(0) { $0 + ($1.isActive ? 1 : 0) } }
 
     func schedule(_ id: String) -> Schedule? { schedules.first { $0.id == id } }

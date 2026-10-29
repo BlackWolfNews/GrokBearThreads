@@ -56,10 +56,11 @@ final class ScheduleTests: XCTestCase {
     // MARK: Runners (docs/protocol.md, "Schedules", "Runners")
 
     func testScheduleOnAnotherRunner() throws {
-        let json = #"{"id":"x","text":"t","cron":"0 8 * * 1","runnerId":"r_bruce","runnerName":"bruce","runRequestedAt":"2026-10-29T01:02:03Z"}"#
+        let json = #"{"id":"x","text":"t","cron":"0 8 * * 1","runnerId":"r_bruce","runnerName":"bruce","runnerIcon":"macmini","runRequestedAt":"2026-10-29T01:02:03Z"}"#
         let schedule = try JSONDecoder().decode(Schedule.self, from: Data(json.utf8))
         XCTAssertEqual(schedule.runnerId, "r_bruce")
         XCTAssertEqual(schedule.runnerName, "bruce")
+        XCTAssertEqual(schedule.runnerIcon, "macmini")
         XCTAssertEqual(schedule.runRequestedAt, ISO8601.parse("2026-10-29T01:02:03Z"))
         XCTAssertTrue(schedule.runsElsewhere(than: "r_m5"))
         XCTAssertFalse(schedule.runsElsewhere(than: "r_bruce"))
@@ -67,23 +68,26 @@ final class ScheduleTests: XCTestCase {
     }
 
     func testScheduleRunnerFieldsDecodeTolerantly() throws {
-        let json = #"{"id":"x","text":"t","runnerId":"","runnerName":5,"runRequestedAt":"soon"}"#
+        let json = #"{"id":"x","text":"t","runnerId":"","runnerName":5,"runnerIcon":"","runRequestedAt":"soon"}"#
         let schedule = try JSONDecoder().decode(Schedule.self, from: Data(json.utf8))
         XCTAssertNil(schedule.runnerId)
         XCTAssertNil(schedule.runnerName)
+        XCTAssertNil(schedule.runnerIcon)
         XCTAssertNil(schedule.runRequestedAt)
         XCTAssertFalse(schedule.runsElsewhere(than: "r_m5"))
     }
 
     func testRunnersDecodeLeniently() throws {
         let json = #"""
-        {"runners":[{"id":"r_m5","name":"m5","online":true,"self":true,"lastSeenAt":"2026-10-29T01:00:00Z"},
+        {"runners":[{"id":"r_m5","name":"m5","icon":"laptopcomputer","online":true,"self":true,"lastSeenAt":"2026-10-29T01:00:00Z"},
                     {"id":"r_bruce","name":"bruce","online":false,"self":false,"somethingNew":1},
                     {"name":"no id"},{"id":"r_bare"}]}
         """#
         let runners = try JSONDecoder().decode(RunnersResult.self, from: Data(json.utf8)).runners
         XCTAssertEqual(runners.map(\.id), ["r_m5", "r_bruce", "r_bare"])
         XCTAssertTrue(runners[0].isSelf)
+        XCTAssertEqual(runners[0].icon, "laptopcomputer")
+        XCTAssertNil(runners[1].icon, "a runner from before icons has none")
         XCTAssertTrue(runners[0].online)
         XCTAssertEqual(runners[0].lastSeenAt, ISO8601.parse("2026-10-29T01:00:00Z"))
         XCTAssertFalse(runners[1].isSelf)

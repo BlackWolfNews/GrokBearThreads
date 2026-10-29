@@ -304,7 +304,7 @@ test('agents schedule messages to their own thread by default', async () => {
 
 // The backend's schedules table as convex/sync.ts keeps it: a row per
 // schedule, claims that lapse, and every change sent to each subscriber.
-function fakeBackend(clock: { now(): number }, runners: { id: string; name: string }[] = []) {
+function fakeBackend(clock: { now(): number }, runners: { id: string; name: string; icon?: string }[] = []) {
   const rows = new Map<string, StoredSchedule & { claim?: { holder: string; until: number } }>();
   const subs = new Set<(rows: StoredSchedule[]) => void>();
   const calls: string[] = [];
@@ -388,8 +388,8 @@ function fakeBackend(clock: { now(): number }, runners: { id: string; name: stri
   };
 }
 
-const M5 = { id: 'r-m5', name: 'm5' };
-const BRUCE = { id: 'r-bruce', name: 'bruce' };
+const M5 = { id: 'r-m5', name: 'm5', icon: 'laptopcomputer' };
+const BRUCE = { id: 'r-bruce', name: 'bruce', icon: 'macmini' };
 
 function backendScheduler(h: ReturnType<typeof makeHarness>, self = M5, home = h.home) {
   fs.mkdirSync(home, { recursive: true });
@@ -467,6 +467,8 @@ test('a schedule made for another runner runs there, with that runner\'s folder'
   const made = await m5.create({ text: 'Summarise Slack', title: 'Slack summary', cron: '0 * * * *', cwd: '/nowhere/on/this/mac', accountId: 'codex-main', runnerId: 'Bruce' });
   assert.equal(made.runnerId, BRUCE.id);
   assert.equal(made.runnerName, 'bruce');
+  assert.equal(made.runnerIcon, 'macmini');
+  assert.deepEqual((await m5.runners()).map((r) => [r.name, r.icon]), [['m5', 'laptopcomputer'], ['bruce', 'macmini']]);
   assert.equal(made.cwd, '/nowhere/on/this/mac');
   await tick();
   assert.equal(bruce.list().length, 1, 'bruce sees it');

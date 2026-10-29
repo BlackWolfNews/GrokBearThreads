@@ -40,4 +40,7 @@
 //    sync:requestScheduleRun. A runner moves its schedules here only from 9.
 // 10: phone:quickAsk queues a "quickAsk" command: a quick ask the phone
 //    answered itself, which the runner keeps as a thread with no turn run.
-export const API_VERSION = 10;
+// 11: a runner's heartbeat can carry `icon`, an SF Symbol for its Mac
+//    (sync.icon, or worked out from the model), and sync:runnersList
+//    returns it. A runner sends it only to a backend of 11 or later.
+export const API_VERSION = 11;

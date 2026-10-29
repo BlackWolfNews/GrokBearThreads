@@ -67,10 +67,13 @@ private struct ScheduleRowView: View {
                     // Quiet, like the rest of the line: most schedules are
                     // this Mac's, and those say nothing about it.
                     Text("·").foregroundStyle(SidebarMetrics.faint)
-                    Text(away)
-                        .lineLimit(1)
-                        .layoutPriority(1)
-                        .tip("Runs on \(away)")
+                    // Its Mac's icon, so runners tell apart at a glance.
+                    HStack(spacing: zoomed(3)) {
+                        Image(systemName: app.runnerIcon(schedule)).imageScale(.small)
+                        Text(away).lineLimit(1)
+                    }
+                    .layoutPriority(1)
+                    .tip("Runs on \(away)")
                 }
                 Text("·").foregroundStyle(SidebarMetrics.faint)
                 TargetButton(schedule: schedule)

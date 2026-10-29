@@ -38,6 +38,7 @@ import { removeTempFiles } from './fsutil.ts';
 import { Models } from './models/index.ts';
 import { SettingsService, modelMethods, settingsMethods } from './settings.ts';
 import { ConvexSync, defaultRunnerName, ensureRunnerId, readSyncKey } from './sync.ts';
+import { detectMachineIcon } from './machine.ts';
 import { devicesMethods } from './devices.ts';
 import { flushSentry, reportException, reportLoggedError, reportLoggedWarning, startSentry } from './sentry.ts';
 import { ALWAYS_ASK_TOOLS, SERVER_NAME, buildThreadbearTools, threadbearMcpServer } from './threadbear-mcp.ts';
@@ -219,13 +220,15 @@ async function main(): Promise<void> {
   // Its runner id and name are the mirror's (sync.ts), since that's how other
   // runners and the backend know this one (step 6, docs/step6-plan.md).
   const syncRunnerId = cfg.sync.runnerId ?? ensureRunnerId(cfg.home);
+  // The kind of Mac this is, for its icon in lists (machine.ts).
+  const runnerIcon = cfg.sync.icon ?? (await detectMachineIcon());
   scheduler = new Scheduler({
     runner,
     home: cfg.home,
     clock: realClock,
     log,
     elsewhere: (id) => peers.owns(id),
-    self: { id: syncRunnerId, name: cfg.sync.name ?? defaultRunnerName() },
+    self: { id: syncRunnerId, name: cfg.sync.name ?? defaultRunnerName(), icon: runnerIcon },
     syncOn: Boolean(cfg.sync.enabled && cfg.sync.url && readSyncKey(cfg.home)),
   });
   scheduler.start();
@@ -250,7 +253,7 @@ async function main(): Promise<void> {
   // The RPC server is made further down; presence asks it once it's there.
   let rpcServer: RpcServer | undefined;
   const sync = new ConvexSync({
-    config: { ...cfg.sync, runnerId: syncRunnerId },
+    config: { ...cfg.sync, runnerId: syncRunnerId, icon: runnerIcon },
     key: readSyncKey(cfg.home),
     statePath: `${cfg.home}/sync-state.json`,
     presence: async () => isAtMac(rpcServer?.appConnected() ?? false, await hidIdleMs()),
