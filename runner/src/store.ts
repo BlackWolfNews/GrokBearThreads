@@ -68,7 +68,9 @@ export type ThreadRecord = {
   // rebuilt; the next turn starts a new native session with a note.
   // lost: the session to resume couldn't be found (never saved; only set
   // while the fresh session's first message is put together).
-  handoff?: { fromCwd: string; fromAccountId: string; rebuilt?: boolean; lost?: boolean };
+  // quickAsk: the thread began as a quick ask from the phone (Runner.quickAsk),
+  // answered by a fast model rather than a session of its own.
+  handoff?: { fromCwd: string; fromAccountId: string; rebuilt?: boolean; lost?: boolean; quickAsk?: boolean };
   allowRules?: string[]; // "Always allow" rules, in the CLI's syntax
   queue: QueuedSend[];
   pendingApprovals: string[];

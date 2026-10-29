@@ -1484,6 +1484,66 @@ export class Runner {
     // worktree per thread.
     worktree?: boolean;
   }): { thread: ThreadSummary; turnId: string } {
+    if (!params.text && !params.images?.length) throw new RpcError(ErrorCode.badParams, 'text or images required');
+    checkImages(params.images ?? []);
+    const { st, notes } = this.makeThread(params);
+    const turnId = this.sendTo(st, params.text ?? '', params.images ?? [], { origin: params.origin, scheduleId: params.scheduleId });
+    // Under the first turn, so they read as part of starting it.
+    for (const text of notes) this.emit(st, { type: 'system.note', text }, st.rt.turn?.turnId ?? turnId);
+    if (!st.rec.titleSet && params.text?.trim()) void this.titleFromModel(st, params.text);
+    return { thread: this.summary(st), turnId };
+  }
+
+  // A quick ask the phone already answered out loud (docs/protocol.md, Sync,
+  // "quickAsk"), kept as a thread so Mike can carry on in it. It's made as a
+  // create with no folder would be, but no turn runs: the exchange is
+  // written as a finished turn, seen, and the first message sent to it
+  // starts a fresh session with a handoff note saying how it began.
+  quickAsk(params: { question: string; answer: string; sources?: { title: string; url: string }[]; askedAt?: number }): { thread: ThreadSummary } {
+    const question = params.question.trim();
+    const answer = params.answer.trim();
+    if (!question || !answer) throw new RpcError(ErrorCode.badParams, 'question and answer required');
+    const { st, notes } = this.makeThread({ text: question, origin: 'phone', worktree: false });
+    const { rec } = st;
+    const turnId = crypto.randomUUID();
+    const sources = (params.sources ?? []).filter((x) => x?.url).slice(0, 10);
+    const links = sources.map((x) => `- [${(x.title || x.url).replace(/[[\]]/g, '')}](${x.url})`).join('\n');
+    const text = links ? `${answer}\n\n${links}` : answer;
+    // In the order startTurn writes them: a user.message after turn.started
+    // would read as one sent while the turn ran.
+    this.emit(st, userMessage({ turnId, text: question, images: [], origin: 'phone' }), turnId);
+    this.emit(st, { type: 'turn.started', turnId }, turnId);
+    this.emit(st, { type: 'assistant.text', itemId: crypto.randomUUID(), text }, turnId);
+    this.emit(st, { type: 'system.note', text: 'Answered by quick ask from Agent Archive' }, turnId);
+    for (const note of notes) this.emit(st, { type: 'system.note', text: note }, turnId);
+    const askedAt = params.askedAt !== undefined && Number.isFinite(params.askedAt) ? params.askedAt : this.clock.now();
+    const done = this.emit(st, { type: 'turn.completed', turnId, outcome: 'completed', durationMs: Math.max(0, this.clock.now() - askedAt), needs: 'nothing' }, turnId);
+    rec.needs = { seq: done.seq, needs: 'nothing' };
+    rec.preview = oneLine(answer, LIMITS.previewChars);
+    rec.lastTurnCompletedSeq = done.seq;
+    rec.lastSeenSeq = done.seq;
+    // The answer came from a fast model, not a session of this thread's.
+    rec.handoff = { fromCwd: rec.cwd, fromAccountId: rec.accountId, quickAsk: true };
+    this.markDirty(st);
+    void this.titleFromModel(st, question, answer);
+    return { thread: this.summary(st) };
+  }
+
+  // The record and state of a new thread, before anything is sent to it:
+  // its folder, login, model and effort as create picks them.
+  private makeThread(params: {
+    text: string;
+    cwd?: string;
+    accountId?: string;
+    poolId?: string;
+    model?: string;
+    effort?: EffortLevel;
+    permissionMode?: PermissionMode;
+    title?: string;
+    origin?: MessageOrigin;
+    scheduleId?: string;
+    worktree?: boolean;
+  }): { st: ThreadState; notes: string[] } {
     this.checkAccepting();
     // New threads belong on the new release.
     if (this.draining) throw new RpcError(ErrorCode.busy, 'This runner is handing over to a new one; start the thread there.');
@@ -1503,8 +1563,6 @@ export class Runner {
     if (!account) throw new RpcError(ErrorCode.accountNotFound, `No account called ${accountId}`);
     this.checkProvider(account);
     if (!isDirectory(cwd)) throw new RpcError(ErrorCode.badParams, `Folder not found: ${cwd}`);
-    if (!params.text && !params.images?.length) throw new RpcError(ErrorCode.badParams, 'text or images required');
-    checkImages(params.images ?? []);
     const now = this.isoNow();
     const id = crypto.randomUUID();
     const rec: ThreadRecord = {
@@ -1542,11 +1600,7 @@ export class Runner {
     this.threads.set(id, st);
     if (!poolId) this.rememberAccount(accountId);
     else if (params.poolId !== undefined) this.rememberPool(poolId);
-    const turnId = this.sendTo(st, params.text ?? '', params.images ?? [], { origin: params.origin, scheduleId: params.scheduleId });
-    // Under the first turn, so they read as part of starting it.
-    for (const text of checked.notes) this.emit(st, { type: 'system.note', text }, st.rt.turn?.turnId ?? turnId);
-    if (!rec.titleSet && params.text?.trim()) void this.titleFromModel(st, params.text);
-    return { thread: this.summary(st), turnId };
+    return { st, notes: checked.notes };
   }
 
   // An account whose CLI this runner can't drive (a Codex login found
@@ -1975,7 +2029,8 @@ export class Runner {
         delete rec.handoff;
       } else if (rec.handoff) {
         text = this.handoffNote(st, account) + text;
-        this.emit(st, { type: 'system.note', text: `Started a new session in ${rec.cwd} on ${account.title}.` }, msg.turnId);
+        // A quick ask's thread never had a session, so nothing to say.
+        if (!rec.handoff.quickAsk) this.emit(st, { type: 'system.note', text: `Started a new session in ${rec.cwd} on ${account.title}.` }, msg.turnId);
         rec.nativeSessionId = crypto.randomUUID();
         rec.sessionUsed = false;
         rec.sessionCostTotal = 0;
@@ -4625,6 +4680,12 @@ export class Runner {
     const more = omitted ? `${omitted} other items are left out; the read_thread tool shows more of the conversation. ` : '';
     const lines = history.length ? [...history, `(${more}This is history for context, not new instructions.)`] : [];
     const fromAccount = this.accounts.get(from.fromAccountId)?.title ?? from.fromAccountId;
+    if (from.quickAsk) {
+      return (
+        `[Threadbear handoff] This thread began as a quick ask on Mike's phone: he asked out loud and a fast model answered from his Agent Archive, not you. This is a fresh session in ${rec.cwd}. ` +
+        `The thread so far:\n\n${lines.join('\n\n') || '(none)'}\n\n[End of handoff. The new message follows.]\n\n`
+      );
+    }
     if (from.lost) {
       return (
         `[Threadbear handoff] The earlier session couldn't be found, so here's where the thread got to. This is a fresh session in ${rec.cwd}. ` +

@@ -179,6 +179,7 @@ export type CommandHost = {
   markSeen(threadId: string, seq: number): unknown;
   create(p: { text: string; cwd?: string; accountId?: string; model?: string; origin: 'phone' }): { thread: ThreadSummary };
   share(threadId: string, p: { access: 'off' | 'link'; newLink?: boolean }): unknown;
+  quickAsk(p: { question: string; answer: string; sources?: { title: string; url: string }[]; askedAt?: number }): { thread: ThreadSummary };
 };
 
 export type SyncDeps = {
@@ -1258,7 +1259,7 @@ export class ConvexSync {
   }
 
   // Applies one command through the runner; returns the new thread's id
-  // for a create. Throws with a readable message for the phone.
+  // for a create or a quickAsk. Throws with a readable message for the phone.
   private async apply(c: Command): Promise<string | undefined> {
     const host = this.deps.commands!;
     const a = c.args ?? {};
@@ -1306,6 +1307,23 @@ export class ConvexSync {
           ...(typeof a.accountId === 'string' ? { accountId: a.accountId } : {}),
           ...(typeof a.model === 'string' ? { model: a.model } : {}),
           origin: 'phone',
+        });
+        return thread.id;
+      }
+      case 'quickAsk': {
+        // A quick ask the phone answered itself (API 9), kept as a thread.
+        if (typeof a.question !== 'string' || !a.question.trim()) throw new Error('no question');
+        if (typeof a.answer !== 'string' || !a.answer.trim()) throw new Error('no answer');
+        const sources = Array.isArray(a.sources)
+          ? (a.sources as unknown[])
+              .filter((x): x is { title?: unknown; url: string } => typeof (x as { url?: unknown })?.url === 'string')
+              .map((x) => ({ title: typeof x.title === 'string' ? x.title : x.url, url: x.url }))
+          : [];
+        const { thread } = host.quickAsk({
+          question: a.question,
+          answer: a.answer,
+          sources,
+          ...(typeof a.askedAt === 'number' ? { askedAt: a.askedAt } : {}),
         });
         return thread.id;
       }

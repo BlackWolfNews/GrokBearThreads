@@ -2079,12 +2079,28 @@ the mirror back as state. The Mac app doesn't use it.
   (it reconnects by itself), and for each one: takes it
   (`sync:takeCommand`, which says no if it was already taken), applies
   it through the same methods the app's RPCs use, then finishes it with
-  the outcome and, for a `create`, the new thread's id. `send` and
+  the outcome and, for a `create` or `quickAsk`, the new thread's id. `send` and
   `create` give the `user.message` `origin: "phone"`. `update` takes one
   of `{ snooze: { until?, untilRestart? } }`, `{ wake }`, `{ archive }`,
   `{ unarchive }`, `{ markSeen }` or `{ title }`; `respond` is
   `approvals.respond`'s decision, message and answers; `page` is
-  `{ beforeSeq }` (above). A failed command
+  `{ beforeSeq }` (above). `quickAsk` (backend API 9) is
+  `{ question, answer, sources: { title, url }[], askedAt }`: a quick
+  ask the phone already answered out loud (from Agent Archive's
+  `/api/quick/ask`, straight over Tailscale), kept as a thread so Mike
+  can carry on in it. The runner makes a thread as a `create` with no
+  `cwd` would (the default folder, never a worktree, the login and model
+  a new thread gets) but runs no turn: it writes the question as a
+  `user.message` with `origin: "phone"`, `turn.started`, the answer as an
+  `assistant.text` (the sources after it as markdown links), a
+  `system.note` "Answered by quick ask from Agent Archive" and a
+  `turn.completed` (`completed`, `needs: "nothing"`), all under one
+  `turnId`, and marks it seen, since Mike has heard it. The title comes
+  from the question, then a model title with the answer as the reply.
+  The first message sent to it starts a fresh session with a handoff
+  note saying the thread began as a quick ask that a fast model answered
+  (see `threads.update` for the note). Like `create`, it finishes with
+  the new thread's id. A failed command
   gets `state: "failed"` and a readable `note`. A draining runner takes
   no commands. Finished commands go after a day.
 - **Failures.** A write that fails is kept and tried again after 5

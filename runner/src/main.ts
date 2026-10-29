@@ -269,6 +269,7 @@ async function main(): Promise<void> {
       markSeen: (id, seq) => runner.markSeen(id, seq),
       create: (p) => runner.create(p),
       share: (id, p) => runner.share(id, p),
+      quickAsk: (p) => runner.quickAsk(p),
     },
     schedules: scheduler,
     version: RUNNER_VERSION,

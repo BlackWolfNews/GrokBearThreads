@@ -130,7 +130,7 @@ export default defineSchema({
   commands: defineTable({
     runnerId: v.string(), // or "any"
     threadId: v.optional(v.string()),
-    kind: v.union(v.literal('send'), v.literal('respond'), v.literal('update'), v.literal('create'), v.literal('page'), v.literal('share')),
+    kind: v.union(v.literal('send'), v.literal('respond'), v.literal('update'), v.literal('create'), v.literal('page'), v.literal('share'), v.literal('quickAsk')),
     args: v.any(),
     state: v.union(v.literal('pending'), v.literal('taken'), v.literal('done'), v.literal('failed')),
     note: v.optional(v.string()),

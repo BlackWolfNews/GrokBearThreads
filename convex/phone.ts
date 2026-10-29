@@ -311,18 +311,48 @@ export const create = mutation({
   returns: v.id('commands'),
   handler: async (ctx, { token, text, runnerId, cwd, accountId, model }) => {
     await checkPhoneToken(ctx, token);
-    let target = runnerId;
-    if (!target) {
-      let best: { runnerId: string; lastSeenAt: number } | undefined;
-      for await (const r of ctx.db.query('runners')) {
-        if (r.draining || Date.now() - r.lastSeenAt > ONLINE_MS) continue;
-        if (!best || r.lastSeenAt > best.lastSeenAt) best = r;
-      }
-      target = best?.runnerId ?? 'any';
-    }
+    const target = runnerId || (await newestRunner(ctx));
     return queue(ctx, target, 'create', undefined, { text, ...(cwd ? { cwd } : {}), ...(accountId ? { accountId } : {}), ...(model ? { model } : {}) });
   },
 });
+
+// A quick ask the phone has already answered out loud (API 9), kept as a
+// thread so Mike can carry on in it. The runner writes the exchange with
+// no turn run (docs/protocol.md, Sync, "quickAsk"); phone:command gives the
+// new thread's id once it's done. Targets a runner as create does.
+export const quickAsk = mutation({
+  args: {
+    token: v.string(),
+    question: v.string(),
+    answer: v.string(),
+    sources: v.optional(v.array(v.object({ title: v.string(), url: v.string() }))),
+    askedAt: v.number(),
+    runnerId: v.optional(v.string()),
+  },
+  returns: v.id('commands'),
+  handler: async (ctx, { token, question, answer, sources, askedAt, runnerId }) => {
+    await checkPhoneToken(ctx, token);
+    const q = question.trim();
+    const a = answer.trim();
+    if (!q || q.length > 2000) throw new ConvexError({ kind: 'invalid', message: 'question must be 1 to 2000 characters' });
+    if (!a || a.length > 20000) throw new ConvexError({ kind: 'invalid', message: 'answer must be 1 to 20000 characters' });
+    if ((sources?.length ?? 0) > 10) throw new ConvexError({ kind: 'invalid', message: 'at most 10 sources' });
+    if (!Number.isFinite(askedAt)) throw new ConvexError({ kind: 'invalid', message: 'askedAt must be a time' });
+    const target = runnerId || (await newestRunner(ctx));
+    return queue(ctx, target, 'quickAsk', undefined, { question: q, answer: a, sources: sources ?? [], askedAt });
+  },
+});
+
+// The newest runner seen in the last ONLINE_MS, or "any" (the first one
+// back takes it).
+async function newestRunner(ctx: QueryCtx): Promise<string> {
+  let best: { runnerId: string; lastSeenAt: number } | undefined;
+  for await (const r of ctx.db.query('runners')) {
+    if (r.draining || Date.now() - r.lastSeenAt > ONLINE_MS) continue;
+    if (!best || r.lastSeenAt > best.lastSeenAt) best = r;
+  }
+  return best?.runnerId ?? 'any';
+}
 
 // Older messages: the owning runner writes up to 50 text messages before
 // `beforeSeq` as paged rows (phone:thread then returns them too; they go
@@ -383,6 +413,6 @@ async function findThread(ctx: QueryCtx, threadId: string) {
   return t;
 }
 
-async function queue(ctx: { db: QueryCtx['db'] & { insert: any } }, runnerId: string, kind: 'send' | 'respond' | 'update' | 'create' | 'page' | 'share', threadId: string | undefined, args: Record<string, unknown>) {
+async function queue(ctx: { db: QueryCtx['db'] & { insert: any } }, runnerId: string, kind: 'send' | 'respond' | 'update' | 'create' | 'page' | 'share' | 'quickAsk', threadId: string | undefined, args: Record<string, unknown>) {
   return ctx.db.insert('commands', { runnerId, ...(threadId ? { threadId } : {}), kind, args, state: 'pending', createdAt: Date.now() });
 }

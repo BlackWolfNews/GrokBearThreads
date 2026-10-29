@@ -499,6 +499,14 @@ within a second or two while it's online (state `taken`, then `done` or
 - `phone:create({ token, text, runnerId?, cwd?, accountId?, model? })`.
   With no `runnerId`, the newest runner seen in the last 3 minutes, or
   `"any"` (the first runner back takes it).
+- `phone:quickAsk({ token, question, answer, sources?, askedAt, runnerId? })`
+  (API 9): a quick ask the phone has already answered out loud, kept as a
+  thread. `question` is 1 to 2,000 characters once trimmed, `answer` 1 to
+  20,000, `sources` at most 10 `{ title, url }`, `askedAt` ms since 1970.
+  Targets a runner as `phone:create` does. The runner makes the thread
+  with the exchange in it and no turn (docs/protocol.md, Sync,
+  `quickAsk`), so a message sent to it later is an ordinary follow-up;
+  `phone:command` gives its `threadId` once `done`.
 - `phone:loadEarlier({ token, threadId, beforeSeq })`: the runner writes
   up to 50 text messages before `beforeSeq` as paged rows, then the
   command is `done`; `phone:thread` then returns them too. Paged rows go

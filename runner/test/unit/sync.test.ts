@@ -338,6 +338,10 @@ function setupFull(opts: { heads?: { threadId: string; lastSeq: number }[]; take
         applied.push(`share ${id} ${p.access}${p.newLink ? ' new' : ''}`);
         return h.runner.share(id, p);
       },
+      quickAsk: (p) => {
+        applied.push(`quickAsk ${p.question} ${p.sources?.length ?? 0}`);
+        return h.runner.quickAsk(p);
+      },
     },
     version: '0.1.0+test',
     startedAt: '2026-10-27T00:00:00.000Z',
@@ -546,6 +550,31 @@ test('commands: each pending one is taken once, applied through the runner as fr
   assert.equal(h.runner.get(t.id).archivedAt !== undefined, true);
   assert.equal(h.runner.get(t.id).share?.access, 'link');
   assert.deepEqual(sync.status().commands, { state: 'on', applied: 4, failed: 0 });
+});
+
+test('commands: a quickAsk is kept as a thread and finished with its id', async () => {
+  const { h, sync, calls, push, applied } = setupFull();
+  sync.start();
+  await sync.flushNow();
+  push([
+    {
+      commandId: 'q1',
+      kind: 'quickAsk',
+      args: { question: 'Which drive?', answer: 'CannMedia.', sources: [{ title: 'Notes', url: 'https://x.example/1' }, { nope: 1 }], askedAt: 5 },
+      createdAt: 1,
+    },
+    { commandId: 'q2', kind: 'quickAsk', args: { question: 'no answer' }, createdAt: 2 },
+  ]);
+  await tick(10);
+  assert.deepEqual(applied, ['quickAsk Which drive? 1']);
+  const finished = calls.filter((c) => c.fn === 'sync:finishCommand').map((c) => c.args);
+  assert.equal(finished.length, 2);
+  assert.equal(finished[0]!.ok, true);
+  const id = finished[0]!.resultThreadId as string;
+  assert.equal(h.runner.get(id).title, 'Which drive?');
+  assert.equal(h.adapter.sessions.length, 0, 'no turn ran');
+  assert.equal(finished[1]!.ok, false);
+  assert.equal(finished[1]!.note, 'no answer');
 });
 
 test('commands: one that fails is finished with a note; one another runner took is left alone', async () => {

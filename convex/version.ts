@@ -38,4 +38,6 @@
 //    sync:saveSchedule, sync:deleteSchedule, sync:adoptSchedules,
 //    sync:claimSchedule, sync:releaseSchedule, sync:scheduleRan and
 //    sync:requestScheduleRun. A runner moves its schedules here only from 9.
-export const API_VERSION = 9;
+// 10: phone:quickAsk queues a "quickAsk" command: a quick ask the phone
+//    answered itself, which the runner keeps as a thread with no turn run.
+export const API_VERSION = 10;

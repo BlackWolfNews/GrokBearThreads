@@ -238,6 +238,12 @@ default. Threadbear counts you as at the Mac when the app is open and you've
 used the keyboard or mouse in the last two minutes, and as away when the Mac
 is asleep. On the iPhone, Settings > Notify me changes it to Always or Never.
 
+A quick ask on the iPhone (a question you say out loud and hear answered
+from your Agent Archive) is kept as a thread in your default folder, with
+the question, the answer and a note that quick ask answered it. It shows
+as done and already read. Write in it to carry on: the agent is told the
+thread started as a quick ask and picks up from there.
+
 Your threads also have a website, on your own Convex deployment. To sign a
 browser in, Settings > Phone & browser > Open signed in opens it in your
 browser (or run `npm run web:sign-in` from your Threadbear folder). Each
