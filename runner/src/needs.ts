@@ -233,6 +233,11 @@ const END_TURN_SUMMARY =
   'summary is what Mike reads first when he comes back to the thread, often hours later and among many others: 2 to 5 markdown bullets of what happened this turn (what you found, changed, shipped or decided, with the result), each one line of about 15 words at most, in plain words that make sense to someone who has forgotten the task. ' +
   "It is drawn as your reply, with the asks under it, and everything else you wrote this turn folds into your working, so don't repeat it in a message, and leave what Mike has to do to the asks. If he asked a question, the first bullet answers it. " +
   'Link each bullet to where he can check it: a web page or a file as an ordinary markdown link; another thread as [its own thread](thread:<its id from list_threads>); a step in your own working this turn as work: and a few words copied exactly from that step (the command you ran or its description, the file you edited, or a line you wrote while working), e.g. [tests pass](work:npm test), which opens your working at that step and lights it up. Links work in the asks too. ' +
+  // Mike, 29 Oct: a turn that waited for the app to restart, then the
+  // check after it, left two summaries. The app now shows a runner's turn
+  // and the turns before it back to Mike's message as one, with the last
+  // summary as the reply (docs/protocol.md, "The summary").
+  "When this turn started from a message the runner sent rather than one from Mike (the app restarted, a hook ran, the resume after a restart), this summary takes the place of your last one, so cover everything since Mike's last message, not just this turn; work: links can quote steps from those turns too. " +
   'Leave summary out only when the turn was a line or two of conversation, and write that as an ordinary message. ';
 
 // What to put in it, the same for both providers.

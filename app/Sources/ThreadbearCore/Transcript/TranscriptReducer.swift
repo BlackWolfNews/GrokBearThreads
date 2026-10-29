@@ -858,11 +858,14 @@ public struct TranscriptModel: Sendable {
         return Self.isWork(row)
     }
 
-    /// The items of the finished turn item `i` is in (a turn's items are
-    /// together). A finished turn shows as Mike's messages, one line of
-    /// work, its reply and its cards, like Codex desktop (Mike, 29 Oct):
-    /// the agent's notes, thinking and tools all fold into that line.
+    /// The items of the finished stretch (`doneBlock`) or, while a later
+    /// turn in its stretch still runs, the finished turn item `i` is in (a
+    /// turn's items are together). A finished turn shows as Mike's
+    /// messages, one line of work, its reply and its cards, like Codex
+    /// desktop (Mike, 29 Oct): the agent's notes, thinking and tools all
+    /// fold into that line.
     private func doneTurn(_ i: Int) -> Range<Int>? {
+        if let block = doneBlock(i) { return block }
         guard i >= 0, i < items.count, let turn = items[i].turnId, completedTurns.contains(turn) else { return nil }
         var low = i
         while low > 0, items[low - 1].turnId == turn { low -= 1 }
@@ -871,23 +874,81 @@ public struct TranscriptModel: Sendable {
         return low..<high
     }
 
-    /// A finished turn's reply: its summary from end_turn, else its last
-    /// message.
-    private func replyIndex(in turn: Range<Int>) -> Int? {
-        func message(_ k: Int, summary: Bool) -> Bool {
-            guard case .assistant(let text) = items[k].content else { return false }
-            return !summary || text.isSummary
+    /// A message from Mike (or a schedule, or another thread's agent) that
+    /// started a turn of its own. The runner's messages (the app restarted,
+    /// a hook ran, the resume after a restart) carry on from the turn
+    /// before, and one Mike sent into a running turn went into that turn.
+    private func startsBlock(_ k: Int) -> Bool {
+        guard case .user(let message) = items[k].content, !message.isFromRunner else { return false }
+        guard let turn = items[k].turnId else { return true }
+        var j = k - 1
+        while j >= 0, items[j].turnId == nil { j -= 1 }
+        return j < 0 || items[j].turnId != turn
+    }
+
+    /// The first item of the stretch item `i` is in: the message that
+    /// started it, or the first item held.
+    private func blockStart(_ i: Int) -> Int {
+        var low = min(i, items.count - 1)
+        while low > 0, !startsBlock(low) { low -= 1 }
+        return max(0, low)
+    }
+
+    /// The finished part of item `i`'s stretch: from the message that
+    /// started it up to the next one, or to the first item of a turn still
+    /// going. Mike's message, the turn it started, the runner's turns after
+    /// it and the notes between show as one line of work and one reply.
+    /// Mike, 29 Oct: an agent that waited for the app to restart and
+    /// checked its change left two summaries with the restart notes between
+    /// them, and he couldn't tell which to read.
+    private func doneBlock(_ i: Int) -> Range<Int>? {
+        guard i >= 0, i < items.count else { return nil }
+        // An item of a running turn is never in a finished stretch, and
+        // this is most of what's asked while a turn streams.
+        if let turn = items[i].turnId, !isFinished(turn) { return nil }
+        let low = blockStart(i)
+        var high = low
+        while high < items.count, high == low || !startsBlock(high) {
+            if let turn = items[high].turnId, !isFinished(turn) { break }
+            high += 1
         }
-        return turn.last { message($0, summary: true) } ?? turn.last { message($0, summary: false) }
+        guard i < high, items[low..<high].contains(where: { $0.turnId != nil }) else { return nil }
+        return low..<high
+    }
+
+    private func isFinished(_ turn: String) -> Bool {
+        completedTurns.contains(turn) && turn != openTurn
+    }
+
+    /// A finished turn's reply: its last summary from end_turn, else its
+    /// last message. In a stretch with the runner's turns in it, each turn
+    /// after the one with that summary (each turn, without one) has its
+    /// last message as a reply too, so a turn that ended on a line rather
+    /// than a summary isn't folded away behind the one before.
+    private func replies(in turn: Range<Int>) -> Set<Int> {
+        func text(_ k: Int) -> TextItem? {
+            if case .assistant(let text) = items[k].content { return text }
+            return nil
+        }
+        let summary = turn.last { text($0)?.isSummary == true }
+        var out: Set<Int> = summary.map { [$0] } ?? []
+        var seen: Set<String> = summary.flatMap { items[$0].turnId }.map { [$0] } ?? []
+        for k in turn.reversed() where k > (summary ?? -1) && text(k) != nil {
+            if seen.insert(items[k].turnId ?? "").inserted { out.insert(k) }
+        }
+        return out
     }
 
     /// What stays out of a finished turn's line of work: Mike's messages,
     /// the reply, errors, reviews waiting on him, pictures the agent made
     /// (the poster it was asked for is the answer), the footer and the card.
-    private func staysOut(_ k: Int, reply: Int?) -> Bool {
-        if k == reply { return true }
+    /// The runner's messages fold in: they're how the work carried on. The
+    /// note an edit of Mike's leaves stays, as it says what he did.
+    private func staysOut(_ k: Int, replies: Set<Int>) -> Bool {
+        if replies.contains(k) || items[k].id.hasPrefix("rw:") { return true }
         switch items[k].content {
-        case .user, .error, .footer, .asks, .review: return true
+        case .user(let message): return !message.isFromRunner
+        case .error, .footer, .asks, .review: return true
         case .images(_, _, let generated): return generated
         case .tool(let tool): return Self.isTakenEndTurn(tool)
         default: return false
@@ -919,11 +980,17 @@ public struct TranscriptModel: Sendable {
     /// the group row it's folded into, nil when it's shown as itself.
     public func workStep(_ quote: String, turn turnId: String) -> (rowId: String, groupId: String?)? {
         let turnItems = items.lazy.filter { $0.turnId == turnId }
-        guard let row = WorkLinks.step(for: quote, in: turnItems), let i = itemIndex[row.id] else { return nil }
+        var found = WorkLinks.step(for: quote, in: turnItems)
+        // A runner's turn's summary covers its whole stretch, so it can
+        // point at a step from the turn Mike's message started.
+        if found == nil, let first = items.firstIndex(where: { $0.turnId == turnId }), let block = doneBlock(first) {
+            found = WorkLinks.step(for: quote, in: items[block])
+        }
+        guard let row = found, let i = itemIndex[row.id] else { return nil }
         if let turn = doneTurn(i) {
-            let reply = replyIndex(in: turn)
-            if staysOut(i, reply: reply) { return (row.id, nil) }
-            return (row.id, turn.first { !staysOut($0, reply: reply) }.map { "g:" + items[$0].id })
+            let replies = replies(in: turn)
+            if staysOut(i, replies: replies) { return (row.id, nil) }
+            return (row.id, turn.first { !staysOut($0, replies: replies) }.map { "g:" + items[$0].id })
         }
         let start = runStart(i)
         return (row.id, runEnd(i) - start > 1 ? "g:" + items[start].id : nil)
@@ -951,7 +1018,14 @@ public struct TranscriptModel: Sendable {
         if let changed = dirtyUpdate { start = min(start, runStart(changed)) }
         // A new item can join the run before it, or end it (so it's no longer
         // the live group).
-        if let added = dirtyInsert { start = min(start, runStart(added), runStart(added - 1)) }
+        if let added = dirtyInsert {
+            start = min(start, runStart(added), runStart(added - 1))
+            // A new turn or a note can join a finished stretch or end it
+            // (doneBlock), which changes rows back to its first message.
+            if added > 0, added < items.count, items[added].turnId != items[added - 1].turnId {
+                start = min(start, blockStart(added))
+            }
+        }
         let bounded = dirtyInsert == nil && !tailDirty
         if bounded { end = min(items.count, dirtyUpdateEnd) }
         dirtyUpdate = nil
@@ -1012,17 +1086,25 @@ public struct TranscriptModel: Sendable {
             if let turn = doneTurn(i), i == turn.lowerBound {
                 // Every row of a finished turn starts at its first item, so
                 // a change anywhere in it rebuilds it whole (runStart).
-                let reply = replyIndex(in: turn)
-                let folded = turn.filter { !staysOut($0, reply: reply) }
+                let replies = replies(in: turn)
+                let folded = turn.filter { !staysOut($0, replies: replies) }
+                // A stretch with the runner's turns in it has a footer for
+                // each: the last one stands for them all, with their time
+                // and cost added up, and the changes card has every turn's
+                // edits.
+                let footers: [(index: Int, done: TurnCompletion)] = turn.compactMap {
+                    if case .footer(let done) = items[$0].content { return ($0, done) }
+                    return nil
+                }
+                let worked = footers.reduce(0) { $0 + $1.done.durationMs }
                 for k in turn {
                     let row = items[k]
                     if k == folded.first {
                         let id = "g:" + row.id
                         let open = expanded.contains(id)
                         var group = WorkGroup(members: ArraySlice(folded.map { items[$0] }), isExpanded: open, isLive: false)
-                        if let footer = turn.last(where: { if case .footer = items[$0].content { return true }; return false }),
-                           case .footer(let done) = items[footer].content, done.durationMs > 0 {
-                            group.summary = "Worked for " + RelativeTime.duration(milliseconds: done.durationMs)
+                        if worked > 0 {
+                            group.summary = "Worked for " + RelativeTime.duration(milliseconds: worked)
                         }
                         out.append(derived(id, seq: row.seq, turnId: row.turnId, .group(group)))
                         starts.append(turn.lowerBound)
@@ -1034,17 +1116,28 @@ public struct TranscriptModel: Sendable {
                                 starts.append(turn.lowerBound)
                             }
                         }
-                    } else if !staysOut(k, reply: reply) {
+                    } else if !staysOut(k, replies: replies) {
                         continue
                     } else if case .asks(let card) = row.content, !card.isOpen {
                         continue
                     } else if case .tool(let tool) = row.content, Self.isTakenEndTurn(tool) {
                         continue
-                    } else {
-                        if case .footer = row.content, let card = changedFiles(turn: row.turnId ?? "") {
+                    } else if case .footer(var done) = row.content {
+                        guard k == footers.last?.index else { continue }
+                        if let card = changedFiles(turns: footers.map { items[$0.index].turnId ?? "" }) {
                             out.append(derived("cf:" + card.turnId, seq: row.seq, turnId: row.turnId, .changes(card)))
                             starts.append(turn.lowerBound)
                         }
+                        if footers.count > 1 {
+                            done.durationMs = worked
+                            let costs = footers.compactMap(\.done.costUsd)
+                            done.costUsd = costs.isEmpty ? nil : costs.reduce(0, +)
+                            out.append(derived(row.id, seq: row.seq, turnId: row.turnId, .footer(done)))
+                        } else {
+                            out.append(row)
+                        }
+                        starts.append(turn.lowerBound)
+                    } else {
                         out.append(row)
                         starts.append(turn.lowerBound)
                     }
@@ -1120,7 +1213,15 @@ public struct TranscriptModel: Sendable {
     /// The files a turn changed, from its Edit and Write calls that didn't
     /// fail, each with its edits' line counts added up.
     private func changedFiles(turn: String) -> ChangedFiles? {
-        guard let ids = editsByTurn[turn], !ids.isEmpty else { return nil }
+        changedFiles(turns: [turn])
+    }
+
+    /// The same for a finished stretch's turns, as one card under the
+    /// last one's footer.
+    private func changedFiles(turns: [String]) -> ChangedFiles? {
+        guard let turn = turns.last else { return nil }
+        let ids = turns.flatMap { editsByTurn[$0] ?? [] }
+        guard !ids.isEmpty else { return nil }
         var order: [String] = []
         var files: [String: ChangedFile] = [:]
         for id in ids {

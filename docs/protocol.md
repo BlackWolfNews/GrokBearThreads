@@ -1337,7 +1337,20 @@ A turn the agent finished can say whether Mike has to do anything, so
   everything else, its reply (the summary, else its last
   `assistant.text`), errors, a review still waiting, pictures the agent
   made, the changes card, the footer and the card (Mike, 29 Oct: like
-  Codex desktop). While it runs, its work shows as it always has. Text after the call is dropped as before
+  Codex desktop). While it runs, its work shows as it always has.
+  A turn started by a `user.message` with `origin: "runner"` (the app
+  restarted, a hook ran, a resume, a carry-on) joins the turns before it
+  back to the last message that started a turn of its own (Mike's, a
+  schedule's, another agent's): one line of work holding all of them and
+  the notes between (their earlier summaries and the runner's messages
+  too), one reply (the last summary, plus the last `assistant.text` of
+  any later turn), one changes card and one footer with their time and
+  cost added up. A note from an edit (`thread.rewound`) stays out. The
+  `end_turn` description tells the agent that in such a turn its summary
+  takes the place of the last one, so it covers everything since Mike's
+  message, and its work links can quote steps from those turns (Mike,
+  29 Oct: an app-restart check left two summaries with notes between
+  them). Text after the call is dropped as before
   (Claude), and Codex's final answer, which still follows its `end_turn`,
   folds away like the rest and doesn't take over the preview. Up to 8
   bullets of up to 400 characters are kept; a leading `-`, `*` or `•` is

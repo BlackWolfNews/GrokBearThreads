@@ -116,7 +116,10 @@ When an agent finishes a piece of work, its reply is a few short bullets
 of what it did, with what it needs from you (or "Nothing needed from you")
 under them. Everything it did to get there, its notes, thinking, commands
 and edits, is one line above the reply, "Worked for 2m 13s": click it to
-open it. Pictures it made stay out, as they're often the answer. A link
+open it. Pictures it made stay out, as they're often the answer. When
+the agent carries on by itself after that (to check its change once the
+app restarts, say), the follow-up joins the same line and its bullets
+replace the earlier ones, so there's still one reply to read. A link
 with ↑ after it goes to the step it's about: click it and the work opens
 there, with that step lit up. A link to another thread opens that
 thread.

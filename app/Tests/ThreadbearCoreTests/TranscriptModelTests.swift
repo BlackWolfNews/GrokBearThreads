@@ -51,13 +51,15 @@ final class TranscriptModelTests: XCTestCase {
         change = model.apply([E.event(5, "turn.started", ["turnId": "t2"])])
         XCTAssertEqual(model.rows.map(\.id), ["u:2", "a:m1", "f:t1", "w:t2"])
         XCTAssertTrue(change.removed.contains(3))
-        // That turn ends with the other still out: back to the background line.
+        // That turn ends with the other still out: back to the background
+        // line. The turn carried on from the one before, so the two show
+        // as one, each reply kept, under one footer.
         change = model.apply([E.text(6, "m2", "Page B is done.").withTurn("t2"), E.done(7, turn: "t2")])
-        XCTAssertEqual(model.rows.map(\.id), ["u:2", "a:m1", "f:t1", "a:m2", "f:t2", "bg:"])
+        XCTAssertEqual(model.rows.map(\.id), ["u:2", "a:m1", "a:m2", "f:t2", "bg:"])
         // All done and read: it goes.
         change = model.setBackground([])
-        XCTAssertEqual(change.removed, [5])
-        XCTAssertEqual(model.rows.map(\.id), ["u:2", "a:m1", "f:t1", "a:m2", "f:t2"])
+        XCTAssertEqual(change.removed, [4])
+        XCTAssertEqual(model.rows.map(\.id), ["u:2", "a:m1", "a:m2", "f:t2"])
         XCTAssertNil(MarkdownExport.message(for: TranscriptRow(id: "bg:", seq: 7, content: .background(BackgroundStatus(tasks: cubs)))))
     }
 
