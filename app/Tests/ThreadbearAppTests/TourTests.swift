@@ -16,15 +16,29 @@ final class TourTests: XCTestCase {
         tour.defaults = defaults
     }
 
-    func testSkipsStepsWhosePartIsntOnScreenButKeepsTheHandsOnOnes() {
+    func testLeavesOutClosedPanelsButKeepsWhatTurnsUpAsItGoes() {
         tour.frames = [.threads: CGRect(x: 44, y: 0, width: 300, height: 800),
-                       // Gone (onDisappear) or squashed to nothing: skipped too.
-                       .permission: .zero]
+                       // Gone (onDisappear) or squashed to nothing: as good as closed.
+                       .activityBar: .zero]
         tour.start()
-        // The hands-on steps bring their part up themselves.
-        XCTAssertEqual(tour.shown.map(\.title), ["Welcome to Threadbear", "Threads", "Not now? Hibernate it", "Done with it? Archive it",
-                                                 "Move a panel", "Patches", "Your first thread"])
+        // The views and Highlights are panels that aren't there; the samples'
+        // rows, the chips, the composer and Finish setting up turn up later.
+        XCTAssertEqual(tour.shown.map(\.title), Tour.steps.map(\.title).filter { $0 != "Your views" && $0 != "Highlights" })
         XCTAssertEqual(tour.step, 0)
+    }
+
+    /// Mike, 29 Oct: the first cut's cards were too much to read. One short
+    /// sentence a card, and a step per idea.
+    func testEveryCardIsOneShortSentence() {
+        let ends = try! NSRegularExpression(pattern: #"[.!?](\s|$)"#)
+        for step in Tour.steps {
+            for text in [step.body, step.doneBody].compactMap({ $0 }) {
+                let sentences = ends.numberOfMatches(in: text, range: NSRange(text.startIndex..., in: text))
+                XCTAssertLessThanOrEqual(sentences, 1, "one sentence: \(text)")
+                XCTAssertLessThanOrEqual(text.count, 90, "short: \(text)")
+            }
+            XCTAssertLessThanOrEqual(step.title.count, 24, "short title: \(step.title)")
+        }
     }
 
     func testOnlyTheReplayCanBeSkipped() {

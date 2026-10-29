@@ -135,6 +135,8 @@ private struct ThreadSection: View {
                 if section == .archived { ArchiveSearch() }
                 ForEach(threads.map { SectionRow(section: section.title, thread: $0) }) { row in
                     ThreadRowView(thread: row.thread, mode: RowMode(section), section: section) { select(row.thread.id) }
+                        // The tour points at the samples' rows by title.
+                        .tourTarget(.sampleRow(row.thread.title), when: row.thread.sample)
                         .transition(Juice.row)
                     // Put-away threads have nothing running to list.
                     if !section.isPutAway {

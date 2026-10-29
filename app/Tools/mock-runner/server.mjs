@@ -505,7 +505,9 @@ async function dispatch(client, method, p) {
         }
         return { threads: [] };
       }
-      if (existing.length) return { threads: existing.map((t) => t.summary) };
+      // In SAMPLE_THREADS' order, as the runner gives them.
+      const order = (t) => SAMPLE_THREADS.findIndex((x) => x.title === t.summary.title);
+      if (existing.length) return { threads: existing.sort((a, b) => order(a) - order(b)).map((t) => t.summary) };
       const made = [];
       for (const sample of [...SAMPLE_THREADS].reverse()) {
         const threadId = 'th_sample_' + crypto.randomBytes(4).toString('hex');

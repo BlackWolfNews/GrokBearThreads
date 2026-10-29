@@ -20,6 +20,22 @@ enum TourTarget: Hashable {
     /// The main panel, bar and all: something to drag when Highlights
     /// isn't open.
     case mainPanel
+    /// The icons down the window's left edge.
+    case activityBar
+    /// A sample thread's row in the list, by its title.
+    case sampleRow(String)
+    /// Finish setting up's panel, opened when the first thread's sent.
+    case setupPanel
+
+    /// A panel Mike may have closed: a step pointing only at these is left
+    /// out when none of them is on screen as the tour starts. The rest turn
+    /// up as it goes (the samples' rows, the composer, the chips).
+    var mayBeClosed: Bool {
+        switch self {
+        case .threads, .highlights, .highlightsRail, .activityBar: true
+        default: false
+        }
+    }
 }
 
 /// Which side of what it points at the tour's card goes, in the order
@@ -88,40 +104,48 @@ final class Tour {
     /// or the click won't take.
     static let patience: Duration = .seconds(20)
 
+    /// One short sentence a card, and a step per idea (Mike, 29 Oct: the
+    /// first cut's cards were too much to read). TourTests holds them to it.
     static let steps: [TourStep] = [
-        TourStep(title: "Welcome to Threadbear",
-                 body: "A quick, hands-on look round, with a few sample threads to try things on. They go when the tour ends.",
-                 bear: .wave),
-        TourStep(targets: [.threads], title: "Threads",
-                 body: "Everything your agents are working on. One that needs you moves to the top, and a blue dot is a reply you haven't read. The icons on the left switch to hibernating threads, the archive, schedules and projects."),
-        TourStep(targets: [.threads], title: "Not now? Hibernate it",
-                 body: "Hover Plan the weekend and press the moon to put it away until later. It comes back by itself, marked unread.",
-                 task: .hibernate,
-                 doneBody: "It waits under the sleeping bear on the left until then."),
-        TourStep(targets: [.threads], title: "Done with it? Archive it",
-                 body: "Hover Draft the release notes and press the box, or select it and press ⌘E.",
-                 task: .archive,
-                 doneBody: "Archived threads are kept, with a search, under the box on the left."),
-        // The one choice that matters for safety, so it gets a step of its own.
-        TourStep(targets: [.permission], title: "Full access or ask first",
-                 body: "With Full access the agent edits files and runs commands on its own. Ask before edits stops for your OK each time. You choose per thread.",
+        TourStep(title: "Welcome to Threadbear", body: "A quick look round, with a few sample threads to try things on.", bear: .wave),
+        TourStep(targets: [.threads], title: "Threads", body: "Everything your agents are working on is listed here."),
+        TourStep(targets: [.sampleRow("Fix the flaky login test"), .threads], title: "Needs you",
+                 body: "A blue dot means this one is waiting on you."),
+        TourStep(targets: [.sampleRow("Plan the weekend"), .threads], title: "Finished",
+                 body: "A tick means it's done and needs nothing from you."),
+        TourStep(targets: [.sampleRow("Plan the weekend"), .threads], title: "Hibernate",
+                 body: "Hover Plan the weekend and press the moon to put it away for later.",
+                 task: .hibernate, doneBody: "It comes back by itself, marked unread."),
+        TourStep(targets: [.sampleRow("Draft the release notes"), .threads], title: "Archive",
+                 body: "Archive Draft the release notes with its box, or ⌘E.",
+                 task: .archive, doneBody: "Archived threads are kept, a click away."),
+        TourStep(targets: [.activityBar], title: "Your views",
+                 body: "These icons switch to hibernating threads, the archive, schedules and projects."),
+        // The one choice that matters for safety, so it gets two steps.
+        TourStep(targets: [.permission], title: "Full access",
+                 body: "With Full access, the agent edits files and runs commands on its own.",
+                 edges: [.above, .below, .right, .left], opensSample: true),
+        TourStep(targets: [.permission], title: "Ask before edits",
+                 body: "Switch to Ask before edits and it stops for your OK first.",
                  edges: [.above, .below, .right, .left], opensSample: true),
         TourStep(targets: [.highlights, .highlightsRail], title: "Highlights",
-                 body: "Files, links and questions the agent pins for you, so you don't have to dig through the thread for them.",
+                 body: "The files, links and questions from a thread collect here.",
                  opensSample: true),
         TourStep(targets: [.highlights, .mainPanel], title: "Move a panel",
-                 body: "Every panel can go wherever you like. Drag this one by its bar to another side of the window, or onto another panel to make tabs.",
-                 task: .movePanel,
-                 doneBody: "That's it. View › Reset Panel Layout puts everything back."),
+                 body: "Drag this panel by its bar to another side of the window.",
+                 task: .movePanel, doneBody: "View › Reset Panel Layout puts it back."),
         TourStep(targets: [.actionChips], title: "Patches",
-                 body: "A patch adds buttons, panels and checks to the threads in a folder. The samples' folder has one. Press Roll a die.",
-                 task: .runPatch,
-                 doneBody: "That ran a command in the folder. You don't write patches yourself: ask a thread to \"add a button that runs the tests\" and it makes one.",
+                 body: "A patch adds buttons like this one to a folder's threads.",
+                 edges: [.above, .right, .left, .below], opensSample: true),
+        TourStep(targets: [.actionChips], title: "Try it",
+                 body: "Press Roll a die.",
+                 task: .runPatch, doneBody: "Ask any thread to make you a button like it.",
                  edges: [.above, .right, .left, .below], opensSample: true),
         TourStep(targets: [.composer], title: "Your first thread",
-                 body: "We've written its first message for you: it asks for a patch with a hello button of your own. Press Return to send it, and while it works, Finish setting up has the rest.",
-                 task: .sendFirst,
-                 edges: [.above, .below, .right, .left]),
+                 body: "We've written its first message, so press Return to send it.",
+                 task: .sendFirst, edges: [.above, .below, .right, .left]),
+        TourStep(targets: [.setupPanel], title: "Finish setting up",
+                 body: "While it works, pair your phone here to check in from anywhere."),
     ]
 
     /// The step on show, as an index into `shown`; nil when the tour's
@@ -172,7 +196,9 @@ final class Tour {
         if let app {
             Task { sampleIds = await app.makeTourSamples() }
         }
-        shown = Self.steps.filter { $0.task != nil || $0.targets.isEmpty || frame(for: $0) != nil }
+        shown = Self.steps.filter { step in
+            step.task != nil || step.targets.contains { !$0.mayBeClosed } || step.targets.isEmpty || frame(for: step) != nil
+        }
         go(to: 0)
         // The composer has the keyboard on a new thread: Return is the
         // tour's while it's up, not a send or an empty line.
@@ -238,9 +264,14 @@ final class Tour {
             if running { sawChipRun = true } else if sawChipRun { taskDone = true }
         case .sendFirst:
             if app.threads.keys.contains(where: { !threadsAtStart.contains($0) }) {
-                finish()
-                // On to what's left while the thread works.
-                if app.setupShowsIcon { app.setupShown = true }
+                // On to what's left while the thread works: the last card,
+                // or the end if there's nothing left to set up.
+                if app.setupShowsIcon {
+                    app.setupShown = true
+                    next()
+                } else {
+                    finish()
+                }
             }
         }
     }
@@ -363,20 +394,31 @@ extension View {
     /// Marks this view as the part of the window a tour step points at.
     /// `withBar` for a dock panel's content: the spotlight takes in the
     /// panel's bar above it too, so it reads as the whole panel.
-    func tourTarget(_ target: TourTarget, withBar: Bool = false) -> some View {
-        modifier(TourTargetModifier(target: target, bar: withBar ? RootView.options.headerHeight : 0))
+    /// `when` false leaves it untagged (a row that isn't a sample's).
+    func tourTarget(_ target: TourTarget, withBar: Bool = false, when active: Bool = true) -> some View {
+        modifier(TourTargetModifier(target: target, bar: withBar ? RootView.options.headerHeight : 0, active: active))
     }
 }
 
 private struct TourTargetModifier: ViewModifier {
     let target: TourTarget
     let bar: CGFloat
+    let active: Bool
     /// Which view last said where the target is. A panel moved in the dock
     /// is drawn afresh: the new view says where it is before the old one
     /// disappears, so only the one that last said may clear it.
     @State private var me = UUID()
 
+    @ViewBuilder
     func body(content: Content) -> some View {
+        if !active {
+            content
+        } else {
+            tagged(content)
+        }
+    }
+
+    private func tagged(_ content: Content) -> some View {
         content
             .onGeometryChange(for: CGRect.self) { $0.frame(in: .named(Tour.space)) } action: { frame in
                 Tour.shared.frames[target] = CGRect(x: frame.minX, y: frame.minY - bar, width: frame.width, height: frame.height + bar)
@@ -520,7 +562,7 @@ private struct TourCard: View {
                 .accessibilityElement()
                 .accessibilityLabel("Step \(index + 1) of \(count)")
                 Spacer(minLength: zoomed(8))
-                if tour.skippable && step.task != .sendFirst {
+                if tour.skippable && step.task != .sendFirst && !tour.isLast {
                     Button("Skip") { withAnimation(.easeOut(duration: 0.2)) { tour.finish() } }
                         .buttonStyle(.plain)
                         .foregroundStyle(.secondary)
@@ -537,11 +579,11 @@ private struct TourCard: View {
                     Button("Not now") { withAnimation(.easeOut(duration: 0.2)) { tour.finish() } }
                         .tip("End the tour. The message stays in the composer")
                 } else {
-                    Button(index == 0 ? "Show me" : "Next") { tour.next() }
+                    Button(tour.isLast ? "Done" : index == 0 ? "Show me" : "Next") { tour.next() }
                         .buttonStyle(.borderedProminent)
                         .keyboardShortcut(.defaultAction)
                         .disabled(step.task != nil && !done && !waited)
-                        .tip(step.task != nil && !done && !waited ? "Have a go first" : "The next step (Return)")
+                        .tip(step.task != nil && !done && !waited ? "Have a go first" : tour.isLast ? "End the tour (Return)" : "The next step (Return)")
                 }
             }
             .font(.system(size: TypeScale.label))
