@@ -19,12 +19,16 @@ import type { AskCli, CliResponse } from './claude-pool.ts';
 import { Ledger } from './ledger.ts';
 import type { UsageLine } from './ledger.ts';
 
-export type ModelJob = 'classify' | 'extract' | 'summarize' | 'generate';
+export type ModelJob = 'classify' | 'extract' | 'summarize' | 'generate' | 'decide';
 
 // Haiku through OpenRouter, and Haiku on a login in the settings' pool.
 // A route starting "pool:" runs on the pool; any other is an OpenRouter id.
 export const HAIKU = 'anthropic/claude-haiku-5.5';
 export const POOL_HAIKU = 'pool:claude-haiku-5-5';
+// Opus, for the few calls that need judgment more than speed (a generate
+// with `strong`): Mike's words for when to wake a thread.
+export const OPUS = 'anthropic/claude-opus-5.5';
+export const POOL_OPUS = 'pool:claude-opus-5-5';
 const POOL_PREFIX = 'pool:';
 
 // Haiku on the pool comes before Haiku on OpenRouter: it's the same model,
@@ -38,6 +42,7 @@ export const ROUTES: Record<ModelJob, string[]> = {
   extract: ['scaledown/extract', POOL_HAIKU, HAIKU],
   summarize: ['scaledown/summarize', POOL_HAIKU, HAIKU],
   generate: [POOL_HAIKU, HAIKU],
+  decide: [POOL_OPUS, OPUS],
 };
 
 export type ModelFailure = 'no-key' | 'off' | 'private' | 'over-budget' | 'no-room' | 'timeout' | 'provider';
@@ -55,7 +60,8 @@ type Common = { feature: string; cwd?: string };
 export type ClassifyParams = Common & { text: string; labels: string[]; instructions?: string };
 export type ExtractParams = Common & { text: string; fields: Record<string, string> };
 export type SummarizeParams = Common & { text: string; maxWords?: number };
-export type GenerateParams = Common & { prompt: string; system?: string; maxTokens?: number };
+// strong: on ROUTES.decide (Opus) rather than the small model.
+export type GenerateParams = Common & { prompt: string; system?: string; maxTokens?: number; strong?: boolean };
 
 // pool: the pool whose Claude logins answer "pool:" routes; null for none.
 export type ModelSettings = { dailyBudgetUsd: number; privateFolders: string[]; pool?: string | null };
@@ -274,7 +280,7 @@ export class Models {
   }
 
   generate(p: GenerateParams): Promise<ModelResult<string>> {
-    return this.run('generate', p, () => ({ system: p.system, user: p.prompt, maxTokens: p.maxTokens ?? 500, read: (t) => t.trim() || undefined }));
+    return this.run(p.strong ? 'decide' : 'generate', p, () => ({ system: p.system, user: p.prompt, maxTokens: p.maxTokens ?? 500, read: (t) => t.trim() || undefined }));
   }
 
   private async run<T>(job: ModelJob, p: Common, attempt: (model: string) => Attempt<T>): Promise<ModelResult<T>> {

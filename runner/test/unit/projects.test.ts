@@ -718,3 +718,26 @@ test('the librarian adds a link only when the thread gave it, to a project the t
   assert.deepEqual(projects.record(other.id)?.links, [], 'not a project the thread is in');
   assert.equal(librarian.status().recent[0].text, 'Added a link to Cruise');
 });
+
+test('the librarian wakes a thread hibernating on a topic when Mike talks about it in another', async () => {
+  const s = setup({
+    models: (p) => {
+      if (!p.prompt.includes('Router table jig')) return reply({ projects: [], new: null, state: {}, why: 'x' });
+      assert.match(p.prompt, new RegExp(`Hibernating threads waiting for Mike to talk about something:\\n- ${waiting.slice(0, 8)} "Plan the workbench drawers": woodworking`));
+      return reply({ projects: [], new: null, state: {}, wake: [waiting.slice(0, 8), 'nothere1'], why: 'Woodworking again' });
+    },
+  });
+  const { h, create, librarian } = s;
+  const waiting = create('Plan the workbench drawers').thread.id;
+  h.clock.advance(FIRST_MESSAGE_MS);
+  await tick(6);
+  h.runner.update({ threadId: waiting, snoozedUntil: new Date(h.clock.now() + 30 * 86_400_000).toISOString() });
+  rec(h, waiting).wakeWhen = { said: 'next time I talk about woodworking', topic: 'woodworking' };
+  const other = create('Router table jig').thread.id;
+  h.clock.advance(FIRST_MESSAGE_MS);
+  await tick(6);
+  assert.equal(librarian.status().recent[0].text, 'Woke Plan the workbench drawers');
+  assert.equal(h.runner.get(waiting).snoozedUntil, undefined);
+  assert.equal(h.runner.get(waiting).needsYou, true);
+  assert.notEqual(other, waiting);
+});

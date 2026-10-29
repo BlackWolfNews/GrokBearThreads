@@ -494,6 +494,7 @@ async function dispatch(client, method, p) {
         const untilRestart = p.snoozedUntil === 'restart';
         s.snoozedUntil = untilRestart ? '9999-12-31T00:00:00.000Z' : p.snoozedUntil ?? undefined;
         s.snoozedUntilRestart = untilRestart || undefined;
+        delete s.wakeWhen;
         if (s.snoozedUntil) { s.live = false; scheduleWake(s.id); }
       }
       if (p.archived !== undefined) {
@@ -673,6 +674,25 @@ async function dispatch(client, method, p) {
       const file = path.join(here, 'fixtures/demo-upload-resume/media/progress-after.png');
       await new Promise((r) => setTimeout(r, 300));
       return { image: { path: file, mediaType: 'image/png', ...imageSize(file) } };
+    }
+    case 'threads.hibernateWhen': {
+      // Away at once, then a canned answer a moment later, as the real
+      // runner does after Opus answers: "talk about X" is a topic, anything
+      // else two days on.
+      const t = need(p.threadId);
+      const s = t.summary;
+      const said = String(p.said ?? '').trim();
+      s.snoozedUntil = '9999-12-31T00:00:00.000Z';
+      s.wakeWhen = { said, pending: true };
+      s.live = false;
+      broadcastSummary(s.id);
+      await new Promise((r) => setTimeout(r, 1500));
+      const topic = /talk about (.+)$/i.exec(said)?.[1];
+      s.wakeWhen = topic ? { said, topic } : { said };
+      if (!topic) s.snoozedUntil = new Date(Date.now() + 2 * 86_400_000).toISOString();
+      scheduleWake(s.id);
+      broadcastSummary(s.id);
+      return { thread: s };
     }
     case 'threads.explain': {
       // A canned answer after a moment, like the small model's few seconds.
@@ -1346,6 +1366,7 @@ function scheduleWake(threadId) {
     const s = t.summary;
     if (s.snoozedUntil && Date.parse(s.snoozedUntil) <= Date.now()) {
       s.snoozedUntil = undefined;
+      delete s.wakeWhen;
       s.needsYou = true;
       broadcastSummary(threadId);
     }

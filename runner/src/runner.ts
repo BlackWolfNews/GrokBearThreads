@@ -82,6 +82,7 @@ import { fileContext } from './adapters/claude/normalize.ts';
 import type { Models } from './models/index.ts';
 import { EXPLAIN_SYSTEM, RECENT_CHARS, RECENT_MESSAGES, explainPrompt } from './explain.ts';
 import type { ExplainTurn } from './explain.ts';
+import { SAID_MAX, WAKE_SYSTEM, hibernateNote, readWakeAnswer, wakePrompt } from './wake-when.ts';
 import { emptyHighlights, observe as observeHighlights, pinItem, remove as removeHighlight, unpin as unpinHighlight, upsert as upsertHighlight, view as highlightsView, absolute, type ThreadHighlights } from './highlights.ts';
 import { SERVER_NAME, approvalTitle } from './threadbear-mcp.ts';
 import { PANEL_ACK_WAIT_MS, PANEL_PLACES, resolvePanel } from './panel-requests.ts';
@@ -395,6 +396,9 @@ const HOOK_TELL_CHARS = 8000;
 // after a restart, a client older than snoozedUntilRestart) sees it as
 // snoozed, and start() wakes it long before.
 export const UNTIL_RESTART = '9999-12-31T00:00:00.000Z';
+// snoozedUntil for a thread waiting on a topic alone (wake-when.ts), or
+// while its time is worked out: the same far-off time, without the flag.
+export const NO_WAKE_TIME = UNTIL_RESTART;
 
 export class Runner {
   private cfg: Config;
@@ -510,7 +514,9 @@ export class Runner {
     // Hibernating until the runner restarts: this is the restart. Before
     // the restart's resume (main.ts), so a thread put away while its own
     // restart waited still gets carried on.
-    for (const st of this.threads.values()) if (st.rec.snoozedUntilRestart) this.wake(st);
+    // A wake-when still being worked out lost its answer with the old
+    // runner, so it comes back too.
+    for (const st of this.threads.values()) if (st.rec.snoozedUntilRestart || st.rec.wakeWhen?.pending) this.wake(st);
     this.flush();
     for (const st of this.threads.values()) if (st.rec.queue.some(q => q.reviewId) && this.bucket(st.rec) === 'inbox') this.kickQueue(st);
     this.armSnoozeTimer();
@@ -923,7 +929,7 @@ export class Runner {
     }
     // Hibernating until the runner restarts: for this thread, coming across
     // is the restart.
-    if (rec.snoozedUntilRestart) this.wake(st);
+    if (rec.snoozedUntilRestart || rec.wakeWhen?.pending) this.wake(st);
     else if (rec.queue.length && this.bucket(rec) === 'inbox') {
       this.kickQueue(st);
     }
@@ -1633,6 +1639,85 @@ export class Runner {
     return { answer: res.value.trim(), model: res.model };
   }
 
+  // Hibernates a thread until when Mike said, in his own words
+  // (wake-when.ts), as Opus reads them: a time, a topic for the librarian
+  // to listen for, or both. The thread goes away at once, as a preset
+  // does, and the time follows once the model answers; if it can't say,
+  // the thread comes back and the call fails with why.
+  async hibernateWhen(params: { threadId: string; said: string }): Promise<{ thread: ThreadSummary; until?: string; topic?: string; why: string }> {
+    const st = this.mustGet(params.threadId);
+    const said = params.said.trim();
+    if (!said) throw new RpcError(ErrorCode.badParams, 'Say when it should wake.');
+    if (said.length > SAID_MAX) throw new RpcError(ErrorCode.badParams, `That's more than ${SAID_MAX} characters.`);
+    const models = this.models;
+    if (!models) throw new RpcError(ErrorCode.other, 'Model calls are off in this runner.');
+    const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    const gist = this.threadGist(st.rec.id, { recent: 0 });
+    const input = { said, now: this.clock.now(), timeZone, title: st.rec.title, first: gist.first, brief: st.rec.brief?.text };
+    this.update({ threadId: st.rec.id, snoozedUntil: NO_WAKE_TIME });
+    st.rec.wakeWhen = { said, pending: true };
+    this.markDirty(st);
+    const ask = (withThread: boolean) =>
+      models.generate({
+        feature: 'wake-when',
+        ...(withThread ? { cwd: st.rec.cwd } : {}),
+        system: WAKE_SYSTEM,
+        prompt: wakePrompt(withThread ? input : { said, now: input.now, timeZone, title: '(private)' }),
+        maxTokens: 300,
+        strong: true,
+      });
+    let res = await ask(true);
+    // A private folder's thread isn't sent: his words alone are usually enough.
+    if (!res.ok && res.reason === 'private') res = await ask(false);
+    // Woken, hibernated another way or deleted meanwhile: that wins.
+    if (st.rt.deleted || st.rec.wakeWhen?.pending !== true || st.rec.wakeWhen.said !== said) {
+      throw new RpcError(ErrorCode.other, 'The thread was woken or put away again while this was worked out.');
+    }
+    const answer = res.ok ? readWakeAnswer(res.value, this.clock.now()) : { error: res.message || `No answer from the model (${res.reason}).` };
+    if ('error' in answer) {
+      delete st.rec.snoozedUntil;
+      delete st.rec.wakeWhen;
+      st.rec.updatedAt = this.isoNow();
+      this.markDirty(st);
+      this.armSnoozeTimer();
+      this.kickQueue(st);
+      throw new RpcError(ErrorCode.other, `Couldn't work out when to wake it: ${answer.error}`);
+    }
+    st.rec.snoozedUntil = answer.until ?? NO_WAKE_TIME;
+    st.rec.wakeWhen = { said, ...(answer.topic ? { topic: answer.topic } : {}) };
+    this.emit(st, { type: 'system.note', text: hibernateNote(answer, said, timeZone) });
+    this.armSnoozeTimer();
+    this.log.info('hibernated in words', { threadId: st.rec.id, until: answer.until, topic: answer.topic });
+    return { thread: this.summary(st), ...answer };
+  }
+
+  // Threads hibernating until Mike next talks about something, for the
+  // librarian to listen for.
+  waitingTopics(): { threadId: string; title: string; topic: string }[] {
+    const now = this.clock.now();
+    const out: { threadId: string; title: string; topic: string }[] = [];
+    for (const { rec, rt } of this.threads.values()) {
+      const topic = rec.wakeWhen?.topic;
+      if (!topic || rt.deleted || rec.archivedAt || !rec.snoozedUntil || Date.parse(rec.snoozedUntil) <= now) continue;
+      out.push({ threadId: rec.id, title: rec.title, topic });
+    }
+    return out;
+  }
+
+  // The librarian heard Mike talk about a hibernating thread's topic in
+  // another thread: it wakes, unread, saying where.
+  wakeForTopic(threadId: string, inThreadId: string): boolean {
+    const st = this.threads.get(threadId);
+    const topic = st?.rec.wakeWhen?.topic;
+    if (!st || !topic || st.rt.deleted || st.rec.archivedAt || threadId === inThreadId || this.bucket(st.rec) !== 'snoozed') return false;
+    const where = this.threads.get(inThreadId)?.rec.title;
+    this.emit(st, { type: 'system.note', text: `Woke up: you talked about ${topic}${where ? ` in "${where}"` : ' in another thread'}.` });
+    this.wake(st);
+    this.armSnoozeTimer();
+    this.log.info('woke for a topic', { threadId, inThreadId, topic });
+    return true;
+  }
+
   // The first user.message's text and the first assistant.text after it,
   // read a page at a time from the start: both are nearly always within
   // the first few events, and a long thread's log is large.
@@ -1682,6 +1767,7 @@ export class Runner {
     if (rec.snoozedUntil || rec.archivedAt) {
       delete rec.snoozedUntil;
       delete rec.snoozedUntilRestart;
+      delete rec.wakeWhen;
       delete rec.archivedAt;
       rt.releaseWhenIdle = false;
     }
@@ -2794,6 +2880,7 @@ export class Runner {
     }
     if (params.snoozedUntil !== undefined) {
       delete rec.snoozedUntilRestart;
+      delete rec.wakeWhen;
       if (params.snoozedUntil === null) delete rec.snoozedUntil;
       else if (params.snoozedUntil === 'restart') {
         rec.snoozedUntil = UNTIL_RESTART;
@@ -3250,6 +3337,7 @@ export class Runner {
   private wake(st: ThreadState): void {
     delete st.rec.snoozedUntil;
     delete st.rec.snoozedUntilRestart;
+    delete st.rec.wakeWhen;
     st.rec.forceUnread = true;
     st.rec.updatedAt = this.isoNow();
     this.markDirty(st);
@@ -3515,12 +3603,14 @@ export class Runner {
     if (wake) {
       delete next.snoozedUntil;
       delete next.snoozedUntilRestart;
+      delete next.wakeWhen;
       delete next.archivedAt;
     }
     this.store.save(next);
     if (wake) {
       delete st.rec.snoozedUntil;
       delete st.rec.snoozedUntilRestart;
+      delete st.rec.wakeWhen;
       delete st.rec.archivedAt;
     }
     // Preserve the record object used by any in-flight deliver() callback.
@@ -3715,6 +3805,7 @@ export class Runner {
     if (rec.effortInUse) s.effortInUse = rec.effortInUse;
     if (rec.snoozedUntil) s.snoozedUntil = rec.snoozedUntil;
     if (rec.snoozedUntilRestart) s.snoozedUntilRestart = true;
+    if (rec.wakeWhen && rec.snoozedUntil) s.wakeWhen = { ...rec.wakeWhen };
     if (rec.archivedAt) s.archivedAt = rec.archivedAt;
     if (rec.nativeSessionId && rec.sessionUsed) s.nativeSessionId = rec.nativeSessionId;
     if (rec.contextTokens !== undefined) s.contextTokens = rec.contextTokens;

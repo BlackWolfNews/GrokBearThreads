@@ -110,6 +110,9 @@ struct ThreadbearApp: App {
                     Button("Pick a time…") {
                         if let id = app.selection { SnoozePicker.show(threadId: id, app: app) }
                     }
+                    Button(WakeWords.menuTitle) {
+                        if let id = app.selection { WakeWhenPrompt.show(threadId: id, app: app) }
+                    }
                 }
                 .disabled(app.selection == nil)
                 Button("Stop") { app.interrupt() }

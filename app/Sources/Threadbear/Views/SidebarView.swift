@@ -522,7 +522,16 @@ struct ThreadRowView: View {
         switch look.status {
         case .time:
             if mode == .snoozed {
-                if let wakeText {
+                if let words = WakeWords.row(thread, now: app.now) {
+                    // A topic, or Thinking… while the runner works out when.
+                    Text(words.text)
+                        .font(.system(size: TypeScale.sidebarMeta))
+                        .foregroundStyle(SidebarMetrics.faint)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                        .frame(maxWidth: zoomed(110), alignment: .trailing)
+                        .tip(words.tip)
+                } else if let wakeText {
                     Text(wakeText).font(.system(size: TypeScale.sidebarMeta)).foregroundStyle(SidebarMetrics.faint)
                 }
             } else if section == .waiting, let wake = app.wakes[thread.id], let next = wake.nextRunAt {
@@ -858,6 +867,10 @@ struct SnoozeMenuItems: View {
             guard allowed() else { return }
             SnoozePicker.show(threadId: threadId, app: app)
         }
+        Button(WakeWords.menuTitle, systemImage: "text.bubble") {
+            guard allowed() else { return }
+            WakeWhenPrompt.show(threadId: threadId, app: app)
+        }
     }
 
     private func allowed() -> Bool {
@@ -1000,6 +1013,28 @@ struct SearchField: View {
         // row's fill it read as a selected item stacked on the list.
         .background(Color.primary.opacity(0.035), in: RoundedRectangle(cornerRadius: SidebarMetrics.corner))
         .overlay(RoundedRectangle(cornerRadius: SidebarMetrics.corner).strokeBorder(.separator, lineWidth: 0.5))
+    }
+}
+
+/// "Wake when…": a text box for when, in Mike's own words. The runner's
+/// model turns them into a time or a topic (protocol "Hibernate in words").
+@MainActor
+enum WakeWhenPrompt {
+    static func show(threadId: String, app: AppModel) {
+        let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 320, height: 24))
+        field.placeholderString = WakeWords.placeholder
+        field.cell?.isScrollable = true
+        field.cell?.wraps = false
+        let alert = NSAlert()
+        alert.messageText = "Hibernate until"
+        alert.accessoryView = field
+        alert.addButton(withTitle: "Hibernate")
+        alert.addButton(withTitle: "Cancel")
+        alert.window.initialFirstResponder = field
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        let said = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !said.isEmpty else { return }
+        app.hibernateWhen(threadId, said: said)
     }
 }
 

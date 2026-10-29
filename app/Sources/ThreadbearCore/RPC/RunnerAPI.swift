@@ -94,6 +94,14 @@ public extension RPCClient {
         try await call("threads.explain", session.params(threadId: threadId, for: index), as: ExplainResult.self, timeout: .seconds(75))
     }
 
+    /// Hibernates a thread until when Mike said, in his own words ("at the
+    /// weekend", "next time I talk about woodworking"). The runner puts it
+    /// away at once and answers once Opus has worked out when, which on
+    /// the pool's CLI can take a while.
+    func hibernateWhen(threadId: String, said: String) async throws -> ThreadSummary {
+        try await call("threads.hibernateWhen", .object(["threadId": .string(threadId), "said": .string(said)]), as: ThreadResult.self, timeout: .seconds(150)).thread
+    }
+
     /// Takes one off the list for good: a later mention doesn't bring it back.
     func removeHighlight(threadId: String, highlightId: String) async throws -> ThreadSummary {
         try await call("threads.removeHighlight", .object(["threadId": .string(threadId), "highlightId": .string(highlightId)]), as: ThreadResult.self).thread

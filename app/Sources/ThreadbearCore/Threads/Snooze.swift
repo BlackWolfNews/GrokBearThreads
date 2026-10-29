@@ -57,3 +57,40 @@ public enum Snooze {
         return nil
     }
 }
+
+/// How a thread hibernated in Mike's words says when it wakes. A topic
+/// alone has no time: its snoozedUntil is a date the runner never reaches.
+public enum WakeWords {
+    public static let menuTitle = "Wake when…"
+    /// The text box's examples.
+    public static let placeholder = "at the weekend, in a few weeks, next time I talk about woodworking"
+
+    /// The time it wakes by, if it has one.
+    public static func time(_ thread: ThreadSummary) -> Date? {
+        guard let until = thread.snoozedUntil, !thread.snoozedUntilRestart, until < farOff else { return nil }
+        return until
+    }
+
+    /// What a Hibernating row shows where its time would be, and the tooltip
+    /// with the rest; nil for one hibernated the ordinary way.
+    public static func row(_ thread: ThreadSummary, now: Date) -> (text: String, tip: String)? {
+        guard let wake = thread.wakeWhen else { return nil }
+        if wake.pending { return ("Thinking…", "Working out when from \"\(wake.said)\"") }
+        guard let topic = wake.topic else { return nil }
+        var tip = "Back when you next talk about \(topic)"
+        if let time = time(thread) { tip += ", or \(RelativeTime.until(time, now: now)) at the latest" }
+        return (topic, tip + ". You said \"\(wake.said)\".")
+    }
+
+    /// The thread's status line ("Hibernating until you talk about woodworking").
+    public static func status(_ thread: ThreadSummary, now: Date) -> String? {
+        guard let wake = thread.wakeWhen else { return nil }
+        if wake.pending { return "Hibernating, working out until when" }
+        guard let topic = wake.topic else { return nil }
+        if let time = time(thread) { return "Hibernating until you talk about \(topic), or \(RelativeTime.until(time, now: now))" }
+        return "Hibernating until you talk about \(topic)"
+    }
+
+    // The runner's 9999-12-31 is beyond this; any real time is well before.
+    static let farOff = Date(timeIntervalSince1970: 200 * 365 * 86_400)
+}

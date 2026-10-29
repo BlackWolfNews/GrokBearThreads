@@ -42,6 +42,10 @@ export type LibrarianHost = {
   // Renames a thread whose title no longer says what it's about; returns
   // the title it took, or nothing when it kept the old one.
   retitleFromLibrarian?(threadId: string, title: string, from: string): string | undefined;
+  // Threads hibernating until Mike next talks about something
+  // (wake-when.ts), and waking one he just did.
+  waitingTopics?(): { threadId: string; title: string; topic: string }[];
+  wakeForTopic?(threadId: string, inThreadId: string): boolean;
 };
 
 // How long after a turn ends before a look, so a quick follow-up turn
@@ -102,6 +106,7 @@ type Answer = {
   links?: unknown;
   thread?: unknown;
   title?: unknown;
+  wake?: unknown;
   why?: unknown;
 };
 
@@ -467,6 +472,11 @@ export class Librarian {
     if (repos.length) lines.push(`Edited files in: ${repos.join(', ')}`);
     const worked = [...(this.workedIn.get(rec.id) ?? [])].filter((r) => !this.edited.get(rec.id)?.has(r)).map((r) => this.tilde(r));
     if (worked.length) lines.push(`Ran commands in: ${worked.join(', ')}`);
+    const waiting = this.waitingFor(rec);
+    if (waiting.length) {
+      lines.push('', 'Hibernating threads waiting for Mike to talk about something:');
+      for (const w of waiting) lines.push(`- ${w.threadId.slice(0, 8)} "${w.title}": ${w.topic}`);
+    }
     const gist = this.host.threadGist(rec.id);
     if (job.reason === 'first-message') lines.push("It has only just started: file it from what it's about, and don't change any project's state yet.");
     if (gist.first) lines.push('', `First message: ${gist.first}`);
@@ -595,9 +605,27 @@ export class Librarian {
         bump('updated');
       }
     }
+    // Hibernating threads whose topic Mike has just talked about here.
+    if (Array.isArray(a.wake)) {
+      const waiting = this.waitingFor(rec);
+      const woke: string[] = [];
+      for (const id of a.wake) {
+        const w = typeof id === 'string' && id.length >= 8 ? waiting.find((x) => x.threadId.startsWith(id)) : undefined;
+        if (w && !woke.includes(w.title) && this.host.wakeForTopic?.(w.threadId, rec.id)) woke.push(w.title);
+      }
+      if (woke.length) {
+        said.push(`Woke ${woke.join(' and ')}`);
+        bump('updated');
+      }
+    }
     const why = typeof a.why === 'string' ? a.why.trim().slice(0, 200) : '';
     const text = said.length ? said.join('. ') : why ? `Nothing to change: ${lowerFirst(why)}` : 'Nothing to change';
     this.note(job, outcome, text, [...ids], costUsd);
+  }
+
+  // The other threads waiting on a topic.
+  private waitingFor(rec: ThreadRecord): { threadId: string; title: string; topic: string }[] {
+    return (this.host.waitingTopics?.() ?? []).filter((w) => w.threadId !== rec.id);
   }
 
   private markLooked(rec: ThreadRecord, job: LibrarianJob): void {
@@ -879,6 +907,7 @@ Reply with JSON only, no prose and no code fence:
  "links": {"<project id>": [{"title": "Live site", "url": "https://..."}]} for lasting places of a project it's in that the messages give and the project doesn't list yet, else {},
  "thread": "where this thread itself is up to, as two or three short bullets, one per line, each starting \"- \": what it did or found, and what it's waiting on or doing next",
  "title": null, or a new title when the thread's title no longer says what it's about (see below),
+ "wake": ["<ids of hibernating threads Mike is talking about here>"], or [] (see below),
  "why": "one short line"}
 
 Folders are repos the work lives in (the thread's folder when it's a repo, the repos it edited, and the ones it ran commands in when the work was about them, not a look at something else), never a catch-all folder. A project with no folders that this thread worked on in a repo should get that repo through addFolders. State is two to four plain sentences about the whole project, not this thread: what's done, what's next, what's blocked. Start from the current state, keep what's still true and fold the change in; don't replace it with this thread's details. Ideas and plans that aren't built yet don't change the state.
@@ -886,6 +915,8 @@ Folders are repos the work lives in (the thread's folder when it's a repo, the r
 Links are the few places Mike keeps going back to for a project: its live site, admin page, dashboard, store listing. Copy the url exactly from the messages and give it a short title ("Live site", "Admin", "App Store"). Never a pull request, commit, issue, docs page, localhost, file or one-off page.
 
 Keep the thread's title (title null) unless it no longer says what the thread is about: the work moved on to something else, or the title is only the first words of the first message ("Hey, does the library, sorry, the librarian, does it update"). A better wording of the same subject is no reason. A new title is 2 to 6 words about the whole thread as it is now, in sentence case (a capital for the first word and for names only), with no quotes, full stop, dash or emoji: "Fix the flaky upload test on CI", "Librarian renames threads that move on".
+
+Some hibernating threads are waiting for Mike to talk about something again ("woodworking"). Put one in wake when Mike's own messages in this thread are about that: he's working on it, planning it or asking about it. A passing mention, or only the agent bringing it up, isn't enough. Most looks wake none.
 
 The thread bullets are for Mike glancing at the thread later: concrete, in his plain words, each under ten words, no full stops. The last one says who's waiting on whom ("Waiting on Mike to pick a design", "Fixing the last failing test").`;
 

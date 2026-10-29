@@ -119,6 +119,40 @@ final class SnoozeTests: XCTestCase {
     }
 }
 
+final class WakeWordsTests: XCTestCase {
+    let now = ISO8601.parse("2026-10-29T06:00:00Z")!
+    let never = ISO8601.parse("9999-12-31T00:00:00.000Z")!
+
+    func testTopicAloneShowsTheTopicAndNoTime() {
+        let t = ThreadSummary(id: "a", title: "Drawers", snoozedUntil: never, wakeWhen: WakeWhen(said: "next time I talk about woodworking", topic: "woodworking"))
+        XCTAssertNil(WakeWords.time(t))
+        XCTAssertEqual(WakeWords.row(t, now: now)?.text, "woodworking")
+        XCTAssertEqual(WakeWords.row(t, now: now)?.tip, "Back when you next talk about woodworking. You said \"next time I talk about woodworking\".")
+        XCTAssertEqual(ThreadRefs.status(t, now: now), "Hibernating until you talk about woodworking")
+    }
+
+    func testTopicWithALimitAndPending() {
+        let limit = now.addingTimeInterval(30 * 86_400)
+        let t = ThreadSummary(id: "a", title: "Drawers", snoozedUntil: limit, wakeWhen: WakeWhen(said: "woodworking or a month", topic: "woodworking"))
+        XCTAssertEqual(WakeWords.time(t), limit)
+        XCTAssertTrue(ThreadRefs.status(t, now: now).hasPrefix("Hibernating until you talk about woodworking, or "))
+        let pending = ThreadSummary(id: "b", title: "x", snoozedUntil: never, wakeWhen: WakeWhen(said: "at the weekend", pending: true))
+        XCTAssertEqual(WakeWords.row(pending, now: now)?.text, "Thinking…")
+        // A plain time in words reads as any other snooze.
+        let plain = ThreadSummary(id: "c", title: "x", snoozedUntil: limit, wakeWhen: WakeWhen(said: "in a month"))
+        XCTAssertNil(WakeWords.row(plain, now: now))
+        XCTAssertNil(WakeWords.status(plain, now: now))
+    }
+
+    func testDecodesFromTheRunner() throws {
+        let json = #"{"id":"a","title":"x","cwd":"/","accountId":"c","provider":"claude","permissionMode":"full","status":"idle","live":false,"needsYou":false,"createdAt":"2026-10-29T06:00:00Z","updatedAt":"2026-10-29T06:00:00Z","lastActivityAt":"2026-10-29T06:00:00Z","snoozedUntil":"9999-12-31T00:00:00.000Z","wakeWhen":{"said":"soon","pending":true},"preview":"","lastSeq":1,"lastSeenSeq":1}"#
+        let t = try JSONDecoder().decode(ThreadSummary.self, from: Data(json.utf8))
+        XCTAssertEqual(t.wakeWhen, WakeWhen(said: "soon", pending: true))
+        let back = try JSONDecoder().decode(ThreadSummary.self, from: JSONEncoder().encode(t))
+        XCTAssertEqual(back.wakeWhen, t.wakeWhen)
+    }
+}
+
 final class ThreadSectionsTests: XCTestCase {
     func thread(_ id: String, status: ThreadStatus = .idle, needsYou: Bool = false, minutesAgo: Double, snoozed: Date? = nil, archived: Date? = nil, background: [BackgroundTask] = []) -> ThreadSummary {
         let now = Date(timeIntervalSince1970: 1_000_000)

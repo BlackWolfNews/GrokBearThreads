@@ -5,6 +5,7 @@ import type { WaitingForRoom, Ask, AskAnswer, NeedsWho, DesignReview, ReviewDraf
 import { atomicWriteFileSync, readJsonSync } from './fsutil.ts';
 import { paths } from './config.ts';
 import type { WorktreeRecord } from './worktrees.ts';
+import type { WakeWhen } from './wake-when.ts';
 
 export type QueuedSend = { turnId: string; text: string; images: ImageRef[]; origin?: MessageOrigin; scheduleId?: string; reviewId?: string; reviewResponse?: ReviewDraft; answers?: AskAnswer[]; editOf?: number };
 
@@ -36,6 +37,7 @@ export type ThreadRecord = {
   lastActivityAt: string;
   snoozedUntil?: string;
   snoozedUntilRestart?: boolean; // snoozedUntil is UNTIL_RESTART; start() wakes it
+  wakeWhen?: WakeWhen; // hibernated in Mike's words (wake-when.ts)
   archivedAt?: string;
   preview: string;
   lastSeq: number;

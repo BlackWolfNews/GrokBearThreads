@@ -396,6 +396,11 @@ enum Automation {
         case "snooze":
             let target = target(c, app)
             guard let id = target.id else { return target.error }
+            // {"cmd":"snooze","said":"at the weekend"} is Wake when… without its text box.
+            if let said = c["said"] as? String {
+                app.hibernateWhen(id, said: said)
+                return "ok \(id)"
+            }
             app.snooze(id, until: Date().addingTimeInterval(number(c["seconds"]) ?? 3600))
             return "ok \(id)"
         case "panel":

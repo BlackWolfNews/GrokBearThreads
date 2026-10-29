@@ -145,6 +145,9 @@ type ThreadSummary = {
   snoozedUntil?: string
   snoozedUntilRestart?: true // hibernating until the runner next starts;
                         // snoozedUntil is then 9999-12-31T00:00:00.000Z
+  wakeWhen?: { said: string, topic?: string, pending?: true }
+                        // hibernated in Mike's words (Hibernate in words);
+                        // only while snoozedUntil is set
   archivedAt?: string
   onOldRunner?: true    // finishing a turn on the runner that handed over
                         // (Handovers); moves across when the turn ends
@@ -632,6 +635,7 @@ take the streaming reasoning row's place.
 | `panels.convexKey` | `{ threadId, panelId, deployment?: string, renew?: boolean }` | `{ deployment, deploymentUrl, adminKey }`, a deploy key for a panel with `convex`, for Convex's embedded dashboard. `deployment` defaults to the panel's configured deployment; any other name must be one returned by `panels.convexDeployments` for this panel's project. The runner makes it the first time (`npx convex deployment token create` in the project's folder, on Mike's Convex CLI login) and keeps it in `secrets/convex-panels/<deployment>.json`; `renew` deletes that one from Convex and makes a fresh one. Slow the first time. `-32602` for a panel the thread doesn't have or one without `convex`; an error with the CLI's message when it couldn't make one (not logged in, no `convex` package installed) |
 | `threads.highlights` | `{ threadId }` | `ThreadHighlights` (see Highlights): what the thread has made, shared and pinned, read from its events since the last call and kept with the thread |
 | `threads.explain` | `{ threadId, selection: string, message?: string, question?: string, earlier?: { question?: string, answer: string }[] }` | `{ answer: string, model: string }`. Explains words Mike selected in the transcript, on the small model (see Explain). `message` is the whole message they came from, as the app shows it; `earlier` and `question` are a follow-up. Writes nothing to the thread. `-32000` with the reason when no model answers |
+| `threads.hibernateWhen` | `{ threadId, said: string }` (at most 300 characters) | `{ thread: ThreadSummary, until?: string, topic?: string, why: string }`. Hibernates the thread until when Mike said, in his own words (see Hibernate in words). It's away at once, with `wakeWhen.pending`, and the answer comes once the model has worked out when. `-32000` with the reason when it can't say, and the thread is back in the inbox |
 | `threads.removeHighlight` | `{ threadId, highlightId }` | `{ thread: ThreadSummary }` takes one off the list for good (a pin or a found one); a later mention doesn't bring it back. `-32602` for an id the thread doesn't have |
 | `threads.panelShown` | `{ threadId, requestId }` | `{ thread: ThreadSummary }`. The app has shown the thread's `panelRequest` (see Showing panels), which clears it. Another id (a newer request replaced it, or it's gone already) changes nothing |
 | `schedules.list` | `{ threadId?: string }` | `{ schedules: Schedule[] }`, soonest `nextRunAt` first, then the paused and finished ones. With `threadId`, only the ones that send to that thread or were made by it |
@@ -981,6 +985,34 @@ context doesn't grow. The side conversation lives in the app (one per
 thread, gone on quit); each follow-up sends the earlier answers again as
 `earlier`. Private folders, the pool and the budget apply as for any
 model call.
+
+## Hibernate in words
+
+Besides the presets and a picked time, Mike can say when a thread should
+come back in his own words: "at the weekend", "in a few weeks", "next
+time I talk about woodworking". `threads.hibernateWhen` hibernates it
+straight away (`snoozedUntil` 9999-12-31, `wakeWhen: { said, pending:
+true }`), then asks Opus (job `decide`: Opus on the pool, then on
+OpenRouter; feature `wake-when`) with the local time and time zone, the
+thread's title, first message and brief, and his words. It answers with a
+time, a topic, or both:
+
+- **A time** becomes `snoozedUntil`, and the thread wakes as any snooze
+  does.
+- **A topic** ("woodworking") waits for the librarian. While any thread is
+  waiting on one, every look lists them, and its answer's `wake` names the
+  ones Mike's own messages in the looked-at thread are about. Each wakes,
+  unread, with a `system.note` saying where ("Woke up: you talked about
+  woodworking in "Router table jig"."). A topic with no time has the far-off
+  `snoozedUntil`; with one, whichever comes first wakes it.
+
+The thread gets a `system.note` saying what was worked out ("Hibernating
+until Saturday 31 October, 9 am. You said "at the weekend"."). A model
+that can't say (no pool room, an answer that isn't a time or a topic)
+puts the thread back and fails the call. A private folder's thread is
+asked about with his words alone. Any other snooze, a wake or a message
+clears `wakeWhen`, and a runner that restarts while one is pending wakes
+the thread, as the answer is lost.
 
 ## Pools
 

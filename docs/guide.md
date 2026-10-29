@@ -110,6 +110,13 @@ come back: in an hour, this evening, tomorrow, next Monday or a time of your
 own. It leaves the list, its agent stops, and it comes back marked unread
 when the time comes. Hibernating threads have their own view (⌘2).
 
+Or pick Wake when… and say it in your own words: "at the weekend", "in a
+few weeks", "next time I talk about woodworking". Opus works out what you
+meant (the row says Thinking… for a few seconds) and the thread says what
+it settled on. A topic waits for you to bring it up: when the librarian
+sees you talking about it in another thread, it wakes this one and says
+where.
+
 When a thread is done, archive it with ⌘E, or swipe its row left with two
 fingers on the trackpad (or drag it left with the mouse) and let go once the space behind it turns blue (a
 quick flick works too). The Archive view (⌘3) lists them with a search box,

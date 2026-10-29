@@ -1064,6 +1064,22 @@ final class AppModel {
         if selection == threadId { select(next) }
     }
 
+    /// Hibernate until when Mike said, in his words. The runner puts it
+    /// away straight off (its row says Thinking… until the time is worked
+    /// out); if the model can't say, it comes back and the banner says why.
+    func hibernateWhen(_ threadId: String, said: String) {
+        guard let client else { return }
+        let next = neighbour(of: threadId)
+        if selection == threadId { select(next) }
+        Task {
+            do {
+                threads[threadId] = try await client.hibernateWhen(threadId: threadId, said: said)
+            } catch {
+                show(error)
+            }
+        }
+    }
+
     /// Hibernate until the runner next starts. Offered while a restart is
     /// waiting for threads: one that's holding it up can go away now (its
     /// turn stops, so the restart can go ahead) and come back after.

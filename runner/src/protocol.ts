@@ -155,6 +155,9 @@ export type ThreadSummary = {
   lastActivityAt: string;
   snoozedUntil?: string;
   snoozedUntilRestart?: boolean; // hibernating until the runner next starts
+  // Hibernated in Mike's words ("Hibernate in words"): what he said, the
+  // topic it waits for, and pending while the time is worked out.
+  wakeWhen?: { said: string; topic?: string; pending?: true };
   onOldRunner?: boolean; // finishing a turn on a runner that handed over (Handovers)
   archivedAt?: string;
   preview: string;
