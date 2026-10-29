@@ -80,7 +80,7 @@ export const ICON_SWEEP_MS = 60 * 60_000;
 export const ICON_SOON_MS = 3_000;
 
 // Which reason wins when a thread is queued twice.
-const RANK: Record<LibrarianReason, number> = { asked: 0, moved: 1, 'new-folder': 2, 'first-turn': 3, 'first-message': 4, 'catch-up': 5, error: 6 };
+const RANK: Record<LibrarianReason, number> = { asked: 0, moved: 1, 'new-folder': 2, 'first-turn': 3, 'first-message': 4, 'catch-up': 5 };
 
 // `early`: the look was from the first message alone, so the first turn's
 // end still gets a look of its own.
@@ -259,19 +259,6 @@ export class Librarian {
       this.changed();
     }
     return this.status();
-  }
-
-  isPaused(): boolean {
-    return this.paused;
-  }
-
-  // The error watch opened a thread for an error in Threadbear itself
-  // (error-watch.ts): into what it did, like a look.
-  noteError(threadId: string, threadTitle: string, text: string, costUsd?: number): void {
-    this.rollDay();
-    this.day.spentUsd += costUsd ?? 0;
-    this.note({ threadId, threadTitle, reason: 'error', why: text, dueAt: new Date(this.clock.now()).toISOString() }, 'opened', text, undefined, costUsd);
-    this.changed();
   }
 
   // ------------------------------------------------------------- triggers

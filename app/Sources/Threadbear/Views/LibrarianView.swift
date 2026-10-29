@@ -190,7 +190,6 @@ private struct EntryRow: View {
         case .nothing: return "Left it as it was"
         case .skipped: return "Skipped it"
         case .failed: return "Couldn't look"
-        case .opened: return "Opened a thread for an error"
         case .other: return "Looked"
         }
     }

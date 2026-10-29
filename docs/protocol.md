@@ -349,7 +349,6 @@ type LibrarianReason =
   | "moved"             // the thread changed folder
   | "catch-up"          // more turns since its last look (at most hourly)
   | "asked"             // librarian.run, or a backfill
-  | "error"             // the error watch opened the thread (Projects, "Error watch")
 
 type LibrarianJob = {
   threadId: string
@@ -366,7 +365,6 @@ type LibrarianEntry = {
   threadTitle: string
   reason: LibrarianReason
   outcome: "joined" | "created" | "updated" | "left" | "nothing" | "skipped" | "failed"
-         | "opened"     // the error watch opened this thread for an error
   text: string          // "Put it in Threadbear", "Made Poddle and put it there",
                         // "Threadbear's state", "No key", the model's error
   projectIds?: string[]
@@ -1795,29 +1793,6 @@ never takes one away. Merging two projects keeps both lots.
 `list_projects`, `read_project`, `create_project`, `update_project`,
 `join_project` and `leave_project` (each for their own thread by default).
 An agent's join is pinned.
-
-**Error watch.** The librarian also keeps an eye on Threadbear itself
-(`runner/src/error-watch.ts`). Every warning and error the runner logs is
-grouped by its message and what it said, with ids, hashes, temp paths and
-numbers taken out, so one fault logged twenty times is one group (model
-call failures and the watch's own lines aren't counted). Groups are kept
-in `<home>/error-watch.json`, the newest 200. Every 15 minutes, groups it
-hasn't decided about go to the small model in one call (feature `errors`),
-which says which look like a bug worth a thread, putting errors with the
-same cause together, and which to let be. For each one worth it, a thread
-starts in the checkout the runner's release was built from (so it gets a
-worktree of its own) with an `origin: "runner"` message giving the
-errors, their counts and latest lines, and telling the agent to find the
-cause, fix it test-first and `tb land`, or say why not and stop. The
-librarian's `recent` gets an entry with `reason: "error"` and `outcome:
-"opened"`, linked to the new thread.
-
-At most 3 threads a day. An error whose thread is still open is never
-raised again; once its thread is archived, it's asked about again if it
-happens a day or more after it was raised. One let be is asked about
-again after a week if it has happened since. Nothing is checked while the
-librarian is paused, and a runner with no release (a dev runner, a
-sandbox, a test) never checks.
 
 ## Schedules
 

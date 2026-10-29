@@ -271,7 +271,7 @@ export type ProjectIcon = {
   updatedAt: string;
 };
 
-export type LibrarianReason = 'first-message' | 'first-turn' | 'new-folder' | 'moved' | 'catch-up' | 'asked' | 'error';
+export type LibrarianReason = 'first-message' | 'first-turn' | 'new-folder' | 'moved' | 'catch-up' | 'asked';
 
 export type LibrarianJob = {
   threadId: string;
@@ -281,7 +281,7 @@ export type LibrarianJob = {
   dueAt: string;
 };
 
-export type LibrarianOutcome = 'joined' | 'created' | 'updated' | 'left' | 'nothing' | 'skipped' | 'failed' | 'opened';
+export type LibrarianOutcome = 'joined' | 'created' | 'updated' | 'left' | 'nothing' | 'skipped' | 'failed';
 
 export type LibrarianEntry = {
   id: string;

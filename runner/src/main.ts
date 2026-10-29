@@ -14,7 +14,6 @@ import { AppRestarts } from './app-restarts.ts';
 import { Scheduler, scheduleMethods } from './schedules.ts';
 import { Projects, guardProjects, projectMethods } from './projects.ts';
 import { Librarian, librarianMethods } from './librarian.ts';
-import { ErrorWatch } from './error-watch.ts';
 import { ConnectorsMonitor, connectorsMethods } from './connectors.ts';
 import { createLogger } from './log.ts';
 import { hidIdleMs, isAtMac } from './presence.ts';
@@ -45,11 +44,7 @@ export const REPORTS_LISTENING = true;
 async function main(): Promise<void> {
   const cfg = loadConfig();
   ensureHome(cfg.home);
-  const rawLog = createLogger(cfg.logFile, { echo: process.env.THREADBEAR_LOG_STDERR === '1', debug: process.env.THREADBEAR_DEBUG === '1' });
-  // Every warning and error the runner logs is also seen by the error
-  // watch, which opens a thread for one that looks like a bug (error-watch.ts).
-  const errorWatch = new ErrorWatch({ home: cfg.home, clock: realClock, log: rawLog });
-  const log = errorWatch.tee(rawLog);
+  const log = createLogger(cfg.logFile, { echo: process.env.THREADBEAR_LOG_STDERR === '1', debug: process.env.THREADBEAR_DEBUG === '1' });
   log.info('runner starting', { version: RUNNER_VERSION, home: cfg.home, port: cfg.port, pid: process.pid });
 
   // The SDK warns when canUseTool is set in bypass mode; it's deliberate
@@ -216,16 +211,6 @@ async function main(): Promise<void> {
   projects.start(runner);
   const librarian = new Librarian({ host: runner, projects, models, clock: realClock, log, home: cfg.home });
   librarian.start();
-  // Only a release knows the checkout it came from; a dev runner has none,
-  // so it never opens threads.
-  errorWatch.start({
-    host: runner,
-    models,
-    repo: readRelease()?.checkout,
-    logFile: cfg.logFile,
-    paused: () => librarian.isPaused(),
-    noted: (threadId, title, text, costUsd) => librarian.noteError(threadId, title, text, costUsd),
-  });
   // The Connectors gateway's /health, for the app's Connectors panel
   // (docs/protocol.md, "Connectors"). Off when there's no gateway.
   const connectors = new ConnectorsMonitor({
@@ -414,7 +399,6 @@ async function main(): Promise<void> {
     primaryLink?.close();
     scheduler.stop();
     librarian.stop();
-    errorWatch.stop();
     connectors.stop();
     projects.stop();
     usage.stop();
@@ -455,7 +439,6 @@ async function main(): Promise<void> {
       stopHousekeeping();
       scheduler.stop();
       librarian.stop();
-      errorWatch.stop();
       connectors.stop();
       projects.freeze();
       updates.stop();
