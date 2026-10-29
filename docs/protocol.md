@@ -444,6 +444,20 @@ type Schedule = {
     threadId?: string   // the thread it sent to or started
     note?: string       // why it was skipped or failed
   }
+  runnerId?: string     // the runner it runs on (see Schedules, "Runners").
+                        // Absent from a runner whose schedules are its own
+                        // file: then it's that runner
+  runnerName?: string   // that runner's name, as runners.list has it
+  runRequestedAt?: string // a schedules.run for it waits for its runner
+}
+
+// A runner Threadbear knows of, from the backend (runners.list).
+type RunnerInfo = {
+  id: string
+  name: string          // "m5", "bruce": the Mac's hostname by default
+  online: boolean       // heard from in the last 3 minutes
+  lastSeenAt?: string
+  self: boolean         // the runner answering
 }
 
 // The runner's settings, as the Settings window shows them. Everything here
@@ -641,10 +655,11 @@ take the streaming reasoning row's place.
 | `threads.removeHighlight` | `{ threadId, highlightId }` | `{ thread: ThreadSummary }` takes one off the list for good (a pin or a found one); a later mention doesn't bring it back. `-32602` for an id the thread doesn't have |
 | `threads.panelShown` | `{ threadId, requestId }` | `{ thread: ThreadSummary }`. The app has shown the thread's `panelRequest` (see Showing panels), which clears it. Another id (a newer request replaced it, or it's gone already) changes nothing |
 | `schedules.list` | `{ threadId?: string }` | `{ schedules: Schedule[] }`, soonest `nextRunAt` first, then the paused and finished ones. With `threadId`, only the ones that send to that thread or were made by it |
-| `schedules.create` | `{ text: string, title?: string, at?: string, cron?: string, timezone?: string, threadId?: string, cwd?, accountId?, model?, effort?, permissionMode?, paused?: boolean, createdBy?: string }` | `{ schedule: Schedule }`. Exactly one of `at` and `cron`. An `at` in the past runs straight away. With `threadId` it sends there, otherwise it starts a new thread each time (`cwd` defaults like `threads.create`'s, checked now). A bad cron or zone is `-32602` with a message saying what's wrong |
+| `schedules.create` | `{ text: string, title?: string, at?: string, cron?: string, timezone?: string, threadId?: string, cwd?, accountId?, model?, effort?, permissionMode?, paused?: boolean, createdBy?: string, runnerId?: string }` | `{ schedule: Schedule }`. Exactly one of `at` and `cron`. An `at` in the past runs straight away. With `threadId` it sends there, otherwise it starts a new thread each time (`cwd` defaults like `threads.create`'s, checked now). A bad cron or zone is `-32602` with a message saying what's wrong. `runnerId` (an id or a name from `runners.list`) puts a new-thread schedule on another runner: its folder and account are checked there when it runs, and an absent `cwd` means that runner's default. Absent, it's this runner. Needs schedules in the backend (see Schedules, "Runners"); otherwise `-32602` |
 | `schedules.update` | `{ scheduleId, title?, text?, at?: string, cron?: string, timezone?: string \| null, paused?: boolean, cwd?, accountId?, model?: string \| null, effort?: EffortLevel \| null, permissionMode? }` | `{ schedule: Schedule }`. Setting `at` drops `cron` and the other way round. A new time works out `nextRunAt` again; so does unpausing. Setting `at` on a finished one-off makes it run again then. The target thread can't be changed (make a new schedule) |
 | `schedules.delete` | `{ scheduleId }` | `{}` |
-| `schedules.run` | `{ scheduleId }` | `{ schedule: Schedule, threadId: string, turnId: string }` runs it now, as if it were due, even when paused. A repeating schedule keeps its `nextRunAt`; a one-off is finished |
+| `schedules.run` | `{ scheduleId }` | `{ schedule: Schedule, threadId?: string, turnId?: string, queued?: boolean }` runs it now, as if it were due, even when paused. A repeating schedule keeps its `nextRunAt`; a one-off is finished. For a schedule on another runner it answers at once with `queued: true` and no thread: that runner runs it when it next hears (`runRequestedAt` is set until then) |
+| `runners.list` | `{}` | `{ runners: RunnerInfo[] }`, this runner first, then the rest by name. Without a backend, just this runner |
 | `schedules.preview` | `{ cron?: string, at?: string, timezone?: string, count?: number }` | `{ whenText: string, runs: string[] }`, the next `count` (default 5, at most 20) times it would run, for an editor to show as someone types. `-32602` with the reason for a cron or zone it can't read |
 | `projects.list` | `{ archived?: boolean }` | `{ projects: Project[] }`, newest `lastActivityAt` first. Archived ones only with `archived: true` (then all of them) |
 | `projects.get` | `{ projectId }` | `{ project: Project, threadIds: string[] }`, its threads newest activity first, put away ones included |
@@ -1934,11 +1949,30 @@ kept in `schedules.json` in the data dir.
   records `lastRun.outcome: "failed"` and a `note`, and a repeating
   schedule carries on next time. Deleting a thread deletes the schedules
   that send to it.
+- **Runners.** With sync on and a backend of API 9 or later, schedules
+  live in the backend's `schedules` table rather than `schedules.json`,
+  so every runner sees one list and a schedule can be made for another
+  runner (step 6, docs/step6-plan.md). Each row names its `runnerId`, and
+  only that runner sends it. The runner keeps a live subscription to the
+  table (`sync:schedules`) and a copy in `schedules.json` (`version: 2`)
+  for when the backend can't be reached. Its own timer finds a due run,
+  as above; before sending it takes the run with `sync:claimSchedule`,
+  which says no unless the row is still due at that `nextRunAt` and
+  nobody holds it (a claim lasts 2 minutes), so a run is sent once even
+  while two runner processes share a `runnerId` in a handover. Then
+  `sync:scheduleRan` records it and the next time. Making, changing and
+  deleting go straight to the backend and answer once it has them; with
+  no backend reachable they fail with `-32000` saying so. Nothing fires
+  without the backend. The first time a runner meets a backend of API 9
+  it moves its own `schedules.json` up, under its `runnerId`, and from
+  then on the file is only the copy. With sync off, or an older backend,
+  schedules stay the runner's own file as before.
 - **Agents** make and change schedules with the `threadbear` tools
   (`schedule_message`, `list_schedules`, `update_schedule`,
   `delete_schedule`); `createdBy` is their thread. By default an agent's
   schedule sends to its own thread ("check the deploy again in 20
-  minutes").
+  minutes"). `schedule_message` takes a `runner` (a name or id from
+  `runners.list`); left out, the schedule runs on the agent's own runner.
 
 ## Sync
 
@@ -1990,7 +2024,10 @@ the mirror back as state. The Mac app doesn't use it.
   `approval.resolved`, or the thread no longer waiting, takes it off.
 - **Projects, schedules, accounts.** Each `projects.updated`,
   `schedules.updated` and `accounts.updated` replaces that runner's rows
-  of the table with the whole list (`Project` with its icon as `icon: {
+  of the table with the whole list (schedules only while they're the
+  runner's own file: once they live in the backend, see Schedules,
+  "Runners", the runner writes them there directly and these mirrored rows
+  are gone) (`Project` with its icon as `icon: {
   symbol?, picture?, by }`, `picture` naming the runner's copy of the
   picture, the file name without its extension; `Schedule` without effort
   and permission mode; `Account` as `id, provider, title, note?, email?,

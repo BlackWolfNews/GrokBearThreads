@@ -33,4 +33,9 @@
 //    its controls; phone:share queues a "share" command; and a shared
 //    thread's pictures go to file storage (sync:addShareImage), shown by
 //    share:view. A runner sends `share` only to a backend of 8 or later.
-export const API_VERSION = 8;
+// 9: schedules can live here rather than in each runner's schedules.json
+//    (step 6; docs/protocol.md, Schedules, "Runners"): sync:schedules,
+//    sync:saveSchedule, sync:deleteSchedule, sync:adoptSchedules,
+//    sync:claimSchedule, sync:releaseSchedule, sync:scheduleRan and
+//    sync:requestScheduleRun. A runner moves its schedules here only from 9.
+export const API_VERSION = 9;

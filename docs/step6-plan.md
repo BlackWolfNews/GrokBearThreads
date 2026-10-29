@@ -81,15 +81,20 @@ mirrors it) flips: for schedules Convex owns them and runners follow.
   mirror for the phone). Each row keeps today's `Schedule` fields plus
   `runnerId`. The current `schedules.json` is moved in once, onto the M5's
   runner.
-- **The clock is Convex.** Saving a schedule sets `nextRunAt` and uses
-  `ctx.scheduler.runAt` to mark it due then. Runners can't poll "what's due
-  now" with a query: a query that reads the time doesn't re-run as time
-  passes.
-- **Runners claim.** Each runner subscribes to its own due runs and takes
-  each with `schedules:claim`, a mutation, so a run starts exactly once.
-  That still matters with one runner per schedule: during a handover two
-  runner processes share a `runnerId`. The claim is a lease: if the run
-  isn't reported started within a couple of minutes, it goes back to due.
+- **The clock is the runner's own timer; Convex decides who sends.** As
+  built (29 Oct), each runner checks its own schedules as before, and
+  before sending a due run takes it with `sync:claimSchedule`, a mutation,
+  so a run starts exactly once. That matters even with one runner per
+  schedule: during a handover two runner processes share a `runnerId`.
+  The claim is a lease: if the run isn't recorded within 2 minutes, it can
+  be taken again. The draft had Convex's `scheduler.runAt` as the clock,
+  but with every schedule on a named runner nothing can run while that
+  runner is off anyway, so a Convex clock added moving parts and no
+  behaviour. It's worth adding with "Any" (below), if that comes.
+- **Runners subscribe** to the whole table (`sync:schedules`), so the Mac
+  app's list shows every runner's schedules with the runner's name, and a
+  "Run now" on another runner's schedule is a request
+  (`sync:requestScheduleRun`) its runner picks up.
 - **When its runner is off**, the run waits, then happens once when the
   runner is back, as late runs do today.
 - **The skip rule stays**: a repeating schedule whose last thread is still

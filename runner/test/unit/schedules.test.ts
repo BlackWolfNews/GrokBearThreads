@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { makeHarness, tick } from '../helpers/fakes.ts';
 import { describeAt, describeCron, nextRuns, parseCron } from '../../src/cron.ts';
-import { Scheduler, scheduleMethods } from '../../src/schedules.ts';
+import { Scheduler, scheduleMethods, type ScheduleBackend, type StoredSchedule } from '../../src/schedules.ts';
 import { buildThreadbearTools } from '../../src/threadbear-mcp.ts';
 import { ErrorCode, RpcError } from '../../src/protocol.ts';
 import { nullLogger } from '../../src/log.ts';
@@ -94,7 +94,7 @@ function idleThread(h: ReturnType<typeof makeHarness>) {
 test('a one-off sends to its thread when due, says it was scheduled, then is done', async () => {
   const { h, sched, updates } = setup();
   const { thread, s } = idleThread(h);
-  const sc = sched.create({ text: 'Check the deploy again', at: iso(h.clock.now() + 10 * MIN), threadId: thread.id });
+  const sc = await sched.create({ text: 'Check the deploy again', at: iso(h.clock.now() + 10 * MIN), threadId: thread.id });
   assert.equal(sc.title, 'Check the deploy again');
   assert.equal(sc.whenText, 'Once, Mon 26 Oct at 12:10');
   assert.equal(sc.nextRunAt, '2026-10-26T12:10:00.000Z');
@@ -131,7 +131,7 @@ test('a schedule for a busy thread waits for its turn to end rather than joining
   const s = h.adapter.last;
   s.init();
   // An `at` already passed runs straight away.
-  sched.create({ text: 'Status?', at: iso(h.clock.now() - MIN), threadId: thread.id });
+  await sched.create({ text: 'Status?', at: iso(h.clock.now() - MIN), threadId: thread.id });
   await tick();
   assert.equal(s.sent.length, 1, 'not steered into the running turn');
   assert.equal(h.events(thread.id).filter((e) => e.type === 'user.message').length, 1);
@@ -144,7 +144,7 @@ test('a schedule for a busy thread waits for its turn to end rather than joining
 
 test('a cron starts a new thread each time, and skips a run while the last thread is still going', async () => {
   const { h, sched } = setup();
-  const sc = sched.create({ text: 'Summarise my inbox', title: 'Inbox summary', cron: '*/30 * * * *', accountId: 'claude-3', model: 'claude-haiku-5-5' });
+  const sc = await sched.create({ text: 'Summarise my inbox', title: 'Inbox summary', cron: '*/30 * * * *', accountId: 'claude-3', model: 'claude-haiku-5-5' });
   assert.equal(sc.cwd, h.cfg.defaults.cwd);
   assert.equal(sc.whenText, 'Every 30 minutes');
   assert.equal(sc.nextRunAt, '2026-10-26T12:30:00.000Z');
@@ -180,7 +180,7 @@ test('a cron starts a new thread each time, and skips a run while the last threa
 test('runs missed while the runner was stopped happen once, then the cron carries on from now', async () => {
   const { h, sched } = setup();
   const { thread } = idleThread(h);
-  const sc = sched.create({ text: 'ping', cron: '*/5 * * * *', threadId: thread.id });
+  const sc = await sched.create({ text: 'ping', cron: '*/5 * * * *', threadId: thread.id });
   sched.stop();
   h.clock.advance(2 * 60 * MIN);
   const again = new Scheduler({ runner: h.runner, home: h.home, clock: h.clock, log: nullLogger, zone: () => 'UTC' });
@@ -192,11 +192,11 @@ test('runs missed while the runner was stopped happen once, then the cron carrie
   again.stop();
 });
 
-test('while the runner is restarting a due run waits', () => {
+test('while the runner is restarting a due run waits', async () => {
   const { h, sched } = setup();
   const { thread, s } = idleThread(h);
   h.runner.refuseNewTurns('The runner is restarting; send again in a moment.');
-  const sc = sched.create({ text: 'later', at: iso(h.clock.now() + MIN), threadId: thread.id });
+  const sc = await sched.create({ text: 'later', at: iso(h.clock.now() + MIN), threadId: thread.id });
   h.clock.advance(2 * MIN);
   assert.equal(s.sent.length, 1);
   const still = sched.find(sc.id);
@@ -205,12 +205,12 @@ test('while the runner is restarting a due run waits', () => {
   sched.stop();
 });
 
-test('a failed run says why, and deleting the thread deletes its schedules', () => {
+test('a failed run says why, and deleting the thread deletes its schedules', async () => {
   const { h, sched } = setup();
   const { thread } = idleThread(h);
   const dir = path.join(h.home, 'gone-soon');
   fs.mkdirSync(dir);
-  const job = sched.create({ text: 'build', cron: '@hourly', cwd: dir, accountId: 'claude-3' });
+  const job = await sched.create({ text: 'build', cron: '@hourly', cwd: dir, accountId: 'claude-3' });
   fs.rmSync(dir, { recursive: true });
   h.clock.advance(60 * MIN);
   const failed = sched.find(job.id);
@@ -218,7 +218,7 @@ test('a failed run says why, and deleting the thread deletes its schedules', () 
   assert.match(failed.lastRun?.note ?? '', /Folder not found/);
   assert.equal(failed.nextRunAt, '2026-10-26T14:00:00.000Z', 'carries on next time');
 
-  sched.create({ text: 'a', cron: '@daily', threadId: thread.id });
+  await sched.create({ text: 'a', cron: '@daily', threadId: thread.id });
   assert.equal(sched.list(thread.id).length, 1);
   h.runner.delete(thread.id);
   assert.equal(sched.list(thread.id).length, 0);
@@ -229,42 +229,42 @@ test('a failed run says why, and deleting the thread deletes its schedules', () 
 test('pause, resume, edit and run now', async () => {
   const { h, sched } = setup();
   const { thread, s } = idleThread(h);
-  const sc = sched.create({ text: 'standup notes', cron: '0 9 * * 1-5', threadId: thread.id });
-  assert.equal(sched.update({ scheduleId: sc.id.slice(0, 6), paused: true }).nextRunAt, undefined);
-  const ran = sched.runNow(sc.id);
+  const sc = await sched.create({ text: 'standup notes', cron: '0 9 * * 1-5', threadId: thread.id });
+  assert.equal((await sched.update({ scheduleId: sc.id.slice(0, 6), paused: true })).nextRunAt, undefined);
+  const ran = await sched.runNow(sc.id);
   await tick();
   assert.equal(ran.threadId, thread.id);
   assert.equal(s.sent.length, 2, 'run now works while paused');
-  const resumed = sched.update({ scheduleId: sc.id, paused: false });
+  const resumed = await sched.update({ scheduleId: sc.id, paused: false });
   assert.equal(resumed.nextRunAt, '2026-10-27T09:00:00.000Z');
-  const once = sched.update({ scheduleId: sc.id, at: '2026-10-26T15:00:00Z' });
+  const once = await sched.update({ scheduleId: sc.id, at: '2026-10-26T15:00:00Z' });
   assert.equal(once.cron, undefined);
   assert.equal(once.nextRunAt, '2026-10-26T15:00:00.000Z');
-  assert.throws(() => sched.update({ scheduleId: sc.id, cwd: '/tmp' }), /sends to a thread/);
-  sched.delete(sc.id);
+  await assert.rejects(sched.update({ scheduleId: sc.id, cwd: '/tmp' }), /sends to a thread/);
+  await sched.delete(sc.id);
   assert.throws(() => sched.find(sc.id), (e: unknown) => e instanceof RpcError && e.code === ErrorCode.scheduleNotFound);
   sched.stop();
 });
 
-test('the methods check what they are given', () => {
+test('the methods check what they are given', async () => {
   const { h, sched } = setup();
   const m = scheduleMethods(sched);
-  const code = (fn: () => unknown) => {
+  const code = async (fn: () => unknown) => {
     try {
-      fn();
+      await fn();
     } catch (e) {
       return (e as RpcError).code;
     }
     return 0;
   };
-  assert.equal(code(() => m['schedules.create']({ text: 'x', cron: '0 9 * *' })), ErrorCode.badParams);
-  assert.equal(code(() => m['schedules.create']({ text: 'x', cron: '0 0 30 2 *' })), ErrorCode.badParams);
-  assert.equal(code(() => m['schedules.create']({ text: 'x' })), ErrorCode.badParams);
-  assert.equal(code(() => m['schedules.create']({ text: 'x', at: 'soon' })), ErrorCode.badParams);
-  assert.equal(code(() => m['schedules.create']({ text: 'x', cron: '@daily', timezone: 'Mars/Olympus' })), ErrorCode.badParams);
-  assert.equal(code(() => m['schedules.create']({ text: 'x', cron: '@daily', threadId: 'nope' })), ErrorCode.threadNotFound);
-  assert.equal(code(() => m['schedules.create']({ text: 'x', cron: '@daily', accountId: 'claude-99' })), ErrorCode.accountNotFound);
-  assert.equal(code(() => m['schedules.delete']({ scheduleId: 'nope' })), ErrorCode.scheduleNotFound);
+  assert.equal(await code(() => m['schedules.create']({ text: 'x', cron: '0 9 * *' })), ErrorCode.badParams);
+  assert.equal(await code(() => m['schedules.create']({ text: 'x', cron: '0 0 30 2 *' })), ErrorCode.badParams);
+  assert.equal(await code(() => m['schedules.create']({ text: 'x' })), ErrorCode.badParams);
+  assert.equal(await code(() => m['schedules.create']({ text: 'x', at: 'soon' })), ErrorCode.badParams);
+  assert.equal(await code(() => m['schedules.create']({ text: 'x', cron: '@daily', timezone: 'Mars/Olympus' })), ErrorCode.badParams);
+  assert.equal(await code(() => m['schedules.create']({ text: 'x', cron: '@daily', threadId: 'nope' })), ErrorCode.threadNotFound);
+  assert.equal(await code(() => m['schedules.create']({ text: 'x', cron: '@daily', accountId: 'claude-99' })), ErrorCode.accountNotFound);
+  assert.equal(await code(() => m['schedules.delete']({ scheduleId: 'nope' })), ErrorCode.scheduleNotFound);
   const p = m['schedules.preview']({ cron: '0 9 * * 1-5', count: 2 }) as { whenText: string; runs: string[] };
   assert.deepEqual(p, { whenText: 'Weekdays at 9:00', runs: ['2026-10-27T09:00:00.000Z', '2026-10-28T09:00:00.000Z'] });
   assert.equal(h.runner.list().length, 0);
@@ -297,5 +297,264 @@ test('agents schedule messages to their own thread by default', async () => {
   h.clock.advance(30 * MIN);
   await tick();
   assert.equal(s.sent.length, 1, 'the deleted one never sent');
+  sched.stop();
+});
+
+// ------------------------------------------------------- in the backend (API 9)
+
+// The backend's schedules table as convex/sync.ts keeps it: a row per
+// schedule, claims that lapse, and every change sent to each subscriber.
+function fakeBackend(clock: { now(): number }, runners: { id: string; name: string }[] = []) {
+  const rows = new Map<string, StoredSchedule & { claim?: { holder: string; until: number } }>();
+  const subs = new Set<(rows: StoredSchedule[]) => void>();
+  const calls: string[] = [];
+  let down = false;
+  const push = () => {
+    const list = [...rows.values()].map(({ claim: _c, ...r }) => structuredClone(r));
+    for (const fn of subs) queueMicrotask(() => fn(structuredClone(list)));
+  };
+  const check = (what: string) => {
+    calls.push(what);
+    if (down) throw new Error('fetch failed');
+  };
+  const forHolder = (holder: string, runnerId: string): ScheduleBackend => ({
+    subscribe: (onRows) => {
+      subs.add(onRows);
+      push();
+      return () => subs.delete(onRows);
+    },
+    save: async (sc) => {
+      check(`save ${sc.title}`);
+      const old = rows.get(sc.id);
+      rows.set(sc.id, { ...structuredClone(sc), ...(old?.claim && old.nextRunAt === sc.nextRunAt ? { claim: old.claim } : {}) });
+      push();
+    },
+    remove: async (id) => {
+      check(`remove ${id}`);
+      rows.delete(id);
+      push();
+    },
+    adopt: async (list) => {
+      check(`adopt ${list.length}`);
+      for (const r of list) if (!rows.has(r.id)) rows.set(r.id, structuredClone(r));
+      push();
+    },
+    claim: async (id, kind, expect) => {
+      check(`claim ${kind} ${holder}`);
+      const r = rows.get(id);
+      if (!r || r.runnerId !== runnerId) return false;
+      if (r.claim && r.claim.until > clock.now() && r.claim.holder !== holder) return false;
+      if (kind === 'due' && (r.paused || r.nextRunAt !== expect)) return false;
+      if (kind === 'request' && r.runRequestedAt !== expect) return false;
+      r.claim = { holder, until: clock.now() + 2 * MIN };
+      return true;
+    },
+    release: async (id) => {
+      const r = rows.get(id);
+      if (r?.claim?.holder === holder) delete r.claim;
+    },
+    ran: async (p) => {
+      check(`ran ${p.lastRun.outcome}`);
+      const r = rows.get(p.scheduleId);
+      if (!r) return;
+      r.lastRun = p.lastRun;
+      r.runs += p.sent ? 1 : 0;
+      if (r.claim?.holder === holder) delete r.claim;
+      if (p.request !== undefined && r.runRequestedAt === p.request) delete r.runRequestedAt;
+      if (r.updatedAt === p.expectUpdatedAt) {
+        if (p.nextRunAt) r.nextRunAt = p.nextRunAt;
+        else delete r.nextRunAt;
+        if (p.finishedAt) r.finishedAt = p.finishedAt;
+      }
+      push();
+    },
+    requestRun: async (id, at) => {
+      check('requestRun');
+      const r = rows.get(id);
+      if (!r) return false;
+      r.runRequestedAt = at;
+      push();
+      return true;
+    },
+    runners: async () => runners.map((r) => ({ ...r, lastSeenAt: clock.now() })),
+  });
+  return {
+    rows,
+    calls,
+    for: forHolder,
+    setDown: (d: boolean) => {
+      down = d;
+    },
+  };
+}
+
+const M5 = { id: 'r-m5', name: 'm5' };
+const BRUCE = { id: 'r-bruce', name: 'bruce' };
+
+function backendScheduler(h: ReturnType<typeof makeHarness>, self = M5, home = h.home) {
+  fs.mkdirSync(home, { recursive: true });
+  const sched = new Scheduler({ runner: h.runner, home, clock: h.clock, log: nullLogger, zone: () => 'UTC', self, syncOn: true });
+  sched.start();
+  return sched;
+}
+
+test('meeting a backend moves schedules.json up once, then the file is only its copy', async () => {
+  const h = makeHarness();
+  const { thread } = idleThread(h);
+  const local = new Scheduler({ runner: h.runner, home: h.home, clock: h.clock, log: nullLogger, zone: () => 'UTC', self: M5, syncOn: true });
+  local.start();
+  const sc = await local.create({ text: 'ping', cron: '@hourly', threadId: thread.id });
+  assert.equal(local.inBackend(), false, 'its own file until a backend says API 9');
+
+  const b = fakeBackend(h.clock, [M5, BRUCE]);
+  await local.attach(b.for('m5-a', M5.id));
+  await tick();
+  assert.equal(local.inBackend(), true);
+  assert.deepEqual(b.calls.slice(0, 1), ['adopt 1']);
+  assert.equal(b.rows.get(sc.id)?.runnerId, M5.id);
+  assert.equal(b.rows.get(sc.id)?.whenText, 'Every hour');
+  const listed = local.list()[0];
+  assert.equal(listed.runnerId, M5.id);
+  assert.equal(listed.runnerName, 'm5');
+  const saved = JSON.parse(fs.readFileSync(path.join(h.home, 'schedules.json'), 'utf8'));
+  assert.equal(saved.version, 2);
+  local.stop();
+
+  // The next start doesn't move it up again, and sends nothing before the
+  // backend is attached.
+  const again = backendScheduler(h);
+  assert.equal(again.inBackend(), true);
+  assert.equal(again.list().length, 1, 'listed from the copy');
+  await again.attach(b.for('m5-b', M5.id));
+  await tick();
+  assert.equal(b.calls.filter((c) => c.startsWith('adopt')).length, 1);
+  again.stop();
+});
+
+test('a due run is claimed, so two runner processes under one id send it once', async () => {
+  const h = makeHarness();
+  const { thread } = idleThread(h);
+  const b = fakeBackend(h.clock, [M5]);
+  // The release that's draining and the new one, as in a handover.
+  const old = backendScheduler(h, M5, path.join(h.home, 'old'));
+  const now = backendScheduler(h, M5, path.join(h.home, 'new'));
+  await old.attach(b.for('m5-old', M5.id));
+  await now.attach(b.for('m5-new', M5.id));
+  const sc = await now.create({ text: 'Check CI', at: iso(h.clock.now() + 10 * MIN), threadId: thread.id });
+  await tick();
+  h.clock.advance(10 * MIN);
+  for (let i = 0; i < 5; i++) await tick();
+  const sent = h.events(thread.id).filter((e) => e.type === 'user.message' && e.scheduleId === sc.id);
+  assert.equal(sent.length, 1, 'sent once');
+  const row = b.rows.get(sc.id)!;
+  assert.equal(row.runs, 1);
+  assert.equal(row.finishedAt, '2026-10-26T12:10:00.000Z');
+  assert.equal(row.nextRunAt, undefined);
+  assert.equal(row.claim, undefined, 'the claim is let go once it ran');
+  old.stop();
+  now.stop();
+});
+
+test('a schedule made for another runner runs there, with that runner\'s folder', async () => {
+  const h = makeHarness();
+  const b = fakeBackend(h.clock, [M5, BRUCE]);
+  const m5 = backendScheduler(h, M5, path.join(h.home, 'm5'));
+  const bruce = backendScheduler(h, BRUCE, path.join(h.home, 'bruce'));
+  await m5.attach(b.for('m5', M5.id));
+  await bruce.attach(b.for('bruce', BRUCE.id));
+
+  // A folder that only exists on Bruce isn't checked on the M5.
+  const made = await m5.create({ text: 'Summarise Slack', title: 'Slack summary', cron: '0 * * * *', cwd: '/nowhere/on/this/mac', accountId: 'codex-main', runnerId: 'Bruce' });
+  assert.equal(made.runnerId, BRUCE.id);
+  assert.equal(made.runnerName, 'bruce');
+  assert.equal(made.cwd, '/nowhere/on/this/mac');
+  await tick();
+  assert.equal(bruce.list().length, 1, 'bruce sees it');
+  await assert.rejects(m5.create({ text: 'x', cron: '@daily', runnerId: 'tinker' }), /No runner called tinker. Runners: m5, bruce/);
+  await assert.rejects(m5.create({ text: 'x', cron: '@daily', threadId: 'whatever', runnerId: 'bruce' }), /runs on that thread's runner/);
+
+  // Due: Bruce takes it and it fails there (no such folder, no such
+  // account), the M5 never tries.
+  h.clock.advance(60 * MIN);
+  for (let i = 0; i < 5; i++) await tick();
+  const row = b.rows.get(made.id)!;
+  assert.equal(row.lastRun?.outcome, 'failed');
+  assert.equal(b.calls.filter((c) => c === 'claim due m5').length, 0, 'the M5 leaves it alone');
+  assert.equal(row.nextRunAt, '2026-10-26T14:00:00.000Z', 'carries on next time');
+
+  // Run now from the M5: asked for, and run by Bruce. With no folder it uses
+  // Bruce's default.
+  await m5.update({ scheduleId: made.id, cwd: '' });
+  await tick();
+  assert.equal(b.rows.get(made.id)?.cwd, undefined);
+  await bruce.update({ scheduleId: made.id, accountId: 'claude-3' });
+  const asked = await m5.runNow(made.id);
+  assert.equal(asked.queued, true);
+  assert.equal(asked.threadId, undefined);
+  for (let i = 0; i < 5; i++) await tick();
+  const started = h.runner.list().find((t) => t.schedule?.id === made.id);
+  assert.ok(started, 'Bruce started the thread');
+  assert.equal(started.cwd, h.cfg.defaults.cwd);
+  assert.equal(b.rows.get(made.id)?.runRequestedAt, undefined);
+  assert.equal(b.rows.get(made.id)?.runs, 1);
+  m5.stop();
+  bruce.stop();
+});
+
+test('with the backend out of reach, changes fail and say so', async () => {
+  const h = makeHarness();
+  const b = fakeBackend(h.clock, [M5]);
+  const first = backendScheduler(h);
+  await first.attach(b.for('m5', M5.id));
+  first.stop();
+  // Started again: its file is the backend's copy, and until the backend is
+  // attached there's nowhere to write.
+  const sched = backendScheduler(h);
+  await assert.rejects(sched.create({ text: 'x', cron: '@daily' }), /can't reach right now/, 'before the backend is attached');
+  await sched.attach(b.for('m5', M5.id));
+  b.setDown(true);
+  await assert.rejects(sched.create({ text: 'x', cron: '@daily' }), /Couldn't save the schedule to the backend: fetch failed/);
+  assert.equal(sched.list().length, 0);
+  sched.stop();
+});
+
+test('with sync turned off, its own schedules come back from the copy as its own', async () => {
+  const h = makeHarness();
+  const b = fakeBackend(h.clock, [M5, BRUCE]);
+  const sched = backendScheduler(h);
+  await sched.attach(b.for('m5', M5.id));
+  await sched.create({ text: 'mine', cron: '@daily' });
+  await sched.create({ text: 'bruce', cron: '@daily', runnerId: 'bruce' });
+  await tick();
+  sched.stop();
+  const off = new Scheduler({ runner: h.runner, home: h.home, clock: h.clock, log: nullLogger, zone: () => 'UTC', self: M5, syncOn: false });
+  off.start();
+  assert.deepEqual(off.list().map((s) => [s.title, s.runnerId]), [['mine', undefined]]);
+  off.stop();
+});
+
+test('a schedule made while the file is being moved up is moved up too', async () => {
+  const h = makeHarness();
+  const b = fakeBackend(h.clock, [M5]);
+  const sched = new Scheduler({ runner: h.runner, home: h.home, clock: h.clock, log: nullLogger, zone: () => 'UTC', self: M5, syncOn: true });
+  sched.start();
+  const early = await sched.create({ text: 'early', cron: '@daily' });
+  const backend = b.for('m5', M5.id);
+  // The adopt call is slow; meanwhile one is made, one changed, one deleted.
+  let late: Awaited<ReturnType<Scheduler['create']>> | undefined;
+  const slow: ScheduleBackend = {
+    ...backend,
+    adopt: async (rows) => {
+      await backend.adopt(rows);
+      if (!late) {
+        late = await sched.create({ text: 'late', cron: '@hourly' });
+        await sched.update({ scheduleId: early.id, title: 'early, renamed' });
+      }
+    },
+  };
+  await sched.attach(slow);
+  await tick();
+  assert.deepEqual([...b.rows.values()].map((r) => r.title).sort(), ['early, renamed', 'late']);
+  assert.deepEqual(sched.list().map((s) => s.title).sort(), ['early, renamed', 'late']);
   sched.stop();
 });

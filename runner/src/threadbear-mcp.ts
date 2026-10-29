@@ -229,9 +229,10 @@ export function buildThreadbearTools(
 
   const scheduleLine = async (sc: Schedule): Promise<string> => {
     const state = sc.finishedAt ? 'done' : sc.paused ? 'paused' : sc.nextRunAt ? `next ${relativeFuture(sc.nextRunAt, now())} (${sc.nextRunAt})` : 'no more runs';
-    const target = sc.threadId ? (sc.threadId === selfId ? 'this thread' : `thread ${sc.threadId.slice(0, 8)} ${await titleOf(sc.threadId)}`) : `a new thread in ${sc.cwd}`;
+    const target = sc.threadId ? (sc.threadId === selfId ? 'this thread' : `thread ${sc.threadId.slice(0, 8)} ${await titleOf(sc.threadId)}`) : `a new thread in ${sc.cwd ?? 'its default folder'}`;
     const last = sc.lastRun && sc.lastRun.outcome !== 'sent' ? `; last run ${sc.lastRun.outcome}: ${sc.lastRun.note ?? ''}` : '';
-    return `${sc.id.slice(0, 8)}  ${sc.title}  [${sc.whenText}; ${state}${last}]  to ${target}`;
+    const where = sc.runnerName ? ` on ${sc.runnerName}` : '';
+    return `${sc.id.slice(0, 8)}  ${sc.title}  [${sc.whenText}; ${state}${last}]  to ${target}${where}`;
   };
 
   const mustSchedules = (): ScheduleControl => {
@@ -330,12 +331,21 @@ export function buildThreadbearTools(
         model: z.string().optional().describe("With new_thread: model id, one of the account's (list_accounts shows them)."),
         effort: effortEnum.optional().describe('With new_thread: reasoning effort (ultra is Codex only).'),
         permissionMode: z.enum(['full', 'ask']).optional().describe('With new_thread: "full" (default) or "ask".'),
+        runner: z
+          .string()
+          .optional()
+          .describe("With new_thread: the runner (machine) it runs on, by name, e.g. bruce. Default: this thread's runner. Only when Mike asks for another machine; the folder and account are then that machine's (a path there, or left out for its default)."),
       },
-      handle(async ({ text, when, cron, timezone, title, threadId, id: alias, new_thread, folder: f, account: acc, model, effort, permissionMode }) => {
+      handle(async ({ text, when, cron, timezone, title, threadId, id: alias, new_thread, folder: f, account: acc, model, effort, permissionMode, runner }) => {
         if ((when === undefined) === (cron === undefined)) throw new Error('Give exactly one of when (once) and cron (repeating).');
-        const target = new_thread
-          ? { cwd: await folder(f ?? '.'), accountId: await account(acc), model, effort, permissionMode }
-          : { threadId: await resolve(threadId ?? alias) };
+        if (runner && !new_thread) throw new Error("runner is for new_thread schedules; one that sends to a thread runs on that thread's runner.");
+        // On another runner the folder and account are that machine's, so
+        // they go as given and are checked there when it runs.
+        const target = !new_thread
+          ? { threadId: await resolve(threadId ?? alias) }
+          : runner
+            ? { cwd: f, accountId: acc, model, effort, permissionMode, runnerId: runner }
+            : { cwd: await folder(f ?? '.'), accountId: await account(acc), model, effort, permissionMode };
         if (!new_thread && (f || acc || model || effort || permissionMode)) throw new Error('folder, account, model, effort and permissionMode are for new_thread schedules; a thread keeps its own.');
         const sc = await mustSchedules().create({
           text,

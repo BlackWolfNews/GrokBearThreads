@@ -119,7 +119,21 @@ Inside a thread, rest the pointer on a link for a moment, in a reply or on a
 Needs you card's buttons, to see where it goes: a picture of the file, or
 the page's address. Click it to open it.
 
-## Hibernate and Archive
+## Schedules
+
+A schedule sends a message at a set time, once or over and over: to a
+thread, or to a new thread each time (a morning summary, say). Make one in
+the Scheduled view, or ask an agent ("look at this again every weekday at
+9"). The Scheduled view lists them with when each runs next.
+
+If you run Threadbear on more than one Mac, a schedule that starts a new
+thread can run on any of them: pick the Mac under Runs on. It runs there
+even while this one is asleep, in that Mac's folder (leave the folder
+empty for its default). Its threads show on your phone and the website;
+the Mac app only shows this Mac's threads for now. Schedules need your
+Convex backend: with no internet, they wait.
+
+
 
 To put a thread away for a while, hibernate it (the Thread menu, the ...
 menu, or the button that shows when you hover a row). Pick when it should

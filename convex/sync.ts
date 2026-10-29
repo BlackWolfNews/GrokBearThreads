@@ -231,9 +231,19 @@ export const runnersList = query({
   handler: async (ctx, { key }) => {
     checkRunnerKey(key);
     const out = [];
-    for await (const row of ctx.db.query('runners')) {
-      const { _id, _creationTime, ...rest } = row;
-      out.push(rest);
+    // Picked by name: the row keeps fields of its own (atMac and atMacAt,
+    // from setPresence), and returning one fails the validator.
+    for await (const r of ctx.db.query('runners')) {
+      out.push({
+        runnerId: r.runnerId,
+        name: r.name,
+        version: r.version,
+        ...(r.release !== undefined ? { release: r.release } : {}),
+        startedAt: r.startedAt,
+        draining: r.draining,
+        threadCount: r.threadCount,
+        lastSeenAt: r.lastSeenAt,
+      });
     }
     return out;
   },
@@ -462,13 +472,202 @@ export const setProjectIcon = mutation({
   },
 });
 
+// The mirror of a runner's own schedules.json. Rows that are schedules in
+// their own right (`owned`, API 9) are left alone, and a mirrored row is
+// never written over one: a runner still on an older release, a draining
+// one say, mustn't undo a move it hasn't heard of.
 export const setSchedules = mutation({
   args: { key: v.string(), runnerId: v.string(), schedules: v.array(scheduleDoc) },
   returns: v.null(),
   handler: async (ctx, { key, runnerId, schedules }) => {
     checkRunnerKey(key);
-    await replaceRows(ctx, 'schedules', runnerId, schedules);
+    const owned = new Set<string>();
+    for await (const row of ctx.db.query('schedules')) {
+      if (row.owned) owned.add(row.id);
+      else if (row.runnerId === runnerId) await ctx.db.delete(row._id);
+    }
+    for (const row of schedules) if (!owned.has(row.id)) await ctx.db.insert('schedules', { ...row, runnerId });
     return null;
+  },
+});
+
+// ------------------------------------------------------------ schedules (API 9)
+// Schedules that live here (docs/protocol.md, Schedules, "Runners"). Every
+// runner subscribes to the whole list; a schedule's own runner is the only
+// one that sends it, and takes each run with claimSchedule first so it's
+// sent once even while a handover has two runner processes under one
+// runnerId. The runner works out nextRunAt and whenText (it has the cron
+// code and the zones); this only stores them.
+
+const CLAIM_MS = 2 * 60_000;
+
+const ownedScheduleDoc = v.object({
+  ...scheduleDoc.fields,
+  runnerId: v.string(),
+  effort: v.optional(v.string()),
+  permissionMode: v.optional(v.string()),
+  createdBy: v.optional(v.string()),
+  runRequestedAt: v.optional(v.string()),
+});
+
+const lastRunDoc = v.object({ at: v.string(), outcome: v.string(), threadId: v.optional(v.string()), note: v.optional(v.string()) });
+
+async function scheduleRow(ctx: { db: MutationCtx['db'] }, scheduleId: string) {
+  const row = await ctx.db
+    .query('schedules')
+    .withIndex('by_scheduleId', (q) => q.eq('id', scheduleId))
+    .filter((q) => q.eq(q.field('owned'), true))
+    .first();
+  return row ?? undefined;
+}
+
+export const schedules = query({
+  args: { key: v.string() },
+  returns: v.array(ownedScheduleDoc),
+  handler: async (ctx, { key }) => {
+    checkRunnerKey(key);
+    const out = [];
+    for await (const row of ctx.db.query('schedules')) {
+      if (!row.owned) continue;
+      const { _id, _creationTime, owned, claim, ...rest } = row;
+      out.push(rest);
+    }
+    return out;
+  },
+});
+
+// Makes or replaces one, as the runner that took schedules.create or
+// schedules.update has it. A change to when it runs drops a claim on the
+// old time.
+export const saveSchedule = mutation({
+  args: { key: v.string(), schedule: ownedScheduleDoc },
+  returns: v.null(),
+  handler: async (ctx, { key, schedule }) => {
+    checkRunnerKey(key);
+    const row = await scheduleRow(ctx, schedule.id);
+    if (!row) {
+      await ctx.db.insert('schedules', { ...schedule, owned: true });
+      return null;
+    }
+    const claim = row.claim && row.nextRunAt === schedule.nextRunAt ? { claim: row.claim } : {};
+    await ctx.db.replace(row._id, { ...schedule, owned: true, ...claim });
+    return null;
+  },
+});
+
+export const deleteSchedule = mutation({
+  args: { key: v.string(), scheduleId: v.string() },
+  returns: v.boolean(),
+  handler: async (ctx, { key, scheduleId }) => {
+    checkRunnerKey(key);
+    const row = await scheduleRow(ctx, scheduleId);
+    if (!row) return false;
+    await ctx.db.delete(row._id);
+    return true;
+  },
+});
+
+// A runner's schedules.json, the first time it meets API 9: each one it
+// has that isn't here yet comes in under its runnerId, and its mirrored
+// rows go. Running it twice is harmless.
+export const adoptSchedules = mutation({
+  args: { key: v.string(), runnerId: v.string(), schedules: v.array(ownedScheduleDoc) },
+  returns: v.null(),
+  handler: async (ctx, { key, runnerId, schedules }) => {
+    checkRunnerKey(key);
+    for await (const row of ctx.db.query('schedules').withIndex('by_runnerId', (q) => q.eq('runnerId', runnerId))) {
+      if (!row.owned) await ctx.db.delete(row._id);
+    }
+    for (const s of schedules) {
+      if (await scheduleRow(ctx, s.id)) continue;
+      await ctx.db.insert('schedules', { ...s, runnerId, owned: true });
+    }
+    return null;
+  },
+});
+
+// Takes a run: "due" while the row is still due at that nextRunAt, or
+// "request" for the schedules.run waiting at runRequestedAt. No when it's
+// another runner's, paused (a due run), or someone else holds it.
+export const claimSchedule = mutation({
+  args: {
+    key: v.string(),
+    runnerId: v.string(),
+    scheduleId: v.string(),
+    holder: v.string(),
+    kind: v.union(v.literal('due'), v.literal('request')),
+    expect: v.string(),
+  },
+  returns: v.boolean(),
+  handler: async (ctx, { key, runnerId, scheduleId, holder, kind, expect }) => {
+    checkRunnerKey(key);
+    const row = await scheduleRow(ctx, scheduleId);
+    if (!row || row.runnerId !== runnerId) return false;
+    const now = Date.now();
+    if (row.claim && row.claim.until > now && row.claim.holder !== holder) return false;
+    if (kind === 'due' && (row.paused || row.nextRunAt !== expect)) return false;
+    if (kind === 'request' && row.runRequestedAt !== expect) return false;
+    await ctx.db.patch(row._id, { claim: { holder, until: now + CLAIM_MS } });
+    return true;
+  },
+});
+
+// Lets go of a run that couldn't be sent yet (its runner is restarting),
+// so the next try, or the next runner process, can take it.
+export const releaseSchedule = mutation({
+  args: { key: v.string(), scheduleId: v.string(), holder: v.string() },
+  returns: v.null(),
+  handler: async (ctx, { key, scheduleId, holder }) => {
+    checkRunnerKey(key);
+    const row = await scheduleRow(ctx, scheduleId);
+    if (row?.claim?.holder === holder) await ctx.db.patch(row._id, { claim: undefined });
+    return null;
+  },
+});
+
+// Records a run the holder sent (or skipped, or couldn't send). The next
+// time goes in only if nobody changed the schedule meanwhile
+// (`expectUpdatedAt`): a change already worked out its own.
+export const scheduleRan = mutation({
+  args: {
+    key: v.string(),
+    scheduleId: v.string(),
+    holder: v.string(),
+    lastRun: lastRunDoc,
+    sent: v.boolean(),
+    expectUpdatedAt: v.string(),
+    nextRunAt: v.optional(v.string()),
+    finishedAt: v.optional(v.string()),
+    request: v.optional(v.string()),
+  },
+  returns: v.null(),
+  handler: async (ctx, { key, scheduleId, holder, lastRun, sent, expectUpdatedAt, nextRunAt, finishedAt, request }) => {
+    checkRunnerKey(key);
+    const row = await scheduleRow(ctx, scheduleId);
+    if (!row) return null;
+    const patch: Record<string, unknown> = { lastRun, runs: row.runs + (sent ? 1 : 0) };
+    if (row.claim?.holder === holder) patch.claim = undefined;
+    if (request !== undefined && row.runRequestedAt === request) patch.runRequestedAt = undefined;
+    if (row.updatedAt === expectUpdatedAt) {
+      patch.nextRunAt = nextRunAt;
+      patch.finishedAt = finishedAt;
+    }
+    await ctx.db.patch(row._id, patch);
+    return null;
+  },
+});
+
+// schedules.run on a runner that isn't the schedule's: its own runner sees
+// runRequestedAt and runs it.
+export const requestScheduleRun = mutation({
+  args: { key: v.string(), scheduleId: v.string(), at: v.string() },
+  returns: v.boolean(),
+  handler: async (ctx, { key, scheduleId, at }) => {
+    checkRunnerKey(key);
+    const row = await scheduleRow(ctx, scheduleId);
+    if (!row) return false;
+    await ctx.db.patch(row._id, { runRequestedAt: at });
+    return true;
   },
 });
 

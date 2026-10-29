@@ -1,8 +1,16 @@
 // Schedules: a message sent at a set time, once (`at`) or over and over
 // (`cron`), to a thread or to a new thread each time. Like Convex's
-// scheduled functions and crons. Kept in schedules.json in the data dir and
-// served as the schedules.* methods beside the runner's own (see
-// "Schedules" in docs/protocol.md).
+// scheduled functions and crons. Served as the schedules.* methods beside
+// the runner's own (see "Schedules" in docs/protocol.md).
+//
+// Where they're kept depends on the backend. With sync off, or a backend
+// older than API 9, they're this runner's own schedules.json, as they always
+// were. Once a backend of API 9 is attached (attach(), from sync.ts), they
+// live in its `schedules` table so every runner sees one list and a schedule
+// can run on another runner (step 6, docs/step6-plan.md): this runner moves
+// its own file up once, keeps a live copy of the whole table (and a copy on
+// disk for when the backend can't be reached), and sends only its own,
+// each run taken with a claim first so it's sent once.
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
@@ -16,8 +24,50 @@ import { expandHome } from './config.ts';
 import { CronError, checkZone, describeAt, describeCron, localZone, nextRun, nextRuns, parseCron } from './cron.ts';
 
 // What schedules.json holds for each: everything but whenText, which is
-// worked out when it's sent.
-type ScheduleRecord = Omit<Schedule, 'whenText'>;
+// worked out when it's sent, and runnerName, from the backend's runners.
+type ScheduleRecord = Omit<Schedule, 'whenText' | 'runnerName'>;
+
+// A schedule as the backend stores it: the record with its runner and its
+// words (the phone shows whenText; the backend has no cron code).
+export type StoredSchedule = ScheduleRecord & { runnerId: string; whenText: string };
+
+// What a runner the backend knows of looks like, and what runners.list
+// answers with (docs/protocol.md, RunnerInfo).
+export type BackendRunner = { id: string; name: string; lastSeenAt?: number };
+export type RunnerInfo = { id: string; name: string; online: boolean; lastSeenAt?: string; self: boolean };
+
+// The backend's schedules table (sync.ts makes one for Convex; tests pass a
+// fake). Every call can fail when the backend can't be reached.
+export type ScheduleBackend = {
+  // The whole table now and whenever it changes. Returns the unsubscribe.
+  subscribe(onRows: (rows: StoredSchedule[]) => void, onError: (e: Error) => void): () => void;
+  save(s: StoredSchedule): Promise<void>;
+  remove(scheduleId: string): Promise<void>;
+  // This runner's schedules.json, moved up once.
+  adopt(rows: StoredSchedule[]): Promise<void>;
+  // Takes a run: "due" at that nextRunAt, or the "request" at that
+  // runRequestedAt. False when it isn't ours to send (any more).
+  claim(scheduleId: string, kind: 'due' | 'request', expect: string): Promise<boolean>;
+  release(scheduleId: string): Promise<void>;
+  ran(p: {
+    scheduleId: string;
+    lastRun: NonNullable<Schedule['lastRun']>;
+    sent: boolean;
+    expectUpdatedAt: string;
+    nextRunAt?: string;
+    finishedAt?: string;
+    request?: string;
+  }): Promise<void>;
+  requestRun(scheduleId: string, at: string): Promise<boolean>;
+  runners(): Promise<BackendRunner[]>;
+};
+
+// A runner the backend hasn't heard from for this long shows as offline,
+// as on the phone.
+const ONLINE_MS = 3 * 60_000;
+// One not heard from for this long (or that said goodbye for good) isn't
+// offered in runners.list: an old install, or a test's.
+const FORGET_MS = 30 * 86_400_000;
 
 export type ScheduleRunner = Pick<Runner, 'create' | 'send' | 'get' | 'hello' | 'onNotification' | 'publish'>;
 
@@ -35,6 +85,8 @@ export type CreateScheduleParams = {
   permissionMode?: PermissionMode;
   paused?: boolean;
   createdBy?: string;
+  // Another runner's id or name (runners.list); absent, this one.
+  runnerId?: string;
 };
 
 export type UpdateScheduleParams = {
@@ -69,12 +121,40 @@ export class Scheduler {
   private timer?: TimerHandle;
   private stopped = false;
   private unlisten?: () => void;
+  // This runner, as the backend knows it (sync.runnerId and its name).
+  private self: { id: string; name: string };
+  // Whether this runner has a backend to attach to at all (sync is on).
+  // Without one a backend copy on disk is taken back as the runner's own.
+  private syncOn: boolean;
+  // "local": schedules.json is the schedules. "backend": the backend's
+  // table is, and this.items is a copy of it, live once `backend` is set.
+  private mode: 'local' | 'backend' = 'local';
+  private backend?: ScheduleBackend;
+  private attaching = false;
+  private unsubscribe?: () => void;
+  private ticking = false;
+  // A change (a new row, a run asked for) that came in mid-tick: look again
+  // straight after rather than on the next regular check.
+  private tickAgain = false;
+  private names = new Map<string, string>();
+  private namesDue = false;
   // Threads a draining runner still has (docs/protocol.md, "Handovers"):
   // they're real threads, just not loaded here yet.
   private elsewhere: (threadId: string) => boolean;
 
-  constructor(deps: { runner: ScheduleRunner; home: string; clock: Clock; log: Logger; zone?: () => string; elsewhere?: (threadId: string) => boolean }) {
+  constructor(deps: {
+    runner: ScheduleRunner;
+    home: string;
+    clock: Clock;
+    log: Logger;
+    zone?: () => string;
+    elsewhere?: (threadId: string) => boolean;
+    self?: { id: string; name: string };
+    syncOn?: boolean;
+  }) {
     this.runner = deps.runner;
+    this.self = deps.self ?? { id: 'runner', name: 'this Mac' };
+    this.syncOn = deps.syncOn ?? false;
     this.elsewhere = deps.elsewhere ?? (() => false);
     this.file = path.join(deps.home, 'schedules.json');
     this.clock = deps.clock;
@@ -83,24 +163,35 @@ export class Scheduler {
   }
 
   start(): void {
-    const saved = readJsonSync<{ schedules?: ScheduleRecord[] }>(this.file);
+    const saved = readJsonSync<{ version?: number; schedules?: ScheduleRecord[] }>(this.file);
     if (!saved && fs.existsSync(this.file)) this.log.error('schedules.json could not be read; starting with none', { file: this.file });
+    // Version 2 is the backend's copy. With sync on it stays one (nothing is
+    // sent until the backend is attached and says so); with sync turned off
+    // since, this runner's own come back as its own file.
+    const copy = saved?.version === 2;
+    if (copy && this.syncOn) this.mode = 'backend';
     for (const s of saved?.schedules ?? []) {
-      if (s && typeof s.id === 'string') this.items.set(s.id, s);
+      if (!s || typeof s.id !== 'string') continue;
+      if (copy && !this.syncOn) {
+        if (s.runnerId && s.runnerId !== this.self.id) continue;
+        delete s.runnerId;
+        delete s.runRequestedAt;
+      }
+      this.items.set(s.id, s);
     }
     // A thread's schedules go with it.
     this.unlisten = this.runner.onNotification((n) => {
       if (n.method !== 'thread.deleted') return;
       let gone = false;
-      for (const s of this.items.values()) {
-        if (s.threadId === n.params.threadId) {
-          this.items.delete(s.id);
-          gone = true;
-        }
+      for (const s of [...this.items.values()]) {
+        if (s.threadId !== n.params.threadId || !this.mine(s)) continue;
+        this.items.delete(s.id);
+        gone = true;
+        if (this.mode === 'backend') void this.backend?.remove(s.id).catch((e) => this.log.warn('could not delete a schedule from the backend', { scheduleId: s.id, error: String(e) }));
       }
       if (gone) this.changed();
     });
-    this.log.info('schedules loaded', { count: this.items.size });
+    this.log.info('schedules loaded', { count: this.items.size, mode: this.mode });
     this.tick();
   }
 
@@ -108,11 +199,166 @@ export class Scheduler {
     this.stopped = true;
     this.timer?.cancel();
     this.unlisten?.();
+    this.unsubscribe?.();
+    this.unsubscribe = undefined;
+  }
+
+  // ---------------------------------------------------------- the backend
+
+  /** Whether the schedules are the backend's (sync.ts stops mirroring them). */
+  inBackend(): boolean {
+    return this.mode === 'backend';
+  }
+
+  // Called by sync.ts after each heartbeat from a backend of API 9 or later.
+  // The first time, this runner's own schedules.json goes up (if it wasn't
+  // already the backend's copy), then the live copy starts. A failure is
+  // logged and tried again on the next heartbeat; meanwhile a runner still
+  // on its own file keeps sending from it.
+  async attach(backend: ScheduleBackend): Promise<void> {
+    if (this.backend || this.attaching || this.stopped) return;
+    this.attaching = true;
+    try {
+      if (this.mode === 'local') await this.moveUp(backend);
+      if (this.stopped) return;
+      // No await between moveUp's last look and here, so nothing made in
+      // the file meanwhile is left behind.
+      this.mode = 'backend';
+      this.backend = backend;
+      this.changed();
+      this.unsubscribe = backend.subscribe(
+        (rows) => this.onRows(rows),
+        (e) => this.log.warn('the schedules subscription failed', { error: String(e) }),
+      );
+      void this.refreshNames();
+    } catch (e) {
+      this.log.warn('could not move schedules to the backend; trying again later', { error: String(e) });
+    } finally {
+      this.attaching = false;
+    }
+  }
+
+  // Moves this runner's schedules.json up. The file keeps working while the
+  // calls are out, so it looks again until a pass finds nothing made,
+  // changed or deleted since the last one.
+  private async moveUp(backend: ScheduleBackend): Promise<void> {
+    // id -> the record as sent (not updatedAt: two changes can share a
+    // millisecond).
+    const sent = new Map<string, string>();
+    let first = true;
+    for (;;) {
+      const now = [...this.items.values()];
+      const fresh = now.filter((r) => !sent.has(r.id));
+      const changed = now.filter((r) => sent.has(r.id) && sent.get(r.id) !== JSON.stringify(r));
+      const gone = [...sent.keys()].filter((id) => !this.items.has(id));
+      if (!first && !fresh.length && !changed.length && !gone.length) break;
+      // The first pass always goes, even with none: it clears this runner's
+      // mirrored rows.
+      if (first || fresh.length) await backend.adopt(fresh.map((r) => this.stored({ ...r, runnerId: this.self.id })));
+      for (const r of changed) await backend.save(this.stored({ ...r, runnerId: this.self.id }));
+      for (const id of gone) await backend.remove(id);
+      for (const r of [...fresh, ...changed]) sent.set(r.id, JSON.stringify(r));
+      for (const id of gone) sent.delete(id);
+      first = false;
+    }
+    for (const r of this.items.values()) r.runnerId = this.self.id;
+    this.log.info('schedules moved to the backend', { count: sent.size });
+  }
+
+  private onRows(rows: StoredSchedule[]): void {
+    if (this.stopped) return;
+    this.items.clear();
+    for (const r of rows) {
+      const { whenText: _w, ...rec } = r;
+      this.items.set(rec.id, rec);
+      if (!this.names.has(rec.runnerId)) this.namesDue = true;
+    }
+    if (this.namesDue) void this.refreshNames();
+    this.changed();
+    this.tick();
+  }
+
+  // The runners' names, for runnerName on each schedule: every runner the
+  // backend has, gone quiet or not, since a schedule can name any of them.
+  private async refreshNames(): Promise<void> {
+    const list = await this.backend?.runners().catch(() => undefined);
+    if (!list) return;
+    const before = JSON.stringify([...this.names]);
+    for (const r of list) this.names.set(r.id, r.name);
+    this.namesDue = false;
+    if (JSON.stringify([...this.names]) !== before) this.publish();
+  }
+
+  /** runners.list: this runner first, then the backend's others by name. */
+  async runners(): Promise<RunnerInfo[]> {
+    const me: RunnerInfo = { id: this.self.id, name: this.self.name, online: true, self: true };
+    if (!this.backend) return [me];
+    const now = this.clock.now();
+    const all = await this.backend.runners();
+    for (const r of all) this.names.set(r.id, r.name);
+    const others = all
+      .filter((r) => r.id !== this.self.id && r.lastSeenAt !== undefined && now - r.lastSeenAt < FORGET_MS)
+      .map((r) => ({
+        id: r.id,
+        name: r.name,
+        online: r.lastSeenAt !== undefined && now - r.lastSeenAt < ONLINE_MS,
+        ...(r.lastSeenAt !== undefined ? { lastSeenAt: new Date(r.lastSeenAt).toISOString() } : {}),
+        self: false,
+      }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+    return [me, ...others];
+  }
+
+  // An id or a name from runners.list, as an id.
+  private async resolveRunner(idOrName: string): Promise<string> {
+    const want = idOrName.trim();
+    if (want === this.self.id || want.toLowerCase() === this.self.name.toLowerCase()) return this.self.id;
+    if (!this.backend) {
+      throw bad(this.mode === 'backend' ? "Can't reach the backend to find that runner; try again in a moment." : 'Schedules on another runner need the Convex backend (sync on, API 9 or later).');
+    }
+    const list = await this.runners();
+    const hit = list.find((r) => r.id === want) ?? list.find((r) => r.name.toLowerCase() === want.toLowerCase());
+    if (!hit) throw bad(`No runner called ${want}. Runners: ${list.map((r) => r.name).join(', ')}.`);
+    return hit.id;
+  }
+
+  // Ours to send: every one while they're our own file; in the backend,
+  // the ones with our runnerId.
+  private mine(rec: ScheduleRecord): boolean {
+    return this.mode === 'local' || rec.runnerId === this.self.id;
+  }
+
+  private stored(rec: ScheduleRecord & { runnerId: string }): StoredSchedule {
+    return { ...rec, whenText: this.whenText(rec) };
+  }
+
+  // Writes a made or changed schedule: to the backend, which answers once
+  // it has it, or straight into the file.
+  private async put(rec: ScheduleRecord): Promise<void> {
+    if (this.mode === 'backend') {
+      const b = this.mustHaveBackend();
+      try {
+        await b.save(this.stored({ ...rec, runnerId: rec.runnerId ?? this.self.id }));
+      } catch (e) {
+        throw new RpcError(ErrorCode.other, `Couldn't save the schedule to the backend: ${(e as Error).message ?? e}`);
+      }
+    }
+    this.items.set(rec.id, rec);
+    this.changed();
+  }
+
+  private mustHaveBackend(): ScheduleBackend {
+    if (!this.backend) throw new RpcError(ErrorCode.other, "Schedules live in the Convex backend, which this runner can't reach right now; try again in a moment.");
+    return this.backend;
   }
 
   // ---------------------------------------------------------------- reads
 
   list(threadId?: string): Schedule[] {
+    return this.listRecords(threadId).map((s) => this.view(s));
+  }
+
+  private listRecords(threadId?: string): ScheduleRecord[] {
     const rank = (s: ScheduleRecord): number => (s.nextRunAt && !s.paused ? 0 : s.finishedAt ? 2 : 1);
     return [...this.items.values()]
       .filter((s) => !threadId || s.threadId === threadId || s.createdBy === threadId)
@@ -122,8 +368,7 @@ export class Scheduler {
         if (a.nextRunAt && b.nextRunAt && !a.paused && !b.paused) return a.nextRunAt.localeCompare(b.nextRunAt);
         if (a.finishedAt && b.finishedAt) return b.finishedAt.localeCompare(a.finishedAt);
         return b.createdAt.localeCompare(a.createdAt);
-      })
-      .map((s) => this.view(s));
+      });
   }
 
   find(idOrPrefix: string): Schedule {
@@ -146,10 +391,13 @@ export class Scheduler {
 
   // ------------------------------------------------------------ mutations
 
-  create(p: CreateScheduleParams): Schedule {
+  async create(p: CreateScheduleParams): Promise<Schedule> {
     const text = p.text?.trim();
     if (!text) throw bad('text is required');
     if ((p.cron === undefined) === (p.at === undefined)) throw bad('Give either at (once) or cron (repeating).');
+    const runnerId = p.runnerId?.trim() ? await this.resolveRunner(p.runnerId) : this.self.id;
+    const away = runnerId !== this.self.id;
+    if (away && p.threadId) throw bad("A schedule that sends to a thread runs on that thread's runner; leave runnerId out.");
     const now = this.iso();
     const rec: ScheduleRecord = {
       id: crypto.randomUUID(),
@@ -166,6 +414,14 @@ export class Scheduler {
     if (p.threadId) {
       // Throws thread not found for a bad id.
       rec.threadId = this.elsewhere(p.threadId) ? p.threadId : this.runner.get(p.threadId).id;
+    } else if (away) {
+      // Its folder and account are that runner's, checked there when it
+      // runs; no folder means its default.
+      if (p.cwd?.trim()) rec.cwd = p.cwd.trim();
+      if (p.accountId) rec.accountId = p.accountId;
+      if (p.model) rec.model = p.model;
+      if (p.effort) rec.effort = p.effort;
+      if (p.permissionMode) rec.permissionMode = p.permissionMode;
     } else {
       rec.cwd = this.checkedFolder(p.cwd);
       if (p.accountId) rec.accountId = this.checkedAccount(p.accountId);
@@ -174,16 +430,18 @@ export class Scheduler {
       if (p.permissionMode) rec.permissionMode = p.permissionMode;
     }
     if (p.createdBy) rec.createdBy = p.createdBy;
+    if (this.mode === 'backend') rec.runnerId = runnerId;
     this.plan(rec);
-    this.items.set(rec.id, rec);
-    this.changed();
+    await this.put(rec);
     // An `at` that's already passed runs now rather than on the next tick.
     this.tick();
     return this.view(this.items.get(rec.id) ?? rec);
   }
 
-  update(p: UpdateScheduleParams): Schedule {
-    const rec = this.mustGet(p.scheduleId);
+  async update(p: UpdateScheduleParams): Promise<Schedule> {
+    // A copy, so a write the backend turns down changes nothing here.
+    const rec: ScheduleRecord = structuredClone(this.mustGet(p.scheduleId));
+    const away = !this.mine(rec);
     let replan = false;
     if (p.title !== undefined) rec.title = p.title.trim() ? p.title.trim().slice(0, 200) : firstLine(rec.text);
     if (p.text !== undefined) {
@@ -213,8 +471,9 @@ export class Scheduler {
       replan = true;
     }
     if (!rec.threadId) {
-      if (p.cwd !== undefined) rec.cwd = this.checkedFolder(p.cwd);
-      if (p.accountId !== undefined) rec.accountId = this.checkedAccount(p.accountId);
+      if (p.cwd !== undefined) rec.cwd = away ? p.cwd.trim() || undefined : this.checkedFolder(p.cwd);
+      if (rec.cwd === undefined) delete rec.cwd;
+      if (p.accountId !== undefined) rec.accountId = away ? p.accountId : this.checkedAccount(p.accountId);
       if (p.model !== undefined) setOrDelete(rec, 'model', p.model);
       if (p.effort !== undefined) setOrDelete(rec, 'effort', p.effort);
       if (p.permissionMode !== undefined) rec.permissionMode = p.permissionMode;
@@ -223,31 +482,75 @@ export class Scheduler {
     }
     rec.updatedAt = this.iso();
     if (replan) this.plan(rec);
-    this.changed();
+    await this.put(rec);
     this.tick();
     return this.view(rec);
   }
 
-  delete(scheduleId: string): Record<string, never> {
+  async delete(scheduleId: string): Promise<Record<string, never>> {
     const rec = this.mustGet(scheduleId);
+    if (this.mode === 'backend') {
+      try {
+        await this.mustHaveBackend().remove(rec.id);
+      } catch (e) {
+        if (e instanceof RpcError) throw e;
+        throw new RpcError(ErrorCode.other, `Couldn't delete the schedule from the backend: ${(e as Error).message ?? e}`);
+      }
+    }
     this.items.delete(rec.id);
     this.changed();
     return {};
   }
 
   // Runs it now, as if it were due. A repeating one keeps its next time.
-  runNow(scheduleId: string): { schedule: Schedule; threadId: string; turnId: string } {
+  // Another runner's is asked for through the backend, and runs there.
+  async runNow(scheduleId: string): Promise<{ schedule: Schedule; threadId?: string; turnId?: string; queued?: boolean }> {
     const rec = this.mustGet(scheduleId);
+    if (!this.mine(rec)) {
+      const at = this.iso();
+      const ok = await this.mustHaveBackend()
+        .requestRun(rec.id, at)
+        .catch((e) => {
+          throw new RpcError(ErrorCode.other, `Couldn't ask its runner to run it: ${(e as Error).message ?? e}`);
+        });
+      if (!ok) throw new RpcError(ErrorCode.scheduleNotFound, `No schedule ${scheduleId}`);
+      rec.runRequestedAt = at;
+      this.changed();
+      return { schedule: this.view(rec), queued: true };
+    }
     const res = this.send(rec, true);
     if (res.outcome !== 'sent') throw new RpcError(ErrorCode.other, res.note ?? "Couldn't run it.");
     if (rec.at) this.finish(rec);
+    if (this.mode === 'backend') await this.recordRun(rec, true);
     this.changed();
     return { schedule: this.view(rec), threadId: res.threadId!, turnId: res.turnId! };
+  }
+
+  // Tells the backend about a run this runner sent (or skipped, or
+  // couldn't send), with the schedule's next time. Best effort: a run that
+  // was sent stays sent.
+  private async recordRun(rec: ScheduleRecord, sent: boolean, request?: string): Promise<void> {
+    if (!this.backend || !rec.lastRun) return;
+    await this.backend
+      .ran({
+        scheduleId: rec.id,
+        lastRun: rec.lastRun,
+        sent,
+        expectUpdatedAt: rec.updatedAt,
+        ...(rec.nextRunAt ? { nextRunAt: rec.nextRunAt } : {}),
+        ...(rec.finishedAt ? { finishedAt: rec.finishedAt } : {}),
+        ...(request ? { request } : {}),
+      })
+      .catch((e) => this.log.warn('could not record a schedule run in the backend', { scheduleId: rec.id, error: String(e) }));
   }
 
   // ------------------------------------------------------------------ runs
 
   private tick(): void {
+    if (this.mode === 'backend') {
+      void this.backendTick();
+      return;
+    }
     this.timer?.cancel();
     this.timer = undefined;
     if (this.stopped) return;
@@ -271,6 +574,89 @@ export class Scheduler {
     // next regular check, not straight away over and over.
     const wait = next <= now ? TICK_MS : Math.min(next - now, TICK_MS);
     this.timer = this.clock.setTimeout(() => this.tick(), wait);
+  }
+
+  // The backend's version of tick: the same runs, each taken with a claim
+  // before it's sent, then recorded with the next time. Also the
+  // schedules.run requests other runners left for ours. Nothing is sent
+  // until the backend is attached.
+  private async backendTick(): Promise<void> {
+    this.timer?.cancel();
+    this.timer = undefined;
+    if (this.stopped) return;
+    if (this.ticking) {
+      this.tickAgain = true;
+      return;
+    }
+    const backend = this.backend;
+    if (!backend) return;
+    this.ticking = true;
+    this.tickAgain = false;
+    try {
+      const now = this.clock.now();
+      for (const rec of [...this.items.values()]) {
+        if (!this.mine(rec)) continue;
+        if (rec.finishedAt && now - Date.parse(rec.finishedAt) > KEEP_FINISHED_MS) {
+          await backend.remove(rec.id).catch(() => {});
+          this.items.delete(rec.id);
+          continue;
+        }
+        if (rec.runRequestedAt) await this.runRequested(backend, rec);
+        if (rec.paused || !rec.nextRunAt || Date.parse(rec.nextRunAt) > now) continue;
+        const claimed = await backend.claim(rec.id, 'due', rec.nextRunAt).catch((e) => {
+          this.log.warn('could not claim a schedule run', { scheduleId: rec.id, error: String(e) });
+          return false;
+        });
+        if (!claimed || this.stopped) continue;
+        const res = this.send(rec, false);
+        if (res.outcome === 'retry') {
+          await backend.release(rec.id).catch(() => {});
+          continue;
+        }
+        if (rec.at) this.finish(rec);
+        else this.plan(rec);
+        await this.recordRun(rec, res.outcome === 'sent');
+      }
+      this.changed();
+    } finally {
+      this.ticking = false;
+    }
+    if (this.stopped) return;
+    if (this.tickAgain) {
+      this.timer = this.clock.setTimeout(() => this.tick(), 0);
+      return;
+    }
+    let next = Infinity;
+    const now = this.clock.now();
+    for (const rec of this.items.values()) {
+      if (!this.mine(rec)) continue;
+      if (!rec.paused && rec.nextRunAt) next = Math.min(next, Date.parse(rec.nextRunAt));
+      if (rec.runRequestedAt) next = now;
+    }
+    const wait = next <= now ? TICK_MS : Math.min(next - now, TICK_MS);
+    this.timer = this.clock.setTimeout(() => this.tick(), wait);
+  }
+
+  // A schedules.run another runner asked for: sent as if run here.
+  private async runRequested(backend: ScheduleBackend, rec: ScheduleRecord): Promise<void> {
+    const request = rec.runRequestedAt!;
+    const claimed = await backend.claim(rec.id, 'request', request).catch(() => false);
+    if (!claimed || this.stopped) return;
+    let res: ReturnType<Scheduler['send']>;
+    try {
+      res = this.send(rec, true);
+    } catch (e) {
+      // Busy (a restart, or its thread finishing on the old runner): leave
+      // the request for the next look.
+      if (e instanceof RpcError && e.code === ErrorCode.busy) {
+        await backend.release(rec.id).catch(() => {});
+        return;
+      }
+      throw e;
+    }
+    if (res.outcome === 'sent' && rec.at) this.finish(rec);
+    delete rec.runRequestedAt;
+    await this.recordRun(rec, res.outcome === 'sent', request);
   }
 
   private send(rec: ScheduleRecord, manual: boolean): { outcome: 'sent' | 'skipped' | 'failed' | 'retry'; threadId?: string; turnId?: string; note?: string } {
@@ -304,7 +690,8 @@ export class Scheduler {
       const r = this.runner.create({
         text,
         title: rec.title,
-        cwd: rec.cwd,
+        // Made on another runner, the folder is as it was typed there.
+        cwd: rec.cwd ? path.resolve(expandHome(rec.cwd)) : undefined,
         accountId: rec.accountId,
         model: rec.model,
         effort: rec.effort,
@@ -367,16 +754,26 @@ export class Scheduler {
 
   private changed(): void {
     const stored = [...this.items.values()];
+    const version = this.mode === 'backend' ? 2 : 1;
     try {
-      atomicWriteFileSync(this.file, `${JSON.stringify({ version: 1, schedules: stored }, null, 2)}\n`);
+      atomicWriteFileSync(this.file, `${JSON.stringify({ version, schedules: stored }, null, 2)}\n`);
     } catch (e) {
       this.log.error('could not save schedules', { error: String(e) });
     }
+    this.publish();
+  }
+
+  private publish(): void {
     this.runner.publish({ method: 'schedules.updated', params: { schedules: this.list() } });
   }
 
   private view(rec: ScheduleRecord): Schedule {
-    return { ...rec, whenText: this.whenText(rec) };
+    const v: Schedule = { ...rec, whenText: this.whenText(rec) };
+    if (rec.runnerId) {
+      const name = rec.runnerId === this.self.id ? this.self.name : this.names.get(rec.runnerId);
+      if (name) v.runnerName = name;
+    }
+    return v;
   }
 
   private whenText(rec: ScheduleRecord): string {
@@ -456,8 +853,9 @@ function setOrDelete<K extends 'model' | 'effort'>(rec: ScheduleRecord, key: K, 
 export function scheduleMethods(s: Scheduler): Record<string, (p: Record<string, unknown>) => unknown> {
   return {
     'schedules.list': (p) => ({ schedules: s.list(str(p, 'threadId')) }),
-    'schedules.create': (p) => ({
-      schedule: s.create({
+    'runners.list': async () => ({ runners: await s.runners() }),
+    'schedules.create': async (p) => ({
+      schedule: await s.create({
         text: str(p, 'text') ?? '',
         title: str(p, 'title'),
         at: str(p, 'at'),
@@ -471,9 +869,10 @@ export function scheduleMethods(s: Scheduler): Record<string, (p: Record<string,
         permissionMode: mode(p.permissionMode),
         paused: bool(p, 'paused'),
         createdBy: str(p, 'createdBy'),
+        runnerId: str(p, 'runnerId'),
       }),
     }),
-    'schedules.update': (p) => {
+    'schedules.update': async (p) => {
       const scheduleId = str(p, 'scheduleId');
       if (!scheduleId) throw bad('scheduleId must be a string');
       const upd: UpdateScheduleParams = { scheduleId };
@@ -486,7 +885,7 @@ export function scheduleMethods(s: Scheduler): Record<string, (p: Record<string,
       if (p.effort !== undefined) upd.effort = effort(p.effort);
       if (p.permissionMode !== undefined) upd.permissionMode = mode(p.permissionMode);
       if (p.paused !== undefined) upd.paused = bool(p, 'paused');
-      return { schedule: s.update(upd) };
+      return { schedule: await s.update(upd) };
     },
     'schedules.delete': (p) => s.delete(reqStr(p, 'scheduleId')),
     'schedules.run': (p) => s.runNow(reqStr(p, 'scheduleId')),

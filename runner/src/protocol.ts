@@ -650,6 +650,10 @@ export type Schedule = {
   finishedAt?: string;
   runs: number;
   lastRun?: { at: string; outcome: 'sent' | 'skipped' | 'failed'; threadId?: string; note?: string };
+  // Where it runs, once schedules live in the backend (Schedules, "Runners").
+  runnerId?: string;
+  runnerName?: string;
+  runRequestedAt?: string;
 };
 
 // Who sent a message when it wasn't a person or a client: the runner by

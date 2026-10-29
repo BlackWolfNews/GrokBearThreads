@@ -215,7 +215,11 @@ export const schedules = query({
   handler: async (ctx, { token }) => {
     await checkPhoneToken(ctx, token);
     const out = [];
-    for await (const s of ctx.db.query('schedules')) out.push(strip(s));
+    // `owned` and `claim` are the backend's own (API 9), not the phone's.
+    for await (const s of ctx.db.query('schedules')) {
+      const { owned, claim, ...rest } = strip(s);
+      out.push(rest);
+    }
     return out;
   },
 });

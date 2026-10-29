@@ -5,15 +5,24 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { makeHarness, tick, tmpDir } from '../helpers/fakes.ts';
-import { ConvexSync, BACKEND_API_VERSION, ICONS_API_VERSION, SHARE_API_VERSION, PRESENCE_MS, SYNC_COALESCE_MS, HEARTBEAT_MS, SYNC_BATCH, ensureRunnerId, toThreadDoc, convexPoster, convexUploader, pictureName, type ThreadDoc } from '../../src/sync.ts';
+import { ConvexSync, BACKEND_API_VERSION, ICONS_API_VERSION, SCHEDULES_API_VERSION, SHARE_API_VERSION, PRESENCE_MS, SYNC_COALESCE_MS, HEARTBEAT_MS, SYNC_BATCH, ensureRunnerId, toThreadDoc, convexPoster, convexUploader, pictureName, type ThreadDoc } from '../../src/sync.ts';
 import type { Project } from '../../src/protocol.ts';
+import type { ScheduleBackend } from '../../src/schedules.ts';
 import { nullLogger } from '../../src/log.ts';
 import { AT_MAC_IDLE_MS, isAtMac } from '../../src/presence.ts';
 import { readRunnerJson } from '../../src/config.ts';
 
 type Call = { kind: string; fn: string; args: Record<string, unknown> };
 
-function setup(opts: { fail?: () => Error | undefined; config?: Partial<ConstructorParameters<typeof ConvexSync>[0]['config']>; key?: string; answer?: (fn: string) => unknown } = {}) {
+function setup(
+  opts: {
+    fail?: () => Error | undefined;
+    config?: Partial<ConstructorParameters<typeof ConvexSync>[0]['config']>;
+    key?: string;
+    answer?: (fn: string) => unknown;
+    schedules?: ConstructorParameters<typeof ConvexSync>[0]['schedules'];
+  } = {},
+) {
   const h = makeHarness();
   const calls: Call[] = [];
   const post = async (kind: 'mutation' | 'query', fn: string, args: Record<string, unknown>) => {
@@ -32,6 +41,7 @@ function setup(opts: { fail?: () => Error | undefined; config?: Partial<Construc
     clock: h.clock,
     log: nullLogger,
     post,
+    schedules: opts.schedules,
   });
   const upserts = () => calls.filter((c) => c.fn === 'sync:upsertThreads');
   const docs = () => upserts().flatMap((c) => c.args.threads as ThreadDoc[]);
@@ -1011,4 +1021,39 @@ test('sharing: a shared thread seen before it comes across in a handover has its
   await tick(20);
   await sync.flushNow();
   assert.equal(calls.filter((c) => c.fn === 'sync:addShareImage').length, 1);
+});
+
+test('schedules: a backend of API 9 gets the scheduler attached, and schedules stop being mirrored', async () => {
+  let inBackend = false;
+  const attached: ScheduleBackend[] = [];
+  const old = setup({
+    answer: (fn) => (fn === 'sync:heartbeat' ? { apiVersion: SCHEDULES_API_VERSION - 1 } : null),
+    schedules: { attach: (b) => void attached.push(b), inBackend: () => inBackend },
+  });
+  old.sync.start();
+  await tick();
+  assert.equal(attached.length, 0, 'an older backend keeps them in the file');
+  await old.sync.stop();
+
+  const answers: Record<string, unknown> = { 'sync:heartbeat': { apiVersion: SCHEDULES_API_VERSION }, 'sync:claimSchedule': true, 'sync:runnersList': [{ runnerId: 'r2', name: 'bruce', lastSeenAt: 5 }] };
+  const f = setup({ answer: (fn) => answers[fn] ?? null, schedules: { attach: (b) => void attached.push(b), inBackend: () => inBackend } });
+  f.sync.start();
+  await tick();
+  assert.equal(attached.length, 1);
+  const b = attached[0]!;
+  assert.equal(await b.claim('s1', 'due', '2026-10-27T03:00:00.000Z'), true);
+  const claim = f.calls.find((c) => c.fn === 'sync:claimSchedule')!;
+  assert.deepEqual({ ...claim.args, holder: undefined }, { key: 'k', runnerId: 'r1', scheduleId: 's1', holder: undefined, kind: 'due', expect: '2026-10-27T03:00:00.000Z' });
+  assert.match(String(claim.args.holder), /^r1:\d+:2026-10-27T00:00:00.000Z$/);
+  assert.deepEqual(await b.runners(), [{ id: 'r2', name: 'bruce', lastSeenAt: 5 }]);
+  await b.save({ id: 's9', runnerId: 'r2', title: 't', text: 'x', whenText: 'Every day at 0:00', cron: '@daily', paused: false, createdAt: 'c', updatedAt: 'u', runs: 0 });
+  assert.deepEqual(f.calls.find((c) => c.fn === 'sync:saveSchedule')!.args.schedule, { id: 's9', runnerId: 'r2', title: 't', text: 'x', whenText: 'Every day at 0:00', paused: false, createdAt: 'c', updatedAt: 'u', runs: 0, cron: '@daily' });
+
+  // Once they live in the backend, a schedules.updated isn't mirrored.
+  inBackend = true;
+  f.h.runner.publish({ method: 'schedules.updated', params: { schedules: [] } });
+  f.h.clock.advance(SYNC_COALESCE_MS);
+  await tick();
+  assert.equal(f.calls.filter((c) => c.fn === 'sync:setSchedules').length, 0);
+  await f.sync.stop();
 });

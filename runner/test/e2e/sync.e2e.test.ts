@@ -136,6 +136,81 @@ describe('convex mirror e2e', { skip: LOCAL ? false : 'no local Convex deploymen
     else if (fs.existsSync(envLocalPath)) fs.rmSync(envLocalPath);
   });
 
+  // Step 6 (docs/protocol.md, Schedules, "Runners"): with an API 9 backend
+  // the runner moves its schedules into the table, makes them there, takes
+  // each due run with a claim, runs what another runner asked for, and can
+  // put one on another runner (here a pretend "bruce" that only heartbeats).
+  test('schedules live in the backend: made there, claimed when due, run on request, made for another runner', async () => {
+    const runnerId = readRunnerJson(home).sync?.runnerId;
+    const owned = async () => (await api('query', 'sync:schedules', { key })) as any[];
+    const row = (id: string) => owned().then((rows) => rows.find((r) => r.id === id));
+
+    // Made through the runner once it has attached (the first heartbeat).
+    const daily = await until('the scheduler to attach', async () => {
+      try {
+        return ((await client.call('schedules.create', { text: 'Daily check', cron: '0 9 * * *', cwd: home, accountId: 'claude-main' })) as any).schedule;
+      } catch {
+        return undefined;
+      }
+    });
+    const saved = await until('the row', () => row(daily.id));
+    assert.equal(saved.runnerId, runnerId);
+    assert.equal(saved.whenText, 'Every day at 9:00');
+    assert.equal(saved.cwd, home);
+    // Made before the first heartbeat it was the file's, and moved up; either
+    // way it's listed with this runner's name now.
+    const listed = await until('the runner name', async () => {
+      const l = ((await client.call('schedules.list')) as any).schedules.find((x: any) => x.id === daily.id);
+      return l?.runnerName ? l : undefined;
+    });
+    assert.equal(listed.runnerName, 'E2E Mac');
+
+    // Another runner, as the backend knows it.
+    await api('mutation', 'sync:heartbeat', { key, runner: { runnerId: 'e2e-bruce', name: 'bruce', version: 'x', startedAt: new Date().toISOString(), draining: false, threadCount: 0 } });
+    // The local deployment keeps the runners of earlier runs (said goodbye,
+    // so not offered); this one is first.
+    const runners = ((await client.call('runners.list')) as any).runners;
+    assert.deepEqual([runners[0].name, runners[0].self], ['E2E Mac', true]);
+    assert.ok(runners.some((r: any) => r.id === 'e2e-bruce' && r.name === 'bruce' && r.online && !r.self), JSON.stringify(runners));
+    const away = ((await client.call('schedules.create', { text: 'On Bruce', cron: '@hourly', runnerId: 'bruce' })) as any).schedule;
+    assert.equal(away.runnerId, 'e2e-bruce');
+    assert.equal(away.runnerName, 'bruce');
+    assert.equal((await until('bruce\'s row', () => row(away.id))).cwd, undefined, "bruce's default folder");
+    // Run now on bruce's: asked for, not run here.
+    const asked = (await client.call('schedules.run', { scheduleId: away.id })) as any;
+    assert.equal(asked.queued, true);
+    assert.ok((await row(away.id)).runRequestedAt);
+
+    // Due: an `at` already passed runs straight away, once.
+    const once = ((await client.call('schedules.create', { text: 'Now please', at: new Date(Date.now() - 60_000).toISOString(), cwd: home, accountId: 'claude-main' })) as any).schedule;
+    const ran = await until('the due run', async () => {
+      const r = await row(once.id);
+      return r?.finishedAt ? r : undefined;
+    });
+    assert.equal(ran.runs, 1);
+    assert.equal(ran.lastRun.outcome, 'sent');
+    assert.equal(ran.nextRunAt, undefined);
+
+    // A run another runner asked for on ours: this runner sends it.
+    await api('mutation', 'sync:requestScheduleRun', { key, scheduleId: daily.id, at: new Date().toISOString() });
+    const requested = await until('the requested run', async () => {
+      const r = await row(daily.id);
+      return r?.runs === 1 && !r.runRequestedAt ? r : undefined;
+    });
+    assert.equal(requested.nextRunAt, saved.nextRunAt, 'a run now keeps the next time');
+    const started = ((await client.call('threads.list', { include: ['inbox'] })) as any).threads.filter((t: any) => t.schedule?.id === daily.id || t.schedule?.id === once.id);
+    assert.equal(started.length, 2, 'one thread each');
+
+    // Delete goes to the backend.
+    for (const sc of [daily, away, once]) await client.call('schedules.delete', { scheduleId: sc.id });
+    await until('the rows to go', async () => ((await owned()).some((r) => [daily.id, away.id, once.id].includes(r.id)) ? undefined : true));
+    for (const t of started) await client.call('threads.delete', { threadId: t.id });
+    const saidOnDisk = JSON.parse(fs.readFileSync(path.join(home, 'schedules.json'), 'utf8'));
+    assert.equal(saidOnDisk.version, 2, 'the file is the backend copy');
+    // Bruce goes, so the phone's "newest runner online" is this one again.
+    await api('mutation', 'sync:bye', { key, runnerId: 'e2e-bruce' });
+  });
+
   test('a thread is mirrored, updated, and removed; the runner is listed and signs off', async () => {
     const runnerId = readRunnerJson(home).sync?.runnerId;
     assert.ok(runnerId, 'the runner made itself an id');

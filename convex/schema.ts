@@ -212,7 +212,21 @@ export default defineSchema({
     finishedAt: v.optional(v.string()),
     runs: v.number(),
     lastRun: v.optional(v.object({ at: v.string(), outcome: v.string(), threadId: v.optional(v.string()), note: v.optional(v.string()) })),
-  }).index('by_runnerId', ['runnerId']),
+    // Since API 9 a row can be the schedule itself rather than a runner's
+    // mirror of its own file (docs/protocol.md, Schedules, "Runners"):
+    // `owned` marks those, which only the sync:*Schedule functions write
+    // and setSchedules never touches. They also keep what the mirror left
+    // out, a run being sent (`claim`, which lapses at `until`), and a
+    // schedules.run made on another runner (`runRequestedAt`).
+    owned: v.optional(v.boolean()),
+    effort: v.optional(v.string()),
+    permissionMode: v.optional(v.string()),
+    createdBy: v.optional(v.string()),
+    claim: v.optional(v.object({ holder: v.string(), until: v.number() })),
+    runRequestedAt: v.optional(v.string()),
+  })
+    .index('by_runnerId', ['runnerId'])
+    .index('by_scheduleId', ['id']),
 
   accounts: defineTable({
     runnerId: v.string(),

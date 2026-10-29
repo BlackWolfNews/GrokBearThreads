@@ -23,6 +23,7 @@ import type { Clock, TimerHandle } from './clock.ts';
 import type { Logger } from './log.ts';
 import type { Account, ApprovalDecision, ApprovalOption, PersistedEvent, Project, Question, Schedule, ThreadSummary } from './protocol.ts';
 import type { Notification } from './runner.ts';
+import type { ScheduleBackend, StoredSchedule } from './schedules.ts';
 import { paths, readRunnerJson, writeRunnerJson } from './config.ts';
 
 // At most one write per thread this often while a turn runs: a running
@@ -61,7 +62,7 @@ export type SyncConfig = {
 // lower one means its backend hasn't been deployed since this runner was:
 // said in runner.status, tb status and the log rather than stopping, since
 // the runner only adds to what it sends while the number stays the same.
-export const BACKEND_API_VERSION = 8;
+export const BACKEND_API_VERSION = 9;
 // From this backend version a project's picture goes up to file storage
 // (sync:iconUploadUrl, sync:setProjectIcon); an older backend gets the
 // project without it and the phone shows its symbol or first letter.
@@ -71,6 +72,10 @@ export const ICONS_API_VERSION = 5;
 // older backend's validator would turn the whole write down, so it gets
 // the row without it, and the link doesn't work until it's deployed.
 export const SHARE_API_VERSION = 8;
+// From this one schedules live in the backend (step 6; docs/protocol.md,
+// Schedules, "Runners"): the scheduler is attached once a heartbeat says
+// so, and from then on writes them there itself, so they aren't mirrored.
+export const SCHEDULES_API_VERSION = 9;
 
 export type SyncStatus = {
   state: 'off' | 'ok' | 'error';
@@ -196,6 +201,10 @@ export type SyncDeps = {
   post?: Post;
   subscriber?: Subscriber;
   upload?: Upload;
+  // The scheduler (schedules.ts), given the backend's schedules table once
+  // a heartbeat says it has one; while inBackend(), schedules.updated isn't
+  // mirrored. Absent in small tests.
+  schedules?: { attach(backend: ScheduleBackend): void | Promise<void>; inBackend(): boolean };
 };
 
 // POST /api/mutation or /api/query on a Convex deployment, the plain HTTP
@@ -407,6 +416,29 @@ export function toScheduleDoc(s: Schedule) {
   return out;
 }
 
+// A schedule as sync:saveSchedule and sync:adoptSchedules take it: the
+// validator's fields only.
+export function toOwnedScheduleDoc(s: StoredSchedule) {
+  const out: Record<string, unknown> = {
+    id: s.id,
+    runnerId: s.runnerId,
+    title: s.title,
+    text: s.text,
+    whenText: s.whenText,
+    paused: s.paused,
+    createdAt: s.createdAt,
+    updatedAt: s.updatedAt,
+    runs: s.runs,
+  };
+  for (const k of ['at', 'cron', 'timezone', 'threadId', 'cwd', 'accountId', 'model', 'effort', 'permissionMode', 'createdBy', 'nextRunAt', 'finishedAt', 'runRequestedAt'] as const) {
+    if (s[k] !== undefined) out[k] = s[k];
+  }
+  if (s.lastRun) {
+    out.lastRun = { at: s.lastRun.at, outcome: s.lastRun.outcome, ...(s.lastRun.threadId ? { threadId: s.lastRun.threadId } : {}), ...(s.lastRun.note ? { note: s.lastRun.note } : {}) };
+  }
+  return out;
+}
+
 export function toAccountDoc(a: Account) {
   const out: Record<string, unknown> = { id: a.id, provider: a.provider, title: a.title };
   for (const k of ['note', 'email', 'plan', 'defaultModel'] as const) if (a[k] !== undefined) out[k] = a[k];
@@ -499,7 +531,11 @@ export class ConvexSync {
     this.running = true;
     this.unsub = this.deps.runner.onNotification((n) => this.onNotification(n));
     for (const t of this.deps.runner.list(ALL)) this.mark(t);
-    this.lists = { projects: this.deps.runner.listProjects?.(), schedules: this.deps.runner.listSchedules?.(), accounts: this.deps.runner.listAccounts?.() };
+    this.lists = {
+      projects: this.deps.runner.listProjects?.(),
+      schedules: this.deps.schedules?.inBackend() ? undefined : this.deps.runner.listSchedules?.(),
+      accounts: this.deps.runner.listAccounts?.(),
+    };
     for (const name of ['projects', 'schedules', 'accounts'] as const) if (this.lists[name]) this.dirtyLists.add(name);
     this.full = true;
     this.scheduleFlush();
@@ -658,6 +694,8 @@ export class ConvexSync {
         this.scheduleFlush();
         break;
       case 'schedules.updated':
+        // Ones that live in the backend are written there by the scheduler.
+        if (this.deps.schedules?.inBackend()) break;
         this.lists.schedules = n.params.schedules;
         this.dirtyLists.add('schedules');
         this.scheduleFlush();
@@ -795,6 +833,7 @@ export class ConvexSync {
       for (const name of lists) {
         const list = this.lists[name];
         if (!list) continue;
+        if (name === 'schedules' && this.deps.schedules?.inBackend()) continue;
         const rows = name === 'projects' ? (list as Project[]).map(toProjectDoc) : name === 'schedules' ? (list as Schedule[]).map(toScheduleDoc) : (list as Account[]).map(toAccountDoc);
         await this.post('mutation', `sync:set${name[0]!.toUpperCase()}${name.slice(1)}`, { key, runnerId: this.runnerId, [name]: rows });
       }
@@ -1102,12 +1141,61 @@ export class ConvexSync {
       threadCount: this.deps.runner.list(ALL).length,
     };
     void this.post('mutation', 'sync:heartbeat', { key: this.deps.key, runner }).then(
-      (r) => this.sawBackend(r),
+      (r) => {
+        this.sawBackend(r);
+        if ((this.backendApiVersion ?? 0) >= SCHEDULES_API_VERSION && this.running) void this.deps.schedules?.attach(this.scheduleBackend());
+      },
       (e) => {
         this.deps.log.debug('convex heartbeat failed', { error: String(e) });
       },
     );
     this.heartbeatTimer = this.deps.clock.setTimeout(() => this.heartbeat(), HEARTBEAT_MS);
+  }
+
+  // ------------------------------------------------------------ schedules
+
+  private schedulesTable?: ScheduleBackend;
+
+  // The backend's schedules table for the scheduler (SCHEDULES_API_VERSION).
+  // `holder` names this runner process, so a claim taken by the release
+  // that's draining isn't this one's.
+  scheduleBackend(): ScheduleBackend {
+    if (this.schedulesTable) return this.schedulesTable;
+    const key = this.deps.key;
+    const runnerId = this.runnerId;
+    const holder = `${runnerId}:${process.pid}:${this.deps.startedAt}`;
+    const call = (kind: 'mutation' | 'query', fn: string, args: Record<string, unknown>) => this.backend(kind, fn, { key, ...args });
+    this.schedulesTable = {
+      subscribe: (onRows, onError) => {
+        if (!this.subscriber) {
+          onError(new Error('sync is off'));
+          return () => {};
+        }
+        return this.subscriber.subscribe('sync:schedules', { key }, (v) => onRows(Array.isArray(v) ? (v as StoredSchedule[]) : []), onError);
+      },
+      save: async (sc) => {
+        await call('mutation', 'sync:saveSchedule', { schedule: toOwnedScheduleDoc(sc) });
+      },
+      remove: async (scheduleId) => {
+        await call('mutation', 'sync:deleteSchedule', { scheduleId });
+      },
+      adopt: async (rows) => {
+        await call('mutation', 'sync:adoptSchedules', { runnerId, schedules: rows.map(toOwnedScheduleDoc) });
+      },
+      claim: async (scheduleId, kind, expect) => (await call('mutation', 'sync:claimSchedule', { runnerId, scheduleId, holder, kind, expect })) === true,
+      release: async (scheduleId) => {
+        await call('mutation', 'sync:releaseSchedule', { scheduleId, holder });
+      },
+      ran: async (p) => {
+        await call('mutation', 'sync:scheduleRan', { holder, ...p });
+      },
+      requestRun: async (scheduleId, at) => (await call('mutation', 'sync:requestScheduleRun', { scheduleId, at })) === true,
+      runners: async () => {
+        const rows = await call('query', 'sync:runnersList', {});
+        return Array.isArray(rows) ? (rows as { runnerId: string; name: string; lastSeenAt: number }[]).map((r) => ({ id: r.runnerId, name: r.name, lastSeenAt: r.lastSeenAt })) : [];
+      },
+    };
+    return this.schedulesTable;
   }
 
   // ------------------------------------------------------------ commands
