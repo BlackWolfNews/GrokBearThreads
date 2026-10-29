@@ -213,12 +213,12 @@ function others() {
       reply: 'Three sub-agents are on it, one page each. I\'ll come back here as each one finishes.', ms: 9_000, cost: 0.03 },
   ] });
   // Needs you: a turn that ended with end_turn's asks, as a checklist.
-  smallThread({ name: 'openrouter-key', title: 'Small-model settings page', minutesAgo: 2, needsYou: true, turns: [
-    { user: 'Get the settings page working with an OpenRouter key.', tools: [{ id: 't', name: 'Bash', kind: 'command', title: 'npm test', output: '412 passed' }],
-      reply: 'The Settings window is in, with the key field, the daily budget and private folders. The runner keeps the key in `secrets/openrouter-key` and the app only ever hears whether one is set.\n\nI tested it with a fake key. To see a real title come back I need a real one.',
+  smallThread({ name: 'testflight-beta', title: 'Ship the beta to TestFlight', minutesAgo: 2, needsYou: true, turns: [
+    { user: 'Get build 42 of the iPhone app out to the beta testers.', tools: [{ id: 't', name: 'Bash', kind: 'command', title: 'xcodebuild archive', output: '** ARCHIVE SUCCEEDED **' }],
+      reply: 'Build 42 is archived and signed, with the release notes written from this week\'s commits.\n\nThe upload stopped at App Store Connect: there\'s a new agreement to accept, and only the account holder can.',
       needs: 'you', asks: [
-        { action: 'Paste your OpenRouter key into Settings and turn on titles', where: 'Threadbear › Settings › Models', reply: 'done' },
-        { action: 'Check the two budget settings', why: 'My picks are in brackets:\n- Is a $1 daily budget right? (yes)\n- Should titles stop for the day when it runs out? (yes)' },
+        { action: 'Accept the new agreement in App Store Connect', where: 'App Store Connect › Business', reply: 'done' },
+        { action: 'Check who gets the beta', why: 'My picks are in brackets:\n- Just the internal testers first? (yes)\n- Send the external group a day later? (yes)' },
       ] },
   ] });
   // Done: finished, unread, and it said nothing waits on Mike, so it's in

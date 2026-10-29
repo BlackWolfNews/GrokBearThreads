@@ -2236,15 +2236,15 @@ The new hero is shorter, and every page now leads with what the app does.
     site.summary.patches = [{ id: 'deploys', source: 'project', file: path.join(root, '.threadbear/patches/deploys.ts') }];
   }
   // The thread with open asks: Highlights lists them under Needs you.
-  const key = threads.get('demo_openrouter_key');
-  if (key) {
-    const at = key.events.at(-1)?.ts ?? iso();
-    highlights.set(key.summary.id, {
+  const beta = threads.get('demo_testflight_beta');
+  if (beta) {
+    const at = beta.events.at(-1)?.ts ?? iso();
+    highlights.set(beta.summary.id, {
       highlights: [
-        { id: 'link:https://openrouter.ai/settings/keys', kind: 'link', title: 'OpenRouter keys', url: 'https://openrouter.ai/settings/keys', how: 'mentioned', seq: key.summary.lastSeq, lastSeq: key.summary.lastSeq, at },
+        { id: 'link:https://appstoreconnect.apple.com/business', kind: 'link', title: 'App Store Connect', url: 'https://appstoreconnect.apple.com/business', how: 'mentioned', seq: beta.summary.lastSeq, lastSeq: beta.summary.lastSeq, at },
       ],
-      edited: ['Sources/Threadbear/Views/SettingsView.swift', 'Sources/ThreadbearCore/Protocol/RunnerSettings.swift', 'runner/src/settings.ts']
-        .map((rel) => `/Users/mike/dev/me/threadbear/${rel}`),
+      edited: ['ios/App/Info.plist', 'ios/fastlane/Fastfile', 'ios/RELEASE_NOTES.md']
+        .map((rel) => `/Users/mike/dev/me/app/${rel}`),
     });
   }
   const upload = threads.get('demo_upload_resume');

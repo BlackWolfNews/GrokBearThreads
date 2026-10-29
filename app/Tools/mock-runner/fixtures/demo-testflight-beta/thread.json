@@ -1,0 +1,30 @@
+{
+  "id": "demo_testflight_beta",
+  "title": "Ship the beta to TestFlight",
+  "cwd": "/Users/mike/dev/me/misc",
+  "accountId": "claude-main",
+  "provider": "claude",
+  "permissionMode": "full",
+  "status": "idle",
+  "live": false,
+  "needsYou": true,
+  "createdAt": "2026-10-29T06:17:18.574Z",
+  "updatedAt": "2026-10-29T07:17:18.574Z",
+  "lastActivityAt": "2026-10-29T07:17:18.574Z",
+  "preview": "Build 42 is archived and signed, with the release notes written from this week's commits. The upload stopped at App Store Connect: there's a",
+  "lastSeq": 6,
+  "lastSeenSeq": 5,
+  "needs": "you",
+  "asks": [
+    {
+      "action": "Accept the new agreement in App Store Connect",
+      "where": "App Store Connect › Business",
+      "reply": "done"
+    },
+    {
+      "action": "Check who gets the beta",
+      "why": "My picks are in brackets:\n- Just the internal testers first? (yes)\n- Send the external group a day later? (yes)"
+    }
+  ],
+  "asksSeq": 6
+}

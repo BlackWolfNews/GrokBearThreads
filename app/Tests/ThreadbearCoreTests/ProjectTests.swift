@@ -157,13 +157,13 @@ final class ProjectTests: XCTestCase {
         transport.push(E.json(["jsonrpc": "2.0", "method": "projects.updated",
                                "params": ["projects": [["id": "p_a", "title": "Threadbear"], ["title": "no id"]]]]))
         transport.push(E.json(["jsonrpc": "2.0", "method": "librarian.updated",
-                               "params": ["librarian": ["state": "off", "reason": "No OpenRouter key", "paused": false, "queue": [], "recent": []]]]))
+                               "params": ["librarian": ["state": "off", "reason": "Needs a Claude pool to run on", "paused": false, "queue": [], "recent": []]]]))
         var iterator = client.notifications.makeAsyncIterator()
         guard case .projectsUpdated(let projects)? = await iterator.next() else { return XCTFail("no projects.updated") }
         XCTAssertEqual(projects.map(\.id), ["p_a"])
         guard case .librarianUpdated(let librarian)? = await iterator.next() else { return XCTFail("no librarian.updated") }
         XCTAssertEqual(librarian.state, .off)
-        XCTAssertEqual(LibrarianText.state(librarian), "Off: No OpenRouter key")
+        XCTAssertEqual(LibrarianText.state(librarian), "Off: Needs a Claude pool to run on")
     }
 
     // MARK: Requests

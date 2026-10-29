@@ -381,9 +381,9 @@ enum ScreenshotRunner {
             }
             // 17e. A thread whose last turn asked Mike for things: they
             // lead its Highlights, with the tick boxes the card has.
-            await open(app, "demo_openrouter_key")
-            app.choosePanel(PaneSection.highlightsId, in: "demo_openrouter_key")
-            await waitUntil(5) { app.highlights["demo_openrouter_key"] != nil }
+            await open(app, "demo_testflight_beta")
+            app.choosePanel(PaneSection.highlightsId, in: "demo_testflight_beta")
+            await waitUntil(5) { app.highlights["demo_testflight_beta"] != nil }
             try? await Task.sleep(for: .milliseconds(400))
             await capture(window, dir.appendingPathComponent("17e-needs-you.png"))
         }
