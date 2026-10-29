@@ -107,3 +107,31 @@ if [[ -e "$FINAL_DIR" ]]; then mv "$FINAL_DIR" "$OLD_DIR"; fi
 mv "$STAGE_DIR" "$FINAL_DIR"
 rm -rf "$OLD_DIR"
 echo "Built $FINAL_DIR (signed: $SIGN_IDENTITY)"
+
+# Sentry needs the debug symbols to show function names in crash reports.
+# Only the release app Mike runs reports (CrashReporting.swift), so only the
+# builds that become it upload them: setup_mac.sh's install and the
+# self-update's staged bundle (stage-update.sh), not debug, perf or
+# screenshot builds. This never fails the build: no sentry-cli or token
+# skips it, a failed upload warns.
+upload_debug_symbols() {
+  local cli token
+  cli="$(command -v sentry-cli || true)"
+  if [[ -z "$cli" && -x "$HOME/.local/bin/sentry-cli" ]]; then cli="$HOME/.local/bin/sentry-cli"; fi
+  token="${SENTRY_AUTH_TOKEN:-}"
+  if [[ -z "$token" && -r "$HOME/.config/sentry/token" ]]; then token="$(tr -d '[:space:]' < "$HOME/.config/sentry/token")"; fi
+  if [[ -z "$cli" || -z "$token" ]]; then
+    echo "Debug symbols not uploaded to Sentry (no sentry-cli or no token)."
+    return 0
+  fi
+  # SwiftPM release builds don't make a dSYM; dsymutil gathers one from the
+  # object files the binary points at.
+  if ! dsymutil "$BINARY" -o "$BINARY.dSYM" \
+    || ! SENTRY_AUTH_TOKEN="$token" "$cli" debug-files upload --org mikec --project threadbear "$BINARY.dSYM"; then
+    echo "WARNING: debug symbols weren't uploaded to Sentry; crash reports from this build won't show function names."
+  fi
+}
+if [[ "$BUILD_CONFIGURATION" == "release" \
+  && ( "$FINAL_DIR" == "$HOME/Applications/$APP_NAME.app" || "$FINAL_DIR" == "$HOME/Applications/.$APP_NAME.app.next" ) ]]; then
+  upload_debug_symbols || true
+fi
