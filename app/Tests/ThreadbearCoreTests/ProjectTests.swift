@@ -206,6 +206,8 @@ final class ProjectTests: XCTestCase {
         XCTAssertEqual(built.sections[0].threads.map(\.id), ["t2"], "archived threads aren't listed")
         XCTAssertEqual(built.sections[1].threads.map(\.id), ["t2", "t1"], "a thread in two projects is under both; hibernating ones aren't")
         XCTAssertEqual(built.sections[2].threads, [])
+        XCTAssertEqual(built.sections[0].archived.map(\.id), ["t3"], "archived ones are kept apart, for the sidebar's fold")
+        XCTAssertEqual(built.sections[1].archived, [], "hibernating isn't archived")
         XCTAssertEqual(built.unfiled.map(\.id), ["t4", "t5"], "a thread only in an archived project counts as in none")
         XCTAssertEqual(built.order, ["t2", "t1", "t4", "t5"])
         XCTAssertEqual(ProjectSections.threads(in: "b", from: threads).map(\.id), ["t3", "t2"], "the page lists put away ones too")
@@ -270,14 +272,58 @@ final class ProjectTests: XCTestCase {
     }
 
     func testProjectPatchesAcrossThreadsEachOnce() {
+        let project = Project(id: "p_b", title: "Poddle", folders: ["/p"])
         var one = ThreadSummary(id: "th1", title: "one")
         one.patches = [PatchInfo(id: "convex", source: "builtin", folder: "/p", projectId: "p_b"), PatchInfo(id: "tools")]
         var two = ThreadSummary(id: "th2", title: "two")
         two.patches = [PatchInfo(id: "convex", source: "builtin", folder: "/p", projectId: "p_b"),
                        PatchInfo(id: "poddle:tools", source: "project", folder: "/p", projectId: "p_b")]
-        let found = PatchGroups.patches(of: "p_b", in: [one, two])
-        XCTAssertEqual(found.map(\.patch.id), ["convex", "poddle:tools"])
-        XCTAssertEqual(found.map(\.thread.id), ["th1", "th2"])
+        // In the project's folder: its patches are its own, untagged.
+        var three = ThreadSummary(id: "th3", title: "three", cwd: "/p/app")
+        three.patches = [PatchInfo(id: "xcode", source: "builtin"), PatchInfo(id: "mine", source: "home", file: "/p/x.ts")]
+        let found = PatchGroups.patches(of: project, in: [one, two, three])
+        XCTAssertEqual(found.map(\.patch.id), ["convex", "poddle:tools", "xcode"], "home patches aren't the project's")
+        XCTAssertEqual(found.map(\.thread.id), ["th1", "th2", "th3"])
+    }
+
+    // MARK: A project's page in the pane
+
+    func testProjectPaneBorrowsTheNewestOpenThreadsPanels() {
+        let project = Project(id: "p_w", title: "Walkies", folders: ["/walkies"])
+        let inW = [ThreadProject(id: "p_w", title: "Walkies")]
+        let at = { (minutes: Double) in Date(timeIntervalSince1970: 1_000_000 - minutes * 60) }
+        // Elsewhere, put in the project: the project's patches are tagged.
+        var misc = ThreadSummary(id: "misc", title: "misc", cwd: "/misc", lastActivityAt: at(10), projects: inW)
+        misc.patches = [PatchInfo(id: "checks", source: "project", file: "/misc/.threadbear/patches/checks.ts"),
+                        PatchInfo(id: "walkies:convex", source: "builtin", folder: "/walkies", projectId: "p_w")]
+        misc.panels = [Panel(id: "worktrees", title: "Worktrees", kind: .list, patch: "checks"),
+                       Panel(id: "walkies:convex", title: "Convex", patch: "walkies:convex", projectId: "p_w")]
+        // In a subfolder of the project's: the same, untagged.
+        var inside = ThreadSummary(id: "inside", title: "inside", cwd: "/walkies-threads/x", lastActivityAt: at(1), projects: inW)
+        inside.patches = [PatchInfo(id: "convex", source: "builtin")]
+        inside.panels = [Panel(id: "convex", title: "Convex", patch: "convex")]
+        let newer = ThreadSummary(id: "bare", title: "nothing", cwd: "/elsewhere", lastActivityAt: at(0), projects: inW)
+        var away = ThreadSummary(id: "away", title: "away", cwd: "/walkies", lastActivityAt: at(0), archivedAt: at(0), projects: inW)
+        away.patches = [PatchInfo(id: "xcode", source: "builtin")]
+        away.panels = [Panel(id: "simulator", title: "Simulator", kind: .image, patch: "xcode")]
+        let other = ThreadSummary(id: "other", title: "other", cwd: "/walkies", lastActivityAt: at(0))
+
+        let pane = ProjectPane.standIn(for: project, threads: [misc, inside, newer, away, other])
+        XCTAssertEqual(pane?.id, "misc", "a worktree outside the folder isn't inside it; nothing, archived or not in the project lose")
+        XCTAssertEqual(pane?.patches.map(\.id), ["walkies:convex"], "only what came from the project")
+        XCTAssertEqual(pane?.panels.map(\.id), ["walkies:convex"])
+
+        var home = ThreadSummary(id: "home", title: "home", cwd: "/walkies/ios", lastActivityAt: at(5), projects: inW)
+        home.patches = [PatchInfo(id: "convex", source: "builtin"), PatchInfo(id: "notes", source: "home", file: "/h/.threadbear/patches/notes.ts")]
+        home.panels = [Panel(id: "convex", title: "Convex", patch: "convex"), Panel(id: "notes", title: "Notes", patch: "notes")]
+        let mine = ProjectPane.standIn(for: project, threads: [misc, home])
+        XCTAssertEqual(mine?.id, "home", "a thread in the folder has the project's patches as its own")
+        XCTAssertEqual(mine?.panels.map(\.id), ["convex"], "not a home patch's panel")
+
+        XCTAssertEqual(ProjectPane.standIn(for: project, threads: [newer, away])?.id, "away", "an archived thread when no open one has any")
+        XCTAssertNil(ProjectPane.standIn(for: project, threads: [newer, other]))
+        XCTAssertTrue(ProjectPane.isInside("/walkies", "/walkies/"))
+        XCTAssertFalse(ProjectPane.isInside("/walkies2", "/walkies"))
     }
 
     func testPanelOriginForTheRailBadge() {

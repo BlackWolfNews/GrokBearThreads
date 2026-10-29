@@ -414,7 +414,7 @@ private struct PatchesSection: View {
     let threads: [ThreadSummary]
 
     var body: some View {
-        let found = PatchGroups.patches(of: project.id, in: threads)
+        let found = PatchGroups.patches(of: project, in: threads)
         VStack(alignment: .leading, spacing: zoomed(12)) {
             PageHeading(title: "Patches", detail: found.isEmpty ? nil : "\(found.count)")
             ForEach(found, id: \.patch.id) { item in

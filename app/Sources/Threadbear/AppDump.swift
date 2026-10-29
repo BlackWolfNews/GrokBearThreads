@@ -321,7 +321,7 @@ struct AppDump: Encodable {
             project: app.openProject.map { project in
                 let threads = ProjectSections.threads(in: project.id, from: app.threads.values)
                 return ProjectInfo(id: project.id, title: project.title, folders: project.folders, threads: threads.map(\.id),
-                                   patches: PatchGroups.patches(of: project.id, in: threads).map(\.patch.id), archived: project.archived)
+                                   patches: PatchGroups.patches(of: project, in: threads).map(\.patch.id), archived: project.archived)
             },
             projectCards: app.openProject == nil && app.showsProjectsHome ? app.projectCards.map { card in
                 card.project.title + ": " + (card.status.isQuiet ? "quiet" : card.status.parts.map(\.text).joined(separator: " · "))

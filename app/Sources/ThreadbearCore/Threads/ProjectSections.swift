@@ -6,6 +6,9 @@ public struct ProjectSection: Sendable, Equatable, Identifiable {
     public var project: Project
     /// Its threads in the inbox (not put away), newest activity first.
     public var threads: [ThreadSummary]
+    /// Its archived threads, newest activity first: folded away under the
+    /// open ones in the sidebar, a few at a time.
+    public var archived: [ThreadSummary] = []
     /// Its newest thread's activity (put away ones too), else the runner's.
     public var lastActivityAt: Date
 
@@ -26,11 +29,13 @@ public struct ProjectSections: Sendable, Equatable {
     }
 
     /// Archived projects are left out, and so are archived and hibernating
-    /// threads, as in the inbox. A thread in two projects is under both.
+    /// threads, as in the inbox (archived ones go in `archived`). A thread
+    /// in two projects is under both.
     public static func build(projects: [Project], threads: some Sequence<ThreadSummary>, now: Date) -> ProjectSections {
         let shown = projects.filter { !$0.archived }
         let shownIds = Set(shown.map(\.id))
         var members: [String: [ThreadSummary]] = [:]
+        var archived: [String: [ThreadSummary]] = [:]
         var newest: [String: Date] = [:]
         var unfiled: [ThreadSummary] = []
         for thread in threads {
@@ -40,6 +45,7 @@ public struct ProjectSections: Sendable, Equatable {
                 filed = true
                 newest[membership.id] = max(newest[membership.id] ?? .distantPast, thread.lastActivityAt)
                 if inbox { members[membership.id, default: []].append(thread) }
+                if thread.isArchived { archived[membership.id, default: []].append(thread) }
             }
             if inbox && !filed { unfiled.append(thread) }
         }
@@ -50,6 +56,7 @@ public struct ProjectSections: Sendable, Equatable {
             ProjectSection(
                 project: project,
                 threads: (members[project.id] ?? []).sorted(by: newestFirst),
+                archived: (archived[project.id] ?? []).sorted(by: newestFirst),
                 lastActivityAt: max(newest[project.id] ?? .distantPast, project.lastActivityAt ?? project.updatedAt)
             )
         }
@@ -86,6 +93,12 @@ public struct PatchGroup: Sendable, Equatable, Identifiable {
     public var title: String?
     public var patches: [PatchInfo]
 
+    public init(projectId: String?, title: String?, patches: [PatchInfo]) {
+        self.projectId = projectId
+        self.title = title
+        self.patches = patches
+    }
+
     public var id: String { projectId ?? "" }
 }
 
@@ -113,11 +126,11 @@ public enum PatchGroups {
 
     /// A project's patches across its threads, each once (by id and
     /// folder), for its page: what the project gives a thread put in it.
-    public static func patches(of projectId: String, in threads: [ThreadSummary]) -> [(patch: PatchInfo, thread: ThreadSummary)] {
+    public static func patches(of project: Project, in threads: [ThreadSummary]) -> [(patch: PatchInfo, thread: ThreadSummary)] {
         var seen = Set<String>()
         var out: [(PatchInfo, ThreadSummary)] = []
         for thread in threads {
-            for patch in thread.patches where patch.projectId == projectId {
+            for patch in ProjectPane.patches(of: project, in: thread) {
                 if seen.insert(patch.id + "|" + (patch.folder ?? "")).inserted { out.append((patch, thread)) }
             }
         }
@@ -174,6 +187,62 @@ public enum PanelOrigin: Sendable, Equatable {
         case .folder: return "\(title), from this folder's .threadbear"
         case .builtin: return "\(title), built in"
         }
+    }
+}
+
+/// The pane on a project's page: its panels and patches, as one of its
+/// threads has them. Only threads have them (the runner works them out
+/// per thread, from its folder and its projects' folders), so the page
+/// borrows a thread's and keeps only what came from the project.
+public enum ProjectPane {
+    /// What a thread has from the project: patches tagged with it, and the
+    /// thread's own ones from inside one of its folders, which the runner
+    /// doesn't tag (a thread already in a project's folder gets that
+    /// folder's patches as its own). Home patches go everywhere, so they
+    /// aren't the project's.
+    public static func patches(of project: Project, in thread: ThreadSummary) -> [PatchInfo] {
+        thread.patches.filter { patch in
+            if let id = patch.projectId { return id == project.id }
+            guard patch.source != "home" else { return false }
+            // A built-in from the thread's own folder says no folder.
+            let from = patch.folder ?? patch.file ?? thread.cwd
+            return !from.isEmpty && project.folders.contains { isInside(from, $0) }
+        }
+    }
+
+    /// The panels those patches give.
+    public static func panels(of project: Project, in thread: ThreadSummary) -> [Panel] {
+        let own = Set(patches(of: project, in: thread).filter { $0.projectId == nil }.map(\.id))
+        return thread.panels.filter { $0.projectId == project.id || ($0.projectId == nil && own.contains($0.patch)) }
+    }
+
+    /// The thread the page borrows from, with only the project's panels
+    /// and patches: the newest open one that has any, else the newest
+    /// archived one. Nil when none of its threads has anything from it.
+    /// It keeps the thread's id, which the panels' requests to the runner
+    /// go by.
+    public static func standIn(for project: Project, threads: some Sequence<ThreadSummary>) -> ThreadSummary? {
+        var best: ThreadSummary?
+        for thread in threads where thread.projects.contains(where: { $0.id == project.id }) {
+            if let best, !better(thread, than: best) { continue }
+            guard !patches(of: project, in: thread).isEmpty else { continue }
+            best = thread
+        }
+        guard var out = best else { return nil }
+        out.panels = panels(of: project, in: out)
+        out.patches = patches(of: project, in: out)
+        return out
+    }
+
+    private static func better(_ a: ThreadSummary, than b: ThreadSummary) -> Bool {
+        if a.isArchived != b.isArchived { return !a.isArchived }
+        return a.lastActivityAt != b.lastActivityAt ? a.lastActivityAt > b.lastActivityAt : a.id < b.id
+    }
+
+    /// `path` is `folder` or inside it, as the runner's isInside.
+    static func isInside(_ path: String, _ folder: String) -> Bool {
+        let p = (path as NSString).standardizingPath, f = (folder as NSString).standardizingPath
+        return p == f || p.hasPrefix(f.hasSuffix("/") ? f : f + "/")
     }
 }
 

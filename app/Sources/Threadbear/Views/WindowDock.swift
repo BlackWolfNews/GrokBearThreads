@@ -124,7 +124,7 @@ enum WindowDock {
         }
         // A file or page open over the section: its name, with Back to the
         // section in the bar.
-        if let thread = app.selectedThread, let preview = app.panePreview[thread.id], preview.from.id == panel {
+        if let thread = app.paneThread, let preview = app.panePreview[thread.id], preview.from.id == panel {
             return preview.title
         }
         switch panel {
@@ -134,7 +134,7 @@ enum WindowDock {
             // The selected thread's panel by that id, else any thread's, as
             // a panel stays in the layout when Mike moves to a thread
             // without it.
-            if let hit = app.selectedThread?.panels.first(where: { $0.id == panel }) { return hit.title }
+            if let hit = app.paneThread?.panels.first(where: { $0.id == panel }) { return hit.title }
             return app.threads.values.lazy.flatMap(\.panels).first { $0.id == panel }?.title ?? panel
         }
     }
@@ -142,7 +142,7 @@ enum WindowDock {
     /// A patch panel's picture (its tool's icon), when it has one.
     @MainActor
     static func image(of panel: PanelID, app: AppModel) -> NSImage? {
-        let hit = app.selectedThread?.panels.first { $0.id == panel } ?? app.threads.values.lazy.flatMap(\.panels).first { $0.id == panel }
+        let hit = app.paneThread?.panels.first { $0.id == panel } ?? app.threads.values.lazy.flatMap(\.panels).first { $0.id == panel }
         return PatchImage.image(hit?.iconFile)
     }
 
@@ -170,7 +170,7 @@ enum WindowDock {
         case PaneSection.patchesId: return "square.dashed"
         default:
             if pinnedThread(panel) != nil { return "text.alignleft" }
-            let hit = app.selectedThread?.panels.first { $0.id == panel } ?? app.threads.values.lazy.flatMap(\.panels).first { $0.id == panel }
+            let hit = app.paneThread?.panels.first { $0.id == panel } ?? app.threads.values.lazy.flatMap(\.panels).first { $0.id == panel }
             return hit.map(PanelIcon.symbol(for:))
         }
     }
@@ -179,6 +179,15 @@ enum WindowDock {
 // MARK: - The pane, through the dock
 
 extension AppModel {
+    /// Whose panels and patches the pane shows: the selected thread's, or
+    /// on a project's page the project's, as one of its threads has them
+    /// (ProjectPane). Nil on a project page when none of its threads has
+    /// any.
+    var paneThread: ThreadSummary? {
+        guard let project = openProject else { return selectedThread }
+        return ProjectPane.standIn(for: project, threads: threads.values)
+    }
+
     /// The pane sections open in the dock, in layout order.
     var openPanes: [PanelID] {
         dock.layout.panels.filter { WindowDock.section($0) != nil }
@@ -242,8 +251,8 @@ struct RootView: View {
                 .tourTarget(.activityBar)
                 .zIndex(1)
             DockView(controller: app.dock, options: Self.options, content: content)
-            if let thread = app.selectedThread, app.openProject == nil {
-                PanelRail(thread: thread)
+            if let thread = app.paneThread {
+                PanelRail(thread: thread, project: app.openProject)
             }
         }
         // The tour's frames are in this space, and its overlay covers it.
@@ -328,8 +337,12 @@ struct RootView: View {
                 // anywhere else it stays.
                 if panel == WindowDock.review { return app.reviewPanel != nil }
                 if let id = WindowDock.pinnedThread(panel) { return app.threads[id] != nil }
-                guard let thread = app.selectedThread else { return true }
+                // A project's page has no Highlights (they're a thread's),
+                // and only the panels its folders give.
+                if app.openProject != nil, WindowDock.section(panel) != nil, app.paneThread == nil { return false }
+                guard let thread = app.paneThread else { return true }
                 switch WindowDock.section(panel) {
+                case .highlights: return app.openProject == nil
                 case .panel(let id): return thread.panels.contains { $0.id == id }
                 case .patches: return !thread.patches.isEmpty
                 default: return true

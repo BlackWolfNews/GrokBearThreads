@@ -5,7 +5,8 @@ import ThreadbearCore
 import WebKit
 
 /// A pane section as a panel in the window's dock (WindowDock): Highlights,
-/// one of the thread's panels, or Patches, for the thread that's selected.
+/// one of the thread's panels, or Patches, for the thread that's selected,
+/// or on a project's page the project's panels and Patches.
 /// A preview of a file or page opened from it takes its place until Back.
 /// A `url` panel is a web view kept loaded between visits (WebPanelPool),
 /// so the Convex dashboard doesn't reload every time Mike switches threads.
@@ -17,17 +18,22 @@ struct DockPane: View {
 
     var body: some View {
         Group {
-            if let thread = app.selectedThread {
+            if let thread = app.paneThread {
                 if let preview = app.panePreview[thread.id], preview.from == section {
                     PreviewBody(thread: thread, preview: preview)
                 } else {
                     switch section {
                     case .highlights:
-                        // Its own state (Show all, the edited files open) per thread.
-                        HighlightsView(thread: thread)
-                            .id(thread.id)
+                        if app.openProject != nil {
+                            // Not drawn (WindowDock's `available`), but just in case.
+                            PaneNote(text: "Highlights are a thread's.")
+                        } else {
+                            // Its own state (Show all, the edited files open) per thread.
+                            HighlightsView(thread: thread)
+                                .id(thread.id)
+                        }
                     case .patches:
-                        PatchesList(thread: thread)
+                        PatchesList(thread: thread, project: app.openProject)
                     case .panel(let id):
                         if let panel = thread.panels.first(where: { $0.id == id }) {
                             panelView(panel, in: thread)
@@ -72,7 +78,7 @@ struct DockPaneButtons: View {
 
     var body: some View {
         HStack(spacing: 0) {
-            if let thread = app.selectedThread {
+            if let thread = app.paneThread {
                 if let preview = app.panePreview[thread.id], preview.from == section {
                     PreviewButtons(thread: thread, preview: preview)
                 } else if case .panel(let id) = section, let panel = thread.panels.first(where: { $0.id == id }),
@@ -174,9 +180,12 @@ struct PaneHeaderButton: View {
 /// foot. A click shows that section in the pane, or collapses the pane if
 /// it's the one showing, as VS Code's bars do. It's also what keeps the
 /// thread's highlights fresh, being on screen whenever a thread is.
+/// On a project's page it has the project's panels and Patches, and no
+/// Highlights; `thread` is then the one the page borrows them from.
 struct PanelRail: View {
     @Environment(AppModel.self) private var app
     let thread: ThreadSummary
+    var project: Project? = nil
 
     /// What moves when there may be new highlights: a new event, or a pin,
     /// removal or brief (`highlightsAt`).
@@ -190,18 +199,23 @@ struct PanelRail: View {
         VStack(spacing: zoomed(4)) {
             // The accent dot while the last turn's asks aren't all ticked:
             // Highlights lists them under Needs you.
-            ActivityButton(symbol: "pin", title: "Highlights", dot: thread.firstOpenAsk != nil, active: app.dock.isShowing(PaneSection.highlightsId)) {
-                app.clickRail(.highlights, in: thread)
+            if project == nil {
+                ActivityButton(symbol: "pin", title: "Highlights", dot: thread.firstOpenAsk != nil, active: app.dock.isShowing(PaneSection.highlightsId)) {
+                    app.clickRail(.highlights, in: thread)
+                }
+                .tourTarget(.highlightsRail)
             }
-            .tourTarget(.highlightsRail)
             ForEach(thread.panels) { panel in
                 let origin = PanelOrigin.of(panel, in: thread)
                 ActivityButton(symbol: PanelIcon.symbol(for: panel), image: PatchImage.image(panel.iconFile), tinted: false, title: panel.title,
                                tip: origin.tip(panel.title, projectTitle: PanelOriginBadge.projectTitle(origin, thread: thread, app: app)), badge: panel.badge, active: app.dock.isShowing(panel.id)) {
                     app.clickRail(.panel(panel.id), in: thread)
                 }
-                // Bottom corner: the top one is the patch's count.
-                .overlay(alignment: .bottomTrailing) { PanelOriginBadge(panel: panel, thread: thread, app: app) }
+                // Bottom corner: the top one is the patch's count. Not on a
+                // project's page, where every panel is the project's.
+                .overlay(alignment: .bottomTrailing) {
+                    if project == nil { PanelOriginBadge(panel: panel, thread: thread, app: app) }
+                }
             }
             Spacer(minLength: zoomed(8))
             if !thread.patches.isEmpty {
@@ -220,11 +234,12 @@ struct PanelRail: View {
         // Straight away for a thread not fetched yet this session, else
         // after a second like any other change.
         .task(id: thread.id) {
+            guard project == nil else { return }
             app.refreshHighlights(thread.id, after: app.highlights[thread.id] == nil ? .zero : .seconds(1))
         }
         .onChange(of: HighlightsKey(threadId: thread.id, lastSeq: thread.lastSeq, highlightsAt: thread.highlightsAt)) { old, new in
             // A different thread is the task's job above.
-            if old.threadId == new.threadId { app.refreshHighlights(thread.id) }
+            if old.threadId == new.threadId, project == nil { app.refreshHighlights(thread.id) }
         }
     }
 }
@@ -278,12 +293,15 @@ struct PanelOriginBadge: View {
 /// from, what it gives, and its error if it couldn't load. A file opens in
 /// the default editor. Patches from the thread's projects' folders are
 /// grouped under each project, so it's clear why a chip or panel is there.
+/// On a project's page it's the project's, in one list.
 struct PatchesList: View {
     @Environment(AppModel.self) private var app
     let thread: ThreadSummary
+    var project: Project? = nil
 
     var body: some View {
-        let groups = PatchGroups.group(thread) { app.project($0)?.title }
+        let groups = project != nil ? [PatchGroup(projectId: nil, title: nil, patches: thread.patches)]
+            : PatchGroups.group(thread) { app.project($0)?.title }
         ScrollView {
             VStack(alignment: .leading, spacing: zoomed(14)) {
                 ForEach(groups) { group in
@@ -292,7 +310,9 @@ struct PatchesList: View {
                         row(patch)
                     }
                 }
-                Text("A patch is a file in .threadbear/patches (in the thread's folder, a parent folder, a folder of one of its projects, or ~) whose default export lists actions, panels and hooks. Ask the agent for one.")
+                Text(project == nil
+                     ? "A patch is a file in .threadbear/patches (in the thread's folder, a parent folder, a folder of one of its projects, or ~) whose default export lists actions, panels and hooks. Ask the agent for one."
+                     : "These come from the project's folders, and every thread in it gets them. Ask the agent for another.")
                     .font(.system(size: TypeScale.small))
                     .foregroundStyle(Color(nsColor: Theme.faintText))
                     .padding(.top, zoomed(6))

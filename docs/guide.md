@@ -235,6 +235,9 @@ and the agent writes the patch into the folder's `.threadbear/patches/`
 folder). It shows up within a few seconds. A patch is code that runs on your
 Mac, so keep only the ones you'd be happy to run.
 
+A project's page has its own panels and Patches on the right-hand rail:
+the ones its folders give its threads.
+
 ## Changing Threadbear itself
 
 You can change Threadbear by asking a thread to. Start one in your

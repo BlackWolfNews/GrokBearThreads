@@ -5,10 +5,13 @@ import ThreadbearCore
 /// The sidebar's Projects view: a section per project, newest activity
 /// first, with its open threads under it (a thread in two projects is
 /// under both), then the threads in no project. A project's header opens
-/// its page.
+/// its page. A project's archived threads are folded away under its open
+/// ones, a few at a time.
 struct ProjectsList: View {
     @Environment(AppModel.self) private var app
     @State private var showArchived = false
+    /// How many archived threads each unfolded project shows.
+    @State private var archivedShown: [String: Int] = [:]
 
     var body: some View {
         let built = app.projectSections
@@ -36,6 +39,21 @@ struct ProjectsList: View {
                         ForEach(section.threads.map { SectionRow(section: section.id, thread: $0) }) { row in
                             ThreadRowView(thread: row.thread, mode: .projects, heading: section.project.id) { select(row.thread.id) }
                         }
+                        if !section.archived.isEmpty {
+                            let shown = archivedShown[section.id] ?? 0
+                            ArchivedFold(count: section.archived.count, open: shown > 0) {
+                                archivedShown[section.id] = shown > 0 ? nil : Self.archivedStep
+                            }
+                            // Their own section ids: a row id is a section's and a thread's.
+                            ForEach(section.archived.prefix(shown).map { SectionRow(section: section.id + Self.archivedSuffix, thread: $0) }) { row in
+                                ThreadRowView(thread: row.thread, mode: .archive, heading: section.project.id) { select(row.thread.id) }
+                            }
+                            if shown > 0 && section.archived.count > shown {
+                                ShowMoreRow(more: min(Self.archivedStep, section.archived.count - shown)) {
+                                    archivedShown[section.id] = shown + Self.archivedStep
+                                }
+                            }
+                        }
                     }
                     if !built.unfiled.isEmpty {
                         SectionHeading(title: "Not in a project", icon: "square.dashed")
@@ -55,6 +73,60 @@ struct ProjectsList: View {
     }
 
     static let unfiledId = "-"
+    static let archivedSuffix = "/archived"
+    /// Archived threads shown at a time.
+    static let archivedStep = 5
+}
+
+/// Under a project's open threads: how many it has archived, a click
+/// showing the newest of them.
+private struct ArchivedFold: View {
+    let count: Int
+    let open: Bool
+    let toggle: () -> Void
+    @State private var hovering = false
+
+    var body: some View {
+        Button(action: toggle) {
+            HStack(spacing: zoomed(5)) {
+                Text("\(count) archived").monospacedDigit()
+                Image(systemName: open ? "chevron.down" : "chevron.right")
+                    .font(.system(size: zoomed(8), weight: .semibold))
+                Spacer(minLength: 0)
+            }
+            .font(.system(size: TypeScale.sidebarMeta))
+            .foregroundStyle(hovering ? AnyShapeStyle(.secondary) : AnyShapeStyle(SidebarMetrics.faint))
+            .padding(.leading, SidebarMetrics.leading)
+            .padding(.trailing, SidebarMetrics.trailing)
+            .padding(.vertical, zoomed(4))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering = $0 }
+        .tip(open ? "Hide archived threads" : "Show archived threads")
+    }
+}
+
+/// After the archived threads shown so far, when there are more.
+private struct ShowMoreRow: View {
+    let more: Int
+    let action: () -> Void
+    @State private var hovering = false
+
+    var body: some View {
+        Button(action: action) {
+            Text("Show \(more) more")
+                .font(.system(size: TypeScale.sidebarMeta))
+                .foregroundStyle(hovering ? AnyShapeStyle(.secondary) : AnyShapeStyle(SidebarMetrics.faint))
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.leading, SidebarMetrics.leading)
+                .padding(.vertical, zoomed(4))
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering = $0 }
+        .tip("Show more archived threads")
+    }
 }
 
 /// A project's heading: its title, quiet like the inbox's headings but a

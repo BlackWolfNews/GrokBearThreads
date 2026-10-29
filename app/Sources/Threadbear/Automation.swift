@@ -408,10 +408,10 @@ enum Automation {
             // the selected thread's pane (threadbear.highlights and
             // threadbear.patches are the rail's own); {"cmd":"panel","show":false}
             // hides the pane, {"cmd":"panel","show":true} shows it;
-            // {"cmd":"panel"} toggles.
-            guard let thread = app.selectedThread else { return "error no thread selected" }
+            // {"cmd":"panel"} toggles. On a project's page, the project's.
+            guard let thread = app.paneThread else { return "error no thread selected" }
             if let id = c["id"] as? String {
-                let ids = [PaneSection.highlightsId] + thread.panels.map(\.id) + (thread.patches.isEmpty ? [] : [PaneSection.patchesId])
+                let ids = (app.openProject == nil ? [PaneSection.highlightsId] : []) + thread.panels.map(\.id) + (thread.patches.isEmpty ? [] : [PaneSection.patchesId])
                 guard ids.contains(id) else { return "error no panel \(id); this thread has \(ids.joined(separator: ", "))" }
                 app.choosePanel(id, in: thread.id)
             } else if let show = c["show"] as? Bool {
