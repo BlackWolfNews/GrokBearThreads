@@ -16,14 +16,22 @@ final class TourTests: XCTestCase {
         tour.defaults = defaults
     }
 
-    func testSkipsStepsWhosePartIsntOnScreen() {
-        tour.frames = [.activityBar: CGRect(x: 0, y: 0, width: 44, height: 800),
-                       .threads: CGRect(x: 44, y: 0, width: 300, height: 800),
+    func testSkipsStepsWhosePartIsntOnScreenButKeepsTheHandsOnOnes() {
+        tour.frames = [.threads: CGRect(x: 44, y: 0, width: 300, height: 800),
                        // Gone (onDisappear) or squashed to nothing: skipped too.
-                       .usage: .zero]
+                       .permission: .zero]
         tour.start()
-        XCTAssertEqual(tour.shown.map(\.title), ["Welcome to Threadbear", "Your views", "Threads", "That's the lot"])
+        // The hands-on steps bring their part up themselves.
+        XCTAssertEqual(tour.shown.map(\.title), ["Welcome to Threadbear", "Threads", "Move a panel", "Patches", "Your first thread"])
         XCTAssertEqual(tour.step, 0)
+    }
+
+    func testOnlyTheReplayCanBeSkipped() {
+        tour.startIfNew()
+        XCTAssertFalse(tour.skippable, "the first run has no Skip")
+        tour.finish()
+        tour.start()
+        XCTAssertTrue(tour.skippable, "Help's replay does")
     }
 
     func testHighlightsFallsBackToTheRailIcon() {

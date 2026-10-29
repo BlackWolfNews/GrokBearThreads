@@ -41,6 +41,7 @@ struct ComposerView: View {
             // The folder's actions (patches), above the text as in the design.
             if let thread, !thread.actions.isEmpty {
                 ActionChips(thread: thread)
+                    .tourTarget(.actionChips)
             }
             if !draft.wrappedValue.images.isEmpty || importing > 0 {
                 AttachmentStrip(images: draft.images, importing: importing)

@@ -312,12 +312,15 @@ function install() {
   const homeArgs = path.resolve(home) === DEFAULT_HOME ? [] : ['--home', home];
   runOrFail('Installing the runner', 'bash', [path.join(repo, 'runner', 'scripts', 'install-runner.sh'), ...homeArgs], { env });
   runOrFail('Installing the Mac app', 'bash', [path.join(repo, 'app', 'install.sh')], { env });
+  // A Mac joining a Threadbear you already use: you know your way round,
+  // so the app's first-run tour stays away (Help > Take the Tour still has it).
+  if (v.existing) run('defaults', ['write', 'com.mikerosoft.threadbear', 'tourSeen', '-bool', 'YES']);
   ok('runner and app installed');
 }
 
 function finish(url) {
   say('8. Finish setting up');
-  note('Open Threadbear. After a short tour, Finish setting up lists what is left (pair your iPhone, open your website, notifications) and ticks each off as you do it.');
+  note('Open Threadbear for a short tour that ends with your first thread. While it runs, Finish setting up has the rest: pair your iPhone and open your website, to check on your threads from anywhere.');
   note('Pairing and the website are in Settings (⌘,) › Phone & browser too.');
   // The terminal scripts still work, for a Mac with no app window to hand.
   const at = url ?? '<your deployment URL>';

@@ -119,18 +119,25 @@ and the perf run stay away from the real one. Install the runner itself with
   the runner is down, or it doesn't take the message (busy, say), the text
   and images stay in the box (or go back into it) and a banner says why.
 - **The tour.** The first time the app connects to a runner it dims the
-  window and lights up its parts one at a time (the views down the left,
-  the threads, the composer, its access chip, Highlights, Usage and Finish
-  setting up) with a card beside each.
-  Return goes on, Esc skips it, and Help > Take the Tour runs it again.
-  It only points at things; it never starts a thread.
+  window and lights up its parts one at a time (the threads, the access
+  chip, Highlights) with a card beside each, then has you do three things:
+  drag a panel somewhere (done when the dock's layout changes), press the
+  example chip in a Welcome thread (`~/Threadbear/Welcome`, made with no
+  turn, `threads.create`'s `start: false`, its patch written there if it
+  isn't already), and send your first thread, its message written for you
+  (a patch with a hello button). Sending it ends the tour and opens Finish
+  setting up. The first run has no Skip; Next turns up on a hands-on step
+  after 20 seconds in case it won't take. Help > Take the Tour runs it
+  again, skippable. `setup --existing` marks it seen, so a Mac joining a
+  Threadbear you already use doesn't get it.
 - **Finish setting up.** While anything's left after setup, an icon on
   the activity bar (with a count) opens a short checklist under the
-  threads: start your first thread (which shows the login works), allow
-  notifications, pair your iPhone and open your website. Each ticks itself
-  off from what the app already knows; the phone and website ones only show
-  once the threads are mirrored to Convex. The tour ends by opening it.
-  Hide this list puts it away; Help > Finish Setting Up brings it back.
+  threads: start your first thread (which shows the login works), pair
+  your iPhone and open your website. Each ticks itself off from what the
+  app already knows; the phone and website ones only show once the threads
+  are mirrored to Convex. Notifications aren't on it: they're not pushed on
+  anyone. Hide this list puts it away; Help > Finish Setting Up brings it
+  back.
 - **Snooze** from a row's hover button, the Thread menu, the ... menu or a
   row's right-click menu: 1 hour, this evening 6 pm, tomorrow 9 am, next
   Monday 9 am, or pick a time. The time is worked out when you choose, not
@@ -517,8 +524,8 @@ is an error. Commands marked "the open thread" act on `id` when it's given
 | `sort` | `order` (`needsYou`, `newest`, `oldest`) | the Inbox section's order, as its heading's sort menu sets it |
 | `scroll` | `to` (`top`, `bottom`) or `row`, `offset` | |
 | `hints` | `on` (default true) | shows the keys as if ⌘ were held, or hides them |
-| `setup` | `show`, `hidden`, `notifications` (`allowed`, `denied`, `notAsked`) | Finish setting up: opens or closes its panel, hides or unhides it, or stands in for macOS's notification answer (a dev app can't get one); says what's left, `[x]` on each item done, and whether the icon and panel are up |
-| `tour` | `do` (`start`, `next`, `back`, `end`) | the first-run tour (Help > Take the Tour): says the step, its title and the frame it lights up, or `off`. A scripted app never starts it by itself |
+| `setup` | `show`, `hidden` | Finish setting up: opens or closes its panel, or hides or unhides it; says what's left, `[x]` on each item done, and whether the icon and panel are up |
+| `tour` | `do` (`start`, `next`, `back`, `end`), `skippable` | the first-run tour (Help > Take the Tour): `start` is the first-run one, with no Skip, unless `skippable`; says the step, its title, whether its hands-on task is done and the frame it lights up, or `off`. A scripted app never starts it by itself; its Welcome folder is in the instance's data folder |
 | `hover` | `id` (sidebar) or `row` (transcript); neither clears | draws a row as if the pointer were on it |
 | `swipe` | `id`, `dx` (left negative), `steps`, `lift` (default true) | two fingers across a sidebar row, as synthetic trackpad events; `lift: false` leaves it part way for a shot. Says the offset, whether it's past the line, and whether it archived |
 | `link` | `row`, `url` | follows a `work:` or `thread:` link as if it were clicked in that row (WorkLinks): opens the step's group, scrolls to it and lights it, or opens the thread |

@@ -1,7 +1,6 @@
 import AppKit
 import SwiftUI
 import ThreadbearCore
-import UserNotifications
 
 /// "Finish setting up": what's left after `./threadbear setup` for a new
 /// install, in a panel under the threads (like Usage) with an icon on the
@@ -10,18 +9,16 @@ import UserNotifications
 /// the place of a post-install script (Mike, 28 Oct), and of printing the
 /// pairing commands at the end of setup.
 ///
+/// Notifications aren't on it: Mike finds them a bit annoying, so they're
+/// not pushed on anyone (macOS still asks once at first launch). The phone
+/// is pitched for asking and steering while you're out (29 Oct).
+///
 /// Tailscale isn't on it: nothing in Threadbear uses Tailscale yet (the
 /// runner only listens on 127.0.0.1, docs/setup-and-updates.md). Add it
 /// once the phone fetches tool output over it (2.5 there).
 enum SetupItem: String, CaseIterable, Identifiable {
-    case firstThread, notifications, phone, website
+    case firstThread, phone, website
     var id: String { rawValue }
-}
-
-/// Whether the Mac app may post notifications, as far as the checklist
-/// cares.
-enum NotificationPermission: Equatable {
-    case unknown, notAsked, allowed, denied
 }
 
 struct SetupChecklist: Equatable {
@@ -39,13 +36,12 @@ struct SetupChecklist: Equatable {
     }
 
     static func build(threads: some Collection<ThreadSummary>, accounts: [Account], devices: [Device],
-                      canPair: Bool, notifications: NotificationPermission) -> SetupChecklist {
-        // A thread whose CLI has started a session: the login worked.
-        let ran = threads.contains { $0.nativeSessionId != nil && $0.status != .error }
-        var items: [(SetupItem, Bool)] = [
-            (.firstThread, ran),
-            (.notifications, notifications == .allowed),
-        ]
+                      canPair: Bool) -> SetupChecklist {
+        // A turn that reached the model (it reported a cost or how full
+        // the context is): the login worked. Not the session id, which a
+        // thread gets when it's made, the tour's turnless Welcome one too.
+        let ran = threads.contains { ($0.costUsd != nil || $0.contextTokens != nil) && $0.status != .error }
+        var items: [(SetupItem, Bool)] = [(.firstThread, ran)]
         if canPair {
             let live = devices.filter { !$0.expired }
             items.append((.phone, live.contains { $0.kind == .phone }))
@@ -55,18 +51,13 @@ struct SetupChecklist: Equatable {
     }
 }
 
-/// The checklist's own state: the notification permission (asked of macOS,
-/// which says nothing when it changes) and whether Mike hid the list.
+/// Whether Mike hid the list (Hide this list), kept across launches.
 @MainActor
 @Observable
 final class SetupState {
     static let shared = SetupState()
     static let hiddenKey = "setupHidden"
 
-    var notifications: NotificationPermission = .unknown
-    /// The automation's answer in place of macOS's, which a dev app's
-    /// temp bundle never gets a real one for.
-    @ObservationIgnored var standIn: NotificationPermission?
     var hidden: Bool {
         didSet { defaults.set(hidden, forKey: Self.hiddenKey) }
     }
@@ -76,43 +67,12 @@ final class SetupState {
         self.defaults = defaults
         hidden = defaults.bool(forKey: Self.hiddenKey)
     }
-
-    /// Asks macOS again: at launch and whenever the app comes to the front,
-    /// as that's when someone may have changed it in System Settings.
-    func refreshNotifications() {
-        if let standIn { return notifications = standIn }
-        guard Notifier.available else { return }
-        Task {
-            let status = await UNUserNotificationCenter.current().notificationSettings().authorizationStatus
-            notifications = switch status {
-            case .authorized, .provisional, .ephemeral: .allowed
-            case .denied: .denied
-            case .notDetermined: .notAsked
-            @unknown default: .unknown
-            }
-        }
-    }
-
-    /// macOS's own prompt the first time, then System Settings, as an app
-    /// can only ask once.
-    func allowNotifications() {
-        if notifications == .notAsked {
-            Task {
-                _ = try? await UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge])
-                refreshNotifications()
-            }
-        } else if let id = Bundle.main.bundleIdentifier,
-                  let url = URL(string: "x-apple.systempreferences:com.apple.Notifications-Settings.extension?id=\(id)") {
-            NSWorkspace.shared.open(url)
-        }
-    }
 }
 
 extension AppModel {
     var setupChecklist: SetupChecklist {
         SetupChecklist.build(threads: threads.values, accounts: accounts, devices: devices,
-                             canPair: devicesLoaded && devicesReason == nil && !devicesUnsupported,
-                             notifications: SetupState.shared.notifications)
+                             canPair: devicesLoaded && devicesReason == nil && !devicesUnsupported)
     }
 
     /// The activity bar's icon for it shows while something's left and
@@ -136,7 +96,6 @@ struct SetupActivityButton: View {
                            active: app.setupShown) {
                 app.setupShown.toggle()
             }
-            .tourTarget(.setup)
             .transition(Juice.popIn)
         }
     }
@@ -180,7 +139,6 @@ struct SetupPanel: View {
         .animation(Juice.swap, value: checklist)
         .onAppear {
             app.loadDevices()
-            SetupState.shared.refreshNotifications()
         }
     }
 }
@@ -220,7 +178,6 @@ private struct SetupRow: View {
     private var title: String {
         switch item {
         case .firstThread: "Start your first thread"
-        case .notifications: "Allow notifications"
         case .phone: "Pair your iPhone"
         case .website: "Open your website"
         }
@@ -232,9 +189,8 @@ private struct SetupRow: View {
             noLogin
                 ? "There's no Claude Code or Codex login on this Mac yet. Run claude or codex in Terminal and log in, then come back."
                 : "It shows your Claude Code or Codex login works. Try asking what's in the folder."
-        case .notifications: "So you hear when a thread needs you."
-        case .phone: "Answer threads from your phone, and get a push when one needs you."
-        case .website: "Your threads in a browser, with a link for each."
+        case .phone: "Ask questions and steer your threads while you're out, and see how they're getting on."
+        case .website: "Check on your threads from any browser, with a link for each."
         }
     }
 
@@ -246,13 +202,6 @@ private struct SetupRow: View {
                 Button("New thread") { app.newThread() }
                     .tip("A new thread, in ~/Threadbear unless you pick another folder (⌘N)")
             }
-        case .notifications:
-            Button(SetupState.shared.notifications == .denied ? "Open System Settings" : "Allow…") {
-                SetupState.shared.allowNotifications()
-            }
-            .tip(SetupState.shared.notifications == .denied
-                 ? "Notifications for Threadbear are off. Turn them on in System Settings"
-                 : "macOS asks whether Threadbear may send notifications")
         case .phone:
             Button("Open Phone & browser") {
                 app.settingsTab = .devices

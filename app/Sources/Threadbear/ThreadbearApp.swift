@@ -178,7 +178,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             app.notificationsEnabled = !scripted && Handover.incomingFrom == nil
             ShortcutHints.shared.install()
             if !scripted { Notifier.setUp(delegate: self) }
-            SetupState.shared.refreshNotifications()
             app.onThreadsLoaded = {
                 LaunchClock.threadsLoaded()
                 // After a restart the app made itself for an update: back
@@ -219,11 +218,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     }
 
     func applicationDidBecomeActive(_ notification: Notification) {
-        MainActor.assumeIsolated {
-            AppModel.shared.appBecameActive()
-            // Notifications may have been turned on in System Settings.
-            SetupState.shared.refreshNotifications()
-        }
+        MainActor.assumeIsolated { AppModel.shared.appBecameActive() }
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }

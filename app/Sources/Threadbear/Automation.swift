@@ -655,18 +655,8 @@ enum Automation {
         case "setup":
             // Finish setting up: {"show": true|false} opens or closes its
             // panel, {"hidden": true|false} as Hide this list and Help's
-            // Finish Setting Up set it, {"notifications": "allowed",
-            // "denied" or "notAsked"} stands in for macOS's answer, which
-            // a dev app can't get. Says each item, [x] when done.
-            let state = SetupState.shared
-            if let hidden = c["hidden"] as? Bool { state.hidden = hidden }
-            switch c["notifications"] as? String {
-            case "allowed": state.standIn = .allowed; state.notifications = .allowed
-            case "denied": state.standIn = .denied; state.notifications = .denied
-            case "notAsked": state.standIn = .notAsked; state.notifications = .notAsked
-            case nil: break
-            default: return "error notifications is allowed, denied or notAsked"
-            }
+            // Finish Setting Up set it. Says each item, [x] when done.
+            if let hidden = c["hidden"] as? Bool { SetupState.shared.hidden = hidden }
             if let show = c["show"] as? Bool { app.setupShown = show }
             try? await Task.sleep(for: .milliseconds(300))
             let checklist = app.setupChecklist
@@ -677,7 +667,9 @@ enum Automation {
             // where it's at. Says the step, its title and what it lights up.
             let tour = Tour.shared
             switch c["do"] as? String {
-            case "start": tour.start()
+            // A scripted start is the first-run one (no Skip) unless
+            // {"skippable": true}, as Help's replay is.
+            case "start": tour.start(skippable: c["skippable"] as? Bool ?? false)
             case "next": tour.next()
             case "back": tour.back()
             case "end": tour.finish()
@@ -688,7 +680,7 @@ enum Automation {
             try? await Task.sleep(for: .milliseconds(400))
             guard let step = tour.step, let current = tour.current else { return "ok off" }
             let lit = tour.frame(for: current).map { "\(Int($0.minX)),\(Int($0.minY)) \(Int($0.width))x\(Int($0.height))" } ?? "nothing"
-            return "ok \(step + 1)/\(tour.shown.count) \(current.title) lit: \(lit)"
+            return "ok \(step + 1)/\(tour.shown.count) \(current.title)\(current.task == nil ? "" : tour.taskDone ? " (done)" : " (to do)") lit: \(lit)"
         case "chip":
             return chip(c, app: app)
         case "link":

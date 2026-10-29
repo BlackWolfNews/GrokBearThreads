@@ -250,7 +250,6 @@ struct RootView: View {
             // Drawn over the dock: its keys hang out to the right while ⌘
             // is held (ShortcutHints).
             ActivityBar()
-                .tourTarget(.activityBar)
                 .zIndex(1)
             DockView(controller: app.dock, options: Self.options, content: content)
             if let thread = app.paneThread {
@@ -359,7 +358,7 @@ struct RootView: View {
                 case WindowDock.updates: AnyView(UpdatesPanel())
                 case WindowDock.setup: AnyView(SetupPanel())
                 case WindowDock.connectors: AnyView(ConnectorsPanel())
-                case WindowDock.main: AnyView(DetailView())
+                case WindowDock.main: AnyView(DetailView().tourTarget(.mainPanel, withBar: true))
                 case let id where WindowDock.pinnedThread(id) != nil:
                     AnyView(PinnedThreadView(threadId: WindowDock.pinnedThread(id)!).id(id))
                 case WindowDock.review:

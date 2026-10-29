@@ -5,9 +5,12 @@ import ThreadbearCore
 /// Finish setting up ticks itself off from what the app knows, and leaves
 /// out what this install can't do.
 final class SetupChecklistTests: XCTestCase {
-    private func thread(_ id: String, session: String?, status: ThreadStatus = .idle) -> ThreadSummary {
+    /// `ran`: a turn reached the model, so the runner has its cost.
+    private func thread(_ id: String, ran: Bool, status: ThreadStatus = .idle) -> ThreadSummary {
         var t = ThreadSummary(id: id, title: "", cwd: "/tmp", accountId: "a")
-        t.nativeSessionId = session
+        // Every thread has one from the start, the turnless Welcome one too.
+        t.nativeSessionId = "s"
+        t.costUsd = ran ? 0.01 : nil
         t.status = status
         return t
     }
@@ -15,35 +18,35 @@ final class SetupChecklistTests: XCTestCase {
     private let account = Account(id: "a", title: "a")
 
     func testNewInstallHasEverythingLeft() {
-        let list = SetupChecklist.build(threads: [], accounts: [account], devices: [], canPair: true, notifications: .notAsked)
-        XCTAssertEqual(list.items.map(\.item), [.firstThread, .notifications, .phone, .website])
-        XCTAssertEqual(list.left, 4)
+        let list = SetupChecklist.build(threads: [], accounts: [account], devices: [], canPair: true)
+        XCTAssertEqual(list.items.map(\.item), [.firstThread, .phone, .website])
+        XCTAssertEqual(list.left, 3)
         XCTAssertFalse(list.noLogin)
     }
 
     func testEachTicksItselfOff() {
         let devices = [Device(id: "1", kind: .phone, name: "iPhone"), Device(id: "2", kind: .browser, name: "Chrome")]
-        let list = SetupChecklist.build(threads: [thread("t", session: "s")], accounts: [account], devices: devices,
-                                        canPair: true, notifications: .allowed)
+        let list = SetupChecklist.build(threads: [thread("t", ran: true)], accounts: [account], devices: devices,
+                                        canPair: true)
         XCTAssertEqual(list.left, 0)
     }
 
-    func testAFailedOrUnstartedThreadDoesntCount() {
-        for t in [thread("t", session: nil), thread("t", session: "s", status: .error)] {
-            let list = SetupChecklist.build(threads: [t], accounts: [account], devices: [], canPair: false, notifications: .allowed)
+    func testAFailedOrTurnlessThreadDoesntCount() {
+        for t in [thread("t", ran: false), thread("t", ran: true, status: .error)] {
+            let list = SetupChecklist.build(threads: [t], accounts: [account], devices: [], canPair: false)
             XCTAssertEqual(list.items.first?.done, false)
         }
     }
 
     func testAnExpiredPhoneNeedsPairingAgain() {
         let list = SetupChecklist.build(threads: [], accounts: [account], devices: [Device(id: "1", kind: .phone, name: "iPhone", expired: true)],
-                                        canPair: true, notifications: .denied)
+                                        canPair: true)
         XCTAssertEqual(list.items.first { $0.item == .phone }?.done, false)
     }
 
     func testWithoutTheMirrorThePhoneAndWebsiteArentListed() {
-        let list = SetupChecklist.build(threads: [], accounts: [], devices: [], canPair: false, notifications: .notAsked)
-        XCTAssertEqual(list.items.map(\.item), [.firstThread, .notifications])
+        let list = SetupChecklist.build(threads: [], accounts: [], devices: [], canPair: false)
+        XCTAssertEqual(list.items.map(\.item), [.firstThread])
         XCTAssertTrue(list.noLogin)
     }
 }

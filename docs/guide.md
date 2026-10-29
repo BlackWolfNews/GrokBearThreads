@@ -228,8 +228,11 @@ the thread runs on.
 ## The prompts macOS shows you
 
 - **Notifications.** The first time the app opens, macOS asks whether
-  Threadbear may send notifications. Click Allow. The app then tells you
-  when a thread needs you and you aren't looking at it.
+  Threadbear may send notifications. Either answer is fine: with them on,
+  the app tells you when a thread needs you and you aren't looking at it,
+  which helps most when your threads run on Full access and you've
+  wandered off. You can change it later in System Settings >
+  Notifications.
 - **Folder access.** When an agent reaches into a protected folder, such as
   Desktop, Documents, Downloads or Dropbox, macOS asks whether to allow it.
   Click Allow if you want agents working there, or Don't Allow if not. You
@@ -239,8 +242,10 @@ the thread runs on.
 
 ## Your phone and a browser
 
-The Threadbear iPhone app shows your threads, lets you answer the ones that
-need you, and sends you notifications. It pairs with your Mac by scanning a
+The Threadbear iPhone app is for when you're away from the Mac: ask a
+thread a question, steer it, answer the ones that need you, start new
+ones, and see how they're all getting on. It can send notifications too,
+though you don't need them for any of that. It pairs with your Mac by scanning a
 QR code: on the Mac, Settings (⌘,) > Phone & browser > Show the code, then
 scan it with the iPhone app. Keep the code to yourself: anyone who scans it
 can run your agents. The same tab lists each paired phone and browser with
@@ -250,8 +255,8 @@ terminal command setup used to print still works too:
 
     swift ios/scripts/pair-qr.swift --prod --url <your deployment URL>
 
-Notifications reach your phone only while you're away from the Mac by
-default. Threadbear counts you as at the Mac when the app is open and you've
+If you have them on, notifications reach your phone only while you're away
+from the Mac by default. Threadbear counts you as at the Mac when the app is open and you've
 used the keyboard or mouse in the last two minutes, and as away when the Mac
 is asleep. On the iPhone, Settings > Notify me changes it to Always or Never.
 
@@ -356,11 +361,15 @@ never sees what a notification says.
 ## The tour and Finish setting up
 
 The first time the app opens it shows you round the window, one part at a
-time. Help > Take the Tour runs it again.
+time, and has you try a few things: move a panel, press a patch's button
+in a Welcome thread (in `~/Threadbear/Welcome`, where its example patch
+lives), and send your first thread, whose message it writes for you: it
+asks the agent for a patch with a hello button of your own. Help > Take
+the Tour runs it again. A Mac that joined a Threadbear you already use
+(setup's `--existing`) skips it.
 
-The tour ends on Finish setting up, a short list of what's left after
-setup: start your first thread (which shows your login works), allow
-notifications, pair your iPhone and open your website. Each item ticks
-itself off once it's done, and its icon on the left goes when they all
-have. Hide this list puts it away, and Help > Finish Setting Up brings it
-back.
+While that first thread works, Finish setting up has what's left after
+setup: pair your iPhone and open your website, so you can check on your
+threads from anywhere. Each item ticks itself off once it's done, and its
+icon on the left goes when they all have. Hide this list puts it away, and
+Help > Finish Setting Up brings it back.
