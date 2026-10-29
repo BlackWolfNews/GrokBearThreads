@@ -11,6 +11,12 @@ public enum RPCError: Error, Sendable, Equatable, LocalizedError {
 
     public var errorDescription: String? {
         switch self {
+        // The app updates a few minutes before the runner can (it builds and
+        // tests main first), and during a handover an old runner still
+        // answers for the threads it's finishing, so a new feature can meet
+        // a runner that doesn't know it yet. Callers that check the code
+        // for an old runner still see -32601.
+        case .server(Self.methodNotFound, _): return "The runner hasn't caught up with this version of the app yet. Try again in a minute."
         case .server(_, let message): return message
         case .disconnected: return "Lost the connection to the runner."
         case .timeout(let method): return "The runner didn't answer \(method) in time."

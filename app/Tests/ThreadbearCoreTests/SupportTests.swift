@@ -119,6 +119,15 @@ final class SnoozeTests: XCTestCase {
     }
 }
 
+final class RPCErrorTests: XCTestCase {
+    func testAnUnknownMethodSaysTheRunnerIsCatchingUp() {
+        let e = RPCError.server(code: RPCError.methodNotFound, message: "Unknown method threads.hibernateWhen")
+        XCTAssertEqual(e.localizedDescription, "The runner hasn't caught up with this version of the app yet. Try again in a minute.")
+        // Other errors keep the runner's own words.
+        XCTAssertEqual(RPCError.server(code: -32000, message: "No room").localizedDescription, "No room")
+    }
+}
+
 final class WakeWordsTests: XCTestCase {
     let now = ISO8601.parse("2026-10-29T06:00:00Z")!
     let never = ISO8601.parse("9999-12-31T00:00:00.000Z")!
