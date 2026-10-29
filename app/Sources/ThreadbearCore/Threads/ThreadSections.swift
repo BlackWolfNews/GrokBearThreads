@@ -18,6 +18,22 @@ public enum InboxSection: String, Sendable, CaseIterable {
     }
 }
 
+/// How the Inbox section is ordered, from the sort menu on its heading.
+/// Mike has a long inbox and wanted the oldest at the top to work through
+/// it from there (29 Oct), so newest and oldest ignore `urgency` and go by
+/// last activity alone.
+public enum InboxOrder: String, Sendable, CaseIterable {
+    case needsYou, newest, oldest
+
+    public var title: String {
+        switch self {
+        case .needsYou: return "Needs you first"
+        case .newest: return "Newest first"
+        case .oldest: return "Oldest first"
+        }
+    }
+}
+
 /// The sidebar's sections.
 public struct ThreadSections: Sendable, Equatable {
     public var inbox: [ThreadSummary] = []
@@ -35,12 +51,12 @@ public struct ThreadSections: Sendable, Equatable {
     /// done: the thread isn't finished yet). Waiting: idle with a schedule
     /// due to message it (`wakes`), and nothing for Mike: no question, no
     /// unread reply that didn't say "nothing", no open asks. Soonest wake
-    /// first. Inbox: everything else, what most needs Mike first (see
-    /// `urgency`), newest first within that. A question or approval goes in
+    /// first. Inbox: everything else, by `order`: by default what most
+    /// needs Mike first (see `urgency`), newest first within that. A question or approval goes in
     /// the inbox even with background work going, since the thread is stuck
     /// until he answers. Snoozed and archived threads are left out. Running
     /// is newest activity first.
-    public static func build(_ threads: some Sequence<ThreadSummary>, now: Date, wakes: [String: Schedule] = [:]) -> ThreadSections {
+    public static func build(_ threads: some Sequence<ThreadSummary>, now: Date, wakes: [String: Schedule] = [:], order: InboxOrder = .needsYou) -> ThreadSections {
         var sections = ThreadSections()
         for thread in threads where !thread.isArchived && !thread.isSnoozed(at: now) {
             if thread.hasPendingReviews || thread.status == .waiting || (thread.needsYou && !thread.isWorkingInBackground) {
@@ -56,9 +72,16 @@ public struct ThreadSections: Sendable, Equatable {
         let newestFirst: (ThreadSummary, ThreadSummary) -> Bool = {
             $0.lastActivityAt != $1.lastActivityAt ? $0.lastActivityAt > $1.lastActivityAt : $0.id < $1.id
         }
-        sections.inbox.sort {
-            let (a, b) = (urgency($0), urgency($1))
-            return a != b ? a < b : newestFirst($0, $1)
+        switch order {
+        case .needsYou:
+            sections.inbox.sort {
+                let (a, b) = (urgency($0), urgency($1))
+                return a != b ? a < b : newestFirst($0, $1)
+            }
+        case .newest:
+            sections.inbox.sort(by: newestFirst)
+        case .oldest:
+            sections.inbox.sort { newestFirst($1, $0) }
         }
         sections.running.sort(by: newestFirst)
         sections.waiting.sort {

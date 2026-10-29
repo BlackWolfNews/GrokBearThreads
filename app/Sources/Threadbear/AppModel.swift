@@ -271,6 +271,11 @@ final class AppModel {
     ) {
         didSet { UserDefaults.standard.set(collapsedSections.map(\.rawValue).sorted(), forKey: Self.collapsedSectionsKey) }
     }
+    /// The Inbox section's order, from the sort menu on its heading,
+    /// remembered across launches.
+    var inboxOrder: InboxOrder = InboxOrder(rawValue: UserDefaults.standard.string(forKey: AppModel.inboxOrderKey) ?? "") ?? .needsYou {
+        didSet { UserDefaults.standard.set(inboxOrder.rawValue, forKey: Self.inboxOrderKey) }
+    }
     /// A thread's chosen pane section, as `PaneSection.id`.
     var panelChoice: [String: String] = [:]
     /// Each thread's highlights once `threads.highlights` has answered
@@ -352,6 +357,7 @@ final class AppModel {
     static let lastEffortKey = "lastEffort"
     static let memoryProviders = ["claude", "codex"]
     static let collapsedSectionsKey = "collapsedSections"
+    static let inboxOrderKey = "inboxOrder"
     /// The error banner text shown for a connection problem, so it can be
     /// cleared when the connection comes back.
     @ObservationIgnored private var connectionErrorMessage: String?
@@ -377,7 +383,7 @@ final class AppModel {
 
     // MARK: Derived
 
-    var sections: ThreadSections { ThreadSections.build(threads.values, now: now, wakes: wakes) }
+    var sections: ThreadSections { ThreadSections.build(threads.values, now: now, wakes: wakes, order: inboxOrder) }
     /// The schedule due to message each thread soonest, for the Waiting section.
     var wakes: [String: Schedule] { ThreadSections.wakes(schedules) }
     var snoozed: [ThreadSummary] { ThreadSections.snoozed(threads.values, now: now) }

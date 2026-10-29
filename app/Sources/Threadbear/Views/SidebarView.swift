@@ -104,7 +104,9 @@ private struct ThreadSection: View {
                 withAnimation(.snappy(duration: 0.2)) {
                     if collapsed { app.collapsedSections.remove(section) } else { app.collapsedSections.insert(section) }
                 }
-            })
+            }) {
+                if section == .inbox { InboxOrderMenu() }
+            }
             if !collapsed {
                 ForEach(threads.map { SectionRow(section: section.title, thread: $0) }) { row in
                     ThreadRowView(thread: row.thread, mode: .inbox, section: section) { select(row.thread.id) }
@@ -129,7 +131,41 @@ struct SectionRow: Identifiable {
     static func id(section: String, thread: String) -> String { section + "/" + thread }
 }
 
-struct SectionHeading: View {
+/// The sort button at the end of the Inbox heading.
+private struct InboxOrderMenu: View {
+    @Environment(AppModel.self) private var app
+    @State private var hovering = false
+
+    var body: some View {
+        Menu {
+            Picker("Sort", selection: Binding(
+                get: { app.inboxOrder },
+                set: { order in withAnimation(.snappy(duration: 0.2)) { app.inboxOrder = order } }
+            )) {
+                ForEach(InboxOrder.allCases, id: \.self) { Text($0.title).tag($0) }
+            }
+            .pickerStyle(.inline)
+            .labelsHidden()
+        } label: {
+            Image(systemName: "arrow.up.arrow.down")
+                .font(.system(size: zoomed(10), weight: .semibold))
+                // Brighter once it's off the default, so a changed order
+                // isn't a surprise.
+                .foregroundStyle(hovering ? AnyShapeStyle(.primary) : app.inboxOrder == .needsYou ? AnyShapeStyle(SidebarMetrics.faint) : AnyShapeStyle(.secondary))
+                .animation(Juice.hover, value: hovering)
+                .frame(width: zoomed(16), height: zoomed(16))
+                .contentShape(Rectangle())
+        }
+        .menuStyle(.button)
+        .buttonStyle(.plain)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .onHover { hovering = $0 }
+        .tip("Sort: \(app.inboxOrder.title)")
+    }
+}
+
+struct SectionHeading<Accessory: View>: View {
     let title: String
     /// A small SF Symbol before the title, so the groups can be told apart
     /// at a glance.
@@ -139,6 +175,9 @@ struct SectionHeading: View {
     var project: Project? = nil
     /// Given for a heading that folds its rows away when clicked.
     var fold: Fold? = nil
+    /// Controls at the heading's end, outside the fold button so a click
+    /// on them doesn't fold the section: the Inbox's sort menu.
+    @ViewBuilder var accessory: () -> Accessory
     @State private var hovering = false
 
     struct Fold {
@@ -149,15 +188,22 @@ struct SectionHeading: View {
     }
 
     var body: some View {
-        if let fold {
-            Button(action: fold.toggle) { label }
-                .buttonStyle(.plain)
-                .onHover { hovering = $0 }
-                .tip(fold.collapsed ? "Show \(title)" : "Hide \(title)")
-                .accessibilityValue(fold.collapsed ? "Collapsed" : "Expanded")
-        } else {
-            label
+        HStack(spacing: zoomed(4)) {
+            if let fold {
+                Button(action: fold.toggle) { label }
+                    .buttonStyle(.plain)
+                    .onHover { hovering = $0 }
+                    .tip(fold.collapsed ? "Show \(title)" : "Hide \(title)")
+                    .accessibilityValue(fold.collapsed ? "Collapsed" : "Expanded")
+            } else {
+                label
+            }
+            // The same band as the title, so the two line up.
+            accessory()
+                .padding(.top, zoomed(18))
+                .padding(.bottom, zoomed(6))
         }
+        .padding(.trailing, SidebarMetrics.trailing)
     }
 
     private var label: some View {
@@ -208,13 +254,20 @@ struct SectionHeading: View {
         }
         .foregroundStyle(.secondary)
         .padding(.leading, SidebarMetrics.leading)
-        .padding(.trailing, SidebarMetrics.trailing)
+        // The padding sits inside the fold button, so the whole band
+        // above the rows folds, as it did before the accessory.
         .padding(.top, zoomed(18))
         .padding(.bottom, zoomed(6))
         .frame(maxWidth: .infinity, alignment: .leading)
         .contentShape(Rectangle())
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(.isHeader)
+    }
+}
+
+extension SectionHeading where Accessory == EmptyView {
+    init(title: String, icon: String? = nil, project: Project? = nil, fold: Fold? = nil) {
+        self.init(title: title, icon: icon, project: project, fold: fold) { EmptyView() }
     }
 }
 

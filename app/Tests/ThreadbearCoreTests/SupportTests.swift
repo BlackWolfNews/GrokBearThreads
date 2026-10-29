@@ -201,6 +201,27 @@ final class ThreadSectionsTests: XCTestCase {
         XCTAssertEqual(ThreadSections.snoozed(threads, now: now).map(\.id), ["snoozed"])
     }
 
+    /// The inbox's sort menu: newest or oldest first go by last activity
+    /// alone, so a question doesn't jump the queue (Mike asked 29 Oct, to
+    /// work through a long inbox from the oldest). Running is unchanged.
+    func testInboxOrder() {
+        let now = Date(timeIntervalSince1970: 1_000_000)
+        let threads = [
+            thread("idle-old", minutesAgo: 50),
+            thread("question", status: .waiting, needsYou: true, minutesAgo: 20),
+            thread("unread", needsYou: true, minutesAgo: 1),
+            thread("idle-new", minutesAgo: 5),
+            thread("running-old", status: .running, minutesAgo: 30),
+            thread("running-new", status: .running, minutesAgo: 2),
+        ]
+        let newest = ThreadSections.build(threads, now: now, order: .newest)
+        XCTAssertEqual(newest.inbox.map(\.id), ["unread", "idle-new", "question", "idle-old"])
+        let oldest = ThreadSections.build(threads, now: now, order: .oldest)
+        XCTAssertEqual(oldest.inbox.map(\.id), ["idle-old", "question", "idle-new", "unread"])
+        XCTAssertEqual(oldest.running.map(\.id), ["running-new", "running-old"])
+        XCTAssertEqual(ThreadSections.build(threads, now: now).inbox.map(\.id), ["question", "unread", "idle-new", "idle-old"])
+    }
+
     /// A thread that has booked itself a message for later, and has nothing
     /// for Mike, waits in its own section at the bottom, soonest first,
     /// rather than sitting in the inbox (Mike asked 29 Oct). Anything it

@@ -547,6 +547,13 @@ enum Automation {
         case "close-schedule":
             app.scheduleEditor = nil
             return "ok"
+        case "sort":
+            // The Inbox heading's sort menu.
+            guard let order = (c["order"] as? String).flatMap(InboxOrder.init(rawValue:)) else {
+                return "error order must be one of \(InboxOrder.allCases.map(\.rawValue).joined(separator: ", "))"
+            }
+            app.inboxOrder = order
+            return "ok"
         case "expand", "collapse":
             if let raw = c["section"] as? String {
                 // An inbox heading, as clicking it does.

@@ -506,6 +506,7 @@ is an error. Commands marked "the open thread" act on `id` when it's given
 | `decide` | `pick` (`"ask:choice"`, both 1-based, choice 0 for "Something else"; picking the same again unpicks it), `clear`, `send` | the open thread's card of asks, picked as its buttons pick, waiting in the composer; `send` sends the composer with the picks. Says what's picked after |
 | `click` | `title` | a button in the transcript: Allow, Always allow, Deny, an option, Send answer |
 | `expand`, `collapse` | `row`, `file`, `all`, `section` | a group, tool, thinking block or settled approval (one folded in a closed group opens it); `file` (path or index) in a changes card; `all` for a whole diff; `section` (`inbox`, `running`) folds or opens an inbox heading, as clicking it does |
+| `sort` | `order` (`needsYou`, `newest`, `oldest`) | the Inbox section's order, as its heading's sort menu sets it |
 | `scroll` | `to` (`top`, `bottom`) or `row`, `offset` | |
 | `hints` | `on` (default true) | shows the keys as if ⌘ were held, or hides them |
 | `setup` | `show`, `hidden`, `notifications` (`allowed`, `denied`, `notAsked`) | Finish setting up: opens or closes its panel, hides or unhides it, or stands in for macOS's notification answer (a dev app can't get one); says what's left, `[x]` on each item done, and whether the icon and panel are up |
