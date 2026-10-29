@@ -1409,7 +1409,10 @@ A turn the agent finished can say whether Mike has to do anything, so
   a thinking block signed as narration is an `assistant.text` (see
   Transient events), so it counts; a thinking block signed as thinking
   doesn't. When the only reply was such a block (`narration: true`,
-  whose text is only a summary of it) and there are no summary bullets,
+  whose text is only a summary of it), or the last was and no words
+  came after the last tool call of any kind (a status line, then
+  `read_thread`, then the answer as narration, 29 Oct 2026), and there
+  are no summary bullets,
   the accepted result asks for the message again in full, and the
   text after it replaces the summary. The SDK runs a tool as
   soon as it reads the call, at times a few frames ahead of the runner's

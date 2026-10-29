@@ -363,8 +363,9 @@ export type TurnReply = {
   replied: boolean;
   // Every text that counted for `replied` was a summary (a Claude
   // narration block, which reaches the runner only as the API's summary
-  // of what the agent wrote): Mike has a paragraph about the reply, not
-  // the reply. end_turn asks for it again (NARRATION_ONLY).
+  // of what the agent wrote), or the last one was and nothing in words
+  // followed the last tool call: Mike has a paragraph about the reply,
+  // not the reply. end_turn asks for it again (NARRATION_ONLY).
   narrationOnly?: true;
 };
 
@@ -389,6 +390,7 @@ export function turnReply(events: PersistedEvent[], serverName = 'threadbear'): 
   let lastText = 0;
   let lastWords = 0; // the last text that wasn't a summary
   let lastWork = 0;
+  let lastTool = 0; // the last result from any tool but end_turn and ToolSearch
   let lastUser = 0;
   for (const e of events.slice(start)) {
     // A Codex child's items carry its prefix (<child>/<id>); Claude's
@@ -410,6 +412,7 @@ export function turnReply(events: PersistedEvent[], serverName = 'threadbear'): 
         const name = names.get(e.itemId);
         open.delete(e.itemId);
         if (name !== undefined && !name.startsWith(ownPrefix) && !PLUMBING_TOOLS.has(name)) lastWork = e.seq;
+        if (name !== undefined && name !== endTurn && !PLUMBING_TOOLS.has(name)) lastTool = e.seq;
         break;
       }
       default:
@@ -418,5 +421,12 @@ export function turnReply(events: PersistedEvent[], serverName = 'threadbear'): 
   }
   const since = Math.max(lastWork, lastUser);
   const replied = lastText > 0 && lastText > since;
-  return { landed: open.size > 0, replied, ...(replied && lastWords <= since ? { narrationOnly: true as const } : {}) };
+  // Or the last text was narration, with no words since the last tool of
+  // any kind: on 29 Oct 2026 a status line, then read_thread, then the
+  // whole explanation as narration, counted as words, so end_turn didn't
+  // ask for it again, and the text after end_turn (a repeat of the card)
+  // took the narration's place. Words just before the narration, with no
+  // tool between, are the reply, so they still count.
+  const lastIsNarration = lastText > lastWords && lastWords < lastTool;
+  return { landed: open.size > 0, replied, ...(replied && (lastWords <= since || lastIsNarration) ? { narrationOnly: true as const } : {}) };
 }

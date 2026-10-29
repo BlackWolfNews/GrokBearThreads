@@ -258,6 +258,12 @@ test('turnReply: a reply in words after a narration block is not narration-only;
   assert.deepEqual(turnReply(log(user(), started, text('Step 1: ...', 'b'), narrated('a'), call('e1', END))), { landed: true, replied: true });
   // Words before work, then only narration since: narration-only.
   assert.deepEqual(turnReply(log(user(), started, text('Checking.', 'b'), call('b1', 'Bash'), result('b1'), narrated('a'), call('e1', END))), { landed: true, replied: true, narrationOnly: true });
+  // A status line, then Threadbear's own read tools, then the answer as
+  // narration (29 Oct 2026): the status line isn't the reply.
+  const read = 'mcp__threadbear__read_thread';
+  assert.deepEqual(turnReply(log(user(), started, text('Looking into it.', 'b'), call('r1', read), result('r1'), narrated('a'), call('e1', END))), { landed: true, replied: true, narrationOnly: true });
+  // Words, then a pin, then end_turn: the words are the reply.
+  assert.deepEqual(turnReply(log(user(), started, text('Step 1: ...', 'b'), call('p1', 'mcp__threadbear__pin'), result('p1'), call('e1', END))), { landed: true, replied: true });
 });
 
 test("end_turn's description asks for the words naming a link's target to be that link", () => {
