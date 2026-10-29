@@ -412,7 +412,7 @@ struct ReviewWindow: View {
                     Button {
                         session.show(index, slot: session.mode == .pair ? 1 : 0)
                     } label: {
-                        ReviewCanvas(image: option.image, actualSize: false).frame(width: 64, height: 42).allowsHitTesting(false)
+                        ReviewCanvas(image: option.image, actualSize: false, passive: true).frame(width: 64, height: 42)
                             .clipShape(RoundedRectangle(cornerRadius: 5))
                             .overlay(RoundedRectangle(cornerRadius: 5).strokeBorder(
                                 session.draft.pickedId == option.id ? Color.accentColor : session.visibleIndices.contains(index) ? Color.primary.opacity(0.5) : Color(nsColor: .separatorColor),
@@ -480,17 +480,31 @@ struct ReviewWindow: View {
 private struct ReviewCanvas: NSViewRepresentable {
     let image: ImageRef
     let actualSize: Bool
-    func makeNSView(context: Context) -> ReviewImageScroll { ReviewImageScroll() }
-    func updateNSView(_ view: ReviewImageScroll, context: Context) { view.show(image, actual: actualSize) }
+    /// A thumbnail: the strip's button under it takes the clicks.
+    var passive = false
+    func makeNSView(context: Context) -> ReviewImageScroll {
+        let view = ReviewImageScroll()
+        view.passive = passive
+        return view
+    }
+    func updateNSView(_ view: ReviewImageScroll, context: Context) {
+        view.passive = passive
+        view.show(image, actual: actualSize)
+    }
 }
 
-private final class ReviewImageScroll: NSScrollView {
+final class ReviewImageScroll: NSScrollView {
     private let picture = NSImageView()
     private var reference: ImageRef?
     private var actual = false
     private var loadedKey = ""
     private var resetScroll = true
     private var orientedSize: NSSize?
+    var passive = false
+
+    // SwiftUI's allowsHitTesting(false) doesn't reach AppKit views: without
+    // this, a strip thumbnail swallowed the click its Button was waiting for.
+    override func hitTest(_ point: NSPoint) -> NSView? { passive ? nil : super.hitTest(point) }
 
     override init(frame: NSRect) {
         super.init(frame: frame)
