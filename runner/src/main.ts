@@ -12,6 +12,7 @@ import { RunnerUpdater } from './update.ts';
 import { Restarter, restartMethods } from './restart.ts';
 import { AppRestarts } from './app-restarts.ts';
 import { Scheduler, scheduleMethods } from './schedules.ts';
+import { StuckJobs } from './stuck-jobs.ts';
 import { Projects, guardProjects, projectMethods } from './projects.ts';
 import { Librarian, librarianMethods } from './librarian.ts';
 import { ConnectorsMonitor, connectorsMethods } from './connectors.ts';
@@ -211,6 +212,9 @@ async function main(): Promise<void> {
   projects.start(runner);
   const librarian = new Librarian({ host: runner, projects, models, clock: realClock, log, home: cfg.home });
   librarian.start();
+  // Background jobs that look stuck get their thread a message.
+  const stuckJobs = new StuckJobs({ host: runner, clock: realClock, log, home: cfg.home });
+  stuckJobs.start();
   // The Connectors gateway's /health, for the app's Connectors panel
   // (docs/protocol.md, "Connectors"). Off when there's no gateway.
   const connectors = new ConnectorsMonitor({
@@ -399,6 +403,7 @@ async function main(): Promise<void> {
     primaryLink?.close();
     scheduler.stop();
     librarian.stop();
+    stuckJobs.stop();
     connectors.stop();
     projects.stop();
     usage.stop();
@@ -439,6 +444,7 @@ async function main(): Promise<void> {
       stopHousekeeping();
       scheduler.stop();
       librarian.stop();
+      stuckJobs.stop();
       connectors.stop();
       projects.freeze();
       updates.stop();

@@ -972,6 +972,19 @@ export class Runner {
     return out;
   }
 
+  // Claude threads with no turn going whose CLI still runs background
+  // work, for the stuck-job check (stuck-jobs.ts). Its output files are
+  // named by the session and task ids.
+  idleBackground(): { threadId: string; sessionId: string; tasks: BackgroundTask[] }[] {
+    const out: { threadId: string; sessionId: string; tasks: BackgroundTask[] }[] = [];
+    for (const { rec, rt } of this.threads.values()) {
+      if (rt.deleted || rec.archivedAt || rec.provider !== 'claude' || !rec.nativeSessionId || !rt.session) continue;
+      if (rt.turn || rt.wakeTimer || rec.status !== 'idle' || !rt.tasks.length) continue;
+      out.push({ threadId: rec.id, sessionId: rec.nativeSessionId, tasks: rt.tasks });
+    }
+    return out;
+  }
+
   // The summary's background list: what the CLI is still running, then
   // (while the wake grace runs) what just finished and is about to be read.
   private background(st: ThreadState): ProtocolBackgroundTask[] {

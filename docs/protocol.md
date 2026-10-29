@@ -907,6 +907,29 @@ restart wait for busy threads. It hands over instead:
 The methods between runners (`drain.hello`, `drain.stop`) and
 `drain.handedOver` and `drain.usage` are for runners only.
 
+### Stuck background jobs
+
+A thread whose turn has ended stays in Running while its CLI still has
+background shells or sub-agents going, so a job that can never finish
+(a wait loop whose `pgrep -f` matches its own shell, say) keeps it there
+for good. Every 5 minutes the runner (stuck-jobs.ts) looks at idle Claude
+threads with background work. A shell or sub-agent counts as stuck when
+its output file under `/tmp/claude-<uid>/<project>/<session>/tasks/` (a
+sub-agent's links to its transcript) was made more than 30 minutes ago
+and hasn't been written for 30 minutes, and, for a shell, it and
+everything under it used under 2 seconds of CPU between two looks. The
+shells are found under the thread's CLI (the process whose arguments
+carry `--resume=<session>` or `--session-id=<session>`) and matched to
+their jobs by the output file on their stdout. Monitors are left alone;
+they sit quiet by design. Codex's background terminals leave no files,
+so Codex threads aren't looked at.
+
+The thread gets one message from the runner (origin `runner`) listing
+its stuck jobs, how long each has run and what's running in it, asking
+the agent to stop any that are stuck and to ask Mike if it can't tell.
+Jobs it has been told about are kept in `stuck-jobs.json` in the data
+dir for a day, so a runner restart doesn't tell it again.
+
 ## Settings and models
 
 The runner makes small model calls of its own (classify, extract,
