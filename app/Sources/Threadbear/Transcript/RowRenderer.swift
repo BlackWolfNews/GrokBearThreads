@@ -1145,6 +1145,7 @@ enum RowRenderer {
     /// BackgroundLayoutManager. Closed, it's just the asks, quietly.
     static func asksText(_ card: AsksCard) -> NSAttributedString {
         let (titleStyle, titleOffset) = Theme.lines(TypeScale.workLine, font: Theme.changesTitleFont, spacing: zoomed(6))
+        if card.isDone { return doneText(titleStyle: titleStyle, titleOffset: titleOffset) }
         let output = NSMutableAttributedString(string: card.isOpen ? "Needs you" : "Needed you", attributes: [
             .font: Theme.changesTitleFont, .foregroundColor: card.isOpen ? NSColor.labelColor : NSColor.secondaryLabelColor,
             .paragraphStyle: titleStyle, .baselineOffset: titleOffset,
@@ -1209,6 +1210,23 @@ enum RowRenderer {
         return output
     }
 
+    /// The done card: the agent said nothing waits on Mike, so the one
+    /// thing left to do is put the thread away (`archive`, as ⌘E does).
+    private static func doneText(titleStyle: NSParagraphStyle, titleOffset: CGFloat) -> NSAttributedString {
+        let output = NSMutableAttributedString(string: "Nothing needed from you", attributes: [
+            .font: Theme.changesTitleFont, .foregroundColor: NSColor.labelColor,
+            .paragraphStyle: titleStyle, .baselineOffset: titleOffset,
+        ])
+        let button = Theme.labelFont
+        let (buttonStyle, buttonOffset) = Theme.lines(TypeScale.scaled(38), font: button, before: zoomed(6))
+        output.append(NSAttributedString(string: "\n", attributes: [.font: button, .paragraphStyle: buttonStyle]))
+        output.append(NSAttributedString(string: "\u{00A0}\u{00A0}\u{00A0}Archive\u{00A0}thread\u{00A0}\u{00A0}\u{00A0}", attributes: [
+            .font: button, .foregroundColor: AskButtonStyle.plain.textColor, .paragraphStyle: buttonStyle, .baselineOffset: buttonOffset,
+            .tbAction: "archive", .tbButton: AskButtonStyle.plain.rawValue,
+        ]))
+        return output
+    }
+
     /// A plain sentence for a failure whose cause the runner gave.
     static func errorAdvice(_ kind: TurnErrorKind?) -> String? {
         switch kind {
@@ -1221,9 +1239,8 @@ enum RowRenderer {
     /// "12s · $0.04" for Claude, "12s" for Codex, which reports no cost
     /// (its tokens are in "Copy debug info" instead).
     static func footerText(_ completion: TurnCompletion) -> NSAttributedString {
+        // "Nothing needed from you" is the done card's now, under this line.
         var parts: [String] = []
-        // The agent said it's finished and nothing waits on Mike.
-        if completion.outcome == .completed, completion.needs == "nothing" { parts.append("Nothing needed from you") }
         switch completion.outcome {
         case .completed: parts.append(RelativeTime.duration(milliseconds: completion.durationMs))
         case .interrupted: parts.append("Stopped after \(RelativeTime.duration(milliseconds: completion.durationMs))")

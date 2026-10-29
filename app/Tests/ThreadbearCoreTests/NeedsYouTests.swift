@@ -60,6 +60,28 @@ final class NeedsYouTests: XCTestCase {
         XCTAssertEqual(message.answers, [AskAnswer(action: "Log in", answer: "Done")])
     }
 
+    /// A turn that needs nothing gets the done card in place of its end_turn
+    /// call, which isn't shown once the runner takes it; a refused one is.
+    func testADoneTurnGetsTheDoneCardAndHidesItsEndTurn() {
+        var model = TranscriptModel(events: [
+            E.event(1, "turn.started", ["turnId": "t1"], turn: "t1"),
+            E.call(2, "c1", name: "mcp__threadbear__end_turn", kind: "other", title: "end_turn", input: ["needs": "nothing"]),
+            E.result(3, "c1", ok: false, text: "Not ended: Mike hasn't had a reply this turn."),
+            E.text(4, "m1", "Built it."),
+            E.call(5, "c2", name: "mcp__threadbear__end_turn", kind: "other", title: "end_turn", input: ["needs": "nothing"]),
+            E.result(6, "c2", text: "Noted: this thread is done."),
+            done(7, turn: "t1", needs: "nothing"),
+        ])
+        XCTAssertNotNil(model.row(id: "t:c1"), "the refused call is still shown")
+        XCTAssertNil(model.row(id: "t:c2"))
+        XCTAssertEqual(model.rows.last?.id, "ak:7")
+        XCTAssertEqual(card(model, "ak:7")?.isDone, true)
+        XCTAssertEqual(card(model, "ak:7")?.isOpen, true)
+        // Mike's next message puts it away, as it does an asks card.
+        _ = model.apply([E.event(8, "user.message", ["text": "One more thing", "images": []], turn: "t2")])
+        XCTAssertNil(model.row(id: "ak:7"))
+    }
+
     func testOnlyACompletedTurnThatNeedsYouWithAsksGetsACard() {
         let model = TranscriptModel(events: [
             done(1, turn: "t1", needs: "you"),
@@ -67,6 +89,8 @@ final class NeedsYouTests: XCTestCase {
             E.event(3, "asks.ticked", ["asksSeq": 99, "ticked": [0]], turn: nil),
         ])
         XCTAssertFalse(model.rows.contains { $0.kind == .asks })
+        let stopped = TranscriptModel(events: [done(1, turn: "t1", needs: "nothing", outcome: "interrupted")])
+        XCTAssertFalse(stopped.rows.contains { $0.kind == .asks }, "a stopped turn gets no done card")
     }
 
     func testSummaryDecodesNeedsAndAsks() throws {

@@ -138,6 +138,11 @@ final class TranscriptLayoutTests: XCTestCase {
         // One ask: no number.
         let one = RowRenderer.asksText(AsksCard(seq: 2, asks: [Ask(action: "Merge #48?", why: "Checks pass.")])).string
         XCTAssertTrue(one.contains("\nMerge #48? Checks pass."), one)
+        // No asks: the done card, with its one button.
+        let done = RowRenderer.asksText(AsksCard(seq: 3, asks: []))
+        XCTAssertTrue(done.string.hasPrefix("Nothing needed from you\n"), done.string)
+        let archive = (done.string as NSString).range(of: "Archive")
+        XCTAssertEqual(done.attribute(.tbAction, at: archive.location, effectiveRange: nil) as? String, "archive")
     }
 }
 

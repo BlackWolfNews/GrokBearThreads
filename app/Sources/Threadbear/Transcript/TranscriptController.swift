@@ -704,9 +704,16 @@ final class TranscriptController: NSObject, NSTableViewDataSource, NSTableViewDe
 
     /// A button on the open asks card: `pick:<ask>:<n>` picks (or unpicks)
     /// an answer, which waits in the composer; `link:<ask>:<n>` opens one of
-    /// the ask's links where links open (the pane or the browser).
+    /// the ask's links where links open (the pane or the browser). The done
+    /// card's `archive` archives the thread, as ⌘E does.
     func askAction(_ card: AsksCard, action: String) {
         guard let session, let app = session.app, let thread = app.threads[session.threadId] else { return }
+        if action == "archive" {
+            // Already archived (end_turn's archive: true, or ⌘E): nothing to do,
+            // and archiving again would move the selection off it.
+            if !thread.isArchived { app.archive(thread.id) }
+            return
+        }
         let parts = action.split(separator: ":")
         guard parts.count == 3, let index = Int(parts[1]), let n = Int(parts[2]), card.asks.indices.contains(index) else { return }
         let ask = card.asks[index]

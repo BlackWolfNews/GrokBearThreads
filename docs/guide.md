@@ -88,8 +88,9 @@ At the right of each row:
 - **Needs you**, in orange: the agent has asked you something, wants your OK,
   or has finished and said there's something for you to do.
 - A blue dot before the title: a reply you haven't read yet.
-- A time: the thread is idle. It finished and doesn't need anything. After a
-  while Threadbear stops its agent to save memory, and your next message
+- A time: the thread is idle. It finished and doesn't need anything: its
+  last reply ends with a "Nothing needed from you" card, with an Archive
+  thread button to put it away. After a while Threadbear stops its agent to save memory, and your next message
   starts it again where it left off.
 - **Failed**: the last turn ended with an error. Read the thread to see why,
   and send a message to try again.

@@ -305,4 +305,10 @@ public struct AsksCard: Sendable, Hashable {
     }
 
     public var tickedCount: Int { asks.indices.filter { ticked.contains($0) }.count }
+
+    /// A turn that said it needs nothing gets a card too, with no asks:
+    /// "Nothing needed from you" and an Archive button, where the raw
+    /// end_turn call used to be all there was (Mike, 29 Oct). A turn that
+    /// needs Mike only gets a card when it has asks, so no asks means this.
+    public var isDone: Bool { asks.isEmpty }
 }

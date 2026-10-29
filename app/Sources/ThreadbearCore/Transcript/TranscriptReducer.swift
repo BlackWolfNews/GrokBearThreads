@@ -726,6 +726,12 @@ public struct TranscriptModel: Sendable {
                     append(TranscriptRow(id: cardId, seq: seq, turnId: turnId ?? completion.turnId, content: .asks(AsksCard(seq: seq, asks: completion.asks, picks: askPicks[seq] ?? [:]))))
                     asksRowForSeq[seq] = cardId
                     openAsksRow = cardId
+                } else if completion.outcome == .completed, completion.needs == "nothing" {
+                    // The done card: goes, as an asks card does, once Mike
+                    // replies or the next turn ends.
+                    let cardId = "ak:\(seq)"
+                    append(TranscriptRow(id: cardId, seq: seq, turnId: turnId ?? completion.turnId, content: .asks(AsksCard(seq: seq, asks: []))))
+                    openAsksRow = cardId
                 }
             }
 
@@ -789,10 +795,21 @@ public struct TranscriptModel: Sendable {
     /// and a second group.
     static func isWork(_ row: TranscriptRow) -> Bool {
         switch row.content {
-        case .reasoning, .tool, .note: return true
+        case .tool(let tool): return !isTakenEndTurn(tool)
+        case .reasoning, .note: return true
         case .approval(let item): return item.isAllowed
         default: return false
         }
+    }
+
+    /// An end_turn call the runner took (or hasn't answered yet). It isn't
+    /// shown: the card under the turn's footer says what it said, and its
+    /// result ("Noted: this thread is done. Stop here...") is for the
+    /// agent (Mike, 29 Oct). A refused one stays, as work, since the turn
+    /// carried on because of it.
+    static func isTakenEndTurn(_ tool: ToolItem) -> Bool {
+        guard let name = tool.call?.name, name.hasPrefix("mcp__threadbear"), name.hasSuffix("__end_turn") else { return false }
+        return tool.result?.ok ?? true
     }
 
     /// The first item of the run of work that item `i` is in (or `i`).
@@ -919,6 +936,8 @@ public struct TranscriptModel: Sendable {
             } else if case .asks(let card) = item.content, !card.isOpen {
                 // A card that's been answered or moved past isn't shown: the
                 // answers bubble says what was picked (Mike, 28 Oct).
+                i += 1
+            } else if case .tool(let tool) = item.content, Self.isTakenEndTurn(tool) {
                 i += 1
             } else {
                 if case .footer = item.content, let card = changedFiles(turn: item.turnId ?? "") {

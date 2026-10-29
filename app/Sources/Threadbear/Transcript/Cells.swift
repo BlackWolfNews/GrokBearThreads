@@ -335,9 +335,9 @@ final class TextRowCell: RowCellView {
 
         case .asks(let card):
             // The open card is outlined like an approval waiting on Mike;
-            // a closed one is a plain card.
+            // a closed one, or the done card (nothing's waiting), is a plain card.
             box.isHidden = false
-            box.set(fill: Theme.cardBackground, stroke: card.isOpen ? NSColor.controlAccentColor : Theme.cardBorder, radius: zoomed(10))
+            box.set(fill: Theme.cardBackground, stroke: card.isOpen && !card.isDone ? NSColor.controlAccentColor : Theme.cardBorder, radius: zoomed(10))
             box.frame = NSRect(x: x, y: top + zoomed(2), width: width, height: render.textSize.height + RowMetrics.cardPad * 2 - zoomed(4))
             textView.place(box.frame.insetBy(dx: RowMetrics.cardPad, dy: RowMetrics.cardPad - zoomed(2)))
 
