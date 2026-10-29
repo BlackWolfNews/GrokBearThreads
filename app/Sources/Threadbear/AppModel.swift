@@ -48,6 +48,14 @@ final class AppModel {
     static let shared = AppModel()
 
     var connection: ConnectionState = .connecting
+    /// A `threads.create` from the new-thread composer hasn't come back:
+    /// its draft stays in the box, greyed and locked, with a spinner for
+    /// Send, so the click visibly did something however slow the runner is.
+    var creatingThread = false
+    /// How long a thread may sit idle with one of Mike's messages still
+    /// queued before the app gives up on it showing.
+    static let queuedGrace: Double = 10
+    @ObservationIgnored private var queuedChecks: Set<String> = []
     var runnerVersion = ""
     var accounts: [Account] = []
     var defaults = RunnerDefaults(cwd: NSString("~/dev/me/misc").expandingTildeInPath, accountId: "claude-main")
@@ -701,6 +709,7 @@ final class AppModel {
         }
         // A thread a pending restart waits for may just have finished.
         if restart.isPending, previous?.status != thread.status { refreshRunnerStatus() }
+        checkQueued(thread.id)
         let becameNeedy = thread.needsYou && previous?.needsYou != true
         let showing = isLooking && isShowing(thread.id)
         if becameNeedy && !showing && notificationsEnabled {
@@ -949,9 +958,13 @@ final class AppModel {
     }
 
     /// Sends the draft for `threadId` (or starts a new thread with the "new"
-    /// draft), with any answers picked on the open card. The box empties
-    /// straight away, but the text, images and picks go back if the runner
-    /// doesn't take them; while disconnected nothing is touched at all.
+    /// draft), with any answers picked on the open card. In a thread the
+    /// box empties straight away and the message shows at the end of the
+    /// transcript, dimmed, until the runner shows it (a busy Mac can keep
+    /// the runner from answering for many seconds); the text, images and
+    /// picks go back if the runner doesn't take them. A new thread's
+    /// draft stays in the box, greyed, with a spinner for Send, until the
+    /// thread exists. While disconnected nothing is touched at all.
     func send(threadId: String?) {
         let key = threadId ?? "new"
         if let threadId, let edit = editing[threadId] {
@@ -970,18 +983,33 @@ final class AppModel {
             ? draft.text.trimmingCharacters(in: .whitespacesAndNewlines)
             : Decisions.message(asks: asks, picks: picks, extra: draft.text)
         guard !trimmed.isEmpty || !draft.images.isEmpty else { return }
+        // A second Return while the first new thread is still being made.
+        if threadId == nil, creatingThread { return }
         guard let client, connection == .connected else {
             showConnectionError("Not connected to the runner, so that wasn't sent. It's still in the box.")
             return
         }
-        drafts[key] = nil
         if let threadId {
+            drafts[key] = nil
             let seq = thread?.asksSeq
             if let seq, !answers.isEmpty { setPicks([:], seq: seq, threadId: threadId) }
+            let pendingId = UUID().uuidString
+            // The thread's own session, open already as its composer is
+            // showing; kept by the Task, so a failure finds it.
+            let session: ThreadSession? = self.session(for: threadId)
+            session?.addPending(id: pendingId, text: trimmed, images: draft.images, answers: answers, summarySeq: thread?.lastSeq ?? 0)
             Task {
                 do {
                     try await client.send(threadId: threadId, text: trimmed, images: draft.images, answers: answers)
+                    // Taken but not shown: it's queued behind the running
+                    // turn. Its user.message usually comes just before this
+                    // reply, but is applied on the next frame, so wait a
+                    // moment rather than flash the clock on every send.
+                    try? await Task.sleep(for: .milliseconds(600))
+                    session?.markQueued(pendingId)
+                    checkQueued(threadId)
                 } catch {
+                    session?.removePending(pendingId)
                     restoreDraft(draft, key: key)
                     if let seq, !answers.isEmpty { setPicks(picks, seq: seq, threadId: threadId) }
                     show(error)
@@ -990,9 +1018,13 @@ final class AppModel {
         } else {
             let account = newThreadAccountId
             let request = newThreadRequest(text: trimmed, images: draft.images)
+            creatingThread = true
             Task {
+                defer { creatingThread = false }
                 do {
                     let thread = try await client.createThread(request)
+                    // Only what was sent goes; the box was locked meanwhile.
+                    if drafts[key] == draft { drafts[key] = nil }
                     // In a pool the runner picked the login; that's the one
                     // that counts as used.
                     rememberLastAccount(request.poolId == nil ? account : thread.accountId)
@@ -1008,10 +1040,24 @@ final class AppModel {
                     threads[thread.id] = thread
                     select(thread.id)
                 } catch {
-                    restoreDraft(draft, key: key)
+                    // The draft never left the box.
                     show(error)
                 }
             }
+        }
+    }
+
+    /// A queued message starts its own turn once the thread is free, so
+    /// one still queued after the thread has sat idle a while was lost on
+    /// the way (a disconnect clears them anyway): it goes rather than stay
+    /// at the end of the transcript for good.
+    private func checkQueued(_ threadId: String) {
+        guard threads[threadId]?.status.isBusy == false, sessions[threadId]?.hasQueued == true,
+              queuedChecks.insert(threadId).inserted else { return }
+        Task {
+            try? await Task.sleep(for: .seconds(Self.queuedGrace))
+            queuedChecks.remove(threadId)
+            if threads[threadId]?.status.isBusy == false { sessions[threadId]?.dropQueued() }
         }
     }
 
@@ -1031,12 +1077,21 @@ final class AppModel {
         Task { try? await client.interrupt(threadId: threadId) }
     }
 
+    /// Changes a thread on the runner. What can safely be guessed (archived,
+    /// snoozed, permission, model, effort) shows at once
+    /// (`ThreadUpdate.applied`), so the click does something however slow
+    /// the runner is; its reply replaces the guess, and a failure puts back
+    /// what was there unless something else has changed it since.
     func update(_ threadId: String, _ update: ThreadUpdate) {
         guard let client else { return }
+        let before = threads[threadId]
+        let guess = before.map { update.applied(to: $0) }
+        if let guess, guess != before { threads[threadId] = guess }
         Task {
             do {
                 threads[threadId] = try await client.updateThread(threadId, update)
             } catch {
+                if let before, let guess, threads[threadId] == guess { threads[threadId] = before }
                 show(error)
             }
         }

@@ -68,8 +68,16 @@ public struct UserMessage: Sendable, Hashable {
     /// a message"). Set by the reducer, which knows whether it started its
     /// own turn.
     public var editable: Bool
+    /// Sent from this app and not shown by the runner yet
+    /// (`PendingMessage`): drawn dimmed, with a spinner while it's on its
+    /// way and a clock once the runner has queued it.
+    public var pending: Pending?
 
-    public init(text: String, images: [ImageRef] = [], origin: String? = nil, answers: [AskAnswer] = [], editOf: Int? = nil, review: ReviewAnswer? = nil, editable: Bool = false) {
+    public enum Pending: Sendable, Hashable {
+        case sending, queued
+    }
+
+    public init(text: String, images: [ImageRef] = [], origin: String? = nil, answers: [AskAnswer] = [], editOf: Int? = nil, review: ReviewAnswer? = nil, editable: Bool = false, pending: Pending? = nil) {
         self.text = text
         self.images = images
         self.origin = origin
@@ -77,6 +85,7 @@ public struct UserMessage: Sendable, Hashable {
         self.review = review
         self.editOf = editOf
         self.editable = editable
+        self.pending = pending
     }
 
     /// Mike wrote it, in the app or on the phone: not the runner, a

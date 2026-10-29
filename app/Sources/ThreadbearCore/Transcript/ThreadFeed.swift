@@ -161,6 +161,12 @@ public struct ThreadFeed: Sendable {
         model.setBackground(tasks)
     }
 
+    /// Messages sent and not shown yet (see `TranscriptModel.setPending`).
+    /// Queued events stay queued.
+    public mutating func setPending(_ list: [PendingMessage]) -> TranscriptChange {
+        model.setPending(list)
+    }
+
     /// A sub-agent started or stopped running (see
     /// `TranscriptModel.setLiveTurn`). Queued events stay queued.
     public mutating func setLiveTurn(_ turn: String?, startedAt: Date? = nil) -> TranscriptChange {

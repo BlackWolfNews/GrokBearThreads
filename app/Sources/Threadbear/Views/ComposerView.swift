@@ -28,6 +28,9 @@ struct ComposerView: View {
         // here as chips and go with the message (AnswerChips).
         let picks = thread.map { app.picks(for: $0) } ?? [:]
         let canSend = !picks.isEmpty || ComposerChips.canSend(text: draft.wrappedValue.text, imageCount: draft.wrappedValue.images.count)
+        // A new thread on its way: what was sent stays, greyed and locked,
+        // until the runner has made the thread.
+        let creating = thread == nil && app.creatingThread
         VStack(alignment: .leading, spacing: zoomed(6)) {
         VStack(alignment: .leading, spacing: zoomed(10)) {
             if let thread, let edit = app.editing[thread.id] {
@@ -41,6 +44,8 @@ struct ComposerView: View {
             }
             if !draft.wrappedValue.images.isEmpty || importing > 0 {
                 AttachmentStrip(images: draft.images, importing: importing)
+                    .disabled(creating)
+                    .opacity(creating ? 0.5 : 1)
             }
             ComposerTextField(
                 text: draft.text,
@@ -50,13 +55,16 @@ struct ComposerView: View {
                 onSend: { send() },
                 onReturnWhenEmpty: { returnWhenEmpty(draft.wrappedValue) },
                 onImages: { urls in attach(urls, to: draft) },
-                onEscape: { cancelEdit() }
+                onEscape: { cancelEdit() },
+                editable: !creating
             )
             .frame(height: height)
+            .opacity(creating ? 0.5 : 1)
             ComposerControls(
                 thread: thread,
                 running: thread?.status.isBusy == true,
                 canSend: canSend,
+                sending: creating,
                 onAttach: { chooseImages(for: draft) },
                 onSend: { send() },
                 onSchedule: { app.newSchedule(from: thread, draftKey: draftKey) }
@@ -291,6 +299,8 @@ struct ComposerTextField: NSViewRepresentable {
     var onImages: ([URL]) -> Void
     /// Esc: true if it did something (left an edit).
     var onEscape: () -> Bool = { false }
+    /// False while what's in it is being sent (a new thread being made).
+    var editable = true
 
     // Computed, so they follow the zoom (`applyTypeScale` re-applies
     // them to a text view that's already up).
@@ -364,6 +374,7 @@ struct ComposerTextField: NSViewRepresentable {
         textView.onImages = onImages
         textView.onEscape = onEscape
         textView.placeholder = placeholder
+        if textView.isEditable != editable { textView.isEditable = editable }
         if textView.string != text {
             textView.replaceText(text)
             context.coordinator.updateHeight()

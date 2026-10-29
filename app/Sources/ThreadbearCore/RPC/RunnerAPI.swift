@@ -34,7 +34,7 @@ public extension RPCClient {
         if let effort = request.effort { params["effort"] = .string(effort) }
         if let mode = request.permissionMode { params["permissionMode"] = .string(mode.rawValue) }
         if let title = request.title { params["title"] = .string(title) }
-        return try await call("threads.create", .object(params), as: ThreadResult.self).thread
+        return try await call("threads.create", .object(params), as: ThreadResult.self, timeout: RPCClient.sendTimeout).thread
     }
 
     @discardableResult
@@ -45,8 +45,16 @@ public extension RPCClient {
         if !answers.isEmpty {
             params["answers"] = .array(answers.map { .object(["action": .string($0.action), "answer": .string($0.answer)]) })
         }
-        return try await call("threads.send", .object(params), as: TurnResult.self).turnId
+        return try await call("threads.send", .object(params), as: TurnResult.self, timeout: RPCClient.sendTimeout).turnId
     }
+
+    /// A send or a new thread waits longer than the usual 30 s: on a Mac
+    /// loaded with renders and backups the runner's event loop has stalled
+    /// for 35 s, and giving up then put the draft back in the box while
+    /// the runner went on to send it anyway (twice, once Mike sent it
+    /// again). The app shows the message on its way meanwhile, and a
+    /// dropped connection still fails it at once.
+    static var sendTimeout: Duration { .seconds(120) }
 
     /// Replaces the message at `seq` and carries on from there: the runner
     /// stops the thread, cuts it back to before that message, undoes the
@@ -321,6 +329,32 @@ public struct ThreadUpdate: Sendable, Hashable {
         if let archived { params["archived"] = .bool(archived) }
         if let poolId { params["poolId"] = poolId.map { .string($0) } ?? .null }
         return params
+    }
+
+    /// The summary as it will be once the runner has made this change, for
+    /// the parts it's safe to guess, so a click on Archive, Snooze or a
+    /// permission or model pick shows straight away rather than after a
+    /// busy runner answers. The runner's reply replaces it either way. A
+    /// folder, login or pool change is left to the runner: it can move the
+    /// thread to another provider and reset other settings with it.
+    public func applied(to thread: ThreadSummary, now: Date = Date()) -> ThreadSummary {
+        var thread = thread
+        if let title, !title.isEmpty { thread.title = title }
+        if let permissionMode { thread.permissionMode = permissionMode }
+        if accountId == nil, poolId == nil {
+            if let model { thread.model = model }
+            if let effort { thread.effort = effort }
+        }
+        if snoozeUntilRestart {
+            thread.snoozedUntil = .distantFuture
+            thread.snoozedUntilRestart = true
+        } else if let snoozedUntil {
+            thread.snoozedUntil = snoozedUntil
+            thread.snoozedUntilRestart = false
+            if snoozedUntil == nil { thread.wakeWhen = nil }
+        }
+        if let archived { thread.archivedAt = archived ? (thread.archivedAt ?? now) : nil }
+        return thread
     }
 }
 

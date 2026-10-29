@@ -275,6 +275,14 @@ restart waited for finish just before it (those waiting on Mike stay
 waiting), and any other running turn ends interrupted with the thread
 stopped.
 
+`mock.slow` (`ms`, `queueMs`; both 0 turns it off) plays a runner on a
+loaded Mac: `ms` holds every `threads.send`, `threads.create` and
+`threads.update` that long before it's handled, as a stalled event loop
+does, and `queueMs` answers a send at once but starts its turn that much
+later, as for a message queued behind a running turn. It's for seeing a
+message on its way (dimmed, with a spinner or a clock) and the new-thread
+composer's spinner.
+
 `mock.background` (`threadId`, `tasks: [{ kind, description, finished? }]`;
 empty clears it) sets what a thread's CLI is still running in the
 background between turns, as the real runner's `background` summary field

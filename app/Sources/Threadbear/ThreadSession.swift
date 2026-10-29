@@ -49,6 +49,11 @@ final class ThreadSession {
     @ObservationIgnored var olderFetchMs: [Double] = []
     @ObservationIgnored var olderMergeMs: [Double] = []
     @ObservationIgnored var onLoaded: (() -> Void)?
+    /// Messages sent from this thread's composer that the runner hasn't
+    /// shown yet (`PendingMessage`), kept here so they outlive the model
+    /// being built again (opening, older pages). The model drops each one
+    /// as its `user.message` is applied, and this follows it after a flush.
+    @ObservationIgnored private(set) var pending: [PendingMessage] = []
     @ObservationIgnored var onOlderLoaded: ((Int) -> Void)?
 
     init(threadId: String, subagentId: String? = nil, app: AppModel) {
@@ -108,7 +113,13 @@ final class ThreadSession {
                     if debug { print(String(format: "    after prepare %.0f MB", memoryMB())) }
                     return (model, start)
                 }.value
-                feed = ThreadFeed(model: prepared.0)
+                var model = prepared.0
+                // Sent while it loaded, or before it was last let go.
+                if !pending.isEmpty {
+                    _ = model.setPending(pending)
+                    pending = model.pending
+                }
+                feed = ThreadFeed(model: model)
                 displayStart = prepared.1
                 state = .loaded
                 perfLog.endInterval("open", signpost)
@@ -198,9 +209,12 @@ final class ThreadSession {
     }
 
     /// The connection dropped; the next connection re-subscribes from the
-    /// last seq we have and the runner replays the gap.
+    /// last seq we have and the runner replays the gap. Messages still on
+    /// their way go: one in flight fails its send, which puts the draft
+    /// back, and one the runner had queued comes back with its turn.
     func connectionLost() {
         subscribed = false
+        updatePending { $0.removeAll() }
     }
 
     func unsubscribe() {
@@ -272,6 +286,8 @@ final class ThreadSession {
         lastFlush = started
         let oldStart = displayStart
         let change = feed.flush()
+        // A user.message may have taken one of the messages on their way.
+        if pending != feed.model.pending, state == .loaded { pending = feed.model.pending }
         guard !change.isEmpty else { return }
         show(change, oldStart: oldStart)
         flushCount += 1
@@ -284,6 +300,62 @@ final class ThreadSession {
         guard state == .loaded, !rebuilding else { return }
         let oldStart = displayStart
         let change = feed.setBackground(tasks)
+        guard !change.isEmpty else { return }
+        show(change, oldStart: oldStart)
+    }
+
+    // MARK: Messages on their way
+
+    /// Shows a message Mike just sent at the end of the transcript, dimmed,
+    /// until the runner shows it. `afterSeq` is worked out here: the last
+    /// event this app knows of for the thread.
+    func addPending(id: String, text: String, images: [ImageRef], answers: [AskAnswer], summarySeq: Int) {
+        let message = PendingMessage(id: id, text: text, images: images, answers: answers, afterSeq: max(feed.acceptedSeq, summarySeq))
+        updatePending { $0.append(message) }
+        // Sent from further up the thread: go down to it, as it's what
+        // shows the click did something.
+        if state == .loaded, !rebuilding { view?.scrollToBottom() }
+    }
+
+    /// The runner took it but hasn't shown it: it's queued behind the
+    /// running turn.
+    func markQueued(_ id: String) {
+        updatePending { list in
+            if let index = list.firstIndex(where: { $0.id == id }) { list[index].queued = true }
+        }
+    }
+
+    /// The send failed (its draft goes back in the box).
+    func removePending(_ id: String) {
+        updatePending { $0.removeAll { $0.id == id } }
+    }
+
+    func hasPending(_ id: String) -> Bool { pending.contains { $0.id == id } }
+
+    var hasQueued: Bool { pending.contains(where: \.queued) }
+
+    /// The thread has sat idle with a message still queued: the runner
+    /// dropped it somewhere (it would have started its turn), so it goes
+    /// rather than wait here for good.
+    func dropQueued() {
+        updatePending { $0.removeAll(where: \.queued) }
+    }
+
+    private func updatePending(_ body: (inout [PendingMessage]) -> Void) {
+        var list = pending
+        body(&list)
+        guard list != pending else { return }
+        pending = list
+        syncPending()
+    }
+
+    /// Hands the list to the model and the table, once it's loaded and no
+    /// older page is being merged (the flush after that merge brings it).
+    private func syncPending() {
+        guard state == .loaded, !rebuilding, pending != feed.model.pending else { return }
+        let oldStart = displayStart
+        let change = feed.setPending(pending)
+        pending = feed.model.pending
         guard !change.isEmpty else { return }
         show(change, oldStart: oldStart)
     }
@@ -376,6 +448,7 @@ final class ThreadSession {
                 let memory = view?.captureMemory()
                 feed.replaceModel(result.0)
                 rebuilding = false
+                defer { syncPending() }
                 olderMergeMs.append((CACurrentMediaTime() - mergeStart) * 1000)
                 let newStart = max(0, result.1.added - Self.pageRows)
                 if result.1.keepsOrder {

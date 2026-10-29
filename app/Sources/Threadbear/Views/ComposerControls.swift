@@ -10,6 +10,8 @@ struct ComposerControls: View {
     let thread: ThreadSummary?
     let running: Bool
     let canSend: Bool
+    /// A new thread is being made from what's in the box.
+    var sending = false
     let onAttach: () -> Void
     let onSend: () -> Void
     /// Opens the schedule editor with the draft, instead of sending it now.
@@ -54,7 +56,7 @@ struct ComposerControls: View {
             }
             .tourTarget(.permission)
             Spacer(minLength: zoomed(8))
-            SendButton(running: running, canSend: canSend, onSend: onSend, onStop: { app.interrupt() })
+            SendButton(running: running, canSend: canSend, sending: sending, onSend: onSend, onStop: { app.interrupt() })
                 .layoutPriority(1)
                 // Right-click send for later, as Mail and Slack do.
                 .contextMenu {
@@ -590,6 +592,7 @@ private struct PlusButton: View {
 private struct SendButton: View {
     let running: Bool
     let canSend: Bool
+    let sending: Bool
     let onSend: () -> Void
     let onStop: () -> Void
 
@@ -600,7 +603,16 @@ private struct SendButton: View {
         // turn is sent into that turn (the runner steers the CLI), so the
         // one round button never stops a turn Mike meant to add to. ⌘. and
         // the Thread menu still stop it.
-        if running && !canSend {
+        if sending {
+            // The runner is making the thread: a spinner in the button's
+            // place until it has, however long a busy Mac makes that.
+            SpinnerMark(color: .secondaryLabelColor)
+                .padding(zoomed(6))
+                .frame(width: Self.size, height: Self.size)
+                .background(Circle().fill(Color.primary.opacity(0.1)))
+                .tip("Starting the thread")
+                .accessibilityLabel("Starting the thread")
+        } else if running && !canSend {
             Button(action: onStop) {
                 Image(systemName: "stop.fill").font(.system(size: zoomed(9), weight: .bold))
             }

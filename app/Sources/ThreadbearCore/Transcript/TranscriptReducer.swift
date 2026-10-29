@@ -128,6 +128,11 @@ public struct TranscriptModel: Sendable {
     /// The thread's working folder. File rows and the changes card name
     /// folders relative to it, so they don't repeat the project's name.
     public private(set) var root: String?
+    /// Messages sent from this app that the runner hasn't shown yet, as
+    /// the last rows (`PendingMessage`). Each goes as its `user.message`
+    /// is applied, in the same change that adds the real row, so the
+    /// bubble never blinks out and back.
+    public private(set) var pending: [PendingMessage] = []
 
     public init(root: String? = nil) {
         self.root = root
@@ -168,6 +173,7 @@ public struct TranscriptModel: Sendable {
         events = newEvents.filter { !$0.isTransient }.sorted { $0.seq < $1.seq }
         firstSeq = events.first?.seq ?? 0
         lastSeq = events.last?.seq ?? 0
+        PendingMessage.remove(landedIn: events, from: &pending)
         streaming = [:]
         for item in inProgress {
             streaming[item.itemId] = (item.type == "reasoning" ? .reasoning : .assistant, item.text)
@@ -228,12 +234,16 @@ public struct TranscriptModel: Sendable {
                 if firstSeq == 0 { firstSeq = event.seq }
                 lastSeq = event.seq
                 if case .threadRewound = event.payload { rewound = true }
+                if PendingMessage.remove(landedIn: CollectionOfOne(event), from: &pending) { tailDirty = true }
             }
             reduce(event)
         }
         // An edit cut rows that are already showing: build them all again
         // and have the table reload, rather than work out what moved.
         if rewound {
+            // The runner drops messages queued behind an edited one
+            // (docs/protocol.md, "Editing a message").
+            pending.removeAll(where: \.queued)
             let before = rows.count
             rebuild()
             var change = TranscriptChange(removed: IndexSet(integersIn: 0..<before), inserted: IndexSet(integersIn: 0..<rows.count))
@@ -270,6 +280,20 @@ public struct TranscriptModel: Sendable {
     public mutating func setBackground(_ tasks: [BackgroundTask]) -> TranscriptChange {
         guard tasks != background else { return TranscriptChange() }
         background = tasks
+        tailDirty = true
+        return refreshRows()
+    }
+
+    /// The messages sent from this app that the runner hasn't shown yet.
+    /// Any that the events held already show are left out (a reload can
+    /// bring one in).
+    public mutating func setPending(_ list: [PendingMessage]) -> TranscriptChange {
+        var list = list
+        if let earliest = list.map(\.afterSeq).min() {
+            PendingMessage.remove(landedIn: events.reversed().prefix { $0.seq > earliest }.reversed(), from: &list)
+        }
+        guard list != pending else { return TranscriptChange() }
+        pending = list
         tailDirty = true
         return refreshRows()
     }
@@ -959,6 +983,14 @@ public struct TranscriptModel: Sendable {
             // line would be.
             out.append(derived("bg:", seq: lastSeq, turnId: nil, .background(BackgroundStatus(tasks: background))))
             starts.append(items.count)
+        }
+        // Mike's messages on their way, last: under the working line, as a
+        // queued one waits for that turn to end.
+        if workingLine {
+            for message in pending {
+                out.append(derived("p:" + message.id, seq: lastSeq, turnId: nil, message.row.content))
+                starts.append(items.count)
+            }
         }
         return (out, starts)
     }

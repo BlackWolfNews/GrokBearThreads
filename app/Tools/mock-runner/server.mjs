@@ -330,6 +330,12 @@ const startedAt = iso();
 // A restart waiting for threads (mock.restartPending): { when, reason?,
 // resumeThreadId?, requestedAt, waitingFor: string[] }.
 let pendingRestart;
+// A runner on a loaded Mac (mock.slow): `ms` holds threads.send,
+// threads.create and threads.update that long before they're handled, as
+// a stalled event loop does; `queueMs` answers threads.send at once but
+// starts its turn (and its user.message) that much later, as a message
+// queued behind a running turn is. Both 0 by default.
+let slow = { ms: 0, queueMs: 0 };
 // The runner's own update (protocol "Runner updates"), set by mock.updates.
 let updates = { state: 'idle', oldRunners: [] };
 
@@ -382,6 +388,9 @@ function onConnection(ws, request) {
 }
 
 async function handle(client, { id, method, params = {} }) {
+  if (slow.ms > 0 && ['threads.send', 'threads.create', 'threads.update'].includes(method)) {
+    await new Promise((resolve) => setTimeout(resolve, slow.ms));
+  }
   const result = await dispatch(client, method, params);
   if (id !== undefined && id !== null) reply(client, id, result ?? {});
   // Like the real runner: a client that says hello hears about a restart
@@ -500,7 +509,7 @@ async function dispatch(client, method, p) {
       // As the runner has it once the CLI starts a session (the app's
       // Finish setting up counts that as a login that works).
       t.summary.nativeSessionId ??= 'mock-session-' + t.summary.id;
-      setTimeout(() => fakeTurn(t.summary.id, p.text ?? '', p.images ?? [], turnId, undefined, extra), 10);
+      setTimeout(() => fakeTurn(t.summary.id, p.text ?? '', p.images ?? [], turnId, undefined, extra), 10 + slow.queueMs);
       return { turnId };
     }
     case 'threads.edit': {
@@ -981,6 +990,10 @@ async function dispatch(client, method, p) {
       return deviceList();
     }
     // Mock-only helpers for perf runs, demos and screenshots.
+    case 'mock.slow': {
+      slow = { ms: Math.max(0, Number(p.ms ?? 0)), queueMs: Math.max(0, Number(p.queueMs ?? 0)) };
+      return slow;
+    }
     case 'mock.restartPending': {
       // A restart waiting for threads, as `runner.restart` leaves one:
       // runner.status shows it and every client gets the notice. By default

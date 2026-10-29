@@ -211,6 +211,9 @@ final class TextRowCell: RowCellView {
     /// The pencil left of an editable message of Mike's, shown while the
     /// pointer is over the row.
     let edit = NSButton()
+    /// Left of a message still on its way to the runner: a spinner while
+    /// it's sent, a clock once it's queued behind the running turn.
+    let pendingMark = PendingMark()
     private var editable = false
     private var pointerInside = false
     /// Screenshots show the pencil without a real hover.
@@ -236,6 +239,8 @@ final class TextRowCell: RowCellView {
         edit.setTip("Edit this message and carry on from here")
         edit.setAccessibilityLabel("Edit message")
         addSubview(edit)
+        pendingMark.isHidden = true
+        addSubview(pendingMark)
     }
 
     required init?(coder: NSCoder) { fatalError() }
@@ -286,6 +291,7 @@ final class TextRowCell: RowCellView {
         images.isHidden = true
         textView.isHidden = render.text == nil
         editable = false
+        var pending: UserMessage.Pending?
 
         switch row.content {
         case .user(let message) where message.showsAsNote:
@@ -315,6 +321,15 @@ final class TextRowCell: RowCellView {
                 box.frame = bubble
                 box.set(fill: Theme.bubbleBackground, stroke: nil, radius: RowMetrics.bubbleRadius)
                 textView.place(bubble.insetBy(dx: RowMetrics.bubblePadH, dy: RowMetrics.bubblePadV))
+            }
+            pending = message.pending
+            if let state = message.pending {
+                // Where the pencil goes on a message that's landed.
+                let side = zoomed(22)
+                let left = render.text != nil ? box.frame.minX : images.frame.minX
+                let bottom = render.text != nil ? box.frame.maxY : images.frame.maxY
+                pendingMark.frame = NSRect(x: left - side - zoomed(6), y: bottom - side - zoomed(4), width: side, height: side)
+                pendingMark.show(state)
             }
             if message.editable {
                 // Left of the bubble (or of the pictures, with no text),
@@ -360,6 +375,10 @@ final class TextRowCell: RowCellView {
         }
 
         updateEdit()
+        // A message the runner hasn't shown yet is drawn faded.
+        let alpha: CGFloat = pending == nil ? 1 : 0.5
+        for view in [box, textView, images] as [NSView] where view.alphaValue != alpha { view.alphaValue = alpha }
+        if pending == nil, !pendingMark.isHidden { pendingMark.hide() }
 
         // Messages get the selection bar (Explain, Quote, Copy).
         switch row.content {
@@ -413,6 +432,51 @@ final class TextRowCell: RowCellView {
 
     override func updateSlices(force: Bool = false) {
         textView.updateSlice(force: force)
+    }
+}
+
+/// The mark left of a message still on its way, with a tip saying where
+/// it is: the spinner turns in the render server, so nothing redraws while
+/// a slow runner keeps it waiting.
+final class PendingMark: NSView {
+    private let spinner = SpinnerView()
+    private let clock = Symbols.makeView()
+    private(set) var state: UserMessage.Pending?
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        addSubview(spinner)
+        addSubview(clock)
+        setAccessibilityElement(true)
+        setAccessibilityRole(.image)
+    }
+
+    required init?(coder: NSCoder) { fatalError() }
+
+    override var isFlipped: Bool { true }
+
+    func show(_ state: UserMessage.Pending) {
+        isHidden = false
+        let side = zoomed(14)
+        let inset = (bounds.width - side) / 2
+        spinner.frame = NSRect(x: inset, y: inset, width: side, height: side)
+        clock.frame = bounds
+        spinner.color = Theme.quietText
+        Symbols.set(clock, "clock", size: 12, tint: Theme.quietText)
+        spinner.isHidden = state != .sending
+        clock.isHidden = state != .queued
+        if state == .sending { spinner.start() } else { spinner.stop() }
+        guard state != self.state else { return }
+        self.state = state
+        let words = state == .sending ? "Sending to the runner" : "Waiting for the current turn to finish"
+        setTip(words)
+        setAccessibilityLabel(words)
+    }
+
+    func hide() {
+        isHidden = true
+        spinner.stop()
+        state = nil
     }
 }
 

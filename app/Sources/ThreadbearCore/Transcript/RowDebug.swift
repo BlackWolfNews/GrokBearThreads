@@ -15,6 +15,12 @@ public enum RowDebug {
     public static func text(_ row: TranscriptRow) -> String {
         switch row.content {
         case .user(let message):
+            // One on its way says so, as its spinner or clock does.
+            if let pending = message.pending {
+                var plain = message
+                plain.pending = nil
+                return "(\(pending == .sending ? "sending" : "queued")) " + text(TranscriptRow(id: "", seq: 0, content: .user(plain)))
+            }
             if message.text.isEmpty { return message.images.count == 1 ? "1 image" : "\(message.images.count) images" }
             // A dump should say it wasn't Mike, as the transcript does.
             if message.isFromRunner { return "(sent by the runner) " + message.text }

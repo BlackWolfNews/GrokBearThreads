@@ -56,6 +56,14 @@ starts the next item ("2. " after "1. milk", "- " after "- milk"), and
 Shift-Return on an empty item ends the list. You can paste or drop images
 into the composer. Stop (⌘.) ends a turn that's running.
 
+A message shows in the thread as soon as you send it, faded, with a
+spinner beside it until the runner has it (a busy Mac can hold the runner
+up for a few seconds). A clock instead means it's waiting for the turn
+that's running to finish, and it starts its own turn then. If it can't be
+sent, it goes and its text is back in the composer. Starting a new thread
+keeps your message in the composer, greyed, with a spinner in place of
+Send, until the thread exists.
+
 ### Going back to an earlier message
 
 Hover over one of your own messages and click the pencil to change it. Its
