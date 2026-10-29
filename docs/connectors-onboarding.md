@@ -8,7 +8,7 @@ public repo so other people can run it easily.
 
 ## 1. Where things stand
 
-- **The gateway** (`mikecann/connectors`, private, `~/dev/me/connectors`) runs on Bruce
+- **The gateway** (public since 29 Oct as `mikecann/plugboard`, working copy `~/dev/me/connectors`) runs on Bruce
   behind `tailscale serve`. It signs in to each service once and gives every agent one
   MCP URL, with "ask Mike first" rules for sending and a call log. Since 29 Oct it has
   Notion, Sentry, Cloudflare, DeepWiki, and Gmail plus Google Calendar through Mike's own
