@@ -32,10 +32,10 @@ final class CodexTranscriptTests: XCTestCase {
             diff(6, "p1", "/w/site/styles.css", ["+.poster {}", "+.map {}"]),
             E.result(7, "p1"), E.text(8, "m1", "Done"), E.done(9),
         ])
-        guard case .tool(let tool)? = model.row(id: "t:p1")?.content else { return XCTFail("no tool row") }
+        guard case .tool(let tool)? = model.item(id: "t:p1")?.content else { return XCTFail("no tool row") }
         XCTAssertEqual(tool.diffs.map(\.path), ["/w/site/events.json", "/w/site/events.html", "/w/site/styles.css"])
         XCTAssertEqual(tool.diffs.last?.hunks.first?.lines, ["+.poster {}", "+.map {}"], "the repeated path replaced its diff")
-        XCTAssertEqual(model.row(id: "t:p1")?.kind, .diff)
+        XCTAssertEqual(model.item(id: "t:p1")?.kind, .diff)
         // The Edited files card lists and counts all three.
         guard case .changes(let card)? = model.row(id: "cf:t1")?.content else { return XCTFail("no card") }
         XCTAssertEqual(card.title, "Edited 3 files")
@@ -49,7 +49,7 @@ final class CodexTranscriptTests: XCTestCase {
         let model = TranscriptModel(events: [
             E.user(1, "Go"), E.event(2, "reasoning", ["itemId": "r1", "text": "Editing the three files."]), patchCall(3),
             diff(4, "p1", "/w/site/events.json", ["+a"]), diff(5, "p1", "/w/site/events.html", ["+b"]), diff(6, "p1", "/w/site/styles.css", ["+c"]),
-            E.result(7, "p1"), E.text(8, "m1", "Done"), E.done(9),
+            E.result(7, "p1"), E.text(8, "m1", "Done"),
         ])
         guard case .group(let group)? = model.rows.first(where: { $0.kind == .group })?.content else { return XCTFail("no group") }
         XCTAssertEqual(group.summary, "Edited 3 files")
@@ -64,7 +64,7 @@ final class CodexTranscriptTests: XCTestCase {
             E.call(2, "c1", name: "Edit", kind: "edit", title: "Edit a.swift", input: ["file_path": "/a.swift", "old_string": "let a = 1", "new_string": "let a = 2"]),
             E.result(3, "c1"), E.done(4),
         ])
-        guard case .tool(let tool)? = model.row(id: "t:c1")?.content else { return XCTFail() }
+        guard case .tool(let tool)? = model.item(id: "t:c1")?.content else { return XCTFail() }
         XCTAssertTrue(tool.diffs.isEmpty)
         XCTAssertEqual(tool.effectiveDiffs.first?.hunks.first?.lines, ["-let a = 1", "+let a = 2"])
     }
@@ -83,10 +83,10 @@ final class CodexTranscriptTests: XCTestCase {
         let before = model.rows.map(\.id)
         let footer = model.indexOf(id: "f:t1")
         _ = model.apply([E.event(5, "tool.result", ["itemId": "b1", "ok": true, "text": "built in 8s", "truncated": false, "images": []], turn: nil)])
-        guard case .tool(let tool)? = model.row(id: "t:b1")?.content else { return XCTFail("no row") }
+        guard case .tool(let tool)? = model.item(id: "t:b1")?.content else { return XCTFail("no row") }
         XCTAssertTrue(tool.isFinished)
         XCTAssertEqual(tool.result?.text, "built in 8s")
-        XCTAssertEqual(model.row(id: "t:b1")?.turnId, "t1", "still in its turn")
+        XCTAssertEqual(model.item(id: "t:b1")?.turnId, "t1", "still in its turn")
         XCTAssertEqual(model.rows.map(\.id), before, "no row moved or appeared")
         XCTAssertEqual(model.indexOf(id: "f:t1"), footer)
         XCTAssertNil(model.rows.first { $0.kind == .working }, "nothing looks busy")
@@ -106,12 +106,15 @@ final class CodexTranscriptTests: XCTestCase {
             E.result(7, "ig2", text: "Another", images: [image]),
             E.text(8, "m1", "Here they are"), E.done(9),
         ])
-        // Images end a run of work, so each tool is a line of its own here.
-        let summaries = ["t:ig1", "t:v1", "t:ig2"].compactMap { id in model.row(id: id).map { WorkSummary.describe([$0]).text } }
+        let summaries = ["t:ig1", "t:v1", "t:ig2"].compactMap { id in model.item(id: id).map { WorkSummary.describe([$0]).text } }
         XCTAssertEqual(summaries, ["Made an image", "Viewed an image", "Made an image"])
+        // The pictures it made are the answer, so they stay out of the
+        // finished turn's line of work; one it only looked at folds away.
         guard case .images(_, _, let generated)? = model.row(id: "i:ig1")?.content else { return XCTFail("no image row") }
         XCTAssertTrue(generated, "a generated image is shown larger")
-        guard case .images(_, _, let viewed)? = model.row(id: "i:v1")?.content else { return XCTFail("no image row") }
+        XCTAssertNotNil(model.row(id: "i:ig2"))
+        XCTAssertNil(model.row(id: "i:v1"))
+        guard case .images(_, _, let viewed)? = model.item(id: "i:v1")?.content else { return XCTFail("no image row") }
         XCTAssertFalse(viewed)
         let rows = [
             TranscriptRow(id: "t:a", seq: 1, content: .tool(ToolItem(itemId: "a", call: ToolCall(itemId: "a", name: "image_generation", kind: .image, title: "Generate image"),

@@ -72,7 +72,8 @@ final class NeedsYouTests: XCTestCase {
             E.result(6, "c2", text: "Noted: this thread is done."),
             done(7, turn: "t1", needs: "nothing"),
         ])
-        XCTAssertNotNil(model.row(id: "t:c1"), "the refused call is still shown")
+        guard case .group(let work)? = model.row(id: "g:t:c1")?.content else { return XCTFail("the turn's line of work") }
+        XCTAssertEqual(work.memberIds, ["t:c1"], "the refused call is in the turn's work; the taken one isn't shown")
         XCTAssertNil(model.row(id: "t:c2"))
         XCTAssertEqual(model.rows.last?.id, "ak:7")
         XCTAssertEqual(card(model, "ak:7")?.isDone, true)

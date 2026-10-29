@@ -186,8 +186,9 @@ final class RowDebugTests: XCTestCase {
         let model = TranscriptModel(events: events)
         let group = try XCTUnwrap(model.rows.first { $0.kind == .group })
         guard case .group(let members) = group.content else { return XCTFail() }
-        XCTAssertEqual(members.memberIds, ["r:r1", "t:c1", "ap:ap1"])
-        XCTAssertEqual(model.sourceSeqs(of: group.id), [4, 5, 6, 7, 8, 9])
+        // A finished turn's one line of work: its plan too.
+        XCTAssertEqual(members.memberIds, ["p:3", "r:r1", "t:c1", "ap:ap1"])
+        XCTAssertEqual(model.sourceSeqs(of: group.id), [3, 4, 5, 6, 7, 8, 9, 10])
         XCTAssertEqual(model.sourceSeqs(of: "cf:t1"), [5, 8, 9])
     }
 

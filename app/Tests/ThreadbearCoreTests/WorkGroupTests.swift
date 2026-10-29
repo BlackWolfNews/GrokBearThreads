@@ -33,8 +33,31 @@ final class WorkGroupTests: XCTestCase {
     // MARK: Grouping rules
 
     func testARunOfOneIsShownAsItself() {
-        let model = TranscriptModel(events: [E.user(1, "Go"), E.call(2, "c1"), E.result(3, "c1"), E.text(4, "m1", "Done"), E.done(5)])
-        XCTAssertEqual(model.rows.map(\.id), ["u:1", "t:c1", "a:m1", "f:t1"])
+        let model = TranscriptModel(events: [E.user(1, "Go"), E.call(2, "c1"), E.result(3, "c1"), E.text(4, "m1", "Done")])
+        XCTAssertEqual(Array(model.rows.map(\.id).prefix(3)), ["u:1", "t:c1", "a:m1"])
+    }
+
+    /// A finished turn is Mike's message, one line of work with everything
+    /// the agent did, its reply and its cards, like Codex desktop (Mike,
+    /// 29 Oct): its progress notes fold away too.
+    func testAFinishedTurnFoldsAllItsWorkIntoOneLine() {
+        let model = TranscriptModel(events: [
+            E.user(1, "Go"), E.text(2, "m0", "Looking."), E.call(3, "c1"), E.result(4, "c1"),
+            E.text(5, "m1", "Found it, fixing."), E.call(6, "c2"), E.result(7, "c2"), E.text(8, "m2", "Fixed."), E.done(9),
+        ])
+        XCTAssertEqual(model.rows.map(\.id), ["u:1", "g:a:m0", "a:m2", "f:t1"])
+        guard case .group(let group)? = model.row(id: "g:a:m0")?.content else { return XCTFail("a group") }
+        XCTAssertEqual(group.memberIds, ["a:m0", "t:c1", "a:m1", "t:c2"])
+        XCTAssertEqual(group.summary, "Worked for 4s")
+        // Opening it shows everything, in order, above the reply.
+        var open = model
+        _ = open.setExpanded("g:a:m0", true)
+        XCTAssertEqual(open.rows.map(\.id), ["u:1", "g:a:m0", "a:m0", "t:c1", "a:m1", "t:c2", "a:m2", "f:t1"])
+        // Live, the turn's lines become the one as it finishes.
+        var live = TranscriptModel(events: Array(model.events.dropLast()))
+        var table = live.rows.map(\.id)
+        Self.replay(live.apply([E.done(9)]), onto: &table, model: live)
+        XCTAssertEqual(live.rows.map(\.id), model.rows.map(\.id))
     }
 
     func testMessagesCardsPlansImagesAndErrorsEndARun() {
@@ -531,7 +554,7 @@ final class WorkGroupTests: XCTestCase {
             ["oldStart": 40, "oldLines": 1, "newStart": 40, "newLines": 2, "lines": ["-a", "+b", "+c"]],
         ]])])
         Self.replay(change, onto: &table, model: model)
-        XCTAssertEqual(change.updated, [1, 3], "the edit row and its turn's card")
+        XCTAssertEqual(change.updated, [3], "its turn's card; the edit is folded in the turn's line")
         XCTAssertEqual(model.rows.suffix(3).map(\.version), after, "the next turn's rows are untouched")
         guard case .changes(let card)? = model.row(id: "cf:t1")?.content else { return XCTFail() }
         XCTAssertEqual(card.files.first?.added, 2)

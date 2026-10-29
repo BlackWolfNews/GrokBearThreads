@@ -858,8 +858,46 @@ public struct TranscriptModel: Sendable {
         return Self.isWork(row)
     }
 
-    /// The first item of the run of work that item `i` is in (or `i`).
+    /// The items of the finished turn item `i` is in (a turn's items are
+    /// together). A finished turn shows as Mike's messages, one line of
+    /// work, its reply and its cards, like Codex desktop (Mike, 29 Oct):
+    /// the agent's notes, thinking and tools all fold into that line.
+    private func doneTurn(_ i: Int) -> Range<Int>? {
+        guard i >= 0, i < items.count, let turn = items[i].turnId, completedTurns.contains(turn) else { return nil }
+        var low = i
+        while low > 0, items[low - 1].turnId == turn { low -= 1 }
+        var high = i + 1
+        while high < items.count, items[high].turnId == turn { high += 1 }
+        return low..<high
+    }
+
+    /// A finished turn's reply: its summary from end_turn, else its last
+    /// message.
+    private func replyIndex(in turn: Range<Int>) -> Int? {
+        func message(_ k: Int, summary: Bool) -> Bool {
+            guard case .assistant(let text) = items[k].content else { return false }
+            return !summary || text.isSummary
+        }
+        return turn.last { message($0, summary: true) } ?? turn.last { message($0, summary: false) }
+    }
+
+    /// What stays out of a finished turn's line of work: Mike's messages,
+    /// the reply, errors, reviews waiting on him, pictures the agent made
+    /// (the poster it was asked for is the answer), the footer and the card.
+    private func staysOut(_ k: Int, reply: Int?) -> Bool {
+        if k == reply { return true }
+        switch items[k].content {
+        case .user, .error, .footer, .asks, .review: return true
+        case .images(_, _, let generated): return generated
+        case .tool(let tool): return Self.isTakenEndTurn(tool)
+        default: return false
+        }
+    }
+
+    /// The first item of the run of work that item `i` is in (or `i`); a
+    /// finished turn is one run.
     private func runStart(_ i: Int) -> Int {
+        if let turn = doneTurn(i) { return turn.lowerBound }
         guard i >= 0, i < items.count, isWork(items[i]) else { return max(0, i) }
         let turn = items[i].turnId
         var j = i
@@ -869,6 +907,7 @@ public struct TranscriptModel: Sendable {
 
     /// One past the last item of the run that item `i` is in (or `i + 1`).
     private func runEnd(_ i: Int) -> Int {
+        if let turn = doneTurn(i) { return turn.upperBound }
         guard i >= 0, i < items.count, isWork(items[i]) else { return min(items.count, i + 1) }
         let turn = items[i].turnId
         var j = i + 1
@@ -881,6 +920,11 @@ public struct TranscriptModel: Sendable {
     public func workStep(_ quote: String, turn turnId: String) -> (rowId: String, groupId: String?)? {
         let turnItems = items.lazy.filter { $0.turnId == turnId }
         guard let row = WorkLinks.step(for: quote, in: turnItems), let i = itemIndex[row.id] else { return nil }
+        if let turn = doneTurn(i) {
+            let reply = replyIndex(in: turn)
+            if staysOut(i, reply: reply) { return (row.id, nil) }
+            return (row.id, turn.first { !staysOut($0, reply: reply) }.map { "g:" + items[$0].id })
+        }
         let start = runStart(i)
         return (row.id, runEnd(i) - start > 1 ? "g:" + items[start].id : nil)
     }
@@ -965,6 +1009,49 @@ public struct TranscriptModel: Sendable {
         var i = start
         while i < end {
             let item = items[i]
+            if let turn = doneTurn(i), i == turn.lowerBound {
+                // Every row of a finished turn starts at its first item, so
+                // a change anywhere in it rebuilds it whole (runStart).
+                let reply = replyIndex(in: turn)
+                let folded = turn.filter { !staysOut($0, reply: reply) }
+                for k in turn {
+                    let row = items[k]
+                    if k == folded.first {
+                        let id = "g:" + row.id
+                        let open = expanded.contains(id)
+                        var group = WorkGroup(members: ArraySlice(folded.map { items[$0] }), isExpanded: open, isLive: false)
+                        if let footer = turn.last(where: { if case .footer = items[$0].content { return true }; return false }),
+                           case .footer(let done) = items[footer].content, done.durationMs > 0 {
+                            group.summary = "Worked for " + RelativeTime.duration(milliseconds: done.durationMs)
+                        }
+                        out.append(derived(id, seq: row.seq, turnId: row.turnId, .group(group)))
+                        starts.append(turn.lowerBound)
+                        if open {
+                            for m in folded {
+                                var member = items[m]
+                                member.inGroup = true
+                                out.append(member)
+                                starts.append(turn.lowerBound)
+                            }
+                        }
+                    } else if !staysOut(k, reply: reply) {
+                        continue
+                    } else if case .asks(let card) = row.content, !card.isOpen {
+                        continue
+                    } else if case .tool(let tool) = row.content, Self.isTakenEndTurn(tool) {
+                        continue
+                    } else {
+                        if case .footer = row.content, let card = changedFiles(turn: row.turnId ?? "") {
+                            out.append(derived("cf:" + card.turnId, seq: row.seq, turnId: row.turnId, .changes(card)))
+                            starts.append(turn.lowerBound)
+                        }
+                        out.append(row)
+                        starts.append(turn.lowerBound)
+                    }
+                }
+                i = turn.upperBound
+                continue
+            }
             if isWork(item) {
                 let runEnd = runEnd(i)
                 // A summarized turn's one message still folds away: the

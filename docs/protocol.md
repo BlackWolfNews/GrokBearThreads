@@ -1276,7 +1276,12 @@ A turn the agent finished can say whether Mike has to do anything, so
   reply everywhere: the preview, notifications, the phone, the website,
   `read_thread`. The Mac app folds the turn's other `assistant.text`
   into its working, so the turn reads as one line of work, the bullets,
-  then the Needs you card. Text after the call is dropped as before
+  then the Needs you card. Once any turn is over (`turn.completed`), the
+  app shows it as Mike's messages, one "Worked for 2m 13s" line holding
+  everything else, its reply (the summary, else its last
+  `assistant.text`), errors, a review still waiting, pictures the agent
+  made, the changes card, the footer and the card (Mike, 29 Oct: like
+  Codex desktop). While it runs, its work shows as it always has. Text after the call is dropped as before
   (Claude), and Codex's final answer, which still follows its `end_turn`,
   folds away like the rest and doesn't take over the preview. Up to 8
   bullets of up to 400 characters are kept; a leading `-`, `*` or `•` is

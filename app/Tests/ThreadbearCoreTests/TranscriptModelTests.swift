@@ -52,7 +52,7 @@ final class TranscriptModelTests: XCTestCase {
         XCTAssertEqual(model.rows.map(\.id), ["u:2", "a:m1", "f:t1", "w:t2"])
         XCTAssertTrue(change.removed.contains(3))
         // That turn ends with the other still out: back to the background line.
-        change = model.apply([E.text(6, "m2", "Page B is done."), E.done(7, turn: "t2")])
+        change = model.apply([E.text(6, "m2", "Page B is done.").withTurn("t2"), E.done(7, turn: "t2")])
         XCTAssertEqual(model.rows.map(\.id), ["u:2", "a:m1", "f:t1", "a:m2", "f:t2", "bg:"])
         // All done and read: it goes.
         change = model.setBackground([])
@@ -218,12 +218,13 @@ final class TranscriptModelTests: XCTestCase {
         // (The turn's end is on the newer page too; a page that starts
         // mid-turn with no end would be a turn still running.)
         var model = TranscriptModel(events: [E.result(5, "c1", text: "ok"), E.text(6, "m1", "Done"), E.done(7)])
-        XCTAssertEqual(model.rows.map(\.id), ["t:c1", "a:m1", "f:t1"])
+        XCTAssertEqual(model.rows.map(\.id), ["g:t:c1", "a:m1", "f:t1"])
         let added = model.prepend(olderEvents: [E.user(3, "Run it"), E.call(4, "c1", title: "make")])
-        XCTAssertEqual(model.rows.map(\.id), ["u:3", "t:c1", "a:m1", "f:t1"])
+        XCTAssertEqual(model.rows.map(\.id), ["u:3", "g:t:c1", "a:m1", "f:t1"])
         XCTAssertEqual(added.added, 1)
-        XCTAssertEqual(added.changedIds, ["t:c1"])
-        guard case .tool(let tool) = model.rows[1].content else { return XCTFail() }
+        // The call it merged with is folded in the turn's line, which reads the same.
+        XCTAssertEqual(added.changedIds, [])
+        guard case .tool(let tool)? = model.item(id: "t:c1")?.content else { return XCTFail() }
         XCTAssertEqual(tool.title, "make")
         XCTAssertEqual(tool.result?.text, "ok")
         XCTAssertEqual(model.firstSeq, 3)
@@ -341,8 +342,12 @@ final class TranscriptModelTests: XCTestCase {
         // result the older page has some text, which lands below t:c1.
         var model = TranscriptModel(events: [E.result(6, "c1"), E.text(7, "m1", "Done"), E.done(8)])
         let result = model.prepend(olderEvents: [E.call(4, "c1"), E.text(5, "m0", "Running it")])
-        XCTAssertEqual(model.rows.map(\.id), ["t:c1", "a:m0", "a:m1", "f:t1"])
-        XCTAssertFalse(result.keepsOrder)
+        // Both land in the finished turn's line of work, so what shows keeps
+        // its order; open, the line lists them in their order.
+        XCTAssertEqual(model.rows.map(\.id), ["g:t:c1", "a:m1", "f:t1"])
+        XCTAssertTrue(result.keepsOrder)
+        guard case .group(let work)? = model.row(id: "g:t:c1")?.content else { return XCTFail() }
+        XCTAssertEqual(work.memberIds, ["t:c1", "a:m0"])
     }
 
     func testPrependWithTheCallLastOnTheOlderPageKeepsOrder() {

@@ -69,3 +69,11 @@ thread links open on click. The lit-up step fades after a few seconds
 rather than waiting for a click elsewhere, and the group stays open.
 A real Opus turn and a real Codex turn through a dev runner both wrote
 their summaries in end_turn unprompted by anything but its description.
+
+## One line for the whole turn (29 Oct, later)
+
+Seeing it live, Mike wanted all of a finished turn's working under one
+expander line, like Codex desktop and like a tool row, not split into
+several groups by progress notes, single tool rows and thinking. A
+finished turn is now Mike's message, "Worked for 2m 13s ›", the reply,
+then the cards. Pictures the agent made stay out of the fold.
