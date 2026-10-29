@@ -140,7 +140,10 @@ function notOurBug(msg: string, extra: Record<string, unknown> | undefined): boo
 // once-an-hour memory, for the tests.
 export function logLineEvent(level: LogLevel, msg: string, extra: Record<string, unknown> | undefined, now = Date.now()) {
   if (REPORTED_AS_EXCEPTIONS.has(msg) || notOurBug(msg, extra)) return null;
-  const title = msg.replace(UUID, '<id>');
+  // One message can cover many causes: 'request failed' is logged for every
+  // RPC method, so the method goes in the title to keep their issues apart.
+  const method = typeof extra?.method === 'string' ? extra.method : undefined;
+  const title = (method ? `${msg} (${method})` : msg).replace(UUID, '<id>');
   const key = `${level} ${title}`;
   const last = lastSent.get(key);
   if (last !== undefined && now - last < SAME_MESSAGE_MS) return null;

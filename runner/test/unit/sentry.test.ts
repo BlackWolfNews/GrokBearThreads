@@ -66,3 +66,11 @@ test('model limits and Convex sync network blips are never sent', () => {
 test('uncaught exceptions are left to reportException, which has the stack', () => {
   assert.equal(logLineEvent('error', 'uncaught exception', { error: 'boom' }), null);
 });
+
+test('the RPC method goes in the title, so different requests failing are separate issues', () => {
+  const now = 3_000_000;
+  const a = logLineEvent('error', 'request failed', { method: 'panels.convexKey', error: 'x' }, now);
+  const b = logLineEvent('error', 'request failed', { method: 'runners.list', error: 'fetch failed' }, now);
+  assert.equal(a?.title, 'request failed (panels.convexKey)');
+  assert.notDeepEqual(a?.fingerprint, b?.fingerprint);
+});
