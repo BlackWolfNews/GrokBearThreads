@@ -47,8 +47,8 @@ final class DecisionsTests: XCTestCase {
         XCTAssertEqual(Decisions.choices(for: Ask(action: "Reply \"go\" when the \"Export\" step is done")), ["go"])
     }
 
-    /// The card shows an ask as one paragraph, the way the agent would
-    /// have written it in its message: the action, then the why.
+    /// The card shows an ask the way the agent would have written it in
+    /// its message: the action, then the why.
     func testAParagraphIsTheActionThenTheWhy() {
         XCTAssertEqual(Decisions.paragraph(Ask(action: "Pick a layout for the card", why: "Three mockups are in the review window.")),
                        "Pick a layout for the card. Three mockups are in the review window.")
@@ -62,9 +62,20 @@ final class DecisionsTests: XCTestCase {
         // No why, or an empty one: just the action.
         XCTAssertEqual(Decisions.paragraph(Ask(action: "Log in to Hugging Face")), "Log in to Hugging Face")
         XCTAssertEqual(Decisions.paragraph(Ask(action: "Log in", why: "  ")), "Log in")
-        // One paragraph, even when the agent broke a line.
+        // The why's line breaks stay, so a list in it draws as one (Mike, 29
+        // Oct: four questions run together were hard to read). The action
+        // is a sentence, so its breaks still go.
+        XCTAssertEqual(Decisions.paragraph(Ask(action: "Answer the\nfour questions", why: "My picks are in brackets:\n- Two or more logins? (yes)\n- On this Mac? (yes)\n")),
+                       "Answer the four questions. My picks are in brackets:\n- Two or more logins? (yes)\n- On this Mac? (yes)")
         XCTAssertEqual(Decisions.paragraph(Ask(action: "Check the build", why: "It failed once.\n\nThe log has why.")),
-                       "Check the build. It failed once. The log has why.")
+                       "Check the build. It failed once.\n\nThe log has why.")
+    }
+
+    /// Markdown that starts an ask's text past a marker ("2. ", "- [ ] ")
+    /// keeps the lines after the first in the same list item.
+    func testContinuedLinesStayInTheListItem() {
+        XCTAssertEqual(Decisions.continued("Picks:\n- one\n\n- two", under: "2. "), "Picks:\n   - one\n\n   - two")
+        XCTAssertEqual(Decisions.continued("One line", under: "- [ ] "), "One line")
     }
 
     func testDecodesLinksAndWhatTheyOpen() throws {

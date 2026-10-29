@@ -1207,6 +1207,9 @@ A turn the agent finished can say whether Mike has to do anything, so
   and Something else. A `where` goes on a quiet line under the paragraph.
   Mike found a bold title over a small grey reason backwards (28 Oct):
   the reason is part of the ask, in the agent's own words, at full size.
+  The action's line breaks go, as it's a sentence, but the why keeps
+  its own, so a list of questions in it draws as a list (29 Oct: four
+  questions run together in one line were hard to read).
   The paragraph is markdown, and the tool's description asks for the
   words that name a link's target to link to the same place (29 Oct), so
   Mike can open it from the sentence as well as the button. Resting the

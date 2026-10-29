@@ -12,17 +12,29 @@ public enum Decisions {
         return impliedChoices(ask.action)
     }
 
-    /// An ask as the one paragraph the card shows: its action, then its
-    /// why, as the agent would have written it under "What I need from
-    /// you" in its message. Mike found a bold title over a small grey
-    /// reason backwards (28 Oct): you explain, then ask, in the same
-    /// voice. An action with no full stop gets one, so it doesn't run into
-    /// the why, and line breaks go, as it's one paragraph.
+    /// An ask as the markdown the card shows: its action, then its why, as
+    /// the agent would have written it under "What I need from you" in its
+    /// message. Mike found a bold title over a small grey reason backwards
+    /// (28 Oct): you explain, then ask, in the same voice. An action with
+    /// no full stop gets one, so it doesn't run into the why. The action is
+    /// a sentence, so its line breaks go; the why keeps its own, so a list
+    /// of questions in it draws as a list rather than one run-on line
+    /// (Mike, 29 Oct).
     public static func paragraph(_ ask: Ask) -> String {
         let action = oneLine(ask.action)
-        let why = oneLine(ask.why ?? "")
+        let why = (ask.why ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         guard !why.isEmpty else { return action }
         return (endsSentence(action) ? action : action + ".") + " " + why
+    }
+
+    /// Text that will follow a list marker (`under`, like "2. " or
+    /// "- [ ] "), with its later lines indented past the marker so a list
+    /// or paragraph in it stays inside that item rather than ending it.
+    public static func continued(_ text: String, under marker: String) -> String {
+        let pad = String(repeating: " ", count: marker.count)
+        return text.components(separatedBy: "\n").enumerated()
+            .map { $0.offset == 0 || $0.element.isEmpty ? $0.element : pad + $0.element }
+            .joined(separator: "\n")
     }
 
     private static func oneLine(_ text: String) -> String {

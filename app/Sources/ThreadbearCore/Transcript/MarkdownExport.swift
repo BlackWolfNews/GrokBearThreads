@@ -83,7 +83,7 @@ public enum MarkdownExport {
             }.joined(separator: "\n")
         case .asks(let card):
             return "**What I need from you**\n\n" + card.asks.enumerated().map { index, ask in
-                "- [\(card.ticked.contains(index) ? "x" : " ")] \(Decisions.paragraph(ask))" + (ask.where_.map { " (\($0))" } ?? "")
+                "- [\(card.ticked.contains(index) ? "x" : " ")] \(Decisions.continued(Decisions.paragraph(ask), under: "- [ ] "))" + (ask.where_.map { " (\($0))" } ?? "")
             }.joined(separator: "\n")
         case .footer(let completion):
             var text = "_\(RelativeTime.duration(milliseconds: completion.durationMs))"

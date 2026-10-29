@@ -218,7 +218,7 @@ function others() {
       reply: 'The Settings window is in, with the key field, the daily budget and private folders. The runner keeps the key in `secrets/openrouter-key` and the app only ever hears whether one is set.\n\nI tested it with a fake key. To see a real title come back I need a real one.',
       needs: 'you', asks: [
         { action: 'Paste your OpenRouter key into Settings and turn on titles', where: 'Threadbear › Settings › Models', reply: 'done' },
-        { action: 'Say whether a $1 daily budget is right, or give me a number' },
+        { action: 'Check the two budget settings', why: 'My picks are in brackets:\n- Is a $1 daily budget right? (yes)\n- Should titles stop for the day when it runs out? (yes)' },
       ] },
   ] });
   // Done: finished, unread, and it said nothing waits on Mike, so it's in

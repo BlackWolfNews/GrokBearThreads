@@ -8,9 +8,9 @@
   "status": "idle",
   "live": false,
   "needsYou": true,
-  "createdAt": "2026-10-27T06:42:10.753Z",
-  "updatedAt": "2026-10-27T07:42:10.753Z",
-  "lastActivityAt": "2026-10-27T07:42:10.753Z",
+  "createdAt": "2026-10-28T23:54:46.333Z",
+  "updatedAt": "2026-10-29T00:54:46.333Z",
+  "lastActivityAt": "2026-10-29T00:54:46.333Z",
   "preview": "The Settings window is in, with the key field, the daily budget and private folders. The runner keeps the key in `secrets/openrouter-key` an",
   "lastSeq": 6,
   "lastSeenSeq": 5,
@@ -22,7 +22,8 @@
       "reply": "done"
     },
     {
-      "action": "Say whether a $1 daily budget is right, or give me a number"
+      "action": "Check the two budget settings",
+      "why": "My picks are in brackets:\n- Is a $1 daily budget right? (yes)\n- Should titles stop for the day when it runs out? (yes)"
     }
   ],
   "asksSeq": 6

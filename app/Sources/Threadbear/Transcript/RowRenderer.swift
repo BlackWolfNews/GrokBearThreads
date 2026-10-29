@@ -1083,14 +1083,28 @@ enum RowRenderer {
         // ("- " or "2. ") are the ask's words, not markdown.
         if text.range(of: #"^(#{1,6}\s|>|[-+*]\s|\d{1,9}[.)]\s|```|~~~|<)"#, options: .regularExpression) != nil { text = "\\" + text }
         let paragraph = NSMutableAttributedString(string: "\n", attributes: Theme.bodyAttributes)
-        paragraph.append(MarkdownRenderer.renderBlock(number.map { "\($0). " + text } ?? text))
-        // A message's paragraph spacing, swapped for the card's: 12 under
-        // what's above, close over its buttons.
-        let base = paragraph.length > 1 ? paragraph.attribute(.paragraphStyle, at: 1, effectiveRange: nil) as? NSParagraphStyle : nil
-        let style = (base ?? NSParagraphStyle.default).mutableCopy() as! NSMutableParagraphStyle
-        style.paragraphSpacingBefore = zoomed(12)
-        style.paragraphSpacing = zoomed(2)
-        paragraph.addAttribute(.paragraphStyle, value: style, range: NSRange(location: 0, length: paragraph.length))
+        paragraph.append(MarkdownRenderer.renderBlock(number.map { Decisions.continued("\($0). " + text, under: "\($0). ") } ?? text))
+        // A message's paragraph spacing, swapped for the card's at the ends:
+        // 12 under what's above, close over its buttons. The paragraphs and
+        // list items between keep the message's, so a list in the why
+        // looks the way it would in the message.
+        let ns = paragraph.string as NSString
+        func style(at location: Int) -> NSMutableParagraphStyle {
+            let base = location < ns.length ? paragraph.attribute(.paragraphStyle, at: location, effectiveRange: nil) as? NSParagraphStyle : nil
+            return (base ?? NSParagraphStyle.default).mutableCopy() as! NSMutableParagraphStyle
+        }
+        let first = ns.paragraphRange(for: NSRange(location: min(1, ns.length), length: 0))
+        let last = ns.paragraphRange(for: NSRange(location: ns.length - 1, length: 0))
+        let opening = style(at: 1)
+        opening.paragraphSpacingBefore = zoomed(12)
+        if first == last { opening.paragraphSpacing = zoomed(2) }
+        // From 0: the leading line break takes the first paragraph's style.
+        paragraph.addAttribute(.paragraphStyle, value: opening, range: NSRange(location: 0, length: NSMaxRange(first)))
+        if first != last {
+            let closing = style(at: last.location)
+            closing.paragraphSpacing = zoomed(2)
+            paragraph.addAttribute(.paragraphStyle, value: closing, range: last)
+        }
         return paragraph
     }
 
