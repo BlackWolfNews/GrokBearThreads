@@ -28,9 +28,34 @@ Two pieces, both on Mike's MacBook to start:
    AppKit `NSTableView` transcript. It's a client of the runner and holds no
    agent state of its own.
 
-Later steps (not in this build): Codex adapter, Token Stats usage in the app,
-CLI auto-updates, thread summaries to Convex plus a Threads tab and push in
-Quick Ask, Tinker Desk as a second runner, cloud sandboxes.
+## Build order and where it stands (29 Oct 2026)
+
+The order Mike agreed on 26 Oct, and what became of each step:
+
+- **Steps 1 to 3: runner and Mac app v1**, then the design pass and the
+  dev tools (`docs/design-pass.md`, `docs/dev-tools.md`). Done 26 to 27 Oct.
+- **Step 4: Codex threads, every login, usage in the app, CLI
+  auto-updates** (`docs/step4-plan.md`). Done 27 Oct. Pools
+  (`docs/pools-plan.md`) came on top: the runner picks the login per turn.
+- **Step 5: Convex and the phone** (`docs/convex-backend.md`): thread
+  summaries, recent messages, approvals, projects and schedules mirrored to
+  Convex, phone commands, push when a thread needs Mike. Done 28 Oct, and
+  bigger than planned: Threadbear got its own iPhone app (1.0 in App
+  Review) and a website with sharing, rather than a Threads tab in Quick
+  Ask.
+- **Step 6: Tinker Desk as a second runner, then cloud sandboxes.** Not
+  started. Cloud sandboxes were only ever this line; nothing is designed.
+
+Much was added outside this order: schedules, hibernate, projects and the
+librarian, the dockable window (BearDock), patches and panels, the asks card,
+handovers for runner and app restarts, message editing and sharing. Their
+docs are in `docs/` and the contracts in `docs/protocol.md`.
+
+## Step 6: Tinker Desk as a second runner
+
+Draft design in `docs/step6-plan.md` (29 Oct), with open questions for
+Mike. Convex already handles several runners (`docs/convex-backend.md`);
+the gap is the Mac app, which talks to one runner on this Mac.
 
 ## Behaviour Mike asked for
 
@@ -175,7 +200,29 @@ On the M5 and Tinker Desk (M2, 16 GB):
 `app/Tools/fixture-export` turns real Claude JSONL into event fixtures
 (gitignored, they contain private text) for these tests.
 
+`app/Tools/perf-run.sh` measures all of these against the mock runner and
+prints which bars are met.
+
+Results so far:
+
+- **26 Oct, M5, v1.** Every bar met but memory: 253 MB one second after
+  loading 20 threads (105 MB of it graphics), 152 MB settled.
+- **29 Oct, Tinker Desk, main at 10fedd8** (after the dock, panels and
+  link peeks). Every bar met but the first open after launch: 185 ms for
+  the biggest thread (later first opens 74 to 95 ms). Switches p95 45 ms,
+  fling max frame gap 53 ms with no jumps, streaming scrolled up 9.4% of a
+  core, memory 164 MB (174 MB peak) on its 1080p display.
+- The M5 hasn't been measured since 26 Oct: on 29 Oct its load average was
+  over 200 from other threads' builds, which would skew every number.
+
+Two things to know when comparing runs. The reducer now folds more events
+into each row, so the "4,100-row" fixture is about 2,450 rows (4,454 on 26
+Oct). And on Tinker Desk the run needs `caffeinate -u -d`: with the display
+asleep the app gets no frames and the fling waits forever.
+
 ## Trial
 
-Use it next to T3 for a week. If the transcript isn't nicer than T3's, stop:
-the shared memory and the Connectors gateway are worth having anyway.
+Done: by 29 Oct Mike was running his threads in Threadbear. The original
+test was to use it next to T3 for a week and stop if the transcript wasn't
+nicer than T3's, since the shared memory and the Connectors gateway were
+worth having anyway.
