@@ -20,9 +20,13 @@ protocol RowCellDelegate: AnyObject {
     /// A work: or thread: link in row `rowId`'s text (WorkLinks): open the
     /// step in that turn's working, or the other thread.
     func openThreadLink(_ url: URL, fromRow rowId: String)
+    /// The runner the transcript's thread lives on when it isn't this
+    /// Mac's ("bruce"): its pictures are files on that Mac.
+    var awayName: String? { get }
 }
 
 extension RowCellDelegate {
+    var awayName: String? { nil }
     func openReview(_ review: DesignReview) {}
     func editMessage(rowId: String) {}
     func openThreadLink(_ url: URL, fromRow rowId: String) {}
@@ -314,6 +318,7 @@ final class TextRowCell: RowCellView {
                 let area = floor(width * RowMetrics.bubbleShare)
                 images.isHidden = false
                 images.frame = NSRect(x: x + width - area, y: y, width: area, height: render.imageAreaHeight)
+                images.awayName = delegate?.awayName
                 images.show(paths: message.images.map(\.path), frames: render.imageFrames)
                 y += render.imageAreaHeight + RowMetrics.imageGap
             }
@@ -963,6 +968,7 @@ final class ImagesRowCell: RowCellView {
         guard case .images(_, let images, _) = row.content else { return }
         let (x, width) = RowMetrics.column(for: row, tableWidth: tableWidth)
         grid.frame = NSRect(x: x, y: RowMetrics.rowTop + zoomed(2), width: width, height: render.imageAreaHeight)
+        grid.awayName = delegate?.awayName
         grid.show(paths: images.map(\.path), frames: render.imageFrames)
     }
 

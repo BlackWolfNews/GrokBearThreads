@@ -146,8 +146,11 @@ next day, repeating, set by threads, paused, and how often they've run.
 If you run Threadbear on more than one Mac, a schedule that starts a new
 thread can run on any of them: pick the Mac under Runs on. It runs there
 even while this one is asleep, in that Mac's folder (leave the folder
-empty for its default). Its threads show on your phone and the website;
-the Mac app only shows this Mac's threads for now. Schedules need your
+empty for its default). Its threads show on your phone and the website, and
+threads made on another Mac show in your sidebar too, with that Mac's
+icon in the row: open one and you're talking to that Mac directly (over
+Tailscale), so it needs that Mac to be on and its key copied to this one.
+Pictures and files in them stay on that Mac for now. Schedules need your
 Convex backend: with no internet, they wait.
 
 

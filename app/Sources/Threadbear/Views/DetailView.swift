@@ -81,8 +81,9 @@ struct DetailView: View {
                         }
                     } else if let session, case .failed(let message) = session.state {
                         VStack(spacing: zoomed(8)) {
-                            Text("Couldn't load this thread.").font(.headline)
+                            Text(session.failureHeadline ?? "Couldn't load this thread.").font(.headline)
                             Text(message).foregroundStyle(.secondary)
+                                .multilineTextAlignment(.center)
                             Button("Try again") { app.select(session.threadId) }
                                 .tip("Load the thread again")
                         }
@@ -193,6 +194,13 @@ struct HeaderTitle: View {
                         }
                     }
                     .layoutPriority(1)
+                } else if let place = app.runnerPlace(of: thread) {
+                    // Another runner's thread: its Mac, where the folder would be.
+                    Image(systemName: app.runnerIcon(of: thread))
+                        .font(.system(size: TypeScale.detail))
+                        .foregroundStyle(.secondary)
+                        .tip("\(place), in \(thread.cwd.abbreviatingHome)")
+                        .layoutPriority(1)
                 } else {
                     Image(systemName: "folder")
                         .font(.system(size: TypeScale.detail))

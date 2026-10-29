@@ -107,8 +107,9 @@ struct PinnedThreadView: View {
                         ProgressView().controlSize(.small)
                     } else if case .failed(let message) = session.state {
                         VStack(spacing: zoomed(8)) {
-                            Text("Couldn't load this thread.").font(.headline)
+                            Text(session.failureHeadline ?? "Couldn't load this thread.").font(.headline)
                             Text(message).foregroundStyle(.secondary)
+                                .multilineTextAlignment(.center)
                             Button("Try again") { _ = app.openPanelSession(threadId) }
                                 .tip("Load the thread again")
                         }

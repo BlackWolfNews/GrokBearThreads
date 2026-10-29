@@ -456,6 +456,17 @@ public extension RPCClient {
         }
     }
 
+    /// Other runners' threads for the sidebar (docs/protocol.md, "Other
+    /// runners' threads"). A runner from before them answers -32601, which
+    /// is none: the sidebar has only this Mac's.
+    func remoteThreads() async throws -> RemoteThreads {
+        do {
+            return try await call("remoteThreads.list", .object([:]), as: RemoteThreads.self)
+        } catch RPCError.server(let code, _) where code == RPCError.methodNotFound {
+            return RemoteThreads()
+        }
+    }
+
     /// Runs it now, as if it were due, even when paused. Another runner's
     /// schedule comes back `queued`, with no thread: that runner runs it.
     func runSchedule(_ scheduleId: String) async throws -> ScheduleRunResult {

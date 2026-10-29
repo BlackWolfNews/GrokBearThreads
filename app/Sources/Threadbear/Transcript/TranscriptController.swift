@@ -37,6 +37,11 @@ struct ScrollMemory {
 /// keeping the visible row anchored when older rows are paged in.
 @MainActor
 final class TranscriptController: NSObject, NSTableViewDataSource, NSTableViewDelegate, RowCellDelegate {
+    var awayName: String? {
+        guard let session, let app = session.app, let thread = app.threads[session.threadId] else { return nil }
+        return app.runnerName(of: thread)
+    }
+
     nonisolated static let renders = RenderCache()
 
     /// Overlay scrollers whatever the system setting, so the reading

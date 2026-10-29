@@ -373,7 +373,7 @@ private struct FolderMenu: View {
     private var recent: [String] {
         var seen = Set<String>()
         var folders: [String] = []
-        for folder in [cwd, app.defaults.cwd] + app.threads.values.sorted(by: { $0.lastActivityAt > $1.lastActivityAt }).map(\.cwd) {
+        for folder in [cwd, app.defaults.cwd] + app.threads.values.filter({ !$0.isRemote }).sorted(by: { $0.lastActivityAt > $1.lastActivityAt }).map(\.cwd) {
             guard !folder.isEmpty, seen.insert(folder).inserted else { continue }
             folders.append(folder)
             if folders.count >= 8 { break }

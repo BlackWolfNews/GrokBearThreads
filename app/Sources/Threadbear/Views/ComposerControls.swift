@@ -18,6 +18,40 @@ struct ComposerControls: View {
     let onSchedule: () -> Void
 
     var body: some View {
+        if let thread, let place = app.runnerPlace(of: thread) {
+            remoteControls(thread, place: place)
+        } else {
+            controls
+        }
+    }
+
+    /// Another runner's thread: its Mac's name where the chips would be,
+    /// and send. Its folder, logins and models are that Mac's, and a
+    /// picture from here would be a path that Mac hasn't got, so there's
+    /// nothing to pick.
+    private func remoteControls(_ thread: ThreadSummary, place: String) -> some View {
+        HStack(spacing: zoomed(4)) {
+            HStack(spacing: zoomed(4)) {
+                Image(systemName: app.runnerIcon(of: thread))
+                    .font(.system(size: TypeScale.chip - 1))
+                    .foregroundStyle(Color(nsColor: Theme.faintIcon))
+                Text(app.runnerName(of: thread) ?? "")
+                    .font(.system(size: TypeScale.chip))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+            .padding(.horizontal, zoomed(7))
+            .frame(height: zoomed(26))
+            .tip("\(place), in \(thread.cwd.abbreviatingHome)")
+            Spacer(minLength: zoomed(8))
+            SendButton(running: running, canSend: canSend, sending: sending, onSend: onSend, onStop: { app.interrupt() })
+                .layoutPriority(1)
+        }
+        .frame(height: SendButton.size)
+    }
+
+    @ViewBuilder
+    private var controls: some View {
         let settings = ThreadSettings(app: app, thread: thread)
         let cwd = settings.cwd
         let account = settings.account
@@ -444,7 +478,7 @@ struct ThreadSettings {
     private func recentFolders(including cwd: String) -> [String] {
         var seen = Set<String>()
         var folders: [String] = []
-        for folder in [cwd, app.defaults.cwd] + app.threads.values.sorted(by: { $0.lastActivityAt > $1.lastActivityAt }).map(\.cwd) {
+        for folder in [cwd, app.defaults.cwd] + app.threads.values.filter({ !$0.isRemote }).sorted(by: { $0.lastActivityAt > $1.lastActivityAt }).map(\.cwd) {
             guard !folder.isEmpty, seen.insert(folder).inserted else { continue }
             folders.append(folder)
             if folders.count >= 8 { break }

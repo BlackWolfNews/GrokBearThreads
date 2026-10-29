@@ -110,6 +110,10 @@ final class ImageGridView: NSView {
     private var paths: [String] = []
     private var frames: [NSRect] = []
     private var tiles: [CALayer] = []
+    /// Set for another runner's thread ("bruce"): the pictures are files on
+    /// that Mac, so each tile says so quietly instead of loading.
+    var awayName: String?
+    private var awayLabels: [CATextLayer] = []
 
     override var isFlipped: Bool { true }
 
@@ -147,6 +151,13 @@ final class ImageGridView: NSView {
             // A faint placeholder while the thumbnail decodes, and no box
             // behind the image once it's there.
             let placeholder = Theme.codeBackground.resolvedCGColor(for: self)
+            label(for: index, in: tile)
+            if awayName != nil {
+                tile.contents = nil
+                tile.backgroundColor = placeholder
+                tile.name = nil
+                continue
+            }
             let path = paths[index]
             let pixels = Int(max(frames[index].width, frames[index].height) * scale)
             if let image = ThumbnailLoader.shared.cached(path: path, maxPixels: pixels) {
@@ -167,11 +178,39 @@ final class ImageGridView: NSView {
         CATransaction.commit()
     }
 
+    /// "On bruce" in the middle of a tile whose picture is on another
+    /// Mac; hidden otherwise.
+    private func label(for index: Int, in tile: CALayer) {
+        while awayLabels.count <= index {
+            let text = CATextLayer()
+            text.alignmentMode = .center
+            text.truncationMode = .end
+            text.contentsScale = window?.backingScaleFactor ?? 2
+            tile.addSublayer(text)
+            awayLabels.append(text)
+        }
+        let text = awayLabels[index]
+        if text.superlayer !== tile { tile.addSublayer(text) }
+        guard let awayName else {
+            text.isHidden = true
+            return
+        }
+        let font = NSFont.systemFont(ofSize: TypeScale.work - 1)
+        text.isHidden = false
+        text.string = "On \(awayName)"
+        text.font = font
+        text.fontSize = font.pointSize
+        text.foregroundColor = Theme.faintText.resolvedCGColor(for: self)
+        let height = ceil(font.ascender - font.descender + font.leading) + 2
+        text.frame = NSRect(x: 4, y: (tile.bounds.height - height) / 2, width: max(0, tile.bounds.width - 8), height: height)
+    }
+
     override func viewDidChangeEffectiveAppearance() {
         super.viewDidChangeEffectiveAppearance()
         // Layer colours don't follow appearance changes on their own.
         let border = Theme.cardBorder.resolvedCGColor(for: self)
         for tile in tiles { tile.borderColor = border }
+        if awayName != nil, !frames.isEmpty { show(paths: paths, frames: frames) }
     }
 
     /// Drops the decoded images, for a cell the table has parked off screen.
@@ -190,6 +229,8 @@ final class ImageGridView: NSView {
 
     override func mouseDown(with event: NSEvent) {
         let point = convert(event.locationInWindow, from: nil)
+        // Nothing here to look at or drag: the file is on the other Mac.
+        if awayName != nil { return super.mouseDown(with: event) }
         if let index = frames.firstIndex(where: { $0.contains(point) }) {
             // Dragged, the picture goes out as the file itself (FileDrag).
             if FileDrag.isDrag(from: event) {
@@ -203,6 +244,7 @@ final class ImageGridView: NSView {
     }
 
     override func resetCursorRects() {
+        guard awayName == nil else { return }
         for frame in frames { addCursorRect(frame, cursor: .pointingHand) }
     }
 }

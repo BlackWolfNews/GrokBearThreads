@@ -25,6 +25,10 @@ final class ThreadSession {
     /// `threads.subagent` (again for more while it runs), never subscribed.
     let subagentId: String?
     private(set) var state: LoadState = .idle
+    /// What the failure says first, in place of "Couldn't load this
+    /// thread.": "Can't reach bruce from this Mac." for another runner's
+    /// thread that couldn't be opened (`RemoteUnreachable`).
+    private(set) var failureHeadline: String?
     /// The runner has no record of the sub-agent (-32006), so there's
     /// nothing to show rather than something that failed.
     private(set) var missing = false
@@ -78,13 +82,19 @@ final class ThreadSession {
     /// Loads the newest page, renders the rows it will show off the main
     /// thread, then hands them to the view and subscribes.
     func open(width: CGFloat) {
-        guard state == .idle || state.isFailed, loadTask == nil else { return }
-        guard let client = app?.client else { return }
+        guard state == .idle || state.isFailed, loadTask == nil, let appModel = app else { return }
+        // Another runner's thread connects to its runner first, in the load
+        // below; this Mac's waits for the app's own connection, which
+        // opens it once it's up.
+        let remote = appModel.isRemote(threadId)
+        guard remote || appModel.client != nil else { return }
         if let subagentId {
+            guard let client = appModel.client(for: threadId) else { return }
             openSubagent(subagentId, client: client, width: width)
             return
         }
         state = .loading
+        failureHeadline = nil
         let threadId = threadId
         let expanded = expanded
         // File rows name folders from the thread's folder.
@@ -95,6 +105,7 @@ final class ThreadSession {
             do {
                 let debug = CommandLine.arguments.contains("--perf-debug")
                 if debug { print(String(format: "    open %@: before fetch %.0f MB", threadId, memoryMB())) }
+                let client = try await appModel.openClient(for: threadId)
                 let page = try await client.events(threadId: threadId, limit: Self.eventsPage)
                 if debug { print(String(format: "    after fetch %.0f MB", memoryMB())) }
                 // What the thread's summary says is running in the
@@ -129,6 +140,7 @@ final class ThreadSession {
             } catch {
                 perfLog.endInterval("open", signpost)
                 AppLog.write("rpc", "couldn't load \(threadId): \(error.localizedDescription)")
+                failureHeadline = (error as? RemoteUnreachable)?.headline
                 state = .failed(error.localizedDescription)
             }
         }
@@ -174,7 +186,7 @@ final class ThreadSession {
     /// read, and the CLI only ever adds to its record, so new ones are the
     /// ones past the last seq shown.
     func refreshSubagent() {
-        guard let subagentId, state == .loaded, !refreshing, let client = app?.client else { return }
+        guard let subagentId, state == .loaded, !refreshing, let client = app?.client(for: threadId) else { return }
         refreshing = true
         let threadId = threadId
         Task {
@@ -196,7 +208,7 @@ final class ThreadSession {
     }
 
     func subscribe() async {
-        guard subagentId == nil, let client = app?.client, state == .loaded else { return }
+        guard subagentId == nil, let client = app?.client(for: threadId), state == .loaded else { return }
         feed.beginSubscribe()
         do {
             let reply = try await client.subscribe(threadId: threadId, afterSeq: feed.acceptedSeq)
@@ -217,8 +229,22 @@ final class ThreadSession {
         updatePending { $0.removeAll() }
     }
 
+    /// Another runner's thread whose runner can't be reached any more: the
+    /// transcript goes and the reason shows in its place, with Try again,
+    /// rather than an old transcript that's quietly stopped updating.
+    func markUnreachable(_ error: Error) {
+        guard subagentId == nil, loadTask == nil else { return }
+        subscribed = false
+        updatePending { $0.removeAll() }
+        feed = ThreadFeed()
+        displayStart = 0
+        failureHeadline = (error as? RemoteUnreachable)?.headline
+        state = .failed(error.localizedDescription)
+        view?.reloadAll()
+    }
+
     func unsubscribe() {
-        guard subscribed, let client = app?.client else { return }
+        guard subscribed, let client = app?.client(for: threadId) else { return }
         subscribed = false
         let threadId = threadId
         Task { try? await client.unsubscribe(threadId: threadId) }
@@ -244,7 +270,7 @@ final class ThreadSession {
                 feed.catchUpFailed()
                 return
             }
-            guard let client = app?.client else {
+            guard let client = app?.client(for: threadId) else {
                 feed.catchUpFailed()
                 return
             }
@@ -420,7 +446,7 @@ final class ThreadSession {
             }
             return
         }
-        guard subagentId == nil, let client = app?.client else {
+        guard subagentId == nil, let client = app?.client(for: threadId) else {
             loadingOlder = false
             return
         }
@@ -500,7 +526,7 @@ final class ThreadSession {
     /// Ticks an ask on the open card. The runner's thread.updated and
     /// asks.ticked event bring the change back.
     func tickAsk(asksSeq: Int, index: Int, ticked: Bool) {
-        guard let client = app?.client else { return }
+        guard let client = app?.client(for: threadId) else { return }
         let threadId = threadId
         Task {
             do {
@@ -512,7 +538,7 @@ final class ThreadSession {
     }
 
     func respond(approvalId: String, decision: ApprovalDecision, answers: [String: String]?, message: String?) {
-        guard let client = app?.client else { return }
+        guard let client = app?.client(for: threadId) else { return }
         let threadId = threadId
         ActivityRecorder.shared.answered(threadId: threadId, decision: decision)
         Task {
@@ -526,7 +552,7 @@ final class ThreadSession {
 
     /// Copies the whole thread, fetching any older pages first.
     func copyTranscript() {
-        guard let client = app?.client else { return }
+        guard let client = app?.client(for: threadId) else { return }
         let threadId = threadId
         let title = app?.threads[threadId]?.title ?? ""
         var events = feed.model.events

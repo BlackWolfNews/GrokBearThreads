@@ -46,6 +46,9 @@ public enum RPCNotification: Sendable {
     case clisUpdated([CliStatus])
     /// The whole schedule list, after any change.
     case schedulesUpdated([Schedule])
+    /// Other runners and their threads, whole each time (docs/protocol.md,
+    /// "Other runners' threads").
+    case remoteThreadsUpdated(RemoteThreads)
     /// Every project, archived ones too, after any change. Thread
     /// membership comes as `thread.updated`.
     case projectsUpdated([Project])
@@ -256,6 +259,10 @@ public final class RPCClient: Sendable {
             guard let params = try? decoder.decode(RPCNotificationEnvelope<SchedulesResult>.self, from: data).params
             else { return nil }
             return .schedulesUpdated(params.schedules)
+        case "remoteThreads.updated":
+            guard let params = try? decoder.decode(RPCNotificationEnvelope<RemoteThreads>.self, from: data).params
+            else { return nil }
+            return .remoteThreadsUpdated(params)
         case "projects.updated":
             guard let params = try? decoder.decode(RPCNotificationEnvelope<ProjectsResult>.self, from: data).params
             else { return nil }

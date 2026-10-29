@@ -501,9 +501,12 @@ struct ThreadRowView: View {
         // across the whole width and under it where the thread belongs and
         // what it's doing. The preview and the account name went once
         // projects came: Mike reads a thread by its title and its project.
+        // Another runner's thread: its Mac's icon in the tile (it has no
+        // projects here), and the Mac's name in the tooltips.
+        let place = app.runnerPlace(of: thread)
         HStack(alignment: .center, spacing: zoomed(10)) {
-            ProjectTiles(projects: ProjectMark.shown(thread, under: heading))
-                .tip(ProjectMark.help(thread))
+            ProjectTiles(projects: ProjectMark.shown(thread, under: heading), runnerIcon: thread.isRemote ? app.runnerIcon(of: thread) : nil)
+                .tip(place.map { "\($0), in \(thread.cwd.abbreviatingHome)" } ?? ProjectMark.help(thread))
                 .overlay(alignment: .leading) {
                     if look.done {
                         // Finished with nothing needed: a tick where the
@@ -570,6 +573,9 @@ struct ThreadRowView: View {
             }
         }
         .padding(EdgeInsets(top: zoomed(8), leading: SidebarMetrics.leading, bottom: zoomed(8), trailing: SidebarMetrics.trailing))
+        // An offline runner's threads stay listed, quietly: they can't
+        // change until it's back.
+        .opacity(app.remoteRunner(of: thread)?.online == false ? 0.5 : 1)
         .background {
             if landed {
                 RoundedRectangle(cornerRadius: SidebarMetrics.corner)
@@ -628,7 +634,7 @@ struct ThreadRowView: View {
         .animation(Juice.hover, value: showsActions)
         // The whole title, which the row often cuts short, and where it runs.
         // The status and project marks have their own tips over this one.
-        .tip((thread.title.isEmpty ? "Untitled" : thread.title) + "\n" + thread.cwd.abbreviatingHome)
+        .tip((thread.title.isEmpty ? "Untitled" : thread.title) + "\n" + (place.map { "\($0), in " } ?? "") + thread.cwd.abbreviatingHome)
         .contextMenu { ThreadMenu(thread: thread) }
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
@@ -746,6 +752,8 @@ struct ThreadRowView: View {
 private struct ProjectTiles: View {
     @Environment(AppModel.self) private var app
     let projects: [ThreadProject]
+    /// Another runner's thread: that Mac's symbol in place of the folder.
+    var runnerIcon: String? = nil
 
     var body: some View {
         let size = zoomed(30)
@@ -788,6 +796,12 @@ private struct ProjectTiles: View {
                     } else if let project = projects.first {
                         Text(ProjectMark.letter(project.title))
                             .font(.system(size: zoomed(14), weight: .semibold))
+                            .foregroundStyle(.secondary)
+                    } else if let runnerIcon {
+                        // Wider than tall (a Mac mini is a flat box), so a
+                        // little larger than the folder to read at a glance.
+                        Image(systemName: runnerIcon)
+                            .font(.system(size: zoomed(16)))
                             .foregroundStyle(.secondary)
                     } else {
                         Image(systemName: "folder")
@@ -943,7 +957,9 @@ struct ThreadMenu: View {
         } else {
             Button("Archive", systemImage: "archivebox") { app.archive(thread.id) }
         }
-        if app.projectsSupported {
+        // Projects are this Mac's runner's; another runner's threads
+        // aren't in them.
+        if app.projectsSupported, !thread.isRemote {
             ThreadProjectsMenu(thread: thread)
         }
     }

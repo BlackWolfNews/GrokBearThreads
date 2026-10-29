@@ -60,7 +60,7 @@ extension AppModel {
     }
 
     private func fetchHighlights(_ threadId: String) async {
-        guard let client else { return }
+        guard let client = client(for: threadId) else { return }
         do {
             let fresh = try await client.threadHighlights(threadId: threadId)
             if highlights[threadId] != fresh { highlights[threadId] = fresh }
@@ -79,7 +79,7 @@ extension AppModel {
     /// Takes a highlight off for good. It goes from the list straight away;
     /// the runner's answer and the next fetch confirm it.
     func removeHighlight(_ highlight: Highlight, in threadId: String) {
-        guard let client else { return }
+        guard let client = client(for: threadId) else { return }
         highlights[threadId]?.highlights.removeAll { $0.id == highlight.id }
         Task {
             do {
@@ -98,7 +98,9 @@ extension AppModel {
     /// `external` is Open in the context menu: always the default app or
     /// browser.
     func open(_ highlight: Highlight, in thread: ThreadSummary, external: Bool) {
-        if let path = highlight.path {
+        if highlight.path != nil, let away = awayFileNote(thread) {
+            errorMessage = away
+        } else if let path = highlight.path {
             if external { openExternally(URL(fileURLWithPath: path)) } else { preview(path: path, title: highlight.title, in: thread) }
         } else if let url = highlight.link {
             openLink(url, title: highlight.title, in: thread, external: external)
@@ -187,6 +189,10 @@ extension AppModel {
     /// browser keeps.
     @discardableResult
     func openTranscriptFile(_ url: URL, _ action: FileLinkAction) -> Bool {
+        if let thread = selectedThread, let away = awayFileNote(thread) {
+            errorMessage = away
+            return true
+        }
         let path = url.path
         var action = action
         if action == .automatic { action = PreviewRules.previewsInPane(transcriptLink: url) ? .panel : .app }
@@ -226,6 +232,8 @@ extension AppModel {
     /// from the selected thread's folder and what its tools touched
     /// (FilePathRefs). Nil for one that names nothing.
     func transcriptLinkFile(_ url: URL) -> URL? {
+        // Another runner's paths are that Mac's: nothing here to open.
+        if selectedThread?.isRemote == true { return nil }
         if url.isFileURL { return url }
         guard let text = FilePathRefs.text(of: url) else { return nil }
         let thread = selectedThread
@@ -233,8 +241,18 @@ extension AppModel {
         return FilePathRefs.fileLink(text, root: thread?.cwd, known: known)
     }
 
+    /// Files in another runner's thread are on that Mac, so a click on one
+    /// says so rather than open whatever this Mac has at that path.
+    func awayFileNote(_ thread: ThreadSummary) -> String? {
+        runnerName(of: thread).map { "That file is on \($0), not this Mac." }
+    }
+
     /// A click on a path in inline code. One that names nothing beeps.
     func openTranscriptPathRef(_ text: String, commandKey: Bool) -> Bool {
+        if let thread = selectedThread, let away = awayFileNote(thread) {
+            errorMessage = away
+            return true
+        }
         guard let url = FilePathRefs.url(for: text), let file = transcriptLinkFile(url) else {
             NSSound.beep()
             return false

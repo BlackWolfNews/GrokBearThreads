@@ -96,6 +96,7 @@ final class AppModel {
                 mainContextChanged()
                 // Back and forward set this without select().
                 servePanelRequest()
+                tidyRemoteClients()
             }
         }
     }
@@ -199,6 +200,22 @@ final class AppModel {
     /// Empty from a runner before step 6, or before it answers: then
     /// there's no choice to offer and every schedule is this runner's.
     var runners: [RunnerInfo] = []
+    /// Other runners, from this one (docs/protocol.md, "Other runners'
+    /// threads"): their names, icons, whether they're online and how to
+    /// reach them. Their threads are in `threads`, marked with `runnerId`
+    /// (RemoteRunners.swift).
+    var remoteRunners: [RemoteRunner] = []
+    /// The last `remoteThreads` list, kept to put the sidebar table's rows
+    /// back once a runner's own connection closes.
+    @ObservationIgnored var remoteIndex = RemoteThreads()
+    /// Other runners' threads whose summary came from their own runner's
+    /// connection, which is fuller and fresher than the sidebar table's
+    /// row, until that connection closes.
+    @ObservationIgnored var liveRemote: Set<String> = []
+    /// One connection per other runner, made when one of its threads is
+    /// opened.
+    @ObservationIgnored let remoteClients = RemoteClients(version: Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "dev")
+    @ObservationIgnored var remoteTidy: Task<Void, Never>?
     /// Every project, archived ones too, in the runner's order (newest
     /// activity first). Replaced whole by `projects.updated`.
     var projects: [Project] = []
@@ -434,6 +451,7 @@ final class AppModel {
             save?(layout)
             self?.dockChanged(layout)
         }
+        wireRemoteClients()
         clockTimer = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated {
                 guard let self else { return }
@@ -574,6 +592,8 @@ final class AppModel {
                 let list = try await client.listThreads(include: [.inbox, .snoozed, .archived])
                 var fresh: [String: ThreadSummary] = [:]
                 for thread in list { fresh[thread.id] = thread }
+                // Other runners' threads aren't this runner's to list.
+                for (id, thread) in threads where thread.isRemote && fresh[id] == nil { fresh[id] = thread }
                 threads = fresh
                 threadsLoaded = true
                 archiveLoaded = true
@@ -581,13 +601,15 @@ final class AppModel {
                 servePanelRequest()
                 loadSchedules()
                 loadRunners()
+                loadRemoteThreads()
                 loadProjects()
                 loadConnectors()
                 loadSettings()
-                for session in sessions.values where session.state == .loaded {
+                // Other runners' threads come back with their own connection.
+                for session in sessions.values where session.state == .loaded && !isRemote(session.threadId) {
                     await session.subscribe()
                 }
-                for session in sessions.values where session.state != .loaded {
+                for session in sessions.values where session.state != .loaded && !isRemote(session.threadId) {
                     session.open(width: transcript.width > 0 ? transcript.width : transcript.currentTableWidth)
                 }
                 if let ref = subagentSelection {
@@ -600,7 +622,7 @@ final class AppModel {
                 // new client; only the loop that owns the client clears it.
                 guard self.client === client else { return }
                 self.client = nil
-                for session in sessions.values { session.connectionLost() }
+                for session in sessions.values where !isRemote(session.threadId) { session.connectionLost() }
                 connection = .lost
                 updateRestart { $0.disconnected(now: Date()) }
                 AppLog.write("connection", "lost the connection to the runner")
@@ -654,6 +676,8 @@ final class AppModel {
             case .schedulesUpdated(let list):
                 schedules = list
                 schedulesSupported = true
+            case .remoteThreadsUpdated(let remote):
+                receive(remote: remote)
             case .projectsUpdated(let list):
                 receive(projects: list)
             case .librarianUpdated(let status):
@@ -720,7 +744,7 @@ final class AppModel {
         }
     }
 
-    private func receive(_ thread: ThreadSummary) {
+    func receive(_ thread: ThreadSummary) {
         if heldWhileSliding[thread.id] != nil {
             heldWhileSliding[thread.id] = thread
             return
@@ -756,7 +780,9 @@ final class AppModel {
         checkQueued(thread.id)
         let becameNeedy = thread.needsYou && previous?.needsYou != true
         let showing = isLooking && isShowing(thread.id)
-        if becameNeedy && !showing && notificationsEnabled {
+        // Not for another runner's threads: notifications are low-key,
+        // and that Mac's app says so there.
+        if becameNeedy && !showing && notificationsEnabled && !thread.isRemote {
             Notifier.post(thread: thread)
         }
         if showing && thread.lastSeq > thread.lastSeenSeq && thread.status != .waiting {
@@ -767,7 +793,7 @@ final class AppModel {
 
     /// A thread deleted on the runner (by an agent's delete_thread, or `tb
     /// delete`) disappears from every list straight away.
-    private func forget(_ threadId: String) {
+    func forget(_ threadId: String) {
         let panel = WindowDock.threadPanel(threadId)
         if dock.layout.contains(panel) { dock.close(panel) }
         threads[threadId] = nil
@@ -797,6 +823,9 @@ final class AppModel {
         let session = session(for: threadId)
         if session.state == .idle || session.state.isFailed {
             session.open(width: transcript.width > 0 ? transcript.width : transcript.currentTableWidth)
+        } else if isRemote(threadId), !session.subscribed {
+            // Its runner's connection closed while it was away.
+            reconnectRemote(for: threadId)
         }
         if let thread = threads[threadId], thread.needsYou || thread.lastSeq > thread.lastSeenSeq {
             scheduleMarkSeen(threadId)
@@ -890,6 +919,14 @@ final class AppModel {
     /// A thread's session if it's open already, without opening one.
     func loadedSession(_ threadId: String) -> ThreadSession? { sessions[threadId] }
 
+    /// Every open session, for RemoteRunners.swift.
+    var openSessions: [ThreadSession] { Array(sessions.values) }
+
+    /// Lets a session go, so the thread loads afresh next time it's opened.
+    func dropSession(_ threadId: String) {
+        sessions.removeValue(forKey: threadId)?.unsubscribe()
+    }
+
     private func evictSessions() {
         guard sessions.count > Self.maxSessions else { return }
         let victims = sessions.values
@@ -916,7 +953,7 @@ final class AppModel {
         markSeenTasks[threadId]?.cancel()
         markSeenTasks[threadId] = Task {
             try? await Task.sleep(for: .milliseconds(400))
-            guard !Task.isCancelled, let client, let thread = threads[threadId], isLooking, isShowing(threadId) else { return }
+            guard !Task.isCancelled, let client = client(for: threadId), let thread = threads[threadId], isLooking, isShowing(threadId) else { return }
             if let updated = try? await client.markSeen(threadId: threadId, seq: thread.lastSeq) {
                 threads[threadId] = updated
             }
@@ -988,8 +1025,8 @@ final class AppModel {
         let draft = drafts[threadId] ?? Draft()
         let text = draft.text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty || !draft.images.isEmpty, !edit.sending else { return }
-        guard let client, connection == .connected else {
-            showConnectionError("Not connected to the runner, so the edit wasn't sent. It's still in the box.")
+        guard let client = client(for: threadId), isRemote(threadId) || connection == .connected else {
+            showConnectionError(notConnectedText(threadId, "the edit wasn't sent"))
             return
         }
         ActivityRecorder.shared.sent(threadId: threadId, images: draft.images.count, answers: 0, edit: true)
@@ -1034,8 +1071,8 @@ final class AppModel {
         guard !trimmed.isEmpty || !draft.images.isEmpty else { return }
         // A second Return while the first new thread is still being made.
         if threadId == nil, creatingThread { return }
-        guard let client, connection == .connected else {
-            showConnectionError("Not connected to the runner, so that wasn't sent. It's still in the box.")
+        guard let client = client(for: threadId), threadId.map(isRemote) == true || connection == .connected else {
+            showConnectionError(notConnectedText(threadId, "that wasn't sent"))
             return
         }
         ActivityRecorder.shared.sent(threadId: threadId, images: draft.images.count, answers: answers.count)
@@ -1145,7 +1182,7 @@ final class AppModel {
     }
 
     func interrupt() {
-        guard let client, let threadId = selection else { return }
+        guard let threadId = selection, let client = client(for: threadId) else { return }
         Task { try? await client.interrupt(threadId: threadId) }
     }
 
@@ -1155,7 +1192,7 @@ final class AppModel {
     /// the runner is; its reply replaces the guess, and a failure puts back
     /// what was there unless something else has changed it since.
     func update(_ threadId: String, _ update: ThreadUpdate) {
-        guard let client else { return }
+        guard let client = client(for: threadId) else { return }
         let before = threads[threadId]
         let guess = before.map { update.applied(to: $0) }
         if let guess, guess != before { threads[threadId] = guess }
@@ -1173,7 +1210,7 @@ final class AppModel {
     /// (protocol "Sharing"). The share popover shows a failure itself, so
     /// this throws rather than putting up the banner.
     func share(_ threadId: String, access: ThreadShare.Access, newLink: Bool = false) async throws {
-        guard let client else { throw RPCError.disconnected(nil) }
+        guard let client = client(for: threadId) else { throw RPCError.disconnected(nil) }
         threads[threadId] = try await client.share(threadId: threadId, access: access, newLink: newLink)
     }
 
@@ -1194,7 +1231,7 @@ final class AppModel {
     /// `threads.update`, `titleBy`). Shown at once, put back if it fails.
     func rename(_ threadId: String, to title: String) {
         let title = title.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let client, let before = threads[threadId], !title.isEmpty, title != before.title else { return }
+        guard let client = client(for: threadId), let before = threads[threadId], !title.isEmpty, title != before.title else { return }
         threads[threadId]?.title = title
         Task {
             do {
@@ -1219,7 +1256,7 @@ final class AppModel {
         Task {
             try? await Task.sleep(for: Self.slideTime)
             do {
-                guard let client else { throw RPCError.disconnected(nil) }
+                guard let client = client(for: threadId) else { throw RPCError.disconnected(nil) }
                 threads[threadId] = try await client.updateThread(threadId, ThreadUpdate(archived: true))
                 await endSlide(threadId)
             } catch {
@@ -1266,7 +1303,7 @@ final class AppModel {
     /// away straight off (its row says Thinking… until the time is worked
     /// out); if the model can't say, it comes back and the banner says why.
     func hibernateWhen(_ threadId: String, said: String) {
-        guard let client else { return }
+        guard let client = client(for: threadId) else { return }
         let next = neighbour(of: threadId)
         if selection == threadId { select(next) }
         Task {
@@ -1645,7 +1682,7 @@ final class AppModel {
     /// or runs a command action and puts its output in the transcript.
     func runAction(_ action: Action, in threadId: String) {
         let key = Self.actionKey(threadId: threadId, actionId: action.id)
-        guard !runningActions.contains(key), let client else { return }
+        guard !runningActions.contains(key), let client = client(for: threadId) else { return }
         runningActions.insert(key)
         Task {
             do {
@@ -1661,7 +1698,7 @@ final class AppModel {
     /// panel showed them; the runner then loads them.
     func trustPatches(_ patches: [PatchInfo], in threadId: String) {
         let files = patches.compactMap { p in p.file.flatMap { f in p.hash.map { (file: f, hash: $0) } } }
-        guard !files.isEmpty, let client else { return }
+        guard !files.isEmpty, let client = client(for: threadId) else { return }
         Task {
             do {
                 try await client.trustPatches(threadId: threadId, files: files)
@@ -1675,7 +1712,7 @@ final class AppModel {
     /// the runner can't be asked (not connected). `failure` is the note
     /// when it couldn't answer.
     func renderPanel(threadId: String, panelId: String, failure: String) async -> PanelRender? {
-        guard let client else { return nil }
+        guard let client = client(for: threadId) else { return nil }
         do {
             return try await client.renderPanel(threadId: threadId, panelId: panelId)
         } catch {
@@ -1686,7 +1723,7 @@ final class AppModel {
 
     /// Available cloud deployments for the panel's project.
     func convexPanelDeployments(threadId: String, panelId: String, refresh: Bool = false) async -> Result<ConvexDeployments, Error> {
-        guard let client else { return .failure(RPCError.disconnected(nil)) }
+        guard let client = client(for: threadId) else { return .failure(RPCError.disconnected(nil)) }
         do {
             return .success(try await client.convexPanelDeployments(threadId: threadId, panelId: panelId, refresh: refresh))
         } catch {
@@ -1697,7 +1734,7 @@ final class AppModel {
     /// A deploy key for the selected deployment, or the CLI's reason when
     /// it couldn't make one.
     func convexPanelKey(threadId: String, panelId: String, deployment: String? = nil, renew: Bool = false) async -> Result<ConvexPanelKey, Error> {
-        guard let client else { return .failure(RPCError.disconnected(nil)) }
+        guard let client = client(for: threadId) else { return .failure(RPCError.disconnected(nil)) }
         do {
             return .success(try await client.convexPanelKey(threadId: threadId, panelId: panelId, deployment: deployment, renew: renew))
         } catch {

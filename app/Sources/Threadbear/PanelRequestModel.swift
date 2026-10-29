@@ -21,7 +21,7 @@ extension AppModel {
         }
         showRequested(panel, at: PanelRequests.place(request), in: thread)
         AppLog.write("panels", "showed \(request.panel) for \(thread.id.prefix(8))")
-        guard let client else { return }
+        guard let client = client(for: thread.id) else { return }
         Task {
             do {
                 _ = try await client.panelShown(threadId: thread.id, requestId: request.id)

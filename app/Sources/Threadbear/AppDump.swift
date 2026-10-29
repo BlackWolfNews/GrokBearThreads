@@ -34,6 +34,8 @@ struct AppDump: Encodable {
         var waiting: String? = nil
         /// The sub-agent rows under it, as the sidebar shows them.
         var subagents: [SubagentInfo] = []
+        /// "On bruce" for another runner's thread ("On bruce, offline").
+        var runner: String? = nil
     }
 
     struct SubagentInfo: Encodable {
@@ -240,7 +242,7 @@ struct AppDump: Encodable {
                           unread: look.unread, hovered: app.hoverOverride == summary.id,
                           background: look.status == .background ? BackgroundWork.short(summary.background) : nil,
                           waiting: summary.waitingForRoom.map { Pools.waitingLine($0, now: app.now) },
-                          subagents: subagents)
+                          subagents: subagents, runner: app.runnerPlace(of: summary))
         }
         let sections: [Section]
         switch app.sidebarMode {
@@ -506,6 +508,7 @@ struct AppDump: Encodable {
                 if thread.hovered { flags.append("hovered") }
                 if let background = thread.background { flags.append("bg: " + background) }
                 if let waiting = thread.waiting { flags.append(waiting) }
+                if let runner = thread.runner { flags.append(runner) }
                 let mark = thread.id == selection?.id ? ">" : " "
                 lines.append("  \(mark) \(pad(thread.id, threadWidth)) \(pad(flags.joined(separator: " "), 16)) \(thread.title)")
                 for sub in thread.subagents {

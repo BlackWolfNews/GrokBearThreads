@@ -1019,6 +1019,14 @@ public struct ThreadSummary: Sendable, Hashable, Codable, Identifiable {
     /// Who else can read it on the website. Nil until it's first shared,
     /// and from a runner older than sharing.
     public var share: ThreadShare?
+    /// Set by the app for another runner's thread (docs/protocol.md,
+    /// "Other runners' threads"): which runner it lives on, so its rows can
+    /// say so and its requests go there. Nil for this Mac's own. Never on
+    /// the wire: a runner's summaries are all its own.
+    public var runnerId: String?
+
+    /// Lives on another runner.
+    public var isRemote: Bool { runnerId != nil }
 
     public init(
         id: String, title: String, cwd: String = "~/dev/me/misc", accountId: String = "claude-main",

@@ -309,6 +309,14 @@ addDemoSubagents();
  */
 const SELF_RUNNER = { id: 'runner_mock', name: 'm5', icon: 'laptopcomputer', self: true };
 const runners = [SELF_RUNNER, { id: 'runner_bruce', name: 'bruce', icon: 'macmini', self: false }];
+// Bruce's own threads (docs/protocol.md, "Other runners' threads"). This
+// mock plays bruce too, on /bruce/rpc with the same token: its threads sit
+// in `threads` marked with `runnerId`, and only a client connected as
+// bruce lists them, gets their events or can act on them. A client of this
+// runner hears of them through remoteThreads.list and remoteThreads.updated,
+// as the real runner passes on what the backend has.
+const BRUCE = 'runner_bruce';
+addRemoteDemo();
 /** The schedules (docs/protocol.md, "Schedules"), soonest first. */
 let schedules = [];
 addDemoSchedules();
@@ -334,6 +342,11 @@ const token = crypto.randomBytes(24).toString('hex');
 fs.mkdirSync(path.join(dataDir, 'secrets'), { recursive: true });
 fs.mkdirSync(path.join(dataDir, 'inbox'), { recursive: true });
 fs.writeFileSync(path.join(dataDir, 'secrets/runner-token'), token + '\n', { mode: 0o600 });
+// Bruce's token, where the real runner keeps another runner's once it's
+// been copied in (secrets/runners/<id>.token). Bruce is this mock, so it's
+// the same token.
+fs.mkdirSync(path.join(dataDir, 'secrets/runners'), { recursive: true });
+fs.writeFileSync(path.join(dataDir, `secrets/runners/${BRUCE}.token`), token + '\n', { mode: 0o600 });
 
 // What `hello` and `runner.status` report. mock.restart bumps the version,
 // as a deploy would, so the app's "Runner restarted" note has two to name.
@@ -360,7 +373,8 @@ let wss = listen(Number(args.port ?? 0));
 // The WebSocket server, on its own so mock.restart can close it and listen
 // again on the same port, the way the real runner goes away and comes back.
 function listen(port) {
-  const server = new WebSocketServer({ host: '127.0.0.1', port, path: '/rpc', maxPayload: 64 * 1024 * 1024 });
+  // No `path`: /rpc is this runner and /bruce/rpc is bruce (onConnection).
+  const server = new WebSocketServer({ host: '127.0.0.1', port, maxPayload: 64 * 1024 * 1024 });
   server.on('listening', () => {
     const { port } = server.address();
     fs.writeFileSync(path.join(dataDir, 'runner.json'), JSON.stringify({ port, mock: true }, null, 2));
@@ -376,8 +390,11 @@ function listen(port) {
 }
 
 function onConnection(ws, request) {
+  const where = (request.url ?? '').split('?')[0];
+  if (where !== '/rpc' && where !== '/bruce/rpc') return ws.close(4404, 'not found');
   const header = request.headers['authorization'] ?? '';
-  const client = { ws, subs: new Set(), authed: header === `Bearer ${token}` };
+  // `as` is whose threads it sees: this runner's (null) or bruce's.
+  const client = { ws, subs: new Set(), authed: header === `Bearer ${token}`, as: where === '/bruce/rpc' ? BRUCE : null };
   clients.add(client);
   ws.on('close', () => clients.delete(client));
   ws.on('message', (raw) => {
@@ -401,6 +418,11 @@ function onConnection(ws, request) {
 }
 
 async function handle(client, { id, method, params = {} }) {
+  // Each runner knows only its own threads: asking this one about one of
+  // bruce's (or bruce about this one's) is "Thread not found".
+  if (typeof params?.threadId === 'string' && threads.has(params.threadId) && ownerOf(params.threadId) !== client.as) {
+    return reply(client, id, null, { code: -32004, message: 'Thread not found' });
+  }
   if (slow.ms > 0 && ['threads.send', 'threads.create', 'threads.update'].includes(method)) {
     await new Promise((resolve) => setTimeout(resolve, slow.ms));
   }
@@ -433,7 +455,7 @@ async function dispatch(client, method, p) {
       return { pools };
     }
     case 'runner.status': {
-      const all = [...threads.values()].map((t) => t.summary);
+      const all = [...threads.values()].filter((t) => (t.runnerId ?? null) === client.as).map((t) => t.summary);
       const status = {
         version: runnerVersion, pid: process.pid, startedAt, home: dataDir, logFile: path.join(dataDir, 'runner.log'),
         liveClis: all.filter((s) => s.live).length,
@@ -480,7 +502,7 @@ async function dispatch(client, method, p) {
     case 'threads.list': {
       const include = new Set(p.include ?? ['inbox']);
       const now = Date.now();
-      const list = [...threads.values()].map((t) => t.summary).filter((s) => {
+      const list = [...threads.values()].filter((t) => (t.runnerId ?? null) === client.as).map((t) => t.summary).filter((s) => {
         if (s.archivedAt) return include.has('archived');
         if (s.snoozedUntil && Date.parse(s.snoozedUntil) > now) return include.has('snoozed');
         return include.has('inbox');
@@ -489,7 +511,7 @@ async function dispatch(client, method, p) {
     }
     case 'threads.search': {
       const q = String(p.query ?? '').toLowerCase();
-      const list = [...threads.values()].map((t) => t.summary)
+      const list = [...threads.values()].filter((t) => (t.runnerId ?? null) === client.as).map((t) => t.summary)
         .filter((s) => s.title.toLowerCase().includes(q) || s.preview.toLowerCase().includes(q));
       return { threads: newestFirst(list).slice(0, p.limit ?? 50) };
     }
@@ -918,6 +940,9 @@ async function dispatch(client, method, p) {
       const list = sortedSchedules();
       return { schedules: p.threadId ? list.filter((x) => x.threadId === p.threadId || x.createdBy === p.threadId) : list };
     }
+    case 'remoteThreads.list':
+      if (oldRunner) throw rpcError(-32601, `Unknown method ${method}`);
+      return remoteThreads(client);
     case 'runners.list':
       if (oldRunner) throw rpcError(-32601, `Unknown method ${method}`);
       return { runners: runners.map((r) => ({ id: r.id, name: r.name, icon: r.icon, online: true, lastSeenAt: iso(), self: r.self })) };
@@ -1072,7 +1097,7 @@ async function dispatch(client, method, p) {
         broadcastNotice('info', 'The pending runner restart was cancelled.');
         return { scheduled: false, waitingFor: [] };
       }
-      const busy = [...threads.values()].map((t) => t.summary).filter((s) => ['starting', 'running', 'waiting'].includes(s.status)).map((s) => s.id);
+      const busy = [...threads.values()].filter((t) => !t.runnerId).map((t) => t.summary).filter((s) => ['starting', 'running', 'waiting'].includes(s.status)).map((s) => s.id);
       const waitingFor = Array.isArray(p.waitingFor) ? p.waitingFor.filter((id) => threads.has(id)) : busy;
       pendingRestart = { when: 'idle', requestedAt: iso(), waitingFor };
       if (p.reason) pendingRestart.reason = p.reason;
@@ -1508,8 +1533,88 @@ function setStatus(threadId, status, needsYou) {
 function broadcastSummary(threadId) {
   const t = threads.get(threadId);
   if (t.summary.pendingReviews) t.summary.needsYou = true;
+  const owner = t.runnerId ?? null;
   const text = JSON.stringify({ jsonrpc: '2.0', method: 'thread.updated', params: { thread: threads.get(threadId).summary } });
-  for (const client of clients) if (client.authed) client.ws.send(text);
+  for (const client of clients) if (client.authed && client.as === owner) client.ws.send(text);
+  // This runner's clients hear about bruce's threads from the backend.
+  if (owner) for (const client of clients) if (client.authed && client.as === null) send(client, 'remoteThreads.updated', remoteThreads(client));
+}
+
+function send(client, method, params) {
+  if (client.ws.readyState === 1) client.ws.send(JSON.stringify({ jsonrpc: '2.0', method, params }));
+}
+
+function ownerOf(threadId) {
+  return threads.get(threadId)?.runnerId ?? null;
+}
+
+// What remoteThreads.list answers this runner's clients: bruce, online and
+// reachable at this mock's own /bruce/rpc with a token copied in, and its
+// threads as the backend's sidebar table has them. Bruce's own clients
+// see no others.
+function remoteThreads(client) {
+  if (client.as) return { runners: [], threads: [] };
+  const { port } = wss.address();
+  const bruce = runners.find((r) => r.id === BRUCE);
+  const rows = [...threads.values()].filter((t) => t.runnerId === BRUCE).map(({ summary: s }) => ({
+    runnerId: BRUCE, threadId: s.id, title: s.title, cwd: s.cwd, accountId: s.accountId, provider: s.provider,
+    ...(s.model ? { model: s.model } : {}), status: s.status, needsYou: Boolean(s.needsYou), unread: s.lastSeq > s.lastSeenSeq,
+    preview: s.preview, createdAt: s.createdAt, lastActivityAt: s.lastActivityAt,
+    ...(s.snoozedUntil ? { snoozedUntil: s.snoozedUntil } : {}), ...(s.archivedAt ? { archivedAt: s.archivedAt } : {}),
+  }));
+  return {
+    runners: [{
+      id: BRUCE, name: bruce.name, icon: bruce.icon, online: true, lastSeenAt: iso(),
+      rpcUrl: `ws://127.0.0.1:${port}/bruce/rpc`, tokenFile: path.join(dataDir, `secrets/runners/${BRUCE}.token`),
+    }],
+    threads: rows,
+  };
+}
+
+// Three of bruce's threads, one in each state worth seeing: finished and
+// waiting on Mike, idle and read, and a turn running. Their folders and
+// the picture are paths on bruce, so nothing here has them.
+function addRemoteDemo() {
+  const ago = (minutes) => new Date(Date.now() - minutes * 60_000).toISOString();
+  const make = (id, title, cwd, minutes, status, turns, { unread = false, needsYou = false } = {}) => {
+    const summary = {
+      id, title, cwd, accountId: 'claude-main', provider: 'claude', model: 'claude-opus-5-5', permissionMode: 'full',
+      status, live: status !== 'idle', needsYou, createdAt: ago(minutes + 90), updatedAt: ago(minutes), lastActivityAt: ago(minutes),
+      preview: '', lastSeq: 0, lastSeenSeq: 0,
+    };
+    const events = [];
+    const push = (fields, turnId) => events.push({ seq: events.length + 1, ts: ago(minutes), threadId: id, ...(turnId ? { turnId } : {}), ...fields });
+    turns.forEach((turn, i) => {
+      const turnId = `${id}_t${i}`;
+      push({ type: 'user.message', text: turn.ask, images: turn.images ?? [] }, turnId);
+      push({ type: 'turn.started' }, turnId);
+      if (turn.answer) {
+        push({ type: 'assistant.text', itemId: `${id}_m${i}`, text: turn.answer }, turnId);
+        push({ type: 'turn.completed', outcome: 'completed', durationMs: 42_000, ...(turn.needs ? { needs: turn.needs } : {}) }, turnId);
+        summary.preview = turn.answer.replace(/\s+/g, ' ').slice(0, 140);
+      }
+    });
+    summary.lastSeq = events.length;
+    summary.lastSeenSeq = unread ? Math.max(0, events.length - 2) : events.length;
+    threads.set(id, { summary, events, inProgress: new Map(), timers: [], runnerId: BRUCE });
+  };
+  make('bruce_backup', 'Check the photo library backup', '/Users/bruce/dev/me/misc', 12, 'idle', [{
+    ask: 'Is last night\'s photo library backup complete? Here is what Backblaze showed this morning.',
+    images: [{ path: '/Users/bruce/Library/Application Support/Threadbear/media/backblaze.png', mediaType: 'image/png' }],
+    answer: 'The backup finished at 3:12 am: **48,210 files**, nothing skipped. The only warning is the external drive, which was asleep for the first pass and caught up on the second.\n\nWant me to keep the drive awake during backups?',
+    needs: 'you',
+  }], { unread: true, needsYou: true });
+  make('bruce_media', 'Tidy the media drive', '/Volumes/CannMedia', 300, 'idle', [{
+    ask: 'Find duplicate videos on the media drive.',
+    answer: 'Found 14 duplicates, 61 GB in all. I listed them in `duplicates.txt` and left the files alone.',
+    needs: 'nothing',
+  }]);
+  make('bruce_render', 'Render the shed walkthrough', '/Users/bruce/dev/me/shed', 1, 'running', [{
+    ask: 'Render the shed walkthrough at 1080p and tell me when it is done.',
+  }]);
+  // A turn under way: its clock started a little while ago.
+  const render = threads.get('bruce_render').summary;
+  render.lastActivityAt = ago(3);
 }
 
 function scheduleWake(threadId) {
@@ -1826,7 +1931,7 @@ function projectRequest(method, p) {
     case 'librarian.run': {
       const due = new Date(Date.now() + 10_000).toISOString();
       const ids = p.threadId ? [need(p.threadId).summary.id]
-        : newestFirst([...threads.values()].map((t) => t.summary).filter((s) => !s.projects?.length && !s.archivedAt)).map((s) => s.id);
+        : newestFirst([...threads.values()].filter((t) => !t.runnerId).map((t) => t.summary).filter((s) => !s.projects?.length && !s.archivedAt)).map((s) => s.id);
       for (const id of ids) {
         if (librarian.current?.threadId === id || librarian.queue.some((j) => j.threadId === id)) continue;
         librarian.queue.push({ threadId: id, threadTitle: threads.get(id).summary.title, reason: 'asked', why: 'Asked for', dueAt: due });

@@ -153,6 +153,12 @@ struct ComposerView: View {
     /// through the runner's `media.import` into the draft.
     private func attach(_ urls: [URL], to draft: Binding<Draft>) {
         guard !urls.isEmpty else { return }
+        // A picture this Mac's runner keeps would be a path another
+        // runner hasn't got.
+        if let thread, let name = app.runnerName(of: thread) {
+            app.errorMessage = "Pictures can't go to \(name) from this Mac yet."
+            return
+        }
         importing += urls.count
         Task {
             let refs = await app.importImages(urls)
