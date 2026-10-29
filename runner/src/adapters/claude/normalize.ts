@@ -14,6 +14,19 @@ export { fileContext, type NormalizerContext } from '../context.ts';
 
 type AnyMsg = Record<string, any>;
 
+// Opus 5.5 with summarised thinking at times sends what it says to Mike
+// as a thinking block, not a text block: the block's signature (a
+// protobuf, base64) names its kind "narration" where a real one says
+// "thinking". It sits in the text block's slot (thinking, narration, tool
+// call; never a text block after it) and reads as the reply. Shown as
+// reasoning, those replies were folded away and end_turn refused the turn
+// for having none (29 Oct 2026). The CLI itself doesn't tell them apart.
+export function isNarration(signature: unknown): boolean {
+  if (typeof signature !== 'string' || !signature) return false;
+  // The kind is in the first few dozen bytes; 64 characters is 48 of them.
+  return Buffer.from(signature.slice(0, 64), 'base64').includes('narration');
+}
+
 type OpenItem = { type: 'assistant.text' | 'reasoning'; text: string };
 
 export class ClaudeNormalizer {
@@ -216,6 +229,12 @@ export class ClaudeNormalizer {
         const itemId = `${this.curMsgId}:${ev.index}`;
         if (d?.type === 'text_delta' && d.text) this.delta(out, 'assistant.text', itemId, d.text);
         else if (d?.type === 'thinking_delta' && d.thinking) this.delta(out, 'reasoning', itemId, d.thinking);
+        else if (d?.type === 'signature_delta' && isNarration(d.signature)) {
+          // Its deltas went out as reasoning; the complete frame says text.
+          // This keeps one cut off before that frame as text too.
+          const item = this.open.get(itemId);
+          if (item) item.type = 'assistant.text';
+        }
         break;
       }
       case 'message_delta': {
@@ -262,7 +281,7 @@ export class ClaudeNormalizer {
           if (block.text) out.push({ kind: 'event', event: { type: 'assistant.text', itemId, text: block.text } });
           break;
         case 'thinking':
-          if (block.thinking) out.push({ kind: 'event', event: { type: 'reasoning', itemId, text: block.thinking } });
+          if (block.thinking) out.push({ kind: 'event', event: { type: isNarration(block.signature) ? 'assistant.text' : 'reasoning', itemId, text: block.thinking } });
           break;
         case 'tool_use':
         case 'server_tool_use':

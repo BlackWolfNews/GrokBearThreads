@@ -509,3 +509,44 @@ test('init reports the session and the version of the CLI running it', () => {
   // An older CLI without the field just reports the session.
   assert.ok(!n.handle({ type: 'system', subtype: 'init', session_id: 's1', model: 'x' }).some((o) => o.kind === 'cliVersion'));
 });
+
+// Opus 5.5 (with summarised thinking) at times sends its reply as a
+// thinking block whose signature says "narration", in the very slot a text
+// block would take, and never a text block after it. Shown as reasoning,
+// Mike lost the reply and end_turn refused the turn (29 Oct 2026). These
+// are the first bytes of real signatures from that thread.
+const THINKING_SIG = 'CAQSgwwKEAgTGAI4AUIIdGhpbmtpbmcSDHCL3VyUshfP/bVqShoMrDMmssSa4HNEPdUlIjCBvNA2YwVcxIn+';
+const NARRATION_SIG = 'CAQSjhEKEQgTGAI4AUIJbmFycmF0aW9uEgwlQ92PE4QEL1MnR7kaDO5+aQgmped7VShGsSIwdgSJ2ZkHJEzG';
+
+test('a thinking block signed as narration is the reply: assistant.text, not reasoning', () => {
+  const n = new ClaudeNormalizer(ctx());
+  n.sent();
+  const frame = (content: unknown[]) => ({ type: 'assistant', message: { id: 'm1', content }, parent_tool_use_id: null });
+  const outs = [
+    frame([{ type: 'thinking', thinking: 'Wrap up now.', signature: THINKING_SIG }]),
+    frame([{ type: 'thinking', thinking: 'Found the bug and fixed it.', signature: NARRATION_SIG }]),
+    frame([{ type: 'tool_use', id: 'tu1', name: 'mcp__threadbear__end_turn', input: { needs: 'nothing' } }]),
+  ].flatMap((m) => n.handle(m));
+  assertProtocol(outs);
+  assert.deepEqual(
+    events(outs).map((e) => [e.type, e.itemId, e.text ?? e.name]),
+    [
+      ['reasoning', 'm1:0', 'Wrap up now.'],
+      ['assistant.text', 'm1:1', 'Found the bug and fixed it.'],
+      ['tool.call', 'tu1', 'mcp__threadbear__end_turn'],
+    ],
+  );
+});
+
+test('a narration block cut off after its signature streamed is kept as text', () => {
+  const n = new ClaudeNormalizer(ctx());
+  const se = (event: unknown) => ({ type: 'stream_event', event, parent_tool_use_id: null });
+  const outs = [
+    se({ type: 'message_start', message: { id: 'm1' } }),
+    se({ type: 'content_block_start', index: 0, content_block: { type: 'thinking', thinking: '' } }),
+    se({ type: 'content_block_delta', index: 0, delta: { type: 'thinking_delta', thinking: 'All done.' } }),
+    se({ type: 'content_block_delta', index: 0, delta: { type: 'signature_delta', signature: NARRATION_SIG } }),
+    { type: 'result', subtype: 'error_during_execution', is_error: true, terminal_reason: 'aborted_streaming', duration_ms: 5, errors: ['[ede_diagnostic] x'] },
+  ].flatMap((m) => n.handle(m));
+  assert.deepEqual(events(outs), [{ type: 'assistant.text', itemId: 'm1:0', text: 'All done.' }]);
+});

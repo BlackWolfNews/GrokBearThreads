@@ -4,6 +4,7 @@ import type { PersistedEvent } from '../../src/protocol.ts';
 import { archiveFromTool, CODEX_END_TURN_DESCRIPTION, END_TURN_DESCRIPTION, END_TURN_FULL_NAME, needsFromText, needsFromTool, turnReply } from '../../src/needs.ts';
 import { END_TURN_TOOL } from '../../src/needs.ts';
 import { SERVER_NAME } from '../../src/threadbear-mcp.ts';
+import { ClaudeNormalizer, fileContext } from '../../src/adapters/claude/normalize.ts';
 
 test('end_turn input: nothing, you with asks, and junk falls back', () => {
   assert.deepEqual(needsFromTool({ needs: 'nothing', asks: [{ action: 'ignored' }] }), { needs: 'nothing' });
@@ -194,6 +195,31 @@ test("turnReply: not landed until the call is in the events; a Codex child's ite
   assert.deepEqual(turnReply(log(user(), started, call('b1', 'Bash'), result('b1'))), { landed: false, replied: false });
   // The child's text and its own end_turn are not the thread's.
   assert.deepEqual(turnReply(log(user(), started, text('Done.'), call('child/b1', 'Bash'), result('child/b1'), call('child/e1', END), call('e1', END))), { landed: true, replied: true });
+});
+
+// The 29 Oct refusals (threads 1edccf6f and ec75fe8b): the reply came as a
+// thinking block signed as narration, straight before end_turn, after a
+// create_thread result. Run the CLI's frames through the Claude normaliser
+// as the runner does: that reply counts, and a plain thought still doesn't.
+test('turnReply: a reply the CLI sent as a narration block counts; a thought before end_turn still does not', () => {
+  const sig = (kind: string) => Buffer.concat([Buffer.from('0804128e110a11081318023801', 'hex'), Buffer.from([0x42, kind.length]), Buffer.from(kind)]).toString('base64');
+  const turn = (kind: string) => {
+    const n = new ClaudeNormalizer(fileContext('/work', '/nowhere/media', '/nowhere/blobs'));
+    n.sent();
+    const frame = (id: string, content: unknown[]) => ({ type: 'assistant', message: { id, content }, parent_tool_use_id: null });
+    const evs = [
+      frame('m1', [{ type: 'tool_use', id: 'c1', name: 'mcp__threadbear__create_thread', input: {} }]),
+      { type: 'user', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'c1', content: 'Started thread 3fee4428' }] }, parent_tool_use_id: null },
+      frame('m2', [{ type: 'thinking', thinking: 'Wrap up.', signature: sig('thinking') }]),
+      frame('m2', [{ type: 'thinking', thinking: "I've started a thread to fix the refusals.", signature: sig(kind) }]),
+      frame('m2', [{ type: 'tool_use', id: 'e1', name: END, input: { needs: 'nothing' } }]),
+    ]
+      .flatMap((m) => n.handle(m))
+      .flatMap((o) => (o.kind === 'event' ? [o.event as Record<string, unknown> & { type: string }] : []));
+    return turnReply(log(user(), started, ...evs));
+  };
+  assert.deepEqual(turn('narration'), { landed: true, replied: true });
+  assert.deepEqual(turn('thinking'), { landed: true, replied: false });
 });
 
 test("end_turn's description asks for the words naming a link's target to be that link", () => {

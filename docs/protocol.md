@@ -597,7 +597,11 @@ Transient events are only sent to subscribers, never persisted, and carry
 | `tool.output.delta` | `itemId`, `text` (append, for long-running commands if available) |
 
 When an item completes, its persisted event (`assistant.text`, `reasoning`)
-replaces whatever the deltas built up.
+replaces whatever the deltas built up. That can be of the other kind: Claude
+at times sends its reply as a thinking block signed as narration, which
+streams as `reasoning.delta` and lands as `assistant.text` with the same
+`itemId` (it is the reply, so end_turn counts it). A client lets the text
+take the streaming reasoning row's place.
 
 ## Requests (app to runner)
 
@@ -1135,7 +1139,10 @@ A turn the agent finished can say whether Mike has to do anything, so
   to read, so a message, then `pin`, then `end_turn` is fine; a progress
   line, then more work, then `end_turn` is not. An agent that drafted its answer in
   thinking and went straight to `end_turn` left Mike a folded work group
-  and a card, twice in one thread (28 Oct 2026). The SDK runs a tool as
+  and a card, twice in one thread (28 Oct 2026). A reply Claude sent as
+  a thinking block signed as narration is an `assistant.text` (see
+  Transient events), so it counts; a thinking block signed as thinking
+  doesn't. The SDK runs a tool as
   soon as it reads the call, at times a few frames ahead of the runner's
   log, so the handler waits up to a second for its own call to land
   before judging; one that never lands (a sub-agent's, which the events

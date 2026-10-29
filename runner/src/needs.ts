@@ -254,7 +254,10 @@ export function endTurnAccepted(result: { ok: boolean; text: string }): boolean 
 // Whether the turn so far has given Mike a reply, for end_turn to check
 // before it ends the turn. An agent that drafted its answer in thinking
 // and went straight to end_turn left him a folded work group and a card
-// of asks, twice in one thread (28 Oct 2026). `events` are the thread's
+// of asks, twice in one thread (28 Oct 2026). Those answers, and the
+// replies refused on 29 Oct, were thinking blocks signed as narration,
+// which the Claude normaliser now makes assistant.text (isNarration);
+// this still refuses a turn whose only words were thinking. `events` are the thread's
 // recent ones, oldest first; only those after the last turn.started count.
 export type TurnReply = {
   // This end_turn call has reached the events (a tool.call for it with no

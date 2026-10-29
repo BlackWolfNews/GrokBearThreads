@@ -483,7 +483,18 @@ public struct TranscriptModel: Sendable {
         case .assistantText(let itemId, let text):
             streaming[itemId] = nil
             let id = "a:\(itemId)"
-            if itemIndex[id] != nil {
+            let thought = "r:\(itemId)"
+            if itemIndex[id] == nil, let i = itemIndex[thought], case .reasoning(let live) = items[i].content, live.isStreaming {
+                // A reply the CLI sent as a thinking block signed as
+                // narration (runner: isNarration in normalize.ts) streams as
+                // reasoning and lands as text: it takes that row's place.
+                var row = TranscriptRow(id: id, seq: items[i].seq, turnId: items[i].turnId, content: .assistant(TextItem(itemId: itemId, text: text)))
+                row.version = RowVersion.next()
+                items[i] = row
+                itemIndex[thought] = nil
+                itemIndex[id] = i
+                markInserted(i)
+            } else if itemIndex[id] != nil {
                 update(id) { $0 = .assistant(TextItem(itemId: itemId, text: text)) }
             } else if !text.isEmpty {
                 append(TranscriptRow(id: id, seq: seq, turnId: turnId, content: .assistant(TextItem(itemId: itemId, text: text))))

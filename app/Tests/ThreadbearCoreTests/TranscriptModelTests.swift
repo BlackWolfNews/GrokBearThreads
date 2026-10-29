@@ -83,6 +83,22 @@ final class TranscriptModelTests: XCTestCase {
         XCTAssertGreaterThan(model.rows[1].version, version)
     }
 
+    /// A reply the CLI sent as a narration block streams as reasoning and
+    /// lands as text with the same item id: the text takes the live
+    /// reasoning row's place rather than leaving it streaming forever.
+    func testTextLandingForStreamingReasoningTakesItsPlace() {
+        var model = TranscriptModel(events: [E.user(1, "Hi")])
+        _ = model.apply([E.event(1, "reasoning.delta", ["itemId": "m1:1", "text": "All done"])])
+        XCTAssertEqual(model.items.map(\.id), ["u:1", "r:m1:1"])
+        _ = model.apply([E.text(2, "m1:1", "All done.")])
+        XCTAssertEqual(model.items.map(\.id), ["u:1", "a:m1:1"])
+        XCTAssertEqual(model.rows.map(\.id), ["u:1", "a:m1:1"])
+        XCTAssertEqual(model.rows[1].content, .assistant(TextItem(itemId: "m1:1", text: "All done.")))
+        // A finished thought with the same id is left alone.
+        _ = model.apply([E.event(3, "reasoning", ["itemId": "m2:0", "text": "Thought."]), E.text(4, "m2:0", "Said.")])
+        XCTAssertEqual(model.items.map(\.id), ["u:1", "a:m1:1", "r:m2:0", "a:m2:0"])
+    }
+
     func testDuplicateAndOldEventsAreIgnoredAndGapsFlagged() {
         var model = TranscriptModel(events: [E.user(1, "a"), E.text(2, "m1", "b")])
         XCTAssertTrue(model.apply([E.text(2, "m1", "b")]).isEmpty)
