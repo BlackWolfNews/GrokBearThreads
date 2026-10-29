@@ -68,6 +68,9 @@ test('a second runner on the same data dir refuses to start and touches nothing'
     assert.match(c.out(), /port \d+ is already in use/);
     assert.doesNotMatch(c.out(), /Unhandled 'error' event/);
 
+    // Run from a checkout on a temp data dir: no Sentry (sentry.ts).
+    assert.match(fs.readFileSync(path.join(home, 'runner.log'), 'utf8'), /runner starting .*"sentry":false/);
+
     a.proc.kill('SIGTERM');
     assert.equal(await a.exited, 0);
     assert.equal(fs.existsSync(path.join(home, 'run', 'runner.pid')), false, 'the lock is released on a clean stop');

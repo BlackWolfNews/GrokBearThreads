@@ -60,8 +60,11 @@ arguments, isn't on production APNs or has no privacy manifest.
 
 ## 5. Only in App Store Connect
 
-- **App Privacy**: Data Not Collected (the developer collects nothing; it only talks to the
-  person's own deployment). Publish.
+- **App Privacy**: from the version after 1.0.0, Diagnostics > Crash Data, not linked to the
+  user, not used for tracking, for App Functionality: App Store builds send anonymous crash
+  reports to Sentry (`Threadbear/CrashReporting.swift`). Nothing else is collected; the app only
+  talks to the person's own deployment. Publish. (1.0.0 went in as Data Not Collected, before
+  Sentry.)
 - **App Information > Regulated Medical Device**: not a medical device (Walkies was asked for this
   on resubmission, Oct 2026).
 - **Age Rating**: any questions `appstore-metadata.mjs` lists as unanswered; all none, no kids band.

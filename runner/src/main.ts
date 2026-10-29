@@ -39,6 +39,7 @@ import { Models } from './models/index.ts';
 import { SettingsService, modelMethods, settingsMethods } from './settings.ts';
 import { ConvexSync, defaultRunnerName, ensureRunnerId, readSyncKey } from './sync.ts';
 import { devicesMethods } from './devices.ts';
+import { flushSentry, reportException, reportLoggedError, startSentry } from './sentry.ts';
 import { ALWAYS_ASK_TOOLS, SERVER_NAME, buildThreadbearTools, threadbearMcpServer } from './threadbear-mcp.ts';
 
 // Tells launch.mjs this runner calls its listening() hook (release.ts), so
@@ -48,8 +49,10 @@ export const REPORTS_LISTENING = true;
 async function main(): Promise<void> {
   const cfg = loadConfig();
   ensureHome(cfg.home);
-  const log = createLogger(cfg.logFile, { echo: process.env.THREADBEAR_LOG_STDERR === '1', debug: process.env.THREADBEAR_DEBUG === '1' });
-  log.info('runner starting', { version: RUNNER_VERSION, home: cfg.home, port: cfg.port, pid: process.pid });
+  const log = createLogger(cfg.logFile, { echo: process.env.THREADBEAR_LOG_STDERR === '1', debug: process.env.THREADBEAR_DEBUG === '1', onError: reportLoggedError });
+  // Only the installed runner reports to Sentry (sentry.ts says why).
+  const reporting = await startSentry(cfg.home);
+  log.info('runner starting', { version: RUNNER_VERSION, home: cfg.home, port: cfg.port, pid: process.pid, sentry: reporting });
 
   // The SDK warns when canUseTool is set in bypass mode; it's deliberate
   // (AskUserQuestion still goes through it), so keep it out of the log.
@@ -557,9 +560,11 @@ async function main(): Promise<void> {
   process.on('SIGHUP', () => void stop('SIGHUP'));
   process.on('uncaughtException', (e) => {
     log.error('uncaught exception', { error: e?.stack ?? String(e) });
+    reportException(e, 'uncaught exception');
   });
   process.on('unhandledRejection', (e) => {
     log.error('unhandled rejection', { error: (e as Error)?.stack ?? String(e) });
+    reportException(e, 'unhandled rejection');
   });
   // Last resort if the process exits some other way: kill the CLI groups
   // synchronously so they never outlive the runner.
@@ -588,7 +593,9 @@ function missingCodex(start: string, cfg: ReturnType<typeof loadConfig>): string
   return `The codex CLI isn't at ${start}, so Codex threads can't start. Install @openai/codex next to the runner's Node, or set codexPath in runner.json.`;
 }
 
-main().catch((e) => {
+main().catch(async (e) => {
   process.stderr.write(`runner failed to start: ${e?.stack ?? e}\n`);
+  reportException(e, 'runner failed to start');
+  await flushSentry();
   process.exit(1);
 });

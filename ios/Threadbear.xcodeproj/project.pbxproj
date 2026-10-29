@@ -8,6 +8,7 @@
 
 /* Begin PBXBuildFile section */
 		BB0000000000000000000301 /* ThreadbearKit in Frameworks */ = {isa = PBXBuildFile; productRef = BB0000000000000000000401 /* ThreadbearKit */; };
+		BB0000000000000000000303 /* Sentry in Frameworks */ = {isa = PBXBuildFile; productRef = BB0000000000000000000402 /* Sentry */; };
 		BB0000000000000000000302 /* NotificationService.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = BB0000000000000000000103 /* NotificationService.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 /* End PBXBuildFile section */
 
@@ -85,6 +86,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				BB0000000000000000000301 /* ThreadbearKit in Frameworks */,
+				BB0000000000000000000303 /* Sentry in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -150,6 +152,7 @@
 			name = Threadbear;
 			packageProductDependencies = (
 				BB0000000000000000000401 /* ThreadbearKit */,
+				BB0000000000000000000402 /* Sentry */,
 			);
 			productName = Threadbear;
 			productReference = BB0000000000000000000101 /* Threadbear.app */;
@@ -204,6 +207,7 @@
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
 				BB0000000000000000000201 /* XCLocalSwiftPackageReference "ThreadbearKit" */,
+				BB0000000000000000000202 /* XCLocalSwiftPackageReference "../app/SentryBinary" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = BB0000000000000000000502 /* Products */;
@@ -462,12 +466,20 @@
 			isa = XCLocalSwiftPackageReference;
 			relativePath = ThreadbearKit;
 		};
+		BB0000000000000000000202 /* XCLocalSwiftPackageReference "../app/SentryBinary" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = ../app/SentryBinary;
+		};
 /* End XCLocalSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
 		BB0000000000000000000401 /* ThreadbearKit */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = ThreadbearKit;
+		};
+		BB0000000000000000000402 /* Sentry */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = Sentry;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

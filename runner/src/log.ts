@@ -10,7 +10,8 @@ export type Logger = {
 
 // Plain line logger. Never pass secrets in `extra`; callers log names and
 // paths only.
-export function createLogger(file: string | null, opts: { echo?: boolean; debug?: boolean } = {}): Logger {
+// onError sees every ERROR line too (main.ts sends them to Sentry).
+export function createLogger(file: string | null, opts: { echo?: boolean; debug?: boolean; onError?: (msg: string, extra?: Record<string, unknown>) => void } = {}): Logger {
   let fd: number | null = null;
   if (file) {
     try {
@@ -34,7 +35,10 @@ export function createLogger(file: string | null, opts: { echo?: boolean; debug?
   return {
     info: (m, e) => write('INFO', m, e),
     warn: (m, e) => write('WARN', m, e),
-    error: (m, e) => write('ERROR', m, e),
+    error: (m, e) => {
+      write('ERROR', m, e);
+      opts.onError?.(m, e);
+    },
     debug: (m, e) => {
       if (opts.debug) write('DEBUG', m, e);
     },

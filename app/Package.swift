@@ -16,6 +16,9 @@ let package = Package(
         .package(url: "https://github.com/raspu/Highlightr.git", from: "2.3.0"),
         // The window's dockable panels, in this repo (dock/README.md).
         .package(path: "../dock"),
+        // Crash reports from the installed app (CrashReporting.swift):
+        // Sentry's static framework alone (SentryBinary/Package.swift says why).
+        .package(path: "SentryBinary"),
     ],
     targets: [
         // Protocol models, the JSON-RPC client, the event reducer and other
@@ -31,6 +34,7 @@ let package = Package(
                 .product(name: "Markdown", package: "swift-markdown"),
                 .product(name: "Highlightr", package: "Highlightr"),
                 .product(name: "BearDock", package: "dock"),
+                .product(name: "Sentry", package: "SentryBinary"),
             ],
             path: "Sources/Threadbear",
             // Big pictures (the Librarian's page). Looked up through Art,

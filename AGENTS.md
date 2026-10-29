@@ -36,6 +36,14 @@ static site with its own `package.json`; its comments say how to build it.
   `.help` and `toolTip` never show in this app; TipsTests fails on them.
 - Transcript files and fixtures made from real sessions are private: keep them
   out of git (`.fixtures/` is ignored).
+- Errors go to Sentry (project `threadbear`, tag `component` mac, runner or
+  ios) only from what Mike really runs: the installed release app
+  (`app/Sources/Threadbear/CrashReporting.swift`), the installed runner's
+  release on the real data dir (`runner/src/sentry.ts`) and App Store
+  iPhone builds. Debug builds, dev runners, tests, sandboxes and scripted
+  runs never report; keep it that way. `THREADBEAR_SENTRY=off` turns it off.
+  Never add user text to what's sent. Convex reports through its own log
+  stream, so convex/ has no Sentry.
 - Mike's own repo: work goes to main once tests pass. A thread started in
   this repo has a worktree of its own and lands with `tb land` (below).
   Anywhere several threads share a checkout (the main one, a worktree made
