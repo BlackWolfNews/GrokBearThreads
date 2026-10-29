@@ -125,6 +125,58 @@ public enum PatchGroups {
     }
 }
 
+/// Where a panel came from, for the small badge in the corner of its rail
+/// button: two Convex buttons, say, one from the thread's folder and one
+/// from a project's, look alike without it.
+public enum PanelOrigin: Sendable, Equatable {
+    /// One of the thread's projects' folders: the badge is that project's icon.
+    case project(id: String)
+    /// A tool patch (`appliesTo`), here for these paths.
+    case tool(matched: [String])
+    /// `~/.threadbear/patches`.
+    case home
+    /// A `.threadbear/patches` in the thread's folder or one above it.
+    case folder
+    case builtin
+
+    /// A project's folder wins over the rest, as that's what Mike would
+    /// least expect to see in another folder's thread; then a tool patch,
+    /// which is there because of one file.
+    public static func of(_ panel: Panel, in thread: ThreadSummary) -> PanelOrigin {
+        let patch = thread.patches.first { $0.id == panel.patch }
+        if let projectId = panel.projectId ?? patch?.projectId { return .project(id: projectId) }
+        if let matched = patch?.matched, !matched.isEmpty { return .tool(matched: matched) }
+        switch patch?.source {
+        case "home": return .home
+        case "builtin": return .builtin
+        default: return .folder
+        }
+    }
+
+    /// The badge's SF Symbol; nil for a project, whose own icon is drawn.
+    public var symbol: String? {
+        switch self {
+        case .project: return nil
+        case .tool: return "wrench.and.screwdriver.fill"
+        case .home: return "house.fill"
+        case .folder: return "folder.fill"
+        case .builtin: return "shippingbox.fill"
+        }
+    }
+
+    /// The rail button's tooltip: "Convex, from the Threadbear project".
+    public func tip(_ title: String, projectTitle: String?) -> String {
+        switch self {
+        case .project: return "\(title), " + (projectTitle.map { "from the \($0) project" } ?? "from a project")
+        case .tool(let matched):
+            return "\(title), for " + matched.map { ($0 as NSString).lastPathComponent }.joined(separator: ", ")
+        case .home: return "\(title), from ~/.threadbear"
+        case .folder: return "\(title), from this folder's .threadbear"
+        case .builtin: return "\(title), built in"
+        }
+    }
+}
+
 /// The words the Librarian view uses.
 public enum LibrarianText {
     /// "Idle", "Looking at Rename the Settings tabs", "Paused", "Off: No

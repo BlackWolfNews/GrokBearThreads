@@ -280,6 +280,31 @@ final class ProjectTests: XCTestCase {
         XCTAssertEqual(found.map(\.thread.id), ["th1", "th2"])
     }
 
+    func testPanelOriginForTheRailBadge() {
+        var thread = ThreadSummary(id: "th1", title: "t", projects: [ThreadProject(id: "p_a", title: "Threadbear")])
+        thread.patches = [
+            PatchInfo(id: "convex", source: "builtin"),
+            PatchInfo(id: "threadbear:convex", source: "builtin", folder: "/tb", projectId: "p_a"),
+            PatchInfo(id: "tandem", source: "home", matched: ["/videos/James/edit.tandem"]),
+            PatchInfo(id: "storybook", source: "home"),
+            PatchInfo(id: "checks", source: "project"),
+        ]
+        let origin = { (patch: String, projectId: String?) in
+            PanelOrigin.of(Panel(id: patch + ".p", title: "P", patch: patch, projectId: projectId), in: thread)
+        }
+        XCTAssertEqual(origin("convex", nil), .builtin)
+        XCTAssertEqual(origin("threadbear:convex", nil), .project(id: "p_a"), "the patch's project")
+        XCTAssertEqual(origin("convex", "p_a"), .project(id: "p_a"), "the panel's own project wins")
+        XCTAssertEqual(origin("tandem", nil), .tool(matched: ["/videos/James/edit.tandem"]))
+        XCTAssertEqual(origin("storybook", nil), .home)
+        XCTAssertEqual(origin("checks", nil), .folder)
+        XCTAssertEqual(origin("gone", nil), .folder, "a summary a moment behind")
+        XCTAssertNil(PanelOrigin.project(id: "p_a").symbol, "drawn with the project's icon")
+        XCTAssertEqual(PanelOrigin.project(id: "p_a").tip("Convex", projectTitle: "Threadbear"), "Convex, from the Threadbear project")
+        XCTAssertEqual(PanelOrigin.project(id: "p_a").tip("Convex", projectTitle: nil), "Convex, from a project")
+        XCTAssertEqual(origin("tandem", nil).tip("Timeline", projectTitle: nil), "Timeline, for edit.tandem")
+    }
+
     // MARK: Words
 
     func testLibrarianWords() {

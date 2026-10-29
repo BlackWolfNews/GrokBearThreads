@@ -195,9 +195,13 @@ struct PanelRail: View {
             }
             .tourTarget(.highlightsRail)
             ForEach(thread.panels) { panel in
-                ActivityButton(symbol: PanelIcon.symbol(for: panel), image: PatchImage.image(panel.iconFile), tinted: false, title: panel.title, badge: panel.badge, active: app.dock.isShowing(panel.id)) {
+                let origin = PanelOrigin.of(panel, in: thread)
+                ActivityButton(symbol: PanelIcon.symbol(for: panel), image: PatchImage.image(panel.iconFile), tinted: false, title: panel.title,
+                               tip: origin.tip(panel.title, projectTitle: projectTitle(origin)), badge: panel.badge, active: app.dock.isShowing(panel.id)) {
                     app.clickRail(.panel(panel.id), in: thread)
                 }
+                // Bottom corner: the top one is the patch's count.
+                .overlay(alignment: .bottomTrailing) { PanelOriginBadge(origin: origin, projectTitle: projectTitle(origin) ?? "") }
             }
             Spacer(minLength: zoomed(8))
             if !thread.patches.isEmpty {
@@ -222,6 +226,40 @@ struct PanelRail: View {
             // A different thread is the task's job above.
             if old.threadId == new.threadId { app.refreshHighlights(thread.id) }
         }
+    }
+
+    private func projectTitle(_ origin: PanelOrigin) -> String? {
+        guard case .project(let id) = origin else { return nil }
+        return thread.projects.first { $0.id == id }?.title ?? app.project(id)?.title
+    }
+}
+
+/// The little badge in the bottom corner of a panel's rail button that says
+/// where it came from: the project's own icon for a project's folder, else
+/// a glyph (a house for ~/.threadbear, a folder for the thread's own, a
+/// wrench for a tool patch, a box for a built-in). Grey and small, like the
+/// counts: it's there to answer "where's this from?", not to be noticed.
+struct PanelOriginBadge: View {
+    @Environment(AppModel.self) private var app
+    let origin: PanelOrigin
+    /// For the letter tile, when the project isn't in the list yet.
+    var projectTitle = ""
+
+    var body: some View {
+        Group {
+            if case .project(let id) = origin {
+                ProjectIconView(project: app.project(id), title: projectTitle, size: 10)
+            } else if let symbol = origin.symbol {
+                Image(systemName: symbol)
+                    .font(.system(size: zoomed(6.5), weight: .semibold))
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .frame(width: zoomed(13), height: zoomed(13))
+        .background(Color(nsColor: .windowBackgroundColor), in: Circle())
+        .overlay(Circle().strokeBorder(.separator, lineWidth: 0.5))
+        .offset(x: zoomed(2), y: zoomed(1))
+        .allowsHitTesting(false)
     }
 }
 
