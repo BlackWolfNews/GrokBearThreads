@@ -74,6 +74,7 @@ final class AppModel {
     @ObservationIgnored private var heldWhileSliding: [String: ThreadSummary] = [:]
     var threads: [String: ThreadSummary] = [:] {
         didSet {
+            threadsVersion &+= 1
             refreshDockBadge()
             noteFailedAccounts(from: oldValue)
             // Most updates change a thread, not which threads there are.
@@ -192,7 +193,9 @@ final class AppModel {
     var accountPickerRequest = 0
     /// Every schedule, in the runner's order (soonest first, then the
     /// paused and finished ones). Replaced whole by `schedules.updated`.
-    var schedules: [Schedule] = []
+    var schedules: [Schedule] = [] {
+        didSet { schedulesVersion &+= 1 }
+    }
     /// The runner knows about schedules: an older one answers
     /// `schedules.list` with -32601, and then the sidebar has no Scheduled row.
     var schedulesSupported = false
@@ -218,7 +221,9 @@ final class AppModel {
     @ObservationIgnored var remoteTidy: Task<Void, Never>?
     /// Every project, archived ones too, in the runner's order (newest
     /// activity first). Replaced whole by `projects.updated`.
-    var projects: [Project] = []
+    var projects: [Project] = [] {
+        didSet { projectsVersion &+= 1 }
+    }
     /// The runner knows about projects: an older one answers
     /// `projects.list` with -32601, and then the activity bar has no
     /// Projects or Librarian button and threads show no project chips.
@@ -463,9 +468,43 @@ final class AppModel {
         }
     }
 
+    // Bumped on every change to these, for the memos below: cheaper than
+    // comparing every thread.
+    @ObservationIgnored private var threadsVersion = 0
+    @ObservationIgnored private var schedulesVersion = 0
+    @ObservationIgnored private var projectsVersion = 0
+    private struct DerivedKey: Equatable {
+        var threads: Int, other: Int, now: Date, order: InboxOrder?
+    }
+    @ObservationIgnored private var sectionsMemo: (key: DerivedKey, value: ThreadSections)?
+    @ObservationIgnored private var projectSectionsMemo: (key: DerivedKey, value: ProjectSections)?
+
     // MARK: Derived
 
-    var sections: ThreadSections { ThreadSections.build(threads.values, now: now, wakes: wakes, order: inboxOrder) }
+    /// Built once per change rather than once per reader. The activity
+    /// bar's badge, the inbox list and the projects views all read these, and
+    /// every thread.updated from a running thread used to rebuild them for
+    /// each one, copying and sorting every thread each time: most of what an
+    /// update cost the main thread.
+    var sections: ThreadSections {
+        // Read through the observed properties every time, memo or not, so
+        // a view reading this still redraws when any of them changes.
+        let (threads, now, schedules, order) = (threads, now, schedules, inboxOrder)
+        let key = DerivedKey(threads: threadsVersion, other: schedulesVersion, now: now, order: order)
+        if let memo = sectionsMemo, memo.key == key { return memo.value }
+        let built = ThreadSections.build(threads.values, now: now, wakes: ThreadSections.wakes(schedules), order: order)
+        sectionsMemo = (key, built)
+        return built
+    }
+
+    var projectSections: ProjectSections {
+        let (threads, now, projects) = (threads, now, projects)
+        let key = DerivedKey(threads: threadsVersion, other: projectsVersion, now: now, order: nil)
+        if let memo = projectSectionsMemo, memo.key == key { return memo.value }
+        let built = ProjectSections.build(projects: projects, threads: threads.values, now: now)
+        projectSectionsMemo = (key, built)
+        return built
+    }
     /// The schedule due to message each thread soonest, for the Waiting section.
     var wakes: [String: Schedule] { ThreadSections.wakes(schedules) }
     var snoozed: [ThreadSummary] { ThreadSections.snoozed(threads.values, now: now) }

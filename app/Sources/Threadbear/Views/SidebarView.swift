@@ -700,14 +700,15 @@ struct ThreadRowView: View {
                     .frame(width: zoomed(12), height: zoomed(12))
                     // On the text's baseline, centred on its lowercase.
                     .alignmentGuide(.firstTextBaseline) { $0[VerticalAlignment.center] + zoomed(4) }
-                // How long the turn has run, ticking once a second. Only
-                // running rows have this, and there are one to three.
+                // How long the turn has run, ticking once a second. No
+                // rolling digits: each roll animated for a moment, and every
+                // frame of it laid the whole window out again. With a dozen
+                // threads running, ticking out of step, that kept the main
+                // thread over half busy doing nothing, and every click and
+                // scroll waited behind it (29 Oct).
                 TimelineView(.periodic(from: .now, by: 1)) { context in
                     let elapsed = ThreadRowLook.workingLabel(since: thread.lastActivityAt, now: context.date)
-                    // The seconds roll over like a counter.
                     Text(look.labelled ? "Working " + elapsed : elapsed).monospacedDigit()
-                        .contentTransition(.numericText(countsDown: false))
-                        .animation(Juice.swap, value: elapsed)
                 }
             }
             .font(.system(size: TypeScale.sidebarMeta, weight: .medium))

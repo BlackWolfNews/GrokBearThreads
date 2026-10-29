@@ -47,8 +47,6 @@ extension AppModel {
 
     var openProject: Project? { openProjectId.flatMap(project) }
 
-    var projectSections: ProjectSections { ProjectSections.build(projects: projects, threads: threads.values, now: now) }
-
     var projectCards: [ProjectCard] { ProjectCard.build(projectSections) }
 
     /// Projects a thread could be put in: the live ones it isn't in.

@@ -224,6 +224,21 @@ enum Automation {
         return "ok \(window.windowNumber) " + shown
     }
 
+    /// Milliseconds from `start` until the main run loop next goes idle:
+    /// the SwiftUI update, layout and Core Animation commit a change sets
+    /// off. The observer runs last of the run loop's, after SwiftUI's and
+    /// Core Animation's own.
+    private static func untilIdle(since start: CFAbsoluteTime) async -> Int {
+        await withCheckedContinuation { (done: CheckedContinuation<Int, Never>) in
+            nonisolated(unsafe) var observer: CFRunLoopObserver?
+            observer = CFRunLoopObserverCreateWithHandler(nil, CFRunLoopActivity.beforeWaiting.rawValue, false, CFIndex.max) { _, _ in
+                CFRunLoopRemoveObserver(CFRunLoopGetMain(), observer, .commonModes)
+                done.resume(returning: Int(((CFAbsoluteTimeGetCurrent() - start) * 1000).rounded()))
+            }
+            CFRunLoopAddObserver(CFRunLoopGetMain(), observer, .commonModes)
+        }
+    }
+
     private static func run(_ name: String, _ c: [String: Any], app: AppModel) async -> String {
         let window = mainWindow
         switch name {
@@ -500,7 +515,97 @@ enum Automation {
             if app.isRunning(action: action, in: thread.id) { return "error \(id) still running after the timeout" }
             try? await Task.sleep(for: .milliseconds(150))
             return "ok ran \(id)"
+        case "running":
+            // Shows `count` threads as running, in this app only (the runner
+            // isn't told), as Mike's sidebar has on a busy day, and says how
+            // much of the main thread `seconds` of doing nothing then takes.
+            let count = c["count"] as? Int ?? 10
+            let idle = app.threads.values.filter { !$0.isArchived && $0.status == .idle }.sorted { $0.lastActivityAt > $1.lastActivityAt }
+            for var thread in idle.prefix(count) {
+                thread.status = .running
+                thread.lastActivityAt = Date().addingTimeInterval(-Double.random(in: 5...300))
+                app.threads[thread.id] = thread
+            }
+            let seconds = c["seconds"] as? Double ?? 5
+            try? await Task.sleep(for: .seconds(1))
+            let start = Double(clock_gettime_nsec_np(CLOCK_THREAD_CPUTIME_ID)) / 1_000_000
+            try? await Task.sleep(for: .seconds(seconds))
+            let used = Double(clock_gettime_nsec_np(CLOCK_THREAD_CPUTIME_ID)) / 1_000_000 - start
+            let running = app.threads.values.filter { $0.status == .running }.count
+            return String(format: "ok %d running, main thread %.0f%% busy doing nothing", running, used / (seconds * 10))
+        case "bump":
+            // Stands in for thread.updated from a running thread (its preview
+            // and activity change), `count` times `gap` ms apart (default 20,
+            // 150), and says the main thread's CPU time a bump, less what the
+            // same wait costs with no bumps. For checking what one update
+            // costs the window.
+            let ids = app.threads.keys.sorted()
+            let id = c["id"] as? String
+            guard let key = id.map({ id in ids.first { $0.hasPrefix(id) } }) ?? ids.first, app.threads[key] != nil else { return "error no such thread" }
+            let count = max(1, c["count"] as? Int ?? 20)
+            let gap = c["gap"] as? Int ?? 150
+            func cpu() -> Double { Double(clock_gettime_nsec_np(CLOCK_THREAD_CPUTIME_ID)) / 1_000_000 }
+            var start = cpu()
+            for _ in 0..<count { try? await Task.sleep(for: .milliseconds(gap)) }
+            let idle = (cpu() - start) / Double(count)
+            start = cpu()
+            for n in 0..<count {
+                guard var thread = app.threads[key] else { break }
+                thread.preview = "Working on it \(n)"
+                thread.lastActivityAt = Date()
+                app.threads[key] = thread
+                try? await Task.sleep(for: .milliseconds(gap))
+            }
+            let busy = (cpu() - start) / Double(count)
+            return String(format: "ok %.1f ms a bump (%.1f ms with none)", busy - idle, idle)
+        case "page-scroll":
+            // Scrolls the detail area's scroll view `dy` points a frame for
+            // `steps` frames, down then back up (only down with "back":
+            // false), moving its clip view as a trackpad would, and says how
+            // the frames went. Only means something with the window in front.
+            guard let window, let content = window.contentView else { return "error no window" }
+            let point = content.convert(NSPoint(x: content.bounds.width * 0.55, y: content.bounds.height * 0.5), to: nil)
+            func scrollViews(in view: NSView) -> [NSScrollView] {
+                view.subviews.flatMap { scrollViews(in: $0) } + ((view as? NSScrollView).map { [$0] } ?? [])
+            }
+            // The innermost one under the point: the page's, not the window's.
+            guard let scroll = scrollViews(in: content).first(where: { $0.convert($0.bounds, to: nil).contains(point) && ($0.documentView?.frame.height ?? 0) > $0.bounds.height }) else { return "error no scroll view there" }
+            let dy = c["dy"] as? Double ?? 14
+            let steps = c["steps"] as? Int ?? 120
+            let clip = scroll.contentView
+            let top = clip.bounds.minY
+            // "updates": n stands in for n thread.updated a second from
+            // running threads (as `bump`), to see what they cost mid-scroll.
+            let updates = c["updates"] as? Double ?? 0
+            let busy = Array(app.threads.keys.sorted().prefix(8))
+            var step = 0
+            let watch = FrameWatch(view: content)
+            watch?.start()
+            for direction in (c["back"] as? Bool == false ? [1.0] : [1.0, -1.0]) {
+                for _ in 0..<steps {
+                    step += 1
+                    if updates > 0, !busy.isEmpty, step % max(1, Int((60 / updates).rounded())) == 0, var thread = app.threads[busy[step % busy.count]] {
+                        thread.preview = "Working on it \(step)"
+                        thread.lastActivityAt = Date()
+                        app.threads[thread.id] = thread
+                    }
+                    let maxY = (scroll.documentView?.frame.height ?? 0) - clip.bounds.height
+                    let y = min(max(top, clip.bounds.minY + direction * dy * (clip.isFlipped ? 1 : -1)), max(top, maxY))
+                    clip.scroll(to: NSPoint(x: clip.bounds.minX, y: y))
+                    scroll.reflectScrolledClipView(clip)
+                    try? await Task.sleep(for: .milliseconds(16))
+                }
+                try? await Task.sleep(for: .milliseconds(200))
+            }
+            return "ok " + (watch?.stop() ?? "no frames") + String(format: ", ended at %.0f", clip.bounds.minY)
+        case "front":
+            // Brings the window in front of everything, for frame timings.
+            guard let window else { return "error no window" }
+            NSApp.activate()
+            window.orderFrontRegardless()
+            return "ok"
         case "mode":
+            let started = CFAbsoluteTimeGetCurrent()
             switch c["mode"] as? String {
             case "archive": app.showArchive()
             case "snoozed": app.showHibernating()
@@ -512,6 +617,20 @@ enum Automation {
                 guard app.projectsSupported else { return "error this runner has no projects" }
                 app.showLibrarian()
             default: app.sidebarMode = .inbox
+            }
+            // "time": true says how long the switch held up the main thread,
+            // for checking the Projects page opens quickly.
+            // With "frames": true it also watches the next second of frames
+            // (the slide and the page drawing in): how many, the longest
+            // gap and how many missed a 60 Hz frame. Only means something
+            // with the window on screen ("front").
+            if c["time"] as? Bool == true {
+                let watch = c["frames"] as? Bool == true ? window.flatMap { FrameWatch(view: $0.contentView) } : nil
+                watch?.start()
+                let ms = await untilIdle(since: started)
+                guard let watch else { return "ok \(ms) ms" }
+                try? await Task.sleep(for: .seconds(1))
+                return "ok \(ms) ms; " + watch.stop()
             }
             return "ok"
         case "schedule":
@@ -1672,3 +1791,34 @@ extension Automation {
     }
 }
 #endif
+
+/// Frame gaps from the window's display link, for `mode` with "frames".
+@MainActor
+private final class FrameWatch: NSObject {
+    private var link: CADisplayLink?
+    private var last: CFTimeInterval = 0
+    private var gaps: [Double] = []
+
+    init?(view: NSView?) {
+        super.init()
+        guard let view else { return nil }
+        link = view.displayLink(target: self, selector: #selector(tick(_:)))
+    }
+
+    func start() { link?.add(to: .main, forMode: .common) }
+
+    @objc private func tick(_ link: CADisplayLink) {
+        if last > 0 { gaps.append((link.timestamp - last) * 1000) }
+        last = link.timestamp
+    }
+
+    func stop() -> String {
+        link?.invalidate()
+        let worst = gaps.max() ?? 0
+        let missed = gaps.filter { $0 > 20 }.count
+        // A frame more than half again as long as the display's own was dropped.
+        let frame = gaps.sorted()[gaps.count / 2]
+        let dropped = gaps.filter { $0 > frame * 1.5 }.count
+        return String(format: "%d frames at %.1f ms, %d dropped, worst %.0f ms, %d over 20 ms", gaps.count + 1, frame, dropped, worst, missed)
+    }
+}
