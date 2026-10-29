@@ -27,6 +27,10 @@ export const DEV_HELP = `Working on Threadbear itself:
   tb show <threadId> [--last N] [--tools]
                                   the thread as plain text; --last N turns; --tools adds results
   tb logs [-f] [-n 200] [--thread ID]
+  tb activity [--since 1h] [--thread ID] [--summary] [--json]
+                                  what was clicked, opened, chosen and sent in the Mac app, from its
+                                  activity log (Settings > General, off unless it's switched on);
+                                  --summary counts what's used most, over 7 days unless --since
   tb export <threadId> [--out DIR]
                                   thread.json, events.ndjson and media/ for the mock runner,
                                   in app/.fixtures/threads/<id> by default

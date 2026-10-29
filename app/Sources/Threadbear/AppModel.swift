@@ -992,6 +992,7 @@ final class AppModel {
             showConnectionError("Not connected to the runner, so the edit wasn't sent. It's still in the box.")
             return
         }
+        ActivityRecorder.shared.sent(threadId: threadId, images: draft.images.count, answers: 0, edit: true)
         editing[threadId]?.sending = true
         Task {
             do {
@@ -1037,6 +1038,7 @@ final class AppModel {
             showConnectionError("Not connected to the runner, so that wasn't sent. It's still in the box.")
             return
         }
+        ActivityRecorder.shared.sent(threadId: threadId, images: draft.images.count, answers: answers.count)
         if let threadId {
             drafts[key] = nil
             let seq = thread?.asksSeq

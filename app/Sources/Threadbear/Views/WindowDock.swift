@@ -75,6 +75,7 @@ enum WindowDock {
         var withoutReview = layout
         var reviewWasOpen = false
         dock.onChange = { [weak dock] next in
+            ActivityRecorder.shared.panels(next)
             if next.contains(review) {
                 reviewWasOpen = true
                 return

@@ -514,6 +514,7 @@ final class ThreadSession {
     func respond(approvalId: String, decision: ApprovalDecision, answers: [String: String]?, message: String?) {
         guard let client = app?.client else { return }
         let threadId = threadId
+        ActivityRecorder.shared.answered(threadId: threadId, decision: decision)
         Task {
             do {
                 try await client.respond(threadId: threadId, approvalId: approvalId, decision: decision, message: message, answers: answers)

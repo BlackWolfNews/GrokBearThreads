@@ -71,6 +71,11 @@ final class TipAnchorView: NSView {
         super.viewWillMove(toWindow: newWindow)
         if newWindow == nil { Tips.shared.exit(self) }
     }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        Tips.shared.placed(self)
+    }
 }
 
 extension NSView {
@@ -111,6 +116,9 @@ final class Tips {
     private var timer: Timer?
     private var lastHidden = Date.distantPast
     private lazy var panel = TipPanel()
+    /// Every anchor in a window, so the activity log can name what's under
+    /// a click (`text(at:in:)`).
+    private let placedAnchors = NSHashTable<TipAnchorView>.weakObjects()
 
     private init() {
         // A click, a key or a scroll puts the tip away, as AppKit does.
@@ -133,6 +141,27 @@ final class Tips {
         inside.removeAll { $0 === anchor }
         if dismissed === anchor { dismissed = nil }
         refresh()
+    }
+
+    func placed(_ anchor: TipAnchorView) {
+        if anchor.window == nil { placedAnchors.remove(anchor) } else { placedAnchors.add(anchor) }
+    }
+
+    /// The tip of what's at `point` (in the window's coordinates), for the
+    /// activity log: the smallest anchor there, so a button's tip wins over
+    /// the row it sits in. Found by where the anchors are rather than by
+    /// the pointer's enter and exit, which a click can come before.
+    func text(at point: NSPoint, in window: NSWindow) -> String? {
+        var best: (area: CGFloat, text: String)?
+        for anchor in placedAnchors.allObjects where anchor.window === window && !anchor.text.isEmpty && !anchor.isHiddenOrHasHiddenAncestor {
+            // Its own bounds as well as what's visible of it: since macOS 14
+            // views don't clip, and visibleRect then runs past the view.
+            let local = anchor.convert(point, from: nil)
+            guard anchor.bounds.contains(local), anchor.visibleRect.contains(local) else { continue }
+            let area = anchor.bounds.width * anchor.bounds.height
+            if area < best?.area ?? .infinity { best = (area, anchor.text) }
+        }
+        return best?.text
     }
 
     func textChanged(_ anchor: TipAnchorView) {
@@ -171,6 +200,7 @@ final class Tips {
         guard NSWindow.windowNumber(at: mouse, belowWindowWithWindowNumber: 0) == window.windowNumber else { return }
         shown = anchor
         panel.show(anchor.text, at: mouse, on: window.screen)
+        ActivityRecorder.shared.hover(anchor.text, in: window)
     }
 
     private func hide() {

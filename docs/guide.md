@@ -359,6 +359,23 @@ thread that merges Mike's changes with your own, sorts out any clashes,
 runs the checks and asks you before it lands. From a thread, `tb updates`
 says the same, and `tb updates check` looks again now.
 
+### The activity log
+
+Turn on Keep an activity log in Settings (⌘,) > General and the app notes
+down what you do in it, so the agents working on Threadbear can see how you
+really use it: what you click, which threads and pages you open, the menu
+items and shortcuts you use, the tooltips you stop to read, and when you
+send a message or answer a prompt. It never notes what you type or the
+words of a message, only which button, row or item it was, by its tooltip
+or its name in the menu (so clicking a thread's row puts that thread's
+title in it). An agent reads it with `tb activity`, or
+`tb activity --summary` for what's used most.
+
+It's off until you turn it on. It's kept in the `activity` folder of
+Threadbear's data folder, a file a day, and each file is deleted after 30
+days. Threadbear never sends it anywhere, though once an agent has read
+some of it, that's part of its thread like anything else it reads.
+
 ## Privacy
 
 Your threads are mirrored to a Convex deployment in your own Convex account,
@@ -369,7 +386,8 @@ and only that thread. The pictures are uploaded only while it's shared.
 Notifications to your phone go through a small relay Mike runs, because
 Apple only delivers notifications for his app through his key. The text is
 locked with a key only your phone and your deployment have, so the relay
-never sees what a notification says.
+never sees what a notification says. The activity log (above) is off unless
+you turn it on, and it stays on your Mac.
 
 ## Getting help
 

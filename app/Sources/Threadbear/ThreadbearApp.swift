@@ -197,6 +197,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             }
             app.start()
             MouseNavigation.install(app: app)
+            // Records nothing unless it's switched on in Settings.
+            ActivityRecorder.shared.install(app: app)
             if perf { PerfRunner.start(app: app) }
             if screenshots { ScreenshotRunner.start(app: app) }
             // What only one of two Threadbears should run: a handover's
@@ -217,7 +219,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     }
 
     func applicationWillTerminate(_ notification: Notification) {
-        MainActor.assumeIsolated { AppUpdater.shared.applyAtQuit() }
+        MainActor.assumeIsolated {
+            ActivityRecorder.shared.quit()
+            AppUpdater.shared.applyAtQuit()
+        }
     }
 
     func applicationDidBecomeActive(_ notification: Notification) {

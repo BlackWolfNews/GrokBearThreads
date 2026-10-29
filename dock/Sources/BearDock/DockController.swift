@@ -296,6 +296,16 @@ public final class DockController {
         layout.group(containing: panel).flatMap { frames[$0.id] }
     }
 
+    /// The panel showing at `point` (in `window`'s coordinates): the front
+    /// panel of the group there, or the panel a window of its own holds.
+    /// Threadbear's activity log says where a click was with it.
+    public func panel(at point: CGPoint, in window: NSWindow) -> PanelID? {
+        if let own = window as? DockPanelWindow { return own.panel }
+        guard let anchor, anchor.window === window else { return nil }
+        let p = anchor.convert(point, from: nil)
+        return layout.groups.first { frames[$0.id]?.contains(p) == true }?.selected
+    }
+
     // MARK: Windows of their own
 
     /// Right-click, Open in New Window: the panel in a window of its own,

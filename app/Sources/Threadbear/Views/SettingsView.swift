@@ -3,8 +3,9 @@ import SwiftUI
 import ThreadbearCore
 
 /// The Settings window (⌘,): the runner's settings, in the grouped form
-/// every Mac app's settings use. All of it lives in the runner; this only
-/// shows it and sends changes.
+/// every Mac app's settings use. All of it lives in the runner, and this
+/// only shows it and sends changes, apart from the activity log's switch,
+/// which is this Mac's own (ActivityRecorder).
 struct SettingsView: View {
     @Environment(AppModel.self) private var app
 
@@ -72,6 +73,7 @@ private struct SettingsErrorRow: View {
 
 private struct GeneralSettings: View {
     @Environment(AppModel.self) private var app
+    @AppStorage(ActivityRecorder.enabledKey) private var activityLog = false
 
     var body: some View {
         SettingsGate { settings in
@@ -115,6 +117,13 @@ private struct GeneralSettings: View {
                         .tip("Update the runner by itself from each new commit on main")
                 } footer: {
                     Footnote("The runner builds each new commit on main and restarts onto it once no thread is busy. A change here takes effect when the runner next restarts.")
+                }
+
+                Section {
+                    Toggle("Keep an activity log", isOn: $activityLog)
+                        .tip("Note what you click and open in this app, so agents working on Threadbear can see how you use it")
+                } footer: {
+                    Footnote("It stays on this Mac for 30 days and Threadbear never sends it anywhere. Agents read it with tb activity.")
                 }
 
                 Section {

@@ -33,6 +33,7 @@ extension AppModel {
             guard let self else { return }
             self.navigationPending = false
             self.history.record(self.place)
+            ActivityRecorder.shared.view(self.place)
         }
     }
 
@@ -42,6 +43,7 @@ extension AppModel {
         guard navigationPending else { return }
         navigationPending = false
         history.record(place)
+        ActivityRecorder.shared.view(place)
     }
 
     var canGoBack: Bool { history.canGoBack }

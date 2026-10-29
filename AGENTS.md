@@ -68,6 +68,12 @@ static site with its own `package.json`; its comments say how to build it.
   thread when the app is back on the new build (docs/protocol.md, "App
   restarts"); check it then yourself, with `tb export` of the thread and
   the scripted app (below), and ask him only for a judgement he has to make.
+- While Mike has the activity log on (Settings > General; off by
+  default, so other people's copies never record), `tb activity` shows
+  what he's clicked, opened, chosen and sent in the app lately, and
+  `tb activity --summary` what he uses most. Look before changing how
+  something works, to see how he really uses it. It's his private
+  activity: keep it out of git and out of anything posted or sent.
 - Files and links an agent makes for Mike to look at belong in the
   thread's Highlights (the pin on the right-hand rail): use the `pin`
   tool, with `show: true` to open it in the side pane, rather than `open`.

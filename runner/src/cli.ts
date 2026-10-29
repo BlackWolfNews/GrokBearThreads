@@ -12,6 +12,7 @@ import { DEV_HELP, formatModels, logsCommand, runDev } from './tb-dev.ts';
 import { findWorktreePatch, isInside } from './patches.ts';
 import { TRUST_ALL } from './patch-trust.ts';
 import { land, landTargetFromGit, type LandTarget } from './worktrees.ts';
+import { activityCommand } from './activity.ts';
 
 const OPTIONS = {
   cwd: { type: 'string' },
@@ -52,6 +53,8 @@ const OPTIONS = {
   'max-wait': { type: 'string' },
   lines: { type: 'string', short: 'n' },
   follow: { type: 'boolean', short: 'f' },
+  since: { type: 'string' },
+  summary: { type: 'boolean' },
   help: { type: 'boolean', short: 'h' },
 } as const;
 
@@ -141,6 +144,7 @@ const COMMAND_FLAGS: Record<string, string[]> = {
   restart: ['now', 'force', 'resume', 'no-resume', 'cancel', 'reason', 'thread', 'max-wait'],
   show: ['last', 'tools'],
   logs: ['lines', 'follow', 'thread'],
+  activity: ['since', 'thread', 'summary', 'json'],
   export: ['out'],
   rpc: [],
   land: ['dry-run'],
@@ -193,6 +197,8 @@ async function main(argv: string[]): Promise<number> {
   }
   const cfg = loadConfig();
   if (cmd === 'logs') return logsCommand(cfg, values);
+  // The app's activity log is files on this Mac: no runner needed.
+  if (cmd === 'activity') return activityCommand(cfg, values);
   // Works with no runner too: from any thread/ worktree, by git alone.
   if (cmd === 'land') return landCommand(cfg, Boolean(values['dry-run']));
   const url = runnerUrl(cfg);

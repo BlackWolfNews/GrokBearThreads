@@ -623,6 +623,8 @@ enum Automation {
             return "ok \(zoom.percent)"
         case "hover":
             return hover(c, app: app)
+        case "activity":
+            return await activity(c, app: app)
         case "edit-message":
             // Clicks the pencil by one of Mike's messages (`row`: its row id
             // or a prefix), as he would, which loads it into the composer
@@ -1117,6 +1119,42 @@ enum Automation {
 
     /// `{"id": thread}` shows a sidebar row's hover buttons; `{"row": id}`
     /// draws a transcript row as hovered; neither clears both.
+    /// The activity log (ActivityRecorder). `"on": true | false` sets the
+    /// Settings switch. `"click": "<tip>"` gives the recorder a click on the
+    /// control with that tooltip (without pressing it), and `"key": "n"`
+    /// with `"command": true` presses a key through the app's own event
+    /// dispatch, so a menu's shortcut comes back as its item. Says whether
+    /// it's on, how many lines today has and the last few (`"last": N`).
+    private static func activity(_ c: [String: Any], app: AppModel) async -> String {
+        if let on = c["on"] as? Bool { UserDefaults.standard.set(on, forKey: ActivityRecorder.enabledKey) }
+        if let tip = c["click"] as? String {
+            guard let window = mainWindow, let content = window.contentView,
+                  let anchor = all(TipAnchorView.self, in: content).last(where: { $0.text == tip && !$0.isHiddenOrHasHiddenAncestor })
+            else { return "error no control with the tip \(tip)" }
+            let center = anchor.convert(NSPoint(x: anchor.bounds.midX, y: anchor.bounds.midY), to: nil)
+            let type: NSEvent.EventType = c["button"] as? String == "right" ? .rightMouseDown : .leftMouseDown
+            guard let event = NSEvent.mouseEvent(with: type, location: center, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+                                                 windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 1)
+            else { return "error no event" }
+            ActivityRecorder.shared.click(event)
+        }
+        if let key = c["key"] as? String {
+            guard let window = mainWindow,
+                  let event = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: c["command"] as? Bool == true ? .command : [],
+                                               timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber, context: nil,
+                                               characters: key, charactersIgnoringModifiers: key, isARepeat: false, keyCode: UInt16(number(c["keyCode"]) ?? 45))
+            else { return "error no event" }
+            NSApp.sendEvent(event)
+        }
+        // The writer's queue and the main queue's next turn (a key waits one).
+        try? await Task.sleep(for: .milliseconds(300))
+        let file = ActivityFiles.folder(in: app.dataDir).appendingPathComponent(ActivityFiles.fileName(for: Date()))
+        let lines = ((try? String(contentsOf: file, encoding: .utf8)) ?? "").split(separator: "\n")
+        // On one line, as every result is: the lines after " | ".
+        let last = lines.suffix(number(c["last"]).map { Int($0) } ?? 3).map { " | " + $0 }.joined()
+        return "ok \(ActivityRecorder.isOn ? "on" : "off") \(lines.count) lines today" + last
+    }
+
     private static func hover(_ c: [String: Any], app: AppModel) -> String {
         if let prefix = c["row"] as? String {
             guard let row = displayedRow(prefix, app), let index = app.transcript.session?.displayIndex(of: row.id) else { return "error no such row" }
