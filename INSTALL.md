@@ -24,10 +24,19 @@ Run these and fix what's missing before going on:
 
 ## 2. Get the code
 
-If you aren't in a clone of the repo already, clone the person's fork (or
-`https://github.com/mikecann/threadbear` if they haven't forked it) to
-`~/threadbear` and work from there. If git needs a GitHub login, run
-`gh auth login --web` and **Ask** them to approve it in the browser.
+If you aren't in a copy of the repo already, fork it rather than cloning
+it, so their changes have a home of their own and Mike's updates can still
+come in:
+
+```sh
+cd ~ && gh repo fork mikecann/threadbear --clone
+```
+
+If `gh` isn't logged in, run `gh auth login --web` and **Ask** them to
+approve it in the browser. If they'd rather not use GitHub, a plain
+`git clone https://github.com/mikecann/threadbear ~/threadbear` works too:
+setup then makes Mike's repo their `upstream`, and they can fork later.
+Work from `~/threadbear` from here on.
 
 ## 3. Run setup
 

@@ -1344,6 +1344,61 @@ public struct RunnerUpdates: Sendable, Hashable, Decodable {
         enum CodingKeys: String, CodingKey { case version, threads }
     }
 
+    /// Mike's releases, for a fork (protocol "Mike's releases").
+    public struct Upstream: Sendable, Hashable, Decodable {
+        public struct Release: Sendable, Hashable, Decodable {
+            public var tag: String
+            public var changes: Int
+            public var subjects: [String]
+
+            public init(tag: String, changes: Int, subjects: [String] = []) {
+                self.tag = tag
+                self.changes = changes
+                self.subjects = subjects
+            }
+
+            public init(from decoder: Decoder) throws {
+                let c = try decoder.container(keyedBy: CodingKeys.self)
+                tag = ((try? c.decodeIfPresent(String.self, forKey: .tag)) ?? nil) ?? "?"
+                changes = ((try? c.decodeIfPresent(Int.self, forKey: .changes)) ?? nil) ?? 0
+                subjects = ((try? c.decodeIfPresent([String].self, forKey: .subjects)) ?? nil) ?? []
+            }
+
+            enum CodingKeys: String, CodingKey { case tag, changes, subjects }
+        }
+
+        /// off, idle, checking, available or failed.
+        public var state: String
+        public var reason: String?
+        public var checkout: String?
+        public var release: Release?
+        /// Mike's own runner: the last release tag it made.
+        public var publishedTag: String?
+
+        public init(state: String, reason: String? = nil, checkout: String? = nil, release: Release? = nil, publishedTag: String? = nil) {
+            self.state = state
+            self.reason = reason
+            self.checkout = checkout
+            self.release = release
+            self.publishedTag = publishedTag
+        }
+
+        public init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            state = ((try? c.decodeIfPresent(String.self, forKey: .state)) ?? nil) ?? "off"
+            reason = (try? c.decodeIfPresent(String.self, forKey: .reason)) ?? nil
+            checkout = (try? c.decodeIfPresent(String.self, forKey: .checkout)) ?? nil
+            release = (try? c.decodeIfPresent(Release.self, forKey: .release)) ?? nil
+            publishedTag = ((try? c.decodeIfPresent(Published.self, forKey: .published)) ?? nil)?.tag
+        }
+
+        private struct Published: Decodable { var tag: String }
+        enum CodingKeys: String, CodingKey { case state, reason, checkout, release, published }
+
+        /// A newer release than main has, to bring in.
+        public var available: Bool { state == "available" && (release?.changes ?? 0) > 0 }
+    }
+
     /// off, idle, checking, building, waiting or failed.
     public var state: String
     public var commit: String?
@@ -1354,8 +1409,10 @@ public struct RunnerUpdates: Sendable, Hashable, Decodable {
     /// Which way the LaunchAgent is behind main, in a sentence (runners
     /// from before 29 Oct 2026 don't send it).
     public var launcherReason: String?
+    /// Left out by runners before 30 Oct 2026, and while it's off.
+    public var upstream: Upstream?
 
-    public init(state: String = "idle", commit: String? = nil, subject: String? = nil, reason: String? = nil, oldRunners: [OldRunner] = [], launcherChanged: Bool = false, launcherReason: String? = nil) {
+    public init(state: String = "idle", commit: String? = nil, subject: String? = nil, reason: String? = nil, oldRunners: [OldRunner] = [], launcherChanged: Bool = false, launcherReason: String? = nil, upstream: Upstream? = nil) {
         self.state = state
         self.commit = commit
         self.subject = subject
@@ -1363,6 +1420,7 @@ public struct RunnerUpdates: Sendable, Hashable, Decodable {
         self.oldRunners = oldRunners
         self.launcherChanged = launcherChanged
         self.launcherReason = launcherReason
+        self.upstream = upstream
     }
 
     public init(from decoder: Decoder) throws {
@@ -1374,9 +1432,10 @@ public struct RunnerUpdates: Sendable, Hashable, Decodable {
         oldRunners = c.lossyArray(OldRunner.self, forKey: .oldRunners)
         launcherChanged = ((try? c.decodeIfPresent(Bool.self, forKey: .launcherChanged)) ?? nil) ?? false
         launcherReason = (try? c.decodeIfPresent(String.self, forKey: .launcherReason)) ?? nil
+        upstream = (try? c.decodeIfPresent(Upstream.self, forKey: .upstream)) ?? nil
     }
 
-    enum CodingKeys: String, CodingKey { case state, commit, subject, reason, oldRunners, launcherChanged, launcherReason }
+    enum CodingKeys: String, CodingKey { case state, commit, subject, reason, oldRunners, launcherChanged, launcherReason, upstream }
 
     /// Something's on its way: a release being built or about to start, an
     /// old runner still finishing turns, or a LaunchAgent to reinstall.

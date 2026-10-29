@@ -10,10 +10,13 @@ import { defaultHome, readToken, runnerUrl, type Config } from './config.ts';
 import { RunnerClient, RpcClientError } from './client.ts';
 import { ErrorCode, type Account, type ImageRef, type PersistedEvent, type RunnerDefaults, type ThreadSummary } from './protocol.ts';
 import type { RestartResult, RunnerStatus } from './restart.ts';
+import type { UpstreamStatus } from './upstream.ts';
 
 export const DEV_HELP = `Working on Threadbear itself:
   tb status [--json]              the runner: version, live CLIs, busy threads, a pending restart
   tb self [--json]                the thread this command runs in (THREADBEAR_THREAD_ID)
+  tb updates [check] [--json]     Mike's newest release and what this copy's main is missing
+                                  (docs/bringing-in-updates.md); check fetches upstream now
   tb restart [--now] [--resume "text" | --no-resume] [--reason "text"] [--thread ID]
              [--max-wait 30m]     restart once no thread is busy (or now), for dev runners and
                                   sandboxes. Inside a thread it carries that thread on
@@ -71,6 +74,20 @@ export async function runDev(client: RunnerClient, cmd: string, args: string[], 
       }
       if (f.json) return printJson(s);
       process.stdout.write(formatStatus(s, await listAll(client), Date.now(), env.THREADBEAR_THREAD_ID));
+      return 0;
+    }
+    case 'updates': {
+      if (args[0] && args[0] !== 'check') {
+        console.error('Usage: tb updates [check] [--json]');
+        return 2;
+      }
+      const r = await client.call<{ upstream: UpstreamStatus }>(args[0] === 'check' ? 'upstream.check' : 'upstream.status').catch(quietlyTooOld);
+      if (!r) {
+        console.error("This runner predates Mike's releases (upstream.status); it picks them up on its next update.");
+        return 1;
+      }
+      if (f.json) return printJson(r.upstream);
+      process.stdout.write(formatUpstream(r.upstream, Date.now()) + '\n');
       return 0;
     }
     case 'self': {
@@ -423,6 +440,7 @@ export function formatStatus(s: RunnerStatus, threads: ThreadSummary[], now: num
   }
   const u = s.update;
   if (u) lines.push(formatUpdate(u, now));
+  if (s.upstream && (s.upstream.state !== 'off' || s.upstream.published)) lines.push(formatUpstream(s.upstream, now).split('\n')[0]);
   if (s.sync) lines.push(formatSync(s.sync, now));
   // Releases never touch the LaunchAgent (launch.mjs, the plist, Threadbear
   // Runner.app); only Mike's install-runner.sh does.
@@ -458,6 +476,32 @@ function formatUpdate(u: NonNullable<RunnerStatus['update']>, now: number): stri
       return `Following main: the build of main${at} failed${checked}: ${u.reason ?? 'unknown error'}${u.logFile ? ` (output in ${u.logFile})` : ''}`;
     default:
       return `Following main: up to date${at}${checked}`;
+  }
+}
+
+// Mike's releases (src/upstream.ts): a line, then what's in a release
+// main doesn't have yet.
+export function formatUpstream(u: UpstreamStatus, now: number): string {
+  const checked = u.checkedAt ? `, checked ${duration(now - Date.parse(u.checkedAt))} ago` : '';
+  const published = u.published ? `\nLast release tagged here: ${u.published.tag}` : '';
+  const r = u.release;
+  switch (u.state) {
+    case 'off':
+      return `Mike's releases: off${u.reason ? ` (${u.reason})` : ''}${published}`;
+    case 'checking':
+      return `Mike's releases: checking upstream now`;
+    case 'failed':
+      return `Mike's releases: the last check failed${checked}: ${u.reason ?? 'unknown error'}${r ? `\nNewest known: ${r.tag}` : ''}`;
+    case 'available': {
+      if (!r) return `Mike's releases: a new one is available${checked}`;
+      const more = r.changes > r.subjects.length ? `\n  … and ${r.changes - r.subjects.length} more` : '';
+      return [
+        `Mike's releases: ${r.tag} has ${r.changes} change${r.changes === 1 ? '' : 's'} this copy's main doesn't${checked}`,
+        ...r.subjects.map((x) => `  ${x}`),
+      ].join('\n') + more + `\nTo bring it in, follow docs/bringing-in-updates.md (or Bring them in, in the app's Updates panel).`;
+    }
+    default:
+      return `Mike's releases: up to date${r ? ` with ${r.tag}` : ''}${u.reason ? ` (${u.reason})` : ''}${checked}${published}`;
   }
 }
 

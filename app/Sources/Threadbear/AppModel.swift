@@ -1095,6 +1095,28 @@ final class AppModel {
         }
     }
 
+    /// Updates panel, From Mike: a new thread in the repo the runner
+    /// follows that merges Mike's release in (docs/bringing-in-updates.md),
+    /// on the composer's account or pool and model.
+    func bringInUpstream(_ upstream: RunnerUpdates.Upstream) {
+        guard let client, let release = upstream.release, !creatingThread else { return }
+        var request = newThreadRequest(text: UpdatesText.bringInPrompt(release), images: [])
+        request.cwd = upstream.checkout ?? AppUpdater.shared.running?.checkout ?? request.cwd
+        request.permissionMode = .full
+        request.title = "Bring in Mike's release \(UpdatesText.releaseDate(release.tag))"
+        creatingThread = true
+        Task {
+            defer { creatingThread = false }
+            do {
+                let thread = try await client.createThread(request)
+                threads[thread.id] = thread
+                select(thread.id)
+            } catch {
+                show(error)
+            }
+        }
+    }
+
     /// A queued message starts its own turn once the thread is free, so
     /// one still queued after the thread has sat idle a while was lost on
     /// the way (a disconnect clears them anyway): it goes rather than stay

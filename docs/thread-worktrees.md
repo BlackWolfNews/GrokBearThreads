@@ -62,7 +62,11 @@ chip, which is a command action every opted-in thread gets):
 
 1. Refuses with uncommitted changes in the worktree (says which files).
 2. `git rebase main` in the worktree. A conflict aborts the rebase and
-   says which files; the agent sorts it out and runs `tb land` again.
+   says which files; the agent sorts it out and runs `tb land` again. A
+   branch with a merge commit on it (Mike's release brought in,
+   docs/bringing-in-updates.md) is never rebased, since that would flatten
+   the merge and rewrite Mike's commits: if main has moved, main is merged
+   into it instead, with the same undo-and-name-the-files on a conflict.
 3. Runs `check` in the worktree, if there is one. A failure stops here,
    with the last lines of its output.
 4. `git -C <mainCheckout> merge --ff-only thread/<id8>`. If main's working

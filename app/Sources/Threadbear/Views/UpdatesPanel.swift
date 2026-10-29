@@ -137,6 +137,24 @@ struct UpdatesPanel: View {
                         ForEach(UpdatesText.runnerLines(nil), id: \.self) { line($0) }
                     }
                 }
+                // Mike's releases, on a fork; on Mike's own copy, the last
+                // one it tagged.
+                if let upstream = runner?.upstream, let text = UpdatesText.upstreamLine(upstream) {
+                    section("From Mike") {
+                        line(text)
+                        if upstream.available, let release = upstream.release {
+                            ForEach(release.subjects.prefix(5), id: \.self) { subject in
+                                Text(subject)
+                                    .font(.system(size: zoomed(11)))
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(1)
+                            }
+                            Button("Bring Them In") { app.bringInUpstream(upstream) }
+                                .disabled(app.creatingThread)
+                                .tip("Start a thread that merges Mike's release into your main. It asks before it lands.")
+                        }
+                    }
+                }
                 // The CLIs' versions and whether they update by themselves.
                 // In Usage until 28 Oct; they're updates, not room.
                 section("CLIs") {

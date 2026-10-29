@@ -268,7 +268,7 @@ made, so design shots don't age by the hour; exports keep their own.
 
 `mock.updates` plays the runner's own update for the rail's updates icon
 (`state`, `commit`, `subject`, `reason`, `oldRunners: [{ version, threads }]`,
-`launcherChanged`, `launcherReason`); threads named in `oldRunners` get `onOldRunner`.
+`launcherChanged`, `launcherReason`, `upstream` for Mike's releases); threads named in `oldRunners` get `onOldRunner`.
 
 It also answers `runner.status`, and fakes a runner restart for the app's
 restart states: `mock.restartPending` (`waitingFor`, default the busy

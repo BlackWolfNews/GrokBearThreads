@@ -99,4 +99,28 @@ final class UpdatesTextTests: XCTestCase {
         XCTAssertEqual(updates.commit, "abc1234")
         XCTAssertEqual(updates.oldRunners, [])
     }
+
+    // Mike's releases (protocol "Mike's releases"): a blue dot, as they only
+    // come in when he says.
+    func testANewReleaseFromMikeNeedsYou() throws {
+        let json = #"{"state":"idle","oldRunners":[],"upstream":{"state":"available","checkout":"/Users/x/threadbear","release":{"tag":"release/2026-10-30","commit":"abc","changes":12,"subjects":["Third","Second"]}}}"#
+        let updates = try JSONDecoder().decode(RunnerUpdates.self, from: Data(json.utf8))
+        XCTAssertEqual(updates.upstream?.checkout, "/Users/x/threadbear")
+        XCTAssertEqual(updates.upstream?.release?.subjects, ["Third", "Second"])
+        XCTAssertTrue(UpdatesText.shown(app: Side(), runner: updates))
+        XCTAssertTrue(UpdatesText.needsYou(app: Side(), runner: updates))
+        XCTAssertEqual(UpdatesText.iconTooltip(app: Side(), runner: updates, clis: []), "Updates\n12 new changes from Mike")
+        XCTAssertEqual(UpdatesText.upstreamLine(updates.upstream), "Mike's release of 30 Oct has 12 new changes.")
+        XCTAssertTrue(UpdatesText.bringInPrompt(updates.upstream!.release!).contains("docs/bringing-in-updates.md"))
+
+        let upToDate = RunnerUpdates(upstream: .init(state: "idle", release: .init(tag: "release/2026-10-30", changes: 0)))
+        XCTAssertFalse(UpdatesText.needsYou(app: Side(), runner: upToDate))
+        XCTAssertFalse(UpdatesText.shown(app: Side(), runner: upToDate))
+        XCTAssertEqual(UpdatesText.upstreamLine(upToDate.upstream), "You're up to date with Mike's release of 30 Oct.")
+        // Mike's own copy says what it last tagged, and nothing else.
+        let mikes = try JSONDecoder().decode(RunnerUpdates.self, from: Data(#"{"state":"idle","upstream":{"state":"off","reason":"upstream is this repo","published":{"tag":"release/2026-10-30","at":"x"}}}"#.utf8))
+        XCTAssertEqual(UpdatesText.upstreamLine(mikes.upstream), "Your last release for everyone else is release/2026-10-30.")
+        XCTAssertFalse(UpdatesText.needsYou(app: Side(), runner: mikes))
+        XCTAssertNil(UpdatesText.upstreamLine(nil))
+    }
 }

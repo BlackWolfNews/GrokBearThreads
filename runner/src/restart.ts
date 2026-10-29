@@ -6,6 +6,7 @@
 // starts the runner again. The next start reads the file, notes the restart
 // in the threads that asked to carry on, and sends each of them its resume
 // text as a turn of the runner's own.
+import type { UpstreamStatus } from './upstream.ts';
 import fs from 'node:fs';
 import path from 'node:path';
 import type { Runner } from './runner.ts';
@@ -86,6 +87,8 @@ export type RunnerStatus = {
   draining?: { pid: number; version: string; release?: string; since: string; threads: string[] }[];
   // The runner following main by itself (src/update.ts).
   update?: UpdateStatus;
+  // Mike's releases, for a fork (upstream.ts; main.ts adds it).
+  upstream?: UpstreamStatus;
   // The Convex mirror (src/sync.ts; main.ts adds it).
   sync?: SyncStatus;
 };

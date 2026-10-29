@@ -1,6 +1,7 @@
 // The thread manager: owns threads, turns, the event log, approvals, idle
 // release and snoozes. Providers plug in through AgentAdapter; the WebSocket
 // server in rpc.ts is a thin layer over the public methods here.
+import type { UpstreamStatus } from './upstream.ts';
 import fs from 'node:fs';
 import os from 'node:os';
 import { SAMPLE_THREADS } from './samples.ts';
@@ -141,6 +142,8 @@ export type RunnerUpdates = {
   oldRunners: { version: string; threads: string[] }[];
   launcherChanged?: true;
   launcherReason?: string;
+  // Mike's releases, for a fork (upstream.ts); left out while off.
+  upstream?: UpstreamStatus;
 };
 
 // What the librarian (librarian.ts) hears about threads: a turn that ended,

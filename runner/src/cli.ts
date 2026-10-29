@@ -137,6 +137,7 @@ const COMMAND_FLAGS: Record<string, string[]> = {
   settings: ['json'],
   models: ['json', 'remove', 'labels', 'field', 'system', 'cwd'],
   status: ['json'],
+  updates: ['json'],
   self: ['json'],
   restart: ['now', 'force', 'resume', 'no-resume', 'cancel', 'reason', 'thread', 'max-wait'],
   show: ['last', 'tools'],

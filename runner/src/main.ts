@@ -5,10 +5,11 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { loadConfig, ensureHome, readToken, paths, recordListening, defaultHome, DEFAULT_CWD, RUNNER_VERSION } from './config.ts';
 import { startHousekeeping } from './housekeeping.ts';
-import { RELEASE, markGoodLater, onSupervisorGone, readRelease, requestHandover, supervised, takeRollbackNotice, tellLaunchListening } from './release.ts';
+import { RELEASE, markGoodLater, onSupervisorGone, readRelease, readState, requestHandover, supervised, takeRollbackNotice, tellLaunchListening } from './release.ts';
 import type { RunnerUpdates } from './runner.ts';
 import { Peers, PrimaryLink, ThreadRouter, drainChildrenName, peersElsewhere, primaryElsewhere, removeDrainInfo, scheduleRouter, writeDrainInfo, type Elsewhere } from './handover.ts';
-import { RunnerUpdater } from './update.ts';
+import { RunnerUpdater, releaseTreeAt } from './update.ts';
+import { SETTLE_MS, Upstream } from './upstream.ts';
 import { Restarter, restartMethods } from './restart.ts';
 import { AppRestarts } from './app-restarts.ts';
 import { Scheduler, scheduleMethods } from './schedules.ts';
@@ -322,6 +323,26 @@ async function main(): Promise<void> {
     pendingRestart: () => Boolean(restarter.status().pendingRestart),
     onChange: () => publishUpdates(),
   });
+  // Mike's releases for a fork, and on Mike's own runner the tagging of
+  // them (upstream.ts). Starts with the updater, once this release is good.
+  const thisRelease = readRelease();
+  const bootedAt = Date.now();
+  const upstream = new Upstream({
+    home: cfg.home,
+    checkout: thisRelease?.checkout,
+    clock: realClock,
+    log,
+    publish: cfg.releases,
+    // Main's tip is what this runner runs (its runner/ at least), and this
+    // release has been marked good and up for a while.
+    runningMainSettled: () => {
+      if (!thisRelease?.checkout || !thisRelease.tree || thisRelease.dirty) return false;
+      if (Date.now() - bootedAt < SETTLE_MS) return false;
+      if (readState(cfg.home)?.lastGood !== thisRelease.id) return false;
+      return releaseTreeAt(thisRelease.checkout, thisRelease.prefix ?? 'runner/', 'refs/heads/main') === thisRelease.tree;
+    },
+    onChange: () => publishUpdates(),
+  });
   // runner.updates: sent when what hello's `updates` says changes.
   let lastUpdates = '';
   const runnerUpdates = (): RunnerUpdates => {
@@ -332,6 +353,8 @@ async function main(): Promise<void> {
     if (u.reason) out.reason = u.reason;
     if (u.launcherChanged) out.launcherChanged = true;
     if (u.launcherReason) out.launcherReason = u.launcherReason;
+    const up = upstream.status();
+    if (up.state !== 'off' || up.published) out.upstream = up;
     return out;
   };
   function publishUpdates(): void {
@@ -351,8 +374,11 @@ async function main(): Promise<void> {
   const restartStatus = methods['runner.status'];
   methods['runner.status'] = (p) => {
     const draining = peers.status();
-    return { ...(restartStatus(p) as Record<string, unknown>), clis: updates.list(), sync: sync.status(), ...(draining.length ? { draining } : {}) };
+    return { ...(restartStatus(p) as Record<string, unknown>), clis: updates.list(), sync: sync.status(), upstream: upstream.status(), ...(draining.length ? { draining } : {}) };
   };
+  // tb updates (docs/protocol.md, "Mike's releases").
+  methods['upstream.status'] = () => ({ upstream: upstream.status() });
+  methods['upstream.check'] = async () => ({ upstream: await upstream.check() });
   const codexWarning = missingCodex(updates.codexBinary(), cfg);
   if (codexWarning) log.warn('codex CLI not found', { path: updates.codexBinary() });
   const server = (rpcServer = new RpcServer({
@@ -408,6 +434,7 @@ async function main(): Promise<void> {
   const cancelMarkGood = markGoodLater(cfg.home, RELEASE.release, log, process.env, () => {
     restarter.proven();
     updater.start();
+    upstream.start();
   });
   // Only once listening: a runner that can't listen exits, and the next
   // one should still find the resume.
@@ -419,6 +446,7 @@ async function main(): Promise<void> {
     stopping = true;
     cancelMarkGood();
     updater.stop();
+    upstream.stop();
     stopHousekeeping();
     log.info('runner stopping', { signal });
     // Whatever stopped it, a pending restart has now happened. A draining
@@ -469,6 +497,7 @@ async function main(): Promise<void> {
     try {
       cancelMarkGood();
       updater.stop();
+      upstream.stop();
       stopHousekeeping();
       scheduler.stop();
       librarian.stop();

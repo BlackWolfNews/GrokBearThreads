@@ -195,22 +195,44 @@ export async function land(t: LandTarget, opts: LandOptions = {}): Promise<numbe
     );
   }
 
-  // 2. Rebase on main. A conflict is undone, and the files named.
-  const rebase = await git(t.path, ['rebase', MAIN]);
-  if (!rebase.ok) {
-    const conflicted = (await gitOut(t.path, ['diff', '--name-only', '--diff-filter=U'])) ?? '';
-    await git(t.path, ['rebase', '--abort']);
-    if (conflicted) {
-      return fail(
-        `Rebasing ${t.branch} on ${MAIN} ran into conflicts in:`,
-        ...conflicted.split('\n').map((f) => `  ${f}`),
-        `The rebase was undone, so ${t.branch} is as it was and ${MAIN} wasn't touched. Run git rebase ${MAIN} in ${t.path}, sort out those files, finish the rebase, then run tb land again.`,
-      );
+  // 2. Rebase on main. A conflict is undone, and the files named. A branch
+  // with a merge on it (Mike's release, brought in: docs/bringing-in-updates.md)
+  // is never rebased, as that flattens the merge and rewrites his commits,
+  // and then the copy never looks up to date with his release again. It
+  // merges main in instead, when main has moved.
+  const hasMerge = Boolean(await gitOut(t.path, ['rev-list', '--merges', `${MAIN}..${t.branch}`]));
+  const behind = !(await git(t.path, ['merge-base', '--is-ancestor', MAIN, t.branch])).ok;
+  if (hasMerge && behind) {
+    const merged = await git(t.path, ['merge', '--no-edit', MAIN]);
+    if (!merged.ok) {
+      const conflicted = (await gitOut(t.path, ['diff', '--name-only', '--diff-filter=U'])) ?? '';
+      await git(t.path, ['merge', '--abort']);
+      if (conflicted) {
+        return fail(
+          `Merging ${MAIN} into ${t.branch} (it has a merge on it, so it isn't rebased) ran into conflicts in:`,
+          ...conflicted.split('\n').map((f) => `  ${f}`),
+          `The merge was undone, so ${t.branch} is as it was and ${MAIN} wasn't touched. Run git merge ${MAIN} in ${t.path}, sort out those files, commit, then run tb land again.`,
+        );
+      }
+      return fail(`git merge ${MAIN} failed in ${t.path}, so nothing landed: ${firstLine(merged.stderr || merged.stdout)}`);
     }
-    return fail(`git rebase ${MAIN} failed in ${t.path}, so nothing landed: ${firstLine(rebase.stderr || rebase.stdout)}`);
+  } else if (!hasMerge) {
+    const rebase = await git(t.path, ['rebase', MAIN]);
+    if (!rebase.ok) {
+      const conflicted = (await gitOut(t.path, ['diff', '--name-only', '--diff-filter=U'])) ?? '';
+      await git(t.path, ['rebase', '--abort']);
+      if (conflicted) {
+        return fail(
+          `Rebasing ${t.branch} on ${MAIN} ran into conflicts in:`,
+          ...conflicted.split('\n').map((f) => `  ${f}`),
+          `The rebase was undone, so ${t.branch} is as it was and ${MAIN} wasn't touched. Run git rebase ${MAIN} in ${t.path}, sort out those files, finish the rebase, then run tb land again.`,
+        );
+      }
+      return fail(`git rebase ${MAIN} failed in ${t.path}, so nothing landed: ${firstLine(rebase.stderr || rebase.stdout)}`);
+    }
   }
 
-  const commits = (await gitOut(t.path, ['log', '--oneline', `${MAIN}..${t.branch}`])) ?? '';
+  const commits = (await gitOut(t.path, ['log', '--oneline', '--first-parent', `${MAIN}..${t.branch}`])) ?? '';
   if (!commits) {
     out(`Nothing to land: ${t.branch} has no commits that aren't on ${MAIN}.`);
     return 0;
@@ -257,7 +279,7 @@ export async function land(t: LandTarget, opts: LandOptions = {}): Promise<numbe
   }
 
   // 5. What landed.
-  const landed = (await gitOut(t.mainCheckout, ['log', '--oneline', `${before}..${MAIN}`])) ?? commits;
+  const landed = (await gitOut(t.mainCheckout, ['log', '--oneline', '--first-parent', `${before}..${MAIN}`])) ?? commits;
   out(`Landed on ${MAIN} in ${t.mainCheckout}:`);
   out(landed);
   return 0;

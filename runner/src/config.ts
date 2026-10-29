@@ -89,6 +89,9 @@ export type Config = {
   // (src/update.ts). Off with followMain: false in runner.json or
   // THREADBEAR_FOLLOW_MAIN=0.
   followMain: boolean;
+  // Mike's runner tags a signed release of main once a day for everyone
+  // else's copy (src/upstream.ts): runner.json `releases`.
+  releases?: { publish: boolean; signingKey?: string };
   // The runner's own model calls (src/models/): the pool whose Claude
   // logins answer them first (null: none), OpenRouter's daily cap in
   // dollars (0 turns it off) and folders whose threads are never sent.
@@ -128,6 +131,7 @@ export type RunnerJson = {
   poolFolders?: Record<string, string[]>;
   pools?: unknown[];
   followMain?: boolean;
+  releases?: { publish?: boolean; signingKey?: string };
   models?: { pool?: string | null; dailyBudgetUsd?: number; privateFolders?: string[] };
   // icon: an SF Symbol for this runner in lists (machine.ts works one out).
   sync?: { enabled?: boolean; url?: string; name?: string; runnerId?: string; icon?: string };
@@ -217,6 +221,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
       env.THREADBEAR_ACCOUNTS_DIR || '~/Library/Application Support/Token Stats/Accounts',
     ),
     followMain: env.THREADBEAR_FOLLOW_MAIN ? env.THREADBEAR_FOLLOW_MAIN !== '0' : json.followMain !== false,
+    ...(json.releases?.publish === true ? { releases: { publish: true, ...(typeof json.releases.signingKey === 'string' ? { signingKey: expandHome(json.releases.signingKey) } : {}) } } : {}),
     models: modelSettingsFrom(json),
     ...(codexPath ? { codexPath: expandHome(codexPath) } : {}),
     codexArgs: Array.isArray(json.codexArgs) ? json.codexArgs.filter((a): a is string => typeof a === 'string') : [],

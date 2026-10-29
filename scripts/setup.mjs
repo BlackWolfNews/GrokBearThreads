@@ -9,19 +9,22 @@
 //
 //   1. this Mac: macOS, Xcode's command line tools, git, Node 24, Claude Code
 //      or Codex, and Tailscale (optional)
-//   2. the repo's packages
-//   3. a Convex login, then a Convex project of your own with a production
+//   2. your copy: a fork of Mike's repo, with his as `upstream`, and the
+//      key his releases are signed with pinned in the data folder
+//      (docs/setup-and-updates.md section 2.3)
+//   3. the repo's packages
+//   4. a Convex login, then a Convex project of your own with a production
 //      deployment (a new one, the one this clone already uses, or with
 //      --existing the project named by --project, for a second Mac)
-//   4. its keys: a deploy key the runner uses to deploy the backend when it
+//   5. its keys: a deploy key the runner uses to deploy the backend when it
 //      updates, and the runner's own key, set as RUNNER_KEY
-//   5. runner.json: where the runner mirrors to, and the default folder for
+//   6. runner.json: where the runner mirrors to, and the default folder for
 //      new threads (~/Threadbear, made here, unless --cwd; Settings changes it)
-//   6. the backend and the website, deployed
-//   7. the runner (its LaunchAgent, with Threadbear Runner.app as the
+//   7. the backend and the website, deployed
+//   8. the runner (its LaunchAgent, with Threadbear Runner.app as the
 //      program, so macOS's privacy prompts name it) and the Mac app, built
 //      and installed
-//   8. where to pair your iPhone and sign a browser in (the app's Settings)
+//   9. where to pair your iPhone and sign a browser in (the app's Settings)
 //
 // Node built-ins only, so it runs before the repo's packages are installed.
 import { spawnSync } from 'node:child_process';
@@ -134,7 +137,7 @@ function checkMac() {
   if (!claude && !codex) throw new Fail('Neither Claude Code nor Codex is installed. Install one and log in first: https://claude.com/claude-code or https://developers.openai.com/codex');
   ok([claude && 'Claude Code', codex && 'Codex'].filter(Boolean).join(' and '));
   // The runner is a login agent, which macOS only loads for someone logged in
-  // to the desktop: over SSH to a Mac nobody's logged in to, step 7 can't
+  // to the desktop: over SSH to a Mac nobody's logged in to, step 8 can't
   // finish (seen on Tinker Desk, 28 Oct).
   if (desktopSession()) ok('logged in to the desktop');
   else note("Nobody is logged in to this Mac's desktop. Everything up to installing the runner works, then setup stops: log in (in person or with Screen Sharing) and run it again.");
@@ -146,8 +149,62 @@ function desktopSession() {
   return run('launchctl', ['print', `gui/${process.getuid()}`]).status === 0;
 }
 
+// Mike's repo, which everyone else's copy follows for his releases.
+const MIKES_REPO = 'https://github.com/mikecann/threadbear.git';
+const repoKey = (url) => url.trim().replace(/^git@([^:]+):/, '$1/').replace(/^[a-z+]+:\/\/(?:[^@/]+@)?/, '').replace(/\.git\/?$/, '').replace(/\/$/, '').toLowerCase();
+
+function remoteUrl(name) {
+  const r = run('git', ['remote', 'get-url', name]);
+  return r.status === 0 ? r.stdout.trim() : undefined;
+}
+
+// A fork, not a clone (Mike, 29 Oct): their changes need somewhere of their
+// own to live, and `upstream` is where Mike's releases come from. With no
+// GitHub login it still works: origin becomes upstream, and their changes
+// stay on this Mac until they fork.
+function yourCopy() {
+  say('2. Your copy');
+  const origin = remoteUrl('origin');
+  const upstream = remoteUrl('upstream');
+  const mikes = repoKey(MIKES_REPO);
+  if (upstream) ok(`Mike's releases come from upstream (${upstream})`);
+  else if (origin && repoKey(origin) === mikes) {
+    const login = has('gh') ? run('gh', ['api', 'user', '--jq', '.login']).stdout?.trim() : '';
+    if (login === 'mikecann') ok("this is Mike's own repo");
+    else if (dry) todo(login ? `gh repo fork --remote: fork it to ${login}'s GitHub, origin becomes the fork and upstream Mike's` : "git remote rename origin upstream (no GitHub login, so no fork)");
+    else if (login) {
+      runOrFail('Forking the repo', 'gh', ['repo', 'fork', '--remote', '--remote-name', 'origin']);
+      ok(`forked to ${login}'s GitHub as origin; Mike's repo is upstream`);
+    } else {
+      runOrFail('Renaming origin to upstream', 'git', ['remote', 'rename', 'origin', 'upstream']);
+      ok("Mike's repo is upstream");
+      note('Not logged in to GitHub, so this copy has no fork of its own. To keep your changes on GitHub later: gh auth login --web, then gh repo fork --remote --remote-name origin');
+    }
+  } else if (origin) {
+    if (dry) todo(`git remote add upstream ${MIKES_REPO}`);
+    else {
+      runOrFail('Adding upstream', 'git', ['remote', 'add', 'upstream', MIKES_REPO]);
+      ok(`upstream is Mike's repo; origin (${origin}) is yours`);
+    }
+  } else note("This copy has no git remote, so it won't hear about Mike's releases. Add his repo with: git remote add upstream " + MIKES_REPO);
+
+  // The pinned copy is the one the runner trusts; a later change to the
+  // repo's copy never replaces it (runner/src/upstream.ts).
+  const pinned = path.join(home, 'upstream-signers');
+  const shipped = path.join(repo, 'scripts', 'release-signers');
+  if (!fs.existsSync(shipped)) return note("this copy has no scripts/release-signers, so Mike's releases can't be checked");
+  if (fs.existsSync(pinned)) {
+    if (fs.readFileSync(pinned, 'utf8') !== fs.readFileSync(shipped, 'utf8')) note(`the release key in scripts/release-signers differs from the one pinned at ${pinned}; keeping the pinned one`);
+    return ok("Mike's release key is pinned");
+  }
+  if (dry) return todo(`pin Mike's release key at ${pinned}`);
+  fs.mkdirSync(home, { recursive: true });
+  fs.copyFileSync(shipped, pinned);
+  ok(`Mike's release key pinned at ${pinned}`);
+}
+
 function packages() {
-  say('2. Packages');
+  say('3. Packages');
   if (fs.existsSync(path.join(repo, 'node_modules', 'convex'))) return ok('installed');
   if (dry) return todo('npm ci');
   runOrFail('npm ci', npm, ['ci', '--no-audit', '--no-fund']);
@@ -155,7 +212,7 @@ function packages() {
 }
 
 function convexLogin() {
-  say('3. Convex');
+  say('4. Convex');
   const config = readJson(path.join(os.homedir(), '.convex', 'config.json'));
   if (config.accessToken) ok('logged in to Convex');
   else if (dry) todo('npx convex login (opens the browser)');
@@ -201,7 +258,7 @@ async function project() {
 }
 
 async function keys(urlFromProject) {
-  say('4. Keys');
+  say('5. Keys');
   if (!deployKey()) {
     if (dry) todo(`a deploy key in ${deployKeyFile}`);
     else {
@@ -279,7 +336,7 @@ async function findUrl(name) {
 }
 
 async function runnerJson(url) {
-  say('5. runner.json');
+  say('6. runner.json');
   const json = readJson(runnerJsonPath);
   const name = v.name ?? json.sync?.name ?? os.hostname().split('.')[0];
   // Not asked: it's in the Mac app's Settings, and each new thread can pick
@@ -298,13 +355,13 @@ async function runnerJson(url) {
 }
 
 function backend() {
-  say('6. Backend and website');
+  say('7. Backend and website');
   if (dry) return todo('node runner/scripts/deploy-backend.mjs (deploys convex/ and web/ if they changed)');
   runOrFail('Deploying the backend', process.execPath, [path.join(repo, 'runner', 'scripts', 'deploy-backend.mjs'), '--home', home, '--repo', repo]);
 }
 
 function install() {
-  say('7. Runner and Mac app');
+  say('8. Runner and Mac app');
   if (v['skip-install']) return note('skipped (--skip-install)');
   if (dry) return todo('runner/scripts/install-runner.sh, then app/install.sh');
   if (!desktopSession()) throw new Fail("Nobody is logged in to this Mac's desktop, and macOS only starts the runner (a login agent) for someone who is. Log in, in person or with Screen Sharing, then run setup again.");
@@ -319,7 +376,7 @@ function install() {
 }
 
 function finish(url) {
-  say('8. Finish setting up');
+  say('9. Finish setting up');
   note('Open Threadbear for a short tour that ends with your first thread. While it runs, Finish setting up has the rest: pair your iPhone and open your website, to check on your threads from anywhere.');
   note('Pairing and the website are in Settings (⌘,) › Phone & browser too.');
   // The terminal scripts still work, for a Mac with no app window to hand.
@@ -330,6 +387,8 @@ function finish(url) {
 try {
   say(dry ? 'Threadbear setup (dry run: nothing changes)\n' : 'Threadbear setup\n');
   checkMac();
+  say();
+  yourCopy();
   say();
   packages();
   say();

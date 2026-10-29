@@ -1091,12 +1091,14 @@ async function dispatch(client, method, p) {
     }
     case 'mock.updates': {
       // The runner's own update, as hello and runner.updates carry it:
-      // { state, commit?, subject?, reason?, oldRunners?, launcherChanged?, launcherReason? }.
+      // { state, commit?, subject?, reason?, oldRunners?, launcherChanged?, launcherReason?, upstream? }.
       // Threads named in oldRunners get onOldRunner in their summaries, as
       // the real primary marks a draining runner's threads.
       updates = { state: p.state ?? 'idle', oldRunners: Array.isArray(p.oldRunners) ? p.oldRunners : [] };
       for (const k of ['commit', 'subject', 'reason', 'launcherReason']) if (typeof p[k] === 'string') updates[k] = p[k];
       if (p.launcherChanged) updates.launcherChanged = true;
+      // Mike's releases (protocol "Mike's releases"), as given.
+      if (p.upstream && typeof p.upstream === 'object') updates.upstream = p.upstream;
       const old = new Set(updates.oldRunners.flatMap((r) => r.threads ?? []));
       for (const t of threads.values()) {
         const was = Boolean(t.summary.onOldRunner);

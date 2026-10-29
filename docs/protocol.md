@@ -781,8 +781,52 @@ type RunnerUpdates = {
   launcherChanged?: true
   // Which of those, in a sentence (for tb status and the Updates panel).
   launcherReason?: string
+  // Mike's releases, for a fork (below). Left out while off, except on
+  // Mike's own runner once it has tagged one.
+  upstream?: UpstreamStatus
 }
 ```
+
+### Mike's releases
+
+A copy of Threadbear that's someone's fork follows Mike's releases
+(`runner/src/upstream.ts`, docs/setup-and-updates.md section 2.3). Every six
+hours, and a couple of minutes after the release is marked good, the runner
+fetches `upstream`'s `release/*` tags into `refs/threadbear/upstream/*` in
+its checkout, and takes the newest that is signed with the key pinned in
+`<home>/upstream-signers` and names itself as the ref it came in as. It
+never changes main: bringing a release in is a thread (docs/bringing-in-updates.md).
+
+```ts
+type UpstreamStatus = {
+  // off: no upstream remote, upstream is the same repo as origin, or no
+  // pinned key; idle: main has the newest release; available: it doesn't.
+  state: "off" | "idle" | "checking" | "available" | "failed"
+  reason?: string          // off and failed: why; idle: "no signed releases yet"
+  checkout?: string        // the repo it looks at (the release's checkout)
+  checkedAt?: string
+  release?: {              // the newest signed release, kept through a failed check
+    tag: string            // "release/2026-10-30"
+    commit: string
+    date?: string          // the tag's, ISO
+    changes: number        // commits in it main doesn't have, merges left out
+    subjects: string[]     // their subject lines, newest first, at most 50
+  }
+  // Mike's runner (runner.json releases.publish): the last tag it made.
+  published?: { tag: string; at: string }
+}
+```
+
+`upstream.status` returns `{ upstream: UpstreamStatus }`, and
+`upstream.check` fetches first and then returns the same (`tb updates
+[check]`). `runner.status` carries it as `upstream`.
+
+Mike's runner makes the tags when runner.json has `"releases": { "publish":
+true, "signingKey": "~/.ssh/<key>" }`: once an hour it looks, and tags
+main's tip as `release/<local date>` (SSH-signed, its message the subjects
+since the last release) and pushes it to origin, when there's no tag for
+today, main has moved since the last one, main's tip is an hour old, and the
+runner it's running is main's runner/, marked good and up for an hour.
 
 "Pending" for a client means `building`, `waiting`, any `oldRunners`, or
 `launcherChanged`; `failed` is worth a look too. `waiting` is brief once

@@ -26,7 +26,13 @@ public enum UpdatesText {
     /// the runner: the icon's grey dot. The icon itself is always there
     /// since the CLIs' versions moved into its panel (28 Oct).
     public static func shown(app: AppSide, runner: RunnerUpdates?) -> Bool {
-        app.isPending || app.failed || runner?.isPending == true || runner?.failed == true
+        app.isPending || app.failed || runner?.isPending == true || runner?.failed == true || fromMike(runner)
+    }
+
+    /// A release of Mike's this copy's main doesn't have yet (protocol
+    /// "Mike's releases").
+    public static func fromMike(_ runner: RunnerUpdates?) -> Bool {
+        runner?.upstream?.available == true
     }
 
     /// A CLI with a new version, held back, updating, or whose update
@@ -40,7 +46,8 @@ public enum UpdatesText {
     /// date), or that everything is. The panel has the rest.
     public static func iconTooltip(app: AppSide, runner: RunnerUpdates?, clis: [CliStatus]) -> String {
         var lines: [String] = []
-        if shown(app: app, runner: runner) { lines.append(tooltip(app: app, runner: runner)) }
+        if app.isPending || app.failed || runner?.isPending == true || runner?.failed == true { lines.append(tooltip(app: app, runner: runner)) }
+        if let line = upstreamTooltip(runner?.upstream) { lines.append(line) }
         for cli in clis where cliPending(cli) {
             lines.append(CliText.bannerText(cli) ?? CliText.statusLine(cli))
         }
@@ -53,8 +60,51 @@ public enum UpdatesText {
     /// main is fixed, and fixing main is a thread's job, not his. The icon
     /// gets a grey dot for those instead of the accent one (27 Oct, Mike:
     /// "the blue dot usually indicates there's something for me to action").
+    /// New changes from Mike want him too: they only come in when he says
+    /// (docs/setup-and-updates.md 2.3, "Ask by default", 29 Oct).
     public static func needsYou(app: AppSide, runner: RunnerUpdates?) -> Bool {
-        runner?.launcherChanged == true
+        runner?.launcherChanged == true || fromMike(runner)
+    }
+
+    /// "12 new changes from Mike", for the icon's tooltip.
+    public static func upstreamTooltip(_ u: RunnerUpdates.Upstream?) -> String? {
+        guard let u, u.available, let r = u.release else { return nil }
+        return r.changes == 1 ? "1 new change from Mike" : "\(r.changes) new changes from Mike"
+    }
+
+    /// The panel's From Mike section: what's new, that it's up to date, or
+    /// why it can't tell. Nil when there's nothing to say (no upstream).
+    public static func upstreamLine(_ u: RunnerUpdates.Upstream?) -> String? {
+        guard let u else { return nil }
+        if let tag = u.publishedTag, u.state == "off" { return "Your last release for everyone else is \(tag)." }
+        switch u.state {
+        case "available":
+            guard let r = u.release else { return nil }
+            let what = r.changes == 1 ? "1 new change" : "\(r.changes) new changes"
+            return "Mike's release \(releaseDate(r.tag)) has \(what)."
+        case "idle":
+            return u.release.map { "You're up to date with Mike's release \(releaseDate($0.tag))." } ?? "Mike hasn't made a release yet."
+        case "checking":
+            return "Checking for Mike's releases."
+        case "failed":
+            return "Couldn't check for Mike's releases\(u.reason.map { ": \($0)" } ?? ".")"
+        default:
+            return nil
+        }
+    }
+
+    /// "release/2026-10-30" as "of 30 Oct".
+    public static func releaseDate(_ tag: String) -> String {
+        let date = tag.hasPrefix("release/") ? String(tag.dropFirst("release/".count)) : tag
+        let parts = date.split(separator: "-").compactMap { Int($0) }
+        let months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+        guard parts.count == 3, (1...12).contains(parts[1]) else { return tag }
+        return "of \(parts[2]) \(months[parts[1] - 1])"
+    }
+
+    /// The first message of the thread Bring them in starts.
+    public static func bringInPrompt(_ r: RunnerUpdates.Upstream.Release) -> String {
+        "Bring in Mike's release \(r.tag) (\(r.changes) new change\(r.changes == 1 ? "" : "s")) to this copy of Threadbear. Follow docs/bringing-in-updates.md, and ask me before it lands."
     }
 
     /// The icon's tooltip. A failure is said, as it shares the grey dot

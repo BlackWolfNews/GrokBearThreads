@@ -96,19 +96,49 @@ Mike's own defaults stay defaults (misc as the default folder and so on), but mo
 
 ### 2.3 Updates: your main, plus Mike's changes when you ask
 
-Everyone has their own fork. `origin` is theirs, and setup adds `upstream` pointing at
-`mikecann/threadbear`. For Mike they're the same repo.
+Everyone has their own fork. `origin` is theirs and `upstream` is `mikecann/threadbear`.
+Setup forks it for you (`gh repo fork`, which renames the clone's `origin` to
+`upstream`). For Mike they're the same repo. Revised 29 Oct (thread 869a137f) after a
+second think, with Mike's answers in section 3.
+
+**Three layers, lowest first.** Every edit to Threadbear's own code is a merge waiting
+to happen later, which is how forks usually end up stuck on an old version. So an agent
+changing someone's Threadbear uses the lowest layer that does the job:
+
+1. Settings (`runner.json`, the app's Settings): no code.
+2. Patches (`.threadbear/patches/`, `~/.threadbear/patches/`): their code, outside
+   Threadbear's, which updates never touch.
+3. Edits to Threadbear itself: commits on their `main`, merged with Mike's.
+
+**Releases, not Mike's main.** Mike's `main` moves dozens of times a day. Once a day,
+Mike's own runner tags the newest commit it has been running as its last good release
+for at least six hours, as `release/YYYY-MM-DD`, if anything changed since the last tag.
+The tag is signed with Mike's SSH signing key and pushed to GitHub. The tag's message
+lists the changes since the last tag, which is what the app shows.
+
+**Signed, because it's code that runs as you.** Setup pins Mike's public key
+(`scripts/release-signers`) into the data folder. The runner ignores any release tag that
+doesn't verify against that pinned copy, so a change to the key in the repo (or a hijacked
+GitHub account) can't push code onto everyone's Mac.
 
 - **Your own changes ship as they do today.** Commit to `main` (or ask a thread to) and
-  the runner and the app rebuild themselves. Patches you write in `.threadbear/patches/`
-  need no fork at all.
-- **Mike's changes come in when you say so.** The runner fetches `upstream` every few
-  hours. When there's something new, the app shows "12 new changes from Mike" with what
-  they are, under the updates icon at the bottom of the left-hand rail (the one that
-  already shows app and runner updates). "Bring them in" starts a new thread that merges
-  upstream into your `main`, sorts out clashes with your own changes, runs the checks,
-  and asks before it lands. It never
-  happens silently, because a merge can quietly undo something you changed on purpose.
+  the runner and the app rebuild themselves.
+- **Mike's changes come in when you say so.** The runner fetches `upstream`'s release
+  tags every six hours. When there's a newer signed one, the Updates panel (the updates
+  icon at the bottom of the left-hand rail) shows "12 new changes from Mike" with what
+  they are. "Bring them in" starts a new thread that merges the tag into your `main`,
+  sorts out clashes with your own changes, runs the checks, and asks before it lands
+  (docs/bringing-in-updates.md is its brief). Asking is the default (Mike, 29 Oct),
+  because a merge can quietly undo something you changed on purpose. Merging by
+  itself when nothing clashes and the checks pass could be a setting later.
+- **Merging by intent, not just by text.** Git does most of a merge. For the rest,
+  the merge thread reads why each side changed (your commits since the last release
+  you brought in, and Mike's in the release) and puts your change back onto Mike's new
+  code, or drops it when Mike's now does the same thing. It also judges whether a
+  release looks halfway through something, and says so before landing.
+- **Agents can ask too.** `tb updates` shows the same thing, and `tb updates check`
+  fetches now, so a thread that hits a bug can see that Mike's latest release fixes it
+  and offer to bring it in.
 - **Each release deploys its backend first.** The release pipeline gains a step: deploy
   the Convex functions (and the website) to your backend, then restart the runner. Today
   nothing does this, so a runner can quietly get ahead of its backend.
@@ -175,7 +205,15 @@ Decided 28 Oct:
 - Bringing in Mike's changes: from the updates icon on the left-hand rail, "Bring them
   in" starts a new thread you approve (2.3).
 
-Nothing is open now. Next is building, in the order below.
+Decided 29 Oct:
+
+- Setup forks the repo rather than cloning it.
+- Mike's runner tags a release once a day when something changed. Whether a release
+  is halfway through a feature is for the merge thread to judge.
+- Other people's copies ask before bringing Mike's changes in.
+
+Open: the repo is private (0 forks on 29 Oct), so nobody else can fork it yet. Making
+it public is Mike's call, once he's happy for others to use it.
 
 ## 4. A rough order to build it in
 
@@ -196,7 +234,12 @@ Nothing is open now. Next is building, in the order below.
    runner.json. The pairing QR code and the browser sign-in moved into the Mac app on
    28 Oct (Settings › Phone & browser, docs/protocol.md "Devices"), so setup now points
    there and the terminal scripts are the fallback.
-5. Upstream updates: fetch, "new changes from Mike", the merge thread.
+5. Done 29 Oct: Mike's releases. His runner tags a signed `release/<date>` once a
+   day (runner.json `releases`); a fork's runner fetches and checks them
+   (runner/src/upstream.ts, docs/protocol.md "Mike's releases"); the Updates panel's
+   From Mike section and `tb updates` show what's new; Bring Them In starts the merge
+   thread (docs/bringing-in-updates.md); `tb land` never rebases a merge; setup forks
+   and pins the key.
 6. The heavy bits over Tailscale for the phone and the website.
 7. Tinker Desk as a second runner on the same backend.
 8. Self-hosted backend as a setup option.

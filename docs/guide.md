@@ -316,8 +316,10 @@ the ones its folders give its threads.
 ## Changing Threadbear itself
 
 You can change Threadbear by asking a thread to. Start one in your
-Threadbear folder (the clone setup ran from) and say what you'd like
-different. A thread there gets its own copy of the code to work in, and when
+Threadbear folder (your fork, the copy setup ran from) and say what you'd
+like different. If a setting or a patch would do it, the agent uses that
+rather than changing Threadbear's own code, so Mike's updates come in
+cleanly later. A thread there gets its own copy of the code to work in, and when
 the change is ready and its checks pass, the agent lands it on your `main`
 branch.
 
@@ -334,6 +336,17 @@ The Updates icon on the left-hand rail shows what's on its way for the app,
 the runner and the Claude Code and Codex tools. A grey dot means something
 is in progress and will sort itself out, and a coloured dot means it needs
 you. Right-click it for a quick Restart to Update.
+
+### Mike's updates
+
+Your copy is a fork of Mike's, and it doesn't change unless you say so.
+About once a day Mike publishes a release. Your runner checks for new ones
+every few hours, and only trusts releases signed with the key setup saved.
+When there's one your copy doesn't have, the Updates icon gets a coloured
+dot, and its From Mike section lists what's new. Bring Them In starts a
+thread that merges Mike's changes with your own, sorts out any clashes,
+runs the checks and asks you before it lands. From a thread, `tb updates`
+says the same, and `tb updates check` looks again now.
 
 ## Privacy
 
