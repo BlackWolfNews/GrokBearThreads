@@ -76,8 +76,12 @@ private struct InboxList: View {
             // a New thread row over a search field read as two bars that
             // didn't match. The button takes the field's height.
             HStack(spacing: zoomed(6)) {
+                // Room to type always; New thread gets what's left
+                // (`NewThreadButton` fits its words to it).
                 ThreadSearch()
+                    .frame(minWidth: zoomed(140))
                 NewThreadButton()
+                    .layoutPriority(1)
             }
             .fixedSize(horizontal: false, vertical: true)
             .padding(.horizontal, SidebarMetrics.outerInset)
@@ -180,9 +184,9 @@ private struct ThreadSearch: View {
     }
 }
 
-/// New thread beside the search: the compose icon alone, as Mail and
-/// Notes have it, so the search keeps the room. Lit while the new
-/// thread's composer is showing, as the row it replaced was.
+/// New thread beside the search, with its words: as the compose icon
+/// alone, Mike wanted them back (30 Oct). Lit while the new thread's
+/// composer is showing, as the row it replaced was.
 private struct NewThreadButton: View {
     @Environment(AppModel.self) private var app
     @Environment(\.controlActiveState) private var activeState
@@ -191,14 +195,17 @@ private struct NewThreadButton: View {
     var body: some View {
         let active = app.selection == nil
         Button { app.newThread() } label: {
-            Image(systemName: "square.and.pencil")
-                .font(.system(size: TypeScale.sidebarButton))
-                .foregroundStyle(hovering || active ? .primary : .secondary)
-                .frame(width: zoomed(32))
-                .frame(maxHeight: .infinity)
-                .background(active ? Color.primary.opacity(activeState == .key ? 0.08 : 0.06) : hovering ? SidebarMetrics.hover : .clear,
-                            in: RoundedRectangle(cornerRadius: SidebarMetrics.corner))
-                .contentShape(Rectangle())
+            // The words that fit beside the search: a narrow sidebar gets
+            // "New", then the icon alone.
+            ViewThatFits(in: .horizontal) {
+                label("New thread", lit: hovering || active)
+                label("New", lit: hovering || active)
+                label(nil, lit: hovering || active)
+            }
+            .frame(maxHeight: .infinity)
+            .background(active ? Color.primary.opacity(activeState == .key ? 0.08 : 0.06) : hovering ? SidebarMetrics.hover : .clear,
+                        in: RoundedRectangle(cornerRadius: SidebarMetrics.corner))
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .onHover { hovering = $0 }
@@ -208,6 +215,22 @@ private struct NewThreadButton: View {
         .shortcutHint("⌘N", .before)
         .tip("Start a new thread (⌘N)")
         .accessibilityLabel("New thread")
+    }
+
+    private func label(_ title: String?, lit: Bool) -> some View {
+        HStack(spacing: zoomed(6)) {
+            Image(systemName: "square.and.pencil")
+                .font(.system(size: TypeScale.sidebarButton))
+                .foregroundStyle(lit ? .primary : .secondary)
+            if let title {
+                Text(title)
+                    .font(.system(size: TypeScale.sidebarButton))
+                    .foregroundStyle(.primary)
+                    .fixedSize()
+            }
+        }
+        .padding(.horizontal, title == nil ? 0 : zoomed(10))
+        .frame(minWidth: zoomed(32))
     }
 }
 
