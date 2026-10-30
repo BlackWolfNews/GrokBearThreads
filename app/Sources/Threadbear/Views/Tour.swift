@@ -256,6 +256,26 @@ final class Tour {
 
     /// Whether the step's task has been done, as the window changes
     /// (TourOverlay calls it).
+    /// Opens the roll's row, so it shows without a click. The run can
+    /// finish a moment before its row reaches the thread (it did once the
+    /// chips moved onto shelves, 30 Oct), so it looks again every 0.1s
+    /// for up to `tries` times rather than once.
+    private func openRoll(tries: Int) {
+        guard let app, let id = app.selection, sampleIds.contains(id) else { return }
+        if let row = app.session(for: id).model.items.last(where: { $0.id.hasPrefix("t:action:") }),
+           app.transcript.session?.threadId == id, let shown = app.transcript.session?.displayIndex(of: row.id),
+           let drawn = app.transcript.row(at: shown) {
+            guard !app.transcript.isExpanded(drawn) else { return }
+            app.transcript.toggleExpanded(rowId: row.id)
+            // Down to its output, once the opened row is laid out:
+            // opened in place, the roll sat under the composer.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [app] in app.transcript.scrollToBottom() }
+            return
+        }
+        guard tries > 1 else { return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in self?.openRoll(tries: tries - 1) }
+    }
+
     func check() {
         guard let app, let task = current?.task, !taskDone else { return }
         let samples = sampleIds.compactMap { app.threads[$0] }
@@ -272,16 +292,7 @@ final class Tour {
             let running = app.runningActions.contains { key in sampleIds.contains { key.hasPrefix($0) } }
             if running { sawChipRun = true } else if sawChipRun {
                 taskDone = true
-                // Open its row, so the roll shows without a click.
-                if let id = app.selection, sampleIds.contains(id),
-                   let row = app.session(for: id).model.items.last(where: { $0.id.hasPrefix("t:action:") }),
-                   app.transcript.session?.threadId == id, let shown = app.transcript.session?.displayIndex(of: row.id),
-                   let drawn = app.transcript.row(at: shown), !app.transcript.isExpanded(drawn) {
-                    app.transcript.toggleExpanded(rowId: row.id)
-                    // Down to its output, once the opened row is laid out:
-                    // opened in place, the roll sat under the composer.
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { app.transcript.scrollToBottom() }
-                }
+                openRoll(tries: 30)
             }
         case .sendFirst:
             if let id = app.threads.keys.first(where: { !threadsAtStart.contains($0) }) {
