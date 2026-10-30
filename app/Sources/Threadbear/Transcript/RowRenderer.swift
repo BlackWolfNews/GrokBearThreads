@@ -1257,13 +1257,15 @@ enum RowRenderer {
     /// The done card: the agent said nothing waits on Mike, so it says
     /// Done, with Archive (`archive`, as ⌘E does) at the right of that
     /// line. Any follow-ups it suggested sit under "Or carry on", one
-    /// row each, and a click on one sends it (`next:<n>`). Mike found
+    /// row each with a tick circle, and a click ticks or unticks one
+    /// (`next:<n>`): ticked ones go with his next message, so he can pick
+    /// several and add to them (30 Oct). Mike found
     /// "Nothing needed from you" over a list of ticks confusing (30 Oct):
     /// it read as things to do. Now the card offers the real choice, put
     /// it away or keep going, and he picked this from mockups. Rows rather
-    /// than buttons, as a long one broke into two buttons; they leave room
-    /// at the right for the "Send ↑" the pointer shows (`.tbRow`). The
-    /// follow-ups go once he's replied, like an ask's answers.
+    /// than buttons, as a long one broke into two buttons; the pointer
+    /// lights up the whole row (`.tbRow`). The follow-ups go once he's
+    /// replied, like an ask's answers.
     private static func doneText(_ card: AsksCard, width: CGFloat) -> NSAttributedString {
         let title = Theme.changesTitleFont
         let button = Theme.labelFont
@@ -1293,22 +1295,27 @@ enum RowRenderer {
             .font: small, .foregroundColor: NSColor.secondaryLabelColor, .paragraphStyle: labelStyle, .baselineOffset: labelOffset,
         ]))
         let font = Theme.bodyFont
-        // Room at the right for "Send ↑", so a long one wraps short of it.
-        let send = ceil(NSAttributedString(string: sendLabel, attributes: [.font: small]).size().width) + zoomed(16) + inset
-        let (rowStyle, rowOffset) = Theme.lines(TypeScale.bodyLine, font: font, spacing: zoomed(8), before: zoomed(8), head: inset, tail: -send)
+        // The words start on a tab past the circle, and a long one wraps
+        // in line with them rather than under the circle.
+        let words = inset + ceil(font.pointSize * 1.2) + zoomed(8)
+        let (rowStyle, rowOffset) = Theme.lines(TypeScale.bodyLine, font: font, spacing: zoomed(8), before: zoomed(8), head: words, first: inset, tail: -inset)
+        rowStyle.tabStops = [NSTextTab(textAlignment: .left, location: words)]
         for (n, text) in card.next.enumerated() {
             // The break ends the line before, so it isn't part of the row.
             output.append(NSAttributedString(string: "\n", attributes: [.font: font, .paragraphStyle: rowStyle]))
-            output.append(NSAttributedString(string: text, attributes: [
+            let attributes: [NSAttributedString.Key: Any] = [
                 .font: font, .foregroundColor: NSColor.labelColor, .paragraphStyle: rowStyle, .baselineOffset: rowOffset,
                 .tbAction: "next:\(n)", .tbRow: "next:\(n)",
-            ]))
+            ]
+            let ticked = card.pickedNext.contains(n)
+            output.append(ticked
+                ? symbol("checkmark.circle.fill", label: "Ticked", font: font, attributes: attributes, color: .controlAccentColor)
+                : symbol("circle", label: "Not ticked", font: font, attributes: attributes))
+            output.append(NSAttributedString(string: "\t" + text, attributes: attributes))
         }
         return output
     }
 
-    /// What a follow-up row shows at its right under the pointer.
-    static let sendLabel = "Send ↑"
     /// How far a follow-up row's words sit in from its hover fill.
     static var rowInset: CGFloat { zoomed(8) }
 

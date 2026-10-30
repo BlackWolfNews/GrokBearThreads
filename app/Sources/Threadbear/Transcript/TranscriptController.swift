@@ -792,7 +792,7 @@ final class TranscriptController: NSObject, NSTableViewDataSource, NSTableViewDe
     /// an answer, which waits in the composer; `link:<ask>:<n>` opens one of
     /// the ask's links where links open (the pane or the browser). The done
     /// card's `archive` archives the thread, as ⌘E does, and `next:<n>`
-    /// sends a suggested follow-up.
+    /// ticks or unticks a suggested follow-up, which waits in the composer.
     func askAction(_ card: AsksCard, action: String) {
         guard let session, let app = session.app, let thread = app.threads[session.threadId] else { return }
         if action == "archive" {
@@ -803,7 +803,7 @@ final class TranscriptController: NSObject, NSTableViewDataSource, NSTableViewDe
         }
         if action.hasPrefix("next:") {
             guard card.isOpen, let n = Int(action.dropFirst(5)), card.next.indices.contains(n) else { return }
-            app.sendFollowUp(threadId: thread.id, text: card.next[n])
+            app.toggleFollowUp(threadId: thread.id, card: card, index: n)
             return
         }
         let parts = action.split(separator: ":")

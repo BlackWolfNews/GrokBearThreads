@@ -92,6 +92,24 @@ final class NeedsYouTests: XCTestCase {
         XCTAssertEqual(card(model, "ak:1")?.next, ["Show Bruce pictures", "Start Bruce threads"])
     }
 
+    /// Ticking follow-ups shows on the done card, and survives a rebuild
+    /// of the rows; several go as a list, with anything he typed after.
+    func testFollowUpsAreTickedOnTheDoneCard() {
+        var model = TranscriptModel(events: [done(1, turn: "t1", needs: "nothing", next: ["Check the nightly", "Refresh the cache"])])
+        _ = model.setNextPicks(1, [0, 1])
+        XCTAssertEqual(card(model, "ak:1")?.pickedNext, [0, 1])
+        _ = model.setNextPicks(1, [1])
+        XCTAssertEqual(card(model, "ak:1")?.pickedNext, [1])
+        // Picks made before the events load (a transcript opened again).
+        var later = TranscriptModel()
+        _ = later.setNextPicks(1, [0])
+        later.load(events: [done(1, turn: "t1", needs: "nothing", next: ["Check the nightly"])])
+        XCTAssertEqual(card(later, "ak:1")?.pickedNext, [0])
+        XCTAssertEqual(Decisions.followUpMessage(["Check the nightly"]), "Check the nightly")
+        XCTAssertEqual(Decisions.followUpMessage(["Check the nightly", "Refresh the cache"], extra: " and be quick \n"),
+                       "- Check the nightly\n- Refresh the cache\n\nand be quick")
+    }
+
     /// The open card is what the composer draws at its top (ComposerCard),
     /// with its picks; Mike's reply takes it out of the composer as well.
     func testTheOpenCardIsTheLastTurnsUntilHeReplies() {

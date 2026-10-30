@@ -30,7 +30,9 @@ struct ComposerView: View {
         )
         // Answers picked on the open card of asks go with the message.
         let picks = thread.map { app.picks(for: $0) } ?? [:]
-        let canSend = !picks.isEmpty || ComposerChips.canSend(text: draft.wrappedValue.text, imageCount: draft.wrappedValue.images.count)
+        // So are follow-ups ticked on a done card.
+        let followUps = thread.map { app.pickedFollowUps(threadId: $0.id) } ?? []
+        let canSend = !picks.isEmpty || !followUps.isEmpty || ComposerChips.canSend(text: draft.wrappedValue.text, imageCount: draft.wrappedValue.images.count)
         // A new thread on its way: what was sent stays, greyed and locked,
         // until the runner has made the thread.
         let creating = thread == nil && app.creatingThread
@@ -76,7 +78,7 @@ struct ComposerView: View {
                 text: draft.text,
                 height: $height,
                 focusTrigger: app.focusRequests[draftKey] ?? 0,
-                placeholder: placeholder(picks, needsYou: needsYou),
+                placeholder: placeholder(picks, followUps: followUps, needsYou: needsYou),
                 onSend: { send() },
                 onReturnWhenEmpty: { returnWhenEmpty(draft.wrappedValue) },
                 onImages: { urls in attach(urls, to: draft) },
@@ -136,9 +138,9 @@ struct ComposerView: View {
     /// With answers picked, the box is for anything else: a Something
     /// else answer has its own box on the card. Under asks with none
     /// picked, it's the way to answer in other words.
-    private func placeholder(_ picks: [Int: Int], needsYou: Bool) -> String {
+    private func placeholder(_ picks: [Int: Int], followUps: [String], needsYou: Bool) -> String {
         if let thread, app.editing[thread.id] != nil { return "Your message…" }
-        if !picks.isEmpty { return "Add anything else…" }
+        if !picks.isEmpty || !followUps.isEmpty { return "Add anything else…" }
         return needsYou ? "Or say something else…" : "Message"
     }
 
@@ -156,7 +158,7 @@ struct ComposerView: View {
             if !draft.images.isEmpty { send() }
             return true
         }
-        if let thread, !app.picks(for: thread).isEmpty {
+        if let thread, !app.picks(for: thread).isEmpty || !app.pickedFollowUps(threadId: thread.id).isEmpty {
             send()
             return true
         }

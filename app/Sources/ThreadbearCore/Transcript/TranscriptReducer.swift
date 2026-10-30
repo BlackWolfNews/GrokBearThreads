@@ -100,6 +100,9 @@ public struct TranscriptModel: Sendable {
     /// What Mike has written in each card's Something else boxes, by the
     /// card's seq, kept here for the same reason.
     public private(set) var askNotes: [Int: [Int: AskNote]] = [:]
+    /// The follow-ups Mike ticked on each done card, by the card's seq,
+    /// kept here for the same reason.
+    public private(set) var nextPicks: [Int: Set<Int>] = [:]
     /// Each turn's last error row, to learn the turn's `errorKind`.
     private var errorRowForTurn: [String: String] = [:]
     private var turnStarts: [String: Date] = [:]
@@ -365,6 +368,20 @@ public struct TranscriptModel: Sendable {
         update(cardId) { content in
             if case .asks(var card) = content {
                 card.notes = notes
+                content = .asks(card)
+            }
+        }
+        return refreshRows()
+    }
+
+    /// Mike ticked (or unticked) follow-ups on the done card from `seq`.
+    public mutating func setNextPicks(_ seq: Int, _ picks: Set<Int>) -> TranscriptChange {
+        guard nextPicks[seq, default: []] != picks else { return TranscriptChange() }
+        nextPicks[seq] = picks.isEmpty ? nil : picks
+        guard let cardId = asksRowForSeq[seq] else { return TranscriptChange() }
+        update(cardId) { content in
+            if case .asks(var card) = content {
+                card.pickedNext = picks
                 content = .asks(card)
             }
         }
@@ -803,7 +820,8 @@ public struct TranscriptModel: Sendable {
                     // The done card: goes, as an asks card does, once Mike
                     // replies or the next turn ends.
                     let cardId = "ak:\(seq)"
-                    append(TranscriptRow(id: cardId, seq: seq, turnId: turnId ?? completion.turnId, content: .asks(AsksCard(seq: seq, asks: [], next: completion.next))))
+                    append(TranscriptRow(id: cardId, seq: seq, turnId: turnId ?? completion.turnId, content: .asks(AsksCard(seq: seq, asks: [], next: completion.next, pickedNext: nextPicks[seq] ?? []))))
+                    asksRowForSeq[seq] = cardId
                     openAsksRow = cardId
                 }
             }

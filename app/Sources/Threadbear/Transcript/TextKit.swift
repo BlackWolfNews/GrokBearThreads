@@ -6,8 +6,8 @@ import ThreadbearCore
 /// backgrounds: rounded boxes behind code blocks and full-width line fills
 /// for diffs. Plain `.backgroundColor` only covers the glyphs.
 final class BackgroundLayoutManager: NSLayoutManager {
-    /// The `.tbRow` paragraph under the pointer, lit up with "Send ↑" at
-    /// its right (set by the text view).
+    /// The `.tbRow` paragraph under the pointer, lit up (set by the text
+    /// view).
     var hoveredRow: NSRange?
 
     override func drawBackground(forGlyphRange glyphsToShow: NSRange, at origin: NSPoint) {
@@ -78,24 +78,17 @@ final class BackgroundLayoutManager: NSLayoutManager {
     }
 
     /// A faint fill across a hovered `.tbRow` paragraph, the width of the
-    /// text view (the row's words sit in from its edges), and "Send ↑" in
-    /// its right margin (the paragraph's tail indent leaves room for it),
-    /// on its first line.
+    /// text view (the row's words sit in from its edges).
     private func drawHoveredRow(_ range: NSRange, width: CGFloat, origin: NSPoint) {
         let glyphs = glyphRange(forCharacterRange: range, actualCharacterRange: nil)
         var box = NSRect.null
-        var first = NSRect.null
         enumerateLineFragments(forGlyphRange: glyphs) { _, used, _, _, _ in
-            if first.isNull { first = used }
             box = box.union(used)
         }
         guard !box.isNull else { return }
         let rect = NSRect(x: origin.x, y: origin.y + box.minY - zoomed(5), width: width, height: box.height + zoomed(10))
         Theme.hoverFill.setFill()
         NSBezierPath(roundedRect: rect, xRadius: zoomed(6), yRadius: zoomed(6)).fill()
-        let label = NSAttributedString(string: RowRenderer.sendLabel, attributes: [.font: Theme.smallFont, .foregroundColor: NSColor.secondaryLabelColor])
-        let size = label.size()
-        label.draw(at: NSPoint(x: origin.x + width - RowRenderer.rowInset - size.width, y: origin.y + first.midY - size.height / 2))
     }
 
     /// A capsule behind an asks card button, one per line if it wraps.

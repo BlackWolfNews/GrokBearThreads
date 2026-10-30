@@ -145,22 +145,32 @@ final class TranscriptLayoutTests: XCTestCase {
         let archive = (done.string as NSString).range(of: "Archive")
         XCTAssertEqual(done.attribute(.tbAction, at: archive.location, effectiveRange: nil) as? String, "archive")
         // Suggested follow-ups: under "Or carry on", each a whole-row click
-        // target that sends it; gone once it's closed.
+        // target that ticks it, with its circle; gone once it's closed.
         let next = RowRenderer.asksText(AsksCard(seq: 4, asks: [], next: ["Show Bruce pictures", "Start Bruce threads"]))
         let nextString = next.string as NSString
         let suggestion = nextString.range(of: "Show Bruce pictures")
         XCTAssertNotEqual(suggestion.location, NSNotFound, next.string)
         XCTAssertEqual(next.attribute(.tbAction, at: suggestion.location, effectiveRange: nil) as? String, "next:0")
         var row = NSRange()
-        XCTAssertEqual(next.attribute(.tbRow, at: suggestion.location, effectiveRange: &row) as? String, "next:0")
-        XCTAssertEqual(row, suggestion, "the row is just its own words")
+        XCTAssertEqual(next.attribute(.tbRow, at: suggestion.location, longestEffectiveRange: &row, in: NSRange(location: 0, length: next.length)) as? String, "next:0")
+        XCTAssertEqual(NSMaxRange(row), NSMaxRange(suggestion), "the row is its circle and its own words")
+        XCTAssertNotNil(next.attribute(.attachment, at: row.location, effectiveRange: nil), "the tick circle starts the row")
         let heading = nextString.range(of: "Or carry on").location
         XCTAssertLessThan(nextString.range(of: "Archive").location, heading)
         XCTAssertLessThan(heading, suggestion.location)
-        // A row, not a button, so a long one wraps, short of "Send ↑".
+        // A row, not a button, so a long one wraps, in line with its words.
         XCTAssertNil(next.attribute(.tbButton, at: suggestion.location, effectiveRange: nil))
         let style = next.attribute(.paragraphStyle, at: suggestion.location, effectiveRange: nil) as? NSParagraphStyle
-        XCTAssertLessThan(style?.tailIndent ?? 0, 0)
+        XCTAssertGreaterThan(style?.headIndent ?? 0, style?.firstLineHeadIndent ?? 0)
+        // A ticked one has a different circle from an unticked one.
+        let ticked = RowRenderer.asksText(AsksCard(seq: 4, asks: [], next: ["Show Bruce pictures", "Start Bruce threads"], pickedNext: [1]))
+        let image = { (text: NSAttributedString, words: String) -> NSImage? in
+            var range = NSRange()
+            _ = text.attribute(.tbRow, at: (text.string as NSString).range(of: words).location, longestEffectiveRange: &range, in: NSRange(location: 0, length: text.length))
+            return (text.attribute(.attachment, at: range.location, effectiveRange: nil) as? NSTextAttachment)?.image
+        }
+        XCTAssertEqual(image(ticked, "Show Bruce pictures")?.tiffRepresentation, image(next, "Show Bruce pictures")?.tiffRepresentation)
+        XCTAssertNotEqual(image(ticked, "Start Bruce threads")?.tiffRepresentation, image(next, "Start Bruce threads")?.tiffRepresentation)
         let start = nextString.range(of: "Start Bruce threads").location
         XCTAssertEqual(next.attribute(.tbRow, at: start, effectiveRange: nil) as? String, "next:1")
         XCTAssertFalse(done.string.contains("carry on"), done.string)

@@ -43,6 +43,12 @@ struct AskPicks: Equatable {
     var notes: [Int: AskNote] = [:]
 }
 
+/// The follow-ups ticked on a thread's done card, and which card they're for.
+struct NextPicks: Equatable {
+    var seq: Int
+    var picked: Set<Int>
+}
+
 /// App state: the runner connection, the thread list, the selection and the
 /// open thread sessions. Holds no agent state of its own.
 @MainActor
@@ -161,6 +167,10 @@ final class AppModel {
     /// thread id, waiting in the composer to go with his next message.
     /// Ones for an older card count as none.
     var askPicks: [String: AskPicks] = [:]
+    /// The follow-ups ticked on each thread's done card, by thread id,
+    /// waiting in the composer the same way. Ones for an older card count
+    /// as none.
+    var nextPicks: [String: NextPicks] = [:]
     @ObservationIgnored var reviewWindows: [String: ReviewWindowController] = [:]
     /// The review open in the dock's Review panel (WindowDock.review), if
     /// any. A review popped out into its own window leaves it.
@@ -1148,21 +1158,27 @@ final class AppModel {
         sessions[threadId]?.setAskNotes(seq: seq, notes: notes)
     }
 
-    /// A follow-up from the done card, sent as it is. Ticking them into
-    /// the composer read as a to-do list under "Nothing needed from you"
-    /// (Mike, 30 Oct), so the card now offers them as ways to carry on,
-    /// one click each. Whatever he'd typed in the box stays there, for
-    /// his next message: it goes through `send` as the draft for a
-    /// moment, then the box gets his words back, whether it went or not
-    /// (not connected). A send that fails later puts the follow-up back
-    /// in the box with them (restoreDraft). While he's editing a message,
-    /// sending would replace that message, so the click does nothing.
-    func sendFollowUp(threadId: String, text: String) {
-        guard editing[threadId] == nil else { return }
-        let typed = drafts[threadId]
-        drafts[threadId] = Draft(text: text)
-        send(threadId: threadId)
-        if drafts[threadId] == nil || drafts[threadId]?.text == text { drafts[threadId] = typed }
+    /// Ticks (or unticks) a follow-up on the done card. Ticked ones wait
+    /// in the composer and go with whatever he sends next, so he can pick
+    /// several and add his own words. They used to send on one click,
+    /// which only ever got one of them and gave no chance to add anything
+    /// (Mike, 30 Oct); ticking read as a to-do list back when the card
+    /// said "Nothing needed from you", but it says Done now.
+    func toggleFollowUp(threadId: String, card: AsksCard, index: Int) {
+        guard card.isDone, card.isOpen, card.next.indices.contains(index) else { return }
+        var picked = nextPicks[threadId].flatMap { $0.seq == card.seq ? $0.picked : nil } ?? []
+        if picked.remove(index) == nil { picked.insert(index) }
+        nextPicks[threadId] = picked.isEmpty ? nil : NextPicks(seq: card.seq, picked: picked)
+        sessions[threadId]?.setNextPicks(seq: card.seq, picks: picked)
+        focusComposer(threadId)
+    }
+
+    /// The words of the follow-ups ticked on the thread's open done card,
+    /// in the card's order.
+    func pickedFollowUps(threadId: String) -> [String] {
+        guard case .asks(let card)? = sessions[threadId]?.openCard?.content, card.isDone, card.isOpen,
+              let mine = nextPicks[threadId], mine.seq == card.seq else { return [] }
+        return card.next.indices.filter { mine.picked.contains($0) }.map { card.next[$0] }
     }
 
     /// Puts one of Mike's messages in the thread's composer to edit: sending
@@ -1228,7 +1244,13 @@ final class AppModel {
         let notes = thread.map { self.notes(for: $0) } ?? [:]
         let asks = thread?.asks ?? []
         let answers = Decisions.answers(asks: asks, picks: picks, notes: notes).map(\.answer)
-        let trimmed = answers.isEmpty
+        // Follow-ups ticked on a done card go first too (it has no asks,
+        // so it's one or the other).
+        let followUps = threadId.map { pickedFollowUps(threadId: $0) } ?? []
+        let ticked = threadId.flatMap { nextPicks[$0] }
+        let trimmed = !followUps.isEmpty
+            ? Decisions.followUpMessage(followUps, extra: draft.text)
+            : answers.isEmpty
             ? draft.text.trimmingCharacters(in: .whitespacesAndNewlines)
             : Decisions.message(asks: asks, picks: picks, notes: notes, extra: draft.text)
         // Pictures from the asks' boxes first, numbered as the answers say,
@@ -1250,6 +1272,8 @@ final class AppModel {
             drafts[key] = nil
             let seq = thread?.asksSeq
             if let seq, !answers.isEmpty { setAnswers(picks: [:], notes: [:], seq: seq, threadId: threadId) }
+            // The card keeps its ticks until his message closes it.
+            if !followUps.isEmpty { nextPicks[threadId] = nil }
             let pendingId = UUID().uuidString
             // The thread's own session, open already as its composer is
             // showing; kept by the Task, so a failure finds it.
@@ -1269,6 +1293,7 @@ final class AppModel {
                     session?.removePending(pendingId)
                     restoreDraft(draft, key: key)
                     if let seq, !answers.isEmpty { setAnswers(picks: picks, notes: notes, seq: seq, threadId: threadId) }
+                    if !followUps.isEmpty, nextPicks[threadId] == nil { nextPicks[threadId] = ticked }
                     show(error)
                 }
             }

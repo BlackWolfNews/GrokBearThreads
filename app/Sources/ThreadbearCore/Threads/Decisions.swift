@@ -141,6 +141,15 @@ public enum Decisions {
         return body
     }
 
+    /// The message for follow-ups ticked on a done card: the one on its
+    /// own, or several as a list, then anything he typed.
+    public static func followUpMessage(_ followUps: [String], extra: String = "") -> String {
+        var body = followUps.count == 1 ? followUps[0] : followUps.map { "- \($0)" }.joined(separator: "\n")
+        let more = extra.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !more.isEmpty { body += (body.isEmpty ? "" : "\n\n") + more }
+        return body
+    }
+
     /// One ask's question then its answer. Numbered, the answer is
     /// indented under it, every line of it.
     static func block(_ answer: AskAnswer, number: Int?) -> String {

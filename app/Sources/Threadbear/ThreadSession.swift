@@ -118,12 +118,14 @@ final class ThreadSession {
                 let background = app?.threads[threadId]?.background ?? []
                 // Answers picked on the open card before it was last shown.
                 let picks = app?.askPicks[threadId]
+                let nextPicks = app?.nextPicks[threadId]
                 let prepared = await Task.detached(priority: .userInitiated) { () -> (TranscriptModel, Int) in
                     var model = TranscriptModel(root: root)
                     if let picks {
                         _ = model.setAskPicks(picks.asksSeq, picks.picks)
                         _ = model.setAskNotes(picks.asksSeq, picks.notes)
                     }
+                    if let nextPicks { _ = model.setNextPicks(nextPicks.seq, nextPicks.picked) }
                     model.load(events: page.events, inProgress: page.inProgress)
                     _ = model.setBackground(background)
                     if debug { print(String(format: "    after model %.0f MB", memoryMB())) }
@@ -412,6 +414,16 @@ final class ThreadSession {
         guard state == .loaded, !rebuilding else { return }
         let oldStart = displayStart
         let change = feed.setAskNotes(seq, notes)
+        guard !change.isEmpty else { return }
+        show(change, oldStart: oldStart)
+    }
+
+    /// Shows the follow-ups ticked on the done card from `seq` as ticked
+    /// (before it's loaded, the model is built with AppModel.nextPicks).
+    func setNextPicks(seq: Int, picks: Set<Int>) {
+        guard state == .loaded, !rebuilding else { return }
+        let oldStart = displayStart
+        let change = feed.setNextPicks(seq, picks)
         guard !change.isEmpty else { return }
         show(change, oldStart: oldStart)
     }
