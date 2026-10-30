@@ -71,6 +71,28 @@ final class WorkLinksTests: XCTestCase {
         XCTAssertEqual(model.rows.map(\.id), ["u:1", "g:t:c1", "a:e1.summary", "f:t1"])
     }
 
+    /// The runner's "the app restarted" landed between an end_turn that
+    /// asked for a narration's words and the words themselves (30 Oct
+    /// 2026). It starts a fresh answer: the agent's last words after its
+    /// last step are the reply, not the narration before the restart.
+    func testAMessageSentIntoTheTurnStartsAFreshAnswer() {
+        let model = TranscriptModel(events: [
+            E.user(1, "Set up end-to-end tests"),
+            E.call(2, "c1", input: ["command": "./check.sh"]), E.result(3, "c1"),
+            E.event(4, "assistant.text", ["itemId": "m1", "text": "Added an end-to-end test that walks all 14 tour steps on a real runner.", "narration": true]),
+            E.call(5, "e1", name: "mcp__threadbear__end_turn", kind: "mcp", title: "end_turn"), E.result(6, "e1", text: "Noted. Mike got only a short summary"),
+            E.event(7, "user.message", ["text": "The app has restarted onto 062f66a", "images": [], "origin": "runner"]),
+            E.text(8, "m2", "The tour now has an end-to-end test against a real runner, and the fixes are on main."),
+            E.call(9, "c2", input: ["command": "tb status"]), E.result(10, "c2"),
+            E.event(11, "assistant.text", ["itemId": "m3", "text": "M5 is updated with the fixes and Tinker Desk is still building.", "narration": true]),
+            E.call(12, "e2", name: "mcp__threadbear__end_turn", kind: "mcp", title: "end_turn"), E.result(13, "e2", ok: false, text: "Already ended"),
+            E.text(14, "m4", "Your M5 app is now on 062f66a, with the fixes the end-to-end test found. Tinker Desk is still building."),
+            E.done(15),
+        ])
+        let shown = model.rows.filter { if case .assistant = $0.content { return true }; return false }.map(\.id)
+        XCTAssertEqual(shown, ["a:m4"])
+    }
+
     /// Text after end_turn never takes the answer's place: an agent wrote
     /// its "What I need from you" there, and it showed instead of the
     /// explanation before it (29 Oct 2026).

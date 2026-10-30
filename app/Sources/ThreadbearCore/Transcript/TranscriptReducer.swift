@@ -987,7 +987,16 @@ public struct TranscriptModel: Sendable {
     /// needs.ts, BULLETS_ONLY).
     private func reply(of turn: [Int]) -> Set<Int> {
         let text = textItem
-        let end = turn.firstIndex { k in
+        // A message sent into the turn (the runner's "the app restarted")
+        // starts a fresh answer, so only an end_turn after it ends this
+        // one: on 30 Oct 2026 a restart landed between end_turn and the
+        // message it asked for, and everything after it folded away
+        // under the narration it was meant to replace.
+        let fresh = (turn.lastIndex { k in
+            if case .user = items[k].content { return true }
+            return false
+        }).map { $0 + 1 } ?? 0
+        let end = turn[fresh...].firstIndex { k in
             if case .tool(let tool) = items[k].content { return Self.isTakenEndTurn(tool) }
             return false
         } ?? turn.count
@@ -1015,6 +1024,9 @@ public struct TranscriptModel: Sendable {
             let said = words.reduce(0) { $0 + (text($1)?.text.count ?? 0) }
             return said > (text(summary)?.text.count ?? 0) ? Set(words) : [summary]
         }
+        // Words win over a narration paraphrase of them.
+        let words = final.filter { text($0)?.isNarration == false }
+        if !words.isEmpty { return Set(words) }
         if !final.isEmpty { return Set(final) }
         return (turn.last { text($0) != nil }).map { [$0] } ?? []
     }

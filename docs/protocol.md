@@ -1364,7 +1364,10 @@ A turn the agent finished can say whether Mike has to do anything, so
   paraphrase of what the agent wrote (30 Oct 2026: one about a list of
   names showed instead of the bullets). A step is a tool call outside the `threadbear` tools and `ToolSearch`,
   counted from its `tool.result` too (a message written while it ran
-  isn't after it); a `user.message` sent into the turn counts as one.
+  isn't after it); a `user.message` sent into the turn counts as one, and only an
+  `end_turn` after it ends the answer (30 Oct 2026: the runner's "app
+  restarted" landed between an `end_turn` and the message it asked
+  for). Words beat a narration paraphrase with no summary too.
   Text after `end_turn` never counts. The line of work goes above the
   reply, and holds the summary when the message won. On 29 Oct 2026 the
   bullets alone hid two answers: a turn that only explained something
