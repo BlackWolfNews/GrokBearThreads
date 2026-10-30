@@ -21,13 +21,18 @@ public struct ThreadProject: Sendable, Hashable, Codable, Identifiable {
     /// take it out.
     public var pinned: Bool
     public var at: Date?
+    /// Why it's there, a short line: the librarian's reason ("Shortlists
+    /// photos for the calendar entry"). Behind the project's ⓘ in
+    /// Highlights, so a wrong guess can be seen and taken out.
+    public var why: String?
 
-    public init(id: String, title: String, by: ProjectAuthor = .librarian, pinned: Bool = false, at: Date? = nil) {
+    public init(id: String, title: String, by: ProjectAuthor = .librarian, pinned: Bool = false, at: Date? = nil, why: String? = nil) {
         self.id = id
         self.title = title
         self.by = by
         self.pinned = pinned
         self.at = at
+        self.why = why
     }
 
     public init(from decoder: Decoder) throws {
@@ -37,6 +42,7 @@ public struct ThreadProject: Sendable, Hashable, Codable, Identifiable {
         by = (try? c.decodeIfPresent(ProjectAuthor.self, forKey: .by)).flatMap { $0 } ?? .librarian
         pinned = (try? c.decodeIfPresent(Bool.self, forKey: .pinned)).flatMap { $0 } ?? false
         at = (try? c.decodeIfPresent(String.self, forKey: .at)).flatMap { $0 }.flatMap(ISO8601.parse)
+        why = (try? c.decodeIfPresent(String.self, forKey: .why)).flatMap { $0 }.flatMap { $0.isEmpty ? nil : $0 }
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -46,9 +52,10 @@ public struct ThreadProject: Sendable, Hashable, Codable, Identifiable {
         try c.encode(by, forKey: .by)
         if pinned { try c.encode(true, forKey: .pinned) }
         try c.encodeIfPresent(at.map(ISO8601.format), forKey: .at)
+        try c.encodeIfPresent(why, forKey: .why)
     }
 
-    enum CodingKeys: String, CodingKey { case id, title, by, pinned, at }
+    enum CodingKeys: String, CodingKey { case id, title, by, pinned, at, why }
 }
 
 /// A grouping above folders that carries goals, state and notes forward.

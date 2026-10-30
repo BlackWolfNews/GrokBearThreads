@@ -22,7 +22,7 @@ import type { LibrarianEntry, LibrarianJob, LibrarianOutcome, LibrarianReason, L
 import { ErrorCode, RpcError } from './protocol.ts';
 import type { ThreadRecord } from './store.ts';
 import type { ProjectRecord, Projects } from './projects.ts';
-import { LINKS_MAX, NOTES_LONG } from './projects.ts';
+import { LINKS_MAX, NOTES_LONG, WHY_MAX } from './projects.ts';
 import { atomicWriteFileSync, readJsonSync } from './fsutil.ts';
 import { findUp, isInside } from './patches.ts';
 import { SYMBOLS, fileHash, findIcon, storeIcon } from './project-icons.ts';
@@ -107,6 +107,11 @@ type Day = { date: string; looks: number; skipped?: number; tokens?: number; not
 // What the model is asked to answer.
 type Answer = {
   projects?: unknown;
+  // Why it belongs in each of `projects`, by id: kept with the thread's
+  // membership for Highlights' ⓘ.
+  reasons?: unknown;
+  // Projects it's in that it turns out not to be about, by id, with why.
+  leave?: unknown;
   new?: unknown;
   state?: unknown;
   addFolders?: unknown;
@@ -493,7 +498,7 @@ export class Librarian {
     }
     lines.push('');
     lines.push(`Thread "${rec.title}", in ${this.tilde(rec.cwd)}${this.isRepo(rec.cwd) ? '' : ' (not a repo: a catch-all folder)'}`);
-    const inNow = (rec.projects ?? []).map((m) => `${m.id}${m.pinned ? ' (pinned)' : ''}`);
+    const inNow = (rec.projects ?? []).map((m) => `${m.id}${m.pinned || m.by !== 'librarian' ? ' (pinned)' : ''}${m.why ? ` (${m.why})` : ''}`);
     lines.push(`Currently in: ${inNow.join(', ') || 'none'}`);
     if (rec.projectsLeft?.length) lines.push(`Never put it in: ${rec.projectsLeft.join(', ')}`);
     if (selfFiled(rec)) lines.push('Filed by its own agent or the user: leave its projects as they are (projects [], new null).');
@@ -528,6 +533,7 @@ export class Librarian {
       a = { ...a, projects: [], new: null };
     }
     const wanted = Array.isArray(a.projects) ? a.projects.filter((x): x is string => typeof x === 'string' && live.has(x)) : [];
+    const reasons = byProject(a.reasons);
     const said: string[] = [];
     const ids = new Set<string>();
     let outcome: LibrarianOutcome = 'nothing';
@@ -541,7 +547,7 @@ export class Librarian {
       const folders = fresh.folders.map((f) => this.expand(f)).filter((f) => this.isProjectFolder(f));
       try {
         const p = this.projects.create({ title: fresh.title, folders, goals: fresh.goals, state: fresh.state, by: 'librarian', byThread: rec.id });
-        this.projects.changeMembership(rec.id, { add: [p.id], by: 'librarian' });
+        this.projects.changeMembership(rec.id, { add: [p.id], by: 'librarian', why: fresh.why ? { [p.id]: fresh.why } : undefined });
         said.push(`Made ${p.title} and put it there`);
         ids.add(p.id);
         bump('created');
@@ -550,7 +556,7 @@ export class Librarian {
       }
     }
     if (wanted.length) {
-      const r = this.projects.changeMembership(rec.id, { add: wanted, by: 'librarian' });
+      const r = this.projects.changeMembership(rec.id, { add: wanted, by: 'librarian', why: reasons });
       if (r.joined.length) {
         said.push(`Put it in ${r.joined.map((p) => live.get(p)!.title).join(' and ')}`);
         r.joined.forEach((p) => ids.add(p));
@@ -569,6 +575,20 @@ export class Librarian {
           r.left.forEach((p) => ids.add(p));
           bump('left');
         }
+      }
+    }
+    // Its own guesses it now says were wrong ("not a Convex components
+    // thread", 30 Oct). Only when it says so: leaving one out of
+    // `projects` isn't enough, or turns alone would make it flap. Never
+    // a pinned one or one Mike or an agent chose (changeMembership).
+    if (!self) {
+      const leave = Object.entries(byProject(a.leave)).filter(([pid]) => live.has(pid) && !wanted.includes(pid) && !ids.has(pid));
+      for (const [pid, why] of leave) {
+        const r = this.projects.changeMembership(rec.id, { remove: [pid], by: 'librarian' });
+        if (!r.left.length) continue;
+        said.push(`Took it out of ${live.get(pid)!.title}: ${lowerFirst(why)}`);
+        ids.add(pid);
+        bump('left');
       }
     }
     // Where the thread got its projects to, and folders they've grown.
@@ -1024,11 +1044,13 @@ function offReason(reason: ModelFailure, message: string): string {
 
 export const SYSTEM = `You are the librarian in Threadbear, an app where the user runs AI coding agents in threads. ${userLine()}You keep their projects: groupings above folders that carry goals, state and notes from thread to thread. A project is a body of work they'll come back to (an app, a library, a video, a house job, an ongoing chore), never a single task. One project can span several repos, and a thread can be in several projects.
 
-Given the project list and one thread, decide which projects the thread belongs in. A thread belongs in a project when it's about that project: building, fixing, planning, ideas, research or questions for it. A thread whose folder is a project's repo almost always belongs in that project. Prefer existing projects. Make a new one when the thread is about a body of work that fits none of them (its own repo is a strong sign); a one-off question, a quick chore or a throwaway test belongs in none. Never put a thread back in one it says never to.
+Given the project list and one thread, decide which projects the thread belongs in, and say why in a few plain words the user will see beside each project. A thread belongs in a project when it's about that project: building, fixing, planning, ideas, research or questions for it. A thread whose folder is a project's repo almost always belongs in that project. Prefer existing projects. Make a new one when the thread is about a body of work that fits none of them (its own repo is a strong sign); a one-off question, a quick chore or a throwaway test belongs in none. Never put a thread back in one it says never to.
 
 Reply with JSON only, no prose and no code fence:
 {"projects": ["<ids of existing projects the thread belongs in, or []>"],
- "new": null or {"title": "short name, as the user would say it", "folders": ["~/path of its repo(s)"], "goals": "one or two sentences: what it's for", "state": "one or two sentences: where it's up to"},
+ "reasons": {"<project id>": "why the thread belongs there"} for every id in projects,
+ "leave": {"<project id>": "why the thread isn't about it"} for a project it's currently in (not pinned) that it turns out not to be about, else {},
+ "new": null or {"title": "short name, as the user would say it", "folders": ["~/path of its repo(s)"], "goals": "one or two sentences: what it's for", "state": "one or two sentences: where it's up to", "why": "why the thread belongs there"},
  "state": {"<project id>": "the project's new state"} only when this thread changed where the whole project stands (shipped or finished something, made a decision, hit a blocker), else {},
  "addFolders": {"<project id>": ["~/path"]} for repos this thread shows belong to a project it's in, else {},
  "links": {"<project id>": [{"title": "Live site", "url": "https://..."}]} for lasting places of a project it's in that the messages give and the project doesn't list yet, else {},
@@ -1036,6 +1058,8 @@ Reply with JSON only, no prose and no code fence:
  "title": null, or a new title when the thread's title no longer says what it's about (see below),
  "wake": ["<ids of hibernating threads the user is talking about here>"], or [] (see below),
  "why": "one short line"}
+
+A reason is under 12 words, about this thread, in the user's plain words: "Edits the Poddle repo", "Shortlists photos for the calendar entry", "Asks how the librarian picks projects". Leaving a project out of projects doesn't take the thread out of it; only leave does. Use leave when the thread clearly isn't about that project: the earlier guess was wrong, or the work has gone elsewhere for good. A thread that has only paused that work stays.
 
 Folders are repos the work lives in (the thread's folder when it's a repo, the repos it edited, and the ones it ran commands in when the work was about them, not a look at something else), never a catch-all folder. A project with no folders that this thread worked on in a repo should get that repo through addFolders. State is two to four plain sentences about the whole project, not this thread: what's done, what's next, what's blocked. Start from the current state, keep what's still true and fold the change in; don't replace it with this thread's details. Ideas and plans that aren't built yet don't change the state.
 
@@ -1078,7 +1102,17 @@ function parseAnswer(text: string): Answer | undefined {
   }
 }
 
-function readNew(v: unknown): { title: string; folders: string[]; goals: string; state: string } | undefined {
+// A `{ "<project id>": "a line" }` from the model, without the junk.
+function byProject(v: unknown): Record<string, string> {
+  if (!v || typeof v !== 'object' || Array.isArray(v)) return {};
+  const out: Record<string, string> = {};
+  for (const [k, line] of Object.entries(v as Record<string, unknown>)) {
+    if (typeof line === 'string' && line.trim()) out[k] = line.trim().replace(/\s+/g, ' ').slice(0, WHY_MAX);
+  }
+  return out;
+}
+
+function readNew(v: unknown): { title: string; folders: string[]; goals: string; state: string; why: string } | undefined {
   if (!v || typeof v !== 'object') return undefined;
   const n = v as Record<string, unknown>;
   if (typeof n.title !== 'string' || !n.title.trim()) return undefined;
@@ -1087,6 +1121,7 @@ function readNew(v: unknown): { title: string; folders: string[]; goals: string;
     folders: Array.isArray(n.folders) ? n.folders.filter((f): f is string => typeof f === 'string') : [],
     goals: typeof n.goals === 'string' ? n.goals.trim().slice(0, 2000) : '',
     state: typeof n.state === 'string' ? n.state.trim().slice(0, 2000) : '',
+    why: typeof n.why === 'string' ? n.why.trim() : '',
   };
 }
 

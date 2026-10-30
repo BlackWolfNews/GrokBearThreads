@@ -1021,6 +1021,19 @@ enum Automation {
             let tip = UpdatesText.iconTooltip(app: side, runner: app.runnerUpdates, clis: app.clis)
             let popover = "popover: " + (app.updatePopoverShown ? "shown, " : "closed, ") + UpdatesText.popoverLine(side)
             return "ok " + json(["shown: \(shown)", "tip: " + tip.replacingOccurrences(of: "\n", with: " / "), popover, UpdatesText.appLine(side)] + UpdatesText.runnerLines(app.runnerUpdates))
+        case "project-why":
+            // The ⓘ popover on a project's heading in the open thread's
+            // Highlights: {"id": "<project id>"} opens it, {"id": null}
+            // closes it. Says who put the thread there and why.
+            guard let id = c["id"] as? String else {
+                app.projectWhyShown = nil
+                return "ok closed"
+            }
+            guard let thread = app.selectedThread,
+                  let m = thread.projects.first(where: { $0.id.hasPrefix(id) }) else { return "error the open thread isn't in \(id)" }
+            app.projectWhyShown = m.id
+            let (who, reason) = HighlightProjects.why(m)
+            return "ok " + json([reason ?? "(no reason)", who] + (HighlightProjects.canKeep(m) ? ["Keep"] : []) + ["Take out", "Open project"])
         case "connectors":
             // The Connectors panel: {"show": true} opens it ({"show":
             // false} closes it), {"click": "<service id>"} presses its

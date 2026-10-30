@@ -2057,8 +2057,8 @@ function membersOf(projectId) {
   return [...threads.values()].map((t) => t.summary).filter((s) => s.projects?.some((x) => x.id === projectId));
 }
 
-function join(summary, project, by, pinned, at = iso()) {
-  summary.projects = [...(summary.projects ?? []), { id: project.id, title: project.title, by, ...(pinned ? { pinned: true } : {}), at }];
+function join(summary, project, by, pinned, at = iso(), why) {
+  summary.projects = [...(summary.projects ?? []), { id: project.id, title: project.title, by, ...(pinned ? { pinned: true } : {}), at, ...(why ? { why } : {}) }];
 }
 
 function renameIn(summary, project) {
@@ -2119,19 +2119,20 @@ function addDemoProjects() {
     ],
   };
   projects = [tb, photo, walkies];
-  const put = (threadId, project, by, pinned, minutesAgo) => {
+  // `why` is the librarian's reason, behind the project's ⓘ in Highlights.
+  const put = (threadId, project, by, pinned, minutesAgo, why) => {
     const t = threads.get(threadId);
-    if (t) join(t.summary, project, by, pinned, ago(minutesAgo));
+    if (t) join(t.summary, project, by, pinned, ago(minutesAgo), why);
   };
-  put('demo_settings_tabs', tb, 'librarian', false, 3);
+  put('demo_settings_tabs', tb, 'librarian', false, 3, 'Renames the Settings tabs in the Mac app');
   put('demo_sqlite_vs_files', tb, 'agent', true, 60 * 30);
   put('demo_release_notes', tb, 'mike', true, 60 * 24 * 9);
   put('demo_quick_ask_readme', tb, 'librarian', false, 60 * 24 * 6);
   put('demo_ci_slow', photo, 'agent', true, 60 * 3);
-  put('demo_ci_slow', tb, 'librarian', false, 60 * 2);
-  put('demo_upload_resume', photo, 'librarian', true, 60 * 24 * 4);
+  put('demo_ci_slow', tb, 'librarian', false, 60 * 2, 'Mentions the runner\'s check script');
+  put('demo_upload_resume', photo, 'librarian', true, 60 * 24 * 4, 'Makes uploads resume after a crash');
   put('demo_build_scripts', photo, 'librarian', false, 60 * 24 * 3);
-  put('demo_button_colour', walkies, 'librarian', false, 18);
+  put('demo_button_colour', walkies, 'librarian', false, 18, 'Picks the share button colour for Walkies');
   put('demo_dark_mode', walkies, 'mike', true, 60 * 24 * 2);
 
   // Walkies' backend folder gives the dark mode thread (which is in misc)

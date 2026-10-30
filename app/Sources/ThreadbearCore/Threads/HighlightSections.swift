@@ -74,13 +74,39 @@ public struct HighlightSections: Sendable, Hashable {
 /// The links of the projects a thread is in, for the top of its
 /// Highlights: in the thread's order, leaving out archived projects and
 /// ones with no links.
-public enum ProjectLinkGroups {
-    public static func build(thread: ThreadSummary, project: (String) -> Project?) -> [Project] {
+/// The thread's projects at the top of Highlights: each one's icon and
+/// name with why it's there behind an ⓘ, then its links. Every project the
+/// thread is in, links or not, so a wrong guess of the librarian's shows
+/// (Mike asked 30 Oct, after a photo thread sat in the components
+/// directory).
+public enum HighlightProjects {
+    public struct Row: Sendable, Equatable, Identifiable {
+        public var project: Project
+        public var membership: ThreadProject
+        public var id: String { project.id }
+    }
+
+    public static func build(thread: ThreadSummary, project: (String) -> Project?) -> [Row] {
         var seen = Set<String>()
         return thread.projects.compactMap { member in
-            guard seen.insert(member.id).inserted, let p = project(member.id), !p.archived, !p.links.isEmpty else { return nil }
-            return p
+            guard seen.insert(member.id).inserted, let p = project(member.id), !p.archived else { return nil }
+            return Row(project: p, membership: member)
         }
+    }
+
+    /// Who put it there, then its reason when it has one.
+    public static func why(_ m: ThreadProject) -> (who: String, reason: String?) {
+        let who = switch m.by {
+        case .mike: "You put it here."
+        case .agent: "Its agent put it here."
+        case .librarian: m.pinned ? "The librarian put it here, and you kept it." : "The librarian put it here."
+        }
+        return (who, m.why)
+    }
+
+    /// A guess of the librarian's nobody has kept yet: it can be kept.
+    public static func canKeep(_ m: ThreadProject) -> Bool {
+        m.by == .librarian && !m.pinned
     }
 }
 

@@ -7,8 +7,8 @@ import UniformTypeIdentifiers
 
 /// The pane's Highlights section: what the thread has made, shared and
 /// pinned, so it doesn't scroll away with the transcript. The librarian's
-/// line on where it's up to, the links of the projects it's in (its live
-/// site, admin page), its schedules and sub-agents, then pins, files, links
+/// line on where it's up to, the projects it's in (why, behind an ⓘ, and
+/// their links: live site, admin page), its schedules and sub-agents, then pins, files, links
 /// and commits, each under a grey heading like the sidebar's, and left out
 /// when empty.
 struct HighlightsView: View {
@@ -25,7 +25,7 @@ struct HighlightsView: View {
             PaneNote(text: "This runner doesn't keep highlights yet.")
         } else if let fetched = app.highlights[thread.id] {
             let sections = HighlightSections.build(fetched)
-            let projects = ProjectLinkGroups.build(thread: thread, project: app.project)
+            let projects = HighlightProjects.build(thread: thread, project: app.project)
             if sections.isEmpty && openAsks == nil && projects.isEmpty && toolPanels.isEmpty && schedules.isEmpty && thread.subagents.isEmpty {
                 PaneNote(text: "Nothing here yet. Files, links and commits from this thread show up here as it works.")
             } else {
@@ -52,7 +52,7 @@ struct HighlightsView: View {
     }
 
     @ViewBuilder
-    private func content(_ sections: HighlightSections, projects: [Project]) -> some View {
+    private func content(_ sections: HighlightSections, projects: [HighlightProjects.Row]) -> some View {
         ForEach(toolPanels) { panel in
             ToolCard(panel: panel) { app.choosePanel(panel.id, in: thread.id) }
                 .padding(.horizontal, SidebarMetrics.outerInset)
@@ -88,12 +88,15 @@ struct HighlightsView: View {
                 }
             }
         }
-        // The places Mike keeps going back to for the thread's projects,
-        // under each project's own icon, so the live site is one click
-        // from any of its threads (Mike asked 28 Oct).
-        ForEach(projects) { project in
-            SectionHeading(title: project.title, project: project)
-            ForEach(project.links, id: \.url) { projectLink($0) }
+        // The thread's projects, each under its own icon with why it's
+        // there behind an ⓘ (Mike asked 30 Oct), then the places Mike keeps
+        // going back to for it, so the live site is one click from any of
+        // its threads (28 Oct).
+        ForEach(projects) { row in
+            SectionHeading(title: row.project.title, project: row.project) {
+                ProjectWhyButton(row: row, threadId: thread.id)
+            }
+            ForEach(row.project.links, id: \.url) { projectLink($0) }
         }
         // What will message the thread later, and the helpers it started:
         // they were a line over the composer and only the sidebar's rows
@@ -240,6 +243,68 @@ struct HighlightsView: View {
                 .contextMenu { FileMenu(path: path, thread: thread, title: (path as NSString).lastPathComponent) }
             }
         }
+    }
+}
+
+/// The ⓘ on a project's heading in Highlights: who put the thread there
+/// and why, and Keep, Take out and Open project, so a wrong guess of the
+/// librarian's is undone where it's seen.
+private struct ProjectWhyButton: View {
+    @Environment(AppModel.self) private var app
+    let row: HighlightProjects.Row
+    let threadId: String
+
+    private var shown: Binding<Bool> {
+        Binding { app.projectWhyShown == row.project.id } set: { app.projectWhyShown = $0 ? row.project.id : nil }
+    }
+
+    var body: some View {
+        Button { shown.wrappedValue.toggle() } label: {
+            Image(systemName: "info.circle").font(.system(size: zoomed(11)))
+        }
+        .buttonStyle(.borderless)
+        .foregroundStyle(.secondary)
+        .tip("Why it's in \(row.project.title)")
+        .popover(isPresented: shown, arrowEdge: .bottom) { card }
+    }
+
+    private var card: some View {
+        let (who, reason) = HighlightProjects.why(row.membership)
+        return VStack(alignment: .leading, spacing: zoomed(8)) {
+            if let reason {
+                Text(reason)
+                    .font(.system(size: zoomed(13)))
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Text(who)
+                .font(.system(size: zoomed(12)))
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            HStack(spacing: zoomed(8)) {
+                if HighlightProjects.canKeep(row.membership) {
+                    Button("Keep") {
+                        app.setProjects(threadId, add: [row.project.id])
+                        app.projectWhyShown = nil
+                    }
+                    .tip("Keep it in \(row.project.title), so the librarian never takes it out")
+                }
+                Button("Take out") {
+                    app.setProjects(threadId, remove: [row.project.id])
+                    app.projectWhyShown = nil
+                }
+                .tip("Take it out of \(row.project.title); the librarian won't put it back")
+                Spacer(minLength: 0)
+                Button("Open project") {
+                    app.openProjectPage(row.project.id)
+                    app.projectWhyShown = nil
+                }
+                .buttonStyle(.link)
+                .tip("Open \(row.project.title)'s page")
+            }
+            .controlSize(.small)
+        }
+        .padding(zoomed(14))
+        .frame(width: zoomed(280), alignment: .leading)
     }
 }
 

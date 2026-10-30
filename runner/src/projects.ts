@@ -79,7 +79,13 @@ export type MembershipChange = {
   add?: string[];
   remove?: string[];
   by: ProjectMaker;
+  // Why it's in each added project, by project id (ThreadProject.why).
+  why?: Record<string, string>;
 };
+
+// A reason is one line under a project's name; the librarian is asked for
+// a dozen words, this only stops a runaway one.
+export const WHY_MAX = 200;
 
 const TITLE_MAX = 80;
 const SHORT_MAX = 2000; // goals and state
@@ -426,9 +432,17 @@ export class Projects {
     const at = this.iso();
     const current = new Map((rec.projects ?? []).map((m) => [m.id, m]));
     const plan: ((r: ThreadRecord) => void)[] = [];
+    const whyFor = (p: string) => {
+      const w = change.why?.[p]?.trim().replace(/\s+/g, ' ').slice(0, WHY_MAX);
+      return w ? { why: w } : {};
+    };
     for (const p of add) {
       const has = current.get(p);
       if (change.by === 'librarian') {
+        // Its own guess, looked at again: the newer reason replaces the
+        // old, so the line under the project says what it thinks now.
+        const why = whyFor(p).why;
+        if (has && has.by === 'librarian' && why && why !== has.why) plan.push((r) => (r.projects!.find((m) => m.id === p)!.why = why));
         if (has || rec.projectsLeft?.includes(p)) continue;
       } else if (has) {
         // Already there: Mike or an agent saying so pins it.
@@ -437,7 +451,7 @@ export class Projects {
       }
       joined.push(p);
       plan.push((r) => {
-        (r.projects ??= []).push({ id: p, by: change.by, at, ...(change.by === 'librarian' ? {} : { pinned: true }) });
+        (r.projects ??= []).push({ id: p, by: change.by, at, ...(change.by === 'librarian' ? {} : { pinned: true }), ...whyFor(p) });
         if (r.projectsLeft?.includes(p)) {
           r.projectsLeft = r.projectsLeft.filter((x) => x !== p);
           if (!r.projectsLeft.length) delete r.projectsLeft;
@@ -460,7 +474,7 @@ export class Projects {
     const say: { note?: string } = {};
     // Mike sees his own change; the librarian's and agents' are said in
     // the transcript so a wrong guess gets noticed.
-    if (change.by !== 'mike') {
+    if (change.by !== 'mike' && (joined.length || left.length)) {
       const who = change.by === 'librarian' ? 'by the librarian' : 'by the agent';
       const parts = [joined.length ? `Put in ${names(joined)}` : '', left.length ? `Taken out of ${names(left)}` : ''].filter(Boolean);
       say.note = `${parts.join('. ')} ${who}.`;

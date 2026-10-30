@@ -215,6 +215,10 @@ type ThreadProject = {
   pinned?: boolean      // Mike put it there (or an agent was told to): the
                         // librarian won't take it out
   at: string            // when it was put there
+  why?: string          // why it's there, a short line: the librarian's
+                        // reason ("Shortlists photos for the calendar
+                        // entry"), newest look's wins. Highlights shows it
+                        // behind the project's ⓘ
 }
 
 type Action = {
@@ -2053,13 +2057,21 @@ thread's agent is told, in the Threadbear tools' instructions, to
 One look at a time, the soonest due first. A look sends the model the
 project list (title, folders, goals, one line of state) and the thread's
 title, folder, first message, last few messages and the folders it edited
-in, and gets back the projects the thread belongs in, a new project when
-none fits, and a new `state` for a project the thread moved on. What it
-decides takes effect straight away: the thread gets `projects` (`by:
-"librarian"`) and a `system.note` saying so ("Put in Threadbear"), and
+in, and gets back the projects the thread belongs in with a short reason
+for each, a new project when none fits, and a new `state` for a project
+the thread moved on. What it decides takes effect straight away: the
+thread gets `projects` (`by: "librarian"`, `why` the reason, replaced by a
+later look's) and a `system.note` saying so ("Put in Threadbear"), and
 Mike can take it out (`threads.setProjects`), after which it's never put
-back. It never takes out a pinned project or one an agent added. Looks
-are listed in `LibrarianStatus.recent`.
+back. It never takes out a pinned project or one an agent added.
+
+Leaving a project out of its answer doesn't take the thread out of it, so
+it doesn't flap from turn to turn. A look takes the thread out of one of
+its own guesses when its answer says to (`leave`, with why: "Took it out
+of Convex components directory: not a components thread"), on any look,
+and also when a move or an ask leaves it out. That isn't remembered as a
+no the way Mike's is: a later look can put it back. Looks are listed in
+`LibrarianStatus.recent`.
 
 Looks (and icon picks) run on the Claude pool, like every small job.
 Without a pool with a Claude login (`models.pool` null, or a pool with

@@ -278,8 +278,11 @@ From the top, and only when there's something to show:
 - A line or two from the librarian on where the thread is up to.
 - **Needs you**: what the agent's last reply asked you to do, each with a
   box to tick off as you go. Ticking one here ticks it in the thread too.
-- The links of the thread's projects, such as a live site or an admin
-  page.
+- The thread's projects, each under its icon and name with its links,
+  such as a live site or an admin page. The ⓘ beside a project's name
+  says who put the thread there and why ("Shortlists photos for the
+  calendar entry"). If the librarian guessed wrong, press Take out there
+  and it won't put it back; Keep stops it ever taking the thread out.
 - **Scheduled**: messages booked to come to this thread. Click one to
   change it.
 - **Sub-agents**: helpers the agent started, with how each is getting on.

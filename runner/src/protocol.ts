@@ -236,6 +236,10 @@ export type ThreadProject = {
   by: ProjectMaker;
   pinned?: boolean; // the librarian won't take it out
   at: string;
+  // Why it's there, in a short line: the librarian's reason, or an
+  // agent's. Highlights shows it behind the project's ⓘ, so a wrong guess
+  // can be seen and undone.
+  why?: string;
 };
 
 export type Project = {

@@ -421,6 +421,9 @@ final class AppModel {
     /// updating the app without the panel. On the model so a script can
     /// open it.
     var updatePopoverShown = false
+    /// The project whose ⓘ popover is open in Highlights (why the thread
+    /// is in it), if any. On the model so a script can open it.
+    var projectWhyShown: String?
     /// The thread whose share popover is open, if any. On the model so a
     /// script can open it.
     var sharePopoverThread: String?

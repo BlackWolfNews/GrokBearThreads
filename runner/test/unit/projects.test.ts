@@ -57,6 +57,48 @@ function setup(opts: { models?: (p: GenerateParams) => Promise<ModelResult<strin
   return { h, root, misc, repo, projects, librarian, asked, create, finish };
 }
 
+test("the librarian keeps why a thread is in each project, and takes it out of a wrong guess only when it says so", async () => {
+  let answer: unknown = {};
+  const s = setup({ models: () => reply(answer) });
+  const { h, create, finish, librarian, projects } = s;
+  const dir = projects.create({ title: 'Components directory', by: 'mike' });
+  const cal = projects.create({ title: 'Calendar', by: 'mike' });
+  const kept = projects.create({ title: 'Kept', by: 'mike' });
+  // A wrong first guess, with its reason.
+  answer = { projects: [dir.id, kept.id], reasons: { [dir.id]: 'Mentions the directory', [kept.id]: 'Also this' } };
+  const { thread } = create('Check my photos');
+  await finish(thread.id);
+  h.clock.advance(SETTLE_MS);
+  await tick(6);
+  const whys = () => h.runner.get(thread.id).projects?.map((m) => [m.title, m.why]);
+  assert.deepEqual(whys(), [['Components directory', 'Mentions the directory'], ['Kept', 'Also this']]);
+  checkSummary(h.runner.get(thread.id));
+  // Mike keeps one (it's pinned and its reason stays).
+  projects.changeMembership(thread.id, { add: [kept.id], by: 'mike' });
+  // A catch-up that only leaves it out of projects keeps it there, as before.
+  answer = { projects: [cal.id], reasons: { [cal.id]: 'Shortlists photos for the calendar' } };
+  h.runner.send(thread.id, 'more about photos '.repeat(40));
+  await tick();
+  await finish(thread.id);
+  h.clock.advance(CATCH_UP_MS + SETTLE_MS);
+  await tick(8);
+  assert.equal(librarian.status().recent[0].text, 'Put it in Calendar');
+  assert.deepEqual(whys(), [['Components directory', 'Mentions the directory'], ['Kept', 'Also this'], ['Calendar', 'Shortlists photos for the calendar']]);
+  // One that says to leave it takes it out, but never out of Mike's.
+  answer = { projects: [cal.id], reasons: { [cal.id]: 'Picks photos for the calendar' }, leave: { [dir.id]: 'Not a components thread', [kept.id]: 'Nor this' } };
+  h.runner.send(thread.id, 'and more photos '.repeat(40));
+  await tick();
+  await finish(thread.id);
+  h.clock.advance(CATCH_UP_MS + SETTLE_MS);
+  await tick(8);
+  assert.equal(librarian.status().recent[0].text, 'Took it out of Components directory: not a components thread');
+  assert.equal(librarian.status().recent[0].outcome, 'left');
+  // The newer reason replaces the old one on its own guess.
+  assert.deepEqual(whys(), [['Kept', 'Also this'], ['Calendar', 'Picks photos for the calendar']]);
+  // Not remembered as Mike's no: a later look may put it back.
+  assert.equal(rec(h, thread.id).projectsLeft, undefined);
+});
+
 const rec = (h: ReturnType<typeof makeHarness>, id: string) => h.runner.threadRecords().find((t) => t.id === id)!;
 const reply = (v: unknown): ModelResult<string> => ({ ok: true, value: JSON.stringify(v), model: 'haiku' });
 

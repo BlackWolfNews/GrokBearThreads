@@ -74,9 +74,9 @@ final class ProjectTests: XCTestCase {
         XCTAssertEqual(try decode(Project.self, #"{"id":"p_2"}"#).links, [], "none from a runner before links")
     }
 
-    func testProjectLinkGroupsFollowTheThreadAndSkipEmptyOrArchived() throws {
+    func testHighlightProjectsFollowTheThreadAndSkipArchived() throws {
         let thread = try decode(ThreadSummary.self, """
-        {"id":"th1","projects":[{"id":"p_b","title":"B"},{"id":"p_a","title":"A"},{"id":"p_none","title":"N"},
+        {"id":"th1","projects":[{"id":"p_b","title":"B","why":"Edits B's repo"},{"id":"p_a","title":"A"},{"id":"p_none","title":"N"},
          {"id":"p_old","title":"Old"},{"id":"p_gone","title":"Gone"}]}
         """)
         let link = [ProjectLink(title: "Site", url: "https://x.example")]
@@ -86,8 +86,23 @@ final class ProjectTests: XCTestCase {
             Project(id: "p_none", title: "N"),
             Project(id: "p_old", title: "Old", links: link, archived: true),
         ]
-        let groups = ProjectLinkGroups.build(thread: thread) { id in all.first { $0.id == id } }
-        XCTAssertEqual(groups.map(\.id), ["p_b", "p_a"])
+        let rows = HighlightProjects.build(thread: thread) { id in all.first { $0.id == id } }
+        XCTAssertEqual(rows.map(\.id), ["p_b", "p_a", "p_none"], "one with no links still shows, so a wrong guess can be seen")
+        XCTAssertEqual(rows[0].membership.why, "Edits B's repo")
+        XCTAssertNil(rows[1].membership.why)
+    }
+
+    func testHighlightProjectsSayWhoAndWhy() {
+        let guess = ThreadProject(id: "p", title: "P", by: .librarian, why: "Shortlists photos")
+        XCTAssertEqual(HighlightProjects.why(guess).who, "The librarian put it here.")
+        XCTAssertEqual(HighlightProjects.why(guess).reason, "Shortlists photos")
+        XCTAssertTrue(HighlightProjects.canKeep(guess))
+        var kept = guess
+        kept.pinned = true
+        XCTAssertEqual(HighlightProjects.why(kept).who, "The librarian put it here, and you kept it.")
+        XCTAssertFalse(HighlightProjects.canKeep(kept))
+        XCTAssertEqual(HighlightProjects.why(ThreadProject(id: "p", title: "P", by: .mike, pinned: true)).who, "You put it here.")
+        XCTAssertFalse(HighlightProjects.canKeep(ThreadProject(id: "p", title: "P", by: .agent, pinned: true)))
     }
 
     func testThreadSummaryProjects() throws {
