@@ -15,8 +15,10 @@ enum BrowserBear {
     }
 
     /// True when an agent's tab was on `url` and is now in front of Mike.
-    /// False straight away without BrowserBear, and after a couple of
-    /// seconds at most when it doesn't answer.
+    /// False straight away without BrowserBear, and after 4 s at most when
+    /// it doesn't answer: a tab an agent opened is found at once, but ruling
+    /// one out means listing Chrome's tabs, which takes seconds while
+    /// BrowserBear's extension wakes up (2 s was too short, 30 Oct).
     static func handoff(_ url: URL) async -> Bool {
         guard ["http", "https"].contains(url.scheme?.lowercased() ?? ""),
               FileManager.default.fileExists(atPath: socket) else { return false }
@@ -29,7 +31,7 @@ enum BrowserBear {
         let fd = Darwin.socket(AF_UNIX, SOCK_STREAM, 0)
         guard fd >= 0 else { return false }
         defer { close(fd) }
-        var wait = timeval(tv_sec: 2, tv_usec: 0)
+        var wait = timeval(tv_sec: 4, tv_usec: 0)
         setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &wait, socklen_t(MemoryLayout<timeval>.size))
         setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &wait, socklen_t(MemoryLayout<timeval>.size))
         var addr = sockaddr_un()
