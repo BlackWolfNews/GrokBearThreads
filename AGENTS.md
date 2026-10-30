@@ -37,6 +37,12 @@ static site with its own `package.json`; its comments say how to build it.
   against it before installing (README's prompt), so anything missing
   from it looks like something hidden. Keep it true when a change adds a
   file outside the repo, a timer, something it reads, or a network call.
+- The first-run tour (app/Sources/Threadbear/Views/Tour.swift), its sample
+  threads (`threads.samples`) or anything a step points at: run
+  `node app/Tools/tour-e2e.mjs` before landing. It plays the whole tour
+  against a real dev runner and debug app, checks each step, and saves a
+  shot of each; look at the shots too. The mock fakes patches and trust,
+  and tours that passed on it were broken on a real install (30 Oct).
 - Every control gets a tooltip, with `.tip("…")` (SwiftUI) or `setTip` (AppKit).
   `.help` and `toolTip` never show in this app; TipsTests fails on them.
 - Transcript files and fixtures made from real sessions are private: keep them

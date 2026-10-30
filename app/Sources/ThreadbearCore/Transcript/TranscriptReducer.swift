@@ -83,6 +83,12 @@ public struct TranscriptModel: Sendable {
     /// decreases, so the rows for items from `n` on are a binary search away.
     private var rowStarts: [Int] = []
     private var planRowForTurn: [String: String] = [:]
+    /// Rows of commands Mike ran from a chip (an action.run with no
+    /// trigger): left out of the turn's line of work before them, so what
+    /// he pressed shows where he pressed it. A hook's run (a trigger) folds
+    /// in with the turn it followed. The tour's Roll a die vanished into a
+    /// collapsed "Worked for 4s" above the answer (30 Oct).
+    private var pressedRuns: Set<String> = []
     /// Cards of asks by the seq of their turn.completed, and the open one
     /// (the last finished turn's), if it has asks.
     private var asksRowForSeq: [Int: String] = [:]
@@ -380,6 +386,7 @@ public struct TranscriptModel: Sendable {
         items = []
         itemIndex = [:]
         planRowForTurn = [:]
+        pressedRuns = []
         asksRowForSeq = [:]
         openAsksRow = nil
         errorRowForTurn = [:]
@@ -819,6 +826,7 @@ public struct TranscriptModel: Sendable {
             var (call, result) = run.asToolCall
             call.itemId = itemId
             result.itemId = itemId
+            if run.trigger == nil { pressedRuns.insert("t:\(itemId)") }
             append(TranscriptRow(id: "t:\(itemId)", seq: seq, turnId: turnId, content: .tool(ToolItem(itemId: itemId, call: call, result: result, root: root))))
 
         case .unknown:
@@ -1028,7 +1036,7 @@ public struct TranscriptModel: Sendable {
         case .user(let message): return !message.isFromRunner
         case .error, .footer, .asks, .review: return true
         case .images(_, _, let generated): return generated
-        case .tool(let tool): return Self.isTakenEndTurn(tool)
+        case .tool(let tool): return Self.isTakenEndTurn(tool) || pressedRuns.contains(items[k].id)
         default: return false
         }
     }

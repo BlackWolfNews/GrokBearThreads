@@ -571,6 +571,14 @@ is an error. Commands marked "the open thread" act on `id` when it's given
 | `mock` | `method`, `params` (an object) | `mock.<method>` on the mock runner, such as `restartPending` and `restart` |
 | `status`, `sidebar`, `streaming`, `account-ids`, `quit` | | |
 
+`Tools/tour-e2e.mjs` plays the first-run tour end to end against a real
+runner: it starts `runner/scripts/dev-runner.sh` on a temp data folder and a
+debug app on it, steps through every card (hibernating and archiving a
+sample, moving a panel, pressing Roll a die, sending the first thread on the
+dev runner's cheap model), checks what each lights up and what it changed,
+then the samples' removal and Help's replay. Shots of each step go in
+`--shots DIR` (default a temp folder). It exits 1 on a failed check.
+
 `Tools/drive.sh` posts commands without waiting (`THREADBEAR_AUTOMATION_ID`
 picks an instance). The integration run on 2026-10-26 used it against the
 real runner with a debug build that replaced Mike's app in `~/Applications`;

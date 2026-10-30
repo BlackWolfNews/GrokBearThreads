@@ -143,7 +143,8 @@ final class Tour {
         TourStep(targets: [.actionChips], title: "Try it",
                  body: "Press Roll a die.",
                  task: .runPatch, doneBody: "Ask any thread for a patch that does whatever you want.",
-                 edges: [.above, .right, .left, .below], opensSample: true, doc: "patches"),
+                 // Under the button: the roll comes out just above it.
+                 edges: [.below, .above, .right, .left], opensSample: true, doc: "patches"),
         TourStep(targets: [.composer], title: "Your first thread",
                  body: "We've written its first message, so press Return to send it.",
                  task: .sendFirst, edges: [.above, .below, .right, .left], doc: "first-thread"),
@@ -269,7 +270,19 @@ final class Tour {
             // Running, then not: the command has finished and its output is
             // in the thread.
             let running = app.runningActions.contains { key in sampleIds.contains { key.hasPrefix($0) } }
-            if running { sawChipRun = true } else if sawChipRun { taskDone = true }
+            if running { sawChipRun = true } else if sawChipRun {
+                taskDone = true
+                // Open its row, so the roll shows without a click.
+                if let id = app.selection, sampleIds.contains(id),
+                   let row = app.session(for: id).model.items.last(where: { $0.id.hasPrefix("t:action:") }),
+                   app.transcript.session?.threadId == id, let shown = app.transcript.session?.displayIndex(of: row.id),
+                   let drawn = app.transcript.row(at: shown), !app.transcript.isExpanded(drawn) {
+                    app.transcript.toggleExpanded(rowId: row.id)
+                    // Down to its output, once the opened row is laid out:
+                    // opened in place, the roll sat under the composer.
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { app.transcript.scrollToBottom() }
+                }
+            }
         case .sendFirst:
             if let id = app.threads.keys.first(where: { !threadsAtStart.contains($0) }) {
                 firstThreadId = id
@@ -528,6 +541,18 @@ private struct TourCard: View {
                         .foregroundStyle(.secondary)
                         .transition(Juice.popIn)
                 }
+                Spacer(minLength: zoomed(8))
+                // By the title, out of the buttons' way (beside them it
+                // squeezed Back to "Ba…").
+                if let doc = step.doc, let url = URL(string: "\(Tour.docsSite)/\(doc)") {
+                    // The detail the card leaves out, on the website.
+                    Button { NSWorkspace.shared.open(url) } label: {
+                        Image(systemName: "info.circle")
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(.secondary)
+                    .tip("More about this, in the docs")
+                }
             }
             Text(failed ? step.failBody ?? step.body : done ? step.doneBody ?? step.body : step.body)
                 .font(.system(size: TypeScale.label))
@@ -545,6 +570,9 @@ private struct TourCard: View {
                 }
                 .accessibilityElement()
                 .accessibilityLabel("Step \(index + 1) of \(count)")
+                // The dots give way before a button's label does.
+                .layoutPriority(-1)
+                .clipped()
                 Spacer(minLength: zoomed(8))
                 if tour.skippable && step.task != .sendFirst && !tour.isLast {
                     Button("Skip") { withAnimation(.easeOut(duration: 0.2)) { tour.finish() } }
@@ -552,15 +580,6 @@ private struct TourCard: View {
                         .foregroundStyle(.secondary)
                         .keyboardShortcut(.cancelAction)
                         .tip("End the tour (Esc). Help > Take the Tour brings it back")
-                }
-                if let doc = step.doc, let url = URL(string: "\(Tour.docsSite)/\(doc)") {
-                    // The detail the card leaves out, on the website.
-                    Button { NSWorkspace.shared.open(url) } label: {
-                        Image(systemName: "info.circle")
-                    }
-                    .buttonStyle(.plain)
-                    .foregroundStyle(.secondary)
-                    .tip("More about this, in the docs")
                 }
                 if index > 0 {
                     Button("Back") { tour.back() }
@@ -583,7 +602,7 @@ private struct TourCard: View {
             .padding(.top, zoomed(4))
         }
         .padding(zoomed(16))
-        .frame(width: zoomed(300), alignment: .leading)
+        .frame(width: zoomed(320), alignment: .leading)
         .background(Color(nsColor: .windowBackgroundColor), in: RoundedRectangle(cornerRadius: 12))
         .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(.separator, lineWidth: 0.5))
         .shadow(color: .black.opacity(0.25), radius: 18, y: 6)

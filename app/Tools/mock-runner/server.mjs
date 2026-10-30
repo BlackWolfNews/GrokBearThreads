@@ -524,17 +524,12 @@ async function dispatch(client, method, p) {
       // As the runner makes them (runner/src/samples.ts), each with the
       // Welcome folder's Roll a die chip, as the runner would read it from
       // the patch file the app wrote there.
-      const existing = [...threads.values()].filter((t) => t.summary.sample);
-      if (p.remove) {
-        for (const t of existing) {
-          threads.delete(t.summary.id);
-          broadcast('thread.deleted', { threadId: t.summary.id });
-        }
-        return { threads: [] };
+      // As the runner does: any there are go, and fresh ones are made.
+      for (const t of [...threads.values()].filter((t) => t.summary.sample)) {
+        threads.delete(t.summary.id);
+        broadcast('thread.deleted', { threadId: t.summary.id });
       }
-      // In SAMPLE_THREADS' order, as the runner gives them.
-      const order = (t) => SAMPLE_THREADS.findIndex((x) => x.title === t.summary.title);
-      if (existing.length) return { threads: existing.sort((a, b) => order(a) - order(b)).map((t) => t.summary) };
+      if (p.remove) return { threads: [] };
       const made = [];
       for (const sample of [...SAMPLE_THREADS].reverse()) {
         const threadId = 'th_sample_' + crypto.randomBytes(4).toString('hex');

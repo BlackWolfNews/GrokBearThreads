@@ -251,7 +251,6 @@ struct RootView: View {
             // Drawn over the dock: its keys hang out to the right while ⌘
             // is held (ShortcutHints).
             ActivityBar()
-                .tourTarget(.activityBar)
                 .zIndex(1)
             DockView(controller: app.dock, options: Self.options, content: content)
             if let thread = app.paneThread {

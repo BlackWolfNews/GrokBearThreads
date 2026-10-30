@@ -26,6 +26,9 @@ struct ActivityBar: View {
             // panels' bars beside it do.
             WindowGrip()
                 .frame(height: RootView.options.headerHeight)
+            // The views, together, for the tour to light up (not the
+            // setup, updates and settings icons at the foot).
+            VStack(spacing: zoomed(4)) {
             // How many threads are in the Inbox section, so Mike can see
             // how far off inbox zero he is from any view (29 Oct).
             ActivityButton(symbol: "bubble.left.and.bubble.right", title: "Threads", shortcut: "⌘1",
@@ -52,6 +55,8 @@ struct ActivityBar: View {
                     app.showLibrarian()
                 }
             }
+            }
+            .tourTarget(.activityBar)
             Spacer(minLength: zoomed(8))
             // Only while something's left to set up and it isn't hidden.
             SetupActivityButton()

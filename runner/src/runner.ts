@@ -1555,17 +1555,14 @@ export class Runner {
   // made up exchanges written as finished turns, like a quick ask, in the
   // folder the app gives (~/ThreadbearThreads/Welcome, where its example patch
   // is), so someone new has threads to hibernate, archive and look round.
-  // Asking again gives the ones there are; remove deletes them all,
-  // archived and hibernating ones too.
+  // Asking again makes them afresh; remove deletes them all, archived and
+  // hibernating ones too.
   samples(params: { cwd: string; remove?: boolean }): { threads: ThreadSummary[] } {
-    const existing = [...this.threads.values()].filter((st) => st.rec.sample);
-    if (params.remove) {
-      for (const st of existing) this.delete(st.rec.id);
-      return { threads: [] };
-    }
-    // In SAMPLE_THREADS' order, as they were first given.
-    const order = (st: ThreadState) => SAMPLE_THREADS.findIndex((x) => x.title === st.rec.title);
-    if (existing.length) return { threads: existing.sort((a, b) => order(a) - order(b)).map((st) => this.summary(st)) };
+    // Any there are go first, made fresh each time: ones left by a tour that
+    // didn't finish could be hibernating, archived, in another folder, or
+    // from a runner that didn't trust the patch yet (Tinker Desk, 30 Oct).
+    for (const st of [...this.threads.values()].filter((st) => st.rec.sample)) this.delete(st.rec.id);
+    if (params.remove) return { threads: [] };
     // The folder and its example patch, written here and trusted as written:
     // one changed since is someone's code, and waits like any other.
     const cwd = path.resolve(expandHome(params.cwd));

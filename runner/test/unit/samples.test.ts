@@ -31,15 +31,20 @@ test('samples are finished threads with no CLI, the first needing you, in a fold
   assert.ok(Date.parse(flaky.createdAt) >= Date.parse(notes.createdAt));
 });
 
-test('asking again gives the same samples; remove deletes them, archived ones too', () => {
+test('asking again makes them afresh, with the patch back; remove deletes them, archived ones too', () => {
   const h = makeHarness();
-  const first = h.runner.samples({ cwd: h.cfg.defaults.cwd }).threads.map((t) => t.id);
-  assert.deepEqual(h.runner.samples({ cwd: h.cfg.defaults.cwd }).threads.map((t) => t.id), first);
+  const folder = path.join(h.cfg.home, 'Welcome');
+  const first = h.runner.samples({ cwd: folder }).threads.map((t) => t.id);
   h.runner.update({ threadId: first[2], archived: true });
+  // A tour left unfinished, and the patch gone (or never trusted).
+  fs.rmSync(path.join(folder, '.threadbear'), { recursive: true });
+  const again = h.runner.samples({ cwd: folder }).threads;
+  assert.equal(again.length, 3);
+  assert.ok(again.every((t) => !first.includes(t.id) && !t.archivedAt), 'fresh ones, none archived');
+  assert.ok(fs.existsSync(path.join(folder, '.threadbear/patches/welcome.ts')));
   const real = h.runner.create({ text: 'A real one', accountId: 'claude-3' }).thread.id;
-  assert.deepEqual(h.runner.samples({ cwd: h.cfg.defaults.cwd, remove: true }).threads, []);
-  const left = h.runner.list(['inbox', 'snoozed', 'archived']).map((t) => t.id);
-  assert.deepEqual(left, [real]);
+  assert.deepEqual(h.runner.samples({ cwd: folder, remove: true }).threads, []);
+  assert.deepEqual(h.runner.list(['inbox', 'snoozed', 'archived']).map((t) => t.id), [real]);
 });
 
 test('nothing can be sent to a sample', () => {
