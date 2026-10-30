@@ -138,27 +138,32 @@ final class TranscriptLayoutTests: XCTestCase {
         // One ask: no number.
         let one = RowRenderer.asksText(AsksCard(seq: 2, asks: [Ask(action: "Merge #48?", why: "Checks pass.")])).string
         XCTAssertTrue(one.contains("\nMerge #48? Checks pass."), one)
-        // No asks: the done card, with its one button.
+        // No asks: the done card, Done with Archive on the same line.
         let done = RowRenderer.asksText(AsksCard(seq: 3, asks: []))
-        XCTAssertTrue(done.string.hasPrefix("Nothing needed from you\n"), done.string)
+        XCTAssertTrue(done.string.contains("Done\t"), done.string)
+        XCTAssertFalse(done.string.contains("\n"), "one line: \(done.string)")
         let archive = (done.string as NSString).range(of: "Archive")
         XCTAssertEqual(done.attribute(.tbAction, at: archive.location, effectiveRange: nil) as? String, "archive")
-        // Suggested follow-ups: under Archive, in a section marked optional,
-        // the ones in the composer ticked; gone once it's closed.
-        let next = RowRenderer.asksText(AsksCard(seq: 4, asks: [], next: ["Show Bruce pictures", "Start Bruce threads"], nextPicked: [1]))
+        // Suggested follow-ups: under "Or carry on", each a whole-row click
+        // target that sends it; gone once it's closed.
+        let next = RowRenderer.asksText(AsksCard(seq: 4, asks: [], next: ["Show Bruce pictures", "Start Bruce threads"]))
         let nextString = next.string as NSString
         let suggestion = nextString.range(of: "Show Bruce pictures")
         XCTAssertNotEqual(suggestion.location, NSNotFound, next.string)
         XCTAssertEqual(next.attribute(.tbAction, at: suggestion.location, effectiveRange: nil) as? String, "next:0")
-        let heading = nextString.range(of: "Optional follow-ups").location
+        var row = NSRange()
+        XCTAssertEqual(next.attribute(.tbRow, at: suggestion.location, effectiveRange: &row) as? String, "next:0")
+        XCTAssertEqual(row, suggestion, "the row is just its own words")
+        let heading = nextString.range(of: "Or carry on").location
         XCTAssertLessThan(nextString.range(of: "Archive").location, heading)
         XCTAssertLessThan(heading, suggestion.location)
-        // A row, not a button, so a long one wraps; its circle is part of it.
+        // A row, not a button, so a long one wraps, short of "Send ↑".
         XCTAssertNil(next.attribute(.tbButton, at: suggestion.location, effectiveRange: nil))
+        let style = next.attribute(.paragraphStyle, at: suggestion.location, effectiveRange: nil) as? NSParagraphStyle
+        XCTAssertLessThan(style?.tailIndent ?? 0, 0)
         let start = nextString.range(of: "Start Bruce threads").location
-        XCTAssertEqual(next.attribute(.tbAction, at: start - 2, effectiveRange: nil) as? String, "next:1")
-        XCTAssertNotNil(next.attribute(.attachment, at: start - 2, effectiveRange: nil))
-        XCTAssertFalse(done.string.contains("Optional"), done.string)
+        XCTAssertEqual(next.attribute(.tbRow, at: start, effectiveRange: nil) as? String, "next:1")
+        XCTAssertFalse(done.string.contains("carry on"), done.string)
         let closed = RowRenderer.asksText(AsksCard(seq: 4, asks: [], isOpen: false, next: ["Show Bruce pictures"]))
         XCTAssertFalse(closed.string.contains("Bruce"), closed.string)
     }

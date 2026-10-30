@@ -267,7 +267,7 @@ const END_TURN_ASKS =
   'For a step he has to do himself, offer options like ["Done", "Can you do it?"] when you could plausibly do it yourself. ' +
   // Mike, 30 Oct: a follow-up in the closing prose, over a card that only
   // offered Archive, got buried and forgotten. Not make-work, though.
-  'next is for needs "nothing": up to 3 follow-ups in this thread worth doing, so they don\'t get lost: a piece still missing, a check that\'s due, something you or Mike raised and didn\'t get to. Only ones that really came up; never invent work, and most turns have none, so leave it out then. Write each as the message Mike would send to start it, about 8 words ("Show pictures and files from Bruce threads"). They are buttons on the done card beside Archive, and one puts its words in his composer, so don\'t also list them in your message. ' +
+  'next is for needs "nothing": up to 3 follow-ups in this thread worth doing, so they don\'t get lost: a piece still missing, a check that\'s due, something you or Mike raised and didn\'t get to. Only ones that really came up; never invent work, and most turns have none, so leave it out then. Write each as the message Mike would send to start it, about 8 words ("Show pictures and files from Bruce threads"). They are rows on the done card under "Or carry on", and a click sends one to you as it is, so each must make sense sent alone; don\'t also list them in your message. ' +
   'archive: true archives this thread once the turn is over, with needs "nothing" only. Use it only when Mike asks for this thread to be archived; otherwise leave it out, as a thread that vanishes from his inbox when he hadn\'t finished with it is confusing. ' +
   'Sub-agents never call this; only the thread\'s own agent does.';
 

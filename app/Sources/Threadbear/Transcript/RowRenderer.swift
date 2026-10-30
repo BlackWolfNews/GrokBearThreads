@@ -1171,7 +1171,7 @@ enum RowRenderer {
     /// what's in it at `width`. Closed, it's just the asks, quietly.
     static func asksText(_ card: AsksCard, width: CGFloat = 600) -> NSAttributedString {
         let (titleStyle, titleOffset) = Theme.lines(TypeScale.workLine, font: Theme.changesTitleFont, spacing: zoomed(6))
-        if card.isDone { return doneText(card, titleStyle: titleStyle, titleOffset: titleOffset) }
+        if card.isDone { return doneText(card, width: width) }
         let output = NSMutableAttributedString(string: card.isOpen ? "Needs you" : "Needed you", attributes: [
             .font: Theme.changesTitleFont, .foregroundColor: card.isOpen ? NSColor.labelColor : NSColor.secondaryLabelColor,
             .paragraphStyle: titleStyle, .baselineOffset: titleOffset,
@@ -1249,50 +1249,63 @@ enum RowRenderer {
         return output
     }
 
-    /// The done card: the agent said nothing waits on Mike, so what's left
-    /// is putting the thread away (`archive`, as ⌘E does) or any follow-up
-    /// it suggested (`next:<n>`). Mike read follow-ups sat beside Archive
-    /// under "Nothing needed from you" as things he had to do (30 Oct), so
-    /// they're a section of their own, marked optional, as a list he can
-    /// tick any of: each row toggles its words in the composer, ticked
-    /// while they're there. Rows rather than buttons, as a long one broke
-    /// into two buttons. The follow-ups go once he's replied, like an
-    /// ask's answers.
-    private static func doneText(_ card: AsksCard, titleStyle: NSParagraphStyle, titleOffset: CGFloat) -> NSAttributedString {
-        let output = NSMutableAttributedString(string: "Nothing needed from you", attributes: [
-            .font: Theme.changesTitleFont, .foregroundColor: NSColor.labelColor,
-            .paragraphStyle: titleStyle, .baselineOffset: titleOffset,
-        ])
+    /// The done card: the agent said nothing waits on Mike, so it says
+    /// Done, with Archive (`archive`, as ⌘E does) at the right of that
+    /// line. Any follow-ups it suggested sit under "Or carry on", one
+    /// row each, and a click on one sends it (`next:<n>`). Mike found
+    /// "Nothing needed from you" over a list of ticks confusing (30 Oct):
+    /// it read as things to do. Now the card offers the real choice, put
+    /// it away or keep going, and he picked this from mockups. Rows rather
+    /// than buttons, as a long one broke into two buttons; they leave room
+    /// at the right for the "Send ↑" the pointer shows (`.tbRow`). The
+    /// follow-ups go once he's replied, like an ask's answers.
+    private static func doneText(_ card: AsksCard, width: CGFloat) -> NSAttributedString {
+        let title = Theme.changesTitleFont
         let button = Theme.labelFont
-        let (buttonStyle, buttonOffset) = Theme.lines(TypeScale.scaled(38), font: button, before: zoomed(6))
-        output.append(NSAttributedString(string: "\n", attributes: [.font: button, .paragraphStyle: buttonStyle]))
-        output.append(NSAttributedString(string: "\u{00A0}\u{00A0}\u{00A0}Archive\u{00A0}thread\u{00A0}\u{00A0}\u{00A0}", attributes: [
-            .font: button, .foregroundColor: AskButtonStyle.plain.textColor, .paragraphStyle: buttonStyle, .baselineOffset: buttonOffset,
+        // One line as tall as the button, with Archive on a right tab.
+        let height = TypeScale.scaled(38)
+        let (lineStyle, buttonOffset) = Theme.lines(height, font: button)
+        lineStyle.tabStops = [NSTextTab(textAlignment: .right, location: width - 1)]
+        let titleOffset = Theme.baselineOffset(height, font: title)
+        let output = NSMutableAttributedString()
+        let titleAttributes: [NSAttributedString.Key: Any] = [
+            .font: title, .foregroundColor: card.isOpen ? NSColor.labelColor : NSColor.secondaryLabelColor,
+            .paragraphStyle: lineStyle, .baselineOffset: titleOffset,
+        ]
+        output.append(symbol("checkmark", label: "Done", font: title, attributes: titleAttributes, color: .systemGreen))
+        output.append(NSAttributedString(string: " Done\t", attributes: titleAttributes))
+        output.append(NSAttributedString(string: "\u{00A0}\u{00A0}\u{00A0}Archive\u{00A0}\u{00A0}\u{00A0}", attributes: [
+            .font: button, .foregroundColor: AskButtonStyle.plain.textColor, .paragraphStyle: lineStyle, .baselineOffset: buttonOffset,
             .tbAction: "archive", .tbButton: AskButtonStyle.plain.rawValue,
         ]))
         guard card.isOpen, !card.next.isEmpty else { return output }
-        let (headingStyle, headingOffset) = Theme.lines(TypeScale.workLine, font: Theme.changesTitleFont, spacing: zoomed(6), before: zoomed(16))
-        output.append(NSAttributedString(string: "\nOptional follow-ups", attributes: [
-            .font: Theme.changesTitleFont, .foregroundColor: NSColor.secondaryLabelColor,
-            .paragraphStyle: headingStyle, .baselineOffset: headingOffset,
+        let small = Theme.smallFont
+        // The rows and their label sit in by the hover fill's padding, as
+        // the text view clips anything drawn left of its text.
+        let inset = rowInset
+        let (labelStyle, labelOffset) = Theme.lines(TypeScale.scaled(19), font: small, before: zoomed(10), head: inset)
+        output.append(NSAttributedString(string: "\nOr carry on", attributes: [
+            .font: small, .foregroundColor: NSColor.secondaryLabelColor, .paragraphStyle: labelStyle, .baselineOffset: labelOffset,
         ]))
-        // Wrapped lines start under the text, past the circle.
         let font = Theme.bodyFont
-        let indent = MarkdownRenderer.Builder.listIndent
-        let (rowStyle, rowOffset) = Theme.lines(TypeScale.bodyLine, font: font, spacing: zoomed(2), before: zoomed(8), head: indent, first: 0)
-        rowStyle.tabStops = [NSTextTab(textAlignment: .left, location: indent)]
+        // Room at the right for "Send ↑", so a long one wraps short of it.
+        let send = ceil(NSAttributedString(string: sendLabel, attributes: [.font: small]).size().width) + zoomed(16) + inset
+        let (rowStyle, rowOffset) = Theme.lines(TypeScale.bodyLine, font: font, spacing: zoomed(8), before: zoomed(8), head: inset, tail: -send)
         for (n, text) in card.next.enumerated() {
-            let picked = card.nextPicked.contains(n)
-            let attributes: [NSAttributedString.Key: Any] = [
-                .font: font, .foregroundColor: NSColor.labelColor, .paragraphStyle: rowStyle, .baselineOffset: rowOffset, .tbAction: "next:\(n)",
-            ]
-            output.append(NSAttributedString(string: "\n", attributes: attributes))
-            output.append(symbol(picked ? "checkmark.circle.fill" : "circle", label: picked ? "Picked" : "Not picked", font: font, attributes: attributes,
-                                 color: picked ? .controlAccentColor : .secondaryLabelColor))
-            output.append(NSAttributedString(string: "\t" + text, attributes: attributes))
+            // The break ends the line before, so it isn't part of the row.
+            output.append(NSAttributedString(string: "\n", attributes: [.font: font, .paragraphStyle: rowStyle]))
+            output.append(NSAttributedString(string: text, attributes: [
+                .font: font, .foregroundColor: NSColor.labelColor, .paragraphStyle: rowStyle, .baselineOffset: rowOffset,
+                .tbAction: "next:\(n)", .tbRow: "next:\(n)",
+            ]))
         }
         return output
     }
+
+    /// What a follow-up row shows at its right under the pointer.
+    static let sendLabel = "Send ↑"
+    /// How far a follow-up row's words sit in from its hover fill.
+    static var rowInset: CGFloat { zoomed(8) }
 
     /// A plain sentence for a failure whose cause the runner gave.
     static func errorAdvice(_ kind: TurnErrorKind?) -> String? {
@@ -1306,7 +1319,7 @@ enum RowRenderer {
     /// "12s · $0.04" for Claude, "12s" for Codex, which reports no cost
     /// (its tokens are in "Copy debug info" instead).
     static func footerText(_ completion: TurnCompletion) -> NSAttributedString {
-        // "Nothing needed from you" is the done card's now, under this line.
+        // "Done" is the done card's now, under this line.
         var parts: [String] = []
         switch completion.outcome {
         case .completed: parts.append(RelativeTime.duration(milliseconds: completion.durationMs))

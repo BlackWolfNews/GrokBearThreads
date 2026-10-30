@@ -330,20 +330,16 @@ public struct AsksCard: Sendable, Hashable {
     /// The option picked on each ask (ask index to option index), waiting
     /// in the composer to be sent.
     public var picks: [Int: Int]
-    /// The done card's follow-ups (end_turn's `next`): buttons that put
-    /// their words in the composer, or take them out again.
+    /// The done card's follow-ups (end_turn's `next`): rows under
+    /// "Or carry on" that each send their words as a message.
     public var next: [String]
-    /// The follow-ups whose words are in the composer, ticked on the card
-    /// (`FollowUps`).
-    public var nextPicked: Set<Int>
     /// What Mike has written and pasted in the boxes under the asks he
     /// picked Something else on, by ask index. The card makes room for
     /// each box from it; the box itself is a text view over that room.
     public var notes: [Int: AskNote]
 
-    public init(seq: Int, asks: [Ask], ticked: Set<Int> = [], isOpen: Bool = true, picks: [Int: Int] = [:], next: [String] = [], nextPicked: Set<Int> = [], notes: [Int: AskNote] = [:]) {
+    public init(seq: Int, asks: [Ask], ticked: Set<Int> = [], isOpen: Bool = true, picks: [Int: Int] = [:], next: [String] = [], notes: [Int: AskNote] = [:]) {
         self.seq = seq
-        self.nextPicked = nextPicked
         self.notes = notes
         self.asks = asks
         self.next = next
@@ -355,9 +351,9 @@ public struct AsksCard: Sendable, Hashable {
     public var tickedCount: Int { asks.indices.filter { ticked.contains($0) }.count }
 
     /// A turn that said it needs nothing gets a card too, with no asks:
-    /// "Nothing needed from you" and an Archive button, where the raw
-    /// end_turn call used to be all there was (Mike, 29 Oct), after any
-    /// follow-ups the agent suggested (30 Oct). A turn that
+    /// "Done" and an Archive button, where the raw end_turn call used to
+    /// be all there was (Mike, 29 Oct), and any follow-ups the agent
+    /// suggested (30 Oct). A turn that
     /// needs Mike only gets a card when it has asks, so no asks means this.
     public var isDone: Bool { asks.isEmpty }
 }

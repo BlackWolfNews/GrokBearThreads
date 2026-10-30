@@ -137,13 +137,7 @@ final class AppModel {
     /// id, or "new"): with threads open in several panels, only that one's.
     var focusRequests: [String: Int] = [:]
     var now = Date()
-    var drafts: [String: Draft] = [:] {
-        // The open done card ticks the follow-ups in its thread's composer,
-        // however they got there or went (FollowUps).
-        didSet {
-            for (id, session) in sessions where drafts[id]?.text != oldValue[id]?.text { session.setDraft(drafts[id]?.text ?? "") }
-        }
-    }
+    var drafts: [String: Draft] = [:]
     /// Messages being edited, by thread id: the seq of the message the
     /// composer's draft will replace (docs/protocol.md, "Editing a
     /// message"), and whatever was in the box before, to put back after.
@@ -1136,16 +1130,21 @@ final class AppModel {
         sessions[threadId]?.setAskNotes(seq: seq, notes: notes)
     }
 
-    /// A follow-up from the done card, into the thread's composer rather
-    /// than sent: a stray click shouldn't start a turn, and he may want to
-    /// add to it. Whatever he'd typed stays, with it on a line after. When
-    /// it's already there, the click takes it out again, so he can pick
-    /// any of them and send them as one message (FollowUps).
-    func toggleNext(threadId: String, text: String) {
-        var draft = drafts[threadId] ?? Draft()
-        draft.text = FollowUps.toggled(text, in: draft.text)
-        drafts[threadId] = draft.text.isEmpty && draft.images.isEmpty ? nil : draft
-        focusComposer(threadId)
+    /// A follow-up from the done card, sent as it is. Ticking them into
+    /// the composer read as a to-do list under "Nothing needed from you"
+    /// (Mike, 30 Oct), so the card now offers them as ways to carry on,
+    /// one click each. Whatever he'd typed in the box stays there, for
+    /// his next message: it goes through `send` as the draft for a
+    /// moment, then the box gets his words back, whether it went or not
+    /// (not connected). A send that fails later puts the follow-up back
+    /// in the box with them (restoreDraft). While he's editing a message,
+    /// sending would replace that message, so the click does nothing.
+    func sendFollowUp(threadId: String, text: String) {
+        guard editing[threadId] == nil else { return }
+        let typed = drafts[threadId]
+        drafts[threadId] = Draft(text: text)
+        send(threadId: threadId)
+        if drafts[threadId] == nil || drafts[threadId]?.text == text { drafts[threadId] = typed }
     }
 
     /// Puts one of Mike's messages in the thread's composer to edit: sending

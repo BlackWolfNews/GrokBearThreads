@@ -6,12 +6,20 @@ import ThreadbearCore
 /// backgrounds: rounded boxes behind code blocks and full-width line fills
 /// for diffs. Plain `.backgroundColor` only covers the glyphs.
 final class BackgroundLayoutManager: NSLayoutManager {
+    /// The `.tbRow` paragraph under the pointer, lit up with "Send ↑" at
+    /// its right (set by the text view).
+    var hoveredRow: NSRange?
+
     override func drawBackground(forGlyphRange glyphsToShow: NSRange, at origin: NSPoint) {
         super.drawBackground(forGlyphRange: glyphsToShow, at: origin)
         guard let storage = textStorage, let container = textContainers.first, storage.length > 0 else { return }
         let characters = characterRange(forGlyphRange: glyphsToShow, actualGlyphRange: nil)
         let whole = NSRange(location: 0, length: storage.length)
         let width = container.size.width
+
+        if let row = hoveredRow, NSMaxRange(row) <= storage.length, NSIntersectionRange(row, characters).length > 0 {
+            drawHoveredRow(row, width: width, origin: origin)
+        }
 
         var drawnBlocks = Set<Int>()
         storage.enumerateAttribute(.tbBlockBackground, in: characters) { value, range, _ in
@@ -67,6 +75,27 @@ final class BackgroundLayoutManager: NSLayoutManager {
                 NSRect(x: origin.x, y: rect.minY + origin.y, width: width, height: rect.height).fill()
             }
         }
+    }
+
+    /// A faint fill across a hovered `.tbRow` paragraph, the width of the
+    /// text view (the row's words sit in from its edges), and "Send ↑" in
+    /// its right margin (the paragraph's tail indent leaves room for it),
+    /// on its first line.
+    private func drawHoveredRow(_ range: NSRange, width: CGFloat, origin: NSPoint) {
+        let glyphs = glyphRange(forCharacterRange: range, actualCharacterRange: nil)
+        var box = NSRect.null
+        var first = NSRect.null
+        enumerateLineFragments(forGlyphRange: glyphs) { _, used, _, _, _ in
+            if first.isNull { first = used }
+            box = box.union(used)
+        }
+        guard !box.isNull else { return }
+        let rect = NSRect(x: origin.x, y: origin.y + box.minY - zoomed(5), width: width, height: box.height + zoomed(10))
+        Theme.hoverFill.setFill()
+        NSBezierPath(roundedRect: rect, xRadius: zoomed(6), yRadius: zoomed(6)).fill()
+        let label = NSAttributedString(string: RowRenderer.sendLabel, attributes: [.font: Theme.smallFont, .foregroundColor: NSColor.secondaryLabelColor])
+        let size = label.size()
+        label.draw(at: NSPoint(x: origin.x + width - RowRenderer.rowInset - size.width, y: origin.y + first.midY - size.height / 2))
     }
 
     /// A capsule behind an asks card button, one per line if it wraps.
@@ -342,6 +371,7 @@ final class TranscriptTextView: NSTextView {
         guard let storage = textStorage else { return }
         if storage.length == string.length, storage.isEqual(to: string) { return }
         storage.setAttributedString(string)
+        (layoutManager as? BackgroundLayoutManager)?.hoveredRow = nil
         refreshChips()
         // The pointing hand over "Show 30 more lines" (always the last run)
         // only shows once the view rebuilds its cursor rects.
@@ -354,6 +384,7 @@ final class TranscriptTextView: NSTextView {
     func clear() {
         guard let storage = textStorage, storage.length > 0 else { return }
         storage.setAttributedString(NSAttributedString())
+        (layoutManager as? BackgroundLayoutManager)?.hoveredRow = nil
         refreshChips()
     }
 
@@ -388,7 +419,7 @@ final class TranscriptTextView: NSTextView {
             FileDrag.begin(link.peek.url, from: self, event: event)
             return
         }
-        if let onAction, let action = character(at: point).flatMap({ textStorage?.attribute(.tbAction, at: $0, effectiveRange: nil) as? String }) {
+        if let onAction, let action = row(at: point)?.action ?? character(at: point).flatMap({ textStorage?.attribute(.tbAction, at: $0, effectiveRange: nil) as? String }) {
             closeChipCard()
             onAction(action)
             return
@@ -413,6 +444,46 @@ final class TranscriptTextView: NSTextView {
         let index = layoutManager.characterIndexForGlyph(at: glyph)
         return index < storage.length ? index : nil
     }
+
+    /// The `.tbRow` paragraph whose lines `point` is on, anywhere across
+    /// them, so the space right of a short row is part of it too.
+    private func row(at point: NSPoint) -> (range: NSRange, action: String)? {
+        guard let layoutManager, let textContainer, let storage = textStorage, storage.length > 0 else { return nil }
+        let origin = textContainerOrigin
+        let local = NSPoint(x: point.x - origin.x, y: point.y - origin.y)
+        guard local.x >= 0, local.x <= textContainer.size.width else { return nil }
+        let glyph = layoutManager.glyphIndex(for: local, in: textContainer)
+        let line = layoutManager.lineFragmentRect(forGlyphAt: glyph, effectiveRange: nil)
+        guard local.y >= line.minY, local.y < line.maxY else { return nil }
+        let index = layoutManager.characterIndexForGlyph(at: glyph)
+        guard index < storage.length else { return nil }
+        var range = NSRange()
+        guard let action = storage.attribute(.tbRow, at: index, longestEffectiveRange: &range, in: NSRange(location: 0, length: storage.length)) as? String
+        else { return nil }
+        return (range, action)
+    }
+
+    /// Lights up the `.tbRow` paragraph under the pointer, or none.
+    private func hoverRow(_ range: NSRange?) {
+        guard let manager = layoutManager as? BackgroundLayoutManager, manager.hoveredRow != range else { return }
+        manager.hoveredRow = range
+        needsDisplay = true
+    }
+
+    #if DEBUG
+    /// The automation hook's `hover` on a row: lights up the first
+    /// `.tbRow` as if the pointer were on it. False when there's none.
+    func debugHoverFirstRow(_ on: Bool) -> Bool {
+        guard let storage = textStorage else { return false }
+        var first: NSRange?
+        storage.enumerateAttribute(.tbRow, in: NSRange(location: 0, length: storage.length)) { value, range, stop in
+            if value != nil { first = range; stop.pointee = true }
+        }
+        guard let first else { return false }
+        hoverRow(on ? first : nil)
+        return true
+    }
+    #endif
 
     // MARK: Thread chips
     //
@@ -496,7 +567,9 @@ final class TranscriptTextView: NSTextView {
         super.mouseMoved(with: event)
         let point = convert(event.locationInWindow, from: nil)
         let chip = chip(at: point)
-        if chip != nil || isAction(at: point) { NSCursor.pointingHand.set() }
+        let row = onAction == nil ? nil : row(at: point)
+        hoverRow(row?.range)
+        if chip != nil || row != nil || isAction(at: point) { NSCursor.pointingHand.set() }
         if let chip { hoverChip(chip) } else { hoverPeek(peek(at: point)) }
     }
 
@@ -507,7 +580,7 @@ final class TranscriptTextView: NSTextView {
 
     override func cursorUpdate(with event: NSEvent) {
         let point = convert(event.locationInWindow, from: nil)
-        if chip(at: point) != nil || isAction(at: point) {
+        if chip(at: point) != nil || isAction(at: point) || (onAction != nil && row(at: point) != nil) {
             NSCursor.pointingHand.set()
         } else {
             super.cursorUpdate(with: event)
@@ -517,6 +590,7 @@ final class TranscriptTextView: NSTextView {
     override func mouseExited(with event: NSEvent) {
         super.mouseExited(with: event)
         hoverChip(nil)
+        hoverRow(nil)
     }
 
     override func viewWillMove(toWindow newWindow: NSWindow?) {

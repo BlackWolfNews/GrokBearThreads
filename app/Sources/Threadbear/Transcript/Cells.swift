@@ -295,8 +295,10 @@ final class TextRowCell: RowCellView {
     }
 
     #if DEBUG
-    /// A message of Mike's has no hover fill, but shows its pencil.
+    /// A message of Mike's has no hover fill, but shows its pencil. A
+    /// done card lights up its first follow-up.
     override func debugHover(_ on: Bool) -> Bool {
+        if textView.debugHoverFirstRow(on) { return true }
         guard editable else { return super.debugHover(on) }
         pointerInside = on
         updateEdit()

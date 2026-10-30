@@ -321,6 +321,12 @@ extension NSAttributedString.Key {
     /// box (an NSNumber, the ask's index): one line as tall as the box, with
     /// the box itself a text view the cell puts over it (AskAnswerBox).
     static let tbAnswerBox = NSAttributedString.Key("tbAnswerBox")
+    /// A whole paragraph that's one click target (the done card's
+    /// follow-ups): the value is its `tbAction`. The text view lights the
+    /// paragraph up under the pointer and shows "Send ↑" at its right
+    /// (BackgroundLayoutManager.hoveredRow), and a click anywhere on its
+    /// lines counts, not just on the words.
+    static let tbRow = NSAttributedString.Key("tbRow")
 }
 
 /// How a button on an asks card is drawn (`.tbButton`).

@@ -92,38 +92,6 @@ final class NeedsYouTests: XCTestCase {
         XCTAssertEqual(card(model, "ak:1")?.next, ["Show Bruce pictures", "Start Bruce threads"])
     }
 
-    /// The done card ticks the follow-ups that are in the composer (Mike,
-    /// 30 Oct: he wanted several, and couldn't tell which he'd added).
-    func testTheDoneCardTicksTheFollowUpsInTheComposer() {
-        var model = TranscriptModel()
-        _ = model.setDraft("Start Bruce threads")
-        model.load(events: [done(1, turn: "t1", needs: "nothing", next: ["Show Bruce pictures", "Start Bruce threads"])], inProgress: [])
-        XCTAssertEqual(card(model, "ak:1")?.nextPicked, [1], "a draft from before the card loads counts")
-        XCTAssertFalse(model.setDraft(FollowUps.toggled("Show Bruce pictures", in: "Start Bruce threads")).isEmpty)
-        XCTAssertEqual(card(model, "ak:1")?.nextPicked, [0, 1])
-        _ = model.setDraft("")
-        XCTAssertEqual(card(model, "ak:1")?.nextPicked, [])
-    }
-
-    func testFollowUpsToggleInAndOutOfTheDraft() {
-        XCTAssertEqual(FollowUps.toggled("A", in: ""), "A")
-        XCTAssertEqual(FollowUps.toggled("B", in: "Also this\n"), "Also this\n\nB")
-        XCTAssertEqual(FollowUps.toggled("B", in: "A\n\nB\n\nC"), "A\n\nC")
-        XCTAssertEqual(FollowUps.toggled("A", in: "A\n\nB"), "B")
-        XCTAssertEqual(FollowUps.picked(in: "A\n\nmy own words", next: ["A", "B", " "]), [0])
-    }
-
-    func testOnlyACompletedTurnThatNeedsYouWithAsksGetsACard() {
-        let model = TranscriptModel(events: [
-            done(1, turn: "t1", needs: "you"),
-            done(2, turn: "t2", needs: "you", asks: [["action": "x"]], outcome: "interrupted"),
-            E.event(3, "asks.ticked", ["asksSeq": 99, "ticked": [0]], turn: nil),
-        ])
-        XCTAssertFalse(model.rows.contains { $0.kind == .asks })
-        let stopped = TranscriptModel(events: [done(1, turn: "t1", needs: "nothing", outcome: "interrupted")])
-        XCTAssertFalse(stopped.rows.contains { $0.kind == .asks }, "a stopped turn gets no done card")
-    }
-
     func testSummaryDecodesNeedsAndAsks() throws {
         let json = #"{"id":"a","title":"T","needsYou":true,"needs":"you","asksSeq":12,"asks":[{"action":"Paste the key","where":"Settings","reply":"done","ticked":true},{"action":"Pick one"},{"bad":1}]}"#
         let thread = try JSONDecoder().decode(ThreadSummary.self, from: Data(json.utf8))
