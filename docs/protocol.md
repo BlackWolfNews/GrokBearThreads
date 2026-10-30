@@ -2109,6 +2109,23 @@ never for a private folder) choosing from a fixed list. One Mike or an
 agent chose (`projects.setIcon`, `update_project`'s `icon`) is never
 changed by the librarian.
 
+**Fix threads.** When Mike, in a thread about something else, points out
+a problem with his tools or with how agents work ("is this a bug in
+Threadbear?", "I couldn't see the tab you opened"), and the thread doesn't
+say a fix was started, a look's answer gives `fix` (a title, the tool's
+repo and what went wrong). The librarian starts a thread there with
+`origin: "runner"` and that title, whose first message links back to the
+thread and asks the agent to find the cause and fix it, landing it when
+it's reversible and clear, or to say in a line that it's already fixed or
+not real. The thread Mike said it in gets a `system.note` ("The librarian
+started a thread to fix that: ..."), and the look's entry says so. Never
+from a `first-message` look, never from a fix thread itself, at most one a
+day per thread and 5 a day in all; each look lists the fix threads of the
+last 7 days, so the same problem isn't opened twice. A repo that isn't
+there falls back to the thread's own folder. Kept in `librarian.json`
+(`fixes`). Added 30 Oct 2026, after Mike had to ask for two such threads
+in one thread about his flights.
+
 **Links.** A project keeps up to 8 links: the places Mike keeps going
 back to for it (its live site, admin page, dashboard, store listing), not
 one-off pages or pull requests. The app shows them at the top of each of

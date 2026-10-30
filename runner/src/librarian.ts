@@ -47,6 +47,9 @@ export type LibrarianHost = {
   // (wake-when.ts), and waking one he just did.
   waitingTopics?(): { threadId: string; title: string; topic: string }[];
   wakeForTopic?(threadId: string, inThreadId: string): boolean;
+  // Starts a thread to fix a problem Mike ran into with his tools; returns
+  // its id.
+  startFix?(p: { fromThreadId: string; cwd: string; title: string; text: string }): string | undefined;
 };
 
 // How long after a turn ends before a look, so a quick follow-up turn
@@ -85,6 +88,12 @@ export const ICON_SOON_MS = 3_000;
 export const NOTES_SOON_MS = 60_000;
 // Old notes kept on disk per project, the newest first.
 const NOTES_KEPT = 5;
+// Fix threads: at most this many a day, so a look that gets it wrong
+// can't fill the inbox. Each look is shown the ones opened in the last
+// FIXES_SHOWN_MS, so the same problem isn't opened twice.
+export const FIXES_PER_DAY = 5;
+const FIXES_SHOWN_MS = 7 * 24 * 60 * 60_000;
+const FIXES_KEPT = 30;
 
 // Which reason wins when a thread is queued twice.
 const RANK: Record<LibrarianReason, number> = { asked: 0, moved: 1, 'new-folder': 2, 'first-turn': 3, 'first-message': 4, 'catch-up': 5, notes: 6 };
@@ -92,7 +101,12 @@ const RANK: Record<LibrarianReason, number> = { asked: 0, moved: 1, 'new-folder'
 // `early`: the look was from the first message alone, so the first turn's
 // end still gets a look of its own.
 type Look = { at: string; seq: number; early?: boolean };
+// A fix thread the librarian started, and the thread Mike ran into the
+// problem in.
+type Fix = { at: string; fromThreadId: string; threadId: string; title: string };
+
 type Saved = {
+  fixes?: Fix[];
   paused?: boolean;
   queue?: LibrarianJob[];
   recent?: LibrarianEntry[];
@@ -119,6 +133,7 @@ type Answer = {
   thread?: unknown;
   title?: unknown;
   wake?: unknown;
+  fix?: unknown;
   why?: unknown;
 };
 
@@ -134,6 +149,7 @@ export class Librarian {
   private queue = new Map<string, LibrarianJob>();
   private recent: LibrarianEntry[] = [];
   private looks: Record<string, Look> = {};
+  private fixes: Fix[] = [];
   private day: Day = { date: '', looks: 0 };
   // Folders each thread has edited in since its last look, by repo.
   private edited = new Map<string, Set<string>>();
@@ -181,6 +197,7 @@ export class Librarian {
     for (const j of saved?.queue ?? []) if (j && typeof j.threadId === 'string') this.queue.set(j.threadId, j);
     this.recent = (saved?.recent ?? []).slice(0, RECENT_KEPT);
     this.looks = saved?.looks ?? {};
+    this.fixes = (saved?.fixes ?? []).slice(0, FIXES_KEPT);
     if (saved?.day) this.day = saved.day;
     if (!this.models) this.off = 'Model calls are off in this runner.';
     this.unsubs.push(this.host.onThreadActivity((a) => this.onActivity(a)));
@@ -512,6 +529,11 @@ export class Librarian {
       lines.push('', 'Hibernating threads waiting for the user to talk about something:');
       for (const w of waiting) lines.push(`- ${w.threadId.slice(0, 8)} "${w.title}": ${w.topic}`);
     }
+    const lately = this.fixesLately();
+    if (lately.length) {
+      lines.push('', 'Fix threads opened lately:');
+      for (const f of lately) lines.push(`- "${f.title}"`);
+    }
     const gist = this.host.threadGist(rec.id);
     if (job.reason === 'first-message') lines.push("It has only just started: file it from what it's about, and don't change any project's state yet.");
     if (gist.first) lines.push('', `First message: ${gist.first}`);
@@ -680,9 +702,61 @@ export class Librarian {
         bump('updated');
       }
     }
+    const fixed = this.startFix(job, rec, a.fix);
+    if (fixed) {
+      said.push(`Started ${fixed} to fix the tooling`);
+      bump('updated');
+    }
     const why = typeof a.why === 'string' ? a.why.trim().slice(0, 200) : '';
     const text = said.length ? said.join('. ') : why ? `Nothing to change: ${lowerFirst(why)}` : 'Nothing to change';
     this.note(job, outcome, text, [...ids]);
+  }
+
+  // Mike pointed out a problem with his tools, apart from the thread's
+  // task, and nobody started fixing it: a thread of its own does, so he
+  // doesn't have to ask for one (30 Oct 2026). Returns its title.
+  private startFix(job: LibrarianJob, rec: ThreadRecord, fix: unknown): string | undefined {
+    if (!fix || typeof fix !== 'object' || !this.host.startFix) return undefined;
+    const f = fix as { title?: unknown; folder?: unknown; problem?: unknown };
+    const title = typeof f.title === 'string' ? f.title.trim().slice(0, 80) : '';
+    const problem = typeof f.problem === 'string' ? f.problem.trim().slice(0, 1500) : '';
+    if (!title || !problem) return undefined;
+    // The first message alone is what the thread is for, not a side problem;
+    // and a fix thread's own complaints are its task.
+    if (job.reason === 'first-message' || this.fixes.some((x) => x.threadId === rec.id)) return undefined;
+    const today = new Date(this.clock.now()).toDateString();
+    if (this.fixes.filter((x) => new Date(x.at).toDateString() === today).length >= FIXES_PER_DAY) {
+      this.log.info('librarian skipped a fix: the day has had its share', { threadId: rec.id, title });
+      return undefined;
+    }
+    // One per thread a day: the next look would only see the same complaint.
+    if (this.fixes.some((x) => x.fromThreadId === rec.id && new Date(x.at).toDateString() === today)) return undefined;
+    // The repo of the tool at fault, else where the thread is.
+    const asked = typeof f.folder === 'string' && f.folder.trim() ? mainCheckout(this.expand(f.folder)) : '';
+    const cwd = asked && isInside(asked, this.home) && fs.existsSync(asked) && fs.statSync(asked).isDirectory() ? asked : mainCheckout(rec.cwd);
+    const text = [
+      `The librarian started this thread. In [${rec.title}](thread:${rec.id}) the user ran into a problem with their tools, apart from what that thread was doing:`,
+      '',
+      problem,
+      '',
+      "Read that thread (read_thread) for the details, then find the underlying cause and fix it so it doesn't happen again. If the fix is reversible and you're confident it's right, make it and land it, then tell the user what you did. If it's already fixed, already being fixed in another thread (list_threads), or not a real problem, say so in a line and stop.",
+    ].join('\n');
+    let threadId: string | undefined;
+    try {
+      threadId = this.host.startFix({ fromThreadId: rec.id, cwd, title, text });
+    } catch (e) {
+      this.log.warn('librarian could not start a fix thread', { threadId: rec.id, title, error: String(e) });
+    }
+    if (!threadId) return undefined;
+    this.fixes.unshift({ at: new Date(this.clock.now()).toISOString(), fromThreadId: rec.id, threadId, title });
+    if (this.fixes.length > FIXES_KEPT) this.fixes.length = FIXES_KEPT;
+    this.log.info('librarian started a fix thread', { from: rec.id, threadId, title, cwd });
+    return title;
+  }
+
+  private fixesLately(): Fix[] {
+    const since = this.clock.now() - FIXES_SHOWN_MS;
+    return this.fixes.filter((f) => Date.parse(f.at) >= since);
   }
 
   // The other threads waiting on a topic.
@@ -946,7 +1020,7 @@ export class Librarian {
       }
       atomicWriteFileSync(
         this.file,
-        JSON.stringify({ paused: this.paused, queue, recent: this.recent, looks: this.looks, day: this.day } satisfies Saved),
+        JSON.stringify({ paused: this.paused, queue, recent: this.recent, looks: this.looks, day: this.day, fixes: this.fixes } satisfies Saved),
       );
     } catch (e) {
       this.log.warn('could not save librarian.json', { error: String(e) });
@@ -1071,6 +1145,7 @@ Reply with JSON only, no prose and no code fence:
  "thread": "where this thread itself is up to, as two or three short bullets, one per line, each starting \"- \": what it did or found, and what it's waiting on or doing next",
  "title": null, or a new title when the thread's title no longer says what it's about (see below),
  "wake": ["<ids of hibernating threads the user is talking about here>"], or [] (see below),
+ "fix": null, or {"title": "the fix in 2 to 6 words", "folder": "~/path of the repo of the tool at fault", "problem": "what went wrong"} (see below),
  "why": "one short line"}
 
 A reason is under 12 words, about this thread, in the user's plain words: "Edits the Poddle repo", "Shortlists photos for the calendar entry", "Asks how the librarian picks projects". Leaving a project out of projects doesn't take the thread out of it; only leave does. Use leave when the thread clearly isn't about that project: the earlier guess was wrong, or the work has gone elsewhere for good. A thread that has only paused that work stays.
@@ -1082,6 +1157,8 @@ Links are the few places the user keeps going back to for a project: its live si
 Keep the thread's title (title null) unless it no longer says what the thread is about: the work moved on to something else, or the title is only the first words of the first message ("Hey, does the library, sorry, the librarian, does it update"). A better wording of the same subject is no reason. A new title is 2 to 6 words about the whole thread as it is now, in sentence case (a capital for the first word and for names only), with no quotes, full stop, dash or emoji: "Fix the flaky upload test on CI", "Librarian renames threads that move on".
 
 Some hibernating threads are waiting for the user to talk about something again ("woodworking"). Put one in wake when the user's own messages in this thread are about that: they're working on it, planning it or asking about it. A passing mention, or only the agent bringing it up, isn't enough. Most looks wake none.
+
+Give fix when the user, in their own messages here, points out a problem with their tools or with how agents work, apart from the task the thread is about: a bug in Threadbear or another of their own apps or tools, a tool that misbehaved, a skill or instruction that led the agent wrong ("is this a bug in Threadbear?", "I couldn't see the tab you opened"). The title says what to fix ("Show replies written after end_turn"). The folder is that tool's repo from the project list, or the thread's own folder when you can't tell. The problem says what happened and what the user said about it, with the names, for an agent who hasn't seen this thread. Not when the thread's task is that tool (it's fixing it already), not for problems with the task itself or with someone else's website or service, not when the messages say a thread to fix it was started or the agent fixed it there and then, and not when a fix thread opened lately covers it. Most looks give none.
 
 The thread bullets are for the user glancing at the thread later: concrete, in their plain words, each under ten words, no full stops. The last one says who's waiting on whom ("Waiting on you to pick a design", "Fixing the last failing test").`;
 

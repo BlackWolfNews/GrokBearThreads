@@ -6,7 +6,7 @@ import { makeHarness, tick, tmpDir } from '../helpers/fakes.ts';
 import { checkSummary } from '../helpers/protocol-check.ts';
 import { Projects, drainProjectMethods, projectMethods, BRIEF_MAX, NOTES_LONG, type ProjectHost } from '../../src/projects.ts';
 import { projectRouter, type PrimaryLink } from '../../src/handover.ts';
-import { Librarian, librarianMethods, saysNoFit, mainCheckout, SETTLE_MS, CATCH_UP_MS, CATCH_UP_MIN_CHARS, FIRST_MESSAGE_MS, SWEEP_MS } from '../../src/librarian.ts';
+import { Librarian, librarianMethods, saysNoFit, mainCheckout, SETTLE_MS, CATCH_UP_MS, CATCH_UP_MIN_CHARS, FIRST_MESSAGE_MS, SWEEP_MS, FIXES_PER_DAY } from '../../src/librarian.ts';
 import { buildThreadbearTools } from '../../src/threadbear-mcp.ts';
 import { FakeClock } from '../../src/clock.ts';
 import { nullLogger, type Logger } from '../../src/log.ts';
@@ -970,6 +970,65 @@ test('the librarian wakes a thread hibernating on a topic when Mike talks about 
   assert.equal(h.runner.get(waiting).snoozedUntil, undefined);
   assert.equal(h.runner.get(waiting).needsYou, true);
   assert.notEqual(other, waiting);
+});
+
+// Mike pointed out a Threadbear bug in a thread about his flights and had
+// to ask for a thread to fix it (30 Oct 2026): the librarian starts one.
+test('the librarian starts a thread to fix a tooling problem Mike ran into, once', async () => {
+  const fix = { title: 'Show replies written after end_turn', folder: '~/dev/threadbear', problem: 'The call details the agent wrote after end_turn never showed.' };
+  const prompts: string[] = [];
+  const s = setup({
+    models: (p) => {
+      prompts.push(p.prompt);
+      return reply({ projects: [], new: null, state: {}, fix, why: 'Threadbear dropped a reply' });
+    },
+  });
+  const { h, root, misc, repo, create, finish, librarian } = s;
+  const tb = repo('dev/threadbear');
+  const flights = create('Check the flights are linked').thread.id;
+  h.clock.advance(FIRST_MESSAGE_MS);
+  await tick(6);
+  // The first message alone is the thread's task, never a side problem.
+  assert.equal(h.runner.threadRecords().length, 1);
+  await finish(flights);
+  h.clock.advance(SETTLE_MS);
+  await tick(6);
+  const fixer = h.runner.threadRecords().find((t) => t.id !== flights)!;
+  assert.ok(fixer, 'a fix thread was started');
+  assert.equal(fixer.cwd, tb);
+  assert.equal(fixer.title, fix.title);
+  const first = h.events(fixer.id).find((e) => e.type === 'user.message') as { text: string; origin?: string };
+  assert.equal(first.origin, 'runner');
+  assert.match(first.text, new RegExp(`^The librarian started this thread\\. In \\[Check the flights are linked\\]\\(thread:${flights}\\)`));
+  assert.match(first.text, /never showed\./);
+  assert.ok(librarian.status().recent.some((e) => e.threadId === flights && e.text === `Started ${fix.title} to fix the tooling`));
+  assert.ok(h.events(flights).some((e) => e.type === 'system.note' && e.text === `The librarian started a thread to fix that: ${fix.title}.`));
+  // Later looks see it, and neither the same thread nor the fix thread
+  // itself opens another that day.
+  await finish(fixer.id);
+  h.clock.advance(CATCH_UP_MS + SETTLE_MS);
+  librarian.run(flights);
+  h.clock.advance(SETTLE_MS);
+  await tick(6);
+  assert.equal(h.runner.threadRecords().length, 2);
+  assert.match(prompts.at(-1)!, /Fix threads opened lately:\n- "Show replies written after end_turn"/);
+  // A folder that isn't there falls back to the thread's own.
+  fix.folder = '~/dev/nothere';
+  const other = create('Order timber').thread.id;
+  await finish(other);
+  h.clock.advance(SETTLE_MS);
+  await tick(6);
+  assert.equal(h.runner.threadRecords().find((t) => t.id !== flights && t.id !== fixer.id && t.id !== other)?.cwd, misc);
+  // At most FIXES_PER_DAY a day.
+  for (let i = 0; i < FIXES_PER_DAY; i++) {
+    const t = create(`Chore ${i}`).thread.id;
+    await finish(t);
+    h.clock.advance(SETTLE_MS);
+    await tick(6);
+  }
+  const fixers = h.runner.threadRecords().filter((t) => t.title === fix.title);
+  assert.equal(fixers.length, FIXES_PER_DAY);
+  assert.ok(root);
 });
 
 // A note that won't fit says how to make room instead of only refusing

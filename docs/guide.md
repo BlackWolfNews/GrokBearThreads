@@ -513,6 +513,12 @@ cleanly later. A thread there gets its own copy of the code to work in, and when
 the change is ready and its checks pass, the agent lands it on your `main`
 branch.
 
+You don't always have to ask. If you point out a problem with your tools
+in a thread about something else ("is this a bug in Threadbear?"), and the
+agent doesn't start fixing it, the librarian starts a thread for it in
+that tool's folder and leaves a note in the thread you said it in. It
+starts at most five a day.
+
 Updates then arrive by themselves. Within a few minutes of a change landing
 on `main`, the runner builds it and switches over without cutting off any
 thread that's partway through a turn, and the app builds its new version in
