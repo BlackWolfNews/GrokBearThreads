@@ -324,7 +324,9 @@ empty for its default). Its threads show on your phone and the website, and
 threads made on another Mac show in your sidebar too, with that Mac's
 icon in the row: open one and you're talking to that Mac directly (over
 Tailscale), so it needs that Mac to be on and its key copied to this one.
-Pictures and files in them stay on that Mac for now. Schedules need your
+Its pictures and files come from that Mac as you open them. To start a
+thread on another Mac, pick it with the machine chip on the composer: the
+folder, account and model are then that Mac's. Schedules need your
 Convex backend: with no internet, they wait.
 
 ## Accounts, pools and Usage
