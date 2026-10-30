@@ -46,6 +46,23 @@ final class Dictation {
             self.request = request
             let input = engine.inputNode
             input.removeTap(onBus: 0)
+            // Just after the category changes (from Ask's playAndRecord, or
+            // a call) the node can still report the old format, and a tap
+            // in a format the hardware isn't running at is an Objective-C
+            // exception Swift can't catch: it crashed the app on 30 Oct, as
+            // it had Ask on 29 Oct (AudioInput.installTapIfNeeded). So wait
+            // for it to settle, which takes a few tens of milliseconds.
+            var settled = false
+            for _ in 0..<20 {
+                if Self.formatSettled(input) { settled = true; break }
+                try await Task.sleep(for: .milliseconds(50))
+            }
+            guard generation == current else { return }
+            guard settled else {
+                problem = "Couldn't start the microphone. Tap the mic to try again."
+                stop()
+                return
+            }
             // The tap runs on the audio queue. Written plainly inside this
             // @MainActor class the block would be main-actor isolated (the
             // project's default isolation), and iOS 18 trapped on the first
@@ -93,6 +110,14 @@ final class Dictation {
         task = nil
         isListening = false
         try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+    }
+
+    /// Whether the mic node's format is one a tap can be put on: a real
+    /// microphone, at the rate the hardware is running.
+    private static func formatSettled(_ input: AVAudioInputNode) -> Bool {
+        let format = input.outputFormat(forBus: 0)
+        let hardware = input.inputFormat(forBus: 0)
+        return format.sampleRate > 0 && format.channelCount > 0 && hardware.sampleRate == format.sampleRate
     }
 
     /// "No speech detected" and cancellation aren't worth showing.
