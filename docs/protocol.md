@@ -2248,7 +2248,8 @@ the mirror back as state. The Mac app doesn't use it.
   createdAt, lastActivityAt, snoozedUntil?, snoozedUntilRestart?,
   archivedAt?, costUsd?` (to the cent), `projects?: { id, title }[]`,
   `working?` (the first unfinished background task's description),
-  `pendingApproval?` (below), `earliestSeq?` (Messages, below), `share?` (see Sharing; API 8) and `view` (`inbox`, `hibernating` or `den`,
+  `pendingApproval?` (below), `earliestSeq?` (Messages, below), `share?` (see Sharing; API 8),
+  `asks?` and `asksSeq?` (the open card, below; API 14), `next?` (below; API 14) and `view` (`inbox`, `hibernating` or `den`,
   worked out the way the app's lists are). Nothing else from
   `ThreadSummary`: no `lastSeq`, context, panels, actions, hooks or
   sub-agents, and never a tool result, diff or image. A `thread.updated`
@@ -2273,6 +2274,16 @@ the mirror back as state. The Mac app doesn't use it.
   in the input, at most 200 characters, never the whole input); a
   `question.requested` puts `{ approvalId, kind: "question", questions }`.
   `approval.resolved`, or the thread no longer waiting, takes it off.
+- **End-of-turn cards** (API 14, 30 Oct 2026). The open card of asks
+  (see Needs you) goes on the row as `asks` and `asksSeq`, each ask
+  without `where` and with only its `http(s)` links, as the phone can't
+  open a file on the Mac. While a thread is idle on a turn that said it
+  needs `nothing`, `next` is that `turn.completed`'s follow-ups. An
+  `assistant.text` with `summary: true` goes up with `summary: true`, so
+  the phone can pick a turn's reply as the Mac does and fold the rest of
+  the turn into one "Worked for" line. A `send` command may carry
+  `answers` (`AskAnswer[]`), passed to `threads.send`. A backend older
+  than 14 gets the rows and messages without them.
 - **Projects, schedules, accounts.** Each `projects.updated`,
   `schedules.updated` and `accounts.updated` replaces that runner's rows
   of the table with the whole list (schedules only while they're the

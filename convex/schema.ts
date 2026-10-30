@@ -46,6 +46,27 @@ export const threadFields = {
   // Whether anyone with the /s/<slug> link can read it (docs/website.md,
   // "Sharing"). Absent: never shared.
   share: v.optional(shareField),
+  // The open card of asks from the agent's end_turn (docs/protocol.md,
+  // "Needs you"), since API 14: what Mike has to do, which the phone shows
+  // under the reply with its options as buttons. asksSeq says which card a
+  // picked answer belongs to. Only web links: the phone can't open a file
+  // on the Mac.
+  asks: v.optional(
+    v.array(
+      v.object({
+        action: v.string(),
+        why: v.optional(v.string()),
+        reply: v.optional(v.string()),
+        options: v.optional(v.array(v.string())),
+        suggested: v.optional(v.number()),
+        links: v.optional(v.array(v.object({ title: v.string(), url: v.string() }))),
+        ticked: v.optional(v.boolean()),
+      }),
+    ),
+  ),
+  asksSeq: v.optional(v.number()),
+  // A finished turn's suggested follow-ups (end_turn's `next`), since API 14.
+  next: v.optional(v.array(v.string())),
   // The approval or question the thread is waiting on, if any (step 2).
   pendingApproval: v.optional(
     v.union(
@@ -151,6 +172,7 @@ export default defineSchema({
     text: v.string(),
     origin: v.optional(v.string()),
     toolKind: v.optional(v.string()), // the protocol's ToolKind, for a tool row
+    summary: v.optional(v.boolean()), // end_turn's bullets, the turn's reply (since API 14)
     at: v.string(),
     pagedAt: v.optional(v.number()),
   })

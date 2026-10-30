@@ -224,6 +224,14 @@ public struct PhoneThread: Codable, Sendable, Hashable, Identifiable {
     /// whether there's anything older than what it has to load. A Convex
     /// number, so a Double on the wire.
     public var earliestSeq: Double?
+    /// The open card of asks from the agent's end_turn (backend API 14):
+    /// what Mike has to do, shown under the reply with its options.
+    public var asks: [PhoneAsk]?
+    /// Which turn the card came with (a Convex number).
+    public var asksSeq: Double?
+    /// A finished turn's suggested follow-ups (end_turn's `next`), for the
+    /// done card.
+    public var next: [String]?
 
     public init(
         threadId: String, runnerId: String = "m5", title: String, cwd: String = "~/dev/me/misc",
@@ -231,7 +239,8 @@ public struct PhoneThread: Codable, Sendable, Hashable, Identifiable {
         status: ThreadStatus = .idle, needsYou: Bool = false, unread: Bool = false, preview: String = "",
         lastActivityAt: Date, snoozedUntil: Date? = nil, snoozedUntilRestart: Bool? = nil, woke: Woke? = nil, archivedAt: Date? = nil,
         costUsd: Double? = nil, projects: [ProjectRef]? = nil, working: String? = nil,
-        pendingApproval: PendingApproval? = nil, earliestSeq: Double? = nil
+        pendingApproval: PendingApproval? = nil, earliestSeq: Double? = nil,
+        asks: [PhoneAsk]? = nil, asksSeq: Double? = nil, next: [String]? = nil
     ) {
         self.threadId = threadId
         self.runnerId = runnerId
@@ -254,6 +263,9 @@ public struct PhoneThread: Codable, Sendable, Hashable, Identifiable {
         self.working = working
         self.pendingApproval = pendingApproval
         self.earliestSeq = earliestSeq
+        self.asks = asks
+        self.asksSeq = asksSeq
+        self.next = next
     }
 
     public var isBusy: Bool { status == .running || status == .starting }
@@ -292,18 +304,21 @@ public struct PhoneMessage: Codable, Sendable, Hashable, Identifiable {
     public var origin: String?
     /// For a tool line: the protocol's ToolKind ("command", "read", "edit"...).
     public var toolKind: String?
+    /// The turn's summary bullets from end_turn, its reply (backend API 14).
+    public var summary: Bool
     @FlexibleDate public var at: Date
 
-    public init(seq: Int, role: Role, text: String, origin: String? = nil, toolKind: String? = nil, at: Date) {
+    public init(seq: Int, role: Role, text: String, origin: String? = nil, toolKind: String? = nil, summary: Bool = false, at: Date) {
         self.seq = seq
         self.role = role
         self.text = text
         self.origin = origin
         self.toolKind = toolKind
+        self.summary = summary
         self._at = FlexibleDate(wrappedValue: at)
     }
 
-    private enum Keys: String, CodingKey { case seq, role, text, origin, toolKind, at }
+    private enum Keys: String, CodingKey { case seq, role, text, origin, toolKind, summary, at }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: Keys.self)
@@ -313,6 +328,7 @@ public struct PhoneMessage: Codable, Sendable, Hashable, Identifiable {
         text = try c.decode(String.self, forKey: .text)
         origin = try c.decodeIfPresent(String.self, forKey: .origin)
         toolKind = try c.decodeIfPresent(String.self, forKey: .toolKind)
+        summary = (try? c.decodeIfPresent(Bool.self, forKey: .summary)).flatMap { $0 } ?? false
         _at = try c.decode(FlexibleDate.self, forKey: .at)
     }
 
@@ -323,6 +339,7 @@ public struct PhoneMessage: Codable, Sendable, Hashable, Identifiable {
         try c.encode(text, forKey: .text)
         try c.encodeIfPresent(origin, forKey: .origin)
         try c.encodeIfPresent(toolKind, forKey: .toolKind)
+        if summary { try c.encode(true, forKey: .summary) }
         try c.encode(_at, forKey: .at)
     }
 }
@@ -358,11 +375,16 @@ public struct MessagePage: Codable, Sendable, Hashable {
 public enum ThreadItem: Identifiable, Hashable, Sendable {
     case message(PhoneMessage)
     case tools([PhoneMessage])
+    /// A finished turn's work, folded into one "Worked for 2m 13s" line
+    /// (Turns.fold).
+    case worked(WorkedTurn)
 
     public var id: Int {
         switch self {
         case let .message(m): m.seq
         case let .tools(items): items.first?.seq ?? 0
+        // Negative, so it never meets the seq of the message it folds.
+        case let .worked(w): -(w.items.first?.id ?? 0) - 1
         }
     }
 
@@ -439,7 +461,7 @@ public enum BackendCompatibility {
     /// The newest backend API this app knows. From 2 a thread's messages come
     /// from phone:messages (every message and tool line, paged in Convex);
     /// an older backend still gets phone:thread and the runner's paging.
-    public static let currentAPIVersion = 10
+    public static let currentAPIVersion = 14
     public static let messagePagesAPIVersion = 2
     /// From 3 each phone chooses when it's notified (phone:setNotifications).
     public static let notificationSettingAPIVersion = 3
@@ -450,6 +472,10 @@ public enum BackendCompatibility {
     public static let projectIconsAPIVersion = 5
     /// From 10 phone:quickAsk records a quick ask as a thread.
     public static let quickAskAPIVersion = 10
+    /// From 14 thread rows carry the open card of asks and the done card's
+    /// next steps, and phone:send takes answers. Older backends leave them
+    /// out, and the phone shows neither card.
+    public static let asksAPIVersion = 14
 
     /// The line to show, or nil when the backend is fine.
     public static func problem(_ identity: PhoneIdentity) -> String? {

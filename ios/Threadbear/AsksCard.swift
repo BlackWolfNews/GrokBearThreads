@@ -1,0 +1,211 @@
+import SwiftUI
+import ThreadbearKit
+
+/// What a finished turn needs from Mike (its end_turn asks, backend API 14),
+/// under the reply, as the Mac's Needs you card: each ask as one paragraph,
+/// its links, and its likely answers as buttons. With one ask a tap sends
+/// it; with several he picks, then sends. Anything else goes in the composer,
+/// which sends the picks along with it.
+struct AsksCard: View {
+    let asks: [PhoneAsk]
+    @Binding var picks: [Int: Int]
+    var busy: Bool
+    var send: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            ForEach(Array(asks.enumerated()), id: \.offset) { index, ask in
+                askView(ask, index: index)
+            }
+            if asks.count > 1, !picks.isEmpty {
+                Button(action: send) {
+                    Text("Send").frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(busy)
+            }
+        }
+        .padding()
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+    }
+
+    private func askView(_ ask: PhoneAsk, index: Int) -> some View {
+        let ticked = ask.ticked == true
+        return VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                if ticked {
+                    Image(systemName: "checkmark.circle.fill").foregroundStyle(.secondary)
+                } else if asks.count > 1 {
+                    Text("\(index + 1).").foregroundStyle(.secondary)
+                }
+                MarkdownText(ask.paragraph)
+                    .textSelection(.enabled)
+                    .foregroundStyle(ticked ? .secondary : .primary)
+            }
+            if !ticked, !(ask.links ?? []).isEmpty || !ask.choices.isEmpty {
+                FlowLayout(spacing: 8) {
+                    ForEach(ask.links ?? [], id: \.url) { link in
+                        if let url = URL(string: link.url) {
+                            Link(destination: url) {
+                                Label(link.title, systemImage: "arrow.up.right.square")
+                            }
+                            .buttonStyle(.bordered)
+                            .tint(.secondary)
+                        }
+                    }
+                    ForEach(Array(ask.choices.enumerated()), id: \.offset) { choice, label in
+                        choiceButton(label, index: index, choice: choice, suggested: ask.suggestedIndex == choice)
+                    }
+                }
+                .controlSize(.small)
+                .disabled(busy)
+            }
+        }
+    }
+
+    private func choiceButton(_ label: String, index: Int, choice: Int, suggested: Bool) -> some View {
+        let picked = picks[index] == choice
+        return Button {
+            if asks.count == 1 {
+                picks = [index: choice]
+                send()
+            } else {
+                picks[index] = picked ? nil : choice
+            }
+        } label: {
+            HStack(spacing: 4) {
+                // The agent's own pick, as the Mac marks it.
+                if suggested && !picked { Image(systemName: "star.fill").imageScale(.small).foregroundStyle(.secondary) }
+                Text(label)
+            }
+        }
+        .buttonStyle(picked ? AnyButtonStyle(.borderedProminent) : AnyButtonStyle(.bordered))
+        .tint(picked ? .accentColor : .primary)
+    }
+}
+
+/// Under a finished turn that needs nothing, as the Mac's Done card:
+/// Done and Archive on one line, then the agent's suggested follow-ups
+/// (end_turn's `next`) under "Or carry on", each sending itself when
+/// tapped (Mike picked that on the Mac, 30 Oct).
+struct DoneCard: View {
+    let next: [String]
+    var busy: Bool
+    var carryOn: (String) -> Void
+    var archive: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Label("Done", systemImage: "checkmark.circle")
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Button(action: archive) {
+                    Image(systemName: "archivebox")
+                }
+                .buttonStyle(.bordered)
+                .tint(.secondary)
+                .controlSize(.small)
+                .accessibilityLabel("Archive")
+            }
+            if !next.isEmpty {
+                Text("Or carry on").font(.footnote).foregroundStyle(.secondary)
+                ForEach(next, id: \.self) { step in
+                    Button { carryOn(step) } label: {
+                        HStack {
+                            Text(step).multilineTextAlignment(.leading)
+                            Spacer(minLength: 8)
+                            Image(systemName: "arrow.up.circle").foregroundStyle(.secondary)
+                        }
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(busy)
+                }
+            }
+        }
+        .padding(12)
+        .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+    }
+}
+
+/// A finished turn's work, folded into one line that opens to it, as the
+/// Mac shows it. The reply sits under it, outside the fold.
+struct WorkedView: View {
+    let worked: WorkedTurn
+
+    var body: some View {
+        DisclosureGroup {
+            VStack(alignment: .leading, spacing: 10) {
+                ForEach(worked.items) { item in
+                    switch item {
+                    case let .message(message):
+                        if message.role == .assistant {
+                            MarkdownText(message.text)
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        } else {
+                            MessageView(message: message)
+                        }
+                    case let .tools(run): ToolRunView(items: run)
+                    case let .worked(inner): WorkedView(worked: inner)
+                    }
+                }
+            }
+            .padding(.top, 6)
+        } label: {
+            Text(worked.title)
+        }
+        .font(.footnote)
+        .foregroundStyle(.secondary)
+        .tint(.secondary)
+    }
+}
+
+/// Buttons that wrap onto the next line when they don't fit.
+struct FlowLayout: Layout {
+    var spacing: CGFloat = 8
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let rows = arrange(proposal.width ?? .infinity, subviews)
+        let width = rows.map { $0.width }.max() ?? 0
+        let height = rows.reduce(0) { $0 + $1.height } + spacing * CGFloat(max(0, rows.count - 1))
+        return CGSize(width: proposal.width ?? width, height: height)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        var y = bounds.minY
+        for row in arrange(bounds.width, subviews) {
+            var x = bounds.minX
+            for i in row.indexes {
+                let size = subviews[i].sizeThatFits(.init(width: bounds.width, height: nil))
+                subviews[i].place(at: CGPoint(x: x, y: y), proposal: .init(width: min(size.width, bounds.width), height: size.height))
+                x += min(size.width, bounds.width) + spacing
+            }
+            y += row.height + spacing
+        }
+    }
+
+    private struct Row { var indexes: [Int] = []; var width: CGFloat = 0; var height: CGFloat = 0 }
+
+    private func arrange(_ maxWidth: CGFloat, _ subviews: Subviews) -> [Row] {
+        var rows: [Row] = []
+        var row = Row()
+        for (i, view) in subviews.enumerated() {
+            let size = view.sizeThatFits(.init(width: maxWidth, height: nil))
+            let width = min(size.width, maxWidth)
+            if !row.indexes.isEmpty, row.width + spacing + width > maxWidth {
+                rows.append(row)
+                row = Row()
+            }
+            row.width += (row.indexes.isEmpty ? 0 : spacing) + width
+            row.height = max(row.height, size.height)
+            row.indexes.append(i)
+        }
+        if !row.indexes.isEmpty { rows.append(row) }
+        return rows
+    }
+}

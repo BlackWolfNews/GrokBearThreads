@@ -3,6 +3,12 @@ import Foundation
 /// What the app needs from Threadbear's Convex mirror (convex/phone.ts).
 /// Reads are live; writes are commands the owning runner picks up and
 /// applies, each returning a command id the app can watch.
+public extension Backend {
+    func send(threadId: String, text: String) async throws -> String {
+        try await send(threadId: threadId, text: text, answers: [])
+    }
+}
+
 public protocol Backend: Sendable {
     func me() async throws -> PhoneIdentity
     func runners() -> AsyncThrowingStream<[PhoneRunner], Error>
@@ -15,7 +21,8 @@ public protocol Backend: Sendable {
     func command(_ commandId: String) -> AsyncThrowingStream<CommandStatus?, Error>
     func connectionStates() -> AsyncStream<Bool>
 
-    func send(threadId: String, text: String) async throws -> String
+    /// `answers` (backend API 14): the open card's asks the message answers.
+    func send(threadId: String, text: String, answers: [AskAnswer]) async throws -> String
     func respond(threadId: String, approvalId: String, decision: ApprovalOption) async throws -> String
     /// Answers keyed by question text, several choices joined with ", ",
     /// as the Mac app sends them. `summary` goes in the transcript.
@@ -121,8 +128,13 @@ public final class ConvexBackend: Backend, @unchecked Sendable {
 
     public func connectionStates() -> AsyncStream<Bool> { transport.connectionStates() }
 
-    public func send(threadId: String, text: String) async throws -> String {
-        try await command("phone:send", ["threadId": .string(threadId), "text": .string(text)])
+    public func send(threadId: String, text: String, answers: [AskAnswer]) async throws -> String {
+        var args: [String: JSONValue] = ["threadId": .string(threadId), "text": .string(text)]
+        // Only when there are some: a backend before API 14 refuses the field.
+        if !answers.isEmpty {
+            args["answers"] = .array(answers.map { .object(["action": .string($0.action), "answer": .string($0.answer)]) })
+        }
+        return try await command("phone:send", args)
     }
 
     public func respond(threadId: String, approvalId: String, decision: ApprovalOption) async throws -> String {

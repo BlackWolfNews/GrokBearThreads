@@ -448,7 +448,11 @@ Queries:
   `threadId, runnerId, title, cwd, accountId, provider, model?, status,
   needsYou, unread, preview, createdAt, lastActivityAt, lastActivityMs,
   snoozedUntil?, snoozedUntilRestart?, archivedAt?, costUsd?, projects?:
-  [{ id, title }], working?, pendingApproval?, view`. `pendingApproval`
+  [{ id, title }], working?, pendingApproval?, asks?, asksSeq?, next?,
+  view`. `asks` and `asksSeq` (API 14) are the open card of the agent's
+  end_turn asks (`{ action, why?, reply?, options?, suggested?, links?,
+  ticked? }`, web links only), and `next` a finished turn's suggested
+  follow-ups, for the done card. `pendingApproval`
   (from step 2) is `{ approvalId, kind: "approval", name, title, options:
   ("allow" | "allowAlways" | "deny")[], inputSummary? }` or `{ approvalId,
   kind: "question", questions: Question[] }` with the protocol's
@@ -485,7 +489,7 @@ within a second or two while it's online (state `taken`, then `done` or
 `failed` with a `note`); while it's offline the command waits as
 `pending`:
 
-- `phone:send({ token, threadId, text })`
+- `phone:send({ token, threadId, text, answers? })` (`answers`, API 14: the card's asks it answers, `{ action, answer }[]`)
 - `phone:respond({ token, threadId, approvalId, decision: "allow" |
   "allowAlways" | "deny", message? })`
 - `phone:answer({ token, threadId, approvalId, answers: Record<string,

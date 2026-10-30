@@ -55,8 +55,8 @@ struct InboxView: View {
                         NavigationLink { ThreadListView(title: "Hibernating", view: .hibernating) } label: {
                             Label("Hibernating (\(model.hibernating.count))", systemImage: "moon.zzz")
                         }
-                        NavigationLink { ThreadListView(title: "Den", view: .den) } label: {
-                            Label("Den", systemImage: "archivebox")
+                        NavigationLink { ThreadListView(title: "Archived", view: .den) } label: {
+                            Label("Archived", systemImage: "archivebox")
                         }
                         NavigationLink { SettingsView() } label: { Label("Settings", systemImage: "gear") }
                         if model.isFake {
@@ -110,7 +110,7 @@ struct InboxView: View {
             .listRowInsets(ThreadRow.insets)
             .listRowSeparator(.hidden)
             .swipeActions(edge: .trailing) {
-                Button { Task { await perform(thread, .archive) } } label: { Label("Den", systemImage: "archivebox") }
+                Button { Task { await perform(thread, .archive) } } label: { Label("Archive", systemImage: "archivebox") }
                     .tint(.brown)
             }
             .swipeActions(edge: .leading) {
@@ -119,7 +119,7 @@ struct InboxView: View {
             }
             .contextMenu {
                 Button { hibernateTarget = thread } label: { Label("Hibernate…", systemImage: "moon.zzz") }
-                Button { Task { await perform(thread, .archive) } } label: { Label("Put in the Den", systemImage: "archivebox") }
+                Button { Task { await perform(thread, .archive) } } label: { Label("Archive", systemImage: "archivebox") }
                 if thread.unread || thread.needsYou {
                     Button { Task { await perform(thread, .markSeen) } } label: { Label("Mark as read", systemImage: "envelope.open") }
                 }
@@ -133,7 +133,7 @@ struct InboxView: View {
     }
 }
 
-/// Hibernating or the Den: a plain list, newest first, with a way back.
+/// Hibernating or Archived: a plain list, newest first, with a way back.
 struct ThreadListView: View {
     @Environment(AppModel.self) private var model
     var title: String
@@ -144,7 +144,7 @@ struct ThreadListView: View {
         List {
             if threads.isEmpty {
                 ContentUnavailableView {
-                    Label { Text(view == .den ? "The Den's empty" : "Nobody's hibernating") } icon: {
+                    Label { Text(view == .den ? "Nothing archived" : "Nobody's hibernating") } icon: {
                         BearView(pose: .sleep, size: 44)
                     }
                 }

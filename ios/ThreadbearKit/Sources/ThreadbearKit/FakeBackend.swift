@@ -129,9 +129,13 @@ public final class FakeBackend: Backend, @unchecked Sendable {
         }
     }
 
-    public func send(threadId: String, text: String) async throws -> String {
+    public func send(threadId: String, text: String, answers: [AskAnswer]) async throws -> String {
         mutate { s in
             s.append(threadId, role: .user, text: text, origin: "phone")
+            // The next turn closes the card, as on the runner.
+            s.threadsById[threadId]?.asks = nil
+            s.threadsById[threadId]?.asksSeq = nil
+            s.threadsById[threadId]?.next = nil
             s.threadsById[threadId]?.status = .running
             s.threadsById[threadId]?.working = "Bear with me"
             s.threadsById[threadId]?.needsYou = false
@@ -263,9 +267,15 @@ public final class FakeBackend: Backend, @unchecked Sendable {
             PhoneThread(threadId: "a3", title: "Date picker on small screens", cwd: "~/code/website",
                         needsYou: true, unread: true,
                         preview: "Fixed in 4700e57. The picker fits on the smallest iPhone now.",
-                        lastActivityAt: ago(25), costUsd: 1.84, projects: site, earliestSeq: 1),
+                        lastActivityAt: ago(25), costUsd: 1.84, projects: site, earliestSeq: 1,
+                        asks: [PhoneAsk(action: "Ship the fix to the website now?",
+                                        why: "It's on a preview while you look. I'll merge and deploy once you say so.",
+                                        options: ["Ship it", "Not yet"], suggested: 0,
+                                        links: [PhoneAskLink(title: "See the preview", url: "https://example.com")])],
+                        asksSeq: 126),
             PhoneThread(threadId: "a4", title: "Tidy up old feature flags", cwd: "~/code/api",
-                        preview: "Removed six flags nothing reads any more.", lastActivityAt: ago(190)),
+                        preview: "Removed six flags nothing reads any more.", lastActivityAt: ago(190),
+                        next: ["Remove the flag helpers too"]),
             PhoneThread(threadId: "a5", title: "Search box for the docs", cwd: "~/code/website", status: .running,
                         preview: "Adding the index.", lastActivityAt: ago(1), projects: site,
                         working: "Running npm test"),
@@ -289,7 +299,19 @@ public final class FakeBackend: Backend, @unchecked Sendable {
             ],
             "a3": [
                 PhoneMessage(seq: 120, role: .user, text: "The date picker gets cut off on small phones, can you fix it?", at: ago(50)),
-                PhoneMessage(seq: 121, role: .assistant, text: "Fixed in `4700e57`. The picker fits on the smallest iPhone now, and I checked it in the simulator at three sizes.", at: ago(25)),
+                PhoneMessage(seq: 121, role: .tool, text: "Read src/DatePicker.tsx", toolKind: "read", at: ago(48)),
+                PhoneMessage(seq: 122, role: .tool, text: "Edited src/DatePicker.tsx", toolKind: "edit", at: ago(40)),
+                PhoneMessage(seq: 123, role: .assistant, text: "That fits now. Checking the other sizes.", at: ago(38)),
+                PhoneMessage(seq: 124, role: .tool, text: "Screenshot at three phone sizes", toolKind: "command", at: ago(30)),
+                PhoneMessage(seq: 125, role: .tool, text: "threadbear: end_turn", toolKind: "mcp", at: ago(25)),
+                PhoneMessage(seq: 126, role: .assistant, text: "- Fixed in `4700e57`: the picker fits on the smallest iPhone now\n- Checked it in the simulator at three sizes", summary: true, at: ago(25)),
+            ],
+            "a4": [
+                PhoneMessage(seq: 1, role: .user, text: "Get rid of the feature flags nothing uses", at: ago(200)),
+                PhoneMessage(seq: 2, role: .tool, text: "Searched for isEnabled(", toolKind: "search", at: ago(199)),
+                PhoneMessage(seq: 3, role: .tool, text: "Edited src/flags.ts", toolKind: "edit", at: ago(195)),
+                PhoneMessage(seq: 4, role: .tool, text: "Run the tests", toolKind: "command", at: ago(192)),
+                PhoneMessage(seq: 5, role: .assistant, text: "- Removed six flags nothing reads any more\n- Tests pass", summary: true, at: ago(190)),
             ],
             "a5": [
                 PhoneMessage(seq: 1, role: .user, text: "Okay, let's go with it.", at: ago(8)),

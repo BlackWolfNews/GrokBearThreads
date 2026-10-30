@@ -22,7 +22,7 @@ import { makeFunctionReference } from 'convex/server';
 import type { Clock, TimerHandle } from './clock.ts';
 import type { Logger } from './log.ts';
 import { ErrorCode } from './protocol.ts';
-import type { Account, ApprovalDecision, ApprovalOption, PersistedEvent, Project, Question, Schedule, ThreadSummary } from './protocol.ts';
+import type { Account, ApprovalDecision, ApprovalOption, AskAnswer, OpenAsk, PersistedEvent, Project, Question, Schedule, ThreadSummary } from './protocol.ts';
 import type { Notification } from './runner.ts';
 import type { ScheduleBackend, StoredSchedule } from './schedules.ts';
 import { ThreadIndex, type RemoteThreads } from './thread-index.ts';
@@ -66,7 +66,12 @@ export type SyncConfig = {
 // lower one means its backend hasn't been deployed since this runner was:
 // said in runner.status, tb status and the log rather than stopping, since
 // the runner only adds to what it sends while the number stays the same.
-export const BACKEND_API_VERSION = 13;
+export const BACKEND_API_VERSION = 14;
+// From this one a thread's row carries its open card of asks and a finished
+// turn's next steps, and a message row can be `summary` (end_turn's
+// bullets), so the phone shows end-of-turn cards. An older backend's
+// validators would turn the write down, so it gets them without.
+export const ASKS_API_VERSION = 14;
 // From this backend version a project's picture goes up to file storage
 // (sync:iconUploadUrl, sync:setProjectIcon); an older backend gets the
 // project without it and the phone shows its symbol or first letter.
@@ -142,12 +147,20 @@ export type ThreadDoc = {
   pendingApproval?: PendingApproval;
   earliestSeq?: number;
   share?: { access: 'off' | 'link'; slug: string };
+  asks?: PhoneAsk[];
+  asksSeq?: number;
+  next?: string[];
   view: 'inbox' | 'hibernating' | 'den';
 };
 
+// An open ask as the phone sees it (convex/schema.ts): no `where`, which the
+// paragraph already says, and only web links, as a file on the Mac can't
+// be opened from the phone.
+export type PhoneAsk = { action: string; why?: string; reply?: string; options?: string[]; suggested?: number; links?: { title: string; url: string }[]; ticked?: boolean };
+
 // A text message, or one line for a tool call (role "tool", since backend
 // API 2): what the phone and the website show of a thread.
-export type MessageDoc = { threadId: string; seq: number; role: 'user' | 'assistant' | 'tool'; text: string; origin?: string; toolKind?: string; at: string; pagedAt?: number };
+export type MessageDoc = { threadId: string; seq: number; role: 'user' | 'assistant' | 'tool'; text: string; origin?: string; toolKind?: string; summary?: true; at: string; pagedAt?: number };
 
 // One call to the deployment's HTTP API; tests pass a fake.
 export type Post = (kind: 'mutation' | 'query', fn: string, args: Record<string, unknown>) => Promise<unknown>;
@@ -190,7 +203,7 @@ type Host = {
 // A thread's commands may go on to a draining runner (handover.ts's
 // phoneCommands), so they can answer later; apply() waits for each.
 export type CommandHost = {
-  send(threadId: string, text: string, images: never[], opts: { origin: 'phone' }): unknown;
+  send(threadId: string, text: string, images: never[], opts: { origin: 'phone'; answers?: AskAnswer[] }): unknown;
   respondApproval(p: { threadId: string; approvalId: string; decision: ApprovalDecision; message?: string; answers?: Record<string, string> }): unknown;
   update(p: { threadId: string; title?: string; snoozedUntil?: string | null; archived?: boolean }): unknown;
   // Seen up to the last event it has.
@@ -300,7 +313,7 @@ export function defaultRunnerName(hostname = os.hostname()): string {
   return hostname.replace(/\.(local|localdomain|lan|home)$/i, '') || 'runner';
 }
 
-export function toThreadDoc(t: ThreadSummary, runnerId: string, now: number, pending?: PendingApproval, earliestSeq?: number): ThreadDoc {
+export function toThreadDoc(t: ThreadSummary, runnerId: string, now: number, pending?: PendingApproval, earliestSeq?: number, next?: string[]): ThreadDoc {
   const doc: ThreadDoc = {
     threadId: t.id,
     runnerId,
@@ -332,16 +345,48 @@ export function toThreadDoc(t: ThreadSummary, runnerId: string, now: number, pen
   if (earliestSeq !== undefined) doc.earliestSeq = earliestSeq;
   // "off" goes up too, so Mike's own page for the link can offer Share again.
   if (t.share) doc.share = { access: t.share.access, slug: t.share.slug };
+  if (t.asks?.length && t.asksSeq !== undefined) {
+    doc.asks = t.asks.map(toPhoneAsk);
+    doc.asksSeq = t.asksSeq;
+  }
+  if (next?.length) doc.next = next;
   return doc;
+}
+
+export function toPhoneAsk(a: OpenAsk): PhoneAsk {
+  const out: PhoneAsk = { action: a.action };
+  if (a.why) out.why = a.why;
+  if (a.reply) out.reply = a.reply;
+  if (a.options?.length) {
+    out.options = a.options;
+    if (a.suggested !== undefined) out.suggested = a.suggested;
+  }
+  const links = a.links?.filter((l) => /^https?:\/\//i.test(l.url));
+  if (links?.length) out.links = links.map((l) => ({ title: l.title, url: l.url }));
+  if (a.ticked) out.ticked = true;
+  return out;
+}
+
+// A phone send's `answers`, kept only when well formed.
+function phoneAnswers(raw: unknown): AskAnswer[] | undefined {
+  if (!Array.isArray(raw)) return undefined;
+  const out = raw.filter((x): x is AskAnswer => !!x && typeof x.action === 'string' && typeof x.answer === 'string').map((x) => ({ action: x.action, answer: x.answer }));
+  return out.length ? out : undefined;
 }
 
 // The row as a backend of version v takes it: without the fields its
 // validator doesn't know yet.
 function forBackend(d: ThreadDoc, v: number): ThreadDoc {
-  if ((v >= SHARE_API_VERSION || !d.share) && (v >= WOKE_API_VERSION || !d.woke)) return d;
+  const asks = d.asks !== undefined || d.asksSeq !== undefined || d.next !== undefined;
+  if ((v >= SHARE_API_VERSION || !d.share) && (v >= WOKE_API_VERSION || !d.woke) && (v >= ASKS_API_VERSION || !asks)) return d;
   const out = { ...d };
   if (v < SHARE_API_VERSION) delete out.share;
   if (v < WOKE_API_VERSION) delete out.woke;
+  if (v < ASKS_API_VERSION) {
+    delete out.asks;
+    delete out.asksSeq;
+    delete out.next;
+  }
   return out;
 }
 
@@ -353,6 +398,7 @@ export function toMessageDoc(threadId: string, e: PersistedEvent): MessageDoc | 
   const text = e.text.length > MESSAGE_CHARS ? e.text.slice(0, MESSAGE_CHARS) + '\n\n[cut: the rest is on the Mac]' : e.text;
   const doc: MessageDoc = { threadId, seq: e.seq, role: e.type === 'user.message' ? 'user' : 'assistant', text, at: e.ts };
   if (e.type === 'user.message' && e.origin) doc.origin = e.origin;
+  if (e.type === 'assistant.text' && e.summary) doc.summary = true;
   return doc;
 }
 
@@ -503,6 +549,7 @@ export class ConvexSync {
   private messages: MessageDoc[] = [];
   private pending = new Map<string, PendingApproval>(); // threadId -> what it waits on
   private earliest = new Map<string, number | null>(); // threadId -> seq of its first text message (null: none yet)
+  private nexts = new Map<string, { lastSeq: number; next?: string[] }>(); // threadId -> its done card's next steps, as of lastSeq
   private lists: { projects?: Project[]; schedules?: Schedule[]; accounts?: Account[] } = {};
   private dirtyLists = new Set<ListName>();
   // Project pictures (ICONS_API_VERSION): what the mirror has, projectId ->
@@ -621,7 +668,7 @@ export class ConvexSync {
     // Shared threads held back their share from an older backend (or
     // before the first heartbeat said which): they go again now.
     if (v >= SHARE_API_VERSION && this.running) {
-      for (const t of this.deps.runner.list(ALL)) if (t.share || (t.woke && v >= WOKE_API_VERSION)) this.mark(t);
+      for (const t of this.deps.runner.list(ALL)) if (t.share || (t.woke && v >= WOKE_API_VERSION) || (t.asks?.length && v >= ASKS_API_VERSION)) this.mark(t);
       this.scheduleFlush();
     }
     // The pictures wait for the first heartbeat to say the backend takes them.
@@ -725,6 +772,7 @@ export class ConvexSync {
         this.sent.delete(id);
         this.pending.delete(id);
         this.earliest.delete(id);
+        this.nexts.delete(id);
         this.removed.add(id);
         this.scheduleFlush();
         break;
@@ -795,7 +843,7 @@ export class ConvexSync {
     // way (the turn ended, the runner restarted); the row mustn't keep it.
     if (t.status === 'idle' || t.status === 'error' || t.status === 'stopped') this.pending.delete(t.id);
     this.noteShared(t);
-    const doc = toThreadDoc(t, this.runnerId, this.deps.clock.now(), this.pending.get(t.id), this.earliestSeq(t));
+    const doc = toThreadDoc(t, this.runnerId, this.deps.clock.now(), this.pending.get(t.id), this.earliestSeq(t), this.nextSteps(t));
     if (this.sent.get(t.id) === JSON.stringify(doc)) {
       this.dirty.delete(t.id);
       return;
@@ -820,6 +868,32 @@ export class ConvexSync {
       this.imagesUp.delete(t.id);
       this.pendingImages = this.pendingImages.filter((i) => i.threadId !== t.id);
     }
+  }
+
+  // A finished turn's suggested follow-ups (end_turn's `next`), for the
+  // phone's done card: only while the thread is idle on a turn that said
+  // it needs nothing, read from the end of its log once per lastSeq.
+  private nextSteps(t: ThreadSummary): string[] | undefined {
+    if (t.status !== 'idle' || t.needs !== 'nothing' || t.archivedAt) return undefined;
+    const known = this.nexts.get(t.id);
+    if (known && known.lastSeq === t.lastSeq) return known.next;
+    let next: string[] | undefined;
+    try {
+      const { events } = this.deps.runner.events(t.id, { beforeSeq: t.lastSeq + 1, limit: 20 });
+      for (let i = events.length - 1; i >= 0; i--) {
+        const e = events[i]!;
+        if (e.type === 'turn.completed') {
+          if (e.next?.length) next = e.next;
+          break;
+        }
+        // A message after the turn means it's no longer the last word.
+        if (e.type === 'user.message' || e.type === 'turn.started') break;
+      }
+    } catch {
+      return undefined;
+    }
+    this.nexts.set(t.id, { lastSeq: t.lastSeq, next });
+    return next;
   }
 
   // The seq of the thread's first text message, read once from the start
@@ -1039,7 +1113,10 @@ export class ConvexSync {
   private async appendMessages(all: MessageDoc[]): Promise<void> {
     // A backend from before API 2 can't take tool rows; it's deployed before
     // the runner, so this only matters when that deploy was skipped.
-    const messages = this.backendApiVersion !== undefined && this.backendApiVersion < 2 ? all.filter((m) => m.role !== 'tool') : all;
+    const v = this.backendApiVersion;
+    let messages = v !== undefined && v < 2 ? all.filter((m) => m.role !== 'tool') : all;
+    // Before API 14 the validator has no `summary`; the bullets go as text.
+    if (v === undefined || v < ASKS_API_VERSION) messages = messages.map((m) => (m.summary ? (({ summary, ...rest }) => rest)(m) : m));
     for (let i = 0; i < messages.length; i += MESSAGE_BATCH) {
       const batch = messages.slice(i, i + MESSAGE_BATCH);
       await this.post('mutation', 'sync:appendMessages', { key: this.deps.key, messages: batch });
@@ -1328,7 +1405,7 @@ export class ConvexSync {
     switch (c.kind) {
       case 'send': {
         if (typeof a.text !== 'string' || !a.text.trim()) throw new Error('nothing to send');
-        await host.send(needThread(), a.text, [], { origin: 'phone' });
+        await host.send(needThread(), a.text, [], { origin: 'phone', ...(phoneAnswers(a.answers) ? { answers: phoneAnswers(a.answers) } : {}) });
         return undefined;
       }
       case 'respond': {

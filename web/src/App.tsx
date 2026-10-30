@@ -102,7 +102,7 @@ function Shell({ token, route }: { token: string; route: ReturnType<typeof useRo
         <nav className="tabs">
           {(['inbox', 'hibernating', 'den'] as const).map((v) => (
             <button key={v} className={v === view ? 'on' : ''} onClick={() => setView(v)}>
-              {v === 'inbox' ? 'Inbox' : v === 'hibernating' ? 'Hibernating' : 'Den'}
+              {v === 'inbox' ? 'Inbox' : v === 'hibernating' ? 'Hibernating' : 'Archived'}
             </button>
           ))}
         </nav>

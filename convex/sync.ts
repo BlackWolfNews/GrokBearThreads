@@ -309,6 +309,7 @@ const messageDoc = v.object({
   text: v.string(),
   origin: v.optional(v.string()),
   toolKind: v.optional(v.string()),
+  summary: v.optional(v.boolean()), // API 14
   at: v.string(),
   pagedAt: v.optional(v.number()), // an old phone asked for it (loadEarlier): phone:thread shows it for a day
 });

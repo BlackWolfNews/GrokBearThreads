@@ -211,8 +211,7 @@ quick flick works too). However it's archived (⌘E, a button, or an agent
 or your phone doing it), its row slides off the same way. The Archived
 section at the foot of the list has them, most recently archived first,
 with the older ones behind Show more (the search at the top finds any of
-them). Unarchive, or the same swipe there, puts one back. The iPhone app
-and the website call the archive the Den.
+them). Unarchive, or the same swipe there, puts one back.
 
 Hibernating or archiving a thread that's partway through a turn stops
 that turn. From the row's hover buttons, Threadbear asks first.
@@ -405,7 +404,11 @@ the thread runs on.
 
 The Threadbear iPhone app is for when you're away from the Mac: ask a
 thread a question, steer it, answer the ones that need you, start new
-ones, and see how they're all getting on. It can send notifications too,
+ones, and see how they're all getting on. A thread's finished turns
+fold into one Worked line above the reply, as on the Mac; tap it to see
+the work. What a thread needs from you shows under its reply with the
+likely answers as buttons (type in the box to say something else), and
+a thread that's done offers its suggested next steps and Archive. It can send notifications too,
 though you don't need them for any of that. It pairs with your Mac by scanning a
 QR code: on the Mac, Settings (⌘,) > Phone & browser > Show the code, then
 scan it with the iPhone app. Keep the code to yourself: anyone who scans it

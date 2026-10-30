@@ -50,4 +50,8 @@
 // 13: thread rows can carry `woke` ({ at, since? }): back from hibernating
 //    by itself and not opened yet, for the phone's "Woke up". A runner
 //    sends it only to a backend of 13 or later.
-export const API_VERSION = 13;
+// 14: the phone sees end-of-turn cards: thread rows carry the open card's
+//    `asks` and `asksSeq` and a finished turn's `next`, a message row can be
+//    `summary` (end_turn's bullets, the turn's reply), and phone:send takes
+//    `answers`. A runner sends them only to a backend of 14 or later.
+export const API_VERSION = 14;

@@ -21,6 +21,10 @@ struct ThreadView: View {
     /// From API 2: the newest `limit` messages and tool lines, from Convex.
     @State private var page: MessagePage?
     @State private var limit = ThreadView.firstPage
+    /// Answers picked on the open card of asks (ask index to choice), until
+    /// they're sent; the composer sends them along with what's typed.
+    @State private var picks: [Int: Int] = [:]
+    @State private var pickedFor: Double?
     static let firstPage = 80
     static let morePerPage = 200
 
@@ -63,7 +67,7 @@ struct ThreadView: View {
         // From API 2 the page from phone:messages (tool lines included);
         // until it arrives, and on an older backend, phone:thread's messages.
         let messages = page?.messages ?? detail.messages
-        let items = ThreadItem.group(messages)
+        let items = Turns.fold(messages, busy: thread.isBusy)
         let paged = model.hasMessagePages && page != nil
         let canLoadMore = paged ? page?.hasMore == true : thread.hasEarlier(than: detail.messages.first?.seq)
         // Paged: a bigger page has been asked for and hasn't arrived yet.
@@ -86,6 +90,7 @@ struct ThreadView: View {
                         switch item {
                         case let .message(message): MessageView(message: message)
                         case let .tools(run): ToolRunView(items: run)
+                        case let .worked(worked): WorkedView(worked: worked)
                         }
                     }
                     if let pending = thread.pendingApproval {
@@ -93,10 +98,25 @@ struct ThreadView: View {
                     } else if thread.isBusy || thread.working != nil {
                         WorkingLine(text: thread.working)
                             .id("working:\(thread.status == .running)")
+                    } else if let asks = thread.asks, !asks.isEmpty, sent == nil {
+                        AsksCard(asks: asks, picks: $picks, busy: sent != nil) {
+                            Task { _ = await send("", to: thread) }
+                        }
+                        .onChange(of: thread.asksSeq, initial: true) {
+                            // A new card starts with nothing picked.
+                            if pickedFor != thread.asksSeq { picks = [:]; pickedFor = thread.asksSeq }
+                        }
                     } else if thread.status == .error {
                         Label("The last turn failed. Send a message to try again.", systemImage: "exclamationmark.triangle")
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
+                    } else if isDone(thread, messages: messages) {
+                        // A follow-up sends itself; anything typed stays in the box.
+                        DoneCard(next: thread.next ?? [], busy: sent != nil) { step in
+                            Task { _ = await send(step, to: thread, withPicks: false) }
+                        } archive: {
+                            change(.archive)
+                        }
                     }
                     if let note = sentNote {
                         Text(note).font(.footnote).foregroundStyle(.secondary).frame(maxWidth: .infinity, alignment: .trailing)
@@ -149,7 +169,7 @@ struct ThreadView: View {
                     } else {
                         Button { hibernateTarget = thread } label: { Label("Hibernate…", systemImage: "moon.zzz") }
                     }
-                    Button { change(.archive) } label: { Label("Put in the Den", systemImage: "archivebox") }
+                    Button { change(.archive) } label: { Label("Archive", systemImage: "archivebox") }
                 }
                 Section {
                     Label(thread.cwd, systemImage: "folder")
@@ -216,11 +236,24 @@ struct ThreadView: View {
         } catch {}
     }
 
-    private func send(_ text: String, to thread: PhoneThread) async -> Bool {
+    /// A finished turn that needs nothing from Mike: the done card's place.
+    private func isDone(_ thread: PhoneThread, messages: [PhoneMessage]) -> Bool {
+        thread.status == .idle && !thread.needsYou && thread.archivedAt == nil && thread.working == nil
+            && messages.last?.role == .assistant && sent == nil
+    }
+
+    /// Sends what's typed, with any answers picked on the card of asks
+    /// before it (the Mac's one message: each picked ask, then the rest).
+    private func send(_ text: String, to thread: PhoneThread, withPicks: Bool = true) async -> Bool {
         guard let backend = model.backend else { return false }
+        let asks = thread.asks ?? []
+        let answers = withPicks ? AskAnswer.answers(asks: asks, picks: picks).map(\.answer) : []
+        let message = answers.isEmpty ? text : AskAnswer.message(asks: asks, picks: picks, extra: text)
+        guard !message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return false }
         do {
-            let id = try await backend.send(threadId: thread.threadId, text: text)
+            let id = try await backend.send(threadId: thread.threadId, text: message, answers: answers)
             sent = (id, nil)
+            picks = [:]
             return true
         } catch {
             model.report(error)

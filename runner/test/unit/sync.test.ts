@@ -1157,3 +1157,47 @@ test('the heartbeat carries the runner icon once the backend takes it', async ()
   assert.equal(beats().at(-1), 'macmini');
   await f.sync.stop();
 });
+
+test('end-of-turn cards: the open asks (web links only) and next steps go on the row, the bullets are marked', () => {
+  const now = Date.parse('2026-10-30T10:00:00.000Z');
+  const base = {
+    id: 't1', title: 'T', cwd: '/w', accountId: 'claude-3', provider: 'claude' as const, permissionMode: 'full' as const, status: 'idle' as const, live: false, needsYou: true,
+    createdAt: '2026-10-30T09:00:00.000Z', updatedAt: '2026-10-30T09:30:00.000Z', lastActivityAt: '2026-10-30T09:30:00.000Z', preview: 'p', lastSeq: 9, lastSeenSeq: 9,
+  };
+  const doc = toThreadDoc({
+    ...base,
+    needs: 'you',
+    asksSeq: 8,
+    asks: [
+      { action: 'Merge it?', why: 'Tests pass.', where: 'GitHub', options: ['Merge', 'Not yet'], suggested: 0, links: [{ title: 'Open PR', url: 'https://github.com/x/y/pull/1' }, { title: 'See shot', url: '/Users/m/shot.png' }] },
+      { action: 'Add the key.', why: 'Settings.', reply: 'done', ticked: true, links: [{ title: 'File', url: '~/notes.md' }] },
+    ],
+  }, 'r', now);
+  assert.equal(doc.asksSeq, 8);
+  assert.deepEqual(doc.asks, [
+    { action: 'Merge it?', why: 'Tests pass.', options: ['Merge', 'Not yet'], suggested: 0, links: [{ title: 'Open PR', url: 'https://github.com/x/y/pull/1' }] },
+    { action: 'Add the key.', why: 'Settings.', reply: 'done', ticked: true },
+  ]);
+  const done = toThreadDoc({ ...base, needsYou: false, needs: 'nothing' }, 'r', now, undefined, undefined, ['Ship it']);
+  assert.deepEqual(done.next, ['Ship it']);
+  assert.ok(!('asks' in done) && !('asksSeq' in done));
+  const ts = '2026-10-30T09:30:00.000Z';
+  assert.equal(toMessageDoc('t', { seq: 5, ts, threadId: 't', type: 'assistant.text', itemId: 'i.summary', text: '- did it', summary: true } as never)?.summary, true);
+  assert.ok(!('summary' in toMessageDoc('t', { seq: 4, ts, threadId: 't', type: 'assistant.text', itemId: 'i', text: 'hi' } as never)!));
+});
+
+test('commands: a send from the phone keeps the asks it answers', async () => {
+  const { h, sync, push } = setupFull();
+  sync.start();
+  await sync.flushNow();
+  const t = h.runner.create({ text: 'hello', cwd: h.cfg.defaults.cwd, accountId: 'claude-3' }).thread;
+  const s = session(h, t.id);
+  s.init();
+  s.result('completed');
+  await tick();
+  push([{ commandId: 'a1', kind: 'send', threadId: t.id, args: { text: '1. Merge it?\nMerge', answers: [{ action: 'Merge it?', answer: 'Merge' }, { bad: true }] }, createdAt: 1 }]);
+  await tick(10);
+  const ev = h.events(t.id).find((e: { type: string; text?: string }) => e.type === 'user.message' && e.text?.startsWith('1. Merge')) as { answers?: unknown; origin?: string };
+  assert.equal(ev?.origin, 'phone');
+  assert.deepEqual(ev?.answers, [{ action: 'Merge it?', answer: 'Merge' }]);
+});
