@@ -73,6 +73,12 @@ final class AppModel {
     /// What the runner said about a thread archived elsewhere, held back
     /// while its row slides off, so the row's still there to slide.
     @ObservationIgnored private var heldWhileSliding: [String: ThreadSummary] = [:]
+    /// Archived threads whose panel is still dropping into the Archived
+    /// heading (`ArchiveFlight`). The heading leaves them out of its count
+    /// and rows until they land, so the count rolls on as one arrives.
+    private(set) var flyingToArchive: Set<String> = []
+    /// How many of those have landed, for the heading's box to bounce.
+    private(set) var archiveLandings = 0
     var threads: [String: ThreadSummary] = [:] {
         didSet {
             // A summary from another runner never says which runner it's on
@@ -1401,7 +1407,10 @@ final class AppModel {
     func archive(_ threadId: String? = nil, slid: Bool = false) {
         guard let threadId = threadId ?? selection else { return }
         let next = neighbour(of: threadId)
-        if selection == threadId { select(next) }
+        if selection == threadId {
+            flyToArchive(threadId)
+            select(next)
+        }
         if slid { return update(threadId, ThreadUpdate(archived: true)) }
         guard !slidingOff.contains(threadId) else { return }
         slideOff(threadId)
@@ -1417,6 +1426,19 @@ final class AppModel {
                 show(error)
             }
         }
+    }
+
+    /// The open thread's panel drops into the Archived heading while the
+    /// next thread fades in under it (`ArchiveFlight`). Only when it's the
+    /// transcript being shown: not a sub-agent's, a project's page or a
+    /// thread open in a panel of its own.
+    private func flyToArchive(_ threadId: String) {
+        guard transcript.session?.threadId == threadId, transcript.session?.subagentId == nil else { return }
+        let started = ArchiveFlight.launch(from: transcript.scrollView) { [weak self] in
+            self?.flyingToArchive.remove(threadId)
+            self?.archiveLandings &+= 1
+        }
+        if started { flyingToArchive.insert(threadId) }
     }
 
     /// As long as a swiped row takes to leave (`RowSwipeController`).

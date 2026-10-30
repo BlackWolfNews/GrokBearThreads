@@ -58,9 +58,13 @@ private struct InboxList: View {
         let query = app.searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
         let searching = !query.isEmpty
         let sections = app.sections.matching(query)
+        // A thread whose panel is still dropping into the Archived heading
+        // isn't counted or listed there until it lands (`ArchiveFlight`).
+        let flying = app.flyingToArchive
+        let archived = flying.isEmpty ? sections.archived : sections.archived.filter { !flying.contains($0.id) }
         // The Archived section shows the most recent few, or every match
         // while searching.
-        let archive = ArchiveRows.shown(sections.archived, limit: archiveLimit, searching: searching, selection: app.selection)
+        let archive = ArchiveRows.shown(archived, limit: archiveLimit, searching: searching, selection: app.selection)
         // Each section's rows as drawn.
         let drawn: (InboxSection) -> [ThreadSummary] = { $0 == .archived ? archive.rows : sections[$0] }
         // A folded section's rows aren't drawn, so the arrow keys skip
@@ -95,7 +99,7 @@ private struct InboxList: View {
                     }
                     ForEach(InboxSection.allCases, id: \.self) { section in
                         if section == .archived {
-                            ThreadSection(section: section, threads: archive.rows, total: sections.archived.count, more: archive.more,
+                            ThreadSection(section: section, threads: archive.rows, total: archived.count, more: archive.more,
                                           searching: searching, showMore: { archiveLimit += ArchiveRows.step }, select: select)
                         } else {
                             ThreadSection(section: section, threads: sections[section], searching: searching, select: select)
@@ -109,6 +113,9 @@ private struct InboxList: View {
                     }
                 }
             }
+            // An archived panel falls off the bottom of this when the
+            // Archived heading is out of sight (`ArchiveFlight`).
+            .background(FlightMarker(kind: .inboxList))
         }
     }
 }
@@ -146,6 +153,7 @@ private struct ThreadSection: View {
             }) {
                 if section == .inbox { InboxOrderMenu() }
             }
+            .environment(\.archiveLandings, section == .archived ? app.archiveLandings : nil)
             if !collapsed {
                 ForEach(threads.map { SectionRow(section: section.title, thread: $0) }) { row in
                     ThreadRowView(thread: row.thread, mode: RowMode(section), section: section) { select(row.thread.id) }
@@ -290,6 +298,7 @@ struct SectionHeading<Accessory: View>: View {
     /// on them doesn't fold the section: the Inbox's sort menu.
     @ViewBuilder var accessory: () -> Accessory
     @State private var hovering = false
+    @Environment(\.archiveLandings) private var archiveLandings
 
     struct Fold {
         var collapsed: Bool
@@ -329,6 +338,11 @@ struct SectionHeading<Accessory: View>: View {
             } else if let icon {
                 Image(systemName: icon)
                     .font(.system(size: zoomed(11), weight: .medium))
+                    // The Archived heading's box: where an archived
+                    // thread's panel lands, bouncing as it does
+                    // (`ArchiveFlight`).
+                    .symbolEffect(.bounce, value: archiveLandings ?? 0)
+                    .background { if archiveLandings != nil { FlightMarker(kind: .archiveBox) } }
                     .frame(width: zoomed(14))
             }
             Text(title)

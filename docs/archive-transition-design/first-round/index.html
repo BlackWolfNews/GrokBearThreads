@@ -1,0 +1,262 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Archive transition</title>
+<!-- Mockups of the thread panel animating when the open thread is archived
+     (Mike asked 30 Oct): the sidebar row already slides off, the panel just
+     flicks to the next thread. Open as is to play them (tabs, ⌘E or the
+     button, slow-mo to watch closely). ?v=B&t=0.4&bare=1 freezes variant B
+     at 40% of the way through, for filmstrip.html. -->
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#141414;font:13px/1.4 -apple-system,"SF Pro Text",system-ui;color:#e6e4e1;-webkit-font-smoothing:antialiased}
+.page{padding:24px;display:flex;flex-direction:column;align-items:center;gap:14px}
+body.bare .page{padding:0}
+body.bare .bar,body.bare .about{display:none}
+.bar{display:flex;gap:8px;align-items:center;width:1000px}
+.tab,.go{background:#2a2a2a;border:1px solid #3a3a3a;color:#cfcdc9;border-radius:8px;padding:6px 12px;font:inherit;cursor:pointer}
+.tab.on{background:#3d3d3d;color:#fff;border-color:#5a5a5a}
+.go{background:#3478f6;border-color:#3478f6;color:#fff;margin-left:auto}
+.bar label{color:#9a9894;display:flex;gap:5px;align-items:center;margin-left:10px}
+.about{width:1000px;color:#a3a09b;min-height:20px}
+
+.win{width:1000px;height:620px;background:#1c1c1c;border:1px solid #333;border-radius:12px;display:flex;overflow:hidden;position:relative}
+body.bare .win{border-radius:0;border:0}
+.side{width:300px;background:#232323;display:flex;border-right:1px solid #2c2c2c;position:relative;z-index:1}
+.lights{position:absolute;top:14px;left:14px;display:flex;gap:7px}
+.lights i{width:11px;height:11px;border-radius:50%;background:#3d3d3d}
+.act{width:46px;display:flex;flex-direction:column;align-items:center;padding-top:46px;gap:10px;color:#8f8d89}
+.act .i{width:32px;height:32px;display:grid;place-items:center;border-radius:8px}
+.act .i.on{background:#343434;color:#ddd}
+.act svg{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round}
+.list{flex:1;padding:42px 10px 0 2px;overflow:hidden}
+.newt{padding:6px 10px 2px;color:#ddd;display:flex;gap:8px;align-items:center}
+.newt svg{width:15px;height:15px;fill:none;stroke:currentColor;stroke-width:1.5}
+.sec{display:flex;gap:6px;align-items:center;color:#a5a29d;padding:12px 10px 6px;font-weight:500}
+.rw{height:56px;overflow:hidden}
+.row{display:flex;gap:10px;align-items:center;padding:0 8px;border-radius:8px;height:52px}
+.row .av{width:28px;height:28px;border-radius:7px;background:#2f2f2f;display:grid;place-items:center;color:#9a9894;font-weight:600;font-size:12px;flex:none}
+.row .tx{flex:1;min-width:0}
+.row .t{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.row .s{color:#8f8d89;display:flex;justify-content:space-between;font-size:12px}
+.row .needs{color:#e8a33d}
+.row.sel{background:#363636}
+
+.main{flex:1;position:relative;overflow:hidden;background:#1c1c1c}
+.main.fly{overflow:visible;z-index:2}
+.panel{position:absolute;inset:0;display:flex;flex-direction:column;background:#1c1c1c}
+.mv{flex:1;display:flex;flex-direction:column;min-height:0}
+.head{height:44px;display:flex;align-items:center;padding:0 22px;gap:6px;font-size:14px;flex:none}
+.head .crumb{color:#8f8d89}
+.head b{font-weight:600}
+.content{flex:1;padding:14px 30px;display:flex;flex-direction:column;gap:12px}
+.user{align-self:flex-end;max-width:68%;background:#2b3240;border-radius:14px;padding:10px 14px;font-size:13.5px}
+.work{color:#8f8d89}
+.reply{font-size:13.5px}
+.meta{color:#6f6d69;font-size:12px}
+.card{border:1px solid #3a3a3a;border-radius:12px;padding:10px 14px;display:flex;align-items:center;gap:10px;background:#212121}
+.card .sum{flex:1;color:#cfcdc9}
+.btn{background:#383838;border:1px solid #474747;border-radius:7px;padding:3px 10px;font-size:12.5px}
+.btn.press{background:#4a4a4a}
+.composer{margin:0 30px 18px;height:80px;background:#262626;border:1px solid #353535;border-radius:16px;padding:12px 16px;color:#6f6d69;flex:none}
+/* Variant C: the leaving panel is a card with a shadow. */
+.panel.card-out{border-radius:12px;box-shadow:-10px 0 40px rgba(0,0,0,.55),0 0 0 1px #333}
+</style></head>
+<body>
+<div class="page">
+  <div class="bar">
+    <button class="tab" data-v="now">Now</button>
+    <button class="tab" data-v="A">A · Lift</button>
+    <button class="tab" data-v="B">B · Slide</button>
+    <button class="tab" data-v="C">C · Card underneath</button>
+    <button class="tab" data-v="D">D · Into the archive</button>
+    <button class="tab" data-v="E">E · Blur swap</button>
+    <label><input type="checkbox" id="slow"> Slow-mo</label>
+    <label><input type="checkbox" id="loop" checked> Loop</label>
+    <button class="go" id="go">Archive ⌘E</button>
+  </div>
+  <div class="about" id="about"></div>
+  <div class="win" id="win"></div>
+</div>
+
+<template id="tpl">
+  <div class="lights"><i></i><i></i><i></i></div>
+  <div class="side">
+    <div class="act">
+      <div class="i on"><svg viewBox="0 0 20 20"><path d="M3 4h11v8H8l-3 3v-3H3z"/><path d="M14 7h3v7h-2v2.5L12.5 14H8"/></svg></div>
+      <div class="i"><svg viewBox="0 0 20 20"><circle cx="10" cy="11" r="6"/><circle cx="5" cy="5" r="2"/><circle cx="15" cy="5" r="2"/></svg></div>
+      <div class="i" id="archIcon"><svg viewBox="0 0 20 20"><rect x="3" y="4" width="14" height="4" rx="1"/><path d="M4 8v8h12V8M8 11h4"/></svg></div>
+      <div class="i"><svg viewBox="0 0 20 20"><circle cx="10" cy="10" r="7"/><path d="M10 6v4l3 2"/></svg></div>
+      <div class="i"><svg viewBox="0 0 20 20"><path d="M10 3l7 4-7 4-7-4zM3 10.5l7 4 7-4M3 14l7 4 7-4"/></svg></div>
+    </div>
+    <div class="list">
+      <div class="newt"><svg viewBox="0 0 16 16"><path d="M2 3h7M2 3v11h11V7"/><path d="M12 2l2 2-6 6H6V8z"/></svg>New thread</div>
+      <div class="sec">Inbox</div>
+      <div class="rw" id="rw1"><div class="row sel" id="row1"><div class="av">W</div><div class="tx"><div class="t">Fix the login redirect loop</div><div class="s"><span>Walkies</span><span>2m</span></div></div></div></div>
+      <div class="rw"><div class="row" id="row2"><div class="av">P</div><div class="tx"><div class="t">Make uploads resume after a crash</div><div class="s"><span>Photo sync</span><span class="needs">Needs you</span></div></div></div></div>
+      <div class="rw"><div class="row"><div class="av">T</div><div class="tx"><div class="t">Small-model settings page</div><div class="s"><span>Threadbear</span><span>14m</span></div></div></div></div>
+      <div class="rw"><div class="row"><div class="av">m</div><div class="tx"><div class="t">Tidy the imports in the uploader</div><div class="s"><span>misc</span><span>1h</span></div></div></div></div>
+      <div class="rw"><div class="row"><div class="av">T</div><div class="tx"><div class="t">Rename the Settings tabs</div><div class="s"><span>Threadbear</span><span>16h</span></div></div></div></div>
+      <div class="rw"><div class="row"><div class="av">W</div><div class="tx"><div class="t">Add dark mode to the dashboard</div><div class="s"><span>Walkies</span><span>Sun</span></div></div></div></div>
+      <div class="rw"><div class="row"><div class="av">m</div><div class="tx"><div class="t">Compare SQLite and plain files</div><div class="s"><span>misc</span><span>Sat</span></div></div></div></div>
+    </div>
+  </div>
+  <div class="main" id="main">
+    <div class="panel" id="pNew">
+      <div class="mv">
+        <div class="head"><span class="crumb">photo-sync /</span><b>Make uploads resume after a crash</b></div>
+        <div class="content">
+          <div class="user">Uploads start again from zero when the app crashes. Can they pick up where they left off?</div>
+          <div class="work">Read 6 files, ran 2 commands ›</div>
+          <div class="reply">They can. Each chunk's offset is already saved, it's just never read back on launch. I've written the fix on a branch; it needs one thing from you first.</div>
+          <div class="meta">1m 12s · $0.21</div>
+          <div class="card" style="border-color:#6b5223"><span class="sum">Should a resumed upload keep its old place in the queue?</span><span class="btn">Yes</span><span class="btn">Back of the queue</span></div>
+        </div>
+      </div>
+      <div class="composer">Message</div>
+    </div>
+    <div class="panel" id="pOld">
+      <div class="mv">
+        <div class="head"><span class="crumb">walkies /</span><b>Fix the login redirect loop</b></div>
+        <div class="content">
+          <div class="user">Signing in on the web bounces between /login and /home forever. Fix it?</div>
+          <div class="work">Read 4 files, edited 1, ran tests ›</div>
+          <div class="reply">The auth check ran before the session cookie was read, so every page thought you were signed out. It waits for the session now, and the tests pass.</div>
+          <div class="meta">48s · $0.09</div>
+          <div class="card"><span class="sum">Fixed and landed on main.</span><span class="btn" id="archBtn">Archive</span></div>
+        </div>
+      </div>
+      <div class="composer">Message</div>
+    </div>
+  </div>
+</template>
+
+<script>
+const about = {
+  now: "What happens today: the row slides off and the panel just swaps.",
+  A: "The finished thread lifts and fades away, the next one rises in under it. Quiet, closest to the sidebar's own row fades.",
+  B: "Panel slides left with the row, the next thread slides in from the right. Reads as one motion across the window.",
+  C: "The finished thread is a card that slides off to the left, showing the next thread already sitting underneath, which settles forward.",
+  D: "The finished thread shrinks into the Archive icon in the activity bar, which gives a little bump. Most playful; also shows where it went.",
+  E: "A soft blur swap, like the sidebar's status words. Subtlest; barely more than a crossfade.",
+};
+
+const easeIn = "cubic-bezier(.4,0,1,1)";
+const easeOut = "cubic-bezier(0,0,.2,1)";
+const snappy = "cubic-bezier(.2,.9,.25,1)";
+
+let variant = new URLSearchParams(location.search).get("v") || "A";
+const frozenAt = new URLSearchParams(location.search).get("t");
+if (new URLSearchParams(location.search).has("bare")) document.body.classList.add("bare");
+
+let anims = [], timer;
+const $ = (id) => document.getElementById(id);
+const scale = () => ($("slow").checked ? 4 : 1);
+
+function an(el, frames, dur, { delay = 0, easing = easeOut } = {}) {
+  const a = el.animate(frames, { duration: dur * scale(), delay: delay * scale(), easing, fill: "both" });
+  anims.push(a);
+  return a;
+}
+
+function reset() {
+  anims.forEach((a) => a.cancel());
+  anims = [];
+  $("win").innerHTML = $("tpl").innerHTML;
+}
+
+// What the sidebar already does: the row slides off left, the rows below
+// close up and the selection lands on the next one.
+function sidebar() {
+  an($("archBtn"), [{ background: "#5a5a5a" }, { background: "#383838" }], 120);
+  an($("row1"), [{ transform: "translateX(0)", opacity: 1 }, { transform: "translateX(-105%)", opacity: 0 }], 160, { easing: easeIn });
+  an($("rw1"), [{ height: "56px" }, { height: "0px" }], 320, { delay: 160, easing: snappy });
+  an($("row2"), [{ background: "rgba(54,54,54,0)" }, { background: "#363636" }], 200, { delay: 120 });
+}
+
+const old = () => $("pOld").querySelector(".mv");
+const neu = () => $("pNew").querySelector(".mv");
+
+const variants = {
+  now() {
+    an($("pOld"), [{ opacity: 1 }, { opacity: 0 }], 1, { delay: 160 });
+  },
+  A() {
+    $("pOld").querySelector(".composer").style.visibility = "hidden";
+    $("pOld").style.background = "transparent";
+    an(old(), [{ transform: "translateY(0)", opacity: 1 }, { transform: "translateY(-16px)", opacity: 0 }], 170, { easing: easeIn });
+    an(neu(), [{ transform: "translateY(12px)", opacity: 0 }, { transform: "translateY(0)", opacity: 1 }], 280, { delay: 110, easing: snappy });
+  },
+  B() {
+    $("pOld").querySelector(".composer").style.visibility = "hidden";
+    $("pOld").style.background = "transparent";
+    an(old(), [{ transform: "translateX(0)", opacity: 1 }, { transform: "translateX(-56px)", opacity: 0 }], 170, { easing: easeIn });
+    an(neu(), [{ transform: "translateX(56px)", opacity: 0 }, { transform: "translateX(0)", opacity: 1 }], 300, { delay: 90, easing: snappy });
+  },
+  C() {
+    $("pOld").classList.add("card-out");
+    an($("pOld"), [{ transform: "translateX(0)" }, { transform: "translateX(-104%)" }], 340, { easing: "cubic-bezier(.5,0,.75,.35)" });
+    an($("pNew"), [{ transform: "scale(.955)", filter: "brightness(.5)" }, { transform: "scale(1)", filter: "brightness(1)" }], 380, { delay: 40, easing: snappy });
+  },
+  D() {
+    $("main").classList.add("fly");
+    $("pOld").querySelector(".composer").style.visibility = "hidden";
+    $("pOld").style.background = "transparent";
+    const from = old().getBoundingClientRect();
+    const to = $("archIcon").getBoundingClientRect();
+    const dx = to.left + to.width / 2 - (from.left + from.width / 2);
+    const dy = to.top + to.height / 2 - (from.top + from.height / 2);
+    an(old(), [
+      { transform: "translate(0,0) scale(1)", opacity: 1, borderRadius: "0px", background: "#1c1c1c" },
+      { transform: `translate(${dx * 0.35}px,${dy * 0.35}px) scale(.55)`, opacity: 0.9, borderRadius: "18px", background: "#262626", offset: 0.45 },
+      { transform: `translate(${dx}px,${dy}px) scale(.03)`, opacity: 0.2, borderRadius: "40px", background: "#2e2e2e" },
+    ], 380, { easing: "cubic-bezier(.45,0,.75,.4)" });
+    an($("archIcon"), [
+      { transform: "scale(1)", background: "rgba(52,120,246,0)", color: "#8f8d89" },
+      { transform: "scale(1.3)", background: "rgba(52,120,246,.25)", color: "#cfe0ff", offset: 0.35 },
+      { transform: "scale(1)", background: "rgba(52,120,246,0)", color: "#8f8d89" },
+    ], 420, { delay: 340, easing: "cubic-bezier(.3,1.4,.5,1)" });
+    an(neu(), [{ transform: "translateY(8px)", opacity: 0 }, { transform: "translateY(0)", opacity: 1 }], 280, { delay: 200, easing: easeOut });
+  },
+  E() {
+    $("pOld").querySelector(".composer").style.visibility = "hidden";
+    $("pOld").style.background = "transparent";
+    an(old(), [{ filter: "blur(0px)", opacity: 1, transform: "scale(1)" }, { filter: "blur(8px)", opacity: 0, transform: "scale(.985)" }], 180, { easing: easeIn });
+    an(neu(), [{ filter: "blur(8px)", opacity: 0, transform: "scale(1.015)" }, { filter: "blur(0px)", opacity: 1, transform: "scale(1)" }], 260, { delay: 90, easing: easeOut });
+  },
+};
+
+function total() {
+  return Math.max(...anims.map((a) => a.effect.getComputedTiming().endTime));
+}
+
+function run() {
+  clearTimeout(timer);
+  reset();
+  sidebar();
+  variants[variant]();
+  if (frozenAt != null) {
+    const end = total();
+    anims.forEach((a) => { a.pause(); a.currentTime = end * Number(frozenAt); });
+    return;
+  }
+  if ($("loop").checked) timer = setTimeout(() => { reset(); timer = setTimeout(run, 700); }, total() + 900);
+}
+
+function pick(v) {
+  variant = v;
+  document.querySelectorAll(".tab").forEach((t) => t.classList.toggle("on", t.dataset.v === v));
+  $("about").textContent = about[v];
+  run();
+}
+
+document.querySelectorAll(".tab").forEach((t) => (t.onclick = () => pick(t.dataset.v)));
+$("go").onclick = run;
+$("slow").onchange = run;
+$("loop").onchange = run;
+addEventListener("keydown", (e) => {
+  if (e.key === "e" && (e.metaKey || e.ctrlKey)) { e.preventDefault(); run(); }
+  const keys = { 0: "now", 1: "A", 2: "B", 3: "C", 4: "D", 5: "E" };
+  if (keys[e.key]) pick(keys[e.key]);
+});
+pick(variant);
+</script>
+</body></html>

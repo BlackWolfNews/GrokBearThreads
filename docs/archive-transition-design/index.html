@@ -1,0 +1,331 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Archive transition</title>
+<!-- Mockups of the thread panel animating when the open thread is archived
+     (Mike asked 30 Oct). Round 1 (first-round/) tried five; Mike liked the
+     panel flying into the archive, but there's no Archive view any more,
+     just the folded Archived section at the bottom of the inbox (29 Oct). So
+     these fly there and roll its count on by one. Open as is to play them
+     (tabs, ⌘E or the button, slow-mo to watch closely). ?v=D2&t=0.4&bare=1
+     freezes D2 at 40% of the way through, for filmstrip.html; &long=1 makes
+     the inbox long enough to push Archived below the fold. -->
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#141414;font:13px/1.4 -apple-system,"SF Pro Text",system-ui;color:#e6e4e1;-webkit-font-smoothing:antialiased}
+.page{padding:24px;display:flex;flex-direction:column;align-items:center;gap:14px}
+body.bare .page{padding:0}
+body.bare .bar,body.bare .about{display:none}
+.bar{display:flex;gap:8px;align-items:center;width:1000px}
+.tab,.go{background:#2a2a2a;border:1px solid #3a3a3a;color:#cfcdc9;border-radius:8px;padding:6px 12px;font:inherit;cursor:pointer}
+.tab.on{background:#3d3d3d;color:#fff;border-color:#5a5a5a}
+.go{background:#3478f6;border-color:#3478f6;color:#fff;margin-left:auto}
+.bar label{color:#9a9894;display:flex;gap:5px;align-items:center;margin-left:8px}
+.about{width:1000px;color:#a3a09b;min-height:20px}
+
+.win{width:1000px;height:620px;background:#1c1c1c;border:1px solid #333;border-radius:12px;display:flex;overflow:hidden;position:relative}
+body.bare .win{border-radius:0;border:0}
+.side{width:300px;background:#232323;display:flex;border-right:1px solid #2c2c2c;position:relative;z-index:1}
+.lights{position:absolute;top:14px;left:14px;display:flex;gap:7px;z-index:3}
+.lights i{width:11px;height:11px;border-radius:50%;background:#3d3d3d}
+.act{width:46px;display:flex;flex-direction:column;align-items:center;padding-top:46px;gap:10px;color:#8f8d89}
+.act .i{width:32px;height:32px;display:grid;place-items:center;border-radius:8px}
+.act .i.on{background:#343434;color:#ddd}
+.act svg{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round}
+.list{flex:1;padding:42px 10px 0 2px;overflow:hidden}
+.newt{padding:6px 10px 2px;color:#ddd;display:flex;gap:8px;align-items:center}
+.newt svg{width:15px;height:15px;fill:none;stroke:currentColor;stroke-width:1.5}
+/* Section headings as SidebarView's: icon, grey semibold title, hairline,
+   and when folded a faint count and a chevron. */
+.sec{display:flex;gap:6px;align-items:center;color:#a5a29d;padding:14px 10px 6px;font-weight:600}
+.sec svg{width:13px;height:13px;fill:none;stroke:currentColor;stroke-width:1.4;stroke-linecap:round;stroke-linejoin:round;flex:none}
+.sec .rule{flex:1;height:1px;background:rgba(255,255,255,.08);margin:0 4px}
+.sec .cnt{color:#77746f;font-weight:400;font-size:12px;font-variant-numeric:tabular-nums;position:relative;display:inline-block;height:16px;width:16px;overflow:hidden;text-align:right}
+.sec .cnt span{position:absolute;right:0;top:0}
+.sec .chev{color:#77746f;font-size:10px;width:10px}
+.rw{height:56px;overflow:hidden}
+.row{display:flex;gap:10px;align-items:center;padding:0 8px;border-radius:8px;height:52px;background:#232323}
+.row .av{width:28px;height:28px;border-radius:7px;background:#2f2f2f;display:grid;place-items:center;color:#9a9894;font-weight:600;font-size:12px;flex:none}
+.row .tx{flex:1;min-width:0}
+.row .t{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.row .s{color:#8f8d89;display:flex;justify-content:space-between;font-size:12px}
+.row .needs{color:#e8a33d}
+.row.sel{background:#363636}
+.extra{display:none}
+body.long .extra{display:block}
+
+.main{flex:1;position:relative;overflow:hidden;background:#1c1c1c}
+.main.fly{overflow:visible;z-index:2}
+.panel{position:absolute;inset:0;display:flex;flex-direction:column;background:#1c1c1c}
+.mv{flex:1;display:flex;flex-direction:column;min-height:0}
+.head{height:44px;display:flex;align-items:center;padding:0 22px;gap:6px;font-size:14px;flex:none}
+.head .crumb{color:#8f8d89}
+.head b{font-weight:600}
+.content{flex:1;padding:14px 30px;display:flex;flex-direction:column;gap:12px}
+.user{align-self:flex-end;max-width:68%;background:#2b3240;border-radius:14px;padding:10px 14px;font-size:13.5px}
+.work{color:#8f8d89}
+.reply{font-size:13.5px}
+.meta{color:#6f6d69;font-size:12px}
+.card{border:1px solid #3a3a3a;border-radius:12px;padding:10px 14px;display:flex;align-items:center;gap:10px;background:#212121}
+.card .sum{flex:1;color:#cfcdc9}
+.btn{background:#383838;border:1px solid #474747;border-radius:7px;padding:3px 10px;font-size:12.5px}
+.composer{margin:0 30px 18px;height:80px;background:#262626;border:1px solid #353535;border-radius:16px;padding:12px 16px;color:#6f6d69;flex:none}
+/* D3: the thread as a sidebar row, what the panel turns into mid-flight. */
+.pill{position:absolute;width:250px;height:52px;border-radius:10px;background:#2c2c2c;box-shadow:0 8px 24px rgba(0,0,0,.45),0 0 0 1px #3a3a3a;display:flex;gap:10px;align-items:center;padding:0 10px;opacity:0;pointer-events:none}
+</style></head>
+<body>
+<div class="page">
+  <div class="bar">
+    <button class="tab" data-v="now">Now</button>
+    <button class="tab" data-v="D1">D1 · Shrink</button>
+    <button class="tab" data-v="D2">D2 · Drop</button>
+    <button class="tab" data-v="D3">D3 · Becomes a row</button>
+    <label><input type="checkbox" id="long"> Long inbox</label>
+    <label><input type="checkbox" id="slow"> Slow-mo</label>
+    <label><input type="checkbox" id="loop" checked> Loop</label>
+    <button class="go" id="go">Archive ⌘E</button>
+  </div>
+  <div class="about" id="about"></div>
+  <div class="win" id="win"></div>
+</div>
+
+<template id="tpl">
+  <div class="lights"><i></i><i></i><i></i></div>
+  <div class="side">
+    <div class="act">
+      <div class="i on"><svg viewBox="0 0 20 20"><path d="M3 4h11v8H8l-3 3v-3H3z"/><path d="M14 7h3v7h-2v2.5L12.5 14H8"/></svg></div>
+      <div class="i"><svg viewBox="0 0 20 20"><circle cx="10" cy="10" r="7"/><path d="M10 6v4l3 2"/></svg></div>
+      <div class="i"><svg viewBox="0 0 20 20"><path d="M10 3l7 4-7 4-7-4zM3 10.5l7 4 7-4M3 14l7 4 7-4"/></svg></div>
+      <div class="i"><svg viewBox="0 0 20 20"><path d="M4 3v14M8 3v14M12 4l4 13"/></svg></div>
+    </div>
+    <div class="list" id="list">
+      <div class="newt"><svg viewBox="0 0 16 16"><path d="M2 3h7M2 3v11h11V7"/><path d="M12 2l2 2-6 6H6V8z"/></svg>New thread</div>
+      <div class="sec"><svg viewBox="0 0 14 14"><path d="M1.5 8l2-5.5h7l2 5.5v4h-11z"/><path d="M1.5 8h3.5l.7 1.5h2.6L9 8h3.5"/></svg>Inbox<span class="rule"></span></div>
+      <div class="rw" id="rw1"><div class="row sel" id="row1"><div class="av">W</div><div class="tx"><div class="t">Fix the login redirect loop</div><div class="s"><span>Walkies</span><span>2m</span></div></div></div></div>
+      <div class="rw"><div class="row" id="row2"><div class="av">P</div><div class="tx"><div class="t">Make uploads resume after a crash</div><div class="s"><span>Photo sync</span><span class="needs">Needs you</span></div></div></div></div>
+      <div class="rw"><div class="row"><div class="av">T</div><div class="tx"><div class="t">Small-model settings page</div><div class="s"><span>Threadbear</span><span>14m</span></div></div></div></div>
+      <div class="rw"><div class="row"><div class="av">m</div><div class="tx"><div class="t">Tidy the imports in the uploader</div><div class="s"><span>misc</span><span>1h</span></div></div></div></div>
+      <div class="rw"><div class="row"><div class="av">T</div><div class="tx"><div class="t">Rename the Settings tabs</div><div class="s"><span>Threadbear</span><span>16h</span></div></div></div></div>
+      <div class="rw extra"><div class="row"><div class="av">W</div><div class="tx"><div class="t">Add dark mode to the dashboard</div><div class="s"><span>Walkies</span><span>Sun</span></div></div></div></div>
+      <div class="rw extra"><div class="row"><div class="av">m</div><div class="tx"><div class="t">Compare SQLite and plain files</div><div class="s"><span>misc</span><span>Sat</span></div></div></div></div>
+      <div class="rw extra"><div class="row"><div class="av">P</div><div class="tx"><div class="t">Thumbnail cache keeps growing</div><div class="s"><span>Photo sync</span><span>Fri</span></div></div></div></div>
+      <div class="rw extra"><div class="row"><div class="av">T</div><div class="tx"><div class="t">Draft the release notes for 0.4</div><div class="s"><span>Threadbear</span><span>Fri</span></div></div></div></div>
+      <div class="sec"><svg viewBox="0 0 14 14"><path d="M11 8.5A5 5 0 1 1 5.5 3a4 4 0 0 0 5.5 5.5z"/></svg>Hibernating<span class="rule"></span><span class="cnt"><span>3</span></span><span class="chev">›</span></div>
+      <div class="sec" id="archSec"><svg id="archIcon" viewBox="0 0 14 14"><rect x="1.5" y="2.5" width="11" height="3" rx=".8"/><path d="M2.5 5.5v6h9v-6M5.5 8h3"/></svg>Archived<span class="rule"></span><span class="cnt" id="archCnt"><span id="cOld">41</span><span id="cNew" style="opacity:0">42</span></span><span class="chev">›</span></div>
+    </div>
+  </div>
+  <div class="main" id="main">
+    <div class="panel" id="pNew">
+      <div class="mv">
+        <div class="head"><span class="crumb">photo-sync /</span><b>Make uploads resume after a crash</b></div>
+        <div class="content">
+          <div class="user">Uploads start again from zero when the app crashes. Can they pick up where they left off?</div>
+          <div class="work">Read 6 files, ran 2 commands ›</div>
+          <div class="reply">They can. Each chunk's offset is already saved, it's just never read back on launch. I've written the fix on a branch; it needs one thing from you first.</div>
+          <div class="meta">1m 12s · $0.21</div>
+          <div class="card" style="border-color:#6b5223"><span class="sum">Should a resumed upload keep its old place in the queue?</span><span class="btn">Yes</span><span class="btn">Back of the queue</span></div>
+        </div>
+      </div>
+      <div class="composer">Message</div>
+    </div>
+    <div class="panel" id="pOld">
+      <div class="mv">
+        <div class="head"><span class="crumb">walkies /</span><b>Fix the login redirect loop</b></div>
+        <div class="content">
+          <div class="user">Signing in on the web bounces between /login and /home forever. Fix it?</div>
+          <div class="work">Read 4 files, edited 1, ran tests ›</div>
+          <div class="reply">The auth check ran before the session cookie was read, so every page thought you were signed out. It waits for the session now, and the tests pass.</div>
+          <div class="meta">48s · $0.09</div>
+          <div class="card"><span class="sum">Fixed and landed on main.</span><span class="btn" id="archBtn">Archive</span></div>
+        </div>
+      </div>
+      <div class="composer">Message</div>
+    </div>
+    <div class="pill row" id="pill"><div class="av">W</div><div class="tx"><div class="t">Fix the login redirect loop</div><div class="s"><span>Walkies</span><span>now</span></div></div></div>
+  </div>
+</template>
+
+<script>
+const about = {
+  now: "What happens today: the row slides off and the panel just swaps.",
+  D1: "Round 1's D, aimed at the Archived heading: the thread shrinks in a straight line into the archive box, which bumps, and the count rolls on by one.",
+  D2: "Drops on a curve, falling first and then sliding across into the heading, like a sheet dropped into a drawer. A little more physical.",
+  D3: "The panel shrinks into its own sidebar row, and that row drops into the Archived heading. Says most plainly what just happened.",
+};
+
+const easeIn = "cubic-bezier(.4,0,1,1)";
+const easeOut = "cubic-bezier(0,0,.2,1)";
+const snappy = "cubic-bezier(.2,.9,.25,1)";
+const params = new URLSearchParams(location.search);
+
+let variant = params.get("v") || "D1";
+const frozenAt = params.get("t");
+if (params.has("bare")) document.body.classList.add("bare");
+if (params.has("long")) document.body.classList.add("long");
+
+let anims = [], timer;
+const $ = (id) => document.getElementById(id);
+const scale = () => ($("slow").checked ? 4 : 1);
+
+function an(el, frames, dur, { delay = 0, easing = easeOut } = {}) {
+  const a = el.animate(frames, { duration: dur * scale(), delay: delay * scale(), easing, fill: "both" });
+  anims.push(a);
+  return a;
+}
+
+function reset() {
+  anims.forEach((a) => a.cancel());
+  anims = [];
+  $("win").innerHTML = $("tpl").innerHTML;
+}
+
+// What the sidebar already does: the row slides off left, the rows below
+// close up and the selection lands on the next one.
+function sidebar() {
+  an($("archBtn"), [{ background: "#5a5a5a" }, { background: "#383838" }], 120);
+  an($("row1"), [{ transform: "translateX(0)", opacity: 1 }, { transform: "translateX(-105%)", opacity: 0 }], 160, { easing: easeIn });
+  an($("rw1"), [{ height: "56px" }, { height: "0px" }], 320, { delay: 160, easing: snappy });
+  an($("row2"), [{ background: "rgba(54,54,54,0)" }, { background: "#363636" }], 200, { delay: 120 });
+}
+
+// Where the flight lands: the Archived heading's box, where it will be once
+// the archived row has closed up (56px higher). With a long inbox it's below
+// the fold, so the flight drops off the bottom of the sidebar under it.
+function target() {
+  const icon = $("archIcon").getBoundingClientRect();
+  const list = $("list").getBoundingClientRect();
+  const x = icon.left + icon.width / 2;
+  const y = icon.top + icon.height / 2 - 56;
+  const visible = y < list.bottom - 10;
+  return { x, y: visible ? y : list.bottom + 30, visible };
+}
+
+// The heading's landing: the archive box bumps and the count rolls on.
+function land(at) {
+  if (!target().visible) return;
+  an($("archIcon"), [
+    { transform: "scale(1)", color: "#a5a29d" },
+    { transform: "scale(1.45)", color: "#cfe0ff", offset: 0.35 },
+    { transform: "scale(1)", color: "#a5a29d" },
+  ], 420, { delay: at, easing: "cubic-bezier(.3,1.4,.5,1)" });
+  an($("cOld"), [{ transform: "translateY(0)", opacity: 1 }, { transform: "translateY(-9px)", opacity: 0 }], 220, { delay: at + 40, easing: snappy });
+  an($("cNew"), [{ transform: "translateY(9px)", opacity: 0 }, { transform: "translateY(0)", opacity: 1 }], 260, { delay: at + 60, easing: snappy });
+}
+
+function nextIn(delay) {
+  an($("pNew").querySelector(".mv"), [{ transform: "translateY(8px)", opacity: 0 }, { transform: "translateY(0)", opacity: 1 }], 280, { delay, easing: easeOut });
+}
+
+// The panel's text lifts off its background, which the next thread's
+// panel already sits under.
+function prepOld() {
+  $("main").classList.add("fly");
+  $("pOld").querySelector(".composer").style.visibility = "hidden";
+  $("pOld").style.background = "transparent";
+  const mv = $("pOld").querySelector(".mv");
+  const r = mv.getBoundingClientRect();
+  return { mv, cx: r.left + r.width / 2, cy: r.top + r.height / 2 };
+}
+
+const variants = {
+  now() {
+    an($("pOld"), [{ opacity: 1 }, { opacity: 0 }], 1, { delay: 160 });
+  },
+  D1() {
+    const { mv, cx, cy } = prepOld();
+    const t = target();
+    const dx = t.x - cx, dy = t.y - cy;
+    an(mv, [
+      { transform: "translate(0,0) scale(1)", opacity: 1, borderRadius: "0px", background: "#1c1c1c" },
+      { transform: `translate(${dx * 0.35}px,${dy * 0.35}px) scale(.55)`, opacity: 0.9, borderRadius: "18px", background: "#262626", offset: 0.45 },
+      { transform: `translate(${dx}px,${dy}px) scale(.02)`, opacity: 0.2, borderRadius: "40px", background: "#2e2e2e" },
+    ], 400, { easing: "cubic-bezier(.45,0,.75,.4)" });
+    land(370);
+    nextIn(200);
+  },
+  D2() {
+    // Along a curve that falls first, then swings across: a quadratic
+    // Bézier with its control point straight below the panel's centre.
+    const { mv, cx, cy } = prepOld();
+    const t = target();
+    const c = { x: cx - 40, y: t.y + 40 };
+    const frames = [];
+    const steps = 10;
+    for (let i = 0; i <= steps; i++) {
+      const p = i / steps;
+      const x = (1 - p) ** 2 * cx + 2 * (1 - p) * p * c.x + p * p * t.x;
+      const y = (1 - p) ** 2 * cy + 2 * (1 - p) * p * c.y + p * p * t.y;
+      const s = Math.max(0.02, 1 - 0.98 * Math.pow(p, 0.7));
+      frames.push({
+        offset: p,
+        transform: `translate(${x - cx}px,${y - cy}px) scale(${s}) rotate(${-4 * Math.sin(p * Math.PI)}deg)`,
+        opacity: p < 0.85 ? 1 : 1 - (p - 0.85) / 0.15 * 0.8,
+        borderRadius: `${Math.min(40, 6 + 60 * p)}px`,
+        background: p < 0.05 ? "#1c1c1c" : "#262626",
+      });
+    }
+    an(mv, frames, 440, { easing: "cubic-bezier(.5,0,.6,1)" });
+    land(410);
+    nextIn(220);
+  },
+  D3() {
+    const { mv, cx, cy } = prepOld();
+    const t = target();
+    const pill = $("pill");
+    const main = $("main").getBoundingClientRect();
+    // The row sits where the panel's centre is, then drops to the heading.
+    pill.style.left = `${cx - main.left - 125}px`;
+    pill.style.top = `${cy - main.top - 26}px`;
+    an(mv, [
+      { transform: "scale(1)", opacity: 1, borderRadius: "0px", background: "#1c1c1c" },
+      { transform: "scale(.32,.12)", opacity: 0, borderRadius: "30px", background: "#2c2c2c" },
+    ], 200, { easing: easeIn });
+    const dx = t.x - cx + 125 - 22, dy = t.y - cy;
+    an(pill, [
+      { opacity: 0, transform: "translate(0,0) scale(1.15)" },
+      { opacity: 1, transform: "translate(0,0) scale(1)", offset: 0.3 },
+      { opacity: 1, transform: `translate(${dx * 0.25}px,${dy * 0.15}px) scale(.95)`, offset: 0.5 },
+      { opacity: 0, transform: `translate(${dx}px,${dy}px) scale(.25)` },
+    ], 520, { delay: 120, easing: "cubic-bezier(.4,0,.6,1)" });
+    land(590);
+    nextIn(220);
+  },
+};
+
+function total() {
+  return Math.max(...anims.map((a) => a.effect.getComputedTiming().endTime));
+}
+
+function run() {
+  clearTimeout(timer);
+  document.body.classList.toggle("long", $("long").checked);
+  reset();
+  sidebar();
+  variants[variant]();
+  if (frozenAt != null) {
+    const end = total();
+    anims.forEach((a) => { a.pause(); a.currentTime = end * Number(frozenAt); });
+    return;
+  }
+  if ($("loop").checked) timer = setTimeout(() => { reset(); timer = setTimeout(run, 700); }, total() + 900);
+}
+
+function pick(v) {
+  variant = v;
+  document.querySelectorAll(".tab").forEach((t) => t.classList.toggle("on", t.dataset.v === v));
+  $("about").textContent = about[v];
+  run();
+}
+
+$("long").checked = params.has("long");
+document.querySelectorAll(".tab").forEach((t) => (t.onclick = () => pick(t.dataset.v)));
+$("go").onclick = run;
+$("slow").onchange = run;
+$("loop").onchange = run;
+$("long").onchange = run;
+addEventListener("keydown", (e) => {
+  if (e.key === "e" && (e.metaKey || e.ctrlKey)) { e.preventDefault(); run(); }
+  const keys = { 0: "now", 1: "D1", 2: "D2", 3: "D3" };
+  if (keys[e.key]) pick(keys[e.key]);
+});
+pick(variant);
+</script>
+</body></html>

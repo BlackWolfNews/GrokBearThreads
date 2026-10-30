@@ -1,0 +1,20 @@
+<!doctype html><html><head><meta charset="utf-8">
+<!-- size: 1040x700 -->
+<!-- Four frozen moments of one variant from index.html (?v=D1, &long=1 for a long inbox), for stills. -->
+<style>
+*{box-sizing:border-box;margin:0}
+body{background:#141414;font:13px -apple-system,system-ui;color:#a3a09b;padding:16px;display:grid;grid-template-columns:500px 500px;gap:10px 8px}
+.f{position:relative}
+.f span{position:absolute;left:8px;top:6px;z-index:2;background:rgba(0,0,0,.6);color:#ddd;border-radius:5px;padding:1px 7px;font-size:12px}
+.clip{width:500px;height:310px;overflow:hidden;border-radius:8px;border:1px solid #333}
+iframe{width:1000px;height:620px;border:0;transform:scale(.5);transform-origin:0 0}
+</style></head><body>
+<script>
+const q = new URLSearchParams(location.search);
+const v = q.get("v") || "D1";
+const long = q.has("long") ? "&long=1" : "";
+[0.15, 0.4, 0.62, 0.85].forEach((t, i) => {
+  document.body.insertAdjacentHTML("beforeend",
+    `<div class="f"><span>${i + 1}</span><div class="clip"><iframe src="index.html?v=${v}&t=${t}&bare=1${long}"></iframe></div></div>`);
+});
+</script></body></html>
