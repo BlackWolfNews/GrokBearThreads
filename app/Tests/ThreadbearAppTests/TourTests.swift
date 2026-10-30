@@ -32,7 +32,7 @@ final class TourTests: XCTestCase {
     func testEveryCardIsOneShortSentence() {
         let ends = try! NSRegularExpression(pattern: #"[.!?](\s|$)"#)
         for step in Tour.steps {
-            for text in [step.body, step.doneBody].compactMap({ $0 }) {
+            for text in [step.body, step.doneBody, step.failBody].compactMap({ $0 }) {
                 let sentences = ends.numberOfMatches(in: text, range: NSRange(text.startIndex..., in: text))
                 XCTAssertLessThanOrEqual(sentences, 1, "one sentence: \(text)")
                 XCTAssertLessThanOrEqual(text.count, 90, "short: \(text)")

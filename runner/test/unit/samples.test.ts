@@ -4,10 +4,17 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { RpcError } from '../../src/protocol.ts';
+import fs from 'node:fs';
+import path from 'node:path';
+import { WELCOME_PATCH } from '../../src/samples.ts';
 import { makeHarness, tick } from '../helpers/fakes.ts';
 
-test('samples are finished threads with no CLI, the first needing you', async () => {
+test('samples are finished threads with no CLI, the first needing you, in a folder with the example patch', async () => {
   const h = makeHarness();
+  const folder = path.join(h.cfg.home, 'Welcome');
+  h.runner.samples({ cwd: folder });
+  assert.equal(fs.readFileSync(path.join(folder, '.threadbear/patches/welcome.ts'), 'utf8'), WELCOME_PATCH);
+  h.runner.samples({ cwd: folder, remove: true });
   const { threads } = h.runner.samples({ cwd: h.cfg.defaults.cwd });
   await tick();
   assert.equal(h.adapter.sessions.length, 0, 'no turn runs');

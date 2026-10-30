@@ -57,3 +57,20 @@ export const SAMPLE_THREADS: SampleThread[] = [
     needs: 'nothing',
   },
 ];
+
+// The example patch the samples' folder gets (the tour's Roll a die). The
+// runner writes it and trusts that exact text (patch-trust.ts), so its chip
+// shows straight away; the app writing it left it waiting as untrusted
+// (Mike on Tinker Desk, 30 Oct). Its comment is for whoever opens the file.
+export const WELCOME_PATCH = `// A patch: tools for the threads in this folder. This one adds a chip
+// above the composer that runs a command. A patch can also add panels
+// beside a thread and checks that run after each turn. You don't have
+// to write them: ask a thread to "add a button that runs the tests" and
+// its agent writes one like this.
+export default {
+  icon: "dice",
+  actions: [
+    { title: "Roll a die", run: "echo \\"You rolled a $(( RANDOM % 6 + 1 )).\\"" },
+  ],
+}
+`;

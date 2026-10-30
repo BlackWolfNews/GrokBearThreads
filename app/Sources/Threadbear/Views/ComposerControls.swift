@@ -116,7 +116,6 @@ struct ComposerControls: View {
             ) {
                 settings.permissionMenu()
             }
-            .tourTarget(.permission)
             Spacer(minLength: zoomed(8))
             SendButton(running: running, canSend: canSend, sending: sending, onSend: onSend, onStop: { app.interrupt() })
                 .layoutPriority(1)

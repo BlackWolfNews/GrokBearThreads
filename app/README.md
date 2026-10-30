@@ -132,7 +132,7 @@ and the perf run stay away from the real one. Install the runner itself with
   finished, no turn) in `~/Threadbear/Welcome`, where it writes an example
   patch, and has you hibernate one, archive another, drag a panel (done
   when the dock's layout changes) and press the patch's Roll a die chip,
-  between cards on the threads, the access chip and Highlights. It ends on
+  between cards on the threads and Highlights. It ends on
   a new thread with its message written for you (a patch with a hello
   button); sending it ends the tour and opens Finish setting up. However it
   ends, the samples are deleted. The first run has no Skip; Next turns up

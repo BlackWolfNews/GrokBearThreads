@@ -9,8 +9,6 @@ import ThreadbearCore
 enum TourTarget: Hashable {
     case threads
     case composer
-    /// The composer's Full access / Ask before edits chip.
-    case permission
     /// The chips above the composer, from the thread's patches.
     case actionChips
     /// The Highlights panel, or its icon on the rail when the panel's
@@ -69,6 +67,9 @@ struct TourStep: Equatable {
     var task: TourTask? = nil
     /// What the card says once the task's done.
     var doneBody: String? = nil
+    /// What it says instead when the first thread failed (a login that's
+    /// run out, say): "while it works" would be wrong.
+    var failBody: String? = nil
     var edges: [TourEdge] = [.right, .left, .below, .above]
     /// The bear on the card.
     var bear: Bear.Pose? = nil
@@ -121,31 +122,30 @@ final class Tour {
                  task: .archive, doneBody: "Archived threads are kept, a click away."),
         TourStep(targets: [.activityBar], title: "Your views",
                  body: "These icons switch to hibernating threads, the archive, schedules and projects."),
-        // The one choice that matters for safety, so it gets two steps.
-        TourStep(targets: [.permission], title: "Full access",
-                 body: "With Full access, the agent edits files and runs commands on its own.",
-                 edges: [.above, .below, .right, .left], opensSample: true),
-        TourStep(targets: [.permission], title: "Ask before edits",
-                 body: "Switch to Ask before edits and it stops for your OK first.",
-                 edges: [.above, .below, .right, .left], opensSample: true),
+        // No card for Full access / Ask before edits: people know access
+        // modes from other agent apps, and the chip says it (Mike, 30 Oct).
         TourStep(targets: [.highlights, .highlightsRail], title: "Highlights",
                  body: "The files, links and questions from a thread collect here.",
                  opensSample: true),
         TourStep(targets: [.highlights, .mainPanel], title: "Move a panel",
-                 body: "Drag this panel by its bar to another side of the window.",
+                 body: "Drag a panel by its title, or press and hold anywhere on it, then drag.",
                  task: .movePanel, doneBody: "View › Reset Panel Layout puts it back."),
         TourStep(targets: [.actionChips], title: "Patches",
-                 body: "A patch adds buttons like this one to a folder's threads.",
+                 body: "Patches add buttons like these, and panels, to your threads.",
+                 edges: [.above, .right, .left, .below], opensSample: true),
+        TourStep(targets: [.actionChips], title: "Per project or tool",
+                 body: "Each patch belongs to a project, or to a tool wherever you use it.",
                  edges: [.above, .right, .left, .below], opensSample: true),
         TourStep(targets: [.actionChips], title: "Try it",
                  body: "Press Roll a die.",
-                 task: .runPatch, doneBody: "Ask any thread to make you a button like it.",
+                 task: .runPatch, doneBody: "Ask any thread for a patch that does whatever you want.",
                  edges: [.above, .right, .left, .below], opensSample: true),
         TourStep(targets: [.composer], title: "Your first thread",
                  body: "We've written its first message, so press Return to send it.",
                  task: .sendFirst, edges: [.above, .below, .right, .left]),
         TourStep(targets: [.setupPanel], title: "Finish setting up",
-                 body: "While it works, pair your phone here to check in from anywhere."),
+                 body: "While it works, pair your phone here to check in from anywhere.",
+                 failBody: "Your first thread hit a snag, and its message says how to fix it."),
     ]
 
     /// The step on show, as an index into `shown`; nil when the tour's
@@ -173,10 +173,14 @@ final class Tour {
     @ObservationIgnored private var layoutAtStart: DockLayout?
     @ObservationIgnored private var sawChipRun = false
     @ObservationIgnored private var threadsAtStart: Set<String> = []
+    /// The first thread the tour had them send.
+    private(set) var firstThreadId: String?
 
     static let space = "tour"
 
     var current: TourStep? { step.map { shown[$0] } }
+    /// The first thread they sent has failed.
+    var firstThreadFailed: Bool { firstThreadId.flatMap { app?.threads[$0] }?.status == .error }
     var isLast: Bool { step == shown.count - 1 }
 
     /// Where the step's part of the window is, or nil to put the card in
@@ -263,7 +267,8 @@ final class Tour {
             let running = app.runningActions.contains { key in sampleIds.contains { key.hasPrefix($0) } }
             if running { sawChipRun = true } else if sawChipRun { taskDone = true }
         case .sendFirst:
-            if app.threads.keys.contains(where: { !threadsAtStart.contains($0) }) {
+            if let id = app.threads.keys.first(where: { !threadsAtStart.contains($0) }) {
+                firstThreadId = id
                 // On to what's left while the thread works: the last card,
                 // or the end if there's nothing left to set up.
                 if app.setupShowsIcon {
@@ -306,23 +311,6 @@ final class Tour {
 // MARK: - The samples' folder and its patch
 
 extension Tour {
-    /// The example patch the samples' folder gets. Its comment is for
-    /// whoever opens the file to see what a patch looks like.
-    static let welcomePatch = """
-    // A patch: tools for the threads in this folder. This one adds a chip
-    // above the composer that runs a command. A patch can also add panels
-    // beside a thread and checks that run after each turn. You don't have
-    // to write them: ask a thread to "add a button that runs the tests" and
-    // its agent writes one like this.
-    export default {
-      icon: "dice",
-      actions: [
-        { title: "Roll a die", run: "echo \\"You rolled a $(( RANDOM % 6 + 1 )).\\"" },
-      ],
-    }
-
-    """
-
     /// ~/Threadbear/Welcome: Threadbear's own folder, nowhere macOS asks
     /// about. A scripted dev app keeps it in its own data folder, away from
     /// the real one.
@@ -334,16 +322,6 @@ extension Tour {
         return NSString(string: "~/Threadbear/Welcome").expandingTildeInPath
     }
 
-    /// Writes the example patch unless the file's there already (it may
-    /// have been changed, and it's theirs now).
-    nonisolated static func writeWelcomePatch(in folder: String) throws {
-        let patches = URL(fileURLWithPath: folder).appendingPathComponent(".threadbear/patches")
-        try FileManager.default.createDirectory(at: patches, withIntermediateDirectories: true)
-        let file = patches.appendingPathComponent("welcome.ts")
-        if !FileManager.default.fileExists(atPath: file.path) {
-            try welcomePatch.write(to: file, atomically: true, encoding: .utf8)
-        }
-    }
 }
 
 extension AppModel {
@@ -354,7 +332,8 @@ extension AppModel {
         let folder = Tour.welcomeFolder(app: self)
         guard let client else { return [] }
         do {
-            try Tour.writeWelcomePatch(in: folder)
+            // The runner makes the folder and its example patch, and trusts
+            // that patch, so Roll a die shows without asking.
             let samples = try await client.samples(cwd: folder)
             for thread in samples { threads[thread.id] = thread }
             return samples.map(\.id)
@@ -529,6 +508,7 @@ private struct TourCard: View {
     var body: some View {
         let tour = Tour.shared
         let done = tour.taskDone
+        let failed = tour.firstThreadFailed
         VStack(alignment: .leading, spacing: zoomed(8)) {
             if let bear = step.bear {
                 Image(nsImage: Bear.image(bear, side: zoomed(44)))
@@ -545,7 +525,7 @@ private struct TourCard: View {
                         .transition(Juice.popIn)
                 }
             }
-            Text(done ? step.doneBody ?? step.body : step.body)
+            Text(failed ? step.failBody ?? step.body : done ? step.doneBody ?? step.body : step.body)
                 .font(.system(size: TypeScale.label))
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)

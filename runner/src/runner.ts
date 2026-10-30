@@ -4,7 +4,7 @@
 import type { UpstreamStatus } from './upstream.ts';
 import fs from 'node:fs';
 import os from 'node:os';
-import { SAMPLE_THREADS } from './samples.ts';
+import { SAMPLE_THREADS, WELCOME_PATCH } from './samples.ts';
 import { reviewInput, reviewDraft, reviewReply, sameDraft, type ReviewInput } from './reviews.ts';
 import path from 'node:path';
 import { ConvexKeys, convexFolderFor, type ConvexKey, type ConvexDeployments } from './convex-keys.ts';
@@ -1566,10 +1566,17 @@ export class Runner {
     // In SAMPLE_THREADS' order, as they were first given.
     const order = (st: ThreadState) => SAMPLE_THREADS.findIndex((x) => x.title === st.rec.title);
     if (existing.length) return { threads: existing.sort((a, b) => order(a) - order(b)).map((st) => this.summary(st)) };
+    // The folder and its example patch, written here and trusted as written:
+    // one changed since is someone's code, and waits like any other.
+    const cwd = path.resolve(expandHome(params.cwd));
+    const patchFile = path.join(cwd, '.threadbear', 'patches', 'welcome.ts');
+    fs.mkdirSync(path.dirname(patchFile), { recursive: true });
+    if (!fs.existsSync(patchFile)) fs.writeFileSync(patchFile, WELCOME_PATCH);
+    if (fs.readFileSync(patchFile, 'utf8') === WELCOME_PATCH) this.trustAgentPatches([patchFile]);
     const made: ThreadSummary[] = [];
     // Oldest first, so the first in SAMPLE_THREADS is the newest in the list.
     for (const sample of [...SAMPLE_THREADS].reverse()) {
-      const { st } = this.makeThread({ text: sample.question, cwd: params.cwd, title: sample.title, worktree: false });
+      const { st } = this.makeThread({ text: sample.question, cwd, title: sample.title, worktree: false });
       const { rec } = st;
       rec.sample = true;
       const turnId = crypto.randomUUID();
