@@ -679,6 +679,9 @@ struct ThreadRowView: View {
             }
         }
         .rowHighlight(selected: isSelected, hovering: showsActions, selectedColor: selectedColor, space: rowSpace)
+        // The open thread's row: archived, it closes up as its panel drops
+        // into the Archived heading, which the flight allows for.
+        .background { if isSelected { FlightMarker(kind: .openRow) } }
         .contentShape(RoundedRectangle(cornerRadius: SidebarMetrics.corner))
         // A slight press while the mouse is down, so a click feels like it
         // landed on something.
