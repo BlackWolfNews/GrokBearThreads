@@ -43,6 +43,10 @@ static site with its own `package.json`; its comments say how to build it.
   against a real dev runner and debug app, checks each step, and saves a
   shot of each; look at the shots too. The mock fakes patches and trust,
   and tours that passed on it were broken on a real install (30 Oct).
+- Building a design Mike picked (show_options): before landing, put a
+  shot of the build beside the mockup he picked and check the layout
+  matches, not just the wording. The done card shipped as a card in the
+  transcript when he'd picked one joined to the composer (30 Oct).
 - Every control gets a tooltip, with `.tip("…")` (SwiftUI) or `setTip` (AppKit).
   `.help` and `toolTip` never show in this app; TipsTests fails on them.
 - Transcript files and fixtures made from real sessions are private: keep them
