@@ -630,7 +630,7 @@ test('the librarian renames a thread that has moved on, never one Mike or an age
   // Named by an agent: the look is told so, and a title it sends anyway is ignored.
   h.runner.update({ threadId: thread.id, title: 'Picked by the agent', titleBy: 'agent' });
   answer = (q: GenerateParams) => {
-    assert.match(q.prompt, /Its title was set by Mike or an agent/);
+    assert.match(q.prompt, /Its title was set by the user or an agent/);
     return { projects: [], title: 'Something else' };
   };
   librarian.run(thread.id);
@@ -785,7 +785,7 @@ test('a thread a draining runner lets go mid-look is left to the new runner, qui
 test("a thread its agent filed is the agent's to file: the librarian keeps its line and state only", async () => {
   const s = setup({
     models: (q) => {
-      assert.match(q.prompt, /Filed by its own agent or Mike/);
+      assert.match(q.prompt, /Filed by its own agent or the user/);
       return reply({ projects: [other.id], new: { title: 'Another', folders: [], goals: 'x', state: 'y' }, state: { [p.id]: 'Shipped' }, thread: 'Done.' });
     },
   });
@@ -870,7 +870,7 @@ test('the librarian wakes a thread hibernating on a topic when Mike talks about 
   const s = setup({
     models: (p) => {
       if (!p.prompt.includes('Router table jig')) return reply({ projects: [], new: null, state: {}, why: 'x' });
-      assert.match(p.prompt, new RegExp(`Hibernating threads waiting for Mike to talk about something:\\n- ${waiting.slice(0, 8)} "Plan the workbench drawers": woodworking`));
+      assert.match(p.prompt, new RegExp(`Hibernating threads waiting for the user to talk about something:\\n- ${waiting.slice(0, 8)} "Plan the workbench drawers": woodworking`));
       return reply({ projects: [], new: null, state: {}, wake: [waiting.slice(0, 8), 'nothere1'], why: 'Woodworking again' });
     },
   });

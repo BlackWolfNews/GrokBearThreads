@@ -77,7 +77,7 @@ test('an idle thread whose shell has sat quiet and idle gets one message about i
   assert.equal(said.length, 1);
   assert.match(said[0], /stuck-job check/);
   assert.match(said[0], /snip2\.py.*\(shell, 40 min, running zsh, sleep\)/);
-  assert.match(said[0], /ask Mike in end_turn/);
+  assert.match(said[0], /ask the user in end_turn/);
 
   // Once only, even after the turn it started has ended.
   s.result('completed');

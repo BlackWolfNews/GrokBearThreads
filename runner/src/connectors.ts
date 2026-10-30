@@ -358,8 +358,8 @@ export function signInNudge(problems: SignInProblem[]): string {
     return `- ${p.service} needs signing in again, ${where}`;
   });
   return (
-    `${SIGN_IN_NUDGE} a service that needs Mike to sign in again:\n${lines.join('\n')}\n` +
-    'If the work needs it, give Mike an ask for it in end_turn (needs "you"), with that page as a link titled like "Sign in to <service>", and say what you\'ll do once he has. ' +
+    `${SIGN_IN_NUDGE} a service that needs the user to sign in again:\n${lines.join('\n')}\n` +
+    'If the work needs it, give the user an ask for it in end_turn (needs "you"), with that page as a link titled like "Sign in to <service>", and say what you\'ll do once they have. ' +
     "If it didn't matter, call end_turn again as you were: this note comes once a turn."
   );
 }

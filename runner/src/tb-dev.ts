@@ -213,7 +213,7 @@ export async function runDev(client: RunnerClient, cmd: string, args: string[], 
       if (self && r.waitingFor.includes(self)) {
         console.log(
           r.noResume && resume?.threadId === self
-            ? 'End your turn now, and say in your reply that Mike has to message this thread once the runner is back; the runner restarts after it.'
+            ? 'End your turn now, and say in your reply that the user has to message this thread once the runner is back; the runner restarts after it.'
             : 'End your turn now; the runner restarts after it and carries this thread on.',
         );
       } else console.log(`${tbCommand()} restart --cancel withdraws it.`);
@@ -268,7 +268,7 @@ export async function runDev(client: RunnerClient, cmd: string, args: string[], 
       // own cards are Mike's to answer, and it can't stop itself.
       const own = env.THREADBEAR_THREAD_ID && (params as { threadId?: unknown }).threadId === env.THREADBEAR_THREAD_ID;
       if (own && ['approvals.respond', 'threads.delete', 'threads.interrupt'].includes(args[0])) {
-        console.error(args[0] === 'approvals.respond' ? "That's this thread's own card; Mike answers it." : `Not on the thread this runs in (${args[0]}).`);
+        console.error(args[0] === 'approvals.respond' ? "That's this thread's own card; the user answers it." : `Not on the thread this runs in (${args[0]}).`);
         return 1;
       }
       // Snoozing or archiving releases the CLI, ending this turn: tb snooze
@@ -276,7 +276,7 @@ export async function runDev(client: RunnerClient, cmd: string, args: string[], 
       if (own && args[0] === 'threads.update') {
         const u = params as { archived?: unknown; snoozedUntil?: unknown };
         if (u.archived === true || (u.snoozedUntil !== undefined && u.snoozedUntil !== null)) {
-          console.error("Can't snooze or archive the thread this runs in from inside its own turn. Ask Mike to, or do it when the work is done.");
+          console.error("Can't snooze or archive the thread this runs in from inside its own turn. Ask the user to, or do it when the work is done.");
           return 1;
         }
       }
@@ -303,7 +303,7 @@ export function restartRefusal(s: Pick<RunnerStatus, 'version' | 'release' | 'ho
   if (!o.real) return undefined;
   const source = !s.release;
   if (o.onIt && source) {
-    return `The runner your thread runs on runs from a checkout (${s.version}), so a restart would bring it back on whatever is in that checkout now, untested. Runner changes wait for Mike: tell him what you need, and he can switch it to releases with scripts/install-runner.sh from a terminal.`;
+    return `The runner your thread runs on runs from a checkout (${s.version}), so a restart would bring it back on whatever is in that checkout now, untested. Runner changes wait for the user: tell them what you need, and they can switch it to releases with scripts/install-runner.sh from a terminal.`;
   }
   if (o.force) return undefined;
   if (o.onIt) return 'This is the runner your thread runs on. Ship runner changes with scripts/deploy-runner.sh, which builds, tests and checks a release, then restarts it once every thread is idle and carries your thread on.';
@@ -355,7 +355,7 @@ const TOO_OLD = 3;
 function tooOld(e: unknown): undefined {
   if (e !== undefined) quietlyTooOld(e);
   console.error(
-    "This runner is too old for runner.status and runner.restart, so it can't wait for its threads before restarting. deploy-runner.sh waits for them itself; inside a thread, leave the restart to Mike.",
+    "This runner is too old for runner.status and runner.restart, so it can't wait for its threads before restarting. deploy-runner.sh waits for them itself; inside a thread, leave the restart to the user.",
   );
   return undefined;
 }
@@ -448,7 +448,7 @@ export function formatStatus(s: RunnerStatus, threads: ThreadSummary[], now: num
   if (s.sync) lines.push(formatSync(s.sync, now));
   // Releases never touch the LaunchAgent (launch.mjs, the plist, Threadbear
   // Runner.app); only Mike's install-runner.sh does.
-  if (u?.launcherChanged) lines.push(`${u.launcherReason ?? 'launch.mjs on main differs from the installed one.'} Mike runs ${u.checkout ? `${u.checkout}/runner/` : 'runner/'}scripts/install-runner.sh once nothing is busy.`);
+  if (u?.launcherChanged) lines.push(`${u.launcherReason ?? 'launch.mjs on main differs from the installed one.'} The user runs ${u.checkout ? `${u.checkout}/runner/` : 'runner/'}scripts/install-runner.sh once nothing is busy.`);
   return lines.join('\n') + '\n';
 }
 

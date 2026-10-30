@@ -541,7 +541,7 @@ test('tb restart leaves the live runner alone: refused from its own threads, and
   // not even --force.
   assert.match(restartRefusal(live, { onIt: true, real: true, force: false })!, /^This is the runner your thread runs on\. Ship runner changes with scripts\/deploy-runner\.sh/);
   assert.equal(restartRefusal(live, { onIt: true, real: true, force: true }), undefined);
-  assert.match(restartRefusal(source, { onIt: true, real: true, force: true })!, /runs from a checkout \(0\.1\.0\+source\).*Runner changes wait for Mike/);
+  assert.match(restartRefusal(source, { onIt: true, real: true, force: true })!, /runs from a checkout \(0\.1\.0\+source\).*Runner changes wait for the user/);
   // From outside its threads (a terminal, or a T3 agent): only a runner
   // run from a checkout is refused, and --force does it.
   assert.equal(restartRefusal(live, { onIt: false, real: true, force: false }), undefined);
@@ -739,7 +739,7 @@ test("tb rpc keeps tb's guards, flag errors never offer --force, and a resume th
     r = await run(h.home, url, ['restart'], { ...inThread, THREADBEAR_TB: '/tmp/dev/tb' });
     assert.equal(r.code, 0, r.out);
     assert.match(r.out, /\nThe runner won't carry this thread on afterwards: this thread has already been resumed 3 times in the last hour\.\n/);
-    assert.match(r.out, /End your turn now, and say in your reply that Mike has to message this thread once the runner is back/);
+    assert.match(r.out, /End your turn now, and say in your reply that the user has to message this thread once the runner is back/);
     assert.doesNotMatch(r.out, /carries this thread on/);
     assert.equal(JSON.parse(fs.readFileSync(resumesPath(h.home), 'utf8'))[thread.id].length, 3);
 

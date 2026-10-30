@@ -102,7 +102,7 @@ test('inside a thread, tb will not delete, interrupt, snooze or archive that thr
     for (const args of [['approve', self.id, approvalId, 'allow'], ['answer', self.id.slice(0, 8), approvalId, 'yes'], ['rpc', 'approvals.respond', JSON.stringify({ threadId: self.id, approvalId, decision: 'allow' })]]) {
       const t = tb(h, url, args, inThread);
       assert.equal(await t.exited, 1, args[0]);
-      assert.match(t.out(), /own card; Mike answers it/, args[0]);
+      assert.match(t.out(), /own card; the user answers it/, args[0]);
     }
     assert.equal(h.runner.get(self.id).status, 'waiting', 'still waiting on Mike');
     // Unarchiving itself, and other threads, are fine.

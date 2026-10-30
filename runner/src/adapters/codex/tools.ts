@@ -14,7 +14,8 @@
 import { z } from 'zod';
 import type { ToolApprovalAnswer, ToolApprovalRequest } from '../types.ts';
 import type { PermissionMode } from '../../protocol.ts';
-import { ALWAYS_ASK_TOOLS, FILING_PROJECTS, guideLine, SERVER_NAME, SHOWING_MIKE } from '../../threadbear-mcp.ts';
+import { ALWAYS_ASK_TOOLS, FILING_PROJECTS, guideLine, SERVER_NAME, SHOWING_THE_USER } from '../../threadbear-mcp.ts';
+import { userLine } from '../../user-name.ts';
 import { toolTitle, truncateInput } from '../../tools.ts';
 import type { DynamicToolCallParams, DynamicToolCallResponse, DynamicToolSpec } from './types.ts';
 
@@ -35,7 +36,7 @@ export const NAMESPACE = SERVER_NAME;
 // the whole thread/start), so this stays a short summary. The longer
 // guidance on when to use each tool goes in as developer instructions.
 export const NAMESPACE_DESCRIPTION =
-  "Tools that manage Threadbear, Mike's own app for running agent threads, which this thread runs in: threads, schedules, projects, show_options, pin and show_panel for showing Mike things, and end_turn to finish every turn.";
+  "Tools that manage Threadbear, the app the user runs agent threads in, which this thread runs in: threads, schedules, projects, show_options, pin and show_panel for showing the user things, and end_turn to finish every turn.";
 export const NAMESPACE_DESCRIPTION_MAX = 1024;
 
 // Said as developer instructions at thread/start, next to the thread's
@@ -43,13 +44,14 @@ export const NAMESPACE_DESCRIPTION_MAX = 1024;
 // instructions.
 const GUIDE = guideLine();
 export const TOOL_GUIDANCE =
+  userLine() +
   (GUIDE ? `${GUIDE} ` : '') +
   "This thread's threadbear tools manage Threadbear itself: list and read threads, start new ones, message them, rename, snooze, archive, move and delete them, and schedule messages for later. " +
   'Use move_thread when the work belongs in another folder (for example a repo), so this thread runs there from the next turn. ' +
-  `${SHOWING_MIKE} ` +
+  `${SHOWING_THE_USER} ` +
   `${FILING_PROJECTS} ` +
   // Before, not after: Codex's final answer ends its turn (needs.ts).
-  'End every turn by calling end_turn as your last tool call, just before your final answer, with a short summary of what you did (Mike reads it first) and anything he has to do.';
+  'End every turn by calling end_turn as your last tool call, just before your final answer, with a short summary of what you did (the user reads it first) and anything they have to do.';
 
 // The tools as one dynamic-tool namespace, with JSON Schema from zod.
 export function dynamicToolSpecs(tools: ToolDefinition[]): DynamicToolSpec[] {

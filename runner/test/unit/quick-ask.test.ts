@@ -55,7 +55,7 @@ test("a follow-up starts a fresh session told the thread began as a quick ask", 
   const s = h.adapter.last;
   assert.equal(s.opts.resume, false);
   const sent = s.sent[0].text;
-  assert.match(sent, /^\[Threadbear handoff\] This thread began as a quick ask on Mike's phone/);
+  assert.match(sent, /^\[Threadbear handoff\] This thread began as a quick ask on the user's phone/);
   assert.match(sent, /User: What did I call the backup drive on Bruce\?/);
   assert.match(sent, /Assistant: It's CannMedia/);
   assert.ok(sent.endsWith('How big is the other one?'));

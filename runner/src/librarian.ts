@@ -26,6 +26,7 @@ import { LINKS_MAX, NOTES_LONG } from './projects.ts';
 import { atomicWriteFileSync, readJsonSync } from './fsutil.ts';
 import { findUp, isInside } from './patches.ts';
 import { SYMBOLS, fileHash, findIcon, storeIcon } from './project-icons.ts';
+import { userLine } from './user-name.ts';
 
 // What the librarian needs from the runner.
 export type LibrarianHost = {
@@ -495,15 +496,15 @@ export class Librarian {
     const inNow = (rec.projects ?? []).map((m) => `${m.id}${m.pinned ? ' (pinned)' : ''}`);
     lines.push(`Currently in: ${inNow.join(', ') || 'none'}`);
     if (rec.projectsLeft?.length) lines.push(`Never put it in: ${rec.projectsLeft.join(', ')}`);
-    if (selfFiled(rec)) lines.push('Filed by its own agent or Mike: leave its projects as they are (projects [], new null).');
-    if (rec.titleSet) lines.push('Its title was set by Mike or an agent: keep it (title null).');
+    if (selfFiled(rec)) lines.push('Filed by its own agent or the user: leave its projects as they are (projects [], new null).');
+    if (rec.titleSet) lines.push('Its title was set by the user or an agent: keep it (title null).');
     const repos = [...(this.edited.get(rec.id) ?? [])].map((r) => this.tilde(r));
     if (repos.length) lines.push(`Edited files in: ${repos.join(', ')}`);
     const worked = [...(this.workedIn.get(rec.id) ?? [])].filter((r) => !this.edited.get(rec.id)?.has(r)).map((r) => this.tilde(r));
     if (worked.length) lines.push(`Ran commands in: ${worked.join(', ')}`);
     const waiting = this.waitingFor(rec);
     if (waiting.length) {
-      lines.push('', 'Hibernating threads waiting for Mike to talk about something:');
+      lines.push('', 'Hibernating threads waiting for the user to talk about something:');
       for (const w of waiting) lines.push(`- ${w.threadId.slice(0, 8)} "${w.title}": ${w.topic}`);
     }
     const gist = this.host.threadGist(rec.id);
@@ -511,7 +512,7 @@ export class Librarian {
     if (gist.first) lines.push('', `First message: ${gist.first}`);
     if (gist.recent.length) {
       lines.push('', 'Latest messages:');
-      for (const m of gist.recent) lines.push(`${m.who === 'user' ? 'Mike' : 'Agent'}: ${m.text}`);
+      for (const m of gist.recent) lines.push(`${m.who === 'user' ? 'User' : 'Agent'}: ${m.text}`);
     }
     return lines.join('\n');
   }
@@ -1021,34 +1022,34 @@ function offReason(reason: ModelFailure, message: string): string {
   return message;
 }
 
-export const SYSTEM = `You are the librarian in Threadbear, an app where Mike runs AI coding agents in threads. You keep his projects: groupings above folders that carry goals, state and notes from thread to thread. A project is a body of work he'll come back to (an app, a library, a video, a house job, an ongoing chore), never a single task. One project can span several repos, and a thread can be in several projects.
+export const SYSTEM = `You are the librarian in Threadbear, an app where the user runs AI coding agents in threads. ${userLine()}You keep their projects: groupings above folders that carry goals, state and notes from thread to thread. A project is a body of work they'll come back to (an app, a library, a video, a house job, an ongoing chore), never a single task. One project can span several repos, and a thread can be in several projects.
 
 Given the project list and one thread, decide which projects the thread belongs in. A thread belongs in a project when it's about that project: building, fixing, planning, ideas, research or questions for it. A thread whose folder is a project's repo almost always belongs in that project. Prefer existing projects. Make a new one when the thread is about a body of work that fits none of them (its own repo is a strong sign); a one-off question, a quick chore or a throwaway test belongs in none. Never put a thread back in one it says never to.
 
 Reply with JSON only, no prose and no code fence:
 {"projects": ["<ids of existing projects the thread belongs in, or []>"],
- "new": null or {"title": "short name, as Mike would say it", "folders": ["~/path of its repo(s)"], "goals": "one or two sentences: what it's for", "state": "one or two sentences: where it's up to"},
+ "new": null or {"title": "short name, as the user would say it", "folders": ["~/path of its repo(s)"], "goals": "one or two sentences: what it's for", "state": "one or two sentences: where it's up to"},
  "state": {"<project id>": "the project's new state"} only when this thread changed where the whole project stands (shipped or finished something, made a decision, hit a blocker), else {},
  "addFolders": {"<project id>": ["~/path"]} for repos this thread shows belong to a project it's in, else {},
  "links": {"<project id>": [{"title": "Live site", "url": "https://..."}]} for lasting places of a project it's in that the messages give and the project doesn't list yet, else {},
  "thread": "where this thread itself is up to, as two or three short bullets, one per line, each starting \"- \": what it did or found, and what it's waiting on or doing next",
  "title": null, or a new title when the thread's title no longer says what it's about (see below),
- "wake": ["<ids of hibernating threads Mike is talking about here>"], or [] (see below),
+ "wake": ["<ids of hibernating threads the user is talking about here>"], or [] (see below),
  "why": "one short line"}
 
 Folders are repos the work lives in (the thread's folder when it's a repo, the repos it edited, and the ones it ran commands in when the work was about them, not a look at something else), never a catch-all folder. A project with no folders that this thread worked on in a repo should get that repo through addFolders. State is two to four plain sentences about the whole project, not this thread: what's done, what's next, what's blocked. Start from the current state, keep what's still true and fold the change in; don't replace it with this thread's details. Ideas and plans that aren't built yet don't change the state.
 
-Links are the few places Mike keeps going back to for a project: its live site, admin page, dashboard, store listing. Copy the url exactly from the messages and give it a short title ("Live site", "Admin", "App Store"). Never a pull request, commit, issue, docs page, localhost, file or one-off page.
+Links are the few places the user keeps going back to for a project: its live site, admin page, dashboard, store listing. Copy the url exactly from the messages and give it a short title ("Live site", "Admin", "App Store"). Never a pull request, commit, issue, docs page, localhost, file or one-off page.
 
 Keep the thread's title (title null) unless it no longer says what the thread is about: the work moved on to something else, or the title is only the first words of the first message ("Hey, does the library, sorry, the librarian, does it update"). A better wording of the same subject is no reason. A new title is 2 to 6 words about the whole thread as it is now, in sentence case (a capital for the first word and for names only), with no quotes, full stop, dash or emoji: "Fix the flaky upload test on CI", "Librarian renames threads that move on".
 
-Some hibernating threads are waiting for Mike to talk about something again ("woodworking"). Put one in wake when Mike's own messages in this thread are about that: he's working on it, planning it or asking about it. A passing mention, or only the agent bringing it up, isn't enough. Most looks wake none.
+Some hibernating threads are waiting for the user to talk about something again ("woodworking"). Put one in wake when the user's own messages in this thread are about that: they're working on it, planning it or asking about it. A passing mention, or only the agent bringing it up, isn't enough. Most looks wake none.
 
-The thread bullets are for Mike glancing at the thread later: concrete, in his plain words, each under ten words, no full stops. The last one says who's waiting on whom ("Waiting on Mike to pick a design", "Fixing the last failing test").`;
+The thread bullets are for the user glancing at the thread later: concrete, in their plain words, each under ten words, no full stops. The last one says who's waiting on whom ("Waiting on you to pick a design", "Fixing the last failing test").`;
 
-const NOTES_SYSTEM = `You tidy a project's notes in Threadbear, Mike's app for running AI coding agents in threads. Agents add to a project's notes as they work, and these have grown into a log. Rewrite them as short markdown notes that a later agent reads before working on the project.
+const NOTES_SYSTEM = `You tidy a project's notes in Threadbear, the user's app for running AI coding agents in threads. ${userLine()}Agents add to a project's notes as they work, and these have grown into a log. Rewrite them as short markdown notes that a later agent reads before working on the project.
 
-Keep: Mike's decisions and why, facts and gotchas the code doesn't make obvious (deployment names, commands, where things live, what breaks and how to tell), and what's still owed or waiting on someone, with its date.
+Keep: the user's decisions and why, facts and gotchas the code doesn't make obvious (deployment names, commands, where things live, what breaks and how to tell), and what's still owed or waiting on someone, with its date.
 Drop: what was built or landed (git and the docs record that), commit hashes, test runs and checks that passed, and anything a later note replaced or that has since been done.
 Merge notes on the same subject. Keep names, paths, ids and numbers exactly as written, and never add anything that isn't in the notes.
 
@@ -1062,7 +1063,7 @@ export function tidiedNotes(text: string): string {
     .trim();
 }
 
-const SYMBOL_SYSTEM = `You pick an icon for a project in Threadbear, Mike's app for running AI coding agents. Given the project and a list of SF Symbol names, reply with the one name from the list that best shows what the project is about, and nothing else.`;
+const SYMBOL_SYSTEM = `You pick an icon for a project in Threadbear, an app for running AI coding agents. Given the project and a list of SF Symbol names, reply with the one name from the list that best shows what the project is about, and nothing else.`;
 
 function parseAnswer(text: string): Answer | undefined {
   const t = text.trim().replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/, '');

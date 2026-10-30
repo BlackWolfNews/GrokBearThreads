@@ -206,13 +206,13 @@ test('list, read and account tools', async () => {
   const read = await t.call('read_thread', { threadId: b.id.slice(0, 8) });
   assert.match(read.text, /title: Second thread/);
   const self = await t.call('read_thread');
-  assert.match(self.text, /Mike \(.*\):\nFirst thread/);
+  assert.match(self.text, /User \(.*\):\nFirst thread/);
   assert.match(self.text, /Agent \(.*\):\nHello from the agent/);
   // The runner's resume after a restart isn't Mike's.
   h.runner.send(a.id, 'The runner restarted on release R. Check your change.', [], { origin: 'runner' });
   const resumed = await t.call('read_thread');
   assert.match(resumed.text, /Runner \(.*\):\nThe runner restarted on release R/);
-  assert.doesNotMatch(resumed.text, /Mike \(.*\):\nThe runner restarted/);
+  assert.doesNotMatch(resumed.text, /User \(.*\):\nThe runner restarted/);
   assert.match((await t.call('list_accounts')).text, /claude-3 {2}three@example\.com/);
   assert.match((await t.call('list_threads', { query: 'Second' })).text, /Second thread/);
   const missing = await t.call('read_thread', { threadId: 'zzzz' });
@@ -288,7 +288,7 @@ test("move_thread's `then` to another login isn't taken for Mike: the turn finis
   assert.match(first, /^\[Threadbear handoff\][\s\S]*\[Sent by the agent before moving to .*\]\n\nCarry on with the tests$/);
   const read = (await t.call('read_thread', { messages: 5 })).text;
   assert.match(read, /Agent \([^)]*\):\n\[Sent by the agent before moving to /);
-  assert.doesNotMatch(read, /Mike \([^)]*\):\n\[Sent by the agent/);
+  assert.doesNotMatch(read, /User \([^)]*\):\n\[Sent by the agent/);
 });
 
 test('interrupt and delete refuse this thread and work on others', async () => {
@@ -330,7 +330,7 @@ test("update_thread leaves a title Mike gave alone unless he asked for the new o
   h.runner.update({ threadId: other.id, title: 'Mike name' });
   const refused = await t.call('update_thread', { id: other.id, title: 'Agent again', snooze: '2h' });
   assert.equal(refused.error, true);
-  assert.match(refused.text, /Mike named this thread "Mike name" himself/);
+  assert.match(refused.text, /The user named this thread "Mike name" themselves/);
   assert.equal(h.runner.get(other.id).title, 'Mike name');
   assert.equal(h.runner.get(other.id).snoozedUntil, undefined, 'nothing else in the refused call changed');
   // The same title, or one Mike asked for, goes through.
@@ -478,7 +478,7 @@ test('end_turn is refused until the turn has replied to Mike in text', async () 
   assert.match(r.text, /result and any supporting evidence/);
   // So an agent sure it had answered doesn't take the check for broken.
   assert.match(r.text, /a refused end_turn isn't a tool result/);
-  assert.match(r.text, /If you think you already answered, he hasn't seen any of it/);
+  assert.match(r.text, /If you think you already answered, they haven't seen any of it/);
   assert.doesNotMatch(r.text, /thinking|thought|scratchpad|internal reasoning/i);
   toolResult(s, 'e1');
   // A progress line before more work isn't the reply either.

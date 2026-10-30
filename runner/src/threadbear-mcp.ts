@@ -25,6 +25,7 @@ import { PANEL_PLACES } from './panel-requests.ts';
 import { nudgedThisTurn, signInNudge, turnSignIns, uncovered } from './connectors.ts';
 import type { PanelPlace } from './protocol.ts';
 import { readRelease, type ReleaseJson } from './release.ts';
+import { userLine } from './user-name.ts';
 
 // What the tools drive: the Runner itself, or during a handover
 // (docs/protocol.md) a ThreadRouter (handover.ts) that reaches threads on
@@ -192,7 +193,7 @@ export function buildThreadbearTools(
 
   const line = (t: ThreadSummary): string => {
     const where = t.archivedAt ? 'archived' : t.snoozedUntil ? `snoozed until ${snoozeEnd(t)}` : 'inbox';
-    const flags = [t.status, where, t.needsYou ? 'needs Mike' : '', t.id === selfId ? 'this thread' : ''].filter(Boolean).join(', ');
+    const flags = [t.status, where, t.needsYou ? 'needs the user' : '', t.id === selfId ? 'this thread' : ''].filter(Boolean).join(', ');
     return `${t.id.slice(0, 8)}  ${t.title}  [${flags}]  ${t.cwd}  ${t.accountId}  ${relativeTime(t.lastActivityAt, now())}`;
   };
 
@@ -200,7 +201,7 @@ export function buildThreadbearTools(
     [
       `id: ${t.id}`,
       `title: ${t.title}`,
-      `status: ${t.status}${t.needsYou ? ' (needs Mike)' : ''}`,
+      `status: ${t.status}${t.needsYou ? ' (needs the user)' : ''}`,
       `folder: ${t.cwd}`,
       `account: ${t.accountId} (${providerName(t)})`,
       `pool: ${t.poolId ?? 'none (pinned to its account)'}`,
@@ -245,9 +246,9 @@ export function buildThreadbearTools(
   const reviewTools = [
     tool(
       'show_options',
-      'Shows Mike a set of images to compare side by side in a review window, with an optional pick and notes per image. Use this whenever you have two or more design alternatives (mockups, wireframes, screenshots of variants) for Mike to choose between, instead of pinning them, listing them in your reply or reading every image into the transcript. Returns a review ID promptly; finish your turn and Mike’s answer arrives later as a message. Images are copied into the thread. Reference images can receive notes but cannot be picked.',
+      'Shows the user a set of images to compare side by side in a review window, with an optional pick and notes per image. Use this whenever you have two or more design alternatives (mockups, wireframes, screenshots of variants) for the user to choose between, instead of pinning them, listing them in your reply or reading every image into the transcript. Returns a review ID promptly; finish your turn and the user’s answer arrives later as a message. Images are copied into the thread. Reference images can receive notes but cannot be picked.',
       {
-        title: z.string().min(1).max(200).describe('What Mike is reviewing.'),
+        title: z.string().min(1).max(200).describe('What the user is reviewing.'),
         note: z.string().max(4000).optional().describe('A short explanation or question for the whole review.'),
         options: z.array(z.object({
           id: z.string().min(1).max(200).describe('Stable option ID, such as A or B.'),
@@ -260,7 +261,7 @@ export function buildThreadbearTools(
       handle(async (input) => {
         if (!control.createReview) throw new Error('This runner does not support image reviews yet.');
         const { review } = await control.createReview(selfId, input);
-        return `Review ${review.id}: ${review.title} (${review.options.length} images). Mike can compare them and send a choice or notes. You can finish this turn; his reply will arrive as a later message.`;
+        return `Review ${review.id}: ${review.title} (${review.options.length} images). The user can compare them and send a choice or notes. You can finish this turn; their reply will arrive as a later message.`;
       }),
     ),
   ];
@@ -270,12 +271,12 @@ export function buildThreadbearTools(
   const highlightTools = [
     tool(
       'pin',
-      "Pins a file or link to this thread's Highlights, the list beside the transcript in Threadbear, so Mike can find it without scrolling: something you made for him to review (a mockup, a doc, a screenshot), a preview URL, a PR. Prefer this to running `open` on a file or page meant for Mike; with show: true it opens in the app's side pane straight away instead of taking over his screen. Files you write and links you mention are listed by themselves, so pin only what matters most, with a note saying why.",
+      "Pins a file or link to this thread's Highlights, the list beside the transcript in Threadbear, so the user can find it without scrolling: something you made for them to review (a mockup, a doc, a screenshot), a preview URL, a PR. Prefer this to running `open` on a file or page meant for the user; with show: true it opens in the app's side pane straight away instead of taking over their screen. Files you write and links you mention are listed by themselves, so pin only what matters most, with a note saying why.",
       {
         path: z.string().optional().describe('A file, absolute or relative to this thread’s folder. Give path or url.'),
         url: z.string().optional().describe('A link, with its scheme (https://, http://localhost:5173).'),
         title: z.string().max(200).optional().describe('What to call it. Default: the file name or the link.'),
-        note: z.string().max(500).optional().describe('One line on why Mike should look at it.'),
+        note: z.string().max(500).optional().describe('One line on why the user should look at it.'),
         show: z.boolean().optional().describe('Open it in the side pane now.'),
       },
       handle(async (input) => {
@@ -298,20 +299,20 @@ export function buildThreadbearTools(
     // moves one Mike has open: his layout is his.
     tool(
       'show_panel',
-      "Opens one of Threadbear's panels for Mike, or brings it to the front where he has it: this thread's Highlights or Patches, one of its patch panels (by id or title, like the Convex dashboard or the Simulator), or the app's Usage, Updates or Connectors (which of Mike's gateway services are signed in, with Connect buttons). Use it when what he should look at is a panel; for a file or a link, use pin with show: true. It happens while Mike is looking at this thread in the Mac app: straight away if he is, otherwise when he next opens it (unless he sends a message first). The answer says which. A panel he has open stays where he put it; `where` only says where a closed one opens.",
+      "Opens one of Threadbear's panels for the user, or brings it to the front where they have it: this thread's Highlights or Patches, one of its patch panels (by id or title, like the Convex dashboard or the Simulator), or the app's Usage, Updates or Connectors (which of the user's gateway services are signed in, with Connect buttons). Use it when what they should look at is a panel; for a file or a link, use pin with show: true. It happens while the user is looking at this thread in the Mac app: straight away if they are, otherwise when they next open it (unless they send a message first). The answer says which. A panel they have open stays where they put it; `where` only says where a closed one opens.",
       {
         panel: z.string().min(1).max(200).describe("highlights, patches, usage, updates, connectors, or one of this thread's panels by id or title."),
         where: z
           .enum(PANEL_PLACES as [PanelPlace, ...PanelPlace[]])
           .optional()
-          .describe('Where a closed panel opens: tab (beside the thread, closing when Mike moves on), left, right, top or bottom (along that side of the window), or window (its own). Default: its usual place.'),
+          .describe('Where a closed panel opens: tab (beside the thread, closing when the user moves on), left, right, top or bottom (along that side of the window), or window (its own). Default: its usual place.'),
       },
       handle(async (input) => {
         if (!control.showPanel) throw new Error("This runner can't show panels yet.");
         const { request, shown } = await control.showPanel(selfId, input);
         return shown
-          ? `${request.title} is open in front of Mike now.`
-          : `${request.title} will open when Mike next looks at this thread in the Mac app; he isn't right now. It waits until then, or until his next message.`;
+          ? `${request.title} is open in front of the user now.`
+          : `${request.title} will open when the user next looks at this thread in the Mac app; they aren't right now. It waits until then, or until their next message.`;
       }),
     ),
   ];
@@ -336,7 +337,7 @@ export function buildThreadbearTools(
         runner: z
           .string()
           .optional()
-          .describe("With new_thread: the runner (machine) it runs on, by name, e.g. bruce. Default: this thread's runner. Only when Mike asks for another machine; the folder and account are then that machine's (a path there, or left out for its default)."),
+          .describe("With new_thread: the runner (machine) it runs on, by name, e.g. bruce. Default: this thread's runner. Only when the user asks for another machine; the folder and account are then that machine's (a path there, or left out for its default)."),
       },
       handle(async ({ text, when, cron, timezone, title, threadId, id: alias, new_thread, folder: f, account: acc, model, effort, permissionMode, runner }) => {
         if ((when === undefined) === (cron === undefined)) throw new Error('Give exactly one of when (once) and cron (repeating).');
@@ -423,12 +424,12 @@ export function buildThreadbearTools(
 
   const linksArg = z.array(z.object({ title: z.string().optional(), url: z.string() }));
   const LINKS_HELP =
-    'The few places Mike goes for this project, at most 8: its live site, admin page, dashboard, store listing, repo. Short titles ("Live site", "Admin"). Not one-off pages, PRs or docs.';
+    'The few places the user goes for this project, at most 8: its live site, admin page, dashboard, store listing, repo. Short titles ("Live site", "Admin"). Not one-off pages, PRs or docs.';
 
   const projectTools = [
     tool(
       'list_projects',
-      "Lists Mike's projects: groupings above folders that carry goals, state and notes from thread to thread. Shows which this thread is in. A background librarian files threads into them; you can too (join_project), and should keep a project's state and notes current (update_project).",
+      "Lists the user's projects: groupings above folders that carry goals, state and notes from thread to thread. Shows which this thread is in. A background librarian files threads into them; you can too (join_project), and should keep a project's state and notes current (update_project).",
       { archived: z.boolean().optional().describe('Include archived projects.') },
       handle(async ({ archived }) => {
         const mine = new Set(((await control.get(selfId)).projects ?? []).map((m) => m.id));
@@ -474,9 +475,9 @@ export function buildThreadbearTools(
     ),
     tool(
       'create_project',
-      "Makes a project and puts this thread in it. For a body of work Mike will come back to (an app, a library, a video, an ongoing job), not a single task; check list_projects first so you don't make a second one for the same thing.",
+      "Makes a project and puts this thread in it. For a body of work the user will come back to (an app, a library, a video, an ongoing job), not a single task; check list_projects first so you don't make a second one for the same thing.",
       {
-        title: z.string().min(1).describe('Short name, as Mike would say it.'),
+        title: z.string().min(1).describe('Short name, as the user would say it.'),
         folders: z.array(z.string()).optional().describe("Repos the work lives in. ~ works; relative paths are from this thread's folder."),
         goals: z.string().optional().describe("What it's for and what done looks like, a few lines."),
         state: z.string().optional().describe("Where it's up to and what's next, a few lines."),
@@ -501,7 +502,7 @@ export function buildThreadbearTools(
     ),
     tool(
       'update_project',
-      "Changes a project: title, goals, state, notes, links, folders or icon. Keep state current as work moves on (what's done, what's next, what's blocked). Notes are for what a later thread should know that the repo doesn't say: decisions and why, gotchas, what's still owed. They're not a log of what landed (git and the docs have that), so when something you note replaces an older note, rewrite the notes rather than adding to them. appendNote adds a paragraph without rewriting the notes. When the project gets a place Mike will keep going back to (it goes live, gets an admin page, a dashboard, a store listing), add it with addLinks: links show at the top of every one of its threads' Highlights. The librarian finds icons by itself from the project's folders, so only set one when Mike asks or the project gets a new app icon somewhere it wouldn't look.",
+      "Changes a project: title, goals, state, notes, links, folders or icon. Keep state current as work moves on (what's done, what's next, what's blocked). Notes are for what a later thread should know that the repo doesn't say: decisions and why, gotchas, what's still owed. They're not a log of what landed (git and the docs have that), so when something you note replaces an older note, rewrite the notes rather than adding to them. appendNote adds a paragraph without rewriting the notes. When the project gets a place the user will keep going back to (it goes live, gets an admin page, a dashboard, a store listing), add it with addLinks: links show at the top of every one of its threads' Highlights. The librarian finds icons by itself from the project's folders, so only set one when the user asks or the project gets a new app icon somewhere it wouldn't look.",
       {
         project: z.string().describe('Project id, id prefix or title.'),
         title: z.string().optional(),
@@ -576,21 +577,21 @@ export function buildThreadbearTools(
       END_TURN_TOOL,
       codex ? CODEX_END_TURN_DESCRIPTION : END_TURN_DESCRIPTION,
       {
-        needs: z.enum(['you', 'nothing']).optional().describe('"you" when Mike has to do something before this can go on; "nothing" when it is done. Left out, it follows the asks.'),
+        needs: z.enum(['you', 'nothing']).optional().describe('"you" when the user has to do something before this can go on; "nothing" when it is done. Left out, it follows the asks.'),
         summary: z
           .array(z.string())
           .max(8)
           .optional()
-          .describe('What happened this turn, 2 to 5 markdown bullets (one string each, no leading dash), each one line of about 15 words at most, linked to where Mike can check it: [tests pass](work:npm test) for a step in your working, [its own thread](thread:a1b2c3d4), a web page or a file. Drawn as your reply; see the description.'),
+          .describe('What happened this turn, 2 to 5 markdown bullets (one string each, no leading dash), each one line of about 15 words at most, linked to where the user can check it: [tests pass](work:npm test) for a step in your working, [its own thread](thread:a1b2c3d4), a web page or a file. Drawn as your reply; see the description.'),
         asks: z
           .array(
             z.object({
               // No where: the paragraph says it (docs/protocol.md, "Needs
               // you"). The runner still takes one from older sessions.
-              action: z.string().min(1).describe('The ask\'s first sentence: one concrete thing for Mike to do, or the question, e.g. "Add your Claude login to the Claude pool in Settings › Pools." The card shows it with why as one paragraph; Highlights and notifications show it alone, so keep it to a sentence.'),
-              reply: z.string().optional().describe('The exact words to send back when it is done, e.g. "done" or "key set". Leave it out when the reply is his own answer (a decision, a choice).'),
+              action: z.string().min(1).describe('The ask\'s first sentence: one concrete thing for the user to do, or the question, e.g. "Add your Claude login to the Claude pool in Settings › Pools." The card shows it with why as one paragraph; Highlights and notifications show it alone, so keep it to a sentence.'),
+              reply: z.string().optional().describe('The exact words to send back when it is done, e.g. "done" or "key set". Leave it out when the reply is their own answer (a decision, a choice).'),
               why: z.string().min(1).describe('The rest of the ask\'s paragraph, read straight after action: what this is about and what you want back, in a sentence or two, so it makes sense without your message: "Your Slack draft to Emily names the automation guy Hayden; he\'s Pete. Say if I should fix it and send it." Never just a place. When the ask is several questions or choices, end it with them as a short markdown list, one per line; the card draws the list.'),
-              options: z.array(z.string()).max(6).optional().describe('Likely answers to pick from, short: ["Merge", "Test locally first"]. Give them for every decision or yes/no question. He can always write his own instead.'),
+              options: z.array(z.string()).max(6).optional().describe('Likely answers to pick from, short: ["Merge", "Test locally first"]. Give them for every decision or yes/no question. They can always write their own instead.'),
               suggested: z.number().int().optional().describe('Index into options of the answer you would pick.'),
               links: z
                 .array(
@@ -606,16 +607,16 @@ export function buildThreadbearTools(
           )
           .max(10)
           .optional()
-          .describe('With needs "you": each thing he has to do, most blocking first. Usually one or two.'),
+          .describe('With needs "you": each thing they have to do, most blocking first. Usually one or two.'),
         next: z
           .array(z.string())
           .max(3)
           .optional()
-          .describe('With needs "nothing": follow-ups in this thread worth doing next, each the message Mike would send to start it, about 8 words: "Show pictures and files from Bruce threads". Only ones that really came up; usually none. See the description.'),
+          .describe('With needs "nothing": follow-ups in this thread worth doing next, each the message the user would send to start it, about 8 words: "Show pictures and files from Bruce threads". Only ones that really came up; usually none. See the description.'),
         archive: z
           .boolean()
           .optional()
-          .describe('true to archive this thread once the turn is over. Only when Mike has asked for this thread to be archived, and only with needs "nothing".'),
+          .describe('true to archive this thread once the turn is over. Only when the user has asked for this thread to be archived, and only with needs "nothing".'),
       },
       handle(async (args) => {
         const { asks, archive } = args;
@@ -648,7 +649,7 @@ export function buildThreadbearTools(
         // Not ENDED: that would have the runner drop the final answer that
         // follows as text after end_turn.
         if (codex) {
-          const answer = summary ? 'Now write your final answer, one short line, as Mike reads your summary: it ends the turn.' : 'Now write your final answer: it ends the turn.';
+          const answer = summary ? 'Now write your final answer, one short line, as the user reads your summary: it ends the turn.' : 'Now write your final answer: it ends the turn.';
           return needs === 'you' ? `Noted.${restart} ${answer} Keep the asks out of it, as they go in a card under it.` : `Noted. ${answer}`;
         }
         // With the why, as the bare "End the turn now, with no more text"
@@ -659,19 +660,19 @@ export function buildThreadbearTools(
         // the runner puts it in the summary's place (needs.ts, NARRATION_ONLY).
         if (reply?.narrationOnly) {
           return needs === 'you'
-            ? `${ENDED} will wait in Needs you${archive ? ', and stays in the inbox, as it needs something from Mike' : ''}.${restart} ${NARRATION_ONLY} Keep the asks out of it: they go in a card under it.`
+            ? `${ENDED} will wait in Needs you${archive ? ', and stays in the inbox, as it needs something from the user' : ''}.${restart} ${NARRATION_ONLY} Keep the asks out of it: they go in a card under it.`
             : `${ENDED} is done${archive ? ', and will be archived once the turn is over' : ''}. ${NARRATION_ONLY}`;
         }
         return needs === 'you'
-          ? `${ENDED} will wait in Needs you${archive ? ', and stays in the inbox, as it needs something from Mike' : ''}.${restart} Stop here, with no more text: Mike has your reply, the asks go in a card under it, and anything written now lands as a second message.`
-          : `${ENDED} is done${archive ? ', and will be archived once the turn is over' : ''}. Stop here, with no more text: Mike has your reply, and anything written now lands as a second message under it.`;
+          ? `${ENDED} will wait in Needs you${archive ? ', and stays in the inbox, as it needs something from the user' : ''}.${restart} Stop here, with no more text: the user has your reply, the asks go in a card under it, and anything written now lands as a second message.`
+          : `${ENDED} is done${archive ? ', and will be archived once the turn is over' : ''}. Stop here, with no more text: the user has your reply, and anything written now lands as a second message under it.`;
       }),
     ),
     ...(appRestarts
       ? [
           tool(
             'wait_for_app_restart',
-            "Sends you a message in this thread when Mike's Threadbear Mac app next restarts onto a new build: after you've landed an app change and asked him to Restart to Update (in the Threadbear menu), so you can check it in the running app. An end_turn ask that mentions Restart to Update does this by itself. `text` is what to send then; by default a line saying it restarted. One per thread: asking again replaces it.",
+            "Sends you a message in this thread when the user's Threadbear Mac app next restarts onto a new build: after you've landed an app change and asked them to Restart to Update (in the Threadbear menu), so you can check it in the running app. An end_turn ask that mentions Restart to Update does this by itself. `text` is what to send then; by default a line saying it restarted. One per thread: asking again replaces it.",
             { text: z.string().max(4000).optional().describe('What to send when it restarts, e.g. what to check.') },
             handle(async ({ text }) => {
               const { build } = appRestarts.watch(selfId, text);
@@ -699,7 +700,7 @@ export function buildThreadbearTools(
     ),
     tool(
       'read_thread',
-      'Shows a thread\'s settings and its most recent messages from Mike and the agent (tool calls left out). Leave threadId out for this thread.',
+      'Shows a thread\'s settings and its most recent messages from the user and the agent (tool calls left out). Leave threadId out for this thread.',
       {
         ...thisOrOther,
         messages: z.number().int().min(1).max(100).optional().describe('How many recent messages. Default 10.'),
@@ -728,7 +729,7 @@ export function buildThreadbearTools(
             // The runner's own messages (the resume after a restart) and
             // agents' aren't Mike's, and an agent shouldn't take them for
             // his instructions.
-            if (e.type === 'user.message') picked.push(`${e.origin === 'runner' ? 'Runner' : e.origin === 'schedule' ? 'Schedule' : !e.origin && sentByAgent(e.text) ? 'Agent' : 'Mike'} (${e.ts}):\n${clip(e.text)}`);
+            if (e.type === 'user.message') picked.push(`${e.origin === 'runner' ? 'Runner' : e.origin === 'schedule' ? 'Schedule' : !e.origin && sentByAgent(e.text) ? 'Agent' : 'User'} (${e.ts}):\n${clip(e.text)}`);
             else if (e.type === 'assistant.text' && !texts.has(e.itemId)) {
               texts.add(e.itemId);
               picked.push(`Agent (${e.ts}):\n${clip(e.text)}`);
@@ -764,7 +765,7 @@ export function buildThreadbearTools(
     ),
     tool(
       'create_thread',
-      'Starts a new Threadbear thread and sends it a first message straight away; it runs on its own, like Mike starting it from the app. Returns the new thread\'s id. Use read_thread later to see how it went.',
+      'Starts a new Threadbear thread and sends it a first message straight away; it runs on its own, like the user starting it from the app. Returns the new thread\'s id. Use read_thread later to see how it went.',
       {
         text: z.string().min(1).describe('The first message: a complete brief, since the new thread knows nothing else.'),
         title: z.string().optional().describe('Title for the sidebar. Default: the first line of text.'),
@@ -806,11 +807,11 @@ export function buildThreadbearTools(
     ),
     tool(
       'update_thread',
-      "Changes a thread's title, model or permissions, snoozes it, or archives it. Leave threadId out for this thread. This thread can be renamed or have its model or permissions changed, but not snoozed or archived while it's working (that would stop this turn). If Mike asks for this thread to be archived, pass archive: true to end_turn instead.",
+      "Changes a thread's title, model or permissions, snoozes it, or archives it. Leave threadId out for this thread. This thread can be renamed or have its model or permissions changed, but not snoozed or archived while it's working (that would stop this turn). If the user asks for this thread to be archived, pass archive: true to end_turn instead.",
       {
         ...thisOrOther,
         title: z.string().optional(),
-        mikeAsked: z.boolean().optional().describe('true when Mike asked for this title. A thread Mike named himself keeps his title unless he asks for a new one.'),
+        mikeAsked: z.boolean().optional().describe('true when the user asked for this title. A thread the user named themselves keeps that title unless they ask for a new one.'),
         model: z.string().nullable().optional().describe('Model id, or null for the account default.'),
         effort: effortEnum.nullable().optional().describe("Reasoning effort, or null for the model's own level (ultra is Codex only)."),
         pool: z.string().nullable().optional().describe('Pool id or title to put the thread in (it moves onto one of its logins from the next turn if its current one isn\'t in it), or null or "pin" to pin it to its current login.'),
@@ -821,7 +822,7 @@ export function buildThreadbearTools(
       handle(async ({ threadId, id: alias, title, mikeAsked, model, effort, pool: p, permissionMode, snooze, archived }) => {
         const id = await resolve(threadId ?? alias);
         const stops = (snooze !== undefined && snooze.trim().toLowerCase() !== 'off') || archived === true;
-        if (id === selfId && stops) throw new Error("Can't snooze or archive this thread from inside its own turn. Ask Mike to, or do it when the work is done.");
+        if (id === selfId && stops) throw new Error("Can't snooze or archive this thread from inside its own turn. Ask the user to, or do it when the work is done.");
         const upd: Parameters<ThreadControl['update']>[0] = { threadId: id };
         if (title !== undefined) {
           upd.title = title;
@@ -841,7 +842,7 @@ export function buildThreadbearTools(
     ),
     tool(
       'move_thread',
-      "Moves a thread to another working folder (and optionally another account). For this thread the move happens when the current turn ends: the next message starts the CLI in the new folder and, on the same account, resumes the whole conversation there; on a new account it starts fresh with a short summary. Pass `then` to have this thread carry on by itself straight after the move, with that text as its next message; without it, the thread waits for Mike.",
+      "Moves a thread to another working folder (and optionally another account). For this thread the move happens when the current turn ends: the next message starts the CLI in the new folder and, on the same account, resumes the whole conversation there; on a new account it starts fresh with a short summary. Pass `then` to have this thread carry on by itself straight after the move, with that text as its next message; without it, the thread waits for the user.",
       {
         folder: z.string().describe("The new folder. ~ works; relative paths are from this thread's current folder."),
         ...thisOrOther,
@@ -857,7 +858,7 @@ export function buildThreadbearTools(
           await control.send(id, `${MOVE_MESSAGE_PREFIX}${t.cwd}]\n\n${then.trim()}`);
         }
         const when = self ? 'when this turn ends' : 'on its next message';
-        const next = then?.trim() ? (self ? ' It carries on by itself straight after.' : ' Your message waits for it.') : self ? ' It waits for Mike after that.' : '';
+        const next = then?.trim() ? (self ? ' It carries on by itself straight after.' : ' Your message waits for it.') : self ? ' It waits for the user after that.' : '';
         return `Moved ${self ? 'this thread' : `"${t.title}"`} to ${t.cwd}${acc ? ` on ${t.accountId}` : ''}. That takes effect ${when}.${next}`;
       }),
     ),
@@ -874,7 +875,7 @@ export function buildThreadbearTools(
     ),
     tool(
       'delete_thread',
-      "Deletes a thread: stops its CLI and moves its files to Threadbear's trash folder. Mike is always asked first. Archiving is usually what's wanted; delete only when he asked for it.",
+      "Deletes a thread: stops its CLI and moves its files to Threadbear's trash folder. The user is always asked first. Archiving is usually what's wanted; delete only when they asked for it.",
       other,
       handle(async ({ threadId, id: alias }) => {
         const id = await resolveOther(threadId ?? alias);
@@ -901,22 +902,22 @@ function clip(text: string, max = 2000): string {
 // agent sees only their names until it loads one, and an agent that made
 // three mockups pinned them and asked in chat instead of calling
 // show_options, never knowing the review window was there.
-export const SHOWING_MIKE =
-  'When you have design options, mockups or wireframes for Mike to choose between, put them in front of him with show_options (a side-by-side review window where he picks one and leaves notes), not as pins or a list in your reply; his answer comes back as a message. ' +
-  "For a single file or link he should look at (a doc, a screenshot, a preview URL, a PR), use pin, with show: true to open it in Threadbear's side pane rather than running `open`. " +
-  "To put one of Threadbear's own panels in front of him (this thread's Highlights, a patch panel such as the Convex dashboard, Usage), use show_panel. " +
-  // The app takes a new build by itself once Mike leaves it idle, and the
-  // runner tells the thread when it has, so neither the restart nor the
-  // looking needs him. Agents kept ending "Restart to Update, then check
-  // the bubble" anyway, because this line told them to (Mike, 29 Oct).
-  "After landing a change to the Threadbear Mac app, don't ask Mike to restart it or to check it: the app restarts onto the new build by itself once he leaves it idle. Call wait_for_app_restart saying what to check, end the turn with needs \"nothing\", and check it yourself when that message comes (the Threadbear repo's AGENTS.md, \"Seeing and driving the app\", shows any thread in a scripted copy of the app and screenshots it). Ask him only for a judgement he has to make.";
+// What to do after changing Threadbear's own Mac app (don't ask for a
+// restart, call wait_for_app_restart) used to be here too. It only matters
+// to threads working on Threadbear itself, so it lives in the repo's
+// AGENTS.md, which those threads read, and other people's threads don't
+// get it (30 Oct).
+export const SHOWING_THE_USER =
+  'When you have design options, mockups or wireframes for the user to choose between, put them in front of them with show_options (a side-by-side review window where they pick one and leave notes), not as pins or a list in your reply; their answer comes back as a message. ' +
+  "For a single file or link they should look at (a doc, a screenshot, a preview URL, a PR), use pin, with show: true to open it in Threadbear's side pane rather than running `open`. " +
+  "To put one of Threadbear's own panels in front of them (this thread's Highlights, a patch panel such as the Convex dashboard, Usage), use show_panel.";
 
 // Also in the instructions, for the same reason. The librarian files
 // threads by itself, but it only sees a summary and can miss one; the
-// thread's own agent knows what it's working on. Once an agent (or Mike)
-// has filed a thread, the librarian leaves its projects alone.
+// thread's own agent knows what it's working on. Once an agent (or the
+// user) has filed a thread, the librarian leaves its projects alone.
 export const FILING_PROJECTS =
-  "If this thread's work belongs to one of Mike's projects (list_projects) and it isn't in it yet, put it there early with join_project, or make one with create_project for a new body of work he'll come back to (not for a one-off question or chore). " +
+  "If this thread's work belongs to one of the user's projects (list_projects) and it isn't in it yet, put it there early with join_project, or make one with create_project for a new body of work they'll come back to (not for a one-off question or chore). " +
   "When the thread ships or finishes something, makes a decision or hits a blocker that changes where the project stands, update the project's state with update_project.";
 
 // This runner's release.json, or none when it runs from a checkout.
@@ -950,13 +951,14 @@ export function threadbearMcpServer(control: ThreadControl, selfId: string, sche
     name: SERVER_NAME,
     version: RUNNER_VERSION,
     instructions:
-      `This session is a thread in Threadbear, Mike's own app for running agent threads (thread id ${selfId}). ` +
+      `This session is a thread in Threadbear, the app the user runs agent threads in (thread id ${selfId}). ` +
+      userLine() +
       (guide ? `${guide} ` : '') +
-      'These tools manage Threadbear itself: list and read threads, start new ones, message them, rename, snooze, archive, move and delete them, schedule messages for later (once or on a cron), and keep Mike\'s projects (groupings above folders with goals, state and notes) up to date. ' +
+      'These tools manage Threadbear itself: list and read threads, start new ones, message them, rename, snooze, archive, move and delete them, schedule messages for later (once or on a cron), and keep the user\'s projects (groupings above folders with goals, state and notes) up to date. ' +
       'Use move_thread when the work belongs in another folder (for example a repo), so this thread runs there from the next turn. ' +
-      `${SHOWING_MIKE} ` +
+      `${SHOWING_THE_USER} ` +
       (projects ? `${FILING_PROJECTS} ` : '') +
-      'End every turn by calling end_turn, with a short summary of what you did (Mike reads it first, as your reply) and anything he has to do.',
+      'End every turn by calling end_turn, with a short summary of what you did (the user reads it first, as your reply) and anything they have to do.',
     tools: buildThreadbearTools(control, selfId, Date.now, schedules, projects, appRestarts),
   });
   server.tools = [...ALWAYS_ASK_TOOLS].map((name) => ({ name: name.split('__').at(-1)!, permission_policy: 'always_ask' as const }));

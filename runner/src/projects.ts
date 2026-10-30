@@ -622,7 +622,7 @@ export function checkLinks(links: unknown): ProjectLink[] {
     if (out.some((o) => sameUrl(o.url, parsed.href))) continue;
     out.push({ title: name.slice(0, TITLE_MAX), url: parsed.href });
   }
-  if (out.length > LINKS_MAX) throw bad(`A project has at most ${LINKS_MAX} links: the few places Mike goes for it.`);
+  if (out.length > LINKS_MAX) throw bad(`A project has at most ${LINKS_MAX} links: the few places the user goes for it.`);
   return out;
 }
 

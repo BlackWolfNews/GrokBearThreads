@@ -32,10 +32,10 @@ export const TOPIC_MAX = 80;
 const LATEST_MS = 2 * 365 * 86_400_000;
 
 export const WAKE_SYSTEM = [
-  "You work out when a hibernating thread should wake up, in Threadbear, Mike's app for running AI agents in threads. Mike has put a thread away and said in his own words when he wants it back.",
+  "You work out when a hibernating thread should wake up, in Threadbear, the user's app for running AI agents in threads. The user has put a thread away and said in their own words when they want it back.",
   'Answer with a time, a topic, or both:',
-  '- A time when he names one, however loosely: "at the weekend" is Saturday 9 am, "tonight" 7 pm, "in a few weeks" three weeks on at 9 am, "after Christmas" 27 December 9 am. Pick a sensible hour when he gives none: 9 am for a day. Never a time that has already passed.',
-  '- A topic when he wants it back the next time he brings something up ("next time I talk about woodworking", "when I get back to the shed"): a few words for what to listen for, as you would say it in "when Mike talks about …" ("woodworking", "the shed build"). Add a time as well only when he gives a limit ("or in a month at the latest").',
+  '- A time when they name one, however loosely: "at the weekend" is Saturday 9 am, "tonight" 7 pm, "in a few weeks" three weeks on at 9 am, "after Christmas" 27 December 9 am. Pick a sensible hour when they give none: 9 am for a day. Never a time that has already passed.',
+  '- A topic when they want it back the next time they bring something up ("next time I talk about woodworking", "when I get back to the shed"): a few words for what to listen for, as you would say it in "when the user talks about …" ("woodworking", "the shed build"). Add a time as well only when they give a limit ("or in a month at the latest").',
   "- Something you can't watch for (a reply from someone, a PR merging, a delivery): the time it's most likely to have happened by, and say so in why.",
   'Reply with JSON only, no prose and no code fence: {"until": "an ISO 8601 time with its UTC offset, or null", "topic": "a few words, or null", "why": "one short line, in plain words"}',
 ].join('\n\n');
@@ -45,9 +45,9 @@ export function wakePrompt(input: WakeInput): string {
     `Now: ${localNow(input.now, input.timeZone)} (${input.timeZone})`,
     `The thread: "${input.title}"`,
   ];
-  if (input.first) parts.push(`How it started (Mike): ${cut(input.first, 800)}`);
+  if (input.first) parts.push(`How it started (the user): ${cut(input.first, 800)}`);
   if (input.brief) parts.push(`Where it's up to:\n${cut(input.brief, 600)}`);
-  parts.push(`Mike wants it back: ${input.said.trim()}`);
+  parts.push(`The user wants it back: ${input.said.trim()}`);
   return parts.join('\n\n');
 }
 

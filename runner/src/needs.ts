@@ -232,7 +232,7 @@ function askFrom(item: string): Ask {
 // session keeps the system prompt it started with, but sees every tool's
 // description afresh.
 const END_TURN_WHAT =
-  'Ends the turn: says what it did (summary) and whether Mike has to do anything (asks), so Threadbear can put the thread in Needs you or leave it as done. ';
+  'Ends the turn: says what it did (summary) and whether the user has to do anything (asks), so Threadbear can put the thread in Needs you or leave it as done. ';
 
 // Mike, 29 Oct 2026, after Codex desktop: the least context to load when
 // he comes back to a thread, then what's next, with links back into the
@@ -243,39 +243,39 @@ const END_TURN_WHAT =
 // (docs/end-turn-design). The links' quote-a-step rule is what models
 // managed: they can't see their tool calls' ids.
 const END_TURN_SUMMARY =
-  'summary is what Mike reads first when he comes back to the thread, often hours later and among many others: 2 to 5 markdown bullets of what happened this turn (what you found, changed, shipped or decided, with the result), each one line of about 15 words at most, in plain words that make sense to someone who has forgotten the task. ' +
-  "The preview, notifications and the phone show it as your reply. In the Mac app, what you write after your last step (before end_turn) is the reply when it says more than the bullets, and the bullets fold into your working with everything else; otherwise the bullets are the reply. So when the answer is an explanation or a report, write it as your message and make the bullets a short version that stands on its own; when it isn't, don't repeat the bullets in a message. Never point at something \"above\": Mike may only see the bullets. Leave what Mike has to do to the asks. If he asked a question, the first bullet answers it. " +
-  'Link each bullet to where he can check it: a web page or a file as an ordinary markdown link; another thread as [its own thread](thread:<its id from list_threads>); a step in your own working this turn as work: and a few words copied exactly from that step (the command you ran or its description, the file you edited, or a line you wrote while working), e.g. [tests pass](work:npm test), which opens your working at that step and lights it up. Links work in the asks too. ' +
+  'summary is what the user reads first when they come back to the thread, often hours later and among many others: 2 to 5 markdown bullets of what happened this turn (what you found, changed, shipped or decided, with the result), each one line of about 15 words at most, in plain words that make sense to someone who has forgotten the task. ' +
+  "The preview, notifications and the phone show it as your reply. In the Mac app, what you write after your last step (before end_turn) is the reply when it says more than the bullets, and the bullets fold into your working with everything else; otherwise the bullets are the reply. So when the answer is an explanation or a report, write it as your message and make the bullets a short version that stands on its own; when it isn't, don't repeat the bullets in a message. Never point at something \"above\": the user may only see the bullets. Leave what the user has to do to the asks. If they asked a question, the first bullet answers it. " +
+  'Link each bullet to where they can check it: a web page or a file as an ordinary markdown link; another thread as [its own thread](thread:<its id from list_threads>); a step in your own working this turn as work: and a few words copied exactly from that step (the command you ran or its description, the file you edited, or a line you wrote while working), e.g. [tests pass](work:npm test), which opens your working at that step and lights it up. Links work in the asks too. ' +
   // Mike, 29 Oct: a turn that waited for the app to restart, then the
   // check after it, left two summaries. The app now shows a runner's turn
   // and the turns before it back to Mike's message as one, with the last
   // summary as the reply (docs/protocol.md, "The summary").
-  "When this turn started from a message the runner sent rather than one from Mike (the app restarted, a hook ran, the resume after a restart), this summary takes the place of your last one, so cover everything since Mike's last message, not just this turn; work: links can quote steps from those turns too. " +
+  "When this turn started from a message the runner sent rather than one from the user (the app restarted, a hook ran, the resume after a restart), this summary takes the place of your last one, so cover everything since the user's last message, not just this turn; work: links can quote steps from those turns too. " +
   'Leave summary out only when the turn was a line or two of conversation, and write that as an ordinary message. ';
 
 // What to put in it, the same for both providers.
 const END_TURN_ASKS =
-  'needs "nothing" when the work is finished (or still going by itself) and nothing waits on Mike. ' +
-  'needs "you" when it does: an approval, a decision, a key, something to look at, a question. Give one ask per thing he has to do, most blocking first. ' +
-  'The asks are your "What I need from you" list: Mike reads and answers them in a card under your message, each drawn as one paragraph of message text, its action then its why, with its buttons under it. So don\'t also list them in your message. ' +
+  'needs "nothing" when the work is finished (or still going by itself) and nothing waits on the user. ' +
+  'needs "you" when it does: an approval, a decision, a key, something to look at, a question. Give one ask per thing they have to do, most blocking first. ' +
+  'The asks are your "What I need from you" list: the user reads and answers them in a card under your message, each drawn as one paragraph of message text, its action then its why, with its buttons under it. So don\'t also list them in your message. ' +
   'Write each ask the way you would in that list, so it makes sense on its own to someone who has forgotten everything: action is its first sentence, the thing to do or the question ("Next time you leave the room, take your phone and leave the laptop idle on power."); why carries on the same paragraph with what it is about and what you want back, in a sentence or two ("It should lock within a minute of you going. Tell me whether it did, and I\'ll tune the Bluetooth cutoff."). Say where in it when it matters (System Settings › Bluetooth), and name things rather than places (not "Slack #channel", but "Your Slack draft to Emily names the automation guy Hayden; he is Pete"). When one ask is several questions or choices, end its why with them as a short markdown list, one per line, rather than running them together. ' +
   'Give links whenever there is somewhere to go to do it or judge it: the page to log in on, the Slack message (its permalink), the PR, the preview, the file or screenshot to look at, the project to open (a path opens in its own app, e.g. a .tandem file in Tandem). Each is a button on the ask, so title it as the action ("Open login page", "Open the Slack message", "Open Short 4 in Tandem"). ' +
   // Mike, 29 Oct: an ask said "Look at the screenshots in Highlights" in
   // plain words over a "See the tab" button for the same screenshot.
-  'The paragraph is markdown, so where action or why names the thing a link opens, make those words a link to the same url ("Look at [the pairing screenshot](/Users/mike/shots/pair.png) and say whether to land it."): Mike can hover them for a peek or click them, and the button stays as the next step. ' +
-  'Every decision or yes/no question needs options: 2 to 4 short likely answers, e.g. ["Go", "Not yet"] or ["Merge", "Test locally first"], with suggested: the index of the one you would pick. "Say go for X, or name another" is a decision too: give ["Go", ...the other candidates]. Mike can always write his own answer instead, so options never box him in. ' +
-  'For a step he has to do himself, offer options like ["Done", "Can you do it?"] when you could plausibly do it yourself. ' +
+  'The paragraph is markdown, so where action or why names the thing a link opens, make those words a link to the same url ("Look at [the pairing screenshot](/Users/mike/shots/pair.png) and say whether to land it."): the user can hover them for a peek or click them, and the button stays as the next step. ' +
+  'Every decision or yes/no question needs options: 2 to 4 short likely answers, e.g. ["Go", "Not yet"] or ["Merge", "Test locally first"], with suggested: the index of the one you would pick. "Say go for X, or name another" is a decision too: give ["Go", ...the other candidates]. The user can always write their own answer instead, so options never box them in. ' +
+  'For a step they have to do themselves, offer options like ["Done", "Can you do it?"] when you could plausibly do it yourself. ' +
   // Mike, 30 Oct: a follow-up in the closing prose, over a card that only
   // offered Archive, got buried and forgotten. Not make-work, though.
-  'next is for needs "nothing": up to 3 follow-ups in this thread worth doing, so they don\'t get lost: a piece still missing, a check that\'s due, something you or Mike raised and didn\'t get to. Only ones that really came up; never invent work, and most turns have none, so leave it out then. Write each as the message Mike would send to start it, about 8 words ("Show pictures and files from Bruce threads"). They are rows on the done card under "Or carry on", and a click sends one to you as it is, so each must make sense sent alone; don\'t also list them in your message. ' +
-  'archive: true archives this thread once the turn is over, with needs "nothing" only. Use it only when Mike asks for this thread to be archived; otherwise leave it out, as a thread that vanishes from his inbox when he hadn\'t finished with it is confusing. ' +
+  'next is for needs "nothing": up to 3 follow-ups in this thread worth doing, so they don\'t get lost: a piece still missing, a check that\'s due, something you or the user raised and didn\'t get to. Only ones that really came up; never invent work, and most turns have none, so leave it out then. Write each as the message the user would send to start it, about 8 words ("Show pictures and files from Bruce threads"). They are rows on the done card under "Or carry on", and a click sends one to you as it is, so each must make sense sent alone; don\'t also list them in your message. ' +
+  'archive: true archives this thread once the turn is over, with needs "nothing" only. Use it only when the user asks for this thread to be archived; otherwise leave it out, as a thread that vanishes from their inbox when they hadn\'t finished with it is confusing. ' +
   'Sub-agents never call this; only the thread\'s own agent does.';
 
 export const END_TURN_DESCRIPTION =
   END_TURN_WHAT +
   'Call it once, as the very last thing in every turn, and write nothing after it. ' +
   END_TURN_SUMMARY +
-  "With a summary, you needn't write a message first. Without one, it is refused until the turn has a reply: ordinary text from you after your last tool result (Threadbear's own tools aside), so Mike gets a complete answer in the conversation. " +
+  "With a summary, you needn't write a message first. Without one, it is refused until the turn has a reply: ordinary text from you after your last tool result (Threadbear's own tools aside), so the user gets a complete answer in the conversation. " +
   END_TURN_ASKS;
 
 // Codex's: its final answer ends the turn, so nothing can be called after
@@ -287,7 +287,7 @@ export const CODEX_END_TURN_DESCRIPTION =
   'Call it once, as your last tool call, just before your final answer: the final answer ends the turn, so nothing can be called after it. ' +
   'Call it through your tools like any other; never write the call, or its result, in your message. ' +
   END_TURN_SUMMARY +
-  'With a summary, your final answer can be one short line: it folds into your working, as Mike reads the summary instead. ' +
+  'With a summary, your final answer can be one short line: it folds into your working, as the user reads the summary instead. ' +
   END_TURN_ASKS;
 
 // What end_turn says when the turn has no reply yet. An error result, so
@@ -302,9 +302,9 @@ export const CODEX_END_TURN_DESCRIPTION =
 // so say a refusal isn't a tool result, and that an answer it thinks it
 // gave never arrived.
 export const NO_REPLY =
-  "Not ended: Mike hasn't had a reply this turn. No message text from you has reached him since his latest message and your latest tool result (a refused end_turn isn't a tool result). " +
-  "If you think you already answered, he hasn't seen any of it. " +
-  'Please write the whole answer as ordinary text, with the result and any supporting evidence Mike needs. Then call end_turn again.';
+  "Not ended: the user hasn't had a reply this turn. No message text from you has reached them since their latest message and your latest tool result (a refused end_turn isn't a tool result). " +
+  "If you think you already answered, they haven't seen any of it. " +
+  'Please write the whole answer as ordinary text, with the result and any supporting evidence the user needs. Then call end_turn again.';
 
 // What an accepted end_turn adds when the turn's reply reached Mike only
 // as a narration block's summary (TurnReply.narrationOnly), and end_turn
@@ -317,7 +317,7 @@ export const NO_REPLY =
 // place (runner.ts, onOutput), and this asks for it. A text block with no
 // tool call after it is never narration, so "nothing after it" matters.
 export const NARRATION_ONLY =
-  'Mike got only a short summary of your last message, not its words. ' +
+  'The user got only a short summary of your last message, not its words. ' +
   'Write the whole message again now, as ordinary text with nothing after it: it takes the summary\'s place.';
 
 // How every accepted end_turn result starts, so the runner can tell one
@@ -354,7 +354,7 @@ export function endedThisTurn(events: PersistedEvent[], serverName = 'threadbear
   return false;
 }
 
-export const ALREADY_ENDED = 'Already ended: this turn has had its end_turn, and Mike has its summary and asks. Stop here, with no more text.';
+export const ALREADY_ENDED = 'Already ended: this turn has had its end_turn, and the user has its summary and asks. Stop here, with no more text.';
 
 // Whether the turn so far has given Mike a reply, for end_turn to check
 // before it ends the turn. An agent that drafted its answer in thinking

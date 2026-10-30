@@ -31,7 +31,7 @@ test('the prompt gives the local time, the thread and his words; the note says w
   assert.match(p, /^Now: Thursday,? 29 October 2026,? (at )?2:00 pm \(Australia\/Perth\)/);
   assert.match(p, /The thread: "Workbench drawers"/);
   assert.match(p, /- Cut list done/);
-  assert.match(p, /Mike wants it back: at the weekend$/);
+  assert.match(p, /The user wants it back: at the weekend$/);
   const sat = Date.parse('2026-10-31T01:00:00Z');
   assert.equal(localWhen(sat, 'Australia/Perth'), 'Saturday 31 October, 9 am');
   assert.equal(localWhen(sat + 30 * 60_000, 'Australia/Perth'), 'Saturday 31 October, 9:30 am');
@@ -80,7 +80,7 @@ test('hibernateWhen: away at once, then until the time Opus gives, with a note',
   assert.equal(asked[0].strong, true);
   assert.equal(asked[0].feature, 'wake-when');
   assert.match(asked[0].prompt, /The thread: "Plan the workbench drawers"/);
-  assert.match(asked[0].prompt, /How it started \(Mike\): Plan the workbench drawers/);
+  assert.match(asked[0].prompt, /How it started \(the user\): Plan the workbench drawers/);
   assert.equal(res.until, new Date(h.clock.now() + 2 * DAY).toISOString());
   assert.equal(res.thread.snoozedUntil, res.until);
   assert.deepEqual(res.thread.wakeWhen, { said: 'at the weekend' });

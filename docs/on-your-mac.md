@@ -71,6 +71,9 @@ File references are where to look.
   `THREADBEAR_TOKEN_TALLY=off` stops the counting). It never reads or
   copies login tokens or the Keychain.
 - Token Stats' files, if you have that app.
+- Your first name, from your Mac account's full name (`id -F`), so its
+  agents know what to call you (`runner/src/user-name.ts`). It stays in
+  the instructions your own threads get.
 
 ## Who it talks to
 

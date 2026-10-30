@@ -60,7 +60,7 @@ test('show_panel puts a request on the thread, and says it waits when the app do
   h.clock.advance(PANEL_ACK_WAIT_MS);
   const res = await pending;
   assert.equal(res.error, false, res.text);
-  assert.match(res.text, /Convex will open when Mike next looks at this thread/);
+  assert.match(res.text, /Convex will open when the user next looks at this thread/);
   // Still waiting on the thread for him, and kept across a restart.
   assert.ok(h.runner.get(thread.id).panelRequest);
   h.runner.flush();
@@ -80,7 +80,7 @@ test('the app showing it clears the request and the tool says Mike has it in fro
   const { thread: after } = h.runner.panelShown(thread.id, request.id);
   assert.equal(after.panelRequest, undefined);
   const res = await pending;
-  assert.match(res.text, /Highlights is open in front of Mike now/);
+  assert.match(res.text, /Highlights is open in front of the user now/);
 });
 
 test('an unknown panel is an error that lists the thread\'s', async () => {

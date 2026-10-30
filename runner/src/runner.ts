@@ -2944,7 +2944,7 @@ export class Runner {
     const { rec, rt } = st;
     // Checked before anything changes, so a refused rename changes nothing else either.
     if (params.title !== undefined && params.titleBy === 'agent' && rec.titleByMike && params.title.trim() !== rec.title) {
-      throw new RpcError(ErrorCode.badParams, `Mike named this thread "${rec.title}" himself, so it keeps that title. Only rename it if he asks you to.`);
+      throw new RpcError(ErrorCode.badParams, `The user named this thread "${rec.title}" themselves, so it keeps that title. Only rename it if they ask you to.`);
     }
     let release = false;
     let stop = false;
@@ -4875,7 +4875,7 @@ export class Runner {
     const fromAccount = this.accounts.get(from.fromAccountId)?.title ?? from.fromAccountId;
     if (from.quickAsk) {
       return (
-        `[Threadbear handoff] This thread began as a quick ask on Mike's phone: he asked out loud and a fast model answered from his Agent Archive, not you. This is a fresh session in ${rec.cwd}. ` +
+        `[Threadbear handoff] This thread began as a quick ask on the user's phone: they asked out loud and a fast model answered from their Agent Archive, not you. This is a fresh session in ${rec.cwd}. ` +
         `The thread so far:\n\n${lines.join('\n\n') || '(none)'}\n\n[End of handoff. The new message follows.]\n\n`
       );
     }
@@ -4944,7 +4944,7 @@ function fromMike(text: string, opts: SendOptions): boolean {
 
 // What the agent is told when Mike writes a message while its question or
 // approval card is still open (sendTo).
-export const WROTE_INSTEAD = "Mike didn't answer this; he wrote you a message instead, which comes next. Read it before asking again.";
+export const WROTE_INSTEAD = "The user didn't answer this; they wrote you a message instead, which comes next. Read it before asking again.";
 
 // What a pool thread is told when it carries on by itself after its login
 // ran dry (docs/protocol.md, "Pools").

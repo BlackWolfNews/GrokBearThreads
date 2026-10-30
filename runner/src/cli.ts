@@ -91,7 +91,7 @@ const HELP = `tb: talk to the Threadbear runner
   tb schedules [--json]           tb schedules run|pause|resume|delete <scheduleId>
   tb projects [--archived] [--json]  the projects, their folders and thread counts
   tb projects show <project>      one project: goals, state, notes, threads
-  tb projects add|remove <threadId> <project>   puts a thread in a project or takes it out, as Mike
+  tb projects add|remove <threadId> <project>   puts a thread in a project or takes it out, as the user would
   tb librarian [--json]           what the librarian is doing, its queue and what it did
   tb librarian run [<threadId>]   a look at a thread now; with none, at every recent thread it hasn't seen
   tb librarian pause|resume
@@ -350,7 +350,7 @@ async function run(client: RunnerClient, cmd: string, args: string[], f: Flags):
     case 'answer': {
       // Its own cards are Mike's to answer: delete_thread always asks him,
       // and an edit in an ask-before-edits thread waits for him.
-      const threadId = notSelf(await resolveId(client, args[0]), "That's this thread's own card; Mike answers it.");
+      const threadId = notSelf(await resolveId(client, args[0]), "That's this thread's own card; the user answers it.");
       const params: Record<string, unknown> = { threadId, approvalId: await resolveApproval(client, threadId, args[1]) };
       if (cmd === 'approve') params.decision = args[2] ?? 'allow';
       else Object.assign(params, { decision: 'answered', answers: { '0': args[2] ?? '' } });
@@ -365,7 +365,7 @@ async function run(client: RunnerClient, cmd: string, args: string[], f: Flags):
       return 0;
     }
     case 'delete': {
-      const id = notSelf(await resolveId(client, args[0]), "A thread can't delete itself. Ask Mike to.");
+      const id = notSelf(await resolveId(client, args[0]), "A thread can't delete itself. Ask the user to.");
       await client.call('threads.delete', { threadId: id });
       console.log(`deleted ${id}`);
       return 0;
@@ -676,7 +676,7 @@ async function modelsCommand(client: RunnerClient, args: string[], f: Flags): Pr
 // Inside a thread, tb won't stop the thread it runs in, as the threadbear
 // MCP tools won't (threadbear-mcp.ts): it would end this very turn.
 // THREADBEAR_THREAD_ID is only set in a thread's own CLI and what it runs.
-const STOPS_SELF = "Can't snooze or archive the thread this runs in from inside its own turn. Ask Mike to, or do it when the work is done.";
+const STOPS_SELF = "Can't snooze or archive the thread this runs in from inside its own turn. Ask the user to, or do it when the work is done.";
 
 function notSelf(id: string, message: string): string {
   if (id === process.env.THREADBEAR_THREAD_ID) throw new Error(message);

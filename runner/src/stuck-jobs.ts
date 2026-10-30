@@ -188,7 +188,7 @@ export function message(jobs: Stuck[]): string {
     '',
     ...lines,
     '',
-    `Check whether ${one ? "it's" : "they're"} still doing anything useful. Stop any that are stuck (a wait loop that can never end, say) and carry on from there. If you can't tell, ask Mike in end_turn.`,
+    `Check whether ${one ? "it's" : "they're"} still doing anything useful. Stop any that are stuck (a wait loop that can never end, say) and carry on from there. If you can't tell, ask the user in end_turn.`,
   ].join('\n');
 }
 

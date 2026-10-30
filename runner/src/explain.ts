@@ -29,7 +29,7 @@ export const RECENT_CHARS = 1_500;
 export const EARLIER_KEPT = 6;
 
 export const EXPLAIN_SYSTEM = [
-  "You explain things in a conversation between Mike and his coding agent. Mike has selected some words in it that he doesn't follow and wants them explained.",
+  "You explain things in a conversation between the user and their coding agent. The user has selected some words in it that they don't follow and wants them explained.",
   'Explain what the selected words mean here, in this conversation: what they refer to, and why they matter to what the agent is doing. Use the conversation to be specific, rather than giving a dictionary definition.',
   "Write plainly, like a colleague explaining over a coffee. Start with the answer itself, with no preamble and no restating the question. Keep it short: a few sentences, or a short list if there are several parts. Use Markdown only for lists, code and file names. Don't use em dashes.",
   "If the conversation doesn't say enough to know, say what it most likely means and that you're not sure.",
@@ -39,18 +39,18 @@ const cut = (t: string, n: number) => (t.length > n ? t.slice(0, n) + '…' : t)
 
 export function explainPrompt(input: ExplainInput): string {
   const parts: string[] = [];
-  if (input.first) parts.push(`How the conversation started (Mike):\n${input.first}`);
+  if (input.first) parts.push(`How the conversation started (the user):\n${input.first}`);
   if (input.recent.length) {
-    const lines = input.recent.map((m) => `${m.who === 'user' ? 'Mike' : 'Agent'}: ${m.text}`);
+    const lines = input.recent.map((m) => `${m.who === 'user' ? 'User' : 'Agent'}: ${m.text}`);
     parts.push(`The latest messages:\n\n${lines.join('\n\n')}`);
   }
-  if (input.message) parts.push(`The message Mike selected from:\n${cut(input.message, MESSAGE_CHARS)}`);
-  parts.push(`What Mike selected:\n"${cut(input.selection.trim(), SELECTION_CHARS)}"`);
+  if (input.message) parts.push(`The message the user selected from:\n${cut(input.message, MESSAGE_CHARS)}`);
+  parts.push(`What the user selected:\n"${cut(input.selection.trim(), SELECTION_CHARS)}"`);
   const earlier = input.earlier.slice(-EARLIER_KEPT);
   if (earlier.length) {
-    const said = earlier.map((t, i) => (i === 0 && !t.question ? `You explained:\n${t.answer}` : `Mike asked: ${t.question ?? ''}\nYou answered:\n${t.answer}`));
+    const said = earlier.map((t, i) => (i === 0 && !t.question ? `You explained:\n${t.answer}` : `The user asked: ${t.question ?? ''}\nYou answered:\n${t.answer}`));
     parts.push(said.join('\n\n'));
   }
-  parts.push(input.question ? `Mike now asks: ${input.question}` : 'Explain what Mike selected.');
+  parts.push(input.question ? `The user now asks: ${input.question}` : 'Explain what the user selected.');
   return parts.join('\n\n---\n\n');
 }

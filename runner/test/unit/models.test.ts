@@ -377,16 +377,16 @@ test('explain: asks the small model about the selection, and writes nothing to t
   assert.equal(r.model, HAIKU);
   const p = asked.find((a) => a.feature === 'explain');
   assert.equal(p.cwd, thread.cwd, 'the folder goes along, for private folders');
-  assert.match(p.prompt, /What Mike selected:\n"the library"/);
-  assert.match(p.prompt, /The message Mike selected from:\nwhat should we move/);
-  assert.match(p.prompt, /Explain what Mike selected\.$/);
+  assert.match(p.prompt, /What the user selected:\n"the library"/);
+  assert.match(p.prompt, /The message the user selected from:\nwhat should we move/);
+  assert.match(p.prompt, /Explain what the user selected\.$/);
   assert.equal(h.runner.get(thread.id)!.lastSeq, before, 'nothing goes into the thread');
 
   // A follow-up sends the earlier answer and the new question.
   asked.length = 0;
   await h.runner.explain({ threadId: thread.id, selection: 'the library', earlier: [{ answer: 'It is the state machines library.' }], question: 'which repo?' });
   assert.match(asked[0].prompt, /You explained:\nIt is the state machines library\./);
-  assert.match(asked[0].prompt, /Mike now asks: which repo\?$/);
+  assert.match(asked[0].prompt, /The user now asks: which repo\?$/);
 
   // No model: the reason comes back as an error.
   reply = { ok: false, reason: 'private', message: 'This thread is in a private folder.' };
