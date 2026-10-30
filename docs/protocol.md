@@ -1503,8 +1503,17 @@ A turn the agent finished can say whether Mike has to do anything, so
   (`reply "done"`) are its `reply`; a list of them (`Reply with "Land
   it", "Website, then land it", or…`) is its `options`, one each. A
   heading with no list whose text says nothing is needed counts as
-  `nothing`. `needsFrom` says which
+  `nothing`. So does a closing "Nothing needed from you right now" with
+  no heading. Either way, a list after the "nothing" (with at most a line
+  of lead-in, like "Two follow-ups are worth doing:") is the turn's
+  `next`, each item's first sentence, three at most. `needsFrom` says which
   it was. Neither found: no `needs`, and the turn counts as today.
+- **Ending without it.** The Claude adapter's Stop hook sends a thread's
+  own turn back once when it ends with no `end_turn` taken, asking for the
+  call alone, as its message is already the reply. Not while background
+  work it started is still running (the turn that work wakes ends it),
+  nor a second time (`stop_hook_active`). Codex's final answer ends its
+  turn, so it gets no such check.
 - **What decides `needsYou`**, in order: an approval or question waiting;
   a thread marked unread; then a finished turn after `lastSeenSeq`,
   unless that turn said `nothing`.

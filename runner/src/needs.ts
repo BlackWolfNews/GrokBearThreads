@@ -156,7 +156,8 @@ export function needsFromText(text: string): Needs | undefined {
   }
   if (at < 0) {
     const tail = lines.slice(-NEAR_END_LINES);
-    return tail.some((l) => NOTHING_LINE.test(l)) ? { needs: 'nothing' } : undefined;
+    const i = tail.findIndex((l) => NOTHING_LINE.test(l));
+    return i < 0 ? undefined : done(nextFromList(tail.slice(i + 1)));
   }
   const body = lines.slice(at + 1);
   const items: string[] = [];
@@ -190,13 +191,52 @@ export function needsFromText(text: string): Needs | undefined {
       break;
     }
   }
+  const para = prose.join(' ').trim();
   if (!items.length) {
-    const para = prose.join(' ').trim();
     if (!para || NOTHING.test(para)) return { needs: 'nothing' };
     return { needs: 'you', asks: [askFrom(para)] };
   }
+  // "Nothing right now. Worth doing next:" then a list: follow-ups, not asks.
+  if (NOTHING.test(para)) return done(items.map(nextFrom));
   if (items.length === 1 && NOTHING.test(items[0])) return { needs: 'nothing' };
   return { needs: 'you', asks: items.slice(0, MAX_ASKS).map(askFrom) };
+}
+
+// Mike's instructions ask for any follow-up after "Nothing needed from you
+// right now", which agents write as a list: "Two follow-ups are worth
+// doing:" then a bullet each. With no end_turn to carry them, the done
+// card showed none (30 Oct 2026, thread 13096d04). So a list in the lines
+// after it, with at most a line of lead-in before it, is the card's next.
+// Prose after the list ends it, and prose with no list is no follow-up.
+function nextFromList(lines: string[]): string[] {
+  const items: string[] = [];
+  let lead = 0;
+  let inFence = false;
+  for (const line of lines) {
+    if (/^\s*```/.test(line)) inFence = !inFence;
+    const m = inFence ? null : ITEM.exec(line);
+    if (m && (!items.length || m[1].length === 0)) items.push(m[3]);
+    else if (m || (items.length && /^\s{2,}\S/.test(line))) items[items.length - 1] += ` ${line.trim()}`;
+    else if (!line.trim()) continue;
+    else if (items.length || inFence || ++lead > 1) break;
+  }
+  return items.map(nextFrom);
+}
+
+// A follow-up as the message that would start it, for a row on the done
+// card: "**Check your next call:** confirm Bruce used Nemotron on it. Its
+// service is untested." becomes "Check your next call: confirm Bruce used
+// Nemotron on it". Only the first sentence, as the rest says why.
+function nextFrom(item: string): string {
+  const t = item
+    .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')
+    .replace(/\*\*(.+?)\*\*/g, '$1')
+    .replace(/\s+/g, ' ')
+    .trim();
+  const first = (/^.+?[.!?](?=\s|$)/.exec(t)?.[0] ?? t).replace(/\.$/, '');
+  if (first.length <= MAX_NEXT_CHARS) return first;
+  const cut = first.slice(0, MAX_NEXT_CHARS);
+  return cut.slice(0, Math.max(cut.lastIndexOf(' '), 1)).replace(/[,;:]$/, '');
 }
 
 // "Open X, add Y, then reply 'done'" names the words to send back.
@@ -374,6 +414,15 @@ export function endedThisTurn(events: PersistedEvent[], serverName = 'threadbear
   }
   return false;
 }
+
+// What the Claude adapter's Stop hook sends back, once, to a turn that
+// ended without end_turn (adapter.ts, onStop). The reply already written
+// stands, so it asks for the call alone: a fresh message would sit under
+// the real answer as the reply.
+export const END_TURN_NUDGE =
+  'This turn ended without end_turn, so Threadbear has no summary or card for it. ' +
+  'Call end_turn now (load it with ToolSearch first if you need to), with the summary, needs, and any asks or next follow-ups from what you just wrote. ' +
+  "Your message above is the reply: don't write it again, and write nothing after end_turn.";
 
 export const ALREADY_ENDED = 'Already ended: this turn has had its end_turn, and the user has its summary and asks. Stop here, with no more text.';
 

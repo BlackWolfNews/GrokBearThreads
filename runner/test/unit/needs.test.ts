@@ -131,6 +131,36 @@ test('the section: "nothing needed" under the heading, on its line, or with no h
   assert.deepEqual(needsFromText('I wrote the file. The task is finished, and nothing is needed from you right now.'), { needs: 'nothing' });
 });
 
+test('the section: follow-ups listed after "nothing needed" are the done card\'s next', () => {
+  // Thread 13096d04's last message (30 Oct 2026), which skipped end_turn.
+  const text = [
+    "Meeting Archive is running again on your Mac. I've checked it myself: it's up.",
+    '',
+    'So everything from this thread is now live:',
+    '- **On your Mac:** the app records calls again.',
+    '- **On Bruce:** new calls get their speakers labelled by Nemotron 3 Diarization.',
+    '',
+    'Nothing needed from you right now; the work is finished. Two follow-ups are worth doing:',
+    "- **Check your next call:** confirm Bruce actually used Nemotron on it. Its background service is the one setup I couldn't test before deploying.",
+    '- **Try a bigger Whisper model:** the transcribed words are now the weaker part of the notes.',
+  ].join('\n');
+  assert.deepEqual(needsFromText(text), {
+    needs: 'nothing',
+    next: ['Check your next call: confirm Bruce actually used Nemotron on it', 'Try a bigger Whisper model: the transcribed words are now the weaker part of the notes'],
+  });
+  // A line of lead-in, a cap of three, and long ones cut at a word.
+  const many = ['Nothing needed from you right now.', '', 'Worth doing next:', '', '1. One', '2. Two', '3. Three', '4. Four'].join('\n');
+  assert.deepEqual(needsFromText(many), { needs: 'nothing', next: ['One', 'Two', 'Three'] });
+  const long = needsFromText(`Nothing needed from you right now.\n- ${'word '.repeat(40)}`)!;
+  assert.ok(long.next![0].length <= 120 && long.next![0].endsWith('word'));
+  // Prose after it, or a list before it, is no follow-up.
+  assert.deepEqual(needsFromText('Nothing needed from you right now. If you want, I can compare them.'), { needs: 'nothing' });
+  assert.deepEqual(needsFromText('Done:\n- a\n- b\n\nNothing needed from you right now.'), { needs: 'nothing' });
+  assert.deepEqual(needsFromText('Nothing needed from you right now.\n\nThe tests pass and it is on main.\nMore prose.\n- not a follow-up'), { needs: 'nothing' });
+  // Under the heading too: "nothing" and then a list is follow-ups, not asks.
+  assert.deepEqual(needsFromText('**What I need from you**\n\nNothing right now. Worth doing next:\n- Try the bigger model.'), { needs: 'nothing', next: ['Try the bigger model'] });
+});
+
 test('the section: the last heading wins, a mention in a sentence does not count', () => {
   const text = [
     'Agents end with a **What I need from you** section, which we could parse.',

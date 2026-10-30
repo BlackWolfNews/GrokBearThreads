@@ -15,7 +15,7 @@ import { prepareImageForModel } from '../../media.ts';
 import { toolTitle, truncateInput } from '../../tools.ts';
 import { RUNNER_VERSION } from '../../config.ts';
 import { stripModelSuffix } from '../../accounts.ts';
-import { END_TURN_FULL_NAME } from '../../needs.ts';
+import { END_TURN_FULL_NAME, END_TURN_NUDGE } from '../../needs.ts';
 
 // Variables a parent Claude Code session sets for its own children. If the
 // runner was started from inside one (tests, a terminal in T3), they would
@@ -248,6 +248,10 @@ class ClaudeSession implements AgentSession {
   private stderrTail: string[] = [];
   private seenTools = new Set<string>();
   private toolWaiters = new Map<string, (() => void)[]>();
+  // Whether this session has the threadbear server's end_turn, and whether
+  // the turn now ending called it (a taken call, from the PostToolUse hook).
+  private hasEndTurn = false;
+  private endTurnTaken = false;
 
   constructor(opts: StartSessionOptions, sink: SessionSink, deps: ClaudeAdapterDeps) {
     this.opts = opts;
@@ -278,13 +282,20 @@ class ClaudeSession implements AgentSession {
       canUseTool: (name, input, o) => this.canUseTool(name, input, o),
       // The CLI says which effort level a turn ran at (after its own
       // defaults and any downgrade) only through hooks; Stop fires once a
-      // turn, and is the cheapest place to read it.
-      hooks: { Stop: [{ hooks: [(input) => this.onStop(input)] }] },
+      // turn, and is the cheapest place to read it. It's also where a turn
+      // that never called end_turn is sent back to call it (onStop).
+      // PostToolUse is awaited before the CLI goes on, so a taken end_turn
+      // is always noted before the Stop that follows it.
+      hooks: {
+        Stop: [{ hooks: [(input) => this.onStop(input)] }],
+        PostToolUse: [{ matcher: END_TURN_FULL_NAME, hooks: [async (input) => this.onEndTurn(input)] }],
+      },
       abortController: this.abort,
       spawnClaudeCodeProcess: groupSpawner(deps.registry, deps.log, (line) => this.stderr(line), opts.threadId),
     };
     const servers = deps.mcpServersFor?.(opts.threadId);
     if (servers && Object.keys(servers).length) options.mcpServers = servers;
+    this.hasEndTurn = Object.keys(servers ?? {}).some((k) => END_TURN_FULL_NAME.startsWith(`mcp__${k}__`));
     if (opts.model) options.model = opts.model;
     const effort = claudeEffort(opts.effort);
     if (effort) options.effort = effort;
@@ -298,9 +309,27 @@ class ClaudeSession implements AgentSession {
     void this.pump();
   }
 
-  private async onStop(input: HookInput): Promise<Record<string, never>> {
+  private async onStop(input: HookInput): Promise<{ decision?: 'block'; reason?: string }> {
     const level = (input as { effort?: { level?: unknown } }).effort?.level;
     if (isEffortLevel(level)) this.sink.output({ kind: 'effort', level });
+    const stop = input as { stop_hook_active?: boolean; background_tasks?: unknown[] };
+    const ended = this.endTurnTaken;
+    this.endTurnTaken = false;
+    // A turn that ended in plain text leaves the runner reading the card
+    // from the prose (needs.ts, needsFromText), which drops what end_turn
+    // would have carried: on 30 Oct 2026 an agent skipped it for three
+    // turns running and its follow-ups never reached the done card (thread
+    // 13096d04). So send it back, once: stop_hook_active says this stop
+    // already follows a nudge. Not while background work it started is
+    // still going, as the turn that work wakes will end it. Sub-agents
+    // stop through SubagentStop, never here.
+    if (!this.hasEndTurn || ended || stop.stop_hook_active || stop.background_tasks?.length) return {};
+    return { decision: 'block', reason: END_TURN_NUDGE };
+  }
+
+  private onEndTurn(input: HookInput): Record<string, never> {
+    // A sub-agent's call never reaches the thread (threadbear-mcp.ts).
+    if (!(input as { agent_id?: string }).agent_id) this.endTurnTaken = true;
     return {};
   }
 
@@ -413,6 +442,8 @@ class ClaudeSession implements AgentSession {
 
   send(input: UserInput): void {
     this.normalizer.sent();
+    // In case the CLI ran no Stop hook after the last end_turn.
+    this.endTurnTaken = false;
     const content: Record<string, unknown>[] = [];
     for (const img of input.images) {
       const { data, mediaType } = prepareImageForModel(img, this.opts.tmpDir);
