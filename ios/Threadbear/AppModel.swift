@@ -15,6 +15,10 @@ final class AppModel {
     private(set) var inbox: [PhoneThread] = []
     private(set) var hibernating: [PhoneThread] = []
     private(set) var den: [PhoneThread] = []
+    /// The lists that have had their first answer from Convex. Until then
+    /// a list is loading, not empty: saying "Nothing in the inbox" at
+    /// launch, before anything had arrived, read as if it was (Mike, 30 Oct).
+    private(set) var loaded: Set<ThreadsView> = []
     private(set) var connected = true
     /// The token was refused (expired or revoked): the app shows pairing again.
     private(set) var authProblem: String?
@@ -59,15 +63,16 @@ final class AppModel {
     private(set) var isFake = false
 
     init() {
-        if ProcessInfo.processInfo.arguments.contains("-ThreadbearFake") {
-            connect(FakeBackend(), pairing: nil)
+        let args = ProcessInfo.processInfo.arguments
+        if args.contains("-ThreadbearFake") {
+            // -ThreadbearSlowLoad: the lists answer after a few seconds, to see the loading rows.
+            connect(FakeBackend(listDelay: args.contains("-ThreadbearSlowLoad") ? .seconds(6) : .zero), pairing: nil)
         } else if let saved = PairingStore.load() {
             connect(ConvexBackend(deploymentURL: saved.deploymentURL, token: saved.token), pairing: saved)
         }
         #if DEBUG
         // `-ThreadbearPair <link>`: pair on launch, since the simulator asks
         // "Open in Threadbear?" for links from outside and nothing can tap it.
-        let args = ProcessInfo.processInfo.arguments
         if let i = args.firstIndex(of: "-ThreadbearPair"), i + 1 < args.count, let link = URL(string: args[i + 1]) {
             Task { await pair(with: link) }
         }
@@ -146,6 +151,7 @@ final class AppModel {
         inbox = []
         hibernating = []
         den = []
+        loaded = []
     }
 
     func unpair() {
@@ -161,6 +167,7 @@ final class AppModel {
         inbox = []
         hibernating = []
         den = []
+        loaded = []
     }
 
     private func connect(_ backend: any Backend, pairing: Pairing?) {
@@ -174,9 +181,10 @@ final class AppModel {
             // Two runners could use the same id; the first one wins.
             model.projects = Dictionary(list.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         })
-        tasks.append(follow(backend.threads(.inbox)) { $0.inbox = $1 })
-        tasks.append(follow(backend.threads(.hibernating)) { $0.hibernating = $1 })
-        tasks.append(follow(backend.threads(.den)) { $0.den = $1 })
+        loaded = []
+        tasks.append(follow(backend.threads(.inbox)) { $0.inbox = $1; $0.loaded.insert(.inbox) })
+        tasks.append(follow(backend.threads(.hibernating)) { $0.hibernating = $1; $0.loaded.insert(.hibernating) })
+        tasks.append(follow(backend.threads(.den)) { $0.den = $1; $0.loaded.insert(.den) })
         tasks.append(Task { [weak self] in
             for await up in backend.connectionStates() { self?.connected = up }
         })

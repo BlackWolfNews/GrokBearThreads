@@ -13,14 +13,18 @@ public final class FakeBackend: Backend, @unchecked Sendable {
     private var listeners: [UUID: @Sendable () -> Void] = [:]
     /// How long a fake turn takes. Zero in tests.
     private let turnDelay: Duration
+    /// How long the thread lists take to answer the first time, to see the
+    /// app's loading rows (`-ThreadbearSlowLoad`). Zero normally.
+    private let listDelay: Duration
 
-    public init(now: Date = .now, turnDelay: Duration = .seconds(2), runnerOnline: Bool = true) {
+    public init(now: Date = .now, turnDelay: Duration = .seconds(2), runnerOnline: Bool = true, listDelay: Duration = .zero) {
         let sample = Self.sample(now: now)
         threadsById = Dictionary(uniqueKeysWithValues: sample.threads.map { ($0.threadId, $0) })
         messagesById = sample.messages
         runnerList = [PhoneRunner(runnerId: "m5", name: "MacBook Pro", version: "0.1.0",
                                   lastSeenAt: runnerOnline ? now : now.addingTimeInterval(-3 * 3600))]
         self.turnDelay = turnDelay
+        self.listDelay = listDelay
     }
 
     // MARK: Live reads
@@ -63,6 +67,24 @@ public final class FakeBackend: Backend, @unchecked Sendable {
     }
 
     public func threads(_ view: ThreadsView) -> AsyncThrowingStream<[PhoneThread], Error> {
+        let live = liveThreads(view)
+        guard listDelay > .zero else { return live }
+        let delay = listDelay
+        return AsyncThrowingStream { continuation in
+            let task = Task {
+                try? await Task.sleep(for: delay)
+                do {
+                    for try await value in live { continuation.yield(value) }
+                    continuation.finish()
+                } catch {
+                    continuation.finish(throwing: error)
+                }
+            }
+            continuation.onTermination = { _ in task.cancel() }
+        }
+    }
+
+    private func liveThreads(_ view: ThreadsView) -> AsyncThrowingStream<[PhoneThread], Error> {
         watch { [unowned self] in
             let all = lock.withLock { Array(threadsById.values) }
             let now = Date.now

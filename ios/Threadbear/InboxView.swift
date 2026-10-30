@@ -29,7 +29,9 @@ struct InboxView: View {
                     }
                 }
                 let sections = model.sections
-                if sections.isEmpty {
+                if !model.loaded.contains(.inbox) {
+                    LoadingRows()
+                } else if sections.isEmpty {
                     ContentUnavailableView {
                         Label { Text("Nothing in the inbox") } icon: { BearView(pose: .sit, size: 44) }
                     } description: {
@@ -142,7 +144,9 @@ struct ThreadListView: View {
     var body: some View {
         let threads = view == .den ? model.den : model.hibernating
         List {
-            if threads.isEmpty {
+            if !model.loaded.contains(view) {
+                LoadingRows(count: 4)
+            } else if threads.isEmpty {
                 ContentUnavailableView {
                     Label { Text(view == .den ? "Nothing archived" : "Nobody's hibernating") } icon: {
                         BearView(pose: .sleep, size: 44)
@@ -340,5 +344,38 @@ private struct HibernateDialog: ViewModifier {
             guard let backend = model.backend else { return }
             do { _ = try await backend.update(threadId: thread.threadId, change: change) } catch { model.report(error) }
         }
+    }
+}
+
+/// Grey placeholder rows, shaped like thread rows, while a list waits for
+/// its first answer from Convex, so a list that's loading doesn't look
+/// empty.
+struct LoadingRows: View {
+    var count = 6
+    @State private var dim = false
+
+    var body: some View {
+        ForEach(0..<count, id: \.self) { i in
+            HStack(alignment: .center, spacing: 10) {
+                RoundedRectangle(cornerRadius: 5).frame(width: 22, height: 22)
+                VStack(alignment: .leading, spacing: 7) {
+                    // Varied widths, so it reads as rows of titles rather than bars.
+                    Capsule().frame(width: [190, 150, 220, 170, 130, 200][i % 6], height: 11)
+                    Capsule().frame(width: [110, 90, 130, 80, 120, 100][i % 6], height: 9)
+                }
+                Spacer()
+                Capsule().frame(width: 24, height: 9)
+            }
+            .foregroundStyle(Color(.tertiarySystemFill))
+            .opacity(dim ? 0.45 : 1)
+            .listRowInsets(ThreadRow.insets)
+            .listRowSeparator(.hidden)
+            .accessibilityHidden(true)
+        }
+        .onAppear {
+            withAnimation(.easeInOut(duration: 0.9).repeatForever(autoreverses: true)) { dim = true }
+        }
+        .accessibilityElement()
+        .accessibilityLabel("Loading threads")
     }
 }
