@@ -60,8 +60,10 @@ Then run it, with their answers:
 ./threadbear setup --yes --existing --project <name>
 ```
 
-New threads start in `~/Threadbear`, which setup makes; they can change that
-in the app's Settings, and pick a folder for each thread as they start it.
+New threads start in `~/ThreadbearThreads`, which setup makes (not
+`~/Threadbear`: macOS ignores case, so that would be this repo's folder).
+They can change it in the app's Settings, and pick a folder for each
+thread as they start it.
 
 It takes a few minutes (it builds the Mac app). Along the way:
 

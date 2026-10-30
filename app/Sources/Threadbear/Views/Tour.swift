@@ -87,7 +87,7 @@ struct TourStep: Equatable {
 ///
 /// So there's something to try things on before they've run anything, it
 /// asks the runner for a few sample threads (`threads.samples`, made up
-/// and finished, no turn) in ~/Threadbear/Welcome, where it writes an
+/// and finished, no turn) in ~/ThreadbearThreads/Welcome, where it writes an
 /// example patch, and removes them when it ends however it ends (Mike,
 /// 29 Oct). The first real thread is theirs to send.
 ///
@@ -311,7 +311,7 @@ final class Tour {
 // MARK: - The samples' folder and its patch
 
 extension Tour {
-    /// ~/Threadbear/Welcome: Threadbear's own folder, nowhere macOS asks
+    /// ~/ThreadbearThreads/Welcome: Threadbear's own folder, nowhere macOS asks
     /// about. A scripted dev app keeps it in its own data folder, away from
     /// the real one.
     @MainActor
@@ -319,7 +319,7 @@ extension Tour {
         #if DEBUG
         if Automation.instanceId != nil { return app.dataDir.appendingPathComponent("Welcome").path }
         #endif
-        return NSString(string: "~/Threadbear/Welcome").expandingTildeInPath
+        return NSString(string: "~/ThreadbearThreads/Welcome").expandingTildeInPath
     }
 
 }

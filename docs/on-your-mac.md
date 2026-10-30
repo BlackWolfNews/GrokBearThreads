@@ -25,7 +25,7 @@ File references are where to look.
   (threads, settings, `secrets/`, runner releases, and the pinned release
   key `upstream-signers`); `~/Library/Caches/Threadbear/update`;
   `~/Library/Logs/threadbear-runner.log` and `threadbear-update.log`; and
-  `~/Threadbear`, the default folder for new threads.
+  `~/ThreadbearThreads`, the default folder for new threads.
 
 ## What runs in the background
 

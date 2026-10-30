@@ -200,7 +200,7 @@ private struct SetupRow: View {
         case .firstThread:
             if !noLogin {
                 Button("New thread") { app.newThread() }
-                    .tip("A new thread, in ~/Threadbear unless you pick another folder (⌘N)")
+                    .tip("A new thread, in your threads folder unless you pick another (⌘N)")
             }
         case .phone:
             Button("Open Phone & browser") {

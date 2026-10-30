@@ -19,7 +19,7 @@
 //   5. its keys: a deploy key the runner uses to deploy the backend when it
 //      updates, and the runner's own key, set as RUNNER_KEY
 //   6. runner.json: where the runner mirrors to, and the default folder for
-//      new threads (~/Threadbear, made here, unless --cwd; Settings changes it)
+//      new threads (~/ThreadbearThreads, made here, unless --cwd; Settings changes it)
 //   7. the backend and the website, deployed
 //   8. the runner (its LaunchAgent, with Threadbear Runner.app as the
 //      program, so macOS's privacy prompts name it) and the Mac app, built
@@ -35,6 +35,19 @@ import path from 'node:path';
 import { parseArgs } from 'node:util';
 
 const repo = path.resolve(import.meta.dirname, '..');
+// Where new threads start: a folder of their own, not the home folder, and
+// not ~/Threadbear, which on macOS is the same folder as a ~/threadbear clone.
+const THREADS_FOLDER = '~/ThreadbearThreads';
+
+// Whether a folder is this repo or inside it, as macOS sees it: names
+// compared without case, through links where the folder exists.
+function insideRepo(folder) {
+  const abs = path.resolve(folder.replace(/^~(?=$|\/)/, os.homedir()));
+  const real = (p) => { try { return fs.realpathSync(p); } catch { return p; } };
+  const a = real(abs).toLowerCase();
+  const r = real(repo).toLowerCase();
+  return a === r || a.startsWith(r + path.sep);
+}
 const DEFAULT_HOME = path.join(os.homedir(), 'Library', 'Application Support', 'Threadbear');
 
 const { values: v } = parseArgs({
@@ -344,7 +357,15 @@ async function runnerJson(url) {
   // own rather than the home folder: an agent searching home reaches Dropbox,
   // Desktop and Documents, and macOS stops everything to ask about each
   // (Mike's first thread on Tinker Desk, 28 Oct).
-  const cwd = v.cwd ?? json.defaults?.cwd ?? '~/Threadbear';
+  let cwd = v.cwd ?? json.defaults?.cwd ?? THREADS_FOLDER;
+  // Not inside this repo: a thread there gets the repo's patches and a
+  // worktree each. macOS ignores case, so the ~/Threadbear this used to
+  // make was the ~/threadbear clone itself (Tinker Desk, 30 Oct). One
+  // saved by an older setup moves; one given with --cwd is said.
+  if (insideRepo(cwd)) {
+    if (v.cwd) note(`${cwd} is inside this repo, so threads there get its patches and a worktree each.`);
+    else cwd = THREADS_FOLDER;
+  }
   const cwdPath = cwd.replace(/^~(?=$|\/)/, os.homedir());
   if (!dry && !fs.existsSync(cwdPath)) fs.mkdirSync(cwdPath, { recursive: true });
   const next = { ...json, sync: { ...json.sync, ...(url ? { url } : {}), name }, defaults: { ...json.defaults, cwd } };

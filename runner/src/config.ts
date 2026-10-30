@@ -10,7 +10,7 @@ import { CLI_POLICIES, isEffortLevel, isProvider, type CliPolicy, type EffortLev
 // <package version>+<release id>, or +source when run from a checkout.
 export const RUNNER_VERSION = RELEASE.version;
 // Where a new thread starts when nothing says otherwise. Setup writes
-// ~/Threadbear into runner.json (not the home folder, where agents set off
+// ~/ThreadbearThreads into runner.json (not the home folder, where agents set off
 // macOS's Dropbox, Desktop and Documents prompts); Mike's own default
 // (~/dev/me/misc) is in his runner.json's defaults.cwd.
 export const DEFAULT_CWD = '~';

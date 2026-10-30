@@ -129,7 +129,7 @@ and the perf run stay away from the real one. Install the runner itself with
 - **The tour.** The first time the app connects to a runner it dims the
   window and lights up its parts one at a time with a card beside each. It
   asks the runner for three sample threads (`threads.samples`: made up,
-  finished, no turn) in `~/Threadbear/Welcome`, where it writes an example
+  finished, no turn) in `~/ThreadbearThreads/Welcome`, where it writes an example
   patch, and has you hibernate one, archive another, drag a panel (done
   when the dock's layout changes) and press the patch's Roll a die chip,
   between cards on the threads and Highlights. It ends on

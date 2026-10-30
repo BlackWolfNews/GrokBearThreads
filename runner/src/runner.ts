@@ -1553,7 +1553,7 @@ export class Runner {
 
   // The tour's sample threads (docs/protocol.md, threads.samples; samples.ts):
   // made up exchanges written as finished turns, like a quick ask, in the
-  // folder the app gives (~/Threadbear/Welcome, where its example patch
+  // folder the app gives (~/ThreadbearThreads/Welcome, where its example patch
   // is), so someone new has threads to hibernate, archive and look round.
   // Asking again gives the ones there are; remove deletes them all,
   // archived and hibernating ones too.
