@@ -26,9 +26,50 @@ struct ComposerControls: View {
             } else {
                 remoteControls(thread, place: place)
             }
+        } else if thread == nil, app.newThreadRunnerId != nil, app.newThreadLogins == nil {
+            // A new thread for another runner, before its hello has said
+            // what logins it has: the machine chip, and how it's going.
+            draftWaitingControls
         } else {
             controls(remote: nil)
         }
+    }
+
+    /// The machine chip on the new-thread composer, when there's another
+    /// runner to choose: which Mac the thread will run on.
+    @ViewBuilder
+    private var runsOnChip: some View {
+        if thread == nil, !app.remoteRunners.isEmpty {
+            let settings = ThreadSettings(app: app, thread: nil)
+            let runner = app.newThreadRunner
+            ComposerChip(icon: runner.map { RunnerIcon.symbol($0.icon) } ?? app.selfRunnerIcon, title: "",
+                         help: "Runs on " + (runner.map { $0.online ? $0.name : "\($0.name), offline" } ?? "this Mac")) {
+                settings.runnerMenu()
+            }
+            ChipDivider()
+        }
+    }
+
+    private var draftWaitingControls: some View {
+        HStack(spacing: zoomed(4)) {
+            runsOnChip
+                .padding(.leading, -zoomed(7))
+            if let problem = app.newThreadRunnerProblem {
+                Text("Can't reach \(app.newThreadRunner?.name ?? "it")")
+                    .font(.system(size: TypeScale.chip))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .tip(problem)
+            } else {
+                ProgressView()
+                    .controlSize(.mini)
+                    .tip("Connecting to \(app.newThreadRunner?.name ?? "it")")
+            }
+            Spacer(minLength: zoomed(8))
+            SendButton(running: false, canSend: canSend, sending: sending, onSend: onSend, onStop: {})
+                .layoutPriority(1)
+        }
+        .frame(height: SendButton.size)
     }
 
     /// Another runner's thread: its Mac's icon and name, at the front of
@@ -78,17 +119,32 @@ struct ComposerControls: View {
         let cwd = settings.cwd
         let account = settings.account
         let ask = settings.ask
+        // A new thread for another runner: no pictures or schedules from
+        // here (paths on this Mac). Its folder chip shows once it isn't
+        // that runner's default; the machine chip's menu has Folder too.
+        let draftAway = thread == nil && app.newThreadRunnerId != nil
         HStack(spacing: zoomed(4)) {
             if let remote {
                 runnerChip(remote.thread, place: remote.place)
                     .padding(.leading, -zoomed(7))
                 ChipDivider()
+            } else if draftAway {
+                runsOnChip
+                    .padding(.leading, -zoomed(7))
             } else {
                 PlusButton { settings.plusMenu(attach: onAttach, schedule: app.schedulesSupported ? onSchedule : nil) }
                     // Pulls the glyph back so it lines up with the text above.
                     .padding(.leading, -zoomed(7))
+                runsOnChip
             }
-            if remote == nil, ComposerChips.showsFolder(cwd, defaultFolder: app.defaults.cwd) {
+            if draftAway {
+                if ComposerChips.showsFolder(cwd, defaultFolder: settings.logins.defaults.cwd) {
+                    ComposerChip(icon: "folder", title: ComposerChips.folder(cwd), help: "\(cwd) on \(app.newThreadRunner?.name ?? "that Mac")") {
+                        settings.folderMenu()
+                    }
+                    ChipDivider()
+                }
+            } else if remote == nil, ComposerChips.showsFolder(cwd, defaultFolder: app.defaults.cwd) {
                 ComposerChip(icon: "folder", title: ComposerChips.folder(cwd), help: cwd.abbreviatingHome) {
                     settings.folderMenu()
                 }
@@ -122,7 +178,7 @@ struct ComposerControls: View {
                 // Right-click send for later, as Mail and Slack do. Not on
                 // another Mac's thread: its schedules are made from there.
                 .contextMenu {
-                    if app.schedulesSupported, remote == nil { Button("Schedule…", systemImage: "clock", action: onSchedule) }
+                    if app.schedulesSupported, remote == nil, !draftAway { Button("Schedule…", systemImage: "clock", action: onSchedule) }
                 }
         }
         .frame(height: SendButton.size)
@@ -155,6 +211,10 @@ struct ThreadSettings {
     var model: String? { thread == nil ? app.lastModels[provider] : thread?.model }
     var effort: String? { thread == nil ? app.lastEfforts[provider] : thread?.effort }
     var ask: Bool { thread.map { $0.permissionMode == .ask } ?? app.newThreadAsk }
+    /// A new thread for another runner: its folders are paths on that Mac.
+    var draftRunnerId: String? { thread == nil ? app.newThreadRunnerId : nil }
+    /// Another runner's thread, or a new one for another runner.
+    var isAway: Bool { thread.map(\.isRemote) ?? (app.newThreadRunnerId != nil) }
 
     /// What the account's CLI offers, once the runner has asked it.
     var choices: [ModelChoice] { logins.account(account)?.models ?? [] }
@@ -246,6 +306,7 @@ struct ThreadSettings {
     }
 
     func folderMenu() -> NSMenu {
+        if let runnerId = draftRunnerId { return remoteFolderMenu(runnerId) }
         let menu = NSMenu()
         let current = cwd
         for folder in recentFolders(including: current) {
@@ -258,6 +319,72 @@ struct ThreadSettings {
         return menu
     }
 
+    /// The folder for a new thread on another runner: its default, the
+    /// folders of its threads here, and Other… to type a path on that Mac.
+    /// Nothing is checked on this Mac (the paths aren't here); that runner
+    /// says if one isn't there when the thread starts.
+    private func remoteFolderMenu(_ runnerId: String) -> NSMenu {
+        let menu = NSMenu()
+        let current = cwd
+        var folders = app.remoteFolders(runnerId)
+        if !current.isEmpty, !folders.contains(current) { folders.insert(current, at: 0) }
+        for folder in folders.prefix(8) {
+            let item = ActionMenuItem(folder, checked: folder == current) { setCwd(folder) }
+            item.image = NSImage(systemSymbolName: "folder", accessibilityDescription: nil)
+            if folder == logins.defaults.cwd { item.subtitle = "Default" }
+            menu.addItem(item)
+        }
+        if !folders.isEmpty { menu.addItem(.separator()) }
+        let other = ActionMenuItem("Other…") { typeRemoteFolder() }
+        other.image = NSImage(systemSymbolName: "character.cursor.ibeam", accessibilityDescription: nil)
+        menu.addItem(other)
+        return menu
+    }
+
+    /// Asks for a path on the other Mac, as there's no folder picker for it.
+    private func typeRemoteFolder() {
+        let name = app.newThreadRunner?.name ?? "that Mac"
+        let alert = NSAlert()
+        alert.messageText = "A folder on \(name)"
+        alert.informativeText = "Its full path, like /Users/\(name)/dev."
+        let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 320, height: 24))
+        field.stringValue = cwd
+        field.placeholderString = "/Users/\(name)/dev"
+        alert.accessoryView = field
+        alert.addButton(withTitle: "Use")
+        alert.addButton(withTitle: "Cancel")
+        alert.window.initialFirstResponder = field
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        let folder = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !folder.isEmpty { setCwd(folder) }
+    }
+
+    /// "Runs on" for a new thread: this Mac, then each other runner, with
+    /// the offline ones saying so (still a choice: it may be waking up).
+    func runnerMenu() -> NSMenu {
+        let menu = NSMenu()
+        let chosen = app.newThreadRunnerId
+        let here = ActionMenuItem("This Mac", checked: chosen == nil) { app.chooseNewThreadRunner(nil) }
+        here.image = NSImage(systemSymbolName: app.selfRunnerIcon, accessibilityDescription: nil)
+        menu.addItem(here)
+        menu.addItem(.separator())
+        for runner in app.remoteRunners {
+            let item = ActionMenuItem(runner.name, checked: chosen == runner.id) { app.chooseNewThreadRunner(runner.id) }
+            item.image = NSImage(systemSymbolName: RunnerIcon.symbol(runner.icon), accessibilityDescription: nil)
+            if !runner.online { item.subtitle = "Offline" }
+            menu.addItem(item)
+        }
+        // On another runner there's no "+": its folders are here.
+        if draftRunnerId != nil, app.newThreadLogins != nil {
+            menu.addItem(.separator())
+            let folder = NSMenuItem(title: "Folder", action: nil, keyEquivalent: "")
+            folder.image = NSImage(systemSymbolName: "folder", accessibilityDescription: nil)
+            folder.submenu = folderMenu()
+            menu.addItem(folder)
+        }
+        return menu
+    }
+
     /// The providers in the picker's rail, and which column opens: the
     /// account's own provider.
     var providers: [ModelPicker.Provider] { ModelPicker.providers(logins.accounts) }
@@ -267,7 +394,9 @@ struct ThreadSettings {
     /// own when it's on that provider, else the provider's first.
     func listedAccount(for providerId: String) -> String? {
         if self.providerId == providerId { return account }
-        return app.accountForProvider(providerId) ?? providers.first { $0.id == providerId }?.accountIds.first
+        // This Mac's last login for it only if this runner has it.
+        if let last = app.accountForProvider(providerId), logins.account(last) != nil { return last }
+        return providers.first { $0.id == providerId }?.accountIds.first
     }
 
     /// The rows of a provider's column. The default and the selection are
@@ -290,7 +419,7 @@ struct ThreadSettings {
 
     /// The runner has pools: the rail lists them, and the login is the
     /// runner's to pick unless the thread is pinned.
-    var usesPools: Bool { (app.poolsSupported && !logins.pools.isEmpty) }
+    var usesPools: Bool { !logins.pools.isEmpty && (app.poolsSupported || isAway) }
 
     /// The thread's pool, or the one a new thread starts on. Nil when it's
     /// pinned to a login (or there are no pools). A thread whose pool has
@@ -298,7 +427,7 @@ struct ThreadSettings {
     var pool: Pool? {
         guard usesPools else { return nil }
         let id = thread.map { $0.poolId } ?? app.newThreadPoolId
-        return id.flatMap(app.pool)
+        return id.flatMap(logins.pool)
     }
 
     /// On one login of Mike's choosing, which the runner never moves.
@@ -343,7 +472,7 @@ struct ThreadSettings {
         return providers.compactMap { providerId -> ModelPicker.Section? in
             let own = shown.id == pool?.id && providerId == provider
             let listed = own ? account : Pools.pickLogin(shown, accounts: logins.accounts, provider: providerId, current: app.lastAccountId(provider: providerId))
-            let listedAccount = listed.flatMap(app.account)
+            let listedAccount = listed.flatMap(logins.account)
             let defaultId = own ? defaultModel : (logins.defaults.model(for: providerId) ?? listedAccount?.defaultModel)
             let rows = ModelPicker.rows(choices: listedAccount?.models ?? [], defaultId: defaultId, selected: own ? effectiveModel : nil,
                                         query: query, provider: providerId)
@@ -582,10 +711,13 @@ private struct ComposerChip: View {
                 Image(systemName: icon)
                     .font(.system(size: TypeScale.chip - 1))
                     .foregroundStyle(Color(nsColor: Theme.faintIcon))
-                Text(title)
-                    .font(.system(size: TypeScale.chip))
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
+                // No title: an icon-only chip (Runs on).
+                if !title.isEmpty {
+                    Text(title)
+                        .font(.system(size: TypeScale.chip))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
                 switch badge {
                 case .low(let percent)?:
                     Text("· " + percent)
@@ -600,9 +732,13 @@ private struct ComposerChip: View {
                 case nil:
                     EmptyView()
                 }
-                Image(systemName: "chevron.down")
-                    .font(.system(size: zoomed(7.5), weight: .bold))
-                    .foregroundStyle(Color(nsColor: Theme.faintIcon))
+                // An icon-only chip is just its icon: room is short on
+                // the new-thread composer with the machine chip there too.
+                if !title.isEmpty {
+                    Image(systemName: "chevron.down")
+                        .font(.system(size: zoomed(7.5), weight: .bold))
+                        .foregroundStyle(Color(nsColor: Theme.faintIcon))
+                }
             }
             .padding(.horizontal, zoomed(7))
             .frame(height: zoomed(26))

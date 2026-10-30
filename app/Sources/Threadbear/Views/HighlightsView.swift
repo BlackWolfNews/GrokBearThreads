@@ -229,7 +229,11 @@ struct HighlightsView: View {
             ForEach(paths, id: \.self) { path in
                 PaneRow(icon: FileIcon.symbol(forPath: path), title: (path as NSString).lastPathComponent,
                         detail: HighlightText.folder(of: path, cwd: thread.cwd), indent: true) {
-                    app.openExternally(URL(fileURLWithPath: path))
+                    if thread.isRemote {
+                        app.openRemoteFile(URL(fileURLWithPath: path), .app, in: thread)
+                    } else {
+                        app.openExternally(URL(fileURLWithPath: path))
+                    }
                 }
                 .tip("Open in its app")
                 .fileDrag(URL(fileURLWithPath: path))
@@ -405,8 +409,13 @@ struct FileMenu: View {
 
     var body: some View {
         Button("Preview here", systemImage: "sidebar.right") { app.preview(path: path, title: title, in: thread) }
-        Button("Open", systemImage: "arrow.up.forward.app") { app.openExternally(URL(fileURLWithPath: path)) }
-        Button("Reveal in Finder", systemImage: "folder") { app.revealInFinder(path) }
+        if thread.isRemote {
+            // On that Mac: its copy here, once it's fetched.
+            Button("Open", systemImage: "arrow.up.forward.app") { app.openRemoteFile(URL(fileURLWithPath: path), .app, in: thread, title: title) }
+        } else {
+            Button("Open", systemImage: "arrow.up.forward.app") { app.openExternally(URL(fileURLWithPath: path)) }
+            Button("Reveal in Finder", systemImage: "folder") { app.revealInFinder(path) }
+        }
         Button("Copy path", systemImage: "doc.on.doc") { app.copyToPasteboard(path) }
     }
 }
@@ -425,7 +434,7 @@ struct LinkMenu: View {
     var body: some View {
         if url.isFileURL {
             Button("Preview here", systemImage: "sidebar.right") { app.preview(path: url.path, title: title, in: thread) }
-            Button("Open", systemImage: "arrow.up.forward.app") { app.openExternally(url) }
+            Button("Open", systemImage: "arrow.up.forward.app") { app.openLink(url, title: title, in: thread, external: true) }
         } else {
             Button(WebLinkAction.browser.title, systemImage: WebLinkAction.browser.symbol) { app.openExternally(url) }
             if PreviewRules.isWebPage(url) {
@@ -459,19 +468,45 @@ struct PreviewBody: View {
         switch preview.target {
         case .page(let url):
             WebPanel(url: url)
-        case .file(let path):
-            if !FileManager.default.fileExists(atPath: path) {
-                PaneNote(text: "This file isn't there any more.")
-            } else if PreviewRules.viewer(forPath: path) == .web {
-                WebPanel(url: URL(fileURLWithPath: path))
-            } else if TextFileView.shows(path) {
-                TextFileView(url: URL(fileURLWithPath: path), opened: preview.opened, editing: preview.editing)
-                    .id(path)
+        case .remote(_, let failed):
+            // Being fetched from that Mac, or why it couldn't be.
+            if let failed {
+                PaneNote(text: "Couldn't get it from \(preview.away ?? "that Mac")")
+                    .tip(failed)
             } else {
-                QuickLookView(url: URL(fileURLWithPath: path), opened: preview.opened)
+                ProgressView()
+                    .controlSize(.small)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .tip("Getting it from \(preview.away ?? "that Mac")")
             }
+        case .file(let path) where preview.cut:
+            // Over the size cap: what came, with a word that it's cut.
+            VStack(spacing: 0) {
+                Text("Only the start of this file came from \(preview.away ?? "that Mac").")
+                    .font(.system(size: TypeScale.small))
+                    .foregroundStyle(.secondary)
+                    .padding(.vertical, zoomed(6))
+                    .frame(maxWidth: .infinity)
+                fileBody(path)
+            }
+        case .file(let path):
+            fileBody(path)
         case .explain:
             ExplainPane(thread: thread)
+        }
+    }
+
+    @ViewBuilder
+    private func fileBody(_ path: String) -> some View {
+        if !FileManager.default.fileExists(atPath: path) {
+            PaneNote(text: "This file isn't there any more.")
+        } else if PreviewRules.viewer(forPath: path) == .web {
+            WebPanel(url: URL(fileURLWithPath: path))
+        } else if TextFileView.shows(path) {
+            TextFileView(url: URL(fileURLWithPath: path), opened: preview.opened, editing: preview.editing)
+                .id(path)
+        } else {
+            QuickLookView(url: URL(fileURLWithPath: path), opened: preview.opened)
         }
     }
 }
@@ -488,7 +523,9 @@ struct PreviewButtons: View {
         PaneHeaderButton(symbol: "chevron.left", help: "Back to \(PreviewBody.name(of: preview.from, in: thread))") {
             app.closePreview(in: thread.id)
         }
-        if let file = preview.fileURL {
+        // A copy of another Mac's file: not edited here (only the copy
+        // would change), and its folder is just the cache.
+        if let file = preview.fileURL, preview.away == nil {
             if preview.editing {
                 PaneHeaderButton(symbol: "checkmark", help: "Done. What you typed is saved.") { app.setPreviewEditing(false, in: thread.id) }
             } else if TextFileView.shows(file.path), TextFileView.canEdit(file.path) {

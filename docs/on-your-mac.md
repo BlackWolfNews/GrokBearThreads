@@ -24,6 +24,8 @@ File references are where to look.
 - **Files:** the data folder `~/Library/Application Support/Threadbear`
   (threads, settings, `secrets/`, runner releases, and the pinned release
   key `upstream-signers`); `~/Library/Caches/Threadbear/update`;
+  `~/Library/Caches/Threadbear/remote` (copies of pictures and files from
+  threads on your other Macs, at most 512 MB, unused ones go after 30 days);
   `~/Library/Logs/threadbear-runner.log` and `threadbear-update.log`; and
   `~/ThreadbearThreads`, the default folder for new threads.
 

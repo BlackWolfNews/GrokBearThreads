@@ -69,7 +69,7 @@ struct LinkPeekCard: View {
                         .truncationMode(.middle)
                 }
             }
-            Text(exists ? "Click to open" : "Not found on this Mac")
+            Text(exists ? "Click to open" : away.map { "On \($0). Click to open." } ?? "Not found on this Mac")
                 .font(.system(size: TypeScale.small))
                 .foregroundStyle(.tertiary)
                 .padding(.top, zoomed(3))
@@ -82,6 +82,11 @@ struct LinkPeekCard: View {
     }
 
     private var isFile: Bool { peek.url.isFileURL }
+    /// "bruce", for a file in another runner's thread: a click fetches it.
+    private var away: String? {
+        guard isFile else { return nil }
+        return MainActor.assumeIsolated { AppModel.shared.selectedThread.flatMap(AppModel.shared.runnerName(of:)) }
+    }
     private var exists: Bool { !isFile || FileManager.default.fileExists(atPath: peek.url.path) }
 
     /// A file by its name; a page by the link's words, unless they're just

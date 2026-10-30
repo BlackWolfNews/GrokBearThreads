@@ -484,25 +484,41 @@ private struct NewThreadNote: View {
     @Environment(AppModel.self) private var app
 
     var body: some View {
-        let cwd = app.newThreadCwd ?? app.defaults.cwd
+        // This Mac's logins, or the chosen runner's for a thread on it.
+        let logins = app.draftLogins
+        let runner = app.newThreadRunner
+        let cwd = app.newThreadCwd ?? logins.defaults.cwd
         let account = app.newThreadAccountId
-        let pool = app.newThreadPoolId.flatMap(app.pool)
+        let pool = app.newThreadPoolId.flatMap(logins.pool)
         let on = pool.map { "the \($0.title) pool" }
-            ?? (app.usesPools ? AccountName.login(account, accounts: app.accounts) : app.accountShortTitle(account))
+            ?? (app.newThreadUsesPools ? AccountName.login(account, accounts: logins.accounts) : AccountName.short(account, accounts: logins.accounts))
+        let title = logins.account(account).map(AccountName.title) ?? account
         VStack(spacing: zoomed(14)) {
-            Text("Starts in \(FolderName.short(cwd)) on \(on)")
-                .font(.system(size: TypeScale.label))
-                .foregroundStyle(Color(nsColor: Theme.faintText))
-                .tip("\(cwd.abbreviatingHome) on " + (pool.map { "the \($0.title) pool, which picks the login" } ?? app.accountTitle(account)))
+            if let runner, app.newThreadLogins == nil {
+                // Its logins and folders come with its hello.
+                Text("Starts on \(runner.name)")
+                    .font(.system(size: TypeScale.label))
+                    .foregroundStyle(Color(nsColor: Theme.faintText))
+            } else if let runner {
+                Text("Starts in \(FolderName.short(cwd)) on \(runner.name), with \(on)")
+                    .font(.system(size: TypeScale.label))
+                    .foregroundStyle(Color(nsColor: Theme.faintText))
+                    .tip("\(cwd) on \(runner.name), with " + (pool.map { "the \($0.title) pool, which picks the login" } ?? title))
+            } else {
+                Text("Starts in \(FolderName.short(cwd)) on \(on)")
+                    .font(.system(size: TypeScale.label))
+                    .foregroundStyle(Color(nsColor: Theme.faintText))
+                    .tip("\(cwd.abbreviatingHome) on " + (pool.map { "the \($0.title) pool, which picks the login" } ?? title))
+            }
             // Only once there's something to compare: an older runner sends
             // no usage, and one account has nothing to choose between.
-            let accounts = UsageGroups.byProvider(app.accounts).flatMap(\.accounts)
+            let accounts = UsageGroups.byProvider(logins.accounts).flatMap(\.accounts)
                 .filter { item in pool.map { $0.accountIds.contains(item.id) } ?? true }
             if accounts.count > 1, accounts.contains(where: { $0.usage != nil }) {
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: zoomed(140), maximum: zoomed(200)), spacing: zoomed(8), alignment: .top)], spacing: zoomed(8)) {
                     ForEach(accounts) { item in
                         // In a pool none is ringed: the pool picks. A click pins.
-                        AccountRoomCard(account: item, accounts: app.accounts, selected: pool == nil && item.id == account, now: app.now) {
+                        AccountRoomCard(account: item, accounts: logins.accounts, selected: pool == nil && item.id == account, now: app.now) {
                             app.newThreadPool = nil
                             app.newThreadProvider = nil
                             app.newThreadAccount = item.id

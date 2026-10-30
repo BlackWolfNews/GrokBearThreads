@@ -1,0 +1,180 @@
+import AppKit
+import XCTest
+@testable import Threadbear
+@testable import ThreadbearCore
+
+/// A new thread on another runner (the composer's "Runs on"): its pickers
+/// and folders are that runner's, and it's made over that runner's
+/// connection and listed as its. A new thread on this Mac never is.
+@MainActor
+final class RemoteDraftTests: XCTestCase {
+    override func setUp() {
+        super.setUp()
+        _ = NSApplication.shared
+    }
+
+    private let bruce = RemoteRunner(id: "r-bruce", name: "bruce", icon: "macmini", online: true,
+                                     rpcUrl: URL(string: "ws://127.0.0.1:1/bruce/rpc"), tokenFile: "/tmp/not-read")
+    private let bruceLogins: [String: Any] = [
+        "runnerVersion": "test", "protocol": 1,
+        "accounts": [["id": "claude-bruce", "provider": "claude", "title": "bruce@example.com"]],
+        "defaults": ["cwd": "/Users/bruce/dev", "accountId": "claude-bruce"],
+        "pools": [],
+    ]
+
+    /// This Mac's runner and bruce's, each on a transport that answers
+    /// as told and records what it was asked.
+    private func app() async throws -> (AppModel, RecordingTransport, RecordingTransport) {
+        let app = AppModel()
+        let local = RecordingTransport()
+        local.answers["threads.create"] = { params in ["thread": ["id": "th_here", "title": "Here", "cwd": params["cwd"] ?? ""]] }
+        let client = RPCClient(transport: local)
+        try await client.start()
+        app.useClientForTesting(client)
+        app.accounts = [Account(id: "claude-here", provider: "claude", title: "me@example.com")]
+        app.defaults = RunnerDefaults(cwd: "/Users/me/misc", accountId: "claude-here")
+
+        let away = RecordingTransport()
+        away.answers["hello"] = { [bruceLogins] _ in bruceLogins }
+        away.answers["threads.list"] = { _ in ["threads": []] }
+        away.answers["threads.create"] = { params in ["thread": ["id": "th_bruce", "title": "On bruce", "cwd": params["cwd"] ?? "", "accountId": params["accountId"] ?? ""]] }
+        app.useRemoteClientsForTesting(RemoteClients(version: "test", makeTransport: { _, _ in away }, readToken: { _ in "token" }))
+        app.remoteRunners = [bruce]
+        return (app, local, away)
+    }
+
+    private func until(_ condition: () -> Bool) async throws {
+        for _ in 0..<400 where !condition() {
+            try await Task.sleep(for: .milliseconds(5))
+        }
+    }
+
+    func testADraftForAnotherRunnerUsesItsLoginsAndGoesThere() async throws {
+        let (app, local, away) = try await app()
+        app.newThreadCwd = "/Users/me/somewhere-here"
+        app.chooseNewThreadRunner(bruce.id)
+        XCTAssertNil(app.newThreadCwd, "this Mac's folder means nothing on bruce")
+        try await until { app.remoteLogins[self.bruce.id] != nil }
+
+        // Its pickers, folder and request are bruce's.
+        XCTAssertEqual(app.logins(for: nil)?.accounts.map(\.id), ["claude-bruce"])
+        let settings = ThreadSettings(app: app, thread: nil)
+        XCTAssertEqual(settings.accountSections.flatMap(\.items).map(\.id), ["claude-bruce"])
+        XCTAssertEqual(settings.cwd, "/Users/bruce/dev")
+        XCTAssertEqual(app.newThreadAccountId, "claude-bruce")
+        XCTAssertEqual(settings.folderMenu().items.first?.title, "/Users/bruce/dev")
+        XCTAssertEqual(settings.folderMenu().items.last?.title, "Other…", "a path typed, not a folder picked on this Mac")
+        // A folder from one of bruce's threads is offered too.
+        var theirs = ThreadSummary(id: "t_old", title: "Old one", cwd: "/Volumes/CannMedia", status: .idle)
+        theirs.runnerId = bruce.id
+        app.threads[theirs.id] = theirs
+        XCTAssertEqual(app.remoteFolders(bruce.id), ["/Users/bruce/dev", "/Volumes/CannMedia"])
+        app.newThreadCwd = "/Volumes/CannMedia"
+
+        app.drafts["new"] = Draft(text: "Check the drive")
+        app.send(threadId: nil)
+        try await until { app.selection == "th_bruce" }
+        let create = try XCTUnwrap(away.params("threads.create").first)
+        XCTAssertEqual(create["cwd"] as? String, "/Volumes/CannMedia")
+        XCTAssertEqual(create["accountId"] as? String, "claude-bruce")
+        XCTAssertEqual(create["text"] as? String, "Check the drive")
+        XCTAssertTrue(local.params("threads.create").isEmpty, "never this Mac's runner")
+        XCTAssertEqual(app.threads["th_bruce"]?.runnerId, bruce.id, "listed as bruce's, so its calls go there")
+        XCTAssertEqual(app.route("th_bruce"), .remote(bruce))
+        XCTAssertNil(app.drafts["new"])
+        XCTAssertNil(app.newThreadRunnerId, "the next one starts on this Mac again")
+    }
+
+    func testAThisMacDraftNeverGetsARunner() async throws {
+        let (app, local, away) = try await app()
+        // Chosen and then put back: it's this Mac's again.
+        app.chooseNewThreadRunner(bruce.id)
+        app.chooseNewThreadRunner(nil)
+        XCTAssertEqual(app.logins(for: nil)?.accounts.map(\.id), ["claude-here"])
+        XCTAssertEqual(ThreadSettings(app: app, thread: nil).cwd, "/Users/me/misc")
+
+        app.drafts["new"] = Draft(text: "Tidy my notes")
+        app.send(threadId: nil)
+        try await until { app.selection == "th_here" }
+        XCTAssertEqual(local.params("threads.create").first?["accountId"] as? String, "claude-here")
+        XCTAssertTrue(away.params("threads.create").isEmpty)
+        XCTAssertNil(app.threads["th_here"]?.runnerId)
+        XCTAssertEqual(app.route("th_here"), .local)
+    }
+
+    func testARunnerThatCantBeReachedKeepsTheDraft() async throws {
+        let (app, _, _) = try await app()
+        let unreachable = RemoteRunner(id: "r-studio", name: "studio", online: false)
+        app.remoteRunners.append(unreachable)
+        app.chooseNewThreadRunner(unreachable.id)
+        try await until { app.newThreadRunnerProblem != nil }
+        app.drafts["new"] = Draft(text: "Render it")
+        app.send(threadId: nil)
+        try await until { app.errorMessage != nil }
+        XCTAssertEqual(app.drafts["new"]?.text, "Render it", "still in the box")
+        XCTAssertTrue(app.errorMessage?.contains("studio") == true)
+        XCTAssertNil(app.selection)
+    }
+}
+
+/// Answers each request from `answers` by method (an empty result for any
+/// other), and records the params of each.
+private final class RecordingTransport: RPCTransport, @unchecked Sendable {
+    private let lock = NSLock()
+    private var inbox: [Data] = []
+    private var waiter: CheckedContinuation<Data, Error>?
+    private var sent: [(method: String, params: [String: Any])] = []
+    var answers: [String: ([String: Any]) -> [String: Any]] = [:]
+
+    func open() async throws {}
+
+    func send(_ text: String) async throws {
+        guard let object = try? JSONSerialization.jsonObject(with: Data(text.utf8)) as? [String: Any],
+              let method = object["method"] as? String else { return }
+        let params = object["params"] as? [String: Any] ?? [:]
+        lock.withLock { sent.append((method, params)) }
+        // The auth handshake has no id; nothing to answer.
+        guard let id = object["id"] else { return }
+        let result = answers[method]?(params) ?? [:]
+        push(["jsonrpc": "2.0", "id": id, "result": result])
+    }
+
+    func params(_ method: String) -> [[String: Any]] {
+        lock.withLock { sent.filter { $0.method == method }.map(\.params) }
+    }
+
+    func receive() async throws -> Data {
+        try await withCheckedThrowingContinuation { continuation in
+            lock.lock()
+            if !inbox.isEmpty {
+                let data = inbox.removeFirst()
+                lock.unlock()
+                continuation.resume(returning: data)
+            } else {
+                waiter = continuation
+                lock.unlock()
+            }
+        }
+    }
+
+    func close() {
+        lock.lock()
+        let waiting = waiter
+        waiter = nil
+        lock.unlock()
+        waiting?.resume(throwing: RPCError.disconnected("closed"))
+    }
+
+    private func push(_ object: [String: Any]) {
+        guard let data = try? JSONSerialization.data(withJSONObject: object) else { return }
+        lock.lock()
+        if let waiting = waiter {
+            waiter = nil
+            lock.unlock()
+            waiting.resume(returning: data)
+        } else {
+            inbox.append(data)
+            lock.unlock()
+        }
+    }
+}

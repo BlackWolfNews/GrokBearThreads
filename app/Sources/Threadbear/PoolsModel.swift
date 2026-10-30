@@ -35,17 +35,27 @@ extension AppModel {
     /// else its folder's, else the last one he picked. Nil when it's pinned
     /// to a login, or with no pools.
     var newThreadPoolId: String? {
-        guard usesPools, newThreadAccount == nil else { return nil }
-        return Pools.newThreadPool(pools, picked: newThreadPool, cwd: newThreadCwd ?? defaults.cwd, home: NSHomeDirectory(),
-                                   last: lastPoolId, runnerDefault: defaults.poolId)
+        guard newThreadUsesPools, newThreadAccount == nil else { return nil }
+        // Another runner's pools and default for a draft on it.
+        let logins = draftLogins
+        return Pools.newThreadPool(logins.pools, picked: newThreadPool, cwd: newThreadCwd ?? logins.defaults.cwd, home: NSHomeDirectory(),
+                                   last: lastPoolId, runnerDefault: logins.defaults.poolId)
+    }
+
+    /// The new-thread composer shows pools: this Mac's runner's, or the
+    /// chosen runner's (one that sends pools in its hello has them).
+    var newThreadUsesPools: Bool {
+        guard newThreadRunnerId != nil else { return usesPools }
+        return !(newThreadLogins?.pools.isEmpty ?? true)
     }
 
     /// Which of a pool's providers a new thread in it runs on: the one
     /// picked for this draft, else the one last picked in that pool, else
     /// the pool's first.
     func newThreadProvider(in poolId: String) -> String {
-        guard let pool = pool(poolId) else { return "claude" }
-        let providers = Pools.providers(pool, accounts: accounts)
+        let logins = draftLogins
+        guard let pool = logins.pool(poolId) else { return "claude" }
+        let providers = Pools.providers(pool, accounts: logins.accounts)
         for candidate in [newThreadProvider, lastPoolProviders[poolId]] {
             if let candidate, providers.contains(candidate) { return candidate }
         }
@@ -57,19 +67,26 @@ extension AppModel {
     /// model is always named, since that's how the runner knows which
     /// provider Mike meant.
     func newThreadRequest(text: String, images: [ImageRef]) -> NewThreadRequest {
-        let cwd = newThreadCwd ?? defaults.cwd
+        // This Mac's logins, or the chosen runner's for a draft on it.
+        let logins = draftLogins
         let ask: PermissionMode = newThreadAsk ? .ask : .full
-        if let poolId = newThreadPoolId, let pool = pool(poolId) {
+        // Another runner that hasn't said hello yet: its own defaults,
+        // in the folder typed for it if any (the runner checks it).
+        if newThreadRunnerId != nil, newThreadLogins == nil {
+            return NewThreadRequest(text: text, images: [], cwd: newThreadCwd, permissionMode: ask)
+        }
+        let cwd = newThreadCwd ?? logins.defaults.cwd
+        if let poolId = newThreadPoolId, let pool = logins.pool(poolId) {
             let provider = newThreadProvider(in: poolId)
             var model = lastModels[provider]
-            if model == nil, Pools.providers(pool, accounts: accounts).count > 1 {
-                model = defaults.model(for: provider) ?? account(newThreadAccountId)?.defaultModel
+            if model == nil, Pools.providers(pool, accounts: logins.accounts).count > 1 {
+                model = logins.defaults.model(for: provider) ?? logins.account(newThreadAccountId)?.defaultModel
             }
             return NewThreadRequest(text: text, images: images, cwd: cwd, poolId: poolId, model: model,
                                     effort: lastEfforts[provider], permissionMode: ask)
         }
         let account = newThreadAccountId
-        let provider = provider(ofAccount: account)
+        let provider = logins.account(account)?.provider ?? "claude"
         return NewThreadRequest(text: text, images: images, cwd: cwd, accountId: account,
                                 model: lastModels[provider], effort: lastEfforts[provider], permissionMode: ask)
     }

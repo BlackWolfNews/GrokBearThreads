@@ -9,6 +9,10 @@ struct PanePreview: Equatable {
         case page(URL)
         /// Words selected in the transcript, explained (`explainers`).
         case explain
+        /// A file on the Mac another runner's thread is on, being fetched
+        /// (`files.read`), or why it couldn't be. Once it's here the
+        /// preview becomes `.file` of this Mac's copy.
+        case remote(path: String, failed: String?)
     }
 
     var target: Target
@@ -20,6 +24,12 @@ struct PanePreview: Equatable {
     var opened = 0
     /// A text file with its raw text up for editing (TextFileView).
     var editing = false
+    /// "bruce": a copy of a file on another runner's Mac. It isn't edited
+    /// here (the edit would only change this Mac's copy) or shown in the
+    /// Finder (the copy lives in a cache).
+    var away: String?
+    /// That runner sent only the start of it (over the size cap).
+    var cut = false
 
     var fileURL: URL? {
         if case .file(let path) = target { return URL(fileURLWithPath: path) }
@@ -31,7 +41,7 @@ struct PanePreview: Equatable {
         switch target {
         case .file(let path): URL(fileURLWithPath: path)
         case .page(let url): url
-        case .explain: nil
+        case .explain, .remote: nil
         }
     }
 }
@@ -98,8 +108,9 @@ extension AppModel {
     /// `external` is Open in the context menu: always the default app or
     /// browser.
     func open(_ highlight: Highlight, in thread: ThreadSummary, external: Bool) {
-        if highlight.path != nil, let away = awayFileNote(thread) {
-            errorMessage = away
+        if let path = highlight.path, thread.isRemote {
+            // On that Mac: fetched, then its copy here is used.
+            openRemoteFile(URL(fileURLWithPath: path), external ? .app : .panel, in: thread, title: highlight.title)
         } else if let path = highlight.path {
             if external { openExternally(URL(fileURLWithPath: path)) } else { preview(path: path, title: highlight.title, in: thread) }
         } else if let url = highlight.link {
@@ -111,7 +122,9 @@ extension AppModel {
     /// a page where "Default" says (the browser unless Mike picked the
     /// panel).
     func openLink(_ url: URL, title: String? = nil, in thread: ThreadSummary, external: Bool = false) {
-        if external {
+        if url.isFileURL, thread.isRemote {
+            openRemoteFile(url, external ? .app : .panel, in: thread, title: title)
+        } else if external {
             openExternally(url)
         } else if url.isFileURL {
             preview(path: url.path, title: title ?? url.lastPathComponent, in: thread)
@@ -123,6 +136,7 @@ extension AppModel {
     }
 
     func preview(path: String, title: String? = nil, in thread: ThreadSummary) {
+        if thread.isRemote { return openRemoteFile(URL(fileURLWithPath: path), .panel, in: thread, title: title) }
         show(PanePreview(target: .file(path), title: title ?? (path as NSString).lastPathComponent, from: paneSection(for: thread)), in: thread.id)
     }
 
@@ -189,8 +203,8 @@ extension AppModel {
     /// browser keeps.
     @discardableResult
     func openTranscriptFile(_ url: URL, _ action: FileLinkAction) -> Bool {
-        if let thread = selectedThread, let away = awayFileNote(thread) {
-            errorMessage = away
+        if let thread = selectedThread, thread.isRemote {
+            openRemoteFile(url, action, in: thread)
             return true
         }
         let path = url.path
@@ -232,27 +246,22 @@ extension AppModel {
     /// from the selected thread's folder and what its tools touched
     /// (FilePathRefs). Nil for one that names nothing.
     func transcriptLinkFile(_ url: URL) -> URL? {
-        // Another runner's paths are that Mac's: nothing here to open.
-        if selectedThread?.isRemote == true { return nil }
         if url.isFileURL { return url }
         guard let text = FilePathRefs.text(of: url) else { return nil }
         let thread = selectedThread
         let known = thread.flatMap { loadedSession($0.id) }.map { FilePathRefs.toolPaths($0.model.items) } ?? []
+        // Another runner's paths are that Mac's, so nothing is looked for
+        // here: the path as written, or from the thread's folder there,
+        // and its runner says whether it's there when it's fetched.
+        if let thread, thread.isRemote {
+            return FilePathRefs.fileLink(text, root: thread.cwd, known: known, home: remoteHome(of: thread),
+                                         exists: { $0.hasPrefix("/") }, search: { _, _ in nil })
+        }
         return FilePathRefs.fileLink(text, root: thread?.cwd, known: known)
-    }
-
-    /// Files in another runner's thread are on that Mac, so a click on one
-    /// says so rather than open whatever this Mac has at that path.
-    func awayFileNote(_ thread: ThreadSummary) -> String? {
-        runnerName(of: thread).map { "That file is on \($0), not this Mac." }
     }
 
     /// A click on a path in inline code. One that names nothing beeps.
     func openTranscriptPathRef(_ text: String, commandKey: Bool) -> Bool {
-        if let thread = selectedThread, let away = awayFileNote(thread) {
-            errorMessage = away
-            return true
-        }
         guard let url = FilePathRefs.url(for: text), let file = transcriptLinkFile(url) else {
             NSSound.beep()
             return false

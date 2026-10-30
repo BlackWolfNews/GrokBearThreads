@@ -727,7 +727,17 @@ enum RowRenderer {
         if tool.result?.truncated == true {
             output.append(mono("\n", .labelColor))
             output.append(gap(zoomed(6)))
-            output.append(NSAttributedString(string: "Output shortened", attributes: Theme.text(Theme.smallFont, color: Theme.faintText, line: TypeScale.scaled(17))))
+            let note = Theme.text(Theme.smallFont, color: Theme.faintText, line: TypeScale.scaled(17))
+            output.append(NSAttributedString(string: "Output shortened", attributes: note))
+            // The whole of it is kept in a file (blobPath): a file link, so
+            // it opens like any other, fetched first in another runner's
+            // thread.
+            if let blob = tool.result?.blobPath, !blob.isEmpty {
+                output.append(NSAttributedString(string: " · ", attributes: note))
+                var link = note
+                link[.link] = URL(fileURLWithPath: blob)
+                output.append(NSAttributedString(string: "Show all", attributes: link))
+            }
         } else if !hasOutput {
             if output.length > 0 { output.append(mono("\n", .labelColor)) }
             output.append(mono(tool.isFinished ? "No output" : "Running…", Theme.faintText))

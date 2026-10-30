@@ -37,9 +37,9 @@ struct ScrollMemory {
 /// keeping the visible row anchored when older rows are paged in.
 @MainActor
 final class TranscriptController: NSObject, NSTableViewDataSource, NSTableViewDelegate, RowCellDelegate {
-    var awayName: String? {
+    var remoteImages: RemoteImages? {
         guard let session, let app = session.app, let thread = app.threads[session.threadId] else { return nil }
-        return app.runnerName(of: thread)
+        return app.remoteImages(for: thread)
     }
 
     nonisolated static let renders = RenderCache()

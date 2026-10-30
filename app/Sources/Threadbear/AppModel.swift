@@ -164,6 +164,14 @@ final class AppModel {
     /// across launches; the folder and "Ask before edits" are for one
     /// thread and go back to the defaults after it starts.
     var newThreadCwd: String?
+    /// The runner the next new thread starts on ("Runs on", the
+    /// composer's machine chip): nil for this Mac, or another runner's id.
+    /// Its folder, account, model and effort are then that runner's
+    /// (`newThreadLogins`), and the thread is made over its connection.
+    /// For one thread, like the folder: back to this Mac after it starts.
+    var newThreadRunnerId: String?
+    /// Why the chosen runner can't be reached, for the composer to say.
+    var newThreadRunnerProblem: String?
     /// The account Mike picked for the next new thread, for that draft only:
     /// with none picked it's the one with the most room (`newThreadAccountId`).
     /// With pools, a pick here pins the new thread to that login.
@@ -238,8 +246,11 @@ final class AppModel {
     @ObservationIgnored var liveRemote: Set<String> = []
     /// One connection per other runner, made when one of its threads is
     /// opened.
-    @ObservationIgnored let remoteClients = RemoteClients(version: Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "dev")
+    @ObservationIgnored private(set) var remoteClients = RemoteClients(version: Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "dev")
     @ObservationIgnored var remoteTidy: Task<Void, Never>?
+    /// This Mac's copies of files in other runners' threads
+    /// (`remoteFiles`, RemoteFiles.swift), made on first use.
+    @ObservationIgnored var remoteFileStore: RemoteFileStore?
     /// Every project, archived ones too, in the runner's order (newest
     /// activity first). Replaced whole by `projects.updated`.
     var projects: [Project] = [] {
@@ -541,28 +552,47 @@ final class AppModel {
     /// (`AccountUsageText.pickAccount`, the runner's rule too). Follows
     /// `accounts.updated`, so it moves as usage does until he picks one.
     var newThreadAccountId: String {
-        if let newThreadAccount { return newThreadAccount }
+        let logins = draftLogins
+        // On another runner, only one of its own logins will do.
+        if let newThreadAccount, newThreadRunnerId == nil || logins.account(newThreadAccount) != nil { return newThreadAccount }
         // With pools, the login the runner would pick in the new thread's
         // pool, so the picker lists that provider's models.
-        if let poolId = newThreadPoolId, let pool = pool(poolId) {
+        if let poolId = newThreadPoolId, let pool = logins.pool(poolId) {
             let provider = newThreadProvider(in: poolId)
-            if let login = Pools.pickLogin(pool, accounts: accounts, provider: provider, current: lastAccountId(provider: provider)) { return login }
+            if let login = Pools.pickLogin(pool, accounts: logins.accounts, provider: provider, current: lastAccountId(provider: provider)) { return login }
         }
+        if newThreadRunnerId != nil { return AccountUsageText.pickAccount(logins.accounts, lastUsedId: lastAccountId) ?? logins.defaults.accountId }
         return AccountUsageText.pickAccount(accounts, lastUsedId: lastAccountId) ?? lastAccountId
+    }
+
+    /// The logins a new thread's pickers offer and it starts on: this
+    /// Mac's, or the chosen runner's once its connection has said hello
+    /// (nil until then).
+    var newThreadLogins: RunnerLogins? {
+        guard let runnerId = newThreadRunnerId else { return RunnerLogins(accounts: accounts, pools: pools, defaults: defaults) }
+        return remoteLogins[runnerId]
+    }
+
+    /// The same, with none for a runner that hasn't said hello yet.
+    var draftLogins: RunnerLogins {
+        newThreadLogins ?? RunnerLogins(accounts: [], pools: [], defaults: RunnerDefaults(cwd: "", accountId: ""))
     }
 
     func provider(ofAccount id: String) -> String { account(id)?.provider ?? "claude" }
 
+    /// The provider of the login the next new thread starts on.
+    var newThreadProviderId: String { draftLogins.account(newThreadAccountId)?.provider ?? "claude" }
+
     /// The model and effort the next new thread starts on, for the
     /// provider of the account it starts on.
     var newThreadModel: String? {
-        get { lastModels[provider(ofAccount: newThreadAccountId)] }
-        set { remember(model: newValue, provider: provider(ofAccount: newThreadAccountId)) }
+        get { lastModels[newThreadProviderId] }
+        set { remember(model: newValue, provider: newThreadProviderId) }
     }
 
     var newThreadEffort: String? {
-        get { lastEfforts[provider(ofAccount: newThreadAccountId)] }
-        set { remember(effort: newValue, provider: provider(ofAccount: newThreadAccountId)) }
+        get { lastEfforts[newThreadProviderId] }
+        set { remember(effort: newValue, provider: newThreadProviderId) }
     }
 
     func remember(model: String?, provider: String) {
@@ -772,6 +802,13 @@ final class AppModel {
     func useClientForTesting(_ client: RPCClient) {
         self.client = client
         connection = .connected
+    }
+
+    /// And other runners' connections over fake ones.
+    func useRemoteClientsForTesting(_ clients: RemoteClients) {
+        remoteClients.closeAll()
+        remoteClients = clients
+        wireRemoteClients()
     }
 
     /// Tests feed it what the runner would: a notice, a status, a drop.
@@ -1183,6 +1220,10 @@ final class AppModel {
         guard !trimmed.isEmpty || !images.isEmpty else { return }
         // A second Return while the first new thread is still being made.
         if threadId == nil, creatingThread { return }
+        // A new thread on another runner goes over that runner's connection.
+        if threadId == nil, let runnerId = newThreadRunnerId {
+            return sendNewThread(on: runnerId, text: trimmed, draft: draft)
+        }
         guard let client = client(for: threadId), threadId.map(isRemote) == true || connection == .connected else {
             showConnectionError(notConnectedText(threadId, "that wasn't sent"))
             return

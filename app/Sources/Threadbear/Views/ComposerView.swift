@@ -153,7 +153,7 @@ struct ComposerView: View {
         guard !urls.isEmpty else { return }
         // A picture this Mac's runner keeps would be a path another
         // runner hasn't got.
-        if let thread, let name = app.runnerName(of: thread) {
+        if let name = thread.flatMap(app.runnerName(of:)) ?? (thread == nil ? app.newThreadRunner?.name : nil) {
             app.errorMessage = "Pictures can't go to \(name) from this Mac yet."
             return
         }

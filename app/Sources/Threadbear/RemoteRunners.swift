@@ -52,10 +52,12 @@ extension AppModel {
     func route(_ threadId: String) -> ThreadRoute { ThreadRoute.of(threads[threadId], runners: remoteRunners) }
 
     /// The logins a thread's pickers offer: its runner's. This Mac's for its
-    /// own threads and a new one; another runner's once its connection has
-    /// said hello, nil until then (the composer shows just that Mac's name).
+    /// own threads; another runner's once its connection has said hello,
+    /// nil until then (the composer shows just that Mac's name). A new
+    /// thread's are those of the runner it's for (`newThreadLogins`).
     func logins(for thread: ThreadSummary?) -> RunnerLogins? {
-        guard let runnerId = thread?.runnerId else { return RunnerLogins(accounts: accounts, pools: pools, defaults: defaults) }
+        guard let thread else { return newThreadLogins }
+        guard let runnerId = thread.runnerId else { return RunnerLogins(accounts: accounts, pools: pools, defaults: defaults) }
         return remoteLogins[runnerId]
     }
 
@@ -140,10 +142,101 @@ extension AppModel {
         remoteTidy = Task { [weak self] in
             try? await Task.sleep(for: .seconds(60))
             guard let self, !Task.isCancelled else { return }
-            let showing = Set(self.threads.values.filter { self.isOnScreen($0.id) }.compactMap(\.runnerId))
+            var showing = Set(self.threads.values.filter { self.isOnScreen($0.id) }.compactMap(\.runnerId))
+            // A new thread being written for it needs it too.
+            if let draft = self.newThreadRunnerId { showing.insert(draft) }
             for id in self.remoteClients.connectedRunners where !showing.contains(id) {
                 AppLog.write("connection", "closing the connection to \(self.remoteName(id)): none of its threads is open")
                 self.remoteClients.close(id)
+            }
+        }
+    }
+
+    // MARK: New threads on another runner
+
+    /// "Runs on" in the new-thread composer: nil for this Mac. Another
+    /// runner's connection is opened now, so its hello fills the pickers
+    /// with its logins before Mike sends. The folder, login and pool
+    /// picked so far were this Mac's, so they go back to that runner's
+    /// defaults (and this Mac's when he comes back to it).
+    func chooseNewThreadRunner(_ runnerId: String?) {
+        guard runnerId != newThreadRunnerId else { return }
+        newThreadRunnerId = runnerId
+        newThreadRunnerProblem = nil
+        newThreadCwd = nil
+        newThreadAccount = nil
+        newThreadPool = nil
+        newThreadProvider = nil
+        guard let runnerId else { return tidyRemoteClients() }
+        Task {
+            do {
+                guard let runner = remoteRunners.first(where: { $0.id == runnerId }) else {
+                    throw RemoteUnreachable(runnerId: runnerId, runnerName: "that Mac", online: false, reason: .unknownRunner)
+                }
+                _ = try await remoteClients.client(for: runner)
+            } catch {
+                guard newThreadRunnerId == runnerId else { return }
+                newThreadRunnerProblem = Self.remoteFileReason(error)
+            }
+        }
+    }
+
+    /// The runner a new thread will be made on, when it isn't this Mac.
+    var newThreadRunner: RemoteRunner? { newThreadRunnerId.flatMap { id in remoteRunners.first { $0.id == id } } }
+
+    /// Folders a new thread on another runner might start in: its default
+    /// and the folders of its threads this Mac lists, newest first. Paths
+    /// on that Mac, so nothing here is checked.
+    func remoteFolders(_ runnerId: String) -> [String] {
+        var seen = Set<String>()
+        let defaultFolder = remoteLogins[runnerId]?.defaults.cwd ?? ""
+        let recent = threads.values.filter { $0.runnerId == runnerId }.sorted { $0.lastActivityAt > $1.lastActivityAt }.map(\.cwd)
+        return ([defaultFolder] + recent).filter { !$0.isEmpty && seen.insert($0).inserted }
+    }
+
+    /// Makes the new thread on that runner, over its connection, with what
+    /// the composer's chips say (that runner's logins, a folder on that
+    /// Mac). It's listed as that runner's from the start, so its calls go
+    /// there, and opened as a new thread here is. If the runner can't be
+    /// reached the draft stays and the banner says why.
+    func sendNewThread(on runnerId: String, text: String, draft: Draft) {
+        let name = remoteRunners.first { $0.id == runnerId }?.name ?? "that Mac"
+        guard draft.images.isEmpty else {
+            errorMessage = "Pictures can't go to \(name) from this Mac yet."
+            return
+        }
+        ActivityRecorder.shared.sent(threadId: nil, images: 0, answers: 0)
+        creatingThread = true
+        Task {
+            defer { creatingThread = false }
+            do {
+                guard let runner = remoteRunners.first(where: { $0.id == runnerId }) else {
+                    throw RemoteUnreachable(runnerId: runnerId, runnerName: name, online: false, reason: .unknownRunner)
+                }
+                let client = try await remoteClients.client(for: runner)
+                var made = try await client.createThread(newThreadRequest(text: text, images: []))
+                if drafts["new"] == draft { drafts["new"] = nil }
+                // The runner, folder, "Ask before edits" and picks were for
+                // this thread; the next starts on this Mac's defaults.
+                newThreadRunnerId = nil
+                newThreadRunnerProblem = nil
+                newThreadCwd = nil
+                newThreadAsk = false
+                newThreadAccount = nil
+                newThreadPool = nil
+                newThreadProvider = nil
+                made.runnerId = runnerId
+                liveRemote.insert(made.id)
+                threads[made.id] = made
+                select(made.id)
+            } catch let unreachable as RemoteUnreachable {
+                // The draft never left the box.
+                newThreadRunnerProblem = unreachable.detail
+                errorMessage = unreachable.headline + " " + unreachable.detail + " It's still in the box."
+            } catch {
+                // Not this Mac's runner's banner: it's that one that failed.
+                AppLog.write("rpc", "threads.create on \(name) failed: \(error.localizedDescription)")
+                errorMessage = "Couldn't start it on \(name). \(error.localizedDescription)"
             }
         }
     }
@@ -188,6 +281,7 @@ extension AppModel {
 
     private func remoteConnected(_ runnerId: String, _ client: RPCClient) {
         AppLog.write("connection", "connected to \(remoteName(runnerId))")
+        if newThreadRunnerId == runnerId { newThreadRunnerProblem = nil }
         Task {
             // Its logins (accounts with their models, pools, defaults) fill
             // the composer's pickers on its threads; its accounts.updated

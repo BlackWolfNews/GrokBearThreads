@@ -82,6 +82,8 @@ struct AppDump: Encodable {
         var pool: String? = nil
         /// The model chip as it reads ("Claude · Opus 5.5 · High").
         var chip: String = ""
+        /// The other runner it runs on ("bruce"); nil for this Mac.
+        var runner: String? = nil
     }
 
     struct Settings {
@@ -109,7 +111,7 @@ struct AppDump: Encodable {
     @MainActor
     static func newThreadSettings(_ app: AppModel) -> Settings {
         let account = app.newThreadAccountId
-        return Settings(cwd: app.newThreadCwd ?? app.defaults.cwd, account: account,
+        return Settings(cwd: app.newThreadCwd ?? app.draftLogins.defaults.cwd, account: account,
                         model: app.newThreadModel ?? defaultModel(app, account: account), ask: app.newThreadAsk,
                         effort: app.newThreadEffort ?? "default", pool: app.newThreadPoolId)
     }
@@ -347,8 +349,9 @@ struct AppDump: Encodable {
         }
         let preview: String? = app.panePreview[thread.id].map { preview in
             switch preview.target {
-            case .file(let path): "file \(path)" + (preview.editing ? " (editing)" : "")
+            case .file(let path): "file \(path)" + (preview.editing ? " (editing)" : "") + (preview.away.map { " (from \($0)\(preview.cut ? ", cut" : ""))" } ?? "")
             case .page(let url): "page \(url.absoluteString)"
+            case .remote(let path, let failed): "fetching \(path)" + (failed.map { " (failed: \($0))" } ?? "")
             case .explain:
                 // What was asked and where each answer is up to, for a script.
                 "explain " + (app.explainers[thread.id].map { session in
@@ -466,7 +469,8 @@ struct AppDump: Encodable {
         return Composer(draft: key, text: app.drafts[key]?.text ?? "", images: app.drafts[key]?.images.count ?? 0,
                         editing: app.editing[key]?.seq,
                         cwd: settings.cwd, account: settings.account, model: settings.model, ask: settings.ask, effort: settings.effort,
-                        pool: settings.pool, chip: ThreadSettings(app: app, thread: app.selectedThread).modelChipTitle)
+                        pool: settings.pool, chip: ThreadSettings(app: app, thread: app.selectedThread).modelChipTitle,
+                        runner: app.selectedThread.flatMap(app.runnerName(of:)) ?? (app.selectedThread == nil ? app.newThreadRunner?.name : nil))
     }
 
     /// Rows a click opens: work lines, groups and settled approvals that
@@ -554,8 +558,8 @@ struct AppDump: Encodable {
         if let decisions { lines.append("decisions: " + decisions[0]); lines += decisions.dropFirst().map { "  " + $0 } }
         lines.append("composer (\(composer.draft)): \"\(composer.text)\"" + (composer.images > 0 ? " and \(composer.images) image(s)" : "")
             + (composer.editing.map { ", editing the message at seq \($0)" } ?? ""))
-        let on = composer.pool.map { "pool \($0) (now \(composer.account))" } ?? (pools.isEmpty ? composer.account : "\(composer.account), pinned")
-        lines.append("  \(composer.draft == "new" ? "starts" : "runs") in \(composer.cwd) on \(on), model \(composer.model), "
+        let on = composer.pool.map { "pool \($0) (now \(composer.account))" } ?? (pools.isEmpty || composer.runner != nil ? composer.account : "\(composer.account), pinned")
+        lines.append("  \(composer.draft == "new" ? "starts" : "runs") in \(composer.cwd)\(composer.runner.map { " on \($0)" } ?? "") on \(on), model \(composer.model), "
             + (composer.effort == "default" ? "" : "effort \(composer.effort), ") + (composer.ask ? "asks before edits" : "full access"))
         lines.append("  model chip: \(composer.chip)")
         lines.append("dock: \(dock)")

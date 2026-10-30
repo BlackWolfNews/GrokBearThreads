@@ -316,6 +316,15 @@ const runners = [SELF_RUNNER, { id: 'runner_bruce', name: 'bruce', icon: 'macmin
 // runner hears of them through remoteThreads.list and remoteThreads.updated,
 // as the real runner passes on what the backend has.
 const BRUCE = 'runner_bruce';
+// Files on bruce's Mac that its threads name, for files.read from
+// /bruce/rpc (docs/protocol.md, "Other runners' threads"): the picture is a
+// real PNG, the rest text. None of these paths exist on this Mac.
+const BRUCE_FILES = {
+  picture: '/Users/bruce/Library/Application Support/Threadbear/media/backblaze.png',
+  list: '/Volumes/CannMedia/duplicates.txt',
+  blob: '/Users/bruce/Library/Application Support/Threadbear/threads/bruce_media/blobs/bruce_media_c0_0.txt',
+};
+const bruceModifiedAt = new Date(Date.now() - 3600_000).toISOString();
 addRemoteDemo();
 /** The schedules (docs/protocol.md, "Schedules"), soonest first. */
 let schedules = [];
@@ -442,12 +451,19 @@ async function dispatch(client, method, p) {
       // Bruce has two logins of its own and no pools, as the real one does,
       // so the pickers on its threads plainly aren't this Mac's.
       if (client.as) {
-        return { runnerVersion, protocol: 1, accounts: publicAccounts().filter((a) => a.id === 'claude-main' || a.id === 'codex-main'), defaults: { ...defaults, poolId: undefined }, clis, updates, pools: [] };
+        return { runnerVersion, protocol: 1, accounts: publicAccounts().filter((a) => a.id === 'claude-main' || a.id === 'codex-main'),
+          // Its own home folder, so the composer's folder chip on a new
+          // thread there shows a path on bruce.
+          defaults: { ...defaults, poolId: undefined, accountId: 'claude-main', cwd: '/Users/bruce/dev/me/misc' }, clis, updates, pools: [] };
       }
       return {
         runnerVersion, protocol: 1, accounts: publicAccounts(),
         defaults: oldRunner ? { ...defaults, poolId: undefined } : defaults, ...(oldRunner ? {} : { clis, updates, pools }),
       };
+    case 'files.read':
+      // Slow enough on bruce that the app's loading state shows.
+      if (client.as) await sleep(400);
+      return readFile(client, p);
     case 'pools.list':
       if (oldRunner) throw rpcError(-32601, 'Method not found');
       return { pools };
@@ -561,7 +577,9 @@ async function dispatch(client, method, p) {
       const now = iso();
       // Like the runner: a login named pins the thread; otherwise a pool
       // (named, else the default) picks one, on the named model's provider.
-      const pool = !oldRunner && !p.accountId ? poolOf(p.poolId ?? defaults.poolId) : undefined;
+      // Bruce has no pools: a thread made there is on the login named, or
+      // its default.
+      const pool = !oldRunner && !client.as && !p.accountId ? poolOf(p.poolId ?? defaults.poolId) : undefined;
       const accountId = p.accountId ?? (pool && pickInPool(pool, providerOfModel(p.model))) ?? defaults.accountId;
       const provider = providerOf(accountId);
       const summary = {
@@ -571,7 +589,9 @@ async function dispatch(client, method, p) {
         permissionMode: p.permissionMode ?? 'full', status: 'starting', live: true, needsYou: false,
         createdAt: now, updatedAt: now, lastActivityAt: now, preview: '', lastSeq: 0, lastSeenSeq: 0,
       };
-      threads.set(threadId, { summary, events: [], inProgress: new Map(), timers: [] });
+      // Made over /bruce/rpc, it's bruce's: only bruce's clients hear of
+      // it, and this runner's through remoteThreads.updated.
+      threads.set(threadId, { summary, events: [], inProgress: new Map(), timers: [], ...(client.as ? { runnerId: client.as } : {}) });
       broadcastSummary(threadId);
       setTimeout(() => fakeTurn(threadId, p.text, p.images ?? []), 10);
       return { thread: summary };
@@ -1571,6 +1591,46 @@ function remoteThreads(client) {
   };
 }
 
+
+function bruceFile(file) {
+  if (file === BRUCE_FILES.picture) return fs.readFileSync(path.join(here, 'fixtures/demo-upload-resume/media/upload-times.png'));
+  if (file === BRUCE_FILES.list) {
+    return Array.from({ length: 14 }, (_, i) => `/Volumes/CannMedia/Footage/2025/clip-${String(i + 1).padStart(3, '0')}.mov  (copy in /Volumes/CannMedia/Inbox)`).join('\n') + '\n';
+  }
+  if (file === BRUCE_FILES.blob) {
+    return Array.from({ length: 400 }, (_, i) => `/Volumes/CannMedia/Footage/2025/clip-${String((i % 14) + 1).padStart(3, '0')}.mov\n/Volumes/CannMedia/Inbox/clip-${String((i % 14) + 1).padStart(3, '0')} (${i}).mov\n`).join('\n');
+  }
+  return undefined;
+}
+
+// files.read as the runner answers it (runner/src/files.ts): bruce's made-up
+// files for bruce's clients, real ones on this Mac for this runner's.
+function readFile(client, p) {
+  if (typeof p.path !== 'string' || !p.path.startsWith('/')) throw rpcError(-32602, `path must be absolute: ${p.path}`);
+  let bytes;
+  let modifiedAt;
+  if (client.as === BRUCE) {
+    const content = bruceFile(p.path);
+    if (content === undefined) throw rpcError(-32602, `No such file: ${p.path}`);
+    bytes = Buffer.isBuffer(content) ? content : Buffer.from(content);
+    modifiedAt = bruceModifiedAt;
+  } else {
+    let stat;
+    try { stat = fs.statSync(p.path); } catch { throw rpcError(-32602, `No such file: ${p.path}`); }
+    if (!stat.isFile()) throw rpcError(-32602, `Not a file: ${p.path}`);
+    bytes = fs.readFileSync(p.path);
+    modifiedAt = stat.mtime.toISOString();
+  }
+  if (p.known && p.known.size === bytes.length && p.known.modifiedAt === modifiedAt) {
+    return { path: p.path, unchanged: true, size: bytes.length, modifiedAt };
+  }
+  const max = Math.min(typeof p.maxBytes === 'number' && p.maxBytes > 0 ? p.maxBytes : 16 * 1024 * 1024, 48 * 1024 * 1024);
+  const sent = bytes.subarray(0, max);
+  const ext = path.extname(p.path).slice(1).toLowerCase();
+  const mediaType = { png: 'image/png', txt: 'text/plain', md: 'text/markdown' }[ext] ?? 'application/octet-stream';
+  return { path: p.path, size: bytes.length, modifiedAt, mediaType, data: sent.toString('base64'), truncated: bytes.length > sent.length };
+}
+
 // Three of bruce's threads, one in each state worth seeing: finished and
 // waiting on Mike, idle and read, and a turn running. Their folders and
 // the picture are paths on bruce, so nothing here has them.
@@ -1588,6 +1648,11 @@ function addRemoteDemo() {
       const turnId = `${id}_t${i}`;
       push({ type: 'user.message', text: turn.ask, images: turn.images ?? [] }, turnId);
       push({ type: 'turn.started' }, turnId);
+      for (const [j, tool] of (turn.tools ?? []).entries()) {
+        const itemId = `${id}_c${i}_${j}`;
+        push({ type: 'tool.call', itemId, name: 'Bash', kind: 'command', title: tool.command, input: { command: tool.command } }, turnId);
+        push({ type: 'tool.result', itemId, ok: true, text: tool.text, truncated: Boolean(tool.blobPath), ...(tool.blobPath ? { blobPath: tool.blobPath } : {}), images: [] }, turnId);
+      }
       if (turn.answer) {
         push({ type: 'assistant.text', itemId: `${id}_m${i}`, text: turn.answer }, turnId);
         push({ type: 'turn.completed', outcome: 'completed', durationMs: 42_000, ...(turn.needs ? { needs: turn.needs } : {}) }, turnId);
@@ -1600,15 +1665,24 @@ function addRemoteDemo() {
   };
   make('bruce_backup', 'Check the photo library backup', '/Users/bruce/dev/me/misc', 12, 'idle', [{
     ask: 'Is last night\'s photo library backup complete? Here is what Backblaze showed this morning.',
-    images: [{ path: '/Users/bruce/Library/Application Support/Threadbear/media/backblaze.png', mediaType: 'image/png' }],
+    images: [{ path: BRUCE_FILES.picture, mediaType: 'image/png', width: 760, height: 420 }],
     answer: 'The backup finished at 3:12 am: **48,210 files**, nothing skipped. The only warning is the external drive, which was asleep for the first pass and caught up on the second.\n\nWant me to keep the drive awake during backups?',
     needs: 'you',
   }], { unread: true, needsYou: true });
   make('bruce_media', 'Tidy the media drive', '/Volumes/CannMedia', 300, 'idle', [{
     ask: 'Find duplicate videos on the media drive.',
-    answer: 'Found 14 duplicates, 61 GB in all. I listed them in `duplicates.txt` and left the files alone.',
+    // Output past the runner's cut, kept whole in a blob on bruce.
+    tools: [{ command: 'fdupes -r /Volumes/CannMedia/Footage', text: bruceFile(BRUCE_FILES.blob).slice(0, 600), blobPath: BRUCE_FILES.blob }],
+    answer: `Found 14 duplicates, 61 GB in all. I listed them in \`duplicates.txt\` and left the files alone.\n\nThe [full scan](<${BRUCE_FILES.blob}>) has every match.`,
     needs: 'nothing',
   }]);
+  // Its Highlights: the list it wrote, a path on bruce.
+  const media = threads.get('bruce_media');
+  highlights.set('bruce_media', {
+    highlights: [{ id: `file:${BRUCE_FILES.list}`, kind: 'file', title: 'duplicates.txt', path: BRUCE_FILES.list, how: 'written',
+      seq: media.summary.lastSeq, lastSeq: media.summary.lastSeq, at: media.summary.lastActivityAt }],
+    edited: [],
+  });
   make('bruce_render', 'Render the shed walkthrough', '/Users/bruce/dev/me/shed', 1, 'running', [{
     ask: 'Render the shed walkthrough at 1080p and tell me when it is done.',
   }]);
