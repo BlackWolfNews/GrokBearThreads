@@ -88,6 +88,37 @@ export const threads = query({
   },
 });
 
+// Archived threads whose title or last reply has these words (API 16): the
+// phone has only the newest DEN_LIMIT of the den, and searches those itself,
+// so this finds the older ones. Convex's full-text search matches whole
+// words, the last one as a prefix, so "sett" finds "settings". Titles first.
+const SEARCH_LIMIT = 30;
+export const search = query({
+  args: { token: v.string(), text: v.string() },
+  returns: v.array(row),
+  handler: async (ctx, { token, text }) => {
+    await checkPhoneToken(ctx, token);
+    const words = text.trim();
+    if (!words) return [];
+    const byTitle = await ctx.db
+      .query('threads')
+      .withSearchIndex('search_title', (q) => q.search('title', words).eq('view', 'den'))
+      .take(SEARCH_LIMIT);
+    const byPreview = await ctx.db
+      .query('threads')
+      .withSearchIndex('search_preview', (q) => q.search('preview', words).eq('view', 'den'))
+      .take(SEARCH_LIMIT);
+    const seen = new Set<string>();
+    const out = [];
+    for (const t of [...byTitle, ...byPreview]) {
+      if (seen.has(t.threadId) || out.length >= SEARCH_LIMIT) continue;
+      seen.add(t.threadId);
+      out.push(stripThread(t));
+    }
+    return out;
+  },
+});
+
 // The thread's row and, as API 1 had it, its newest MESSAGES_SHOWN text
 // messages plus any an old phone paged in. Tool rows are never in it: an app
 // built before API 2 can't decode them. Newer clients use phone:messages.

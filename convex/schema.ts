@@ -163,7 +163,10 @@ export default defineSchema({
     .index('by_threadId', ['threadId'])
     .index('by_share_slug', ['share.slug'])
     .index('by_runnerId', ['runnerId'])
-    .index('by_view_activity', ['view', 'lastActivityMs']),
+    .index('by_view_activity', ['view', 'lastActivityMs'])
+    // phone:search, for archived threads older than the phone's den list.
+    .searchIndex('search_title', { searchField: 'title', filterFields: ['view'] })
+    .searchIndex('search_preview', { searchField: 'preview', filterFields: ['view'] }),
 
   // The last 20 text messages of each thread (step 2), plus pages the
   // phone asked for, which a cron deletes a day later.

@@ -543,7 +543,7 @@ public enum BackendCompatibility {
     /// The newest backend API this app knows. From 2 a thread's messages come
     /// from phone:messages (every message and tool line, paged in Convex);
     /// an older backend still gets phone:thread and the runner's paging.
-    public static let currentAPIVersion = 15
+    public static let currentAPIVersion = 16
     public static let messagePagesAPIVersion = 2
     /// From 3 each phone chooses when it's notified (phone:setNotifications).
     public static let notificationSettingAPIVersion = 3
@@ -563,6 +563,9 @@ public enum BackendCompatibility {
     /// out, and a thread with a schedule waits unless it needs Mike in a
     /// way the phone can see.
     public static let sectionsAPIVersion = 15
+    /// From 16 phone:search finds archived threads past the den's newest
+    /// 100. Older backends don't have it, and the search stops at those.
+    public static let searchAPIVersion = 16
 
     /// The line to show, or nil when the backend is fine.
     public static func problem(_ identity: PhoneIdentity) -> String? {

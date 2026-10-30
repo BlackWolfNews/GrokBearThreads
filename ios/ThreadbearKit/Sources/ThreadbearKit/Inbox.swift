@@ -106,7 +106,11 @@ public struct ThreadSearch: Sendable, Equatable {
     public var hibernating: [PhoneThread] = []
     public var archived: [PhoneThread] = []
 
-    public init(_ query: String, sections: InboxSections, hibernating: [PhoneThread], archived: [PhoneThread]) {
+    /// `olderArchived` is what phone:search found past the den's newest 100:
+    /// matched by Convex on whole words, so kept as it comes, after the
+    /// archived threads the phone has.
+    public init(_ query: String, sections: InboxSections, hibernating: [PhoneThread], archived: [PhoneThread],
+                olderArchived: [PhoneThread] = []) {
         let query = query.trimmingCharacters(in: .whitespacesAndNewlines)
         // A thread can sit in two lists for a moment while the runner moves
         // it (snoozed but not yet out of the inbox view): show it once.
@@ -118,7 +122,7 @@ public struct ThreadSearch: Sendable, Equatable {
         running = keep(sections.running)
         waiting = keep(sections.waiting)
         self.hibernating = keep(hibernating)
-        self.archived = keep(archived)
+        self.archived = keep(archived) + olderArchived.filter { seen.insert($0.threadId).inserted }
     }
 
     /// Part of the title or the last reply, as on the Mac, or the project

@@ -9,6 +9,7 @@ struct InboxView: View {
     @State private var composeText = ""
     @State private var hibernateTarget: PhoneThread?
     @State private var query = ""
+    @State private var olderArchived: [PhoneThread] = []
 
     var body: some View {
         NavigationStack(path: $path) {
@@ -31,7 +32,7 @@ struct InboxView: View {
                 }
                 let sections = model.sections
                 if !query.trimmingCharacters(in: .whitespaces).isEmpty {
-                    results(ThreadSearch(query, sections: sections, hibernating: model.hibernating, archived: model.den))
+                    results(ThreadSearch(query, sections: sections, hibernating: model.hibernating, archived: model.den, olderArchived: olderArchived))
                 } else if !model.loaded.contains(.inbox) {
                     LoadingRows()
                 } else if sections.isEmpty {
@@ -61,6 +62,17 @@ struct InboxView: View {
             // Always showing, rather than tucked under the title until you
             // pull down: on the phone it's the quickest way to an old thread.
             .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always))
+            // The phone has only the newest 100 archived threads, so Convex
+            // looks through the rest, once typing pauses.
+            .task(id: query) {
+                olderArchived = []
+                let text = query.trimmingCharacters(in: .whitespaces)
+                guard !text.isEmpty else { return }
+                try? await Task.sleep(for: .milliseconds(300))
+                guard !Task.isCancelled else { return }
+                let found = await model.searchOlderArchived(text)
+                if !Task.isCancelled { olderArchived = found }
+            }
             .navigationDestination(for: String.self) { ThreadView(threadId: $0) }
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {

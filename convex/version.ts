@@ -58,4 +58,7 @@
 //    so the phone sorts threads into the Mac's sections (Waiting: idle
 //    threads a schedule will message). A runner sends them only to a
 //    backend of 15 or later.
-export const API_VERSION = 15;
+// 16: phone:search({ token, text }) finds archived threads by the words in
+//    their title or last reply, past the newest 100 phone:threads gives the
+//    den. Nothing changes for runners.
+export const API_VERSION = 16;

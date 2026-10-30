@@ -33,6 +33,14 @@ final class AppModel {
     /// Whether threads read phone:messages (API 2) rather than phone:thread's
     /// newest 20 plus the runner's paging.
     var hasMessagePages: Bool { (apiVersion ?? 0) >= BackendCompatibility.messagePagesAPIVersion }
+
+    /// Archived threads past the den's newest 100 with these words in
+    /// (API 16). Empty from an older backend, or when the call fails: the
+    /// search still shows what the phone has, so a failure isn't worth a toast.
+    func searchOlderArchived(_ text: String) async -> [PhoneThread] {
+        guard let backend, (apiVersion ?? 0) >= BackendCompatibility.searchAPIVersion else { return [] }
+        return (try? await backend.search(text)) ?? []
+    }
     /// When this phone is notified, kept on the phone and sent to the backend
     /// with each registration and change (API 3).
     private(set) var notifyMode: NotifyMode = NotifyMode(rawValue: UserDefaults.standard.string(forKey: "notifyMode") ?? "") ?? .away

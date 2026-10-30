@@ -66,7 +66,7 @@ export type SyncConfig = {
 // lower one means its backend hasn't been deployed since this runner was:
 // said in runner.status, tb status and the log rather than stopping, since
 // the runner only adds to what it sends while the number stays the same.
-export const BACKEND_API_VERSION = 15;
+export const BACKEND_API_VERSION = 16;
 // From this one a thread's row carries its open card of asks and a finished
 // turn's next steps, and a message row can be `summary` (end_turn's
 // bullets), so the phone shows end-of-turn cards. An older backend's

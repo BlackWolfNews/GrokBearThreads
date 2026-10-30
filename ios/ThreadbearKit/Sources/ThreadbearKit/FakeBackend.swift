@@ -86,6 +86,13 @@ public final class FakeBackend: Backend, @unchecked Sendable {
         }
     }
 
+    public func search(_ text: String) async throws -> [PhoneThread] {
+        let query = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        return lock.withLock { Array(threadsById.values) }
+            .filter { $0.archivedAt != nil && ThreadSearch.matches($0, query) }
+            .sorted { $0.lastActivityAt > $1.lastActivityAt }
+    }
+
     private func liveThreads(_ view: ThreadsView) -> AsyncThrowingStream<[PhoneThread], Error> {
         watch { [unowned self] in
             let all = lock.withLock { Array(threadsById.values) }

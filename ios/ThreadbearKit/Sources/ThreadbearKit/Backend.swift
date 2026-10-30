@@ -16,6 +16,10 @@ public protocol Backend: Sendable {
     /// backend API 5, so a row can show its project the way the Mac does.
     func projects() -> AsyncThrowingStream<[PhoneProject], Error>
     func threads(_ view: ThreadsView) -> AsyncThrowingStream<[PhoneThread], Error>
+    /// Archived threads with these words in their title or last reply
+    /// (backend API 16), for the search to find ones older than the den's
+    /// newest 100. Once, not live: it runs again as the words change.
+    func search(_ text: String) async throws -> [PhoneThread]
     /// Every runner's schedules, for the inbox's Waiting section: which
     /// threads have booked themselves a message for later.
     func schedules() -> AsyncThrowingStream<[PhoneSchedule], Error>
@@ -115,6 +119,10 @@ public final class ConvexBackend: Backend, @unchecked Sendable {
 
     public func threads(_ view: ThreadsView) -> AsyncThrowingStream<[PhoneThread], Error> {
         live("phone:threads", ["view": .string(view.rawValue)], as: [PhoneThread].self)
+    }
+
+    public func search(_ text: String) async throws -> [PhoneThread] {
+        try Self.decode([PhoneThread].self, try await transport.query("phone:search", args(["text": .string(text)])))
     }
 
     public func schedules() -> AsyncThrowingStream<[PhoneSchedule], Error> {

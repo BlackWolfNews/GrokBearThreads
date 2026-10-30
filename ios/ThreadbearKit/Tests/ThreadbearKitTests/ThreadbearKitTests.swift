@@ -242,6 +242,11 @@ import Testing
         #expect(ThreadSearch("garden", sections: sections, hibernating: [], archived: []).inbox.map(\.threadId) == ["Release 1.2"])
         #expect(ThreadSearch("séttings", sections: sections, hibernating: [], archived: [archived]).archived.count == 1)
         #expect(ThreadSearch("nothing like it", sections: sections, hibernating: [asleep], archived: [archived]).isEmpty)
+        // What phone:search found past the den's 100 comes after the phone's
+        // own archived matches, once each, as Convex matched it (whole words).
+        let old = thread("Picker from last year", 9000)
+        let withOlder = ThreadSearch("picker", sections: sections, hibernating: [], archived: [archived, asleep], olderArchived: [asleep, old])
+        #expect(withOlder.archived.map(\.threadId) == ["Old picker work", "Picker from last year"])
         // Mid-move, in the inbox and hibernating at once: shown once.
         #expect(ThreadSearch("dates", sections: sections, hibernating: [dates], archived: []).hibernating.isEmpty)
     }

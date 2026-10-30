@@ -480,6 +480,11 @@ Queries:
 - `phone:command({ token, commandId })` → `{ state: "pending" | "taken" |
   "done" | "failed", note?, threadId? }`.
 
+Since API 16, `phone:search({ token, text })` returns up to 30 archived
+thread rows whose title or last reply has those words (Convex full-text
+search, the last word as a prefix), for the phone's search: `phone:threads`
+gives it only the newest 100 of the den.
+
 Also `phone:projects({ token, archived? })`, `phone:schedules({ token })`
 and `phone:accounts({ token })`, the runner's lists as it last sent them
 (docs/protocol.md "Sync" says which fields). Since API 5 a project row

@@ -290,6 +290,13 @@ describe('convex mirror e2e', { skip: LOCAL ? false : 'no local Convex deploymen
     const issued = JSON.parse(stdout.slice(stdout.indexOf('{'))) as { token: string };
     const den = (await api('query', 'phone:threads', { token: issued.token, view: 'den' })) as any[];
     assert.ok(den.some((r) => r.threadId === made.id));
+    // phone:search finds archived threads by a word of the title, the last
+    // one as a prefix; the search index catches up a moment after the write.
+    await until('phone:search', async () => {
+      const found = (await api('query', 'phone:search', { token: issued.token, text: 'renamed fr' })) as any[];
+      return found.some((r) => r.threadId === made.id && r.view === 'den') || undefined;
+    });
+    assert.deepEqual(await api('query', 'phone:search', { token: issued.token, text: 'nothingmatchesthis' }), []);
     const one = (await api('query', 'phone:thread', { token: issued.token, threadId: made.id })) as any;
     assert.equal(one.thread.title, 'Renamed from the e2e');
     await assert.rejects(api('query', 'phone:threads', { token: 'tb_wrong', view: 'inbox' }), /auth|token/);
