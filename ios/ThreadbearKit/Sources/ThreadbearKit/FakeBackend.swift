@@ -111,6 +111,15 @@ public final class FakeBackend: Backend, @unchecked Sendable {
         watch { [unowned self] in lock.withLock { scheduleList } }
     }
 
+    public func counts() -> AsyncThrowingStream<PhoneCounts, Error> {
+        watch { [unowned self] in
+            let all = lock.withLock { Array(threadsById.values) }
+            let now = Date.now
+            return PhoneCounts(hibernating: all.filter { $0.archivedAt == nil && InboxSections.isSnoozed($0, now: now) }.count,
+                               den: all.filter { $0.archivedAt != nil }.count)
+        }
+    }
+
     public func thread(_ threadId: String) -> AsyncThrowingStream<ThreadDetail?, Error> {
         watch { [unowned self] in
             lock.withLock {

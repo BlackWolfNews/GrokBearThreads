@@ -119,6 +119,24 @@ export const search = query({
   },
 });
 
+// How many threads are hibernating and archived (API 16), for the phone's
+// folded headings: it loads those lists only while their section is open,
+// so a count here is all it needs the rest of the time. Not capped like
+// the den list, so it says the same number as the Mac.
+export const counts = query({
+  args: { token: v.string() },
+  returns: v.object({ hibernating: v.number(), den: v.number() }),
+  handler: async (ctx, { token }) => {
+    await checkPhoneToken(ctx, token);
+    const count = async (view: 'hibernating' | 'den') => {
+      let n = 0;
+      for await (const _ of ctx.db.query('threads').withIndex('by_view_activity', (x) => x.eq('view', view))) n++;
+      return n;
+    };
+    return { hibernating: await count('hibernating'), den: await count('den') };
+  },
+});
+
 // The thread's row and, as API 1 had it, its newest MESSAGES_SHOWN text
 // messages plus any an old phone paged in. Tool rows are never in it: an app
 // built before API 2 can't decode them. Newer clients use phone:messages.

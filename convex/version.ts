@@ -61,4 +61,6 @@
 // 16: phone:search({ token, text }) finds archived threads by the words in
 //    their title or last reply, past the newest 100 phone:threads gives the
 //    den. Nothing changes for runners.
-export const API_VERSION = 16;
+// 17: phone:counts says how many threads are hibernating and archived, so
+//    the phone can fold those sections without loading them.
+export const API_VERSION = 17;

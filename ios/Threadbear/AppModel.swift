@@ -18,6 +18,16 @@ final class AppModel {
     /// For each thread a schedule will message, the one due soonest: the
     /// inbox's Waiting section.
     private(set) var wakes: [String: PhoneSchedule] = [:]
+    /// How many are hibernating and archived (backend API 16), for the
+    /// folded headings. Nil on an older backend.
+    private(set) var counts: PhoneCounts?
+    /// Which headings are folded, remembered across launches.
+    private(set) var folds = SectionFolds(saved: UserDefaults.standard.stringArray(forKey: "foldedSections"))
+    /// A search is on: it looks in the put-away lists too, so they load.
+    private(set) var searching = false
+    /// The live thread lists, one subscription per view that's wanted
+    /// (`folds.views`). A folded Hibernating or Archived has none.
+    private var listTasks: [ThreadsView: Task<Void, Never>] = [:]
     /// The lists that have had their first answer from Convex. Until then
     /// a list is loading, not empty: saying "Nothing in the inbox" at
     /// launch, before anything had arrived, read as if it was (Mike, 30 Oct).
@@ -107,6 +117,68 @@ final class AppModel {
 
     var sections: InboxSections { InboxSections.build(inbox, now: now, wakes: wakes) }
 
+    func toggle(_ section: PhoneSection) {
+        folds.toggle(section)
+        UserDefaults.standard.set(folds.saved, forKey: "foldedSections")
+        followLists()
+    }
+
+    func setSearching(_ on: Bool) {
+        guard on != searching else { return }
+        searching = on
+        followLists()
+    }
+
+    /// How many threads a folded heading hides: the list when it's loaded,
+    /// else phone:counts'. Nil when neither knows.
+    func count(_ section: PhoneSection) -> Int? {
+        switch section {
+        case .inbox: sections.inbox.count
+        case .running: sections.running.count
+        case .waiting: sections.waiting.count
+        case .hibernating: loaded.contains(.hibernating) ? hibernating.count : counts?.hibernating
+        // The den list is capped at 100; the count isn't.
+        case .archived: counts?.den ?? (loaded.contains(.den) ? den.count : nil)
+        }
+    }
+
+    func threads(_ section: PhoneSection) -> [PhoneThread] {
+        switch section {
+        case .inbox: sections.inbox
+        case .running: sections.running
+        case .waiting: sections.waiting
+        case .hibernating: hibernating
+        case .archived: den
+        }
+    }
+
+    /// Starts a subscription for each list now wanted and stops the rest,
+    /// dropping what a stopped one had so it isn't shown stale later.
+    private func followLists() {
+        guard let backend else { return }
+        let wanted = folds.views(searching: searching)
+        for (view, task) in listTasks where !wanted.contains(view) {
+            task.cancel()
+            listTasks[view] = nil
+            loaded.remove(view)
+            switch view {
+            case .inbox: inbox = []
+            case .hibernating: hibernating = []
+            case .den: den = []
+            }
+        }
+        for view in wanted where listTasks[view] == nil {
+            listTasks[view] = follow(backend.threads(view)) { model, list in
+                switch view {
+                case .inbox: model.inbox = list
+                case .hibernating: model.hibernating = list
+                case .den: model.den = list
+                }
+                model.loaded.insert(view)
+            }
+        }
+    }
+
     /// "Mac offline since 10:42" when no runner has checked in for three
     /// minutes. Things done meanwhile wait until it's back.
     var offlineText: String? {
@@ -167,6 +239,7 @@ final class AppModel {
         hibernating = []
         den = []
         wakes = [:]
+        counts = nil
         loaded = []
     }
 
@@ -184,6 +257,7 @@ final class AppModel {
         hibernating = []
         den = []
         wakes = [:]
+        counts = nil
         loaded = []
     }
 
@@ -199,9 +273,7 @@ final class AppModel {
             model.projects = Dictionary(list.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         })
         loaded = []
-        tasks.append(follow(backend.threads(.inbox)) { $0.inbox = $1; $0.loaded.insert(.inbox) })
-        tasks.append(follow(backend.threads(.hibernating)) { $0.hibernating = $1; $0.loaded.insert(.hibernating) })
-        tasks.append(follow(backend.threads(.den)) { $0.den = $1; $0.loaded.insert(.den) })
+        followLists()
         tasks.append(follow(backend.schedules()) { $0.wakes = InboxSections.wakes($1) })
         tasks.append(Task { [weak self] in
             for await up in backend.connectionStates() { self?.connected = up }
@@ -210,6 +282,11 @@ final class AppModel {
             guard let identity = try? await backend.me() else { return }
             self?.backendProblem = BackendCompatibility.problem(identity)
             self?.apiVersion = identity.apiVersion ?? 0
+            // An older backend has no phone:counts, and asking would only
+            // fail and retry.
+            if (identity.apiVersion ?? 0) >= BackendCompatibility.countsAPIVersion, !Task.isCancelled, let self {
+                self.tasks.append(self.follow(backend.counts()) { $0.counts = $1 })
+            }
         })
         if let apnsToken { register(apnsToken) }
     }
@@ -217,6 +294,8 @@ final class AppModel {
     private func stop() {
         tasks.forEach { $0.cancel() }
         tasks = []
+        listTasks.values.forEach { $0.cancel() }
+        listTasks = [:]
     }
 
     /// Keeps a live query going: on a network error it waits and

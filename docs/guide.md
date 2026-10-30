@@ -419,8 +419,10 @@ the thread runs on.
 The Threadbear iPhone app is for when you're away from the Mac: ask a
 thread a question, steer it, answer the ones that need you, start new
 ones, and see how they're all getting on. Its inbox sorts threads the
-way the Mac's does, into Inbox, Running and Waiting; Hibernating and
-Archived are in the menu at the top left. A thread's finished turns
+way the Mac's does, into Inbox, Running, Waiting, Hibernating and
+Archived. All but Inbox start folded, showing how many they hold; tap a
+heading to open or fold it, and the phone remembers. A folded Hibernating
+or Archived isn't loaded at all, so the phone fetches less. A thread's finished turns
 fold into one Worked line above the reply, as on the Mac; tap it to see
 the work. The search at the top of the inbox finds any thread, hibernating
 and archived ones too, by its title, last reply or project. What a thread needs from you shows under its reply with the

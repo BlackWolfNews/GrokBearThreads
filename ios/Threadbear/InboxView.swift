@@ -43,21 +43,16 @@ struct InboxView: View {
                     }
                     .listRowBackground(Color.clear)
                 }
-                if query.trimmingCharacters(in: .whitespaces).isEmpty {
-                    if !sections.inbox.isEmpty {
-                        Section { rows(sections.inbox) } header: { SectionHeading(title: "Inbox", icon: "tray") }
-                    }
-                    if !sections.running.isEmpty {
-                        Section { rows(sections.running, running: true) } header: { SectionHeading(title: "Running", icon: "bolt") }
-                    }
-                    if !sections.waiting.isEmpty {
-                        Section { rows(sections.waiting, waiting: true) } header: { SectionHeading(title: "Waiting", icon: "clock") }
-                    }
+                if query.trimmingCharacters(in: .whitespaces).isEmpty, model.loaded.contains(.inbox) {
+                    ForEach(PhoneSection.allCases, id: \.self) { section($0) }
                 }
             }
             // A flat list with the Mac sidebar's headings, not grouped cards.
             .listStyle(.plain)
             .listSectionSeparator(.hidden)
+            // Folded headings sit one under another, without the gap an
+            // empty section would leave.
+            .listSectionSpacing(0)
             .navigationTitle("Threadbear")
             // Always showing, rather than tucked under the title until you
             // pull down: on the phone it's the quickest way to an old thread.
@@ -77,12 +72,6 @@ struct InboxView: View {
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     Menu {
-                        NavigationLink { ThreadListView(title: "Hibernating", view: .hibernating) } label: {
-                            Label("Hibernating (\(model.hibernating.count))", systemImage: "moon.zzz")
-                        }
-                        NavigationLink { ThreadListView(title: "Archived", view: .den) } label: {
-                            Label("Archived", systemImage: "archivebox")
-                        }
                         NavigationLink { SettingsView() } label: { Label("Settings", systemImage: "gear") }
                         if model.isFake {
                             Button { model.leaveDemo() } label: {
@@ -116,6 +105,9 @@ struct InboxView: View {
             .hibernateDialog(for: $hibernateTarget)
             .refreshable { try? await Task.sleep(for: .milliseconds(400)) }
             .overlay(alignment: .bottom) { ConnectionToast() }
+            .onChange(of: query, initial: true) { _, text in
+                model.setSearching(!text.trimmingCharacters(in: .whitespaces).isEmpty)
+            }
             .onChange(of: model.searchText, initial: true) { _, text in
                 guard let text else { return }
                 query = text
@@ -126,6 +118,41 @@ struct InboxView: View {
                 path = [id]
                 model.openThreadId = nil
             }
+        }
+    }
+
+    /// A heading and its rows, as on the Mac's sidebar: tap the heading to
+    /// fold it away, and folded it says how many it hides. Empty sections
+    /// are left out, Inbox aside, which has the empty view above instead.
+    @ViewBuilder private func section(_ section: PhoneSection) -> some View {
+        let folded = model.folds.isFolded(section)
+        let count = model.count(section)
+        let threads = model.threads(section)
+        // A folded put-away section with no count (an older backend) still
+        // shows its heading, so there's a way to open it.
+        if section != .inbox, count != 0 || (count == nil && section.view != nil) {
+            Section {
+                if !folded {
+                    if let view = section.view {
+                        if !model.loaded.contains(view) {
+                            LoadingRows(count: 3)
+                        } else {
+                            putAwayRows(threads, from: view)
+                        }
+                    } else {
+                        rows(threads, running: section == .running, waiting: section == .waiting)
+                    }
+                }
+            } header: {
+                // A tap rather than a Button: a button in a list header
+                // is drawn dimmed, so the heading looked disabled.
+                SectionHeading(title: section.title, icon: section.icon, fold: .init(folded: folded, count: count))
+                    .onTapGesture { withAnimation(.snappy(duration: 0.2)) { model.toggle(section) } }
+                    .accessibilityAction { model.toggle(section) }
+                    .accessibilityHint(folded ? "Shows these threads" : "Hides these threads")
+            }
+        } else if section == .inbox, !threads.isEmpty {
+            Section { rows(threads) } header: { SectionHeading(title: section.title, icon: section.icon) }
         }
     }
 
@@ -197,37 +224,6 @@ struct InboxView: View {
     private func perform(_ thread: PhoneThread, _ change: ThreadChange) async {
         guard let backend = model.backend else { return }
         do { _ = try await backend.update(threadId: thread.threadId, change: change) } catch { model.report(error) }
-    }
-}
-
-/// Hibernating or Archived: a plain list, newest first, with a way back.
-struct ThreadListView: View {
-    @Environment(AppModel.self) private var model
-    var title: String
-    var view: ThreadsView
-
-    var body: some View {
-        let threads = view == .den ? model.den : model.hibernating
-        List {
-            if !model.loaded.contains(view) {
-                LoadingRows(count: 4)
-            } else if threads.isEmpty {
-                ContentUnavailableView {
-                    Label { Text(view == .den ? "Nothing archived" : "Nobody's hibernating") } icon: {
-                        BearView(pose: .sleep, size: 44)
-                    }
-                }
-                .listRowBackground(Color.clear)
-            }
-            ForEach(threads) { thread in
-                NavigationLink(value: thread.threadId) { ThreadRow(thread: thread) }
-                    .listRowInsets(ThreadRow.insets)
-                    .listRowSeparator(.hidden)
-                    .bringBackSwipe(thread, from: view)
-            }
-        }
-        .listStyle(.plain)
-        .navigationTitle(title)
     }
 }
 

@@ -145,6 +145,14 @@ final class ProjectPictures {
 struct SectionHeading: View {
     var title: String
     var icon: String
+    /// For a heading that folds: whether it's folded and how many rows
+    /// that hides (nil: not known yet).
+    var fold: Fold?
+
+    struct Fold {
+        var folded: Bool
+        var count: Int?
+    }
 
     var body: some View {
         HStack(spacing: 6) {
@@ -158,10 +166,29 @@ struct SectionHeading: View {
                 .fill(Look.tile)
                 .frame(height: 1)
                 .padding(.horizontal, 4)
+            if let fold {
+                // Folded, the count says what's hidden, as on the Mac.
+                if fold.folded, let count = fold.count {
+                    Text("\(count)")
+                        .font(.footnote)
+                        .monospacedDigit()
+                        .foregroundStyle(Look.faint)
+                        .contentTransition(.numericText(value: Double(count)))
+                }
+                // Always showing: there's no hover on the phone to reveal it.
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(Look.faint)
+                    .rotationEffect(.degrees(fold.folded ? -90 : 0))
+            }
         }
         .foregroundStyle(.secondary)
         .padding(.top, 14)
         .padding(.bottom, 4)
-        .accessibilityAddTraits(.isHeader)
+        // The whole band takes the tap, not just the words.
+        .contentShape(Rectangle())
+        .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(fold == nil ? .isHeader : [.isHeader, .isButton])
+        .accessibilityValue(fold.map { $0.folded ? "Collapsed" : "Expanded" } ?? "")
     }
 }

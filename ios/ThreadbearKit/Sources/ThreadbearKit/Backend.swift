@@ -23,6 +23,9 @@ public protocol Backend: Sendable {
     /// Every runner's schedules, for the inbox's Waiting section: which
     /// threads have booked themselves a message for later.
     func schedules() -> AsyncThrowingStream<[PhoneSchedule], Error>
+    /// How many threads are hibernating and archived (backend API 16), for
+    /// the folded headings, so those lists needn't be loaded.
+    func counts() -> AsyncThrowingStream<PhoneCounts, Error>
     /// Nil once the thread's gone from the mirror.
     func thread(_ threadId: String) -> AsyncThrowingStream<ThreadDetail?, Error>
     func command(_ commandId: String) -> AsyncThrowingStream<CommandStatus?, Error>
@@ -127,6 +130,10 @@ public final class ConvexBackend: Backend, @unchecked Sendable {
 
     public func schedules() -> AsyncThrowingStream<[PhoneSchedule], Error> {
         live("phone:schedules", [:], as: [PhoneSchedule].self)
+    }
+
+    public func counts() -> AsyncThrowingStream<PhoneCounts, Error> {
+        live("phone:counts", [:], as: PhoneCounts.self)
     }
 
     public func thread(_ threadId: String) -> AsyncThrowingStream<ThreadDetail?, Error> {

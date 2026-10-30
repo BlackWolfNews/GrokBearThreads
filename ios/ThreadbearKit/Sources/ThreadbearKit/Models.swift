@@ -543,7 +543,7 @@ public enum BackendCompatibility {
     /// The newest backend API this app knows. From 2 a thread's messages come
     /// from phone:messages (every message and tool line, paged in Convex);
     /// an older backend still gets phone:thread and the runner's paging.
-    public static let currentAPIVersion = 16
+    public static let currentAPIVersion = 17
     public static let messagePagesAPIVersion = 2
     /// From 3 each phone chooses when it's notified (phone:setNotifications).
     public static let notificationSettingAPIVersion = 3
@@ -566,6 +566,10 @@ public enum BackendCompatibility {
     /// From 16 phone:search finds archived threads past the den's newest
     /// 100. Older backends don't have it, and the search stops at those.
     public static let searchAPIVersion = 16
+    /// From 17 phone:counts says how many threads are hibernating and
+    /// archived, for the folded headings. Older backends don't have it, so
+    /// those headings show no number until opened.
+    public static let countsAPIVersion = 17
 
     /// The line to show, or nil when the backend is fine.
     public static func problem(_ identity: PhoneIdentity) -> String? {
@@ -587,6 +591,32 @@ public struct CommandStatus: Codable, Sendable, Hashable {
         self.state = state
         self.note = note
         self.threadId = threadId
+    }
+}
+
+/// phone:counts (backend API 16): how many threads are hibernating and
+/// archived, uncapped. Convex numbers, so Doubles on the wire.
+public struct PhoneCounts: Codable, Sendable, Hashable {
+    public var hibernating: Int
+    public var den: Int
+
+    public init(hibernating: Int, den: Int) {
+        self.hibernating = hibernating
+        self.den = den
+    }
+
+    private enum Keys: String, CodingKey { case hibernating, den }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: Keys.self)
+        hibernating = Int((try? c.decodeIfPresent(Double.self, forKey: .hibernating)).flatMap { $0 } ?? 0)
+        den = Int((try? c.decodeIfPresent(Double.self, forKey: .den)).flatMap { $0 } ?? 0)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: Keys.self)
+        try c.encode(hibernating, forKey: .hibernating)
+        try c.encode(den, forKey: .den)
     }
 }
 

@@ -462,6 +462,10 @@ Queries:
   ("allow" | "allowAlways" | "deny")[], inputSummary? }` or `{ approvalId,
   kind: "question", questions: Question[] }` with the protocol's
   `Question` shape.
+- `phone:counts({ token })` → `{ hibernating, den }` (API 17): how many
+  threads are in each, uncapped. The phone shows them on its folded
+  Hibernating and Archived headings and subscribes to `phone:threads` for
+  those views only while their section is open or a search is on.
 - `phone:thread({ token, threadId })` → `{ thread, messages: [{ seq, role,
   text, origin?, at, pagedAt? }] }`, oldest first: the newest 20 text
   messages plus any paged ones (`origin` is `"phone"` for one sent from

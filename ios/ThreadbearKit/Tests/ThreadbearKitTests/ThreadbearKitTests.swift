@@ -206,6 +206,28 @@ import Testing
         #expect(RowStatus.kind(review) == .needsYou)
     }
 
+    /// Everything but Inbox starts folded, and a folded put-away section
+    /// isn't loaded, unless a search wants it.
+    @Test func foldedSectionsAreNotLoaded() {
+        var folds = SectionFolds(saved: nil)
+        #expect(!folds.isFolded(.inbox))
+        #expect(PhoneSection.allCases.filter(folds.isFolded) == [.running, .waiting, .hibernating, .archived])
+        #expect(folds.views(searching: false) == [.inbox])
+        #expect(folds.views(searching: true) == [.inbox, .hibernating, .den])
+        folds.toggle(.archived)
+        folds.toggle(.inbox)
+        #expect(folds.views(searching: false) == [.inbox, .den])
+        #expect(!folds.isFolded(.inbox))
+        let back = SectionFolds(saved: folds.saved + ["someday"])
+        #expect(back == folds)
+        #expect(SectionFolds(saved: []).views(searching: false) == [.inbox, .hibernating, .den])
+    }
+
+    @Test func countsDecode() throws {
+        let counts = try JSONDecoder().decode(PhoneCounts.self, from: Data(#"{"hibernating":3,"den":309.0}"#.utf8))
+        #expect(counts == PhoneCounts(hibernating: 3, den: 309))
+    }
+
     @Test func scheduleRowsDecode() throws {
         let json = #"""
         [{"runnerId":"r1","id":"s1","title":"Check","text":"look","whenText":"Every day at 8:00","threadId":"t1","paused":false,

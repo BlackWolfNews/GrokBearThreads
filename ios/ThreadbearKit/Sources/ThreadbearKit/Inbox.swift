@@ -1,5 +1,81 @@
 import Foundation
 
+/// The inbox's headings, top to bottom, as on the Mac sidebar
+/// (app InboxSection).
+public enum PhoneSection: String, Sendable, CaseIterable {
+    case inbox, running, waiting, hibernating, archived
+
+    public var title: String {
+        switch self {
+        case .inbox: "Inbox"
+        case .running: "Running"
+        case .waiting: "Waiting"
+        case .hibernating: "Hibernating"
+        case .archived: "Archived"
+        }
+    }
+
+    public var icon: String {
+        switch self {
+        case .inbox: "tray"
+        case .running: "bolt"
+        case .waiting: "clock"
+        case .hibernating: "moon.zzz"
+        case .archived: "archivebox"
+        }
+    }
+
+    /// The backend list a put-away section's rows come from. The others'
+    /// come from the inbox list, sorted on the phone.
+    public var view: ThreadsView? {
+        switch self {
+        case .hibernating: .hibernating
+        case .archived: .den
+        default: nil
+        }
+    }
+}
+
+/// Which headings are folded, as the Mac's sidebar folds them. Everything
+/// but Inbox starts folded (Mike asked 30 Oct), so the inbox is what you
+/// see first. A folded Hibernating or Archived isn't loaded at all: its
+/// heading shows phone:counts' number, and its threads are fetched once
+/// it's opened, or while a search is on, since search looks in them too.
+public struct SectionFolds: Sendable, Equatable {
+    public static let initial: Set<PhoneSection> = [.running, .waiting, .hibernating, .archived]
+
+    public private(set) var folded: Set<PhoneSection>
+
+    public init(folded: Set<PhoneSection> = SectionFolds.initial) {
+        self.folded = folded.subtracting([.inbox])
+    }
+
+    /// From what was saved: the folded sections' names. Nil (never saved)
+    /// is the initial folds; names this build doesn't know are dropped.
+    public init(saved: [String]?) {
+        self.init(folded: saved.map { Set($0.compactMap(PhoneSection.init(rawValue:))) } ?? Self.initial)
+    }
+
+    public var saved: [String] { folded.map(\.rawValue).sorted() }
+
+    /// Inbox never folds.
+    public func isFolded(_ section: PhoneSection) -> Bool { section != .inbox && folded.contains(section) }
+
+    public mutating func toggle(_ section: PhoneSection) {
+        guard section != .inbox else { return }
+        if folded.contains(section) { folded.remove(section) } else { folded.insert(section) }
+    }
+
+    /// The backend lists to keep a subscription to.
+    public func views(searching: Bool) -> Set<ThreadsView> {
+        var views: Set<ThreadsView> = [.inbox]
+        for section in PhoneSection.allCases {
+            if let view = section.view, searching || !isFolded(section) { views.insert(view) }
+        }
+        return views
+    }
+}
+
 /// The inbox's sections, as on the Mac sidebar (app ThreadSections): Inbox
 /// first, ordered by how much a thread wants Mike, then Running, since
 /// there's nothing to do with those until they finish, then Waiting:
