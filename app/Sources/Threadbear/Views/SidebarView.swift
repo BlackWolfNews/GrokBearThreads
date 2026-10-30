@@ -714,6 +714,8 @@ struct ThreadRowView: View {
         .overlay(alignment: .trailing) {
             if showsActions {
                 RowActions(thread: thread, actions: mode.rowActions)
+                    // The tour points at a sample's moon and box.
+                    .tourTarget(.rowButtons, when: thread.sample)
                     .padding(.trailing, SidebarMetrics.trailing - zoomed(5))
             }
         }

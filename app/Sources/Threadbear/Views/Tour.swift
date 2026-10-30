@@ -22,6 +22,8 @@ enum TourTarget: Hashable {
     case activityBar
     /// A sample thread's row in the list, by its title.
     case sampleRow(String)
+    /// A sample row's hover buttons (hibernate and archive), while drawn.
+    case rowButtons
     /// Finish setting up's panel, opened when the first thread's sent.
     case setupPanel
 
@@ -114,7 +116,7 @@ final class Tour {
         TourStep(targets: [.threads], title: "Threads", body: "Everything your agents are working on is listed here.", doc: "threads"),
         // Shown on a sample's row rather than pressed: pressing them was
         // a chore, and "it comes back by itself" read as a riddle (Mike, 30 Oct).
-        TourStep(targets: [.sampleRow("Plan the weekend"), .threads], title: "Put threads away",
+        TourStep(targets: [.rowButtons, .sampleRow("Plan the weekend"), .threads], title: "Put threads away",
                  body: "Hover a thread for these: the moon puts it away for later, the box archives it.",
                  hovers: "Plan the weekend", doc: "hibernate-and-archive"),
         TourStep(targets: [.activityBar], title: "Your views",
@@ -304,20 +306,27 @@ final class Tour {
     /// the window's edges.
     nonisolated static func cardOrigin(target: CGRect?, card: CGSize, bounds: CGRect, edges: [TourEdge],
                                        gap: CGFloat = 14, margin: CGFloat = 12) -> CGPoint {
-        let centred = CGPoint(x: bounds.midX - card.width / 2, y: bounds.midY - card.height / 2)
+        cardPlacement(target: target, card: card, bounds: bounds, edges: edges, gap: gap, margin: margin).origin
+    }
+
+    /// The card's place, and the side of the target it went on (nil in the
+    /// middle), for its arrow.
+    nonisolated static func cardPlacement(target: CGRect?, card: CGSize, bounds: CGRect, edges: [TourEdge],
+                                          gap: CGFloat = 14, margin: CGFloat = 12) -> (origin: CGPoint, edge: TourEdge?) {
+        let centred = (origin: CGPoint(x: bounds.midX - card.width / 2, y: bounds.midY - card.height / 2), edge: TourEdge?.none)
         guard let target else { return centred }
         func clampX(_ x: CGFloat) -> CGFloat { min(max(x, bounds.minX + margin), bounds.maxX - margin - card.width) }
         func clampY(_ y: CGFloat) -> CGFloat { min(max(y, bounds.minY + margin), bounds.maxY - margin - card.height) }
         for edge in edges {
             switch edge {
             case .right where target.maxX + gap + card.width <= bounds.maxX - margin:
-                return CGPoint(x: target.maxX + gap, y: clampY(target.midY - card.height / 2))
+                return (CGPoint(x: target.maxX + gap, y: clampY(target.midY - card.height / 2)), edge)
             case .left where target.minX - gap - card.width >= bounds.minX + margin:
-                return CGPoint(x: target.minX - gap - card.width, y: clampY(target.midY - card.height / 2))
+                return (CGPoint(x: target.minX - gap - card.width, y: clampY(target.midY - card.height / 2)), edge)
             case .below where target.maxY + gap + card.height <= bounds.maxY - margin:
-                return CGPoint(x: clampX(target.midX - card.width / 2), y: target.maxY + gap)
+                return (CGPoint(x: clampX(target.midX - card.width / 2), y: target.maxY + gap), edge)
             case .above where target.minY - gap - card.height >= bounds.minY + margin:
-                return CGPoint(x: clampX(target.midX - card.width / 2), y: target.minY - gap - card.height)
+                return (CGPoint(x: clampX(target.midX - card.width / 2), y: target.minY - gap - card.height), edge)
             default:
                 continue
             }
@@ -452,7 +461,8 @@ struct TourOverlay: View {
                 let target = tour.frame(for: step)
                 // A few points round it, and never past the window's edge.
                 let hole = target.map { $0.insetBy(dx: -4, dy: -4).intersection(bounds) }
-                let origin = Tour.cardOrigin(target: hole, card: cardSize, bounds: bounds, edges: step.edges)
+                let placed = Tour.cardPlacement(target: hole, card: cardSize, bounds: bounds, edges: step.edges)
+                let origin = placed.origin
                 let shape = Spotlight(hole: hole ?? CGRect(x: bounds.midX, y: bounds.midY, width: 0, height: 0))
                 ZStack(alignment: .topLeading) {
                     if step.task == .movePanel {
@@ -473,15 +483,26 @@ struct TourOverlay: View {
                             .onTapGesture {}
                     }
                     if let hole {
-                        RoundedRectangle(cornerRadius: Spotlight.corner)
-                            .strokeBorder(Color.white.opacity(0.35), lineWidth: 1)
+                        // A soft glow round the lit part, so the eye goes
+                        // there (Mike, 30 Oct: the card alone didn't say
+                        // what it meant).
+                        TourGlow()
                             .frame(width: hole.width, height: hole.height)
                             .offset(x: hole.minX, y: hole.minY)
                             .allowsHitTesting(false)
+                            .id(index)
                     }
                     TourCard(step: step, index: index, count: tour.shown.count)
                         .onGeometryChange(for: CGSize.self) { $0.size } action: { cardSize = $0 }
                         .offset(x: origin.x, y: origin.y)
+                    // And an arrow from the card to it, on the card's side
+                    // that faces it.
+                    if let hole, let edge = placed.edge {
+                        TourArrow(edge: edge, at: TourArrow.anchor(edge: edge, card: CGRect(origin: origin, size: cardSize), target: hole))
+                            .fill(Color(nsColor: .windowBackgroundColor))
+                            .frame(width: bounds.width, height: bounds.height)
+                            .allowsHitTesting(false)
+                    }
                 }
                 .animation(Juice.reduceMotion ? nil : .snappy(duration: 0.3), value: index)
                 .animation(Juice.reduceMotion ? nil : .snappy(duration: 0.3), value: hole)
@@ -491,6 +512,64 @@ struct TourOverlay: View {
                 tour.check()
             }
         }
+    }
+}
+
+/// The lit part's outline: the accent, glowing softly in and out (still
+/// with Reduce Motion).
+private struct TourGlow: View {
+    @State private var bright = false
+
+    var body: some View {
+        RoundedRectangle(cornerRadius: Spotlight.corner)
+            .strokeBorder(Color.accentColor, lineWidth: 2)
+            .shadow(color: Color.accentColor.opacity(bright ? 0.9 : 0.35), radius: bright ? 12 : 5)
+            .onAppear {
+                guard !Juice.reduceMotion else { return }
+                withAnimation(.easeInOut(duration: 1.1).repeatForever(autoreverses: true)) { bright = true }
+            }
+    }
+}
+
+/// The card's pointer: a small triangle on the card's side that faces what
+/// it's about, its tip toward it. Drawn over the card's edge in the card's
+/// own colour, so the two read as one shape.
+private struct TourArrow: Shape {
+    static let size: CGFloat = 10
+    let edge: TourEdge
+    /// The middle of the arrow's base, on the card's edge.
+    let at: CGPoint
+
+    /// Where on the card's edge the arrow sits: level with the target's
+    /// middle, kept clear of the card's rounded corners.
+    static func anchor(edge: TourEdge, card: CGRect, target: CGRect) -> CGPoint {
+        let inset: CGFloat = 20
+        func clampY(_ y: CGFloat) -> CGFloat { min(max(y, card.minY + inset), card.maxY - inset) }
+        func clampX(_ x: CGFloat) -> CGFloat { min(max(x, card.minX + inset), card.maxX - inset) }
+        switch edge {
+        case .right: return CGPoint(x: card.minX, y: clampY(target.midY))
+        case .left: return CGPoint(x: card.maxX, y: clampY(target.midY))
+        case .below: return CGPoint(x: clampX(target.midX), y: card.minY)
+        case .above: return CGPoint(x: clampX(target.midX), y: card.maxY)
+        }
+    }
+
+    func path(in rect: CGRect) -> Path {
+        let s = Self.size
+        var p = Path()
+        switch edge {
+        // The card's to the right of the target: the arrow points left.
+        case .right:
+            p.move(to: CGPoint(x: at.x + 1, y: at.y - s)); p.addLine(to: CGPoint(x: at.x - s, y: at.y)); p.addLine(to: CGPoint(x: at.x + 1, y: at.y + s))
+        case .left:
+            p.move(to: CGPoint(x: at.x - 1, y: at.y - s)); p.addLine(to: CGPoint(x: at.x + s, y: at.y)); p.addLine(to: CGPoint(x: at.x - 1, y: at.y + s))
+        case .below:
+            p.move(to: CGPoint(x: at.x - s, y: at.y + 1)); p.addLine(to: CGPoint(x: at.x, y: at.y - s)); p.addLine(to: CGPoint(x: at.x + s, y: at.y + 1))
+        case .above:
+            p.move(to: CGPoint(x: at.x - s, y: at.y - 1)); p.addLine(to: CGPoint(x: at.x, y: at.y + s)); p.addLine(to: CGPoint(x: at.x + s, y: at.y - 1))
+        }
+        p.closeSubpath()
+        return p
     }
 }
 
