@@ -328,23 +328,21 @@ enum ScreenshotRunner {
                 if case .review(let review) = row.content { return review }
                 return nil
             }).first {
-                // In the Review panel beside the thread, then popped out.
+                // In its own window, as a click on the card opens it.
                 app.openReview(threadId: "demo_design_review", review: review)
-                if let session = app.reviewPanel {
+                if let controller = app.reviewWindows["demo_design_review/" + review.id], let compare = controller.window {
+                    let session = controller.session
+                    compare.tuckBehind()
                     session.mode = .grid
-                    await capture(window, dir.appendingPathComponent("16b-design-review-grid.png"))
+                    await capture(compare, dir.appendingPathComponent("16b-design-review-grid.png"))
                     session.mode = .pair
                     session.pick("B")
                     session.setNote("Keep the account override easy to find.", for: "B")
                     await session.saveNow()
-                    await capture(window, dir.appendingPathComponent("16c-design-review-pair.png"))
-                    app.popOutReview()
-                    if let controller = app.reviewWindows["demo_design_review/" + review.id], let compare = controller.window {
-                        compare.tuckBehind()
-                        controller.session.actualSize = true
-                        await capture(compare, dir.appendingPathComponent("16d-design-review-100-percent.png"))
-                        controller.close()
-                    }
+                    await capture(compare, dir.appendingPathComponent("16c-design-review-pair.png"))
+                    session.actualSize = true
+                    await capture(compare, dir.appendingPathComponent("16d-design-review-100-percent.png"))
+                    controller.close()
                 }
             }
         }

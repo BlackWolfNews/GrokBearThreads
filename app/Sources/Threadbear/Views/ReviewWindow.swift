@@ -4,8 +4,10 @@ import SwiftUI
 import ThreadbearCore
 
 extension AppModel {
-    /// Opens a review in the dock's Review panel, a tab beside its thread,
-    /// or brings up the window it was popped out into.
+    /// Opens a review in a window of its own, most of the screen (Mike,
+    /// 30 Oct): beside the thread as a dock tab the images were too small
+    /// to compare. A review already in the Review panel moves out of it,
+    /// keeping its draft.
     func openReview(threadId: String, review: DesignReview) {
         let key = threadId + "/" + review.id
         if let existing = reviewWindows[key] {
@@ -13,18 +15,12 @@ extension AppModel {
             existing.present()
             return
         }
-        // The review is a tab beside the main panel, so the main panel
-        // moves to its thread first: that closes another thread's review
-        // still there (mainContextChanged), and must come before this one
-        // is set up. One dragged out elsewhere is replaced in place.
-        if selection != threadId { select(threadId) }
         if let session = reviewPanel, session.threadId == threadId, session.review.id == review.id {
             session.receive(review)
-        } else {
-            if let old = reviewPanel { Task { await old.saveNow() } }
-            reviewPanel = makeReviewSession(threadId: threadId, review: review)
+            popOutReview()
+            return
         }
-        showReviewPanel(threadId: threadId)
+        presentReviewWindow(makeReviewSession(threadId: threadId, review: review))
     }
 
     private func makeReviewSession(threadId: String, review: DesignReview) -> ReviewSession {
@@ -67,10 +63,14 @@ extension AppModel {
     /// or a second display. The same session, so nothing typed is lost.
     func popOutReview() {
         guard let session = reviewPanel else { return }
-        let threadId = session.threadId
-        let key = threadId + "/" + session.review.id
         dock.close(WindowDock.review)
         reviewPanel = nil
+        presentReviewWindow(session)
+    }
+
+    private func presentReviewWindow(_ session: ReviewSession) {
+        let threadId = session.threadId
+        let key = threadId + "/" + session.review.id
         let controller = ReviewWindowController(session: session, threadTitle: threads[threadId]?.title ?? "Thread", back: { [weak self] in
             self?.select(threadId)
             #if DEBUG
@@ -159,18 +159,32 @@ final class ReviewWindowController: NSWindowController, NSWindowDelegate {
 
     init(session: ReviewSession, threadTitle: String, back: @escaping () -> Void) {
         self.session = session
-        let window = ReviewNativeWindow(contentRect: NSRect(x: 0, y: 0, width: 1240, height: 860), styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
+        // On the screen Threadbear's in, not wherever the mouse is.
+        let screen = NSApp.keyWindow?.screen ?? NSApp.mainWindow?.screen ?? NSScreen.main
+        let frame = Self.frame(on: screen?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1240 / 0.9, height: 860 / 0.9))
+        let window = ReviewNativeWindow(contentRect: frame, styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
         window.reviewSession = session
         window.title = session.review.title
         window.subtitle = threadTitle
         window.minSize = NSSize(width: 780, height: 650)
         window.isReleasedWhenClosed = false
         window.collectionBehavior = [.fullScreenPrimary]
-        window.setFrameAutosaveName("DesignReview")
+        // No frame autosave: each review opens at the size below, not
+        // whatever the last one was dragged to.
         super.init(window: window)
         window.delegate = self
         window.contentView = NSHostingView(rootView: ReviewWindow(session: session, back: back, close: { [weak self] in self?.close() }))
-        window.center()
+        window.setFrame(frame, display: false)
+    }
+
+    /// 90% of the screen, centred, so a border of the desktop shows round
+    /// it; capped on a huge display, where 90% would be a wall of image.
+    static let maxSize = NSSize(width: 2400, height: 1500)
+
+    static func frame(on visible: NSRect) -> NSRect {
+        let width = min(visible.width * 0.9, maxSize.width)
+        let height = min(visible.height * 0.9, maxSize.height)
+        return NSRect(x: (visible.midX - width / 2).rounded(), y: (visible.midY - height / 2).rounded(), width: width.rounded(), height: height.rounded())
     }
 
     required init?(coder: NSCoder) { fatalError() }
