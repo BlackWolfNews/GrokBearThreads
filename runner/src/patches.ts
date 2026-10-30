@@ -56,7 +56,7 @@ import type { Action, Hook, ImageRef, Panel, PanelItem, PatchInfo } from './prot
 import { LIMITS } from './protocol.ts';
 import { imageRefFor } from './media.ts';
 import { FolderCache } from './folder-cache.ts';
-import { TRUST_ALL, type PatchGate } from './patch-trust.ts';
+import { TRUST_ALL, worktreeOf, type PatchGate } from './patch-trust.ts';
 
 export const CONVEX_DASHBOARD = 'https://dashboard.convex.dev';
 // `npx convex dev` on an anonymous (no account) deployment serves the
@@ -192,16 +192,43 @@ function placeTool(loaded: LoadedPatch, cwd: string, home: string, roots: Projec
 }
 
 // The project folders that add anything: not the thread's own folder or
-// one it's inside (its own chain already covers those), each once.
+// one it's inside (its own chain already covers those), each once. For a
+// thread in a worktree, a project folder in that repo's main checkout is
+// read from the worktree's copy: the main checkout is the same repo on
+// another branch, and loading both showed every chip twice (30 Oct).
 function projectRoots(cwd: string, projectFolders: ProjectFolder[]): ProjectFolder[] {
   const own = path.resolve(cwd);
+  const worktree = projectFolders.length > 0 ? worktreeOf(own) : undefined;
   const out: ProjectFolder[] = [];
   for (const pf of projectFolders) {
-    const folder = path.resolve(pf.folder);
+    const folder = worktree ? inWorktree(path.resolve(pf.folder), worktree, own) : path.resolve(pf.folder);
     if (isInside(own, folder) || out.some((r) => r.folder === folder)) continue;
     out.push({ folder, projectId: pf.projectId });
   }
   return out;
+}
+
+// `folder`'s place in the thread's worktree when it's in the worktree's
+// main checkout and the worktree has it too, else `folder`. Written from
+// the thread's own folder as given, not its real path, so it walks up to
+// home the way `own` does (/tmp and /private/tmp are one folder to git).
+function inWorktree(folder: string, worktree: { top: string; main: string }, own: string): string {
+  let real: string;
+  try {
+    real = fs.realpathSync(folder);
+  } catch {
+    return folder;
+  }
+  if (!isInside(real, worktree.main)) return folder;
+  let ownReal: string;
+  try {
+    ownReal = fs.realpathSync(own);
+  } catch {
+    return folder;
+  }
+  const top = path.resolve(own, path.relative(ownReal, worktree.top));
+  const twin = path.join(top, path.relative(worktree.main, real));
+  return fs.existsSync(twin) ? twin : folder;
 }
 
 // The built-in patches: the thread's folder's, then each project folder's

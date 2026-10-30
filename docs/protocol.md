@@ -2035,7 +2035,11 @@ as before. Anything from a project folder has `folder` and `projectId`
 set and runs in that folder; a hook from one only runs after a turn that
 edited a file inside it, matched against its `edited` glob relative to
 it. Two items that would share an id get the folder's name in front, the
-later one only (`poddle:convex.dashboard`).
+later one only (`poddle:convex.dashboard`). A thread in a git worktree
+reads a project folder in that repo's main checkout from the worktree's
+copy of it instead, and skips it when its own folder already covers it:
+the main checkout is the same repo on another branch, so loading both
+gave every chip twice.
 
 **The brief.** A session is told about its thread's projects once each.
 A fresh session (a new thread, a move or account change that starts a new

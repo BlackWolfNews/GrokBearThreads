@@ -223,6 +223,14 @@ function worktreeTop(dir: string): string | undefined {
   }
 }
 
+// The worktree `dir` is in (its top folder) and that worktree's main
+// checkout, both as real paths; undefined outside a worktree git made.
+export function worktreeOf(dir: string): { top: string; main: string } | undefined {
+  const top = worktreeTop(realpath(path.resolve(dir)));
+  const main = top ? mainCheckoutOf(top) : undefined;
+  return top && main ? { top, main: realpath(main) } : undefined;
+}
+
 // The main checkout a worktree belongs to, if git really made it: its .git
 // file names `<repo>/.git/worktrees/<name>`, and that folder's `gitdir`
 // names this worktree's .git back.

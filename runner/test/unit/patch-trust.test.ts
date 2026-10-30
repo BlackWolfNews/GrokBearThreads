@@ -114,6 +114,26 @@ test("a worktree of a trusted repo is trusted as its main checkout; a folder can
   assert.equal(inFake.patches[0].untrusted, 'new');
 });
 
+test("a worktree thread whose project has the main checkout reads the repo's patches once, from the worktree", async () => {
+  const root = tmpDir();
+  const main = repo(root, 'app');
+  writePatch(main, 'checks', 'Check');
+  writePatch(path.join(main, 'web'), 'site', 'Preview');
+  const wt = path.join(root, 'app-threads', 'abc');
+  git(main, 'worktree', 'add', '-q', '--detach', wt, 'main');
+  fs.cpSync(path.join(main, '.threadbear'), path.join(wt, '.threadbear'), { recursive: true });
+  fs.cpSync(path.join(main, 'web'), path.join(wt, 'web'), { recursive: true });
+  // The checks chips showed twice, the second set under +N (Mike, 30 Oct).
+  const set = await loadPatchSet(wt, root, new Map(), [{ folder: main, projectId: 'p_1' }]);
+  assert.deepEqual(set.actions.map((a) => [a.title, a.patch, a.folder]), [['Check', 'checks', undefined]]);
+  // A project folder further in is read from the worktree's copy, on the thread's branch.
+  const deeper = await loadPatchSet(wt, root, new Map(), [{ folder: path.join(main, 'web'), projectId: 'p_1' }]);
+  assert.deepEqual(deeper.actions.map((a) => [a.title, fs.realpathSync(a.folder ?? wt)]), [
+    ['Check', fs.realpathSync(wt)],
+    ['Preview', fs.realpathSync(path.join(wt, 'web'))],
+  ]);
+});
+
 test('an untrusted worktree patch makes no worktree', async () => {
   const root = tmpDir();
   const project = path.join(root, 'app');
