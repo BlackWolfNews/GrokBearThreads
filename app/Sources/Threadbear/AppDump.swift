@@ -150,6 +150,8 @@ struct AppDump: Encodable {
     var connection: String
     var runnerVersion: String
     var banner: BannerInfo?
+    /// The Archived note with Undo at the top of the thread panel: its thread.
+    var archivedNote: String?
     var error: String?
     var window: Window?
     var sidebar: Sidebar
@@ -305,6 +307,7 @@ struct AppDump: Encodable {
             connection: connectionName(app.connection),
             runnerVersion: app.runnerVersion,
             banner: app.banner.map { BannerInfo(style: $0.style.rawValue, text: $0.text, detail: $0.detail) },
+            archivedNote: app.archivedNote?.threadId,
             error: app.errorMessage,
             window: window.map { Window(width: Int(contentSize($0).width), height: Int(contentSize($0).height), appearance: appearance) },
             sidebar: Sidebar(mode: String(describing: app.sidebarMode), sections: sections,
@@ -505,6 +508,7 @@ struct AppDump: Encodable {
         if let window { head += ", window \(window.width)x\(window.height) \(window.appearance)" }
         lines.append(head)
         if let banner { lines.append("banner (\(banner.style)): \(banner.text)" + (banner.detail.map { "  [\($0)]" } ?? "")) }
+        if let archivedNote { lines.append("archived note: \(archivedNote), with Undo") }
         if let error { lines.append("error banner: \(error)") }
         lines.append("")
         lines.append("sidebar, \(sidebar.mode) (\(sidebar.snoozed) snoozed, \(sidebar.archived) archived):")

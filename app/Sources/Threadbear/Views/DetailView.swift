@@ -108,6 +108,74 @@ struct DetailView: View {
             .frame(maxWidth: .infinity)
         }
         }
+        .overlay(alignment: .top) { ArchivedToast() }
+    }
+}
+
+/// "Archived" and the thread's name, floating at the top of the thread
+/// panel for a few seconds after Mike archives one, with Undo. A click
+/// anywhere else on it opens the thread in the Archived section. Stays
+/// while the pointer's over it.
+private struct ArchivedToast: View {
+    @Environment(AppModel.self) private var app
+    @Environment(\.colorScheme) private var colorScheme
+    @State private var hovering = false
+
+    static let shownFor: Duration = .seconds(6)
+
+    var body: some View {
+        ZStack {
+            if let note = app.archivedNote {
+                toast(note)
+                    .id(note.id)
+                    .transition(Juice.reduceMotion ? .opacity : .move(edge: .top).combined(with: .opacity))
+                    .task(id: note.id) {
+                        try? await Task.sleep(for: Self.shownFor)
+                        while hovering, !Task.isCancelled { try? await Task.sleep(for: .milliseconds(300)) }
+                        guard !Task.isCancelled else { return }
+                        app.dismissArchivedNote(note.id)
+                    }
+            }
+        }
+        .animation(Juice.reduceMotion ? .easeOut(duration: 0.15) : .snappy(duration: 0.3), value: app.archivedNote?.id)
+    }
+
+    private func toast(_ note: ArchivedNote) -> some View {
+        let dark = colorScheme == .dark
+        let shape = Capsule(style: .continuous)
+        return HStack(spacing: zoomed(10)) {
+            Button { app.openArchivedNote() } label: {
+                HStack(spacing: zoomed(7)) {
+                    Image(systemName: "archivebox").foregroundStyle(.secondary)
+                    Text("Archived").foregroundStyle(.secondary)
+                    Text(note.title.isEmpty ? "Untitled" : note.title)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                        .frame(maxWidth: zoomed(280), alignment: .leading)
+                        .fixedSize(horizontal: true, vertical: false)
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .tip("Open this thread")
+            Rectangle().fill(Color(nsColor: .separatorColor)).frame(width: 0.5, height: zoomed(14))
+            Button("Undo") { app.undoArchive() }
+                .buttonStyle(.plain)
+                .foregroundStyle(Color(nsColor: .controlAccentColor))
+                .fontWeight(.medium)
+                .tip("Put it back in the inbox")
+        }
+        .font(.system(size: TypeScale.label))
+        .padding(.horizontal, zoomed(14))
+        .padding(.vertical, zoomed(7))
+        .background {
+            shape
+                .fill(.regularMaterial)
+                .shadow(color: .black.opacity(dark ? 0.4 : 0.12), radius: zoomed(10), y: zoomed(3))
+        }
+        .overlay(shape.strokeBorder(Color(nsColor: .separatorColor), lineWidth: 0.5))
+        .onHover { hovering = $0 }
+        .padding(.top, zoomed(10))
     }
 }
 

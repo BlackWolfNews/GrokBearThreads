@@ -215,7 +215,10 @@ left with the mouse) and let go once the space behind it turns blue (a
 quick flick works too). However it's archived (⌘E, a button, or an agent
 or your phone doing it), its row slides off the same way. Archive the
 thread you have open and its page drops into the Archived heading as the
-next thread comes in. The Archived section at the foot of the list has
+next thread comes in. When you archive one, a note saying so floats at
+the top of the thread panel for a few seconds (longer while the pointer's
+on it): Undo puts the thread back, and a click anywhere else on it opens
+the thread. The Archived section at the foot of the list has
 them, most recently archived first, with the older ones behind Show more
 (the search at the top finds any of them). Unarchive, or the same swipe
 there, puts one back.

@@ -408,6 +408,16 @@ enum Automation {
             guard let id = target.id else { return target.error }
             app.archive(id)
             return "ok \(id)"
+        case "undo-archive":
+            // The Archived note's Undo.
+            guard let id = app.archivedNote?.threadId else { return "error no archived note" }
+            app.undoArchive()
+            return "ok \(id)"
+        case "open-archived":
+            // A click on the Archived note.
+            guard let id = app.archivedNote?.threadId else { return "error no archived note" }
+            app.openArchivedNote()
+            return "ok \(id)"
         case "unarchive":
             let target = target(c, app)
             guard let id = target.id else { return target.error }

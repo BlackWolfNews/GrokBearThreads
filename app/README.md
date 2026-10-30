@@ -551,6 +551,7 @@ is an error. Commands marked "the open thread" act on `id` when it's given
 | `appearance`, `resize` | `mode` (light, dark, system); `w`, `h` | |
 | `zoom` | `to` (in, out, reset) or `percent` | the window's zoom, as ⌘=, ⌘- and ⌘0 set it; says the percent it's at |
 | `archive`, `unarchive`, `snooze` | `id`, `seconds` (default 3600) | the open thread; says which thread it acted on |
+| `undo-archive`, `open-archived` | | the Archived note's Undo, or a click on the note (opens the thread) |
 | `mode` | `mode` (`inbox`, `scheduled`, `projects`, `librarian`; `archive` and `snoozed` show the inbox with that section unfolded), `time`, `frames` | which view the sidebar shows. `time: true` says how long until the main thread next goes idle; with `frames: true` too, how the next second of frames went (count, dropped, worst) |
 | `front` | | brings the window in front of everything, for frame timings (ask Mike first: it comes up over his work) |
 | `bump` | `id` (default: the first thread), `count` (20), `gap` (ms, 150) | stands in for a running thread's thread.updated (its preview and activity change) `count` times, and says the main thread's CPU time a bump, less what the same wait costs with none |

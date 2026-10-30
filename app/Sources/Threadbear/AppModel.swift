@@ -79,6 +79,15 @@ final class AppModel {
     private(set) var flyingToArchive: Set<String> = []
     /// How many of those have landed, for the heading's box to bounce.
     private(set) var archiveLandings = 0
+    /// The note at the top of the thread panel after Mike archives a thread
+    /// here, with Undo; a click on it opens the thread (Mike asked 30 Oct).
+    /// Not for one an agent or the phone archives. `ArchivedToast` takes it
+    /// down after a few seconds; the next archive replaces it.
+    var archivedNote: ArchivedNote?
+    /// Archives from the button, ⌘E or the done card that haven't gone to
+    /// the runner yet (the row's still sliding). Undo takes one out of here,
+    /// and then it never goes.
+    @ObservationIgnored private var archivesNotSent: Set<String> = []
     var threads: [String: ThreadSummary] = [:] {
         didSet {
             // A summary from another runner never says which runner it's on
@@ -1410,6 +1419,9 @@ final class AppModel {
     func archive(_ threadId: String? = nil, slid: Bool = false) {
         guard let threadId = threadId ?? selection else { return }
         let next = neighbour(of: threadId)
+        if let thread = threads[threadId] {
+            archivedNote = ArchivedNote(threadId: threadId, title: thread.title, wasOpen: selection == threadId)
+        }
         if selection == threadId {
             flyToArchive(threadId)
             select(next)
@@ -1417,8 +1429,11 @@ final class AppModel {
         if slid { return update(threadId, ThreadUpdate(archived: true)) }
         guard !slidingOff.contains(threadId) else { return }
         slideOff(threadId)
+        archivesNotSent.insert(threadId)
         Task {
             try? await Task.sleep(for: Self.slideTime)
+            // Undone while the row was still on its way: it never leaves.
+            guard archivesNotSent.remove(threadId) != nil else { return }
             do {
                 guard let client = client(for: threadId) else { throw RPCError.disconnected(nil) }
                 threads[threadId] = try await client.updateThread(threadId, ThreadUpdate(archived: true))
@@ -1426,9 +1441,39 @@ final class AppModel {
             } catch {
                 // Still in the inbox: bring the row back.
                 slidingOff.remove(threadId)
+                if archivedNote?.threadId == threadId { archivedNote = nil }
                 show(error)
             }
         }
+    }
+
+    /// The archived note's Undo: back in the inbox, and open again if it
+    /// was the one open when it went.
+    func undoArchive() {
+        guard let note = archivedNote else { return }
+        archivedNote = nil
+        if archivesNotSent.remove(note.threadId) != nil {
+            slidingOff.remove(note.threadId)
+        } else {
+            unarchive(note.threadId)
+        }
+        if note.wasOpen {
+            sidebarMode = .inbox
+            select(note.threadId)
+        }
+    }
+
+    /// A click on the archived note: opens the thread where it now is, in
+    /// the Archived section.
+    func openArchivedNote() {
+        guard let note = archivedNote else { return }
+        archivedNote = nil
+        openThread(note.threadId)
+    }
+
+    /// Takes the note down, unless a newer archive has replaced it.
+    func dismissArchivedNote(_ id: UUID) {
+        if archivedNote?.id == id { archivedNote = nil }
     }
 
     /// The open thread's panel drops into the Archived heading while the
@@ -1918,6 +1963,15 @@ final class AppModel {
             return .failure(error)
         }
     }
+}
+
+/// What `ArchivedToast` shows.
+struct ArchivedNote: Equatable, Identifiable {
+    let id = UUID()
+    let threadId: String
+    let title: String
+    /// It was the open thread, so Undo opens it again.
+    let wasOpen: Bool
 }
 
 /// What `ConnectionBanner` shows.
