@@ -166,6 +166,11 @@ public struct TranscriptModel: Sendable {
 
     public func indexOf(id: String) -> Int? { index[id] }
 
+    /// The last finished turn's card while it's open (Needs you or Done):
+    /// the app draws it in the composer, not the transcript, so the two
+    /// read as one box (Mike, 30 Oct).
+    public var openCard: TranscriptRow? { openAsksRow.flatMap { row(id: $0) } }
+
     /// An item, shown or folded away in a closed group.
     public func item(id: String) -> TranscriptRow? {
         itemIndex[id].map { items[$0] }

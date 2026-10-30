@@ -246,6 +246,10 @@ final class TextRowCell: RowCellView {
     /// The zoom the shown text was rendered at: a pooled cell can get the
     /// same row back after a zoom change, with its blocks still matching.
     private var shownZoom = 0
+    /// Draws an asks card with no box of its own, filling the cell: the
+    /// open card at the top of the composer (ComposerCard), whose box
+    /// is the composer's.
+    var bare = false
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -378,9 +382,15 @@ final class TextRowCell: RowCellView {
             box.frame = NSRect(x: x, y: top + zoomed(2), width: width, height: render.textSize.height + RowMetrics.cardPad * 2 - zoomed(4))
             textView.place(box.frame.insetBy(dx: RowMetrics.cardPad, dy: RowMetrics.cardPad - zoomed(2)))
 
+        case .asks where bare:
+            textView.place(NSRect(x: 0, y: 0, width: bounds.width, height: render.textSize.height))
+
+        case .asks(let card) where card.isOpen:
+            // Drawn in the composer; this row is empty (RowRenderer).
+            textView.isHidden = true
+
         case .asks(let card):
-            // The open card is outlined like an approval waiting on Mike;
-            // a closed one, or the done card (nothing's waiting), is a plain card.
+            // A closed card, or the done card (nothing's waiting), is a plain card.
             box.isHidden = false
             box.set(fill: Theme.cardBackground, stroke: card.isOpen && !card.isDone ? NSColor.controlAccentColor : Theme.cardBorder, radius: zoomed(10))
             box.frame = NSRect(x: x, y: top + zoomed(2), width: width, height: render.textSize.height + RowMetrics.cardPad * 2 - zoomed(4))
@@ -449,9 +459,14 @@ final class TextRowCell: RowCellView {
         placeAnswerBoxes(row)
     }
 
-    func focusAnswerBox(_ ask: Int) {
-        guard let box = answerBoxes[ask], !box.isHidden else { return }
+    /// False when the card hasn't made room for that box yet.
+    @discardableResult
+    func focusAnswerBox(_ ask: Int) -> Bool {
+        guard let box = answerBoxes[ask], !box.isHidden else { return false }
+        // In the composer the card may be scrolled past it.
+        box.scrollToVisible(box.bounds)
         box.focus()
+        return true
     }
 
     /// Puts each Something else box over the room the card's text left for

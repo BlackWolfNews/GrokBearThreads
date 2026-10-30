@@ -95,17 +95,19 @@ reply to read. A link with ↑ after it goes to the step it's about: click
 it and the work opens there, with that step lit up. A link to another
 thread opens that thread.
 
-A reply that needs nothing from you ends with a Done card, with an
-Archive button to put the thread away. When something it talked about is
+A reply that needs nothing from you ends with a Done card at the top of
+the message box, with an Archive button to put the thread away. When something it talked about is
 still worth doing (a piece it didn't get to, a check that's due), the
 card lists them under "Or carry on". Click one to send it to the agent
 straight away; anything you'd typed in the message box stays there. When
-the reply does need you, the
-card lists what to do, with a box to tick off beside each one; the same
-list is near the top of the thread's [Highlights](#highlights).
+the reply does need you, a Needs you card takes its place in the message
+box, outlined, listing what to do; the same list is near the top of the
+thread's [Highlights](#highlights), with a box to tick off beside each
+one. A long card scrolls inside the box, so the reply stays in sight.
+Once you reply, the card goes.
 
-To answer a Needs you card, click its buttons: your picks wait over the
-message box and go with your next message. To answer an ask in your own
+To answer a Needs you card, click its buttons: your picks show on the
+card and go with your next message. To answer an ask in your own
 words, click Something else under it and write in the box that opens
 there. You can paste or drop screenshots in that box too, or use its
 picture button. Each ask can have a box of its own. Return sends the lot

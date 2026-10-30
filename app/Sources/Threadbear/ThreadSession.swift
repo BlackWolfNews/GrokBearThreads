@@ -33,7 +33,9 @@ final class ThreadSession {
     /// nothing to show rather than something that failed.
     private(set) var missing = false
     @ObservationIgnored private var refreshing = false
-    @ObservationIgnored private(set) var feed = ThreadFeed()
+    @ObservationIgnored private(set) var feed = ThreadFeed() {
+        didSet { syncOpenCard() }
+    }
     /// First model row the table shows.
     @ObservationIgnored private(set) var displayStart = 0
     @ObservationIgnored var expanded = Set<String>()
@@ -59,6 +61,9 @@ final class ThreadSession {
     /// as its `user.message` is applied, and this follows it after a flush.
     @ObservationIgnored private(set) var pending: [PendingMessage] = []
     @ObservationIgnored var onOlderLoaded: ((Int) -> Void)?
+    /// The open card (TranscriptModel.openCard), observed, so the composer
+    /// it's drawn in follows its picks and notes and drops it once it closes.
+    private(set) var openCard: TranscriptRow?
 
     init(threadId: String, subagentId: String? = nil, app: AppModel) {
         self.threadId = threadId
@@ -435,6 +440,11 @@ final class ThreadSession {
         let inserted = IndexSet(change.inserted.compactMap { $0 >= start ? $0 - start : nil })
         let updated = IndexSet(change.updated.compactMap { $0 >= start ? $0 - start : nil })
         view?.apply(removed: removed, inserted: inserted, updated: updated)
+    }
+
+    private func syncOpenCard() {
+        let card = feed.model.openCard
+        if card != openCard { openCard = card }
     }
 
     // MARK: Older rows

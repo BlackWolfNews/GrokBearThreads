@@ -92,6 +92,24 @@ final class NeedsYouTests: XCTestCase {
         XCTAssertEqual(card(model, "ak:1")?.next, ["Show Bruce pictures", "Start Bruce threads"])
     }
 
+    /// The open card is what the composer draws at its top (ComposerCard),
+    /// with its picks; Mike's reply takes it out of the composer as well.
+    func testTheOpenCardIsTheLastTurnsUntilHeReplies() {
+        var model = TranscriptModel(events: [done(1, turn: "t1", needs: "nothing", next: ["Tidy notes"])])
+        XCTAssertEqual(model.openCard?.id, "ak:1")
+        _ = model.apply([E.event(2, "user.message", ["text": "Tidy notes", "images": []], turn: "t2"), E.event(3, "turn.started", ["turnId": "t2"], turn: "t2"),
+                         done(4, turn: "t2", needs: "you", asks: [["action": "Merge?", "options": ["Yes", "No"]]])])
+        XCTAssertEqual(model.openCard?.id, "ak:4")
+        _ = model.setAskPicks(4, [0: 1])
+        guard case .asks(let card)? = model.openCard?.content else { return XCTFail() }
+        XCTAssertEqual(card.picks, [0: 1])
+        _ = model.apply([E.event(5, "user.message", ["text": "Merge?\nNo", "images": []], turn: "t3")])
+        XCTAssertNil(model.openCard)
+        // A turn that ends without saying (an older session) has none.
+        _ = model.apply([E.event(6, "turn.started", ["turnId": "t3"], turn: "t3"), done(7, turn: "t3")])
+        XCTAssertNil(model.openCard)
+    }
+
     func testSummaryDecodesNeedsAndAsks() throws {
         let json = #"{"id":"a","title":"T","needsYou":true,"needs":"you","asksSeq":12,"asks":[{"action":"Paste the key","where":"Settings","reply":"done","ticked":true},{"action":"Pick one"},{"bad":1}]}"#
         let thread = try JSONDecoder().decode(ThreadSummary.self, from: Data(json.utf8))

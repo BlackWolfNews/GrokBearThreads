@@ -167,6 +167,18 @@ final class TranscriptLayoutTests: XCTestCase {
         let closed = RowRenderer.asksText(AsksCard(seq: 4, asks: [], isOpen: false, next: ["Show Bruce pictures"]))
         XCTAssertFalse(closed.string.contains("Bruce"), closed.string)
     }
+
+    /// The open card is drawn in the composer (ComposerCard), so its row
+    /// in the transcript takes no room.
+    func testTheOpenCardTakesNoRoomInTheTranscript() {
+        let open = TranscriptRow(id: "ak:1", seq: 1, turnId: "t1", content: .asks(AsksCard(seq: 1, asks: [Ask(action: "Merge?", why: "Checks pass.")])))
+        let render = RowRenderer.render(open, expanded: false, tableWidth: 700, measurer: TextMeasurer())
+        XCTAssertEqual(render.height, 0)
+        XCTAssertNil(render.text)
+        let card = ComposerCardHost.render(open, width: 600)
+        XCTAssertGreaterThan(card.height, 40)
+        XCTAssertTrue(card.text?.string.contains("Merge?") == true)
+    }
 }
 
 private final class FlippedDocument: NSView {

@@ -93,7 +93,7 @@ struct DetailView: View {
                 // A sub-agent can't be written to: it takes its brief from
                 // the agent that started it.
                 if subagentRef == nil {
-                    ComposerView(thread: thread)
+                    ComposerView(thread: thread, session: session, controller: app.transcript)
                         .tourTarget(.composer)
                         .layoutValue(key: PaneRole.self, value: .composer)
                 }

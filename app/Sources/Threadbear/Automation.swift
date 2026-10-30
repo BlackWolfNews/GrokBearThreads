@@ -1302,6 +1302,12 @@ enum Automation {
 
     private static func hover(_ c: [String: Any], app: AppModel) -> String {
         if let prefix = c["row"] as? String {
+            // The open card is in the composer.
+            if let card = app.transcript.session?.openCard, card.id.hasPrefix(prefix), let host = app.transcript.composerCard {
+                _ = hoveredCell?.debugHover(false)
+                hoveredCell = nil
+                return host.debugHover(true) ? "ok \(card.id)" : "error \(card.id) has no hover state"
+            }
             guard let row = displayedRow(prefix, app), let index = app.transcript.session?.displayIndex(of: row.id) else { return "error no such row" }
             app.transcript.scroll(toRow: index, offset: 120)
             guard let cell = app.transcript.tableView.view(atColumn: 0, row: index, makeIfNecessary: true) as? RowCellView else { return "error row isn't drawn" }
@@ -1314,6 +1320,7 @@ enum Automation {
             app.hoverOverride = nil
             _ = hoveredCell?.debugHover(false)
             hoveredCell = nil
+            _ = app.transcript.composerCard?.debugHover(false)
             return "ok"
         }
         // A schedule's row in the Scheduled view, by its id.

@@ -48,6 +48,8 @@ final class TranscriptController: NSObject, NSTableViewDataSource, NSTableViewDe
     /// column and the composer under it are centred in the pane.
     let scrollView: NSScrollView = OverlayScrollView()
     let tableView = TranscriptTableView()
+    /// The open card, drawn at the top of the composer.
+    weak var composerCard: ComposerCardHost?
     private(set) weak var session: ThreadSession?
     private(set) var width: CGFloat = 0
     private var deferred = Set<String>()
@@ -780,10 +782,10 @@ final class TranscriptController: NSObject, NSTableViewDataSource, NSTableViewDe
     }
 
     /// Puts the cursor in ask `ask`'s Something else box on the card from `seq`.
+    /// The open card is in the composer (ComposerCard).
     func focusAnswerBox(seq: Int, ask: Int) {
-        guard let index = session?.displayIndex(of: "ak:\(seq)"),
-              let cell = tableView.view(atColumn: 0, row: index, makeIfNecessary: false) as? TextRowCell else { return }
-        cell.focusAnswerBox(ask)
+        guard session?.openCard?.id == "ak:\(seq)" else { return }
+        composerCard?.focusAnswerBox(ask)
     }
 
     /// A button on the open asks card: `pick:<ask>:<n>` picks (or unpicks)

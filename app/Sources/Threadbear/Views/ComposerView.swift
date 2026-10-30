@@ -11,6 +11,10 @@ struct ComposerView: View {
     @Environment(AppModel.self) private var app
     @Environment(\.colorScheme) private var colorScheme
     let thread: ThreadSummary?
+    /// The thread's transcript and the controller drawing it, for its open
+    /// card (ComposerCard); none for a new thread.
+    var session: ThreadSession? = nil
+    var controller: TranscriptController? = nil
     @State private var height: CGFloat = ComposerTextField.minHeight
     @State private var importing = 0
 
@@ -24,13 +28,16 @@ struct ComposerView: View {
             get: { app.drafts[draftKey] ?? Draft() },
             set: { app.drafts[draftKey] = $0 }
         )
-        // Answers picked on the open card of asks, in the transcript, wait
-        // here as chips and go with the message (AnswerChips).
+        // Answers picked on the open card of asks go with the message.
         let picks = thread.map { app.picks(for: $0) } ?? [:]
         let canSend = !picks.isEmpty || ComposerChips.canSend(text: draft.wrappedValue.text, imageCount: draft.wrappedValue.images.count)
         // A new thread on its way: what was sent stays, greyed and locked,
         // until the runner has made the thread.
         let creating = thread == nil && app.creatingThread
+        // The open card sits at the top of the box (ComposerCard), not
+        // while a message is being edited: the edit is a reply of its own.
+        let cardRow = thread.flatMap { thread in app.editing[thread.id] == nil ? session?.openCard : nil }
+        let needsYou = cardRow.map { row in if case .asks(let card) = row.content { !card.isDone } else { false } } ?? false
         VStack(alignment: .leading, spacing: 0) {
         // The folder's actions (patches), on shelves sitting on the box's
         // top edge, in from its rounded corner (ActionChips).
@@ -42,10 +49,22 @@ struct ComposerView: View {
                 .padding(.bottom, -0.5)
                 .zIndex(1)
         }
+        // The box: the open card over a line, then the message.
+        VStack(alignment: .leading, spacing: 0) {
+        if let cardRow, let controller {
+            ComposerCard(row: cardRow, controller: controller)
+                .padding(.horizontal, Self.padding)
+                .padding(.top, zoomed(8))
+                .padding(.bottom, zoomed(10))
+            Rectangle()
+                .fill(Color(nsColor: .separatorColor))
+                .frame(height: 0.5)
+        }
         VStack(alignment: .leading, spacing: zoomed(10)) {
             if let thread, let edit = app.editing[thread.id] {
                 EditingBanner(sending: edit.sending) { app.cancelEditing(threadId: thread.id) }
-            } else if let thread, !picks.isEmpty {
+            } else if let thread, !picks.isEmpty, cardRow == nil {
+                // With the card right above, its buttons show what's picked.
                 AnswerChips(thread: thread, picks: picks)
             }
             if !draft.wrappedValue.images.isEmpty || importing > 0 {
@@ -57,7 +76,7 @@ struct ComposerView: View {
                 text: draft.text,
                 height: $height,
                 focusTrigger: app.focusRequests[draftKey] ?? 0,
-                placeholder: placeholder(picks),
+                placeholder: placeholder(picks, needsYou: needsYou),
                 onSend: { send() },
                 onReturnWhenEmpty: { returnWhenEmpty(draft.wrappedValue) },
                 onImages: { urls in attach(urls, to: draft) },
@@ -77,7 +96,8 @@ struct ComposerView: View {
             )
         }
         .padding(Self.padding)
-        .background { card }
+        }
+        .background { card(attention: needsYou) }
         }
         // The transcript's reading column: 780 wide at most at 100%,
         // centred, with the same side insets once the window is narrower.
@@ -91,7 +111,9 @@ struct ComposerView: View {
 
     /// A lighter fill on dark; on light, white lifted off the page by a
     /// soft shadow. Clicking the card's padding puts the cursor in the text.
-    private var card: some View {
+    /// Outlined in the accent while the card in it needs Mike, as the
+    /// card was in the transcript.
+    private func card(attention: Bool) -> some View {
         let shape = RoundedRectangle(cornerRadius: Self.cornerRadius, style: .continuous)
         let dark = colorScheme == .dark
         return shape
@@ -99,7 +121,7 @@ struct ComposerView: View {
             // lighter than the pane and read as an outline, not a card.
             .fill(dark ? Color.primary.opacity(0.085) : Color.white)
             .shadow(color: .black.opacity(dark ? 0 : 0.08), radius: zoomed(14), y: zoomed(4))
-            .overlay(shape.strokeBorder(Color(nsColor: .separatorColor), lineWidth: 0.5))
+            .overlay(shape.strokeBorder(attention ? Color(nsColor: .controlAccentColor) : Color(nsColor: .separatorColor), lineWidth: attention ? 1 : 0.5))
             .contentShape(shape)
             .onTapGesture { app.focusComposer(draftKey) }
     }
@@ -112,10 +134,12 @@ struct ComposerView: View {
     }
 
     /// With answers picked, the box is for anything else: a Something
-    /// else answer has its own box on the card.
-    private func placeholder(_ picks: [Int: Int]) -> String {
+    /// else answer has its own box on the card. Under asks with none
+    /// picked, it's the way to answer in other words.
+    private func placeholder(_ picks: [Int: Int], needsYou: Bool) -> String {
         if let thread, app.editing[thread.id] != nil { return "Your message…" }
-        return picks.isEmpty ? "Message" : "Add anything else…"
+        if !picks.isEmpty { return "Add anything else…" }
+        return needsYou ? "Or say something else…" : "Message"
     }
 
     /// AppModel empties the box, and puts the draft back if it isn't sent.

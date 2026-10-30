@@ -411,6 +411,11 @@ enum RowRenderer {
             return RowRender(height: vertical + zoomed(4) + total, text: answerText(resolution), lineHeights: textHeights)
 
         case .asks(let card):
+            // The open card is drawn at the top of the composer instead
+            // (ComposerCard), joined to the box it's answered in. Mike
+            // picked that from mockups (30 Oct). Once closed it's left out
+            // of the rows altogether.
+            if card.isOpen { return RowRender(height: 0) }
             let text = asksText(card, width: width - RowMetrics.cardPad * 2)
             let size = measurer.measure(text, width: width - RowMetrics.cardPad * 2)
             return RowRender(height: vertical + zoomed(4) + size.height + RowMetrics.cardPad * 2 - zoomed(4), text: text, textSize: size)
