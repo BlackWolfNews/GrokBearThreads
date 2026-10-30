@@ -4,10 +4,11 @@ import XCTest
 /// docs/protocol.md, "Needs you": a finished turn's asks as a card, the
 /// thread's summary fields, and how its sidebar row looks.
 final class NeedsYouTests: XCTestCase {
-    private func done(_ seq: Int, turn: String, needs: String? = nil, asks: [[String: Any]] = [], outcome: String = "completed") -> Event {
+    private func done(_ seq: Int, turn: String, needs: String? = nil, asks: [[String: Any]] = [], next: [Any] = [], outcome: String = "completed") -> Event {
         var fields: [String: Any] = ["turnId": turn, "outcome": outcome, "durationMs": 1000]
         if let needs { fields["needs"] = needs }
         if !asks.isEmpty { fields["asks"] = asks }
+        if !next.isEmpty { fields["next"] = next }
         return E.event(seq, "turn.completed", fields, turn: turn)
     }
 
@@ -81,6 +82,14 @@ final class NeedsYouTests: XCTestCase {
         // Mike's next message puts it away, as it does an asks card.
         _ = model.apply([E.event(8, "user.message", ["text": "One more thing", "images": []], turn: "t2")])
         XCTAssertNil(model.row(id: "ak:7"))
+    }
+
+    /// end_turn's follow-ups ride on the done card (Mike, 30 Oct: they got
+    /// lost in the closing prose); one that isn't a string is dropped.
+    func testTheDoneCardCarriesTheSuggestedNextSteps() {
+        let model = TranscriptModel(events: [done(1, turn: "t1", needs: "nothing", next: ["Show Bruce pictures", 7, "Start Bruce threads"])])
+        XCTAssertEqual(card(model, "ak:1")?.isDone, true)
+        XCTAssertEqual(card(model, "ak:1")?.next, ["Show Bruce pictures", "Start Bruce threads"])
     }
 
     func testOnlyACompletedTurnThatNeedsYouWithAsksGetsACard() {

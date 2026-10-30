@@ -1159,7 +1159,7 @@ enum RowRenderer {
     /// BackgroundLayoutManager. Closed, it's just the asks, quietly.
     static func asksText(_ card: AsksCard) -> NSAttributedString {
         let (titleStyle, titleOffset) = Theme.lines(TypeScale.workLine, font: Theme.changesTitleFont, spacing: zoomed(6))
-        if card.isDone { return doneText(titleStyle: titleStyle, titleOffset: titleOffset) }
+        if card.isDone { return doneText(card, titleStyle: titleStyle, titleOffset: titleOffset) }
         let output = NSMutableAttributedString(string: card.isOpen ? "Needs you" : "Needed you", attributes: [
             .font: Theme.changesTitleFont, .foregroundColor: card.isOpen ? NSColor.labelColor : NSColor.secondaryLabelColor,
             .paragraphStyle: titleStyle, .baselineOffset: titleOffset,
@@ -1224,9 +1224,11 @@ enum RowRenderer {
         return output
     }
 
-    /// The done card: the agent said nothing waits on Mike, so the one
-    /// thing left to do is put the thread away (`archive`, as ⌘E does).
-    private static func doneText(titleStyle: NSParagraphStyle, titleOffset: CGFloat) -> NSAttributedString {
+    /// The done card: the agent said nothing waits on Mike, so what's left
+    /// is any follow-up it suggested (`next:<n>`, its words into the
+    /// composer) or putting the thread away (`archive`, as ⌘E does). The
+    /// follow-ups go once he's replied, like an ask's answers.
+    private static func doneText(_ card: AsksCard, titleStyle: NSParagraphStyle, titleOffset: CGFloat) -> NSAttributedString {
         let output = NSMutableAttributedString(string: "Nothing needed from you", attributes: [
             .font: Theme.changesTitleFont, .foregroundColor: NSColor.labelColor,
             .paragraphStyle: titleStyle, .baselineOffset: titleOffset,
@@ -1234,10 +1236,14 @@ enum RowRenderer {
         let button = Theme.labelFont
         let (buttonStyle, buttonOffset) = Theme.lines(TypeScale.scaled(38), font: button, before: zoomed(6))
         output.append(NSAttributedString(string: "\n", attributes: [.font: button, .paragraphStyle: buttonStyle]))
-        output.append(NSAttributedString(string: "\u{00A0}\u{00A0}\u{00A0}Archive\u{00A0}thread\u{00A0}\u{00A0}\u{00A0}", attributes: [
-            .font: button, .foregroundColor: AskButtonStyle.plain.textColor, .paragraphStyle: buttonStyle, .baselineOffset: buttonOffset,
-            .tbAction: "archive", .tbButton: AskButtonStyle.plain.rawValue,
-        ]))
+        let next = card.isOpen ? card.next.enumerated().map { n, text in (text, "next:\(n)") } : []
+        for (k, item) in (next + [("Archive thread", "archive")]).enumerated() {
+            if k > 0 { output.append(NSAttributedString(string: "    ", attributes: [.font: button, .paragraphStyle: buttonStyle, .baselineOffset: buttonOffset])) }
+            output.append(NSAttributedString(string: "\u{00A0}\u{00A0}\u{00A0}" + item.0.replacingOccurrences(of: " ", with: "\u{00A0}") + "\u{00A0}\u{00A0}\u{00A0}", attributes: [
+                .font: button, .foregroundColor: AskButtonStyle.plain.textColor, .paragraphStyle: buttonStyle, .baselineOffset: buttonOffset,
+                .tbAction: item.1, .tbButton: AskButtonStyle.plain.rawValue,
+            ]))
+        }
         return output
     }
 

@@ -1,4 +1,4 @@
 {"seq":1,"ts":"2026-10-27T07:30:10.753Z","threadId":"demo_tidy_imports","turnId":"turn_1","type":"user.message","text":"Tidy the imports in the uploader.","images":[]}
 {"seq":2,"ts":"2026-10-27T07:30:10.753Z","threadId":"demo_tidy_imports","turnId":"turn_1","type":"turn.started"}
 {"seq":3,"ts":"2026-10-27T07:30:10.753Z","threadId":"demo_tidy_imports","turnId":"turn_1","type":"assistant.text","itemId":"turn_1_m","text":"Sorted and de-duplicated the imports in all six files. The build and tests pass."}
-{"seq":4,"ts":"2026-10-27T07:30:10.753Z","threadId":"demo_tidy_imports","turnId":"turn_1","type":"turn.completed","outcome":"completed","durationMs":31000,"costUsd":0.04,"needs":"nothing","needsFrom":"tool"}
+{"seq":4,"ts":"2026-10-27T07:30:10.753Z","threadId":"demo_tidy_imports","turnId":"turn_1","type":"turn.completed","outcome":"completed","durationMs":31000,"costUsd":0.04,"needs":"nothing","next":["Turn on the lint rule that sorts imports"],"needsFrom":"tool"}

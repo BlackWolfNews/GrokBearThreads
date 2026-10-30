@@ -168,7 +168,7 @@ function smallThread({ name, title, minutesAgo, status = 'idle', needsYou = fals
     }
     events.push({ seq: ++seq, ts, threadId: id, turnId, type: 'assistant.text', itemId: `${turnId}_m`, text: turn.reply });
     // What the turn said it needs from Mike (docs/protocol.md, "Needs you").
-    const said = turn.needs ? { needs: turn.needs, ...(turn.asks ? { asks: turn.asks } : {}), needsFrom: 'tool' } : {};
+    const said = turn.needs ? { needs: turn.needs, ...(turn.asks ? { asks: turn.asks } : {}), ...(turn.next ? { next: turn.next } : {}), needsFrom: 'tool' } : {};
     events.push({ seq: ++seq, ts, threadId: id, turnId, type: 'turn.completed', turnId, outcome: 'completed', durationMs: turn.ms ?? 18_000, costUsd: turn.cost ?? 0.05, ...said });
   });
   const last = [...events].reverse().find((e) => e.type === 'assistant.text');
@@ -224,7 +224,7 @@ function others() {
   // Done: finished, unread, and it said nothing waits on Mike, so it's in
   // the inbox with a tick rather than in Needs you.
   smallThread({ name: 'tidy-imports', title: 'Tidy the imports in the uploader', minutesAgo: 9, unread: true, turns: [
-    { user: 'Tidy the imports in the uploader.', reply: 'Sorted and de-duplicated the imports in all six files. The build and tests pass.', needs: 'nothing', ms: 31_000, cost: 0.04 },
+    { user: 'Tidy the imports in the uploader.', reply: 'Sorted and de-duplicated the imports in all six files. The build and tests pass.', needs: 'nothing', next: ['Turn on the lint rule that sorts imports'], ms: 31_000, cost: 0.04 },
   ] });
   smallThread({ name: 'settings-tabs', title: 'Rename the Settings tabs', minutesAgo: 47, turns: [
     { user: 'Rename the Settings tabs to General, Sync and Advanced.', tools: [{ id: 'e', name: 'Edit', kind: 'edit', title: 'Edit ~/dev/photo-sync/Sources/Settings/SettingsView.swift', input: { file_path: `${home}/dev/photo-sync/Sources/Settings/SettingsView.swift`, old_string: 'Tab("Prefs")', new_string: 'Tab("General")' } }], reply: 'Done. The tabs now read **General**, **Sync** and **Advanced**.' },

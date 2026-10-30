@@ -610,7 +610,7 @@ Persisted event types (stored in `events.ndjson`, returned by `threads.events`):
 | `approval.resolved` | `approvalId`, `decision` (`allow` \| `allowAlways` \| `deny` \| `answered` \| `expired`), `message?` |
 | `plan.updated` | `entries: {text, status: "pending" \| "in_progress" \| "completed"}[]` |
 | `turn.started` | `turnId`. A turn the agent starts by itself (a background task finished, or a background subagent needs an approval) has no `user.message` before it. A `user.message` after `turn.started` was sent while the turn ran and went into it |
-| `turn.completed` | `turnId`, `outcome` (`completed` \| `interrupted` \| `failed`), `durationMs`, `costUsd?` (Codex turns have none), `usage?` (Claude: `{inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens}`; Codex: `{inputTokens, cachedInputTokens, cacheWriteTokens?, outputTokens, reasoningTokens}`), `error?`, `errorKind?` (`usageLimit` \| `contextWindow` \| `auth`, when a failed turn's cause is known, so a client can offer the fix without reading `error`), `needs?` (`you` \| `nothing`), `asks?: Ask[]`, `needsFrom?` (`tool` \| `text`): what a completed turn said it needs from Mike (Needs you) |
+| `turn.completed` | `turnId`, `outcome` (`completed` \| `interrupted` \| `failed`), `durationMs`, `costUsd?` (Codex turns have none), `usage?` (Claude: `{inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens}`; Codex: `{inputTokens, cachedInputTokens, cacheWriteTokens?, outputTokens, reasoningTokens}`), `error?`, `errorKind?` (`usageLimit` \| `contextWindow` \| `auth`, when a failed turn's cause is known, so a client can offer the fix without reading `error`), `needs?` (`you` \| `nothing`), `asks?: Ask[]`, `next?: string[]` (with `nothing`: suggested follow-ups), `needsFrom?` (`tool` \| `text`): what a completed turn said it needs from Mike (Needs you) |
 | `asks.ticked` | `asksSeq`, `ticked: number[]` (indexes into that turn's `asks`, the whole set now ticked). Outside any turn. The latest one for an `asksSeq` is that card's ticks |
 | `system.note` | `text` (e.g. "Resumed session", "Compacted the conversation", "Patch reseed added: action Reseed dev DB.") |
 | `error` | `message` |
@@ -1308,7 +1308,7 @@ A turn the agent finished can say whether Mike has to do anything, so
 - **The tool.** Every thread's own agent (not its sub-agents) has
   `end_turn` in the `threadbear` tools: `{ needs?: "you" | "nothing",
   summary?: string[], asks?: { action, reply?, why?, options?,
-  suggested?, links? }[] }`.
+  suggested?, links? }[], next?: string[], archive?: boolean }`.
   The asks are the agent's "What I need from you" list, written there
   instead of in its message: each is one paragraph, `action` its first
   sentence (one concrete thing to do, or a question) and `why` the rest
@@ -1446,6 +1446,17 @@ A turn the agent finished can say whether Mike has to do anything, so
   there lets the model's empty reply end the turn quietly (CLI 2.1.312;
   older CLIs ignore it and nudge as before). A refused `end_turn` is an
   error result, which doesn't count.
+- **Next steps.** With `needs: "nothing"` (said or worked out),
+  `end_turn` also takes `next?: string[]`: follow-ups in this thread
+  worth doing, each the message Mike would send to start it. The runner
+  keeps up to three distinct strings of up to 120 characters on the
+  `turn.completed` (`next`), and drops them with `needs: "you"`, as a
+  card of asks has buttons of its own. The Mac app's done card shows
+  them as buttons before Archive; one puts its words in the composer
+  (after anything already typed) rather than sending, so a stray click
+  never starts a turn. The description asks only for ones that really
+  came up, never made-up work (Mike, 30 Oct 2026: a follow-up in the
+  closing prose, over a card that only offered Archive, got forgotten).
 - **Archiving itself.** `end_turn` also takes `archive?: true`. With
   `needs: "nothing"`, a turn that completes archives its own thread once
   it's over, with a `system.note` saying why; the thread can't archive

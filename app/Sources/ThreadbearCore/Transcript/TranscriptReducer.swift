@@ -774,7 +774,7 @@ public struct TranscriptModel: Sendable {
                     // The done card: goes, as an asks card does, once Mike
                     // replies or the next turn ends.
                     let cardId = "ak:\(seq)"
-                    append(TranscriptRow(id: cardId, seq: seq, turnId: turnId ?? completion.turnId, content: .asks(AsksCard(seq: seq, asks: []))))
+                    append(TranscriptRow(id: cardId, seq: seq, turnId: turnId ?? completion.turnId, content: .asks(AsksCard(seq: seq, asks: [], next: completion.next))))
                     openAsksRow = cardId
                 }
             }

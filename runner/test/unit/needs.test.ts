@@ -24,6 +24,20 @@ test('end_turn input: nothing, you with asks, and junk falls back', () => {
   assert.equal(needsFromTool({ needs: 'you', asks: Array.from({ length: 20 }, (_, i) => ({ action: `a${i}` })) })!.asks!.length, 10);
 });
 
+test('end_turn input: next steps go with needs nothing only', () => {
+  // Mike, 30 Oct: follow-ups in the prose got lost under a done card.
+  assert.deepEqual(needsFromTool({ needs: 'nothing', next: [' Show Bruce pictures ', '', 7, 'Show Bruce pictures', 'Start Bruce threads'] }), {
+    needs: 'nothing',
+    next: ['Show Bruce pictures', 'Start Bruce threads'],
+  });
+  assert.deepEqual(needsFromTool({ summary: ['Done.'], next: ['Do the next bit'] }), { needs: 'nothing', next: ['Do the next bit'] });
+  assert.equal(needsFromTool({ needs: 'nothing', next: ['a', 'b', 'c', 'd'] })!.next!.length, 3);
+  assert.equal(needsFromTool({ needs: 'nothing', next: ['x'.repeat(500)] })!.next![0].length, 120);
+  assert.deepEqual(needsFromTool({ needs: 'nothing', next: 'not a list' }), { needs: 'nothing' });
+  // A card of asks has its own buttons.
+  assert.deepEqual(needsFromTool({ needs: 'you', asks: [{ action: 'Pick one' }], next: ['Later'] }), { needs: 'you', asks: [{ action: 'Pick one' }] });
+});
+
 test('end_turn input: needs left out comes from the asks', () => {
   // Agents filling in a summary forgot needs 2 times in 9 (29 Oct 2026).
   assert.deepEqual(needsFromTool({ asks: [{ action: 'Paste the key', why: 'For the deploy.' }] }), { needs: 'you', asks: [{ action: 'Paste the key', why: 'For the deploy.' }] });

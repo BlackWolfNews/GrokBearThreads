@@ -1552,12 +1552,14 @@ test('needs you: end_turn "nothing" keeps a finished thread out of Needs you; "y
   let s = h.adapter.last;
   s.init();
   s.text('m1', 'All fixed.\n\n**What I need from you**\n\n1. This list is ignored: the tool call wins.');
-  endTurnCall(s, 't1', { needs: 'nothing' });
+  endTurnCall(s, 't1', { needs: 'nothing', next: ['Write the docs'] });
   s.result('completed');
   let t = h.runner.get(thread.id);
   const done = h.events(thread.id).at(-1);
   assert.equal(done.needs, 'nothing');
   assert.equal(done.needsFrom, 'tool');
+  // The done card's follow-ups ride on the turn's own event.
+  assert.deepEqual(done.next, ['Write the docs']);
   assert.deepEqual(checkSummary(t), []);
   assert.equal(t.needs, 'nothing');
   assert.equal(t.needsYou, false, 'finished and unread, but it said it needs nothing');

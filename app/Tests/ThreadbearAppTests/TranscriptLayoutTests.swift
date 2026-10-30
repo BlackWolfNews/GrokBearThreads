@@ -143,6 +143,14 @@ final class TranscriptLayoutTests: XCTestCase {
         XCTAssertTrue(done.string.hasPrefix("Nothing needed from you\n"), done.string)
         let archive = (done.string as NSString).range(of: "Archive")
         XCTAssertEqual(done.attribute(.tbAction, at: archive.location, effectiveRange: nil) as? String, "archive")
+        // Suggested follow-ups: buttons before Archive, gone once it's closed.
+        let next = RowRenderer.asksText(AsksCard(seq: 4, asks: [], next: ["Show Bruce pictures"]))
+        let suggestion = (next.string as NSString).range(of: "Show\u{00A0}Bruce\u{00A0}pictures")
+        XCTAssertNotEqual(suggestion.location, NSNotFound, next.string)
+        XCTAssertEqual(next.attribute(.tbAction, at: suggestion.location, effectiveRange: nil) as? String, "next:0")
+        XCTAssertLessThan(suggestion.location, (next.string as NSString).range(of: "Archive").location)
+        let closed = RowRenderer.asksText(AsksCard(seq: 4, asks: [], isOpen: false, next: ["Show Bruce pictures"]))
+        XCTAssertFalse(closed.string.contains("Bruce"), closed.string)
     }
 }
 

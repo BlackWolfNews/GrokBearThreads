@@ -2520,6 +2520,7 @@ export class Runner {
     if (said) {
       body.needs = said.needs;
       if (said.asks) body.asks = said.asks;
+      if (said.next) body.next = said.next;
       body.needsFrom = said.from;
     }
     // Here rather than only in end_turn's handler: a refused end_turn

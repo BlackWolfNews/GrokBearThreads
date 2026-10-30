@@ -316,10 +316,14 @@ public struct AsksCard: Sendable, Hashable {
     /// The option picked on each ask (ask index to option index), waiting
     /// in the composer to be sent.
     public var picks: [Int: Int]
+    /// The done card's follow-ups (end_turn's `next`): buttons that put
+    /// their words in the composer.
+    public var next: [String]
 
-    public init(seq: Int, asks: [Ask], ticked: Set<Int> = [], isOpen: Bool = true, picks: [Int: Int] = [:]) {
+    public init(seq: Int, asks: [Ask], ticked: Set<Int> = [], isOpen: Bool = true, picks: [Int: Int] = [:], next: [String] = []) {
         self.seq = seq
         self.asks = asks
+        self.next = next
         self.ticked = ticked
         self.isOpen = isOpen
         self.picks = picks
@@ -329,7 +333,8 @@ public struct AsksCard: Sendable, Hashable {
 
     /// A turn that said it needs nothing gets a card too, with no asks:
     /// "Nothing needed from you" and an Archive button, where the raw
-    /// end_turn call used to be all there was (Mike, 29 Oct). A turn that
+    /// end_turn call used to be all there was (Mike, 29 Oct), after any
+    /// follow-ups the agent suggested (30 Oct). A turn that
     /// needs Mike only gets a card when it has asks, so no asks means this.
     public var isDone: Bool { asks.isEmpty }
 }

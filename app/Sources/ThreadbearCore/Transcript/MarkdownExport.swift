@@ -82,7 +82,10 @@ public enum MarkdownExport {
                 return "- \(box) \(entry.text)"
             }.joined(separator: "\n")
         case .asks(let card):
-            if card.isDone { return "**What I need from you**\n\nNothing needed from you." }
+            if card.isDone {
+                let next = card.next.map { "\n- Could do next: \($0)" }.joined()
+                return "**What I need from you**\n\nNothing needed from you." + (next.isEmpty ? "" : "\n" + next)
+            }
             return "**What I need from you**\n\n" + card.asks.enumerated().map { index, ask in
                 "- [\(card.ticked.contains(index) ? "x" : " ")] \(Decisions.continued(Decisions.paragraph(ask), under: "- [ ] "))" + (ask.where_.map { " (\($0))" } ?? "")
             }.joined(separator: "\n")

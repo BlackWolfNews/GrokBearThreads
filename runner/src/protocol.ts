@@ -550,6 +550,8 @@ export type EventBody =
       errorKind?: TurnErrorKind;
       needs?: NeedsWho;
       asks?: Ask[];
+      // With needs "nothing": end_turn's suggested follow-ups.
+      next?: string[];
       needsFrom?: 'tool' | 'text';
     }
   // The ticks on a card of asks, the whole set each time. Outside any turn.

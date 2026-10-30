@@ -607,6 +607,11 @@ export function buildThreadbearTools(
           .max(10)
           .optional()
           .describe('With needs "you": each thing he has to do, most blocking first. Usually one or two.'),
+        next: z
+          .array(z.string())
+          .max(3)
+          .optional()
+          .describe('With needs "nothing": follow-ups in this thread worth doing next, each the message Mike would send to start it, about 8 words: "Show pictures and files from Bruce threads". Only ones that really came up; usually none. See the description.'),
         archive: z
           .boolean()
           .optional()

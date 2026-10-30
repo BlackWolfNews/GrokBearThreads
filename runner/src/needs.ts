@@ -5,7 +5,7 @@
 
 import type { Ask, AskLink, NeedsWho, PersistedEvent } from './protocol.ts';
 
-export type Needs = { needs: NeedsWho; asks?: Ask[] };
+export type Needs = { needs: NeedsWho; asks?: Ask[]; next?: string[] };
 
 export const END_TURN_TOOL = 'end_turn';
 // As the CLIs name it: under threadbear-mcp.ts's SERVER_NAME, which lives
@@ -21,6 +21,9 @@ const MAX_OPTIONS = 6;
 // A button or two to go and do the thing; past three it's a reading list.
 const MAX_LINKS = 3;
 const MAX_URL = 2000;
+// Follow-ups on the done card: a few buttons, each a short message.
+const MAX_NEXT = 3;
+const MAX_NEXT_CHARS = 120;
 // Web pages, and paths on this Mac. Anything else (javascript:, custom
 // schemes) isn't something a button should open.
 const LINK_URL = /^(?:https?:\/\/|file:\/\/|\/|~\/)/i;
@@ -33,7 +36,7 @@ export function needsFromTool(input: unknown): Needs | undefined {
   // Left out, it comes from the asks: agents filling in a summary forgot
   // it 2 times in 9 (29 Oct 2026). Anything else is a call to ignore.
   if (o.needs !== undefined && o.needs !== 'you' && o.needs !== 'nothing') return undefined;
-  if (o.needs === 'nothing') return { needs: 'nothing' };
+  if (o.needs === 'nothing') return done(o.next);
   const asks: Ask[] = [];
   for (const a of Array.isArray(o.asks) ? o.asks : []) {
     if (!a || typeof a !== 'object') continue;
@@ -59,8 +62,16 @@ export function needsFromTool(input: unknown): Needs | undefined {
     asks.push(ask);
     if (asks.length === MAX_ASKS) break;
   }
-  if (o.needs === undefined) return asks.length ? { needs: 'you', asks } : { needs: 'nothing' };
+  if (o.needs === undefined) return asks.length ? { needs: 'you', asks } : done(o.next);
   return asks.length ? { needs: 'you', asks } : { needs: 'you' };
+}
+
+// A turn that needs nothing, with any follow-ups it suggested: the done
+// card's buttons (docs/protocol.md, "Next steps"). Only here, as a card
+// of asks already has its own buttons.
+function done(v: unknown): Needs {
+  const next = [...new Set((Array.isArray(v) ? v : []).map((n) => str(n, MAX_NEXT_CHARS)).filter((n): n is string => !!n))].slice(0, MAX_NEXT);
+  return next.length ? { needs: 'nothing', next } : { needs: 'nothing' };
 }
 
 // Big enough for any turn's story; past this it's the working again.
@@ -254,6 +265,9 @@ const END_TURN_ASKS =
   'The paragraph is markdown, so where action or why names the thing a link opens, make those words a link to the same url ("Look at [the pairing screenshot](/Users/mike/shots/pair.png) and say whether to land it."): Mike can hover them for a peek or click them, and the button stays as the next step. ' +
   'Every decision or yes/no question needs options: 2 to 4 short likely answers, e.g. ["Go", "Not yet"] or ["Merge", "Test locally first"], with suggested: the index of the one you would pick. "Say go for X, or name another" is a decision too: give ["Go", ...the other candidates]. Mike can always write his own answer instead, so options never box him in. ' +
   'For a step he has to do himself, offer options like ["Done", "Can you do it?"] when you could plausibly do it yourself. ' +
+  // Mike, 30 Oct: a follow-up in the closing prose, over a card that only
+  // offered Archive, got buried and forgotten. Not make-work, though.
+  'next is for needs "nothing": up to 3 follow-ups in this thread worth doing, so they don\'t get lost: a piece still missing, a check that\'s due, something you or Mike raised and didn\'t get to. Only ones that really came up; never invent work, and most turns have none, so leave it out then. Write each as the message Mike would send to start it, about 8 words ("Show pictures and files from Bruce threads"). They are buttons on the done card beside Archive, and one puts its words in his composer, so don\'t also list them in your message. ' +
   'archive: true archives this thread once the turn is over, with needs "nothing" only. Use it only when Mike asks for this thread to be archived; otherwise leave it out, as a thread that vanishes from his inbox when he hadn\'t finished with it is confusing. ' +
   'Sub-agents never call this; only the thread\'s own agent does.';
 

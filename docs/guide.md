@@ -110,7 +110,10 @@ At the right of each row:
 - A blue dot before the title: a reply you haven't read yet.
 - A time: the thread is idle. It finished and doesn't need anything: its
   last reply ends with a "Nothing needed from you" card, with an Archive
-  thread button to put it away. After a while Threadbear stops its agent to save memory, and your next message
+  thread button to put it away. When something it talked about is still
+  worth doing (a piece it didn't get to, a check that's due), the card
+  has a button for each, and clicking one puts it in the message box to
+  send or change. After a while Threadbear stops its agent to save memory, and your next message
   starts it again where it left off.
 - **Failed**: the last turn ended with an error. Read the thread to see why,
   and send a message to try again.

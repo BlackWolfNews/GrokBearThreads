@@ -1055,6 +1055,17 @@ final class AppModel {
         sessions[threadId]?.setAskPicks(seq: seq, picks: picks)
     }
 
+    /// A follow-up from the done card, into the thread's composer rather
+    /// than sent: a stray click shouldn't start a turn, and he may want to
+    /// add to it. Whatever he'd typed stays, with it on a line after.
+    func suggestNext(threadId: String, text: String) {
+        var draft = drafts[threadId] ?? Draft()
+        let typed = draft.text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !typed.contains(text) { draft.text = typed.isEmpty ? text : typed + "\n\n" + text }
+        drafts[threadId] = draft
+        focusComposer(threadId)
+    }
+
     /// Puts one of Mike's messages in the thread's composer to edit: sending
     /// it then replaces that message and carries on from there.
     func startEditing(threadId: String, seq: Int, text: String, images: [ImageRef]) {
