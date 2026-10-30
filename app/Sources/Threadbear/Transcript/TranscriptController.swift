@@ -793,12 +793,17 @@ final class TranscriptController: NSObject, NSTableViewDataSource, NSTableViewDe
     /// the ask's links where links open (the pane or the browser). The done
     /// card's `archive` archives the thread, as ⌘E does, and `next:<n>`
     /// ticks or unticks a suggested follow-up, which waits in the composer.
+    /// `page:<n>` shows ask `n` on a paged card.
     func askAction(_ card: AsksCard, action: String) {
         guard let session, let app = session.app, let thread = app.threads[session.threadId] else { return }
         if action == "archive" {
             // Already archived (end_turn's archive: true, or ⌘E): nothing to do,
             // and archiving again would move the selection off it.
             if !thread.isArchived { app.archive(thread.id) }
+            return
+        }
+        if action.hasPrefix("page:") {
+            if let n = Int(action.dropFirst(5)) { composerCard?.showPage(n) }
             return
         }
         if action.hasPrefix("next:") {
@@ -817,6 +822,10 @@ final class TranscriptController: NSObject, NSTableViewDataSource, NSTableViewDe
             // it, once the card has made room for it.
             if n == Decisions.ownAnswer, let now = app.threads[thread.id], app.picks(for: now)[index] == Decisions.ownAnswer {
                 DispatchQueue.main.async { [weak self] in self?.focusAnswerBox(seq: card.seq, ask: index) }
+            }
+            // A picked answer on a paged card moves on to the next ask.
+            else if n != Decisions.ownAnswer, let now = app.threads[thread.id], app.picks(for: now)[index] == n {
+                composerCard?.pagePast(index)
             }
         case "link":
             guard ask.links.indices.contains(n), let url = ask.links[n].target else { return }

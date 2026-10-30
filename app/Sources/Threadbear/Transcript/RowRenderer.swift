@@ -1178,13 +1178,15 @@ enum RowRenderer {
     /// BackgroundLayoutManager. An ask with Something else picked gets room
     /// under its buttons for its own answer box (`.tbAnswerBox`), sized to
     /// what's in it at `width`. Closed, it's just the asks, quietly.
-    static func asksText(_ card: AsksCard, width: CGFloat = 600) -> NSAttributedString {
-        let (titleStyle, titleOffset) = Theme.lines(TypeScale.workLine, font: Theme.changesTitleFont, spacing: zoomed(6))
+    ///
+    /// With `page`, only that ask is drawn, and the heading line gets
+    /// ‹ 2 of 3 › on its right (`page:<n>`): three asks with their buttons
+    /// took most of the window's height (Mike, 30 Oct), so a tall card
+    /// shows them one at a time (ComposerCardHost decides when).
+    static func asksText(_ card: AsksCard, width: CGFloat = 600, page: Int? = nil) -> NSAttributedString {
         if card.isDone { return doneText(card, width: width) }
-        let output = NSMutableAttributedString(string: card.isOpen ? "Needs you" : "Needed you", attributes: [
-            .font: Theme.changesTitleFont, .foregroundColor: card.isOpen ? NSColor.labelColor : NSColor.secondaryLabelColor,
-            .paragraphStyle: titleStyle, .baselineOffset: titleOffset,
-        ])
+        let page = page.flatMap { card.isOpen && card.asks.indices.contains($0) ? $0 : nil }
+        let output = asksHeading(card, width: width, page: page)
         let numbered = card.asks.count > 1
         // A numbered ask's text starts past its number, as in a list in a
         // message; its buttons line up with the text, not the number.
@@ -1195,7 +1197,7 @@ enum RowRenderer {
         let button = Theme.labelFont
         // Tall lines, so a row of buttons that wraps keeps them apart.
         let (buttonStyle, buttonOffset) = Theme.lines(TypeScale.scaled(38), font: button, before: zoomed(6), head: indent)
-        for (i, ask) in card.asks.enumerated() {
+        for (i, ask) in card.asks.enumerated() where page == nil || page == i {
             guard card.isOpen else {
                 output.append(NSAttributedString(string: "\n" + (numbered ? "\(i + 1)  " : "") + ask.action, attributes: [
                     .font: Theme.bodyFont, .foregroundColor: NSColor.secondaryLabelColor,
@@ -1255,6 +1257,62 @@ enum RowRenderer {
                 ]))
             }
         }
+        return output
+    }
+
+    /// The asks card's heading. Open, it's a raised hand in the sidebar's
+    /// Needs you orange and what's wanted, so it reads as a title over
+    /// the asks: a plain "Needs you" was easy to miss (Mike, 30 Oct).
+    /// "Decisions needed" when every ask came with answers to pick from,
+    /// as most do. On a paged card the line is a button tall, with the
+    /// pager on a right tab; past either end its arrow is faint and does
+    /// nothing.
+    private static func asksHeading(_ card: AsksCard, width: CGFloat, page: Int?) -> NSMutableAttributedString {
+        let title = Theme.changesTitleFont
+        guard card.isOpen else {
+            let (style, offset) = Theme.lines(TypeScale.workLine, font: title, spacing: zoomed(6))
+            return NSMutableAttributedString(string: "Needed you", attributes: [
+                .font: title, .foregroundColor: NSColor.secondaryLabelColor, .paragraphStyle: style, .baselineOffset: offset,
+            ])
+        }
+        let button = Theme.labelFont
+        let style: NSMutableParagraphStyle
+        let offset: CGFloat
+        var buttonOffset: CGFloat = 0
+        if page != nil {
+            let height = TypeScale.scaled(38)
+            (style, buttonOffset) = Theme.lines(height, font: button)
+            style.tabStops = [NSTextTab(textAlignment: .right, location: width - 1)]
+            offset = Theme.baselineOffset(height, font: title)
+        } else {
+            (style, offset) = Theme.lines(TypeScale.workLine, font: title, spacing: zoomed(6))
+        }
+        let attributes: [NSAttributedString.Key: Any] = [
+            .font: title, .foregroundColor: NSColor.labelColor, .paragraphStyle: style, .baselineOffset: offset,
+        ]
+        let decisions = card.asks.allSatisfy { !$0.options.isEmpty }
+        let words = !decisions ? "Needed from you" : card.asks.count == 1 ? "Decision needed" : "Decisions needed"
+        let output = NSMutableAttributedString()
+        output.append(symbol("hand.raised.fill", label: "Needs you", font: title, attributes: attributes, color: Theme.needsYou))
+        output.append(NSAttributedString(string: " " + words, attributes: attributes))
+        guard let page else { return output }
+        output.append(NSAttributedString(string: "\t", attributes: attributes))
+        let arrow = { (glyph: String, to: Int) -> NSAttributedString in
+            var arrow: [NSAttributedString.Key: Any] = [.font: button, .paragraphStyle: style, .baselineOffset: buttonOffset]
+            if card.asks.indices.contains(to) {
+                arrow[.tbAction] = "page:\(to)"
+                arrow[.tbButton] = AskButtonStyle.plain.rawValue
+                arrow[.foregroundColor] = AskButtonStyle.plain.textColor
+            } else {
+                arrow[.foregroundColor] = Theme.faintText
+            }
+            return NSAttributedString(string: "\u{00A0}\u{00A0}" + glyph + "\u{00A0}\u{00A0}", attributes: arrow)
+        }
+        output.append(arrow("‹", page - 1))
+        output.append(NSAttributedString(string: "\u{00A0}\u{00A0}\(page + 1) of \(card.asks.count)\u{00A0}\u{00A0}", attributes: [
+            .font: button, .foregroundColor: NSColor.secondaryLabelColor, .paragraphStyle: style, .baselineOffset: buttonOffset,
+        ]))
+        output.append(arrow("›", page + 1))
         return output
     }
 

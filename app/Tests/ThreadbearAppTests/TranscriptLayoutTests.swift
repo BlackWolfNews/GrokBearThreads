@@ -178,6 +178,36 @@ final class TranscriptLayoutTests: XCTestCase {
         XCTAssertFalse(closed.string.contains("Bruce"), closed.string)
     }
 
+    /// The open card has a heading saying what's wanted, and a tall one
+    /// shows its asks one page at a time, ‹ 2 of 3 › on the heading's line,
+    /// each page as tall as the tallest so the composer stays still.
+    func testATallAsksCardIsPaged() {
+        let why = String(repeating: "This one needs a proper explanation so it wraps over a few lines. ", count: 3)
+        let asks = (1...3).map { Ask(action: "Pick number \($0)", why: why, options: ["Yes", "No"]) }
+        let row = TranscriptRow(id: "ak:1", seq: 1, turnId: "t1", content: .asks(AsksCard(seq: 1, asks: asks, picks: [0: 0])))
+        let heading = RowRenderer.asksText(AsksCard(seq: 1, asks: asks)).string
+        XCTAssertTrue(heading.contains("Decisions needed"), heading)
+        XCTAssertTrue(RowRenderer.asksText(AsksCard(seq: 1, asks: [Ask(action: "Add the key", why: "Settings.")])).string.contains("Needed from you"))
+        let first = ComposerCardHost.render(row, width: 600, page: 0)
+        let second = ComposerCardHost.render(row, width: 600, page: 1)
+        XCTAssertEqual(first.height, second.height)
+        let text = second.text!
+        let string = text.string as NSString
+        XCTAssertTrue(text.string.contains("2.\tPick number 2"), text.string)
+        XCTAssertFalse(text.string.contains("Pick number 1"), text.string)
+        XCTAssertFalse(text.string.contains("Pick number 3"), text.string)
+        XCTAssertTrue(text.string.contains("2 of 3"), text.string)
+        XCTAssertEqual(text.attribute(.tbAction, at: string.range(of: "‹").location, effectiveRange: nil) as? String, "page:0")
+        XCTAssertEqual(text.attribute(.tbAction, at: string.range(of: "›").location, effectiveRange: nil) as? String, "page:2")
+        // Past the last page, › does nothing.
+        let last = ComposerCardHost.render(row, width: 600, page: 2).text!
+        XCTAssertNil(last.attribute(.tbAction, at: (last.string as NSString).range(of: "›").location, effectiveRange: nil))
+        // A short card stays one list.
+        let short = TranscriptRow(id: "ak:2", seq: 2, turnId: "t1", content: .asks(AsksCard(seq: 2, asks: [Ask(action: "Merge?", why: "Checks pass."), Ask(action: "Tag it?", why: "Yes.")])))
+        let shortText = ComposerCardHost.render(short, width: 600, page: 1).text!.string
+        XCTAssertTrue(shortText.contains("Merge?") && shortText.contains("Tag it?") && !shortText.contains("of 2"), shortText)
+    }
+
     /// The open card is drawn in the composer (ComposerCard), so its row
     /// in the transcript takes no room.
     func testTheOpenCardTakesNoRoomInTheTranscript() {
