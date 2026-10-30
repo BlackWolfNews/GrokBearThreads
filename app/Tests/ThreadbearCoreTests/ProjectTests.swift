@@ -36,6 +36,30 @@ final class ProjectTests: XCTestCase {
         XCTAssertFalse(project.archived)
     }
 
+    func testProjectTasksDecodeLeniently() throws {
+        let project = try decode(Project.self, """
+        {"id":"p_1","title":"Port Geo","notion":"https://www.notion.so/abc","tasks":{"url":"https://www.notion.so/db",
+         "fetchedAt":"2026-10-30T05:00:00Z","error":"",
+         "columns":[{"name":"To do","kind":"todo","color":"gray"},{"name":"Blocked","kind":"stuck"},{"name":"Done","kind":"done"}],
+         "items":[{"id":"t1","title":"Eventbrite link","url":"https://www.notion.so/t1","status":"To do","who":["Zaran",3],"due":"2026-11-29","thread":"60f772ab"},
+                  {"id":"t2","url":"https://www.notion.so/t2","status":"Done"},{"title":"no id"}]}}
+        """)
+        XCTAssertEqual(project.notion, "https://www.notion.so/abc")
+        let tasks = try XCTUnwrap(project.tasks)
+        XCTAssertEqual(tasks.columns.map(\.kind), [.todo, .todo, .done], "an unknown kind reads as to do")
+        XCTAssertEqual(tasks.items.count, 2, "a card without an id is skipped")
+        XCTAssertEqual(tasks.items[0].who, ["Zaran"])
+        XCTAssertEqual(tasks.items[0].thread, "60f772ab")
+        XCTAssertEqual(tasks.items[1].title, "Untitled")
+        XCTAssertNil(tasks.error, "an empty error is none")
+        XCTAssertFalse(tasks.loading)
+        XCTAssertEqual(tasks.openCount, 1)
+        XCTAssertEqual(tasks.items(in: tasks.columns[2]).map(\.id), ["t2"])
+        let none = try decode(Project.self, #"{"id":"p_2","title":"No board","notion":""}"#)
+        XCTAssertNil(none.notion)
+        XCTAssertNil(none.tasks)
+    }
+
     func testProjectIcons() throws {
         let picture = try decode(Project.self, """
         {"id":"p_1","icon":{"image":{"path":"/d/project-icons/p_1-ab.png","mediaType":"image/png","width":256,"height":256},

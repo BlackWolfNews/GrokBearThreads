@@ -25,6 +25,7 @@ struct ProjectPage: View {
                 }
                 TextSection(project: project, field: .goals)
                 TextSection(project: project, field: .state)
+                TasksSection(project: project)
                 TextSection(project: project, field: .notes)
                 FoldersSection(project: project)
                 ThreadsSection(project: project, threads: threads)
@@ -267,6 +268,207 @@ private struct TextSection: View {
     /// show as their plain lines, which reads well enough for notes.
     static func markdown(_ text: String) -> AttributedString {
         (try? AttributedString(markdown: text, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace))) ?? AttributedString(text)
+    }
+}
+
+/// Its task board, read from the Notion database on its page
+/// (docs/protocol.md, "Project tasks"): a column per Status option, cards
+/// with who and when. Read-only: a card opens in Notion, where it's moved.
+/// Opening the page asks the runner to read it again if it's over a
+/// minute old.
+private struct TasksSection: View {
+    @Environment(AppModel.self) private var app
+    let project: Project
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            PageHeading(title: "Tasks", detail: detail) {
+                if let notion = project.notion {
+                    HStack(spacing: zoomed(10)) {
+                        Button { app.refreshProjectTasks(project.id, force: true) } label: { Image(systemName: "arrow.clockwise") }
+                            .buttonStyle(.borderless)
+                            .tip("Read the board from Notion again")
+                        Button { if let url = URL(string: project.tasks?.url ?? notion) { NSWorkspace.shared.open(url) } } label: { Image(systemName: "arrow.up.forward.square") }
+                            .buttonStyle(.borderless)
+                            .tip("Open the board in Notion, where cards are moved")
+                    }
+                    .font(.system(size: TypeScale.detail))
+                } else {
+                    Button("Add Notion page…") { app.linkProjectNotion(project.id) }
+                        .buttonStyle(.borderless)
+                        .tip("Show a task board from a Notion page here")
+                        .font(.system(size: TypeScale.detail))
+                }
+            }
+            if project.notion == nil {
+                Text("None yet. A Notion page with a Tasks database shows here as a board.")
+                    .font(.system(size: TypeScale.label))
+                    .foregroundStyle(Color(nsColor: Theme.faintText))
+            } else if let tasks = project.tasks, !tasks.columns.isEmpty {
+                if let error = tasks.error {
+                    Text(error)
+                        .font(.system(size: TypeScale.detail))
+                        .foregroundStyle(.orange)
+                        .padding(.bottom, zoomed(8))
+                }
+                TaskBoard(tasks: tasks)
+            } else if let error = project.tasks?.error {
+                Text(error)
+                    .font(.system(size: TypeScale.label))
+                    .foregroundStyle(.orange)
+                    .textSelection(.enabled)
+            } else {
+                Text(project.tasks?.loading == false ? "No cards yet." : "Reading the board from Notion…")
+                    .font(.system(size: TypeScale.label))
+                    .foregroundStyle(Color(nsColor: Theme.faintText))
+            }
+        }
+        .onAppear { app.refreshProjectTasks(project.id) }
+    }
+
+    /// "8 open · read 2m ago".
+    private var detail: String? {
+        guard let tasks = project.tasks, !tasks.loading else { return nil }
+        var parts = ["\(tasks.openCount) open"]
+        if let at = tasks.fetchedAt {
+            let ago = RelativeTime.short(at, now: app.now)
+            parts.append("read " + (ago == "now" ? "just now" : ago + " ago"))
+        }
+        return parts.joined(separator: " · ")
+    }
+}
+
+/// The columns side by side, each as wide as the others. A Complete
+/// column shows its newest few; the rest are a click away in Notion.
+private struct TaskBoard: View {
+    let tasks: ProjectTasks
+    static let doneShown = 3
+
+    var body: some View {
+        HStack(alignment: .top, spacing: zoomed(8)) {
+            ForEach(tasks.columns) { column in
+                let items = tasks.items(in: column)
+                VStack(alignment: .leading, spacing: zoomed(6)) {
+                    HStack(spacing: zoomed(6)) {
+                        Circle().fill(TaskBoard.color(column.color)).frame(width: zoomed(6), height: zoomed(6))
+                        Text(column.name)
+                            .font(.system(size: TypeScale.detail, weight: .semibold))
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                        Spacer(minLength: 0)
+                        Text("\(items.count)")
+                            .font(.system(size: TypeScale.detail))
+                            .foregroundStyle(Color(nsColor: Theme.faintText))
+                            .monospacedDigit()
+                    }
+                    .padding(.horizontal, zoomed(4))
+                    .padding(.bottom, zoomed(2))
+                    let shown = column.kind == .done ? Array(items.prefix(Self.doneShown)) : items
+                    ForEach(shown) { TaskCard(task: $0, done: column.kind == .done) }
+                    if shown.count < items.count, let url = URL(string: tasks.url) {
+                        PlainLink(title: "\(items.count - shown.count) more", help: "See them in Notion") { NSWorkspace.shared.open(url) }
+                            .font(.system(size: TypeScale.detail))
+                            .foregroundStyle(Color(nsColor: Theme.faintText))
+                            .padding(.horizontal, zoomed(4))
+                    }
+                }
+                .padding(zoomed(6))
+                .frame(maxWidth: .infinity, minHeight: zoomed(80), alignment: .topLeading)
+                .background(Color(nsColor: Theme.cardBackground), in: RoundedRectangle(cornerRadius: zoomed(8)))
+            }
+        }
+    }
+
+    /// Notion's colour names, toned down to a dot.
+    static func color(_ name: String?) -> Color {
+        switch name {
+        case "blue": return .blue
+        case "green": return .green
+        case "orange": return .orange
+        case "yellow": return .yellow
+        case "red": return .red
+        case "purple": return .purple
+        case "pink": return .pink
+        case "brown": return .brown
+        default: return Color(nsColor: Theme.faintText)
+        }
+    }
+}
+
+/// One card: its title, then who, when and the thread working on it. A
+/// click opens it in Notion; the thread chip opens the thread.
+private struct TaskCard: View {
+    @Environment(AppModel.self) private var app
+    let task: ProjectTask
+    let done: Bool
+    @State private var hovering = false
+
+    private var thread: ThreadSummary? {
+        guard let id = task.thread?.lowercased(), id.count >= 6 else { return nil }
+        return app.threads[id] ?? app.threads.values.first { $0.id.hasPrefix(id) }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: zoomed(4)) {
+            Text(task.title)
+                .font(.system(size: TypeScale.detail))
+                .foregroundStyle(done ? .secondary : .primary)
+                .lineLimit(4)
+                .fixedSize(horizontal: false, vertical: true)
+            if !task.who.isEmpty || task.due != nil || thread != nil {
+                // One line when it fits, else who over when, so a date
+                // range in a narrow column isn't cut off.
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: zoomed(6)) { meta }
+                    VStack(alignment: .leading, spacing: zoomed(2)) { meta }
+                }
+                .font(.system(size: TypeScale.small))
+                .foregroundStyle(Color(nsColor: Theme.faintText))
+            }
+        }
+        .padding(.horizontal, zoomed(8))
+        .padding(.vertical, zoomed(7))
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(hovering ? Color(nsColor: Theme.hoverFill) : Color(nsColor: Theme.codeBackground), in: RoundedRectangle(cornerRadius: zoomed(6)))
+        .overlay(RoundedRectangle(cornerRadius: zoomed(6)).strokeBorder(Color(nsColor: Theme.cardBorder), lineWidth: 0.5))
+        .contentShape(Rectangle())
+        .onTapGesture { if let url = URL(string: task.url) { NSWorkspace.shared.open(url) } }
+        .onHover { hovering = $0 }
+        .tip("Open in Notion")
+    }
+
+    @ViewBuilder private var meta: some View {
+                    if !task.who.isEmpty {
+                        Text(task.who.joined(separator: ", ")).lineLimit(1)
+                    }
+                    if let due = TaskCard.due(task) { Text(due).lineLimit(1) }
+                    if let thread {
+                        Button { app.openThread(thread.id) } label: {
+                            HStack(spacing: zoomed(3)) {
+                                if thread.status.isBusy { Circle().fill(Color.accentColor).frame(width: zoomed(5), height: zoomed(5)) }
+                                Image(systemName: "bubble.left")
+                            }
+                            .padding(.horizontal, zoomed(4))
+                            .padding(.vertical, zoomed(1))
+                            .background(Color.primary.opacity(0.07), in: RoundedRectangle(cornerRadius: zoomed(4)))
+                        }
+                        .buttonStyle(.plain)
+                        .tip("Open the thread working on it: \(thread.title)")
+                    }
+    }
+
+    /// "29 Nov" or "29 Nov to 4 Dec".
+    static func due(_ task: ProjectTask) -> String? {
+        func day(_ s: String) -> String? {
+            let f = DateFormatter()
+            f.locale = Locale(identifier: "en_US_POSIX")
+            f.dateFormat = "yyyy-MM-dd"
+            guard let d = f.date(from: String(s.prefix(10))) else { return nil }
+            return d.formatted(.dateTime.day().month(.abbreviated))
+        }
+        guard let start = task.due.flatMap(day) else { return nil }
+        if let end = task.dueEnd.flatMap(day) { return "\(start) to \(end)" }
+        return start
     }
 }
 

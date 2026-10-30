@@ -18,6 +18,7 @@ import { StuckJobs } from './stuck-jobs.ts';
 import { Projects, drainProjectMethods, projectMethods } from './projects.ts';
 import { Librarian, librarianMethods } from './librarian.ts';
 import { ConnectorsMonitor, connectorsMethods } from './connectors.ts';
+import { TaskBoards, gatewayCaller, helperHeaders } from './notion-tasks.ts';
 import { createLogger } from './log.ts';
 import { hidIdleMs, isAtMac } from './presence.ts';
 import { ThreadStore } from './store.ts';
@@ -250,6 +251,17 @@ async function main(): Promise<void> {
     onChange: (s) => runner.publish({ method: 'connectors.updated', params: { connectors: s } }),
   });
   connectors.start();
+  // Projects' task boards in Notion, read through the same gateway
+  // (notion-tasks.ts). With no gateway, a project with a Notion page
+  // shows why its board is empty.
+  projects.useTaskBoards(
+    new TaskBoards({
+      home: cfg.home,
+      ...(cfg.connectorsClient ? { call: gatewayCaller({ mcpUrl: cfg.connectorsClient.mcpUrl, headers: helperHeaders(cfg.connectorsClient.headersHelper) }) } : {}),
+      log,
+      onChange: () => projects.boardChanged(),
+    }),
+  );
   // The Convex mirror the phone reads (docs/convex-backend.md). Best
   // effort: off without a URL and key, and never in the way of a turn.
   // The RPC server is made further down; presence asks it once it's there.

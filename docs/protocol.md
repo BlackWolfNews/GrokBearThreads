@@ -711,7 +711,8 @@ the summary and then the reply.
 | `projects.list` | `{ archived?: boolean }` | `{ projects: Project[] }`, newest `lastActivityAt` first. Archived ones only with `archived: true` (then all of them) |
 | `projects.get` | `{ projectId }` | `{ project: Project, threadIds: string[] }`, its threads newest activity first, put away ones included |
 | `projects.create` | `{ title: string, folders?: string[], goals?, state?, notes?, links?: { title?, url }[], threadIds?: string[] }` | `{ project: Project }`, made by Mike (`createdBy: "mike"`). `threadIds` are put in it, pinned. Folders must exist (`-32602` otherwise) |
-| `projects.update` | `{ projectId, title?, folders?: string[], goals?, state?, notes?, links?: { title?, url }[], archived?: boolean }` | `{ project: Project }`. Replaces what's given. A link that isn't http(s), or more than 8, is `-32602`. A change of folders reloads its threads' patches |
+| `projects.update` | `{ projectId, title?, folders?: string[], goals?, state?, notes?, links?: { title?, url }[], notion?: string, archived?: boolean }` | `{ project: Project }`. Replaces what's given. A link that isn't http(s), or more than 8, is `-32602`. A change of folders reloads its threads' patches. `notion` is a Notion page or database address (notion.so, notion.site, notion.com, or a `collection://` data source), read straight away (see Project tasks); empty takes it off; anything else is `-32602` |
+| `projects.refreshTasks` | `{ projectId, force?: boolean }` | `{ project: Project }` once its Notion board has been read again, unless it was read in the last minute (`force` reads it anyway). The project page asks when it opens. `-32602` for a project with no `notion` |
 | `projects.setIcon` | `{ projectId, path?: string, symbol?: string }` | `{ project: Project }`. Mike's choice: `path` a picture on this Mac (PNG, JPEG, WebP, SVG, ICNS or ICO, copied in), or `symbol` an SF Symbol name; neither puts it back to automatic, and the librarian finds one again within seconds. `-32602` for a missing file or a name that isn't a symbol's |
 | `projects.merge` | `{ projectId, intoId }` | `{ project: Project }` (the one kept). Folders and threads move over, notes are joined, and `projectId` is deleted |
 | `projects.delete` | `{ projectId }` | `{}`. Its threads leave it; nothing else is touched |
@@ -2156,6 +2157,53 @@ never takes one away. Merging two projects keeps both lots.
 `list_projects`, `read_project`, `create_project`, `update_project`,
 `join_project` and `leave_project` (each for their own thread by default).
 An agent's join is pinned.
+
+### Project tasks
+
+A project can name a Notion page (`notion`) with its task board on it: a
+database with a Status column, like a Notion board. The runner reads it
+through the Connectors gateway (see Connectors), with the main Claude
+login's `connectors` entry in `~/.claude.json` (its URL and its
+`headersHelper`, which prints the Authorization header;
+`runner.json`'s `connectors.headersHelper` can name another). So it's the
+same Notion login the agents use, and the runner keeps no Notion key.
+
+It finds the database on the page (the one called Tasks, else the first;
+a database or a `collection://` address is used as it is), then reads the
+database's schema and its first 100 rows every 5 minutes, and when the
+project page asks (`projects.refreshTasks`). Each read is two or three
+`tools/call`s to the gateway (`notion__notion-fetch`,
+`notion__notion-query-data-sources` in rows mode). The last board is kept
+in `project-tasks.json` in the data dir, so a restart shows it at once.
+
+```ts
+// On Project
+notion?: string        // the page (or database) Mike or an agent set
+tasks?: ProjectTasks   // with notion only
+
+type ProjectTasks = {
+  url: string          // the database to open in Notion
+  columns: { name: string; kind: "todo" | "doing" | "done"; color?: string }[]
+                       // the Status options in Notion's order; kind is the
+                       // option's group (To do, In progress, Complete)
+  items: {
+    id: string; title: string; url: string
+    status: string     // a column's name
+    who: string[]      // a Who / Assignee / Owner multi-select or people
+    due?: string; dueEnd?: string // the first date property, ISO
+    thread?: string    // a text property called Thread: a thread id or prefix
+  }[]
+  fetchedAt?: string
+  loading?: boolean    // not read yet
+  error?: string       // the last read failed; the rest is the last good board
+  more?: boolean       // over 100 rows
+}
+```
+
+Threadbear only shows the board; cards are moved in Notion, by people
+or by agents with the Notion tools. `read_project` lists the open cards,
+and a thread's brief has one line saying the board is there and how many
+are open. With no gateway, `error` says so.
 
 ## Schedules
 

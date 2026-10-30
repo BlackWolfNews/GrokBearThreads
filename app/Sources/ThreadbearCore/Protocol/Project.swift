@@ -81,11 +81,16 @@ public struct Project: Sendable, Hashable, Decodable, Identifiable {
     /// Threads in it, put away ones included.
     public var threadCount: Int
     public var lastActivityAt: Date?
+    /// A Notion page (or database) with its task board on it, and the
+    /// board as the runner last read it (docs/protocol.md, "Project tasks").
+    public var notion: String?
+    public var tasks: ProjectTasks?
 
     public init(
         id: String, title: String, folders: [String] = [], goals: String = "", state: String = "", notes: String = "",
         links: [ProjectLink] = [], createdBy: ProjectAuthor = .librarian, createdByThread: String? = nil, createdAt: Date = Date(), updatedAt: Date = Date(),
-        stateUpdatedAt: Date? = nil, archived: Bool = false, icon: ProjectIcon? = nil, threadCount: Int = 0, lastActivityAt: Date? = nil
+        stateUpdatedAt: Date? = nil, archived: Bool = false, icon: ProjectIcon? = nil, threadCount: Int = 0, lastActivityAt: Date? = nil,
+        notion: String? = nil, tasks: ProjectTasks? = nil
     ) {
         self.id = id
         self.title = title
@@ -103,6 +108,8 @@ public struct Project: Sendable, Hashable, Decodable, Identifiable {
         self.icon = icon
         self.threadCount = threadCount
         self.lastActivityAt = lastActivityAt
+        self.notion = notion
+        self.tasks = tasks
     }
 
     public init(from decoder: Decoder) throws {
@@ -125,12 +132,122 @@ public struct Project: Sendable, Hashable, Decodable, Identifiable {
         icon = (try? c.decodeIfPresent(ProjectIcon.self, forKey: .icon)).flatMap { $0 }
         threadCount = c.lenientInt(forKey: .threadCount) ?? 0
         lastActivityAt = date(.lastActivityAt)
+        notion = string(.notion).flatMap { $0.isEmpty ? nil : $0 }
+        tasks = (try? c.decodeIfPresent(ProjectTasks.self, forKey: .tasks)).flatMap { $0 }
     }
 
     enum CodingKeys: String, CodingKey {
         case id, title, folders, goals, state, notes, links, createdBy, createdByThread, createdAt, updatedAt, stateUpdatedAt
-        case archived, icon, threadCount, lastActivityAt
+        case archived, icon, threadCount, lastActivityAt, notion, tasks
     }
+}
+
+/// A project's task board, read from the Notion database on its page.
+/// Notion is where it's changed; the app only shows it.
+public struct ProjectTasks: Sendable, Hashable, Decodable {
+    /// The database (or page) to open in Notion.
+    public var url: String
+    /// The Status options, in Notion's order.
+    public var columns: [TaskColumn]
+    public var items: [ProjectTask]
+    public var fetchedAt: Date?
+    /// The first read hasn't come back yet.
+    public var loading: Bool
+    /// The last read failed; columns and items are the last good ones.
+    public var error: String?
+    /// Over 100 cards: only the first 100 are here.
+    public var more: Bool
+
+    public init(url: String, columns: [TaskColumn] = [], items: [ProjectTask] = [], fetchedAt: Date? = nil, loading: Bool = false, error: String? = nil, more: Bool = false) {
+        self.url = url
+        self.columns = columns
+        self.items = items
+        self.fetchedAt = fetchedAt
+        self.loading = loading
+        self.error = error
+        self.more = more
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        url = (try? c.decodeIfPresent(String.self, forKey: .url)).flatMap { $0 } ?? ""
+        columns = c.lossyArray(TaskColumn.self, forKey: .columns)
+        items = c.lossyArray(ProjectTask.self, forKey: .items)
+        fetchedAt = (try? c.decodeIfPresent(String.self, forKey: .fetchedAt)).flatMap { $0 }.flatMap(ISO8601.parse)
+        loading = (try? c.decodeIfPresent(Bool.self, forKey: .loading)).flatMap { $0 } ?? false
+        error = (try? c.decodeIfPresent(String.self, forKey: .error)).flatMap { $0 }.flatMap { $0.isEmpty ? nil : $0 }
+        more = (try? c.decodeIfPresent(Bool.self, forKey: .more)).flatMap { $0 } ?? false
+    }
+
+    enum CodingKeys: String, CodingKey { case url, columns, items, fetchedAt, loading, error, more }
+
+    /// The cards in a column, in Notion's order.
+    public func items(in column: TaskColumn) -> [ProjectTask] { items.filter { $0.status == column.name } }
+
+    /// Cards not in a Complete column.
+    public var openCount: Int {
+        items.filter { item in columns.first { $0.name == item.status }?.kind != .done }.count
+    }
+}
+
+/// A Status option. Its kind is Notion's group for it.
+public struct TaskColumn: Sendable, Hashable, Decodable, Identifiable {
+    public enum Kind: String, Sendable, Hashable, Decodable {
+        case todo, doing, done
+        public init(from decoder: Decoder) throws {
+            self = Kind(rawValue: try decoder.singleValueContainer().decode(String.self)) ?? .todo
+        }
+    }
+
+    public var name: String
+    public var kind: Kind
+    /// Notion's colour name: gray, blue, orange, green...
+    public var color: String?
+    public var id: String { name }
+
+    public init(name: String, kind: Kind, color: String? = nil) {
+        self.name = name
+        self.kind = kind
+        self.color = color
+    }
+}
+
+public struct ProjectTask: Sendable, Hashable, Decodable, Identifiable {
+    public var id: String
+    public var title: String
+    public var url: String
+    public var status: String
+    public var who: [String]
+    public var due: String?
+    public var dueEnd: String?
+    /// A Threadbear thread id (or prefix) working on it.
+    public var thread: String?
+
+    public init(id: String, title: String, url: String, status: String, who: [String] = [], due: String? = nil, dueEnd: String? = nil, thread: String? = nil) {
+        self.id = id
+        self.title = title
+        self.url = url
+        self.status = status
+        self.who = who
+        self.due = due
+        self.dueEnd = dueEnd
+        self.thread = thread
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        func string(_ key: CodingKeys) -> String? { (try? c.decodeIfPresent(String.self, forKey: key)).flatMap { $0 }.flatMap { $0.isEmpty ? nil : $0 } }
+        id = try c.decode(String.self, forKey: .id)
+        title = string(.title) ?? "Untitled"
+        url = string(.url) ?? ""
+        status = string(.status) ?? ""
+        who = c.lossyArray(String.self, forKey: .who)
+        due = string(.due)
+        dueEnd = string(.dueEnd)
+        thread = string(.thread)
+    }
+
+    enum CodingKeys: String, CodingKey { case id, title, url, status, who, due, dueEnd, thread }
 }
 
 /// A place Mike keeps going back to for a project (docs/protocol.md,

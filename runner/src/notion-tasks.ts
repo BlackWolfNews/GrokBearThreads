@@ -1,0 +1,389 @@
+// A project's task board, read from Notion (docs/protocol.md, "Project
+// tasks"). A project can name a Notion page (or a database); the runner
+// finds the task database on it and reads its rows every few minutes
+// through Mike's Connectors gateway (connectors.ts), the same Notion login
+// his agents use, so there's no Notion key of its own to keep. Notion stays
+// the one place tasks are changed: people edit the board there and agents
+// move cards with the Notion tools. Threadbear only shows it.
+//
+// The gateway speaks MCP over HTTP. Each read is three tool calls at most
+// (the page, the database's schema, its rows), stateless, with the
+// Authorization header the main Claude login's `headersHelper` prints.
+import { execFile } from 'node:child_process';
+import fs from 'node:fs';
+import path from 'node:path';
+import type { Logger } from './log.ts';
+import type { ProjectTask, ProjectTasks, TaskColumn } from './protocol.ts';
+import { atomicWriteFileSync, readJsonSync } from './fsutil.ts';
+
+// How often a board is read when nobody's asking. Opening the project page
+// asks again once it's older than FRESH_MS.
+export const POLL_MS = 5 * 60_000;
+export const FRESH_MS = 60_000;
+const TIMEOUT_MS = 30_000;
+// Notion's rows mode returns at most this many; a bigger board says so.
+const ROWS_MAX = 100;
+
+// ------------------------------------------------------------- the gateway
+
+export type CallTool = (name: string, args: Record<string, unknown>) => Promise<string>;
+
+// Calls one of the gateway's tools and gives back its text. The answer is
+// JSON or a one-event SSE stream, depending on the gateway's mood.
+export function gatewayCaller(opts: { mcpUrl: string; headers: () => Promise<Record<string, string>>; fetch?: typeof fetch }): CallTool {
+  const f = opts.fetch ?? fetch;
+  let id = 0;
+  return async (name, args) => {
+    const res = await f(opts.mcpUrl, {
+      method: 'POST',
+      headers: { ...(await opts.headers()), 'content-type': 'application/json', accept: 'application/json, text/event-stream' },
+      body: JSON.stringify({ jsonrpc: '2.0', id: ++id, method: 'tools/call', params: { name, arguments: args } }),
+      signal: AbortSignal.timeout(TIMEOUT_MS),
+    });
+    if (!res.ok) throw new Error(`the gateway answered ${res.status}`);
+    const msg = parseRpc(await res.text());
+    if (msg.error) throw new Error(msg.error.message ?? 'the gateway gave an error');
+    const text = (msg.result?.content ?? []).filter((c) => c.type === 'text').map((c) => c.text ?? '').join('\n');
+    if (msg.result?.isError) throw new Error(signInLine(text) ?? (text.slice(0, 300) || 'Notion gave an error'));
+    return text;
+  };
+}
+
+type RpcMessage = { result?: { content?: { type: string; text?: string }[]; isError?: boolean }; error?: { message?: string } };
+
+export function parseRpc(body: string): RpcMessage {
+  const t = body.trim();
+  if (t.startsWith('{')) return JSON.parse(t) as RpcMessage;
+  // SSE: the last `data:` line is the answer.
+  const data = t.split('\n').filter((l) => l.startsWith('data:')).map((l) => l.slice(5).trim());
+  if (!data.length) throw new Error("the gateway's answer wasn't JSON");
+  return JSON.parse(data[data.length - 1]!) as RpcMessage;
+}
+
+// "Notion needs signing in again..." is worth showing as it is.
+function signInLine(text: string): string | undefined {
+  const line = text.split('\n').find((l) => /sign(ed)? in|sign_in/i.test(l));
+  return line?.trim().slice(0, 300);
+}
+
+// The Authorization header the main login's connectors entry gets, from
+// its headersHelper (install-clients.sh writes one that reads the token
+// from the Keychain). The helper prints a JSON object of headers.
+export function helperHeaders(command: string): () => Promise<Record<string, string>> {
+  return () =>
+    new Promise((resolve, reject) => {
+      execFile('/bin/sh', ['-c', command], { timeout: 10_000 }, (err, stdout) => {
+        if (err) return reject(new Error('the connectors headers helper failed'));
+        try {
+          const h = JSON.parse(stdout) as Record<string, unknown>;
+          resolve(Object.fromEntries(Object.entries(h).filter((e): e is [string, string] => typeof e[1] === 'string')));
+        } catch {
+          reject(new Error("the connectors headers helper didn't print JSON"));
+        }
+      });
+    });
+}
+
+// The gateway's MCP URL and headers helper from the main login's
+// ~/.claude.json, as connectors.ts finds its base. runner.json's
+// connectors.headersHelper wins for the helper.
+export function findGatewayClient(raw: { url?: unknown; enabled?: unknown; headersHelper?: unknown } | undefined, claudeJsonPath: string): { mcpUrl: string; headersHelper: string } | undefined {
+  if (raw?.enabled === false) return undefined;
+  let entry: { url?: unknown; headersHelper?: unknown } | undefined;
+  try {
+    entry = (JSON.parse(fs.readFileSync(claudeJsonPath, 'utf8')) as { mcpServers?: Record<string, { url?: unknown; headersHelper?: unknown }> })?.mcpServers?.connectors;
+  } catch {
+    entry = undefined;
+  }
+  const url = typeof raw?.url === 'string' && raw.url.trim() ? raw.url.trim() : entry?.url;
+  const helper = typeof raw?.headersHelper === 'string' && raw.headersHelper.trim() ? raw.headersHelper.trim() : entry?.headersHelper;
+  if (typeof url !== 'string' || typeof helper !== 'string' || !url || !helper) return undefined;
+  try {
+    const u = new URL(url);
+    // A bare base (https://host:8443) means its /mcp.
+    const mcpUrl = u.pathname === '/' ? new URL('/mcp', u).href : u.href;
+    return { mcpUrl, headersHelper: helper };
+  } catch {
+    return undefined;
+  }
+}
+
+// ------------------------------------------------------------- reading Notion
+
+// What Notion's fetch tool gives back: JSON with the entity in `text`.
+type Fetched = { metadata?: { type?: string }; title?: string; url?: string; text?: string };
+
+// Where a project's tasks are: the database to open and its data source.
+export type TaskSource = { dataSource: string; databaseUrl?: string };
+
+// Finds the task database from what a project names: a database (its first
+// data source), a data source, or a page with a database on it (the one
+// called Tasks, or the first).
+export async function findSource(call: CallTool, url: string): Promise<TaskSource> {
+  if (url.startsWith('collection://')) return { dataSource: url };
+  const f = JSON.parse(await call('notion__notion-fetch', { id: url })) as Fetched;
+  const text = f.text ?? '';
+  const type = f.metadata?.type;
+  if (type === 'database') {
+    const ds = text.match(/<data-source url="\{*(collection:\/\/[0-9a-f-]+)\}*"/)?.[1];
+    if (!ds) throw new Error('That Notion database has no data source Threadbear can read.');
+    return { dataSource: ds, databaseUrl: cleanUrl(f.url ?? url) };
+  }
+  if (type === 'data_source') {
+    const ds = text.match(/<data-source url="\{*(collection:\/\/[0-9a-f-]+)\}*"/)?.[1] ?? '';
+    return { dataSource: ds, databaseUrl: f.url ? cleanUrl(f.url) : undefined };
+  }
+  const dbs = [...text.matchAll(/<database url="([^"]+)" data-source-url="(collection:\/\/[0-9a-f-]+)"[^>]*>\s*([^<]*?)\s*<\/database>/g)].map((m) => ({
+    url: m[1]!,
+    dataSource: m[2]!,
+    title: m[3]!.trim(),
+  }));
+  if (!dbs.length) throw new Error('No database on that Notion page. Add a Tasks database to it (a board grouped by Status).');
+  const pick = dbs.find((d) => /^tasks?$/i.test(d.title)) ?? dbs.find((d) => /task/i.test(d.title)) ?? dbs[0]!;
+  return { dataSource: pick.dataSource, databaseUrl: cleanUrl(pick.url) };
+}
+
+type SchemaProp = {
+  name: string;
+  type: string;
+  options?: { name: string; color?: string }[];
+  groups?: Record<string, { name: string; color?: string }[]>;
+};
+
+// Which of the database's properties are which, by type and then by name.
+export type Board = {
+  title: string;
+  status?: string;
+  columns: TaskColumn[];
+  who?: string;
+  due?: string;
+  thread?: string;
+};
+
+export function readSchema(fetchedText: string): Board {
+  const f = JSON.parse(fetchedText) as Fetched;
+  const json = (f.text ?? '').match(/<data-source-state>\s*([\s\S]*?)\s*<\/data-source-state>/)?.[1];
+  if (!json) throw new Error("Couldn't read the task database's columns.");
+  const props = Object.values((JSON.parse(json) as { schema?: Record<string, SchemaProp> }).schema ?? {});
+  const title = props.find((p) => p.type === 'title')?.name ?? 'Name';
+  // Status: a status property (Notion's own To do / In progress / Complete
+  // groups), else a select called Status.
+  const statusProp = props.find((p) => p.type === 'status') ?? props.find((p) => p.type === 'select' && /status|stage|state/i.test(p.name));
+  const columns: TaskColumn[] = [];
+  if (statusProp?.groups) {
+    for (const [group, kind] of [['to_do', 'todo'], ['in_progress', 'doing'], ['complete', 'done']] as const) {
+      for (const o of statusProp.groups[group] ?? []) columns.push({ name: o.name, kind, ...(o.color ? { color: o.color } : {}) });
+    }
+  } else if (statusProp?.options) {
+    for (const o of statusProp.options) columns.push({ name: o.name, kind: /done|complete|shipped|closed/i.test(o.name) ? 'done' : /doing|progress|review|wait/i.test(o.name) ? 'doing' : 'todo', ...(o.color ? { color: o.color } : {}) });
+  }
+  const people = props.filter((p) => p.type === 'multi_select' || p.type === 'person' || p.type === 'people' || (p.type === 'select' && p !== statusProp));
+  const who = people.find((p) => /who|assign|owner|people|person/i.test(p.name)) ?? people.find((p) => p.type === 'person' || p.type === 'people');
+  const dates = props.filter((p) => p.type === 'date');
+  const due = dates.find((p) => /due|when|date/i.test(p.name)) ?? dates[0];
+  const thread = props.find((p) => p.type === 'text' && /thread/i.test(p.name));
+  return {
+    title,
+    columns,
+    ...(statusProp ? { status: statusProp.name } : {}),
+    ...(who ? { who: who.name } : {}),
+    ...(due ? { due: due.name } : {}),
+    ...(thread ? { thread: thread.name } : {}),
+  };
+}
+
+type Row = Record<string, unknown>;
+
+export function readRows(text: string, board: Board): { items: ProjectTask[]; more: boolean } {
+  const parsed = JSON.parse(text) as { results?: Row[]; has_more?: boolean };
+  const items: ProjectTask[] = [];
+  for (const r of parsed.results ?? []) {
+    const url = typeof r.url === 'string' ? cleanUrl(r.url) : undefined;
+    const title = asText(r[board.title]);
+    if (!url || !title) continue;
+    const id = url.match(/([0-9a-f]{32})/)?.[1] ?? url;
+    const t: ProjectTask = { id, title, url, status: board.status ? asText(r[board.status]) : '', who: board.who ? asList(r[board.who]) : [] };
+    if (board.due) {
+      const start = asText(r[`date:${board.due}:start`]);
+      const end = asText(r[`date:${board.due}:end`]);
+      if (start) t.due = start;
+      if (end) t.dueEnd = end;
+    }
+    if (board.thread) {
+      const th = asText(r[board.thread]).trim();
+      if (th) t.thread = th;
+    }
+    items.push(t);
+  }
+  return { items, more: Boolean(parsed.has_more) };
+}
+
+// Reads the whole board: where it is, its columns and its rows.
+export async function readTasks(call: CallTool, notionUrl: string, known?: TaskSource): Promise<{ source: TaskSource; tasks: Omit<ProjectTasks, 'fetchedAt'> }> {
+  const source = known ?? (await findSource(call, notionUrl));
+  const board = readSchema(await call('notion__notion-fetch', { id: source.dataSource }));
+  const { items, more } = readRows(await call('notion__notion-query-data-sources', { data: { mode: 'rows', data_source_url: source.dataSource, limit: ROWS_MAX } }), board);
+  // Statuses the schema didn't list (a select with a new option) still
+  // get a column, at the end.
+  const columns = [...board.columns];
+  for (const t of items) if (t.status && !columns.some((c) => c.name === t.status)) columns.push({ name: t.status, kind: 'todo' });
+  return {
+    source,
+    tasks: {
+      url: source.databaseUrl ?? notionUrl,
+      columns,
+      items,
+      ...(more ? { more: true } : {}),
+    },
+  };
+}
+
+function asText(v: unknown): string {
+  if (typeof v === 'string') return v;
+  if (typeof v === 'number') return String(v);
+  return '';
+}
+
+// Multi-selects come as a JSON list in a string; people as user:// urls.
+function asList(v: unknown): string[] {
+  let list: unknown = v;
+  if (typeof v === 'string') {
+    try {
+      list = v.trim().startsWith('[') ? JSON.parse(v) : v ? [v] : [];
+    } catch {
+      list = [v];
+    }
+  }
+  return Array.isArray(list) ? list.filter((x): x is string => typeof x === 'string' && Boolean(x)).map((x) => x.replace(/^user:\/\//, '')) : [];
+}
+
+// Notion's links carry ?pvs=204 and {{ }} from the fetch tool.
+function cleanUrl(u: string): string {
+  return u.replace(/[{}]/g, '').replace(/\?pvs=\d+$/, '');
+}
+
+// ------------------------------------------------------------- the boards
+
+type Timer = { cancel(): void };
+
+export type TaskBoardsOptions = {
+  home: string; // the runner's data dir: project-tasks.json is kept there
+  call?: CallTool; // none: no gateway, every board says so
+  log: Pick<Logger, 'info' | 'error'>;
+  now?: () => number;
+  setTimeout?: (fn: () => void, ms: number) => Timer;
+  onChange: (projectId: string) => void;
+};
+
+type Saved = { notion: string; source?: TaskSource; tasks?: ProjectTasks };
+
+// Keeps each project's board, read now and then, and remembers the last
+// one across restarts so the page isn't empty while the first read runs.
+export class TaskBoards {
+  private boards = new Map<string, Saved>();
+  private inFlight = new Map<string, Promise<void>>();
+  private timer?: Timer;
+  private file: string;
+  private now: () => number;
+  private wanted: () => { id: string; notion?: string }[] = () => [];
+  private opts: TaskBoardsOptions;
+
+  constructor(opts: TaskBoardsOptions) {
+    this.opts = opts;
+    this.file = path.join(opts.home, 'project-tasks.json');
+    this.now = opts.now ?? Date.now;
+    const saved = readJsonSync<{ boards?: Record<string, Saved> }>(this.file);
+    for (const [id, b] of Object.entries(saved?.boards ?? {})) if (b && typeof b.notion === 'string') this.boards.set(id, b);
+  }
+
+  // `projects` lists the projects and their Notion page each time it's
+  // asked, so a project that gains or loses one is picked up.
+  start(projects: () => { id: string; notion?: string }[]): void {
+    this.wanted = projects;
+    this.tick();
+  }
+
+  stop(): void {
+    this.timer?.cancel();
+    this.timer = undefined;
+  }
+
+  // What the project page shows, if the project has a Notion page.
+  get(projectId: string, notion: string | undefined): ProjectTasks | undefined {
+    if (!notion) return undefined;
+    const b = this.boards.get(projectId);
+    if (!b || b.notion !== notion) return { url: notion, columns: [], items: [], loading: true };
+    return b.tasks ?? { url: notion, columns: [], items: [], loading: true };
+  }
+
+  // Reads one board now, unless it was read within FRESH_MS (force skips
+  // that). One read per project at a time; a second ask joins it.
+  refresh(projectId: string, notion: string | undefined, force = false): Promise<void> {
+    if (!notion) {
+      if (this.boards.delete(projectId)) this.save();
+      return Promise.resolve();
+    }
+    const b = this.boards.get(projectId);
+    const at = b?.tasks?.fetchedAt ? Date.parse(b.tasks.fetchedAt) : 0;
+    if (!force && b?.notion === notion && this.now() - at < FRESH_MS && !b.tasks?.error) return Promise.resolve();
+    const running = this.inFlight.get(projectId);
+    if (running) return running;
+    const p = this.read(projectId, notion).finally(() => this.inFlight.delete(projectId));
+    this.inFlight.set(projectId, p);
+    return p;
+  }
+
+  private async read(projectId: string, notion: string): Promise<void> {
+    const before = this.boards.get(projectId);
+    const known = before?.notion === notion ? before.source : undefined;
+    const fetchedAt = new Date(this.now()).toISOString();
+    let next: Saved;
+    if (!this.opts.call) {
+      next = { notion, tasks: { url: notion, columns: [], items: [], fetchedAt, error: 'Threadbear reads Notion through the Connectors gateway, and none is set up.' } };
+    } else {
+      try {
+        const { source, tasks } = await readTasks(this.opts.call, notion, known);
+        next = { notion, source, tasks: { ...tasks, fetchedAt } };
+      } catch (e) {
+        const error = e instanceof Error ? e.message : String(e);
+        this.opts.log.info('project tasks not read', { projectId, error });
+        // Keep the last good board, with the error over it; forget where
+        // it was, in case the database moved.
+        const kept = before?.notion === notion ? before.tasks : undefined;
+        next = { notion, tasks: { url: kept?.url ?? notion, columns: kept?.columns ?? [], items: kept?.items ?? [], fetchedAt, error } };
+      }
+    }
+    const changed = JSON.stringify({ ...before?.tasks, fetchedAt: '' }) !== JSON.stringify({ ...next.tasks, fetchedAt: '' }) || before?.notion !== notion;
+    this.boards.set(projectId, next);
+    this.save();
+    if (changed) this.opts.onChange(projectId);
+  }
+
+  private tick(): void {
+    const live = this.wanted();
+    // Forget boards of projects that no longer have a page.
+    let dropped = false;
+    for (const id of [...this.boards.keys()]) {
+      if (!live.some((p) => p.id === id && p.notion)) {
+        this.boards.delete(id);
+        dropped = true;
+      }
+    }
+    if (dropped) this.save();
+    for (const p of live) if (p.notion) void this.refresh(p.id, p.notion).catch(() => {});
+    const set = this.opts.setTimeout ?? ((fn, ms) => {
+      const t = setTimeout(fn, ms);
+      t.unref?.();
+      return { cancel: () => clearTimeout(t) };
+    });
+    this.timer = set(() => this.tick(), POLL_MS);
+  }
+
+  private save(): void {
+    try {
+      atomicWriteFileSync(this.file, JSON.stringify({ boards: Object.fromEntries(this.boards) }, null, 2));
+    } catch (e) {
+      this.opts.log.error('project-tasks.json not saved', { error: String(e) });
+    }
+  }
+}

@@ -235,6 +235,7 @@ struct ProjectMenu: View {
         } else {
             Button("Archive", systemImage: "archivebox") { app.setProjectArchived(project.id, true) }
         }
+        Button(project.notion == nil ? "Add Notion Page…" : "Notion Page…", systemImage: "checklist") { app.linkProjectNotion(project.id) }
         let others = app.projects.filter { $0.id != project.id && !$0.archived }
         if !others.isEmpty {
             Menu("Merge into", systemImage: "arrow.triangle.merge") {

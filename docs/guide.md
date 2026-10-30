@@ -505,6 +505,15 @@ trusted it") with a Trust button. Open its file to read it first. A
 thread's worktree counts as its repo, and patches that were already in
 your folders when this arrived are trusted for you.
 
+A project can show a task board from Notion. Give it a Notion page with a
+Tasks database on it (a board grouped by Status): Add Notion page… under
+Tasks on its page, Notion Page… when you right-click it in Projects, or ask
+an agent to. The page shows the board, read every few minutes, with a
+column per status and who and when on each card. Cards are moved in Notion,
+by you, anyone you share the page with, or the agents, who see the open
+cards and are told to keep them moving. A card whose Thread column names a
+thread links to it.
+
 A project's page has its own panels and Patches on the right-hand rail:
 the ones its folders give its threads.
 

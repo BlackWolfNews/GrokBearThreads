@@ -23,11 +23,12 @@ import type { ProjectFolder } from './patches.ts';
 import { atomicWriteFileSync, isDirectory, readJsonSync } from './fsutil.ts';
 import { expandHome } from './config.ts';
 import { fileHash, removeIcons, storeIcon } from './project-icons.ts';
+import type { TaskBoards } from './notion-tasks.ts';
 
 // What projects.json holds for each: the counts are worked out from the
 // threads when they're sent. An icon keeps the hash of the file it was
 // copied from, to tell when that file changes.
-export type ProjectRecord = Omit<Project, 'threadCount' | 'lastActivityAt' | 'icon'> & { icon?: StoredIcon };
+export type ProjectRecord = Omit<Project, 'threadCount' | 'lastActivityAt' | 'icon' | 'tasks'> & { icon?: StoredIcon };
 export type StoredIcon = ProjectIcon & { hash?: string };
 
 // What Mike or an agent chooses: a picture, a symbol, or neither to go
@@ -72,6 +73,8 @@ export type UpdateProjectParams = {
   state?: string;
   notes?: string;
   links?: LinkInput[];
+  // A Notion page or database with the project's tasks; empty takes it off.
+  notion?: string;
   archived?: boolean;
 };
 
@@ -114,6 +117,9 @@ export class Projects {
   private unlisten?: () => void;
   // Set on a draining runner (handover): the primary owns projects.json now.
   private frozen = false;
+  // Each project's task board from Notion (notion-tasks.ts), when the
+  // runner reads them.
+  private boards?: TaskBoards;
 
   constructor(deps: { home: string; clock: Clock; log: Logger; userHome?: string }) {
     this.file = path.join(deps.home, 'projects.json');
@@ -141,12 +147,36 @@ export class Projects {
 
   stop(): void {
     this.unlisten?.();
+    this.boards?.stop();
+  }
+
+  // Starts reading the task boards of projects with a Notion page. A board
+  // that changes is sent with the projects.
+  useTaskBoards(boards: TaskBoards): void {
+    this.boards = boards;
+    boards.start(() => [...this.items.values()].filter((p) => !p.archived).map((p) => ({ id: p.id, notion: p.notion })));
+  }
+
+  // Called by the boards when one changes.
+  boardChanged(): void {
+    this.publish();
+  }
+
+  // Reads a project's board again now (the project page asks when it
+  // opens; force when Mike asks), then gives the project back.
+  async refreshTasks(projectId: string, force = false): Promise<Project> {
+    const rec = this.must(projectId);
+    if (!rec.notion) throw bad(`${rec.title} has no Notion page. Set one with notion.`);
+    await this.boards?.refresh(rec.id, rec.notion, force);
+    return this.withCounts(this.must(rec.id), this.host?.threadRecords() ?? []);
   }
 
   // A draining runner reads projects for its kept threads but no longer
   // changes them.
   freeze(): void {
     this.frozen = true;
+    // The primary reads the boards now.
+    this.boards?.stop();
   }
 
   // A draining runner's copy of the primary's project, so a thread it keeps
@@ -252,7 +282,16 @@ export class Projects {
     const room = Math.max(120, max - head.length - 20);
     const goals = clip(p.goals, Math.floor(room / 2));
     const state = clip(p.state, room - goals.length);
-    return [head, goals && `Goals: ${goals}`, state && `State: ${state}`].filter(Boolean).join('\n');
+    return [head, goals && `Goals: ${goals}`, state && `State: ${state}`, this.tasksLine(p)].filter(Boolean).join('\n');
+  }
+
+  // One line on the project's Notion board for the brief, so an agent
+  // knows to keep it moving: how many cards are open, and where.
+  private tasksLine(p: ProjectRecord): string | undefined {
+    const t = p.notion ? this.boards?.get(p.id, p.notion) : undefined;
+    if (!t || t.loading) return undefined;
+    const open = t.items.filter((i) => t.columns.find((c) => c.name === i.status)?.kind !== 'done').length;
+    return `Tasks: a board in Notion (${t.url}), ${open} open. read_project lists them; move a card with the Notion tools when its work starts, stalls or is done.`;
   }
 
   // The projects a brief covers, for knowing what a session has been told.
@@ -313,6 +352,11 @@ export class Projects {
     if (params.state !== undefined) next.state = checkText('state', params.state, SHORT_MAX);
     if (params.notes !== undefined) next.notes = checkText('notes', params.notes, NOTES_MAX);
     if (params.links !== undefined) next.links = checkLinks(params.links);
+    if (params.notion !== undefined) {
+      const n = checkNotion(params.notion);
+      if (n) next.notion = n;
+      else delete next.notion;
+    }
     if (params.archived !== undefined) {
       if (params.archived) next.archived = true;
       else delete next.archived;
@@ -326,6 +370,7 @@ export class Projects {
     if (next.title !== rec.title || JSON.stringify(next.folders) !== JSON.stringify(rec.folders) || next.archived !== rec.archived) {
       this.mustHost().touchThreads(this.threadsIn(rec.id));
     }
+    if (next.notion !== rec.notion) void this.boards?.refresh(rec.id, next.notion, true).catch(() => {});
     this.publish();
     return this.withCounts(next, this.mustHost().threadRecords());
   }
@@ -551,6 +596,8 @@ export class Projects {
       out.icon = shown;
     }
     if (last) out.lastActivityAt = last;
+    const tasks = this.boards?.get(p.id, p.notion);
+    if (tasks) out.tasks = tasks;
     return out;
   }
 
@@ -607,6 +654,24 @@ function checkTitle(title: unknown): string {
   const t = title.trim().replace(/\s+/g, ' ');
   if (t.length > TITLE_MAX) throw bad(`A project title is at most ${TITLE_MAX} characters.`);
   return t;
+}
+
+// A Notion page or database: its notion.so, notion.site or app.notion.com
+// address, or a collection:// data source. Empty means none.
+export function checkNotion(v: unknown): string {
+  if (typeof v !== 'string') throw bad('notion must be a Notion page address');
+  const t = v.trim();
+  if (!t) return '';
+  if (/^collection:\/\/[0-9a-f-]{32,36}$/i.test(t)) return t;
+  let u: URL;
+  try {
+    u = new URL(t);
+  } catch {
+    throw bad(`${t} isn't a Notion page address.`);
+  }
+  if (u.protocol !== 'https:' || !/(^|\.)(notion\.so|notion\.site|notion\.com)$/.test(u.hostname)) throw bad(`${t} isn't a Notion page address.`);
+  u.searchParams.delete('pvs');
+  return u.href;
 }
 
 function checkText(name: string, text: unknown, max: number): string {
@@ -681,9 +746,11 @@ export function projectMethods(projects: Projects): Record<string, (p: Record<st
         state: str(p, 'state'),
         notes: str(p, 'notes'),
         links: links(p),
+        notion: str(p, 'notion'),
         archived: bool(p, 'archived'),
       }),
     }),
+    'projects.refreshTasks': async (p) => ({ project: await projects.refreshTasks(reqStr(p, 'projectId'), bool(p, 'force')) }),
     'projects.setIcon': async (p) => {
       const path = str(p, 'path');
       const symbol = str(p, 'symbol');

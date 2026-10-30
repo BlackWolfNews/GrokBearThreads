@@ -1,0 +1,23 @@
+<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="app.css"><link rel="stylesheet" href="proj.css"><script src="shell.js"></script><script src="proj.js"></script><!-- size: 1520x1000 --></head><body>
+<div class="title">2. Threadbear owns the board, threads move the cards, Notion gets a copy<span>Tasks live in the project like goals and state. A card can start a thread, and the thread moves its card: running is Doing, Needs you is Waiting, done is Done. The runner writes the board to the project's Notion page so Zaran can see it; what she changes there comes back.</span></div>
+<div id="win"></div>
+<script>
+const st = { 'Fixes from the 30 Oct reply': ['live', 'Running 4m'], 'Sign artworks, 50 to 60 A0 with QR codes': ['start'] }
+const card = ([t, w, c]) => {
+  const s = st[t]
+  const extra = !s ? '' : s[0] === 'live' ? ` <span class="tb"><span class="live"></span> ${s[1]}</span>` : ` <span class="tb">${I('play', 's')} Start a thread</span>`
+  return `<div class="card ${c === 'done' ? 'done' : ''}">${t}<div class="w">${I('person', 's')} ${w}${extra}</div></div>`
+}
+const main = `<div class="thread">${pageTop(`<span class="lk">${I('notion', 's')} Notion copy</span>`)}
+  <div class="h">${I('board', 's')} Tasks <span class="r">${I('sync', 's')} Copied to Notion, 1m ago</span></div>
+  <div class="cols4">${COLS.map(([k, n]) => {
+    const ts = TASKS.filter(t => t[2] === k)
+    return `<div class="colm"><div class="ch">${n}<span>${ts.length}</span></div>${ts.slice(0, k === 'done' ? 2 : 9).map(card).join('')}${k === 'todo' ? `<div class="ghostcard">${I('plus', 's')} Add a task</div>` : ''}</div>`
+  }).join('')}</div>
+  </div></div>`
+shell({ side: projectsSide(), main, pane: highlightsPane() })
+document.querySelector('.pane .pbody').innerHTML = `<div class="ph">Tasks</div>
+  <div class="lib brief"><div><span>•</span><span>This thread is on: Fixes from the 30 Oct reply</span></div><div><span>•</span><span>Ending the turn as done moves it to Done</span></div></div>
+  <div class="ph">Changed in Notion</div>
+  <div class="prow">${I('notion', 's')}<div>Zaran moved "Hilton voter prize draw" to Waiting<div class="sub">Today, 10:12</div></div></div>`
+</script></body></html>

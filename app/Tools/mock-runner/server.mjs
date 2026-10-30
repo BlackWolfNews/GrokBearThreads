@@ -1041,6 +1041,7 @@ async function dispatch(client, method, p) {
     case 'projects.create':
     case 'projects.update':
     case 'projects.setIcon':
+    case 'projects.refreshTasks':
     case 'projects.merge':
     case 'projects.delete':
     case 'threads.setProjects':
@@ -1950,11 +1951,22 @@ function projectRequest(method, p) {
     case 'projects.update': {
       const project = needProject(p.projectId);
       for (const key of ['title', 'folders', 'goals', 'notes', 'links']) if (p[key] !== undefined) project[key] = p[key];
+      if (p.notion !== undefined) {
+        project.notion = p.notion || undefined;
+        project.tasks = p.notion ? { url: p.notion, columns: [], items: [], loading: true } : undefined;
+      }
       if (p.state !== undefined) { project.state = p.state; project.stateUpdatedAt = iso(); }
       if (p.archived !== undefined) project.archived = Boolean(p.archived) || undefined;
       project.updatedAt = iso();
       if (p.title !== undefined) for (const s of membersOf(project.id)) { renameIn(s, project); broadcastSummary(s.id); }
       broadcastProjects();
+      return { project: projectView(project) };
+    }
+    // The board is canned (addDemoProjects); a read just moves its time on.
+    case 'projects.refreshTasks': {
+      const project = needProject(p.projectId);
+      if (!project.notion) throw rpcError(-32602, `${project.title} has no Notion page.`);
+      if (project.tasks && !project.tasks.loading) project.tasks.fetchedAt = iso();
       return { project: projectView(project) };
     }
     case 'projects.setIcon': {
@@ -2090,6 +2102,31 @@ function broadcastLibrarian() {
 // transcript's note saying so), and Walkies giving the dark mode thread
 // its Convex panel from another folder. The librarian is part way through
 // a look with three more queued, and has done eight things today.
+function walkiesTasks(fetchedAt) {
+  const card = (n, title, status, who, extra = {}) => ({ id: `t${n}`, title, url: `https://www.notion.so/t${n}`, status, who, ...extra });
+  return {
+    url: 'https://www.notion.so/1a2b3c4d5e6f40718293a4b5c6d7e8f9',
+    fetchedAt,
+    columns: [
+      { name: 'To do', kind: 'todo', color: 'gray' },
+      { name: 'Doing', kind: 'doing', color: 'blue' },
+      { name: 'Waiting', kind: 'doing', color: 'orange' },
+      { name: 'Done', kind: 'done', color: 'green' },
+    ],
+    items: [
+      card(1, 'Share a walk with a friend', 'To do', ['Mike']),
+      card(2, 'Walk replay at the end is too long', 'To do', ['Mike'], { due: '2026-11-07' }),
+      card(3, 'Pick the share button colour', 'Doing', ['Mike'], { thread: 'demo_button_colour' }),
+      card(4, 'Dark mode for the dashboard', 'Waiting', ['Sam'], { thread: 'demo_dark_mode' }),
+      card(5, 'App Store screenshots for 1.1', 'Waiting', ['Sam', 'Mike'], { due: '2026-11-29', dueEnd: '2026-12-04' }),
+      card(6, 'Battery check on the old Pixel', 'Done', ['Mike']),
+      card(7, 'Car trips stop counting as walks', 'Done', ['Mike']),
+      card(8, 'Fix the 5.1.1 rejection', 'Done', ['Mike']),
+      card(9, 'Sentry on the backend', 'Done', ['Mike']),
+    ],
+  };
+}
+
 function addDemoProjects() {
   const now = Date.now();
   const ago = (minutes) => new Date(now - minutes * 60_000).toISOString();
@@ -2123,6 +2160,9 @@ function addDemoProjects() {
       { title: 'Admin', url: 'https://walkies.example.app/admin' },
       { title: 'App Store', url: 'https://apps.apple.com/app/walkies/id6700000000' },
     ],
+    // A task board from Notion (docs/protocol.md, "Project tasks").
+    notion: 'https://www.notion.so/Walkies-1a2b3c4d5e6f40718293a4b5c6d7e8f9',
+    tasks: walkiesTasks(ago(2)),
   };
   projects = [tb, photo, walkies];
   // `why` is the librarian's reason, behind the project's ⓘ in Highlights.

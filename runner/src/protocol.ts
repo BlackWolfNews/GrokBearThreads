@@ -257,8 +257,39 @@ export type Project = {
   stateUpdatedAt?: string;
   archived?: boolean;
   icon?: ProjectIcon;
+  // A Notion page (or database) with the project's task board on it, and
+  // the board as last read (see "Project tasks").
+  notion?: string;
+  tasks?: ProjectTasks;
   threadCount: number;
   lastActivityAt?: string;
+};
+
+// A project's task board, read from the Notion database on its page.
+// Notion is where it's changed; Threadbear only shows it.
+export type ProjectTasks = {
+  url: string; // the database (or page) to open in Notion
+  columns: TaskColumn[]; // the Status options, in Notion's order
+  items: ProjectTask[];
+  fetchedAt?: string; // absent while the first read is going
+  loading?: boolean; // the first read hasn't come back yet
+  error?: string; // the last read failed; columns and items are the last good ones
+  more?: boolean; // more than 100 rows: only the first 100 are here
+};
+
+// A Status option. kind is Notion's group for it: To do, In progress
+// or Complete.
+export type TaskColumn = { name: string; kind: 'todo' | 'doing' | 'done'; color?: string };
+
+export type ProjectTask = {
+  id: string; // the Notion page id
+  title: string;
+  url: string;
+  status: string; // a column's name, or empty
+  who: string[];
+  due?: string; // ISO date
+  dueEnd?: string;
+  thread?: string; // a Threadbear thread id (or prefix) working on it
 };
 
 // A place Mike goes for a project: its live site, admin page, dashboard,

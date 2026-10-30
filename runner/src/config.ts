@@ -5,6 +5,7 @@ import crypto from 'node:crypto';
 import { atomicWriteFileSync } from './fsutil.ts';
 import { RELEASE } from './release.ts';
 import { findGateway, gatewayBase } from './connectors.ts';
+import { findGatewayClient } from './notion-tasks.ts';
 import { CLI_POLICIES, isEffortLevel, isProvider, type CliPolicy, type EffortLevel, type Provider } from './protocol.ts';
 
 // <package version>+<release id>, or +source when run from a checkout.
@@ -103,6 +104,10 @@ export type Config = {
   // Mike's Connectors gateway's base URL (connectors.ts), for the app's
   // Connectors panel. Unset means there's none to watch.
   connectorsUrl?: string;
+  // The same gateway's MCP endpoint and the command that prints its
+  // Authorization header, for reading projects' Notion boards
+  // (notion-tasks.ts). Only with connectorsUrl.
+  connectorsClient?: { mcpUrl: string; headersHelper: string };
 };
 
 export type RunnerJson = {
@@ -138,7 +143,7 @@ export type RunnerJson = {
   sync?: { enabled?: boolean; url?: string; name?: string; runnerId?: string; icon?: string; rpcUrl?: string };
   // The gateway, when it isn't the `connectors` MCP server in
   // ~/.claude.json; url "" or enabled: false turns the panel's polling off.
-  connectors?: { url?: string; enabled?: boolean };
+  connectors?: { url?: string; enabled?: boolean; headersHelper?: string };
 };
 
 export function defaultHome(): string {
@@ -242,10 +247,12 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
 
 // THREADBEAR_CONNECTORS_URL wins (empty or "off" turns it off, for tests),
 // then runner.json, then the main login's `connectors` MCP server.
-function connectorsConfig(raw: RunnerJson['connectors'], env: NodeJS.ProcessEnv, claudeJson: string): Pick<Config, 'connectorsUrl'> {
+function connectorsConfig(raw: RunnerJson['connectors'], env: NodeJS.ProcessEnv, claudeJson: string): Pick<Config, 'connectorsUrl' | 'connectorsClient'> {
   const fromEnv = env.THREADBEAR_CONNECTORS_URL;
   const url = fromEnv !== undefined ? (fromEnv.trim() && fromEnv.trim() !== 'off' ? gatewayBase(fromEnv.trim()) : undefined) : findGateway(raw, claudeJson);
-  return url ? { connectorsUrl: url } : {};
+  if (!url) return {};
+  const client = fromEnv !== undefined ? undefined : findGatewayClient(raw, claudeJson);
+  return { connectorsUrl: url, ...(client ? { connectorsClient: client } : {}) };
 }
 
 // THREADBEAR_SYNC=off wins over runner.json; THREADBEAR_SYNC_URL points a

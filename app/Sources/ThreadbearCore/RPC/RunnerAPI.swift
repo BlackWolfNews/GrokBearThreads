@@ -644,6 +644,12 @@ public extension RPCClient {
         return try await call("projects.update", .object(params), as: ProjectResult.self).project
     }
 
+    /// Reads the project's Notion board again (unless it was read in the
+    /// last minute; `force` reads it anyway) and gives the project back.
+    func refreshProjectTasks(_ projectId: String, force: Bool = false) async throws -> Project {
+        try await call("projects.refreshTasks", .object(["projectId": .string(projectId), "force": .bool(force)]), as: ProjectResult.self).project
+    }
+
     /// Mike's icon for a project: a picture file, an SF Symbol, or neither
     /// for automatic again (the librarian finds one).
     func setProjectIcon(_ projectId: String, path: String? = nil, symbol: String? = nil) async throws -> Project {
@@ -730,14 +736,17 @@ public struct ProjectUpdate: Sendable, Hashable {
     public var state: String?
     public var notes: String?
     public var archived: Bool?
+    /// A Notion page with the project's task board; empty takes it off.
+    public var notion: String?
 
-    public init(title: String? = nil, folders: [String]? = nil, goals: String? = nil, state: String? = nil, notes: String? = nil, archived: Bool? = nil) {
+    public init(title: String? = nil, folders: [String]? = nil, goals: String? = nil, state: String? = nil, notes: String? = nil, archived: Bool? = nil, notion: String? = nil) {
         self.title = title
         self.folders = folders
         self.goals = goals
         self.state = state
         self.notes = notes
         self.archived = archived
+        self.notion = notion
     }
 
     public var params: [String: JSONValue] {
@@ -748,6 +757,7 @@ public struct ProjectUpdate: Sendable, Hashable {
         if let state { params["state"] = .string(state) }
         if let notes { params["notes"] = .string(notes) }
         if let archived { params["archived"] = .bool(archived) }
+        if let notion { params["notion"] = .string(notion) }
         return params
     }
 }

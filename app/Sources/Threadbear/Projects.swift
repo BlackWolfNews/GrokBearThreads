@@ -149,6 +149,34 @@ extension AppModel {
         }
     }
 
+    /// Reads the project's Notion board again. Quiet when it fails: the
+    /// board shows the error itself.
+    func refreshProjectTasks(_ id: String, force: Bool = false) {
+        guard let client, project(id)?.notion != nil else { return }
+        Task {
+            if let project = try? await client.refreshProjectTasks(id, force: force) { replace(project) }
+        }
+    }
+
+    /// Asks for the Notion page with the project's task board.
+    func linkProjectNotion(_ id: String) {
+        guard let project = project(id) else { return }
+        let alert = NSAlert()
+        alert.messageText = "Notion page for \(project.title)"
+        alert.informativeText = "Paste the link to a Notion page with a Tasks database on it, or to the database itself. Leave it empty to take it off."
+        let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 360, height: 24))
+        field.placeholderString = "https://www.notion.so/…"
+        field.stringValue = project.notion ?? ""
+        alert.accessoryView = field
+        alert.addButton(withTitle: "Save")
+        alert.addButton(withTitle: "Cancel")
+        alert.window.initialFirstResponder = field
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        let url = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard url != (project.notion ?? "") else { return }
+        updateProject(id, ProjectUpdate(notion: url))
+    }
+
     func removeProjectFolder(_ id: String, _ folder: String) {
         guard let project = project(id) else { return }
         updateProject(id, ProjectUpdate(folders: project.folders.filter { $0 != folder }))

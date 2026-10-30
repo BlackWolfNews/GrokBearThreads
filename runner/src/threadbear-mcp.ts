@@ -9,7 +9,7 @@ import { createSdkMcpServer, tool } from '@anthropic-ai/claude-agent-sdk';
 import type { McpSdkServerConfigWithInstance } from '@anthropic-ai/claude-agent-sdk';
 import { z } from 'zod';
 import type { Runner } from './runner.ts';
-import type { Account, EffortLevel, PersistedEvent, Schedule, ThreadSummary } from './protocol.ts';
+import type { Account, EffortLevel, PersistedEvent, Project, Schedule, ThreadSummary } from './protocol.ts';
 import { usageLine } from './usage.ts';
 import { findPool, poolLine } from './pools.ts';
 import { AGENT_MESSAGE_PREFIX, EFFORT_LEVELS, MOVE_MESSAGE_PREFIX, sentByAgent } from './protocol.ts';
@@ -463,6 +463,7 @@ export function buildThreadbearTools(
           `Goals: ${p.goals || '(none yet)'}`,
           `State: ${p.state || '(none yet)'}`,
           `Links: ${(p.links ?? []).map((l) => `${l.title} ${l.url}`).join(' · ') || 'none'}`,
+          ...tasksLines(p),
           '',
           'Notes:',
           p.notes || '(none yet)',
@@ -502,7 +503,7 @@ export function buildThreadbearTools(
     ),
     tool(
       'update_project',
-      "Changes a project: title, goals, state, notes, links, folders or icon. Keep state current as work moves on (what's done, what's next, what's blocked). Notes are for what a later thread should know that the repo doesn't say: decisions and why, gotchas, what's still owed. They're not a log of what landed (git and the docs have that), so when something you note replaces an older note, rewrite the notes rather than adding to them. appendNote adds a paragraph without rewriting the notes. When the project gets a place the user will keep going back to (it goes live, gets an admin page, a dashboard, a store listing), add it with addLinks: links show at the top of every one of its threads' Highlights. The librarian finds icons by itself from the project's folders, so only set one when the user asks or the project gets a new app icon somewhere it wouldn't look.",
+      "Changes a project: title, goals, state, notes, links, folders, icon or Notion task board. Keep state current as work moves on (what's done, what's next, what's blocked). Notes are for what a later thread should know that the repo doesn't say: decisions and why, gotchas, what's still owed. They're not a log of what landed (git and the docs have that), so when something you note replaces an older note, rewrite the notes rather than adding to them. appendNote adds a paragraph without rewriting the notes. When the project gets a place the user will keep going back to (it goes live, gets an admin page, a dashboard, a store listing), add it with addLinks: links show at the top of every one of its threads' Highlights. The librarian finds icons by itself from the project's folders, so only set one when the user asks or the project gets a new app icon somewhere it wouldn't look.",
       {
         project: z.string().describe('Project id, id prefix or title.'),
         title: z.string().optional(),
@@ -519,8 +520,14 @@ export function buildThreadbearTools(
           .string()
           .optional()
           .describe('A path to a picture (PNG, SVG, ICNS...), an SF Symbol name such as "film", or "auto" to let the librarian find one again.'),
+        notion: z
+          .string()
+          .optional()
+          .describe(
+            "A Notion page (or database) with the project's task board on it: a database with a Status column (To do, Doing, Waiting, Done), Who, Due and Thread (the thread id working on it). The project page shows the board, read every few minutes. Empty takes it off.",
+          ),
       },
-      handle(async ({ project: q, title, goals, state, notes, appendNote, links, addLinks, removeLinks, addFolders, removeFolders, icon }) => {
+      handle(async ({ project: q, title, goals, state, notes, appendNote, links, addLinks, removeLinks, addFolders, removeFolders, icon, notion }) => {
         const pc = mustProjects();
         const p = await project(q);
         let folders: string[] | undefined;
@@ -529,7 +536,7 @@ export function buildThreadbearTools(
           const add = await Promise.all((addFolders ?? []).map(projectFolder));
           folders = [...p.folders.filter((f) => !drop.has(f)), ...add.filter((f) => !p.folders.includes(f))];
         }
-        let out = await pc.update(p.id, { title, goals, state, notes, links, folders });
+        let out = await pc.update(p.id, { title, goals, state, notes, links, folders, notion });
         if (appendNote?.trim()) out = await pc.appendNote(p.id, appendNote);
         if (addLinks?.length || removeLinks?.length) {
           if (!pc.addLinks || !pc.removeLinks) throw new Error("This runner can't change project links yet.");
@@ -976,4 +983,25 @@ export function threadbearMcpServer(control: ThreadControl, selfId: string, sche
   });
   server.tools = [...ALWAYS_ASK_TOOLS].map((name) => ({ name: name.split('__').at(-1)!, permission_policy: 'always_ask' as const }));
   return server;
+}
+
+// A project's Notion board for read_project: open cards by column, then
+// how many are done. Agents move cards with the Notion tools.
+function tasksLines(p: Project): string[] {
+  if (!p.notion) return [];
+  const t = p.tasks;
+  if (!t || t.loading) return [`Tasks: on Notion at ${p.notion} (not read yet)`];
+  const out = [`Tasks (Notion board ${t.url}${t.error ? `; the last read failed: ${t.error}` : ''}):`];
+  for (const c of t.columns) {
+    const items = t.items.filter((i) => i.status === c.name);
+    if (!items.length) continue;
+    if (c.kind === 'done') {
+      out.push(`- ${c.name}: ${items.length}`);
+      continue;
+    }
+    out.push(`- ${c.name}:`);
+    for (const i of items) out.push(`  - ${i.title}${i.who.length ? ` (${i.who.join(', ')})` : ''}${i.due ? `, due ${i.due}` : ''}${i.thread ? `, thread ${i.thread}` : ''} ${i.url}`);
+  }
+  if (t.more) out.push('- (only the first 100 cards)');
+  return out;
 }
