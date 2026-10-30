@@ -431,7 +431,7 @@ public enum EventPayload: Sendable, Hashable {
     case userMessage(text: String, images: [ImageRef], origin: String? = nil, answers: [AskAnswer] = [], editOf: Int? = nil, review: ReviewAnswer? = nil)
     /// `summary`: the turn's summary, written by the runner from end_turn
     /// (docs/protocol.md, "The summary").
-    case assistantText(itemId: String, text: String, summary: Bool = false)
+    case assistantText(itemId: String, text: String, summary: Bool = false, narration: Bool = false)
     case reasoning(itemId: String, text: String)
     case toolCall(ToolCall)
     case toolResult(ToolResult)
@@ -503,6 +503,7 @@ public struct Event: Sendable, Hashable, Decodable {
         var reviewId: String?
         var reviewResponse: ReviewDraft?
         var summary = false
+        var narration = false
 
         init(from decoder: Decoder) throws {
             let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -516,9 +517,10 @@ public struct Event: Sendable, Hashable, Decodable {
             reviewId = try? c.decodeIfPresent(String.self, forKey: .reviewId)
             reviewResponse = try? c.decodeIfPresent(ReviewDraft.self, forKey: .reviewResponse)
             summary = (try? c.decodeIfPresent(Bool.self, forKey: .summary)) == true
+            narration = (try? c.decodeIfPresent(Bool.self, forKey: .narration)) == true
         }
 
-        enum CodingKeys: String, CodingKey { case itemId, text, images, message, origin, answers, editOf, reviewId, reviewResponse, summary }
+        enum CodingKeys: String, CodingKey { case itemId, text, images, message, origin, answers, editOf, reviewId, reviewResponse, summary, narration }
     }
 
     private struct PlanFields: Decodable {
@@ -563,7 +565,7 @@ public struct Event: Sendable, Hashable, Decodable {
                                 review: ReviewAnswer.parse(text, reviewId: fields.reviewId, response: fields.reviewResponse))
         case "assistant.text":
             let fields = try text()
-            return .assistantText(itemId: fields.itemId ?? "", text: fields.text ?? "", summary: fields.summary)
+            return .assistantText(itemId: fields.itemId ?? "", text: fields.text ?? "", summary: fields.summary, narration: fields.narration)
         case "reasoning":
             let fields = try text()
             return .reasoning(itemId: fields.itemId ?? "", text: fields.text ?? "")

@@ -511,7 +511,7 @@ public struct TranscriptModel: Sendable {
             closeOpenAsks()
             append(TranscriptRow(id: "rw:\(seq)", seq: seq, turnId: turnId, content: .note(rewind.summary)))
 
-        case .assistantText(let itemId, let text, let summary) where summary:
+        case .assistantText(let itemId, let text, let summary, _) where summary:
             // The turn's summary is its reply: what the agent wrote before it
             // folds into the work, so the turn reads as one line of work,
             // the bullets, then the card (docs/protocol.md, "The summary").
@@ -523,7 +523,7 @@ public struct TranscriptModel: Sendable {
             }
             append(TranscriptRow(id: id, seq: seq, turnId: turnId, content: .assistant(TextItem(itemId: itemId, text: text, isSummary: true))))
 
-        case .assistantText(let itemId, let text, _):
+        case .assistantText(let itemId, let text, _, let narration):
             streaming[itemId] = nil
             let id = "a:\(itemId)"
             let thought = "r:\(itemId)"
@@ -531,16 +531,16 @@ public struct TranscriptModel: Sendable {
                 // A reply the CLI sent as a thinking block signed as
                 // narration (runner: isNarration in normalize.ts) streams as
                 // reasoning and lands as text: it takes that row's place.
-                var row = TranscriptRow(id: id, seq: items[i].seq, turnId: items[i].turnId, content: .assistant(TextItem(itemId: itemId, text: text)))
+                var row = TranscriptRow(id: id, seq: items[i].seq, turnId: items[i].turnId, content: .assistant(TextItem(itemId: itemId, text: text, isNarration: narration)))
                 row.version = RowVersion.next()
                 items[i] = row
                 itemIndex[thought] = nil
                 itemIndex[id] = i
                 markInserted(i)
             } else if itemIndex[id] != nil {
-                update(id) { $0 = .assistant(TextItem(itemId: itemId, text: text)) }
+                update(id) { $0 = .assistant(TextItem(itemId: itemId, text: text, isNarration: narration)) }
             } else if !text.isEmpty {
-                append(TranscriptRow(id: id, seq: seq, turnId: turnId, content: .assistant(TextItem(itemId: itemId, text: text))))
+                append(TranscriptRow(id: id, seq: seq, turnId: turnId, content: .assistant(TextItem(itemId: itemId, text: text, isNarration: narration))))
             }
 
         case .reasoning(let itemId, let text):
@@ -975,8 +975,12 @@ public struct TranscriptModel: Sendable {
             text(k).map { !$0.isSummary } == true && k > (steps.last ?? Int.min) && items[k].seq > lastResult
         }
         if let summary = turn.last(where: { text($0)?.isSummary == true }) {
-            let said = final.reduce(0) { $0 + (text($1)?.text.count ?? 0) }
-            return said > (text(summary)?.text.count ?? 0) ? Set(final) : [summary]
+            // A narration block is only a paraphrase of what the agent
+            // wrote, so it never beats the bullets: one about a list of 13
+            // names for Paws showed instead of them (30 Oct 2026).
+            let words = final.filter { text($0)?.isNarration == false }
+            let said = words.reduce(0) { $0 + (text($1)?.text.count ?? 0) }
+            return said > (text(summary)?.text.count ?? 0) ? Set(words) : [summary]
         }
         if !final.isEmpty { return Set(final) }
         return (turn.last { text($0) != nil }).map { [$0] } ?? []

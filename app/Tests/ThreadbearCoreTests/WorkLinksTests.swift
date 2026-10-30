@@ -57,6 +57,20 @@ final class WorkLinksTests: XCTestCase {
         XCTAssertEqual(group.memberIds, ["a:m1", "t:c1", "t:c2", "t:p1", "a:e1.summary"])
     }
 
+    /// A narration block is only the API's paraphrase of what the agent
+    /// wrote, so it never beats the bullets, however long it is: one about
+    /// a list of names for Paws showed instead of them (30 Oct 2026).
+    func testANarrationParaphraseNeverBeatsTheSummary() {
+        let model = TranscriptModel(events: [
+            E.user(1, "More names?"),
+            E.call(2, "c1", input: ["command": "which browsy clicky"]), E.result(3, "c1"),
+            E.event(4, "assistant.text", ["itemId": "m1", "text": "I've checked these whimsical name pairs for clashes and recommend Browsy McBrowseface as the clearest fit, noting the old name is still in review.", "narration": true]),
+            E.call(5, "e1", name: "mcp__threadbear__end_turn", kind: "mcp", title: "end_turn"), E.result(6, "e1", text: "Noted"),
+            Self.summary(7, "e1.summary", "- Five name pairs\n- My pick: Browsy"), E.done(8),
+        ])
+        XCTAssertEqual(model.rows.map(\.id), ["u:1", "g:t:c1", "a:e1.summary", "f:t1"])
+    }
+
     /// Text after end_turn never takes the answer's place: an agent wrote
     /// its "What I need from you" there, and it showed instead of the
     /// explanation before it (29 Oct 2026).

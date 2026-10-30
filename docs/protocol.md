@@ -1343,8 +1343,10 @@ A turn the agent finished can say whether Mike has to do anything, so
   the agent made, the changes card, the footer and the card (Mike, 29
   Oct: like Codex desktop). The reply is the turn's messages after its
   last step and before its taken `end_turn`, when they're longer than
-  the summary; else the summary; else its last `assistant.text`. A step
-  is a tool call outside the `threadbear` tools and `ToolSearch`,
+  the summary; else the summary; else its last `assistant.text`. A
+  `narration: true` text never beats the summary, as it's only the API's
+  paraphrase of what the agent wrote (30 Oct 2026: one about a list of
+  names showed instead of the bullets). A step is a tool call outside the `threadbear` tools and `ToolSearch`,
   counted from its `tool.result` too (a message written while it ran
   isn't after it); a `user.message` sent into the turn counts as one.
   Text after `end_turn` never counts. The line of work goes above the

@@ -156,7 +156,7 @@ extension TranscriptModel {
         let seq = event.seq
         switch event.payload {
         case .userMessage: return ["u:\(seq)"]
-        case .assistantText(let itemId, _, _): return ["a:" + itemId]
+        case .assistantText(let itemId, _, _, _): return ["a:" + itemId]
         case .reasoning(let itemId, _): return ["r:" + itemId]
         case .toolCall(let call): return ["t:" + call.itemId]
         case .toolResult(let result): return ["t:" + result.itemId] + (result.images.isEmpty ? [] : ["i:" + result.itemId])
