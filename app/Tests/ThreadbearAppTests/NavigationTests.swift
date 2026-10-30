@@ -150,6 +150,16 @@ final class NavigationTests: XCTestCase {
         XCTAssertEqual(AppModel.storedCollapsedSections(defaults), [.running], "opened ones stay open")
     }
 
+    /// Scheduled's Done starts folded; after that it's however Mike left it.
+    func testScheduleSectionsStartWithDoneFolded() throws {
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: "NavigationTests.\(UUID().uuidString)"))
+        XCTAssertEqual(AppModel.storedCollapsedScheduleSections(defaults), [.done])
+        defaults.set([String](), forKey: AppModel.collapsedScheduleSectionsKey)
+        XCTAssertEqual(AppModel.storedCollapsedScheduleSections(defaults), [], "opened ones stay open")
+        defaults.set(["paused", "gone"], forKey: AppModel.collapsedScheduleSectionsKey)
+        XCTAssertEqual(AppModel.storedCollapsedScheduleSections(defaults), [.paused])
+    }
+
     /// The Archive section shows the most recent few, more on asking, every
     /// match while searching, and always the open thread.
     func testArchiveRowsAreCutShort() {

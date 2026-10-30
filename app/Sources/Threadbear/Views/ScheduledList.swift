@@ -3,8 +3,9 @@ import SwiftUI
 import ThreadbearCore
 
 /// The sidebar's Scheduled view, reached from its footer like the Den:
-/// every schedule, soonest first. Clicking a row opens the editor; its
-/// target opens the thread.
+/// every schedule under Active, Paused and Done headings that fold like
+/// the inbox's, soonest first in each. Clicking a row opens the editor;
+/// its target opens the thread.
 struct ScheduledList: View {
     @Environment(AppModel.self) private var app
 
@@ -18,8 +19,11 @@ struct ScheduledList: View {
             .padding(.horizontal, SidebarMetrics.outerInset)
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0) {
-                    ForEach(schedules) { schedule in
-                        ScheduleRowView(schedule: schedule)
+                    let groups = ScheduleSection.group(schedules)
+                    ForEach(ScheduleSection.allCases, id: \.self) { section in
+                        if let rows = groups[section] {
+                            ScheduleSectionView(section: section, schedules: rows)
+                        }
                     }
                     if schedules.isEmpty {
                         EmptyNote(text: "Nothing scheduled.")
@@ -31,6 +35,38 @@ struct ScheduledList: View {
             }
             .scrollIndicators(.never)
             .onExitCommand { app.sidebarMode = .inbox }
+        }
+    }
+}
+
+/// One heading and its rows; a heading with nothing under it isn't drawn.
+private struct ScheduleSectionView: View {
+    @Environment(AppModel.self) private var app
+    let section: ScheduleSection
+    let schedules: [Schedule]
+
+    var body: some View {
+        let collapsed = app.collapsedScheduleSections.contains(section)
+        SectionHeading(title: section.title, icon: section.icon, fold: .init(collapsed: collapsed, count: schedules.count) {
+            withAnimation(.snappy(duration: 0.2)) {
+                if collapsed { app.collapsedScheduleSections.remove(section) } else { app.collapsedScheduleSections.insert(section) }
+            }
+        })
+        if !collapsed {
+            ForEach(schedules) { schedule in
+                ScheduleRowView(schedule: schedule)
+                    .transition(Juice.row)
+            }
+        }
+    }
+}
+
+extension ScheduleSection {
+    var icon: String {
+        switch self {
+        case .active: return "clock"
+        case .paused: return "pause"
+        case .done: return "checkmark"
         }
     }
 }

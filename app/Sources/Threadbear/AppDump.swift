@@ -50,7 +50,7 @@ struct AppDump: Encodable {
     struct Section: Encodable {
         var name: String
         var threads: [Thread]
-        /// Inbox sections only: folded away under their heading.
+        /// Inbox and Scheduled sections only: folded away under their heading.
         var collapsed: Bool? = nil
     }
 
@@ -275,10 +275,13 @@ struct AppDump: Encodable {
             ]
         case .scheduled:
             // Schedules in the thread shape: their state is the status.
-            sections = [Section(name: "Scheduled", threads: app.schedules.map { schedule in
-                Thread(id: schedule.id, title: schedule.title, status: schedule.paused ? "paused" : schedule.isFinished ? "finished" : "active",
-                       needsYou: false, unread: false, hovered: app.hoverOverride == schedule.id)
-            })]
+            let groups = ScheduleSection.group(app.schedules)
+            sections = ScheduleSection.allCases.map { section in
+                Section(name: section.title, threads: (groups[section] ?? []).map { schedule in
+                    Thread(id: schedule.id, title: schedule.title, status: schedule.paused ? "paused" : schedule.isFinished ? "finished" : "active",
+                           needsYou: false, unread: false, hovered: app.hoverOverride == schedule.id)
+                }, collapsed: app.collapsedScheduleSections.contains(section))
+            }
         }
         let key = app.selection ?? "new"
         var transcript: Transcript?

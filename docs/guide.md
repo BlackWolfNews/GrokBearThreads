@@ -333,7 +333,9 @@ few things that matter most. To have something pinned, ask the thread
 A schedule sends a message at a set time, once or over and over: to a
 thread, or to a new thread each time (a morning summary, say). Make one in
 the Scheduled view (⌘2), or ask an agent ("look at this again every weekday
-at 9"). The Scheduled view lists them with when each runs next, and its page
+at 9"). The Scheduled view lists them under Active, Paused and Done, with
+when each runs next. Click a heading to fold it away (Done starts folded); a
+folded one shows how many are under it. Its page
 says what's coming up next with a few numbers: how many are on, due in the
 next day, repeating, set by threads, paused, and how often they've run.
 

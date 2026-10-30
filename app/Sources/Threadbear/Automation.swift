@@ -709,6 +709,14 @@ enum Automation {
             app.searchQuery = c["text"] as? String ?? ""
             return "ok"
         case "expand", "collapse":
+            if let raw = c["scheduleSection"] as? String {
+                // A Scheduled heading, as clicking it does.
+                guard let section = ScheduleSection(rawValue: raw) else {
+                    return "error scheduleSection must be one of \(ScheduleSection.allCases.map(\.rawValue).joined(separator: ", "))"
+                }
+                if name == "expand" { app.collapsedScheduleSections.remove(section) } else { app.collapsedScheduleSections.insert(section) }
+                return "ok"
+            }
             if let raw = c["section"] as? String {
                 // An inbox heading, as clicking it does.
                 guard let section = InboxSection(rawValue: raw) else {

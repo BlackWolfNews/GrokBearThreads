@@ -339,4 +339,19 @@ final class ScheduleTests: XCTestCase {
         // A malformed one is dropped rather than losing the thread.
         XCTAssertNil(try JSONDecoder().decode(ThreadSummary.self, from: Data(#"{"id":"t1","schedule":"sc1"}"#.utf8)).schedule)
     }
+
+    func testScheduleSections() {
+        let now = Date()
+        let soon = Schedule(id: "a", title: "A", whenText: "Weekdays at 9:00", nextRunAt: now)
+        let paused = Schedule(id: "b", title: "B", whenText: "Every hour", paused: true)
+        let ran = Schedule(id: "c", title: "C", whenText: "Once", finishedAt: now)
+        // Paused and then run by hand: done, as it won't run again.
+        let pausedRan = Schedule(id: "d", title: "D", whenText: "Once", paused: true, finishedAt: now)
+        let later = Schedule(id: "e", title: "E", whenText: "Mondays at 10:00", nextRunAt: now.addingTimeInterval(60))
+        let groups = ScheduleSection.group([soon, paused, ran, pausedRan, later])
+        XCTAssertEqual(groups[.active]?.map(\.id), ["a", "e"])
+        XCTAssertEqual(groups[.paused]?.map(\.id), ["b"])
+        XCTAssertEqual(groups[.done]?.map(\.id), ["c", "d"])
+        XCTAssertEqual(ScheduleSection.allCases.map(\.title), ["Active", "Paused", "Done"])
+    }
 }

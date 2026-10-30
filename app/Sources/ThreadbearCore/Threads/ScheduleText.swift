@@ -208,3 +208,29 @@ public enum StartedBySchedule {
         return when.isEmpty ? named + ". Click to edit it." : named + " (\(when)). Click to edit it."
     }
 }
+
+/// The Scheduled list's headings, folded like the inbox's (Mike asked 30
+/// Oct, with 31 schedules in one list): what's coming up, what's paused,
+/// and one-offs that have run.
+public enum ScheduleSection: String, Sendable, CaseIterable {
+    case active, paused, done
+
+    public var title: String {
+        switch self {
+        case .active: return "Active"
+        case .paused: return "Paused"
+        case .done: return "Done"
+        }
+    }
+
+    /// A one-off that has run is done even if it was paused first: it
+    /// won't run again either way.
+    public static func of(_ schedule: Schedule) -> ScheduleSection {
+        schedule.isFinished ? .done : schedule.paused ? .paused : .active
+    }
+
+    /// The schedules under each heading, keeping the runner's order.
+    public static func group(_ schedules: [Schedule]) -> [ScheduleSection: [Schedule]] {
+        Dictionary(grouping: schedules, by: of)
+    }
+}

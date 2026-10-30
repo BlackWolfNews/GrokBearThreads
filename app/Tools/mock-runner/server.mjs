@@ -1908,6 +1908,10 @@ function addDemoSchedules() {
   make({ id: 'sc_demo_backup', title: 'Nightly backup report', text: 'Summarise last night\'s Backblaze log and say if anything failed.',
     cron: '0 2 * * *', cwd: '/Users/mike/dev/old-backups', accountId: defaults.accountId, paused: true, runs: 21,
     lastRun: { at: ago(60 * 30), outcome: 'failed', note: 'the folder /Users/mike/dev/old-backups is gone' } });
+  // A one-off that has run, under Done in the Scheduled list.
+  make({ id: 'sc_demo_renewal', title: 'Check the domain renewal went through', text: 'Look for the renewal receipt in the inbox and say if it charged the right card.',
+    at: ago(60 * 20), cwd: defaults.cwd, accountId: defaults.accountId, permissionMode: 'full', runs: 1, finishedAt: ago(60 * 20),
+    lastRun: { at: ago(60 * 20), outcome: 'sent' } });
 
   // What a schedule's message looks like once sent: at the end of the
   // release notes thread, without moving it in the sidebar.
