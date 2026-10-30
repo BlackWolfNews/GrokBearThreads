@@ -14,8 +14,11 @@ public enum ComposerChips {
 
     /// Whether the folder chip shows. Nearly every thread starts in the
     /// runner's default folder (misc), so the chip only appears for one
-    /// that doesn't; "+" > Folder changes it either way.
-    public static func showsFolder(_ path: String, defaultFolder: String) -> Bool {
+    /// that doesn't; "+" > Folder changes it either way. A thread in its
+    /// own worktree never shows it: the folder is a spare like "slot-4",
+    /// which says nothing, and the header already names its branch.
+    public static func showsFolder(_ path: String, defaultFolder: String, inWorktree: Bool = false) -> Bool {
+        if inWorktree { return false }
         let folder = standardised(path)
         return folder.isEmpty || folder != standardised(defaultFolder)
     }

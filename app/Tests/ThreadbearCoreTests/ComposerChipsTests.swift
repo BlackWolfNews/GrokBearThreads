@@ -24,6 +24,8 @@ final class ComposerChipsTests: XCTestCase {
         // Before the runner says what its default is, show the folder.
         XCTAssertTrue(ComposerChips.showsFolder(misc, defaultFolder: ""))
         XCTAssertFalse(ComposerChips.showsFolder("/", defaultFolder: "/"))
+        // A worktree's folder is a spare slot, not worth a chip.
+        XCTAssertFalse(ComposerChips.showsFolder("/Users/mike/dev/me/threadbear-threads/slot-4", defaultFolder: misc, inWorktree: true))
     }
 
     /// No model is the account's default; aliases and Claude ids read as

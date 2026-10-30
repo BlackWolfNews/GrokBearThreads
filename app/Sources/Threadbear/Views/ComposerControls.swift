@@ -144,7 +144,7 @@ struct ComposerControls: View {
                     }
                     ChipDivider()
                 }
-            } else if remote == nil, ComposerChips.showsFolder(cwd, defaultFolder: app.defaults.cwd) {
+            } else if remote == nil, ComposerChips.showsFolder(cwd, defaultFolder: app.defaults.cwd, inWorktree: thread?.worktree != nil) {
                 ComposerChip(icon: "folder", title: ComposerChips.folder(cwd), help: cwd.abbreviatingHome) {
                     settings.folderMenu()
                 }
