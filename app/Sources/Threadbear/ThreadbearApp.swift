@@ -156,6 +156,9 @@ struct ThreadbearApp: App {
 }
 
 final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDelegate {
+    /// A thread link that came in before the thread list loaded (it started the app).
+    private var linkedThread: String?
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         MainActor.assumeIsolated {
             let app = AppModel.shared
@@ -181,8 +184,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             // steps need the model from its first step.
             Tour.shared.app = app
             if !scripted { Notifier.setUp(delegate: self) }
-            app.onThreadsLoaded = {
+            app.onThreadsLoaded = { [weak self] in
                 LaunchClock.threadsLoaded()
+                if let threadId = self?.linkedThread {
+                    self?.linkedThread = nil
+                    self?.show(threadId: threadId)
+                }
                 // After a restart the app made itself for an update: back
                 // to where it was (a no-op otherwise).
                 AppUpdater.restoreAfterRestart(app: app)
@@ -235,11 +242,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         let threadId = response.notification.request.content.userInfo["threadId"] as? String
         await MainActor.run {
             NSApp.activate()
-            if let threadId {
-                AppModel.shared.sidebarMode = .inbox
-                AppModel.shared.select(threadId)
-            }
+            if let threadId { show(threadId: threadId) }
         }
+    }
+
+    /// `threadbear://thread/<id>` (ThreadLink): the thread comes up as it
+    /// does from a notification. Opening BrowserBear's pill on an agent's
+    /// Chrome tab sends one.
+    func application(_ application: NSApplication, open urls: [URL]) {
+        MainActor.assumeIsolated {
+            guard let threadId = urls.lazy.compactMap(ThreadLink.threadId(from:)).last else { return }
+            NSApp.activate()
+            if AppModel.shared.threadsLoaded { show(threadId: threadId) } else { linkedThread = threadId }
+        }
+    }
+
+    @MainActor private func show(threadId: String) {
+        AppModel.shared.sidebarMode = .inbox
+        AppModel.shared.select(threadId)
     }
 
     nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification) async -> UNNotificationPresentationOptions {

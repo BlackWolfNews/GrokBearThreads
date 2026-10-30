@@ -473,7 +473,9 @@ browser in, Settings > Phone & browser > Open signed in opens it in your
 browser (or run `npm run web:sign-in` from your Threadbear folder). Each
 thread has its own link: Copy web link in a
 thread's ... menu on the Mac, or the Copy link button on the website, gives
-you one to paste anywhere you're signed in.
+you one to paste anywhere you're signed in. On your Mac,
+`threadbear://thread/<id>` opens a thread in the app instead (the Open
+thread button on a tab BrowserBear has marked for an agent uses it).
 
 To let someone else read a thread, click the share button beside a
 thread's ... menu and pick Anyone with the link, then Copy link. It's a

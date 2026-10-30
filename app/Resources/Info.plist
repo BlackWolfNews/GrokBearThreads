@@ -28,5 +28,17 @@
     <true/>
     <key>NSSupportsAutomaticTermination</key>
     <false/>
+    <!-- threadbear://thread/<id> opens a thread (ThreadLink). -->
+    <key>CFBundleURLTypes</key>
+    <array>
+        <dict>
+            <key>CFBundleURLName</key>
+            <string>com.mikerosoft.threadbear.thread-link</string>
+            <key>CFBundleURLSchemes</key>
+            <array>
+                <string>threadbear</string>
+            </array>
+        </dict>
+    </array>
 </dict>
 </plist>
