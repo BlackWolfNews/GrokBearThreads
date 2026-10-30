@@ -379,7 +379,12 @@ private struct TaskBoard: View {
         }
     }
 
-    /// Notion's colour names, toned down to a dot.
+    static func color(_ name: String?) -> Color { TaskColors.color(name) }
+}
+
+/// Notion's colour names as SwiftUI colours, for a column's dot on the
+/// board and a card's icon in Highlights.
+enum TaskColors {
     static func color(_ name: String?) -> Color {
         switch name {
         case "blue": return .blue

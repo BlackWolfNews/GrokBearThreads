@@ -60,6 +60,21 @@ final class ProjectTests: XCTestCase {
         XCTAssertNil(none.tasks)
     }
 
+    func testHighlightsPickThisThreadsCardThenUnderWayThenToDo() {
+        let todo = TaskColumn(name: "To do", kind: .todo), doing = TaskColumn(name: "Doing", kind: .doing)
+        let waiting = TaskColumn(name: "Waiting", kind: .doing), done = TaskColumn(name: "Done", kind: .done)
+        let card = { (id: String, status: String, thread: String?) in ProjectTask(id: id, title: id, url: "https://n/\(id)", status: status, thread: thread) }
+        let tasks = ProjectTasks(url: "https://n", columns: [todo, doing, waiting, done], items: [
+            card("a", "To do", nil), card("b", "To do", "85046057"), card("c", "Waiting", nil),
+            card("d", "Doing", nil), card("e", "Done", "85046057"), card("f", "To do", "abc"),
+        ])
+        let picks = tasks.highlights(threadId: "85046057-1df7-4169-bb7d-fca554331b4c", limit: 4)
+        XCTAssertEqual(picks.shown.map(\.task.id), ["b", "d", "c", "a"], "its own card, then Doing and Waiting in column order, then To do; Done never")
+        XCTAssertEqual(picks.shown.map(\.mine), [true, false, false, false])
+        XCTAssertEqual(picks.more, 1)
+        XCTAssertFalse(card("x", "To do", "abc").isWorked(by: "abcdef12"), "a short Thread value matches nothing")
+    }
+
     func testProjectIcons() throws {
         let picture = try decode(Project.self, """
         {"id":"p_1","icon":{"image":{"path":"/d/project-icons/p_1-ab.png","mediaType":"image/png","width":256,"height":256},

@@ -85,7 +85,7 @@ File references are where to look.
 | Anthropic, OpenAI | yours | Your threads, through the official CLIs on your own logins |
 | Mike's push relay | Mike's | Only when a paired iPhone gets a notification. It's sent from your Convex deployment, not the Mac. The text is encrypted for the phone; the relay sees the device token and thread id (`convex/push.ts`, `docs/push-relay.md`). |
 | OpenRouter | theirs | Thread excerpts, only if you add a key |
-| A Connectors gateway | whoever runs it | Only if one is set in `runner.json` or `~/.claude.json`. Its `/health` every few minutes, and for a project with a Notion page, two or three Notion reads every 5 minutes for its task board (`runner/src/notion-tasks.ts`) |
+| A Connectors gateway | whoever runs it | Only if one is set in `runner.json` or `~/.claude.json`. Its `/health` every few minutes, and for a project with a Notion page, a Notion read or two every 5 minutes for its task board (`runner/src/notion-tasks.ts`) |
 | Sentry | Mike's | Nothing from your copy. Only a copy whose `origin` is Mike's own repo reports errors (`runner/src/sentry.ts`, `app/Sources/Threadbear/CrashReporting.swift`). The App Store iPhone app sends anonymous crash reports. |
 
 On the Mac itself, a web link you click in the app first goes to

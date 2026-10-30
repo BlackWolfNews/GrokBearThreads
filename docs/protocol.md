@@ -2182,12 +2182,17 @@ login's `connectors` entry in `~/.claude.json` (its URL and its
 same Notion login the agents use, and the runner keeps no Notion key.
 
 It finds the database on the page (the one called Tasks, else the first;
-a database or a `collection://` address is used as it is), then reads the
-database's schema and its first 100 rows every 5 minutes, and when the
-project page asks (`projects.refreshTasks`). Each read is two or three
-`tools/call`s to the gateway (`notion__notion-fetch`,
-`notion__notion-query-data-sources` in rows mode). The last board is kept
-in `project-tasks.json` in the data dir, so a restart shows it at once.
+a database or a `collection://` address is used as it is) and one of its
+views with no filter, then reads the rows through that view every 5
+minutes, and when the project page asks (`projects.refreshTasks`):
+`notion__notion-query-data-sources` in view mode, 100 a page, 300 at
+most. Not rows or SQL mode: Notion caps those per workspace, and two dozen
+boards used the allowance up in minutes (30 Oct); view queries don't
+count. A database with only filtered views is read in rows mode. The
+columns (`notion__notion-fetch` of the data source) are read again every
+30 minutes, or when a card is in a column they don't have. The last board
+is kept in `project-tasks.json` in the data dir, so a restart shows it at
+once.
 
 ```ts
 // On Project
@@ -2209,9 +2214,13 @@ type ProjectTasks = {
   fetchedAt?: string
   loading?: boolean    // not read yet
   error?: string       // the last read failed; the rest is the last good board
-  more?: boolean       // over 100 rows
+  more?: boolean       // over 300 rows
 }
 ```
+
+A thread's Highlights lists up to 4 open cards under each of its
+projects: the one whose Thread is this thread first, then those in an
+In progress column, then To do; more opens the project page.
 
 Threadbear only shows the board; cards are moved in Notion, by people
 or by agents with the Notion tools. `read_project` lists the open cards,

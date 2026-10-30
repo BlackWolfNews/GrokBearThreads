@@ -54,13 +54,24 @@ const rows = JSON.stringify({
   has_more: false,
 });
 
+// The database lists its views: a filtered one first, which a board must
+// not read through (it would hide cards), then a plain one.
+const VIEW = 'view://409fd70e-cfa0-814a-bcf7-000c11d3e829';
+const dbFetch = JSON.stringify({
+  metadata: { type: 'database' },
+  url: DB + '?pvs=204',
+  text: `<database url="{{${DB}}}"><data-sources><data-source url="{{${DS}}}"></data-source></data-sources>\n<views>\n<view url="{{view://11111111-0000-0000-0000-000000000000}}">\n{"dataSourceUrl":"{{${DS}}}","name":"Mine","type":"table","filter":{"property":"Who"}}\n</view>\n<view url="{{${VIEW}}}">\n{"dataSourceUrl":"{{${DS}}}","name":"Board","type":"board","groupBy":{"property":"Status"}}\n</view>\n</views></database>`,
+});
+
 // A fake gateway: answers by tool and id, and counts what it was asked.
+// Row queries through a view answer `view`; straight ones `rows`.
 function fakeNotion(over: Partial<Record<string, string | Error>> = {}) {
   const calls: { name: string; args: Record<string, unknown> }[] = [];
-  const answers: Record<string, string | Error> = { [PAGE]: pageFetch, [DS]: dsFetch, rows, ...over };
+  const answers: Record<string, string | Error> = { [PAGE]: pageFetch, [DB]: dbFetch, [DS]: dsFetch, rows, view: rows, ...over };
   const call: CallTool = async (name, args) => {
     calls.push({ name, args });
-    const key = name === 'notion__notion-query-data-sources' ? 'rows' : String(args.id);
+    const mode = (args.data as { mode?: string } | undefined)?.mode;
+    const key = name === 'notion__notion-query-data-sources' ? (mode === 'view' ? 'view' : 'rows') : String(args.id);
     const a = answers[key];
     if (a instanceof Error) throw a;
     if (a === undefined) throw new Error(`nothing for ${key}`);
@@ -93,10 +104,12 @@ test('the gateway answers as SSE or JSON; a tool error says what Notion said', a
 
 test("a page's Tasks database is the board, over any other database on it", async () => {
   const n = fakeNotion();
-  assert.deepEqual(await findSource(n.call, PAGE), { dataSource: DS, databaseUrl: DB });
-  // A database names its own data source.
-  const dbFetch = JSON.stringify({ metadata: { type: 'database' }, url: DB + '?pvs=204', text: `<database url="{{${DB}}}"><data-sources><data-source url="{{${DS}}}"></data-source></data-sources></database>` });
-  assert.deepEqual(await findSource(fakeNotion({ [DB]: dbFetch }).call, DB), { dataSource: DS, databaseUrl: DB });
+  assert.deepEqual(await findSource(n.call, PAGE), { dataSource: DS, databaseUrl: DB, view: VIEW });
+  // A database names its own data source and views.
+  assert.deepEqual(await findSource(fakeNotion().call, DB), { dataSource: DS, databaseUrl: DB, view: VIEW });
+  // With only filtered views, there's no view to read through.
+  const filtered = JSON.stringify({ metadata: { type: 'database' }, url: DB, text: `<data-source url="{{${DS}}}"></data-source><view url="{{view://11111111-0000-0000-0000-000000000000}}">\n{"filter":{"property":"Who"}}\n</view>` });
+  assert.deepEqual(await findSource(fakeNotion({ [DB]: filtered }).call, DB), { dataSource: DS, databaseUrl: DB });
   // A page with no database says what to add.
   const bare = JSON.stringify({ metadata: { type: 'page' }, text: '<page><content>Hi</content></page>' });
   await assert.rejects(findSource(fakeNotion({ [PAGE]: bare }).call, PAGE), /No database on that Notion page/);
@@ -125,16 +138,39 @@ test('rows become cards: people as a list, a date range kept, untitled rows skip
   assert.deepEqual([items[2]!.due, items[2]!.dueEnd, items[2]!.who], ['2026-11-29', '2026-12-04', ['Zaran', 'Tracy']]);
 });
 
-test('a whole read asks for the page once; after that, the schema and rows only', async () => {
+test('rows are read through a view, never straight, since straight queries have a workspace allowance', async () => {
   const n = fakeNotion();
   const first = await readTasks(n.call, PAGE);
   assert.equal(first.tasks.url, DB);
   assert.equal(first.tasks.items.length, 3);
-  assert.equal(n.calls.length, 3);
+  // The page, the database (for its views), the schema, the rows.
+  assert.equal(n.calls.length, 4);
+  assert.deepEqual(n.calls[3]!.args, { data: { mode: 'view', view_url: VIEW, page_size: 100 } });
+  assert.ok(!n.calls.some((c) => (c.args.data as { mode?: string } | undefined)?.mode === 'rows'));
+  // Known source and a good schema: the rows alone.
   n.calls.length = 0;
-  await readTasks(n.call, PAGE, first.source);
-  assert.deepEqual(n.calls.map((c) => c.name), ['notion__notion-fetch', 'notion__notion-query-data-sources']);
-  assert.deepEqual(n.calls[1]!.args, { data: { mode: 'rows', data_source_url: DS, limit: 100 } });
+  await readTasks(n.call, PAGE, first.source, first.board);
+  assert.deepEqual(n.calls.map((c) => c.name), ['notion__notion-query-data-sources']);
+  // A card in a column the cached schema lacks: the schema is read again.
+  n.calls.length = 0;
+  const stale = { ...first.board, columns: first.board.columns.filter((c) => c.name !== 'Waiting') };
+  const again = await readTasks(n.call, PAGE, first.source, stale);
+  assert.ok(again.board.columns.some((c) => c.name === 'Waiting'));
+  assert.ok(n.calls.some((c) => c.args.id === DS));
+});
+
+test('a big board is read a page at a time, three pages at most', async () => {
+  let page = 0;
+  const call: CallTool = async (name, args) => {
+    if (name === 'notion__notion-fetch') return dsFetch;
+    page++;
+    const cursor = (args.data as { start_cursor?: string }).start_cursor;
+    assert.equal(cursor, page === 1 ? undefined : `c${page - 1}`);
+    return JSON.stringify({ results: [{ Name: `Card ${page}`, Status: 'To do', url: `https://app.notion.com/p/${String(page).padStart(32, '0')}` }], has_more: true, next_cursor: `c${page}` });
+  };
+  const r = await readTasks(call, DS, { dataSource: DS, view: VIEW });
+  assert.equal(r.tasks.items.length, 3);
+  assert.equal(r.tasks.more, true);
 });
 
 test('the boards: loading at first, then the board; a failed read keeps the last good one with the error; kept across restarts', async () => {
@@ -156,11 +192,16 @@ test('the boards: loading at first, then the board; a failed read keeps the last
   assert.equal(n.calls.length, 0);
   // Stale and failing: the last good board stays, with the error.
   now += 2 * 60_000;
-  n.answers.rows = new Error('Notion needs signing in again.');
+  n.answers.view = new Error('Notion needs signing in again.');
   await boards.refresh('p_1', PAGE);
   const failed = boards.get('p_1', PAGE)!;
   assert.equal(failed.items.length, 3);
   assert.equal(failed.error, 'Notion needs signing in again.');
+  // Notion's allowance message is long; the board says it plainly.
+  now += 2 * 60_000;
+  n.answers.view = new Error('Your workspace has used up its Query Data Source allowance for SQL and rows-mode queries. Learn more https://app.notion.');
+  await boards.refresh('p_1', PAGE);
+  assert.match(boards.get('p_1', PAGE)!.error!, /^Notion's query limit for this workspace is used up for now/);
   // A new runner starts with what was saved.
   const again = new TaskBoards({ home, call: n.call, log: nullLogger, onChange: () => {} });
   assert.equal(again.get('p_1', PAGE)!.items.length, 3);

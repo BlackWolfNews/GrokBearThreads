@@ -97,6 +97,17 @@ struct HighlightsView: View {
                 ProjectWhyButton(row: row, threadId: thread.id)
             }
             ForEach(row.project.links, id: \.url) { projectLink($0) }
+            // Its open Notion cards, this thread's own first, so what's
+            // next for the project is in the pane that's open by default
+            // (Mike asked 30 Oct). The board itself is on the project page.
+            if let tasks = row.project.tasks, !tasks.loading {
+                let picks = tasks.highlights(threadId: thread.id, limit: HighlightSections.taskLimit)
+                ForEach(picks.shown) { taskRow($0) }
+                if picks.more > 0 {
+                    PaneRow(icon: "ellipsis", title: "\(picks.more) more on the board", quiet: true) { app.openProjectPage(row.project.id) }
+                        .tip("Open \(row.project.title)'s page")
+                }
+            }
         }
         // What will message the thread later, and the helpers it started:
         // they were a line over the composer and only the sidebar's rows
@@ -208,6 +219,17 @@ struct HighlightsView: View {
                 Divider()
                 Button("Remove", systemImage: "pin.slash") { app.removeHighlight(item, in: thread.id) }
             }
+    }
+
+    /// An open Notion card: its column and who, a click opens it in
+    /// Notion. The thread's own card has a filled bubble.
+    private func taskRow(_ pick: ProjectTasks.Pick) -> some View {
+        let icon = pick.mine ? "bubble.left.fill" : pick.column.kind == .doing ? "circle.lefthalf.filled" : "circle"
+        let detail = ([pick.column.name] + (pick.task.who.isEmpty ? [] : [pick.task.who.joined(separator: ", ")])).joined(separator: " · ")
+        return PaneRow(icon: icon, iconColor: TaskColors.color(pick.column.color), title: pick.task.title, detail: detail, titleTruncation: .tail, detailTruncation: .tail) {
+            if let url = URL(string: pick.task.url) { NSWorkspace.shared.open(url) }
+        }
+        .tip(pick.mine ? "This thread's card. Open it in Notion" : "Open in Notion")
     }
 
     private func projectLink(_ link: ProjectLink) -> some View {

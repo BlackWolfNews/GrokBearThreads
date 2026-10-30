@@ -21,8 +21,13 @@ import { atomicWriteFileSync, readJsonSync } from './fsutil.ts';
 export const POLL_MS = 5 * 60_000;
 export const FRESH_MS = 60_000;
 const TIMEOUT_MS = 30_000;
-// Notion's rows mode returns at most this many; a bigger board says so.
-const ROWS_MAX = 100;
+// A view query returns at most 100 a page; a board reads this many pages
+// at most, and says when there are more.
+const PAGE_SIZE = 100;
+const PAGES_MAX = 3;
+// The columns change rarely: the schema is fetched again after this, or
+// when a card turns up in a column it didn't list.
+const SCHEMA_MS = 30 * 60_000;
 
 // ------------------------------------------------------------- the gateway
 
@@ -113,8 +118,11 @@ export function findGatewayClient(raw: { url?: unknown; enabled?: unknown; heade
 // What Notion's fetch tool gives back: JSON with the entity in `text`.
 type Fetched = { metadata?: { type?: string }; title?: string; url?: string; text?: string };
 
-// Where a project's tasks are: the database to open and its data source.
-export type TaskSource = { dataSource: string; databaseUrl?: string };
+// Where a project's tasks are: the database to open, its data source, and
+// one of its views. Rows are read through the view: Notion caps rows and
+// SQL queries per workspace (an allowance a few dozen boards used up in
+// minutes, 30 Oct), and view queries don't count against it.
+export type TaskSource = { dataSource: string; databaseUrl?: string; view?: string };
 
 // Finds the task database from what a project names: a database (its first
 // data source), a data source, or a page with a database on it (the one
@@ -127,7 +135,8 @@ export async function findSource(call: CallTool, url: string): Promise<TaskSourc
   if (type === 'database') {
     const ds = text.match(/<data-source url="\{*(collection:\/\/[0-9a-f-]+)\}*"/)?.[1];
     if (!ds) throw new Error('That Notion database has no data source Threadbear can read.');
-    return { dataSource: ds, databaseUrl: cleanUrl(f.url ?? url) };
+    const view = pickView(text);
+    return { dataSource: ds, databaseUrl: cleanUrl(f.url ?? url), ...(view ? { view } : {}) };
   }
   if (type === 'data_source') {
     const ds = text.match(/<data-source url="\{*(collection:\/\/[0-9a-f-]+)\}*"/)?.[1] ?? '';
@@ -140,7 +149,28 @@ export async function findSource(call: CallTool, url: string): Promise<TaskSourc
   }));
   if (!dbs.length) throw new Error('No database on that Notion page. Add a Tasks database to it (a board grouped by Status).');
   const pick = dbs.find((d) => /^tasks?$/i.test(d.title)) ?? dbs.find((d) => /task/i.test(d.title)) ?? dbs[0]!;
-  return { dataSource: pick.dataSource, databaseUrl: cleanUrl(pick.url) };
+  // The page names the database; the database lists its views.
+  const db = JSON.parse(await call('notion__notion-fetch', { id: pick.url })) as Fetched;
+  const view = pickView(db.text ?? '');
+  return { dataSource: pick.dataSource, databaseUrl: cleanUrl(pick.url), ...(view ? { view } : {}) };
+}
+
+// A view of the database to read rows through: one with no filter, so no
+// card is hidden, else none (rows are then read straight, which counts
+// against the allowance).
+export function pickView(databaseText: string): string | undefined {
+  for (const m of databaseText.matchAll(/<view url="\{*(view:\/\/[0-9a-f-]+)\}*">\s*(\{[\s\S]*?\})\s*<\/view>/g)) {
+    let config: Record<string, unknown> = {};
+    try {
+      // The fetch tool wraps ids in {{ }}, inside the JSON's strings too.
+      config = JSON.parse(m[2]!.replace(/\{\{(\w+:\/\/[^}]*)\}\}/g, '$1')) as Record<string, unknown>;
+    } catch {
+      // A view we can't read is no worse than one with a filter: skip it.
+      continue;
+    }
+    if (!config.filter && !config.filters) return m[1]!;
+  }
+  return undefined;
 }
 
 type SchemaProp = {
@@ -218,17 +248,47 @@ export function readRows(text: string, board: Board): { items: ProjectTask[]; mo
   return { items, more: Boolean(parsed.has_more) };
 }
 
-// Reads the whole board: where it is, its columns and its rows.
-export async function readTasks(call: CallTool, notionUrl: string, known?: TaskSource): Promise<{ source: TaskSource; tasks: Omit<ProjectTasks, 'fetchedAt'> }> {
+// The rows, through the view a page at a time when there is one.
+async function readAllRows(call: CallTool, source: TaskSource, board: Board): Promise<{ items: ProjectTask[]; more: boolean }> {
+  if (!source.view) {
+    return readRows(await call('notion__notion-query-data-sources', { data: { mode: 'rows', data_source_url: source.dataSource, limit: PAGE_SIZE } }), board);
+  }
+  const items: ProjectTask[] = [];
+  let cursor: string | undefined;
+  for (let page = 0; page < PAGES_MAX; page++) {
+    const text = await call('notion__notion-query-data-sources', { data: { mode: 'view', view_url: source.view, page_size: PAGE_SIZE, ...(cursor ? { start_cursor: cursor } : {}) } });
+    items.push(...readRows(text, board).items);
+    const page_ = JSON.parse(text) as { has_more?: unknown; next_cursor?: unknown };
+    cursor = page_.has_more && typeof page_.next_cursor === 'string' ? page_.next_cursor : undefined;
+    if (!cursor) return { items, more: false };
+  }
+  return { items, more: true };
+}
+
+// Reads the whole board: where it is, its columns (unless `board` is still
+// good) and its rows.
+export async function readTasks(
+  call: CallTool,
+  notionUrl: string,
+  known?: TaskSource,
+  cached?: Board,
+): Promise<{ source: TaskSource; board: Board; tasks: Omit<ProjectTasks, 'fetchedAt'> }> {
   const source = known ?? (await findSource(call, notionUrl));
-  const board = readSchema(await call('notion__notion-fetch', { id: source.dataSource }));
-  const { items, more } = readRows(await call('notion__notion-query-data-sources', { data: { mode: 'rows', data_source_url: source.dataSource, limit: ROWS_MAX } }), board);
+  let board = cached ?? readSchema(await call('notion__notion-fetch', { id: source.dataSource }));
+  let { items, more } = await readAllRows(call, source, board);
+  // A card in a column the cached schema doesn't have: the columns
+  // changed, so read them again.
+  if (cached && items.some((t) => t.status && !board.columns.some((c) => c.name === t.status))) {
+    board = readSchema(await call('notion__notion-fetch', { id: source.dataSource }));
+    ({ items, more } = await readAllRows(call, source, board));
+  }
   // Statuses the schema didn't list (a select with a new option) still
   // get a column, at the end.
   const columns = [...board.columns];
   for (const t of items) if (t.status && !columns.some((c) => c.name === t.status)) columns.push({ name: t.status, kind: 'todo' });
   return {
     source,
+    board,
     tasks: {
       url: source.databaseUrl ?? notionUrl,
       columns,
@@ -275,7 +335,7 @@ export type TaskBoardsOptions = {
   onChange: (projectId: string) => void;
 };
 
-type Saved = { notion: string; source?: TaskSource; tasks?: ProjectTasks };
+type Saved = { notion: string; source?: TaskSource; board?: Board; boardAt?: number; tasks?: ProjectTasks };
 
 // Keeps each project's board, read now and then, and remembers the last
 // one across restarts so the page isn't empty while the first read runs.
@@ -335,17 +395,22 @@ export class TaskBoards {
 
   private async read(projectId: string, notion: string): Promise<void> {
     const before = this.boards.get(projectId);
-    const known = before?.notion === notion ? before.source : undefined;
+    // A source saved before views were read through has none: find it again.
+    const same = before?.notion === notion ? before : undefined;
+    const known = same?.source && (same.source.view || notion.startsWith('collection://')) ? same.source : undefined;
+    const cached = known && same?.board && this.now() - (same.boardAt ?? 0) < SCHEMA_MS ? same.board : undefined;
     const fetchedAt = new Date(this.now()).toISOString();
     let next: Saved;
     if (!this.opts.call) {
       next = { notion, tasks: { url: notion, columns: [], items: [], fetchedAt, error: 'Threadbear reads Notion through the Connectors gateway, and none is set up.' } };
     } else {
       try {
-        const { source, tasks } = await readTasks(this.opts.call, notion, known);
-        next = { notion, source, tasks: { ...tasks, fetchedAt } };
+        const { source, board, tasks } = await readTasks(this.opts.call, notion, known, cached);
+        next = { notion, source, board, boardAt: board === cached ? same!.boardAt : this.now(), tasks: { ...tasks, fetchedAt } };
       } catch (e) {
-        const error = e instanceof Error ? e.message : String(e);
+        const raw = e instanceof Error ? e.message : String(e);
+        // Notion's own wording is long and ends in a sales link.
+        const error = /allowance/i.test(raw) ? "Notion's query limit for this workspace is used up for now. It resets within the hour." : raw;
         this.opts.log.info('project tasks not read', { projectId, error });
         // Keep the last good board, with the error over it; forget where
         // it was, in case the database moved.

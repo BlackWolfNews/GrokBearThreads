@@ -515,7 +515,8 @@ an agent to. The page shows the board, read every few minutes, with a
 column per status and who and when on each card. Cards are moved in Notion,
 by you, anyone you share the page with, or the agents, who see the open
 cards and are told to keep them moving. A card whose Thread column names a
-thread links to it.
+thread links to it. A thread's Highlights shows a few of its projects'
+open cards under each project, its own card first.
 
 A project's page has its own panels and Patches on the right-hand rail:
 the ones its folders give its threads.

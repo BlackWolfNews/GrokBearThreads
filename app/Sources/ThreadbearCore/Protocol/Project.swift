@@ -184,6 +184,30 @@ public struct ProjectTasks: Sendable, Hashable, Decodable {
     /// The cards in a column, in Notion's order.
     public func items(in column: TaskColumn) -> [ProjectTask] { items.filter { $0.status == column.name } }
 
+    /// A card and its column, for a list outside the board.
+    public struct Pick: Sendable, Hashable, Identifiable {
+        public var task: ProjectTask
+        public var column: TaskColumn
+        /// The card names this thread as the one working on it.
+        public var mine: Bool
+        public var id: String { task.id }
+    }
+
+    /// The open cards worth showing in a thread's Highlights, at most
+    /// `limit`: the thread's own first, then what's under way (Doing,
+    /// Waiting...) in Notion's column order, then what's to do. Done is
+    /// left out. `more` is how many open ones that leaves.
+    public func highlights(threadId: String, limit: Int) -> (shown: [Pick], more: Int) {
+        var picks: [Pick] = []
+        for column in columns where column.kind != .done {
+            for task in items(in: column) { picks.append(Pick(task: task, column: column, mine: task.isWorked(by: threadId))) }
+        }
+        let rank: (Pick) -> Int = { $0.mine ? 0 : $0.column.kind == .doing ? 1 : 2 }
+        // A stable sort, so each rank keeps Notion's order.
+        let sorted = picks.enumerated().sorted { (rank($0.element), $0.offset) < (rank($1.element), $1.offset) }.map(\.element)
+        return (Array(sorted.prefix(limit)), max(0, sorted.count - limit))
+    }
+
     /// Cards not in a Complete column.
     public var openCount: Int {
         items.filter { item in columns.first { $0.name == item.status }?.kind != .done }.count
@@ -248,6 +272,13 @@ public struct ProjectTask: Sendable, Hashable, Decodable, Identifiable {
     }
 
     enum CodingKeys: String, CodingKey { case id, title, url, status, who, due, dueEnd, thread }
+
+    /// Its Thread column names this thread: the id or a prefix of it (6
+    /// characters at least, so a stray word doesn't match).
+    public func isWorked(by threadId: String) -> Bool {
+        guard let mine = thread?.lowercased().trimmingCharacters(in: .whitespaces), mine.count >= 6 else { return false }
+        return threadId.lowercased().hasPrefix(mine)
+    }
 }
 
 /// A place Mike keeps going back to for a project (docs/protocol.md,
