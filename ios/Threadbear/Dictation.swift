@@ -46,31 +46,31 @@ final class Dictation {
             self.request = request
             let input = engine.inputNode
             input.removeTap(onBus: 0)
-            // Just after the category changes (from Ask's playAndRecord, or
-            // a call) the node can still report the old format, and a tap
-            // in a format the hardware isn't running at is an Objective-C
-            // exception Swift can't catch: it crashed the app on 30 Oct, as
-            // it had Ask on 29 Oct (AudioInput.installTapIfNeeded). So wait
-            // for it to settle, which takes a few tens of milliseconds.
-            var settled = false
-            for _ in 0..<20 {
-                if Self.formatSettled(input) { settled = true; break }
-                try await Task.sleep(for: .milliseconds(50))
-            }
-            guard generation == current else { return }
-            guard settled else {
-                problem = "Couldn't start the microphone. Tap the mic to try again."
-                stop()
-                return
-            }
             // The tap runs on the audio queue. Written plainly inside this
             // @MainActor class the block would be main-actor isolated (the
             // project's default isolation), and iOS 18 trapped on the first
             // buffer: dispatch_assert_queue in Dictation.start. So it's
             // @Sendable and reaches the request through MicSink.
             let sink = MicSink(request)
-            input.installTap(onBus: 0, bufferSize: 1024, format: input.outputFormat(forBus: 0)) { @Sendable buffer, _ in
-                sink.append(buffer)
+            // MicTap refuses while the mic's format is still settling after
+            // the category change, for a few tens of milliseconds: try again.
+            var refusal: MicTap.Refusal?
+            for attempt in 0..<20 {
+                do {
+                    try MicTap.install(on: input) { buffer, _ in sink.append(buffer) }
+                    refusal = nil
+                    break
+                } catch {
+                    refusal = error
+                    guard error == .formatChanging, attempt < 19 else { break }
+                    try await Task.sleep(for: .milliseconds(50))
+                    guard generation == current else { return }
+                }
+            }
+            if let refusal {
+                problem = refusal == .noMicrophone ? "There's no microphone available." : "Couldn't start the microphone. Tap the mic to try again."
+                stop()
+                return
             }
             engine.prepare()
             try engine.start()
@@ -110,14 +110,6 @@ final class Dictation {
         task = nil
         isListening = false
         try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
-    }
-
-    /// Whether the mic node's format is one a tap can be put on: a real
-    /// microphone, at the rate the hardware is running.
-    private static func formatSettled(_ input: AVAudioInputNode) -> Bool {
-        let format = input.outputFormat(forBus: 0)
-        let hardware = input.inputFormat(forBus: 0)
-        return format.sampleRate > 0 && format.channelCount > 0 && hardware.sampleRate == format.sampleRate
     }
 
     /// "No speech detected" and cancellation aren't worth showing.

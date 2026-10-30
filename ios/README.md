@@ -9,7 +9,10 @@ directly, so it works with the Mac asleep: whatever you send waits in
 
 - `ThreadbearKit/`: the rows, the inbox order (same rules as the Mac
   sidebar), the Convex transport, a `FakeBackend` with sample data. `swift
-  test` runs on the Mac.
+  test` runs on the Mac, and `./check.sh` runs it whenever `ios/` changed.
+- Every mic tap goes through `Threadbear/MicTap.swift`, which waits for the
+  mic's format to settle (a tap too early crashed Ask and reply dictation);
+  `MicTapTests` fails on an `installTap` anywhere else.
 - The rows look like the Mac sidebar's (`Threadbear/Look.swift`): the
   project's tile with its picture (from `phone:projects`, backend API 5,
   fetched once and kept in `ProjectPictures`), its symbol or first

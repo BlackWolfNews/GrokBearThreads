@@ -15,8 +15,10 @@
 # The deploy tests (a few minutes) only run when something they cover
 # changed from main: runner/scripts/, launch.mjs, the launcher or the tests
 # themselves. BearDock's tests only run when dock/ changed (the app's own
-# build and tests cover how it uses it). On main itself, with nothing
-# changed, everything runs.
+# build and tests cover how it uses it). The iPhone app's ThreadbearKit
+# tests run with any of the options when ios/ changed, --quick included, so
+# `tb land` runs them (MicTapTests guards a crash the phone hit twice). On
+# main itself, with nothing changed, everything runs.
 #
 # How long the app takes depends on its build cache: under a minute when
 # app/.build is warm, 5 to 10 minutes in a folder that has never built
@@ -148,6 +150,13 @@ if [ "$QUICK" = 0 ]; then
   else
     skip "dock tests" "nothing in dock/ changed"
   fi
+fi
+# The iPhone app's logic and source checks (ios/ThreadbearKit), on the Mac.
+# The app itself only builds with Xcode; ios/scripts/sim-shots.sh does that.
+if needed '^ios/'; then
+  step "iphone kit tests" "$ROOT/ios/ThreadbearKit" swift test
+else
+  skip "iphone kit tests" "nothing in ios/ changed"
 fi
 if [ "$E2E" = 1 ]; then
   # Claude's first, then Codex's (codex*.e2e.test.ts: the conversation

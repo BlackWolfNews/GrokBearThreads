@@ -256,19 +256,14 @@ nonisolated final class AudioInput: @unchecked Sendable {
 
     private func installTapIfNeeded() throws {
         guard !tapInstalled else { return }
-        let input = engine.inputNode
-        let format = input.outputFormat(forBus: 0)
-        guard format.sampleRate > 0, format.channelCount > 0 else { throw Failure.noMicrophone }
-        // Just after an audio configuration change the node's format can still be the old one,
-        // and a tap in a format the hardware isn't running at is an Objective-C exception, which
-        // Swift can't catch: it crashed the app (29 Oct, on the XS Max, the first time quick ask
-        // listened). So that's refused here, and the restart tries again shortly.
-        let hardware = input.inputFormat(forBus: 0)
-        guard hardware.sampleRate > 0, hardware.sampleRate == format.sampleRate else {
+        // MicTap refuses while the format is still settling after a configuration change (it
+        // crashed the app on 29 Oct, the first time quick ask listened); the callers try again.
+        do {
+            try MicTap.install(on: engine.inputNode) { [weak self] buffer, _ in self?.handle(buffer) }
+        } catch .noMicrophone {
+            throw Failure.noMicrophone
+        } catch .formatChanging {
             throw Failure.formatChanging
-        }
-        input.installTap(onBus: 0, bufferSize: 1024, format: format) { [weak self] buffer, _ in
-            self?.handle(buffer)
         }
         tapInstalled = true
     }
