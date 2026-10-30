@@ -1226,6 +1226,12 @@ public struct ThreadSummary: Sendable, Hashable, Codable, Identifiable {
 
     public var hasPendingReviews: Bool { (pendingReviews ?? 0) > 0 }
 
+    /// A design review waiting on Mike, and the thread has finished
+    /// working. show_options doesn't block the turn, so while the turn or
+    /// background work carries on the thread stays in Running; it comes
+    /// to the inbox as "Needs you" once it's done, like a reply would.
+    public var reviewWaiting: Bool { hasPendingReviews && !status.isBusy && background.isEmpty }
+
     public var isArchived: Bool { archivedAt != nil }
 
     public func isSnoozed(at now: Date) -> Bool {

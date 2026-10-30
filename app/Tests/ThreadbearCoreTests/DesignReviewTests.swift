@@ -90,12 +90,25 @@ final class DesignReviewTests: XCTestCase {
         XCTAssertEqual(RowDebug.text(model.rows[0]), "Picked B")
     }
 
-    func testPendingReviewNeedsAttentionEvenWhenReadOrWorkingInBackground() {
+    func testPendingReviewWaitsForTheThreadToFinishWorking() {
         let now = Date()
-        for status in [ThreadStatus.idle, .running, .starting, .error, .stopped] {
+        let tests = [BackgroundTask(kind: .agent, description: "Running tests")]
+        for (status, background) in [(ThreadStatus.running, [BackgroundTask]()), (.starting, []), (.idle, tests)] {
             let thread = ThreadSummary(id: "reviewing", title: "Choose a design", status: status,
-                                       needsYou: false, lastSeq: 20, lastSeenSeq: 20,
-                                       background: [BackgroundTask(kind: .agent, description: "Running tests")], pendingReviews: 2)
+                                       needsYou: false, background: background, pendingReviews: 1)
+            let sections = ThreadSections.build([thread], now: now)
+            XCTAssertEqual(sections.running.map(\.id), [thread.id], "\(status): still working, so not in the inbox yet")
+            XCTAssertTrue(sections.needsYou.isEmpty)
+            XCTAssertNotEqual(ThreadRowLook(thread, section: .running).status, .needsYou)
+            XCTAssertNil(DockBadge.label(for: [thread], now: now))
+        }
+    }
+
+    func testPendingReviewNeedsAttentionEvenWhenRead() {
+        let now = Date()
+        for status in [ThreadStatus.idle, .error, .stopped] {
+            let thread = ThreadSummary(id: "reviewing", title: "Choose a design", status: status,
+                                       needsYou: false, lastSeq: 20, lastSeenSeq: 20, pendingReviews: 2)
             let sections = ThreadSections.build([thread], now: now)
             XCTAssertEqual(sections.needsYou.map(\.id), [thread.id], "\(status): a review is still waiting after mark-read")
             XCTAssertTrue(sections.running.isEmpty)

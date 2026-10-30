@@ -23,6 +23,7 @@ function fixture() {
 test('review imports files, persists draft and stays needsYou after read and restart', () => {
   const {h, thread, source, input} = fixture();
   const {review} = h.runner.createReview(thread.id, input);
+  assert.equal(h.runner.get(thread.id).needsYou, false, 'no Needs you while the turn that showed it is still running');
   assert.equal(review.options.length, 3);
   assert.notEqual(review.options[0].image.path, source);
   fs.unlinkSync(source);

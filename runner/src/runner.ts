@@ -4012,8 +4012,10 @@ export class Runner {
       status: rec.status,
       live: Boolean(rt.session),
       // A finished turn that said it needs nothing isn't waiting on Mike
-      // (docs/protocol.md, "Needs you").
-      needsYou: Boolean(rec.reviews?.some(r => r.status === 'pending')) || rec.status === 'waiting' || Boolean(rec.forceUnread) || (!running && rec.lastTurnCompletedSeq > rec.lastSeenSeq && !this.saidNothing(rec)),
+      // (docs/protocol.md, "Needs you"). A pending design review only
+      // counts once the turn ends: show_options doesn't block, and Mike
+      // didn't want a "Needs you" (or a phone push) mid-turn.
+      needsYou: (!running && Boolean(rec.reviews?.some(r => r.status === 'pending'))) || rec.status === 'waiting' || Boolean(rec.forceUnread) || (!running && rec.lastTurnCompletedSeq > rec.lastSeenSeq && !this.saidNothing(rec)),
       createdAt: rec.createdAt,
       updatedAt: rec.updatedAt,
       lastActivityAt: rec.lastActivityAt,

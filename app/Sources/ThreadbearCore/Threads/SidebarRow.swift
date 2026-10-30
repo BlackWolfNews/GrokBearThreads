@@ -64,7 +64,7 @@ public struct ThreadRowLook: Sendable, Equatable {
     }
 
     public init(_ thread: ThreadSummary, section: InboxSection? = nil) {
-        if thread.hasPendingReviews {
+        if thread.reviewWaiting {
             status = .needsYou
         } else {
             switch thread.status {

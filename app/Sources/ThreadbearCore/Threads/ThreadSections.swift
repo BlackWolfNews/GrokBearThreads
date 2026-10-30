@@ -67,7 +67,8 @@ public struct ThreadSections: Sendable, Equatable {
     /// done: the thread isn't finished yet). Waiting: idle with a schedule
     /// due to message it (`wakes`), and nothing for Mike: no question, no
     /// unread reply that didn't say "nothing", no open asks. Soonest wake
-    /// first. Inbox: everything else, by `order`: by default what most
+    /// first. A pending design review counts once the thread has finished
+    /// working (`reviewWaiting`). Inbox: everything else, by `order`: by default what most
     /// needs Mike first (see `urgency`), newest first within that. A question or approval goes in
     /// the inbox even with background work going, since the thread is stuck
     /// until he answers. Running is newest activity first. Snoozed and
@@ -79,7 +80,7 @@ public struct ThreadSections: Sendable, Equatable {
                 sections.archived.append(thread)
             } else if thread.isSnoozed(at: now) {
                 sections.hibernating.append(thread)
-            } else if thread.hasPendingReviews || thread.status == .waiting || (thread.needsYou && !thread.isWorkingInBackground) {
+            } else if thread.reviewWaiting || thread.status == .waiting || (thread.needsYou && !thread.isWorkingInBackground) {
                 sections.inbox.append(thread)
             } else if thread.status == .running || thread.status == .starting || thread.isWorkingInBackground {
                 sections.running.append(thread)
@@ -132,13 +133,13 @@ public struct ThreadSections: Sendable, Equatable {
     /// failed or was stopped, so it's still not done. 4: read and done.
     public static func urgency(_ thread: ThreadSummary) -> Int {
         let broken = thread.status == .error || thread.status == .stopped
-        if thread.hasPendingReviews || thread.status == .waiting { return 0 }
+        if thread.reviewWaiting || thread.status == .waiting { return 0 }
         if thread.needsYou { return broken ? 1 : 2 }
         return broken ? 3 : 4
     }
 
     /// The inbox threads waiting on Mike or not read yet (the Dock badge).
-    public var needsYou: [ThreadSummary] { inbox.filter { $0.hasPendingReviews || $0.status == .waiting || $0.needsYou } }
+    public var needsYou: [ThreadSummary] { inbox.filter { $0.reviewWaiting || $0.status == .waiting || $0.needsYou } }
 
     /// The live threads, not the ones put away.
     public var all: [ThreadSummary] { inbox + running + waiting }
