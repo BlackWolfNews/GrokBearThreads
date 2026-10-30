@@ -113,7 +113,10 @@ as one message, with anything you wrote in the message box at the end.
 
 Inside a thread, rest the pointer on a link for a moment, in a reply or on a
 Needs you card's buttons, to see where it goes: a picture of the file, or
-the page's address. Click it to open it.
+the page's address. Click it to open it. If an agent already has that page
+open in Chrome through [BrowserBear](https://github.com/mikecann/browserbear)
+(say, a sign-in page it wants you to use), the click brings the agent's tab
+into your Chrome window rather than opening a second one.
 
 To share a file somewhere else, drag it out of the app: a file link in a
 reply, a picture in the transcript, a file in Highlights, or the picture or

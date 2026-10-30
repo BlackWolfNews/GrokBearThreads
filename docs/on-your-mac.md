@@ -88,4 +88,10 @@ File references are where to look.
 | A Connectors gateway | whoever runs it | Only if one is set in `runner.json` or `~/.claude.json` |
 | Sentry | Mike's | Nothing from your copy. Only a copy whose `origin` is Mike's own repo reports errors (`runner/src/sentry.ts`, `app/Sources/Threadbear/CrashReporting.swift`). The App Store iPhone app sends anonymous crash reports. |
 
+On the Mac itself, a web link you click in the app first goes to
+BrowserBear's socket (`~/Library/Application Support/BrowserBear/browserbear.sock`),
+if you have BrowserBear, to ask whether an agent's Chrome tab is already
+on that page (`app/Sources/Threadbear/BrowserBear.swift`). Only the link
+goes there.
+
 Nothing else: no analytics, no ads, no tracking.

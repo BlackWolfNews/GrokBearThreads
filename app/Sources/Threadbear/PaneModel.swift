@@ -131,6 +131,16 @@ extension AppModel {
         } else if PreviewRules.isWebPage(url), WebLinkAction.click == .panel {
             preview(page: url, title: title ?? HighlightText.address(url.absoluteString), in: thread)
         } else {
+            openWebPage(url)
+        }
+    }
+
+    /// A web page in the browser, unless an agent already has it open in
+    /// Chrome through BrowserBear: then that tab comes to Mike instead of
+    /// a second one opening (BrowserBear.swift).
+    func openWebPage(_ url: URL) {
+        Task { @MainActor in
+            if await BrowserBear.handoff(url) { return }
             openExternally(url)
         }
     }
@@ -236,7 +246,10 @@ extension AppModel {
     @discardableResult
     func openTranscriptWebLink(_ url: URL, _ action: WebLinkAction) -> Bool {
         // The pane belongs to a thread; on a project page there's none.
-        guard action == .panel, let thread = selectedThread, openProjectId == nil else { return NSWorkspace.shared.open(url) }
+        guard action == .panel, let thread = selectedThread, openProjectId == nil else {
+            openWebPage(url)
+            return true
+        }
         preview(page: url, title: HighlightText.address(url.absoluteString), in: thread)
         return true
     }
