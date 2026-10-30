@@ -41,6 +41,7 @@ import { Models } from './models/index.ts';
 import { SettingsService, modelMethods, settingsMethods } from './settings.ts';
 import { ConvexSync, defaultRunnerName, ensureRunnerId, readSyncKey } from './sync.ts';
 import { detectMachineIcon } from './machine.ts';
+import { filesMethods } from './files.ts';
 import { devicesMethods } from './devices.ts';
 import { flushSentry, reportException, reportLoggedError, reportLoggedWarning, startSentry } from './sentry.ts';
 import { ALWAYS_ASK_TOOLS, SERVER_NAME, buildThreadbearTools, threadbearMcpServer } from './threadbear-mcp.ts';
@@ -375,6 +376,9 @@ async function main(): Promise<void> {
   methods['upstream.status'] = () => ({ upstream: upstream.status() });
   // Other runners' threads, for the Mac app's sidebar (step 6 part 2).
   methods['remoteThreads.list'] = () => sync.remoteThreads();
+  // A file here, for a Mac app showing one of this runner's threads from
+  // another Mac (files.ts).
+  Object.assign(methods, filesMethods());
   methods['upstream.check'] = async () => ({ upstream: await upstream.check() });
   const codexWarning = missingCodex(updates.codexBinary(), cfg);
   if (codexWarning) log.warn('codex CLI not found', { path: updates.codexBinary() });

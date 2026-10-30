@@ -691,6 +691,7 @@ the summary and then the reply.
 | `schedules.run` | `{ scheduleId }` | `{ schedule: Schedule, threadId?: string, turnId?: string, queued?: boolean }` runs it now, as if it were due, even when paused. A repeating schedule keeps its `nextRunAt`; a one-off is finished. For a schedule on another runner it answers at once with `queued: true` and no thread: that runner runs it when it next hears (`runRequestedAt` is set until then) |
 | `runners.list` | `{}` | `{ runners: RunnerInfo[] }`, this runner first, then the rest by name. Without a backend, just this runner |
 | `remoteThreads.list` | `{}` | `RemoteThreads`: other runners' threads for the sidebar (see "Other runners' threads"). Empty with sync off, or before the backend (API 12) has answered. A runner older than this answers `-32601` |
+| `files.read` | `{ path: string, maxBytes?: number, known?: { size, modifiedAt } }` | `{ path, size, modifiedAt, mediaType, data, truncated }` (`data` base64, at most `maxBytes`, default 16 MB, never over 48 MB; `truncated` when the file is longer), or `{ path, unchanged: true, size, modifiedAt }` when `known` matches the file. A file on this runner's Mac, for a Mac app showing one of its threads from another Mac (see "Other runners' threads"). `-32602` for a relative path, a missing file or a folder |
 | `schedules.preview` | `{ cron?: string, at?: string, timezone?: string, count?: number }` | `{ whenText: string, runs: string[] }`, the next `count` (default 5, at most 20) times it would run, for an editor to show as someone types. `-32602` with the reason for a cron or zone it can't read |
 | `projects.list` | `{ archived?: boolean }` | `{ projects: Project[] }`, newest `lastActivityAt` first. Archived ones only with `archived: true` (then all of them) |
 | `projects.get` | `{ projectId }` | `{ project: Project, threadIds: string[] }`, its threads newest activity first, put away ones included |
@@ -2201,7 +2202,12 @@ type RemoteThread = { runnerId: string, threadId: string, title, cwd,
   normal methods there for that thread: `threads.events`,
   `threads.subscribe`, `threads.send`, `threads.update`,
   `approvals.respond`, and so on. Paths in its events (images, blobs,
-  file links) are that Mac's.
+  file links) are that Mac's: the client gets them with `files.read` on
+  that runner and keeps its own copy, passing `known` to check it's still
+  current.
+- **New threads on another runner** are a `threads.create` on that
+  runner's connection, with its folder (a path on that Mac), account,
+  model and effort from that runner's `hello`.
 - **`sync.rpcUrl`** in a runner's `runner.json` is the URL it tells the
   backend (in its heartbeat, API 12) for other Macs to reach it by.
 
