@@ -313,6 +313,8 @@ type Project = {
                         // Projects, "Links"); [] from a runner before them
   createdBy: "mike" | "agent" | "librarian"
   createdByThread?: string // the thread whose agent or look made it
+  titleBy?: "mike" | "agent" | "librarian" // who last named it; absent
+                        // on older projects, where createdBy stands in
   createdAt: string
   updatedAt: string
   stateUpdatedAt?: string
@@ -711,7 +713,7 @@ the summary and then the reply.
 | `projects.list` | `{ archived?: boolean }` | `{ projects: Project[] }`, newest `lastActivityAt` first. Archived ones only with `archived: true` (then all of them) |
 | `projects.get` | `{ projectId }` | `{ project: Project, threadIds: string[] }`, its threads newest activity first, put away ones included |
 | `projects.create` | `{ title: string, folders?: string[], goals?, state?, notes?, links?: { title?, url }[], threadIds?: string[] }` | `{ project: Project }`, made by Mike (`createdBy: "mike"`). `threadIds` are put in it, pinned. Folders must exist (`-32602` otherwise) |
-| `projects.update` | `{ projectId, title?, folders?: string[], goals?, state?, notes?, links?: { title?, url }[], notion?: string, archived?: boolean }` | `{ project: Project }`. Replaces what's given. A link that isn't http(s), or more than 8, is `-32602`. A change of folders reloads its threads' patches. `notion` is a Notion page or database address (notion.so, notion.site, notion.com, or a `collection://` data source), read straight away (see Project tasks); empty takes it off; anything else is `-32602` |
+| `projects.update` | `{ projectId, title?, folders?: string[], goals?, state?, notes?, links?: { title?, url }[], notion?: string, archived?: boolean }` | `{ project: Project }`. Replaces what's given. A new title is Mike's (`titleBy: "mike"`), so the librarian never renames it. A link that isn't http(s), or more than 8, is `-32602`. A change of folders reloads its threads' patches. `notion` is a Notion page or database address (notion.so, notion.site, notion.com, or a `collection://` data source), read straight away (see Project tasks); empty takes it off; anything else is `-32602` |
 | `projects.refreshTasks` | `{ projectId, force?: boolean }` | `{ project: Project }` once its Notion board has been read again, unless it was read in the last minute (`force` reads it anyway). The project page asks when it opens. `-32602` for a project with no `notion` |
 | `projects.setIcon` | `{ projectId, path?: string, symbol?: string }` | `{ project: Project }`. Mike's choice: `path` a picture on this Mac (PNG, JPEG, WebP, SVG, ICNS or ICO, copied in), or `symbol` an SF Symbol name; neither puts it back to automatic, and the librarian finds one again within seconds. `-32602` for a missing file or a name that isn't a symbol's |
 | `projects.merge` | `{ projectId, intoId }` | `{ project: Project }` (the one kept). Folders and threads move over, notes are joined, and `projectId` is deleted |
@@ -2119,6 +2121,16 @@ a title Mike or an agent set (`titleSet`), and not if the title changed
 while the model was answering. A librarian title doesn't set `titleSet`,
 so a later look can rename it again. No extra model call: it's the same
 look.
+
+The same look renames a project the thread is in whose name has gone out
+of date: the thing it's about was renamed ("Chrome browser control" after
+Paws became BrowserBear), or the work got a name of its own. The entry
+says "Renamed <old> to <new>", and the project's `titleBy` becomes
+`librarian`. Never on a `first-message` look, and never a project Mike
+named (`titleBy`, else `createdBy`, is `mike`): one he made or renamed in
+the app, or one an agent named because he asked (`update_project`'s
+`mikeAsked`). The prompt marks those, and a name it sends for one anyway
+is dropped. Names from the librarian or an agent can be renamed again.
 
 **Icons.** The librarian gives each project an icon and keeps it up to
 date. It looks through the project's folders for the picture the project

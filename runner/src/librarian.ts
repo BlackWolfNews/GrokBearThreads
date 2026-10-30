@@ -132,6 +132,8 @@ type Answer = {
   links?: unknown;
   thread?: unknown;
   title?: unknown;
+  // New names for projects the thread is in, by id.
+  retitle?: unknown;
   wake?: unknown;
   fix?: unknown;
   why?: unknown;
@@ -511,7 +513,7 @@ export class Librarian {
     if (!list.length) lines.push('(none yet)');
     for (const p of list) {
       const state = p.state.split('\n')[0]?.slice(0, 160);
-      lines.push(`- ${p.id} "${p.title}"; folders: ${p.folders.map((f) => this.tilde(f)).join(', ') || 'none'}` + (p.goals ? `; goals: ${p.goals.slice(0, 200).replace(/\s+/g, ' ')}` : '') + (state ? `; state: ${state}` : '') + (p.links.length ? `; links: ${p.links.map((l) => l.url).join(' ')}` : ''));
+      lines.push(`- ${p.id} "${p.title}"${(p.titleBy ?? p.createdBy) === 'mike' ? ' (named by the user: keep it)' : ''}; folders: ${p.folders.map((f) => this.tilde(f)).join(', ') || 'none'}` + (p.goals ? `; goals: ${p.goals.slice(0, 200).replace(/\s+/g, ' ')}` : '') + (state ? `; state: ${state}` : '') + (p.links.length ? `; links: ${p.links.map((l) => l.url).join(' ')}` : ''));
     }
     lines.push('');
     lines.push(`Thread "${rec.title}", in ${this.tilde(rec.cwd)}${this.isRepo(rec.cwd) ? '' : ' (not a repo: a catch-all folder)'}`);
@@ -675,6 +677,27 @@ export class Librarian {
       }
       if (updated.length) {
         said.push(`Updated ${updated.join(' and ')}'s state`);
+        bump('updated');
+      }
+    }
+    // A project whose name has gone out of date: the tool it's about was
+    // renamed ("Chrome browser control" after Paws became BrowserBear, 30
+    // Oct 2026), or the work got a name. Only one the thread is in, never
+    // one Mike named, and not from the first message alone.
+    if (job.reason !== 'first-message') {
+      for (const [pid, name] of Object.entries(byProject(a.retitle))) {
+        const p = this.projects.record(pid);
+        if (!p || !member.has(pid) || (p.titleBy ?? p.createdBy) === 'mike') continue;
+        const next = projectTitle(name);
+        if (!next || next.toLowerCase() === p.title.toLowerCase()) continue;
+        try {
+          this.projects.update(pid, { title: next, by: 'librarian' });
+        } catch (e) {
+          this.log.warn('librarian could not rename a project', { projectId: pid, error: String(e) });
+          continue;
+        }
+        said.push(`Renamed ${p.title} to ${next}`);
+        ids.add(pid);
         bump('updated');
       }
     }
@@ -1144,6 +1167,7 @@ Reply with JSON only, no prose and no code fence:
  "links": {"<project id>": [{"title": "Live site", "url": "https://..."}]} for lasting places of a project it's in that the messages give and the project doesn't list yet, else {},
  "thread": "where this thread itself is up to, as two or three short bullets, one per line, each starting \"- \": what it did or found, and what it's waiting on or doing next",
  "title": null, or a new title when the thread's title no longer says what it's about (see below),
+ "retitle": {"<project id>": "the project's new name"} for a project it's in whose name has gone out of date (see below), else {},
  "wake": ["<ids of hibernating threads the user is talking about here>"], or [] (see below),
  "fix": null, or {"title": "the fix in 2 to 6 words", "folder": "~/path of the repo of the tool at fault", "problem": "what went wrong"} (see below),
  "why": "one short line"}
@@ -1155,6 +1179,8 @@ Folders are repos the work lives in (the thread's folder when it's a repo, the r
 Links are the few places the user keeps going back to for a project: its live site, admin page, dashboard, store listing. Copy the url exactly from the messages and give it a short title ("Live site", "Admin", "App Store"). Never a pull request, commit, issue, docs page, localhost, file or one-off page.
 
 Keep the thread's title (title null) unless it no longer says what the thread is about: the work moved on to something else, or the title is only the first words of the first message ("Hey, does the library, sorry, the librarian, does it update"). A better wording of the same subject is no reason. A new title is 2 to 6 words about the whole thread as it is now, in sentence case (a capital for the first word and for names only), with no quotes, full stop, dash or emoji: "Fix the flaky upload test on CI", "Librarian renames threads that move on".
+
+Keep projects' names too, unless one the thread is in has gone out of date: the thing it's about was renamed (a tool renamed from Paws to BrowserBear leaves "Paws" or a vaguer "Chrome browser control" behind), or a project named for what it does now has a name of its own. Give the new name the user would say, keeping the old words in brackets when they still help: "BrowserBear (Chrome browser control)". A better wording of the same name is no reason, and never rename one marked as named by the user. Most looks rename none.
 
 Some hibernating threads are waiting for the user to talk about something again ("woodworking"). Put one in wake when the user's own messages in this thread are about that: they're working on it, planning it or asking about it. A passing mention, or only the agent bringing it up, isn't enough. Most looks wake none.
 
@@ -1220,6 +1246,18 @@ function readNew(v: unknown): { title: string; folders: string[]; goals: string;
     state: typeof n.state === 'string' ? n.state.trim().slice(0, 2000) : '',
     why: typeof n.why === 'string' ? n.why.trim() : '',
   };
+}
+
+// A project name from the model, tidied like a thread title: no quotes or
+// full stop round it. Too long reads as a sentence, not a name.
+function projectTitle(name: string): string | undefined {
+  const t = name
+    .trim()
+    .replace(/^["'“‘]+|["'”’]+$/g, '')
+    .replace(/\.+$/, '')
+    .replace(/^["'“‘]+|["'”’]+$/g, '')
+    .trim();
+  return t && t.length <= 60 ? t : undefined;
 }
 
 function lowerFirst(s: string): string {

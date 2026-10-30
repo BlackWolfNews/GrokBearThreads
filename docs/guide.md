@@ -292,6 +292,9 @@ From the top, and only when there's something to show:
   says who put the thread there and why ("Shortlists photos for the
   calendar entry"). If the librarian guessed wrong, press Take out there
   and it won't put it back; Keep stops it ever taking the thread out.
+  The librarian also renames a project whose name has gone out of date
+  (a tool it's about was renamed, say), but never one you named or
+  renamed yourself.
 - **Scheduled**: messages booked to come to this thread. Click one to
   change it.
 - **Sub-agents**: helpers the agent started, with how each is getting on.

@@ -252,6 +252,9 @@ export type Project = {
   links: ProjectLink[];
   createdBy: ProjectMaker;
   createdByThread?: string;
+  // Who last named it. The librarian renames one whose name has gone out of
+  // date, never one Mike named. Absent on older projects: createdBy.
+  titleBy?: ProjectMaker;
   createdAt: string;
   updatedAt: string;
   stateUpdatedAt?: string;

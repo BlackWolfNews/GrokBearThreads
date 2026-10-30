@@ -507,6 +507,7 @@ export function buildThreadbearTools(
       {
         project: z.string().describe('Project id, id prefix or title.'),
         title: z.string().optional(),
+        mikeAsked: z.boolean().optional().describe("true when the user asked for this title. The librarian renames a project whose name has gone out of date, but never one the user named."),
         goals: z.string().optional(),
         state: z.string().optional(),
         notes: z.string().optional().describe('Replaces all the notes.'),
@@ -527,7 +528,7 @@ export function buildThreadbearTools(
             "A Notion page (or database) with the project's task board on it: a database with a Status column (To do, Doing, Waiting, Done), Who, Due and Thread (the thread id working on it). The project page shows the board, read every few minutes. Empty takes it off.",
           ),
       },
-      handle(async ({ project: q, title, goals, state, notes, appendNote, links, addLinks, removeLinks, addFolders, removeFolders, icon, notion }) => {
+      handle(async ({ project: q, title, mikeAsked, goals, state, notes, appendNote, links, addLinks, removeLinks, addFolders, removeFolders, icon, notion }) => {
         const pc = mustProjects();
         const p = await project(q);
         let folders: string[] | undefined;
@@ -536,7 +537,7 @@ export function buildThreadbearTools(
           const add = await Promise.all((addFolders ?? []).map(projectFolder));
           folders = [...p.folders.filter((f) => !drop.has(f)), ...add.filter((f) => !p.folders.includes(f))];
         }
-        let out = await pc.update(p.id, { title, goals, state, notes, links, folders, notion });
+        let out = await pc.update(p.id, { title, goals, state, notes, links, folders, notion, by: mikeAsked ? 'mike' : 'agent' });
         if (appendNote?.trim()) out = await pc.appendNote(p.id, appendNote);
         if (addLinks?.length || removeLinks?.length) {
           if (!pc.addLinks || !pc.removeLinks) throw new Error("This runner can't change project links yet.");

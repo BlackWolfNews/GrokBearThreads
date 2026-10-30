@@ -76,6 +76,9 @@ export type UpdateProjectParams = {
   // A Notion page or database with the project's tasks; empty takes it off.
   notion?: string;
   archived?: boolean;
+  // Who's changing the title, kept as titleBy. Absent counts as Mike, so a
+  // name from somewhere unknown is never renamed by the librarian.
+  by?: ProjectMaker;
 };
 
 export type MembershipChange = {
@@ -328,6 +331,7 @@ export class Projects {
       notes: checkText('notes', params.notes ?? '', NOTES_MAX),
       links: checkLinks(params.links ?? []),
       createdBy: params.by,
+      titleBy: params.by,
       createdAt: now,
       updatedAt: now,
     };
@@ -347,6 +351,7 @@ export class Projects {
     const rec = this.must(projectId);
     const next = { ...rec };
     if (params.title !== undefined) next.title = checkTitle(params.title);
+    if (next.title !== rec.title) next.titleBy = params.by ?? 'mike';
     if (params.folders !== undefined) next.folders = this.checkFolders(params.folders);
     if (params.goals !== undefined) next.goals = checkText('goals', params.goals, SHORT_MAX);
     if (params.state !== undefined) next.state = checkText('state', params.state, SHORT_MAX);
@@ -748,6 +753,7 @@ export function projectMethods(projects: Projects): Record<string, (p: Record<st
         links: links(p),
         notion: str(p, 'notion'),
         archived: bool(p, 'archived'),
+        by: 'mike',
       }),
     }),
     'projects.refreshTasks': async (p) => ({ project: await projects.refreshTasks(reqStr(p, 'projectId'), bool(p, 'force')) }),

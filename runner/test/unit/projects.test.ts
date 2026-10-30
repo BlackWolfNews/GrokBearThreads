@@ -721,6 +721,56 @@ test('the librarian renames a thread that has moved on, never one Mike or an age
   assert.equal(h.runner.get(thread.id).title, 'Picked by the agent');
 });
 
+// "Chrome browser control" kept its name after the tool it's about was
+// renamed Paws, then BrowserBear (Mike, 30 Oct 2026).
+test('the librarian renames a project whose name has gone out of date, never one Mike named', async () => {
+  let answer: unknown = {};
+  const s = setup({ models: (p) => reply(typeof answer === 'function' ? (answer as (p: GenerateParams) => unknown)(p) : answer) });
+  const { h, create, finish, librarian, projects } = s;
+  const p = projects.create({ title: 'Chrome browser control', by: 'librarian' });
+  const other = projects.create({ title: 'Other', by: 'agent' });
+  const mikes = projects.create({ title: 'Mikes name', by: 'mike' });
+  assert.equal(projects.record(p.id)?.titleBy, 'librarian');
+  const { thread } = create('Rename Paws to BrowserBear');
+  projects.changeMembership(thread.id, { add: [p.id, mikes.id], by: 'agent' });
+  // Not from the first message alone.
+  answer = { projects: [], retitle: { [p.id]: 'Too soon' } };
+  h.clock.advance(FIRST_MESSAGE_MS);
+  await tick(8);
+  assert.equal(projects.record(p.id)?.title, 'Chrome browser control');
+  // After a turn: one it's in, tidied; never one it isn't in.
+  answer = (q: GenerateParams) => {
+    assert.match(q.prompt, new RegExp(`${mikes.id} "Mikes name" \\(named by the user: keep it\\)`));
+    assert.doesNotMatch(q.prompt, new RegExp(`${p.id} "Chrome browser control" \\(named`));
+    return { projects: [], retitle: { [p.id]: ' "BrowserBear (Chrome browser control)." ', [other.id]: 'Not in it' } };
+  };
+  await finish(thread.id);
+  h.clock.advance(SETTLE_MS);
+  await tick(8);
+  assert.equal(projects.record(p.id)?.title, 'BrowserBear (Chrome browser control)');
+  assert.equal(projects.record(p.id)?.titleBy, 'librarian');
+  assert.equal(projects.record(other.id)?.title, 'Other');
+  assert.equal(librarian.status().recent[0].text, 'Renamed Chrome browser control to BrowserBear (Chrome browser control)');
+  // Mike's name stays, whatever the look says.
+  answer = { projects: [], retitle: { [mikes.id]: 'Something else' } };
+  librarian.run(thread.id);
+  await tick(8);
+  assert.equal(projects.record(mikes.id)?.title, 'Mikes name');
+  // An agent's rename can still be tidied later; Mike's rename in the app
+  // (projects.update) makes it his.
+  const tools = buildThreadbearTools(h.runner, thread.id, Date.now, undefined, projects);
+  await tools.find((x) => x.name === 'update_project')!.handler({ project: p.id, title: 'BrowserBear' } as never, {} as never);
+  assert.equal(projects.record(p.id)?.titleBy, 'agent');
+  await tools.find((x) => x.name === 'update_project')!.handler({ project: other.id, title: 'Asked for', mikeAsked: true } as never, {} as never);
+  assert.equal(projects.record(other.id)?.titleBy, 'mike');
+  projectMethods(projects)['projects.update']({ projectId: p.id, title: 'BrowserBear by Mike' });
+  assert.equal(projects.record(p.id)?.titleBy, 'mike');
+  answer = { projects: [], retitle: { [p.id]: 'BrowserBear again' } };
+  librarian.run(thread.id);
+  await tick(8);
+  assert.equal(projects.record(p.id)?.title, 'BrowserBear by Mike');
+});
+
 test('the librarian files a new thread from its first message, then looks again when the first turn ends', async () => {
   let answer: unknown = {};
   const s = setup({ models: (p) => reply(typeof answer === 'function' ? (answer as (p: GenerateParams) => unknown)(p) : answer) });
