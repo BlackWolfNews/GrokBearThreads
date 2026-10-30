@@ -85,6 +85,11 @@ enum Automation {
         FileManager.default.createFile(atPath: logURL.path, contents: nil)
         AppLog.writeFile(to: appLogURL(automationLog: logURL))
         AppLog.write("automation", "listening on \(channel(id: instanceId))")
+        // Beside the log, so a scripted run can see HangWatch work (`stall`)
+        // and never adds to the installed app's folder.
+        HangWatch.start(folder: logURL.deletingLastPathComponent().appendingPathComponent("hangs"), build: nil) { frames, _ in
+            AppLog.write("hang", "would report \(HangSample.deepestAppFrame(frames) ?? frames.last ?? "unknown")")
+        }
         app.pasteboard = pasteboard
         if let mode = argument(after: "--appearance") { setAppearance(mode) }
         observer = DistributedNotificationCenter.default().addObserver(forName: Notification.Name(channel(id: instanceId)), object: nil, queue: .main) { note in
@@ -452,6 +457,10 @@ enum Automation {
             // A beat for the pane (and a web view) to appear.
             try? await Task.sleep(for: .milliseconds(200))
             return "ok \(app.showsPanels(for: thread) ? "showing \(app.paneSection(for: thread).id)" : "hidden")"
+        case "stall":
+            // Blocks the main thread, to try what a freeze does: `seconds`.
+            usleep(UInt32((c["seconds"] as? Double ?? 6) * 1_000_000))
+            return "ok"
         case "convex":
             // Select through the same model as the panel's deployment menu.
             guard let thread = app.selectedThread,

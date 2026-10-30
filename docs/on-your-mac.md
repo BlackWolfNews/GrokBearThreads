@@ -26,8 +26,11 @@ File references are where to look.
   key `upstream-signers`); `~/Library/Caches/Threadbear/update`;
   `~/Library/Caches/Threadbear/remote` (copies of pictures and files from
   threads on your other Macs, at most 512 MB, unused ones go after 30 days);
-  `~/Library/Logs/threadbear-runner.log` and `threadbear-update.log`; and
-  `~/ThreadbearThreads`, the default folder for new threads.
+  `~/Library/Logs/threadbear-runner.log` and `threadbear-update.log`;
+  `~/Library/Logs/Threadbear/hangs` (the last 10 times the app froze: if its
+  main thread is stuck for 4 seconds it runs macOS's `sample` on itself, and
+  nothing else ever reads these); and `~/ThreadbearThreads`, the default
+  folder for new threads.
 
 ## What runs in the background
 

@@ -66,6 +66,10 @@ static site with its own `package.json`; its comments say how to build it.
   runs never report; keep it that way. `THREADBEAR_SENTRY=off` turns it off.
   Never add user text to what's sent. Convex reports through its own log
   stream, so convex/ has no Sentry.
+- The Mac app freezing: read `~/Library/Logs/Threadbear/hangs` first
+  (`HangWatch.swift`). Each stall of 4 seconds or more has a `sample` of the
+  stuck main thread, and one of 15 or more reaches Sentry as "Main thread
+  stuck in ...". Fix the frame it names rather than guessing from logs.
 - Mike's own repo: work goes to main once tests pass. A thread started in
   this repo has a worktree of its own and lands with `tb land` (below).
   Anywhere several threads share a checkout (the main one, a worktree made

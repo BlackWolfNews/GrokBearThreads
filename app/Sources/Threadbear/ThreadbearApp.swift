@@ -163,6 +163,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         MainActor.assumeIsolated {
             let app = AppModel.shared
             let arguments = CommandLine.arguments
+            if AppUpdater.isInstalledApp {
+                HangWatch.start(folder: HangWatch.defaultFolder, build: BuildInfo.read(bundle: Bundle.main.bundleURL)?.short, report: CrashReporting.reportHang)
+            }
             #if DEBUG
             // Before anything connects.
             if Automation.refusesLiveRunner(dataDir: app.dataDir) { Automation.refuseLiveRunner() }

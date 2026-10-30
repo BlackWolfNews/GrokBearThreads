@@ -1,4 +1,5 @@
 import Foundation
+import ThreadbearCore
 #if !DEBUG
 import Sentry
 #endif
@@ -49,6 +50,24 @@ enum CrashReporting {
             scope.setTag(value: "mac", key: "component")
         }
         AppLog.write("sentry", "crash reporting on (\(version)+\(short))")
+        #endif
+    }
+
+    /// A past freeze HangWatch caught. Frames are symbol names, no user text.
+    /// Grouped by the app's own frame, so each cause is one issue.
+    static func reportHang(frames: [String], record: HangWatch.Record) {
+        #if !DEBUG
+        guard SentrySDK.isEnabled else { return }
+        let own = HangSample.deepestAppFrame(frames)
+        let event = Event(level: .error)
+        event.message = SentryMessage(formatted: "Main thread stuck in \(own ?? frames.last ?? "unknown")")
+        event.fingerprint = ["main-thread-hang", own ?? frames.last ?? "unknown"]
+        event.extra = [
+            "frames": Array(frames.suffix(60)),
+            "seconds": record.recoveredAfter.map { Int($0) } ?? "never came back",
+            "build": record.build ?? "unknown",
+        ]
+        SentrySDK.capture(event: event)
         #endif
     }
 }
