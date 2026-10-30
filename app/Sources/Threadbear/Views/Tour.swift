@@ -45,10 +45,6 @@ enum TourEdge {
 /// Something the tour has them do rather than read about (Mike, 29 Oct:
 /// show what makes Threadbear interesting, hands-on).
 enum TourTask: Equatable {
-    /// Hibernate one of the sample threads.
-    case hibernate
-    /// Archive one of the sample threads.
-    case archive
     /// Drag a panel somewhere else; done when the dock's layout changes.
     case movePanel
     /// Press the Welcome thread's example chip; done once it has run.
@@ -76,6 +72,8 @@ struct TourStep: Equatable {
     /// Opens the sample that needs you first, for a composer, Highlights
     /// and the example patch's chip to point at.
     var opensSample = false
+    /// The sample whose row is drawn hovered, buttons showing, by title.
+    var hovers: String? = nil
     /// The docs page its ⓘ opens (threadbear.mikecann.app/docs/<doc>), one
     /// of site/app-doc-slugs.json: the detail a one-sentence card leaves out.
     var doc: String? = nil
@@ -83,7 +81,7 @@ struct TourStep: Equatable {
 
 /// A short, hands-on look round the window for someone new: the window
 /// dims and each step lights up one part of it with a card beside it, and
-/// most have you do the thing (hibernate and archive a thread, move a
+/// some have you do the thing (move a
 /// panel, press a patch's chip, send your first thread). It starts by
 /// itself the first time the app connects to its runner, with no Skip
 /// then, and Help > Take the Tour runs it again, skippable.
@@ -114,12 +112,11 @@ final class Tour {
     static let steps: [TourStep] = [
         TourStep(title: "Welcome to Threadbear", body: "A quick look round, with a few sample threads to try things on.", bear: .wave),
         TourStep(targets: [.threads], title: "Threads", body: "Everything your agents are working on is listed here.", doc: "threads"),
-        TourStep(targets: [.sampleRow("Plan the weekend"), .threads], title: "Hibernate",
-                 body: "Hover Plan the weekend and press the moon to put it away for later.",
-                 task: .hibernate, doneBody: "It comes back by itself, marked unread.", doc: "hibernate-and-archive"),
-        TourStep(targets: [.sampleRow("Draft the release notes"), .threads], title: "Archive",
-                 body: "Archive Draft the release notes with its box, or ⌘E.",
-                 task: .archive, doneBody: "Archived threads are kept, a click away.", doc: "hibernate-and-archive"),
+        // Shown on a sample's row rather than pressed: pressing them was
+        // a chore, and "it comes back by itself" read as a riddle (Mike, 30 Oct).
+        TourStep(targets: [.sampleRow("Plan the weekend"), .threads], title: "Put threads away",
+                 body: "Hover a thread for these: the moon puts it away for later, the box archives it.",
+                 hovers: "Plan the weekend", doc: "hibernate-and-archive"),
         TourStep(targets: [.activityBar], title: "Your views",
                  body: "These icons switch to schedules, projects and the librarian.", doc: "threads"),
         // No card for Full access / Ask before edits: people know access
@@ -224,6 +221,7 @@ final class Tour {
     /// the samples go.
     func finish() {
         step = nil
+        app?.hoverOverride = nil
         defaults.set(true, forKey: Self.seenKey)
         if let app, !sampleIds.isEmpty { app.removeTourSamples() }
         sampleIds = []
@@ -234,10 +232,11 @@ final class Tour {
         taskDone = false
         guard let app else { return }
         if shown[index].opensSample { app.openTourSample(sampleIds) }
+        // The row's hover buttons, drawn without the pointer (as the
+        // screenshot run does); nil puts the row back.
+        app.hoverOverride = shown[index].hovers.flatMap { title in sampleIds.first { app.threads[$0]?.title == title } }
         guard let task = shown[index].task else { return }
         switch task {
-        case .hibernate, .archive:
-            break
         case .movePanel:
             layoutAtStart = app.dock.layout
         case .runPatch:
@@ -274,12 +273,7 @@ final class Tour {
 
     func check() {
         guard let app, let task = current?.task, !taskDone else { return }
-        let samples = sampleIds.compactMap { app.threads[$0] }
         switch task {
-        case .hibernate:
-            if samples.contains(where: { $0.isSnoozed(at: Date()) }) { taskDone = true }
-        case .archive:
-            if samples.contains(where: \.isArchived) { taskDone = true }
         case .movePanel:
             if let layoutAtStart, app.dock.layout != layoutAtStart { taskDone = true }
         case .runPatch:
@@ -441,8 +435,6 @@ private struct TourProgress: Equatable {
     var layout: DockLayout
     var running: Set<String>
     var threadCount: Int
-    /// The samples hibernated or archived.
-    var putAway: Set<String>
 }
 
 /// The dimmed window with the step's part cut out of it, and the card.
@@ -495,8 +487,7 @@ struct TourOverlay: View {
                 .animation(Juice.reduceMotion ? nil : .snappy(duration: 0.3), value: hole)
             }
             .transition(.opacity)
-            .onChange(of: TourProgress(layout: app.dock.layout, running: app.runningActions, threadCount: app.threads.count,
-                                       putAway: Set(tour.sampleIds.filter { id in app.threads[id].map { $0.isArchived || $0.snoozedUntil != nil } ?? false }))) {
+            .onChange(of: TourProgress(layout: app.dock.layout, running: app.runningActions, threadCount: app.threads.count)) {
                 tour.check()
             }
         }

@@ -115,16 +115,11 @@ async function main() {
   };
 
   next('Threads');
-  t = next('Hibernate');
-  check('Hibernate lights one row, not the list', t.lit && t.lit.h < 120, t.raw);
-  check('Hibernate waits for you', t.task === 'to do', t.raw);
-  run({ cmd: 'snooze', id: sampleId(dump(), 'Plan the weekend'), seconds: 3600 });
-  await until('Hibernate done once a sample sleeps', () => parseTour(tour()).task === 'done');
-  shot('hibernated');
-
-  t = next('Archive');
-  run({ cmd: 'archive', id: sampleId(dump(), 'Draft the release notes') });
-  await until('Archive done once a sample is archived', () => parseTour(tour()).task === 'done');
+  // Shown, not pressed: the sample's row drawn hovered, its moon and box out.
+  t = next('Put threads away');
+  check('it lights one row, not the list', t.lit && t.lit.h < 120, t.raw);
+  const hovered = threadsIn(dump()).find((th) => th.hovered);
+  check('that row shows its hover buttons', hovered?.title === 'Plan the weekend', JSON.stringify(hovered?.title));
 
   t = next('Your views');
   // The view icons only, not the whole column down to Settings.
@@ -177,7 +172,7 @@ async function main() {
   const after = dump();
   const left = threadsIn(after).filter((th) => sampleTitles.includes(th.title)).map((th) => th.title);
   check('the samples are gone from the inbox', left.length === 0, left.join(', '));
-  check('none left hibernating or archived', after.sidebar.snoozed === 0 && after.sidebar.archived === 0, `hibernating ${after.sidebar.snoozed}, archived ${after.sidebar.archived}`);
+  check('no row left drawn hovered', !threadsIn(after).some((th) => th.hovered));
   check('the first thread is still there', threadsIn(after).some((th) => /Make me a patch/.test(th.title) || th.id !== undefined), '');
   shot('after');
 
