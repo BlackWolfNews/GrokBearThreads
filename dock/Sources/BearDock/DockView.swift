@@ -222,12 +222,14 @@ struct SplitView: View {
                                     let start = startFractions ?? split.fractions
                                     if startFractions == nil, ProcessInfo.processInfo.environment["BEARDOCK_LOG"] != nil { print("divider \(split.id) \(i) from \(value.startLocation)") }
                                     if startFractions == nil { startFractions = start; dragging = i }
+                                    // The pointer runs ahead of the strip, over views that set their own.
+                                    DividerHandle.cursor(split.axis).set()
                                     let t = split.axis == .horizontal ? value.translation.width : value.translation.height
                                     let visible = Self.normalized(shown.map { start[$0] })
                                     let moved = Self.resized(visible, at: i, by: t / max(available, 1), min: 80 / max(available, 1))
                                     controller.layout.setFractions(split: split.id, Self.merged(moved, into: start, at: shown))
                                 }
-                                .onEnded { _ in startFractions = nil; dragging = nil }
+                                .onEnded { _ in startFractions = nil; dragging = nil; NSCursor.arrow.set() }
                         )
                 }
             }
@@ -320,10 +322,24 @@ private struct DividerHandle: View {
             .frame(maxWidth: axis == .vertical ? .infinity : nil, maxHeight: axis == .horizontal ? .infinity : nil)
             .contentShape(Rectangle())
             .animation(.easeOut(duration: 0.1).delay(lit ? 0.05 : 0), value: lit)
-            .onHover { inside in
-                hovering = inside
-                if inside { (axis == .horizontal ? NSCursor.resizeLeftRight : NSCursor.resizeUpDown).push() } else { NSCursor.pop() }
+            // Set on every move, not pushed once on the way in: the views
+            // under the strip (the sidebar's scroller, a transcript's text)
+            // set their own cursor as the pointer moves and won, so the line
+            // lit with an arrow showing (Mike, 30 Oct). As TextKit's hand.
+            .onContinuousHover { phase in
+                switch phase {
+                case .active:
+                    hovering = true
+                    Self.cursor(axis).set()
+                case .ended:
+                    hovering = false
+                    if !dragging { NSCursor.arrow.set() }
+                }
             }
+    }
+
+    static func cursor(_ axis: SplitAxis) -> NSCursor {
+        axis == .horizontal ? .resizeLeftRight : .resizeUpDown
     }
 }
 
