@@ -41,6 +41,19 @@ final class TourTests: XCTestCase {
         }
     }
 
+    /// Every card's ⓘ opens a docs page the site builds: the site's build
+    /// fails if a slug in app-doc-slugs.json isn't in docs/guide.md.
+    func testEveryDocsLinkIsAPageTheSiteHas() throws {
+        let slugsFile = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("site/app-doc-slugs.json")
+        let slugs = try JSONDecoder().decode([String].self, from: Data(contentsOf: slugsFile))
+        for step in Tour.steps where step.title != "Welcome to Threadbear" {
+            XCTAssertNotNil(step.doc, "\(step.title) has no docs link")
+            if let doc = step.doc { XCTAssertTrue(slugs.contains(doc), "\(doc) isn't in site/app-doc-slugs.json") }
+        }
+    }
+
     func testOnlyTheReplayCanBeSkipped() {
         tour.startIfNew()
         XCTAssertFalse(tour.skippable, "the first run has no Skip")

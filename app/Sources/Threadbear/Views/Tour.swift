@@ -76,6 +76,9 @@ struct TourStep: Equatable {
     /// Opens the sample that needs you first, for a composer, Highlights
     /// and the example patch's chip to point at.
     var opensSample = false
+    /// The docs page its ⓘ opens (threadbear.mikecann.app/docs/<doc>), one
+    /// of site/app-doc-slugs.json: the detail a one-sentence card leaves out.
+    var doc: String? = nil
 }
 
 /// A short, hands-on look round the window for someone new: the window
@@ -99,6 +102,7 @@ struct TourStep: Equatable {
 final class Tour {
     static let shared = Tour()
     static let seenKey = "tourSeen"
+    static let docsSite = "https://threadbear.mikecann.app/docs"
     /// The tour's last step writes this in the new-thread composer.
     static let firstMessage = "Make me a patch for this folder that adds a button saying hello, then tell me what you did."
     /// Next turns up on a hands-on step after this long, in case the drag
@@ -109,43 +113,43 @@ final class Tour {
     /// first cut's cards were too much to read). TourTests holds them to it.
     static let steps: [TourStep] = [
         TourStep(title: "Welcome to Threadbear", body: "A quick look round, with a few sample threads to try things on.", bear: .wave),
-        TourStep(targets: [.threads], title: "Threads", body: "Everything your agents are working on is listed here."),
+        TourStep(targets: [.threads], title: "Threads", body: "Everything your agents are working on is listed here.", doc: "threads"),
         TourStep(targets: [.sampleRow("Fix the flaky login test"), .threads], title: "Needs you",
-                 body: "A blue dot means this one is waiting on you."),
+                 body: "A blue dot means this one is waiting on you.", doc: "threads"),
         TourStep(targets: [.sampleRow("Plan the weekend"), .threads], title: "Finished",
-                 body: "A tick means it's done and needs nothing from you."),
+                 body: "A tick means it's done and needs nothing from you.", doc: "threads"),
         TourStep(targets: [.sampleRow("Plan the weekend"), .threads], title: "Hibernate",
                  body: "Hover Plan the weekend and press the moon to put it away for later.",
-                 task: .hibernate, doneBody: "It comes back by itself, marked unread."),
+                 task: .hibernate, doneBody: "It comes back by itself, marked unread.", doc: "hibernate-and-archive"),
         TourStep(targets: [.sampleRow("Draft the release notes"), .threads], title: "Archive",
                  body: "Archive Draft the release notes with its box, or ⌘E.",
-                 task: .archive, doneBody: "Archived threads are kept, a click away."),
+                 task: .archive, doneBody: "Archived threads are kept, a click away.", doc: "hibernate-and-archive"),
         TourStep(targets: [.activityBar], title: "Your views",
-                 body: "These icons switch to hibernating threads, the archive, schedules and projects."),
+                 body: "These icons switch to schedules, projects and the librarian.", doc: "threads"),
         // No card for Full access / Ask before edits: people know access
         // modes from other agent apps, and the chip says it (Mike, 30 Oct).
         TourStep(targets: [.highlights, .highlightsRail], title: "Highlights",
                  body: "The files, links and questions from a thread collect here.",
-                 opensSample: true),
+                 opensSample: true, doc: "highlights"),
         TourStep(targets: [.highlights, .mainPanel], title: "Move a panel",
                  body: "Drag a panel by its title, or press and hold anywhere on it, then drag.",
-                 task: .movePanel, doneBody: "View › Reset Panel Layout puts it back."),
+                 task: .movePanel, doneBody: "View › Reset Panel Layout puts it back.", doc: "panels"),
         TourStep(targets: [.actionChips], title: "Patches",
                  body: "Patches add buttons like these, and panels, to your threads.",
-                 edges: [.above, .right, .left, .below], opensSample: true),
+                 edges: [.above, .right, .left, .below], opensSample: true, doc: "patches"),
         TourStep(targets: [.actionChips], title: "Per project or tool",
                  body: "Each patch belongs to a project, or to a tool wherever you use it.",
-                 edges: [.above, .right, .left, .below], opensSample: true),
+                 edges: [.above, .right, .left, .below], opensSample: true, doc: "patches"),
         TourStep(targets: [.actionChips], title: "Try it",
                  body: "Press Roll a die.",
                  task: .runPatch, doneBody: "Ask any thread for a patch that does whatever you want.",
-                 edges: [.above, .right, .left, .below], opensSample: true),
+                 edges: [.above, .right, .left, .below], opensSample: true, doc: "patches"),
         TourStep(targets: [.composer], title: "Your first thread",
                  body: "We've written its first message, so press Return to send it.",
-                 task: .sendFirst, edges: [.above, .below, .right, .left]),
+                 task: .sendFirst, edges: [.above, .below, .right, .left], doc: "first-thread"),
         TourStep(targets: [.setupPanel], title: "Finish setting up",
                  body: "While it works, pair your phone here to check in from anywhere.",
-                 failBody: "Your first thread hit a snag, and its message says how to fix it."),
+                 failBody: "Your first thread hit a snag, and its message says how to fix it.", doc: "finish-setting-up"),
     ]
 
     /// The step on show, as an index into `shown`; nil when the tour's
@@ -548,6 +552,15 @@ private struct TourCard: View {
                         .foregroundStyle(.secondary)
                         .keyboardShortcut(.cancelAction)
                         .tip("End the tour (Esc). Help > Take the Tour brings it back")
+                }
+                if let doc = step.doc, let url = URL(string: "\(Tour.docsSite)/\(doc)") {
+                    // The detail the card leaves out, on the website.
+                    Button { NSWorkspace.shared.open(url) } label: {
+                        Image(systemName: "info.circle")
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(.secondary)
+                    .tip("More about this, in the docs")
                 }
                 if index > 0 {
                     Button("Back") { tour.back() }
