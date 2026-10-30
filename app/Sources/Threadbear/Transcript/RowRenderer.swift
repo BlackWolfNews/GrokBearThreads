@@ -582,7 +582,11 @@ enum RowRenderer {
             .font: Theme.workFont, .foregroundColor: Theme.quietText, .paragraphStyle: style,
         ])
         if group.failedCount > 0 {
-            output.append(NSAttributedString(string: ", \(group.failedCount) failed", attributes: [
+            // Only the count is red; the comma belongs to the quiet summary.
+            output.append(NSAttributedString(string: ", ", attributes: [
+                .font: Theme.workFont, .foregroundColor: Theme.quietText, .paragraphStyle: style,
+            ]))
+            output.append(NSAttributedString(string: "\(group.failedCount) failed", attributes: [
                 .font: Theme.workFont, .foregroundColor: Theme.failed, .paragraphStyle: style,
             ]))
         }
