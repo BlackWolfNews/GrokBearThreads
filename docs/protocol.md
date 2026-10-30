@@ -1401,8 +1401,11 @@ A turn the agent finished can say whether Mike has to do anything, so
   them). Text after the call is dropped as before
   (Claude), with one exception: when the turn has no message since its
   last step, so the bullets are all Mike has, the accepted result says
-  so and asks the agent to write now, once, whatever the bullets stand
-  for but it hasn't written (details, a list, steps). On 30 Oct 2026
+  only "Stop here, with no more text: the user has your bullets", words
+  the runner knows it by. It used to ask the agent to write whatever the
+  bullets stood for but it hadn't written, and every agent took that as
+  "write a message": all 14 such turns in the next four hours wrote a
+  prose repeat of their bullets, which showed in place of them. On 30 Oct 2026
   Opus called `end_turn` with "Put together the details you'll need
   for the Qantas call", wrote the details after it, and the runner
   dropped them, twice (thread 2a0a9c2c). The runner keeps the first own
@@ -1410,8 +1413,8 @@ A turn the agent finished can say whether Mike has to do anything, so
   bullets (unstreamed, so a shorter sign-off it drops never flashes up),
   and the app takes text after `end_turn` as the reply, by the rule
   above, in a turn with no other words. No wording in the bullets tells
-  reliably whether they point at more, so the agent is asked rather
-  than refused. Codex's final answer, which still follows its `end_turn`,
+  reliably whether they point at more, so the message is kept when it
+  comes, not asked for. Codex's final answer, which still follows its `end_turn`,
   folds away like the rest and doesn't take over the preview. Up to 8
   bullets of up to 400 characters are kept; a leading `-`, `*` or `•` is
   taken off. Why not just ask for bullets in the final message: in 36

@@ -603,7 +603,7 @@ test('a reply that came only as a summary: end_turn asks for it again, and the r
 // Thread 2a0a9c2c, 30 Oct 2026: asked for the details for a call to Qantas,
 // Opus called end_turn with "Put together the details you'll need" as a
 // bullet and wrote the details after it, where the runner dropped them.
-test('bullets with no message since the last step: end_turn asks for the message, and the one after it is kept', async () => {
+test('bullets with no message since the last step: end_turn says stop without asking for more, and a message after it is kept', async () => {
   const h = makeHarness();
   const { thread, s } = start(h);
   const { call } = tools(h, thread.id);
@@ -614,8 +614,10 @@ test('bullets with no message since the last step: end_turn asks for the message
   const r = await call('end_turn', args);
   assert.equal(r.error, false);
   assert.match(r.text, /^Noted: this thread will wait in Needs you/);
-  assert.match(r.text, /bullets are all the user has/);
-  assert.match(r.text, /write it now, once, as ordinary text/);
+  assert.match(r.text, /Stop here, with no more text: the user has your bullets/);
+  // Asking whether the bullets stood for more had every agent write a
+  // prose repeat of them (30 Oct 2026).
+  assert.doesNotMatch(r.text, /write it now|haven't written/);
   assert.doesNotMatch(r.text, /second message/);
   s.out({ kind: 'event', event: { type: 'tool.result', itemId: 'e1', ok: true, text: r.text, truncated: false, images: [] } });
   // A line shorter than the bullets says no more than them: dropped.
@@ -652,7 +654,7 @@ test('bullets after a message: end_turn says stop, and text after it is dropped'
   assert.equal(r.error, false);
   assert.match(r.text, /Stop here, with no more text/);
   assert.match(r.text, /nothing written now reaches them/);
-  assert.doesNotMatch(r.text, /bullets are all the user has/);
+  assert.doesNotMatch(r.text, /the user has your bullets/);
   s.out({ kind: 'event', event: { type: 'tool.result', itemId: 'e1', ok: true, text: r.text, truncated: false, images: [] } });
   s.text('m2:0', 'Tests pass. The bug was a missing await in the loader.');
   const texts = h.events(thread.id).filter((e) => e.type === 'assistant.text');

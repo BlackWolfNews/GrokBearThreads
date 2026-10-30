@@ -370,17 +370,23 @@ export const NARRATION_ONLY =
 // to stop, it wrote the details anyway, and the runner dropped them as a
 // repeat, twice: he got bullets pointing at nothing. Whether the bullets
 // stand for words not yet written is for the agent to say, as no wording
-// gives it away ("put together", "here are", "below"), so this asks, and
-// the runner keeps the one message that follows (runner.ts, owedReply)
-// and the app shows it as the reply (TranscriptReducer, reply(of:)).
-export const BULLETS_ONLY =
-  'Your summary bullets are all the user has from this turn: no message from you has reached them since your last step. ' +
-  "If the bullets point at something you haven't written in a message yet (the details, a list, steps, an explanation, a draft), write it now, once, as ordinary text with nothing after it: it shows as your reply, with the bullets folded under it. " +
-  'If the bullets are the whole answer, stop here with no more text.';
+// gives it away ("put together", "here are", "below"). The runner keeps
+// the one message that follows when it says more than the bullets
+// (runner.ts, owedReply), and the app shows it as the reply
+// (TranscriptReducer, reply(of:)).
+// It used to ask outright whether the bullets stood for a message not
+// yet written. Agents took that as "write one": all 14 bullets-only
+// turns in the next four hours wrote a prose repeat of their bullets,
+// which then showed in place of them (30 Oct 2026). So it only says to
+// stop, in words the runner can tell apart from the other results; an
+// agent that meant to write its answer after end_turn, as the Qantas one
+// did when told to stop, still has it kept.
+export const BULLETS_ONLY = 'Stop here, with no more text: the user has your bullets';
 
-// Whether an accepted end_turn's result asked for the message (BULLETS_ONLY).
+// Whether an accepted end_turn's result was the bullets-only one
+// (BULLETS_ONLY), whose next message the runner keeps.
 export function endTurnOwesReply(result: { text: string }): boolean {
-  return result.text.includes(BULLETS_ONLY.slice(0, 60));
+  return result.text.includes(BULLETS_ONLY);
 }
 
 // How every accepted end_turn result starts, so the runner can tell one

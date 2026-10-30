@@ -638,10 +638,10 @@ export function buildThreadbearTools(
         const reply = codex ? undefined : await replied();
         if (reply && !summary && !reply.replied) throw new Error(NO_REPLY);
         // Bullets with no message since the last step (or only a
-        // narration block's summary of one): asked whether they stand for
-        // words not yet written, which the runner then keeps (needs.ts,
-        // BULLETS_ONLY).
-        const owed = summary && reply && (!reply.replied || reply.narrationOnly) ? ` ${BULLETS_ONLY}` : '';
+        // narration block's summary of one): told to stop in words the
+        // runner knows, so it keeps a message that follows anyway
+        // (needs.ts, BULLETS_ONLY).
+        const owed = Boolean(summary && reply && (!reply.replied || reply.narrationOnly));
         if (endedThisTurn(await turnEvents(), SERVER_NAME)) throw new Error(ALREADY_ENDED);
         // A connector that needs Mike to sign in again (a gateway service's
         // sign_in stub, or claude.ai's "needs you to sign in again") came
@@ -678,8 +678,8 @@ export function buildThreadbearTools(
         }
         if (owed) {
           return needs === 'you'
-            ? `${ENDED} will wait in Needs you${archive ? ', and stays in the inbox, as it needs something from the user' : ''}.${restart}${owed} Keep the asks out of it: they go in a card under it.`
-            : `${ENDED} is done${archive ? ', and will be archived once the turn is over' : ''}.${owed}`;
+            ? `${ENDED} will wait in Needs you${archive ? ', and stays in the inbox, as it needs something from the user' : ''}.${restart} ${BULLETS_ONLY}, and the asks go in a card under them.`
+            : `${ENDED} is done${archive ? ', and will be archived once the turn is over' : ''}. ${BULLETS_ONLY}.`;
         }
         // Not "lands as a second message": the runner drops it as a
         // repeat, and an agent told it would land wrote its answer there
