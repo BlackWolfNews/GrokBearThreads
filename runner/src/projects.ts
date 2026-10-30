@@ -84,10 +84,11 @@ export type MembershipChange = {
 const TITLE_MAX = 80;
 const SHORT_MAX = 2000; // goals and state
 const NOTES_MAX = 50_000;
-// Past this, update_project asks the agent to rewrite the notes shorter.
-// Agents appended a changelog of everything that landed until Threadbear's
-// hit NOTES_MAX and a note was refused (Mike, 30 Oct); git and the docs
-// already say what landed, and read_project hands an agent all of it.
+// Past this, the librarian rewrites the notes shorter (librarian.ts,
+// keepNotes). Agents appended a changelog of everything that landed until
+// Threadbear's hit NOTES_MAX and a note was refused (Mike, 30 Oct); git
+// and the docs already say what landed, and read_project hands an agent
+// all of it.
 export const NOTES_LONG = 12_000;
 // A project's links are the few places Mike goes for it, not a bookmark
 // list: more than this and the top of Highlights is all links.

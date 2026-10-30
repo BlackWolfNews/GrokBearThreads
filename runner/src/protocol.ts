@@ -272,7 +272,9 @@ export type ProjectIcon = {
   updatedAt: string;
 };
 
-export type LibrarianReason = 'first-message' | 'first-turn' | 'new-folder' | 'moved' | 'catch-up' | 'asked';
+// 'notes': a project's notes got long and were tidied; the entry is the
+// project's, with an empty threadId.
+export type LibrarianReason = 'first-message' | 'first-turn' | 'new-folder' | 'moved' | 'catch-up' | 'asked' | 'notes';
 
 export type LibrarianJob = {
   threadId: string;

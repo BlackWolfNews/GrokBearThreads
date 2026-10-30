@@ -889,10 +889,9 @@ test('the librarian wakes a thread hibernating on a topic when Mike talks about 
   assert.notEqual(other, waiting);
 });
 
-// Notes are a short set of decisions and gotchas, not a log: past
-// NOTES_LONG the agent is asked to rewrite them, and a note that won't fit
-// says how to make room instead of only refusing (Mike, 30 Oct).
-test('update_project asks for long notes to be rewritten, and says how when they are full', async () => {
+// A note that won't fit says how to make room instead of only refusing
+// (Mike, 30 Oct: Threadbear's notes hit the cap).
+test('update_project says how to make room when the notes are full', async () => {
   const { h, projects, create } = setup();
   const { thread } = create();
   const tools = buildThreadbearTools(h.runner, thread.id, Date.now, undefined, projects);
@@ -902,10 +901,55 @@ test('update_project asks for long notes to be rewritten, and says how when they
     return { text: r.content.map((c: any) => c.text).join(''), error: Boolean(r.isError) };
   };
   await call('create_project', { title: 'App' });
-  const long = await call('update_project', { project: 'app', notes: 'x'.repeat(NOTES_LONG + 1) });
-  assert.match(long.text, /Its notes are 12001 characters: rewrite them shorter with notes/);
   await call('update_project', { project: 'app', notes: 'x'.repeat(49_990) });
   const full = await call('update_project', { project: 'app', appendNote: 'One more thing.' });
   assert.equal(full.error, true);
   assert.match(full.text, /The notes are full \(49990 of 50000 characters\)\. Rewrite them shorter with notes/);
+});
+
+// Past NOTES_LONG the librarian rewrites a project's notes on the pool,
+// keeps the old ones on disk and says so in what it did; it leaves short
+// notes alone, notes it couldn't shorten, and notes that changed while
+// the model was writing.
+test('the librarian tidies long project notes and keeps the old ones', async () => {
+  let answer = '```markdown\n## Decisions\n- ' + 'Keep pools provider-agnostic. '.repeat(10) + '\n```';
+  let during: (() => void) | undefined;
+  const { h, projects, librarian, asked } = setup({
+    models: (p) => {
+      during?.();
+      return { ok: true, value: p.system?.startsWith('You tidy') ? answer : '{}', model: 'haiku' };
+    },
+  });
+  const short = projects.create({ title: 'Short', by: 'mike', notes: 'Use npm ci.' });
+  const long = projects.create({ title: 'Long', by: 'mike', notes: 'Landed a thing. '.repeat(NOTES_LONG / 10) });
+  const before = projects.record(long.id)!.notes;
+  await librarian.keepNotes();
+  const tidyCalls = () => asked.filter((p) => p.system?.startsWith('You tidy'));
+  assert.equal(tidyCalls().length, 1, 'only the long notes go to the model');
+  assert.match(tidyCalls()[0].prompt, /^Project "Long"\n\nNotes:\nLanded a thing\./);
+  assert.match(projects.record(long.id)!.notes, /^## Decisions\n- Keep pools/, 'the fence is taken off');
+  assert.equal(projects.record(short.id)!.notes, 'Use npm ci.');
+  const dir = path.join(h.home, 'project-notes');
+  const kept = fs.readdirSync(dir);
+  assert.equal(kept.length, 1);
+  assert.ok(kept[0].startsWith(`${long.id}-`));
+  assert.equal(fs.readFileSync(path.join(dir, kept[0]), 'utf8'), before);
+  const entry = librarian.status().recent[0];
+  assert.deepEqual([entry.threadId, entry.reason, entry.outcome, entry.projectIds], ['', 'notes', 'updated', [long.id]]);
+  assert.match(entry.text, /^Tidied Long's notes, [\d,]+ to \d+ characters$/);
+
+  // An answer that's no shorter is dropped, and the same notes aren't sent again.
+  projects.update(long.id, { notes: before });
+  answer = before;
+  await librarian.keepNotes();
+  await librarian.keepNotes();
+  assert.equal(tidyCalls().length, 2);
+  assert.equal(projects.record(long.id)!.notes, before);
+
+  // A note added while the model was writing wins; the tidy waits for next time.
+  projects.update(long.id, { notes: before + ' One more.' });
+  answer = '## Open\n- ' + 'A thing still owed. '.repeat(15);
+  during = () => projects.appendNote(long.id, 'Added mid-tidy.');
+  await librarian.keepNotes();
+  assert.match(projects.record(long.id)!.notes, /Added mid-tidy\.$/);
 });

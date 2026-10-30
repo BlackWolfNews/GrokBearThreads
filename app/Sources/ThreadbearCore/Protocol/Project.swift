@@ -197,6 +197,9 @@ public enum LibrarianReason: String, Sendable, Hashable, Decodable {
     case moved
     case catchUp = "catch-up"
     case asked
+    /// A project's notes got long and were tidied: the entry is the
+    /// project's, with no thread.
+    case notes
 
     public init(from decoder: Decoder) throws {
         let raw = try decoder.singleValueContainer().decode(String.self)

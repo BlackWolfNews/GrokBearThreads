@@ -51,8 +51,9 @@ File references are where to look.
 - **Small model calls** (`runner/src/models/`): thread titles, filing
   threads into projects (the librarian, every 5 minutes) and similar jobs
   send short excerpts of your threads to `claude -p` on your own logins.
-  With an OpenRouter key in `secrets/openrouter-key`, they go to
-  OpenRouter instead, capped at $1 a day.
+  When a project's notes pass 12,000 characters, the librarian sends them
+  the same way to be rewritten shorter, and keeps the old notes in the
+  data folder's `project-notes/` (the last 5 for each project).
 - **Housekeeping** (`runner/src/housekeeping.ts`): trims logs and deletes
   old pasted images, trash and archived threads' media.
 - **Presence** (`runner/src/presence.ts`): reads how long the keyboard and

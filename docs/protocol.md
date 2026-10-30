@@ -356,6 +356,10 @@ type LibrarianReason =
   | "moved"             // the thread changed folder
   | "catch-up"          // more turns since its last look (at most hourly)
   | "asked"             // librarian.run, or a backfill
+  | "notes"             // a project's notes went past 12,000 characters and
+                        // were rewritten shorter (an entry only: threadId is
+                        // "", projectIds has the project; the old notes are
+                        // kept in <data dir>/project-notes, the last 5 each)
 
 type LibrarianJob = {
   threadId: string

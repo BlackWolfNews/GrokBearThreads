@@ -14,7 +14,7 @@ import { usageLine } from './usage.ts';
 import { findPool, poolLine } from './pools.ts';
 import { AGENT_MESSAGE_PREFIX, EFFORT_LEVELS, MOVE_MESSAGE_PREFIX, sentByAgent } from './protocol.ts';
 import type { Scheduler } from './schedules.ts';
-import { NOTES_LONG, type Projects } from './projects.ts';
+import type { Projects } from './projects.ts';
 import { parseWhen, relativeFuture, relativeTime } from './when.ts';
 
 export { parseWhen, relativeFuture, relativeTime };
@@ -541,10 +541,7 @@ export function buildThreadbearTools(
           const choice = v === 'auto' ? {} : /[/~]/.test(v) ? { path: v } : { symbol: v };
           out = await pc.chooseIcon(p.id, choice, 'agent');
         }
-        const long = out.notes.length > NOTES_LONG
-          ? ` Its notes are ${out.notes.length} characters: rewrite them shorter with notes, keeping decisions, gotchas and what's still owed and dropping what git and the docs already record.`
-          : '';
-        return `Updated "${out.title}" (${out.id}).${long}`;
+        return `Updated "${out.title}" (${out.id}).`;
       }),
     ),
     tool(

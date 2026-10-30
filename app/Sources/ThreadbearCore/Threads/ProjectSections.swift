@@ -273,6 +273,7 @@ public enum LibrarianText {
         case .moved: return "Moved to another folder"
         case .catchUp: return "More turns since the last look"
         case .asked: return "Asked for"
+        case .notes: return "Its notes got long"
         }
     }
 

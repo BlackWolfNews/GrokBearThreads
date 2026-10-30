@@ -162,13 +162,16 @@ private struct EntryRow: View {
                         .tip(at.formatted(date: .abbreviated, time: .shortened))
                 }
             }
-            // The thread, then the projects it touched.
+            // The thread, then the projects it touched. Tidying a
+            // project's notes has no thread, just the project.
             HStack(alignment: .firstTextBaseline, spacing: zoomed(4)) {
-                ThreadLink(threadId: entry.threadId, title: entry.threadTitle)
-                    .layoutPriority(1)
-                ForEach(entry.projectIds, id: \.self) { id in
+                if !entry.threadId.isEmpty {
+                    ThreadLink(threadId: entry.threadId, title: entry.threadTitle)
+                        .layoutPriority(1)
+                }
+                ForEach(Array(entry.projectIds.enumerated()), id: \.element) { n, id in
                     if let project = app.project(id) {
-                        Text("·").foregroundStyle(SidebarMetrics.faint)
+                        if n > 0 || !entry.threadId.isEmpty { Text("·").foregroundStyle(SidebarMetrics.faint) }
                         PlainLink(title: project.title, help: "Open the project") { app.openProjectPage(id) }
                     }
                 }

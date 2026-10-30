@@ -22,7 +22,7 @@ import type { LibrarianEntry, LibrarianJob, LibrarianOutcome, LibrarianReason, L
 import { ErrorCode, RpcError } from './protocol.ts';
 import type { ThreadRecord } from './store.ts';
 import type { ProjectRecord, Projects } from './projects.ts';
-import { LINKS_MAX } from './projects.ts';
+import { LINKS_MAX, NOTES_LONG } from './projects.ts';
 import { atomicWriteFileSync, readJsonSync } from './fsutil.ts';
 import { findUp, isInside } from './patches.ts';
 import { SYMBOLS, fileHash, findIcon, storeIcon } from './project-icons.ts';
@@ -78,9 +78,15 @@ const BACKFILL_DAYS = 30;
 // folders changed is looked at after ICON_SOON_MS.
 export const ICON_SWEEP_MS = 60 * 60_000;
 export const ICON_SOON_MS = 3_000;
+// A project's notes past NOTES_LONG get rewritten shorter, this long after
+// the project last changed, so a thread part-way through adding to them
+// has finished first.
+export const NOTES_SOON_MS = 60_000;
+// Old notes kept on disk per project, the newest first.
+const NOTES_KEPT = 5;
 
 // Which reason wins when a thread is queued twice.
-const RANK: Record<LibrarianReason, number> = { asked: 0, moved: 1, 'new-folder': 2, 'first-turn': 3, 'first-message': 4, 'catch-up': 5 };
+const RANK: Record<LibrarianReason, number> = { asked: 0, moved: 1, 'new-folder': 2, 'first-turn': 3, 'first-message': 4, 'catch-up': 5, notes: 6 };
 
 // `early`: the look was from the first message alone, so the first turn's
 // end still gets a look of its own.
@@ -146,6 +152,11 @@ export class Librarian {
   private iconRun?: Promise<void>;
   private iconAgain = false;
   private iconFullDue = 0;
+  private notesTimer?: TimerHandle;
+  private notesRun?: Promise<void>;
+  // Notes it already tried and couldn't shorten, by project, so the same
+  // notes aren't sent again on every change to the project.
+  private notesTried = new Map<string, string>();
 
   constructor(deps: { host: LibrarianHost; projects: Projects; models?: Pick<Models, 'generate'> & { unavailable?(opts?: { poolOnly?: boolean }): string | undefined }; clock: Clock; log: Logger; home: string; userHome?: string }) {
     this.host = deps.host;
@@ -169,7 +180,10 @@ export class Librarian {
     this.unsubs.push(this.host.onThreadActivity((a) => this.onActivity(a)));
     this.unsubs.push(
       this.host.onNotification((n) => {
-        if (n.method === 'projects.updated') this.iconsSoon();
+        if (n.method === 'projects.updated') {
+          this.iconsSoon();
+          this.notesSoon();
+        }
         if (n.method !== 'thread.deleted') return;
         const id = n.params.threadId;
         delete this.looks[id];
@@ -181,6 +195,7 @@ export class Librarian {
     this.sweep();
     this.schedule();
     this.iconsSoon();
+    this.notesSoon();
   }
 
   stop(): void {
@@ -188,6 +203,7 @@ export class Librarian {
     this.timer?.cancel();
     this.sweepTimer?.cancel();
     this.iconTimer?.cancel();
+    this.notesTimer?.cancel();
     for (const u of this.unsubs) u();
   }
 
@@ -653,19 +669,21 @@ export class Librarian {
   }
 
   private note(job: LibrarianJob, outcome: LibrarianOutcome, text: string, projectIds?: string[]): void {
-    const e: LibrarianEntry = {
-      id: crypto.randomBytes(6).toString('hex'),
-      at: new Date(this.clock.now()).toISOString(),
+    this.entry({
       threadId: job.threadId,
       threadTitle: this.host.threadRecords().find((t) => t.id === job.threadId)?.title ?? job.threadTitle,
       reason: job.reason,
       outcome,
       text,
-    };
-    if (projectIds?.length) e.projectIds = projectIds;
-    this.recent.unshift(e);
-    if (this.recent.length > RECENT_KEPT) this.recent.length = RECENT_KEPT;
+      ...(projectIds?.length ? { projectIds } : {}),
+    });
     this.log.info('librarian looked', { threadId: job.threadId, reason: job.reason, outcome, text });
+  }
+
+  // Onto what it did, newest first.
+  private entry(e: Omit<LibrarianEntry, 'id' | 'at'>): void {
+    this.recent.unshift({ id: crypto.randomBytes(6).toString('hex'), at: new Date(this.clock.now()).toISOString(), ...e });
+    if (this.recent.length > RECENT_KEPT) this.recent.length = RECENT_KEPT;
   }
 
   // ------------------------------------------------------------- icons
@@ -784,6 +802,96 @@ export class Librarian {
     this.used(res);
     const words = res.value.toLowerCase().match(/[a-z0-9.]+/g) ?? [];
     return words.map((w) => w.replace(/\.+$/, '')).find((w) => SYMBOLS.includes(w));
+  }
+
+  // ------------------------------------------------------------- notes
+
+  // Agents add to a project's notes as they go, and they grew into a log
+  // of everything that landed until Threadbear's hit the cap and a note was
+  // refused (Mike, 30 Oct). Past NOTES_LONG the librarian rewrites them as
+  // decisions, gotchas and what's owed, keeping the old ones on disk.
+  private notesSoon(): void {
+    // Once, NOTES_SOON_MS after the first change: projects change often
+    // (every look), so pushing it back on each would put it off for good.
+    if (this.stopped || this.notesTimer) return;
+    this.notesTimer = this.clock.setTimeout(() => {
+      this.notesTimer = undefined;
+      void this.keepNotes();
+    }, NOTES_SOON_MS);
+  }
+
+  // Every project whose notes have got long, one at a time. Not while
+  // paused, and like a look, on the pool only.
+  keepNotes(): Promise<void> {
+    if (this.notesRun) return this.notesRun;
+    this.notesRun = (async () => {
+      for (const p of this.projects.list()) {
+        if (this.stopped || this.paused || !this.models) return;
+        const rec = this.projects.record(p.id);
+        if (!rec || rec.notes.length <= NOTES_LONG || this.notesTried.get(rec.id) === rec.notes) continue;
+        try {
+          await this.tidyNotes(rec);
+        } catch (e) {
+          this.notesTried.set(rec.id, rec.notes);
+          this.log.warn('librarian could not tidy notes', { projectId: rec.id, error: String(e) });
+        }
+      }
+    })().finally(() => {
+      this.notesRun = undefined;
+    });
+    return this.notesRun;
+  }
+
+  private async tidyNotes(rec: ProjectRecord): Promise<void> {
+    const before = rec.notes;
+    const about = [`Project "${rec.title}"`, rec.goals && `Goals: ${rec.goals}`, rec.state && `State: ${rec.state}`].filter(Boolean);
+    const prompt = [...about, '', 'Notes:', before].join('\n');
+    const res = await this.models!.generate({ feature: 'projects', cwd: rec.folders[0], system: NOTES_SYSTEM, prompt, maxTokens: 4000 });
+    if (this.stopped) return;
+    if (!res.ok) {
+      // No pool or no room: the next change to the project tries again.
+      if (!WAIT_FOR.includes(res.reason)) {
+        this.notesTried.set(rec.id, before);
+        this.log.info('librarian could not tidy notes', { projectId: rec.id, reason: res.reason });
+      }
+      return;
+    }
+    this.rollDay();
+    this.used(res);
+    // Something added while the model was writing would be lost: leave
+    // them, and the change that came with it brings it back here.
+    if (this.projects.record(rec.id)?.notes !== before) return;
+    const after = tidiedNotes(res.value);
+    if (after.length < 200 || after.length > Math.min(NOTES_LONG, before.length * 0.8)) {
+      this.notesTried.set(rec.id, before);
+      this.log.info('librarian could not shorten notes', { projectId: rec.id, before: before.length, after: after.length });
+      return;
+    }
+    const kept = this.keepOldNotes(rec.id, before);
+    this.projects.update(rec.id, { notes: after });
+    this.entry({
+      threadId: '',
+      threadTitle: '',
+      reason: 'notes',
+      outcome: 'updated',
+      text: `Tidied ${rec.title}'s notes, ${before.length.toLocaleString('en')} to ${after.length.toLocaleString('en')} characters`,
+      projectIds: [rec.id],
+    });
+    this.log.info('librarian tidied notes', { projectId: rec.id, before: before.length, after: after.length, kept });
+    this.changed(false);
+  }
+
+  // The notes as they were, in <data dir>/project-notes, so nothing a
+  // rewrite dropped is gone for good. The newest NOTES_KEPT per project.
+  private keepOldNotes(projectId: string, notes: string): string {
+    const dir = path.join(path.dirname(this.file), 'project-notes');
+    fs.mkdirSync(dir, { recursive: true });
+    const stamp = new Date(this.clock.now()).toISOString().replace(/[:.]/g, '-');
+    const file = path.join(dir, `${projectId}-${stamp}.md`);
+    atomicWriteFileSync(file, notes);
+    const old = fs.readdirSync(dir).filter((f) => f.startsWith(`${projectId}-`)).sort().reverse();
+    for (const f of old.slice(NOTES_KEPT)) fs.rmSync(path.join(dir, f), { force: true });
+    return file;
   }
 
   // ------------------------------------------------------------- helpers
@@ -937,6 +1045,22 @@ Keep the thread's title (title null) unless it no longer says what the thread is
 Some hibernating threads are waiting for Mike to talk about something again ("woodworking"). Put one in wake when Mike's own messages in this thread are about that: he's working on it, planning it or asking about it. A passing mention, or only the agent bringing it up, isn't enough. Most looks wake none.
 
 The thread bullets are for Mike glancing at the thread later: concrete, in his plain words, each under ten words, no full stops. The last one says who's waiting on whom ("Waiting on Mike to pick a design", "Fixing the last failing test").`;
+
+const NOTES_SYSTEM = `You tidy a project's notes in Threadbear, Mike's app for running AI coding agents in threads. Agents add to a project's notes as they work, and these have grown into a log. Rewrite them as short markdown notes that a later agent reads before working on the project.
+
+Keep: Mike's decisions and why, facts and gotchas the code doesn't make obvious (deployment names, commands, where things live, what breaks and how to tell), and what's still owed or waiting on someone, with its date.
+Drop: what was built or landed (git and the docs record that), commit hashes, test runs and checks that passed, and anything a later note replaced or that has since been done.
+Merge notes on the same subject. Keep names, paths, ids and numbers exactly as written, and never add anything that isn't in the notes.
+
+Use three sections, "## Decisions", "## Facts and gotchas" and "## Open", with one short bullet per item. Stay under 6,000 characters. Reply with the notes only.`;
+
+// The model's notes without a code fence it may have put round them.
+export function tidiedNotes(text: string): string {
+  return text
+    .trim()
+    .replace(/^```(?:markdown|md)?\n([\s\S]*?)\n```$/, '$1')
+    .trim();
+}
 
 const SYMBOL_SYSTEM = `You pick an icon for a project in Threadbear, Mike's app for running AI coding agents. Given the project and a list of SF Symbol names, reply with the one name from the list that best shows what the project is about, and nothing else.`;
 
