@@ -91,7 +91,10 @@ its notes, thinking, commands and edits, is one line above the reply,
 they're often the answer. When the agent carries on by itself after that
 (to check its change once the app restarts, say), the follow-up joins the
 same line and its bullets replace the earlier ones, so there's still one
-reply to read. A link with ↑ after it goes to the step it's about: click
+reply to read. If you'd rather read the agent's own message every time,
+turn off Bullet replies in Settings > General: agents write a normal message
+from their next turn, under the same "Worked" line, and the bullets only
+show in previews, notifications and on the phone. A link with ↑ after it goes to the step it's about: click
 it and the work opens there, with that step lit up. A link to another
 thread opens that thread.
 

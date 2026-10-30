@@ -14,6 +14,7 @@ export type Settings = {
   idleMinutes: number;
   maxLiveCLIs: number;
   followMain: boolean;
+  bulletReplies: boolean;
   models: {
     pool: string | null;
     privateFolders: string[];
@@ -25,6 +26,7 @@ export type SettingsUpdate = {
   idleMinutes?: number;
   maxLiveCLIs?: number;
   followMain?: boolean;
+  bulletReplies?: boolean;
   models?: { pool?: string | null; privateFolders?: string[] };
 };
 
@@ -47,6 +49,7 @@ export class SettingsService {
       maxLiveCLIs: this.cfg.maxLive,
       // What the next start will do, which is what the switch means.
       followMain: readRunnerJson(this.cfg.home).followMain !== false,
+      bulletReplies: this.cfg.bulletReplies,
       models: {
         pool: this.cfg.models.pool,
         privateFolders: [...this.cfg.models.privateFolders],
@@ -87,6 +90,7 @@ export class SettingsService {
     }
     // Saved only: the updater reads it when the runner starts.
     if (u.followMain !== undefined) json.followMain = u.followMain;
+    if (u.bulletReplies !== undefined) json.bulletReplies = this.cfg.bulletReplies = u.bulletReplies;
     if (folders !== undefined || pool !== undefined) {
       json.models = { ...json.models };
       if (pool !== undefined) json.models.pool = this.cfg.models.pool = pool;
@@ -114,6 +118,10 @@ export function settingsMethods(s: SettingsService): Record<string, (p: Record<s
       if (p.followMain !== undefined) {
         if (typeof p.followMain !== 'boolean') throw bad('followMain must be a boolean');
         u.followMain = p.followMain;
+      }
+      if (p.bulletReplies !== undefined) {
+        if (typeof p.bulletReplies !== 'boolean') throw bad('bulletReplies must be a boolean');
+        u.bulletReplies = p.bulletReplies;
       }
       if (p.models !== undefined) {
         const m = p.models;

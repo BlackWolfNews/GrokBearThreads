@@ -557,7 +557,7 @@ public struct TranscriptModel: Sendable {
             closeOpenAsks()
             append(TranscriptRow(id: "rw:\(seq)", seq: seq, turnId: turnId, content: .note(rewind.summary)))
 
-        case .assistantText(let itemId, let text, let summary, _) where summary:
+        case .assistantText(let itemId, let text, let summary, _, let givesWay) where summary:
             // The turn's summary is its reply: what the agent wrote before it
             // folds into the work, so the turn reads as one line of work,
             // the bullets, then the card (docs/protocol.md, "The summary").
@@ -567,9 +567,9 @@ public struct TranscriptModel: Sendable {
                 summarizedTurns.insert(turnId)
                 if let first = items.firstIndex(where: { $0.turnId == turnId }) { markInserted(first) }
             }
-            append(TranscriptRow(id: id, seq: seq, turnId: turnId, content: .assistant(TextItem(itemId: itemId, text: text, isSummary: true))))
+            append(TranscriptRow(id: id, seq: seq, turnId: turnId, content: .assistant(TextItem(itemId: itemId, text: text, isSummary: true, givesWay: givesWay))))
 
-        case .assistantText(let itemId, let text, _, let narration):
+        case .assistantText(let itemId, let text, _, let narration, _):
             streaming[itemId] = nil
             let id = "a:\(itemId)"
             let thought = "r:\(itemId)"
@@ -1045,7 +1045,10 @@ public struct TranscriptModel: Sendable {
                 words = turn[end...].filter { text($0).map { !$0.isSummary && !$0.isNarration } == true }
             }
             let said = words.reduce(0) { $0 + (text($1)?.text.count ?? 0) }
-            return said > (text(summary)?.text.count ?? 0) ? Set(words) : [summary]
+            // With bullet replies off, a sign-off line wins too: the agent
+            // was told its message is the reply (needs.ts).
+            let bar = text(summary)?.givesWay == true ? 0 : (text(summary)?.text.count ?? 0)
+            return said > bar ? Set(words) : [summary]
         }
         // Words win over a narration paraphrase of them.
         let words = final.filter { text($0)?.isNarration == false }

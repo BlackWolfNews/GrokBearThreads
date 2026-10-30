@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { firstName, USER_NAME, userLine } from '../../src/user-name.ts';
 import { buildThreadbearTools, FILING_PROJECTS, SHOWING_THE_USER } from '../../src/threadbear-mcp.ts';
-import { ALREADY_ENDED, CODEX_END_TURN_DESCRIPTION, END_TURN_DESCRIPTION, NARRATION_ONLY, NO_REPLY } from '../../src/needs.ts';
+import { ALREADY_ENDED, CODEX_END_TURN_DESCRIPTION, END_TURN_DESCRIPTION, endTurnDescription, NARRATION_ONLY, NO_REPLY } from '../../src/needs.ts';
 import { dynamicToolSpecs, NAMESPACE_DESCRIPTION, TOOL_GUIDANCE } from '../../src/adapters/codex/tools.ts';
 import { SYSTEM } from '../../src/librarian.ts';
 import { EXPLAIN_SYSTEM } from '../../src/explain.ts';
@@ -30,6 +30,8 @@ test('nothing an agent reads names Mike, apart from the user line', () => {
     ['FILING_PROJECTS', FILING_PROJECTS],
     ['END_TURN_DESCRIPTION', END_TURN_DESCRIPTION],
     ['CODEX_END_TURN_DESCRIPTION', CODEX_END_TURN_DESCRIPTION],
+    ['message end_turn', endTurnDescription('claude', false)],
+    ['message Codex end_turn', endTurnDescription('codex', false)],
     ['ALREADY_ENDED', ALREADY_ENDED],
     ['NARRATION_ONLY', NARRATION_ONLY],
     ['NO_REPLY', NO_REPLY],

@@ -209,6 +209,7 @@ enum Automation {
                 "idleMinutes": settings.idleMinutes,
                 "maxLiveCLIs": settings.maxLiveCLIs,
                 "followMain": settings.followMain,
+                "bulletReplies": settings.bulletReplies,
                 // "" is none (small jobs off), or an older runner with no pools.
                 "smallJobsPool": settings.models.pool ?? "",
                 "privateFolders": settings.models.privateFolders,

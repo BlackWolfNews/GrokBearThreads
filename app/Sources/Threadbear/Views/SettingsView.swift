@@ -94,6 +94,13 @@ private struct GeneralSettings: View {
                 }
 
                 Section {
+                    Toggle("Bullet replies", isOn: binding(settings.bulletReplies) { SettingsUpdate(bulletReplies: $0) })
+                        .tip("Show a few short bullets as an agent's reply, rather than its own message")
+                } footer: {
+                    Footnote("Off, agents write a normal message under the Worked line. Previews, notifications and the phone still show bullets.")
+                }
+
+                Section {
                     LabeledContent("Release an idle CLI after") {
                         Stepper(value: binding(settings.idleMinutes) { SettingsUpdate(idleMinutes: $0) }, in: 1...600, step: 5) {
                             Text(settings.idleMinutes == 1 ? "1 minute" : "\(settings.idleMinutes) minutes")

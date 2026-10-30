@@ -172,6 +172,7 @@ export function testConfig(home: string, extra: Partial<Config> = {}): Config {
     cliUpdates: { claude: 'off', codex: 'off', checkMinutes: 60, keepCodexVersions: 2 },
     accountNotes: {},
     followMain: false,
+    bulletReplies: true,
     models: { pool: 'claude', privateFolders: [] },
     // Never the real Convex project from a test (sync.test.ts passes a fake).
     sync: { enabled: false },

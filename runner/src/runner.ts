@@ -88,7 +88,7 @@ import { SAID_MAX, WAKE_SYSTEM, awayFor, hibernateNote, readWakeAnswer, wakeProm
 import { emptyHighlights, observe as observeHighlights, pinItem, remove as removeHighlight, unpin as unpinHighlight, upsert as upsertHighlight, view as highlightsView, absolute, type ThreadHighlights } from './highlights.ts';
 import { SERVER_NAME, approvalTitle } from './threadbear-mcp.ts';
 import { PANEL_ACK_WAIT_MS, PANEL_PLACES, resolvePanel } from './panel-requests.ts';
-import { archiveFromTool, END_TURN_TOOL, endTurnAccepted, endTurnOwesReply, endTurnTaken, needsFromText, needsFromTool, summaryFromTool, summaryMarkdown } from './needs.ts';
+import { archiveFromTool, END_TURN_TOOL, endTurnAccepted, endTurnAsksForMessage, endTurnOwesReply, endTurnTaken, needsFromText, needsFromTool, summaryFromTool, summaryMarkdown } from './needs.ts';
 import type { Needs } from './needs.ts';
 import { asksForAppRestart } from './app-restarts.ts';
 import type { ConnectorsStatus } from './connectors.ts';
@@ -2300,7 +2300,7 @@ export class Runner {
           if (ev.type === 'tool.result' && ev.itemId === rt.turn.endTurnCall && endTurnAccepted(ev)) {
             rt.turn.ended = true;
             const bullets = summaryFromTool(rt.turn.endTurn);
-            rt.turn.owedReply = bullets && endTurnOwesReply(ev) ? summaryMarkdown(bullets).length : undefined;
+            rt.turn.owedReply = !bullets ? undefined : endTurnAsksForMessage(ev) ? 0 : endTurnOwesReply(ev) ? summaryMarkdown(bullets).length : undefined;
           }
           if (ev.type === 'edit.diff') rt.turn.edited.add(ev.path);
           else if (ev.type === 'tool.call' && (ev.kind === 'edit' || ev.kind === 'write')) {
@@ -2332,7 +2332,7 @@ export class Runner {
             rt.turn.summarized = true;
             rt.turn.lastText = text;
             rec.preview = oneLine(text, LIMITS.previewChars);
-            this.emit(st, { type: 'assistant.text', itemId: `${ev.itemId}.summary`, text, summary: true }, rt.turn.turnId);
+            this.emit(st, { type: 'assistant.text', itemId: `${ev.itemId}.summary`, text, summary: true, ...(this.cfg.bulletReplies ? {} : { givesWay: true as const }) }, rt.turn.turnId);
           }
         }
         break;

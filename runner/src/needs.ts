@@ -284,9 +284,25 @@ const END_TURN_WHAT =
 // came back as prose from Opus every time; in here, as bullets every time
 // (docs/end-turn-design). The links' quote-a-step rule is what models
 // managed: they can't see their tool calls' ids.
-const END_TURN_SUMMARY =
-  'summary is what the user reads first when they come back to the thread, often hours later and among many others: 2 to 5 markdown bullets of what happened this turn (what you found, changed, shipped or decided, with the result), each one line of about 15 words at most, in plain words that make sense to someone who has forgotten the task. ' +
-  "The preview, notifications and the phone show it as your reply. In the Mac app, what you write after your last step (before end_turn) is the reply when it says more than the bullets, and the bullets fold into your working with everything else; otherwise the bullets are the reply. So when the answer is an explanation or a report, write it as your message and make the bullets a short version that stands on its own; when it isn't, don't repeat the bullets in a message. Never point at something \"above\": the user may only see the bullets. Leave what the user has to do to the asks. If they asked a question, the first bullet answers it. " +
+const SUMMARY_BULLETS = '2 to 5 markdown bullets of what happened this turn (what you found, changed, shipped or decided, with the result), each one line of about 15 words at most, in plain words that make sense to someone who has forgotten the task. ';
+const SUMMARY_STANDS_ALONE = 'Never point at something "above": the user may only see the bullets. Leave what the user has to do to the asks. If they asked a question, the first bullet answers it. ';
+
+const END_TURN_SUMMARY_IS_THE_REPLY =
+  'summary is what the user reads first when they come back to the thread, often hours later and among many others: ' +
+  SUMMARY_BULLETS +
+  "The preview, notifications and the phone show it as your reply. In the Mac app, what you write after your last step (before end_turn) is the reply when it says more than the bullets, and the bullets fold into your working with everything else; otherwise the bullets are the reply. So when the answer is an explanation or a report, write it as your message and make the bullets a short version that stands on its own; when it isn't, don't repeat the bullets in a message. " +
+  SUMMARY_STANDS_ALONE;
+
+// Bullet replies off (Settings > General): Mike, 30 Oct 2026, liked the
+// folded working but wanted the agent's normal message as the reply. The
+// bullets stay, as previews and notifications need something short.
+const END_TURN_SUMMARY_IS_THE_PREVIEW =
+  'Write your reply as an ordinary message, as you would with no tool to call: the result and what the user needs to know, at the length it deserves. In the Mac app that message is the reply, and the summary folds into your working with everything else. ' +
+  'summary is the short version the preview, notifications and the phone show: ' +
+  SUMMARY_BULLETS +
+  SUMMARY_STANDS_ALONE;
+
+const END_TURN_SUMMARY_LINKS =
   'Link each bullet to where they can check it: a web page or a file as an ordinary markdown link; another thread as [its own thread](thread:<its id from list_threads>); a step in your own working this turn as work: and a few words copied exactly from that step (the command you ran or its description, the file you edited, or a line you wrote while working), e.g. [tests pass](work:npm test), which opens your working at that step and lights it up. Links work in the asks too. ' +
   // Mike, 29 Oct: a turn that waited for the app to restart, then the
   // check after it, left two summaries. The app now shows a runner's turn
@@ -316,7 +332,8 @@ const END_TURN_ASKS =
 export const END_TURN_DESCRIPTION =
   END_TURN_WHAT +
   'Call it once, as the very last thing in every turn, and write nothing after it. ' +
-  END_TURN_SUMMARY +
+  END_TURN_SUMMARY_IS_THE_REPLY +
+  END_TURN_SUMMARY_LINKS +
   "With a summary, you needn't write a message first when the bullets are the whole answer. When the user asked for something to read (details, a list, steps, a draft, an explanation), write it as your message before you call end_turn: a bullet like \"Put together the details you need\" points at nothing unless the details are in a message. Without one, it is refused until the turn has a reply: ordinary text from you after your last tool result (Threadbear's own tools aside), so the user gets a complete answer in the conversation. " +
   END_TURN_ASKS;
 
@@ -324,13 +341,39 @@ export const END_TURN_DESCRIPTION =
 // it. Told to call end_turn after its final message, Codex never once
 // did; GPT-6.1-Sol wrote the call into its final answer instead, raw
 // tool-call tokens and all, and Mike read them (28 Oct 2026).
+const CODEX_END_TURN_HOW = 'Call it through your tools like any other; never write the call, or its result, in your message. ';
+
 export const CODEX_END_TURN_DESCRIPTION =
   END_TURN_WHAT +
   'Call it once, as your last tool call, just before your final answer: the final answer ends the turn, so nothing can be called after it. ' +
-  'Call it through your tools like any other; never write the call, or its result, in your message. ' +
-  END_TURN_SUMMARY +
+  CODEX_END_TURN_HOW +
+  END_TURN_SUMMARY_IS_THE_REPLY +
+  END_TURN_SUMMARY_LINKS +
   'With a summary, your final answer can be one short line: it folds into your working, as the user reads the summary instead. ' +
   END_TURN_ASKS;
+
+// With bullet replies off. A session sees these when its CLI starts; one
+// already live goes by what end_turn's handler answers until then.
+const MESSAGE_END_TURN_DESCRIPTION =
+  END_TURN_WHAT +
+  'Call it once, as the very last thing in every turn, and write nothing after it. ' +
+  END_TURN_SUMMARY_IS_THE_PREVIEW +
+  END_TURN_SUMMARY_LINKS +
+  "It is refused until the turn has that message: ordinary text from you after your last tool result (Threadbear's own tools aside). " +
+  END_TURN_ASKS;
+
+const CODEX_MESSAGE_END_TURN_DESCRIPTION =
+  END_TURN_WHAT +
+  'Call it once, as your last tool call, just before your final answer: the final answer ends the turn, so nothing can be called after it. ' +
+  CODEX_END_TURN_HOW +
+  END_TURN_SUMMARY_IS_THE_PREVIEW.replace('an ordinary message', 'your final answer').replace('that message', 'that answer') +
+  END_TURN_SUMMARY_LINKS +
+  END_TURN_ASKS;
+
+export function endTurnDescription(provider: 'claude' | 'codex', bulletReplies: boolean): string {
+  if (provider === 'codex') return bulletReplies ? CODEX_END_TURN_DESCRIPTION : CODEX_MESSAGE_END_TURN_DESCRIPTION;
+  return bulletReplies ? END_TURN_DESCRIPTION : MESSAGE_END_TURN_DESCRIPTION;
+}
 
 // What end_turn says when the turn has no reply yet. An error result, so
 // the CLI doesn't take the call as the end of the turn (adapter.ts,
@@ -387,6 +430,14 @@ export const BULLETS_ONLY = 'Stop here, with no more text: the user has your bul
 // (BULLETS_ONLY), whose next message the runner keeps.
 export function endTurnOwesReply(result: { text: string }): boolean {
   return result.text.includes(BULLETS_ONLY);
+}
+
+// With bullet replies off, a turn whose message came as a narration block
+// is asked for it again even with bullets (threadbear-mcp.ts). The message
+// lands under them, so any length of it is kept, as the app shows it
+// whatever its length (TranscriptReducer, reply(of:)).
+export function endTurnAsksForMessage(result: { text: string }): boolean {
+  return result.text.includes(NARRATION_ONLY);
 }
 
 // How every accepted end_turn result starts, so the runner can tell one

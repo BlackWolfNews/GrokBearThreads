@@ -44,15 +44,19 @@ public struct TextItem: Sendable, Hashable {
     /// The turn's summary from end_turn: the turn's reply, while its other
     /// messages fold into the work.
     public var isSummary: Bool
+    /// A summary written with bullet replies off: any message of the turn
+    /// is the reply over it, however short.
+    public var givesWay: Bool
     /// Claude sent it as a narration block: its text is only the API's
     /// paraphrase of what the agent wrote, not the words.
     public var isNarration: Bool
 
-    public init(itemId: String, text: String, isStreaming: Bool = false, isSummary: Bool = false, isNarration: Bool = false) {
+    public init(itemId: String, text: String, isStreaming: Bool = false, isSummary: Bool = false, givesWay: Bool = false, isNarration: Bool = false) {
         self.itemId = itemId
         self.text = text
         self.isStreaming = isStreaming
         self.isSummary = isSummary
+        self.givesWay = givesWay
         self.isNarration = isNarration
     }
 }

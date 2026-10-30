@@ -284,7 +284,7 @@ let deviceSeq = devices.length;
 const deviceList = () => ({ devices: [...devices], site: DEMO_SITE });
 
 const settings = {
-  defaultCwd: defaults.cwd, idleMinutes: 30, maxLiveCLIs: 6, followMain: true,
+  defaultCwd: defaults.cwd, idleMinutes: 30, maxLiveCLIs: 6, followMain: true, bulletReplies: true,
   models: {
     pool: 'claude',
     privateFolders: ['~/dev/clients/acme'],
@@ -1074,6 +1074,7 @@ async function dispatch(client, method, p) {
         settings.maxLiveCLIs = p.maxLiveCLIs;
       }
       if (p.followMain !== undefined) settings.followMain = Boolean(p.followMain);
+      if (p.bulletReplies !== undefined) settings.bulletReplies = Boolean(p.bulletReplies);
       const m = p.models ?? {};
       if (m.pool !== undefined) {
         if (m.pool !== null && !poolOf(m.pool)) throw rpcError(-32602, `No pool called ${m.pool}`);

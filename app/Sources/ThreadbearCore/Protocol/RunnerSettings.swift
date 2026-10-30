@@ -36,13 +36,16 @@ public struct RunnerSettings: Sendable, Hashable, Decodable {
     public var maxLiveCLIs: Int
     /// Takes effect when the runner next restarts.
     public var followMain: Bool
+    /// A turn's reply: end_turn's bullets, or (false) the agent's own message.
+    public var bulletReplies: Bool
     public var models: Models
 
-    public init(defaultCwd: String = "", idleMinutes: Int = 30, maxLiveCLIs: Int = 6, followMain: Bool = true, models: Models = Models()) {
+    public init(defaultCwd: String = "", idleMinutes: Int = 30, maxLiveCLIs: Int = 6, followMain: Bool = true, bulletReplies: Bool = true, models: Models = Models()) {
         self.defaultCwd = defaultCwd
         self.idleMinutes = idleMinutes
         self.maxLiveCLIs = maxLiveCLIs
         self.followMain = followMain
+        self.bulletReplies = bulletReplies
         self.models = models
     }
 
@@ -52,10 +55,11 @@ public struct RunnerSettings: Sendable, Hashable, Decodable {
         idleMinutes = c.number(.idleMinutes).map { Int($0.rounded()) } ?? 30
         maxLiveCLIs = c.number(.maxLiveCLIs).map { Int($0.rounded()) } ?? 6
         followMain = (try? c.decodeIfPresent(Bool.self, forKey: .followMain)) ?? true
+        bulletReplies = (try? c.decodeIfPresent(Bool.self, forKey: .bulletReplies)) ?? true
         models = (try? c.decodeIfPresent(Models.self, forKey: .models)) ?? Models()
     }
 
-    enum CodingKeys: String, CodingKey { case defaultCwd, idleMinutes, maxLiveCLIs, followMain, models }
+    enum CodingKeys: String, CodingKey { case defaultCwd, idleMinutes, maxLiveCLIs, followMain, bulletReplies, models }
 }
 
 /// Fields for `settings.update`; nil ones are left out, so an edit to one
@@ -65,17 +69,19 @@ public struct SettingsUpdate: Sendable, Hashable {
     public var idleMinutes: Int?
     public var maxLiveCLIs: Int?
     public var followMain: Bool?
+    public var bulletReplies: Bool?
     /// `.some(nil)` sends null: no pool, so no small jobs.
     public var pool: String??
     public var privateFolders: [String]?
 
-    public init(defaultCwd: String? = nil, idleMinutes: Int? = nil, maxLiveCLIs: Int? = nil, followMain: Bool? = nil,
+    public init(defaultCwd: String? = nil, idleMinutes: Int? = nil, maxLiveCLIs: Int? = nil, followMain: Bool? = nil, bulletReplies: Bool? = nil,
                 pool: String?? = nil, privateFolders: [String]? = nil) {
         self.pool = pool
         self.defaultCwd = defaultCwd
         self.idleMinutes = idleMinutes
         self.maxLiveCLIs = maxLiveCLIs
         self.followMain = followMain
+        self.bulletReplies = bulletReplies
         self.privateFolders = privateFolders
     }
 
@@ -85,6 +91,7 @@ public struct SettingsUpdate: Sendable, Hashable {
         if let idleMinutes { params["idleMinutes"] = .number(Double(idleMinutes)) }
         if let maxLiveCLIs { params["maxLiveCLIs"] = .number(Double(maxLiveCLIs)) }
         if let followMain { params["followMain"] = .bool(followMain) }
+        if let bulletReplies { params["bulletReplies"] = .bool(bulletReplies) }
         var models: [String: JSONValue] = [:]
         if let pool { models["pool"] = pool.map { .string($0) } ?? .null }
         if let privateFolders { models["privateFolders"] = .array(privateFolders.map { .string($0) }) }

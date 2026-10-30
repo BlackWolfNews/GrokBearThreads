@@ -14,10 +14,11 @@ function start(h: ReturnType<typeof makeHarness>, text = 'Fix the tests', extra:
   return { thread, s };
 }
 
-function tools(h: ReturnType<typeof makeHarness>, selfId: string) {
+function tools(h: ReturnType<typeof makeHarness>, selfId: string, bulletReplies?: () => boolean) {
   // end_turn's wait for its own call to land is counted, not slept.
   const slept: number[] = [];
   const list = buildThreadbearTools(h.runner, selfId, () => Date.parse('2026-10-26T12:00:00Z'), undefined, undefined, undefined, {
+    bulletReplies,
     sleep: async (ms) => {
       slept.push(ms);
     },
@@ -598,6 +599,57 @@ test('a reply that came only as a summary: end_turn asks for it again, and the r
   const read = await call('read_thread', { threadId: thread.id });
   assert.match(read.text, /Step 2/);
   assert.doesNotMatch(read.text, /resent the full/);
+});
+
+test('bullet replies off: bullets alone are refused, and the summary gives way to the message', async () => {
+  const h = makeHarness(undefined, { bulletReplies: false });
+  const { thread, s } = start(h);
+  const { call } = tools(h, thread.id, () => false);
+  toolCall(s, 'b1', 'Bash', { command: 'npm test' });
+  toolResult(s, 'b1');
+  const args = { summary: ['Fixed the loader bug; tests pass.'], needs: 'nothing' };
+  toolCall(s, 'e1', END_TURN, args);
+  const refused = await call('end_turn', args);
+  assert.equal(refused.error, true);
+  assert.match(refused.text, /^Not ended/);
+  s.out({ kind: 'event', event: { type: 'tool.result', itemId: 'e1', ok: false, text: refused.text, truncated: false, images: [] } });
+  assert.ok(!h.events(thread.id).some((e) => e.type === 'assistant.text' && e.summary), 'no bullets from a refused call');
+
+  s.text('m1:0', 'Fixed it.');
+  toolCall(s, 'e2', END_TURN, args);
+  const r = await call('end_turn', args);
+  assert.equal(r.error, false);
+  assert.doesNotMatch(r.text, /your bullets/);
+  s.out({ kind: 'event', event: { type: 'tool.result', itemId: 'e2', ok: true, text: r.text, truncated: false, images: [] } });
+  const summary = h.events(thread.id).find((e) => e.type === 'assistant.text' && e.summary);
+  assert.ok(summary?.type === 'assistant.text' && summary.givesWay === true);
+  assert.equal(h.runner.get(thread.id).preview, '- Fixed the loader bug; tests pass.', 'previews keep the bullets');
+});
+
+test('bullet replies off: a message that came only as narration is asked for again, and kept at any length', async () => {
+  const h = makeHarness(undefined, { bulletReplies: false });
+  const { thread, s } = start(h);
+  const { call } = tools(h, thread.id, () => false);
+  s.out({ kind: 'event', event: { type: 'assistant.text', itemId: 'm1:1', text: "I've explained the fix.", narration: true } });
+  const args = { summary: ['Explained the fix in plenty of detail for you.'], needs: 'nothing' };
+  toolCall(s, 'e1', END_TURN, args);
+  const r = await call('end_turn', args);
+  assert.equal(r.error, false, 'no refusal loop');
+  assert.match(r.text, /Write the whole message again now/);
+  s.out({ kind: 'event', event: { type: 'tool.result', itemId: 'e1', ok: true, text: r.text, truncated: false, images: [] } });
+  s.text('m2:0', 'It was the loader.');
+  s.text('m3:0', 'Over to you.');
+  const texts = h.events(thread.id).filter((e) => e.type === 'assistant.text').map((e) => e.itemId);
+  assert.deepEqual(texts, ['m1:1', 'e1.summary', 'm2:0']);
+});
+
+test('bullet replies off: Codex is asked for its whole final answer', async () => {
+  const h = makeHarness(undefined, { bulletReplies: false });
+  const { thread } = start(h);
+  const list = buildThreadbearTools(h.runner, thread.id, Date.now, undefined, undefined, undefined, { provider: 'codex', bulletReplies: () => false });
+  const t = list.find((x) => x.name === 'end_turn')!;
+  const r = (await t.handler({ summary: ['Fixed it.'] } as never, {})) as { content: { text: string }[] };
+  assert.equal(r.content[0].text, 'Noted. Now write your final answer: it ends the turn.');
 });
 
 // Thread 2a0a9c2c, 30 Oct 2026: asked for the details for a call to Qantas,

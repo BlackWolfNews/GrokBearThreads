@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { PersistedEvent } from '../../src/protocol.ts';
-import { archiveFromTool, CODEX_END_TURN_DESCRIPTION, END_TURN_DESCRIPTION, END_TURN_FULL_NAME, needsFromText, needsFromTool, summaryFromTool, summaryMarkdown, turnReply } from '../../src/needs.ts';
+import { archiveFromTool, CODEX_END_TURN_DESCRIPTION, END_TURN_DESCRIPTION, END_TURN_FULL_NAME, endTurnDescription, needsFromText, needsFromTool, summaryFromTool, summaryMarkdown, turnReply } from '../../src/needs.ts';
 import { END_TURN_TOOL } from '../../src/needs.ts';
 import { SERVER_NAME } from '../../src/threadbear-mcp.ts';
 import { ClaudeNormalizer, fileContext } from '../../src/adapters/claude/normalize.ts';
@@ -328,4 +328,16 @@ test('turnReply: a reply in words after a narration block is not narration-only;
 test("end_turn's description asks for the words naming a link's target to be that link", () => {
   // Mike, 29 Oct: plain "the screenshots in Highlights" over a button for the same screenshot.
   for (const d of [END_TURN_DESCRIPTION, CODEX_END_TURN_DESCRIPTION]) assert.match(d, /make those words a link to the same url/);
+});
+
+test('with bullet replies off, end_turn asks for a normal message first', () => {
+  assert.equal(endTurnDescription('claude', true), END_TURN_DESCRIPTION);
+  assert.equal(endTurnDescription('codex', true), CODEX_END_TURN_DESCRIPTION);
+  assert.match(endTurnDescription('claude', false), /Write your reply as an ordinary message/);
+  assert.match(endTurnDescription('claude', false), /refused until the turn has that message/);
+  assert.match(endTurnDescription('codex', false), /Write your reply as your final answer/);
+  for (const provider of ['claude', 'codex'] as const) {
+    assert.doesNotMatch(endTurnDescription(provider, false), /the bullets are the reply|one short line/);
+    assert.match(endTurnDescription(provider, false), /make those words a link to the same url/);
+  }
 });

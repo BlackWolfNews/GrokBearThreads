@@ -549,10 +549,12 @@ export type EventBody =
   // after a restart).
   | { type: 'user.message'; text: string; images: ImageRef[]; origin?: MessageOrigin; scheduleId?: string; reviewId?: string; reviewResponse?: ReviewDraft; answers?: AskAnswer[]; editOf?: number }
   // summary: the turn's summary, written by the runner from end_turn
+  // givesWay: the turn's summary, with bullet replies off: any message of
+  // the turn is the reply over it, however short
   // narration: the provider sent only a summary of what the agent wrote
   // (Claude's narration blocks, normalize.ts); a later event with the
   // same itemId replaces it (docs/protocol.md, Transient events).
-  | { type: 'assistant.text'; itemId: string; text: string; summary?: true; narration?: true }
+  | { type: 'assistant.text'; itemId: string; text: string; summary?: true; givesWay?: true; narration?: true }
   | { type: 'reasoning'; itemId: string; text: string }
   | { type: 'tool.call'; itemId: string; name: string; kind: ToolKind; title: string; input: Record<string, unknown> }
   | {

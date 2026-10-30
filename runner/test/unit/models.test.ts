@@ -161,17 +161,20 @@ test('settings: update saves to runner.json, applies at once, and a bad field ch
   const other = path.join(s.home, 'other');
   fs.mkdirSync(other);
   // dailyBudgetUsd: what an older app still sends; ignored.
-  const r = s.methods['settings.update']({ defaultCwd: other, idleMinutes: 10, maxLiveCLIs: 3, followMain: false, models: { dailyBudgetUsd: 2.5, privateFolders: ['~/client', ' ', '~/client'] } }) as { settings: any };
+  const r = s.methods['settings.update']({ defaultCwd: other, idleMinutes: 10, maxLiveCLIs: 3, followMain: false, bulletReplies: false, models: { dailyBudgetUsd: 2.5, privateFolders: ['~/client', ' ', '~/client'] } }) as { settings: any };
   assert.equal(r.settings.defaultCwd, other);
   assert.equal(s.cfg.idleMs, 10 * 60_000);
   assert.equal(s.cfg.maxLive, 3);
   assert.deepEqual(s.cfg.models, { pool: 'claude', privateFolders: ['~/client'] });
   assert.equal(r.settings.followMain, false);
+  assert.equal(r.settings.bulletReplies, false);
+  assert.equal(s.cfg.bulletReplies, false);
   assert.equal(s.published.length, 1);
   assert.equal(s.published[0].method, 'settings.updated');
   const json = JSON.parse(fs.readFileSync(path.join(s.home, 'runner.json'), 'utf8'));
   assert.equal(json.idleMinutes, 10);
   assert.equal(json.followMain, false);
+  assert.equal(json.bulletReplies, false);
   assert.deepEqual(json.models, { privateFolders: ['~/client'] });
   // A fresh load reads the same.
   const cfg = loadConfig({ THREADBEAR_HOME: s.home });

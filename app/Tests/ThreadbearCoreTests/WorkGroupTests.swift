@@ -594,6 +594,28 @@ final class WorkGroupTests: XCTestCase {
         XCTAssertNil(model.rows.first { $0.kind == .changes })
     }
 
+    /// A sign-off shorter than the bullets loses to them, unless the summary
+    /// was written with bullet replies off (docs/protocol.md, "The summary").
+    func testASummaryThatGivesWayLosesToAShortMessage() {
+        func model(givesWay: Bool) -> TranscriptModel {
+            var summary: [String: Any] = ["itemId": "e1.summary", "text": "- Fixed the loader bug and the tests pass", "summary": true]
+            if givesWay { summary["givesWay"] = true }
+            return TranscriptModel(events: [
+                E.user(1, "Fix it"), Self.started(2),
+                E.call(3, "c1").withTurn("t1"), E.result(4, "c1").withTurn("t1"),
+                E.text(5, "m1", "Fixed it.").withTurn("t1"),
+                E.call(6, "e1", name: "mcp__threadbear__end_turn", kind: "mcp", title: "end_turn").withTurn("t1"),
+                E.result(7, "e1", text: "Noted: this thread is done.").withTurn("t1"),
+                E.event(8, "assistant.text", summary, turn: "t1"),
+                E.done(9),
+            ])
+        }
+        XCTAssertNotNil(model(givesWay: false).row(id: "a:e1.summary"))
+        XCTAssertNil(model(givesWay: false).row(id: "a:m1"), "folded into the work")
+        XCTAssertNotNil(model(givesWay: true).row(id: "a:m1"))
+        XCTAssertNil(model(givesWay: true).row(id: "a:e1.summary"), "folded into the work")
+    }
+
     func testATurnWithNoEditsHasNoCard() {
         let model = TranscriptModel(events: [E.user(1, "Hi"), E.call(2, "c1"), E.text(3, "m1", "Hello"), E.done(4)])
         XCTAssertNil(model.rows.first { $0.kind == .changes })

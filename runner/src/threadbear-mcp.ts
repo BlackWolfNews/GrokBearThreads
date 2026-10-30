@@ -19,7 +19,7 @@ import { parseWhen, relativeFuture, relativeTime } from './when.ts';
 
 export { parseWhen, relativeFuture, relativeTime };
 import { RUNNER_VERSION, expandHome } from './config.ts';
-import { ALREADY_ENDED, CODEX_END_TURN_DESCRIPTION, END_TURN_DESCRIPTION, END_TURN_TOOL, BULLETS_ONLY, ENDED, endedThisTurn, NARRATION_ONLY, NO_REPLY, needsFromTool, summaryFromTool, turnReply, type TurnReply } from './needs.ts';
+import { ALREADY_ENDED, endTurnDescription, END_TURN_TOOL, BULLETS_ONLY, ENDED, endedThisTurn, NARRATION_ONLY, NO_REPLY, needsFromTool, summaryFromTool, turnReply, type TurnReply } from './needs.ts';
 import { asksForAppRestart, type AppRestarts } from './app-restarts.ts';
 import { PANEL_PLACES } from './panel-requests.ts';
 import { nudgedThisTurn, signInNudge, turnSignIns, uncovered } from './connectors.ts';
@@ -110,9 +110,12 @@ export function buildThreadbearTools(
   appRestarts?: AppRestartControl,
   // codex: the tools are for a Codex thread, whose end_turn comes just
   // before its final answer rather than after it (needs.ts).
-  opts: { sleep?: (ms: number) => Promise<void>; provider?: 'claude' | 'codex' } = {},
+  // bulletReplies: Settings > General; false has agents write a normal
+  // message as the reply, with the bullets only for previews.
+  opts: { sleep?: (ms: number) => Promise<void>; provider?: 'claude' | 'codex'; bulletReplies?: () => boolean } = {},
 ) {
   const codex = opts.provider === 'codex';
+  const bulletReplies = () => opts.bulletReplies?.() !== false;
   const all = async (): Promise<ThreadSummary[]> => control.list(['inbox', 'snoozed', 'archived']);
   const sleep = opts.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
 
@@ -583,14 +586,14 @@ export function buildThreadbearTools(
     // handler only checks it; a sub-agent's call never reaches the thread.
     tool(
       END_TURN_TOOL,
-      codex ? CODEX_END_TURN_DESCRIPTION : END_TURN_DESCRIPTION,
+      endTurnDescription(codex ? 'codex' : 'claude', bulletReplies()),
       {
         needs: z.enum(['you', 'nothing']).optional().describe('"you" when the user has to do something before this can go on; "nothing" when it is done. Left out, it follows the asks.'),
         summary: z
           .array(z.string())
           .max(8)
           .optional()
-          .describe('What happened this turn, 2 to 5 markdown bullets (one string each, no leading dash), each one line of about 15 words at most, linked to where the user can check it: [tests pass](work:npm test) for a step in your working, [its own thread](thread:a1b2c3d4), a web page or a file. Drawn as your reply; see the description.'),
+          .describe('What happened this turn, 2 to 5 markdown bullets (one string each, no leading dash), each one line of about 15 words at most, linked to where the user can check it: [tests pass](work:npm test) for a step in your working, [its own thread](thread:a1b2c3d4), a web page or a file. See the description.'),
         asks: z
           .array(
             z.object({
@@ -636,12 +639,16 @@ export function buildThreadbearTools(
         // Codex's reply is the final answer it writes next.
         const summary = summaryFromTool(args);
         const reply = codex ? undefined : await replied();
-        if (reply && !summary && !reply.replied) throw new Error(NO_REPLY);
+        // With bullet replies off, bullets don't stand in for the message.
+        // Read at each call, as a live session's description is from before
+        // any change to the setting.
+        const needsMessage = !summary || !bulletReplies();
+        if (reply && needsMessage && !reply.replied) throw new Error(NO_REPLY);
         // Bullets with no message since the last step (or only a
         // narration block's summary of one): told to stop in words the
         // runner knows, so it keeps a message that follows anyway
         // (needs.ts, BULLETS_ONLY).
-        const owed = Boolean(summary && reply && (!reply.replied || reply.narrationOnly));
+        const owed = Boolean(!needsMessage && reply && (!reply.replied || reply.narrationOnly));
         if (endedThisTurn(await turnEvents(), SERVER_NAME)) throw new Error(ALREADY_ENDED);
         // A connector that needs Mike to sign in again (a gateway service's
         // sign_in stub, or claude.ai's "needs you to sign in again") came
@@ -662,7 +669,7 @@ export function buildThreadbearTools(
         // Not ENDED: that would have the runner drop the final answer that
         // follows as text after end_turn.
         if (codex) {
-          const answer = summary ? 'Now write your final answer, one short line, as the user reads your summary: it ends the turn.' : 'Now write your final answer: it ends the turn.';
+          const answer = needsMessage ? 'Now write your final answer: it ends the turn.' : 'Now write your final answer, one short line, as the user reads your summary: it ends the turn.';
           return needs === 'you' ? `Noted.${restart} ${answer} Keep the asks out of it, as they go in a card under it.` : `Noted. ${answer}`;
         }
         // With the why, as the bare "End the turn now, with no more text"
@@ -671,7 +678,7 @@ export function buildThreadbearTools(
         // asks for without a nudge (adapter.ts) (28 Oct 2026).
         // A reply that reached Mike only as a summary is asked for again;
         // the runner puts it in the summary's place (needs.ts, NARRATION_ONLY).
-        if (!summary && reply?.narrationOnly) {
+        if (needsMessage && reply?.narrationOnly) {
           return needs === 'you'
             ? `${ENDED} will wait in Needs you${archive ? ', and stays in the inbox, as it needs something from the user' : ''}.${restart} ${NARRATION_ONLY} Keep the asks out of it: they go in a card under it.`
             : `${ENDED} is done${archive ? ', and will be archived once the turn is over' : ''}. ${NARRATION_ONLY}`;
@@ -966,7 +973,7 @@ export function guideLine(file = guidePath(), exists: (p: string) => boolean = f
   );
 }
 
-export function threadbearMcpServer(control: ThreadControl, selfId: string, schedules?: ScheduleControl, projects?: ProjectControl, appRestarts?: AppRestartControl): McpSdkServerConfigWithInstance {
+export function threadbearMcpServer(control: ThreadControl, selfId: string, schedules?: ScheduleControl, projects?: ProjectControl, appRestarts?: AppRestartControl, bulletReplies: () => boolean = () => true): McpSdkServerConfigWithInstance {
   const guide = guideLine();
   const server = createSdkMcpServer({
     name: SERVER_NAME,
@@ -979,8 +986,10 @@ export function threadbearMcpServer(control: ThreadControl, selfId: string, sche
       'Use move_thread when the work belongs in another folder (for example a repo), so this thread runs there from the next turn. ' +
       `${SHOWING_THE_USER} ` +
       (projects ? `${FILING_PROJECTS} ` : '') +
-      'End every turn by calling end_turn, with a short summary of what you did (the user reads it first, as your reply) and anything they have to do.',
-    tools: buildThreadbearTools(control, selfId, Date.now, schedules, projects, appRestarts),
+      (bulletReplies()
+        ? 'End every turn by calling end_turn, with a short summary of what you did (the user reads it first, as your reply) and anything they have to do.'
+        : 'End every turn by writing your reply as an ordinary message, then calling end_turn with a short summary of what you did (for previews and notifications) and anything they have to do.'),
+    tools: buildThreadbearTools(control, selfId, Date.now, schedules, projects, appRestarts, { bulletReplies }),
   });
   server.tools = [...ALWAYS_ASK_TOOLS].map((name) => ({ name: name.split('__').at(-1)!, permission_policy: 'always_ask' as const }));
   return server;

@@ -621,6 +621,7 @@ function printSettings(s: Settings): void {
   console.log(`Idle minutes     ${s.idleMinutes}`);
   console.log(`Most live CLIs   ${s.maxLiveCLIs}`);
   console.log(`Follow main      ${s.followMain ? 'on' : 'off'}`);
+  console.log(`Bullet replies   ${s.bulletReplies === false ? 'off' : 'on'}`);
   printModels(s);
 }
 

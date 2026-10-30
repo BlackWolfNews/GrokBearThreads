@@ -55,6 +55,7 @@ extension AppModel {
             if let v = update.idleMinutes { shown.idleMinutes = v }
             if let v = update.maxLiveCLIs { shown.maxLiveCLIs = v }
             if let v = update.followMain { shown.followMain = v }
+            if let v = update.bulletReplies { shown.bulletReplies = v }
             if let v = update.pool { shown.models.pool = v }
             if let v = update.privateFolders { shown.models.privateFolders = v }
             runnerSettings = shown
