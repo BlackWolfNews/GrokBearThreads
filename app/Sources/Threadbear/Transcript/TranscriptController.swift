@@ -805,7 +805,8 @@ final class TranscriptController: NSObject, NSTableViewDataSource, NSTableViewDe
     /// the ask's links where links open (the pane or the browser). The done
     /// card's `archive` archives the thread, as ⌘E does, and `next:<n>`
     /// ticks or unticks a suggested follow-up, which waits in the composer.
-    /// `page:<n>` shows ask `n` on a paged card.
+    /// `page:<n>` shows ask `n` on a paged card, and `collapse` folds the
+    /// card to its heading or brings it back.
     func askAction(_ card: AsksCard, action: String) {
         guard let session, let app = session.app, let thread = app.threads[session.threadId] else { return }
         if action == "archive" {
@@ -816,6 +817,10 @@ final class TranscriptController: NSObject, NSTableViewDataSource, NSTableViewDe
         }
         if action.hasPrefix("page:") {
             if let n = Int(action.dropFirst(5)) { composerCard?.showPage(n) }
+            return
+        }
+        if action == "collapse" {
+            app.toggleCardCollapsed(threadId: thread.id, seq: card.seq)
             return
         }
         if action.hasPrefix("next:") {

@@ -9,8 +9,12 @@ import ThreadbearCore
 /// recognise as what he'd chosen. The card is drawn as it was in the
 /// transcript: a bare TextRowCell, its clicks going to the transcript's
 /// controller, which looks after the thread on show.
+///
+/// A card of asks can be collapsed to its heading with the chevron at its
+/// top right, to read the reply behind it (Mike, 30 Oct).
 struct ComposerCard: NSViewRepresentable {
     let row: TranscriptRow
+    var collapsed = false
     let controller: TranscriptController
 
     func makeNSView(context: Context) -> ComposerCardHost {
@@ -19,12 +23,12 @@ struct ComposerCard: NSViewRepresentable {
 
     func updateNSView(_ view: ComposerCardHost, context: Context) {
         view.attach(controller)
-        view.show(row)
+        view.show(row, collapsed: collapsed)
     }
 
     func sizeThatFits(_ proposal: ProposedViewSize, nsView: ComposerCardHost, context: Context) -> CGSize? {
         let width = proposal.width ?? Theme.maxContentWidth
-        let full = ComposerCardHost.render(row, width: width, page: nsView.page).height
+        let full = ComposerCardHost.render(row, width: width, page: nsView.page, collapsed: collapsed).height
         return CGSize(width: width, height: min(full, nsView.maxHeight))
     }
 }
@@ -37,7 +41,11 @@ final class ComposerCardHost: NSView {
     private let document = FlippedView()
     private weak var controller: TranscriptController?
     private var row: TranscriptRow?
-    private var shown: (row: TranscriptRow, width: CGFloat, zoom: Int)?
+    private var collapsed = false
+    /// A real button rather than a `.tbAction` run like the pager's, so it
+    /// has a tooltip, and stays put while a tall card scrolls under it.
+    private let toggle = NSHostingView(rootView: CardCollapseButton(collapsed: false, action: {}))
+    private var shown: (row: TranscriptRow, collapsed: Bool, width: CGFloat, zoom: Int)?
     /// The Something else box to put the cursor in once the card has made
     /// room for it (picking it and the card growing happen a beat apart).
     private var pendingFocus: Int?
@@ -61,6 +69,9 @@ final class ComposerCardHost: NSView {
         scroll.documentView = document
         document.addSubview(cell)
         addSubview(scroll)
+        // It's framed by hand in layout, so it mustn't add constraints.
+        toggle.sizingOptions = []
+        addSubview(toggle)
         controller.composerCard = self
     }
 
@@ -85,9 +96,15 @@ final class ComposerCardHost: NSView {
     /// The card at `width`. A paged one is drawn on `page` but as tall as
     /// its tallest page, so the composer doesn't jump up and down and the
     /// arrows stay put under the pointer while he pages through.
-    static func render(_ row: TranscriptRow, width: CGFloat, page: Int = 0) -> RowRender {
+    static func render(_ row: TranscriptRow, width: CGFloat, page: Int = 0, collapsed: Bool = false) -> RowRender {
         guard case .asks(let card) = row.content else { return RowRender(height: 0) }
         let measure = { (text: NSAttributedString) in TextMeasurer.current.measure(text, width: width) }
+        if collapsed {
+            let heading = RowRenderer.asksText(card, width: width, collapsed: true)
+            let size = measure(heading)
+            // Never shorter than the chevron beside it.
+            return RowRender(height: max(size.height, toggleSize), text: heading, textSize: size)
+        }
         let all = RowRenderer.asksText(card, width: width)
         let full = measure(all)
         guard isPaged(card, height: full.height) else { return RowRender(height: full.height, text: all, textSize: full) }
@@ -104,9 +121,10 @@ final class ComposerCardHost: NSView {
         return RowRender(height: tallest, text: text, textSize: size)
     }
 
-    func show(_ row: TranscriptRow) {
-        guard row != self.row else { return }
+    func show(_ row: TranscriptRow, collapsed: Bool = false) {
+        guard row != self.row || collapsed != self.collapsed else { return }
         self.row = row
+        self.collapsed = collapsed
         if case .asks(let card) = row.content, card.seq != pageSeq {
             pageSeq = card.seq
             page = card.asks.indices.first { card.picks[$0] == nil } ?? 0
@@ -147,13 +165,36 @@ final class ComposerCardHost: NSView {
         scroll.frame = bounds
         guard let row, bounds.width > 0 else { return }
         let zoom = TypeScale.percent
-        if let shown, shown.row == row, shown.width == bounds.width, shown.zoom == zoom { return }
-        shown = (row, bounds.width, zoom)
-        let render = Self.render(row, width: bounds.width, page: page)
+        if let shown, shown.row == row, shown.collapsed == collapsed, shown.width == bounds.width, shown.zoom == zoom { return }
+        shown = (row, collapsed, bounds.width, zoom)
+        placeToggle(row)
+        let render = Self.render(row, width: bounds.width, page: page, collapsed: collapsed)
         document.frame = NSRect(x: 0, y: 0, width: bounds.width, height: render.height)
         cell.frame = document.bounds
         cell.configure(row: row, render: render, tableWidth: bounds.width, expanded: false)
         if let ask = pendingFocus, cell.focusAnswerBox(ask) { pendingFocus = nil }
+    }
+
+    static var toggleSize: CGFloat { zoomed(22) }
+
+    /// The chevron, at the right of the heading line and centred on it,
+    /// which is a button tall on a paged card. Only asks collapse: a done
+    /// card has Archive there, and is short already.
+    private func placeToggle(_ row: TranscriptRow) {
+        guard case .asks(let card) = row.content, !card.isDone else {
+            toggle.isHidden = true
+            return
+        }
+        let width = bounds.width
+        let full = TextMeasurer.current.measure(RowRenderer.asksText(card, width: width), width: width)
+        let line = !collapsed && Self.isPaged(card, height: full.height) ? TypeScale.scaled(38) : TypeScale.workLine
+        let size = Self.toggleSize
+        toggle.frame = NSRect(x: width - size, y: max(0, (line - size) / 2), width: size, height: size)
+        toggle.isHidden = false
+        toggle.rootView = CardCollapseButton(collapsed: collapsed) { [weak self] in
+            guard let self, case .asks(let card)? = self.row?.content else { return }
+            self.controller?.askAction(card, action: "collapse")
+        }
     }
 
     func focusAnswerBox(_ ask: Int) {
@@ -163,6 +204,23 @@ final class ComposerCardHost: NSView {
     #if DEBUG
     func debugHover(_ on: Bool) -> Bool { cell.debugHover(on) }
     #endif
+}
+
+/// Points where the card will go: down to tuck it into the composer, up
+/// to bring it back.
+private struct CardCollapseButton: View {
+    let collapsed: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: collapsed ? "chevron.up" : "chevron.down")
+                .font(.system(size: zoomed(11), weight: .semibold))
+        }
+        .buttonStyle(RowIconButtonStyle())
+        .accessibilityLabel(collapsed ? "Expand" : "Collapse")
+        .tip(collapsed ? "Expand" : "Collapse")
+    }
 }
 
 private final class FlippedView: NSView {

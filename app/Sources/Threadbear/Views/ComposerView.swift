@@ -40,6 +40,7 @@ struct ComposerView: View {
         // while a message is being edited: the edit is a reply of its own.
         let cardRow = thread.flatMap { thread in app.editing[thread.id] == nil ? session?.openCard : nil }
         let needsYou = cardRow.map { row in if case .asks(let card) = row.content { !card.isDone } else { false } } ?? false
+        let cardCollapsed = needsYou && thread.map { app.collapsedCards[$0.id] == cardRow?.seq } == true
         VStack(alignment: .leading, spacing: 0) {
         // The folder's actions (patches), on shelves sitting on the box's
         // top edge, in from its rounded corner (ActionChips).
@@ -54,7 +55,7 @@ struct ComposerView: View {
         // The box: the open card over a line, then the message.
         VStack(alignment: .leading, spacing: 0) {
         if let cardRow, let controller {
-            ComposerCard(row: cardRow, controller: controller)
+            ComposerCard(row: cardRow, collapsed: cardCollapsed, controller: controller)
                 .padding(.horizontal, Self.padding)
                 .padding(.top, zoomed(8))
                 .padding(.bottom, zoomed(10))
@@ -65,8 +66,9 @@ struct ComposerView: View {
         VStack(alignment: .leading, spacing: zoomed(10)) {
             if let thread, let edit = app.editing[thread.id] {
                 EditingBanner(sending: edit.sending) { app.cancelEditing(threadId: thread.id) }
-            } else if let thread, !picks.isEmpty, cardRow == nil {
-                // With the card right above, its buttons show what's picked.
+            } else if let thread, !picks.isEmpty, cardRow == nil || cardCollapsed {
+                // With the card open right above, its buttons show what's
+                // picked. Collapsed, the picks would go with no sign of them.
                 AnswerChips(thread: thread, picks: picks)
             }
             if !draft.wrappedValue.images.isEmpty || importing > 0 {

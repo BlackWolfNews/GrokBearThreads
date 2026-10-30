@@ -1183,8 +1183,10 @@ enum RowRenderer {
     /// ‹ 2 of 3 › on its right (`page:<n>`): three asks with their buttons
     /// took most of the window's height (Mike, 30 Oct), so a tall card
     /// shows them one at a time (ComposerCardHost decides when).
-    static func asksText(_ card: AsksCard, width: CGFloat = 600, page: Int? = nil) -> NSAttributedString {
+    /// `collapsed` is the heading alone, with no pager.
+    static func asksText(_ card: AsksCard, width: CGFloat = 600, page: Int? = nil, collapsed: Bool = false) -> NSAttributedString {
         if card.isDone { return doneText(card, width: width) }
+        if collapsed { return asksHeading(card, width: width, page: nil) }
         let page = page.flatMap { card.isOpen && card.asks.indices.contains($0) ? $0 : nil }
         let output = asksHeading(card, width: width, page: page)
         let numbered = card.asks.count > 1
@@ -1267,7 +1269,8 @@ enum RowRenderer {
     /// the asks: a plain "Needs you" was easy to miss (Mike, 30 Oct).
     /// "Decisions needed" when every ask came with answers to pick from,
     /// as most do. On a paged card the line is a button tall, with the
-    /// pager on a right tab; past either end its arrow is faint and does
+    /// pager on a right tab, clear of the collapse chevron ComposerCardHost
+    /// puts at the line's end; past either end its arrow is faint and does
     /// nothing.
     private static func asksHeading(_ card: AsksCard, width: CGFloat, page: Int?) -> NSMutableAttributedString {
         let title = Theme.changesTitleFont
@@ -1284,7 +1287,7 @@ enum RowRenderer {
         if page != nil {
             let height = TypeScale.scaled(38)
             (style, buttonOffset) = Theme.lines(height, font: button)
-            style.tabStops = [NSTextTab(textAlignment: .right, location: width - 1)]
+            style.tabStops = [NSTextTab(textAlignment: .right, location: width - 1 - ComposerCardHost.toggleSize - zoomed(6))]
             offset = Theme.baselineOffset(height, font: title)
         } else {
             (style, offset) = Theme.lines(TypeScale.workLine, font: title, spacing: zoomed(6))

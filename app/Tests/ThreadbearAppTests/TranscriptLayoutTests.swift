@@ -208,6 +208,38 @@ final class TranscriptLayoutTests: XCTestCase {
         XCTAssertTrue(shortText.contains("Merge?") && shortText.contains("Tag it?") && !shortText.contains("of 2"), shortText)
     }
 
+    /// Collapsed, a card of asks is its heading alone, with no pager, and
+    /// the pager of an open paged card leaves room for the chevron.
+    func testACollapsedCardIsItsHeadingAlone() {
+        let why = String(repeating: "This one needs a proper explanation so it wraps over a few lines. ", count: 3)
+        let asks = (1...3).map { Ask(action: "Pick number \($0)", why: why, options: ["Yes", "No"]) }
+        let row = TranscriptRow(id: "ak:1", seq: 1, turnId: "t1", content: .asks(AsksCard(seq: 1, asks: asks)))
+        let open = ComposerCardHost.render(row, width: 600, page: 1)
+        let collapsed = ComposerCardHost.render(row, width: 600, page: 1, collapsed: true)
+        XCTAssertLessThan(collapsed.height, 40)
+        XCTAssertGreaterThanOrEqual(collapsed.height, ComposerCardHost.toggleSize)
+        XCTAssertLessThan(collapsed.height, open.height)
+        XCTAssertTrue(collapsed.text!.string.contains("Decisions needed"), collapsed.text!.string)
+        XCTAssertFalse(collapsed.text!.string.contains("Pick number"), collapsed.text!.string)
+        XCTAssertFalse(collapsed.text!.string.contains("of 3"), collapsed.text!.string)
+        let style = open.text!.attribute(.paragraphStyle, at: 0, effectiveRange: nil) as! NSParagraphStyle
+        XCTAssertLessThanOrEqual(style.tabStops[0].location, 600 - ComposerCardHost.toggleSize)
+    }
+
+    /// Collapsing belongs to the card: the next one opens.
+    func testCollapsingLastsForThatCardOnly() {
+        let app = AppModel()
+        app.toggleCardCollapsed(threadId: "t", seq: 4)
+        XCTAssertEqual(app.collapsedCards["t"], 4)
+        // A newer card isn't collapsed by the older one's entry.
+        XCTAssertNotEqual(app.collapsedCards["t"], 9)
+        app.toggleCardCollapsed(threadId: "t", seq: 4)
+        XCTAssertNil(app.collapsedCards["t"])
+        app.toggleCardCollapsed(threadId: "t", seq: 4)
+        app.toggleCardCollapsed(threadId: "t", seq: 9)
+        XCTAssertEqual(app.collapsedCards["t"], 9)
+    }
+
     /// The open card is drawn in the composer (ComposerCard), so its row
     /// in the transcript takes no room.
     func testTheOpenCardTakesNoRoomInTheTranscript() {

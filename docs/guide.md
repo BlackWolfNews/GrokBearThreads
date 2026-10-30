@@ -108,8 +108,10 @@ one. Its heading says what's wanted ("Decisions needed" when every ask
 has answers to pick). When there are several asks and they'd take a lot
 of room, the card shows one at a time, with ‹ 1 of 3 › by the heading;
 picking an answer moves on to the next ask still waiting for one. A long
-ask scrolls inside the box, so the reply stays in sight. Once you reply,
-the card goes.
+ask scrolls inside the box, so the reply stays in sight. The chevron at
+the card's top right collapses it to its heading, to read the reply behind
+it, and brings it back; the next card opens again. Once you reply, the
+card goes.
 
 To answer a Needs you card, click its buttons: your picks show on the
 card and go with your next message. To answer an ask in your own

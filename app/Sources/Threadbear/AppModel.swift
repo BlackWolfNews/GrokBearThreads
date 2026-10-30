@@ -167,6 +167,9 @@ final class AppModel {
     /// thread id, waiting in the composer to go with his next message.
     /// Ones for an older card count as none.
     var askPicks: [String: AskPicks] = [:]
+    /// The seq of the card of asks collapsed on each thread, by thread id.
+    /// By card, so the next one, something new to decide, always opens.
+    var collapsedCards: [String: Int] = [:]
     /// The follow-ups ticked on each thread's done card, by thread id,
     /// waiting in the composer the same way. Ones for an older card count
     /// as none.
@@ -1105,6 +1108,13 @@ final class AppModel {
         stopShowingSubagent()
         sidebarMode = .inbox
         focusComposer("new")
+    }
+
+    /// Collapses the thread's card of asks, or brings it back. The cursor
+    /// goes to the composer, as a Something else box may have just gone.
+    func toggleCardCollapsed(threadId: String, seq: Int) {
+        collapsedCards[threadId] = collapsedCards[threadId] == seq ? nil : seq
+        focusComposer(threadId)
     }
 
     /// The answers picked on the thread's open card (ask index to option
