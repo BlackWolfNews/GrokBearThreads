@@ -514,7 +514,9 @@ type Settings = {
 ### Design reviews
 
 `show_options` gives the calling thread a durable image review. It returns
-promptly; the agent may finish its turn while Mike reviews the options.
+promptly, with the review's id and the `review:<id>` link that opens it
+from an ask or a message (see Needs you); the agent may finish its turn
+while Mike reviews the options.
 The app shows a compact card outside work groups. Opening it opens a
 resizable, modeless comparison window; arrival never steals focus.
 
@@ -1340,10 +1342,16 @@ A turn the agent finished can say whether Mike has to do anything, so
   `options` up to six likely answers and `suggested` the index of the
   agent's own pick (dropped unless it points at an option). `links` (up
   to three) are where to go to do it or judge it, `{ title, url }`: a web
-  page (`http(s)://`) or a file or folder on Mike's Mac (`file://`, an
-  absolute or `~` path); anything else is dropped. The app shows a
-  picture, PDF, text file or page in the pane and opens anything else (a
-  folder, a `.tandem` project) in its own app. The agent calls it last, after its final
+  page (`http(s)://`), a file or folder on Mike's Mac (`file://`, an
+  absolute or `~` path), or `review:<id>`, one of the thread's design
+  reviews (the id `show_options` returned, letters, digits and dashes);
+  anything else is dropped. The app shows a
+  picture, PDF, text file or page in the pane, opens a review's window as
+  its card does, and opens anything else (a
+  folder, a `.tandem` project) in its own app. A review link has no
+  hover peek and isn't sent to the phone (only `http(s)` links are). Mike,
+  30 Oct 2026: a card's buttons opened three videos, but nothing on it
+  opened the stills the agent had put up to compare. The agent calls it last, after its final
   message. The tool's description says when, so a resumed session that
   kept its old system prompt still hears it.
 - **The summary.** `end_turn` also takes `summary?: string[]`: two to
@@ -1412,7 +1420,9 @@ A turn the agent finished can say whether Mike has to do anything, so
   every one came back as bullets (docs/end-turn-design).
 - **Links into the thread.** A summary bullet (or any message, or an
   ask's markdown) can link `work:<words>`, a step in this turn's working,
-  and `thread:<id>`, another thread by id or id prefix. Spaces are fine
+  `thread:<id>`, another thread by id or id prefix, and `review:<id>`,
+  one of this thread's design reviews by id or a prefix that fits only
+  one (its window opens). Spaces are fine
   inside the parentheses. The app opens the turn's work group, scrolls to
   the step and lights it up: the last step whose command (or one of its
   `&&` parts) starts with the words, else the last whose command,

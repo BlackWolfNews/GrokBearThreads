@@ -261,7 +261,7 @@ export function buildThreadbearTools(
       handle(async (input) => {
         if (!control.createReview) throw new Error('This runner does not support image reviews yet.');
         const { review } = await control.createReview(selfId, input);
-        return `Review ${review.id}: ${review.title} (${review.options.length} images). The user can compare them and send a choice or notes. You can finish this turn; their reply will arrive as a later message.`;
+        return `Review ${review.id}: ${review.title} (${review.options.length} images). The user can compare them and send a choice or notes. You can finish this turn; their reply will arrive as a later message. To open it from an end_turn ask, link to review:${review.id}.`;
       }),
     ),
   ];
@@ -605,7 +605,7 @@ export function buildThreadbearTools(
                 .array(
                   z.object({
                     title: z.string().min(1).describe('What the button does, short: "Open login page", "See the preview".'),
-                    url: z.string().min(1).describe('A web page (https://…) or a file or folder on this Mac (an absolute or ~ path).'),
+                    url: z.string().min(1).describe('A web page (https://…), a file or folder on this Mac (an absolute or ~ path), or review:<id> to open one of this thread\'s show_options reviews.'),
                   }),
                 )
                 .max(3)

@@ -118,6 +118,9 @@ there. You can paste or drop screenshots in that box too, or use its
 picture button. Each ask can have a box of its own. Return sends the lot
 as one message, with anything you wrote in the message box at the end.
 
+When an ask is about pictures the agent put up to compare, its button can
+open that comparison window straight from the card.
+
 Inside a thread, rest the pointer on a link for a moment, in a reply or on a
 Needs you card's buttons, to see where it goes: a picture of the file, or
 the page's address. Click it to open it. If an agent already has that page

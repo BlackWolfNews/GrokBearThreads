@@ -1218,8 +1218,10 @@ enum RowRenderer {
             var links: [AskButton] = []
             for (n, link) in ask.links.enumerated() {
                 guard let target = link.target else { continue }
+                // A review has nothing to peek at: its window is the look.
+                let isReview = WorkLinks.reviewId(of: target) != nil
                 links.append(AskButton(title: link.title + " ↗", action: "link:\(i):\(n)", style: n == 0 ? .primary : .plain,
-                                       peek: LinkPeek(url: target, title: link.title)))
+                                       peek: isReview ? nil : LinkPeek(url: target, title: link.title)))
             }
             var answers = Decisions.choices(for: ask).enumerated().map { n, choice in
                 let style: AskButtonStyle = card.picks[i] == n ? .picked : ask.suggested == n ? .suggested : .plain

@@ -102,6 +102,21 @@ test('end_turn input: links to go and do the thing, web or local, a few at most'
   assert.equal(needsFromTool({ needs: 'you', asks: [{ action: 'a', links: [] }] })!.asks![0].links, undefined);
 });
 
+test('end_turn input: a link can open one of the thread\'s reviews', () => {
+  const asks = needsFromTool({
+    needs: 'you',
+    asks: [{
+      action: 'Pick a banner',
+      links: [
+        { title: 'Compare banners', url: 'review:5f1c2a90-1b2c-4d5e-8f90-0a1b2c3d4e5f' },
+        { title: 'Empty', url: 'review:' },
+        { title: 'Odd', url: 'review:<script>' },
+      ],
+    }],
+  })!.asks!;
+  assert.deepEqual(asks[0].links, [{ title: 'Compare banners', url: 'review:5f1c2a90-1b2c-4d5e-8f90-0a1b2c3d4e5f' }]);
+});
+
 test('the section: a bold heading then a numbered list, with a reply phrase', () => {
   const text = [
     'The Settings window is in.',

@@ -24,9 +24,11 @@ const MAX_URL = 2000;
 // Follow-ups on the done card: a few buttons, each a short message.
 const MAX_NEXT = 3;
 const MAX_NEXT_CHARS = 120;
-// Web pages, and paths on this Mac. Anything else (javascript:, custom
-// schemes) isn't something a button should open.
-const LINK_URL = /^(?:https?:\/\/|file:\/\/|\/|~\/)/i;
+// Web pages, paths on this Mac, and review:<id>, which opens one of the
+// thread's show_options reviews (Mike, 30 Oct: "Watch A" opened the video
+// but nothing opened the stills to compare). Anything else (javascript:,
+// other schemes) isn't something a button should open.
+const LINK_URL = /^(?:https?:\/\/|file:\/\/|\/|~\/|review:[\w-]+$)/i;
 
 // end_turn's input, checked. Undefined when it isn't usable, so the turn
 // falls back to the text.
@@ -299,7 +301,7 @@ const END_TURN_ASKS =
   'needs "you" when it does: an approval, a decision, a key, something to look at, a question. Give one ask per thing they have to do, most blocking first. ' +
   'The asks are your "What I need from you" list: the user reads and answers them in a card under your message, each drawn as one paragraph of message text, its action then its why, with its buttons under it. So don\'t also list them in your message. ' +
   'Write each ask the way you would in that list, so it makes sense on its own to someone who has forgotten everything: action is its first sentence, the thing to do or the question ("Next time you leave the room, take your phone and leave the laptop idle on power."); why carries on the same paragraph with what it is about and what you want back, in a sentence or two ("It should lock within a minute of you going. Tell me whether it did, and I\'ll tune the Bluetooth cutoff."). Say where in it when it matters (System Settings › Bluetooth), and name things rather than places (not "Slack #channel", but "Your Slack draft to Emily names the automation guy Hayden; he is Pete"). When one ask is several questions or choices, end its why with them as a short markdown list, one per line, rather than running them together. ' +
-  'Give links whenever there is somewhere to go to do it or judge it: the page to log in on, the Slack message (its permalink), the PR, the preview, the file or screenshot to look at, the project to open (a path opens in its own app, e.g. a .tandem file in Tandem). Each is a button on the ask, so title it as the action ("Open login page", "Open the Slack message", "Open Short 4 in Tandem"). ' +
+  'Give links whenever there is somewhere to go to do it or judge it: the page to log in on, the Slack message (its permalink), the PR, the preview, the file or screenshot to look at, the project to open (a path opens in its own app, e.g. a .tandem file in Tandem), or review:<id> for a show_options review in this thread (its window, to compare and pick). Each is a button on the ask, so title it as the action ("Open login page", "Open the Slack message", "Open Short 4 in Tandem"). ' +
   // Mike, 29 Oct: an ask said "Look at the screenshots in Highlights" in
   // plain words over a "See the tab" button for the same screenshot.
   'The paragraph is markdown, so where action or why names the thing a link opens, make those words a link to the same url ("Look at [the pairing screenshot](/Users/mike/shots/pair.png) and say whether to land it."): the user can hover them for a peek or click them, and the button stays as the next step. ' +

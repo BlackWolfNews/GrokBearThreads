@@ -833,11 +833,11 @@ enum Automation {
         case "chip":
             return chip(c, app: app)
         case "link":
-            // A work: or thread: link in a row's text, followed as a click
+            // A work:, thread: or review: link in a row's text, followed as a click
             // on it would be (TranscriptController.openThreadLink).
             // Escaped after the scheme only, as the markdown's would be.
             guard let row = c["row"] as? String, let raw = c["url"] as? String, let colon = raw.firstIndex(of: ":"),
-                  let url = URL(string: raw[...colon] + (raw[raw.index(after: colon)...].addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? "")) else { return "error link needs row and a work: or thread: url" }
+                  let url = URL(string: raw[...colon] + (raw[raw.index(after: colon)...].addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? "")) else { return "error link needs row and a work:, thread: or review: url" }
             app.transcript.openThreadLink(url, fromRow: row)
             return "ok"
         case "peek":

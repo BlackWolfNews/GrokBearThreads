@@ -446,10 +446,22 @@ final class TranscriptController: NSObject, NSTableViewDataSource, NSTableViewDe
         refreshInPlace(index: index, row: row)
     }
 
+    /// A review: link opens that review's window, as its card does.
+    private func openReviewLink(_ url: URL) {
+        guard let session, let id = WorkLinks.reviewId(of: url), let review = WorkLinks.review(id, in: session.model.items) else {
+            AppLog.write("transcript", "review link \(url.absoluteString): no such review")
+            NSSound.beep()
+            return
+        }
+        openReview(review)
+    }
+
     /// A work: link opens the turn's working at the step it quotes and
-    /// lights it up; a thread: link opens that thread (WorkLinks).
+    /// lights it up; a thread: link opens that thread; a review: link that
+    /// review (WorkLinks).
     func openThreadLink(_ url: URL, fromRow rowId: String) {
         guard let session else { return }
+        if WorkLinks.reviewId(of: url) != nil { return openReviewLink(url) }
         if let id = WorkLinks.threadId(of: url)?.lowercased() {
             let app = AppModel.shared
             let matches = app.threads.keys.filter { $0 == id || $0.hasPrefix(id) }
@@ -829,6 +841,7 @@ final class TranscriptController: NSObject, NSTableViewDataSource, NSTableViewDe
             }
         case "link":
             guard ask.links.indices.contains(n), let url = ask.links[n].target else { return }
+            if WorkLinks.reviewId(of: url) != nil { return openReviewLink(url) }
             // A picture, PDF, text or page shows in the pane; anything else
             // (a .tandem project, a folder) opens in its own app, as that's
             // where the ask wants him.

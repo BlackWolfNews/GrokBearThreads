@@ -22,7 +22,7 @@ protocol RowCellDelegate: AnyObject {
     /// The pencil by one of Mike's messages: edit it and carry on from
     /// there (docs/protocol.md, "Editing a message").
     func editMessage(rowId: String)
-    /// A work: or thread: link in row `rowId`'s text (WorkLinks): open the
+    /// A work:, thread: or review: link in row `rowId`'s text (WorkLinks): open the
     /// step in that turn's working, or the other thread.
     func openThreadLink(_ url: URL, fromRow rowId: String)
     /// For a thread on another runner ("bruce"): its pictures are files

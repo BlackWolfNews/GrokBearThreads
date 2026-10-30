@@ -1633,8 +1633,9 @@ public struct Ask: Sendable, Hashable, Codable {
     }
 }
 
-/// A button on an ask: a web page, or a file or folder on this Mac (an
-/// absolute, `~` or `file://` path).
+/// A button on an ask: a web page, a file or folder on this Mac (an
+/// absolute, `~` or `file://` path), or `review:<id>`, one of the
+/// thread's design reviews.
 public struct AskLink: Sendable, Hashable, Codable {
     public var title: String
     public var url: String
@@ -1644,10 +1645,12 @@ public struct AskLink: Sendable, Hashable, Codable {
         self.url = url
     }
 
-    /// What clicking it opens: the web page, or the file with `~` expanded.
+    /// What clicking it opens: the web page, the file with `~` expanded,
+    /// or the review.
     public var target: URL? {
         if url.hasPrefix("~/") || url.hasPrefix("/") { return URL(fileURLWithPath: (url as NSString).expandingTildeInPath) }
-        guard let parsed = URL(string: url), let scheme = parsed.scheme?.lowercased(), ["http", "https", "file"].contains(scheme) else { return nil }
+        guard let parsed = URL(string: url), let scheme = parsed.scheme?.lowercased(), ["http", "https", "file", WorkLinks.reviewScheme].contains(scheme) else { return nil }
+        if scheme == WorkLinks.reviewScheme, WorkLinks.reviewId(of: parsed) == nil { return nil }
         return parsed
     }
 }

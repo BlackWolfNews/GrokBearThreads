@@ -5,9 +5,11 @@ import Foundation
 /// the turn's own working, `thread:<id>` another thread. The agent can't
 /// see its tool calls' ids, so a work link quotes the step: the command it
 /// ran or its description, the file it edited, or a line it wrote.
+/// `review:<id>` opens one of the thread's design reviews (show_options).
 public enum WorkLinks {
     public static let workScheme = "work"
     public static let threadScheme = "thread"
+    public static let reviewScheme = "review"
 
     /// The markdown with the spaces (and anything else a URL can't hold)
     /// in work: and thread: destinations escaped, as agents write
@@ -48,6 +50,25 @@ public enum WorkLinks {
         guard url.scheme?.lowercased() == threadScheme else { return nil }
         let id = url.absoluteString.dropFirst(threadScheme.count + 1).trimmingCharacters(in: .whitespaces)
         return id.isEmpty ? nil : id
+    }
+
+    /// The review a review: link names (an id or an id prefix).
+    public static func reviewId(of url: URL) -> String? {
+        guard url.scheme?.lowercased() == reviewScheme else { return nil }
+        let id = url.absoluteString.dropFirst(reviewScheme.count + 1).trimmingCharacters(in: .whitespaces)
+        return id.isEmpty ? nil : id
+    }
+
+    /// The thread's review with that id, or the only one it's a prefix of.
+    public static func review(_ id: String, in rows: some Sequence<TranscriptRow>) -> DesignReview? {
+        let id = id.lowercased()
+        let reviews = rows.compactMap { row -> DesignReview? in
+            if case .review(let review) = row.content { return review }
+            return nil
+        }
+        if let exact = reviews.last(where: { $0.id.lowercased() == id }) { return exact }
+        let matches = reviews.filter { $0.id.lowercased().hasPrefix(id) }
+        return Set(matches.map(\.id)).count == 1 ? matches.last : nil
     }
 
     /// The item a quote means among a turn's items: the last whose command

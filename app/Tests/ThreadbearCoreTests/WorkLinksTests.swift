@@ -213,4 +213,20 @@ final class WorkLinksTests: XCTestCase {
         XCTAssertEqual(WorkLinks.threadId(of: URL(string: "thread:a1b2c3d4")!), "a1b2c3d4")
         XCTAssertNil(WorkLinks.quote(of: URL(string: "https://example.com")!))
     }
+
+    // Mike, 30 Oct: an ask's buttons could open the videos but not the
+    // review window the agent had put the stills in.
+    func testAReviewLinkOpensThatReviewByIdOrPrefix() {
+        XCTAssertEqual(WorkLinks.reviewId(of: URL(string: "review:5f1c2a90-aaaa")!), "5f1c2a90-aaaa")
+        XCTAssertNil(WorkLinks.reviewId(of: URL(string: "thread:5f1c2a90")!))
+        XCTAssertEqual(AskLink(title: "Compare", url: "review:5f1c2a90").target, URL(string: "review:5f1c2a90"))
+        XCTAssertNil(AskLink(title: "Bad", url: "review:").target)
+        let first = DesignReview(id: "5f1c2a90-aaaa", title: "Banners", options: [])
+        let second = DesignReview(id: "5f1c9999-bbbb", title: "Videos", options: [])
+        let rows = [first, second].enumerated().map { n, r in TranscriptRow(id: r.id, seq: n, content: .review(r)) }
+        XCTAssertEqual(WorkLinks.review("5F1C2A90", in: rows)?.title, "Banners")
+        XCTAssertEqual(WorkLinks.review("5f1c9999-bbbb", in: rows)?.title, "Videos")
+        XCTAssertNil(WorkLinks.review("5f1c", in: rows), "a prefix that fits two is no review")
+        XCTAssertNil(WorkLinks.review("nope", in: rows))
+    }
 }
