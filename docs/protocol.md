@@ -2200,7 +2200,7 @@ minutes, and when the project page asks (`projects.refreshTasks`):
 `notion__notion-query-data-sources` in view mode, 100 a page, 300 at
 most. Not rows or SQL mode: Notion caps those per workspace, and two dozen
 boards used the allowance up in minutes (30 Oct); view queries don't
-count. A database with only filtered views is read in rows mode. The
+count. A database with only filtered views is read in rows mode. Boards are read three at a time: the gateway allows 32 calls in flight, agents' included, and 73 boards read together went past it. The
 columns (`notion__notion-fetch` of the data source) are read again every
 30 minutes, or when a card is in a column they don't have. The last board
 is kept in `project-tasks.json` in the data dir, so a restart shows it at

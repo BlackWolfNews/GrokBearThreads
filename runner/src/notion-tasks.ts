@@ -28,6 +28,10 @@ const PAGES_MAX = 3;
 // The columns change rarely: the schema is fetched again after this, or
 // when a card turns up in a column it didn't list.
 const SCHEMA_MS = 30 * 60_000;
+// Boards read at once. The gateway allows 32 calls in flight for everyone
+// (agents included), and 73 boards read together every 5 minutes went
+// past it (30 Oct); a few at a time still reads them all in seconds.
+export const READS_AT_ONCE = 3;
 
 // ------------------------------------------------------------- the gateway
 
@@ -347,6 +351,9 @@ export class TaskBoards {
   private now: () => number;
   private wanted: () => { id: string; notion?: string }[] = () => [];
   private opts: TaskBoardsOptions;
+  // Reads waiting for one of the READS_AT_ONCE places.
+  private reading = 0;
+  private queue: (() => void)[] = [];
 
   constructor(opts: TaskBoardsOptions) {
     this.opts = opts;
@@ -388,9 +395,20 @@ export class TaskBoards {
     if (!force && b?.notion === notion && this.now() - at < FRESH_MS && !b.tasks?.error) return Promise.resolve();
     const running = this.inFlight.get(projectId);
     if (running) return running;
-    const p = this.read(projectId, notion).finally(() => this.inFlight.delete(projectId));
+    const p = this.limited(() => this.read(projectId, notion)).finally(() => this.inFlight.delete(projectId));
     this.inFlight.set(projectId, p);
     return p;
+  }
+
+  private async limited<T>(fn: () => Promise<T>): Promise<T> {
+    if (this.reading >= READS_AT_ONCE) await new Promise<void>((go) => this.queue.push(go));
+    this.reading++;
+    try {
+      return await fn();
+    } finally {
+      this.reading--;
+      this.queue.shift()?.();
+    }
   }
 
   private async read(projectId: string, notion: string): Promise<void> {

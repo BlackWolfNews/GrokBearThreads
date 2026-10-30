@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { makeHarness, tmpDir } from '../helpers/fakes.ts';
-import { TaskBoards, findGatewayClient, findSource, gatewayCaller, parseRpc, readSchema, readRows, readTasks, type CallTool } from '../../src/notion-tasks.ts';
+import { READS_AT_ONCE, TaskBoards, findGatewayClient, findSource, gatewayCaller, parseRpc, readSchema, readRows, readTasks, type CallTool } from '../../src/notion-tasks.ts';
 import { Projects, checkNotion, projectMethods } from '../../src/projects.ts';
 import { buildThreadbearTools } from '../../src/threadbear-mcp.ts';
 import { FakeClock } from '../../src/clock.ts';
@@ -266,4 +266,21 @@ test("a project with a Notion page sends its board; read_project lists the open 
   methods['projects.update']!({ projectId: p.id, notion: '' });
   assert.equal((methods['projects.get']!({ projectId: p.id }) as { project: { tasks?: unknown; notion?: string } }).project.tasks, undefined);
   projects.stop();
+});
+
+test('boards are read a few at a time, so a big round never floods the gateway', async () => {
+  let running = 0;
+  let most = 0;
+  const n = fakeNotion();
+  const call: CallTool = async (name, args) => {
+    running++;
+    most = Math.max(most, running);
+    await new Promise((r) => setTimeout(r, 2));
+    running--;
+    return n.call(name, args);
+  };
+  const boards = new TaskBoards({ home: tmpDir(), call, log: nullLogger, setTimeout: () => ({ cancel() {} }), onChange: () => {} });
+  await Promise.all(Array.from({ length: 12 }, (_, i) => boards.refresh(`p_${i}`, PAGE)));
+  assert.ok(most <= READS_AT_ONCE, `at most ${READS_AT_ONCE} reads at once, saw ${most}`);
+  for (let i = 0; i < 12; i++) assert.equal(boards.get(`p_${i}`, PAGE)!.items.length, 3);
 });
