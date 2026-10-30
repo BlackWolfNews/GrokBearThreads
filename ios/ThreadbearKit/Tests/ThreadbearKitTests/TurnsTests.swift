@@ -74,6 +74,8 @@ import Testing
         #expect(AskAnswer.message(asks: asks, picks: [1: 0], extra: "thanks") == "2. Add the key\n   done\n\nthanks")
         #expect(AskAnswer.message(asks: [asks[0]], picks: [0: 1]) == "Merge it?\nNot yet")
         #expect(AskAnswer.answers(asks: asks, picks: [0: 5]).isEmpty)
+        #expect(AskAnswer.followUpMessage(["Check the nightly"]) == "Check the nightly")
+        #expect(AskAnswer.followUpMessage(["Check the nightly", "Refresh the cache"], extra: " quick \n") == "- Check the nightly\n- Refresh the cache\n\nquick")
     }
 
     @Test func threadRowsAndMessagesDecodeTheCard() throws {

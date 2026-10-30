@@ -172,6 +172,16 @@ public struct AskAnswer: Codable, Sendable, Hashable {
         return parts.joined(separator: "\n\n")
     }
 
+    /// The message for follow-ups ticked on the done card, as the Mac
+    /// sends it (Decisions.followUpMessage): the one on its own, or
+    /// several as a list, then anything else he wrote.
+    public static func followUpMessage(_ followUps: [String], extra: String = "") -> String {
+        var body = followUps.count == 1 ? followUps[0] : followUps.map { "- \($0)" }.joined(separator: "\n")
+        let more = extra.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !more.isEmpty { body += (body.isEmpty ? "" : "\n\n") + more }
+        return body
+    }
+
     /// The picked asks as answers, in the card's order.
     public static func answers(asks: [PhoneAsk], picks: [Int: Int]) -> [(index: Int, answer: AskAnswer)] {
         asks.enumerated().compactMap { i, ask in

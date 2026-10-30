@@ -25,6 +25,9 @@ struct ThreadView: View {
     /// they're sent; the composer sends them along with what's typed.
     @State private var picks: [Int: Int] = [:]
     @State private var pickedFor: Double?
+    /// Follow-ups ticked on the done card, and the reply it's under.
+    @State private var nextPicks: Set<Int> = []
+    @State private var nextPickedFor: Int?
     static let firstPage = 80
     static let morePerPage = 200
 
@@ -111,11 +114,16 @@ struct ThreadView: View {
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
                     } else if isDone(thread, messages: messages) {
-                        // A follow-up sends itself; anything typed stays in the box.
-                        DoneCard(next: thread.next ?? [], busy: sent != nil) { step in
-                            Task { _ = await send(step, to: thread, withPicks: false) }
+                        // Ticked follow-ups go from the card's Send on their
+                        // own; anything typed stays in the box for later.
+                        DoneCard(next: thread.next ?? [], picked: $nextPicks, busy: sent != nil) {
+                            Task { _ = await send("", to: thread) }
                         } archive: {
                             change(.archive)
+                        }
+                        .onChange(of: messages.last?.seq, initial: true) {
+                            // A new reply's card starts with nothing ticked.
+                            if nextPickedFor != messages.last?.seq { nextPicks = []; nextPickedFor = messages.last?.seq }
                         }
                     }
                     if let note = sentNote {
@@ -243,17 +251,24 @@ struct ThreadView: View {
     }
 
     /// Sends what's typed, with any answers picked on the card of asks
-    /// before it (the Mac's one message: each picked ask, then the rest).
-    private func send(_ text: String, to thread: PhoneThread, withPicks: Bool = true) async -> Bool {
+    /// before it (the Mac's one message: each picked ask, then the rest),
+    /// or the follow-ups ticked on the done card.
+    private func send(_ text: String, to thread: PhoneThread) async -> Bool {
         guard let backend = model.backend else { return false }
         let asks = thread.asks ?? []
-        let answers = withPicks ? AskAnswer.answers(asks: asks, picks: picks).map(\.answer) : []
-        let message = answers.isEmpty ? text : AskAnswer.message(asks: asks, picks: picks, extra: text)
+        let answers = AskAnswer.answers(asks: asks, picks: picks).map(\.answer)
+        let next = thread.next ?? []
+        // Only while the card they were ticked on is the last reply's.
+        let lastSeq = (page?.messages ?? detail?.messages)?.last?.seq
+        let followUps = nextPickedFor == lastSeq ? next.indices.filter { nextPicks.contains($0) }.map { next[$0] } : []
+        let message = !followUps.isEmpty ? AskAnswer.followUpMessage(followUps, extra: text)
+            : answers.isEmpty ? text : AskAnswer.message(asks: asks, picks: picks, extra: text)
         guard !message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return false }
         do {
             let id = try await backend.send(threadId: thread.threadId, text: message, answers: answers)
             sent = (id, nil)
             picks = [:]
+            nextPicks = []
             return true
         } catch {
             model.report(error)

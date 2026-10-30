@@ -87,12 +87,15 @@ struct AsksCard: View {
 
 /// Under a finished turn that needs nothing, as the Mac's Done card:
 /// Done and Archive on one line, then the agent's suggested follow-ups
-/// (end_turn's `next`) under "Or carry on", each sending itself when
-/// tapped (Mike picked that on the Mac, 30 Oct).
+/// (end_turn's `next`) under "Or carry on". A tap ticks one (again
+/// unticks it), so he can pick several, as on the Mac (30 Oct); Send on
+/// the card sends them, and the composer's Send takes them with what's
+/// typed.
 struct DoneCard: View {
     let next: [String]
+    @Binding var picked: Set<Int>
     var busy: Bool
-    var carryOn: (String) -> Void
+    var send: () -> Void
     var archive: () -> Void
 
     var body: some View {
@@ -112,16 +115,28 @@ struct DoneCard: View {
             }
             if !next.isEmpty {
                 Text("Or carry on").font(.footnote).foregroundStyle(.secondary)
-                ForEach(next, id: \.self) { step in
-                    Button { carryOn(step) } label: {
-                        HStack {
+                ForEach(Array(next.enumerated()), id: \.offset) { index, step in
+                    let ticked = picked.contains(index)
+                    Button {
+                        if ticked { picked.remove(index) } else { picked.insert(index) }
+                    } label: {
+                        HStack(alignment: .firstTextBaseline, spacing: 10) {
+                            Image(systemName: ticked ? "checkmark.circle.fill" : "circle")
+                                .foregroundStyle(ticked ? Color.accentColor : .secondary)
                             Text(step).multilineTextAlignment(.leading)
-                            Spacer(minLength: 8)
-                            Image(systemName: "arrow.up.circle").foregroundStyle(.secondary)
+                            Spacer(minLength: 0)
                         }
                         .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
+                    .disabled(busy)
+                    .accessibilityAddTraits(ticked ? .isSelected : [])
+                }
+                if !picked.isEmpty {
+                    Button(action: send) {
+                        Text("Send").frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.borderedProminent)
                     .disabled(busy)
                 }
             }
