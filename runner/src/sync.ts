@@ -668,7 +668,10 @@ export class ConvexSync {
     // Shared threads held back their share from an older backend (or
     // before the first heartbeat said which): they go again now.
     if (v >= SHARE_API_VERSION && this.running) {
-      for (const t of this.deps.runner.list(ALL)) if (t.share || (t.woke && v >= WOKE_API_VERSION) || (t.asks?.length && v >= ASKS_API_VERSION)) this.mark(t);
+      // A done thread may have next steps (nextSteps), which a row written
+      // before the heartbeat left out too.
+      const card = (t: ThreadSummary) => Boolean(t.asks?.length) || (t.needs === 'nothing' && t.status === 'idle' && !t.archivedAt);
+      for (const t of this.deps.runner.list(ALL)) if (t.share || (t.woke && v >= WOKE_API_VERSION) || (v >= ASKS_API_VERSION && card(t))) this.mark(t);
       this.scheduleFlush();
     }
     // The pictures wait for the first heartbeat to say the backend takes them.

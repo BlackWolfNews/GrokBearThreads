@@ -1201,3 +1201,51 @@ test('commands: a send from the phone keeps the asks it answers', async () => {
   assert.equal(ev?.origin, 'phone');
   assert.deepEqual(ev?.answers, [{ action: 'Merge it?', answer: 'Merge' }]);
 });
+
+test('end-of-turn cards: next steps come from the last turn.completed while the thread is idle and done', async () => {
+  const h = makeHarness();
+  const calls: Call[] = [];
+  const thread = {
+    id: 'tn', title: 'T', cwd: '/w', accountId: 'claude-3', provider: 'claude' as const, permissionMode: 'full' as const, status: 'idle' as const, live: false, needsYou: false, needs: 'nothing' as const,
+    createdAt: '2026-10-30T09:00:00.000Z', updatedAt: '2026-10-30T09:30:00.000Z', lastActivityAt: '2026-10-30T09:30:00.000Z', preview: 'p', lastSeq: 6, lastSeenSeq: 6,
+  };
+  const ts = '2026-10-30T09:30:00.000Z';
+  let events: unknown[] = [
+    { seq: 4, ts, threadId: 'tn', type: 'turn.started', turnId: 'u1' },
+    { seq: 5, ts, threadId: 'tn', type: 'assistant.text', itemId: 'i', text: 'done' },
+    { seq: 6, ts, threadId: 'tn', type: 'turn.completed', turnId: 'u1', outcome: 'completed', durationMs: 1, needs: 'nothing', next: ['Ship it'] },
+  ];
+  let summary = { ...thread };
+  const sync = new ConvexSync({
+    config: { enabled: true, url: 'https://x.convex.cloud', name: 'TestMac', runnerId: 'r1' },
+    key: 'k',
+    runner: { onNotification: () => () => {}, list: () => [summary], get: () => summary, events: () => ({ events: events as never }) },
+    version: '0.1.0+test',
+    startedAt: '2026-10-27T00:00:00.000Z',
+    clock: h.clock,
+    log: nullLogger,
+    post: async (kind, fn, args) => {
+      calls.push({ kind, fn, args });
+      // The heartbeat answers after the first write, as it can at start,
+      // so that write can't know the backend takes next yet.
+      if (fn === 'sync:heartbeat') await heartbeatGate;
+      return fn === 'sync:heartbeat' ? { apiVersion: BACKEND_API_VERSION } : null;
+    },
+  });
+  let openGate!: () => void;
+  const heartbeatGate = new Promise<void>((r) => (openGate = r));
+  sync.start();
+  await sync.flushNow();
+  openGate();
+  await tick(20);
+  h.clock.advance(SYNC_COALESCE_MS);
+  await tick(20);
+  await sync.flushNow();
+  const rows = () => calls.filter((c) => c.fn === 'sync:upsertThreads').flatMap((c) => c.args.threads as ThreadDoc[]).filter((d) => d.threadId === 'tn');
+  assert.deepEqual(rows().at(-1)?.next, ['Ship it']);
+  // Mike replied: the turn's next steps aren't the last word any more.
+  events = [...events, { seq: 7, ts, threadId: 'tn', type: 'user.message', text: 'go', images: [] }];
+  summary = { ...thread, lastSeq: 7, status: 'running' as never };
+  assert.equal(toThreadDoc(summary, 'r1', 0).next, undefined);
+  await sync.stop();
+});
