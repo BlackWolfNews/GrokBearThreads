@@ -66,7 +66,7 @@ export type SyncConfig = {
 // lower one means its backend hasn't been deployed since this runner was:
 // said in runner.status, tb status and the log rather than stopping, since
 // the runner only adds to what it sends while the number stays the same.
-export const BACKEND_API_VERSION = 14;
+export const BACKEND_API_VERSION = 15;
 // From this one a thread's row carries its open card of asks and a finished
 // turn's next steps, and a message row can be `summary` (end_turn's
 // bullets), so the phone shows end-of-turn cards. An older backend's
@@ -95,6 +95,11 @@ export const THREAD_INDEX_API_VERSION = 12;
 // opened yet), for the phone's "Woke up". An older backend's validator
 // would turn the row down, so it goes without.
 export const WOKE_API_VERSION = 13;
+// From this one a thread's row carries what the phone's sections need to
+// match the Mac's (app ThreadSections): `needs`, `pendingReviews` and
+// `waitingForRoom`. An older backend's validator would turn the row down,
+// so it goes without them.
+export const SECTIONS_API_VERSION = 15;
 
 export type SyncStatus = {
   state: 'off' | 'ok' | 'error';
@@ -150,6 +155,9 @@ export type ThreadDoc = {
   asks?: PhoneAsk[];
   asksSeq?: number;
   next?: string[];
+  needs?: 'you' | 'nothing';
+  pendingReviews?: number;
+  waitingForRoom?: { until: string; accountId?: string };
   view: 'inbox' | 'hibernating' | 'den';
 };
 
@@ -350,6 +358,9 @@ export function toThreadDoc(t: ThreadSummary, runnerId: string, now: number, pen
     doc.asksSeq = t.asksSeq;
   }
   if (next?.length) doc.next = next;
+  if (t.needs) doc.needs = t.needs;
+  if (t.pendingReviews) doc.pendingReviews = t.pendingReviews;
+  if (t.waitingForRoom) doc.waitingForRoom = { until: t.waitingForRoom.until, ...(t.waitingForRoom.accountId ? { accountId: t.waitingForRoom.accountId } : {}) };
   return doc;
 }
 
@@ -378,8 +389,14 @@ function phoneAnswers(raw: unknown): AskAnswer[] | undefined {
 // validator doesn't know yet.
 function forBackend(d: ThreadDoc, v: number): ThreadDoc {
   const asks = d.asks !== undefined || d.asksSeq !== undefined || d.next !== undefined;
-  if ((v >= SHARE_API_VERSION || !d.share) && (v >= WOKE_API_VERSION || !d.woke) && (v >= ASKS_API_VERSION || !asks)) return d;
+  const sections = d.needs !== undefined || d.pendingReviews !== undefined || d.waitingForRoom !== undefined;
+  if ((v >= SHARE_API_VERSION || !d.share) && (v >= WOKE_API_VERSION || !d.woke) && (v >= ASKS_API_VERSION || !asks) && (v >= SECTIONS_API_VERSION || !sections)) return d;
   const out = { ...d };
+  if (v < SECTIONS_API_VERSION) {
+    delete out.needs;
+    delete out.pendingReviews;
+    delete out.waitingForRoom;
+  }
   if (v < SHARE_API_VERSION) delete out.share;
   if (v < WOKE_API_VERSION) delete out.woke;
   if (v < ASKS_API_VERSION) {
@@ -671,7 +688,9 @@ export class ConvexSync {
       // A done thread may have next steps (nextSteps), which a row written
       // before the heartbeat left out too.
       const card = (t: ThreadSummary) => Boolean(t.asks?.length) || (t.needs === 'nothing' && t.status === 'idle' && !t.archivedAt);
-      for (const t of this.deps.runner.list(ALL)) if (t.share || (t.woke && v >= WOKE_API_VERSION) || (v >= ASKS_API_VERSION && card(t))) this.mark(t);
+      // Likewise needs, reviews and waiting for room, for the phone's sections.
+      const sections = (t: ThreadSummary) => Boolean(t.needs || t.pendingReviews || t.waitingForRoom);
+      for (const t of this.deps.runner.list(ALL)) if (t.share || (t.woke && v >= WOKE_API_VERSION) || (v >= ASKS_API_VERSION && card(t)) || (v >= SECTIONS_API_VERSION && sections(t))) this.mark(t);
       this.scheduleFlush();
     }
     // The pictures wait for the first heartbeat to say the backend takes them.

@@ -15,6 +15,9 @@ final class AppModel {
     private(set) var inbox: [PhoneThread] = []
     private(set) var hibernating: [PhoneThread] = []
     private(set) var den: [PhoneThread] = []
+    /// For each thread a schedule will message, the one due soonest: the
+    /// inbox's Waiting section.
+    private(set) var wakes: [String: PhoneSchedule] = [:]
     /// The lists that have had their first answer from Convex. Until then
     /// a list is loading, not empty: saying "Nothing in the inbox" at
     /// launch, before anything had arrived, read as if it was (Mike, 30 Oct).
@@ -94,7 +97,7 @@ final class AppModel {
 
     var isPaired: Bool { backend != nil && authProblem == nil }
 
-    var sections: InboxSections { InboxSections.build(inbox, now: now) }
+    var sections: InboxSections { InboxSections.build(inbox, now: now, wakes: wakes) }
 
     /// "Mac offline since 10:42" when no runner has checked in for three
     /// minutes. Things done meanwhile wait until it's back.
@@ -155,6 +158,7 @@ final class AppModel {
         inbox = []
         hibernating = []
         den = []
+        wakes = [:]
         loaded = []
     }
 
@@ -171,6 +175,7 @@ final class AppModel {
         inbox = []
         hibernating = []
         den = []
+        wakes = [:]
         loaded = []
     }
 
@@ -189,6 +194,7 @@ final class AppModel {
         tasks.append(follow(backend.threads(.inbox)) { $0.inbox = $1; $0.loaded.insert(.inbox) })
         tasks.append(follow(backend.threads(.hibernating)) { $0.hibernating = $1; $0.loaded.insert(.hibernating) })
         tasks.append(follow(backend.threads(.den)) { $0.den = $1; $0.loaded.insert(.den) })
+        tasks.append(follow(backend.schedules()) { $0.wakes = InboxSections.wakes($1) })
         tasks.append(Task { [weak self] in
             for await up in backend.connectionStates() { self?.connected = up }
         })

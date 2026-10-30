@@ -1,26 +1,41 @@
 import Foundation
 
-/// The inbox's two sections, as on the Mac sidebar (app ThreadSections):
-/// Inbox first, ordered by how much a thread wants Mike, then Running at
-/// the bottom, since there's nothing to do with those until they finish.
+/// The inbox's sections, as on the Mac sidebar (app ThreadSections): Inbox
+/// first, ordered by how much a thread wants Mike, then Running, since
+/// there's nothing to do with those until they finish, then Waiting:
+/// threads that have booked themselves a message for later and have
+/// nothing for him until then. Hibernating and Archived are lists of their
+/// own from the menu, as the backend sends them separately.
 public struct InboxSections: Sendable, Equatable {
     public var inbox: [PhoneThread] = []
     public var running: [PhoneThread] = []
+    /// Soonest to wake first.
+    public var waiting: [PhoneThread] = []
 
-    public init(inbox: [PhoneThread] = [], running: [PhoneThread] = []) {
+    public init(inbox: [PhoneThread] = [], running: [PhoneThread] = [], waiting: [PhoneThread] = []) {
         self.inbox = inbox
         self.running = running
+        self.waiting = waiting
     }
 
-    public static func build(_ threads: some Sequence<PhoneThread>, now: Date) -> InboxSections {
+    /// The same rules as the Mac's ThreadSections.build, so the phone and
+    /// the sidebar agree on what's in the inbox; change both together.
+    /// Running: a turn is underway, or background work is still going.
+    /// Waiting: idle with a schedule due to message it (`wakes`), and
+    /// nothing for Mike: no question, no design review, no unread reply
+    /// that didn't say "nothing", no open asks, not waiting for a login
+    /// with room. Inbox: everything else.
+    public static func build(_ threads: some Sequence<PhoneThread>, now: Date, wakes: [String: PhoneSchedule] = [:]) -> InboxSections {
         var sections = InboxSections()
         for thread in threads where thread.archivedAt == nil && !isSnoozed(thread, now: now) {
             // A question or approval goes in the inbox even while background
             // work runs: the thread is stuck until he answers.
-            if needsAnswer(thread) || (thread.needsYou && thread.working == nil) {
+            if thread.reviewWaiting || needsAnswer(thread) || (thread.needsYou && thread.working == nil) {
                 sections.inbox.append(thread)
             } else if thread.isBusy || thread.working != nil {
                 sections.running.append(thread)
+            } else if thread.status == .idle, thread.needs != "you", thread.waitingForRoom == nil, wakes[thread.threadId] != nil {
+                sections.waiting.append(thread)
             } else {
                 sections.inbox.append(thread)
             }
@@ -30,14 +45,31 @@ public struct InboxSections: Sendable, Equatable {
             return a != b ? a < b : newestFirst($0, $1)
         }
         sections.running.sort(by: newestFirst)
+        sections.waiting.sort {
+            let (a, b) = (wakes[$0.threadId]?.nextRunAt ?? .distantFuture, wakes[$1.threadId]?.nextRunAt ?? .distantFuture)
+            return a != b ? a < b : newestFirst($0, $1)
+        }
         return sections
+    }
+
+    /// For each thread a schedule will message by itself, the one due
+    /// soonest, as the Mac's ThreadSections.wakes. Paused and finished
+    /// ones don't count, nor ones that start a new thread.
+    public static func wakes(_ schedules: some Sequence<PhoneSchedule>) -> [String: PhoneSchedule] {
+        var soonest: [String: PhoneSchedule] = [:]
+        for schedule in schedules where schedule.isActive {
+            guard let threadId = schedule.threadId, let next = schedule.nextRunAt else { continue }
+            if let current = soonest[threadId]?.nextRunAt, current <= next { continue }
+            soonest[threadId] = schedule
+        }
+        return soonest
     }
 
     /// Lowest first. 0: stuck on his answer. 1: finished unread with a
     /// failure. 2: finished unread. 3: read but failed or stopped. 4: done.
     public static func urgency(_ thread: PhoneThread) -> Int {
         let broken = thread.status == .error || thread.status == .stopped
-        if needsAnswer(thread) { return 0 }
+        if thread.reviewWaiting || needsAnswer(thread) { return 0 }
         if thread.needsYou || thread.unread { return broken ? 1 : 2 }
         return broken ? 3 : 4
     }
@@ -61,7 +93,7 @@ public struct InboxSections: Sendable, Equatable {
         inbox.filter { Self.urgency($0) <= 2 }.count
     }
 
-    public var isEmpty: Bool { inbox.isEmpty && running.isEmpty }
+    public var isEmpty: Bool { inbox.isEmpty && running.isEmpty && waiting.isEmpty }
 }
 
 /// The search at the top of the inbox, as the Mac sidebar's
@@ -70,6 +102,7 @@ public struct InboxSections: Sendable, Equatable {
 public struct ThreadSearch: Sendable, Equatable {
     public var inbox: [PhoneThread] = []
     public var running: [PhoneThread] = []
+    public var waiting: [PhoneThread] = []
     public var hibernating: [PhoneThread] = []
     public var archived: [PhoneThread] = []
 
@@ -83,6 +116,7 @@ public struct ThreadSearch: Sendable, Equatable {
         }
         inbox = keep(sections.inbox)
         running = keep(sections.running)
+        waiting = keep(sections.waiting)
         self.hibernating = keep(hibernating)
         self.archived = keep(archived)
     }
@@ -95,7 +129,7 @@ public struct ThreadSearch: Sendable, Equatable {
         return [thread.title, thread.preview, thread.placeText].contains { $0.range(of: query, options: options) != nil }
     }
 
-    public var isEmpty: Bool { inbox.isEmpty && running.isEmpty && hibernating.isEmpty && archived.isEmpty }
+    public var isEmpty: Bool { inbox.isEmpty && running.isEmpty && waiting.isEmpty && hibernating.isEmpty && archived.isEmpty }
 }
 
 /// What a row says at its right: the status while it means something, else
@@ -105,7 +139,7 @@ public enum RowStatus {
     public enum Kind: Sendable, Equatable { case needsYou, working, failed, stopped, time }
 
     public static func kind(_ thread: PhoneThread) -> Kind {
-        if thread.pendingApproval != nil || thread.status == .waiting { return .needsYou }
+        if thread.reviewWaiting || thread.pendingApproval != nil || thread.status == .waiting { return .needsYou }
         switch thread.status {
         case .running, .starting: return .working
         case .error: return .failed
@@ -157,7 +191,9 @@ public enum RelativeTime {
         return date.formatted(style)
     }
 
-    /// "10:42" today, "Mon 10:42" otherwise: for "Mac offline since".
+    /// "10:42" today, "Mon 10:42" otherwise: for "Mac offline since", and
+    /// when a waiting thread's schedule messages it, as the Mac's
+    /// RelativeTime.until.
     public static func clock(_ date: Date, now: Date, calendar: Calendar = .current) -> String {
         if calendar.isDate(date, inSameDayAs: now) {
             return date.formatted(Date.FormatStyle(calendar: calendar).hour().minute())

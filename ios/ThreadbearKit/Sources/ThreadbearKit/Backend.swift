@@ -16,6 +16,9 @@ public protocol Backend: Sendable {
     /// backend API 5, so a row can show its project the way the Mac does.
     func projects() -> AsyncThrowingStream<[PhoneProject], Error>
     func threads(_ view: ThreadsView) -> AsyncThrowingStream<[PhoneThread], Error>
+    /// Every runner's schedules, for the inbox's Waiting section: which
+    /// threads have booked themselves a message for later.
+    func schedules() -> AsyncThrowingStream<[PhoneSchedule], Error>
     /// Nil once the thread's gone from the mirror.
     func thread(_ threadId: String) -> AsyncThrowingStream<ThreadDetail?, Error>
     func command(_ commandId: String) -> AsyncThrowingStream<CommandStatus?, Error>
@@ -112,6 +115,10 @@ public final class ConvexBackend: Backend, @unchecked Sendable {
 
     public func threads(_ view: ThreadsView) -> AsyncThrowingStream<[PhoneThread], Error> {
         live("phone:threads", ["view": .string(view.rawValue)], as: [PhoneThread].self)
+    }
+
+    public func schedules() -> AsyncThrowingStream<[PhoneSchedule], Error> {
+        live("phone:schedules", [:], as: [PhoneSchedule].self)
     }
 
     public func thread(_ threadId: String) -> AsyncThrowingStream<ThreadDetail?, Error> {

@@ -138,6 +138,87 @@ import Testing
         #expect(sections.needsYouCount == 3)
     }
 
+    /// The Mac's ThreadSectionsTests.testBookedThreadsWait, on the phone: a
+    /// thread that has booked itself a message for later, and has nothing
+    /// for Mike, waits in its own section, soonest first, rather than
+    /// sitting in the inbox. Anything it still wants from him keeps it in
+    /// the inbox.
+    @Test func bookedThreadsWait() {
+        var said = thread("said-done-unread", 1)
+        said.needs = "nothing"
+        said.unread = true
+        var asked = thread("asked-read", 2)
+        asked.needs = "you"
+        var review = thread("review", 10)
+        review.pendingReviews = 1
+        var noRoom = thread("no-room", 11)
+        noRoom.waitingForRoom = PhoneWaitingForRoom(until: "2026-10-30T12:00:00.000Z")
+        let threads = [
+            thread("read", 5),
+            said,
+            asked,
+            thread("unread", 3, needsYou: true),
+            thread("question", 4, status: .waiting, approval: true),
+            thread("failed", 6, status: .error),
+            thread("running", 7, status: .running),
+            thread("no-wake", 8),
+            thread("woken", 9),
+            review,
+            noRoom,
+        ]
+        let schedules = [
+            PhoneSchedule(id: "1", threadId: "read", nextRunAt: now.addingTimeInterval(600)),
+            PhoneSchedule(id: "2", threadId: "said-done-unread", nextRunAt: now.addingTimeInterval(120)),
+            // A later one for the same thread: the soonest counts.
+            PhoneSchedule(id: "3", threadId: "said-done-unread", nextRunAt: now.addingTimeInterval(9000)),
+            PhoneSchedule(id: "4", threadId: "asked-read", nextRunAt: now.addingTimeInterval(60)),
+            PhoneSchedule(id: "5", threadId: "unread", nextRunAt: now.addingTimeInterval(60)),
+            PhoneSchedule(id: "6", threadId: "question", nextRunAt: now.addingTimeInterval(60)),
+            PhoneSchedule(id: "7", threadId: "failed", nextRunAt: now.addingTimeInterval(60)),
+            PhoneSchedule(id: "8", threadId: "running", nextRunAt: now.addingTimeInterval(60)),
+            PhoneSchedule(id: "9", threadId: "no-wake", paused: true, nextRunAt: now.addingTimeInterval(60)),
+            PhoneSchedule(id: "10", threadId: "woken", nextRunAt: now.addingTimeInterval(60), finishedAt: now),
+            PhoneSchedule(id: "12", threadId: "review", nextRunAt: now.addingTimeInterval(60)),
+            PhoneSchedule(id: "13", threadId: "no-room", nextRunAt: now.addingTimeInterval(60)),
+            // Starts new threads: nobody waits on it.
+            PhoneSchedule(id: "11", nextRunAt: now.addingTimeInterval(30)),
+        ]
+        let wakes = InboxSections.wakes(schedules)
+        #expect(wakes["said-done-unread"]?.id == "2")
+        #expect(wakes["no-wake"] == nil)
+        #expect(wakes["woken"] == nil)
+        let sections = InboxSections.build(threads, now: now, wakes: wakes)
+        #expect(sections.waiting.map(\.threadId) == ["said-done-unread", "read"])
+        #expect(Set(sections.inbox.map(\.threadId)) == ["asked-read", "unread", "question", "failed", "no-wake", "woken", "review", "no-room"])
+        #expect(sections.running.map(\.threadId) == ["running"])
+    }
+
+    /// A design review waiting on Mike counts as a question once the
+    /// thread has finished working, as on the Mac (reviewWaiting).
+    @Test func aWaitingReviewNeedsYou() {
+        var review = thread("review", 30)
+        review.pendingReviews = 1
+        var busy = thread("busy", 1, status: .running)
+        busy.pendingReviews = 1
+        let sections = InboxSections.build([thread("unread", 1, needsYou: true), review, busy], now: now)
+        #expect(sections.inbox.map(\.threadId) == ["review", "unread"])
+        #expect(sections.running.map(\.threadId) == ["busy"])
+        #expect(RowStatus.kind(review) == .needsYou)
+    }
+
+    @Test func scheduleRowsDecode() throws {
+        let json = #"""
+        [{"runnerId":"r1","id":"s1","title":"Check","text":"look","whenText":"Every day at 8:00","threadId":"t1","paused":false,
+          "createdAt":"2026-10-30T08:00:00.000Z","updatedAt":"2026-10-30T08:00:00.000Z","nextRunAt":"2026-10-31T08:00:00.000Z","runs":3},
+         {"runnerId":"r1","id":"s2","title":"New","text":"x","whenText":"Once","cwd":"~/x","paused":true,
+          "createdAt":"2026-10-30T08:00:00.000Z","updatedAt":"2026-10-30T08:00:00.000Z","runs":0}]
+        """#
+        let rows = try JSONDecoder().decode([PhoneSchedule].self, from: Data(json.utf8))
+        #expect(rows.map(\.id) == ["s1", "s2"])
+        #expect(rows[0].threadId == "t1" && rows[0].isActive && rows[0].nextRunAt != nil)
+        #expect(rows[1].threadId == nil && !rows[1].isActive)
+    }
+
     @Test func aQuestionStaysInTheInboxWhileBackgroundWorkRuns() {
         let sections = InboxSections.build([thread("q", 1, status: .waiting, approval: true, working: "1 sub-agent")], now: now)
         #expect(sections.inbox.map(\.threadId) == ["q"])

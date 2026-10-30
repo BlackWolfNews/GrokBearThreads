@@ -449,10 +449,15 @@ Queries:
   needsYou, unread, preview, createdAt, lastActivityAt, lastActivityMs,
   snoozedUntil?, snoozedUntilRestart?, archivedAt?, costUsd?, projects?:
   [{ id, title }], working?, pendingApproval?, asks?, asksSeq?, next?,
-  view`. `asks` and `asksSeq` (API 14) are the open card of the agent's
+  needs?, pendingReviews?, waitingForRoom?, view`. `asks` and `asksSeq`
+  (API 14) are the open card of the agent's
   end_turn asks (`{ action, why?, reply?, options?, suggested?, links?,
   ticked? }`, web links only), and `next` a finished turn's suggested
-  follow-ups, for the done card. `pendingApproval`
+  follow-ups, for the done card. `needs` (`you` | `nothing`),
+  `pendingReviews` and `waitingForRoom` (`{ until, accountId? }`) (API 15)
+  are what the phone needs to sort threads into the Mac sidebar's
+  sections: with `phone:schedules` it puts an idle thread a schedule will
+  message under Waiting, by the same rules as app ThreadSections. `pendingApproval`
   (from step 2) is `{ approvalId, kind: "approval", name, title, options:
   ("allow" | "allowAlways" | "deny")[], inputSummary? }` or `{ approvalId,
   kind: "question", questions: Question[] }` with the protocol's

@@ -232,6 +232,13 @@ public struct PhoneThread: Codable, Sendable, Hashable, Identifiable {
     /// A finished turn's suggested follow-ups (end_turn's `next`), for the
     /// done card.
     public var next: [String]?
+    /// What the last completed turn said it needs from Mike, "you" or
+    /// "nothing" (backend API 15). Absent: it said neither.
+    public var needs: String?
+    /// Design reviews waiting on Mike (backend API 15), a Convex number.
+    public var pendingReviews: Double?
+    /// Every login it could use is out of room until then (backend API 15).
+    public var waitingForRoom: PhoneWaitingForRoom?
 
     public init(
         threadId: String, runnerId: String = "m5", title: String, cwd: String = "~/dev/me/misc",
@@ -240,7 +247,8 @@ public struct PhoneThread: Codable, Sendable, Hashable, Identifiable {
         lastActivityAt: Date, snoozedUntil: Date? = nil, snoozedUntilRestart: Bool? = nil, woke: Woke? = nil, archivedAt: Date? = nil,
         costUsd: Double? = nil, projects: [ProjectRef]? = nil, working: String? = nil,
         pendingApproval: PendingApproval? = nil, earliestSeq: Double? = nil,
-        asks: [PhoneAsk]? = nil, asksSeq: Double? = nil, next: [String]? = nil
+        asks: [PhoneAsk]? = nil, asksSeq: Double? = nil, next: [String]? = nil,
+        needs: String? = nil, pendingReviews: Double? = nil, waitingForRoom: PhoneWaitingForRoom? = nil
     ) {
         self.threadId = threadId
         self.runnerId = runnerId
@@ -266,9 +274,16 @@ public struct PhoneThread: Codable, Sendable, Hashable, Identifiable {
         self.asks = asks
         self.asksSeq = asksSeq
         self.next = next
+        self.needs = needs
+        self.pendingReviews = pendingReviews
+        self.waitingForRoom = waitingForRoom
     }
 
     public var isBusy: Bool { status == .running || status == .starting }
+
+    /// A design review is waiting on Mike and the thread has finished
+    /// working, as the Mac's ThreadSummary.reviewWaiting.
+    public var reviewWaiting: Bool { (pendingReviews ?? 0) > 0 && !isBusy && working == nil }
 
     /// Whether there are older text messages on the Mac than `oldestSeq`,
     /// the oldest the phone has. False when the runner doesn't say.
@@ -289,6 +304,73 @@ public struct PhoneThread: Codable, Sendable, Hashable, Identifiable {
         if let projects, !projects.isEmpty { return projects.map(\.title).joined(separator: ", ") }
         return folderName
     }
+}
+
+/// When a thread waiting for a login with room can go on.
+public struct PhoneWaitingForRoom: Codable, Sendable, Hashable {
+    public var until: String
+    public var accountId: String?
+
+    public init(until: String, accountId: String? = nil) {
+        self.until = until
+        self.accountId = accountId
+    }
+}
+
+/// A row of phone:schedules: a message the runner sends by itself, once or
+/// on a cron. The phone reads only what the inbox's Waiting section needs.
+public struct PhoneSchedule: Codable, Sendable, Hashable, Identifiable {
+    public var id: String
+    public var runnerId: String?
+    public var title: String
+    /// "Every weekday at 9:00", "Tomorrow at 10:00": the runner's words.
+    public var whenText: String
+    /// The thread it messages. Absent: it starts a new thread each time.
+    public var threadId: String?
+    public var paused: Bool
+    @OptionalFlexibleDate public var nextRunAt: Date?
+    @OptionalFlexibleDate public var finishedAt: Date?
+
+    public init(id: String, runnerId: String? = nil, title: String = "", whenText: String = "", threadId: String? = nil,
+                paused: Bool = false, nextRunAt: Date? = nil, finishedAt: Date? = nil) {
+        self.id = id
+        self.runnerId = runnerId
+        self.title = title
+        self.whenText = whenText
+        self.threadId = threadId
+        self.paused = paused
+        self._nextRunAt = OptionalFlexibleDate(wrappedValue: nextRunAt)
+        self._finishedAt = OptionalFlexibleDate(wrappedValue: finishedAt)
+    }
+
+    private enum Keys: String, CodingKey { case id, runnerId, title, whenText, threadId, paused, nextRunAt, finishedAt }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: Keys.self)
+        id = try c.decode(String.self, forKey: .id)
+        runnerId = (try? c.decodeIfPresent(String.self, forKey: .runnerId)).flatMap { $0 }
+        title = (try? c.decodeIfPresent(String.self, forKey: .title)).flatMap { $0 } ?? ""
+        whenText = (try? c.decodeIfPresent(String.self, forKey: .whenText)).flatMap { $0 } ?? ""
+        threadId = (try? c.decodeIfPresent(String.self, forKey: .threadId)).flatMap { $0 }
+        paused = (try? c.decodeIfPresent(Bool.self, forKey: .paused)).flatMap { $0 } ?? false
+        _nextRunAt = try c.decode(OptionalFlexibleDate.self, forKey: .nextRunAt)
+        _finishedAt = try c.decode(OptionalFlexibleDate.self, forKey: .finishedAt)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: Keys.self)
+        try c.encode(id, forKey: .id)
+        try c.encodeIfPresent(runnerId, forKey: .runnerId)
+        try c.encode(title, forKey: .title)
+        try c.encode(whenText, forKey: .whenText)
+        try c.encodeIfPresent(threadId, forKey: .threadId)
+        try c.encode(paused, forKey: .paused)
+        try c.encode(_nextRunAt, forKey: .nextRunAt)
+        try c.encode(_finishedAt, forKey: .finishedAt)
+    }
+
+    /// Still going to run by itself, as the Mac's Schedule.isActive.
+    public var isActive: Bool { !paused && finishedAt == nil }
 }
 
 public struct PhoneMessage: Codable, Sendable, Hashable, Identifiable {
@@ -461,7 +543,7 @@ public enum BackendCompatibility {
     /// The newest backend API this app knows. From 2 a thread's messages come
     /// from phone:messages (every message and tool line, paged in Convex);
     /// an older backend still gets phone:thread and the runner's paging.
-    public static let currentAPIVersion = 14
+    public static let currentAPIVersion = 15
     public static let messagePagesAPIVersion = 2
     /// From 3 each phone chooses when it's notified (phone:setNotifications).
     public static let notificationSettingAPIVersion = 3
@@ -476,6 +558,11 @@ public enum BackendCompatibility {
     /// next steps, and phone:send takes answers. Older backends leave them
     /// out, and the phone shows neither card.
     public static let asksAPIVersion = 14
+    /// From 15 thread rows carry needs, pendingReviews and waitingForRoom,
+    /// so the inbox's sections match the Mac's. Older backends leave them
+    /// out, and a thread with a schedule waits unless it needs Mike in a
+    /// way the phone can see.
+    public static let sectionsAPIVersion = 15
 
     /// The line to show, or nil when the backend is fine.
     public static func problem(_ identity: PhoneIdentity) -> String? {

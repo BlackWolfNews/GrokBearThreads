@@ -67,6 +67,12 @@ export const threadFields = {
   asksSeq: v.optional(v.number()),
   // A finished turn's suggested follow-ups (end_turn's `next`), since API 14.
   next: v.optional(v.array(v.string())),
+  // What the phone's sections need to match the Mac's (app ThreadSections),
+  // since API 15: what the last turn said it needs, the design reviews
+  // waiting on Mike, and whether it's waiting for a login with room.
+  needs: v.optional(v.union(v.literal('you'), v.literal('nothing'))),
+  pendingReviews: v.optional(v.number()),
+  waitingForRoom: v.optional(v.object({ until: v.string(), accountId: v.optional(v.string()) })),
   // The approval or question the thread is waiting on, if any (step 2).
   pendingApproval: v.optional(
     v.union(

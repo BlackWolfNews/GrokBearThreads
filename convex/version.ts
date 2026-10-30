@@ -54,4 +54,8 @@
 //    `asks` and `asksSeq` and a finished turn's `next`, a message row can be
 //    `summary` (end_turn's bullets, the turn's reply), and phone:send takes
 //    `answers`. A runner sends them only to a backend of 14 or later.
-export const API_VERSION = 14;
+// 15: thread rows can carry `needs`, `pendingReviews` and `waitingForRoom`,
+//    so the phone sorts threads into the Mac's sections (Waiting: idle
+//    threads a schedule will message). A runner sends them only to a
+//    backend of 15 or later.
+export const API_VERSION = 15;

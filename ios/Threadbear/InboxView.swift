@@ -49,6 +49,9 @@ struct InboxView: View {
                     if !sections.running.isEmpty {
                         Section { rows(sections.running, running: true) } header: { SectionHeading(title: "Running", icon: "bolt") }
                     }
+                    if !sections.waiting.isEmpty {
+                        Section { rows(sections.waiting, waiting: true) } header: { SectionHeading(title: "Waiting", icon: "clock") }
+                    }
                 }
             }
             // A flat list with the Mac sidebar's headings, not grouped cards.
@@ -128,6 +131,9 @@ struct InboxView: View {
         if !search.running.isEmpty {
             Section { rows(search.running, running: true) } header: { SectionHeading(title: "Running", icon: "bolt") }
         }
+        if !search.waiting.isEmpty {
+            Section { rows(search.waiting, waiting: true) } header: { SectionHeading(title: "Waiting", icon: "clock") }
+        }
         if !search.hibernating.isEmpty {
             Section { putAwayRows(search.hibernating, from: .hibernating) } header: { SectionHeading(title: "Hibernating", icon: "moon.zzz") }
         }
@@ -148,12 +154,12 @@ struct InboxView: View {
         }
     }
 
-    @ViewBuilder private func rows(_ threads: [PhoneThread], running: Bool = false) -> some View {
+    @ViewBuilder private func rows(_ threads: [PhoneThread], running: Bool = false, waiting: Bool = false) -> some View {
         ForEach(threads) { thread in
             // A plain row, not a NavigationLink: the Mac's rows have no
             // chevron, and the status sits where it would go.
             Button { path.append(thread.threadId) } label: {
-                ThreadRow(thread: thread, underRunning: running)
+                ThreadRow(thread: thread, underRunning: running, wake: waiting ? model.wakes[thread.threadId] : nil)
             }
             .buttonStyle(.plain)
             .listRowInsets(ThreadRow.insets)
@@ -251,6 +257,9 @@ struct ThreadRow: View {
     /// Under the Running heading a working row shows just its spinner and
     /// time, as on the Mac: the heading says what it's doing.
     var underRunning = false
+    /// Under the Waiting heading, the schedule that messages it next: the
+    /// row says when, where the time would be, as on the Mac.
+    var wake: PhoneSchedule?
 
     /// Room on the left for the gutter mark; the trailing edge like the Mac's.
     static let insets = EdgeInsets(top: 6, leading: 28, bottom: 6, trailing: 16)
@@ -342,6 +351,11 @@ struct ThreadRow: View {
             // Back from hibernating by itself; the time comes back once
             // it's been opened.
             Text(RowStatus.text(thread, now: model.now)).font(.footnote.weight(.medium)).foregroundStyle(Color.accentColor)
+        case .time where wake?.nextRunAt != nil:
+            // When its schedule messages it next: "10:42", "Mon 10:42".
+            Text(RelativeTime.clock(wake?.nextRunAt ?? model.now, now: model.now))
+                .font(.footnote).monospacedDigit().foregroundStyle(Look.faint)
+                .accessibilityLabel("Scheduled: \(wake?.whenText ?? "")")
         case .time:
             Text(RowStatus.text(thread, now: model.now)).font(.footnote).monospacedDigit().foregroundStyle(Look.faint)
         }

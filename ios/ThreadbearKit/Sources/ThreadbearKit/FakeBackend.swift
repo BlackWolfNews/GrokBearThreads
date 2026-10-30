@@ -9,6 +9,7 @@ public final class FakeBackend: Backend, @unchecked Sendable {
     private var threadsById: [String: PhoneThread]
     private var messagesById: [String: [PhoneMessage]]
     private var runnerList: [PhoneRunner]
+    private var scheduleList: [PhoneSchedule]
     private var commands: [String: CommandStatus] = [:]
     private var listeners: [UUID: @Sendable () -> Void] = [:]
     /// How long a fake turn takes. Zero in tests.
@@ -21,6 +22,7 @@ public final class FakeBackend: Backend, @unchecked Sendable {
         let sample = Self.sample(now: now)
         threadsById = Dictionary(uniqueKeysWithValues: sample.threads.map { ($0.threadId, $0) })
         messagesById = sample.messages
+        scheduleList = sample.schedules
         runnerList = [PhoneRunner(runnerId: "m5", name: "MacBook Pro", version: "0.1.0",
                                   lastSeenAt: runnerOnline ? now : now.addingTimeInterval(-3 * 3600))]
         self.turnDelay = turnDelay
@@ -96,6 +98,10 @@ public final class FakeBackend: Backend, @unchecked Sendable {
                 }
             }.sorted { $0.lastActivityAt > $1.lastActivityAt }
         }
+    }
+
+    public func schedules() -> AsyncThrowingStream<[PhoneSchedule], Error> {
+        watch { [unowned self] in lock.withLock { scheduleList } }
     }
 
     public func thread(_ threadId: String) -> AsyncThrowingStream<ThreadDetail?, Error> {
@@ -266,7 +272,7 @@ public final class FakeBackend: Backend, @unchecked Sendable {
         PhoneProject(id: "p_site", title: "Website", icon: PhoneProjectIcon(symbol: "globe", by: "librarian")),
     ]
 
-    static func sample(now: Date) -> (threads: [PhoneThread], messages: [String: [PhoneMessage]]) {
+    static func sample(now: Date) -> (threads: [PhoneThread], messages: [String: [PhoneMessage]], schedules: [PhoneSchedule]) {
         func ago(_ minutes: Double) -> Date { now.addingTimeInterval(-minutes * 60) }
         let garden = [ProjectRef(id: "p_garden", title: "Garden planner")]
         let site = [ProjectRef(id: "p_site", title: "Website")]
@@ -306,6 +312,14 @@ public final class FakeBackend: Backend, @unchecked Sendable {
                         snoozedUntil: now.addingTimeInterval(3600 * 14)),
             PhoneThread(threadId: "a7", title: "Rename the settings screen", cwd: "~/code/garden-planner",
                         preview: "Done.", lastActivityAt: ago(60 * 30), archivedAt: ago(60 * 26)),
+            // Booked itself a look tomorrow morning: it waits under Waiting.
+            PhoneThread(threadId: "a8", title: "Watch the nightly build", cwd: "~/code/api",
+                        preview: "All green tonight. I'll look again in the morning.", lastActivityAt: ago(45),
+                        needs: "nothing"),
+        ]
+        let schedules = [
+            PhoneSchedule(id: "s1", title: "Check the nightly build", whenText: "Every day at 8:00", threadId: "a8",
+                          nextRunAt: now.addingTimeInterval(3600 * 9)),
         ]
         let messages: [String: [PhoneMessage]] = [
             "a1": [
@@ -342,7 +356,12 @@ public final class FakeBackend: Backend, @unchecked Sendable {
                 PhoneMessage(seq: 1, role: .user, text: "Review: Router upgrade order (0f3c2a9e-5b1d-4e7a-9c64-2d8b1f0a7e35)\n\nPicked B. B: docs pages first.\n\nNotes on B (B: docs pages first): Leave the search page till last.", at: ago(60 * 21)),
                 PhoneMessage(seq: 2, role: .assistant, text: "Going with the docs pages first, search last. Picked the next three pages to move.", at: ago(60 * 20)),
             ],
+            "a8": [
+                PhoneMessage(seq: 1, role: .user, text: "Keep an eye on the nightly build this week", at: ago(50)),
+                PhoneMessage(seq: 2, role: .tool, text: "Read the build log", toolKind: "read", at: ago(48)),
+                PhoneMessage(seq: 3, role: .assistant, text: "All green tonight. I'll look again in the morning.", at: ago(45)),
+            ],
         ]
-        return (threads, messages)
+        return (threads, messages, schedules)
     }
 }

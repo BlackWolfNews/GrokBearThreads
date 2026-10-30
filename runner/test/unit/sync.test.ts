@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { makeHarness, tick, tmpDir } from '../helpers/fakes.ts';
-import { ConvexSync, BACKEND_API_VERSION, ICONS_API_VERSION, RUNNER_ICON_API_VERSION, SCHEDULES_API_VERSION, SHARE_API_VERSION, WOKE_API_VERSION, PRESENCE_MS, SYNC_COALESCE_MS, HEARTBEAT_MS, SYNC_BATCH, ensureRunnerId, toThreadDoc, convexPoster, convexUploader, pictureName, type ThreadDoc } from '../../src/sync.ts';
+import { ConvexSync, BACKEND_API_VERSION, ICONS_API_VERSION, RUNNER_ICON_API_VERSION, SCHEDULES_API_VERSION, SHARE_API_VERSION, WOKE_API_VERSION, SECTIONS_API_VERSION, PRESENCE_MS, SYNC_COALESCE_MS, HEARTBEAT_MS, SYNC_BATCH, ensureRunnerId, toThreadDoc, convexPoster, convexUploader, pictureName, type ThreadDoc } from '../../src/sync.ts';
 import type { Project } from '../../src/protocol.ts';
 import type { ScheduleBackend } from '../../src/schedules.ts';
 import { nullLogger, type Logger } from '../../src/log.ts';
@@ -132,6 +132,12 @@ test('view follows hibernate and den; cost is to the cent; working comes from ba
   const woke = { at: '2026-10-27T10:00:00.000Z', since: '2026-10-26T10:00:00.000Z' };
   assert.deepEqual(toThreadDoc({ ...base, woke }, 'r', now).woke, woke);
   assert.ok(!('woke' in inbox));
+  // What the phone's sections go by, as the Mac's do.
+  const sections = toThreadDoc({ ...base, needs: 'nothing', pendingReviews: 2, waitingForRoom: { until: '2026-10-27T11:00:00.000Z' } }, 'r', now);
+  assert.equal(sections.needs, 'nothing');
+  assert.equal(sections.pendingReviews, 2);
+  assert.deepEqual(sections.waitingForRoom, { until: '2026-10-27T11:00:00.000Z' });
+  assert.ok(!('needs' in inbox) && !('pendingReviews' in inbox) && !('waitingForRoom' in inbox));
   // Nothing the phone doesn't need.
   assert.ok(!('lastSeq' in inbox) && !('contextTokens' in inbox) && !('panels' in inbox));
 });
@@ -947,6 +953,28 @@ test('a woken thread\'s row carries woke, once the backend takes it', async () =
   await tick(20);
   await sync.flushNow();
   assert.deepEqual(docs().filter((d) => d.threadId === a.id).at(-1)!.woke, h.runner.get(a.id).woke);
+  await sync.stop();
+});
+
+test('a row carries needs for the phone\'s sections, once the backend takes it', async () => {
+  let backend = SECTIONS_API_VERSION - 1;
+  const { h, sync, docs } = setup({ answer: (fn) => (fn === 'sync:heartbeat' ? { apiVersion: backend } : null) });
+  // A quick ask's thread ends with needs "nothing", as end_turn would say.
+  const { thread: a } = h.runner.quickAsk({ question: 'q', answer: 'a', sources: [], askedAt: h.clock.now() });
+  assert.equal(h.runner.get(a.id).needs, 'nothing');
+  sync.start();
+  await tick(20);
+  await sync.flushNow();
+  // An older backend would turn the row down with needs on it.
+  const old = docs().filter((d) => d.threadId === a.id);
+  assert.ok(old.length);
+  assert.ok(old.every((d) => d.needs === undefined));
+  backend = SECTIONS_API_VERSION;
+  await sync.stop();
+  sync.start();
+  await tick(20);
+  await sync.flushNow();
+  assert.equal(docs().filter((d) => d.threadId === a.id).at(-1)!.needs, 'nothing');
   await sync.stop();
 });
 
