@@ -189,6 +189,8 @@ struct SplitView: View {
     @Environment(\.dockContent) private var content
     /// The fractions when a divider drag started.
     @State private var startFractions: [Double]?
+    /// The divider being dragged, kept lit while the pointer runs ahead of it.
+    @State private var dragging: Int?
 
     var body: some View {
         // Children with nothing to show right now (a thread's patch panel,
@@ -210,7 +212,7 @@ struct SplitView: View {
                 ForEach(0..<max(shown.count - 1, 0), id: \.self) { i in
                     let before = fractions.prefix(i + 1).reduce(0, +)
                     let at = CGFloat(before) * available + CGFloat(i) * DockTheme.gap + DockTheme.gap / 2
-                    DividerHandle(axis: split.axis)
+                    DividerHandle(axis: split.axis, dragging: dragging == i)
                         .position(split.axis == .horizontal
                                   ? CGPoint(x: at, y: geo.size.height / 2)
                                   : CGPoint(x: geo.size.width / 2, y: at))
@@ -219,13 +221,13 @@ struct SplitView: View {
                                 .onChanged { value in
                                     let start = startFractions ?? split.fractions
                                     if startFractions == nil, ProcessInfo.processInfo.environment["BEARDOCK_LOG"] != nil { print("divider \(split.id) \(i) from \(value.startLocation)") }
-                                    if startFractions == nil { startFractions = start }
+                                    if startFractions == nil { startFractions = start; dragging = i }
                                     let t = split.axis == .horizontal ? value.translation.width : value.translation.height
                                     let visible = Self.normalized(shown.map { start[$0] })
                                     let moved = Self.resized(visible, at: i, by: t / max(available, 1), min: 80 / max(available, 1))
                                     controller.layout.setFractions(split: split.id, Self.merged(moved, into: start, at: shown))
                                 }
-                                .onEnded { _ in startFractions = nil }
+                                .onEnded { _ in startFractions = nil; dragging = nil }
                         )
                 }
             }
@@ -301,18 +303,23 @@ struct SplitLayout: Layout {
 }
 
 /// The invisible strip over a hairline that resizes the panels either side.
+/// 14 pt wide and lit in the accent almost at once (Mike, 30 Oct: the old
+/// 9 pt strip with a faint, late line was fiddly to find). The short delay
+/// stays so the pointer passing over it on the way somewhere doesn't flash.
 private struct DividerHandle: View {
     let axis: SplitAxis
+    var dragging = false
     @State private var hovering = false
 
     var body: some View {
+        let lit = hovering || dragging
         Rectangle()
-            .fill(DockTheme.accent.opacity(hovering ? 0.5 : 0))
-            .frame(width: axis == .horizontal ? 2 : nil, height: axis == .vertical ? 2 : nil)
-            .frame(width: axis == .horizontal ? 9 : nil, height: axis == .vertical ? 9 : nil)
+            .fill(DockTheme.accent.opacity(lit ? 0.85 : 0))
+            .frame(width: axis == .horizontal ? 3 : nil, height: axis == .vertical ? 3 : nil)
+            .frame(width: axis == .horizontal ? 14 : nil, height: axis == .vertical ? 14 : nil)
             .frame(maxWidth: axis == .vertical ? .infinity : nil, maxHeight: axis == .horizontal ? .infinity : nil)
             .contentShape(Rectangle())
-            .animation(.easeOut(duration: 0.12).delay(hovering ? 0.15 : 0), value: hovering)
+            .animation(.easeOut(duration: 0.1).delay(lit ? 0.05 : 0), value: lit)
             .onHover { inside in
                 hovering = inside
                 if inside { (axis == .horizontal ? NSCursor.resizeLeftRight : NSCursor.resizeUpDown).push() } else { NSCursor.pop() }
