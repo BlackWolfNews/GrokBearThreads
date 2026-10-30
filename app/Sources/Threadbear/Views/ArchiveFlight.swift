@@ -26,13 +26,17 @@ enum ArchiveFlight {
     fileprivate(set) static weak var inboxList: NSView?
 
     static let duration: Double = 0.44
+    /// How long the last flight's picture took, for the perf run.
+    private(set) static var lastPictureMs = 0.0
 
     /// Starts a flight from `view` as it looks now, and fades `view` back
     /// in for the thread that replaces it. Calls `landed` at the end.
     /// False, with nothing started, when there's nothing to picture.
     static func launch(from view: NSView, landed: @escaping @MainActor () -> Void) -> Bool {
+        let pictureStart = CACurrentMediaTime()
         guard let window = view.window, !view.isHiddenOrHasHiddenAncestor, view.bounds.width > 1, view.bounds.height > 1,
               let picture = picture(of: view) else { return false }
+        lastPictureMs = (CACurrentMediaTime() - pictureStart) * 1000
         let overlay = Overlay(over: window)
         let card = CALayer()
         card.contents = picture

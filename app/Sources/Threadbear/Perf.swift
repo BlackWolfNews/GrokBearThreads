@@ -209,6 +209,39 @@ final class PerfRunner: NSObject {
         json["memoryCheckpoints"] = memoryCheckpoints
         log("  checkpoints: " + memoryCheckpoints.map { String(format: "%@ %.0f MB", $0["at"] as! String, $0["mb"] as! Double) }.joined(separator: ", "))
 
+        // 7. Archiving the open thread: a picture of its transcript drops
+        // into the Archived heading while the next thread opens under it
+        // (`ArchiveFlight`). On the real-size copies, so the fixtures
+        // themselves stay in the inbox. Times the click itself (the
+        // picture, then opening the next thread) and watches the frames
+        // until the flight has landed.
+        log("")
+        log("Archive the open thread (\(min(5, copies.count)) real-size copies, scrolled to the bottom)")
+        var archiveClicks: [Double] = [], pictures: [Double] = []
+        var archiveMaxGap = 0.0, archiveOver33 = 0, archiveFrames = 0
+        for copy in copies.prefix(5) {
+            _ = await measureSwitch(copy.id)
+            app.transcript.scrollToBottom()
+            try? await Task.sleep(for: .milliseconds(300))
+            let watch = FrameWatch()
+            watch.start(on: app.transcript.scrollView)
+            try? await Task.sleep(for: .milliseconds(100))
+            let start = CACurrentMediaTime()
+            app.archive(copy.id)
+            archiveClicks.append((CACurrentMediaTime() - start) * 1000)
+            pictures.append(ArchiveFlight.lastPictureMs)
+            try? await Task.sleep(for: .seconds(ArchiveFlight.duration + 0.5))
+            watch.stop()
+            archiveMaxGap = max(archiveMaxGap, watch.maxGap)
+            archiveOver33 += watch.over33
+            archiveFrames += watch.frames
+        }
+        log("  " + stats("click (picture and opening the next thread)", archiveClicks, unit: "archives"))
+        log("  " + stats("of which the picture", pictures, unit: "archives"))
+        log(String(format: "  frames from the click until it landed: %d, max gap %.1f ms, over 33 ms: %d", archiveFrames, archiveMaxGap, archiveOver33))
+        json["archive"] = ["clickMs": statsJSON(archiveClicks), "pictureMs": statsJSON(pictures),
+                           "frames": archiveFrames, "maxGapMs": archiveMaxGap, "over33": archiveOver33]
+
         // Counted last: it loads every event of every fixture, which would
         // skew the memory numbers above.
         log("")
@@ -234,6 +267,8 @@ final class PerfRunner: NSObject {
         bar("Live resize of the biggest thread, no hang over 100 ms", resize.max <= 100, String(format: "max %.0f ms a step", resize.max))
         bar("Streaming scrolled up, 30% of a core or less", scrolledUp.cpuPercent <= 30 && scrolledUp.anchorHeld,
             String(format: "%.1f%%, the row being read %@", scrolledUp.cpuPercent, scrolledUp.anchorHeld ? "stayed put" : "moved"))
+        bar("Archive the open thread, no hang over 100 ms", archiveMaxGap <= 100 && !archiveClicks.isEmpty,
+            String(format: "max frame gap %.0f ms, click max %.0f ms", archiveMaxGap, archiveClicks.max() ?? 0))
         bar("20 threads loaded and the biggest open, 200 MB or less", footprint <= 200 && settled <= 200,
             String(format: "%.0f MB after 1 s (%.0f MB graphics), %.0f MB settled (peak %.0f MB)", footprint, graphics, settled, peak))
         json["bars"] = barResults
@@ -712,5 +747,38 @@ final class Fling: NSObject {
         result.reachedFirst = !session.hasMoreAbove
         goingUp = false
         phaseStart = now
+    }
+}
+
+/// Frame gaps for a while, from the window's display link: whether frames
+/// kept coming through something short, like an archive's flight.
+@MainActor
+private final class FrameWatch: NSObject {
+    private var link: CADisplayLink?
+    private var last: CFTimeInterval = 0
+    private(set) var frames = 0
+    private(set) var maxGap = 0.0
+    private(set) var over33 = 0
+
+    func start(on view: NSView) {
+        let link = view.displayLink(target: self, selector: #selector(tick(_:)))
+        link.add(to: .main, forMode: .common)
+        self.link = link
+    }
+
+    @objc private func tick(_ link: CADisplayLink) {
+        let now = link.timestamp
+        if last > 0 {
+            let gap = (now - last) * 1000
+            frames += 1
+            maxGap = max(maxGap, gap)
+            if gap > 33 { over33 += 1 }
+        }
+        last = now
+    }
+
+    func stop() {
+        link?.invalidate()
+        link = nil
     }
 }

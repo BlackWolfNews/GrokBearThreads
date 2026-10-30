@@ -213,7 +213,7 @@ enum RowSwipeEvents {
 extension View {
     /// Slides the row with the fingers and shows what letting go will do
     /// in the space it leaves on the right. `leaving` slides it all the way
-    /// off as a swipe would, for an archive from anywhere else.
+    /// off and fades it, for an archive from anywhere else.
     func rowSwipe(_ controller: RowSwipeController, leaving: Bool = false) -> some View {
         modifier(RowSwipeModifier(controller: controller, leaving: leaving))
     }
@@ -228,13 +228,18 @@ private struct RowSwipeModifier: ViewModifier {
     func body(content: Content) -> some View {
         content
             .offset(x: offset)
+            // An archive from anywhere but a swipe (a button, ⌘E, an
+            // agent) slides the row off fading, with nothing behind it:
+            // the blue backing is the swipe's, saying what letting go will
+            // do, and Mike found it distracting from a button (30 Oct).
+            .opacity(leaving ? 0 : 1)
             .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { controller.setWidth($0) }
             // Behind the row and only as wide as the gap it's left: the
             // rows have no fill of their own, so a full-width backing would
             // show through the text.
             .background(alignment: .trailing) {
-                if let action = controller.action, offset < 0 {
-                    let armed = controller.swipe.armed || controller.leaving || leaving
+                if let action = controller.action, offset < 0, !leaving {
+                    let armed = controller.swipe.armed || controller.leaving
                     ZStack {
                         RoundedRectangle(cornerRadius: SidebarMetrics.corner)
                             .fill(armed ? Color.accentColor : Color.primary.opacity(0.07))
