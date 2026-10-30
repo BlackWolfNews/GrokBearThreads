@@ -93,7 +93,11 @@ private struct InboxList: View {
                 drawn(section).map { SectionRow.id(section: section.title, thread: $0.id) }
             }
             ThreadList(order: order, layout: layout, scrollID: { rowIDs[$0] ?? $0 }) { select in
-                if app.threadsLoaded {
+                if !app.threadsLoaded {
+                    // Before the runner's first list: rows shaped like
+                    // threads, so the sidebar reads as loading, not empty.
+                    LoadingRows()
+                } else {
                     if searching && sections.isEmpty {
                         EmptyNote(text: "No threads match.")
                     }
@@ -117,6 +121,42 @@ private struct InboxList: View {
             // Archived heading is out of sight (`ArchiveFlight`).
             .background(FlightMarker(kind: .inboxList))
         }
+    }
+}
+
+/// Grey placeholder rows the size of thread rows (a 30 pt tile, a title
+/// line and a place line), gently pulsing while the app waits for the
+/// runner's first list. Mike asked for these on 30 Oct, after the iPhone
+/// said "Nothing in the inbox" while it loaded.
+private struct LoadingRows: View {
+    @State private var dim = false
+    private static let widths: [(CGFloat, CGFloat)] = [(170, 90), (130, 70), (190, 110), (150, 80), (120, 95), (175, 75)]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            ForEach(Self.widths.indices, id: \.self) { i in
+                let (title, place) = Self.widths[i]
+                HStack(alignment: .center, spacing: zoomed(10)) {
+                    RoundedRectangle(cornerRadius: zoomed(7)).frame(width: zoomed(30), height: zoomed(30))
+                    VStack(alignment: .leading, spacing: zoomed(7)) {
+                        Capsule().frame(width: zoomed(title), height: zoomed(9))
+                        Capsule().frame(width: zoomed(place), height: zoomed(7))
+                    }
+                    Spacer(minLength: 0)
+                }
+                .padding(EdgeInsets(top: zoomed(8), leading: SidebarMetrics.leading, bottom: zoomed(8), trailing: SidebarMetrics.trailing))
+            }
+        }
+        .foregroundStyle(Color.primary.opacity(0.07))
+        .padding(.horizontal, SidebarMetrics.outerInset)
+        .padding(.top, zoomed(10))
+        .opacity(dim ? 0.5 : 1)
+        .onAppear {
+            guard !Juice.reduceMotion else { return }
+            withAnimation(.easeInOut(duration: 0.9).repeatForever(autoreverses: true)) { dim = true }
+        }
+        .accessibilityElement()
+        .accessibilityLabel("Loading threads")
     }
 }
 

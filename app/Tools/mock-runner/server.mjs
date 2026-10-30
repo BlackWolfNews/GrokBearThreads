@@ -521,6 +521,10 @@ async function dispatch(client, method, p) {
       return { clis };
     }
     case 'threads.list': {
+      // THREADBEAR_MOCK_LIST_DELAY_MS: answer late, to see the sidebar's
+      // loading rows.
+      const listDelay = Number(process.env.THREADBEAR_MOCK_LIST_DELAY_MS ?? 0);
+      if (listDelay > 0) await new Promise((r) => setTimeout(r, listDelay));
       const include = new Set(p.include ?? ['inbox']);
       const now = Date.now();
       const list = [...threads.values()].filter((t) => (t.runnerId ?? null) === client.as).map((t) => t.summary).filter((s) => {
