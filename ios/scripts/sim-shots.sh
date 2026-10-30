@@ -37,6 +37,7 @@ shot() {
   echo "$OUT/$name.png"
 }
 shot inbox
+shot search -ThreadbearSearch settings
 shot approval -ThreadbearOpen a1
 shot question -ThreadbearOpen a2
 shot reply -ThreadbearOpen a3

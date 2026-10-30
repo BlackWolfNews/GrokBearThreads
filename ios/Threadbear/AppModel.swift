@@ -55,6 +55,9 @@ final class AppModel {
     /// `-ThreadbearCompose <text>` (Debug only): open New thread with this
     /// typed in, for the screenshots.
     var composeText: String?
+    /// `-ThreadbearSearch <text>` (Debug only): start with this in the
+    /// inbox's search, for the screenshots.
+    var searchText: String?
 
     private var tasks: [Task<Void, Never>] = []
     private(set) var apnsToken: String?
@@ -79,6 +82,7 @@ final class AppModel {
         // `-ThreadbearOpen <threadId>`: start on that thread, for screenshots.
         if let i = args.firstIndex(of: "-ThreadbearOpen"), i + 1 < args.count { openThreadId = args[i + 1] }
         if let i = args.firstIndex(of: "-ThreadbearCompose"), i + 1 < args.count { composeText = args[i + 1] }
+        if let i = args.firstIndex(of: "-ThreadbearSearch"), i + 1 < args.count { searchText = args[i + 1] }
         #endif
         Task { [weak self] in
             while !Task.isCancelled {

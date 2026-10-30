@@ -143,6 +143,28 @@ import Testing
         #expect(sections.inbox.map(\.threadId) == ["q"])
     }
 
+    @Test func searchLooksThroughEveryListLikeTheMac() {
+        var dates = thread("Dates on small screens", 1)
+        dates.preview = "The **picker** fits now"
+        var garden = thread("Release 1.2", 2)
+        garden.projects = [ProjectRef(id: "p", title: "Garden planner")]
+        let sections = InboxSections.build([dates, garden, thread("Busy picker", 0, status: .running)], now: now)
+        let asleep = thread("Old picker work", 50)
+        let archived = thread("Rename the settings screen", 90)
+
+        let picker = ThreadSearch("  PICKER ", sections: sections, hibernating: [asleep], archived: [archived])
+        #expect(picker.inbox.map(\.threadId) == ["Dates on small screens"])
+        #expect(picker.running.map(\.threadId) == ["Busy picker"])
+        #expect(picker.hibernating.map(\.threadId) == ["Old picker work"])
+        #expect(picker.archived.isEmpty)
+
+        #expect(ThreadSearch("garden", sections: sections, hibernating: [], archived: []).inbox.map(\.threadId) == ["Release 1.2"])
+        #expect(ThreadSearch("séttings", sections: sections, hibernating: [], archived: [archived]).archived.count == 1)
+        #expect(ThreadSearch("nothing like it", sections: sections, hibernating: [asleep], archived: [archived]).isEmpty)
+        // Mid-move, in the inbox and hibernating at once: shown once.
+        #expect(ThreadSearch("dates", sections: sections, hibernating: [dates], archived: []).hibernating.isEmpty)
+    }
+
     @Test func rowStatusText() {
         #expect(RowStatus.text(thread("a", 1, status: .waiting, approval: true), now: now) == "Needs you")
         #expect(RowStatus.kind(thread("a", 1, status: .waiting, approval: true)) == .needsYou)

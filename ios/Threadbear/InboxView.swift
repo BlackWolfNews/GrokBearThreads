@@ -8,6 +8,7 @@ struct InboxView: View {
     @State private var composing = false
     @State private var composeText = ""
     @State private var hibernateTarget: PhoneThread?
+    @State private var query = ""
 
     var body: some View {
         NavigationStack(path: $path) {
@@ -29,7 +30,9 @@ struct InboxView: View {
                     }
                 }
                 let sections = model.sections
-                if !model.loaded.contains(.inbox) {
+                if !query.trimmingCharacters(in: .whitespaces).isEmpty {
+                    results(ThreadSearch(query, sections: sections, hibernating: model.hibernating, archived: model.den))
+                } else if !model.loaded.contains(.inbox) {
                     LoadingRows()
                 } else if sections.isEmpty {
                     ContentUnavailableView {
@@ -39,17 +42,22 @@ struct InboxView: View {
                     }
                     .listRowBackground(Color.clear)
                 }
-                if !sections.inbox.isEmpty {
-                    Section { rows(sections.inbox) } header: { SectionHeading(title: "Inbox", icon: "tray") }
-                }
-                if !sections.running.isEmpty {
-                    Section { rows(sections.running, running: true) } header: { SectionHeading(title: "Running", icon: "bolt") }
+                if query.trimmingCharacters(in: .whitespaces).isEmpty {
+                    if !sections.inbox.isEmpty {
+                        Section { rows(sections.inbox) } header: { SectionHeading(title: "Inbox", icon: "tray") }
+                    }
+                    if !sections.running.isEmpty {
+                        Section { rows(sections.running, running: true) } header: { SectionHeading(title: "Running", icon: "bolt") }
+                    }
                 }
             }
             // A flat list with the Mac sidebar's headings, not grouped cards.
             .listStyle(.plain)
             .listSectionSeparator(.hidden)
             .navigationTitle("Threadbear")
+            // Always showing, rather than tucked under the title until you
+            // pull down: on the phone it's the quickest way to an old thread.
+            .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always))
             .navigationDestination(for: String.self) { ThreadView(threadId: $0) }
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
@@ -93,11 +101,50 @@ struct InboxView: View {
             .hibernateDialog(for: $hibernateTarget)
             .refreshable { try? await Task.sleep(for: .milliseconds(400)) }
             .overlay(alignment: .bottom) { ConnectionToast() }
+            .onChange(of: model.searchText, initial: true) { _, text in
+                guard let text else { return }
+                query = text
+                model.searchText = nil
+            }
             .onChange(of: model.openThreadId, initial: true) { _, id in
                 guard let id else { return }
                 path = [id]
                 model.openThreadId = nil
             }
+        }
+    }
+
+    /// What the search found, under the same headings as the Mac's sidebar,
+    /// the put-away threads too.
+    @ViewBuilder private func results(_ search: ThreadSearch) -> some View {
+        if search.isEmpty {
+            ContentUnavailableView.search(text: query.trimmingCharacters(in: .whitespaces))
+                .listRowBackground(Color.clear)
+                .listRowSeparator(.hidden)
+        }
+        if !search.inbox.isEmpty {
+            Section { rows(search.inbox) } header: { SectionHeading(title: "Inbox", icon: "tray") }
+        }
+        if !search.running.isEmpty {
+            Section { rows(search.running, running: true) } header: { SectionHeading(title: "Running", icon: "bolt") }
+        }
+        if !search.hibernating.isEmpty {
+            Section { putAwayRows(search.hibernating, from: .hibernating) } header: { SectionHeading(title: "Hibernating", icon: "moon.zzz") }
+        }
+        if !search.archived.isEmpty {
+            Section { putAwayRows(search.archived, from: .den) } header: { SectionHeading(title: "Archived", icon: "archivebox") }
+        }
+    }
+
+    /// Hibernating or archived rows found by the search: open on a tap, and
+    /// swipe to bring back, as in their own lists.
+    private func putAwayRows(_ threads: [PhoneThread], from view: ThreadsView) -> some View {
+        ForEach(threads) { thread in
+            Button { path.append(thread.threadId) } label: { ThreadRow(thread: thread) }
+                .buttonStyle(.plain)
+                .listRowInsets(ThreadRow.insets)
+                .listRowSeparator(.hidden)
+                .bringBackSwipe(thread, from: view)
         }
     }
 
@@ -158,22 +205,39 @@ struct ThreadListView: View {
                 NavigationLink(value: thread.threadId) { ThreadRow(thread: thread) }
                     .listRowInsets(ThreadRow.insets)
                     .listRowSeparator(.hidden)
-                    .swipeActions(edge: .trailing) {
-                        Button {
-                            Task {
-                                guard let backend = model.backend else { return }
-                                do { _ = try await backend.update(threadId: thread.threadId, change: view == .den ? .unarchive : .wake) }
-                                catch { model.report(error) }
-                            }
-                        } label: {
-                            Label(view == .den ? "Back to inbox" : "Wake", systemImage: view == .den ? "tray.and.arrow.up" : "sun.max")
-                        }
-                        .tint(.accentColor)
-                    }
+                    .bringBackSwipe(thread, from: view)
             }
         }
         .listStyle(.plain)
         .navigationTitle(title)
+    }
+}
+
+extension View {
+    /// Wake a hibernating thread, or put an archived one back in the inbox.
+    func bringBackSwipe(_ thread: PhoneThread, from view: ThreadsView) -> some View {
+        modifier(BringBackSwipe(thread: thread, view: view))
+    }
+}
+
+private struct BringBackSwipe: ViewModifier {
+    @Environment(AppModel.self) private var model
+    var thread: PhoneThread
+    var view: ThreadsView
+
+    func body(content: Content) -> some View {
+        content.swipeActions(edge: .trailing) {
+            Button {
+                Task {
+                    guard let backend = model.backend else { return }
+                    do { _ = try await backend.update(threadId: thread.threadId, change: view == .den ? .unarchive : .wake) }
+                    catch { model.report(error) }
+                }
+            } label: {
+                Label(view == .den ? "Back to inbox" : "Wake", systemImage: view == .den ? "tray.and.arrow.up" : "sun.max")
+            }
+            .tint(.accentColor)
+        }
     }
 }
 

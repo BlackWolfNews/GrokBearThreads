@@ -21,7 +21,7 @@ directly, so it works with the Mac asleep: whatever you send waits in
 - `Threadbear/`: the SwiftUI app. iOS 18, so the XS Max runs it too.
 - `scripts/sim-shots.sh [dir] [--dark]`: screenshots on sample data in the
   simulator (`-ThreadbearFake`, `-ThreadbearOpen <threadId>`,
-  `-ThreadbearCompose <text>`), on a 6.9" iPhone, so they're App Store sized.
+  `-ThreadbearCompose <text>`, `-ThreadbearSearch <text>`), on a 6.9" iPhone, so they're App Store sized.
 - `appstore/` and `scripts/appstore-*`: the App Store listing and release,
   in `appstore/RELEASE.md`.
 - `scripts/install-phone.sh`: build, install over wifi, launch.

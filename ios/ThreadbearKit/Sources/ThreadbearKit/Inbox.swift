@@ -64,6 +64,40 @@ public struct InboxSections: Sendable, Equatable {
     public var isEmpty: Bool { inbox.isEmpty && running.isEmpty }
 }
 
+/// The search at the top of the inbox, as the Mac sidebar's
+/// (ThreadSections.matching): every thread, the put-away ones too, each
+/// section cut down to the matches in its usual order.
+public struct ThreadSearch: Sendable, Equatable {
+    public var inbox: [PhoneThread] = []
+    public var running: [PhoneThread] = []
+    public var hibernating: [PhoneThread] = []
+    public var archived: [PhoneThread] = []
+
+    public init(_ query: String, sections: InboxSections, hibernating: [PhoneThread], archived: [PhoneThread]) {
+        let query = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        // A thread can sit in two lists for a moment while the runner moves
+        // it (snoozed but not yet out of the inbox view): show it once.
+        var seen = Set<String>()
+        let keep: ([PhoneThread]) -> [PhoneThread] = { threads in
+            threads.filter { Self.matches($0, query) && seen.insert($0.threadId).inserted }
+        }
+        inbox = keep(sections.inbox)
+        running = keep(sections.running)
+        self.hibernating = keep(hibernating)
+        self.archived = keep(archived)
+    }
+
+    /// Part of the title or the last reply, as on the Mac, or the project
+    /// or folder, which on the phone's narrow rows is often all you can
+    /// remember a thread by.
+    public static func matches(_ thread: PhoneThread, _ query: String) -> Bool {
+        let options: String.CompareOptions = [.caseInsensitive, .diacriticInsensitive]
+        return [thread.title, thread.preview, thread.placeText].contains { $0.range(of: query, options: options) != nil }
+    }
+
+    public var isEmpty: Bool { inbox.isEmpty && running.isEmpty && hibernating.isEmpty && archived.isEmpty }
+}
+
 /// What a row says at its right: the status while it means something, else
 /// the time since its last activity.
 public enum RowStatus {
