@@ -275,7 +275,7 @@ export const END_TURN_DESCRIPTION =
   END_TURN_WHAT +
   'Call it once, as the very last thing in every turn, and write nothing after it. ' +
   END_TURN_SUMMARY +
-  "With a summary, you needn't write a message first. Without one, it is refused until the turn has a reply: ordinary text from you after your last tool result (Threadbear's own tools aside), so the user gets a complete answer in the conversation. " +
+  "With a summary, you needn't write a message first when the bullets are the whole answer. When the user asked for something to read (details, a list, steps, a draft, an explanation), write it as your message before you call end_turn: a bullet like \"Put together the details you need\" points at nothing unless the details are in a message. Without one, it is refused until the turn has a reply: ordinary text from you after your last tool result (Threadbear's own tools aside), so the user gets a complete answer in the conversation. " +
   END_TURN_ASKS;
 
 // Codex's: its final answer ends the turn, so nothing can be called after
@@ -319,6 +319,27 @@ export const NO_REPLY =
 export const NARRATION_ONLY =
   'The user got only a short summary of your last message, not its words. ' +
   'Write the whole message again now, as ordinary text with nothing after it: it takes the summary\'s place.';
+
+// What an accepted end_turn with summary bullets adds when the turn has
+// no message of its own since its last step, so the bullets are all the
+// user has. On 30 Oct 2026 (thread 2a0a9c2c) Mike asked for the details
+// he needed for a call to Qantas, and Opus called end_turn first, with
+// "Put together the details you'll need for the call" as a bullet. Told
+// to stop, it wrote the details anyway, and the runner dropped them as a
+// repeat, twice: he got bullets pointing at nothing. Whether the bullets
+// stand for words not yet written is for the agent to say, as no wording
+// gives it away ("put together", "here are", "below"), so this asks, and
+// the runner keeps the one message that follows (runner.ts, owedReply)
+// and the app shows it as the reply (TranscriptReducer, reply(of:)).
+export const BULLETS_ONLY =
+  'Your summary bullets are all the user has from this turn: no message from you has reached them since your last step. ' +
+  "If the bullets point at something you haven't written in a message yet (the details, a list, steps, an explanation, a draft), write it now, once, as ordinary text with nothing after it: it shows as your reply, with the bullets folded under it. " +
+  'If the bullets are the whole answer, stop here with no more text.';
+
+// Whether an accepted end_turn's result asked for the message (BULLETS_ONLY).
+export function endTurnOwesReply(result: { text: string }): boolean {
+  return result.text.includes(BULLETS_ONLY.slice(0, 60));
+}
 
 // How every accepted end_turn result starts, so the runner can tell one
 // from a refusal by what it says (a refusal's ok flag is only as good as

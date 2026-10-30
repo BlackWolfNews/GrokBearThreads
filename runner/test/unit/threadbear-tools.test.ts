@@ -600,6 +600,65 @@ test('a reply that came only as a summary: end_turn asks for it again, and the r
   assert.doesNotMatch(read.text, /resent the full/);
 });
 
+// Thread 2a0a9c2c, 30 Oct 2026: asked for the details for a call to Qantas,
+// Opus called end_turn with "Put together the details you'll need" as a
+// bullet and wrote the details after it, where the runner dropped them.
+test('bullets with no message since the last step: end_turn asks for the message, and the one after it is kept', async () => {
+  const h = makeHarness();
+  const { thread, s } = start(h);
+  const { call } = tools(h, thread.id);
+  toolCall(s, 'b1', 'Bash', { command: 'browserbear read 1' });
+  toolResult(s, 'b1');
+  const args = { summary: ["Put together the details you'll need for the Qantas call."], needs: 'you', asks: [{ action: 'Tell me what they said.', why: 'So I can update the trip page.' }] };
+  toolCall(s, 'e1', END_TURN, args);
+  const r = await call('end_turn', args);
+  assert.equal(r.error, false);
+  assert.match(r.text, /^Noted: this thread will wait in Needs you/);
+  assert.match(r.text, /bullets are all the user has/);
+  assert.match(r.text, /write it now, once, as ordinary text/);
+  assert.doesNotMatch(r.text, /second message/);
+  s.out({ kind: 'event', event: { type: 'tool.result', itemId: 'e1', ok: true, text: r.text, truncated: false, images: [] } });
+  // A line shorter than the bullets says no more than them: dropped.
+  s.text('m1:0', 'Over to you.');
+  // Thinking, as Opus did, then the details, streamed then whole.
+  s.out({ kind: 'event', event: { type: 'reasoning', itemId: 'm2:0', text: 'The user has not got the details yet.' } });
+  s.out({ kind: 'delta', delta: { type: 'assistant.text.delta', itemId: 'm2:1', text: '**Phone:**' } });
+  s.text('m2:1', '**Phone:** 13 13 13\n\n**Bookings:** EXBEEI (you), E9SMYP (Kelsie and Joshua), last name CANN');
+  // Anything after that is a repeat again.
+  s.text('m3:0', 'Over to you. ' + 'x'.repeat(100));
+  const texts = h.events(thread.id).filter((e) => e.type === 'assistant.text');
+  assert.deepEqual(
+    texts.map((e) => [e.itemId, e.text]),
+    [
+      ['e1.summary', "- Put together the details you'll need for the Qantas call."],
+      ['m2:1', '**Phone:** 13 13 13\n\n**Bookings:** EXBEEI (you), E9SMYP (Kelsie and Joshua), last name CANN'],
+    ],
+  );
+  assert.ok(!h.events(thread.id).some((e) => e.type === 'reasoning' && e.itemId === 'm2:0'), 'thinking after end_turn still goes');
+  // The bullets stay the preview, as on the phone.
+  assert.equal(h.runner.get(thread.id).preview, "- Put together the details you'll need for the Qantas call.");
+});
+
+test('bullets after a message: end_turn says stop, and text after it is dropped', async () => {
+  const h = makeHarness();
+  const { thread, s } = start(h);
+  const { call } = tools(h, thread.id);
+  toolCall(s, 'b1', 'Bash', { command: 'npm test' });
+  toolResult(s, 'b1');
+  s.text('m1:0', 'Tests pass. The bug was a missing await in the loader.');
+  const args = { summary: ['Fixed the loader bug; tests pass.'], needs: 'nothing' };
+  toolCall(s, 'e1', END_TURN, args);
+  const r = await call('end_turn', args);
+  assert.equal(r.error, false);
+  assert.match(r.text, /Stop here, with no more text/);
+  assert.match(r.text, /nothing written now reaches them/);
+  assert.doesNotMatch(r.text, /bullets are all the user has/);
+  s.out({ kind: 'event', event: { type: 'tool.result', itemId: 'e1', ok: true, text: r.text, truncated: false, images: [] } });
+  s.text('m2:0', 'Tests pass. The bug was a missing await in the loader.');
+  const texts = h.events(thread.id).filter((e) => e.type === 'assistant.text');
+  assert.deepEqual(texts.map((e) => e.itemId), ['m1:0', 'e1.summary']);
+});
+
 // Codex's final answer ends its turn, so its end_turn comes just before it.
 // Told to call it after, Codex never did (28 Oct 2026).
 test("Codex's end_turn comes before the final answer: never refused, and the answer after it is kept", async () => {

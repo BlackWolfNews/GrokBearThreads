@@ -88,7 +88,7 @@ import { SAID_MAX, WAKE_SYSTEM, awayFor, hibernateNote, readWakeAnswer, wakeProm
 import { emptyHighlights, observe as observeHighlights, pinItem, remove as removeHighlight, unpin as unpinHighlight, upsert as upsertHighlight, view as highlightsView, absolute, type ThreadHighlights } from './highlights.ts';
 import { SERVER_NAME, approvalTitle } from './threadbear-mcp.ts';
 import { PANEL_ACK_WAIT_MS, PANEL_PLACES, resolvePanel } from './panel-requests.ts';
-import { archiveFromTool, END_TURN_TOOL, endTurnAccepted, endTurnTaken, needsFromText, needsFromTool, summaryFromTool, summaryMarkdown } from './needs.ts';
+import { archiveFromTool, END_TURN_TOOL, endTurnAccepted, endTurnOwesReply, endTurnTaken, needsFromText, needsFromTool, summaryFromTool, summaryMarkdown } from './needs.ts';
 import type { Needs } from './needs.ts';
 import { asksForAppRestart } from './app-restarts.ts';
 import type { ConnectorsStatus } from './connectors.ts';
@@ -250,6 +250,14 @@ type Turn = {
   // end_turn asked for (needs.ts, NARRATION_ONLY): it's kept, not dropped,
   // and takes the summary's itemId so it replaces it.
   narrationItem?: string;
+  // The accepted end_turn brought bullets with no message since the last
+  // step, and asked whether they stand for one not yet written (needs.ts,
+  // BULLETS_ONLY): the first own text after it is that message, kept
+  // rather than dropped (30 Oct 2026, thread 2a0a9c2c), when it says more
+  // than the bullets, as the app takes it as the reply only then
+  // (TranscriptReducer, reply(of:)): a "Done." under them is still a
+  // repeat. The bullets' length, while it's owed.
+  owedReply?: number;
 };
 
 type Runtime = {
@@ -2041,6 +2049,7 @@ export class Runner {
     turn.messages.push(msg.turnId);
     // He wrote again, so the turn owes him another reply.
     turn.ended = false;
+    turn.owedReply = undefined;
     this.markDirty(st);
     rt.session!.send({ id: msg.turnId, text: msg.text, images: msg.images });
   }
@@ -2260,6 +2269,9 @@ export class Runner {
           this.log.info('replaced a summary with the text after end_turn', { threadId: rec.id, chars: ev.text.length });
           ev = { type: 'assistant.text', itemId: rt.turn.narrationItem, text: ev.text };
           rt.turn.narrationItem = undefined;
+        } else if (ev.type === 'assistant.text' && rt.turn?.ended && rt.turn.owedReply !== undefined && !ev.itemId.includes('/') && ev.text.trim().length > rt.turn.owedReply) {
+          this.log.info('kept the message after end_turn its bullets stood for', { threadId: rec.id, chars: ev.text.length });
+          rt.turn.owedReply = undefined;
         } else if ((ev.type === 'assistant.text' || ev.type === 'reasoning') && rt.turn?.ended && !ev.itemId.includes('/')) {
           rt.inProgress.delete(ev.itemId);
           this.log.info('dropped text after end_turn', { threadId: rec.id, chars: ev.text.length });
@@ -2285,7 +2297,11 @@ export class Runner {
             rt.turn.endTurn = ev.input;
             rt.turn.endTurnCall = ev.itemId;
           }
-          if (ev.type === 'tool.result' && ev.itemId === rt.turn.endTurnCall && endTurnAccepted(ev)) rt.turn.ended = true;
+          if (ev.type === 'tool.result' && ev.itemId === rt.turn.endTurnCall && endTurnAccepted(ev)) {
+            rt.turn.ended = true;
+            const bullets = summaryFromTool(rt.turn.endTurn);
+            rt.turn.owedReply = bullets && endTurnOwesReply(ev) ? summaryMarkdown(bullets).length : undefined;
+          }
           if (ev.type === 'edit.diff') rt.turn.edited.add(ev.path);
           else if (ev.type === 'tool.call' && (ev.kind === 'edit' || ev.kind === 'write')) {
             const file = ev.input.file_path ?? ev.input.path ?? ev.input.notebook_path;
@@ -2324,6 +2340,8 @@ export class Runner {
       case 'delta':
         // Streamed text after an accepted end_turn, dropped like its frame
         // above, so it doesn't flash up and vanish.
+        // That includes the message an owed reply keeps (owedReply): it
+        // lands whole, as a sign-off line it drops would leave a row behind.
         if (rt.turn?.ended && (o.delta.type === 'assistant.text.delta' || o.delta.type === 'reasoning.delta') && !o.delta.itemId.includes('/')) break;
         this.addDelta(st, o.delta);
         break;

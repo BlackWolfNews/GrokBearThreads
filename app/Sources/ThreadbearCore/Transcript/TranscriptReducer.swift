@@ -977,9 +977,14 @@ public struct TranscriptModel: Sendable {
     /// broken. Mike: everything before the last step is the work, what
     /// comes after it is what he should see. A sign-off line ("Landed.")
     /// is shorter than the bullets, so they still win over it. Text after
-    /// end_turn never counts: it's a repeat of the card (an agent wrote
-    /// "What I need from you" there and it took the answer's place), or
-    /// Codex's final answer, which follows its end_turn by design.
+    /// end_turn counts only in a turn with no words of its own before it:
+    /// otherwise it's a repeat of the card (an agent wrote "What I need
+    /// from you" there and it took the answer's place), or Codex's final
+    /// answer, which follows its end_turn by design. With no words before,
+    /// it's the message the bullets stood for, which end_turn asked for
+    /// and the runner kept: on 30 Oct 2026 the details for a call to
+    /// Qantas came after "Put together the details you'll need" (runner
+    /// needs.ts, BULLETS_ONLY).
     private func reply(of turn: [Int]) -> Set<Int> {
         let text = textItem
         let end = turn.firstIndex { k in
@@ -1003,7 +1008,10 @@ public struct TranscriptModel: Sendable {
             // A narration block is only a paraphrase of what the agent
             // wrote, so it never beats the bullets: one about a list of 13
             // names for Paws showed instead of them (30 Oct 2026).
-            let words = final.filter { text($0)?.isNarration == false }
+            var words = final.filter { text($0)?.isNarration == false }
+            if words.isEmpty {
+                words = turn[end...].filter { text($0).map { !$0.isSummary && !$0.isNarration } == true }
+            }
             let said = words.reduce(0) { $0 + (text($1)?.text.count ?? 0) }
             return said > (text(summary)?.text.count ?? 0) ? Set(words) : [summary]
         }

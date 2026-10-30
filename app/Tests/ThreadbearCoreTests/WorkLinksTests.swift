@@ -85,6 +85,32 @@ final class WorkLinksTests: XCTestCase {
         XCTAssertEqual(model.rows.map(\.id), ["u:1", "g:t:c1", "a:m1", "f:t1"])
     }
 
+    /// Asked for the details for a call to Qantas, Opus called end_turn
+    /// first, with "Put together the details" as a bullet, and wrote them
+    /// after it (30 Oct 2026). With no words before end_turn, the message
+    /// after it is the reply; a sign-off shorter than the bullets isn't.
+    func testTheMessageAfterBulletsThatStoodForItIsTheReply() {
+        let model = TranscriptModel(events: [
+            E.user(1, "Give me the details for the call"),
+            E.call(2, "c1", input: ["command": "browserbear read 1"]), E.result(3, "c1"),
+            E.call(4, "e1", name: "mcp__threadbear__end_turn", kind: "mcp", title: "end_turn"), E.result(5, "e1", text: "Noted"),
+            Self.summary(6, "e1.summary", "- Put together the details you'll need for the call."),
+            E.text(7, "m1", "**Phone:** 13 13 13\n\n**Bookings:** EXBEEI (you), E9SMYP (Kelsie and Joshua), last name CANN"), E.done(8),
+        ])
+        XCTAssertEqual(model.rows.map(\.id), ["u:1", "g:t:c1", "a:m1", "f:t1"])
+        guard case .group(let group) = model.rows[1].content else { return XCTFail("a group") }
+        XCTAssertEqual(group.memberIds, ["t:c1", "a:e1.summary"])
+
+        let short = TranscriptModel(events: [
+            E.user(1, "Fix it"),
+            E.call(2, "c1", input: ["command": "npm test"]), E.result(3, "c1"),
+            E.call(4, "e1", name: "mcp__threadbear__end_turn", kind: "mcp", title: "end_turn"), E.result(5, "e1", text: "Noted"),
+            Self.summary(6, "e1.summary", "- Fixed the slug bug; tests pass."),
+            E.text(7, "m1", "Done."), E.done(8),
+        ])
+        XCTAssertEqual(short.rows.map(\.id), ["u:1", "g:t:c1", "a:e1.summary", "f:t1"])
+    }
+
     func testATurnWithoutASummaryKeepsItsMessages() {
         let model = TranscriptModel(events: [
             E.user(1, "Hi"), E.text(2, "m1", "Hello."), E.done(3),

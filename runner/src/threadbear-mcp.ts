@@ -19,7 +19,7 @@ import { parseWhen, relativeFuture, relativeTime } from './when.ts';
 
 export { parseWhen, relativeFuture, relativeTime };
 import { RUNNER_VERSION, expandHome } from './config.ts';
-import { ALREADY_ENDED, CODEX_END_TURN_DESCRIPTION, END_TURN_DESCRIPTION, END_TURN_TOOL, ENDED, endedThisTurn, NARRATION_ONLY, NO_REPLY, needsFromTool, summaryFromTool, turnReply, type TurnReply } from './needs.ts';
+import { ALREADY_ENDED, CODEX_END_TURN_DESCRIPTION, END_TURN_DESCRIPTION, END_TURN_TOOL, BULLETS_ONLY, ENDED, endedThisTurn, NARRATION_ONLY, NO_REPLY, needsFromTool, summaryFromTool, turnReply, type TurnReply } from './needs.ts';
 import { asksForAppRestart, type AppRestarts } from './app-restarts.ts';
 import { PANEL_PLACES } from './panel-requests.ts';
 import { nudgedThisTurn, signInNudge, turnSignIns, uncovered } from './connectors.ts';
@@ -627,8 +627,13 @@ export function buildThreadbearTools(
         // also keeps the CLI from taking this call as the turn's end.
         // Codex's reply is the final answer it writes next.
         const summary = summaryFromTool(args);
-        const reply = codex || summary ? undefined : await replied();
-        if (reply && !reply.replied) throw new Error(NO_REPLY);
+        const reply = codex ? undefined : await replied();
+        if (reply && !summary && !reply.replied) throw new Error(NO_REPLY);
+        // Bullets with no message since the last step (or only a
+        // narration block's summary of one): asked whether they stand for
+        // words not yet written, which the runner then keeps (needs.ts,
+        // BULLETS_ONLY).
+        const owed = summary && reply && (!reply.replied || reply.narrationOnly) ? ` ${BULLETS_ONLY}` : '';
         if (endedThisTurn(await turnEvents(), SERVER_NAME)) throw new Error(ALREADY_ENDED);
         // A connector that needs Mike to sign in again (a gateway service's
         // sign_in stub, or claude.ai's "needs you to sign in again") came
@@ -658,14 +663,22 @@ export function buildThreadbearTools(
         // asks for without a nudge (adapter.ts) (28 Oct 2026).
         // A reply that reached Mike only as a summary is asked for again;
         // the runner puts it in the summary's place (needs.ts, NARRATION_ONLY).
-        if (reply?.narrationOnly) {
+        if (!summary && reply?.narrationOnly) {
           return needs === 'you'
             ? `${ENDED} will wait in Needs you${archive ? ', and stays in the inbox, as it needs something from the user' : ''}.${restart} ${NARRATION_ONLY} Keep the asks out of it: they go in a card under it.`
             : `${ENDED} is done${archive ? ', and will be archived once the turn is over' : ''}. ${NARRATION_ONLY}`;
         }
+        if (owed) {
+          return needs === 'you'
+            ? `${ENDED} will wait in Needs you${archive ? ', and stays in the inbox, as it needs something from the user' : ''}.${restart}${owed} Keep the asks out of it: they go in a card under it.`
+            : `${ENDED} is done${archive ? ', and will be archived once the turn is over' : ''}.${owed}`;
+        }
+        // Not "lands as a second message": the runner drops it as a
+        // repeat, and an agent told it would land wrote its answer there
+        // (30 Oct 2026, thread 2a0a9c2c).
         return needs === 'you'
-          ? `${ENDED} will wait in Needs you${archive ? ', and stays in the inbox, as it needs something from the user' : ''}.${restart} Stop here, with no more text: the user has your reply, the asks go in a card under it, and anything written now lands as a second message.`
-          : `${ENDED} is done${archive ? ', and will be archived once the turn is over' : ''}. Stop here, with no more text: the user has your reply, and anything written now lands as a second message under it.`;
+          ? `${ENDED} will wait in Needs you${archive ? ', and stays in the inbox, as it needs something from the user' : ''}.${restart} Stop here, with no more text: the user has your reply, the asks go in a card under it, and nothing written now reaches them.`
+          : `${ENDED} is done${archive ? ', and will be archived once the turn is over' : ''}. Stop here, with no more text: the user has your reply, and nothing written now reaches them.`;
       }),
     ),
     ...(appRestarts
