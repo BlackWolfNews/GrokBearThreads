@@ -106,12 +106,10 @@ struct ComposerView: View {
         return true
     }
 
-    /// With "Something else" picked, the box is that ask's answer.
+    /// With answers picked, the box is for anything else: a Something
+    /// else answer has its own box on the card.
     private func placeholder(_ picks: [Int: Int]) -> String {
         if let thread, app.editing[thread.id] != nil { return "Your message…" }
-        if let thread, let own = picks.first(where: { $0.value == Decisions.ownAnswer })?.key, thread.asks.indices.contains(own) {
-            return thread.asks.count == 1 ? "Your answer…" : "Your answer to \(own + 1)…"
-        }
         return picks.isEmpty ? "Message" : "Add anything else…"
     }
 
@@ -444,6 +442,9 @@ struct ComposerTextField: NSViewRepresentable {
 }
 
 final class ComposerTextView: NSTextView {
+    /// One of a card's Something else boxes (AskAnswerBox), not the
+    /// composer: lookups for the composer skip it.
+    var inAnswerBox = false
     var onSend: (() -> Void)?
     var onReturnWhenEmpty: (() -> Bool)?
     var onEscape: (() -> Bool)?

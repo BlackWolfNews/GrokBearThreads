@@ -36,10 +36,11 @@ struct MessageEdit: Equatable {
 }
 
 /// The answers picked on a thread's open card (ask index to option index),
-/// and which card they're for.
+/// what's written in its Something else boxes, and which card they're for.
 struct AskPicks: Equatable {
     var asksSeq: Int
     var picks: [Int: Int]
+    var notes: [Int: AskNote] = [:]
 }
 
 /// App state: the runner connection, the thread list, the selection and the
@@ -1037,22 +1038,59 @@ final class AppModel {
         return mine.picks
     }
 
+    /// What's written and pasted in the open card's Something else boxes,
+    /// by ask. A box that's closed again keeps what was in it until the
+    /// card is answered.
+    func notes(for thread: ThreadSummary) -> [Int: AskNote] {
+        guard Decisions.isOpen(thread), let seq = thread.asksSeq, let mine = askPicks[thread.id], mine.asksSeq == seq else { return [:] }
+        return mine.notes
+    }
+
     /// Picks option `option` on ask `ask` of the open card, or unpicks it
     /// when it's already the pick. It waits in the composer as a chip and
-    /// goes with whatever he sends next.
+    /// goes with whatever he sends next. Something else opens a box under
+    /// the ask, which the transcript puts the cursor in, so the composer
+    /// doesn't take it.
     func pickAnswer(thread: ThreadSummary, ask: Int, option: Int) {
         guard Decisions.isOpen(thread), let seq = thread.asksSeq else { return }
         var picks = picks(for: thread)
-        // What he writes can only answer one ask, so "Something else" moves.
-        if option == Decisions.ownAnswer { picks = picks.filter { $0.value != Decisions.ownAnswer || $0.key == ask } }
         picks[ask] = picks[ask] == option ? nil : option
-        setPicks(picks, seq: seq, threadId: thread.id)
-        focusComposer(thread.id)
+        setAnswers(picks: picks, notes: notes(for: thread), seq: seq, threadId: thread.id)
+        if picks[ask] != Decisions.ownAnswer { focusComposer(thread.id) }
     }
 
-    private func setPicks(_ picks: [Int: Int], seq: Int, threadId: String) {
-        askPicks[threadId] = picks.isEmpty ? nil : AskPicks(asksSeq: seq, picks: picks)
+    /// Mike wrote in an ask's Something else box.
+    func setNote(thread: ThreadSummary, ask: Int, note: AskNote) {
+        guard Decisions.isOpen(thread), let seq = thread.asksSeq else { return }
+        var notes = notes(for: thread)
+        notes[ask] = note.text.isEmpty && note.images.isEmpty ? nil : note
+        setAnswers(picks: picks(for: thread), notes: notes, seq: seq, threadId: thread.id)
+    }
+
+    /// Pictures pasted, dropped or chosen in an ask's Something else box,
+    /// imported as the composer's are and added to that ask's answer.
+    func addNoteImages(thread: ThreadSummary, ask: Int, urls: [URL]) {
+        guard !urls.isEmpty else { return }
+        // A picture this Mac's runner keeps would be a path another
+        // runner hasn't got (as in the composer).
+        if let name = runnerName(of: thread) {
+            errorMessage = "Pictures can't go to \(name) from this Mac yet."
+            return
+        }
+        let threadId = thread.id
+        Task {
+            let refs = await importImages(urls)
+            guard !refs.isEmpty, let current = threads[threadId] else { return }
+            var note = notes(for: current)[ask] ?? AskNote()
+            note.images += refs
+            setNote(thread: current, ask: ask, note: note)
+        }
+    }
+
+    private func setAnswers(picks: [Int: Int], notes: [Int: AskNote], seq: Int, threadId: String) {
+        askPicks[threadId] = picks.isEmpty && notes.isEmpty ? nil : AskPicks(asksSeq: seq, picks: picks, notes: notes)
         sessions[threadId]?.setAskPicks(seq: seq, picks: picks)
+        sessions[threadId]?.setAskNotes(seq: seq, notes: notes)
     }
 
     /// A follow-up from the done card, into the thread's composer rather
@@ -1126,31 +1164,35 @@ final class AppModel {
         let thread = threadId.flatMap { threads[$0] }
         // self. so Swift 6.3 (Xcode 26) doesn't read picks as the variable being declared.
         let picks = thread.map { self.picks(for: $0) } ?? [:]
+        let notes = thread.map { self.notes(for: $0) } ?? [:]
         let asks = thread?.asks ?? []
-        let answers = Decisions.answers(asks: asks, picks: picks, written: draft.text).map(\.answer)
+        let answers = Decisions.answers(asks: asks, picks: picks, notes: notes).map(\.answer)
         let trimmed = answers.isEmpty
             ? draft.text.trimmingCharacters(in: .whitespacesAndNewlines)
-            : Decisions.message(asks: asks, picks: picks, extra: draft.text)
-        guard !trimmed.isEmpty || !draft.images.isEmpty else { return }
+            : Decisions.message(asks: asks, picks: picks, notes: notes, extra: draft.text)
+        // Pictures from the asks' boxes first, numbered as the answers say,
+        // then the composer's.
+        let images = Decisions.images(asks: asks, picks: picks, notes: notes) + draft.images
+        guard !trimmed.isEmpty || !images.isEmpty else { return }
         // A second Return while the first new thread is still being made.
         if threadId == nil, creatingThread { return }
         guard let client = client(for: threadId), threadId.map(isRemote) == true || connection == .connected else {
             showConnectionError(notConnectedText(threadId, "that wasn't sent"))
             return
         }
-        ActivityRecorder.shared.sent(threadId: threadId, images: draft.images.count, answers: answers.count)
+        ActivityRecorder.shared.sent(threadId: threadId, images: images.count, answers: answers.count)
         if let threadId {
             drafts[key] = nil
             let seq = thread?.asksSeq
-            if let seq, !answers.isEmpty { setPicks([:], seq: seq, threadId: threadId) }
+            if let seq, !answers.isEmpty { setAnswers(picks: [:], notes: [:], seq: seq, threadId: threadId) }
             let pendingId = UUID().uuidString
             // The thread's own session, open already as its composer is
             // showing; kept by the Task, so a failure finds it.
             let session: ThreadSession? = self.session(for: threadId)
-            session?.addPending(id: pendingId, text: trimmed, images: draft.images, answers: answers, summarySeq: thread?.lastSeq ?? 0)
+            session?.addPending(id: pendingId, text: trimmed, images: images, answers: answers, summarySeq: thread?.lastSeq ?? 0)
             Task {
                 do {
-                    try await client.send(threadId: threadId, text: trimmed, images: draft.images, answers: answers)
+                    try await client.send(threadId: threadId, text: trimmed, images: images, answers: answers)
                     // Taken but not shown: it's queued behind the running
                     // turn. Its user.message usually comes just before this
                     // reply, but is applied on the next frame, so wait a
@@ -1161,7 +1203,7 @@ final class AppModel {
                 } catch {
                     session?.removePending(pendingId)
                     restoreDraft(draft, key: key)
-                    if let seq, !answers.isEmpty { setPicks(picks, seq: seq, threadId: threadId) }
+                    if let seq, !answers.isEmpty { setAnswers(picks: picks, notes: notes, seq: seq, threadId: threadId) }
                     show(error)
                 }
             }

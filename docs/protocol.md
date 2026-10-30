@@ -1500,13 +1500,24 @@ A turn the agent finished can say whether Mike has to do anything, so
   Mike can open it from the sentence as well as the button. Resting the
   pointer on any link in transcript text, or on a link button, shows a
   card of where it goes (a file's thumbnail, a page's address). Picking one puts it in
-  the composer as a chip; with Something else, what he writes in the
-  composer is that ask's answer (one ask at a time);
-  the composer stays the only place to write, so his own words and images
-  go with the picks, and a message with no picks is just a message. Send
-  makes one ordinary message, each picked ask's question then its answer,
-  numbered in the card's order, then whatever he wrote, and passes the
-  picks as `answers` so the app can show them as answers. The runner
+  the composer as a chip. Something else opens a box under that ask, with
+  the cursor in it: what he writes there, and any pictures he pastes,
+  drops or adds with its picture button, is that ask's answer. Any number
+  of asks can have one (30 Oct 2026: with the composer as the only box, a
+  second Something else took the first one's place, so he could only
+  answer one ask in his own words; of the five designs he picked a box
+  per ask, and asked for pictures in them). Return in a box sends, as in
+  the composer. The composer is for anything else, and a message with no
+  picks is just a message. Send makes one ordinary message, each picked
+  ask's question then its answer, numbered in the card's order, then
+  whatever he wrote in the composer, and passes the picks as `answers` so
+  the app can show them as answers. The boxes' pictures go first in the
+  message's `images`, in the card's order, then the composer's, and an
+  answer with pictures ends "See picture 1." (or "See pictures 2 and
+  3."), so the agent knows which are whose. A box he closes again keeps
+  what's in it until the card is answered, but sends none of it. Words
+  or pictures in a box hold up the app's restart onto a new build, as a
+  draft does. The runner
   keeps `answers` on the `user.message` and otherwise treats it as a
   normal `threads.send`; the next turn closes the card as usual.
 

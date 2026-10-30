@@ -115,7 +115,10 @@ final class ThreadSession {
                 let picks = app?.askPicks[threadId]
                 let prepared = await Task.detached(priority: .userInitiated) { () -> (TranscriptModel, Int) in
                     var model = TranscriptModel(root: root)
-                    if let picks { _ = model.setAskPicks(picks.asksSeq, picks.picks) }
+                    if let picks {
+                        _ = model.setAskPicks(picks.asksSeq, picks.picks)
+                        _ = model.setAskNotes(picks.asksSeq, picks.notes)
+                    }
                     model.load(events: page.events, inProgress: page.inProgress)
                     _ = model.setBackground(background)
                     if debug { print(String(format: "    after model %.0f MB", memoryMB())) }
@@ -393,6 +396,17 @@ final class ThreadSession {
         guard state == .loaded, !rebuilding else { return }
         let oldStart = displayStart
         let change = feed.setAskPicks(seq, picks)
+        guard !change.isEmpty else { return }
+        show(change, oldStart: oldStart)
+    }
+
+    /// Shows what's in the card's Something else boxes, so it makes room
+    /// for them (picked before the transcript loaded, they come with
+    /// AppModel.askPicks as the picks do).
+    func setAskNotes(seq: Int, notes: [Int: AskNote]) {
+        guard state == .loaded, !rebuilding else { return }
+        let oldStart = displayStart
+        let change = feed.setAskNotes(seq, notes)
         guard !change.isEmpty else { return }
         show(change, oldStart: oldStart)
     }

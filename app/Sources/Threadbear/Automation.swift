@@ -323,6 +323,13 @@ enum Automation {
         case "review":
             return await designReview(c, app: app)
         case "type":
+            // `"focused": true` types where the cursor is instead (a card's
+            // Something else box, say), as keys would.
+            if c["focused"] as? Bool == true {
+                guard let field = window?.firstResponder as? NSTextView, field.isEditable else { return "error the cursor isn't in a text box" }
+                field.insertText(c["text"] as? String ?? "", replacementRange: field.selectedRange())
+                return "ok " + ((field as? ComposerTextView)?.inAnswerBox == true ? "answer box" : "text box")
+            }
             guard let composer = findComposer(in: window?.contentView) else { return "error no composer" }
             window?.makeFirstResponder(composer)
             // `replace` takes the text view's whole text: clearing only the
@@ -1696,7 +1703,7 @@ enum Automation {
     /// its class.
     private static func findComposer(in view: NSView?) -> ComposerTextView? {
         guard let view else { return nil }
-        if let match = view as? ComposerTextView { return match }
+        if let match = view as? ComposerTextView, !match.inAnswerBox { return match }
         for sub in view.subviews {
             if let found = findComposer(in: sub) { return found }
         }
@@ -1773,8 +1780,10 @@ extension Automation {
     /// The open thread's card of asks, picked as its buttons pick:
     /// `pick` is "ask:option", both 1-based ("2:1" picks the second ask's
     /// first choice, or unpicks it if it was), `clear` drops every pick,
-    /// `send` sends the composer with them. Says where it is after, as
-    /// `dump` does.
+    /// `write` is "ask:text" for an ask's Something else box (picking
+    /// Something else on it if it isn't), `picture` "ask:path" adds a
+    /// picture to that box, and `send` sends the composer with them. Says
+    /// where it is after, as `dump` does.
     @MainActor
     static func decide(_ c: [String: Any], app: AppModel) -> String {
         guard let thread = app.selectedThread else { return "error no thread open" }
@@ -1788,6 +1797,21 @@ extension Automation {
             guard parts.count == 2, thread.asks.indices.contains(parts[0] - 1),
                   parts[1] == 0 || Decisions.choices(for: thread.asks[parts[0] - 1]).indices.contains(parts[1] - 1) else { return "error no choice \(pick)" }
             app.pickAnswer(thread: thread, ask: parts[0] - 1, option: parts[1] == 0 ? Decisions.ownAnswer : parts[1] - 1)
+        }
+        for key in ["write", "picture"] {
+            guard let value = c[key] as? String else { continue }
+            guard let colon = value.firstIndex(of: ":"), let n = Int(value[..<colon]), thread.asks.indices.contains(n - 1) else { return "error no ask in \(value)" }
+            let ask = n - 1
+            let rest = String(value[value.index(after: colon)...])
+            if app.picks(for: thread)[ask] != Decisions.ownAnswer { app.pickAnswer(thread: thread, ask: ask, option: Decisions.ownAnswer) }
+            guard let current = app.threads[thread.id] else { continue }
+            if key == "write" {
+                var note = app.notes(for: current)[ask] ?? AskNote()
+                note.text = rest
+                app.setNote(thread: current, ask: ask, note: note)
+            } else {
+                app.addNoteImages(thread: current, ask: ask, urls: [URL(fileURLWithPath: (rest as NSString).expandingTildeInPath)])
+            }
         }
         if c["send"] as? Bool == true {
             app.send(threadId: thread.id)

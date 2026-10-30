@@ -13,6 +13,11 @@ protocol RowCellDelegate: AnyObject {
     func setQuestionDraft(_ approvalId: String, _ draft: [Int: Set<String>])
     /// A click on an asks card: `tick:<index>` or `reply:<index>`.
     func askAction(_ card: AsksCard, action: String)
+    /// An ask's Something else box on the open card (AskAnswerBox): what's
+    /// in it changed, pictures were added to it, or Return sent.
+    func askNoteChanged(_ card: AsksCard, ask: Int, note: AskNote)
+    func askNoteImages(_ card: AsksCard, ask: Int, urls: [URL])
+    func sendAnswers(_ card: AsksCard)
     func openReview(_ review: DesignReview)
     /// The pencil by one of Mike's messages: edit it and carry on from
     /// there (docs/protocol.md, "Editing a message").
@@ -27,6 +32,9 @@ protocol RowCellDelegate: AnyObject {
 
 extension RowCellDelegate {
     var awayName: String? { nil }
+    func askNoteChanged(_ card: AsksCard, ask: Int, note: AskNote) {}
+    func askNoteImages(_ card: AsksCard, ask: Int, urls: [URL]) {}
+    func sendAnswers(_ card: AsksCard) {}
     func openReview(_ review: DesignReview) {}
     func editMessage(rowId: String) {}
     func openThreadLink(_ url: URL, fromRow rowId: String) {}
@@ -224,6 +232,12 @@ final class TextRowCell: RowCellView {
     let pendingMark = PendingMark()
     private var editable = false
     private var pointerInside = false
+    /// The open card's Something else boxes, by ask, over the room its
+    /// text leaves for them; kept while the cell is, so typing in one
+    /// survives the card being laid out again around it.
+    private var answerBoxes: [Int: AskAnswerBox] = [:]
+    /// The open card the boxes belong to, as last shown.
+    private var answerCard: AsksCard?
     /// Screenshots show the pencil without a real hover.
     static var debugShowEdit = false
     private var shownBlocks: [String] = []
@@ -404,7 +418,7 @@ final class TextRowCell: RowCellView {
             textView.onAction = nil
         }
 
-        guard let text = render.text else { return }
+        guard let text = render.text else { placeAnswerBoxes(row); return }
         let textWidth = textView.fullFrame.width
         // A streaming assistant row only replaces the blocks that changed,
         // so TextKit lays out just the tail.
@@ -430,6 +444,60 @@ final class TextRowCell: RowCellView {
         shownStarts = render.blockStarts
         shownRowId = row.id
         shownZoom = zoom
+        placeAnswerBoxes(row)
+    }
+
+    func focusAnswerBox(_ ask: Int) {
+        guard let box = answerBoxes[ask], !box.isHidden else { return }
+        box.focus()
+    }
+
+    /// Puts each Something else box over the room the card's text left for
+    /// it (`.tbAnswerBox`, its last character the box's own line), and
+    /// hides the rest.
+    private func placeAnswerBoxes(_ row: TranscriptRow) {
+        var shown = Set<Int>()
+        if case .asks(let card) = row.content, card.isOpen, let storage = textView.textStorage,
+           let layoutManager = textView.layoutManager, let container = textView.textContainer {
+            answerCard = card
+            layoutManager.ensureLayout(for: container)
+            let full = textView.fullFrame
+            let origin = textView.textContainerOrigin
+            storage.enumerateAttribute(.tbAnswerBox, in: NSRange(location: 0, length: storage.length)) { value, range, _ in
+                guard let index = (value as? NSNumber)?.intValue, range.length > 0 else { return }
+                let at = NSMaxRange(range) - 1
+                let line = layoutManager.lineFragmentRect(forGlyphAt: layoutManager.glyphIndexForCharacter(at: at), effectiveRange: nil)
+                let indent = (storage.attribute(.paragraphStyle, at: at, effectiveRange: nil) as? NSParagraphStyle)?.headIndent ?? 0
+                let box = answerBoxes[index] ?? makeAnswerBox(index)
+                box.frame = NSRect(x: full.minX + origin.x + indent, y: full.minY + origin.y + line.minY + AskBoxMetrics.gap,
+                                   width: full.width - origin.x - indent, height: max(0, line.height - AskBoxMetrics.gap))
+                box.show(card.notes[index] ?? AskNote())
+                if box.isHidden { box.isHidden = false }
+                shown.insert(index)
+            }
+        } else {
+            answerCard = nil
+        }
+        for (index, box) in answerBoxes where !shown.contains(index) && !box.isHidden { box.isHidden = true }
+    }
+
+    private func makeAnswerBox(_ index: Int) -> AskAnswerBox {
+        let box = AskAnswerBox()
+        box.onChange = { [weak self] note in
+            guard let self, let card = self.answerCard else { return }
+            self.delegate?.askNoteChanged(card, ask: index, note: note)
+        }
+        box.onImages = { [weak self] urls in
+            guard let self, let card = self.answerCard else { return }
+            self.delegate?.askNoteImages(card, ask: index, urls: urls)
+        }
+        box.onSend = { [weak self] in
+            guard let self, let card = self.answerCard else { return }
+            self.delegate?.sendAnswers(card)
+        }
+        answerBoxes[index] = box
+        addSubview(box)
+        return box
     }
 
     override func releaseContent() {

@@ -103,6 +103,13 @@ the message box to send or change. When the reply does need you, the
 card lists what to do, with a box to tick off beside each one; the same
 list is near the top of the thread's [Highlights](#highlights).
 
+To answer a Needs you card, click its buttons: your picks wait over the
+message box and go with your next message. To answer an ask in your own
+words, click Something else under it and write in the box that opens
+there. You can paste or drop screenshots in that box too, or use its
+picture button. Each ask can have a box of its own. Return sends the lot
+as one message, with anything you wrote in the message box at the end.
+
 Inside a thread, rest the pointer on a link for a moment, in a reply or on a
 Needs you card's buttons, to see where it goes: a picture of the file, or
 the page's address. Click it to open it.

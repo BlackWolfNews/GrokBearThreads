@@ -760,6 +760,32 @@ final class TranscriptController: NSObject, NSTableViewDataSource, NSTableViewDe
 
     func setQuestionDraft(_ approvalId: String, _ draft: [Int: Set<String>]) { questionDrafts[approvalId] = draft }
 
+    /// Mike typed in, or took a picture out of, an ask's Something else box.
+    func askNoteChanged(_ card: AsksCard, ask: Int, note: AskNote) {
+        guard let session, let app = session.app, let thread = app.threads[session.threadId], thread.asksSeq == card.seq else { return }
+        app.setNote(thread: thread, ask: ask, note: note)
+    }
+
+    /// Pictures pasted, dropped or chosen in an ask's Something else box.
+    func askNoteImages(_ card: AsksCard, ask: Int, urls: [URL]) {
+        guard let session, let app = session.app, let thread = app.threads[session.threadId], thread.asksSeq == card.seq else { return }
+        app.addNoteImages(thread: thread, ask: ask, urls: urls)
+    }
+
+    /// Return in a Something else box sends, as it does in the composer:
+    /// the picks, every box and whatever's in the composer, as one message.
+    func sendAnswers(_ card: AsksCard) {
+        guard let session, let app = session.app else { return }
+        app.send(threadId: session.threadId)
+    }
+
+    /// Puts the cursor in ask `ask`'s Something else box on the card from `seq`.
+    func focusAnswerBox(seq: Int, ask: Int) {
+        guard let index = session?.displayIndex(of: "ak:\(seq)"),
+              let cell = tableView.view(atColumn: 0, row: index, makeIfNecessary: false) as? TextRowCell else { return }
+        cell.focusAnswerBox(ask)
+    }
+
     /// A button on the open asks card: `pick:<ask>:<n>` picks (or unpicks)
     /// an answer, which waits in the composer; `link:<ask>:<n>` opens one of
     /// the ask's links where links open (the pane or the browser). The done
@@ -785,6 +811,11 @@ final class TranscriptController: NSObject, NSTableViewDataSource, NSTableViewDe
         case "pick":
             guard Decisions.choices(for: ask).indices.contains(n) || n == Decisions.ownAnswer, thread.asksSeq == card.seq else { return }
             app.pickAnswer(thread: thread, ask: index, option: n)
+            // Something else opened a box under the ask: the cursor goes in
+            // it, once the card has made room for it.
+            if n == Decisions.ownAnswer, let now = app.threads[thread.id], app.picks(for: now)[index] == Decisions.ownAnswer {
+                DispatchQueue.main.async { [weak self] in self?.focusAnswerBox(seq: card.seq, ask: index) }
+            }
         case "link":
             guard ask.links.indices.contains(n), let url = ask.links[n].target else { return }
             // A picture, PDF, text or page shows in the pane; anything else

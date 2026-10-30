@@ -411,7 +411,7 @@ enum RowRenderer {
             return RowRender(height: vertical + zoomed(4) + total, text: answerText(resolution), lineHeights: textHeights)
 
         case .asks(let card):
-            let text = asksText(card)
+            let text = asksText(card, width: width - RowMetrics.cardPad * 2)
             let size = measurer.measure(text, width: width - RowMetrics.cardPad * 2)
             return RowRender(height: vertical + zoomed(4) + size.height + RowMetrics.cardPad * 2 - zoomed(4), text: text, textSize: size)
         case .review:
@@ -1156,8 +1156,10 @@ enum RowRenderer {
     /// (the first filled in, as the thing to do next) and its answers, the
     /// picked one filled and the agent's pick outlined. Buttons are
     /// `.tbAction` runs (`link:<ask>:<n>`, `pick:<ask>:<n>`) drawn by
-    /// BackgroundLayoutManager. Closed, it's just the asks, quietly.
-    static func asksText(_ card: AsksCard) -> NSAttributedString {
+    /// BackgroundLayoutManager. An ask with Something else picked gets room
+    /// under its buttons for its own answer box (`.tbAnswerBox`), sized to
+    /// what's in it at `width`. Closed, it's just the asks, quietly.
+    static func asksText(_ card: AsksCard, width: CGFloat = 600) -> NSAttributedString {
         let (titleStyle, titleOffset) = Theme.lines(TypeScale.workLine, font: Theme.changesTitleFont, spacing: zoomed(6))
         if card.isDone { return doneText(card, titleStyle: titleStyle, titleOffset: titleOffset) }
         let output = NSMutableAttributedString(string: card.isOpen ? "Needs you" : "Needed you", attributes: [
@@ -1219,6 +1221,19 @@ enum RowRenderer {
                     if let peek = item.peek { attributes[.tbPeek] = peek }
                     output.append(NSAttributedString(string: "\u{00A0}\u{00A0}\u{00A0}" + item.title.replacingOccurrences(of: " ", with: "\u{00A0}") + "\u{00A0}\u{00A0}\u{00A0}", attributes: attributes))
                 }
+            }
+            // Something else: room for its box, under the answers and lined
+            // up with them, as tall as what's written and pasted in it.
+            if own {
+                let box = AskBoxMetrics.height(card.notes[i] ?? AskNote(), width: width - indent)
+                let style = NSMutableParagraphStyle()
+                style.minimumLineHeight = box + AskBoxMetrics.gap
+                style.maximumLineHeight = box + AskBoxMetrics.gap
+                style.headIndent = indent
+                style.firstLineHeadIndent = indent
+                output.append(NSAttributedString(string: "\n\u{00A0}", attributes: [
+                    .font: button, .paragraphStyle: style, .tbAnswerBox: NSNumber(value: i),
+                ]))
             }
         }
         return output

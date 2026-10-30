@@ -274,9 +274,11 @@ final class AppUpdater {
     /// (`autoRestartInterval`), so it goes soon after the idle time.
     func considerAutoRestart(app: AppModel) {
         guard !restarting, let staged else { return }
-        // An open schedule editor counts as something typed: a restart
-        // would throw away what's in it.
+        // An open schedule editor, or words or pictures in a card's
+        // Something else box, count as something typed: a restart would
+        // throw away what's in them.
         let hasDrafts = app.drafts.values.contains { !$0.text.isEmpty || !$0.images.isEmpty } || app.scheduleEditor != nil
+            || app.askPicks.values.contains { $0.notes.values.contains { !$0.isEmpty } }
         let loaded = app.threadsLoaded && app.connection == .connected
         let active = NSApp.isActive
         // A handover only keeps the main window: with Settings, a panel's

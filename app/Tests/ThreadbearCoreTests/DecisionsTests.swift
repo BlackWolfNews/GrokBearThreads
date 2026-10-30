@@ -119,24 +119,51 @@ final class DecisionsTests: XCTestCase {
         XCTAssertNil(Decisions.extra(in: text, answers: []))
     }
 
-    /// "Something else": what he wrote answers that ask, with his line
-    /// breaks kept, and nothing is left over as extra.
-    func testSomethingElseTakesWhatHeWrote() {
-        let picks = [0: 0, 2: Decisions.ownAnswer]
-        let text = Decisions.message(asks: [merge, signIn, events], picks: picks, extra: " Signups\nand searches ")
+    /// "Something else": each ask's own box is its answer, with his line
+    /// breaks kept, and the composer's words come after as extra. Any
+    /// number of asks can have one.
+    func testSomethingElseTakesWhatHeWroteInItsBox() {
+        let picks = [0: Decisions.ownAnswer, 1: 0, 2: Decisions.ownAnswer]
+        let notes = [0: AskNote(text: "ThreadbearThreads"), 2: AskNote(text: " Signups\nand searches ")]
+        let text = Decisions.message(asks: [merge, signIn, events], picks: picks, notes: notes, extra: "Thanks")
         XCTAssertEqual(text, """
         1. Merge #52 to prod, or test locally first?
-           Merge
+           ThreadbearThreads
+
+        2. Sign in to PostHog in Chrome
+           done
 
         3. Which events matter most?
            Signups
            and searches
+
+        Thanks
         """)
-        let answers = Decisions.answers(asks: [merge, signIn, events], picks: picks, written: "Signups\nand searches").map(\.answer)
+        let answers = Decisions.answers(asks: [merge, signIn, events], picks: picks, notes: notes).map(\.answer)
         XCTAssertEqual(answers.last, AskAnswer(action: events.action, answer: "Signups\nand searches"))
-        XCTAssertEqual(Decisions.extra(in: text, answers: answers), "")
+        XCTAssertEqual(Decisions.extra(in: text, answers: answers), "Thanks")
         // Nothing written: that ask isn't answered.
         XCTAssertEqual(Decisions.message(asks: [merge, events], picks: [1: Decisions.ownAnswer]), "")
-        XCTAssertEqual(Decisions.message(asks: [events], picks: [0: Decisions.ownAnswer], extra: "Signups"), "Which events matter most?\nSignups")
+        XCTAssertEqual(Decisions.message(asks: [events], picks: [0: Decisions.ownAnswer], notes: [0: AskNote(text: "Signups")]), "Which events matter most?\nSignups")
+        // A box left with words in it after its Something else is taken back doesn't go.
+        XCTAssertEqual(Decisions.message(asks: [events], picks: [:], notes: [0: AskNote(text: "Signups")], extra: "hi"), "hi")
+    }
+
+    /// Pictures in the boxes go first, in the card's order, and each
+    /// answer says which are its own; a box can be just pictures.
+    func testPicturesInTheBoxesAreNumberedAcrossTheCard() {
+        let shot = { (name: String) in ImageRef(path: "/tmp/\(name).png", mediaType: "image/png") }
+        let picks = [0: Decisions.ownAnswer, 1: Decisions.ownAnswer, 2: Decisions.ownAnswer]
+        let notes = [
+            0: AskNote(text: "Like this", images: [shot("a")]),
+            1: AskNote(text: "", images: [shot("b"), shot("c")]),
+            2: AskNote(text: "Three", images: [shot("d"), shot("e"), shot("f")]),
+        ]
+        let answers = Decisions.answers(asks: [merge, signIn, events], picks: picks, notes: notes).map(\.answer.answer)
+        XCTAssertEqual(answers, ["Like this\nSee picture 1.", "See pictures 2 and 3.", "Three\nSee pictures 4 to 6."])
+        XCTAssertEqual(Decisions.images(asks: [merge, signIn, events], picks: picks, notes: notes).map(\.path),
+                       ["a", "b", "c", "d", "e", "f"].map { "/tmp/\($0).png" })
+        // A box whose Something else was taken back sends no pictures.
+        XCTAssertEqual(Decisions.images(asks: [merge, signIn, events], picks: [1: Decisions.ownAnswer], notes: notes).count, 2)
     }
 }

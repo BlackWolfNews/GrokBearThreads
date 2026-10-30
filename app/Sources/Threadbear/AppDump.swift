@@ -425,18 +425,26 @@ struct AppDump: Encodable {
         return lines
     }
 
+    /// What's in an ask's Something else box, quoted, with its pictures.
+    private static func ownAnswer(_ note: AskNote?) -> String {
+        let note = note ?? AskNote()
+        let pictures = note.images.isEmpty ? "" : " +\(note.images.count) picture\(note.images.count == 1 ? "" : "s")"
+        return "\"\(note.text)\"" + pictures
+    }
+
     /// "2 picked", then each ask with its choices, "*" on the agent's
     /// pick, its links and the answer picked.
     @MainActor
     static func decisions(_ thread: ThreadSummary, app: AppModel) -> [String]? {
         guard Decisions.isOpen(thread) else { return nil }
         let picks = app.picks(for: thread)
+        let notes = app.notes(for: thread)
         var lines = ["\(picks.count) picked"]
         for (i, ask) in thread.asks.enumerated() {
             let options = Decisions.choices(for: ask)
             let choices = options.enumerated().map { $0.offset == ask.suggested ? "*\($0.element)" : $0.element }
             let links = ask.links.isEmpty ? "" : " links: " + ask.links.map(\.title).joined(separator: ", ")
-            let answer = picks[i] == Decisions.ownAnswer ? "something else (the composer)" : picks[i].flatMap { options.indices.contains($0) ? options[$0] : nil } ?? "no answer"
+            let answer = picks[i] == Decisions.ownAnswer ? "something else: " + ownAnswer(notes[i]) : picks[i].flatMap { options.indices.contains($0) ? options[$0] : nil } ?? "no answer"
             lines.append("  \(i + 1). \(ask.action) [\(choices.joined(separator: " | "))]\(links) -> \(answer)")
         }
         return lines

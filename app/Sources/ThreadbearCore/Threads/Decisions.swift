@@ -83,36 +83,60 @@ public enum Decisions {
     private static let more = try! NSRegularExpression(pattern: #"\s*(?:,\s*(?:or\s+)?|or\s+|/\s*)[\"“']([^\"”']{1,40})[\"”']"#, options: .caseInsensitive)
     private static let bare = try! NSRegularExpression(pattern: #"^(?:say|reply)\s+(go|yes|ok|okay|done|ship it|merge it|merge)\b"#, options: .caseInsensitive)
 
-    /// The pick that means "Something else": what Mike writes in the
-    /// composer is his answer to that ask (Mike, 28 Oct). One ask at a time.
+    /// The pick that means "Something else": a box opens under that ask,
+    /// and what Mike writes (and pastes) there is its answer. Any number of
+    /// asks can have one (Mike, 30 Oct: one box shared by them all meant a
+    /// second Something else took the first's place).
     public static let ownAnswer = -1
 
     /// The picked asks as answers, in the card's order, each with its
     /// index on the card. A pick that isn't one of its ask's choices is
-    /// left out, and so is "Something else" with nothing written.
-    public static func answers(asks: [Ask], picks: [Int: Int], written: String = "") -> [(index: Int, answer: AskAnswer)] {
-        let own = written.trimmingCharacters(in: .whitespacesAndNewlines)
+    /// left out, and so is "Something else" with nothing written or
+    /// pasted. Pictures in the boxes are numbered across the card, in the
+    /// order `images` sends them, and the answer says which are its own.
+    public static func answers(asks: [Ask], picks: [Int: Int], notes: [Int: AskNote] = [:]) -> [(index: Int, answer: AskAnswer)] {
+        var picture = 0
         return asks.enumerated().compactMap { i, ask in
             guard let n = picks[i] else { return nil }
-            if n == ownAnswer { return own.isEmpty ? nil : (i, AskAnswer(action: ask.action, answer: own)) }
+            if n == ownAnswer {
+                let note = notes[i] ?? AskNote()
+                let text = note.text.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !text.isEmpty || !note.images.isEmpty else { return nil }
+                let first = picture + 1
+                picture += note.images.count
+                let pictures = note.images.isEmpty ? "" : picturesLine(first, picture)
+                let answer = [text, pictures].filter { !$0.isEmpty }.joined(separator: "\n")
+                return (i, AskAnswer(action: ask.action, answer: answer))
+            }
             let options = choices(for: ask)
             guard options.indices.contains(n) else { return nil }
             return (i, AskAnswer(action: ask.action, answer: options[n]))
         }
     }
 
+    /// The pictures from the answered asks' boxes, in the card's order,
+    /// numbered as `answers` says. The composer's own go after them.
+    public static func images(asks: [Ask], picks: [Int: Int], notes: [Int: AskNote]) -> [ImageRef] {
+        asks.indices.flatMap { i in picks[i] == ownAnswer ? notes[i]?.images ?? [] : [] }
+    }
+
+    /// "See picture 2." or "See pictures 1 and 2." for a box's pictures.
+    static func picturesLine(_ first: Int, _ last: Int) -> String {
+        if first == last { return "See picture \(first)." }
+        if last == first + 1 { return "See pictures \(first) and \(last)." }
+        return "See pictures \(first) to \(last)."
+    }
+
     /// One ordinary message: each picked ask's question then its answer,
     /// numbered as on the card (the agent wrote them in that order, and
     /// unpicked ones keep their numbers out of it, so it can tell which
-    /// were answered), then whatever Mike wrote in the composer. With
-    /// "Something else" picked, what he wrote is that ask's answer instead.
-    public static func message(asks: [Ask], picks: [Int: Int], extra: String = "") -> String {
-        let ownPicked = picks.values.contains(ownAnswer)
-        let parts = answers(asks: asks, picks: picks, written: ownPicked ? extra : "").map { i, answer in
+    /// were answered), then whatever Mike wrote in the composer.
+    public static func message(asks: [Ask], picks: [Int: Int], notes: [Int: AskNote] = [:], extra: String = "") -> String {
+        let parts = answers(asks: asks, picks: picks, notes: notes).map { i, answer in
             block(answer, number: asks.count == 1 ? nil : i + 1)
         }
         var body = parts.joined(separator: "\n\n")
-        let more = ownPicked ? "" : extra.trimmingCharacters(in: .whitespacesAndNewlines)
+        let more = extra.trimmingCharacters(in: .whitespacesAndNewlines)
         if !more.isEmpty { body += (body.isEmpty ? "" : "\n\n") + more }
         return body
     }

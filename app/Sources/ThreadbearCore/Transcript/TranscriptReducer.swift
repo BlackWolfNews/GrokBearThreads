@@ -91,6 +91,9 @@ public struct TranscriptModel: Sendable {
     /// index), by the card's seq. Kept here rather than in the rows, so a
     /// rebuild keeps them; only the app sets them.
     public private(set) var askPicks: [Int: [Int: Int]] = [:]
+    /// What Mike has written in each card's Something else boxes, by the
+    /// card's seq, kept here for the same reason.
+    public private(set) var askNotes: [Int: [Int: AskNote]] = [:]
     /// Each turn's last error row, to learn the turn's `errorKind`.
     private var errorRowForTurn: [String: String] = [:]
     private var turnStarts: [String: Date] = [:]
@@ -337,6 +340,20 @@ public struct TranscriptModel: Sendable {
         update(cardId) { content in
             if case .asks(var card) = content {
                 card.picks = picks
+                content = .asks(card)
+            }
+        }
+        return refreshRows()
+    }
+
+    /// Mike wrote or pasted in the Something else boxes on the card from `seq`.
+    public mutating func setAskNotes(_ seq: Int, _ notes: [Int: AskNote]) -> TranscriptChange {
+        guard askNotes[seq, default: [:]] != notes else { return TranscriptChange() }
+        askNotes[seq] = notes.isEmpty ? nil : notes
+        guard let cardId = asksRowForSeq[seq] else { return TranscriptChange() }
+        update(cardId) { content in
+            if case .asks(var card) = content {
+                card.notes = notes
                 content = .asks(card)
             }
         }
@@ -767,7 +784,7 @@ public struct TranscriptModel: Sendable {
                 // picked there and sent from the composer (Mike, 28 Oct).
                 if completion.outcome == .completed, completion.needs == "you", !completion.asks.isEmpty {
                     let cardId = "ak:\(seq)"
-                    append(TranscriptRow(id: cardId, seq: seq, turnId: turnId ?? completion.turnId, content: .asks(AsksCard(seq: seq, asks: completion.asks, picks: askPicks[seq] ?? [:]))))
+                    append(TranscriptRow(id: cardId, seq: seq, turnId: turnId ?? completion.turnId, content: .asks(AsksCard(seq: seq, asks: completion.asks, picks: askPicks[seq] ?? [:], notes: askNotes[seq] ?? [:]))))
                     asksRowForSeq[seq] = cardId
                     openAsksRow = cardId
                 } else if completion.outcome == .completed, completion.needs == "nothing" {

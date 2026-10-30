@@ -476,7 +476,7 @@ enum ScreenshotRunner {
 
     private static func findComposer(in view: NSView?) -> ComposerTextView? {
         guard let view else { return nil }
-        if let composer = view as? ComposerTextView { return composer }
+        if let composer = view as? ComposerTextView, !composer.inAnswerBox { return composer }
         for sub in view.subviews {
             if let found = findComposer(in: sub) { return found }
         }

@@ -303,6 +303,20 @@ public enum RowContent: Sendable, Hashable {
     }
 }
 
+/// What Mike has put in an ask's own box (its Something else): his words
+/// and any pictures he pasted or dropped there.
+public struct AskNote: Sendable, Hashable {
+    public var text: String
+    public var images: [ImageRef]
+
+    public init(text: String = "", images: [ImageRef] = []) {
+        self.text = text
+        self.images = images
+    }
+
+    public var isEmpty: Bool { text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && images.isEmpty }
+}
+
 /// A finished turn's asks (docs/protocol.md, "Needs you"). Only the card
 /// of the thread's last finished turn is open: ticking it goes to the
 /// runner, and its reply chips fill the composer. Older cards keep the
@@ -319,9 +333,14 @@ public struct AsksCard: Sendable, Hashable {
     /// The done card's follow-ups (end_turn's `next`): buttons that put
     /// their words in the composer.
     public var next: [String]
+    /// What Mike has written and pasted in the boxes under the asks he
+    /// picked Something else on, by ask index. The card makes room for
+    /// each box from it; the box itself is a text view over that room.
+    public var notes: [Int: AskNote]
 
-    public init(seq: Int, asks: [Ask], ticked: Set<Int> = [], isOpen: Bool = true, picks: [Int: Int] = [:], next: [String] = []) {
+    public init(seq: Int, asks: [Ask], ticked: Set<Int> = [], isOpen: Bool = true, picks: [Int: Int] = [:], next: [String] = [], notes: [Int: AskNote] = [:]) {
         self.seq = seq
+        self.notes = notes
         self.asks = asks
         self.next = next
         self.ticked = ticked

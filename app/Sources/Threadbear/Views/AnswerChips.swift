@@ -3,9 +3,9 @@ import ThreadbearCore
 
 /// The answers Mike picked on the open card of asks (in the transcript,
 /// under the agent's message), waiting over the composer to go with his
-/// next message: the ask's number and the answer, × to unpick it. The
-/// composer stays the only place to write, so his own words and images go
-/// with them (docs/protocol.md, "Needs you", Answering).
+/// next message: the ask's number and the answer, × to unpick it. A
+/// Something else answer is written in its own box on the card; its chip
+/// shows the start of it (docs/protocol.md, "Needs you", Answering).
 struct AnswerChips: View {
     @Environment(AppModel.self) private var app
     let thread: ThreadSummary
@@ -13,8 +13,18 @@ struct AnswerChips: View {
 
     var body: some View {
         // "Something else" shows as a chip too, before he's written it.
-        let answers = Decisions.answers(asks: thread.asks, picks: picks, written: "…").map { index, answer in
-            (index: index, answer: picks[index] == Decisions.ownAnswer ? AskAnswer(action: answer.action, answer: "Your answer below") : answer)
+        let notes = app.notes(for: thread)
+        let answers = thread.asks.indices.compactMap { index -> (index: Int, answer: AskAnswer)? in
+            guard let pick = picks[index] else { return nil }
+            let ask = thread.asks[index]
+            if pick == Decisions.ownAnswer {
+                let note = notes[index] ?? AskNote()
+                let text = note.text.trimmingCharacters(in: .whitespacesAndNewlines)
+                let shown = !text.isEmpty ? text : note.images.isEmpty ? "Your answer above" : note.images.count == 1 ? "1 picture" : "\(note.images.count) pictures"
+                return (index, AskAnswer(action: ask.action, answer: shown))
+            }
+            let options = Decisions.choices(for: ask)
+            return options.indices.contains(pick) ? (index, AskAnswer(action: ask.action, answer: options[pick])) : nil
         }
         // In a row that scrolls, like the action chips.
         ScrollView(.horizontal, showsIndicators: false) {
