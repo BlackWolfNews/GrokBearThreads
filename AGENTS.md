@@ -212,8 +212,11 @@ if `tb` isn't found (an older runner, or outside a thread), use
   phone yourself: `taskpolicy -b ios/scripts/install-phone.sh` from the
   landed commit, without asking, so he always has the latest to look at
   (Mike asked 30 Oct). It takes ten minutes or more, so run it in the
-  background. Say in your reply that it's installed, or why it couldn't be
-  (the phone off the wifi, asleep, or needing a restart for "cryptexd").
+  background, and don't `tb land` or rebase while it builds: files
+  changing under the compile broke the first try. Say in your reply that
+  it's installed, or why it couldn't be (the phone off the wifi, asleep,
+  or needing a restart for "cryptexd"). "Unable to launch ... could not
+  be unlocked" at the end is fine: it's installed, just not opened.
   That's his own phone only: uploading to App Store Connect still needs
   him to ask.
 - `tb show <id>` reads a thread as text (`--tools` for results, each under
