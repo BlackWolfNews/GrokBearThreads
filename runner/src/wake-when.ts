@@ -78,6 +78,18 @@ export function hibernateNote(answer: WakeAnswer, said: string, timeZone: string
   return `${head} You said "${cut(said.trim(), 120)}".`;
 }
 
+// How long a thread was away, for the note it wakes with: "5 minutes",
+// "an hour", "3 hours", "a day", "12 days". Rounded, as Mike only wants
+// a feel for it.
+export function awayFor(ms: number): string {
+  const minutes = Math.max(1, Math.round(ms / 60_000));
+  if (minutes < 60) return minutes === 1 ? 'a minute' : `${minutes} minutes`;
+  const hours = Math.round(ms / 3_600_000);
+  if (hours < 24) return hours === 1 ? 'an hour' : `${hours} hours`;
+  const days = Math.round(ms / 86_400_000);
+  return days === 1 ? 'a day' : `${days} days`;
+}
+
 // "Thursday 29 October 2026, 2:05 pm"
 function localNow(now: number, timeZone: string): string {
   return new Date(now).toLocaleString('en-GB', { timeZone, weekday: 'long', day: 'numeric', month: 'long', year: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true });

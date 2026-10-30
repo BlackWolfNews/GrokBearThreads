@@ -722,6 +722,13 @@ struct ThreadRowView: View {
                 } else if let wakeText {
                     Text(wakeText).font(.system(size: TypeScale.sidebarMeta)).foregroundStyle(SidebarMetrics.faint)
                 }
+            } else if look.woke, let woke = thread.woke {
+                // Back from hibernating by itself; the time comes back
+                // once it's been opened.
+                Text("Woke up")
+                    .font(.system(size: TypeScale.sidebarMeta, weight: .medium))
+                    .foregroundStyle(Color.accentColor)
+                    .tip(WokeWords.tip(woke))
             } else if section == .waiting, let wake = app.wakes[thread.id], let next = wake.nextRunAt {
                 // When its schedule messages it next, where the time would be.
                 Text(RelativeTime.until(next, now: app.now))

@@ -84,7 +84,7 @@ import { fileContext } from './adapters/claude/normalize.ts';
 import type { Models } from './models/index.ts';
 import { EXPLAIN_SYSTEM, RECENT_CHARS, RECENT_MESSAGES, explainPrompt } from './explain.ts';
 import type { ExplainTurn } from './explain.ts';
-import { SAID_MAX, WAKE_SYSTEM, hibernateNote, readWakeAnswer, wakePrompt } from './wake-when.ts';
+import { SAID_MAX, WAKE_SYSTEM, awayFor, hibernateNote, readWakeAnswer, wakePrompt } from './wake-when.ts';
 import { emptyHighlights, observe as observeHighlights, pinItem, remove as removeHighlight, unpin as unpinHighlight, upsert as upsertHighlight, view as highlightsView, absolute, type ThreadHighlights } from './highlights.ts';
 import { SERVER_NAME, approvalTitle } from './threadbear-mcp.ts';
 import { PANEL_ACK_WAIT_MS, PANEL_PLACES, resolvePanel } from './panel-requests.ts';
@@ -557,7 +557,7 @@ export class Runner {
     // restart waited still gets carried on.
     // A wake-when still being worked out lost its answer with the old
     // runner, so it comes back too.
-    for (const st of this.threads.values()) if (st.rec.snoozedUntilRestart || st.rec.wakeWhen?.pending) this.wake(st);
+    for (const st of this.threads.values()) if (st.rec.snoozedUntilRestart || st.rec.wakeWhen?.pending) this.wake(st, 'restart');
     // Before anything reads a thread's patches. Every thread on disk,
     // including ones a draining runner still has.
     this.seedPatchTrust(records.map((r) => r.cwd));
@@ -973,7 +973,7 @@ export class Runner {
     }
     // Hibernating until the runner restarts: for this thread, coming across
     // is the restart.
-    if (rec.snoozedUntilRestart || rec.wakeWhen?.pending) this.wake(st);
+    if (rec.snoozedUntilRestart || rec.wakeWhen?.pending) this.wake(st, 'restart');
     else if (rec.queue.length && this.bucket(rec) === 'inbox') {
       this.kickQueue(st);
     }
@@ -1867,8 +1867,7 @@ export class Runner {
     const topic = st?.rec.wakeWhen?.topic;
     if (!st || !topic || st.rt.deleted || st.rec.archivedAt || threadId === inThreadId || this.bucket(st.rec) !== 'snoozed') return false;
     const where = this.threads.get(inThreadId)?.rec.title;
-    this.emit(st, { type: 'system.note', text: `Woke up: you talked about ${topic}${where ? ` in "${where}"` : ' in another thread'}.` });
-    this.wake(st);
+    this.wake(st, { why: `you talked about ${topic}${where ? ` in "${where}"` : ' in another thread'}` });
     this.armSnoozeTimer();
     this.log.info('woke for a topic', { threadId, inThreadId, topic });
     return true;
@@ -1929,6 +1928,8 @@ export class Runner {
       delete rec.archivedAt;
       rt.releaseWhenIdle = false;
     }
+    // Answering it from his phone without opening it counts as having seen it woke.
+    if (fromMike(text, opts)) delete rec.woke;
     this.supersedeReviews(st, text, opts);
     // He has seen the reply a waiting panel went with.
     if (rec.panelRequest && fromMike(text, opts)) {
@@ -3089,6 +3090,10 @@ export class Runner {
       );
     }
     if (params.snoozedUntil !== undefined) {
+      // Kept through a change of wake time, so the note on waking counts
+      // from when it first went away.
+      if (params.snoozedUntil !== null && this.bucket(rec) !== 'snoozed') rec.snoozedAt = this.isoNow();
+      delete rec.woke;
       delete rec.snoozedUntilRestart;
       delete rec.wakeWhen;
       if (params.snoozedUntil === null) delete rec.snoozedUntil;
@@ -3207,6 +3212,7 @@ export class Runner {
     const last = Math.max(rec.lastSeq, this.store.log(threadId).lastSeq);
     rec.lastSeenSeq = Math.max(rec.lastSeenSeq, Math.min(Math.floor(seq), last));
     rec.forceUnread = false;
+    delete rec.woke;
     this.markDirty(st);
     return { thread: this.summary(st) };
   }
@@ -3536,7 +3542,7 @@ export class Runner {
     for (const st of this.threads.values()) {
       if (!st.rec.snoozedUntil) continue;
       const t = Date.parse(st.rec.snoozedUntil);
-      if (t <= now) this.wake(st);
+      if (t <= now) this.wake(st, 'time');
       else next = Math.min(next, t);
     }
     if (next === Infinity) return;
@@ -3544,7 +3550,25 @@ export class Runner {
     this.snoozeTimer = this.clock.setTimeout(() => this.armSnoozeTimer(), Math.min(next - now, 3_600_000));
   }
 
-  private wake(st: ThreadState): void {
+  // A thread coming back by itself (its time, a restart, a topic) says so
+  // in its conversation, with how long it was away, and its row says
+  // "Woke up" until Mike looks (`woke`): otherwise it just turns up in the
+  // inbox with nothing to say why (30 Oct).
+  private wake(st: ThreadState, cause: 'time' | 'restart' | { why: string }): void {
+    const { rec } = st;
+    const now = this.clock.now();
+    const since = rec.snoozedAt && Date.parse(rec.snoozedAt) <= now ? rec.snoozedAt : undefined;
+    // Under a minute (a wake-when cut short by a restart) isn't worth saying.
+    const ms = since ? now - Date.parse(since) : 0;
+    const away = ms >= 60_000 ? ` after ${awayFor(ms)}` : '';
+    const text = typeof cause === 'object'
+      ? `Woke up${away}: ${cause.why}.`
+      : cause === 'restart'
+        ? `Woke up${away}, as the runner restarted.`
+        : away ? `Woke up after hibernating for ${awayFor(ms)}.` : 'Woke up from hibernating.';
+    this.emit(st, { type: 'system.note', text });
+    rec.woke = { at: new Date(now).toISOString(), ...(since ? { since } : {}) };
+    delete rec.snoozedAt;
     delete st.rec.snoozedUntil;
     delete st.rec.snoozedUntilRestart;
     delete st.rec.wakeWhen;
@@ -4016,6 +4040,7 @@ export class Runner {
     if (rec.snoozedUntil) s.snoozedUntil = rec.snoozedUntil;
     if (rec.snoozedUntilRestart) s.snoozedUntilRestart = true;
     if (rec.wakeWhen && rec.snoozedUntil) s.wakeWhen = { ...rec.wakeWhen };
+    if (rec.woke && rec.forceUnread) s.woke = { ...rec.woke };
     if (rec.archivedAt) s.archivedAt = rec.archivedAt;
     if (rec.nativeSessionId && rec.sessionUsed) s.nativeSessionId = rec.nativeSessionId;
     if (rec.contextTokens !== undefined) s.contextTokens = rec.contextTokens;

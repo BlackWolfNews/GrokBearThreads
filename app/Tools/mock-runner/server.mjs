@@ -670,6 +670,9 @@ async function dispatch(client, method, p) {
         s.snoozedUntil = untilRestart ? '9999-12-31T00:00:00.000Z' : p.snoozedUntil ?? undefined;
         s.snoozedUntilRestart = untilRestart || undefined;
         delete s.wakeWhen;
+        delete s.woke;
+        if (s.snoozedUntil && !s.snoozedAt) s.snoozedAt = iso();
+        if (!s.snoozedUntil) delete s.snoozedAt;
         if (s.snoozedUntil) { s.live = false; scheduleWake(s.id); }
       }
       if (p.archived !== undefined) {
@@ -738,6 +741,7 @@ async function dispatch(client, method, p) {
       const t = need(p.threadId);
       t.summary.lastSeenSeq = Math.max(t.summary.lastSeenSeq, p.seq ?? 0);
       if (t.summary.status !== 'waiting') t.summary.needsYou = Boolean(t.summary.pendingReviews);
+      delete t.summary.woke;
       broadcastSummary(t.summary.id);
       return { thread: t.summary };
     }
@@ -1701,6 +1705,9 @@ function scheduleWake(threadId) {
       s.snoozedUntil = undefined;
       delete s.wakeWhen;
       s.needsYou = true;
+      // As the runner does: "Woke up" on the row until it's opened.
+      s.woke = { at: iso(), ...(s.snoozedAt ? { since: s.snoozedAt } : {}) };
+      delete s.snoozedAt;
       broadcastSummary(threadId);
     }
   }, delay + 50);

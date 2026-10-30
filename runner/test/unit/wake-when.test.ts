@@ -4,11 +4,17 @@ import { makeHarness, tick } from '../helpers/fakes.ts';
 import { checkSummary } from '../helpers/protocol-check.ts';
 import { RpcError } from '../../src/protocol.ts';
 import { NO_WAKE_TIME } from '../../src/runner.ts';
-import { hibernateNote, localWhen, readWakeAnswer, wakePrompt } from '../../src/wake-when.ts';
+import { awayFor, hibernateNote, localWhen, readWakeAnswer, wakePrompt } from '../../src/wake-when.ts';
 import type { GenerateParams, ModelResult } from '../../src/models/index.ts';
 
 const DAY = 86_400_000;
 const NOW = Date.parse('2026-10-29T06:00:00Z');
+
+test('awayFor: rounded minutes, hours and days', () => {
+  const MIN = 60_000;
+  assert.deepEqual([10_000, MIN, 45 * MIN, 59 * MIN, 60 * MIN, 100 * MIN, 23 * 60 * MIN, 30 * 60 * MIN, 40 * 60 * MIN, 12 * 1440 * MIN].map(awayFor),
+    ['a minute', 'a minute', '45 minutes', '59 minutes', 'an hour', '2 hours', '23 hours', 'a day', '2 days', '12 days']);
+});
 
 test('readWakeAnswer: a time, a topic, both, and what it refuses', () => {
   assert.deepEqual(readWakeAnswer('{"until":"2026-10-31T09:00:00+08:00","topic":null,"why":"Saturday morning"}', NOW), { until: '2026-10-31T01:00:00.000Z', why: 'Saturday morning' });
@@ -120,7 +126,7 @@ test('a topic waits for the librarian: waitingTopics lists it, wakeForTopic brin
   const other = h.runner.create({ text: 'Router table jig', accountId: 'claude-3' }).thread;
   assert.equal(h.runner.wakeForTopic(thread.id, thread.id), false);
   assert.equal(h.runner.wakeForTopic(thread.id, other.id), true);
-  assert.equal(h.events(thread.id).at(-1).text, 'Woke up: you talked about woodworking in "Router table jig".');
+  assert.equal(h.events(thread.id).at(-1).text, 'Woke up after 30 days: you talked about woodworking in "Router table jig".');
   const t = h.runner.get(thread.id);
   assert.equal(t.snoozedUntil, undefined);
   assert.equal(t.needsYou, true);

@@ -148,6 +148,12 @@ type ThreadSummary = {
   wakeWhen?: { said: string, topic?: string, pending?: true }
                         // hibernated in Mike's words (Hibernate in words);
                         // only while snoozedUntil is set
+  woke?: { at: string, since?: string } // came back from hibernating by
+                        // itself (its time, a restart, a topic) at `at`,
+                        // put away at `since` when known; only until Mike
+                        // looks (threads.markSeen) or sends to it. The wake
+                        // also adds a system.note ("Woke up after
+                        // hibernating for a day.")
   archivedAt?: string
   onOldRunner?: true    // finishing a turn on the runner that handed over
                         // (Handovers); moves across when the turn ends

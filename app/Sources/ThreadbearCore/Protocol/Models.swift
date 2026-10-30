@@ -960,6 +960,9 @@ public struct ThreadSummary: Sendable, Hashable, Codable, Identifiable {
     public var snoozedUntilRestart: Bool
     /// Hibernated in Mike's words (protocol "Hibernate in words").
     public var wakeWhen: WakeWhen?
+    /// Came back from hibernating by itself and not looked at yet: the
+    /// row says "Woke up" until then.
+    public var woke: ThreadWoke?
     public var archivedAt: Date?
     /// Finishing a turn on the runner that handed over to a new release
     /// (protocol "Handovers"); it moves across when the turn ends.
@@ -1033,7 +1036,7 @@ public struct ThreadSummary: Sendable, Hashable, Codable, Identifiable {
         provider: String = "claude", model: String? = nil, permissionMode: PermissionMode = .full,
         status: ThreadStatus = .idle, live: Bool = false, needsYou: Bool = false,
         createdAt: Date = Date(), updatedAt: Date = Date(), lastActivityAt: Date = Date(),
-        snoozedUntil: Date? = nil, snoozedUntilRestart: Bool = false, wakeWhen: WakeWhen? = nil, archivedAt: Date? = nil, onOldRunner: Bool = false, preview: String = "",
+        snoozedUntil: Date? = nil, snoozedUntilRestart: Bool = false, wakeWhen: WakeWhen? = nil, woke: ThreadWoke? = nil, archivedAt: Date? = nil, onOldRunner: Bool = false, preview: String = "",
         lastSeq: Int = 0, lastSeenSeq: Int = 0, nativeSessionId: String? = nil,
         contextTokens: Int? = nil, costUsd: Double? = nil,
         effort: String? = nil, modelInUse: String? = nil, effortInUse: String? = nil, contextWindow: Int? = nil,
@@ -1063,6 +1066,7 @@ public struct ThreadSummary: Sendable, Hashable, Codable, Identifiable {
         self.snoozedUntil = snoozedUntil
         self.snoozedUntilRestart = snoozedUntilRestart
         self.wakeWhen = wakeWhen
+        self.woke = woke
         self.archivedAt = archivedAt
         self.onOldRunner = onOldRunner
         self.preview = preview
@@ -1118,6 +1122,7 @@ public struct ThreadSummary: Sendable, Hashable, Codable, Identifiable {
         snoozedUntil = try date(.snoozedUntil)
         snoozedUntilRestart = ((try? c.decodeIfPresent(Bool.self, forKey: .snoozedUntilRestart)) ?? nil) ?? false
         wakeWhen = (try? c.decodeIfPresent(WakeWhen.self, forKey: .wakeWhen)) ?? nil
+        woke = (try? c.decodeIfPresent(ThreadWoke.self, forKey: .woke)) ?? nil
         archivedAt = try date(.archivedAt)
         onOldRunner = ((try? c.decodeIfPresent(Bool.self, forKey: .onOldRunner)) ?? nil) ?? false
         preview = try c.decodeIfPresent(String.self, forKey: .preview) ?? ""
@@ -1170,6 +1175,7 @@ public struct ThreadSummary: Sendable, Hashable, Codable, Identifiable {
         try c.encodeIfPresent(snoozedUntil.map(ISO8601.format), forKey: .snoozedUntil)
         if snoozedUntilRestart { try c.encode(true, forKey: .snoozedUntilRestart) }
         try c.encodeIfPresent(wakeWhen, forKey: .wakeWhen)
+        try c.encodeIfPresent(woke, forKey: .woke)
         try c.encodeIfPresent(archivedAt.map(ISO8601.format), forKey: .archivedAt)
         if onOldRunner { try c.encode(true, forKey: .onOldRunner) }
         try c.encode(preview, forKey: .preview)
@@ -1201,7 +1207,7 @@ public struct ThreadSummary: Sendable, Hashable, Codable, Identifiable {
 
     enum CodingKeys: String, CodingKey {
         case id, title, cwd, accountId, provider, model, effort, modelInUse, effortInUse, permissionMode, status, live, needsYou, pendingReviews
-        case createdAt, updatedAt, lastActivityAt, snoozedUntil, snoozedUntilRestart, wakeWhen, archivedAt, onOldRunner, preview
+        case createdAt, updatedAt, lastActivityAt, snoozedUntil, snoozedUntilRestart, wakeWhen, woke, archivedAt, onOldRunner, preview
         case lastSeq, lastSeenSeq, nativeSessionId, contextTokens, contextWindow, costUsd, panels, actions, hooks, patches, background, subagents
         case projects, worktree, needs, asks, asksSeq, highlightsAt, schedule, poolId, waitingForRoom, panelRequest, share, sample
     }
@@ -1226,6 +1232,35 @@ public struct ThreadSummary: Sendable, Hashable, Codable, Identifiable {
         guard let snoozedUntil else { return false }
         return snoozedUntil > now
     }
+}
+
+/// When a hibernating thread came back by itself (`at`), and when it was
+/// put away (`since`), when the runner knows.
+public struct ThreadWoke: Sendable, Hashable, Codable {
+    public var at: Date
+    public var since: Date?
+
+    public init(at: Date, since: Date? = nil) {
+        self.at = at
+        self.since = since
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        guard let at = ISO8601.parse(try c.decode(String.self, forKey: .at)) else {
+            throw DecodingError.dataCorruptedError(forKey: .at, in: c, debugDescription: "not an ISO time")
+        }
+        self.at = at
+        since = try c.decodeIfPresent(String.self, forKey: .since).flatMap(ISO8601.parse)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(ISO8601.format(at), forKey: .at)
+        try c.encodeIfPresent(since.map(ISO8601.format), forKey: .since)
+    }
+
+    enum CodingKeys: String, CodingKey { case at, since }
 }
 
 /// When a thread hibernated in Mike's words wakes: what he said, the topic

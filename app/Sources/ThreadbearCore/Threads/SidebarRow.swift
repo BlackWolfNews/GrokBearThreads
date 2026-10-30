@@ -50,9 +50,13 @@ public struct ThreadRowLook: Sendable, Equatable {
     /// Unread, and its last turn said nothing waits on Mike: a tick in the
     /// gutter instead of the dot, out of Needs you.
     public var done: Bool
+    /// Back from hibernating by itself and not opened yet: "Woke up" where
+    /// the time would be, so a thread turning up in the inbox says why.
+    public var woke: Bool
 
-    public init(status: ThreadRowStatus, unread: Bool, emphasised: Bool, labelled: Bool = true, done: Bool = false) {
+    public init(status: ThreadRowStatus, unread: Bool, emphasised: Bool, labelled: Bool = true, done: Bool = false, woke: Bool = false) {
         self.done = done
+        self.woke = woke
         self.status = status
         self.unread = unread
         self.emphasised = emphasised
@@ -77,6 +81,7 @@ public struct ThreadRowLook: Sendable, Equatable {
         unread = (thread.needsYou && status != .needsYou && status != .working && status != .background) || done
         emphasised = thread.needsYou || status == .needsYou || done
         labelled = !(status == .working && section == .running)
+        woke = status == .time && thread.woke != nil
     }
 
     /// How long a running turn has been going, where the time would be:
@@ -90,6 +95,26 @@ public struct ThreadRowLook: Sendable, Equatable {
         if minutes < 60 { return "\(minutes)m" }
         let hours = minutes / 60
         return minutes % 60 == 0 ? "\(hours)h" : "\(hours)h \(minutes % 60)m"
+    }
+}
+
+/// The words for a thread that's woken from hibernating.
+public enum WokeWords {
+    /// The row's tooltip: "Woke up after hibernating for 2 days".
+    public static func tip(_ woke: ThreadWoke) -> String {
+        guard let since = woke.since, woke.at.timeIntervalSince(since) >= 60 else { return "Woke up from hibernating" }
+        return "Woke up after hibernating for \(away(woke.at.timeIntervalSince(since)))"
+    }
+
+    /// Rounded, as the runner's note has it (awayFor in wake-when.ts):
+    /// "5 minutes", "an hour", "3 hours", "a day", "12 days".
+    public static func away(_ seconds: TimeInterval) -> String {
+        let minutes = max(1, Int((seconds / 60).rounded()))
+        if minutes < 60 { return minutes == 1 ? "a minute" : "\(minutes) minutes" }
+        let hours = Int((seconds / 3600).rounded())
+        if hours < 24 { return hours == 1 ? "an hour" : "\(hours) hours" }
+        let days = Int((seconds / 86_400).rounded())
+        return days == 1 ? "a day" : "\(days) days"
     }
 }
 

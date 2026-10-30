@@ -6,6 +6,30 @@ final class SidebarRowTests: XCTestCase {
         ThreadRowLook(ThreadSummary(id: "t", title: "t", status: status, needsYou: needsYou))
     }
 
+    /// A thread back from hibernating by itself says "Woke up" until it's
+    /// opened, with how long it was away in the tip; a turn running on it
+    /// shows as working instead (Mike, 30 Oct).
+    func testWokenThreadSaysSo() throws {
+        let at = Date(timeIntervalSince1970: 1_800_000_000)
+        let woke = ThreadWoke(at: at, since: at.addingTimeInterval(-2 * 86_400))
+        var thread = ThreadSummary(id: "t", title: "t", status: .idle, needsYou: true, woke: woke)
+        let look = ThreadRowLook(thread)
+        XCTAssertTrue(look.woke)
+        XCTAssertTrue(look.unread)
+        XCTAssertEqual(WokeWords.tip(woke), "Woke up after hibernating for 2 days")
+        XCTAssertEqual(WokeWords.tip(ThreadWoke(at: at)), "Woke up from hibernating")
+        XCTAssertEqual([30, 60, 45 * 60, 3600, 6000, 30 * 3600, 40 * 3600].map(WokeWords.away),
+                       ["a minute", "a minute", "45 minutes", "an hour", "2 hours", "a day", "2 days"])
+        thread.status = .running
+        XCTAssertFalse(ThreadRowLook(thread).woke)
+        // It comes over the protocol as the runner sends it.
+        let json = #"{"id":"t","title":"t","woke":{"at":"2026-10-30T02:00:00.000Z","since":"2026-10-29T02:00:00.000Z"}}"#
+        let decoded = try JSONDecoder().decode(ThreadSummary.self, from: Data(json.utf8))
+        XCTAssertEqual(decoded.woke.map(WokeWords.tip), "Woke up after hibernating for a day")
+        let back = try JSONDecoder().decode(ThreadSummary.self, from: JSONEncoder().encode(decoded))
+        XCTAssertEqual(back.woke, decoded.woke)
+    }
+
     /// Between turns with sub-agents or jobs still going, the row says so
     /// (and keeps saying so under the Running heading, since the words are
     /// what's running, not the heading's). An unread reply waits for its

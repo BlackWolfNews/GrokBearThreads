@@ -38,6 +38,8 @@ export type ThreadRecord = {
   snoozedUntil?: string;
   snoozedUntilRestart?: boolean; // snoozedUntil is UNTIL_RESTART; start() wakes it
   wakeWhen?: WakeWhen; // hibernated in Mike's words (wake-when.ts)
+  snoozedAt?: string; // when it was last put away, for how long it slept; may be stale once awake
+  woke?: { at: string; since?: string }; // woke by itself and not looked at yet (since = snoozedAt)
   archivedAt?: string;
   preview: string;
   lastSeq: number;

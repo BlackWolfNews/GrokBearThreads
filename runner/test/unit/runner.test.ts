@@ -430,7 +430,28 @@ test('snooze releases the CLI, hides the thread, and brings it back unread', asy
   const t = h.runner.get(thread.id);
   assert.equal(t.snoozedUntil, undefined);
   assert.equal(t.needsYou, true);
-  assert.equal(h.runner.markSeen(thread.id, t.lastSeq).thread.needsYou, false);
+  // It says it woke, and for how long it was away, until he looks.
+  assert.equal(h.events(thread.id).at(-1).text, 'Woke up after hibernating for an hour.');
+  assert.deepEqual(t.woke, { at: new Date(h.clock.now()).toISOString(), since: new Date(h.clock.now() - 60 * MIN).toISOString() });
+  const seen = h.runner.markSeen(thread.id, t.lastSeq).thread;
+  assert.equal(seen.needsYou, false);
+  assert.equal(seen.woke, undefined);
+});
+
+test('the wake note counts from when it first went away, even if the time changed', () => {
+  const h = makeHarness();
+  const { thread } = create(h);
+  h.adapter.last.init();
+  h.adapter.last.result();
+  h.runner.update({ threadId: thread.id, snoozedUntil: new Date(h.clock.now() + 60 * MIN).toISOString() });
+  h.clock.advance(30 * MIN);
+  h.runner.update({ threadId: thread.id, snoozedUntil: new Date(h.clock.now() + 2 * 24 * 60 * MIN).toISOString() });
+  h.clock.advance(2 * 24 * 60 * MIN);
+  assert.equal(h.events(thread.id).at(-1).text, 'Woke up after hibernating for 2 days.');
+  assert.ok(h.runner.get(thread.id).woke);
+  // A message from him clears it as looking would.
+  h.runner.send(thread.id, 'thanks');
+  assert.equal(h.runner.get(thread.id).woke, undefined);
 });
 
 test('hibernating until a restart stops the turn, holds the restart no longer, and wakes on the next start', async () => {
@@ -455,6 +476,9 @@ test('hibernating until a restart stops the turn, holds the restart no longer, a
   const t = h2.runner.get(thread.id);
   assert.equal(t.snoozedUntil, undefined);
   assert.equal(t.snoozedUntilRestart, undefined);
+  // The restarted harness's clock starts again, so no time away to give.
+  assert.equal(h2.events(thread.id).at(-1).text, 'Woke up, as the runner restarted.');
+  assert.ok(t.woke);
   assert.equal(t.needsYou, true);
   assert.deepEqual(h2.runner.list().map((x) => x.id), [thread.id]);
 });
