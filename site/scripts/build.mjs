@@ -8,6 +8,9 @@
 // for an iPhone one, {{icon <name>}} for a Phosphor icon, {{fork}} and {{appStoreBadge}} for the
 // two ways to get it, and {{commits}} / {{firstDay}} for the repo's own numbers.
 //
+// The docs pages (/docs and /docs/<slug>) aren't in src: scripts/docs.mjs makes them from the
+// repo's docs/guide.md, a page per `## ` section, in the same layout.
+//
 // It won't build if an em or en dash gets into a page, a {{placeholder}} is left over, a style=""
 // slips in (the CSP blocks it), or a link or image points at a file or #anchor that isn't there.
 import { execFileSync } from "node:child_process";
@@ -16,6 +19,7 @@ import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, write
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { APP_STORE_LIVE, APP_STORE_URL, GITHUB_PUBLIC, GITHUB_URL, SITE_URL } from "../site.mjs";
+import { markdown, readGuide, summary } from "./docs.mjs";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const src = join(root, "src");
@@ -223,38 +227,95 @@ const shared = {
   bodyClass: GITHUB_PUBLIC ? " has-corner" : "",
 };
 
-const pages = readdirSync(src).filter((f) => f.endsWith(".html") && f !== "layout.html");
+/**
+ * Wraps a page's content in the layout, checks it and writes it to dist/<name>.html. `page` is
+ * its { title, description, path }; `name` is its address without the slash ("docs/threads").
+ */
 const built = new Map();
-for (const file of pages) {
-  const html = readFileSync(join(src, file), "utf8");
-  const match = html.match(/^<!--page (\{.*?\}) -->\n/);
-  if (!match) throw new Error(`${file} needs a <!--page {...} --> line first`);
-  const page = JSON.parse(match[1]);
-  const name = file.replace(/\.html$/, "");
+function writePage(name, page, content, label = `${name}.html`) {
   const url = page.path && SITE_URL + page.path;
+  const inDocs = name === "docs" || name.startsWith("docs/");
   const out = fill(layout, {
     ...shared,
-    title: escape(page.title), description: escape(page.description), page: name,
+    title: escape(page.title), description: escape(page.description), page: name.replace(/\//g, "-"),
     // The 404 page has no address of its own, so it isn't canonical anywhere and isn't indexed.
     canonical: url ? `<link rel="canonical" href="${url}">\n  <meta property="og:url" content="${url}">` : '<meta name="robots" content="noindex">',
     homeCurrent: name === "index" ? ' aria-current="page"' : "",
     privacyCurrent: name === "privacy" ? ' aria-current="page"' : "",
     supportCurrent: name === "support" ? ' aria-current="page"' : "",
+    // Every docs page is under Docs in the nav, so it's marked there too (the index only in
+    // the docs list, where it's the page itself).
+    docsCurrent: inDocs ? ' aria-current="page"' : "",
     structuredData: name === "index" ? structuredData() : "",
     script: `<script src="${siteScript}" defer></script>`,
-    content: fill(html.slice(match[0].length), shared).trimEnd(),
+    content,
   });
-  if (/\{\{[\w -]+\}\}/.test(out)) throw new Error(`${file} has a {{placeholder}} left over: ${out.match(/\{\{[\w -]+\}\}/)[0]}`);
+  if (/\{\{[\w -]+\}\}/.test(out)) throw new Error(`${label} has a {{placeholder}} left over: ${out.match(/\{\{[\w -]+\}\}/)[0]}`);
   // Em and en dashes read as written by a machine, so they never go out.
-  if (/[—–]/.test(out)) throw new Error(`${file} has an em or en dash in it: ${out.match(/.{0,40}[—–].{0,40}/)[0]}`);
+  if (/[—–]/.test(out)) throw new Error(`${label} has an em or en dash in it: ${out.match(/.{0,40}[—–].{0,40}/)[0]}`);
   // The Worker's CSP has no 'unsafe-inline' for styles, so a style="" would be ignored.
-  if (/\sstyle="/.test(out)) throw new Error(`${file} has a style="" attribute, which the CSP blocks`);
+  if (/\sstyle="/.test(out)) throw new Error(`${label} has a style="" attribute, which the CSP blocks`);
   // The comments are notes for whoever edits the page (including which claims aren't built
   // yet), so they stay in src and never ship.
   const shipped = out.replace(/\n?[ \t]*<!--[\s\S]*?-->/g, "");
-  writeFileSync(join(dist, file), shipped);
+  mkdirSync(dirname(join(dist, `${name}.html`)), { recursive: true });
+  writeFileSync(join(dist, `${name}.html`), shipped);
   built.set(name, { page, html: shipped });
 }
+
+const pages = readdirSync(src).filter((f) => f.endsWith(".html") && f !== "layout.html");
+for (const file of pages) {
+  const html = readFileSync(join(src, file), "utf8");
+  const match = html.match(/^<!--page (\{.*?\}) -->\n/);
+  if (!match) throw new Error(`${file} needs a <!--page {...} --> line first`);
+  writePage(file.replace(/\.html$/, ""), JSON.parse(match[1]), fill(html.slice(match[0].length), shared).trimEnd(), file);
+}
+
+/**
+ * The docs: /docs lists the guide's sections, and each is a page of its own at /docs/<slug>,
+ * with the list down the side and the next section at the foot. app-doc-slugs.json is the
+ * slugs the Mac app links to, which the guide must keep.
+ */
+const appDocSlugs = JSON.parse(readFileSync(join(root, "app-doc-slugs.json"), "utf8"));
+const guide = readGuide(join(root, ".."), appDocSlugs);
+const docSlugs = new Set(guide.sections.map((s) => s.slug));
+function docsNav(current) {
+  const items = guide.sections.map(({ slug, title }) =>
+    `          <li><a href="/docs/${slug}"${slug === current ? ' aria-current="page"' : ""}>${escape(title)}</a></li>`);
+  return `      <nav class="docs-nav" aria-label="Docs">
+        <a class="docs-home" href="/docs"${current ? "" : ' aria-current="page"'}>${escape(guide.title)}</a>
+        <ol>
+${items.join("\n")}
+        </ol>
+      </nav>`;
+}
+writePage("docs", {
+  title: `${guide.title} · Threadbear`,
+  description: "How to use Threadbear: threads, panels, Highlights, patches, your phone and the rest, one page a part.",
+  path: "/docs",
+}, `    <div class="docs">
+${docsNav(null)}
+      <article class="legal doc">
+        <h1>${escape(guide.title)}</h1>
+        <div class="doc-intro">
+${markdown(guide.intro, docSlugs)}
+        </div>
+        <ol class="doc-index">
+${guide.sections.map(({ slug, title }) => `          <li><a href="/docs/${slug}">${escape(title)}</a></li>`).join("\n")}
+        </ol>
+      </article>
+    </div>`);
+guide.sections.forEach(({ slug, title, body }, index) => {
+  const next = guide.sections[index + 1];
+  writePage(`docs/${slug}`, { title: `${title} · Threadbear docs`, description: summary(body) || `${title}, from the Threadbear guide.`, path: `/docs/${slug}` }, `    <div class="docs">
+${docsNav(slug)}
+      <article class="legal doc">
+        <h1>${escape(title)}</h1>
+${markdown(body, docSlugs)}
+        ${next ? `<p class="doc-next"><a href="/docs/${next.slug}">Next: ${escape(next.title)}</a></p>` : `<p class="doc-next"><a href="/docs">All the docs</a></p>`}
+      </article>
+    </div>`, `docs/${slug} (docs/guide.md)`);
+});
 
 // Every link and image that stays on the site has to land somewhere: a page, a file, and the
 // #anchor on it if there is one.
@@ -272,4 +333,4 @@ for (const [name, { html }] of built) {
 const urls = [...built.values()].map(({ page }) => page.path).filter(Boolean).sort()
   .map((p) => `  <url><loc>${SITE_URL}${p}</loc></url>`).join("\n");
 writeFileSync(join(dist, "sitemap.xml"), `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${urls}\n</urlset>\n`);
-console.log(`Built ${pages.length} pages into site/dist (${commits} commits since ${firstDay}).`);
+console.log(`Built ${pages.length} pages and ${guide.sections.length + 1} docs pages into site/dist (${commits} commits since ${firstDay}).`);

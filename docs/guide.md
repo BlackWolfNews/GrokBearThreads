@@ -1,5 +1,11 @@
 # Using Threadbear
 
+<!-- Each `## ` section is also a page on the website, at
+     threadbear.mikecann.app/docs/<slug>, named by the slug comment on the
+     line under its heading (site/scripts/docs.mjs builds them). The Mac
+     app links to some of those pages (site/app-doc-slugs.json lists them),
+     so keep a section's slug when you rename its heading. -->
+
 Threadbear is a Mac app for running AI agent threads. It drives the official
 Claude Code and Codex command line tools on your own logins. A small program
 called the runner keeps every agent going in the background, so quitting or
@@ -11,6 +17,7 @@ This guide is for using it. `INSTALL.md` covers setting it up, and `docs/`
 has how it all works inside.
 
 ## Threads
+<!-- slug: threads -->
 
 A thread is one conversation with an agent, working in one folder on your
 Mac. You say what you want done, the agent does it (reading files, running
@@ -18,7 +25,96 @@ commands, making changes) and replies. You can have as many threads going as
 you like, and each one remembers its whole conversation, so you can come
 back to it days later and carry on.
 
+### The list
+
+The threads view has five sections. Inbox holds the threads for you, with
+the ones that need you at the top. The number on the Threads icon in the
+left-hand rail is how many are in it. The arrows at the end of its heading
+sort it newest first or oldest first instead, which is handy for working
+through a long inbox from the bottom up. Running holds threads whose agent is
+working now. Waiting holds threads that have booked a message to themselves
+for later (an agent saying "I'll check again in 20 minutes") and have nothing
+for you until then: each says when it wakes, soonest first. When the time
+comes it runs again, and lands in the inbox when it's done. A thread that
+asks you something keeps its place in the inbox, wake-up or not.
+Hibernating and Archived, at the foot, hold the threads you've put away
+(see [Hibernate and archive](#hibernate-and-archive)). They start folded,
+showing only how many; click a heading to open or fold it.
+
+The search box at the top, beside the New thread button, looks through
+every thread, the put-away ones too. Type part of a title, or of a thread's
+last reply, and each section shows only the threads that match, with folded
+ones opened. The x clears it.
+
+### What a row tells you
+
+Each row has the thread's title, with its project or folder under it. A
+title in bold needs you or has a reply you haven't read.
+
+Before the title, in the gap at the left:
+
+- **A blue dot**: the thread has finished and is waiting on you, with a
+  reply you haven't read yet. It stays near the top of the inbox.
+- **A tick**: the thread has finished and said there's nothing needed
+  from you. It shows until you open the thread, so you can see at a
+  glance what got done while you were away.
+
+At the right of the row:
+
+- **Working**, with a spinner and a timer: the agent is busy. In the
+  Running section the spinner and timer are enough, so the word is left
+  off.
+- A grey spinner with something like "2 sub-agents": the turn has ended
+  but helpers or jobs it started are still going.
+- **Needs you**, in orange: the agent has stopped partway through to ask
+  you something, to get your OK for a command or an edit, or for you to
+  pick between some designs it showed you. Open the thread to answer.
+- A time: the thread is idle. After a while Threadbear stops an idle
+  thread's agent to save memory, and your next message starts it again
+  where it left off.
+- **Failed**: the last turn ended with an error. Read the thread to see why,
+  and send a message to try again.
+- **Stopped**: the runner restarted while the thread was busy.
+- **Waiting for room**, with a time: every login it could use has hit its
+  limit (see [Accounts, pools and Usage](#accounts)). It carries on by
+  itself when one has room again.
+
+### Reading a reply
+
+When an agent finishes a piece of work, its reply is a few short bullets
+of what it did, with what it needs from you (or "Nothing needed from you")
+under them. When its last message says more than the bullets (an
+explanation you asked for, a report), that message is the reply instead,
+and the bullets fold away with the work. Everything it did to get there,
+its notes, thinking, commands and edits, is one line above the reply,
+"Worked for 2m 13s": click it to open it. Pictures it made stay out, as
+they're often the answer. When the agent carries on by itself after that
+(to check its change once the app restarts, say), the follow-up joins the
+same line and its bullets replace the earlier ones, so there's still one
+reply to read. A link with ↑ after it goes to the step it's about: click
+it and the work opens there, with that step lit up. A link to another
+thread opens that thread.
+
+A reply that needs nothing from you ends with a "Nothing needed from you"
+card, with an Archive thread button to put it away. When something it
+talked about is still worth doing (a piece it didn't get to, a check
+that's due), the card has a button for each, and clicking one puts it in
+the message box to send or change. When the reply does need you, the
+card lists what to do, with a box to tick off beside each one; the same
+list is near the top of the thread's [Highlights](#highlights).
+
+Inside a thread, rest the pointer on a link for a moment, in a reply or on a
+Needs you card's buttons, to see where it goes: a picture of the file, or
+the page's address. Click it to open it.
+
+To share a file somewhere else, drag it out of the app: a file link in a
+reply, a picture in the transcript, a file in Highlights, or the picture or
+video showing in the side pane. It drops as the file itself, so you can
+drag a clip straight into a post on X, or onto the Finder. A web link drags
+out as its address.
+
 ## Full access or Ask before edits
+<!-- slug: full-access -->
 
 Read this before your first thread. Every thread runs in one of two modes,
 shown on the composer (the box you type in) and changed by clicking it.
@@ -38,19 +134,20 @@ before edits before you send. Deleting a thread is one thing an agent always
 has to ask about, whatever the mode.
 
 ## Your first thread
+<!-- slug: first-thread -->
 
 Press ⌘N, or click New thread (the pencil beside the search at the top of
 the list), type a message and press Return.
 
-New threads start in the `Threadbear` folder in your home folder
-(`~/Threadbear`), which setup makes for you. You can pick another folder for
+New threads start in the `ThreadbearThreads` folder in your home folder
+(`~/ThreadbearThreads`), which setup makes for you. You can pick another folder for
 one thread from the composer's + menu, or change the default in Settings
 (⌘,).
 
 A safe first message is one that only reads, such as "What's in this
 folder?" or "Explain what you can do for me here." When you're ready for it
 to make something, try "Make a file called hello.txt that says hi" and watch
-it appear in `~/Threadbear`.
+it appear in `~/ThreadbearThreads`.
 
 Return sends and Shift-Return adds a new line. In a list, Shift-Return
 starts the next item ("2. " after "1. milk", "- " after "- milk"), and
@@ -81,71 +178,128 @@ of its files yourself since, that file may be left as it is, and the line
 says so. A message you sent while the agent was working went into that
 turn, so edit the message that started it instead.
 
-## What the list tells you
+## Hibernate and archive
+<!-- slug: hibernate-and-archive -->
 
-The threads view has five sections. Inbox holds the threads for you, with
-the ones that need you at the top. The number on the Threads icon in the
-left-hand rail is how many are in it. The arrows at the end of its heading
-sort it newest first or oldest first instead, which is handy for working
-through a long inbox from the bottom up. Running holds threads whose agent is
-working now. Waiting holds threads that have booked a message to themselves
-for later (an agent saying "I'll check again in 20 minutes") and have nothing
-for you until then: each says when it wakes, soonest first. When the time
-comes it runs again, and lands in the inbox when it's done. A thread that
-asks you something keeps its place in the inbox, wake-up or not.
-Hibernating and Archived, at the foot, hold the threads you've put away
-(below). They start folded, showing only how many; click a heading to
-open or fold it.
+To put a thread away for a while, hibernate it: hover its row and press
+the moon, or use the Thread menu or the ... menu. Pick when it should
+come back: in an hour, this evening, tomorrow, next Monday or a time of your
+own. It leaves the list, its agent stops, and it comes back marked unread
+when the time comes. Hibernating threads wait in the Hibernating section at
+the foot of the list, soonest to wake first.
 
-The search box at the top, beside the New thread button, looks through
-every thread, the put-away ones too. Type part of a title, or of a thread's last reply, and each
-section shows only the threads that match, with folded ones opened. The x
-clears it.
+Or pick Wake when… and say it in your own words: "at the weekend", "in a
+few weeks", "next time I talk about woodworking". Opus works out what you
+meant (the row says Thinking… for a few seconds) and the thread says what
+it settled on. A topic waits for you to bring it up: when the librarian
+sees you talking about it in another thread, it wakes this one and says
+where.
 
-At the right of each row:
+When a thread is done, archive it: press ⌘E, hover its row and press the
+box, or swipe the row left with two fingers on the trackpad (or drag it
+left with the mouse) and let go once the space behind it turns blue (a
+quick flick works too). However it's archived (⌘E, a button, or an agent
+or your phone doing it), its row slides off the same way. The Archived
+section at the foot of the list has them, most recently archived first,
+with the older ones behind Show more (the search at the top finds any of
+them). Unarchive, or the same swipe there, puts one back. The iPhone app
+and the website call the archive the Den.
 
-- **Working**, with a spinner and a timer: the agent is busy.
-- **Needs you**, in orange: the agent has asked you something, wants your OK,
-  or has finished and said there's something for you to do.
-- A blue dot before the title: a reply you haven't read yet.
-- A time: the thread is idle. It finished and doesn't need anything: its
-  last reply ends with a "Nothing needed from you" card, with an Archive
-  thread button to put it away. When something it talked about is still
-  worth doing (a piece it didn't get to, a check that's due), the card
-  has a button for each, and clicking one puts it in the message box to
-  send or change. After a while Threadbear stops its agent to save memory, and your next message
-  starts it again where it left off.
-- **Failed**: the last turn ended with an error. Read the thread to see why,
-  and send a message to try again.
-- **Stopped**: the runner restarted while the thread was busy.
-- **Waiting for room**: every login it could use has hit its limit (see
-  Accounts below). It carries on by itself when one has room again.
+Hibernating or archiving a thread that's partway through a turn stops
+that turn. From the row's hover buttons, Threadbear asks first.
 
-When an agent finishes a piece of work, its reply is a few short bullets
-of what it did, with what it needs from you (or "Nothing needed from you")
-under them. When its last message says more than the bullets (an
-explanation you asked for, a report), that message is the reply instead,
-and the bullets fold away with the work. Everything it did to get there, its notes, thinking, commands
-and edits, is one line above the reply, "Worked for 2m 13s": click it to
-open it. Pictures it made stay out, as they're often the answer. When
-the agent carries on by itself after that (to check its change once the
-app restarts, say), the follow-up joins the same line and its bullets
-replace the earlier ones, so there's still one reply to read. A link
-with ↑ after it goes to the step it's about: click it and the work opens
-there, with that step lit up. A link to another thread opens that
-thread.
+## Panels
+<!-- slug: panels -->
 
-Inside a thread, rest the pointer on a link for a moment, in a reply or on a
-Needs you card's buttons, to see where it goes: a picture of the file, or
-the page's address. Click it to open it.
+The window is made of panels you can move around: the list of threads,
+the thread you're reading, Highlights, a project's panels, Patches, and
+the ones you open from the left-hand rail, such as Usage and Updates. Each
+panel has a bar along its top with its title, and panels that share a
+space show as tabs in it. To begin with there are three side by side:
+the list, the thread and Highlights.
 
-To share a file somewhere else, drag it out of the app: a file link in a
-reply, a picture in the transcript, a file in Highlights, or the picture or
-video showing in the side pane. It drops as the file itself, so you can
-drag a clip straight into a post on X, or onto the Finder. A web link drags
-out as its address.
+To move a panel, drag it by its title, or by one of its tabs. You can also
+press and hold anywhere else on it (the empty part of its bar, or its
+background) for a moment, then drag. A quick drag on the empty part of a
+bar moves the whole window instead, as there's no title bar, and a
+double-click there zooms it. While you drag, the panel shrinks under the
+pointer and shows where it will go when you let go:
+
+- Over another panel's bar, a tab with its name shows there: let go to
+  add it as a tab.
+- Near one side of another panel, that side lights up: let go to split
+  that panel's space in half.
+- In the middle of another panel, a compass shows. Drop on one of its
+  arrows to dock above, below, left or right of it, in the middle to add
+  it as a tab, on Swap to change places, or on Window to give it a
+  window of its own.
+- Along the window's own edge, it docks across that whole side.
+- Past the edge of the window, it opens in a window of its own. Right-click
+  a panel's title for Open in New Window too, and Put Back in Main Window
+  to bring it home.
+
+Escape, or letting go anywhere else, puts it back where it was. Drag the
+line between two panels to resize them, and click × on a tab to close it.
+Right-click a title for Hide Title, which leaves the panel without a bar
+while it's on its own; a thin strip along its top still lets you drag it.
+
+The icons down the right edge of the window open and close the thread's
+own panels: Highlights at the top, one for each panel its patches add,
+and Patches at the foot. To open a thread in a panel of its own, beside
+the one you're reading, right-click it in the list and pick Open in New
+Panel.
+
+The View menu has the rest: Show or Hide Threads (⌃⌘S) for the list,
+Show or Hide Panels (⌥⌘P) for the panels beside the thread, and Reset
+Panel Layout, which puts everything back how it started. Threadbear remembers your
+layout between launches.
+
+## Highlights
+<!-- slug: highlights -->
+
+Highlights is the panel beside the thread that collects what the thread
+has made and shared, so you can find it without scrolling back through
+the conversation. It fills in by itself as the agent works. Its icon is
+the pin at the top of the right-hand edge, which gets a dot while the
+last reply has things for you to do.
+
+From the top, and only when there's something to show:
+
+- A line or two from the librarian on where the thread is up to.
+- **Needs you**: what the agent's last reply asked you to do, each with a
+  box to tick off as you go. Ticking one here ticks it in the thread too.
+- The links of the thread's projects, such as a live site or an admin
+  page.
+- **Scheduled**: messages booked to come to this thread. Click one to
+  change it.
+- **Sub-agents**: helpers the agent started, with how each is getting on.
+  Click one to read what it did.
+- **Pinned**: what the agent pinned for you (below).
+- **Files**: documents, pages, pictures and videos the thread wrote, opened
+  or mentioned.
+- **Links**: web pages and pull requests it opened or mentioned.
+- **Changes**: its commits, and a line such as "4 files edited" that
+  opens to the code it changed.
+
+Click a file and it opens in the panel, with Back to return to the list
+(a text file there has Edit too). A link opens in your browser, unless you
+change Default in its right-click menu to open pages in the panel. An
+edited code file opens in its own app. Right-click any of them for more,
+such as Reveal in Finder, or Remove to take it off the list. You can drag
+files out of Highlights into other apps.
+
+### Pins
+
+An agent can pin a file or link to Highlights, under Pinned, with its
+`pin` tool and a short note on why you should look at it: a mockup it
+made for you to check, a preview address, a pull request. It can also
+open the pin straight away, in the panel beside the thread. Files it
+writes and links it mentions show up by themselves, so pins are for the
+few things that matter most. To have something pinned, ask the thread
+("pin the mockup for me").
 
 ## Schedules
+<!-- slug: schedules -->
 
 A schedule sends a message at a set time, once or over and over: to a
 thread, or to a new thread each time (a morning summary, say). Make one in
@@ -164,32 +318,8 @@ Tailscale), so it needs that Mac to be on and its key copied to this one.
 Pictures and files in them stay on that Mac for now. Schedules need your
 Convex backend: with no internet, they wait.
 
-
-
-To put a thread away for a while, hibernate it (the Thread menu, the ...
-menu, or the button that shows when you hover a row). Pick when it should
-come back: in an hour, this evening, tomorrow, next Monday or a time of your
-own. It leaves the list, its agent stops, and it comes back marked unread
-when the time comes. Hibernating threads wait in the Hibernating section at
-the foot of the list, soonest to wake first.
-
-Or pick Wake when… and say it in your own words: "at the weekend", "in a
-few weeks", "next time I talk about woodworking". Opus works out what you
-meant (the row says Thinking… for a few seconds) and the thread says what
-it settled on. A topic waits for you to bring it up: when the librarian
-sees you talking about it in another thread, it wakes this one and says
-where.
-
-When a thread is done, archive it with ⌘E, or swipe its row left with two
-fingers on the trackpad (or drag it left with the mouse) and let go once the space behind it turns blue (a
-quick flick works too). However it's archived (⌘E, a button, or an agent
-or your phone doing it), its row slides off the same way. The Archived section at the foot of the
-list has them, most recently archived first, with the older ones behind
-Show more (the search at the top finds any of them). Unarchive, or the
-same swipe there, puts one back. The iPhone app and the
-website call the archive the Den.
-
 ## Accounts, pools and Usage
+<!-- slug: accounts -->
 
 Threadbear uses the Claude Code and Codex logins already on your Mac: the
 Claude Code login in `~/.claude` and the Codex login in `~/.codex`. It never
@@ -224,6 +354,7 @@ window would run out before it resets at that pace, it says when in
 orange. Hover a window for its rate.
 
 ## Connectors
+<!-- slug: connectors -->
 
 Agents get services like Notion, Sentry and Cloudflare from your Connectors
 gateway, and Gmail, Drive and the like from claude.ai's connectors on each
@@ -243,6 +374,7 @@ connectors are signed in on claude.ai (Settings > Connectors), on the login
 the thread runs on.
 
 ## The prompts macOS shows you
+<!-- slug: macos-prompts -->
 
 - **Notifications.** The first time the app opens, macOS asks whether
   Threadbear may send notifications. Either answer is fine: with them on,
@@ -254,10 +386,11 @@ the thread runs on.
   Desktop, Documents, Downloads or Dropbox, macOS asks whether to allow it.
   Click Allow if you want agents working there, or Don't Allow if not. You
   can change your mind later in System Settings > Privacy & Security >
-  Files and Folders. Starting threads in `~/Threadbear` keeps these prompts
+  Files and Folders. Starting threads in `~/ThreadbearThreads` keeps these prompts
   away until you choose a folder that needs them.
 
 ## Your phone and a browser
+<!-- slug: phone-and-browser -->
 
 The Threadbear iPhone app is for when you're away from the Mac: ask a
 thread a question, steer it, answer the ones that need you, start new
@@ -310,6 +443,7 @@ The Mac app also draws a picture an agent writes into its reply with a path
 on your Mac (`![a chart](/path/to/chart.png)`), rather than showing a link.
 
 ## Patches: your own buttons and panels
+<!-- slug: patches -->
 
 A patch adds buttons (chips above the composer) and panels (beside the
 thread) for the threads in a folder. A button can run a command, like your
@@ -342,6 +476,7 @@ A project's page has its own panels and Patches on the right-hand rail:
 the ones its folders give its threads.
 
 ## Changing Threadbear itself
+<!-- slug: changing-threadbear -->
 
 You can change Threadbear by asking a thread to. Start one in your
 Threadbear folder (your fork, the copy setup ran from) and say what you'd
@@ -394,6 +529,7 @@ days. Threadbear never sends it anywhere, though once an agent has read
 some of it, that's part of its thread like anything else it reads.
 
 ## Privacy
+<!-- slug: privacy -->
 
 Your threads are mirrored to a Convex deployment in your own Convex account,
 which setup made: the thread list, the text of each message, and one line
@@ -403,10 +539,12 @@ and only that thread. The pictures are uploaded only while it's shared.
 Notifications to your phone go through a small relay Mike runs, because
 Apple only delivers notifications for his app through his key. The text is
 locked with a key only your phone and your deployment have, so the relay
-never sees what a notification says. The activity log (above) is off unless
+never sees what a notification says. The activity log (see
+[Changing Threadbear itself](#changing-threadbear)) is off unless
 you turn it on, and it stays on your Mac.
 
 ## Getting help
+<!-- slug: getting-help -->
 
 - Ask a thread. Its agent knows where this guide is and can read it, or
   look at the code and tell you how something works.
@@ -418,18 +556,28 @@ you turn it on, and it stays on your Mac.
   can't reach the runner, click Start runner.
 
 ## The tour and Finish setting up
+<!-- slug: finish-setting-up -->
 
 The first time the app opens it shows you round the window, one part at a
 time, with a few made-up sample threads to try things on: you hibernate one,
-archive another, move a panel, and press an example patch's button (it
-lives in `~/Threadbear/Welcome`). Then it opens your first thread with the
-message written for you, asking the agent for a patch with a hello button of
-your own, and you send it. The samples are deleted when the tour ends.
-Help > Take the Tour runs it again. A Mac that joined a Threadbear you
-already use (setup's `--existing`) skips it.
+archive another, move a panel, and press an example patch's button, Roll a
+die (it lives in `~/ThreadbearThreads/Welcome`). Then it opens your first
+thread with the message written for you, asking the agent for a patch with
+a hello button of your own, and you send it. The samples are deleted when
+the tour ends. Help > Take the Tour runs it again, and that time you can
+skip it. A Mac that joined a Threadbear you already use (setup's
+`--existing`) skips it.
 
-While that first thread works, Finish setting up has what's left after
-setup: pair your iPhone and open your website, so you can check on your
-threads from anywhere. Each item ticks itself off once it's done, and its
-icon on the left goes when they all have. Hide this list puts it away, and
-Help > Finish Setting Up brings it back.
+While that first thread works, Finish setting up shows what's left after
+setup:
+
+- **Start your first thread**, which shows your Claude Code or Codex login
+  works. If there's no login on the Mac yet, it says how to add one.
+- **Pair your iPhone**, so you can ask questions and steer your threads
+  while you're out (see [Your phone and a browser](#phone-and-browser)).
+- **Open your website**, to check on your threads from any browser.
+
+Each item ticks itself off once it's done, and the list's icon on the
+left-hand rail goes once they all have. Hide this list puts it away, and
+Help > Finish Setting Up brings it back. The phone and website items only
+show when your Threadbear has a Convex deployment for them to use.

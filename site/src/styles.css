@@ -462,6 +462,37 @@ a.appstore:active { transform: scale(.98); }
 .legal p:not(.lede) { font-size: 16px; line-height: 24px; color: var(--body); margin-top: var(--s-75); }
 @media (max-width: 860px) { .legal { margin: var(--s-500) var(--s-200) var(--s-700); padding: var(--s-400) var(--s-300); } }
 
+/* The docs (/docs, made from docs/guide.md by scripts/docs.mjs): the list of pages down the left,
+   sticky under the nav, and the page on a card like the privacy page's. On a phone the list goes
+   above the page. */
+.docs { max-width: 1080px; margin: var(--s-700) auto var(--s-900); padding: 0 var(--s-300); display: grid; grid-template-columns: 240px minmax(0, 1fr); gap: var(--s-400); align-items: start; }
+.docs .legal { margin: 0; max-width: 760px; }
+.docs-nav { position: sticky; top: var(--s-900); font-size: 14px; line-height: 20px; }
+.docs-nav ol { list-style: none; display: flex; flex-direction: column; gap: var(--s-25); margin-top: var(--s-75); }
+.docs-nav a { display: block; padding: var(--s-50) var(--s-100); border-radius: var(--r-lg); color: var(--ink-soft); text-decoration: none; transition: background-color 300ms var(--ease), color 300ms var(--ease); }
+.docs-nav a:hover { background: rgba(31, 28, 24, .05); color: var(--ink); }
+.docs-nav a[aria-current="page"] { background: var(--well); color: var(--ink); font-weight: 500; }
+.docs-nav .docs-home { font-weight: 600; color: var(--ink); }
+.doc h3 { font-size: 18px; line-height: 28px; font-weight: 600; margin-top: var(--s-300); }
+.doc > p, .doc-intro p { font-size: 16px; line-height: 24px; color: var(--body); margin-top: var(--s-100); }
+.doc h1 + p { margin-top: var(--s-200); }
+.doc ul, .doc ol:not(.doc-index) { margin-top: var(--s-100); padding-left: var(--s-300); color: var(--body); font-size: 16px; line-height: 24px; }
+.doc li + li { margin-top: var(--s-75); }
+.doc strong { font-weight: 600; color: var(--ink); }
+.doc code { background: var(--well); border-radius: var(--r); padding: 0 var(--s-25); }
+.doc pre { margin-top: var(--s-100); padding: var(--s-100) var(--s-200); background: var(--well); border-radius: var(--r-lg); overflow-x: auto; }
+.doc pre code { background: none; padding: 0; font-size: 14px; line-height: 20px; }
+.doc-index { list-style: none; margin-top: var(--s-400); display: flex; flex-direction: column; border-top: 1px solid var(--line); }
+.doc-index li + li { margin-top: 0; }
+.doc-index a { display: block; padding: var(--s-100) 0; border-bottom: 1px solid var(--line); font-size: 16px; line-height: 24px; font-weight: 500; text-decoration: none; }
+.doc-next { margin-top: var(--s-500); padding-top: var(--s-200); border-top: 1px solid var(--line); font-size: 16px; line-height: 24px; font-weight: 500; }
+.doc-next a { text-decoration: none; }
+@media (max-width: 860px) {
+  .docs { grid-template-columns: 1fr; margin: var(--s-500) auto var(--s-700); padding: 0 var(--s-200); gap: var(--s-300); }
+  .docs-nav { position: static; }
+  .docs-nav ol { flex-direction: row; flex-wrap: wrap; }
+}
+
 /* The 404 */
 .lost { max-width: 560px; margin: var(--s-700) auto var(--s-900); padding: 0 var(--s-300); text-align: center; display: flex; flex-direction: column; align-items: center; }
 .lost img { width: 120px; height: auto; margin-bottom: var(--s-300); }
