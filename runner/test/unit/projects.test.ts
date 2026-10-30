@@ -6,7 +6,7 @@ import { makeHarness, tick, tmpDir } from '../helpers/fakes.ts';
 import { checkSummary } from '../helpers/protocol-check.ts';
 import { Projects, drainProjectMethods, projectMethods, BRIEF_MAX, NOTES_LONG, type ProjectHost } from '../../src/projects.ts';
 import { projectRouter, type PrimaryLink } from '../../src/handover.ts';
-import { Librarian, librarianMethods, mainCheckout, SETTLE_MS, CATCH_UP_MS, CATCH_UP_MIN_CHARS, FIRST_MESSAGE_MS, SWEEP_MS } from '../../src/librarian.ts';
+import { Librarian, librarianMethods, saysNoFit, mainCheckout, SETTLE_MS, CATCH_UP_MS, CATCH_UP_MIN_CHARS, FIRST_MESSAGE_MS, SWEEP_MS } from '../../src/librarian.ts';
 import { buildThreadbearTools } from '../../src/threadbear-mcp.ts';
 import { FakeClock } from '../../src/clock.ts';
 import { nullLogger, type Logger } from '../../src/log.ts';
@@ -129,6 +129,47 @@ test('Mike makes a project with a thread in it: pinned, in the summary, counted,
   again.start(h.runner);
   assert.equal(again.find('poddle app')?.id, p.id);
   assert.deepEqual(again.get(p.id).threadIds, [thread.id]);
+});
+
+// 30 Oct 2026: a catch-all thread checking Qantas bookings went into
+// Walkies. Replaying the look, Haiku listed a project 3 times in 6 with
+// no reason, or one like "Not that; ignore", while its why said nothing
+// fit. These are its answers; none of them may file the thread.
+test('the librarian leaves a thread unfiled when its pick has no reason, or one that says it fits none', async () => {
+  let answer: unknown = {};
+  const s = setup({ models: () => reply(answer) });
+  const { h, create, finish, librarian, projects } = s;
+  const walkies = projects.create({ title: 'Walkies', folders: [s.repo('dev/walkies'), s.repo('dev/misc/walkies-release-watch')], by: 'mike' });
+  const cruise = projects.create({ title: 'Lights cruise', by: 'mike' });
+  const { thread } = create('Check my flight is linked with my family\'s booking');
+  const bad = [
+    { projects: [walkies.id], reasons: {}, why: 'Qantas booking link, not tied to a project' },
+    { projects: [cruise.id], reasons: { [cruise.id]: 'Not that; ignore' }, why: 'Qantas flight check, not about any listed project' },
+    { projects: [walkies.id], reasons: { [walkies.id]: 'Unrelated to the thread' }, why: 'A one-off travel errand' },
+  ];
+  for (const [i, a] of bad.entries()) {
+    answer = a;
+    if (i) h.runner.send(thread.id, 'still on the flights '.repeat(40));
+    await tick();
+    await finish(thread.id);
+    h.clock.advance(CATCH_UP_MS + SETTLE_MS);
+    await tick(8);
+    assert.equal(h.runner.get(thread.id).projects?.length ?? 0, 0, JSON.stringify(a));
+    assert.equal(librarian.status().recent[0].outcome, 'nothing');
+  }
+  // A real reason still files it.
+  answer = { projects: [walkies.id], reasons: { [walkies.id]: 'Plans the dog walk route' } };
+  h.runner.send(thread.id, 'now the walk app '.repeat(40));
+  await tick();
+  await finish(thread.id);
+  h.clock.advance(CATCH_UP_MS + SETTLE_MS);
+  await tick(8);
+  assert.equal(librarian.status().recent[0].text, 'Put it in Walkies');
+});
+
+test('saysNoFit spots reasons that say a thread does not belong', () => {
+  for (const no of ['Not that; ignore', 'Unrelated', 'No clear fit', 'none', 'Not about this project', "Doesn't fit"]) assert.ok(saysNoFit(no), no);
+  for (const yes of ['Edits the Poddle repo', 'Fixes the not-found page', 'Shortlists photos for the calendar entry', 'Notes for the Northern trip']) assert.ok(!saysNoFit(yes), yes);
 });
 
 test('membership: the librarian never undoes Mike or an agent, and says what it did', () => {
@@ -379,7 +420,7 @@ test('the librarian: catch-up an hour after a look, new folders sooner, state up
   await finish(thread.id, [path.join(app, 'x.ts')]);
   const job = librarian.status().queue[0];
   assert.deepEqual([job.reason, job.why], ['new-folder', 'Edited files in ~/dev/app']);
-  answer = { projects: [p.id], state: { [p.id]: 'Working on x.ts' }, addFolders: { [p.id]: ['~/dev/other'] } };
+  answer = { projects: [p.id], reasons: { [p.id]: 'Works on the app' }, state: { [p.id]: 'Working on x.ts' }, addFolders: { [p.id]: ['~/dev/other'] } };
   h.clock.advance(SETTLE_MS);
   await tick(8);
   const entry = librarian.status().recent[0];
@@ -563,7 +604,7 @@ test('a git worktree counts as its main checkout, never as a folder of its own',
   assert.equal(mainCheckout(main), main);
   const p = projects.create({ title: 'App', folders: [main], by: 'mike' });
   const { thread } = create();
-  answer = { projects: [p.id], addFolders: { [p.id]: ['~/dev/app-wt'] } };
+  answer = { projects: [p.id], reasons: { [p.id]: 'Works on the app' }, addFolders: { [p.id]: ['~/dev/app-wt'] } };
   await finish(thread.id, [path.join(wt, 'src/x.ts')]);
   h.clock.advance(SETTLE_MS);
   await tick(8);
@@ -692,7 +733,7 @@ test('the librarian files a new thread from its first message, then looks again 
   assert.equal(Date.parse(job.dueAt) - h.clock.now(), FIRST_MESSAGE_MS);
   answer = (q: GenerateParams) => {
     assert.match(q.prompt, /It has only just started/);
-    return { projects: [p.id], state: { [p.id]: 'Login fixed' } };
+    return { projects: [p.id], reasons: { [p.id]: 'Fixes the login' }, state: { [p.id]: 'Login fixed' } };
   };
   h.clock.advance(FIRST_MESSAGE_MS);
   await tick(8);
@@ -700,7 +741,7 @@ test('the librarian files a new thread from its first message, then looks again 
   assert.equal(projects.record(p.id)?.state, 'old', 'an early look never changes the state');
   assert.equal(librarian.status().recent[0].reason, 'first-message');
   // The first turn's end still gets its own look, 10 seconds later.
-  answer = { projects: [p.id], state: { [p.id]: 'Login fixed' } };
+  answer = { projects: [p.id], reasons: { [p.id]: 'Fixes the login' }, state: { [p.id]: 'Login fixed' } };
   await finish(thread.id, [path.join(app, 'login.ts')]);
   const next = librarian.status().queue[0];
   assert.equal(next.reason, 'first-turn');

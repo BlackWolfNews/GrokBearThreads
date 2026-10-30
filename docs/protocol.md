@@ -2064,6 +2064,9 @@ thread gets `projects` (`by: "librarian"`, `why` the reason, replaced by a
 later look's) and a `system.note` saying so ("Put in Threadbear"), and
 Mike can take it out (`threads.setProjects`), after which it's never put
 back. It never takes out a pinned project or one an agent added.
+A project the thread isn't in yet needs a reason that says it fits: an
+id with no reason, or one like "Not that; ignore", is dropped and
+logged, and a thread nothing clearly fits stays unfiled.
 
 Leaving a project out of its answer doesn't take the thread out of it, so
 it doesn't flap from turn to turn. A look takes the thread out of one of

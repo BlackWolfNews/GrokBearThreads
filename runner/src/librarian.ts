@@ -532,8 +532,17 @@ export class Librarian {
     if (self) {
       a = { ...a, projects: [], new: null };
     }
-    const wanted = Array.isArray(a.projects) ? a.projects.filter((x): x is string => typeof x === 'string' && live.has(x)) : [];
     const reasons = byProject(a.reasons);
+    // A project it isn't in yet needs a reason that says it fits. Haiku,
+    // given seventy-odd projects and a thread that fits none, sometimes
+    // lists one anyway, with no reason or one like "Not that; ignore",
+    // while its `why` says nothing fits: that's how a Qantas booking
+    // check ended up in Walkies (30 Oct 2026). Ones it's in already stay.
+    const inAlready = new Set((rec.projects ?? []).map((m) => m.id));
+    const listed = Array.isArray(a.projects) ? a.projects.filter((x): x is string => typeof x === 'string' && live.has(x)) : [];
+    const wanted = listed.filter((pid) => inAlready.has(pid) || (reasons[pid] !== undefined && !saysNoFit(reasons[pid])));
+    const unexplained = listed.filter((pid) => !wanted.includes(pid));
+    if (unexplained.length) this.log.info('librarian dropped a pick it gave no reason for', { threadId: rec.id, projects: unexplained, reasons: unexplained.map((pid) => reasons[pid] ?? null), why: typeof a.why === 'string' ? a.why : undefined });
     const said: string[] = [];
     const ids = new Set<string>();
     let outcome: LibrarianOutcome = 'nothing';
@@ -558,6 +567,9 @@ export class Librarian {
     if (wanted.length) {
       const r = this.projects.changeMembership(rec.id, { add: wanted, by: 'librarian', why: reasons });
       if (r.joined.length) {
+        // Its reasons go once the thread leaves, so the log keeps them for
+        // working out a wrong guess later.
+        this.log.info('librarian joined', { threadId: rec.id, reasons: Object.fromEntries(r.joined.map((p) => [p, reasons[p]])), why: typeof a.why === 'string' ? a.why : undefined });
         said.push(`Put it in ${r.joined.map((p) => live.get(p)!.title).join(' and ')}`);
         r.joined.forEach((p) => ids.add(p));
         bump('joined');
@@ -1046,9 +1058,11 @@ export const SYSTEM = `You are the librarian in Threadbear, an app where the use
 
 Given the project list and one thread, decide which projects the thread belongs in, and say why in a few plain words the user will see beside each project. A thread belongs in a project when it's about that project: building, fixing, planning, ideas, research or questions for it. A thread whose folder is a project's repo almost always belongs in that project. Prefer existing projects. Make a new one when the thread is about a body of work that fits none of them (its own repo is a strong sign); a one-off question, a quick chore or a throwaway test belongs in none. Never put a thread back in one it says never to.
 
+Most threads in a catch-all folder belong in no project: errands, personal admin, bookings, one-off questions. Put a thread in a project only when its own messages are about that project's work and you can say what it does there. A project having a folder inside the same catch-all folder isn't enough, and nor is the thread using a tool that is one of the projects (a browser tool, Threadbear itself) or starting a thread to fix one. When nothing clearly fits, projects is [] and new is null: an empty answer is right far more often than a guess.
+
 Reply with JSON only, no prose and no code fence:
 {"projects": ["<ids of existing projects the thread belongs in, or []>"],
- "reasons": {"<project id>": "why the thread belongs there"} for every id in projects,
+ "reasons": {"<project id>": "why the thread belongs there"} for every id in projects (an id without a reason is ignored),
  "leave": {"<project id>": "why the thread isn't about it"} for a project it's currently in (not pinned) that it turns out not to be about, else {},
  "new": null or {"title": "short name, as the user would say it", "folders": ["~/path of its repo(s)"], "goals": "one or two sentences: what it's for", "state": "one or two sentences: where it's up to", "why": "why the thread belongs there"},
  "state": {"<project id>": "the project's new state"} only when this thread changed where the whole project stands (shipped or finished something, made a decision, hit a blocker), else {},
@@ -1110,6 +1124,12 @@ function byProject(v: unknown): Record<string, string> {
     if (typeof line === 'string' && line.trim()) out[k] = line.trim().replace(/\s+/g, ' ').slice(0, WHY_MAX);
   }
   return out;
+}
+
+// A reason that says the thread doesn't belong: "Not that; ignore",
+// "Unrelated", "No clear fit". A real one says what the thread does there.
+export function saysNoFit(why: string): boolean {
+  return /^(not|no|none|n\/a|ignore|unrelated|irrelevant|doesn'?t|isn'?t|nothing)\b/i.test(why.trim()) || /\b(ignore|unrelated|no (clear )?(fit|match)|not (about|related|part|tied|relevant))\b/i.test(why);
 }
 
 function readNew(v: unknown): { title: string; folders: string[]; goals: string; state: string; why: string } | undefined {
