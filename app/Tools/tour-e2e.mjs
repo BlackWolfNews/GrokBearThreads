@@ -115,12 +115,8 @@ async function main() {
   };
 
   next('Threads');
-  t = next('Needs you');
-  check('Needs you lights one row, not the list', t.lit && t.lit.h < 120, t.raw);
-  t = next('Finished');
-  check('Finished lights one row', t.lit && t.lit.h < 120, t.raw);
-
   t = next('Hibernate');
+  check('Hibernate lights one row, not the list', t.lit && t.lit.h < 120, t.raw);
   check('Hibernate waits for you', t.task === 'to do', t.raw);
   run({ cmd: 'snooze', id: sampleId(dump(), 'Plan the weekend'), seconds: 3600 });
   await until('Hibernate done once a sample sleeps', () => parseTour(tour()).task === 'done');

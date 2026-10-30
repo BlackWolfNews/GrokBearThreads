@@ -114,10 +114,6 @@ final class Tour {
     static let steps: [TourStep] = [
         TourStep(title: "Welcome to Threadbear", body: "A quick look round, with a few sample threads to try things on.", bear: .wave),
         TourStep(targets: [.threads], title: "Threads", body: "Everything your agents are working on is listed here.", doc: "threads"),
-        TourStep(targets: [.sampleRow("Fix the flaky login test"), .threads], title: "Needs you",
-                 body: "A blue dot means this one is waiting on you.", doc: "threads"),
-        TourStep(targets: [.sampleRow("Plan the weekend"), .threads], title: "Finished",
-                 body: "A tick means it's done and needs nothing from you.", doc: "threads"),
         TourStep(targets: [.sampleRow("Plan the weekend"), .threads], title: "Hibernate",
                  body: "Hover Plan the weekend and press the moon to put it away for later.",
                  task: .hibernate, doneBody: "It comes back by itself, marked unread.", doc: "hibernate-and-archive"),
