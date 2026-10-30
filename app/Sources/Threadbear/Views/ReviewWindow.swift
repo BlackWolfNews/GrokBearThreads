@@ -412,7 +412,7 @@ struct ReviewWindow: View {
                     Button {
                         session.show(index, slot: session.mode == .pair ? 1 : 0)
                     } label: {
-                        ReviewCanvas(image: option.image, actualSize: false, passive: true).frame(width: 64, height: 42)
+                        ReviewThumbnail(path: option.image.path).frame(width: 64, height: 42)
                             .clipShape(RoundedRectangle(cornerRadius: 5))
                             .overlay(RoundedRectangle(cornerRadius: 5).strokeBorder(
                                 session.draft.pickedId == option.id ? Color.accentColor : session.visibleIndices.contains(index) ? Color.primary.opacity(0.5) : Color(nsColor: .separatorColor),
@@ -423,6 +423,7 @@ struct ReviewWindow: View {
                                     .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 3)).padding(3)
                             }
                     }.buttonStyle(.plain)
+                        .accessibilityLabel("Show \(option.label)")
                         .tip(option.label)
                 }
             }.padding(.horizontal, 14).padding(.vertical, 10)
@@ -480,31 +481,38 @@ struct ReviewWindow: View {
 private struct ReviewCanvas: NSViewRepresentable {
     let image: ImageRef
     let actualSize: Bool
-    /// A thumbnail: the strip's button under it takes the clicks.
-    var passive = false
-    func makeNSView(context: Context) -> ReviewImageScroll {
-        let view = ReviewImageScroll()
-        view.passive = passive
-        return view
-    }
-    func updateNSView(_ view: ReviewImageScroll, context: Context) {
-        view.passive = passive
-        view.show(image, actual: actualSize)
+    func makeNSView(context: Context) -> ReviewImageScroll { ReviewImageScroll() }
+    func updateNSView(_ view: ReviewImageScroll, context: Context) { view.show(image, actual: actualSize) }
+}
+
+/// A strip thumbnail, drawn in SwiftUI. It used to be a ReviewCanvas, and
+/// SwiftUI never handed a click over an AppKit view to the Button around
+/// it, even with the view saying no in hitTest (Mike, 29 and 30 Oct).
+private struct ReviewThumbnail: View {
+    let path: String
+    @State private var image: CGImage?
+
+    var body: some View {
+        ZStack {
+            Color(nsColor: .textBackgroundColor)
+            if let image { Image(decorative: image, scale: 2).resizable().aspectRatio(contentMode: .fit) }
+        }
+        .contentShape(Rectangle())
+        .task(id: path) {
+            image = nil
+            // 64x42 points at 2x, with room to spare for a tall image.
+            ThumbnailLoader.shared.load(path: path, maxPixels: 256) { image = $0 }
+        }
     }
 }
 
-final class ReviewImageScroll: NSScrollView {
+private final class ReviewImageScroll: NSScrollView {
     private let picture = NSImageView()
     private var reference: ImageRef?
     private var actual = false
     private var loadedKey = ""
     private var resetScroll = true
     private var orientedSize: NSSize?
-    var passive = false
-
-    // SwiftUI's allowsHitTesting(false) doesn't reach AppKit views: without
-    // this, a strip thumbnail swallowed the click its Button was waiting for.
-    override func hitTest(_ point: NSPoint) -> NSView? { passive ? nil : super.hitTest(point) }
 
     override init(frame: NSRect) {
         super.init(frame: frame)
