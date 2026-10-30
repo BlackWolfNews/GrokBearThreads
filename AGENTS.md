@@ -47,6 +47,13 @@ static site with its own `package.json`; its comments say how to build it.
   shot of the build beside the mockup he picked and check the layout
   matches, not just the wording. The done card shipped as a card in the
   transcript when he'd picked one joined to the composer (30 Oct).
+- Animations: hand anything longer than a hover fade to Core Animation
+  (keyframes, `animator()`, SwiftUI's own animations), never step it from
+  the main thread each frame, and before landing try it with the main
+  thread busy (a temporary sleep after the click). The archive flight
+  stepped from a display link showed Mike a couple of frames, as the
+  same click opens the next thread (30 Oct). The perf run
+  (`app/Tools/perf-run.sh`) times archiving too.
 - Every control gets a tooltip, with `.tip("…")` (SwiftUI) or `setTip` (AppKit).
   `.help` and `toolTip` never show in this app; TipsTests fails on them.
 - Transcript files and fixtures made from real sessions are private: keep them
