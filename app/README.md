@@ -103,7 +103,7 @@ and the perf run stay away from the real one. Install the runner itself with
 - **Header.** One line: the folder's name, then the title. The full path is
   in its tooltip. The ... menu has Snooze, Archive, "Copy transcript as
   Markdown" and "Copy thread id" (for pointing an agent at the thread).
-- **New thread** with ⌘N or the button beside the search. The composer sits in the
+- **New thread** with ⌘N or the pencil beside the search. The composer sits in the
   middle of the pane under "What should we work on?", with where the thread
   will start ("Starts in misc on mike") under it, and drops to the bottom
   once you send. It starts in `~/dev/me/misc` on the last account you used.

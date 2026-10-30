@@ -39,8 +39,8 @@ has to ask about, whatever the mode.
 
 ## Your first thread
 
-Press ⌘N, or click New thread beside the search at the top of the list,
-type a message and press Return.
+Press ⌘N, or click New thread (the pencil beside the search at the top of
+the list), type a message and press Return.
 
 New threads start in the `Threadbear` folder in your home folder
 (`~/Threadbear`), which setup makes for you. You can pick another folder for
