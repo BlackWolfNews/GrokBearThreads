@@ -183,6 +183,17 @@ public enum ProjectMark {
     }
 }
 
+/// When a hibernating thread came back by itself, and when it went away.
+public struct Woke: Codable, Sendable, Hashable {
+    @FlexibleDate public var at: Date
+    @OptionalFlexibleDate public var since: Date?
+
+    public init(at: Date, since: Date? = nil) {
+        self._at = FlexibleDate(wrappedValue: at)
+        self._since = OptionalFlexibleDate(wrappedValue: since)
+    }
+}
+
 public struct PhoneThread: Codable, Sendable, Hashable, Identifiable {
     public var id: String { threadId }
     public var threadId: String
@@ -199,6 +210,9 @@ public struct PhoneThread: Codable, Sendable, Hashable, Identifiable {
     @FlexibleDate public var lastActivityAt: Date
     @OptionalFlexibleDate public var snoozedUntil: Date?
     public var snoozedUntilRestart: Bool?
+    /// Back from hibernating by itself and not opened yet: the row says
+    /// "Woke up", as the Mac's does.
+    public var woke: Woke?
     @OptionalFlexibleDate public var archivedAt: Date?
     public var costUsd: Double?
     public var projects: [ProjectRef]?
@@ -215,7 +229,7 @@ public struct PhoneThread: Codable, Sendable, Hashable, Identifiable {
         threadId: String, runnerId: String = "m5", title: String, cwd: String = "~/dev/me/misc",
         accountId: String = "claude-3", provider: String = "claude", model: String? = nil,
         status: ThreadStatus = .idle, needsYou: Bool = false, unread: Bool = false, preview: String = "",
-        lastActivityAt: Date, snoozedUntil: Date? = nil, snoozedUntilRestart: Bool? = nil, archivedAt: Date? = nil,
+        lastActivityAt: Date, snoozedUntil: Date? = nil, snoozedUntilRestart: Bool? = nil, woke: Woke? = nil, archivedAt: Date? = nil,
         costUsd: Double? = nil, projects: [ProjectRef]? = nil, working: String? = nil,
         pendingApproval: PendingApproval? = nil, earliestSeq: Double? = nil
     ) {
@@ -233,6 +247,7 @@ public struct PhoneThread: Codable, Sendable, Hashable, Identifiable {
         self._lastActivityAt = FlexibleDate(wrappedValue: lastActivityAt)
         self._snoozedUntil = OptionalFlexibleDate(wrappedValue: snoozedUntil)
         self.snoozedUntilRestart = snoozedUntilRestart
+        self.woke = woke
         self._archivedAt = OptionalFlexibleDate(wrappedValue: archivedAt)
         self.costUsd = costUsd
         self.projects = projects

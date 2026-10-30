@@ -35,6 +35,9 @@ export const threadFields = {
   lastActivityMs: v.number(), // lastActivityAt as a number, for the index
   snoozedUntil: v.optional(v.string()),
   snoozedUntilRestart: v.optional(v.boolean()),
+  // Back from hibernating by itself and not opened yet: the row says
+  // "Woke up" (docs/protocol.md, ThreadSummary.woke).
+  woke: v.optional(v.object({ at: v.string(), since: v.optional(v.string()) })),
   archivedAt: v.optional(v.string()),
   costUsd: v.optional(v.number()),
   projects: v.optional(v.array(v.object({ id: v.string(), title: v.string() }))),

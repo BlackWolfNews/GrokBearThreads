@@ -66,7 +66,7 @@ export type SyncConfig = {
 // lower one means its backend hasn't been deployed since this runner was:
 // said in runner.status, tb status and the log rather than stopping, since
 // the runner only adds to what it sends while the number stays the same.
-export const BACKEND_API_VERSION = 12;
+export const BACKEND_API_VERSION = 13;
 // From this backend version a project's picture goes up to file storage
 // (sync:iconUploadUrl, sync:setProjectIcon); an older backend gets the
 // project without it and the phone shows its symbol or first letter.
@@ -86,6 +86,10 @@ export const RUNNER_ICON_API_VERSION = 11;
 // From this one there's the sidebar table (thread-index.ts) and the
 // heartbeat carries rpcUrl (step 6 part 2).
 export const THREAD_INDEX_API_VERSION = 12;
+// From this one a thread's row carries `woke` (back from hibernating, not
+// opened yet), for the phone's "Woke up". An older backend's validator
+// would turn the row down, so it goes without.
+export const WOKE_API_VERSION = 13;
 
 export type SyncStatus = {
   state: 'off' | 'ok' | 'error';
@@ -130,6 +134,7 @@ export type ThreadDoc = {
   lastActivityMs: number;
   snoozedUntil?: string;
   snoozedUntilRestart?: boolean;
+  woke?: { at: string; since?: string };
   archivedAt?: string;
   costUsd?: number;
   projects?: { id: string; title: string }[];
@@ -315,6 +320,7 @@ export function toThreadDoc(t: ThreadSummary, runnerId: string, now: number, pen
   if (t.model) doc.model = t.model;
   if (t.snoozedUntil) doc.snoozedUntil = t.snoozedUntil;
   if (t.snoozedUntilRestart) doc.snoozedUntilRestart = true;
+  if (t.woke) doc.woke = { ...t.woke };
   if (t.archivedAt) doc.archivedAt = t.archivedAt;
   // To the cent: a running thread's cost moves every turn and the phone
   // doesn't need a write for the fourth decimal.
@@ -329,9 +335,14 @@ export function toThreadDoc(t: ThreadSummary, runnerId: string, now: number, pen
   return doc;
 }
 
-function withoutShare(d: ThreadDoc): ThreadDoc {
-  const { share, ...rest } = d;
-  return rest;
+// The row as a backend of version v takes it: without the fields its
+// validator doesn't know yet.
+function forBackend(d: ThreadDoc, v: number): ThreadDoc {
+  if ((v >= SHARE_API_VERSION || !d.share) && (v >= WOKE_API_VERSION || !d.woke)) return d;
+  const out = { ...d };
+  if (v < SHARE_API_VERSION) delete out.share;
+  if (v < WOKE_API_VERSION) delete out.woke;
+  return out;
 }
 
 // A persisted user.message or assistant.text as a message row; anything
@@ -610,7 +621,7 @@ export class ConvexSync {
     // Shared threads held back their share from an older backend (or
     // before the first heartbeat said which): they go again now.
     if (v >= SHARE_API_VERSION && this.running) {
-      for (const t of this.deps.runner.list(ALL)) if (t.share) this.mark(t);
+      for (const t of this.deps.runner.list(ALL)) if (t.share || (t.woke && v >= WOKE_API_VERSION)) this.mark(t);
       this.scheduleFlush();
     }
     // The pictures wait for the first heartbeat to say the backend takes them.
@@ -854,11 +865,11 @@ export class ConvexSync {
     const key = this.deps.key;
     try {
       // What was written is what's remembered as sent, so a row whose
-      // share was held back from an older backend goes again once it's new
-      // enough (sawBackend).
-      const shares = (this.backendApiVersion ?? 0) >= SHARE_API_VERSION;
+      // share or woke was held back from an older backend goes again once
+      // it's new enough (sawBackend).
+      const v = this.backendApiVersion ?? 0;
       for (let i = 0; i < docs.length; i += SYNC_BATCH) {
-        const batch = docs.slice(i, i + SYNC_BATCH).map((d) => (shares || !d.share ? d : withoutShare(d)));
+        const batch = docs.slice(i, i + SYNC_BATCH).map((d) => forBackend(d, v));
         await this.post('mutation', 'sync:upsertThreads', { key, threads: batch });
         for (const d of batch) this.sent.set(d.threadId, JSON.stringify(d));
         this.written += batch.length;
@@ -889,7 +900,7 @@ export class ConvexSync {
       });
       await this.appendMessages(messages);
       this.markFilled(filling);
-      if (shares) await this.sendShareImages();
+      if (v >= SHARE_API_VERSION) await this.sendShareImages();
       this.lastSyncAt = this.deps.clock.now();
       this.backoffMs = 0;
       this.retryAt = undefined;

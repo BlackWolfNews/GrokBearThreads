@@ -88,7 +88,7 @@ public enum RowStatus {
         case .working: "Working"
         case .failed: "Failed"
         case .stopped: "Stopped"
-        case .time: RelativeTime.short(thread.lastActivityAt, now: now)
+        case .time: thread.woke != nil ? "Woke up" : RelativeTime.short(thread.lastActivityAt, now: now)
         }
     }
 

@@ -47,4 +47,7 @@
 //    table (sync:setThreadIndex, sync:otherRunnersThreads), and a runner's
 //    heartbeat can carry rpcUrl, how a Mac app reaches it. A runner writes
 //    the index and sends rpcUrl only to a backend of 12 or later.
-export const API_VERSION = 12;
+// 13: thread rows can carry `woke` ({ at, since? }): back from hibernating
+//    by itself and not opened yet, for the phone's "Woke up". A runner
+//    sends it only to a backend of 13 or later.
+export const API_VERSION = 13;

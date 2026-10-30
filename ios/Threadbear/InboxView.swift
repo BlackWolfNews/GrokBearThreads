@@ -270,6 +270,10 @@ struct ThreadRow: View {
             Text("Failed").font(.footnote.weight(.medium)).foregroundStyle(Look.failed)
         case .stopped:
             Text("Stopped").font(.footnote).foregroundStyle(.secondary)
+        case .time where thread.woke != nil:
+            // Back from hibernating by itself; the time comes back once
+            // it's been opened.
+            Text(RowStatus.text(thread, now: model.now)).font(.footnote.weight(.medium)).foregroundStyle(Color.accentColor)
         case .time:
             Text(RowStatus.text(thread, now: model.now)).font(.footnote).monospacedDigit().foregroundStyle(Look.faint)
         }

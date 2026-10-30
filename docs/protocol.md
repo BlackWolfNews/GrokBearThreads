@@ -153,7 +153,8 @@ type ThreadSummary = {
                         // put away at `since` when known; only until Mike
                         // looks (threads.markSeen) or sends to it. The wake
                         // also adds a system.note ("Woke up after
-                        // hibernating for a day.")
+                        // hibernating for a day.") Mirrored to the phone's
+                        // row from backend API 13
   archivedAt?: string
   onOldRunner?: true    // finishing a turn on the runner that handed over
                         // (Handovers); moves across when the turn ends

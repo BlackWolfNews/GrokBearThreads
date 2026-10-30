@@ -44,6 +44,23 @@ import Testing
         #expect(PushSeal.open("AiSVcm4cKdtZwL3c/Uwy7/xLI/glgedZynZE0KGAPg1kAmJEyB2VjF4/jTFQARFe9Fvu853UYEiuEU6uMrlKm9HezW8YilUyjUeS13rAMw==", key: Data(repeating: 8, count: 32)) == nil, "the wrong key opens nothing")
     }
 
+    @Test func wokenThreadSaysSoUntilOpened() throws {
+        let json = """
+        {"threadId":"t1","runnerId":"m5","title":"A","cwd":"/x","accountId":"claude-3","provider":"claude",
+         "status":"idle","needsYou":true,"unread":true,"preview":"","lastActivityAt":"2026-10-27T08:23:19.962Z",
+         "woke":{"at":"2026-10-30T02:24:21.575Z","since":"2026-10-30T02:23:21.575Z"}}
+        """
+        var row = try JSONDecoder().decode(PhoneThread.self, from: Data(json.utf8))
+        #expect(row.woke?.since != nil)
+        #expect(RowStatus.text(row, now: Date()) == "Woke up")
+        row.woke = nil
+        #expect(RowStatus.text(row, now: row.lastActivityAt) == "now")
+        // A turn running on it says so instead.
+        row.woke = Woke(at: Date())
+        row.status = .running
+        #expect(RowStatus.text(row, now: Date()) == "Working")
+    }
+
     @Test func threadRowDecodesWithISOAndMillisecondDates() throws {
         let json = """
         [{"threadId":"t1","runnerId":"m5","title":"A","cwd":"/Users/m/dev/me/misc","accountId":"claude-3",
@@ -59,6 +76,7 @@ import Testing
         #expect(rows[0].status == .running)
         #expect(rows[0].snoozedUntil != nil)
         #expect(rows[0].archivedAt == nil)
+        #expect(rows[0].woke == nil)
         #expect(rows[0].placeText == "Threadbear")
         #expect(rows[1].status == .unknown)
         #expect(rows[1].folderName == "x")

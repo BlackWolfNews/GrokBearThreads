@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { makeHarness, tick, tmpDir } from '../helpers/fakes.ts';
-import { ConvexSync, BACKEND_API_VERSION, ICONS_API_VERSION, RUNNER_ICON_API_VERSION, SCHEDULES_API_VERSION, SHARE_API_VERSION, PRESENCE_MS, SYNC_COALESCE_MS, HEARTBEAT_MS, SYNC_BATCH, ensureRunnerId, toThreadDoc, convexPoster, convexUploader, pictureName, type ThreadDoc } from '../../src/sync.ts';
+import { ConvexSync, BACKEND_API_VERSION, ICONS_API_VERSION, RUNNER_ICON_API_VERSION, SCHEDULES_API_VERSION, SHARE_API_VERSION, WOKE_API_VERSION, PRESENCE_MS, SYNC_COALESCE_MS, HEARTBEAT_MS, SYNC_BATCH, ensureRunnerId, toThreadDoc, convexPoster, convexUploader, pictureName, type ThreadDoc } from '../../src/sync.ts';
 import type { Project } from '../../src/protocol.ts';
 import type { ScheduleBackend } from '../../src/schedules.ts';
 import { nullLogger, type Logger } from '../../src/log.ts';
@@ -129,6 +129,9 @@ test('view follows hibernate and den; cost is to the cent; working comes from ba
   assert.equal(toThreadDoc({ ...base, snoozedUntil: '2026-10-27T18:00:00.000Z' }, 'r', now).view, 'hibernating');
   assert.equal(toThreadDoc({ ...base, snoozedUntil: '2026-10-27T09:00:00.000Z' }, 'r', now).view, 'inbox', 'a snooze that has passed');
   assert.equal(toThreadDoc({ ...base, archivedAt: '2026-10-27T09:40:00.000Z' }, 'r', now).view, 'den');
+  const woke = { at: '2026-10-27T10:00:00.000Z', since: '2026-10-26T10:00:00.000Z' };
+  assert.deepEqual(toThreadDoc({ ...base, woke }, 'r', now).woke, woke);
+  assert.ok(!('woke' in inbox));
   // Nothing the phone doesn't need.
   assert.ok(!('lastSeq' in inbox) && !('contextTokens' in inbox) && !('panels' in inbox));
 });
@@ -920,6 +923,31 @@ test('at the Mac means the Mac app is connected and the keyboard or mouse was us
   assert.equal(isAtMac(true, AT_MAC_IDLE_MS + 1), false, 'stepped away');
   assert.equal(isAtMac(false, 5_000), false, 'the app is closed');
   assert.equal(isAtMac(true, undefined), false, "can't tell, so away");
+});
+
+test('a woken thread\'s row carries woke, once the backend takes it', async () => {
+  let backend = WOKE_API_VERSION - 1;
+  const { h, sync, docs } = setup({ answer: (fn) => (fn === 'sync:heartbeat' ? { apiVersion: backend } : null) });
+  const a = h.runner.create({ text: 'one', cwd: h.cfg.defaults.cwd, accountId: 'claude-3' }).thread;
+  h.adapter.last.init();
+  h.adapter.last.result();
+  h.runner.update({ threadId: a.id, snoozedUntil: new Date(h.clock.now() + 60_000).toISOString() });
+  h.clock.advance(60_000);
+  assert.ok(h.runner.get(a.id).woke);
+  sync.start();
+  await tick(20);
+  await sync.flushNow();
+  // An older backend would turn the row down with woke on it.
+  const old = docs().filter((d) => d.threadId === a.id);
+  assert.ok(old.length);
+  assert.ok(old.every((d) => d.woke === undefined));
+  backend = WOKE_API_VERSION;
+  await sync.stop();
+  sync.start();
+  await tick(20);
+  await sync.flushNow();
+  assert.deepEqual(docs().filter((d) => d.threadId === a.id).at(-1)!.woke, h.runner.get(a.id).woke);
+  await sync.stop();
 });
 
 test('sharing: the row carries share, "off" included, once the backend takes it', async () => {
