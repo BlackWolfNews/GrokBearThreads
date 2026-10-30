@@ -1590,6 +1590,12 @@ public struct Ask: Sendable, Hashable, Codable {
     /// Ticked on the open card (only in a summary's `asks`).
     public var ticked: Bool
 
+    /// The action and where as plain words, for the places that can't draw
+    /// markdown (Highlights' Needs you list, notifications, a closed card,
+    /// tooltips): an agent's `[the review](review:x)` reads "the review".
+    public var plainAction: String { PreviewText.plain(action) }
+    public var plainWhere: String? { where_.flatMap { $0.isEmpty ? nil : PreviewText.plain($0) } }
+
     public init(action: String, where_: String? = nil, reply: String? = nil, why: String? = nil, options: [String] = [], suggested: Int? = nil, links: [AskLink] = [], ticked: Bool = false) {
         self.action = action
         self.where_ = where_

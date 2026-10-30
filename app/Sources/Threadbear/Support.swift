@@ -24,7 +24,7 @@ enum Notifier {
         } else {
             // What the agent asked for, rather than the last line it wrote.
             if let ask = thread.firstOpenAsk {
-                content.body = ask.action
+                content.body = ask.plainAction
             } else {
                 content.body = thread.preview.isEmpty ? "Finished." : PreviewText.plain(thread.preview)
             }

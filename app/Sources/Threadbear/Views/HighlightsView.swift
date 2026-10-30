@@ -467,12 +467,12 @@ private struct AskRow: View {
             .buttonStyle(.plain)
             .tip(ask.ticked ? "Not done" : "Done")
             VStack(alignment: .leading, spacing: zoomed(2)) {
-                Text(ask.action)
+                Text(ask.plainAction)
                     .font(.system(size: TypeScale.label))
                     .foregroundStyle(ask.ticked ? AnyShapeStyle(.secondary) : AnyShapeStyle(.primary))
                     .strikethrough(ask.ticked)
                     .fixedSize(horizontal: false, vertical: true)
-                if let place = ask.where_, !place.isEmpty {
+                if let place = ask.plainWhere {
                     Text(place)
                         .font(.system(size: TypeScale.small))
                         .foregroundStyle(SidebarMetrics.faint)

@@ -310,6 +310,15 @@ final class ThreadSectionsTests: XCTestCase {
         XCTAssertEqual(PreviewText.plain("C# and a#b stay"), "C# and a#b stay")
     }
 
+    // Highlights' Needs you list, notifications and a closed card show an
+    // ask as plain text, so a link reads as its words (30 Oct).
+    func testAskPlainActionShowsLinkWords() {
+        let ask = Ask(action: "Look at [the review](review:review_account) and pick **one**", where_: "In [Highlights](thread:abc)")
+        XCTAssertEqual(ask.plainAction, "Look at the review and pick one")
+        XCTAssertEqual(ask.plainWhere, "In Highlights")
+        XCTAssertNil(Ask(action: "x").plainWhere)
+    }
+
     func testSearchFindsThreadsInEverySection() {
         let now = Date()
         var archivedOld = thread("archived-old", minutesAgo: 1, archived: Date(timeIntervalSince1970: 10))

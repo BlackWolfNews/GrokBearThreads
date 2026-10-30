@@ -1199,7 +1199,7 @@ enum RowRenderer {
         let (buttonStyle, buttonOffset) = Theme.lines(TypeScale.scaled(38), font: button, before: zoomed(6), head: indent)
         for (i, ask) in card.asks.enumerated() where page == nil || page == i {
             guard card.isOpen else {
-                output.append(NSAttributedString(string: "\n" + (numbered ? "\(i + 1)  " : "") + ask.action, attributes: [
+                output.append(NSAttributedString(string: "\n" + (numbered ? "\(i + 1)  " : "") + ask.plainAction, attributes: [
                     .font: Theme.bodyFont, .foregroundColor: NSColor.secondaryLabelColor,
                     .paragraphStyle: closedStyle, .baselineOffset: closedOffset,
                 ]))
