@@ -30,10 +30,18 @@ extension AppModel {
         }
     }
 
-    /// Opens a service's sign-in page in the browser.
+    /// Opens a service's page on the gateway in the browser: its sign-in
+    /// when it's signed out, else where it can be signed out or retried.
     func openConnect(_ service: ConnectorService) {
-        guard let raw = service.connectUrl, let url = URL(string: raw), ["https", "http"].contains(url.scheme?.lowercased() ?? "") else { return }
-        AppLog.write("connectors", "opening the sign-in page for \(service.id)")
+        guard let url = ConnectorsText.serviceURL(connectors, service) else { return }
+        AppLog.write("connectors", "opening the gateway's page for \(service.id)")
+        NSWorkspace.shared.open(url)
+    }
+
+    /// Opens the gateway's admin page, with every service on it.
+    func openConnectorsAdmin() {
+        guard let url = ConnectorsText.manageURL(connectors) else { return }
+        AppLog.write("connectors", "opening the gateway's admin page")
         NSWorkspace.shared.open(url)
     }
 }

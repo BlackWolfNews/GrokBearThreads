@@ -23,7 +23,10 @@ struct ConnectorsActivityButton: View {
 }
 
 /// Each gateway service with its state, and Connect for one that's signed
-/// out, which opens its sign-in page in the browser. A panel in the dock,
+/// out, which opens its sign-in page in the browser. The header's arrow
+/// opens the gateway's admin page and a signed-in row's opens that
+/// service's page, where it can be signed out (30 Oct: Mike wanted to edit
+/// connectors from here, and the gateway already has the pages for it). A panel in the dock,
 /// beside Usage and Updates. It asks the runner for a fresh look when it
 /// opens; the runner also looks every few minutes by itself.
 struct ConnectorsPanel: View {
@@ -41,6 +44,14 @@ struct ConnectorsPanel: View {
                         .foregroundStyle(.tertiary)
                         .accessibilityAddTraits(.isHeader)
                     Spacer(minLength: 0)
+                    if ConnectorsText.manageURL(status) != nil {
+                        Button { app.openConnectorsAdmin() } label: {
+                            Image(systemName: "arrow.up.forward.square").font(.system(size: zoomed(11)))
+                        }
+                        .buttonStyle(.borderless)
+                        .foregroundStyle(.secondary)
+                        .tip("Manage connectors on \(ConnectorsText.host(status) ?? "the gateway")")
+                    }
                     Button { app.refreshConnectors() } label: {
                         Image(systemName: "arrow.clockwise").font(.system(size: zoomed(11)))
                     }
@@ -75,6 +86,7 @@ struct ConnectorsPanel: View {
 private struct ConnectorRow: View {
     @Environment(AppModel.self) private var app
     let service: ConnectorService
+    @State private var hovered = false
 
     var body: some View {
         let signedOut = service.state == "signed_out"
@@ -106,8 +118,21 @@ private struct ConnectorRow: View {
                 Button(title) { app.openConnect(service) }
                     .controlSize(.small)
                     .tip("Open \(service.title)'s sign-in page in your browser")
+            } else if ConnectorsText.serviceURL(app.connectors, service) != nil {
+                // A signed-in service has nothing to press, but Mike may
+                // want to sign it out or switch accounts: its page on the
+                // gateway has Disconnect. Quiet until the row's hovered.
+                Button { app.openConnect(service) } label: {
+                    Image(systemName: "arrow.up.forward").font(.system(size: zoomed(11)))
+                }
+                .buttonStyle(.borderless)
+                .foregroundStyle(.secondary)
+                .opacity(hovered ? 1 : 0.35)
+                .tip("Open \(service.title)'s page on \(ConnectorsText.host(app.connectors) ?? "the gateway") to sign out or reconnect")
             }
         }
+        .contentShape(Rectangle())
+        .onHover { hovered = $0 }
         .accessibilityElement(children: .contain)
     }
 
@@ -128,7 +153,7 @@ private struct ConnectorsAbout: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: zoomed(8)) {
-            Text("These are the services your agents get from the Connectors gateway\(host.map { " on \($0)" } ?? ""). Connect opens a service's sign-in page in your browser.")
+            Text("These are the services your agents get from the Connectors gateway\(host.map { " on \($0)" } ?? ""). Connect opens a service's sign-in page in your browser. The arrows open the gateway's own pages, to sign a service out or reconnect it.")
             Text("The runner checks every few minutes and when this panel opens. When an agent runs into a service that needs signing in, it asks you with a link to the page.")
             Text("claude.ai's own connectors are signed in on claude.ai, for each login.")
             if let checked = status?.checkedAt {

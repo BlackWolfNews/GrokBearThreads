@@ -73,4 +73,20 @@ final class ConnectorsTextTests: XCTestCase {
         guard case .connectorsUpdated(let s)? = await iterator.next() else { return XCTFail("no connectors.updated") }
         XCTAssertEqual(s.services.first?.state, "signed_out")
     }
+
+    func testManageLinksGoToTheGatewaysOwnPages() {
+        let base = "https://bruce.example.ts.net:8443"
+        let fine = ConnectorService(id: "notion", title: "Notion", state: "connected")
+        let out = ConnectorService(id: "sentry", title: "Sentry", state: "signed_out", connectUrl: "\(base)/admin/connect/sentry?from=x")
+        let odd = ConnectorService(id: "a/b", title: "Odd", state: "connected")
+        let s = ConnectorsStatus(state: "ok", url: base + "/", services: [fine, out, odd])
+        XCTAssertEqual(ConnectorsText.manageURL(s)?.absoluteString, "\(base)/admin")
+        XCTAssertEqual(ConnectorsText.serviceURL(s, fine)?.absoluteString, "\(base)/admin/connect/notion", "signed in: the gateway's page for it")
+        XCTAssertEqual(ConnectorsText.serviceURL(s, out)?.absoluteString, "\(base)/admin/connect/sentry?from=x", "the runner's URL when it sent one")
+        XCTAssertEqual(ConnectorsText.serviceURL(s, odd)?.absoluteString, "\(base)/admin/connect/a%2Fb")
+        XCTAssertNil(ConnectorsText.manageURL(nil))
+        XCTAssertNil(ConnectorsText.manageURL(ConnectorsStatus(state: "off")))
+        XCTAssertNil(ConnectorsText.manageURL(ConnectorsStatus(state: "ok", url: "file:///etc")))
+        XCTAssertNil(ConnectorsText.serviceURL(ConnectorsStatus(state: "off"), fine))
+    }
 }

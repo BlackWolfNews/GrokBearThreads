@@ -67,6 +67,35 @@ public enum ConnectorsText {
         return host.components(separatedBy: ".").first ?? host
     }
 
+    /// The gateway's admin page, where every service can be connected,
+    /// signed out or retried, for the panel's manage button.
+    public static func manageURL(_ s: ConnectorsStatus?) -> URL? {
+        adminURL(s, path: "/admin")
+    }
+
+    /// One service's page on the gateway (its Connect, Disconnect or Try
+    /// again), whatever its state. The runner only sends a connect URL for
+    /// a service that isn't signed in, so a signed-in one gets the
+    /// gateway's page for it, as the runner's own fallback does.
+    public static func serviceURL(_ s: ConnectorsStatus?, _ service: ConnectorService) -> URL? {
+        if let raw = service.connectUrl, let url = URL(string: raw), isWeb(url) { return url }
+        let id = service.id.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed.subtracting(CharacterSet(charactersIn: "/"))) ?? service.id
+        return adminURL(s, path: "/admin/connect/\(id)")
+    }
+
+    private static func adminURL(_ s: ConnectorsStatus?, path: String) -> URL? {
+        guard let s, s.state != "off", let raw = s.url, let base = URL(string: raw), isWeb(base),
+              var parts = URLComponents(url: base, resolvingAgainstBaseURL: false) else { return nil }
+        parts.percentEncodedPath = path
+        parts.query = nil
+        parts.fragment = nil
+        return parts.url
+    }
+
+    private static func isWeb(_ url: URL) -> Bool {
+        ["https", "http"].contains(url.scheme?.lowercased() ?? "")
+    }
+
     /// A service's state in a word or two.
     public static func stateLine(_ service: ConnectorService) -> String {
         switch service.state {
