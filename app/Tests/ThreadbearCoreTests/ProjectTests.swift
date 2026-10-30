@@ -362,6 +362,28 @@ final class ProjectTests: XCTestCase {
         XCTAssertEqual(origin("tandem", nil).tip("Timeline", projectTitle: nil), "Timeline, for edit.tandem")
     }
 
+    /// The composer's shelves: one per place the chips came from, each
+    /// holding its chips by patch, in the order they arrived.
+    func testActionShelvesGroupChipsByWhereTheyCameFrom() {
+        var thread = ThreadSummary(id: "th1", title: "t", projects: [ThreadProject(id: "p_a", title: "Threadbear")])
+        thread.patches = [
+            PatchInfo(id: "checks", source: "project", projectId: "p_a"),
+            PatchInfo(id: "releases", source: "project", projectId: "p_a"),
+            PatchInfo(id: "mine", source: "home"),
+        ]
+        let actions = [
+            Action(id: "quick", title: "Quick check", patch: "checks"),
+            Action(id: "note", title: "Note", patch: "mine"),
+            Action(id: "app", title: "App check", patch: "checks"),
+            Action(id: "rel", title: "Releases", patch: "releases"),
+        ]
+        let shelves = ActionShelf.shelves(actions, in: thread)
+        XCTAssertEqual(shelves.map(\.origin), [.project(id: "p_a"), .home])
+        XCTAssertEqual(shelves[0].patches.map { $0.map(\.id) }, [["quick", "app"], ["rel"]])
+        XCTAssertEqual(shelves[1].patches.map { $0.map(\.id) }, [["note"]])
+        XCTAssertEqual(ActionShelf.shelves([], in: thread), [])
+    }
+
     // MARK: Words
 
     func testLibrarianWords() {

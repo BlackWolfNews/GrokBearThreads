@@ -31,17 +31,22 @@ struct ComposerView: View {
         // A new thread on its way: what was sent stays, greyed and locked,
         // until the runner has made the thread.
         let creating = thread == nil && app.creatingThread
-        VStack(alignment: .leading, spacing: zoomed(6)) {
+        VStack(alignment: .leading, spacing: 0) {
+        // The folder's actions (patches), on shelves sitting on the box's
+        // top edge, in from its rounded corner (ActionChips).
+        if let thread, !thread.actions.isEmpty || thread.patches.contains(where: { $0.untrusted != nil }) {
+            ActionChips(thread: thread)
+                .tourTarget(.actionChips)
+                .padding(.horizontal, Self.cornerRadius)
+                // Overlap the box's border, so the two read as one piece.
+                .padding(.bottom, -0.5)
+                .zIndex(1)
+        }
         VStack(alignment: .leading, spacing: zoomed(10)) {
             if let thread, let edit = app.editing[thread.id] {
                 EditingBanner(sending: edit.sending) { app.cancelEditing(threadId: thread.id) }
             } else if let thread, !picks.isEmpty {
                 AnswerChips(thread: thread, picks: picks)
-            }
-            // The folder's actions (patches), above the text as in the design.
-            if let thread, !thread.actions.isEmpty || thread.patches.contains(where: { $0.untrusted != nil }) {
-                ActionChips(thread: thread)
-                    .tourTarget(.actionChips)
             }
             if !draft.wrappedValue.images.isEmpty || importing > 0 {
                 AttachmentStrip(images: draft.images, importing: importing)

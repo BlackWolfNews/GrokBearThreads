@@ -156,8 +156,18 @@ public enum PanelOrigin: Sendable, Equatable {
     /// least expect to see in another folder's thread; then a tool patch,
     /// which is there because of one file.
     public static func of(_ panel: Panel, in thread: ThreadSummary) -> PanelOrigin {
-        let patch = thread.patches.first { $0.id == panel.patch }
-        if let projectId = panel.projectId ?? patch?.projectId { return .project(id: projectId) }
+        of(patch: panel.patch, projectId: panel.projectId, in: thread)
+    }
+
+    /// Where an action's chip came from, worked out as a panel's is, for
+    /// its shelf over the composer (ActionShelves).
+    public static func of(_ action: Action, in thread: ThreadSummary) -> PanelOrigin {
+        of(patch: action.patch, projectId: action.projectId, in: thread)
+    }
+
+    private static func of(patch id: String, projectId: String?, in thread: ThreadSummary) -> PanelOrigin {
+        let patch = thread.patches.first { $0.id == id }
+        if let projectId = projectId ?? patch?.projectId { return .project(id: projectId) }
         if let matched = patch?.matched, !matched.isEmpty { return .tool(matched: matched) }
         switch patch?.source {
         case "home": return .home
@@ -187,6 +197,34 @@ public enum PanelOrigin: Sendable, Equatable {
         case .folder: return "\(title), from this folder's .threadbear"
         case .builtin: return "\(title), built in"
         }
+    }
+}
+
+/// A thread's action chips as shelves over its composer, one for each
+/// place they came from (a project, the folder, ~/.threadbear, a tool,
+/// built in), so a project's buttons read as the project's rather than
+/// as part of writing a message (Mike, 30 Oct). Each shelf holds its
+/// chips by patch, so a hairline can sit between two patches from the
+/// same place. Shelves and patches keep the order their first chip had.
+public struct ActionShelf: Sendable, Equatable {
+    public var origin: PanelOrigin
+    public var patches: [[Action]]
+
+    public static func shelves(_ actions: [Action], in thread: ThreadSummary) -> [ActionShelf] {
+        var shelves: [ActionShelf] = []
+        for action in actions {
+            let origin = PanelOrigin.of(action, in: thread)
+            let index = shelves.firstIndex { $0.origin == origin } ?? {
+                shelves.append(ActionShelf(origin: origin, patches: []))
+                return shelves.count - 1
+            }()
+            if let group = shelves[index].patches.firstIndex(where: { $0.first?.patch == action.patch }) {
+                shelves[index].patches[group].append(action)
+            } else {
+                shelves[index].patches.append([action])
+            }
+        }
+        return shelves
     }
 }
 

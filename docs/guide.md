@@ -461,10 +461,15 @@ on your Mac (`![a chart](/path/to/chart.png)`), rather than showing a link.
 ## Patches: your own buttons and panels
 <!-- slug: patches -->
 
-A patch adds buttons (chips above the composer) and panels (beside the
-thread) for the threads in a folder. A button can run a command, like your
-tests, or send the agent a message you use a lot. A panel can show a web
-page, such as your app running on localhost, or a list.
+A patch adds buttons and panels (beside the thread) for the threads in a
+folder. A button can run a command, like your tests, or send the agent a
+message you use a lot. A panel can show a web page, such as your app
+running on localhost, or a list.
+
+Buttons sit on shelves along the top edge of the message box, one shelf
+for each place they came from, starting with the same badge the panels
+wear (below). Buttons that don't fit go under a "+2" (or however many)
+at the end, which lists them.
 
 Each panel has a button on the right-hand rail, with a small badge in its
 bottom corner (and on the panel's tab) saying where it came from: the project's own icon when it came

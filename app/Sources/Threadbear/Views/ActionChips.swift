@@ -2,49 +2,124 @@ import AppKit
 import SwiftUI
 import ThreadbearCore
 
-/// The thread's actions (from its folder's patches) as chips above the
-/// composer's text. A command action runs in the folder and its output
-/// lands in the transcript; a prompt action sends its message. Chips from
-/// one patch sit together, with a hairline between patches, so a row that
-/// mixes a repo's checks with a tool's chips (Tandem's, say) reads as two.
+/// The thread's actions (from its folder's patches) as shelves on top of
+/// the composer: tabs on its top edge, one for each place the chips came
+/// from, led by the badge the rail's panel buttons wear (the project's
+/// icon, a folder, a house, a wrench, a box). Inside the box they looked
+/// like part of writing a message (Mike, 30 Oct); on a shelf of their
+/// own they read as the project's buttons. A command action runs in the
+/// folder and its output lands in the transcript; a prompt action sends
+/// its message. Chips from one patch sit together, with a hairline
+/// between patches on the same shelf.
 struct ActionChips: View {
     @Environment(AppModel.self) private var app
     let thread: ThreadSummary
 
     var body: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: zoomed(6)) {
-                let waiting = thread.patches.filter { $0.untrusted != nil }.count
-                if waiting > 0 {
+        let actions = thread.actions
+        // As many chips as fit, in order, and the rest under "+N": the
+        // first of these that fits the box's width is the one shown. A
+        // scrolling row cut its last chip off mid-word.
+        ViewThatFits(in: .horizontal) {
+            ForEach((0...actions.count).reversed(), id: \.self) { shown in
+                row(Array(actions.prefix(shown)), more: Array(actions.dropFirst(shown)))
+            }
+        }
+    }
+
+    private func row(_ shown: [Action], more: [Action]) -> some View {
+        HStack(alignment: .bottom, spacing: zoomed(6)) {
+            let waiting = thread.patches.filter { $0.untrusted != nil }.count
+            if waiting > 0 {
+                ActionShelfTab {
                     WaitingPatchesChip(count: waiting) { app.showPane(.patches) }
                 }
-                ForEach(Array(Self.groups(thread.actions).enumerated()), id: \.offset) { index, group in
-                    if index > 0 {
-                        Rectangle()
-                            .fill(Color(nsColor: Theme.cardBorder))
-                            .frame(width: 1, height: zoomed(14))
-                            .padding(.horizontal, zoomed(2))
-                    }
-                    ForEach(group) { action in
-                        ActionChip(action: action, running: app.isRunning(action: action, in: thread.id)) {
-                            app.runAction(action, in: thread.id)
+            }
+            ForEach(Array(ActionShelf.shelves(shown, in: thread).enumerated()), id: \.offset) { _, shelf in
+                ActionShelfTab {
+                    ShelfBadge(origin: shelf.origin, thread: thread)
+                    hairline
+                    ForEach(Array(shelf.patches.enumerated()), id: \.offset) { index, group in
+                        if index > 0 { hairline }
+                        ForEach(group) { action in
+                            ActionChip(action: action, running: app.isRunning(action: action, in: thread.id)) {
+                                app.runAction(action, in: thread.id)
+                            }
                         }
                     }
                 }
             }
-            .padding(.vertical, 1)
+            if !more.isEmpty {
+                ActionShelfTab {
+                    Menu {
+                        ForEach(more) { action in
+                            Button(action.title) { app.runAction(action, in: thread.id) }
+                                .disabled(app.isRunning(action: action, in: thread.id))
+                        }
+                    } label: {
+                        Text("+\(more.count)")
+                            .font(.system(size: TypeScale.chip))
+                            .foregroundStyle(.secondary)
+                            .padding(.horizontal, zoomed(6))
+                            .padding(.vertical, zoomed(4))
+                    }
+                    .menuStyle(.button)
+                    .buttonStyle(.plain)
+                    .menuIndicator(.hidden)
+                    .fixedSize()
+                    .tip(more.map(\.title).joined(separator: ", "))
+                }
+            }
         }
+        .fixedSize(horizontal: true, vertical: false)
     }
 
-    /// The actions by patch, each patch where its first chip was.
-    static func groups(_ actions: [Action]) -> [[Action]] {
-        var order: [String] = []
-        var byPatch: [String: [Action]] = [:]
-        for action in actions {
-            if byPatch[action.patch] == nil { order.append(action.patch) }
-            byPatch[action.patch, default: []].append(action)
+    private var hairline: some View {
+        Rectangle()
+            .fill(Color(nsColor: Theme.cardBorder))
+            .frame(width: 1, height: zoomed(14))
+            .padding(.horizontal, zoomed(2))
+    }
+}
+
+/// One shelf: a tab with rounded top corners whose bottom edge sits on
+/// the composer's top edge, a shade quieter than the box itself.
+private struct ActionShelfTab<Content: View>: View {
+    @Environment(\.colorScheme) private var colorScheme
+    @ViewBuilder let content: Content
+
+    var body: some View {
+        let shape = UnevenRoundedRectangle(topLeadingRadius: zoomed(10), topTrailingRadius: zoomed(10), style: .continuous)
+        HStack(spacing: zoomed(2)) { content }
+            .padding(.horizontal, zoomed(6))
+            .padding(.vertical, zoomed(4))
+            .background(shape.fill(Color.primary.opacity(colorScheme == .dark ? 0.05 : 0.035)))
+            .overlay(shape.strokeBorder(Color(nsColor: .separatorColor), lineWidth: 0.5))
+    }
+}
+
+/// Where a shelf's chips came from, at its left: the project's own icon,
+/// or the rail's glyph for the rest, with the same words on hover.
+private struct ShelfBadge: View {
+    @Environment(AppModel.self) private var app
+    let origin: PanelOrigin
+    let thread: ThreadSummary
+
+    var body: some View {
+        let title = PanelOriginBadge.projectTitle(origin, thread: thread, app: app)
+        Group {
+            if case .project(let id) = origin {
+                ProjectIconView(project: app.project(id), title: title ?? "", size: 14)
+            } else if let symbol = origin.symbol {
+                Image(systemName: symbol)
+                    .font(.system(size: zoomed(10), weight: .semibold))
+                    .foregroundStyle(.secondary)
+            }
         }
-        return order.map { byPatch[$0]! }
+        .frame(width: zoomed(18), height: zoomed(18))
+        .padding(.horizontal, zoomed(2))
+        .contentShape(Rectangle())
+        .tip(origin.tip("These buttons", projectTitle: title))
     }
 }
 
@@ -64,11 +139,9 @@ private struct WaitingPatchesChip: View {
                     .foregroundStyle(.primary)
             }
             .font(.system(size: TypeScale.chip))
-            .padding(.horizontal, zoomed(9))
+            .padding(.horizontal, zoomed(8))
             .padding(.vertical, zoomed(4))
-            .background(Capsule().fill(Color.primary.opacity(0.06)))
-            .overlay(Capsule().strokeBorder(Color(nsColor: Theme.cardBorder), lineWidth: 0.5))
-            .contentShape(Capsule())
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .tip("This folder has patch files that haven't run, because you haven't trusted them yet. A patch is code that runs on your Mac. Open Patches to read and trust them.")
@@ -79,6 +152,7 @@ private struct ActionChip: View {
     let action: Action
     let running: Bool
     let run: () -> Void
+    @State private var hovered = false
 
     var body: some View {
         Button(action: run) {
@@ -110,13 +184,15 @@ private struct ActionChip: View {
                 }
             }
             .font(.system(size: TypeScale.chip))
-            .padding(.horizontal, zoomed(9))
+            .padding(.horizontal, zoomed(8))
             .padding(.vertical, zoomed(4))
-            .background(Capsule().fill(Color.primary.opacity(0.06)))
-            .overlay(Capsule().strokeBorder(Color(nsColor: Theme.cardBorder), lineWidth: 0.5))
-            .contentShape(Capsule())
+            // The shelf is the chips' frame, so each is just a fill under
+            // the pointer rather than a capsule of its own.
+            .background(RoundedRectangle(cornerRadius: zoomed(6), style: .continuous).fill(Color.primary.opacity(hovered ? 0.08 : 0)))
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .onHover { hovered = $0 }
         .disabled(running)
         .tip(Self.tip(for: action))
     }
