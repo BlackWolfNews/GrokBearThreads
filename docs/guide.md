@@ -98,8 +98,10 @@ thread opens that thread.
 A reply that needs nothing from you ends with a "Nothing needed from you"
 card, with an Archive thread button to put it away. When something it
 talked about is still worth doing (a piece it didn't get to, a check
-that's due), the card has a button for each, and clicking one puts it in
-the message box to send or change. When the reply does need you, the
+that's due), the card lists them under Optional follow-ups, a button for
+each. Clicking one puts it in the message box and ticks it; click more to
+add them too, or a ticked one again to take it out, then send them as one
+message (or change them first). When the reply does need you, the
 card lists what to do, with a box to tick off beside each one; the same
 list is near the top of the thread's [Highlights](#highlights).
 

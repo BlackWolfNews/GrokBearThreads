@@ -1240,9 +1240,14 @@ enum RowRenderer {
     }
 
     /// The done card: the agent said nothing waits on Mike, so what's left
-    /// is any follow-up it suggested (`next:<n>`, its words into the
-    /// composer) or putting the thread away (`archive`, as ⌘E does). The
-    /// follow-ups go once he's replied, like an ask's answers.
+    /// is putting the thread away (`archive`, as ⌘E does) or any follow-up
+    /// it suggested (`next:<n>`). Mike read follow-ups sat beside Archive
+    /// under "Nothing needed from you" as things he had to do (30 Oct), so
+    /// they're a section of their own, marked optional, as a list he can
+    /// tick any of: each row toggles its words in the composer, ticked
+    /// while they're there. Rows rather than buttons, as a long one broke
+    /// into two buttons. The follow-ups go once he's replied, like an
+    /// ask's answers.
     private static func doneText(_ card: AsksCard, titleStyle: NSParagraphStyle, titleOffset: CGFloat) -> NSAttributedString {
         let output = NSMutableAttributedString(string: "Nothing needed from you", attributes: [
             .font: Theme.changesTitleFont, .foregroundColor: NSColor.labelColor,
@@ -1251,13 +1256,30 @@ enum RowRenderer {
         let button = Theme.labelFont
         let (buttonStyle, buttonOffset) = Theme.lines(TypeScale.scaled(38), font: button, before: zoomed(6))
         output.append(NSAttributedString(string: "\n", attributes: [.font: button, .paragraphStyle: buttonStyle]))
-        let next = card.isOpen ? card.next.enumerated().map { n, text in (text, "next:\(n)") } : []
-        for (k, item) in (next + [("Archive thread", "archive")]).enumerated() {
-            if k > 0 { output.append(NSAttributedString(string: "    ", attributes: [.font: button, .paragraphStyle: buttonStyle, .baselineOffset: buttonOffset])) }
-            output.append(NSAttributedString(string: "\u{00A0}\u{00A0}\u{00A0}" + item.0.replacingOccurrences(of: " ", with: "\u{00A0}") + "\u{00A0}\u{00A0}\u{00A0}", attributes: [
-                .font: button, .foregroundColor: AskButtonStyle.plain.textColor, .paragraphStyle: buttonStyle, .baselineOffset: buttonOffset,
-                .tbAction: item.1, .tbButton: AskButtonStyle.plain.rawValue,
-            ]))
+        output.append(NSAttributedString(string: "\u{00A0}\u{00A0}\u{00A0}Archive\u{00A0}thread\u{00A0}\u{00A0}\u{00A0}", attributes: [
+            .font: button, .foregroundColor: AskButtonStyle.plain.textColor, .paragraphStyle: buttonStyle, .baselineOffset: buttonOffset,
+            .tbAction: "archive", .tbButton: AskButtonStyle.plain.rawValue,
+        ]))
+        guard card.isOpen, !card.next.isEmpty else { return output }
+        let (headingStyle, headingOffset) = Theme.lines(TypeScale.workLine, font: Theme.changesTitleFont, spacing: zoomed(6), before: zoomed(16))
+        output.append(NSAttributedString(string: "\nOptional follow-ups", attributes: [
+            .font: Theme.changesTitleFont, .foregroundColor: NSColor.secondaryLabelColor,
+            .paragraphStyle: headingStyle, .baselineOffset: headingOffset,
+        ]))
+        // Wrapped lines start under the text, past the circle.
+        let font = Theme.bodyFont
+        let indent = MarkdownRenderer.Builder.listIndent
+        let (rowStyle, rowOffset) = Theme.lines(TypeScale.bodyLine, font: font, spacing: zoomed(2), before: zoomed(8), head: indent, first: 0)
+        rowStyle.tabStops = [NSTextTab(textAlignment: .left, location: indent)]
+        for (n, text) in card.next.enumerated() {
+            let picked = card.nextPicked.contains(n)
+            let attributes: [NSAttributedString.Key: Any] = [
+                .font: font, .foregroundColor: NSColor.labelColor, .paragraphStyle: rowStyle, .baselineOffset: rowOffset, .tbAction: "next:\(n)",
+            ]
+            output.append(NSAttributedString(string: "\n", attributes: attributes))
+            output.append(symbol(picked ? "checkmark.circle.fill" : "circle", label: picked ? "Picked" : "Not picked", font: font, attributes: attributes,
+                                 color: picked ? .controlAccentColor : .secondaryLabelColor))
+            output.append(NSAttributedString(string: "\t" + text, attributes: attributes))
         }
         return output
     }

@@ -113,12 +113,15 @@ final class ThreadSession {
                 let background = app?.threads[threadId]?.background ?? []
                 // Answers picked on the open card before it was last shown.
                 let picks = app?.askPicks[threadId]
+                // And what's in its composer, for the done card's ticks.
+                let draft = app?.drafts[threadId]?.text ?? ""
                 let prepared = await Task.detached(priority: .userInitiated) { () -> (TranscriptModel, Int) in
                     var model = TranscriptModel(root: root)
                     if let picks {
                         _ = model.setAskPicks(picks.asksSeq, picks.picks)
                         _ = model.setAskNotes(picks.asksSeq, picks.notes)
                     }
+                    _ = model.setDraft(draft)
                     model.load(events: page.events, inProgress: page.inProgress)
                     _ = model.setBackground(background)
                     if debug { print(String(format: "    after model %.0f MB", memoryMB())) }
@@ -407,6 +410,17 @@ final class ThreadSession {
         guard state == .loaded, !rebuilding else { return }
         let oldStart = displayStart
         let change = feed.setAskNotes(seq, notes)
+        guard !change.isEmpty else { return }
+        show(change, oldStart: oldStart)
+    }
+
+    /// Ticks the done card's follow-ups that are in the composer's `text`
+    /// (before the transcript has loaded, the model reads AppModel.drafts
+    /// instead, as it does the picks).
+    func setDraft(_ text: String) {
+        guard state == .loaded, !rebuilding else { return }
+        let oldStart = displayStart
+        let change = feed.setDraft(text)
         guard !change.isEmpty else { return }
         show(change, oldStart: oldStart)
     }

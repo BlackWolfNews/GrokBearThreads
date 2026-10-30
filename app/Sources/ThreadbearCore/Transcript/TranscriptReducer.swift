@@ -100,6 +100,9 @@ public struct TranscriptModel: Sendable {
     /// What Mike has written in each card's Something else boxes, by the
     /// card's seq, kept here for the same reason.
     public private(set) var askNotes: [Int: [Int: AskNote]] = [:]
+    /// What's in the thread's composer, so the done card can tick the
+    /// follow-ups already in it. Only the app sets it.
+    private var draft = ""
     /// Each turn's last error row, to learn the turn's `errorKind`.
     private var errorRowForTurn: [String: String] = [:]
     private var turnStarts: [String: Date] = [:]
@@ -360,6 +363,22 @@ public struct TranscriptModel: Sendable {
         update(cardId) { content in
             if case .asks(var card) = content {
                 card.notes = notes
+                content = .asks(card)
+            }
+        }
+        return refreshRows()
+    }
+
+    /// Mike's composer text changed: the open done card ticks the
+    /// follow-ups that are in it now.
+    public mutating func setDraft(_ text: String) -> TranscriptChange {
+        guard text != draft else { return TranscriptChange() }
+        draft = text
+        guard let open = openAsksRow, case .asks(let card)? = item(id: open)?.content, card.isDone,
+              FollowUps.picked(in: text, next: card.next) != card.nextPicked else { return TranscriptChange() }
+        update(open) { content in
+            if case .asks(var card) = content {
+                card.nextPicked = FollowUps.picked(in: text, next: card.next)
                 content = .asks(card)
             }
         }
@@ -798,7 +817,8 @@ public struct TranscriptModel: Sendable {
                     // The done card: goes, as an asks card does, once Mike
                     // replies or the next turn ends.
                     let cardId = "ak:\(seq)"
-                    append(TranscriptRow(id: cardId, seq: seq, turnId: turnId ?? completion.turnId, content: .asks(AsksCard(seq: seq, asks: [], next: completion.next))))
+                    let picked = FollowUps.picked(in: draft, next: completion.next)
+                    append(TranscriptRow(id: cardId, seq: seq, turnId: turnId ?? completion.turnId, content: .asks(AsksCard(seq: seq, asks: [], next: completion.next, nextPicked: picked))))
                     openAsksRow = cardId
                 }
             }

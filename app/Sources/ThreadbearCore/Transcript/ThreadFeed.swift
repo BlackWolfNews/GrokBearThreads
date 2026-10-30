@@ -160,6 +160,11 @@ public struct ThreadFeed: Sendable {
         model.setAskNotes(seq, notes)
     }
 
+    /// The composer's text changed (see `TranscriptModel.setDraft`).
+    public mutating func setDraft(_ text: String) -> TranscriptChange {
+        model.setDraft(text)
+    }
+
     /// The thread's background work changed (see
     /// `TranscriptModel.setBackground`). Queued events stay queued.
     public mutating func setBackground(_ tasks: [BackgroundTask]) -> TranscriptChange {

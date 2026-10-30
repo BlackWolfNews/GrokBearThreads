@@ -137,7 +137,13 @@ final class AppModel {
     /// id, or "new"): with threads open in several panels, only that one's.
     var focusRequests: [String: Int] = [:]
     var now = Date()
-    var drafts: [String: Draft] = [:]
+    var drafts: [String: Draft] = [:] {
+        // The open done card ticks the follow-ups in its thread's composer,
+        // however they got there or went (FollowUps).
+        didSet {
+            for (id, session) in sessions where drafts[id]?.text != oldValue[id]?.text { session.setDraft(drafts[id]?.text ?? "") }
+        }
+    }
     /// Messages being edited, by thread id: the seq of the message the
     /// composer's draft will replace (docs/protocol.md, "Editing a
     /// message"), and whatever was in the box before, to put back after.
@@ -1095,12 +1101,13 @@ final class AppModel {
 
     /// A follow-up from the done card, into the thread's composer rather
     /// than sent: a stray click shouldn't start a turn, and he may want to
-    /// add to it. Whatever he'd typed stays, with it on a line after.
-    func suggestNext(threadId: String, text: String) {
+    /// add to it. Whatever he'd typed stays, with it on a line after. When
+    /// it's already there, the click takes it out again, so he can pick
+    /// any of them and send them as one message (FollowUps).
+    func toggleNext(threadId: String, text: String) {
         var draft = drafts[threadId] ?? Draft()
-        let typed = draft.text.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !typed.contains(text) { draft.text = typed.isEmpty ? text : typed + "\n\n" + text }
-        drafts[threadId] = draft
+        draft.text = FollowUps.toggled(text, in: draft.text)
+        drafts[threadId] = draft.text.isEmpty && draft.images.isEmpty ? nil : draft
         focusComposer(threadId)
     }
 
