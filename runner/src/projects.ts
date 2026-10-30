@@ -84,6 +84,11 @@ export type MembershipChange = {
 const TITLE_MAX = 80;
 const SHORT_MAX = 2000; // goals and state
 const NOTES_MAX = 50_000;
+// Past this, update_project asks the agent to rewrite the notes shorter.
+// Agents appended a changelog of everything that landed until Threadbear's
+// hit NOTES_MAX and a note was refused (Mike, 30 Oct); git and the docs
+// already say what landed, and read_project hands an agent all of it.
+export const NOTES_LONG = 12_000;
 // A project's links are the few places Mike goes for it, not a bookmark
 // list: more than this and the top of Highlights is all links.
 export const LINKS_MAX = 8;
@@ -324,6 +329,9 @@ export class Projects {
     const rec = this.must(projectId);
     const add = text.trim();
     if (!add) throw bad('The note is empty.');
+    if (rec.notes.length + add.length + 2 > NOTES_MAX) {
+      throw bad(`The notes are full (${rec.notes.length} of ${NOTES_MAX} characters). Rewrite them shorter with notes, keeping decisions, gotchas and what's still owed and dropping what git and the docs already record, then add this.`);
+    }
     return this.update(projectId, { notes: rec.notes.trim() ? `${rec.notes.trimEnd()}\n\n${add}` : add });
   }
 

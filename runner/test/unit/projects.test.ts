@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { makeHarness, tick, tmpDir } from '../helpers/fakes.ts';
 import { checkSummary } from '../helpers/protocol-check.ts';
-import { Projects, drainProjectMethods, projectMethods, BRIEF_MAX, type ProjectHost } from '../../src/projects.ts';
+import { Projects, drainProjectMethods, projectMethods, BRIEF_MAX, NOTES_LONG, type ProjectHost } from '../../src/projects.ts';
 import { projectRouter, type PrimaryLink } from '../../src/handover.ts';
 import { Librarian, librarianMethods, mainCheckout, SETTLE_MS, CATCH_UP_MS, CATCH_UP_MIN_CHARS, FIRST_MESSAGE_MS, SWEEP_MS } from '../../src/librarian.ts';
 import { buildThreadbearTools } from '../../src/threadbear-mcp.ts';
@@ -417,7 +417,7 @@ test('agent tools: make, read, update, join and leave projects', async () => {
   const p = projects.list()[0];
   assert.deepEqual(h.runner.get(thread.id).projects?.map((m) => [m.by, m.pinned]), [['agent', true]]);
   assert.equal(p.createdBy, 'agent');
-  await call('update_project', { project: 'app', state: 'Half done', appendNote: 'Use npm ci.' });
+  assert.deepEqual(await call('update_project', { project: 'app', state: 'Half done', appendNote: 'Use npm ci.' }), { text: `Updated "App" (${p.id}).`, error: false });
   const read = await call('read_project', { project: p.id });
   assert.match(read.text, /^App \(p_[0-9a-f]+\)\nFolders: .*\nGoals: Ship it\nState: Half done\nLinks: none\n\nNotes:\nUse npm ci\.\n\nThreads \(1\):\n- [0-9a-f]{8} ".*" \(this thread\)$/);
   assert.match((await call('list_projects', {})).text, /\(this thread is in it\) · 1 thread · folders .* · state: Half done/);
@@ -887,4 +887,25 @@ test('the librarian wakes a thread hibernating on a topic when Mike talks about 
   assert.equal(h.runner.get(waiting).snoozedUntil, undefined);
   assert.equal(h.runner.get(waiting).needsYou, true);
   assert.notEqual(other, waiting);
+});
+
+// Notes are a short set of decisions and gotchas, not a log: past
+// NOTES_LONG the agent is asked to rewrite them, and a note that won't fit
+// says how to make room instead of only refusing (Mike, 30 Oct).
+test('update_project asks for long notes to be rewritten, and says how when they are full', async () => {
+  const { h, projects, create } = setup();
+  const { thread } = create();
+  const tools = buildThreadbearTools(h.runner, thread.id, Date.now, undefined, projects);
+  const call = async (name: string, args: Record<string, unknown>) => {
+    const t = tools.find((x) => x.name === name)!;
+    const r = await t.handler(args as never, {} as never);
+    return { text: r.content.map((c: any) => c.text).join(''), error: Boolean(r.isError) };
+  };
+  await call('create_project', { title: 'App' });
+  const long = await call('update_project', { project: 'app', notes: 'x'.repeat(NOTES_LONG + 1) });
+  assert.match(long.text, /Its notes are 12001 characters: rewrite them shorter with notes/);
+  await call('update_project', { project: 'app', notes: 'x'.repeat(49_990) });
+  const full = await call('update_project', { project: 'app', appendNote: 'One more thing.' });
+  assert.equal(full.error, true);
+  assert.match(full.text, /The notes are full \(49990 of 50000 characters\)\. Rewrite them shorter with notes/);
 });

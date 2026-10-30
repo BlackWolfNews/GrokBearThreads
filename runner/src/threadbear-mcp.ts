@@ -14,7 +14,7 @@ import { usageLine } from './usage.ts';
 import { findPool, poolLine } from './pools.ts';
 import { AGENT_MESSAGE_PREFIX, EFFORT_LEVELS, MOVE_MESSAGE_PREFIX, sentByAgent } from './protocol.ts';
 import type { Scheduler } from './schedules.ts';
-import type { Projects } from './projects.ts';
+import { NOTES_LONG, type Projects } from './projects.ts';
 import { parseWhen, relativeFuture, relativeTime } from './when.ts';
 
 export { parseWhen, relativeFuture, relativeTime };
@@ -501,7 +501,7 @@ export function buildThreadbearTools(
     ),
     tool(
       'update_project',
-      "Changes a project: title, goals, state, notes, links, folders or icon. Keep state current as work moves on (what's done, what's next, what's blocked), and add to the notes anything a later thread should know. appendNote adds a paragraph without rewriting the notes. When the project gets a place Mike will keep going back to (it goes live, gets an admin page, a dashboard, a store listing), add it with addLinks: links show at the top of every one of its threads' Highlights. The librarian finds icons by itself from the project's folders, so only set one when Mike asks or the project gets a new app icon somewhere it wouldn't look.",
+      "Changes a project: title, goals, state, notes, links, folders or icon. Keep state current as work moves on (what's done, what's next, what's blocked). Notes are for what a later thread should know that the repo doesn't say: decisions and why, gotchas, what's still owed. They're not a log of what landed (git and the docs have that), so when something you note replaces an older note, rewrite the notes rather than adding to them. appendNote adds a paragraph without rewriting the notes. When the project gets a place Mike will keep going back to (it goes live, gets an admin page, a dashboard, a store listing), add it with addLinks: links show at the top of every one of its threads' Highlights. The librarian finds icons by itself from the project's folders, so only set one when Mike asks or the project gets a new app icon somewhere it wouldn't look.",
       {
         project: z.string().describe('Project id, id prefix or title.'),
         title: z.string().optional(),
@@ -541,7 +541,10 @@ export function buildThreadbearTools(
           const choice = v === 'auto' ? {} : /[/~]/.test(v) ? { path: v } : { symbol: v };
           out = await pc.chooseIcon(p.id, choice, 'agent');
         }
-        return `Updated "${out.title}" (${out.id}).`;
+        const long = out.notes.length > NOTES_LONG
+          ? ` Its notes are ${out.notes.length} characters: rewrite them shorter with notes, keeping decisions, gotchas and what's still owed and dropping what git and the docs already record.`
+          : '';
+        return `Updated "${out.title}" (${out.id}).${long}`;
       }),
     ),
     tool(
