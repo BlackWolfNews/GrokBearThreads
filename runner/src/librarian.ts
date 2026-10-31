@@ -31,6 +31,8 @@ import type { PocketCardInput, PocketCardSummary } from './sync.ts';
 
 // The phone's Pocket, in the Convex backend (sync.ts). Asked for each look,
 // as sync can be off.
+export type ThreadGist = { first?: string; firstImages?: number; recent: { who: 'user' | 'assistant'; text: string; images?: number }[] };
+
 export type LibrarianPocket = {
   pocketCards(): Promise<PocketCardSummary[]>;
   savePocketCard(card: PocketCardInput): Promise<'added' | 'replaced'>;
@@ -40,7 +42,7 @@ export type LibrarianPocket = {
 // What the librarian needs from the runner.
 export type LibrarianHost = {
   threadRecords(): ThreadRecord[];
-  threadGist(threadId: string, opts?: { recent?: number; chars?: number }): { first?: string; recent: { who: 'user' | 'assistant'; text: string }[] };
+  threadGist(threadId: string, opts?: { recent?: number; chars?: number }): ThreadGist;
   threadSince?(threadId: string, seq: number): { chars: number; links: boolean };
   resolveThread(idOrPrefix: string): string;
   onThreadActivity(fn: (a: ThreadActivity) => void): () => void;
@@ -103,6 +105,11 @@ const NOTES_KEPT = 5;
 export const FIXES_PER_DAY = 5;
 const FIXES_SHOWN_MS = 7 * 24 * 60 * 60_000;
 const FIXES_KEPT = 30;
+// Other threads a look is shown, so it can tell one already has the problem.
+const OTHERS_SHOWN = 20;
+const OTHERS_SHOWN_MS = 48 * 60 * 60_000;
+// A message this short with a picture says what's wrong only in the picture.
+const PICTURE_WORDS = 15;
 
 // New Pocket cards: at most this many a day, so a look that gets it wrong
 // can't fill the deck. A thread only ever gets one from the librarian, so
@@ -165,7 +172,7 @@ type Answer = {
 export class Librarian {
   private host: LibrarianHost;
   private projects: Projects;
-  private models?: Pick<Models, 'generate'> & { unavailable?(opts?: { poolOnly?: boolean }): string | undefined };
+  private models?: Pick<Models, 'generate'> & { unavailable?(opts?: { poolOnly?: boolean }): string | undefined; isPrivateFolder?(cwd: string): boolean };
   private clock: Clock;
   private log: Logger;
   private file: string;
@@ -207,7 +214,7 @@ export class Librarian {
   // notes aren't sent again on every change to the project.
   private notesTried = new Map<string, string>();
 
-  constructor(deps: { host: LibrarianHost; projects: Projects; models?: Pick<Models, 'generate'> & { unavailable?(opts?: { poolOnly?: boolean }): string | undefined }; clock: Clock; log: Logger; home: string; userHome?: string; pocket?: () => LibrarianPocket | undefined }) {
+  constructor(deps: { host: LibrarianHost; projects: Projects; models?: Pick<Models, 'generate'> & { unavailable?(opts?: { poolOnly?: boolean }): string | undefined; isPrivateFolder?(cwd: string): boolean }; clock: Clock; log: Logger; home: string; userHome?: string; pocket?: () => LibrarianPocket | undefined }) {
     this.host = deps.host;
     this.pocket = deps.pocket;
     this.projects = deps.projects;
@@ -608,6 +615,11 @@ export class Librarian {
       lines.push('', 'Fix threads opened lately:');
       for (const f of lately) lines.push(`- "${f.title}"`);
     }
+    const others = this.otherThreads(rec, lately);
+    if (others.length) {
+      lines.push('', 'Other threads the user has going:');
+      for (const t of others) lines.push(`- "${t}"`);
+    }
     if (cards) {
       const own = cards.filter((c) => c.threadId === rec.id);
       lines.push('', 'Pocket cards from this thread:');
@@ -620,10 +632,10 @@ export class Librarian {
     }
     const gist = this.host.threadGist(rec.id);
     if (job.reason === 'first-message') lines.push("It has only just started: file it from what it's about, and don't change any project's state yet.");
-    if (gist.first) lines.push('', `First message: ${gist.first}`);
+    if (gist.first) lines.push('', `First message${attached(gist.firstImages)}: ${gist.first}`);
     if (gist.recent.length) {
       lines.push('', 'Latest messages:');
-      for (const m of gist.recent) lines.push(`${m.who === 'user' ? 'User' : 'Agent'}: ${m.text}`);
+      for (const m of gist.recent) lines.push(`${m.who === 'user' ? 'User' : 'Agent'}${attached(m.images)}: ${m.text}`);
     }
     return lines.join('\n');
   }
@@ -822,9 +834,10 @@ export class Librarian {
   // doesn't have to ask for one (30 Oct 2026). Returns its title.
   private startFix(job: LibrarianJob, rec: ThreadRecord, fix: unknown): string | undefined {
     if (!fix || typeof fix !== 'object' || !this.host.startFix) return undefined;
-    const f = fix as { title?: unknown; folder?: unknown; problem?: unknown };
+    const f = fix as { title?: unknown; folder?: unknown; problem?: unknown; said?: unknown };
     const title = typeof f.title === 'string' ? f.title.trim().slice(0, 80) : '';
     const problem = typeof f.problem === 'string' ? f.problem.trim().slice(0, 1500) : '';
+    const said = typeof f.said === 'string' ? f.said.trim().slice(0, 500) : '';
     if (!title || !problem) return undefined;
     // The first message alone is what the thread is for, not a side problem;
     // and a fix thread's own complaints are its task.
@@ -839,12 +852,23 @@ export class Librarian {
     // The repo of the tool at fault, else where the thread is.
     const asked = typeof f.folder === 'string' && f.folder.trim() ? mainCheckout(this.expand(f.folder)) : '';
     const cwd = asked && isInside(asked, this.home) && fs.existsSync(asked) && fs.statSync(asked).isDirectory() ? asked : mainCheckout(rec.cwd);
+    // The model has been told all this and still opened threads for it (two
+    // of its first three, 31 Oct 2026), so it's checked here too. Each thread
+    // cost Mike an inbox row to clear with nothing in it for him.
+    const editing = [...(this.edited.get(rec.id) ?? [])].some((r) => mainCheckout(r) === cwd);
+    const refused = editing ? 'the thread is editing that repo itself' : whyNoFix(said, problem, this.host.threadGist(rec.id));
+    if (refused) {
+      this.log.info('librarian skipped a fix', { threadId: rec.id, title, said, why: refused });
+      return undefined;
+    }
     const text = [
       `The librarian started this thread. In [${rec.title}](thread:${rec.id}) the user ran into a problem with their tools, apart from what that thread was doing:`,
       '',
       problem,
       '',
-      "Read that thread (read_thread) for the details, then find the underlying cause and fix it so it doesn't happen again. If the fix is reversible and you're confident it's right, make it and land it, then tell the user what you did. If it's already fixed, already being fixed in another thread (list_threads), or not a real problem, say so in a line and stop.",
+      `The user's words: "${said}"`,
+      '',
+      "Read that thread (read_thread) for the details, then find the underlying cause and fix it so it doesn't happen again. If the fix is reversible and you're confident it's right, make it and land it, then tell the user what you did. If it's already fixed, already being fixed in another thread (list_threads), or not a real problem, say so in a line and call end_turn with needs \"nothing\" and archive true. The user wants that: a thread they never asked for that changed nothing shouldn't sit in their inbox.",
     ].join('\n');
     let threadId: string | undefined;
     try {
@@ -857,6 +881,19 @@ export class Librarian {
     if (this.fixes.length > FIXES_KEPT) this.fixes.length = FIXES_KEPT;
     this.log.info('librarian started a fix thread', { from: rec.id, threadId, title, cwd });
     return title;
+  }
+
+  // The titles of what else has been going lately. Never a private folder's:
+  // the model is never sent anything from one.
+  private otherThreads(rec: ThreadRecord, lately: Fix[]): string[] {
+    const since = this.clock.now() - OTHERS_SHOWN_MS;
+    const fixes = new Set(lately.map((f) => f.threadId));
+    return this.host
+      .threadRecords()
+      .filter((t) => t.id !== rec.id && !fixes.has(t.id) && !t.sample && t.title && Date.parse(t.lastActivityAt) >= since && !this.models?.isPrivateFolder?.(t.cwd))
+      .sort((a, b) => Date.parse(b.lastActivityAt) - Date.parse(a.lastActivityAt))
+      .slice(0, OTHERS_SHOWN)
+      .map((t) => t.title);
   }
 
   private fixesLately(): Fix[] {
@@ -1295,7 +1332,7 @@ Reply with JSON only, no prose and no code fence:
  "title": null, or a new title when the thread's title no longer says what it's about (see below),
  "retitle": {"<project id>": "the project's new name"} for a project it's in whose name has gone out of date (see below), else {},
  "wake": ["<ids of hibernating threads the user is talking about here>"], or [] (see below),
- "fix": null, or {"title": "the fix in 2 to 6 words", "folder": "~/path of the repo of the tool at fault", "problem": "what went wrong"} (see below),
+ "fix": null, or {"title": "the fix in 2 to 6 words", "folder": "~/path of the repo of the tool at fault", "problem": "what went wrong", "said": "the user's words about it"} (see below),
  "pocket": null, or {"save": [{"title": "short name", "text": "the card", "place": "optional"}], "remove": ["title"]} (see below),
  "why": "one short line"}
 
@@ -1311,7 +1348,15 @@ Keep projects' names too, unless one the thread is in has gone out of date: the 
 
 Some hibernating threads are waiting for the user to talk about something again ("woodworking"). Put one in wake when the user's own messages in this thread are about that: they're working on it, planning it or asking about it. A passing mention, or only the agent bringing it up, isn't enough. Most looks wake none.
 
-Give fix when the user, in their own messages here, points out a problem with their tools or with how agents work, apart from the task the thread is about: a bug in Threadbear or another of their own apps or tools, a tool that misbehaved, a skill or instruction that led the agent wrong ("is this a bug in Threadbear?", "I couldn't see the tab you opened"). The title says what to fix ("Show replies written after end_turn"). The folder is that tool's repo from the project list, or the thread's own folder when you can't tell. The problem says what happened and what the user said about it, with the names, for an agent who hasn't seen this thread. Not when the thread's task is that tool (it's fixing it already), not for problems with the task itself or with someone else's website or service, not when the messages say a thread to fix it was started or the agent fixed it there and then, and not when a fix thread opened lately covers it. Most looks give none.
+Give fix when the user, in their own messages here, points out a problem with their tools or with how agents work, apart from the task the thread is about: a bug in Threadbear or another of their own apps or tools, a tool that misbehaved, a skill or instruction that led the agent wrong ("is this a bug in Threadbear?", "I couldn't see the tab you opened"). They shouldn't have to ask for a thread to fix it, and a thread in that tool's own repo can still run into one apart from what it's doing. The title says what to fix ("Show replies written after end_turn"). The folder is that tool's repo from the project list, or the thread's own folder when you can't tell. The problem says what happened and what the user said about it, with the names, for an agent who hasn't seen this thread. Said is the user's words about it, copied exactly from one of their messages.
+
+Give no fix (null) when:
+- the problem is in the first message, or is what the thread has been doing since: that's its task, and its agent is on it, so a second thread would only repeat it
+- the thread's agent is looking into it or fixing it, or fixed it there and then, or the messages say a thread to fix it was started or that another thread has it
+- it's covered by a fix thread opened lately or by one of the user's other threads in the lists above. If you'd write "another thread owns this" in the problem, there's no fix to give
+- it's a problem with the task itself or with someone else's website or service
+- you can't be sure what the problem is. You only get the words of a message, never its images: one marked as having an image, or leaning on "this", "that" or "it", may be about something you can't see. Don't guess, and don't settle on some other thing the thread mentions (its folder, say) as what they meant. Only go on when the words or the agent's replies spell the problem out.
+Most looks give none.
 
 The Pocket is a deck of short cards on the user's phone, to read at a counter when they're out. Keep this thread's cards true: save one with the same title when a fact on it has changed, and remove one when the messages say it's done with (the parcel's posted, the trip's over). Add a card only when the user, in their own messages here, says they're going somewhere or will need something while out, the messages hold the facts they'd want there, and this thread has no card. A plan for someday isn't enough. If the messages say a card was filed and it isn't listed, the user took it out: leave it. Copy addresses, codes and numbers exactly from the messages and never guess one. The text is only the facts, a line each, with no explanation. The place is what you'd search a map for ("post office"), only if the card is for somewhere. Most looks change nothing: pocket null.
 
@@ -1331,6 +1376,50 @@ export function tidiedNotes(text: string): string {
     .trim()
     .replace(/^```(?:markdown|md)?\n([\s\S]*?)\n```$/, '$1')
     .trim();
+}
+
+// A fix the look shouldn't have offered, and why. The cases are real ones
+// from 31 Oct 2026 (projects.test.ts has them): a thread whose whole task
+// was the complaint, a brief saying another thread owned the fix, and "it
+// often goes to this?" with a screenshot, read as being about a folder. The
+// one good fix so far came from a later question in a thread about something
+// else, and passes all of these. Exported for its tests.
+export function whyNoFix(said: string, problem: string, gist: ThreadGist): string | undefined {
+  if (!said) return "it didn't quote the user";
+  const first = gist.first ? words(gist.first).join(' ') : undefined;
+  const at = gist.recent.findIndex((m) => m.who === 'user' && words(m.text).join(' ') !== first && quotes(said, m.text));
+  if (at < 0) return gist.first && quotes(said, gist.first) ? "it's the first message: that's the thread's task, not a side problem" : "the quote isn't in the user's messages";
+  const m = gist.recent[at];
+  if (leansOnPicture(m)) return 'the message only makes sense with a picture the look cannot see';
+  if (saysInHand(problem)) return 'its own brief says someone else has it';
+  if (gist.recent.slice(at + 1).some((r) => r.who === 'assistant' && saysInHand(r.text))) return 'the agent says another thread has it';
+  return undefined;
+}
+
+function words(text: string): string[] {
+  return text.toLowerCase().match(/[\p{L}\p{N}']+/gu) ?? [];
+}
+
+// Whether a message holds the quote. A model tends to tidy what it copies, so
+// nearly all of the words will do, but a word or two proves nothing.
+function quotes(said: string, text: string): boolean {
+  const wanted = words(said);
+  if (wanted.length < 3) return false;
+  const have = new Set(words(text));
+  return wanted.filter((w) => have.has(w)).length >= wanted.length * 0.8;
+}
+
+function leansOnPicture(m: { text: string; images?: number }): boolean {
+  if (!m.images) return false;
+  return words(m.text).length <= PICTURE_WORDS && /\b(this|these|those|here)\b|\bthat\W*$/i.test(m.text);
+}
+
+function saysInHand(text: string): boolean {
+  return /\b(another|other|separate|different)\b[^.\n]{0,20}\bthreads?\b[^.\n]{0,40}\b(owns?|owning|fix(es|ing)?|handling|on it)\b|\bthreads?\b[^.\n]{0,40}\b(already|which) (owns?|fix(es|ing)?|has)\b|\balready (being )?(fixing|fixed|owns?|in hand)\b/i.test(text);
+}
+
+function attached(images?: number): string {
+  return images ? ` (with ${images === 1 ? 'an image' : `${images} images`} you can't see)` : '';
 }
 
 const SYMBOL_SYSTEM = `You pick an icon for a project in Threadbear, an app for running AI coding agents. Given the project and a list of SF Symbol names, reply with the one name from the list that best shows what the project is about, and nothing else.`;

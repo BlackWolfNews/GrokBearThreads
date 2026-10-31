@@ -2181,18 +2181,30 @@ changed by the librarian.
 a problem with his tools or with how agents work ("is this a bug in
 Threadbear?", "I couldn't see the tab you opened"), and the thread doesn't
 say a fix was started, a look's answer gives `fix` (a title, the tool's
-repo and what went wrong). The librarian starts a thread there with
-`origin: "runner"` and that title, whose first message links back to the
-thread and asks the agent to find the cause and fix it, landing it when
-it's reversible and clear, or to say in a line that it's already fixed or
-not real. The thread Mike said it in gets a `system.note` ("The librarian
-started a thread to fix that: ..."), and the look's entry says so. Never
-from a `first-message` look, never from a fix thread itself, at most one a
-day per thread and 5 a day in all; each look lists the fix threads of the
-last 7 days, so the same problem isn't opened twice. A repo that isn't
-there falls back to the thread's own folder. Kept in `librarian.json`
-(`fixes`). Added 30 Oct 2026, after Mike had to ask for two such threads
-in one thread about his flights.
+repo, what went wrong and `said`, his words about it). The librarian starts
+a thread there with `origin: "runner"` and that title, whose first message
+links back to the thread and asks the agent to find the cause and fix it,
+landing it when it's reversible and clear. If it's already fixed, being
+fixed elsewhere or not real, the agent says so in a line and passes
+`archive: true` to `end_turn`, so a thread that changed nothing doesn't
+stay in his inbox. The thread Mike said it in gets a `system.note` ("The
+librarian started a thread to fix that: ..."), and the look's entry says so.
+
+Never from a `first-message` look or from a fix thread itself, at most one
+a day per thread and 5 a day in all; each look lists the fix threads of the
+last 7 days and the titles of other threads active in the last 48 hours
+(never a private folder's), so the same problem isn't opened twice. A look
+gets a message's words but not its images, so each message with images is
+marked as having some. Whatever the model says, the runner turns a fix down
+(`whyNoFix`, logged as "librarian skipped a fix") when `said` isn't in one
+of his messages after the first (the first is the thread's task), when that
+message is short, has an image and leans on "this" or "those", when the
+brief or the agent's later replies say another thread has it, or when the
+thread edited that repo since the last look. A repo that isn't there falls
+back to the thread's own folder. Kept in `librarian.json` (`fixes`). Added
+30 Oct 2026, after Mike had to ask for two such threads in one thread about
+his flights; tightened 31 Oct, after two of the first three had nothing to
+fix.
 
 **Links.** A project keeps up to 8 links: the places Mike keeps going
 back to for it (its live site, admin page, dashboard, store listing), not

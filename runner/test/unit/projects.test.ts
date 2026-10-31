@@ -7,7 +7,7 @@ import { checkSummary } from '../helpers/protocol-check.ts';
 import { Projects, drainProjectMethods, projectMethods, BRIEF_MAX, NOTES_LONG, type ProjectHost } from '../../src/projects.ts';
 import { projectRouter, type PrimaryLink } from '../../src/handover.ts';
 import type { PocketCardInput, PocketCardSummary } from '../../src/sync.ts';
-import { Librarian, type LibrarianPocket, librarianMethods, saysNoFit, mainCheckout, SETTLE_MS, CATCH_UP_MS, CATCH_UP_MIN_CHARS, FIRST_MESSAGE_MS, SWEEP_MS, FIXES_PER_DAY } from '../../src/librarian.ts';
+import { Librarian, type LibrarianPocket, librarianMethods, saysNoFit, mainCheckout, whyNoFix, SETTLE_MS, CATCH_UP_MS, CATCH_UP_MIN_CHARS, FIRST_MESSAGE_MS, SWEEP_MS, FIXES_PER_DAY } from '../../src/librarian.ts';
 import { buildThreadbearTools } from '../../src/threadbear-mcp.ts';
 import { FakeClock } from '../../src/clock.ts';
 import { nullLogger, type Logger } from '../../src/log.ts';
@@ -16,7 +16,7 @@ import { commandFolders } from '../../src/tools.ts';
 import type { GenerateParams, ModelResult } from '../../src/models/index.ts';
 
 // A harness whose runner has projects, with a fake home holding repos.
-function setup(opts: { pocket?: () => LibrarianPocket | undefined; models?: (p: GenerateParams) => Promise<ModelResult<string>> | ModelResult<string>; log?: Logger } = {}) {
+function setup(opts: { pocket?: () => LibrarianPocket | undefined; models?: (p: GenerateParams) => Promise<ModelResult<string>> | ModelResult<string>; log?: Logger; privateFolder?: (cwd: string) => boolean } = {}) {
   const root = tmpDir();
   const repo = (rel: string, files: Record<string, string> = {}) => {
     const dir = path.join(root, rel);
@@ -38,6 +38,7 @@ function setup(opts: { pocket?: () => LibrarianPocket | undefined; models?: (p: 
           asked.push(p);
           return opts.models!(p);
         },
+        isPrivateFolder: opts.privateFolder,
       }
     : undefined;
   const h = makeHarness(home, {}, { projects, panelsRoot: root, actionShell: ['/bin/sh', '-c'], actionTimeoutMs: 5000 });
@@ -1026,7 +1027,8 @@ test('the librarian wakes a thread hibernating on a topic when Mike talks about 
 // Mike pointed out a Threadbear bug in a thread about his flights and had
 // to ask for a thread to fix it (30 Oct 2026): the librarian starts one.
 test('the librarian starts a thread to fix a tooling problem Mike ran into, once', async () => {
-  const fix = { title: 'Show replies written after end_turn', folder: '~/dev/threadbear', problem: 'The call details the agent wrote after end_turn never showed.' };
+  const COMPLAINT = 'Why did the reply vanish, is this a bug in Threadbear?';
+  const fix = { title: 'Show replies written after end_turn', folder: '~/dev/threadbear', problem: 'The call details the agent wrote after end_turn never showed.', said: COMPLAINT };
   const prompts: string[] = [];
   const s = setup({
     models: (p) => {
@@ -1036,14 +1038,25 @@ test('the librarian starts a thread to fix a tooling problem Mike ran into, once
   });
   const { h, root, misc, repo, create, finish, librarian } = s;
   const tb = repo('dev/threadbear');
+  // Its first turn, then a look after Mike's complaint in a later message.
+  const complain = async (id: string) => {
+    await finish(id);
+    h.clock.advance(SETTLE_MS);
+    await tick(6);
+    h.runner.send(id, COMPLAINT);
+    await tick();
+    await finish(id);
+    h.clock.advance(SETTLE_MS);
+    librarian.run(id);
+    h.clock.advance(SETTLE_MS);
+    await tick(6);
+  };
   const flights = create('Check the flights are linked').thread.id;
   h.clock.advance(FIRST_MESSAGE_MS);
   await tick(6);
   // The first message alone is the thread's task, never a side problem.
   assert.equal(h.runner.threadRecords().length, 1);
-  await finish(flights);
-  h.clock.advance(SETTLE_MS);
-  await tick(6);
+  await complain(flights);
   const fixer = h.runner.threadRecords().find((t) => t.id !== flights)!;
   assert.ok(fixer, 'a fix thread was started');
   assert.equal(fixer.cwd, tb);
@@ -1052,6 +1065,9 @@ test('the librarian starts a thread to fix a tooling problem Mike ran into, once
   assert.equal(first.origin, 'runner');
   assert.match(first.text, new RegExp(`^The librarian started this thread\\. In \\[Check the flights are linked\\]\\(thread:${flights}\\)`));
   assert.match(first.text, /never showed\./);
+  assert.match(first.text, /The user's words: "Why did the reply vanish/);
+  // One that finds nothing goes quietly (31 Oct 2026).
+  assert.match(first.text, /call end_turn with needs "nothing" and archive true/);
   assert.ok(librarian.status().recent.some((e) => e.threadId === flights && e.text === `Started ${fix.title} to fix the tooling`));
   assert.ok(h.events(flights).some((e) => e.type === 'system.note' && e.text === `The librarian started a thread to fix that: ${fix.title}.`));
   // Later looks see it, and neither the same thread nor the fix thread
@@ -1066,20 +1082,126 @@ test('the librarian starts a thread to fix a tooling problem Mike ran into, once
   // A folder that isn't there falls back to the thread's own.
   fix.folder = '~/dev/nothere';
   const other = create('Order timber').thread.id;
-  await finish(other);
-  h.clock.advance(SETTLE_MS);
-  await tick(6);
+  await complain(other);
   assert.equal(h.runner.threadRecords().find((t) => t.id !== flights && t.id !== fixer.id && t.id !== other)?.cwd, misc);
   // At most FIXES_PER_DAY a day.
-  for (let i = 0; i < FIXES_PER_DAY; i++) {
-    const t = create(`Chore ${i}`).thread.id;
-    await finish(t);
-    h.clock.advance(SETTLE_MS);
-    await tick(6);
-  }
+  for (let i = 0; i < FIXES_PER_DAY; i++) await complain(create(`Chore ${i}`).thread.id);
   const fixers = h.runner.threadRecords().filter((t) => t.title === fix.title);
   assert.equal(fixers.length, FIXES_PER_DAY);
   assert.ok(root);
+});
+
+// The three fix threads the librarian had started by 31 Oct 2026, in the
+// words it was given: two were noise in Mike's inbox, one was right.
+test('whyNoFix turns down the two bad fix threads and lets the good one through', () => {
+  // thread:39d1229e -> thread:d9973b5c. The complaint was the thread's task,
+  // and the brief itself says another thread has it.
+  const menus = "It's doing it again right now. I can't click the Hibernate button or the change access control button.";
+  assert.match(
+    whyNoFix(menus, 'Hibernate and change access menus open via NSMenu.popUp but macOS marks them hidden, so clicks appear dead. Another thread already owns the fix.', {
+      first: menus,
+      firstImages: 1,
+      recent: [
+        { who: 'user', text: menus, images: 1 },
+        { who: 'assistant', text: 'Findings sent to [the other thread](thread:0b69c142), which owns the fix' },
+      ],
+    })!,
+    /first message/,
+  );
+  // thread:97095398 -> thread:ca76ed3b. "This" was a screenshot of the phone's
+  // "This thread's gone", and the look took it for the thread's folder.
+  const gone = 'After creating a new thread it often goes to this?';
+  assert.match(
+    whyNoFix(gone, 'Mike asked why a new thread often opens in ~/dev/me/misc, a catch-all folder, after he creates it.', {
+      first: gone,
+      firstImages: 1,
+      recent: [
+        { who: 'user', text: gone, images: 1 },
+        { who: 'assistant', text: "It was a race on the Mac side, not the thread getting deleted. It's fixed and pushed to main." },
+      ],
+    })!,
+    /first message/,
+  );
+  // thread:fc08b53e -> thread:5d9387e4, the good one: a later question, in a
+  // thread about something else, about a problem nobody was fixing.
+  const raw = "I don't know what you mean by show highlight asks without raw markdown links. What does that mean?";
+  assert.equal(
+    whyNoFix(raw, "The Highlights Needs you list shows a link's raw markdown, like [the review](review:review_account), instead of the words 'the review'.", {
+      first: 'In the need you section can the hotlink buttons allow opening compare panels?',
+      firstImages: 1,
+      recent: [
+        { who: 'assistant', text: 'A Needs-you button can now open a compare window, and the change is on main.' },
+        { who: 'user', text: raw },
+        { who: 'assistant', text: "It's about Highlights' Needs you list showing a link's raw code. It's been that way for any link; a small fix." },
+      ],
+    }),
+    undefined,
+  );
+
+  // The same bad reasons from a later message, as the first-message rule
+  // doesn't catch those.
+  const later = (text: string, images?: number, after?: string) => ({
+    first: 'Book the flights',
+    recent: [{ who: 'user' as const, text: 'Book the flights' }, { who: 'user' as const, text, ...(images ? { images } : {}) }, ...(after ? [{ who: 'assistant' as const, text: after }] : [])],
+  });
+  assert.match(whyNoFix(gone, 'Why it goes there.', later(gone, 1))!, /picture/);
+  assert.match(whyNoFix('the menus are broken again', 'Menus broke. Another thread already owns the fix.', later('the menus are broken again'))!, /brief/);
+  assert.match(whyNoFix('the menus are broken again', 'Menus broke.', later('the menus are broken again', 0, 'Findings sent to [the other thread](thread:0b69c142), which owns the fix'))!, /another thread has it/);
+  assert.match(whyNoFix('the menus are broken again', 'Menus broke.', later('the tab was fine, thanks'))!, /isn't in the user's messages/);
+  assert.match(whyNoFix('', 'Menus broke.', later('the menus are broken again'))!, /didn't quote/);
+
+  // Real complaints still get through: a picture with words that stand up by
+  // themselves, "this" with no picture, and a tidied quote.
+  const clear = 'Threadbear lost my draft when the app restarted overnight and I had typed a lot in it, which has now happened to me three or four times';
+  assert.equal(whyNoFix(clear, 'Drafts lost on restart.', later(clear, 1)), undefined);
+  const asks = 'Is this a bug in Threadbear?';
+  assert.equal(whyNoFix(asks, 'The transcript dropped a reply.', later(asks)), undefined);
+  assert.equal(whyNoFix('I could not see the tab you opened', 'BrowserBear opened a tab out of sight.', later("I couldn't see the tab you opened, could not see it at all")), undefined);
+  assert.equal(whyNoFix('the tab you opened', 'x', later('I could not see the tab you opened')), undefined);
+});
+
+test('a look sees what the thread had attached, other threads and phone messages, and no fix from a thread editing that repo', async () => {
+  const fix = { title: 'Fix the sidebar', folder: '~/dev/threadbear', problem: 'The sidebar went blank.', said: 'the sidebar went blank again' };
+  const prompts: string[] = [];
+  const s = setup({
+    models: (p) => {
+      prompts.push(p.prompt);
+      return reply({ projects: [], new: null, state: {}, fix, why: 'x' });
+    },
+    privateFolder: (cwd) => cwd.endsWith('secret'),
+  });
+  const { h, root, repo, misc, create, finish, librarian } = s;
+  const tb = repo('dev/threadbear');
+  const secret = path.join(root, 'dev/secret');
+  fs.mkdirSync(secret, { recursive: true });
+  create('Fix stuck menus behind Hibernate');
+  create('My private plans', secret);
+  const look = async (id: string) => {
+    h.clock.advance(SETTLE_MS);
+    librarian.run(id);
+    h.clock.advance(SETTLE_MS);
+    await tick(6);
+  };
+  const t = h.runner.create({ text: 'Tidy the app', cwd: misc, accountId: 'claude-3', images: [] }).thread.id;
+  await finish(t);
+  // From the phone, with a picture.
+  const picture = path.join(root, 'shot.png');
+  // A 1x1 PNG, as the runner reads what it's sent.
+  fs.writeFileSync(picture, Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==', 'base64'));
+  h.runner.send(t, 'the sidebar went blank again', [{ path: picture, mediaType: 'image/png' } as never], { origin: 'phone' });
+  await tick();
+  // It edits the repo the fix would go to, so it's on it already.
+  await finish(t, [path.join(tb, 'file.ts')]);
+  h.clock.advance(SETTLE_MS);
+  await tick(6);
+  const seen = prompts.filter((x) => x.includes('Thread "Tidy the app"')).at(-1)!;
+  assert.match(seen, /User \(with an image you can't see\): the sidebar went blank again/);
+  assert.match(seen, /Other threads the user has going:\n(- ".*"\n)*- "Fix stuck menus behind Hibernate"/);
+  assert.doesNotMatch(seen, /My private plans/);
+  assert.equal(h.runner.threadRecords().filter((x) => x.title === fix.title).length, 0, 'the thread is editing that repo');
+  // Once it has stopped editing there, the complaint still gets a thread.
+  await look(t);
+  assert.equal(h.runner.threadRecords().filter((x) => x.title === fix.title).length, 1);
 });
 
 // A note that won't fit says how to make room instead of only refusing

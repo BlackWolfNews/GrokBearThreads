@@ -326,7 +326,7 @@ const END_TURN_ASKS =
   // Mike, 30 Oct: a follow-up in the closing prose, over a card that only
   // offered Archive, got buried and forgotten. Not make-work, though.
   'next is for needs "nothing": up to 3 follow-ups in this thread worth doing, so they don\'t get lost: a piece still missing, a check that\'s due, something you or the user raised and didn\'t get to. Only ones that really came up; never invent work, and most turns have none, so leave it out then. Write each as the message the user would send to start it, about 8 words ("Show pictures and files from Bruce threads"). They are rows on the done card under "Or carry on": the user ticks one or more and they come to you as they are, as a list when there are several, with anything they add, so each must make sense on its own; don\'t also list them in your message. ' +
-  'archive: true archives this thread once the turn is over, with needs "nothing" only. Use it only when the user asks for this thread to be archived; otherwise leave it out, as a thread that vanishes from their inbox when they hadn\'t finished with it is confusing. ' +
+  'archive: true archives this thread once the turn is over, with needs "nothing" only. Use it only when the user asks for this thread to be archived, or the message that started the thread says to; otherwise leave it out, as a thread that vanishes from their inbox when they hadn\'t finished with it is confusing. ' +
   'Sub-agents never call this; only the thread\'s own agent does.';
 
 export const END_TURN_DESCRIPTION =

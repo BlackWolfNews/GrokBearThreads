@@ -1156,13 +1156,16 @@ export class Runner {
 
   // The first user message and the last few messages of a thread, as plain
   // text, for the librarian.
-  threadGist(threadId: string, opts: { recent?: number; chars?: number } = {}): { first?: string; recent: { who: 'user' | 'assistant'; text: string }[] } {
+  // `images` counts what a message had attached: the librarian only gets the
+  // words, so it has to know when they're pointing at a picture.
+  threadGist(threadId: string, opts: { recent?: number; chars?: number } = {}): { first?: string; firstImages?: number; recent: { who: 'user' | 'assistant'; text: string; images?: number }[] } {
     const st = this.mustGet(threadId);
     const chars = opts.chars ?? 600;
     const cut = (t: string) => (t.length > chars ? t.slice(0, chars) + '…' : t);
-    const first = this.opening(st.rec.id, st.rec).text;
+    const opening = this.opening(st.rec.id, st.rec);
+    const first = opening.text;
     const log = this.store.log(st.rec.id);
-    const recent: { who: 'user' | 'assistant'; text: string }[] = [];
+    const recent: { who: 'user' | 'assistant'; text: string; images?: number }[] = [];
     const want = opts.recent ?? 6;
     // Back from the end a page at a time until there are enough.
     for (let to = log.lastSeq; to >= 1 && recent.length < want; to -= 200) {
@@ -1170,11 +1173,12 @@ export class Runner {
       for (const e of page.reverse()) {
         if (recent.length >= want) break;
         if (cutOut(st.rec, e.seq)) continue;
-        if (e.type === 'user.message' && e.origin === undefined) recent.unshift({ who: 'user', text: cut(e.text) });
+        // From the phone is still Mike talking.
+        if (e.type === 'user.message' && (e.origin === undefined || e.origin === 'phone')) recent.unshift({ who: 'user', text: cut(e.text), ...(e.images?.length ? { images: e.images.length } : {}) });
         else if (e.type === 'assistant.text' && e.text.trim()) recent.unshift({ who: 'assistant', text: cut(e.text) });
       }
     }
-    return { first: first ? cut(first) : undefined, recent };
+    return { first: first ? cut(first) : undefined, ...(opening.images ? { firstImages: opening.images } : {}), recent };
   }
 
   // The seq ranges edits cut out of the thread (docs/protocol.md, "Editing
@@ -1194,7 +1198,7 @@ export class Runner {
     for (let from = seq + 1; from <= log.lastSeq; from += 500) {
       for (const e of log.read(from, Math.min(log.lastSeq, from + 499))) {
         if (cutOut(st.rec, e.seq)) continue;
-        const text = e.type === 'user.message' && e.origin === undefined ? e.text : e.type === 'assistant.text' ? e.text : '';
+        const text = e.type === 'user.message' && (e.origin === undefined || e.origin === 'phone') ? e.text : e.type === 'assistant.text' ? e.text : '';
         chars += text.trim().length;
         if (!links && /https?:\/\//.test(text)) links = true;
       }
@@ -1911,17 +1915,20 @@ export class Runner {
   // The first user.message's text and the first assistant.text after it,
   // read a page at a time from the start: both are nearly always within
   // the first few events, and a long thread's log is large.
-  private opening(id: string, rec?: Pick<ThreadRecord, 'rewinds'>): { text?: string; reply?: string } {
+  private opening(id: string, rec?: Pick<ThreadRecord, 'rewinds'>): { text?: string; images?: number; reply?: string } {
     const log = this.store.log(id);
     let text: string | undefined;
+    let images = 0;
     for (let from = 1; from <= Math.min(log.lastSeq, 500); from += 50) {
       for (const e of log.read(from, from + 49)) {
         if (rec && cutOut(rec, e.seq)) continue;
-        if (text === undefined && e.type === 'user.message') text = e.text;
-        else if (text !== undefined && e.type === 'assistant.text' && e.text.trim()) return { text, reply: e.text };
+        if (text === undefined && e.type === 'user.message') {
+          text = e.text;
+          images = e.images?.length ?? 0;
+        } else if (text !== undefined && e.type === 'assistant.text' && e.text.trim()) return { text, images, reply: e.text };
       }
     }
-    return { text };
+    return { text, images };
   }
 
   // origin "runner" marks a message the runner sends by itself (restart.ts),

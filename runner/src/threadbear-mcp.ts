@@ -664,7 +664,7 @@ export function buildThreadbearTools(
         archive: z
           .boolean()
           .optional()
-          .describe('true to archive this thread once the turn is over. Only when the user has asked for this thread to be archived, and only with needs "nothing".'),
+          .describe('true to archive this thread once the turn is over. Only when the user has asked for this thread to be archived or the message that started it says to, and only with needs "nothing".'),
       },
       handle(async (args) => {
         const { asks, archive } = args;

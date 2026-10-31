@@ -205,6 +205,11 @@ export class Models {
     });
   }
 
+  // Whether nothing from this folder may go to a model.
+  isPrivateFolder(cwd: string): boolean {
+    return isPrivate(cwd, this.opts.settings().privateFolders);
+  }
+
   generate(p: GenerateParams): Promise<ModelResult<string>> {
     return this.run(p.strong ? 'decide' : 'generate', p, { system: p.system, user: p.prompt, maxTokens: p.maxTokens ?? 500, read: (t) => t.trim() || undefined });
   }
