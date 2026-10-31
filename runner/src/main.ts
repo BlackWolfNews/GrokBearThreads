@@ -245,7 +245,7 @@ async function main(): Promise<void> {
   // Projects need the threads loaded (their counts, and the thread side of
   // membership); the librarian needs both.
   projects.start(runner);
-  const librarian = new Librarian({ host: runner, projects, models, clock: realClock, log, home: cfg.home });
+  const librarian = new Librarian({ host: runner, projects, models, clock: realClock, log, home: cfg.home, pocket: pocketControl });
   librarian.start();
   // Background jobs that look stuck get their thread a message.
   const stuckJobs = new StuckJobs({ host: runner, clock: realClock, log, home: cfg.home });

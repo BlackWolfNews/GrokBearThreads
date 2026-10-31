@@ -579,7 +579,7 @@ export function toAccountDoc(a: Account) {
 type ListName = 'projects' | 'schedules' | 'accounts';
 
 export type PocketCardInput = { title: string; text: string; place?: string; threadId?: string; source?: string };
-export type PocketCardSummary = { title: string; text: string; place?: string; source?: string; updatedAt: string };
+export type PocketCardSummary = { title: string; text: string; place?: string; threadId?: string; source?: string; updatedAt: string };
 
 export class ConvexSync {
   private deps: SyncDeps;

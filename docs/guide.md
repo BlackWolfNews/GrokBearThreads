@@ -486,7 +486,12 @@ copy it, open its thread or remove it. A card can name a place: while the app's
 open the phone checks where you are, marks that card "here" and brings it to
 the front (it asks first, and your location stays on the phone apart from the
 map search it asks Apple). Agents replace or remove cards too, and the pencil
-starts a thread to add one.
+starts a thread to add one. The librarian looks after them as well: it updates
+a thread's card when the facts change, takes it out once the thread says it's
+done, and files one when you say you're going somewhere and the agent didn't.
+It only touches cards from the thread it's looking at, adds at most one per
+thread, and won't put an address or code on a card unless the thread said it.
+The Librarian view lists what it did.
 
 Your threads also have a website, on your own Convex deployment. To sign a
 browser in, Settings > Phone & browser > Open signed in opens it in your

@@ -27,6 +27,15 @@ import { atomicWriteFileSync, readJsonSync } from './fsutil.ts';
 import { findUp, isInside } from './patches.ts';
 import { SYMBOLS, fileHash, findIcon, storeIcon } from './project-icons.ts';
 import { userLine } from './user-name.ts';
+import type { PocketCardInput, PocketCardSummary } from './sync.ts';
+
+// The phone's Pocket, in the Convex backend (sync.ts). Asked for each look,
+// as sync can be off.
+export type LibrarianPocket = {
+  pocketCards(): Promise<PocketCardSummary[]>;
+  savePocketCard(card: PocketCardInput): Promise<'added' | 'replaced'>;
+  removePocketCard(title: string): Promise<boolean>;
+};
 
 // What the librarian needs from the runner.
 export type LibrarianHost = {
@@ -95,6 +104,15 @@ export const FIXES_PER_DAY = 5;
 const FIXES_SHOWN_MS = 7 * 24 * 60 * 60_000;
 const FIXES_KEPT = 30;
 
+// New Pocket cards: at most this many a day, so a look that gets it wrong
+// can't fill the deck. A thread only ever gets one from the librarian, so
+// one Mike took out doesn't come back on the next look.
+export const POCKET_ADDS_PER_DAY = 5;
+const POCKET_ADDS_KEPT_MS = 30 * 24 * 60 * 60_000;
+// A short message saying they're going out would otherwise be a quiet
+// catch-up, with no look to file a card from.
+const HEADING_OUT = /\b(heading|going|off|popping|driving|walking) (to|out|over|down|into)\b|\bon my way\b|\bI'?m at\b|\bout and about\b/i;
+
 // Which reason wins when a thread is queued twice.
 const RANK: Record<LibrarianReason, number> = { asked: 0, moved: 1, 'new-folder': 2, 'first-turn': 3, 'first-message': 4, 'catch-up': 5, notes: 6 };
 
@@ -105,8 +123,12 @@ type Look = { at: string; seq: number; early?: boolean };
 // problem in.
 type Fix = { at: string; fromThreadId: string; threadId: string; title: string };
 
+// A Pocket card the librarian added.
+type PocketAdded = { at: string; threadId: string };
+
 type Saved = {
   fixes?: Fix[];
+  pocketAdded?: PocketAdded[];
   paused?: boolean;
   queue?: LibrarianJob[];
   recent?: LibrarianEntry[];
@@ -136,6 +158,7 @@ type Answer = {
   retitle?: unknown;
   wake?: unknown;
   fix?: unknown;
+  pocket?: unknown;
   why?: unknown;
 };
 
@@ -152,6 +175,8 @@ export class Librarian {
   private recent: LibrarianEntry[] = [];
   private looks: Record<string, Look> = {};
   private fixes: Fix[] = [];
+  private pocket?: () => LibrarianPocket | undefined;
+  private pocketAdded: PocketAdded[] = [];
   private day: Day = { date: '', looks: 0 };
   // Folders each thread has edited in since its last look, by repo.
   private edited = new Map<string, Set<string>>();
@@ -182,8 +207,9 @@ export class Librarian {
   // notes aren't sent again on every change to the project.
   private notesTried = new Map<string, string>();
 
-  constructor(deps: { host: LibrarianHost; projects: Projects; models?: Pick<Models, 'generate'> & { unavailable?(opts?: { poolOnly?: boolean }): string | undefined }; clock: Clock; log: Logger; home: string; userHome?: string }) {
+  constructor(deps: { host: LibrarianHost; projects: Projects; models?: Pick<Models, 'generate'> & { unavailable?(opts?: { poolOnly?: boolean }): string | undefined }; clock: Clock; log: Logger; home: string; userHome?: string; pocket?: () => LibrarianPocket | undefined }) {
     this.host = deps.host;
+    this.pocket = deps.pocket;
     this.projects = deps.projects;
     this.models = deps.models;
     this.clock = deps.clock;
@@ -200,6 +226,7 @@ export class Librarian {
     this.recent = (saved?.recent ?? []).slice(0, RECENT_KEPT);
     this.looks = saved?.looks ?? {};
     this.fixes = (saved?.fixes ?? []).slice(0, FIXES_KEPT);
+    this.pocketAdded = saved?.pocketAdded ?? [];
     if (saved?.day) this.day = saved.day;
     if (!this.models) this.off = 'Model calls are off in this runner.';
     this.unsubs.push(this.host.onThreadActivity((a) => this.onActivity(a)));
@@ -445,7 +472,10 @@ export class Librarian {
       this.off = 'Model calls are off in this runner.';
       return;
     }
-    if (this.quiet(rec, job)) {
+    // Not from the first message alone: its agent hasn't had the chance to
+    // file a card yet.
+    const cards = job.reason === 'first-message' ? undefined : await this.pocketCards();
+    if (this.quiet(rec, job, cards)) {
       // Its seq stays, so what these turns said counts towards the next.
       this.looks[rec.id] = { ...this.looks[rec.id], at: new Date(this.clock.now()).toISOString() };
       this.rollDay();
@@ -453,7 +483,7 @@ export class Librarian {
       this.log.info('librarian skipped a quiet catch-up', { threadId: rec.id });
       return;
     }
-    const prompt = this.prompt(rec, job);
+    const prompt = this.prompt(rec, job, cards);
     // rec is the live record: the title as the model saw it, so a rename
     // during the call isn't undone.
     const title = rec.title;
@@ -492,21 +522,63 @@ export class Librarian {
       return;
     }
     this.apply(job, rec, answer, prompt, title);
+    if (cards) await this.applyPocket(job, rec, answer, cards, prompt);
     this.markLooked(rec, job);
   }
 
   // A catch-up whose turns edited nothing, gave no link and said little
   // since the last look: not worth a model call (CATCH_UP_MIN_CHARS).
-  private quiet(rec: ThreadRecord, job: LibrarianJob): boolean {
+  private quiet(rec: ThreadRecord, job: LibrarianJob, cards?: PocketCardSummary[]): boolean {
     const look = this.looks[rec.id];
     if (job.reason !== 'catch-up' || !look || look.early || !this.host.threadSince) return false;
+    // "Posted it" is short, and it's just what takes a card out.
+    if (cards?.some((c) => c.threadId === rec.id)) return false;
+    if (cards && this.host.threadGist(rec.id).recent.some((m) => m.who === 'user' && HEADING_OUT.test(m.text))) return false;
     if (this.edited.get(rec.id)?.size) return false;
     if (this.newWorkedIn(rec).length) return false;
     const since = this.host.threadSince(rec.id, look.seq);
     return !since.links && since.chars < CATCH_UP_MIN_CHARS;
   }
 
-  private prompt(rec: ThreadRecord, job: LibrarianJob): string {
+  // The deck, or nothing when it can't be read (no backend, or none yet):
+  // the look then goes ahead and leaves the Pocket alone.
+  private async pocketCards(): Promise<PocketCardSummary[] | undefined> {
+    try {
+      return await this.pocket?.()?.pocketCards();
+    } catch (e) {
+      this.log.info('librarian could not read the pocket', { error: String(e) });
+      return undefined;
+    }
+  }
+
+  private async applyPocket(job: LibrarianJob, rec: ThreadRecord, a: Answer, cards: PocketCardSummary[], seen: string): Promise<void> {
+    const pocket = this.pocket?.();
+    if (!pocket || this.stopped) return;
+    const now = this.clock.now();
+    this.pocketAdded = this.pocketAdded.filter((x) => now - Date.parse(x.at) < POCKET_ADDS_KEPT_MS);
+    const { save, remove } = pocketChanges(a.pocket, {
+      threadId: rec.id,
+      cards,
+      seen,
+      addsToday: this.pocketAdded.filter((x) => now - Date.parse(x.at) < 24 * 60 * 60_000).length,
+      addedBefore: this.pocketAdded.some((x) => x.threadId === rec.id),
+    });
+    const source = (rec.projects ?? []).map((m) => this.projects.list().find((p) => p.id === m.id)?.title).find(Boolean) ?? path.basename(rec.cwd);
+    const said: string[] = [];
+    try {
+      for (const title of remove) if (await pocket.removePocketCard(title)) said.push(`Took "${title}" out of the Pocket`);
+      for (const c of save) {
+        const how = await pocket.savePocketCard({ ...c, threadId: rec.id, source });
+        if (how === 'added') this.pocketAdded.push({ at: new Date(now).toISOString(), threadId: rec.id });
+        said.push(`${how === 'added' ? 'Filed' : 'Updated'} "${c.title}" in the Pocket`);
+      }
+    } catch (e) {
+      this.log.warn('librarian could not change the pocket', { error: String(e) });
+    }
+    if (said.length) this.note(job, 'updated', said.join('. '));
+  }
+
+  private prompt(rec: ThreadRecord, job: LibrarianJob, cards?: PocketCardSummary[]): string {
     const list = this.projects.list();
     const lines: string[] = [];
     lines.push('Projects:');
@@ -535,6 +607,16 @@ export class Librarian {
     if (lately.length) {
       lines.push('', 'Fix threads opened lately:');
       for (const f of lately) lines.push(`- "${f.title}"`);
+    }
+    if (cards) {
+      const own = cards.filter((c) => c.threadId === rec.id);
+      lines.push('', 'Pocket cards from this thread:');
+      if (!own.length) lines.push('(none)');
+      for (const c of own) lines.push(`- "${c.title}"${c.place ? ` (place: ${c.place})` : ''}: ${c.text.replace(/\n/g, ' / ')}`);
+      const others = cards.filter((c) => c.threadId !== rec.id).map((c) => `"${c.title}"`);
+      if (others.length) lines.push(`Other Pocket cards, not yours to touch: ${others.join(', ')}`);
+    } else {
+      lines.push('', 'The Pocket is not available for this look: pocket null.');
     }
     const gist = this.host.threadGist(rec.id);
     if (job.reason === 'first-message') lines.push("It has only just started: file it from what it's about, and don't change any project's state yet.");
@@ -1043,7 +1125,7 @@ export class Librarian {
       }
       atomicWriteFileSync(
         this.file,
-        JSON.stringify({ paused: this.paused, queue, recent: this.recent, looks: this.looks, day: this.day, fixes: this.fixes } satisfies Saved),
+        JSON.stringify({ paused: this.paused, queue, recent: this.recent, looks: this.looks, day: this.day, fixes: this.fixes, pocketAdded: this.pocketAdded } satisfies Saved),
       );
     } catch (e) {
       this.log.warn('could not save librarian.json', { error: String(e) });
@@ -1151,6 +1233,50 @@ function offReason(reason: ModelFailure, message: string): string {
   return message;
 }
 
+// What of a look's answer can touch the Pocket. A look can only change this
+// thread's own cards, which is why they're matched by thread, not by what the
+// model says. A card can't be guessed into being either: anything on it with a
+// digit or a run of capitals (an address, a booking code) must be in what the
+// look was shown, as a small model will happily make those up.
+export function pocketChanges(
+  raw: unknown,
+  ctx: { threadId: string; cards: PocketCardSummary[]; seen: string; addsToday: number; addedBefore: boolean },
+): { save: { title: string; text: string; place?: string }[]; remove: string[] } {
+  const out = { save: [] as { title: string; text: string; place?: string }[], remove: [] as string[] };
+  if (!raw || typeof raw !== 'object') return out;
+  const key = (t: string) => t.trim().toLowerCase();
+  const own = new Map(ctx.cards.filter((c) => c.threadId === ctx.threadId).map((c) => [key(c.title), c]));
+  const taken = new Set(ctx.cards.map((c) => key(c.title)));
+  const seen = ctx.seen.toLowerCase();
+  const grounded = (text: string) =>
+    text
+      .split(/\s+/)
+      .map((w) => w.replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, ''))
+      .filter((w) => /\d|\p{Lu}{4}/u.test(w))
+      .every((w) => seen.includes(w.toLowerCase()));
+  const { save, remove } = raw as { save?: unknown; remove?: unknown };
+  let added = false;
+  for (const c of Array.isArray(save) ? save : []) {
+    const title = typeof c?.title === 'string' ? c.title.trim() : '';
+    const text = typeof c?.text === 'string' ? c.text.trim() : '';
+    const place = typeof c?.place === 'string' && c.place.trim() ? c.place.trim().slice(0, 100) : undefined;
+    if (!title || title.length > 60 || !text || text.length > 2000 || !grounded(text)) continue;
+    const mine = own.get(key(title));
+    if (mine) {
+      if (mine.text !== text || (place ?? mine.place) !== mine.place) out.save.push({ title, text, ...((place ?? mine.place) ? { place: place ?? mine.place } : {}) });
+    } else if (!taken.has(key(title)) && !own.size && !ctx.addedBefore && !added && ctx.addsToday < POCKET_ADDS_PER_DAY) {
+      added = true;
+      out.save.push({ title, text, ...(place ? { place } : {}) });
+    }
+  }
+  const saving = new Set(out.save.map((c) => key(c.title)));
+  for (const t of Array.isArray(remove) ? remove : []) {
+    const mine = typeof t === 'string' ? own.get(key(t)) : undefined;
+    if (mine && !saving.has(key(mine.title))) out.remove.push(mine.title);
+  }
+  return out;
+}
+
 export const SYSTEM = `You are the librarian in Threadbear, an app where the user runs AI coding agents in threads. ${userLine()}You keep their projects: groupings above folders that carry goals, state and notes from thread to thread. A project is a body of work they'll come back to (an app, a library, a video, a house job, an ongoing chore), never a single task. One project can span several repos, and a thread can be in several projects.
 
 Given the project list and one thread, decide which projects the thread belongs in, and say why in a few plain words the user will see beside each project. A thread belongs in a project when it's about that project: building, fixing, planning, ideas, research or questions for it. A thread whose folder is a project's repo almost always belongs in that project. Prefer existing projects. Make a new one when the thread is about a body of work that fits none of them (its own repo is a strong sign); a one-off question, a quick chore or a throwaway test belongs in none. Never put a thread back in one it says never to.
@@ -1170,6 +1296,7 @@ Reply with JSON only, no prose and no code fence:
  "retitle": {"<project id>": "the project's new name"} for a project it's in whose name has gone out of date (see below), else {},
  "wake": ["<ids of hibernating threads the user is talking about here>"], or [] (see below),
  "fix": null, or {"title": "the fix in 2 to 6 words", "folder": "~/path of the repo of the tool at fault", "problem": "what went wrong"} (see below),
+ "pocket": null, or {"save": [{"title": "short name", "text": "the card", "place": "optional"}], "remove": ["title"]} (see below),
  "why": "one short line"}
 
 A reason is under 12 words, about this thread, in the user's plain words: "Edits the Poddle repo", "Shortlists photos for the calendar entry", "Asks how the librarian picks projects". Leaving a project out of projects doesn't take the thread out of it; only leave does. Use leave when the thread clearly isn't about that project: the earlier guess was wrong, or the work has gone elsewhere for good. A thread that has only paused that work stays.
@@ -1185,6 +1312,8 @@ Keep projects' names too, unless one the thread is in has gone out of date: the 
 Some hibernating threads are waiting for the user to talk about something again ("woodworking"). Put one in wake when the user's own messages in this thread are about that: they're working on it, planning it or asking about it. A passing mention, or only the agent bringing it up, isn't enough. Most looks wake none.
 
 Give fix when the user, in their own messages here, points out a problem with their tools or with how agents work, apart from the task the thread is about: a bug in Threadbear or another of their own apps or tools, a tool that misbehaved, a skill or instruction that led the agent wrong ("is this a bug in Threadbear?", "I couldn't see the tab you opened"). The title says what to fix ("Show replies written after end_turn"). The folder is that tool's repo from the project list, or the thread's own folder when you can't tell. The problem says what happened and what the user said about it, with the names, for an agent who hasn't seen this thread. Not when the thread's task is that tool (it's fixing it already), not for problems with the task itself or with someone else's website or service, not when the messages say a thread to fix it was started or the agent fixed it there and then, and not when a fix thread opened lately covers it. Most looks give none.
+
+The Pocket is a deck of short cards on the user's phone, to read at a counter when they're out. Keep this thread's cards true: save one with the same title when a fact on it has changed, and remove one when the messages say it's done with (the parcel's posted, the trip's over). Add a card only when the user, in their own messages here, says they're going somewhere or will need something while out, the messages hold the facts they'd want there, and this thread has no card. A plan for someday isn't enough. If the messages say a card was filed and it isn't listed, the user took it out: leave it. Copy addresses, codes and numbers exactly from the messages and never guess one. The text is only the facts, a line each, with no explanation. The place is what you'd search a map for ("post office"), only if the card is for somewhere. Most looks change nothing: pocket null.
 
 The thread bullets are for the user glancing at the thread later: concrete, in their plain words, each under ten words, no full stops. The last one says who's waiting on whom ("Waiting on you to pick a design", "Fixing the last failing test").`;
 

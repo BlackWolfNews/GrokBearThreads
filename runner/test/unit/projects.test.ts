@@ -6,7 +6,8 @@ import { makeHarness, tick, tmpDir } from '../helpers/fakes.ts';
 import { checkSummary } from '../helpers/protocol-check.ts';
 import { Projects, drainProjectMethods, projectMethods, BRIEF_MAX, NOTES_LONG, type ProjectHost } from '../../src/projects.ts';
 import { projectRouter, type PrimaryLink } from '../../src/handover.ts';
-import { Librarian, librarianMethods, saysNoFit, mainCheckout, SETTLE_MS, CATCH_UP_MS, CATCH_UP_MIN_CHARS, FIRST_MESSAGE_MS, SWEEP_MS, FIXES_PER_DAY } from '../../src/librarian.ts';
+import type { PocketCardInput, PocketCardSummary } from '../../src/sync.ts';
+import { Librarian, type LibrarianPocket, librarianMethods, saysNoFit, mainCheckout, SETTLE_MS, CATCH_UP_MS, CATCH_UP_MIN_CHARS, FIRST_MESSAGE_MS, SWEEP_MS, FIXES_PER_DAY } from '../../src/librarian.ts';
 import { buildThreadbearTools } from '../../src/threadbear-mcp.ts';
 import { FakeClock } from '../../src/clock.ts';
 import { nullLogger, type Logger } from '../../src/log.ts';
@@ -15,7 +16,7 @@ import { commandFolders } from '../../src/tools.ts';
 import type { GenerateParams, ModelResult } from '../../src/models/index.ts';
 
 // A harness whose runner has projects, with a fake home holding repos.
-function setup(opts: { models?: (p: GenerateParams) => Promise<ModelResult<string>> | ModelResult<string>; log?: Logger } = {}) {
+function setup(opts: { pocket?: () => LibrarianPocket | undefined; models?: (p: GenerateParams) => Promise<ModelResult<string>> | ModelResult<string>; log?: Logger } = {}) {
   const root = tmpDir();
   const repo = (rel: string, files: Record<string, string> = {}) => {
     const dir = path.join(root, rel);
@@ -41,7 +42,7 @@ function setup(opts: { models?: (p: GenerateParams) => Promise<ModelResult<strin
     : undefined;
   const h = makeHarness(home, {}, { projects, panelsRoot: root, actionShell: ['/bin/sh', '-c'], actionTimeoutMs: 5000 });
   projects.start(h.runner);
-  const librarian = new Librarian({ host: h.runner, projects, models, clock: h.clock, log: opts.log ?? nullLogger, home, userHome: root });
+  const librarian = new Librarian({ host: h.runner, projects, models, clock: h.clock, log: opts.log ?? nullLogger, home, userHome: root, pocket: opts.pocket });
   librarian.start();
   const create = (text = 'Work on the app', cwd = misc) => h.runner.create({ text, cwd, accountId: 'claude-3' });
   // Ends the thread's running turn as the CLI would.
@@ -1144,4 +1145,92 @@ test('the librarian tidies long project notes and keeps the old ones', async () 
   during = () => projects.appendNote(long.id, 'Added mid-tidy.');
   await librarian.keepNotes();
   assert.match(projects.record(long.id)!.notes, /Added mid-tidy\.$/);
+});
+
+function fakePocket(cards: PocketCardSummary[] = []) {
+  const saved: PocketCardInput[] = [];
+  const removed: string[] = [];
+  const pocket: LibrarianPocket = {
+    pocketCards: async () => cards,
+    savePocketCard: async (c) => {
+      saved.push(c);
+      const had = cards.findIndex((x) => x.title.toLowerCase() === c.title.toLowerCase());
+      if (had >= 0) cards.splice(had, 1);
+      cards.push({ ...c, updatedAt: 'now' });
+      return had >= 0 ? 'replaced' : 'added';
+    },
+    removePocketCard: async (title) => {
+      removed.push(title);
+      const had = cards.findIndex((x) => x.title === title);
+      if (had >= 0) cards.splice(had, 1);
+      return had >= 0;
+    },
+  };
+  return { cards, saved, removed, pocket };
+}
+
+test("a look files a card when the thread says it's going out, and doesn't file it again once it's taken out", async () => {
+  const fake = fakePocket();
+  const s = setup({ pocket: () => fake.pocket, models: () => reply({ projects: [], why: 'Errand', pocket: { save: [{ title: 'Post office', text: 'Take the parcel', place: 'post office' }] } }) });
+  const { h, create, finish, librarian, asked } = s;
+  const { thread } = create("I'm heading to the post office with the parcel");
+  await finish(thread.id);
+  h.clock.advance(SETTLE_MS);
+  await tick(8);
+  assert.deepEqual(fake.saved.map((c) => [c.title, c.threadId, c.source]), [['Post office', thread.id, 'misc']]);
+  assert.match(librarian.status().recent[0].text, /Filed "Post office" in the Pocket/);
+  assert.match(asked.at(-1)!.prompt, /Pocket cards from this thread:\n\(none\)/);
+  // Mike takes it out on the phone, and the thread's still about the trip.
+  fake.cards.length = 0;
+  h.runner.send(thread.id, 'On my way there now');
+  await tick();
+  await finish(thread.id);
+  h.clock.advance(CATCH_UP_MS);
+  await tick(8);
+  assert.ok(asked.length >= 2);
+  assert.equal(fake.saved.length, 1);
+});
+
+test('a short "posted it" still gets a look, which takes out the thread\'s card', async () => {
+  const s0 = fakePocket();
+  let answer: unknown = { projects: [], why: 'Errand' };
+  const s = setup({ pocket: () => s0.pocket, models: () => reply(answer) });
+  const { h, create, finish, asked } = s;
+  const { thread } = create('Sort the parcel');
+  h.clock.advance(FIRST_MESSAGE_MS);
+  await tick(8);
+  await finish(thread.id);
+  h.clock.advance(SETTLE_MS);
+  await tick(8);
+  s0.cards.push({ title: 'Post to Corby', text: 'Long Croft Road', threadId: thread.id, updatedAt: 'x' });
+  s0.cards.push({ title: 'Europe trip', text: 'EXBEEI', updatedAt: 'x' });
+  const calls = asked.length;
+  answer = { projects: [], why: 'Posted', pocket: { remove: ['Post to Corby', 'Europe trip'] } };
+  h.runner.send(thread.id, 'Posted it');
+  await tick();
+  await finish(thread.id);
+  h.clock.advance(CATCH_UP_MS);
+  await tick(8);
+  assert.equal(asked.length, calls + 1);
+  assert.match(asked.at(-1)!.prompt, /- "Post to Corby": Long Croft Road/);
+  assert.match(asked.at(-1)!.prompt, /Other Pocket cards, not yours to touch: "Europe trip"/);
+  assert.deepEqual(s0.removed, ['Post to Corby']);
+});
+
+test('a look from the first message alone leaves the Pocket to its agent, and a backend that fails costs only the Pocket', async () => {
+  const fake = fakePocket();
+  const s = setup({ pocket: () => fake.pocket, models: () => reply({ projects: [], why: 'Errand', pocket: { save: [{ title: 'Early', text: 'Too soon' }] } }) });
+  const { thread } = s.create("I'm heading to the shops");
+  s.h.clock.advance(FIRST_MESSAGE_MS);
+  await tick(8);
+  assert.match(s.asked.at(-1)!.prompt, /The Pocket is not available/);
+  assert.equal(fake.saved.length, 0);
+  fake.pocket.pocketCards = async () => {
+    throw new Error('no signal');
+  };
+  await s.finish(thread.id);
+  s.h.clock.advance(SETTLE_MS);
+  await tick(8);
+  assert.match(s.asked.at(-1)!.prompt, /The Pocket is not available/);
+  assert.equal(fake.saved.length, 0);
 });

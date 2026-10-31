@@ -735,11 +735,11 @@ export const removePocketCard = mutation({
 
 export const pocketCards = query({
   args: { key: v.string() },
-  returns: v.array(v.object({ title: v.string(), text: v.string(), place: v.optional(v.string()), source: v.optional(v.string()), updatedAt: v.string() })),
+  returns: v.array(v.object({ title: v.string(), text: v.string(), place: v.optional(v.string()), threadId: v.optional(v.string()), source: v.optional(v.string()), updatedAt: v.string() })),
   handler: async (ctx, { key }) => {
     checkRunnerKey(key);
     const rows = await ctx.db.query('pocketCards').collect();
-    return rows.map((c) => ({ title: c.title, text: c.text, ...(c.place ? { place: c.place } : {}), ...(c.source ? { source: c.source } : {}), updatedAt: c.updatedAt }));
+    return rows.map((c) => ({ title: c.title, text: c.text, ...(c.place ? { place: c.place } : {}), ...(c.threadId ? { threadId: c.threadId } : {}), ...(c.source ? { source: c.source } : {}), updatedAt: c.updatedAt }));
   },
 });
 

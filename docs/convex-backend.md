@@ -553,3 +553,11 @@ with `phone:removePocketCard`, not through a command. Both runners then share
 one deck, and removing a card works while the Macs sleep. With sync off the
 tool isn't offered. The phone saves what it last saw in `pocket.json`
 (`PocketStore`), which is what makes the deck work with no signal.
+
+The librarian keeps cards current too (`pocketChanges` in
+`runner/src/librarian.ts`): each look sees the thread's own cards and can
+update or remove them, or add one if the thread has none. What it can do is
+checked in code, not left to the model: only that thread's cards, one added
+card per thread and five a day, and no digits or codes that weren't in what
+the look was shown. A thread with cards, or a message saying the user's going
+out, is never skipped as a quiet catch-up, since "posted it" is short.
