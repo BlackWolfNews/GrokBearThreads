@@ -8,9 +8,19 @@ import XCTest
 /// connection and listed as its. A new thread on this Mac never is.
 @MainActor
 final class RemoteDraftTests: XCTestCase {
+    /// A login an earlier test left as the last one used would be this
+    /// Mac's pick instead of claude-here (saved defaults outlive a run).
+    private let keys = [AppModel.lastAccountKey, "lastAccountId.byProvider", "lastAccountId.codex.byProvider"]
+
     override func setUp() {
         super.setUp()
         _ = NSApplication.shared
+        keys.forEach { UserDefaults.standard.removeObject(forKey: $0) }
+    }
+
+    override func tearDown() {
+        keys.forEach { UserDefaults.standard.removeObject(forKey: $0) }
+        super.tearDown()
     }
 
     private let bruce = RemoteRunner(id: "r-bruce", name: "bruce", icon: "macmini", online: true,

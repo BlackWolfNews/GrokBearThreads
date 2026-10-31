@@ -12,6 +12,15 @@ final class PendingSendTests: XCTestCase {
         _ = NSApplication.shared
     }
 
+    /// Making a new thread saves its login as the last one used, which
+    /// would outlive the run and pick the login in other tests.
+    override func tearDown() {
+        for key in [AppModel.lastAccountKey, "lastAccountId.byProvider", "lastAccountId.codex.byProvider"] {
+            UserDefaults.standard.removeObject(forKey: key)
+        }
+        super.tearDown()
+    }
+
     private func connected() async throws -> (AppModel, HoldingTransport) {
         let app = AppModel()
         let transport = HoldingTransport()
