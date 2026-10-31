@@ -103,7 +103,9 @@ the message box, with an Archive button to put the thread away. When something i
 still worth doing (a piece it didn't get to, a check that's due), the
 card lists them under "Or carry on". Click any of them to tick them
 (click again to untick), add anything you like in the message box, and
-send: the ticked ones go to the agent together, with your words. When
+send: the ticked ones go to the agent together, with your words. Not
+sure what one means? The ? at its right asks the agent straight away,
+and leaves the message box as it was. When
 the reply does need you, a Needs you card takes its place in the message
 box, outlined, listing what to do; the same list is near the top of the
 thread's [Highlights](#highlights), with a box to tick off beside each

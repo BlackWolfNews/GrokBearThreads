@@ -241,6 +241,10 @@ final class TextRowCell: RowCellView {
     private var answerBoxes: [Int: AskAnswerBox] = [:]
     /// The open card the boxes belong to, as last shown.
     private var answerCard: AsksCard?
+    /// The "?" at the right of each of the open done card's follow-ups,
+    /// by index, over the room its row leaves (`RowRenderer.explainRoom`).
+    /// Real buttons rather than `.tbAction` runs, so they get a tip.
+    private var explainButtons: [Int: NSButton] = [:]
     /// Screenshots show the pencil without a real hover.
     static var debugShowEdit = false
     private var shownBlocks: [String] = []
@@ -460,7 +464,7 @@ final class TextRowCell: RowCellView {
             textView.onAction = nil
         }
 
-        guard let text = render.text else { placeAnswerBoxes(row); return }
+        guard let text = render.text else { placeAnswerBoxes(row); placeExplainButtons(row); return }
         let textWidth = textView.fullFrame.width
         // A streaming assistant row only replaces the blocks that changed,
         // so TextKit lays out just the tail.
@@ -487,6 +491,7 @@ final class TextRowCell: RowCellView {
         shownRowId = row.id
         shownZoom = zoom
         placeAnswerBoxes(row)
+        placeExplainButtons(row)
     }
 
     /// False when the card hasn't made room for that box yet.
@@ -526,6 +531,55 @@ final class TextRowCell: RowCellView {
             answerCard = nil
         }
         for (index, box) in answerBoxes where !shown.contains(index) && !box.isHidden { box.isHidden = true }
+    }
+
+    /// Puts a "?" at the right of each follow-up's first line on the open
+    /// done card in the composer, and hides the rest.
+    private func placeExplainButtons(_ row: TranscriptRow) {
+        var shown = Set<Int>()
+        if bare, case .asks(let card) = row.content, card.isDone, card.isOpen, let storage = textView.textStorage,
+           let layoutManager = textView.layoutManager, let container = textView.textContainer {
+            layoutManager.ensureLayout(for: container)
+            let full = textView.fullFrame
+            let origin = textView.textContainerOrigin
+            let side = RowRenderer.explainRoom
+            storage.enumerateAttribute(.tbRow, in: NSRange(location: 0, length: storage.length)) { value, range, _ in
+                guard let action = value as? String, action.hasPrefix("next:"), let index = Int(action.dropFirst(5)), range.length > 0 else { return }
+                // Level with the row's tick circle, its first character:
+                // the line's own box has the space between rows in it.
+                let circle = layoutManager.boundingRect(forGlyphRange: NSRange(location: layoutManager.glyphIndexForCharacter(at: range.location), length: 1), in: container)
+                let button = explainButtons[index] ?? makeExplainButton(index)
+                button.frame = NSRect(x: full.minX + origin.x + container.size.width - RowRenderer.rowInset - side,
+                                      y: full.minY + origin.y + circle.midY - side / 2, width: side, height: side)
+                // Set each time, so it follows a zoom change.
+                let image = Symbols.image("questionmark.circle", size: 14)
+                if button.image !== image { button.image = image }
+                if button.isHidden { button.isHidden = false }
+                shown.insert(index)
+            }
+        }
+        for (index, button) in explainButtons where !shown.contains(index) && !button.isHidden { button.isHidden = true }
+    }
+
+    private func makeExplainButton(_ index: Int) -> NSButton {
+        let button = NSButton()
+        button.isBordered = false
+        button.bezelStyle = .regularSquare
+        button.imagePosition = .imageOnly
+        button.contentTintColor = .secondaryLabelColor
+        button.tag = index
+        button.target = self
+        button.action = #selector(explainClicked(_:))
+        button.setTip("Ask what this means")
+        button.setAccessibilityLabel("Ask what this means")
+        explainButtons[index] = button
+        addSubview(button)
+        return button
+    }
+
+    @objc private func explainClicked(_ sender: NSButton) {
+        guard let card = answerCard, card.isDone else { return }
+        delegate?.askAction(card, action: "explain:\(sender.tag)")
     }
 
     private func makeAnswerBox(_ index: Int) -> AskAnswerBox {

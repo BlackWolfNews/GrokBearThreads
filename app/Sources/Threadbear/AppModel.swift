@@ -1295,28 +1295,10 @@ final class AppModel {
             if let seq, !answers.isEmpty { setAnswers(picks: [:], notes: [:], seq: seq, threadId: threadId) }
             // The card keeps its ticks until his message closes it.
             if !followUps.isEmpty { nextPicks[threadId] = nil }
-            let pendingId = UUID().uuidString
-            // The thread's own session, open already as its composer is
-            // showing; kept by the Task, so a failure finds it.
-            let session: ThreadSession? = self.session(for: threadId)
-            session?.addPending(id: pendingId, text: trimmed, images: images, answers: answers, summarySeq: thread?.lastSeq ?? 0)
-            Task {
-                do {
-                    try await client.send(threadId: threadId, text: trimmed, images: images, answers: answers)
-                    // Taken but not shown: it's queued behind the running
-                    // turn. Its user.message usually comes just before this
-                    // reply, but is applied on the next frame, so wait a
-                    // moment rather than flash the clock on every send.
-                    try? await Task.sleep(for: .milliseconds(600))
-                    session?.markQueued(pendingId)
-                    checkQueued(threadId)
-                } catch {
-                    session?.removePending(pendingId)
-                    restoreDraft(draft, key: key)
-                    if let seq, !answers.isEmpty { setAnswers(picks: picks, notes: notes, seq: seq, threadId: threadId) }
-                    if !followUps.isEmpty, nextPicks[threadId] == nil { nextPicks[threadId] = ticked }
-                    show(error)
-                }
+            post(threadId: threadId, text: trimmed, images: images, answers: answers, client: client) { [self] in
+                restoreDraft(draft, key: key)
+                if let seq, !answers.isEmpty { setAnswers(picks: picks, notes: notes, seq: seq, threadId: threadId) }
+                if !followUps.isEmpty, nextPicks[threadId] == nil { nextPicks[threadId] = ticked }
             }
         } else {
             let account = newThreadAccountId
@@ -1348,6 +1330,47 @@ final class AppModel {
                 }
             }
         }
+    }
+
+    /// Sends a message to a thread, shown dimmed at the end of the
+    /// transcript until the runner shows it. `failed` puts back whatever
+    /// the send took from the composer, if the runner doesn't take it.
+    private func post(threadId: String, text: String, images: [ImageRef], answers: [AskAnswer], client: RPCClient, failed: @escaping () -> Void = {}) {
+        let pendingId = UUID().uuidString
+        // The thread's own session, open already as its composer is
+        // showing; kept by the Task, so a failure finds it.
+        let session: ThreadSession? = self.session(for: threadId)
+        session?.addPending(id: pendingId, text: text, images: images, answers: answers, summarySeq: threads[threadId]?.lastSeq ?? 0)
+        Task {
+            do {
+                try await client.send(threadId: threadId, text: text, images: images, answers: answers)
+                // Taken but not shown: it's queued behind the running
+                // turn. Its user.message usually comes just before this
+                // reply, but is applied on the next frame, so wait a
+                // moment rather than flash the clock on every send.
+                try? await Task.sleep(for: .milliseconds(600))
+                session?.markQueued(pendingId)
+                checkQueued(threadId)
+            } catch {
+                session?.removePending(pendingId)
+                failed()
+                show(error)
+            }
+        }
+    }
+
+    /// The "?" on a done card's follow-up: asks the agent what it meant,
+    /// at once, as its own message. Mike got a follow-up that seemed to
+    /// come from nowhere and had no way to ask about it short of typing
+    /// the question out (31 Oct). What's in the composer stays there.
+    func explainFollowUp(threadId: String, card: AsksCard, index: Int) {
+        guard card.isDone, card.isOpen, card.next.indices.contains(index) else { return }
+        guard let client = client(for: threadId), isRemote(threadId) || connection == .connected else {
+            showConnectionError(notConnectedText(threadId, "that wasn't sent"))
+            return
+        }
+        ActivityRecorder.shared.sent(threadId: threadId, images: 0, answers: 0)
+        post(threadId: threadId, text: Decisions.explainMessage(card.next[index]), images: [], answers: [], client: client)
     }
 
     /// Updates panel, From Mike: a new thread in the repo the runner

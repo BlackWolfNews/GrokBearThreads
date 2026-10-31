@@ -1332,7 +1332,8 @@ enum RowRenderer {
     /// it away or keep going, and he picked this from mockups. Rows rather
     /// than buttons, as a long one broke into two buttons; the pointer
     /// lights up the whole row (`.tbRow`). The follow-ups go once he's
-    /// replied, like an ask's answers.
+    /// replied, like an ask's answers. A "?" at each row's right asks
+    /// the agent what it meant, as one can come out of nowhere (31 Oct).
     private static func doneText(_ card: AsksCard, width: CGFloat) -> NSAttributedString {
         let title = Theme.changesTitleFont
         let button = Theme.labelFont
@@ -1365,7 +1366,9 @@ enum RowRenderer {
         // The words start on a tab past the circle, and a long one wraps
         // in line with them rather than under the circle.
         let words = inset + ceil(font.pointSize * 1.2) + zoomed(8)
-        let (rowStyle, rowOffset) = Theme.lines(TypeScale.bodyLine, font: font, spacing: zoomed(8), before: zoomed(8), head: words, first: inset, tail: -inset)
+        // The words stop short of the "?" the cell puts at the right
+        // (TextRowCell.placeExplainButtons).
+        let (rowStyle, rowOffset) = Theme.lines(TypeScale.bodyLine, font: font, spacing: zoomed(8), before: zoomed(8), head: words, first: inset, tail: -(inset + explainRoom + zoomed(8)))
         rowStyle.tabStops = [NSTextTab(textAlignment: .left, location: words)]
         for (n, text) in card.next.enumerated() {
             // The break ends the line before, so it isn't part of the row.
@@ -1385,6 +1388,10 @@ enum RowRenderer {
 
     /// How far a follow-up row's words sit in from its hover fill.
     static var rowInset: CGFloat { zoomed(8) }
+
+    /// The room at a follow-up row's right for its "?", which asks the
+    /// agent what it meant (`explain:<n>`).
+    static var explainRoom: CGFloat { zoomed(22) }
 
     /// A plain sentence for a failure whose cause the runner gave.
     static func errorAdvice(_ kind: TurnErrorKind?) -> String? {

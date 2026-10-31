@@ -150,6 +150,13 @@ public enum Decisions {
         return body
     }
 
+    /// The message the "?" on a done card's follow-up sends: Mike asking
+    /// what the agent meant by it, as one sounded out of nowhere on a
+    /// thread about something else (31 Oct).
+    public static func explainMessage(_ followUp: String) -> String {
+        "What do you mean by \"\(followUp)\"? Please explain."
+    }
+
     /// One ask's question then its answer. Numbered, the answer is
     /// indented under it, every line of it.
     static func block(_ answer: AskAnswer, number: Int?) -> String {

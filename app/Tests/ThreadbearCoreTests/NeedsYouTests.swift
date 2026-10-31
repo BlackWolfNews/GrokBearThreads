@@ -108,6 +108,7 @@ final class NeedsYouTests: XCTestCase {
         XCTAssertEqual(Decisions.followUpMessage(["Check the nightly"]), "Check the nightly")
         XCTAssertEqual(Decisions.followUpMessage(["Check the nightly", "Refresh the cache"], extra: " and be quick \n"),
                        "- Check the nightly\n- Refresh the cache\n\nand be quick")
+        XCTAssertEqual(Decisions.explainMessage("Check the nightly"), "What do you mean by \"Check the nightly\"? Please explain.")
     }
 
     /// The open card is what the composer draws at its top (ComposerCard),
