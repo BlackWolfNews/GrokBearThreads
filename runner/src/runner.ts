@@ -1533,18 +1533,17 @@ export class Runner {
     const question = params.question.trim();
     const answer = params.answer.trim();
     if (!question || !answer) throw new RpcError(ErrorCode.badParams, 'question and answer required');
-    // A follow-up is usually spoken and waited on, so it starts on the fastest
-    // model. Timed 31 Oct: level with Haiku on a 60-word reply (about 4.5 s),
-    // but about 10 s for 300 words against Haiku's 21 to 31, at low effort.
-    // Codex's Fast and Ultrafast settings aren't used: Fast showed no gain and
-    // costs 2.5x the limits, and Ultrafast needs a plan Mike isn't on. With no
-    // login for either it's the account's default, as naming a model the login
-    // can't run would write a note into the thread.
+    // A follow-up is usually spoken and waited on, so it starts on a small
+    // quick model. Mike picked Haiku 5.5 over GPT-6-Luna on 31 Oct as the
+    // smarter of the two, though Luna is quicker on long replies (about 10 s
+    // for 300 words against 21 to 31). Luna is for a runner with no Claude
+    // login. With neither it's the account's default, as naming a model the
+    // login can't run would write a note into the thread.
     const usable = this.usableAccounts();
-    const speed = usable.some((a) => a.provider === 'codex')
-      ? { model: ASK_CODEX_MODEL, effort: 'low' as const }
-      : usable.some((a) => a.provider === 'claude')
-        ? { model: HAIKU }
+    const speed = usable.some((a) => a.provider === 'claude')
+      ? { model: HAIKU }
+      : usable.some((a) => a.provider === 'codex')
+        ? { model: ASK_CODEX_MODEL, effort: 'low' as const }
         : {};
     const { st, notes } = this.makeThread({ text: question, origin: 'phone', worktree: false, ...speed });
     const { rec } = st;

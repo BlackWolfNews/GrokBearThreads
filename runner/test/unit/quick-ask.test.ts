@@ -47,23 +47,24 @@ test('a quick ask with no sources has just the answer', () => {
   assert.equal(text, ask.answer);
 });
 
-test('with a Codex login, a follow-up runs on Luna at low effort, so a spoken question gets a quick reply', async () => {
+test('a follow-up runs on Haiku, even with a Codex login too', async () => {
   const h = makeHarness(undefined, {}, { accounts: new FakeAccounts(withCodex()) });
   const { thread } = h.runner.quickAsk(ask);
-  assert.equal(thread.provider, 'codex');
-  assert.equal(thread.model, 'gpt-6-luna');
-  assert.equal(thread.effort, 'low');
-  assert.equal(h.events(thread.id).some((e) => e.type === 'system.note' && /isn't a|doesn't offer/.test(e.text)), false);
-});
-
-test('with only Claude logins, a follow-up runs on Haiku', async () => {
-  const h = makeHarness();
-  const { thread } = h.runner.quickAsk(ask);
+  assert.equal(thread.provider, 'claude');
   assert.equal(thread.model, 'claude-haiku-5-5');
   h.runner.send(thread.id, 'How big is the other one?');
   await tick();
   assert.equal(h.adapter.last.opts.model, 'claude-haiku-5-5');
   assert.equal(h.events(thread.id).some((e) => e.type === 'system.note' && /isn't a/.test(e.text)), false);
+});
+
+test('with only a Codex login, a follow-up runs on Luna at low effort', () => {
+  const h = makeHarness(undefined, {}, { accounts: new FakeAccounts(withCodex().filter((a) => a.provider === 'codex')) });
+  const { thread } = h.runner.quickAsk(ask);
+  assert.equal(thread.provider, 'codex');
+  assert.equal(thread.model, 'gpt-6-luna');
+  assert.equal(thread.effort, 'low');
+  assert.equal(h.events(thread.id).some((e) => e.type === 'system.note' && /isn't a|doesn't offer/.test(e.text)), false);
 });
 
 test("a follow-up starts a fresh session told the thread began as a quick ask", async () => {

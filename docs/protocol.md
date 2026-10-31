@@ -2505,8 +2505,8 @@ the mirror back as state. The Mac app doesn't use it.
   `turn.completed` (`completed`, `needs: "nothing"`), all under one
   `turnId`, and marks it seen, since Mike has heard it. The title comes
   from the question, then a model title with the answer as the reply.
-  A spoken follow-up wants a quick reply, so the thread is set to GPT-6-Luna
-  at low effort when the runner has a Codex login, else Haiku with a Claude
+  A spoken follow-up wants a quick reply, so the thread is set to Haiku when
+  the runner has a Claude login, else GPT-6-Luna at low effort with a Codex
   login, else the account's default.
   The first message sent to it starts a fresh session with a handoff
   note saying the thread began as a quick ask that a fast model answered

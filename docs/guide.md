@@ -469,7 +469,7 @@ Each answer is kept as a thread in your default folder, with the question,
 the answer and a note that Ask answered it. It shows as done and already
 read. Once it's kept, the phone opens that thread with a big mic at the
 bottom: tap it and say a follow-up, which goes to the agent as an ordinary
-reply on a small fast model (GPT-6-Luna, or Haiku with no Codex login; change
+reply on a small fast model (Haiku, or GPT-6-Luna with no Claude login; change
 it in the thread if it needs more), and its answer is read out when it's done. The keyboard button
 beside the mic brings back the text box. The agent is told the thread
 started with Ask and picks up from there.
