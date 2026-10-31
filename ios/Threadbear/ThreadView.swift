@@ -564,68 +564,104 @@ struct ToolRunView: View {
     }
 }
 
-/// Assistant text: block by block, so paragraphs, lists, headings and code
-/// keep their shape; inline markdown inside each.
+/// Assistant text, block by block from ThreadbearKit's MarkdownBlock, so
+/// paragraphs, lists, tables, quotes and code keep their shape as on the
+/// Mac; inline markdown inside each.
 struct MarkdownText: View {
-    let blocks: [Block]
+    let blocks: [MarkdownBlock]
 
-    enum Block: Hashable {
-        case paragraph(String)
-        case heading(String)
-        case bullet(String, marker: String)
-        case code(String)
-    }
-
-    init(_ text: String) { blocks = Self.parse(text) }
+    init(_ text: String) { blocks = MarkdownBlock.parse(text) }
+    init(blocks: [MarkdownBlock]) { self.blocks = blocks }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             ForEach(Array(blocks.enumerated()), id: \.offset) { _, block in
-                switch block {
-                case let .paragraph(text): Text(Self.inline(text))
-                case let .heading(text): Text(Self.inline(text)).font(.headline)
-                case let .bullet(text, marker):
-                    HStack(alignment: .firstTextBaseline, spacing: 6) {
-                        Text(marker).foregroundStyle(.secondary)
-                        Text(Self.inline(text))
-                    }
-                case let .code(text):
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        Text(text).font(.system(.footnote, design: .monospaced)).padding(10)
-                    }
-                    .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 8))
-                }
+                view(for: block)
             }
+        }
+    }
+
+    @ViewBuilder private func view(for block: MarkdownBlock) -> some View {
+        switch block {
+        case let .paragraph(text):
+            Text(Self.inline(text))
+        case let .heading(level, text):
+            Text(Self.inline(text)).font(level <= 2 ? .headline : .subheadline.weight(.semibold))
+        case let .listItem(text, marker, depth, task):
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                if let task {
+                    Image(systemName: task ? "checkmark.square" : "square").foregroundStyle(.secondary)
+                } else {
+                    Text(marker).foregroundStyle(.secondary).monospacedDigit()
+                }
+                Text(Self.inline(text))
+            }
+            .padding(.leading, CGFloat(depth) * 18)
+        case let .code(text):
+            ScrollView(.horizontal, showsIndicators: false) {
+                Text(text).font(.system(.footnote, design: .monospaced)).padding(10)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 8))
+        case let .quote(inner):
+            MarkdownText(blocks: inner)
+                .foregroundStyle(.secondary)
+                .padding(.leading, 12)
+                .overlay(alignment: .leading) {
+                    RoundedRectangle(cornerRadius: 1.5).fill(.quaternary).frame(width: 3)
+                }
+        case .rule:
+            Divider().padding(.vertical, 4)
+        case let .table(header, alignments, rows):
+            MarkdownTable(header: header, alignments: alignments, rows: rows)
         }
     }
 
     static func inline(_ text: String) -> AttributedString {
         (try? AttributedString(markdown: text, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace))) ?? AttributedString(text)
     }
+}
 
-    static func parse(_ text: String) -> [Block] {
-        var blocks: [Block] = []
-        var paragraph: [String] = []
-        var code: [String]?
-        func flush() {
-            if !paragraph.isEmpty { blocks.append(.paragraph(paragraph.joined(separator: "\n"))) }
-            paragraph = []
-        }
-        for raw in text.components(separatedBy: "\n") {
-            let line = raw.trimmingCharacters(in: .whitespaces)
-            if line.hasPrefix("```") {
-                if let open = code { blocks.append(.code(open.joined(separator: "\n"))); code = nil } else { flush(); code = [] }
-                continue
+/// A markdown table: a bold header row, lines between rows, and sideways
+/// scrolling when it's wider than the phone, as tables are in Safari.
+private struct MarkdownTable: View {
+    let header: [String]
+    let alignments: [MarkdownBlock.Alignment]
+    let rows: [[String]]
+
+    var body: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            Grid(alignment: .leading, horizontalSpacing: 14, verticalSpacing: 6) {
+                GridRow { cells(header).fontWeight(.semibold) }
+                ForEach(Array(rows.enumerated()), id: \.offset) { _, row in
+                    Divider().gridCellUnsizedAxes(.horizontal)
+                    GridRow { cells(row) }
+                }
             }
-            if code != nil { code?.append(raw); continue }
-            if line.isEmpty { flush(); continue }
-            if let match = line.firstMatch(of: /^#{1,6}\s+(.*)/) { flush(); blocks.append(.heading(String(match.1))); continue }
-            if let match = line.firstMatch(of: /^[-*]\s+(.*)/) { flush(); blocks.append(.bullet(String(match.1), marker: "•")); continue }
-            if let match = line.firstMatch(of: /^(\d+)[.)]\s+(.*)/) { flush(); blocks.append(.bullet(String(match.2), marker: "\(match.1).")); continue }
-            paragraph.append(raw)
+            .font(.subheadline)
+            .padding(10)
         }
-        if let open = code { blocks.append(.code(open.joined(separator: "\n"))) }
-        flush()
-        return blocks
+        .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 8))
+    }
+
+    private func cells(_ texts: [String]) -> some View {
+        ForEach(Array(texts.enumerated()), id: \.offset) { i, text in
+            Text(MarkdownText.inline(text))
+                // Cells wrap rather than run off forever; past this the row scrolls.
+                .frame(maxWidth: 220, alignment: frameAlignment(i))
+                .gridColumnAlignment(columnAlignment(i))
+        }
+    }
+
+    private func alignment(_ i: Int) -> MarkdownBlock.Alignment {
+        i < alignments.count ? alignments[i] : .leading
+    }
+
+    private func columnAlignment(_ i: Int) -> HorizontalAlignment {
+        switch alignment(i) { case .leading: .leading; case .center: .center; case .trailing: .trailing }
+    }
+
+    private func frameAlignment(_ i: Int) -> Alignment {
+        switch alignment(i) { case .leading: .leading; case .center: .center; case .trailing: .trailing }
     }
 }
