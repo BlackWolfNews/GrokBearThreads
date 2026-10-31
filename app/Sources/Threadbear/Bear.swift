@@ -168,29 +168,47 @@ enum Bear {
         }
     }
 
+    /// The waving pose's measurements on the grid, shared with
+    /// WavingBearView, which draws the same pose in parts it can move.
+    enum Wave {
+        static let headCentre = NSPoint(x: 10.5, y: 12.5)
+        static let headRadius: CGFloat = 7
+        static let earRadius: CGFloat = 2.6
+        /// Where the arm leaves the head; the paw swings about this.
+        static let shoulder = NSPoint(x: 16.4, y: 16.6)
+        static let armEnd = NSPoint(x: 20.4, y: 9.4)
+        static let armControl1 = NSPoint(x: 19.6, y: 15.6)
+        static let armControl2 = NSPoint(x: 21.4, y: 12.4)
+        static let paw = NSPoint(x: 20.6, y: 6.6)
+        static let pawRadius: CGFloat = 2.4
+        static let toeRadius: CGFloat = 0.75
+        /// Three toes round the top of the paw.
+        static var toes: [NSPoint] {
+            [220.0, 270.0, 320.0].map { angle in
+                let rad = angle * .pi / 180
+                return NSPoint(x: paw.x + cos(rad) * (pawRadius + 1.5), y: paw.y + sin(rad) * (pawRadius + 1.5))
+            }
+        }
+    }
+
     /// The head to the left, a paw raised at the top right with three
     /// toes, and an arm line between.
     private static func drawWave(lineWidth: CGFloat) {
-        let c = NSPoint(x: 10.5, y: 12.5)
-        let r: CGFloat = 7
-        drawHead(centre: c, radius: r, earRadius: 2.6, lineWidth: lineWidth)
+        drawHead(centre: Wave.headCentre, radius: Wave.headRadius, earRadius: Wave.earRadius, lineWidth: lineWidth)
         // The arm: from the head's lower right up to the paw.
         let arm = NSBezierPath()
-        arm.move(to: NSPoint(x: 16.4, y: 16.6))
-        arm.curve(to: NSPoint(x: 20.4, y: 9.4), controlPoint1: NSPoint(x: 19.6, y: 15.6), controlPoint2: NSPoint(x: 21.4, y: 12.4))
+        arm.move(to: Wave.shoulder)
+        arm.curve(to: Wave.armEnd, controlPoint1: Wave.armControl1, controlPoint2: Wave.armControl2)
         arm.lineWidth = lineWidth
         arm.lineCapStyle = .round
         arm.stroke()
         // The paw: a small circle, three toe arcs on top.
-        let paw = NSPoint(x: 20.6, y: 6.6)
-        let pr: CGFloat = 2.4
+        let paw = Wave.paw, pr = Wave.pawRadius
         let pad = NSBezierPath(ovalIn: NSRect(x: paw.x - pr, y: paw.y - pr, width: 2 * pr, height: 2 * pr))
         pad.lineWidth = lineWidth
         pad.stroke()
-        for angle in [220.0, 270.0, 320.0] {
-            let rad = angle * .pi / 180
-            let toe = NSPoint(x: paw.x + cos(rad) * (pr + 1.5), y: paw.y + sin(rad) * (pr + 1.5))
-            let dot: CGFloat = 0.75
+        for toe in Wave.toes {
+            let dot = Wave.toeRadius
             NSBezierPath(ovalIn: NSRect(x: toe.x - dot, y: toe.y - dot, width: 2 * dot, height: 2 * dot)).fill()
         }
     }

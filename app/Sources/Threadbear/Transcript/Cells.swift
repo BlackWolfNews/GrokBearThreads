@@ -870,7 +870,7 @@ final class GroupRowCell: RowCellView {
 /// turn's one status line. Counts by itself once a second while it's in a
 /// window, so the row never re-renders as time passes.
 final class WorkingRowCell: RowCellView {
-    let bear = NSImageView()
+    let bear = WavingBearView()
     let label = makeLabel()
     private var startedAt: Date?
     private var timer: Timer?
@@ -881,9 +881,7 @@ final class WorkingRowCell: RowCellView {
         // this line is what Mike watches while a turn runs.
         label.font = Theme.workFont
         label.textColor = Theme.quietText
-        bear.image = Bear.image(.wave)
-        bear.contentTintColor = Theme.quietText
-        bear.imageScaling = .scaleProportionallyUpOrDown
+        bear.tint = Theme.quietText
         addSubview(bear)
         addSubview(label)
     }
@@ -916,7 +914,11 @@ final class WorkingRowCell: RowCellView {
     override func releaseContent() { stop() }
 
     private func startIfVisible() {
-        guard window != nil, timer == nil, startedAt != nil else { return }
+        guard window != nil else { return }
+        // A turn that's only just begun gets the bear popping up; scrolling
+        // back to one that's been going a while doesn't.
+        bear.start(fresh: startedAt.map { Date().timeIntervalSince($0) < 2 } ?? false)
+        guard timer == nil, startedAt != nil else { return }
         let timer = Timer(timeInterval: 1, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated { self?.tick() }
         }
@@ -928,6 +930,7 @@ final class WorkingRowCell: RowCellView {
     private func stop() {
         timer?.invalidate()
         timer = nil
+        bear.stop()
     }
 
     private func tick() {
