@@ -210,6 +210,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             // Records nothing unless it's switched on in Settings.
             ActivityRecorder.shared.install(app: app)
             MenuWatch.install()
+            // Takes the window off the drag Space a drag can leave it on,
+            // which hides every menu (macOS 27.2).
+            DragSpace.install()
             if perf { PerfRunner.start(app: app) }
             if screenshots { ScreenshotRunner.start(app: app) }
             // What only one of two Threadbears should run: a handover's

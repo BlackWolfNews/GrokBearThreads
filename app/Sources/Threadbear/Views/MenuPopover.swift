@@ -2,26 +2,28 @@ import AppKit
 import SwiftUI
 
 /// An NSMenu drawn in a popover, for when macOS won't show the menu itself.
-/// Since macOS 27.2 the app sometimes gets into a state where every
-/// `NSMenu` it opens is made and placed but the window server never shows
-/// it, until the app relaunches (31 Oct; MenuWatch spots it). Popovers still
-/// show then, so the same menu is drawn here instead: titles, icons, ticks,
-/// subtitles, section headers, separators, and submenus opened in place. A
-/// pick runs the item through the menu itself (`performActionForItem`), so
-/// it does exactly what choosing it from the menu would.
+/// On macOS 27.2 a window left on the drag Space by a drag has every menu
+/// opened from it made and placed but never shown (DragSpace; MenuWatch
+/// spots it). Popovers still show then, so the same menu is drawn here
+/// instead: titles, icons, ticks, subtitles, section headers, separators,
+/// and submenus opened in place. A pick runs the item through the menu
+/// itself (`performActionForItem`), so it does exactly what choosing it
+/// from the menu would.
 @MainActor
 enum MenuPopover {
     private static var shown: NSPopover?
+    private static var closing: CloseWatch?
     /// The rows on show, for the automation's `click`.
     private(set) static var rows: [MenuPopoverRow] = []
 
     static var isShown: Bool { shown?.isShown == true }
 
-    static func show(_ menu: NSMenu, relativeTo rect: NSRect, of view: NSView, edge: NSRectEdge) {
+    /// `onClose` runs once it's gone, however it goes.
+    static func show(_ menu: NSMenu, relativeTo rect: NSRect, of view: NSView, edge: NSRectEdge, onClose: (() -> Void)? = nil) {
         close()
         let rows = MenuPopoverRow.rows(of: menu)
         AppLog.write("menu", "as a popover: \(rows.count) rows, in \(view.window.map { "window \($0.windowNumber)" } ?? "no window")")
-        guard !rows.isEmpty else { return }
+        guard !rows.isEmpty else { onClose?(); return }
         self.rows = rows
         let popover = NSPopover()
         popover.behavior = .transient
@@ -30,7 +32,21 @@ enum MenuPopover {
         // Measured first, as the composer's pickers are, so it's placed for
         // its real size.
         popover.contentSize = controller.view.fittingSize
-        popover.show(relativeTo: rect, of: view, preferredEdge: edge)
+        // Shown from the window's content view, at the same place, rather
+        // than from `view`: a sidebar row's moon is only there while the row
+        // is hovered, and as the pointer went down into the popover the row
+        // let the moon go and its view was freed, which closes a popover
+        // shown from it (Mike, 1 Nov). The edge is turned round when the
+        // content view's y runs the other way.
+        let host = view.window?.contentView ?? view
+        var hostEdge = edge
+        if host !== view, host.isFlipped != view.isFlipped {
+            if edge == .minY { hostEdge = .maxY } else if edge == .maxY { hostEdge = .minY }
+        }
+        let watch = CloseWatch(onClose)
+        popover.delegate = watch
+        closing = watch
+        popover.show(relativeTo: view.convert(rect, to: host), of: host, preferredEdge: hostEdge)
         shown = popover
     }
 
@@ -54,6 +70,8 @@ enum MenuPopover {
     static func close() {
         shown?.close()
         shown = nil
+        closing?.fire()
+        closing = nil
     }
 
     static func pick(_ row: MenuPopoverRow) {
@@ -63,6 +81,23 @@ enum MenuPopover {
         // runs: some actions put up an alert or a sheet.
         DispatchQueue.main.async { perform() }
     }
+}
+
+/// Runs a closure once when its popover closes, by a pick, a click outside
+/// or Esc.
+@MainActor
+private final class CloseWatch: NSObject, NSPopoverDelegate {
+    private var action: (() -> Void)?
+
+    init(_ action: (() -> Void)?) { self.action = action }
+
+    func fire() {
+        let action = self.action
+        self.action = nil
+        action?()
+    }
+
+    func popoverDidClose(_ notification: Notification) { fire() }
 }
 
 /// One line of a menu: an item, a section header or a separator.

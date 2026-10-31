@@ -586,7 +586,9 @@ struct ThreadRowView: View {
     /// Archived from somewhere other than a swipe: slides off all the same.
     private var slidingOff: Bool { app.slidingOff.contains(thread.id) }
     /// Not while it's being swiped: the buttons would ride along with it.
-    private var showsActions: Bool { pointerOver && !swipe.isSwiping && !slidingOff }
+    /// Kept while its moon's menu is open, which the pointer leaves the row
+    /// to get into (`MenuAnchor.held`).
+    private var showsActions: Bool { (pointerOver || app.menuOpenRow == thread.id) && !swipe.isSwiping && !slidingOff }
 
     var body: some View {
         // The Projects view's rows say what they're doing too: it has no
@@ -960,8 +962,6 @@ private struct RowActions: View {
 }
 
 /// The moon: a plain button that pops the Hibernate menu up from AppKit.
-/// It was a SwiftUI `Menu`, which since macOS 27.2 took the click on a
-/// row and never opened (31 Oct), while a bare one in a test app still did.
 private struct HibernateButton: View {
     @Environment(AppModel.self) private var app
     let threadId: String
@@ -969,6 +969,11 @@ private struct HibernateButton: View {
 
     var body: some View {
         Button {
+            // The row keeps its buttons, the moon among them, while the menu
+            // is open: on the way down into it the pointer leaves the row.
+            anchor.held = { [app, threadId] open in
+                if open { app.menuOpenRow = threadId } else if app.menuOpenRow == threadId { app.menuOpenRow = nil }
+            }
             anchor.popUp(SnoozeNSMenu.make(threadId: threadId, app: app), below: true)
         } label: { Image(systemName: "moon.zzz") }
             .buttonStyle(RowIconButtonStyle())

@@ -67,6 +67,12 @@ File references are where to look.
   the Mac.
 - **Patches** (`.threadbear/patches/`): code from a folder runs only after
   you trust that folder (`runner/src/patch-trust.ts`).
+- **Menus on macOS 27.2** (`app/Sources/Threadbear/DragSpace.swift`): every
+  5 seconds, and before a button opens a menu, the app asks the window
+  server which Spaces its own windows are on, and takes them off the drag
+  Space a window drag can leave them on, which hides their menus. These
+  are private window server calls, and they only touch the app's own
+  windows.
 
 ## What it reads
 

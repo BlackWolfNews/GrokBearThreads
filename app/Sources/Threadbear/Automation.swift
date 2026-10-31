@@ -982,6 +982,8 @@ enum Automation {
             return composerMenu(c, app: app)
         case "menu-popover":
             return menuPopover(c, app: app)
+        case "drag-space":
+            return dragSpace(c)
         case "usage":
             // The Usage panel: {"show": true} opens it ({"show": false}
             // closes it), {"click": "Update"} presses one of the Updates
@@ -1589,6 +1591,25 @@ enum Automation {
             }
             guard let view = mainWindow?.contentView else { return "error no window" }
             let spot = NSRect(x: view.bounds.midX, y: view.bounds.midY, width: 1, height: 1)
+            if c["fromView"] as? Bool == true {
+                // As the moon's fallback: from a small plain view that's then
+                // removed and freed, as SwiftUI frees the moon once the row
+                // stops being hovered. Says whether the popover stayed, and
+                // whether it sits below where the view was.
+                var anchorOnScreen = NSRect.zero
+                autoreleasepool {
+                    let moon = NSView(frame: NSRect(x: view.bounds.midX - 11, y: view.bounds.midY - 11, width: 22, height: 22))
+                    view.addSubview(moon)
+                    anchorOnScreen = view.window!.convertToScreen(moon.convert(moon.bounds, to: nil))
+                    MenuPopover.show(menu, relativeTo: moon.bounds, of: moon, edge: moon.isFlipped ? .maxY : .minY)
+                    RunLoop.main.run(until: Date().addingTimeInterval(0.3))
+                    moon.removeFromSuperview()
+                }
+                RunLoop.main.run(until: Date().addingTimeInterval(0.4))
+                let popover = NSApp.windows.first { String(describing: type(of: $0)).contains("Popover") && $0.isVisible }
+                let below = popover.map { $0.frame.maxY <= anchorOnScreen.minY + 2 } ?? false
+                return "ok shown \(MenuPopover.isShown) below \(below) popover \(popover.map { NSStringFromRect($0.frame) } ?? "none") anchor \(NSStringFromRect(anchorOnScreen))"
+            }
             if c["popup"] != nil {
                 // A real menu, as a right-click opens one: MenuWatch has to
                 // see it and, if menus are stuck, swap in the popover.
@@ -1617,6 +1638,18 @@ enum Automation {
             }
         }
         return "ok stuck \(MenuWatch.stuck) shown \(MenuPopover.isShown) " + json(lines(MenuPopover.rows, ""))
+    }
+
+    /// The drag Space bug (DragSpace): `add` puts the main window on that
+    /// Space (31 on Mike's Mac), as a drag on macOS 27.2 leaves it, so a menu
+    /// opened next comes up unseen; `repair` runs the repair now. Says the
+    /// window's Spaces, the displays' own, and how many repairs have run.
+    private static func dragSpace(_ c: [String: Any]) -> String {
+        guard let window = mainWindow else { return "error no window" }
+        guard SkyLight.available else { return "error the window server calls aren't there" }
+        if let space = c["add"] as? Int { SkyLight.add(window.windowNumber, to: [space]) }
+        if c["repair"] as? Bool == true { DragSpace.repair("automation") }
+        return "ok spaces \(SkyLight.spaces(of: window.windowNumber)) display spaces \(SkyLight.displaySpaces().sorted()) repairs \(DragSpace.repairs) stuck \(MenuWatch.stuck)"
     }
 
     private static func usage(_ c: [String: Any], app: AppModel) -> String {

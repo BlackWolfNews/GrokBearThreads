@@ -3,26 +3,29 @@ import AppKit
 /// Notes every menu the app opens in the app log (`log show --predicate
 /// 'subsystem == "com.mikerosoft.threadbear"'`): where its window went, on
 /// which screen, whether it was visible, and how it closed. Since macOS 27.2
-/// (31 Oct) the app sometimes gets into a state where clicking the moon or a
-/// composer chip shows no menu, though AppKit's own log says the menu's
-/// window was made, and only a relaunch fixes it. These lines say whether
-/// the menu was open somewhere unseen or closed straight away, and what was
-/// in front at the time (ComputerCub was a suspect).
+/// (31 Oct) a menu could be made and placed but never shown: the moon, the
+/// composer chips and right-click menus all went dead until a relaunch. The
+/// cause was the window left on the drag Space by a drag (DragSpace, 1 Nov).
 ///
 /// It also works round it. A menu whose window isn't visible a quarter
-/// second in is cancelled and drawn as a popover instead (`MenuPopover`),
-/// and from then on, until the app relaunches, the buttons' menus go
-/// straight to the popover: once stuck, the app stays stuck.
+/// second in is cancelled and drawn as a popover instead (`MenuPopover`).
+/// When the window was on the drag Space it's taken off, and the next menu
+/// shows as a menu. Anything else and, until the app relaunches, the
+/// buttons' menus go straight to the popover.
 @MainActor
 enum MenuWatch {
     private static var observers: [NSObjectProtocol] = []
     private static var opened: Date?
     private static var picked = false
-    /// Menus aren't showing in this run of the app.
+    /// Menus aren't showing in this run of the app, for a reason other than
+    /// the drag Space.
     private(set) static var stuck = false
     /// The view a `MenuAnchor` is opening its menu from, so a fallback
-    /// popover comes up from it rather than from the pointer.
-    static var anchor: (view: NSView, below: Bool)?
+    /// popover comes up from it rather than from the pointer, and who to
+    /// tell it's open (`MenuAnchor.held`).
+    static var anchor: (view: NSView, below: Bool, held: ((Bool) -> Void)?)?
+    /// Between cancelling an unseen menu and its popover coming up.
+    private(set) static var handingOver = false
 
     /// For the automation: as if menus had stopped showing, even a menu
     /// that does show.
@@ -81,8 +84,6 @@ enum MenuWatch {
             // buttons' menus go straight to the popover, `MenuAnchor`): a
             // menu can only be cancelled once its tracking is well under way.
             guard menu.supermenu == nil, !menuWindows.isEmpty, forced || !menuWindows.contains(where: { $0.occlusionState.contains(.visible) }) else { return }
-            stuck = true
-            AppLog.write("menu", "not shown: menus are stuck until the app relaunches, so they open as popovers")
             fallBack(menu)
         }
     }
@@ -91,14 +92,29 @@ enum MenuWatch {
     /// anchor it was opened from, else at the pointer.
     private static func fallBack(_ menu: NSMenu) {
         let from = anchor
+        handingOver = true
         // Called a quarter second into the menu, from a timer: by then the
         // menu is tracking, and the cancel takes.
         menu.cancelTrackingWithoutAnimation()
+        // Nearly always a window a drag left on the drag Space: taken off
+        // it, the next menu shows. Anything else stays stuck for the run.
+        // A held button now is the menu's own click (press, drag, release),
+        // not a window being dragged.
+        if !forced, DragSpace.repair("hidden menu", beforeMenu: true) {
+            AppLog.write("menu", "not shown: its window was on the drag Space; this one opens as a popover, the next as a menu")
+        } else {
+            stuck = true
+            AppLog.write("menu", "not shown: menus are stuck until the app relaunches, so they open as popovers")
+        }
         // Once the menu's tracking has wound down and `popUp` has returned.
         later(0.05) {
+            handingOver = false
             if let from, from.view.window != nil {
-                MenuPopover.show(menu, relativeTo: from.view.bounds, of: from.view, edge: from.below == from.view.isFlipped ? .maxY : .minY)
+                MenuPopover.show(menu, relativeTo: from.view.bounds, of: from.view, edge: from.below == from.view.isFlipped ? .maxY : .minY) {
+                    from.held?(false)
+                }
             } else {
+                from?.held?(false)
                 MenuPopover.showAtPointer(menu)
             }
         }

@@ -407,6 +407,9 @@ final class AppModel {
     /// A sidebar row drawn as if the pointer were over it, so the screenshot
     /// run can show the hover buttons without moving the mouse.
     var hoverOverride: String?
+    /// The sidebar row whose moon menu is open: it keeps its hover buttons,
+    /// as the pointer leaves the row to get into the menu.
+    var menuOpenRow: String?
     /// The window's panels and where they are (WindowDock), saved as Mike
     /// moves them.
     @ObservationIgnored let dock = WindowDock.makeController()

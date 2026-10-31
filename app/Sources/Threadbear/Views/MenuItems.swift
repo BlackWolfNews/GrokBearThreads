@@ -13,12 +13,18 @@ extension NSMenuItem {
 }
 
 /// Keeps the AppKit view behind a chip or button so its menu can open from
-/// it. A plain Button that pops an NSMenu, rather than SwiftUI's `Menu`:
-/// since macOS 27.2 a sidebar row's `Menu` (the Hibernate moon) took the
-/// click and never opened (31 Oct).
+/// it: a plain Button that pops an NSMenu. The Hibernate moon moved to this
+/// from SwiftUI's `Menu` on 31 Oct, when its menu stopped showing; the cause
+/// turned out to be the window left on the drag Space (DragSpace), which
+/// hid every menu, not anything about `Menu`.
 @MainActor
 final class MenuAnchor {
     weak var view: NSView?
+    /// Told when the menu, or the popover standing in for it, opens and
+    /// closes. A sidebar row keeps its buttons showing meanwhile: the
+    /// pointer leaves the row on its way into the menu, and the moon is
+    /// only there while the row's hovered.
+    var held: ((Bool) -> Void)?
 
     private var popover: NSPopover?
 
@@ -27,19 +33,26 @@ final class MenuAnchor {
     /// there isn't room.
     func popUp(_ menu: NSMenu, below: Bool = false) {
         guard let view else { return }
-        // Menus have stopped showing in this run (MenuWatch): the popover
-        // straight away.
+        // A window a drag left on the drag Space hides every menu opened
+        // from it: off it first, so this one shows.
+        DragSpace.repair("menu", beforeMenu: true)
+        held?(true)
+        // Menus have stopped showing in this run for some other reason
+        // (MenuWatch): the popover straight away.
         if MenuWatch.stuck {
-            MenuPopover.show(menu, relativeTo: view.bounds, of: view, edge: below == view.isFlipped ? .maxY : .minY)
+            MenuPopover.show(menu, relativeTo: view.bounds, of: view, edge: below == view.isFlipped ? .maxY : .minY) { [held] in held?(false) }
             return
         }
-        MenuWatch.anchor = (view, below)
+        MenuWatch.anchor = (view, below, held)
         defer { MenuWatch.anchor = nil }
         let gap = zoomed(4)
         let top = below
             ? (view.isFlipped ? view.bounds.height + gap : -gap)
             : (view.isFlipped ? -menu.size.height - gap : view.bounds.height + menu.size.height + gap)
         menu.popUp(positioning: nil, at: NSPoint(x: 0, y: top), in: view)
+        // Unless it went unseen and a popover is taking its place, which
+        // lets go when it closes.
+        if !MenuWatch.handingOver { held?(false) }
     }
 
     /// A popover above the chip that goes away on a click outside or Esc.
