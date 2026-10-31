@@ -1,7 +1,7 @@
 # Threadbear for iPhone
 
 The phone side of Threadbear: the inbox, a thread's last messages, replies
-(typed), approvals and questions, Hibernate and the Den, new
+(typed, with photos taken or chosen), approvals and questions, Hibernate and the Den, new
 threads and push. It reads the Convex mirror the runner writes
 (`docs/convex-backend.md`, `convex/phone.ts`) and never talks to the runner
 directly, so it works with the Mac asleep: whatever you send waits in

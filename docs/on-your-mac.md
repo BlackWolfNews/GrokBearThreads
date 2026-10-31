@@ -82,7 +82,7 @@ File references are where to look.
 
 | Service | Whose | What goes there |
 |---|---|---|
-| Your Convex deployment | yours | Thread titles and status, all message text (each message cut at 8,000 characters), one line per tool call, projects, schedules, your logins' emails and usage, whether you're at the Mac. Images only for threads you share by link. Tool output and files stay on the Mac. |
+| Your Convex deployment | yours | Thread titles and status, all message text (each message cut at 8,000 characters), one line per tool call, projects, schedules, your logins' emails and usage, whether you're at the Mac. Photos you send from the phone, deleted once the Mac has fetched them. Other images only for threads you share by link. Tool output and files stay on the Mac. |
 | GitHub | Mike's repo | Release tags fetched every 6 hours; the fork at setup |
 | downloads.claude.ai, registry.npmjs.org | Anthropic, npm | CLI version checks and installs; `npm ci` |
 | Anthropic, OpenAI | yours | Your threads, through the official CLIs on your own logins |

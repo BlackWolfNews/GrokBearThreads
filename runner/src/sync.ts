@@ -18,11 +18,12 @@ import crypto from 'node:crypto';
 import { ConvexClient } from 'convex/browser';
 import { phonePicture } from './project-icons.ts';
 import { imagesInEvent, readShareImage, type ShareImage } from './share-images.ts';
+import { extForMediaType, sniffImage } from './media.ts';
 import { makeFunctionReference } from 'convex/server';
 import type { Clock, TimerHandle } from './clock.ts';
 import type { Logger } from './log.ts';
 import { ErrorCode } from './protocol.ts';
-import type { Account, ApprovalDecision, ApprovalOption, AskAnswer, OpenAsk, PersistedEvent, Project, Question, Schedule, ThreadSummary } from './protocol.ts';
+import type { Account, ApprovalDecision, ApprovalOption, AskAnswer, ImageRef, OpenAsk, PersistedEvent, Project, Question, Schedule, ThreadSummary } from './protocol.ts';
 import type { Notification } from './runner.ts';
 import type { ScheduleBackend, StoredSchedule } from './schedules.ts';
 import { ThreadIndex, type RemoteThreads } from './thread-index.ts';
@@ -66,7 +67,7 @@ export type SyncConfig = {
 // lower one means its backend hasn't been deployed since this runner was:
 // said in runner.status, tb status and the log rather than stopping, since
 // the runner only adds to what it sends while the number stays the same.
-export const BACKEND_API_VERSION = 17;
+export const BACKEND_API_VERSION = 18;
 // From this one a thread's row carries its open card of asks and a finished
 // turn's next steps, and a message row can be `summary` (end_turn's
 // bullets), so the phone shows end-of-turn cards. An older backend's
@@ -181,6 +182,8 @@ export type Subscriber = { subscribe: Subscribe; close(): Promise<void> | void }
 // Puts a picture's bytes at the upload URL the backend gave (file storage)
 // and returns its storage id. Tests pass a fake.
 export type Upload = (url: string, bytes: Uint8Array, mediaType: string) => Promise<string>;
+export type Download = (url: string) => Promise<Uint8Array>;
+const MAX_PHONE_IMAGE_BYTES = 25 * 1024 * 1024;
 
 // A phone or browser that holds a phone token (docs/protocol.md "Devices"),
 // as the backend lists them (convex/tokens.ts tokenInfo).
@@ -211,12 +214,12 @@ type Host = {
 // A thread's commands may go on to a draining runner (handover.ts's
 // phoneCommands), so they can answer later; apply() waits for each.
 export type CommandHost = {
-  send(threadId: string, text: string, images: never[], opts: { origin: 'phone'; answers?: AskAnswer[] }): unknown;
+  send(threadId: string, text: string, images: ImageRef[], opts: { origin: 'phone'; answers?: AskAnswer[] }): unknown;
   respondApproval(p: { threadId: string; approvalId: string; decision: ApprovalDecision; message?: string; answers?: Record<string, string> }): unknown;
   update(p: { threadId: string; title?: string; snoozedUntil?: string | null; archived?: boolean }): unknown;
   // Seen up to the last event it has.
   markSeen(threadId: string): unknown;
-  create(p: { text: string; cwd?: string; accountId?: string; model?: string; origin: 'phone' }): { thread: ThreadSummary };
+  create(p: { text: string; images?: ImageRef[]; cwd?: string; accountId?: string; model?: string; origin: 'phone' }): { thread: ThreadSummary };
   share(threadId: string, p: { access: 'off' | 'link'; newLink?: boolean }): unknown;
   quickAsk(p: { question: string; answer: string; sources?: { title: string; url: string }[]; askedAt?: number }): { thread: ThreadSummary };
 };
@@ -241,6 +244,7 @@ export type SyncDeps = {
   post?: Post;
   subscriber?: Subscriber;
   upload?: Upload;
+  download?: Download;
   // The scheduler (schedules.ts), given the backend's schedules table once
   // a heartbeat says it has one; while inBackend(), schedules.updated isn't
   // mirrored. Absent in small tests.
@@ -276,6 +280,18 @@ export function convexUploader(fetchFn: typeof fetch = fetch): Upload {
     const body = (await res.json().catch(() => undefined)) as { storageId?: unknown } | undefined;
     if (!res.ok || typeof body?.storageId !== 'string') throw new Error(`icon upload failed: HTTP ${res.status}`);
     return body.storageId;
+  };
+}
+
+// A photo the phone sent, from file storage. Capped so a bad upload can't
+// fill the disk: the phone sends JPEGs of a few MB at most.
+export function convexDownloader(fetchFn: typeof fetch = fetch): Download {
+  return async (url) => {
+    const res = await fetchFn(url, { signal: AbortSignal.timeout(POST_TIMEOUT_MS) });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const bytes = new Uint8Array(await res.arrayBuffer());
+    if (bytes.byteLength > MAX_PHONE_IMAGE_BYTES) throw new Error('too big');
+    return bytes;
   };
 }
 
@@ -379,6 +395,13 @@ export function toPhoneAsk(a: OpenAsk): PhoneAsk {
 }
 
 // A phone send's `answers`, kept only when well formed.
+// A send or create's words, which can be empty when it carries photos.
+function commandText(a: Record<string, unknown>): string {
+  const text = typeof a.text === 'string' ? a.text : '';
+  if (!text.trim() && !(Array.isArray(a.images) && a.images.length)) throw new Error('nothing to send');
+  return text;
+}
+
 function phoneAnswers(raw: unknown): AskAnswer[] | undefined {
   if (!Array.isArray(raw)) return undefined;
   const out = raw.filter((x): x is AskAnswer => !!x && typeof x.action === 'string' && typeof x.answer === 'string').map((x) => ({ action: x.action, answer: x.answer }));
@@ -412,7 +435,12 @@ function forBackend(d: ThreadDoc, v: number): ThreadDoc {
 export function toMessageDoc(threadId: string, e: PersistedEvent): MessageDoc | undefined {
   if (e.type === 'tool.call') return { threadId, seq: e.seq, role: 'tool', text: toolLine(e), toolKind: e.kind, at: e.ts };
   if (e.type !== 'user.message' && e.type !== 'assistant.text') return undefined;
-  const text = e.text.length > MESSAGE_CHARS ? e.text.slice(0, MESSAGE_CHARS) + '\n\n[cut: the rest is on the Mac]' : e.text;
+  const cut = e.text.length > MESSAGE_CHARS ? e.text.slice(0, MESSAGE_CHARS) + '\n\n[cut: the rest is on the Mac]' : e.text;
+  // Pictures stay on the Mac, so the phone and website get a line saying
+  // there were some; a photo sent with no words would be an empty bubble.
+  const pictures = e.type === 'user.message' ? (e.images?.length ?? 0) : 0;
+  const note = pictures === 1 ? '[1 picture]' : pictures ? `[${pictures} pictures]` : '';
+  const text = note ? (cut ? `${cut}\n\n${note}` : note) : cut;
   const doc: MessageDoc = { threadId, seq: e.seq, role: e.type === 'user.message' ? 'user' : 'assistant', text, at: e.ts };
   if (e.type === 'user.message' && e.origin) doc.origin = e.origin;
   if (e.type === 'assistant.text' && e.summary) doc.summary = true;
@@ -1414,6 +1442,32 @@ export class ConvexSync {
     }
   }
 
+  // Fetches a command's photos into inbox/ for as long as the send takes:
+  // the runner copies them into the thread's media folder as it takes the
+  // message, and a draining runner does the same on this Mac.
+  private async withPhoneImages<T>(raw: unknown, send: (images: ImageRef[]) => T | Promise<T>): Promise<T> {
+    const wanted = Array.isArray(raw) ? (raw as { url?: unknown }[]) : [];
+    if (!wanted.length) return send([]);
+    const dir = paths.inbox(this.deps.home ?? os.tmpdir());
+    const download = this.deps.download ?? convexDownloader();
+    const images: ImageRef[] = [];
+    try {
+      fs.mkdirSync(dir, { recursive: true });
+      for (const { url } of wanted) {
+        if (typeof url !== 'string') throw new Error('a photo has no address');
+        const bytes = Buffer.from(await download(url));
+        const info = sniffImage(bytes);
+        if (!info) throw new Error('that photo is not an image');
+        const file = path.join(dir, `phone-${crypto.randomUUID()}.${extForMediaType(info.mediaType)}`);
+        fs.writeFileSync(file, bytes);
+        images.push({ path: file, mediaType: info.mediaType });
+      }
+      return await send(images);
+    } finally {
+      for (const { path: file } of images) fs.rmSync(file, { force: true });
+    }
+  }
+
   // Applies one command through the runner; returns the new thread's id
   // for a create or a quickAsk. Throws with a readable message for the phone.
   private async apply(c: Command): Promise<string | undefined> {
@@ -1426,8 +1480,8 @@ export class ConvexSync {
     };
     switch (c.kind) {
       case 'send': {
-        if (typeof a.text !== 'string' || !a.text.trim()) throw new Error('nothing to send');
-        await host.send(needThread(), a.text, [], { origin: 'phone', ...(phoneAnswers(a.answers) ? { answers: phoneAnswers(a.answers) } : {}) });
+        const text = commandText(a);
+        await this.withPhoneImages(a.images, (images) => host.send(needThread(), text, images, { origin: 'phone', ...(phoneAnswers(a.answers) ? { answers: phoneAnswers(a.answers) } : {}) }));
         return undefined;
       }
       case 'respond': {
@@ -1456,14 +1510,15 @@ export class ConvexSync {
         return undefined;
       }
       case 'create': {
-        if (typeof a.text !== 'string' || !a.text.trim()) throw new Error('nothing to send');
-        const { thread } = host.create({
-          text: a.text,
+        const text = commandText(a);
+        const { thread } = await this.withPhoneImages(a.images, (images) => host.create({
+          text,
+          ...(images.length ? { images } : {}),
           ...(typeof a.cwd === 'string' ? { cwd: a.cwd } : {}),
           ...(typeof a.accountId === 'string' ? { accountId: a.accountId } : {}),
           ...(typeof a.model === 'string' ? { model: a.model } : {}),
           origin: 'phone',
-        });
+        }));
         return thread.id;
       }
       case 'quickAsk': {

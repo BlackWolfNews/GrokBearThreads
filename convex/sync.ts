@@ -738,6 +738,12 @@ export const finishCommand = mutation({
     const c = await ctx.db.get(commandId);
     if (!c) return null;
     await ctx.db.patch(commandId, { state: ok ? 'done' : 'failed', doneAt: Date.now(), ...(note ? { note } : {}), ...(resultThreadId ? { resultThreadId } : {}) });
+    // The runner has its copy of the phone's photos by now, and images are
+    // meant to live on the Mac. A failed send keeps its photos on the phone,
+    // which uploads them again.
+    for (const image of Array.isArray(c.args?.images) ? c.args.images : []) {
+      if (await ctx.db.system.get(image.storageId)) await ctx.storage.delete(image.storageId);
+    }
     return null;
   },
 });

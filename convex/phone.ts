@@ -5,7 +5,7 @@
 // marks done or failed. Nothing here touches a runner directly.
 import { ConvexError, v, type Infer } from 'convex/values';
 import { mutation, query, type QueryCtx } from './_generated/server';
-import type { Doc } from './_generated/dataModel';
+import type { Doc, Id } from './_generated/dataModel';
 import { threadFields, views } from './schema';
 import { checkPhoneToken } from './lib';
 import { API_VERSION } from './version';
@@ -15,6 +15,7 @@ import { imagesFrom, shareImage } from './share';
 // runnerId goes to the main one still online (mainRunner).
 const ONLINE_MS = 3 * 60_000;
 const DEN_LIMIT = 100;
+const MAX_COMMAND_IMAGES = 6;
 
 const row = v.object({ ...threadFields, view: v.union(...views.map((x) => v.literal(x))) });
 const message = v.object({ seq: v.number(), role: v.union(v.literal('user'), v.literal('assistant')), text: v.string(), origin: v.optional(v.string()), at: v.string() });
@@ -288,13 +289,14 @@ export const accounts = query({
 
 // answers (API 14): the open card's asks the message answers, as the Mac
 // app passes them to threads.send, so the transcript shows them as answers.
+// images (API 18): photos put in file storage with imageUploadUrl.
 export const send = mutation({
-  args: { token: v.string(), threadId: v.string(), text: v.string(), answers: v.optional(v.array(v.object({ action: v.string(), answer: v.string() }))) },
+  args: { token: v.string(), threadId: v.string(), text: v.string(), answers: v.optional(v.array(v.object({ action: v.string(), answer: v.string() }))), images: v.optional(v.array(v.id('_storage'))) },
   returns: v.id('commands'),
-  handler: async (ctx, { token, threadId, text, answers }) => {
+  handler: async (ctx, { token, threadId, text, answers, images }) => {
     await checkPhoneToken(ctx, token);
     const t = await findThread(ctx, threadId);
-    return queue(ctx, t.runnerId, 'send', threadId, { text, ...(answers?.length ? { answers } : {}) });
+    return queue(ctx, t.runnerId, 'send', threadId, { text, ...(answers?.length ? { answers } : {}), ...(await commandImages(ctx, images)) });
   },
 });
 
@@ -358,12 +360,23 @@ export const share = mutation({
 // A new thread. With no runnerId, the main runner still online takes it
 // (or the first one back, as "any").
 export const create = mutation({
-  args: { token: v.string(), text: v.string(), runnerId: v.optional(v.string()), cwd: v.optional(v.string()), accountId: v.optional(v.string()), model: v.optional(v.string()) },
+  args: { token: v.string(), text: v.string(), runnerId: v.optional(v.string()), cwd: v.optional(v.string()), accountId: v.optional(v.string()), model: v.optional(v.string()), images: v.optional(v.array(v.id('_storage'))) },
   returns: v.id('commands'),
-  handler: async (ctx, { token, text, runnerId, cwd, accountId, model }) => {
+  handler: async (ctx, { token, text, runnerId, cwd, accountId, model, images }) => {
     await checkPhoneToken(ctx, token);
     const target = runnerId || (await mainRunner(ctx));
-    return queue(ctx, target, 'create', undefined, { text, ...(cwd ? { cwd } : {}), ...(accountId ? { accountId } : {}), ...(model ? { model } : {}) });
+    return queue(ctx, target, 'create', undefined, { text, ...(cwd ? { cwd } : {}), ...(accountId ? { accountId } : {}), ...(model ? { model } : {}), ...(await commandImages(ctx, images)) });
+  },
+});
+
+// Where the phone POSTs a photo before sending it (API 18). It's only in
+// Convex on its way to the runner: sync:finishCommand deletes it.
+export const imageUploadUrl = mutation({
+  args: { token: v.string() },
+  returns: v.string(),
+  handler: async (ctx, { token }) => {
+    await checkPhoneToken(ctx, token);
+    return ctx.storage.generateUploadUrl();
   },
 });
 
@@ -464,6 +477,21 @@ async function findThread(ctx: QueryCtx, threadId: string) {
     .unique();
   if (!t) throw new ConvexError({ kind: 'notFound', message: 'no such thread' });
   return t;
+}
+
+// A command's photos as the runner fetches them. The URL is worked out here
+// rather than taken from the phone, so a command can't send a runner off to
+// fetch an address of the phone's choosing.
+async function commandImages(ctx: { storage: { getUrl(id: Id<'_storage'>): Promise<string | null> } }, images: Id<'_storage'>[] | undefined) {
+  if (!images?.length) return {};
+  if (images.length > MAX_COMMAND_IMAGES) throw new ConvexError({ kind: 'invalid', message: `at most ${MAX_COMMAND_IMAGES} photos` });
+  const out = [];
+  for (const storageId of images) {
+    const url = await ctx.storage.getUrl(storageId);
+    if (!url) throw new ConvexError({ kind: 'notFound', message: 'that photo has gone' });
+    out.push({ storageId, url });
+  }
+  return { images: out };
 }
 
 async function queue(ctx: { db: QueryCtx['db'] & { insert: any } }, runnerId: string, kind: 'send' | 'respond' | 'update' | 'create' | 'page' | 'share' | 'quickAsk', threadId: string | undefined, args: Record<string, unknown>) {

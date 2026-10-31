@@ -173,7 +173,17 @@ public final class FakeBackend: Backend, @unchecked Sendable {
         }
     }
 
-    public func send(threadId: String, text: String, answers: [AskAnswer]) async throws -> String {
+    public func uploadPhoto(_ jpeg: Data) async throws -> String { UUID().uuidString }
+
+    /// What the runner's mirror shows for a message with pictures (sync.ts toMessageDoc).
+    private static func withPictures(_ text: String, _ images: [String]) -> String {
+        guard !images.isEmpty else { return text }
+        let note = images.count == 1 ? "[1 picture]" : "[\(images.count) pictures]"
+        return text.isEmpty ? note : "\(text)\n\n\(note)"
+    }
+
+    public func send(threadId: String, text: String, answers: [AskAnswer], images: [String]) async throws -> String {
+        let text = Self.withPictures(text, images)
         mutate { s in
             s.append(threadId, role: .user, text: text, origin: "phone")
             // The next turn closes the card, as on the runner.
@@ -230,9 +240,10 @@ public final class FakeBackend: Backend, @unchecked Sendable {
         return newCommand()
     }
 
-    public func create(text: String, runnerId: String?, cwd: String?) async throws -> String {
+    public func create(text: String, runnerId: String?, cwd: String?, images: [String]) async throws -> String {
         let id = UUID().uuidString.lowercased()
-        let title = String(text.prefix(48))
+        let title = text.isEmpty ? "Untitled" : String(text.prefix(48))
+        let text = Self.withPictures(text, images)
         mutate { s in
             s.threadsById[id] = PhoneThread(threadId: id, title: title, cwd: cwd ?? "~/code/misc", status: .running,
                                             lastActivityAt: .now, working: "Bear with me")

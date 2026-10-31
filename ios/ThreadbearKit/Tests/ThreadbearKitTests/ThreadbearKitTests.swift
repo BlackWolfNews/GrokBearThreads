@@ -1,5 +1,8 @@
 import Foundation
+import CoreGraphics
+import ImageIO
 import Testing
+import UniformTypeIdentifiers
 @testable import ThreadbearKit
 
 @Suite struct DecodingTests {
@@ -445,5 +448,45 @@ struct FailingTransport: ConvexTransport {
         #expect(detail.messages.first?.seq == 70)
         #expect(detail.messages.map(\.seq) == detail.messages.map(\.seq).sorted())
         #expect(detail.thread.hasEarlier(than: detail.messages.first?.seq))
+    }
+}
+
+/// A red PNG, `width` by `height`, with a GPS tag if asked, as ImageIO writes one.
+private func samplePhoto(width: Int, height: Int, gps: Bool = false) -> Data {
+    let context = CGContext(data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 0,
+                            space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+    context.setFillColor(CGColor(red: 1, green: 0, blue: 0, alpha: 1))
+    context.fill(CGRect(x: 0, y: 0, width: width, height: height))
+    let out = NSMutableData()
+    let destination = CGImageDestinationCreateWithData(out, UTType.jpeg.identifier as CFString, 1, nil)!
+    let properties: [CFString: Any] = gps ? [kCGImagePropertyGPSDictionary: [kCGImagePropertyGPSLatitude: 31.9, kCGImagePropertyGPSLatitudeRef: "S", kCGImagePropertyGPSLongitude: 115.8, kCGImagePropertyGPSLongitudeRef: "E"]] : [:]
+    CGImageDestinationAddImage(destination, context.makeImage()!, properties as CFDictionary)
+    CGImageDestinationFinalize(destination)
+    return out as Data
+}
+
+private func properties(of data: Data) -> [CFString: Any] {
+    let source = CGImageSourceCreateWithData(data as CFData, nil)!
+    return CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any] ?? [:]
+}
+
+@Suite struct PhotoPrepTests {
+    @Test func aBigPhotoShrinksAndLosesItsLocation() throws {
+        let big = samplePhoto(width: 4000, height: 3000, gps: true)
+        #expect(properties(of: big)[kCGImagePropertyGPSDictionary] != nil, "the sample has a location to lose")
+        let out = try #require(PhotoPrep.jpeg(from: big))
+        let props = properties(of: out)
+        #expect(props[kCGImagePropertyPixelWidth] as? Int == 2048)
+        #expect(props[kCGImagePropertyPixelHeight] as? Int == 1536)
+        #expect(props[kCGImagePropertyGPSDictionary] == nil)
+    }
+
+    @Test func aSmallPhotoIsNotBlownUp() throws {
+        let props = properties(of: try #require(PhotoPrep.jpeg(from: samplePhoto(width: 300, height: 200))))
+        #expect(props[kCGImagePropertyPixelWidth] as? Int == 300)
+    }
+
+    @Test func somethingElseIsNotAPhoto() {
+        #expect(PhotoPrep.jpeg(from: Data("hello".utf8)) == nil)
     }
 }

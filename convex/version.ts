@@ -63,4 +63,9 @@
 //    den. Nothing changes for runners.
 // 17: phone:counts says how many threads are hibernating and archived, so
 //    the phone can fold those sections without loading them.
-export const API_VERSION = 17;
+// 18: photos from the phone. phone:imageUploadUrl gives somewhere to put one,
+//    phone:send and phone:create take `images` (storage ids), and the command's
+//    args carry each with its URL for the runner, which fetches it;
+//    sync:finishCommand deletes them. Nothing changes for an older runner
+//    until a phone sends a photo, which it only does from 18.
+export const API_VERSION = 18;

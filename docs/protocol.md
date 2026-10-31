@@ -2482,7 +2482,13 @@ the mirror back as state. The Mac app doesn't use it.
   draining runner still has goes to that runner, as the app's would),
   then finishes it with
   the outcome and, for a `create` or `quickAsk`, the new thread's id. `send` and
-  `create` give the `user.message` `origin: "phone"`. `update` takes one
+  `create` give the `user.message` `origin: "phone"`. Either can carry
+  `images: { storageId, url }[]` (backend API 18), photos the phone put in
+  file storage (`phone:imageUploadUrl`), when `text` may be empty: the
+  runner fetches each, sends it as an ordinary `ImageRef`, and
+  `sync:finishCommand` deletes them from storage, whether or not the send
+  worked. A message row with pictures gets a `[1 picture]` line, as the
+  pictures themselves stay on the Mac. `update` takes one
   of `{ snooze: { until?, untilRestart? } }`, `{ wake }`, `{ archive }`,
   `{ unarchive }`, `{ markSeen }` or `{ title }`; `respond` is
   `approvals.respond`'s decision, message and answers; `page` is

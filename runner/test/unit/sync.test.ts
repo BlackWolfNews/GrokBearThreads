@@ -285,6 +285,9 @@ type Fake = { h: ReturnType<typeof makeHarness>; sync: ConvexSync; calls: Call[]
 // A harness whose sync has lists, commands and a fake subscription; the
 // fake post answers messageHeads and takeCommand the way the deployment
 // would.
+// What the fake deployment's photos were fetched from, across setupFull calls in a test.
+const downloads: string[] = [];
+
 function setupFull(opts: { heads?: { threadId: string; lastSeq: number }[]; taken?: Set<string>; failApply?: boolean | 'async'; log?: Logger } = {}): Fake {
   const h = makeHarness();
   const calls: Call[] = [];
@@ -312,6 +315,11 @@ function setupFull(opts: { heads?: { threadId: string; lastSeq: number }[]; take
   const sync = new ConvexSync({
     config: { enabled: true, url: 'https://x.convex.cloud', name: 'TestMac', runnerId: 'r1' },
     key: 'k',
+    home: h.cfg.home,
+    download: async (url) => {
+      downloads.push(url);
+      return url.includes('notimage') ? new Uint8Array([1, 2, 3, 4]) : new Uint8Array([0xff, 0xd8, 0xff, 0xd9]);
+    },
     runner: {
       onNotification: (fn) => h.runner.onNotification(fn),
       list: (i) => h.runner.list(i),
@@ -1275,5 +1283,44 @@ test('end-of-turn cards: next steps come from the last turn.completed while the 
   events = [...events, { seq: 7, ts, threadId: 'tn', type: 'user.message', text: 'go', images: [] }];
   summary = { ...thread, lastSeq: 7, status: 'running' as never };
   assert.equal(toThreadDoc(summary, 'r1', 0).next, undefined);
+  await sync.stop();
+});
+
+test('commands: a photo from the phone reaches the transcript and the inbox copy goes', async () => {
+  const { h, sync, push, calls } = setupFull();
+  sync.start();
+  await sync.flushNow();
+  const t = h.runner.create({ text: 'hello', cwd: h.cfg.defaults.cwd, accountId: 'claude-3' }).thread;
+  const s = session(h, t.id);
+  s.init();
+  s.result('completed');
+  await tick();
+  push([{ commandId: 'p1', kind: 'send', threadId: t.id, args: { text: '', images: [{ storageId: 's1', url: 'https://x/photo' }] }, createdAt: 1 }]);
+  await tick(10);
+  const finished = calls.filter((c) => c.fn === 'sync:finishCommand').map((c) => c.args);
+  assert.equal(finished[0]!.ok, true, String(finished[0]!.note));
+  const ev = h.events(t.id).findLast((e: { type: string }) => e.type === 'user.message') as { images: { path: string; mediaType: string }[]; origin?: string };
+  assert.equal(ev.origin, 'phone');
+  assert.equal(ev.images.length, 1);
+  assert.equal(ev.images[0]!.mediaType, 'image/jpeg');
+  assert.ok(fs.existsSync(ev.images[0]!.path), 'the thread keeps its own copy');
+  const inbox = path.join(h.cfg.home, 'inbox');
+  assert.deepEqual(fs.existsSync(inbox) ? fs.readdirSync(inbox) : [], [], 'nothing left in the inbox');
+  assert.equal(toMessageDoc(t.id, ev as never)?.text, '[1 picture]');
+  await sync.stop();
+});
+
+test('commands: something that is not an image fails the command, and nothing is sent', async () => {
+  const { h, sync, push, calls, applied } = setupFull();
+  sync.start();
+  await sync.flushNow();
+  const t = h.runner.create({ text: 'hello', cwd: h.cfg.defaults.cwd, accountId: 'claude-3' }).thread;
+  await tick();
+  push([{ commandId: 'p2', kind: 'send', threadId: t.id, args: { text: 'look', images: [{ storageId: 's2', url: 'https://x/notimage' }] }, createdAt: 1 }]);
+  await tick(10);
+  const finished = calls.filter((c) => c.fn === 'sync:finishCommand').map((c) => c.args);
+  assert.equal(finished[0]!.ok, false);
+  assert.match(String(finished[0]!.note), /not an image/);
+  assert.deepEqual(applied, []);
   await sync.stop();
 });

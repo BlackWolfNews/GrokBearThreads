@@ -147,8 +147,8 @@ struct ThreadView: View {
                 if quick.voiceThreadId == threadId, !typing {
                     VoiceBar(threadId: threadId, afterSeq: messages.last?.seq ?? 0, working: thread.isBusy) { typing = true }
                 } else {
-                    Composer(text: $draft, placeholder: thread.isBusy ? "Steer the agent" : "Reply") { text in
-                        await send(text, to: thread)
+                    Composer(text: $draft, placeholder: thread.isBusy ? "Steer the agent" : "Reply") { text, photos in
+                        await send(text, photos: photos, to: thread)
                     }
                 }
             }
@@ -253,7 +253,7 @@ struct ThreadView: View {
     /// Sends what's typed, with any answers picked on the card of asks
     /// before it (the Mac's one message: each picked ask, then the rest),
     /// or the follow-ups ticked on the done card.
-    private func send(_ text: String, to thread: PhoneThread) async -> Bool {
+    private func send(_ text: String, photos: [PickedPhoto] = [], to thread: PhoneThread) async -> Bool {
         guard let backend = model.backend else { return false }
         let asks = thread.asks ?? []
         let answers = AskAnswer.answers(asks: asks, picks: picks).map(\.answer)
@@ -263,9 +263,10 @@ struct ThreadView: View {
         let followUps = nextPickedFor == lastSeq ? next.indices.filter { nextPicks.contains($0) }.map { next[$0] } : []
         let message = !followUps.isEmpty ? AskAnswer.followUpMessage(followUps, extra: text)
             : answers.isEmpty ? text : AskAnswer.message(asks: asks, picks: picks, extra: text)
-        guard !message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return false }
+        guard !message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !photos.isEmpty else { return false }
         do {
-            let id = try await backend.send(threadId: thread.threadId, text: message, answers: answers)
+            let images = try await model.upload(photos)
+            let id = try await backend.send(threadId: thread.threadId, text: message, answers: answers, images: images)
             sent = (id, nil)
             picks = [:]
             nextPicks = []

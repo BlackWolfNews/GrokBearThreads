@@ -15,6 +15,7 @@ struct NewThreadView: View {
     }
     @State private var folder: String?
     @State private var commandId: String?
+    @State private var photos: [PickedPhoto] = []
 
     var body: some View {
         NavigationStack {
@@ -22,6 +23,12 @@ struct NewThreadView: View {
                 Section {
                     TextField("What should it do?", text: $text, axis: .vertical)
                         .lineLimit(4...12)
+                    if model.canSendPhotos {
+                        PhotoMenu(photos: $photos) {
+                            Label("Add a photo", systemImage: "photo")
+                        }
+                        if !photos.isEmpty { PhotoStrip(photos: $photos) }
+                    }
                 }
                 Section("Folder") {
                     Picker("Folder", selection: $folder) {
@@ -41,11 +48,14 @@ struct NewThreadView: View {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
                 ToolbarItem(placement: .confirmationAction) {
                     if commandId != nil { ProgressView() } else {
-                        Button("Start", action: start).disabled(text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                        Button("Start", action: start).disabled(text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && photos.isEmpty)
                     }
                 }
             }
             .task(id: commandId) { await waitForThread() }
+            .task {
+                if photos.isEmpty, let sample = model.samplePhoto, let photo = await PickedPhoto.from(sample) { photos = [photo] }
+            }
         }
     }
 
@@ -66,7 +76,8 @@ struct NewThreadView: View {
         let message = text.trimmingCharacters(in: .whitespacesAndNewlines)
         Task {
             do {
-                commandId = try await backend.create(text: message, runnerId: nil, cwd: folder)
+                let images = try await model.upload(photos)
+                commandId = try await backend.create(text: message, runnerId: nil, cwd: folder, images: images)
             } catch {
                 model.report(error)
             }

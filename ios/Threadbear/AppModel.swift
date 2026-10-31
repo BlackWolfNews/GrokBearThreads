@@ -79,6 +79,23 @@ final class AppModel {
     /// `-ThreadbearSearch <text>` (Debug only): start with this in the
     /// inbox's search, for the screenshots.
     var searchText: String?
+    /// `-ThreadbearPhoto <path>` (Debug only): start the composers with this
+    /// photo, for the screenshots, as nothing can tap the system picker.
+    var samplePhoto: Data?
+
+    /// Whether this backend takes photos. The demo does, so App Review sees it.
+    var canSendPhotos: Bool { isFake || (apiVersion ?? 0) >= BackendCompatibility.photosAPIVersion }
+
+    /// Uploads what isn't up yet and returns the storage ids, in order.
+    func upload(_ photos: [PickedPhoto]) async throws -> [String] {
+        guard let backend else { throw TransportError.server("Not connected.") }
+        var ids: [String] = []
+        for photo in photos {
+            if photo.storageId == nil { photo.storageId = try await backend.uploadPhoto(photo.jpeg) }
+            if let id = photo.storageId { ids.append(id) }
+        }
+        return ids
+    }
 
     private var tasks: [Task<Void, Never>] = []
     private(set) var apnsToken: String?
@@ -104,6 +121,7 @@ final class AppModel {
         if let i = args.firstIndex(of: "-ThreadbearOpen"), i + 1 < args.count { openThreadId = args[i + 1] }
         if let i = args.firstIndex(of: "-ThreadbearCompose"), i + 1 < args.count { composeText = args[i + 1] }
         if let i = args.firstIndex(of: "-ThreadbearSearch"), i + 1 < args.count { searchText = args[i + 1] }
+        if let i = args.firstIndex(of: "-ThreadbearPhoto"), i + 1 < args.count { samplePhoto = FileManager.default.contents(atPath: args[i + 1]) }
         #endif
         Task { [weak self] in
             while !Task.isCancelled {

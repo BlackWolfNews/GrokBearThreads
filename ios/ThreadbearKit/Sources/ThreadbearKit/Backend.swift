@@ -7,6 +7,14 @@ public extension Backend {
     func send(threadId: String, text: String) async throws -> String {
         try await send(threadId: threadId, text: text, answers: [])
     }
+
+    func send(threadId: String, text: String, answers: [AskAnswer]) async throws -> String {
+        try await send(threadId: threadId, text: text, answers: answers, images: [])
+    }
+
+    func create(text: String, runnerId: String?, cwd: String?) async throws -> String {
+        try await create(text: text, runnerId: runnerId, cwd: cwd, images: [])
+    }
 }
 
 public protocol Backend: Sendable {
@@ -32,13 +40,17 @@ public protocol Backend: Sendable {
     func connectionStates() -> AsyncStream<Bool>
 
     /// `answers` (backend API 14): the open card's asks the message answers.
-    func send(threadId: String, text: String, answers: [AskAnswer]) async throws -> String
+    /// `images` (backend API 18): storage ids from `uploadPhoto`.
+    func send(threadId: String, text: String, answers: [AskAnswer], images: [String]) async throws -> String
+    /// Puts a JPEG in file storage on its way to the runner (backend API 18), and returns its
+    /// storage id. The backend deletes it once the runner has its copy.
+    func uploadPhoto(_ jpeg: Data) async throws -> String
     func respond(threadId: String, approvalId: String, decision: ApprovalOption) async throws -> String
     /// Answers keyed by question text, several choices joined with ", ",
     /// as the Mac app sends them. `summary` goes in the transcript.
     func answer(threadId: String, approvalId: String, answers: [String: String], summary: String) async throws -> String
     func update(threadId: String, change: ThreadChange) async throws -> String
-    func create(text: String, runnerId: String?, cwd: String?) async throws -> String
+    func create(text: String, runnerId: String?, cwd: String?, images: [String]) async throws -> String
     /// A quick ask that's been answered (backend API 10): the runner makes it a thread with the
     /// question and its answer in, without running a turn, so a follow-up is an ordinary reply.
     /// The command's threadId is that thread.
@@ -60,10 +72,26 @@ public protocol Backend: Sendable {
 public final class ConvexBackend: Backend, @unchecked Sendable {
     private let transport: any ConvexTransport
     private let token: String
+    private let post: PhotoPost
 
-    public init(transport: any ConvexTransport, token: String) {
+    /// POSTs a photo's bytes to an upload URL and returns the response body.
+    public typealias PhotoPost = @Sendable (URL, Data) async throws -> Data
+
+    public init(transport: any ConvexTransport, token: String, post: @escaping PhotoPost = ConvexBackend.urlSessionPost) {
         self.transport = transport
         self.token = token
+        self.post = post
+    }
+
+    public static let urlSessionPost: PhotoPost = { url, jpeg in
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("image/jpeg", forHTTPHeaderField: "Content-Type")
+        let (data, response) = try await URLSession.shared.upload(for: request, from: jpeg)
+        guard (response as? HTTPURLResponse)?.statusCode == 200 else {
+            throw TransportError.server("Couldn't upload the photo.")
+        }
+        return data
     }
 
     public convenience init(deploymentURL: URL, token: String) {
@@ -150,8 +178,19 @@ public final class ConvexBackend: Backend, @unchecked Sendable {
 
     public func connectionStates() -> AsyncStream<Bool> { transport.connectionStates() }
 
-    public func send(threadId: String, text: String, answers: [AskAnswer]) async throws -> String {
+    public func uploadPhoto(_ jpeg: Data) async throws -> String {
+        let answer = try await transport.mutation("phone:imageUploadUrl", args())
+        guard let url = URL(string: try Self.decode(String.self, answer)) else {
+            throw TransportError.server("Couldn't upload the photo.")
+        }
+        struct Uploaded: Decodable { var storageId: String }
+        return try Self.decode(Uploaded.self, try await post(url, jpeg)).storageId
+    }
+
+    public func send(threadId: String, text: String, answers: [AskAnswer], images: [String]) async throws -> String {
         var args: [String: JSONValue] = ["threadId": .string(threadId), "text": .string(text)]
+        // Likewise: a backend before API 18 refuses it.
+        if !images.isEmpty { args["images"] = .array(images.map { .string($0) }) }
         // Only when there are some: a backend before API 14 refuses the field.
         if !answers.isEmpty {
             args["answers"] = .array(answers.map { .object(["action": .string($0.action), "answer": .string($0.answer)]) })
@@ -176,8 +215,9 @@ public final class ConvexBackend: Backend, @unchecked Sendable {
         try await command("phone:update", ["threadId": .string(threadId), "change": change.json])
     }
 
-    public func create(text: String, runnerId: String?, cwd: String?) async throws -> String {
+    public func create(text: String, runnerId: String?, cwd: String?, images: [String]) async throws -> String {
         var extra: [String: JSONValue] = ["text": .string(text)]
+        if !images.isEmpty { extra["images"] = .array(images.map { .string($0) }) }
         if let runnerId { extra["runnerId"] = .string(runnerId) }
         if let cwd { extra["cwd"] = .string(cwd) }
         return try await command("phone:create", extra)

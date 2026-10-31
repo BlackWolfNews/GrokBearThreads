@@ -540,7 +540,7 @@ export function phoneCommands(runner: Runner, remote?: Pick<Peers, 'owns' | 'cal
     });
   };
   return {
-    send: (id, text, images, o) => at(id, 'threads.send', { text, origin: o.origin }, () => runner.send(id, text, images, o)) as { turnId: string },
+    send: (id, text, images, o) => at(id, 'threads.send', { text, ...(images.length ? { images } : {}), origin: o.origin, ...(o.answers ? { answers: o.answers } : {}) }, () => runner.send(id, text, images, o)) as { turnId: string },
     respondApproval: (p) => at(p.threadId, 'approvals.respond', { ...p }, () => runner.respondApproval(p)),
     update: (p) => at(p.threadId, 'threads.update', { ...p }, () => runner.update(p)),
     // Up to whatever it has: markSeen keeps it within the thread's events.

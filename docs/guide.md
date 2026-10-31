@@ -607,7 +607,9 @@ some of it, that's part of its thread like anything else it reads.
 
 Your threads are mirrored to a Convex deployment in your own Convex account,
 which setup made: the thread list, the text of each message, and one line
-for each thing an agent did. Tool output and images stay on your Mac.
+for each thing an agent did. Tool output and images stay on your Mac. A photo
+you send from your phone passes through that deployment on its way to the Mac
+and is deleted once the Mac has it.
 A thread you share can be read by anyone with its link, pictures included,
 and only that thread. The pictures are uploaded only while it's shared.
 Notifications to your phone go through a small relay Mike runs, because
