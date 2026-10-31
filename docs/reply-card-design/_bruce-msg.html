@@ -1,0 +1,16 @@
+<h4>The malware popup</h4>
+<p>It's a false alarm in practice, not an infection:</p>
+<ul>
+<li><b>What it was:</b> an old copy of <code>codex</code> from the npm install on Bruce, signed by OpenAI on 9 May. Gatekeeper reports its signing certificate as revoked (<code>CSSMERR_TP_CERT_REVOKED</code>), which is what I think triggered the block.</li>
+<li><b>When it happened:</b> macOS moved it to the Bin on 29 Oct at 12:15, so the popup has probably been sitting there for three days.</li>
+<li><b>What I did:</b> I checked it wasn't still needed and deleted that <code>codex</code> from Bruce's Bin. <span class="DUP3">Clicking Done only closes the popup.</span></li>
+</ul>
+<h4>Why you can't see the app in Applications</h4>
+<p><span class="DUP1">It isn't in the main Applications folder. It's in Bruce's personal one</span>, at <code>/Users/bruce/Applications/Threadbear Runner.app</code>, so the picker opening at <code>/Applications</code> won't show it.</p>
+<p>The permission you allowed did register, but it only covers Downloads and removable volumes. There's no Full Disk Access entry for the runner yet.</p>
+<p><span class="DUP2">I don't know what state I left the file picker in. It may still have a "Go to folder" box open.</span></p>
+<h4>The other two notifications</h4>
+<ul>
+<li><code>run.sh</code> <b>background activity:</b> that's Sammy Cam's Convex backend, so it's expected.</li>
+<li><b>"Device Added to Your Account":</b> I didn't look into this one. If you don't recognise the device, check it in System Settings.</li>
+</ul>
