@@ -27,6 +27,14 @@ final class MenuAnchor {
     /// there isn't room.
     func popUp(_ menu: NSMenu, below: Bool = false) {
         guard let view else { return }
+        // Menus have stopped showing in this run (MenuWatch): the popover
+        // straight away.
+        if MenuWatch.stuck {
+            MenuPopover.show(menu, relativeTo: view.bounds, of: view, edge: below == view.isFlipped ? .maxY : .minY)
+            return
+        }
+        MenuWatch.anchor = (view, below)
+        defer { MenuWatch.anchor = nil }
         let gap = zoomed(4)
         let top = below
             ? (view.isFlipped ? view.bounds.height + gap : -gap)

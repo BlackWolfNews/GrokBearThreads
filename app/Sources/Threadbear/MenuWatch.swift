@@ -8,11 +8,26 @@ import AppKit
 /// window was made, and only a relaunch fixes it. These lines say whether
 /// the menu was open somewhere unseen or closed straight away, and what was
 /// in front at the time (ComputerCub was a suspect).
+///
+/// It also works round it. A menu whose window isn't visible a quarter
+/// second in is cancelled and drawn as a popover instead (`MenuPopover`),
+/// and from then on, until the app relaunches, the buttons' menus go
+/// straight to the popover: once stuck, the app stays stuck.
 @MainActor
 enum MenuWatch {
     private static var observers: [NSObjectProtocol] = []
     private static var opened: Date?
     private static var picked = false
+    /// Menus aren't showing in this run of the app.
+    private(set) static var stuck = false
+    /// The view a `MenuAnchor` is opening its menu from, so a fallback
+    /// popover comes up from it rather than from the pointer.
+    static var anchor: (view: NSView, below: Bool)?
+
+    /// For the automation: as if menus had stopped showing, even a menu
+    /// that does show.
+    private static var forced = false
+    static func forceStuck() { stuck = true; forced = true }
 
     static func install() {
         guard observers.isEmpty else { return }
@@ -38,9 +53,11 @@ enum MenuWatch {
         let front = NSWorkspace.shared.frontmostApplication?.bundleIdentifier ?? "?"
         let mouse = NSEvent.mouseLocation
         AppLog.write("menu", "opened \(describe(menu)), active \(NSApp.isActive), front \(front), mouse \(Int(mouse.x)),\(Int(mouse.y))")
-        // Once its window is up. The main queue still runs while a menu
-        // tracks the mouse (common modes), so this lands mid-menu.
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
+        // Once its window is up. A run-loop timer in the common modes, not
+        // the main queue: it fires while the menu tracks the mouse even when
+        // the menu was opened from a main-queue block, which the queue
+        // can't interrupt (a scripted run hung that way, 31 Oct).
+        later(0.25) {
             guard opened != nil else {
                 AppLog.write("menu", "closed again within 0.25 s, before its window could be looked at")
                 return
@@ -53,6 +70,37 @@ enum MenuWatch {
                 let onScreen = NSScreen.screens.contains { $0.frame.intersects(f) }
                 AppLog.write("menu", "window \(type(of: window)) \(Int(f.minX)),\(Int(f.minY)) \(Int(f.width))x\(Int(f.height)) on \(screen), on a screen \(onScreen), alpha \(window.alphaValue), occlusion visible \(window.occlusionState.contains(.visible))")
             }
+            // The menu's own windows (not the tooltip panel, at the same
+            // level): when stuck, none of them is ever shown. A working
+            // menu's glass window is by now.
+            let menuWindows = windows.filter { window in
+                let name = String(describing: type(of: window))
+                return name.contains("Menu") || name.contains("GlassEffect")
+            }
+            // Right-click menus land here every time once stuck (the
+            // buttons' menus go straight to the popover, `MenuAnchor`): a
+            // menu can only be cancelled once its tracking is well under way.
+            guard menu.supermenu == nil, !menuWindows.isEmpty, forced || !menuWindows.contains(where: { $0.occlusionState.contains(.visible) }) else { return }
+            stuck = true
+            AppLog.write("menu", "not shown: menus are stuck until the app relaunches, so they open as popovers")
+            fallBack(menu)
+        }
+    }
+
+    /// Puts the invisible menu away and shows it as a popover, from the
+    /// anchor it was opened from, else at the pointer.
+    private static func fallBack(_ menu: NSMenu) {
+        let from = anchor
+        // Called a quarter second into the menu, from a timer: by then the
+        // menu is tracking, and the cancel takes.
+        menu.cancelTrackingWithoutAnimation()
+        // Once the menu's tracking has wound down and `popUp` has returned.
+        later(0.05) {
+            if let from, from.view.window != nil {
+                MenuPopover.show(menu, relativeTo: from.view.bounds, of: from.view, edge: from.below == from.view.isFlipped ? .maxY : .minY)
+            } else {
+                MenuPopover.showAtPointer(menu)
+            }
         }
     }
 
@@ -61,6 +109,12 @@ enum MenuWatch {
         opened = nil
         let seconds = String(format: "%.2f", Date().timeIntervalSince(start))
         AppLog.write("menu", "closed \(describe(menu)) after \(seconds) s, \(picked ? "an item picked" : "nothing picked")")
+    }
+
+    /// Runs `body` after `seconds` on a common-modes timer (see `began`).
+    private static func later(_ seconds: TimeInterval, _ body: @escaping @MainActor () -> Void) {
+        let timer = Timer(timeInterval: seconds, repeats: false) { _ in MainActor.assumeIsolated { body() } }
+        RunLoop.main.add(timer, forMode: .common)
     }
 
     /// Its first items, enough to tell which menu it was.

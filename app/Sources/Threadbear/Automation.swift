@@ -980,6 +980,8 @@ enum Automation {
             return menu(c, app: app)
         case "composer-menu":
             return composerMenu(c, app: app)
+        case "menu-popover":
+            return menuPopover(c, app: app)
         case "usage":
             // The Usage panel: {"show": true} opens it ({"show": false}
             // closes it), {"click": "Update"} presses one of the Updates
@@ -1552,6 +1554,69 @@ enum Automation {
             return "ok"
         }
         return "ok " + json(describe(menu, indent: ""))
+    }
+
+    /// The popover menus stand in for once macOS stops showing the app's
+    /// menus (MenuWatch): `stuck` true makes this run behave as if it had;
+    /// `show` (`permission`, `folder`, `plus` or `hibernate`, with `id` for
+    /// a thread) draws that menu as a popover over the window and says its
+    /// window number; `popup` opens it as a real menu instead (stuck, the
+    /// popover should take its place); `click` picks a row by its title, as a click would.
+    /// With none of them, lists the rows on show.
+    private static func menuPopover(_ c: [String: Any], app: AppModel) -> String {
+        if c["stuck"] as? Bool == true { MenuWatch.forceStuck() }
+        if let title = c["click"] as? String {
+            func find(_ rows: [MenuPopoverRow]) -> MenuPopoverRow? {
+                for row in rows { if row.title == title { return row }; if let child = find(row.children) { return child } }
+                return nil
+            }
+            guard MenuPopover.isShown, let row = find(MenuPopover.rows) else { return "error no row \(title)" }
+            MenuPopover.pick(row)
+            RunLoop.main.run(until: Date().addingTimeInterval(0.3))
+            return "ok"
+        }
+        if let name = (c["show"] ?? c["popup"]) as? String {
+            let settings = ThreadSettings(app: app, thread: app.selectedThread)
+            let menu: NSMenu
+            switch name {
+            case "permission": menu = settings.permissionMenu()
+            case "folder": menu = settings.folderMenu()
+            case "plus": menu = settings.plusMenu(attach: {}, schedule: {})
+            case "hibernate":
+                guard let id = c["id"] as? String ?? app.selection else { return "error hibernate needs id" }
+                menu = SnoozeNSMenu.make(threadId: id, app: app)
+            default: return "error show is permission, folder, plus or hibernate"
+            }
+            guard let view = mainWindow?.contentView else { return "error no window" }
+            let spot = NSRect(x: view.bounds.midX, y: view.bounds.midY, width: 1, height: 1)
+            if c["popup"] != nil {
+                // A real menu, as a right-click opens one: MenuWatch has to
+                // see it and, if menus are stuck, swap in the popover.
+                // Never left up on Mike's screen if the swap doesn't happen.
+                // A timer: this runs in a main-queue block, so the queue
+                // can't break in while the menu is up.
+                let safety = Timer(timeInterval: 2, repeats: false) { _ in menu.cancelTrackingWithoutAnimation() }
+                RunLoop.main.add(safety, forMode: .common)
+                menu.popUp(positioning: nil, at: NSPoint(x: spot.minX, y: spot.minY), in: view)
+            } else {
+                MenuPopover.show(menu, relativeTo: spot, of: view, edge: .maxY)
+            }
+            RunLoop.main.run(until: Date().addingTimeInterval(0.4))
+            let window = NSApp.windows.first { String(describing: type(of: $0)).contains("Popover") && $0.isVisible }
+            return window.map { "ok window \($0.windowNumber)" } ?? "error the popover didn't open"
+        }
+        func lines(_ rows: [MenuPopoverRow], _ indent: String) -> [String] {
+            rows.flatMap { row -> [String] in
+                let line: String
+                switch row.kind {
+                case .separator: line = indent + "---"
+                case .header: line = indent + "# " + row.title
+                case .item: line = indent + (row.checked ? "[x] " : "") + row.title + (row.subtitle.map { " - " + $0 } ?? "") + (row.enabled ? "" : " (disabled)")
+                }
+                return [line] + lines(row.children, indent + "  ")
+            }
+        }
+        return "ok stuck \(MenuWatch.stuck) shown \(MenuPopover.isShown) " + json(lines(MenuPopover.rows, ""))
     }
 
     private static func usage(_ c: [String: Any], app: AppModel) -> String {
