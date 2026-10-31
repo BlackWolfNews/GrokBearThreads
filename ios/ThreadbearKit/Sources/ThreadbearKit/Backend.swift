@@ -15,6 +15,10 @@ public extension Backend {
     func create(text: String, runnerId: String?, cwd: String?) async throws -> String {
         try await create(text: text, runnerId: runnerId, cwd: cwd, images: [])
     }
+
+    func create(text: String, runnerId: String?, cwd: String?, images: [String]) async throws -> String {
+        try await create(text: text, runnerId: runnerId, cwd: cwd, images: images, settings: NewThreadSettings())
+    }
 }
 
 public protocol Backend: Sendable {
@@ -50,7 +54,10 @@ public protocol Backend: Sendable {
     /// as the Mac app sends them. `summary` goes in the transcript.
     func answer(threadId: String, approvalId: String, answers: [String: String], summary: String) async throws -> String
     func update(threadId: String, change: ThreadChange) async throws -> String
-    func create(text: String, runnerId: String?, cwd: String?, images: [String]) async throws -> String
+    /// `settings` (backend API 20 for an effort): the model and effort it starts on.
+    func create(text: String, runnerId: String?, cwd: String?, images: [String], settings: NewThreadSettings) async throws -> String
+    /// Every runner's logins with the models they offer (backend API 20), for the new thread pickers.
+    func accounts() -> AsyncThrowingStream<[PhoneAccount], Error>
     /// A quick ask that's been answered (backend API 10): the runner makes it a thread with the
     /// question and its answer in, without running a turn, so a follow-up is an ordinary reply.
     /// The command's threadId is that thread.
@@ -226,8 +233,14 @@ public final class ConvexBackend: Backend, @unchecked Sendable {
         try await command("phone:update", ["threadId": .string(threadId), "change": change.json])
     }
 
-    public func create(text: String, runnerId: String?, cwd: String?, images: [String]) async throws -> String {
+    public func accounts() -> AsyncThrowingStream<[PhoneAccount], Error> {
+        live("phone:accounts", [:], as: [PhoneAccount].self)
+    }
+
+    public func create(text: String, runnerId: String?, cwd: String?, images: [String], settings: NewThreadSettings) async throws -> String {
         var extra: [String: JSONValue] = ["text": .string(text)]
+        if let model = settings.model { extra["model"] = .string(model) }
+        if let effort = settings.effort { extra["effort"] = .string(effort) }
         if !images.isEmpty { extra["images"] = .array(images.map { .string($0) }) }
         if let runnerId { extra["runnerId"] = .string(runnerId) }
         if let cwd { extra["cwd"] = .string(cwd) }

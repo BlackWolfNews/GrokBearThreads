@@ -576,6 +576,9 @@ public enum BackendCompatibility {
     /// From 19 the Pocket (phone:pocket). Cards already saved on the phone
     /// still show on anything older, or with no signal.
     public static let pocketAPIVersion = 19
+    /// From 20 accounts carry their models and phone:create takes an effort,
+    /// for the new thread pickers. Older backends get neither picker.
+    public static let modelsAPIVersion = 20
 
     /// The line to show, or nil when the backend is fine.
     public static func problem(_ identity: PhoneIdentity) -> String? {

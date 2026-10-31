@@ -1,8 +1,9 @@
 import SwiftUI
 import ThreadbearKit
 
-/// A new thread from the phone. Like the Mac it starts in misc on the
-/// last-used account unless you pick a folder; the runner fills the rest.
+/// A new thread from the phone. It starts in the runner's default folder
+/// (Mike didn't want a folder picker on the phone, 31 Oct); the model and
+/// effort can be picked, and the runner picks a login with room for them.
 struct NewThreadView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
@@ -13,7 +14,8 @@ struct NewThreadView: View {
         _text = State(initialValue: text)
         self.onCreated = onCreated
     }
-    @State private var folder: String?
+    @State private var modelId: String?
+    @State private var effort: String?
     @State private var commandId: String?
     @State private var photos: [PickedPhoto] = []
 
@@ -21,8 +23,8 @@ struct NewThreadView: View {
         NavigationStack {
             Form {
                 Section {
-                    TextField("What should it do?", text: $text, axis: .vertical)
-                        .lineLimit(4...12)
+                    PastableTextField(text: $text, placeholder: "What should it do?", lines: 4...12,
+                                      onPasteImages: model.canSendPhotos ? { addPasted($0, to: $photos, model: model) } : nil)
                     if model.canSendPhotos {
                         PhotoMenu(photos: $photos) {
                             Label("Add a photo", systemImage: "photo")
@@ -30,13 +32,21 @@ struct NewThreadView: View {
                         if !photos.isEmpty { PhotoStrip(photos: $photos) }
                     }
                 }
-                Section("Folder") {
-                    Picker("Folder", selection: $folder) {
-                        Text("misc (the usual)").tag(String?.none)
-                        ForEach(recentFolders, id: \.self) { Text(Self.short($0)).tag(Optional($0)) }
+                if !models.isEmpty {
+                    Section {
+                        Picker("Model", selection: $modelId) {
+                            Text("Default").tag(String?.none)
+                            ForEach(models) { Text($0.title).tag(Optional($0.id)) }
+                        }
+                        Picker("Effort", selection: $effort) {
+                            Text("Default").tag(String?.none)
+                            ForEach(NewThreadChoices.efforts(for: chosenModel), id: \.self) { Text(NewThreadChoices.effortTitle($0)).tag(Optional($0)) }
+                        }
                     }
-                    .pickerStyle(.inline)
-                    .labelsHidden()
+                    .onChange(of: modelId) {
+                        // Codex's Ultra on a Claude model, say: back to the model's own.
+                        if !NewThreadChoices.keeps(effort: effort, model: chosenModel) { effort = nil }
+                    }
                 }
                 if let offline = model.offlineText {
                     Section { Label("\(offline). It'll start when it's back.", systemImage: "moon.zzz").font(.footnote) }
@@ -59,17 +69,8 @@ struct NewThreadView: View {
         }
     }
 
-    /// Folders of recent threads, most used first, misc left out (it's the default).
-    private var recentFolders: [String] {
-        var counts: [String: Int] = [:]
-        for thread in model.inbox + model.hibernating + model.den.prefix(30) { counts[thread.cwd, default: 0] += 1 }
-        return counts.filter { !$0.key.hasSuffix("/misc") }.sorted { $0.value != $1.value ? $0.value > $1.value : $0.key < $1.key }
-            .prefix(8).map(\.key)
-    }
-
-    static func short(_ path: String) -> String {
-        path.replacingOccurrences(of: #"^/Users/[^/]+"#, with: "~", options: .regularExpression)
-    }
+    private var models: [PhoneModelChoice] { model.newThreadModels }
+    private var chosenModel: PhoneModelChoice? { models.first { $0.id == modelId } }
 
     private func start() {
         guard let backend = model.backend else { return }
@@ -77,7 +78,8 @@ struct NewThreadView: View {
         Task {
             do {
                 let images = try await model.upload(photos)
-                commandId = try await backend.create(text: message, runnerId: nil, cwd: folder, images: images)
+                commandId = try await backend.create(text: message, runnerId: nil, cwd: nil, images: images,
+                                                     settings: NewThreadSettings(model: modelId, effort: effort))
             } catch {
                 model.report(error)
             }

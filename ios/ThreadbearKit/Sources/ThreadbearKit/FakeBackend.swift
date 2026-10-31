@@ -249,7 +249,23 @@ public final class FakeBackend: Backend, @unchecked Sendable {
         return newCommand()
     }
 
-    public func create(text: String, runnerId: String?, cwd: String?, images: [String]) async throws -> String {
+    public func accounts() -> AsyncThrowingStream<[PhoneAccount], Error> {
+        watch { Self.sampleAccounts }
+    }
+
+    /// Two logins, so the demo's new thread sheet has models to pick.
+    static let sampleAccounts = [
+        PhoneAccount(id: "claude-main", provider: "claude", title: "Claude", models: [
+            PhoneModelChoice(id: "opus", title: "Opus 5.5", effortLevels: ["low", "medium", "high", "xhigh", "max"]),
+            PhoneModelChoice(id: "sonnet", title: "Sonnet 5.5", effortLevels: ["low", "medium", "high", "xhigh", "max"]),
+            PhoneModelChoice(id: "haiku", title: "Haiku 5.5"),
+        ]),
+        PhoneAccount(id: "codex-main", provider: "codex", title: "Codex", models: [
+            PhoneModelChoice(id: "gpt-6-astra", title: "GPT-6 Astra", effortLevels: ["low", "medium", "high", "xhigh", "ultra"]),
+        ]),
+    ]
+
+    public func create(text: String, runnerId: String?, cwd: String?, images: [String], settings: NewThreadSettings) async throws -> String {
         let id = UUID().uuidString.lowercased()
         let title = text.isEmpty ? "Untitled" : String(text.prefix(48))
         let text = Self.withPictures(text, images)

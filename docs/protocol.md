@@ -2451,8 +2451,10 @@ the mirror back as state. The Mac app doesn't use it.
   symbol?, picture?, by }`, `picture` naming the runner's copy of the
   picture, the file name without its extension; `Schedule` without effort
   and permission mode; `Account` as `id, provider, title, note?, email?,
-  plan?, defaultModel?, usage?`, never `configDir` or the model list). The
-  same at start.
+  plan?, defaultModel?, usage?`, never `configDir`; from backend API 20
+  also `models?` (each `id, title, effortLevels?, defaultEffort?`) and
+  `defaultEffort?`, for the phone's new thread pickers). The same at start,
+  and the accounts again once a heartbeat first says the backend is at 20.
 - **Project pictures** (backend API 5). A project's picture goes to the
   deployment's file storage so the phone can show it: the runner asks
   `sync:projectIcons` once for what the mirror has, and for each project
@@ -2482,7 +2484,9 @@ the mirror back as state. The Mac app doesn't use it.
   draining runner still has goes to that runner, as the app's would),
   then finishes it with
   the outcome and, for a `create` or `quickAsk`, the new thread's id. `send` and
-  `create` give the `user.message` `origin: "phone"`. Either can carry
+  `create` give the `user.message` `origin: "phone"`. A `create` can name
+  `accountId`, `model` and (backend API 20) `effort`, checked as
+  `threads.create` checks them; an effort that isn't a level is dropped. Either can carry
   `images: { storageId, url }[]` (backend API 18), photos the phone put in
   file storage (`phone:imageUploadUrl`), when `text` may be empty: the
   runner fetches each, sends it as an ordinary `ImageRef`, and

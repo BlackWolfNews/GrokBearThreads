@@ -71,4 +71,8 @@
 // 19: the Pocket. phone:pocket and phone:removePocketCard for the phone,
 //    sync:savePocketCard, sync:removePocketCard and sync:pocketCards for the
 //    runner's `pocket` tool. Nothing else changes for older clients.
-export const API_VERSION = 19;
+// 20: the phone's new thread pickers. Account rows carry `models` ({ id,
+//    title, effortLevels?, defaultEffort? }) and `defaultEffort`, and
+//    phone:create takes `effort`. A runner sends models only to a backend
+//    of 20 or later; an older runner ignores an effort.
+export const API_VERSION = 20;

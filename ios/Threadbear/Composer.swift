@@ -1,7 +1,7 @@
 import SwiftUI
 
 /// The text box at the bottom of a thread: type, or use the keyboard's own
-/// dictation, add photos, then send.
+/// dictation, add or paste photos, then send.
 struct Composer: View {
     @Environment(AppModel.self) private var model
     @Binding var text: String
@@ -10,7 +10,6 @@ struct Composer: View {
     var onSend: (String, [PickedPhoto]) async -> Bool
     @State private var photos: [PickedPhoto] = []
     @State private var sending = false
-    @FocusState private var focused: Bool
 
     var body: some View {
         VStack(spacing: 6) {
@@ -29,9 +28,8 @@ struct Composer: View {
                     .tint(.secondary)
                     .accessibilityLabel("Add a photo")
                 }
-                TextField(placeholder, text: $text, axis: .vertical)
-                    .lineLimit(1...6)
-                    .focused($focused)
+                PastableTextField(text: $text, placeholder: placeholder, lines: 1...6,
+                                  onPasteImages: model.canSendPhotos ? { addPasted($0, to: $photos, model: model) } : nil)
                     .padding(.horizontal, 14)
                     .padding(.vertical, 9)
                     .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 20, style: .continuous))

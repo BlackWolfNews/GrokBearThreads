@@ -404,6 +404,9 @@ const accountDoc = v.object({
   email: v.optional(v.string()),
   plan: v.optional(v.string()),
   defaultModel: v.optional(v.string()),
+  // API 20: what the phone's new thread pickers offer.
+  models: v.optional(v.array(v.object({ id: v.string(), title: v.string(), effortLevels: v.optional(v.array(v.string())), defaultEffort: v.optional(v.string()) }))),
+  defaultEffort: v.optional(v.string()),
   usage: v.optional(
     v.object({
       windows: v.array(v.object({ kind: v.string(), title: v.string(), remainingPercent: v.number(), resetsAt: v.optional(v.string()), detail: v.optional(v.string()) })),

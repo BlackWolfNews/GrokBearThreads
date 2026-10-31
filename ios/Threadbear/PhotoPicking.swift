@@ -23,6 +23,20 @@ import ThreadbearKit
     }
 }
 
+/// Adds photos pasted into a composer, as many as still fit.
+@MainActor func addPasted(_ images: [Data], to photos: Binding<[PickedPhoto]>, model: AppModel) {
+    Task {
+        for data in images {
+            guard photos.wrappedValue.count < PhotoPrep.maxPhotos else { return }
+            if let photo = await PickedPhoto.from(data) {
+                photos.wrappedValue.append(photo)
+            } else {
+                model.report(TransportError.server("Couldn't read that photo."))
+            }
+        }
+    }
+}
+
 /// The menu that adds a photo: take one or choose from the library. The
 /// library picker runs outside the app, so it needs no permission; the camera
 /// asks the first time. Left out where there's no camera (the simulator).

@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { makeHarness, tick, tmpDir } from '../helpers/fakes.ts';
-import { ConvexSync, BACKEND_API_VERSION, ICONS_API_VERSION, RUNNER_ICON_API_VERSION, SCHEDULES_API_VERSION, SHARE_API_VERSION, WOKE_API_VERSION, SECTIONS_API_VERSION, PRESENCE_MS, SYNC_COALESCE_MS, HEARTBEAT_MS, SYNC_BATCH, ensureRunnerId, toThreadDoc, convexPoster, convexUploader, pictureName, type ThreadDoc } from '../../src/sync.ts';
+import { ConvexSync, BACKEND_API_VERSION, ICONS_API_VERSION, RUNNER_ICON_API_VERSION, SCHEDULES_API_VERSION, SHARE_API_VERSION, WOKE_API_VERSION, SECTIONS_API_VERSION, MODELS_API_VERSION, toAccountDoc, PRESENCE_MS, SYNC_COALESCE_MS, HEARTBEAT_MS, SYNC_BATCH, ensureRunnerId, toThreadDoc, convexPoster, convexUploader, pictureName, type ThreadDoc } from '../../src/sync.ts';
 import type { Project } from '../../src/protocol.ts';
 import type { ScheduleBackend } from '../../src/schedules.ts';
 import { nullLogger, type Logger } from '../../src/log.ts';
@@ -288,13 +288,14 @@ type Fake = { h: ReturnType<typeof makeHarness>; sync: ConvexSync; calls: Call[]
 // What the fake deployment's photos were fetched from, across setupFull calls in a test.
 const downloads: string[] = [];
 
-function setupFull(opts: { heads?: { threadId: string; lastSeq: number }[]; taken?: Set<string>; failApply?: boolean | 'async'; log?: Logger } = {}): Fake {
+function setupFull(opts: { heads?: { threadId: string; lastSeq: number }[]; taken?: Set<string>; failApply?: boolean | 'async'; log?: Logger; apiVersion?: number } = {}): Fake {
   const h = makeHarness();
   const calls: Call[] = [];
   const taken = opts.taken ?? new Set<string>();
   const post = async (kind: 'mutation' | 'query', fn: string, args: Record<string, unknown>) => {
     calls.push({ kind, fn, args });
     if (fn === 'sync:messageHeads') return opts.heads ?? [];
+    if (fn === 'sync:heartbeat' && opts.apiVersion !== undefined) return { apiVersion: opts.apiVersion };
     if (fn === 'sync:takeCommand') {
       const id = String(args.commandId);
       if (taken.has(id)) return false;
@@ -350,7 +351,7 @@ function setupFull(opts: { heads?: { threadId: string; lastSeq: number }[]; take
         return h.runner.markSeen(id, h.runner.get(id).lastSeq);
       },
       create: (p) => {
-        applied.push(`create ${p.text} ${p.origin}`);
+        applied.push(`create ${p.text} ${p.origin}${p.model ? ` ${p.model}` : ''}${p.effort ? ` ${p.effort}` : ''}`);
         return h.runner.create(p);
       },
       share: (id, p) => {
@@ -536,6 +537,34 @@ test('lists: projects, schedules and accounts go up at start and when they chang
   await tick();
   assert.equal(set('Projects').length, 2);
   assert.deepEqual(set('Projects')[1]!.args.projects, []);
+});
+
+test('lists: from backend API 20 accounts carry their models and effort levels, for the phone\'s new thread pickers', async () => {
+  const { sync, calls } = setupFull({ apiVersion: MODELS_API_VERSION });
+  sync.start();
+  await sync.flushNow();
+  await tick();
+  // The first flush may go before the heartbeat says the version: the accounts go again once it does.
+  await sync.flushNow();
+  const sets = calls.filter((c) => c.fn === 'sync:setAccounts');
+  const accounts = sets.at(-1)!.args.accounts as Record<string, unknown>[];
+  assert.deepEqual(accounts[0]!.models, [{ id: 'x', title: 'X' }]);
+  assert.ok(!('configDir' in accounts[0]!));
+  assert.deepEqual(toAccountDoc({ id: 'c', provider: 'codex', title: 'Codex', configDir: '/c', defaultEffort: 'medium', models: [{ id: 'g', model: 'gpt-x', title: 'G', description: 'long words', effortLevels: ['low', 'high'], defaultEffort: 'low' }] }, MODELS_API_VERSION), {
+    id: 'c', provider: 'codex', title: 'Codex', defaultEffort: 'medium', models: [{ id: 'g', title: 'G', effortLevels: ['low', 'high'], defaultEffort: 'low' }],
+  });
+});
+
+test('commands: a create from the phone can name its model and effort; an effort that isn\'t one is dropped', async () => {
+  const { h, sync, push, applied } = setupFull();
+  sync.start();
+  await sync.flushNow();
+  push([
+    { commandId: 'm1', kind: 'create', args: { text: 'one', cwd: h.cfg.defaults.cwd, accountId: 'claude-3', model: 'haiku', effort: 'high' }, createdAt: 1 },
+    { commandId: 'm2', kind: 'create', args: { text: 'two', cwd: h.cfg.defaults.cwd, accountId: 'claude-3', effort: 'loud' }, createdAt: 2 },
+  ]);
+  await tick(10);
+  assert.deepEqual(applied, ['create one phone haiku high', 'create two phone']);
 });
 
 test('commands: each pending one is taken once, applied through the runner as from the phone, and finished', async () => {

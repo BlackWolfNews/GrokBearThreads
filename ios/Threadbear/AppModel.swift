@@ -13,6 +13,8 @@ final class AppModel {
     private(set) var runners: [PhoneRunner] = []
     /// The projects by id, for the rows' icons (backend API 5 carries them).
     private(set) var projects: [String: PhoneProject] = [:]
+    /// The logins and their models (backend API 20), for the new thread pickers.
+    private(set) var accounts: [PhoneAccount] = []
     /// The Pocket's cards, from the file until the backend answers, so they
     /// show with no signal.
     private(set) var pocket: [PocketCard] = []
@@ -97,6 +99,12 @@ final class AppModel {
 
     /// Whether this backend takes photos. The demo does, so App Review sees it.
     var canSendPhotos: Bool { isFake || (apiVersion ?? 0) >= BackendCompatibility.photosAPIVersion }
+
+    /// The models a new thread can start on; empty hides the pickers, as an
+    /// older backend would turn an effort down.
+    var newThreadModels: [PhoneModelChoice] {
+        isFake || (apiVersion ?? 0) >= BackendCompatibility.modelsAPIVersion ? NewThreadChoices.models(accounts) : []
+    }
 
     /// Uploads what isn't up yet and returns the storage ids, in order.
     func upload(_ photos: [PickedPhoto]) async throws -> [String] {
@@ -311,6 +319,7 @@ final class AppModel {
         isFake = false
         runners = []
         projects = [:]
+        accounts = []
         inbox = []
         hibernating = []
         den = []
@@ -344,6 +353,7 @@ final class AppModel {
         apiVersion = nil
         runners = []
         projects = [:]
+        accounts = []
         inbox = []
         hibernating = []
         den = []
@@ -387,6 +397,7 @@ final class AppModel {
         })
         loaded = []
         followLists()
+        tasks.append(follow(backend.accounts()) { $0.accounts = $1 })
         tasks.append(follow(backend.schedules()) { $0.wakes = InboxSections.wakes($1) })
         tasks.append(Task { [weak self] in
             for await up in backend.connectionStates() { self?.connected = up }

@@ -384,12 +384,12 @@ export const share = mutation({
 // A new thread. With no runnerId, the main runner still online takes it
 // (or the first one back, as "any").
 export const create = mutation({
-  args: { token: v.string(), text: v.string(), runnerId: v.optional(v.string()), cwd: v.optional(v.string()), accountId: v.optional(v.string()), model: v.optional(v.string()), images: v.optional(v.array(v.id('_storage'))) },
+  args: { token: v.string(), text: v.string(), runnerId: v.optional(v.string()), cwd: v.optional(v.string()), accountId: v.optional(v.string()), model: v.optional(v.string()), effort: v.optional(v.string()), images: v.optional(v.array(v.id('_storage'))) },
   returns: v.id('commands'),
-  handler: async (ctx, { token, text, runnerId, cwd, accountId, model, images }) => {
+  handler: async (ctx, { token, text, runnerId, cwd, accountId, model, effort, images }) => {
     await checkPhoneToken(ctx, token);
     const target = runnerId || (await mainRunner(ctx));
-    return queue(ctx, target, 'create', undefined, { text, ...(cwd ? { cwd } : {}), ...(accountId ? { accountId } : {}), ...(model ? { model } : {}), ...(await commandImages(ctx, images)) });
+    return queue(ctx, target, 'create', undefined, { text, ...(cwd ? { cwd } : {}), ...(accountId ? { accountId } : {}), ...(model ? { model } : {}), ...(effort ? { effort } : {}), ...(await commandImages(ctx, images)) });
   },
 });
 

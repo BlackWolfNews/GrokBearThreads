@@ -22,8 +22,8 @@ import { extForMediaType, sniffImage } from './media.ts';
 import { makeFunctionReference } from 'convex/server';
 import type { Clock, TimerHandle } from './clock.ts';
 import type { Logger } from './log.ts';
-import { ErrorCode } from './protocol.ts';
-import type { Account, ApprovalDecision, ApprovalOption, AskAnswer, ImageRef, OpenAsk, PersistedEvent, Project, Question, Schedule, ThreadSummary } from './protocol.ts';
+import { ErrorCode, isEffortLevel } from './protocol.ts';
+import type { Account, ApprovalDecision, ApprovalOption, AskAnswer, EffortLevel, ImageRef, OpenAsk, PersistedEvent, Project, Question, Schedule, ThreadSummary } from './protocol.ts';
 import type { Notification } from './runner.ts';
 import type { ScheduleBackend, StoredSchedule } from './schedules.ts';
 import { ThreadIndex, type RemoteThreads } from './thread-index.ts';
@@ -67,7 +67,7 @@ export type SyncConfig = {
 // lower one means its backend hasn't been deployed since this runner was:
 // said in runner.status, tb status and the log rather than stopping, since
 // the runner only adds to what it sends while the number stays the same.
-export const BACKEND_API_VERSION = 19;
+export const BACKEND_API_VERSION = 20;
 // From this one a thread's row carries its open card of asks and a finished
 // turn's next steps, and a message row can be `summary` (end_turn's
 // bullets), so the phone shows end-of-turn cards. An older backend's
@@ -101,6 +101,10 @@ export const WOKE_API_VERSION = 13;
 // `waitingForRoom`. An older backend's validator would turn the row down,
 // so it goes without them.
 export const SECTIONS_API_VERSION = 15;
+// From this one an account's row carries its models (each with its effort
+// levels) and its own effort, for the phone's new thread pickers. An older
+// backend's validator would turn the list down, so it goes without.
+export const MODELS_API_VERSION = 20;
 
 export type SyncStatus = {
   state: 'off' | 'ok' | 'error';
@@ -219,7 +223,7 @@ export type CommandHost = {
   update(p: { threadId: string; title?: string; snoozedUntil?: string | null; archived?: boolean }): unknown;
   // Seen up to the last event it has.
   markSeen(threadId: string): unknown;
-  create(p: { text: string; images?: ImageRef[]; cwd?: string; accountId?: string; model?: string; origin: 'phone' }): { thread: ThreadSummary };
+  create(p: { text: string; images?: ImageRef[]; cwd?: string; accountId?: string; model?: string; effort?: EffortLevel; origin: 'phone' }): { thread: ThreadSummary };
   share(threadId: string, p: { access: 'off' | 'link'; newLink?: boolean }): unknown;
   quickAsk(p: { question: string; answer: string; sources?: { title: string; url: string }[]; askedAt?: number }): { thread: ThreadSummary };
 };
@@ -559,9 +563,14 @@ export function toOwnedScheduleDoc(s: StoredSchedule) {
   return out;
 }
 
-export function toAccountDoc(a: Account) {
+export function toAccountDoc(a: Account, apiVersion = 0) {
   const out: Record<string, unknown> = { id: a.id, provider: a.provider, title: a.title };
   for (const k of ['note', 'email', 'plan', 'defaultModel'] as const) if (a[k] !== undefined) out[k] = a[k];
+  if (apiVersion >= MODELS_API_VERSION) {
+    // Just what a picker shows and sends: no descriptions or full ids.
+    if (a.models) out.models = a.models.map((m) => ({ id: m.id, title: m.title, ...(m.effortLevels ? { effortLevels: m.effortLevels } : {}), ...(m.defaultEffort ? { defaultEffort: m.defaultEffort } : {}) }));
+    if (a.defaultEffort) out.defaultEffort = a.defaultEffort;
+  }
   if (a.usage) {
     const u = a.usage;
     out.usage = {
@@ -726,6 +735,11 @@ export class ConvexSync {
     }
     // The pictures wait for the first heartbeat to say the backend takes them.
     if (v >= ICONS_API_VERSION && this.picturesDue) this.scheduleFlush();
+    // Accounts went without their models before the heartbeat said this one takes them.
+    if (v >= MODELS_API_VERSION && this.lists.accounts && this.running) {
+      this.dirtyLists.add('accounts');
+      this.scheduleFlush();
+    }
   }
 
   status(): SyncStatus {
@@ -1043,7 +1057,7 @@ export class ConvexSync {
         const list = this.lists[name];
         if (!list) continue;
         if (name === 'schedules' && this.deps.schedules?.inBackend()) continue;
-        const rows = name === 'projects' ? (list as Project[]).map(toProjectDoc) : name === 'schedules' ? (list as Schedule[]).map(toScheduleDoc) : (list as Account[]).map(toAccountDoc);
+        const rows = name === 'projects' ? (list as Project[]).map(toProjectDoc) : name === 'schedules' ? (list as Schedule[]).map(toScheduleDoc) : (list as Account[]).map((a) => toAccountDoc(a, v));
         await this.post('mutation', `sync:set${name[0]!.toUpperCase()}${name.slice(1)}`, { key, runnerId: this.runnerId, [name]: rows });
       }
       if (this.picturesDue && (this.backendApiVersion ?? 0) >= ICONS_API_VERSION) await this.sendPictures();
@@ -1558,6 +1572,7 @@ export class ConvexSync {
           ...(typeof a.cwd === 'string' ? { cwd: a.cwd } : {}),
           ...(typeof a.accountId === 'string' ? { accountId: a.accountId } : {}),
           ...(typeof a.model === 'string' ? { model: a.model } : {}),
+          ...(isEffortLevel(a.effort) ? { effort: a.effort } : {}),
           origin: 'phone',
         }));
         return thread.id;
