@@ -117,6 +117,80 @@ final class RemoteDraftTests: XCTestCase {
     }
 }
 
+/// A thread on another runner can be archived or put away from its sidebar
+/// row while nothing of that runner's is open, so there's no connection to it
+/// yet. That connects, rather than failing as if this Mac's runner had gone.
+@MainActor
+final class RemoteRowActionTests: XCTestCase {
+    override func setUp() {
+        super.setUp()
+        _ = NSApplication.shared
+    }
+
+    private let bruce = RemoteRunner(id: "r-bruce", name: "bruce", icon: "macmini", online: true,
+                                     rpcUrl: URL(string: "ws://127.0.0.1:1/bruce/rpc"), tokenFile: "/tmp/not-read")
+
+    private func app(token: String? = "token") async throws -> (AppModel, RecordingTransport, RecordingTransport) {
+        let app = AppModel()
+        let local = RecordingTransport()
+        let client = RPCClient(transport: local)
+        try await client.start()
+        app.useClientForTesting(client)
+
+        let away = RecordingTransport()
+        away.answers["hello"] = { _ in ["runnerVersion": "test", "protocol": 1, "accounts": [], "defaults": ["cwd": "/Users/bruce/dev", "accountId": "claude-bruce"], "pools": []] }
+        away.answers["threads.list"] = { _ in ["threads": []] }
+        away.answers["threads.update"] = { params in ["thread": ["id": params["threadId"] ?? "", "title": "On bruce", "archivedAt": "2026-10-31T00:00:00Z"]] }
+        away.answers["threads.hibernateWhen"] = { params in ["thread": ["id": params["threadId"] ?? "", "title": "On bruce", "snoozedUntil": "2026-11-01T00:00:00Z"]] }
+        app.useRemoteClientsForTesting(RemoteClients(version: "test", makeTransport: { _, _ in away }, readToken: { _ in token }))
+        app.remoteRunners = [bruce]
+        var thread = ThreadSummary(id: "th_bruce", title: "On bruce", status: .idle)
+        thread.runnerId = bruce.id
+        app.threads[thread.id] = thread
+        return (app, local, away)
+    }
+
+    private func until(_ condition: () -> Bool) async throws {
+        for _ in 0..<800 where !condition() {
+            try await Task.sleep(for: .milliseconds(5))
+        }
+    }
+
+    func testArchivingARowConnectsToItsRunner() async throws {
+        let (app, local, away) = try await app()
+        XCTAssertNil(app.client(for: "th_bruce"), "nothing of bruce's is open")
+        app.archive("th_bruce")
+        try await until { app.threads["th_bruce"]?.isArchived == true }
+        XCTAssertEqual(app.threads["th_bruce"]?.isArchived, true)
+        XCTAssertEqual(away.params("threads.update").count, 1)
+        XCTAssertTrue(local.params("threads.update").isEmpty, "it's bruce's thread")
+        XCTAssertNil(app.errorMessage)
+    }
+
+    func testSwipingARowConnectsToItsRunner() async throws {
+        let (app, _, away) = try await app()
+        app.archive("th_bruce", slid: true)
+        try await until { !away.params("threads.update").isEmpty }
+        XCTAssertEqual(away.params("threads.update").count, 1, "a swipe used to do nothing at all")
+    }
+
+    func testHibernatingARowConnectsToItsRunner() async throws {
+        let (app, _, away) = try await app()
+        app.hibernateWhen("th_bruce", said: "tomorrow")
+        try await until { !away.params("threads.hibernateWhen").isEmpty }
+        XCTAssertEqual(away.params("threads.hibernateWhen").count, 1)
+    }
+
+    func testARunnerItCantReachIsNamedAndTheRowComesBack() async throws {
+        let (app, _, _) = try await app(token: nil)
+        app.archive("th_bruce")
+        try await until { app.errorMessage != nil }
+        XCTAssertEqual(app.errorMessage, "Can't reach bruce from this Mac. Its runner token isn't on this Mac yet (secrets/runners/r-bruce.token).")
+        XCTAssertEqual(app.threads["th_bruce"]?.isArchived, false)
+        XCTAssertFalse(app.slidingOff.contains("th_bruce"))
+    }
+}
+
 /// Answers each request from `answers` by method (an empty result for any
 /// other), and records the params of each.
 private final class RecordingTransport: RPCTransport, @unchecked Sendable {

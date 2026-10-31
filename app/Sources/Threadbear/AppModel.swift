@@ -1408,12 +1408,13 @@ final class AppModel {
     /// the runner is; its reply replaces the guess, and a failure puts back
     /// what was there unless something else has changed it since.
     func update(_ threadId: String, _ update: ThreadUpdate) {
-        guard let client = client(for: threadId) else { return }
+        guard isRemote(threadId) || client != nil else { return }
         let before = threads[threadId]
         let guess = before.map { update.applied(to: $0) }
         if let guess, guess != before { threads[threadId] = guess }
         Task {
             do {
+                let client = try await rowClient(for: threadId)
                 threads[threadId] = try await client.updateThread(threadId, update)
             } catch {
                 if let before, let guess, threads[threadId] == guess { threads[threadId] = before }
@@ -1481,7 +1482,7 @@ final class AppModel {
             // Undone while the row was still on its way: it never leaves.
             guard archivesNotSent.remove(threadId) != nil else { return }
             do {
-                guard let client = client(for: threadId) else { throw RPCError.disconnected(nil) }
+                let client = try await rowClient(for: threadId)
                 threads[threadId] = try await client.updateThread(threadId, ThreadUpdate(archived: true))
                 await endSlide(threadId)
             } catch {
@@ -1571,11 +1572,12 @@ final class AppModel {
     /// away straight off (its row says Thinking… until the time is worked
     /// out); if the model can't say, it comes back and the banner says why.
     func hibernateWhen(_ threadId: String, said: String) {
-        guard let client = client(for: threadId) else { return }
+        guard isRemote(threadId) || client != nil else { return }
         let next = neighbour(of: threadId)
         if selection == threadId { select(next) }
         Task {
             do {
+                let client = try await rowClient(for: threadId)
                 threads[threadId] = try await client.hibernateWhen(threadId: threadId, said: said)
             } catch {
                 show(error)
@@ -1743,6 +1745,11 @@ final class AppModel {
 
     func show(_ error: Error) {
         AppLog.write("rpc", "error: \(error.localizedDescription)")
+        // Its description alone doesn't say which Mac it means.
+        if let unreachable = error as? RemoteUnreachable {
+            errorMessage = unreachable.headline + " " + unreachable.detail
+            return
+        }
         switch error as? RPCError {
         case .disconnected?, .timeout?, .connectFailed?:
             showConnectionError(error.localizedDescription)

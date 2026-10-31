@@ -107,6 +107,17 @@ extension AppModel {
         }
     }
 
+    /// For something done to a thread from its sidebar row. It needn't be
+    /// open, and another runner's connection only lasts while one of its
+    /// threads is on screen, so this connects if need be. Only a change of
+    /// selection sets off the close, so this has to as well, or a connection
+    /// opened just for this would stay until the next one.
+    func rowClient(for threadId: String) async throws -> RPCClient {
+        let client = try await openClient(for: threadId)
+        if isRemote(threadId) { tidyRemoteClients() }
+        return client
+    }
+
     /// What the banner says when a send can't go.
     func notConnectedText(_ threadId: String?, _ what: String) -> String {
         if let thread = threadId.flatMap({ threads[$0] }), let name = runnerName(of: thread) {

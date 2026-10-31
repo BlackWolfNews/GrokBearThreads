@@ -2371,7 +2371,9 @@ type RemoteThread = { runnerId: string, threadId: string, title, cwd,
   `approvals.respond`, and so on. Paths in its events (images, blobs,
   file links) are that Mac's: the client gets them with `files.read` on
   that runner and keeps its own copy, passing `known` to check it's still
-  current.
+  current. A sidebar row's actions (archive, hibernate) don't need it open:
+  they connect the same way, and that connection closes a minute later
+  unless one of that runner's threads is on screen.
 - **New threads on another runner** are a `threads.create` on that
   runner's connection, with its folder (a path on that Mac), account,
   model and effort from that runner's `hello`.
