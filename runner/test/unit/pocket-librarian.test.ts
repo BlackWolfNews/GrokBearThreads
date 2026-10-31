@@ -57,3 +57,12 @@ test('a title or text too long for the tool is refused', () => {
   assert.equal(pocketChanges({ save: [{ title: 'x'.repeat(61), text: 'y' }] }, ctx).save.length, 0);
   assert.equal(pocketChanges({ save: [{ title: 'x', text: 'y'.repeat(2001) }] }, ctx).save.length, 0);
 });
+
+test('keeps an icon from the list, and leaves off one it made up', () => {
+  assert.equal(pocketChanges({ save: [{ ...card, icon: 'parcel' }] }, ctx).save[0]!.icon, 'parcel');
+  const made = pocketChanges({ save: [{ ...card, icon: 'unicorn' }] }, ctx).save[0]!;
+  assert.equal(made.title, card.title);
+  assert.equal('icon' in made, false);
+  // A new look alone is worth saving on a card that's otherwise the same.
+  assert.equal(pocketChanges({ save: [{ title: mine.title, text: mine.text, icon: 'parcel' }] }, { ...ctx, cards: [mine] }).save.length, 1);
+});

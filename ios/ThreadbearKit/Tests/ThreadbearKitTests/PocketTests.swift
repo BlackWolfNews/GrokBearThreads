@@ -56,4 +56,26 @@ import Testing
             break
         }
     }
+
+    @Test func anIconItDoesNotKnowIsThePlainOne() {
+        #expect(PocketIcon.named("parcel").symbol == "shippingbox")
+        #expect(PocketIcon.named("unicorn") == .plain)
+        #expect(PocketIcon.named(nil) == .plain)
+    }
+
+    @Test func aCardKeepsItsIconInTheFile() throws {
+        let store = PocketStore(file: FileManager.default.temporaryDirectory.appending(path: "pocket-\(UUID()).json"))
+        store.save([PocketCard(id: "a", title: "A", text: "t", icon: "plane", updatedAt: "x")])
+        #expect(store.load().first?.icon == "plane")
+        store.clear()
+    }
+
+    @Test func aSwipeRemovesOnlyFarEnoughLeftOrFlicked() {
+        #expect(PocketSwipe.removes(width: -120, predictedWidth: -120))
+        #expect(PocketSwipe.removes(width: -40, predictedWidth: -300))
+        #expect(!PocketSwipe.removes(width: -40, predictedWidth: -60))
+        #expect(!PocketSwipe.removes(width: 200, predictedWidth: 400))
+        #expect(PocketSwipe.isSideways(width: 60, height: 10))
+        #expect(!PocketSwipe.isSideways(width: 30, height: 40))
+    }
 }

@@ -27,6 +27,7 @@ import type { PanelPlace } from './protocol.ts';
 import { readRelease, type ReleaseJson } from './release.ts';
 import { userLine } from './user-name.ts';
 import type { ConvexSync } from './sync.ts';
+import { POCKET_ICONS } from './pocket-icons.ts';
 
 // What the tools drive: the Runner itself, or during a handover
 // (docs/protocol.md) a ThreadRouter (handover.ts) that reaches threads on
@@ -286,9 +287,10 @@ export function buildThreadbearTools(
             title: z.string().trim().min(1).max(60).optional().describe('Short name for the card, like "Post to Corby".'),
             text: z.string().trim().min(1).max(2000).optional().describe('What goes on the card, plain text, with line breaks where it should break.'),
             place: z.string().trim().min(1).max(100).optional().describe('Where it applies, as you would search a map: "post office", "Bunnings". The phone marks the card "here" and brings it to the front there.'),
+            icon: z.enum(POCKET_ICONS).optional().describe("The picture and colour on the card, so they can spot it in the deck. Choose the closest; leave it out if none fits. Filing a card again without one keeps its icon."),
             remove: z.boolean().optional().describe('Take the card with this title out.'),
           },
-          handle(async ({ title, text, place, remove }) => {
+          handle(async ({ title, text, place, icon, remove }) => {
             if (!title) {
               const cards = await pocket.pocketCards();
               return cards.length ? cards.map((c) => `${c.title}${c.place ? ` (${c.place})` : ''}${c.source ? ` [${c.source}]` : ''}\n${c.text}`).join('\n\n') : 'The Pocket is empty.';
@@ -299,7 +301,7 @@ export function buildThreadbearTools(
             // Its project or folder, as the inbox rows show. Not the thread's
             // title: on its first turn that's still the start of the message.
             const source = t.projects?.[0]?.title ?? path.basename(t.cwd);
-            const how = await pocket.savePocketCard({ title, text, ...(place ? { place } : {}), threadId: selfId, ...(source ? { source } : {}) });
+            const how = await pocket.savePocketCard({ title, text, ...(place ? { place } : {}), ...(icon ? { icon } : {}), threadId: selfId, ...(source ? { source } : {}) });
             return `${how === 'replaced' ? 'Replaced' : 'Filed'} "${title}" in the Pocket.`;
           }),
         ),

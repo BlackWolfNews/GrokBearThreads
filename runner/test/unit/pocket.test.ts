@@ -33,10 +33,11 @@ test('files a card with the thread it came from, and the same title replaces it'
   const { thread } = await h.runner.create({ text: 'Passport' } as never);
   const { saved, pocket } = setup();
   const tools = buildThreadbearTools(h.runner, thread.id, Date.now, undefined, undefined, undefined, { pocket: () => pocket });
-  assert.match((await call(tools, { title: 'Post to Corby', text: 'Long Croft Road', place: 'post office' })).text, /Filed/);
+  assert.match((await call(tools, { title: 'Post to Corby', text: 'Long Croft Road', place: 'post office', icon: 'parcel' })).text, /Filed/);
   assert.match((await call(tools, { title: 'Post to Corby', text: 'New' })).text, /Replaced/);
   assert.equal(saved[0]!.threadId, thread.id);
   assert.equal(saved[0]!.place, 'post office');
+  assert.equal(saved[0]!.icon, 'parcel');
   // The folder, not the thread's title, which starts as the first message.
   assert.equal(saved[0]!.source, path.basename(thread.cwd));
   assert.equal(saved[1]!.place, undefined);

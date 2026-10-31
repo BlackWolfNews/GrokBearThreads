@@ -488,8 +488,9 @@ heading to the post office and its agent can file a card with the address and
 what to take; the wallet button at the top of the inbox opens the deck. The
 cards are saved on the phone, so they open straight away with no signal. Tap
 a card to bring it forward, then tap it again to fill the screen, black on
-white, for reading out or holding up at a counter. Press and hold a card to
-copy it, open its thread or remove it. A card can name a place: while the app's
+white, for reading out or holding up at a counter. Swipe a card left to remove
+it, with a few seconds to Undo, or press and hold to copy it, open its thread
+or remove it. Each card has its own icon and colour, chosen by whoever filed it. A card can name a place: while the app's
 open the phone checks where you are, marks that card "here" and brings it to
 the front (it asks first, and only the phone and Apple's map search see your
 location). Agents replace or remove cards too, and the pencil

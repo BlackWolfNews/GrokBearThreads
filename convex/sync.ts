@@ -708,14 +708,16 @@ const pocketKey = (title: string) => title.trim().toLowerCase();
 export const savePocketCard = mutation({
   args: {
     key: v.string(),
-    card: v.object({ title: v.string(), text: v.string(), place: v.optional(v.string()), threadId: v.optional(v.string()), source: v.optional(v.string()) }),
+    card: v.object({ title: v.string(), text: v.string(), place: v.optional(v.string()), icon: v.optional(v.string()), threadId: v.optional(v.string()), source: v.optional(v.string()) }),
   },
   returns: v.union(v.literal('added'), v.literal('replaced')),
   handler: async (ctx, { key, card }) => {
     checkRunnerKey(key);
     const k = pocketKey(card.title);
-    const doc = { ...card, title: card.title.trim(), key: k, updatedAt: new Date().toISOString() };
     const had = await ctx.db.query('pocketCards').withIndex('by_key', (q) => q.eq('key', k)).first();
+    // A card keeps its look when it's filed again without one.
+    const icon = card.icon ?? had?.icon;
+    const doc = { ...card, ...(icon ? { icon } : {}), title: card.title.trim(), key: k, updatedAt: new Date().toISOString() };
     if (had) {
       await ctx.db.replace(had._id, doc);
       return 'replaced';
@@ -738,11 +740,11 @@ export const removePocketCard = mutation({
 
 export const pocketCards = query({
   args: { key: v.string() },
-  returns: v.array(v.object({ title: v.string(), text: v.string(), place: v.optional(v.string()), threadId: v.optional(v.string()), source: v.optional(v.string()), updatedAt: v.string() })),
+  returns: v.array(v.object({ title: v.string(), text: v.string(), place: v.optional(v.string()), icon: v.optional(v.string()), threadId: v.optional(v.string()), source: v.optional(v.string()), updatedAt: v.string() })),
   handler: async (ctx, { key }) => {
     checkRunnerKey(key);
     const rows = await ctx.db.query('pocketCards').collect();
-    return rows.map((c) => ({ title: c.title, text: c.text, ...(c.place ? { place: c.place } : {}), ...(c.threadId ? { threadId: c.threadId } : {}), ...(c.source ? { source: c.source } : {}), updatedAt: c.updatedAt }));
+    return rows.map((c) => ({ title: c.title, text: c.text, ...(c.place ? { place: c.place } : {}), ...(c.icon ? { icon: c.icon } : {}), ...(c.threadId ? { threadId: c.threadId } : {}), ...(c.source ? { source: c.source } : {}), updatedAt: c.updatedAt }));
   },
 });
 

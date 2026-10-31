@@ -28,6 +28,7 @@ import { findUp, isInside } from './patches.ts';
 import { SYMBOLS, fileHash, findIcon, storeIcon } from './project-icons.ts';
 import { userLine } from './user-name.ts';
 import type { PocketCardInput, PocketCardSummary } from './sync.ts';
+import { POCKET_ICONS, type PocketIconName } from './pocket-icons.ts';
 
 // The phone's Pocket, in the Convex backend (sync.ts). Asked for each look,
 // as sync can be off.
@@ -1275,11 +1276,13 @@ function offReason(reason: ModelFailure, message: string): string {
 // model says. A card can't be guessed into being either: anything on it with a
 // digit or a run of capitals (an address, a booking code) must be in what the
 // look was shown, as a small model will happily make those up.
+type PocketSave = { title: string; text: string; place?: string; icon?: PocketIconName };
+
 export function pocketChanges(
   raw: unknown,
   ctx: { threadId: string; cards: PocketCardSummary[]; seen: string; addsToday: number; addedBefore: boolean },
-): { save: { title: string; text: string; place?: string }[]; remove: string[] } {
-  const out = { save: [] as { title: string; text: string; place?: string }[], remove: [] as string[] };
+): { save: PocketSave[]; remove: string[] } {
+  const out = { save: [] as PocketSave[], remove: [] as string[] };
   if (!raw || typeof raw !== 'object') return out;
   const key = (t: string) => t.trim().toLowerCase();
   const own = new Map(ctx.cards.filter((c) => c.threadId === ctx.threadId).map((c) => [key(c.title), c]));
@@ -1297,13 +1300,15 @@ export function pocketChanges(
     const title = typeof c?.title === 'string' ? c.title.trim() : '';
     const text = typeof c?.text === 'string' ? c.text.trim() : '';
     const place = typeof c?.place === 'string' && c.place.trim() ? c.place.trim().slice(0, 100) : undefined;
+    // One it made up is left off: the card still gets the plain look.
+    const icon = POCKET_ICONS.find((n) => n === c?.icon);
     if (!title || title.length > 60 || !text || text.length > 2000 || !grounded(text)) continue;
     const mine = own.get(key(title));
     if (mine) {
-      if (mine.text !== text || (place ?? mine.place) !== mine.place) out.save.push({ title, text, ...((place ?? mine.place) ? { place: place ?? mine.place } : {}) });
+      if (mine.text !== text || (place ?? mine.place) !== mine.place || (icon && icon !== mine.icon)) out.save.push({ title, text, ...((place ?? mine.place) ? { place: place ?? mine.place } : {}), ...(icon ? { icon } : {}) });
     } else if (!taken.has(key(title)) && !own.size && !ctx.addedBefore && !added && ctx.addsToday < POCKET_ADDS_PER_DAY) {
       added = true;
-      out.save.push({ title, text, ...(place ? { place } : {}) });
+      out.save.push({ title, text, ...(place ? { place } : {}), ...(icon ? { icon } : {}) });
     }
   }
   const saving = new Set(out.save.map((c) => key(c.title)));
@@ -1333,7 +1338,7 @@ Reply with JSON only, no prose and no code fence:
  "retitle": {"<project id>": "the project's new name"} for a project it's in whose name has gone out of date (see below), else {},
  "wake": ["<ids of hibernating threads the user is talking about here>"], or [] (see below),
  "fix": null, or {"title": "the fix in 2 to 6 words", "folder": "~/path of the repo of the tool at fault", "problem": "what went wrong", "said": "the user's words about it"} (see below),
- "pocket": null, or {"save": [{"title": "short name", "text": "the card", "place": "optional"}], "remove": ["title"]} (see below),
+ "pocket": null, or {"save": [{"title": "short name", "text": "the card", "place": "optional", "icon": "optional"}], "remove": ["title"]} (see below),
  "why": "one short line"}
 
 A reason is under 12 words, about this thread, in the user's plain words: "Edits the Poddle repo", "Shortlists photos for the calendar entry", "Asks how the librarian picks projects". Leaving a project out of projects doesn't take the thread out of it; only leave does. Use leave when the thread clearly isn't about that project: the earlier guess was wrong, or the work has gone elsewhere for good. A thread that has only paused that work stays.
@@ -1358,7 +1363,7 @@ Give no fix (null) when:
 - you can't be sure what the problem is. You only get the words of a message, never its images: one marked as having an image, or leaning on "this", "that" or "it", may be about something you can't see. Don't guess, and don't settle on some other thing the thread mentions (its folder, say) as what they meant. Only go on when the words or the agent's replies spell the problem out.
 Most looks give none.
 
-The Pocket is a deck of short cards on the user's phone, to read at a counter when they're out. Keep this thread's cards true: save one with the same title when a fact on it has changed, and remove one when the messages say it's done with (the parcel's posted, the trip's over). Add a card only when the user, in their own messages here, says they're going somewhere or will need something while out, the messages hold the facts they'd want there, and this thread has no card. A plan for someday isn't enough. If the messages say a card was filed and it isn't listed, the user took it out: leave it. Copy addresses, codes and numbers exactly from the messages and never guess one. The text is only the facts, a line each, with no explanation. The place is what you'd search a map for ("post office"), only if the card is for somewhere. Most looks change nothing: pocket null.
+The Pocket is a deck of short cards on the user's phone, to read at a counter when they're out. Keep this thread's cards true: save one with the same title when a fact on it has changed, and remove one when the messages say it's done with (the parcel's posted, the trip's over). Add a card only when the user, in their own messages here, says they're going somewhere or will need something while out, the messages hold the facts they'd want there, and this thread has no card. A plan for someday isn't enough. If the messages say a card was filed and it isn't listed, the user took it out: leave it. Copy addresses, codes and numbers exactly from the messages and never guess one. The text is only the facts, a line each, with no explanation. The place is what you'd search a map for ("post office"), only if the card is for somewhere. The icon is the closest of ${POCKET_ICONS.join(', ')}, left out if none fits. Most looks change nothing: pocket null.
 
 The thread bullets are for the user glancing at the thread later: concrete, in their plain words, each under ten words, no full stops. The last one says who's waiting on whom ("Waiting on you to pick a design", "Fixing the last failing test").`;
 

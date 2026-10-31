@@ -8,16 +8,19 @@ public struct PocketCard: Codable, Sendable, Hashable, Identifiable {
     public var text: String
     /// What to search the map for, to tell whether the card applies here.
     public var place: String?
+    /// Which picture and colour it has (PocketIcon).
+    public var icon: String?
     public var threadId: String?
     /// The project or thread it came from.
     public var source: String?
     public var updatedAt: String
 
-    public init(id: String, title: String, text: String, place: String? = nil, threadId: String? = nil, source: String? = nil, updatedAt: String) {
+    public init(id: String, title: String, text: String, place: String? = nil, icon: String? = nil, threadId: String? = nil, source: String? = nil, updatedAt: String) {
         self.id = id
         self.title = title
         self.text = text
         self.place = place
+        self.icon = icon
         self.threadId = threadId
         self.source = source
         self.updatedAt = updatedAt

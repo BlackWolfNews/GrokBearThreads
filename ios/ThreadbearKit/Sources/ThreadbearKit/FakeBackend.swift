@@ -320,9 +320,9 @@ public final class FakeBackend: Backend, @unchecked Sendable {
     /// The projects the sample threads are in, with symbols for icons (a
     /// picture would need a URL to fetch; the demo has no backend).
     public static let samplePocket = [
-        PocketCard(id: "seeds to pick up", title: "Seeds to pick up", text: "Sweet peas\nRunner beans\nThe small terracotta pots", place: "garden centre", source: "Garden planner", updatedAt: "2026-10-20T09:00:00Z"),
-        PocketCard(id: "train home", title: "Train home", text: "Booking ABC123\nCoach C, seat 42", source: "Trip", updatedAt: "2026-10-21T09:00:00Z"),
-        PocketCard(id: "post the parcel", title: "Post the parcel", text: "Sam Taylor\n12 Harbour Street\nBristol BS1 4QA\nUK", threadId: "demo_upload", source: "Website", updatedAt: "2026-10-22T09:00:00Z"),
+        PocketCard(id: "seeds to pick up", title: "Seeds to pick up", text: "Sweet peas\nRunner beans\nThe small terracotta pots", place: "garden centre", icon: "shopping", source: "Garden planner", updatedAt: "2026-10-20T09:00:00Z"),
+        PocketCard(id: "train home", title: "Train home", text: "Booking ABC123\nCoach C, seat 42", icon: "ticket", source: "Trip", updatedAt: "2026-10-21T09:00:00Z"),
+        PocketCard(id: "post the parcel", title: "Post the parcel", text: "Sam Taylor\n12 Harbour Street\nBristol BS1 4QA\nUK", icon: "parcel", threadId: "demo_upload", source: "Website", updatedAt: "2026-10-22T09:00:00Z"),
     ]
 
     public static let sampleProjects = [

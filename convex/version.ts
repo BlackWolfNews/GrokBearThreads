@@ -75,4 +75,5 @@
 //    title, effortLevels?, defaultEffort? }) and `defaultEffort`, and
 //    phone:create takes `effort`. A runner sends models only to a backend
 //    of 20 or later; an older runner ignores an effort.
-export const API_VERSION = 20;
+// 21: a Pocket card can have an `icon`; filing one again without keeps it.
+export const API_VERSION = 21;

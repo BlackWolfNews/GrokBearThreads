@@ -262,7 +262,7 @@ export const projects = query({
 // The Pocket (API 19; schema.ts, pocketCards). A card's id is its key.
 export const pocket = query({
   args: { token: v.string() },
-  returns: v.array(v.object({ id: v.string(), title: v.string(), text: v.string(), place: v.optional(v.string()), threadId: v.optional(v.string()), source: v.optional(v.string()), updatedAt: v.string() })),
+  returns: v.array(v.object({ id: v.string(), title: v.string(), text: v.string(), place: v.optional(v.string()), icon: v.optional(v.string()), threadId: v.optional(v.string()), source: v.optional(v.string()), updatedAt: v.string() })),
   handler: async (ctx, { token }) => {
     await checkPhoneToken(ctx, token);
     const rows = await ctx.db.query('pocketCards').collect();

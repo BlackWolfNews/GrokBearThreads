@@ -13,10 +13,14 @@ struct PocketView: View {
     @State private var places = PocketPlaces()
     @State private var chosen: String?
     @State private var showing: PocketCard?
+    /// Swiped out, with Undo showing. It only goes from the backend once
+    /// that's passed, so taking back a mis-swipe needs no connection.
+    @State private var going: PocketCard?
+    @State private var goingTimer: Task<Void, Never>?
     var then: (Next) -> Void
 
     var body: some View {
-        let deck = PocketDeck.ordered(model.pocket, here: places.here)
+        let deck = PocketDeck.ordered(model.pocket.filter { $0.id != going?.id }, here: places.here)
         let open = deck.first { $0.id == chosen }?.id ?? deck.last?.id
         NavigationStack {
             Group {
@@ -51,6 +55,24 @@ struct PocketView: View {
                 }
             }
         }
+        .overlay(alignment: .bottom) {
+            if let going {
+                HStack {
+                    Text("Removed \(going.title)")
+                        .lineLimit(1)
+                    Spacer(minLength: 12)
+                    Button("Undo") { undoRemove() }
+                        .fontWeight(.semibold)
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 12)
+                .background(.regularMaterial, in: .capsule)
+                .padding(.horizontal, 16)
+                .padding(.bottom, 8)
+                .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+        }
+        .onDisappear { finishRemoving() }
         .task(id: model.pocket.map(\.id)) {
             if !model.isFake { places.look(for: model.pocket) }
         }
@@ -58,6 +80,8 @@ struct PocketView: View {
         .onChange(of: deck.last?.id, initial: true) { _, _ in
             #if DEBUG
             if CommandLine.arguments.contains("-ThreadbearPocketBig"), showing == nil { showing = deck.last }
+            // `-ThreadbearPocketUndo`: the first card just removed, for screenshots.
+            if CommandLine.arguments.contains("-ThreadbearPocketUndo"), going == nil, let card = deck.first { going = card }
             #endif
         }
         .fullScreenCover(item: $showing) { card in
@@ -66,7 +90,7 @@ struct PocketView: View {
     }
 
     private func row(_ card: PocketCard, index: Int, isOpen: Bool) -> some View {
-        PocketCardView(card: card, isOpen: isOpen, isHere: places.here.contains(card.id), depth: index)
+        PocketRow(card: card, isOpen: isOpen, isHere: places.here.contains(card.id)) { remove(card) }
             .zIndex(Double(index))
             .onTapGesture {
                 if isOpen { showing = card } else {
@@ -78,8 +102,32 @@ struct PocketView: View {
                 if let thread = card.threadId {
                     Button { go(.thread(thread)) } label: { Label("Open thread", systemImage: "bubble.left") }
                 }
-                Button(role: .destructive) { model.removePocketCard(card) } label: { Label("Remove", systemImage: "trash") }
+                Button(role: .destructive) { remove(card) } label: { Label("Remove", systemImage: "trash") }
             }
+    }
+
+    private func remove(_ card: PocketCard) {
+        // Only one Undo at a time: the one before is final now.
+        finishRemoving()
+        withAnimation { going = card }
+        goingTimer = Task {
+            try? await Task.sleep(for: .seconds(5))
+            if !Task.isCancelled { finishRemoving() }
+        }
+    }
+
+    private func finishRemoving() {
+        goingTimer?.cancel()
+        goingTimer = nil
+        guard let card = going else { return }
+        model.removePocketCard(card)
+        withAnimation { going = nil }
+    }
+
+    private func undoRemove() {
+        goingTimer?.cancel()
+        goingTimer = nil
+        withAnimation { going = nil }
     }
 
     private func go(_ next: Next) {
@@ -89,15 +137,66 @@ struct PocketView: View {
     }
 }
 
+/// A card and what a swipe does to it: it follows the finger left, with a
+/// bin showing behind it, and past PocketSwipe's line it flies off.
+private struct PocketRow: View {
+    var card: PocketCard
+    var isOpen: Bool
+    var isHere: Bool
+    var onRemove: () -> Void
+    @State private var offset: CGFloat = 0
+    @State private var sideways = false
+
+    var body: some View {
+        PocketCardView(card: card, isOpen: isOpen, isHere: isHere)
+            .offset(x: offset)
+            .background(alignment: .topTrailing) {
+                Image(systemName: "trash")
+                    .font(.title3)
+                    .foregroundStyle(.white)
+                    .padding(22)
+                    .opacity(min(-offset / PocketSwipe.removeAt, 1))
+            }
+            .sensoryFeedback(.impact(weight: .light), trigger: offset <= -PocketSwipe.removeAt)
+            // Alongside the scroll view's own drag, so it's only taken as a
+            // swipe once it's clearly sideways, and up and down still scrolls.
+            .simultaneousGesture(
+                DragGesture(minimumDistance: 16)
+                    .onChanged { value in
+                        if !sideways {
+                            guard PocketSwipe.isSideways(width: value.translation.width, height: value.translation.height) else { return }
+                            sideways = true
+                        }
+                        offset = min(value.translation.width, 0)
+                    }
+                    .onEnded { value in
+                        let removes = sideways && PocketSwipe.removes(width: value.translation.width, predictedWidth: value.predictedEndTranslation.width)
+                        sideways = false
+                        if removes {
+                            withAnimation(.easeIn(duration: 0.18)) { offset = -600 } completion: { onRemove() }
+                        } else {
+                            withAnimation(.spring(duration: 0.3)) { offset = 0 }
+                        }
+                    }
+            )
+    }
+}
+
+/// A luggage tag: a wash of the card's colour, and its icon big and faint
+/// behind it, so a card can be picked out of the deck before it's read.
 private struct PocketCardView: View {
     var card: PocketCard
     var isOpen: Bool
     var isHere: Bool
-    var depth: Int
 
     var body: some View {
+        let icon = PocketIcon.named(card.icon)
+        let colour = Color(red: icon.red, green: icon.green, blue: icon.blue)
         VStack(alignment: .leading, spacing: 10) {
-            HStack(alignment: .firstTextBaseline) {
+            HStack(alignment: .center, spacing: 9) {
+                Image(systemName: icon.symbol)
+                    .font(.body)
+                    .frame(width: 22)
                 Text(card.title)
                     .font(.headline)
                     .lineLimit(1)
@@ -121,11 +220,20 @@ private struct PocketCardView: View {
         }
         .padding(15)
         .frame(maxWidth: .infinity, minHeight: isOpen ? 300 : 80, alignment: .topLeading)
-        // A solid fill, as the cards overlap, a touch lighter towards the front.
-        .background {
-            ZStack {
+        .background(alignment: isOpen ? .bottomTrailing : .topTrailing) {
+            // A solid fill under the wash, as the cards overlap, and the big
+            // icon under the words.
+            ZStack(alignment: isOpen ? .bottomTrailing : .topTrailing) {
                 Color(.secondarySystemBackground)
-                Color.primary.opacity(min(0.02 * Double(depth), 0.1))
+                LinearGradient(colors: [colour.opacity(0.28), colour.opacity(0.08)], startPoint: .topLeading, endPoint: .bottomTrailing)
+                Image(systemName: icon.symbol)
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: isOpen ? 180 : 76, height: isOpen ? 180 : 76)
+                    .foregroundStyle(colour.opacity(0.16))
+                    // Out past the edge when open; on a folded card, left of
+                    // its label and cut off by the top edge.
+                    .offset(x: isOpen ? 22 : -92, y: isOpen ? 22 : -12)
             }
         }
         .clipShape(.rect(cornerRadius: 15))

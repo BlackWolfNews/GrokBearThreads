@@ -254,6 +254,7 @@ export default defineSchema({
     title: v.string(),
     text: v.string(),
     place: v.optional(v.string()), // what to search the map for, to mark the card "here"
+    icon: v.optional(v.string()), // since API 21: its picture and colour on the phone (runner/src/pocket-icons.ts)
     threadId: v.optional(v.string()),
     source: v.optional(v.string()), // the project or thread it came from, as it was then
     updatedAt: v.string(),
