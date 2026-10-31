@@ -1,5 +1,6 @@
 import Foundation
 import Observation
+import SwiftUI
 import ThreadbearKit
 import UIKit
 
@@ -19,6 +20,11 @@ final class AppModel {
     /// `-ThreadbearPocket` (Debug only): start with the Pocket open.
     var opensPocketAtLaunch = false
     private(set) var inbox: [PhoneThread] = []
+    /// Rows sliding off the inbox on their way out (`archive`).
+    private(set) var slidingOff: Set<String> = []
+    /// Archived from this phone, kept out of the lists until Convex says the
+    /// runner has done it, which waits for the Mac if it's asleep.
+    private var archiving: Set<String> = []
     private(set) var hibernating: [PhoneThread] = []
     private(set) var den: [PhoneThread] = []
     /// For each thread a schedule will message, the one due soonest: the
@@ -144,7 +150,44 @@ final class AppModel {
 
     var isPaired: Bool { backend != nil && authProblem == nil }
 
-    var sections: InboxSections { InboxSections.build(inbox, now: now, wakes: wakes) }
+    var sections: InboxSections {
+        InboxSections.build(inbox.filter { !archiving.contains($0.threadId) }, now: now, wakes: wakes)
+    }
+
+    /// Archives a thread, gone from the inbox at once. `leavingThread` is for
+    /// its own page, which is popping back to the inbox: the row waits for
+    /// the page to clear, then slides off where he can see it go (Mike, 31
+    /// Oct). The command is only sent once the row has gone, as the runner
+    /// can answer within the animation and a list update would snap it away.
+    func archive(_ threadId: String, leavingThread: Bool = false) {
+        guard let backend, !archiving.contains(threadId), !slidingOff.contains(threadId) else { return }
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        // Hibernating threads can be archived from their page but have no inbox row to animate.
+        let hasRow = inbox.contains { $0.threadId == threadId }
+        Task {
+            if hasRow, leavingThread {
+                try? await Task.sleep(for: .milliseconds(420))
+                withAnimation(.easeIn(duration: 0.24)) { _ = slidingOff.insert(threadId) }
+                try? await Task.sleep(for: .milliseconds(240))
+            }
+            // The Mac may have archived it during the wait; an id that's not
+            // in the list would never get cleared by the next list update.
+            if inbox.contains(where: { $0.threadId == threadId }) {
+                withAnimation(.snappy(duration: 0.25)) { _ = archiving.insert(threadId) }
+            }
+            slidingOff.remove(threadId)
+            do {
+                let command = try await backend.update(threadId: threadId, change: .archive)
+                for try await status in backend.command(command) {
+                    if status?.state == .failed { throw TransportError.server(status?.note ?? "The runner couldn't archive that thread.") }
+                    if status?.state == .done { return }
+                }
+            } catch {
+                withAnimation(.snappy(duration: 0.25)) { _ = archiving.remove(threadId) }
+                report(error)
+            }
+        }
+    }
 
     func toggle(_ section: PhoneSection) {
         folds.toggle(section)
@@ -199,7 +242,10 @@ final class AppModel {
         for view in wanted where listTasks[view] == nil {
             listTasks[view] = follow(backend.threads(view)) { model, list in
                 switch view {
-                case .inbox: model.inbox = list
+                case .inbox:
+                    model.inbox = list
+                    // Gone from the list means it's done, so a later unarchive shows.
+                    model.archiving.formIntersection(list.map(\.threadId))
                 case .hibernating: model.hibernating = list
                 case .den: model.den = list
                 }

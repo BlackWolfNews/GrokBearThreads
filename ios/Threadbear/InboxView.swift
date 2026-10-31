@@ -4,6 +4,7 @@ import ThreadbearKit
 struct InboxView: View {
     @Environment(AppModel.self) private var model
     @Environment(QuickAskModel.self) private var quick
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var path: [String] = []
     @State private var composing = false
     @State private var composeText = ""
@@ -225,12 +226,15 @@ struct InboxView: View {
             // chevron, and the status sits where it would go.
             Button { path.append(thread.threadId) } label: {
                 ThreadRow(thread: thread, underRunning: running, wake: waiting ? model.wakes[thread.threadId] : nil)
+                    // Off to the left, the way a swipe to archive goes.
+                    .offset(x: model.slidingOff.contains(thread.threadId) && !reduceMotion ? -500 : 0)
+                    .opacity(model.slidingOff.contains(thread.threadId) ? 0 : 1)
             }
             .buttonStyle(.plain)
             .listRowInsets(ThreadRow.insets)
             .listRowSeparator(.hidden)
             .swipeActions(edge: .trailing) {
-                Button { Task { await perform(thread, .archive) } } label: { Label("Archive", systemImage: "archivebox") }
+                Button { model.archive(thread.threadId) } label: { Label("Archive", systemImage: "archivebox") }
                     .tint(.brown)
             }
             .swipeActions(edge: .leading) {
@@ -239,7 +243,7 @@ struct InboxView: View {
             }
             .contextMenu {
                 Button { hibernateTarget = thread } label: { Label("Hibernate…", systemImage: "moon.zzz") }
-                Button { Task { await perform(thread, .archive) } } label: { Label("Archive", systemImage: "archivebox") }
+                Button { model.archive(thread.threadId) } label: { Label("Archive", systemImage: "archivebox") }
                 if thread.unread || thread.needsYou {
                     Button { Task { await perform(thread, .markSeen) } } label: { Label("Mark as read", systemImage: "envelope.open") }
                 }

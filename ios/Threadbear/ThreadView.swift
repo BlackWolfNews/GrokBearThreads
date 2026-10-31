@@ -4,6 +4,7 @@ import ThreadbearKit
 struct ThreadView: View {
     @Environment(AppModel.self) private var model
     @Environment(QuickAskModel.self) private var quick
+    @Environment(\.dismiss) private var dismiss
     /// In a quick ask's thread, the keyboard's been asked for in place of the big mic.
     @State private var typing = false
     let threadId: String
@@ -121,7 +122,7 @@ struct ThreadView: View {
                         DoneCard(next: thread.next ?? [], picked: $nextPicks, busy: sent != nil) {
                             Task { _ = await send("", to: thread) }
                         } archive: {
-                            change(.archive)
+                            archive()
                         }
                         .onChange(of: messages.last?.seq, initial: true) {
                             // A new reply's card starts with nothing ticked.
@@ -179,7 +180,7 @@ struct ThreadView: View {
                     } else {
                         Button { hibernateTarget = thread } label: { Label("Hibernate…", systemImage: "moon.zzz") }
                     }
-                    Button { change(.archive) } label: { Label("Archive", systemImage: "archivebox") }
+                    Button { archive() } label: { Label("Archive", systemImage: "archivebox") }
                 }
                 Section {
                     Label(thread.cwd, systemImage: "folder")
@@ -302,6 +303,12 @@ struct ThreadView: View {
             try? await Task.sleep(for: .seconds(2))
             if loadingBefore == seq { loadingBefore = nil }
         }
+    }
+
+    /// Back to the inbox, where the thread's row slides away.
+    private func archive() {
+        model.archive(threadId, leavingThread: true)
+        dismiss()
     }
 
     private func change(_ change: ThreadChange) {

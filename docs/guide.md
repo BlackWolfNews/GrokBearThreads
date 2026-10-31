@@ -446,7 +446,7 @@ fold into one Worked line above the reply, as on the Mac; tap it to see
 the work. The search at the top of the inbox finds any thread, hibernating
 and archived ones too, by its title, last reply or project. What a thread needs from you shows under its reply with the
 likely answers as buttons (type in the box to say something else), and
-a thread that's done offers its suggested next steps and Archive. It can send notifications too,
+a thread that's done offers its suggested next steps and Archive, which takes you back to the inbox as its row slides away. It can send notifications too,
 though you don't need them for any of that. It pairs with your Mac by scanning a
 QR code: on the Mac, Settings (⌘,) > Phone & browser > Show the code, then
 scan it with the iPhone app. Keep the code to yourself: anyone who scans it
