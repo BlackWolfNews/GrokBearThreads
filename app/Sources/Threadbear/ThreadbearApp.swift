@@ -209,6 +209,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             MouseNavigation.install(app: app)
             // Records nothing unless it's switched on in Settings.
             ActivityRecorder.shared.install(app: app)
+            MenuWatch.install()
             if perf { PerfRunner.start(app: app) }
             if screenshots { ScreenshotRunner.start(app: app) }
             // What only one of two Threadbears should run: a handover's
