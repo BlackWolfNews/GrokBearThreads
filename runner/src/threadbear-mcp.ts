@@ -296,7 +296,9 @@ export function buildThreadbearTools(
             if (remove) return (await pocket.removePocketCard(title)) ? `Took "${title}" out of the Pocket.` : `No card called "${title}" in the Pocket.`;
             if (!text) throw new Error('A card needs text. To take one out, pass remove: true.');
             const t = await control.get(selfId);
-            const source = t.projects?.[0]?.title ?? t.title;
+            // Its project or folder, as the inbox rows show. Not the thread's
+            // title: on its first turn that's still the start of the message.
+            const source = t.projects?.[0]?.title ?? path.basename(t.cwd);
             const how = await pocket.savePocketCard({ title, text, ...(place ? { place } : {}), threadId: selfId, ...(source ? { source } : {}) });
             return `${how === 'replaced' ? 'Replaced' : 'Filed'} "${title}" in the Pocket.`;
           }),

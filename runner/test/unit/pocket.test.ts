@@ -2,6 +2,7 @@
 // removes and lists the cards on the phone.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import path from 'node:path';
 import { makeHarness } from '../helpers/fakes.ts';
 import { buildThreadbearTools, type PocketControl } from '../../src/threadbear-mcp.ts';
 
@@ -36,7 +37,8 @@ test('files a card with the thread it came from, and the same title replaces it'
   assert.match((await call(tools, { title: 'Post to Corby', text: 'New' })).text, /Replaced/);
   assert.equal(saved[0]!.threadId, thread.id);
   assert.equal(saved[0]!.place, 'post office');
-  assert.ok(saved[0]!.source);
+  // The folder, not the thread's title, which starts as the first message.
+  assert.equal(saved[0]!.source, path.basename(thread.cwd));
   assert.equal(saved[1]!.place, undefined);
 });
 
